@@ -162,7 +162,7 @@ wait "$smoke_pid" 2>/dev/null || true
 ext_errors=$(grep "Extension load error" "$smoke_out" 2>/dev/null | wc -l | tr -d ' ')
 # Strip ANSI escape codes for branding check
 plain_out=$(sed 's/\x1b\[[0-9;]*m//g' "$smoke_out" 2>/dev/null || cat "$smoke_out")
-has_gsd=$(echo "$plain_out" | grep -qi "gsd\|get stuff done" && echo "yes" || echo "no")
+has_gsd=$(echo "$plain_out" | grep -qi "gsd\|get shit done" && echo "yes" || echo "no")
 
 if [ "$ext_errors" -eq 0 ]; then
   pass "8a — zero Extension load errors on launch"
@@ -172,7 +172,7 @@ else
 fi
 
 if [ "$has_gsd" = "yes" ]; then
-  pass "8b — \"gsd\" / \"get stuff done\" branding found in launch output"
+  pass "8b — \"gsd\" / \"get shit done\" branding found in launch output"
 else
   # Fallback: check if binary self-identifies differently (not "pi")
   has_pi_only=$(echo "$plain_out" | grep -qi "^pi\b" && echo "yes" || echo "no")
