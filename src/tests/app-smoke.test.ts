@@ -308,6 +308,28 @@ test("tarball installs and gsd binary resolves", async () => {
   }
 });
 
+test("postinstall avoids sudo during browser setup and suggests install-deps only when needed", () => {
+  const postinstall = readFileSync(join(projectRoot, "scripts", "postinstall.js"), "utf-8");
+
+  assert.doesNotMatch(
+    postinstall,
+    /playwright install chromium[^\n]*--with-deps/,
+    "postinstall does not request sudo-backed Playwright deps during npm install",
+  );
+  assert.ok(
+    postinstall.includes("npx playwright install chromium"),
+    "postinstall downloads Chromium during install",
+  );
+  assert.ok(
+    postinstall.includes("Host system is missing dependencies to run browsers."),
+    "postinstall detects Playwright's missing Linux dependency warning",
+  );
+  assert.ok(
+    postinstall.includes("sudo npx playwright install-deps chromium"),
+    "postinstall suggests the explicit follow-up command only when Linux deps are missing",
+  );
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // 8. Launch → extensions load → no errors on stderr
 // ═══════════════════════════════════════════════════════════════════════════
