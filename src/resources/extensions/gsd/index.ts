@@ -143,7 +143,7 @@ export default function (pi: ExtensionAPI) {
 
     const injection = await buildGuidedExecuteContextInjection(event.prompt, process.cwd());
 
-    // Worktree context — tell the LLM it's in a worktree
+    // Worktree context — override the static CWD in the system prompt
     let worktreeBlock = "";
     const worktreeName = getActiveWorktreeName();
     const worktreeMainCwd = getWorktreeOriginalCwd();
@@ -151,13 +151,15 @@ export default function (pi: ExtensionAPI) {
       worktreeBlock = [
         "",
         "",
-        "[WORKTREE CONTEXT]",
+        "[WORKTREE CONTEXT — OVERRIDES CURRENT WORKING DIRECTORY ABOVE]",
+        `IMPORTANT: Ignore the "Current working directory" shown earlier in this prompt.`,
+        `The actual current working directory is: ${process.cwd()}`,
+        "",
         `You are working inside a GSD worktree.`,
         `- Worktree name: ${worktreeName}`,
-        `- Worktree path: ${process.cwd()}`,
+        `- Worktree path (this is the real cwd): ${process.cwd()}`,
         `- Main project: ${worktreeMainCwd}`,
         `- Branch: worktree/${worktreeName}`,
-        `- Current working directory: ${process.cwd()}`,
         "",
         "All file operations, bash commands, and GSD state resolve against the worktree path above.",
         "Use /worktree merge to merge changes back. Use /worktree return to switch back to the main tree.",
