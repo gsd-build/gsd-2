@@ -1,78 +1,66 @@
 /**
- * Remote Questions — Configuration resolution
- *
- * Reads remote_questions config from GSD preferences and verifies
- * the corresponding token exists in process.env.
+ * Remote Questions — configuration resolution and validation
  */
 
 import { loadEffectiveGSDPreferences, type RemoteQuestionsConfig } from "../gsd/preferences.js";
+import type { RemoteChannel } from "./types.js";
 
 export interface ResolvedConfig {
-  channel: "slack" | "discord";
+  channel: RemoteChannel;
   channelId: string;
   timeoutMs: number;
   pollIntervalMs: number;
   token: string;
 }
 
-const ENV_KEYS: Record<string, string> = {
+const ENV_KEYS: Record<RemoteChannel, string> = {
   slack: "SLACK_BOT_TOKEN",
   discord: "DISCORD_BOT_TOKEN",
 };
 
 const DEFAULT_TIMEOUT_MINUTES = 5;
 const DEFAULT_POLL_INTERVAL_SECONDS = 5;
+const MIN_TIMEOUT_MINUTES = 1;
+const MAX_TIMEOUT_MINUTES = 30;
+const MIN_POLL_INTERVAL_SECONDS = 2;
+const MAX_POLL_INTERVAL_SECONDS = 30;
 
-/**
- * Resolve remote questions configuration from preferences + env.
- * Returns null if not configured or token is missing.
- */
 export function resolveRemoteConfig(): ResolvedConfig | null {
   const prefs = loadEffectiveGSDPreferences();
   const rq: RemoteQuestionsConfig | undefined = prefs?.preferences.remote_questions;
   if (!rq || !rq.channel || !rq.channel_id) return null;
+  if (rq.channel !== "slack" && rq.channel !== "discord") return null;
 
-  const envVar = ENV_KEYS[rq.channel];
-  if (!envVar) return null;
-
-  const token = process.env[envVar];
+  const token = process.env[ENV_KEYS[rq.channel]];
   if (!token) return null;
 
-  const timeoutMinutes = rq.timeout_minutes ?? DEFAULT_TIMEOUT_MINUTES;
-  const pollIntervalSeconds = rq.poll_interval_seconds ?? DEFAULT_POLL_INTERVAL_SECONDS;
-
-  // Always coerce channel_id to string — parseScalar may convert large numeric
-  // Discord IDs to a lossy Number (exceeds Number.MAX_SAFE_INTEGER).
-  const channelId = String(rq.channel_id);
+  const timeoutMinutes = clampNumber(rq.timeout_minutes, DEFAULT_TIMEOUT_MINUTES, MIN_TIMEOUT_MINUTES, MAX_TIMEOUT_MINUTES);
+  const pollIntervalSeconds = clampNumber(rq.poll_interval_seconds, DEFAULT_POLL_INTERVAL_SECONDS, MIN_POLL_INTERVAL_SECONDS, MAX_POLL_INTERVAL_SECONDS);
 
   return {
     channel: rq.channel,
-    channelId,
+    channelId: String(rq.channel_id),
     timeoutMs: timeoutMinutes * 60 * 1000,
     pollIntervalMs: pollIntervalSeconds * 1000,
     token,
   };
 }
 
-/**
- * Return a human-readable status string for the remote questions config.
- * Used by session_start notification and /gsd remote status.
- */
 export function getRemoteConfigStatus(): string {
   const prefs = loadEffectiveGSDPreferences();
   const rq: RemoteQuestionsConfig | undefined = prefs?.preferences.remote_questions;
-
-  if (!rq || !rq.channel || !rq.channel_id) {
-    return "Remote questions: not configured";
-  }
-
+  if (!rq || !rq.channel || !rq.channel_id) return "Remote questions: not configured";
+  if (rq.channel !== "slack" && rq.channel !== "discord") return `Remote questions: unknown channel type \"${rq.channel}\"`;
   const envVar = ENV_KEYS[rq.channel];
-  if (!envVar) return `Remote questions: unknown channel type "${rq.channel}"`;
+  if (!process.env[envVar]) return `Remote questions: ${envVar} not set — remote questions disabled`;
 
-  const token = process.env[envVar];
-  if (!token) {
-    return `Remote questions: ${envVar} not set — remote questions disabled`;
-  }
+  const timeoutMinutes = clampNumber(rq.timeout_minutes, DEFAULT_TIMEOUT_MINUTES, MIN_TIMEOUT_MINUTES, MAX_TIMEOUT_MINUTES);
+  const pollIntervalSeconds = clampNumber(rq.poll_interval_seconds, DEFAULT_POLL_INTERVAL_SECONDS, MIN_POLL_INTERVAL_SECONDS, MAX_POLL_INTERVAL_SECONDS);
+  return `Remote questions: ${rq.channel} configured (timeout ${timeoutMinutes}m, poll ${pollIntervalSeconds}s)`;
+}
 
-  return `Remote questions: ${rq.channel} (channel ${rq.channel_id}) configured`;
+function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
 }

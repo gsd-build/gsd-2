@@ -85,10 +85,15 @@ export default function (pi: ExtensionAPI) {
 
     // Notify remote questions status if configured
     try {
-      const { getRemoteConfigStatus } = await import("../remote-questions/config.js");
+      const [{ getRemoteConfigStatus }, { getLatestPromptSummary }] = await Promise.all([
+        import("../remote-questions/config.js"),
+        import("../remote-questions/status.js"),
+      ]);
       const status = getRemoteConfigStatus();
+      const latest = getLatestPromptSummary();
       if (!status.includes("not configured")) {
-        ctx.ui.notify(status, status.includes("disabled") ? "warning" : "info");
+        const suffix = latest ? `\nLast remote prompt: ${latest.id} (${latest.status})` : "";
+        ctx.ui.notify(`${status}${suffix}`, status.includes("disabled") ? "warning" : "info");
       }
     } catch {
       // Remote questions module not available — ignore

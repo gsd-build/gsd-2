@@ -120,7 +120,7 @@ export default function AskUserQuestions(pi: ExtensionAPI) {
 			}
 
 			if (!ctx.hasUI) {
-				const { tryRemoteQuestions } = await import("./remote-questions/send.js");
+				const { tryRemoteQuestions } = await import("./remote-questions/manager.js");
 				const remoteResult = await tryRemoteQuestions(params.questions, signal);
 				if (remoteResult) return remoteResult;
 				return errorResult("Error: UI not available (non-interactive mode)", params.questions);
@@ -168,7 +168,7 @@ export default function AskUserQuestions(pi: ExtensionAPI) {
 		},
 
 		renderResult(result, _options, theme) {
-			const details = result.details as (AskUserQuestionsDetails & { remote?: boolean; channel?: string; timed_out?: boolean; threadUrl?: string }) | undefined;
+			const details = result.details as (AskUserQuestionsDetails & { remote?: boolean; channel?: string; timed_out?: boolean; threadUrl?: string; promptId?: string; status?: string }) | undefined;
 			if (!details) {
 				const text = result.content[0];
 				return new Text(text?.type === "text" ? text.text : "", 0, 0);

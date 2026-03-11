@@ -33,9 +33,9 @@ export interface AutoSupervisorConfig {
 
 export interface RemoteQuestionsConfig {
   channel: "slack" | "discord";
-  channel_id: string;
-  timeout_minutes?: number;       // Default: 5
-  poll_interval_seconds?: number;  // Default: 5
+  channel_id: string | number;
+  timeout_minutes?: number;        // clamped to 1-30
+  poll_interval_seconds?: number;  // clamped to 2-30
 }
 
 export interface GSDPreferences {
