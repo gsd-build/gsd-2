@@ -72,18 +72,17 @@ export function getProjectGSDPreferencesPath(): string {
   return PROJECT_PREFERENCES_PATH;
 }
 
+const VALID_BRANCH_NAME = /^[a-zA-Z0-9_\-\/.]+$/;
+
 /**
  * Get the configured main branch from preferences.
- * Checks project preferences first, then global, then defaults to "main".
+ * Uses the effective (merged) preferences cascade, then defaults to "main".
  */
-export function getConfiguredMainBranch(basePath: string): string {
-  const prefs = loadProjectGSDPreferences();
-  if (prefs?.preferences?.main_branch) {
-    return prefs.preferences.main_branch;
-  }
-  const globalPrefs = loadGlobalGSDPreferences();
-  if (globalPrefs?.preferences?.main_branch) {
-    return globalPrefs.preferences.main_branch;
+export function getConfiguredMainBranch(): string {
+  const prefs = loadEffectiveGSDPreferences();
+  const branch = prefs?.preferences?.main_branch;
+  if (branch && VALID_BRANCH_NAME.test(branch)) {
+    return branch;
   }
   return "main";
 }
@@ -528,6 +527,7 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
     remote_questions: override.remote_questions
       ? { ...(base.remote_questions ?? {}), ...override.remote_questions }
       : base.remote_questions,
+    main_branch: override.main_branch ?? base.main_branch,
   };
 }
 

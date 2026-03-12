@@ -20,7 +20,7 @@ import {
 } from "./paths.js";
 import { join } from "node:path";
 import { readFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { ensureGitignore, ensurePreferences } from "./gitignore.js";
 import { getConfiguredMainBranch } from "./preferences.js";
 
@@ -445,8 +445,8 @@ export async function showSmartEntry(
   try {
     execSync("git rev-parse --git-dir", { cwd: basePath, stdio: "pipe" });
   } catch {
-    const mainBranch = getConfiguredMainBranch(basePath);
-    execSync(`git init -b ${mainBranch}`, { cwd: basePath, stdio: "pipe" });
+    const mainBranch = getConfiguredMainBranch();
+    execFileSync("git", ["init", "-b", mainBranch], { cwd: basePath, stdio: "pipe" });
   }
 
   // ── Ensure .gitignore has baseline patterns ──────────────────────────

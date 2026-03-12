@@ -56,7 +56,7 @@ import {
 } from "./metrics.js";
 import { join } from "node:path";
 import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import {
   autoCommitCurrentBranch,
   ensureSliceBranch,
@@ -359,8 +359,8 @@ export async function startAuto(
   try {
     execSync("git rev-parse --git-dir", { cwd: base, stdio: "pipe" });
   } catch {
-    const mainBranch = getConfiguredMainBranch(base);
-    execSync(`git init -b ${mainBranch}`, { cwd: base, stdio: "pipe" });
+    const mainBranch = getConfiguredMainBranch();
+    execFileSync("git", ["init", "-b", mainBranch], { cwd: base, stdio: "pipe" });
   }
 
   // Ensure .gitignore has baseline patterns
