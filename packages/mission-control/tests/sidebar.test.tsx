@@ -29,17 +29,17 @@ const SAMPLE_PROJECT_STATE: ProjectState = {
 };
 
 describe("GsdLogo", () => {
-  it("renders an SVG element with viewBox", () => {
+  it("renders an img element pointing to the official GSD logo asset", () => {
     const result = GsdLogo({});
     const json = JSON.stringify(result);
-    expect(json).toContain("svg");
-    expect(json).toContain("0 0 32 32");
+    expect(json).toContain("img");
+    expect(json).toContain("gsd-logo-2000-transparent.svg");
   });
 
-  it("uses currentColor for fills", () => {
+  it("has alt text for accessibility", () => {
     const result = GsdLogo({});
     const json = JSON.stringify(result);
-    expect(json).toContain("currentColor");
+    expect(json).toContain("GSD");
   });
 
   it("accepts className prop", () => {

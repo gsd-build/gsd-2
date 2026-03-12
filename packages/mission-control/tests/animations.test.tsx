@@ -18,21 +18,11 @@ import { shouldPulseOnTaskChange } from "../src/components/active-task/TaskExecu
 // -- LogoAnimationView (pure render, no hooks) --
 
 describe("LogoAnimationView", () => {
-  it("renders SVG with animation class names on rect groups", () => {
+  it("renders an img element pointing to the official GSD logo asset", () => {
     const result = LogoAnimationView({});
     const json = JSON.stringify(result);
-    expect(json).toContain("logo-anim-frame");
-    expect(json).toContain("logo-anim-titlebar");
-    expect(json).toContain("logo-anim-dots");
-    expect(json).toContain("logo-anim-chevron");
-    expect(json).toContain("logo-anim-cursor");
-  });
-
-  it("renders an SVG element with viewBox", () => {
-    const result = LogoAnimationView({});
-    const json = JSON.stringify(result);
-    expect(json).toContain("0 0 32 32");
-    expect(json).toContain("svg");
+    expect(json).toContain("img");
+    expect(json).toContain("gsd-logo-2000-transparent.svg");
   });
 
   it("applies lg size class by default", () => {
@@ -49,39 +39,33 @@ describe("LogoAnimationView", () => {
     expect(json).toContain("w-8");
   });
 
-  it("contains all five rect groups from GsdLogo", () => {
+  it("has alt text for accessibility", () => {
     const result = LogoAnimationView({});
     const json = JSON.stringify(result);
-    // Frame, titlebar, dots, chevron, cursor — all wrapped in <g> with anim class
-    expect(json).toContain("logo-anim-frame");
-    expect(json).toContain("logo-anim-titlebar");
-    expect(json).toContain("logo-anim-dots");
-    expect(json).toContain("logo-anim-chevron");
-    expect(json).toContain("logo-anim-cursor");
+    expect(json).toContain("GSD Logo");
   });
 });
 
 // -- LoadingLogo --
 
 describe("LoadingLogo", () => {
-  it("renders SVG with scan line element", () => {
+  it("renders an img element pointing to the terminal.svg asset", () => {
     const result = LoadingLogo({});
     const json = JSON.stringify(result);
-    expect(json).toContain("logo-scan-line");
+    expect(json).toContain("img");
+    expect(json).toContain("terminal.svg");
   });
 
-  it("renders at 50% opacity for the logo portion", () => {
+  it("includes animate-pulse class for loading indication", () => {
     const result = LoadingLogo({});
     const json = JSON.stringify(result);
-    expect(json).toContain("opacity");
-    expect(json).toContain("0.5");
+    expect(json).toContain("animate-pulse");
   });
 
-  it("renders an SVG element", () => {
+  it("has alt text for accessibility", () => {
     const result = LoadingLogo({});
     const json = JSON.stringify(result);
-    expect(json).toContain("svg");
-    expect(json).toContain("0 0 32 32");
+    expect(json).toContain("Loading");
   });
 });
 

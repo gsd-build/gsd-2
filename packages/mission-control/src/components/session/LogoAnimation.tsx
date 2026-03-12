@@ -13,7 +13,7 @@ const SIZE_CLASSES = {
 } as const;
 
 /**
- * Pure render function for the animated logo SVG.
+ * Pure render function for the brand logo image.
  * Exported for direct-call testing (no hooks).
  */
 export function LogoAnimationView({
@@ -21,45 +21,17 @@ export function LogoAnimationView({
   size = "lg",
 }: Omit<LogoAnimationProps, "onComplete">) {
   return (
-    <svg
-      viewBox="0 0 32 32"
-      fill="currentColor"
-      xmlns="http://www.w3.org/2000/svg"
+    <img
+      src="/assets/gsd-logo-2000-transparent.svg"
+      alt="GSD Logo"
       className={cn(SIZE_CLASSES[size], className)}
-      aria-label="GSD Logo Animation"
-    >
-      {/* Terminal window frame */}
-      <g className="logo-anim-frame">
-        <rect x="2" y="4" width="28" height="24" rx="2" opacity="0.15" />
-      </g>
-      {/* Title bar */}
-      <g className="logo-anim-titlebar">
-        <rect x="2" y="4" width="28" height="4" />
-      </g>
-      {/* Title bar dots */}
-      <g className="logo-anim-dots">
-        <rect x="4" y="5" width="2" height="2" fill="currentColor" opacity="0.4" />
-        <rect x="8" y="5" width="2" height="2" fill="currentColor" opacity="0.4" />
-      </g>
-      {/* Prompt chevron > */}
-      <g className="logo-anim-chevron">
-        <rect x="6" y="12" width="4" height="4" />
-        <rect x="10" y="16" width="4" height="4" />
-        <rect x="6" y="20" width="4" height="4" />
-      </g>
-      {/* Cursor block */}
-      <g className="logo-anim-cursor">
-        <rect x="18" y="14" width="4" height="4" opacity="0.8" />
-        <rect x="22" y="14" width="4" height="4" opacity="0.5" />
-      </g>
-    </svg>
+    />
   );
 }
 
 /**
- * Animated GSD logo with sequential rect reveals over 600ms.
- * Each rect group fades in with scale using CSS animation classes.
- * Fires onComplete after the full 600ms build sequence.
+ * Animated GSD logo using the official brand asset.
+ * Fires onComplete after 600ms to drive initialization sequencing.
  */
 export function LogoAnimation({
   className,

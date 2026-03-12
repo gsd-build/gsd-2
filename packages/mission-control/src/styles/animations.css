@@ -1,32 +1,14 @@
 /**
- * GSD Animation Keyframes — Phase 7 foundation.
+ * GSD Animation Keyframes.
  *
- * - gsd-build-in: Logo rect reveal (opacity + scale), 120-150ms per group
- * - logo-scan: Horizontal scan line for loading state, 200ms infinite
  * - amber-pulse: Box-shadow pulse for active indicators, 150ms (Plan 03)
+ *
+ * Note: gsd-build-in and logo-scan keyframes were removed in Phase 11.1 Plan 03
+ * when LogoAnimation and LoadingLogo switched from inline pixel-art SVGs to
+ * official brand asset <img> tags.
  */
 
 /* -- Keyframes -- */
-
-@keyframes gsd-build-in {
-  from {
-    opacity: 0;
-    transform: scale(0.8);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes logo-scan {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(100%);
-  }
-}
 
 @keyframes amber-pulse {
   from {
@@ -35,40 +17,6 @@
   to {
     box-shadow: 0 0 8px 0 transparent;
   }
-}
-
-/* -- Logo build animation utility classes -- */
-/* Each group has sequential delay summing to 600ms total */
-
-.logo-anim-frame {
-  opacity: 0;
-  animation: gsd-build-in 120ms ease-out 0ms forwards;
-}
-
-.logo-anim-titlebar {
-  opacity: 0;
-  animation: gsd-build-in 100ms ease-out 120ms forwards;
-}
-
-.logo-anim-dots {
-  opacity: 0;
-  animation: gsd-build-in 80ms ease-out 220ms forwards;
-}
-
-.logo-anim-chevron {
-  opacity: 0;
-  animation: gsd-build-in 150ms ease-out 300ms forwards;
-}
-
-.logo-anim-cursor {
-  opacity: 0;
-  animation: gsd-build-in 150ms ease-out 450ms forwards;
-}
-
-/* -- Scan line for loading logo -- */
-
-.logo-scan-line {
-  animation: logo-scan 200ms linear infinite;
 }
 
 /* -- Amber pulse for active indicators (Plan 03) -- */
