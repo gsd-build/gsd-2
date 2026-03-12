@@ -11,9 +11,10 @@
  *   3. mergeSliceToMain() — checkout main, squash-merge, delete branch
  */
 
-import { existsSync } from "node:fs";
-import { execSync } from "node:child_process";
-import { sep } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { sep, join } from "node:path";
+import { GitService } from "./git-service.ts";
+import { loadEffectiveGSDPreferences } from "./preferences.ts";
 
 export interface MergeSliceResult {
   branch: string;
@@ -21,18 +22,13 @@ export interface MergeSliceResult {
   deletedBranch: boolean;
 }
 
-function runGit(basePath: string, args: string[], options: { allowFailure?: boolean } = {}): string {
-  try {
-    return execSync(`git ${args.join(" ")}`, {
-      cwd: basePath,
-      stdio: ["ignore", "pipe", "pipe"],
-      encoding: "utf-8",
-    }).trim();
-  } catch (error) {
-    if (options.allowFailure) return "";
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`git ${args.join(" ")} failed in ${basePath}: ${message}`);
+// Internal singleton or factory for GitService
+let _gitService: GitService | null = null;
+function getGit(basePath: string): GitService {
+  if (!_gitService || (_gitService as any).basePath !== basePath) {
+    _gitService = new GitService(basePath);
   }
+  return _gitService;
 }
 
 /**
@@ -50,13 +46,6 @@ export function detectWorktreeName(basePath: string): string | null {
 
 /**
  * Get the slice branch name, namespaced by worktree when inside one.
- *
- * In the main tree:     gsd/<milestoneId>/<sliceId>
- * In a worktree:        gsd/<worktreeName>/<milestoneId>/<sliceId>
- *
- * This prevents branch conflicts when multiple worktrees work on the
- * same milestone/slice IDs — git doesn't allow a branch to be checked
- * out in more than one worktree simultaneously.
  */
 export function getSliceBranchName(milestoneId: string, sliceId: string, worktreeName?: string | null): string {
   if (worktreeName) {
@@ -70,7 +59,6 @@ export const SLICE_BRANCH_RE = /^gsd\/(?:([a-zA-Z0-9_-]+)\/)?(M\d+)\/(S\d+)$/;
 
 /**
  * Parse a slice branch name into its components.
- * Handles both `gsd/M001/S01` and `gsd/myworktree/M001/S01`.
  */
 export function parseSliceBranch(branchName: string): {
   worktreeName: string | null;
@@ -88,52 +76,18 @@ export function parseSliceBranch(branchName: string): {
 
 /**
  * Get the "main" branch for GSD slice operations.
- *
- * In the main working tree: returns main/master (the repo's default branch).
- * In a worktree: returns worktree/<name> — the worktree's own base branch.
- *
- * This is critical because git doesn't allow a branch to be checked out
- * in more than one worktree. Slice branches merge into the worktree's base
- * branch, and the worktree branch later merges into the real main via
- * /worktree merge.
  */
 export function getMainBranch(basePath: string): string {
-  // When inside a worktree, slice branches should merge into the worktree's
-  // own branch (worktree/<name>), not main — main is checked out by the
-  // parent working tree and git would refuse the checkout.
-  const wtName = detectWorktreeName(basePath);
-  if (wtName) {
-    const wtBranch = `worktree/${wtName}`;
-    // Verify the branch exists (it should — createWorktree made it)
-    const exists = runGit(basePath, ["show-ref", "--verify", `refs/heads/${wtBranch}`], { allowFailure: true });
-    if (exists) return wtBranch;
-    // Worktree branch is gone — return current branch rather than falling
-    // through to main/master which would cause a checkout conflict
-    return runGit(basePath, ["branch", "--show-current"]);
-  }
-
-  const symbolic = runGit(basePath, ["symbolic-ref", "refs/remotes/origin/HEAD"], { allowFailure: true });
-  if (symbolic) {
-    const match = symbolic.match(/refs\/remotes\/origin\/(.+)$/);
-    if (match) return match[1]!;
-  }
-
-  const mainExists = runGit(basePath, ["show-ref", "--verify", "refs/heads/main"], { allowFailure: true });
-  if (mainExists) return "main";
-
-  const masterExists = runGit(basePath, ["show-ref", "--verify", "refs/heads/master"], { allowFailure: true });
-  if (masterExists) return "master";
-
-  return runGit(basePath, ["branch", "--show-current"]);
+  return getGit(basePath).getMainBranch();
 }
 
 export function getCurrentBranch(basePath: string): string {
-  return runGit(basePath, ["branch", "--show-current"]);
+  return getGit(basePath).getCurrentBranch();
 }
 
 function branchExists(basePath: string, branch: string): boolean {
   try {
-    runGit(basePath, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
+    getGit(basePath).run(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
     return true;
   } catch {
     return false;
@@ -142,36 +96,24 @@ function branchExists(basePath: string, branch: string): boolean {
 
 /**
  * Ensure the slice branch exists and is checked out.
- * Creates the branch from the current branch if it's not a slice branch,
- * otherwise from main. This preserves planning artifacts (CONTEXT, ROADMAP,
- * etc.) that were committed on the working branch — which may differ from
- * the repo's default branch (e.g. `developer` vs `main`).
- * When inside a worktree, the branch is namespaced to avoid conflicts.
- * Returns true if the branch was newly created.
  */
 export function ensureSliceBranch(basePath: string, milestoneId: string, sliceId: string): boolean {
+  const git = getGit(basePath);
   const wtName = detectWorktreeName(basePath);
   const branch = getSliceBranchName(milestoneId, sliceId, wtName);
-  const current = getCurrentBranch(basePath);
+  const current = git.getCurrentBranch();
 
   if (current === branch) return false;
 
   let created = false;
 
   if (!branchExists(basePath, branch)) {
-    // Branch from the current branch when it's a normal working branch
-    // (not itself a slice branch). This ensures the new slice branch
-    // inherits planning artifacts that may only exist on the working
-    // branch and haven't been merged to main yet.
-    // If we're already on a slice branch (e.g. creating S02 while S01
-    // wasn't merged yet), fall back to main to avoid chaining slice branches.
-    const mainBranch = getMainBranch(basePath);
+    const mainBranch = git.getMainBranch();
     const base = SLICE_BRANCH_RE.test(current) ? mainBranch : current;
-    runGit(basePath, ["branch", branch, base]);
+    git.run(["branch", branch, base]);
     created = true;
   } else {
-    // Check if the branch is already checked out in another worktree
-    const worktreeList = runGit(basePath, ["worktree", "list", "--porcelain"]);
+    const worktreeList = git.run(["worktree", "list", "--porcelain"]);
     if (worktreeList.includes(`branch refs/heads/${branch}`)) {
       throw new Error(
         `Branch "${branch}" is already in use by another worktree. ` +
@@ -180,68 +122,81 @@ export function ensureSliceBranch(basePath: string, milestoneId: string, sliceId
     }
   }
 
-  // Auto-commit dirty files before checkout to prevent "would be overwritten" errors.
-  // This handles cases where doctor, STATE.md rebuild, or agent work left uncommitted changes.
-  const status = runGit(basePath, ["status", "--short"]);
-  if (status.trim()) {
-    runGit(basePath, ["add", "-A"]);
-    const staged = runGit(basePath, ["diff", "--cached", "--stat"]);
-    if (staged.trim()) {
-      runGit(basePath, ["commit", "-m", `"chore: auto-commit before switching to ${branch}"`]);
-    }
-  }
+  // Auto-commit dirty files before checkout
+  autoCommitCurrentBranch(basePath, "pre-checkout", branch);
 
-  runGit(basePath, ["checkout", branch]);
+  git.run(["checkout", branch]);
   return created;
 }
 
 /**
  * Auto-commit any dirty files in the current working tree.
- * Returns the commit message used, or null if already clean.
  */
 export function autoCommitCurrentBranch(
   basePath: string, unitType: string, unitId: string,
 ): string | null {
-  const status = runGit(basePath, ["status", "--short"]);
+  const git = getGit(basePath);
+  const status = git.run(["status", "--short"]);
   if (!status.trim()) return null;
 
-  runGit(basePath, ["add", "-A"]);
+  git.run(["add", "-A"]);
 
-  const staged = runGit(basePath, ["diff", "--cached", "--stat"]);
+  const staged = git.run(["diff", "--cached", "--stat"]);
   if (!staged.trim()) return null;
 
-  const message = `chore(${unitId}): auto-commit after ${unitType}`;
-  runGit(basePath, ["commit", "-m", JSON.stringify(message)]);
+  let message = `chore(${unitId}): auto-commit after ${unitType}`;
+
+  // Try to find a better message for tasks
+  if (unitType === "execute-task") {
+    const [mid, sid, tid] = unitId.split("/");
+    if (mid && sid && tid) {
+      const summaryPath = join(basePath, ".gsd", "milestones", mid, "slices", sid, "tasks", `${tid}-SUMMARY.md`);
+      if (existsSync(summaryPath)) {
+        try {
+          const content = readFileSync(summaryPath, "utf-8");
+          const titleMatch = content.match(/^# (.*)/m);
+          if (titleMatch && titleMatch[1]) {
+            message = `feat(${sid}/${tid}): ${titleMatch[1].trim()}`;
+          }
+        } catch { /* ignore */ }
+      }
+    }
+  }
+
+  git.run(["commit", "-m", JSON.stringify(message)]);
   return message;
 }
 
 /**
- * Switch to main, auto-committing any dirty files on the current branch first.
+ * Switch to main, auto-committing first.
  */
 export function switchToMain(basePath: string): void {
-  const mainBranch = getMainBranch(basePath);
-  const current = getCurrentBranch(basePath);
+  const git = getGit(basePath);
+  const mainBranch = git.getMainBranch();
+  const current = git.getCurrentBranch();
   if (current === mainBranch) return;
 
-  // Auto-commit if dirty
+  // Auto-commit for visible history
   autoCommitCurrentBranch(basePath, "pre-switch", current);
 
-  runGit(basePath, ["checkout", mainBranch]);
+  // Snapshot for recovery safety
+  git.snapshot(current);
+
+  git.run(["checkout", mainBranch]);
 }
 
 /**
  * Squash-merge a completed slice branch to main.
- * Expects to already be on main (call switchToMain first).
- * Deletes the branch after merge.
  */
-export function mergeSliceToMain(
+export async function mergeSliceToMain(
   basePath: string, milestoneId: string, sliceId: string, sliceTitle: string,
-): MergeSliceResult {
+): Promise<MergeSliceResult> {
+  const git = getGit(basePath);
   const wtName = detectWorktreeName(basePath);
   const branch = getSliceBranchName(milestoneId, sliceId, wtName);
-  const mainBranch = getMainBranch(basePath);
+  const mainBranch = git.getMainBranch();
 
-  const current = getCurrentBranch(basePath);
+  const current = git.getCurrentBranch();
   if (current !== mainBranch) {
     throw new Error(`Expected to be on ${mainBranch}, found ${current}`);
   }
@@ -250,20 +205,49 @@ export function mergeSliceToMain(
     throw new Error(`Slice branch ${branch} does not exist`);
   }
 
-  const ahead = runGit(basePath, ["rev-list", "--count", `${mainBranch}..${branch}`]);
+  // Verification (Merge Guard)
+  await git.verify();
+
+  const ahead = git.run(["rev-list", "--count", `${mainBranch}..${branch}`]);
   if (Number(ahead) <= 0) {
     throw new Error(`Slice branch ${branch} has no commits ahead of ${mainBranch}`);
   }
 
-  runGit(basePath, ["merge", "--squash", branch]);
-  const mergedCommitMessage = `feat(${milestoneId}/${sliceId}): ${sliceTitle}`;
-  runGit(basePath, ["commit", "-m", JSON.stringify(mergedCommitMessage)]);
-  runGit(basePath, ["branch", "-D", branch]);
+  git.run(["merge", "--squash", branch]);
+  
+  // Richer commit message
+  const log = git.run(["log", "--oneline", `${mainBranch}..${branch}`]);
+  const taskLines = log
+    .split("\n")
+    .filter(line => line.includes("feat(") && line.includes("/T"))
+    .map(line => {
+      const match = line.match(/feat\([^)]*\/(T\d+)\):\s*(.*)/);
+      return match ? `- ${match[1]}: ${match[2]}` : null;
+    })
+    .filter(Boolean);
+
+  let mergedCommitMessage = `feat(${milestoneId}/${sliceId}): ${sliceTitle}`;
+  if (taskLines.length > 0) {
+    mergedCommitMessage += `\n\nTasks:\n${taskLines.join("\n")}`;
+  }
+  mergedCommitMessage += `\n\nBranch: ${branch}`;
+
+  git.run(["commit", "-m", JSON.stringify(mergedCommitMessage)]);
+
+  const prefs = loadEffectiveGSDPreferences()?.preferences.git;
+  const preserve = prefs?.preserve_branches ?? false;
+
+  if (!preserve) {
+    git.run(["branch", "-D", branch]);
+  }
+
+  // Push if enabled
+  git.push();
 
   return {
     branch,
     mergedCommitMessage,
-    deletedBranch: true,
+    deletedBranch: !preserve,
   };
 }
 

@@ -101,7 +101,7 @@ async function main(): Promise<void> {
   run("git commit -m 'feat: slice change'", base);
   switchToMain(base);
 
-  const merge = mergeSliceToMain(base, "M001", "S01", "Slice One");
+  const merge = await mergeSliceToMain(base, "M001", "S01", "Slice One");
   assertEq(merge.branch, "gsd/M001/S01", "merge reports branch");
   assertEq(getCurrentBranch(base), "main", "still on main after merge");
   assert(readFileSync(join(base, "README.md"), "utf-8").includes("slice"), "main got squashed content");
@@ -134,7 +134,7 @@ async function main(): Promise<void> {
   switchToMain(base);
 
   // Now merge S02
-  const mergeS02 = mergeSliceToMain(base, "M001", "S02", "Slice Two");
+  const mergeS02 = await mergeSliceToMain(base, "M001", "S02", "Slice Two");
   assert(readFileSync(join(base, "feature.txt"), "utf-8").includes("new feature"), "main got feature from auto-committed branch");
   assertEq(mergeS02.deletedBranch, true, "S02 branch deleted");
 

@@ -38,6 +38,29 @@ export interface RemoteQuestionsConfig {
   poll_interval_seconds?: number;  // clamped to 2-30
 }
 
+export interface GSDGitPreferences {
+  /** Run build/test before merging slice to main. Default: "auto" (detect from project). */
+  merge_guard?: "auto" | "always" | "never" | string;
+
+  /** Push main to remote after slice merge. Default: false. */
+  auto_push?: boolean;
+
+  /** Push slice branches to remote during work (backup). Default: false. */
+  push_branches?: boolean;
+
+  /** Remote name. Default: "origin". */
+  remote?: string;
+
+  /** Preserve slice branches after merge. Default: true. */
+  preserve_branches?: boolean;
+
+  /** Create git tag on milestone completion. Default: true. */
+  tag_milestones?: boolean;
+
+  /** Create GitHub PR on milestone completion. Default: false. */
+  create_pr?: boolean;
+}
+
 export interface GSDPreferences {
   version?: number;
   always_use_skills?: string[];
@@ -51,6 +74,7 @@ export interface GSDPreferences {
   uat_dispatch?: boolean;
   budget_ceiling?: number;
   remote_questions?: RemoteQuestionsConfig;
+  git?: GSDGitPreferences;
 }
 
 export interface LoadedGSDPreferences {
@@ -511,6 +535,9 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
     remote_questions: override.remote_questions
       ? { ...(base.remote_questions ?? {}), ...override.remote_questions }
       : base.remote_questions,
+    git: override.git
+      ? { ...(base.git ?? {}), ...override.git }
+      : base.git,
   };
 }
 
@@ -591,6 +618,17 @@ function validatePreferences(preferences: GSDPreferences): {
       validated.budget_ceiling = Number(raw);
     } else {
       errors.push("budget_ceiling must be a finite number");
+    }
+  }
+
+  if (preferences.git) {
+    validated.git = { ...preferences.git };
+    // Basic validation for git prefs
+    if (validated.git.merge_guard !== undefined) {
+      if (typeof validated.git.merge_guard !== "string") {
+        errors.push("git.merge_guard must be a string (command or 'auto'|'always'|'never')");
+        delete validated.git.merge_guard;
+      }
     }
   }
 

@@ -18,9 +18,10 @@ Then:
 7. Write `{{sliceUatAbsPath}}`. Fill the new `UAT Type`, `Requirements Proved By This UAT`, and `Not Proven By This UAT` sections explicitly.
 8. Review task summaries for `key_decisions`. Ensure any significant architectural, pattern, or observability decisions are in `.gsd/DECISIONS.md`. If any are missing, append them now.
 9. Mark {{sliceId}} done in `{{roadmapPath}}` (change `[ ]` to `[x]`)
-10. Commit all remaining slice changes: `git add -A && git commit -m 'feat(gsd): complete {{sliceId}}'`. Do not squash-merge manually; the extension will merge the slice branch back to main after this unit succeeds.
-11. Update `.gsd/PROJECT.md` if it exists — refresh current state if needed.
-12. Update `.gsd/STATE.md`
+10. Finish the slice: write `{{sliceSummaryAbsPath}}` AND mark {{sliceId}} as `[x]` in `{{roadmapPath}}`.
+11. Once the slice is marked as complete and the summary is written, the system will automatically commit your work. You do not need to run git commands manually. Do not squash-merge manually; the extension will merge the slice branch back to main after this unit succeeds.
+12. Update `.gsd/PROJECT.md` if it exists — refresh current state if needed.
+13. Update `.gsd/STATE.md`
 
 **You MUST mark {{sliceId}} as `[x]` in `{{roadmapPath}}` AND write `{{sliceSummaryAbsPath}}` before finishing.**
 

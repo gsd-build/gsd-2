@@ -991,7 +991,7 @@ async function dispatchNextUnit(
           try {
             const sliceTitleForMerge = sliceEntry.title || branchSid;
             switchToMain(basePath);
-            const mergeResult = mergeSliceToMain(
+            const mergeResult = await mergeSliceToMain(
               basePath, branchMid, branchSid, sliceTitleForMerge,
             );
             const targetBranch = getMainBranch(basePath);

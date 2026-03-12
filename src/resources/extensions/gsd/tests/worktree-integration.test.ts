@@ -148,7 +148,7 @@ async function main(): Promise<void> {
   assertEq(getCurrentBranch(wt.path), "worktree/alpha", "switchToMain goes to worktree branch, not main");
 
   // mergeSliceToMain should merge into worktree/alpha
-  const merge = mergeSliceToMain(wt.path, "M001", "S01", "First");
+  const merge = await mergeSliceToMain(wt.path, "M001", "S01", "First");
   assertEq(merge.branch, "gsd/alpha/M001/S01", "merged the namespaced branch");
   assert(merge.deletedBranch, "slice branch deleted after merge");
   assertEq(getCurrentBranch(wt.path), "worktree/alpha", "still on worktree branch after merge");
@@ -170,7 +170,7 @@ async function main(): Promise<void> {
   run("git commit -m 'feat: add feature 2'", wt.path);
 
   switchToMain(wt.path);
-  const merge2 = mergeSliceToMain(wt.path, "M001", "S02", "Second");
+  const merge2 = await mergeSliceToMain(wt.path, "M001", "S02", "Second");
   assertEq(merge2.branch, "gsd/alpha/M001/S02", "S02 merge correct");
   assertEq(getCurrentBranch(wt.path), "worktree/alpha", "back on worktree branch");
 
@@ -188,7 +188,7 @@ async function main(): Promise<void> {
 
   switchToMain(base);
   assertEq(getCurrentBranch(base), "main", "main tree switchToMain goes to main");
-  const mainMerge = mergeSliceToMain(base, "M001", "S01", "First");
+  const mainMerge = await mergeSliceToMain(base, "M001", "S01", "First");
   assertEq(mainMerge.branch, "gsd/M001/S01", "main tree merge uses plain branch");
 
   // ── Parallel worktrees don't conflict ──────────────────────────────────────
