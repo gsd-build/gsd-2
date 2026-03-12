@@ -19,9 +19,9 @@ Requirements for the Native Desktop milestone. Each maps to roadmap phases 12–
 
 ### Session Streaming (STREAM)
 
-- [ ] **STREAM-01**: Pi SDK event parser handles plain text, tool use blocks, tool result blocks, phase transitions (Research/Plan/Execute/Complete), cost/token updates, stuck detection, timeout messages, auto mode phase announcements
-- [ ] **STREAM-02**: Stream parser is resilient — malformed chunks logged and skipped, never crash the stream
-- [ ] **STREAM-03**: Process lifecycle — clean spawn with correct working directory, graceful shutdown (interrupt → wait → kill), crash recovery (reconnect option, preserve history, attempt restart), orphan prevention (registry kills all processes on app close)
+- [x] **STREAM-01**: Pi SDK event parser handles plain text, tool use blocks, tool result blocks, phase transitions (Research/Plan/Execute/Complete), cost/token updates, stuck detection, timeout messages, auto mode phase announcements
+- [x] **STREAM-02**: Stream parser is resilient — malformed chunks logged and skipped, never crash the stream
+- [x] **STREAM-03**: Process lifecycle — clean spawn with correct working directory, graceful shutdown (interrupt → wait → kill), crash recovery (reconnect option, preserve history, attempt restart), orphan prevention (registry kills all processes on app close)
 - [ ] **STREAM-04**: WebSocket reconnect uses exponential backoff (1s → 2s → 4s → 8s → 30s max)
 - [ ] **STREAM-05**: On reconnect, full state re-derived from `.gsd/` files — no reliance on in-memory state; stale state detected via `STATE.md` modified time
 - [ ] **STREAM-06**: Cost/token display — running cost badge in chat header, per-slice total on slice card, milestone total in milestone header; budget ceiling warning at 80% (amber) and 95% (red)
@@ -131,9 +131,9 @@ Deferred to future release.
 | COMPAT-05 | Phase 12 | Complete |
 | COMPAT-06 | Phase 12 | Complete |
 | COMPAT-07 | Phase 12 | Complete |
-| STREAM-01 | Phase 13 | Pending |
-| STREAM-02 | Phase 13 | Pending |
-| STREAM-03 | Phase 13 | Pending |
+| STREAM-01 | Phase 13 | Complete |
+| STREAM-02 | Phase 13 | Complete |
+| STREAM-03 | Phase 13 | Complete |
 | STREAM-04 | Phase 13 | Pending |
 | STREAM-05 | Phase 13 | Pending |
 | STREAM-06 | Phase 13 | Pending |

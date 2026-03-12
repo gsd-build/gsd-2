@@ -3,6 +3,20 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Native Desktop
 status: in_progress
+last_updated: "2026-03-12T20:25:04.650Z"
+last_activity: "2026-03-12 — Plan 12-07 complete: test gap closure (chat-input, fs-api, ChatView v1 fields removed)"
+progress:
+  total_phases: 10
+  completed_phases: 1
+  total_plans: 17
+  completed_plans: 12
+---
+
+---
+gsd_state_version: 1.0
+milestone: v2.0
+milestone_name: Native Desktop
+status: in_progress
 last_updated: "2026-03-12T19:23:57.466Z"
 last_activity: "2026-03-12 — Plan 12-05 complete: SettingsView GSD 2 fields, settings-api.ts preferences.md"
 progress:
@@ -52,12 +66,12 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 
 ## Current Position
 
-Phase: 12 of 20 (GSD 2 Compatibility Pass)
-Plan: 7 of 7 (plans 00-07 complete — Phase 12 complete)
+Phase: 13 of 20 (Session Streaming Hardening)
+Plan: 2 of 6 (plan 02 complete — interrupt, process_crashed, killAll)
 Status: In progress
-Last activity: 2026-03-12 — Plan 12-07 complete: test gap closure (chat-input, fs-api, ChatView v1 fields removed)
+Last activity: 2026-03-12 — Plan 13-02 complete: interrupt(), process_crashed event emission, SessionManager.killAll()
 
-Progress: [█████████░] 91% (v2.0 phase 12)
+Progress: [███████░░░] 71% (12/17 plans complete)
 
 ## Milestone Archive
 
@@ -112,6 +126,10 @@ Progress: [█████████░] 91% (v2.0 phase 12)
 - [Phase 12]: settings-api.ts project tier changed from config.json to preferences.md YAML frontmatter via gray-matter
 - [Phase 12]: planningState.projectState.last_activity used for TaskWaiting lastCompleted prop — GSD2State.project is string | null (raw markdown), not an object; projectState: GSD2ProjectState has last_activity?: string
 - [Phase 12-07]: ChatView v1 derivation block replaced with stub constants (undefined/false) + TODO Phase 13-14 comment — defers GSD2State task display rebuild while eliminating runtime TypeError
+- [Phase 13-01]: GSD2StreamEvent uses 'kind' discriminant (not 'type') to avoid collision with existing StreamEvent.type field
+- [Phase 13-01]: classifyPiSdkEvent validates required fields per variant — missing fields return null (strict degradation, never throws)
+- [Phase 13]: process_crashed cast as unknown as StreamEvent to pass through existing handler infrastructure — GSD2StreamEvent richer typing deferred to plan 13-05
+- [Phase 13]: killAll() uses Promise.all on listSessions() map — concurrent kill, no registry removal (shutdown-only hook)
 
 ### Blockers/Concerns
 
