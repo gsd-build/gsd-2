@@ -10,8 +10,6 @@ import * as path from "node:path";
 import { createWorktree, removeWorktree, mergeWorktreeTo, runGit } from "./worktree-manager.js";
 import type { TaskPlanEntry } from "./types.js";
 
-const MAX_WAVE_CONCURRENCY = 4;
-
 export interface TaskResult {
   taskId: string;
   taskTitle: string;
@@ -197,6 +195,7 @@ export async function executeWave(
   sliceBranch: string,
   buildPromptFn: (tid: string, tTitle: string, worktreeBase: string) => Promise<string>,
   timeoutMs: number,
+  maxConcurrency: number = 4,
 ): Promise<WaveResult> {
   const taskEntries: WorktreeTaskEntry[] = [];
   const taskResults: TaskResult[] = [];
@@ -205,7 +204,7 @@ export async function executeWave(
   try {
     // 1. Create worktrees and build prompts
     for (const task of wave) {
-      const wtName = `wave-${milestoneId.toLowerCase()}-${sliceId.toLowerCase()}-${task.id.toLowerCase()}`;
+      const wtName = `wave-${milestoneId.toLowerCase()}-${sliceId.toLowerCase()}-${task.id.toLowerCase()}-${process.pid}`;
       const wt = createWorktree(basePath, wtName, sliceBranch);
       // Track worktree immediately so it's cleaned up if buildPromptFn throws
       taskEntries.push({ task, wtName, wt, prompt: "" });
@@ -214,7 +213,7 @@ export async function executeWave(
     }
 
     // 2. Run all tasks in parallel with concurrency limit
-    const results = await mapWithConcurrencyLimit(taskEntries, MAX_WAVE_CONCURRENCY, async (entry) => {
+    const results = await mapWithConcurrencyLimit(taskEntries, maxConcurrency, async (entry) => {
       return runTaskInWorktree(entry.wt.path, entry.task.id, entry.task.title, entry.prompt, timeoutMs);
     });
 
@@ -260,9 +259,11 @@ export async function executeWave(
         result.merged = false;
         result.error = `Merge failed for task ${entry.task.id}: ${err instanceof Error ? err.message : String(err)}`;
 
-        // Abort any in-progress merge so subsequent merges aren't blocked
+        // Abort any in-progress merge and reset the index to avoid contaminating subsequent merges.
+        // git merge --squash stages files; merge --abort alone may not clear them.
         runGit(basePath, ["merge", "--abort"], { allowFailure: true });
-        onSliceBranch = false; // merge --abort may leave branch in odd state
+        runGit(basePath, ["reset", "HEAD"], { allowFailure: true });
+        onSliceBranch = false;
 
         failedTasks.push(entry.task);
       }

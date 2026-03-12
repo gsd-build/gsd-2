@@ -1125,6 +1125,7 @@ async function dispatchNextUnit(
           currentWave, basePath, mid, sid, sliceBranch,
           (tid, tTitle, wtBase) => buildExecuteTaskPrompt(mid, sid, sTitle, tid, tTitle, wtBase),
           waveTimeoutMs,
+          supervisor.wave_concurrency,
         );
 
         // Log results

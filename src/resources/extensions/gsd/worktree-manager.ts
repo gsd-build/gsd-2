@@ -16,7 +16,7 @@
  */
 
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { join, relative, resolve } from "node:path";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ export interface WorktreeDiffSummary {
 
 export function runGit(cwd: string, args: string[], opts: { allowFailure?: boolean } = {}): string {
   try {
-    return execSync(`git ${args.join(" ")}`, {
+    return execFileSync("git", args, {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf-8",

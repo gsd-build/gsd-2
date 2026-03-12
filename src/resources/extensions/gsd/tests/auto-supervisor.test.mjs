@@ -11,6 +11,7 @@ test('resolveAutoSupervisorConfig provides safe timeout defaults', () => {
   assert.equal(supervisor.soft_timeout_minutes, 20);
   assert.equal(supervisor.idle_timeout_minutes, 10);
   assert.equal(supervisor.hard_timeout_minutes, 30);
+  assert.equal(supervisor.wave_concurrency, 4);
 });
 
 test('writeUnitRuntimeRecord persists progress and recovery metadata defaults', () => {

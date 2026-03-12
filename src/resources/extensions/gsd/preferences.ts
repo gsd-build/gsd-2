@@ -29,6 +29,7 @@ export interface AutoSupervisorConfig {
   soft_timeout_minutes?: number;
   idle_timeout_minutes?: number;
   hard_timeout_minutes?: number;
+  wave_concurrency?: number;
 }
 
 export interface RemoteQuestionsConfig {
@@ -491,6 +492,7 @@ export function resolveAutoSupervisorConfig(): AutoSupervisorConfig {
     soft_timeout_minutes: configured.soft_timeout_minutes ?? 20,
     idle_timeout_minutes: configured.idle_timeout_minutes ?? 10,
     hard_timeout_minutes: configured.hard_timeout_minutes ?? 30,
+    wave_concurrency: configured.wave_concurrency ?? 4,
     ...(configured.model ? { model: configured.model } : {}),
   };
 }
