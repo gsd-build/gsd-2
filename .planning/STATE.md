@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Native Desktop
 status: in_progress
-stopped_at: "Completed 11.1-01-PLAN.md"
-last_updated: "2026-03-12T17:08:00Z"
-last_activity: "2026-03-12 — Plan 11.1-01 complete: config bridge wired, WS bound to 127.0.0.1, CORS restricted to localhost:4000"
+stopped_at: "Completed 11.1-03-PLAN.md"
+last_updated: "2026-03-12T17:19:28Z"
+last_activity: "2026-03-12 — Plan 11.1-03 complete: ErrorBoundary added, brand assets deployed, pixel-art SVGs replaced, nul/ removed"
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
-  percent: 50
+  completed_plans: 3
+  percent: 75
 ---
 
 ## Project Reference
@@ -24,11 +24,11 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 ## Current Position
 
 Phase: 11.1 of 20 (Pre-v2.0 Stabilization)
-Plan: 02 of 4 (plans 00 and 01 complete, plan 02 is next)
+Plan: 04 of 4 (plans 00, 01, 02, and 03 complete, plan 04 is next)
 Status: In progress
-Last activity: 2026-03-12 — Plan 11.1-01 complete: config bridge wired, WS bound to 127.0.0.1, CORS restricted to localhost:4000
+Last activity: 2026-03-12 — Plan 11.1-03 complete: ErrorBoundary added, brand assets deployed, pixel-art SVGs replaced, nul/ removed
 
-Progress: [█████░░░░░] 50% (v2.0 phase 11.1)
+Progress: [████████░░] 75% (v2.0 phase 11.1)
 
 ## Milestone Archive
 
@@ -65,6 +65,8 @@ Progress: [█████░░░░░] 50% (v2.0 phase 11.1)
 - **11.1-01:** PipelineOptions.processFactory injection enables config-derived skipPermissions to reach test doubles and real ClaudeProcessManager
 - **11.1-01:** switchProject updates SessionManager processFactory via indexed property access rather than rebuilding — preserves session state during project switch
 - **11.1-01:** server-cors.test.ts RED stub updated alongside real server.ts fix — inline mirror pattern requires test update when implementation changes
+- **11.1-03:** React 19 renderToString no longer triggers error boundary lifecycle — error-boundary test updated to direct class instance testing (getDerivedStateFromError + render())
+- **11.1-03:** logo-anim-* CSS classes removed from animations.css; LogoAnimation, LoadingLogo, GsdLogo now use img tags pointing to official brand assets in public/assets/
 
 ### Blockers/Concerns
 
