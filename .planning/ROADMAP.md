@@ -32,7 +32,7 @@
 
 **Milestone Goal:** Wrap Mission Control in a Tauri 2 native app, migrate all GSD v1 conventions to GSD 2 (`.gsd/`, `gsd` CLI, Pi SDK streaming), add OAuth + keychain, a Builder mode for non-technical users, and ship signed installers for macOS and Windows.
 
-- [ ] **Phase 11.1: Pre-v2.0 Stabilization (INSERTED)** — Address CONCERNS.md: config bridge, security hardening, fragile areas, tech debt, and missing critical features before v2.0 begins
+- [x] **Phase 11.1: Pre-v2.0 Stabilization (INSERTED)** — Address CONCERNS.md: config bridge, security hardening, fragile areas, tech debt, and missing critical features before v2.0 begins (completed 2026-03-12)
 - [ ] **Phase 12: GSD 2 Compatibility Pass** — Migrate file watcher, state schema, child process, and command syntax to GSD 2 conventions
 - [ ] **Phase 13: Session Streaming Hardening** — Pi SDK event parser, resilient stream, process lifecycle, reconnect, cost/token display, auto mode indicators
 - [ ] **Phase 14: Slice Integration** — Milestones view renders slices with four states (Planned/In Progress/Needs Review/Complete) and state-appropriate actions
@@ -74,7 +74,15 @@ Plans:
   3. Opening a project that has `.planning/` but no `.gsd/` shows a migration banner; clicking "Run migration" sends `/gsd migrate` to the active session
   4. Settings shows per-phase model selection, budget ceiling, and skill_discovery toggle — v1 fields are absent
   5. The spawned child process is `gsd`, verifiable in Activity Monitor or Task Manager
-**Plans**: TBD
+**Plans**: 6 plans
+
+Plans:
+- [ ] 12-01-PLAN.md — Wave 0: Test stubs for COMPAT-04/05/06/07 + GSD 2 fixtures in state-deriver tests
+- [ ] 12-02-PLAN.md — Wave 1: Rewrite types.ts (GSD2State) + state-deriver.ts (buildFullState for .gsd/) (COMPAT-02, COMPAT-03)
+- [ ] 12-03-PLAN.md — Wave 2: Path migration .planning→.gsd in watcher/server/fs-api + spawn gsd binary (COMPAT-01, COMPAT-05)
+- [ ] 12-04-PLAN.md — Wave 3a: Replace slash command registry + MigrationBanner component (COMPAT-04, COMPAT-06)
+- [ ] 12-05-PLAN.md — Wave 3b: Settings panel GSD 2 fields + settings-api reads preferences.md (COMPAT-07)
+- [ ] 12-06-PLAN.md — Wave 4: Full suite + human regression test (all COMPAT-*)
 
 ### Phase 13: Session Streaming Hardening
 **Goal**: The Pi SDK stream is fully parsed, resilient to malformed input, and surfaces cost/token data and auto mode phase transitions to the user in real time — with WebSocket reconnect and process lifecycle handled cleanly
@@ -194,8 +202,8 @@ Plans:
 | 9. Live Preview | v1.0 | 4/4 | Complete | — |
 | 10. Keyboard Shortcuts + Accessibility | v1.0 | 3/3 | Complete | 2026-03-12 |
 | 11. Documentation Integrity (GAP) | 4/4 | Complete   | 2026-03-12 | 2026-03-12 |
-| 11.1 Pre-v2.0 Stabilization (INSERTED) | 3/4 | In Progress|  | — |
-| 12. GSD 2 Compatibility Pass | v2.0 | 0/TBD | Not started | — |
+| 11.1 Pre-v2.0 Stabilization (INSERTED) | 3/4 | Complete    | 2026-03-12 | — |
+| 12. GSD 2 Compatibility Pass | v2.0 | 0/6 | Not started | — |
 | 13. Session Streaming Hardening | v2.0 | 0/TBD | Not started | — |
 | 14. Slice Integration | v2.0 | 0/TBD | Not started | — |
 | 15. Tauri Shell | v2.0 | 0/TBD | Not started | — |
