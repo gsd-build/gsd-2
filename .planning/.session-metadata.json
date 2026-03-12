@@ -1,0 +1,14 @@
+{
+  "sessions": [
+    {
+      "id": "87169935-6fea-4d8d-9817-a40e077b0895",
+      "name": "Chat 1",
+      "slug": "chat-1",
+      "createdAt": 1773326005614,
+      "claudeSessionId": null
+    }
+  ],
+  "tabOrder": [
+    "87169935-6fea-4d8d-9817-a40e077b0895"
+  ]
+}

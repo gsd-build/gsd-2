@@ -1,0 +1,243 @@
+/**
+ * Settings API — two-tier config (global + project) with merge.
+ * Also discovers real Claude Code configuration:
+ *   - Skills from ~/.claude/skills/
+ *   - Commands from ~/.claude/commands/
+ *   - Agents from ~/.claude/agents/
+ *   - Plugins from ~/.claude/plugins/installed_plugins.json
+ *   - Settings from ~/.claude/settings.json
+ */
+
+import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
+import { join } from "node:path";
+import { homedir } from "node:os";
+
+/** Override for testing — points to the .gsd directory (not homedir) */
+let globalDirOverride: string | null = null;
+
+/** Set global dir for test isolation. Pass null to reset. */
+export function _setGlobalDir(dir: string | null): void {
+  globalDirOverride = dir;
+}
+
+function getGlobalDir(): string {
+  return globalDirOverride ?? join(homedir(), ".gsd");
+}
+
+function getClaudeDir(): string {
+  return join(homedir(), ".claude");
+}
+
+function globalPath(): string {
+  return join(getGlobalDir(), "defaults.json");
+}
+
+function projectPath(planningDir: string): string {
+  return join(planningDir, "config.json");
+}
+
+async function readJsonSafe(filePath: string): Promise<Record<string, unknown>> {
+  try {
+    const content = await readFile(filePath, "utf-8");
+    return JSON.parse(content);
+  } catch {
+    return {};
+  }
+}
+
+async function listDirNames(dirPath: string): Promise<string[]> {
+  try {
+    const entries = await readdir(dirPath, { withFileTypes: true });
+    return entries
+      .filter((e) => e.isDirectory() || e.isSymbolicLink() || e.name.endsWith(".md"))
+      .map((e) => e.name.replace(/\.md$/, ""));
+  } catch {
+    return [];
+  }
+}
+
+async function listSubcommands(dirPath: string): Promise<string[]> {
+  try {
+    const entries = await readdir(dirPath, { withFileTypes: true });
+    const commands: string[] = [];
+    for (const e of entries) {
+      if (e.isDirectory()) {
+        // Directory = command namespace (e.g., "gsd")
+        const subDir = join(dirPath, e.name);
+        const subEntries = await readdir(subDir).catch(() => []);
+        for (const sub of subEntries) {
+          if (typeof sub === "string" && sub.endsWith(".md")) {
+            commands.push(`${e.name}:${sub.replace(/\.md$/, "")}`);
+          }
+        }
+      } else if (e.name.endsWith(".md")) {
+        commands.push(e.name.replace(/\.md$/, ""));
+      }
+    }
+    return commands;
+  } catch {
+    return [];
+  }
+}
+
+/** Discover Claude Code configuration from filesystem. */
+async function discoverClaudeConfig(): Promise<{
+  skills: string[];
+  commands: string[];
+  agents: string[];
+  plugins: Array<{ name: string; scope: string }>;
+  claudeSettings: Record<string, unknown>;
+}> {
+  const claudeDir = getClaudeDir();
+
+  const [skills, commands, agents, pluginsData, claudeSettings] =
+    await Promise.all([
+      listDirNames(join(claudeDir, "skills")),
+      listSubcommands(join(claudeDir, "commands")),
+      listDirNames(join(claudeDir, "agents")).then((names) =>
+        names.filter((n) => !n.startsWith("gsd-")),
+      ),
+      readJsonSafe(join(claudeDir, "plugins", "installed_plugins.json")),
+      readJsonSafe(join(claudeDir, "settings.json")),
+    ]);
+
+  // Parse plugins from installed_plugins.json
+  const pluginEntries: Array<{ name: string; scope: string }> = [];
+  const pluginMap = (pluginsData as Record<string, unknown>).plugins as
+    | Record<string, Array<{ scope?: string }>>
+    | undefined;
+  if (pluginMap && typeof pluginMap === "object") {
+    for (const [name, installs] of Object.entries(pluginMap)) {
+      if (Array.isArray(installs) && installs.length > 0) {
+        pluginEntries.push({
+          name,
+          scope: installs[0]?.scope ?? "user",
+        });
+      }
+    }
+  }
+
+  // Extract enabled plugins from settings
+  const enabledPlugins = claudeSettings.enabledPlugins as
+    | Record<string, boolean>
+    | undefined;
+
+  return {
+    skills,
+    commands,
+    agents,
+    plugins: pluginEntries.map((p) => ({
+      ...p,
+      enabled: enabledPlugins?.[p.name] ?? false,
+    })),
+    claudeSettings,
+  };
+}
+
+/**
+ * Read settings from both tiers and return merged result.
+ * Merged = { ...global, ...project } (project overrides global).
+ * Also includes discovered Claude Code configuration.
+ */
+export async function getSettings(
+  planningDir: string,
+): Promise<{
+  global: Record<string, unknown>;
+  project: Record<string, unknown>;
+  merged: Record<string, unknown>;
+  claude: Awaited<ReturnType<typeof discoverClaudeConfig>>;
+}> {
+  const [global, project, claude] = await Promise.all([
+    readJsonSafe(globalPath()),
+    readJsonSafe(projectPath(planningDir)),
+    discoverClaudeConfig(),
+  ]);
+  return {
+    global,
+    project,
+    merged: { ...global, ...project },
+    claude,
+  };
+}
+
+/**
+ * Save settings to the specified tier, merging with existing data.
+ */
+export async function saveSettings(
+  tier: "global" | "project",
+  settings: Record<string, unknown>,
+  planningDir?: string,
+): Promise<void> {
+  const filePath =
+    tier === "global" ? globalPath() : projectPath(planningDir!);
+
+  // Ensure parent directory exists
+  const dir = tier === "global" ? getGlobalDir() : planningDir!;
+  await mkdir(dir, { recursive: true });
+
+  // Read existing and merge
+  const existing = await readJsonSafe(filePath);
+  const merged = { ...existing, ...settings };
+
+  await writeFile(filePath, JSON.stringify(merged, null, 2));
+}
+
+/**
+ * HTTP request handler for /api/settings routes.
+ * Returns Response or null if route not matched.
+ */
+export async function handleSettingsRequest(
+  req: Request,
+  url: URL,
+  planningDir: string,
+): Promise<Response | null> {
+  const { pathname } = url;
+
+  // GET /api/settings — return merged settings + claude config
+  if (pathname === "/api/settings" && req.method === "GET") {
+    const result = await getSettings(planningDir);
+    return Response.json(result);
+  }
+
+  // PUT /api/settings — save settings to a tier
+  if (pathname === "/api/settings" && req.method === "PUT") {
+    let body: { tier?: string; settings?: Record<string, unknown> };
+    try {
+      body = await req.json();
+    } catch {
+      return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+    }
+
+    const { tier, settings } = body;
+
+    if (!tier || !settings || (tier !== "global" && tier !== "project")) {
+      return Response.json(
+        {
+          error:
+            "Body must include tier ('global'|'project') and settings object",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (tier === "project" && !planningDir) {
+      return Response.json(
+        {
+          error:
+            "Cannot save project settings: no planning directory configured",
+        },
+        { status: 400 },
+      );
+    }
+
+    await saveSettings(
+      tier as "global" | "project",
+      settings,
+      planningDir || undefined,
+    );
+
+    return Response.json({ saved: true, tier });
+  }
+
+  return null;
+}

@@ -39,3 +39,7 @@ TODOS.md
 
 # ── GSD baseline (auto-generated) ──
 .gsd/
+
+# ── Mission Control ──
+packages/*/node_modules/
+packages/*/bun.lock
