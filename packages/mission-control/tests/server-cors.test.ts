@@ -15,9 +15,8 @@ import { describe, it, expect } from "bun:test";
  * This test asserts the post-fix behavior.
  */
 function addCorsHeaders(response: Response): Response {
-  // NOTE: This currently uses "*" — the test expects "http://localhost:4000".
-  // Plan 01 will update src/server.ts; this test validates that change.
-  response.headers.set("Access-Control-Allow-Origin", "*");
+  // Mirrors the implementation in src/server.ts (updated by Plan 01).
+  response.headers.set("Access-Control-Allow-Origin", "http://localhost:4000");
   response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   response.headers.set("Access-Control-Allow-Headers", "Content-Type");
   return response;

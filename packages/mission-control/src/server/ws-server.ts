@@ -39,6 +39,8 @@ export interface WsServer {
   publishSessionUpdate(data: unknown): void;
   stop(): void;
   getSequence(): number;
+  /** The hostname the server is bound to. */
+  readonly hostname: string;
 }
 
 const TOPIC = "planning-state";
@@ -60,6 +62,7 @@ export function createWsServer(options: WsServerOptions): WsServer {
 
   const server = Bun.serve({
     port,
+    hostname: "127.0.0.1",
     fetch(req, server) {
       const upgraded = server.upgrade(req);
       if (upgraded) return undefined;
@@ -154,6 +157,9 @@ export function createWsServer(options: WsServerOptions): WsServer {
     },
     getSequence(): number {
       return sequence;
+    },
+    get hostname(): string {
+      return server.hostname;
     },
   };
 }

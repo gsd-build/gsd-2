@@ -151,7 +151,7 @@ console.log(`Mission Control running at ${server.url}`);
 
 /** Add CORS headers to API responses (defensive — same-origin in practice). */
 function addCorsHeaders(response: Response): Response {
-  response.headers.set("Access-Control-Allow-Origin", "*");
+  response.headers.set("Access-Control-Allow-Origin", "http://localhost:4000");
   response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   response.headers.set("Access-Control-Allow-Headers", "Content-Type");
   return response;
