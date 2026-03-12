@@ -3,10 +3,25 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Native Desktop
 status: in_progress
+last_updated: "2026-03-12T20:37:06.472Z"
+last_activity: "2026-03-12 — Plan 13-03 complete: isReconnect helper, refresh-on-reconnect in usePlanningState, ChatView crash banner"
+progress:
+  total_phases: 10
+  completed_phases: 1
+  total_plans: 17
+  completed_plans: 14
+  percent: 82
+---
+
+---
+gsd_state_version: 1.0
+milestone: v2.0
+milestone_name: Native Desktop
+status: in_progress
 last_updated: "2026-03-12T20:34:58.119Z"
 last_activity: "2026-03-12 — Plan 13-03 complete: isReconnect helper, refresh-on-reconnect, ChatView crash banner"
 progress:
-  total_phases: 10
+  [████████░░] 82%
   completed_phases: 1
   total_plans: 17
   completed_plans: 13
@@ -82,11 +97,11 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 ## Current Position
 
 Phase: 13 of 20 (Session Streaming Hardening)
-Plan: 3 of 6 (plan 03 complete — reconnect refresh signal, crash recovery banner)
+Plan: 5 of 6 (plan 05 complete — auto mode indicators, EXECUTING badge, phase/tool cards)
 Status: In progress
-Last activity: 2026-03-12 — Plan 13-03 complete: isReconnect helper, refresh-on-reconnect in usePlanningState, ChatView crash banner
+Last activity: 2026-03-12 — Plan 13-05 complete: applyGSD2Event, isAutoMode/isCrashed/interrupt in useSessionManager, EXECUTING badge, phase_transition + tool_use cards
 
-Progress: [████████░░] 76% (13/17 plans complete)
+Progress: [████████░░] 82% (14/17 plans complete)
 
 ## Milestone Archive
 
@@ -147,6 +162,7 @@ Progress: [████████░░] 76% (13/17 plans complete)
 - [Phase 13]: killAll() uses Promise.all on listSessions() map — concurrent kill, no registry removal (shutdown-only hook)
 - [Phase 13]: isReconnect(attemptBeforeConnect) extracted as pure helper for testability — mirrors calculateBackoffDelay/shouldProcessMessage pattern
 - [Phase 13]: wsRef pattern in usePlanningState — ref to ReconnectingWebSocketResult so onReconnect always calls latest send() without stale closure
+- [Phase 13]: applyGSD2Event is a pure exported helper tested without React; interrupt() sends WebSocket message not direct processManager call
 
 ### Blockers/Concerns
 
