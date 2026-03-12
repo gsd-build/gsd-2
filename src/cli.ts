@@ -7,6 +7,7 @@ import {
   createAgentSession,
   InteractiveMode,
   runPrintMode,
+  runRpcMode,
 } from '@mariozechner/pi-coding-agent'
 import { existsSync, readdirSync, renameSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -49,6 +50,22 @@ function parseCliArgs(argv: string[]): CliFlags {
       flags.appendSystemPrompt = args[++i]
     } else if (arg === '--tools' && i + 1 < args.length) {
       flags.tools = args[++i].split(',')
+    } else if (arg === '--version' || arg === '-v') {
+      process.stdout.write((process.env.GSD_VERSION || '0.0.0') + '\n')
+      process.exit(0)
+    } else if (arg === '--help' || arg === '-h') {
+      process.stdout.write(`GSD v${process.env.GSD_VERSION || '0.0.0'} — Get Shit Done\n\n`)
+      process.stdout.write('Usage: gsd [options] [message...]\n\n')
+      process.stdout.write('Options:\n')
+      process.stdout.write('  --mode <text|json|rpc>   Output mode (default: interactive)\n')
+      process.stdout.write('  --print, -p              Single-shot print mode\n')
+      process.stdout.write('  --model <id>             Override model (e.g. claude-opus-4-6)\n')
+      process.stdout.write('  --no-session             Disable session persistence\n')
+      process.stdout.write('  --extension <path>       Load additional extension\n')
+      process.stdout.write('  --tools <a,b,c>          Restrict available tools\n')
+      process.stdout.write('  --version, -v            Print version and exit\n')
+      process.stdout.write('  --help, -h               Print this help and exit\n')
+      process.exit(0)
     } else if (!arg.startsWith('--') && !arg.startsWith('-')) {
       flags.messages.push(arg)
     }
@@ -164,8 +181,14 @@ if (isPrintMode) {
   }
 
   const mode = cliFlags.mode || 'text'
+
+  if (mode === 'rpc') {
+    await runRpcMode(session)
+    process.exit(0)
+  }
+
   await runPrintMode(session, {
-    mode: mode === 'rpc' ? 'json' : mode,
+    mode,
     messages: cliFlags.messages,
   })
   process.exit(0)
@@ -265,6 +288,15 @@ if (enabledModelPatterns && enabledModelPatterns.length > 0) {
   if (scopedModels.length > 0 && scopedModels.length < availableModels.length) {
     session.setScopedModels(scopedModels)
   }
+}
+
+if (!process.stdin.isTTY) {
+  process.stderr.write('[gsd] Error: Interactive mode requires a terminal (TTY).\n')
+  process.stderr.write('[gsd] Non-interactive alternatives:\n')
+  process.stderr.write('[gsd]   gsd --print "your message"     Single-shot prompt\n')
+  process.stderr.write('[gsd]   gsd --mode rpc                 JSON-RPC over stdin/stdout\n')
+  process.stderr.write('[gsd]   gsd --mode text "message"      Text output mode\n')
+  process.exit(1)
 }
 
 const interactiveMode = new InteractiveMode(session)

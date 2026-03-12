@@ -184,8 +184,10 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ── Ctrl+Alt+G shortcut — GSD dashboard overlay ────────────────────────
+  // Requires Kitty keyboard protocol or modifyOtherKeys support.
+  // Terminals without support (macOS Terminal.app, JetBrains): use /gsd status instead.
   pi.registerShortcut(Key.ctrlAlt("g"), {
-    description: "Open GSD dashboard",
+    description: "Open GSD dashboard (or use /gsd status)",
     handler: async (ctx) => {
       // Only show if .gsd/ exists
       if (!existsSync(join(process.cwd(), ".gsd"))) {

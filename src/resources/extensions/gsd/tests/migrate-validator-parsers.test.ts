@@ -211,15 +211,15 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log('\n=== Validator: missing ROADMAP.md → fatal ===');
+  console.log('\n=== Validator: missing ROADMAP.md → warning (not fatal) ===');
   {
     const base = createFixtureBase();
     try {
       const planning = createPlanningDir(base);
       writeFileSync(join(planning, 'PROJECT.md'), SAMPLE_PROJECT);
       const result = await validatePlanningDirectory(planning);
-      assertEq(result.valid, false, 'no roadmap: validation fails');
-      assert(result.issues.some(i => i.severity === 'fatal' && i.file.includes('ROADMAP')), 'no roadmap: fatal issue mentions ROADMAP');
+      assertEq(result.valid, true, 'no roadmap: validation still passes');
+      assert(result.issues.some(i => i.severity === 'warning' && i.file.includes('ROADMAP')), 'no roadmap: warning issue mentions ROADMAP');
     } finally {
       cleanup(base);
     }

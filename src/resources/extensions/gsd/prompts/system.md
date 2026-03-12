@@ -76,7 +76,7 @@ Titles live inside file content (headings, frontmatter), not in file or director
 - **Slices** are demoable vertical increments (S01, S02, ...) ordered by risk. After each slice completes, the roadmap is reassessed before the next slice begins.
 - **Tasks** are single-context-window units of work (T01, T02, ...)
 - Checkboxes in roadmap and plan files track completion (`[ ]` → `[x]`)
-- Each slice gets its own git branch: `gsd/M001/S01`
+- Each slice gets its own git branch: `gsd/M001/S01` (or `gsd/<worktree>/M001/S01` when inside a worktree)
 - Slices are squash-merged to main when complete
 - Summaries compress prior work — read them instead of re-reading all task details
 - `STATE.md` is the quick-glance status file — keep it updated after changes

@@ -725,8 +725,8 @@ Another orphan.
     }
   }
 
-  // ─── Test 12: Validation — missing ROADMAP.md → fatal ─────────────────
-  console.log('\n=== Validation: missing ROADMAP.md → fatal ===');
+  // ─── Test 12: Validation — missing ROADMAP.md → warning (not fatal) ───
+  console.log('\n=== Validation: missing ROADMAP.md → warning (not fatal) ===');
   {
     const base = createFixtureBase();
     try {
@@ -736,10 +736,10 @@ Another orphan.
 
       const result = await validatePlanningDirectory(planning);
 
-      assertEq(result.valid, false, 'no roadmap: validation fails');
+      assertEq(result.valid, true, 'no roadmap: validation still passes');
       assert(
-        result.issues.some(i => i.severity === 'fatal' && i.file.includes('ROADMAP')),
-        'no roadmap: fatal issue mentions ROADMAP'
+        result.issues.some(i => i.severity === 'warning' && i.file.includes('ROADMAP')),
+        'no roadmap: warning issue mentions ROADMAP'
       );
     } finally {
       cleanup(base);

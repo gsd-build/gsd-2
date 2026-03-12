@@ -1249,6 +1249,100 @@ console.log('\n=== parseRequirementCounts: total is sum of all section counts ==
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// parseSummary: bare scalar frontmatter fields (regression test for #91)
+// ═══════════════════════════════════════════════════════════════════════════
+
+console.log('\n=== parseSummary: bare scalar "none" coerced to string array (#91) ===');
+{
+  const content = `---
+id: T04
+parent: S03
+milestone: M001
+provides:
+  - iOS rules
+key_files:
+  - .claude/rules/swift-style.md
+key_decisions: none
+patterns_established: none
+drill_down_paths: none
+observability_surfaces: none — static reference files
+affects: single-value
+---
+
+# T04: iOS Rules
+
+**Created iOS-specific rules.**
+
+## What Happened
+
+Added rules.
+
+## Deviations
+
+None.
+`;
+
+  const s = parseSummary(content);
+
+  // Array fields should remain arrays
+  assertEq(s.frontmatter.provides.length, 1, '#91: provides array preserved');
+  assertEq(s.frontmatter.provides[0], 'iOS rules', '#91: provides value');
+  assertEq(s.frontmatter.key_files.length, 1, '#91: key_files array preserved');
+
+  // Bare scalar "none" must be coerced to ["none"], not crash
+  assertEq(Array.isArray(s.frontmatter.key_decisions), true, '#91: key_decisions is array');
+  assertEq(s.frontmatter.key_decisions.length, 1, '#91: key_decisions has 1 element');
+  assertEq(s.frontmatter.key_decisions[0], 'none', '#91: key_decisions[0] is "none"');
+
+  assertEq(Array.isArray(s.frontmatter.patterns_established), true, '#91: patterns_established is array');
+  assertEq(s.frontmatter.patterns_established.length, 1, '#91: patterns_established coerced');
+
+  assertEq(Array.isArray(s.frontmatter.drill_down_paths), true, '#91: drill_down_paths is array');
+  assertEq(s.frontmatter.drill_down_paths.length, 1, '#91: drill_down_paths coerced');
+
+  // Scalar with spaces: "none — static reference files"
+  assertEq(Array.isArray(s.frontmatter.observability_surfaces), true, '#91: observability_surfaces is array');
+  assertEq(s.frontmatter.observability_surfaces.length, 1, '#91: observability_surfaces coerced');
+  assertEq(s.frontmatter.observability_surfaces[0], 'none — static reference files', '#91: full scalar preserved');
+
+  // Single value (not "none") also coerced
+  assertEq(Array.isArray(s.frontmatter.affects), true, '#91: affects is array');
+  assertEq(s.frontmatter.affects.length, 1, '#91: affects single value coerced');
+  assertEq(s.frontmatter.affects[0], 'single-value', '#91: affects value');
+
+  // .slice().join() must not crash (the original bug)
+  const decisions = s.frontmatter.key_decisions.slice(0, 2).join('; ');
+  assertEq(decisions, 'none', '#91: .slice().join() works on coerced array');
+}
+
+console.log('\n=== parseSummary: missing/empty frontmatter fields yield empty arrays ===');
+{
+  const content = `---
+id: T05
+parent: S04
+milestone: M001
+---
+
+# T05: Minimal Summary
+
+**Minimal.**
+
+## What Happened
+
+Nothing.
+`;
+
+  const s = parseSummary(content);
+  assertEq(s.frontmatter.provides.length, 0, 'missing provides = empty array');
+  assertEq(s.frontmatter.key_decisions.length, 0, 'missing key_decisions = empty array');
+  assertEq(s.frontmatter.affects.length, 0, 'missing affects = empty array');
+  assertEq(s.frontmatter.key_files.length, 0, 'missing key_files = empty array');
+  assertEq(s.frontmatter.patterns_established.length, 0, 'missing patterns_established = empty array');
+  assertEq(s.frontmatter.drill_down_paths.length, 0, 'missing drill_down_paths = empty array');
+  assertEq(s.frontmatter.observability_surfaces.length, 0, 'missing observability_surfaces = empty array');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Results
 // ═══════════════════════════════════════════════════════════════════════════
 

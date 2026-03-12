@@ -141,7 +141,7 @@ export default function (pi: ExtensionAPI) {
 			try {
 				const ai = getClient();
 				const response = await ai.models.generateContent({
-					model: "gemini-3-flash-preview",
+					model: process.env.GEMINI_SEARCH_MODEL || "gemini-2.5-flash",
 					contents: params.query,
 					config: {
 						tools: [{ googleSearch: {} }],

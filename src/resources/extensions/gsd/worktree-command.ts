@@ -14,6 +14,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-cod
 import { loadPrompt } from "./prompt-loader.js";
 import { autoCommitCurrentBranch } from "./worktree.js";
 import { showConfirm } from "../shared/confirm-ui.js";
+import { gsdRoot, milestonesDir } from "./paths.js";
 import {
   createWorktree,
   listWorktrees,
@@ -28,7 +29,7 @@ import {
   worktreePath,
 } from "./worktree-manager.js";
 import type { FileLineStat } from "./worktree-manager.js";
-import { existsSync, realpathSync, readFileSync, utimesSync } from "node:fs";
+import { existsSync, realpathSync, readFileSync, readdirSync, rmSync, unlinkSync, utimesSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 
 /**
@@ -304,6 +305,44 @@ export function registerWorktreeCommand(pi: ExtensionAPI): void {
 
 // ─── Handlers ──────────────────────────────────────────────────────────────
 
+/**
+ * Check if the worktree has existing GSD milestones that would
+ * cause auto-mode to continue previous work instead of starting fresh.
+ */
+function hasExistingMilestones(wtPath: string): boolean {
+  const mDir = milestonesDir(wtPath);
+  if (!existsSync(mDir)) return false;
+  try {
+    const entries = readdirSync(mDir, { withFileTypes: true })
+      .filter(d => d.isDirectory() && /^M\d+/.test(d.name));
+    return entries.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Clear GSD planning artifacts so auto-mode starts fresh with the discuss flow.
+ * Keeps the .gsd/ directory structure intact but removes milestones and root planning files.
+ */
+function clearGSDPlans(wtPath: string): void {
+  const mDir = milestonesDir(wtPath);
+  if (existsSync(mDir)) {
+    rmSync(mDir, { recursive: true, force: true });
+  }
+
+  // Remove root planning files — PROJECT.md, DECISIONS.md, QUEUE.md, REQUIREMENTS.md
+  // Keep STATE.md (gitignored, will be rebuilt) and other runtime files
+  const root = gsdRoot(wtPath);
+  const planningFiles = ["PROJECT.md", "DECISIONS.md", "QUEUE.md", "REQUIREMENTS.md"];
+  for (const file of planningFiles) {
+    const filePath = join(root, file);
+    if (existsSync(filePath)) {
+      unlinkSync(filePath);
+    }
+  }
+}
+
 async function handleCreate(
   basePath: string,
   name: string,
@@ -324,16 +363,45 @@ async function handleCreate(
     process.chdir(info.path);
     nudgeGitBranchCache(prevCwd);
 
-    const commitNote = commitMsg ? `\n  Auto-committed on previous branch before switching.` : "";
+    // If the worktree inherited existing milestones, ask whether to keep or clear them
+    let clearedPlans = false;
+    if (hasExistingMilestones(info.path)) {
+      // confirmLabel = Continue (safe default, on the left / first)
+      // declineLabel = Start fresh (destructive, on the right)
+      const keepExisting = await showConfirm(ctx, {
+        title: "Worktree Setup",
+        message: [
+          `This worktree inherited existing GSD milestones from the main branch.`,
+          ``,
+          `  Continue — keep milestones and pick up where main left off`,
+          `  Start fresh — clear milestones so /gsd auto starts a new project`,
+        ].join("\n"),
+        confirmLabel: "Continue",
+        declineLabel: "Start fresh",
+      });
+      if (!keepExisting) {
+        clearGSDPlans(info.path);
+        clearedPlans = true;
+      }
+    }
+
+    const commitNote = commitMsg
+      ? `  ${CLR.muted("Auto-committed on previous branch before switching.")}`
+      : "";
+    const freshNote = clearedPlans
+      ? `  ${CLR.ok("✓")} Cleared milestones — ${CLR.hint("/gsd auto")} will start fresh.`
+      : "";
     ctx.ui.notify(
       [
-        `Worktree "${name}" created and activated.`,
-        `  Path:   ${info.path}`,
-        `  Branch: ${info.branch}`,
+        `${CLR.ok("✓")} Worktree ${CLR.name(name)} created and activated.`,
+        "",
+        `  ${CLR.label("path")}     ${CLR.path(info.path)}`,
+        `  ${CLR.label("branch")}   ${CLR.branch(info.branch)}`,
         commitNote,
-        `Session is now in the worktree. All commands run here.`,
-        `Use /worktree merge ${name} to merge back when done.`,
-        `Use /worktree return to switch back to the main tree.`,
+        freshNote,
+        "",
+        `  ${CLR.hint(`/worktree merge ${name}`)}  ${CLR.muted("merge back when done")}`,
+        `  ${CLR.hint("/worktree return")}${" ".repeat(Math.max(1, name.length - 2))}  ${CLR.muted("switch back to main tree")}`,
       ].filter(Boolean).join("\n"),
       "info",
     );
@@ -370,14 +438,18 @@ async function handleSwitch(
     process.chdir(wtPath);
     nudgeGitBranchCache(prevCwd);
 
-    const commitNote = commitMsg ? `\n  Auto-committed on previous branch before switching.` : "";
+    const commitNote = commitMsg
+      ? `  ${CLR.muted("Auto-committed on previous branch before switching.")}`
+      : "";
     ctx.ui.notify(
       [
-        `Switched to worktree "${name}".`,
-        `  Path:   ${wtPath}`,
-        `  Branch: ${worktreeBranchName(name)}`,
+        `${CLR.ok("✓")} Switched to worktree ${CLR.name(name)}.`,
+        "",
+        `  ${CLR.label("path")}     ${CLR.path(wtPath)}`,
+        `  ${CLR.label("branch")}   ${CLR.branch(worktreeBranchName(name))}`,
         commitNote,
-        `Use /worktree return to switch back to the main tree.`,
+        "",
+        `  ${CLR.hint("/worktree return")}  ${CLR.muted("switch back to main tree")}`,
       ].filter(Boolean).join("\n"),
       "info",
     );
@@ -403,26 +475,56 @@ async function handleReturn(ctx: ExtensionCommandContext): Promise<void> {
   process.chdir(returnTo);
   nudgeGitBranchCache(prevCwd);
 
-  const commitNote = commitMsg ? `\n  Auto-committed on worktree branch before returning.` : "";
+  const commitNote = commitMsg
+    ? `  ${CLR.muted("Auto-committed on worktree branch before returning.")}`
+    : "";
   ctx.ui.notify(
     [
-      `Returned to main project tree.`,
-      `  Path: ${returnTo}`,
+      `${CLR.ok("✓")} Returned to main project tree.`,
+      "",
+      `  ${CLR.label("path")}  ${CLR.path(returnTo)}`,
       commitNote,
     ].filter(Boolean).join("\n"),
     "info",
   );
 }
 
-// ANSI helpers for list formatting
-const BOLD = "\x1b[1m";
-const DIM = "\x1b[2m";
-const RESET = "\x1b[0m";
-const CYAN = "\x1b[36m";
-const GREEN = "\x1b[32m";
-const RED = "\x1b[31m";
+// ─── ANSI styling ─────────────────────────────────────────────────────────
+// Consistent palette for all worktree command output.
+
+const BOLD   = "\x1b[1m";
+const DIM    = "\x1b[2m";
+const RESET  = "\x1b[0m";
+const CYAN   = "\x1b[36m";
+const GREEN  = "\x1b[32m";
+const RED    = "\x1b[31m";
 const YELLOW = "\x1b[33m";
-const WHITE = "\x1b[37m";
+const WHITE  = "\x1b[37m";
+const MAGENTA = "\x1b[35m";
+
+// Semantic aliases for consistent use across all handlers
+const CLR = {
+  /** Worktree names and primary emphasis */
+  name:    (s: string) => `${BOLD}${CYAN}${s}${RESET}`,
+  /** Active worktree name */
+  nameActive: (s: string) => `${BOLD}${GREEN}${s}${RESET}`,
+  /** Branch names */
+  branch:  (s: string) => `${MAGENTA}${s}${RESET}`,
+  /** File paths */
+  path:    (s: string) => `${DIM}${s}${RESET}`,
+  /** Labels (key in key:value pairs) */
+  label:   (s: string) => `${WHITE}${s}${RESET}`,
+  /** Hints and commands the user can run */
+  hint:    (s: string) => `${DIM}${CYAN}${s}${RESET}`,
+  /** Success messages and checks */
+  ok:      (s: string) => `${GREEN}${s}${RESET}`,
+  /** Warning badges */
+  warn:    (s: string) => `${YELLOW}${s}${RESET}`,
+  /** Section headers */
+  header:  (s: string) => `${BOLD}${WHITE}${s}${RESET}`,
+  /** Muted secondary info */
+  muted:   (s: string) => `${DIM}${s}${RESET}`,
+} as const;
 
 async function handleList(
   basePath: string,
@@ -438,22 +540,26 @@ async function handleList(
     }
 
     const cwd = process.cwd();
-    const lines = [`${BOLD}${WHITE}GSD Worktrees${RESET}`, ""];
+    const lines = [CLR.header("GSD Worktrees"), ""];
     for (const wt of worktrees) {
       const isCurrent = cwd === wt.path
         || (existsSync(cwd) && existsSync(wt.path)
           && realpathSync(cwd) === realpathSync(wt.path));
 
-      const nameColor = isCurrent ? GREEN : CYAN;
-      const badge = isCurrent ? `  ${GREEN}● active${RESET}` : !wt.exists ? `  ${YELLOW}✗ missing${RESET}` : "";
-      lines.push(`  ${BOLD}${nameColor}${wt.name}${RESET}${badge}`);
-      lines.push(`  ${DIM}  branch${RESET}  ${wt.branch}`);
-      lines.push(`  ${DIM}  path${RESET}    ${DIM}${wt.path}${RESET}`);
+      const styledName = isCurrent ? CLR.nameActive(wt.name) : CLR.name(wt.name);
+      const badge = isCurrent
+        ? `  ${CLR.ok("● active")}`
+        : !wt.exists
+          ? `  ${CLR.warn("✗ missing")}`
+          : "";
+      lines.push(`  ${styledName}${badge}`);
+      lines.push(`    ${CLR.label("branch")}  ${CLR.branch(wt.branch)}`);
+      lines.push(`    ${CLR.label("path")}    ${CLR.path(wt.path)}`);
       lines.push("");
     }
 
     if (originalCwd) {
-      lines.push(`${DIM}Main tree: ${originalCwd}${RESET}`);
+      lines.push(`  ${CLR.label("main tree")}  ${CLR.path(originalCwd)}`);
     }
 
     ctx.ui.notify(lines.join("\n"), "info");
@@ -491,7 +597,7 @@ async function handleMerge(
 
     const totalChanges = diffSummary.added.length + diffSummary.modified.length + diffSummary.removed.length;
     if (totalChanges === 0 && !commitLog.trim()) {
-      ctx.ui.notify(`Worktree "${name}" has no changes to merge.`, "info");
+      ctx.ui.notify(`Worktree ${CLR.name(name)} has no changes to merge.`, "info");
       return;
     }
 
@@ -516,15 +622,15 @@ async function handleMerge(
     // Format a file line with +/- stats
     const formatFileLine = (prefix: string, file: string): string => {
       const s = statMap.get(file);
-      const stat = s ? ` ${GREEN}+${s.added}${RESET} ${RED}-${s.removed}${RESET}` : "";
+      const stat = s ? ` ${CLR.ok(`+${s.added}`)} ${RED}-${s.removed}${RESET}` : "";
       return `    ${prefix} ${file}${stat}`;
     };
 
     // Preview confirmation before merge dispatch
     const previewLines = [
-      `Merge worktree "${name}" → ${mainBranch}`,
+      `Merge ${CLR.name(name)} → ${CLR.branch(mainBranch)}`,
       "",
-      `  ${totalChanges} file${totalChanges === 1 ? "" : "s"} changed, ${GREEN}+${totalAdded}${RESET} ${RED}-${totalRemoved}${RESET} lines (${codeChanges} code, ${gsdChanges} GSD)`,
+      `  ${totalChanges} file${totalChanges === 1 ? "" : "s"} changed, ${CLR.ok(`+${totalAdded}`)} ${RED}-${totalRemoved}${RESET} lines ${CLR.muted(`(${codeChanges} code, ${gsdChanges} GSD)`)}`,
     ];
 
     const appendFileList = (label: string, files: string[], prefix: string, limit = 10) => {
@@ -590,7 +696,7 @@ async function handleMerge(
     );
 
     ctx.ui.notify(
-      `Merge helper started for worktree "${name}" (${codeChanges} code + ${gsdChanges} GSD artifact change${totalChanges === 1 ? "" : "s"}).`,
+      `${CLR.ok("✓")} Merge helper started for ${CLR.name(name)} ${CLR.muted(`(${codeChanges} code + ${gsdChanges} GSD artifact change${totalChanges === 1 ? "" : "s"})`)}`,
       "info",
     );
   } catch (error) {
@@ -617,7 +723,7 @@ async function handleRemove(
 
     const confirmed = await showConfirm(ctx, {
       title: "Remove Worktree",
-      message: `Remove worktree "${name}" and delete branch ${wt.branch}?`,
+      message: `Remove worktree ${CLR.name(name)} and delete branch ${CLR.branch(wt.branch)}?`,
       confirmLabel: "Remove",
       declineLabel: "Cancel",
     });
@@ -635,7 +741,7 @@ async function handleRemove(
       originalCwd = null;
     }
 
-    ctx.ui.notify(`Worktree "${name}" removed (branch deleted).`, "info");
+    ctx.ui.notify(`${CLR.ok("✓")} Worktree ${CLR.name(name)} removed ${CLR.muted("(branch deleted)")}.`, "info");
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     ctx.ui.notify(`Failed to remove worktree: ${msg}`, "error");
@@ -658,7 +764,7 @@ async function handleRemoveAll(
     const names = worktrees.map(w => w.name);
     const confirmed = await showConfirm(ctx, {
       title: "Remove All Worktrees",
-      message: `This will remove ${worktrees.length} worktree${worktrees.length === 1 ? "" : "s"} and delete their branches:\n\n${names.map(n => `  • ${n}`).join("\n")}`,
+      message: `Remove ${worktrees.length} worktree${worktrees.length === 1 ? "" : "s"} and delete their branches?\n\n${names.map(n => `  • ${CLR.name(n)}`).join("\n")}`,
       confirmLabel: "Remove all",
       declineLabel: "Cancel",
     });
@@ -687,8 +793,8 @@ async function handleRemoveAll(
     }
 
     const lines: string[] = [];
-    if (removed.length > 0) lines.push(`Removed: ${removed.join(", ")}`);
-    if (failed.length > 0) lines.push(`Failed: ${failed.join(", ")}`);
+    if (removed.length > 0) lines.push(`${CLR.ok("✓")} Removed: ${removed.map(n => CLR.name(n)).join(", ")}`);
+    if (failed.length > 0) lines.push(`${CLR.warn("✗")} Failed: ${failed.map(n => CLR.name(n)).join(", ")}`);
     ctx.ui.notify(lines.join("\n"), failed.length > 0 ? "warning" : "info");
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

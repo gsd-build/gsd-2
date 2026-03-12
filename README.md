@@ -48,6 +48,8 @@ GSD v2 solves all of these because it's not a prompt framework anymore — it's 
 
 ### Migrating from v1
 
+> **Note:** Migration works best with a `ROADMAP.md` file for milestone structure. Without one, milestones are inferred from the `phases/` directory.
+
 If you have projects with `.planning` directories from the original Get Shit Done, you can migrate them to GSD-2's `.gsd` format:
 
 ```bash

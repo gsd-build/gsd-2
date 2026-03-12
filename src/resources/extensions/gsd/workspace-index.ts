@@ -12,7 +12,7 @@ import {
 } from "./paths.ts";
 import { deriveState } from "./state.ts";
 import { type ValidationIssue, validateCompleteBoundary, validatePlanBoundary } from "./observability-validator.ts";
-import { getSliceBranchName } from "./worktree.ts";
+import { getSliceBranchName, detectWorktreeName } from "./worktree.ts";
 
 export interface WorkspaceTaskTarget {
   id: string;
@@ -112,7 +112,7 @@ async function indexSlice(basePath: string, milestoneId: string, sliceId: string
     summaryPath,
     uatPath,
     tasksDir,
-    branch: getSliceBranchName(milestoneId, sliceId),
+    branch: getSliceBranchName(milestoneId, sliceId, detectWorktreeName(basePath)),
     tasks,
   };
 }

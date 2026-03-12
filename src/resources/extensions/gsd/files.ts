@@ -347,21 +347,23 @@ export function parseSummary(content: string): Summary {
   const [fmLines, body] = splitFrontmatter(content);
 
   const fm = fmLines ? parseFrontmatterMap(fmLines) : {};
+  const asStringArray = (v: unknown): string[] =>
+    Array.isArray(v) ? v : (typeof v === 'string' && v ? [v] : []);
   const frontmatter: SummaryFrontmatter = {
     id: (fm.id as string) || '',
     parent: (fm.parent as string) || '',
     milestone: (fm.milestone as string) || '',
-    provides: (fm.provides as string[]) || [],
+    provides: asStringArray(fm.provides),
     requires: ((fm.requires as Array<Record<string, string>>) || []).map(r => ({
       slice: r.slice || '',
       provides: r.provides || '',
     })),
-    affects: (fm.affects as string[]) || [],
-    key_files: (fm.key_files as string[]) || [],
-    key_decisions: (fm.key_decisions as string[]) || [],
-    patterns_established: (fm.patterns_established as string[]) || [],
-    drill_down_paths: (fm.drill_down_paths as string[]) || [],
-    observability_surfaces: (fm.observability_surfaces as string[]) || [],
+    affects: asStringArray(fm.affects),
+    key_files: asStringArray(fm.key_files),
+    key_decisions: asStringArray(fm.key_decisions),
+    patterns_established: asStringArray(fm.patterns_established),
+    drill_down_paths: asStringArray(fm.drill_down_paths),
+    observability_surfaces: asStringArray(fm.observability_surfaces),
     duration: (fm.duration as string) || '',
     verification_result: (fm.verification_result as string) || 'untested',
     completed_at: (fm.completed_at as string) || '',

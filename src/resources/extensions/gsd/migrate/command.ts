@@ -96,7 +96,10 @@ export async function handleMigrate(
 
   if (!existsSync(sourcePath)) {
     ctx.ui.notify(
-      `Directory not found: ${sourcePath}\n\nMake sure the path points to a project root with a .planning directory.`,
+      `Directory not found: ${sourcePath}\n\n` +
+      'Migration converts a .planning/ directory (from older GSD versions) into .gsd/ format.\n' +
+      'If you are starting a new project, use /gsd:new-project instead.\n' +
+      'If migrating, ensure the path contains a .planning/ directory.',
       "error",
     );
     return;

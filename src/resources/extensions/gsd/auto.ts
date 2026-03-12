@@ -63,14 +63,48 @@ import {
   autoCommitCurrentBranch,
   ensureSliceBranch,
   getCurrentBranch,
+  getMainBranch,
   getSliceBranchName,
+  parseSliceBranch,
   switchToMain,
   mergeSliceToMain,
-  getCurrentBranch,
 } from "./worktree.ts";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { makeUI, GLYPH, INDENT } from "../shared/ui.js";
 import { showNextAction } from "../shared/next-action-ui.js";
+
+// ─── Disk-backed completed-unit helpers ───────────────────────────────────────
+
+/** Path to the persisted completed-unit keys file. */
+function completedKeysPath(base: string): string {
+  return join(base, ".gsd", "completed-units.json");
+}
+
+/** Write a completed unit key to disk atomically (append to set). */
+function persistCompletedKey(base: string, key: string): void {
+  const file = completedKeysPath(base);
+  let keys: string[] = [];
+  try {
+    if (existsSync(file)) {
+      keys = JSON.parse(readFileSync(file, "utf-8"));
+    }
+  } catch { /* corrupt file — start fresh */ }
+  if (!keys.includes(key)) {
+    keys.push(key);
+    writeFileSync(file, JSON.stringify(keys), "utf-8");
+  }
+}
+
+/** Load all completed unit keys from disk into the in-memory set. */
+function loadPersistedKeys(base: string, target: Set<string>): void {
+  const file = completedKeysPath(base);
+  try {
+    if (existsSync(file)) {
+      const keys: string[] = JSON.parse(readFileSync(file, "utf-8"));
+      for (const k of keys) target.add(k);
+    }
+  } catch { /* non-fatal */ }
+}
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -81,10 +115,15 @@ let verbose = false;
 let cmdCtx: ExtensionCommandContext | null = null;
 let basePath = "";
 
-/** Track last dispatched unit to detect stuck loops */
-let lastUnit: { type: string; id: string } | null = null;
-let retryCount = 0;
-const MAX_RETRIES = 1;
+/** Track total dispatches per unit to detect stuck loops (catches A→B→A→B patterns) */
+const unitDispatchCount = new Map<string, number>();
+const MAX_UNIT_DISPATCHES = 3;
+
+/** Tracks recovery attempt count per unit for backoff and diagnostics. */
+const unitRecoveryCount = new Map<string, number>();
+
+/** Persisted completed-unit keys — survives restarts. Loaded from .gsd/completed-units.json. */
+const completedKeySet = new Set<string>();
 
 /** Crash recovery prompt — set by startAuto, consumed by first dispatchNextUnit */
 let pendingCrashRecovery: string | null = null;
@@ -208,7 +247,8 @@ export async function stopAuto(ctx?: ExtensionContext, pi?: ExtensionAPI): Promi
   active = false;
   paused = false;
   stepMode = false;
-  lastUnit = null;
+  unitDispatchCount.clear();
+  unitRecoveryCount.clear();
   currentUnit = null;
   currentMilestoneId = null;
   cachedSliceProgress = null;
@@ -238,7 +278,7 @@ export async function pauseAuto(ctx?: ExtensionContext, _pi?: ExtensionAPI): Pro
   if (basePath) clearLock(basePath);
   active = false;
   paused = true;
-  // Preserve: lastUnit, currentUnit, basePath, verbose, cmdCtx,
+  // Preserve: unitDispatchCount, currentUnit, basePath, verbose, cmdCtx,
   // completedUnits, autoStartTime, currentMilestoneId, originalModelId
   // — all needed for resume and dashboard display
   ctx?.ui.setStatus("gsd-auto", "paused");
@@ -249,6 +289,33 @@ export async function pauseAuto(ctx?: ExtensionContext, _pi?: ExtensionAPI): Pro
     `${stepMode ? "Step" : "Auto"}-mode paused (Escape). Type to interact, or ${resumeCmd} to resume.`,
     "info",
   );
+}
+
+/**
+ * Self-heal: scan runtime records in .gsd/ and clear any where the expected
+ * artifact already exists on disk. This repairs incomplete closeouts from
+ * prior crashes — preventing spurious re-dispatch of already-completed units.
+ */
+async function selfHealRuntimeRecords(base: string, ctx: ExtensionContext): Promise<void> {
+  try {
+    const { listUnitRuntimeRecords } = await import("./unit-runtime.js");
+    const records = listUnitRuntimeRecords(base);
+    let healed = 0;
+    for (const record of records) {
+      const { unitType, unitId } = record;
+      const artifactPath = resolveExpectedArtifactPath(unitType, unitId, base);
+      if (artifactPath && existsSync(artifactPath)) {
+        // Artifact exists — unit completed but closeout didn't finish.
+        clearUnitRuntimeRecord(base, unitType, unitId);
+        healed++;
+      }
+    }
+    if (healed > 0) {
+      ctx.ui.notify(`Self-heal: cleared ${healed} stale runtime record(s) with completed artifacts.`, "info");
+    }
+  } catch {
+    // Non-fatal — self-heal should never block auto-mode start
+  }
 }
 
 export async function startAuto(
@@ -270,6 +337,7 @@ export async function startAuto(
     stepMode = requestedStepMode;
     cmdCtx = ctx;
     basePath = base;
+    unitDispatchCount.clear();
     // Re-initialize metrics in case ledger was lost during pause
     if (!getLedger()) initMetrics(base);
     ctx.ui.setStatus("gsd-auto", stepMode ? "next" : "auto");
@@ -283,6 +351,8 @@ export async function startAuto(
         ctx.ui.notify(`Resume: applied ${report.fixesApplied.length} fix(es) to state.`, "info");
       }
     } catch { /* non-fatal */ }
+    // Self-heal: clear stale runtime records where artifacts already exist
+    await selfHealRuntimeRecords(base, ctx);
     await dispatchNextUnit(ctx, pi);
     return;
   }
@@ -361,8 +431,10 @@ export async function startAuto(
   verbose = verboseMode;
   cmdCtx = ctx;
   basePath = base;
-  lastUnit = null;
-  retryCount = 0;
+  unitDispatchCount.clear();
+  unitRecoveryCount.clear();
+  completedKeySet.clear();
+  loadPersistedKeys(base, completedKeySet);
   autoStartTime = Date.now();
   completedUnits = [];
   currentUnit = null;
@@ -385,6 +457,9 @@ export async function startAuto(
     ? `Will loop through ${pendingCount} milestones.`
     : "Will loop until milestone complete.";
   ctx.ui.notify(`${modeLabel} started. ${scopeMsg}`, "info");
+
+  // Self-heal: clear stale runtime records where artifacts already exist
+  await selfHealRuntimeRecords(base, ctx);
 
   // Dispatch the first unit
   await dispatchNextUnit(ctx, pi);
@@ -879,8 +954,8 @@ async function dispatchNextUnit(
       "info",
     );
     // Reset stuck detection for new milestone
-    lastUnit = null;
-    retryCount = 0;
+    unitDispatchCount.clear();
+    unitRecoveryCount.clear();
   }
   if (mid) currentMilestoneId = mid;
 
@@ -904,10 +979,10 @@ async function dispatchNextUnit(
   //   - complete-milestone runs on a slice branch (last slice bypass)
   {
     const currentBranch = getCurrentBranch(basePath);
-    const branchMatch = currentBranch.match(/^gsd\/(M\d+)\/(S\d+)$/);
-    if (branchMatch) {
-      const branchMid = branchMatch[1]!;
-      const branchSid = branchMatch[2]!;
+    const parsedBranch = parseSliceBranch(currentBranch);
+    if (parsedBranch) {
+      const branchMid = parsedBranch.milestoneId;
+      const branchSid = parsedBranch.sliceId;
       // Check if this slice is marked done in the roadmap
       const roadmapFile = resolveMilestoneFile(basePath, branchMid, "ROADMAP");
       const roadmapContent = roadmapFile ? await loadFile(roadmapFile) : null;
@@ -921,8 +996,9 @@ async function dispatchNextUnit(
             const mergeResult = mergeSliceToMain(
               basePath, branchMid, branchSid, sliceTitleForMerge,
             );
+            const targetBranch = getMainBranch(basePath);
             ctx.ui.notify(
-              `Merged ${mergeResult.branch} → main.`,
+              `Merged ${mergeResult.branch} → ${targetBranch}.`,
               "info",
             );
             // Re-derive state from main so downstream logic sees merged state
@@ -956,6 +1032,12 @@ async function dispatchNextUnit(
       snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
       saveActivityLog(ctx, basePath, currentUnit.type, currentUnit.id);
     }
+    // Clear completed-units.json for the finished milestone so it doesn't grow unbounded.
+    try {
+      const file = completedKeysPath(basePath);
+      if (existsSync(file)) writeFileSync(file, JSON.stringify([]), "utf-8");
+      completedKeySet.clear();
+    } catch { /* non-fatal */ }
     await stopAuto(ctx, pi);
     return;
   }
@@ -995,226 +1077,238 @@ async function dispatchNextUnit(
   // can perform the UAT manually. On next resume, result file will exist → skip.
   let pauseAfterUatDispatch = false;
 
-  // ── Adaptive Replanning: check if last completed slice needs reassessment ──
-  // After a slice completes, we reassess the roadmap before moving to the next slice.
-  // Skip reassessment for the final slice (milestone complete) or if already assessed.
-  const needsReassess = await checkNeedsReassessment(basePath, mid, state);
-  if (needsRunUat) {
-    const { sliceId, uatType } = needsRunUat;
-    unitType = "run-uat";
-    unitId = `${mid}/${sliceId}`;
-    const uatFile = resolveSliceFile(basePath, mid, sliceId, "UAT")!;
-    const uatContent = await loadFile(uatFile);
-    prompt = await buildRunUatPrompt(
-      mid, sliceId, relSliceFile(basePath, mid, sliceId, "UAT"), uatContent ?? "", basePath,
-    );
-    // For non-artifact-driven UAT types, pause after the prompt is dispatched.
-    // The agent receives the prompt, writes S0x-UAT-RESULT.md surfacing the UAT,
-    // then auto-mode pauses for human execution. On resume, result file exists → skip.
-    if (uatType !== "artifact-driven") {
-      pauseAfterUatDispatch = true;
-    }
-  } else if (needsReassess) {
-    unitType = "reassess-roadmap";
-    unitId = `${mid}/${needsReassess.sliceId}`;
-    prompt = await buildReassessRoadmapPrompt(mid, midTitle!, needsReassess.sliceId, basePath);
-  } else if (state.phase === "pre-planning") {
-    // Need roadmap — check if context exists
-    const contextFile = resolveMilestoneFile(basePath, mid, "CONTEXT");
-    const hasContext = !!(contextFile && await loadFile(contextFile));
-
-    if (!hasContext) {
-      await stopAuto(ctx, pi);
-      ctx.ui.notify("No context or roadmap yet. Run /gsd to discuss first.", "warning");
-      return;
-    }
-
-    // Research before roadmap if no research exists
-    const researchFile = resolveMilestoneFile(basePath, mid, "RESEARCH");
-    const hasResearch = !!(researchFile && await loadFile(researchFile));
-
-    if (!hasResearch) {
-      unitType = "research-milestone";
-      unitId = mid;
-      prompt = await buildResearchMilestonePrompt(mid, midTitle!, basePath);
-    } else {
-      unitType = "plan-milestone";
-      unitId = mid;
-      prompt = await buildPlanMilestonePrompt(mid, midTitle!, basePath);
-    }
-
-  } else if (state.phase === "planning") {
-    // Slice needs planning — but research first if no research exists
-    const sid = state.activeSlice!.id;
-    const sTitle = state.activeSlice!.title;
-    const researchFile = resolveSliceFile(basePath, mid, sid, "RESEARCH");
-    const hasResearch = !!(researchFile && await loadFile(researchFile));
-
-    if (!hasResearch) {
-      unitType = "research-slice";
-      unitId = `${mid}/${sid}`;
-      prompt = await buildResearchSlicePrompt(mid, midTitle!, sid, sTitle, basePath);
-    } else {
-      unitType = "plan-slice";
-      unitId = `${mid}/${sid}`;
-      prompt = await buildPlanSlicePrompt(mid, midTitle!, sid, sTitle, basePath);
-    }
-
-  } else if (state.phase === "replanning-slice") {
-    // Blocker discovered — replan the slice before continuing
-    const sid = state.activeSlice!.id;
-    const sTitle = state.activeSlice!.title;
-    unitType = "replan-slice";
-    unitId = `${mid}/${sid}`;
-    prompt = await buildReplanSlicePrompt(mid, midTitle!, sid, sTitle, basePath);
-
-  } else if (state.phase === "executing" && state.activeTask) {
-    const sid = state.activeSlice!.id;
-    const sTitle = state.activeSlice!.title;
-
-    // Check for parallelizable tasks only when multiple incomplete tasks remain
-    const planPath = resolveSliceFile(basePath, mid, sid, "PLAN");
-    let useWave = false;
-    let currentWave: TaskPlanEntry[] | null = null;
-
-    if (planPath) {
-      const planContent = await loadFile(planPath);
-      if (planContent) {
-        const incompleteTasks = parsePlan(planContent).tasks.filter(t => !t.done);
-        if (incompleteTasks.length > 1) {
-          const waves = computeWaves(incompleteTasks);
-          if (waves.length > 0 && waves[0].length > 1) {
-            currentWave = waves[0];
-            useWave = true;
-          }
-        }
-      }
-    }
-
-    if (useWave && currentWave) {
-      // PARALLEL: multiple independent tasks in this wave
-      const sliceBranch = `gsd/${mid}/${sid}`;
-      const supervisor = resolveAutoSupervisorConfig();
-      const waveTimeoutMs = supervisor.hard_timeout_minutes * 60 * 1000;
-
-      // Snapshot metrics for previous unit before wave execution
-      if (currentUnit) {
-        const modelId = ctx.model?.id ?? "unknown";
-        snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
-        saveActivityLog(ctx, basePath, currentUnit.type, currentUnit.id);
-        completedUnits.push({
-          type: currentUnit.type,
-          id: currentUnit.id,
-          startedAt: currentUnit.startedAt,
-          finishedAt: Date.now(),
-        });
-        clearUnitRuntimeRecord(basePath, currentUnit.type, currentUnit.id);
-      }
-
-      const waveTaskIds = currentWave.map(t => t.id).join(",");
-      lastUnit = { type: "execute-wave", id: `${mid}/${sid}/wave[${waveTaskIds}]` };
-      currentUnit = { type: "execute-wave", id: `${mid}/${sid}/wave[${waveTaskIds}]`, startedAt: Date.now() };
-
-      ctx.ui.notify(
-        `Wave: executing ${currentWave.length} tasks in parallel [${waveTaskIds}]`,
-        "info",
-      );
-
-      try {
-        const result = await executeWave(
-          currentWave, basePath, mid, sid, sliceBranch,
-          (tid, tTitle, wtBase) => buildExecuteTaskPrompt(mid, sid, sTitle, tid, tTitle, wtBase),
-          waveTimeoutMs,
-          supervisor.wave_concurrency,
-        );
-
-        // Log results
-        for (const tr of result.taskResults) {
-          if (tr.merged) {
-            ctx.ui.notify(`  ${tr.taskId}: merged (${tr.usage.turns} turns, $${tr.usage.cost.toFixed(4)})`, "info");
-          } else {
-            ctx.ui.notify(`  ${tr.taskId}: ${tr.error ?? "failed"}`, "warning");
-          }
-        }
-
-        if (result.failedTasks.length > 0) {
-          ctx.ui.notify(
-            `Wave: ${result.failedTasks.length} task(s) failed, will retry sequentially`,
-            "warning",
-          );
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(`Wave execution failed: ${message}`, "error");
-      }
-
-      // Re-dispatch to pick up remaining tasks (completed tasks now have summaries on disk)
-      await dispatchNextUnit(ctx, pi);
-      return;
-    }
-
-    // SEQUENTIAL (default): single task or wave of 1, unchanged behavior
-    const tid = state.activeTask.id;
-    const tTitle = state.activeTask.title;
-    unitType = "execute-task";
-    unitId = `${mid}/${sid}/${tid}`;
-    prompt = await buildExecuteTaskPrompt(mid, sid, sTitle, tid, tTitle, basePath);
-
-  } else if (state.phase === "summarizing") {
-    // All tasks done — complete the slice
+  // ── Phase-first dispatch: complete-slice MUST run before reassessment ──
+  // If the current phase is "summarizing", complete-slice is responsible for
+  // mergeSliceToMain. Reassessment must wait until the merge is done.
+  if (state.phase === "summarizing") {
     const sid = state.activeSlice!.id;
     const sTitle = state.activeSlice!.title;
     unitType = "complete-slice";
     unitId = `${mid}/${sid}`;
     prompt = await buildCompleteSlicePrompt(mid, midTitle!, sid, sTitle, basePath);
-
-  } else if (state.phase === "completing-milestone") {
-    // All slices done — complete the milestone
-    unitType = "complete-milestone";
-    unitId = mid;
-    prompt = await buildCompleteMilestonePrompt(mid, midTitle!, basePath);
-
   } else {
-    if (currentUnit) {
-      const modelId = ctx.model?.id ?? "unknown";
-      snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
-      saveActivityLog(ctx, basePath, currentUnit.type, currentUnit.id);
+    // ── Adaptive Replanning: check if last completed slice needs reassessment ──
+    // Computed here (after summarizing guard) so complete-slice always runs first.
+    const needsReassess = await checkNeedsReassessment(basePath, mid, state);
+    if (needsRunUat) {
+      const { sliceId, uatType } = needsRunUat;
+      unitType = "run-uat";
+      unitId = `${mid}/${sliceId}`;
+      const uatFile = resolveSliceFile(basePath, mid, sliceId, "UAT")!;
+      const uatContent = await loadFile(uatFile);
+      prompt = await buildRunUatPrompt(
+        mid, sliceId, relSliceFile(basePath, mid, sliceId, "UAT"), uatContent ?? "", basePath,
+      );
+      // For non-artifact-driven UAT types, pause after the prompt is dispatched.
+      // The agent receives the prompt, writes S0x-UAT-RESULT.md surfacing the UAT,
+      // then auto-mode pauses for human execution. On resume, result file exists → skip.
+      if (uatType !== "artifact-driven") {
+        pauseAfterUatDispatch = true;
+      }
+    } else if (needsReassess) {
+      unitType = "reassess-roadmap";
+      unitId = `${mid}/${needsReassess.sliceId}`;
+      prompt = await buildReassessRoadmapPrompt(mid, midTitle!, needsReassess.sliceId, basePath);
+    } else if (state.phase === "pre-planning") {
+      // Need roadmap — check if context exists
+      const contextFile = resolveMilestoneFile(basePath, mid, "CONTEXT");
+      const hasContext = !!(contextFile && await loadFile(contextFile));
+
+      if (!hasContext) {
+        await stopAuto(ctx, pi);
+        ctx.ui.notify("No context or roadmap yet. Run /gsd to discuss first.", "warning");
+        return;
+      }
+
+      // Research before roadmap if no research exists
+      const researchFile = resolveMilestoneFile(basePath, mid, "RESEARCH");
+      const hasResearch = !!(researchFile && await loadFile(researchFile));
+
+      if (!hasResearch) {
+        unitType = "research-milestone";
+        unitId = mid;
+        prompt = await buildResearchMilestonePrompt(mid, midTitle!, basePath);
+      } else {
+        unitType = "plan-milestone";
+        unitId = mid;
+        prompt = await buildPlanMilestonePrompt(mid, midTitle!, basePath);
+      }
+
+    } else if (state.phase === "planning") {
+      // Slice needs planning — but research first if no research exists
+      const sid = state.activeSlice!.id;
+      const sTitle = state.activeSlice!.title;
+      const researchFile = resolveSliceFile(basePath, mid, sid, "RESEARCH");
+      const hasResearch = !!(researchFile && await loadFile(researchFile));
+
+      if (!hasResearch) {
+        unitType = "research-slice";
+        unitId = `${mid}/${sid}`;
+        prompt = await buildResearchSlicePrompt(mid, midTitle!, sid, sTitle, basePath);
+      } else {
+        unitType = "plan-slice";
+        unitId = `${mid}/${sid}`;
+        prompt = await buildPlanSlicePrompt(mid, midTitle!, sid, sTitle, basePath);
+      }
+
+    } else if (state.phase === "replanning-slice") {
+      // Blocker discovered — replan the slice before continuing
+      const sid = state.activeSlice!.id;
+      const sTitle = state.activeSlice!.title;
+      unitType = "replan-slice";
+      unitId = `${mid}/${sid}`;
+      prompt = await buildReplanSlicePrompt(mid, midTitle!, sid, sTitle, basePath);
+
+    } else if (state.phase === "executing" && state.activeTask) {
+      const sid = state.activeSlice!.id;
+      const sTitle = state.activeSlice!.title;
+
+      // Check for parallelizable tasks only when multiple incomplete tasks remain
+      const planPath = resolveSliceFile(basePath, mid, sid, "PLAN");
+      let useWave = false;
+      let currentWave: TaskPlanEntry[] | null = null;
+
+      if (planPath) {
+        const planContent = await loadFile(planPath);
+        if (planContent) {
+          const incompleteTasks = parsePlan(planContent).tasks.filter(t => !t.done);
+          if (incompleteTasks.length > 1) {
+            const waves = computeWaves(incompleteTasks);
+            if (waves.length > 0 && waves[0].length > 1) {
+              currentWave = waves[0];
+              useWave = true;
+            }
+          }
+        }
+      }
+
+      if (useWave && currentWave) {
+        // PARALLEL: multiple independent tasks in this wave
+        const sliceBranch = `gsd/${mid}/${sid}`;
+        const supervisor = resolveAutoSupervisorConfig();
+        const waveTimeoutMs = supervisor.hard_timeout_minutes * 60 * 1000;
+
+        // Snapshot metrics for previous unit before wave execution
+        if (currentUnit) {
+          const modelId = ctx.model?.id ?? "unknown";
+          snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
+          saveActivityLog(ctx, basePath, currentUnit.type, currentUnit.id);
+          completedUnits.push({
+            type: currentUnit.type,
+            id: currentUnit.id,
+            startedAt: currentUnit.startedAt,
+            finishedAt: Date.now(),
+          });
+          clearUnitRuntimeRecord(basePath, currentUnit.type, currentUnit.id);
+        }
+
+        const waveTaskIds = currentWave.map(t => t.id).join(",");
+        lastUnit = { type: "execute-wave", id: `${mid}/${sid}/wave[${waveTaskIds}]` };
+        currentUnit = { type: "execute-wave", id: `${mid}/${sid}/wave[${waveTaskIds}]`, startedAt: Date.now() };
+
+        ctx.ui.notify(
+          `Wave: executing ${currentWave.length} tasks in parallel [${waveTaskIds}]`,
+          "info",
+        );
+
+        try {
+          const result = await executeWave(
+            currentWave, basePath, mid, sid, sliceBranch,
+            (tid, tTitle, wtBase) => buildExecuteTaskPrompt(mid, sid, sTitle, tid, tTitle, wtBase),
+            waveTimeoutMs,
+            supervisor.wave_concurrency,
+          );
+
+          // Log results
+          for (const tr of result.taskResults) {
+            if (tr.merged) {
+              ctx.ui.notify(`  ${tr.taskId}: merged (${tr.usage.turns} turns, $${tr.usage.cost.toFixed(4)})`, "info");
+            } else {
+              ctx.ui.notify(`  ${tr.taskId}: ${tr.error ?? "failed"}`, "warning");
+            }
+          }
+
+          if (result.failedTasks.length > 0) {
+            ctx.ui.notify(
+              `Wave: ${result.failedTasks.length} task(s) failed, will retry sequentially`,
+              "warning",
+            );
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          ctx.ui.notify(`Wave execution failed: ${message}`, "error");
+        }
+
+        // Re-dispatch to pick up remaining tasks (completed tasks now have summaries on disk)
+        await dispatchNextUnit(ctx, pi);
+        return;
+      }
+
+      // SEQUENTIAL (default): single task or wave of 1, unchanged behavior
+      const tid = state.activeTask.id;
+      const tTitle = state.activeTask.title;
+      unitType = "execute-task";
+      unitId = `${mid}/${sid}/${tid}`;
+      prompt = await buildExecuteTaskPrompt(mid, sid, sTitle, tid, tTitle, basePath);
+
+    } else if (state.phase === "completing-milestone") {
+      // All slices done — complete the milestone
+      unitType = "complete-milestone";
+      unitId = mid;
+      prompt = await buildCompleteMilestonePrompt(mid, midTitle!, basePath);
+
+    } else {
+      if (currentUnit) {
+        const modelId = ctx.model?.id ?? "unknown";
+        snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
+        saveActivityLog(ctx, basePath, currentUnit.type, currentUnit.id);
+      }
+      await stopAuto(ctx, pi);
+      ctx.ui.notify(`Unexpected phase: ${state.phase}. Stopping auto-mode.`, "warning");
+      return;
     }
-    await stopAuto(ctx, pi);
-    ctx.ui.notify(`Unexpected phase: ${state.phase}. Stopping auto-mode.`, "warning");
-    return;
   }
 
   await emitObservabilityWarnings(ctx, unitType, unitId);
 
-  // Stuck detection — same unit dispatched again means the LLM didn't produce
-  // the expected artifact. Retry once (the LLM may have hit an error or run out
-  // of context), then stop with a diagnostic.
-  if (lastUnit && lastUnit.type === unitType && lastUnit.id === unitId) {
-    retryCount++;
-
-    if (retryCount > MAX_RETRIES) {
-      if (currentUnit) {
-        const modelId = ctx.model?.id ?? "unknown";
-        snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
-      }
-      saveActivityLog(ctx, basePath, lastUnit.type, lastUnit.id);
-
-      // Diagnostic: what file was expected?
-      const expected = diagnoseExpectedArtifact(unitType, unitId, basePath);
-      await stopAuto(ctx, pi);
-      ctx.ui.notify(
-        `Stuck: ${unitType} ${unitId} fired ${retryCount + 1} times. Expected artifact not found.${expected ? `\n   Expected: ${expected}` : ""}\n   Check .gsd/ and activity logs.`,
-        "error",
-      );
-      return;
-    }
+  // Idempotency: skip units already completed in a prior session.
+  const idempotencyKey = `${unitType}/${unitId}`;
+  if (completedKeySet.has(idempotencyKey)) {
     ctx.ui.notify(
-      `${unitType} ${unitId} didn't produce expected artifact. Retrying (${retryCount}/${MAX_RETRIES}).`,
+      `Skipping ${unitType} ${unitId} — already completed in a prior session. Advancing.`,
+      "info",
+    );
+    // Don't increment dispatch count — just advance by calling dispatchNextUnit again.
+    // First, force state re-derive so the scheduler sees the completed artifact.
+    await dispatchNextUnit(ctx, pi);
+    return;
+  }
+
+  // Stuck detection — tracks total dispatches per unit (not just consecutive repeats).
+  // Pattern A→B→A→B would reset retryCount every time; this map catches it.
+  const dispatchKey = `${unitType}/${unitId}`;
+  const prevCount = unitDispatchCount.get(dispatchKey) ?? 0;
+  if (prevCount >= MAX_UNIT_DISPATCHES) {
+    if (currentUnit) {
+      const modelId = ctx.model?.id ?? "unknown";
+      snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
+    }
+    saveActivityLog(ctx, basePath, unitType, unitId);
+
+    const expected = diagnoseExpectedArtifact(unitType, unitId, basePath);
+    await stopAuto(ctx, pi);
+    ctx.ui.notify(
+      `Loop detected: ${unitType} ${unitId} dispatched ${prevCount + 1} times total. Expected artifact not found.${expected ? `\n   Expected: ${expected}` : ""}\n   Check branch state and .gsd/ artifacts.`,
+      "error",
+    );
+    return;
+  }
+  unitDispatchCount.set(dispatchKey, prevCount + 1);
+  if (prevCount > 0) {
+    ctx.ui.notify(
+      `${unitType} ${unitId} didn't produce expected artifact. Retrying (${prevCount + 1}/${MAX_UNIT_DISPATCHES}).`,
       "warning",
     );
-  } else {
-    retryCount = 0;
   }
   // Snapshot metrics + activity log for the PREVIOUS unit before we reassign.
   // The session still holds the previous unit's data (newSession hasn't fired yet).
@@ -1223,6 +1317,11 @@ async function dispatchNextUnit(
     snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
     saveActivityLog(ctx, basePath, currentUnit.type, currentUnit.id);
 
+    // Persist completion to disk BEFORE updating memory — so a crash here is recoverable.
+    const closeoutKey = `${currentUnit.type}/${currentUnit.id}`;
+    persistCompletedKey(basePath, closeoutKey);
+    completedKeySet.add(closeoutKey);
+
     completedUnits.push({
       type: currentUnit.type,
       id: currentUnit.id,
@@ -1230,9 +1329,9 @@ async function dispatchNextUnit(
       finishedAt: Date.now(),
     });
     clearUnitRuntimeRecord(basePath, currentUnit.type, currentUnit.id);
+    unitDispatchCount.delete(`${currentUnit.type}/${currentUnit.id}`);
+    unitRecoveryCount.delete(`${currentUnit.type}/${currentUnit.id}`);
   }
-
-  lastUnit = { type: unitType, id: unitId };
   currentUnit = { type: unitType, id: unitId, startedAt: Date.now() };
   writeUnitRuntimeRecord(basePath, unitType, unitId, currentUnit.startedAt, {
     phase: "dispatched",
@@ -1276,7 +1375,7 @@ async function dispatchNextUnit(
   if (pendingCrashRecovery) {
     finalPrompt = `${pendingCrashRecovery}\n\n---\n\n${finalPrompt}`;
     pendingCrashRecovery = null;
-  } else if (retryCount > 0) {
+  } else if ((unitDispatchCount.get(`${unitType}/${unitId}`) ?? 0) > 1) {
     const diagnostic = getDeepDiagnostic(basePath);
     if (diagnostic) {
       finalPrompt = `**RETRY — your previous attempt did not produce the required artifact.**\n\nDiagnostic from previous attempt:\n${diagnostic}\n\nFix whatever went wrong and make sure you write the required file this time.\n\n---\n\n${finalPrompt}`;
@@ -2254,6 +2353,20 @@ async function recoverTimedOutUnit(
   const recoveryAttempts = runtime?.recoveryAttempts ?? 0;
   const maxRecoveryAttempts = reason === "idle" ? 2 : 1;
 
+  const recoveryKey = `${unitType}/${unitId}`;
+  const attemptNumber = (unitRecoveryCount.get(recoveryKey) ?? 0) + 1;
+  unitRecoveryCount.set(recoveryKey, attemptNumber);
+
+  if (attemptNumber > 1) {
+    // Exponential backoff: 2^(n-1) seconds, capped at 30s
+    const backoffMs = Math.min(1000 * Math.pow(2, attemptNumber - 2), 30000);
+    ctx.ui.notify(
+      `Recovery attempt ${attemptNumber} for ${unitType} ${unitId}. Waiting ${backoffMs / 1000}s before retry.`,
+      "info",
+    );
+    await new Promise(r => setTimeout(r, backoffMs));
+  }
+
   if (unitType === "execute-task") {
     const status = await inspectExecuteTaskDurability(basePath, unitId);
     if (!status) return "paused";
@@ -2269,9 +2382,10 @@ async function recoverTimedOutUnit(
         recovery: status,
       });
       ctx.ui.notify(
-        `${reason === "idle" ? "Idle" : "Timeout"} recovery: ${unitType} ${unitId} already completed on disk. Continuing auto-mode.`,
+        `${reason === "idle" ? "Idle" : "Timeout"} recovery: ${unitType} ${unitId} already completed on disk. Continuing auto-mode. (attempt ${attemptNumber})`,
         "info",
       );
+      unitRecoveryCount.delete(recoveryKey);
       await dispatchNextUnit(ctx, pi);
       return "recovered";
     }
@@ -2318,7 +2432,7 @@ async function recoverTimedOutUnit(
         { triggerTurn: true, deliverAs: "steer" },
       );
       ctx.ui.notify(
-        `${reason === "idle" ? "Idle" : "Timeout"} recovery: steering ${unitType} ${unitId} to finish durable output (attempt ${recoveryAttempts + 1}/${maxRecoveryAttempts}).`,
+        `${reason === "idle" ? "Idle" : "Timeout"} recovery: steering ${unitType} ${unitId} to finish durable output (attempt ${recoveryAttempts + 1}/${maxRecoveryAttempts}) (attempt ${attemptNumber}).`,
         "warning",
       );
       return "recovered";
@@ -2339,9 +2453,10 @@ async function recoverTimedOutUnit(
         lastRecoveryReason: reason,
       });
       ctx.ui.notify(
-        `${unitType} ${unitId} skipped after ${maxRecoveryAttempts} recovery attempts (${diagnostic}). Blocker artifacts written. Advancing pipeline.`,
+        `${unitType} ${unitId} skipped after ${maxRecoveryAttempts} recovery attempts (${diagnostic}). Blocker artifacts written. Advancing pipeline. (attempt ${attemptNumber})`,
         "warning",
       );
+      unitRecoveryCount.delete(recoveryKey);
       await dispatchNextUnit(ctx, pi);
       return "recovered";
     }
@@ -2372,9 +2487,10 @@ async function recoverTimedOutUnit(
       lastRecoveryReason: reason,
     });
     ctx.ui.notify(
-      `${reason === "idle" ? "Idle" : "Timeout"} recovery: ${unitType} ${unitId} artifact already exists on disk. Advancing.`,
+      `${reason === "idle" ? "Idle" : "Timeout"} recovery: ${unitType} ${unitId} artifact already exists on disk. Advancing. (attempt ${attemptNumber})`,
       "info",
     );
+    unitRecoveryCount.delete(recoveryKey);
     await dispatchNextUnit(ctx, pi);
     return "recovered";
   }
@@ -2420,7 +2536,7 @@ async function recoverTimedOutUnit(
       { triggerTurn: true, deliverAs: "steer" },
     );
     ctx.ui.notify(
-      `${reason === "idle" ? "Idle" : "Timeout"} recovery: steering ${unitType} ${unitId} to produce ${expected} (attempt ${recoveryAttempts + 1}/${maxRecoveryAttempts}).`,
+      `${reason === "idle" ? "Idle" : "Timeout"} recovery: steering ${unitType} ${unitId} to produce ${expected} (attempt ${recoveryAttempts + 1}/${maxRecoveryAttempts}) (attempt ${attemptNumber}).`,
       "warning",
     );
     return "recovered";
@@ -2440,9 +2556,10 @@ async function recoverTimedOutUnit(
       lastRecoveryReason: reason,
     });
     ctx.ui.notify(
-      `${unitType} ${unitId} skipped after ${maxRecoveryAttempts} recovery attempts. Blocker placeholder written to ${placeholder}. Advancing pipeline.`,
+      `${unitType} ${unitId} skipped after ${maxRecoveryAttempts} recovery attempts. Blocker placeholder written to ${placeholder}. Advancing pipeline. (attempt ${attemptNumber})`,
       "warning",
     );
+    unitRecoveryCount.delete(recoveryKey);
     await dispatchNextUnit(ctx, pi);
     return "recovered";
   }

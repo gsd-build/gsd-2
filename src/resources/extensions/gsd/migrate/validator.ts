@@ -14,7 +14,7 @@ function issue(file: string, severity: ValidationSeverity, message: string): Val
 /**
  * Validate that a .planning directory has the minimum required structure.
  * Returns structured issues with severity levels:
- * - fatal: directory doesn't exist or ROADMAP.md missing (migration cannot proceed)
+ * - fatal: directory doesn't exist (migration cannot proceed)
  * - warning: optional files missing (migration can proceed with reduced data)
  */
 export async function validatePlanningDirectory(path: string): Promise<ValidationResult> {
@@ -26,9 +26,11 @@ export async function validatePlanningDirectory(path: string): Promise<Validatio
     return { valid: false, issues };
   }
 
-  // ROADMAP.md is required (fatal if missing)
+  // ROADMAP.md — warn if missing (transformer falls back to filesystem phases)
   if (!existsSync(join(path, 'ROADMAP.md'))) {
-    issues.push(issue('ROADMAP.md', 'fatal', 'ROADMAP.md is required for migration'));
+    issues.push(issue('ROADMAP.md', 'warning',
+      'ROADMAP.md not found — milestone structure will be inferred from phases/ directory',
+    ));
   }
 
   // Optional files — warn if missing
