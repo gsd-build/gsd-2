@@ -30,9 +30,31 @@ function run(cmd, options = {}) {
 process.stdout.write = process.stderr.write.bind(process.stderr)
 
 // ---------------------------------------------------------------------------
+// ASCII banner — printed before clack UI for brand recognition
+// ---------------------------------------------------------------------------
+const cyan    = '\x1b[36m'
+const dim     = '\x1b[2m'
+const reset   = '\x1b[0m'
+
+const banner =
+  '\n' +
+  cyan +
+  '   ██████╗ ███████╗██████╗ \n' +
+  '  ██╔════╝ ██╔════╝██╔══██╗\n' +
+  '  ██║  ███╗███████╗██║  ██║\n' +
+  '  ██║   ██║╚════██║██║  ██║\n' +
+  '  ╚██████╔╝███████║██████╔╝\n' +
+  '   ╚═════╝ ╚══════╝╚═════╝ ' +
+  reset + '\n' +
+  '\n' +
+  `  Get Shit Done ${dim}v${pkg.version}${reset}\n`
+
+// ---------------------------------------------------------------------------
 // Main — wrapped in async IIFE, with graceful fallback if clack fails
 // ---------------------------------------------------------------------------
 ;(async () => {
+  process.stderr.write(banner)
+
   let p, pc
 
   try {
@@ -40,14 +62,14 @@ process.stdout.write = process.stderr.write.bind(process.stderr)
     pc = (await import('picocolors')).default
   } catch {
     // Clack or picocolors unavailable — fall back to minimal output
-    process.stderr.write(`\n  GSD v${pkg.version} installed.\n  Run gsd to get started.\n\n`)
+    process.stderr.write(`  Run gsd to get started.\n\n`)
     await run('npx patch-package')
     await run('npx playwright install chromium')
     return
   }
 
   // --- Branded intro -------------------------------------------------------
-  p.intro(pc.bgCyan(pc.black(' gsd ')) + '  ' + pc.dim(`v${pkg.version}`))
+  p.intro('Setup')
 
   const results = []
   const s = p.spinner()
