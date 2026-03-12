@@ -3,15 +3,15 @@
 ## Active Work
 
 - **Milestone:** M003 — Custom Model Provider Support
-- **Slice:** S01 — Custom provider onboarding and auth ✅ complete
-- **Branch:** `gsd/M003/S01`
-- **Phase:** slice-done
-- **Next:** S02 — Startup validation and fallback
+- **Slice:** S02 — Startup validation and fallback
+- **Branch:** `gsd/M003/S02`
+- **Phase:** complete
+- **Task:** T01 — done
 
 ## Completed Slices (M003)
 
 | Slice | Title | Status |
 |-------|-------|--------|
 | S01 | Custom provider onboarding and auth | done |
-| S02 | Startup validation and fallback | pending |
+| S02 | Startup validation and fallback | done |
 | S03 | Documentation | pending |

@@ -102,6 +102,15 @@ if (!isPrintMode && shouldRunOnboarding(authStorage)) {
 }
 
 const modelRegistry = new ModelRegistry(authStorage)
+
+// Surface models.json parse errors as a warning — don't crash, the SDK
+// falls back to built-in models gracefully.
+const modelsJsonError = modelRegistry.getError()
+if (modelsJsonError) {
+  console.error(`[gsd] Warning: models.json error — ${modelsJsonError}`)
+  console.error('[gsd] Custom provider models were not loaded. Built-in models are still available.')
+}
+
 const settingsManager = SettingsManager.create(agentDir)
 
 // Validate configured model on startup — catches stale settings from prior installs
@@ -115,11 +124,14 @@ const configuredExists = configuredProvider && configuredModel &&
   allModels.some((m) => m.provider === configuredProvider && m.id === configuredModel)
 
 if (!configuredModel || !configuredExists) {
-  // Fallback: pick the best available Anthropic model
+  // Fallback: try Anthropic first (preserves existing behavior for most users),
+  // then any available model (supports custom-provider-only setups).
+  const available = modelRegistry.getAvailable()
   const preferred =
-    allModels.find((m) => m.provider === 'anthropic' && m.id === 'claude-opus-4-6') ||
-    allModels.find((m) => m.provider === 'anthropic' && m.id.includes('opus')) ||
-    allModels.find((m) => m.provider === 'anthropic')
+    available.find((m) => m.provider === 'anthropic' && m.id === 'claude-opus-4-6') ||
+    available.find((m) => m.provider === 'anthropic' && m.id.includes('opus')) ||
+    available.find((m) => m.provider === 'anthropic') ||
+    available[0]  // any available model — custom providers included
   if (preferred) {
     settingsManager.setDefaultModelAndProvider(preferred.provider, preferred.id)
   }

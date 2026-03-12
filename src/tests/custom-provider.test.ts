@@ -9,7 +9,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -272,4 +272,298 @@ test('shouldRunOnboarding: returns false when known LLM provider is authed (exis
     Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true })
     rmSync(tmp, { recursive: true, force: true })
   }
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// S02: Error surfacing, startup fallback, and auto-mode provider restore
+// ═══════════════════════════════════════════════════════════════════════════
+
+// --- 5. ModelRegistry error surfacing ---
+
+test('ModelRegistry.getError: returns undefined for valid models.json', async () => {
+  const { ModelRegistry, AuthStorage } = await import('@mariozechner/pi-coding-agent')
+
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-error-surface-'))
+  const authPath = join(tmp, 'auth.json')
+  const modelsPath = join(tmp, 'models.json')
+
+  writeFileSync(authPath, JSON.stringify({}))
+  writeFileSync(modelsPath, JSON.stringify({
+    providers: {
+      ollama: {
+        baseUrl: 'http://localhost:11434/v1',
+        api: 'openai-completions',
+        apiKey: 'ollama',
+        models: [{ id: 'llama3.1:8b' }],
+      },
+    },
+  }))
+
+  try {
+    const auth = AuthStorage.create(authPath)
+    const registry = new ModelRegistry(auth, modelsPath)
+    assert.equal(registry.getError(), undefined, 'valid models.json should produce no error')
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('ModelRegistry.getError: returns error string for malformed models.json', async () => {
+  const { ModelRegistry, AuthStorage } = await import('@mariozechner/pi-coding-agent')
+
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-error-surface-'))
+  const authPath = join(tmp, 'auth.json')
+  const modelsPath = join(tmp, 'models.json')
+
+  writeFileSync(authPath, JSON.stringify({}))
+  writeFileSync(modelsPath, '{ this is not valid JSON }}}')
+
+  try {
+    const auth = AuthStorage.create(authPath)
+    const registry = new ModelRegistry(auth, modelsPath)
+    const error = registry.getError()
+    assert.ok(error, 'malformed models.json should produce an error')
+    assert.equal(typeof error, 'string', 'error should be a string')
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('ModelRegistry.getError: returns undefined when no models.json exists', async () => {
+  const { ModelRegistry, AuthStorage } = await import('@mariozechner/pi-coding-agent')
+
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-error-surface-'))
+  const authPath = join(tmp, 'auth.json')
+  const modelsPath = join(tmp, 'nonexistent-models.json')
+
+  writeFileSync(authPath, JSON.stringify({}))
+
+  try {
+    const auth = AuthStorage.create(authPath)
+    const registry = new ModelRegistry(auth, modelsPath)
+    assert.equal(registry.getError(), undefined, 'missing models.json should not produce an error')
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+// --- 6. Generalized startup fallback ---
+
+test('Startup fallback: picks Anthropic model when Anthropic auth is available', async () => {
+  const { ModelRegistry, AuthStorage } = await import('@mariozechner/pi-coding-agent')
+
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-fallback-'))
+  const authPath = join(tmp, 'auth.json')
+
+  // Give Anthropic a valid key so models are "available"
+  writeFileSync(authPath, JSON.stringify({
+    anthropic: { type: 'api_key', key: 'sk-ant-test123' },
+  }))
+
+  try {
+    const auth = AuthStorage.create(authPath)
+    const registry = new ModelRegistry(auth)
+    const available = registry.getAvailable()
+
+    // Simulate the fallback logic from cli.ts
+    const preferred =
+      available.find((m) => m.provider === 'anthropic' && m.id === 'claude-opus-4-6') ||
+      available.find((m) => m.provider === 'anthropic' && m.id.includes('opus')) ||
+      available.find((m) => m.provider === 'anthropic') ||
+      available[0]
+
+    assert.ok(preferred, 'should find a preferred model')
+    assert.equal(preferred.provider, 'anthropic', 'should pick Anthropic when available')
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('Startup fallback: picks custom provider model when only custom provider is available', async () => {
+  const { ModelRegistry, AuthStorage } = await import('@mariozechner/pi-coding-agent')
+
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-fallback-'))
+  const authPath = join(tmp, 'auth.json')
+  const modelsPath = join(tmp, 'models.json')
+
+  // No Anthropic key — only custom provider auth
+  writeFileSync(authPath, JSON.stringify({
+    ollama: { type: 'api_key', key: 'ollama' },
+  }))
+  writeFileSync(modelsPath, JSON.stringify({
+    providers: {
+      ollama: {
+        baseUrl: 'http://localhost:11434/v1',
+        api: 'openai-completions',
+        apiKey: 'ollama',
+        models: [{ id: 'llama3.1:8b' }],
+      },
+    },
+  }))
+
+  try {
+    const auth = AuthStorage.create(authPath)
+    const registry = new ModelRegistry(auth, modelsPath)
+    const available = registry.getAvailable()
+
+    // Simulate the fallback logic from cli.ts
+    const preferred =
+      available.find((m) => m.provider === 'anthropic' && m.id === 'claude-opus-4-6') ||
+      available.find((m) => m.provider === 'anthropic' && m.id.includes('opus')) ||
+      available.find((m) => m.provider === 'anthropic') ||
+      available[0]
+
+    assert.ok(preferred, 'should find a preferred model')
+    assert.equal(preferred.provider, 'ollama', 'should pick custom provider when Anthropic unavailable')
+    assert.equal(preferred.id, 'llama3.1:8b', 'should pick the custom provider model')
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('Startup fallback: handles zero available models gracefully', async () => {
+  const { ModelRegistry, AuthStorage } = await import('@mariozechner/pi-coding-agent')
+
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-fallback-'))
+  const authPath = join(tmp, 'auth.json')
+
+  // No auth at all — no models should be available
+  writeFileSync(authPath, JSON.stringify({}))
+
+  try {
+    const auth = AuthStorage.create(authPath)
+    const registry = new ModelRegistry(auth)
+    const available = registry.getAvailable()
+
+    // Simulate the fallback logic from cli.ts
+    const preferred =
+      available.find((m) => m.provider === 'anthropic' && m.id === 'claude-opus-4-6') ||
+      available.find((m) => m.provider === 'anthropic' && m.id.includes('opus')) ||
+      available.find((m) => m.provider === 'anthropic') ||
+      available[0]
+
+    // With no auth, preferred should be undefined — no crash
+    assert.equal(preferred, undefined, 'should be undefined when no models are available')
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+// --- 7. Auto-mode provider storage and restore ---
+
+test('Auto-mode: originalProvider is exported and tracks provider alongside modelId', async () => {
+  // We test the auto.ts module state variables indirectly by verifying the code
+  // structure. Direct auto-mode testing requires ExtensionContext which is complex
+  // to mock, so we verify the code shape.
+  const { readFileSync } = await import('node:fs')
+  const { join } = await import('node:path')
+
+  const autoSource = readFileSync(
+    join(import.meta.dirname, '..', 'resources', 'extensions', 'gsd', 'auto.ts'),
+    'utf-8'
+  )
+
+  // Verify originalProvider state variable exists
+  assert.ok(
+    autoSource.includes('let originalProvider: string | null = null'),
+    'auto.ts should declare originalProvider state variable'
+  )
+
+  // Verify originalProvider is captured alongside originalModelId
+  assert.ok(
+    autoSource.includes('originalProvider = ctx.model?.provider ?? null'),
+    'auto.ts should capture originalProvider from ctx.model'
+  )
+
+  // Verify stopAuto uses originalProvider instead of hardcoded "anthropic"
+  assert.ok(
+    autoSource.includes('ctx.modelRegistry.find(originalProvider, originalModelId)'),
+    'stopAuto should use originalProvider for model restore, not hardcoded "anthropic"'
+  )
+
+  // Verify stopAuto clears originalProvider
+  assert.ok(
+    autoSource.includes('originalProvider = null'),
+    'stopAuto should clear originalProvider after restore'
+  )
+
+  // Verify pauseAuto preservation comment includes originalProvider
+  assert.ok(
+    autoSource.includes('originalProvider\n  // — all needed'),
+    'pauseAuto preservation comment should list originalProvider'
+  )
+})
+
+test('Auto-mode: stopAuto guard requires both originalProvider and originalModelId', async () => {
+  const { readFileSync } = await import('node:fs')
+  const { join } = await import('node:path')
+
+  const autoSource = readFileSync(
+    join(import.meta.dirname, '..', 'resources', 'extensions', 'gsd', 'auto.ts'),
+    'utf-8'
+  )
+
+  // Verify the guard checks both variables
+  assert.ok(
+    autoSource.includes('originalModelId && originalProvider'),
+    'stopAuto should guard on both originalModelId and originalProvider'
+  )
+})
+
+// --- 8. cli.ts error surfacing integration ---
+
+test('cli.ts: error surfacing block checks modelRegistry.getError() after construction', async () => {
+  const { readFileSync } = await import('node:fs')
+  const { join } = await import('node:path')
+
+  const cliSource = readFileSync(
+    join(import.meta.dirname, '..', 'cli.ts'),
+    'utf-8'
+  )
+
+  // Verify getError() is called after ModelRegistry construction
+  const registryLine = cliSource.indexOf('new ModelRegistry(authStorage)')
+  const errorCheckLine = cliSource.indexOf('modelRegistry.getError()')
+  assert.ok(registryLine > -1, 'cli.ts should construct ModelRegistry')
+  assert.ok(errorCheckLine > -1, 'cli.ts should call modelRegistry.getError()')
+  assert.ok(errorCheckLine > registryLine, 'getError() check should come after ModelRegistry construction')
+
+  // Verify it's a warning, not a crash
+  assert.ok(
+    cliSource.includes('console.error') && cliSource.includes('models.json error'),
+    'cli.ts should emit a console.error warning about models.json errors'
+  )
+})
+
+test('cli.ts: startup fallback uses getAvailable() and falls back to any model', async () => {
+  const { readFileSync } = await import('node:fs')
+  const { join } = await import('node:path')
+
+  const cliSource = readFileSync(
+    join(import.meta.dirname, '..', 'cli.ts'),
+    'utf-8'
+  )
+
+  // Verify fallback uses getAvailable() instead of getAll()
+  const fallbackSection = cliSource.slice(
+    cliSource.indexOf('if (!configuredModel || !configuredExists)'),
+    cliSource.indexOf('// Default thinking level')
+  )
+
+  assert.ok(
+    fallbackSection.includes('modelRegistry.getAvailable()'),
+    'fallback should use getAvailable() to check auth status'
+  )
+
+  // Verify it tries Anthropic first
+  assert.ok(
+    fallbackSection.includes("m.provider === 'anthropic'"),
+    'fallback should try Anthropic models first'
+  )
+
+  // Verify it falls back to available[0]
+  assert.ok(
+    fallbackSection.includes('available[0]'),
+    'fallback should fall back to any available model'
+  )
 })

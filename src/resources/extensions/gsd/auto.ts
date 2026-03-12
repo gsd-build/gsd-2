@@ -150,6 +150,7 @@ let currentMilestoneId: string | null = null;
 
 /** Model the user had selected before auto-mode started */
 let originalModelId: string | null = null;
+let originalProvider: string | null = null;
 
 /** Progress-aware timeout supervision */
 let unitTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
@@ -270,10 +271,11 @@ export async function stopAuto(ctx?: ExtensionContext, pi?: ExtensionAPI): Promi
   ctx?.ui.setFooter(undefined);
 
   // Restore the user's original model
-  if (pi && ctx && originalModelId) {
-    const original = ctx.modelRegistry.find("anthropic", originalModelId);
+  if (pi && ctx && originalModelId && originalProvider) {
+    const original = ctx.modelRegistry.find(originalProvider, originalModelId);
     if (original) await pi.setModel(original);
     originalModelId = null;
+    originalProvider = null;
   }
 
   cmdCtx = null;
@@ -291,7 +293,7 @@ export async function pauseAuto(ctx?: ExtensionContext, _pi?: ExtensionAPI): Pro
   active = false;
   paused = true;
   // Preserve: unitDispatchCount, currentUnit, basePath, verbose, cmdCtx,
-  // completedUnits, autoStartTime, currentMilestoneId, originalModelId
+  // completedUnits, autoStartTime, currentMilestoneId, originalModelId, originalProvider
   // — all needed for resume and dashboard display
   ctx?.ui.setStatus("gsd-auto", "paused");
   ctx?.ui.setWidget("gsd-progress", undefined);
@@ -456,6 +458,7 @@ export async function startAuto(
   currentUnit = null;
   currentMilestoneId = state.activeMilestone?.id ?? null;
   originalModelId = ctx.model?.id ?? null;
+  originalProvider = ctx.model?.provider ?? null;
 
   // Initialize metrics — loads existing ledger from disk
   initMetrics(base);
