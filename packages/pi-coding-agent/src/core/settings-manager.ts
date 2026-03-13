@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
+import type { BashInterceptorRule } from "./tools/bash-interceptor.js";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -39,8 +40,32 @@ export interface ThinkingBudgetsSettings {
 	high?: number;
 }
 
+export interface BashInterceptorSettings {
+	enabled?: boolean; // default: true
+	rules?: BashInterceptorRule[]; // override default rules
+}
+
 export interface MarkdownSettings {
 	codeBlockIndent?: string; // default: "  "
+}
+
+export interface MemorySettings {
+	enabled?: boolean; // default: false
+	maxRolloutsPerStartup?: number; // default: 64
+	maxRolloutAgeDays?: number; // default: 30
+	minRolloutIdleHours?: number; // default: 12
+	stage1Concurrency?: number; // default: 8
+	summaryInjectionTokenLimit?: number; // default: 5000
+}
+
+export interface AsyncSettings {
+	enabled?: boolean;  // default: false
+	maxJobs?: number;   // default: 100
+}
+
+export interface TaskIsolationSettings {
+	mode?: "none" | "worktree" | "fuse-overlay"; // default: "none"
+	merge?: "patch" | "branch"; // default: "patch"
 }
 
 export type TransportSetting = Transport;
@@ -93,6 +118,10 @@ export interface Settings {
 	autocompleteMaxVisible?: number; // Max visible items in autocomplete dropdown (default: 5)
 	showHardwareCursor?: boolean; // Show terminal cursor while still positioning it for IME
 	markdown?: MarkdownSettings;
+	memory?: MemorySettings;
+	async?: AsyncSettings;
+	bashInterceptor?: BashInterceptorSettings;
+	taskIsolation?: TaskIsolationSettings;
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
@@ -355,6 +384,14 @@ export class SettingsManager {
 
 	getProjectSettings(): Settings {
 		return structuredClone(this.projectSettings);
+	}
+
+	getBashInterceptorEnabled(): boolean {
+		return this.settings.bashInterceptor?.enabled ?? true;
+	}
+
+	getBashInterceptorRules(): BashInterceptorRule[] | undefined {
+		return this.settings.bashInterceptor?.rules;
 	}
 
 	reload(): void {
@@ -938,5 +975,39 @@ export class SettingsManager {
 
 	getCodeBlockIndent(): string {
 		return this.settings.markdown?.codeBlockIndent ?? "  ";
+	}
+
+	getMemorySettings(): {
+		enabled: boolean;
+		maxRolloutsPerStartup: number;
+		maxRolloutAgeDays: number;
+		minRolloutIdleHours: number;
+		stage1Concurrency: number;
+		summaryInjectionTokenLimit: number;
+	} {
+		return {
+			enabled: this.settings.memory?.enabled ?? false,
+			maxRolloutsPerStartup: this.settings.memory?.maxRolloutsPerStartup ?? 64,
+			maxRolloutAgeDays: this.settings.memory?.maxRolloutAgeDays ?? 30,
+			minRolloutIdleHours: this.settings.memory?.minRolloutIdleHours ?? 12,
+			stage1Concurrency: this.settings.memory?.stage1Concurrency ?? 8,
+			summaryInjectionTokenLimit: this.settings.memory?.summaryInjectionTokenLimit ?? 5000,
+		};
+	}
+
+	getAsyncEnabled(): boolean {
+		return this.settings.async?.enabled ?? false;
+	}
+
+	getAsyncMaxJobs(): number {
+		return this.settings.async?.maxJobs ?? 100;
+	}
+
+	getTaskIsolationMode(): "none" | "worktree" | "fuse-overlay" {
+		return this.settings.taskIsolation?.mode ?? "none";
+	}
+
+	getTaskIsolationMerge(): "patch" | "branch" {
+		return this.settings.taskIsolation?.merge ?? "patch";
 	}
 }

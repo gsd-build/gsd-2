@@ -145,9 +145,37 @@ jobs:
       - name: Wait for npm registry propagation
         run: sleep 30
 
+      - name: Verify platform packages are published
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "Verifying platform packages at version ${VERSION}..."
+          FAILED=0
+          for platform in darwin-arm64 darwin-x64 linux-x64-gnu linux-arm64-gnu win32-x64-msvc; do
+            PKG="@gsd-build/engine-${platform}"
+            PUBLISHED=$(npm view "${PKG}@${VERSION}" version 2>/dev/null || echo "")
+            if [ "${PUBLISHED}" = "${VERSION}" ]; then
+              echo "  ✓ ${PKG}@${VERSION}"
+            else
+              echo "::error::${PKG}@${VERSION} not found on npm (got: '${PUBLISHED}')"
+              FAILED=1
+            fi
+          done
+          if [ "${FAILED}" = "1" ]; then
+            echo "::error::One or more platform packages are missing from npm. Aborting main package publish to prevent broken installs."
+            exit 1
+          fi
+          echo "All platform packages verified."
+
       - name: Publish main package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           # Skip prepublishOnly (build already done upstream) — just publish the tarball
-          npm publish --ignore-scripts
+          OUTPUT=$(npm publish --ignore-scripts 2>&1) && echo "$OUTPUT" || {
+            if echo "$OUTPUT" | grep -q "cannot publish over the previously published\|You cannot publish over"; then
+              echo "Already published, skipping"
+            else
+              echo "$OUTPUT"
+              exit 1
+            fi
+          }
