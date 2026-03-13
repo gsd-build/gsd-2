@@ -19,7 +19,6 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { GoogleGenAI } from "@google/genai";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -46,10 +45,24 @@ interface SearchDetails {
 
 // ── Lazy singleton client ────────────────────────────────────────────────────
 
-let client: GoogleGenAI | null = null;
+type GoogleGenAIClient = {
+	models: {
+		generateContent: (args: {
+			model: string;
+			contents: string;
+			config?: {
+				tools?: Array<{ googleSearch: Record<string, never> }>;
+				abortSignal?: AbortSignal;
+			};
+		}) => Promise<any>;
+	};
+};
 
-function getClient(): GoogleGenAI {
+let client: GoogleGenAIClient | null = null;
+
+async function getClient(): Promise<GoogleGenAIClient> {
 	if (!client) {
+		const { GoogleGenAI } = await import("@google/genai");
 		client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 	}
 	return client;
@@ -139,7 +152,7 @@ export default function (pi: ExtensionAPI) {
 			// Call Gemini with Google Search grounding
 			let result: SearchResult;
 			try {
-				const ai = getClient();
+				const ai = await getClient();
 				const response = await ai.models.generateContent({
 					model: process.env.GEMINI_SEARCH_MODEL || "gemini-2.5-flash",
 					contents: params.query,

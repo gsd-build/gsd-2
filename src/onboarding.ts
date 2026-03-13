@@ -152,18 +152,17 @@ function isCancelError(p: ClackModule, err: unknown): boolean {
  * Determine if the onboarding wizard should run.
  *
  * Returns true when:
- * - No LLM provider has credentials in authStorage
+ * - No LLM provider auth is available
  * - We're on a TTY (interactive terminal)
  *
  * Returns false (skip wizard) when:
- * - Any LLM provider is already authed (returning user)
+ * - Any LLM provider is already available via auth.json, env vars, runtime overrides, or fallback auth
  * - Not a TTY (piped input, subagent, CI)
  */
 export function shouldRunOnboarding(authStorage: AuthStorage): boolean {
   if (!process.stdin.isTTY) return false
   // Check if any LLM provider has credentials
-  const authedProviders = authStorage.list()
-  const hasLlmAuth = authedProviders.some(id => LLM_PROVIDER_IDS.includes(id))
+  const hasLlmAuth = LLM_PROVIDER_IDS.some(id => authStorage.hasAuth(id))
   return !hasLlmAuth
 }
 
