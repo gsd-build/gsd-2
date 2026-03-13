@@ -189,6 +189,8 @@ export interface AssistantMessage {
 	usage: Usage;
 	stopReason: StopReason;
 	errorMessage?: string;
+	/** Server-requested retry delay in milliseconds (from Retry-After or rate limit headers). */
+	retryAfterMs?: number;
 	timestamp: number; // Unix timestamp in milliseconds
 }
 

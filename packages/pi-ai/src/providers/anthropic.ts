@@ -190,6 +190,43 @@ function mergeHeaders(...headerSources: (Record<string, string> | undefined)[]):
 	return merged;
 }
 
+/**
+ * Extract retry delay from Anthropic error response headers (in milliseconds).
+ * Checks: retry-after (seconds or RFC date), x-ratelimit-reset-requests, x-ratelimit-reset-tokens.
+ * Returns undefined if no valid delay is found or if the delay is in the past.
+ */
+export function extractRetryAfterMs(headers: Headers | { get(name: string): string | null }, errorText = ""): number | undefined {
+	const normalizeDelay = (ms: number): number | undefined => (ms > 0 ? Math.ceil(ms + 1000) : undefined);
+
+	const retryAfter = headers.get("retry-after");
+	if (retryAfter) {
+		const seconds = Number(retryAfter);
+		if (Number.isFinite(seconds)) {
+			const delay = normalizeDelay(seconds * 1000);
+			if (delay !== undefined) return delay;
+		}
+		const asDate = new Date(retryAfter).getTime();
+		if (!Number.isNaN(asDate)) {
+			const delay = normalizeDelay(asDate - Date.now());
+			if (delay !== undefined) return delay;
+		}
+	}
+
+	// x-ratelimit-reset-requests / x-ratelimit-reset-tokens are Unix timestamps (seconds)
+	for (const header of ["x-ratelimit-reset-requests", "x-ratelimit-reset-tokens"]) {
+		const value = headers.get(header);
+		if (value) {
+			const resetSeconds = Number(value);
+			if (Number.isFinite(resetSeconds)) {
+				const delay = normalizeDelay(resetSeconds * 1000 - Date.now());
+				if (delay !== undefined) return delay;
+			}
+		}
+	}
+
+	return undefined;
+}
+
 export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 	model: Model<"anthropic-messages">,
 	context: Context,
@@ -415,6 +452,12 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 			for (const block of output.content) delete (block as any).index;
 			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
 			output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
+			if (error instanceof Anthropic.APIError && error.headers) {
+				const retryAfterMs = extractRetryAfterMs(error.headers, error.message);
+				if (retryAfterMs !== undefined) {
+					output.retryAfterMs = retryAfterMs;
+				}
+			}
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 			stream.end();
 		}

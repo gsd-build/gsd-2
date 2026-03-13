@@ -869,7 +869,7 @@ export class AgentSession {
 		}
 
 		// Validate API key
-		const apiKey = await this._modelRegistry.getApiKey(this.model);
+		const apiKey = await this._modelRegistry.getApiKey(this.model, this.sessionId);
 		if (!apiKey) {
 			const isOAuth = this._modelRegistry.isUsingOAuth(this.model);
 			if (isOAuth) {
@@ -1309,7 +1309,7 @@ export class AgentSession {
 	 * @throws Error if no API key available for the model
 	 */
 	async setModel(model: Model<any>, options?: { persist?: boolean }): Promise<void> {
-		const apiKey = await this._modelRegistry.getApiKey(model);
+		const apiKey = await this._modelRegistry.getApiKey(model, this.sessionId);
 		if (!apiKey) {
 			throw new Error(`No API key for ${model.provider}/${model.id}`);
 		}
@@ -1351,7 +1351,7 @@ export class AgentSession {
 			if (apiKeysByProvider.has(provider)) {
 				apiKey = apiKeysByProvider.get(provider);
 			} else {
-				apiKey = await this._modelRegistry.getApiKeyForProvider(provider);
+				apiKey = await this._modelRegistry.getApiKeyForProvider(provider, this.sessionId);
 				apiKeysByProvider.set(provider, apiKey);
 			}
 
@@ -1406,7 +1406,7 @@ export class AgentSession {
 		const nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
 		const nextModel = availableModels[nextIndex];
 
-		const apiKey = await this._modelRegistry.getApiKey(nextModel);
+		const apiKey = await this._modelRegistry.getApiKey(nextModel, this.sessionId);
 		if (!apiKey) {
 			throw new Error(`No API key for ${nextModel.provider}/${nextModel.id}`);
 		}
@@ -1560,7 +1560,7 @@ export class AgentSession {
 				throw new Error("No model selected");
 			}
 
-			const apiKey = await this._modelRegistry.getApiKey(this.model);
+			const apiKey = await this._modelRegistry.getApiKey(this.model, this.sessionId);
 			if (!apiKey) {
 				throw new Error(`No API key for ${this.model.provider}`);
 			}
@@ -1780,7 +1780,7 @@ export class AgentSession {
 				return;
 			}
 
-			const apiKey = await this._modelRegistry.getApiKey(this.model);
+			const apiKey = await this._modelRegistry.getApiKey(this.model, this.sessionId);
 			if (!apiKey) {
 				this._emit({ type: "auto_compaction_end", result: undefined, aborted: false, willRetry: false });
 				return;
@@ -2082,7 +2082,7 @@ export class AgentSession {
 				refreshTools: () => this._refreshToolRegistry(),
 				getCommands,
 				setModel: async (model, options) => {
-					const key = await this.modelRegistry.getApiKey(model);
+					const key = await this.modelRegistry.getApiKey(model, this.sessionId);
 					if (!key) return false;
 					await this.setModel(model, options);
 					return true;
@@ -2188,7 +2188,14 @@ export class AgentSession {
 			? this._baseToolsOverride
 			: createAllTools(this._cwd, {
 					read: { autoResizeImages },
-					bash: { commandPrefix: shellCommandPrefix },
+					bash: {
+						commandPrefix: shellCommandPrefix,
+						interceptor: {
+							enabled: this.settingsManager.getBashInterceptorEnabled(),
+							rules: this.settingsManager.getBashInterceptorRules(),
+						},
+						availableToolNames: () => this.getActiveToolNames(),
+					},
 				});
 
 		this._baseToolRegistry = new Map(Object.entries(baseTools).map(([name, tool]) => [name, tool as AgentTool]));
@@ -2276,7 +2283,20 @@ export class AgentSession {
 	}
 
 	/**
+	 * Classify an error message into a usage-limit error type for credential backoff.
+	 */
+	private _classifyErrorType(errorMessage: string): import("./auth-storage.js").UsageLimitErrorType {
+		const err = errorMessage.toLowerCase();
+		if (/quota|billing|exceeded.*limit|usage.*limit/i.test(err)) return "quota_exhausted";
+		if (/rate.?limit|too many requests|429/i.test(err)) return "rate_limit";
+		if (/500|502|503|504|server.?error|internal.?error|service.?unavailable/i.test(err)) return "server_error";
+		return "unknown";
+	}
+
+	/**
 	 * Handle retryable errors with exponential backoff.
+	 * When multiple credentials are available, marks the failing credential
+	 * as backed off and retries immediately with the next one.
 	 * @returns true if retry was initiated, false if max retries exceeded or disabled
 	 */
 	private async _handleRetryableError(message: AssistantMessage): Promise<boolean> {
@@ -2294,6 +2314,42 @@ export class AgentSession {
 			});
 		}
 
+		// Try credential fallback before counting against retry budget.
+		// If another credential is available, switch to it and retry immediately.
+		if (this.model && message.errorMessage) {
+			const errorType = this._classifyErrorType(message.errorMessage);
+			const hasAlternate = this._modelRegistry.authStorage.markUsageLimitReached(
+				this.model.provider,
+				this.sessionId,
+				{ errorType },
+			);
+
+			if (hasAlternate) {
+				// Remove error message from agent state
+				const messages = this.agent.state.messages;
+				if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
+					this.agent.replaceMessages(messages.slice(0, -1));
+				}
+
+				this._emit({
+					type: "auto_retry_start",
+					attempt: this._retryAttempt + 1,
+					maxAttempts: settings.maxRetries,
+					delayMs: 0,
+					errorMessage: `${message.errorMessage} (switching credential)`,
+				});
+
+				// Retry immediately with the next credential - don't increment _retryAttempt
+				setTimeout(() => {
+					this.agent.continue().catch(() => {
+						// Retry failed - will be caught by next agent_end
+					});
+				}, 0);
+
+				return true;
+			}
+		}
+
 		this._retryAttempt++;
 
 		if (this._retryAttempt > settings.maxRetries) {
@@ -2309,7 +2365,28 @@ export class AgentSession {
 			return false;
 		}
 
-		const delayMs = settings.baseDelayMs * 2 ** (this._retryAttempt - 1);
+		// Use server-requested delay when available (rate limit headers), capped by maxDelayMs.
+		// Fall back to exponential backoff when no server hint is present.
+		const exponentialDelayMs = settings.baseDelayMs * 2 ** (this._retryAttempt - 1);
+		let delayMs: number;
+		if (message.retryAfterMs !== undefined) {
+			const cap = settings.maxDelayMs > 0 ? settings.maxDelayMs : Infinity;
+			if (message.retryAfterMs > cap) {
+				// Server wants us to wait longer than our max — give up immediately
+				this._emit({
+					type: "auto_retry_end",
+					success: false,
+					attempt: this._retryAttempt - 1,
+					finalError: `Rate limit reset in ${Math.ceil(message.retryAfterMs / 1000)}s (max: ${Math.ceil(cap / 1000)}s). ${message.errorMessage || ""}`.trim(),
+				});
+				this._retryAttempt = 0;
+				this._resolveRetry();
+				return false;
+			}
+			delayMs = message.retryAfterMs;
+		} else {
+			delayMs = exponentialDelayMs;
+		}
 
 		this._emit({
 			type: "auto_retry_start",
@@ -2750,7 +2827,7 @@ export class AgentSession {
 		let summaryDetails: unknown;
 		if (options.summarize && entriesToSummarize.length > 0 && !extensionSummary) {
 			const model = this.model!;
-			const apiKey = await this._modelRegistry.getApiKey(model);
+			const apiKey = await this._modelRegistry.getApiKey(model, this.sessionId);
 			if (!apiKey) {
 				throw new Error(`No API key for ${model.provider}`);
 			}

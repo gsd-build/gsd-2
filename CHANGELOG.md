@@ -6,6 +6,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.10.6] - 2026-03-13
+
+### Added
+- Native Rust output truncation module for efficient large-output handling (#268)
+- Native Rust xxHash32 hasher for hashline IDs — faster line hashing (#272)
+- Native Rust bash stream processor for single-pass chunk processing (#271)
+- Memory extraction pipeline (#261)
+- `claude-opus-4-6` model with 1M context window (#288)
+
+### Fixed
+- Oversized TUI lines now truncated instead of crashing (#287)
+- Anthropic rate limit backoff now respects server-requested retry delay
+- CI publish guard: skip main package publish if already on npm
+
+## [2.10.5] - 2026-03-13
+
+### Fixed
+- `optionalDependencies` in published `gsd-pi@2.10.4` were still pinned to `2.10.2`, causing users to install the broken engine binaries that 2.10.4 was meant to fix (#276)
+
 ## [2.10.4] - 2026-03-13
 
 ### Fixed

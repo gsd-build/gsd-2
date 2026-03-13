@@ -44,22 +44,10 @@ for (const platform of platformPackages) {
   }
 }
 
-// Update optionalDependencies in root package.json
-let rootChanged = false;
-const optDeps = rootPkg.optionalDependencies || {};
-for (const platform of platformPackages) {
-  const depName = `@gsd-build/engine-${platform}`;
-  if (optDeps[depName] && optDeps[depName] !== version) {
-    console.log(`  root optionalDependencies ${depName}: ${optDeps[depName]} -> ${version}`);
-    optDeps[depName] = version;
-    rootChanged = true;
-  }
-}
-
-if (rootChanged) {
-  rootPkg.optionalDependencies = optDeps;
-  fs.writeFileSync(rootPkgPath, JSON.stringify(rootPkg, null, 2) + "\n");
-  console.log("  Updated root package.json optionalDependencies");
-}
+// Skip updating root optionalDependencies — they use a >=2.10.2 range
+// intentionally so that npm can fall back to the latest available
+// platform binary when the exact version hasn't been published yet
+// (e.g. main package published before native CI finishes).
+console.log("  root optionalDependencies: using range specifiers (not updating)");
 
 console.log("[sync-platform-versions] Done.");

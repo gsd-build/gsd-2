@@ -633,7 +633,9 @@ export class ToolExecutionComponent extends Container {
 			text = `${theme.fg("toolTitle", theme.bold("read"))} ${pathDisplay}`;
 
 			if (this.result) {
-				const output = this.getTextOutput();
+				const rawOutput = this.getTextOutput();
+				// Strip hashline prefixes (e.g. "1#BQ:content") for TUI display
+				const output = rawOutput.replace(/^(\s*)\d+#[ZPMQVRWSNKTXJBYH]{2}:/gm, "$1");
 				const rawPath = str(this.args?.file_path ?? this.args?.path);
 				const lang = rawPath ? getLanguageFromPath(rawPath) : undefined;
 				const lines = lang ? highlightCode(replaceTabs(output), lang) : output.split("\n");
