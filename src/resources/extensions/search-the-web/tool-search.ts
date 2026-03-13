@@ -16,12 +16,12 @@ import { Text } from "@gsd/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@gsd/pi-ai";
 
-import { LRUTTLCache } from "./cache";
-import { fetchWithRetryTimed, fetchWithRetry, classifyError, type RateLimitInfo } from "./http";
-import { normalizeQuery, toDedupeKey, detectFreshness } from "./url-utils";
-import { formatSearchResults, type SearchResultFormatted, type FormatSearchOptions } from "./format";
-import { getTavilyApiKey, resolveSearchProvider } from "./provider";
-import { normalizeTavilyResult, mapFreshnessToTavily, type TavilySearchResponse } from "./tavily";
+import { LRUTTLCache } from "./cache.js";
+import { fetchWithRetryTimed, fetchWithRetry, classifyError, type RateLimitInfo } from "./http.js";
+import { normalizeQuery, toDedupeKey, detectFreshness } from "./url-utils.js";
+import { formatSearchResults, type SearchResultFormatted, type FormatSearchOptions } from "./format.js";
+import { getTavilyApiKey, resolveSearchProvider } from "./provider.js";
+import { normalizeTavilyResult, mapFreshnessToTavily, type TavilySearchResponse } from "./tavily.js";
 
 // =============================================================================
 // Types
@@ -291,7 +291,7 @@ export function registerSearchTool(pi: ExtensionAPI) {
 
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (signal?.aborted) {
-        return { content: [{ type: "text", text: "Search cancelled." }] };
+        return { content: [{ type: "text", text: "Search cancelled." }], details: undefined as unknown };
       }
 
       // ------------------------------------------------------------------
@@ -365,7 +365,7 @@ export function registerSearchTool(pi: ExtensionAPI) {
         const truncation = truncateHead(output, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
         let content = truncation.content;
         if (truncation.truncated) {
-          const tempFile = await pi.writeTempFile(output, { prefix: "web-search-" });
+          const tempFile = await (pi as any).writeTempFile(output, { prefix: "web-search-" });
           content += `\n\n[Truncated: ${truncation.outputLines}/${truncation.totalLines} lines (${formatSize(truncation.outputBytes)}/${formatSize(truncation.totalBytes)}). Full results: ${tempFile}]`;
         }
 
@@ -387,7 +387,7 @@ export function registerSearchTool(pi: ExtensionAPI) {
         return { content: [{ type: "text", text: content }], details };
       }
 
-      onUpdate?.({ content: [{ type: "text", text: `Searching for "${params.query}"...` }] });
+      onUpdate?.({ content: [{ type: "text", text: `Searching for "${params.query}"...` }], details: undefined as unknown });
 
       try {
         // ------------------------------------------------------------------
@@ -484,7 +484,7 @@ export function registerSearchTool(pi: ExtensionAPI) {
         let content = truncation.content;
 
         if (truncation.truncated) {
-          const tempFile = await pi.writeTempFile(output, { prefix: "web-search-" });
+          const tempFile = await (pi as any).writeTempFile(output, { prefix: "web-search-" });
           content += `\n\n[Truncated: ${truncation.outputLines}/${truncation.totalLines} lines (${formatSize(truncation.outputBytes)}/${formatSize(truncation.totalBytes)}). Full results: ${tempFile}]`;
         }
 

@@ -3,7 +3,7 @@
  * and LLM context responses.
  */
 
-import { extractDomain } from "./url-utils";
+import { extractDomain } from "./url-utils.js";
 
 export interface SearchResultFormatted {
   title: string;

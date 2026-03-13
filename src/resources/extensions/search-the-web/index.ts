@@ -45,11 +45,11 @@
  */
 
 import type { ExtensionAPI } from "@gsd/pi-coding-agent";
-import { registerSearchTool } from "./tool-search";
-import { registerFetchPageTool } from "./tool-fetch-page";
-import { registerLLMContextTool } from "./tool-llm-context";
-import { registerSearchProviderCommand } from "./command-search-provider.ts";
-import { registerNativeSearchHooks } from "./native-search";
+import { registerSearchTool } from "./tool-search.js";
+import { registerFetchPageTool } from "./tool-fetch-page.js";
+import { registerLLMContextTool } from "./tool-llm-context.js";
+import { registerSearchProviderCommand } from "./command-search-provider.js";
+import { registerNativeSearchHooks } from "./native-search.js";
 
 export default function (pi: ExtensionAPI) {
   registerSearchTool(pi);

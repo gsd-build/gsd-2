@@ -21,13 +21,13 @@ import { Text } from "@gsd/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@gsd/pi-ai";
 
-import { LRUTTLCache } from "./cache";
-import { fetchWithRetryTimed, HttpError, classifyError, type RateLimitInfo } from "./http";
-import { normalizeQuery, extractDomain } from "./url-utils";
-import { formatLLMContext, type LLMContextSnippet, type LLMContextSource } from "./format";
-import type { TavilyResult, TavilySearchResponse } from "./tavily";
-import { publishedDateToAge } from "./tavily";
-import { getTavilyApiKey, resolveSearchProvider } from "./provider";
+import { LRUTTLCache } from "./cache.js";
+import { fetchWithRetryTimed, HttpError, classifyError, type RateLimitInfo } from "./http.js";
+import { normalizeQuery, extractDomain } from "./url-utils.js";
+import { formatLLMContext, type LLMContextSnippet, type LLMContextSource } from "./format.js";
+import type { TavilyResult, TavilySearchResponse } from "./tavily.js";
+import { publishedDateToAge } from "./tavily.js";
+import { getTavilyApiKey, resolveSearchProvider } from "./provider.js";
 
 // =============================================================================
 // Types
@@ -286,7 +286,7 @@ export function registerLLMContextTool(pi: ExtensionAPI) {
 
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (signal?.aborted) {
-        return { content: [{ type: "text", text: "Search cancelled." }] };
+        return { content: [{ type: "text", text: "Search cancelled." }], details: undefined as unknown };
       }
 
       // ------------------------------------------------------------------
@@ -321,7 +321,7 @@ export function registerLLMContextTool(pi: ExtensionAPI) {
         const truncation = truncateHead(output, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
         let content = truncation.content;
         if (truncation.truncated) {
-          const tempFile = await pi.writeTempFile(output, { prefix: "llm-context-" });
+          const tempFile = await (pi as any).writeTempFile(output, { prefix: "llm-context-" });
           content += `\n\n[Truncated. Full content: ${tempFile}]`;
         }
 
@@ -340,7 +340,7 @@ export function registerLLMContextTool(pi: ExtensionAPI) {
         return { content: [{ type: "text", text: content }], details };
       }
 
-      onUpdate?.({ content: [{ type: "text", text: `Searching & reading about "${params.query}"...` }] });
+      onUpdate?.({ content: [{ type: "text", text: `Searching & reading about "${params.query}"...` }], details: undefined as unknown });
 
       try {
         // ------------------------------------------------------------------
@@ -483,7 +483,7 @@ export function registerLLMContextTool(pi: ExtensionAPI) {
         let content = truncation.content;
 
         if (truncation.truncated) {
-          const tempFile = await pi.writeTempFile(output, { prefix: "llm-context-" });
+          const tempFile = await (pi as any).writeTempFile(output, { prefix: "llm-context-" });
           content += `\n\n[Truncated. Full content: ${tempFile}]`;
         }
 
