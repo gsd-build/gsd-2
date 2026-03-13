@@ -82,11 +82,11 @@
     "typescript": "^5.4.0"
   },
   "optionalDependencies": {
-    "@gsd-build/engine-darwin-arm64": "2.10.5",
-    "@gsd-build/engine-darwin-x64": "2.10.5",
-    "@gsd-build/engine-linux-x64-gnu": "2.10.5",
-    "@gsd-build/engine-linux-arm64-gnu": "2.10.5",
-    "@gsd-build/engine-win32-x64-msvc": "2.10.5",
+    "@gsd-build/engine-darwin-arm64": ">=2.10.2",
+    "@gsd-build/engine-darwin-x64": ">=2.10.2",
+    "@gsd-build/engine-linux-x64-gnu": ">=2.10.2",
+    "@gsd-build/engine-linux-arm64-gnu": ">=2.10.2",
+    "@gsd-build/engine-win32-x64-msvc": ">=2.10.2",
     "fsevents": "~2.3.3"
   },
   "overrides": {
