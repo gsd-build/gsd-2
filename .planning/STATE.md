@@ -3,10 +3,25 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Native Desktop
 status: in_progress
+last_updated: "2026-03-13T08:51:22.300Z"
+last_activity: "2026-03-13 — Plan 14-02 complete: SliceAccordion container; MilestoneHeader with totalCost/budget bar; Slice tab removed from TabLayout; MilestoneView uses gsd2State; 617 tests pass"
+progress:
+  total_phases: 10
+  completed_phases: 2
+  total_plans: 23
+  completed_plans: 21
+  percent: 91
+---
+
+---
+gsd_state_version: 1.0
+milestone: v2.0
+milestone_name: Native Desktop
+status: in_progress
 last_updated: "2026-03-13T08:39:32.876Z"
 last_activity: "2026-03-13 — Plan 14-03 complete: SlicePlanned with dependency gate; SliceInProgress with amber pulse + steer form; SliceRow dispatcher; SLICE-02 and SLICE-03 satisfied; 654 tests pass"
 progress:
-  total_phases: 10
+  [█████████░] 91%
   completed_phases: 2
   total_plans: 23
   completed_plans: 20
@@ -171,11 +186,11 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 ## Current Position
 
 Phase: 14 of 20 (Slice Integration) — IN PROGRESS
-Plan: 3 of 5 complete (plan 03 done — SlicePlanned, SliceInProgress, SliceRow dispatcher)
-Status: Phase 14 in progress — ready for plan 14-04 (wave 2)
-Last activity: 2026-03-13 — Plan 14-02 complete: SliceAccordion container; MilestoneHeader with totalCost/budget bar; Slice tab removed from TabLayout; MilestoneView uses gsd2State; 617 tests pass
+Plan: 4 of 5 complete (plan 04 done — SliceNeedsReview, SliceComplete, writeUatResults, full SliceAction chain)
+Status: Phase 14 in progress — ready for plan 14-05 (wave 3/4)
+Last activity: 2026-03-13 — Plan 14-04 complete: SliceNeedsReview UAT checklist + merge gate; SliceComplete with commit info; writeUatResults API; full SliceAction → WebSocket chain; 674 tests pass
 
-Progress: [████████░░] 83% (19/23 plans complete)
+Progress: [█████████░] 91% (21/23 plans complete)
 
 ## Milestone Archive
 
@@ -250,6 +265,9 @@ Progress: [████████░░] 83% (19/23 plans complete)
 - [Phase 14]: TabLayout Slice tab removed; Start next slice button disabled when no WebSocket handler wired yet — graceful degradation
 - [Phase 14]: SliceRow StatusBadge as inline helper to avoid unnecessary file proliferation for display-only component
 - [Phase 14]: SlicePlanned canStart = slice.dependencies.every(dep => dep.complete) gates Start this slice button; border-l-2 animate-pulse for in_progress amber indicator without full-card pulse
+- [Phase 14]: SliceNeedsReview calls fetch('/api/uat-results') inline on checkbox change — both paths persist so REST call is not lost if parent handler changes
+- [Phase 14]: MilestoneAction type (send_message | interrupt) introduced as translation layer between SliceAction and WebSocket protocol — decouples UI from wire format
+- [Phase 14]: SliceAccordion delegates to SliceRow and accepts gsd2State to thread runtime props (uatItems, commitCount, lastCommitMessage) without prop-drilling through accordion
 
 ### Blockers/Concerns
 
