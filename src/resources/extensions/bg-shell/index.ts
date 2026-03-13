@@ -16,7 +16,7 @@
  * - Context injection: proactive alerts for crashes and state changes
  *
  * Tools:
- *   bg_shell — start, output, digest, wait_for_ready, send, send_and_wait,
+ *   bg_shell — start, output, digest, wait_for_ready, send, send_and_wait, run,
  *              signal, list, kill, restart, group_status
  *
  * Commands:
@@ -88,7 +88,7 @@ type ProcessStatus =
 	| "exited"
 	| "crashed";
 
-type ProcessType = "server" | "build" | "test" | "watcher" | "generic";
+type ProcessType = "server" | "build" | "test" | "watcher" | "generic" | "shell";
 
 interface ProcessEvent {
 	type:
@@ -164,6 +164,8 @@ interface BgProcess {
 	lastErrorCount: number;
 	/** Last warning count snapshot for diff detection */
 	lastWarningCount: number;
+	/** Command history for shell-type sessions */
+	commandHistory: string[];
 	/** Dedup tracker: hash → count of repeated lines */
 	lineDedup: Map<string, number>;
 	/** Total raw lines (before dedup) for token savings calc */
@@ -583,7 +585,9 @@ function startProcess(opts: StartOptions): BgProcess {
 	const env = { ...process.env, ...(opts.env || {}) };
 
 	const { shell, args: shellArgs } = getShellConfig();
-	const proc = spawn(shell, [...shellArgs, sanitizeCommand(opts.command)], {
+	// Shell sessions default to the user's shell if no command specified
+	const command = processType === "shell" && !opts.command ? shell : opts.command;
+	const proc = spawn(shell, [...shellArgs, sanitizeCommand(command)], {
 		cwd: opts.cwd,
 		stdio: ["pipe", "pipe", "pipe"],
 		env,
@@ -592,8 +596,8 @@ function startProcess(opts: StartOptions): BgProcess {
 
 	const bg: BgProcess = {
 		id,
-		label: opts.label || opts.command.slice(0, 60),
-		command: opts.command,
+		label: opts.label || command.slice(0, 60),
+		command,
 		cwd: opts.cwd,
 		startedAt: Date.now(),
 		proc,
@@ -615,14 +619,15 @@ function startProcess(opts: StartOptions): BgProcess {
 		group: opts.group || null,
 		lastErrorCount: 0,
 		lastWarningCount: 0,
+		commandHistory: [],
 		lineDedup: new Map(),
 		totalRawLines: 0,
 		envKeys: Object.keys(opts.env || {}),
 		restartCount: 0,
 		startConfig: {
-			command: opts.command,
+			command,
 			cwd: opts.cwd,
-			label: opts.label || opts.command.slice(0, 60),
+			label: opts.label || command.slice(0, 60),
 			processType,
 			readyPattern: opts.readyPattern || null,
 			readyPort: opts.readyPort || null,
@@ -630,7 +635,7 @@ function startProcess(opts: StartOptions): BgProcess {
 		},
 	};
 
-	addEvent(bg, { type: "started", detail: `Process started: ${opts.command.slice(0, 100)}` });
+	addEvent(bg, { type: "started", detail: `Process started: ${command.slice(0, 100)}` });
 
 	proc.stdout?.on("data", (chunk: Buffer) => {
 		const lines = chunk.toString().split("\n");
@@ -685,6 +690,15 @@ function startProcess(opts: StartOptions): BgProcess {
 	// Port probing for server-type processes
 	if (bg.readyPort) {
 		startPortProbing(bg, bg.readyPort);
+	}
+
+	// Shell sessions are ready immediately after spawn
+	if (bg.processType === "shell") {
+		setTimeout(() => {
+			if (bg.alive && bg.status === "starting") {
+				transitionToReady(bg, "Shell session initialized");
+			}
+		}, 200);
 	}
 
 	processes.set(id, bg);
@@ -982,6 +996,92 @@ async function sendAndWait(
 	return { matched: false, output: newEntries.map(e => e.line).join("\n") || "(no output)" };
 }
 
+// ── Run on Session ─────────────────────────────────────────────────────────
+
+async function runOnSession(
+	bg: BgProcess,
+	command: string,
+	timeout: number,
+	signal?: AbortSignal,
+): Promise<{ exitCode: number; output: string; timedOut: boolean }> {
+	const sentinel = randomUUID().slice(0, 8);
+	const startMarker = `__GSD_SENTINEL_${sentinel}_START__`;
+	const endMarker = `__GSD_SENTINEL_${sentinel}_END__`;
+	const exitVar = `__GSD_EXIT_${sentinel}__`;
+
+	// Snapshot current output buffer position
+	const startIndex = bg.output.length;
+
+	// Write the sentinel-wrapped command to stdin
+	const wrappedCommand = [
+		`echo ${startMarker}`,
+		command,
+		`${exitVar}=$?`,
+		`echo ${endMarker} $${exitVar}`,
+	].join("\n");
+	bg.proc.stdin?.write(wrappedCommand + "\n");
+
+	const start = Date.now();
+	while (Date.now() - start < timeout) {
+		if (signal?.aborted) {
+			const newEntries = bg.output.slice(startIndex);
+			return { exitCode: -1, output: newEntries.map(e => e.line).join("\n") || "(cancelled)", timedOut: false };
+		}
+
+		// Process died while waiting
+		if (!bg.alive) {
+			const newEntries = bg.output.slice(startIndex);
+			const lines = newEntries.map(e => e.line);
+			return { exitCode: bg.proc.exitCode ?? -1, output: lines.join("\n") || "(process exited)", timedOut: false };
+		}
+
+		const newEntries = bg.output.slice(startIndex);
+		for (let i = 0; i < newEntries.length; i++) {
+			if (newEntries[i].line.includes(endMarker)) {
+				// Parse exit code from the END sentinel line
+				const endLine = newEntries[i].line;
+				const exitMatch = endLine.match(new RegExp(`${endMarker}\\s+(\\d+)`));
+				const exitCode = exitMatch ? parseInt(exitMatch[1], 10) : -1;
+
+				// Extract output between START and END sentinels
+				const outputLines: string[] = [];
+				let capturing = false;
+				for (let j = 0; j < newEntries.length; j++) {
+					if (newEntries[j].line.includes(startMarker)) {
+						capturing = true;
+						continue;
+					}
+					if (newEntries[j].line.includes(endMarker)) {
+						break;
+					}
+					if (capturing) {
+						outputLines.push(newEntries[j].line);
+					}
+				}
+
+				return { exitCode, output: outputLines.join("\n"), timedOut: false };
+			}
+		}
+
+		await new Promise(r => setTimeout(r, 100));
+	}
+
+	// Timed out
+	const newEntries = bg.output.slice(startIndex);
+	const outputLines: string[] = [];
+	let capturing = false;
+	for (const entry of newEntries) {
+		if (entry.line.includes(startMarker)) {
+			capturing = true;
+			continue;
+		}
+		if (capturing) {
+			outputLines.push(entry.line);
+		}
+	}
+	return { exitCode: -1, output: outputLines.join("\n") || "(no output)", timedOut: true };
+}
+
 // ── Group Operations ───────────────────────────────────────────────────────
 
 function getGroupProcesses(group: string): BgProcess[] {
@@ -1078,8 +1178,11 @@ function formatTimeAgo(timestamp: number): string {
 function pruneDeadProcesses(): void {
 	const now = Date.now();
 	for (const [id, bg] of processes) {
-		if (!bg.alive && now - bg.startedAt > DEAD_PROCESS_TTL) {
-			processes.delete(id);
+		if (!bg.alive) {
+			const ttl = bg.processType === "shell" ? DEAD_PROCESS_TTL * 6 : DEAD_PROCESS_TTL;
+			if (now - bg.startedAt > ttl) {
+				processes.delete(id);
+			}
 		}
 	}
 }
@@ -1242,6 +1345,7 @@ export default function (pi: ExtensionAPI) {
 			"Actions: start (launch with auto-classification & readiness detection), digest (structured summary ~30 tokens vs ~2000 raw), " +
 			"output (raw lines with incremental delivery), wait_for_ready (block until process signals readiness), " +
 			"send (write stdin), send_and_wait (expect-style: send + wait for output pattern), " +
+			"run (execute a command on a persistent shell session, block until done, return output + exit code), " +
 			"env (query shell cwd and environment variables), " +
 			"signal (send OS signal), list (all processes with status), kill (terminate), restart (kill + relaunch), " +
 			"group_status (health of a process group), highlights (significant output lines only).",
@@ -1255,11 +1359,13 @@ export default function (pi: ExtensionAPI) {
 			"The 'output' action returns only new output since the last check (incremental). Repeated calls are cheap on context.",
 			"Set type:'server' and ready_port:3000 for dev servers so readiness detection is automatic.",
 			"Set group:'my-stack' on related processes to manage them together with 'group_status'.",
+			"Use 'run' to execute a command on a persistent shell session and block until it completes — returns structured output + exit code. Shell state (env vars, cwd, virtualenvs) persists across runs.",
 			"Use 'send_and_wait' for interactive CLIs: send input and wait for expected output pattern.",
 			"Use 'env' to check the current working directory and active environment variables of a shell session — useful after cd, source, or export commands.",
 			"Use 'restart' to kill and relaunch with the same config — preserves restart count.",
 			"Background processes are auto-classified (server/build/test/watcher) based on the command.",
 			"Process crashes and errors are automatically surfaced as alerts at the start of your next turn — you don't need to poll.",
+			"To create a persistent shell session: bg_shell start with type:'shell'. The session stays alive for interactive use with 'send', 'send_and_wait', or 'run'.",
 		],
 
 		parameters: Type.Object({
@@ -1271,6 +1377,7 @@ export default function (pi: ExtensionAPI) {
 				"wait_for_ready",
 				"send",
 				"send_and_wait",
+				"run",
 				"env",
 				"signal",
 				"list",
@@ -1279,13 +1386,13 @@ export default function (pi: ExtensionAPI) {
 				"group_status",
 			] as const),
 			command: Type.Optional(
-				Type.String({ description: "Shell command to run (for start)" }),
+				Type.String({ description: "Shell command to run (for start, run)" }),
 			),
 			label: Type.Optional(
 				Type.String({ description: "Short human-readable label for the process (for start)" }),
 			),
 			id: Type.Optional(
-				Type.String({ description: "Process ID (for digest, output, highlights, wait_for_ready, send, send_and_wait, signal, kill, restart)" }),
+				Type.String({ description: "Process ID (for digest, output, highlights, wait_for_ready, send, send_and_wait, run, signal, kill, restart)" }),
 			),
 			stream: Type.Optional(
 				StringEnum(["stdout", "stderr", "both"] as const),
@@ -1306,10 +1413,10 @@ export default function (pi: ExtensionAPI) {
 				Type.String({ description: "OS signal to send, e.g. SIGINT, SIGTERM, SIGHUP (for signal)" }),
 			),
 			timeout: Type.Optional(
-				Type.Number({ description: "Timeout in milliseconds (for wait_for_ready, send_and_wait). Default: 30000" }),
+				Type.Number({ description: "Timeout in milliseconds (for wait_for_ready, send_and_wait, run). Default: 30000 for wait_for_ready/send_and_wait, 120000 for run" }),
 			),
 			type: Type.Optional(
-				StringEnum(["server", "build", "test", "watcher", "generic"] as const),
+				StringEnum(["server", "build", "test", "watcher", "generic", "shell"] as const),
 			),
 			ready_pattern: Type.Optional(
 				Type.String({ description: "Regex pattern that indicates the process is ready (for start)" }),
@@ -1630,6 +1737,52 @@ export default function (pi: ExtensionAPI) {
 					return {
 						content: [{ type: "text" as const, text }],
 						details: { action: "send_and_wait", process: getInfo(bg), matched: result.matched },
+					};
+				}
+
+				// ── run ────────────────────────────────────────────
+				case "run": {
+					if (!params.id) {
+						return {
+							content: [{ type: "text" as const, text: "Error: 'id' is required for run" }],
+							isError: true, details: undefined as unknown,
+						};
+					}
+					if (!params.command) {
+						return {
+							content: [{ type: "text" as const, text: "Error: 'command' is required for run" }],
+							isError: true, details: undefined as unknown,
+						};
+					}
+
+					const bg = processes.get(params.id);
+					if (!bg) {
+						return {
+							content: [{ type: "text" as const, text: `Error: No process found with id '${params.id}'` }],
+							isError: true, details: undefined as unknown,
+						};
+					}
+
+					if (!bg.alive) {
+						return {
+							content: [{ type: "text" as const, text: `Error: Process ${params.id} has already exited` }],
+							isError: true, details: undefined as unknown,
+						};
+					}
+
+					const runTimeout = params.timeout || 120000;
+					const result = await runOnSession(bg, params.command, runTimeout, signal ?? undefined);
+
+					let text: string;
+					if (result.timedOut) {
+						text = `Command timed out after ${runTimeout}ms\nOutput:\n${result.output}`;
+					} else {
+						text = `Exit code: ${result.exitCode}\n${result.output}`;
+					}
+
+					return {
+						content: [{ type: "text" as const, text }],
+						details: { action: "run", process: getInfo(bg), exitCode: result.exitCode, timedOut: result.timedOut },
 					};
 				}
 
@@ -2004,6 +2157,40 @@ export default function (pi: ExtensionAPI) {
 						theme.fg("warning", "✗ ") + theme.fg("muted", `Timed out — ${proc.id}`),
 						0, 0,
 					);
+				}
+
+				case "run": {
+					const proc = details.process as BgProcessInfo;
+					const exitCode = details.exitCode as number;
+					const timedOut = details.timedOut as boolean;
+					if (timedOut) {
+						let text = theme.fg("warning", "⏱ Timed out ") + theme.fg("accent", proc.id);
+						if (expanded) {
+							const rawText = result.content[0];
+							if (rawText?.type === "text") {
+								const lines = rawText.text.split("\n").slice(1);
+								for (const line of lines.slice(0, 30)) {
+									text += "\n  " + theme.fg("toolOutput", line);
+								}
+							}
+						}
+						return new Text(text, 0, 0);
+					}
+					const icon = exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
+					let text = `${icon} ${theme.fg("accent", proc.id)} ${theme.fg("dim", `exit:${exitCode}`)}`;
+					if (expanded) {
+						const rawText = result.content[0];
+						if (rawText?.type === "text") {
+							const lines = rawText.text.split("\n").slice(1);
+							for (const line of lines.slice(0, 30)) {
+								text += "\n  " + theme.fg("toolOutput", line);
+							}
+							if (lines.length > 30) {
+								text += `\n  ${theme.fg("dim", `... ${lines.length - 30} more lines`)}`;
+							}
+						}
+					}
+					return new Text(text, 0, 0);
 				}
 
 				case "signal": {

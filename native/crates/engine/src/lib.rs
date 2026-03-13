@@ -12,6 +12,7 @@ mod clipboard;
 mod fs_cache;
 mod glob;
 mod glob_util;
+mod ast;
 mod grep;
 mod highlight;
 mod ps;

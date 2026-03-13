@@ -11,6 +11,7 @@ description = "N-API native addon for GSD — exposes high-performance Rust modu
 crate-type = ["cdylib"]
 
 [dependencies]
+gsd-ast = { path = "../ast" }
 gsd-grep = { path = "../grep" }
 arboard = "3"
 dashmap = "6"

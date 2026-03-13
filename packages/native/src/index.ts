@@ -48,3 +48,9 @@ export type {
   GlobOptions,
   GlobResult,
 } from "./glob/index.js";
+
+export { astGrep, astEdit } from "./ast/index.js";
+export type {
+  AstFindMatch, AstFindOptions, AstFindResult,
+  AstReplaceChange, AstReplaceFileChange, AstReplaceOptions, AstReplaceResult,
+} from "./ast/index.js";

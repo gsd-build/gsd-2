@@ -8,7 +8,7 @@
   "scripts": {
     "build:native": "node ../../native/scripts/build.js",
     "build:native:dev": "node ../../native/scripts/build.js --dev",
-    "test": "node --test src/__tests__/grep.test.mjs src/__tests__/ps.test.mjs src/__tests__/glob.test.mjs src/__tests__/clipboard.test.mjs"
+    "test": "node --test src/__tests__/grep.test.mjs src/__tests__/ps.test.mjs src/__tests__/glob.test.mjs src/__tests__/clipboard.test.mjs src/__tests__/highlight.test.mjs"
   },
   "exports": {
     ".": {
@@ -30,6 +30,10 @@
     "./clipboard": {
       "types": "./src/clipboard/index.ts",
       "import": "./src/clipboard/index.ts"
+    },
+    "./ast": {
+      "types": "./src/ast/index.ts",
+      "import": "./src/ast/index.ts"
     }
   },
   "files": [
