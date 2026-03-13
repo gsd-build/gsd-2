@@ -6,6 +6,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-03-13
+
+### Added
+- LSP tool — full Language Server Protocol integration with diagnostics, go-to-definition, references, hover, document/workspace symbols, rename, code actions, type definition, and implementation support
+- `/thinking` slash command for toggling thinking level during sessions
+- Interactive wizard mode for `/gsd prefs` with guided configuration
+- Startup update check with 24-hour cache — notifies when a new version is available
+
+### Fixed
+- TypeScript type errors across gsd, browser-tools, search-the-web, and misc extension files
+- Milestone ID generation uses max-based approach instead of length+1 (prevents ID collisions)
+- Non-thinking models handled correctly in `/thinking` command
+- Auto-mode pauses on provider errors to prevent reassess-roadmap loop
+- TAB hint displayed for notes input in discuss-mode survey
+- Slice branches merge to integration branch instead of main
+- Prefs wizard audit findings addressed
+- Deduplicated maxNum logic with test coverage
+- Command injection eliminated in LSP config `which()` function
+- Unhandled JSON.parse in LSP message reader wrapped with error handling
+
 ## [2.8.3] - 2026-03-13
 
 ### Fixed
@@ -335,7 +355,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - License updated to MIT
 
-[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.8.3...HEAD
+[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.9.0...HEAD
+[2.9.0]: https://github.com/gsd-build/gsd-2/compare/v2.8.3...v2.9.0
 [2.8.3]: https://github.com/gsd-build/gsd-2/compare/v2.8.2...v2.8.3
 [2.8.2]: https://github.com/gsd-build/gsd-2/compare/v2.8.1...v2.8.2
 [2.8.1]: https://github.com/gsd-build/gsd-2/compare/v2.8.0...v2.8.1
