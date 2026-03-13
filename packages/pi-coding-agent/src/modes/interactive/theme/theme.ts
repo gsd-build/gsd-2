@@ -6,6 +6,7 @@ import { TypeCompiler } from "@sinclair/typebox/compiler";
 import chalk from "chalk";
 import { highlight, supportsLanguage } from "cli-highlight";
 import { getCustomThemesDir, getThemesDir } from "../../../config.js";
+import { attachWatcherErrorHandler } from "../../../utils/watcher-safety.js";
 
 // ============================================================================
 // Types & Schema
@@ -781,6 +782,9 @@ function startThemeWatcher(): void {
 					}
 				}, 100);
 			}
+		});
+		attachWatcherErrorHandler(themeWatcher, () => {
+			themeWatcher = undefined;
 		});
 	} catch (_error) {
 		// Ignore errors starting watcher

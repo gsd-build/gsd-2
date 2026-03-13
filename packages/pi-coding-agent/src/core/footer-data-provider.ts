@@ -1,5 +1,6 @@
 import { existsSync, type FSWatcher, readFileSync, statSync, watch } from "fs";
 import { dirname, join, resolve } from "path";
+import { attachWatcherErrorHandler } from "../utils/watcher-safety.js";
 
 /**
  * Find the git HEAD path by walking up from cwd.
@@ -130,6 +131,9 @@ export class FooterDataProvider {
 					this.cachedBranch = undefined;
 					for (const cb of this.branchChangeCallbacks) cb();
 				}
+			});
+			attachWatcherErrorHandler(this.gitWatcher, () => {
+				this.gitWatcher = null;
 			});
 		} catch {
 			// Silently fail if we can't watch
