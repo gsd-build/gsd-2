@@ -105,7 +105,7 @@ export interface WrapUpOptions {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const OTHER_OPTION_LABEL = "None of the above";
-const OTHER_OPTION_DESCRIPTION = "Optionally, add details in notes below.";
+const OTHER_OPTION_DESCRIPTION = "Press TAB to add optional notes.";
 
 // ─── Wrap-up screen ───────────────────────────────────────────────────────────
 
@@ -593,7 +593,7 @@ export async function showInterviewRound(
 				hints.push("tab to add notes");
 				hints.push(isLast && allAnswered() ? "enter to review" : "enter to next");
 			} else {
-				if (st.committedIndex !== null || !isMultiQuestion) hints.push("tab to add notes");
+				hints.push("tab to add notes");
 				if (isMultiQuestion) hints.push("←/→ navigate");
 				hints.push(isLast && allAnswered() ? "enter to review" : "enter to next");
 			}
