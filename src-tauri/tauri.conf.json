@@ -38,9 +38,6 @@
     "resources": ["dep_screen.html"]
   },
   "plugins": {
-    "window-state": {
-      "stateFlags": 31
-    },
     "protocol": {
       "asset": true,
       "assetScope": {

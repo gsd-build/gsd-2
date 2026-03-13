@@ -1,5 +1,5 @@
 use std::process::Command;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Check if a CLI tool is available on PATH.
 /// Uses `where` on Windows, `which` on macOS/Linux.

@@ -1,6 +1,6 @@
 use std::process::{Child, Command};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Holds the Bun server child process handle.
 pub struct BunState {
