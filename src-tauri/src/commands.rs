@@ -40,3 +40,9 @@ pub async fn restart_bun(app: tauri::AppHandle) -> bool {
     super::bun_manager::restart_bun(app).await;
     true
 }
+
+#[tauri::command]
+pub async fn retry_dep_check(app: tauri::AppHandle) -> bool {
+    crate::dep_check::run_startup_checks(app).await;
+    true
+}

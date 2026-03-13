@@ -55,6 +55,7 @@ pub fn run() {
             commands::open_external,
             commands::get_platform,
             commands::restart_bun,
+            commands::retry_dep_check,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
