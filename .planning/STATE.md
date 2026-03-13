@@ -3,14 +3,16 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Native Desktop
 status: in_progress
-last_updated: "2026-03-13T17:32:06.893Z"
-last_activity: "2026-03-13 — Plan 15-05 complete: tauri:dev + tauri:build scripts wired; 7 Rust/config compile errors fixed (Emitter/Manager imports, StateFlags::all(), keyring feature, tauri.conf.json invalid block, icons/ dir); SC-1 human-verified — native window opens"
+last_updated: "2026-03-13T18:15:00Z"
+last_activity: "2026-03-13 — Plan 16-01 complete: Rust OAuth backend — PKCE S256, token exchange/refresh via reqwest, 7 IPC commands, gsd://oauth/callback handler emitting oauth-callback event; cargo check passes"
+stopped_at: "Completed 16-01-PLAN.md"
 progress:
+  [█████████░] 91%
   total_phases: 10
   completed_phases: 4
   total_plans: 33
-  completed_plans: 29
-  percent: 88
+  completed_plans: 30
+  percent: 91
 ---
 
 ---
@@ -308,10 +310,10 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 
 ## Current Position
 
-Phase: 15 of 20 (Tauri Shell) — COMPLETE (all 5 plans done, SC-1 human-verified)
-Plan: 5 of 5 complete (plan 05 done — tauri:dev/tauri:build scripts + native window verified)
-Status: Phase 15 fully complete. SC-1 verified: npm run tauri:dev opens native Tauri window rendering Mission Control. SC-2 through SC-5 deferred (acceptable for M2).
-Last activity: 2026-03-13 — Plan 15-05 complete: tauri:dev + tauri:build scripts wired; 7 Rust/config compile errors fixed (Emitter/Manager imports, StateFlags::all(), keyring feature, tauri.conf.json invalid block, icons/ dir); SC-1 human-verified — native window opens
+Phase: 16 of 20 (OAuth + Keychain) — IN PROGRESS (plan 01 of 4 done)
+Plan: 1 of 4 complete (plan 01 done — Rust OAuth backend: PKCE, token exchange/refresh, 7 IPC commands, gsd:// callback)
+Status: Plan 16-01 complete. cargo check passes. Plans 16-02 through 16-04 remaining.
+Last activity: 2026-03-13 — Plan 16-01 complete: Rust OAuth backend — PKCE S256 generate_pkce, exchange_code, refresh_token, write_auth_json; 7 IPC commands in invoke_handler; gsd://oauth/callback emits oauth-callback event
 
 Progress: [██████████] 100% (29/29 plans complete)
 
@@ -411,6 +413,10 @@ Progress: [██████████] 100% (29/29 plans complete)
 - [Phase 16]: @tauri-apps/api@2.10.1 added to package.json — was missing from Phase 15 Tauri shell work
 - [Phase 16]: useRef used in useAuthGuard to avoid stale closure on pendingProvider in oauth-callback event listener
 - [Phase 16]: oauth-callback event listener placed in useAuthGuard (not useTokenRefresh) — auth state ownership determines listener location
+- [Phase 16-oauth-keychain]: reqwest rustls-tls chosen (not native-tls) for cross-platform TLS without OS cert store dependency
+- [Phase 16-oauth-keychain]: ISO 8601 parsing without chrono — pure arithmetic Euclidean calendar algorithm to minimize dependencies
+- [Phase 16-oauth-keychain]: UriSchemeContext requires app.app_handle().emit() — does not implement Emitter directly
+- [Phase 16-oauth-keychain]: pkce_verifier_{state} keychain key scoped by state to handle concurrent OAuth flows
 
 ### Blockers/Concerns
 
