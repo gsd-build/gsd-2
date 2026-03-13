@@ -3,6 +3,23 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Native Desktop
 status: in_progress
+last_updated: "2026-03-13T12:05:00Z"
+last_activity: "2026-03-13 — Plan 15-05 Task 1 complete: tauri:dev and tauri:build scripts added to root package.json; build script added to packages/mission-control/package.json; awaiting human verification checkpoint (Task 2) for all 5 SC"
+stopped_at: "Completed Task 1 of 15-05-PLAN.md — checkpoint:human-verify returned for SC-1 through SC-5"
+progress:
+  [█████████░] 97%
+  total_phases: 10
+  completed_phases: 4
+  total_plans: 29
+  completed_plans: 28
+  percent: 97
+---
+
+---
+gsd_state_version: 1.0
+milestone: v2.0
+milestone_name: Native Desktop
+status: in_progress
 last_updated: "2026-03-13T11:21:19.321Z"
 last_activity: "2026-03-13 — Plan 15-03 complete: dep_screen.html with GSD design system colors and window.__TAURI__.invoke retry; dep_check.rs with check_dependency() (which/where) and run_startup_checks() navigating to asset://localhost/dep_screen.html; retry_dep_check IPC registered"
 progress:
@@ -370,6 +387,7 @@ Progress: [█████████░] 93% (27/29 plans complete)
 - [Phase 15]: dep_screen.html served via asset://localhost/ (Tauri asset protocol) — Bun server may not be running when deps are missing
 - [Phase 15]: window.__TAURI__.invoke used in dep_screen.html (no CDN import) — Tauri injects this global automatically into the webview
 - [Phase 15]: blocking_pick_folder() used for open_folder_dialog — cleaner than channel-bridged callback; StateFlags::ALL added for full window state persistence
+- [Phase 15]: build script added to mission-control/package.json: bun build src/frontend.tsx --outdir public/dist --target browser; matches beforeBuildCommand in tauri.conf.json
 
 ### Blockers/Concerns
 
