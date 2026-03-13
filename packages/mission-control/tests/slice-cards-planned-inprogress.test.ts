@@ -209,12 +209,14 @@ describe("SliceRow", () => {
     expect(rowSource).toContain("in_progress");
   });
 
-  it("renders needs_review stub for coming 14-04", () => {
-    expect(rowSource).toContain("slice-needs-review-stub");
+  it("renders SliceNeedsReview when slice.status === 'needs_review' (14-04)", () => {
+    expect(rowSource).toContain("SliceNeedsReview");
+    expect(rowSource).toContain("needs_review");
   });
 
-  it("renders complete stub for coming 14-04", () => {
-    expect(rowSource).toContain("slice-complete-stub");
+  it("renders SliceComplete when slice.status === 'complete' (14-04)", () => {
+    expect(rowSource).toContain("SliceComplete");
+    expect(rowSource).toContain("status === \"complete\"");
   });
 
   it("accepts isOpen and onToggle props", () => {

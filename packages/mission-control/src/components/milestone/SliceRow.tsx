@@ -2,6 +2,8 @@ import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SlicePlanned } from "@/components/milestone/SlicePlanned";
 import { SliceInProgress } from "@/components/milestone/SliceInProgress";
+import { SliceNeedsReview } from "@/components/milestone/SliceNeedsReview";
+import { SliceComplete } from "@/components/milestone/SliceComplete";
 import type { GSD2SliceInfo, GSD2UatItem, SliceAction, SliceStatus } from "@/server/types";
 
 // ---------------------------------------------------------------------------
@@ -51,8 +53,11 @@ interface SliceRowProps {
   currentTaskName?: string;
   runningCost?: number;
   commitCount?: number;
-  // UAT data needed by needs_review card (14-04)
+  // UAT data needed by needs_review card
   uatItems?: GSD2UatItem[];
+  onUatItemToggle?: (itemId: string, checked: boolean) => void;
+  // Complete card data
+  lastCommitMessage?: string;
   // Action dispatcher
   onAction: (action: SliceAction) => void;
 }
@@ -69,6 +74,9 @@ export function SliceRow({
   currentTaskName = "",
   runningCost = 0,
   commitCount = 0,
+  uatItems,
+  onUatItemToggle,
+  lastCommitMessage = "",
   onAction,
 }: SliceRowProps) {
   return (
@@ -108,14 +116,21 @@ export function SliceRow({
             />
           )}
           {slice.status === "needs_review" && (
-            <div data-testid="slice-needs-review-stub">
-              Needs Review — coming in plan 14-04
-            </div>
+            <SliceNeedsReview
+              slice={slice}
+              uatItems={uatItems ?? []}
+              onItemToggle={onUatItemToggle ?? (() => {})}
+              onAction={onAction}
+            />
           )}
           {slice.status === "complete" && (
-            <div data-testid="slice-complete-stub">
-              Complete — coming in plan 14-04
-            </div>
+            <SliceComplete
+              slice={slice}
+              totalCost={slice.costEstimate ?? 0}
+              commitCount={commitCount}
+              lastCommitMessage={lastCommitMessage}
+              onAction={onAction}
+            />
           )}
         </div>
       )}

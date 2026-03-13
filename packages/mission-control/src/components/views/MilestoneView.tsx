@@ -22,27 +22,61 @@ export interface WorktreeSessionInfo {
   worktreeBranch?: string | null;
 }
 
+/** MilestoneAction — routed to WebSocket layer by SingleColumnView/AppShell. */
+export type MilestoneAction =
+  | { type: 'send_message'; message: string }
+  | { type: 'interrupt' };
+
 interface MilestoneViewProps {
   gsd2State: GSD2State | null;
   /** Optional sessions list — when provided, enables split view for worktree sessions. */
   sessions?: WorktreeSessionInfo[];
-  /** Optional action handler — forwarded to SliceAccordion and MilestoneHeader. */
-  onAction?: (action: SliceAction) => void;
+  /** Optional action handler — forwards translated MilestoneActions to AppShell. */
+  onAction?: (action: MilestoneAction) => void;
 }
 
 /** Standard milestone content (reused in both single and split views). */
-function MilestoneContent({ gsd2State, onAction }: { gsd2State: GSD2State | null; onAction?: (action: SliceAction) => void }) {
+function MilestoneContent({ gsd2State, onAction }: { gsd2State: GSD2State | null; onAction?: (action: MilestoneAction) => void }) {
   const slices = gsd2State?.slices ?? [];
   const activeSliceId = gsd2State?.projectState.active_slice ?? "";
   const isAutoMode = gsd2State?.projectState.auto_mode ?? false;
 
   function handleSliceAction(action: SliceAction) {
-    if (onAction) {
-      onAction(action);
-    } else {
-      // Log for now — full wiring in 14-03/14-04 connects to WebSocket sendMessage
-      console.log("[MilestoneView] SliceAction:", action);
+    switch (action.type) {
+      case 'start_slice':
+        // "/gsd auto" starts the slice gsd workflow
+        onAction?.({ type: 'send_message', message: '/gsd auto' });
+        break;
+      case 'pause':
+        onAction?.({ type: 'interrupt' });
+        break;
+      case 'steer':
+        // Sends direction to active session without stopping auto mode
+        onAction?.({ type: 'send_message', message: action.message });
+        break;
+      case 'merge':
+        // Git squash merge on active slice branch
+        onAction?.({ type: 'send_message', message: `/gsd merge ${gsd2State?.projectState.active_slice}` });
+        break;
+      case 'view_plan':
+      case 'view_task':
+      case 'view_diff':
+      case 'view_uat_results':
+        // TODO: inline read panel — deferred to Phase 14 gap if needed
+        console.log('[MilestoneView] view action deferred:', action);
+        break;
     }
+  }
+
+  function handleUatItemToggle(itemId: string, checked: boolean) {
+    const sliceId = gsd2State?.projectState.active_slice ?? '';
+    const currentItems = gsd2State?.uatFile?.items ?? [];
+    const updated = currentItems.map((i) => (i.id === itemId ? { ...i, checked } : i));
+    fetch('/api/uat-results', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sliceId, items: updated }),
+    });
   }
 
   function handleStartNext() {
@@ -62,7 +96,9 @@ function MilestoneContent({ gsd2State, onAction }: { gsd2State: GSD2State | null
         slices={slices}
         activeSliceId={activeSliceId}
         isAutoMode={isAutoMode}
+        gsd2State={gsd2State}
         onAction={handleSliceAction}
+        onUatItemToggle={handleUatItemToggle}
       />
     </div>
   );

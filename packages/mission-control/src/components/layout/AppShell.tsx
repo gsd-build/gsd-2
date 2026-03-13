@@ -189,6 +189,13 @@ export function AppShell() {
           costState={costState}
           onInterrupt={interrupt}
           onDismissCrash={resetCrash}
+          onMilestoneAction={(action) => {
+            if (action.type === 'send_message') {
+              sendMessage(action.message);
+            } else if (action.type === 'interrupt') {
+              interrupt();
+            }
+          }}
         />
         {/* Preview panel — absolute inset-0 with left offset to preserve Chat column 1 */}
         {previewOpen && (

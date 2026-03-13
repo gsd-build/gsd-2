@@ -28,9 +28,10 @@ describe("SliceAccordion source-text assertions", () => {
     expect(source).toContain('data-testid="slice-accordion"');
   });
 
-  it("has data-testid slice-row prefix for dynamic row test ids", () => {
-    // Template literal form: data-testid={`slice-row-${slice.id}`}
-    expect(source).toContain("data-testid={`slice-row-");
+  it("delegates row rendering to SliceRow component (14-04: stubs replaced)", () => {
+    // SliceAccordion now renders <SliceRow> which carries data-testid={`slice-row-${slice.id}`}
+    expect(source).toContain("SliceRow");
+    expect(source).toContain("slice={slice}");
   });
 
   it("imports SliceAction from server/types (not defined locally)", () => {

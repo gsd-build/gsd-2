@@ -15,6 +15,7 @@ import type { PlanningState } from "@/server/types";
 import type { ChatMessage, ReviewResults } from "@/server/chat-types";
 import type { SessionTab } from "@/hooks/useSessionManager";
 import type { CostState } from "@/hooks/useCostTracker";
+import type { MilestoneAction } from "@/components/views/MilestoneView";
 import type React from "react";
 
 interface SingleColumnViewProps {
@@ -51,6 +52,8 @@ interface SingleColumnViewProps {
   costState?: CostState;
   onInterrupt?: () => void;
   onDismissCrash?: () => void;
+  /** Phase 14 prop — forwards MilestoneView slice actions to AppShell/WebSocket */
+  onMilestoneAction?: (action: MilestoneAction) => void;
 }
 
 export function SingleColumnView({
@@ -77,6 +80,7 @@ export function SingleColumnView({
   costState,
   onInterrupt,
   onDismissCrash,
+  onMilestoneAction,
 }: SingleColumnViewProps) {
   return (
     // tabIndex={-1} enables programmatic focus after Ctrl+1-5 panel switch (KEYS-06)
@@ -117,6 +121,7 @@ export function SingleColumnView({
             worktreePath: s.hasWorktree ? "(worktree)" : null,
             worktreeBranch: s.worktreeBranch,
           }))}
+          onAction={onMilestoneAction}
         />
       )}
       {activeView.kind === "history" && (
