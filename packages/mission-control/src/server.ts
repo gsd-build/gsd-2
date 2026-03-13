@@ -11,6 +11,7 @@ import { handleSettingsRequest } from "./server/settings-api";
 import { handleAssetsRequest } from "./server/assets-api";
 import { handleSessionStatusRequest } from "./server/session-status-api";
 import { handleProxyRequest } from "./server/proxy-api";
+import { handleUatResultsRequest } from "./server/uat-results-api";
 
 const repoRoot = resolve(import.meta.dir, "../../..");
 
@@ -73,6 +74,12 @@ const server = Bun.serve({
     // Route /api/assets/* to assets handler
     if (pathname.startsWith("/api/assets/")) {
       const response = await handleAssetsRequest(req, url, pipeline.getPlanningDir());
+      if (response) return addCorsHeaders(response);
+    }
+
+    // Route /api/uat-results to UAT results handler
+    if (pathname === "/api/uat-results") {
+      const response = await handleUatResultsRequest(req, url, pipeline.getPlanningDir());
       if (response) return addCorsHeaders(response);
     }
 
