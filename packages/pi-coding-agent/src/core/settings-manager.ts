@@ -43,6 +43,11 @@ export interface MarkdownSettings {
 	codeBlockIndent?: string; // default: "  "
 }
 
+export interface TaskIsolationSettings {
+	mode?: "none" | "worktree" | "fuse-overlay"; // default: "none"
+	merge?: "patch" | "branch"; // default: "patch"
+}
+
 export type TransportSetting = Transport;
 
 /**
@@ -93,6 +98,7 @@ export interface Settings {
 	autocompleteMaxVisible?: number; // Max visible items in autocomplete dropdown (default: 5)
 	showHardwareCursor?: boolean; // Show terminal cursor while still positioning it for IME
 	markdown?: MarkdownSettings;
+	taskIsolation?: TaskIsolationSettings;
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
@@ -938,5 +944,13 @@ export class SettingsManager {
 
 	getCodeBlockIndent(): string {
 		return this.settings.markdown?.codeBlockIndent ?? "  ";
+	}
+
+	getTaskIsolationMode(): "none" | "worktree" | "fuse-overlay" {
+		return this.settings.taskIsolation?.mode ?? "none";
+	}
+
+	getTaskIsolationMerge(): "patch" | "branch" {
+		return this.settings.taskIsolation?.merge ?? "patch";
 	}
 }

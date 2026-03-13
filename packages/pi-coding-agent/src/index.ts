@@ -207,6 +207,7 @@ export {
 	type PackageSource,
 	type RetrySettings,
 	SettingsManager,
+	type TaskIsolationSettings,
 } from "./core/settings-manager.js";
 // Skills
 export {
