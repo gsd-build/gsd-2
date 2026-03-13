@@ -18,6 +18,7 @@ dashmap = "6"
 globset = "0.4"
 html-to-markdown-rs = { version = "2", default-features = false }
 ignore = "0.4"
+memchr = "2"
 image = { version = "0.25", default-features = false, features = [
   "png",
   "jpeg",

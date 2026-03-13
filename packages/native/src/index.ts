@@ -109,3 +109,6 @@ export type {
   ParsedGsdFile,
   SectionResult,
 } from "./gsd-parser/index.js";
+
+export { truncateTail, truncateHead, truncateOutput } from "./truncate/index.js";
+export type { TruncateResult, TruncateOutputResult } from "./truncate/index.js";

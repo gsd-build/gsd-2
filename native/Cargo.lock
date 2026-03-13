@@ -540,6 +540,7 @@ dependencies = [
  "ignore",
  "image",
  "libc",
+ "memchr",
  "napi",
  "napi-build",
  "napi-derive",
