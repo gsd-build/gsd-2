@@ -3,6 +3,20 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Native Desktop
 status: in_progress
+last_updated: "2026-03-13T10:56:23.242Z"
+last_activity: "2026-03-13 — Plan 14-06 complete: gsd-file-api.ts + InlineReadPanel; view_plan/view_task/view_diff/view_uat_results wired; 696 tests pass"
+progress:
+  total_phases: 10
+  completed_phases: 3
+  total_plans: 29
+  completed_plans: 24
+---
+
+---
+gsd_state_version: 1.0
+milestone: v2.0
+milestone_name: Native Desktop
+status: in_progress
 last_updated: "2026-03-13T09:48:39.117Z"
 last_activity: "2026-03-13 — Plan 14-05 complete: slice-integration.test.ts 6 tests pass; human verification approved — all four slice states render correctly"
 progress:
@@ -217,12 +231,12 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 
 ## Current Position
 
-Phase: 14 of 20 (Slice Integration) — COMPLETE (gap closure plan 14-06 done)
-Plan: 6 of 6 complete (plan 06 done — InlineReadPanel + /api/gsd-file; SLICE-02/03/05 satisfied)
-Status: Phase 14 fully complete with gap closure — Phase 15 (Tauri Shell) is next
-Last activity: 2026-03-13 — Plan 14-06 complete: gsd-file-api.ts + InlineReadPanel; view_plan/view_task/view_diff/view_uat_results wired; 696 tests pass
+Phase: 15 of 20 (Tauri Shell) — In Progress (plan 15-01 done)
+Plan: 1 of 5 complete (plan 01 done — Tauri 2 scaffold: Cargo.toml, tauri.conf.json, lib.rs with gsd:// stub)
+Status: Phase 15 plan 01 complete — plans 15-02/03/04 can execute in parallel (wave 2)
+Last activity: 2026-03-13 — Plan 15-01 complete: src-tauri/ scaffold with Cargo.toml, tauri.conf.json (1280x800, CSP, devUrl), lib.rs Builder chain with gsd:// URI stub, window-state plugin, and stub modules for plans 15-02 through 15-04
 
-Progress: [██████████] 96% (23/24 plans complete)
+Progress: [████████░░] 83% (24/29 plans complete)
 
 ## Milestone Archive
 
@@ -304,6 +318,8 @@ Progress: [██████████] 96% (23/24 plans complete)
 - [Phase 14-slice-integration]: Dependency resolution verified by checking dep.complete on S01→S02 (complete) and S03→S04 (planned/incomplete) pairs
 - [Phase 14-slice-integration]: gsd-file-api always returns 200 with { content: string } — missing file gives '(file not found)' so UI never breaks on 404
 - [Phase 14-slice-integration]: InlineReadPanel uses in-flow layout (not fixed overlay) to avoid z-index conflicts with PanelWrapper; handleSliceAction made async for await fetch() in view_* cases
+- [Phase 15-tauri-shell]: gsd:// protocol registered via Rust register_uri_scheme_protocol (not tauri.conf.json) — Tauri 2 requires Builder API for OS-level URI scheme registration
+- [Phase 15-tauri-shell]: Stub modules (bun_manager, commands, dep_check) declared in lib.rs with empty async fn bodies so mod declarations compile — each stub has plan-number comment pointing to implementing plan
 
 ### Blockers/Concerns
 

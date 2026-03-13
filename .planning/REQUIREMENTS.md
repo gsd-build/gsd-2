@@ -29,20 +29,20 @@ Requirements for the Native Desktop milestone. Each maps to roadmap phases 12–
 
 ### Slice Integration (SLICE)
 
-- [ ] **SLICE-01**: Milestones view renders slices as accordion inside milestone, not separate nav item; active executing slice auto-expands
-- [ ] **SLICE-02**: Planned state — shows task count, cost estimate, branch, dependencies with completion status; "Review plan" opens S{N}-PLAN.md inline; "Start this slice" sends `/gsd auto` (disabled if dependencies incomplete)
-- [ ] **SLICE-03**: In Progress state — shows task progress bar, branch, commit count, running cost; "Pause" sends escape signal; "View task" opens current T{N}-PLAN.md inline; "Steer" injects mid-slice direction without stopping auto mode; card pulses amber
-- [ ] **SLICE-04**: Needs Review state — shows completed task count, total cost, UAT checklist progress; "Run UAT checklist" expands interactive checklist from S{N}-UAT.md; "Merge to main" gated until all UAT items checked; merge sends git squash merge
-- [ ] **SLICE-05**: Complete state — shows merge commit info and total cost; "View diff" opens squash commit diff inline; "View UAT results" shows completed checklist
-- [ ] **SLICE-06**: UAT checklist state persists — completed checklist written to `.gsd/S{N}-UAT-RESULTS.md`
-- [ ] **SLICE-07**: Milestone header shows total cost across slices, budget ceiling indicator, "Start next slice" shortcut when no slice executing
+- [x] **SLICE-01**: Milestones view renders slices as accordion inside milestone, not separate nav item; active executing slice auto-expands
+- [x] **SLICE-02**: Planned state — shows task count, cost estimate, branch, dependencies with completion status; "Review plan" opens S{N}-PLAN.md inline; "Start this slice" sends `/gsd auto` (disabled if dependencies incomplete)
+- [x] **SLICE-03**: In Progress state — shows task progress bar, branch, commit count, running cost; "Pause" sends escape signal; "View task" opens current T{N}-PLAN.md inline; "Steer" injects mid-slice direction without stopping auto mode; card pulses amber
+- [x] **SLICE-04**: Needs Review state — shows completed task count, total cost, UAT checklist progress; "Run UAT checklist" expands interactive checklist from S{N}-UAT.md; "Merge to main" gated until all UAT items checked; merge sends git squash merge
+- [x] **SLICE-05**: Complete state — shows merge commit info and total cost; "View diff" opens squash commit diff inline; "View UAT results" shows completed checklist
+- [x] **SLICE-06**: UAT checklist state persists — completed checklist written to `.gsd/S{N}-UAT-RESULTS.md`
+- [x] **SLICE-07**: Milestone header shows total cost across slices, budget ceiling indicator, "Start next slice" shortcut when no slice executing
 
 ### Tauri Shell (TAURI)
 
-- [ ] **TAURI-01**: `src-tauri/` added alongside `packages/`; `tauri.conf.json` configured (productName, identifier, window dimensions, `gsd://` custom protocol, devUrl, CSP for localhost WebSocket)
+- [x] **TAURI-01**: `src-tauri/` added alongside `packages/`; `tauri.conf.json` configured (productName, identifier, window dimensions, `gsd://` custom protocol, devUrl, CSP for localhost WebSocket)
 - [ ] **TAURI-02**: Rust backend spawns Bun server on app start, stores handle, kills cleanly on window close, emits event to frontend on Bun crash
 - [ ] **TAURI-03**: Dependency check on startup — `bun` and `gsd` presence verified; if missing, pre-dashboard dependency screen shown with plain-language install instructions
-- [ ] **TAURI-04**: Window state restored (size/position) via `window-state` plugin; OS native title bar (frameless: false)
+- [x] **TAURI-04**: Window state restored (size/position) via `window-state` plugin; OS native title bar (frameless: false)
 - [ ] **TAURI-05**: Tauri IPC commands implemented — `open_folder_dialog`, `get_credential`, `set_credential`, `delete_credential`, `open_external`, `get_platform`, `restart_bun`
 - [ ] **TAURI-06**: Build pipeline — `tauri:dev` and `tauri:build` scripts; dev starts Bun then opens native window
 
@@ -138,17 +138,17 @@ Deferred to future release.
 | STREAM-05 | Phase 13 | Complete |
 | STREAM-06 | Phase 13 | Complete |
 | STREAM-07 | Phase 13 | Complete |
-| SLICE-01 | Phase 14 | Pending |
-| SLICE-02 | Phase 14 | Pending |
-| SLICE-03 | Phase 14 | Pending |
-| SLICE-04 | Phase 14 | Pending |
-| SLICE-05 | Phase 14 | Pending |
-| SLICE-06 | Phase 14 | Pending |
-| SLICE-07 | Phase 14 | Pending |
-| TAURI-01 | Phase 15 | Pending |
+| SLICE-01 | Phase 14 | Complete |
+| SLICE-02 | Phase 14 | Complete |
+| SLICE-03 | Phase 14 | Complete |
+| SLICE-04 | Phase 14 | Complete |
+| SLICE-05 | Phase 14 | Complete |
+| SLICE-06 | Phase 14 | Complete |
+| SLICE-07 | Phase 14 | Complete |
+| TAURI-01 | Phase 15 | Complete |
 | TAURI-02 | Phase 15 | Pending |
 | TAURI-03 | Phase 15 | Pending |
-| TAURI-04 | Phase 15 | Pending |
+| TAURI-04 | Phase 15 | Complete |
 | TAURI-05 | Phase 15 | Pending |
 | TAURI-06 | Phase 15 | Pending |
 | AUTH-01 | Phase 16 | Pending |
