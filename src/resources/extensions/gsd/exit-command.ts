@@ -1,10 +1,18 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent";
 
-export function registerExitCommand(pi: Pick<ExtensionAPI, "registerCommand">): void {
+type StopAutoFn = (ctx: ExtensionCommandContext, pi: ExtensionAPI) => Promise<void>;
+
+export function registerExitCommand(
+  pi: ExtensionAPI,
+  deps: { stopAuto?: StopAutoFn } = {},
+): void {
   pi.registerCommand("exit", {
     description: "Exit GSD gracefully",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
-      await ctx.shutdown();
+      // Stop auto-mode first so locks and activity state are cleaned up before shutdown.
+      const stopAuto = deps.stopAuto ?? (await import("./auto.js")).stopAuto;
+      await stopAuto(ctx, pi);
+      ctx.shutdown();
     },
   });
 }

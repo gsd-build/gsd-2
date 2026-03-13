@@ -20,11 +20,13 @@
 
 import type {
   ExtensionAPI,
+  ExtensionCommandContext,
   ExtensionContext,
 } from "@gsd/pi-coding-agent";
 import { createBashTool, createWriteTool, createReadTool, createEditTool } from "@gsd/pi-coding-agent";
 
 import { registerGSDCommand } from "./commands.js";
+import { registerExitCommand } from "./exit-command.js";
 import { registerWorktreeCommand, getWorktreeOriginalCwd, getActiveWorktreeName } from "./worktree-command.js";
 import { saveFile, formatContinue, loadFile, parseContinue, parseSummary } from "./files.js";
 import { loadPrompt } from "./prompt-loader.js";
@@ -63,22 +65,12 @@ const GSD_LOGO_LINES = [
 export default function (pi: ExtensionAPI) {
   registerGSDCommand(pi);
   registerWorktreeCommand(pi);
-
-  // ── /exit — graceful exit (cleanup auto-mode, save state) ──────────────
-  pi.registerCommand("exit", {
-    description: "Exit GSD gracefully (saves auto-mode state)",
-    handler: async (_ctx) => {
-      // Gracefully stop auto-mode if running (saves activity log, clears locks)
-      const { stopAuto } = await import("./auto.js");
-      await stopAuto(_ctx, pi);
-      process.exit(0);
-    },
-  });
+  registerExitCommand(pi);
 
   // ── /kill — immediate exit (bypass cleanup) ─────────────────────────────
   pi.registerCommand("kill", {
     description: "Exit GSD immediately (no cleanup)",
-    handler: async (_ctx) => {
+    handler: async (_args: string, _ctx: ExtensionCommandContext) => {
       process.exit(0);
     },
   });

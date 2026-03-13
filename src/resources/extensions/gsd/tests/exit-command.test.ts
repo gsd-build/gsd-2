@@ -18,7 +18,12 @@ test("/exit requests graceful shutdown instead of process.exit", async () => {
     },
   };
 
-  registerExitCommand(pi as any);
+  let stopAutoCalls = 0;
+  registerExitCommand(pi as any, {
+    async stopAuto() {
+      stopAutoCalls += 1;
+    },
+  });
 
   const exit = commands.get("exit");
   assert.ok(exit, "registerExitCommand should register /exit");
@@ -40,5 +45,6 @@ test("/exit requests graceful shutdown instead of process.exit", async () => {
     process.exit = originalExit;
   }
 
+  assert.equal(stopAutoCalls, 1, "handler should stop auto-mode exactly once before shutdown");
   assert.equal(shutdownCalls, 1, "handler should request graceful shutdown exactly once");
 });
