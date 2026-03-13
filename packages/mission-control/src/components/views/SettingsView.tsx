@@ -5,7 +5,7 @@
  * Two-tier config: global vs project with override indicators.
  * Discovers real GSD 2 config (skills, commands, agents, plugins).
  */
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   Shield,
   Terminal,
@@ -18,9 +18,15 @@ import {
   Zap,
   Plug,
   Bot,
+  KeyRound,
+  RefreshCw,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSettings } from "@/hooks/useSettings";
+import { getProviderStatus, changeProvider } from "@/auth/auth-api";
+import type { ProviderStatus } from "@/auth/auth-api";
 
 interface SectionProps {
   title: string;
@@ -171,9 +177,35 @@ function ItemPill({ label, variant = "default" }: { label: string; variant?: "de
   );
 }
 
+/** Maps internal provider key to display name. */
+function providerDisplayName(key: string | null): string {
+  if (!key) return "None";
+  const map: Record<string, string> = {
+    anthropic: "Anthropic (Claude Max)",
+    "github-copilot": "GitHub Copilot",
+    openrouter: "OpenRouter",
+    "api-key": "API Key",
+  };
+  return map[key] ?? key;
+}
+
+/** Formats an ISO timestamp as human-readable local time. */
+function formatRefreshed(iso: string | null): string {
+  if (!iso) return "Never";
+  try {
+    const d = new Date(iso);
+    const date = d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    return `${date} at ${time}`;
+  } catch {
+    return iso;
+  }
+}
+
 export function SettingsView() {
   const { settings, loading, error, dirty, update, save } = useSettings();
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    provider: true,
     claude: true,
     skills: true,
     agents: true,
@@ -183,9 +215,18 @@ export function SettingsView() {
   const [marketplaceSearch, setMarketplaceSearch] = useState("");
   // Local overrides for immediate visual feedback before Apply
   const [localOverrides, setLocalOverrides] = useState<Record<string, unknown>>({});
+  // Provider section state
+  const [providerStatus, setProviderStatus] = useState<ProviderStatus | null>(null);
+  const [changingProvider, setChangingProvider] = useState(false);
+  const [confirmChange, setConfirmChange] = useState(false);
 
   const toggleSection = useCallback((key: string) => {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
+
+  // Load provider status on mount
+  useEffect(() => {
+    getProviderStatus().then(setProviderStatus);
   }, []);
 
   const getSetting = (key: string, fallback: unknown = "") => {
@@ -241,6 +282,120 @@ export function SettingsView() {
 
       {/* Scrollable sections */}
       <div className="flex-1 overflow-y-auto">
+        {/* 0. Provider */}
+        <Section
+          title="Provider"
+          icon={<KeyRound className="h-4 w-4 text-cyan-accent" />}
+          open={openSections.provider ?? false}
+          onToggle={() => toggleSection("provider")}
+        >
+          {providerStatus === null ? (
+            /* Loading skeleton */
+            <div className="space-y-2">
+              <div className="h-4 w-48 rounded bg-navy-700 animate-pulse" />
+              <div className="h-4 w-32 rounded bg-navy-700 animate-pulse" />
+              <div className="h-4 w-40 rounded bg-navy-700 animate-pulse" />
+            </div>
+          ) : providerStatus.active_provider === null ? (
+            /* No provider configured */
+            <div className="space-y-2">
+              <p className="text-sm text-slate-400">No provider configured</p>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="text-sm text-cyan-accent hover:underline"
+              >
+                Set up provider →
+              </button>
+            </div>
+          ) : (
+            /* Provider info rows */
+            <div className="space-y-3">
+              {/* Active provider */}
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-slate-400">Active provider</span>
+                <span className="text-sm font-mono text-white" style={{ fontFamily: "Share Tech Mono, monospace" }}>
+                  {providerDisplayName(providerStatus.active_provider)}
+                </span>
+              </div>
+              {/* Connection status */}
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-slate-400">Connection status</span>
+                <span className="flex items-center gap-1.5 text-sm">
+                  {providerStatus.is_expired ? (
+                    <>
+                      <WifiOff className="h-3.5 w-3.5 text-red-400" />
+                      <span className="text-red-400">Expired</span>
+                    </>
+                  ) : providerStatus.expires_soon ? (
+                    <>
+                      <Wifi className="h-3.5 w-3.5 text-amber-400" />
+                      <span className="text-amber-400">Expiring soon</span>
+                    </>
+                  ) : (
+                    <>
+                      <Wifi className="h-3.5 w-3.5 text-emerald-400" />
+                      <span className="text-emerald-400">Connected</span>
+                    </>
+                  )}
+                </span>
+              </div>
+              {/* Last refreshed */}
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-slate-400">Last refreshed</span>
+                <span className="text-sm font-mono text-slate-400" style={{ fontFamily: "JetBrains Mono, monospace" }}>
+                  {formatRefreshed(providerStatus.last_refreshed)}
+                </span>
+              </div>
+              {/* Change provider button / confirmation */}
+              <div className="pt-1">
+                {confirmChange ? (
+                  <div className="rounded-md bg-navy-800 border border-navy-600 p-3 space-y-2">
+                    <p className="text-xs text-slate-300">
+                      This will disconnect your current provider and show the provider picker. Continue?
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={changingProvider}
+                        onClick={async () => {
+                          setChangingProvider(true);
+                          await changeProvider();
+                          window.location.reload();
+                        }}
+                        className="rounded-md bg-red-600/80 hover:bg-red-600 text-white text-xs px-3 py-1.5 transition-colors disabled:opacity-50"
+                      >
+                        {changingProvider ? (
+                          <RefreshCw className="h-3 w-3 animate-spin inline" />
+                        ) : (
+                          "Yes, change"
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmChange(false)}
+                        className="rounded-md bg-navy-700 hover:bg-navy-600 text-slate-300 text-xs px-3 py-1.5 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmChange(true)}
+                      className="text-sm text-slate-400 hover:text-slate-200 transition-colors"
+                    >
+                      Change provider →
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </Section>
+
         {/* 1. AI Model Settings */}
         <Section
           title="AI Model Settings"
