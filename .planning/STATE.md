@@ -3,10 +3,25 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Native Desktop
 status: in_progress
+last_updated: "2026-03-13T08:39:32.876Z"
+last_activity: "2026-03-13 — Plan 14-03 complete: SlicePlanned with dependency gate; SliceInProgress with amber pulse + steer form; SliceRow dispatcher; SLICE-02 and SLICE-03 satisfied; 654 tests pass"
+progress:
+  total_phases: 10
+  completed_phases: 2
+  total_plans: 23
+  completed_plans: 20
+  percent: 87
+---
+
+---
+gsd_state_version: 1.0
+milestone: v2.0
+milestone_name: Native Desktop
+status: in_progress
 last_updated: "2026-03-13T08:32:51.608Z"
 last_activity: "2026-03-13 — Plan 14-01 complete: parseRoadmap/parsePlan/parseUat replace raw stubs; GSD2State gains slices[], uatFile, gitBranchCommits, lastCommitMessage; SLICE-01 through SLICE-07 satisfied; 607 tests pass"
 progress:
-  total_phases: 10
+  [█████████░] 87%
   completed_phases: 2
   total_plans: 23
   completed_plans: 19
@@ -156,8 +171,8 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 ## Current Position
 
 Phase: 14 of 20 (Slice Integration) — IN PROGRESS
-Plan: 2 of 5 complete (plan 02 done — SliceAccordion, MilestoneHeader GSD2State, MilestoneView, TabLayout 2-tab)
-Status: Phase 14 in progress — ready for plans 14-03, 14-04 (wave 2)
+Plan: 3 of 5 complete (plan 03 done — SlicePlanned, SliceInProgress, SliceRow dispatcher)
+Status: Phase 14 in progress — ready for plan 14-04 (wave 2)
 Last activity: 2026-03-13 — Plan 14-02 complete: SliceAccordion container; MilestoneHeader with totalCost/budget bar; Slice tab removed from TabLayout; MilestoneView uses gsd2State; 617 tests pass
 
 Progress: [████████░░] 83% (19/23 plans complete)
@@ -233,6 +248,8 @@ Progress: [████████░░] 83% (19/23 plans complete)
 - [Phase 14]: MilestoneView prop renamed planningState → gsd2State; SingleColumnView updated to pass gsd2State= in same commit
 - [Phase 14]: MilestoneHeader totalCost derived from slices[].costEstimate sum; budget bar only renders when budgetCeiling is non-null and >0
 - [Phase 14]: TabLayout Slice tab removed; Start next slice button disabled when no WebSocket handler wired yet — graceful degradation
+- [Phase 14]: SliceRow StatusBadge as inline helper to avoid unnecessary file proliferation for display-only component
+- [Phase 14]: SlicePlanned canStart = slice.dependencies.every(dep => dep.complete) gates Start this slice button; border-l-2 animate-pulse for in_progress amber indicator without full-card pulse
 
 ### Blockers/Concerns
 
