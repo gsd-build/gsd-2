@@ -2,6 +2,7 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { loadFile, parsePlan, parseRoadmap } from "./files.ts";
+import { MILESTONE_ID_RE } from "./milestone-id.ts";
 import {
   milestonesDir,
   resolveMilestoneFile,
@@ -64,7 +65,7 @@ function findMilestoneIds(basePath: string): string[] {
     return readdirSync(milestonesDir(basePath), { withFileTypes: true })
       .filter(entry => entry.isDirectory())
       .map(entry => {
-        const match = entry.name.match(/^(M\d+)/);
+        const match = entry.name.match(MILESTONE_ID_RE);
         return match ? match[1] : entry.name;
       })
       .sort();
@@ -75,7 +76,7 @@ function findMilestoneIds(basePath: string): string[] {
 
 function titleFromRoadmapHeader(content: string, fallbackId: string): string {
   const roadmap = parseRoadmap(content);
-  return roadmap.title.replace(/^M\d+[^:]*:\s*/, "") || fallbackId;
+  return roadmap.title.replace(/^(?:M\d+|M-[a-zA-Z0-9]+)[^:]*:\s*/, "") || fallbackId;
 }
 
 async function indexSlice(basePath: string, milestoneId: string, sliceId: string, fallbackTitle: string, done: boolean): Promise<WorkspaceSliceTarget> {

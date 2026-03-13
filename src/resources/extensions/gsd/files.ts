@@ -6,6 +6,7 @@
 import { promises as fs, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { milestonesDir, resolveMilestoneFile, relMilestoneFile } from './paths.js';
+import { MILESTONE_ID_RE } from './milestone-id.ts';
 
 import type {
   Roadmap, BoundaryMapEntry,
@@ -746,8 +747,8 @@ export function parseContextDependsOn(content: string | null): string[] {
  * Inline the prior milestone's SUMMARY.md as context for the current milestone's planning prompt.
  * Returns null when: (1) `mid` is the first milestone, (2) prior milestone has no SUMMARY file.
  *
- * Scans the milestones directory using the same readdirSync + sort + M\d+ match pattern
- * as findMilestoneIds in state.ts.
+ * Scans the milestones directory using the same readdirSync + sort + MILESTONE_ID_RE
+ * match pattern as findMilestoneIds in state.ts.
  */
 export async function inlinePriorMilestoneSummary(mid: string, base: string): Promise<string | null> {
   const dir = milestonesDir(base);
@@ -756,7 +757,7 @@ export async function inlinePriorMilestoneSummary(mid: string, base: string): Pr
     sorted = readdirSync(dir, { withFileTypes: true })
       .filter(d => d.isDirectory())
       .map(d => {
-        const match = d.name.match(/^(M\d+)/);
+        const match = d.name.match(MILESTONE_ID_RE);
         return match ? match[1] : d.name;
       })
       .sort();

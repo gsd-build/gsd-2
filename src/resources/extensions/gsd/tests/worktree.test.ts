@@ -169,6 +169,14 @@ async function main(): Promise<void> {
   assert(!SLICE_BRANCH_RE.test("gsd/"), "regex rejects bare gsd/");
   assert(!SLICE_BRANCH_RE.test("worktree/foo"), "regex rejects worktree/foo");
 
+  // New random milestone ID format
+  assert(SLICE_BRANCH_RE.test("gsd/M-a8f3x9k2/S01"), "regex matches random milestone ID branch");
+  assert(SLICE_BRANCH_RE.test("gsd/my-wt/M-a8f3x9k2/S01"), "regex matches worktree + random milestone ID");
+  const randomBranch = parseSliceBranch("gsd/M-a8f3x9k2/S01");
+  assert(randomBranch !== null, "parses random milestone ID branch");
+  assertEq(randomBranch!.milestoneId, "M-a8f3x9k2", "random branch milestone ID");
+  assertEq(randomBranch!.sliceId, "S01", "random branch slice ID");
+
   console.log("\n=== detectWorktreeName ===");
   assertEq(detectWorktreeName("/projects/myapp"), null, "no worktree in plain path");
   assertEq(detectWorktreeName("/projects/myapp/.gsd/worktrees/feature-auth"), "feature-auth", "detects worktree name");

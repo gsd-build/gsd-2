@@ -20,6 +20,7 @@ import {
 } from "./paths.js";
 import { join } from "node:path";
 import { readFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { MILESTONE_ID_RE, generateMilestoneId } from "./milestone-id.ts";
 import { execSync, execFileSync } from "node:child_process";
 import { ensureGitignore, ensurePreferences } from "./gitignore.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
@@ -103,7 +104,7 @@ function findMilestoneIds(basePath: string): string[] {
     return readdirSync(dir, { withFileTypes: true })
       .filter((d) => d.isDirectory())
       .map((d) => {
-        const match = d.name.match(/^(M\d+)/);
+        const match = d.name.match(MILESTONE_ID_RE);
         return match ? match[1] : d.name;
       })
       .sort();
@@ -153,12 +154,7 @@ export async function showQueue(
   const existingContext = await buildExistingMilestonesContext(basePath, milestoneIds, state);
 
   // ── Determine next milestone ID ─────────────────────────────────────
-  const maxNum = milestoneIds.reduce((max, id) => {
-    const num = parseInt(id.replace(/^M/, ""), 10);
-    return num > max ? num : max;
-  }, 0);
-  const nextId = `M${String(maxNum + 1).padStart(3, "0")}`;
-  const nextIdPlus1 = `M${String(maxNum + 2).padStart(3, "0")}`;
+  const nextId = generateMilestoneId();
 
   // ── Build preamble ──────────────────────────────────────────────────
   const activePart = state.activeMilestone
@@ -179,7 +175,6 @@ export async function showQueue(
   const prompt = loadPrompt("queue", {
     preamble,
     nextId,
-    nextIdPlus1,
     existingMilestonesContext: existingContext,
   });
 
@@ -507,7 +502,7 @@ export async function showSmartEntry(
     }
 
     const milestoneIds = findMilestoneIds(basePath);
-    const nextId = `M${String(milestoneIds.length + 1).padStart(3, "0")}`;
+    const nextId = generateMilestoneId();
     const isFirst = milestoneIds.length === 0;
 
     if (isFirst) {
@@ -568,8 +563,7 @@ export async function showSmartEntry(
     });
 
     if (choice === "new_milestone") {
-      const milestoneIds = findMilestoneIds(basePath);
-      const nextId = `M${String(milestoneIds.length + 1).padStart(3, "0")}`;
+      const nextId = generateMilestoneId();
 
       pendingAutoStart = { ctx, pi, basePath, milestoneId: nextId, step: stepMode };
       dispatchWorkflow(pi, buildDiscussPrompt(nextId,
@@ -636,8 +630,7 @@ export async function showSmartEntry(
           milestoneId, milestoneTitle,
         }));
       } else if (choice === "skip_milestone") {
-        const milestoneIds = findMilestoneIds(basePath);
-        const nextId = `M${String(milestoneIds.length + 1).padStart(3, "0")}`;
+        const nextId = generateMilestoneId();
         pendingAutoStart = { ctx, pi, basePath, milestoneId: nextId, step: stepMode };
         dispatchWorkflow(pi, buildDiscussPrompt(nextId,
           `New milestone ${nextId}.`,

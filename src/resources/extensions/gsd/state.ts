@@ -33,6 +33,7 @@ import { getActiveSliceBranch } from './worktree.ts';
 
 import { readdirSync } from 'fs';
 import { join } from 'path';
+import { MILESTONE_ID_RE } from './milestone-id.ts';
 
 // ─── Query Functions ───────────────────────────────────────────────────────
 
@@ -62,7 +63,7 @@ function findMilestoneIds(basePath: string): string[] {
     return readdirSync(dir, { withFileTypes: true })
       .filter(d => d.isDirectory())
       .map(d => {
-        const match = d.name.match(/^(M\d+)/);
+        const match = d.name.match(MILESTONE_ID_RE);
         return match ? match[1] : d.name;
       })
       .sort();
@@ -167,7 +168,7 @@ export async function deriveState(basePath: string): Promise<GSDState> {
     }
 
     const roadmap = parseRoadmap(content);
-    const title = roadmap.title.replace(/^M\d+[^:]*:\s*/, '');
+    const title = roadmap.title.replace(/^(?:M\d+|M-[a-zA-Z0-9]+)[^:]*:\s*/, '');
     const complete = isMilestoneComplete(roadmap);
 
     if (complete) {
