@@ -69,8 +69,12 @@ try {
 process.env.GSD_BIN_PATH = process.argv[1]
 
 // GSD_WORKFLOW_PATH — absolute path to bundled GSD-WORKFLOW.md, used by patched gsd extension
-// when dispatching workflow prompts (dist/loader.js → ../src/resources/GSD-WORKFLOW.md)
-const resourcesDir = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'resources')
+// when dispatching workflow prompts. Prefers dist/resources/ (stable, set at build time)
+// over src/resources/ (live working tree) — see resource-loader.ts for rationale.
+const loaderPackageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const distRes = join(loaderPackageRoot, 'dist', 'resources')
+const srcRes = join(loaderPackageRoot, 'src', 'resources')
+const resourcesDir = existsSync(distRes) ? distRes : srcRes
 process.env.GSD_WORKFLOW_PATH = join(resourcesDir, 'GSD-WORKFLOW.md')
 
 // GSD_BUNDLED_EXTENSION_PATHS — colon-joined list of all bundled extension entry point absolute

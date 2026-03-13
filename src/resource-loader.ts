@@ -4,9 +4,18 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// Resolves to the bundled src/resources/ inside the npm package at runtime:
-//   dist/resource-loader.js → .. → package root → src/resources/
-const resourcesDir = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'resources')
+// Resolve resources directory — prefer dist/resources/ (stable, set at build time)
+// over src/resources/ (live working tree, changes with git branch).
+//
+// Why this matters: with `npm link`, src/resources/ points into the gsd-2 repo's
+// working tree. Switching branches there changes src/resources/ for ALL projects
+// that use gsd — causing stale/broken extensions to be synced to ~/.gsd/agent/.
+// dist/resources/ is populated by the build step (`npm run copy-resources`) and
+// reflects the built state, not the currently checked-out branch.
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const distResources = join(packageRoot, 'dist', 'resources')
+const srcResources = join(packageRoot, 'src', 'resources')
+const resourcesDir = existsSync(distResources) ? distResources : srcResources
 const bundledExtensionsDir = join(resourcesDir, 'extensions')
 
 function isExtensionFile(name: string): boolean {
