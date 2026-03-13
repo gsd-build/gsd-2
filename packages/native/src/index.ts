@@ -93,6 +93,16 @@ export type { NativeImageHandle } from "./image/index.js";
 
 export { ttsrCompileRules, ttsrCheckBuffer, ttsrFreeRules } from "./ttsr/index.js";
 export type { TtsrHandle, TtsrRuleInput } from "./ttsr/index.js";
+
+export {
+  hashString,
+  hashFile,
+  hashFiles,
+  hashDirectory,
+  didFilesChange,
+} from "./hasher/index.js";
+export type { HashDirectoryOptions } from "./hasher/index.js";
+
 export {
   parseFrontmatter,
   extractSection as nativeExtractSection,

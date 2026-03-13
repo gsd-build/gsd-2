@@ -9,6 +9,7 @@
 
 mod ast;
 mod clipboard;
+mod hasher;
 mod diff;
 mod fd;
 mod fs_cache;

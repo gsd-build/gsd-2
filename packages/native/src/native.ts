@@ -129,4 +129,9 @@ export const native = loadNative() as {
   extractAllSections: (content: string, level?: number) => string;
   batchParseGsdFiles: (directory: string) => unknown;
   parseRoadmapFile: (content: string) => unknown;
+  hashString: (text: string) => string;
+  hashFile: (path: string) => string;
+  hashFiles: (paths: string[]) => Record<string, string>;
+  hashDirectory: (dirPath: string, options?: { glob?: string; gitignore?: boolean }) => Record<string, string>;
+  didFilesChange: (hashes: Record<string, string>) => string[];
 };
