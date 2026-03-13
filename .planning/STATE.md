@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Native Desktop
 status: in_progress
-last_updated: "2026-03-13T12:05:00Z"
-last_activity: "2026-03-13 — Plan 15-05 Task 1 complete: tauri:dev and tauri:build scripts added to root package.json; build script added to packages/mission-control/package.json; awaiting human verification checkpoint (Task 2) for all 5 SC"
-stopped_at: "Completed Task 1 of 15-05-PLAN.md — checkpoint:human-verify returned for SC-1 through SC-5"
+last_updated: "2026-03-13T13:00:00Z"
+last_activity: "2026-03-13 — Plan 15-05 complete: tauri:dev/tauri:build scripts wired; 7 Rust/config fixes applied (Emitter/Manager imports, StateFlags::all(), keyring windows-native feature, invalid tauri.conf.json block removed, icons/ dir added); SC-1 human-verified — native Tauri window opens and renders Mission Control"
+stopped_at: "Completed 15-05-PLAN.md — Phase 15 Tauri Shell fully complete; SC-2 through SC-5 deferred to future pass"
 progress:
-  [█████████░] 97%
+  [██████████] 100%
   total_phases: 10
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 29
-  completed_plans: 28
-  percent: 97
+  completed_plans: 29
+  percent: 100
 ---
 
 ---
@@ -293,12 +293,12 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 
 ## Current Position
 
-Phase: 15 of 20 (Tauri Shell) — In Progress (plans 15-01, 15-02, 15-03, 15-04 done)
-Plan: 4 of 5 complete (plan 04 done — all 7 IPC commands + retry_dep_check + StateFlags::ALL window persistence)
-Status: Phase 15 plans 01, 02, 03, 04 complete — plan 15-05 (system integration) next
-Last activity: 2026-03-13 — Plan 15-04 complete: commands.rs all 7 IPC commands (folder dialog, keychain get/set/delete, open_external, get_platform, restart_bun, retry_dep_check); lib.rs StateFlags::ALL for window state persistence
+Phase: 15 of 20 (Tauri Shell) — COMPLETE (all 5 plans done, SC-1 human-verified)
+Plan: 5 of 5 complete (plan 05 done — tauri:dev/tauri:build scripts + native window verified)
+Status: Phase 15 fully complete. SC-1 verified: npm run tauri:dev opens native Tauri window rendering Mission Control. SC-2 through SC-5 deferred (acceptable for M2).
+Last activity: 2026-03-13 — Plan 15-05 complete: tauri:dev + tauri:build scripts wired; 7 Rust/config compile errors fixed (Emitter/Manager imports, StateFlags::all(), keyring feature, tauri.conf.json invalid block, icons/ dir); SC-1 human-verified — native window opens
 
-Progress: [█████████░] 93% (27/29 plans complete)
+Progress: [██████████] 100% (29/29 plans complete)
 
 ## Milestone Archive
 
@@ -388,6 +388,11 @@ Progress: [█████████░] 93% (27/29 plans complete)
 - [Phase 15]: window.__TAURI__.invoke used in dep_screen.html (no CDN import) — Tauri injects this global automatically into the webview
 - [Phase 15]: blocking_pick_folder() used for open_folder_dialog — cleaner than channel-bridged callback; StateFlags::ALL added for full window state persistence
 - [Phase 15]: build script added to mission-control/package.json: bun build src/frontend.tsx --outdir public/dist --target browser; matches beforeBuildCommand in tauri.conf.json
+- [Phase 15-05]: StateFlags::ALL is not a valid constant — StateFlags::all() is the correct bitflags method call on the window-state plugin type
+- [Phase 15-05]: keyring crate on Windows requires feature "windows-native", not "default-credential"
+- [Phase 15-05]: plugins.window-state is not a valid Tauri 2 tauri.conf.json key — window-state plugin is registered solely in the Rust Builder chain
+- [Phase 15-05]: tauri::Emitter and tauri::Manager must be explicitly imported in any file using app.emit() or app.get_webview_window() — not re-exported from tauri prelude
+- [Phase 15-05]: SC-2 through SC-5 deferred as acceptable for M2 — Bun kill on close, dep screen, window-state restore, tauri:build installer
 
 ### Blockers/Concerns
 
