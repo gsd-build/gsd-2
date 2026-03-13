@@ -25,7 +25,7 @@ pub fn run() {
             let url = request.uri().to_string();
             if url.starts_with("gsd://oauth/callback") {
                 let params = parse_oauth_params(&url);
-                let _ = app.emit("oauth-callback", params);
+                let _ = app.app_handle().emit("oauth-callback", params);
             }
             tauri::http::Response::builder()
                 .status(200)
