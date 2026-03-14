@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'url'
 import { dirname, resolve, join, delimiter } from 'path'
-import { existsSync, readFileSync, mkdirSync, symlinkSync } from 'fs'
+import { existsSync, readFileSync, readdirSync, mkdirSync, symlinkSync } from 'fs'
 import { agentDir, appRoot } from './app-paths.js'
 import { serializeBundledExtensionPaths } from './bundled-extension-paths.js'
 import { renderLogo } from './logo.js'
@@ -78,27 +78,40 @@ const srcRes = join(loaderPackageRoot, 'src', 'resources')
 const resourcesDir = existsSync(distRes) ? distRes : srcRes
 process.env.GSD_WORKFLOW_PATH = join(resourcesDir, 'GSD-WORKFLOW.md')
 
-// GSD_BUNDLED_EXTENSION_PATHS — platform-delimited list of bundled extension entry point absolute
-// paths, used by patched subagent to pass --extension <path> to spawned gsd processes.
-// IMPORTANT: paths point to agentDir (~/.gsd/agent/extensions/) NOT src/resources/extensions/.
-// initResources() syncs bundled extensions to agentDir before any extension loading occurs,
-// so these paths are always valid at runtime. Using agentDir paths matches what buildResourceLoader
-// discovers (it scans agentDir), so pi's deduplication works correctly and extensions are not
-// double-loaded in subagent child processes.
-// Note: shared/ is NOT included — it's a library imported by gsd and ask-user-questions, not an entry point.
-process.env.GSD_BUNDLED_EXTENSION_PATHS = serializeBundledExtensionPaths([
-  join(agentDir, 'extensions', 'gsd', 'index.ts'),
-  join(agentDir, 'extensions', 'bg-shell', 'index.ts'),
-  join(agentDir, 'extensions', 'browser-tools', 'index.ts'),
-  join(agentDir, 'extensions', 'context7', 'index.ts'),
-  join(agentDir, 'extensions', 'search-the-web', 'index.ts'),
-  join(agentDir, 'extensions', 'slash-commands', 'index.ts'),
-  join(agentDir, 'extensions', 'subagent', 'index.ts'),
-  join(agentDir, 'extensions', 'mac-tools', 'index.ts'),
-  join(agentDir, 'extensions', 'async-jobs', 'index.ts'),
-  join(agentDir, 'extensions', 'ask-user-questions.ts'),
-  join(agentDir, 'extensions', 'get-secrets-from-user.ts'),
-])
+// GSD_BUNDLED_EXTENSION_PATHS — dynamically discovered bundled extension entry points.
+// Scans the bundled resources directory to find all extensions, then maps paths to
+// agentDir (~/.gsd/agent/extensions/) where initResources() will sync them.
+//
+// Discovery rules (mirroring resource-loader.ts discoverExtensionEntryPaths):
+//   - Top-level .ts/.js files → extension entry point
+//   - Directories with index.ts or index.js → extension entry point
+//   - Directories without either (e.g. shared/, remote-questions/) → skipped
+//
+// Previously this was a hardcoded list that required manual updates whenever
+// extensions were added or removed — causing merge conflicts in forks and
+// falling out of sync with what buildResourceLoader() discovers at runtime.
+const bundledExtDir = join(resourcesDir, 'extensions')
+const agentExtDir = join(agentDir, 'extensions')
+const discoveredExtensionPaths: string[] = []
+
+if (existsSync(bundledExtDir)) {
+  for (const entry of readdirSync(bundledExtDir, { withFileTypes: true })) {
+    if (entry.isFile() && (entry.name.endsWith('.ts') || entry.name.endsWith('.js'))) {
+      discoveredExtensionPaths.push(join(agentExtDir, entry.name))
+    } else if (entry.isDirectory()) {
+      const srcIndex = existsSync(join(bundledExtDir, entry.name, 'index.ts'))
+        ? 'index.ts'
+        : existsSync(join(bundledExtDir, entry.name, 'index.js'))
+          ? 'index.js'
+          : null
+      if (srcIndex) {
+        discoveredExtensionPaths.push(join(agentExtDir, entry.name, srcIndex))
+      }
+    }
+  }
+}
+
+process.env.GSD_BUNDLED_EXTENSION_PATHS = serializeBundledExtensionPaths(discoveredExtensionPaths)
 
 // Respect HTTP_PROXY / HTTPS_PROXY / NO_PROXY env vars for all outbound requests.
 // pi-coding-agent's cli.ts sets this, but GSD bypasses that entry point — so we

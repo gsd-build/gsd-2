@@ -94,22 +94,28 @@ test("loader sets all 4 GSD_ env vars and PI_PACKAGE_DIR", async () => {
   assert.ok(loaderSrc.includes("serializeBundledExtensionPaths"), "loader uses shared bundled path serializer");
   assert.ok(loaderSrc.includes("join(delimiter)"), "loader uses platform delimiter for NODE_PATH");
 
-  // Verify all 11 extension entry points are referenced in loader
-  // Loader uses join() calls like join(agentDir, 'extensions', 'gsd', 'index.ts')
-  // so we check for the distinguishing directory name of each extension
-  const extNames = [
-    "'gsd'",
-    "'bg-shell'",
-    "'browser-tools'",
-    "'context7'",
-    "'search-the-web'",
-    "'slash-commands'",
-    "'subagent'",
-    "'ask-user-questions.ts'",
-    "'get-secrets-from-user.ts'",
-  ];
-  for (const name of extNames) {
-    assert.ok(loaderSrc.includes(name), `loader references extension ${name}`);
+  // Verify extension discovery mechanism is in place
+  // loader.ts now dynamically discovers extensions via readdirSync instead of
+  // hardcoding paths — verify the discovery infrastructure exists
+  assert.ok(loaderSrc.includes("readdirSync"), "loader uses readdirSync for extension discovery");
+  assert.ok(loaderSrc.includes("bundledExtDir"), "loader defines bundledExtDir for scanning");
+  assert.ok(loaderSrc.includes("discoveredExtensionPaths"), "loader collects discovered paths");
+
+  // Verify that the env var is populated at runtime by checking the actual
+  // extensions directory has discoverable entry points
+  const { discoverExtensionEntryPaths } = await import("../resource-loader.ts");
+  const bundledExtensionsDir = join(projectRoot, existsSync(join(projectRoot, "dist", "resources"))
+    ? "dist" : "src", "resources", "extensions");
+  const discovered = discoverExtensionEntryPaths(bundledExtensionsDir);
+  assert.ok(discovered.length >= 10, `expected >=10 extensions, found ${discovered.length}`);
+
+  // Spot-check that core extensions are discoverable
+  const discoveredNames = discovered.map(p => {
+    const rel = p.slice(bundledExtensionsDir.length + 1);
+    return rel.split(/[\\/]/)[0].replace(/\.ts$/, "");
+  });
+  for (const core of ["gsd", "bg-shell", "browser-tools", "subagent", "search-the-web"]) {
+    assert.ok(discoveredNames.includes(core), `core extension '${core}' is discoverable`);
   }
 
   rmSync(tmp, { recursive: true, force: true });
