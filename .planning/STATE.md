@@ -3,6 +3,20 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Native Desktop
 status: in_progress
+last_updated: "2026-03-14T11:32:40.196Z"
+last_activity: "2026-03-14 — Plan 17-03 complete: human verification approved SC-1..SC-4 — all PERM requirements satisfied"
+progress:
+  total_phases: 10
+  completed_phases: 6
+  total_plans: 40
+  completed_plans: 36
+---
+
+---
+gsd_state_version: 1.0
+milestone: v2.0
+milestone_name: Native Desktop
+status: in_progress
 last_updated: "2026-03-14T09:45:00.000Z"
 last_activity: "2026-03-14 — Plan 17-03 complete: human verification approved SC-1..SC-4 — Phase 17 Permission Model fully complete; 35/36 plans done"
 stopped_at: "Completed 17-03-PLAN.md — Phase 17 Permission Model fully complete"
@@ -401,12 +415,13 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 
 ## Current Position
 
-Phase: 17 of 20 (Permission Model) — COMPLETE (all 3 plans done)
-Plan: 3 of 3 complete (plan 03 done — human verification SC-1..SC-4 approved; Phase 17 closed)
-Status: Phase 17 complete. Next: Phase 18 Integration.
-Last activity: 2026-03-14 — Plan 17-03 complete: human verification approved SC-1..SC-4 — all PERM requirements satisfied
+Phase: 18 of 20 (Builder Mode) — In Progress (1 of 4 plans done)
+Plan: 1 of 4 complete (plan 01 done — InterfaceModeContext, vocab maps, Settings toggle, ChatInput control, cost badge suppression)
+Status: Phase 18 in progress. Next: Phase 18-02 (classifyIntent).
+Last activity: 2026-03-14 — Plan 18-01 complete: Builder mode foundation — InterfaceModeContext, BUILDER_VOCAB, SettingsView toggle, ChatInput builderMode prop, cost badge hidden; BUILDER-01/02/03 satisfied; 739 tests pass
+Stopped at: Completed 18-01-PLAN.md
 
-Progress: [██████████] 97% (35/36 plans complete)
+Progress: [█████████░] 90% (36/40 plans complete)
 
 ## Milestone Archive
 
@@ -519,6 +534,9 @@ Progress: [██████████] 97% (35/36 plans complete)
 - [Phase 17-permission-model]: boundary_violation piggybacked on existing useSessionManager WebSocket — no second WS connection
 - [Phase 17-permission-model]: detectBoundaryViolation regex uses negative lookbehind for dot/slash to prevent matching ./relative paths
 - [Phase 17-permission-model]: Human approved SC-1 through SC-4 — all four PERM requirements verified visually and functionally on 2026-03-14
+- [Phase 18]: AppShellWithMode thin wrapper: reads interface_mode from useSettings, wraps AppShell in InterfaceModeProvider
+- [Phase 18]: CommandPalette gated via open={builderMode ? false : paletteOpen} — simpler than modifying useCommandPalette hook
+- [Phase 18]: Cost badge and budget warning wrapped with {!builderMode && ...} in ChatView — not deleted, Developer mode unchanged
 
 ### Blockers/Concerns
 
