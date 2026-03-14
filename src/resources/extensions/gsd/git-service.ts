@@ -839,7 +839,15 @@ export class GitServiceImpl {
     }
 
     if (strategy === "squash") {
-      this.git(["commit", "-F", "-"], { input: message });
+      // After stripping runtime files, there may be nothing left to commit.
+      // This happens when the only changes in the slice were runtime artifacts.
+      const stagedDiff = this.git(["diff", "--cached", "--stat"], { allowFailure: true });
+      if (stagedDiff?.trim()) {
+        this.git(["commit", "-F", "-"], { input: message });
+      } else {
+        // Nothing to commit — clean up the squash-merge state
+        this.git(["reset", "HEAD"], { allowFailure: true });
+      }
     } else {
       // --no-ff already committed; amend to include runtime file removal
       const runtimeDiff = this.git(["diff", "--cached", "--stat"], { allowFailure: true });
