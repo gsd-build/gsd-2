@@ -9,6 +9,10 @@ import * as readline from "node:readline";
 
 const SWIFT_SRC = path.join(__dirname, "speech-recognizer.swift");
 const RECOGNIZER_BIN = path.join(__dirname, "speech-recognizer");
+const PYTHON_SCRIPT = path.join(__dirname, "speech-recognizer.py");
+
+const IS_DARWIN = process.platform === "darwin";
+const IS_LINUX = process.platform === "linux";
 
 function ensureBinary(): boolean {
 	if (fs.existsSync(RECOGNIZER_BIN)) return true;
@@ -22,8 +26,48 @@ function ensureBinary(): boolean {
 	}
 }
 
+let linuxReady = false;
+
+function ensureLinuxReady(ctx: ExtensionContext): boolean {
+	if (linuxReady) return true;
+
+	// Check python3 exists
+	try {
+		execSync("which python3", { stdio: "pipe" });
+	} catch {
+		ctx.ui.notify("Voice: python3 not found — install with: sudo apt install python3", "error");
+		return false;
+	}
+
+	// Check that moonshine-voice and sounddevice are importable
+	try {
+		execSync('python3 -c "import moonshine_voice, sounddevice"', {
+			stdio: "pipe",
+			timeout: 10000,
+		});
+	} catch (err: unknown) {
+		const stderr = (err as { stderr?: Buffer })?.stderr?.toString() ?? "";
+		if (stderr.includes("sounddevice") || stderr.includes("PortAudio") || stderr.includes("portaudio")) {
+			ctx.ui.notify("Voice: install libportaudio2 with: sudo apt install libportaudio2", "error");
+		} else if (stderr.includes("No module") || stderr.includes("ModuleNotFoundError")) {
+			// Deps missing — the Python script handles auto-install on first run,
+			// so we let it through. The script's own ensure_deps() will pip install.
+			ctx.ui.notify("Voice: installing dependencies on first run — this may take a moment", "info");
+			linuxReady = true;
+			return true;
+		} else {
+			ctx.ui.notify(`Voice: dependency check failed — ${stderr.split("\n")[0] || "unknown error"}`, "error");
+			return false;
+		}
+		return false;
+	}
+
+	linuxReady = true;
+	return true;
+}
+
 export default function (pi: ExtensionAPI) {
-	if (process.platform !== "darwin") return;
+	if (!IS_DARWIN && !IS_LINUX) return;
 
 	let active = false;
 	let recognizerProcess: ChildProcess | null = null;
@@ -116,9 +160,15 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		if (!ensureBinary()) {
-			ctx.ui.notify("Voice: failed to compile speech recognizer (need Xcode CLI tools)", "error");
-			return;
+		if (IS_DARWIN) {
+			if (!ensureBinary()) {
+				ctx.ui.notify("Voice: failed to compile speech recognizer (need Xcode CLI tools)", "error");
+				return;
+			}
+		} else if (IS_LINUX) {
+			if (!ensureLinuxReady(ctx)) {
+				return;
+			}
 		}
 
 		active = true;
@@ -146,7 +196,9 @@ export default function (pi: ExtensionAPI) {
 		onError: (msg: string) => void,
 		onReady: () => void,
 	) {
-		recognizerProcess = spawn(RECOGNIZER_BIN, [], { stdio: ["pipe", "pipe", "pipe"] });
+		recognizerProcess = IS_LINUX
+			? spawn("python3", [PYTHON_SCRIPT], { stdio: ["pipe", "pipe", "pipe"] })
+			: spawn(RECOGNIZER_BIN, [], { stdio: ["pipe", "pipe", "pipe"] });
 		const rl = readline.createInterface({ input: recognizerProcess.stdout! });
 		rl.on("line", (line: string) => {
 			if (line === "READY") { onReady(); return; }

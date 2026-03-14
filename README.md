@@ -220,7 +220,7 @@ On first run, GSD launches a branded setup wizard that walks you through LLM pro
 | `/gsd migrate`          | Migrate a v1 `.planning` directory to `.gsd` format             |
 | `/gsd doctor`           | Validate `.gsd/` integrity, find and fix issues                 |
 | `/worktree` (`/wt`)     | Git worktree lifecycle — create, switch, merge, remove          |
-| `/voice`                | Toggle real-time speech-to-text (macOS only)                    |
+| `/voice`                | Toggle real-time speech-to-text (macOS, Linux)                  |
 | `/exit`                 | Graceful shutdown — saves session state before exiting          |
 | `/kill`                 | Kill GSD process immediately                                    |
 | `/clear`                | Start a new session (alias for `/new`)                          |
@@ -348,7 +348,7 @@ GSD ships with 14 extensions, all loaded automatically:
 | **Subagent**           | Delegated tasks with isolated context windows                                                                          |
 | **Mac Tools**          | macOS native app automation via Accessibility APIs                                                                     |
 | **MCPorter**           | Lazy on-demand MCP server integration                                                                                  |
-| **Voice**              | Real-time speech-to-text transcription (macOS)                                                                         |
+| **Voice**              | Real-time speech-to-text transcription (macOS, Linux — Ubuntu 22.04+)                                                  |
 | **Slash Commands**     | Custom command creation                                                                                                |
 | **LSP**                | Language Server Protocol integration — diagnostics, go-to-definition, references, hover, symbols, rename, code actions |
 | **Ask User Questions** | Structured user input with single/multi-select                                                                         |
