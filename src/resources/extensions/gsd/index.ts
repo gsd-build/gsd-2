@@ -348,7 +348,6 @@ export default function (pi: ExtensionAPI) {
         if (modelConfig && modelConfig.fallbacks.length > 0) {
           const availableModels = ctx.modelRegistry.getAvailable();
           const currentModelId = ctx.model?.id;
-
           const nextModelId = getNextFallbackModel(currentModelId, modelConfig);
 
           if (nextModelId) {
