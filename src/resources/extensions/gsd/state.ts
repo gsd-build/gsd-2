@@ -65,6 +65,8 @@ export async function getActiveMilestoneId(basePath: string): Promise<string | n
       const summaryFile = resolveMilestoneFile(basePath, mid, "SUMMARY");
       if (summaryFile) continue; // completed milestone, skip
       return mid; // No roadmap and no summary — milestone is incomplete
+      // Note: draft-awareness (CONTEXT-DRAFT.md) is handled in deriveState(), not here.
+      // A draft milestone is still "active" — this function only determines which milestone is current.
     }
     const roadmap = parseRoadmap(content);
     if (!isMilestoneComplete(roadmap)) return mid;
@@ -120,6 +122,7 @@ export async function deriveState(basePath: string): Promise<GSDState> {
   let activeMilestone: ActiveRef | null = null;
   let activeRoadmap: Roadmap | null = null;
   let activeMilestoneFound = false;
+  let activeMilestoneHasDraft = false;
 
   for (const mid of milestoneIds) {
     const roadmapFile = resolveMilestoneFile(basePath, mid, "ROADMAP");
@@ -138,6 +141,13 @@ export async function deriveState(basePath: string): Promise<GSDState> {
       }
       // No roadmap and no summary — treat as incomplete/active
       if (!activeMilestoneFound) {
+        // Check for CONTEXT-DRAFT.md to distinguish draft-seeded from blank milestones.
+        // A draft seed means the milestone has discussion material but no full context yet.
+        const contextFile = resolveMilestoneFile(basePath, mid, "CONTEXT");
+        if (!contextFile) {
+          const draftFile = resolveMilestoneFile(basePath, mid, "CONTEXT-DRAFT");
+          if (draftFile) activeMilestoneHasDraft = true;
+        }
         activeMilestone = { id: mid, title: mid };
         activeMilestoneFound = true;
         registry.push({ id: mid, title: mid, status: 'active' });
@@ -235,15 +245,21 @@ export async function deriveState(basePath: string): Promise<GSDState> {
   }
 
   if (!activeRoadmap) {
-    // Active milestone exists but has no roadmap yet — needs planning
+    // Active milestone exists but has no roadmap yet.
+    // If a CONTEXT-DRAFT.md seed exists, it needs discussion before planning.
+    // Otherwise, it's a blank milestone ready for initial planning.
+    const phase = activeMilestoneHasDraft ? 'needs-discussion' as const : 'pre-planning' as const;
+    const nextAction = activeMilestoneHasDraft
+      ? `Discuss draft context for milestone ${activeMilestone.id}.`
+      : `Plan milestone ${activeMilestone.id}.`;
     return {
       activeMilestone,
       activeSlice: null,
       activeTask: null,
-      phase: 'pre-planning',
+      phase,
       recentDecisions: [],
       blockers: [],
-      nextAction: `Plan milestone ${activeMilestone.id}.`,
+      nextAction,
       registry,
       requirements,
       progress: {

@@ -5,7 +5,7 @@
 // ─── Enums & Literal Unions ────────────────────────────────────────────────
 
 export type RiskLevel = 'low' | 'medium' | 'high';
-export type Phase = 'pre-planning' | 'discussing' | 'researching' | 'planning' | 'executing' | 'verifying' | 'summarizing' | 'advancing' | 'completing-milestone' | 'replanning-slice' | 'complete' | 'paused' | 'blocked';
+export type Phase = 'pre-planning' | 'needs-discussion' | 'discussing' | 'researching' | 'planning' | 'executing' | 'verifying' | 'summarizing' | 'advancing' | 'completing-milestone' | 'replanning-slice' | 'complete' | 'paused' | 'blocked';
 export type ContinueStatus = 'in_progress' | 'interrupted' | 'compacted';
 
 // ─── Roadmap (Milestone-level) ─────────────────────────────────────────────

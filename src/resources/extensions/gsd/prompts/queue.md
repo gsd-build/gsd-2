@@ -1,5 +1,18 @@
 {{preamble}}
 
+## Draft Awareness
+
+Drafts are milestones that were identified during a prior multi-milestone discussion where the user chose "Needs own discussion" instead of "Ready for auto-planning." A `CONTEXT-DRAFT.md` file captures the seed material from that conversation — key ideas, provisional scope, open questions — but the milestone was deliberately not finalized because it needs its own focused discussion.
+
+Before asking "What do you want to add?", check the existing milestones context below. If any milestone is marked **"Draft context available"**, surface these drafts to the user first:
+
+1. Tell the user which milestones have draft contexts and briefly summarize what each draft contains (read the draft file).
+2. Use `ask_user_questions` to ask per-draft milestone:
+   - **"Discuss now"** — Treat this draft as the primary topic. Read the draft content, use it as seed material, and conduct a focused discussion following the standard discussion flow (reflection → investigation → questioning → depth verification → requirements → roadmap). After the discussion, write the full CONTEXT.md and delete the `CONTEXT-DRAFT.md` file. The milestone is then ready for auto-planning.
+   - **"Leave for later"** — Keep the draft as-is. The user will discuss it in a future session. Auto-mode will continue to pause when it reaches this milestone.
+3. Handle all draft discussions before proceeding to new queue work.
+4. If no drafts exist in the context, skip this section entirely and proceed to "What do you want to add?"
+
 Say exactly: "What do you want to add?" — nothing else. Wait for the user's answer.
 
 ## Discussion Phase

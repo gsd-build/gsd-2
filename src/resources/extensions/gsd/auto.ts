@@ -845,13 +845,15 @@ async function showStepWizard(
 /**
  * Describe what the next unit will be, based on current state.
  */
-function describeNextUnit(state: GSDState): { label: string; description: string } {
+export function describeNextUnit(state: GSDState): { label: string; description: string } {
   const sid = state.activeSlice?.id;
   const sTitle = state.activeSlice?.title;
   const tid = state.activeTask?.id;
   const tTitle = state.activeTask?.title;
 
   switch (state.phase) {
+    case "needs-discussion":
+      return { label: "Discuss milestone draft", description: "Milestone has a draft context — needs discussion before planning." };
     case "pre-planning":
       return { label: "Research & plan milestone", description: "Scout the landscape and create the roadmap." };
     case "planning":
@@ -1528,6 +1530,19 @@ async function dispatchNextUnit(
       unitType = "reassess-roadmap";
       unitId = `${mid}/${needsReassess.sliceId}`;
       prompt = await buildReassessRoadmapPrompt(mid, midTitle!, needsReassess.sliceId, basePath);
+    } else if (state.phase === "needs-discussion") {
+      // Draft milestone — pause auto-mode and notify user.
+      // This milestone has a CONTEXT-DRAFT.md from a prior multi-milestone discussion
+      // where the user chose "Needs own discussion". Auto-mode cannot proceed because
+      // the draft is seed material, not a finalized context — planning requires a
+      // dedicated discussion first.
+      await stopAuto(ctx, pi);
+      ctx.ui.notify(
+        `${mid}: ${midTitle} has draft context from a prior discussion — needs its own discussion before planning.\nRun /gsd to discuss.`,
+        "warning",
+      );
+      return;
+
     } else if (state.phase === "pre-planning") {
       // Need roadmap — check if context exists
       const contextFile = resolveMilestoneFile(basePath, mid, "CONTEXT");

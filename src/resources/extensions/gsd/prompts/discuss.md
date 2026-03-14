@@ -201,13 +201,34 @@ After writing the files and committing, say exactly: "Milestone {{milestoneId}} 
 
 ### Multi-Milestone
 
-Once the user confirms the milestone split, in a single pass:
+Once the user confirms the milestone split:
+
+#### Phase 1: Shared artifacts
+
 1. `mkdir -p .gsd/milestones/{{milestoneId}}/slices` for each milestone
 2. Write `.gsd/PROJECT.md` — read the template at `~/.gsd/agent/extensions/gsd/templates/project.md` first.
 3. Write `.gsd/REQUIREMENTS.md` — read the template at `~/.gsd/agent/extensions/gsd/templates/requirements.md` first. Capture Active, Deferred, Out of Scope, and any already Validated requirements. Later milestones may have provisional ownership where slice plans do not exist yet.
-4. Write a `CONTEXT.md` for **every** milestone — capture the intent, scope, risks, constraints, user-visible outcome, completion class, final integrated acceptance, and relevant requirements for each. Each future milestone's CONTEXT.md should be rich enough that a planning agent encountering it fresh — with no memory of this conversation — can understand the intent, constraints, dependencies, what this milestone unlocks, and what "done" looks like.
-5. Write a `ROADMAP.md` for **only the first milestone** — detail-planning later milestones now is waste because the codebase will change. Include requirement coverage and a milestone definition of done.
-6. Seed `.gsd/DECISIONS.md`.
+4. Seed `.gsd/DECISIONS.md` — read the template at `~/.gsd/agent/extensions/gsd/templates/decisions.md` first.
+
+#### Phase 2: Primary milestone
+
+5. Write a full `CONTEXT.md` for the primary milestone (the one discussed in depth).
+6. Write a `ROADMAP.md` for **only the primary milestone** — detail-planning later milestones now is waste because the codebase will change. Include requirement coverage and a milestone definition of done.
+
+#### Phase 3: Sequential readiness gate for remaining milestones
+
+For each remaining milestone **one at a time, in sequence**, use `ask_user_questions` to assess readiness. Present three options:
+
+- **"Discuss now"** — The user wants to conduct a focused discussion for this milestone in the current session, while the context from the broader discussion is still fresh. Proceed with a focused discussion for this milestone (reflection → investigation → questioning → depth verification). When the discussion concludes, write a full `CONTEXT.md`. Then move to the gate for the next milestone.
+- **"Write draft for later"** — This milestone has seed material from the current conversation but needs its own dedicated discussion in a future session. Write a `CONTEXT-DRAFT.md` capturing the seed material (what was discussed, key ideas, provisional scope, open questions). Mark it clearly as a draft, not a finalized context. **What happens downstream:** When auto-mode reaches this milestone, it pauses and notifies the user: "M00x has draft context — needs discussion. Run /gsd." The `/gsd` wizard shows a "Discuss from draft" option that seeds the new discussion with this draft, so nothing from the current conversation is lost. After the dedicated discussion produces a full CONTEXT.md, the draft file is automatically deleted.
+- **"Just queue it"** — This milestone is identified but intentionally left without context. No context file is written — the directory already exists from Phase 1. **What happens downstream:** When auto-mode reaches this milestone, it pauses and notifies the user to run /gsd. The wizard starts a full discussion from scratch.
+
+**Why sequential, not batch:** After writing the primary milestone's context and roadmap, the agent still has context window capacity. Asking one milestone at a time lets the user decide per-milestone whether to invest that remaining capacity in a focused discussion now, or defer to a future session. A batch question ("Ready/Draft/Queue for M002, M003, M004?") forces the user to decide everything upfront without knowing how much session capacity remains.
+
+Each context file (full or draft) should be rich enough that a future agent encountering it fresh — with no memory of this conversation — can understand the intent, constraints, dependencies, what this milestone unlocks, and what "done" looks like.
+
+#### Phase 4: Finalize
+
 7. Update `.gsd/STATE.md`
 8. Commit: `docs: project plan — N milestones` (replace N with the actual milestone count)
 
