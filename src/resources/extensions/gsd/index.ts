@@ -40,6 +40,7 @@ import {
   renderPreferencesForSystemPrompt,
   resolveAllSkillReferences,
   resolveModelWithFallbacksForUnit,
+  getNextFallbackModel,
 } from "./preferences.js";
 import { hasSkillSnapshot, detectNewSkills, formatSkillsXml } from "./skill-discovery.js";
 import {
@@ -347,19 +348,8 @@ export default function (pi: ExtensionAPI) {
         if (modelConfig && modelConfig.fallbacks.length > 0) {
           const availableModels = ctx.modelRegistry.getAvailable();
           const currentModelId = ctx.model?.id;
-          const modelsToTry = [modelConfig.primary, ...modelConfig.fallbacks];
 
-          let nextModelId: string | undefined;
-          let foundCurrent = false;
-          for (const mId of modelsToTry) {
-            if (foundCurrent) {
-              nextModelId = mId;
-              break;
-            }
-            if (!currentModelId || mId === currentModelId || (mId.includes("/") && mId.endsWith(`/${currentModelId}`))) {
-              foundCurrent = true;
-            }
-          }
+          const nextModelId = getNextFallbackModel(currentModelId, modelConfig);
 
           if (nextModelId) {
             let modelToSet;
