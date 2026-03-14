@@ -54,7 +54,7 @@ This milestone is complete only when all are true:
 - [x] **S02: Production-Like Scenario Testing** `risk:high` `depends:[S01]`
   > After this: New integration tests prove the real ModelRegistry startup path works across fresh install, cache hit, stale cache, version change, offline fallback, and override scenarios using temporary directories.
 
-- [ ] **S03: Live models.dev Verification** `risk:medium` `depends:[S01]`
+- [x] **S03: Live models.dev Verification** `risk:medium` `depends:[S01]`
   > After this: Main test suite includes live verification against models.dev API with schema validation and clear failure diagnostics.
 
 ## Boundary Map

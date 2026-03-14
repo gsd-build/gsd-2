@@ -94,13 +94,13 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R009 - Live models.dev verification in main suite
 - Class: quality-attribute
-- Status: active
+- Status: validated
 - Description: The main test suite includes live verification against models.dev as part of registry-path coverage
 - Why it matters: Upstream compatibility should be checked against the real service, not only fixtures
 - Source: user
-- Primary owning slice: M002
+- Primary owning slice: M002/S03
 - Supporting slices: none
-- Validation: Pending - main suite runs live models.dev verification with explicit failure surface
+- Validation: S03 - Live test fetches from production API with Zod schema validation and env var gate
 - Notes: This intentionally accepts network-dependent test behavior by user choice
 
 ### R010 - Model registry path quality hardening
@@ -146,6 +146,7 @@ This file is the explicit capability and coverage contract for the project.
 - R006 — Remove models.generated.ts and generation script (S03: file deleted, no source references)
 - R007 — Registry path build/test workflow must be trustworthy (M002/S01: npm run build && npm test succeed)
 - R008 — Registry behavior proven through production-like scenarios (M002/S02: 9 scenario tests with tmpdir isolation)
+- R009 — Live models.dev verification in main suite (M002/S03: live test with Zod validation and env var gate)
 
 ## Deferred
 
@@ -167,14 +168,14 @@ This file is the explicit capability and coverage contract for the project.
 | R006 | operability | validated | M001/S03 | none | S03 file deletion + grep verification |
 | R007 | operability | validated | M002/S01 | none | S01 build + test workflow |
 | R008 | quality-attribute | validated | M002/S02 | none | S02 9 scenario tests |
-| R009 | quality-attribute | active | M002 | none | Pending |
+| R009 | quality-attribute | validated | M002/S03 | none | S03 live test with Zod validation |
 | R010 | operability | active | M002 | none | Pending |
 | R011 | operability | active | M003 | none | Pending |
 | R012 | operability | active | M003 | none | Pending |
 
 ## Coverage Summary
 
-- Active requirements: 4
+- Active requirements: 3
 - Mapped to slices: 12
-- Validated: 8
+- Validated: 9
 - Unmapped active requirements: 0
