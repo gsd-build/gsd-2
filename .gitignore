@@ -17,7 +17,8 @@ Thumbs.db
 node_modules/
 .next/
 /dist/
-!/pkg/dist/
+!/pkg/dist/modes/
+!/pkg/dist/core/export-html/
 build/
 __pycache__/
 *.pyc
@@ -38,7 +39,8 @@ packages/*/node_modules/
 
 # ── GSD baseline (auto-generated) ──
 dist/
-!/pkg/dist/
+!/pkg/dist/modes/
+!/pkg/dist/core/export-html/
 .bg_shell
 .gsd*.tgz
 .artifacts/
