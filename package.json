@@ -68,7 +68,13 @@
     "playwright": "^1.58.2",
     "sharp": "^0.34.5"
   },
-  "bundleDependencies": [],
+  "bundleDependencies": [
+    "@gsd/native",
+    "@gsd/pi-agent-core",
+    "@gsd/pi-ai",
+    "@gsd/pi-coding-agent",
+    "@gsd/pi-tui"
+  ],
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/picomatch": "^4.0.2",
