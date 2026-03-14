@@ -65,7 +65,7 @@ function findMilestoneIds(basePath: string): string[] {
     return readdirSync(milestonesDir(basePath), { withFileTypes: true })
       .filter(entry => entry.isDirectory())
       .map(entry => {
-        const match = entry.name.match(/^(M(?:-[a-z0-9]{6}-)?\d+)/);
+        const match = entry.name.match(/^(M\d+(?:-[a-z0-9]{6})?)/);
         return match ? match[1] : entry.name;
       })
       .sort(milestoneIdSort);
@@ -76,7 +76,7 @@ function findMilestoneIds(basePath: string): string[] {
 
 function titleFromRoadmapHeader(content: string, fallbackId: string): string {
   const roadmap = parseRoadmap(content);
-  return roadmap.title.replace(/^M(?:-[a-z0-9]{6}-)?\d+[^:]*:\s*/, "") || fallbackId;
+  return roadmap.title.replace(/^M\d+(?:-[a-z0-9]{6})?[^:]*:\s*/, "") || fallbackId;
 }
 
 async function indexSlice(basePath: string, milestoneId: string, sliceId: string, fallbackTitle: string, done: boolean): Promise<WorkspaceSliceTarget> {

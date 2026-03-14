@@ -1,7 +1,7 @@
 /**
  * Integration tests: deriveState, indexWorkspace, inlinePriorMilestoneSummary,
- * dispatch-guard, and branch operations with new-format (M-abc123-001) and
- * mixed old+new milestone directories.
+ * dispatch-guard, and branch operations with unique-format (M001-abc123) and
+ * mixed classic+unique milestone directories.
  *
  * Uses real filesystem and git fixtures — no mocking.
  */
@@ -110,8 +110,8 @@ async function main(): Promise<void> {
   {
     const base = createFixtureBase();
     try {
-      // Create M-abc123-001 with roadmap + 2 slices (S01 complete, S02 in-progress)
-      writeRoadmap(base, 'M-abc123-001', `# M-abc123-001: Test Feature
+      // Create M001-abc123 with roadmap + 2 slices (S01 complete, S02 in-progress)
+      writeRoadmap(base, 'M001-abc123', `# M001-abc123: Test Feature
 
 **Vision:** Test vision
 
@@ -123,7 +123,7 @@ async function main(): Promise<void> {
 `);
 
       // S01 is complete — write a plan with all tasks done
-      writePlan(base, 'M-abc123-001', 'S01', `# S01: Setup
+      writePlan(base, 'M001-abc123', 'S01', `# S01: Setup
 
 **Goal:** Setup
 **Demo:** Setup works
@@ -134,7 +134,7 @@ async function main(): Promise<void> {
 `);
 
       // S02 is in-progress — write a plan with first task not done
-      writePlan(base, 'M-abc123-001', 'S02', `# S02: Core Logic
+      writePlan(base, 'M001-abc123', 'S02', `# S02: Core Logic
 
 **Goal:** Implement core
 **Demo:** Core works
@@ -151,12 +151,12 @@ async function main(): Promise<void> {
       // Phase should be executing (active milestone with incomplete slice + plan + tasks)
       assertEq(state.phase, 'executing', 'G1: phase is executing');
       assert(state.activeMilestone !== null, 'G1: activeMilestone is not null');
-      assertEq(state.activeMilestone?.id, 'M-abc123-001', 'G1: activeMilestone id is M-abc123-001');
+      assertEq(state.activeMilestone?.id, 'M001-abc123', 'G1: activeMilestone id is M001-abc123');
       assertEq(state.activeMilestone?.title, 'Test Feature', 'G1: title stripped to Test Feature');
 
       // Registry
       assertEq(state.registry.length, 1, 'G1: registry has 1 entry');
-      assertEq(state.registry[0]?.id, 'M-abc123-001', 'G1: registry entry id');
+      assertEq(state.registry[0]?.id, 'M001-abc123', 'G1: registry entry id');
       assertEq(state.registry[0]?.status, 'active', 'G1: registry entry status is active');
       assertEq(state.registry[0]?.title, 'Test Feature', 'G1: registry title stripped');
 
@@ -205,8 +205,8 @@ async function main(): Promise<void> {
 Everything worked.
 `);
 
-      // M-abc123-002 — active milestone (incomplete slice)
-      writeRoadmap(base, 'M-abc123-002', `# M-abc123-002: New Feature
+      // M002-abc123 — active milestone (incomplete slice)
+      writeRoadmap(base, 'M002-abc123', `# M002-abc123: New Feature
 
 **Vision:** New vision
 
@@ -217,7 +217,7 @@ Everything worked.
   > Main work
 `);
 
-      writePlan(base, 'M-abc123-002', 'S01', `# S01: Setup
+      writePlan(base, 'M002-abc123', 'S01', `# S01: Setup
 
 **Goal:** Setup
 **Demo:** Setup done
@@ -227,7 +227,7 @@ Everything worked.
   Init done.
 `);
 
-      writePlan(base, 'M-abc123-002', 'S02', `# S02: Implementation
+      writePlan(base, 'M002-abc123', 'S02', `# S02: Implementation
 
 **Goal:** Implement
 **Demo:** Works
@@ -242,19 +242,19 @@ Everything worked.
       // Registry — should have 2 entries sorted by seq number
       assertEq(state.registry.length, 2, 'G2: registry has 2 entries');
       assertEq(state.registry[0]?.id, 'M001', 'G2: registry[0] is M001 (sorted first)');
-      assertEq(state.registry[1]?.id, 'M-abc123-002', 'G2: registry[1] is M-abc123-002 (sorted second)');
+      assertEq(state.registry[1]?.id, 'M002-abc123', 'G2: registry[1] is M002-abc123 (sorted second)');
 
       // M001 is complete
       assertEq(state.registry[0]?.status, 'complete', 'G2: M001 status is complete');
       assertEq(state.registry[0]?.title, 'Legacy Feature', 'G2: M001 title stripped');
 
-      // M-abc123-002 is active
-      assertEq(state.registry[1]?.status, 'active', 'G2: M-abc123-002 status is active');
-      assertEq(state.registry[1]?.title, 'New Feature', 'G2: M-abc123-002 title stripped');
+      // M002-abc123 is active
+      assertEq(state.registry[1]?.status, 'active', 'G2: M002-abc123 status is active');
+      assertEq(state.registry[1]?.title, 'New Feature', 'G2: M002-abc123 title stripped');
 
       // Active milestone
       assert(state.activeMilestone !== null, 'G2: activeMilestone is not null');
-      assertEq(state.activeMilestone?.id, 'M-abc123-002', 'G2: activeMilestone is M-abc123-002');
+      assertEq(state.activeMilestone?.id, 'M002-abc123', 'G2: activeMilestone is M002-abc123');
       assertEq(state.activeMilestone?.title, 'New Feature', 'G2: activeMilestone title stripped');
 
       // Phase
@@ -276,7 +276,7 @@ Everything worked.
   {
     const base = createFixtureBase();
     try {
-      // Same fixture as Group 2: M001 (complete) + M-abc123-002 (active)
+      // Same fixture as Group 2: M001 (complete) + M002-abc123 (active)
       writeRoadmap(base, 'M001', `# M001: Legacy Feature
 
 **Vision:** Legacy vision
@@ -304,7 +304,7 @@ Everything worked.
 Everything worked.
 `);
 
-      writeRoadmap(base, 'M-abc123-002', `# M-abc123-002: New Feature
+      writeRoadmap(base, 'M002-abc123', `# M002-abc123: New Feature
 
 **Vision:** New vision
 
@@ -313,7 +313,7 @@ Everything worked.
   > First work
 `);
 
-      writePlan(base, 'M-abc123-002', 'S01', `# S01: First Slice
+      writePlan(base, 'M002-abc123', 'S01', `# S01: First Slice
 
 **Goal:** First
 **Demo:** First works
@@ -328,28 +328,28 @@ Everything worked.
       // Both milestones indexed
       assertEq(index.milestones.length, 2, 'G3: 2 milestones in index');
       assertEq(index.milestones[0]?.id, 'M001', 'G3: index[0] is M001');
-      assertEq(index.milestones[1]?.id, 'M-abc123-002', 'G3: index[1] is M-abc123-002');
+      assertEq(index.milestones[1]?.id, 'M002-abc123', 'G3: index[1] is M002-abc123');
 
       // Titles stripped from both formats
       assertEq(index.milestones[0]?.title, 'Legacy Feature', 'G3: M001 title stripped');
-      assertEq(index.milestones[1]?.title, 'New Feature', 'G3: M-abc123-002 title stripped');
+      assertEq(index.milestones[1]?.title, 'New Feature', 'G3: M002-abc123 title stripped');
 
       // Active state
-      assertEq(index.active.milestoneId, 'M-abc123-002', 'G3: active milestone is M-abc123-002');
+      assertEq(index.active.milestoneId, 'M002-abc123', 'G3: active milestone is M002-abc123');
       assertEq(index.active.sliceId, 'S01', 'G3: active slice is S01');
 
       // Scopes include new-format paths
       assert(
-        index.scopes.some(s => s.scope === 'M-abc123-002'),
-        'G3: scope includes M-abc123-002 milestone',
+        index.scopes.some(s => s.scope === 'M002-abc123'),
+        'G3: scope includes M002-abc123 milestone',
       );
       assert(
-        index.scopes.some(s => s.scope === 'M-abc123-002/S01'),
-        'G3: scope includes M-abc123-002/S01 slice',
+        index.scopes.some(s => s.scope === 'M002-abc123/S01'),
+        'G3: scope includes M002-abc123/S01 slice',
       );
       assert(
-        index.scopes.some(s => s.scope === 'M-abc123-002/S01/T01'),
-        'G3: scope includes M-abc123-002/S01/T01 task',
+        index.scopes.some(s => s.scope === 'M002-abc123/S01/T01'),
+        'G3: scope includes M002-abc123/S01/T01 task',
       );
     } finally {
       cleanup(base);
@@ -374,12 +374,12 @@ Built the legacy feature successfully.
 - Used old format for milestone IDs.
 `);
 
-      // M-abc123-002 — active milestone (just needs directory to exist)
-      mkdirSync(join(base, '.gsd', 'milestones', 'M-abc123-002'), { recursive: true });
+      // M002-abc123 — active milestone (just needs directory to exist)
+      mkdirSync(join(base, '.gsd', 'milestones', 'M002-abc123'), { recursive: true });
 
-      const result = await inlinePriorMilestoneSummary('M-abc123-002', base);
+      const result = await inlinePriorMilestoneSummary('M002-abc123', base);
 
-      // Result should be non-null (M001 is before M-abc123-002)
+      // Result should be non-null (M001 is before M002-abc123)
       assert(result !== null, 'G4: result is non-null');
       assert(typeof result === 'string', 'G4: result is a string');
 
@@ -397,8 +397,8 @@ Built the legacy feature successfully.
   {
     const base = createGitRepo();
     try {
-      // M-abc123-001: all slices complete
-      writeRoadmap(base, 'M-abc123-001', `# M-abc123-001: First Feature
+      // M001-abc123: all slices complete
+      writeRoadmap(base, 'M001-abc123', `# M001-abc123: First Feature
 
 **Vision:** First
 
@@ -407,8 +407,8 @@ Built the legacy feature successfully.
   > Completed
 `);
 
-      // M-abc123-002: S01 incomplete
-      writeRoadmap(base, 'M-abc123-002', `# M-abc123-002: Second Feature
+      // M002-abc123: S01 incomplete
+      writeRoadmap(base, 'M002-abc123', `# M002-abc123: Second Feature
 
 **Vision:** Second
 
@@ -424,35 +424,35 @@ Built the legacy feature successfully.
       run('git add .', base);
       run('git commit -m init', base);
 
-      // No blocker: M-abc123-001 is complete, dispatching M-abc123-002/S01
+      // No blocker: M001-abc123 is complete, dispatching M002-abc123/S01
       assertEq(
-        getPriorSliceCompletionBlocker(base, 'main', 'plan-slice', 'M-abc123-002/S01'),
+        getPriorSliceCompletionBlocker(base, 'main', 'plan-slice', 'M002-abc123/S01'),
         null,
-        'G5: no blocker for M-abc123-002/S01 when M-abc123-001 all complete',
+        'G5: no blocker for M002-abc123/S01 when M001-abc123 all complete',
       );
 
       // No blocker for first slice of first milestone
       assertEq(
-        getPriorSliceCompletionBlocker(base, 'main', 'execute-task', 'M-abc123-001/S01/T01'),
+        getPriorSliceCompletionBlocker(base, 'main', 'execute-task', 'M001-abc123/S01/T01'),
         null,
-        'G5: no blocker for M-abc123-001/S01/T01 (first milestone first slice)',
+        'G5: no blocker for M001-abc123/S01/T01 (first milestone first slice)',
       );
 
-      // Blocker: trying to dispatch M-abc123-002/S02 when S01 is incomplete
+      // Blocker: trying to dispatch M002-abc123/S02 when S01 is incomplete
       assertMatch(
-        getPriorSliceCompletionBlocker(base, 'main', 'execute-task', 'M-abc123-002/S02/T01') ?? '',
-        /earlier slice M-abc123-002\/S01 is not complete/,
-        'G5: blocks M-abc123-002/S02 when S01 incomplete',
+        getPriorSliceCompletionBlocker(base, 'main', 'execute-task', 'M002-abc123/S02/T01') ?? '',
+        /earlier slice M002-abc123\/S01 is not complete/,
+        'G5: blocks M002-abc123/S02 when S01 incomplete',
       );
 
       // Non-slice dispatch type should not be blocked
       assertEq(
-        getPriorSliceCompletionBlocker(base, 'main', 'plan-milestone', 'M-abc123-002'),
+        getPriorSliceCompletionBlocker(base, 'main', 'plan-milestone', 'M002-abc123'),
         null,
         'G5: non-slice dispatch type not blocked',
       );
 
-      // Mixed format: M001 (incomplete) + M-abc123-002
+      // Mixed format: M001 (incomplete) + M002-abc123
       writeRoadmap(base, 'M001', `# M001: Legacy Feature
 
 **Vision:** Legacy
@@ -466,10 +466,10 @@ Built the legacy feature successfully.
       run('git add .', base);
       run('git commit -m add-m001', base);
 
-      // M001 (seq=1) < M-abc123-001 (seq=1) — but M001 has incomplete S02
-      // Since M001 seq=1 and M-abc123-002 seq=2, blocker should reference M001/S02
+      // M001 (seq=1) < M001-abc123 (seq=1) — but M001 has incomplete S02
+      // Since M001 seq=1 and M002-abc123 seq=2, blocker should reference M001/S02
       assertMatch(
-        getPriorSliceCompletionBlocker(base, 'main', 'plan-slice', 'M-abc123-002/S01') ?? '',
+        getPriorSliceCompletionBlocker(base, 'main', 'plan-slice', 'M002-abc123/S01') ?? '',
         /earlier slice M001\/S02 is not complete/,
         'G5: mixed-format blocker references M001/S02',
       );
@@ -489,16 +489,16 @@ Built the legacy feature successfully.
       run('git commit -m complete-m001', base);
 
       assertEq(
-        getPriorSliceCompletionBlocker(base, 'main', 'plan-slice', 'M-abc123-002/S01'),
+        getPriorSliceCompletionBlocker(base, 'main', 'plan-slice', 'M002-abc123/S01'),
         null,
         'G5: no blocker after M001 completed (mixed format)',
       );
 
-      // M-abc123-001 still has all complete, M-abc123-002/S01 still incomplete
-      // Check that S02 of M-abc123-002 is still blocked by its own S01
+      // M001-abc123 still has all complete, M002-abc123/S01 still incomplete
+      // Check that S02 of M002-abc123 is still blocked by its own S01
       assertMatch(
-        getPriorSliceCompletionBlocker(base, 'main', 'execute-task', 'M-abc123-002/S02/T01') ?? '',
-        /earlier slice M-abc123-002\/S01 is not complete/,
+        getPriorSliceCompletionBlocker(base, 'main', 'execute-task', 'M002-abc123/S02/T01') ?? '',
+        /earlier slice M002-abc123\/S01 is not complete/,
         'G5: intra-milestone blocker still works in mixed-format context',
       );
     } finally {
@@ -512,7 +512,7 @@ Built the legacy feature successfully.
     const base = createGitRepo();
     try {
       // Need a milestone dir and initial commit for branch ops
-      writeRoadmap(base, 'M-abc123-001', `# M-abc123-001: Branch Test
+      writeRoadmap(base, 'M001-abc123', `# M001-abc123: Branch Test
 
 **Vision:** Test branches
 
@@ -520,7 +520,7 @@ Built the legacy feature successfully.
 - [ ] **S01: Slice One** \`risk:low\` \`depends:[]\`
   > Branch test
 `);
-      writePlan(base, 'M-abc123-001', 'S01', `# S01: Slice One
+      writePlan(base, 'M001-abc123', 'S01', `# S01: Slice One
 
 **Goal:** Test
 **Demo:** Branch works
@@ -535,29 +535,29 @@ Built the legacy feature successfully.
 
       // Test getSliceBranchName with new-format ID
       assertEq(
-        getSliceBranchName('M-abc123-001', 'S01'),
-        'gsd/M-abc123-001/S01',
-        'G6: getSliceBranchName returns gsd/M-abc123-001/S01',
+        getSliceBranchName('M001-abc123', 'S01'),
+        'gsd/M001-abc123/S01',
+        'G6: getSliceBranchName returns gsd/M001-abc123/S01',
       );
 
       // Test parseSliceBranch with new-format branch name
-      const parsed = parseSliceBranch('gsd/M-abc123-001/S01');
+      const parsed = parseSliceBranch('gsd/M001-abc123/S01');
       assert(parsed !== null, 'G6: parseSliceBranch returns non-null for new-format');
-      assertEq(parsed?.milestoneId, 'M-abc123-001', 'G6: parsed milestoneId is M-abc123-001');
+      assertEq(parsed?.milestoneId, 'M001-abc123', 'G6: parsed milestoneId is M001-abc123');
       assertEq(parsed?.sliceId, 'S01', 'G6: parsed sliceId is S01');
       assertEq(parsed?.worktreeName, null, 'G6: parsed worktreeName is null (no worktree)');
 
       // Test ensureSliceBranch creates the branch
-      const created = ensureSliceBranch(base, 'M-abc123-001', 'S01');
+      const created = ensureSliceBranch(base, 'M001-abc123', 'S01');
       assert(created, 'G6: ensureSliceBranch returns true (branch created)');
       assertEq(
         getCurrentBranch(base),
-        'gsd/M-abc123-001/S01',
-        'G6: getCurrentBranch returns gsd/M-abc123-001/S01',
+        'gsd/M001-abc123/S01',
+        'G6: getCurrentBranch returns gsd/M001-abc123/S01',
       );
 
       // Idempotent: second ensure should not create
-      const secondCreate = ensureSliceBranch(base, 'M-abc123-001', 'S01');
+      const secondCreate = ensureSliceBranch(base, 'M001-abc123', 'S01');
       assertEq(secondCreate, false, 'G6: second ensureSliceBranch returns false');
 
       // Make a change on the slice branch, commit, then merge to main
@@ -569,8 +569,8 @@ Built the legacy feature successfully.
       switchToMain(base);
       assertEq(getCurrentBranch(base), 'main', 'G6: back on main after switchToMain');
 
-      const merge = mergeSliceToMain(base, 'M-abc123-001', 'S01', 'Slice One');
-      assertEq(merge.branch, 'gsd/M-abc123-001/S01', 'G6: merge reports correct branch');
+      const merge = mergeSliceToMain(base, 'M001-abc123', 'S01', 'Slice One');
+      assertEq(merge.branch, 'gsd/M001-abc123/S01', 'G6: merge reports correct branch');
       assertEq(getCurrentBranch(base), 'main', 'G6: still on main after merge');
       assert(merge.deletedBranch, 'G6: merge deleted the slice branch');
 
@@ -580,7 +580,7 @@ Built the legacy feature successfully.
 
       // Verify branch is gone
       const branches = run('git branch', base);
-      assert(!branches.includes('gsd/M-abc123-001/S01'), 'G6: slice branch deleted after merge');
+      assert(!branches.includes('gsd/M001-abc123/S01'), 'G6: slice branch deleted after merge');
     } finally {
       cleanup(base);
     }
@@ -592,7 +592,16 @@ Built the legacy feature successfully.
   console.log('All tests passed ✓');
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+// When run via vitest, wrap in test(); when run via tsx, call directly.
+const isVitest = typeof globalThis !== 'undefined' && 'vitest' in (globalThis as any).__vitest_worker__?.config?.defines || process.env.VITEST;
+if (isVitest) {
+  const { test } = await import('vitest');
+  test('integration-mixed-milestones: all groups pass', async () => {
+    await main();
+  });
+} else {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

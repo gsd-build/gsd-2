@@ -63,7 +63,7 @@ function findMilestoneIds(basePath: string): string[] {
     return readdirSync(dir, { withFileTypes: true })
       .filter(d => d.isDirectory())
       .map(d => {
-        const match = d.name.match(/^(M(?:-[a-z0-9]{6}-)?\d+)/);
+        const match = d.name.match(/^(M\d+(?:-[a-z0-9]{6})?)/);
         return match ? match[1] : d.name;
       })
       .sort(milestoneIdSort);
@@ -168,7 +168,7 @@ export async function deriveState(basePath: string): Promise<GSDState> {
     }
 
     const roadmap = parseRoadmap(content);
-    const title = roadmap.title.replace(/^M(?:-[a-z0-9]{6}-)?\d+[^:]*:\s*/, '');
+    const title = roadmap.title.replace(/^M\d+(?:-[a-z0-9]{6})?[^:]*:\s*/, '');
     const complete = isMilestoneComplete(roadmap);
 
     if (complete) {

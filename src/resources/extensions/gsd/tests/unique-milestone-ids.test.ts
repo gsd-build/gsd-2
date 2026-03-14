@@ -66,16 +66,15 @@ async function main(): Promise<void> {
     // Should match
     assertTrue(MILESTONE_ID_RE.test('M001'), 'matches M001');
     assertTrue(MILESTONE_ID_RE.test('M999'), 'matches M999');
-    assertTrue(MILESTONE_ID_RE.test('M-abc123-001'), 'matches M-abc123-001');
-    assertTrue(MILESTONE_ID_RE.test('M-z9a8b7-042'), 'matches M-z9a8b7-042');
+    assertTrue(MILESTONE_ID_RE.test('M001-abc123'), 'matches M001-abc123');
+    assertTrue(MILESTONE_ID_RE.test('M042-z9a8b7'), 'matches M042-z9a8b7');
 
     // Should reject
     assertTrue(!MILESTONE_ID_RE.test('M1'), 'rejects M1 (too few digits)');
     assertTrue(!MILESTONE_ID_RE.test('M0001'), 'rejects M0001 (too many digits)');
-    assertTrue(!MILESTONE_ID_RE.test('M-ABC-001'), 'rejects M-ABC-001 (wrong length prefix)');
-    assertTrue(!MILESTONE_ID_RE.test('M-ABCDEF-001'), 'rejects M-ABCDEF-001 (uppercase prefix)');
-    assertTrue(!MILESTONE_ID_RE.test('M-short-001'), 'rejects M-short-001 (5-char prefix)');
-    assertTrue(!MILESTONE_ID_RE.test('M-toolong1-001'), 'rejects M-toolong1-001 (>6-char prefix)');
+    assertTrue(!MILESTONE_ID_RE.test('M001-ABCDEF'), 'rejects M001-ABCDEF (uppercase prefix)');
+    assertTrue(!MILESTONE_ID_RE.test('M001-short'), 'rejects M001-short (5-char prefix)');
+    assertTrue(!MILESTONE_ID_RE.test('M001-toolong1'), 'rejects M001-toolong1 (>6-char prefix)');
     assertTrue(!MILESTONE_ID_RE.test('IM001'), 'rejects IM001 (prefix before M)');
     assertTrue(!MILESTONE_ID_RE.test(''), 'rejects empty string');
     assertTrue(!MILESTONE_ID_RE.test('M001extra'), 'rejects M001extra (trailing chars)');
@@ -90,16 +89,16 @@ async function main(): Promise<void> {
     assertEq(extractMilestoneSeq('M042'), 42, 'M042 → 42');
     assertEq(extractMilestoneSeq('M999'), 999, 'M999 → 999');
 
-    // New format
-    assertEq(extractMilestoneSeq('M-abc123-001'), 1, 'M-abc123-001 → 1');
-    assertEq(extractMilestoneSeq('M-z9a8b7-042'), 42, 'M-z9a8b7-042 → 42');
+    // Unique format
+    assertEq(extractMilestoneSeq('M001-abc123'), 1, 'M001-abc123 → 1');
+    assertEq(extractMilestoneSeq('M042-z9a8b7'), 42, 'M042-z9a8b7 → 42');
 
     // Invalid → 0
     assertEq(extractMilestoneSeq(''), 0, 'empty → 0');
     assertEq(extractMilestoneSeq('notes'), 0, 'notes → 0');
     assertEq(extractMilestoneSeq('M1'), 0, 'M1 → 0');
     assertEq(extractMilestoneSeq('.DS_Store'), 0, '.DS_Store → 0');
-    assertEq(extractMilestoneSeq('M-ABC-001'), 0, 'M-ABC-001 (wrong length) → 0');
+    assertEq(extractMilestoneSeq('M-ABC-001'), 0, 'M-ABC-001 (old format) → 0');
   }
 
   // (c) parseMilestoneId
@@ -109,23 +108,23 @@ async function main(): Promise<void> {
     assertEq(parseMilestoneId('M001'), { num: 1 }, 'M001 → { num: 1 }');
     assertEq(parseMilestoneId('M042'), { num: 42 }, 'M042 → { num: 42 }');
 
-    // New format — with prefix
-    assertEq(parseMilestoneId('M-abc123-001'), { prefix: 'abc123', num: 1 }, 'M-abc123-001 → { prefix, num }');
-    assertEq(parseMilestoneId('M-z9a8b7-042'), { prefix: 'z9a8b7', num: 42 }, 'M-z9a8b7-042 → { prefix, num }');
+    // Unique format — with prefix
+    assertEq(parseMilestoneId('M001-abc123'), { prefix: 'abc123', num: 1 }, 'M001-abc123 → { prefix, num }');
+    assertEq(parseMilestoneId('M042-z9a8b7'), { prefix: 'z9a8b7', num: 42 }, 'M042-z9a8b7 → { prefix, num }');
 
     // Invalid → { num: 0 }
     assertEq(parseMilestoneId(''), { num: 0 }, 'empty → { num: 0 }');
     assertEq(parseMilestoneId('notes'), { num: 0 }, 'notes → { num: 0 }');
-    assertEq(parseMilestoneId('M-ABCDEF-001'), { num: 0 }, 'uppercase prefix → { num: 0 }');
+    assertEq(parseMilestoneId('M001-ABCDEF'), { num: 0 }, 'uppercase prefix → { num: 0 }');
     assertEq(parseMilestoneId('M1'), { num: 0 }, 'M1 → { num: 0 }');
   }
 
   // (d) milestoneIdSort
   {
     console.log('  (d) milestoneIdSort');
-    const mixed = ['M-abc123-003', 'M001', 'M-z9a8b7-002'];
+    const mixed = ['M003-abc123', 'M001', 'M002-z9a8b7'];
     const sorted = [...mixed].sort(milestoneIdSort);
-    assertEq(sorted, ['M001', 'M-z9a8b7-002', 'M-abc123-003'], 'sorts mixed IDs by sequence number');
+    assertEq(sorted, ['M001', 'M002-z9a8b7', 'M003-abc123'], 'sorts mixed IDs by sequence number');
 
     // All old format
     const oldOnly = ['M003', 'M001', 'M002'];
@@ -159,26 +158,26 @@ async function main(): Promise<void> {
     assertEq(nextMilestoneId(['M001', 'M002']), 'M003', 'sequential + uniqueEnabled=false → M003');
     assertEq(nextMilestoneId(['M001', 'M002'], false), 'M003', 'explicit false → M003');
 
-    // uniqueEnabled=true → new format
+    // uniqueEnabled=true → unique format
     const newId = nextMilestoneId([], true);
     assertMatch(newId, MILESTONE_ID_RE, 'uniqueEnabled=true produces valid ID');
-    assertTrue(newId.startsWith('M-'), 'uniqueEnabled=true starts with M-');
-    assertTrue(newId.endsWith('-001'), 'empty + uniqueEnabled=true ends with -001');
+    assertTrue(newId.startsWith('M001-'), 'uniqueEnabled=true starts with M001-');
+    assertMatch(newId, /^M001-[a-z0-9]{6}$/, 'empty + uniqueEnabled=true → M001-{rand6}');
 
     // Mixed array with uniqueEnabled=true
-    const mixedIds = ['M001', 'M-abc123-003', 'M002'];
+    const mixedIds = ['M001', 'M003-abc123', 'M002'];
     const nextNew = nextMilestoneId(mixedIds, true);
     assertMatch(nextNew, MILESTONE_ID_RE, 'mixed array + uniqueEnabled=true → valid ID');
-    assertTrue(nextNew.endsWith('-004'), 'mixed array max=3 → seq 004');
+    assertMatch(nextNew, /^M004-[a-z0-9]{6}$/, 'mixed array max=3 → M004-{rand6}');
 
     // Mixed array with uniqueEnabled=false
     assertEq(nextMilestoneId(mixedIds, false), 'M004', 'mixed array + uniqueEnabled=false → M004');
 
     // Correct sequential number from mixed arrays
-    const mixedIds2 = ['M-xyz999-005', 'M002'];
+    const mixedIds2 = ['M005-xyz999', 'M002'];
     assertEq(nextMilestoneId(mixedIds2, false), 'M006', 'mixed max=5 → M006');
     const nextNew2 = nextMilestoneId(mixedIds2, true);
-    assertTrue(nextNew2.endsWith('-006'), 'mixed max=5 + unique → seq 006');
+    assertMatch(nextNew2, /^M006-[a-z0-9]{6}$/, 'mixed max=5 + unique → M006-{rand6}');
   }
 
   // (g) maxMilestoneNum
@@ -190,12 +189,12 @@ async function main(): Promise<void> {
     // Old format only
     assertEq(maxMilestoneNum(['M001', 'M002', 'M003']), 3, 'old format only → 3');
 
-    // New format only — must not return NaN
-    assertEq(maxMilestoneNum(['M-abc123-001', 'M-def456-002']), 2, 'new format only → 2');
-    assertTrue(!Number.isNaN(maxMilestoneNum(['M-abc123-001'])), 'new format does not return NaN');
+    // Unique format only — must not return NaN
+    assertEq(maxMilestoneNum(['M001-abc123', 'M002-def456']), 2, 'unique format only → 2');
+    assertTrue(!Number.isNaN(maxMilestoneNum(['M001-abc123'])), 'unique format does not return NaN');
 
     // Mixed formats
-    assertEq(maxMilestoneNum(['M001', 'M-abc123-003', 'M002']), 3, 'mixed → 3');
+    assertEq(maxMilestoneNum(['M001', 'M003-abc123', 'M002']), 3, 'mixed → 3');
 
     // Non-matching entries ignored
     assertEq(maxMilestoneNum(['M001', 'notes', '.DS_Store', 'M003']), 3, 'non-matching ignored → 3');
@@ -244,7 +243,16 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+// When run via vitest, wrap in test(); when run via tsx, call directly.
+const isVitest = typeof globalThis !== 'undefined' && 'vitest' in (globalThis as any).__vitest_worker__?.config?.defines || process.env.VITEST;
+if (isVitest) {
+  const { test } = await import('vitest');
+  test('unique-milestone-ids: all ID primitives handle both formats', async () => {
+    await main();
+  });
+} else {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

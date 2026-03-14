@@ -50,7 +50,7 @@ If a `GSD Skill Preferences` block is present below this contract, treat it as e
 
 Directories use bare IDs. Files use ID-SUFFIX format:
 
-- Milestone dirs: `M001/` (with `unique_milestone_ids: true`, format is `M-{rand6}-{seq}/`, e.g. `M-eh88as-001/`)
+- Milestone dirs: `M001/` (with `unique_milestone_ids: true`, format is `M{seq}-{rand6}/`, e.g. `M001-eh88as/`)
 - Milestone files: `M001-CONTEXT.md`, `M001-ROADMAP.md`, `M001-RESEARCH.md`
 - Slice dirs: `S01/`
 - Slice files: `S01-PLAN.md`, `S01-RESEARCH.md`, `S01-SUMMARY.md`, `S01-UAT.md`

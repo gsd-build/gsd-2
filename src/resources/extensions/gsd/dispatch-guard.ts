@@ -39,7 +39,7 @@ export function getPriorSliceCompletionBlocker(base: string, mainBranch: string,
     milestoneIds = readdirSync(milestonesDir(base), { withFileTypes: true })
       .filter(d => d.isDirectory())
       .map(d => {
-        const match = d.name.match(/^(M(?:-[a-z0-9]{6}-)?\d+)/);
+        const match = d.name.match(/^(M\d+(?:-[a-z0-9]{6})?)/);
         return match ? match[1] : null;
       })
       .filter((id): id is string => id !== null)

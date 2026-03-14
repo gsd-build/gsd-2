@@ -756,7 +756,7 @@ export function parseContextDependsOn(content: string | null): string[] {
  * Inline the prior milestone's SUMMARY.md as context for the current milestone's planning prompt.
  * Returns null when: (1) `mid` is the first milestone, (2) prior milestone has no SUMMARY file.
  *
- * Scans the milestones directory using the same readdirSync + milestoneIdSort + M(?:-[a-z0-9]{6}-)?\d+ match pattern
+ * Scans the milestones directory using the same readdirSync + milestoneIdSort + M\d+(?:-[a-z0-9]{6})? match pattern
  * as findMilestoneIds in state.ts.
  */
 export async function inlinePriorMilestoneSummary(mid: string, base: string): Promise<string | null> {
@@ -766,7 +766,7 @@ export async function inlinePriorMilestoneSummary(mid: string, base: string): Pr
     sorted = readdirSync(dir, { withFileTypes: true })
       .filter(d => d.isDirectory())
       .map(d => {
-        const match = d.name.match(/^(M(?:-[a-z0-9]{6}-)?\d+)/);
+        const match = d.name.match(/^(M\d+(?:-[a-z0-9]{6})?)/);
         return match ? match[1] : d.name;
       })
       .sort(milestoneIdSort);

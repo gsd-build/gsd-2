@@ -104,7 +104,7 @@ function findMilestoneIds(basePath: string): string[] {
     return readdirSync(dir, { withFileTypes: true })
       .filter((d) => d.isDirectory())
       .map((d) => {
-        const match = d.name.match(/^(M(?:-[a-z0-9]{6}-)?\d+)/);
+        const match = d.name.match(/^(M\d+(?:-[a-z0-9]{6})?)/);
         return match ? match[1] : d.name;
       })
       .sort(milestoneIdSort);
@@ -115,22 +115,22 @@ function findMilestoneIds(basePath: string): string[] {
 
 // ─── Milestone ID primitives ────────────────────────────────────────────────
 
-/** Matches both classic `M001` and unique `M-abc123-001` formats (anchored). */
-export const MILESTONE_ID_RE = /^M(?:-[a-z0-9]{6}-)?\d{3}$/;
+/** Matches both classic `M001` and unique `M001-abc123` formats (anchored). */
+export const MILESTONE_ID_RE = /^M\d{3}(?:-[a-z0-9]{6})?$/;
 
 /** Extract the trailing sequential number from a milestone ID. Returns 0 for non-matches. */
 export function extractMilestoneSeq(id: string): number {
-  const m = id.match(/^M(?:-[a-z0-9]{6}-)?(\d{3})$/);
+  const m = id.match(/^M(\d{3})(?:-[a-z0-9]{6})?$/);
   return m ? parseInt(m[1], 10) : 0;
 }
 
 /** Structured parse of a milestone ID into optional prefix and sequence number. */
 export function parseMilestoneId(id: string): { prefix?: string; num: number } {
-  const m = id.match(/^M(?:-([a-z0-9]{6})-)?(\d{3})$/);
+  const m = id.match(/^M(\d{3})(?:-([a-z0-9]{6}))?$/);
   if (!m) return { num: 0 };
   return {
-    ...(m[1] ? { prefix: m[1] } : {}),
-    num: parseInt(m[2], 10),
+    ...(m[2] ? { prefix: m[2] } : {}),
+    num: parseInt(m[1], 10),
   };
 }
 
@@ -161,7 +161,7 @@ export function maxMilestoneNum(milestoneIds: string[]): number {
 export function nextMilestoneId(milestoneIds: string[], uniqueEnabled?: boolean): string {
   const seq = String(maxMilestoneNum(milestoneIds) + 1).padStart(3, "0");
   if (uniqueEnabled) {
-    return `M-${generateMilestonePrefix()}-${seq}`;
+    return `M${seq}-${generateMilestonePrefix()}`;
   }
   return `M${seq}`;
 }

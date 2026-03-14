@@ -1,5 +1,5 @@
 // Regex-hardening tests for S02/T02 — proves all 12 regex/parser sites
-// accept both M001 (old) and M-abc123-001 (new) milestone ID formats.
+// accept both M001 (classic) and M001-abc123 (unique) milestone ID formats.
 //
 // Sections:
 //   (a) Directory scanning regex — findMilestoneIds pattern
@@ -68,21 +68,21 @@ async function main(): Promise<void> {
   console.log('regex-hardening tests');
 
   // (a) Directory scanning regex — used in state.ts, workspace-index.ts, files.ts
-  //     Pattern: /^(M(?:-[a-z0-9]{6}-)?\d+)/
+  //     Pattern: /^(M\d+(?:-[a-z0-9]{6})?)/
   {
     console.log('  (a) Directory scanning regex');
-    const DIR_SCAN_RE = /^(M(?:-[a-z0-9]{6}-)?\d+)/;
+    const DIR_SCAN_RE = /^(M\d+(?:-[a-z0-9]{6})?)/;
 
-    // Old format matches
+    // Classic format matches
     assertTrue(DIR_SCAN_RE.test('M001'), 'dir scan matches M001');
     assertTrue(DIR_SCAN_RE.test('M042'), 'dir scan matches M042');
     assertTrue(DIR_SCAN_RE.test('M999'), 'dir scan matches M999');
-    assertEq(('M001-PAYMENT' as string).match(DIR_SCAN_RE)?.[1], 'M001', 'captures M001 from M001-PAYMENT');
+    assertEq(('M001' as string).match(DIR_SCAN_RE)?.[1], 'M001', 'captures M001');
 
-    // New format matches
-    assertTrue(DIR_SCAN_RE.test('M-abc123-001'), 'dir scan matches M-abc123-001');
-    assertTrue(DIR_SCAN_RE.test('M-z9a8b7-042'), 'dir scan matches M-z9a8b7-042');
-    assertEq(('M-abc123-001-PAYMENT' as string).match(DIR_SCAN_RE)?.[1], 'M-abc123-001', 'captures M-abc123-001 from dir name');
+    // Unique format matches
+    assertTrue(DIR_SCAN_RE.test('M001-abc123'), 'dir scan matches M001-abc123');
+    assertTrue(DIR_SCAN_RE.test('M042-z9a8b7'), 'dir scan matches M042-z9a8b7');
+    assertEq(('M001-abc123' as string).match(DIR_SCAN_RE)?.[1], 'M001-abc123', 'captures M001-abc123 from dir name');
 
     // Rejects
     assertTrue(!DIR_SCAN_RE.test('S01'), 'dir scan rejects S01');
@@ -92,18 +92,18 @@ async function main(): Promise<void> {
   }
 
   // (b) Title-strip regex — used in state.ts, workspace-index.ts
-  //     Pattern: /^M(?:-[a-z0-9]{6}-)?\d+[^:]*:\s*/
+  //     Pattern: /^M\d+(?:-[a-z0-9]{6})?[^:]*:\s*/
   {
     console.log('  (b) Title-strip regex');
-    const TITLE_STRIP_RE = /^M(?:-[a-z0-9]{6}-)?\d+[^:]*:\s*/;
+    const TITLE_STRIP_RE = /^M\d+(?:-[a-z0-9]{6})?[^:]*:\s*/;
 
-    // Old format strip
+    // Classic format strip
     assertEq('M001: Title'.replace(TITLE_STRIP_RE, ''), 'Title', 'strips M001: Title → Title');
     assertEq('M042: Payment Integration'.replace(TITLE_STRIP_RE, ''), 'Payment Integration', 'strips M042: Payment Integration');
 
-    // New format strip
-    assertEq('M-abc123-001: Title'.replace(TITLE_STRIP_RE, ''), 'Title', 'strips M-abc123-001: Title → Title');
-    assertEq('M-z9a8b7-042: Dashboard'.replace(TITLE_STRIP_RE, ''), 'Dashboard', 'strips M-z9a8b7-042: Dashboard');
+    // Unique format strip
+    assertEq('M001-abc123: Title'.replace(TITLE_STRIP_RE, ''), 'Title', 'strips M001-abc123: Title → Title');
+    assertEq('M042-z9a8b7: Dashboard'.replace(TITLE_STRIP_RE, ''), 'Dashboard', 'strips M042-z9a8b7: Dashboard');
 
     // Edge case: dash-style separator (M001 — Title: Subtitle preserves colon in body)
     assertEq(
@@ -124,11 +124,11 @@ async function main(): Promise<void> {
   }
 
   // (c) SLICE_BRANCH_RE — from worktree.ts
-  //     Pattern: /^gsd\/(?:([a-zA-Z0-9_-]+)\/)?(M(?:-[a-z0-9]{6}-)?\d+)\/(S\d+)$/
+  //     Pattern: /^gsd\/(?:([a-zA-Z0-9_-]+)\/)?(M\d+(?:-[a-z0-9]{6})?)\/(S\d+)$/
   {
     console.log('  (c) SLICE_BRANCH_RE');
 
-    // Old format — no worktree prefix
+    // Classic format — no worktree prefix
     {
       const m = 'gsd/M001/S01'.match(SLICE_BRANCH_RE);
       assertTrue(m !== null, 'matches gsd/M001/S01');
@@ -137,16 +137,16 @@ async function main(): Promise<void> {
       assertEq(m?.[3], 'S01', 'captures S01');
     }
 
-    // New format — no worktree prefix
+    // Unique format — no worktree prefix
     {
-      const m = 'gsd/M-abc123-001/S01'.match(SLICE_BRANCH_RE);
-      assertTrue(m !== null, 'matches gsd/M-abc123-001/S01');
-      assertEq(m?.[1], undefined, 'no worktree prefix for new format');
-      assertEq(m?.[2], 'M-abc123-001', 'captures M-abc123-001');
+      const m = 'gsd/M001-abc123/S01'.match(SLICE_BRANCH_RE);
+      assertTrue(m !== null, 'matches gsd/M001-abc123/S01');
+      assertEq(m?.[1], undefined, 'no worktree prefix for unique format');
+      assertEq(m?.[2], 'M001-abc123', 'captures M001-abc123');
       assertEq(m?.[3], 'S01', 'captures S01');
     }
 
-    // Old format — with worktree prefix
+    // Classic format — with worktree prefix
     {
       const m = 'gsd/worktree/M001/S01'.match(SLICE_BRANCH_RE);
       assertTrue(m !== null, 'matches gsd/worktree/M001/S01');
@@ -155,13 +155,13 @@ async function main(): Promise<void> {
       assertEq(m?.[3], 'S01', 'captures S01 with worktree');
     }
 
-    // New format — with worktree prefix
+    // Unique format — with worktree prefix
     {
-      const m = 'gsd/worktree/M-abc123-001/S01'.match(SLICE_BRANCH_RE);
-      assertTrue(m !== null, 'matches gsd/worktree/M-abc123-001/S01');
-      assertEq(m?.[1], 'worktree', 'captures worktree prefix with new format');
-      assertEq(m?.[2], 'M-abc123-001', 'captures M-abc123-001 with worktree');
-      assertEq(m?.[3], 'S01', 'captures S01 with worktree and new format');
+      const m = 'gsd/worktree/M001-abc123/S01'.match(SLICE_BRANCH_RE);
+      assertTrue(m !== null, 'matches gsd/worktree/M001-abc123/S01');
+      assertEq(m?.[1], 'worktree', 'captures worktree prefix with unique format');
+      assertEq(m?.[2], 'M001-abc123', 'captures M001-abc123 with worktree');
+      assertEq(m?.[3], 'S01', 'captures S01 with worktree and unique format');
     }
 
     // Rejects
@@ -172,19 +172,18 @@ async function main(): Promise<void> {
   }
 
   // (d) Milestone detection regex — used in worktree-command.ts (hasExistingMilestones)
-  //     Pattern: /^M(?:-[a-z0-9]{6}-)?\d+/
+  //     Pattern: /^M\d+(?:-[a-z0-9]{6})?/
   {
     console.log('  (d) Milestone detection regex');
-    const MILESTONE_DETECT_RE = /^M(?:-[a-z0-9]{6}-)?\d+/;
+    const MILESTONE_DETECT_RE = /^M\d+(?:-[a-z0-9]{6})?/;
 
-    // Old format matches
+    // Classic format matches
     assertTrue(MILESTONE_DETECT_RE.test('M001'), 'detect matches M001');
     assertTrue(MILESTONE_DETECT_RE.test('M042'), 'detect matches M042');
-    assertTrue(MILESTONE_DETECT_RE.test('M001-PAYMENT'), 'detect matches M001-PAYMENT (anchored start)');
 
-    // New format matches
-    assertTrue(MILESTONE_DETECT_RE.test('M-abc123-001'), 'detect matches M-abc123-001');
-    assertTrue(MILESTONE_DETECT_RE.test('M-z9a8b7-042'), 'detect matches M-z9a8b7-042');
+    // Unique format matches
+    assertTrue(MILESTONE_DETECT_RE.test('M001-abc123'), 'detect matches M001-abc123');
+    assertTrue(MILESTONE_DETECT_RE.test('M042-z9a8b7'), 'detect matches M042-z9a8b7');
 
     // Rejects
     assertTrue(!MILESTONE_DETECT_RE.test('S01'), 'detect rejects S01');
@@ -193,18 +192,18 @@ async function main(): Promise<void> {
   }
 
   // (e) MILESTONE_CONTEXT_RE — used in index.ts (write-gate)
-  //     Pattern: /M(?:-[a-z0-9]{6}-)?\d+-CONTEXT\.md$/
+  //     Pattern: /M\d+(?:-[a-z0-9]{6})?-CONTEXT\.md$/
   {
     console.log('  (e) MILESTONE_CONTEXT_RE');
-    const CONTEXT_RE = /M(?:-[a-z0-9]{6}-)?\d+-CONTEXT\.md$/;
+    const CONTEXT_RE = /M\d+(?:-[a-z0-9]{6})?-CONTEXT\.md$/;
 
-    // Old format matches
+    // Classic format matches
     assertTrue(CONTEXT_RE.test('M001-CONTEXT.md'), 'context matches M001-CONTEXT.md');
-    assertTrue(CONTEXT_RE.test('.gsd/milestones/M001/M001-CONTEXT.md'), 'context matches full path old format');
+    assertTrue(CONTEXT_RE.test('.gsd/milestones/M001/M001-CONTEXT.md'), 'context matches full path classic format');
 
-    // New format matches
-    assertTrue(CONTEXT_RE.test('M-abc123-001-CONTEXT.md'), 'context matches M-abc123-001-CONTEXT.md');
-    assertTrue(CONTEXT_RE.test('.gsd/milestones/M-abc123-001/M-abc123-001-CONTEXT.md'), 'context matches full path new format');
+    // Unique format matches
+    assertTrue(CONTEXT_RE.test('M001-abc123-CONTEXT.md'), 'context matches M001-abc123-CONTEXT.md');
+    assertTrue(CONTEXT_RE.test('.gsd/milestones/M001-abc123/M001-abc123-CONTEXT.md'), 'context matches full path unique format');
 
     // Rejects
     assertTrue(!CONTEXT_RE.test('M001-ROADMAP.md'), 'context rejects M001-ROADMAP.md');
@@ -215,89 +214,89 @@ async function main(): Promise<void> {
   // (f) Prompt dispatch regexes — used in index.ts (executeMatch, resumeMatch)
   {
     console.log('  (f) Prompt dispatch regexes');
-    const EXECUTE_RE = /Execute the next task:\s+(T\d+)\s+\("([^"]+)"\)\s+in slice\s+(S\d+)\s+of milestone\s+(M(?:-[a-z0-9]{6}-)?\d+)/i;
-    const RESUME_RE = /Resume interrupted work\.[\s\S]*?slice\s+(S\d+)\s+of milestone\s+(M(?:-[a-z0-9]{6}-)?\d+)/i;
+    const EXECUTE_RE = /Execute the next task:\s+(T\d+)\s+\("([^"]+)"\)\s+in slice\s+(S\d+)\s+of milestone\s+(M\d+(?:-[a-z0-9]{6})?)/i;
+    const RESUME_RE = /Resume interrupted work\.[\s\S]*?slice\s+(S\d+)\s+of milestone\s+(M\d+(?:-[a-z0-9]{6})?)/i;
 
-    // Execute — old format
+    // Execute — classic format
     {
       const prompt = 'Execute the next task: T01 ("Write tests") in slice S01 of milestone M001';
       const m = prompt.match(EXECUTE_RE);
-      assertTrue(m !== null, 'execute matches old format');
+      assertTrue(m !== null, 'execute matches classic format');
       assertEq(m?.[1], 'T01', 'execute captures T01');
       assertEq(m?.[3], 'S01', 'execute captures S01');
       assertEq(m?.[4], 'M001', 'execute captures M001');
     }
 
-    // Execute — new format
+    // Execute — unique format
     {
-      const prompt = 'Execute the next task: T02 ("Build feature") in slice S03 of milestone M-abc123-001';
+      const prompt = 'Execute the next task: T02 ("Build feature") in slice S03 of milestone M001-abc123';
       const m = prompt.match(EXECUTE_RE);
-      assertTrue(m !== null, 'execute matches new format');
-      assertEq(m?.[1], 'T02', 'execute captures T02 (new format)');
-      assertEq(m?.[3], 'S03', 'execute captures S03 (new format)');
-      assertEq(m?.[4], 'M-abc123-001', 'execute captures M-abc123-001');
+      assertTrue(m !== null, 'execute matches unique format');
+      assertEq(m?.[1], 'T02', 'execute captures T02 (unique format)');
+      assertEq(m?.[3], 'S03', 'execute captures S03 (unique format)');
+      assertEq(m?.[4], 'M001-abc123', 'execute captures M001-abc123');
     }
 
-    // Resume — old format
+    // Resume — classic format
     {
       const prompt = 'Resume interrupted work.\nContinuing slice S02 of milestone M001';
       const m = prompt.match(RESUME_RE);
-      assertTrue(m !== null, 'resume matches old format');
+      assertTrue(m !== null, 'resume matches classic format');
       assertEq(m?.[1], 'S02', 'resume captures S02');
       assertEq(m?.[2], 'M001', 'resume captures M001');
     }
 
-    // Resume — new format
+    // Resume — unique format
     {
-      const prompt = 'Resume interrupted work.\nContinuing slice S01 of milestone M-z9a8b7-042';
+      const prompt = 'Resume interrupted work.\nContinuing slice S01 of milestone M042-z9a8b7';
       const m = prompt.match(RESUME_RE);
-      assertTrue(m !== null, 'resume matches new format');
-      assertEq(m?.[1], 'S01', 'resume captures S01 (new format)');
-      assertEq(m?.[2], 'M-z9a8b7-042', 'resume captures M-z9a8b7-042');
+      assertTrue(m !== null, 'resume matches unique format');
+      assertEq(m?.[1], 'S01', 'resume captures S01 (unique format)');
+      assertEq(m?.[2], 'M042-z9a8b7', 'resume captures M042-z9a8b7');
     }
   }
 
   // (g) milestoneIdSort — mixed-format ordering
   {
     console.log('  (g) milestoneIdSort');
-    const mixed = ['M-abc123-002', 'M001', 'M-xyz789-001'];
+    const mixed = ['M002-abc123', 'M001', 'M001-xyz789'];
     const sorted = [...mixed].sort(milestoneIdSort);
-    assertEq(sorted, ['M001', 'M-xyz789-001', 'M-abc123-002'], 'sorts mixed IDs by sequence number');
+    assertEq(sorted, ['M001', 'M001-xyz789', 'M002-abc123'], 'sorts mixed IDs by sequence number');
 
     // Stable within same seq — preserves insertion order
-    const sameSorted = ['M-abc123-001', 'M001'].sort(milestoneIdSort);
-    assertEq(sameSorted[0], 'M-abc123-001', 'same seq preserves order (first)');
+    const sameSorted = ['M001-abc123', 'M001'].sort(milestoneIdSort);
+    assertEq(sameSorted[0], 'M001-abc123', 'same seq preserves order (first)');
     assertEq(sameSorted[1], 'M001', 'same seq preserves order (second)');
 
-    // Old format only
+    // Classic format only
     const oldOnly = ['M003', 'M001', 'M002'];
-    assertEq([...oldOnly].sort(milestoneIdSort), ['M001', 'M002', 'M003'], 'sorts old-format IDs');
+    assertEq([...oldOnly].sort(milestoneIdSort), ['M001', 'M002', 'M003'], 'sorts classic-format IDs');
 
-    // New format only
-    const newOnly = ['M-abc123-003', 'M-def456-001', 'M-ghi789-002'];
-    assertEq([...newOnly].sort(milestoneIdSort), ['M-def456-001', 'M-ghi789-002', 'M-abc123-003'], 'sorts new-format IDs');
+    // Unique format only
+    const newOnly = ['M003-abc123', 'M001-def456', 'M002-ghi789'];
+    assertEq([...newOnly].sort(milestoneIdSort), ['M001-def456', 'M002-ghi789', 'M003-abc123'], 'sorts unique-format IDs');
   }
 
   // (h) extractMilestoneSeq — numeric extraction from both formats
   {
     console.log('  (h) extractMilestoneSeq');
 
-    // Old format
+    // Classic format
     assertEq(extractMilestoneSeq('M001'), 1, 'M001 → 1');
     assertEq(extractMilestoneSeq('M042'), 42, 'M042 → 42');
     assertEq(extractMilestoneSeq('M999'), 999, 'M999 → 999');
 
-    // New format — confirms dispatch-guard refactor correctness
-    assertEq(extractMilestoneSeq('M-abc123-001'), 1, 'M-abc123-001 → 1');
-    assertEq(extractMilestoneSeq('M-z9a8b7-042'), 42, 'M-z9a8b7-042 → 42');
-    assertEq(extractMilestoneSeq('M-xyz789-100'), 100, 'M-xyz789-100 → 100');
+    // Unique format — confirms dispatch-guard refactor correctness
+    assertEq(extractMilestoneSeq('M001-abc123'), 1, 'M001-abc123 → 1');
+    assertEq(extractMilestoneSeq('M042-z9a8b7'), 42, 'M042-z9a8b7 → 42');
+    assertEq(extractMilestoneSeq('M100-xyz789'), 100, 'M100-xyz789 → 100');
 
     // Invalid → 0 (not NaN — the old parseInt(slice(1)) bug)
     assertEq(extractMilestoneSeq(''), 0, 'empty → 0');
     assertEq(extractMilestoneSeq('notes'), 0, 'notes → 0');
     assertEq(extractMilestoneSeq('S01'), 0, 'S01 → 0');
-    assertTrue(!Number.isNaN(extractMilestoneSeq('M-abc123-001')), 'new format does not return NaN');
-    assertTrue(!Number.isNaN(extractMilestoneSeq('M-ABCDEF-001')), 'invalid format does not return NaN');
+    assertTrue(!Number.isNaN(extractMilestoneSeq('M001-abc123')), 'unique format does not return NaN');
+    assertTrue(!Number.isNaN(extractMilestoneSeq('M001-ABCDEF')), 'invalid format does not return NaN');
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
