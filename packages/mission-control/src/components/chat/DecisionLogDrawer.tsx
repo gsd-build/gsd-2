@@ -8,16 +8,17 @@ import type { DecisionEntry } from "@/server/chat-types";
 interface DecisionLogDrawerProps {
   decisions: DecisionEntry[];
   visible: boolean;
+  builderMode?: boolean;
 }
 
-export function DecisionLogDrawer({ decisions, visible }: DecisionLogDrawerProps) {
+export function DecisionLogDrawer({ decisions, visible, builderMode }: DecisionLogDrawerProps) {
   if (!visible) return null;
 
   return (
     <div className="animate-in slide-in-from-right duration-200 w-48 border-l border-navy-600 bg-navy-900 flex flex-col flex-shrink-0">
       <div className="border-b border-navy-600 px-3 py-2">
         <span className="text-xs font-display uppercase tracking-wider text-slate-400">
-          Decisions
+          {builderMode ? 'Your decisions so far' : 'Decisions'}
         </span>
       </div>
       <div className="flex-1 overflow-y-auto">

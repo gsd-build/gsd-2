@@ -16,6 +16,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { QuestionCard } from "@/components/chat/QuestionCard";
 import { DecisionLogDrawer } from "@/components/chat/DecisionLogDrawer";
+import { useBuilderMode } from "@/hooks/useBuilderMode";
 import type { ModeEvent, QuestionCardPayload, DecisionEntry, ReviewResults } from "@/server/chat-types";
 
 export interface ChatModeState {
@@ -36,6 +37,7 @@ const MODE_EVENT_TYPES = new Set([
 ]);
 
 export function useChatMode(wsUrl: string, onChatSend: (msg: string) => void) {
+  const { builderMode } = useBuilderMode();
   const [mode, setMode] = useState<"chat" | "discuss" | "review">("chat");
   const [currentQuestion, setCurrentQuestion] = useState<QuestionCardPayload | null>(null);
   const [decisions, setDecisions] = useState<DecisionEntry[]>([]);
@@ -134,9 +136,9 @@ export function useChatMode(wsUrl: string, onChatSend: (msg: string) => void) {
     mode === "discuss" && currentQuestion ? (
       <div className="flex flex-1">
         <div className="flex-1 flex items-center">
-          <QuestionCard question={currentQuestion} onAnswer={answerQuestion} />
+          <QuestionCard question={currentQuestion} onAnswer={answerQuestion} builderMode={builderMode} />
         </div>
-        <DecisionLogDrawer decisions={decisions} visible={decisions.length > 0} />
+        <DecisionLogDrawer decisions={decisions} visible={decisions.length > 0} builderMode={builderMode} />
       </div>
     ) : undefined;
 

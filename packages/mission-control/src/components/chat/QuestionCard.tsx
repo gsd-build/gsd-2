@@ -17,6 +17,7 @@ export interface QuestionCardViewProps {
   onConfirm: () => void;
   onFreeTextChange: (value: string) => void;
   onFreeTextSubmit: () => void;
+  builderMode?: boolean;
 }
 
 /** Pure render -- no hooks. Testable via direct function call. */
@@ -29,14 +30,17 @@ export function QuestionCardView({
   onConfirm,
   onFreeTextChange,
   onFreeTextSubmit,
+  builderMode,
 }: QuestionCardViewProps) {
   return (
     <div className="animate-in slide-in-from-bottom duration-200 flex flex-col gap-4 rounded-xl bg-navy-800 border border-cyan-accent/30 p-6 m-4 shadow-lg">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <span className="text-xs font-display uppercase tracking-wider text-cyan-accent">
-          {question.area}
-        </span>
+        {builderMode ? null : (
+          <span className="text-xs font-display uppercase tracking-wider text-cyan-accent">
+            {question.area}
+          </span>
+        )}
         <span className="text-xs text-slate-400 font-mono">
           {`Question ${question.questionNumber} of ${question.totalQuestions}`}
         </span>
@@ -106,9 +110,11 @@ export function QuestionCardView({
 export function QuestionCard({
   question,
   onAnswer,
+  builderMode,
 }: {
   question: QuestionCardPayload;
   onAnswer: (answer: string) => void;
+  builderMode?: boolean;
 }) {
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [freeTextValue, setFreeTextValue] = useState("");
@@ -131,6 +137,7 @@ export function QuestionCard({
       onFreeTextSubmit={() => {
         if (freeTextValue.trim()) onAnswer(freeTextValue.trim());
       }}
+      builderMode={builderMode}
     />
   );
 }
