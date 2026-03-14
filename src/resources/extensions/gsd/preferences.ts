@@ -28,6 +28,8 @@ export interface GSDSkillRule {
 export interface GSDPhaseModelConfig {
   /** Primary model ID (e.g., "claude-opus-4-6") */
   model: string;
+  /** Provider name to disambiguate when the same model ID exists across providers (e.g., "bedrock", "anthropic") */
+  provider?: string;
   /** Fallback models to try in order if primary fails (e.g., rate limits, credits exhausted) */
   fallbacks?: string[];
 }
@@ -580,8 +582,14 @@ export function resolveModelWithFallbacksForUnit(unitType: string): ResolvedMode
     return { primary: phaseConfig, fallbacks: [] };
   }
 
+  // When provider is explicitly set, prepend it to the model ID so the
+  // resolution code in auto.ts can do an explicit provider match.
+  const primary = phaseConfig.provider && !phaseConfig.model.includes("/")
+    ? `${phaseConfig.provider}/${phaseConfig.model}`
+    : phaseConfig.model;
+
   return {
-    primary: phaseConfig.model,
+    primary,
     fallbacks: phaseConfig.fallbacks ?? [],
   };
 }
