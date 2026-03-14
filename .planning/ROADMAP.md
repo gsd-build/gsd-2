@@ -40,7 +40,7 @@
 - [x] **Phase 16: OAuth + Keychain** — First-launch provider picker, OAuth for Claude Max + GitHub Copilot, API key flow, keychain storage, token refresh (completed 2026-03-13)
 - [x] **Phase 17: Permission Model** — Trust dialog replaces skip-permissions toggle, hard boundary enforcement, advanced permission toggles (completed 2026-03-14)
 - [x] **Phase 18: Builder Mode** — Interface mode toggle, vocabulary layer, Builder intent classifier, adapted discuss/slice cards, phase gate intercept (completed 2026-03-14)
-- [ ] **Phase 19: Project Workspace** — Managed workspace path, project home screen, project cards, multi-session tabs, archiving
+- [x] **Phase 19: Project Workspace** — Managed workspace path, project home screen, project cards, multi-session tabs, archiving (completed 2026-03-14)
 - [ ] **Phase 20: Installer + Distribution** — GitHub Actions CI pipeline, code signing, auto-update, landing page
 
 ## Phase Details
@@ -253,5 +253,5 @@ Plans:
 | 16. OAuth + Keychain | 4/4 | Complete    | 2026-03-14 | — |
 | 17. Permission Model | 3/3 | Complete    | 2026-03-14 | — |
 | 18. Builder Mode | 4/4 | Complete    | 2026-03-14 | — |
-| 19. Project Workspace | 4/5 | In Progress|  | — |
+| 19. Project Workspace | 5/5 | Complete   | 2026-03-14 | — |
 | 20. Installer + Distribution | v2.0 | 0/TBD | Not started | — |
