@@ -93,7 +93,24 @@ describe("native grep: search()", () => {
 describe("native grep: grep()", () => {
   let tmpDir;
 
-  test("searches files on disk", (t) => {
+  test("returns a promise", async (t) => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-grep-test-"));
+    t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+
+    fs.writeFileSync(path.join(tmpDir, "file1.txt"), "hello world\n");
+
+    const pending = native.grep({
+      pattern: "hello",
+      path: tmpDir,
+    });
+
+    assert.equal(typeof pending?.then, "function");
+
+    const result = await pending;
+    assert.equal(result.totalMatches, 1);
+  });
+
+  test("searches files on disk", async (t) => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-grep-test-"));
     t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
 
@@ -101,7 +118,7 @@ describe("native grep: grep()", () => {
     fs.writeFileSync(path.join(tmpDir, "file2.txt"), "hello rust\nbaz qux\n");
     fs.writeFileSync(path.join(tmpDir, "file3.log"), "no match here\n");
 
-    const result = native.grep({
+    const result = await native.grep({
       pattern: "hello",
       path: tmpDir,
     });
@@ -115,7 +132,7 @@ describe("native grep: grep()", () => {
     assert.deepEqual(paths, [...paths].sort());
   });
 
-  test("respects glob filter", (t) => {
+  test("respects glob filter", async (t) => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-grep-test-"));
     t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
 
@@ -123,7 +140,7 @@ describe("native grep: grep()", () => {
     fs.writeFileSync(path.join(tmpDir, "code.js"), "hello javascript\n");
     fs.writeFileSync(path.join(tmpDir, "readme.md"), "hello markdown\n");
 
-    const result = native.grep({
+    const result = await native.grep({
       pattern: "hello",
       path: tmpDir,
       glob: "*.ts",
@@ -133,7 +150,7 @@ describe("native grep: grep()", () => {
     assert.equal(result.matches[0].line, "hello typescript");
   });
 
-  test("respects maxCount", (t) => {
+  test("respects maxCount", async (t) => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-grep-test-"));
     t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
 
@@ -141,7 +158,7 @@ describe("native grep: grep()", () => {
       fs.writeFileSync(path.join(tmpDir, `file${i}.txt`), "match_me\n");
     }
 
-    const result = native.grep({
+    const result = await native.grep({
       pattern: "match_me",
       path: tmpDir,
       maxCount: 3,
@@ -151,9 +168,9 @@ describe("native grep: grep()", () => {
     assert.equal(result.limitReached, true);
   });
 
-  test("errors on non-existent path", () => {
-    assert.throws(() => {
-      native.grep({
+  test("errors on non-existent path", async () => {
+    await assert.rejects(() => {
+      return native.grep({
         pattern: "test",
         path: "/nonexistent/path/that/does/not/exist",
       });

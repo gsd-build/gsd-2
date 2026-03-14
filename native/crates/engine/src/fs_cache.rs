@@ -12,8 +12,9 @@
 
 use std::{
     borrow::Cow,
+    ops::Deref,
     path::{Path, PathBuf},
-    sync::LazyLock,
+    sync::{Arc, LazyLock},
     time::{Duration, Instant},
 };
 
@@ -101,9 +102,26 @@ struct CacheKey {
 }
 
 #[derive(Clone)]
+pub struct SharedGlobEntries(Arc<[GlobMatch]>);
+
+impl SharedGlobEntries {
+    fn from_vec(entries: Vec<GlobMatch>) -> Self {
+        Self(Arc::from(entries))
+    }
+}
+
+impl Deref for SharedGlobEntries {
+    type Target = [GlobMatch];
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref()
+    }
+}
+
+#[derive(Clone)]
 struct CacheEntry {
     created_at: Instant,
-    entries: Vec<GlobMatch>,
+    entries: SharedGlobEntries,
 }
 
 static FS_CACHE: LazyLock<DashMap<CacheKey, CacheEntry>> = LazyLock::new(DashMap::new);
@@ -111,7 +129,7 @@ static FS_CACHE: LazyLock<DashMap<CacheKey, CacheEntry>> = LazyLock::new(DashMap
 /// Result of a cache-aware scan, including the age of the cached data.
 pub struct ScanResult {
     /// Scanned filesystem entries.
-    pub entries: Vec<GlobMatch>,
+    pub entries: SharedGlobEntries,
     /// How old the cached data is in milliseconds (0 = freshly scanned).
     pub cache_age_ms: u64,
 }
@@ -293,7 +311,8 @@ pub fn get_or_scan(
 ) -> Result<ScanResult> {
     let ttl = cache_ttl_ms();
     if ttl == 0 {
-        let entries = collect_entries(root, include_hidden, use_gitignore, ct)?;
+        let entries =
+            SharedGlobEntries::from_vec(collect_entries(root, include_hidden, use_gitignore, ct)?);
         return Ok(ScanResult {
             entries,
             cache_age_ms: 0,
@@ -319,7 +338,8 @@ pub fn get_or_scan(
         FS_CACHE.remove(&key);
     }
 
-    let entries = collect_entries(root, include_hidden, use_gitignore, ct)?;
+    let entries =
+        SharedGlobEntries::from_vec(collect_entries(root, include_hidden, use_gitignore, ct)?);
     FS_CACHE.insert(
         key,
         CacheEntry {
@@ -344,7 +364,7 @@ pub fn force_rescan(
     use_gitignore: bool,
     store: bool,
     ct: &task::CancelToken,
-) -> Result<Vec<GlobMatch>> {
+) -> Result<SharedGlobEntries> {
     let key = CacheKey {
         root: root.to_path_buf(),
         include_hidden,
@@ -352,7 +372,8 @@ pub fn force_rescan(
     };
     FS_CACHE.remove(&key);
 
-    let entries = collect_entries(root, include_hidden, use_gitignore, ct)?;
+    let entries =
+        SharedGlobEntries::from_vec(collect_entries(root, include_hidden, use_gitignore, ct)?);
     if store {
         let now = Instant::now();
         FS_CACHE.insert(

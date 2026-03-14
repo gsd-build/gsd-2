@@ -5,6 +5,8 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
+use crate::task;
+
 // ── N-API types (mirroring gsd_grep types for the JS boundary) ────────
 
 #[napi(object)]
@@ -114,8 +116,16 @@ fn convert_search_match(m: gsd_grep::SearchMatch) -> NapiSearchMatch {
     NapiSearchMatch {
         line_number: clamp_u32(m.line_number),
         line: m.line,
-        context_before: m.context_before.into_iter().map(convert_context_line).collect(),
-        context_after: m.context_after.into_iter().map(convert_context_line).collect(),
+        context_before: m
+            .context_before
+            .into_iter()
+            .map(convert_context_line)
+            .collect(),
+        context_after: m
+            .context_after
+            .into_iter()
+            .map(convert_context_line)
+            .collect(),
         truncated: m.truncated,
     }
 }
@@ -125,8 +135,16 @@ fn convert_file_match(m: gsd_grep::FileMatch) -> NapiGrepMatch {
         path: m.path,
         line_number: clamp_u32(m.line_number),
         line: m.line,
-        context_before: m.context_before.into_iter().map(convert_context_line).collect(),
-        context_after: m.context_after.into_iter().map(convert_context_line).collect(),
+        context_before: m
+            .context_before
+            .into_iter()
+            .map(convert_context_line)
+            .collect(),
+        context_after: m
+            .context_after
+            .into_iter()
+            .map(convert_context_line)
+            .collect(),
         truncated: m.truncated,
     }
 }
@@ -151,7 +169,11 @@ pub fn search(content: Buffer, options: NapiSearchOptions) -> Result<NapiSearchR
 
     match gsd_grep::search_content(content.as_ref(), &opts) {
         Ok(result) => Ok(NapiSearchResult {
-            matches: result.matches.into_iter().map(convert_search_match).collect(),
+            matches: result
+                .matches
+                .into_iter()
+                .map(convert_search_match)
+                .collect(),
             match_count: clamp_u32(result.match_count),
             limit_reached: result.limit_reached,
         }),
@@ -164,29 +186,31 @@ pub fn search(content: Buffer, options: NapiSearchOptions) -> Result<NapiSearchR
 /// Walks the directory tree respecting `.gitignore` and optional glob filters.
 /// Returns matches with file paths, line numbers, and optional context.
 #[napi(js_name = "grep")]
-pub fn grep(options: NapiGrepOptions) -> Result<NapiGrepResult> {
-    let opts = gsd_grep::GrepOptions {
-        pattern: options.pattern,
-        path: options.path,
-        glob: options.glob,
-        ignore_case: options.ignore_case.unwrap_or(false),
-        multiline: options.multiline.unwrap_or(false),
-        hidden: options.hidden.unwrap_or(false),
-        gitignore: options.gitignore.unwrap_or(true),
-        max_count: options.max_count.map(u64::from),
-        context_before: options.context_before.unwrap_or(0),
-        context_after: options.context_after.unwrap_or(0),
-        max_columns: options.max_columns.map(|v| v as usize),
-    };
+pub fn grep(options: NapiGrepOptions) -> task::Async<NapiGrepResult> {
+    task::blocking("grep", (), move |_ct| {
+        let opts = gsd_grep::GrepOptions {
+            pattern: options.pattern,
+            path: options.path,
+            glob: options.glob,
+            ignore_case: options.ignore_case.unwrap_or(false),
+            multiline: options.multiline.unwrap_or(false),
+            hidden: options.hidden.unwrap_or(false),
+            gitignore: options.gitignore.unwrap_or(true),
+            max_count: options.max_count.map(u64::from),
+            context_before: options.context_before.unwrap_or(0),
+            context_after: options.context_after.unwrap_or(0),
+            max_columns: options.max_columns.map(|v| v as usize),
+        };
 
-    match gsd_grep::search_path(&opts) {
-        Ok(result) => Ok(NapiGrepResult {
-            matches: result.matches.into_iter().map(convert_file_match).collect(),
-            total_matches: clamp_u32(result.total_matches),
-            files_with_matches: result.files_with_matches,
-            files_searched: result.files_searched,
-            limit_reached: result.limit_reached,
-        }),
-        Err(err) => Err(Error::from_reason(err)),
-    }
+        match gsd_grep::search_path(&opts) {
+            Ok(result) => Ok(NapiGrepResult {
+                matches: result.matches.into_iter().map(convert_file_match).collect(),
+                total_matches: clamp_u32(result.total_matches),
+                files_with_matches: result.files_with_matches,
+                files_searched: result.files_searched,
+                limit_reached: result.limit_reached,
+            }),
+            Err(err) => Err(Error::from_reason(err)),
+        }
+    })
 }

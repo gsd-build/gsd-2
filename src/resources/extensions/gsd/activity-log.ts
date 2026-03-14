@@ -9,9 +9,61 @@
  */
 
 import { writeFileSync, mkdirSync, readdirSync, unlinkSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { ExtensionContext } from "@gsd/pi-coding-agent";
 import { gsdRoot } from "./paths.js";
+
+interface ActivityLogState {
+  nextSeq: number;
+  lastSnapshotKeyByUnit: Map<string, string>;
+}
+
+const activityLogState = new Map<string, ActivityLogState>();
+
+function scanNextSequence(activityDir: string): number {
+  let maxSeq = 0;
+  try {
+    for (const f of readdirSync(activityDir)) {
+      const match = f.match(/^(\d+)-/);
+      if (match) maxSeq = Math.max(maxSeq, parseInt(match[1], 10));
+    }
+  } catch {
+    return 1;
+  }
+  return maxSeq + 1;
+}
+
+function getActivityState(activityDir: string): ActivityLogState {
+  let state = activityLogState.get(activityDir);
+  if (!state) {
+    state = { nextSeq: scanNextSequence(activityDir), lastSnapshotKeyByUnit: new Map() };
+    activityLogState.set(activityDir, state);
+  }
+  return state;
+}
+
+function snapshotKey(unitType: string, unitId: string, content: string): string {
+  const digest = createHash("sha1").update(content).digest("hex");
+  return `${unitType}\0${unitId}\0${digest}`;
+}
+
+function nextActivityFilePath(
+  activityDir: string,
+  state: ActivityLogState,
+  unitType: string,
+  safeUnitId: string,
+): string {
+  while (true) {
+    const seq = String(state.nextSeq).padStart(3, "0");
+    const filePath = join(activityDir, `${seq}-${unitType}-${safeUnitId}.jsonl`);
+    if (!existsSync(filePath)) {
+      return filePath;
+    }
+    state.nextSeq = scanNextSequence(activityDir);
+  }
+}
 
 export function saveActivityLog(
   ctx: ExtensionContext,
@@ -26,22 +78,17 @@ export function saveActivityLog(
     const activityDir = join(gsdRoot(basePath), "activity");
     mkdirSync(activityDir, { recursive: true });
 
-    // Next sequence number
-    let maxSeq = 0;
-    try {
-      for (const f of readdirSync(activityDir)) {
-        const match = f.match(/^(\d+)-/);
-        if (match) maxSeq = Math.max(maxSeq, parseInt(match[1], 10));
-      }
-    } catch { /* empty dir */ }
-    const seq = String(maxSeq + 1).padStart(3, "0");
-
     const safeUnitId = unitId.replace(/\//g, "-");
-    const fileName = `${seq}-${unitType}-${safeUnitId}.jsonl`;
-    const filePath = join(activityDir, fileName);
+    const content = `${entries.map(entry => JSON.stringify(entry)).join("\n")}\n`;
+    const state = getActivityState(activityDir);
+    const unitKey = `${unitType}\0${safeUnitId}`;
+    const key = snapshotKey(unitType, safeUnitId, content);
+    if (state.lastSnapshotKeyByUnit.get(unitKey) === key) return;
 
-    const lines = entries.map(entry => JSON.stringify(entry));
-    writeFileSync(filePath, lines.join("\n") + "\n", "utf-8");
+    const filePath = nextActivityFilePath(activityDir, state, unitType, safeUnitId);
+    writeFileSync(filePath, content, "utf-8");
+    state.nextSeq += 1;
+    state.lastSnapshotKeyByUnit.set(unitKey, key);
   } catch {
     // Don't let logging failures break auto-mode
   }

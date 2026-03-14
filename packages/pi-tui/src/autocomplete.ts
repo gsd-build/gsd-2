@@ -5,6 +5,7 @@ import { fuzzyFind } from "@gsd/native/fd";
 import { fuzzyFilter } from "./fuzzy.js";
 
 const PATH_DELIMITERS = new Set([" ", "\t", '"', "'", "="]);
+const FUZZY_FILE_MAX_RESULTS = 20;
 
 function findLastDelimiter(text: string): number {
 	for (let i = text.length - 1; i >= 0; i -= 1) {
@@ -562,15 +563,12 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 				path: searchPath,
 				hidden: true,
 				gitignore: true,
-				maxResults: 100,
+				maxResults: FUZZY_FILE_MAX_RESULTS,
 			});
-
-			// Take top 20 matches (already sorted by score descending from native module)
-			const topMatches = result.matches.slice(0, 20);
 
 			// Build suggestions
 			const suggestions: AutocompleteItem[] = [];
-			for (const { path: entryPath, isDirectory } of topMatches) {
+			for (const { path: entryPath, isDirectory } of result.matches) {
 				// Native module includes trailing / for directories
 				const pathWithoutSlash = isDirectory ? entryPath.slice(0, -1) : entryPath;
 				const displayPath = scopedQuery

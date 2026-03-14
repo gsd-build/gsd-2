@@ -182,6 +182,14 @@ export interface SessionInfo {
 	allMessagesText: string;
 }
 
+export interface SessionUsageTotals {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	cost: number;
+}
+
 export type ReadonlySessionManager = Pick<
 	SessionManager,
 	| "getCwd"
@@ -195,9 +203,20 @@ export type ReadonlySessionManager = Pick<
 	| "getBranch"
 	| "getHeader"
 	| "getEntries"
+	| "getUsageTotals"
 	| "getTree"
 	| "getSessionName"
 >;
+
+function createEmptyUsageTotals(): SessionUsageTotals {
+	return {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		cost: 0,
+	};
+}
 
 /** Generate a unique short ID (8 hex chars, collision-checked) */
 function generateId(byId: { has(id: string): boolean }): string {
@@ -779,10 +798,12 @@ export class SessionManager {
 	private persist: boolean;
 	private flushed: boolean = false;
 	private fileEntries: FileEntry[] = [];
+	private sessionEntries: SessionEntry[] = [];
 	private byId: Map<string, SessionEntry> = new Map();
 	private blobStore: BlobStore;
 	private labelsById: Map<string, string> = new Map();
 	private leafId: string | null = null;
+	private usageTotals: SessionUsageTotals = createEmptyUsageTotals();
 
 	private constructor(cwd: string, sessionDir: string, sessionFile: string | undefined, persist: boolean) {
 		this.cwd = cwd;
@@ -846,9 +867,11 @@ export class SessionManager {
 			parentSession: options?.parentSession,
 		};
 		this.fileEntries = [header];
+		this.sessionEntries = [];
 		this.byId.clear();
 		this.labelsById.clear();
 		this.leafId = null;
+		this.usageTotals = createEmptyUsageTotals();
 		this.flushed = false;
 
 		if (this.persist) {
@@ -859,13 +882,17 @@ export class SessionManager {
 	}
 
 	private _buildIndex(): void {
+		this.sessionEntries = [];
 		this.byId.clear();
 		this.labelsById.clear();
 		this.leafId = null;
+		this.usageTotals = createEmptyUsageTotals();
 		for (const entry of this.fileEntries) {
 			if (entry.type === "session") continue;
+			this.sessionEntries.push(entry);
 			this.byId.set(entry.id, entry);
 			this.leafId = entry.id;
+			this._accumulateUsage(entry);
 			if (entry.type === "label") {
 				if (entry.label) {
 					this.labelsById.set(entry.targetId, entry.label);
@@ -926,9 +953,28 @@ export class SessionManager {
 
 	private _appendEntry(entry: SessionEntry): void {
 		this.fileEntries.push(entry);
+		this.sessionEntries.push(entry);
 		this.byId.set(entry.id, entry);
 		this.leafId = entry.id;
+		this._accumulateUsage(entry);
 		this._persist(entry);
+	}
+
+	private _accumulateUsage(entry: SessionEntry): void {
+		if (entry.type !== "message" || entry.message.role !== "assistant") {
+			return;
+		}
+
+		const usage = entry.message.usage;
+		if (!usage) {
+			return;
+		}
+
+		this.usageTotals.input += usage.input;
+		this.usageTotals.output += usage.output;
+		this.usageTotals.cacheRead += usage.cacheRead;
+		this.usageTotals.cacheWrite += usage.cacheWrite;
+		this.usageTotals.cost += usage.cost.total;
 	}
 
 	/** Append a message as child of current leaf, then advance leaf. Returns entry id.
@@ -1167,7 +1213,11 @@ export class SessionManager {
 	 * change the leaf pointer. Entries cannot be modified or deleted.
 	 */
 	getEntries(): SessionEntry[] {
-		return this.fileEntries.filter((e): e is SessionEntry => e.type !== "session");
+		return [...this.sessionEntries];
+	}
+
+	getUsageTotals(): SessionUsageTotals {
+		return { ...this.usageTotals };
 	}
 
 	/**

@@ -140,6 +140,7 @@ export function createFindTool(cwd: string, options?: FindToolOptions): AgentToo
 							path: searchPath,
 							hidden: true,
 							gitignore: true,
+							cache: true,
 							maxResults: effectiveLimit,
 						});
 

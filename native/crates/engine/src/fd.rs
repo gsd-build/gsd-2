@@ -6,9 +6,10 @@
 
 use std::path::Path;
 
-use ignore::WalkBuilder;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+
+use crate::{fs_cache, task};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Public types
@@ -50,45 +51,6 @@ pub struct FuzzyFindResult {
     /// Total number of matches found (may exceed `matches.len()`).
     #[napi(js_name = "totalMatches")]
     pub total_matches: u32,
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Path utilities
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// Resolve a search path string to a canonical `PathBuf` (must be a directory).
-fn resolve_search_path(path: &str) -> Result<std::path::PathBuf> {
-    let candidate = std::path::PathBuf::from(path);
-    let root = if candidate.is_absolute() {
-        candidate
-    } else {
-        let cwd = std::env::current_dir()
-            .map_err(|err| Error::from_reason(format!("Failed to resolve cwd: {err}")))?;
-        cwd.join(candidate)
-    };
-    let metadata = std::fs::metadata(&root)
-        .map_err(|err| Error::from_reason(format!("Path not found: {err}")))?;
-    if !metadata.is_dir() {
-        return Err(Error::from_reason(
-            "Search path must be a directory".to_string(),
-        ));
-    }
-    Ok(std::fs::canonicalize(&root).unwrap_or(root))
-}
-
-/// Check if a path component matches a target string.
-fn contains_component(path: &Path, target: &str) -> bool {
-    path.components().any(|component| {
-        component
-            .as_os_str()
-            .to_str()
-            .is_some_and(|value| value == target)
-    })
-}
-
-/// Skip `.git` directories and `node_modules`.
-fn should_skip_path(path: &Path) -> bool {
-    contains_component(path, ".git") || contains_component(path, "node_modules")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -190,96 +152,6 @@ fn score_fuzzy_path(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Directory walking
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// File type classification for discovered entries.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EntryType {
-    File,
-    Dir,
-    Symlink,
-}
-
-/// A filesystem entry discovered during walking.
-struct WalkEntry {
-    /// Relative path from root (forward slashes).
-    path: String,
-    /// Entry type.
-    entry_type: EntryType,
-}
-
-/// Walk a directory tree collecting entries.
-fn walk_directory(
-    root: &Path,
-    include_hidden: bool,
-    respect_gitignore: bool,
-) -> Vec<WalkEntry> {
-    let mut builder = WalkBuilder::new(root);
-    builder
-        .hidden(!include_hidden)
-        .follow_links(false)
-        .sort_by_file_path(|a, b| a.cmp(b));
-
-    if respect_gitignore {
-        builder
-            .git_ignore(true)
-            .git_exclude(true)
-            .git_global(true)
-            .ignore(true)
-            .parents(true);
-    } else {
-        builder
-            .git_ignore(false)
-            .git_exclude(false)
-            .git_global(false)
-            .ignore(false)
-            .parents(false);
-    }
-
-    let mut entries = Vec::new();
-    for entry in builder.build() {
-        let Ok(entry) = entry else { continue };
-        let path = entry.path();
-
-        if should_skip_path(path) {
-            continue;
-        }
-
-        let relative = path.strip_prefix(root).unwrap_or(path);
-        let relative_str = relative.to_string_lossy();
-        if relative_str.is_empty() {
-            continue;
-        }
-
-        // Normalize to forward slashes on all platforms.
-        let relative_str = if cfg!(windows) && relative_str.contains('\\') {
-            relative_str.replace('\\', "/")
-        } else {
-            relative_str.into_owned()
-        };
-
-        let Some(metadata) = std::fs::symlink_metadata(path).ok() else {
-            continue;
-        };
-        let file_type = metadata.file_type();
-        let entry_type = if file_type.is_symlink() {
-            EntryType::Symlink
-        } else if file_type.is_dir() {
-            EntryType::Dir
-        } else {
-            EntryType::File
-        };
-
-        entries.push(WalkEntry {
-            path: relative_str,
-            entry_type,
-        });
-    }
-    entries
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // Execution
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -294,7 +166,7 @@ fn clamp_u32(value: u64) -> u32 {
 /// Results are sorted by match quality (higher score = better match).
 #[napi(js_name = "fuzzyFind")]
 pub fn fuzzy_find(options: FuzzyFindOptions) -> Result<FuzzyFindResult> {
-    let root = resolve_search_path(&options.path)?;
+    let root = fs_cache::resolve_search_path(&options.path)?;
     let include_hidden = options.hidden.unwrap_or(false);
     let respect_gitignore = options.gitignore.unwrap_or(true);
     let max_results = options.max_results.unwrap_or(100) as usize;
@@ -317,15 +189,39 @@ pub fn fuzzy_find(options: FuzzyFindOptions) -> Result<FuzzyFindResult> {
         });
     }
 
-    let entries = walk_directory(&root, include_hidden, respect_gitignore);
+    let ct = task::CancelToken::default();
+    let scan = fs_cache::get_or_scan(&root, include_hidden, respect_gitignore, &ct)?;
+    let mut scored = collect_matches(&scan.entries, &query_lower, &normalized_query, &query_chars);
 
+    if scored.is_empty() && scan.cache_age_ms >= fs_cache::empty_recheck_ms() {
+        let fresh = fs_cache::force_rescan(&root, include_hidden, respect_gitignore, true, &ct)?;
+        scored = collect_matches(&fresh, &query_lower, &normalized_query, &query_chars);
+    }
+
+    scored.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
+    let total_matches = clamp_u32(scored.len() as u64);
+    let matches = scored.into_iter().take(max_results).collect();
+
+    Ok(FuzzyFindResult {
+        matches,
+        total_matches,
+    })
+}
+
+fn collect_matches(
+    entries: &[fs_cache::GlobMatch],
+    query_lower: &str,
+    normalized_query: &str,
+    query_chars: &[char],
+) -> Vec<FuzzyFindMatch> {
     let mut scored: Vec<FuzzyFindMatch> = Vec::with_capacity(entries.len().min(256));
+
     for entry in entries {
-        if entry.entry_type == EntryType::Symlink {
+        if entry.file_type == fs_cache::FileType::Symlink {
             continue;
         }
 
-        let is_directory = entry.entry_type == EntryType::Dir;
+        let is_directory = entry.file_type == fs_cache::FileType::Dir;
         let score = score_fuzzy_path(
             &entry.path,
             is_directory,
@@ -337,7 +233,7 @@ pub fn fuzzy_find(options: FuzzyFindOptions) -> Result<FuzzyFindResult> {
             continue;
         }
 
-        let mut path = entry.path;
+        let mut path = entry.path.clone();
         if is_directory {
             path.push('/');
         }
@@ -348,14 +244,7 @@ pub fn fuzzy_find(options: FuzzyFindOptions) -> Result<FuzzyFindResult> {
         });
     }
 
-    scored.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
-    let total_matches = clamp_u32(scored.len() as u64);
-    let matches = scored.into_iter().take(max_results).collect();
-
-    Ok(FuzzyFindResult {
-        matches,
-        total_matches,
-    })
+    scored
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -480,7 +369,9 @@ mod tests {
     #[test]
     fn test_walk_directory_real_fs() {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let entries = walk_directory(&root, false, true);
+        let entries =
+            fs_cache::force_rescan(&root, false, true, false, &task::CancelToken::default())
+                .expect("force_rescan should succeed");
         let paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
         assert!(
             paths.iter().any(|p| p.contains("fd.rs")),

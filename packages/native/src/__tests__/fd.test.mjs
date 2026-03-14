@@ -139,6 +139,41 @@ describe("native fd: fuzzyFind()", () => {
     );
   });
 
+  test("reuses the shared fs scan cache until invalidated", (t) => {
+    const previousTtl = process.env.FS_SCAN_CACHE_TTL_MS;
+    process.env.FS_SCAN_CACHE_TTL_MS = "10000";
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-fd-test-"));
+    t.after(() => {
+      native.invalidateFsScanCache(tmpDir);
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      if (previousTtl === undefined) {
+        delete process.env.FS_SCAN_CACHE_TTL_MS;
+      } else {
+        process.env.FS_SCAN_CACHE_TTL_MS = previousTtl;
+      }
+    });
+
+    fs.writeFileSync(path.join(tmpDir, "cached.txt"), "cached");
+    native.invalidateFsScanCache(tmpDir);
+
+    const warm = native.fuzzyFind({ query: "cached", path: tmpDir });
+    assert.ok(warm.matches.some((m) => m.path === "cached.txt"));
+
+    fs.unlinkSync(path.join(tmpDir, "cached.txt"));
+
+    const cached = native.fuzzyFind({ query: "cached", path: tmpDir });
+    assert.ok(
+      cached.matches.some((m) => m.path === "cached.txt"),
+      "should serve warm results from the shared fs scan cache",
+    );
+
+    native.invalidateFsScanCache(tmpDir);
+
+    const refreshed = native.fuzzyFind({ query: "cached", path: tmpDir });
+    assert.equal(refreshed.matches.length, 0);
+  });
+
   test("results are sorted by score descending", (t) => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-fd-test-"));
     t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));

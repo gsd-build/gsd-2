@@ -19,6 +19,7 @@ export type { FuzzyFindMatch, FuzzyFindOptions, FuzzyFindResult };
  *
  * Searches for files and directories whose paths match the query string.
  * Results are sorted by match quality (higher score = better match).
+ * Reuses the shared native filesystem scan cache used by glob discovery.
  *
  * Scoring tiers (highest to lowest):
  * - 120: exact filename match

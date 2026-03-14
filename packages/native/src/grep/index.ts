@@ -42,7 +42,8 @@ export function searchContent(
  * Search files on disk for a regex pattern.
  *
  * Walks the directory tree respecting .gitignore and optional glob filters.
+ * Runs on the native blocking worker pool and resolves asynchronously.
  */
-export function grep(options: GrepOptions): GrepResult {
-  return native.grep(options) as GrepResult;
+export function grep(options: GrepOptions): Promise<GrepResult> {
+  return native.grep(options) as Promise<GrepResult>;
 }

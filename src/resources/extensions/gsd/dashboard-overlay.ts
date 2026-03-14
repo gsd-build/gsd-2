@@ -87,6 +87,8 @@ export class GSDDashboardOverlay {
   private dashData: AutoDashboardData;
   private milestoneData: MilestoneView | null = null;
   private loading = true;
+  private loadedDashboardIdentity?: string;
+  private refreshInFlight: Promise<void> | null = null;
 
   constructor(
     tui: { requestRender: () => void },
@@ -98,28 +100,67 @@ export class GSDDashboardOverlay {
     this.onClose = onClose;
     this.dashData = getAutoDashboardData();
 
-    this.loadData().then(() => {
-      this.loading = false;
-      this.invalidate();
-      this.tui.requestRender();
-    });
+    this.scheduleRefresh(true);
 
     this.refreshTimer = setInterval(() => {
-      this.dashData = getAutoDashboardData();
-      this.loadData().then(() => {
-        this.invalidate();
-        this.tui.requestRender();
-      });
+      this.scheduleRefresh();
     }, 2000);
   }
 
-  private async loadData(): Promise<void> {
+  private scheduleRefresh(initial = false): void {
+    if (this.refreshInFlight) return;
+    this.refreshInFlight = this.refreshDashboard(initial)
+      .finally(() => {
+        this.refreshInFlight = null;
+      });
+  }
+
+  private computeDashboardIdentity(dashData: AutoDashboardData): string {
+    const base = dashData.basePath || process.cwd();
+    const currentUnit = dashData.currentUnit
+      ? `${dashData.currentUnit.type}:${dashData.currentUnit.id}:${dashData.currentUnit.startedAt}`
+      : "-";
+    const lastCompleted = dashData.completedUnits.length > 0
+      ? dashData.completedUnits[dashData.completedUnits.length - 1]
+      : null;
+    const completedKey = lastCompleted
+      ? `${dashData.completedUnits.length}:${lastCompleted.type}:${lastCompleted.id}:${lastCompleted.finishedAt}`
+      : "0";
+    return [
+      base,
+      dashData.active ? "1" : "0",
+      dashData.paused ? "1" : "0",
+      currentUnit,
+      completedKey,
+    ].join("|");
+  }
+
+  private async refreshDashboard(initial = false): Promise<void> {
+    this.dashData = getAutoDashboardData();
+    const nextIdentity = this.computeDashboardIdentity(this.dashData);
+
+    if (initial || nextIdentity !== this.loadedDashboardIdentity) {
+      const loaded = await this.loadData();
+      if (loaded) {
+        this.loadedDashboardIdentity = nextIdentity;
+      }
+    }
+
+    if (initial) {
+      this.loading = false;
+    }
+
+    this.invalidate();
+    this.tui.requestRender();
+  }
+
+  private async loadData(): Promise<boolean> {
     const base = this.dashData.basePath || process.cwd();
     try {
       const state = await deriveState(base);
       if (!state.activeMilestone) {
         this.milestoneData = null;
-        return;
+        return true;
       }
 
       const mid = state.activeMilestone.id;
@@ -175,8 +216,10 @@ export class GSDDashboardOverlay {
       }
 
       this.milestoneData = view;
+      return true;
     } catch {
       // Don't crash the overlay
+      return false;
     }
   }
 
