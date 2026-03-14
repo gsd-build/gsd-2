@@ -10,9 +10,10 @@ The model registry must stay current with available models, pricing, and capabil
 
 ## Current State
 
-- Models are statically defined in `packages/pi-ai/src/models.generated.ts` (342KB generated file)
+- **S01 complete:** Zod schemas, mapper, and fetch/cache/fallback orchestration implemented (31 unit tests passing)
+- Models still statically defined in `packages/pi-ai/src/models.generated.ts` (342KB generated file) — S03 will remove
+- S02 will integrate models.dev fetch into ModelRegistry
 - Users can override/add models via `~/.gsd/agent/models.json`
-- Model data becomes stale between releases; new models require code changes
 
 ## Architecture / Key Patterns
 
@@ -26,4 +27,7 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 
 ## Milestone Sequence
 
-- [ ] M001: models.dev registry — Fetch model data from models.dev at runtime with caching, replacing static generated file
+- [ ] M001: models.dev Registry — S01 complete, S02 next
+  - [x] S01: models.dev fetching with caching
+  - [ ] S02: Integrate into ModelRegistry
+  - [ ] S03: Build-time snapshot + cleanup

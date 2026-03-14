@@ -6,35 +6,35 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R001 — Fetch model registry from models.dev
 - Class: core-capability
-- Status: active
+- Status: validated
 - Description: Model data is fetched from https://models.dev/api.json at runtime instead of being statically compiled
 - Why it matters: Keeps model registry current without code releases; new models available immediately
 - Source: user
 - Primary owning slice: M001/S01
 - Supporting slices: M001/S02
-- Validation: unmapped
+- Validation: S01 — Unit tests prove fetch with 10s timeout works (contract-level)
 - Notes: Must handle network failures gracefully
 
 ### R002 — 12-hour cache with fallback on network failure
 - Class: quality-attribute
-- Status: active
+- Status: validated
 - Description: Fetched model data is cached locally for ~12 hours; network failures fall back to cached data even if stale
 - Why it matters: Reduces network requests, enables offline use, graceful degradation
 - Source: user
 - Primary owning slice: M001/S01
 - Supporting slices: none
-- Validation: unmapped
+- Validation: S01 — Unit tests prove 12h TTL and fallback chain (contract-level)
 - Notes: Cache file stored in ~/.gsd/agent/cache/
 
 ### R003 — Version-triggered cache refresh
 - Class: core-capability
-- Status: active
+- Status: validated
 - Description: When gsd-2 version changes, the cache is force-refreshed on next startup
 - Why it matters: New releases may need updated model data; ensures consistency
 - Source: user
 - Primary owning slice: M001/S01
 - Supporting slices: none
-- Validation: unmapped
+- Validation: S01 — Unit tests prove version comparison triggers refresh (contract-level)
 - Notes: Compare cached version with current VERSION
 
 ### R004 — Bundled snapshot for offline-first cold start
@@ -72,7 +72,9 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Validated
 
-(none yet)
+- R001 — Fetch model registry from models.dev (S01: contract-level unit tests)
+- R002 — 12-hour cache with fallback (S01: contract-level unit tests)
+- R003 — Version-triggered cache refresh (S01: contract-level unit tests)
 
 ## Deferred
 
@@ -86,16 +88,16 @@ This file is the explicit capability and coverage contract for the project.
 
 | ID | Class | Status | Primary owner | Supporting | Proof |
 |---|---|---|---|---|---|
-| R001 | core-capability | active | M001/S01 | M001/S02 | unmapped |
-| R002 | quality-attribute | active | M001/S01 | none | unmapped |
-| R003 | core-capability | active | M001/S01 | none | unmapped |
+| R001 | core-capability | validated | M001/S01 | M001/S02 | S01 unit tests |
+| R002 | quality-attribute | validated | M001/S01 | none | S01 unit tests |
+| R003 | core-capability | validated | M001/S01 | none | S01 unit tests |
 | R004 | quality-attribute | active | M001/S03 | none | unmapped |
 | R005 | core-capability | active | M001/S02 | none | unmapped |
 | R006 | operability | active | M001/S03 | none | unmapped |
 
 ## Coverage Summary
 
-- Active requirements: 6
+- Active requirements: 3
 - Mapped to slices: 6
-- Validated: 0
+- Validated: 3
 - Unmapped active requirements: 0

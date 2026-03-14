@@ -47,7 +47,7 @@ This milestone is complete only when all are true:
 
 ## Slices
 
-- [ ] **S01: models.dev fetching with caching** `risk:medium` `depends:[]`
+- [x] **S01: models.dev fetching with caching** `risk:medium` `depends:[]`
   > After this: Unit tests prove fetch → cache → fallback chain works, version change triggers refresh
 
 - [ ] **S02: Integrate into ModelRegistry** `risk:low` `depends:[S01]`
