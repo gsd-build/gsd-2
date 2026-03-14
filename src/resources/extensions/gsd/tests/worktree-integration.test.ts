@@ -96,7 +96,7 @@ writeFileSync(
   "utf-8",
 );
 run("git add .", base);
-run("git commit -m 'chore: init'", base);
+run('git commit -m "chore: init"', base);
 
 async function main(): Promise<void> {
   // ── Verify main tree baseline ──────────────────────────────────────────────
@@ -141,7 +141,7 @@ async function main(): Promise<void> {
   console.log("\n=== Work and merge slice in worktree ===");
   writeFileSync(join(wt.path, "feature.txt"), "new feature\n", "utf-8");
   run("git add .", wt.path);
-  run("git commit -m 'feat: add feature'", wt.path);
+  run('git commit -m "feat: add feature"', wt.path);
 
   // switchToMain should go to worktree/alpha, NOT main
   switchToMain(wt.path);
@@ -167,7 +167,7 @@ async function main(): Promise<void> {
 
   writeFileSync(join(wt.path, "feature2.txt"), "second feature\n", "utf-8");
   run("git add .", wt.path);
-  run("git commit -m 'feat: add feature 2'", wt.path);
+  run('git commit -m "feat: add feature 2"', wt.path);
 
   switchToMain(wt.path);
   const merge2 = mergeSliceToMain(wt.path, "M001", "S02", "Second");
@@ -184,7 +184,7 @@ async function main(): Promise<void> {
 
   writeFileSync(join(base, "main-feature.txt"), "main work\n", "utf-8");
   run("git add .", base);
-  run("git commit -m 'feat: main work'", base);
+  run('git commit -m "feat: main work"', base);
 
   switchToMain(base);
   assertEq(getCurrentBranch(base), "main", "main tree switchToMain goes to main");

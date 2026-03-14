@@ -563,7 +563,7 @@ Built the legacy feature successfully.
       // Make a change on the slice branch, commit, then merge to main
       writeFileSync(join(base, 'feature.txt'), 'new feature from slice\n');
       run('git add feature.txt', base);
-      run("git commit -m 'feat: slice work'", base);
+      run('git commit -m "feat: slice work"', base);
 
       // Switch to main and merge
       switchToMain(base);

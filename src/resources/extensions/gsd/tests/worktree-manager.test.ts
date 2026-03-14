@@ -52,7 +52,7 @@ writeFileSync(
   "utf-8",
 );
 run("git add .", base);
-run("git commit -m 'chore: init'", base);
+run('git commit -m "chore: init"', base);
 
 async function main(): Promise<void> {
   console.log("\n=== worktreeBranchName ===");
@@ -112,7 +112,7 @@ async function main(): Promise<void> {
     "utf-8",
   );
   run("git add .", wtPath);
-  run("git commit -m 'feat: add M002 and update M001'", wtPath);
+  run('git commit -m "feat: add M002 and update M001"', wtPath);
 
   console.log("\n=== diffWorktreeGSD ===");
   const diff = diffWorktreeGSD(base, "feature-x");

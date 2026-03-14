@@ -82,7 +82,7 @@ test("loader sets all 4 GSD_ env vars and PI_PACKAGE_DIR", async () => {
 
   // Direct logic verification (no subprocess needed)
   const { agentDir: ad } = await import("../app-paths.ts");
-  assert.ok(ad.endsWith(".gsd/agent"), "agentDir ends with .gsd/agent");
+  assert.ok(ad.endsWith(join(".gsd", "agent")), "agentDir ends with .gsd/agent");
 
   // Verify the env var names are in loader.ts source
   const loaderSrc = readFileSync(join(projectRoot, "src", "loader.ts"), "utf-8");

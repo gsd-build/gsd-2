@@ -151,7 +151,7 @@ function writeBaseArtifacts(repo: string): void {
     "# S01: First Slice\n\n**Goal:** Demo\n**Demo:** Demo\n\n## Must-Haves\n- done\n\n## Tasks\n- [x] **T01: Task** `est:5m`\n  do it\n",
   );
   run("git add .", repo);
-  run("git commit -m 'chore: milestone base'", repo);
+  run('git commit -m "chore: milestone base"', repo);
 }
 
 function writeCompletedArtifactsOnBranch(repo: string): void {
@@ -175,7 +175,7 @@ function writeCompletedArtifactsOnBranch(repo: string): void {
     "# UAT\n\nPassed.\n",
   );
   run("git add .", repo);
-  run("git commit -m 'feat(M001/S01): complete-slice'", repo);
+  run('git commit -m "feat(M001/S01): complete-slice"', repo);
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -228,7 +228,7 @@ console.log("\n=== orphan detection: slice branch not done ===");
     "# Research\n",
   );
   run("git add .", repo);
-  run("git commit -m 'feat: research'", repo);
+  run('git commit -m "feat: research"', repo);
   run("git checkout main", repo);
 
   const orphans = detectOrphanedSliceBranches(repo);
@@ -266,7 +266,7 @@ console.log("\n=== orphan detection: already merged branch is not orphan ===");
   writeCompletedArtifactsOnBranch(repo);
   run("git checkout main", repo);
   run("git merge --squash gsd/M001/S01", repo);
-  run("git commit -m 'feat(M001/S01): merge'", repo);
+  run('git commit -m "feat(M001/S01): merge"', repo);
   run("git branch -D gsd/M001/S01", repo);
 
   const orphans = detectOrphanedSliceBranches(repo);
@@ -327,7 +327,7 @@ console.log("\n=== orphan merge: squash-merge resolves orphan, artifacts appear 
 
   // Perform squash-merge (as mergeOrphanedSliceBranches does via mergeSliceToMain)
   run("git merge --squash gsd/M001/S01", repo);
-  run("git commit -m 'feat(M001/S01): recover orphaned branch'", repo);
+  run('git commit -m "feat(M001/S01): recover orphaned branch"', repo);
   run("git branch -D gsd/M001/S01", repo);
 
   // Verify artifacts are now on main

@@ -353,13 +353,13 @@ function createGitBase(): string {
   try {
     // Create a conflict: modify same file on two branches
     writeFileSync(join(base, "conflict.txt"), "main content\n", "utf-8");
-    execSync("git add -A && git commit -m 'main change'", { cwd: base, stdio: "ignore" });
+    execSync('git add -A && git commit -m "main change"', { cwd: base, stdio: "ignore" });
     execSync("git checkout -b feature", { cwd: base, stdio: "ignore" });
     writeFileSync(join(base, "conflict.txt"), "feature content\n", "utf-8");
-    execSync("git add -A && git commit -m 'feature change'", { cwd: base, stdio: "ignore" });
+    execSync('git add -A && git commit -m "feature change"', { cwd: base, stdio: "ignore" });
     execSync("git checkout main", { cwd: base, stdio: "ignore" });
     writeFileSync(join(base, "conflict.txt"), "different main content\n", "utf-8");
-    execSync("git add -A && git commit -m 'diverge'", { cwd: base, stdio: "ignore" });
+    execSync('git add -A && git commit -m "diverge"', { cwd: base, stdio: "ignore" });
     try { execSync("git merge feature", { cwd: base, stdio: "ignore" }); } catch { /* expected conflict */ }
     const result = verifyExpectedArtifact("fix-merge", "M001/S01", base);
     assert(result === false, "UU conflict should return false");
@@ -374,13 +374,13 @@ function createGitBase(): string {
   const base = createGitBase();
   try {
     writeFileSync(join(base, "deleted.txt"), "content\n", "utf-8");
-    execSync("git add -A && git commit -m 'add file'", { cwd: base, stdio: "ignore" });
+    execSync('git add -A && git commit -m "add file"', { cwd: base, stdio: "ignore" });
     execSync("git checkout -b feature2", { cwd: base, stdio: "ignore" });
     writeFileSync(join(base, "deleted.txt"), "modified on feature\n", "utf-8");
-    execSync("git add -A && git commit -m 'modify on feature'", { cwd: base, stdio: "ignore" });
+    execSync('git add -A && git commit -m "modify on feature"', { cwd: base, stdio: "ignore" });
     execSync("git checkout main", { cwd: base, stdio: "ignore" });
     execSync("git rm deleted.txt", { cwd: base, stdio: "ignore" });
-    execSync("git commit -m 'delete on main'", { cwd: base, stdio: "ignore" });
+    execSync('git commit -m "delete on main"', { cwd: base, stdio: "ignore" });
     try { execSync("git merge feature2", { cwd: base, stdio: "ignore" }); } catch { /* expected conflict */ }
     const result = verifyExpectedArtifact("fix-merge", "M001/S01", base);
     assert(result === false, "DU conflict should return false");
@@ -396,11 +396,11 @@ function createGitBase(): string {
   try {
     execSync("git checkout -b branch-a", { cwd: base, stdio: "ignore" });
     writeFileSync(join(base, "both.txt"), "branch-a content\n", "utf-8");
-    execSync("git add -A && git commit -m 'add on branch-a'", { cwd: base, stdio: "ignore" });
+    execSync('git add -A && git commit -m "add on branch-a"', { cwd: base, stdio: "ignore" });
     execSync("git checkout main", { cwd: base, stdio: "ignore" });
     execSync("git checkout -b branch-b", { cwd: base, stdio: "ignore" });
     writeFileSync(join(base, "both.txt"), "branch-b content\n", "utf-8");
-    execSync("git add -A && git commit -m 'add on branch-b'", { cwd: base, stdio: "ignore" });
+    execSync('git add -A && git commit -m "add on branch-b"', { cwd: base, stdio: "ignore" });
     try { execSync("git merge branch-a", { cwd: base, stdio: "ignore" }); } catch { /* expected conflict */ }
     const result = verifyExpectedArtifact("fix-merge", "M001/S01", base);
     assert(result === false, "AA conflict should return false");
