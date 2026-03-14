@@ -166,7 +166,12 @@ Plans:
   2. Opening a new project triggers the trust dialog once; after user confirmation a `.gsd/.mission-control-trust` flag is written and the dialog never re-appears for that project
   3. A file operation outside the project directory is blocked by the Bun process layer and surfaces as a `BOUNDARY_VIOLATION` event visible in the UI
   4. Advanced permission settings show plain-language toggles for package install, shell/build commands, git commits, and git push (all off by default) plus an "ask before each operation" debug mode with a visible warning
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 17-01-PLAN.md — Wave 1: TrustDialog + AdvancedPermissionsPanel + trust-api + SettingsView update (PERM-01, PERM-02, PERM-04)
+- [ ] 17-02-PLAN.md — Wave 1: Boundary enforcer + pipeline wiring + App.tsx trust check + BOUNDARY_VIOLATION banner (PERM-02, PERM-03)
+- [ ] 17-03-PLAN.md — Wave 2: Full test suite run + human verification (PERM-01, PERM-02, PERM-03, PERM-04)
 
 ### Phase 18: Builder Mode
 **Goal**: Non-technical users can operate Mission Control through a vocabulary and routing layer that hides GSD terminology, slash commands, and technical metrics — while the underlying GSD 2 engine runs unchanged
@@ -232,7 +237,7 @@ Plans:
 | 13. Session Streaming Hardening | 7/7 | Complete    | 2026-03-13 | — |
 | 14. Slice Integration | 6/6 | Complete    | 2026-03-13 | — |
 | 15. Tauri Shell | 5/5 | Complete   | 2026-03-13 | — |
-| 16. OAuth + Keychain | 4/4 | Complete   | 2026-03-14 | — |
+| 16. OAuth + Keychain | 4/4 | Complete    | 2026-03-14 | — |
 | 17. Permission Model | v2.0 | 0/TBD | Not started | — |
 | 18. Builder Mode | v2.0 | 0/TBD | Not started | — |
 | 19. Project Workspace | v2.0 | 0/TBD | Not started | — |

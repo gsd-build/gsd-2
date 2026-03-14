@@ -3,6 +3,20 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Native Desktop
 status: in_progress
+last_updated: "2026-03-14T08:09:47.327Z"
+last_activity: "2026-03-14 — Plan 16-04 human verification approved: SC-1..SC-4 all passed — Phase 16 OAuth + Keychain complete"
+progress:
+  total_phases: 10
+  completed_phases: 5
+  total_plans: 33
+  completed_plans: 32
+---
+
+---
+gsd_state_version: 1.0
+milestone: v2.0
+milestone_name: Native Desktop
+status: in_progress
 last_updated: "2026-03-14T07:58:50.878Z"
 last_activity: "2026-03-13 — Plan 16-04 complete: SettingsView Provider section (active provider, status dot, change flow), auth.test.ts (7 tests), 698 tests pass"
 progress:
