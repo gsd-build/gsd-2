@@ -84,7 +84,9 @@ Setting `prefer_skills: []` does **not** disable skill discovery — it just mea
 
 - `models`: per-stage model selection for auto-mode. Keys: `research`, `planning`, `execution`, `completion`. Values can be:
   - Simple string: `"claude-sonnet-4-6"` — single model, no fallbacks
+  - Provider-qualified string: `"bedrock/claude-sonnet-4-6"` — targets a specific provider when the same model ID exists across multiple providers
   - Object with fallbacks: `{ model: "claude-opus-4-6", fallbacks: ["glm-5", "minimax-m2.5"] }` — tries fallbacks in order if primary fails
+  - Object with provider: `{ model: "claude-opus-4-6", provider: "bedrock" }` — explicit provider targeting in object format
   - Omit a key to use whatever model is currently active. Fallbacks are tried when model switching fails (provider unavailable, rate limited, etc.).
 
 - `skill_discovery`: controls how GSD discovers and applies skills during auto-mode. Valid values:
@@ -180,6 +182,29 @@ models:
 ```
 
 When a model fails to switch (provider unavailable, rate limited, credits exhausted), GSD automatically tries the next model in the `fallbacks` list. This ensures auto-mode continues even when your preferred provider hits limits.
+
+## Provider Targeting
+
+When the same model ID exists across multiple providers (e.g., `claude-sonnet-4-6` on both Anthropic and Bedrock), use the `provider/model` format or the `provider` field to target a specific one:
+
+```yaml
+---
+version: 1
+models:
+  # String format: provider/model
+  research: bedrock/claude-sonnet-4-6
+  planning: anthropic/claude-opus-4-6
+
+  # Object format: explicit provider field
+  execution:
+    model: claude-sonnet-4-6
+    provider: bedrock
+    fallbacks:
+      - anthropic/claude-sonnet-4-6
+---
+```
+
+If you use a bare model ID (no provider prefix) and it exists in multiple providers, GSD will warn you and resolve to the first available match. Use `provider/model` format to avoid ambiguity.
 
 **Cost-optimized example** — use cheap models with expensive ones as fallback for critical phases:
 
