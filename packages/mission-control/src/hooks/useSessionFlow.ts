@@ -40,10 +40,12 @@ export function deriveSessionMode(
   }
 
   // Connected but no project data — onboarding
-  if (
-    state === null ||
-    (state.slices.length === 0 && (state.roadmap === null || state.roadmap.slices.length === 0))
-  ) {
+  // Check GSD2 slices, roadmap slices, and legacy phases array for "has data"
+  const slices = state?.slices ?? [];
+  const roadmapSlices = state?.roadmap?.slices ?? [];
+  const phases = (state as any)?.phases ?? [];
+  const hasData = slices.length > 0 || roadmapSlices.length > 0 || phases.length > 0;
+  if (state === null || !hasData) {
     return "onboarding";
   }
 
@@ -84,7 +86,10 @@ export function useSessionFlow(
   // Fetch continue-here data once when we have state
   useEffect(() => {
     if (wsStatus !== "connected" || state === null || fetchedRef.current) return;
-    if (state.slices.length === 0 && (state.roadmap === null || state.roadmap.slices.length === 0)) return;
+    const slices = state?.slices ?? [];
+    const roadmapSlices = state?.roadmap?.slices ?? [];
+    const phases = (state as any)?.phases ?? [];
+    if (slices.length === 0 && roadmapSlices.length === 0 && phases.length === 0) return;
 
     fetchedRef.current = true;
 

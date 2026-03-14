@@ -73,13 +73,13 @@ describe("deriveSessionMode", () => {
       },
       phases: [],
       requirements: [],
-    };
+    } as unknown as PlanningState;
     const mode = deriveSessionMode(emptyState, "connected", null);
     expect(mode).toBe("onboarding");
   });
 
   it('returns "resume" when state has data and continueHere is provided', () => {
-    const stateWithData: PlanningState = {
+    const stateWithData = {
       roadmap: { phases: [{ completed: false, number: 1, name: "Setup", description: "" }] },
       state: {
         milestone: "v1.0",
@@ -126,8 +126,9 @@ describe("deriveSessionMode", () => {
           verifications: [],
         },
       ],
+      slices: [{ id: "S01", name: "Setup", status: "complete", taskCount: 1, costEstimate: null, branch: "", dependencies: [] }],
       requirements: [],
-    };
+    } as unknown as PlanningState;
     const continueHere: ContinueHereData = {
       phase: "Phase 1",
       task: 2,
@@ -141,7 +142,7 @@ describe("deriveSessionMode", () => {
   });
 
   it('returns "dashboard" when state has data and no continueHere', () => {
-    const stateWithData: PlanningState = {
+    const stateWithData = {
       roadmap: { phases: [{ completed: false, number: 1, name: "Setup", description: "" }] },
       state: {
         milestone: "v1.0",
@@ -188,8 +189,9 @@ describe("deriveSessionMode", () => {
           verifications: [],
         },
       ],
+      slices: [{ id: "S01", name: "Setup", status: "complete", taskCount: 1, costEstimate: null, branch: "", dependencies: [] }],
       requirements: [],
-    };
+    } as unknown as PlanningState;
     const mode = deriveSessionMode(stateWithData, "connected", null);
     expect(mode).toBe("dashboard");
   });
