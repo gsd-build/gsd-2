@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { AppShell } from "./components/layout/AppShell";
+import { AppShellWithMode } from "./components/layout/AppShell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ProviderPickerScreen } from "./components/auth/ProviderPickerScreen";
 import { TrustDialog } from "./components/permissions/TrustDialog";
@@ -73,7 +73,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <AppShell />
+      <AppShellWithMode />
     </ErrorBoundary>
   );
 }

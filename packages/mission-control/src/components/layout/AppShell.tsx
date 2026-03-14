@@ -29,6 +29,8 @@ import { usePreview } from "@/hooks/usePreview";
 import { useCommandPalette } from "@/hooks/useCommandPalette";
 import { usePanelFocus } from "@/hooks/usePanelFocus";
 import { useSettings } from "@/hooks/useSettings";
+import { useBuilderMode } from "@/hooks/useBuilderMode";
+import { InterfaceModeProvider } from "@/context/InterfaceModeContext";
 import { CommandPalette } from "@/components/command-palette/CommandPalette";
 import { readSession, writeSession } from "@/server/session-persistence-api";
 import type { MissionControlSession } from "@/server/session-persistence-api";
@@ -47,6 +49,9 @@ export function AppShell() {
   const budgetCeiling = typeof settings?.merged?.budget_ceiling === "number"
     ? settings.merged.budget_ceiling
     : null;
+
+  // Builder mode — read from settings (BUILDER-01)
+  const { builderMode } = useBuilderMode();
 
   const {
     sessions,
@@ -236,6 +241,7 @@ export function AppShell() {
               interrupt();
             }
           }}
+          builderMode={builderMode}
         />
         {/* Preview panel — absolute inset-0 with left offset to preserve Chat column 1 */}
         {previewOpen && (
@@ -268,9 +274,9 @@ export function AppShell() {
         onClose={() => setFolderPickerOpen(false)}
         onSelect={() => dismiss()}
       />
-      {/* Command palette — Ctrl+Shift+P / Cmd+Shift+P to open */}
+      {/* Command palette — Ctrl+Shift+P / Cmd+Shift+P to open; gated in Builder mode */}
       <CommandPalette
-        open={paletteOpen}
+        open={builderMode ? false : paletteOpen}
         onClose={() => setPaletteOpen(false)}
         onSelectCommand={(cmd) => {
           setPaletteOpen(false);
@@ -280,5 +286,23 @@ export function AppShell() {
       />
       </div>
     </div>
+  );
+}
+
+/**
+ * AppShellWithMode — thin wrapper that reads builderMode from settings
+ * and wraps AppShell in InterfaceModeProvider.
+ *
+ * Used by App.tsx instead of AppShell directly so the provider is above
+ * the entire component tree. Brief flash (Developer mode while settings load)
+ * is acceptable — same pattern as trust/auth checking.
+ */
+export function AppShellWithMode() {
+  const { settings } = useSettings();
+  const builderMode = settings?.merged?.interface_mode === "builder";
+  return (
+    <InterfaceModeProvider builderMode={builderMode}>
+      <AppShell />
+    </InterfaceModeProvider>
   );
 }

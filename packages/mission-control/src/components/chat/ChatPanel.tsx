@@ -23,6 +23,8 @@ interface ChatPanelViewProps {
   scrollRef: React.RefObject<HTMLDivElement | null>;
   /** Optional overlay node. When present: message list dims, ChatInput is hidden. */
   overlay?: React.ReactNode;
+  /** Builder mode — hides slash autocomplete, changes placeholder */
+  builderMode?: boolean;
 }
 
 /** Pure render -- no hooks. Testable via direct function call. */
@@ -32,6 +34,7 @@ export function ChatPanelView({
   isProcessing,
   scrollRef,
   overlay,
+  builderMode = false,
 }: ChatPanelViewProps) {
   return (
     <div className="flex flex-col h-full relative">
@@ -64,7 +67,7 @@ export function ChatPanelView({
           {overlay}
         </div>
       ) : (
-        <ChatInput onSend={onSend} disabled={isProcessing} />
+        <ChatInput onSend={onSend} disabled={isProcessing} builderMode={builderMode} />
       )}
     </div>
   );
@@ -76,10 +79,12 @@ interface ChatPanelProps {
   isProcessing: boolean;
   /** Optional overlay node forwarded to ChatPanelView (discuss mode QuestionCard). */
   overlay?: React.ReactNode;
+  /** Builder mode — forwarded to ChatInput */
+  builderMode?: boolean;
 }
 
 /** Stateful wrapper with auto-scroll on new messages. */
-export function ChatPanel({ messages, onSend, isProcessing, overlay }: ChatPanelProps) {
+export function ChatPanel({ messages, onSend, isProcessing, overlay, builderMode = false }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -95,6 +100,7 @@ export function ChatPanel({ messages, onSend, isProcessing, overlay }: ChatPanel
       isProcessing={isProcessing}
       scrollRef={scrollRef}
       overlay={overlay}
+      builderMode={builderMode}
     />
   );
 }

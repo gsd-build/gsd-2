@@ -54,6 +54,8 @@ interface SingleColumnViewProps {
   onDismissCrash?: () => void;
   /** Phase 14 prop — forwards MilestoneView slice actions to AppShell/WebSocket */
   onMilestoneAction?: (action: MilestoneAction) => void;
+  /** Phase 18 prop — Builder mode: hides cost badge, slash autocomplete, changes placeholder */
+  builderMode?: boolean;
 }
 
 export function SingleColumnView({
@@ -81,6 +83,7 @@ export function SingleColumnView({
   onInterrupt,
   onDismissCrash,
   onMilestoneAction,
+  builderMode = false,
 }: SingleColumnViewProps) {
   return (
     // tabIndex={-1} enables programmatic focus after Ctrl+1-5 panel switch (KEYS-06)
@@ -110,6 +113,7 @@ export function SingleColumnView({
           costState={costState}
           onInterrupt={onInterrupt}
           onDismissCrash={onDismissCrash}
+          builderMode={builderMode}
         />
       )}
       {activeView.kind === "milestone" && (

@@ -211,6 +211,7 @@ export function SettingsView() {
   const { settings, loading, error, dirty, update, save } = useSettings();
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     provider: true,
+    interfaceMode: true,
     buildPerms: true,
     claude: true,
     skills: true,
@@ -405,7 +406,48 @@ export function SettingsView() {
           )}
         </Section>
 
-        {/* 1. Build Permissions */}
+        {/* 1. Interface Mode */}
+        <Section
+          title="Interface Mode"
+          icon={<Zap className="h-4 w-4 text-cyan-accent" />}
+          open={openSections.interfaceMode ?? true}
+          onToggle={() => toggleSection("interfaceMode")}
+        >
+          <p className="text-sm text-slate-400">
+            Switch between Developer terminology and plain-language Builder mode.
+          </p>
+          <div className="flex items-center gap-3 mt-2">
+            <button
+              type="button"
+              onClick={() => handleUpdate("interface_mode", "developer")}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-sm font-medium border transition-colors",
+                (getSetting("interface_mode", "developer") as string) === "developer"
+                  ? "bg-cyan-accent/15 text-cyan-accent border-cyan-accent/40"
+                  : "bg-navy-800 text-slate-400 border-navy-600 hover:text-slate-200",
+              )}
+            >
+              Developer
+            </button>
+            <button
+              type="button"
+              onClick={() => handleUpdate("interface_mode", "builder")}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-sm font-medium border transition-colors",
+                (getSetting("interface_mode", "developer") as string) === "builder"
+                  ? "bg-cyan-accent/15 text-cyan-accent border-cyan-accent/40"
+                  : "bg-navy-800 text-slate-400 border-navy-600 hover:text-slate-200",
+              )}
+            >
+              Builder
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Builder mode uses plain language: Version, Feature, Step instead of Milestone, Slice, Task.
+          </p>
+        </Section>
+
+        {/* 2. Build Permissions */}
         <Section
           title="Build Permissions"
           icon={<Shield className="h-4 w-4 text-cyan-accent" />}

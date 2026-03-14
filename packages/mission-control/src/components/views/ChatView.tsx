@@ -55,6 +55,8 @@ export interface ChatViewProps {
   isAutoMode?: boolean;
   /** Called on Escape keypress while auto mode is active */
   onInterrupt?: () => void;
+  /** Builder mode — hides cost badge, token count, model name, slash autocomplete */
+  builderMode?: boolean;
 }
 
 /** Internal props injected by ChatViewConnected; not part of the public API. */
@@ -115,6 +117,7 @@ export function ChatView({
   costState,
   onDismissBudgetWarning,
   isAutoMode = false,
+  builderMode = false,
 }: ChatViewInternalProps) {
   // TODO Phase 13-14: derive currentPlan, isExecuting, nextPlan from GSD2State
   // GSD2State has no .phases array — task/plan display will be rebuilt in Phase 13-14
@@ -324,6 +327,7 @@ export function ChatView({
             onSend={onChatSend}
             isProcessing={isChatProcessing}
             overlay={discussOverlay}
+            builderMode={builderMode}
           />
           {pendingAttachment && (
             <div className="absolute bottom-14 left-4 right-4 z-10 flex items-center gap-2 rounded-md bg-navy-700 border border-cyan-accent/30 px-3 py-2">

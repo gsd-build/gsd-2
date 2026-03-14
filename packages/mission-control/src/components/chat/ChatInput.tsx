@@ -54,15 +54,18 @@ export function ChatInputView({
 interface ChatInputProps {
   onSend: (message: string) => void;
   disabled?: boolean;
+  /** When true: hides slash autocomplete, shows Builder placeholder */
+  builderMode?: boolean;
 }
 
 /** Stateful wrapper with command history and autocomplete filtering. */
-export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
+export function ChatInput({ onSend, disabled = false, builderMode = false }: ChatInputProps) {
   const [value, setValue] = useState("");
   const historyRef = useRef<string[]>([]);
   const indexRef = useRef(-1);
 
-  const filtered = value.startsWith("/") ? filterCommands(value) : [];
+  // In Builder mode: slash autocomplete is unconditionally empty
+  const filtered = builderMode ? [] : (value.startsWith("/") ? filterCommands(value) : []);
 
   const pushHistory = useCallback((cmd: string) => {
     if (cmd.trim() && cmd !== historyRef.current[0]) {
@@ -110,7 +113,11 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
     setValue(command);
   };
 
-  const placeholder = disabled ? "Claude is working..." : "Type / for commands...";
+  const placeholder = disabled
+    ? "Claude is working..."
+    : builderMode
+      ? "What do you want to build or change?"
+      : "Type / for commands...";
 
   return (
     <ChatInputView
