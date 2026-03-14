@@ -31,7 +31,7 @@ if [ "$CROSS_FAILED" = "1" ]; then
 fi
 echo "    No @gsd/* cross-dependencies."
 
-# --- Pack and verify contents ---
+# --- Pack tarball ---
 echo "==> Packing tarball..."
 TARBALL_NAME=$(npm pack --ignore-scripts 2>/dev/null | tail -1)
 TARBALL="$ROOT/$TARBALL_NAME"
@@ -46,17 +46,27 @@ trap 'rm -rf "$INSTALL_DIR" "$TARBALL"' EXIT
 
 echo "==> Tarball: $TARBALL_NAME ($(du -h "$TARBALL" | cut -f1) compressed)"
 
-# Verify dist/loader.js is present (sanity check)
-if tar tzf "$TARBALL" 2>/dev/null | grep -q "dist/loader.js"; then
-  echo "    dist/loader.js present."
-else
-  echo "ERROR: dist/loader.js missing from tarball."
-  echo "    Tarball contents (first 20 files):"
-  tar tzf "$TARBALL" | head -20
+# --- Check critical files using tar listing dumped to a file ---
+# (avoids SIGPIPE issues with tar | grep on Linux)
+TAR_LIST=$(mktemp)
+tar tzf "$TARBALL" > "$TAR_LIST" 2>/dev/null
+
+MISSING=0
+for required in dist/loader.js packages/pi-coding-agent/dist/index.js scripts/link-workspace-packages.cjs; do
+  if ! grep -q "package/${required}" "$TAR_LIST"; then
+    echo "    MISSING: $required"
+    MISSING=1
+  fi
+done
+rm -f "$TAR_LIST"
+
+if [ "$MISSING" = "1" ]; then
+  echo "ERROR: Critical files missing from tarball."
   exit 1
 fi
+echo "    Critical files present."
 
-# --- Install test — the definitive proof ---
+# --- Install test ---
 echo "==> Testing install in isolated directory..."
 cd "$INSTALL_DIR"
 npm init -y > /dev/null 2>&1
