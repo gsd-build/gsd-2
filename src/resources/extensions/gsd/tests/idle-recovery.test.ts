@@ -413,9 +413,7 @@ function initGitRepo(): string {
 
     try {
       execSync("git merge feature", { cwd: repo, stdio: "pipe" });
-    } catch (error) {
-      // expected: merge conflict to create unmerged (UU) entries for this test
-    }
+    } catch {}
 
     const porcelain = execSync("git status --porcelain", { cwd: repo }).toString();
     assert(porcelain.includes("UU "), "precondition: UU conflict entry in porcelain output");
@@ -431,6 +429,11 @@ function initGitRepo(): string {
   console.log("\n=== verifyExpectedArtifact: fix-merge — unmerged entries (AA conflict) → false ===");
   const repo = initGitRepo();
   try {
+    // Create a base commit so `main` exists and branches share a history
+    writeFileSync(join(repo, "base.txt"), "base\n");
+    execSync("git add base.txt", { cwd: repo, stdio: "ignore" });
+    execSync("git commit -m 'base'", { cwd: repo, stdio: "ignore" });
+
     // Create an AA (both added) conflict.
     execSync("git checkout -b feature", { cwd: repo, stdio: "ignore" });
     writeFileSync(join(repo, "new.txt"), "added on feature\n");
@@ -444,17 +447,7 @@ function initGitRepo(): string {
 
     try {
       execSync("git merge feature", { cwd: repo, stdio: "pipe" });
-    } catch (error) {
-      // The merge is expected to fail (non-zero exit code) due to the intentional
-      // AA conflict created for this test. Swallow the error so we can assert on
-      // the resulting unmerged state, but log it so unexpected failures are visible.
-      if (error instanceof Error) {
-        console.error(
-          "git merge failed as expected in idle-recovery AA-conflict test:",
-          error.message,
-        );
-      }
-    }
+    } catch {}
 
     const porcelain = execSync("git status --porcelain", { cwd: repo }).toString();
     assert(porcelain.includes("AA "), "precondition: AA conflict entry in porcelain output");
