@@ -11,8 +11,11 @@
  */
 
 import { exec } from 'node:child_process'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import type { AuthStorage } from '@gsd/pi-coding-agent'
 import { renderLogo } from './logo.js'
+import { agentDir } from './app-paths.js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -70,6 +73,7 @@ const LLM_PROVIDER_IDS = [
   'xai',
   'openrouter',
   'mistral',
+  'custom-openai',
 ]
 
 /** API key prefix validation — loose checks to catch obvious mistakes */
@@ -84,6 +88,7 @@ const OTHER_PROVIDERS = [
   { value: 'xai', label: 'xAI (Grok)' },
   { value: 'openrouter', label: 'OpenRouter' },
   { value: 'mistral', label: 'Mistral' },
+  { value: 'custom-openai', label: 'Custom (OpenAI-compatible)' },
 ]
 
 // ─── Dynamic imports ──────────────────────────────────────────────────────────
@@ -320,6 +325,9 @@ async function runLlmStep(p: ClackModule, pc: PicoModule, authStorage: AuthStora
       ],
     })
     if (p.isCancel(provider)) return false
+    if (provider === 'custom-openai') {
+      return await runCustomOpenAIFlow(p, pc, authStorage)
+    }
     const label = provider === 'anthropic' ? 'Anthropic'
       : provider === 'openai' ? 'OpenAI'
       : OTHER_PROVIDERS.find(op => op.value === provider)?.label ?? String(provider)
@@ -426,6 +434,100 @@ async function runApiKeyFlow(
 
   authStorage.set(providerId, { type: 'api_key', key: trimmed })
   p.log.success(`API key saved for ${pc.green(providerLabel)}`)
+  return true
+}
+
+// ─── Custom OpenAI-compatible Flow ────────────────────────────────────────────
+
+async function runCustomOpenAIFlow(
+  p: ClackModule,
+  pc: PicoModule,
+  authStorage: AuthStorage,
+): Promise<boolean> {
+  // Prompt for base URL
+  const baseUrl = await p.text({
+    message: 'Base URL of your OpenAI-compatible endpoint:',
+    placeholder: 'https://my-proxy.example.com/v1',
+    validate: (val) => {
+      const trimmed = val?.trim()
+      if (!trimmed) return 'Base URL is required'
+      try {
+        new URL(trimmed)
+      } catch {
+        return 'Must be a valid URL (e.g. https://my-proxy.example.com/v1)'
+      }
+    },
+  })
+  if (p.isCancel(baseUrl) || !baseUrl) return false
+  const trimmedUrl = (baseUrl as string).trim()
+
+  // Prompt for API key
+  const apiKey = await p.password({
+    message: 'API key for this endpoint:',
+    mask: '●',
+  })
+  if (p.isCancel(apiKey) || !apiKey) return false
+  const trimmedKey = (apiKey as string).trim()
+  if (!trimmedKey) return false
+
+  // Prompt for model ID
+  const modelId = await p.text({
+    message: 'Model ID to use:',
+    placeholder: 'gpt-4o',
+    validate: (val) => {
+      if (!val?.trim()) return 'Model ID is required'
+    },
+  })
+  if (p.isCancel(modelId) || !modelId) return false
+  const trimmedModelId = (modelId as string).trim()
+
+  // Save API key to auth storage
+  authStorage.set('custom-openai', { type: 'api_key', key: trimmedKey })
+
+  // Write or merge into models.json
+  const modelsJsonPath = join(agentDir, 'models.json')
+  let config: { providers: Record<string, any> } = { providers: {} }
+
+  if (existsSync(modelsJsonPath)) {
+    try {
+      config = JSON.parse(readFileSync(modelsJsonPath, 'utf-8'))
+      if (!config.providers) config.providers = {}
+    } catch {
+      // If existing file is corrupt, start fresh
+      config = { providers: {} }
+    }
+  }
+
+  config.providers['custom-openai'] = {
+    baseUrl: trimmedUrl,
+    apiKey: `env:CUSTOM_OPENAI_API_KEY`,
+    api: 'openai-completions',
+    models: [
+      {
+        id: trimmedModelId,
+        name: trimmedModelId,
+        reasoning: false,
+        input: ['text'],
+        contextWindow: 128000,
+        maxTokens: 16384,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      },
+    ],
+  }
+
+  // Ensure parent directory exists
+  const dir = dirname(modelsJsonPath)
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+  }
+  writeFileSync(modelsJsonPath, JSON.stringify(config, null, 2), 'utf-8')
+
+  // Also set env var so the current session picks up the key via fallback resolver
+  process.env.CUSTOM_OPENAI_API_KEY = trimmedKey
+
+  p.log.success(`Custom endpoint saved: ${pc.green(trimmedUrl)}`)
+  p.log.info(`Model: ${pc.cyan(trimmedModelId)}`)
+  p.log.info(`Config written to ${pc.dim(modelsJsonPath)}`)
   return true
 }
 
@@ -771,6 +873,7 @@ export function loadStoredEnvKeys(authStorage: AuthStorage): void {
     ['slack_bot',     'SLACK_BOT_TOKEN'],
     ['discord_bot',   'DISCORD_BOT_TOKEN'],
     ['groq',          'GROQ_API_KEY'],
+    ['custom-openai', 'CUSTOM_OPENAI_API_KEY'],
   ]
   for (const [provider, envVar] of providers) {
     if (!process.env[envVar]) {
