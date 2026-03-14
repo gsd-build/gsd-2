@@ -230,8 +230,8 @@ async function main(): Promise<void> {
 
   const tempDir = mkdtempSync(join(tmpdir(), "gsd-git-service-test-"));
   run("git init -b main", tempDir);
-  run("git config user.name 'Pi Test'", tempDir);
-  run("git config user.email 'pi@example.com'", tempDir);
+  run('git config user.name "Pi Test"', tempDir);
+  run('git config user.email "pi@example.com"', tempDir);
 
   // runGit should work on a valid repo
   const branch = runGit(tempDir, ["branch", "--show-current"]);
@@ -526,7 +526,7 @@ async function main(): Promise<void> {
   function initBranchTestRepo(): string {
     const dir = mkdtempSync(join(tmpdir(), "gsd-git-t03-"));
     run("git init -b main", dir);
-    run("git config user.name 'Pi Test'", dir);
+    run('git config user.name "Pi Test"', dir);
     run("git config user.email 'pi@example.com'", dir);
     createFile(dir, ".gitkeep", "");
     run("git add -A", dir);
@@ -579,7 +579,7 @@ async function main(): Promise<void> {
     // master-only repo
     const repo = mkdtempSync(join(tmpdir(), "gsd-git-t03-master-"));
     run("git init -b master", repo);
-    run("git config user.name 'Pi Test'", repo);
+    run('git config user.name "Pi Test"', repo);
     run("git config user.email 'pi@example.com'", repo);
     createFile(repo, ".gitkeep", "");
     run("git add -A", repo);
@@ -634,7 +634,7 @@ async function main(): Promise<void> {
     run("git checkout -b developer", repo);
     createFile(repo, ".gsd/milestones/M001/M001-ROADMAP.md", "# Roadmap");
     run("git add -A", repo);
-    run("git commit -m 'add roadmap'", repo);
+    run('git commit -m "add roadmap"', repo);
 
     // ensureSliceBranch from this non-main, non-slice branch
     const created = svc.ensureSliceBranch("M001", "S01");
@@ -659,14 +659,14 @@ async function main(): Promise<void> {
     // Create file only on main
     createFile(repo, "main-only.txt", "from main");
     run("git add -A", repo);
-    run("git commit -m 'main-only file'", repo);
+    run('git commit -m "main-only file"', repo);
 
     // Create and check out S01
     svc.ensureSliceBranch("M001", "S01");
     // Add a file only on S01
     createFile(repo, "s01-only.txt", "from s01");
     run("git add -A", repo);
-    run("git commit -m 'S01 work'", repo);
+    run('git commit -m "S01 work"', repo);
 
     // Now create S02 from S01 — should fall back to main
     const created = svc.ensureSliceBranch("M001", "S02");
@@ -700,7 +700,7 @@ async function main(): Promise<void> {
 
     // The auto-commit on main should have src/feature.ts but NOT runtime files
     run("git checkout main", repo);
-    const showStat = run("git show --stat --format='' HEAD", repo);
+    const showStat = run("git show --stat --format= HEAD", repo);
     assertTrue(showStat.includes("src/feature.ts"), "auto-commit includes real files");
     assertTrue(!showStat.includes(".gsd/activity"), "auto-commit excludes .gsd/activity/ (smart staging)");
     assertTrue(!showStat.includes("STATE.md"), "auto-commit excludes .gsd/STATE.md (smart staging)");
@@ -724,7 +724,7 @@ async function main(): Promise<void> {
     // Simulate historical state: STATE.md was committed before gitignore was configured
     createFile(repo, ".gsd/STATE.md", "# State v1");
     run("git add -f .gsd/STATE.md", repo);
-    run("git commit -m 'add state (pre-gitignore)'", repo);
+    run('git commit -m "add state (pre-gitignore)"', repo);
 
     // STATE.md gets modified during runtime (dirty)
     createFile(repo, ".gsd/STATE.md", "# State v2 (modified at runtime)");
@@ -752,12 +752,12 @@ async function main(): Promise<void> {
     // Simulate: STATE.md is tracked in main's HEAD (historical state)
     createFile(repo, ".gsd/STATE.md", "# State original");
     run("git add -f .gsd/STATE.md", repo);
-    run("git commit -m 'initial with tracked STATE.md'", repo);
+    run('git commit -m "initial with tracked STATE.md"', repo);
 
     // Simulate what smartStage one-time cleanup does: remove STATE.md from index and commit.
     // This leaves STATE.md on disk but removes it from main's HEAD.
     run("git rm --cached .gsd/STATE.md", repo);
-    run("git commit -m 'chore: untrack runtime files'", repo);
+    run('git commit -m "chore: untrack runtime files"', repo);
 
     // STATE.md exists on disk (modified) but is now untracked in main's HEAD
     createFile(repo, ".gsd/STATE.md", "# State modified after cleanup");
@@ -790,7 +790,7 @@ async function main(): Promise<void> {
     // Track STATE.md on main (historical pre-gitignore state)
     createFile(repo, ".gsd/STATE.md", "# State on main");
     run("git add -f .gsd/STATE.md", repo);
-    run("git commit -m 'add state (pre-gitignore)'", repo);
+    run('git commit -m "add state (pre-gitignore)"', repo);
 
     // Create slice branch (inherits STATE.md from main)
     svc.ensureSliceBranch("M001", "S01");
@@ -831,7 +831,7 @@ async function main(): Promise<void> {
     assertTrue(sliceLog.includes("pre-switch"), "auto-commit message includes pre-switch");
 
     // Check that the auto-commit on the slice branch excluded runtime files
-    const showStat = run("git log gsd/M001/S01 -1 --format='' --stat", repo);
+    const showStat = run("git log gsd/M001/S01 -1 --format= --stat", repo);
     assertTrue(showStat.includes("src/work.ts"), "switchToMain auto-commit includes real files");
     assertTrue(!showStat.includes(".gsd/activity"), "switchToMain auto-commit excludes .gsd/activity/");
     assertTrue(!showStat.includes(".gsd/runtime"), "switchToMain auto-commit excludes .gsd/runtime/");
@@ -1044,20 +1044,20 @@ async function main(): Promise<void> {
     // Create a .gsd/ planning artifact on main (simulates reassess-roadmap)
     createFile(repo, ".gsd/DECISIONS.md", "# Decisions\n\n- D001: Original decision\n");
     run("git add -A", repo);
-    run("git commit -m 'add decisions on main'", repo);
+    run('git commit -m "add decisions on main"', repo);
 
     // Create slice branch and modify the same .gsd/ file differently
     svc.ensureSliceBranch("M001", "S01");
     createFile(repo, ".gsd/DECISIONS.md", "# Decisions\n\n- D001: Original decision\n- D002: New decision from slice\n");
     createFile(repo, "src/feature.ts", "export const x = 1;");
     run("git add -A", repo);
-    run("git commit -m 'slice work with .gsd/ changes'", repo);
+    run('git commit -m "slice work with .gsd/ changes"', repo);
 
     // Back on main, modify the same .gsd/ file to create a conflict
     svc.switchToMain();
     createFile(repo, ".gsd/DECISIONS.md", "# Decisions\n\n- D001: Updated decision on main\n");
     run("git add -A", repo);
-    run("git commit -m 'update decisions on main'", repo);
+    run('git commit -m "update decisions on main"', repo);
 
     // Merge should auto-resolve .gsd/ conflicts by taking theirs (slice branch)
     const result = svc.mergeSliceToMain("M001", "S01", "Feature with .gsd/ conflicts");
@@ -1126,10 +1126,10 @@ async function main(): Promise<void> {
     // Create package.json with passing test script
     createFile(repo, "package.json", JSON.stringify({
       name: "test-pass",
-      scripts: { test: "node -e 'process.exit(0)'" },
+      scripts: { test: 'node -e "process.exit(0)"' },
     }));
     run("git add -A", repo);
-    run("git commit -m 'add package.json'", repo);
+    run('git commit -m "add package.json"', repo);
 
     const svc = new GitServiceImpl(repo, { pre_merge_check: true });
     const result: PreMergeCheckResult = svc.runPreMergeCheck();
@@ -1149,10 +1149,10 @@ async function main(): Promise<void> {
     // Create package.json with failing test script
     createFile(repo, "package.json", JSON.stringify({
       name: "test-fail",
-      scripts: { test: "node -e 'process.exit(1)'" },
+      scripts: { test: 'node -e "process.exit(1)"' },
     }));
     run("git add -A", repo);
-    run("git commit -m 'add failing package.json'", repo);
+    run('git commit -m "add failing package.json"', repo);
 
     const svc = new GitServiceImpl(repo, { pre_merge_check: true });
     const result: PreMergeCheckResult = svc.runPreMergeCheck();
@@ -1171,10 +1171,10 @@ async function main(): Promise<void> {
     const repo = initBranchTestRepo();
     createFile(repo, "package.json", JSON.stringify({
       name: "test-disabled",
-      scripts: { test: "node -e 'process.exit(1)'" },
+      scripts: { test: 'node -e "process.exit(1)"' },
     }));
     run("git add -A", repo);
-    run("git commit -m 'add package.json'", repo);
+    run('git commit -m "add package.json"', repo);
 
     const svc = new GitServiceImpl(repo, { pre_merge_check: false });
     const result: PreMergeCheckResult = svc.runPreMergeCheck();
@@ -1192,7 +1192,7 @@ async function main(): Promise<void> {
   {
     const repo = initBranchTestRepo();
     // Custom command string overrides auto-detection
-    const svc = new GitServiceImpl(repo, { pre_merge_check: "node -e 'process.exit(0)'" });
+    const svc = new GitServiceImpl(repo, { pre_merge_check: 'node -e "process.exit(0)"' });
     const result: PreMergeCheckResult = svc.runPreMergeCheck();
 
     assertEq(result.passed, true, "runPreMergeCheck passes with custom command that exits 0");
@@ -1326,11 +1326,11 @@ async function main(): Promise<void> {
     // Add a commit to the remote via a temporary clone
     const cloneDir = mkdtempSync(join(tmpdir(), "gsd-git-clone-"));
     run(`git clone ${bareDir} ${cloneDir}`, cloneDir);
-    run("git config user.name 'Remote Dev'", cloneDir);
-    run("git config user.email 'remote@example.com'", cloneDir);
+    run('git config user.name "Remote Dev"', cloneDir);
+    run('git config user.email "remote@example.com"', cloneDir);
     createFile(cloneDir, "remote-file.txt", "from remote");
     run("git add -A", cloneDir);
-    run("git commit -m 'remote commit'", cloneDir);
+    run('git commit -m "remote commit"', cloneDir);
     run("git push origin main", cloneDir);
 
     // ensureSliceBranch should fetch before creating the branch — no crash

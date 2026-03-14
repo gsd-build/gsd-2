@@ -170,7 +170,7 @@ export function listWorktrees(basePath: string): WorktreeInfo[] {
   if (!rawList.trim()) return [];
 
   const worktrees: WorktreeInfo[] = [];
-  const entries = rawList.split("\n\n").filter(Boolean);
+  const entries = rawList.replaceAll("\r\n", "\n").split("\n\n").filter(Boolean);
 
   for (const entry of entries) {
     const lines = entry.split("\n");
