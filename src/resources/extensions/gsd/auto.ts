@@ -1176,6 +1176,31 @@ async function dispatchNextUnit(
     }
   }
 
+  // ── Secrets re-check gate — runs before every dispatch, not just at startAuto ──
+  // plan-milestone writes the milestone SECRETS file (e.g., M001-SECRETS.md) during its unit. By the time we
+  // reach the next dispatchNextUnit call the manifest exists but hasn't been
+  // presented to the user yet. Without this re-check the model would proceed
+  // into plan-slice / execute-task with no real credentials and mock everything.
+  const runSecretsGate = async () => {
+    try {
+      const manifestStatus = await getManifestStatus(basePath, mid);
+      if (manifestStatus && manifestStatus.pending.length > 0) {
+        const result = await collectSecretsFromManifest(basePath, mid, ctx);
+        ctx.ui.notify(
+          `Secrets collected: ${result.applied.length} applied, ${result.skipped.length} skipped, ${result.existingSkipped.length} already set.`,
+          "info",
+        );
+      }
+    } catch (err) {
+      ctx.ui.notify(
+        `Secrets collection error: ${err instanceof Error ? err.message : String(err)}`,
+        "warning",
+      );
+    }
+  };
+
+  await runSecretsGate();
+
   const needsRunUat = await checkNeedsRunUat(basePath, mid, state, prefs);
   // Flag: for human/mixed UAT, pause auto-mode after the prompt is sent so the user
   // can perform the UAT manually. On next resume, result file will exist → skip.
