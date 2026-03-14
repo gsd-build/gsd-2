@@ -10,12 +10,15 @@ import { HistoryView } from "@/components/views/HistoryView";
 import { SettingsView } from "@/components/views/SettingsView";
 import { AssetsView } from "@/components/views/AssetsView";
 import { ReviewViewWithAnimation } from "@/components/views/ReviewView";
+import { RoutingBadge } from "@/components/chat/RoutingBadge";
+import { PhaseGateCard } from "@/components/chat/PhaseGateCard";
 import type { ViewType } from "@/lib/view-types";
 import type { PlanningState } from "@/server/types";
 import type { ChatMessage, ReviewResults } from "@/server/chat-types";
 import type { SessionTab } from "@/hooks/useSessionManager";
 import type { CostState } from "@/hooks/useCostTracker";
 import type { MilestoneAction } from "@/components/views/MilestoneView";
+import type { IntentType } from "@/server/classify-intent-api";
 import type React from "react";
 
 interface SingleColumnViewProps {
@@ -56,6 +59,20 @@ interface SingleColumnViewProps {
   onMilestoneAction?: (action: MilestoneAction) => void;
   /** Phase 18 prop — Builder mode: hides cost badge, slash autocomplete, changes placeholder */
   builderMode?: boolean;
+  /** Phase 18-02: Routing badge state after message send in Builder mode */
+  routingBadgeState?: {
+    intent: Exclude<IntentType, "UI_PHASE_GATE">;
+    originalMessage: string;
+    sentAs: string;
+  } | null;
+  /** Phase 18-02: Phase gate intercept state (UI_PHASE_GATE intent) */
+  phaseGateState?: { originalMessage: string } | null;
+  /** Clear routing badge */
+  onClearRoutingBadge?: () => void;
+  /** Clear phase gate */
+  onClearPhaseGate?: () => void;
+  /** Send message bypassing Builder mode classification (for PhaseGate skip path) */
+  onSendDirectMessage?: (message: string) => void;
 }
 
 export function SingleColumnView({
@@ -84,6 +101,11 @@ export function SingleColumnView({
   onDismissCrash,
   onMilestoneAction,
   builderMode = false,
+  routingBadgeState,
+  phaseGateState,
+  onClearRoutingBadge,
+  onClearPhaseGate,
+  onSendDirectMessage,
 }: SingleColumnViewProps) {
   return (
     // tabIndex={-1} enables programmatic focus after Ctrl+1-5 panel switch (KEYS-06)
@@ -94,27 +116,56 @@ export function SingleColumnView({
     >
       <div key={activeView.kind} className="animate-in fade-in duration-200 h-full">
       {activeView.kind === "chat" && (
-        <ChatView
-          planningState={planningState}
-          chatMessages={chatMessages}
-          onChatSend={onChatSend}
-          isChatProcessing={isChatProcessing}
-          sessions={sessions}
-          activeSessionId={activeSessionId}
-          onSelectSession={onSelectSession}
-          onCreateSession={onCreateSession}
-          onCloseSession={onCloseSession}
-          onRenameSession={onRenameSession}
-          discussOverlay={discussOverlay}
-          onTogglePreview={onTogglePreview}
-          previewOpen={previewOpen}
-          isAutoMode={isAutoMode}
-          isCrashed={isCrashed}
-          costState={costState}
-          onInterrupt={onInterrupt}
-          onDismissCrash={onDismissCrash}
-          builderMode={builderMode}
-        />
+        <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+          {/* Phase gate card — intercept UI_PHASE_GATE intent (BUILDER-04) */}
+          {phaseGateState && (
+            <PhaseGateCard
+              originalMessage={phaseGateState.originalMessage}
+              onSetupDesign={() => {
+                onClearPhaseGate?.();
+                onSendDirectMessage?.("/gsd discuss");
+              }}
+              onSkip={() => {
+                const msg = phaseGateState.originalMessage;
+                onClearPhaseGate?.();
+                onSendDirectMessage?.(msg);
+              }}
+            />
+          )}
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <ChatView
+              planningState={planningState}
+              chatMessages={chatMessages}
+              onChatSend={onChatSend}
+              isChatProcessing={isChatProcessing}
+              sessions={sessions}
+              activeSessionId={activeSessionId}
+              onSelectSession={onSelectSession}
+              onCreateSession={onCreateSession}
+              onCloseSession={onCloseSession}
+              onRenameSession={onRenameSession}
+              discussOverlay={discussOverlay}
+              onTogglePreview={onTogglePreview}
+              previewOpen={previewOpen}
+              isAutoMode={isAutoMode}
+              isCrashed={isCrashed}
+              costState={costState}
+              onInterrupt={onInterrupt}
+              onDismissCrash={onDismissCrash}
+              builderMode={builderMode}
+            />
+          </div>
+          {/* Routing badge — shown after message send in Builder mode (BUILDER-04) */}
+          {routingBadgeState && (
+            <RoutingBadge
+              intent={routingBadgeState.intent}
+              originalMessage={routingBadgeState.originalMessage}
+              sentAs={routingBadgeState.sentAs}
+              onOverride={() => onClearRoutingBadge?.()}
+              onDismiss={() => onClearRoutingBadge?.()}
+            />
+          )}
+        </div>
       )}
       {activeView.kind === "milestone" && (
         <MilestoneView

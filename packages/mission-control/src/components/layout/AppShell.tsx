@@ -11,7 +11,7 @@
  * Uses useSessionManager for multi-session chat support.
  * Uses usePreview for live preview panel state (Cmd+P toggle, port detection).
  */
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { SingleColumnView } from "@/components/layout/SingleColumnView";
 import { PreviewPanelWithState } from "@/components/preview/PreviewPanelWithState";
@@ -34,6 +34,7 @@ import { InterfaceModeProvider } from "@/context/InterfaceModeContext";
 import { CommandPalette } from "@/components/command-palette/CommandPalette";
 import { readSession, writeSession } from "@/server/session-persistence-api";
 import type { MissionControlSession } from "@/server/session-persistence-api";
+import type { IntentType } from "@/server/classify-intent-api";
 
 // Planning directory — usePlanningState does not expose planningDir, fall back to ".planning"
 const PLANNING_DIR = ".planning";
@@ -52,6 +53,15 @@ export function AppShell() {
 
   // Builder mode — read from settings (BUILDER-01)
   const { builderMode } = useBuilderMode();
+
+  // Builder mode routing state (BUILDER-04)
+  const [routingBadgeState, setRoutingBadgeState] = useState<{
+    intent: Exclude<IntentType, "UI_PHASE_GATE">;
+    originalMessage: string;
+    sentAs: string;
+  } | null>(null);
+  const [phaseGateState, setPhaseGateState] = useState<{ originalMessage: string } | null>(null);
+  const [isClassifying, setIsClassifying] = useState(false);
 
   const {
     sessions,
@@ -73,6 +83,43 @@ export function AppShell() {
     boundaryViolation,
     dismissBoundaryViolation,
   } = useSessionManager("ws://localhost:4001", { budgetCeiling });
+
+  // handleBuilderSend: classify intent before dispatching in Builder mode (BUILDER-04)
+  const handleBuilderSend = useCallback(async (message: string) => {
+    if (!builderMode) {
+      sendMessage(message);
+      return;
+    }
+    setIsClassifying(true);
+    try {
+      const stateContent = JSON.stringify(state?.projectState ?? "");
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 1500);
+      const res = await fetch("/api/classify-intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, stateContext: stateContent }),
+        signal: controller.signal,
+      }).catch(() => null);
+      clearTimeout(timer);
+
+      const intent: IntentType | null = res?.ok
+        ? ((await res.json().catch(() => null))?.intent ?? null)
+        : null;
+
+      if (intent === "UI_PHASE_GATE") {
+        setPhaseGateState({ originalMessage: message });
+        return;
+      }
+
+      const resolvedIntent = (intent as Exclude<IntentType, "UI_PHASE_GATE"> | null) ?? "GENERAL_CODING";
+      const sentAs = resolvedIntent === "GSD_COMMAND" ? "/gsd auto" : message;
+      setRoutingBadgeState({ intent: resolvedIntent, originalMessage: message, sentAs });
+      sendMessage(sentAs);
+    } finally {
+      setIsClassifying(false);
+    }
+  }, [builderMode, sendMessage, state]);
 
   const { activeView, setActiveView } = useSidebarNav();
 
@@ -214,8 +261,8 @@ export function AppShell() {
           activeView={activeView}
           planningState={state}
           chatMessages={activeMessages}
-          onChatSend={sendMessage}
-          isChatProcessing={isActiveProcessing}
+          onChatSend={handleBuilderSend}
+          isChatProcessing={isActiveProcessing || isClassifying}
           sessions={sessions}
           activeSessionId={activeSessionId}
           onSelectSession={selectSession}
@@ -242,6 +289,11 @@ export function AppShell() {
             }
           }}
           builderMode={builderMode}
+          routingBadgeState={routingBadgeState}
+          phaseGateState={phaseGateState}
+          onClearRoutingBadge={() => setRoutingBadgeState(null)}
+          onClearPhaseGate={() => setPhaseGateState(null)}
+          onSendDirectMessage={sendMessage}
         />
         {/* Preview panel — absolute inset-0 with left offset to preserve Chat column 1 */}
         {previewOpen && (
