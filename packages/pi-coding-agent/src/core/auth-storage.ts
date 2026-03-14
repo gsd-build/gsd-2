@@ -535,6 +535,14 @@ export class AuthStorage {
 		if (credentials.length === 0) return false;
 
 		const errorType = options?.errorType ?? "rate_limit";
+
+		// For unknown/transport errors (e.g. connection reset, "terminated"),
+		// don't back off the only credential — it would make getApiKey() return
+		// undefined and surface a misleading "Authentication failed" message.
+		if (errorType === "unknown" && credentials.length === 1) {
+			return false;
+		}
+
 		const backoffMs = getBackoffDuration(errorType);
 
 		// Determine which credential was just used (same logic as selectCredentialIndex

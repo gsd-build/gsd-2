@@ -2316,9 +2316,14 @@ export class AgentSession {
 
 		// Try credential fallback before counting against retry budget.
 		// If another credential is available, switch to it and retry immediately.
+		// Only attempt credential rotation for errors that indicate a credential-level
+		// problem (rate limit, quota exhaustion, server error). Transport failures
+		// ("unknown") like connection resets are not credential-specific — rotating
+		// won't help and backing off the only credential causes "Authentication failed".
 		if (this.model && message.errorMessage) {
 			const errorType = this._classifyErrorType(message.errorMessage);
-			const hasAlternate = this._modelRegistry.authStorage.markUsageLimitReached(
+			const isCredentialError = errorType !== "unknown";
+			const hasAlternate = isCredentialError && this._modelRegistry.authStorage.markUsageLimitReached(
 				this.model.provider,
 				this.sessionId,
 				{ errorType },

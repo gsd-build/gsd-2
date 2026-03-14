@@ -319,6 +319,17 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			}
 			const key = await modelRegistry.getApiKeyForProvider(resolvedProvider);
 			if (!key) {
+				// Check if credentials exist but are temporarily backed off
+				// (e.g., after a 429 quota exhaustion). Provide a specific error
+				// so the retry handler knows this is transient, not a permanent
+				// auth failure.
+				const hasAuth = modelRegistry.authStorage.hasAuth(resolvedProvider);
+				if (hasAuth) {
+					throw new Error(
+						`All credentials for "${resolvedProvider}" are temporarily backed off due to rate limiting. ` +
+							`The request will be retried automatically when backoff expires.`,
+					);
+				}
 				const model = agent.state.model;
 				const isOAuth = model && modelRegistry.isUsingOAuth(model);
 				if (isOAuth) {
