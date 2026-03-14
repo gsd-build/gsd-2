@@ -339,7 +339,7 @@ export default function (pi: ExtensionAPI) {
         "errorMessage" in lastMsg && lastMsg.errorMessage
           ? `: ${lastMsg.errorMessage}`
           : "";
-      (ctx as any).log(`Auto-mode paused due to provider error${errorDetail}`);
+      ctx.ui.notify(`Auto-mode paused due to provider error${errorDetail}`, "warning");
       await pauseAuto(ctx, pi);
       return;
     }

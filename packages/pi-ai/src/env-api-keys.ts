@@ -122,6 +122,7 @@ export function getEnvApiKey(provider: any): string | undefined {
 		opencode: "OPENCODE_API_KEY",
 		"opencode-go": "OPENCODE_API_KEY",
 		"kimi-coding": "KIMI_API_KEY",
+		"alibaba-coding-plan": "ALIBABA_API_KEY",
 	};
 
 	const envVar = envMap[provider];
