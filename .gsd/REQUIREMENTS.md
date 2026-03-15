@@ -14,17 +14,6 @@ Guidelines:
 
 ## Active
 
-### R002 — Browser onboarding validates required credentials before use
-- Class: launchability
-- Status: active
-- Description: A first-time `gsd --web` user must enter and test required credentials in the browser before the workspace becomes usable; optional credentials may stay skippable.
-- Why it matters: The browser path must be genuinely usable on first launch, not cosmetically complete but operationally blocked.
-- Source: user
-- Primary owning slice: M001/S02
-- Supporting slices: M001/S01, M001/S07
-- Validation: mapped
-- Notes: Preserve the existing GSD provider/tool setup model, but move it into the browser flow.
-
 ### R004 — Primary GSD workflow runs end-to-end in the browser without opening TUI
 - Class: primary-user-loop
 - Status: active
@@ -126,6 +115,17 @@ Guidelines:
 - Validation: verified by `src/tests/web-mode-cli.test.ts`, the slice-level runtime integration test, and a fresh browser launch with no console errors.
 - Notes: S01 proved the launch path itself; broader browser-first workflow coverage remains with later slices.
 
+### R002 — Browser onboarding validates required setup and unlocks the workspace entirely in-browser
+- Class: launchability
+- Status: validated
+- Description: A first-run `gsd --web` user must be able to complete required setup in-browser, validate required credentials, and reach an unlocked usable workspace without touching the TUI.
+- Why it matters: Browser mode is not operationally real if first-run setup still needs terminal fallback or lets invalid credentials silently through.
+- Source: user
+- Primary owning slice: M001/S02
+- Supporting slices: M001/S01, M001/S07
+- Validation: verified by `src/tests/web-onboarding-contract.test.ts`, `src/tests/integration/web-mode-onboarding.test.ts`, `npm run build:web-host`, and a fresh-profile runtime spot-check of `/api/boot`, `/api/onboarding`, and blocked `/api/session/command` responses.
+- Notes: S02 proves onboarding gating, validation, bridge-auth refresh, and first-command unlock inside the preserved shell; full end-to-end browser workflow still closes in S07.
+
 ### R003 — Web mode opens into the current project/cwd workspace
 - Class: primary-user-loop
 - Status: validated
@@ -212,7 +212,7 @@ Guidelines:
 | ID | Class | Status | Primary owner | Supporting | Proof |
 |---|---|---|---|---|---|
 | R001 | launchability | validated | M001/S01 | M001/S07 | validated |
-| R002 | launchability | active | M001/S02 | M001/S01, M001/S07 | mapped |
+| R002 | launchability | validated | M001/S02 | M001/S01, M001/S07 | validated |
 | R003 | primary-user-loop | validated | M001/S01 | M001/S04 | validated |
 | R004 | primary-user-loop | active | M001/S07 | M001/S01, M001/S02, M001/S03, M001/S04, M001/S05, M001/S06 | mapped |
 | R005 | core-capability | active | M001/S04 | M001/S03, M001/S05, M001/S06 | mapped |
@@ -231,7 +231,7 @@ Guidelines:
 
 ## Coverage Summary
 
-- Active requirements: 9
-- Mapped to concrete M001 slices: 8
-- Validated: 2
+- Active requirements: 8
+- Mapped to concrete M001 slices: 7
+- Validated: 3
 - Unmapped active requirements: 0

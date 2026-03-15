@@ -10,6 +10,12 @@ function isBridgeInput(value: unknown): value is { type: string } {
   return typeof value === "object" && value !== null && typeof (value as { type?: unknown }).type === "string";
 }
 
+function responseStatus(response: { success: boolean; code?: string }): number {
+  if (response.success) return 200;
+  if (response.code === "onboarding_locked") return 423;
+  return 502;
+}
+
 export async function POST(request: Request): Promise<Response> {
   let payload: unknown;
   try {
@@ -31,7 +37,7 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     return Response.json(response, {
-      status: response.success ? 200 : 502,
+      status: responseStatus(response as { success: boolean; code?: string }),
       headers: {
         "Cache-Control": "no-store",
       },

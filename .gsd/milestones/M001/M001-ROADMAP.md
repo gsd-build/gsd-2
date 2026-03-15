@@ -56,7 +56,7 @@ This milestone is complete only when all are true:
 - [x] **S01: Web host + agent bridge** `risk:high` `depends:[]`
   > After this: running `gsd --web` opens a live browser workspace for the current project, and the UI can connect to real GSD session state/events through a local bridge instead of placeholders.
 
-- [ ] **S02: First-run setup wizard** `risk:high` `depends:[S01]`
+- [x] **S02: First-run setup wizard** `risk:high` `depends:[S01]`
   > After this: a fresh user can complete required/optional setup in-browser, required keys are tested, and the workspace stays gated until setup passes.
 
 - [ ] **S03: Live terminal + focused prompt handling** `risk:high` `depends:[S01,S02]`

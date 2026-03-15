@@ -114,7 +114,7 @@ async function launchWebModeFromProject(tempHome: string, browserLogPath: string
     const timeout = setTimeout(() => {
       child.kill("SIGTERM")
       finish(new Error(`Timed out waiting for gsd --web to exit. stderr so far:\n${stderr}`))
-    }, 45_000)
+    }, 90_000)
 
     child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString()

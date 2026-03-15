@@ -23,6 +23,7 @@ import {
   getCurrentScopeLabel,
   getProjectDisplayName,
   getSessionLabelFromBridge,
+  getVisibleWorkspaceError,
   shortenPath,
   useGSDWorkspaceState,
   type WorkspaceMilestoneTarget,
@@ -101,7 +102,7 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
   const currentScope = getCurrentScopeLabel(workspace.boot?.workspace)
   const sessionLabel = getSessionLabelFromBridge(workspace.boot?.bridge)
   const validationCount = workspace.boot?.workspace.validationIssues.length ?? 0
-  const visibleError = workspace.lastBridgeError?.message ?? workspace.lastClientError
+  const visibleError = getVisibleWorkspaceError(workspace)
 
   useEffect(() => {
     if (!activeScope?.milestoneId) return

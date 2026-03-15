@@ -15,37 +15,41 @@ import type {
 } from "../../packages/pi-coding-agent/src/modes/rpc/rpc-types.ts";
 import { authFilePath } from "../app-paths.ts";
 import { getProjectSessionsDir } from "../project-sessions.ts";
+import {
+  collectOnboardingState,
+  type OnboardingLockReason,
+  type OnboardingState,
+} from "./onboarding-service.ts";
 
 const DEFAULT_PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const RESPONSE_TIMEOUT_MS = 30_000;
 const START_TIMEOUT_MS = 30_000;
 const MAX_STDERR_BUFFER = 8_000;
-const LLM_PROVIDER_IDS = [
-  "anthropic",
-  "openai",
-  "github-copilot",
-  "openai-codex",
-  "google-gemini-cli",
-  "google-antigravity",
-  "google",
-  "groq",
-  "xai",
-  "openrouter",
-  "mistral",
-] as const;
-const LLM_ENV_KEYS = [
-  "ANTHROPIC_API_KEY",
-  "OPENAI_API_KEY",
-  "GEMINI_API_KEY",
-  "GOOGLE_API_KEY",
-  "GROQ_API_KEY",
-  "XAI_API_KEY",
-  "OPENROUTER_API_KEY",
-  "MISTRAL_API_KEY",
-] as const;
+const WORKSPACE_INDEX_CACHE_TTL_MS = 30_000;
 
 type BridgeLifecyclePhase = "idle" | "starting" | "ready" | "failed";
 type BridgeInput = RpcCommand | RpcExtensionUIResponse;
+
+type BridgeCommandFailureResponse = RpcResponse & {
+  code?: "onboarding_locked";
+  details?: {
+    reason: OnboardingLockReason;
+    onboarding: Pick<
+      OnboardingState,
+      "locked" | "lockReason" | "required" | "lastValidation" | "bridgeAuthRefresh"
+    >;
+  };
+};
+
+const READ_ONLY_RPC_COMMAND_TYPES = new Set<RpcCommand["type"]>([
+  "get_state",
+  "get_available_models",
+  "get_session_stats",
+  "get_messages",
+  "get_last_assistant_text",
+  "get_fork_messages",
+  "get_commands",
+]);
 
 type BridgeExtensionErrorEvent = {
   type: "extension_error";
@@ -170,6 +174,7 @@ export interface BridgeBootPayload {
   };
   workspace: GSDWorkspaceIndex;
   auto: AutoDashboardData;
+  onboarding: OnboardingState;
   onboardingNeeded: boolean;
   resumableSessions: BootResumableSession[];
   bridge: BridgeRuntimeSnapshot;
@@ -208,8 +213,15 @@ interface BridgeServiceDeps {
   indexWorkspace?: (basePath: string) => Promise<GSDWorkspaceIndex>;
   getAutoDashboardData?: () => AutoDashboardData | Promise<AutoDashboardData>;
   listSessions?: (projectSessionsDir: string) => Promise<LocalSessionInfo[]>;
+  getOnboardingState?: () => OnboardingState | Promise<OnboardingState>;
   getOnboardingNeeded?: (authPath: string, env: NodeJS.ProcessEnv) => boolean | Promise<boolean>;
 }
+
+type WorkspaceIndexCacheEntry = {
+  value: GSDWorkspaceIndex | null;
+  expiresAt: number;
+  promise: Promise<GSDWorkspaceIndex> | null;
+};
 
 const defaultBridgeServiceDeps: BridgeServiceDeps = {
   spawn: (command, args, options) => spawn(command, args, options),
@@ -219,11 +231,11 @@ const defaultBridgeServiceDeps: BridgeServiceDeps = {
   indexWorkspace: (basePath: string) => fallbackWorkspaceIndex(basePath),
   getAutoDashboardData: () => fallbackAutoDashboardData(),
   listSessions: async (projectSessionsDir: string) => listProjectSessions(projectSessionsDir),
-  getOnboardingNeeded: (authPath, env) => defaultOnboardingNeeded(authPath, env),
 };
 
 let bridgeServiceOverrides: Partial<BridgeServiceDeps> | null = null;
 let projectBridgeSingleton: { key: string; service: BridgeService } | null = null;
+const workspaceIndexCache = new Map<string, WorkspaceIndexCacheEntry>();
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -296,6 +308,57 @@ function getBridgeDeps(): BridgeServiceDeps {
   return { ...defaultBridgeServiceDeps, ...(bridgeServiceOverrides ?? {}) };
 }
 
+function cloneWorkspaceIndex(index: GSDWorkspaceIndex): GSDWorkspaceIndex {
+  return structuredClone(index);
+}
+
+function invalidateWorkspaceIndexCache(basePath?: string): void {
+  if (basePath) {
+    workspaceIndexCache.delete(basePath);
+    return;
+  }
+
+  workspaceIndexCache.clear();
+}
+
+async function loadCachedWorkspaceIndex(
+  basePath: string,
+  loader: () => Promise<GSDWorkspaceIndex>,
+): Promise<GSDWorkspaceIndex> {
+  const cached = workspaceIndexCache.get(basePath);
+  const now = Date.now();
+
+  if (cached?.value && cached.expiresAt > now) {
+    return cloneWorkspaceIndex(cached.value);
+  }
+
+  if (cached?.promise) {
+    return cloneWorkspaceIndex(await cached.promise);
+  }
+
+  const promise = loader()
+    .then((index) => {
+      workspaceIndexCache.set(basePath, {
+        value: cloneWorkspaceIndex(index),
+        expiresAt: Date.now() + WORKSPACE_INDEX_CACHE_TTL_MS,
+        promise: null,
+      });
+      return index;
+    })
+    .catch((error) => {
+      workspaceIndexCache.delete(basePath);
+      throw error;
+    });
+
+  workspaceIndexCache.set(basePath, {
+    value: cached?.value ?? null,
+    expiresAt: 0,
+    promise,
+  });
+
+  return cloneWorkspaceIndex(await promise);
+}
+
 async function loadWorkspaceIndexViaChildProcess(basePath: string, packageRoot: string): Promise<GSDWorkspaceIndex> {
   const deps = getBridgeDeps();
   const resolveTsLoader = join(packageRoot, "src", "resources", "extensions", "gsd", "tests", "resolve-ts.mjs");
@@ -348,32 +411,33 @@ async function loadWorkspaceIndexViaChildProcess(basePath: string, packageRoot: 
   });
 }
 
-function entryHasAuth(entry: unknown): boolean {
-  if (Array.isArray(entry)) {
-    return entry.some((item) => entryHasAuth(item));
-  }
-  if (!entry || typeof entry !== "object") return false;
-  const credential = entry as { type?: string; key?: string };
-  if (credential.type === "oauth") return true;
-  if (credential.type === "api_key") return typeof credential.key === "string" && credential.key.trim().length > 0;
-  return Object.keys(entry).length > 0;
-}
-
-function defaultOnboardingNeeded(authPath: string, env: NodeJS.ProcessEnv): boolean {
-  if (LLM_ENV_KEYS.some((key) => typeof env[key] === "string" && env[key]!.trim().length > 0)) {
-    return false;
-  }
-
-  if (!existsSync(authPath)) {
-    return true;
-  }
-
-  try {
-    const raw = JSON.parse(readFileSync(authPath, "utf-8")) as Record<string, unknown>;
-    return !LLM_PROVIDER_IDS.some((providerId) => entryHasAuth(raw[providerId]));
-  } catch {
-    return true;
-  }
+function legacyOnboardingStateFromNeeded(onboardingNeeded: boolean): OnboardingState {
+  return {
+    status: onboardingNeeded ? "blocked" : "ready",
+    locked: onboardingNeeded,
+    lockReason: onboardingNeeded ? "required_setup" : null,
+    required: {
+      blocking: true,
+      skippable: false,
+      satisfied: !onboardingNeeded,
+      satisfiedBy: onboardingNeeded ? null : { providerId: "legacy", source: "runtime" },
+      providers: [],
+    },
+    optional: {
+      blocking: false,
+      skippable: true,
+      sections: [],
+    },
+    lastValidation: null,
+    activeFlow: null,
+    bridgeAuthRefresh: {
+      phase: "idle",
+      strategy: null,
+      startedAt: null,
+      completedAt: null,
+      error: null,
+    },
+  };
 }
 
 function parseSessionInfo(path: string): LocalSessionInfo | null {
@@ -497,6 +561,41 @@ function isRpcExtensionUiResponse(input: BridgeInput): input is RpcExtensionUIRe
   return input.type === "extension_ui_response";
 }
 
+function isReadOnlyBridgeInput(input: BridgeInput): boolean {
+  if (isRpcExtensionUiResponse(input)) {
+    return false;
+  }
+  return READ_ONLY_RPC_COMMAND_TYPES.has(input.type);
+}
+
+function buildBridgeLockedResponse(input: BridgeInput, onboarding: OnboardingState): BridgeCommandFailureResponse {
+  const reason = onboarding.lockReason ?? "required_setup";
+  const error =
+    reason === "bridge_refresh_failed"
+      ? "Workspace is locked because bridge auth refresh failed after setup"
+      : reason === "bridge_refresh_pending"
+        ? "Workspace is still locked while bridge auth refresh completes"
+        : "Workspace is locked until required onboarding completes";
+
+  return {
+    type: "response",
+    command: input.type,
+    success: false,
+    error,
+    code: "onboarding_locked",
+    details: {
+      reason,
+      onboarding: {
+        locked: onboarding.locked,
+        lockReason: onboarding.lockReason,
+        required: onboarding.required,
+        lastValidation: onboarding.lastValidation,
+        bridgeAuthRefresh: onboarding.bridgeAuthRefresh,
+      },
+    },
+  };
+}
+
 function sanitizeRpcResponse(response: RpcResponse): RpcResponse {
   if (response.success) return response;
   return { ...response, error: redactSensitiveText(response.error) } satisfies RpcResponse;
@@ -524,6 +623,7 @@ export class BridgeService {
   private detachStdoutReader: (() => void) | null = null;
   private startPromise: Promise<void> | null = null;
   private refreshPromise: Promise<void> | null = null;
+  private authRefreshPromise: Promise<void> | null = null;
   private requestCounter = 0;
   private stderrBuffer = "";
   private snapshot: BridgeRuntimeSnapshot;
@@ -593,6 +693,55 @@ export class BridgeService {
     void this.queueStateRefresh();
     this.broadcastStatus();
     return response;
+  }
+
+  async refreshAuth(): Promise<void> {
+    if (this.authRefreshPromise) {
+      return await this.authRefreshPromise;
+    }
+
+    this.authRefreshPromise = this.refreshAuthInternal().finally(() => {
+      this.authRefreshPromise = null;
+    });
+
+    await this.authRefreshPromise;
+  }
+
+  private async refreshAuthInternal(): Promise<void> {
+    if (this.startPromise) {
+      await this.startPromise;
+    }
+
+    if (this.process && this.snapshot.phase === "ready") {
+      this.resetProcessForAuthRefresh();
+    }
+
+    await this.ensureStarted();
+  }
+
+  private resetProcessForAuthRefresh(): void {
+    const child = this.process;
+    this.process = null;
+    this.detachStdoutReader?.();
+    this.detachStdoutReader = null;
+    this.stderrBuffer = "";
+
+    for (const pending of this.pendingRequests.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(new Error("RPC bridge restarting to reload auth"));
+    }
+    this.pendingRequests.clear();
+
+    if (child) {
+      child.removeAllListeners("exit");
+      child.removeAllListeners("error");
+      child.kill("SIGTERM");
+    }
+
+    this.snapshot.phase = "idle";
+    this.snapshot.updatedAt = nowIso();
+    this.snapshot.lastError = null;
+    this.broadcastStatus();
   }
 
   subscribe(listener: (event: BridgeEvent) => void): () => void {
@@ -853,15 +1002,28 @@ function toBootResumableSession(session: LocalSessionInfo, activeSessionFile: st
   };
 }
 
+async function resolveBootOnboardingState(deps: BridgeServiceDeps, env: NodeJS.ProcessEnv): Promise<OnboardingState> {
+  if (deps.getOnboardingState) {
+    return await deps.getOnboardingState();
+  }
+  if (deps.getOnboardingNeeded) {
+    return legacyOnboardingStateFromNeeded(await deps.getOnboardingNeeded(authFilePath, env));
+  }
+  return await collectOnboardingState();
+}
+
 export async function collectBootPayload(): Promise<BridgeBootPayload> {
   const deps = getBridgeDeps();
   const env = deps.env ?? process.env;
   const config = resolveBridgeRuntimeConfig(env);
   const bridge = getProjectBridgeService();
 
-  const workspacePromise = (deps.indexWorkspace ?? fallbackWorkspaceIndex)(config.projectCwd);
+  const workspacePromise = loadCachedWorkspaceIndex(
+    config.projectCwd,
+    async () => await (deps.indexWorkspace ?? fallbackWorkspaceIndex)(config.projectCwd),
+  );
   const auto = await (deps.getAutoDashboardData ?? fallbackAutoDashboardData)();
-  const onboardingNeeded = await (deps.getOnboardingNeeded ?? defaultOnboardingNeeded)(authFilePath, env);
+  const onboarding = await resolveBootOnboardingState(deps, env);
 
   try {
     await bridge.ensureStarted();
@@ -880,13 +1042,14 @@ export async function collectBootPayload(): Promise<BridgeBootPayload> {
     },
     workspace: await workspacePromise,
     auto,
-    onboardingNeeded,
+    onboarding,
+    onboardingNeeded: onboarding.locked,
     resumableSessions: sessions.map((session) => toBootResumableSession(session, bridgeSnapshot.activeSessionFile)),
     bridge: bridgeSnapshot,
   };
 }
 
-export function buildBridgeFailureResponse(commandType: string, error: unknown): RpcResponse {
+export function buildBridgeFailureResponse(commandType: string, error: unknown): BridgeCommandFailureResponse {
   return {
     type: "response",
     command: commandType,
@@ -895,12 +1058,24 @@ export function buildBridgeFailureResponse(commandType: string, error: unknown):
   };
 }
 
+export async function refreshProjectBridgeAuth(): Promise<void> {
+  await getProjectBridgeService().refreshAuth();
+}
+
 export async function sendBridgeInput(input: BridgeInput): Promise<RpcResponse | null> {
+  if (!isReadOnlyBridgeInput(input)) {
+    const onboarding = await collectOnboardingState();
+    if (onboarding.locked) {
+      return buildBridgeLockedResponse(input, onboarding);
+    }
+  }
+
   return await getProjectBridgeService().sendInput(input);
 }
 
 export function configureBridgeServiceForTests(overrides: Partial<BridgeServiceDeps> | null): void {
   bridgeServiceOverrides = overrides;
+  invalidateWorkspaceIndexCache();
 }
 
 export async function resetBridgeServiceForTests(): Promise<void> {
@@ -909,4 +1084,5 @@ export async function resetBridgeServiceForTests(): Promise<void> {
   }
   projectBridgeSingleton = null;
   bridgeServiceOverrides = null;
+  invalidateWorkspaceIndexCache();
 }

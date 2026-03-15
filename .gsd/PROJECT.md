@@ -12,9 +12,10 @@ A user can run `gsd --web`, complete setup, and do the full GSD workflow in a sn
 
 - Core GSD CLI, TUI, onboarding, and RPC mode already exist in this repo.
 - `src/cli.ts` now has a real `--web` launch path that starts browser mode for the current cwd without opening the TUI.
-- `src/web/bridge-service.ts` plus `web/app/api/boot|session/command|session/events` now expose a live same-origin browser bridge backed by real GSD session state.
-- `web/` is still the preserved Next.js skin, but the launch-critical shell surfaces now hydrate from live boot/SSE state instead of startup mocks.
-- S01 is complete; S02 (first-run setup wizard) is next.
+- `src/web/bridge-service.ts` plus `web/app/api/boot|session/command|session/events` expose a live same-origin browser bridge backed by real GSD session state.
+- S02 is complete: browser onboarding now uses shared auth truth, same-origin onboarding routes, server-side command gating, bridge-auth refresh, and a locked onboarding overlay in the preserved shell.
+- `web/` still uses the preserved Next.js skin, and the shell/store now carry real onboarding state instead of a boolean seam.
+- The packaged `gsd --web` onboarding proof now passes end-to-end in automated runtime/browser coverage, and the standalone host no longer emits the earlier dynamic-module errors during `build:web-host`.
 
 ## Architecture / Key Patterns
 

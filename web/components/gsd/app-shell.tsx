@@ -9,6 +9,7 @@ import { FilesView } from "@/components/gsd/files-view"
 import { ActivityView } from "@/components/gsd/activity-view"
 import { StatusBar } from "@/components/gsd/status-bar"
 import { DualTerminal } from "@/components/gsd/dual-terminal"
+import { OnboardingGate } from "@/components/gsd/onboarding-gate"
 import { cn } from "@/lib/utils"
 import {
   GSDWorkspaceProvider,
@@ -16,6 +17,7 @@ import {
   getProjectDisplayName,
   getSessionLabelFromBridge,
   getStatusPresentation,
+  getVisibleWorkspaceError,
   shortenPath,
   useGSDWorkspaceState,
 } from "@/lib/gsd-workspace-store"
@@ -67,10 +69,10 @@ function WorkspaceChrome() {
         ? "STEP"
         : "AUTO"
     : "LIVE"
-  const visibleError = workspace.lastBridgeError?.message ?? workspace.lastClientError
+  const visibleError = getVisibleWorkspaceError(workspace)
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+    <div className="relative flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <header className="flex h-12 flex-shrink-0 items-center justify-between border-b border-border bg-card px-4">
         <div className="min-w-0 flex items-center gap-3">
           <div className="flex items-center gap-2">
@@ -176,6 +178,7 @@ function WorkspaceChrome() {
       </div>
 
       <StatusBar />
+      <OnboardingGate />
     </div>
   )
 }

@@ -139,6 +139,88 @@ export interface BootResumableSession {
   isActive: boolean
 }
 
+export interface WorkspaceOnboardingProviderState {
+  id: string
+  label: string
+  required: true
+  recommended: boolean
+  configured: boolean
+  configuredVia: "auth_file" | "environment" | "runtime" | null
+  supports: {
+    apiKey: boolean
+    oauth: boolean
+    oauthAvailable: boolean
+    usesCallbackServer: boolean
+  }
+}
+
+export interface WorkspaceOnboardingOptionalSectionState {
+  id: string
+  label: string
+  blocking: false
+  skippable: true
+  configured: boolean
+  configuredItems: string[]
+}
+
+export interface WorkspaceOnboardingValidationResult {
+  status: "succeeded" | "failed"
+  providerId: string
+  method: "api_key" | "oauth"
+  checkedAt: string
+  message: string
+  persisted: boolean
+}
+
+export interface WorkspaceOnboardingFlowState {
+  flowId: string
+  providerId: string
+  providerLabel: string
+  status: "idle" | "running" | "awaiting_browser_auth" | "awaiting_input" | "succeeded" | "failed" | "cancelled"
+  updatedAt: string
+  auth: {
+    url: string
+    instructions?: string
+  } | null
+  prompt: {
+    kind: "text" | "manual_code"
+    message: string
+    placeholder?: string
+    allowEmpty?: boolean
+  } | null
+  progress: string[]
+  error: string | null
+}
+
+export interface WorkspaceOnboardingBridgeAuthRefreshState {
+  phase: "idle" | "pending" | "succeeded" | "failed"
+  strategy: "restart" | null
+  startedAt: string | null
+  completedAt: string | null
+  error: string | null
+}
+
+export interface WorkspaceOnboardingState {
+  status: "blocked" | "ready"
+  locked: boolean
+  lockReason: "required_setup" | "bridge_refresh_pending" | "bridge_refresh_failed" | null
+  required: {
+    blocking: true
+    skippable: false
+    satisfied: boolean
+    satisfiedBy: { providerId: string; source: "auth_file" | "environment" | "runtime" } | null
+    providers: WorkspaceOnboardingProviderState[]
+  }
+  optional: {
+    blocking: false
+    skippable: true
+    sections: WorkspaceOnboardingOptionalSectionState[]
+  }
+  lastValidation: WorkspaceOnboardingValidationResult | null
+  activeFlow: WorkspaceOnboardingFlowState | null
+  bridgeAuthRefresh: WorkspaceOnboardingBridgeAuthRefreshState
+}
+
 export interface WorkspaceBootPayload {
   project: {
     cwd: string
@@ -147,6 +229,7 @@ export interface WorkspaceBootPayload {
   }
   workspace: WorkspaceIndex
   auto: AutoDashboardData
+  onboarding: WorkspaceOnboardingState
   onboardingNeeded: boolean
   resumableSessions: BootResumableSession[]
   bridge: BridgeRuntimeSnapshot
@@ -187,6 +270,11 @@ export interface WorkspaceCommandResponse {
   error?: string
   data?: unknown
   id?: string
+  code?: string
+  details?: {
+    reason?: "required_setup" | "bridge_refresh_pending" | "bridge_refresh_failed"
+    onboarding?: Partial<WorkspaceOnboardingState>
+  }
 }
 
 export interface WorkspaceBridgeCommand {
@@ -201,6 +289,14 @@ export interface WorkspaceTerminalLine {
   timestamp: string
 }
 
+export type WorkspaceOnboardingRequestState =
+  | "idle"
+  | "refreshing"
+  | "saving_api_key"
+  | "starting_provider_flow"
+  | "submitting_provider_flow_input"
+  | "cancelling_provider_flow"
+
 export interface WorkspaceStoreState {
   bootStatus: WorkspaceStatus
   connectionState: WorkspaceConnectionState
@@ -211,6 +307,8 @@ export interface WorkspaceStoreState {
   sessionAttached: boolean
   lastEventType: string | null
   commandInFlight: string | null
+  onboardingRequestState: WorkspaceOnboardingRequestState
+  onboardingRequestProviderId: string | null
 }
 
 const MAX_TERMINAL_LINES = 250
@@ -339,6 +437,51 @@ function summarizeEvent(event: WorkspaceEvent): { type: TerminalLineType; messag
   }
 }
 
+type OnboardingApiPayload = {
+  onboarding?: WorkspaceOnboardingState
+  error?: string
+}
+
+const ACTIVE_ONBOARDING_FLOW_STATUSES = new Set<WorkspaceOnboardingFlowState["status"]>([
+  "running",
+  "awaiting_browser_auth",
+  "awaiting_input",
+])
+
+const TERMINAL_ONBOARDING_FLOW_STATUSES = new Set<WorkspaceOnboardingFlowState["status"]>([
+  "succeeded",
+  "failed",
+  "cancelled",
+])
+
+function findOnboardingProviderLabel(onboarding: WorkspaceOnboardingState, providerId: string): string {
+  return onboarding.required.providers.find((provider) => provider.id === providerId)?.label ?? providerId
+}
+
+function mergeOnboardingState(
+  current: WorkspaceOnboardingState,
+  patch: Partial<WorkspaceOnboardingState>,
+): WorkspaceOnboardingState {
+  return {
+    ...current,
+    ...patch,
+    required: {
+      ...current.required,
+      ...(patch.required ?? {}),
+      providers: patch.required?.providers ?? current.required.providers,
+    },
+    optional: {
+      ...current.optional,
+      ...(patch.optional ?? {}),
+      sections: patch.optional?.sections ?? current.optional.sections,
+    },
+    bridgeAuthRefresh: {
+      ...current.bridgeAuthRefresh,
+      ...(patch.bridgeAuthRefresh ?? {}),
+    },
+  }
+}
+
 function cloneBootWithBridge(
   boot: WorkspaceBootPayload | null,
   bridge: BridgeRuntimeSnapshot,
@@ -348,6 +491,97 @@ function cloneBootWithBridge(
     ...boot,
     bridge,
   }
+}
+
+function cloneBootWithOnboarding(
+  boot: WorkspaceBootPayload | null,
+  onboarding: WorkspaceOnboardingState,
+): WorkspaceBootPayload | null {
+  if (!boot) return null
+  return {
+    ...boot,
+    onboarding,
+    onboardingNeeded: onboarding.locked,
+  }
+}
+
+function cloneBootWithPartialOnboarding(
+  boot: WorkspaceBootPayload | null,
+  onboarding: Partial<WorkspaceOnboardingState>,
+): WorkspaceBootPayload | null {
+  if (!boot) return null
+  return cloneBootWithOnboarding(boot, mergeOnboardingState(boot.onboarding, onboarding))
+}
+
+function summarizeOnboardingState(onboarding: WorkspaceOnboardingState): { type: TerminalLineType; message: string } | null {
+  if (onboarding.bridgeAuthRefresh.phase === "failed") {
+    return {
+      type: "error",
+      message: onboarding.bridgeAuthRefresh.error
+        ? `Bridge auth refresh failed — ${onboarding.bridgeAuthRefresh.error}`
+        : "Bridge auth refresh failed after setup",
+    }
+  }
+
+  if (onboarding.bridgeAuthRefresh.phase === "pending") {
+    return {
+      type: "system",
+      message: "Credentials saved — refreshing bridge auth before the workspace unlocks…",
+    }
+  }
+
+  if (onboarding.lastValidation?.status === "failed") {
+    return {
+      type: "error",
+      message: `Credential validation failed — ${onboarding.lastValidation.message}`,
+    }
+  }
+
+  if (!onboarding.locked && onboarding.lastValidation?.status === "succeeded") {
+    return {
+      type: "success",
+      message: `${findOnboardingProviderLabel(onboarding, onboarding.lastValidation.providerId)} is ready — workspace unlocked`,
+    }
+  }
+
+  if (onboarding.activeFlow?.status === "awaiting_browser_auth") {
+    return {
+      type: "system",
+      message: `${onboarding.activeFlow.providerLabel} sign-in is waiting for browser confirmation`,
+    }
+  }
+
+  if (onboarding.activeFlow?.status === "awaiting_input") {
+    return {
+      type: "system",
+      message: `${onboarding.activeFlow.providerLabel} sign-in needs one more input step`,
+    }
+  }
+
+  if (onboarding.activeFlow?.status === "cancelled") {
+    return {
+      type: "system",
+      message: `${onboarding.activeFlow.providerLabel} sign-in was cancelled`,
+    }
+  }
+
+  if (onboarding.activeFlow?.status === "failed") {
+    return {
+      type: "error",
+      message: onboarding.activeFlow.error
+        ? `${onboarding.activeFlow.providerLabel} sign-in failed — ${onboarding.activeFlow.error}`
+        : `${onboarding.activeFlow.providerLabel} sign-in failed`,
+    }
+  }
+
+  if (onboarding.lockReason === "required_setup") {
+    return {
+      type: "system",
+      message: "Onboarding is still required before model-backed prompts will run",
+    }
+  }
+
+  return null
 }
 
 function bootSeedLines(boot: WorkspaceBootPayload): WorkspaceTerminalLine[] {
@@ -363,8 +597,9 @@ function bootSeedLines(boot: WorkspaceBootPayload): WorkspaceTerminalLine[] {
     lines.push(createTerminalLine("error", `Bridge error: ${boot.bridge.lastError.message}`))
   }
 
-  if (boot.onboardingNeeded) {
-    lines.push(createTerminalLine("system", "Onboarding is still required before model-backed prompts will run"))
+  const onboardingSummary = summarizeOnboardingState(boot.onboarding)
+  if (onboardingSummary) {
+    lines.push(createTerminalLine(onboardingSummary.type, onboardingSummary.message))
   }
 
   return lines
@@ -464,7 +699,134 @@ export function getModelLabel(bridge: BridgeRuntimeSnapshot | null | undefined):
   return model.id || model.providerId || model.provider || "model pending"
 }
 
-export function getStatusPresentation(state: Pick<WorkspaceStoreState, "bootStatus" | "connectionState" | "boot">): {
+export interface WorkspaceOnboardingPresentation {
+  phase:
+    | "loading"
+    | "locked"
+    | "validating"
+    | "running_flow"
+    | "awaiting_browser_auth"
+    | "awaiting_input"
+    | "refreshing"
+    | "failure"
+    | "ready"
+  label: string
+  detail: string
+  tone: WorkspaceStatusTone
+}
+
+export function getOnboardingPresentation(
+  state: Pick<WorkspaceStoreState, "bootStatus" | "boot" | "onboardingRequestState">,
+): WorkspaceOnboardingPresentation {
+  if (state.bootStatus === "loading" || !state.boot) {
+    return {
+      phase: "loading",
+      label: "Loading setup state",
+      detail: "Resolving the current project, bridge, and onboarding contract…",
+      tone: "info",
+    }
+  }
+
+  if (state.onboardingRequestState === "saving_api_key") {
+    return {
+      phase: "validating",
+      label: "Validating credentials",
+      detail: "Checking the provider key and saving it only if validation succeeds.",
+      tone: "info",
+    }
+  }
+
+  if (state.onboardingRequestState === "starting_provider_flow" || state.onboardingRequestState === "submitting_provider_flow_input") {
+    return {
+      phase: "running_flow",
+      label: "Advancing provider sign-in",
+      detail: "The onboarding flow is running and will update here as soon as the next step is ready.",
+      tone: "info",
+    }
+  }
+
+  const onboarding = state.boot.onboarding
+  if (onboarding.activeFlow?.status === "awaiting_browser_auth") {
+    return {
+      phase: "awaiting_browser_auth",
+      label: "Continue sign-in in your browser",
+      detail: `${onboarding.activeFlow.providerLabel} is waiting for browser confirmation before the workspace can unlock.`,
+      tone: "info",
+    }
+  }
+
+  if (onboarding.activeFlow?.status === "awaiting_input") {
+    return {
+      phase: "awaiting_input",
+      label: "One more sign-in step is required",
+      detail: onboarding.activeFlow.prompt?.message ?? `${onboarding.activeFlow.providerLabel} needs one more input step.`,
+      tone: "info",
+    }
+  }
+
+  if (onboarding.lockReason === "bridge_refresh_pending") {
+    return {
+      phase: "refreshing",
+      label: "Refreshing bridge auth",
+      detail: "Credentials validated. The live bridge is restarting onto the new auth view before the shell unlocks.",
+      tone: "info",
+    }
+  }
+
+  if (onboarding.lockReason === "bridge_refresh_failed") {
+    return {
+      phase: "failure",
+      label: "Setup completed, but the shell is still locked",
+      detail: onboarding.bridgeAuthRefresh.error ?? "The bridge could not reload auth after setup.",
+      tone: "danger",
+    }
+  }
+
+  if (onboarding.lastValidation?.status === "failed") {
+    return {
+      phase: "failure",
+      label: "Credential validation failed",
+      detail: onboarding.lastValidation.message,
+      tone: "danger",
+    }
+  }
+
+  if (onboarding.locked) {
+    return {
+      phase: "locked",
+      label: "Required setup needed",
+      detail: "Choose a required provider, validate it here, and the workspace will unlock without restarting the host.",
+      tone: "warning",
+    }
+  }
+
+  return {
+    phase: "ready",
+    label: "Workspace unlocked",
+    detail:
+      onboarding.lastValidation?.status === "succeeded"
+        ? `${findOnboardingProviderLabel(onboarding, onboarding.lastValidation.providerId)} is ready and the workspace is live.`
+        : "Required setup is satisfied and the shell is ready for live commands.",
+    tone: "success",
+  }
+}
+
+export function getVisibleWorkspaceError(
+  state: Pick<WorkspaceStoreState, "boot" | "lastBridgeError" | "lastClientError">,
+): string | null {
+  const onboarding = state.boot?.onboarding
+  if (onboarding?.bridgeAuthRefresh.phase === "failed" && onboarding.bridgeAuthRefresh.error) {
+    return onboarding.bridgeAuthRefresh.error
+  }
+  if (onboarding?.lastValidation?.status === "failed") {
+    return onboarding.lastValidation.message
+  }
+  return state.lastBridgeError?.message ?? state.lastClientError
+}
+
+export function getStatusPresentation(
+  state: Pick<WorkspaceStoreState, "bootStatus" | "connectionState" | "boot" | "onboardingRequestState">,
+): {
   label: string
   tone: WorkspaceStatusTone
 } {
@@ -474,6 +836,14 @@ export function getStatusPresentation(state: Pick<WorkspaceStoreState, "bootStat
 
   if (state.bootStatus === "error") {
     return { label: "Boot failed", tone: "danger" }
+  }
+
+  const onboardingPresentation = getOnboardingPresentation(state)
+  if (onboardingPresentation.phase !== "ready") {
+    return {
+      label: onboardingPresentation.label,
+      tone: onboardingPresentation.tone,
+    }
   }
 
   if (state.boot?.bridge.phase === "failed") {
@@ -507,6 +877,8 @@ function createInitialState(): WorkspaceStoreState {
     sessionAttached: false,
     lastEventType: null,
     commandInFlight: null,
+    onboardingRequestState: "idle",
+    onboardingRequestProviderId: null,
   }
 }
 
@@ -515,6 +887,7 @@ class GSDWorkspaceStore {
   private readonly listeners = new Set<() => void>()
   private bootPromise: Promise<void> | null = null
   private eventSource: EventSource | null = null
+  private onboardingPollTimer: ReturnType<typeof setInterval> | null = null
   private started = false
   private disposed = false
   private lastBridgeDigest: string | null = null
@@ -538,6 +911,7 @@ class GSDWorkspaceStore {
   dispose = (): void => {
     this.disposed = true
     this.started = false
+    this.stopOnboardingPoller()
     this.closeEventStream()
   }
 
@@ -546,15 +920,23 @@ class GSDWorkspaceStore {
     this.patchState({ terminalLines: replacement })
   }
 
-  refreshBoot = async (): Promise<void> => {
+  refreshBoot = async (options: { soft?: boolean } = {}): Promise<void> => {
     if (this.bootPromise) return await this.bootPromise
 
+    const softRefresh = Boolean(options.soft && this.state.boot)
+
     this.bootPromise = (async () => {
-      this.patchState({
-        bootStatus: "loading",
-        connectionState: this.state.connectionState === "connected" ? "connected" : "connecting",
-        lastClientError: null,
-      })
+      if (!softRefresh) {
+        this.patchState({
+          bootStatus: "loading",
+          connectionState: this.state.connectionState === "connected" ? "connected" : "connecting",
+          lastClientError: null,
+        })
+      } else {
+        this.patchState({
+          lastClientError: null,
+        })
+      }
 
       try {
         const response = await fetch("/api/boot", {
@@ -579,11 +961,19 @@ class GSDWorkspaceStore {
           lastBridgeError: boot.bridge.lastError,
           sessionAttached: hasAttachedSession(boot.bridge),
           lastClientError: null,
-          terminalLines: bootSeedLines(boot),
+          ...(softRefresh ? {} : { terminalLines: bootSeedLines(boot) }),
         })
         this.ensureEventStream()
       } catch (error) {
         const message = normalizeClientError(error)
+        if (softRefresh) {
+          this.patchState({
+            lastClientError: message,
+            terminalLines: withTerminalLine(this.state.terminalLines, createTerminalLine("error", `Workspace refresh failed — ${message}`)),
+          })
+          return
+        }
+
         this.patchState({
           bootStatus: "error",
           connectionState: "error",
@@ -596,6 +986,148 @@ class GSDWorkspaceStore {
     })
 
     await this.bootPromise
+  }
+
+  refreshOnboarding = async (): Promise<WorkspaceOnboardingState | null> => {
+    this.patchState({
+      onboardingRequestState: "refreshing",
+      onboardingRequestProviderId: null,
+      lastClientError: null,
+    })
+
+    try {
+      return await this.fetchOnboardingState()
+    } catch (error) {
+      const message = normalizeClientError(error)
+      this.patchState({
+        lastClientError: message,
+        terminalLines: withTerminalLine(this.state.terminalLines, createTerminalLine("error", `Onboarding refresh failed — ${message}`)),
+      })
+      return null
+    } finally {
+      this.patchState({
+        onboardingRequestState: "idle",
+        onboardingRequestProviderId: null,
+      })
+    }
+  }
+
+  saveApiKey = async (providerId: string, apiKey: string): Promise<WorkspaceOnboardingState | null> => {
+    this.patchState({
+      onboardingRequestState: "saving_api_key",
+      onboardingRequestProviderId: providerId,
+      lastClientError: null,
+    })
+
+    try {
+      const onboarding = await this.postOnboardingAction({
+        action: "save_api_key",
+        providerId,
+        apiKey,
+      })
+      await this.syncAfterOnboardingMutation(onboarding)
+      return onboarding
+    } catch (error) {
+      const message = normalizeClientError(error)
+      this.patchState({
+        lastClientError: message,
+        terminalLines: withTerminalLine(this.state.terminalLines, createTerminalLine("error", `Credential setup failed — ${message}`)),
+      })
+      return null
+    } finally {
+      this.patchState({
+        onboardingRequestState: "idle",
+        onboardingRequestProviderId: null,
+      })
+    }
+  }
+
+  startProviderFlow = async (providerId: string): Promise<WorkspaceOnboardingState | null> => {
+    this.patchState({
+      onboardingRequestState: "starting_provider_flow",
+      onboardingRequestProviderId: providerId,
+      lastClientError: null,
+    })
+
+    try {
+      const onboarding = await this.postOnboardingAction({
+        action: "start_provider_flow",
+        providerId,
+      })
+      await this.syncAfterOnboardingMutation(onboarding)
+      return onboarding
+    } catch (error) {
+      const message = normalizeClientError(error)
+      this.patchState({
+        lastClientError: message,
+        terminalLines: withTerminalLine(this.state.terminalLines, createTerminalLine("error", `Provider sign-in failed to start — ${message}`)),
+      })
+      return null
+    } finally {
+      this.patchState({
+        onboardingRequestState: "idle",
+        onboardingRequestProviderId: null,
+      })
+    }
+  }
+
+  submitProviderFlowInput = async (flowId: string, input: string): Promise<WorkspaceOnboardingState | null> => {
+    this.patchState({
+      onboardingRequestState: "submitting_provider_flow_input",
+      onboardingRequestProviderId: this.state.boot?.onboarding.activeFlow?.providerId ?? null,
+      lastClientError: null,
+    })
+
+    try {
+      const onboarding = await this.postOnboardingAction({
+        action: "continue_provider_flow",
+        flowId,
+        input,
+      })
+      await this.syncAfterOnboardingMutation(onboarding)
+      return onboarding
+    } catch (error) {
+      const message = normalizeClientError(error)
+      this.patchState({
+        lastClientError: message,
+        terminalLines: withTerminalLine(this.state.terminalLines, createTerminalLine("error", `Provider sign-in input failed — ${message}`)),
+      })
+      return null
+    } finally {
+      this.patchState({
+        onboardingRequestState: "idle",
+        onboardingRequestProviderId: null,
+      })
+    }
+  }
+
+  cancelProviderFlow = async (flowId: string): Promise<WorkspaceOnboardingState | null> => {
+    this.patchState({
+      onboardingRequestState: "cancelling_provider_flow",
+      onboardingRequestProviderId: this.state.boot?.onboarding.activeFlow?.providerId ?? null,
+      lastClientError: null,
+    })
+
+    try {
+      const onboarding = await this.postOnboardingAction({
+        action: "cancel_provider_flow",
+        flowId,
+      })
+      await this.syncAfterOnboardingMutation(onboarding)
+      return onboarding
+    } catch (error) {
+      const message = normalizeClientError(error)
+      this.patchState({
+        lastClientError: message,
+        terminalLines: withTerminalLine(this.state.terminalLines, createTerminalLine("error", `Provider sign-in cancellation failed — ${message}`)),
+      })
+      return null
+    } finally {
+      this.patchState({
+        onboardingRequestState: "idle",
+        onboardingRequestProviderId: null,
+      })
+    }
   }
 
   sendCommand = async (command: WorkspaceBridgeCommand): Promise<WorkspaceCommandResponse | null> => {
@@ -639,6 +1171,12 @@ class GSDWorkspaceStore {
         })
       }
 
+      if (payload.code === "onboarding_locked" && payload.details?.onboarding && this.state.boot) {
+        this.patchState({
+          boot: cloneBootWithPartialOnboarding(this.state.boot, payload.details.onboarding),
+        })
+      }
+
       this.patchState({
         terminalLines: withTerminalLine(this.state.terminalLines, responseToLine(payload)),
         lastBridgeError: payload.success ? this.state.lastBridgeError : this.state.boot?.bridge.lastError ?? this.state.lastBridgeError,
@@ -664,6 +1202,85 @@ class GSDWorkspaceStore {
     }
   }
 
+  private async fetchOnboardingState(silent = false): Promise<WorkspaceOnboardingState> {
+    const previousFlowStatus = this.state.boot?.onboarding.activeFlow?.status ?? null
+    const response = await fetch("/api/onboarding", {
+      method: "GET",
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+      },
+    })
+    const payload = (await response.json()) as OnboardingApiPayload
+    if (!response.ok || !payload.onboarding) {
+      throw new Error(payload.error ?? `Onboarding request failed with ${response.status}`)
+    }
+
+    this.applyOnboardingState(payload.onboarding)
+
+    if (
+      previousFlowStatus &&
+      ACTIVE_ONBOARDING_FLOW_STATUSES.has(previousFlowStatus) &&
+      payload.onboarding.activeFlow &&
+      TERMINAL_ONBOARDING_FLOW_STATUSES.has(payload.onboarding.activeFlow.status)
+    ) {
+      await this.syncAfterOnboardingMutation(payload.onboarding)
+    } else if (!silent) {
+      this.appendOnboardingSummaryLine(payload.onboarding)
+    }
+
+    return payload.onboarding
+  }
+
+  private async postOnboardingAction(body: Record<string, unknown>): Promise<WorkspaceOnboardingState> {
+    const response = await fetch("/api/onboarding", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+    })
+
+    const payload = (await response.json()) as OnboardingApiPayload
+    if (!payload.onboarding) {
+      throw new Error(payload.error ?? `Onboarding action failed with ${response.status}`)
+    }
+
+    this.applyOnboardingState(payload.onboarding)
+    return payload.onboarding
+  }
+
+  private applyOnboardingState(onboarding: WorkspaceOnboardingState): void {
+    if (!this.state.boot) return
+    this.patchState({
+      boot: cloneBootWithOnboarding(this.state.boot, onboarding),
+    })
+  }
+
+  private async syncAfterOnboardingMutation(onboarding: WorkspaceOnboardingState): Promise<void> {
+    this.applyOnboardingState(onboarding)
+    this.appendOnboardingSummaryLine(onboarding)
+
+    if (onboarding.lastValidation?.status === "succeeded" || onboarding.bridgeAuthRefresh.phase !== "idle") {
+      void this.refreshBoot({ soft: true })
+    }
+  }
+
+  private appendOnboardingSummaryLine(onboarding: WorkspaceOnboardingState): void {
+    const summary = summarizeOnboardingState(onboarding)
+    if (!summary) return
+
+    const lastLine = this.state.terminalLines.at(-1)
+    if (lastLine?.type === summary.type && lastLine.content === summary.message) {
+      return
+    }
+
+    this.patchState({
+      terminalLines: withTerminalLine(this.state.terminalLines, createTerminalLine(summary.type, summary.message)),
+    })
+  }
+
   private emit(): void {
     for (const listener of this.listeners) {
       listener()
@@ -672,7 +1289,40 @@ class GSDWorkspaceStore {
 
   private patchState(patch: Partial<WorkspaceStoreState>): void {
     this.state = { ...this.state, ...patch }
+    this.syncOnboardingPoller()
     this.emit()
+  }
+
+  private syncOnboardingPoller(): void {
+    if (this.disposed) {
+      this.stopOnboardingPoller()
+      return
+    }
+
+    const flowStatus = this.state.boot?.onboarding.activeFlow?.status
+    const shouldPoll = Boolean(flowStatus && ACTIVE_ONBOARDING_FLOW_STATUSES.has(flowStatus))
+    if (shouldPoll && !this.onboardingPollTimer) {
+      this.onboardingPollTimer = setInterval(() => {
+        if (this.state.onboardingRequestState !== "idle") return
+        void this.fetchOnboardingState(true).catch((error) => {
+          const message = normalizeClientError(error)
+          this.patchState({
+            lastClientError: message,
+          })
+        })
+      }, 1500)
+      return
+    }
+
+    if (!shouldPoll) {
+      this.stopOnboardingPoller()
+    }
+  }
+
+  private stopOnboardingPoller(): void {
+    if (!this.onboardingPollTimer) return
+    clearInterval(this.onboardingPollTimer)
+    this.onboardingPollTimer = null
   }
 
   private ensureEventStream(): void {
@@ -797,12 +1447,27 @@ export function useGSDWorkspaceState(): WorkspaceStoreState {
   return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
 }
 
-export function useGSDWorkspaceActions(): Pick<GSDWorkspaceStore, "sendCommand" | "clearTerminalLines" | "refreshBoot"> {
+export function useGSDWorkspaceActions(): Pick<
+  GSDWorkspaceStore,
+  | "sendCommand"
+  | "clearTerminalLines"
+  | "refreshBoot"
+  | "refreshOnboarding"
+  | "saveApiKey"
+  | "startProviderFlow"
+  | "submitProviderFlowInput"
+  | "cancelProviderFlow"
+> {
   const store = useWorkspaceStore()
   return {
     sendCommand: store.sendCommand,
     clearTerminalLines: store.clearTerminalLines,
     refreshBoot: store.refreshBoot,
+    refreshOnboarding: store.refreshOnboarding,
+    saveApiKey: store.saveApiKey,
+    startProviderFlow: store.startProviderFlow,
+    submitProviderFlowInput: store.submitProviderFlowInput,
+    cancelProviderFlow: store.cancelProviderFlow,
   }
 }
 

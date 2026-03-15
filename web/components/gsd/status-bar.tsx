@@ -9,6 +9,7 @@ import {
   getCurrentScopeLabel,
   getModelLabel,
   getStatusPresentation,
+  getVisibleWorkspaceError,
   useGSDWorkspaceState,
 } from "@/lib/gsd-workspace-store"
 
@@ -32,7 +33,7 @@ export function StatusBar() {
   const model = getModelLabel(workspace.boot?.bridge)
   const auto = workspace.boot?.auto
   const unitLabel = auto?.currentUnit?.id ?? getCurrentScopeLabel(workspace.boot?.workspace)
-  const visibleError = workspace.lastBridgeError?.message ?? workspace.lastClientError
+  const visibleError = getVisibleWorkspaceError(workspace)
 
   return (
     <div className="flex h-7 items-center justify-between border-t border-border bg-card px-3 text-xs">

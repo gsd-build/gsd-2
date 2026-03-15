@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import {
   buildPromptCommand,
+  getOnboardingPresentation,
   getSessionLabelFromBridge,
   getStatusPresentation,
   useGSDWorkspaceActions,
@@ -18,6 +19,9 @@ function terminalPlaceholder(state: ReturnType<typeof useGSDWorkspaceState>): st
   if (state.bootStatus === "loading") return "Loading workspace…"
   if (state.bootStatus === "error") return "Workspace boot failed — check the visible error state"
   if (state.commandInFlight) return `Sending ${state.commandInFlight}…`
+  if (state.boot?.onboarding.locked) {
+    return getOnboardingPresentation(state).detail
+  }
   if (state.boot?.bridge.sessionState?.isStreaming) return "Agent is active — type a follow-up or /state"
   return "Type a prompt, /state, /new, or /clear"
 }
@@ -35,7 +39,10 @@ export function Terminal({ className }: TerminalProps) {
 
   const status = getStatusPresentation(workspace)
   const sessionLabel = getSessionLabelFromBridge(workspace.boot?.bridge)
-  const isInputDisabled = workspace.bootStatus !== "ready" || workspace.commandInFlight === "refresh"
+  const isInputDisabled =
+    workspace.bootStatus !== "ready" ||
+    workspace.commandInFlight === "refresh" ||
+    Boolean(workspace.boot?.onboarding.locked)
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -116,6 +123,7 @@ export function Terminal({ className }: TerminalProps) {
           className="flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground/50 disabled:cursor-not-allowed disabled:text-muted-foreground"
           placeholder={terminalPlaceholder(workspace)}
           disabled={isInputDisabled}
+          data-testid="terminal-command-input"
           autoFocus
         />
         {workspace.commandInFlight && (
