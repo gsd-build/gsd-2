@@ -17,7 +17,8 @@ A user can run `gsd --web`, complete setup, and do the full GSD workflow in a sn
 - S03 is complete: the workspace store has typed live-interaction state, the terminal streams agent output with steer/abort controls, and a focused Sheet side panel handles blocking UI requests (select, confirm, input, editor) with multi-request queue support.
 - S04 is complete: dashboard, roadmap, files, and activity views show real current-project data instead of mock values.
 - S05 is complete: dashboard action bar, session picker, and sidebar quick-action button let users start/resume/stop work and switch sessions from visible UI controls backed by real store state.
-- `web/` uses the preserved Next.js skin with real onboarding, live-interaction state, project surfaces, and workflow controls rather than mock data.
+- S06 is complete: store has safety caps (transcript 100-block limit, 90s command timeout), SSE reconnect and visibility-return trigger state resync, error banner has actionable retry button, power mode has workflow controls, and active view persists across refresh via sessionStorage.
+- `web/` uses the preserved Next.js skin with real onboarding, live-interaction state, project surfaces, workflow controls, and continuity/recovery mechanisms rather than mock data.
 - The packaged `gsd --web` proof passes end-to-end in automated coverage, and the standalone host builds cleanly.
 
 ## Architecture / Key Patterns
@@ -35,5 +36,5 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 
 ## Milestone Sequence
 
-- [ ] M001: Web mode foundation — Launch `gsd --web`, onboard in-browser, connect the skin to a live current-project GSD session, and prove the end-to-end browser workflow.
+- [ ] M001: Web mode foundation — Launch `gsd --web`, onboard in-browser, connect the skin to a live current-project GSD session, and prove the end-to-end browser workflow. (S01-S06 complete, S07 remaining)
 - [ ] M002: Web parity and hardening — Close remaining TUI parity gaps, harden continuity/recovery/observability, and finish the browser-first flow for reliable daily use.

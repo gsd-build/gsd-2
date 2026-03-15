@@ -387,6 +387,9 @@ export interface WorkspaceStoreState {
 }
 
 const MAX_TERMINAL_LINES = 250
+export const MAX_TRANSCRIPT_BLOCKS = 100
+export const COMMAND_TIMEOUT_MS = 90_000
+export const VISIBILITY_REFRESH_THRESHOLD_MS = 30_000
 
 function timestampLabel(date = new Date()): string {
   return date.toLocaleTimeString("en-US", {
@@ -977,6 +980,9 @@ class GSDWorkspaceStore {
   private disposed = false
   private lastBridgeDigest: string | null = null
   private lastStreamState: WorkspaceConnectionState = "idle"
+  private commandTimeoutTimer: ReturnType<typeof setTimeout> | null = null
+  private lastBootRefreshAt = 0
+  private visibilityHandler: (() => void) | null = null
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
@@ -990,6 +996,16 @@ class GSDWorkspaceStore {
   start = (): void => {
     if (this.started || this.disposed) return
     this.started = true
+
+    if (typeof document !== "undefined") {
+      this.visibilityHandler = () => {
+        if (document.visibilityState === "visible" && Date.now() - this.lastBootRefreshAt >= VISIBILITY_REFRESH_THRESHOLD_MS) {
+          void this.refreshBoot({ soft: true })
+        }
+      }
+      document.addEventListener("visibilitychange", this.visibilityHandler)
+    }
+
     void this.refreshBoot()
   }
 
@@ -998,6 +1014,11 @@ class GSDWorkspaceStore {
     this.started = false
     this.stopOnboardingPoller()
     this.closeEventStream()
+    this.clearCommandTimeout()
+    if (this.visibilityHandler && typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", this.visibilityHandler)
+      this.visibilityHandler = null
+    }
   }
 
   clearTerminalLines = (): void => {
@@ -1068,6 +1089,7 @@ class GSDWorkspaceStore {
   refreshBoot = async (options: { soft?: boolean } = {}): Promise<void> => {
     if (this.bootPromise) return await this.bootPromise
 
+    this.lastBootRefreshAt = Date.now()
     const softRefresh = Boolean(options.soft && this.state.boot)
 
     this.bootPromise = (async () => {
@@ -1276,6 +1298,7 @@ class GSDWorkspaceStore {
   }
 
   sendCommand = async (command: WorkspaceBridgeCommand): Promise<WorkspaceCommandResponse | null> => {
+    this.clearCommandTimeout()
     this.patchState({
       commandInFlight: command.type,
       terminalLines: withTerminalLine(
@@ -1283,6 +1306,19 @@ class GSDWorkspaceStore {
         createTerminalLine("input", typeof command.message === "string" ? command.message : `/${command.type}`),
       ),
     })
+
+    this.commandTimeoutTimer = setTimeout(() => {
+      if (this.state.commandInFlight) {
+        this.patchState({
+          commandInFlight: null,
+          lastClientError: "Command timed out — controls re-enabled",
+          terminalLines: withTerminalLine(
+            this.state.terminalLines,
+            createTerminalLine("error", "Command timed out — controls re-enabled"),
+          ),
+        })
+      }
+    }, COMMAND_TIMEOUT_MS)
 
     try {
       const response = await fetch("/api/session/command", {
@@ -1343,7 +1379,15 @@ class GSDWorkspaceStore {
         error: message,
       }
     } finally {
+      this.clearCommandTimeout()
       this.patchState({ commandInFlight: null })
+    }
+  }
+
+  private clearCommandTimeout(): void {
+    if (this.commandTimeoutTimer) {
+      clearTimeout(this.commandTimeoutTimer)
+      this.commandTimeoutTimer = null
     }
   }
 
@@ -1477,14 +1521,18 @@ class GSDWorkspaceStore {
     this.eventSource = stream
 
     stream.onopen = () => {
-      const nextState = this.lastStreamState === "idle" ? "connected" : this.lastStreamState === "connected" ? "connected" : "connected"
-      if (this.lastStreamState === "reconnecting" || this.lastStreamState === "disconnected" || this.lastStreamState === "error") {
+      const previousState = this.lastStreamState
+      const wasDisconnected = previousState === "reconnecting" || previousState === "disconnected" || previousState === "error"
+      if (wasDisconnected) {
         this.patchState({
           terminalLines: withTerminalLine(this.state.terminalLines, createTerminalLine("success", "Live event stream reconnected")),
         })
       }
-      this.lastStreamState = nextState
-      this.patchState({ connectionState: nextState, lastClientError: null })
+      this.lastStreamState = "connected"
+      this.patchState({ connectionState: "connected", lastClientError: null })
+      if (wasDisconnected) {
+        void this.refreshBoot({ soft: true })
+      }
     }
 
     stream.onmessage = (message) => {
@@ -1629,8 +1677,9 @@ class GSDWorkspaceStore {
 
   private handleTurnBoundary(): void {
     if (this.state.streamingAssistantText.length > 0) {
+      const next = [...this.state.liveTranscript, this.state.streamingAssistantText]
       this.patchState({
-        liveTranscript: [...this.state.liveTranscript, this.state.streamingAssistantText],
+        liveTranscript: next.length > MAX_TRANSCRIPT_BLOCKS ? next.slice(next.length - MAX_TRANSCRIPT_BLOCKS) : next,
         streamingAssistantText: "",
       })
     }

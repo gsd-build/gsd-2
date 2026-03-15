@@ -68,7 +68,7 @@ This milestone is complete only when all are true:
 - [x] **S05: Start/resume workflow controls** `risk:medium` `depends:[S03,S04]`
   > After this: users can start new work or resume interrupted work from the skin’s controls instead of typing hidden terminal commands.
 
-- [ ] **S06: Power mode + continuity + failure visibility** `risk:medium` `depends:[S03,S04,S05]`
+- [x] **S06: Power mode + continuity + failure visibility** `risk:medium` `depends:[S03,S04,S05]`
   > After this: richer control surfaces stay attached across refresh/reopen, show recoverable failure states, and keep the experience snappy and fast under normal use.
 
 - [ ] **S07: End-to-end web assembly proof** `risk:high` `depends:[S01,S02,S03,S04,S05,S06]`

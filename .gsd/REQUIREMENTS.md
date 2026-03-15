@@ -49,13 +49,13 @@ Guidelines:
 
 ### R007 — Session continuity works across refresh/reopen and supports resume inside web mode
 - Class: continuity
-- Status: active
+- Status: validated
 - Description: Users can refresh or reopen the browser workspace, reattach to the correct current-project session state, and resume work from the web UI.
 - Why it matters: Browser mode stops feeling first-class if normal browser lifecycle behavior loses context or control.
 - Source: inferred
 - Primary owning slice: M001/S06
 - Supporting slices: M001/S05, M001/S07
-- Validation: mapped
+- Validation: verified by `src/tests/web-continuity-contract.test.ts` (14/14 — reconnect resync, visibility-return refresh, transcript cap, command timeout), sessionStorage view persistence in app-shell, and `npm run build:web-host` (all continuity components compile and mount).
 - Notes: This covers current-project continuity, not cross-project switching.
 
 ### R008 — Live web mode never mixes mock data with real GSD state
@@ -82,13 +82,13 @@ Guidelines:
 
 ### R010 — Failures are visible and recoverable in-browser
 - Class: failure-visibility
-- Status: active
+- Status: validated
 - Description: Setup failures, bridge disconnects, blocked actions, and agent/runtime errors must be visible in-browser with a clear recovery path.
 - Why it matters: A browser-first path becomes fragile if the user has to guess what failed or fall back to terminal debugging.
 - Source: research
 - Primary owning slice: M001/S06
 - Supporting slices: M001/S03, M001/S04, M001/S07
-- Validation: mapped
+- Validation: verified by `src/tests/web-continuity-contract.test.ts` (command timeout clears stuck state with error visibility, reconnect resync recovers from bridge disconnects), error banner retry button in app-shell (`data-testid="workspace-error-banner"`), and `npm run build:web-host` (all failure surfaces compile).
 - Notes: This is especially important because `--web` intentionally suppresses TUI fallback.
 
 ### R011 — Remaining lower-frequency TUI capabilities reach browser parity after the primary loop
@@ -217,10 +217,10 @@ Guidelines:
 | R004 | primary-user-loop | active | M001/S07 | M001/S01, M001/S02, M001/S03, M001/S04, M001/S05, M001/S06 | mapped |
 | R005 | core-capability | active | M001/S04 | M001/S03, M001/S05, M001/S06 | mapped |
 | R006 | continuity | validated | M001/S03 | M001/S07 | validated |
-| R007 | continuity | active | M001/S06 | M001/S05, M001/S07 | mapped |
+| R007 | continuity | validated | M001/S06 | M001/S05, M001/S07 | validated |
 | R008 | constraint | active | M001/S04 | M001/S07 | mapped |
 | R009 | quality-attribute | active | M001/S06 | M001/S01, M001/S03, M001/S04, M001/S05, M001/S07 | mapped |
-| R010 | failure-visibility | active | M001/S06 | M001/S03, M001/S04, M001/S07 | mapped |
+| R010 | failure-visibility | validated | M001/S06 | M001/S03, M001/S04, M001/S07 | validated |
 | R011 | core-capability | active | M002 (provisional) | none | mapped |
 | R020 | admin/support | deferred | none | none | unmapped |
 | R021 | operability | deferred | none | none | unmapped |
@@ -231,7 +231,7 @@ Guidelines:
 
 ## Coverage Summary
 
-- Active requirements: 7
-- Mapped to concrete M001 slices: 7
-- Validated: 4
+- Active requirements: 5
+- Mapped to concrete M001 slices: 5
+- Validated: 6
 - Unmapped active requirements: 0

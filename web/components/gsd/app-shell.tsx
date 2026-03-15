@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Sidebar } from "@/components/gsd/sidebar"
 import { Terminal } from "@/components/gsd/terminal"
 import { Dashboard } from "@/components/gsd/dashboard"
@@ -21,6 +21,7 @@ import {
   getVisibleWorkspaceError,
   shortenPath,
   useGSDWorkspaceState,
+  useGSDWorkspaceActions,
 } from "@/lib/gsd-workspace-store"
 
 function statusPillClass(tone: ReturnType<typeof getStatusPresentation>["tone"]): string {
@@ -53,10 +54,18 @@ function connectionDotClass(tone: ReturnType<typeof getStatusPresentation>["tone
   }
 }
 
+const KNOWN_VIEWS = new Set(["dashboard", "terminal", "power", "roadmap", "files", "activity"])
+
+function viewStorageKey(projectCwd: string): string {
+  return `gsd-active-view:${projectCwd}`
+}
+
 function WorkspaceChrome() {
   const [activeView, setActiveView] = useState("dashboard")
   const [isTerminalExpanded, setIsTerminalExpanded] = useState(false)
+  const [viewRestored, setViewRestored] = useState(false)
   const workspace = useGSDWorkspaceState()
+  const { refreshBoot } = useGSDWorkspaceActions()
 
   const status = getStatusPresentation(workspace)
   const projectPath = workspace.boot?.project.cwd
@@ -71,6 +80,36 @@ function WorkspaceChrome() {
         : "AUTO"
     : "LIVE"
   const visibleError = getVisibleWorkspaceError(workspace)
+
+  // Restore persisted view once boot provides projectCwd
+  useEffect(() => {
+    if (viewRestored || !projectPath) return
+    try {
+      const stored = sessionStorage.getItem(viewStorageKey(projectPath))
+      if (stored && KNOWN_VIEWS.has(stored)) {
+        setActiveView(stored)
+      }
+    } catch {
+      // sessionStorage may be unavailable (e.g. SSR, iframe sandbox)
+    }
+    setViewRestored(true)
+  }, [projectPath, viewRestored])
+
+  // Persist view changes to sessionStorage
+  useEffect(() => {
+    if (!projectPath) return
+    try {
+      sessionStorage.setItem(viewStorageKey(projectPath), activeView)
+    } catch {
+      // sessionStorage may be unavailable
+    }
+  }, [activeView, projectPath])
+
+  const handleViewChange = useCallback((view: string) => {
+    setActiveView(view)
+  }, [])
+
+  const retryDisabled = !!workspace.commandInFlight || workspace.onboardingRequestState !== "idle"
 
   return (
     <div className="relative flex h-screen flex-col overflow-hidden bg-background text-foreground">
@@ -117,15 +156,25 @@ function WorkspaceChrome() {
 
       {visibleError && (
         <div
-          className="border-b border-destructive/20 bg-destructive/10 px-4 py-2 text-xs text-destructive"
+          className="flex items-center gap-3 border-b border-destructive/20 bg-destructive/10 px-4 py-2 text-xs text-destructive"
           data-testid="workspace-error-banner"
         >
-          {visibleError}
+          <span className="flex-1">{visibleError}</span>
+          <button
+            onClick={() => void refreshBoot()}
+            disabled={retryDisabled}
+            className={cn(
+              "flex-shrink-0 rounded border border-destructive/30 bg-background px-2 py-0.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10",
+              retryDisabled && "cursor-not-allowed opacity-50",
+            )}
+          >
+            Retry
+          </button>
         </div>
       )}
 
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar activeView={activeView} onViewChange={setActiveView} />
+        <Sidebar activeView={activeView} onViewChange={handleViewChange} />
 
         <div className="flex flex-1 flex-col overflow-hidden">
           <div
