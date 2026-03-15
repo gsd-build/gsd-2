@@ -56,7 +56,7 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
     description: "GSD — Get Shit Done: /gsd next|auto|stop|status|queue|prefs|hooks|doctor|migrate|remote",
 
     getArgumentCompletions: (prefix: string) => {
-      const subcommands = ["next", "auto", "stop", "status", "queue", "discuss", "prefs", "hooks", "doctor", "migrate", "remote"];
+      const subcommands = ["next", "auto", "stop", "status", "queue", "discuss", "prefs", "hooks", "doctor", "migrate", "remote", "inspect"];
       const parts = prefix.trim().split(/\s+/);
 
       if (parts.length <= 1) {
@@ -167,6 +167,11 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         return;
       }
 
+      if (trimmed === "inspect") {
+        await handleInspect(ctx);
+        return;
+      }
+
       if (trimmed === "") {
         // Bare /gsd defaults to step mode
         await startAuto(ctx, pi, process.cwd(), false, { step: true });
@@ -174,7 +179,7 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
       }
 
       ctx.ui.notify(
-        `Unknown: /gsd ${trimmed}. Use /gsd, /gsd next, /gsd auto, /gsd stop, /gsd status, /gsd queue, /gsd discuss, /gsd prefs [global|project|status|wizard|setup], /gsd hooks, /gsd doctor [audit|fix|heal] [M###/S##], /gsd migrate <path>, or /gsd remote [slack|discord|status|disconnect].`,
+        `Unknown: /gsd ${trimmed}. Use /gsd, /gsd next, /gsd auto, /gsd stop, /gsd status, /gsd queue, /gsd discuss, /gsd prefs [global|project|status|wizard|setup], /gsd hooks, /gsd doctor [audit|fix|heal] [M###/S##], /gsd migrate <path>, /gsd remote [slack|discord|status|disconnect], or /gsd inspect.`,
         "warning",
       );
     },
@@ -300,6 +305,91 @@ async function handleDoctor(args: string, ctx: ExtensionCommandContext, pi: Exte
     const structuredIssues = formatDoctorIssuesForPrompt(actionable);
     dispatchDoctorHeal(pi, effectiveScope, reportText, structuredIssues);
     ctx.ui.notify(`Doctor heal dispatched ${actionable.length} issue(s) to the LLM.`, "info");
+  }
+}
+
+// ─── Inspect ──────────────────────────────────────────────────────────────────
+
+export interface InspectData {
+  schemaVersion: number | null;
+  counts: { decisions: number; requirements: number; artifacts: number };
+  recentDecisions: Array<{ id: string; decision: string; choice: string }>;
+  recentRequirements: Array<{ id: string; status: string; description: string }>;
+}
+
+export function formatInspectOutput(data: InspectData): string {
+  const lines: string[] = [];
+  lines.push("=== GSD Database Inspect ===");
+  lines.push(`Schema version: ${data.schemaVersion ?? "unknown"}`);
+  lines.push("");
+  lines.push(`Decisions:    ${data.counts.decisions}`);
+  lines.push(`Requirements: ${data.counts.requirements}`);
+  lines.push(`Artifacts:    ${data.counts.artifacts}`);
+
+  if (data.recentDecisions.length > 0) {
+    lines.push("");
+    lines.push("Recent decisions:");
+    for (const d of data.recentDecisions) {
+      lines.push(`  ${d.id}: ${d.decision} → ${d.choice}`);
+    }
+  }
+
+  if (data.recentRequirements.length > 0) {
+    lines.push("");
+    lines.push("Recent requirements:");
+    for (const r of data.recentRequirements) {
+      lines.push(`  ${r.id} [${r.status}]: ${r.description}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+async function handleInspect(ctx: ExtensionCommandContext): Promise<void> {
+  try {
+    const { isDbAvailable, _getAdapter } = await import("./gsd-db.js");
+
+    if (!isDbAvailable()) {
+      ctx.ui.notify("No GSD database available. Run /gsd auto to create one.", "info");
+      return;
+    }
+
+    const adapter = _getAdapter();
+    if (!adapter) {
+      ctx.ui.notify("No GSD database available. Run /gsd auto to create one.", "info");
+      return;
+    }
+
+    const versionRow = adapter.prepare("SELECT MAX(version) as v FROM schema_version").get();
+    const schemaVersion = versionRow ? (versionRow["v"] as number | null) : null;
+
+    const dCount = adapter.prepare("SELECT count(*) as cnt FROM decisions").get();
+    const rCount = adapter.prepare("SELECT count(*) as cnt FROM requirements").get();
+    const aCount = adapter.prepare("SELECT count(*) as cnt FROM artifacts").get();
+
+    const recentDecisions = adapter
+      .prepare("SELECT id, decision, choice FROM decisions ORDER BY seq DESC LIMIT 5")
+      .all() as Array<{ id: string; decision: string; choice: string }>;
+
+    const recentRequirements = adapter
+      .prepare("SELECT id, status, description FROM requirements ORDER BY id DESC LIMIT 5")
+      .all() as Array<{ id: string; status: string; description: string }>;
+
+    const data: InspectData = {
+      schemaVersion,
+      counts: {
+        decisions: (dCount?.["cnt"] as number) ?? 0,
+        requirements: (rCount?.["cnt"] as number) ?? 0,
+        artifacts: (aCount?.["cnt"] as number) ?? 0,
+      },
+      recentDecisions,
+      recentRequirements,
+    };
+
+    ctx.ui.notify(formatInspectOutput(data), "info");
+  } catch (err) {
+    process.stderr.write(`gsd-db: /gsd inspect failed: ${err instanceof Error ? err.message : String(err)}\n`);
+    ctx.ui.notify("Failed to inspect GSD database. Check stderr for details.", "error");
   }
 }
 

@@ -56,7 +56,7 @@
   - Verify: `npm run test:unit -- --test-name-pattern "gsd-tools"` — all assertions pass
   - Done when: All 3 tools register, execute with valid params, produce correct DB state and return structured results
 
-- [ ] **T03: /gsd inspect slash command** `est:20m`
+- [x] **T03: /gsd inspect slash command** `est:20m`
   - Why: R015 deliverable — debugging visibility into DB state. Without this, there's no way to verify DB contents from within pi.
   - Files: `src/resources/extensions/gsd/commands.ts`, `src/resources/extensions/gsd/tests/gsd-inspect.test.ts`
   - Do: (1) Add `"inspect"` to the autocomplete array in commands.ts. (2) Add `if (trimmed === "inspect")` branch in the handler that: dynamically imports gsd-db.js and context-store.js, checks `isDbAvailable()` (show "No DB available" notification if false), queries schema_version table for version, counts rows in decisions/requirements/artifacts tables via `SELECT count(*)`, fetches 5 most recent decisions and 5 most recent requirements, formats as multi-line text, calls `ctx.ui.notify(text, "info")`. (3) Update the unknown-command help text to include `inspect`. Test: build the inspect output formatter as a pure function, test with known data.

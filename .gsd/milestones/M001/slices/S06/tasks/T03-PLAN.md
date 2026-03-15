@@ -45,3 +45,9 @@ Add an `inspect` subcommand to the `/gsd` command handler in `commands.ts` (R015
 
 - `src/resources/extensions/gsd/commands.ts` — modified with `inspect` subcommand (~40 LOC addition)
 - `src/resources/extensions/gsd/tests/gsd-inspect.test.ts` — new test file for inspect output formatting
+
+## Observability Impact
+
+- **New diagnostic surface:** `/gsd inspect` command dumps schema version, table row counts (decisions/requirements/artifacts), and the 5 most recent decisions and requirements from the SQLite DB. This is the primary agent-usable diagnostic for verifying DB state.
+- **Failure visibility:** When DB is unavailable, displays clear "No GSD database available" message via `ctx.ui.notify()`. On unexpected errors, writes `gsd-db: /gsd inspect failed:` to stderr with the error message, and shows "Failed to inspect GSD database" notification.
+- **No existing signals changed.**
