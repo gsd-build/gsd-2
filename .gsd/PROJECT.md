@@ -10,7 +10,7 @@ Selective context injection: the TS system becomes the context curator, using it
 
 ## Current State
 
-All 7 slices complete. M001 is fully verified at the integration level with 288 tests passing and 21/21 requirements validated.
+**M001 complete.** All 7 slices delivered, 293 tests passing, 21/21 requirements validated, all success criteria met.
 
 Key capabilities delivered:
 - All 9 prompt builders rewired from `inlineGsdRootFile` to scoped DB queries
@@ -40,4 +40,4 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 
 ## Milestone Sequence
 
-- [x] M001: Memory Database — SQLite-backed context store with selective injection, full prompt rewiring, and structured LLM tools (21 requirements validated)
+- [x] M001: Memory Database — SQLite-backed context store with selective injection, full prompt rewiring, and structured LLM tools (21 requirements validated, 293 tests)
