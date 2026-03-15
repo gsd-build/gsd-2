@@ -9,8 +9,70 @@
  * via prefix matching, so existing projects work without migration.
  */
 
-import { readdirSync, existsSync, Dirent } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, existsSync, realpathSync, Dirent } from "node:fs";
+import { execSync } from "node:child_process";
+import { join, resolve } from "node:path";
+
+// ─── Main Worktree Resolution ─────────────────────────────────────────────────
+
+/**
+ * Cache for resolveMainWorktreeRoot(). Keyed by basePath, stores the resolved
+ * main worktree root (or basePath itself if not in a worktree).
+ */
+const mainWorktreeCache = new Map<string, string>();
+
+/**
+ * Resolve the main worktree root from any git worktree.
+ *
+ * When GSD runs inside a git worktree (e.g. `.gsd/worktrees/M001/`),
+ * `basePath` points to the worktree root. `.gsd/` must resolve relative
+ * to the **main** worktree so all worktrees share a single `.gsd/` state.
+ *
+ * Uses `git rev-parse --show-toplevel` from the git common dir to find
+ * the main worktree root. Falls back to basePath on error.
+ */
+export function resolveMainWorktreeRoot(basePath: string): string {
+  const cached = mainWorktreeCache.get(basePath);
+  if (cached !== undefined) return cached;
+
+  try {
+    // git-common-dir: the shared .git object store (same for all worktrees)
+    const gitCommonDir = execSync("git rev-parse --git-common-dir", {
+      cwd: basePath,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf-8",
+    }).trim();
+
+    // git-dir: the per-worktree .git reference
+    const gitDir = execSync("git rev-parse --git-dir", {
+      cwd: basePath,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf-8",
+    }).trim();
+
+    // If git-common-dir === git-dir, we're in the main worktree already
+    const resolvedCommon = resolve(basePath, gitCommonDir);
+    const resolvedGitDir = resolve(basePath, gitDir);
+
+    if (resolvedCommon === resolvedGitDir) {
+      mainWorktreeCache.set(basePath, basePath);
+      return basePath;
+    }
+
+    // We're in a linked worktree. The common dir is the main repo's .git/.
+    // The main worktree root is one level up from the common dir
+    // (e.g. /repo/.git → /repo).
+    let mainRoot = resolve(resolvedCommon, "..");
+    // Resolve symlinks to normalize paths (e.g. /var → /private/var on macOS)
+    if (existsSync(mainRoot)) mainRoot = realpathSync(mainRoot);
+    mainWorktreeCache.set(basePath, mainRoot);
+    return mainRoot;
+  } catch {
+    // Not a git repo or git not available — fall back to basePath
+    mainWorktreeCache.set(basePath, basePath);
+    return basePath;
+  }
+}
 
 // ─── Directory Listing Cache ──────────────────────────────────────────────────
 
@@ -41,6 +103,7 @@ function cachedReaddir(dirPath: string): string[] {
 export function clearPathCache(): void {
   dirEntryCache.clear();
   dirListCache.clear();
+  mainWorktreeCache.clear();
 }
 
 // ─── Name Builders ─────────────────────────────────────────────────────────
@@ -173,7 +236,7 @@ const LEGACY_GSD_ROOT_FILES: Record<GSDRootFileKey, string> = {
 };
 
 export function gsdRoot(basePath: string): string {
-  return join(basePath, ".gsd");
+  return join(resolveMainWorktreeRoot(basePath), ".gsd");
 }
 
 export function milestonesDir(basePath: string): string {
