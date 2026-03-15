@@ -12,8 +12,9 @@ import { test, expect } from "../fixtures/auth";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-// process.cwd() is the project root when Playwright is invoked from root
-const ROOT = process.cwd();
+// Spec lives at packages/mission-control/e2e/specs/ — repo root is 4 levels up
+// (../../../.. from this file, or ../../.. from packages/mission-control/ CWD)
+const ROOT = resolve(process.cwd(), "../..");
 
 // ---------------------------------------------------------------------------
 // DIST-01 — release.yml exists and has correct structure
