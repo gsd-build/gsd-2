@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useCallback } from "react"
 import {
   FileText,
   ChevronRight,
@@ -9,120 +9,15 @@ import {
   FolderOpen,
   FileCode,
   File,
+  Loader2,
+  AlertCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface FileNode {
   name: string
-  type: "file" | "folder"
+  type: "file" | "directory"
   children?: FileNode[]
-  content?: string
-}
-
-const gsdFiles: FileNode = {
-  name: ".gsd",
-  type: "folder",
-  children: [
-    {
-      name: "STATE.md",
-      type: "file",
-      content: `---
-milestone: M002
-slice: S02
-task: T02
-phase: execute
-auto_mode: true
----
-
-# Current State
-
-## Active Unit
-- **Milestone:** M002 — Auto Mode Engine
-- **Slice:** S02 — Context Injection
-- **Task:** T02 — Dispatch prompt builder
-
-## Progress
-- Tasks Completed: 5/9
-- Current Phase: Execute
-- Auto Mode: Active
-
-## Last Update
-2024-03-14T14:23:15Z`,
-    },
-    {
-      name: "PROJECT.md",
-      type: "file",
-      content: `# GSD 2
-
-A TypeScript CLI application that controls an LLM coding agent.
-
-## Architecture
-- CLI binary built with Pi SDK
-- State machine driven by .gsd/ files
-- Branch-per-slice git strategy
-- Fresh context window per task
-
-## Key Features
-- Autonomous mode (/gsd auto)
-- Step mode (/gsd)
-- Crash recovery
-- Cost tracking`,
-    },
-    {
-      name: "DECISIONS.md",
-      type: "file",
-      content: `# Decisions Register
-
-## D001: State lives on disk
-**Context:** Need crash recovery and multi-terminal support
-**Decision:** All state in .gsd/ files, no in-memory state
-**Consequences:** Sessions can resume, but need file I/O
-
-## D002: Fresh context per task
-**Context:** Long sessions degrade quality
-**Decision:** New 200k window per task
-**Consequences:** Better quality, more overhead`,
-    },
-    {
-      name: "milestones",
-      type: "folder",
-      children: [
-        {
-          name: "M002-Auto-Mode-Engine",
-          type: "folder",
-          children: [
-            { name: "M002-ROADMAP.md", type: "file" },
-            { name: "M002-CONTEXT.md", type: "file" },
-            { name: "M002-RESEARCH.md", type: "file" },
-            {
-              name: "S01-State-Machine",
-              type: "folder",
-              children: [
-                { name: "S01-PLAN.md", type: "file" },
-                { name: "S01-UAT.md", type: "file" },
-                { name: "T01-PLAN.md", type: "file" },
-                { name: "T01-SUMMARY.md", type: "file" },
-                { name: "T02-PLAN.md", type: "file" },
-                { name: "T02-SUMMARY.md", type: "file" },
-              ],
-            },
-            {
-              name: "S02-Context-Injection",
-              type: "folder",
-              children: [
-                { name: "S02-PLAN.md", type: "file" },
-                { name: "T01-PLAN.md", type: "file" },
-                { name: "T01-SUMMARY.md", type: "file" },
-                { name: "T02-PLAN.md", type: "file" },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    { name: "preferences.md", type: "file" },
-    { name: "metrics.json", type: "file" },
-  ],
 }
 
 function FileIcon({ name, isFolder, isOpen }: { name: string; isFolder: boolean; isOpen?: boolean }) {
@@ -145,18 +40,20 @@ function FileIcon({ name, isFolder, isOpen }: { name: string; isFolder: boolean;
 interface FileTreeItemProps {
   node: FileNode
   depth: number
-  selectedFile: string | null
-  onSelectFile: (name: string, content?: string) => void
+  parentPath: string
+  selectedPath: string | null
+  onSelectFile: (path: string) => void
 }
 
-function FileTreeItem({ node, depth, selectedFile, onSelectFile }: FileTreeItemProps) {
+function FileTreeItem({ node, depth, parentPath, selectedPath, onSelectFile }: FileTreeItemProps) {
   const [isOpen, setIsOpen] = useState(depth < 2)
+  const fullPath = parentPath ? `${parentPath}/${node.name}` : node.name
 
   const handleClick = () => {
-    if (node.type === "folder") {
+    if (node.type === "directory") {
       setIsOpen(!isOpen)
     } else {
-      onSelectFile(node.name, node.content)
+      onSelectFile(fullPath)
     }
   }
 
@@ -166,28 +63,29 @@ function FileTreeItem({ node, depth, selectedFile, onSelectFile }: FileTreeItemP
         onClick={handleClick}
         className={cn(
           "flex w-full items-center gap-1.5 px-2 py-1 text-sm hover:bg-accent/50 transition-colors",
-          selectedFile === node.name && node.type === "file" && "bg-accent"
+          selectedPath === fullPath && node.type === "file" && "bg-accent"
         )}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
       >
-        {node.type === "folder" && (
+        {node.type === "directory" && (
           isOpen ? (
             <ChevronDown className="h-3 w-3 text-muted-foreground" />
           ) : (
             <ChevronRight className="h-3 w-3 text-muted-foreground" />
           )
         )}
-        <FileIcon name={node.name} isFolder={node.type === "folder"} isOpen={isOpen} />
+        <FileIcon name={node.name} isFolder={node.type === "directory"} isOpen={isOpen} />
         <span className="truncate">{node.name}</span>
       </button>
-      {node.type === "folder" && isOpen && node.children && (
+      {node.type === "directory" && isOpen && node.children && (
         <div>
           {node.children.map((child, i) => (
             <FileTreeItem
               key={i}
               node={child}
               depth={depth + 1}
-              selectedFile={selectedFile}
+              parentPath={fullPath}
+              selectedPath={selectedPath}
               onSelectFile={onSelectFile}
             />
           ))}
@@ -198,14 +96,88 @@ function FileTreeItem({ node, depth, selectedFile, onSelectFile }: FileTreeItemP
 }
 
 export function FilesView() {
-  const [selectedFile, setSelectedFile] = useState<string | null>("STATE.md")
-  const [fileContent, setFileContent] = useState<string | undefined>(
-    gsdFiles.children?.[0].content
-  )
+  const [tree, setTree] = useState<FileNode[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [fileContent, setFileContent] = useState<string | null>(null)
+  const [contentLoading, setContentLoading] = useState(false)
+  const [contentError, setContentError] = useState<string | null>(null)
 
-  const handleSelectFile = (name: string, content?: string) => {
-    setSelectedFile(name)
-    setFileContent(content)
+  useEffect(() => {
+    let cancelled = false
+    async function fetchTree() {
+      try {
+        setLoading(true)
+        setError(null)
+        const res = await fetch("/api/files")
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error(data.error || `Failed to fetch files (${res.status})`)
+        }
+        const data = await res.json()
+        if (!cancelled) {
+          setTree(data.tree ?? [])
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to fetch files")
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
+    }
+    fetchTree()
+    return () => { cancelled = true }
+  }, [])
+
+  const handleSelectFile = useCallback(async (path: string) => {
+    setSelectedPath(path)
+    setFileContent(null)
+    setContentError(null)
+    setContentLoading(true)
+
+    try {
+      const res = await fetch(`/api/files?path=${encodeURIComponent(path)}`)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || `Failed to fetch file (${res.status})`)
+      }
+      const data = await res.json()
+      setFileContent(data.content ?? null)
+    } catch (err) {
+      setContentError(err instanceof Error ? err.message : "Failed to fetch file content")
+    } finally {
+      setContentLoading(false)
+    }
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin mr-2" />
+        Loading files…
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex h-full items-center justify-center text-destructive">
+        <AlertCircle className="h-5 w-5 mr-2" />
+        {error}
+      </div>
+    )
+  }
+
+  if (tree.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center text-muted-foreground">
+        No .gsd/ files found
+      </div>
+    )
   }
 
   return (
@@ -213,24 +185,38 @@ export function FilesView() {
       {/* File tree */}
       <div className="w-64 flex-shrink-0 border-r border-border overflow-y-auto">
         <div className="py-2">
-          <FileTreeItem
-            node={gsdFiles}
-            depth={0}
-            selectedFile={selectedFile}
-            onSelectFile={handleSelectFile}
-          />
+          {tree.map((node, i) => (
+            <FileTreeItem
+              key={i}
+              node={node}
+              depth={0}
+              parentPath=""
+              selectedPath={selectedPath}
+              onSelectFile={handleSelectFile}
+            />
+          ))}
         </div>
       </div>
 
       {/* File content */}
       <div className="flex-1 overflow-hidden flex flex-col">
-        {selectedFile && (
+        {selectedPath && (
           <>
             <div className="flex h-9 items-center border-b border-border px-4">
-              <span className="text-sm font-medium">{selectedFile}</span>
+              <span className="text-sm font-medium">{selectedPath}</span>
             </div>
             <div className="flex-1 overflow-y-auto p-4 font-mono text-sm">
-              {fileContent ? (
+              {contentLoading ? (
+                <div className="flex items-center text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Loading…
+                </div>
+              ) : contentError ? (
+                <div className="flex items-center text-destructive">
+                  <AlertCircle className="h-4 w-4 mr-2" />
+                  {contentError}
+                </div>
+              ) : fileContent !== null ? (
                 <pre className="whitespace-pre-wrap text-muted-foreground">{fileContent}</pre>
               ) : (
                 <p className="text-muted-foreground italic">No preview available</p>
@@ -238,7 +224,7 @@ export function FilesView() {
             </div>
           </>
         )}
-        {!selectedFile && (
+        {!selectedPath && (
           <div className="flex h-full items-center justify-center text-muted-foreground">
             Select a file to view
           </div>

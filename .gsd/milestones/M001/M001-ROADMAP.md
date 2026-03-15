@@ -62,7 +62,7 @@ This milestone is complete only when all are true:
 - [x] **S03: Live terminal + focused prompt handling** `risk:high` `depends:[S01,S02]`
   > After this: the browser can send prompts, stream agent output, and answer agent questions/confirmations/editor requests in the focused panel without TUI fallback.
 
-- [ ] **S04: Current-project state surfaces** `risk:medium` `depends:[S01,S03]`
+- [x] **S04: Current-project state surfaces** `risk:medium` `depends:[S01,S03]`
   > After this: dashboard, roadmap, files, and activity views show real current-project data and live session context rather than mock values.
 
 - [ ] **S05: Start/resume workflow controls** `risk:medium` `depends:[S03,S04]`

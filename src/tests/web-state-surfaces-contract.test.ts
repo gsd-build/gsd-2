@@ -1,0 +1,473 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
+// ─── Imports ──────────────────────────────────────────────────────────
+const workspaceIndex = await import(
+  "../resources/extensions/gsd/workspace-index.ts"
+);
+const filesRoute = await import("../../web/app/api/files/route.ts");
+
+// Re-import status helpers from the web-side module
+const workspaceStatus = await import("../../web/lib/workspace-status.ts");
+
+// ─── Helpers ──────────────────────────────────────────────────────────
+function makeGsdFixture(): { root: string; gsdDir: string; cleanup: () => void } {
+  const root = mkdtempSync(join(tmpdir(), "gsd-state-surfaces-"));
+  const gsdDir = join(root, ".gsd");
+  mkdirSync(gsdDir, { recursive: true });
+  return {
+    root,
+    gsdDir,
+    cleanup: () => rmSync(root, { recursive: true, force: true }),
+  };
+}
+
+// ─── Group 1: Workspace index — risk/depends/demo fields ─────────────
+test("indexWorkspace extracts risk, depends, and demo from roadmap", async () => {
+  const { root, gsdDir, cleanup } = makeGsdFixture();
+
+  try {
+    const milestoneDir = join(gsdDir, "milestones", "M001");
+    const sliceDir = join(milestoneDir, "slices", "S01");
+    const tasksDir = join(sliceDir, "tasks");
+    mkdirSync(tasksDir, { recursive: true });
+
+    writeFileSync(
+      join(milestoneDir, "M001-ROADMAP.md"),
+      [
+        "# M001: Test Milestone",
+        "",
+        "## Slices",
+        "- [ ] **S01: Feature slice** `risk:high` `depends:[S00]`",
+        "  > After this: users can see the dashboard",
+      ].join("\n"),
+    );
+
+    writeFileSync(
+      join(sliceDir, "S01-PLAN.md"),
+      [
+        "# S01: Feature slice",
+        "",
+        "**Goal:** Build the feature",
+        "**Demo:** Dashboard renders",
+        "",
+        "## Tasks",
+        "- [ ] **T01: Build thing** `est:30m`",
+        "  Do the work.",
+      ].join("\n"),
+    );
+
+    writeFileSync(join(tasksDir, "T01-PLAN.md"), "# T01: Build thing\n\n## Steps\n- do it\n");
+
+    const index = await workspaceIndex.indexWorkspace(root);
+
+    assert.equal(index.milestones.length, 1);
+    assert.equal(index.milestones[0].id, "M001");
+
+    const slice = index.milestones[0].slices[0];
+    assert.equal(slice.id, "S01");
+    assert.equal(slice.risk, "high");
+    assert.deepEqual(slice.depends, ["S00"]);
+    assert.equal(slice.demo, "users can see the dashboard");
+    assert.equal(slice.done, false);
+    assert.equal(slice.tasks.length, 1);
+    assert.equal(slice.tasks[0].id, "T01");
+    assert.equal(slice.tasks[0].done, false);
+  } finally {
+    cleanup();
+  }
+});
+
+test("indexWorkspace handles slices without risk/depends/demo", async () => {
+  const { root, gsdDir, cleanup } = makeGsdFixture();
+
+  try {
+    const milestoneDir = join(gsdDir, "milestones", "M001");
+    const sliceDir = join(milestoneDir, "slices", "S01");
+    mkdirSync(join(sliceDir, "tasks"), { recursive: true });
+
+    writeFileSync(
+      join(milestoneDir, "M001-ROADMAP.md"),
+      "# M001: Minimal\n\n## Slices\n- [x] **S01: Done slice**\n",
+    );
+
+    writeFileSync(
+      join(sliceDir, "S01-PLAN.md"),
+      "# S01: Done slice\n\n**Goal:** Done\n\n## Tasks\n",
+    );
+
+    const index = await workspaceIndex.indexWorkspace(root);
+
+    const slice = index.milestones[0].slices[0];
+    // Parser defaults risk to "low" when not specified, demo to "" when no blockquote
+    assert.equal(slice.risk, "low");
+    assert.deepEqual(slice.depends, []);
+    assert.equal(slice.demo, "");
+    assert.equal(slice.done, true);
+  } finally {
+    cleanup();
+  }
+});
+
+// ─── Group 2: Shared status helpers ──────────────────────────────────
+test("getMilestoneStatus returns correct statuses", () => {
+  const { getMilestoneStatus } = workspaceStatus;
+
+  // All slices done → done
+  const doneMilestone = {
+    id: "M001",
+    title: "Done",
+    slices: [
+      { id: "S01", title: "S01", done: true, tasks: [] },
+      { id: "S02", title: "S02", done: true, tasks: [] },
+    ],
+  };
+  assert.equal(getMilestoneStatus(doneMilestone, {}), "done");
+
+  // Active milestone with some done slices → in-progress
+  const activeMilestone = {
+    id: "M001",
+    title: "Active",
+    slices: [
+      { id: "S01", title: "S01", done: true, tasks: [] },
+      { id: "S02", title: "S02", done: false, tasks: [] },
+    ],
+  };
+  assert.equal(getMilestoneStatus(activeMilestone, { milestoneId: "M001" }), "in-progress");
+
+  // Not active, no done slices → pending
+  const pendingMilestone = {
+    id: "M002",
+    title: "Pending",
+    slices: [
+      { id: "S01", title: "S01", done: false, tasks: [] },
+    ],
+  };
+  assert.equal(getMilestoneStatus(pendingMilestone, { milestoneId: "M001" }), "pending");
+});
+
+test("getSliceStatus returns correct statuses", () => {
+  const { getSliceStatus } = workspaceStatus;
+
+  // Done slice
+  assert.equal(
+    getSliceStatus("M001", { id: "S01", title: "S01", done: true, tasks: [] }, { milestoneId: "M001", sliceId: "S01" }),
+    "done",
+  );
+
+  // Active slice
+  assert.equal(
+    getSliceStatus("M001", { id: "S01", title: "S01", done: false, tasks: [] }, { milestoneId: "M001", sliceId: "S01" }),
+    "in-progress",
+  );
+
+  // Pending slice (different milestone active)
+  assert.equal(
+    getSliceStatus("M002", { id: "S01", title: "S01", done: false, tasks: [] }, { milestoneId: "M001", sliceId: "S01" }),
+    "pending",
+  );
+});
+
+test("getTaskStatus returns correct statuses", () => {
+  const { getTaskStatus } = workspaceStatus;
+  const active = { milestoneId: "M001", sliceId: "S01", taskId: "T01" };
+
+  // Done task
+  assert.equal(
+    getTaskStatus("M001", "S01", { id: "T01", title: "T01", done: true }, active),
+    "done",
+  );
+
+  // Active task
+  assert.equal(
+    getTaskStatus("M001", "S01", { id: "T01", title: "T01", done: false }, active),
+    "in-progress",
+  );
+
+  // Pending task (different task active)
+  assert.equal(
+    getTaskStatus("M001", "S01", { id: "T02", title: "T02", done: false }, active),
+    "pending",
+  );
+});
+
+// ─── Group 3: Files API — tree listing ───────────────────────────────
+test("files API returns tree listing of .gsd/ directory", async () => {
+  const { root, gsdDir, cleanup } = makeGsdFixture();
+  const origEnv = process.env.GSD_WEB_PROJECT_CWD;
+
+  try {
+    process.env.GSD_WEB_PROJECT_CWD = root;
+
+    // Create some files
+    writeFileSync(join(gsdDir, "STATE.md"), "# State\nactive");
+    writeFileSync(join(gsdDir, "PROJECT.md"), "# Project");
+    const msDir = join(gsdDir, "milestones", "M001");
+    mkdirSync(msDir, { recursive: true });
+    writeFileSync(join(msDir, "M001-ROADMAP.md"), "# Roadmap");
+
+    const request = new Request("http://localhost:3000/api/files");
+    const response = await filesRoute.GET(request);
+    assert.equal(response.status, 200);
+
+    const data = await response.json();
+    assert.ok(Array.isArray(data.tree));
+    assert.ok(data.tree.length > 0);
+
+    // Should have files at root level
+    const names = data.tree.map((n: { name: string }) => n.name);
+    assert.ok(names.includes("STATE.md"), `Expected STATE.md in tree, got: ${names}`);
+    assert.ok(names.includes("PROJECT.md"), `Expected PROJECT.md in tree, got: ${names}`);
+    assert.ok(names.includes("milestones"), `Expected milestones in tree, got: ${names}`);
+
+    // milestones should be a directory with children
+    const milestones = data.tree.find((n: { name: string }) => n.name === "milestones");
+    assert.equal(milestones.type, "directory");
+    assert.ok(Array.isArray(milestones.children));
+    assert.ok(milestones.children.length > 0);
+  } finally {
+    process.env.GSD_WEB_PROJECT_CWD = origEnv;
+    cleanup();
+  }
+});
+
+// ─── Group 4: Files API — file content ───────────────────────────────
+test("files API returns file content for valid path", async () => {
+  const { root, gsdDir, cleanup } = makeGsdFixture();
+  const origEnv = process.env.GSD_WEB_PROJECT_CWD;
+
+  try {
+    process.env.GSD_WEB_PROJECT_CWD = root;
+
+    const fileContent = "# State\n\nCurrent milestone: M001";
+    writeFileSync(join(gsdDir, "STATE.md"), fileContent);
+
+    const request = new Request("http://localhost:3000/api/files?path=STATE.md");
+    const response = await filesRoute.GET(request);
+    assert.equal(response.status, 200);
+
+    const data = await response.json();
+    assert.equal(data.content, fileContent);
+  } finally {
+    process.env.GSD_WEB_PROJECT_CWD = origEnv;
+    cleanup();
+  }
+});
+
+test("files API returns content for nested files", async () => {
+  const { root, gsdDir, cleanup } = makeGsdFixture();
+  const origEnv = process.env.GSD_WEB_PROJECT_CWD;
+
+  try {
+    process.env.GSD_WEB_PROJECT_CWD = root;
+
+    const msDir = join(gsdDir, "milestones", "M001");
+    mkdirSync(msDir, { recursive: true });
+    writeFileSync(join(msDir, "M001-ROADMAP.md"), "# Roadmap content");
+
+    const request = new Request(
+      "http://localhost:3000/api/files?path=milestones/M001/M001-ROADMAP.md",
+    );
+    const response = await filesRoute.GET(request);
+    assert.equal(response.status, 200);
+
+    const data = await response.json();
+    assert.equal(data.content, "# Roadmap content");
+  } finally {
+    process.env.GSD_WEB_PROJECT_CWD = origEnv;
+    cleanup();
+  }
+});
+
+// ─── Group 5: Files API — security: path traversal rejection ─────────
+test("files API rejects path traversal with ../", async () => {
+  const { root, cleanup } = makeGsdFixture();
+  const origEnv = process.env.GSD_WEB_PROJECT_CWD;
+
+  try {
+    process.env.GSD_WEB_PROJECT_CWD = root;
+
+    const request = new Request(
+      "http://localhost:3000/api/files?path=../etc/passwd",
+    );
+    const response = await filesRoute.GET(request);
+    assert.equal(response.status, 400);
+
+    const data = await response.json();
+    assert.ok(data.error, "Expected error message in response");
+  } finally {
+    process.env.GSD_WEB_PROJECT_CWD = origEnv;
+    cleanup();
+  }
+});
+
+test("files API rejects absolute paths", async () => {
+  const { root, cleanup } = makeGsdFixture();
+  const origEnv = process.env.GSD_WEB_PROJECT_CWD;
+
+  try {
+    process.env.GSD_WEB_PROJECT_CWD = root;
+
+    const request = new Request(
+      "http://localhost:3000/api/files?path=/etc/passwd",
+    );
+    const response = await filesRoute.GET(request);
+    assert.equal(response.status, 400);
+
+    const data = await response.json();
+    assert.ok(data.error);
+  } finally {
+    process.env.GSD_WEB_PROJECT_CWD = origEnv;
+    cleanup();
+  }
+});
+
+test("files API returns 404 for missing files", async () => {
+  const { root, cleanup } = makeGsdFixture();
+  const origEnv = process.env.GSD_WEB_PROJECT_CWD;
+
+  try {
+    process.env.GSD_WEB_PROJECT_CWD = root;
+
+    const request = new Request(
+      "http://localhost:3000/api/files?path=nonexistent.md",
+    );
+    const response = await filesRoute.GET(request);
+    assert.equal(response.status, 404);
+
+    const data = await response.json();
+    assert.ok(data.error);
+  } finally {
+    process.env.GSD_WEB_PROJECT_CWD = origEnv;
+    cleanup();
+  }
+});
+
+test("files API returns empty tree when .gsd/ does not exist", async () => {
+  const root = mkdtempSync(join(tmpdir(), "gsd-state-surfaces-empty-"));
+  const origEnv = process.env.GSD_WEB_PROJECT_CWD;
+
+  try {
+    process.env.GSD_WEB_PROJECT_CWD = root;
+
+    const request = new Request("http://localhost:3000/api/files");
+    const response = await filesRoute.GET(request);
+    assert.equal(response.status, 200);
+
+    const data = await response.json();
+    assert.deepEqual(data.tree, []);
+  } finally {
+    process.env.GSD_WEB_PROJECT_CWD = origEnv;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ─── Group 6: Mock-free invariant — no static mock data ──────────────
+
+const VIEW_FILES = [
+  "web/components/gsd/dashboard.tsx",
+  "web/components/gsd/roadmap.tsx",
+  "web/components/gsd/activity-view.tsx",
+  "web/components/gsd/files-view.tsx",
+  "web/components/gsd/dual-terminal.tsx",
+];
+
+// Patterns that indicate hardcoded mock data arrays
+const MOCK_DATA_PATTERNS = [
+  /const\s+\w+Data\s*=\s*\[/,            // const roadmapData = [, const activityLog = [, etc.
+  /const\s+activityLog\s*=/,              // const activityLog = ...
+  /const\s+recentActivity\s*=\s*\[/,      // const recentActivity = [...]
+  /const\s+currentSliceTasks\s*=\s*\[/,   // const currentSliceTasks = [...]
+  /const\s+modelUsage\s*=\s*\[/,          // const modelUsage = [...]
+  /const\s+gsdFiles\s*=\s*\[/,            // const gsdFiles = [...]
+  /AutoModeState.*idle.*working/,          // old enum-style mock state
+  /Lorem\s+ipsum/i,                        // lorem placeholder text
+  /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.*Z["'](?:.*,\s*$)/m,  // hardcoded ISO timestamps in array literals
+];
+
+const webRoot = resolve(import.meta.dirname, "../../web");
+
+test("view components contain no static mock data arrays", () => {
+  for (const filePath of VIEW_FILES) {
+    const fullPath = resolve(import.meta.dirname, "../..", filePath);
+    const source = readFileSync(fullPath, "utf-8");
+    for (const pattern of MOCK_DATA_PATTERNS) {
+      const match = source.match(pattern);
+      assert.equal(
+        match,
+        null,
+        `${filePath} contains mock data pattern: ${pattern} — matched: "${match?.[0]}"`,
+      );
+    }
+  }
+});
+
+test("view components read from real data sources (store or API)", () => {
+  // Views that derive state from the workspace store
+  const STORE_VIEWS = [
+    "web/components/gsd/dashboard.tsx",
+    "web/components/gsd/roadmap.tsx",
+    "web/components/gsd/activity-view.tsx",
+    "web/components/gsd/dual-terminal.tsx",
+  ];
+
+  // FilesView fetches from /api/files (real endpoint), not the workspace store — that's correct
+  const API_VIEWS = [
+    { path: "web/components/gsd/files-view.tsx", apiPattern: "/api/files" },
+  ];
+
+  for (const filePath of STORE_VIEWS) {
+    const fullPath = resolve(import.meta.dirname, "../..", filePath);
+    const source = readFileSync(fullPath, "utf-8");
+    assert.ok(
+      source.includes("gsd-workspace-store"),
+      `${filePath} does not import from gsd-workspace-store — store-backed views must read real store state`,
+    );
+  }
+
+  for (const { path: filePath, apiPattern } of API_VIEWS) {
+    const fullPath = resolve(import.meta.dirname, "../..", filePath);
+    const source = readFileSync(fullPath, "utf-8");
+    assert.ok(
+      source.includes(apiPattern),
+      `${filePath} does not reference ${apiPattern} — API-backed views must fetch from real endpoints`,
+    );
+  }
+});
+
+test("dashboard consumes activeToolExecution and streamingAssistantText from store", () => {
+  const dashboardPath = resolve(import.meta.dirname, "../../web/components/gsd/dashboard.tsx");
+  const source = readFileSync(dashboardPath, "utf-8");
+
+  assert.ok(
+    source.includes("activeToolExecution"),
+    "dashboard.tsx must reference activeToolExecution for live tool execution display",
+  );
+  assert.ok(
+    source.includes("streamingAssistantText"),
+    "dashboard.tsx must reference streamingAssistantText for streaming indicator",
+  );
+});
+
+test("status bar consumes statusTexts from store", () => {
+  const statusBarPath = resolve(import.meta.dirname, "../../web/components/gsd/status-bar.tsx");
+  const source = readFileSync(statusBarPath, "utf-8");
+
+  assert.ok(
+    source.includes("statusTexts"),
+    "status-bar.tsx must reference statusTexts for extension status display",
+  );
+});
+
+test("dual terminal consumes activeToolExecution from store", () => {
+  const dualTerminalPath = resolve(import.meta.dirname, "../../web/components/gsd/dual-terminal.tsx");
+  const source = readFileSync(dualTerminalPath, "utf-8");
+
+  assert.ok(
+    source.includes("activeToolExecution"),
+    "dual-terminal.tsx must reference activeToolExecution for tool execution display",
+  );
+});

@@ -73,6 +73,8 @@ export interface WorkspaceTaskTarget {
   summaryPath?: string
 }
 
+export type RiskLevel = "low" | "medium" | "high"
+
 export interface WorkspaceSliceTarget {
   id: string
   title: string
@@ -82,6 +84,9 @@ export interface WorkspaceSliceTarget {
   uatPath?: string
   tasksDir?: string
   branch?: string
+  risk?: RiskLevel
+  depends?: string[]
+  demo?: string
   tasks: WorkspaceTaskTarget[]
 }
 

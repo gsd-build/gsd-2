@@ -1,6 +1,6 @@
 "use client"
 
-import { GitBranch, Cpu, DollarSign, Clock, Zap, AlertTriangle, Wifi } from "lucide-react"
+import { GitBranch, Cpu, DollarSign, Clock, Zap, AlertTriangle, Wifi, Info } from "lucide-react"
 import {
   formatCost,
   formatDuration,
@@ -34,6 +34,9 @@ export function StatusBar() {
   const auto = workspace.boot?.auto
   const unitLabel = auto?.currentUnit?.id ?? getCurrentScopeLabel(workspace.boot?.workspace)
   const visibleError = getVisibleWorkspaceError(workspace)
+  const statusTexts = workspace.statusTexts
+  const statusTextEntries = Object.entries(statusTexts)
+  const latestStatusText = statusTextEntries.length > 0 ? statusTextEntries[statusTextEntries.length - 1][1] : null
 
   return (
     <div className="flex h-7 items-center justify-between border-t border-border bg-card px-3 text-xs">
@@ -54,6 +57,12 @@ export function StatusBar() {
           <div className="hidden max-w-sm items-center gap-1.5 truncate text-destructive lg:flex" data-testid="status-bar-error">
             <AlertTriangle className="h-3 w-3 shrink-0" />
             <span className="truncate">{visibleError}</span>
+          </div>
+        )}
+        {latestStatusText && !visibleError && (
+          <div className="hidden max-w-xs items-center gap-1.5 truncate text-muted-foreground lg:flex" data-testid="status-bar-extension-status">
+            <Info className="h-3 w-3 shrink-0" />
+            <span className="truncate">{latestStatusText}</span>
           </div>
         )}
       </div>

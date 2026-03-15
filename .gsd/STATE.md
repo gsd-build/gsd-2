@@ -2,7 +2,7 @@
 
 **Active Milestone:** M001 — Web mode foundation
 **Active Slice:** S04 — Current-project state surfaces
-**Phase:** planned
+**Phase:** executing
 **Requirements Status:** 8 active · 3 validated · 3 deferred · 3 out of scope
 
 ## Milestone Registry
@@ -16,4 +16,4 @@
 - None
 
 ## Next Action
-Execute T01: Wire live session context into views and verify mock-free invariant.
+Execute T01: Extend workspace index and wire Roadmap + Activity views.

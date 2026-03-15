@@ -27,11 +27,13 @@ import {
   resolveSliceFile,
   resolveTaskFile,
   resolveGsdRootFile,
+  gsdRoot,
 } from './paths.js';
 import { getActiveSliceBranch } from './worktree.js';
-import { milestoneIdSort, findMilestoneIds } from './milestone-id-utils.js';
+import { milestoneIdSort, findMilestoneIds } from './guided-flow.js';
+import { nativeBatchParseGsdFiles, type BatchParsedFile } from './native-parser-bridge.js';
 
-import { join } from 'path';
+import { join, resolve } from 'path';
 
 // ─── Query Functions ───────────────────────────────────────────────────────
 
@@ -98,6 +100,11 @@ export async function getActiveMilestoneId(basePath: string): Promise<string | n
 /**
  * Reconstruct GSD state from files on disk.
  * This is the source of truth — STATE.md is just a cache of this output.
+ *
+ * Uses native batch parsing when available: a single Rust call reads and parses
+ * every .md file under .gsd/, populating an in-memory cache that replaces all
+ * individual loadFile() calls during milestone/slice/task traversal.
+ * Falls back to sequential JS file reads when the native module is absent.
  */
 export async function deriveState(basePath: string): Promise<GSDState> {
   // Return cached result if within the TTL window for the same basePath
@@ -116,7 +123,71 @@ export async function deriveState(basePath: string): Promise<GSDState> {
 
 async function _deriveStateImpl(basePath: string): Promise<GSDState> {
   const milestoneIds = findMilestoneIds(basePath);
-  const requirements = parseRequirementCounts(await loadFile(resolveGsdRootFile(basePath, "REQUIREMENTS")));
+
+  // ── Batch-parse file cache ──────────────────────────────────────────────
+  // When the native Rust parser is available, read every .md file under .gsd/
+  // in one call and build an in-memory content map keyed by absolute path.
+  // This eliminates O(N) individual fs.readFile calls during traversal.
+  const fileContentCache = new Map<string, string>();
+  const gsdDir = gsdRoot(basePath);
+
+  const batchFiles = nativeBatchParseGsdFiles(gsdDir);
+  if (batchFiles) {
+    for (const f of batchFiles) {
+      // Reconstruct the full file content from parsed components so downstream
+      // parsers (parseRoadmap, parseSummary, etc.) receive the same input they
+      // expect from loadFile(). Files with frontmatter get it re-serialized;
+      // files without get just the body.
+      const absPath = resolve(gsdDir, f.path);
+      const hasMetadata = Object.keys(f.metadata).length > 0;
+      if (hasMetadata) {
+        // Re-serialize frontmatter as simple YAML key: value lines
+        const fmLines: string[] = ['---'];
+        for (const [key, value] of Object.entries(f.metadata)) {
+          if (Array.isArray(value)) {
+            if (value.length === 0) {
+              fmLines.push(`${key}: []`);
+            } else if (typeof value[0] === 'object' && value[0] !== null) {
+              fmLines.push(`${key}:`);
+              for (const obj of value) {
+                const entries = Object.entries(obj as Record<string, unknown>);
+                if (entries.length > 0) {
+                  fmLines.push(`  - ${entries[0][0]}: ${entries[0][1]}`);
+                  for (let i = 1; i < entries.length; i++) {
+                    fmLines.push(`    ${entries[i][0]}: ${entries[i][1]}`);
+                  }
+                }
+              }
+            } else {
+              fmLines.push(`${key}:`);
+              for (const item of value) {
+                fmLines.push(`  - ${item}`);
+              }
+            }
+          } else {
+            fmLines.push(`${key}: ${value}`);
+          }
+        }
+        fmLines.push('---');
+        fileContentCache.set(absPath, fmLines.join('\n') + '\n\n' + f.body);
+      } else {
+        fileContentCache.set(absPath, f.body);
+      }
+    }
+  }
+
+  /**
+   * Load file content from batch cache first, falling back to disk read.
+   * Resolves the path to absolute before cache lookup.
+   */
+  async function cachedLoadFile(path: string): Promise<string | null> {
+    const abs = resolve(path);
+    const cached = fileContentCache.get(abs);
+    if (cached !== undefined) return cached;
+    return loadFile(path);
+  }
+
+  const requirements = parseRequirementCounts(await cachedLoadFile(resolveGsdRootFile(basePath, "REQUIREMENTS")));
 
   if (milestoneIds.length === 0) {
     return {
@@ -135,25 +206,31 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
     };
   }
 
-  // Pre-compute the set of complete milestone IDs for dependency checking.
-  // This allows forward references (M002 depending on M003) to resolve correctly.
+  // ── Single-pass milestone scan ──────────────────────────────────────────
+  // Parse each milestone's roadmap once, caching results. First pass determines
+  // completeness for dependency resolution; second pass builds the registry.
+  // With the batch cache, all file reads hit memory instead of disk.
+
+  // Phase 1: Build roadmap cache and completeness set
+  const roadmapCache = new Map<string, Roadmap>();
   const completeMilestoneIds = new Set<string>();
+
   for (const mid of milestoneIds) {
     const rf = resolveMilestoneFile(basePath, mid, "ROADMAP");
-    const rc = rf ? await loadFile(rf) : null;
+    const rc = rf ? await cachedLoadFile(rf) : null;
     if (!rc) {
-      // No roadmap — milestone is complete if it has a summary
       const sf = resolveMilestoneFile(basePath, mid, "SUMMARY");
       if (sf) completeMilestoneIds.add(mid);
       continue;
     }
     const rmap = parseRoadmap(rc);
+    roadmapCache.set(mid, rmap);
     if (!isMilestoneComplete(rmap)) continue;
     const sf = resolveMilestoneFile(basePath, mid, "SUMMARY");
     if (sf) completeMilestoneIds.add(mid);
   }
 
-  // Build the registry and locate the active milestone in a single pass.
+  // Phase 2: Build registry using cached roadmaps (no re-parsing or re-reading)
   const registry: MilestoneRegistryEntry[] = [];
   let activeMilestone: ActiveRef | null = null;
   let activeRoadmap: Roadmap | null = null;
@@ -161,13 +238,13 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
   let activeMilestoneHasDraft = false;
 
   for (const mid of milestoneIds) {
-    const roadmapFile = resolveMilestoneFile(basePath, mid, "ROADMAP");
-    const content = roadmapFile ? await loadFile(roadmapFile) : null;
-    if (!content) {
+    const roadmap = roadmapCache.get(mid) ?? null;
+
+    if (!roadmap) {
       // No roadmap — check if a summary exists (completed milestone without roadmap)
       const summaryFile = resolveMilestoneFile(basePath, mid, "SUMMARY");
       if (summaryFile) {
-        const summaryContent = await loadFile(summaryFile);
+        const summaryContent = await cachedLoadFile(summaryFile);
         const summaryTitle = summaryContent
           ? (parseSummary(summaryContent).title || mid)
           : mid;
@@ -193,7 +270,6 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
       continue;
     }
 
-    const roadmap = parseRoadmap(content);
     const title = roadmap.title.replace(/^M\d+(?:-[a-z0-9]{6})?[^:]*:\s*/, '');
     const complete = isMilestoneComplete(roadmap);
 
@@ -212,7 +288,7 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
     } else if (!activeMilestoneFound) {
       // Check milestone-level dependencies before promoting to active
       const contextFile = resolveMilestoneFile(basePath, mid, "CONTEXT");
-      const contextContent = contextFile ? await loadFile(contextFile) : null;
+      const contextContent = contextFile ? await cachedLoadFile(contextFile) : null;
       const deps = parseContextDependsOn(contextContent);
       const depsUnmet = deps.some(dep => !completeMilestoneIds.has(dep));
       if (depsUnmet) {
@@ -226,7 +302,7 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
       }
     } else {
       const contextFile2 = resolveMilestoneFile(basePath, mid, "CONTEXT");
-      const contextContent2 = contextFile2 ? await loadFile(contextFile2) : null;
+      const contextContent2 = contextFile2 ? await cachedLoadFile(contextFile2) : null;
       const deps2 = parseContextDependsOn(contextContent2);
       registry.push({ id: mid, title, status: 'pending', ...(deps2.length > 0 ? { dependsOn: deps2 } : {}) });
     }
@@ -366,7 +442,7 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
 
   // Check if the slice has a plan
   const planFile = resolveSliceFile(basePath, activeMilestone.id, activeSlice.id, "PLAN");
-  const slicePlanContent = planFile ? await loadFile(planFile) : null;
+  const slicePlanContent = planFile ? await cachedLoadFile(planFile) : null;
 
   if (!slicePlanContent) {
     return {
@@ -428,7 +504,7 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
   for (const ct of completedTasks) {
     const summaryFile = resolveTaskFile(basePath, activeMilestone.id, activeSlice.id, ct.id, "SUMMARY");
     if (!summaryFile) continue;
-    const summaryContent = await loadFile(summaryFile);
+    const summaryContent = await cachedLoadFile(summaryFile);
     if (!summaryContent) continue;
     const summary = parseSummary(summaryContent);
     if (summary.frontmatter.blocker_discovered) {
@@ -468,8 +544,8 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
   const sDir = resolveSlicePath(basePath, activeMilestone.id, activeSlice.id);
   const continueFile = sDir ? resolveSliceFile(basePath, activeMilestone.id, activeSlice.id, "CONTINUE") : null;
   // Also check legacy continue.md
-  const hasInterrupted = !!(continueFile && await loadFile(continueFile)) ||
-    !!(sDir && await loadFile(join(sDir, "continue.md")));
+  const hasInterrupted = !!(continueFile && await cachedLoadFile(continueFile)) ||
+    !!(sDir && await cachedLoadFile(join(sDir, "continue.md")));
 
   return {
     activeMilestone,

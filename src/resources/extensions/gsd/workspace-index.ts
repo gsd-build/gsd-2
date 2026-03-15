@@ -9,7 +9,8 @@ import {
   resolveTasksDir,
 } from "./paths.js";
 import { deriveState } from "./state.js";
-import { milestoneIdSort, findMilestoneIds } from "./milestone-id-utils.js";
+import { milestoneIdSort, findMilestoneIds } from "./guided-flow.js";
+import type { RiskLevel } from "./types.js";
 import { type ValidationIssue, validateCompleteBoundary, validatePlanBoundary } from "./observability-validator.js";
 import { getSliceBranchName, detectWorktreeName } from "./worktree.js";
 
@@ -30,6 +31,9 @@ export interface WorkspaceSliceTarget {
   uatPath?: string;
   tasksDir?: string;
   branch?: string;
+  risk?: RiskLevel;
+  depends?: string[];
+  demo?: string;
   tasks: WorkspaceTaskTarget[];
 }
 
@@ -64,7 +68,7 @@ function titleFromRoadmapHeader(content: string, fallbackId: string): string {
   return roadmap.title.replace(/^M\d+(?:-[a-z0-9]{6})?[^:]*:\s*/, "") || fallbackId;
 }
 
-async function indexSlice(basePath: string, milestoneId: string, sliceId: string, fallbackTitle: string, done: boolean): Promise<WorkspaceSliceTarget> {
+async function indexSlice(basePath: string, milestoneId: string, sliceId: string, fallbackTitle: string, done: boolean, roadmapMeta?: { risk?: RiskLevel; depends?: string[]; demo?: string }): Promise<WorkspaceSliceTarget> {
   const planPath = resolveSliceFile(basePath, milestoneId, sliceId, "PLAN") ?? undefined;
   const summaryPath = resolveSliceFile(basePath, milestoneId, sliceId, "SUMMARY") ?? undefined;
   const uatPath = resolveSliceFile(basePath, milestoneId, sliceId, "UAT") ?? undefined;
@@ -99,6 +103,9 @@ async function indexSlice(basePath: string, milestoneId: string, sliceId: string
     uatPath,
     tasksDir,
     branch: getSliceBranchName(milestoneId, sliceId, detectWorktreeName(basePath)),
+    risk: roadmapMeta?.risk,
+    depends: roadmapMeta?.depends,
+    demo: roadmapMeta?.demo,
     tasks,
   };
 }
@@ -119,7 +126,7 @@ export async function indexWorkspace(basePath: string): Promise<GSDWorkspaceInde
         const roadmap = parseRoadmap(roadmapContent);
         title = titleFromRoadmapHeader(roadmapContent, milestoneId);
         for (const slice of roadmap.slices) {
-          const indexedSlice = await indexSlice(basePath, milestoneId, slice.id, slice.title, slice.done);
+          const indexedSlice = await indexSlice(basePath, milestoneId, slice.id, slice.title, slice.done, { risk: slice.risk, depends: slice.depends, demo: slice.demo });
           slices.push(indexedSlice);
           validationIssues.push(...await validatePlanBoundary(basePath, milestoneId, slice.id));
           validationIssues.push(...await validateCompleteBoundary(basePath, milestoneId, slice.id));

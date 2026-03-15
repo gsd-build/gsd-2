@@ -34,6 +34,15 @@ The five content views (Dashboard, Roadmap, Activity, FilesView, DualTerminal) a
 - [ ] Build compiles cleanly
 - [ ] Existing contract tests pass (no regressions)
 
+## Observability Impact
+
+- Dashboard Session card now renders `activeToolExecution.name` with a pulsing indicator — visible as "Running: {tool}" row when tools are active, absent when null. A future agent can verify by checking for the pulsing dot or "Running:" text in the Session card during tool execution.
+- Dashboard streaming indicator renders when `streamingAssistantText` is non-empty — shows "Streaming…" with animation. Disappears when the turn boundary clears the buffer.
+- StatusBar surfaces `statusTexts` — the most recent entry appears in the left section. Inspectable via the `data-testid="status-bar-extension-status"` attribute.
+- DualTerminal shows tool name in the current-workflow section during execution — visible as "Tool: {name}" below the current unit.
+- Failure modes: all three additions are conditional — they gracefully hide when the relevant state is null/empty. No new failure modes introduced. If the store state shape changes, the TypeScript compiler will catch it at build time.
+- Contract test verifies mock-free invariant statically by reading component source files — no runtime needed for this check. Failures produce clear assertion messages identifying which file contains mock data.
+
 ## Verification
 
 - `node --import ./src/resources/extensions/gsd/tests/resolve-ts.mjs --experimental-strip-types --test src/tests/web-state-surfaces-contract.test.ts` — all existing + new tests pass

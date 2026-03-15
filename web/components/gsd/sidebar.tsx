@@ -26,12 +26,8 @@ import {
   getVisibleWorkspaceError,
   shortenPath,
   useGSDWorkspaceState,
-  type WorkspaceMilestoneTarget,
-  type WorkspaceSliceTarget,
-  type WorkspaceTaskTarget,
 } from "@/lib/gsd-workspace-store"
-
-type ItemStatus = "done" | "in-progress" | "pending"
+import { getMilestoneStatus, getSliceStatus, getTaskStatus, type ItemStatus } from "@/lib/workspace-status"
 
 const StatusIcon = ({ status }: { status: ItemStatus }) => {
   if (status === "done") {
@@ -46,40 +42,6 @@ const StatusIcon = ({ status }: { status: ItemStatus }) => {
 interface SidebarProps {
   activeView: string
   onViewChange: (view: string) => void
-}
-
-function getSliceStatus(
-  milestoneId: string,
-  slice: WorkspaceSliceTarget,
-  active: { milestoneId?: string; sliceId?: string },
-): ItemStatus {
-  if (slice.done) return "done"
-  if (active.milestoneId === milestoneId && active.sliceId === slice.id) return "in-progress"
-  return "pending"
-}
-
-function getTaskStatus(
-  milestoneId: string,
-  sliceId: string,
-  task: WorkspaceTaskTarget,
-  active: { milestoneId?: string; sliceId?: string; taskId?: string },
-): ItemStatus {
-  if (task.done) return "done"
-  if (active.milestoneId === milestoneId && active.sliceId === sliceId && active.taskId === task.id) return "in-progress"
-  return "pending"
-}
-
-function getMilestoneStatus(
-  milestone: WorkspaceMilestoneTarget,
-  active: { milestoneId?: string },
-): ItemStatus {
-  if (milestone.slices.length > 0 && milestone.slices.every((slice) => slice.done)) {
-    return "done"
-  }
-  if (active.milestoneId === milestone.id) {
-    return "in-progress"
-  }
-  return milestone.slices.some((slice) => slice.done) ? "in-progress" : "pending"
 }
 
 export function Sidebar({ activeView, onViewChange }: SidebarProps) {

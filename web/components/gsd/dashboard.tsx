@@ -10,15 +10,29 @@ import {
   Play,
   GitBranch,
   Cpu,
+  Wrench,
+  MessageSquare,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import {
+  useGSDWorkspaceState,
+  formatDuration,
+  formatCost,
+  formatTokens,
+  getCurrentScopeLabel,
+  getCurrentBranch,
+  getCurrentSlice,
+  getModelLabel,
+  type WorkspaceTerminalLine,
+  type TerminalLineType,
+} from "@/lib/gsd-workspace-store"
+import { getTaskStatus, type ItemStatus } from "@/lib/workspace-status"
 
 interface MetricCardProps {
   label: string
   value: string
   subtext?: string
   icon: React.ReactNode
-  trend?: "up" | "down" | "neutral"
 }
 
 function MetricCard({ label, value, subtext, icon }: MetricCardProps) {
@@ -38,53 +52,82 @@ function MetricCard({ label, value, subtext, icon }: MetricCardProps) {
   )
 }
 
-interface ProgressItem {
-  id: string
-  name: string
-  status: "done" | "in-progress" | "pending"
-  progress?: number
+function taskStatusIcon(status: ItemStatus) {
+  switch (status) {
+    case "done":
+      return <CheckCircle2 className="h-4 w-4 text-foreground/70" />
+    case "in-progress":
+      return <Play className="h-4 w-4 text-foreground" />
+    case "pending":
+      return <Circle className="h-4 w-4 text-muted-foreground/50" />
+  }
 }
 
-const currentSliceTasks: ProgressItem[] = [
-  { id: "T01", name: "Pre-load context files", status: "done" },
-  { id: "T02", name: "Dispatch prompt builder", status: "in-progress", progress: 65 },
-  { id: "T03", name: "Summary aggregation", status: "pending" },
-]
-
-const recentActivity = [
-  { time: "2m ago", action: "Task T02 started", type: "info" },
-  { time: "8m ago", action: "Committed: feat(S02/T01): pre-load context files", type: "success" },
-  { time: "15m ago", action: "Task T01 verified", type: "success" },
-  { time: "23m ago", action: "Slice S02 research complete", type: "info" },
-  { time: "45m ago", action: "Slice S01 merged to main", type: "success" },
-  { time: "1h ago", action: "Auto mode started", type: "info" },
-]
-
-const modelUsage = [
-  { model: "claude-sonnet-4-6", phase: "execution", tokens: 523400, cost: 7.85 },
-  { model: "claude-opus-4-6", phase: "planning", tokens: 189200, cost: 3.78 },
-  { model: "claude-sonnet-4-6", phase: "research", tokens: 134600, cost: 0.84 },
-]
+function activityDotColor(type: TerminalLineType): string {
+  switch (type) {
+    case "success":
+      return "bg-success"
+    case "error":
+      return "bg-destructive"
+    default:
+      return "bg-foreground/50"
+  }
+}
 
 export function Dashboard() {
+  const state = useGSDWorkspaceState()
+  const boot = state.boot
+  const workspace = boot?.workspace ?? null
+  const auto = boot?.auto ?? null
+  const bridge = boot?.bridge ?? null
+
+  const activeToolExecution = state.activeToolExecution
+  const streamingAssistantText = state.streamingAssistantText
+
+  const elapsed = auto?.elapsed ?? 0
+  const totalCost = auto?.totalCost ?? 0
+  const totalTokens = auto?.totalTokens ?? 0
+
+  const currentSlice = getCurrentSlice(workspace)
+  const doneTasks = currentSlice?.tasks.filter((t) => t.done).length ?? 0
+  const totalTasks = currentSlice?.tasks.length ?? 0
+  const progressPercent = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0
+
+  const scopeLabel = getCurrentScopeLabel(workspace)
+  const branch = getCurrentBranch(workspace)
+  const model = getModelLabel(bridge)
+  const isAutoActive = auto?.active ?? false
+
+  // Last 6 terminal lines for recent activity
+  const recentLines: WorkspaceTerminalLine[] = (state.terminalLines ?? []).slice(-6)
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-border px-6 py-3">
         <div>
           <h1 className="text-lg font-semibold">Dashboard</h1>
           <p className="text-sm text-muted-foreground">
-            M002: Auto Mode Engine — S02: Context Injection
+            {scopeLabel}
           </p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-success" />
-            <span className="font-medium">Auto Mode Active</span>
+            <span
+              className={cn(
+                "h-2 w-2 rounded-full",
+                isAutoActive ? "animate-pulse bg-success" : "bg-muted-foreground/50",
+              )}
+            />
+            <span className="font-medium">
+              {isAutoActive ? "Auto Mode Active" : "Auto Mode Inactive"}
+            </span>
           </div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <GitBranch className="h-4 w-4" />
-            <span className="font-mono">gsd/M002/S02</span>
-          </div>
+          {branch && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <GitBranch className="h-4 w-4" />
+              <span className="font-mono">{branch}</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -93,26 +136,23 @@ export function Dashboard() {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             label="Elapsed Time"
-            value="2h 34m"
-            subtext="Started at 11:49 AM"
+            value={formatDuration(elapsed)}
             icon={<Clock className="h-5 w-5" />}
           />
           <MetricCard
             label="Total Cost"
-            value="$12.47"
-            subtext="Budget: $50.00"
+            value={formatCost(totalCost)}
             icon={<DollarSign className="h-5 w-5" />}
           />
           <MetricCard
             label="Tokens Used"
-            value="847K"
-            subtext="~1.2M projected"
+            value={formatTokens(totalTokens)}
             icon={<Zap className="h-5 w-5" />}
           />
           <MetricCard
             label="Progress"
-            value="58%"
-            subtext="5/9 tasks complete"
+            value={totalTasks > 0 ? `${progressPercent}%` : "—"}
+            subtext={totalTasks > 0 ? `${doneTasks}/${totalTasks} tasks complete` : "No active slice"}
             icon={<Activity className="h-5 w-5" />}
           />
         </div>
@@ -121,77 +161,97 @@ export function Dashboard() {
           {/* Current Slice Progress */}
           <div className="rounded-md border border-border bg-card">
             <div className="border-b border-border px-4 py-3">
-              <h2 className="text-sm font-semibold">Current Slice: S02 — Context Injection</h2>
+              <h2 className="text-sm font-semibold">
+                {currentSlice
+                  ? `Current Slice: ${currentSlice.id} — ${currentSlice.title}`
+                  : "Current Slice"}
+              </h2>
             </div>
             <div className="p-4 space-y-3">
-              {currentSliceTasks.map((task) => (
-                <div key={task.id} className="flex items-center gap-3">
-                  {task.status === "done" && (
-                    <CheckCircle2 className="h-4 w-4 text-foreground/70" />
-                  )}
-                  {task.status === "in-progress" && <Play className="h-4 w-4 text-foreground" />}
-                  {task.status === "pending" && (
-                    <Circle className="h-4 w-4 text-muted-foreground/50" />
-                  )}
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between">
-                      <span
-                        className={cn(
-                          "text-sm",
-                          task.status === "pending" && "text-muted-foreground"
-                        )}
-                      >
-                        {task.id}: {task.name}
-                      </span>
-                      {task.progress !== undefined && (
-                        <span className="text-xs text-muted-foreground">{task.progress}%</span>
-                      )}
-                    </div>
-                    {task.status === "in-progress" && (
-                      <div className="mt-1.5 h-1 w-full rounded-full bg-accent">
-                        <div
-                          className="h-full rounded-full bg-foreground transition-all"
-                          style={{ width: `${task.progress}%` }}
-                        />
+              {currentSlice && currentSlice.tasks.length > 0 ? (
+                currentSlice.tasks.map((task) => {
+                  const status = getTaskStatus(
+                    workspace!.active.milestoneId!,
+                    currentSlice.id,
+                    task,
+                    workspace!.active,
+                  )
+                  return (
+                    <div key={task.id} className="flex items-center gap-3">
+                      {taskStatusIcon(status)}
+                      <div className="flex-1">
+                        <span
+                          className={cn(
+                            "text-sm",
+                            status === "pending" && "text-muted-foreground",
+                          )}
+                        >
+                          {task.id}: {task.title}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                </div>
-              ))}
+                    </div>
+                  )
+                })
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No active slice or no tasks defined yet.
+                </p>
+              )}
             </div>
           </div>
 
-          {/* Model Usage */}
+          {/* Model / Session Info */}
           <div className="rounded-md border border-border bg-card">
             <div className="border-b border-border px-4 py-3">
-              <h2 className="text-sm font-semibold">Model Usage</h2>
+              <h2 className="text-sm font-semibold">Session</h2>
             </div>
             <div className="p-4">
               <div className="space-y-3">
-                {modelUsage.map((usage, i) => (
-                  <div key={i} className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2">
-                      <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="font-mono text-xs">{usage.model}</span>
-                      <span className="rounded bg-accent px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        {usage.phase}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-4 text-muted-foreground">
-                      <span>{(usage.tokens / 1000).toFixed(0)}K tokens</span>
-                      <span className="font-medium text-foreground">${usage.cost.toFixed(2)}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-4 border-t border-border pt-3">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Total</span>
-                  <div className="flex items-center gap-4">
-                    <span className="text-muted-foreground">847K tokens</span>
-                    <span className="font-semibold">$12.47</span>
+                  <div className="flex items-center gap-2">
+                    <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-muted-foreground">Model</span>
                   </div>
+                  <span className="font-mono text-xs">{model}</span>
                 </div>
+                <div className="flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2">
+                    <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-muted-foreground">Cost</span>
+                  </div>
+                  <span className="font-medium">{formatCost(totalCost)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2">
+                    <Zap className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-muted-foreground">Tokens</span>
+                  </div>
+                  <span>{formatTokens(totalTokens)}</span>
+                </div>
+                {activeToolExecution && (
+                  <div className="flex items-center justify-between text-sm" data-testid="dashboard-active-tool">
+                    <div className="flex items-center gap-2">
+                      <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="text-muted-foreground">Running</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
+                      <span className="font-mono text-xs">{activeToolExecution.name}</span>
+                    </div>
+                  </div>
+                )}
+                {streamingAssistantText.length > 0 && (
+                  <div className="flex items-center justify-between text-sm" data-testid="dashboard-streaming">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="text-muted-foreground">Agent</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-foreground/60 animate-pulse" />
+                      <span className="text-xs">Streaming…</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -202,21 +262,28 @@ export function Dashboard() {
           <div className="border-b border-border px-4 py-3">
             <h2 className="text-sm font-semibold">Recent Activity</h2>
           </div>
-          <div className="divide-y divide-border">
-            {recentActivity.map((activity, i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-2.5">
-                <span className="w-16 text-xs text-muted-foreground">{activity.time}</span>
-                <span
-                  className={cn(
-                    "h-1.5 w-1.5 rounded-full",
-                    activity.type === "success" && "bg-success",
-                    activity.type === "info" && "bg-foreground/50"
-                  )}
-                />
-                <span className="text-sm">{activity.action}</span>
-              </div>
-            ))}
-          </div>
+          {recentLines.length > 0 ? (
+            <div className="divide-y divide-border">
+              {recentLines.map((line) => (
+                <div key={line.id} className="flex items-center gap-3 px-4 py-2.5">
+                  <span className="w-16 flex-shrink-0 font-mono text-xs text-muted-foreground">
+                    {line.timestamp}
+                  </span>
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 flex-shrink-0 rounded-full",
+                      activityDotColor(line.type),
+                    )}
+                  />
+                  <span className="text-sm truncate">{line.content}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="px-4 py-4 text-sm text-muted-foreground">
+              No activity yet.
+            </div>
+          )}
         </div>
       </div>
     </div>

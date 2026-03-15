@@ -6,7 +6,7 @@
 import { promises as fs } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { resolveMilestoneFile, relMilestoneFile } from './paths.js';
-import { milestoneIdSort, findMilestoneIds } from './milestone-id-utils.js';
+import { milestoneIdSort, findMilestoneIds } from './guided-flow.js';
 
 import type {
   Roadmap, BoundaryMapEntry,
