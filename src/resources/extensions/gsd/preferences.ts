@@ -485,16 +485,20 @@ function parseFrontmatterBlock(frontmatter: string): GSDPreferences {
   return root as GSDPreferences;
 }
 
-function parseScalar(value: string): string | number | boolean {
+function parseScalar(value: string): unknown {
   if (value === "true") return true;
   if (value === "false") return false;
+  // Recognize empty array/object literals (with or without surrounding quotes)
+  const unquoted = value.replace(/^['\"]|['\"]$/g, "");
+  if (unquoted === "[]") return [];
+  if (unquoted === "{}") return {};
   if (/^-?\d+$/.test(value)) {
     const n = Number(value);
     // Keep large integers (e.g. Discord channel IDs) as strings to avoid precision loss
     if (Number.isSafeInteger(n)) return n;
     return value;
   }
-  return value.replace(/^['\"]|['\"]$/g, "");
+  return unquoted;
 }
 
 /**
@@ -637,7 +641,7 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
   };
 }
 
-function validatePreferences(preferences: GSDPreferences): {
+export function validatePreferences(preferences: GSDPreferences): {
   preferences: GSDPreferences;
   errors: string[];
 } {
@@ -906,6 +910,22 @@ function validatePreferences(preferences: GSDPreferences): {
         git.main_branch = g.main_branch;
       } else {
         errors.push("git.main_branch must be a valid branch name (alphanumeric, _, -, /, .)");
+      }
+    }
+    if (g.isolation !== undefined) {
+      const validIsolation = new Set(["worktree", "branch"]);
+      if (typeof g.isolation === "string" && validIsolation.has(g.isolation)) {
+        git.isolation = g.isolation as "worktree" | "branch";
+      } else {
+        errors.push("git.isolation must be one of: worktree, branch");
+      }
+    }
+    if (g.merge_to_main !== undefined) {
+      const validMergeToMain = new Set(["milestone", "slice"]);
+      if (typeof g.merge_to_main === "string" && validMergeToMain.has(g.merge_to_main)) {
+        git.merge_to_main = g.merge_to_main as "milestone" | "slice";
+      } else {
+        errors.push("git.merge_to_main must be one of: milestone, slice");
       }
     }
 
