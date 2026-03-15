@@ -58,6 +58,8 @@
     "build:native": "node native/scripts/build.js",
     "build:native:dev": "node native/scripts/build.js --dev",
     "dev": "node scripts/dev.js",
+    "gsd": "node scripts/dev-cli.js",
+    "gsd:web": "node scripts/dev-cli.js --web",
     "postinstall": "node scripts/link-workspace-packages.cjs && node scripts/postinstall.js",
     "pi:install-global": "node scripts/install-pi-global.js",
     "pi:uninstall-global": "node scripts/uninstall-pi-global.js",
