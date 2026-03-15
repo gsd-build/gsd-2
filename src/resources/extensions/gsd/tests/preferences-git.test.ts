@@ -1,7 +1,5 @@
-/**
- * preferences-git.test.ts — Validates that deprecated git.isolation and
- * git.merge_to_main preference fields produce deprecation warnings.
- */
+// GSD Git Preferences Tests — validates git.isolation and git.merge_to_main handling
+// Copyright (c) 2026 Jeremy McSpadden <jeremy@fluxlabs.net>
 
 import { createTestContext } from "./test-helpers.ts";
 import { validatePreferences } from "../preferences.ts";
@@ -9,18 +7,27 @@ import { validatePreferences } from "../preferences.ts";
 const { assertEq, assertTrue, report } = createTestContext();
 
 async function main(): Promise<void> {
-  console.log("\n=== git.isolation deprecated ===");
+  console.log("\n=== git.isolation ===");
 
-  // Any value produces a deprecation warning
+  // Valid values are accepted without warnings
   {
-    const { warnings } = validatePreferences({ git: { isolation: "worktree" } });
-    assertTrue(warnings.length > 0, "isolation: worktree — produces deprecation warning");
-    assertTrue(warnings[0].includes("deprecated"), "isolation: worktree — warning mentions deprecated");
+    const { preferences, warnings, errors } = validatePreferences({ git: { isolation: "worktree" } });
+    assertEq(errors.length, 0, "isolation: worktree — no errors");
+    assertEq(warnings.length, 0, "isolation: worktree — no warnings");
+    assertEq(preferences.git?.isolation, "worktree", "isolation: worktree — value preserved");
   }
   {
-    const { warnings } = validatePreferences({ git: { isolation: "branch" } });
-    assertTrue(warnings.length > 0, "isolation: branch — produces deprecation warning");
-    assertTrue(warnings[0].includes("deprecated"), "isolation: branch — warning mentions deprecated");
+    const { preferences, warnings, errors } = validatePreferences({ git: { isolation: "branch" } });
+    assertEq(errors.length, 0, "isolation: branch — no errors");
+    assertEq(warnings.length, 0, "isolation: branch — no warnings");
+    assertEq(preferences.git?.isolation, "branch", "isolation: branch — value preserved");
+  }
+
+  // Invalid values produce errors
+  {
+    const { errors } = validatePreferences({ git: { isolation: "invalid" } });
+    assertTrue(errors.length > 0, "isolation: invalid — produces error");
+    assertTrue(errors[0].includes("worktree, branch"), "isolation: invalid — error mentions valid values");
   }
 
   // Undefined passes through without warning
@@ -51,14 +58,14 @@ async function main(): Promise<void> {
     assertEq(preferences.git?.merge_to_main, undefined, "merge_to_main: undefined — not set");
   }
 
-  console.log("\n=== both deprecated fields together ===");
+  console.log("\n=== isolation + deprecated merge_to_main together ===");
   {
-    const { warnings } = validatePreferences({
-      git: { isolation: "worktree", merge_to_main: "slice" },
+    const { warnings, errors } = validatePreferences({
+      git: { isolation: "branch", merge_to_main: "slice" },
     });
-    assertEq(warnings.length, 2, "both deprecated fields — 2 warnings");
-    assertTrue(warnings.some(w => w.includes("isolation")), "one warning mentions isolation");
-    assertTrue(warnings.some(w => w.includes("merge_to_main")), "one warning mentions merge_to_main");
+    assertEq(errors.length, 0, "branch isolation + deprecated merge_to_main — no errors");
+    assertEq(warnings.length, 1, "branch isolation + deprecated merge_to_main — 1 warning (merge_to_main only)");
+    assertTrue(warnings[0].includes("merge_to_main"), "warning mentions merge_to_main");
   }
 
   report();

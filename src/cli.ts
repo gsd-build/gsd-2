@@ -137,6 +137,15 @@ migratePiCredentials(authStorage)
 // Run onboarding wizard on first launch (no LLM provider configured)
 if (!isPrintMode && shouldRunOnboarding(authStorage)) {
   await runOnboarding(authStorage)
+
+  // Clean up stdin state left by @clack/prompts.
+  // readline.emitKeypressEvents() adds a permanent data listener and
+  // readline.createInterface() may leave stdin paused. Remove stale
+  // listeners and pause stdin so the TUI can start with a clean slate.
+  process.stdin.removeAllListeners('data')
+  process.stdin.removeAllListeners('keypress')
+  if (process.stdin.setRawMode) process.stdin.setRawMode(false)
+  process.stdin.pause()
 }
 
 // Non-blocking update check — runs at most once per 24h, fire-and-forget

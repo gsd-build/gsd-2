@@ -18,7 +18,7 @@ import type {
 
 import { deriveState, invalidateStateCache } from "./state.js";
 import type { BudgetEnforcementMode, GSDState } from "./types.js";
-import { loadFile, parseRoadmap, getManifestStatus, clearParseCache } from "./files.js";
+import { loadFile, parseRoadmap, getManifestStatus } from "./files.js";
 export { inlinePriorMilestoneSummary } from "./files.js";
 import { collectSecretsFromManifest } from "../get-secrets-from-user.js";
 import {
@@ -27,8 +27,8 @@ import {
   relMilestoneFile, relSliceFile, relSlicePath, relMilestonePath,
   milestonesDir,
   buildMilestoneFileName, buildSliceFileName, buildTaskFileName,
-  clearPathCache,
 } from "./paths.js";
+import { invalidateAllCaches } from "./cache.js";
 import { saveActivityLog } from "./activity-log.js";
 import { synthesizeCrashRecovery, getDeepDiagnostic } from "./session-forensics.js";
 import { writeLock, clearLock, readCrashLock, formatCrashInfo, isLockProcessAlive } from "./crash-recovery.js";
@@ -107,20 +107,7 @@ import {
   buildLoopRemediationSteps,
   reconcileMergeState,
 } from "./auto-recovery.js";
-import {
-  buildResearchMilestonePrompt,
-  buildPlanMilestonePrompt,
-  buildResearchSlicePrompt,
-  buildPlanSlicePrompt,
-  buildExecuteTaskPrompt,
-  buildCompleteSlicePrompt,
-  buildCompleteMilestonePrompt,
-  buildReplanSlicePrompt,
-  buildRunUatPrompt,
-  buildReassessRoadmapPrompt,
-  checkNeedsReassessment,
-  checkNeedsRunUat,
-} from "./auto-prompts.js";
+import { resolveDispatch } from "./auto-dispatch.js";
 import {
   type AutoDashboardData,
   updateProgressWidget as _updateProgressWidget,
@@ -168,6 +155,18 @@ const unitRecoveryCount = new Map<string, number>();
 
 /** Persisted completed-unit keys — survives restarts. Loaded from .gsd/completed-units.json. */
 const completedKeySet = new Set<string>();
+
+/**
+ * Resolve whether auto-mode should use worktree isolation.
+ * Returns true for worktree mode (default), false for branch mode.
+ * Branch mode works directly in the project root — useful for repos
+ * with git submodules where worktrees don't work well (#531).
+ */
+function shouldUseWorktreeIsolation(): boolean {
+  const prefs = loadEffectiveGSDPreferences()?.preferences?.git;
+  if (prefs?.isolation === "branch") return false;
+  return true; // default: worktree
+}
 
 /** Crash recovery prompt — set by startAuto, consumed by first dispatchNextUnit */
 let pendingCrashRecovery: string | null = null;
@@ -325,6 +324,18 @@ function startDispatchGapWatchdog(ctx: ExtensionContext, pi: ExtensionAPI): void
         "error",
       );
       await stopAuto(ctx, pi);
+      return;
+    }
+
+    // If dispatchNextUnit returned normally but still didn't dispatch a unit
+    // (no sendMessage called → no timeout set), auto-mode is permanently
+    // stalled. Stop cleanly instead of leaving it active but idle (#537).
+    if (active && !unitTimeoutHandle && !wrapupWarningHandle) {
+      ctx.ui.notify(
+        "Auto-mode stalled — no dispatchable unit found after retry. Stopping. Run /gsd auto to restart.",
+        "warning",
+      );
+      await stopAuto(ctx, pi);
     }
   }, DISPATCH_GAP_TIMEOUT_MS);
 }
@@ -464,7 +475,8 @@ export async function startAuto(
 
     // ── Auto-worktree: re-enter worktree on resume if not already inside ──
     // Skip if already inside a worktree (manual /worktree) to prevent nesting.
-    if (currentMilestoneId && originalBasePath && !isInAutoWorktree(basePath) && !detectWorktreeName(basePath) && !detectWorktreeName(originalBasePath)) {
+    // Skip entirely in branch isolation mode (#531).
+    if (currentMilestoneId && shouldUseWorktreeIsolation() && originalBasePath && !isInAutoWorktree(basePath) && !detectWorktreeName(basePath) && !detectWorktreeName(originalBasePath)) {
       try {
         const existingWtPath = getAutoWorktreePath(originalBasePath, currentMilestoneId);
         if (existingWtPath) {
@@ -505,9 +517,7 @@ export async function startAuto(
     } catch { /* non-fatal */ }
     // Self-heal: clear stale runtime records where artifacts already exist
     await selfHealRuntimeRecords(base, ctx, completedKeySet);
-    invalidateStateCache();
-    clearParseCache();
-    clearPathCache();
+    invalidateAllCaches();
     await dispatchNextUnit(ctx, pi);
     return;
   }
@@ -643,7 +653,7 @@ export async function startAuto(
     return p.endsWith(worktreesSuffix);
   };
 
-  if (currentMilestoneId && !detectWorktreeName(base) && !isUnderGsdWorktrees(base)) {
+  if (currentMilestoneId && shouldUseWorktreeIsolation() && !detectWorktreeName(base) && !isUnderGsdWorktrees(base)) {
     try {
       const existingWtPath = getAutoWorktreePath(base, currentMilestoneId);
       if (existingWtPath) {
@@ -776,11 +786,9 @@ export async function handleAgentEnd(
   // Unit completed — clear its timeout
   clearUnitTimeout();
 
-  // Invalidate deriveState() cache — the unit just completed and may have
+  // Invalidate all caches — the unit just completed and may have
   // written planning files (task summaries, roadmap checkboxes, etc.)
-  invalidateStateCache();
-  clearParseCache();
-  clearPathCache();
+  invalidateAllCaches();
 
   // Small delay to let files settle (git commits, file writes)
   await new Promise(r => setTimeout(r, 500));
@@ -1133,11 +1141,10 @@ async function dispatchNextUnit(
     await new Promise(r => setTimeout(r, 200));
   }
 
-  // Clear stale directory listing cache so deriveState sees fresh disk state (#431)
-  clearPathCache();
-  // Clear parsed roadmap/plan cache — doctor may have re-populated it with
+  // Clear all caches so deriveState sees fresh disk state (#431).
+  // Parse cache is also cleared — doctor may have re-populated it with
   // stale data between handleAgentEnd and this dispatch call (Path B fix).
-  clearParseCache();
+  invalidateAllCaches();
 
   let state = await deriveState(basePath);
   let mid = state.activeMilestone?.id;
@@ -1184,9 +1191,7 @@ async function dispatchNextUnit(
 
   // ── Mid-merge safety check: detect leftover merge state from a prior session ──
   if (reconcileMergeState(basePath, ctx)) {
-    invalidateStateCache();
-    clearParseCache();
-    clearPathCache();
+    invalidateAllCaches();
     state = await deriveState(basePath);
     mid = state.activeMilestone?.id;
     midTitle = state.activeMilestone?.title;
@@ -1347,143 +1352,26 @@ async function dispatchNextUnit(
 
   await runSecretsGate();
 
-  const needsRunUat = await checkNeedsRunUat(basePath, mid, state, prefs);
-  // Flag: for human/mixed UAT, pause auto-mode after the prompt is sent so the user
-  // can perform the UAT manually. On next resume, result file will exist → skip.
-  let pauseAfterUatDispatch = false;
+  // ── Dispatch table: resolve phase → unit type + prompt ──
+  const dispatchResult = await resolveDispatch({
+    basePath, mid, midTitle: midTitle!, state, prefs,
+  });
 
-  // ── Phase-first dispatch: complete-slice MUST run before reassessment ──
-  // If the current phase is "summarizing", complete-slice is responsible for
-  // complete-slice must run before reassessment.
-  if (state.phase === "summarizing") {
-    const sid = state.activeSlice!.id;
-    const sTitle = state.activeSlice!.title;
-    unitType = "complete-slice";
-    unitId = `${mid}/${sid}`;
-    prompt = await buildCompleteSlicePrompt(mid, midTitle!, sid, sTitle, basePath);
-  } else {
-    // ── Adaptive Replanning: check if last completed slice needs reassessment ──
-    // Computed here (after summarizing guard) so complete-slice always runs first.
-    const needsReassess = await checkNeedsReassessment(basePath, mid, state);
-    if (needsRunUat) {
-      const { sliceId, uatType } = needsRunUat;
-      unitType = "run-uat";
-      unitId = `${mid}/${sliceId}`;
-      const uatFile = resolveSliceFile(basePath, mid, sliceId, "UAT")!;
-      const uatContent = await loadFile(uatFile);
-      prompt = await buildRunUatPrompt(
-        mid, sliceId, relSliceFile(basePath, mid, sliceId, "UAT"), uatContent ?? "", basePath,
-      );
-      // For non-artifact-driven UAT types, pause after the prompt is dispatched.
-      // The agent receives the prompt, writes S0x-UAT-RESULT.md surfacing the UAT,
-      // then auto-mode pauses for human execution. On resume, result file exists → skip.
-      if (uatType !== "artifact-driven") {
-        pauseAfterUatDispatch = true;
-      }
-    } else if (needsReassess) {
-      unitType = "reassess-roadmap";
-      unitId = `${mid}/${needsReassess.sliceId}`;
-      prompt = await buildReassessRoadmapPrompt(mid, midTitle!, needsReassess.sliceId, basePath);
-    } else if (state.phase === "needs-discussion") {
-      // Draft milestone — pause auto-mode and notify user.
-      // This milestone has a CONTEXT-DRAFT.md from a prior multi-milestone discussion
-      // where the user chose "Needs own discussion". Auto-mode cannot proceed because
-      // the draft is seed material, not a finalized context — planning requires a
-      // dedicated discussion first.
-      await stopAuto(ctx, pi);
-      ctx.ui.notify(
-        `${mid}: ${midTitle} has draft context from a prior discussion — needs its own discussion before planning.\nRun /gsd to discuss.`,
-        "warning",
-      );
-      return;
-
-    } else if (state.phase === "pre-planning") {
-      // Need roadmap — check if context exists
-      const contextFile = resolveMilestoneFile(basePath, mid, "CONTEXT");
-      const hasContext = !!(contextFile && await loadFile(contextFile));
-
-      if (!hasContext) {
-        await stopAuto(ctx, pi);
-        ctx.ui.notify("No context or roadmap yet. Run /gsd to discuss first.", "warning");
-        return;
-      }
-
-      // Research before roadmap if no research exists
-      const researchFile = resolveMilestoneFile(basePath, mid, "RESEARCH");
-      const hasResearch = !!researchFile;
-
-      if (!hasResearch) {
-        unitType = "research-milestone";
-        unitId = mid;
-        prompt = await buildResearchMilestonePrompt(mid, midTitle!, basePath);
-      } else {
-        unitType = "plan-milestone";
-        unitId = mid;
-        prompt = await buildPlanMilestonePrompt(mid, midTitle!, basePath);
-      }
-
-    } else if (state.phase === "planning") {
-      // Slice needs planning — but research first if no research exists
-      const sid = state.activeSlice!.id;
-      const sTitle = state.activeSlice!.title;
-      const researchFile = resolveSliceFile(basePath, mid, sid, "RESEARCH");
-      const hasResearch = !!researchFile;
-
-      if (!hasResearch) {
-        // Skip slice research for S01 when milestone research already exists —
-        // the milestone research already covers the same ground for the first slice.
-        const milestoneResearchFile = resolveMilestoneFile(basePath, mid, "RESEARCH");
-        const hasMilestoneResearch = !!milestoneResearchFile;
-        if (hasMilestoneResearch && sid === "S01") {
-          unitType = "plan-slice";
-          unitId = `${mid}/${sid}`;
-          prompt = await buildPlanSlicePrompt(mid, midTitle!, sid, sTitle, basePath);
-        } else {
-          unitType = "research-slice";
-          unitId = `${mid}/${sid}`;
-          prompt = await buildResearchSlicePrompt(mid, midTitle!, sid, sTitle, basePath);
-        }
-      } else {
-        unitType = "plan-slice";
-        unitId = `${mid}/${sid}`;
-        prompt = await buildPlanSlicePrompt(mid, midTitle!, sid, sTitle, basePath);
-      }
-
-    } else if (state.phase === "replanning-slice") {
-      // Blocker discovered — replan the slice before continuing
-      const sid = state.activeSlice!.id;
-      const sTitle = state.activeSlice!.title;
-      unitType = "replan-slice";
-      unitId = `${mid}/${sid}`;
-      prompt = await buildReplanSlicePrompt(mid, midTitle!, sid, sTitle, basePath);
-
-    } else if (state.phase === "executing" && state.activeTask) {
-      // Execute next task
-      const sid = state.activeSlice!.id;
-      const sTitle = state.activeSlice!.title;
-      const tid = state.activeTask.id;
-      const tTitle = state.activeTask.title;
-      unitType = "execute-task";
-      unitId = `${mid}/${sid}/${tid}`;
-      prompt = await buildExecuteTaskPrompt(mid, sid, sTitle, tid, tTitle, basePath);
-
-    } else if (state.phase === "completing-milestone") {
-      // All slices done — complete the milestone
-      unitType = "complete-milestone";
-      unitId = mid;
-      prompt = await buildCompleteMilestonePrompt(mid, midTitle!, basePath);
-
-    } else {
-      if (currentUnit) {
-        const modelId = ctx.model?.id ?? "unknown";
-        snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
-        saveActivityLog(ctx, basePath, currentUnit.type, currentUnit.id);
-      }
-      await stopAuto(ctx, pi);
-      ctx.ui.notify(`Unhandled phase "${state.phase}" — run /gsd doctor to diagnose.`, "info");
-      return;
+  if (dispatchResult.action === "stop") {
+    if (currentUnit) {
+      const modelId = ctx.model?.id ?? "unknown";
+      snapshotUnitMetrics(ctx, currentUnit.type, currentUnit.id, currentUnit.startedAt, modelId);
+      saveActivityLog(ctx, basePath, currentUnit.type, currentUnit.id);
     }
+    await stopAuto(ctx, pi);
+    ctx.ui.notify(dispatchResult.reason, dispatchResult.level);
+    return;
   }
+
+  unitType = dispatchResult.unitType;
+  unitId = dispatchResult.unitId;
+  prompt = dispatchResult.prompt;
+  let pauseAfterUatDispatch = dispatchResult.pauseAfterDispatch ?? false;
 
   // ── Pre-dispatch hooks: modify, skip, or replace the unit before dispatch ──
   const preDispatchResult = runPreDispatchHooks(unitType, unitId, prompt, basePath);
@@ -1805,9 +1693,9 @@ async function dispatchNextUnit(
     return;
   }
 
-  // NOTE: Slice merge happens AFTER the complete-slice unit finishes,
-  // not here at dispatch time. See the merge logic at the top of
-  // dispatchNextUnit where we check if the previous unit was complete-slice.
+  // Branchless architecture: all work commits sequentially on the milestone
+  // branch — no per-slice branches or slice-level merges. Milestone merge
+  // happens when phase === "complete" (see mergeMilestoneToMain above).
 
   // Write lock AFTER newSession so we capture the session file path.
   // Pi appends entries incrementally via appendFileSync, so on crash the

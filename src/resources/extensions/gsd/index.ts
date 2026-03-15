@@ -53,6 +53,7 @@ import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { shortcutDesc } from "../shared/terminal.js";
 import { Text } from "@gsd/pi-tui";
+import { pauseAutoForProviderError } from "./provider-error-pause.js";
 
 // ── Depth verification state ──────────────────────────────────────────────
 let depthVerificationDone = false;
@@ -385,8 +386,7 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
-      (ctx as any).log(`Auto-mode paused due to provider error${errorDetail}`);
-      await pauseAuto(ctx, pi);
+      await pauseAutoForProviderError(ctx.ui, errorDetail, () => pauseAuto(ctx, pi));
       return;
     }
 

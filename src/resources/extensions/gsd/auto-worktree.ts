@@ -307,7 +307,7 @@ export function mergeMilestoneToMain(
   }
   const commitMessage = subject + body;
 
-  // 7. Squash merge
+  // 7. Squash merge — auto-resolve .gsd/ state file conflicts (#530)
   try {
     execSync(`git merge --squash ${milestoneBranch}`, {
       cwd: originalBasePath_,
@@ -315,7 +315,7 @@ export function mergeMilestoneToMain(
       encoding: "utf-8",
     });
   } catch (mergeErr) {
-    // Check for real conflicts
+    // Check for conflicts — auto-resolve .gsd/ state files, escalate the rest
     try {
       const conflictOutput = execSync("git diff --name-only --diff-filter=U", {
         cwd: originalBasePath_,
@@ -324,7 +324,44 @@ export function mergeMilestoneToMain(
       }).trim();
       if (conflictOutput) {
         const conflictedFiles = conflictOutput.split("\n").filter(Boolean);
-        throw new MergeConflictError(conflictedFiles, "squash", milestoneBranch, mainBranch);
+
+        // Separate .gsd/ state file conflicts from real code conflicts.
+        // GSD state files (STATE.md, completed-units.json, auto.lock, etc.)
+        // diverge between branches during normal operation — always prefer the
+        // milestone branch version since it has the latest execution state.
+        const gsdConflicts = conflictedFiles.filter(f => f.startsWith(".gsd/"));
+        const codeConflicts = conflictedFiles.filter(f => !f.startsWith(".gsd/"));
+
+        // Auto-resolve .gsd/ conflicts by accepting the milestone branch version
+        if (gsdConflicts.length > 0) {
+          for (const gsdFile of gsdConflicts) {
+            try {
+              execFileSync("git", ["checkout", "--theirs", "--", gsdFile], {
+                cwd: originalBasePath_,
+                stdio: ["ignore", "pipe", "pipe"],
+                encoding: "utf-8",
+              });
+              execFileSync("git", ["add", "--", gsdFile], {
+                cwd: originalBasePath_,
+                stdio: ["ignore", "pipe", "pipe"],
+                encoding: "utf-8",
+              });
+            } catch {
+              // If checkout --theirs fails, try removing the file from the merge
+              // (it's a runtime file that shouldn't be committed anyway)
+              execFileSync("git", ["rm", "--force", "--", gsdFile], {
+                cwd: originalBasePath_,
+                stdio: ["ignore", "pipe", "pipe"],
+                encoding: "utf-8",
+              });
+            }
+          }
+        }
+
+        // If there are still non-.gsd conflicts, escalate
+        if (codeConflicts.length > 0) {
+          throw new MergeConflictError(codeConflicts, "squash", milestoneBranch, mainBranch);
+        }
       }
     } catch (diffErr) {
       if (diffErr instanceof MergeConflictError) throw diffErr;
