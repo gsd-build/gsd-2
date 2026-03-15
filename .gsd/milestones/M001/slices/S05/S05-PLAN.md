@@ -51,7 +51,7 @@
 
 ## Tasks
 
-- [ ] **T01: Implement copyWorktreeDb and reconcileWorktreeDb with test suite** `est:45m`
+- [x] **T01: Implement copyWorktreeDb and reconcileWorktreeDb with test suite** `est:45m`
   - Why: Core logic for both R012 (DB copy) and R013 (merge reconciliation) — must be testable independently before wiring into the worktree lifecycle
   - Files: `src/resources/extensions/gsd/gsd-db.ts`, `src/resources/extensions/gsd/tests/worktree-db.test.ts`
   - Do: Add `copyWorktreeDb(srcDbPath, destDbPath)` — copies gsd.db via copyFileSync, skips WAL/SHM, non-fatal on failure. Add `reconcileWorktreeDb(mainDbPath, worktreeDbPath)` — ATTACHes worktree DB, diffs rows for conflict detection, runs INSERT OR REPLACE for all 3 tables inside transaction, reports conflicts to stderr, DETACHes. Write comprehensive test file exercising copy, reconciliation, conflicts, edge cases.

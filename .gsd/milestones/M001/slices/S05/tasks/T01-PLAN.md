@@ -84,3 +84,9 @@ Build the two core functions for worktree DB isolation: `copyWorktreeDb` (copies
 
 - `src/resources/extensions/gsd/gsd-db.ts` — augmented with `copyWorktreeDb` and `reconcileWorktreeDb` exports
 - `src/resources/extensions/gsd/tests/worktree-db.test.ts` — new test file with ≥20 assertions
+
+## Observability Impact
+
+- **New stderr signals:** `copyWorktreeDb` emits `"gsd-db: failed to copy DB to worktree: <message>"` on failure. `reconcileWorktreeDb` emits `"gsd-db: reconciled N decisions, N requirements, N artifacts (N conflicts)"` on success, conflict details per row, and `"gsd-db: worktree DB reconciliation failed: <message>"` on error.
+- **Inspection:** After copy, `openDatabase(destPath)` + `isDbAvailable()` confirms the copy is usable. After reconciliation, query decisions/requirements/artifacts tables to verify merged rows.
+- **Failure state:** Both functions are non-fatal — they return `false`/zero-counts and log to stderr rather than throwing. The caller can inspect return values to determine if action is needed.
