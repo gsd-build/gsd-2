@@ -9,7 +9,7 @@ import {
 	fuzzyFindText,
 	generateDiffString,
 	normalizeForFuzzyMatch,
-} from "./edit-diff.ts";
+} from "./edit-diff.js";
 
 describe("edit-diff", () => {
 	it("normalizes quotes, dashes, spaces, and trailing whitespace", () => {
