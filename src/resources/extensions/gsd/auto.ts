@@ -2098,11 +2098,14 @@ async function dispatchNextUnit(
   if (verifyExpectedArtifact(unitType, unitId, basePath)) {
     persistCompletedKey(basePath, idempotencyKey);
     completedKeySet.add(idempotencyKey);
+    invalidateStateCache();
     ctx.ui.notify(
       `Skipping ${unitType} ${unitId} — artifact exists but completion key was missing. Repaired and advancing.`,
       "info",
     );
-    await new Promise(r => setImmediate(r));
+    // Yield generously to the event loop to prevent TUI freeze when multiple
+    // tasks are skipped in rapid succession (T01 skip → T02 skip → T03 dispatch).
+    await new Promise(r => setTimeout(r, 50));
     await dispatchNextUnit(ctx, pi);
     return;
   }
