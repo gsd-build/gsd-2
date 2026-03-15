@@ -155,7 +155,7 @@ export function FolderPickerModal({ open, onClose, onSelect }: FolderPickerModal
         <div className="flex items-center gap-3 border-b border-navy-600 px-4 py-3">
           <FolderOpen className="h-5 w-5 text-cyan-accent" />
           <h2 className="flex-1 font-display text-sm font-bold uppercase tracking-wider text-slate-300">
-            Open Folder
+            Open Project
           </h2>
           <button
             type="button"
@@ -312,7 +312,7 @@ export function FolderPickerModal({ open, onClose, onSelect }: FolderPickerModal
             ) : effectiveIsGsd ? (
               "Open Project"
             ) : (
-              "Open Folder"
+              "Open Project"
             )}
           </button>
         </div>

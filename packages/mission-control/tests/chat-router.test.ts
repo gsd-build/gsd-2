@@ -81,37 +81,23 @@ describe("routeMessage", () => {
 
 describe("ClaudeProcessManager", () => {
   test("rejects concurrent spawn when process is active", async () => {
-    const manager = new ClaudeProcessManager();
+    const manager = new ClaudeProcessManager("/tmp/test-cwd");
 
-    // Mock an active process by setting internal state
-    // We use a fake spawn that creates a long-running process
-    const fakeProc = {
-      pid: 12345,
-      killed: false,
-      stdin: null,
-      stdout: new ReadableStream(),
-      stderr: new ReadableStream(),
-      exitCode: null,
-      exited: new Promise<number>(() => {}), // never resolves
-      kill: () => {},
-      ref: () => {},
-      unref: () => {},
-    };
+    // Simulate a message already being processed by setting internal flag
+    (manager as any)._isProcessing = true;
 
-    // Access internal state to simulate active process
-    (manager as any).activeProcess = fakeProc;
-
-    // Second spawn should reject
-    expect(() => manager.spawn("test prompt", "/tmp")).toThrow(/already active/i);
+    // sendMessage should reject while processing is active
+    await expect(manager.sendMessage("test prompt")).rejects.toThrow(/already processing/i);
   });
 
   test("isActive returns false when no process is running", () => {
-    const manager = new ClaudeProcessManager();
+    const manager = new ClaudeProcessManager("/tmp/test-cwd");
+    // No active child process — isActive should be false
     expect(manager.isActive).toBe(false);
   });
 
   test("kill() on inactive manager is a no-op", async () => {
-    const manager = new ClaudeProcessManager();
+    const manager = new ClaudeProcessManager("/tmp/test-cwd");
     // Should not throw
     await manager.kill();
     expect(manager.isActive).toBe(false);

@@ -1,150 +1,129 @@
 # External Integrations
 
-**Analysis Date:** 2026-03-10
+**Analysis Date:** 2026-03-12
 
 ## APIs & External Services
 
-**Claude Code CLI:**
-- Primary integration - Mission Control spawns Claude Code as a child process
-- Binary: `claude` (must be on PATH)
-- Invocation: `claude -p "<prompt>" --output-format stream-json --verbose --include-partial-messages`
-- Session continuity: `--resume <sessionId>` flag for multi-turn conversations
-- Implementation: `packages/mission-control/src/server/claude-process.ts` (ClaudeProcessManager class)
-- Uses Node.js `child_process.spawn` (not Bun.spawn) for Windows compatibility
-- Streams NDJSON events parsed by `packages/mission-control/src/server/ndjson-parser.ts`
-- CLAUDECODE env var is stripped to avoid "nested session" rejection
+**AI / LLM:**
+- Claude Code CLI (`claude` binary) - Core AI integration. GSD spawns it as a child process per user message using `node:child_process.spawn`. Communicates via `--output-format stream-json --verbose --include-partial-messages`. Session continuity via `--resume <sessionId>`.
+  - Client: `ClaudeProcessManager` at `packages/mission-control/src/server/claude-process.ts`
+  - Auth: Claude Code's own auth (managed by the `claude` CLI, not by GSD)
+  - Key env concern: `CLAUDECODE` env var is explicitly deleted before spawning to prevent "nested session" rejection
 
-**Brave Web Search API:**
-- Optional integration for web search capability
-- Endpoint: `https://api.search.brave.com/res/v1/web/search`
-- Auth: `X-Subscription-Token` header with API key
-- API key sources: `BRAVE_API_KEY` env var or `~/.gsd/brave_api_key` file
-- Implementation: `get-shit-done/bin/lib/commands.cjs` (cmdWebsearch function)
-- Graceful degradation: returns `{ available: false }` when key is not set
-- Options: `--limit N`, `--freshness day|week|month`
+**Documentation Lookup:**
+- Context7 API (`https://api.context7.com`) - Fetches library documentation on demand
+  - SDK: Native `fetch` in `src/resources/extensions/context7/index.ts`
+  - Auth: `CONTEXT7_API_KEY` env var (optional; increases rate limits)
+  - Endpoints used: `GET /api/v2/libs/search?libraryName=&query=` and `GET /api/v2/context?libraryId=&query=&tokens=`
 
-**AI Runtime Targets (Installer):**
-- Claude Code - Primary target (`~/.claude/commands/`)
-- OpenCode - Secondary target
-- Gemini CLI - Secondary target
-- Codex CLI - Secondary target (with TOML config for sandbox permissions)
-- Implementation: `bin/install.js` (installs GSD slash commands into each runtime)
+**Web Search:**
+- Tavily Search API (`https://api.tavily.com/search`) - Web search for agent research tasks
+  - SDK: Native `fetch` in `src/resources/extensions/search-the-web/tavily.ts`
+  - Auth: `TAVILY_API_KEY` env var (required for search functionality)
+  - Used by: `src/resources/extensions/search-the-web/tool-search.ts`
 
 ## Data Storage
 
 **Databases:**
-- None - All state is file-based
+- None. No database is used.
 
-**File Storage (`.planning/` directory):**
-- `STATE.md` - Project state with YAML frontmatter (parsed by `gray-matter`)
-- `ROADMAP.md` - Phase checklist in markdown format
-- `REQUIREMENTS.md` - Requirement checklist in markdown format
-- `config.json` - Project configuration (model profiles, workflow toggles, branching strategy)
-- `phases/<NN>-<name>/` - Phase directories containing PLAN.md, SUMMARY.md, VERIFICATION.md files
-- State deriver: `packages/mission-control/src/server/state-deriver.ts`
+**File-based storage (primary data layer):**
+- `.planning/` directory tree within each project — the canonical state store for GSD
+  - Markdown files with YAML front-matter parsed by `gray-matter`
+  - Watched by `packages/mission-control/src/server/watcher.ts` for live updates
+  - Derived into `PlanningState` by `packages/mission-control/src/server/state-deriver.ts`
+- `~/.gsd/defaults.json` - Global user settings
+- `~/.gsd/agent/` - Agent runtime files (synced from `src/resources/` at postinstall)
+- `.planning/config.json` - Per-project settings
 
-**User Data (`~/.gsd/`):**
-- `recent-projects.json` - Last 20 opened projects (managed by `packages/mission-control/src/server/recent-projects.ts`)
-- `brave_api_key` - Optional Brave Search API key file
-- `last-update-check.json` - Update check timestamp (managed by `hooks/gsd-check-update.js`)
+**Session Persistence:**
+- Session metadata stored under `.planning/` by `SessionManager`
+  - `packages/mission-control/src/server/session-manager.ts`
+  - `packages/mission-control/src/server/session-persistence-api.ts`
+
+**File Storage:**
+- Local filesystem only. No cloud storage.
 
 **Caching:**
-- None - State is rebuilt from files on every change via the pipeline
+- In-memory only. Context7 search results and doc pages are cached in-session memory (see `src/resources/extensions/context7/index.ts`). No persistent cache layer.
 
 ## Authentication & Identity
 
 **Auth Provider:**
-- Not applicable - Mission Control is a local-only development tool
-- No user authentication or identity management
-- Claude Code CLI handles its own authentication with Anthropic's API
-
-**API Security:**
-- File system API validates paths against traversal attacks (`packages/mission-control/src/server/fs-api.ts`, `validatePath()`)
-- CORS headers set to `*` (local development only)
-- No API keys or tokens for the Mission Control server itself
+- No auth provider. Mission Control is a local-only tool running on `localhost:4000`.
+- Claude authentication is handled entirely by the `claude` CLI — GSD does not manage API keys for Anthropic.
+- Context7 and Tavily use API keys passed as environment variables.
 
 ## Monitoring & Observability
 
 **Error Tracking:**
-- None - Console.error logging only
+- None. No Sentry, Datadog, or equivalent.
 
 **Logs:**
-- `console.log` / `console.error` with `[module-name]` prefixes
-- Prefixes used: `[pipeline]`, `[claude-process]`, `[ws-server]`, `[watcher]`
-- Claude process logs first 5 stdout chunks for debugging
-
-**Context Monitoring:**
-- `hooks/gsd-context-monitor.js` - Tracks Claude Code context window usage
-- Writes monitoring data to `~/.gsd/` directory
+- `console.log` / `console.error` to stdout/stderr throughout server code
+- Prefixed by module: `[pipeline]`, `[claude-process]`, `[git-api]`, `[worktree-api]`, etc.
+- No structured logging framework
 
 ## CI/CD & Deployment
 
 **Hosting:**
-- Local development tool only - runs on developer machines
-- Mission Control: HTTP on port 4000, WebSocket on port 4001
+- npm registry — `gsd-pi` package published publicly
 
 **CI Pipeline:**
-- Not detected in repository
-
-**Distribution:**
-- npm package: `get-shit-done-cc`
-- `npm run prepublishOnly` triggers `build:hooks` before publish
-- Published files: `bin/`, `commands/`, `get-shit-done/`, `agents/`, `hooks/dist/`, `scripts/`
-
-## Environment Configuration
-
-**Required env vars:**
-- None strictly required for core functionality
-
-**Optional env vars:**
-- `BRAVE_API_KEY` - Enables Brave web search integration
-- `CLAUDECODE` - Stripped by ClaudeProcessManager to prevent nested session detection
-
-**Config files (not secrets):**
-- `.planning/config.json` - Per-project GSD configuration
-- `~/.gsd/brave_api_key` - Alternative to BRAVE_API_KEY env var
-- `~/.gsd/recent-projects.json` - Recent project list
-
-## WebSocket Protocol
-
-**Server:** `packages/mission-control/src/server/ws-server.ts`
-- Port: 4001
-- Topics: `planning-state` (state updates), `chat` (Claude chat events)
-
-**Client -> Server Messages:**
-- `"refresh"` (string) - Request full state resend
-- `{ type: "chat", prompt: "..." }` (JSON) - Send chat message to Claude
-
-**Server -> Client Messages:**
-- `{ type: "full", state: PlanningState, sequence, timestamp }` - Full state (on connect or refresh)
-- `{ type: "diff", changes: Partial<PlanningState>, sequence, timestamp }` - Incremental state update
-- `{ type: "custom_commands", commands: [...] }` - Slash command autocomplete data
-- `{ type: "chat_event", event: StreamEvent }` - Streaming Claude response chunk
-- `{ type: "chat_complete", sessionId? }` - Claude turn complete
-- `{ type: "chat_error", error: string }` - Chat error
-
-## REST API Endpoints
-
-**File System API (`packages/mission-control/src/server/fs-api.ts`):**
-- `GET /api/fs/list?path=X` - List directory contents with GSD project detection
-- `GET /api/fs/detect-project?path=X` - Check if directory is a GSD project
-- `POST /api/fs/mkdir` - Create directory (recursive)
-
-**Project Management (`packages/mission-control/src/server/recent-projects.ts`):**
-- `GET /api/projects/recent` - Get recent projects list
-- `POST /api/projects/recent` - Add/update recent project entry
-
-**Pipeline Control (`packages/mission-control/src/server.ts`):**
-- `POST /api/project/switch` - Switch to different project directory (with guard against concurrent switches)
+- GitHub Actions at `.github/workflows/publish.yml`
+- Triggers on git tags matching `v*`
+- Steps: checkout → Node.js 22 setup → `npm ci` → `npm run build` → `npm publish --access public`
+- Auth: `NPM_TOKEN` GitHub secret
 
 ## Webhooks & Callbacks
 
 **Incoming:**
-- None
+- None. No external webhook endpoints.
 
 **Outgoing:**
-- None
+- None. GSD does not push to external webhooks.
+
+## Inter-Process Communication
+
+**WebSocket Server (internal):**
+- Bun WebSocket server on port 4001 — `packages/mission-control/src/server/ws-server.ts`
+- Clients: React frontend connects via `useReconnectingWebSocket` hook at `packages/mission-control/src/hooks/useReconnectingWebSocket.ts`
+- Topics: `planning-state` (file state diffs), `chat` (Claude streaming events + session updates)
+- Protocol: JSON messages with `type` discriminant (`full`, `diff`, `chat_event`, `chat_complete`, `session_update`, `project_switched`, `preview_open`, etc.)
+
+**HTTP API Server (internal):**
+- Bun HTTP server on port 4000 — `packages/mission-control/src/server.ts`
+- Routes:
+  - `GET /` — serves SPA HTML
+  - `GET|POST /api/fs/*` — file system read/write operations
+  - `GET /api/dialog/*` — native OS folder picker (PowerShell on Windows, zenity on Linux)
+  - `GET /api/git/log` — git commit history
+  - `GET|PUT /api/settings` — two-tier settings (global + project)
+  - `GET|POST /api/projects/*` — recent projects list
+  - `GET /api/session/*` — session status
+  - `GET /api/assets/*` — project asset files
+  - `GET /api/preview/*` — fetch-forwarding proxy to project's local dev server
+
+**Dev Server Proxy:**
+- `packages/mission-control/src/server/proxy-api.ts` — forwards `/api/preview/*` to `http://localhost:<detectedPort>` stripping `X-Frame-Options` and `Content-Security-Policy` headers to allow iframe embedding
+
+## Native OS Integration
+
+**Folder Picker Dialog:**
+- Windows: PowerShell script via `spawn("powershell", [...])`
+- Linux: `spawn("zenity", ["--file-selection", "--directory"])`
+- Implemented in `packages/mission-control/src/server/dialog-api.ts`
+
+**Git CLI:**
+- All git operations use `spawn("git", args, { shell: false })` via Node's `child_process`
+- Operations: `git log`, `git worktree add/remove/list`, `git branch -m`, `git branch -D`
+- Implemented in `packages/mission-control/src/server/git-api.ts` and `packages/mission-control/src/server/worktree-api.ts`
+
+**Browser Automation (agent extension):**
+- Playwright (headless/headed Chromium) for UI verification during agent sessions
+- Implemented in `src/resources/extensions/browser-tools/index.ts`
+- Shares a single `Browser + BrowserContext + Page` per agent session
 
 ---
 
-*Integration audit: 2026-03-10*
+*Integration audit: 2026-03-12*

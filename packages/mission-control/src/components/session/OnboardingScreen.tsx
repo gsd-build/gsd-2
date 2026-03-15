@@ -3,19 +3,22 @@
  *
  * Shows LogoAnimation at size="lg", then fades in welcome text
  * and action buttons after animation completes.
+ *
+ * "New Project" — inline name input → calls onNewProject(name)
+ * "Open Project" — opens the folder picker modal
  */
 import { useState } from "react";
 import { LogoAnimation } from "@/components/session/LogoAnimation";
 
 interface OnboardingScreenProps {
-  onOpenFolder: () => void;
-  onStartChat: () => void;
+  onOpenProject: () => void;
+  onNewProject: (name: string) => void;
 }
 
 interface OnboardingScreenViewProps {
   animationComplete: boolean;
-  onOpenFolder: () => void;
-  onStartChat: () => void;
+  onOpenProject: () => void;
+  onNewProject: (name: string) => void;
 }
 
 /**
@@ -23,9 +26,20 @@ interface OnboardingScreenViewProps {
  */
 export function OnboardingScreenView({
   animationComplete,
-  onOpenFolder,
-  onStartChat,
+  onOpenProject,
+  onNewProject,
 }: OnboardingScreenViewProps) {
+  const [naming, setNaming] = useState(false);
+  const [projectName, setProjectName] = useState("");
+
+  function handleCreate() {
+    const name = projectName.trim();
+    if (!name) return;
+    onNewProject(name);
+    setProjectName("");
+    setNaming(false);
+  }
+
   return (
     <div className="flex h-screen flex-col items-center justify-center bg-navy-base">
       <LogoAnimation size="lg" />
@@ -39,22 +53,55 @@ export function OnboardingScreenView({
           Welcome to GSD Mission Control
         </h1>
         <p className="text-sm text-slate-400">
-          Open a project folder to get started, or type /gsd:new-project in chat
+          Create a new project or open an existing one to get started
         </p>
-        <div className="mt-4 flex gap-3">
-          <button
-            onClick={onOpenFolder}
-            className="rounded-md bg-navy-700 px-4 py-2 text-sm text-slate-200 transition-colors hover:bg-navy-600"
-          >
-            Open Folder
-          </button>
-          <button
-            onClick={onStartChat}
-            className="rounded-md bg-cyan-accent/20 px-4 py-2 text-sm text-cyan-accent transition-colors hover:bg-cyan-accent/30"
-          >
-            Start Chat
-          </button>
-        </div>
+
+        {naming ? (
+          <div className="mt-4 flex flex-col items-center gap-3">
+            <input
+              autoFocus
+              type="text"
+              placeholder="Project name"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleCreate();
+                if (e.key === "Escape") { setNaming(false); setProjectName(""); }
+              }}
+              className="w-64 rounded-md border border-navy-600 bg-navy-700 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-cyan-accent/60"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setNaming(false); setProjectName(""); }}
+                className="rounded-md bg-navy-700 px-4 py-2 text-sm text-slate-400 transition-colors hover:bg-navy-600"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreate}
+                disabled={!projectName.trim()}
+                className="rounded-md bg-cyan-accent/20 px-4 py-2 text-sm text-cyan-accent transition-colors hover:bg-cyan-accent/30 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 flex gap-3">
+            <button
+              onClick={onOpenProject}
+              className="rounded-md bg-navy-700 px-4 py-2 text-sm text-slate-200 transition-colors hover:bg-navy-600"
+            >
+              Open Project
+            </button>
+            <button
+              onClick={() => setNaming(true)}
+              className="rounded-md bg-cyan-accent/20 px-4 py-2 text-sm text-cyan-accent transition-colors hover:bg-cyan-accent/30"
+            >
+              New Project
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -63,8 +110,18 @@ export function OnboardingScreenView({
 /**
  * OnboardingScreen with animation state management.
  */
-export function OnboardingScreen({ onOpenFolder, onStartChat }: OnboardingScreenProps) {
+export function OnboardingScreen({ onOpenProject, onNewProject }: OnboardingScreenProps) {
   const [animationComplete, setAnimationComplete] = useState(false);
+  const [naming, setNaming] = useState(false);
+  const [projectName, setProjectName] = useState("");
+
+  function handleCreate() {
+    const name = projectName.trim();
+    if (!name) return;
+    onNewProject(name);
+    setProjectName("");
+    setNaming(false);
+  }
 
   return (
     <div className="flex h-screen flex-col items-center justify-center bg-navy-base">
@@ -79,22 +136,55 @@ export function OnboardingScreen({ onOpenFolder, onStartChat }: OnboardingScreen
           Welcome to GSD Mission Control
         </h1>
         <p className="text-sm text-slate-400">
-          Open a project folder to get started, or type /gsd:new-project in chat
+          Create a new project or open an existing one to get started
         </p>
-        <div className="mt-4 flex gap-3">
-          <button
-            onClick={onOpenFolder}
-            className="rounded-md bg-navy-700 px-4 py-2 text-sm text-slate-200 transition-colors hover:bg-navy-600"
-          >
-            Open Folder
-          </button>
-          <button
-            onClick={onStartChat}
-            className="rounded-md bg-cyan-accent/20 px-4 py-2 text-sm text-cyan-accent transition-colors hover:bg-cyan-accent/30"
-          >
-            Start Chat
-          </button>
-        </div>
+
+        {naming ? (
+          <div className="mt-4 flex flex-col items-center gap-3">
+            <input
+              autoFocus
+              type="text"
+              placeholder="Project name"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleCreate();
+                if (e.key === "Escape") { setNaming(false); setProjectName(""); }
+              }}
+              className="w-64 rounded-md border border-navy-600 bg-navy-700 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-cyan-accent/60"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setNaming(false); setProjectName(""); }}
+                className="rounded-md bg-navy-700 px-4 py-2 text-sm text-slate-400 transition-colors hover:bg-navy-600"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreate}
+                disabled={!projectName.trim()}
+                className="rounded-md bg-cyan-accent/20 px-4 py-2 text-sm text-cyan-accent transition-colors hover:bg-cyan-accent/30 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 flex gap-3">
+            <button
+              onClick={onOpenProject}
+              className="rounded-md bg-navy-700 px-4 py-2 text-sm text-slate-200 transition-colors hover:bg-navy-600"
+            >
+              Open Project
+            </button>
+            <button
+              onClick={() => setNaming(true)}
+              className="rounded-md bg-cyan-accent/20 px-4 py-2 text-sm text-cyan-accent transition-colors hover:bg-cyan-accent/30"
+            >
+              New Project
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

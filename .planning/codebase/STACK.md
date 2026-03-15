@@ -1,115 +1,110 @@
 # Technology Stack
 
-**Analysis Date:** 2026-03-10
+**Analysis Date:** 2026-03-12
 
 ## Languages
 
 **Primary:**
-- TypeScript (ESNext target) - Mission Control UI and server (`packages/mission-control/src/`)
-- JavaScript (CommonJS) - CLI tools, hooks, installer, and test runner (`get-shit-done/bin/`, `hooks/`, `bin/install.js`, `scripts/`)
+- TypeScript 5.4+ - All application code across root CLI package and `packages/mission-control`
+- JavaScript (ESM) - Entry scripts in `scripts/`, patching shims in `patches/`
 
 **Secondary:**
-- Markdown - Agent definitions (`agents/*.md`), workflow/command specs (`get-shit-done/workflows/`, `commands/gsd/`), and templates (`get-shit-done/templates/`)
+- HTML - Single-page shell at `packages/mission-control/public/index.html`
+- CSS - Global styles at `packages/mission-control/src/styles/globals.css` (Tailwind v4)
 
 ## Runtime
 
 **Environment:**
-- Node.js >= 16.7.0 (declared in `package.json` engines field)
-- Bun (primary runtime for Mission Control server and dev; `bun --hot` for HMR)
+- Node.js >=20.6.0 (required) - Used by root CLI package (`src/`) for TypeScript compilation and test running
+- Bun 1.3.10 (required for mission-control) - Runs the Mission Control dev server (`packages/mission-control/`) via `bun --hot src/server.ts`
+
+**Why two runtimes:**
+- Root `gsd-pi` CLI is distributed via npm and must run on Node.js without Bun
+- `packages/mission-control` uses Bun-native APIs (`Bun.serve`, `Bun.file`, WebSocket pub/sub) and the `bun-plugin-tailwind` build plugin
 
 **Package Manager:**
-- npm (root monorepo; lockfile: `package-lock.json` present)
-- Bun (Mission Control package; lockfile: `bun.lock` present at root)
+- npm - Root package (`package.json`, `package-lock.json`)
+- Bun - `packages/mission-control/` (has `bun.lock`)
+- Lockfiles: `package-lock.json` present at root; `bun.lock` in `packages/mission-control/`
 
 ## Frameworks
 
-**Core:**
-- React 19.2.x - Frontend UI (`packages/mission-control/src/`)
-- Bun.serve() - HTTP server and WebSocket server (no Express/Hono/Fastify)
+**Core (mission-control UI):**
+- React 19.2.4 - Frontend UI, `packages/mission-control/src/`
+- Tailwind CSS 4.2.1 - Utility-first styling, configured via `bunfig.toml` plugin
+- shadcn/ui - Component system via `components.json` (style: default, icon: lucide)
+
+**Core (CLI / agent runtime):**
+- `@mariozechner/pi-coding-agent` ^0.57.1 - Agent SDK that provides the interactive TUI, extension API, tool primitives, and session management for the GSD CLI
+
+**Server:**
+- Bun.serve() - HTTP + WebSocket server, ports 4000 (HTTP) and 4001 (WebSocket)
 
 **Testing:**
-- Node.js built-in test runner (`node --test`) - Root-level tests (`tests/*.test.cjs`)
-- Bun test runner (with `happy-dom` 20.8.x) - Mission Control tests (`packages/mission-control/tests/`)
-- c8 11.x - Code coverage for root tests (70% line threshold)
+- `bun:test` - Test runner for `packages/mission-control/tests/`
+- Node built-in test runner (`node --test`) - Used for root CLI tests in `src/resources/extensions/gsd/tests/` and `src/tests/`
+- `happy-dom` ^20.8.3 - DOM environment for React component tests
 
 **Build/Dev:**
-- esbuild 0.24.x - Hook bundling (`scripts/build-hooks.js`)
-- bun-plugin-tailwind 0.1.x - Tailwind CSS integration for Bun's static server (`packages/mission-control/bunfig.toml`)
+- TypeScript compiler (`tsc`) - Root CLI build, outputs to `dist/`
+- `bun --hot` - Hot-reload dev server for mission-control
+- `bun-plugin-tailwind` ^0.1.2 - Tailwind CSS integration for Bun's bundler
 
 ## Key Dependencies
 
-**Critical (Mission Control - `packages/mission-control/package.json`):**
-- `react` ^19.2.4, `react-dom` ^19.2.4 - UI framework
-- `gray-matter` ^4.0.3 - YAML frontmatter parsing for .planning/ markdown files
-- `tailwindcss` ^4.2.1 - Utility-first CSS framework
-- `lucide-react` ^0.577.0 - Icon library
-- `react-resizable-panels` ^4.7.2 - Draggable panel layout
-- `class-variance-authority` ^0.7.1, `clsx` ^2.1.1, `tailwind-merge` ^3.5.0 - Class management (shadcn/ui pattern)
+**Critical:**
+- `@mariozechner/pi-coding-agent` ^0.57.1 - The entire GSD CLI is built as a pi extension. Provides `ExtensionAPI`, `ExtensionContext`, tool builders (`createBashTool`, `createWriteTool`, etc.), session lifecycle hooks, and the interactive TUI
+- `react` ^19.2.4 / `react-dom` ^19.2.4 - Mission Control UI foundation
+- `playwright` ^1.58.2 - Browser automation for the `browser-tools` extension; lets the agent verify UI work headlessly
+
+**UI Component Libraries:**
+- `lucide-react` ^0.577.0 - Icon library (configured as shadcn icon library)
+- `cmdk` ^1.1.1 - Command palette component (`packages/mission-control/src/components/command-palette/`)
+- `react-resizable-panels` ^4.7.2 - Resizable panel layout
+- `class-variance-authority` ^0.7.1 - CVA for component variant composition
+- `clsx` ^2.1.1 + `tailwind-merge` ^3.5.0 - Class merging utilities (`@/lib/utils`)
 - `tw-animate-css` ^1.4.0 - CSS animations
 
-**Infrastructure (Root - `package.json`):**
-- `esbuild` ^0.24.0 - Build tool for hooks
-- `c8` ^11.0.0 - V8 code coverage
+**Data Processing:**
+- `gray-matter` ^4.0.3 - Parses YAML front-matter from `.planning/` markdown files in the state pipeline
 
-**Fonts:**
-- `@fontsource/jetbrains-mono` ^5.2.8 - Monospace font
-- `@fontsource/share-tech-mono` ^5.2.7 - Display monospace font
+**Typography:**
+- `@fontsource/jetbrains-mono` ^5.2.8 - Primary monospace font
+- `@fontsource/share-tech-mono` ^5.2.7 - Secondary monospace font
 
-**Dev Dependencies (Mission Control):**
-- `@types/react` ^19.2.14, `@types/react-dom` ^19.2.3 - TypeScript type definitions
-- `happy-dom` ^20.8.3 - DOM implementation for tests
-
-## Monorepo Structure
-
-**Workspaces:** npm workspaces declared in root `package.json`
-- `packages/*` - Contains `@gsd/mission-control`
-
-**Root package:** `get-shit-done-cc` v1.22.4
-- Published to npm as CLI tool (`bin.get-shit-done-cc` -> `bin/install.js`)
+**Dev Tooling:**
+- `patch-package` ^8.0.1 - Patches applied to `@mariozechner/pi-coding-agent` (see `patches/`)
+- `@sinclair/typebox` - Runtime schema validation for extension tool parameter definitions (transitive from pi-coding-agent, used directly in extensions)
+- `gaxios` overridden to 7.1.4 - Dependency conflict resolution
 
 ## Configuration
 
-**TypeScript (`packages/mission-control/tsconfig.json`):**
-- Target: ESNext, Module: ESNext, ModuleResolution: bundler
-- JSX: react-jsx with React import source
-- Strict mode enabled
-- Path alias: `@/*` -> `./src/*`
-
-**Bun (`packages/mission-control/bunfig.toml`):**
-- Static serve plugin: `bun-plugin-tailwind`
-
-**shadcn/ui (`packages/mission-control/components.json`):**
-- Style: default, Base color: neutral, CSS variables: enabled
-- Icon library: lucide
-- Not using React Server Components (rsc: false)
+**Environment (runtime secrets/config):**
+- `~/.gsd/defaults.json` - Global GSD user settings
+- `.planning/config.json` - Per-project GSD settings
+- `CONTEXT7_API_KEY` env var - Optional API key for Context7 documentation service (increases rate limits)
+- `TAVILY_API_KEY` env var - Required for web search via Tavily API
+- `PI_PACKAGE_DIR`, `GSD_CODING_AGENT_DIR`, `GSD_VERSION`, `GSD_BIN_PATH`, `GSD_WORKFLOW_PATH`, `GSD_BUNDLED_EXTENSION_PATHS` - Internal env vars set by `src/loader.ts` at startup
 
 **Build:**
-- `npm run build:hooks` - Copies hook JS files to `hooks/dist/` (run as prepublishOnly)
-- `npm run dev` - Starts Mission Control via `bun run --cwd packages/mission-control dev`
-
-## CLI Tools
-
-**`get-shit-done/bin/gsd-tools.cjs`** - Central CLI utility (CommonJS, no build step):
-- Commands: state management, model resolution, phase operations, roadmap operations, web search
-- All lib modules in `get-shit-done/bin/lib/*.cjs` (11 modules)
-
-**`hooks/*.js`** - Claude Code hooks (CommonJS, no external dependencies):
-- `gsd-check-update.js` - Version update checker
-- `gsd-context-monitor.js` - Context usage monitoring
-- `gsd-statusline.js` - Status line display
+- `tsconfig.json` (root) - Node.js ESM output, target ES2022, `dist/` outDir
+- `packages/mission-control/tsconfig.json` - ESNext/bundler mode, `@/*` path alias to `src/`
+- `packages/mission-control/bunfig.toml` - Bun static serve plugin (tailwind)
+- `packages/mission-control/components.json` - shadcn/ui configuration
 
 ## Platform Requirements
 
 **Development:**
-- Node.js >= 16.7.0 (for CLI tools and tests)
-- Bun (for Mission Control server; uses Bun.serve(), Bun.file(), Bun.spawn())
-- Claude Code CLI (`claude` binary) - Required for chat integration in Mission Control
+- Node.js >=20.6.0 (for root CLI)
+- Bun >=1.3.x (for mission-control dev server)
+- Git (used at runtime via `child_process.spawn("git", ...)` for worktrees, log, status)
+- Claude Code CLI (`claude` command) installed and on PATH (spawned per-message by `ClaudeProcessManager`)
 
-**Production/Distribution:**
-- Published as npm package (`get-shit-done-cc`)
-- Installs as slash commands into Claude Code, OpenCode, Gemini CLI, and Codex CLI
-- Mission Control runs locally on port 4000 (HTTP) and 4001 (WebSocket)
+**Production:**
+- Distributed as npm package `gsd-pi` (binary: `gsd` / `gsd-cli`)
+- `dist/` contains compiled CLI; `packages/mission-control` is a dev-time companion not published to npm
+- Mission Control runs locally on port 4000/4001 — not deployed to cloud
 
 ---
 
-*Stack analysis: 2026-03-10*
+*Stack analysis: 2026-03-12*

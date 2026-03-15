@@ -1,5 +1,5 @@
 import { describe, expect, test, afterEach } from "bun:test";
-import { mkdtempSync, writeFileSync, unlinkSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, unlinkSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createFileWatcher } from "../src/server/watcher";
@@ -24,6 +24,72 @@ afterEach(() => {
       // ignore cleanup errors
     }
   }
+});
+
+describe("COMPAT-01: watcher .gsd dotfile exception", () => {
+  test("allows events under .gsd/ subdirectory (dotfile exception)", async () => {
+    tempDir = makeTempDir();
+
+    // Create .gsd/ subdirectory inside the watched root
+    const gsdDir = join(tempDir, ".gsd");
+    mkdirSync(gsdDir, { recursive: true });
+
+    const receivedFiles: string[] = [];
+    const done = new Promise<void>((resolve) => {
+      const watcher = createFileWatcher({
+        planningDir: tempDir,
+        debounceMs: 50,
+        onChange: (files) => {
+          for (const f of files) receivedFiles.push(f);
+          resolve();
+        },
+      });
+      cleanup = () => watcher.close();
+    });
+
+    await Bun.sleep(100);
+    writeFileSync(join(gsdDir, "STATE.md"), "gsd content");
+
+    await Promise.race([done, Bun.sleep(3000)]);
+
+    // At least STATE.md (or .gsd/STATE.md) should have been received
+    const hasGsdFile = receivedFiles.some(
+      (f) => f.includes("STATE.md") || f.startsWith(".gsd")
+    );
+    expect(hasGsdFile).toBe(true);
+  });
+
+  test("filters out events under other dotfile directories (not .gsd/)", async () => {
+    tempDir = makeTempDir();
+
+    // Create .planning/ and .gsd/ alongside each other
+    const planningDir = join(tempDir, ".planning");
+    const gsdDir = join(tempDir, ".gsd");
+    mkdirSync(planningDir, { recursive: true });
+    mkdirSync(gsdDir, { recursive: true });
+
+    const receivedFiles: string[] = [];
+
+    const watcher = createFileWatcher({
+      planningDir: tempDir,
+      debounceMs: 50,
+      onChange: (files) => {
+        for (const f of files) receivedFiles.push(f);
+      },
+    });
+    cleanup = () => watcher.close();
+
+    await Bun.sleep(100);
+
+    // Write to .planning/ — should be filtered out (non-.gsd dotdir)
+    writeFileSync(join(planningDir, "STATE.md"), "planning content");
+
+    await Bun.sleep(300);
+
+    // .planning/STATE.md should NOT appear in received files
+    const hasPlanningFile = receivedFiles.some((f) => f.startsWith(".planning"));
+    expect(hasPlanningFile).toBe(false);
+  });
 });
 
 describe("createFileWatcher", () => {

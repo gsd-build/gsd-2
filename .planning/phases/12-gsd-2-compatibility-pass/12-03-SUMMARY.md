@@ -107,6 +107,19 @@ None - no external service configuration required.
 - Phase 13 can build on the `gsd` binary foundation to implement full Pi SDK arg mapping
 - watcher.test.ts, pipeline-switch.test.ts, and claude-process-gsd.test.ts all GREEN
 
+## Self-Check: PASSED
+
+- FOUND: packages/mission-control/src/server/watcher.ts
+- FOUND: packages/mission-control/src/server.ts
+- FOUND: packages/mission-control/src/server/fs-api.ts
+- FOUND: packages/mission-control/src/server/fs-types.ts
+- FOUND: packages/mission-control/src/server/pipeline.ts
+- FOUND: packages/mission-control/src/server/claude-process.ts
+- FOUND: .planning/phases/12-gsd-2-compatibility-pass/12-03-SUMMARY.md
+- FOUND commit 678ba68 (Task 1)
+- FOUND commit ade6831 (Task 2)
+- FOUND commit 9bcce67 (docs/metadata)
+
 ---
 *Phase: 12-gsd-2-compatibility-pass*
 *Completed: 2026-03-12*

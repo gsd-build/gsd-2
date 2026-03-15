@@ -4,7 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "bun --hot src/server.ts",
-    "build": "bun build src/frontend.tsx --outdir public/dist --target browser"
+    "build": "bun build src/frontend.tsx --outdir public/dist --target browser",
+    "test:e2e": "MC_NO_WEBSERVER=1 npx playwright test",
+    "test:e2e:headed": "MC_NO_WEBSERVER=1 npx playwright test --headed",
+    "test:e2e:ui": "npx playwright test --ui"
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.2.8",
@@ -26,6 +29,7 @@
   "devDependencies": {
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "happy-dom": "^20.8.3"
+    "happy-dom": "^20.8.3",
+    "playwright": "^1.58.2"
   }
 }

@@ -34,6 +34,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/mission-control/src-tauri -> target
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -98,6 +100,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          projectPath: packages/mission-control
           tagName: ${{ github.ref_name }}
           releaseName: 'GSD Mission Control ${{ github.ref_name }}'
           releaseBody: 'See CHANGELOG.md for details.'
@@ -111,4 +114,4 @@ jobs:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         run: |
           echo -n "$GPG_PRIVATE_KEY" | gpg --batch --import
-          find src-tauri/target -name "*.AppImage" -exec gpg --detach-sign --armor {} \;
+          find packages/mission-control/src-tauri/target -name "*.AppImage" -exec gpg --detach-sign --armor {} \;

@@ -108,6 +108,12 @@ None - no external service configuration required.
 - Phase 16-04 (e2e verification checkpoint) can now proceed: all UI components exist and App.tsx routes through auth guard
 - Test suite healthy at 691 passing; auth components add no new test failures
 
+## Self-Check: PASSED
+
+- All 5 expected files confirmed present on disk
+- All 5 task commits (96ae47e, 0fe9cf7, 02b8dfc, bdb8259, e4d3bc4) confirmed in git log
+- Final docs commit: c8aa2c9
+
 ---
 *Phase: 16-oauth-keychain*
 *Completed: 2026-03-13*

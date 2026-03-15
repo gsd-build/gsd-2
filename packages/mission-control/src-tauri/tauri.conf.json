@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.mzansiagentive.gsd-mission-control",
   "build": {
-    "beforeDevCommand": "bun run --cwd packages/mission-control dev",
+    "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:4000",
-    "beforeBuildCommand": "bun run --cwd packages/mission-control build"
+    "beforeBuildCommand": "bun run build"
   },
   "app": {
     "windows": [

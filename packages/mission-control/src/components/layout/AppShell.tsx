@@ -260,10 +260,41 @@ export function AppShell() {
     return (
       <>
         <OnboardingScreen
-          onOpenFolder={() => setFolderPickerOpen(true)}
-          onStartChat={() => {
-            dismiss();
-            setActiveView({ kind: "chat" });
+          onOpenProject={() => setFolderPickerOpen(true)}
+          onNewProject={async (name) => {
+            const wsPath = await fetch("/api/workspace/path")
+              .then((r) => r.json())
+              .then((d) => d.path)
+              .catch(() => null);
+            const res = await fetch("/api/workspace/create", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name, ...(wsPath ? { workspacePath: wsPath } : {}) }),
+            }).catch(() => null);
+            if (res?.ok) {
+              const { projectPath } = await res.json();
+              setOpenProjects((prev) => {
+                if (prev.find((p) => p.path === projectPath)) return prev;
+                return [
+                  ...prev,
+                  {
+                    id: projectPath,
+                    path: projectPath,
+                    name,
+                    isProcessing: false,
+                    isActive: true,
+                  },
+                ];
+              });
+              setActiveProjectPath(projectPath);
+              await fetch("/api/project/switch", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ path: projectPath }),
+              }).catch(() => {});
+              dismiss();
+              setActiveView({ kind: "chat" });
+            }
           }}
         />
         <FolderPickerModal

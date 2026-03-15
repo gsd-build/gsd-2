@@ -1,186 +1,206 @@
 # Architecture
 
-**Analysis Date:** 2026-03-10
+**Analysis Date:** 2026-03-12
 
 ## Pattern Overview
 
-**Overall:** Multi-runtime CLI meta-prompting system with companion dashboard UI
+**Overall:** Dual-surface, plugin-extended CLI agent + Web dashboard
 
-This is a spec-driven development orchestration system that installs into AI coding assistants (Claude Code, OpenCode, Gemini CLI, Codex) as slash commands. It uses markdown-based workflows, agent definitions, and a Node.js CLI toolchain to manage project planning, execution, and verification. A companion Bun+React dashboard (`mission-control`) provides real-time visualization.
+The project has two independently deployable surfaces that share no runtime code:
+
+1. **GSD CLI** (`src/`) — A Node.js CLI tool that wraps `@mariozechner/pi-coding-agent` (the "Pi" SDK) with GSD-specific extensions, commands, and resources. Users run `gsd` in a terminal. The agent operates interactively or in headless print/RPC modes.
+
+2. **Mission Control** (`packages/mission-control/`) — A Bun-served React web UI that reads `.planning/` files from a project directory, streams Claude Code output, and displays live project state in a browser window. It is a separate application that runs alongside GSD (not required).
 
 **Key Characteristics:**
-- Two distinct subsystems: CLI toolchain (Node.js/CJS) and dashboard UI (Bun/TypeScript/React)
-- Markdown-first architecture: commands, workflows, agents, and templates are all `.md` files interpreted by AI runtimes
-- File-based state management: all project state lives in `.planning/` as markdown and JSON files
-- Agent-oriented: specialized AI agents (`gsd-planner`, `gsd-executor`, `gsd-verifier`, etc.) each with dedicated system prompts
-- CLI tool (`gsd-tools.cjs`) provides deterministic operations that AI agents call via Bash
+- File-system as the single source of truth: both surfaces read/write `.gsd/` and `.planning/` markdown files
+- Extension plugin model: GSD CLI loads extensions from `~/.gsd/agent/extensions/` via Pi SDK's `DefaultResourceLoader`
+- WebSocket push model: Mission Control server watches `.planning/` for changes and pushes diffs to connected React clients
+- No shared runtime module between CLI and Mission Control; they communicate only through the file system and by spawning child processes
 
 ## Layers
 
-**Installer Layer:**
-- Purpose: Registers GSD commands, agents, hooks, and workflows into AI runtime config directories
-- Location: `bin/install.js`
-- Contains: Multi-runtime installer supporting Claude Code, OpenCode, Gemini CLI, Codex
-- Depends on: Package files (`commands/`, `agents/`, `get-shit-done/workflows/`, `hooks/`)
-- Used by: End users via `npx get-shit-done-cc`
+**CLI Bootstrap Layer:**
+- Purpose: Set Pi SDK environment, initialize resources, launch interactive or print mode
+- Location: `src/loader.ts`, `src/cli.ts`
+- Contains: Environment variable setup, argument parsing, `InteractiveMode` / `runPrintMode` / `runRpcMode` invocation
+- Depends on: `@mariozechner/pi-coding-agent`, `src/app-paths.ts`, `src/resource-loader.ts`, `src/wizard.ts`, `src/tool-bootstrap.ts`
+- Used by: npm bin entry `gsd` / `gsd-cli` → `dist/loader.js`
 
-**Command Layer (Slash Commands):**
-- Purpose: Entry points that AI runtimes invoke when users type `/gsd:<command>`
-- Location: `commands/gsd/*.md`
-- Contains: 33 markdown command definitions with frontmatter (name, description, allowed-tools)
-- Depends on: Workflow layer (references via `@~/.claude/get-shit-done/workflows/`)
-- Used by: AI runtimes (Claude Code, OpenCode, Gemini, Codex)
+**Resource Layer:**
+- Purpose: Sync bundled extensions/agents/skills from package to `~/.gsd/agent/` on every launch
+- Location: `src/resource-loader.ts`
+- Contains: `initResources()` (cpSync from `src/resources/` to `~/.gsd/agent/`), `buildResourceLoader()`
+- Depends on: Node `fs`, Pi `DefaultResourceLoader`
+- Used by: `src/cli.ts` before creating any sessions
 
-**Workflow Layer:**
-- Purpose: Full implementation logic for each command, loaded as context by the AI runtime
-- Location: `get-shit-done/workflows/*.md`
-- Contains: 35 detailed workflow documents with step-by-step process definitions
-- Depends on: CLI tools layer (calls `gsd-tools` for deterministic operations), reference layer
-- Used by: Command layer (loaded via `@` references in `<execution_context>`)
+**GSD Extension Layer:**
+- Purpose: All GSD-specific AI behaviors — commands (`/gsd`, `/worktree`), lifecycle hooks, auto-mode, state derivation
+- Location: `src/resources/extensions/gsd/`
+- Key files:
+  - `index.ts` — extension entry point, registers commands/tools/hooks
+  - `commands.ts` — `/gsd` command handler (next, auto, stop, status, queue, doctor, migrate, remote)
+  - `auto.ts` — auto-mode state machine (fresh session per unit)
+  - `state.ts` — `deriveState()` reads `.gsd/` files into typed `GSDState`
+  - `paths.ts` — ID-based path resolution for `.gsd/milestones/M001/slices/S01/tasks/T01/`
+  - `types.ts` — core type definitions (`GSDState`, `Roadmap`, `SlicePlan`, `Summary`, etc.)
+  - `files.ts` — file I/O and markdown parsers
+  - `prompt-loader.ts` — loads workflow prompts from `prompts/`
+- Depends on: Pi SDK `ExtensionAPI`, Node `fs`
+- Used by: Pi SDK extension loading via `~/.gsd/agent/extensions/gsd/index.ts`
 
-**Agent Layer:**
-- Purpose: System prompts for specialized AI sub-agents spawned by orchestrator commands
-- Location: `agents/*.md`
-- Contains: 12 agent definitions (`gsd-planner`, `gsd-executor`, `gsd-verifier`, `gsd-codebase-mapper`, `gsd-debugger`, `gsd-roadmapper`, etc.)
-- Depends on: Workflow layer, CLI tools layer
-- Used by: Workflow orchestrators that spawn sub-agents via `Task` tool
+**Supporting Extensions Layer:**
+- Purpose: Auxiliary tools registered as Pi extensions
+- Location: `src/resources/extensions/`
+- Extensions: `bg-shell/`, `browser-tools/`, `context7/`, `search-the-web/`, `slash-commands/`, `subagent/`, `mac-tools/`, `ask-user-questions.ts`, `get-secrets-from-user.ts`
+- Used by: Loaded by `DefaultResourceLoader` from `~/.gsd/agent/extensions/`
 
-**CLI Tools Layer:**
-- Purpose: Deterministic Node.js operations that AI agents call via Bash for state manipulation
-- Location: `get-shit-done/bin/gsd-tools.cjs` (dispatcher), `get-shit-done/bin/lib/*.cjs` (modules)
-- Contains: CLI dispatcher + 11 library modules (core, state, phase, roadmap, milestone, commands, init, verify, template, frontmatter, config)
-- Depends on: `.planning/` filesystem (reads/writes markdown and JSON)
-- Used by: Workflows and agents via `node ~/.claude/get-shit-done/bin/gsd-tools.cjs <command>`
+**Mission Control Server Layer:**
+- Purpose: Bun HTTP + WebSocket server, file watcher, Claude Code process manager
+- Location: `packages/mission-control/src/server.ts`, `packages/mission-control/src/server/`
+- Key files:
+  - `server.ts` — Bun.serve router: mounts REST API handlers, starts pipeline
+  - `pipeline.ts` — orchestrates watcher → state deriver → differ → WebSocket broadcast + Claude process sessions
+  - `state-deriver.ts` — `buildFullState()` parses `.planning/` files into `PlanningState`
+  - `claude-process.ts` — `ClaudeProcessManager` spawns `claude -p` per message, streams NDJSON
+  - `session-manager.ts` — multi-session lifecycle (create, close, rename, fork, worktree-aware close)
+  - `ws-server.ts` — WebSocket server, fan-out chat events and state diffs
+  - `differ.ts` — `computeDiff()` for full vs. partial state pushes
+  - `watcher.ts` — `createFileWatcher()` with debounce on `.planning/`
+- Depends on: Bun runtime, `gray-matter`, `node:child_process`
+- Used by: `bun run packages/mission-control/src/server.ts`
 
-**Reference Layer:**
-- Purpose: Shared reference documents providing behavioral guidelines
-- Location: `get-shit-done/references/*.md`
-- Contains: 13 reference docs (checkpoints, git integration, model profiles, TDD, UI brand, verification patterns, etc.)
-- Depends on: Nothing
-- Used by: Workflows and agents (loaded via `@` references)
+**Mission Control REST API Handlers:**
+- Purpose: Thin handlers for filesystem, dialogs, git, projects, settings, assets, session, proxy
+- Location: `packages/mission-control/src/server/`
+- Files: `fs-api.ts`, `dialog-api.ts`, `git-api.ts`, `recent-projects.ts`, `settings-api.ts`, `assets-api.ts`, `session-status-api.ts`, `proxy-api.ts`
+- Routes prefix: `/api/fs/`, `/api/dialog/`, `/api/git/`, `/api/projects/`, `/api/settings`, `/api/session/`, `/api/assets/`, `/api/preview/`, `/api/project/switch`
 
-**Template Layer:**
-- Purpose: Markdown templates for project artifacts and codebase mapping
-- Location: `get-shit-done/templates/*.md`, `get-shit-done/templates/codebase/*.md`
-- Contains: Project templates (project.md, requirements.md, state.md, roadmap.md, etc.) and 7 codebase mapping templates
-- Depends on: Nothing
-- Used by: Workflows (for scaffolding new artifacts)
+**Mission Control React Layer:**
+- Purpose: Browser UI — sidebar navigation, chat panel, milestone/slice/task views, session tabs
+- Location: `packages/mission-control/src/`
+- Key files:
+  - `App.tsx` — root component, renders `<AppShell />`
+  - `frontend.tsx` — Bun bundled entry point
+  - `components/layout/AppShell.tsx` — top-level layout, session flow routing (initializing → onboarding → dashboard)
+  - `components/layout/Sidebar.tsx` — collapsible nav with project browser
+  - `components/layout/SingleColumnView.tsx` — routes `activeView` to view components
+  - `components/views/` — feature views (ChatView, MilestoneView, SliceView, HistoryView, etc.)
+  - `hooks/` — all data hooks (usePlanningState, useSessionManager, useChatMode, usePreview, etc.)
+- Depends on: React 19, Tailwind CSS 4, `lucide-react`, `cmdk`
 
-**Hook Layer:**
-- Purpose: Background scripts that run alongside AI sessions (update checking, context monitoring, status display)
-- Location: `hooks/*.js`
-- Contains: 3 hooks (`gsd-check-update.js`, `gsd-context-monitor.js`, `gsd-statusline.js`)
-- Depends on: CLI tools layer
-- Used by: AI runtime hook systems
-
-**Mission Control Layer (Dashboard):**
-- Purpose: Real-time browser dashboard for visualizing project state
-- Location: `packages/mission-control/`
-- Contains: Bun HTTP server + WebSocket server + React SPA
-- Depends on: `.planning/` filesystem (reads via file watcher), Claude Code process (for chat)
-- Used by: Developers via `bun run dev` → `http://localhost:4000`
+**Mission Control Hook Layer:**
+- Purpose: Encapsulate all WebSocket and API communication; React components are purely presentational
+- Location: `packages/mission-control/src/hooks/`
+- Key hooks:
+  - `usePlanningState.ts` — subscribes to WS `:4001`, applies full/diff updates to `PlanningState`
+  - `useSessionManager.ts` — multi-session create/close/rename/select, routes chat messages by `sessionId`
+  - `useChatMode.tsx` — discuss/review mode detection from streamed mode tags
+  - `useReconnectingWebSocket.ts` — shared WS transport with exponential backoff
+  - `useSessionFlow.ts` — initializing/onboarding/resume/dashboard session state machine
+  - `usePreview.ts` — live preview panel open/close, port detection
 
 ## Data Flow
 
-**Command Execution Flow:**
+**GSD Auto-Mode Execution Flow:**
 
-1. User types `/gsd:execute-phase 3` in AI runtime
-2. AI runtime loads command definition from `commands/gsd/execute-phase.md`
-3. Command's `<execution_context>` loads workflow from `get-shit-done/workflows/execute-phase.md`
-4. Workflow calls `gsd-tools init execute-phase 3` to gather phase metadata (plans, config, models)
-5. Orchestrator spawns `gsd-executor` sub-agents (one per plan) via `Task` tool
-6. Sub-agents execute plans, writing code and calling `gsd-tools` for state updates
-7. `gsd-tools state update` writes changes to `.planning/STATE.md`
-8. Optional: `gsd-verifier` agent validates work against must-haves
+1. User runs `/gsd auto` in terminal
+2. `commands.ts` calls `startAuto()` in `auto.ts`
+3. `auto.ts` calls `deriveState(process.cwd())` → reads `.gsd/` files → returns `GSDState`
+4. Based on `GSDState.phase`, auto selects prompt template from `prompts/` via `loadPrompt()`
+5. `pi.sendMessage()` injects prompt into a fresh session created via `ctx.newSession()`
+6. LLM executes, writes output files back to `.gsd/milestones/.../`
+7. `agent_end` hook fires → `handleAgentEnd()` loops back to step 3
 
-**Mission Control Data Flow:**
+**Mission Control File-to-State Push Flow:**
 
-1. `startPipeline()` in `src/server/pipeline.ts` initializes the system
-2. `createFileWatcher()` in `src/server/watcher.ts` watches `.planning/` directory recursively
-3. On file change: `buildFullState()` in `src/server/state-deriver.ts` parses all `.planning/` files into `PlanningState`
-4. `computeDiff()` in `src/server/differ.ts` computes delta between old and new state
-5. `createWsServer()` in `src/server/ws-server.ts` broadcasts `StateDiff` to connected WebSocket clients
-6. React app receives updates via `usePlanningState()` hook in `src/hooks/usePlanningState.ts`
-7. Components render current state (milestone progress, phase status, plan details)
+1. File watcher (`watcher.ts`) detects change in `.planning/` with 50ms debounce
+2. `pipeline.ts` calls `buildFullState(planningDir)` → `state-deriver.ts` parses all markdown
+3. `computeDiff(currentState, newState)` produces minimal diff or full state
+4. `wsServer.broadcast(diff)` pushes JSON to all connected browser clients
+5. `usePlanningState` hook in browser applies diff to React state → components re-render
+6. Reconciliation interval (every 5s) runs independent full rebuild to catch missed events
+
+**Chat Message Flow (Mission Control):**
+
+1. User types message in `ChatPanel` → `sendMessage(prompt, sessionId)` via `useSessionManager`
+2. WebSocket message `{type: "chat", prompt, sessionId}` sent to `ws-server.ts`
+3. `pipeline.ts` routes to session's `ClaudeProcessManager.sendMessage()`
+4. `ClaudeProcessManager` spawns `claude -p "<prompt>" --output-format stream-json` as child process
+5. NDJSON stream parsed by `ndjson-parser.ts`, emitted as `StreamEvent`s
+6. `mode-interceptor.ts` strips inline mode tags (`<discuss>`, `<review>`, `<dev_server:PORT>`)
+7. Events forwarded via WebSocket to the session's `activeClient` in the browser
+8. React `useChatMode` hook interprets mode events, `usePlanningState` picks up file writes
 
 **State Management:**
-- All state persists as files in `.planning/` directory
-- `STATE.md` is the central state file with YAML frontmatter
-- `ROADMAP.md` tracks phase structure and completion
-- `REQUIREMENTS.md` tracks requirement completion
-- `config.json` stores workflow preferences
-- Phase directories (`phases/NN-slug/`) contain `PLAN.md`, `SUMMARY.md`, and `VERIFICATION.md` files
+- GSD CLI: stateless across sessions; all state is on disk in `.gsd/`. In-process auto-mode state held in module-level variables in `auto.ts`
+- Mission Control server: in-memory `currentState: PlanningState` kept in `pipeline.ts` closure; authoritative source is always rebuilt from disk
+- Mission Control browser: React state in hooks; `usePlanningState` sequence number prevents stale updates
 
 ## Key Abstractions
 
-**GSD Tools CLI:**
-- Purpose: Single deterministic CLI that all AI agents share for state operations
-- Examples: `get-shit-done/bin/gsd-tools.cjs`, `get-shit-done/bin/lib/core.cjs`
-- Pattern: Dispatcher routes subcommand to function, outputs JSON to stdout (or `@file:/tmp/...` for large payloads)
+**GSDState (CLI):**
+- Purpose: Derived representation of current project progress read from `.gsd/` files
+- Location: `src/resources/extensions/gsd/types.ts`, derived by `src/resources/extensions/gsd/state.ts`
+- Fields: `activeMilestone`, `activeSlice`, `activeTask`, `phase`, `registry`, `progress`
+- Pattern: Pure derivation — always computed from disk, never persisted as a typed object
 
-**Model Profiles:**
-- Purpose: Maps agent types to AI model tiers (opus/sonnet/haiku) based on quality/balanced/budget profile
-- Examples: `MODEL_PROFILES` in `get-shit-done/bin/lib/core.cjs`
-- Pattern: Config-driven lookup table; user sets `model_profile` in `config.json`, agents resolve via `gsd-tools resolve-model`
+**PlanningState (Mission Control):**
+- Purpose: Structured view of `.planning/` content for the browser
+- Location: `packages/mission-control/src/server/types.ts`
+- Fields: `state` (STATE.md), `roadmap` (ROADMAP.md), `config` (config.json), `phases` (PLAN.md files), `requirements`
+- Pattern: Built by `buildFullState()`, pushed via WebSocket as full replace or diff
 
-**Frontmatter System:**
-- Purpose: YAML frontmatter in markdown files serves as structured metadata
-- Examples: `get-shit-done/bin/lib/frontmatter.cjs`
-- Pattern: Custom YAML parser (not a library) handles extraction, reconstruction, and CRUD for plan/summary/verification schemas
+**File Path System (.gsd/ hierarchy):**
+- Purpose: Canonical ID-based addressing for all planning artifacts
+- Location: `src/resources/extensions/gsd/paths.ts`
+- Pattern: `<basePath>/.gsd/milestones/<M001>/slices/<S01>/tasks/<T01>-PLAN.md`
+- Resolvers handle both bare-ID convention and legacy descriptor-suffixed names
 
-**PlanningState:**
-- Purpose: Typed aggregate of all `.planning/` file contents for the dashboard
-- Examples: `packages/mission-control/src/server/types.ts`
-- Pattern: Derived state — rebuilt from filesystem on every change, never stored as single file
+**Extension Entry Point:**
+- Purpose: All GSD behaviors registered with Pi SDK in a single `default export function(pi: ExtensionAPI)`
+- Location: `src/resources/extensions/gsd/index.ts`
+- Pattern: `pi.registerCommand()`, `pi.registerTool()`, `pi.registerShortcut()`, `pi.on(event, handler)`
 
-**Phase Lifecycle:**
-- Purpose: Progression engine for phases through planning → execution → verification → completion
-- Examples: `get-shit-done/bin/lib/phase.cjs`, `get-shit-done/bin/lib/state.cjs`
-- Pattern: Phase directories contain lifecycle artifacts; state transitions tracked in `STATE.md` and `ROADMAP.md`
+**SessionManager (Mission Control):**
+- Purpose: Multi-session lifecycle; each session has its own `ClaudeProcessManager` and `activeClient` WebSocket
+- Location: `packages/mission-control/src/server/session-manager.ts`
+- Pattern: Map of `SessionState` keyed by UUID; sessions support worktree-aware close with merge/keep/delete
 
 ## Entry Points
 
-**NPM Install / CLI:**
-- Location: `bin/install.js`
-- Triggers: `npx get-shit-done-cc` or `npm install -g get-shit-done-cc`
-- Responsibilities: Copies commands, agents, workflows, templates, hooks to AI runtime config directories
+**GSD CLI:**
+- Location: `dist/loader.js` (compiled from `src/loader.ts`)
+- Triggers: `gsd` / `gsd-cli` bin invocation
+- Responsibilities: Set env vars, sync resources to `~/.gsd/agent/`, run wizard, launch Pi interactive or print/RPC mode
 
-**GSD Tools Dispatcher:**
-- Location: `get-shit-done/bin/gsd-tools.cjs`
-- Triggers: AI agents call via `node gsd-tools.cjs <command> [args]`
-- Responsibilities: Routes 50+ subcommands to appropriate library functions, outputs JSON
-
-**Mission Control Server:**
+**Mission Control Dev Server:**
 - Location: `packages/mission-control/src/server.ts`
-- Triggers: `bun run dev` or `bun --hot src/server.ts`
-- Responsibilities: Serves React SPA on `:4000`, WebSocket state updates on `:4001`, REST APIs for filesystem and project management
+- Triggers: `bun run src/server.ts` (via `npm run mc:dev` from root)
+- Responsibilities: Start pipeline on port 4001 (WebSocket) and 4000 (HTTP/React app)
 
-**Slash Commands:**
-- Location: `commands/gsd/*.md` (33 commands)
-- Triggers: User types `/gsd:<name>` in AI runtime
-- Responsibilities: Define entry point metadata (allowed tools, arguments) and reference workflow implementations
+**GSD Extension:**
+- Location: `src/resources/extensions/gsd/index.ts` (synced to `~/.gsd/agent/extensions/gsd/index.ts`)
+- Triggers: Pi SDK extension loading during `resourceLoader.reload()`
+- Responsibilities: Register `/gsd` command, `/worktree` command, lifecycle hooks, dynamic tool wrappers
 
 ## Error Handling
 
-**Strategy:** Fail-fast with JSON error output for CLI tools; graceful degradation for dashboard
+**Strategy:** Defensive — all file reads wrapped in try/catch returning null/default; extension errors logged but non-fatal
 
 **Patterns:**
-- CLI tools: `error(message)` writes to stderr and exits with code 1
-- File operations: `safeReadFile()` returns null on failure, callers handle missing data
-- Dashboard pipeline: try/catch around file parsing with defaults for missing files
-- WebSocket: Reconnecting client with exponential backoff (`useReconnectingWebSocket`)
-- Large output: JSON payloads >50KB written to tmpfile, path returned as `@file:<path>`
+- `loadFile()` in `files.ts` returns `null` on missing files; callers check before parsing
+- `buildFullState()` in `state-deriver.ts` returns default state objects when files are missing or unparseable
+- `ClaudeProcessManager` emits `result` event with `error` field on non-zero exit; pipeline forwards as `chat_error` to WebSocket client
+- Extension load errors in `cli.ts` are logged to stderr but do not prevent startup
+- Pipeline reconciliation interval catches drift silently and broadcasts corrected state
 
 ## Cross-Cutting Concerns
 
-**Logging:** Console-based. CLI tools write JSON to stdout, errors to stderr. Dashboard uses `console.log` with `[pipeline]`/`[watcher]` prefixes.
-
-**Validation:** `gsd-tools validate consistency` checks phase numbering and disk/roadmap sync. `validate health [--repair]` checks `.planning/` integrity. Frontmatter validation enforces schemas for plan/summary/verification files.
-
-**Authentication:** None. This is a local development tool. No auth layer.
-
-**Configuration:** Two-level config: global user defaults in `~/.gsd/defaults.json`, project-level in `.planning/config.json`. Config merges with sensible defaults in `loadConfig()`.
+**Logging:** `console.log` / `console.error` with `[pipeline]` / `[gsd]` prefixes; no structured logging library
+**Validation:** GSD extension uses `observability-validator.ts` to validate plan/execute/complete boundary transitions during auto-mode
+**Authentication:** Pi SDK `AuthStorage` manages API keys; `wizard.ts` prompts on first run; keys stored in `~/.gsd/agent/auth.json`
 
 ---
 
-*Architecture analysis: 2026-03-10*
+*Architecture analysis: 2026-03-12*

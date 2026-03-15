@@ -36,8 +36,14 @@ interface TaskExecutingProps {
   mustHaves?: MustHaves;
   filesModified: string[];
   checkpoint?: string;
+  /** Internal: pulse animation class applied when task advances. Managed by TaskExecutingConnected. */
+  isPulsing?: boolean;
 }
 
+/**
+ * Pure (hook-free) render function for the executing task status panel.
+ * Used directly in tests (direct function call pattern) and composed by TaskExecutingConnected.
+ */
 export function TaskExecuting({
   taskId,
   wave,
@@ -47,21 +53,10 @@ export function TaskExecuting({
   mustHaves,
   filesModified,
   checkpoint,
+  isPulsing = false,
 }: TaskExecutingProps) {
   const budgetColor = getBudgetColor(filesCount, taskCount);
   const budgetPercent = taskCount > 0 ? Math.min(100, (filesCount / taskCount) * 15) : 0;
-
-  const prevTaskIdRef = useRef<string | undefined>(undefined);
-  const [isPulsing, setIsPulsing] = useState(false);
-
-  useEffect(() => {
-    if (shouldPulseOnTaskChange(prevTaskIdRef.current, taskId)) {
-      setIsPulsing(true);
-      const timer = setTimeout(() => setIsPulsing(false), 150);
-      return () => clearTimeout(timer);
-    }
-    prevTaskIdRef.current = taskId;
-  }, [taskId]);
 
   return (
     <div className={`space-y-4${isPulsing ? " task-advance-pulse" : ""}`}>
@@ -100,4 +95,24 @@ export function TaskExecuting({
       <CheckpointRef checkpoint={checkpoint} />
     </div>
   );
+}
+
+/**
+ * Stateful wrapper around TaskExecuting that manages the pulse animation
+ * when taskId changes. Use this in the app; use TaskExecuting in tests.
+ */
+export function TaskExecutingConnected(props: Omit<TaskExecutingProps, "isPulsing">) {
+  const prevTaskIdRef = useRef<string | undefined>(undefined);
+  const [isPulsing, setIsPulsing] = useState(false);
+
+  useEffect(() => {
+    if (shouldPulseOnTaskChange(prevTaskIdRef.current, props.taskId)) {
+      setIsPulsing(true);
+      const timer = setTimeout(() => setIsPulsing(false), 150);
+      return () => clearTimeout(timer);
+    }
+    prevTaskIdRef.current = props.taskId;
+  }, [props.taskId]);
+
+  return <TaskExecuting {...props} isPulsing={isPulsing} />;
 }

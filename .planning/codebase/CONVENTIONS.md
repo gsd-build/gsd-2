@@ -1,170 +1,140 @@
 # Coding Conventions
 
-**Analysis Date:** 2026-03-10
+**Analysis Date:** 2026-03-12
 
 ## Naming Patterns
 
 **Files:**
-- CLI library modules: `kebab-case.cjs` (e.g., `get-shit-done/bin/lib/core.cjs`, `get-shit-done/bin/lib/frontmatter.cjs`)
-- React components: `PascalCase.tsx` (e.g., `src/components/milestone/PhaseRow.tsx`, `src/components/layout/AppShell.tsx`)
-- Server modules: `kebab-case.ts` (e.g., `src/server/state-deriver.ts`, `src/server/ws-server.ts`)
-- React hooks: `camelCase.ts` prefixed with `use` (e.g., `src/hooks/usePlanningState.ts`, `src/hooks/useReconnectingWebSocket.ts`)
-- Utility modules: `kebab-case.ts` (e.g., `src/lib/utils.ts`, `src/lib/layout-storage.ts`)
-- Test files: `<module-name>.test.cjs` (root CLI) or `<module-name>.test.ts`/`.test.tsx` (mission-control)
-- Type definition files: `types.ts` or `<domain>-types.ts` (e.g., `src/server/types.ts`, `src/server/chat-types.ts`, `src/server/fs-types.ts`)
+- React components: PascalCase matching export name — `TaskExecuting.tsx`, `NavItems.tsx`, `AppShell.tsx`
+- Hooks: camelCase prefixed with `use` — `useChat.ts`, `usePlanningState.ts`, `useSessionFlow.ts`
+- Server modules: kebab-case — `session-manager.ts`, `chat-router.ts`, `claude-process.ts`
+- Utility modules: kebab-case — `design-tokens.ts`, `slash-commands.ts`, `layout-storage.ts`
+- Test files: kebab-case matching the module under test — `session-manager.test.ts`, `chat-router.test.ts`
+- GSD extension source: kebab-case — `files.ts`, `state.ts`, `worktree-manager.ts`
+
+**Directories:**
+- Components grouped by feature in kebab-case: `active-task/`, `command-palette/`, `slice-detail/`
+- Shared primitives under `shared/` or `ui/`
+- All hooks flat in `hooks/`
+- Server logic flat in `server/`
 
 **Functions:**
-- Use `camelCase` for all functions in both CJS and TS code
-- CLI command handlers: prefix with `cmd` (e.g., `cmdStateLoad`, `cmdGenerateSlug`, `cmdListTodos`)
-- Internal/shared helpers: suffix with `Internal` (e.g., `resolveModelInternal`, `findPhaseInternal`, `generateSlugInternal`, `getRoadmapPhaseInternal`)
-- React hooks: prefix with `use` (e.g., `usePlanningState`, `useReconnectingWebSocket`, `useChat`)
-- React components: `PascalCase` named exports matching filename (e.g., `export function PhaseRow()`, `export function AppShell()`)
-- Factory/builder functions: prefix with `create` or `build` (e.g., `createFileWatcher`, `buildFullState`, `createWsServer`, `createSwitchGuard`)
+- Components: PascalCase named function exports — `export function TaskExecuting(...)`
+- Hooks: camelCase — `export function usePlanningState(...)`
+- Pure utilities: camelCase — `export function processStreamEvent(...)`, `export function calculateBackoffDelay(...)`
+- Private helpers within modules: camelCase — `getBudgetColor(...)`, `createMessageId()`
+- GSD extension pure functions: camelCase — `deriveState(...)`, `parseRoadmap(...)`, `isSliceComplete(...)`
 
 **Variables:**
-- Use `camelCase` for local variables and parameters
-- Use `UPPER_SNAKE_CASE` for module-level constants (e.g., `MODEL_PROFILES`, `TOOLS_PATH`, `DEFAULT_WS_URL`)
-- Default state objects: `DEFAULT_<NAME>` (e.g., `DEFAULT_PROJECT_STATE`, `DEFAULT_CONFIG_STATE`)
+- Local variables: camelCase
+- Constants / lookup tables: SCREAMING_SNAKE_CASE — `BUDGET_COLORS`, `LAYOUT_DEFAULTS`, `MAX_SESSIONS`, `NAV_ITEMS`
 
-**Types:**
-- Use `PascalCase` for TypeScript interfaces and types
-- Interface names describe the data shape without `I` prefix (e.g., `PhaseState`, `PlanningState`, `PipelineOptions`)
-- Props interfaces: `<ComponentName>Props` (e.g., `PhaseRowProps`)
-- Return type interfaces: `<HookName>Result` (e.g., `UsePlanningStateResult`)
-- Status unions: string literal unions (e.g., `type PhaseStatus = "not_started" | "in_progress" | "complete"`)
+**Types/Interfaces:**
+- PascalCase — `SessionState`, `IProcessManager`, `StreamEvent`, `UseChatResult`
+- Interface prefix `I` only for injected dependency abstractions — `IProcessManager`
+- Type aliases use same PascalCase — `PhaseStatus = "not_started" | "in_progress" | "complete"`
 
 ## Code Style
 
 **Formatting:**
-- No Prettier or ESLint config in the project -- formatting is convention-based
-- Use 2-space indentation throughout
-- Use double quotes for strings in TypeScript files
-- Use single quotes for strings in CJS files
+- No prettier/eslint config file found at project root or package level — formatting is enforced by TypeScript compiler strictness and code review rather than automated tools
+- Indentation: 2 spaces throughout
 - Trailing commas in multi-line structures
+- Double quotes for string literals in TypeScript files
 
 **Linting:**
-- No linter configured at project level
-- TypeScript strict mode enabled in `packages/mission-control/tsconfig.json` (`"strict": true`)
-- `noEmit: true` -- TypeScript is used for type checking only, Bun handles compilation
+- No `.eslintrc` or `biome.json` detected
+- TypeScript `strict: true` is the primary correctness gate in both `tsconfig.json` files
+
+**TypeScript strictness:**
+- Root `tsconfig.json`: `strict: true`, `module: NodeNext`, `moduleResolution: NodeNext`
+- Mission Control `tsconfig.json`: `strict: true`, `isolatedModules: true`, `noEmit: true`
 
 ## Import Organization
 
-**CJS files (`get-shit-done/bin/lib/*.cjs`):**
-1. Node built-ins (`require('fs')`, `require('path')`, `require('child_process')`)
-2. Internal module imports (`require('./core.cjs')`, `require('./frontmatter.cjs')`)
-3. No external npm dependencies (zero-dep design)
-
-**TypeScript files (mission-control `src/`):**
-1. External packages (`react`, `lucide-react`, `gray-matter`)
-2. Internal absolute imports using `@/` alias (`@/lib/utils`, `@/components/shared/ProgressBar`)
-3. Relative imports for same-directory or server modules (`./types`, `../server/types`)
-4. Type-only imports: use `import type { ... }` for types
+**Order (observed pattern):**
+1. Node built-ins with `node:` prefix — `import { join } from "node:path"`
+2. Third-party packages — `import { describe, expect } from "bun:test"`
+3. Local absolute imports using `@/` alias — `import { cn } from "@/lib/utils"`
+4. Local relative imports — `import { deriveState } from "../state.ts"`
+5. Type-only imports last — `import type { MustHaves } from "@/server/types"`
 
 **Path Aliases:**
-- `@/*` maps to `./src/*` in `packages/mission-control/tsconfig.json`
-- Always use `@/` for cross-directory imports within mission-control
+- `@/*` maps to `./src/*` in `packages/mission-control` (configured in `tsconfig.json` paths)
+- GSD extension files use `.js` extension in relative imports (NodeNext module resolution) — `import { milestonesDir } from './paths.js'`
+
+**Module Resolution:**
+- Mission Control: `moduleResolution: bundler` (Bun bundler, no extension required)
+- Root package / GSD extension: `moduleResolution: NodeNext` (requires `.js` extensions on relative imports)
 
 ## Error Handling
 
-**CJS CLI tools (`get-shit-done/bin/lib/*.cjs`):**
-- Use `error(message)` helper from `core.cjs` which writes to stderr and exits with code 1
-- Use `try/catch` with empty catch blocks for non-critical operations (e.g., file reads that may fail):
-  ```javascript
-  function safeReadFile(filePath) {
-    try {
-      return fs.readFileSync(filePath, 'utf-8');
-    } catch {
-      return null;
-    }
-  }
-  ```
-- Return `null` for missing data rather than throwing
-- All CLI output goes through `output(result, raw, rawValue)` helper for consistent JSON formatting
-
-**TypeScript server code (`packages/mission-control/src/server/`):**
-- Async functions return `null` on failure rather than throwing:
-  ```typescript
-  async function readFileText(path: string): Promise<string | null> {
-    try {
-      return await Bun.file(path).text();
-    } catch {
-      return null;
-    }
-  }
-  ```
-- HTTP route handlers use try/catch with appropriate status codes (400, 409, 500)
-- File watcher events wrapped in try/catch to prevent crashes on filesystem errors
-
-**React components:**
-- Use conditional rendering for missing/null data rather than error boundaries
-- Pass `error` objects as props to `PanelError` component for display
+**Patterns:**
+- Server functions use `try/catch` with silent fallbacks for non-critical I/O — `await rm(...).catch(() => {})`
+- File reads that may be absent return `null` or empty defaults rather than throwing — `restoreMetadata` silently handles missing or corrupt JSON
+- Tests assert on graceful degradation explicitly: `"restoreMetadata handles missing file gracefully"`, `"handles corrupt JSON file gracefully"`
+- Throwing reserved for constraint violations: `expect(() => mgr.createSession("/repo")).toThrow(/maximum.*4/i)`
+- Pure functions never throw — they return `null`, `[]`, or a default object
 
 ## Logging
 
-**Framework:** `console` (no logging library)
+**Framework:** `console.log` / `console.error` (no structured logging library)
 
 **Patterns:**
-- Server startup messages: `console.log("File-to-state pipeline running. WebSocket on :4001")`
-- Pipeline events: `console.log(\`[pipeline] ...\`)` with bracketed module prefix
-- No logging in CLI tools -- output is structured JSON to stdout, errors to stderr
+- GSD extension tests use `console.log` headers with separator lines: `console.log('\n=== test group name ===')` and `console.error('  FAIL: message')`
+- Server and component code: no direct logging observed (relies on caller-level error propagation)
 
 ## Comments
 
 **When to Comment:**
-- Module-level JSDoc describing purpose of the file (every `.cjs` and `.ts` file starts with a `/** ... */` block)
-- Section separators using ASCII art: `// --- Section Name ---` or `// ─── Section Name ────────`
-- Regression test documentation: reference bug ID in comments (e.g., `// Bug: loadConfig previously omitted model_overrides from return value`)
-- Known limitations documented with `REG-XX` identifiers
+- Module-level JSDoc block at top of every non-trivial file, describing purpose and key behaviors
+- Inline comments on non-obvious logic — `// WS sends "state" field, but StateDiff expects "changes" — normalize`
+- Section dividers using box-drawing characters for long files: `// ─── Fixture Helpers ───────────────────────────────────────────────────────`
+- `TODO` comments with explicit intent: `// TODO: Implement git merge session/<slug> into main branch.`
 
 **JSDoc/TSDoc:**
-- Use JSDoc `/** */` blocks for exported functions with `@param` tags in CJS helpers
-- TypeScript code relies on type signatures rather than JSDoc for parameter documentation
-- Interface fields occasionally have inline `/** */` comments for non-obvious fields
+- Used on exported pure functions and class methods: `/** Pure function: returns true when taskId changed... */`
+- Interface fields commented when not self-evident: `/** Factory to create process managers. Defaults to real ClaudeProcessManager. */`
+- Type files have module-level comment explaining what consumes the types
 
 ## Function Design
 
-**Size:** Functions are generally compact (10-40 lines). Larger functions are split into helpers.
+**Size:** Functions are kept small. Helper functions are extracted aggressively — `getBudgetColor`, `createMessageId`, `shouldPulseOnTaskChange` are all separate named functions.
 
 **Parameters:**
-- CJS command functions: `(cwd, ...args, raw)` pattern where `cwd` is working directory and `raw` is boolean for raw output mode
-- TypeScript: use options objects for 3+ parameters (e.g., `PipelineOptions`, `WatcherOptions`)
-- React components: destructure props interface inline (e.g., `{ phase, description }: PhaseRowProps`)
+- Props interfaces defined inline above the component: `interface TaskExecutingProps { ... }`
+- Options objects used for multi-param constructors: `new SessionManager(tempDir, { processFactory: ... })`
+- Pure functions accept primitives + typed objects, no implicit `any`
 
 **Return Values:**
-- CJS commands: call `output(result, raw, rawValue)` which writes JSON and exits -- they do not return
-- Internal helpers: return typed objects or `null` for "not found" cases
-- React hooks: return typed result objects (e.g., `{ state, status }`)
+- Functions return typed objects, `null` for absence, never `undefined` for intentional absence
+- React components always return JSX or `null` — explicit `return null` when conditional render produces nothing
+- Pure utility functions return plain objects, never throw
 
 ## Module Design
 
-**Exports (CJS):**
-- Each module file in `get-shit-done/bin/lib/` exports all public functions via `module.exports = { ... }`
-- Internal helpers exported alongside commands when needed by other modules (suffixed with `Internal`)
-- Constants exported alongside functions (e.g., `MODEL_PROFILES`, `FRONTMATTER_SCHEMAS`)
-
-**Exports (TypeScript):**
-- Named exports for all public APIs -- no default exports except `App.tsx`
-- Types exported with `export interface` / `export type` directly in the types file
-- React components: one component per file, named export matching filename
+**Exports:**
+- Named exports throughout — no default exports observed in any module
+- Types exported separately with `export type { ... }` or `export interface`
+- Constants exported alongside functions from the same module
 
 **Barrel Files:**
-- Not used. Import directly from the source file path.
+- Not used — modules are imported directly by path
+- Each feature directory contains its own component files; no `index.ts` barrel re-exports
 
-## Component Patterns
+## React Component Conventions
 
-**React Components (`packages/mission-control/src/components/`):**
-- Functional components only (no class components)
-- Props interface defined above the component in the same file
-- Const objects for static mappings (e.g., `STATUS_ICONS` in `PhaseRow.tsx`)
-- Use `cn()` utility from `@/lib/utils` for conditional className merging (clsx + tailwind-merge)
-- Tailwind CSS classes inline, using design token colors (e.g., `bg-navy-base`, `text-cyan-accent`, `text-status-success`)
+**Pattern:** Functional components only — no class components
 
-**State Management:**
-- No external state library (no Redux, Zustand, etc.)
-- `useState` + `useRef` for local state
-- WebSocket-driven global state via `usePlanningState` hook
-- Props drilling from `AppShell` to child components
+**Composition over prop drilling:**
+- Components receive typed props; deep trees use composition (AppShell wires hooks, passes results to children)
+- `cn()` utility from `@/lib/utils` used for all conditional Tailwind class merging
+
+**Tailwind usage:**
+- All styling via Tailwind utility classes — no inline style objects
+- Design token constants in `src/styles/design-tokens.ts` define the color/typography/spacing vocabulary
+- Custom token names follow kebab-case Tailwind convention: `bg-status-warning`, `text-cyan-accent`, `bg-navy-700`
 
 ---
 
-*Convention analysis: 2026-03-10*
+*Convention analysis: 2026-03-12*

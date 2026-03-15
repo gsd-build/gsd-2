@@ -11,10 +11,13 @@ describe("workspace structure", () => {
     expect(pkg.private).toBe(true);
   });
 
-  it("MONO-02: root package.json has workspaces field containing packages/*", async () => {
+  it("MONO-02: root package.json is the gsd-pi CLI package (not a workspace root)", async () => {
     const pkg = await Bun.file(join(ROOT, "package.json")).json();
-    expect(pkg.workspaces).toBeDefined();
-    expect(pkg.workspaces).toContain("packages/*");
+    // The repo root package.json is the published gsd-pi CLI — it is not a workspace
+    // root, so it has no workspaces field. Mission-control lives in packages/ but is
+    // managed independently via its own bun workspace.
+    expect(pkg.name).toBe("gsd-pi");
+    expect(pkg.bin).toBeDefined();
   });
 
   it("MONO-03: root package.json files field does NOT include packages entries", async () => {

@@ -186,7 +186,7 @@ export default function ProjectHomeScreen({
 
   return (
     <div style={rootStyle}>
-      <h1 style={headerStyle}>GSD Projects</h1>
+      <h1 style={headerStyle}>Projects</h1>
 
       {loading && (
         <p
@@ -247,7 +247,7 @@ export default function ProjectHomeScreen({
               <>
                 <p>No recent projects found.</p>
                 <button style={openFolderBtnStyle} onClick={() => onOpenFolder?.()}>
-                  Open Folder
+                  Open Project
                 </button>
               </>
             )}

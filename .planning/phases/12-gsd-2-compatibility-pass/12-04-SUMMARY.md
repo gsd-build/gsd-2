@@ -108,3 +108,13 @@ None — no external service configuration required.
 ---
 *Phase: 12-gsd-2-compatibility-pass*
 *Completed: 2026-03-12*
+
+## Self-Check: PASSED
+
+- FOUND: packages/mission-control/src/lib/slash-commands.ts
+- FOUND: packages/mission-control/src/components/MigrationBanner.tsx
+- FOUND: packages/mission-control/src/components/views/ChatView.tsx
+- FOUND: .planning/phases/12-gsd-2-compatibility-pass/12-04-SUMMARY.md
+- COMMIT 4ad8213: feat(12-04): replace v1 GSD_COMMANDS with 9 GSD 2 subcommand entries
+- COMMIT 0bf59d6: feat(12-04): create MigrationBanner component and wire into ChatView
+- COMMIT 71d48a6: docs(12-04): complete slash command registry and migration banner plan
