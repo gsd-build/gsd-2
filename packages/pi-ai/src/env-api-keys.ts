@@ -127,21 +127,22 @@ export function getEnvApiKey(provider: any): string | undefined {
 		"custom-openai": "CUSTOM_OPENAI_API_KEY",
 	};
 
-	let envVar = envMap[provider];
-	if (!envVar) {
-		// Auto-api-key resolution from models.dev
-		const modelsDevProvider = SNAPSHOT[provider];
-		if (modelsDevProvider && modelsDevProvider.env && modelsDevProvider.env.length > 0) {
-			// Find the first environment variable that is set
-			for (const expectedVar of modelsDevProvider.env) {
-				if (process.env[expectedVar]) {
-					return process.env[expectedVar];
-				}
+	// Auto-api-key resolution from models.dev
+	const modelsDevProvider = SNAPSHOT[provider];
+	if (modelsDevProvider?.env?.length > 0) {
+		for (const expectedVar of modelsDevProvider.env) {
+			if (process.env[expectedVar]) {
+				return process.env[expectedVar];
 			}
-			// If none are set, return undefined but set envVar so it doesn't fail completely
-			envVar = modelsDevProvider.env[0];
 		}
 	}
 
-	return envVar ? process.env[envVar] : undefined;
+	const envVar = envMap[provider];
+	if (envVar && process.env[envVar]) {
+		return process.env[envVar];
+	}
+
+	// For error reporting, return the first expected var if nothing was found
+	const firstExpected = modelsDevProvider?.env?.[0] ?? envMap[provider];
+	return firstExpected ? process.env[firstExpected] : undefined;
 }

@@ -1,4 +1,3 @@
-import type { OAuthProviderInterface } from "@gsd/pi-ai";
 import { getOAuthProviders } from "@gsd/pi-ai/oauth";
 import { SNAPSHOT } from "@gsd/pi-ai";
 import { Container, getEditorKeybindings, Spacer, TruncatedText } from "@gsd/pi-tui";

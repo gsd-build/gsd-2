@@ -70,13 +70,18 @@ async function runGitCredential(operation: "fill" | "approve" | "reject", input:
 		});
 		return stdout;
 	} catch (e) {
+		if (e && typeof e === 'object' && 'code' in e && e.code === 'ENOENT') {
+			throw new Error('Git is not installed or not in your PATH. Secure credential storage requires Git.');
+		}
 		throw new Error(`Git credential ${operation} failed: ${e instanceof Error ? e.message : String(e)}`);
 	}
 }
 
 async function getGitCredential(providerId: string): Promise<string | undefined> {
 	try {
-		const input = `protocol=gsd\nhost=gsd-provider-${providerId}\n`;
+		// Prevent injection of additional fields in git credential input
+		const safeProviderId = providerId.replace(/[\n\r\0]/g, "");
+		const input = `protocol=gsd\nhost=gsd-provider-${safeProviderId}\n`;
 		const stdout = await runGitCredential("fill", input);
 		const match = stdout.match(/^password=(.*)$/m);
 		return match ? match[1] : undefined;
@@ -86,12 +91,14 @@ async function getGitCredential(providerId: string): Promise<string | undefined>
 }
 
 async function saveGitCredential(providerId: string, password: string): Promise<void> {
-	const input = `protocol=gsd\nhost=gsd-provider-${providerId}\nusername=${providerId}\npassword=${password}\n`;
+	const safeProviderId = providerId.replace(/[\n\r\0]/g, "");
+	const input = `protocol=gsd\nhost=gsd-provider-${safeProviderId}\nusername=${safeProviderId}\npassword=${password}\n`;
 	await runGitCredential("approve", input);
 }
 
 async function removeGitCredential(providerId: string): Promise<void> {
-	const input = `protocol=gsd\nhost=gsd-provider-${providerId}\n`;
+	const safeProviderId = providerId.replace(/[\n\r\0]/g, "");
+	const input = `protocol=gsd\nhost=gsd-provider-${safeProviderId}\n`;
 	await runGitCredential("reject", input);
 }
 
@@ -104,15 +111,22 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 
 	async getCredentialsFromKeyring(providerId: string): Promise<string[] | undefined> {
 		const stored = await getGitCredential(providerId);
-		if (stored) {
-			try {
-				const parsed = JSON.parse(stored);
-				if (Array.isArray(parsed)) return parsed;
-			} catch {
-				return [stored]; // Backward compatibility if single key stored
-			}
+		if (!stored) {
+			return undefined;
 		}
-		return undefined;
+		try {
+			const parsed = JSON.parse(stored);
+			if (Array.isArray(parsed)) {
+				// New format: array of keys. Filter for strings just in case.
+				return parsed.filter((k): k is string => typeof k === 'string');
+			}
+		} catch {
+			// Not JSON, assume old format (raw key string).
+			return [stored];
+		}
+		// It was valid JSON but not an array (e.g. a string, number, or object).
+		// To be safe and avoid data loss, treat the original stored value as a raw key.
+		return [stored];
 	}
 
 	async saveCredentialsToKeyring(providerId: string, keys: string[]): Promise<void> {
@@ -475,7 +489,7 @@ export class AuthStorage {
 	async set(provider: string, credential: AuthCredential): Promise<void> {
 		if (credential.type === "api_key") {
 			// Secure storage via keyring if available
-			if (this.storage.saveCredentialsToKeyring) {
+			if (this.storage.saveCredentialsToKeyring && this.storage.getCredentialsFromKeyring) {
 				const existing = this.getCredentialsForProvider(provider);
 				// Check if duplicate based on hash
 				const hashedKey = hashApiKey(credential.key);
@@ -856,6 +870,25 @@ export class AuthStorage {
 		cred: AuthCredential,
 	): Promise<string | undefined> {
 		if (cred.type === "api_key") {
+			// If it's a hashed key, it should have been overridden by preloadFromKeyring().
+			// If it wasn't, we can't resolve it here directly (as we don't know the plain key).
+			// In theory, we could lazily load it from keyring, but for now we'll just log
+			// a warning or return undefined to prevent sending a hash to the API.
+			if (cred.isHashed) {
+				if (this.storage.getCredentialsFromKeyring) {
+					try {
+						const realKeys = await this.storage.getCredentialsFromKeyring(providerId);
+						if (realKeys && realKeys.length > 0) {
+							// Return the first key matching the hash or just the first key
+							const match = realKeys.find(k => hashApiKey(k) === cred.key) || realKeys[0];
+							return resolveConfigValue(match);
+						}
+					} catch (e) {
+						this.recordError(e);
+					}
+				}
+				return undefined;
+			}
 			return resolveConfigValue(cred.key);
 		}
 

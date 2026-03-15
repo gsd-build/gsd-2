@@ -257,7 +257,9 @@ export class ModelRegistry {
 		this.refreshFromModelsDev();
 
 		// Preload git credentials (async fire-and-forget)
-		this.authStorage.preloadFromKeyring();
+		void this.authStorage.preloadFromKeyring().catch(() => {
+			// Intentionally ignored, errors are recorded in authStorage.errors internally.
+		});
 	}
 
 	/**
@@ -300,10 +302,6 @@ export class ModelRegistry {
 		}
 
 		let builtInModels = this.loadBuiltInModels(overrides, modelOverrides);
-
-		// Identify duplicate baseUrls. We assume builtInModels contains both pi.dev and models.dev providers
-		// (Wait, `builtInModels` comes entirely from `mapToModelRegistry(cache.data)` if cache hits).
-		// If `loadBuiltInModels` only loads from `models.dev`, where does `pi.dev` come from?
 
 		let combined = this.mergeCustomModels(builtInModels, customModels);
 
