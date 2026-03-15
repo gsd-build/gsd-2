@@ -69,6 +69,7 @@ import {
   getProjectTotals, formatCost, formatTokenCount,
 } from "./metrics.js";
 import { dirname, join } from "node:path";
+import { sep as pathSep } from "node:path";
 import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
 import {
@@ -673,7 +674,19 @@ export async function startAuto(
   // Skip if already inside a worktree (manual /worktree or another auto-worktree)
   // to prevent nested worktree creation.
   originalBasePath = base;
-  if (currentMilestoneId && !detectWorktreeName(base)) {
+
+  const isUnderGsdWorktrees = (p: string): boolean => {
+    // Prevent creating nested auto-worktrees when running from within any
+    // `.gsd/worktrees/...` directory (including manual worktrees).
+    const marker = `${pathSep}.gsd${pathSep}worktrees${pathSep}`;
+    if (p.includes(marker)) {
+      return true;
+    }
+    const worktreesSuffix = `${pathSep}.gsd${pathSep}worktrees`;
+    return p.endsWith(worktreesSuffix);
+  };
+
+  if (currentMilestoneId && !detectWorktreeName(base) && !isUnderGsdWorktrees(base)) {
     try {
       const existingWtPath = getAutoWorktreePath(base, currentMilestoneId);
       if (existingWtPath) {
