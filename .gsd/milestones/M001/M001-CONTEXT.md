@@ -5,7 +5,7 @@
 
 ## Project Description
 
-Integrate a browser-first web mode into upstream GSD by taking the existing web skin now housed in `web/` and wiring it into the real GSD workflow. The web path is launched with `gsd --web`, should auto-open the browser, and should not open the regular Pi + GSD TUI. The existing skin is the contract for M001: use that exact skin and wire it into GSD rather than redesigning it.
+Integrate a browser-first web mode into GSD by taking the existing web skin now housed in `web/` and wiring it into the real GSD workflow. The web path is launched with `gsd --web`, should auto-open the browser, and should not open the regular Pi + GSD TUI. The existing skin is the contract for M001: use that exact skin and wire it into GSD rather than redesigning it.
 
 ## Why This Milestone
 

@@ -32,7 +32,7 @@
 
 ## Integration Closure
 
-- Upstream surfaces consumed: `src/cli.ts`, `src/loader.ts`, `src/onboarding.ts`, `src/resources/extensions/gsd/workspace-index.ts`, `src/resources/extensions/gsd/auto.ts`, `packages/pi-coding-agent/src/modes/rpc/rpc-types.ts`, `web/app/page.tsx`.
+- Existing code surfaces consumed: `src/cli.ts`, `src/loader.ts`, `src/onboarding.ts`, `src/resources/extensions/gsd/workspace-index.ts`, `src/resources/extensions/gsd/auto.ts`, `packages/pi-coding-agent/src/modes/rpc/rpc-types.ts`, `web/app/page.tsx`.
 - New wiring introduced in this slice: explicit `--web` launch branch, packaged local web host bootstrap, project-scoped bridge singleton, same-origin boot/command/event routes, and a shared browser workspace store.
 - What remains before the milestone is truly usable end-to-end: browser onboarding validation, focused prompt handling, full view-model replacement for the rest of the skin, start/resume controls, continuity across refresh/reopen, and richer failure recovery.
 

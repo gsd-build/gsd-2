@@ -1,19 +1,21 @@
 # GSD State
 
 **Active Milestone:** M001 — Web mode foundation
-**Active Slice:** S02 — First-run setup wizard
-**Phase:** planned
-**Requirements Status:** 9 active · 2 validated · 3 deferred · 3 out of scope
+**Active Slice:** S03 complete — next up S04
+**Phase:** between slices
+**Requirements Status:** 7 active · 4 validated · 3 deferred · 3 out of scope
 
 ## Milestone Registry
 - 🔄 **M001:** Web mode foundation
 - ⬜ **M002:** M002
 
 ## Recent Decisions
-- D010 — S02 will use a shared onboarding service, same-origin onboarding routes, a server-side command gate, and explicit bridge auth refresh while keeping host launch readiness separate from onboarding completion.
+- D015: Blocking UI requests queue; fire-and-forget update state maps directly
+- D016: All UI responses route through /api/session/command
+- D017: Steer is a local ephemeral toggle, not store state
 
 ## Blockers
 - None
 
 ## Next Action
-Execute S02/T01: establish shared onboarding auth truth and the browser setup API.
+S03 complete. S04 (current-project state surfaces) is next — depends on S01 + S03.

@@ -240,15 +240,19 @@ export interface BridgeStatusEvent {
   bridge: BridgeRuntimeSnapshot
 }
 
-export interface ExtensionUiRequestEvent {
-  type: "extension_ui_request"
-  id: string
-  method: string
-  title?: string
-  message?: string
-  notifyType?: "info" | "warning" | "error"
-  [key: string]: unknown
-}
+// Discriminated union for extension UI requests — matches the authoritative
+// RpcExtensionUIRequest from rpc-types.ts. Blocking methods queue in pendingUiRequests;
+// fire-and-forget methods update state maps directly.
+export type ExtensionUiRequestEvent =
+  | { type: "extension_ui_request"; id: string; method: "select"; title: string; options: string[]; timeout?: number; allowMultiple?: boolean }
+  | { type: "extension_ui_request"; id: string; method: "confirm"; title: string; message: string; timeout?: number }
+  | { type: "extension_ui_request"; id: string; method: "input"; title: string; placeholder?: string; timeout?: number }
+  | { type: "extension_ui_request"; id: string; method: "editor"; title: string; prefill?: string }
+  | { type: "extension_ui_request"; id: string; method: "notify"; message: string; notifyType?: "info" | "warning" | "error" }
+  | { type: "extension_ui_request"; id: string; method: "setStatus"; statusKey: string; statusText: string | undefined }
+  | { type: "extension_ui_request"; id: string; method: "setWidget"; widgetKey: string; widgetLines: string[] | undefined; widgetPlacement?: "aboveEditor" | "belowEditor" }
+  | { type: "extension_ui_request"; id: string; method: "setTitle"; title: string }
+  | { type: "extension_ui_request"; id: string; method: "set_editor_text"; text: string }
 
 export interface ExtensionErrorEvent {
   type: "extension_error"
@@ -257,10 +261,50 @@ export interface ExtensionErrorEvent {
   error: string
 }
 
+export interface MessageUpdateEvent {
+  type: "message_update"
+  assistantMessageEvent?: {
+    type: string
+    delta?: string
+    [key: string]: unknown
+  }
+  [key: string]: unknown
+}
+
+export interface ToolExecutionStartEvent {
+  type: "tool_execution_start"
+  toolCallId: string
+  toolName: string
+  [key: string]: unknown
+}
+
+export interface ToolExecutionEndEvent {
+  type: "tool_execution_end"
+  toolCallId: string
+  toolName: string
+  isError?: boolean
+  [key: string]: unknown
+}
+
+export interface AgentEndEvent {
+  type: "agent_end"
+  [key: string]: unknown
+}
+
+export interface TurnEndEvent {
+  type: "turn_end"
+  [key: string]: unknown
+}
+
 export type WorkspaceEvent =
   | BridgeStatusEvent
   | ExtensionUiRequestEvent
   | ExtensionErrorEvent
+  | MessageUpdateEvent
+  | ToolExecutionStartEvent
+  | ToolExecutionEndEvent
+  | AgentEndEvent
+  | TurnEndEvent
   | ({ type: string; [key: string]: unknown } & Record<string, unknown>)
 
 export interface WorkspaceCommandResponse {
@@ -297,6 +341,23 @@ export type WorkspaceOnboardingRequestState =
   | "submitting_provider_flow_input"
   | "cancelling_provider_flow"
 
+// A blocking UI request that needs user response before the agent can continue.
+// The `method` field discriminates the payload shape.
+export type PendingUiRequest = Extract<
+  ExtensionUiRequestEvent,
+  { method: "select" | "confirm" | "input" | "editor" }
+>
+
+export interface ActiveToolExecution {
+  id: string
+  name: string
+}
+
+export interface WidgetContent {
+  lines: string[] | undefined
+  placement?: "aboveEditor" | "belowEditor"
+}
+
 export interface WorkspaceStoreState {
   bootStatus: WorkspaceStatus
   connectionState: WorkspaceConnectionState
@@ -309,6 +370,15 @@ export interface WorkspaceStoreState {
   commandInFlight: string | null
   onboardingRequestState: WorkspaceOnboardingRequestState
   onboardingRequestProviderId: string | null
+  // Live interaction state
+  pendingUiRequests: PendingUiRequest[]
+  streamingAssistantText: string
+  liveTranscript: string[]
+  activeToolExecution: ActiveToolExecution | null
+  statusTexts: Record<string, string>
+  widgetContents: Record<string, WidgetContent>
+  titleOverride: string | null
+  editorTextBuffer: string | null
 }
 
 const MAX_TERMINAL_LINES = 250
@@ -419,14 +489,15 @@ function summarizeEvent(event: WorkspaceEvent): { type: TerminalLineType; messag
         message: event.success ? "[Auto] Retry recovered the run" : "[Auto] Retry exhausted",
       }
     case "extension_ui_request": {
+      const uiEvent = event as ExtensionUiRequestEvent
       const detail =
-        typeof event.title === "string" && event.title.trim().length > 0
-          ? event.title
-          : typeof event.message === "string" && event.message.trim().length > 0
-            ? event.message
-            : event.method
+        "title" in uiEvent && typeof uiEvent.title === "string" && uiEvent.title.trim().length > 0
+          ? uiEvent.title
+          : "message" in uiEvent && typeof uiEvent.message === "string" && uiEvent.message.trim().length > 0
+            ? uiEvent.message
+            : uiEvent.method
       return {
-        type: event.notifyType === "error" ? "error" : "system",
+        type: ("notifyType" in uiEvent && uiEvent.notifyType === "error") ? "error" : "system",
         message: `[UI] ${detail}`,
       }
     }
@@ -879,6 +950,15 @@ function createInitialState(): WorkspaceStoreState {
     commandInFlight: null,
     onboardingRequestState: "idle",
     onboardingRequestProviderId: null,
+    // Live interaction state
+    pendingUiRequests: [],
+    streamingAssistantText: "",
+    liveTranscript: [],
+    activeToolExecution: null,
+    statusTexts: {},
+    widgetContents: {},
+    titleOverride: null,
+    editorTextBuffer: null,
   }
 }
 
@@ -918,6 +998,66 @@ class GSDWorkspaceStore {
   clearTerminalLines = (): void => {
     const replacement = this.state.boot ? bootSeedLines(this.state.boot) : [createTerminalLine("system", "Terminal cleared")]
     this.patchState({ terminalLines: replacement })
+  }
+
+  respondToUiRequest = async (id: string, response: Record<string, unknown>): Promise<void> => {
+    this.patchState({ commandInFlight: "extension_ui_response" })
+    try {
+      const result = await fetch("/api/session/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ type: "extension_ui_response", id, ...response }),
+      })
+      if (!result.ok) {
+        const body = await result.json().catch(() => ({ error: `HTTP ${result.status}` })) as { error?: string }
+        throw new Error(body.error ?? `extension_ui_response failed with ${result.status}`)
+      }
+      this.patchState({
+        pendingUiRequests: this.state.pendingUiRequests.filter((r) => r.id !== id),
+      })
+    } catch (error) {
+      const message = normalizeClientError(error)
+      this.patchState({
+        lastClientError: message,
+        terminalLines: withTerminalLine(this.state.terminalLines, createTerminalLine("error", `UI response failed — ${message}`)),
+      })
+    } finally {
+      this.patchState({ commandInFlight: null })
+    }
+  }
+
+  dismissUiRequest = async (id: string): Promise<void> => {
+    this.patchState({ commandInFlight: "extension_ui_response" })
+    try {
+      const result = await fetch("/api/session/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ type: "extension_ui_response", id, cancelled: true }),
+      })
+      if (!result.ok) {
+        const body = await result.json().catch(() => ({ error: `HTTP ${result.status}` })) as { error?: string }
+        throw new Error(body.error ?? `extension_ui_response cancel failed with ${result.status}`)
+      }
+      this.patchState({
+        pendingUiRequests: this.state.pendingUiRequests.filter((r) => r.id !== id),
+      })
+    } catch (error) {
+      const message = normalizeClientError(error)
+      this.patchState({
+        lastClientError: message,
+        terminalLines: withTerminalLine(this.state.terminalLines, createTerminalLine("error", `UI dismiss failed — ${message}`)),
+      })
+    } finally {
+      this.patchState({ commandInFlight: null })
+    }
+  }
+
+  sendSteer = async (message: string): Promise<void> => {
+    await this.sendCommand({ type: "steer", message })
+  }
+
+  sendAbort = async (): Promise<void> => {
+    await this.sendCommand({ type: "abort" })
   }
 
   refreshBoot = async (options: { soft?: boolean } = {}): Promise<void> => {
@@ -1390,12 +1530,115 @@ class GSDWorkspaceStore {
       return
     }
 
+    // Route into structured live-interaction state (additive — summary lines still produced below)
+    this.routeLiveInteractionEvent(event)
+
     const summary = summarizeEvent(event)
     if (!summary) return
 
     this.patchState({
       terminalLines: withTerminalLine(this.state.terminalLines, createTerminalLine(summary.type, summary.message)),
     })
+  }
+
+  private routeLiveInteractionEvent(event: WorkspaceEvent): void {
+    switch (event.type) {
+      case "extension_ui_request":
+        this.handleExtensionUiRequest(event as ExtensionUiRequestEvent)
+        break
+      case "message_update":
+        this.handleMessageUpdate(event as MessageUpdateEvent)
+        break
+      case "agent_end":
+      case "turn_end":
+        this.handleTurnBoundary()
+        break
+      case "tool_execution_start":
+        this.handleToolExecutionStart(event as ToolExecutionStartEvent)
+        break
+      case "tool_execution_end":
+        this.handleToolExecutionEnd()
+        break
+    }
+  }
+
+  private handleExtensionUiRequest(event: ExtensionUiRequestEvent): void {
+    const method = event.method
+    switch (method) {
+      // Blocking methods → queue in pendingUiRequests
+      case "select":
+      case "confirm":
+      case "input":
+      case "editor":
+        this.patchState({
+          pendingUiRequests: [...this.state.pendingUiRequests, event as PendingUiRequest],
+        })
+        break
+      // Fire-and-forget methods → update state maps
+      case "notify":
+        // notify still produces a terminal line (via summarizeEvent), but we don't store it in pendingUiRequests
+        break
+      case "setStatus":
+        if (event.method === "setStatus") {
+          const next = { ...this.state.statusTexts }
+          if (event.statusText === undefined) {
+            delete next[event.statusKey]
+          } else {
+            next[event.statusKey] = event.statusText
+          }
+          this.patchState({ statusTexts: next })
+        }
+        break
+      case "setWidget":
+        if (event.method === "setWidget") {
+          const next = { ...this.state.widgetContents }
+          if (event.widgetLines === undefined) {
+            delete next[event.widgetKey]
+          } else {
+            next[event.widgetKey] = { lines: event.widgetLines, placement: event.widgetPlacement }
+          }
+          this.patchState({ widgetContents: next })
+        }
+        break
+      case "setTitle":
+        if (event.method === "setTitle") {
+          this.patchState({ titleOverride: event.title })
+        }
+        break
+      case "set_editor_text":
+        if (event.method === "set_editor_text") {
+          this.patchState({ editorTextBuffer: event.text })
+        }
+        break
+    }
+  }
+
+  private handleMessageUpdate(event: MessageUpdateEvent): void {
+    const assistantEvent = event.assistantMessageEvent
+    if (assistantEvent && assistantEvent.type === "text_delta" && typeof assistantEvent.delta === "string") {
+      this.patchState({
+        streamingAssistantText: this.state.streamingAssistantText + assistantEvent.delta,
+      })
+    }
+  }
+
+  private handleTurnBoundary(): void {
+    if (this.state.streamingAssistantText.length > 0) {
+      this.patchState({
+        liveTranscript: [...this.state.liveTranscript, this.state.streamingAssistantText],
+        streamingAssistantText: "",
+      })
+    }
+  }
+
+  private handleToolExecutionStart(event: ToolExecutionStartEvent): void {
+    this.patchState({
+      activeToolExecution: { id: event.toolCallId, name: event.toolName },
+    })
+  }
+
+  private handleToolExecutionEnd(): void {
+    this.patchState({ activeToolExecution: null })
   }
 
   private recordBridgeStatus(bridge: BridgeRuntimeSnapshot): void {
@@ -1457,6 +1700,10 @@ export function useGSDWorkspaceActions(): Pick<
   | "startProviderFlow"
   | "submitProviderFlowInput"
   | "cancelProviderFlow"
+  | "respondToUiRequest"
+  | "dismissUiRequest"
+  | "sendSteer"
+  | "sendAbort"
 > {
   const store = useWorkspaceStore()
   return {
@@ -1468,6 +1715,10 @@ export function useGSDWorkspaceActions(): Pick<
     startProviderFlow: store.startProviderFlow,
     submitProviderFlowInput: store.submitProviderFlowInput,
     cancelProviderFlow: store.cancelProviderFlow,
+    respondToUiRequest: store.respondToUiRequest,
+    dismissUiRequest: store.dismissUiRequest,
+    sendSteer: store.sendSteer,
+    sendAbort: store.sendAbort,
   }
 }
 

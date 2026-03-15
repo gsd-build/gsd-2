@@ -5,7 +5,7 @@
 
 ## Project Description
 
-After M001 makes `gsd --web` real, M002 finishes the job: close the remaining TUI-to-web parity gaps, harden continuity/recovery and failure visibility, and make browser-first GSD strong enough for everyday use and upstream merge. This milestone is about "full parity with what the TUI can do as well as the current UI skin capabilities and views," not just the main happy path.
+After M001 makes `gsd --web` real, M002 finishes the job: close the remaining TUI-to-web parity gaps, harden continuity/recovery and failure visibility, and make browser-first GSD strong enough for everyday use. This milestone is about "full parity with what the TUI can do as well as the current UI skin capabilities and views," not just the main happy path.
 
 ## Why This Milestone
 
@@ -17,7 +17,7 @@ M001 proves the assembled browser-first workflow. M002 converts that proof into 
 
 - stay in the browser for the remaining TUI capabilities they actually need, not just the main start/resume loop
 - refresh, reopen, recover, and inspect the workspace without losing situational awareness or control
-- trust `gsd --web` as a first-class everyday way to run GSD upstream
+- trust `gsd --web` as a first-class everyday way to run GSD
 
 ### Entry point / environment
 
@@ -44,7 +44,7 @@ To call this milestone complete, we must prove:
 - Long-tail parity may require expanding RPC/state surfaces more than the M001 happy path does.
 - Continuity and reconnect behavior may surface race conditions between browser lifecycle, local host lifecycle, and live agent sessions.
 - Richer activity/files/roadmap views can become slow or noisy if they are overfed with raw state rather than purpose-built view models.
-- Upstream merge readiness may require additional cleanup around packaging, defaults, and platform behavior.
+- Finishing polish may require additional cleanup around packaging, defaults, and platform behavior.
 
 ## Existing Codebase / Prior Art
 
@@ -70,7 +70,7 @@ To call this milestone complete, we must prove:
 - remaining TUI/browser parity gaps exposed after M001
 - continuity, reconnect, resume/recover, and interrupted-run hardening
 - richer control and observability surfaces needed for daily web use
-- packaging/polish needed for upstream browser-first merge readiness
+- packaging/polish needed for browser-first daily-use readiness
 
 ### Out of Scope / Non-Goals
 
@@ -90,7 +90,7 @@ To call this milestone complete, we must prove:
 - web host/runtime from M001 — extend, don’t replace unless proven necessary
 - RPC/session/event surface — expand for parity gaps
 - GSD project artifacts, session storage, and activity history — deepen coverage where browser gaps remain
-- CLI packaging and startup behavior — upstream-friendly browser-mode defaults and lifecycle
+- CLI packaging and startup behavior — browser-mode defaults and lifecycle polish
 
 ## Open Questions
 

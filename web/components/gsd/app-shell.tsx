@@ -9,6 +9,7 @@ import { FilesView } from "@/components/gsd/files-view"
 import { ActivityView } from "@/components/gsd/activity-view"
 import { StatusBar } from "@/components/gsd/status-bar"
 import { DualTerminal } from "@/components/gsd/dual-terminal"
+import { FocusedPanel } from "@/components/gsd/focused-panel"
 import { OnboardingGate } from "@/components/gsd/onboarding-gate"
 import { cn } from "@/lib/utils"
 import {
@@ -179,6 +180,7 @@ function WorkspaceChrome() {
 
       <StatusBar />
       <OnboardingGate />
+      <FocusedPanel />
     </div>
   )
 }

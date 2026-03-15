@@ -59,7 +59,7 @@ This milestone is complete only when all are true:
 - [x] **S02: First-run setup wizard** `risk:high` `depends:[S01]`
   > After this: a fresh user can complete required/optional setup in-browser, required keys are tested, and the workspace stays gated until setup passes.
 
-- [ ] **S03: Live terminal + focused prompt handling** `risk:high` `depends:[S01,S02]`
+- [x] **S03: Live terminal + focused prompt handling** `risk:high` `depends:[S01,S02]`
   > After this: the browser can send prompts, stream agent output, and answer agent questions/confirmations/editor requests in the focused panel without TUI fallback.
 
 - [ ] **S04: Current-project state surfaces** `risk:medium` `depends:[S01,S03]`

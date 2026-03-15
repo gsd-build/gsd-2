@@ -38,14 +38,14 @@ Guidelines:
 
 ### R006 — Agent interruptions are handled in a focused web panel
 - Class: continuity
-- Status: active
+- Status: validated
 - Description: Confirmations, choices, text input, editor-style interruptions, and similar mid-run agent requests must be handled in a focused primary web surface rather than buried modals.
 - Why it matters: The browser needs a clear interaction model for live agent work, or parity will break under real prompts.
 - Source: user
 - Primary owning slice: M001/S03
 - Supporting slices: M001/S07
-- Validation: mapped
-- Notes: This applies to agent/setup interruptions that would otherwise force a terminal-style escape hatch.
+- Validation: verified by `src/tests/web-live-interaction-contract.test.ts` (10/10 — UI request lifecycle, transcript streaming, steer/abort, fire-and-forget state, failure paths), `npm run build:web-host` (focused panel and terminal controls compile and mount), and existing bridge/onboarding tests (10/10 — no regressions).
+- Notes: S03 proves the focused panel for all 4 blocking methods (select, confirm, input, editor) plus multi-request queue, dismiss/cancel, and failure visibility. Full end-to-end exercise with real agent prompts closes in S07.
 
 ### R007 — Session continuity works across refresh/reopen and supports resume inside web mode
 - Class: continuity
@@ -216,7 +216,7 @@ Guidelines:
 | R003 | primary-user-loop | validated | M001/S01 | M001/S04 | validated |
 | R004 | primary-user-loop | active | M001/S07 | M001/S01, M001/S02, M001/S03, M001/S04, M001/S05, M001/S06 | mapped |
 | R005 | core-capability | active | M001/S04 | M001/S03, M001/S05, M001/S06 | mapped |
-| R006 | continuity | active | M001/S03 | M001/S07 | mapped |
+| R006 | continuity | validated | M001/S03 | M001/S07 | validated |
 | R007 | continuity | active | M001/S06 | M001/S05, M001/S07 | mapped |
 | R008 | constraint | active | M001/S04 | M001/S07 | mapped |
 | R009 | quality-attribute | active | M001/S06 | M001/S01, M001/S03, M001/S04, M001/S05, M001/S07 | mapped |
@@ -231,7 +231,7 @@ Guidelines:
 
 ## Coverage Summary
 
-- Active requirements: 8
+- Active requirements: 7
 - Mapped to concrete M001 slices: 7
-- Validated: 3
+- Validated: 4
 - Unmapped active requirements: 0

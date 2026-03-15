@@ -1,7 +1,9 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { Compass, Loader2, OctagonX, Wrench } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import {
   buildPromptCommand,
   getOnboardingPresentation,
@@ -15,30 +17,68 @@ interface TerminalProps {
   className?: string
 }
 
-function terminalPlaceholder(state: ReturnType<typeof useGSDWorkspaceState>): string {
+type InputMode = "prompt" | "follow_up" | "steer"
+
+function getInputMode(state: ReturnType<typeof useGSDWorkspaceState>): InputMode {
+  const session = state.boot?.bridge.sessionState
+  if (!session) return "prompt"
+  if (session.isStreaming) return "follow_up"
+  return "prompt"
+}
+
+function inputModePlaceholder(mode: InputMode, state: ReturnType<typeof useGSDWorkspaceState>): string {
   if (state.bootStatus === "loading") return "Loading workspace…"
   if (state.bootStatus === "error") return "Workspace boot failed — check the visible error state"
   if (state.commandInFlight) return `Sending ${state.commandInFlight}…`
   if (state.boot?.onboarding.locked) {
     return getOnboardingPresentation(state).detail
   }
-  if (state.boot?.bridge.sessionState?.isStreaming) return "Agent is active — type a follow-up or /state"
-  return "Type a prompt, /state, /new, or /clear"
+  switch (mode) {
+    case "steer":
+      return "Type a steering message to redirect the agent…"
+    case "follow_up":
+      return "Agent is active — type a follow-up or /state"
+    case "prompt":
+      return "Type a prompt, /state, /new, or /clear"
+  }
+}
+
+function inputModeLabel(mode: InputMode): string {
+  switch (mode) {
+    case "steer":
+      return "steer"
+    case "follow_up":
+      return "follow-up"
+    case "prompt":
+      return "$"
+  }
 }
 
 export function Terminal({ className }: TerminalProps) {
   const workspace = useGSDWorkspaceState()
-  const { sendCommand, clearTerminalLines, refreshBoot } = useGSDWorkspaceActions()
+  const { sendCommand, clearTerminalLines, refreshBoot, sendAbort, sendSteer } = useGSDWorkspaceActions()
   const [input, setInput] = useState("")
+  const [steerMode, setSteerMode] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  const autoMode = getInputMode(workspace)
+  const inputMode: InputMode = steerMode && workspace.boot?.bridge.sessionState?.isStreaming ? "steer" : autoMode
+
+  // Reset steer mode when agent stops streaming
+  useEffect(() => {
+    if (!workspace.boot?.bridge.sessionState?.isStreaming) {
+      setSteerMode(false)
+    }
+  }, [workspace.boot?.bridge.sessionState?.isStreaming])
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [workspace.terminalLines])
+  }, [workspace.terminalLines, workspace.streamingAssistantText, workspace.liveTranscript])
 
   const status = getStatusPresentation(workspace)
   const sessionLabel = getSessionLabelFromBridge(workspace.boot?.bridge)
+  const isStreaming = Boolean(workspace.boot?.bridge.sessionState?.isStreaming)
   const isInputDisabled =
     workspace.bootStatus !== "ready" ||
     workspace.commandInFlight === "refresh" ||
@@ -61,6 +101,13 @@ export function Terminal({ className }: TerminalProps) {
       return
     }
 
+    if (inputMode === "steer") {
+      await sendSteer(trimmed)
+      setInput("")
+      setSteerMode(false)
+      return
+    }
+
     await sendCommand(buildPromptCommand(trimmed, workspace.boot?.bridge))
     setInput("")
   }
@@ -70,11 +117,41 @@ export function Terminal({ className }: TerminalProps) {
       className={cn("flex flex-col bg-terminal font-mono text-sm", className)}
       onClick={() => inputRef.current?.focus()}
     >
+      {/* Terminal header */}
       <div className="flex items-center justify-between border-b border-border/50 px-4 py-2 text-[11px] text-muted-foreground">
-        <div className="min-w-0 truncate" data-testid="terminal-session-banner">
-          {sessionLabel || "Waiting for live session…"}
+        <div className="min-w-0 flex items-center gap-2 truncate">
+          <span data-testid="terminal-session-banner">
+            {sessionLabel || "Waiting for live session…"}
+          </span>
+          {/* Active tool execution badge */}
+          {workspace.activeToolExecution && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full border border-foreground/15 bg-accent/60 px-2 py-0.5 text-[10px] font-medium text-foreground/80"
+              data-testid="terminal-tool-badge"
+            >
+              <Wrench className="h-3 w-3" />
+              {workspace.activeToolExecution.name}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
+          {/* Abort button */}
+          {isStreaming && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 px-2 text-[11px] text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={(e) => {
+                e.stopPropagation()
+                void sendAbort()
+              }}
+              disabled={workspace.commandInFlight === "abort"}
+              data-testid="terminal-abort-button"
+            >
+              <OctagonX className="h-3 w-3" />
+              Abort
+            </Button>
+          )}
           <span
             className={cn(
               "h-2 w-2 rounded-full",
@@ -92,6 +169,7 @@ export function Terminal({ className }: TerminalProps) {
         </div>
       </div>
 
+      {/* Terminal lines + streaming content */}
       <div className="flex-1 overflow-y-auto p-4">
         {workspace.terminalLines.map((line) => (
           <div key={line.id} className="flex" data-testid="terminal-line">
@@ -110,18 +188,81 @@ export function Terminal({ className }: TerminalProps) {
             </span>
           </div>
         ))}
+
+        {/* Completed transcript blocks from previous turns */}
+        {workspace.liveTranscript.length > 0 && (
+          <div className="mt-2 space-y-2" data-testid="terminal-transcript">
+            {workspace.liveTranscript.map((block, i) => (
+              <div
+                key={`transcript-${i}`}
+                className="whitespace-pre-wrap rounded border border-border/30 bg-accent/20 px-3 py-2 text-foreground/90"
+              >
+                {block}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Live streaming assistant text */}
+        {workspace.streamingAssistantText && (
+          <div className="mt-2" data-testid="terminal-streaming-text">
+            <div className="whitespace-pre-wrap rounded border border-foreground/10 bg-foreground/[0.03] px-3 py-2 text-foreground/90">
+              {workspace.streamingAssistantText}
+              <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-foreground/60" />
+            </div>
+          </div>
+        )}
+
+        {/* Streaming indicator when active but no text yet */}
+        {isStreaming && !workspace.streamingAssistantText && !workspace.activeToolExecution && (
+          <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Agent is thinking…
+          </div>
+        )}
+
         <div ref={bottomRef} />
       </div>
 
+      {/* Input area with steer toggle */}
       <form onSubmit={handleSubmit} className="flex items-center gap-2 border-t border-border/50 px-4 py-2">
-        <span className="text-muted-foreground">$</span>
+        {/* Steer toggle — only visible when agent is streaming */}
+        {isStreaming && (
+          <Button
+            type="button"
+            variant={steerMode ? "default" : "ghost"}
+            size="sm"
+            className={cn(
+              "h-6 gap-1 px-2 text-[11px]",
+              steerMode
+                ? "bg-foreground text-background"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+            onClick={(e) => {
+              e.stopPropagation()
+              setSteerMode(!steerMode)
+            }}
+            data-testid="terminal-steer-toggle"
+          >
+            <Compass className="h-3 w-3" />
+            Steer
+          </Button>
+        )}
+        <span
+          className={cn(
+            "text-muted-foreground",
+            inputMode === "steer" && "text-foreground font-semibold",
+          )}
+        >
+          {inputModeLabel(inputMode)}
+        </span>
         <input
           ref={inputRef}
           type="text"
           value={input}
           onChange={(event) => setInput(event.target.value)}
           className="flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground/50 disabled:cursor-not-allowed disabled:text-muted-foreground"
-          placeholder={terminalPlaceholder(workspace)}
+          placeholder={inputModePlaceholder(inputMode, workspace)}
           disabled={isInputDisabled}
           data-testid="terminal-command-input"
           autoFocus

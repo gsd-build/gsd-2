@@ -33,7 +33,7 @@
 
 ## Integration Closure
 
-- Upstream surfaces consumed: `src/web/bridge-service.ts`, `src/onboarding.ts`, `packages/pi-coding-agent/src/core/auth-storage.ts`, `packages/pi-ai/src/env-api-keys.ts`, `web/lib/gsd-workspace-store.tsx`, `web/components/gsd/app-shell.tsx`, and the S01 boot/command/SSE routes.
+- Existing code surfaces consumed: `src/web/bridge-service.ts`, `src/onboarding.ts`, `packages/pi-coding-agent/src/core/auth-storage.ts`, `packages/pi-ai/src/env-api-keys.ts`, `web/lib/gsd-workspace-store.tsx`, `web/components/gsd/app-shell.tsx`, and the S01 boot/command/SSE routes.
 - New wiring introduced in this slice: a shared onboarding service, same-origin onboarding routes, a server-side session gate, a bridge auth refresh hook, and a locked onboarding surface in the preserved shell.
 - What remains before the milestone is truly usable end-to-end: S03 live prompt/interrupt handling, S04 real workspace state surfaces, S05 workflow controls, S06 continuity/failure polish, and S07 full assembled proof.
 
