@@ -105,3 +105,9 @@ Wire the SQLite DB lifecycle into auto-mode: open/migrate the DB in `startAuto()
 ## Expected Output
 
 - `src/resources/extensions/gsd/auto.ts` — modified with ~30 new lines across 3 insertion points. DB lifecycle fully wired. All existing logic untouched.
+
+## Observability Impact
+
+- **New stderr signals:** `gsd-migrate: auto-migration failed: <msg>` on first-run migration failure in `startAuto()`, `gsd-db: failed to open existing database: <msg>` on DB open failure, `gsd-db: re-import failed: <msg>` on re-import failure in `handleAgentEnd()`
+- **Inspection:** `isDbAvailable()` returns `true` after successful DB init in `startAuto()`, `false` after `closeDatabase()` in `stopAuto()`
+- **Failure state:** All DB operations are non-fatal — failures produce stderr lines and the system degrades to filesystem-only mode silently

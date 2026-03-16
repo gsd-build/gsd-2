@@ -51,7 +51,7 @@
   - Verify: `npx tsc --noEmit` clean. `grep 'inlineGsdRootFile(base' src/resources/extensions/gsd/auto-prompts.ts` returns 0 matches in builder functions.
   - Done when: All 19 data-artifact calls use DB-aware helpers, TypeScript compiles, `inlineGsdRootFile` still exported as fallback.
 
-- [ ] **T02: Wire DB lifecycle into auto.ts** `est:30m`
+- [x] **T02: Wire DB lifecycle into auto.ts** `est:30m`
   - Why: Without lifecycle wiring, the DB layer from S01/S02 is never opened, populated, or refreshed during auto-mode. This connects the plumbing.
   - Files: `src/resources/extensions/gsd/auto.ts`
   - Do: (1) In `startAuto()`, after `.gsd/` bootstrap and after auto-worktree creation (after the worktree try/catch block, before `initMetrics`): add auto-migration block (if `gsd.db` doesn't exist but markdown files do, open DB + `migrateFromMarkdown`), then open existing DB block (if `gsd.db` exists but not yet opened). Use dynamic imports for `gsd-db.js` and `md-importer.js`. All wrapped in try/catch, non-fatal, stderr logging. (2) In `handleAgentEnd()`, after the doctor + rebuildState + auto-commit block but BEFORE the post-unit hooks section: add re-import block guarded by `isDbAvailable()`, calling `migrateFromMarkdown(basePath)`. Non-fatal, stderr on failure. (3) In `stopAuto()`, after worktree teardown but before metrics finalization: add `closeDatabase()` call guarded by `isDbAvailable()`, non-fatal. (4) Add `isDbAvailable` to imports from `./gsd-db.js`.

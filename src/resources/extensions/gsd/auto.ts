@@ -127,6 +127,7 @@ import {
   deregisterSigtermHandler as _deregisterSigtermHandler,
   detectWorkingTreeActivity,
 } from "./auto-supervisor.js";
+import { isDbAvailable } from "./gsd-db.js";
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -397,6 +398,14 @@ export async function stopAuto(ctx?: ExtensionContext, pi?: ExtensionAPI): Promi
         try { process.chdir(basePath); } catch { /* best-effort */ }
       }
     }
+  }
+
+  // ── DB cleanup: close the SQLite connection ──
+  if (isDbAvailable()) {
+    try {
+      const { closeDatabase } = await import("./gsd-db.js");
+      closeDatabase();
+    } catch { /* non-fatal */ }
   }
 
   const ledger = getLedger();
@@ -709,6 +718,33 @@ export async function startAuto(
     }
   }
 
+  // ── DB lifecycle: auto-migrate or open existing database ──
+  const gsdDbPath = join(basePath, ".gsd", "gsd.db");
+  const gsdDirPath = join(basePath, ".gsd");
+  if (existsSync(gsdDirPath) && !existsSync(gsdDbPath)) {
+    const hasDecisions = existsSync(join(gsdDirPath, "DECISIONS.md"));
+    const hasRequirements = existsSync(join(gsdDirPath, "REQUIREMENTS.md"));
+    const hasMilestones = existsSync(join(gsdDirPath, "milestones"));
+    if (hasDecisions || hasRequirements || hasMilestones) {
+      try {
+        const { openDatabase: openDb } = await import("./gsd-db.js");
+        const { migrateFromMarkdown } = await import("./md-importer.js");
+        openDb(gsdDbPath);
+        migrateFromMarkdown(basePath);
+      } catch (err) {
+        process.stderr.write(`gsd-migrate: auto-migration failed: ${(err as Error).message}\n`);
+      }
+    }
+  }
+  if (existsSync(gsdDbPath) && !isDbAvailable()) {
+    try {
+      const { openDatabase: openDb } = await import("./gsd-db.js");
+      openDb(gsdDbPath);
+    } catch (err) {
+      process.stderr.write(`gsd-db: failed to open existing database: ${(err as Error).message}\n`);
+    }
+  }
+
   // Initialize metrics — loads existing ledger from disk
   initMetrics(base);
 
@@ -903,6 +939,16 @@ export async function handleAgentEnd(
       } catch {
         // Non-fatal
       }
+    }
+  }
+
+  // ── DB dual-write: re-import changed markdown files so next unit's prompts use fresh data ──
+  if (isDbAvailable()) {
+    try {
+      const { migrateFromMarkdown } = await import("./md-importer.js");
+      migrateFromMarkdown(basePath);
+    } catch (err) {
+      process.stderr.write(`gsd-db: re-import failed: ${(err as Error).message}\n`);
     }
   }
 
