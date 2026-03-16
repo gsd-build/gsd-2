@@ -39,6 +39,8 @@ export interface UnitMetrics {
   toolCalls: number;
   assistantMessages: number;
   userMessages: number;
+  tier?: string;           // complexity tier (light/standard/heavy) if dynamic routing active
+  modelDowngraded?: boolean; // true if dynamic routing used a cheaper model
 }
 
 export interface MetricsLedger {
@@ -292,6 +294,49 @@ export function getProjectTotals(units: UnitMetrics[]): ProjectTotals {
     totals.userMessages += u.userMessages;
   }
   return totals;
+}
+
+// ─── Tier Aggregation ────────────────────────────────────────────────────────
+
+export interface TierAggregate {
+  tier: string;
+  units: number;
+  tokens: TokenCounts;
+  cost: number;
+  downgraded: number;   // units that were downgraded by dynamic routing
+}
+
+export function aggregateByTier(units: UnitMetrics[]): TierAggregate[] {
+  const map = new Map<string, TierAggregate>();
+  for (const u of units) {
+    const tier = u.tier ?? "unknown";
+    let agg = map.get(tier);
+    if (!agg) {
+      agg = { tier, units: 0, tokens: emptyTokens(), cost: 0, downgraded: 0 };
+      map.set(tier, agg);
+    }
+    agg.units++;
+    agg.tokens = addTokens(agg.tokens, u.tokens);
+    agg.cost += u.cost;
+    if (u.modelDowngraded) agg.downgraded++;
+  }
+  const order = ["light", "standard", "heavy", "unknown"];
+  return order.map(t => map.get(t)).filter((a): a is TierAggregate => !!a);
+}
+
+/**
+ * Format a summary of savings from dynamic routing.
+ * Returns empty string if no units were downgraded.
+ */
+export function formatTierSavings(units: UnitMetrics[]): string {
+  const downgraded = units.filter(u => u.modelDowngraded);
+  if (downgraded.length === 0) return "";
+
+  const downgradedCost = downgraded.reduce((sum, u) => sum + u.cost, 0);
+  const totalUnits = units.filter(u => u.tier).length;
+  const pct = totalUnits > 0 ? Math.round((downgraded.length / totalUnits) * 100) : 0;
+
+  return `Dynamic routing: ${downgraded.length}/${totalUnits} units downgraded (${pct}%), cost: ${formatCost(downgradedCost)}`;
 }
 
 // ─── Formatting helpers ───────────────────────────────────────────────────────
