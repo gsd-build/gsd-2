@@ -103,19 +103,17 @@ export function OnboardingScreen({ onOpenProject, onNewProject }: OnboardingScre
   const [naming, setNaming] = useState(false);
 
   return (
-    <div className="flex h-screen flex-col items-center justify-center bg-navy-base">
+    <div className="flex h-screen flex-col items-center justify-center gap-3 bg-navy-base">
+      <p className="font-mono text-sm text-slate-400">Welcome to</p>
       <LogoAnimation size="lg" onComplete={() => setAnimationComplete(true)} />
 
       <div
-        className={`mt-8 flex flex-col items-center gap-4 transition-opacity duration-500 ${
+        className={`flex flex-col items-center gap-4 transition-opacity duration-500 ${
           animationComplete ? "opacity-100" : "opacity-0"
         }`}
       >
-        <h1 className="font-display text-lg text-cyan-accent">
-          Welcome to GSD Mission Control
-        </h1>
-        <p className="text-sm text-slate-400">
-          Create a new project or open an existing one to get started
+        <p className="text-sm text-slate-400 text-center">
+          Open a project folder to get started
         </p>
 
         {naming ? (
@@ -127,7 +125,7 @@ export function OnboardingScreen({ onOpenProject, onNewProject }: OnboardingScre
             }}
           />
         ) : (
-          <div className="mt-4 flex gap-3">
+          <div className="flex gap-3">
             <button
               onClick={onOpenProject}
               className="rounded-md bg-navy-700 px-4 py-2 text-sm text-slate-200 transition-colors hover:bg-navy-600"
@@ -187,7 +185,7 @@ export function OnboardingScreenView({
             }}
           />
         ) : (
-          <div className="mt-4 flex gap-3">
+          <div className="flex gap-3">
             <button
               onClick={onOpenProject}
               className="rounded-md bg-navy-700 px-4 py-2 text-sm text-slate-200 transition-colors hover:bg-navy-600"

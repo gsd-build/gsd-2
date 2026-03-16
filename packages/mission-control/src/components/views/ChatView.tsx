@@ -128,7 +128,7 @@ export function ChatView({
   const hasMultipleSessions = sessions.length > 0;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       {/* Screen-reader heading for this view */}
       <h1 className="sr-only">GSD Mission Control — Chat</h1>
       {/* Session tabs row — only when multi-session is active */}

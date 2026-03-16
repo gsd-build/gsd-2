@@ -125,7 +125,7 @@ export function ProviderPickerScreen({
       <div style={styles.card}>
         {/* Logo */}
         <div style={styles.logoRow}>
-          <GsdLogo className="h-10 w-10" />
+          <GsdLogo className="w-40 h-auto" />
         </div>
 
         {/* Heading */}

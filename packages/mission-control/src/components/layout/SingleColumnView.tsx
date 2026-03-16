@@ -116,7 +116,7 @@ export function SingleColumnView({
     >
       <div key={activeView.kind} className="animate-in fade-in duration-200 h-full">
       {activeView.kind === "chat" && (
-        <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+        <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
           {/* Phase gate card — intercept UI_PHASE_GATE intent (BUILDER-04) */}
           {phaseGateState && (
             <PhaseGateCard
@@ -132,7 +132,7 @@ export function SingleColumnView({
               }}
             />
           )}
-          <div style={{ flex: 1, minHeight: 0 }}>
+          <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
             <ChatView
               planningState={planningState}
               chatMessages={chatMessages}

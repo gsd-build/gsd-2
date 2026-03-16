@@ -165,6 +165,11 @@ export function startDeviceCodeFlow(
         }
 
         if (pollData.done) return;
+
+        // Brief pause between polls to avoid tight loop when server returns empty
+        if (pollData.events.length === 0 && !abort.signal.aborted) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
       }
     } catch (e: unknown) {
       if (e instanceof Error && e.name !== "AbortError") {

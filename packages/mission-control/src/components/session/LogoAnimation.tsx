@@ -9,7 +9,7 @@ export interface LogoAnimationProps {
 
 const SIZE_CLASSES = {
   sm: "h-8 w-8",
-  lg: "h-32 w-32",
+  lg: "w-80 h-auto",
 } as const;
 
 /**

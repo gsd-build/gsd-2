@@ -224,8 +224,10 @@ export async function handleAuthRequest(req: Request, url: URL): Promise<Respons
       return Response.json({ error: "session not found", done: true, events: [] }, { status: 404 });
     }
 
-    // Long-poll: wait up to 60 seconds for new events
-    const newEvents = await waitForNewEvents(session, after, 60_000);
+    // Short-poll: wait up to 2 seconds for new events.
+    // Bun on Windows drops long-held HTTP connections, so we use short polling
+    // (2s max wait per request). The client loops immediately on empty responses.
+    const newEvents = await waitForNewEvents(session, after, 2_000);
     return Response.json({ events: newEvents, done: session.done });
   }
 
