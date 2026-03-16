@@ -2,6 +2,7 @@
 
 import { GitBranch, Cpu, DollarSign, Clock, Zap, AlertTriangle, Wifi, Info, LifeBuoy } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   formatCost,
   formatDuration,
@@ -15,6 +16,7 @@ import {
   getVisibleWorkspaceError,
   useGSDWorkspaceState,
 } from "@/lib/gsd-workspace-store"
+import { ScopeBadgeInline } from "@/components/gsd/scope-badge"
 
 function toneClass(tone: ReturnType<typeof getStatusPresentation>["tone"]): string {
   switch (tone) {
@@ -44,6 +46,7 @@ export function StatusBar() {
   const validationCount = getLiveWorkspaceIndex(workspace)?.validationIssues.length ?? 0
   const statusTextEntries = Object.entries(statusTexts)
   const latestStatusText = statusTextEntries.length > 0 ? statusTextEntries[statusTextEntries.length - 1][1] : null
+  const isConnecting = workspace.bootStatus === "idle" || workspace.bootStatus === "loading"
 
   return (
     <div className="flex h-7 items-center justify-between border-t border-border bg-card px-3 text-xs">
@@ -54,38 +57,50 @@ export function StatusBar() {
         </div>
         <div className="flex items-center gap-1.5 text-muted-foreground">
           <GitBranch className="h-3 w-3" />
-          <span className="font-mono">{branch}</span>
+          {isConnecting ? (
+            <Skeleton className="h-3 w-20" />
+          ) : (
+            <span className="font-mono">{branch}</span>
+          )}
         </div>
         <div className="flex items-center gap-1.5 text-muted-foreground">
           <Cpu className="h-3 w-3" />
-          <span className="font-mono">{model}</span>
+          {isConnecting ? (
+            <Skeleton className="h-3 w-24" />
+          ) : (
+            <span className="font-mono">{model}</span>
+          )}
         </div>
-        <div className="hidden max-w-xs items-center gap-1.5 truncate text-muted-foreground xl:flex" data-testid="status-bar-retry-compaction">
-          <LifeBuoy className="h-3 w-3 shrink-0" />
-          <span className="truncate">
-            {recoverySummary.retryInProgress ? `Retry ${Math.max(1, recoverySummary.retryAttempt)}` : recoverySummary.isCompacting ? "Compacting" : recoverySummary.freshness}
-          </span>
-        </div>
-        <div
-          className={cn("hidden items-center gap-1.5 xl:flex", validationCount > 0 ? "text-amber-300" : "text-muted-foreground")}
-          data-testid="status-bar-validation-count"
-        >
-          <AlertTriangle className="h-3 w-3 shrink-0" />
-          <span>{validationCount} issue{validationCount === 1 ? "" : "s"}</span>
-        </div>
-        {visibleError && (
+        {!isConnecting && (
+          <div className="hidden max-w-xs items-center gap-1.5 truncate text-muted-foreground xl:flex" data-testid="status-bar-retry-compaction">
+            <LifeBuoy className="h-3 w-3 shrink-0" />
+            <span className="truncate">
+              {recoverySummary.retryInProgress ? `Retry ${Math.max(1, recoverySummary.retryAttempt)}` : recoverySummary.isCompacting ? "Compacting" : recoverySummary.freshness}
+            </span>
+          </div>
+        )}
+        {!isConnecting && (
+          <div
+            className={cn("hidden items-center gap-1.5 xl:flex", validationCount > 0 ? "text-amber-300" : "text-muted-foreground")}
+            data-testid="status-bar-validation-count"
+          >
+            <AlertTriangle className="h-3 w-3 shrink-0" />
+            <span>{validationCount} issue{validationCount === 1 ? "" : "s"}</span>
+          </div>
+        )}
+        {!isConnecting && visibleError && (
           <div className="hidden max-w-sm items-center gap-1.5 truncate text-destructive lg:flex" data-testid="status-bar-error">
             <AlertTriangle className="h-3 w-3 shrink-0" />
             <span className="truncate">{visibleError}</span>
           </div>
         )}
-        {titleOverride && (
+        {!isConnecting && titleOverride && (
           <div className="hidden max-w-xs items-center gap-1.5 truncate text-foreground/80 xl:flex" data-testid="status-bar-title-override">
             <Info className="h-3 w-3 shrink-0" />
             <span className="truncate" title={titleOverride}>{titleOverride}</span>
           </div>
         )}
-        {latestStatusText && !visibleError && (
+        {!isConnecting && latestStatusText && !visibleError && (
           <div className="hidden max-w-xs items-center gap-1.5 truncate text-muted-foreground lg:flex" data-testid="status-bar-extension-status">
             <Info className="h-3 w-3 shrink-0" />
             <span className="truncate">{latestStatusText}</span>
@@ -95,18 +110,18 @@ export function StatusBar() {
       <div className="flex min-w-0 items-center gap-4">
         <div className="flex items-center gap-1.5 text-muted-foreground">
           <Clock className="h-3 w-3" />
-          <span>{formatDuration(auto?.elapsed ?? 0)}</span>
+          {isConnecting ? <Skeleton className="h-3 w-8" /> : <span>{formatDuration(auto?.elapsed ?? 0)}</span>}
         </div>
         <div className="flex items-center gap-1.5 text-muted-foreground">
           <Zap className="h-3 w-3" />
-          <span>{formatTokens(auto?.totalTokens ?? 0)}</span>
+          {isConnecting ? <Skeleton className="h-3 w-6" /> : <span>{formatTokens(auto?.totalTokens ?? 0)}</span>}
         </div>
         <div className="flex items-center gap-1.5 text-muted-foreground">
           <DollarSign className="h-3 w-3" />
-          <span>{formatCost(auto?.totalCost ?? 0)}</span>
+          {isConnecting ? <Skeleton className="h-3 w-10" /> : <span>{formatCost(auto?.totalCost ?? 0)}</span>}
         </div>
         <span className="max-w-[20rem] truncate text-muted-foreground" data-testid="status-bar-unit">
-          {unitLabel}
+          {isConnecting ? <Skeleton className="inline-block h-3 w-28 align-middle" /> : <ScopeBadgeInline label={unitLabel} />}
         </span>
       </div>
     </div>

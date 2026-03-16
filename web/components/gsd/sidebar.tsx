@@ -11,13 +11,13 @@ import {
   FileText,
   GitBranch,
   Settings,
-  Terminal,
   LayoutDashboard,
   Map as MapIcon,
   Activity,
   Columns2,
-  Loader2,
   LogOut,
+  Loader2,
+  SkipForward,
 } from "lucide-react"
 import {
   AlertDialog,
@@ -32,17 +32,15 @@ import {
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import {
-  getCurrentScopeLabel,
   getLiveWorkspaceIndex,
-  getProjectDisplayName,
-  getVisibleWorkspaceError,
-  shortenPath,
+  getLiveAutoDashboard,
+  buildPromptCommand,
   useGSDWorkspaceState,
   useGSDWorkspaceActions,
-  buildPromptCommand,
 } from "@/lib/gsd-workspace-store"
 import { getMilestoneStatus, getSliceStatus, getTaskStatus, type ItemStatus } from "@/lib/workspace-status"
 import { deriveWorkflowAction } from "@/lib/workflow-actions"
+import { Skeleton } from "@/components/ui/skeleton"
 
 const StatusIcon = ({ status }: { status: ItemStatus }) => {
   if (status === "done") {
@@ -54,33 +52,153 @@ const StatusIcon = ({ status }: { status: ItemStatus }) => {
   return <Circle className="h-4 w-4 shrink-0 text-muted-foreground/50" />
 }
 
-interface SidebarProps {
+/* ─── Nav Rail (left icon bar) ─── */
+
+interface NavRailProps {
   activeView: string
   onViewChange: (view: string) => void
+  isConnecting?: boolean
 }
 
-export function Sidebar({ activeView, onViewChange }: SidebarProps) {
-  const workspace = useGSDWorkspaceState()
-  const { sendCommand, openCommandSurface } = useGSDWorkspaceActions()
-  const [expandedMilestones, setExpandedMilestones] = useState<string[]>([])
-  const [expandedSlices, setExpandedSlices] = useState<string[]>([])
+export function NavRail({ activeView, onViewChange, isConnecting = false }: NavRailProps) {
+  const { openCommandSurface } = useGSDWorkspaceActions()
 
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { id: "terminal", label: "Terminal", icon: Terminal },
     { id: "power", label: "Power Mode", icon: Columns2 },
     { id: "roadmap", label: "Roadmap", icon: MapIcon },
     { id: "files", label: "Files", icon: Folder },
     { id: "activity", label: "Activity", icon: Activity },
   ]
 
+  return (
+    <div className="flex w-12 flex-col items-center gap-1 border-r border-border bg-sidebar py-3">
+      {navItems.map((item) => (
+        <button
+          key={item.id}
+          onClick={() => onViewChange(item.id)}
+          disabled={isConnecting}
+          className={cn(
+            "flex h-10 w-10 items-center justify-center rounded-md transition-colors",
+            isConnecting
+              ? "cursor-not-allowed text-muted-foreground/30"
+              : activeView === item.id
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+          )}
+          title={isConnecting ? "Connecting…" : item.label}
+        >
+          <item.icon className="h-5 w-5" />
+        </button>
+      ))}
+      <div className="mt-auto flex flex-col gap-1">
+        <button
+          className={cn(
+            "flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors",
+            isConnecting
+              ? "cursor-not-allowed opacity-30"
+              : "hover:bg-accent/50 hover:text-foreground",
+          )}
+          title="Git"
+          disabled={isConnecting}
+          onClick={() => !isConnecting && openCommandSurface("git", { source: "sidebar" })}
+          data-testid="sidebar-git-button"
+        >
+          <GitBranch className="h-5 w-5" />
+        </button>
+        <button
+          className={cn(
+            "flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors",
+            isConnecting
+              ? "cursor-not-allowed opacity-30"
+              : "hover:bg-accent/50 hover:text-foreground",
+          )}
+          title="Settings"
+          disabled={isConnecting}
+          onClick={() => !isConnecting && openCommandSurface("settings", { source: "sidebar" })}
+          data-testid="sidebar-settings-button"
+        >
+          <Settings className="h-5 w-5" />
+        </button>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <button
+              className={cn(
+                "flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors",
+                isConnecting
+                  ? "cursor-not-allowed opacity-30"
+                  : "hover:bg-destructive/15 hover:text-destructive",
+              )}
+              title="Stop server"
+              disabled={isConnecting}
+              data-testid="sidebar-signoff-button"
+            >
+              <LogOut className="h-5 w-5" />
+            </button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Stop the GSD web server?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will shut down the server process and close this tab. Run{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">npm run gsd:web</code> again to restart.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={async () => {
+                  await fetch("/api/shutdown", { method: "POST" }).catch(() => {})
+                  setTimeout(() => {
+                    try {
+                      window.close()
+                    } catch {
+                      // ignore
+                    }
+                    setTimeout(() => {
+                      window.location.href = "about:blank"
+                    }, 300)
+                  }, 400)
+                }}
+              >
+                Stop server
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Milestone Explorer (right sidebar) ─── */
+
+export function MilestoneExplorer({ isConnecting = false }: { isConnecting?: boolean }) {
+  const workspace = useGSDWorkspaceState()
+  const { sendCommand } = useGSDWorkspaceActions()
+  const [expandedMilestones, setExpandedMilestones] = useState<string[]>([])
+  const [expandedSlices, setExpandedSlices] = useState<string[]>([])
+
   const liveWorkspace = getLiveWorkspaceIndex(workspace)
   const milestones = liveWorkspace?.milestones ?? []
   const activeScope = liveWorkspace?.active
-  const projectLabel = getProjectDisplayName(workspace.boot?.project.cwd)
-  const currentScope = getCurrentScopeLabel(liveWorkspace)
-  const visibleError = getVisibleWorkspaceError(workspace)
-  const workspaceFreshness = workspace.live.freshness.workspace.stale ? "stale" : workspace.live.freshness.workspace.status
+  const auto = getLiveAutoDashboard(workspace)
+  const bridge = workspace.boot?.bridge ?? null
+
+  const workflowAction = deriveWorkflowAction({
+    phase: liveWorkspace?.active.phase ?? "pre-planning",
+    autoActive: auto?.active ?? false,
+    autoPaused: auto?.paused ?? false,
+    onboardingLocked: workspace.boot?.onboarding.locked ?? false,
+    commandInFlight: workspace.commandInFlight,
+    bootStatus: workspace.bootStatus,
+    hasMilestones: milestones.length > 0,
+  })
+
+  const handleCommand = (command: string) => {
+    void sendCommand(buildPromptCommand(command, bridge))
+  }
 
   useEffect(() => {
     if (!activeScope?.milestoneId) return
@@ -110,158 +228,46 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
   }
 
   return (
-    <div className="flex h-full">
-      <div className="flex w-12 flex-col items-center gap-1 border-r border-border bg-sidebar py-3">
-        {navItems.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => onViewChange(item.id)}
-            className={cn(
-              "flex h-10 w-10 items-center justify-center rounded-md transition-colors",
-              activeView === item.id
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-            )}
-            title={item.label}
-          >
-            <item.icon className="h-5 w-5" />
-          </button>
-        ))}
-        <div className="mt-auto flex flex-col gap-1">
-          <button
-            className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-            title="Git"
-            onClick={() => openCommandSurface("git", { source: "sidebar" })}
-            data-testid="sidebar-git-button"
-          >
-            <GitBranch className="h-5 w-5" />
-          </button>
-          <button
-            className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-            title="Settings"
-            onClick={() => openCommandSurface("settings", { source: "sidebar" })}
-            data-testid="sidebar-settings-button"
-          >
-            <Settings className="h-5 w-5" />
-          </button>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <button
-                className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
-                title="Stop server"
-                data-testid="sidebar-signoff-button"
-              >
-                <LogOut className="h-5 w-5" />
-              </button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Stop the GSD web server?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will shut down the server process. The browser tab will stop working and you'll need to run{" "}
-                  <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">npm run gsd:web</code> again to restart it.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                  onClick={async () => {
-                    await fetch("/api/shutdown", { method: "POST" }).catch(() => {})
-                  }}
-                >
-                  Stop server
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
-      </div>
-
-      <div className="flex w-64 flex-col border-r border-border bg-sidebar">
-        <div className="border-b border-border px-3 py-2.5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Explorer
-            </span>
-            <span className="truncate text-[11px] text-muted-foreground" title={workspace.boot?.project.cwd || projectLabel}>
-              {projectLabel}
-            </span>
-          </div>
-          <div
-            className="mt-2 truncate font-mono text-[11px] text-muted-foreground/80"
-            title={workspace.boot?.project.cwd || "Project path pending"}
-          >
-            {workspace.boot?.project.cwd ? shortenPath(workspace.boot.project.cwd, 5) : "Resolving current project…"}
-          </div>
-        </div>
-
-        <div className="border-b border-border px-3 py-3 text-xs">
-          <div className="space-y-2">
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Active scope</div>
-              <div className="font-mono text-[11px] text-foreground" data-testid="sidebar-current-scope">
-                {currentScope}
-              </div>
-              <div className="mt-1 text-[10px] text-muted-foreground">Workspace freshness: {workspaceFreshness}</div>
-            </div>
-            {visibleError && (
-              <div
-                className="rounded border border-destructive/20 bg-destructive/10 px-2 py-1.5 text-destructive"
-                data-testid="sidebar-bridge-error"
-              >
-                {visibleError}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {(() => {
-          const wa = deriveWorkflowAction({
-            phase: liveWorkspace?.active.phase ?? "pre-planning",
-            autoActive: (workspace.live.auto ?? workspace.boot?.auto)?.active ?? false,
-            autoPaused: (workspace.live.auto ?? workspace.boot?.auto)?.paused ?? false,
-            onboardingLocked: workspace.boot?.onboarding.locked ?? false,
-            commandInFlight: workspace.commandInFlight,
-            bootStatus: workspace.bootStatus,
-            hasMilestones: (liveWorkspace?.milestones.length ?? 0) > 0,
-          })
-          if (!wa.primary) return null
-          return (
-            <div className="border-b border-border px-3 py-2.5" data-testid="sidebar-quick-action">
-              <button
-                onClick={() => void sendCommand(buildPromptCommand(wa.primary!.command, workspace.boot?.bridge ?? null))}
-                disabled={wa.disabled}
-                className={cn(
-                  "flex w-full items-center justify-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                  wa.primary.variant === "destructive"
-                    ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                    : "bg-primary text-primary-foreground hover:bg-primary/90",
-                  wa.disabled && "cursor-not-allowed opacity-50",
-                )}
-                title={wa.disabledReason}
-              >
-                {workspace.commandInFlight ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Play className="h-3.5 w-3.5" />
-                )}
-                {wa.primary.label}
-              </button>
-            </div>
-          )
-        })()}
-
-        <div className="flex-1 overflow-y-auto py-1">
+    <div className="flex w-64 flex-col border-l border-border bg-sidebar">
+      {isConnecting && (
+        <div className="flex-1 overflow-y-auto px-1.5 py-1">
           <div className="px-2 py-1.5">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Milestones
             </span>
           </div>
+          <div className="space-y-0.5 px-1">
+            {[1, 2].map((m) => (
+              <div key={m}>
+                <div className="flex items-center gap-1.5 px-2 py-1.5">
+                  <Skeleton className="h-4 w-4 shrink-0 rounded" />
+                  <Skeleton className="h-4 w-4 shrink-0 rounded-full" />
+                  <Skeleton className={cn("h-4", m === 1 ? "w-40" : "w-32")} />
+                </div>
+                {m === 1 && (
+                  <div className="ml-4 space-y-0.5">
+                    {[1, 2, 3].map((s) => (
+                      <div key={s} className="flex items-center gap-1.5 px-2 py-1.5">
+                        <Skeleton className="h-4 w-4 shrink-0 rounded" />
+                        <Skeleton className="h-4 w-4 shrink-0 rounded-full" />
+                        <Skeleton className={cn("h-3.5", s === 1 ? "w-32" : s === 2 ? "w-28" : "w-24")} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
-          {workspace.bootStatus === "loading" && (
-            <div className="px-3 py-2 text-xs text-muted-foreground">Loading workspace index…</div>
-          )}
+      {!isConnecting && (
+        <div className="flex-1 overflow-y-auto px-1.5 py-1">
+          <div className="px-2 py-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Milestones
+            </span>
+          </div>
 
           {workspace.bootStatus === "error" && milestones.length === 0 && (
             <div className="px-3 py-2 text-xs text-destructive">Workspace boot failed before the explorer could load.</div>
@@ -360,7 +366,64 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
             )
           })}
         </div>
-      </div>
+      )}
+
+      {/* Sticky action footer */}
+      {!isConnecting && workflowAction.primary && (
+        <div className="border-t border-border px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleCommand(workflowAction.primary!.command)}
+              disabled={workflowAction.disabled}
+              className={cn(
+                "inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors",
+                workflowAction.primary.variant === "destructive"
+                  ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  : "bg-primary text-primary-foreground hover:bg-primary/90",
+                workflowAction.disabled && "cursor-not-allowed opacity-50",
+              )}
+              title={workflowAction.disabledReason}
+            >
+              {workspace.commandInFlight ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Play className="h-3.5 w-3.5" />
+              )}
+              {workflowAction.primary.label}
+            </button>
+            {workflowAction.secondaries.map((action) => (
+              <button
+                key={action.command}
+                onClick={() => handleCommand(action.command)}
+                disabled={workflowAction.disabled}
+                className={cn(
+                  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background transition-colors hover:bg-accent",
+                  workflowAction.disabled && "cursor-not-allowed opacity-50",
+                )}
+                title={action.label}
+              >
+                <SkipForward className="h-3.5 w-3.5" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─── Legacy Sidebar export (back-compat) ─── */
+
+interface SidebarProps {
+  activeView: string
+  onViewChange: (view: string) => void
+  isConnecting?: boolean
+}
+
+export function Sidebar({ activeView, onViewChange, isConnecting = false }: SidebarProps) {
+  return (
+    <div className="flex h-full">
+      <NavRail activeView={activeView} onViewChange={onViewChange} isConnecting={isConnecting} />
     </div>
   )
 }

@@ -126,25 +126,26 @@ export function stopWebMode(deps: Pick<WebModeDeps, 'pidFilePath' | 'readPidFile
 
   const pid = readPid(pidFilePath)
   if (pid === null) {
-    const message = `[gsd] Web server is not running (no PID file at ${pidFilePath})\n`
-    stderr.write(message)
+    stderr.write(`[gsd] Web server is not running (no PID file found)\n`)
     return { ok: false, reason: 'no-pid-file' }
   }
+
+  stderr.write(`[gsd] Stopping web server (pid=${pid})…\n`)
 
   try {
     process.kill(pid, 'SIGTERM')
     deletePid(pidFilePath)
-    stderr.write(`[gsd] Web server stopped (pid=${pid})\n`)
+    stderr.write(`[gsd] Web server stopped.\n`)
     return { ok: true }
   } catch (error) {
     const isAlreadyDead = error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ESRCH'
     deletePid(pidFilePath)
     if (isAlreadyDead) {
-      stderr.write(`[gsd] Web server process (pid=${pid}) was already gone — cleared stale PID file\n`)
+      stderr.write(`[gsd] Web server was already stopped — cleared stale PID file.\n`)
       return { ok: true }
     }
     const reason = error instanceof Error ? error.message : String(error)
-    stderr.write(`[gsd] Failed to stop web server (pid=${pid}): ${reason}\n`)
+    stderr.write(`[gsd] Failed to stop web server: ${reason}\n`)
     return { ok: false, reason }
   }
 }
@@ -311,28 +312,75 @@ async function requestLocalJson(url: string, timeoutMs: number): Promise<{ statu
   })
 }
 
-async function waitForBootReady(url: string, timeoutMs = 120_000): Promise<void> {
+async function waitForBootReady(url: string, timeoutMs = 120_000, stderr?: WritableLike): Promise<void> {
   const deadline = Date.now() + timeoutMs
+  const startedAt = Date.now()
   let lastError: string | null = null
+  let hostUp = false
+  let lastPhase: string | null = null
+  // Print a progress dot every N ms while waiting so the terminal isn't silent
+  const TICKER_INTERVAL_MS = 5_000
+  let lastTickAt = startedAt
+
+  const elapsed = () => `${Math.round((Date.now() - startedAt) / 1000)}s`
 
   while (Date.now() < deadline) {
     try {
-      // Give the packaged host enough time to finish a cold /api/boot render
-      // under integration-suite load before declaring startup dead. The route
-      // is still polled on a bounded overall deadline below.
+      // Give the packaged host enough time to finish a cold /api/boot render.
       const response = await requestLocalJson(`${url}/api/boot`, 45_000)
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        const payload = JSON.parse(response.body) as { bridge?: { phase?: string } }
-        if (payload.bridge?.phase === 'ready') {
+        const payload = JSON.parse(response.body) as {
+          bridge?: { phase?: string; lastError?: { message?: string } }
+        }
+        const phase = payload.bridge?.phase ?? 'unknown'
+
+        if (!hostUp) {
+          hostUp = true
+          stderr?.write(`[gsd] Web host ready — waiting for agent bridge…\n`)
+        }
+
+        if (phase === 'ready') {
           return
         }
-        lastError = `boot responded but bridge phase was ${payload.bridge?.phase ?? 'unknown'}`
+
+        if (phase === 'failed') {
+          const bridgeErrorMsg = payload.bridge?.lastError?.message
+          const detail = bridgeErrorMsg ? `: ${bridgeErrorMsg}` : ''
+          throw new Error(`bridge startup failed${detail}`)
+        }
+
+        // Log phase transitions
+        if (phase !== lastPhase) {
+          lastPhase = phase
+          if (phase === 'starting') {
+            stderr?.write(`[gsd] Agent bridge starting (this takes ~30s on first run)…\n`)
+          }
+        }
+
+        lastError = `bridge phase=${phase}`
       } else {
-        lastError = `boot responded with ${response.statusCode}`
+        lastError = `http ${response.statusCode}`
       }
     } catch (error) {
+      if (error instanceof Error && error.message.startsWith('bridge startup failed')) {
+        throw error
+      }
       lastError = error instanceof Error ? error.message : String(error)
+      if (!hostUp && Date.now() - startedAt < 3_000) {
+        // Very first poll — host not listening yet, normal
+      }
+    }
+
+    // Emit a heartbeat line every TICKER_INTERVAL_MS to show we're alive
+    const now = Date.now()
+    if (now - lastTickAt >= TICKER_INTERVAL_MS) {
+      lastTickAt = now
+      if (hostUp) {
+        stderr?.write(`[gsd] Still waiting for bridge… (${elapsed()})\n`)
+      } else {
+        stderr?.write(`[gsd] Waiting for web host… (${elapsed()})\n`)
+      }
     }
 
     await new Promise((resolve) => setTimeout(resolve, 250))
@@ -371,6 +419,8 @@ export async function launchWebMode(
     return failure
   }
 
+  stderr.write(`[gsd] Starting web mode…\n`)
+
   const port = options.port ?? await (deps.resolvePort ?? reserveWebPort)(host)
   const url = `http://${host}:${port}`
   const env = {
@@ -383,9 +433,11 @@ export async function launchWebMode(
     GSD_WEB_PROJECT_SESSIONS_DIR: options.projectSessionsDir,
     GSD_WEB_PACKAGE_ROOT: resolution.packageRoot,
     GSD_WEB_HOST_KIND: resolution.kind,
+    ...(resolution.kind === 'source-dev' ? { NEXT_PUBLIC_GSD_DEV: '1' } : {}),
   }
 
   try {
+    stderr.write(`[gsd] Initialising resources…\n`)
     const bootstrap = deps.initResources ? { initResources: deps.initResources } : await loadResourceBootstrap()
     bootstrap.initResources(options.agentDir)
   } catch (error) {
@@ -413,6 +465,8 @@ export async function launchWebMode(
     deps.platform ?? process.platform,
     deps.execPath ?? process.execPath,
   )
+
+  stderr.write(`[gsd] Launching web host on port ${port}…\n`)
 
   const spawnResult = await spawnDetachedProcess(
     deps.spawn ?? ((command, args, spawnOptions) => spawn(command, args, spawnOptions)),
@@ -445,7 +499,8 @@ export async function launchWebMode(
   }
 
   try {
-    await (deps.waitForBootReady ?? waitForBootReady)(url)
+    const bootReadyFn = deps.waitForBootReady ?? ((u: string) => waitForBootReady(u, 120_000, stderr))
+    await bootReadyFn(url)
   } catch (error) {
     const failure: WebModeLaunchFailure = {
       mode: 'web',
@@ -502,6 +557,7 @@ export async function launchWebMode(
     hostPath: resolution.entryPath,
     hostRoot: resolution.hostRoot,
   }
+  stderr.write(`[gsd] Ready → ${url}\n`)
   emitLaunchStatus(stderr, success)
   return success
 }

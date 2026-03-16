@@ -14,6 +14,7 @@ import {
   getModelLabel,
 } from "@/lib/gsd-workspace-store"
 import { deriveWorkflowAction } from "@/lib/workflow-actions"
+import { ScopeBadge } from "@/components/gsd/scope-badge"
 import { Terminal } from "./terminal"
 
 function AutoTerminal() {
@@ -99,8 +100,8 @@ function AutoTerminal() {
         {currentUnit && (
           <div className="mb-4">
             <div className="text-muted-foreground text-xs mb-1">Current Unit</div>
-            <div className="text-foreground">
-              {currentUnit.type}: {currentUnit.id}
+            <div className="mt-1">
+              <ScopeBadge label={currentUnit.id} size="sm" />
             </div>
           </div>
         )}

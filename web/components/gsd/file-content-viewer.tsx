@@ -1,0 +1,364 @@
+"use client"
+
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Loader2 } from "lucide-react"
+import { cn } from "@/lib/utils"
+
+/* ── Language detection ── */
+
+const EXT_TO_LANG: Record<string, string> = {
+  ts: "typescript",
+  tsx: "tsx",
+  js: "javascript",
+  jsx: "jsx",
+  mjs: "javascript",
+  cjs: "javascript",
+  json: "json",
+  jsonc: "jsonc",
+  md: "markdown",
+  mdx: "mdx",
+  css: "css",
+  scss: "scss",
+  less: "less",
+  html: "html",
+  htm: "html",
+  xml: "xml",
+  svg: "xml",
+  yaml: "yaml",
+  yml: "yaml",
+  toml: "toml",
+  sh: "bash",
+  bash: "bash",
+  zsh: "bash",
+  fish: "fish",
+  py: "python",
+  rb: "ruby",
+  rs: "rust",
+  go: "go",
+  java: "java",
+  kt: "kotlin",
+  swift: "swift",
+  c: "c",
+  cpp: "cpp",
+  h: "c",
+  hpp: "cpp",
+  cs: "csharp",
+  php: "php",
+  sql: "sql",
+  graphql: "graphql",
+  gql: "graphql",
+  dockerfile: "dockerfile",
+  makefile: "makefile",
+  lua: "lua",
+  vim: "viml",
+  r: "r",
+  tex: "latex",
+  diff: "diff",
+  ini: "ini",
+  conf: "ini",
+  env: "dotenv",
+}
+
+const SPECIAL_FILENAMES: Record<string, string> = {
+  Dockerfile: "dockerfile",
+  Makefile: "makefile",
+  Containerfile: "dockerfile",
+  Justfile: "makefile",
+  Rakefile: "ruby",
+  Gemfile: "ruby",
+  ".env": "dotenv",
+  ".env.local": "dotenv",
+  ".env.example": "dotenv",
+  ".eslintrc": "json",
+  ".prettierrc": "json",
+  "tsconfig.json": "jsonc",
+  "jsconfig.json": "jsonc",
+}
+
+function detectLanguage(filepath: string): string | null {
+  const filename = filepath.split("/").pop() ?? ""
+
+  // Check special filenames first
+  if (SPECIAL_FILENAMES[filename]) return SPECIAL_FILENAMES[filename]
+
+  const ext = filename.includes(".") ? filename.split(".").pop()?.toLowerCase() : null
+  if (ext && EXT_TO_LANG[ext]) return EXT_TO_LANG[ext]
+
+  return null
+}
+
+function isMarkdown(filepath: string): boolean {
+  const ext = filepath.split(".").pop()?.toLowerCase()
+  return ext === "md" || ext === "mdx"
+}
+
+/* ── Shiki singleton ── */
+
+type ShikiHighlighter = {
+  codeToHtml: (code: string, options: { lang: string; theme: string }) => string
+}
+
+let highlighterPromise: Promise<ShikiHighlighter> | null = null
+
+async function getHighlighter(): Promise<ShikiHighlighter> {
+  if (!highlighterPromise) {
+    highlighterPromise = import("shiki").then((mod) =>
+      mod.createHighlighter({
+        themes: ["github-dark-default"],
+        langs: [
+          "typescript", "tsx", "javascript", "jsx",
+          "json", "jsonc", "markdown", "mdx",
+          "css", "scss", "less", "html", "xml",
+          "yaml", "toml", "bash", "python", "ruby",
+          "rust", "go", "java", "kotlin", "swift",
+          "c", "cpp", "csharp", "php", "sql",
+          "graphql", "dockerfile", "makefile", "lua",
+          "diff", "ini", "dotenv",
+        ],
+      }),
+    ).catch((err) => {
+      // Reset so the next call retries instead of returning a rejected promise forever
+      highlighterPromise = null
+      throw err
+    })
+  }
+  return highlighterPromise
+}
+
+/* ── Code viewer (syntax highlighted) ── */
+
+function CodeViewer({ content, filepath }: { content: string; filepath: string }) {
+  const [html, setHtml] = useState<string | null>(null)
+  const [ready, setReady] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  const lang = detectLanguage(filepath)
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (!lang) {
+      setReady(true)
+      return
+    }
+
+    getHighlighter().then((highlighter) => {
+      if (cancelled) return
+      try {
+        const highlighted = highlighter.codeToHtml(content, {
+          lang,
+          theme: "github-dark-default",
+        })
+        setHtml(highlighted)
+      } catch {
+        // Language not loaded or unsupported — fall back to plain
+        setHtml(null)
+      }
+      setReady(true)
+    }).catch(() => {
+      if (!cancelled) setReady(true)
+    })
+
+    return () => { cancelled = true }
+  }, [content, lang])
+
+  if (!ready) {
+    return (
+      <div className="flex items-center justify-center py-12 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+        Highlighting…
+      </div>
+    )
+  }
+
+  if (html) {
+    return (
+      <div
+        ref={containerRef}
+        className="file-viewer-code overflow-x-auto text-sm leading-relaxed"
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    )
+  }
+
+  // Fallback: plain text with line numbers
+  return <PlainViewer content={content} />
+}
+
+/* ── Plain text viewer with line numbers ── */
+
+function PlainViewer({ content }: { content: string }) {
+  const lines = useMemo(() => content.split("\n"), [content])
+  const gutterWidth = String(lines.length).length
+
+  return (
+    <div className="overflow-x-auto text-sm leading-relaxed font-mono">
+      <table className="border-collapse">
+        <tbody>
+          {lines.map((line, i) => (
+            <tr key={i} className="hover:bg-accent/20">
+              <td
+                className="select-none pr-4 text-right text-muted-foreground/40 align-top"
+                style={{ minWidth: `${gutterWidth + 1}ch` }}
+              >
+                {i + 1}
+              </td>
+              <td className="whitespace-pre text-muted-foreground">{line || " "}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+/* ── Markdown viewer ── */
+
+function MarkdownViewer({ content, filepath }: { content: string; filepath: string }) {
+  const [rendered, setRendered] = useState<React.ReactNode | null>(null)
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+
+    // Dynamic import to keep the main bundle lean
+    Promise.all([
+      import("react-markdown"),
+      import("remark-gfm"),
+      getHighlighter(),
+    ]).then(([ReactMarkdownMod, remarkGfmMod, highlighter]) => {
+      if (cancelled) return
+
+      const ReactMarkdown = ReactMarkdownMod.default
+      const remarkGfm = remarkGfmMod.default
+
+      setRendered(
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            code({ className, children, ...props }) {
+              const match = /language-(\w+)/.exec(className || "")
+              const codeStr = String(children).replace(/\n$/, "")
+
+              if (match) {
+                try {
+                  const highlighted = highlighter.codeToHtml(codeStr, {
+                    lang: match[1],
+                    theme: "github-dark-default",
+                  })
+                  return (
+                    <div
+                      className="file-viewer-code my-3 rounded-md overflow-x-auto text-sm"
+                      dangerouslySetInnerHTML={{ __html: highlighted }}
+                    />
+                  )
+                } catch {
+                  // Fall through to default rendering
+                }
+              }
+
+              // Inline code or unknown language
+              const isInline = !className && !String(children).includes("\n")
+              if (isInline) {
+                return (
+                  <code className="rounded bg-muted px-1.5 py-0.5 text-sm font-mono" {...props}>
+                    {children}
+                  </code>
+                )
+              }
+
+              return (
+                <pre className="my-3 overflow-x-auto rounded-md bg-[#0d1117] p-4 text-sm">
+                  <code>{children}</code>
+                </pre>
+              )
+            },
+            pre({ children }) {
+              // Unwrap <pre> since code blocks handle their own wrapper
+              return <>{children}</>
+            },
+            table({ children }) {
+              return (
+                <div className="my-4 overflow-x-auto">
+                  <table className="min-w-full border-collapse border border-border text-sm">
+                    {children}
+                  </table>
+                </div>
+              )
+            },
+            th({ children }) {
+              return (
+                <th className="border border-border bg-muted/50 px-3 py-2 text-left font-medium">
+                  {children}
+                </th>
+              )
+            },
+            td({ children }) {
+              return (
+                <td className="border border-border px-3 py-2">{children}</td>
+              )
+            },
+            a({ href, children }) {
+              return (
+                <a href={href} className="text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">
+                  {children}
+                </a>
+              )
+            },
+            img({ src, alt }) {
+              return (
+                <span className="my-2 block rounded border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground italic">
+                  🖼 {alt || src || "image"}
+                </span>
+              )
+            },
+          }}
+        >
+          {content}
+        </ReactMarkdown>,
+      )
+      setReady(true)
+    }).catch(() => {
+      if (!cancelled) setReady(true)
+    })
+
+    return () => { cancelled = true }
+  }, [content, filepath])
+
+  if (!ready) {
+    return (
+      <div className="flex items-center justify-center py-12 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+        Rendering…
+      </div>
+    )
+  }
+
+  if (!rendered) {
+    return <PlainViewer content={content} />
+  }
+
+  return <div className="markdown-body">{rendered}</div>
+}
+
+/* ── Exported component ── */
+
+export function FileContentViewer({
+  content,
+  filepath,
+  className,
+}: {
+  content: string
+  filepath: string
+  className?: string
+}) {
+  return (
+    <div className={cn("flex-1 overflow-y-auto p-4", className)}>
+      {isMarkdown(filepath) ? (
+        <MarkdownViewer content={content} filepath={filepath} />
+      ) : (
+        <CodeViewer content={content} filepath={filepath} />
+      )}
+    </div>
+  )
+}

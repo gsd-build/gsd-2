@@ -6,6 +6,8 @@ import {
   ArrowRightLeft,
   ArrowUpRight,
   Brain,
+  Check,
+  ChevronRight,
   Cpu,
   Download,
   ExternalLink,
@@ -17,32 +19,43 @@ import {
   LogIn,
   LogOut,
   PencilLine,
+  Radio,
   RefreshCw,
+  Search,
   Settings2,
-  ShieldAlert,
   ShieldCheck,
+  SquareTerminal,
+  X,
 } from "lucide-react"
+
+import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldTitle } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Sheet,
   SheetContent,
   SheetDescription,
-  SheetFooter,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   COMMAND_SURFACE_THINKING_LEVELS,
   type CommandSurfaceSection,
   type CommandSurfaceTarget,
 } from "@/lib/command-surface-contract"
 import { cn } from "@/lib/utils"
+import {
+  DEV_OVERRIDE_REGISTRY,
+  IS_DEV_MODE,
+  useDevOverrides,
+} from "@/lib/dev-overrides"
 import {
   formatCost,
   formatTokens,
@@ -53,11 +66,14 @@ import {
   useGSDWorkspaceState,
 } from "@/lib/gsd-workspace-store"
 
+// ─── Section metadata ────────────────────────────────────────────────
+
 const SETTINGS_SURFACE_SECTIONS = ["model", "thinking", "queue", "compaction", "retry", "recovery", "auth"] as const
+const ADMIN_SECTION: CommandSurfaceSection = "admin"
 const GIT_SURFACE_SECTIONS = ["git"] as const
 const SESSION_SURFACE_SECTIONS = ["resume", "name", "fork", "session", "compact"] as const
 
-function availableSectionsForSurface(surface: string | null): CommandSurfaceSection[] {
+function availableSectionsForSurface(surface: string | null, includeAdmin: boolean = false): CommandSurfaceSection[] {
   switch (surface) {
     case "git":
       return [...GIT_SURFACE_SECTIONS]
@@ -69,148 +85,68 @@ function availableSectionsForSurface(surface: string | null): CommandSurfaceSect
     case "compact":
       return [...SESSION_SURFACE_SECTIONS]
     default:
-      return [...SETTINGS_SURFACE_SECTIONS]
+      return includeAdmin
+        ? [...SETTINGS_SURFACE_SECTIONS, ADMIN_SECTION]
+        : [...SETTINGS_SURFACE_SECTIONS]
   }
 }
 
 function sectionLabel(section: CommandSurfaceSection): string {
-  switch (section) {
-    case "model":
-      return "Model"
-    case "thinking":
-      return "Thinking"
-    case "queue":
-      return "Queue"
-    case "compaction":
-      return "Auto-compact"
-    case "retry":
-      return "Retry"
-    case "recovery":
-      return "Recovery"
-    case "auth":
-      return "Auth"
-    case "git":
-      return "Git"
-    case "resume":
-      return "Resume"
-    case "name":
-      return "Name"
-    case "fork":
-      return "Fork"
-    case "session":
-      return "Session"
-    case "compact":
-      return "Compact"
+  const labels: Record<CommandSurfaceSection, string> = {
+    model: "Model",
+    thinking: "Thinking",
+    queue: "Queue",
+    compaction: "Compaction",
+    retry: "Retry",
+    recovery: "Recovery",
+    auth: "Auth",
+    admin: "Admin",
+    git: "Git",
+    resume: "Resume",
+    name: "Name",
+    fork: "Fork",
+    session: "Session",
+    compact: "Compact",
   }
+  return labels[section]
 }
 
 function sectionIcon(section: CommandSurfaceSection) {
-  switch (section) {
-    case "model":
-      return <Cpu className="h-4 w-4" />
-    case "thinking":
-      return <Brain className="h-4 w-4" />
-    case "queue":
-      return <ArrowRightLeft className="h-4 w-4" />
-    case "compaction":
-      return <Archive className="h-4 w-4" />
-    case "retry":
-      return <RefreshCw className="h-4 w-4" />
-    case "recovery":
-      return <LifeBuoy className="h-4 w-4" />
-    case "auth":
-      return <ShieldCheck className="h-4 w-4" />
-    case "git":
-      return <GitBranch className="h-4 w-4" />
-    case "resume":
-      return <ArrowRightLeft className="h-4 w-4" />
-    case "name":
-      return <PencilLine className="h-4 w-4" />
-    case "fork":
-      return <GitBranch className="h-4 w-4" />
-    case "session":
-      return <FileText className="h-4 w-4" />
-    case "compact":
-      return <Archive className="h-4 w-4" />
+  const icons: Record<CommandSurfaceSection, React.ReactNode> = {
+    model: <Cpu className="h-4 w-4" />,
+    thinking: <Brain className="h-4 w-4" />,
+    queue: <ArrowRightLeft className="h-4 w-4" />,
+    compaction: <Archive className="h-4 w-4" />,
+    retry: <RefreshCw className="h-4 w-4" />,
+    recovery: <LifeBuoy className="h-4 w-4" />,
+    auth: <ShieldCheck className="h-4 w-4" />,
+    admin: <SquareTerminal className="h-4 w-4" />,
+    git: <GitBranch className="h-4 w-4" />,
+    resume: <ArrowRightLeft className="h-4 w-4" />,
+    name: <PencilLine className="h-4 w-4" />,
+    fork: <GitBranch className="h-4 w-4" />,
+    session: <FileText className="h-4 w-4" />,
+    compact: <Archive className="h-4 w-4" />,
   }
-}
-
-function sectionDescription(section: CommandSurfaceSection): string {
-  switch (section) {
-    case "model":
-      return "Load available models from the live bridge and apply a real model change."
-    case "thinking":
-      return "Choose the thinking level that the current live session should use."
-    case "queue":
-      return "Adjust live steering and follow-up queue behavior; both settings also persist for later sessions."
-    case "compaction":
-      return "Toggle persisted auto-compaction behavior and see whether the live session is compacting right now."
-    case "retry":
-      return "Inspect retry-enabled and retry-in-progress state directly from the bridge, then change or abort it here."
-    case "recovery":
-      return "Load structured doctor, validation, bridge, and interrupted-run diagnostics from the dedicated recovery contract without parsing transcript text."
-    case "auth":
-      return "Manage browser sign-in, API-key setup, and logout against the current onboarding contract."
-    case "git":
-      return "Inspect the current-project repository branch and working tree from authoritative Git state instead of a dead sidebar control."
-    case "resume":
-      return "Switch the live browser workspace to another resumable project session."
-    case "name":
-      return "Search current-project sessions, pick one, and apply an authoritative session rename."
-    case "fork":
-      return "Load forkable user messages from the current session and create a new fork from one of them."
-    case "session":
-      return "Inspect current session stats and export the session as HTML from the browser surface."
-    case "compact":
-      return "Run a real manual compaction with optional custom instructions and inspect the resulting summary."
-  }
+  return icons[section]
 }
 
 function surfaceTitle(surface: string | null): string {
-  switch (surface) {
-    case "model":
-      return "Model"
-    case "thinking":
-      return "Thinking"
-    case "git":
-      return "Git"
-    case "login":
-      return "Login"
-    case "logout":
-      return "Logout"
-    case "settings":
-      return "Settings"
-    case "resume":
-      return "Resume"
-    case "name":
-      return "Name"
-    case "fork":
-      return "Fork"
-    case "session":
-      return "Session"
-    case "export":
-      return "Export"
-    case "compact":
-      return "Compact"
-    default:
-      return "Command surface"
+  const titles: Record<string, string> = {
+    model: "Model",
+    thinking: "Thinking",
+    git: "Git",
+    login: "Login",
+    logout: "Logout",
+    settings: "Settings",
+    resume: "Resume",
+    name: "Name",
+    fork: "Fork",
+    session: "Session",
+    export: "Export",
+    compact: "Compact",
   }
-}
-
-function surfaceDescription(surface: string | null): string {
-  switch (surface) {
-    case "git":
-      return "Browser-native Git summary loads current-project repo truth on demand and keeps not-a-repo or load failures visible in the shared surface."
-    case "resume":
-    case "name":
-    case "fork":
-    case "session":
-    case "export":
-    case "compact":
-      return "Browser-native session controls reuse one shared surface for resume, naming, fork, session stats, export, and compaction."
-    default:
-      return "Browser-native command controls reuse one shared surface for model, thinking, queue, compaction, retry, and auth controls."
-  }
+  return titles[surface ?? ""] ?? "Settings"
 }
 
 function currentAuthIntent(activeSurface: string | null, selectedTarget: CommandSurfaceTarget | null): "login" | "logout" | "manage" {
@@ -232,6 +168,129 @@ function formatRelativeTime(isoDate: string): string {
   const days = Math.floor(hours / 24)
   return `${days}d ago`
 }
+
+// ─── Inline status dot ──────────────────────────────────────────────
+
+function StatusDot({ status }: { status: "ok" | "warning" | "error" | "idle" }) {
+  return (
+    <span
+      className={cn(
+        "inline-block h-1.5 w-1.5 rounded-full",
+        status === "ok" && "bg-emerald-400",
+        status === "warning" && "bg-amber-400",
+        status === "error" && "bg-red-400",
+        status === "idle" && "bg-foreground/20",
+      )}
+    />
+  )
+}
+
+// ─── Inline section header ──────────────────────────────────────────
+
+function SectionHeader({
+  title,
+  action,
+  status,
+}: {
+  title: string
+  action?: React.ReactNode
+  status?: React.ReactNode
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 pb-4">
+      <div className="flex items-center gap-2.5">
+        <h3 className="text-[13px] font-semibold uppercase tracking-[0.08em] text-foreground/70">{title}</h3>
+        {status}
+      </div>
+      {action}
+    </div>
+  )
+}
+
+// ─── Inline key-value row ───────────────────────────────────────────
+
+function KV({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 py-1.5 text-sm">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span className={cn("text-right text-foreground", mono && "font-mono text-xs")}>{children}</span>
+    </div>
+  )
+}
+
+// ─── Toggle row: label + switch ─────────────────────────────────────
+
+function ToggleRow({
+  label,
+  description,
+  checked,
+  onCheckedChange,
+  disabled,
+  busy,
+  testId,
+}: {
+  label: string
+  description?: string
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+  disabled?: boolean
+  busy?: boolean
+  testId?: string
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 rounded-lg border border-border/50 bg-card/50 px-4 py-3">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+          {label}
+          {busy && <LoaderCircle className="h-3 w-3 animate-spin text-muted-foreground" />}
+        </div>
+        {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
+      </div>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} disabled={disabled || busy} data-testid={testId} />
+    </div>
+  )
+}
+
+// ─── Segmented control ──────────────────────────────────────────────
+
+function SegmentedControl<T extends string>({
+  options,
+  value,
+  onChange,
+  disabled,
+}: {
+  options: { value: T; label: string }[]
+  value: T | null
+  onChange: (value: T) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="inline-flex rounded-lg border border-border/60 bg-card/30 p-0.5">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          className={cn(
+            "rounded-md px-3 py-1.5 text-xs font-medium transition-all",
+            value === opt.value
+              ? "bg-foreground/10 text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+          onClick={() => onChange(opt.value)}
+          disabled={disabled || value === opt.value}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+
+
+// ═════════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ═════════════════════════════════════════════════════════════════════
 
 export function CommandSurface() {
   const workspace = useGSDWorkspaceState()
@@ -280,6 +339,8 @@ export function CommandSurface() {
   const currentSessionFile = workspace.boot?.bridge.activeSessionFile ?? workspace.boot?.bridge.sessionState?.sessionFile ?? null
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({})
   const [flowInput, setFlowInput] = useState("")
+
+  // ─── Auto-loaders ──────────────────────────────────────────────────
 
   useEffect(() => {
     if (!commandSurface.open || commandSurface.section !== "model") return
@@ -355,6 +416,22 @@ export function CommandSurface() {
     setFlowInput("")
   }, [activeFlow?.flowId])
 
+  // ─── Toast on action results ───────────────────────────────────────
+
+  useEffect(() => {
+    if (commandSurface.lastError) {
+      toast.error(commandSurface.lastError)
+    }
+  }, [commandSurface.lastError])
+
+  useEffect(() => {
+    if (commandSurface.lastResult) {
+      toast.success(commandSurface.lastResult)
+    }
+  }, [commandSurface.lastResult])
+
+  // ─── Derived state ─────────────────────────────────────────────────
+
   const selectedModelTarget = commandSurface.selectedTarget?.kind === "model" ? commandSurface.selectedTarget : null
   const selectedThinkingTarget = commandSurface.selectedTarget?.kind === "thinking" ? commandSurface.selectedTarget : null
   const selectedAuthTarget = commandSurface.selectedTarget?.kind === "auth" ? commandSurface.selectedTarget : null
@@ -392,7 +469,8 @@ export function CommandSurface() {
   const autoRetryBusy = settingsRequests.autoRetry.pending
   const abortRetryBusy = settingsRequests.abortRetry.pending
   const selectedProviderApiKey = selectedAuthProvider ? apiKeys[selectedAuthProvider.id] ?? "" : ""
-  const surfaceSections = availableSectionsForSurface(commandSurface.activeSurface)
+  const devOverrides = useDevOverrides()
+  const surfaceSections = availableSectionsForSurface(commandSurface.activeSurface, IS_DEV_MODE)
 
   const triggerRecoveryBrowserAction = (actionId: string) => {
     switch (actionId) {
@@ -416,136 +494,570 @@ export function CommandSurface() {
     }
   }
 
-  const renderGitSummaryCard = () => {
-    const result = gitSummary.result
+  // ═══════════════════════════════════════════════════════════════════
+  // SECTION RENDERERS
+  // ═══════════════════════════════════════════════════════════════════
 
-    return (
-      <Card data-testid="command-surface-git-summary">
-        <CardHeader className="gap-3 border-b border-border/60 pb-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <CardTitle className="text-lg">Current-project repo summary</CardTitle>
-              <CardDescription>
-                Read-only Git state from the current project instead of an inert sidebar button.
-              </CardDescription>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void loadGitSummary()}
-              disabled={gitSummaryBusy}
-              data-testid="command-surface-git-refresh"
-            >
-              <RefreshCw className={cn("h-4 w-4", gitSummaryBusy && "animate-spin")} />
-              Refresh repo state
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-5 pt-6">
-          <div className="text-xs text-muted-foreground" data-testid="command-surface-git-state">
-            {gitSummaryBusy
-              ? "Loading current-project Git summary…"
-              : gitSummary.error
-                ? gitSummary.error
-                : result?.kind === "not_repo"
-                  ? result.message
-                  : result
-                    ? `${result.counts.changed} changed · ${result.counts.staged} staged · ${result.counts.dirty} dirty · ${result.counts.untracked} untracked · ${result.counts.conflicts} conflicts`
-                    : "Ready to inspect the current-project repository."}
-          </div>
+  const renderModelSection = () => (
+    <div className="space-y-4" data-testid="command-surface-models">
+      <SectionHeader
+        title="Model"
+        status={
+          <span className="font-mono text-xs text-muted-foreground">{currentModelLabel}</span>
+        }
+        action={
+          <Button type="button" variant="ghost" size="sm" onClick={() => void loadAvailableModels()} disabled={modelBusy} className="h-7 gap-1.5 text-xs">
+            <RefreshCw className={cn("h-3 w-3", modelBusy && "animate-spin")} />
+            Refresh
+          </Button>
+        }
+      />
 
-          {gitSummary.error && (
-            <div className="rounded-xl border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive" data-testid="command-surface-git-error">
-              {gitSummary.error}
-            </div>
-          )}
+      {/* Search filter */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={selectedModelTarget?.query ?? commandSurface.args}
+          onChange={(e) =>
+            selectCommandSurfaceTarget({
+              kind: "model",
+              provider: selectedModelTarget?.provider,
+              modelId: selectedModelTarget?.modelId,
+              query: e.target.value,
+            })
+          }
+          placeholder="Filter models…"
+          className="h-8 pl-9 text-xs"
+        />
+      </div>
 
-          {!gitSummary.error && gitSummaryBusy && !result ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-              Loading current-project repository state…
-            </div>
-          ) : null}
+      {/* Model list */}
+      {modelBusy && commandSurface.availableModels.length === 0 ? (
+        <div className="flex items-center gap-2 py-8 text-xs text-muted-foreground">
+          <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+          Loading models…
+        </div>
+      ) : filteredModels.length > 0 ? (
+        <div className="space-y-1">
+          {filteredModels.map((model) => {
+            const selected = selectedModelTarget?.provider === model.provider && selectedModelTarget?.modelId === model.modelId
+            return (
+              <button
+                key={`${model.provider}/${model.modelId}`}
+                type="button"
+                className={cn(
+                  "group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
+                  selected
+                    ? "bg-foreground/[0.07]"
+                    : "hover:bg-foreground/[0.03]",
+                )}
+                onClick={() =>
+                  selectCommandSurfaceTarget({
+                    kind: "model",
+                    provider: model.provider,
+                    modelId: model.modelId,
+                    query: selectedModelTarget?.query,
+                  })
+                }
+              >
+                {/* Selection indicator */}
+                <div className={cn(
+                  "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors",
+                  selected ? "border-foreground bg-foreground" : "border-foreground/25",
+                )}>
+                  {selected && <Check className="h-2.5 w-2.5 text-background" />}
+                </div>
 
-          {!gitSummary.error && result?.kind === "not_repo" && (
-            <div className="rounded-2xl border border-border/70 bg-background/70 p-4" data-testid="command-surface-git-not-repo">
-              <div className="font-medium text-foreground">No Git repository for this project</div>
-              <div className="mt-2 text-sm text-muted-foreground">{result.message}</div>
-              <div className="mt-3 text-xs text-muted-foreground">{shortenPath(result.project.cwd, 5)}</div>
-            </div>
-          )}
-
-          {!gitSummary.error && result?.kind === "repo" && (
-            <>
-              <div className="grid gap-3 md:grid-cols-2" data-testid="command-surface-git-meta">
-                <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Current branch</div>
-                  <div className="mt-2 font-medium text-foreground" data-testid="command-surface-git-branch">
-                    {result.branch ?? "Detached HEAD"}
+                {/* Model info */}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-foreground">{model.name || model.modelId}</span>
+                    {model.isCurrent && <StatusDot status="ok" />}
                   </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Main branch: {result.mainBranch ?? "Unavailable"}
+                  <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+                    {model.provider}/{model.modelId}
                   </div>
                 </div>
-                <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Scope</div>
-                  <div className="mt-2 font-medium text-foreground">{shortenPath(result.project.repoRoot, 5)}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {result.project.repoRelativePath ? `Project subpath: ${result.project.repoRelativePath}` : "Project root matches repo root"}
-                  </div>
-                </div>
-              </div>
 
-              <div className="flex flex-wrap gap-2" data-testid="command-surface-git-counts">
-                <Badge variant={result.hasChanges ? "default" : "outline"}>{result.hasChanges ? "Dirty" : "Clean"}</Badge>
-                <Badge variant="outline">{result.counts.staged} staged</Badge>
-                <Badge variant="outline">{result.counts.dirty} dirty</Badge>
-                <Badge variant="outline">{result.counts.untracked} untracked</Badge>
-                <Badge variant={result.hasConflicts ? "destructive" : "outline"}>{result.counts.conflicts} conflicts</Badge>
-              </div>
-
-              {result.changedFiles.length > 0 ? (
-                <div className="space-y-3 rounded-2xl border border-border/70 bg-background/70 p-4" data-testid="command-surface-git-files">
-                  <div>
-                    <FieldTitle>Changed files</FieldTitle>
-                    <FieldDescription>
-                      Current-project status derived from Git porcelain parsing; refresh to reload authoritative repo truth.
-                    </FieldDescription>
-                  </div>
-                  <div className="space-y-2">
-                    {result.changedFiles.map((file) => (
-                      <div key={`${file.status}:${file.repoPath}`} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 px-3 py-2 text-sm">
-                        <div className="min-w-0 flex-1 font-mono text-[12px] text-foreground">{file.path}</div>
-                        <div className="flex flex-wrap gap-1.5">
-                          <Badge variant="outline">{file.status}</Badge>
-                          {file.staged && <Badge variant="outline">staged</Badge>}
-                          {file.dirty && <Badge variant="outline">dirty</Badge>}
-                          {file.untracked && <Badge variant="outline">untracked</Badge>}
-                          {file.conflict && <Badge variant="destructive">conflict</Badge>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  {result.truncatedFileCount > 0 && (
-                    <div className="text-xs text-muted-foreground">
-                      {result.truncatedFileCount} additional changed file{result.truncatedFileCount === 1 ? "" : "s"} not shown here.
-                    </div>
+                {/* Badges */}
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {model.isCurrent && (
+                    <span className="rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium text-foreground/70">Active</span>
+                  )}
+                  {model.reasoning && (
+                    <span className="rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium text-foreground/70">Thinking</span>
                   )}
                 </div>
-              ) : (
-                <div className="rounded-2xl border border-border/70 bg-background/70 px-4 py-3 text-sm text-muted-foreground" data-testid="command-surface-git-clean">
-                  No current-project file changes are pending.
-                </div>
-              )}
-            </>
+              </button>
+            )
+          })}
+        </div>
+      ) : (
+        <p className="py-6 text-center text-xs text-muted-foreground">No models matched.</p>
+      )}
+
+      {/* Apply */}
+      <div className="flex justify-end border-t border-border/40 pt-3">
+        <Button
+          type="button"
+          size="sm"
+          onClick={() =>
+            selectedModelTarget?.provider &&
+            selectedModelTarget?.modelId &&
+            void applyModelSelection(selectedModelTarget.provider, selectedModelTarget.modelId)
+          }
+          disabled={!selectedModelTarget?.provider || !selectedModelTarget.modelId || commandSurface.pendingAction === "set_model"}
+          data-testid="command-surface-apply-model"
+          className="h-8 gap-1.5"
+        >
+          {commandSurface.pendingAction === "set_model" ? (
+            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Check className="h-3.5 w-3.5" />
           )}
-        </CardContent>
-      </Card>
+          Apply model
+        </Button>
+      </div>
+    </div>
+  )
+
+  const renderThinkingSection = () => (
+    <div className="space-y-4" data-testid="command-surface-thinking">
+      <SectionHeader
+        title="Thinking level"
+        status={
+          <span className="font-mono text-xs text-muted-foreground">
+            {workspace.boot?.bridge.sessionState?.thinkingLevel ?? "off"}
+          </span>
+        }
+      />
+
+      <div className="space-y-1">
+        {COMMAND_SURFACE_THINKING_LEVELS.map((level) => {
+          const selected = selectedThinkingTarget?.level === level
+          const isCurrent = workspace.boot?.bridge.sessionState?.thinkingLevel === level
+          const description = level === "off" ? "No reasoning overhead" : level === "minimal" ? "Light reasoning" : level === "low" ? "Basic analysis" : level === "medium" ? "Balanced reasoning" : level === "high" ? "Deep analysis" : "Maximum deliberation"
+          return (
+            <button
+              key={level}
+              type="button"
+              className={cn(
+                "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
+                selected ? "bg-foreground/[0.07]" : "hover:bg-foreground/[0.03]",
+              )}
+              onClick={() => selectCommandSurfaceTarget({ kind: "thinking", level })}
+            >
+              <div className={cn(
+                "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors",
+                selected ? "border-foreground bg-foreground" : "border-foreground/25",
+              )}>
+                {selected && <Check className="h-2.5 w-2.5 text-background" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium capitalize text-foreground">{level}</span>
+                  {isCurrent && <StatusDot status="ok" />}
+                </div>
+                <span className="text-xs text-muted-foreground">{description}</span>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="flex justify-end border-t border-border/40 pt-3">
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => selectedThinkingTarget && void applyThinkingLevel(selectedThinkingTarget.level)}
+          disabled={!selectedThinkingTarget || commandSurface.pendingAction === "set_thinking_level"}
+          data-testid="command-surface-apply-thinking"
+          className="h-8 gap-1.5"
+        >
+          {commandSurface.pendingAction === "set_thinking_level" ? (
+            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Check className="h-3.5 w-3.5" />
+          )}
+          Apply
+        </Button>
+      </div>
+    </div>
+  )
+
+  const renderQueueSection = () => (
+    <div className="space-y-5" data-testid="command-surface-queue-settings">
+      <SectionHeader title="Queue modes" />
+
+      {/* Steering mode */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium text-foreground">Steering mode</div>
+            <p className="text-xs text-muted-foreground">How steering messages queue during streaming</p>
+          </div>
+          {settingsRequests.steeringMode.pending && <LoaderCircle className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+        </div>
+        <SegmentedControl
+          options={[
+            { value: "all" as const, label: "Queue all" },
+            { value: "one-at-a-time" as const, label: "One at a time" },
+          ]}
+          value={liveSessionState?.steeringMode ?? null}
+          onChange={(v) => void setSteeringModeFromSurface(v)}
+          disabled={!liveSessionState || queueBusy}
+        />
+        {settingsRequests.steeringMode.error && (
+          <p className="text-xs text-red-400">{settingsRequests.steeringMode.error}</p>
+        )}
+      </div>
+
+      <div className="border-t border-border/30" />
+
+      {/* Follow-up mode */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium text-foreground">Follow-up mode</div>
+            <p className="text-xs text-muted-foreground">How follow-up prompts sequence during a live turn</p>
+          </div>
+          {settingsRequests.followUpMode.pending && <LoaderCircle className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+        </div>
+        <SegmentedControl
+          options={[
+            { value: "all" as const, label: "Queue all" },
+            { value: "one-at-a-time" as const, label: "One at a time" },
+          ]}
+          value={liveSessionState?.followUpMode ?? null}
+          onChange={(v) => void setFollowUpModeFromSurface(v)}
+          disabled={!liveSessionState || queueBusy}
+        />
+        {settingsRequests.followUpMode.error && (
+          <p className="text-xs text-red-400">{settingsRequests.followUpMode.error}</p>
+        )}
+      </div>
+    </div>
+  )
+
+  const renderCompactionSection = () => (
+    <div className="space-y-4" data-testid="command-surface-auto-compaction-settings">
+      <SectionHeader
+        title="Auto-compaction"
+        status={
+          liveSessionState?.isCompacting ? (
+            <span className="flex items-center gap-1.5 text-xs text-amber-400">
+              <LoaderCircle className="h-3 w-3 animate-spin" /> Compacting
+            </span>
+          ) : null
+        }
+      />
+
+      <ToggleRow
+        label="Auto-compact"
+        description="Automatically compact when context thresholds are crossed"
+        checked={liveSessionState?.autoCompactionEnabled ?? false}
+        onCheckedChange={(checked) => void setAutoCompactionFromSurface(checked)}
+        disabled={!liveSessionState || autoCompactionBusy}
+        busy={autoCompactionBusy}
+        testId="command-surface-toggle-auto-compaction"
+      />
+
+      {settingsRequests.autoCompaction.error && (
+        <p className="text-xs text-red-400">{settingsRequests.autoCompaction.error}</p>
+      )}
+      {settingsRequests.autoCompaction.result && (
+        <p className="text-xs text-emerald-400">{settingsRequests.autoCompaction.result}</p>
+      )}
+    </div>
+  )
+
+  const renderRetrySection = () => (
+    <div className="space-y-4" data-testid="command-surface-retry-settings">
+      <SectionHeader
+        title="Retry"
+        status={
+          liveSessionState?.retryInProgress ? (
+            <span className="flex items-center gap-1.5 text-xs text-amber-400">
+              <Radio className="h-3 w-3" /> Attempt {Math.max(1, liveSessionState.retryAttempt)}
+            </span>
+          ) : null
+        }
+      />
+
+      <ToggleRow
+        label="Auto-retry"
+        description="Automatically retry on transient failures"
+        checked={liveSessionState?.autoRetryEnabled ?? false}
+        onCheckedChange={(checked) => void setAutoRetryFromSurface(checked)}
+        disabled={!liveSessionState || autoRetryBusy}
+        busy={autoRetryBusy}
+        testId="command-surface-toggle-auto-retry"
+      />
+
+      {liveSessionState?.retryInProgress && (
+        <div className="flex items-center justify-between rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+          <div>
+            <div className="text-sm font-medium text-foreground">Retry in progress</div>
+            <p className="text-xs text-muted-foreground">Attempt {Math.max(1, liveSessionState.retryAttempt)} is active</p>
+          </div>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            onClick={() => void abortRetryFromSurface()}
+            disabled={abortRetryBusy}
+            data-testid="command-surface-abort-retry"
+            className="h-7 gap-1.5 text-xs"
+          >
+            {abortRetryBusy ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+            Abort
+          </Button>
+        </div>
+      )}
+
+      {settingsRequests.autoRetry.error && <p className="text-xs text-red-400">{settingsRequests.autoRetry.error}</p>}
+      {settingsRequests.abortRetry.error && <p className="text-xs text-red-400">{settingsRequests.abortRetry.error}</p>}
+    </div>
+  )
+
+  const renderRecoverySection = () => {
+    const diag = recoveryDiagnostics
+    return (
+      <div className="space-y-4" data-testid="command-surface-recovery">
+        <SectionHeader
+          title="Recovery"
+          status={
+            diag ? (
+              <StatusDot status={diag.summary.tone === "healthy" ? "ok" : diag.summary.tone === "warning" ? "warning" : "error"} />
+            ) : null
+          }
+          action={
+            <Button type="button" variant="ghost" size="sm" onClick={() => void loadRecoveryDiagnostics()} disabled={recoveryBusy} className="h-7 gap-1.5 text-xs">
+              <RefreshCw className={cn("h-3 w-3", recoveryBusy && "animate-spin")} />
+              Refresh
+            </Button>
+          }
+        />
+
+        {recovery.error && (
+          <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2.5 text-xs text-red-400">{recovery.error}</div>
+        )}
+
+        {recoveryBusy && !diag && (
+          <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
+            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+            Loading diagnostics…
+          </div>
+        )}
+
+        {diag?.status === "unavailable" && !recovery.error && (
+          <div className="space-y-1 rounded-lg border border-border/50 bg-card/50 px-4 py-3">
+            <div className="text-sm font-medium text-foreground">{diag.summary.label}</div>
+            <p className="text-xs text-muted-foreground">{diag.summary.detail}</p>
+          </div>
+        )}
+
+        {diag && diag.status !== "unavailable" && (
+          <>
+            {/* Summary stats */}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-lg border border-border/50 bg-card/50 px-3 py-2.5">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Validation</div>
+                <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">{diag.summary.validationCount}</div>
+              </div>
+              <div className="rounded-lg border border-border/50 bg-card/50 px-3 py-2.5">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Doctor</div>
+                <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">{diag.summary.doctorIssueCount}</div>
+              </div>
+            </div>
+
+            {/* Status badges */}
+            <div className="flex flex-wrap gap-1.5">
+              {diag.summary.retryInProgress && <Badge variant="default" className="text-[10px]">Retry {Math.max(1, diag.summary.retryAttempt)}</Badge>}
+              {diag.summary.compactionActive && <Badge variant="default" className="text-[10px]">Compacting</Badge>}
+              {diag.summary.lastFailurePhase && <Badge variant="destructive" className="text-[10px]">Phase {diag.summary.lastFailurePhase}</Badge>}
+              {recovery.stale && <Badge variant="outline" className="text-[10px]">Stale</Badge>}
+            </div>
+
+            {/* Last failure */}
+            {diag.bridge.lastFailure && (
+              <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2.5">
+                <div className="text-xs font-medium text-red-400">Last failure</div>
+                <p className="mt-1 text-xs text-red-400/80">{diag.bridge.lastFailure.message}</p>
+                <div className="mt-1.5 flex gap-3 text-[10px] text-red-400/60">
+                  <span>Phase: {diag.bridge.lastFailure.phase}</span>
+                  <span>{formatRelativeTime(diag.bridge.lastFailure.at)}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Validation issues */}
+            {diag.validation.topIssues.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs font-medium text-muted-foreground">Validation issues</div>
+                {diag.validation.topIssues.map((issue) => (
+                  <div key={`${issue.code}:${issue.file ?? issue.message}`} className="rounded-lg border border-border/50 bg-card/50 px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <Badge variant={issue.severity === "error" ? "destructive" : "outline"} className="text-[10px]">{issue.code}</Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">{issue.message}</p>
+                    {issue.suggestion && <p className="mt-0.5 text-[11px] text-muted-foreground/70">→ {issue.suggestion}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Doctor issues */}
+            {diag.doctor.topIssues.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs font-medium text-muted-foreground">Doctor issues</div>
+                {diag.doctor.topIssues.map((issue) => (
+                  <div key={`${issue.code}:${issue.unitId ?? issue.message}`} className="rounded-lg border border-border/50 bg-card/50 px-3 py-2">
+                    <Badge variant="outline" className="text-[10px]">{issue.code}</Badge>
+                    <p className="mt-1 text-xs text-muted-foreground">{issue.message}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Interrupted run */}
+            {diag.interruptedRun.detected && (
+              <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5">
+                <div className="text-xs font-medium text-amber-400">Interrupted run detected</div>
+                <p className="mt-1 text-xs text-amber-400/80">{diag.interruptedRun.detail}</p>
+                <div className="mt-1.5 flex flex-wrap gap-3 text-[10px] text-amber-400/60">
+                  <span>{diag.interruptedRun.counts.toolCalls} tools</span>
+                  <span>{diag.interruptedRun.counts.filesWritten} files</span>
+                  <span>{diag.interruptedRun.counts.errors} errors</span>
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            {diag.actions.browser.length > 0 && (
+              <div className="flex flex-wrap gap-2 border-t border-border/30 pt-3">
+                {diag.actions.browser.map((action) => (
+                  <Button
+                    key={action.id}
+                    type="button"
+                    variant={action.emphasis === "danger" ? "destructive" : action.emphasis === "primary" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => triggerRecoveryBrowserAction(action.id)}
+                    disabled={action.id === "refresh_diagnostics" ? recoveryBusy : false}
+                    data-testid={`command-surface-recovery-action-${action.id}`}
+                    className="h-7 text-xs"
+                  >
+                    {action.label}
+                  </Button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     )
   }
 
-  const renderSessionBrowserCard = (mode: "resume" | "name") => {
+  const renderGitSection = () => {
+    const result = gitSummary.result
+    return (
+      <div className="space-y-4" data-testid="command-surface-git-summary">
+        <SectionHeader
+          title="Git"
+          status={
+            result?.kind === "repo" ? (
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <StatusDot status={result.hasChanges ? "warning" : "ok"} />
+                {result.branch ?? "detached"}
+              </span>
+            ) : null
+          }
+          action={
+            <Button type="button" variant="ghost" size="sm" onClick={() => void loadGitSummary()} disabled={gitSummaryBusy} className="h-7 gap-1.5 text-xs">
+              <RefreshCw className={cn("h-3 w-3", gitSummaryBusy && "animate-spin")} />
+              Refresh
+            </Button>
+          }
+        />
+
+        {gitSummaryBusy && !result && (
+          <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
+            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+            Loading repo state…
+          </div>
+        )}
+
+        {gitSummary.error && (
+          <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2.5 text-xs text-red-400">{gitSummary.error}</div>
+        )}
+
+        {!gitSummary.error && result?.kind === "not_repo" && (
+          <div className="space-y-1 rounded-lg border border-border/50 bg-card/50 px-4 py-3">
+            <div className="text-sm font-medium text-foreground">No Git repository</div>
+            <p className="text-xs text-muted-foreground">{result.message}</p>
+          </div>
+        )}
+
+        {!gitSummary.error && result?.kind === "repo" && (
+          <>
+            {/* Branch + scope */}
+            <div className="space-y-0.5 divide-y divide-border/30 rounded-lg border border-border/50 bg-card/50">
+              <div className="px-4 py-2.5">
+                <KV label="Branch" mono>{result.branch ?? "Detached HEAD"}</KV>
+                <KV label="Main" mono>{result.mainBranch ?? "—"}</KV>
+              </div>
+              <div className="px-4 py-2.5">
+                <KV label="Root" mono>{shortenPath(result.project.repoRoot, 4)}</KV>
+                {result.project.repoRelativePath && (
+                  <KV label="Subpath" mono>{result.project.repoRelativePath}</KV>
+                )}
+              </div>
+            </div>
+
+            {/* Counts */}
+            <div className="grid grid-cols-4 gap-2" data-testid="command-surface-git-counts">
+              {[
+                { label: "Staged", count: result.counts.staged },
+                { label: "Dirty", count: result.counts.dirty },
+                { label: "Untracked", count: result.counts.untracked },
+                { label: "Conflicts", count: result.counts.conflicts, danger: true },
+              ].map(({ label, count, danger }) => (
+                <div key={label} className="rounded-lg border border-border/50 bg-card/50 px-3 py-2 text-center">
+                  <div className={cn("text-lg font-semibold tabular-nums", danger && count > 0 ? "text-red-400" : "text-foreground")}>{count}</div>
+                  <div className="text-[10px] text-muted-foreground">{label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Changed files */}
+            {result.changedFiles.length > 0 && (
+              <div className="space-y-1" data-testid="command-surface-git-files">
+                <div className="text-xs font-medium text-muted-foreground">Changed files</div>
+                {result.changedFiles.map((file) => (
+                  <div key={`${file.status}:${file.repoPath}`} className="flex items-center justify-between gap-3 rounded-md px-3 py-1.5 text-xs hover:bg-foreground/[0.03]">
+                    <span className="min-w-0 truncate font-mono text-[11px] text-foreground">{file.path}</span>
+                    <div className="flex shrink-0 gap-1">
+                      <span className="rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] text-muted-foreground">{file.status}</span>
+                      {file.conflict && <span className="rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] text-red-400">conflict</span>}
+                    </div>
+                  </div>
+                ))}
+                {result.truncatedFileCount > 0 && (
+                  <p className="px-3 text-[11px] text-muted-foreground">+{result.truncatedFileCount} more</p>
+                )}
+              </div>
+            )}
+
+            {result.changedFiles.length === 0 && (
+              <p className="text-xs text-muted-foreground">Working tree clean.</p>
+            )}
+          </>
+        )}
+      </div>
+    )
+  }
+
+  const renderSessionBrowserSection = (mode: "resume" | "name") => {
     const renameMode = mode === "name"
     const selectedSessionPath = renameMode ? selectedNameTarget?.sessionPath : selectedResumeTarget?.sessionPath
     const selectedSession = selectedSessionPath
@@ -553,1459 +1065,753 @@ export function CommandSurface() {
       : null
 
     return (
-      <Card data-testid={renameMode ? "command-surface-name" : "command-surface-resume"}>
-        <CardHeader className="gap-3 border-b border-border/60 pb-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <CardTitle className="text-lg">{renameMode ? "Rename a project session" : "Resume another session"}</CardTitle>
-              <CardDescription>
-                {renameMode
-                  ? "Use the current-project browser surface to rename the active or any stored project session."
-                  : `Current live session: ${currentSessionLabel ?? "session pending"}`}
-              </CardDescription>
-            </div>
-            <Badge variant="outline">
-              {sessionBrowser.loaded
-                ? `${sessionBrowser.returnedSessions}/${sessionBrowser.totalSessions} current-project`
-                : "Current project"}
-            </Badge>
+      <div className="space-y-4" data-testid={renameMode ? "command-surface-name" : "command-surface-resume"}>
+        <SectionHeader
+          title={renameMode ? "Rename" : "Resume"}
+          status={
+            !renameMode ? (
+              <span className="text-xs text-muted-foreground">{currentSessionLabel ?? "pending"}</span>
+            ) : null
+          }
+        />
+
+        {/* Search bar */}
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={sessionBrowser.query}
+              onChange={(e) => updateSessionBrowserState({ query: e.target.value })}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void loadSessionBrowser() } }}
+              placeholder="Search sessions…"
+              className="h-8 pl-9 text-xs"
+              disabled={sessionBrowserBusy}
+              data-testid="command-surface-session-browser-query"
+            />
           </div>
-        </CardHeader>
-        <CardContent className="space-y-5 pt-6">
-          <div className="space-y-4 rounded-2xl border border-border/70 bg-background/70 p-4">
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="min-w-[16rem] flex-1 space-y-2">
-                <FieldLabel htmlFor="command-surface-session-browser-query">Search current-project sessions</FieldLabel>
-                <Input
-                  id="command-surface-session-browser-query"
-                  data-testid="command-surface-session-browser-query"
-                  value={sessionBrowser.query}
-                  onChange={(event) => updateSessionBrowserState({ query: event.target.value })}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault()
-                      void loadSessionBrowser()
-                    }
-                  }}
-                  placeholder="Search names, ids, paths, and session text"
-                  disabled={sessionBrowserBusy}
-                />
-                <FieldDescription>
-                  Querying stays current-project scoped and uses the dedicated browser contract instead of widening boot.
-                </FieldDescription>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void loadSessionBrowser()}
-                disabled={sessionBrowserBusy}
-                data-testid="command-surface-session-browser-refresh"
-              >
-                <RefreshCw className={cn("h-4 w-4", sessionBrowserBusy && "animate-spin")} />
-                Refresh results
-              </Button>
-            </div>
+          <Button type="button" variant="ghost" size="sm" onClick={() => void loadSessionBrowser()} disabled={sessionBrowserBusy} className="h-8 w-8 p-0">
+            <RefreshCw className={cn("h-3.5 w-3.5", sessionBrowserBusy && "animate-spin")} />
+          </Button>
+        </div>
 
-            <div className="flex flex-wrap gap-2">
-              {(["threaded", "recent", "relevance"] as const).map((sortMode) => (
-                <Button
-                  key={sortMode}
-                  type="button"
-                  variant={sessionBrowser.sortMode === sortMode ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => {
-                    updateSessionBrowserState({ sortMode })
-                    void loadSessionBrowser({ sortMode })
-                  }}
-                  disabled={sessionBrowserBusy}
-                  data-testid={`command-surface-session-browser-sort-${sortMode}`}
-                >
-                  {sortMode}
-                </Button>
-              ))}
-              <Button
-                type="button"
-                variant={sessionBrowser.nameFilter === "named" ? "default" : "outline"}
-                size="sm"
-                onClick={() => {
-                  const nextFilter = sessionBrowser.nameFilter === "named" ? "all" : "named"
-                  updateSessionBrowserState({ nameFilter: nextFilter })
-                  void loadSessionBrowser({ nameFilter: nextFilter })
-                }}
-                disabled={sessionBrowserBusy}
-                data-testid="command-surface-session-browser-named-only"
-              >
-                {sessionBrowser.nameFilter === "named" ? "Named only" : "All sessions"}
-              </Button>
-            </div>
-
-            <div className="text-xs text-muted-foreground" data-testid="command-surface-session-browser-meta">
-              {sessionBrowser.scope === "current_project"
-                ? `${sessionBrowser.returnedSessions} visible of ${sessionBrowser.totalSessions} current-project sessions`
-                : "Current-project session browser"}
-              {sessionBrowser.query.trim() ? ` · query: “${sessionBrowser.query.trim()}”` : ""}
-            </div>
-
-            {sessionBrowser.error && (
-              <div className="rounded-xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive" data-testid="command-surface-session-browser-error">
-                {sessionBrowser.error}
-              </div>
+        {/* Sort/filter controls */}
+        <div className="flex items-center gap-2">
+          <SegmentedControl
+            options={[
+              { value: "threaded" as const, label: "Threaded" },
+              { value: "recent" as const, label: "Recent" },
+              { value: "relevance" as const, label: "Relevance" },
+            ]}
+            value={sessionBrowser.sortMode}
+            onChange={(v) => { updateSessionBrowserState({ sortMode: v }); void loadSessionBrowser({ sortMode: v }) }}
+            disabled={sessionBrowserBusy}
+          />
+          <button
+            type="button"
+            className={cn(
+              "rounded-md border border-border/60 px-2.5 py-1.5 text-[11px] font-medium transition-colors",
+              sessionBrowser.nameFilter === "named" ? "bg-foreground/10 text-foreground" : "text-muted-foreground hover:text-foreground",
             )}
+            onClick={() => {
+              const next = sessionBrowser.nameFilter === "named" ? "all" : "named"
+              updateSessionBrowserState({ nameFilter: next })
+              void loadSessionBrowser({ nameFilter: next })
+            }}
+            disabled={sessionBrowserBusy}
+          >
+            Named
+          </button>
+        </div>
+
+        {sessionBrowser.error && (
+          <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2.5 text-xs text-red-400">{sessionBrowser.error}</div>
+        )}
+
+        {/* Session list */}
+        {sessionBrowserBusy && sessionBrowser.sessions.length === 0 ? (
+          <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
+            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+            Loading sessions…
           </div>
-
-          {sessionBrowserBusy && sessionBrowser.sessions.length === 0 ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-              Loading current-project sessions…
-            </div>
-          ) : sessionBrowser.sessions.length > 0 ? (
-            <div className="grid gap-3" data-testid="command-surface-session-browser-results">
-              {sessionBrowser.sessions.map((session) => {
-                const selected = session.path === selectedSessionPath
-                const draftName =
-                  renameMode && selectedNameTarget?.sessionPath === session.path ? selectedNameTarget.name : session.name ?? ""
-                return (
-                  <button
-                    key={session.path}
-                    type="button"
-                    className={cn(
-                      "rounded-2xl border px-4 py-3 text-left transition-all",
-                      selected
-                        ? "border-foreground/40 bg-foreground/[0.045] shadow-sm"
-                        : "border-border/70 bg-background/70 hover:border-foreground/20 hover:bg-accent/40",
-                    )}
-                    style={{ paddingLeft: `${1 + session.depth * 0.85}rem` }}
-                    onClick={() =>
-                      renameMode
-                        ? selectCommandSurfaceTarget({ kind: "name", sessionPath: session.path, name: draftName })
-                        : selectCommandSurfaceTarget({ kind: "resume", sessionPath: session.path })
-                    }
-                    data-testid={`command-surface-session-browser-item-${session.id}`}
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <div className="font-medium text-foreground">{session.name || session.firstMessage || session.id}</div>
-                          {session.isActive && <Badge>Active</Badge>}
-                          {session.name && !session.isActive && <Badge variant="outline">Named</Badge>}
-                          {session.depth > 0 && <Badge variant="outline">Depth {session.depth}</Badge>}
-                        </div>
-                        {session.name && (
-                          <div className="mt-2 text-sm text-muted-foreground">{session.firstMessage}</div>
-                        )}
-                        <div className="mt-2 text-xs text-muted-foreground">{shortenPath(session.path)}</div>
-                        <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                          <span>{session.messageCount} messages</span>
-                          <span>{formatRelativeTime(session.modifiedAt)}</span>
-                          <span>{session.isLastInThread ? "Thread end" : "Thread continues"}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-          ) : (
-            <div className="rounded-xl border border-border/70 bg-background/70 px-4 py-3 text-sm text-muted-foreground">
-              No current-project sessions matched the current browser query.
-            </div>
-          )}
-
-          {renameMode ? (
-            <div className="space-y-3 rounded-2xl border border-border/70 bg-background/70 p-4">
-              <FieldLabel htmlFor="command-surface-rename-input">Session name</FieldLabel>
-              <Input
-                id="command-surface-rename-input"
-                data-testid="command-surface-rename-input"
-                value={selectedNameTarget?.name ?? ""}
-                onChange={(event) =>
-                  selectCommandSurfaceTarget({
-                    kind: "name",
-                    sessionPath: selectedNameTarget?.sessionPath,
-                    name: event.target.value,
-                  })
-                }
-                placeholder="Enter a session display name"
-                disabled={!selectedNameTarget?.sessionPath || renameBusy}
-              />
-              <FieldDescription>
-                {selectedRenameSession
-                  ? `Selected session: ${selectedRenameSession.name || selectedRenameSession.id}`
-                  : "Select a session above to rename it."}
-              </FieldDescription>
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-xs text-muted-foreground" data-testid="command-surface-rename-state">
-                  {renameBusy
-                    ? "Saving session name…"
-                    : commandSurface.renameRequest.error ?? commandSurface.renameRequest.result ?? "Ready to rename"}
-                </div>
-                <Button
+        ) : sessionBrowser.sessions.length > 0 ? (
+          <div className="space-y-1" data-testid="command-surface-session-browser-results">
+            {sessionBrowser.sessions.map((session) => {
+              const selected = session.path === selectedSessionPath
+              return (
+                <button
+                  key={session.path}
                   type="button"
+                  className={cn(
+                    "flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
+                    selected ? "bg-foreground/[0.07]" : "hover:bg-foreground/[0.03]",
+                  )}
+                  style={{ paddingLeft: `${0.75 + session.depth * 0.6}rem` }}
                   onClick={() =>
-                    selectedNameTarget?.sessionPath && void renameSessionFromSurface(selectedNameTarget.sessionPath, selectedNameTarget.name)
+                    renameMode
+                      ? selectCommandSurfaceTarget({ kind: "name", sessionPath: session.path, name: selectedNameTarget?.sessionPath === session.path ? (selectedNameTarget?.name ?? session.name ?? "") : (session.name ?? "") })
+                      : selectCommandSurfaceTarget({ kind: "resume", sessionPath: session.path })
                   }
-                  disabled={!selectedNameTarget?.sessionPath || !selectedNameTarget.name.trim() || renameBusy}
-                  data-testid="command-surface-apply-rename"
+                  data-testid={`command-surface-session-browser-item-${session.id}`}
                 >
-                  {renameBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <PencilLine className="h-4 w-4" />}
-                  Apply session name
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-xs text-muted-foreground" data-testid="command-surface-resume-state">
-                {resumeBusy
-                  ? "Switching live session…"
-                  : commandSurface.resumeRequest.error ?? commandSurface.resumeRequest.result ?? "Select a session to resume it live"}
-              </div>
+                  <div className={cn(
+                    "mt-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors",
+                    selected ? "border-foreground bg-foreground" : "border-foreground/25",
+                  )}>
+                    {selected && <Check className="h-2.5 w-2.5 text-background" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-medium text-foreground">
+                        {session.name || session.firstMessage || session.id}
+                      </span>
+                      {session.isActive && <StatusDot status="ok" />}
+                    </div>
+                    {session.name && session.firstMessage && (
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">{session.firstMessage}</p>
+                    )}
+                    <div className="mt-0.5 flex gap-3 text-[11px] text-muted-foreground/70">
+                      <span>{session.messageCount} msgs</span>
+                      <span>{formatRelativeTime(session.modifiedAt)}</span>
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        ) : (
+          <p className="py-4 text-center text-xs text-muted-foreground">No sessions matched.</p>
+        )}
+
+        {sessionBrowser.loaded && (
+          <p className="text-[11px] text-muted-foreground">
+            {sessionBrowser.returnedSessions} of {sessionBrowser.totalSessions} sessions
+          </p>
+        )}
+
+        {/* Rename controls */}
+        {renameMode && (
+          <div className="space-y-3 border-t border-border/30 pt-3">
+            <div className="flex gap-2">
+              <Input
+                value={selectedNameTarget?.name ?? ""}
+                onChange={(e) =>
+                  selectCommandSurfaceTarget({ kind: "name", sessionPath: selectedNameTarget?.sessionPath, name: e.target.value })
+                }
+                placeholder="Session name"
+                className="h-8 flex-1 text-xs"
+                disabled={!selectedNameTarget?.sessionPath || renameBusy}
+                data-testid="command-surface-rename-input"
+              />
               <Button
                 type="button"
-                onClick={() => selectedResumeTarget?.sessionPath && void switchSessionFromSurface(selectedResumeTarget.sessionPath)}
-                disabled={!selectedResumeTarget?.sessionPath || resumeBusy}
-                data-testid="command-surface-apply-resume"
+                size="sm"
+                onClick={() => selectedNameTarget?.sessionPath && void renameSessionFromSurface(selectedNameTarget.sessionPath, selectedNameTarget.name)}
+                disabled={!selectedNameTarget?.sessionPath || !selectedNameTarget.name.trim() || renameBusy}
+                data-testid="command-surface-apply-rename"
+                className="h-8 gap-1.5"
               >
-                {resumeBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ArrowRightLeft className="h-4 w-4" />}
-                Switch session
+                {renameBusy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <PencilLine className="h-3.5 w-3.5" />}
+                Rename
               </Button>
             </div>
-          )}
-        </CardContent>
-      </Card>
+            {commandSurface.renameRequest.error && <p className="text-xs text-red-400">{commandSurface.renameRequest.error}</p>}
+            {commandSurface.renameRequest.result && <p className="text-xs text-emerald-400">{commandSurface.renameRequest.result}</p>}
+          </div>
+        )}
+
+        {/* Resume controls */}
+        {!renameMode && (
+          <div className="flex items-center justify-between border-t border-border/30 pt-3">
+            <span className="text-xs text-muted-foreground" data-testid="command-surface-resume-state">
+              {resumeBusy ? "Switching…" : commandSurface.resumeRequest.error ?? commandSurface.resumeRequest.result ?? "Select a session"}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => selectedResumeTarget?.sessionPath && void switchSessionFromSurface(selectedResumeTarget.sessionPath)}
+              disabled={!selectedResumeTarget?.sessionPath || resumeBusy}
+              data-testid="command-surface-apply-resume"
+              className="h-8 gap-1.5"
+            >
+              {resumeBusy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <ArrowRightLeft className="h-3.5 w-3.5" />}
+              Switch
+            </Button>
+          </div>
+        )}
+      </div>
     )
   }
 
-  return (
-    <Sheet open={commandSurface.open} onOpenChange={(open) => !open && closeCommandSurface()}>
-      <SheetContent side="right" className="sm:max-w-2xl" data-testid="command-surface">
-        <SheetHeader className="border-b border-border/70">
-          <div className="flex items-center gap-2">
-            <Settings2 className="h-4 w-4 text-muted-foreground" />
-            <SheetTitle data-testid="command-surface-title">{surfaceTitle(commandSurface.activeSurface)}</SheetTitle>
-            {commandSurface.activeSurface && (
-              <Badge variant="outline" data-testid="command-surface-kind">
-                /{commandSurface.activeSurface}
-              </Badge>
-            )}
-          </div>
-          <SheetDescription>{surfaceDescription(commandSurface.activeSurface)}</SheetDescription>
-        </SheetHeader>
+  const renderForkSection = () => (
+    <div className="space-y-4" data-testid="command-surface-fork">
+      <SectionHeader
+        title="Fork"
+        action={
+          <Button type="button" variant="ghost" size="sm" onClick={() => void loadForkMessages()} disabled={forkBusy} className="h-7 gap-1.5 text-xs">
+            <RefreshCw className={cn("h-3 w-3", commandSurface.pendingAction === "load_fork_messages" && "animate-spin")} />
+            Refresh
+          </Button>
+        }
+      />
 
-        <div className="flex-1 overflow-y-auto px-4 pb-4">
-          <div className="sticky top-0 z-10 -mx-4 border-b border-border/60 bg-background/95 px-4 py-3 backdrop-blur">
-            <div className="flex flex-wrap gap-2" data-testid="command-surface-sections">
-              {surfaceSections.map((section) => (
-                <Button
-                  key={section}
-                  type="button"
-                  variant={commandSurface.section === section ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setCommandSurfaceSection(section)}
-                  data-testid={`command-surface-section-${section}`}
-                >
-                  {sectionIcon(section)}
-                  {sectionLabel(section)}
-                </Button>
-              ))}
+      {forkBusy && commandSurface.forkMessages.length === 0 ? (
+        <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
+          <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+          Loading fork points…
+        </div>
+      ) : commandSurface.forkMessages.length > 0 ? (
+        <div className="space-y-1">
+          {commandSurface.forkMessages.map((message) => {
+            const selected = selectedForkTarget?.entryId === message.entryId
+            return (
+              <button
+                key={message.entryId}
+                type="button"
+                className={cn(
+                  "flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
+                  selected ? "bg-foreground/[0.07]" : "hover:bg-foreground/[0.03]",
+                )}
+                onClick={() => selectCommandSurfaceTarget({ kind: "fork", entryId: message.entryId })}
+              >
+                <div className={cn(
+                  "mt-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors",
+                  selected ? "border-foreground bg-foreground" : "border-foreground/25",
+                )}>
+                  {selected && <Check className="h-2.5 w-2.5 text-background" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-mono text-[10px] text-muted-foreground/60">{message.entryId}</div>
+                  <p className="mt-0.5 text-sm text-foreground">{message.text}</p>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      ) : (
+        <p className="py-4 text-center text-xs text-muted-foreground">No fork points available yet.</p>
+      )}
+
+      <div className="flex justify-end border-t border-border/40 pt-3">
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => selectedForkTarget?.entryId && void forkSessionFromSurface(selectedForkTarget.entryId)}
+          disabled={!selectedForkTarget?.entryId || commandSurface.pendingAction === "fork_session"}
+          data-testid="command-surface-apply-fork"
+          className="h-8 gap-1.5"
+        >
+          {commandSurface.pendingAction === "fork_session" ? (
+            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <GitBranch className="h-3.5 w-3.5" />
+          )}
+          Create fork
+        </Button>
+      </div>
+    </div>
+  )
+
+  const renderSessionSection = () => (
+    <div className="space-y-4" data-testid="command-surface-session">
+      <SectionHeader
+        title="Session"
+        status={
+          <span className="text-xs text-muted-foreground">{currentSessionLabel ?? "pending"}</span>
+        }
+        action={
+          <Button type="button" variant="ghost" size="sm" onClick={() => void loadSessionStats()} disabled={sessionBusy} className="h-7 gap-1.5 text-xs">
+            <RefreshCw className={cn("h-3 w-3", commandSurface.pendingAction === "load_session_stats" && "animate-spin")} />
+            Refresh
+          </Button>
+        }
+      />
+
+      {commandSurface.sessionStats ? (
+        <>
+          {/* Token & cost grid */}
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { label: "Input", value: formatTokens(commandSurface.sessionStats.tokens.input) },
+              { label: "Output", value: formatTokens(commandSurface.sessionStats.tokens.output) },
+              { label: "Total", value: formatTokens(commandSurface.sessionStats.tokens.total) },
+            ].map(({ label, value }) => (
+              <div key={label} className="rounded-lg border border-border/50 bg-card/50 px-3 py-2.5 text-center">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+                <div className="mt-1 text-sm font-semibold tabular-nums text-foreground">{value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Message breakdown */}
+          <div className="divide-y divide-border/30 rounded-lg border border-border/50 bg-card/50">
+            <div className="px-4 py-2">
+              <KV label="User messages">{commandSurface.sessionStats.userMessages}</KV>
+              <KV label="Assistant messages">{commandSurface.sessionStats.assistantMessages}</KV>
+              <KV label="Tool calls">{commandSurface.sessionStats.toolCalls}</KV>
+              <KV label="Tool results">{commandSurface.sessionStats.toolResults}</KV>
             </div>
-            {commandSurface.section && (
-              <p className="mt-2 text-xs text-muted-foreground">{sectionDescription(commandSurface.section)}</p>
-            )}
+            <div className="px-4 py-2">
+              <KV label="Total messages">{commandSurface.sessionStats.totalMessages}</KV>
+              <KV label="Cost">{formatCost(commandSurface.sessionStats.cost)}</KV>
+              {commandSurface.sessionStats.tokens.cacheRead > 0 && (
+                <KV label="Cache read">{formatTokens(commandSurface.sessionStats.tokens.cacheRead)}</KV>
+              )}
+            </div>
           </div>
+        </>
+      ) : (
+        <p className="py-4 text-center text-xs text-muted-foreground">Refresh to load session stats.</p>
+      )}
 
-          <div className="space-y-4 pt-4">
-            {commandSurface.lastError && (
-              <div
-                className="rounded-xl border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-destructive"
-                data-testid="command-surface-error"
-              >
-                <div className="flex items-start gap-3">
-                  <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-                  <div>{commandSurface.lastError}</div>
-                </div>
-              </div>
+      {/* Export */}
+      <div className="space-y-3 border-t border-border/30 pt-3">
+        <div className="text-xs font-medium text-muted-foreground">Export</div>
+        <div className="flex gap-2">
+          <Input
+            value={selectedSessionTarget?.outputPath ?? ""}
+            onChange={(e) => selectCommandSurfaceTarget({ kind: "session", outputPath: e.target.value })}
+            placeholder="Output path (optional)"
+            className="h-8 flex-1 text-xs"
+            disabled={commandSurface.pendingAction === "export_html"}
+            data-testid="command-surface-export-path"
+          />
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => void exportSessionFromSurface(selectedSessionTarget?.outputPath)}
+            disabled={commandSurface.pendingAction === "export_html"}
+            data-testid="command-surface-export-session"
+            className="h-8 gap-1.5"
+          >
+            {commandSurface.pendingAction === "export_html" ? (
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download className="h-3.5 w-3.5" />
             )}
+            Export HTML
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
 
-            {commandSurface.lastResult && !commandSurface.lastError && (
-              <div
-                className="rounded-xl border border-success/25 bg-success/10 px-4 py-3 text-sm text-success"
-                data-testid="command-surface-result"
-              >
-                <div className="flex items-start gap-3">
-                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-                  <div>{commandSurface.lastResult}</div>
-                </div>
-              </div>
-            )}
+  const renderCompactSection = () => (
+    <div className="space-y-4" data-testid="command-surface-compact">
+      <SectionHeader
+        title="Manual compact"
+        status={
+          compactBusy ? (
+            <span className="flex items-center gap-1.5 text-xs text-amber-400">
+              <LoaderCircle className="h-3 w-3 animate-spin" /> Working
+            </span>
+          ) : null
+        }
+      />
 
-            {commandSurface.section === "git" && renderGitSummaryCard()}
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-muted-foreground" htmlFor="command-surface-compact-instructions">
+          Custom instructions
+        </label>
+        <Textarea
+          id="command-surface-compact-instructions"
+          data-testid="command-surface-compact-instructions"
+          value={selectedCompactTarget?.customInstructions ?? ""}
+          onChange={(e) => selectCommandSurfaceTarget({ kind: "compact", customInstructions: e.target.value })}
+          placeholder="Tell compaction what to preserve or emphasize…"
+          rows={4}
+          disabled={compactBusy}
+          className="text-xs"
+        />
+      </div>
 
-            {commandSurface.section === "model" && (
-              <Card data-testid="command-surface-models">
-                <CardHeader className="gap-3 border-b border-border/60 pb-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <CardTitle className="text-lg">Live model selection</CardTitle>
-                      <CardDescription>
-                        Current session model: <span className="font-mono text-xs text-foreground">{currentModelLabel}</span>
-                      </CardDescription>
-                    </div>
-                    <Button type="button" variant="outline" size="sm" onClick={() => void loadAvailableModels()} disabled={modelBusy}>
-                      <RefreshCw className={cn("h-4 w-4", modelBusy && "animate-spin")} />
-                      Refresh models
-                    </Button>
-                  </div>
-                  {modelQuery && (
-                    <div className="text-xs text-muted-foreground">Showing models matching “{modelQuery}”.</div>
-                  )}
-                </CardHeader>
-                <CardContent className="space-y-3 pt-6">
-                  {modelBusy && commandSurface.availableModels.length === 0 ? (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                      Loading models from the live bridge…
-                    </div>
-                  ) : filteredModels.length > 0 ? (
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {filteredModels.map((model) => {
-                        const selected =
-                          selectedModelTarget?.provider === model.provider &&
-                          selectedModelTarget?.modelId === model.modelId
-                        return (
-                          <button
-                            key={`${model.provider}/${model.modelId}`}
-                            type="button"
-                            className={cn(
-                              "rounded-2xl border px-4 py-3 text-left transition-all",
-                              selected
-                                ? "border-foreground/40 bg-foreground/[0.045] shadow-sm"
-                                : "border-border/70 bg-background/70 hover:border-foreground/20 hover:bg-accent/40",
-                            )}
-                            onClick={() =>
-                              selectCommandSurfaceTarget({
-                                kind: "model",
-                                provider: model.provider,
-                                modelId: model.modelId,
-                                query: selectedModelTarget?.query,
-                              })
-                            }
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="font-medium text-foreground">{model.name || model.modelId}</div>
-                                <div className="mt-1 font-mono text-[11px] text-muted-foreground">
-                                  {model.provider}/{model.modelId}
-                                </div>
-                              </div>
-                              <div className="flex flex-wrap justify-end gap-1">
-                                {model.isCurrent && <Badge>Current</Badge>}
-                                {model.reasoning && <Badge variant="outline">Thinking</Badge>}
-                              </div>
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-border/70 bg-background/70 px-4 py-3 text-sm text-muted-foreground">
-                      No models matched the current filter.
-                    </div>
-                  )}
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => void compactSessionFromSurface(selectedCompactTarget?.customInstructions)}
+          disabled={compactBusy}
+          data-testid="command-surface-apply-compact"
+          className="h-8 gap-1.5"
+        >
+          {compactBusy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />}
+          Compact now
+        </Button>
+      </div>
 
-                  <div className="flex justify-end">
-                    <Button
-                      type="button"
-                      onClick={() =>
-                        selectedModelTarget?.provider &&
-                        selectedModelTarget?.modelId &&
-                        void applyModelSelection(selectedModelTarget.provider, selectedModelTarget.modelId)
-                      }
-                      disabled={!selectedModelTarget?.provider || !selectedModelTarget.modelId || commandSurface.pendingAction === "set_model"}
-                      data-testid="command-surface-apply-model"
-                    >
-                      {commandSurface.pendingAction === "set_model" ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Cpu className="h-4 w-4" />
-                      )}
-                      Apply model
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {commandSurface.section === "thinking" && (
-              <Card data-testid="command-surface-thinking">
-                <CardHeader className="gap-3 border-b border-border/60 pb-4">
-                  <CardTitle className="text-lg">Thinking level</CardTitle>
-                  <CardDescription>
-                    Current level: <span className="font-mono text-xs text-foreground">{workspace.boot?.bridge.sessionState?.thinkingLevel ?? "off"}</span>
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4 pt-6">
-                  <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-                    {COMMAND_SURFACE_THINKING_LEVELS.map((level) => {
-                      const selected = selectedThinkingTarget?.level === level
-                      return (
-                        <button
-                          key={level}
-                          type="button"
-                          className={cn(
-                            "rounded-2xl border px-4 py-3 text-left text-sm transition-all",
-                            selected
-                              ? "border-foreground/40 bg-foreground/[0.045] shadow-sm"
-                              : "border-border/70 bg-background/70 hover:border-foreground/20 hover:bg-accent/40",
-                          )}
-                          onClick={() => selectCommandSurfaceTarget({ kind: "thinking", level })}
-                        >
-                          <div className="font-medium capitalize text-foreground">{level}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {level === "off" ? "Fastest path" : level === "minimal" ? "Light reasoning" : "More deliberate model work"}
-                          </div>
-                        </button>
-                      )
-                    })}
-                  </div>
-
-                  <div className="flex justify-end">
-                    <Button
-                      type="button"
-                      onClick={() => selectedThinkingTarget && void applyThinkingLevel(selectedThinkingTarget.level)}
-                      disabled={!selectedThinkingTarget || commandSurface.pendingAction === "set_thinking_level"}
-                      data-testid="command-surface-apply-thinking"
-                    >
-                      {commandSurface.pendingAction === "set_thinking_level" ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Brain className="h-4 w-4" />
-                      )}
-                      Apply thinking level
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {commandSurface.section === "queue" && (
-              <Card data-testid="command-surface-queue-settings">
-                <CardHeader className="gap-3 border-b border-border/60 pb-4">
-                  <CardTitle className="text-lg">Queue modes</CardTitle>
-                  <CardDescription>
-                    Steering and follow-up modes change the live session immediately and also persist for later sessions.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-5 pt-6">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Current steering mode</div>
-                      <div className="mt-2 font-medium text-foreground">{liveSessionState?.steeringMode ?? "pending"}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">Controls how new steering messages queue while the agent is already streaming.</div>
-                    </div>
-                    <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Current follow-up mode</div>
-                      <div className="mt-2 font-medium text-foreground">{liveSessionState?.followUpMode ?? "pending"}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">Controls how follow-up prompts queue when a live turn is already running.</div>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-3 rounded-2xl border border-border/70 bg-background/70 p-4">
-                      <div>
-                        <FieldTitle>Steering mode</FieldTitle>
-                        <FieldDescription>Live-session behavior plus persisted default for later sessions.</FieldDescription>
-                      </div>
-                      <div className="flex flex-wrap gap-3">
-                        <Button
-                          type="button"
-                          variant={liveSessionState?.steeringMode === "all" ? "default" : "outline"}
-                          onClick={() => void setSteeringModeFromSurface("all")}
-                          disabled={!liveSessionState || queueBusy || liveSessionState.steeringMode === "all"}
-                          data-testid="command-surface-set-steering-all"
-                        >
-                          {settingsRequests.steeringMode.pending && commandSurface.pendingAction === "set_steering_mode" ? (
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                          ) : null}
-                          Queue all
-                        </Button>
-                        <Button
-                          type="button"
-                          variant={liveSessionState?.steeringMode === "one-at-a-time" ? "default" : "outline"}
-                          onClick={() => void setSteeringModeFromSurface("one-at-a-time")}
-                          disabled={!liveSessionState || queueBusy || liveSessionState.steeringMode === "one-at-a-time"}
-                          data-testid="command-surface-set-steering-one-at-a-time"
-                        >
-                          One at a time
-                        </Button>
-                      </div>
-                      <div className="text-xs text-muted-foreground" data-testid="command-surface-steering-mode-state">
-                        {settingsRequests.steeringMode.pending
-                          ? "Updating steering mode…"
-                          : settingsRequests.steeringMode.error ??
-                            settingsRequests.steeringMode.result ??
-                            "The selected button reflects the live bridge state."}
-                      </div>
-                    </div>
-
-                    <div className="space-y-3 rounded-2xl border border-border/70 bg-background/70 p-4">
-                      <div>
-                        <FieldTitle>Follow-up mode</FieldTitle>
-                        <FieldDescription>Changes how queued follow-up prompts are sequenced from this browser shell.</FieldDescription>
-                      </div>
-                      <div className="flex flex-wrap gap-3">
-                        <Button
-                          type="button"
-                          variant={liveSessionState?.followUpMode === "all" ? "default" : "outline"}
-                          onClick={() => void setFollowUpModeFromSurface("all")}
-                          disabled={!liveSessionState || queueBusy || liveSessionState.followUpMode === "all"}
-                          data-testid="command-surface-set-follow-up-all"
-                        >
-                          {settingsRequests.followUpMode.pending && commandSurface.pendingAction === "set_follow_up_mode" ? (
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                          ) : null}
-                          Queue all
-                        </Button>
-                        <Button
-                          type="button"
-                          variant={liveSessionState?.followUpMode === "one-at-a-time" ? "default" : "outline"}
-                          onClick={() => void setFollowUpModeFromSurface("one-at-a-time")}
-                          disabled={!liveSessionState || queueBusy || liveSessionState.followUpMode === "one-at-a-time"}
-                          data-testid="command-surface-set-follow-up-one-at-a-time"
-                        >
-                          One at a time
-                        </Button>
-                      </div>
-                      <div className="text-xs text-muted-foreground" data-testid="command-surface-follow-up-mode-state">
-                        {settingsRequests.followUpMode.pending
-                          ? "Updating follow-up mode…"
-                          : settingsRequests.followUpMode.error ??
-                            settingsRequests.followUpMode.result ??
-                            "The selected button reflects the live bridge state."}
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {commandSurface.section === "compaction" && (
-              <Card data-testid="command-surface-auto-compaction-settings">
-                <CardHeader className="gap-3 border-b border-border/60 pb-4">
-                  <CardTitle className="text-lg">Auto-compaction</CardTitle>
-                  <CardDescription>
-                    Persist whether the session should compact automatically when thresholds are crossed. Manual compaction stays in the Compact section.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-5 pt-6">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Persisted setting</div>
-                      <div className="mt-2 font-medium text-foreground">
-                        {liveSessionState
-                          ? liveSessionState.autoCompactionEnabled
-                            ? "Enabled"
-                            : "Disabled"
-                          : "Pending bridge state"}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">Applies to this session now and persists for later sessions.</div>
-                    </div>
-                    <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Live session status</div>
-                      <div className="mt-2 font-medium text-foreground">
-                        {liveSessionState ? (liveSessionState.isCompacting ? "Compacting now" : "Idle") : "Pending bridge state"}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">This is live bridge state, not a browser guess.</div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-3">
-                    <Button
-                      type="button"
-                      variant={liveSessionState?.autoCompactionEnabled ? "default" : "outline"}
-                      onClick={() => void setAutoCompactionFromSurface(true)}
-                      disabled={!liveSessionState || autoCompactionBusy || liveSessionState.autoCompactionEnabled === true}
-                      data-testid="command-surface-enable-auto-compaction"
-                    >
-                      {autoCompactionBusy && commandSurface.pendingAction === "set_auto_compaction" ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : null}
-                      Enable auto-compaction
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={liveSessionState?.autoCompactionEnabled === false ? "default" : "outline"}
-                      onClick={() => void setAutoCompactionFromSurface(false)}
-                      disabled={!liveSessionState || autoCompactionBusy || liveSessionState.autoCompactionEnabled === false}
-                      data-testid="command-surface-disable-auto-compaction"
-                    >
-                      Disable auto-compaction
-                    </Button>
-                  </div>
-
-                  <div className="text-xs text-muted-foreground" data-testid="command-surface-auto-compaction-state">
-                    {settingsRequests.autoCompaction.pending
-                      ? "Updating auto-compaction…"
-                      : settingsRequests.autoCompaction.error ??
-                        settingsRequests.autoCompaction.result ??
-                        "Use the Compact section when you want a one-off manual compaction instead."}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {commandSurface.section === "retry" && (
-              <Card data-testid="command-surface-retry-settings">
-                <CardHeader className="gap-3 border-b border-border/60 pb-4">
-                  <CardTitle className="text-lg">Retry controls</CardTitle>
-                  <CardDescription>
-                    Inspect retry-enabled and retry-in-progress state directly from the bridge, then change the persisted setting or cancel the active retry.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-5 pt-6">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Persisted auto-retry setting</div>
-                      <div className="mt-2 font-medium text-foreground">
-                        {liveSessionState
-                          ? liveSessionState.autoRetryEnabled
-                            ? "Enabled"
-                            : "Disabled"
-                          : "Pending bridge state"}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">The toggle persists; the live retry status below is session state.</div>
-                    </div>
-                    <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Live retry state</div>
-                      <div className="mt-2 font-medium text-foreground">
-                        {liveSessionState
-                          ? liveSessionState.retryInProgress
-                            ? `Attempt ${Math.max(1, liveSessionState.retryAttempt)}`
-                            : "Idle"
-                          : "Pending bridge state"}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {liveSessionState?.retryInProgress
-                          ? "A scheduled retry is currently active and can be cancelled here."
-                          : "No retry is currently scheduled."}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-3">
-                    <Button
-                      type="button"
-                      variant={liveSessionState?.autoRetryEnabled ? "default" : "outline"}
-                      onClick={() => void setAutoRetryFromSurface(true)}
-                      disabled={!liveSessionState || autoRetryBusy || liveSessionState.autoRetryEnabled === true}
-                      data-testid="command-surface-enable-auto-retry"
-                    >
-                      {autoRetryBusy && commandSurface.pendingAction === "set_auto_retry" ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : null}
-                      Enable auto-retry
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={liveSessionState?.autoRetryEnabled === false ? "default" : "outline"}
-                      onClick={() => void setAutoRetryFromSurface(false)}
-                      disabled={!liveSessionState || autoRetryBusy || liveSessionState.autoRetryEnabled === false}
-                      data-testid="command-surface-disable-auto-retry"
-                    >
-                      Disable auto-retry
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      onClick={() => void abortRetryFromSurface()}
-                      disabled={!liveSessionState || abortRetryBusy || !liveSessionState.retryInProgress}
-                      data-testid="command-surface-abort-retry"
-                    >
-                      {abortRetryBusy && commandSurface.pendingAction === "abort_retry" ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : null}
-                      Abort current retry
-                    </Button>
-                  </div>
-
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="text-xs text-muted-foreground" data-testid="command-surface-auto-retry-state">
-                      {settingsRequests.autoRetry.pending
-                        ? "Updating auto-retry…"
-                        : settingsRequests.autoRetry.error ??
-                          settingsRequests.autoRetry.result ??
-                          "Changing auto-retry updates the persisted setting and affects future transient failures."}
-                    </div>
-                    <div className="text-xs text-muted-foreground" data-testid="command-surface-abort-retry-state">
-                      {settingsRequests.abortRetry.pending
-                        ? "Cancelling the live retry…"
-                        : settingsRequests.abortRetry.error ??
-                          settingsRequests.abortRetry.result ??
-                          (liveSessionState?.retryInProgress
-                            ? `Retry attempt ${Math.max(1, liveSessionState.retryAttempt)} is currently active.`
-                            : "No retry is currently active.")}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {commandSurface.section === "recovery" && (
-              <Card data-testid="command-surface-recovery">
-                <CardHeader className="gap-3 border-b border-border/60 pb-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <CardTitle className="text-lg">Recovery diagnostics</CardTitle>
-                      <CardDescription>
-                        On-demand doctor, validation, bridge, and interrupted-run diagnostics for the current project.
-                      </CardDescription>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void loadRecoveryDiagnostics()}
-                      disabled={recoveryBusy}
-                      data-testid="command-surface-recovery-refresh"
-                    >
-                      <RefreshCw className={cn("h-4 w-4", recoveryBusy && "animate-spin")} />
-                      Refresh diagnostics
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-5 pt-6">
-                  <div className="text-xs text-muted-foreground" data-testid="command-surface-recovery-state">
-                    {recoveryBusy
-                      ? "Loading recovery diagnostics…"
-                      : recovery.error
-                        ? recovery.error
-                        : recoveryDiagnostics
-                          ? `${recoveryDiagnostics.summary.label}${recovery.stale ? " · stale" : ""}`
-                          : "Load the current-project recovery diagnostics contract."}
-                  </div>
-
-                  {recovery.error && (
-                    <div className="rounded-xl border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive" data-testid="command-surface-recovery-error">
-                      {recovery.error}
-                    </div>
-                  )}
-
-                  {!recoveryDiagnostics && recoveryBusy && (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                      Loading structured recovery diagnostics…
-                    </div>
-                  )}
-
-                  {recoveryDiagnostics?.status === "unavailable" && !recovery.error && (
-                    <div className="rounded-2xl border border-border/70 bg-background/70 p-4" data-testid="command-surface-recovery-unavailable">
-                      <div className="font-medium text-foreground">{recoveryDiagnostics.summary.label}</div>
-                      <div className="mt-2 text-sm text-muted-foreground">{recoveryDiagnostics.summary.detail}</div>
-                    </div>
-                  )}
-
-                  {recoveryDiagnostics && (
-                    <>
-                      <div className="grid gap-3 md:grid-cols-2" data-testid="command-surface-recovery-summary">
-                        <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                          <div className="text-xs uppercase tracking-wide text-muted-foreground">Current scope</div>
-                          <div className="mt-2 font-medium text-foreground">{recoveryDiagnostics.project.activeScope ?? "project"}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {recoveryDiagnostics.summary.detail}
-                          </div>
-                        </div>
-                        <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                          <div className="text-xs uppercase tracking-wide text-muted-foreground">Loaded</div>
-                          <div className="mt-2 font-medium text-foreground">
-                            {recovery.lastLoadedAt ? formatRelativeTime(recovery.lastLoadedAt) : "Not loaded yet"}
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {recovery.stale
-                              ? `Marked stale${recovery.lastInvalidatedAt ? ` ${formatRelativeTime(recovery.lastInvalidatedAt)}` : ""}`
-                              : recoveryDiagnostics.loadedAt
-                                ? `Captured ${formatRelativeTime(recoveryDiagnostics.loadedAt)}`
-                                : "Fresh diagnostics"}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2" data-testid="command-surface-recovery-counts">
-                        <Badge variant="outline">Validation {recoveryDiagnostics.summary.validationCount}</Badge>
-                        <Badge variant="outline">Doctor {recoveryDiagnostics.summary.doctorIssueCount}</Badge>
-                        <Badge variant={recoveryDiagnostics.summary.retryInProgress ? "default" : "outline"}>
-                          {recoveryDiagnostics.summary.retryInProgress ? `Retry ${Math.max(1, recoveryDiagnostics.summary.retryAttempt)}` : "Retry idle"}
-                        </Badge>
-                        <Badge variant={recoveryDiagnostics.summary.compactionActive ? "default" : "outline"}>
-                          {recoveryDiagnostics.summary.compactionActive ? "Compacting" : "Compaction idle"}
-                        </Badge>
-                        {recoveryDiagnostics.summary.lastFailurePhase && (
-                          <Badge variant="destructive">Phase {recoveryDiagnostics.summary.lastFailurePhase}</Badge>
-                        )}
-                      </div>
-
-                      {recoveryDiagnostics.bridge.lastFailure && (
-                        <div className="rounded-2xl border border-destructive/20 bg-destructive/10 p-4" data-testid="command-surface-recovery-last-failure">
-                          <div className="font-medium text-destructive">Last bridge failure</div>
-                          <div className="mt-2 text-sm text-destructive">{recoveryDiagnostics.bridge.lastFailure.message}</div>
-                          <div className="mt-2 flex flex-wrap gap-3 text-xs text-destructive/90">
-                            <span>Phase: {recoveryDiagnostics.bridge.lastFailure.phase}</span>
-                            {recoveryDiagnostics.bridge.lastFailure.commandType && <span>Command: {recoveryDiagnostics.bridge.lastFailure.commandType}</span>}
-                            <span>{formatRelativeTime(recoveryDiagnostics.bridge.lastFailure.at)}</span>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-3 rounded-2xl border border-border/70 bg-background/70 p-4" data-testid="command-surface-recovery-validation">
-                          <div>
-                            <FieldTitle>Validation diagnostics</FieldTitle>
-                            <FieldDescription>
-                              {recoveryDiagnostics.validation.total > 0
-                                ? "Current-project validation issues with stable rule ids and suggestions."
-                                : "No validation issues are currently active."}
-                            </FieldDescription>
-                          </div>
-                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                            <span>Errors: {recoveryDiagnostics.validation.bySeverity.errors}</span>
-                            <span>Warnings: {recoveryDiagnostics.validation.bySeverity.warnings}</span>
-                            <span>Infos: {recoveryDiagnostics.validation.bySeverity.infos}</span>
-                          </div>
-                          {recoveryDiagnostics.validation.codes.length > 0 ? (
-                            <div className="flex flex-wrap gap-2">
-                              {recoveryDiagnostics.validation.codes.map((code) => (
-                                <Badge key={code.code} variant={code.severity === "error" ? "destructive" : "outline"}>
-                                  {code.code} · {code.count}
-                                </Badge>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-sm text-muted-foreground">No validation codes are currently active.</div>
-                          )}
-                          {recoveryDiagnostics.validation.topIssues.length > 0 && (
-                            <div className="space-y-2 text-sm">
-                              {recoveryDiagnostics.validation.topIssues.map((issue) => (
-                                <div key={`${issue.code}:${issue.file ?? issue.message}`} className="rounded-xl border border-border/60 px-3 py-2">
-                                  <div className="font-medium text-foreground">{issue.code}</div>
-                                  <div className="mt-1 text-muted-foreground">{issue.message}</div>
-                                  {issue.suggestion && <div className="mt-1 text-xs text-muted-foreground">Suggested: {issue.suggestion}</div>}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-3 rounded-2xl border border-border/70 bg-background/70 p-4" data-testid="command-surface-recovery-doctor">
-                          <div>
-                            <FieldTitle>Doctor diagnostics</FieldTitle>
-                            <FieldDescription>
-                              {recoveryDiagnostics.doctor.total > 0
-                                ? `Scoped doctor findings for ${recoveryDiagnostics.doctor.scope ?? "the current project"}.`
-                                : "No doctor findings are currently active."}
-                            </FieldDescription>
-                          </div>
-                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                            <span>Errors: {recoveryDiagnostics.doctor.errors}</span>
-                            <span>Warnings: {recoveryDiagnostics.doctor.warnings}</span>
-                            <span>Infos: {recoveryDiagnostics.doctor.infos}</span>
-                            <span>Fixable: {recoveryDiagnostics.doctor.fixable}</span>
-                          </div>
-                          {recoveryDiagnostics.doctor.codes.length > 0 ? (
-                            <div className="flex flex-wrap gap-2">
-                              {recoveryDiagnostics.doctor.codes.map((code) => (
-                                <Badge key={code.code} variant="outline">
-                                  {code.code} · {code.count}
-                                </Badge>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-sm text-muted-foreground">No doctor codes are currently active.</div>
-                          )}
-                          {recoveryDiagnostics.doctor.topIssues.length > 0 && (
-                            <div className="space-y-2 text-sm">
-                              {recoveryDiagnostics.doctor.topIssues.map((issue) => (
-                                <div key={`${issue.code}:${issue.unitId ?? issue.message}`} className="rounded-xl border border-border/60 px-3 py-2">
-                                  <div className="font-medium text-foreground">{issue.code}</div>
-                                  <div className="mt-1 text-muted-foreground">{issue.message}</div>
-                                  {issue.unitId && <div className="mt-1 text-xs text-muted-foreground">Scope: {issue.unitId}</div>}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="space-y-3 rounded-2xl border border-border/70 bg-background/70 p-4" data-testid="command-surface-recovery-interrupted-run">
-                        <div>
-                          <FieldTitle>Interrupted-run diagnostics</FieldTitle>
-                          <FieldDescription>{recoveryDiagnostics.interruptedRun.detail}</FieldDescription>
-                        </div>
-                        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                          <span>Available: {recoveryDiagnostics.interruptedRun.available ? "yes" : "no"}</span>
-                          <span>Detected: {recoveryDiagnostics.interruptedRun.detected ? "yes" : "no"}</span>
-                          <span>Tool calls: {recoveryDiagnostics.interruptedRun.counts.toolCalls}</span>
-                          <span>Files written: {recoveryDiagnostics.interruptedRun.counts.filesWritten}</span>
-                          <span>Commands: {recoveryDiagnostics.interruptedRun.counts.commandsRun}</span>
-                          <span>Errors: {recoveryDiagnostics.interruptedRun.counts.errors}</span>
-                          <span>Git changes: {recoveryDiagnostics.interruptedRun.gitChangesDetected ? "yes" : "no"}</span>
-                        </div>
-                        {recoveryDiagnostics.interruptedRun.unit && (
-                          <div className="text-sm text-foreground">
-                            Last unit: {recoveryDiagnostics.interruptedRun.unit.type} · {recoveryDiagnostics.interruptedRun.unit.id}
-                          </div>
-                        )}
-                        {recoveryDiagnostics.interruptedRun.lastError && (
-                          <div className="text-sm text-destructive">Last forensic error: {recoveryDiagnostics.interruptedRun.lastError}</div>
-                        )}
-                      </div>
-
-                      <div className="space-y-3 rounded-2xl border border-border/70 bg-background/70 p-4" data-testid="command-surface-recovery-actions">
-                        <div>
-                          <FieldTitle>Browser actions</FieldTitle>
-                          <FieldDescription>
-                            These controls stay on the authoritative store command path instead of guessing from transcript text.
-                          </FieldDescription>
-                        </div>
-                        <div className="flex flex-wrap gap-3">
-                          {recoveryDiagnostics.actions.browser.map((action) => (
-                            <Button
-                              key={action.id}
-                              type="button"
-                              variant={action.emphasis === "danger" ? "destructive" : action.emphasis === "primary" ? "default" : "outline"}
-                              onClick={() => triggerRecoveryBrowserAction(action.id)}
-                              disabled={action.id === "refresh_diagnostics" ? recoveryBusy : false}
-                              data-testid={`command-surface-recovery-action-${action.id}`}
-                            >
-                              {action.label}
-                            </Button>
-                          ))}
-                        </div>
-                        {recoveryDiagnostics.actions.commands.length > 0 && (
-                          <div className="space-y-2">
-                            <FieldTitle>Suggested commands</FieldTitle>
-                            <div className="flex flex-wrap gap-2" data-testid="command-surface-recovery-commands">
-                              {recoveryDiagnostics.actions.commands.map((command) => (
-                                <Badge key={command.command} variant="outline" title={command.label}>
-                                  {command.command}
-                                </Badge>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-            {commandSurface.section === "resume" && renderSessionBrowserCard("resume")}
-
-            {commandSurface.section === "name" && renderSessionBrowserCard("name")}
-
-            {commandSurface.section === "fork" && (
-              <Card data-testid="command-surface-fork">
-                <CardHeader className="gap-3 border-b border-border/60 pb-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <CardTitle className="text-lg">Fork from a previous message</CardTitle>
-                      <CardDescription>
-                        Load real forkable user messages from the current session and create a new branch session from one.
-                      </CardDescription>
-                    </div>
-                    <Button type="button" variant="outline" size="sm" onClick={() => void loadForkMessages()} disabled={forkBusy}>
-                      <RefreshCw className={cn("h-4 w-4", commandSurface.pendingAction === "load_fork_messages" && "animate-spin")} />
-                      Refresh fork points
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4 pt-6">
-                  {forkBusy && commandSurface.forkMessages.length === 0 ? (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                      Loading forkable messages…
-                    </div>
-                  ) : commandSurface.forkMessages.length > 0 ? (
-                    <div className="grid gap-3">
-                      {commandSurface.forkMessages.map((message) => {
-                        const selected = selectedForkTarget?.entryId === message.entryId
-                        return (
-                          <button
-                            key={message.entryId}
-                            type="button"
-                            className={cn(
-                              "rounded-2xl border px-4 py-3 text-left transition-all",
-                              selected
-                                ? "border-foreground/40 bg-foreground/[0.045] shadow-sm"
-                                : "border-border/70 bg-background/70 hover:border-foreground/20 hover:bg-accent/40",
-                            )}
-                            onClick={() => selectCommandSurfaceTarget({ kind: "fork", entryId: message.entryId })}
-                          >
-                            <div className="font-mono text-[11px] text-muted-foreground">{message.entryId}</div>
-                            <div className="mt-2 text-sm text-foreground">{message.text}</div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-border/70 bg-background/70 px-4 py-3 text-sm text-muted-foreground">
-                      No user messages are available for forking yet.
-                    </div>
-                  )}
-
-                  <div className="flex justify-end">
-                    <Button
-                      type="button"
-                      onClick={() => selectedForkTarget?.entryId && void forkSessionFromSurface(selectedForkTarget.entryId)}
-                      disabled={!selectedForkTarget?.entryId || commandSurface.pendingAction === "fork_session"}
-                      data-testid="command-surface-apply-fork"
-                    >
-                      {commandSurface.pendingAction === "fork_session" ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <GitBranch className="h-4 w-4" />
-                      )}
-                      Create fork
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {commandSurface.section === "session" && (
-              <Card data-testid="command-surface-session">
-                <CardHeader className="gap-3 border-b border-border/60 pb-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <CardTitle className="text-lg">Current session details</CardTitle>
-                      <CardDescription>
-                        Inspect stats for the active session and export the exact session tree to HTML.
-                      </CardDescription>
-                    </div>
-                    <Button type="button" variant="outline" size="sm" onClick={() => void loadSessionStats()} disabled={sessionBusy}>
-                      <RefreshCw className={cn("h-4 w-4", commandSurface.pendingAction === "load_session_stats" && "animate-spin")} />
-                      Refresh stats
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-5 pt-6">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Active session</div>
-                      <div className="mt-2 font-medium text-foreground">{currentSessionLabel ?? "session pending"}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">{currentSessionFile ? shortenPath(currentSessionFile) : "No session file attached yet"}</div>
-                    </div>
-                    <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">Loaded stats</div>
-                      <div className="mt-2 font-medium text-foreground">{commandSurface.sessionStats?.sessionId ?? "Not loaded yet"}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {commandSurface.sessionStats?.sessionFile ? shortenPath(commandSurface.sessionStats.sessionFile) : "Refresh to inspect the current session snapshot"}
-                      </div>
-                    </div>
-                  </div>
-
-                  {commandSurface.sessionStats ? (
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                        <div className="text-xs uppercase tracking-wide text-muted-foreground">Messages</div>
-                        <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                          <div>User: {commandSurface.sessionStats.userMessages}</div>
-                          <div>Assistant: {commandSurface.sessionStats.assistantMessages}</div>
-                          <div>Tool calls: {commandSurface.sessionStats.toolCalls}</div>
-                          <div>Tool results: {commandSurface.sessionStats.toolResults}</div>
-                          <div className="col-span-2 font-medium">Total: {commandSurface.sessionStats.totalMessages}</div>
-                        </div>
-                      </div>
-                      <div className="rounded-2xl border border-border/70 bg-background/70 p-4">
-                        <div className="text-xs uppercase tracking-wide text-muted-foreground">Tokens + cost</div>
-                        <div className="mt-3 space-y-2 text-sm">
-                          <div>Input: {formatTokens(commandSurface.sessionStats.tokens.input)}</div>
-                          <div>Output: {formatTokens(commandSurface.sessionStats.tokens.output)}</div>
-                          {commandSurface.sessionStats.tokens.cacheRead > 0 && <div>Cache read: {formatTokens(commandSurface.sessionStats.tokens.cacheRead)}</div>}
-                          {commandSurface.sessionStats.tokens.cacheWrite > 0 && <div>Cache write: {formatTokens(commandSurface.sessionStats.tokens.cacheWrite)}</div>}
-                          <div className="font-medium">Total: {formatTokens(commandSurface.sessionStats.tokens.total)}</div>
-                          <div>Cost: {formatCost(commandSurface.sessionStats.cost)}</div>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-border/70 bg-background/70 px-4 py-3 text-sm text-muted-foreground">
-                      Refresh session stats to inspect the current session breakdown.
-                    </div>
-                  )}
-
-                  <div className="space-y-3 rounded-2xl border border-border/70 bg-background/70 p-4">
-                    <FieldTitle>Export HTML</FieldTitle>
-                    <FieldDescription>
-                      Leave the path blank to let the bridge choose the default export location.
-                    </FieldDescription>
-                    <Field>
-                      <FieldLabel htmlFor="command-surface-export-path">Output path</FieldLabel>
-                      <FieldContent>
-                        <Input
-                          id="command-surface-export-path"
-                          data-testid="command-surface-export-path"
-                          value={selectedSessionTarget?.outputPath ?? ""}
-                          onChange={(event) => selectCommandSurfaceTarget({ kind: "session", outputPath: event.target.value })}
-                          placeholder="Optional output path"
-                          disabled={commandSurface.pendingAction === "export_html"}
-                        />
-                      </FieldContent>
-                    </Field>
-                    <div className="flex justify-end">
-                      <Button
-                        type="button"
-                        onClick={() => void exportSessionFromSurface(selectedSessionTarget?.outputPath)}
-                        disabled={commandSurface.pendingAction === "export_html"}
-                        data-testid="command-surface-export-session"
-                      >
-                        {commandSurface.pendingAction === "export_html" ? (
-                          <LoaderCircle className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Download className="h-4 w-4" />
-                        )}
-                        Export HTML
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {commandSurface.section === "compact" && (
-              <Card data-testid="command-surface-compact">
-                <CardHeader className="gap-3 border-b border-border/60 pb-4">
-                  <CardTitle className="text-lg">Manual compaction</CardTitle>
-                  <CardDescription>
-                    Compact the current session context now. Provide optional guidance if you want the summary to emphasize specific constraints or files.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-5 pt-6">
-                  <Field>
-                    <FieldLabel htmlFor="command-surface-compact-instructions">Custom instructions</FieldLabel>
-                    <FieldContent>
-                      <Textarea
-                        id="command-surface-compact-instructions"
-                        data-testid="command-surface-compact-instructions"
-                        value={selectedCompactTarget?.customInstructions ?? ""}
-                        onChange={(event) => selectCommandSurfaceTarget({ kind: "compact", customInstructions: event.target.value })}
-                        placeholder="Optional: tell compaction what to preserve or emphasize"
-                        rows={6}
-                        disabled={compactBusy}
-                      />
-                      <FieldDescription>
-                        These instructions are sent directly to the real `compact` RPC command only when provided.
-                      </FieldDescription>
-                    </FieldContent>
-                  </Field>
-
-                  <div className="flex justify-end">
-                    <Button
-                      type="button"
-                      onClick={() => void compactSessionFromSurface(selectedCompactTarget?.customInstructions)}
-                      disabled={compactBusy}
-                      data-testid="command-surface-apply-compact"
-                    >
-                      {compactBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />}
-                      Compact now
-                    </Button>
-                  </div>
-
-                  {commandSurface.lastCompaction && (
-                    <div className="space-y-3 rounded-2xl border border-border/70 bg-background/70 p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <FieldTitle>Last compaction result</FieldTitle>
-                        <Badge variant="outline">{formatTokens(commandSurface.lastCompaction.tokensBefore)} before</Badge>
-                      </div>
-                      <div className="text-xs text-muted-foreground">First kept entry: {commandSurface.lastCompaction.firstKeptEntryId}</div>
-                      <div className="whitespace-pre-wrap text-sm text-foreground">{commandSurface.lastCompaction.summary}</div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-            {commandSurface.section === "auth" && onboarding && (
-              <Card data-testid="command-surface-auth">
-                <CardHeader className="gap-3 border-b border-border/60 pb-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <CardTitle className="text-lg">Auth controls</CardTitle>
-                      <CardDescription>
-                        Start sign-in, validate API keys, or log out without leaving the browser shell.
-                      </CardDescription>
-                    </div>
-                    <Badge variant="outline">
-                      {selectedAuthIntent === "login" ? "Login" : selectedAuthIntent === "logout" ? "Logout" : "Manage auth"}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-5 pt-6">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {onboarding.required.providers.map((provider) => {
-                      const selected = provider.id === selectedAuthProvider?.id
-                      return (
-                        <button
-                          key={provider.id}
-                          type="button"
-                          className={cn(
-                            "rounded-2xl border px-4 py-3 text-left transition-all",
-                            selected
-                              ? "border-foreground/40 bg-foreground/[0.045] shadow-sm"
-                              : "border-border/70 bg-background/70 hover:border-foreground/20 hover:bg-accent/40",
-                          )}
-                          onClick={() =>
-                            selectCommandSurfaceTarget({
-                              kind: "auth",
-                              providerId: provider.id,
-                              intent: selectedAuthIntent,
-                            })
-                          }
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="font-medium text-foreground">{provider.label}</div>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                {provider.configured ? `Configured via ${provider.configuredVia}` : "Not configured yet"}
-                              </div>
-                            </div>
-                            <div className="flex flex-wrap justify-end gap-1">
-                              {provider.recommended && <Badge>Recommended</Badge>}
-                              {provider.configured && <Badge variant="outline">Detected</Badge>}
-                            </div>
-                          </div>
-                        </button>
-                      )
-                    })}
-                  </div>
-
-                  {selectedAuthProvider && (
-                    <div className="space-y-4 rounded-2xl border border-border/70 bg-background/70 p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <FieldTitle>{selectedAuthProvider.label}</FieldTitle>
-                          <div className="mt-1 text-sm text-muted-foreground">
-                            {selectedAuthProvider.supports.apiKey
-                              ? "Validate a provider key here or use browser sign-in when available."
-                              : "This provider uses browser sign-in instead of an API key."}
-                          </div>
-                        </div>
-                        <Badge variant="outline">{selectedAuthProvider.configuredVia ?? "not configured"}</Badge>
-                      </div>
-
-                      {selectedAuthProvider.supports.apiKey && (
-                        <form
-                          className="space-y-4"
-                          onSubmit={(event) => {
-                            event.preventDefault()
-                            if (!selectedProviderApiKey.trim()) return
-                            void saveApiKeyFromSurface(selectedAuthProvider.id, selectedProviderApiKey)
-                          }}
-                        >
-                          <FieldGroup>
-                            <Field>
-                              <FieldLabel htmlFor="command-surface-api-key">API key</FieldLabel>
-                              <FieldContent>
-                                <Input
-                                  id="command-surface-api-key"
-                                  data-testid="command-surface-api-key-input"
-                                  type="password"
-                                  autoComplete="off"
-                                  value={selectedProviderApiKey}
-                                  onChange={(event) =>
-                                    setApiKeys((previous) => ({
-                                      ...previous,
-                                      [selectedAuthProvider.id]: event.target.value,
-                                    }))
-                                  }
-                                  placeholder="Paste a provider key"
-                                  disabled={authBusy}
-                                />
-                                <FieldDescription>
-                                  Validation happens through the onboarding API and only returns sanitized status and refresh state.
-                                </FieldDescription>
-                              </FieldContent>
-                            </Field>
-                          </FieldGroup>
-
-                          <div className="flex flex-wrap gap-3">
-                            <Button
-                              type="submit"
-                              disabled={!selectedProviderApiKey.trim() || authBusy}
-                              data-testid="command-surface-save-api-key"
-                            >
-                              {commandSurface.pendingAction === "save_api_key" ? (
-                                <LoaderCircle className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <KeyRound className="h-4 w-4" />
-                              )}
-                              Validate and save
-                            </Button>
-
-                            {selectedAuthProvider.supports.oauth && selectedAuthProvider.supports.oauthAvailable && (
-                              <Button
-                                type="button"
-                                variant="outline"
-                                disabled={authBusy}
-                                onClick={() => void startProviderFlowFromSurface(selectedAuthProvider.id)}
-                                data-testid="command-surface-start-provider-flow"
-                              >
-                                <ArrowUpRight className="h-4 w-4" />
-                                Browser sign-in
-                              </Button>
-                            )}
-                          </div>
-                        </form>
-                      )}
-
-                      {!selectedAuthProvider.supports.apiKey && selectedAuthProvider.supports.oauth && selectedAuthProvider.supports.oauthAvailable && (
-                        <Button
-                          type="button"
-                          disabled={authBusy}
-                          onClick={() => void startProviderFlowFromSurface(selectedAuthProvider.id)}
-                          data-testid="command-surface-start-provider-flow"
-                        >
-                          {commandSurface.pendingAction === "start_provider_flow" ? (
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <LogIn className="h-4 w-4" />
-                          )}
-                          Start browser sign-in
-                        </Button>
-                      )}
-
-                      <div className="flex flex-wrap gap-3">
-                        {selectedAuthProvider.supports.oauth && selectedAuthProvider.supports.oauthAvailable && selectedAuthProvider.supports.apiKey && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={authBusy}
-                            onClick={() => void startProviderFlowFromSurface(selectedAuthProvider.id)}
-                          >
-                            <LogIn className="h-4 w-4" />
-                            Sign in with browser
-                          </Button>
-                        )}
-                        <Button
-                          type="button"
-                          variant="destructive"
-                          disabled={authBusy}
-                          onClick={() => void logoutProviderFromSurface(selectedAuthProvider.id)}
-                          data-testid="command-surface-logout-provider"
-                        >
-                          {commandSurface.pendingAction === "logout_provider" ? (
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <LogOut className="h-4 w-4" />
-                          )}
-                          Logout provider
-                        </Button>
-                      </div>
-
-                      {activeFlow && activeFlow.providerId === selectedAuthProvider.id && (
-                        <div className="space-y-4 rounded-2xl border border-foreground/10 bg-foreground/[0.03] p-4" data-testid="command-surface-active-flow">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant="outline">{activeFlow.status.replaceAll("_", " ")}</Badge>
-                            <span className="text-sm text-muted-foreground">Updated {new Date(activeFlow.updatedAt).toLocaleTimeString()}</span>
-                          </div>
-
-                          {activeFlow.auth?.instructions && (
-                            <div className="text-sm text-muted-foreground">{activeFlow.auth.instructions}</div>
-                          )}
-
-                          {activeFlow.auth?.url && (
-                            <Button asChild variant="outline" size="sm" data-testid="command-surface-open-auth-url">
-                              <a href={activeFlow.auth.url} target="_blank" rel="noreferrer">
-                                <ExternalLink className="h-4 w-4" />
-                                Open sign-in page
-                              </a>
-                            </Button>
-                          )}
-
-                          {activeFlow.progress.length > 0 && (
-                            <div className="space-y-2">
-                              <FieldTitle>Flow progress</FieldTitle>
-                              <div className="space-y-2 text-sm text-muted-foreground">
-                                {activeFlow.progress.map((message, index) => (
-                                  <div key={`${activeFlow.flowId}-${index}`} className="rounded-lg border border-border/50 bg-background/70 px-3 py-2">
-                                    {message}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {activeFlow.prompt && (
-                            <form
-                              className="space-y-3"
-                              onSubmit={(event) => {
-                                event.preventDefault()
-                                if (!activeFlow.prompt?.allowEmpty && !flowInput.trim()) return
-                                void submitProviderFlowInputFromSurface(activeFlow.flowId, flowInput)
-                              }}
-                            >
-                              <Field>
-                                <FieldLabel htmlFor="command-surface-flow-input">Next step</FieldLabel>
-                                <FieldContent>
-                                  <Input
-                                    id="command-surface-flow-input"
-                                    data-testid="command-surface-flow-input"
-                                    value={flowInput}
-                                    onChange={(event) => setFlowInput(event.target.value)}
-                                    placeholder={activeFlow.prompt.placeholder || "Enter the requested value"}
-                                    disabled={authBusy}
-                                  />
-                                  <FieldDescription>{activeFlow.prompt.message}</FieldDescription>
-                                </FieldContent>
-                              </Field>
-
-                              <div className="flex flex-wrap gap-3">
-                                <Button type="submit" disabled={authBusy || (!activeFlow.prompt.allowEmpty && !flowInput.trim())}>
-                                  {commandSurface.pendingAction === "submit_provider_flow_input" ? (
-                                    <LoaderCircle className="h-4 w-4 animate-spin" />
-                                  ) : (
-                                    <ShieldCheck className="h-4 w-4" />
-                                  )}
-                                  Continue sign-in
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  disabled={authBusy}
-                                  onClick={() => void cancelProviderFlowFromSurface(activeFlow.flowId)}
-                                >
-                                  Cancel flow
-                                </Button>
-                              </div>
-                            </form>
-                          )}
-                        </div>
-                      )}
-
-                      {onboarding.bridgeAuthRefresh.phase !== "idle" && (
-                        <div className="rounded-xl border border-border/70 bg-background/80 px-4 py-3 text-sm text-muted-foreground">
-                          <div className="font-medium text-foreground">Bridge auth refresh</div>
-                          <div className="mt-1">
-                            {onboarding.bridgeAuthRefresh.phase === "pending"
-                              ? "Refreshing the live bridge onto the new auth view…"
-                              : onboarding.bridgeAuthRefresh.phase === "failed"
-                                ? onboarding.bridgeAuthRefresh.error || "Bridge auth refresh failed."
-                                : "The live bridge picked up the latest auth state."}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+      {commandSurface.lastCompaction && (
+        <div className="space-y-2 rounded-lg border border-border/50 bg-card/50 px-4 py-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground">Last compaction</span>
+            <span className="text-[11px] tabular-nums text-muted-foreground">{formatTokens(commandSurface.lastCompaction.tokensBefore)} before</span>
           </div>
+          <p className="whitespace-pre-wrap text-xs text-foreground">{commandSurface.lastCompaction.summary}</p>
+          <p className="text-[11px] text-muted-foreground">First kept: {commandSurface.lastCompaction.firstKeptEntryId}</p>
+        </div>
+      )}
+    </div>
+  )
+
+  const renderAuthSection = () => {
+    if (!onboarding) return null
+    return (
+      <div className="space-y-4" data-testid="command-surface-auth">
+        <SectionHeader
+          title="Auth"
+          status={
+            <span className="text-xs text-muted-foreground">
+              {selectedAuthIntent === "login" ? "Login" : selectedAuthIntent === "logout" ? "Logout" : "Manage"}
+            </span>
+          }
+        />
+
+        {/* Provider list */}
+        <div className="space-y-1">
+          {onboarding.required.providers.map((provider) => {
+            const selected = provider.id === selectedAuthProvider?.id
+            return (
+              <button
+                key={provider.id}
+                type="button"
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
+                  selected ? "bg-foreground/[0.07]" : "hover:bg-foreground/[0.03]",
+                )}
+                onClick={() =>
+                  selectCommandSurfaceTarget({ kind: "auth", providerId: provider.id, intent: selectedAuthIntent })
+                }
+              >
+                <div className={cn(
+                  "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors",
+                  selected ? "border-foreground bg-foreground" : "border-foreground/25",
+                )}>
+                  {selected && <Check className="h-2.5 w-2.5 text-background" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-foreground">{provider.label}</span>
+                    {provider.configured && <StatusDot status="ok" />}
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {provider.configured ? `via ${provider.configuredVia}` : "Not configured"}
+                  </span>
+                </div>
+                {provider.recommended && (
+                  <span className="rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium text-foreground/70">Recommended</span>
+                )}
+              </button>
+            )
+          })}
         </div>
 
-        <SheetFooter className="border-t border-border/70">
-          <Button type="button" variant="ghost" onClick={() => closeCommandSurface()}>
-            Close
-          </Button>
-        </SheetFooter>
+        {/* Selected provider details */}
+        {selectedAuthProvider && (
+          <div className="space-y-4 border-t border-border/30 pt-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium text-foreground">{selectedAuthProvider.label}</div>
+                <span className="text-xs text-muted-foreground">{selectedAuthProvider.configuredVia ?? "Not configured"}</span>
+              </div>
+            </div>
+
+            {/* API key form */}
+            {selectedAuthProvider.supports.apiKey && (
+              <form
+                className="space-y-3"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  if (!selectedProviderApiKey.trim()) return
+                  void saveApiKeyFromSurface(selectedAuthProvider.id, selectedProviderApiKey)
+                }}
+              >
+                <div className="flex gap-2">
+                  <Input
+                    type="password"
+                    autoComplete="off"
+                    value={selectedProviderApiKey}
+                    onChange={(e) =>
+                      setApiKeys((prev) => ({ ...prev, [selectedAuthProvider.id]: e.target.value }))
+                    }
+                    placeholder="Paste API key"
+                    className="h-8 flex-1 text-xs"
+                    disabled={authBusy}
+                    data-testid="command-surface-api-key-input"
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={!selectedProviderApiKey.trim() || authBusy}
+                    data-testid="command-surface-save-api-key"
+                    className="h-8 gap-1.5"
+                  >
+                    {commandSurface.pendingAction === "save_api_key" ? (
+                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <KeyRound className="h-3.5 w-3.5" />
+                    )}
+                    Save
+                  </Button>
+                </div>
+              </form>
+            )}
+
+            {/* OAuth / sign-in buttons */}
+            <div className="flex flex-wrap gap-2">
+              {selectedAuthProvider.supports.oauth && selectedAuthProvider.supports.oauthAvailable && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={authBusy}
+                  onClick={() => void startProviderFlowFromSurface(selectedAuthProvider.id)}
+                  data-testid="command-surface-start-provider-flow"
+                  className="h-8 gap-1.5 text-xs"
+                >
+                  {commandSurface.pendingAction === "start_provider_flow" ? (
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <LogIn className="h-3.5 w-3.5" />
+                  )}
+                  Browser sign-in
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={authBusy}
+                onClick={() => void logoutProviderFromSurface(selectedAuthProvider.id)}
+                data-testid="command-surface-logout-provider"
+                className="h-8 gap-1.5 text-xs text-red-400 hover:text-red-400"
+              >
+                {commandSurface.pendingAction === "logout_provider" ? (
+                  <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <LogOut className="h-3.5 w-3.5" />
+                )}
+                Logout
+              </Button>
+            </div>
+
+            {/* Active OAuth flow */}
+            {activeFlow && activeFlow.providerId === selectedAuthProvider.id && (
+              <div className="space-y-3 rounded-lg border border-foreground/10 bg-foreground/[0.03] px-4 py-3" data-testid="command-surface-active-flow">
+                <div className="flex items-center gap-2 text-xs">
+                  <Badge variant="outline" className="text-[10px]">{activeFlow.status.replaceAll("_", " ")}</Badge>
+                  <span className="text-muted-foreground">{new Date(activeFlow.updatedAt).toLocaleTimeString()}</span>
+                </div>
+
+                {activeFlow.auth?.instructions && (
+                  <p className="text-xs text-muted-foreground">{activeFlow.auth.instructions}</p>
+                )}
+
+                {activeFlow.auth?.url && (
+                  <Button asChild variant="outline" size="sm" className="h-7 gap-1.5 text-xs" data-testid="command-surface-open-auth-url">
+                    <a href={activeFlow.auth.url} target="_blank" rel="noreferrer">
+                      <ExternalLink className="h-3 w-3" />
+                      Open sign-in page
+                    </a>
+                  </Button>
+                )}
+
+                {activeFlow.progress.length > 0 && (
+                  <div className="space-y-1">
+                    {activeFlow.progress.map((message, index) => (
+                      <div key={`${activeFlow.flowId}-${index}`} className="rounded-md border border-border/40 bg-card/30 px-2.5 py-1.5 text-xs text-muted-foreground">
+                        {message}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {activeFlow.prompt && (
+                  <form
+                    className="space-y-2"
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      if (!activeFlow.prompt?.allowEmpty && !flowInput.trim()) return
+                      void submitProviderFlowInputFromSurface(activeFlow.flowId, flowInput)
+                    }}
+                  >
+                    <Input
+                      value={flowInput}
+                      onChange={(e) => setFlowInput(e.target.value)}
+                      placeholder={activeFlow.prompt.placeholder || "Enter value"}
+                      className="h-8 text-xs"
+                      disabled={authBusy}
+                      data-testid="command-surface-flow-input"
+                    />
+                    <p className="text-[11px] text-muted-foreground">{activeFlow.prompt.message}</p>
+                    <div className="flex gap-2">
+                      <Button type="submit" size="sm" disabled={authBusy || (!activeFlow.prompt.allowEmpty && !flowInput.trim())} className="h-7 gap-1.5 text-xs">
+                        {commandSurface.pendingAction === "submit_provider_flow_input" ? (
+                          <LoaderCircle className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="h-3 w-3" />
+                        )}
+                        Continue
+                      </Button>
+                      <Button type="button" variant="ghost" size="sm" disabled={authBusy} onClick={() => void cancelProviderFlowFromSurface(activeFlow.flowId)} className="h-7 text-xs">
+                        Cancel
+                      </Button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            )}
+
+            {/* Bridge auth refresh status */}
+            {onboarding.bridgeAuthRefresh.phase !== "idle" && (
+              <div className="rounded-lg border border-border/50 bg-card/50 px-3 py-2.5 text-xs">
+                <span className="font-medium text-foreground">Auth refresh</span>
+                <span className="ml-2 text-muted-foreground">
+                  {onboarding.bridgeAuthRefresh.phase === "pending"
+                    ? "Refreshing…"
+                    : onboarding.bridgeAuthRefresh.phase === "failed"
+                      ? onboarding.bridgeAuthRefresh.error || "Failed."
+                      : "Complete."}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // SECTION DISPATCH
+  // ═══════════════════════════════════════════════════════════════════
+
+  const renderAdminSection = () => (
+    <div className="space-y-5" data-testid="command-surface-admin">
+      <SectionHeader
+        title="Admin"
+        status={
+          <Badge variant="outline" className="border-amber-500/20 bg-amber-500/[0.06] text-[10px] text-amber-300">
+            Dev only
+          </Badge>
+        }
+      />
+
+      {/* Master toggle */}
+      <ToggleRow
+        label="UI overrides"
+        description="Enable keyboard shortcuts and forced UI states for development"
+        checked={devOverrides.enabled}
+        onCheckedChange={devOverrides.setEnabled}
+        testId="admin-ui-overrides-master"
+      />
+
+      {/* Individual overrides — only visible when master is on */}
+      {devOverrides.enabled && (
+        <div className="space-y-2 rounded-lg border border-border/50 bg-card/30 p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Override shortcuts
+          </div>
+          {DEV_OVERRIDE_REGISTRY.map((entry) => (
+            <div
+              key={entry.key}
+              className="flex items-start justify-between gap-3 rounded-md px-3 py-2.5 transition-colors hover:bg-foreground/[0.03]"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-foreground">{entry.label}</span>
+                  <Badge variant="outline" className="border-border/60 font-mono text-[10px] text-muted-foreground">
+                    {entry.shortcutLabel}
+                  </Badge>
+                </div>
+                <p className="mt-0.5 text-xs text-muted-foreground">{entry.description}</p>
+              </div>
+              <Switch
+                checked={devOverrides.overrides[entry.key]}
+                onCheckedChange={() => devOverrides.toggle(entry.key)}
+                data-testid={`admin-override-${entry.key}`}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="rounded-lg border border-border/40 bg-card/30 px-3 py-2.5 text-xs text-muted-foreground">
+        This tab is only visible when running via{" "}
+        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">npm run gsd:web</code>.
+        Overrides reset on page refresh.
+      </div>
+    </div>
+  )
+
+  const renderSection = () => {
+    switch (commandSurface.section) {
+      case "model": return renderModelSection()
+      case "thinking": return renderThinkingSection()
+      case "queue": return renderQueueSection()
+      case "compaction": return renderCompactionSection()
+      case "retry": return renderRetrySection()
+      case "recovery": return renderRecoverySection()
+      case "auth": return renderAuthSection()
+      case "admin": return renderAdminSection()
+      case "git": return renderGitSection()
+      case "resume": return renderSessionBrowserSection("resume")
+      case "name": return renderSessionBrowserSection("name")
+      case "fork": return renderForkSection()
+      case "session": return renderSessionSection()
+      case "compact": return renderCompactSection()
+      default: return null
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // RENDER
+  // ═══════════════════════════════════════════════════════════════════
+
+  return (
+    <Sheet open={commandSurface.open} onOpenChange={(open) => !open && closeCommandSurface()}>
+      <SheetContent side="right" className="flex w-full flex-col p-0 sm:max-w-[540px]" data-testid="command-surface">
+        {/* Visually hidden accessible title */}
+        <SheetHeader className="sr-only">
+          <SheetTitle>{surfaceTitle(commandSurface.activeSurface)}</SheetTitle>
+          <SheetDescription>Settings and controls</SheetDescription>
+        </SheetHeader>
+
+        <div className="flex h-full">
+          {/* ─── Left nav rail ─────────────────────────────────────── */}
+          <nav className="flex w-12 shrink-0 flex-col items-center gap-0.5 border-r border-border/40 bg-card/30 py-3" data-testid="command-surface-sections">
+            {surfaceSections.map((section) => {
+              const active = commandSurface.section === section
+              return (
+                <Tooltip key={section}>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className={cn(
+                        "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
+                        active
+                          ? "bg-foreground/10 text-foreground"
+                          : "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground",
+                      )}
+                      onClick={() => setCommandSurfaceSection(section)}
+                      data-testid={`command-surface-section-${section}`}
+                    >
+                      {sectionIcon(section)}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={6}>
+                    {sectionLabel(section)}
+                  </TooltipContent>
+                </Tooltip>
+              )
+            })}
+          </nav>
+
+          {/* ─── Right content area ────────────────────────────────── */}
+          <div className="flex min-w-0 flex-1 flex-col">
+            <ScrollArea className="flex-1">
+              <div className="px-5 py-5">
+                {renderSection()}
+              </div>
+            </ScrollArea>
+          </div>
+        </div>
       </SheetContent>
     </Sheet>
   )

@@ -37,7 +37,7 @@ import {
 
 const DEFAULT_PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const RESPONSE_TIMEOUT_MS = 30_000;
-const START_TIMEOUT_MS = 30_000;
+const START_TIMEOUT_MS = 90_000;
 const MAX_STDERR_BUFFER = 8_000;
 const WORKSPACE_INDEX_CACHE_TTL_MS = 30_000;
 
@@ -1395,7 +1395,12 @@ export class BridgeService {
   }
 
   private async refreshState(strict: boolean): Promise<void> {
-    const response = sanitizeRpcResponse(await this.requestResponse({ type: "get_state" }));
+    // During startup (strict=true), the RPC child may need significant time to
+    // initialise — loading extensions, creating the agent session, etc.  Use
+    // the overall START_TIMEOUT_MS instead of the short per-request timeout so
+    // the first get_state doesn't race against cold-start initialisation.
+    const timeout = strict ? START_TIMEOUT_MS : undefined;
+    const response = sanitizeRpcResponse(await this.requestResponse({ type: "get_state" }, timeout));
     if (!response.success) {
       throw new Error(response.error);
     }
@@ -1412,19 +1417,20 @@ export class BridgeService {
     this.snapshot.activeSessionFile = state.sessionFile ?? null;
   }
 
-  private requestResponse(command: RpcCommand): Promise<RpcResponse> {
+  private requestResponse(command: RpcCommand, timeoutMs?: number): Promise<RpcResponse> {
     if (!this.process?.stdin) {
       return Promise.reject(new Error("RPC bridge is not connected"));
     }
 
     const id = command.id ?? `web_${++this.requestCounter}`;
     const payload = { ...command, id } satisfies RpcCommand;
+    const effectiveTimeout = timeoutMs ?? RESPONSE_TIMEOUT_MS;
 
     return new Promise<RpcResponse>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(id);
         reject(new Error(`Timed out waiting for RPC response to ${payload.type}`));
-      }, RESPONSE_TIMEOUT_MS);
+      }, effectiveTimeout);
 
       this.pendingRequests.set(id, {
         resolve: (response) => {

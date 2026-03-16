@@ -33,7 +33,7 @@ function loadNative(): typeof nativeModule {
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require("@gsd/native");
+    const mod = require(/* webpackIgnore: true */ "@gsd/native");
     if (mod.gitCurrentBranch && mod.gitHasChanges) {
       nativeModule = mod;
     }

@@ -14,6 +14,7 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  serverExternalPackages: ['@gsd/native'],
 }
 
 export default nextConfig

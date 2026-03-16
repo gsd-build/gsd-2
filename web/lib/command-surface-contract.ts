@@ -17,6 +17,7 @@ export type CommandSurfaceSection =
   | "retry"
   | "recovery"
   | "auth"
+  | "admin"
   | "git"
   | "resume"
   | "name"
@@ -718,7 +719,7 @@ export function setCommandSurfaceSection(
     selectedTarget = buildModelTarget(request)
   } else if (section === "thinking") {
     selectedTarget = buildThinkingTarget(request)
-  } else if (section === "queue" || section === "compaction" || section === "retry" || section === "recovery" || section === "git") {
+  } else if (section === "queue" || section === "compaction" || section === "retry" || section === "recovery" || section === "git" || section === "admin") {
     selectedTarget = buildSettingsTarget(section)
   } else if (section === "auth") {
     selectedTarget = buildAuthTarget({

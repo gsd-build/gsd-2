@@ -33,11 +33,18 @@ import {
 } from "@/lib/gsd-workspace-store"
 import { getTaskStatus, type ItemStatus } from "@/lib/workspace-status"
 import { deriveWorkflowAction } from "@/lib/workflow-actions"
+import { Skeleton } from "@/components/ui/skeleton"
+import {
+  CurrentSliceCardSkeleton,
+  SessionCardSkeleton,
+  ActivityCardSkeleton,
+} from "@/components/gsd/loading-skeletons"
+import { ScopeBadge } from "@/components/gsd/scope-badge"
 
 interface MetricCardProps {
   label: string
-  value: string
-  subtext?: string
+  value: string | null
+  subtext?: string | null
   icon: React.ReactNode
 }
 
@@ -49,8 +56,17 @@ function MetricCard({ label, value, subtext, icon }: MetricCardProps) {
           <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
             {label}
           </p>
-          <p className="mt-1 truncate text-2xl font-semibold tracking-tight">{value}</p>
-          {subtext && <p className="mt-0.5 truncate text-xs text-muted-foreground">{subtext}</p>}
+          {value === null ? (
+            <>
+              <Skeleton className="mt-2 h-7 w-20" />
+              <Skeleton className="mt-1.5 h-3 w-16" />
+            </>
+          ) : (
+            <>
+              <p className="mt-1 truncate text-2xl font-semibold tracking-tight">{value}</p>
+              {subtext && <p className="mt-0.5 truncate text-xs text-muted-foreground">{subtext}</p>}
+            </>
+          )}
         </div>
         <div className="shrink-0 rounded-md bg-accent p-2 text-muted-foreground">{icon}</div>
       </div>
@@ -95,16 +111,11 @@ function formatRelativeTime(isoDate: string): string {
 
 export function Dashboard() {
   const state = useGSDWorkspaceState()
-  const {
-    sendCommand,
-    openCommandSurface,
-    setCommandSurfaceSection,
-  } = useGSDWorkspaceActions()
+  const { sendCommand } = useGSDWorkspaceActions()
   const boot = state.boot
   const workspace = getLiveWorkspaceIndex(state)
   const auto = getLiveAutoDashboard(state)
   const bridge = boot?.bridge ?? null
-  const recoverySummary = state.live.recoverySummary
   const freshness = state.live.freshness
 
   const activeToolExecution = state.activeToolExecution
@@ -125,7 +136,6 @@ export function Dashboard() {
   const isAutoActive = auto?.active ?? false
   const currentUnitLabel = auto?.currentUnit?.id ?? scopeLabel
   const currentUnitFreshness = freshness.auto.stale ? "stale" : freshness.auto.status
-  const recoveryFreshness = freshness.recovery.stale ? "stale" : freshness.recovery.status
 
   const workflowAction = deriveWorkflowAction({
     phase: workspace?.active.phase ?? "pre-planning",
@@ -141,33 +151,88 @@ export function Dashboard() {
     void sendCommand(buildPromptCommand(command, bridge))
   }
 
-  const openRecoverySummary = () => {
-    openCommandSurface("settings", { source: "surface" })
-    setCommandSurfaceSection("recovery")
-  }
-
   const recentLines: WorkspaceTerminalLine[] = (state.terminalLines ?? []).slice(-6)
+  const isConnecting = state.bootStatus === "idle" || state.bootStatus === "loading"
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-border px-6 py-3">
         <div>
           <h1 className="text-lg font-semibold">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">{scopeLabel}</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm">
-            <span
-              className={cn(
-                "h-2 w-2 rounded-full",
-                isAutoActive ? "animate-pulse bg-success" : "bg-muted-foreground/50",
-              )}
-            />
-            <span className="font-medium">
-              {isAutoActive ? "Auto Mode Active" : "Auto Mode Inactive"}
-            </span>
+          <div className="mt-1 text-sm text-muted-foreground">
+            {isConnecting ? <Skeleton className="h-4 w-40" /> : <ScopeBadge label={scopeLabel} size="sm" />}
           </div>
-          {branch && (
+        </div>
+        <div className="flex items-center gap-3" data-testid="dashboard-action-bar">
+          {isConnecting ? (
+            <>
+              <Skeleton className="h-8 w-36 rounded-md" />
+              <Skeleton className="h-8 w-16 rounded-md" />
+              <div className="h-4 w-px bg-border" />
+              <Skeleton className="h-8 w-40 rounded-md" />
+            </>
+          ) : null}
+          {!isConnecting && workflowAction.primary && (
+            <button
+              onClick={() => handleWorkflowAction(workflowAction.primary!.command)}
+              disabled={workflowAction.disabled}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                workflowAction.primary.variant === "destructive"
+                  ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  : "bg-primary text-primary-foreground hover:bg-primary/90",
+                workflowAction.disabled && "cursor-not-allowed opacity-50",
+              )}
+              title={workflowAction.disabledReason}
+            >
+              {state.commandInFlight ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Play className="h-3.5 w-3.5" />
+              )}
+              {workflowAction.primary.label}
+            </button>
+          )}
+          {!isConnecting && workflowAction.secondaries.map((action) => (
+            <button
+              key={action.command}
+              onClick={() => handleWorkflowAction(action.command)}
+              disabled={workflowAction.disabled}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium transition-colors hover:bg-accent",
+                workflowAction.disabled && "cursor-not-allowed opacity-50",
+              )}
+              title={workflowAction.disabledReason}
+            >
+              {action.label}
+            </button>
+          ))}
+          {!isConnecting && state.commandInFlight && (
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Sending…
+            </span>
+          )}
+          {!isConnecting && workflowAction.disabledReason && !state.commandInFlight && (
+            <span className="text-xs text-muted-foreground">
+              {workflowAction.disabledReason}
+            </span>
+          )}
+          {!isConnecting && <div className="h-4 w-px bg-border" />}
+          {!isConnecting && (
+            <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm">
+              <span
+                className={cn(
+                  "h-2 w-2 rounded-full",
+                  isAutoActive ? "animate-pulse bg-success" : "bg-muted-foreground/50",
+                )}
+              />
+              <span className="font-medium">
+                {isAutoActive ? "Auto Mode Active" : "Auto Mode Inactive"}
+              </span>
+            </div>
+          )}
+          {!isConnecting && branch && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <GitBranch className="h-4 w-4" />
               <span className="font-mono">{branch}</span>
@@ -177,64 +242,26 @@ export function Dashboard() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">
-        <div className="mb-6 flex items-center gap-3 rounded-md border border-border bg-card px-4 py-3" data-testid="dashboard-action-bar">
-          {workflowAction.primary && (
-            <button
-              onClick={() => handleWorkflowAction(workflowAction.primary!.command)}
-              disabled={workflowAction.disabled}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors",
-                workflowAction.primary.variant === "destructive"
-                  ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                  : "bg-primary text-primary-foreground hover:bg-primary/90",
-                workflowAction.disabled && "cursor-not-allowed opacity-50",
-              )}
-              title={workflowAction.disabledReason}
-            >
-              {state.commandInFlight ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Play className="h-4 w-4" />
-              )}
-              {workflowAction.primary.label}
-            </button>
-          )}
-          {workflowAction.secondaries.map((action) => (
-            <button
-              key={action.command}
-              onClick={() => handleWorkflowAction(action.command)}
-              disabled={workflowAction.disabled}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-accent",
-                workflowAction.disabled && "cursor-not-allowed opacity-50",
-              )}
-              title={workflowAction.disabledReason}
-            >
-              {action.label}
-            </button>
-          ))}
-          {state.commandInFlight && (
-            <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Sending…
-            </span>
-          )}
-          {workflowAction.disabledReason && !state.commandInFlight && (
-            <span className="ml-auto text-xs text-muted-foreground">
-              {workflowAction.disabledReason}
-            </span>
-          )}
-        </div>
-
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <div className="rounded-md border border-border bg-card p-4" data-testid="dashboard-current-unit">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Current Unit</p>
-                <p className="mt-1 truncate text-lg font-semibold tracking-tight">{currentUnitLabel}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground" data-testid="dashboard-current-unit-freshness">
-                  Auto freshness: {currentUnitFreshness}
-                </p>
+                {isConnecting ? (
+                  <>
+                    <Skeleton className="mt-2 h-6 w-40" />
+                    <Skeleton className="mt-1.5 h-3 w-28" />
+                  </>
+                ) : (
+                  <>
+                    <div className="mt-2">
+                      <ScopeBadge label={currentUnitLabel} />
+                    </div>
+                    <p className="mt-1.5 text-xs text-muted-foreground" data-testid="dashboard-current-unit-freshness">
+                      Auto freshness: {currentUnitFreshness}
+                    </p>
+                  </>
+                )}
               </div>
               <div className="shrink-0 rounded-md bg-accent p-2 text-muted-foreground">
                 <Activity className="h-5 w-5" />
@@ -243,182 +270,224 @@ export function Dashboard() {
           </div>
           <MetricCard
             label="Elapsed Time"
-            value={formatDuration(elapsed)}
+            value={isConnecting ? null : formatDuration(elapsed)}
             icon={<Clock className="h-5 w-5" />}
           />
           <MetricCard
             label="Total Cost"
-            value={formatCost(totalCost)}
+            value={isConnecting ? null : formatCost(totalCost)}
             icon={<DollarSign className="h-5 w-5" />}
           />
           <MetricCard
             label="Tokens Used"
-            value={formatTokens(totalTokens)}
+            value={isConnecting ? null : formatTokens(totalTokens)}
             icon={<Zap className="h-5 w-5" />}
           />
           <MetricCard
             label="Progress"
-            value={totalTasks > 0 ? `${progressPercent}%` : "—"}
-            subtext={totalTasks > 0 ? `${doneTasks}/${totalTasks} tasks complete` : "No active slice"}
+            value={isConnecting ? null : (totalTasks > 0 ? `${progressPercent}%` : "—")}
+            subtext={isConnecting ? null : (totalTasks > 0 ? `${doneTasks}/${totalTasks} tasks complete` : "No active slice")}
             icon={<Activity className="h-5 w-5" />}
           />
         </div>
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
-          <div className="rounded-md border border-border bg-card">
-            <div className="border-b border-border px-4 py-3">
-              <h2 className="text-sm font-semibold">
-                {currentSlice
-                  ? `Current Slice: ${currentSlice.id} — ${currentSlice.title}`
-                  : "Current Slice"}
-              </h2>
-            </div>
-            <div className="space-y-3 p-4">
-              {currentSlice && currentSlice.tasks.length > 0 ? (
-                currentSlice.tasks.map((task) => {
-                  const status = getTaskStatus(
-                    workspace!.active.milestoneId!,
-                    currentSlice.id,
-                    task,
-                    workspace!.active,
-                  )
-                  return (
-                    <div key={task.id} className="flex items-center gap-3">
-                      {taskStatusIcon(status)}
-                      <div className="flex-1">
-                        <span
+        <div className="mt-6 grid items-stretch gap-6 xl:grid-cols-[1fr_300px]">
+          {/* LEFT — Current Slice */}
+          {isConnecting ? (
+            <CurrentSliceCardSkeleton />
+          ) : (
+            <div className="flex flex-col rounded-md border border-border bg-card">
+              {/* Header */}
+              <div className="border-b border-border px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Current Slice</h2>
+                    {currentSlice ? (
+                      <p className="mt-0.5 truncate text-sm font-medium text-foreground">
+                        {currentSlice.id} — {currentSlice.title}
+                      </p>
+                    ) : (
+                      <p className="mt-0.5 text-sm text-muted-foreground">No active slice</p>
+                    )}
+                  </div>
+                  {currentSlice && totalTasks > 0 && (
+                    <div className="shrink-0 text-right">
+                      <span className="text-2xl font-bold tabular-nums leading-none">{progressPercent}</span>
+                      <span className="text-xs text-muted-foreground">%</span>
+                    </div>
+                  )}
+                </div>
+                {currentSlice && totalTasks > 0 && (
+                  <div className="mt-3">
+                    <div className="h-1 w-full overflow-hidden rounded-full bg-accent">
+                      <div
+                        className="h-full rounded-full bg-foreground transition-all duration-500"
+                        style={{ width: `${progressPercent}%` }}
+                      />
+                    </div>
+                    <p className="mt-1.5 text-xs text-muted-foreground">{doneTasks} of {totalTasks} tasks complete</p>
+                  </div>
+                )}
+              </div>
+              {/* Task list */}
+              <div className="flex-1 p-3">
+                {currentSlice && currentSlice.tasks.length > 0 ? (
+                  <div className="space-y-0.5">
+                    {currentSlice.tasks.map((task) => {
+                      const status = getTaskStatus(
+                        workspace!.active.milestoneId!,
+                        currentSlice.id,
+                        task,
+                        workspace!.active,
+                      )
+                      return (
+                        <div
+                          key={task.id}
                           className={cn(
-                            "text-sm",
-                            status === "pending" && "text-muted-foreground",
+                            "flex items-center gap-2.5 rounded px-2 py-1.5 transition-colors",
+                            status === "in-progress" && "bg-accent",
                           )}
                         >
-                          {task.id}: {task.title}
-                        </span>
-                      </div>
-                    </div>
-                  )
-                })
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  No active slice or no tasks defined yet.
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-md border border-border bg-card">
-            <div className="border-b border-border px-4 py-3">
-              <h2 className="text-sm font-semibold">Session</h2>
-            </div>
-            <div className="p-4">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
-                    <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-muted-foreground">Model</span>
+                          {taskStatusIcon(status)}
+                          <span
+                            className={cn(
+                              "min-w-0 flex-1 truncate text-xs",
+                              status === "done" && "text-muted-foreground line-through decoration-muted-foreground/40",
+                              status === "pending" && "text-muted-foreground",
+                              status === "in-progress" && "font-medium text-foreground",
+                            )}
+                          >
+                            <span className="font-mono text-muted-foreground">{task.id}</span>
+                            <span className="mx-1.5 text-border">·</span>
+                            {task.title}
+                          </span>
+                          {status === "in-progress" && (
+                            <span className="shrink-0 rounded-sm bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-foreground/70">
+                              active
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
-                  <span className="font-mono text-xs">{model}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
-                    <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-muted-foreground">Cost</span>
-                  </div>
-                  <span className="font-medium">{formatCost(totalCost)}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
-                    <Zap className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-muted-foreground">Tokens</span>
-                  </div>
-                  <span>{formatTokens(totalTokens)}</span>
-                </div>
-                {activeToolExecution && (
-                  <div className="flex items-center justify-between text-sm" data-testid="dashboard-active-tool">
-                    <div className="flex items-center gap-2">
-                      <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="text-muted-foreground">Running</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
-                      <span className="font-mono text-xs">{activeToolExecution.name}</span>
-                    </div>
-                  </div>
-                )}
-                {streamingAssistantText.length > 0 && (
-                  <div className="flex items-center justify-between text-sm" data-testid="dashboard-streaming">
-                    <div className="flex items-center gap-2">
-                      <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="text-muted-foreground">Agent</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-foreground/60 animate-pulse" />
-                      <span className="text-xs">Streaming…</span>
-                    </div>
-                  </div>
+                ) : (
+                  <p className="px-2 py-2 text-xs text-muted-foreground">
+                    No active slice or no tasks defined yet.
+                  </p>
                 )}
               </div>
-            </div>
-          </div>
-
-          <div className="rounded-md border border-border bg-card" data-testid="dashboard-recovery-summary">
-            <div className="border-b border-border px-4 py-3">
-              <h2 className="text-sm font-semibold">Recovery Summary</h2>
-            </div>
-            <div className="space-y-4 p-4">
-              <div>
-                <div className="text-sm font-medium" data-testid="dashboard-recovery-summary-state">{recoverySummary.label}</div>
-                <p className="mt-1 text-xs text-muted-foreground">{recoverySummary.detail}</p>
-              </div>
-              <div className="grid gap-2 text-xs text-muted-foreground">
-                <div data-testid="dashboard-retry-freshness">Recovery freshness: {recoveryFreshness}</div>
-                <div>Validation issues: {recoverySummary.validationCount}</div>
-                <div>
-                  Retry: {recoverySummary.retryInProgress ? `attempt ${Math.max(1, recoverySummary.retryAttempt)}` : recoverySummary.autoRetryEnabled ? "enabled" : "idle"}
-                </div>
-                <div>Compaction: {recoverySummary.isCompacting ? "active" : "idle"}</div>
-                {recoverySummary.lastError && <div className="text-destructive">Last error: {recoverySummary.lastError.message}</div>}
-              </div>
-              <button
-                type="button"
-                onClick={openRecoverySummary}
-                className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-accent"
-                data-testid="dashboard-recovery-summary-entrypoint"
-              >
-                {recoverySummary.entrypointLabel}
-              </button>
-            </div>
-          </div>
-        </div>
-
-
-        <div className="mt-6 rounded-md border border-border bg-card">
-          <div className="border-b border-border px-4 py-3">
-            <h2 className="text-sm font-semibold">Recent Activity</h2>
-          </div>
-          {recentLines.length > 0 ? (
-            <div className="divide-y divide-border">
-              {recentLines.map((line) => (
-                <div key={line.id} className="flex items-center gap-3 px-4 py-2.5">
-                  <span className="w-16 flex-shrink-0 font-mono text-xs text-muted-foreground">
-                    {line.timestamp}
-                  </span>
-                  <span
-                    className={cn(
-                      "h-1.5 w-1.5 flex-shrink-0 rounded-full",
-                      activityDotColor(line.type),
-                    )}
-                  />
-                  <span className="truncate text-sm">{line.content}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="px-4 py-4 text-sm text-muted-foreground">
-              No activity yet.
             </div>
           )}
+
+          {/* RIGHT — Session + Recovery stacked */}
+          <div className="flex flex-col gap-6">
+            {isConnecting ? (
+              <SessionCardSkeleton />
+            ) : (
+              <div className="rounded-md border border-border bg-card">
+                {/* Model */}
+                <div className="border-b border-border px-4 py-3">
+                  <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Session</h2>
+                  <div className="mt-1 flex items-center gap-2">
+                    <Cpu className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="font-mono text-sm font-medium truncate">{model}</span>
+                    {(activeToolExecution || streamingAssistantText.length > 0) && (
+                      <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                        <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
+                        <span className="text-xs text-muted-foreground">
+                          {activeToolExecution ? "running" : "streaming"}
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {/* 4-cell stat grid */}
+                <div className="grid grid-cols-2 gap-px bg-border p-px">
+                  <div className="bg-card px-3 py-2.5">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Cost</p>
+                    <p className="mt-1 text-lg font-bold tabular-nums">{formatCost(totalCost)}</p>
+                  </div>
+                  <div className="bg-card px-3 py-2.5">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Tokens</p>
+                    <p className="mt-1 text-lg font-bold tabular-nums">{formatTokens(totalTokens)}</p>
+                  </div>
+                  <div className="bg-card px-3 py-2.5">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Elapsed</p>
+                    <p className="mt-1 text-lg font-bold tabular-nums">{formatDuration(elapsed)}</p>
+                  </div>
+                  <div className="bg-card px-3 py-2.5">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Auto Mode</p>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <span className={cn("h-2 w-2 shrink-0 rounded-full", isAutoActive ? "bg-success animate-pulse" : "bg-muted-foreground/40")} />
+                      <p className="text-sm font-semibold">{isAutoActive ? "active" : "off"}</p>
+                    </div>
+                  </div>
+                </div>
+                {/* Live signals — only shown when active */}
+                {(activeToolExecution || streamingAssistantText.length > 0) && (
+                  <div className="p-3 space-y-1.5">
+                    {activeToolExecution && (
+                      <div
+                        className="flex items-center gap-2.5 rounded border border-border bg-accent px-3 py-2"
+                        data-testid="dashboard-active-tool"
+                      >
+                        <Wrench className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span className="text-xs text-muted-foreground">Tool</span>
+                        <span className="ml-auto font-mono text-xs font-medium">{activeToolExecution.name}</span>
+                      </div>
+                    )}
+                    {streamingAssistantText.length > 0 && (
+                      <div
+                        className="flex items-center gap-2.5 rounded border border-border bg-accent px-3 py-2"
+                        data-testid="dashboard-streaming"
+                      >
+                        <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span className="text-xs text-muted-foreground">Agent</span>
+                        <span className="ml-auto text-xs font-medium">Streaming…</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+
+          </div>
         </div>
+
+        {isConnecting ? (
+          <div className="mt-6">
+            <ActivityCardSkeleton />
+          </div>
+        ) : (
+          <div className="mt-6 rounded-md border border-border bg-card">
+            <div className="border-b border-border px-4 py-3">
+              <h2 className="text-sm font-semibold">Recent Activity</h2>
+            </div>
+            {recentLines.length > 0 ? (
+              <div className="divide-y divide-border">
+                {recentLines.map((line) => (
+                  <div key={line.id} className="flex items-center gap-3 px-4 py-2.5">
+                    <span className="w-16 flex-shrink-0 font-mono text-xs text-muted-foreground">
+                      {line.timestamp}
+                    </span>
+                    <span
+                      className={cn(
+                        "h-1.5 w-1.5 flex-shrink-0 rounded-full",
+                        activityDotColor(line.type),
+                      )}
+                    />
+                    <span className="truncate text-sm">{line.content}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="px-4 py-4 text-sm text-muted-foreground">
+                No activity yet.
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

@@ -16,6 +16,8 @@ const { join, resolve } = require('node:path')
 
 const root = resolve(__dirname, '..')
 const webRoot = join(root, 'web')
+// Also watch src/ because api routes import directly from src/web/* and src/resources/*
+const srcRoot = join(root, 'src')
 const stagedSentinel = join(root, 'dist', 'web', 'standalone', 'server.js')
 
 // Directories inside web/ that are not source and should be ignored for
@@ -63,7 +65,7 @@ function sentinelMtime() {
   }
 }
 
-const sourceMtime = newestMtime(webRoot)
+const sourceMtime = Math.max(newestMtime(webRoot), newestMtime(srcRoot))
 const builtMtime = sentinelMtime()
 
 if (builtMtime > 0 && builtMtime >= sourceMtime) {
@@ -74,7 +76,7 @@ if (builtMtime > 0 && builtMtime >= sourceMtime) {
 if (builtMtime === 0) {
   console.log('[gsd] No staged web build found — building now...')
 } else {
-  console.log('[gsd] Web source has changed since last build — rebuilding...')
+  console.log('[gsd] Web/src source has changed since last build — rebuilding...')
 }
 
 try {

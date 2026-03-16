@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import {
   FileText,
   ChevronRight,
@@ -13,12 +13,40 @@ import {
   AlertCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useGSDWorkspaceState } from "@/lib/gsd-workspace-store"
+import { FileContentViewer } from "@/components/gsd/file-content-viewer"
+
+type RootMode = "gsd" | "project"
 
 interface FileNode {
   name: string
   type: "file" | "directory"
   children?: FileNode[]
 }
+
+/* ── Persistence helpers ── */
+
+function storageKey(projectCwd: string, root: RootMode): string {
+  return `gsd-files-expanded:${root}:${projectCwd}`
+}
+
+function loadExpanded(projectCwd: string | undefined, root: RootMode): Set<string> {
+  if (!projectCwd) return new Set()
+  try {
+    const raw = sessionStorage.getItem(storageKey(projectCwd, root))
+    if (raw) return new Set(JSON.parse(raw) as string[])
+  } catch { /* ignore */ }
+  return new Set()
+}
+
+function saveExpanded(projectCwd: string | undefined, root: RootMode, expanded: Set<string>): void {
+  if (!projectCwd) return
+  try {
+    sessionStorage.setItem(storageKey(projectCwd, root), JSON.stringify([...expanded]))
+  } catch { /* ignore */ }
+}
+
+/* ── Icons ── */
 
 function FileIcon({ name, isFolder, isOpen }: { name: string; isFolder: boolean; isOpen?: boolean }) {
   if (isFolder) {
@@ -31,27 +59,31 @@ function FileIcon({ name, isFolder, isOpen }: { name: string; isFolder: boolean;
   if (name.endsWith(".md")) {
     return <FileText className="h-4 w-4 text-muted-foreground" />
   }
-  if (name.endsWith(".json") || name.endsWith(".ts") || name.endsWith(".tsx")) {
+  if (name.endsWith(".json") || name.endsWith(".ts") || name.endsWith(".tsx") || name.endsWith(".js") || name.endsWith(".jsx")) {
     return <FileCode className="h-4 w-4 text-muted-foreground" />
   }
   return <File className="h-4 w-4 text-muted-foreground" />
 }
+
+/* ── Tree item ── */
 
 interface FileTreeItemProps {
   node: FileNode
   depth: number
   parentPath: string
   selectedPath: string | null
+  expandedPaths: Set<string>
+  onToggleDir: (path: string) => void
   onSelectFile: (path: string) => void
 }
 
-function FileTreeItem({ node, depth, parentPath, selectedPath, onSelectFile }: FileTreeItemProps) {
-  const [isOpen, setIsOpen] = useState(depth < 2)
+function FileTreeItem({ node, depth, parentPath, selectedPath, expandedPaths, onToggleDir, onSelectFile }: FileTreeItemProps) {
   const fullPath = parentPath ? `${parentPath}/${node.name}` : node.name
+  const isOpen = node.type === "directory" && expandedPaths.has(fullPath)
 
   const handleClick = () => {
     if (node.type === "directory") {
-      setIsOpen(!isOpen)
+      onToggleDir(fullPath)
     } else {
       onSelectFile(fullPath)
     }
@@ -63,7 +95,7 @@ function FileTreeItem({ node, depth, parentPath, selectedPath, onSelectFile }: F
         onClick={handleClick}
         className={cn(
           "flex w-full items-center gap-1.5 px-2 py-1 text-sm hover:bg-accent/50 transition-colors",
-          selectedPath === fullPath && node.type === "file" && "bg-accent"
+          selectedPath === fullPath && node.type === "file" && "bg-accent",
         )}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
       >
@@ -77,7 +109,7 @@ function FileTreeItem({ node, depth, parentPath, selectedPath, onSelectFile }: F
         <FileIcon name={node.name} isFolder={node.type === "directory"} isOpen={isOpen} />
         <span className="truncate">{node.name}</span>
       </button>
-      {node.type === "directory" && isOpen && node.children && (
+      {isOpen && node.children && (
         <div>
           {node.children.map((child, i) => (
             <FileTreeItem
@@ -86,6 +118,8 @@ function FileTreeItem({ node, depth, parentPath, selectedPath, onSelectFile }: F
               depth={depth + 1}
               parentPath={fullPath}
               selectedPath={selectedPath}
+              expandedPaths={expandedPaths}
+              onToggleDir={onToggleDir}
               onSelectFile={onSelectFile}
             />
           ))}
@@ -95,43 +129,96 @@ function FileTreeItem({ node, depth, parentPath, selectedPath, onSelectFile }: F
   )
 }
 
+/* ── Main view ── */
+
 export function FilesView() {
-  const [tree, setTree] = useState<FileNode[]>([])
+  const workspace = useGSDWorkspaceState()
+  const projectCwd = workspace.boot?.project.cwd
+
+  const [activeRoot, setActiveRoot] = useState<RootMode>("gsd")
+  const [gsdTree, setGsdTree] = useState<FileNode[] | null>(null)
+  const [projectTree, setProjectTree] = useState<FileNode[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Expanded paths per root, restored from sessionStorage
+  const [gsdExpanded, setGsdExpanded] = useState<Set<string>>(() => loadExpanded(projectCwd, "gsd"))
+  const [projectExpanded, setProjectExpanded] = useState<Set<string>>(() => loadExpanded(projectCwd, "project"))
+
+  // Re-hydrate from storage once projectCwd is available (boot may arrive after first render)
+  const hydratedRef = useRef(false)
+  useEffect(() => {
+    if (!projectCwd || hydratedRef.current) return
+    hydratedRef.current = true
+    setGsdExpanded(loadExpanded(projectCwd, "gsd"))
+    setProjectExpanded(loadExpanded(projectCwd, "project"))
+  }, [projectCwd])
+
+  const expandedPaths = activeRoot === "gsd" ? gsdExpanded : projectExpanded
+  const setExpandedPaths = activeRoot === "gsd" ? setGsdExpanded : setProjectExpanded
+
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState<string | null>(null)
   const [contentLoading, setContentLoading] = useState(false)
   const [contentError, setContentError] = useState<string | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    async function fetchTree() {
-      try {
-        setLoading(true)
-        setError(null)
-        const res = await fetch("/api/files")
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}))
-          throw new Error(data.error || `Failed to fetch files (${res.status})`)
-        }
-        const data = await res.json()
-        if (!cancelled) {
-          setTree(data.tree ?? [])
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to fetch files")
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
+  const tree = activeRoot === "gsd" ? gsdTree : projectTree
+  const treeLoaded = activeRoot === "gsd" ? gsdTree !== null : projectTree !== null
+
+  const fetchTree = useCallback(async (root: RootMode) => {
+    try {
+      setLoading(true)
+      setError(null)
+      const res = await fetch(`/api/files?root=${root}`)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || `Failed to fetch files (${res.status})`)
       }
+      const data = await res.json()
+      const nodes = data.tree ?? []
+      if (root === "gsd") {
+        setGsdTree(nodes)
+      } else {
+        setProjectTree(nodes)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch files")
+    } finally {
+      setLoading(false)
     }
-    fetchTree()
-    return () => { cancelled = true }
   }, [])
+
+  // Fetch tree when tab changes and data isn't cached
+  useEffect(() => {
+    if (!treeLoaded) {
+      fetchTree(activeRoot)
+    }
+  }, [activeRoot, treeLoaded, fetchTree])
+
+  // Initial load
+  useEffect(() => {
+    fetchTree("gsd")
+  }, [fetchTree])
+
+  const handleToggleDir = useCallback((path: string) => {
+    setExpandedPaths((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) {
+        next.delete(path)
+      } else {
+        next.add(path)
+      }
+      saveExpanded(projectCwd, activeRoot, next)
+      return next
+    })
+  }, [setExpandedPaths, projectCwd, activeRoot])
+
+  const handleTabChange = (root: RootMode) => {
+    setActiveRoot(root)
+    setSelectedPath(null)
+    setFileContent(null)
+    setContentError(null)
+  }
 
   const handleSelectFile = useCallback(async (path: string) => {
     setSelectedPath(path)
@@ -140,7 +227,7 @@ export function FilesView() {
     setContentLoading(true)
 
     try {
-      const res = await fetch(`/api/files?path=${encodeURIComponent(path)}`)
+      const res = await fetch(`/api/files?root=${activeRoot}&path=${encodeURIComponent(path)}`)
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         throw new Error(data.error || `Failed to fetch file (${res.status})`)
@@ -152,79 +239,104 @@ export function FilesView() {
     } finally {
       setContentLoading(false)
     }
-  }, [])
+  }, [activeRoot])
 
-  if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center text-muted-foreground">
-        <Loader2 className="h-5 w-5 animate-spin mr-2" />
-        Loading files…
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="flex h-full items-center justify-center text-destructive">
-        <AlertCircle className="h-5 w-5 mr-2" />
-        {error}
-      </div>
-    )
-  }
-
-  if (tree.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center text-muted-foreground">
-        No .gsd/ files found
-      </div>
-    )
-  }
+  const displayPath = selectedPath
+    ? activeRoot === "gsd"
+      ? `.gsd/${selectedPath}`
+      : selectedPath
+    : null
 
   return (
     <div className="flex h-full">
-      {/* File tree */}
-      <div className="w-64 flex-shrink-0 border-r border-border overflow-y-auto">
-        <div className="py-2">
-          {tree.map((node, i) => (
-            <FileTreeItem
-              key={i}
-              node={node}
-              depth={0}
-              parentPath=""
-              selectedPath={selectedPath}
-              onSelectFile={handleSelectFile}
-            />
-          ))}
+      {/* File tree panel */}
+      <div className="w-64 flex-shrink-0 border-r border-border overflow-y-auto flex flex-col">
+        {/* Tab bar */}
+        <div className="flex border-b border-border flex-shrink-0">
+          <button
+            onClick={() => handleTabChange("gsd")}
+            className={cn(
+              "flex-1 px-3 py-2 text-xs font-medium transition-colors",
+              activeRoot === "gsd"
+                ? "border-b-2 border-foreground text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            GSD
+          </button>
+          <button
+            onClick={() => handleTabChange("project")}
+            className={cn(
+              "flex-1 px-3 py-2 text-xs font-medium transition-colors",
+              activeRoot === "project"
+                ? "border-b-2 border-foreground text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Project
+          </button>
+        </div>
+
+        {/* Tree content */}
+        <div className="flex-1 overflow-y-auto py-2">
+          {loading && !treeLoaded ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              Loading…
+            </div>
+          ) : error && !treeLoaded ? (
+            <div className="flex items-center justify-center py-8 text-destructive text-xs px-3">
+              <AlertCircle className="h-4 w-4 mr-2 shrink-0" />
+              {error}
+            </div>
+          ) : tree && tree.length === 0 ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground text-xs">
+              {activeRoot === "gsd" ? "No .gsd/ files found" : "No files found"}
+            </div>
+          ) : tree ? (
+            tree.map((node, i) => (
+              <FileTreeItem
+                key={`${activeRoot}-${i}`}
+                node={node}
+                depth={0}
+                parentPath=""
+                selectedPath={selectedPath}
+                expandedPaths={expandedPaths}
+                onToggleDir={handleToggleDir}
+                onSelectFile={handleSelectFile}
+              />
+            ))
+          ) : null}
         </div>
       </div>
 
-      {/* File content */}
+      {/* File content panel */}
       <div className="flex-1 overflow-hidden flex flex-col">
-        {selectedPath && (
+        {displayPath && (
           <>
             <div className="flex h-9 items-center border-b border-border px-4">
-              <span className="text-sm font-medium">{selectedPath}</span>
+              <span className="text-sm font-medium font-mono">{displayPath}</span>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 font-mono text-sm">
-              {contentLoading ? (
-                <div className="flex items-center text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Loading…
-                </div>
-              ) : contentError ? (
-                <div className="flex items-center text-destructive">
-                  <AlertCircle className="h-4 w-4 mr-2" />
-                  {contentError}
-                </div>
-              ) : fileContent !== null ? (
-                <pre className="whitespace-pre-wrap text-muted-foreground">{fileContent}</pre>
-              ) : (
-                <p className="text-muted-foreground italic">No preview available</p>
-              )}
-            </div>
+            {contentLoading ? (
+              <div className="flex flex-1 items-center justify-center text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                Loading…
+              </div>
+            ) : contentError ? (
+              <div className="flex flex-1 items-center justify-center text-destructive">
+                <AlertCircle className="h-4 w-4 mr-2" />
+                {contentError}
+              </div>
+            ) : fileContent !== null ? (
+              <FileContentViewer content={fileContent} filepath={displayPath} />
+            ) : (
+              <div className="flex flex-1 items-center justify-center text-muted-foreground italic">
+                No preview available
+              </div>
+            )}
           </>
         )}
-        {!selectedPath && (
+        {!displayPath && (
           <div className="flex h-full items-center justify-center text-muted-foreground">
             Select a file to view
           </div>

@@ -136,3 +136,143 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ── File viewer: Shiki code blocks ── */
+.file-viewer-code pre {
+  margin: 0;
+  padding: 1rem;
+  background: transparent !important;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+}
+
+.file-viewer-code code {
+  font-family: var(--font-mono);
+  counter-reset: line;
+}
+
+.file-viewer-code code .line {
+  display: inline-block;
+  width: 100%;
+  padding: 0 0.5rem;
+}
+
+.file-viewer-code code .line:hover {
+  background: oklch(0.15 0 0);
+}
+
+.file-viewer-code code .line::before {
+  counter-increment: line;
+  content: counter(line);
+  display: inline-block;
+  width: 3.5ch;
+  margin-right: 1.5ch;
+  text-align: right;
+  color: oklch(0.35 0 0);
+  user-select: none;
+}
+
+/* ── File viewer: Markdown rendering ── */
+.markdown-body {
+  color: oklch(0.85 0 0);
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+
+.markdown-body h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin-top: 0;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid oklch(0.22 0 0);
+}
+
+.markdown-body h2 {
+  font-size: 1.35rem;
+  font-weight: 600;
+  margin-top: 1.75rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid oklch(0.22 0 0);
+}
+
+.markdown-body h3 {
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.markdown-body p {
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+  padding-left: 1.75rem;
+}
+
+.markdown-body ul {
+  list-style: disc;
+}
+
+.markdown-body ol {
+  list-style: decimal;
+}
+
+.markdown-body li {
+  margin-bottom: 0.25rem;
+}
+
+.markdown-body li > ul,
+.markdown-body li > ol {
+  margin-top: 0.25rem;
+  margin-bottom: 0;
+}
+
+.markdown-body blockquote {
+  margin: 0.75rem 0;
+  padding: 0.25rem 1rem;
+  border-left: 3px solid oklch(0.3 0 0);
+  color: oklch(0.6 0 0);
+}
+
+.markdown-body hr {
+  margin: 1.5rem 0;
+  border: none;
+  border-top: 1px solid oklch(0.22 0 0);
+}
+
+.markdown-body strong {
+  font-weight: 600;
+  color: oklch(0.92 0 0);
+}
+
+.markdown-body em {
+  font-style: italic;
+}
+
+.markdown-body del {
+  text-decoration: line-through;
+  color: oklch(0.5 0 0);
+}
+
+/* Task list checkboxes */
+.markdown-body input[type="checkbox"] {
+  margin-right: 0.4rem;
+  accent-color: oklch(0.65 0.15 145);
+}

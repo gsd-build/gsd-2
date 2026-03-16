@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Sidebar } from "@/components/gsd/sidebar"
+import { Sidebar, MilestoneExplorer } from "@/components/gsd/sidebar"
 import { Terminal } from "@/components/gsd/terminal"
 import { Dashboard } from "@/components/gsd/dashboard"
 import { Roadmap } from "@/components/gsd/roadmap"
@@ -12,7 +12,10 @@ import { DualTerminal } from "@/components/gsd/dual-terminal"
 import { FocusedPanel } from "@/components/gsd/focused-panel"
 import { OnboardingGate } from "@/components/gsd/onboarding-gate"
 import { CommandSurface } from "@/components/gsd/command-surface"
+import { DevOverridesProvider } from "@/lib/dev-overrides"
+import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { toast } from "sonner"
 import {
   GSDWorkspaceProvider,
   getCurrentScopeLabel,
@@ -24,6 +27,7 @@ import {
   useGSDWorkspaceState,
   useGSDWorkspaceActions,
 } from "@/lib/gsd-workspace-store"
+import { ScopeBadge } from "@/components/gsd/scope-badge"
 
 function statusPillClass(tone: ReturnType<typeof getStatusPresentation>["tone"]): string {
   switch (tone) {
@@ -55,7 +59,7 @@ function connectionDotClass(tone: ReturnType<typeof getStatusPresentation>["tone
   }
 }
 
-const KNOWN_VIEWS = new Set(["dashboard", "terminal", "power", "roadmap", "files", "activity"])
+const KNOWN_VIEWS = new Set(["dashboard", "power", "roadmap", "files", "activity"])
 
 function viewStorageKey(projectCwd: string): string {
   return `gsd-active-view:${projectCwd}`
@@ -117,6 +121,19 @@ function WorkspaceChrome() {
   }, [])
 
   const retryDisabled = !!workspace.commandInFlight || workspace.onboardingRequestState !== "idle"
+  const isConnecting = workspace.bootStatus === "idle" || workspace.bootStatus === "loading"
+
+  // Persistent loading toast — dismissed the moment boot completes
+  useEffect(() => {
+    if (!isConnecting) return
+    const id = toast.loading("Connecting to workspace…", {
+      description: "Establishing the live bridge session",
+      duration: Infinity,
+    })
+    return () => {
+      toast.dismiss(id)
+    }
+  }, [isConnecting])
 
   return (
     <div className="relative flex h-screen flex-col overflow-hidden bg-background text-foreground">
@@ -130,15 +147,21 @@ function WorkspaceChrome() {
           </div>
           <span className="text-2xl font-thin text-muted-foreground/50 leading-none select-none">/</span>
           <span className="text-sm text-muted-foreground" data-testid="workspace-project-cwd">
-            {projectLabel}
-            {titleOverride && (
-              <span
-                className="ml-2 inline-flex items-center rounded-full border border-foreground/15 bg-accent/60 px-2 py-0.5 text-[10px] font-medium text-foreground"
-                data-testid="workspace-title-override"
-                title={titleOverride}
-              >
-                {titleOverride}
-              </span>
+            {isConnecting ? (
+              <Skeleton className="inline-block h-4 w-28 align-middle" />
+            ) : (
+              <>
+                {projectLabel}
+                {titleOverride && (
+                  <span
+                    className="ml-2 inline-flex items-center rounded-full border border-foreground/15 bg-accent/60 px-2 py-0.5 text-[10px] font-medium text-foreground"
+                    data-testid="workspace-title-override"
+                    title={titleOverride}
+                  >
+                    {titleOverride}
+                  </span>
+                )}
+              </>
             )}
           </span>
         </div>
@@ -148,12 +171,12 @@ function WorkspaceChrome() {
             className="text-xs text-muted-foreground"
             data-testid="workspace-scope-label"
           >
-            {scopeLabel}
+            {isConnecting ? <Skeleton className="inline-block h-3.5 w-40 align-middle" /> : <ScopeBadge label={scopeLabel} size="sm" />}
           </span>
         </div>
       </header>
 
-      {visibleError && (
+      {!isConnecting && visibleError && (
         <div
           className="flex items-center gap-3 border-b border-destructive/20 bg-destructive/10 px-4 py-2 text-xs text-destructive"
           data-testid="workspace-error-banner"
@@ -173,7 +196,7 @@ function WorkspaceChrome() {
       )}
 
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar activeView={activeView} onViewChange={handleViewChange} />
+        <Sidebar activeView={activeView} onViewChange={isConnecting ? () => {} : handleViewChange} isConnecting={isConnecting} />
 
         <div className="flex flex-1 flex-col overflow-hidden">
           <div
@@ -182,35 +205,53 @@ function WorkspaceChrome() {
               isTerminalExpanded && "h-1/3",
             )}
           >
-            {activeView === "dashboard" && <Dashboard />}
-            {activeView === "terminal" && <Terminal className="h-full" />}
-            {activeView === "power" && <DualTerminal />}
-            {activeView === "roadmap" && <Roadmap />}
-            {activeView === "files" && <FilesView />}
-            {activeView === "activity" && <ActivityView />}
+            {isConnecting ? (
+              <Dashboard />
+            ) : (
+              <>
+                {activeView === "dashboard" && <Dashboard />}
+                {activeView === "power" && <DualTerminal />}
+                {activeView === "roadmap" && <Roadmap />}
+                {activeView === "files" && <FilesView />}
+                {activeView === "activity" && <ActivityView />}
+              </>
+            )}
           </div>
 
-          {activeView !== "terminal" && activeView !== "power" && (
+          {activeView !== "power" && (
             <div className="border-t border-border">
               <button
-                onClick={() => setIsTerminalExpanded(!isTerminalExpanded)}
-                className="flex h-8 w-full items-center justify-between bg-card px-3 text-xs transition-colors hover:bg-accent/50"
+                onClick={() => !isConnecting && setIsTerminalExpanded(!isTerminalExpanded)}
+                disabled={isConnecting}
+                className={cn(
+                  "flex h-8 w-full items-center justify-between bg-card px-3 text-xs",
+                  !isConnecting && "transition-colors hover:bg-accent/50",
+                  isConnecting && "cursor-default",
+                )}
               >
                 <span className="min-w-0 flex items-center gap-2 text-muted-foreground">
                   <span className="font-medium text-foreground">Terminal</span>
                   <span className="truncate font-mono text-[10px]" data-testid="workspace-session-label">
-                    {sessionLabel || "Waiting for live session…"}
+                    {isConnecting ? (
+                      <Skeleton className="inline-block h-3 w-36 align-middle" />
+                    ) : (
+                      sessionLabel || "Waiting for live session…"
+                    )}
                   </span>
                 </span>
                 <span className="flex items-center gap-2 text-muted-foreground">
                   <span
                     className={cn(
                       "h-1.5 w-1.5 rounded-full",
-                      connectionDotClass(status.tone),
-                      status.tone === "success" && "animate-pulse",
+                      isConnecting
+                        ? "bg-muted-foreground/30 animate-pulse"
+                        : connectionDotClass(status.tone),
+                      !isConnecting && status.tone === "success" && "animate-pulse",
                     )}
                   />
-                  <span className="font-medium">{runtimeLabel}</span>
+                  <span className={cn("font-medium", isConnecting && "text-muted-foreground/50")}>
+                    {runtimeLabel}
+                  </span>
                 </span>
               </button>
               <div
@@ -224,6 +265,8 @@ function WorkspaceChrome() {
             </div>
           )}
         </div>
+
+        <MilestoneExplorer isConnecting={isConnecting} />
       </div>
 
       <StatusBar />
@@ -237,7 +280,9 @@ function WorkspaceChrome() {
 export function GSDAppShell() {
   return (
     <GSDWorkspaceProvider>
-      <WorkspaceChrome />
+      <DevOverridesProvider>
+        <WorkspaceChrome />
+      </DevOverridesProvider>
     </GSDWorkspaceProvider>
   )
 }
