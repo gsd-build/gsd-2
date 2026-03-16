@@ -436,3 +436,62 @@ test("triage: parseTriageOutput preserves affectedFiles and targetSlice", () => 
   assert.strictEqual(results[1].targetSlice, "S04");
   assert.strictEqual(results[1].affectedFiles, undefined);
 });
+
+// ─── markCaptureApplied ───────────────────────────────────────────────────
+
+import { markCaptureApplied } from "../captures.ts";
+
+test("markCaptureApplied adds Applied field to resolved capture", () => {
+  const dir = makeTempDir("mark-applied");
+  try {
+    const id = appendCapture(dir, "Deploy to production");
+    markCaptureResolved(dir, id, "inject", "Add task T05", "Needs real deployment");
+    markCaptureApplied(dir, id, "Injected as T05");
+
+    const captures = loadAllCaptures(dir);
+    const cap = captures.find(c => c.id === id);
+    assert.ok(cap);
+    assert.ok(cap!.appliedAt);
+    assert.ok(cap!.appliedAt!.includes("Injected as T05"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("markCaptureApplied is idempotent — replaces existing Applied field", () => {
+  const dir = makeTempDir("mark-applied-idem");
+  try {
+    const id = appendCapture(dir, "Setup CI pipeline");
+    markCaptureResolved(dir, id, "inject", "Add task T06", "CI needed");
+    markCaptureApplied(dir, id, "Injected as T06");
+    markCaptureApplied(dir, id, "Re-injected as T07");
+
+    const captures = loadAllCaptures(dir);
+    const cap = captures.find(c => c.id === id);
+    assert.ok(cap);
+    assert.ok(cap!.appliedAt!.includes("Re-injected as T07"));
+    // Should only have one Applied field
+    const content = readFileSync(resolveCapturesPath(dir), "utf-8");
+    const appliedMatches = content.match(/\*\*Applied:\*\*/g);
+    assert.strictEqual(appliedMatches?.length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("appliedAt field is parsed correctly by loadAllCaptures", () => {
+  const dir = makeTempDir("applied-parse");
+  try {
+    const id = appendCapture(dir, "Test applied parsing");
+    markCaptureResolved(dir, id, "note", "Just a note", "For testing");
+    // Not applied — should have no appliedAt
+    let captures = loadAllCaptures(dir);
+    assert.strictEqual(captures[0].appliedAt, undefined);
+
+    markCaptureApplied(dir, id);
+    captures = loadAllCaptures(dir);
+    assert.ok(captures[0].appliedAt);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -26,6 +26,7 @@ export interface CaptureEntry {
   resolution?: string;
   rationale?: string;
   resolvedAt?: string;
+  appliedAt?: string;
 }
 
 export interface TriageResult {
@@ -211,6 +212,44 @@ export function markCaptureResolved(
   writeFileSync(filePath, updated, "utf-8");
 }
 
+/**
+ * Mark a resolved capture as applied (resolution has been executed).
+ * Appends an `**Applied:** <timestamp>` field to prevent re-application
+ * on subsequent dispatch cycles.
+ */
+export function markCaptureApplied(
+  basePath: string,
+  captureId: string,
+  detail?: string,
+): void {
+  const filePath = resolveCapturesPath(basePath);
+  if (!existsSync(filePath)) return;
+
+  const content = readFileSync(filePath, "utf-8");
+  const appliedAt = new Date().toISOString();
+
+  const sectionRegex = new RegExp(
+    `(### ${escapeRegex(captureId)}\\n(?:(?!### ).)*?)(?=### |$)`,
+    "s",
+  );
+  const match = sectionRegex.exec(content);
+  if (!match) return;
+
+  let section = match[1];
+
+  // Remove any existing Applied field (in case of re-application)
+  section = section.replace(/\*\*Applied:\*\*\s*.+\n?/g, "");
+
+  const appliedLine = detail
+    ? `**Applied:** ${appliedAt} — ${detail}`
+    : `**Applied:** ${appliedAt}`;
+
+  section = section.trimEnd() + "\n" + appliedLine + "\n";
+
+  const updated = content.replace(sectionRegex, section);
+  writeFileSync(filePath, updated, "utf-8");
+}
+
 // ─── Parser ───────────────────────────────────────────────────────────────────
 
 /**
@@ -235,6 +274,7 @@ function parseCapturesContent(content: string): CaptureEntry[] {
     const resolution = extractBoldField(body, "Resolution");
     const rationale = extractBoldField(body, "Rationale");
     const resolvedAt = extractBoldField(body, "Resolved");
+    const appliedAt = extractBoldField(body, "Applied");
 
     if (!text || !timestamp) continue;
 
@@ -251,6 +291,7 @@ function parseCapturesContent(content: string): CaptureEntry[] {
       ...(resolution ? { resolution } : {}),
       ...(rationale ? { rationale } : {}),
       ...(resolvedAt ? { resolvedAt } : {}),
+      ...(appliedAt ? { appliedAt } : {}),
     });
   }
 

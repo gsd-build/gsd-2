@@ -144,7 +144,8 @@ import {
   detectWorkingTreeActivity,
 } from "./auto-supervisor.js";
 import { isDbAvailable } from "./gsd-db.js";
-import { hasPendingCaptures, loadPendingCaptures, countPendingCaptures } from "./captures.js";
+import { hasPendingCaptures, loadPendingCaptures, countPendingCaptures, loadAllCaptures, markCaptureApplied } from "./captures.js";
+import { executeInject, executeReplan } from "./triage-resolution.js";
 
 // ─── Worktree → Project Root State Sync ───────────────────────────────────────
 // When running in an auto-worktree, dispatch state (.gsd/ metadata) diverges
@@ -1548,6 +1549,60 @@ export async function handleAgentEnd(
       }
     } catch {
       // Triage check failure is non-fatal — proceed to normal dispatch
+    }
+  }
+
+  // ── Post-triage resolution: apply inject/replan classifications (#701) ───
+  // After a triage-captures unit completes, the LLM has classified captures in
+  // CAPTURES.md but has NOT applied resolutions (the prompt forbids it).
+  // We programmatically execute inject/replan resolutions here so that newly
+  // added tasks are visible to deriveState before the next dispatch cycle.
+  // Without this, the dispatch pipeline sees "all tasks done" and proceeds to
+  // complete-slice, skipping the captured work entirely.
+  if (currentUnit?.type === "triage-captures") {
+    try {
+      const allCaptures = loadAllCaptures(basePath);
+      const state = await deriveState(basePath);
+      const mid = state.activeMilestone?.id;
+      const sid = state.activeSlice?.id;
+
+      if (mid && sid) {
+        let injectedCount = 0;
+        let replanTriggered = false;
+
+        for (const cap of allCaptures) {
+          if (cap.status !== "resolved") continue;
+          if (cap.appliedAt) continue; // Already applied in a prior cycle
+
+          if (cap.classification === "inject") {
+            const newTaskId = executeInject(basePath, mid, sid, cap);
+            if (newTaskId) {
+              injectedCount++;
+              markCaptureApplied(basePath, cap.id, `Injected as ${newTaskId}`);
+              debugLog(`[triage-resolution] Injected task ${newTaskId} from capture ${cap.id}`);
+            }
+          } else if (cap.classification === "replan" && !replanTriggered) {
+            const triggered = executeReplan(basePath, mid, sid, cap);
+            if (triggered) {
+              replanTriggered = true;
+              markCaptureApplied(basePath, cap.id, "Replan triggered");
+              debugLog(`[triage-resolution] Triggered replan from capture ${cap.id}`);
+            }
+          }
+        }
+
+        if (injectedCount > 0 || replanTriggered) {
+          // Invalidate state cache so the next deriveState() picks up new tasks
+          invalidateStateCache();
+          ctx.ui.notify(
+            `Applied triage resolutions: ${injectedCount} task${injectedCount !== 1 ? "s" : ""} injected${replanTriggered ? ", replan triggered" : ""}`,
+            "info",
+          );
+        }
+      }
+    } catch {
+      // Resolution application failure is non-fatal — captures are still
+      // classified in CAPTURES.md for manual inspection.
     }
   }
 

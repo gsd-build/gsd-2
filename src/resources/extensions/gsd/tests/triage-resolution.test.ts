@@ -213,3 +213,49 @@ test("resolution: buildQuickTaskPrompt includes capture text and ID", () => {
   assert.ok(prompt.includes("Quick Task"), "should have Quick Task header");
   assert.ok(prompt.includes("Do NOT modify"), "should warn about plan files");
 });
+
+// ─── executeInject + markCaptureApplied integration (#701) ───────────────────
+
+import { markCaptureApplied } from "../captures.ts";
+
+test("resolution: inject creates task and markCaptureApplied prevents re-injection", () => {
+  const tmp = makeTempDir("inject-applied");
+  try {
+    // Create a plan with existing tasks
+    const planDir = join(tmp, ".gsd", "milestones", "M001", "slices", "S01");
+    mkdirSync(planDir, { recursive: true });
+    const planPath = join(planDir, "S01-PLAN.md");
+    writeFileSync(planPath, [
+      "# S01: Auth Flow",
+      "",
+      "## Tasks",
+      "",
+      "- [x] **T01: Basic login** `est:2h`",
+      "- [x] **T02: Token refresh** `est:1h`",
+    ].join("\n"));
+
+    // Create and resolve a capture as inject
+    const capId = appendCapture(tmp, "Add rate limiting");
+    markCaptureResolved(tmp, capId, "inject", "Add task for rate limiting", "API needs protection");
+
+    // First injection should succeed
+    const taskId = executeInject(tmp, "M001", "S01", loadAllCaptures(tmp).find(c => c.id === capId)!);
+    assert.ok(taskId, "should create a new task");
+    assert.strictEqual(taskId, "T03");
+
+    // Mark as applied
+    markCaptureApplied(tmp, capId, `Injected as ${taskId}`);
+
+    // Verify the applied field prevents re-processing
+    const caps = loadAllCaptures(tmp);
+    const cap = caps.find(c => c.id === capId)!;
+    assert.ok(cap.appliedAt, "should have appliedAt field");
+
+    // Verify the plan now has T03
+    const plan = readFileSync(planPath, "utf-8");
+    assert.ok(plan.includes("**T03:"), "plan should contain T03");
+    assert.ok(plan.includes("Add rate limiting"), "plan should contain capture text");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
