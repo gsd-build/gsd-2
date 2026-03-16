@@ -502,6 +502,16 @@ async function handlePrefsWizard(
       delete git.main_branch;
     }
   }
+  // ─── Git commit_docs ────────────────────────────────────────────────────
+  const currentCommitDocs = git.commit_docs;
+  const commitDocsChoice = await ctx.ui.select(
+    `Track .gsd/ planning docs in git${currentCommitDocs !== undefined ? ` (current: ${currentCommitDocs})` : ""}:`,
+    ["true", "false", "(keep current)"],
+  );
+  if (commitDocsChoice && commitDocsChoice !== "(keep current)") {
+    git.commit_docs = commitDocsChoice === "true";
+  }
+
   if (Object.keys(git).length > 0) {
     prefs.git = git;
   }
