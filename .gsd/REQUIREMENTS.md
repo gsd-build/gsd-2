@@ -135,6 +135,28 @@ Guidelines:
 - Validation: unmapped
 - Notes: Test breakage likely comes from the merge (interface changes) and new web code (new route/store contracts).
 
+### R111 — Web mode documentation covers setup, usage, architecture, and troubleshooting
+- Class: quality-attribute
+- Status: active
+- Description: A dedicated `docs/web-mode.md` guide covering launch, onboarding, workspace UI, browser commands, architecture (host/bridge/store), configuration, and troubleshooting. README documentation index and relevant sections updated. Existing docs (architecture, troubleshooting, commands, getting-started, configuration) reference web mode where relevant.
+- Why it matters: Web mode is a primary product path with zero documentation — users can't discover or troubleshoot it.
+- Source: user
+- Primary owning slice: M004/S01
+- Supporting slices: M004/S02
+- Validation: unmapped
+- Notes: Must be written against the post-M003 codebase to reflect the full feature set.
+
+### R112 — CI pipeline includes a dedicated web-build job on Linux and macOS
+- Class: quality-attribute
+- Status: active
+- Description: A dedicated CI job in `.github/workflows/ci.yml` running on ubuntu-latest and macos-latest that executes `npm run build:web-host`, runs web contract tests, and reports failures independently from the existing build job.
+- Why it matters: The current CI pipeline never builds or tests the web host — web regressions ship silently.
+- Source: user
+- Primary owning slice: M004/S03
+- Supporting slices: none
+- Validation: unmapped
+- Notes: Web integration tests may need Playwright browser install; first pass may limit CI to contract tests and build:web-host.
+
 ## Validated
 
 ### R011 — Remaining lower-frequency TUI capabilities reach browser parity after the primary loop
@@ -360,10 +382,12 @@ Guidelines:
 | R108 | core-capability | active | M003/S07 | M003/S02 | unmapped |
 | R109 | quality-attribute | active | M003/S08 | M003/S03, M003/S04, M003/S05, M003/S06, M003/S07 | unmapped |
 | R110 | quality-attribute | active | M003/S09 | M003/S01 | unmapped |
+| R111 | quality-attribute | active | M004/S01 | M004/S02 | unmapped |
+| R112 | quality-attribute | active | M004/S03 | none | unmapped |
 
 ## Coverage Summary
 
-- Active requirements: 11
-- Mapped to slices: 11
+- Active requirements: 13
+- Mapped to slices: 13
 - Validated: 11
 - Unmapped active requirements: 0

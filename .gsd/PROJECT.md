@@ -42,3 +42,4 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 - [x] M001: Web mode foundation — Browser-first `gsd --web` is real, integrated, and verified end-to-end.
 - [x] M002: Web parity and hardening — Browser daily-use parity, live freshness, recovery diagnostics, and packaged-host hardening proof are complete.
 - [ ] M003: Upstream sync and full web feature parity — Merge 398 upstream commits, surface all new features in web UI, achieve 1:1 TUI-web parity.
+- [ ] M004: Web mode documentation and CI/CD integration — Dedicated web mode guide, existing doc updates, and a separate CI job for web host build/tests on Linux and macOS.
