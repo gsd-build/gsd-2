@@ -837,7 +837,8 @@ async function handlePrefsWizard(
       `── Save & Exit ──`,
     ];
 
-    const choice = await ctx.ui.select("GSD Preferences", options);
+    const raw = await ctx.ui.select("GSD Preferences", options);
+    const choice = typeof raw === "string" ? raw : "";
     if (!choice || choice.includes("Save & Exit")) break;
 
     if (choice.startsWith("Models"))             await configureModels(ctx, prefs);
