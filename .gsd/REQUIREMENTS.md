@@ -34,7 +34,7 @@ This file is the explicit capability and coverage contract for the project.
 - Source: execution (memory-db port)
 - Primary owning slice: M004/S02
 - Supporting slices: M004/S01
-- Validation: unmapped
+- Validation: S02 md-importer.test.ts (70 assertions) proves parseDecisionsTable, parseRequirementsSections, migrateFromMarkdown orchestrator, idempotent re-import, missing file handling, hierarchy walker. Not yet wired into startAuto() (S03).
 - Notes: Port from memory-db `md-importer.ts`. Custom parsers for DECISIONS.md pipe-table format and REQUIREMENTS.md section/bullet format. Hierarchy walker for milestones → slices → tasks.
 
 ### R048 — Round-trip fidelity for all artifact types
@@ -45,7 +45,7 @@ This file is the explicit capability and coverage contract for the project.
 - Source: execution (memory-db port)
 - Primary owning slice: M004/S02
 - Supporting slices: M004/S06
-- Validation: unmapped
+- Validation: S02 db-writer.test.ts (127 assertions) proves generateDecisionsMd/generateRequirementsMd round-trip through parse→generate→parse with field-identical output, pipe escaping, section grouping, empty input handling. Full DB round-trip (insert → generate → parse → compare) confirmed for both decisions and requirements.
 - Notes: Port from memory-db. Custom parsers and generators must produce/consume identical formats.
 
 ### R049 — Surgical prompt injection via DB queries
@@ -659,8 +659,8 @@ This file is the explicit capability and coverage contract for the project.
 | R044 | anti-feature | out-of-scope | none | none | n/a |
 | R045 | core-capability | active | M004/S01 | none | S01 133 assertions: provider, schema, CRUD, views, WAL, transactions, query, formatters, worktree ops, fallback |
 | R046 | continuity | active | M004/S01 | M004/S03 | S01 DB layer fallback proven (returns empty). Prompt builder fallback pending S03 |
-| R047 | core-capability | active | M004/S02 | M004/S01 | unmapped |
-| R048 | quality-attribute | active | M004/S02 | M004/S06 | unmapped |
+| R047 | core-capability | active | M004/S02 | M004/S01 | S02 md-importer.test.ts 70 assertions: parsers, supersession, orchestrator, idempotency, missing files, round-trip |
+| R048 | quality-attribute | active | M004/S02 | M004/S06 | S02 db-writer.test.ts 127 assertions: generators, round-trip parse→generate→parse, write helpers, ID sequencing |
 | R049 | core-capability | active | M004/S03 | M004/S01, M004/S02 | unmapped |
 | R050 | continuity | active | M004/S03 | M004/S06 | unmapped |
 | R051 | operability | active | M004/S04 | M004/S03 | unmapped |

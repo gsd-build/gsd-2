@@ -64,7 +64,7 @@ This milestone is complete only when all are true:
 - [x] **S01: DB Foundation + Schema** `risk:high` `depends:[]`
   > After this: SQLite DB opens with tiered provider chain, schema inits with decisions/requirements/artifacts tables plus filtered views, typed CRUD wrappers work, graceful fallback returns empty results when SQLite unavailable. Proven by unit tests against real DB.
 
-- [ ] **S02: Markdown Importers + Auto-Migration** `risk:medium` `depends:[S01]`
+- [x] **S02: Markdown Importers + Auto-Migration** `risk:medium` `depends:[S01]`
   > After this: Existing GSD project with markdown files starts up → gsd.db appears silently with all artifact types imported. Round-trip fidelity proven for every artifact type — import then regenerate produces identical output.
 
 - [ ] **S03: Surgical Prompt Injection + Dual-Write** `risk:high` `depends:[S01,S02]`
