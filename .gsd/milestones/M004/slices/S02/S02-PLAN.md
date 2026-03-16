@@ -29,6 +29,7 @@
 - `node --experimental-sqlite --import ./src/resources/extensions/gsd/tests/resolve-ts.mjs --experimental-strip-types --test src/resources/extensions/gsd/tests/db-writer.test.ts` — 76 assertions covering markdown generators, round-trip through parse→generate→parse, nextDecisionId, saveDecisionToDb, updateRequirementInDb, saveArtifactToDb
 - Existing S01 tests still pass (gsd-db.test.ts, context-store.test.ts, worktree-db.test.ts)
 - `npx tsc --noEmit` clean
+- Failure-path check: `migrateFromMarkdown()` on a directory with no .gsd/ files completes without error and logs zero counts to stderr; `parseDecisionsTable('')` returns empty array; orchestrator per-category try/catch emits `gsd-migrate:` prefixed skip reasons inspectable in stderr output
 
 ## Observability / Diagnostics
 
@@ -45,7 +46,7 @@
 
 ## Tasks
 
-- [ ] **T01: Port md-importer.ts and its test suite** `est:20m`
+- [x] **T01: Port md-importer.ts and its test suite** `est:20m`
   - Why: Foundation — parsers and migration orchestrator that all downstream slices depend on. Directly proves R047 (auto-migration) and the import half of R048 (round-trip fidelity).
   - Files: `src/resources/extensions/gsd/md-importer.ts`, `src/resources/extensions/gsd/tests/md-importer.test.ts`
   - Do: Copy md-importer.ts from memory-db worktree at `/Users/lexchristopherson/Developer/gsd-2/.gsd/worktrees/memory-db/src/resources/extensions/gsd/md-importer.ts`. All import paths already use `.js` extension convention. No adaptation needed — the file imports from `gsd-db.js`, `paths.js`, `guided-flow.js`, `types.js`, all of which exist in the M004 worktree with compatible exports. Copy md-importer.test.ts from `/Users/lexchristopherson/Developer/gsd-2/.gsd/worktrees/memory-db/src/resources/extensions/gsd/tests/md-importer.test.ts`. Test file imports from `../gsd-db.ts` and `../md-importer.ts` using `.ts` extension (resolved by resolve-ts.mjs hook).

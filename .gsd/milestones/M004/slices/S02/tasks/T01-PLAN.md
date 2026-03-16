@@ -42,6 +42,13 @@ Port the markdown importer module from the memory-db reference worktree. This mo
 - `src/resources/extensions/gsd/tests/test-helpers.ts` — provides `createTestContext()` with `assertEq`, `assertTrue`, `report`
 - `src/resources/extensions/gsd/tests/resolve-ts.mjs` — ESM test resolver hook
 
+## Observability Impact
+
+- **New signals:** `gsd-migrate:` prefixed stderr log lines emitted by `migrateFromMarkdown()` — one line per artifact type with import counts (e.g. `gsd-migrate: imported 5 decisions, 12 requirements, 3 artifacts`)
+- **Inspection:** After migration, query `decisions`, `requirements`, `artifacts` tables in gsd.db to verify imported state
+- **Failure visibility:** Per-category try/catch in orchestrator logs skip reasons to stderr (e.g. `gsd-migrate: skipping decisions — file not found`); parse errors in `parseDecisionsTable` silently skip malformed rows (visible via row count mismatch)
+- **Agent verification:** Run test suite — 71 assertions cover all parse edge cases, missing files, idempotent re-import, and round-trip fidelity
+
 ## Expected Output
 
 - `src/resources/extensions/gsd/md-importer.ts` — new file, 526 lines, exports `parseDecisionsTable`, `parseRequirementsSections`, `migrateFromMarkdown`
