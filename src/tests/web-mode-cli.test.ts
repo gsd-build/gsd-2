@@ -444,3 +444,100 @@ test('launch failure surfaces status and reason before browser open', async () =
     rmSync(tmp, { recursive: true, force: true })
   }
 })
+
+// ─── Instance registry tests ─────────────────────────────────────────
+
+test('registerInstance and readInstanceRegistry round-trip', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-registry-'))
+  const registryPath = join(tmp, 'web-instances.json')
+
+  try {
+    webMode.registerInstance('/tmp/project-a', { pid: 1001, port: 3000, url: 'http://127.0.0.1:3000' }, registryPath)
+    webMode.registerInstance('/tmp/project-b', { pid: 1002, port: 3001, url: 'http://127.0.0.1:3001' }, registryPath)
+
+    const registry = webMode.readInstanceRegistry(registryPath)
+    assert.equal(Object.keys(registry).length, 2)
+    assert.equal(registry['/tmp/project-a']?.pid, 1001)
+    assert.equal(registry['/tmp/project-b']?.port, 3001)
+    assert.ok(registry['/tmp/project-a']?.startedAt)
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('unregisterInstance removes a single entry', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-unreg-'))
+  const registryPath = join(tmp, 'web-instances.json')
+
+  try {
+    webMode.registerInstance('/tmp/project-a', { pid: 1001, port: 3000, url: 'http://127.0.0.1:3000' }, registryPath)
+    webMode.registerInstance('/tmp/project-b', { pid: 1002, port: 3001, url: 'http://127.0.0.1:3001' }, registryPath)
+    webMode.unregisterInstance('/tmp/project-a', registryPath)
+
+    const registry = webMode.readInstanceRegistry(registryPath)
+    assert.equal(Object.keys(registry).length, 1)
+    assert.equal(registry['/tmp/project-a'], undefined)
+    assert.equal(registry['/tmp/project-b']?.pid, 1002)
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('stopWebMode with projectCwd reports not-found when not in registry', () => {
+  let stderrOutput = ''
+
+  const result = webMode.stopWebMode(
+    { stderr: { write: (chunk: string) => { stderrOutput += chunk; return true } } },
+    { projectCwd: '/tmp/nonexistent-project-for-stop-test' },
+  )
+
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'not-found')
+  assert.match(stderrOutput, /No web server running/)
+})
+
+test('gsd web stop all is parsed and dispatched', async () => {
+  let stopOptions: { projectCwd?: string; all?: boolean } | undefined
+
+  const flags = cliWeb.parseCliArgs(['node', 'dist/loader.js', 'web', 'stop', 'all'])
+  assert.deepEqual(flags.messages, ['web', 'stop', 'all'])
+
+  const result = await cliWeb.runWebCliBranch(flags, {
+    stopWebMode: (_deps, opts) => {
+      stopOptions = opts
+      return { ok: true, stoppedCount: 2 }
+    },
+    stderr: { write: () => true },
+  })
+
+  assert.equal(result.handled, true)
+  if (!result.handled) throw new Error('expected handled')
+  assert.equal(result.exitCode, 0)
+  assert.equal(stopOptions?.all, true)
+  assert.equal(stopOptions?.projectCwd, undefined)
+})
+
+test('gsd web stop <path> is parsed and dispatched with resolved path', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-stop-path-'))
+  let stopOptions: { projectCwd?: string; all?: boolean } | undefined
+
+  try {
+    const flags = cliWeb.parseCliArgs(['node', 'dist/loader.js', 'web', 'stop', tmp])
+    const result = await cliWeb.runWebCliBranch(flags, {
+      cwd: () => '/',
+      stopWebMode: (_deps, opts) => {
+        stopOptions = opts
+        return { ok: true, stoppedCount: 1 }
+      },
+      stderr: { write: () => true },
+    })
+
+    assert.equal(result.handled, true)
+    if (!result.handled) throw new Error('expected handled')
+    assert.equal(result.exitCode, 0)
+    assert.equal(stopOptions?.projectCwd, tmp)
+    assert.equal(stopOptions?.all, false)
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})

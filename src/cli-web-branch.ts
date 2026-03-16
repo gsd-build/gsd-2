@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { agentDir as defaultAgentDir, sessionsDir as defaultSessionsDir } from './app-paths.js'
 import { getProjectSessionsDir } from './project-sessions.js'
-import { launchWebMode, stopWebMode, type WebModeLaunchStatus, type WebModeStopResult } from './web-mode.js'
+import { launchWebMode, stopWebMode, type WebModeLaunchStatus, type WebModeStopOptions, type WebModeStopResult } from './web-mode.js'
 
 export interface CliFlags {
   mode?: 'text' | 'json' | 'rpc'
@@ -26,7 +26,7 @@ type WritableLike = Pick<typeof process.stderr, 'write'>
 
 export interface RunWebCliBranchDeps {
   runWebMode?: typeof launchWebMode
-  stopWebMode?: typeof stopWebMode
+  stopWebMode?: (deps: Parameters<typeof stopWebMode>[0], options?: WebModeStopOptions) => WebModeStopResult
   cwd?: () => string
   stderr?: WritableLike
   baseSessionsDir?: string
@@ -122,10 +122,16 @@ export async function runWebCliBranch(
   flags: CliFlags,
   deps: RunWebCliBranchDeps = {},
 ): Promise<RunWebCliBranchResult> {
-  // Handle `gsd web stop` subcommand
+  // Handle `gsd web stop [path|--all]` subcommand
   if (flags.messages[0] === 'web' && flags.messages[1] === 'stop') {
     const stderr = deps.stderr ?? process.stderr
-    const stopResult = (deps.stopWebMode ?? stopWebMode)({ stderr })
+    const stopArg = flags.messages[2]
+    const isAll = stopArg === 'all'
+    const stopCwd = stopArg && !isAll ? resolve((deps.cwd ?? (() => process.cwd()))(), stopArg) : undefined
+    const stopResult = (deps.stopWebMode ?? stopWebMode)({ stderr }, {
+      projectCwd: stopCwd,
+      all: isAll,
+    })
     return {
       handled: true,
       exitCode: stopResult.ok ? 0 : 1,

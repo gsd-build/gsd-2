@@ -5,7 +5,7 @@ import { createServer } from 'node:net'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { openBrowser } from './onboarding.js'
-import { webPidFilePath as defaultWebPidFilePath } from './app-paths.js'
+import { appRoot, webPidFilePath as defaultWebPidFilePath } from './app-paths.js'
 
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -94,6 +94,61 @@ export interface WebModeDeps {
 export interface WebModeStopResult {
   ok: boolean
   reason?: string
+  /** How many instances were stopped (relevant for --all) */
+  stoppedCount?: number
+}
+
+// ─── Instance Registry ──────────────────────────────────────────────────────
+
+export interface WebInstanceEntry {
+  pid: number
+  port: number
+  url: string
+  cwd: string
+  startedAt: string
+}
+
+export type WebInstanceRegistry = Record<string, WebInstanceEntry>
+
+const WEB_INSTANCES_PATH = join(appRoot, 'web-instances.json')
+
+export function readInstanceRegistry(registryPath = WEB_INSTANCES_PATH): WebInstanceRegistry {
+  try {
+    return JSON.parse(readFileSync(registryPath, 'utf8')) as WebInstanceRegistry
+  } catch {
+    return {}
+  }
+}
+
+export function writeInstanceRegistry(registry: WebInstanceRegistry, registryPath = WEB_INSTANCES_PATH): void {
+  writeFileSync(registryPath, JSON.stringify(registry, null, 2), 'utf8')
+}
+
+export function registerInstance(cwd: string, entry: Omit<WebInstanceEntry, 'cwd' | 'startedAt'>, registryPath = WEB_INSTANCES_PATH): void {
+  const registry = readInstanceRegistry(registryPath)
+  registry[resolve(cwd)] = {
+    ...entry,
+    cwd: resolve(cwd),
+    startedAt: new Date().toISOString(),
+  }
+  writeInstanceRegistry(registry, registryPath)
+}
+
+export function unregisterInstance(cwd: string, registryPath = WEB_INSTANCES_PATH): void {
+  const registry = readInstanceRegistry(registryPath)
+  delete registry[resolve(cwd)]
+  writeInstanceRegistry(registry, registryPath)
+}
+
+function killPid(pid: number): 'killed' | 'already-dead' | { error: string } {
+  try {
+    process.kill(pid, 'SIGTERM')
+    return 'killed'
+  } catch (error) {
+    const isAlreadyDead = error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ESRCH'
+    if (isAlreadyDead) return 'already-dead'
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 export function writePidFile(filePath: string, pid: number): void {
@@ -118,7 +173,74 @@ export function deletePidFile(filePath: string): void {
   }
 }
 
-export function stopWebMode(deps: Pick<WebModeDeps, 'pidFilePath' | 'readPidFile' | 'deletePidFile' | 'stderr'> = {}): WebModeStopResult {
+export interface WebModeStopOptions {
+  /** Stop instance for a specific project path */
+  projectCwd?: string
+  /** Stop all running instances */
+  all?: boolean
+}
+
+export function stopWebMode(deps: Pick<WebModeDeps, 'pidFilePath' | 'readPidFile' | 'deletePidFile' | 'stderr'> = {}, options: WebModeStopOptions = {}): WebModeStopResult {
+  const stderr = deps.stderr ?? process.stderr
+
+  // ── Stop all instances ──────────────────────────────────────────────
+  if (options.all) {
+    const registry = readInstanceRegistry()
+    const entries = Object.entries(registry)
+    if (entries.length === 0) {
+      // Fall back to legacy PID file
+      return stopLegacyPidFile(deps)
+    }
+    let stopped = 0
+    for (const [cwd, entry] of entries) {
+      const result = killPid(entry.pid)
+      if (result === 'killed') {
+        stderr.write(`[gsd] Stopped web server for ${cwd} (pid=${entry.pid})\n`)
+        stopped++
+      } else if (result === 'already-dead') {
+        stderr.write(`[gsd] Web server for ${cwd} was already stopped (pid=${entry.pid})\n`)
+        stopped++
+      } else {
+        stderr.write(`[gsd] Failed to stop web server for ${cwd}: ${result.error}\n`)
+      }
+      unregisterInstance(cwd)
+    }
+    // Also clean up legacy PID file
+    const deletePid = deps.deletePidFile ?? deletePidFile
+    const pidFilePath = deps.pidFilePath ?? defaultWebPidFilePath
+    deletePid(pidFilePath)
+    stderr.write(`[gsd] Stopped ${stopped} instance${stopped === 1 ? '' : 's'}.\n`)
+    return { ok: true, stoppedCount: stopped }
+  }
+
+  // ── Stop specific project ──────────────────────────────────────────
+  if (options.projectCwd) {
+    const resolvedCwd = resolve(options.projectCwd)
+    const registry = readInstanceRegistry()
+    const entry = registry[resolvedCwd]
+    if (!entry) {
+      stderr.write(`[gsd] No web server running for ${resolvedCwd}\n`)
+      return { ok: false, reason: 'not-found' }
+    }
+    const result = killPid(entry.pid)
+    unregisterInstance(resolvedCwd)
+    if (result === 'killed') {
+      stderr.write(`[gsd] Stopped web server for ${resolvedCwd} (pid=${entry.pid})\n`)
+      return { ok: true, stoppedCount: 1 }
+    } else if (result === 'already-dead') {
+      stderr.write(`[gsd] Web server for ${resolvedCwd} was already stopped — cleared stale entry.\n`)
+      return { ok: true, stoppedCount: 1 }
+    } else {
+      stderr.write(`[gsd] Failed to stop web server for ${resolvedCwd}: ${result.error}\n`)
+      return { ok: false, reason: result.error }
+    }
+  }
+
+  // ── Default: stop via legacy PID file (backward compat) ─────────────
+  return stopLegacyPidFile(deps)
+}
+
+function stopLegacyPidFile(deps: Pick<WebModeDeps, 'pidFilePath' | 'readPidFile' | 'deletePidFile' | 'stderr'>): WebModeStopResult {
   const stderr = deps.stderr ?? process.stderr
   const pidFilePath = deps.pidFilePath ?? defaultWebPidFilePath
   const readPid = deps.readPidFile ?? readPidFile
@@ -132,21 +254,17 @@ export function stopWebMode(deps: Pick<WebModeDeps, 'pidFilePath' | 'readPidFile
 
   stderr.write(`[gsd] Stopping web server (pid=${pid})…\n`)
 
-  try {
-    process.kill(pid, 'SIGTERM')
-    deletePid(pidFilePath)
+  const result = killPid(pid)
+  deletePid(pidFilePath)
+  if (result === 'killed') {
     stderr.write(`[gsd] Web server stopped.\n`)
     return { ok: true }
-  } catch (error) {
-    const isAlreadyDead = error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ESRCH'
-    deletePid(pidFilePath)
-    if (isAlreadyDead) {
-      stderr.write(`[gsd] Web server was already stopped — cleared stale PID file.\n`)
-      return { ok: true }
-    }
-    const reason = error instanceof Error ? error.message : String(error)
-    stderr.write(`[gsd] Failed to stop web server: ${reason}\n`)
-    return { ok: false, reason }
+  } else if (result === 'already-dead') {
+    stderr.write(`[gsd] Web server was already stopped — cleared stale PID file.\n`)
+    return { ok: true }
+  } else {
+    stderr.write(`[gsd] Failed to stop web server: ${result.error}\n`)
+    return { ok: false, reason: result.error }
   }
 }
 
@@ -525,6 +643,8 @@ export async function launchWebMode(
     if (pid !== undefined) {
       const pidFilePath = deps.pidFilePath ?? defaultWebPidFilePath
       ;(deps.writePidFile ?? writePidFile)(pidFilePath, pid)
+      // Register in multi-instance registry
+      registerInstance(options.cwd, { pid, port, url })
     }
     ;(deps.openBrowser ?? openBrowser)(url)
   } catch (error) {

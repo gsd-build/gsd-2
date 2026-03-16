@@ -72,7 +72,7 @@ function writeHelp(stdout: WritableLike): void {
   stdout.write('  config                   Re-run the setup wizard\n')
   stdout.write('  update                   Update GSD to the latest version\n')
   stdout.write('  web [start] [path]       Launch web mode (optionally for a different project)\n')
-  stdout.write('  web stop                 Stop the running web server\n')
+  stdout.write('  web stop [path|all]      Stop web server (specific project, or all)\n')
 }
 
 function exitAndReturn(exit: ExitFn, code: number): number {
