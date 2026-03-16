@@ -14,6 +14,8 @@ import { join } from "node:path";
 import { gsdRoot } from "./paths.js";
 import { milestoneIdSort } from "./guided-flow.js";
 
+// ─── Types ───────────────────────────────────────────────────────────────────
+
 interface QueueOrderFile {
   order: string[];
   updatedAt: string;
@@ -22,7 +24,7 @@ interface QueueOrderFile {
 export interface DependencyViolation {
   milestone: string;
   dependsOn: string;
-  type: "would_block" | "circular" | "missing_dep";
+  type: 'would_block' | 'circular' | 'missing_dep';
   message: string;
 }
 
@@ -37,9 +39,13 @@ export interface DependencyValidation {
   redundant: DependencyRedundancy[];
 }
 
+// ─── Path ────────────────────────────────────────────────────────────────────
+
 function queueOrderPath(basePath: string): string {
   return join(gsdRoot(basePath), "QUEUE-ORDER.json");
 }
+
+// ─── Read / Write ────────────────────────────────────────────────────────────
 
 /**
  * Load the custom queue order. Returns null if no file exists or if
@@ -68,6 +74,8 @@ export function saveQueueOrder(basePath: string, order: string[]): void {
   writeFileSync(queueOrderPath(basePath), JSON.stringify(data, null, 2) + "\n", "utf-8");
 }
 
+// ─── Sorting ─────────────────────────────────────────────────────────────────
+
 /**
  * Sort milestone IDs respecting a custom order.
  *
@@ -83,6 +91,7 @@ export function sortByQueueOrder(ids: string[], customOrder: string[] | null): s
   const idSet = new Set(ids);
   const ordered: string[] = [];
 
+  // First: IDs from customOrder that exist on disk
   for (const id of customOrder) {
     if (idSet.has(id)) {
       ordered.push(id);
@@ -90,9 +99,12 @@ export function sortByQueueOrder(ids: string[], customOrder: string[] | null): s
     }
   }
 
+  // Then: remaining IDs not in customOrder, in default sort order
   const remaining = [...idSet].sort(milestoneIdSort);
   return [...ordered, ...remaining];
 }
+
+// ─── Pruning ─────────────────────────────────────────────────────────────────
 
 /**
  * Remove IDs from the queue order file that are no longer valid
@@ -109,6 +121,8 @@ export function pruneQueueOrder(basePath: string, validIds: string[]): void {
     saveQueueOrder(basePath, pruned);
   }
 }
+
+// ─── Validation ──────────────────────────────────────────────────────────────
 
 /**
  * Validate a proposed queue order against dependency constraints.
@@ -136,37 +150,42 @@ export function validateQueueOrder(
 
   for (const [mid, deps] of depsMap) {
     const midPos = positionMap.get(mid);
-    if (midPos === undefined) continue;
+    if (midPos === undefined) continue; // not in pending order
 
     for (const dep of deps) {
+      // Dep already completed — always satisfied
       if (completedIds.has(dep)) continue;
 
+      // Dep doesn't exist anywhere
       if (!allKnownIds.has(dep)) {
         violations.push({
           milestone: mid,
           dependsOn: dep,
-          type: "missing_dep",
+          type: 'missing_dep',
           message: `${mid} depends on ${dep}, but ${dep} does not exist.`,
         });
         continue;
       }
 
       const depPos = positionMap.get(dep);
-      if (depPos === undefined) continue;
+      if (depPos === undefined) continue; // dep not in pending order (edge case)
 
       if (depPos > midPos) {
+        // Dep comes AFTER this milestone in the order — violation
         violations.push({
           milestone: mid,
           dependsOn: dep,
-          type: "would_block",
+          type: 'would_block',
           message: `${mid} cannot run before ${dep} — ${mid} depends_on: [${dep}].`,
         });
       } else {
+        // Dep comes before — satisfied by position, redundant
         redundant.push({ milestone: mid, dependsOn: dep });
       }
     }
   }
 
+  // Check for circular dependencies
   const visited = new Set<string>();
   const inStack = new Set<string>();
 
@@ -192,14 +211,14 @@ export function validateQueueOrder(
     if (!visited.has(mid)) {
       const cycle = hasCycle(mid, []);
       if (cycle) {
-        const cycleStr = cycle.join(" → ");
+        const cycleStr = cycle.join(' → ');
         violations.push({
           milestone: cycle[0],
           dependsOn: cycle[cycle.length - 2],
-          type: "circular",
+          type: 'circular',
           message: `Circular dependency: ${cycleStr}`,
         });
-        break;
+        break; // one cycle report is enough
       }
     }
   }
