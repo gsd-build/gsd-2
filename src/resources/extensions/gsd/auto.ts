@@ -1377,12 +1377,12 @@ async function dispatchNextUnit(
     unitRecoveryCount.clear();
     unitLifetimeDispatches.clear();
     // Capture integration branch for the new milestone and update git service
-    captureIntegrationBranch(originalBasePath || basePath, milestoneTransition.to, { commitDocs: loadEffectiveGSDPreferences()?.preferences?.git?.commit_docs });
+    captureIntegrationBranch(originalBasePath || basePath, mid, { commitDocs: loadEffectiveGSDPreferences()?.preferences?.git?.commit_docs });
     // Prune completed milestone from queue order file
-    const pendingMilestoneIds = state.registry
+    const pendingIds = state.registry
       .filter(m => m.status !== "complete")
       .map(m => m.id);
-    pruneQueueOrder(basePath, pendingMilestoneIds);
+    pruneQueueOrder(basePath, pendingIds);
   }
   if (mid) {
     currentMilestoneId = mid;
