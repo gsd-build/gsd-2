@@ -176,10 +176,22 @@ export function handleSessionUpdate(
   serverSessions: SessionTab[],
 ): SessionManagerState {
   const validActive = serverSessions.some((s) => s.id === state.activeSessionId);
+
+  // Reconcile processingBySession from server's authoritative isProcessing.
+  // If server says a session is NOT processing, clear the client flag too.
+  // This recovers from stuck-processing states (e.g., chat_complete missed on WS drop).
+  const newProcessing = new Map(state.processingBySession);
+  for (const s of serverSessions) {
+    if (!s.isProcessing) {
+      newProcessing.set(s.id, false);
+    }
+  }
+
   return {
     ...state,
     sessions: serverSessions,
     activeSessionId: validActive ? state.activeSessionId : (serverSessions[0]?.id ?? ""),
+    processingBySession: newProcessing,
   };
 }
 
@@ -455,6 +467,12 @@ export function useSessionManager(
       if ((evt as { type: string }).type === "process_crashed") {
         setIsCrashed(true);
         setIsAutoMode(false);
+        // Clear processing so user isn't stuck in "Working..." after a crash
+        setProcessingBySession((prev) => {
+          const newMap = new Map(prev);
+          newMap.set(sessionId, false);
+          return newMap;
+        });
         return;
       }
 
@@ -547,6 +565,10 @@ export function useSessionManager(
 
   const { send } = useReconnectingWebSocket(wsUrl, {
     onMessage: handleMessage,
+    onReconnect: () => {
+      // After WS reconnects, request fresh session list so reconciliation can clear stuck processing
+      sendRef.current(JSON.stringify({ type: "session_list" }));
+    },
   });
 
   // Keep send in a ref for the message handler
