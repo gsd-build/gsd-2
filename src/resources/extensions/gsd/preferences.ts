@@ -41,6 +41,7 @@ const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "dynamic_routing",
   "token_profile",
   "phases",
+  "auto_visualize",
 ]);
 
 export interface GSDSkillRule {
@@ -134,6 +135,7 @@ export interface GSDPreferences {
   dynamic_routing?: DynamicRoutingConfig;
   token_profile?: TokenProfile;
   phases?: PhaseSkipPreferences;
+  auto_visualize?: boolean;
 }
 
 export interface LoadedGSDPreferences {

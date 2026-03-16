@@ -1433,6 +1433,11 @@ async function dispatchNextUnit(
       "info",
     );
     sendDesktopNotification("GSD", `Milestone ${currentMilestoneId} complete!`, "success", "milestone");
+    // Hint: visualizer available after milestone transition
+    const vizPrefs = loadEffectiveGSDPreferences()?.preferences;
+    if (vizPrefs?.auto_visualize) {
+      ctx.ui.notify("Run /gsd visualize to see progress overview.", "info");
+    }
     // Reset stuck detection for new milestone
     unitDispatchCount.clear();
     unitRecoveryCount.clear();

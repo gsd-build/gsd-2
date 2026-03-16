@@ -11,6 +11,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveState } from "./state.js";
 import { GSDDashboardOverlay } from "./dashboard-overlay.js";
+import { GSDVisualizerOverlay } from "./visualizer-overlay.js";
 import { showQueue, showDiscuss } from "./guided-flow.js";
 import { startAuto, stopAuto, pauseAuto, isAutoActive, isAutoPaused, isStepMode, stopAutoRemote } from "./auto.js";
 import { resolveProjectRoot } from "./worktree.js";
@@ -65,10 +66,10 @@ function projectRoot(): string {
 
 export function registerGSDCommand(pi: ExtensionAPI): void {
   pi.registerCommand("gsd", {
-    description: "GSD — Get Shit Done: /gsd next|auto|stop|pause|status|queue|capture|triage|history|undo|skip|export|cleanup|prefs|config|hooks|doctor|migrate|remote|steer|knowledge",
+    description: "GSD — Get Shit Done: /gsd next|auto|stop|pause|status|visualize|queue|capture|triage|history|undo|skip|export|cleanup|prefs|config|hooks|doctor|migrate|remote|steer|knowledge",
     getArgumentCompletions: (prefix: string) => {
       const subcommands = [
-        "next", "auto", "stop", "pause", "status", "queue", "discuss",
+        "next", "auto", "stop", "pause", "status", "visualize", "queue", "discuss",
         "capture", "triage",
         "history", "undo", "skip", "export", "cleanup", "prefs",
         "config", "hooks", "doctor", "migrate", "remote", "steer", "knowledge",
@@ -162,6 +163,11 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
 
       if (trimmed === "status") {
         await handleStatus(ctx);
+        return;
+      }
+
+      if (trimmed === "visualize") {
+        await handleVisualize(ctx);
         return;
       }
 
@@ -318,7 +324,7 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
       }
 
       ctx.ui.notify(
-        `Unknown: /gsd ${trimmed}. Use /gsd next|auto|stop|pause|status|queue|capture|triage|discuss|history|undo|skip <unit>|export|cleanup|prefs|config|hooks|doctor|migrate|remote|steer <change>|knowledge <type> <entry>.`,
+        `Unknown: /gsd ${trimmed}. Use /gsd next|auto|stop|pause|status|visualize|queue|capture|triage|discuss|history|undo|skip <unit>|export|cleanup|prefs|config|hooks|doctor|migrate|remote|steer <change>|knowledge <type> <entry>.`,
         "warning",
       );
     },
@@ -354,6 +360,28 @@ export async function fireStatusViaCommand(
   ctx: import("@gsd/pi-coding-agent").ExtensionContext,
 ): Promise<void> {
   await handleStatus(ctx as ExtensionCommandContext);
+}
+
+async function handleVisualize(ctx: ExtensionCommandContext): Promise<void> {
+  if (!ctx.hasUI) {
+    ctx.ui.notify("Visualizer requires an interactive terminal.", "warning");
+    return;
+  }
+
+  await ctx.ui.custom<void>(
+    (tui, theme, _kb, done) => {
+      return new GSDVisualizerOverlay(tui, theme, () => done());
+    },
+    {
+      overlay: true,
+      overlayOptions: {
+        width: "80%",
+        minWidth: 80,
+        maxHeight: "90%",
+        anchor: "center",
+      },
+    },
+  );
 }
 
 async function handlePrefs(args: string, ctx: ExtensionCommandContext): Promise<void> {
