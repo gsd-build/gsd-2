@@ -80,3 +80,10 @@ Add 3 DB-aware inline helper functions to `auto-prompts.ts` and replace all 19 `
 ## Expected Output
 
 - `src/resources/extensions/gsd/auto-prompts.ts` — modified with 3 new helper functions and 19 call site replacements. File grows by ~60 lines (the 3 helpers). Zero `inlineGsdRootFile(base` calls remain in prompt builder bodies.
+
+## Observability Impact
+
+- **Signals changed:** Prompt builders now attempt DB queries before filesystem reads. When DB is available, prompts contain scoped (filtered) decisions/requirements instead of full-file dumps. When DB is unavailable, behavior is identical to pre-change (filesystem fallback).
+- **Inspection:** `isDbAvailable()` returns whether DB-sourced content is being injected. The 3 helpers log nothing on success; catch blocks silently fall through to filesystem (no stderr noise for expected fallback).
+- **Failure visibility:** If dynamic imports fail (e.g., `gsd-db.js` or `context-store.js` missing/broken), the catch block in each helper degrades to `inlineGsdRootFile` — identical to pre-change behavior. No crash, no visible error to the dispatched agent.
+- **Diagnostic command:** `grep -c 'inlineDecisionsFromDb\|inlineRequirementsFromDb\|inlineProjectFromDb' src/resources/extensions/gsd/auto-prompts.ts` — should return ≥22 (3 definitions + 19 call sites).

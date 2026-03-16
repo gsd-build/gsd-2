@@ -44,7 +44,7 @@
 
 ## Tasks
 
-- [ ] **T01: Add DB-aware helpers and rewire all prompt builders** `est:45m`
+- [x] **T01: Add DB-aware helpers and rewire all prompt builders** `est:45m`
   - Why: Core value delivery — this is where prompt injection switches from whole-file dumps to scoped DB queries. The 3 helpers and 19 call replacements are in the same file, tightly coupled, and best done together.
   - Files: `src/resources/extensions/gsd/auto-prompts.ts`
   - Do: Add 3 DB-aware helper functions (`inlineDecisionsFromDb`, `inlineRequirementsFromDb`, `inlineProjectFromDb`) after the existing `inlineGsdRootFile` export. Each uses dynamic `import("./context-store.js")` and `import("./gsd-db.js")`, guards with `isDbAvailable()`, falls back to `inlineGsdRootFile`. Then replace all 19 `inlineGsdRootFile` data-artifact calls in 9 prompt builders per the exact replacement map in research. Scoping: decisions always by `mid`, requirements by `sid` only in slice-level builders (`buildResearchSlicePrompt`, `buildPlanSlicePrompt`, `buildCompleteSlicePrompt`), unscoped in milestone-level builders. Leave `buildExecuteTaskPrompt` and `buildRewriteDocsPrompt` untouched. Keep `inlineGsdRootFile` exported.
