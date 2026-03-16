@@ -94,7 +94,7 @@ export function worktreeBranchName(name: string): string {
  *
  * @param opts.branch — override the default `worktree/<name>` branch name
  */
-export function createWorktree(basePath: string, name: string, opts: { branch?: string } = {}): WorktreeInfo {
+export function createWorktree(basePath: string, name: string, opts: { branch?: string; startPoint?: string; reuseExistingBranch?: boolean } = {}): WorktreeInfo {
   // Validate name: alphanumeric, hyphens, underscores only
   if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
     throw new Error(`Invalid worktree name "${name}". Use only letters, numbers, hyphens, and underscores.`);
@@ -114,9 +114,12 @@ export function createWorktree(basePath: string, name: string, opts: { branch?: 
   // Prune any stale worktree entries from a previous removal
   nativeWorktreePrune(basePath);
 
+  // Use the explicit start point (e.g. integration branch) if provided,
+  // otherwise fall back to the repo's detected main branch.
+  const startPoint = opts.startPoint ?? nativeDetectMainBranch(basePath);
+
   // Check if the branch already exists (leftover from a previous worktree)
   const branchAlreadyExists = nativeBranchExists(basePath, branch);
-  const mainBranch = nativeDetectMainBranch(basePath);
 
   if (branchAlreadyExists) {
     // Check if the branch is actively used by an existing worktree.
@@ -130,11 +133,18 @@ export function createWorktree(basePath: string, name: string, opts: { branch?: 
       );
     }
 
-    // Reset the stale branch to current main, then attach worktree to it
-    nativeBranchForceReset(basePath, branch, mainBranch);
-    nativeWorktreeAdd(basePath, wtPath, branch);
+    if (opts.reuseExistingBranch) {
+      // Attach worktree to the existing branch as-is (preserving commits).
+      // Used when resuming auto-mode: the milestone branch has valid work
+      // from prior sessions that must not be reset.
+      nativeWorktreeAdd(basePath, wtPath, branch);
+    } else {
+      // Reset the stale branch to the start point, then attach worktree to it
+      nativeBranchForceReset(basePath, branch, startPoint);
+      nativeWorktreeAdd(basePath, wtPath, branch);
+    }
   } else {
-    nativeWorktreeAdd(basePath, wtPath, branch, true, mainBranch);
+    nativeWorktreeAdd(basePath, wtPath, branch, true, startPoint);
   }
 
   return {
