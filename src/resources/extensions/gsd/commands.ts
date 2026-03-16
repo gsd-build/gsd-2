@@ -560,7 +560,7 @@ async function handlePrefsWizard(
     `Default commit type${currentCommitType ? ` (current: ${currentCommitType})` : ""}:`,
     commitTypes,
   );
-  if (commitChoice && commitChoice !== "(keep current)") {
+  if (commitChoice && typeof commitChoice === "string" && commitChoice !== "(keep current)") {
     if (commitChoice.startsWith("(inferred")) {
       delete git.commit_type;
     } else {
