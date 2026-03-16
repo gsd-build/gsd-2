@@ -338,11 +338,12 @@ let _sigtermHandler: (() => void) | null = null;
 /** Tool calls currently being executed — prevents false idle detection during long-running tools. */
 const inFlightTools = new Set<string>();
 
-type BudgetAlertLevel = 0 | 75 | 90 | 100;
+type BudgetAlertLevel = 0 | 75 | 80 | 90 | 100;
 
 export function getBudgetAlertLevel(budgetPct: number): BudgetAlertLevel {
   if (budgetPct >= 1.0) return 100;
   if (budgetPct >= 0.90) return 90;
+  if (budgetPct >= 0.80) return 80;
   if (budgetPct >= 0.75) return 75;
   return 0;
 }
@@ -2059,6 +2060,10 @@ async function dispatchNextUnit(
       lastBudgetAlertLevel = newBudgetAlertLevel;
       ctx.ui.notify(`Budget 90%: ${formatCost(totalCost)} / ${formatCost(budgetCeiling)}`, "warning");
       sendDesktopNotification("GSD", `Budget 90%: ${formatCost(totalCost)} / ${formatCost(budgetCeiling)}`, "warning", "budget");
+    } else if (newBudgetAlertLevel === 80) {
+      lastBudgetAlertLevel = newBudgetAlertLevel;
+      ctx.ui.notify(`Approaching budget ceiling — 80%: ${formatCost(totalCost)} / ${formatCost(budgetCeiling)}`, "warning");
+      sendDesktopNotification("GSD", `Approaching budget ceiling — 80%: ${formatCost(totalCost)} / ${formatCost(budgetCeiling)}`, "warning", "budget");
     } else if (newBudgetAlertLevel === 75) {
       lastBudgetAlertLevel = newBudgetAlertLevel;
       ctx.ui.notify(`Budget 75%: ${formatCost(totalCost)} / ${formatCost(budgetCeiling)}`, "info");
