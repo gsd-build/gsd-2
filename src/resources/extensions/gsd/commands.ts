@@ -42,7 +42,7 @@ import { handleUndo } from "./undo.js";
 import { handleExport } from "./export.js";
 import { nativeBranchList, nativeDetectMainBranch, nativeBranchListMerged, nativeBranchDelete, nativeForEachRef, nativeUpdateRef } from "./native-git-bridge.js";
 
-function dispatchDoctorHeal(pi: ExtensionAPI, scope: string | undefined, reportText: string, structuredIssues: string): void {
+export function dispatchDoctorHeal(pi: ExtensionAPI, scope: string | undefined, reportText: string, structuredIssues: string): void {
   const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(process.env.HOME ?? "~", ".pi", "GSD-WORKFLOW.md");
   const workflow = readFileSync(workflowPath, "utf-8");
   const prompt = loadPrompt("doctor-heal", {
@@ -67,13 +67,13 @@ function projectRoot(): string {
 
 export function registerGSDCommand(pi: ExtensionAPI): void {
   pi.registerCommand("gsd", {
-    description: "GSD — Get Shit Done: /gsd help|next|auto|stop|pause|status|visualize|queue|quick|capture|triage|history|undo|skip|export|cleanup|prefs|config|hooks|run-hook|doctor|migrate|remote|steer|knowledge",
+    description: "GSD — Get Shit Done: /gsd help|next|auto|stop|pause|status|visualize|queue|quick|capture|triage|history|undo|skip|export|cleanup|prefs|config|hooks|run-hook|skill-health|doctor|migrate|remote|steer|knowledge",
     getArgumentCompletions: (prefix: string) => {
       const subcommands = [
         "help", "next", "auto", "stop", "pause", "status", "visualize", "queue", "quick", "discuss",
         "capture", "triage",
         "history", "undo", "skip", "export", "cleanup", "prefs",
-        "config", "hooks", "run-hook", "doctor", "migrate", "remote", "steer", "knowledge",
+        "config", "hooks", "run-hook", "skill-health", "doctor", "migrate", "remote", "steer", "inspect", "knowledge",
       ];
       const parts = prefix.trim().split(/\s+/);
 
@@ -299,6 +299,12 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         return;
       }
 
+      // ─── Skill Health ────────────────────────────────────────────
+      if (trimmed === "skill-health" || trimmed.startsWith("skill-health ")) {
+        await handleSkillHealth(trimmed.replace(/^skill-health\s*/, "").trim(), ctx);
+        return;
+      }
+
       if (trimmed.startsWith("run-hook ")) {
         await handleRunHook(trimmed.replace(/^run-hook\s*/, "").trim(), ctx, pi);
         return;
@@ -345,6 +351,11 @@ Examples:
 
       if (trimmed === "remote" || trimmed.startsWith("remote ")) {
         await handleRemote(trimmed.replace(/^remote\s*/, "").trim(), ctx, pi);
+        return;
+      }
+
+      if (trimmed === "inspect") {
+        await handleInspect(ctx);
         return;
       }
 
@@ -400,6 +411,7 @@ function showHelp(ctx: ExtensionCommandContext): void {
     "  /gsd cleanup        Remove merged branches or snapshots  [branches|snapshots]",
     "  /gsd migrate        Upgrade .gsd/ structures to new format",
     "  /gsd remote         Control remote auto-mode  [slack|discord|status|disconnect]",
+    "  /gsd inspect        Show SQLite DB diagnostics (schema, row counts, recent entries)",
   ];
   ctx.ui.notify(lines.join("\n"), "info");
 }
@@ -542,6 +554,132 @@ async function handleDoctor(args: string, ctx: ExtensionCommandContext, pi: Exte
     dispatchDoctorHeal(pi, effectiveScope, reportText, structuredIssues);
     ctx.ui.notify(`Doctor heal dispatched ${actionable.length} issue(s) to the LLM.`, "info");
   }
+}
+
+// ─── Inspect ──────────────────────────────────────────────────────────────────
+
+export interface InspectData {
+  schemaVersion: number | null;
+  counts: { decisions: number; requirements: number; artifacts: number };
+  recentDecisions: Array<{ id: string; decision: string; choice: string }>;
+  recentRequirements: Array<{ id: string; status: string; description: string }>;
+}
+
+export function formatInspectOutput(data: InspectData): string {
+  const lines: string[] = [];
+  lines.push("=== GSD Database Inspect ===");
+  lines.push(`Schema version: ${data.schemaVersion ?? "unknown"}`);
+  lines.push("");
+  lines.push(`Decisions:    ${data.counts.decisions}`);
+  lines.push(`Requirements: ${data.counts.requirements}`);
+  lines.push(`Artifacts:    ${data.counts.artifacts}`);
+
+  if (data.recentDecisions.length > 0) {
+    lines.push("");
+    lines.push("Recent decisions:");
+    for (const d of data.recentDecisions) {
+      lines.push(`  ${d.id}: ${d.decision} → ${d.choice}`);
+    }
+  }
+
+  if (data.recentRequirements.length > 0) {
+    lines.push("");
+    lines.push("Recent requirements:");
+    for (const r of data.recentRequirements) {
+      lines.push(`  ${r.id} [${r.status}]: ${r.description}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+async function handleInspect(ctx: ExtensionCommandContext): Promise<void> {
+  try {
+    const { isDbAvailable, _getAdapter } = await import("./gsd-db.js");
+
+    if (!isDbAvailable()) {
+      ctx.ui.notify("No GSD database available. Run /gsd auto to create one.", "info");
+      return;
+    }
+
+    const adapter = _getAdapter();
+    if (!adapter) {
+      ctx.ui.notify("No GSD database available. Run /gsd auto to create one.", "info");
+      return;
+    }
+
+    const versionRow = adapter.prepare("SELECT MAX(version) as v FROM schema_version").get();
+    const schemaVersion = versionRow ? (versionRow["v"] as number | null) : null;
+
+    const dCount = adapter.prepare("SELECT count(*) as cnt FROM decisions").get();
+    const rCount = adapter.prepare("SELECT count(*) as cnt FROM requirements").get();
+    const aCount = adapter.prepare("SELECT count(*) as cnt FROM artifacts").get();
+
+    const recentDecisions = adapter
+      .prepare("SELECT id, decision, choice FROM decisions ORDER BY seq DESC LIMIT 5")
+      .all() as Array<{ id: string; decision: string; choice: string }>;
+
+    const recentRequirements = adapter
+      .prepare("SELECT id, status, description FROM requirements ORDER BY id DESC LIMIT 5")
+      .all() as Array<{ id: string; status: string; description: string }>;
+
+    const data: InspectData = {
+      schemaVersion,
+      counts: {
+        decisions: (dCount?.["cnt"] as number) ?? 0,
+        requirements: (rCount?.["cnt"] as number) ?? 0,
+        artifacts: (aCount?.["cnt"] as number) ?? 0,
+      },
+      recentDecisions,
+      recentRequirements,
+    };
+
+    ctx.ui.notify(formatInspectOutput(data), "info");
+  } catch (err) {
+    process.stderr.write(`gsd-db: /gsd inspect failed: ${err instanceof Error ? err.message : String(err)}\n`);
+    ctx.ui.notify("Failed to inspect GSD database. Check stderr for details.", "error");
+  }
+}
+
+// ─── Skill Health ─────────────────────────────────────────────────────────────
+
+async function handleSkillHealth(args: string, ctx: ExtensionCommandContext): Promise<void> {
+  const {
+    generateSkillHealthReport,
+    formatSkillHealthReport,
+    formatSkillDetail,
+  } = await import("./skill-health.js");
+
+  const basePath = projectRoot();
+
+  // /gsd skill-health <skill-name> — detail view
+  if (args && !args.startsWith("--")) {
+    const detail = formatSkillDetail(basePath, args);
+    ctx.ui.notify(detail, "info");
+    return;
+  }
+
+  // Parse flags
+  const staleMatch = args.match(/--stale\s+(\d+)/);
+  const staleDays = staleMatch ? parseInt(staleMatch[1], 10) : undefined;
+  const decliningOnly = args.includes("--declining");
+
+  const report = generateSkillHealthReport(basePath, staleDays);
+
+  if (decliningOnly) {
+    if (report.decliningSkills.length === 0) {
+      ctx.ui.notify("No skills flagged for declining performance.", "info");
+      return;
+    }
+    const filtered = {
+      ...report,
+      skills: report.skills.filter(s => s.flagged),
+    };
+    ctx.ui.notify(formatSkillHealthReport(filtered), "info");
+    return;
+  }
+
+  ctx.ui.notify(formatSkillHealthReport(report), "info");
 }
 
 // ─── Preferences Wizard ───────────────────────────────────────────────────────
