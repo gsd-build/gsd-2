@@ -64,7 +64,15 @@ import {
   formatValidationIssues,
 } from "./observability-validator.js";
 import { ensureGitignore, untrackRuntimeFiles } from "./gitignore.js";
-import { runGSDDoctor, rebuildState } from "./doctor.js";
+import { runGSDDoctor, rebuildState, summarizeDoctorIssues } from "./doctor.js";
+import {
+  preDispatchHealthGate,
+  recordHealthSnapshot,
+  checkHealEscalation,
+  resetProactiveHealing,
+  formatHealthSummary,
+  getConsecutiveErrorUnits,
+} from "./doctor-proactive.js";
 import { snapshotSkills, clearSkillSnapshot } from "./skill-discovery.js";
 import { captureAvailableSkills, getAndClearSkills, resetSkillTelemetry } from "./skill-telemetry.js";
 import {
@@ -559,6 +567,7 @@ export async function stopAuto(ctx?: ExtensionContext, pi?: ExtensionAPI): Promi
   completedUnits = [];
   clearSliceProgressCache();
   clearActivityLogState();
+  resetProactiveHealing();
   pendingCrashRecovery = null;
   _handlingAgentEnd = false;
   ctx?.ui.setStatus("gsd-auto", undefined);
@@ -858,6 +867,7 @@ export async function startAuto(
   loadPersistedKeys(base, completedKeySet);
   resetHookState();
   restoreHookState(base);
+  resetProactiveHealing();
   autoStartTime = Date.now();
   resourceSyncedAtOnStart = readResourceSyncedAt();
   completedUnits = [];
@@ -1088,6 +1098,35 @@ export async function handleAgentEnd(
       const report = await runGSDDoctor(basePath, { fix: true, scope: doctorScope, fixLevel: "task" });
       if (report.fixesApplied.length > 0) {
         ctx.ui.notify(`Post-hook: applied ${report.fixesApplied.length} fix(es).`, "info");
+      }
+
+      // ── Proactive health tracking ──────────────────────────────────────
+      // Record health snapshot for trend analysis and escalation logic.
+      const summary = summarizeDoctorIssues(report.issues);
+      recordHealthSnapshot(summary.errors, summary.warnings, report.fixesApplied.length);
+
+      // Check if we should escalate to LLM-assisted heal
+      if (summary.errors > 0) {
+        const unresolvedErrors = report.issues
+          .filter(i => i.severity === "error" && !i.fixable)
+          .map(i => ({ code: i.code, message: i.message, unitId: i.unitId }));
+        const escalation = checkHealEscalation(summary.errors, unresolvedErrors);
+        if (escalation.shouldEscalate) {
+          ctx.ui.notify(
+            `Doctor heal escalation: ${escalation.reason}. Dispatching LLM-assisted heal.`,
+            "warning",
+          );
+          try {
+            const { formatDoctorIssuesForPrompt, formatDoctorReport } = await import("./doctor.js");
+            const { dispatchDoctorHeal } = await import("./commands.js");
+            const actionable = report.issues.filter(i => i.severity === "error");
+            const reportText = formatDoctorReport(report, { scope: doctorScope, includeWarnings: true });
+            const structuredIssues = formatDoctorIssuesForPrompt(actionable);
+            dispatchDoctorHeal(pi, doctorScope, reportText, structuredIssues);
+          } catch {
+            // Non-fatal — escalation dispatch failure
+          }
+        }
       }
     } catch {
       // Non-fatal — doctor failure should never block dispatch
@@ -1557,6 +1596,23 @@ async function dispatchNextUnit(
   invalidateAllCaches();
   lastPromptCharCount = undefined;
   lastBaselineCharCount = undefined;
+
+  // ── Pre-dispatch health gate ──────────────────────────────────────────
+  // Lightweight check for critical issues that would cause the next unit
+  // to fail or corrupt state. Auto-heals what it can, blocks on the rest.
+  try {
+    const healthGate = preDispatchHealthGate(basePath);
+    if (healthGate.fixesApplied.length > 0) {
+      ctx.ui.notify(`Pre-dispatch: ${healthGate.fixesApplied.join(", ")}`, "info");
+    }
+    if (!healthGate.proceed) {
+      ctx.ui.notify(healthGate.reason ?? "Pre-dispatch health check failed.", "error");
+      await pauseAuto(ctx, pi);
+      return;
+    }
+  } catch {
+    // Non-fatal — health gate failure should never block dispatch
+  }
 
   let state = await deriveState(basePath);
   let mid = state.activeMilestone?.id;

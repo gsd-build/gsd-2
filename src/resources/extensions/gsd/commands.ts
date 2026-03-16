@@ -36,12 +36,13 @@ import {
 import { loadPrompt } from "./prompt-loader.js";
 
 import { handleRemote } from "../remote-questions/remote-command.js";
+import { handleQuick } from "./quick.js";
 import { handleHistory } from "./history.js";
 import { handleUndo } from "./undo.js";
 import { handleExport } from "./export.js";
 import { nativeBranchList, nativeDetectMainBranch, nativeBranchListMerged, nativeBranchDelete, nativeForEachRef, nativeUpdateRef } from "./native-git-bridge.js";
 
-function dispatchDoctorHeal(pi: ExtensionAPI, scope: string | undefined, reportText: string, structuredIssues: string): void {
+export function dispatchDoctorHeal(pi: ExtensionAPI, scope: string | undefined, reportText: string, structuredIssues: string): void {
   const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(process.env.HOME ?? "~", ".pi", "GSD-WORKFLOW.md");
   const workflow = readFileSync(workflowPath, "utf-8");
   const prompt = loadPrompt("doctor-heal", {
@@ -66,10 +67,10 @@ function projectRoot(): string {
 
 export function registerGSDCommand(pi: ExtensionAPI): void {
   pi.registerCommand("gsd", {
-    description: "GSD — Get Shit Done: /gsd help|next|auto|stop|pause|status|visualize|queue|capture|triage|history|undo|skip|export|cleanup|mode|prefs|config|hooks|run-hook|skill-health|doctor|migrate|remote|steer|knowledge",
+    description: "GSD — Get Shit Done: /gsd help|next|auto|stop|pause|status|visualize|queue|quick|capture|triage|history|undo|skip|export|cleanup|mode|prefs|config|hooks|run-hook|skill-health|doctor|migrate|remote|steer|knowledge",
     getArgumentCompletions: (prefix: string) => {
       const subcommands = [
-        "help", "next", "auto", "stop", "pause", "status", "visualize", "queue", "discuss",
+        "help", "next", "auto", "stop", "pause", "status", "visualize", "queue", "quick", "discuss",
         "capture", "triage",
         "history", "undo", "skip", "export", "cleanup", "mode", "prefs",
         "config", "hooks", "run-hook", "skill-health", "doctor", "migrate", "remote", "steer", "inspect", "knowledge",
@@ -295,6 +296,11 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
 
       if (trimmed === "triage") {
         await handleTriage(ctx, pi, process.cwd());
+        return;
+      }
+
+      if (trimmed === "quick" || trimmed.startsWith("quick ")) {
+        await handleQuick(trimmed.replace(/^quick\s*/, "").trim(), ctx, pi);
         return;
       }
 
