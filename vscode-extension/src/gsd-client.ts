@@ -7,9 +7,11 @@ import * as vscode from "vscode";
  * extension has no dependency on the agent packages at runtime.
  */
 
+export type ThinkingLevel = "off" | "low" | "medium" | "high";
+
 export interface RpcSessionState {
 	model?: { provider: string; id: string; contextWindow?: number };
-	thinkingLevel: string;
+	thinkingLevel: ThinkingLevel;
 	isStreaming: boolean;
 	isCompacting: boolean;
 	steeringMode: "all" | "one-at-a-time";
@@ -27,6 +29,31 @@ export interface ModelInfo {
 	id: string;
 	contextWindow?: number;
 	reasoning?: boolean;
+}
+
+export interface SessionStats {
+	inputTokens?: number;
+	outputTokens?: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
+	totalCost?: number;
+	messageCount?: number;
+	turnCount?: number;
+	duration?: number;
+}
+
+export interface BashResult {
+	stdout: string;
+	stderr: string;
+	exitCode: number | null;
+}
+
+export interface SlashCommand {
+	name: string;
+	description?: string;
+	source: "extension" | "prompt" | "skill";
+	location?: "user" | "project" | "path";
+	path?: string;
 }
 
 export interface RpcResponse {
@@ -152,12 +179,32 @@ export class GsdClient implements vscode.Disposable {
 		this._onConnectionChange.fire(false);
 	}
 
+	// =========================================================================
+	// Prompting
+	// =========================================================================
+
 	/**
 	 * Send a prompt message to the agent.
 	 * Returns once the command is acknowledged; streaming events follow via onEvent.
 	 */
 	async sendPrompt(message: string): Promise<void> {
 		const response = await this.send({ type: "prompt", message });
+		this.assertSuccess(response);
+	}
+
+	/**
+	 * Interrupt the agent with a steering message while it is streaming.
+	 */
+	async steer(message: string): Promise<void> {
+		const response = await this.send({ type: "steer", message });
+		this.assertSuccess(response);
+	}
+
+	/**
+	 * Send a follow-up message after the agent has completed.
+	 */
+	async followUp(message: string): Promise<void> {
+		const response = await this.send({ type: "follow_up", message });
 		this.assertSuccess(response);
 	}
 
@@ -169,6 +216,10 @@ export class GsdClient implements vscode.Disposable {
 		this.assertSuccess(response);
 	}
 
+	// =========================================================================
+	// State
+	// =========================================================================
+
 	/**
 	 * Get current session state.
 	 */
@@ -177,6 +228,10 @@ export class GsdClient implements vscode.Disposable {
 		this.assertSuccess(response);
 		return response.data as RpcSessionState;
 	}
+
+	// =========================================================================
+	// Model
+	// =========================================================================
 
 	/**
 	 * Set the active model.
@@ -196,11 +251,176 @@ export class GsdClient implements vscode.Disposable {
 	}
 
 	/**
+	 * Cycle through available models.
+	 */
+	async cycleModel(): Promise<{ model: ModelInfo; thinkingLevel: ThinkingLevel; isScoped: boolean } | null> {
+		const response = await this.send({ type: "cycle_model" });
+		this.assertSuccess(response);
+		return response.data as { model: ModelInfo; thinkingLevel: ThinkingLevel; isScoped: boolean } | null;
+	}
+
+	// =========================================================================
+	// Thinking
+	// =========================================================================
+
+	/**
+	 * Set the thinking level explicitly.
+	 */
+	async setThinkingLevel(level: ThinkingLevel): Promise<void> {
+		const response = await this.send({ type: "set_thinking_level", level });
+		this.assertSuccess(response);
+	}
+
+	/**
+	 * Cycle through thinking levels (off -> low -> medium -> high -> off).
+	 */
+	async cycleThinkingLevel(): Promise<{ level: ThinkingLevel } | null> {
+		const response = await this.send({ type: "cycle_thinking_level" });
+		this.assertSuccess(response);
+		return response.data as { level: ThinkingLevel } | null;
+	}
+
+	// =========================================================================
+	// Compaction
+	// =========================================================================
+
+	/**
+	 * Manually compact the conversation context.
+	 */
+	async compact(customInstructions?: string): Promise<unknown> {
+		const cmd: Record<string, unknown> = { type: "compact" };
+		if (customInstructions) {
+			cmd.customInstructions = customInstructions;
+		}
+		const response = await this.send(cmd);
+		this.assertSuccess(response);
+		return response.data;
+	}
+
+	/**
+	 * Enable or disable automatic compaction.
+	 */
+	async setAutoCompaction(enabled: boolean): Promise<void> {
+		const response = await this.send({ type: "set_auto_compaction", enabled });
+		this.assertSuccess(response);
+	}
+
+	// =========================================================================
+	// Retry
+	// =========================================================================
+
+	/**
+	 * Enable or disable automatic retry on failure.
+	 */
+	async setAutoRetry(enabled: boolean): Promise<void> {
+		const response = await this.send({ type: "set_auto_retry", enabled });
+		this.assertSuccess(response);
+	}
+
+	/**
+	 * Abort a pending retry.
+	 */
+	async abortRetry(): Promise<void> {
+		const response = await this.send({ type: "abort_retry" });
+		this.assertSuccess(response);
+	}
+
+	// =========================================================================
+	// Bash
+	// =========================================================================
+
+	/**
+	 * Execute a bash command via the agent.
+	 */
+	async runBash(command: string): Promise<BashResult> {
+		const response = await this.send({ type: "bash", command });
+		this.assertSuccess(response);
+		return response.data as BashResult;
+	}
+
+	/**
+	 * Abort a running bash command.
+	 */
+	async abortBash(): Promise<void> {
+		const response = await this.send({ type: "abort_bash" });
+		this.assertSuccess(response);
+	}
+
+	// =========================================================================
+	// Session
+	// =========================================================================
+
+	/**
 	 * Start a new session.
 	 */
 	async newSession(): Promise<void> {
 		const response = await this.send({ type: "new_session" });
 		this.assertSuccess(response);
+	}
+
+	/**
+	 * Get session statistics (token counts, cost, etc.).
+	 */
+	async getSessionStats(): Promise<SessionStats> {
+		const response = await this.send({ type: "get_session_stats" });
+		this.assertSuccess(response);
+		return response.data as SessionStats;
+	}
+
+	/**
+	 * Export the conversation as HTML.
+	 */
+	async exportHtml(outputPath?: string): Promise<{ path: string }> {
+		const cmd: Record<string, unknown> = { type: "export_html" };
+		if (outputPath) {
+			cmd.outputPath = outputPath;
+		}
+		const response = await this.send(cmd);
+		this.assertSuccess(response);
+		return response.data as { path: string };
+	}
+
+	/**
+	 * Switch to a different session file.
+	 */
+	async switchSession(sessionPath: string): Promise<void> {
+		const response = await this.send({ type: "switch_session", sessionPath });
+		this.assertSuccess(response);
+	}
+
+	/**
+	 * Set the display name for the current session.
+	 */
+	async setSessionName(name: string): Promise<void> {
+		const response = await this.send({ type: "set_session_name", name });
+		this.assertSuccess(response);
+	}
+
+	/**
+	 * Get all conversation messages.
+	 */
+	async getMessages(): Promise<unknown[]> {
+		const response = await this.send({ type: "get_messages" });
+		this.assertSuccess(response);
+		return (response.data as { messages: unknown[] }).messages;
+	}
+
+	/**
+	 * Get the text of the last assistant response.
+	 */
+	async getLastAssistantText(): Promise<string | null> {
+		const response = await this.send({ type: "get_last_assistant_text" });
+		this.assertSuccess(response);
+		return (response.data as { text: string | null }).text;
+	}
+
+	/**
+	 * List available slash commands.
+	 */
+	async getCommands(): Promise<SlashCommand[]> {
+		const response = await this.send({ type: "get_commands" });
+		this.assertSuccess(response);
+		return (response.data as { commands: SlashCommand[] }).commands;
 	}
 
 	dispose(): void {
@@ -278,7 +498,7 @@ export class GsdClient implements vscode.Disposable {
 	}
 
 	private rejectAllPending(reason: string): void {
-		for (const [id, pending] of this.pendingRequests) {
+		for (const [, pending] of this.pendingRequests) {
 			clearTimeout(pending.timer);
 			pending.reject(new Error(reason));
 		}

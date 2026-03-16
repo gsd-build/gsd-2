@@ -33,6 +33,67 @@
       {
         "command": "gsd.sendMessage",
         "title": "GSD: Send Message"
+      },
+      {
+        "command": "gsd.cycleModel",
+        "title": "GSD: Cycle Model"
+      },
+      {
+        "command": "gsd.cycleThinking",
+        "title": "GSD: Cycle Thinking Level"
+      },
+      {
+        "command": "gsd.compact",
+        "title": "GSD: Compact Context"
+      },
+      {
+        "command": "gsd.abort",
+        "title": "GSD: Abort Current Operation"
+      },
+      {
+        "command": "gsd.exportHtml",
+        "title": "GSD: Export Conversation as HTML"
+      },
+      {
+        "command": "gsd.sessionStats",
+        "title": "GSD: Show Session Stats"
+      },
+      {
+        "command": "gsd.runBash",
+        "title": "GSD: Run Bash Command"
+      },
+      {
+        "command": "gsd.switchModel",
+        "title": "GSD: Switch Model"
+      },
+      {
+        "command": "gsd.setThinking",
+        "title": "GSD: Set Thinking Level"
+      },
+      {
+        "command": "gsd.steer",
+        "title": "GSD: Steer Agent"
+      },
+      {
+        "command": "gsd.listCommands",
+        "title": "GSD: List Available Commands"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "gsd.newSession",
+        "key": "ctrl+shift+g ctrl+shift+n",
+        "mac": "cmd+shift+g cmd+shift+n"
+      },
+      {
+        "command": "gsd.cycleModel",
+        "key": "ctrl+shift+g ctrl+shift+m",
+        "mac": "cmd+shift+g cmd+shift+m"
+      },
+      {
+        "command": "gsd.cycleThinking",
+        "key": "ctrl+shift+g ctrl+shift+t",
+        "mac": "cmd+shift+g cmd+shift+t"
       }
     ],
     "viewsContainers": {
@@ -69,6 +130,16 @@
           "type": "string",
           "default": "gsd",
           "description": "Path to the GSD binary"
+        },
+        "gsd.autoStart": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically start the GSD agent when the extension activates"
+        },
+        "gsd.autoCompaction": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automatic context compaction"
         }
       }
     }
