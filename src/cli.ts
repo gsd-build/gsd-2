@@ -75,6 +75,7 @@ function parseCliArgs(argv: string[]): CliFlags {
       process.stdout.write('\nSubcommands:\n')
       process.stdout.write('  config                   Re-run the setup wizard\n')
       process.stdout.write('  update                   Update GSD to the latest version\n')
+      process.stdout.write('  headless                 Run auto-mode without TUI\n')
       process.exit(0)
     } else if (!arg.startsWith('--') && !arg.startsWith('-')) {
       flags.messages.push(arg)
@@ -97,6 +98,13 @@ if (cliFlags.messages[0] === 'config') {
 if (cliFlags.messages[0] === 'update') {
   const { runUpdate } = await import('./update-cmd.js')
   await runUpdate()
+  process.exit(0)
+}
+
+// `gsd headless` — run auto-mode without TUI
+if (cliFlags.messages[0] === 'headless') {
+  const { runHeadless, parseHeadlessArgs } = await import('./headless.js')
+  await runHeadless(parseHeadlessArgs(process.argv))
   process.exit(0)
 }
 
