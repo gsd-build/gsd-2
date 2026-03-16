@@ -228,6 +228,9 @@ const DISPATCH_GAP_TIMEOUT_MS = 5_000; // 5 seconds
 /** SIGTERM handler registered while auto-mode is active — cleared on stop/pause. */
 let _sigtermHandler: (() => void) | null = null;
 
+/** Tool calls currently being executed — prevents false idle detection during long-running tools. */
+const inFlightTools = new Set<string>();
+
 type BudgetAlertLevel = 0 | 75 | 90 | 100;
 
 export function getBudgetAlertLevel(budgetPct: number): BudgetAlertLevel {
@@ -294,6 +297,22 @@ export function isAutoPaused(): boolean {
 }
 
 /**
+ * Mark a tool execution as in-flight. Called from index.ts on tool_execution_start.
+ * Prevents the idle watchdog from declaring the agent idle while tools are executing.
+ */
+export function markToolStart(toolCallId: string): void {
+  if (!active) return;
+  inFlightTools.add(toolCallId);
+}
+
+/**
+ * Mark a tool execution as completed. Called from index.ts on tool_execution_end.
+ */
+export function markToolEnd(toolCallId: string): void {
+  inFlightTools.delete(toolCallId);
+}
+
+/**
  * Return the base path to use for the auto.lock file.
  * Always uses the original project root (not the worktree) so that
  * a second terminal can discover and stop a running auto-mode session.
@@ -345,6 +364,7 @@ function clearUnitTimeout(): void {
     clearInterval(idleWatchdogHandle);
     idleWatchdogHandle = null;
   }
+  inFlightTools.clear();
   clearDispatchGapWatchdog();
 }
 
@@ -458,6 +478,7 @@ export async function stopAuto(ctx?: ExtensionContext, pi?: ExtensionAPI): Promi
   stepMode = false;
   unitDispatchCount.clear();
   unitRecoveryCount.clear();
+  inFlightTools.clear();
   lastBudgetAlertLevel = 0;
   unitLifetimeDispatches.clear();
   currentUnit = null;
@@ -1956,6 +1977,16 @@ async function dispatchNextUnit(
     const runtime = readUnitRuntimeRecord(basePath, unitType, unitId);
     if (!runtime) return;
     if (Date.now() - runtime.lastProgressAt < idleTimeoutMs) return;
+
+    // Agent has tool calls currently executing (await_job, long bash, etc.) —
+    // not idle, just waiting for tool completion.
+    if (inFlightTools.size > 0) {
+      writeUnitRuntimeRecord(basePath, unitType, unitId, currentUnit.startedAt, {
+        lastProgressAt: Date.now(),
+        lastProgressKind: "tool-in-flight",
+      });
+      return;
+    }
 
     // Before triggering recovery, check if the agent is actually producing
     // work on disk.  `git status --porcelain` is cheap and catches any

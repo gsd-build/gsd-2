@@ -31,7 +31,7 @@ import { registerWorktreeCommand, getWorktreeOriginalCwd, getActiveWorktreeName 
 import { saveFile, formatContinue, loadFile, parseContinue, parseSummary, loadActiveOverrides, formatOverridesSection } from "./files.js";
 import { loadPrompt } from "./prompt-loader.js";
 import { deriveState } from "./state.js";
-import { isAutoActive, isAutoPaused, handleAgentEnd, pauseAuto, getAutoDashboardData } from "./auto.js";
+import { isAutoActive, isAutoPaused, handleAgentEnd, pauseAuto, getAutoDashboardData, markToolStart, markToolEnd } from "./auto.js";
 import { saveActivityLog } from "./activity-log.js";
 import { checkAutoStartAfterDiscuss, getDiscussionMilestoneId } from "./guided-flow.js";
 import { GSDDashboardOverlay } from "./dashboard-overlay.js";
@@ -541,6 +541,16 @@ export default function (pi: ExtensionAPI) {
     const newBlock = lines.join("\n");
     const existing = await loadFile(discussionPath) ?? `# ${milestoneId} Discussion Log\n\n`;
     await saveFile(discussionPath, existing + newBlock);
+  });
+
+  // ── tool_execution_start/end: track in-flight tools for idle detection ──
+  pi.on("tool_execution_start", async (event) => {
+    if (!isAutoActive()) return;
+    markToolStart(event.toolCallId);
+  });
+
+  pi.on("tool_execution_end", async (event) => {
+    markToolEnd(event.toolCallId);
   });
 }
 
