@@ -20,7 +20,7 @@ import type {
 
 import { checkExistingEnvKeys } from '../get-secrets-from-user.js';
 import { parseRoadmapSlices } from './roadmap-slices.js';
-import { nativeParseRoadmap, nativeExtractSection, NATIVE_UNAVAILABLE } from './native-parser-bridge.js';
+import { nativeParseRoadmap, nativeExtractSection, nativeParsePlanFile, nativeParseSummaryFile, NATIVE_UNAVAILABLE } from './native-parser-bridge.js';
 
 // ─── Parse Cache ──────────────────────────────────────────────────────────
 
@@ -354,6 +354,28 @@ export function parsePlan(content: string): SlicePlan {
 }
 
 function _parsePlanImpl(content: string): SlicePlan {
+  // Try native parser first for better performance
+  const nativeResult = nativeParsePlanFile(content);
+  if (nativeResult) {
+    return {
+      id: nativeResult.id,
+      title: nativeResult.title,
+      goal: nativeResult.goal,
+      demo: nativeResult.demo,
+      mustHaves: nativeResult.mustHaves,
+      tasks: nativeResult.tasks.map(t => ({
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        done: t.done,
+        estimate: t.estimate,
+        ...(t.files.length > 0 ? { files: t.files } : {}),
+        ...(t.verify ? { verify: t.verify } : {}),
+      })),
+      filesLikelyTouched: nativeResult.filesLikelyTouched,
+    };
+  }
+
   const lines = content.split('\n');
 
   const h1 = lines.find(l => l.startsWith('# '));
@@ -436,6 +458,36 @@ export function parseSummary(content: string): Summary {
 }
 
 function _parseSummaryImpl(content: string): Summary {
+  // Try native parser first for better performance
+  const nativeResult = nativeParseSummaryFile(content);
+  if (nativeResult) {
+    const nfm = nativeResult.frontmatter;
+    return {
+      frontmatter: {
+        id: nfm.id,
+        parent: nfm.parent,
+        milestone: nfm.milestone,
+        provides: nfm.provides,
+        requires: nfm.requires,
+        affects: nfm.affects,
+        key_files: nfm.keyFiles,
+        key_decisions: nfm.keyDecisions,
+        patterns_established: nfm.patternsEstablished,
+        drill_down_paths: nfm.drillDownPaths,
+        observability_surfaces: nfm.observabilitySurfaces,
+        duration: nfm.duration,
+        verification_result: nfm.verificationResult,
+        completed_at: nfm.completedAt,
+        blocker_discovered: nfm.blockerDiscovered,
+      },
+      title: nativeResult.title,
+      oneLiner: nativeResult.oneLiner,
+      whatHappened: nativeResult.whatHappened,
+      deviations: nativeResult.deviations,
+      filesModified: nativeResult.filesModified,
+    };
+  }
+
   const [fmLines, body] = splitFrontmatter(content);
 
   const fm = fmLines ? parseFrontmatterMap(fmLines) : {};

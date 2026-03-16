@@ -21,6 +21,7 @@
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { basename, join } from "node:path";
+import { nativeParseJsonlTail } from "./native-parser-bridge.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -247,14 +248,21 @@ export function synthesizeCrashRecovery(
 
     // Primary source: surviving pi session file
     if (sessionFile && existsSync(sessionFile)) {
-      const stat = statSync(sessionFile, { throwIfNoEntry: false });
-      const fileSize = stat?.size ?? 0;
-      // Skip files that would blow up memory; fall back to activity log
-      if (fileSize <= MAX_JSONL_BYTES * 2) {
-        const raw = readFileSync(sessionFile, "utf-8");
-        const allEntries = parseJSONL(raw);
-        const sessionEntries = extractLastSession(allEntries);
+      // Try native JSONL parser first (handles arbitrary file sizes with constant memory)
+      const nativeResult = nativeParseJsonlTail(sessionFile, MAX_JSONL_BYTES);
+      if (nativeResult) {
+        const sessionEntries = extractLastSession(nativeResult.entries);
         trace = extractTrace(sessionEntries);
+      } else {
+        const stat = statSync(sessionFile, { throwIfNoEntry: false });
+        const fileSize = stat?.size ?? 0;
+        // Skip files that would blow up memory; fall back to activity log
+        if (fileSize <= MAX_JSONL_BYTES * 2) {
+          const raw = readFileSync(sessionFile, "utf-8");
+          const allEntries = parseJSONL(raw);
+          const sessionEntries = extractLastSession(allEntries);
+          trace = extractTrace(sessionEntries);
+        }
       }
     }
 
@@ -452,7 +460,16 @@ function readLastActivityLog(activityDir?: string): ExecutionTrace | null {
     if (files.length === 0) return null;
 
     const lastFile = files[files.length - 1]!;
-    const raw = readFileSync(join(activityDir, lastFile), "utf-8");
+    const filePath = join(activityDir, lastFile);
+
+    // Try native JSONL parser first
+    const nativeResult = nativeParseJsonlTail(filePath, MAX_JSONL_BYTES);
+    if (nativeResult) {
+      return extractTrace(nativeResult.entries);
+    }
+
+    // Fall back to JS parsing
+    const raw = readFileSync(filePath, "utf-8");
     return extractTrace(parseJSONL(raw));
   } catch {
     return null;
