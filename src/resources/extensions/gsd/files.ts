@@ -951,6 +951,128 @@ export async function appendOverride(basePath: string, change: string, appliedAt
   }
 }
 
+export async function appendKnowledge(
+  basePath: string,
+  type: "rule" | "pattern" | "lesson",
+  entry: string,
+  scope: string,
+): Promise<void> {
+  const knowledgePath = resolveGsdRootFile(basePath, "KNOWLEDGE");
+  const existing = await loadFile(knowledgePath);
+
+  if (existing) {
+    // Find the next ID for this type
+    const prefix = type === "rule" ? "K" : type === "pattern" ? "P" : "L";
+    const idPattern = new RegExp(`^\\| ${prefix}(\\d+)`, "gm");
+    let maxId = 0;
+    let match;
+    while ((match = idPattern.exec(existing)) !== null) {
+      const num = parseInt(match[1], 10);
+      if (num > maxId) maxId = num;
+    }
+    const nextId = `${prefix}${String(maxId + 1).padStart(3, "0")}`;
+
+    // Build the table row
+    let row: string;
+    if (type === "rule") {
+      row = `| ${nextId} | ${scope} | ${entry} | — | manual |`;
+    } else if (type === "pattern") {
+      row = `| ${nextId} | ${entry} | — | ${scope} |`;
+    } else {
+      row = `| ${nextId} | ${entry} | — | — | ${scope} |`;
+    }
+
+    // Find the right section and append after the table header
+    const sectionHeading = type === "rule" ? "## Rules" : type === "pattern" ? "## Patterns" : "## Lessons Learned";
+    const sectionIdx = existing.indexOf(sectionHeading);
+    if (sectionIdx !== -1) {
+      // Find the end of the table header row (the |---|...| line)
+      const afterHeading = existing.indexOf("\n", sectionIdx);
+      // Find the next section or end
+      const nextSection = existing.indexOf("\n## ", afterHeading + 1);
+      const insertPoint = nextSection !== -1 ? nextSection : existing.length;
+
+      // Insert row before the next section (or at end)
+      const before = existing.slice(0, insertPoint).trimEnd();
+      const after = existing.slice(insertPoint);
+      await saveFile(knowledgePath, before + "\n" + row + "\n" + after);
+    } else {
+      // Section not found — append at end
+      await saveFile(knowledgePath, existing.trimEnd() + "\n\n" + row + "\n");
+    }
+  } else {
+    // Create file from scratch with template header
+    const header = [
+      "# Project Knowledge",
+      "",
+      "Append-only register of project-specific rules, patterns, and lessons learned.",
+      "Agents read this before every unit. Add entries when you discover something worth remembering.",
+      "",
+    ].join("\n");
+
+    let content: string;
+    if (type === "rule") {
+      content = header + [
+        "## Rules",
+        "",
+        "| # | Scope | Rule | Why | Added |",
+        "|---|-------|------|-----|-------|",
+        `| K001 | ${scope} | ${entry} | — | manual |`,
+        "",
+        "## Patterns",
+        "",
+        "| # | Pattern | Where | Notes |",
+        "|---|---------|-------|-------|",
+        "",
+        "## Lessons Learned",
+        "",
+        "| # | What Happened | Root Cause | Fix | Scope |",
+        "|---|--------------|------------|-----|-------|",
+        "",
+      ].join("\n");
+    } else if (type === "pattern") {
+      content = header + [
+        "## Rules",
+        "",
+        "| # | Scope | Rule | Why | Added |",
+        "|---|-------|------|-----|-------|",
+        "",
+        "## Patterns",
+        "",
+        "| # | Pattern | Where | Notes |",
+        "|---|---------|-------|-------|",
+        `| P001 | ${entry} | — | ${scope} |`,
+        "",
+        "## Lessons Learned",
+        "",
+        "| # | What Happened | Root Cause | Fix | Scope |",
+        "|---|--------------|------------|-----|-------|",
+        "",
+      ].join("\n");
+    } else {
+      content = header + [
+        "## Rules",
+        "",
+        "| # | Scope | Rule | Why | Added |",
+        "|---|-------|------|-----|-------|",
+        "",
+        "## Patterns",
+        "",
+        "| # | Pattern | Where | Notes |",
+        "|---|---------|-------|-------|",
+        "",
+        "## Lessons Learned",
+        "",
+        "| # | What Happened | Root Cause | Fix | Scope |",
+        "|---|--------------|------------|-----|-------|",
+        `| L001 | ${entry} | — | — | ${scope} |`,
+        "",
+      ].join("\n");
+    }
+    await saveFile(knowledgePath, content);
+  }
+}
+
 export async function loadActiveOverrides(basePath: string): Promise<Override[]> {
   const overridesPath = resolveGsdRootFile(basePath, "OVERRIDES");
   const content = await loadFile(overridesPath);

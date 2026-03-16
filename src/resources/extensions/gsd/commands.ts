@@ -22,7 +22,7 @@ import {
   loadEffectiveGSDPreferences,
   resolveAllSkillReferences,
 } from "./preferences.js";
-import { loadFile, saveFile, appendOverride } from "./files.js";
+import { loadFile, saveFile, appendOverride, appendKnowledge } from "./files.js";
 import {
   formatDoctorIssuesForPrompt,
   formatDoctorReport,
@@ -58,12 +58,12 @@ function dispatchDoctorHeal(pi: ExtensionAPI, scope: string | undefined, reportT
 
 export function registerGSDCommand(pi: ExtensionAPI): void {
   pi.registerCommand("gsd", {
-    description: "GSD — Get Shit Done: /gsd next|auto|stop|pause|status|queue|history|undo|skip|export|cleanup|prefs|config|hooks|doctor|migrate|remote|steer",
+    description: "GSD — Get Shit Done: /gsd next|auto|stop|pause|status|queue|history|undo|skip|export|cleanup|prefs|config|hooks|doctor|migrate|remote|steer|knowledge",
     getArgumentCompletions: (prefix: string) => {
       const subcommands = [
         "next", "auto", "stop", "pause", "status", "queue", "discuss",
         "history", "undo", "skip", "export", "cleanup", "prefs",
-        "config", "hooks", "doctor", "migrate", "remote", "steer",
+        "config", "hooks", "doctor", "migrate", "remote", "steer", "knowledge",
       ];
       const parts = prefix.trim().split(/\s+/);
 
@@ -124,6 +124,13 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         return ["branches", "snapshots"]
           .filter((cmd) => cmd.startsWith(subPrefix))
           .map((cmd) => ({ value: `cleanup ${cmd}`, label: cmd }));
+      }
+
+      if (parts[0] === "knowledge" && parts.length <= 2) {
+        const subPrefix = parts[1] ?? "";
+        return ["rule", "pattern", "lesson"]
+          .filter((cmd) => cmd.startsWith(subPrefix))
+          .map((cmd) => ({ value: `knowledge ${cmd}`, label: cmd }));
       }
 
       if (parts[0] === "doctor") {
@@ -266,6 +273,15 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         return;
       }
 
+      if (trimmed.startsWith("knowledge ")) {
+        await handleKnowledge(trimmed.replace(/^knowledge\s+/, "").trim(), ctx);
+        return;
+      }
+      if (trimmed === "knowledge") {
+        ctx.ui.notify("Usage: /gsd knowledge <rule|pattern|lesson> <description>. Example: /gsd knowledge rule Use real DB for integration tests", "warning");
+        return;
+      }
+
       if (trimmed === "migrate" || trimmed.startsWith("migrate ")) {
         const { handleMigrate } = await import("./migrate/command.js");
         await handleMigrate(trimmed.replace(/^migrate\s*/, "").trim(), ctx, pi);
@@ -284,7 +300,7 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
       }
 
       ctx.ui.notify(
-        `Unknown: /gsd ${trimmed}. Use /gsd next|auto|stop|pause|status|queue|discuss|history|undo|skip <unit>|export|cleanup|prefs|config|hooks|doctor|migrate|remote|steer <change>.`,
+        `Unknown: /gsd ${trimmed}. Use /gsd next|auto|stop|pause|status|queue|discuss|history|undo|skip <unit>|export|cleanup|prefs|config|hooks|doctor|migrate|remote|steer <change>|knowledge <type> <entry>.`,
         "warning",
       );
     },
@@ -970,6 +986,35 @@ async function handleCleanupSnapshots(ctx: ExtensionCommandContext, basePath: st
   }
 
   ctx.ui.notify(`Pruned ${pruned} old snapshot refs. ${refs.length - pruned} remain.`, "success");
+}
+
+async function handleKnowledge(args: string, ctx: ExtensionCommandContext): Promise<void> {
+  const parts = args.split(/\s+/);
+  const typeArg = parts[0]?.toLowerCase();
+
+  if (!typeArg || !["rule", "pattern", "lesson"].includes(typeArg)) {
+    ctx.ui.notify(
+      "Usage: /gsd knowledge <rule|pattern|lesson> <description>\nExample: /gsd knowledge rule Use real DB for integration tests",
+      "warning",
+    );
+    return;
+  }
+
+  const entryText = parts.slice(1).join(" ").trim();
+  if (!entryText) {
+    ctx.ui.notify(`Usage: /gsd knowledge ${typeArg} <description>`, "warning");
+    return;
+  }
+
+  const type = typeArg as "rule" | "pattern" | "lesson";
+  const basePath = process.cwd();
+  const state = await deriveState(basePath);
+  const scope = state.activeMilestone?.id
+    ? `${state.activeMilestone.id}${state.activeSlice ? `/${state.activeSlice.id}` : ""}`
+    : "global";
+
+  await appendKnowledge(basePath, type, entryText, scope);
+  ctx.ui.notify(`Added ${type} to KNOWLEDGE.md: "${entryText}"`, "success");
 }
 
 async function handleSteer(change: string, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<void> {

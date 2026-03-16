@@ -47,10 +47,11 @@ import {
   resolveSlicePath, resolveSliceFile, resolveTaskFile, resolveTaskFiles, resolveTasksDir,
   relSliceFile, relSlicePath, relTaskFile,
   buildSliceFileName, buildMilestoneFileName, gsdRoot, resolveMilestonePath,
+  resolveGsdRootFile,
 } from "./paths.js";
 import { Key } from "@gsd/pi-tui";
 import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { shortcutDesc } from "../shared/terminal.js";
 import { Text } from "@gsd/pi-tui";
 import { pauseAutoForProviderError } from "./provider-error-pause.js";
@@ -272,6 +273,20 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
+    // Load project knowledge if available
+    let knowledgeBlock = "";
+    const knowledgePath = resolveGsdRootFile(process.cwd(), "KNOWLEDGE");
+    if (existsSync(knowledgePath)) {
+      try {
+        const content = readFileSync(knowledgePath, "utf-8").trim();
+        if (content) {
+          knowledgeBlock = `\n\n[PROJECT KNOWLEDGE — Rules, patterns, and lessons learned]\n\n${content}`;
+        }
+      } catch {
+        // File read error — skip knowledge injection
+      }
+    }
+
     // Detect skills installed during this auto-mode session
     let newSkillsBlock = "";
     if (hasSkillSnapshot()) {
@@ -307,7 +322,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     return {
-      systemPrompt: `${event.systemPrompt}\n\n[SYSTEM CONTEXT — GSD]\n\n${systemContent}${preferenceBlock}${newSkillsBlock}${worktreeBlock}`,
+      systemPrompt: `${event.systemPrompt}\n\n[SYSTEM CONTEXT — GSD]\n\n${systemContent}${preferenceBlock}${knowledgeBlock}${newSkillsBlock}${worktreeBlock}`,
       ...(injection
         ? {
           message: {
