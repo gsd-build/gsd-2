@@ -26,6 +26,7 @@ import { deriveState } from "./state.js";
 import { isAutoActive } from "./auto.js";
 import { loadPrompt } from "./prompt-loader.js";
 import { gsdRoot } from "./paths.js";
+import { getAutoWorktreePath } from "./auto-worktree.js";
 import { formatDuration } from "./history.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -52,6 +53,7 @@ interface ForensicReport {
   gsdVersion: string;
   timestamp: string;
   basePath: string;
+  worktreePath: string | null;
   activeMilestone: string | null;
   activeSlice: string | null;
   unitTraces: UnitTrace[];
@@ -143,14 +145,42 @@ async function buildForensicReport(basePath: string): Promise<ForensicReport> {
     activeSlice = state.activeSlice?.id ?? null;
   } catch { /* state derivation failure is non-fatal */ }
 
-  // 2. Scan activity logs (last 5)
-  const unitTraces = scanActivityLogs(basePath);
+  // 1b. Detect active auto-worktree (#724)
+  // When a milestone runs in a worktree, activity logs and artifacts live inside
+  // .gsd/worktrees/<MID>/.gsd/, not the project root's .gsd/. If we only scan
+  // the root, we report stale/missing data while the real work is in the worktree.
+  let effectivePath = basePath;
+  let worktreeActive = false;
+  if (activeMilestone) {
+    const wtPath = getAutoWorktreePath(basePath, activeMilestone);
+    if (wtPath) {
+      effectivePath = wtPath;
+      worktreeActive = true;
+    }
+  }
+
+  // 2. Scan activity logs (last 5) — prefer worktree logs when active
+  const worktreeTraces = worktreeActive ? scanActivityLogs(effectivePath) : [];
+  const rootTraces = scanActivityLogs(basePath);
+  // Merge: worktree traces first (more recent/relevant), then root traces
+  // that aren't duplicates (by unitType+unitId)
+  const seenTraceKeys = new Set(worktreeTraces.map(t => `${t.unitType}/${t.unitId}`));
+  const unitTraces = [
+    ...worktreeTraces,
+    ...rootTraces.filter(t => !seenTraceKeys.has(`${t.unitType}/${t.unitId}`)),
+  ].sort((a, b) => b.seq - a.seq).slice(0, 5);
 
   // 3. Load metrics
   const metrics = loadLedgerFromDisk(basePath);
 
-  // 4. Load completed keys
+  // 4. Load completed keys — check both root and worktree
   const completedKeys = loadCompletedKeys(basePath);
+  if (worktreeActive) {
+    const wtKeys = loadCompletedKeys(effectivePath);
+    for (const k of wtKeys) {
+      if (!completedKeys.includes(k)) completedKeys.push(k);
+    }
+  }
 
   // 5. Check crash lock
   const crashLock = readCrashLock(basePath);
@@ -191,7 +221,7 @@ async function buildForensicReport(basePath: string): Promise<ForensicReport> {
   if (metrics?.units) detectStuckLoops(metrics.units, anomalies);
   if (metrics?.units) detectCostSpikes(metrics.units, anomalies);
   detectTimeouts(unitTraces, anomalies);
-  detectMissingArtifacts(completedKeys, basePath, anomalies);
+  detectMissingArtifacts(completedKeys, basePath, anomalies, worktreeActive ? effectivePath : undefined);
   detectCrash(crashLock, anomalies);
   detectDoctorIssues(doctorIssues, anomalies);
   detectErrorTraces(unitTraces, anomalies);
@@ -200,6 +230,7 @@ async function buildForensicReport(basePath: string): Promise<ForensicReport> {
     gsdVersion,
     timestamp: new Date().toISOString(),
     basePath,
+    worktreePath: worktreeActive ? effectivePath : null,
     activeMilestone,
     activeSlice,
     unitTraces,
@@ -336,21 +367,25 @@ function detectTimeouts(traces: UnitTrace[], anomalies: ForensicAnomaly[]): void
   }
 }
 
-function detectMissingArtifacts(completedKeys: string[], basePath: string, anomalies: ForensicAnomaly[]): void {
+function detectMissingArtifacts(completedKeys: string[], basePath: string, anomalies: ForensicAnomaly[], worktreePath?: string): void {
   for (const key of completedKeys) {
     const slashIdx = key.indexOf("/");
     if (slashIdx === -1) continue;
     const unitType = key.slice(0, slashIdx);
     const unitId = key.slice(slashIdx + 1);
 
-    if (!verifyExpectedArtifact(unitType, unitId, basePath)) {
+    // Check worktree first (if active), then fall back to root (#724)
+    const foundInWorktree = worktreePath && verifyExpectedArtifact(unitType, unitId, worktreePath);
+    const foundInRoot = verifyExpectedArtifact(unitType, unitId, basePath);
+
+    if (!foundInWorktree && !foundInRoot) {
       anomalies.push({
         type: "missing-artifact",
         severity: "error",
         unitType,
         unitId,
         summary: `Completed key ${key} but artifact missing or invalid`,
-        details: `The unit is recorded as completed but verifyExpectedArtifact() returns false. The completion state is stale.`,
+        details: `The unit is recorded as completed but verifyExpectedArtifact() returns false${worktreePath ? " (checked both worktree and root)" : ""}. The completion state is stale.`,
       });
     }
   }
@@ -416,6 +451,7 @@ function saveForensicReport(basePath: string, report: ForensicReport, problemDes
     `**GSD Version:** ${report.gsdVersion}`,
     `**Active Milestone:** ${report.activeMilestone ?? "none"}`,
     `**Active Slice:** ${report.activeSlice ?? "none"}`,
+    `**Worktree:** ${report.worktreePath ? `active at \`${redact(report.worktreePath)}\`` : "none (root)"}`,
     ``,
     `## Problem Description`,
     ``,
@@ -559,7 +595,9 @@ function formatReportForPrompt(report: ForensicReport): string {
   sections.push(`### GSD Version: ${report.gsdVersion}`);
   sections.push(`### Active Milestone: ${report.activeMilestone ?? "none"}`);
   sections.push(`### Active Slice: ${report.activeSlice ?? "none"}`);
-
+  if (report.worktreePath) {
+    sections.push(`### Worktree: active at ${report.worktreePath}`);
+  }
   let result = sections.join("\n");
   if (result.length > MAX_BYTES) {
     result = result.slice(0, MAX_BYTES) + "\n\n[... truncated at 30KB ...]";
