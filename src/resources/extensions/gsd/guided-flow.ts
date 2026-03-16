@@ -52,8 +52,20 @@ export function checkAutoStartAfterDiscuss(): boolean {
   const { ctx, pi, basePath, milestoneId, step, waitFor } = pendingAutoStart;
 
   if (waitFor === "roadmap") {
+    // Gate 1: ROADMAP.md must exist — written by the plan-milestone workflow.
     const roadmapFile = resolveMilestoneFile(basePath, milestoneId, "ROADMAP");
     if (!roadmapFile) return false; // no roadmap yet — keep waiting
+
+    // Gate 2: STATE.md must exist — written as the final step of the plan-milestone
+    // workflow to signal successful session completion. Prevents premature auto-start
+    // if ROADMAP.md is written mid-session before the workflow has fully finished.
+    const stateFile = resolveGsdRootFile(basePath, "STATE");
+    if (!existsSync(stateFile)) return false; // planning session not yet finalized
+
+    // Gates 3-4 (multi-milestone completeness check + discussion manifest
+    // verification) are intentionally skipped: the plan-milestone workflow is
+    // single-milestone and produces neither a PROJECT.md milestone sequence
+    // nor a DISCUSSION-MANIFEST.json, so those gates are not applicable.
 
     pendingAutoStart = null;
     startAuto(ctx, pi, basePath, false, { step }).catch(() => {});
