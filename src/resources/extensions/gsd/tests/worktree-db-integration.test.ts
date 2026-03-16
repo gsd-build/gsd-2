@@ -76,7 +76,7 @@ async function main(): Promise<void> {
 
       // Commit so createAutoWorktree can copy planning artifacts
       run("git add .", tempDir);
-      run("git commit -m 'add gsd dir'", tempDir);
+      run('git commit -m "add gsd dir"', tempDir);
 
       // createAutoWorktree should copy the DB into the worktree
       const wtPath = createAutoWorktree(tempDir, "M004");
