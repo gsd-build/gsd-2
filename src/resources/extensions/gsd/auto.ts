@@ -293,6 +293,41 @@ export function isAutoPaused(): boolean {
   return paused;
 }
 
+/**
+ * Return the base path to use for the auto.lock file.
+ * Always uses the original project root (not the worktree) so that
+ * a second terminal can discover and stop a running auto-mode session.
+ */
+function lockBase(): string {
+  return originalBasePath || basePath;
+}
+
+/**
+ * Attempt to stop a running auto-mode session from a different process.
+ * Reads the lock file at the project root, checks if the PID is alive,
+ * and sends SIGTERM to gracefully stop it.
+ *
+ * Returns true if a remote session was found and signaled, false otherwise.
+ */
+export function stopAutoRemote(projectRoot: string): { found: boolean; pid?: number; error?: string } {
+  const lock = readCrashLock(projectRoot);
+  if (!lock) return { found: false };
+
+  if (!isLockProcessAlive(lock)) {
+    // Stale lock — clean it up
+    clearLock(projectRoot);
+    return { found: false };
+  }
+
+  // Send SIGTERM — the auto-mode process has a handler that clears the lock and exits
+  try {
+    process.kill(lock.pid, "SIGTERM");
+    return { found: true, pid: lock.pid };
+  } catch (err) {
+    return { found: false, error: (err as Error).message };
+  }
+}
+
 export function isStepMode(): boolean {
   return stepMode;
 }
@@ -371,7 +406,7 @@ function startDispatchGapWatchdog(ctx: ExtensionContext, pi: ExtensionAPI): void
 export async function stopAuto(ctx?: ExtensionContext, pi?: ExtensionAPI): Promise<void> {
   if (!active && !paused) return;
   clearUnitTimeout();
-  if (basePath) clearLock(basePath);
+  if (lockBase()) clearLock(lockBase());
   clearSkillSnapshot();
   _dispatching = false;
   _skipDepth = 0;
@@ -454,7 +489,7 @@ export async function stopAuto(ctx?: ExtensionContext, pi?: ExtensionAPI): Promi
 export async function pauseAuto(ctx?: ExtensionContext, _pi?: ExtensionAPI): Promise<void> {
   if (!active) return;
   clearUnitTimeout();
-  if (basePath) clearLock(basePath);
+  if (lockBase()) clearLock(lockBase());
 
   // Remove SIGTERM handler registered at auto-mode start
   deregisterSigtermHandler();
@@ -527,8 +562,8 @@ export async function startAuto(
       }
     }
 
-    // Re-register SIGTERM handler for the resumed session
-    registerSigtermHandler(basePath);
+    // Re-register SIGTERM handler for the resumed session (use original base for lock)
+    registerSigtermHandler(lockBase());
 
     ctx.ui.setStatus("gsd-auto", stepMode ? "next" : "auto");
     ctx.ui.setFooter(hideFooter);
@@ -695,8 +730,8 @@ export async function startAuto(
         gitService = new GitServiceImpl(basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
         ctx.ui.notify(`Created auto-worktree at ${wtPath}`, "info");
       }
-      // Re-register SIGTERM handler with the new basePath
-      registerSigtermHandler(basePath);
+      // Re-register SIGTERM handler with the original basePath (lock lives there)
+      registerSigtermHandler(originalBasePath);
     } catch (err) {
       // Worktree creation is non-fatal — continue in the project root.
       ctx.ui.notify(
@@ -952,7 +987,7 @@ export async function handleAgentEnd(
         return;
       }
       const sessionFile = ctx.sessionManager.getSessionFile();
-      writeLock(basePath, hookUnit.unitType, hookUnit.unitId, completedUnits.length, sessionFile);
+      writeLock(lockBase(), hookUnit.unitType, hookUnit.unitId, completedUnits.length, sessionFile);
       // Persist hook state so cycle counts survive crashes
       persistHookState(basePath);
 
@@ -1758,7 +1793,7 @@ async function dispatchNextUnit(
   // Pi appends entries incrementally via appendFileSync, so on crash the
   // session file survives with every tool call up to the crash point.
   const sessionFile = ctx.sessionManager.getSessionFile();
-  writeLock(basePath, unitType, unitId, completedUnits.length, sessionFile);
+  writeLock(lockBase(), unitType, unitId, completedUnits.length, sessionFile);
 
   // On crash recovery, prepend the full recovery briefing
   // On retry (stuck detection), prepend deep diagnostic from last attempt
