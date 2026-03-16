@@ -40,6 +40,9 @@ jobs:
       - name: Run integration tests
         run: npm run test:integration
 
+      - name: Check GSD milestones are complete
+        run: npm run check:milestones
+
   windows-portability:
     runs-on: windows-latest
 
