@@ -14,11 +14,10 @@ A user can run `gsd --web`, complete setup, and do the full GSD workflow in a sn
 - `src/cli.ts` has a real `--web` launch path that starts browser mode for the current cwd without opening the TUI.
 - `src/web/bridge-service.ts` plus `web/app/api/boot|session/command|session/events` expose a live same-origin browser bridge backed by real GSD session state.
 - Browser onboarding is live: required setup blocks the workspace, credentials validate through the browser, and bridge auth refresh keeps the first prompt on the current auth view.
-- The workspace store now drives real dashboard, roadmap, files, activity, terminal, focused-panel prompt handling, workflow controls, continuity, and recovery surfaces instead of mock data.
-- M001 is complete: assembled route/runtime/browser proof is green, the preserved skin is wired to live state/actions, and the milestone-close live browser acceptance bar has been cleared.
-- `launchWebMode` now keeps the parent launcher thin by skipping in-memory extension reload in the short-lived parent process, which materially reduced `gsd --web` startup time.
-- M002 is complete: browser slash commands now dispatch safely in web mode, current-project session browse/resume/rename/fork plus settings/auth/Git/shell controls are browser-native, dashboard/sidebar/roadmap/status/recovery surfaces stay fresh through targeted invalidation-driven updates instead of aggressive `/api/boot` polling, and packaged-host runtime proof covers refresh, reopen, daily-use browser workflows, and seeded interrupted-run recovery.
-- All currently scoped requirements are validated. Remaining follow-on scope is explicitly deferred (`R020`, `R021`, `R022`) until a new milestone or user request promotes it.
+- The workspace store drives real dashboard, roadmap, files, activity, terminal, focused-panel prompt handling, workflow controls, continuity, and recovery surfaces.
+- M001 is complete: assembled route/runtime/browser proof is green, the preserved skin is wired to live state/actions.
+- M002 is complete: browser slash commands dispatch safely, current-project session browse/resume/rename/fork plus settings/auth/Git/shell controls are browser-native, dashboard/sidebar/roadmap/status/recovery surfaces stay fresh through targeted invalidation-driven updates.
+- Upstream has diverged significantly (398 commits, v2.12→v2.21) with major new features: workflow visualizer, forensics, capture/triage, dynamic model routing, SQLite context store, branchless worktree architecture, 15+ new /gsd subcommands. These need merging and web UI surfaces.
 
 ## Architecture / Key Patterns
 
@@ -27,9 +26,12 @@ A user can run `gsd --web`, complete setup, and do the full GSD workflow in a sn
 - Existing RPC transport and extension UI request/response surface
 - Existing onboarding/auth flows in `src/onboarding.ts`
 - Web mode stays current-project scoped and browser-first
-- M001 preserves the existing Next.js skin and proves it live before reconsidering framework/runtime changes
+- Next.js skin in `web/` wired to live GSD data via same-origin API routes
 - Thin parent launcher → packaged same-origin host → one project-scoped bridge singleton → shared browser workspace store
 - Browser freshness and recovery use typed invalidation events plus narrow same-origin routes instead of broad `/api/boot` polling
+- Upstream decomposed `auto.ts` into focused modules (auto-dispatch, auto-recovery, auto-dashboard, auto-prompts, auto-supervisor, auto-worktree)
+- Upstream moved git operations to Rust via git2 crate (`native-git-bridge.ts`)
+- Upstream added SQLite-backed context store and metrics ledger
 
 ## Capability Contract
 
@@ -39,3 +41,4 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 
 - [x] M001: Web mode foundation — Browser-first `gsd --web` is real, integrated, and verified end-to-end.
 - [x] M002: Web parity and hardening — Browser daily-use parity, live freshness, recovery diagnostics, and packaged-host hardening proof are complete.
+- [ ] M003: Upstream sync and full web feature parity — Merge 398 upstream commits, surface all new features in web UI, achieve 1:1 TUI-web parity.

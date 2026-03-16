@@ -51,6 +51,9 @@ TODOS.md
 # ── GSD baseline (auto-generated) ──
 !.gsd/
 .gsd/*
+!.gsd/PROJECT.md
+!.gsd/REQUIREMENTS.md
+!.gsd/DECISIONS.md
 !.gsd/milestones/
 .gsd/milestones/*
 !.gsd/milestones/M002/
@@ -61,6 +64,8 @@ TODOS.md
 .gsd/milestones/M002/slices/S03/*
 !.gsd/milestones/M002/slices/S03/S03-SUMMARY.md
 !.gsd/milestones/M002/slices/S03/S03-UAT.md
+!.gsd/milestones/M003/
+!.gsd/milestones/M003/**
 
 # ── GSD baseline (auto-generated) ──
 .gsd/activity/

@@ -14,7 +14,126 @@ Guidelines:
 
 ## Active
 
-- none
+### R100 — Clean upstream merge with all conflicts resolved and build green
+- Class: core-capability
+- Status: active
+- Description: Merge 398 upstream commits (v2.12→v2.21) into the fork, resolve all 50 file conflicts, and achieve a green build (`npm run build`, `npm run build:web-host`).
+- Why it matters: Nothing else in M003 can proceed until the codebase is unified and compiling.
+- Source: user
+- Primary owning slice: M003/S01
+- Supporting slices: none
+- Validation: unmapped
+- Notes: Conflicts concentrated in GSD extension core (auto.ts decomposition), cli.ts, loader.ts, onboarding.ts, git-service.ts, types.ts. Web-only files (web/, src/web/) have zero conflicts.
+
+### R101 — Browser slash-command dispatch covers all upstream /gsd subcommands
+- Class: primary-user-loop
+- Status: active
+- Description: Every /gsd subcommand (help, next, auto, stop, pause, status, visualize, queue, quick, discuss, capture, triage, history, undo, skip, export, cleanup, mode, prefs, config, hooks, run-hook, skill-health, doctor, forensics, migrate, remote, steer, inspect, knowledge) dispatches correctly from the browser terminal — opening a surface, executing, or rejecting with clear guidance.
+- Why it matters: Silent command fallthrough was the highest-risk M002 gap; extending dispatch to new commands maintains that safety.
+- Source: user
+- Primary owning slice: M003/S02
+- Supporting slices: M003/S04, M003/S05, M003/S06, M003/S07
+- Validation: unmapped
+- Notes: Current dispatch handles ~12 commands. Upstream added ~15 more.
+
+### R102 — Workflow visualizer page with 7 tabbed sections
+- Class: core-capability
+- Status: active
+- Description: A dedicated browser page with tabbed sections for Progress, Deps, Metrics, Timeline, Agent activity, Changelog, and Export — backed by the upstream visualizer-data.ts aggregation.
+- Why it matters: The TUI visualizer is a primary workflow surface for understanding project state; web mode needs parity.
+- Source: user
+- Primary owning slice: M003/S03
+- Supporting slices: none
+- Validation: unmapped
+- Notes: Upstream has VisualizerData interface with milestones, phase, totals, byPhase, bySlice, byModel, units, criticalPath, agentActivity, changelog.
+
+### R103 — Forensics panel for auto-mode failure investigation
+- Class: failure-visibility
+- Status: active
+- Description: A browser panel showing forensic anomaly scanning results — stuck loops, cost spikes, timeouts, missing artifacts, crashes, doctor issues, and error traces from auto-mode runs.
+- Why it matters: Auto-mode failures need browser-visible investigation, not just TUI-only forensics.
+- Source: user
+- Primary owning slice: M003/S04
+- Supporting slices: M003/S02
+- Validation: unmapped
+- Notes: Upstream forensics.ts provides handleForensics() with ForensicReport containing anomalies, session traces, and doctor issues.
+
+### R104 — Doctor panel with health checks, auto-fix, and scope filtering
+- Class: failure-visibility
+- Status: active
+- Description: A browser panel showing doctor health check results (7 runtime checks), auto-fix actions, severity filtering, and scope selection.
+- Why it matters: Doctor is the primary health diagnostic tool; existing web recovery surface covers only basic recovery, not the full doctor report.
+- Source: user
+- Primary owning slice: M003/S04
+- Supporting slices: M003/S02
+- Validation: unmapped
+- Notes: Upstream doctor.ts provides runGSDDoctor() with DoctorReport containing issues, auto-fix capability, and scope filtering.
+
+### R105 — Skill health panel with telemetry, staleness, and heal suggestions
+- Class: operability
+- Status: active
+- Description: A browser panel showing per-skill pass/fail rates, token usage, staleness warnings, declining performance flags, and heal-skill suggestions.
+- Why it matters: Skill lifecycle management is a new upstream capability that needs browser visibility.
+- Source: user
+- Primary owning slice: M003/S04
+- Supporting slices: M003/S02
+- Validation: unmapped
+- Notes: Upstream skill-health.ts provides generateSkillHealthReport() with SkillHealthReport.
+
+### R106 — Knowledge and captures/triage dedicated page
+- Class: core-capability
+- Status: active
+- Description: A dedicated browser page showing KNOWLEDGE.md entries and CAPTURES.md with pending/triaged/resolved status, classification labels, and triage action controls.
+- Why it matters: Knowledge and captures are persistent project-context artifacts that need browser visibility and interaction.
+- Source: user
+- Primary owning slice: M003/S05
+- Supporting slices: M003/S02
+- Validation: unmapped
+- Notes: Upstream captures.ts provides loadAllCaptures/loadPendingCaptures/markCaptureResolved. KNOWLEDGE.md is an append-only register.
+
+### R107 — Extended settings surface for model routing, provider management, and budget visibility
+- Class: core-capability
+- Status: active
+- Description: The browser settings command surface shows dynamic model routing configuration, provider fallback chain management, budget allocation visibility, and all preference fields from the upstream preferences wizard.
+- Why it matters: Model/provider/budget management is a substantial new upstream capability with TUI-only surfaces.
+- Source: user
+- Primary owning slice: M003/S06
+- Supporting slices: M003/S02
+- Validation: unmapped
+- Notes: Upstream has model-router.ts, complexity-classifier.ts, context-budget.ts, fallback-resolver.ts, model-discovery.ts, provider-manager TUI component.
+
+### R108 — Browser surfaces for quick tasks, history, undo, steer, mode, hooks, config, inspect, export, cleanup
+- Class: core-capability
+- Status: active
+- Description: Each of the remaining /gsd subcommands opens a browser-native surface with appropriate controls, feedback, and state visibility.
+- Why it matters: Absolute parity means no command is TUI-only.
+- Source: user
+- Primary owning slice: M003/S07
+- Supporting slices: M003/S02
+- Validation: unmapped
+- Notes: These are individually smaller but collectively substantial. Some (quick, history, undo) have rich data views; others (hooks, run-hook, config) are simpler.
+
+### R109 — TUI-to-web 1:1 feature parity audit with gap closure
+- Class: quality-attribute
+- Status: active
+- Description: A systematic comparison of every TUI feature against the web UI, with any gaps found being closed in this slice.
+- Why it matters: Individual feature slices may miss edge cases or subtle TUI behaviors; a dedicated audit pass catches them.
+- Source: user
+- Primary owning slice: M003/S08
+- Supporting slices: M003/S03, M003/S04, M003/S05, M003/S06, M003/S07
+- Validation: unmapped
+- Notes: Audit should cover commands, surfaces, data visibility, interaction patterns, and error states.
+
+### R110 — Full test suite passes after merge and all new web UI work
+- Class: quality-attribute
+- Status: active
+- Description: npm run test:unit, npm run test:integration, npm run test:browser-tools, npm run build, and npm run build:web-host all pass clean after all M003 work.
+- Why it matters: The merge and new code must not break existing functionality.
+- Source: user
+- Primary owning slice: M003/S09
+- Supporting slices: M003/S01
+- Validation: unmapped
+- Notes: Test breakage likely comes from the merge (interface changes) and new web code (new route/store contracts).
 
 ## Validated
 
@@ -230,10 +349,21 @@ Guidelines:
 | R030 | anti-feature | out-of-scope | none | none | n/a |
 | R031 | anti-feature | out-of-scope | none | none | n/a |
 | R032 | constraint | out-of-scope | none | none | n/a |
+| R100 | core-capability | active | M003/S01 | none | unmapped |
+| R101 | primary-user-loop | active | M003/S02 | M003/S04, M003/S05, M003/S06, M003/S07 | unmapped |
+| R102 | core-capability | active | M003/S03 | none | unmapped |
+| R103 | failure-visibility | active | M003/S04 | M003/S02 | unmapped |
+| R104 | failure-visibility | active | M003/S04 | M003/S02 | unmapped |
+| R105 | operability | active | M003/S04 | M003/S02 | unmapped |
+| R106 | core-capability | active | M003/S05 | M003/S02 | unmapped |
+| R107 | core-capability | active | M003/S06 | M003/S02 | unmapped |
+| R108 | core-capability | active | M003/S07 | M003/S02 | unmapped |
+| R109 | quality-attribute | active | M003/S08 | M003/S03, M003/S04, M003/S05, M003/S06, M003/S07 | unmapped |
+| R110 | quality-attribute | active | M003/S09 | M003/S01 | unmapped |
 
 ## Coverage Summary
 
-- Active requirements: 0
-- Mapped to concrete M002 slices: 0
+- Active requirements: 11
+- Mapped to slices: 11
 - Validated: 11
 - Unmapped active requirements: 0
