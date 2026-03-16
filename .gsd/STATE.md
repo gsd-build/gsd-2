@@ -1,8 +1,8 @@
 # GSD State
 
 **Active Milestone:** M004: SQLite Context Store — Surgical Prompt Injection
-**Active Slice:** S01: DB Foundation + Schema
-**Phase:** executing
+**Active Slice:** S02: Markdown Importers + Auto-Migration
+**Phase:** execution
 **Requirements Status:** 13 active · 33 validated · 5 deferred · 4 out of scope
 
 ## Milestone Registry
@@ -18,4 +18,4 @@
 - None
 
 ## Next Action
-Execute T01 of S01 (Port gsd-db.ts and add types).
+Execute T01 of S02 (port md-importer.ts and test suite).
