@@ -2095,7 +2095,7 @@ async function dispatchNextUnit(
     if (inFlightTools.size > 0) {
       writeUnitRuntimeRecord(basePath, unitType, unitId, currentUnit.startedAt, {
         lastProgressAt: Date.now(),
-        lastProgressKind: "tool_in_flight",
+        lastProgressKind: "tool-in-flight",
       });
       return;
     }

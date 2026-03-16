@@ -212,15 +212,6 @@ export function validateQueueOrder(
       const cycle = hasCycle(mid, []);
       if (cycle) {
         const cycleStr = cycle.join(' → ');
-        if (cycle.length < 2) {
-          violations.push({
-            milestone: cycle[0],
-            dependsOn: `${cycle[0]} (self-loop)`,
-            type: 'circular',
-            message: `Circular dependency: ${cycleStr}`,
-          });
-          break; // one cycle report is enough
-        }
         violations.push({
           milestone: cycle[0],
           dependsOn: cycle[cycle.length - 2],
