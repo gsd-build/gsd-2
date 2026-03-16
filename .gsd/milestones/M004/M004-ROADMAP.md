@@ -79,7 +79,7 @@ This milestone is complete only when all are true:
 - [x] **S06: Structured LLM Tools + /gsd inspect** `risk:medium` `depends:[S03]`
   > After this: LLM writes decisions/requirements/summaries via tool calls that write to DB first, then regenerate markdown. `/gsd inspect` dumps schema version, table counts, recent entries.
 
-- [ ] **S07: Integration Verification + Polish** `risk:low` `depends:[S03,S04,S05,S06]`
+- [x] **S07: Integration Verification + Polish** `risk:low` `depends:[S03,S04,S05,S06]`
   > After this: Full auto-mode lifecycle test proves all subsystems compose correctly — migration → scoped queries → formatted prompts → token savings → re-import → round-trip. Edge cases (empty projects, partial migrations, fallback mode) verified. ≥30% savings confirmed on realistic fixture data.
 
 ## Boundary Map
