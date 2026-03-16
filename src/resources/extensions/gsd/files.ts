@@ -55,34 +55,6 @@ export function clearParseCache(): void {
   _parseCache.clear();
 }
 
-// ─── Parse Cache ──────────────────────────────────────────────────────────
-
-const CACHE_MAX = 50;
-
-/** Fast composite key: length + first/last 100 chars. Unique enough for distinct markdown files. */
-function cacheKey(content: string): string {
-  const len = content.length;
-  const head = content.slice(0, 100);
-  const tail = len > 100 ? content.slice(-100) : '';
-  return `${len}:${head}:${tail}`;
-}
-
-const _parseCache = new Map<string, unknown>();
-
-function cachedParse<T>(content: string, tag: string, parseFn: (c: string) => T): T {
-  const key = tag + '|' + cacheKey(content);
-  if (_parseCache.has(key)) return _parseCache.get(key) as T;
-  if (_parseCache.size >= CACHE_MAX) _parseCache.clear();
-  const result = parseFn(content);
-  _parseCache.set(key, result);
-  return result;
-}
-
-/** Clear the module-scoped parse cache. Call when files change on disk. */
-export function clearParseCache(): void {
-  _parseCache.clear();
-}
-
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 /**
