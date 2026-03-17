@@ -2063,6 +2063,12 @@ export class InteractiveMode {
 				this.handleThinkingCommand(arg);
 				return;
 			}
+			if (text === "/edit-mode" || text.startsWith("/edit-mode ")) {
+				const arg = text.startsWith("/edit-mode ") ? text.slice(11).trim() : undefined;
+				this.editor.setText("");
+				this.handleEditModeCommand(arg);
+				return;
+			}
 			if (text === "/debug") {
 				this.handleDebugCommand();
 				this.editor.setText("");
@@ -2889,6 +2895,27 @@ export class InteractiveMode {
 		}
 
 		this.showThinkingSelector();
+	}
+
+	private handleEditModeCommand(arg?: string): void {
+		const modes = ["standard", "hashline"] as const;
+
+		if (arg) {
+			const mode = arg.toLowerCase();
+			if (!modes.includes(mode as typeof modes[number])) {
+				this.showStatus(`Invalid edit mode "${arg}". Available: standard, hashline`);
+				return;
+			}
+			this.session.setEditMode(mode as "standard" | "hashline");
+			this.showStatus(`Edit mode: ${mode}${mode === "hashline" ? " (LINE#ID anchored edits)" : " (text-match edits)"}`);
+			return;
+		}
+
+		// Toggle
+		const current = this.session.editMode;
+		const next = current === "standard" ? "hashline" : "standard";
+		this.session.setEditMode(next);
+		this.showStatus(`Edit mode: ${next}${next === "hashline" ? " (LINE#ID anchored edits)" : " (text-match edits)"}`);
 	}
 
 	private showThinkingSelector(): void {
