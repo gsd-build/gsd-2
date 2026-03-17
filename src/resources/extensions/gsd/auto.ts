@@ -163,6 +163,10 @@ import {
   registerSigtermHandler as _registerSigtermHandler,
   deregisterSigtermHandler as _deregisterSigtermHandler,
   detectWorkingTreeActivity,
+  collectDiagnosticSignals,
+  classifyStuckVsActive,
+  buildDiagnosticSteeringContent,
+  formatDiagnosticReport,
 } from "./auto-supervisor.js";
 import { isDbAvailable } from "./gsd-db.js";
 import { hasPendingCaptures, loadPendingCaptures, countPendingCaptures } from "./captures.js";
@@ -3677,6 +3681,30 @@ async function recoverTimedOutUnit(
     await new Promise(r => setTimeout(r, backoffMs));
   }
 
+  // ── Diagnostic signal collection & classification ───────────────────
+  const diagnosticSignals = await collectDiagnosticSignals(
+    basePath, unitType, unitId, runtime,
+    inFlightTools.size, getOldestInFlightToolAgeMs(),
+  );
+  const diagnosticClassification = classifyStuckVsActive(diagnosticSignals);
+
+  // ── Active suppression (idle path only) ─────────────────────────────
+  // If diagnostics say the agent is actively working, suppress the false
+  // positive idle recovery. Hard timeout always proceeds regardless.
+  if (reason === "idle" && diagnosticClassification.classification === "active") {
+    writeUnitRuntimeRecord(basePath, unitType, unitId, currentUnit.startedAt, {
+      lastProgressAt: Date.now(),
+      lastProgressKind: "diagnostic-active",
+    });
+    ctx.ui.notify(
+      `Diagnostic: ${unitType} ${unitId} classified as active (confidence ${diagnosticClassification.confidence}). Resetting idle clock.`,
+      "info",
+    );
+    // Undo the recovery count bump since we're not actually recovering
+    unitRecoveryCount.set(recoveryKey, attemptNumber - 1);
+    return "recovered";
+  }
+
   if (unitType === "execute-task") {
     const status = await inspectExecuteTaskDurability(basePath, unitId);
     if (!status) return "paused";
@@ -3713,25 +3741,50 @@ async function recoverTimedOutUnit(
       });
 
       const steeringLines = isEscalation
-        ? [
-            `**FINAL ${reason === "idle" ? "IDLE" : "HARD TIMEOUT"} RECOVERY — last chance before this task is skipped.**`,
-            `You are still executing ${unitType} ${unitId}.`,
-            `Recovery attempt ${recoveryAttempts + 1} of ${maxRecoveryAttempts}.`,
-            `Current durability status: ${formatExecuteTaskRecoveryStatus(status)}.`,
-            "You MUST finish the durable output NOW, even if incomplete.",
-            "Write the task summary with whatever you have accomplished so far.",
-            "Mark the task [x] in the plan. Commit your work.",
-            "A partial summary is infinitely better than no summary.",
-          ]
-        : [
-            `**${reason === "idle" ? "IDLE" : "HARD TIMEOUT"} RECOVERY — do not stop.**`,
-            `You are still executing ${unitType} ${unitId}.`,
-            `Recovery attempt ${recoveryAttempts + 1} of ${maxRecoveryAttempts}.`,
-            `Current durability status: ${formatExecuteTaskRecoveryStatus(status)}.`,
-            "Do not keep exploring.",
-            "Immediately finish the required durable output for this unit.",
-            "If full completion is impossible, write the partial artifact/state needed for recovery and make the blocker explicit.",
-          ];
+        ? diagnosticClassification.classification !== "ambiguous"
+          ? [
+              `**FINAL ${reason === "idle" ? "IDLE" : "HARD TIMEOUT"} RECOVERY — last chance before this task is skipped.**`,
+              `You are still executing ${unitType} ${unitId}.`,
+              `Recovery attempt ${recoveryAttempts + 1} of ${maxRecoveryAttempts}.`,
+              `Current durability status: ${formatExecuteTaskRecoveryStatus(status)}.`,
+              "You MUST finish the durable output NOW, even if incomplete.",
+              "Write the task summary with whatever you have accomplished so far.",
+              "Mark the task [x] in the plan. Commit your work.",
+              "A partial summary is infinitely better than no summary.",
+              "",
+              buildDiagnosticSteeringContent(diagnosticClassification, unitType, unitId),
+            ]
+          : [
+              `**FINAL ${reason === "idle" ? "IDLE" : "HARD TIMEOUT"} RECOVERY — last chance before this task is skipped.**`,
+              `You are still executing ${unitType} ${unitId}.`,
+              `Recovery attempt ${recoveryAttempts + 1} of ${maxRecoveryAttempts}.`,
+              `Current durability status: ${formatExecuteTaskRecoveryStatus(status)}.`,
+              "You MUST finish the durable output NOW, even if incomplete.",
+              "Write the task summary with whatever you have accomplished so far.",
+              "Mark the task [x] in the plan. Commit your work.",
+              "A partial summary is infinitely better than no summary.",
+            ]
+        : diagnosticClassification.classification !== "ambiguous"
+          ? [
+              `**${reason === "idle" ? "IDLE" : "HARD TIMEOUT"} RECOVERY — do not stop.**`,
+              `You are still executing ${unitType} ${unitId}.`,
+              `Recovery attempt ${recoveryAttempts + 1} of ${maxRecoveryAttempts}.`,
+              `Current durability status: ${formatExecuteTaskRecoveryStatus(status)}.`,
+              "",
+              buildDiagnosticSteeringContent(diagnosticClassification, unitType, unitId),
+              "",
+              "Immediately finish the required durable output for this unit.",
+              "If full completion is impossible, write the partial artifact/state needed for recovery and make the blocker explicit.",
+            ]
+          : [
+              `**${reason === "idle" ? "IDLE" : "HARD TIMEOUT"} RECOVERY — do not stop.**`,
+              `You are still executing ${unitType} ${unitId}.`,
+              `Recovery attempt ${recoveryAttempts + 1} of ${maxRecoveryAttempts}.`,
+              `Current durability status: ${formatExecuteTaskRecoveryStatus(status)}.`,
+              "Do not keep exploring.",
+              "Immediately finish the required durable output for this unit.",
+              "If full completion is impossible, write the partial artifact/state needed for recovery and make the blocker explicit.",
+            ];
 
       pi.sendMessage(
         {
@@ -3772,6 +3825,8 @@ async function recoverTimedOutUnit(
     }
 
     // Fallback: couldn't write skip artifacts — pause as before.
+    // Write diagnostic report to disk for post-mortem inspection.
+    const reportPath = writeDiagnosticReport(basePath, diagnosticSignals, diagnosticClassification, unitType, unitId);
     writeUnitRuntimeRecord(basePath, unitType, unitId, currentUnit.startedAt, {
       phase: "paused",
       recovery: status,
@@ -3779,7 +3834,7 @@ async function recoverTimedOutUnit(
       lastRecoveryReason: reason,
     });
     ctx.ui.notify(
-      `${reason === "idle" ? "Idle" : "Timeout"} recovery check for ${unitType} ${unitId}: ${diagnostic}`,
+      `${reason === "idle" ? "Idle" : "Timeout"} recovery check for ${unitType} ${unitId}: ${diagnostic}${reportPath ? `. Diagnostic report: ${reportPath}` : ""}`,
       "warning",
     );
     return "paused";
@@ -3817,25 +3872,50 @@ async function recoverTimedOutUnit(
     });
 
     const steeringLines = isEscalation
-      ? [
-          `**FINAL ${reason === "idle" ? "IDLE" : "HARD TIMEOUT"} RECOVERY — last chance before skip.**`,
-          `You are still executing ${unitType} ${unitId}.`,
-          `Recovery attempt ${recoveryAttempts + 1} of ${maxRecoveryAttempts} — next failure skips this unit.`,
-          `Expected durable output: ${expected}.`,
-          "You MUST write the artifact file NOW, even if incomplete.",
-          "Write whatever you have — partial research, preliminary findings, best-effort analysis.",
-          "A partial artifact is infinitely better than no artifact.",
-          "If you are truly blocked, write the file with a BLOCKER section explaining why.",
-        ]
-      : [
-          `**${reason === "idle" ? "IDLE" : "HARD TIMEOUT"} RECOVERY — stay in auto-mode.**`,
-          `You are still executing ${unitType} ${unitId}.`,
-          `Recovery attempt ${recoveryAttempts + 1} of ${maxRecoveryAttempts}.`,
-          `Expected durable output: ${expected}.`,
-          "Stop broad exploration.",
-          "Write the required artifact now.",
-          "If blocked, write the partial artifact and explicitly record the blocker instead of going silent.",
-        ];
+      ? diagnosticClassification.classification !== "ambiguous"
+        ? [
+            `**FINAL ${reason === "idle" ? "IDLE" : "HARD TIMEOUT"} RECOVERY — last chance before skip.**`,
+            `You are still executing ${unitType} ${unitId}.`,
+            `Recovery attempt ${recoveryAttempts + 1} of ${maxRecoveryAttempts} — next failure skips this unit.`,
+            `Expected durable output: ${expected}.`,
+            "You MUST write the artifact file NOW, even if incomplete.",
+            "Write whatever you have — partial research, preliminary findings, best-effort analysis.",
+            "A partial artifact is infinitely better than no artifact.",
+            "If you are truly blocked, write the file with a BLOCKER section explaining why.",
+            "",
+            buildDiagnosticSteeringContent(diagnosticClassification, unitType, unitId),
+          ]
+        : [
+            `**FINAL ${reason === "idle" ? "IDLE" : "HARD TIMEOUT"} RECOVERY — last chance before skip.**`,
+            `You are still executing ${unitType} ${unitId}.`,
+            `Recovery attempt ${recoveryAttempts + 1} of ${maxRecoveryAttempts} — next failure skips this unit.`,
+            `Expected durable output: ${expected}.`,
+            "You MUST write the artifact file NOW, even if incomplete.",
+            "Write whatever you have — partial research, preliminary findings, best-effort analysis.",
+            "A partial artifact is infinitely better than no artifact.",
+            "If you are truly blocked, write the file with a BLOCKER section explaining why.",
+          ]
+      : diagnosticClassification.classification !== "ambiguous"
+        ? [
+            `**${reason === "idle" ? "IDLE" : "HARD TIMEOUT"} RECOVERY — stay in auto-mode.**`,
+            `You are still executing ${unitType} ${unitId}.`,
+            `Recovery attempt ${recoveryAttempts + 1} of ${maxRecoveryAttempts}.`,
+            `Expected durable output: ${expected}.`,
+            "",
+            buildDiagnosticSteeringContent(diagnosticClassification, unitType, unitId),
+            "",
+            "Write the required artifact now.",
+            "If blocked, write the partial artifact and explicitly record the blocker instead of going silent.",
+          ]
+        : [
+            `**${reason === "idle" ? "IDLE" : "HARD TIMEOUT"} RECOVERY — stay in auto-mode.**`,
+            `You are still executing ${unitType} ${unitId}.`,
+            `Recovery attempt ${recoveryAttempts + 1} of ${maxRecoveryAttempts}.`,
+            `Expected durable output: ${expected}.`,
+            "Stop broad exploration.",
+            "Write the required artifact now.",
+            "If blocked, write the partial artifact and explicitly record the blocker instead of going silent.",
+          ];
 
     pi.sendMessage(
       {
@@ -3875,12 +3955,38 @@ async function recoverTimedOutUnit(
   }
 
   // Fallback: couldn't resolve artifact path — pause as before.
+  // Write diagnostic report to disk for post-mortem inspection.
+  writeDiagnosticReport(basePath, diagnosticSignals, diagnosticClassification, unitType, unitId);
   writeUnitRuntimeRecord(basePath, unitType, unitId, currentUnit.startedAt, {
     phase: "paused",
     recoveryAttempts: recoveryAttempts + 1,
     lastRecoveryReason: reason,
   });
   return "paused";
+}
+
+/**
+ * Write a diagnostic report markdown file to .gsd/runtime/ for post-mortem inspection.
+ * Returns the written file path, or null if writing failed.
+ */
+function writeDiagnosticReport(
+  base: string,
+  signals: Awaited<ReturnType<typeof collectDiagnosticSignals>>,
+  classification: ReturnType<typeof classifyStuckVsActive>,
+  unitType: string,
+  unitId: string,
+): string | null {
+  try {
+    const runtimeDir = join(gsdRoot(base), "runtime");
+    mkdirSync(runtimeDir, { recursive: true });
+    const sanitized = `${unitType}-${unitId}`.replace(/[\/]/g, "-");
+    const filePath = join(runtimeDir, `diagnostic-${sanitized}.md`);
+    const report = formatDiagnosticReport(signals, classification, unitType, unitId);
+    writeFileSync(filePath, report, "utf-8");
+    return filePath;
+  } catch {
+    return null;
+  }
 }
 
 // Re-export recovery functions for external consumers
