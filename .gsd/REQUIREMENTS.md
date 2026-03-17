@@ -340,6 +340,17 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: n/a
 - Notes: Local host + local agent bridge is the expected shape.
 
+### R113 — A Chat Mode view in the browser workspace that renders the main GSD PTY session as a styled chat interface with markdown rendering, native TUI prompt components, workflow action buttons, and an auto-closing right panel for GSD phase actions.
+- Class: primary-user-loop
+- Status: active
+- Description: A Chat Mode view accessible from the sidebar (below Power Mode) that renders GSD sessions as chat bubbles with markdown, intercepts TUI prompts as native UI, provides workflow action buttons, and spawns/auto-closes action side panels.
+- Why it matters: Non-technical users cannot operate GSD through a raw terminal. A chat interface makes GSD accessible to a much broader audience without removing any functionality.
+- Source: user
+- Primary owning slice: M007/S02
+- Supporting slices: M007/S01, M007/S03, M007/S04
+- Validation: Chat Mode view renders, markdown displays correctly, TUI prompts function, action panels open and auto-close.
+- Notes: Additive — does not modify Power Mode or existing views.
+
 ## Traceability
 
 | ID | Class | Status | Primary owner | Supporting | Proof |
@@ -375,9 +386,11 @@ This file is the explicit capability and coverage contract for the project.
 | R111 | quality-attribute | active | M004/S01 | M004/S02 | unmapped |
 | R112 | quality-attribute | active | M004/S03 | none | unmapped |
 
+| R113 | primary-user-loop | active | M007/S02 | M007/S01, M007/S03, M007/S04 | unmapped |
+
 ## Coverage Summary
 
-- Active requirements: 3
-- Mapped to slices: 3
+- Active requirements: 4
+- Mapped to slices: 4
 - Validated: 22 (R001, R002, R003, R004, R005, R006, R007, R008, R009, R010, R011, R100, R101, R102, R103, R104, R105, R106, R107, R108, R109, R110)
 - Unmapped active requirements: 0
