@@ -57,6 +57,7 @@ import {
   useDevOverrides,
 } from "@/lib/dev-overrides"
 import { DoctorPanel, ForensicsPanel, SkillHealthPanel } from "./diagnostics-panels"
+import { KnowledgeCapturesPanel } from "./knowledge-captures-panel"
 import {
   formatCost,
   formatTokens,
@@ -306,6 +307,8 @@ export function CommandSurface() {
     loadForensicsDiagnostics,
     loadDoctorDiagnostics,
     loadSkillHealthDiagnostics,
+    loadKnowledgeData,
+    loadCapturesData,
     updateSessionBrowserState,
     loadSessionBrowser,
     renameSessionFromSurface,
@@ -380,6 +383,7 @@ export function CommandSurface() {
 
   // Auto-fetch diagnostics panels when their sections open
   const diagnostics = commandSurface.diagnostics
+  const knowledgeCaptures = commandSurface.knowledgeCaptures
   useEffect(() => {
     if (!commandSurface.open) return
     if (commandSurface.section === "gsd-forensics" && diagnostics.forensics.phase === "idle") {
@@ -388,6 +392,18 @@ export function CommandSurface() {
       void loadDoctorDiagnostics()
     } else if (commandSurface.section === "gsd-skill-health" && diagnostics.skillHealth.phase === "idle") {
       void loadSkillHealthDiagnostics()
+    } else if (
+      commandSurface.section === "gsd-knowledge" &&
+      knowledgeCaptures.knowledge.phase === "idle"
+    ) {
+      void loadKnowledgeData()
+      void loadCapturesData()
+    } else if (
+      (commandSurface.section === "gsd-capture" || commandSurface.section === "gsd-triage") &&
+      knowledgeCaptures.captures.phase === "idle"
+    ) {
+      void loadCapturesData()
+      void loadKnowledgeData()
     }
   }, [
     commandSurface.open,
@@ -395,9 +411,13 @@ export function CommandSurface() {
     diagnostics.forensics.phase,
     diagnostics.doctor.phase,
     diagnostics.skillHealth.phase,
+    knowledgeCaptures.knowledge.phase,
+    knowledgeCaptures.captures.phase,
     loadForensicsDiagnostics,
     loadDoctorDiagnostics,
     loadSkillHealthDiagnostics,
+    loadKnowledgeData,
+    loadCapturesData,
   ])
 
   useEffect(() => {
@@ -1939,6 +1959,9 @@ export function CommandSurface() {
       case "gsd-forensics": return <ForensicsPanel />
       case "gsd-doctor": return <DoctorPanel />
       case "gsd-skill-health": return <SkillHealthPanel />
+      case "gsd-knowledge": return <KnowledgeCapturesPanel initialTab="knowledge" />
+      case "gsd-capture": return <KnowledgeCapturesPanel initialTab="captures" />
+      case "gsd-triage": return <KnowledgeCapturesPanel initialTab="captures" />
       default:
         // GSD subcommand surfaces — generic placeholder (S02)
         if (commandSurface.section?.startsWith("gsd-")) {

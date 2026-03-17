@@ -37,11 +37,13 @@ import {
   type CommandSurfaceSessionStats,
   type CommandSurfaceTarget,
   type CommandSurfaceThinkingLevel,
+  type CommandSurfaceKnowledgeCapturesState,
   type WorkspaceCommandSurfaceState,
   type WorkspaceRecoveryDiagnostics,
   type WorkspaceRecoverySummary,
 } from "./command-surface-contract"
 import type { DoctorFixResult, DoctorReport, ForensicReport, SkillHealthReport } from "./diagnostics-types"
+import type { KnowledgeData, CapturesData, CaptureResolveRequest, CaptureResolveResult } from "./knowledge-captures-types"
 import { isGitSummaryResponse, type GitSummaryResponse } from "./git-summary-contract"
 import type {
   SessionBrowserNameFilter,
@@ -2202,6 +2204,30 @@ export class GSDWorkspaceStore {
     })
   }
 
+  private patchKnowledgeCapturesState(patch: Partial<CommandSurfaceKnowledgeCapturesState>): void {
+    this.patchState({
+      commandSurface: {
+        ...this.state.commandSurface,
+        knowledgeCaptures: { ...this.state.commandSurface.knowledgeCaptures, ...patch },
+      },
+    })
+  }
+
+  private patchKnowledgeCapturesPhaseState<K extends "knowledge" | "captures">(
+    key: K,
+    patch: Partial<CommandSurfaceDiagnosticsPhaseState<K extends "knowledge" ? KnowledgeData : CapturesData>>,
+  ): void {
+    this.patchState({
+      commandSurface: {
+        ...this.state.commandSurface,
+        knowledgeCaptures: {
+          ...this.state.commandSurface.knowledgeCaptures,
+          [key]: { ...this.state.commandSurface.knowledgeCaptures[key], ...patch },
+        },
+      },
+    })
+  }
+
   loadForensicsDiagnostics = async (): Promise<ForensicReport | null> => {
     this.patchDiagnosticsPhaseState("forensics", { phase: "loading", error: null })
     try {
@@ -2283,6 +2309,71 @@ export class GSDWorkspaceStore {
     } catch (error) {
       const message = normalizeClientError(error)
       this.patchDiagnosticsPhaseState("skillHealth", { phase: "error", error: message })
+      return null
+    }
+  }
+
+  loadKnowledgeData = async (): Promise<KnowledgeData | null> => {
+    this.patchKnowledgeCapturesPhaseState("knowledge", { phase: "loading", error: null })
+    try {
+      const response = await fetch("/api/knowledge", { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
+      const payload = await response.json().catch(() => null)
+      if (!response.ok || !payload) {
+        const message = payload?.error ?? `Knowledge request failed with ${response.status}`
+        this.patchKnowledgeCapturesPhaseState("knowledge", { phase: "error", error: message })
+        return null
+      }
+      this.patchKnowledgeCapturesPhaseState("knowledge", { phase: "loaded", data: payload as KnowledgeData, lastLoadedAt: new Date().toISOString() })
+      return payload as KnowledgeData
+    } catch (error) {
+      const message = normalizeClientError(error)
+      this.patchKnowledgeCapturesPhaseState("knowledge", { phase: "error", error: message })
+      return null
+    }
+  }
+
+  loadCapturesData = async (): Promise<CapturesData | null> => {
+    this.patchKnowledgeCapturesPhaseState("captures", { phase: "loading", error: null })
+    try {
+      const response = await fetch("/api/captures", { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
+      const payload = await response.json().catch(() => null)
+      if (!response.ok || !payload) {
+        const message = payload?.error ?? `Captures request failed with ${response.status}`
+        this.patchKnowledgeCapturesPhaseState("captures", { phase: "error", error: message })
+        return null
+      }
+      this.patchKnowledgeCapturesPhaseState("captures", { phase: "loaded", data: payload as CapturesData, lastLoadedAt: new Date().toISOString() })
+      return payload as CapturesData
+    } catch (error) {
+      const message = normalizeClientError(error)
+      this.patchKnowledgeCapturesPhaseState("captures", { phase: "error", error: message })
+      return null
+    }
+  }
+
+  resolveCaptureAction = async (request: CaptureResolveRequest): Promise<CaptureResolveResult | null> => {
+    this.patchKnowledgeCapturesState({ resolveRequest: { pending: true, lastError: null, lastResult: null } })
+    try {
+      const response = await fetch("/api/captures", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(request),
+      })
+      const payload = await response.json().catch(() => null)
+      if (!response.ok || !payload) {
+        const message = payload?.error ?? `Capture resolve failed with ${response.status}`
+        this.patchKnowledgeCapturesState({ resolveRequest: { pending: false, lastError: message, lastResult: null } })
+        return null
+      }
+      const result = payload as CaptureResolveResult
+      this.patchKnowledgeCapturesState({ resolveRequest: { pending: false, lastError: null, lastResult: result } })
+      // Auto-reload captures after successful resolve
+      void this.loadCapturesData()
+      return result
+    } catch (error) {
+      const message = normalizeClientError(error)
+      this.patchKnowledgeCapturesState({ resolveRequest: { pending: false, lastError: message, lastResult: null } })
       return null
     }
   }
@@ -4668,6 +4759,9 @@ export function useGSDWorkspaceActions(): Pick<
   | "loadDoctorDiagnostics"
   | "applyDoctorFixes"
   | "loadSkillHealthDiagnostics"
+  | "loadKnowledgeData"
+  | "loadCapturesData"
+  | "resolveCaptureAction"
   | "updateSessionBrowserState"
   | "loadSessionBrowser"
   | "renameSessionFromSurface"
@@ -4718,6 +4812,9 @@ export function useGSDWorkspaceActions(): Pick<
     loadDoctorDiagnostics: store.loadDoctorDiagnostics,
     applyDoctorFixes: store.applyDoctorFixes,
     loadSkillHealthDiagnostics: store.loadSkillHealthDiagnostics,
+    loadKnowledgeData: store.loadKnowledgeData,
+    loadCapturesData: store.loadCapturesData,
+    resolveCaptureAction: store.resolveCaptureAction,
     updateSessionBrowserState: store.updateSessionBrowserState,
     loadSessionBrowser: store.loadSessionBrowser,
     renameSessionFromSurface: store.renameSessionFromSurface,

@@ -283,6 +283,14 @@ This task modifies three existing files (`command-surface-contract.ts`, `gsd-wor
 - `web/components/gsd/diagnostics-panels.tsx` — reference for UI patterns (DO NOT IMPORT FROM — the shared helpers are not exported; re-implement lightweight equivalents)
 - `web/components/gsd/command-surface.tsx` — existing command surface with diagnostics useEffect pattern (line ~385) and renderSection switch (line ~1939) — modify to wire panel
 
+## Observability Impact
+
+- **State signals:** `commandSurface.knowledgeCaptures.knowledge.phase` and `commandSurface.knowledgeCaptures.captures.phase` transition through `idle → loading → loaded/error` — inspectable via React DevTools or `useGSDWorkspaceState()` in browser console
+- **Resolve state:** `commandSurface.knowledgeCaptures.resolveRequest.pending` / `.lastError` / `.lastResult` track triage action lifecycle
+- **Auto-load triggers:** Opening `gsd-knowledge`, `gsd-capture`, or `gsd-triage` sections fires data fetch when phase is `idle` — visible as network requests to `/api/knowledge` and `/api/captures`
+- **Failure visibility:** Phase `"error"` with error string in store state; panel renders inline error message with retry button
+- **Action wiring:** Three new entries in `ActionKey` union and `useGSDWorkspaceActions` hook — `loadKnowledgeData`, `loadCapturesData`, `resolveCaptureAction`
+
 ## Expected Output
 
 - `web/lib/command-surface-contract.ts` — modified with `CommandSurfaceKnowledgeCapturesState`, `knowledgeCaptures` in `WorkspaceCommandSurfaceState`

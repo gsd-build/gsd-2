@@ -1,5 +1,6 @@
 import type { BrowserSlashCommandDispatchResult, BrowserSlashCommandSurface } from "./browser-slash-command-dispatch"
 import type { DoctorFixResult, DoctorReport, ForensicReport, SkillHealthReport } from "./diagnostics-types"
+import type { KnowledgeData, CapturesData, CaptureResolveResult } from "./knowledge-captures-types"
 import type { GitSummaryResponse } from "./git-summary-contract"
 import type {
   SessionBrowserNameFilter,
@@ -372,6 +373,28 @@ export function createInitialDiagnosticsState(): CommandSurfaceDiagnosticsState 
   }
 }
 
+// ─── Knowledge/Captures panel state ──────────────────────────────────────────
+
+export interface CommandSurfaceKnowledgeCapturesResolveState {
+  pending: boolean
+  lastError: string | null
+  lastResult: CaptureResolveResult | null
+}
+
+export interface CommandSurfaceKnowledgeCapturesState {
+  knowledge: CommandSurfaceDiagnosticsPhaseState<KnowledgeData>
+  captures: CommandSurfaceDiagnosticsPhaseState<CapturesData>
+  resolveRequest: CommandSurfaceKnowledgeCapturesResolveState
+}
+
+export function createInitialKnowledgeCapturesState(): CommandSurfaceKnowledgeCapturesState {
+  return {
+    knowledge: createInitialDiagnosticsPhaseState<KnowledgeData>(),
+    captures: createInitialDiagnosticsPhaseState<CapturesData>(),
+    resolveRequest: { pending: false, lastError: null, lastResult: null },
+  }
+}
+
 export interface WorkspaceCommandSurfaceState {
   open: boolean
   activeSurface: BrowserSlashCommandSurface | null
@@ -389,6 +412,7 @@ export interface WorkspaceCommandSurfaceState {
   gitSummary: CommandSurfaceGitSummaryState
   recovery: CommandSurfaceRecoveryState
   diagnostics: CommandSurfaceDiagnosticsState
+  knowledgeCaptures: CommandSurfaceKnowledgeCapturesState
   sessionBrowser: CommandSurfaceSessionBrowserState
   resumeRequest: CommandSurfaceSessionMutationState
   renameRequest: CommandSurfaceSessionMutationState
@@ -564,6 +588,7 @@ export function createInitialCommandSurfaceState(): WorkspaceCommandSurfaceState
     gitSummary: createInitialCommandSurfaceGitSummaryState(),
     recovery: createInitialCommandSurfaceRecoveryState(),
     diagnostics: createInitialDiagnosticsState(),
+    knowledgeCaptures: createInitialKnowledgeCapturesState(),
     sessionBrowser: createInitialCommandSurfaceSessionBrowserState(),
     resumeRequest: createInitialCommandSurfaceSessionMutationState(),
     renameRequest: createInitialCommandSurfaceSessionMutationState(),
@@ -773,6 +798,7 @@ export function openCommandSurfaceState(
     gitSummary: createInitialCommandSurfaceGitSummaryState(),
     recovery: createInitialCommandSurfaceRecoveryState(),
     diagnostics: createInitialDiagnosticsState(),
+    knowledgeCaptures: createInitialKnowledgeCapturesState(),
     sessionBrowser: buildInitialSessionBrowserState(request),
     resumeRequest: createInitialCommandSurfaceSessionMutationState(),
     renameRequest: createInitialCommandSurfaceSessionMutationState(),
