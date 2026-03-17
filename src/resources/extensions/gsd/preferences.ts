@@ -261,6 +261,7 @@ export function loadEffectiveGSDPreferences(): LoadedGSDPreferences | null {
 }
 
 // ─── Skill Reference Resolution ───────────────────────────────────────────────
+// Focused re-exports available via ./preferences-skills.js
 
 export interface SkillResolution {
   /** The original reference from preferences (bare name or path). */
@@ -546,6 +547,9 @@ export function getIsolationMode(): "none" | "worktree" | "branch" {
   if (prefs?.isolation === "branch") return "branch";
   return "worktree"; // default
 }
+
+// ─── Model Resolution ─────────────────────────────────────────────────────────
+// Focused re-exports available via ./preferences-models.js
 
 /**
  * Resolve which model ID to use for a given auto-mode unit type.
@@ -1388,6 +1392,9 @@ function mergePostUnitHooks(
   }
   return merged.length > 0 ? merged : undefined;
 }
+
+// ─── Hook Resolution ──────────────────────────────────────────────────────────
+// Focused re-exports available via ./preferences-hooks.js
 
 /**
  * Resolve enabled post-unit hooks from effective preferences.
