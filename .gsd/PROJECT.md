@@ -39,7 +39,7 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 
 ## Milestone Sequence
 
-- [ ] M001: Verification Enforcement — no task completes without machine-readable proof
+- 🔄 M001: Verification Enforcement — S01 complete (gate fires, commands discovered, 28 tests). S02–S05 remaining.
 - [ ] M002: Executable UAT — eliminate human pauses for automatable checks
 - [ ] M003: Operational Automation — git push, draft PR, deploy+verify with Vercel
 - [ ] M004: Supervisor Upgrade — bounded diagnostic reasoning for failure recovery

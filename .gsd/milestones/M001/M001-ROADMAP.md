@@ -58,7 +58,7 @@ This milestone is complete only when all are true:
 
 ## Slices
 
-- [ ] **S01: Built-in Verification Gate** `risk:high` `depends:[]`
+- [x] **S01: Built-in Verification Gate** `risk:high` `depends:[]`
   > After this: After execute-task completes, typecheck/lint/test runs automatically via a built-in gate. Task is blocked until commands pass. Evidence of pass/fail is logged to stdout.
 
 - [ ] **S02: Structured Evidence Format** `risk:medium` `depends:[S01]`
