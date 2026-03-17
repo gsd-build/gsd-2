@@ -309,7 +309,7 @@ export async function startParallel(
       const worker: WorkerInfo = {
         milestoneId: mid,
         title: mid,
-        pid: process.pid,
+        pid: 0,  // placeholder — real PID set by spawnWorker()
         process: null,
         worktreePath: wtPath,
         startedAt: now,
@@ -320,28 +320,24 @@ export async function startParallel(
 
       state.workers.set(mid, worker);
 
-      // Write initial session status
-      const sessionStatus: SessionStatus = {
+      // Spawn BEFORE writing session status so the file gets the real worker PID.
+      const spawned = spawnWorker(basePath, mid);
+      if (!spawned) {
+        worker.state = "error";
+      }
+
+      // Write session status with real PID (or 0 if spawn failed)
+      writeSessionStatus(basePath, {
         milestoneId: mid,
         pid: worker.pid,
-        state: "running",
+        state: worker.state,
         currentUnit: null,
         completedUnits: 0,
         cost: 0,
         lastHeartbeat: now,
         startedAt: now,
         worktreePath: wtPath,
-      };
-      writeSessionStatus(basePath, sessionStatus);
-
-      // Attempt to spawn the worker process.
-      // Spawning may fail if the CLI binary is not available (e.g., in tests).
-      // The worker is still tracked and can be spawned later via spawnWorker().
-      const spawned = spawnWorker(basePath, mid);
-      if (!spawned) {
-        // Worker tracked but not yet running a process.
-        // State stays "running" so coordinator can retry or user can investigate.
-      }
+      });
 
       started.push(mid);
     } catch (err) {
@@ -491,7 +487,7 @@ export function spawnWorker(
       w.state = "error";
     }
 
-    // Update session status
+    // Update session status and persist orchestrator state for crash recovery
     writeSessionStatus(basePath, {
       milestoneId,
       pid: w.pid,
@@ -503,6 +499,7 @@ export function spawnWorker(
       startedAt: w.startedAt,
       worktreePath: w.worktreePath,
     });
+    persistState(basePath);
   });
 
   return true;
