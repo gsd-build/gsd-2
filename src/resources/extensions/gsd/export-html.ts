@@ -523,17 +523,20 @@ function buildTokenBreakdown(tokens: { input: number; output: number; cacheRead:
     </div>`;
 }
 
-interface BarEntry { label: string; value: number; display: string; sub?: string }
+interface BarEntry { label: string; value: number; display: string; sub?: string; color?: number }
+
+const CHART_COLORS = 6;
 
 function buildBarChart(title: string, entries: BarEntry[]): string {
   if (entries.length === 0) return '';
   const max = Math.max(...entries.map(e => e.value), 1);
-  const rows = entries.map(e => {
+  const rows = entries.map((e, i) => {
     const pct = (e.value / max) * 100;
+    const ci = e.color ?? i;
     return `
       <div class="bar-row">
         <div class="bar-lbl">${esc(truncStr(e.label, 22))}</div>
-        <div class="bar-track"><div class="bar-fill" style="width:${pct.toFixed(1)}%"></div></div>
+        <div class="bar-track"><div class="bar-fill bar-c${ci % CHART_COLORS}" style="width:${pct.toFixed(1)}%"></div></div>
         <div class="bar-val">${esc(e.display)}</div>
       </div>
       ${e.sub ? `<div class="bar-sub">${esc(e.sub)}</div>` : ''}`;
@@ -546,10 +549,16 @@ function buildBarChart(title: string, entries: BarEntry[]): string {
 function buildTimelineSection(data: VisualizerData): string {
   if (data.units.length === 0) return section('timeline', 'Timeline', '<p class="empty">No units executed yet.</p>');
 
-  const rows = [...data.units].sort((a, b) => a.startedAt - b.startedAt).map((u, i) => {
+  const sorted = [...data.units].sort((a, b) => a.startedAt - b.startedAt);
+  const maxCost = Math.max(...sorted.map(u => u.cost), 0.01);
+
+  const rows = sorted.map((u, i) => {
     const dur = u.finishedAt > 0 ? formatDuration(u.finishedAt - u.startedAt) : 'running';
+    // Cost heatmap: subtle red background for expensive rows
+    const intensity = Math.min(u.cost / maxCost, 1);
+    const heatStyle = intensity > 0.15 ? ` style="background:rgba(239,68,68,${(intensity * 0.15).toFixed(3)})"` : '';
     return `
-      <tr>
+      <tr${heatStyle}>
         <td class="muted">${i + 1}</td>
         <td class="mono">${esc(u.type)}</td>
         <td class="mono muted">${esc(u.id)}</td>
@@ -780,7 +789,11 @@ const CSS = `
   --border-1:#2b2e38;--border-2:#3b3f4c;
   --text-0:#ededef;--text-1:#a1a1aa;--text-2:#71717a;
   --accent:#5e6ad2;--accent-subtle:rgba(94,106,210,.12);
-  --ok:#22c55e;--warn:#ef4444;--caution:#eab308;
+  --ok:#22c55e;--ok-subtle:rgba(34,197,94,.12);--warn:#ef4444;--caution:#eab308;
+  /* Chart palette — 6 hues for bar charts */
+  --c0:#5e6ad2;--c1:#e5796d;--c2:#14b8a6;--c3:#a78bfa;--c4:#f59e0b;--c5:#10b981;
+  /* Token breakdown — 4 distinct hues */
+  --tk-input:#5e6ad2;--tk-output:#e5796d;--tk-cache-r:#2dd4bf;--tk-cache-w:#64748b;
   --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
   --mono:'JetBrains Mono','Fira Code',ui-monospace,SFMono-Regular,monospace;
 }
@@ -800,7 +813,7 @@ code{font-family:var(--mono);font-size:12px;background:var(--bg-3);padding:1px 5
 /* Status dots — geometric, no emoji */
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0;vertical-align:middle}
 .dot-sm{width:6px;height:6px}
-.dot-complete{background:var(--text-2)}
+.dot-complete{background:var(--ok);opacity:.6}
 .dot-active{background:var(--accent)}
 .dot-pending{background:transparent;border:1.5px solid var(--border-2)}
 
@@ -913,7 +926,7 @@ h3{font-size:13px;font-weight:600;color:var(--text-1);margin:20px 0 8px}
 .edge{fill:none;stroke:var(--border-2);stroke-width:1.5}
 .edge-crit{stroke:var(--accent);stroke-width:2}
 .node rect{fill:var(--bg-2);stroke:var(--border-2);stroke-width:1}
-.n-done rect{fill:var(--bg-3);stroke:var(--text-2)}
+.n-done rect{fill:var(--ok-subtle);stroke:rgba(34,197,94,.4)}
 .n-active rect{fill:var(--accent-subtle);stroke:var(--accent)}
 .n-crit rect{stroke:var(--accent)!important;stroke-width:1.5!important}
 .n-id{font-family:var(--mono);font-size:10px;fill:var(--text-1);font-weight:600;text-anchor:middle}
@@ -924,10 +937,10 @@ h3{font-size:13px;font-weight:600;color:var(--text-1);margin:20px 0 8px}
 .token-block{background:var(--bg-1);border:1px solid var(--border-1);border-radius:4px;padding:14px;margin-bottom:16px}
 .token-bar{display:flex;height:16px;border-radius:2px;overflow:hidden;gap:1px;margin-bottom:8px}
 .tseg{height:100%;min-width:2px}
-.seg-1{background:var(--accent)}
-.seg-2{background:var(--text-2)}
-.seg-3{background:rgba(94,106,210,.4)}
-.seg-4{background:var(--border-2)}
+.seg-1{background:var(--tk-input)}
+.seg-2{background:var(--tk-output)}
+.seg-3{background:var(--tk-cache-r)}
+.seg-4{background:var(--tk-cache-w)}
 .token-legend{display:flex;flex-wrap:wrap;gap:12px}
 .leg-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-2)}
 .leg-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0}
@@ -937,7 +950,9 @@ h3{font-size:13px;font-weight:600;color:var(--text-1);margin:20px 0 8px}
 .bar-row{display:grid;grid-template-columns:120px 1fr 68px;align-items:center;gap:6px;margin-bottom:2px}
 .bar-lbl{font-size:12px;color:var(--text-2);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bar-track{height:14px;background:var(--bg-3);border-radius:2px;overflow:hidden}
-.bar-fill{height:100%;background:var(--accent);border-radius:2px}
+.bar-fill{height:100%;border-radius:2px;background:var(--c0)}
+.bar-c0{background:var(--c0)}.bar-c1{background:var(--c1)}.bar-c2{background:var(--c2)}
+.bar-c3{background:var(--c3)}.bar-c4{background:var(--c4)}.bar-c5{background:var(--c5)}
 .bar-val{font-size:11px;font-variant-numeric:tabular-nums;color:var(--text-1)}
 .bar-sub{font-size:10px;color:var(--text-2);padding-left:128px;margin-bottom:6px}
 
@@ -960,7 +975,7 @@ footer{border-top:1px solid var(--border-1);padding:20px 32px;margin-top:40px}
 @media print{
   header,nav.toc{position:static}
   body{background:#fff;color:#1a1a1a}
-  :root{--bg-0:#fff;--bg-1:#fafafa;--bg-2:#f5f5f5;--bg-3:#ebebeb;--border-1:#e5e5e5;--border-2:#d4d4d4;--text-0:#1a1a1a;--text-1:#525252;--text-2:#a3a3a3;--accent:#4f46e5}
+  :root{--bg-0:#fff;--bg-1:#fafafa;--bg-2:#f5f5f5;--bg-3:#ebebeb;--border-1:#e5e5e5;--border-2:#d4d4d4;--text-0:#1a1a1a;--text-1:#525252;--text-2:#a3a3a3;--accent:#4f46e5;--ok:#16a34a;--ok-subtle:rgba(22,163,74,.08);--c0:#4f46e5;--c1:#dc2626;--c2:#0d9488;--c3:#7c3aed;--c4:#d97706;--c5:#059669;--tk-input:#4f46e5;--tk-output:#dc2626;--tk-cache-r:#0d9488;--tk-cache-w:#64748b}
   section{page-break-inside:avoid}
   .table-scroll{overflow:visible}
 }
