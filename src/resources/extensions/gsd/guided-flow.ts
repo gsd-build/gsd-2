@@ -19,6 +19,7 @@ import {
   gsdRoot, milestonesDir, resolveMilestoneFile, resolveMilestonePath,
   resolveSliceFile, resolveSlicePath, resolveGsdRootFile, relGsdRootFile,
   relMilestoneFile, relSliceFile, relSlicePath,
+  clearPathCache,
 } from "./paths.js";
 import { randomInt } from "node:crypto";
 import { join } from "node:path";
@@ -59,6 +60,14 @@ export function getDiscussionMilestoneId(): string | null {
 /** Called from agent_end to check if auto-mode should start after discuss */
 export function checkAutoStartAfterDiscuss(): boolean {
   if (!pendingAutoStart) return false;
+
+  // Clear stale path caches before gate checks. The discussion prompt runs
+  // in a separate agent turn that creates milestone directories and files
+  // after the path cache was last populated (during the initial startAuto →
+  // deriveState call). Without this, cachedReaddir returns pre-discussion
+  // directory listings and the gates fail to find newly written artifacts,
+  // causing auto-mode to silently not start after bootstrap (#921).
+  clearPathCache();
 
   const { ctx, pi, basePath, milestoneId, step } = pendingAutoStart;
 
