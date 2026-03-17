@@ -1093,12 +1093,20 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
 
       const tasksDir = resolveTasksDir(basePath, milestoneId, slice.id);
       if (!tasksDir) {
+        // Check if slice is already complete — missing tasks/ is cosmetic, not structural
+        const sliceSumPath = resolveSliceFile(basePath, milestoneId, slice.id, "SUMMARY");
+        const sliceSumContent = sliceSumPath ? await loadFile(sliceSumPath) : null;
+        const sliceSummary = sliceSumContent ? parseSummary(sliceSumContent) : null;
+        const sliceComplete = sliceSummary?.frontmatter?.status === "complete";
+
         issues.push({
-          severity: "error",
+          severity: sliceComplete ? "warning" : "error",
           code: "missing_tasks_dir",
           scope: "slice",
           unitId,
-          message: `Missing tasks directory for ${unitId}`,
+          message: sliceComplete
+            ? `Missing tasks directory for ${unitId} (slice is complete — cosmetic only)`
+            : `Missing tasks directory for ${unitId}`,
           file: relSlicePath(basePath, milestoneId, slice.id),
           fixable: true,
         });
@@ -1112,15 +1120,23 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
       const planContent = planPath ? await loadFile(planPath) : null;
       const plan = planContent ? parsePlan(planContent) : null;
       if (!plan) {
-        issues.push({
-          severity: "warning",
-          code: "missing_slice_plan",
-          scope: "slice",
-          unitId,
-          message: `Slice ${unitId} has no plan file`,
-          file: relSliceFile(basePath, milestoneId, slice.id, "PLAN"),
-          fixable: false,
-        });
+        // Reuse slice completion check from above, or compute if tasksDir existed
+        const planSumPath = resolveSliceFile(basePath, milestoneId, slice.id, "SUMMARY");
+        const planSumContent = planSumPath ? await loadFile(planSumPath) : null;
+        const planSummary = planSumContent ? parseSummary(planSumContent) : null;
+        const planSliceComplete = planSummary?.frontmatter?.status === "complete";
+
+        if (!planSliceComplete) {
+          issues.push({
+            severity: "warning",
+            code: "missing_slice_plan",
+            scope: "slice",
+            unitId,
+            message: `Slice ${unitId} has no plan file`,
+            file: relSliceFile(basePath, milestoneId, slice.id, "PLAN"),
+            fixable: false,
+          });
+        }
         continue;
       }
 
