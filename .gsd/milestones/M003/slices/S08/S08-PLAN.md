@@ -28,7 +28,7 @@
 
 ## Tasks
 
-- [ ] **T01: Produce the TUI-to-web parity audit document** `est:30m`
+- [x] **T01: Produce the TUI-to-web parity audit document** `est:30m`
   - Why: R109 requires a systematic comparison of every TUI feature against its web equivalent. This is the primary deliverable — a structured document proving the audit was done and recording every gap with its disposition.
   - Files: `.gsd/milestones/M003/slices/S08/S08-PARITY-AUDIT.md`
   - Do: Build a comprehensive feature matrix by reading the TUI command handler (`src/resources/extensions/gsd/commands.ts`), the web dispatch file (`web/lib/browser-slash-command-dispatch.ts`), and the web panel components. For each of the 30 `/gsd` subcommands, document: TUI behavior, web equivalent, parity status (full/partial/view-only/passthrough), and any gaps. Also cover dashboard overlay features, visualizer tabs, and interactive flows (prefs wizard, doctor heal, capture-with-args). Classify every gap as fixed (T02), intentional scope boundary (with rationale), or deferred.
@@ -41,6 +41,14 @@
   - Do: (1) Change `["visualize", "surface"]` to `["visualize", "view-navigate"]` in `EXPECTED_GSD_OUTCOMES`. (2) Update the surface count assertion from 20 to 19 in the "every GSD surface dispatches through the contract wiring end-to-end" test. (3) Add a separate test block for view-navigate outcomes that verifies `/gsd visualize` dispatches correctly with `kind: "view-navigate"` and `view: "visualize"`. (4) Run builds to confirm no regressions.
   - Verify: `npx tsx --test src/tests/web-command-parity-contract.test.ts` passes 118/118 (or more if new assertions added), `npm run build` exit 0, `npm run build:web-host` exit 0
   - Done when: Zero test failures in parity contract suite and both builds pass
+
+## Observability / Diagnostics
+
+- **Parity audit document** (`S08-PARITY-AUDIT.md`) is the primary inspection surface — future agents read it to understand which TUI features have web equivalents and which gaps are intentional.
+- **Test contract** (`web-command-parity-contract.test.ts`) encodes dispatch expectations as assertions — test failures signal parity regressions.
+- **Runtime signals**: No new runtime telemetry. Parity is compile-time + test-time verified.
+- **Failure visibility**: Missing or stub panel components produce `"Unknown GSD surface."` fallback text in the web UI — detectable via `rg "This surface will be implemented"` or `rg "Unknown GSD surface"` in command-surface.tsx.
+- **Redaction**: No secrets or credentials are involved in this slice.
 
 ## Files Likely Touched
 

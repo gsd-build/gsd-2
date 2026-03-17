@@ -82,6 +82,13 @@ Each gap must be classified with a clear rationale. The research doc (S08-RESEAR
 - `web/components/gsd/visualizer-view.tsx` — 7-tab visualizer view
 - `.gsd/milestones/M003/slices/S08/S08-RESEARCH.md` — pre-identified gaps and classifications
 
+## Observability Impact
+
+- **New inspection surface**: `S08-PARITY-AUDIT.md` — future agents read this to determine feature parity status without re-auditing source files.
+- **Signals changed**: None (this task produces a document, not runtime code).
+- **Failure visibility**: If the audit document is missing or incomplete, downstream tasks (T02) cannot reference gap dispositions, and the slice verification check `test -f S08-PARITY-AUDIT.md` fails.
+- **How a future agent inspects this task**: Read `S08-PARITY-AUDIT.md` and verify every TUI subcommand has a row, every gap has a disposition, and no "TBD" entries exist.
+
 ## Expected Output
 
 - `.gsd/milestones/M003/slices/S08/S08-PARITY-AUDIT.md` — complete parity audit document with feature matrix, gap analysis, and dispositions for every TUI feature
