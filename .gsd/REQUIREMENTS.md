@@ -281,6 +281,17 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: Unit tests 1197/0 pass/fail. Both builds exit 0. Integration tests 27/0/1-skipped. All test fixes verified 2026-03-17.
 - Notes: Test breakage came from three sources: (1) resolver not guarding /dist/ imports or handling .tsx, (2) tests with stale assertions after M003 changes, (3) integration tests not adapted to S02 dispatch changes and UI layout changes.
 
+### R113 — A Chat Mode view accessible from the sidebar (below Power Mode) that renders GSD sessions as chat bubbles with markdown, intercepts TUI prompts as native UI, provides workflow action buttons, and spawns/auto-closes action side panels.
+- Class: primary-user-loop
+- Status: validated
+- Description: A Chat Mode view accessible from the sidebar (below Power Mode) that renders GSD sessions as chat bubbles with markdown, intercepts TUI prompts as native UI, provides workflow action buttons, and spawns/auto-closes action side panels.
+- Why it matters: Non-technical users cannot operate GSD through a raw terminal. A chat interface makes GSD accessible to a much broader audience without removing any functionality.
+- Source: user
+- Primary owning slice: M007/S02
+- Supporting slices: M007/S01, M007/S03, M007/S04
+- Validation: All four M007 slices delivered their components: S01 (PtyChatParser + CompletionSignal), S02 (Chat Mode view, ChatPane, ChatBubble, sidebar nav), S03 (TUI prompt intercept UI — select/text/password), S04 (ChatModeHeader toolbar, ActionPanel with animated lifecycle, session DELETE cleanup). npm run build:web-host exits 0. Browser end-to-end verified: panel slides in with accent color, secondary PTY session established, X close fires DELETE, main session unaffected. Completion auto-close (1500ms after CompletionSignal) wired; live runtime UAT required to fully exercise.
+- Notes: Additive — does not modify Power Mode or existing views. All four slices complete as of 2026-03-17.
+
 ## Deferred
 
 ### R021 — Add deeper analytics/history views beyond the live dashboard and activity surfaces required for the core web workflow.
@@ -340,17 +351,6 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: n/a
 - Notes: Local host + local agent bridge is the expected shape.
 
-### R113 — A Chat Mode view in the browser workspace that renders the main GSD PTY session as a styled chat interface with markdown rendering, native TUI prompt components, workflow action buttons, and an auto-closing right panel for GSD phase actions.
-- Class: primary-user-loop
-- Status: validated
-- Description: A Chat Mode view accessible from the sidebar (below Power Mode) that renders GSD sessions as chat bubbles with markdown, intercepts TUI prompts as native UI, provides workflow action buttons, and spawns/auto-closes action side panels.
-- Why it matters: Non-technical users cannot operate GSD through a raw terminal. A chat interface makes GSD accessible to a much broader audience without removing any functionality.
-- Source: user
-- Primary owning slice: M007/S02
-- Supporting slices: M007/S01, M007/S03, M007/S04
-- Validation: All four M007 slices shipped and verified: Chat nav entry in sidebar below Power Mode, live ChatPane connected to gsd-main PTY session via SSE, ChatBubble with react-markdown+shiki, TuiSelectPrompt/TuiTextPrompt/TuiPasswordPrompt intercept with correct PTY keystroke forwarding, ChatModeHeader toolbar with deriveWorkflowAction, ActionPanel with AnimatePresence spring animation and 1500ms auto-close on CompletionSignal, session DELETE via unmount backstop. npm run build:web-host exits 0. Verified 2026-03-17.
-- Notes: Additive — does not modify Power Mode or existing views.
-
 ## Traceability
 
 | ID | Class | Status | Primary owner | Supporting | Proof |
@@ -385,8 +385,7 @@ This file is the explicit capability and coverage contract for the project.
 | R110 | quality-attribute | validated | M003/S09 | M003/S01 | Unit tests 1197/0 pass/fail. Both builds exit 0. Integration tests 27/0/1-skipped. All test fixes verified 2026-03-17. |
 | R111 | quality-attribute | active | M004/S01 | M004/S02 | unmapped |
 | R112 | quality-attribute | active | M004/S03 | none | unmapped |
-
-| R113 | primary-user-loop | validated | M007/S02 | M007/S01, M007/S03, M007/S04 | All four M007 slices verified: sidebar nav entry, live PTY-backed chat bubbles, react-markdown+shiki, TUI prompt intercept (select/text/password), deriveWorkflowAction toolbar, ActionPanel with AnimatePresence spring + CompletionSignal auto-close, session DELETE via unmount backstop. npm run build:web-host exits 0. Verified 2026-03-17. |
+| R113 | primary-user-loop | validated | M007/S02 | M007/S01, M007/S03, M007/S04 | All four M007 slices delivered their components: S01 (PtyChatParser + CompletionSignal), S02 (Chat Mode view, ChatPane, ChatBubble, sidebar nav), S03 (TUI prompt intercept UI — select/text/password), S04 (ChatModeHeader toolbar, ActionPanel with animated lifecycle, session DELETE cleanup). npm run build:web-host exits 0. Browser end-to-end verified: panel slides in with accent color, secondary PTY session established, X close fires DELETE, main session unaffected. Completion auto-close (1500ms after CompletionSignal) wired; live runtime UAT required to fully exercise. |
 
 ## Coverage Summary
 
