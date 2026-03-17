@@ -60,6 +60,10 @@ export interface UseSessionManagerResult {
   boundaryViolation: { path: string } | null;
   /** Dismiss the boundary violation banner */
   dismissBoundaryViolation: () => void;
+  /** Session ID stuck in processing state after reconnect — null when no stuck session */
+  stuckSessionId: string | null;
+  /** Attempt to reconnect to a stuck session */
+  reconnectSession: (sessionId: string) => void;
 }
 
 // -- Pure functions (exported for testing) --
@@ -355,7 +359,7 @@ export interface UseSessionManagerOptions {
  * Replaces useChat for multi-session scenarios.
  */
 export function useSessionManager(
-  wsUrl: string = "ws://localhost:4001",
+  wsUrl: string = "ws://localhost:4011",
   options: UseSessionManagerOptions = {},
 ): UseSessionManagerResult {
   const [sessions, setSessions] = useState<SessionTab[]>([]);
@@ -366,7 +370,15 @@ export function useSessionManager(
   const [isAutoMode, setIsAutoMode] = useState(false);
   const [isCrashed, setIsCrashed] = useState(false);
   const [boundaryViolation, setBoundaryViolation] = useState<{ path: string } | null>(null);
+  const [stuckSessionId, setStuckSessionId] = useState<string | null>(null);
   const { addCostEvent, costState } = useCostTracker(options.budgetCeiling ?? null);
+
+  // Session fork: track which session is being forked so we can copy its messages on session_update
+  const pendingForkRef = useRef<string | null>(null);
+
+  // Refresh recovery: detect sessions stuck in processing state after reconnect
+  const stuckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isReconnectedRef = useRef(false);
 
   // Keep isAutoMode in a ref for use inside the message handler (avoid stale closure)
   const isAutoModeRef = useRef(isAutoMode);
@@ -451,6 +463,41 @@ export function useSessionManager(
       const current = stateRef.current;
       const updated = handleSessionUpdate(current, tabs);
       applyState(updated);
+
+      // Fork message copy: if we just created a fork, copy parent messages to new session.
+      // previousIds is built from stateRef.current (the BEFORE state) — still valid here
+      // because applyState calls setSessions which is async (React batches state updates).
+      if (pendingForkRef.current) {
+        const forkSourceId = pendingForkRef.current;
+        pendingForkRef.current = null;
+        // Find the NEW session: present in tabs but not in the pre-update sessions
+        const previousIds = new Set(stateRef.current.sessions.map(s => s.id));
+        const newSession = tabs.find(t => !previousIds.has(t.id));
+        if (newSession) {
+          setMessagesBySession((prev) => {
+            const newMap = new Map(prev);
+            const parentMsgs = prev.get(forkSourceId) ?? [];
+            // Copy parent messages as display context (shallow copy)
+            newMap.set(newSession.id, [...parentMsgs]);
+            return newMap;
+          });
+        }
+      }
+
+      // Refresh recovery: if we just reconnected and a session is still processing,
+      // start a 3-second timer. If no chat_event arrives, mark session as stuck.
+      if (isReconnectedRef.current) {
+        isReconnectedRef.current = false;
+        const processingSession = tabs.find(t => t.isProcessing);
+        if (processingSession) {
+          // Clear any existing timer
+          if (stuckTimerRef.current) clearTimeout(stuckTimerRef.current);
+          stuckTimerRef.current = setTimeout(() => {
+            setStuckSessionId(processingSession.id);
+          }, 3000);
+        }
+      }
+
       return;
     }
 
@@ -459,6 +506,13 @@ export function useSessionManager(
 
     if (msgType === "chat_event" && msg.event) {
       const evt = msg.event as StreamEvent;
+
+      // Clear stuck timer on any chat activity
+      if (stuckTimerRef.current) {
+        clearTimeout(stuckTimerRef.current);
+        stuckTimerRef.current = null;
+        setStuckSessionId(null);
+      }
 
       // Feed activity events
       onActivityEventRef.current?.(evt);
@@ -512,23 +566,56 @@ export function useSessionManager(
       }
       if (evt.type === "assistant") return;
 
-      const current = stateRef.current;
-      const updated = routeChatEvent(current, sessionId, evt);
-      setMessagesBySession(updated.messagesBySession);
-      setProcessingBySession(updated.processingBySession);
+      // Use functional updates to avoid stale stateRef — rapid stream deltas must append
+      // to the latest accumulated content, not a snapshot from a previous render cycle.
+      setMessagesBySession((prev) => {
+        const newMap = new Map(prev);
+        const msgs = [...(newMap.get(sessionId) ?? [])];
+        const last = msgs[msgs.length - 1];
+        if (last && last.role === "assistant" && last.streaming) {
+          const result = processStreamEvent(evt, last.content);
+          msgs[msgs.length - 1] = {
+            ...last,
+            content: result.content,
+            toolName: result.toolName ?? last.toolName,
+            toolDone: result.toolDone ?? last.toolDone,
+          };
+        } else {
+          const result = processStreamEvent(evt, "");
+          msgs.push({
+            id: createMessageId(),
+            role: evt.type === "system" ? "system" : "assistant",
+            content: result.content,
+            timestamp: Date.now(),
+            streaming: true,
+            toolName: result.toolName,
+            toolDone: result.toolDone,
+          });
+        }
+        newMap.set(sessionId, msgs);
+        return newMap;
+      });
+      setProcessingBySession((prev) => { const m = new Map(prev); m.set(sessionId, true); return m; });
       return;
     }
 
     if (msgType === "chat_complete") {
-      const current = stateRef.current;
-      const updated = routeChatComplete(current, sessionId);
-      setMessagesBySession(updated.messagesBySession);
-      setProcessingBySession(updated.processingBySession);
+      setMessagesBySession((prev) => {
+        const newMap = new Map(prev);
+        const msgs = [...(newMap.get(sessionId) ?? [])];
+        const last = msgs[msgs.length - 1];
+        if (last && last.streaming) {
+          msgs[msgs.length - 1] = { ...last, streaming: false };
+        }
+        newMap.set(sessionId, msgs);
+        return newMap;
+      });
+      setProcessingBySession((prev) => { const m = new Map(prev); m.set(sessionId, false); return m; });
 
       // Auto-naming: if session still has default "Chat N" name, derive from first user message
-      const sessionTab = current.sessions.find((s) => s.id === sessionId);
+      const sessionTab = stateRef.current.sessions.find((s) => s.id === sessionId);
       if (sessionTab && /^Chat \d+$/.test(sessionTab.name)) {
-        const msgs = current.messagesBySession.get(sessionId) ?? [];
+        const msgs = stateRef.current.messagesBySession.get(sessionId) ?? [];
         const firstUserMsg = msgs.find((m) => m.role === "user");
         if (firstUserMsg) {
           const derivedName = deriveSessionName(firstUserMsg.content);
@@ -548,10 +635,14 @@ export function useSessionManager(
 
     if (msgType === "chat_error") {
       const errorText = (msg.error as string) ?? "Unknown error occurred";
-      const current = stateRef.current;
-      const updated = routeChatError(current, sessionId, errorText);
-      setMessagesBySession(updated.messagesBySession);
-      setProcessingBySession(updated.processingBySession);
+      setMessagesBySession((prev) => {
+        const newMap = new Map(prev);
+        const msgs = [...(newMap.get(sessionId) ?? [])];
+        msgs.push({ id: createMessageId(), role: "system", content: errorText, timestamp: Date.now(), streaming: false });
+        newMap.set(sessionId, msgs);
+        return newMap;
+      });
+      setProcessingBySession((prev) => { const m = new Map(prev); m.set(sessionId, false); return m; });
       return;
     }
 
@@ -567,6 +658,7 @@ export function useSessionManager(
     onMessage: handleMessage,
     onReconnect: () => {
       // After WS reconnects, request fresh session list so reconciliation can clear stuck processing
+      isReconnectedRef.current = true;
       sendRef.current(JSON.stringify({ type: "session_list" }));
     },
   });
@@ -621,6 +713,7 @@ export function useSessionManager(
   }, []);
 
   const createSessionAction = useCallback((forkFrom?: string) => {
+    if (forkFrom) pendingForkRef.current = forkFrom;
     const payload: Record<string, unknown> = { type: "session_create" };
     if (forkFrom) {
       payload.forkFromSessionId = forkFrom;
@@ -692,6 +785,20 @@ export function useSessionManager(
     setBoundaryViolation(null);
   }, []);
 
+  // reconnectSession: clears stuck state and re-requests session list
+  const reconnectSession = useCallback((_sessionId: string) => {
+    setStuckSessionId(null);
+    // Re-request session list to get fresh processing state
+    sendRef.current(JSON.stringify({ type: "session_list" }));
+  }, []);
+
+  // Cleanup stuck timer on unmount
+  useEffect(() => {
+    return () => {
+      if (stuckTimerRef.current) clearTimeout(stuckTimerRef.current);
+    };
+  }, []);
+
   return {
     sessions,
     activeSessionId,
@@ -711,5 +818,7 @@ export function useSessionManager(
     costState,
     boundaryViolation,
     dismissBoundaryViolation,
+    stuckSessionId,
+    reconnectSession,
   };
 }
