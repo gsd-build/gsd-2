@@ -1374,10 +1374,13 @@ export async function handleAgentEnd(
     // fixLevel:"task" ensures doctor only fixes task-level issues (e.g. marking
     // checkboxes). Slice/milestone completion transitions (summary stubs,
     // roadmap [x] marking) are left for the complete-slice dispatch unit.
+    // Exception: after complete-slice itself, use fixLevel:"all" so roadmap
+    // checkboxes get fixed even if complete-slice crashed (#839).
     try {
       const scopeParts = currentUnit.id.split("/").slice(0, 2);
       const doctorScope = scopeParts.join("/");
-      const report = await runGSDDoctor(basePath, { fix: true, scope: doctorScope, fixLevel: "task" });
+      const effectiveFixLevel = currentUnit.type === "complete-slice" ? "all" as const : "task" as const;
+      const report = await runGSDDoctor(basePath, { fix: true, scope: doctorScope, fixLevel: effectiveFixLevel });
       if (report.fixesApplied.length > 0) {
         ctx.ui.notify(`Post-hook: applied ${report.fixesApplied.length} fix(es).`, "info");
       }
