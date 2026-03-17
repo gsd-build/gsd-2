@@ -3,8 +3,14 @@
   "version": "0.57.1",
   "description": "Terminal User Interface library (vendored from pi-mono)",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json"
   },
