@@ -342,13 +342,13 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R113 — A Chat Mode view in the browser workspace that renders the main GSD PTY session as a styled chat interface with markdown rendering, native TUI prompt components, workflow action buttons, and an auto-closing right panel for GSD phase actions.
 - Class: primary-user-loop
-- Status: active
+- Status: validated
 - Description: A Chat Mode view accessible from the sidebar (below Power Mode) that renders GSD sessions as chat bubbles with markdown, intercepts TUI prompts as native UI, provides workflow action buttons, and spawns/auto-closes action side panels.
 - Why it matters: Non-technical users cannot operate GSD through a raw terminal. A chat interface makes GSD accessible to a much broader audience without removing any functionality.
 - Source: user
 - Primary owning slice: M007/S02
 - Supporting slices: M007/S01, M007/S03, M007/S04
-- Validation: Chat Mode view renders, markdown displays correctly, TUI prompts function, action panels open and auto-close.
+- Validation: All four M007 slices shipped and verified: Chat nav entry in sidebar below Power Mode, live ChatPane connected to gsd-main PTY session via SSE, ChatBubble with react-markdown+shiki, TuiSelectPrompt/TuiTextPrompt/TuiPasswordPrompt intercept with correct PTY keystroke forwarding, ChatModeHeader toolbar with deriveWorkflowAction, ActionPanel with AnimatePresence spring animation and 1500ms auto-close on CompletionSignal, session DELETE via unmount backstop. npm run build:web-host exits 0. Verified 2026-03-17.
 - Notes: Additive — does not modify Power Mode or existing views.
 
 ## Traceability
@@ -386,11 +386,11 @@ This file is the explicit capability and coverage contract for the project.
 | R111 | quality-attribute | active | M004/S01 | M004/S02 | unmapped |
 | R112 | quality-attribute | active | M004/S03 | none | unmapped |
 
-| R113 | primary-user-loop | active | M007/S02 | M007/S01, M007/S03, M007/S04 | unmapped |
+| R113 | primary-user-loop | validated | M007/S02 | M007/S01, M007/S03, M007/S04 | All four M007 slices verified: sidebar nav entry, live PTY-backed chat bubbles, react-markdown+shiki, TUI prompt intercept (select/text/password), deriveWorkflowAction toolbar, ActionPanel with AnimatePresence spring + CompletionSignal auto-close, session DELETE via unmount backstop. npm run build:web-host exits 0. Verified 2026-03-17. |
 
 ## Coverage Summary
 
-- Active requirements: 4
-- Mapped to slices: 4
-- Validated: 22 (R001, R002, R003, R004, R005, R006, R007, R008, R009, R010, R011, R100, R101, R102, R103, R104, R105, R106, R107, R108, R109, R110)
+- Active requirements: 3
+- Mapped to slices: 3
+- Validated: 23 (R001, R002, R003, R004, R005, R006, R007, R008, R009, R010, R011, R100, R101, R102, R103, R104, R105, R106, R107, R108, R109, R110, R113)
 - Unmapped active requirements: 0
