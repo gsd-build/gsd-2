@@ -823,6 +823,37 @@ export class SessionManager {
 		}
 	}
 
+	/**
+	 * Check if the last assistant turn in the session appears to have been
+	 * interrupted (e.g., the last message is from the assistant with tool_use
+	 * blocks but no subsequent tool_result message).
+	 */
+	wasInterrupted(): boolean {
+		// Walk backwards to find the last message entry
+		for (let i = this.fileEntries.length - 1; i >= 0; i--) {
+			const entry = this.fileEntries[i];
+			if (entry.type !== "message") continue;
+
+			const msg = entry.message;
+			if (msg.role === "user") return false; // clean user turn boundary
+			if (msg.role === "assistant") {
+				// Check if the assistant message contains tool_use blocks
+				const content = Array.isArray(msg.content) ? msg.content : [];
+				const hasToolUse = content.some(
+					(block) => block.type === "toolCall",
+				);
+				if (hasToolUse) {
+					// If the last message is an assistant tool_use with no following
+					// tool_result message, the turn was likely interrupted
+					return true;
+				}
+				return false; // assistant message without tool_use = completed text response
+			}
+			return false;
+		}
+		return false;
+	}
+
 	/** Switch to a different session file (used for resume and branching) */
 	setSessionFile(sessionFile: string): void {
 		this.sessionFile = resolve(sessionFile);
