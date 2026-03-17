@@ -188,18 +188,33 @@ function formatProgress(event: Record<string, unknown>, verbose: boolean): strin
 // Completion Detection
 // ---------------------------------------------------------------------------
 
-const TERMINAL_KEYWORDS = ['complete', 'stopped', 'blocked']
+/**
+ * Detect genuine auto-mode termination notifications.
+ *
+ * Only matches the actual stop signals emitted by stopAuto():
+ *   "Auto-mode stopped..."
+ *   "Step-mode stopped..."
+ *
+ * Does NOT match progress notifications that happen to contain words like
+ * "complete" or "stopped" (e.g., "Override resolved — rewrite-docs completed",
+ * "All slices are complete — nothing to discuss", "Skipped 5+ completed units").
+ *
+ * Blocked detection is separate — checked via isBlockedNotification.
+ */
+const TERMINAL_PREFIXES = ['auto-mode stopped', 'step-mode stopped']
 const IDLE_TIMEOUT_MS = 15_000
 
 function isTerminalNotification(event: Record<string, unknown>): boolean {
   if (event.type !== 'extension_ui_request' || event.method !== 'notify') return false
   const message = String(event.message ?? '').toLowerCase()
-  return TERMINAL_KEYWORDS.some((kw) => message.includes(kw))
+  return TERMINAL_PREFIXES.some((prefix) => message.startsWith(prefix))
 }
 
 function isBlockedNotification(event: Record<string, unknown>): boolean {
   if (event.type !== 'extension_ui_request' || event.method !== 'notify') return false
-  return String(event.message ?? '').toLowerCase().includes('blocked')
+  const message = String(event.message ?? '').toLowerCase()
+  // Blocked notifications come through stopAuto as "Auto-mode stopped (Blocked: ...)"
+  return message.includes('blocked:')
 }
 
 function isMilestoneReadyNotification(event: Record<string, unknown>): boolean {
