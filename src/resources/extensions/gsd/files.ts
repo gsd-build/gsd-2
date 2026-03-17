@@ -4,6 +4,7 @@
 // Pure functions, zero Pi dependencies - uses only Node built-ins.
 
 import { promises as fs } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { resolveMilestoneFile, relMilestoneFile, resolveGsdRootFile } from './paths.js';
 import { milestoneIdSort, findMilestoneIds } from './guided-flow.js';
@@ -705,7 +706,7 @@ export async function saveFile(path: string, content: string): Promise<void> {
   const dir = dirname(path);
   await fs.mkdir(dir, { recursive: true });
 
-  const tmpPath = path + '.tmp';
+  const tmpPath = path + `.tmp.${randomBytes(4).toString('hex')}`;
   await fs.writeFile(tmpPath, content, 'utf-8');
   await fs.rename(tmpPath, path);
 }

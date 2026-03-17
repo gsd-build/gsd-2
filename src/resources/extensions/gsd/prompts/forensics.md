@@ -11,6 +11,7 @@ You are investigating a GSD auto-mode failure. The user has described their prob
 ## GSD Source Location
 
 GSD extension source code is at: {{gsdSourceDir}}
+Activity logs are stored in: `.gsd/activity/` (JSONL files, one per unit execution)
 Key files for understanding failures:
 - auto.ts — unit dispatch loop, stuck detection, timeout recovery
 - session-forensics.ts — trace extraction from activity logs
