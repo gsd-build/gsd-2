@@ -82,6 +82,7 @@ import {
   restoreHookState,
   clearPersistedHookState,
 } from "./post-unit-hooks.js";
+import { setActiveGSDPhase, setGSDAutoActive } from "../shared/gsd-phase-state.js";
 import { ensureGitignore, untrackRuntimeFiles } from "./gitignore.js";
 import { runGSDDoctor, rebuildState, summarizeDoctorIssues } from "./doctor.js";
 import {
@@ -516,6 +517,7 @@ export async function stopAuto(ctx?: ExtensionContext, pi?: ExtensionAPI, reason
   resetHookState();
   if (s.basePath) clearPersistedHookState(s.basePath);
   s.active = false;
+  setGSDAutoActive(false);
   s.paused = false;
   s.stepMode = false;
   s.unitDispatchCount.clear();
@@ -570,6 +572,7 @@ export async function pauseAuto(ctx?: ExtensionContext, _pi?: ExtensionAPI): Pro
   deregisterSigtermHandler();
 
   s.active = false;
+  setGSDAutoActive(false);
   s.paused = true;
   s.pendingVerificationRetry = null;
   s.verificationRetryCount.clear();
@@ -600,6 +603,7 @@ export async function startAuto(
   if (s.paused) {
     s.paused = false;
     s.active = true;
+    setGSDAutoActive(true);
     s.verbose = verboseMode;
     s.stepMode = requestedStepMode;
     s.cmdCtx = ctx;
@@ -1507,6 +1511,7 @@ async function dispatchNextUnit(
     }
   }
   s.currentUnit = { type: unitType, id: unitId, startedAt: Date.now() };
+  setActiveGSDPhase(unitType);
   captureAvailableSkills();
   writeUnitRuntimeRecord(s.basePath, unitType, unitId, s.currentUnit.startedAt, {
     phase: "dispatched",
@@ -1733,6 +1738,7 @@ export async function dispatchHookUnit(
 ): Promise<boolean> {
   if (!s.active) {
     s.active = true;
+    setGSDAutoActive(true);
     s.stepMode = true;
     s.cmdCtx = ctx as ExtensionCommandContext;
     s.basePath = targetBasePath;
@@ -1746,6 +1752,7 @@ export async function dispatchHookUnit(
   const hookStartedAt = Date.now();
 
   s.currentUnit = { type: triggerUnitType, id: triggerUnitId, startedAt: hookStartedAt };
+  setActiveGSDPhase(triggerUnitType);
 
   const result = await s.cmdCtx!.newSession();
   if (result.cancelled) {
@@ -1754,6 +1761,7 @@ export async function dispatchHookUnit(
   }
 
   s.currentUnit = { type: hookUnitType, id: triggerUnitId, startedAt: hookStartedAt };
+  setActiveGSDPhase(hookUnitType);
 
   writeUnitRuntimeRecord(s.basePath, hookUnitType, triggerUnitId, hookStartedAt, {
     phase: "dispatched",

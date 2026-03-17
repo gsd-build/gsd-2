@@ -280,7 +280,9 @@ export async function bootstrapAutoSession(
   }
 
   // ── Initialize session state ──
+  const { setGSDAutoActive, setActiveGSDPhase } = await import("../shared/gsd-phase-state.js");
   s.active = true;
+  setGSDAutoActive(true);
   s.stepMode = requestedStepMode;
   s.verbose = verboseMode;
   s.cmdCtx = ctx;
@@ -300,6 +302,7 @@ export async function bootstrapAutoSession(
   s.completedUnits = [];
   s.pendingQuickTasks = [];
   s.currentUnit = null;
+  setActiveGSDPhase(null);
   s.currentMilestoneId = state.activeMilestone?.id ?? null;
   s.originalModelId = ctx.model?.id ?? null;
   s.originalModelProvider = ctx.model?.provider ?? null;

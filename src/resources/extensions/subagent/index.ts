@@ -24,6 +24,7 @@ import { type ExtensionAPI, getMarkdownTheme } from "@gsd/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@gsd/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
+import { getActiveGSDPhase, isGSDAutoActive } from "../shared/gsd-phase-state.js";
 import {
 	type IsolationEnvironment,
 	type IsolationMode,
@@ -33,6 +34,23 @@ import {
 	readIsolationMode,
 } from "./isolation.js";
 import { registerWorker, updateWorker } from "./worker-registry.js";
+
+/**
+ * Check if an agent conflicts with the currently active GSD phase.
+ * Returns an error message if blocked, or null if allowed.
+ */
+function checkGSDPhaseConflict(agent: AgentConfig): string | null {
+	if (!isGSDAutoActive()) return null;
+	const activePhase = getActiveGSDPhase();
+	if (!activePhase) return null;
+	if (!agent.conflictsWith || agent.conflictsWith.length === 0) return null;
+	if (!agent.conflictsWith.includes(activePhase)) return null;
+
+	return (
+		`Agent "${agent.name}" is blocked: it conflicts with the active GSD phase "${activePhase}". ` +
+		`GSD auto-mode is handling this phase — use the built-in GSD workflow instead of the "${agent.name}" subagent.`
+	);
+}
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -287,6 +305,20 @@ async function runSingleAgent(
 			exitCode: 1,
 			messages: [],
 			stderr: `Unknown agent: "${agentName}". Available agents: ${available}.`,
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
+			step,
+		};
+	}
+
+	const phaseConflict = checkGSDPhaseConflict(agent);
+	if (phaseConflict) {
+		return {
+			agent: agentName,
+			agentSource: agent.source,
+			task,
+			exitCode: 1,
+			messages: [],
+			stderr: phaseConflict,
 			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
 			step,
 		};

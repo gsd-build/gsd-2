@@ -3,6 +3,7 @@ name: planner
 description: Architecture and implementation planning — outputs structured plans, not code
 model: sonnet
 tools: read, grep, find, bash
+conflicts_with: plan-milestone, plan-slice, plan-task, research-milestone, research-slice
 ---
 
 You are a planner. You analyze requirements and codebases to produce structured implementation plans. You do NOT write code.

@@ -13,6 +13,7 @@ export interface AgentConfig {
 	description: string;
 	tools?: string[];
 	model?: string;
+	conflictsWith?: string[];
 	systemPrompt: string;
 	source: "user" | "project";
 	filePath: string;
@@ -60,11 +61,17 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 			.map((t: string) => t.trim())
 			.filter(Boolean);
 
+		const conflictsWith = frontmatter.conflicts_with
+			?.split(",")
+			.map((t: string) => t.trim())
+			.filter(Boolean);
+
 		agents.push({
 			name: frontmatter.name,
 			description: frontmatter.description,
 			tools: tools && tools.length > 0 ? tools : undefined,
 			model: frontmatter.model,
+			conflictsWith: conflictsWith && conflictsWith.length > 0 ? conflictsWith : undefined,
 			systemPrompt: body,
 			source,
 			filePath,
