@@ -16,6 +16,7 @@ import {
   Activity,
   BarChart3,
   Columns2,
+  MessagesSquare,
   LifeBuoy,
   LogOut,
   FolderKanban,
@@ -92,6 +93,7 @@ export function NavRail({ activeView, onViewChange, isConnecting = false }: NavR
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "power", label: "Power Mode", icon: Columns2 },
+    { id: "chat", label: "Chat", icon: MessagesSquare },
     { id: "roadmap", label: "Roadmap", icon: MapIcon },
     { id: "files", label: "Files", icon: Folder },
     { id: "activity", label: "Activity", icon: Activity },

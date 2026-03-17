@@ -29,6 +29,7 @@ import {
   useGSDWorkspaceState,
   useGSDWorkspaceActions,
 } from "@/lib/gsd-workspace-store"
+import { ChatMode } from "@/components/gsd/chat-mode"
 import { ScopeBadge } from "@/components/gsd/scope-badge"
 import { ProjectsView } from "@/components/gsd/projects-view"
 
@@ -62,7 +63,7 @@ function connectionDotClass(tone: ReturnType<typeof getStatusPresentation>["tone
   }
 }
 
-const KNOWN_VIEWS = new Set(["dashboard", "power", "roadmap", "files", "activity", "visualize", "projects"])
+const KNOWN_VIEWS = new Set(["dashboard", "power", "chat", "roadmap", "files", "activity", "visualize", "projects"])
 
 function viewStorageKey(projectCwd: string): string {
   return `gsd-active-view:${projectCwd}`
@@ -317,11 +318,12 @@ function WorkspaceChrome() {
                 {activeView === "activity" && <ActivityView />}
                 {activeView === "visualize" && <VisualizerView />}
                 {activeView === "projects" && <ProjectsView />}
+                {activeView === "chat" && <ChatMode />}
               </>
             )}
           </div>
 
-          {activeView !== "power" && (
+          {activeView !== "power" && activeView !== "chat" && (
             <div className="border-t border-border flex flex-col" style={{ flexShrink: 0 }}>
               {/* Drag handle + toggle header — entire bar is clickable */}
               <div

@@ -30,6 +30,7 @@
 - Manual: open Chat Mode in browser, verify nav item present, click switches to chat view
 - Manual: start GSD in the session, send a message via the input bar, verify it appears as a user bubble and GSD's response appears as an assistant bubble with markdown rendered
 - Manual: paste a GSD response containing a code block — verify syntax highlighting renders
+- Failure path: disconnect the SSE stream (kill the terminal process or use DevTools → Network → block the SSE URL); verify the chat input bar displays a "Disconnected" state indicator and a reconnection attempt is visible in the console
 
 ## Observability / Diagnostics
 
@@ -46,7 +47,7 @@
 
 ## Tasks
 
-- [ ] **T01: Nav entry and view scaffold** `est:45m`
+- [x] **T01: Nav entry and view scaffold** `est:45m`
   - Why: Nothing is visible until the nav item exists and routes to the ChatMode component
   - Files: `web/components/gsd/sidebar.tsx`, `web/components/gsd/app-shell.tsx`, `web/components/gsd/chat-mode.tsx` (new)
   - Do: (1) Read `sidebar.tsx` — find navItems array; add `{ id: "chat", label: "Chat", icon: MessagesSquare }` after the `power` entry. (2) Read `app-shell.tsx` — add `"chat"` to KNOWN_VIEWS Set; import `ChatMode`; add `{activeView === "chat" && <ChatMode />}` in view routing; add `activeView === "chat"` to the condition that hides the bottom terminal panel (same condition as `activeView !== "power"`). (3) Create `chat-mode.tsx` with a `ChatMode` component: full-height flex column, header bar at top, main pane area below (placeholder text acceptable).

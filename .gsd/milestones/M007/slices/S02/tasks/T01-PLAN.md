@@ -29,6 +29,14 @@ Add the "Chat" nav entry to the sidebar below Power Mode, wire the `chat` view i
 - `sidebar.tsx` navItems array → `{ id: "chat", label: "Chat", icon: MessagesSquare }` after the `power` entry
 - `chat-mode.tsx` exported `ChatMode` → imported into `app-shell.tsx`
 
+## Observability Impact
+
+- **New sidebar nav entry** — `data-testid` is inherited from the navItems map (`id="chat"`); future agents can assert `[data-testid="nav-chat"]` if a testid is added, or simply check the button with `title="Chat"` exists in the NavRail.
+- **KNOWN_VIEWS expansion** — sessionStorage will now accept and persist `"chat"` as the active view. A future agent can read `sessionStorage.getItem("gsd-active-view:<cwd>")` to confirm the view persisted correctly.
+- **ChatMode mounting** — when `activeView === "chat"`, `ChatMode` is rendered (not hidden). Console will show no errors if the scaffold renders cleanly; any missing CSS variable or import error will surface as a React hydration/render error visible in browser console.
+- **Bottom terminal suppression** — the terminal panel is hidden when `activeView === "power" || activeView === "chat"`. Inspect `document.querySelector("[data-testid='terminal-panel']")` (if testid exists) or observe the panel disappearing when switching to Chat view.
+- **Failure state**: if `chat-mode.tsx` has a build error, `npm run build:web-host` will exit non-zero. If the view renders blank or crashes, the React error boundary (if present) or browser console will show the exception.
+
 ## Steps
 
 1. Read `web/components/gsd/sidebar.tsx` navItems array to find the exact insertion point after Power Mode
