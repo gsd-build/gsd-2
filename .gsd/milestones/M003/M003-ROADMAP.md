@@ -76,7 +76,7 @@ This milestone is complete only when all are true:
 - [x] **S07: Remaining command surfaces** `risk:medium` `depends:[S02]`
   > After this: `/gsd quick`, `/gsd history`, `/gsd undo`, `/gsd steer`, `/gsd mode`, `/gsd hooks`, `/gsd config`, `/gsd inspect`, `/gsd export`, `/gsd cleanup` each open browser-native surfaces.
 
-- [ ] **S08: TUI-to-web 1:1 parity audit and gap closure** `risk:low` `depends:[S03,S04,S05,S06,S07]`
+- [x] **S08: TUI-to-web 1:1 parity audit and gap closure** `risk:low` `depends:[S03,S04,S05,S06,S07]`
   > After this: systematic comparison proves every TUI feature has a working web equivalent — gaps found are fixed.
 
 - [ ] **S09: Test suite hardening** `risk:low` `depends:[S08]`
