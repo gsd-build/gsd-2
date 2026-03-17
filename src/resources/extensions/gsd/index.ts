@@ -60,6 +60,7 @@ import { shortcutDesc } from "../shared/terminal.js";
 import { Text } from "@gsd/pi-tui";
 import { pauseAutoForProviderError } from "./provider-error-pause.js";
 import { toPosixPath } from "../shared/path-display.js";
+import { isParallelActive, shutdownParallel } from "./parallel-orchestrator.js";
 
 // ── Agent Instructions ────────────────────────────────────────────────────
 // Lightweight "always follow" files injected into every GSD agent session.
@@ -856,6 +857,12 @@ export default function (pi: ExtensionAPI) {
 
   // ── session_shutdown: save activity log on Ctrl+C / SIGTERM ─────────────
   pi.on("session_shutdown", async (_event, ctx: ExtensionContext) => {
+    if (isParallelActive()) {
+      try {
+        await shutdownParallel(process.cwd());
+      } catch { /* best-effort */ }
+    }
+
     if (!isAutoActive() && !isAutoPaused()) return;
 
     // Save the current session — the lock file stays on disk

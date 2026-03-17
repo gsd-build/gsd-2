@@ -52,6 +52,7 @@ import {
 	getGroupStatus,
 	pruneDeadProcesses,
 	cleanupAll,
+	cleanupSessionProcesses,
 	persistManifest,
 	loadManifest,
 	pushAlert,
@@ -71,7 +72,7 @@ import { toPosixPath } from "../shared/path-display.js";
 // ── Re-exports for consumers ───────────────────────────────────────────────
 
 export type { ProcessStatus, ProcessType, BgProcess, BgProcessInfo, OutputDigest, OutputLine, ProcessEvent } from "./types.js";
-export { processes, startProcess, killProcess, restartProcess, cleanupAll } from "./process-manager.js";
+export { processes, startProcess, killProcess, restartProcess, cleanupAll, cleanupSessionProcesses } from "./process-manager.js";
 export { generateDigest, getHighlights, getOutput, formatDigestText } from "./output-formatter.js";
 export { waitForReady, probePort } from "./readiness-detector.js";
 export { sendAndWait, runOnSession, queryShellEnv } from "./interaction.js";
@@ -136,7 +137,13 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// Session switch resets the agent's context.
-	pi.on("session_switch", async () => {
+	pi.on("session_switch", async (event, ctx) => {
+		latestCtx = ctx;
+		if (event.reason === "new" && event.previousSessionFile) {
+			await cleanupSessionProcesses(event.previousSessionFile);
+			syncLatestCtxCwd();
+			if (latestCtx) persistManifest(latestCtx.cwd);
+		}
 		buildProcessStateAlert("Session was switched.");
 	});
 
@@ -232,6 +239,7 @@ export default function (pi: ExtensionAPI) {
 			"Use 'run' to execute a command on a persistent shell session and block until it completes — returns structured output + exit code. Shell state (env vars, cwd, virtualenvs) persists across runs.",
 			"Use 'send_and_wait' for interactive CLIs: send input and wait for expected output pattern.",
 			"Use 'env' to check the current working directory and active environment variables of a shell session — useful after cd, source, or export commands.",
+			"Background processes are session-scoped by default: a new session reaps them unless you set persist_across_sessions:true.",
 			"Use 'restart' to kill and relaunch with the same config — preserves restart count.",
 			"Background processes are auto-classified (server/build/test/watcher) based on the command.",
 			"Process crashes and errors are automatically surfaced as alerts at the start of your next turn — you don't need to poll.",
@@ -300,6 +308,12 @@ export default function (pi: ExtensionAPI) {
 			group: Type.Optional(
 				Type.String({ description: "Group name for related processes (for start, group_status)" }),
 			),
+			persist_across_sessions: Type.Optional(
+				Type.Boolean({
+					description: "Keep this process running after a new session starts. Default: false.",
+					default: false,
+				}),
+			),
 		}),
 
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -318,6 +332,8 @@ export default function (pi: ExtensionAPI) {
 					const bg = startProcess({
 						command: params.command,
 						cwd: ctx.cwd,
+						ownerSessionFile: ctx.sessionManager.getSessionFile() ?? null,
+						persistAcrossSessions: params.persist_across_sessions ?? false,
 						label: params.label,
 						type: params.type as ProcessType | undefined,
 						readyPattern: params.ready_pattern,
@@ -341,6 +357,7 @@ export default function (pi: ExtensionAPI) {
 					text += `  cwd: ${toPosixPath(bg.cwd)}`;
 
 					if (bg.group) text += `\n  group: ${bg.group}`;
+					if (bg.persistAcrossSessions) text += `\n  persist_across_sessions: true`;
 					if (bg.readyPort) text += `\n  ready_port: ${bg.readyPort}`;
 					if (bg.readyPattern) text += `\n  ready_pattern: ${bg.readyPattern}`;
 					if (bg.ports.length > 0) text += `\n  detected ports: ${bg.ports.join(", ")}`;

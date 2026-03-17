@@ -35,6 +35,7 @@ import {
   getWorkerStatuses,
   startParallel,
   stopParallel,
+  shutdownParallel,
   pauseWorker,
   resumeWorker,
   getAggregateCost,
@@ -337,6 +338,14 @@ describe("parallel-orchestrator: lifecycle", () => {
     const signal = consumeSignal(base, "M001");
     assert.ok(signal);
     assert.equal(signal.signal, "pause");
+  });
+
+  it("shutdownParallel deactivates the orchestrator state", async () => {
+    await startParallel(base, ["M001"], undefined);
+    assert.equal(isParallelActive(), true);
+    await shutdownParallel(base);
+    assert.equal(isParallelActive(), false);
+    assert.equal(getOrchestratorState(), null);
   });
 });
 

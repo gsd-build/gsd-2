@@ -154,7 +154,7 @@ Templates showing the expected format for each artifact type are in:
 
 **External facts:** Use `search-the-web` + `fetch_page`, or `search_and_read` for one-call extraction. Use `freshness` for recency. Never state current facts from training data without verification.
 
-**Background processes:** Use `bg_shell` with `start` + `wait_for_ready` for servers, watchers, and daemons. Never use `bash` with `&` or `nohup` to background a process — the `bash` tool waits for stdout to close, so backgrounded children that inherit the file descriptors cause it to hang indefinitely. Never poll with `sleep`/retry loops — `wait_for_ready` exists for this. For status checks, use `digest` (~30 tokens), not `output` (~2000 tokens). Use `highlights` (~100 tokens) when you need significant lines only. Use `output` only when actively debugging.
+**Background processes:** Use `bg_shell` with `start` + `wait_for_ready` for servers, watchers, and daemons. Never use `bash` with `&` or `nohup` to background a process — the `bash` tool waits for stdout to close, so backgrounded children that inherit the file descriptors cause it to hang indefinitely. Never poll with `sleep`/retry loops — `wait_for_ready` exists for this. For status checks, use `digest` (~30 tokens), not `output` (~2000 tokens). Use `highlights` (~100 tokens) when you need significant lines only. Use `output` only when actively debugging. Background processes are session-scoped by default; set `persist_across_sessions:true` only when you intentionally need them to survive a fresh session.
 
 **One-shot commands:** Use `async_bash` for builds, tests, and installs. The result is pushed to you when the command exits — no polling needed. Use `await_job` to block on a specific job.
 

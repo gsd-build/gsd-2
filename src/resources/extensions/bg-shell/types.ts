@@ -53,6 +53,10 @@ export interface BgProcess {
 	label: string;
 	command: string;
 	cwd: string;
+	/** Session file that created this process (used for per-session cleanup) */
+	ownerSessionFile: string | null;
+	/** Whether this process should survive a new-session boundary */
+	persistAcrossSessions: boolean;
 	startedAt: number;
 	proc: import("node:child_process").ChildProcess;
 	/** Unified chronologically-interleaved output buffer */
@@ -103,7 +107,17 @@ export interface BgProcess {
 	/** Restart count */
 	restartCount: number;
 	/** Original start config for restart */
-	startConfig: { command: string; cwd: string; label: string; processType: ProcessType; readyPattern: string | null; readyPort: number | null; group: string | null };
+	startConfig: {
+		command: string;
+		cwd: string;
+		label: string;
+		processType: ProcessType;
+		ownerSessionFile: string | null;
+		persistAcrossSessions: boolean;
+		readyPattern: string | null;
+		readyPort: number | null;
+		group: string | null;
+	};
 }
 
 export interface BgProcessInfo {
@@ -111,6 +125,8 @@ export interface BgProcessInfo {
 	label: string;
 	command: string;
 	cwd: string;
+	ownerSessionFile: string | null;
+	persistAcrossSessions: boolean;
 	startedAt: number;
 	alive: boolean;
 	exitCode: number | null;
@@ -133,6 +149,8 @@ export interface BgProcessInfo {
 export interface StartOptions {
 	command: string;
 	cwd: string;
+	ownerSessionFile?: string | null;
+	persistAcrossSessions?: boolean;
 	label?: string;
 	type?: ProcessType;
 	readyPattern?: string;
@@ -154,6 +172,8 @@ export interface ProcessManifest {
 	label: string;
 	command: string;
 	cwd: string;
+	ownerSessionFile: string | null;
+	persistAcrossSessions: boolean;
 	startedAt: number;
 	processType: ProcessType;
 	group: string | null;

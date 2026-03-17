@@ -58,6 +58,37 @@ export interface OrchestratorState {
 
 let state: OrchestratorState | null = null;
 
+function isPidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForWorkerExit(worker: WorkerInfo, timeoutMs: number): Promise<boolean> {
+  if (worker.process) {
+    await new Promise<void>((resolve) => {
+      const done = () => resolve();
+      const timer = setTimeout(done, timeoutMs);
+      worker.process!.once("exit", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    return worker.process === null || !isPidAlive(worker.pid);
+  }
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (!isPidAlive(worker.pid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return !isPidAlive(worker.pid);
+}
+
 // ─── Accessors ─────────────────────────────────────────────────────────────
 
 /** Returns true if the orchestrator is active and has been initialized. */
@@ -485,10 +516,22 @@ export async function stopParallel(
       try {
         if (worker.process) {
           worker.process.kill("SIGTERM");
-        } else {
+        } else if (worker.pid !== process.pid) {
           process.kill(worker.pid, "SIGTERM");
         }
       } catch { /* process may already be dead */ }
+    }
+
+    const exitedAfterTerm = await waitForWorkerExit(worker, 750);
+    if (!exitedAfterTerm && worker.pid > 0) {
+      try {
+        if (worker.process) {
+          worker.process.kill("SIGKILL");
+        } else if (worker.pid !== process.pid) {
+          process.kill(worker.pid, "SIGKILL");
+        }
+      } catch { /* process may already be dead */ }
+      await waitForWorkerExit(worker, 250);
     }
 
     // Update in-memory state
@@ -503,6 +546,12 @@ export async function stopParallel(
   if (!milestoneId) {
     state.active = false;
   }
+}
+
+export async function shutdownParallel(basePath: string): Promise<void> {
+  if (!state) return;
+  await stopParallel(basePath);
+  resetOrchestrator();
 }
 
 // ─── Pause / Resume ────────────────────────────────────────────────────────
