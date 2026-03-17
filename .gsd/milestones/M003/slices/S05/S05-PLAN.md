@@ -27,6 +27,9 @@
 - `npm run build` — TypeScript compilation with all new types and files
 - `npm run build:web-host` — Next.js production build including new API routes and panel component
 - `npx tsx --test src/tests/web-command-parity-contract.test.ts` — 118 existing tests still pass (regression)
+- `/api/knowledge` GET returns `{ error: string }` with status 500 when KNOWLEDGE.md is unreadable or parser throws
+- `/api/captures` GET returns `{ error: string }` with status 500 when captures subprocess fails
+- `/api/captures` POST returns `{ error: string }` with status 400 when body is missing required fields or has invalid classification
 
 ## Observability / Diagnostics
 
@@ -43,7 +46,7 @@
 
 ## Tasks
 
-- [ ] **T01: Create types, services, and API routes for knowledge and captures** `est:40m`
+- [x] **T01: Create types, services, and API routes for knowledge and captures** `est:40m`
   - Why: Builds the entire server-side data pipeline — types define the API shape, services call upstream code, API routes expose data to the browser. No existing large files need modification.
   - Files: `web/lib/knowledge-captures-types.ts`, `src/web/captures-service.ts`, `src/web/knowledge-service.ts`, `web/app/api/knowledge/route.ts`, `web/app/api/captures/route.ts`
   - Do: (1) Create browser-safe types file with `KnowledgeEntry`, `KnowledgeData`, `CapturesData`, `CaptureEntry` mirror, `CaptureResolveRequest`, `CaptureResolveResult`. (2) Create `captures-service.ts` following the `forensics-service.ts` child-process pattern exactly — `execFile` with `--import resolve-ts.mjs --experimental-strip-types --input-type=module --eval <script>`, script imports `loadAllCaptures` from captures.ts via `pathToFileURL`, writes JSON to stdout. Add `resolveCaptureAction()` calling `markCaptureResolved` similarly. (3) Create `knowledge-service.ts` that reads KNOWLEDGE.md directly via `readFileSync` using `resolveBridgeRuntimeConfig().projectCwd + "/.gsd/KNOWLEDGE.md"`. Parser must handle both freeform `## Title` sections with prose AND structured table rows (`| K001 | scope | rule | ... |`). (4) Create GET route `/api/knowledge` calling `collectKnowledgeData()`. (5) Create `/api/captures` with GET calling `collectCapturesData()` and POST calling `resolveCaptureAction()`.

@@ -172,6 +172,12 @@ Follow the established S04 pattern exactly: `forensics-service.ts` for the child
 - `npm run build` — TypeScript compilation of all new files exits 0
 - Inspect: all 5 new files exist and have correct imports/exports
 
+## Observability Impact
+
+- **New inspection surfaces:** `/api/knowledge` GET returns `KnowledgeData` JSON (entries array, filePath, lastModified). `/api/captures` GET returns `CapturesData` JSON (entries array, pendingCount, actionableCount). `/api/captures` POST returns `CaptureResolveResult` JSON (ok, captureId, error?).
+- **Failure visibility:** All three routes return `{ error: string }` with HTTP 500 on service-level errors (subprocess crash, file read failure, JSON parse failure). POST returns `{ error: string }` with HTTP 400 on validation failure (missing fields, invalid classification).
+- **How to inspect:** `curl http://localhost:3000/api/knowledge | jq` and `curl http://localhost:3000/api/captures | jq` from any environment where the web host is running. Service-level errors include subprocess stderr in the error message.
+
 ## Inputs
 
 - `src/web/forensics-service.ts` — reference pattern for child-process service (read for exact `execFile` arguments, env var passing, error handling)
