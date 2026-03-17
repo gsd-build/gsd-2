@@ -134,7 +134,7 @@ test("auto.ts milestone transition block contains worktree lifecycle", () => {
     "auto.ts should contain the worktree lifecycle comment marker",
   );
   assert.ok(
-    autoSrc.includes("mergeMilestoneToMain") && autoSrc.includes("mid !== currentMilestoneId"),
+    autoSrc.includes("mergeMilestoneToMain") && autoSrc.includes("mid !== s.currentMilestoneId"),
     "auto.ts should call mergeMilestoneToMain during milestone transition",
   );
   assert.ok(
