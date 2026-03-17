@@ -85,7 +85,10 @@ const BASELINE_PATTERNS = [
  * .gitignore instead of individual runtime patterns, keeping all GSD
  * artifacts local-only.
  */
-export function ensureGitignore(basePath: string, options?: { commitDocs?: boolean }): boolean {
+export function ensureGitignore(basePath: string, options?: { commitDocs?: boolean; manageGitignore?: boolean }): boolean {
+  // If manage_gitignore is explicitly false, do not touch .gitignore at all
+  if (options?.manageGitignore === false) return false;
+
   const gitignorePath = join(basePath, ".gitignore");
   const commitDocs = options?.commitDocs !== false; // default true
 

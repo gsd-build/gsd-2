@@ -734,9 +734,11 @@ export async function startAuto(
   }
 
   // Ensure .gitignore has baseline patterns
-  const commitDocs = loadEffectiveGSDPreferences()?.preferences?.git?.commit_docs;
-  ensureGitignore(base, { commitDocs });
-  untrackRuntimeFiles(base);
+  const gitPrefs = loadEffectiveGSDPreferences()?.preferences?.git;
+  const commitDocs = gitPrefs?.commit_docs;
+  const manageGitignore = gitPrefs?.manage_gitignore;
+  ensureGitignore(base, { commitDocs, manageGitignore });
+  if (manageGitignore !== false) untrackRuntimeFiles(base);
 
   // Bootstrap .gsd/ if it doesn't exist
   const gsdDir = join(base, ".gsd");
