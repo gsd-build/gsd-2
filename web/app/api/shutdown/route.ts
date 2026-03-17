@@ -1,14 +1,13 @@
+import { scheduleShutdown } from "../../../lib/shutdown-gate";
+
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 export async function POST(): Promise<Response> {
-  // Respond before killing so the client receives the 200
-  const response = Response.json({ ok: true })
+  // Schedule a deferred shutdown instead of exiting immediately.
+  // This gives the client a window to cancel the exit on page refresh —
+  // the boot route calls cancelShutdown() when it receives the next request.
+  scheduleShutdown();
 
-  // Defer shutdown to the next tick so the response flushes first
-  setImmediate(() => {
-    process.exit(0)
-  })
-
-  return response
+  return Response.json({ ok: true })
 }

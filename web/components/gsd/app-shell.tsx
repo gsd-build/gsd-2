@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react"
 import { Sidebar, MilestoneExplorer } from "@/components/gsd/sidebar"
-import { Terminal } from "@/components/gsd/terminal"
+import { ShellTerminal } from "@/components/gsd/shell-terminal"
 import { Dashboard } from "@/components/gsd/dashboard"
 import { Roadmap } from "@/components/gsd/roadmap"
 import { FilesView } from "@/components/gsd/files-view"
@@ -337,7 +337,7 @@ function WorkspaceChrome() {
                 className="overflow-hidden"
                 style={{ height: isTerminalExpanded ? terminalHeight : 0, transition: isDraggingTerminal.current ? "none" : "height 200ms" }}
               >
-                <Terminal className="h-full" />
+                <ShellTerminal className="h-full" />
               </div>
             </div>
           )}

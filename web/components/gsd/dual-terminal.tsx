@@ -16,7 +16,7 @@ import {
 import { deriveWorkflowAction } from "@/lib/workflow-actions"
 import { ScopeBadge } from "@/components/gsd/scope-badge"
 import { NewMilestoneDialog } from "@/components/gsd/new-milestone-dialog"
-import { Terminal } from "./terminal"
+import { ShellTerminal } from "@/components/gsd/shell-terminal"
 
 function AutoTerminal() {
   const state = useGSDWorkspaceState()
@@ -287,7 +287,7 @@ export function DualTerminal() {
 
         {/* Right terminal - Live S03 Terminal */}
         <div style={{ width: `${100 - splitPosition}%` }} className="h-full overflow-hidden">
-          <Terminal className="h-full" />
+          <ShellTerminal className="h-full" />
         </div>
       </div>
 

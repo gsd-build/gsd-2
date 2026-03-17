@@ -1,4 +1,5 @@
 import { getProjectBridgeServiceForCwd, resolveProjectCwd } from "../../../../../src/web/bridge-service.ts";
+import { cancelShutdown } from "../../../../lib/shutdown-gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,9 @@ function encodeSseData(payload: unknown): Uint8Array {
 }
 
 export async function GET(request: Request): Promise<Response> {
+  // SSE reconnection proves the client is alive — cancel any pending shutdown.
+  cancelShutdown();
+
   const projectCwd = resolveProjectCwd(request);
   const bridge = getProjectBridgeServiceForCwd(projectCwd);
 

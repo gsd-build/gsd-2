@@ -312,7 +312,7 @@ export function Dashboard({ onSwitchView, onExpandTerminal }: DashboardProps = {
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-md border border-border bg-card p-4" data-testid="dashboard-current-unit">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -353,12 +353,7 @@ export function Dashboard({ onSwitchView, onExpandTerminal }: DashboardProps = {
             value={isConnecting ? null : formatTokens(totalTokens)}
             icon={<Zap className="h-5 w-5" />}
           />
-          <MetricCard
-            label="Progress"
-            value={isConnecting ? null : (totalTasks > 0 ? `${progressPercent}%` : "—")}
-            subtext={isConnecting ? null : (totalTasks > 0 ? `${doneTasks}/${totalTasks} tasks complete` : "No active slice")}
-            icon={<Activity className="h-5 w-5" />}
-          />
+
         </div>
 
         <div className="mt-6">
