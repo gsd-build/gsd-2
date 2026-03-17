@@ -197,8 +197,12 @@ function parseMessage(
 	let message: LspJsonRpcResponse | LspJsonRpcNotification;
 	try {
 		message = JSON.parse(messageText);
-	} catch {
-		// Malformed JSON from LSP server — skip this message and advance past it
+	} catch (err) {
+		// Malformed JSON from LSP server — log and skip this message
+		if (process.env.DEBUG) {
+			const preview = messageText.length > 200 ? messageText.slice(0, 200) + "..." : messageText;
+			console.error(`[lsp] Dropped malformed JSON message: ${err instanceof Error ? err.message : err} — ${preview}`);
+		}
 		return { message: null, remaining };
 	}
 
