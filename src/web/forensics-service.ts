@@ -23,8 +23,8 @@ function resolveTsLoaderPath(packageRoot: string): string {
  * to summary totals, and doctorIssues is replaced with a count (doctor panel
  * has its own dedicated API route).
  */
-export async function collectForensicsData(): Promise<ForensicReport> {
-  const config = resolveBridgeRuntimeConfig()
+export async function collectForensicsData(projectCwdOverride?: string): Promise<ForensicReport> {
+  const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { packageRoot, projectCwd } = config
 
   const resolveTsLoader = resolveTsLoaderPath(packageRoot)

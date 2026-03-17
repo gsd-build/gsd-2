@@ -1,15 +1,16 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { resolveBridgeRuntimeConfig } from "../../../../src/web/bridge-service.ts"
+import { resolveBridgeRuntimeConfig, resolveProjectCwd } from "../../../../src/web/bridge-service.ts"
 import type { SteerData } from "../../../lib/remaining-command-types.ts"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   try {
-    const config = resolveBridgeRuntimeConfig()
+    const projectCwd = resolveProjectCwd(request);
+    const config = resolveBridgeRuntimeConfig(undefined, projectCwd)
     const overridesPath = join(config.projectCwd, ".gsd", "OVERRIDES.md")
 
     let overridesContent: string | null = null

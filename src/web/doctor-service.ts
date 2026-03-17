@@ -112,8 +112,8 @@ export async function collectDoctorData(scope?: string): Promise<DoctorReport> {
  * Applies doctor fixes (POST — mutating action).
  * Returns fix result with list of applied fixes.
  */
-export async function applyDoctorFixes(scope?: string): Promise<DoctorFixResult> {
-  const config = resolveBridgeRuntimeConfig()
+export async function applyDoctorFixes(scope?: string, projectCwdOverride?: string): Promise<DoctorFixResult> {
+  const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { packageRoot, projectCwd } = config
 
   const resolveTsLoader = resolveTsLoaderPath(packageRoot)

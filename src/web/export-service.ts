@@ -23,8 +23,9 @@ function resolveTsLoaderPath(packageRoot: string): string {
  */
 export async function collectExportData(
   format: "markdown" | "json" = "markdown",
+  projectCwdOverride?: string,
 ): Promise<ExportResult> {
-  const config = resolveBridgeRuntimeConfig()
+  const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { packageRoot, projectCwd } = config
 
   const resolveTsLoader = resolveTsLoaderPath(packageRoot)

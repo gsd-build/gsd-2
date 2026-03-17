@@ -21,8 +21,8 @@ function resolveTsLoaderPath(packageRoot: string): string {
  * Reads the metrics ledger from disk and computes aggregation views
  * (totals, byPhase, bySlice, byModel) for browser consumption.
  */
-export async function collectHistoryData(): Promise<HistoryData> {
-  const config = resolveBridgeRuntimeConfig()
+export async function collectHistoryData(projectCwdOverride?: string): Promise<HistoryData> {
+  const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { packageRoot, projectCwd } = config
 
   const resolveTsLoader = resolveTsLoaderPath(packageRoot)

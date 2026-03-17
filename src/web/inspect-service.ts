@@ -8,8 +8,8 @@ import type { InspectData } from "../../web/lib/remaining-command-types.ts"
  * Collects project inspection data by reading gsd-db.json directly.
  * No child process needed — gsd-db.json is plain JSON with no .js imports.
  */
-export async function collectInspectData(): Promise<InspectData> {
-  const config = resolveBridgeRuntimeConfig()
+export async function collectInspectData(projectCwdOverride?: string): Promise<InspectData> {
+  const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { projectCwd } = config
 
   const gsdDir = join(projectCwd, ".gsd")

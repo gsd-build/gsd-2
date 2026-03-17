@@ -9,8 +9,8 @@ import type { KnowledgeEntry, KnowledgeData } from "../../web/lib/knowledge-capt
  * because KNOWLEDGE.md is a plain markdown file with a deterministic path
  * and no Node ESM .js-extension imports.
  */
-export async function collectKnowledgeData(): Promise<KnowledgeData> {
-  const config = resolveBridgeRuntimeConfig()
+export async function collectKnowledgeData(projectCwdOverride?: string): Promise<KnowledgeData> {
+  const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { projectCwd } = config
 
   const filePath = join(projectCwd, ".gsd", "KNOWLEDGE.md")

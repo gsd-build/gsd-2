@@ -1,4 +1,5 @@
 import { collectCapturesData, resolveCaptureAction } from "../../../../src/web/captures-service.ts"
+import { resolveProjectCwd } from "../../../../src/web/bridge-service.ts"
 import type { CaptureResolveRequest } from "../../../lib/knowledge-captures-types.ts"
 
 export const runtime = "nodejs"
@@ -12,9 +13,10 @@ const VALID_CLASSIFICATIONS = new Set([
   "note",
 ])
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   try {
-    const payload = await collectCapturesData()
+    const projectCwd = resolveProjectCwd(request);
+    const payload = await collectCapturesData(projectCwd)
     return Response.json(payload, {
       headers: {
         "Cache-Control": "no-store",
@@ -60,7 +62,8 @@ export async function POST(request: Request): Promise<Response> {
       )
     }
 
-    const result = await resolveCaptureAction(validation.value!)
+    const projectCwd = resolveProjectCwd(request);
+    const result = await resolveCaptureAction(validation.value!, projectCwd)
     return Response.json(result, {
       headers: {
         "Cache-Control": "no-store",

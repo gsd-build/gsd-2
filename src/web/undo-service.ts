@@ -26,8 +26,8 @@ function resolveTsLoaderPath(packageRoot: string): string {
  * Reads completed-units.json directly (plain JSON, no child process needed)
  * and scans the activity log directory for associated commits.
  */
-export async function collectUndoInfo(): Promise<UndoInfo> {
-  const config = resolveBridgeRuntimeConfig()
+export async function collectUndoInfo(projectCwdOverride?: string): Promise<UndoInfo> {
+  const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { projectCwd } = config
 
   const gsdDir = join(projectCwd, ".gsd")
@@ -118,8 +118,8 @@ export async function collectUndoInfo(): Promise<UndoInfo> {
  * modify git state, completed-units.json, and plan files — all of which
  * use .ts imports that need the resolve-ts.mjs loader.
  */
-export async function executeUndo(): Promise<UndoResult> {
-  const config = resolveBridgeRuntimeConfig()
+export async function executeUndo(projectCwdOverride?: string): Promise<UndoResult> {
+  const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { packageRoot, projectCwd } = config
 
   const resolveTsLoader = resolveTsLoaderPath(packageRoot)

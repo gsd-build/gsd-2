@@ -47,3 +47,7 @@ Node v25's `--experimental-strip-types` handles `.ts` but NOT `.tsx`. Even `modu
 ## dist-redirect.mjs /dist/ Guard
 
 The test resolver's `.js→.ts` rewrite must NOT apply to imports containing `/dist/` — those `.js` files are real compiled artifacts from package builds. The guard `!specifier.includes('/dist/')` in the else-if condition is the minimal fix. Don't over-restrict by blocking all `../` paths since many legitimate `.js→.ts` rewrites use `../` prefixes.
+
+## Auto-Commit May Not Include Code Changes
+
+GSD auto-commit runs after task summaries are written. If the executor writes a summary but doesn't actually modify the source files (e.g., T02 in M006/S01), the commit only captures the summary markdown. Always verify prior task outputs exist in the actual codebase, not just in the summary file. Use `git diff <commit>..HEAD --stat` to check what was actually committed.

@@ -24,8 +24,8 @@ function resolveTsLoaderPath(packageRoot: string): string {
  * cannot resolve the .js extension imports these upstream modules use, so
  * execFile + resolve-ts.mjs is required.
  */
-export async function collectSettingsData(): Promise<SettingsData> {
-  const config = resolveBridgeRuntimeConfig()
+export async function collectSettingsData(projectCwdOverride?: string): Promise<SettingsData> {
+  const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { packageRoot, projectCwd } = config
 
   const resolveTsLoader = resolveTsLoaderPath(packageRoot)

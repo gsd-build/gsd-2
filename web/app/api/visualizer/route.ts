@@ -1,11 +1,13 @@
 import { collectVisualizerData } from "../../../../src/web/visualizer-service.ts"
+import { resolveProjectCwd } from "../../../../src/web/bridge-service.ts"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   try {
-    const payload = await collectVisualizerData()
+    const projectCwd = resolveProjectCwd(request);
+    const payload = await collectVisualizerData(projectCwd)
     return Response.json(payload, {
       headers: {
         "Cache-Control": "no-store",

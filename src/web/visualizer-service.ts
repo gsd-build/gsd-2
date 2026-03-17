@@ -47,8 +47,8 @@ function resolveTsLoaderPath(packageRoot: string): string {
  * extensions that Turbopack cannot resolve). Converts Map fields to Records
  * for safe JSON serialization.
  */
-export async function collectVisualizerData(): Promise<SerializedVisualizerData> {
-  const config = resolveBridgeRuntimeConfig()
+export async function collectVisualizerData(projectCwdOverride?: string): Promise<SerializedVisualizerData> {
+  const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { packageRoot, projectCwd } = config
 
   const resolveTsLoader = resolveTsLoaderPath(packageRoot)

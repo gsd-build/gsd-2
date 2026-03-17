@@ -1,5 +1,6 @@
 import {
   buildBridgeFailureResponse,
+  resolveProjectCwd,
   sendBridgeInput,
 } from "../../../../../src/web/bridge-service.ts";
 
@@ -31,7 +32,8 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    const response = await sendBridgeInput(payload as Parameters<typeof sendBridgeInput>[0]);
+    const projectCwd = resolveProjectCwd(request);
+    const response = await sendBridgeInput(payload as Parameters<typeof sendBridgeInput>[0], projectCwd);
     if (response === null) {
       return Response.json({ ok: true }, { status: 202 });
     }

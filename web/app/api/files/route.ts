@@ -1,6 +1,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
 
+import { resolveProjectCwd } from "../../../../src/web/bridge-service.ts";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -33,16 +35,12 @@ interface FileNode {
   children?: FileNode[];
 }
 
-function getProjectCwd(): string {
-  return process.env.GSD_WEB_PROJECT_CWD || process.cwd();
+function getGsdRoot(projectCwd: string): string {
+  return join(projectCwd, ".gsd");
 }
 
-function getGsdRoot(): string {
-  return join(getProjectCwd(), ".gsd");
-}
-
-function getRootForMode(mode: RootMode): string {
-  return mode === "project" ? getProjectCwd() : getGsdRoot();
+function getRootForMode(mode: RootMode, projectCwd: string): string {
+  return mode === "project" ? projectCwd : getGsdRoot(projectCwd);
 }
 
 /**
@@ -112,7 +110,8 @@ export async function GET(request: Request): Promise<Response> {
     );
   }
 
-  const root = getRootForMode(rootParam);
+  const projectCwd = resolveProjectCwd(request);
+  const root = getRootForMode(rootParam, projectCwd);
   const headers = { "Cache-Control": "no-store" };
 
   // Mode A: return directory tree

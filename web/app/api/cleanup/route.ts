@@ -1,11 +1,13 @@
 import { collectCleanupData, executeCleanup } from "../../../../src/web/cleanup-service.ts"
+import { resolveProjectCwd } from "../../../../src/web/bridge-service.ts"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   try {
-    const payload = await collectCleanupData()
+    const projectCwd = resolveProjectCwd(request);
+    const payload = await collectCleanupData(projectCwd)
     return Response.json(payload, {
       headers: {
         "Cache-Control": "no-store",
@@ -37,7 +39,8 @@ export async function POST(request: Request): Promise<Response> {
       // No body or invalid JSON — empty arrays
     }
 
-    const payload = await executeCleanup(branches, snapshots)
+    const projectCwd = resolveProjectCwd(request);
+    const payload = await executeCleanup(branches, snapshots, projectCwd)
     return Response.json(payload, {
       headers: {
         "Cache-Control": "no-store",

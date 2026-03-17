@@ -22,6 +22,7 @@ import { WizardStepper, type WizardStep } from "./onboarding/wizard-stepper"
 import { StepWelcome } from "./onboarding/step-welcome"
 import { StepProvider } from "./onboarding/step-provider"
 import { StepAuthenticate } from "./onboarding/step-authenticate"
+import { StepDevRoot } from "./onboarding/step-dev-root"
 import { StepOptional } from "./onboarding/step-optional"
 import { StepReady } from "./onboarding/step-ready"
 
@@ -31,6 +32,7 @@ const WIZARD_STEPS: WizardStep[] = [
   { id: "welcome", label: "Welcome", shortLabel: "Welcome" },
   { id: "provider", label: "Provider", shortLabel: "Provider" },
   { id: "authenticate", label: "Authenticate", shortLabel: "Auth" },
+  { id: "devRoot", label: "Dev Root", shortLabel: "Root" },
   { id: "optional", label: "Integrations", shortLabel: "Extras" },
   { id: "ready", label: "Ready", shortLabel: "Ready" },
 ]
@@ -164,7 +166,7 @@ export function OnboardingGate() {
           </div>
 
           {/* Stepper — hidden on welcome/ready */}
-          <div className={cn("hidden transition-opacity md:block", stepIndex === 0 || stepIndex === 4 ? "opacity-0" : "opacity-100")}>
+          <div className={cn("hidden transition-opacity md:block", stepIndex === 0 || stepIndex === 5 ? "opacity-0" : "opacity-100")}>
             <WizardStepper
               steps={WIZARD_STEPS}
               currentIndex={stepIndex}
@@ -267,14 +269,21 @@ export function OnboardingGate() {
               )}
 
               {stepIndex === 3 && (
-                <StepOptional
-                  sections={onboarding.optional.sections}
+                <StepDevRoot
                   onBack={() => paginate(2)}
                   onNext={() => paginate(4)}
                 />
               )}
 
               {stepIndex === 4 && (
+                <StepOptional
+                  sections={onboarding.optional.sections}
+                  onBack={() => paginate(3)}
+                  onNext={() => paginate(5)}
+                />
+              )}
+
+              {stepIndex === 5 && (
                 <StepReady
                   providerLabel={
                     onboarding.lastValidation?.providerId

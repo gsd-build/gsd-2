@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs'
-import { join, resolve } from 'node:path'
-import { agentDir as defaultAgentDir, sessionsDir as defaultSessionsDir } from './app-paths.js'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync } from 'node:fs'
+import { join, resolve, sep } from 'node:path'
+import { agentDir as defaultAgentDir, sessionsDir as defaultSessionsDir, webPreferencesPath as defaultWebPreferencesPath } from './app-paths.js'
 import { getProjectSessionsDir } from './project-sessions.js'
 import { launchWebMode, stopWebMode, type WebModeLaunchStatus, type WebModeStopOptions, type WebModeStopResult } from './web-mode.js'
 
@@ -31,6 +31,7 @@ export interface RunWebCliBranchDeps {
   stderr?: WritableLike
   baseSessionsDir?: string
   agentDir?: string
+  webPreferencesPath?: string
 }
 
 export function parseCliArgs(argv: string[]): CliFlags {
@@ -100,6 +101,64 @@ export function migrateLegacyFlatSessions(baseSessionsDir: string, projectSessio
 function emitWebModeFailure(stderr: WritableLike, status: WebModeLaunchStatus): void {
   if (status.ok) return
   stderr.write(`[gsd] Web mode launch failed: ${status.failureReason}\n`)
+}
+
+/**
+ * Resolve the working directory for context-aware launch detection.
+ *
+ * If the user has configured a dev root via onboarding and their cwd is inside
+ * a project under that dev root, return the one-level-deep project directory.
+ * Otherwise, return the cwd unchanged (browser picker handles selection).
+ *
+ * Edge cases handled:
+ * - Missing or unreadable prefs file → cwd unchanged
+ * - No devRoot field in prefs → cwd unchanged
+ * - devRoot path doesn't exist (stale) → cwd unchanged
+ * - cwd IS the devRoot → cwd unchanged (picker selects)
+ * - cwd outside devRoot → cwd unchanged
+ */
+export function resolveContextAwareCwd(currentCwd: string, prefsPath: string): string {
+  // 1. Read preferences file
+  let prefs: Record<string, unknown>
+  try {
+    const raw = readFileSync(prefsPath, 'utf-8')
+    prefs = JSON.parse(raw)
+  } catch {
+    return currentCwd
+  }
+
+  // 2. Extract devRoot
+  const devRoot = prefs.devRoot
+  if (typeof devRoot !== 'string' || !devRoot) {
+    return currentCwd
+  }
+
+  // 3. Resolve both paths to absolute
+  const resolvedCwd = resolve(currentCwd)
+  const resolvedDevRoot = resolve(devRoot)
+
+  // 4. Check devRoot still exists
+  if (!existsSync(resolvedDevRoot)) {
+    return currentCwd
+  }
+
+  // 5. If cwd IS the devRoot → unchanged (picker handles selection)
+  if (resolvedCwd === resolvedDevRoot) {
+    return currentCwd
+  }
+
+  // 6. If cwd is inside devRoot, extract one-level-deep project directory
+  const prefix = resolvedDevRoot + sep
+  if (resolvedCwd.startsWith(prefix)) {
+    const relative = resolvedCwd.slice(prefix.length)
+    const firstSegment = relative.split(sep)[0]
+    if (firstSegment) {
+      return join(resolvedDevRoot, firstSegment)
+    }
+  }
+
+  // 7. cwd outside devRoot → unchanged
+  return currentCwd
 }
 
 export type RunWebCliBranchResult =
@@ -193,6 +252,10 @@ export async function runWebCliBranch(
   } else {
     currentCwd = defaultCwd
   }
+
+  // Context-aware launch: if cwd is inside a project under the configured dev root,
+  // resolve to the project directory so the browser opens directly into it
+  currentCwd = resolveContextAwareCwd(currentCwd, deps.webPreferencesPath ?? defaultWebPreferencesPath)
 
   const baseSessionsDir = deps.baseSessionsDir ?? defaultSessionsDir
   const agentDir = deps.agentDir ?? defaultAgentDir

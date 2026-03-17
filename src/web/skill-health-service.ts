@@ -20,8 +20,8 @@ function resolveTsLoaderPath(packageRoot: string): string {
  * Loads skill health report via a child process.
  * SkillHealthReport is already all plain objects — no Map/Set conversion needed.
  */
-export async function collectSkillHealthData(): Promise<SkillHealthReport> {
-  const config = resolveBridgeRuntimeConfig()
+export async function collectSkillHealthData(projectCwdOverride?: string): Promise<SkillHealthReport> {
+  const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { packageRoot, projectCwd } = config
 
   const resolveTsLoader = resolveTsLoaderPath(packageRoot)

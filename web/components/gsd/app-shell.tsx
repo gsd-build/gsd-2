@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react"
 import { Sidebar, MilestoneExplorer } from "@/components/gsd/sidebar"
 import { Terminal } from "@/components/gsd/terminal"
 import { Dashboard } from "@/components/gsd/dashboard"
@@ -14,6 +14,7 @@ import { FocusedPanel } from "@/components/gsd/focused-panel"
 import { OnboardingGate } from "@/components/gsd/onboarding-gate"
 import { CommandSurface } from "@/components/gsd/command-surface"
 import { DevOverridesProvider } from "@/lib/dev-overrides"
+import { ProjectStoreManagerProvider, useProjectStoreManager } from "@/lib/project-store-manager"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -29,6 +30,7 @@ import {
   useGSDWorkspaceActions,
 } from "@/lib/gsd-workspace-store"
 import { ScopeBadge } from "@/components/gsd/scope-badge"
+import { ProjectsView } from "@/components/gsd/projects-view"
 
 function statusPillClass(tone: ReturnType<typeof getStatusPresentation>["tone"]): string {
   switch (tone) {
@@ -60,7 +62,7 @@ function connectionDotClass(tone: ReturnType<typeof getStatusPresentation>["tone
   }
 }
 
-const KNOWN_VIEWS = new Set(["dashboard", "power", "roadmap", "files", "activity", "visualize"])
+const KNOWN_VIEWS = new Set(["dashboard", "power", "roadmap", "files", "activity", "visualize", "projects"])
 
 function viewStorageKey(projectCwd: string): string {
   return `gsd-active-view:${projectCwd}`
@@ -283,6 +285,7 @@ function WorkspaceChrome() {
                 {activeView === "files" && <FilesView />}
                 {activeView === "activity" && <ActivityView />}
                 {activeView === "visualize" && <VisualizerView />}
+                {activeView === "projects" && <ProjectsView />}
               </>
             )}
           </div>
@@ -347,10 +350,46 @@ function WorkspaceChrome() {
 
 export function GSDAppShell() {
   return (
-    <GSDWorkspaceProvider>
+    <ProjectStoreManagerProvider>
+      <ProjectAwareWorkspace />
+    </ProjectStoreManagerProvider>
+  )
+}
+
+function ProjectAwareWorkspace() {
+  const manager = useProjectStoreManager()
+  const activeProjectCwd = useSyncExternalStore(manager.subscribe, manager.getSnapshot, manager.getSnapshot)
+  const activeStore = activeProjectCwd ? manager.getActiveStore() : null
+
+  return (
+    <GSDWorkspaceProvider store={activeStore ?? undefined}>
       <DevOverridesProvider>
+        <BootProjectInitializer />
         <WorkspaceChrome />
       </DevOverridesProvider>
     </GSDWorkspaceProvider>
   )
+}
+
+/**
+ * Auto-registers the boot project with the ProjectStoreManager.
+ *
+ * When the workspace boots and provides a project.cwd (from the server's launch
+ * payload), this component calls manager.switchProject() to register the initial
+ * project — enabling the multi-project flow without requiring explicit user action.
+ *
+ * Runs once on boot completion, then becomes a no-op.
+ */
+function BootProjectInitializer() {
+  const manager = useProjectStoreManager()
+  const workspace = useGSDWorkspaceState()
+  const bootProjectCwd = workspace.boot?.project.cwd
+
+  useEffect(() => {
+    if (bootProjectCwd && !manager.getActiveProjectCwd()) {
+      manager.switchProject(bootProjectCwd)
+    }
+  }, [bootProjectCwd, manager])
+
+  return null
 }

@@ -22,8 +22,8 @@ function resolveTsLoaderPath(packageRoot: string): string {
  * process, so activeCycles will be empty. The child calls getHookStatus() which
  * reads from preferences to build entries, then formatHookStatus() for display.
  */
-export async function collectHooksData(): Promise<HooksData> {
-  const config = resolveBridgeRuntimeConfig()
+export async function collectHooksData(projectCwdOverride?: string): Promise<HooksData> {
+  const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { packageRoot, projectCwd } = config
 
   const resolveTsLoader = resolveTsLoaderPath(packageRoot)

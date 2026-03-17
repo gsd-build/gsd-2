@@ -1,26 +1,25 @@
 <svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <style>
-    @media (prefers-color-scheme: light) {
-      .background { fill: black; }
-      .foreground { fill: white; }
-    }
-    @media (prefers-color-scheme: dark) {
-      .background { fill: white; }
-      .foreground { fill: black; }
-    }
-  </style>
-  <g clip-path="url(#clip0_7960_43945)">
-    <rect class="background" width="180" height="180" rx="37" />
-    <g style="transform: scale(95%); transform-origin: center">
-      <path class="foreground"
-        d="M101.141 53H136.632C151.023 53 162.689 64.6662 162.689 79.0573V112.904H148.112V79.0573C148.112 78.7105 148.098 78.3662 148.072 78.0251L112.581 112.898C112.701 112.902 112.821 112.904 112.941 112.904H148.112V126.672H112.941C98.5504 126.672 86.5638 114.891 86.5638 100.5V66.7434H101.141V100.5C101.141 101.15 101.191 101.792 101.289 102.422L137.56 66.7816C137.255 66.7563 136.945 66.7434 136.632 66.7434H101.141V53Z" />
-      <path class="foreground"
-        d="M65.2926 124.136L14 66.7372H34.6355L64.7495 100.436V66.7372H80.1365V118.47C80.1365 126.278 70.4953 129.958 65.2926 124.136Z" />
-    </g>
-  </g>
-  <defs>
-    <clipPath id="clip0_7960_43945">
-      <rect width="180" height="180" fill="white" />
-    </clipPath>
-  </defs>
+<g clip-path="url(#clip0_1288_85)">
+<mask id="mask0_1288_85" style="mask-type:luminance" maskUnits="userSpaceOnUse" x="0" y="0" width="180" height="180">
+<path d="M180 0H0V180H180V0Z" fill="white"/>
+</mask>
+<g mask="url(#mask0_1288_85)">
+<path d="M143 0H37C16.5655 0 0 16.5655 0 37V143C0 163.435 16.5655 180 37 180H143C163.435 180 180 163.435 180 143V37C180 16.5655 163.435 0 143 0Z" fill="white"/>
+</g>
+<rect x="49.3584" y="55.8633" width="23.5063" height="75.6289" fill="black" fill-opacity="0.4"/>
+<rect x="61.2139" y="154.998" width="23.5063" height="66.2264" transform="rotate(-90 61.2139 154.998)" fill="black" fill-opacity="0.4"/>
+<rect x="61.2139" y="55.8633" width="23.5063" height="66.2264" transform="rotate(-90 61.2139 55.8633)" fill="black" fill-opacity="0.4"/>
+<rect x="112.723" y="131.492" width="23.5063" height="25.1415" transform="rotate(-90 112.723 131.492)" fill="black" fill-opacity="0.4"/>
+<rect x="93.5093" y="107.986" width="23.5063" height="44.3553" transform="rotate(-90 93.5093 107.986)" fill="black" fill-opacity="0.4"/>
+<rect x="42" y="48.5059" width="23.5063" height="75.6289" fill="black"/>
+<rect x="53.8555" y="147.643" width="23.5063" height="66.2264" transform="rotate(-90 53.8555 147.643)" fill="black"/>
+<rect x="53.8555" y="48.5059" width="23.5063" height="66.2264" transform="rotate(-90 53.8555 48.5059)" fill="black"/>
+<rect x="105.365" y="124.135" width="23.5063" height="25.1415" transform="rotate(-90 105.365 124.135)" fill="black"/>
+<rect x="86.1509" y="100.629" width="23.5063" height="44.3553" transform="rotate(-90 86.1509 100.629)" fill="black"/>
+</g>
+<defs>
+<clipPath id="clip0_1288_85">
+<rect width="180" height="180" fill="white"/>
+</clipPath>
+</defs>
 </svg>

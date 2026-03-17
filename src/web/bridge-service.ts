@@ -480,6 +480,9 @@ export interface ProjectDetectionSignals {
   hasPlanningFolder: boolean;
   hasGitRepo: boolean;
   hasPackageJson: boolean;
+  hasCargo?: boolean;
+  hasGoMod?: boolean;
+  hasPyproject?: boolean;
   fileCount: number;
 }
 
@@ -488,13 +491,16 @@ export interface ProjectDetection {
   signals: ProjectDetectionSignals;
 }
 
-function detectProjectKind(projectCwd: string): ProjectDetection {
+export function detectProjectKind(projectCwd: string): ProjectDetection {
   const checkExists = getBridgeDeps().existsSync ?? existsSync;
 
   const hasGsdFolder = checkExists(join(projectCwd, ".gsd"));
   const hasPlanningFolder = checkExists(join(projectCwd, ".planning"));
   const hasGitRepo = checkExists(join(projectCwd, ".git"));
   const hasPackageJson = checkExists(join(projectCwd, "package.json"));
+  const hasCargo = checkExists(join(projectCwd, "Cargo.toml"));
+  const hasGoMod = checkExists(join(projectCwd, "go.mod"));
+  const hasPyproject = checkExists(join(projectCwd, "pyproject.toml"));
 
   // Count top-level non-dot entries (cheap heuristic for "has code")
   let fileCount = 0;
@@ -510,6 +516,9 @@ function detectProjectKind(projectCwd: string): ProjectDetection {
     hasPlanningFolder,
     hasGitRepo,
     hasPackageJson,
+    hasCargo,
+    hasGoMod,
+    hasPyproject,
     fileCount,
   };
 
@@ -528,7 +537,7 @@ function detectProjectKind(projectCwd: string): ProjectDetection {
     kind = hasMilestones ? "active-gsd" : "empty-gsd";
   } else if (hasPlanningFolder) {
     kind = "v1-legacy";
-  } else if (hasGitRepo || hasPackageJson || fileCount > 2) {
+  } else if (hasGitRepo || hasPackageJson || hasCargo || hasGoMod || hasPyproject || fileCount > 2) {
     kind = "brownfield";
   } else {
     kind = "blank";
@@ -644,7 +653,7 @@ const defaultBridgeServiceDeps: BridgeServiceDeps = {
 };
 
 let bridgeServiceOverrides: Partial<BridgeServiceDeps> | null = null;
-let projectBridgeSingleton: { key: string; service: BridgeService } | null = null;
+const projectBridgeRegistry = new Map<string, BridgeService>();
 const workspaceIndexCache = new Map<string, WorkspaceIndexCacheEntry>();
 
 async function loadSessionBrowserSessionsViaChildProcess(config: BridgeRuntimeConfig): Promise<SessionInfo[]> {
@@ -1011,8 +1020,8 @@ async function fallbackWorkspaceIndex(basePath: string): Promise<GSDWorkspaceInd
   return await loadWorkspaceIndexViaChildProcess(basePath, packageRoot);
 }
 
-export function resolveBridgeRuntimeConfig(env: NodeJS.ProcessEnv = getBridgeDeps().env ?? process.env): BridgeRuntimeConfig {
-  const projectCwd = env.GSD_WEB_PROJECT_CWD || process.cwd();
+export function resolveBridgeRuntimeConfig(env: NodeJS.ProcessEnv = getBridgeDeps().env ?? process.env, projectCwdOverride?: string): BridgeRuntimeConfig {
+  const projectCwd = projectCwdOverride || env.GSD_WEB_PROJECT_CWD || process.cwd();
   const projectSessionsDir = env.GSD_WEB_PROJECT_SESSIONS_DIR || getProjectSessionsDir(projectCwd);
   const packageRoot = env.GSD_WEB_PACKAGE_ROOT || DEFAULT_PACKAGE_ROOT;
   return { projectCwd, projectSessionsDir, packageRoot };
@@ -1629,22 +1638,32 @@ export class BridgeService {
   }
 }
 
-export function getProjectBridgeService(): BridgeService {
+export function getProjectBridgeServiceForCwd(projectCwd: string): BridgeService {
+  const resolvedPath = resolve(projectCwd);
+  const existing = projectBridgeRegistry.get(resolvedPath);
+  if (existing) return existing;
+
+  const config = resolveBridgeRuntimeConfig(undefined, resolvedPath);
   const deps = getBridgeDeps();
-  const config = resolveBridgeRuntimeConfig(deps.env ?? process.env);
-  const key = `${config.projectCwd}::${config.projectSessionsDir}::${config.packageRoot}`;
-
-  if (projectBridgeSingleton && projectBridgeSingleton.key === key) {
-    return projectBridgeSingleton.service;
-  }
-
-  if (projectBridgeSingleton) {
-    void projectBridgeSingleton.service.dispose();
-  }
-
   const service = new BridgeService(config, deps);
-  projectBridgeSingleton = { key, service };
+  projectBridgeRegistry.set(resolvedPath, service);
   return service;
+}
+
+export function resolveProjectCwd(request: Request): string {
+  try {
+    const url = new URL(request.url);
+    const projectParam = url.searchParams.get("project");
+    if (projectParam) return decodeURIComponent(projectParam);
+  } catch {
+    // Malformed URL — fall through to env-based default.
+  }
+  return (getBridgeDeps().env ?? process.env).GSD_WEB_PROJECT_CWD || process.cwd();
+}
+
+export function getProjectBridgeService(): BridgeService {
+  const config = resolveBridgeRuntimeConfig();
+  return getProjectBridgeServiceForCwd(config.projectCwd);
 }
 
 function toBootResumableSession(session: LocalSessionInfo, activeSessionFile: string | null): BootResumableSession {
@@ -1787,11 +1806,11 @@ function buildSessionManageError(
   };
 }
 
-export async function collectSessionBrowserPayload(query: SessionBrowserQuery = {}): Promise<SessionBrowserResponse> {
+export async function collectSessionBrowserPayload(query: SessionBrowserQuery = {}, projectCwd?: string): Promise<SessionBrowserResponse> {
   const deps = getBridgeDeps();
   const env = deps.env ?? process.env;
-  const config = resolveBridgeRuntimeConfig(env);
-  const bridge = getProjectBridgeService();
+  const config = resolveBridgeRuntimeConfig(env, projectCwd);
+  const bridge = projectCwd ? getProjectBridgeServiceForCwd(projectCwd) : getProjectBridgeService();
 
   try {
     await bridge.ensureStarted();
@@ -1820,10 +1839,10 @@ export async function collectSessionBrowserPayload(query: SessionBrowserQuery = 
   };
 }
 
-export async function renameSessionInCurrentProject(request: RenameSessionRequest): Promise<SessionManageResponse> {
+export async function renameSessionInCurrentProject(request: RenameSessionRequest, projectCwd?: string): Promise<SessionManageResponse> {
   const deps = getBridgeDeps();
   const env = deps.env ?? process.env;
-  const config = resolveBridgeRuntimeConfig(env);
+  const config = resolveBridgeRuntimeConfig(env, projectCwd);
   const nextName = request.name.trim();
 
   if (!nextName) {
@@ -1842,7 +1861,7 @@ export async function renameSessionInCurrentProject(request: RenameSessionReques
     });
   }
 
-  const bridge = getProjectBridgeService();
+  const bridge = projectCwd ? getProjectBridgeServiceForCwd(projectCwd) : getProjectBridgeService();
   try {
     await bridge.ensureStarted();
   } catch (error) {
@@ -1856,7 +1875,7 @@ export async function renameSessionInCurrentProject(request: RenameSessionReques
   const isActiveSession = Boolean(activeSessionFile && resolve(activeSessionFile) === resolve(targetSession.path));
 
   if (isActiveSession) {
-    const response = await sendBridgeInput({ type: "set_session_name", name: nextName });
+    const response = await sendBridgeInput({ type: "set_session_name", name: nextName }, projectCwd);
     if (response === null) {
       return buildSessionManageError("rename_failed", "Active session rename did not return a response", {
         sessionPath: targetSession.path,
@@ -1926,7 +1945,7 @@ async function resolveBootOnboardingState(deps: BridgeServiceDeps, env: NodeJS.P
   return await collectOnboardingState();
 }
 
-export async function collectCurrentProjectOnboardingState(): Promise<OnboardingState> {
+export async function collectCurrentProjectOnboardingState(projectCwd?: string): Promise<OnboardingState> {
   const deps = getBridgeDeps();
   const env = deps.env ?? process.env;
   return await resolveBootOnboardingState(deps, env);
@@ -1943,11 +1962,12 @@ export interface BridgeSelectiveLiveStatePayload {
 
 export async function collectSelectiveLiveStatePayload(
   domains: BridgeSelectiveLiveStateDomain[] = ["auto", "workspace", "resumable_sessions"],
+  projectCwd?: string,
 ): Promise<BridgeSelectiveLiveStatePayload> {
   const deps = getBridgeDeps();
   const env = deps.env ?? process.env;
-  const config = resolveBridgeRuntimeConfig(env);
-  const bridge = getProjectBridgeService();
+  const config = resolveBridgeRuntimeConfig(env, projectCwd);
+  const bridge = projectCwd ? getProjectBridgeServiceForCwd(projectCwd) : getProjectBridgeService();
 
   try {
     await bridge.ensureStarted();
@@ -1981,10 +2001,10 @@ export async function collectSelectiveLiveStatePayload(
   return payload;
 }
 
-export async function collectBootPayload(): Promise<BridgeBootPayload> {
+export async function collectBootPayload(projectCwd?: string): Promise<BridgeBootPayload> {
   const deps = getBridgeDeps();
   const env = deps.env ?? process.env;
-  const config = resolveBridgeRuntimeConfig(env);
+  const config = resolveBridgeRuntimeConfig(env, projectCwd);
   const getAutoDashboardData = deps.getAutoDashboardData ?? (() => collectTestOnlyFallbackAutoDashboardData());
   const listSessions = deps.listSessions ?? (async (dir: string) => listProjectSessions(dir));
   const projectDetection = detectProjectKind(config.projectCwd);
@@ -2034,7 +2054,7 @@ export async function collectBootPayload(): Promise<BridgeBootPayload> {
     };
   }
 
-  const bridge = getProjectBridgeService();
+  const bridge = projectCwd ? getProjectBridgeServiceForCwd(projectCwd) : getProjectBridgeService();
 
   const workspacePromise = loadCachedWorkspaceIndex(
     config.projectCwd,
@@ -2081,8 +2101,9 @@ export function buildBridgeFailureResponse(commandType: string, error: unknown):
   };
 }
 
-export async function refreshProjectBridgeAuth(): Promise<void> {
-  await getProjectBridgeService().refreshAuth();
+export async function refreshProjectBridgeAuth(projectCwd?: string): Promise<void> {
+  const bridge = projectCwd ? getProjectBridgeServiceForCwd(projectCwd) : getProjectBridgeService();
+  await bridge.refreshAuth();
 }
 
 registerOnboardingBridgeAuthRefresher(async () => {
@@ -2091,11 +2112,13 @@ registerOnboardingBridgeAuthRefresher(async () => {
 
 export function emitProjectLiveStateInvalidation(
   descriptor: BridgeLiveStateInvalidationDescriptor,
+  projectCwd?: string,
 ): BridgeLiveStateInvalidationEvent {
-  return getProjectBridgeService().publishLiveStateInvalidation(descriptor);
+  const bridge = projectCwd ? getProjectBridgeServiceForCwd(projectCwd) : getProjectBridgeService();
+  return bridge.publishLiveStateInvalidation(descriptor);
 }
 
-export async function sendBridgeInput(input: BridgeInput): Promise<RpcResponse | null> {
+export async function sendBridgeInput(input: BridgeInput, projectCwd?: string): Promise<RpcResponse | null> {
   if (!isReadOnlyBridgeInput(input)) {
     const onboarding = await collectOnboardingState();
     if (onboarding.locked) {
@@ -2103,7 +2126,8 @@ export async function sendBridgeInput(input: BridgeInput): Promise<RpcResponse |
     }
   }
 
-  return await getProjectBridgeService().sendInput(input);
+  const bridge = projectCwd ? getProjectBridgeServiceForCwd(projectCwd) : getProjectBridgeService();
+  return await bridge.sendInput(input);
 }
 
 export function configureBridgeServiceForTests(overrides: Partial<BridgeServiceDeps> | null): void {
@@ -2112,10 +2136,12 @@ export function configureBridgeServiceForTests(overrides: Partial<BridgeServiceD
 }
 
 export async function resetBridgeServiceForTests(): Promise<void> {
-  if (projectBridgeSingleton) {
-    await projectBridgeSingleton.service.dispose();
+  const disposePromises: Promise<void>[] = [];
+  for (const service of projectBridgeRegistry.values()) {
+    disposePromises.push(service.dispose());
   }
-  projectBridgeSingleton = null;
+  await Promise.all(disposePromises);
+  projectBridgeRegistry.clear();
   bridgeServiceOverrides = null;
   invalidateWorkspaceIndexCache();
 }

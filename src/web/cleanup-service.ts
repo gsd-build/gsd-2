@@ -21,8 +21,8 @@ function resolveTsLoaderPath(packageRoot: string): string {
  * Child-process pattern required because native-git-bridge.ts uses .ts imports
  * that need the resolve-ts.mjs loader.
  */
-export async function collectCleanupData(): Promise<CleanupData> {
-  const config = resolveBridgeRuntimeConfig()
+export async function collectCleanupData(projectCwdOverride?: string): Promise<CleanupData> {
+  const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { packageRoot, projectCwd } = config
 
   const resolveTsLoader = resolveTsLoaderPath(packageRoot)
@@ -106,8 +106,9 @@ export async function collectCleanupData(): Promise<CleanupData> {
 export async function executeCleanup(
   deleteBranches: string[],
   pruneSnapshots: string[],
+  projectCwdOverride?: string,
 ): Promise<CleanupResult> {
-  const config = resolveBridgeRuntimeConfig()
+  const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { packageRoot, projectCwd } = config
 
   const resolveTsLoader = resolveTsLoaderPath(packageRoot)

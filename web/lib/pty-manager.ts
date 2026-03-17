@@ -146,7 +146,7 @@ function loadNodePty(): LoadedNodePty {
   );
 }
 
-export function getOrCreateSession(sessionId: string): PtySession {
+export function getOrCreateSession(sessionId: string, projectCwd?: string): PtySession {
   ensureProcessCleanupHandlers();
   const map = getSessions();
   const existing = map.get(sessionId);
@@ -179,7 +179,7 @@ export function getOrCreateSession(sessionId: string): PtySession {
   }
 
   const shell = getDefaultShell();
-  const cwd = getProjectCwd();
+  const cwd = projectCwd || getProjectCwd();
   console.log("[pty] Spawning shell:", shell, "cwd:", cwd, "node-pty:", nodePtyRoot);
 
   // Build a clean env — remove GSD-specific vars that would confuse a shell

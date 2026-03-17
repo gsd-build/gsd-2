@@ -541,3 +541,122 @@ test('gsd web stop <path> is parsed and dispatched with resolved path', async ()
     rmSync(tmp, { recursive: true, force: true })
   }
 })
+
+// ─── Context-aware launch detection tests ──────────────────────────────
+
+test('resolveContextAwareCwd returns project cwd when inside a project under dev root', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-ctx-aware-'))
+  const devRoot = join(tmp, 'devroot')
+  const projectA = join(devRoot, 'projectA')
+  const prefsPath = join(tmp, 'web-preferences.json')
+
+  try {
+    mkdirSync(projectA, { recursive: true })
+    writeFileSync(prefsPath, JSON.stringify({ devRoot }))
+
+    const result = cliWeb.resolveContextAwareCwd(projectA, prefsPath)
+    assert.equal(result, projectA)
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('resolveContextAwareCwd returns cwd unchanged when AT dev root', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-ctx-aware-'))
+  const devRoot = join(tmp, 'devroot')
+  const prefsPath = join(tmp, 'web-preferences.json')
+
+  try {
+    mkdirSync(devRoot, { recursive: true })
+    writeFileSync(prefsPath, JSON.stringify({ devRoot }))
+
+    const result = cliWeb.resolveContextAwareCwd(devRoot, prefsPath)
+    assert.equal(result, devRoot)
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('resolveContextAwareCwd returns cwd unchanged when no dev root configured', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-ctx-aware-'))
+  const prefsPath = join(tmp, 'web-preferences.json')
+  const cwd = join(tmp, 'somedir')
+
+  try {
+    mkdirSync(cwd, { recursive: true })
+    writeFileSync(prefsPath, JSON.stringify({ theme: 'dark' }))
+
+    const result = cliWeb.resolveContextAwareCwd(cwd, prefsPath)
+    assert.equal(result, cwd)
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('resolveContextAwareCwd returns cwd unchanged when prefs file missing', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-ctx-aware-'))
+  const prefsPath = join(tmp, 'nonexistent-prefs.json')
+  const cwd = join(tmp, 'somedir')
+
+  try {
+    mkdirSync(cwd, { recursive: true })
+
+    const result = cliWeb.resolveContextAwareCwd(cwd, prefsPath)
+    assert.equal(result, cwd)
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('resolveContextAwareCwd returns cwd unchanged when dev root path is stale', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-ctx-aware-'))
+  const prefsPath = join(tmp, 'web-preferences.json')
+  const cwd = join(tmp, 'somedir')
+  const staleDevRoot = join(tmp, 'nonexistent-devroot')
+
+  try {
+    mkdirSync(cwd, { recursive: true })
+    writeFileSync(prefsPath, JSON.stringify({ devRoot: staleDevRoot }))
+
+    const result = cliWeb.resolveContextAwareCwd(cwd, prefsPath)
+    assert.equal(result, cwd)
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('resolveContextAwareCwd resolves nested cwd to one-level-deep project', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-ctx-aware-'))
+  const devRoot = join(tmp, 'devroot')
+  const projectA = join(devRoot, 'projectA')
+  const nested = join(projectA, 'src', 'components', 'deep')
+  const prefsPath = join(tmp, 'web-preferences.json')
+
+  try {
+    mkdirSync(nested, { recursive: true })
+    writeFileSync(prefsPath, JSON.stringify({ devRoot }))
+
+    const result = cliWeb.resolveContextAwareCwd(nested, prefsPath)
+    assert.equal(result, projectA)
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('resolveContextAwareCwd returns cwd unchanged when outside dev root', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-ctx-aware-'))
+  const devRoot = join(tmp, 'devroot')
+  const outsideDir = join(tmp, 'elsewhere')
+  const prefsPath = join(tmp, 'web-preferences.json')
+
+  try {
+    mkdirSync(devRoot, { recursive: true })
+    mkdirSync(outsideDir, { recursive: true })
+    writeFileSync(prefsPath, JSON.stringify({ devRoot }))
+
+    const result = cliWeb.resolveContextAwareCwd(outsideDir, prefsPath)
+    assert.equal(result, outsideDir)
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})

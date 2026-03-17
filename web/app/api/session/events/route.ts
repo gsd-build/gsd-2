@@ -1,4 +1,4 @@
-import { getProjectBridgeService } from "../../../../../src/web/bridge-service.ts";
+import { getProjectBridgeServiceForCwd, resolveProjectCwd } from "../../../../../src/web/bridge-service.ts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,7 +10,8 @@ function encodeSseData(payload: unknown): Uint8Array {
 }
 
 export async function GET(request: Request): Promise<Response> {
-  const bridge = getProjectBridgeService();
+  const projectCwd = resolveProjectCwd(request);
+  const bridge = getProjectBridgeServiceForCwd(projectCwd);
 
   try {
     await bridge.ensureStarted();

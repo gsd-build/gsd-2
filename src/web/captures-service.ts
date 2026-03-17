@@ -88,8 +88,8 @@ export async function collectCapturesData(): Promise<CapturesData> {
  * Resolves (triages) a single capture by calling markCaptureResolved() in a
  * child process. Returns { ok: true, captureId } on success.
  */
-export async function resolveCaptureAction(request: CaptureResolveRequest): Promise<CaptureResolveResult> {
-  const config = resolveBridgeRuntimeConfig()
+export async function resolveCaptureAction(request: CaptureResolveRequest, projectCwdOverride?: string): Promise<CaptureResolveResult> {
+  const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { packageRoot, projectCwd } = config
 
   const resolveTsLoader = resolveTsLoaderPath(packageRoot)

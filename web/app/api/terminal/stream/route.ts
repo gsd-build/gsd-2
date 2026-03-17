@@ -10,6 +10,7 @@ import {
   getOrCreateSession,
   addListener,
 } from "../../../../lib/pty-manager";
+import { resolveProjectCwd } from "../../../../../src/web/bridge-service.ts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,10 +20,11 @@ const encoder = new TextEncoder();
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const sessionId = url.searchParams.get("id") || "default";
+  const projectCwd = resolveProjectCwd(request);
 
   // Ensure the session exists
   try {
-    getOrCreateSession(sessionId);
+    getOrCreateSession(sessionId, projectCwd);
   } catch (error) {
     console.error("[pty-stream] Failed to create session:", error);
     return Response.json(

@@ -1,4 +1,5 @@
 import { collectDoctorData, applyDoctorFixes } from "../../../../src/web/doctor-service.ts"
+import { resolveProjectCwd } from "../../../../src/web/bridge-service.ts"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -7,7 +8,8 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const url = new URL(request.url)
     const scope = url.searchParams.get("scope") ?? undefined
-    const payload = await collectDoctorData(scope)
+    const projectCwd = resolveProjectCwd(request);
+    const payload = await collectDoctorData(scope, projectCwd)
     return Response.json(payload, {
       headers: {
         "Cache-Control": "no-store",
@@ -36,7 +38,8 @@ export async function POST(request: Request): Promise<Response> {
     } catch {
       // No body or invalid JSON — scope stays undefined
     }
-    const payload = await applyDoctorFixes(scope)
+    const projectCwd = resolveProjectCwd(request);
+    const payload = await applyDoctorFixes(scope, projectCwd)
     return Response.json(payload, {
       headers: {
         "Cache-Control": "no-store",

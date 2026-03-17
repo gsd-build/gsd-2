@@ -18,6 +18,7 @@ import {
   Columns2,
   LifeBuoy,
   LogOut,
+  FolderKanban,
   Loader2,
   Milestone,
   SkipForward,
@@ -69,6 +70,7 @@ export function NavRail({ activeView, onViewChange, isConnecting = false }: NavR
   const { openCommandSurface } = useGSDWorkspaceActions()
 
   const navItems = [
+    { id: "projects", label: "Projects", icon: FolderKanban },
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "power", label: "Power Mode", icon: Columns2 },
     { id: "roadmap", label: "Roadmap", icon: MapIcon },

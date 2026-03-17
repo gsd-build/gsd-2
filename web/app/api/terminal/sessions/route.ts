@@ -11,6 +11,7 @@ import {
   getOrCreateSession,
   destroySession,
 } from "../../../../lib/pty-manager";
+import { resolveProjectCwd } from "../../../../../src/web/bridge-service.ts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,9 +27,10 @@ export async function GET(): Promise<Response> {
   return Response.json({ sessions: listSessions() });
 }
 
-export async function POST(): Promise<Response> {
+export async function POST(request: Request): Promise<Response> {
+  const projectCwd = resolveProjectCwd(request);
   const id = `term-${getNextIndex()}`;
-  getOrCreateSession(id);
+  getOrCreateSession(id, projectCwd);
   return Response.json({ id });
 }
 

@@ -148,8 +148,8 @@ function collectChangedFiles(repoRoot: string, projectPath: string | null): GitS
     .filter((file): file is GitSummaryFile => file !== null)
 }
 
-export async function collectCurrentProjectGitSummary(): Promise<GitSummaryResponse> {
-  const config = resolveBridgeRuntimeConfig()
+export async function collectCurrentProjectGitSummary(projectCwdOverride?: string): Promise<GitSummaryResponse> {
+  const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const projectCwd = resolve(config.projectCwd)
 
   const repoRoot = gitExecTrim(projectCwd, ["rev-parse", "--show-toplevel"], true)

@@ -272,16 +272,16 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Deferred
 
-### R020 — Support broader project/session switching beyond the current-project launch contract.
+### R020 — Support multi-project workspace with dev root selection, project discovery, and project switching.
 - Class: admin/support
-- Status: deferred
-- Description: Support broader project/session switching beyond the current-project launch contract.
-- Why it matters: It may become useful once browser mode is established, but it is not required to make `gsd --web` real.
-- Source: inferred
-- Primary owning slice: none
+- Status: validated
+- Description: Support multi-project workspace with dev root selection, smart project discovery, NavRail project browser, concurrent background agent sessions, and context-aware launch.
+- Why it matters: Users working across multiple projects must juggle separate browser tabs and host processes. A unified multi-project workspace removes this friction.
+- Source: user request
+- Primary owning slice: M006
 - Supporting slices: none
-- Validation: unmapped
-- Notes: Current-project launch is the primary requirement for now.
+- Validation: Bridge registry manages concurrent instances keyed by project path (S01). All 29 API routes accept `?project=` parameter with env-var fallback (S01). Project discovery scans dev root, Projects view renders in NavRail with kind badges, per-project store isolation with SSE lifecycle proven (S02). Onboarding dev root step at position 3 with skip, preferences persist via `/api/preferences` PUT (S03). Context-aware launch detection with 7 contract tests covering all edge cases (S03). Browser boot auto-initializes project store manager (S03). 1222 tests pass, both builds green. Human UAT scripted.
+- Notes: M006 delivered the full multi-project workspace across three slices. UAT is the remaining human acceptance gate.
 
 ### R021 — Add deeper analytics/history views beyond the live dashboard and activity surfaces required for the core web workflow.
 - Class: operability
@@ -355,7 +355,7 @@ This file is the explicit capability and coverage contract for the project.
 | R009 | quality-attribute | validated | M001/S06 | M001/S01, M001/S03, M001/S04, M001/S05, M001/S07 | verified by S06's continuity/performance hardening (`MAX_TRANSCRIPT_BLOCKS`, command timeout recovery, reconnect/visibility refresh), S07's thinner `launchWebMode` parent bootstrap and stable runtime/build regressions, and the final live browser/UAT closure for the remaining subjective acceptance bar. |
 | R010 | failure-visibility | validated | M001/S06 | M001/S03, M001/S04, M001/S07 | verified by `src/tests/web-continuity-contract.test.ts` (timeout clears stuck state with error visibility and reconnect recovery), S02's structured onboarding lock/validation diagnostics, the error-banner retry affordance in app-shell, and `npm run build:web-host`. |
 | R011 | core-capability | validated | M002/S01 | M002/S02, M002/S03, M002/S04 | verified by `src/tests/integration/web-mode-runtime.test.ts`, `src/tests/integration/web-mode-onboarding.test.ts`, `src/tests/integration/web-mode-assembled.test.ts`, `src/tests/web-command-parity-contract.test.ts`, `src/tests/web-session-parity-contract.test.ts`, `src/tests/web-live-state-contract.test.ts`, `src/tests/web-recovery-diagnostics-contract.test.ts`, `npm run build:web-host`, and the real packaged-host browser proof of refresh/reopen, daily-use browser controls, and seeded interrupted-run recovery. |
-| R020 | admin/support | deferred | none | none | unmapped |
+| R020 | admin/support | validated | M006 | none | Bridge registry, project-scoped API, project discovery, Projects view, store isolation, onboarding dev root step, context-aware launch (7 tests), boot auto-init. 1222 tests pass, both builds green. |
 | R021 | operability | deferred | none | none | unmapped |
 | R022 | operability | deferred | none | none | unmapped |
 | R030 | anti-feature | out-of-scope | none | none | n/a |
@@ -380,6 +380,6 @@ This file is the explicit capability and coverage contract for the project.
 - Active requirements: 2 (R111, R112)
 - Mapped to slices: 2
 - Validated: 22 (R001–R011, R100–R110 except R106 which is also included)
-- Deferred: 3 (R020, R021, R022)
+- Deferred: 2 (R021, R022)
 - Out of scope: 3 (R030, R031, R032)
 - Unmapped active requirements: 0

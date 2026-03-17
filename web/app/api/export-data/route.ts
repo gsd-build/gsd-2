@@ -1,4 +1,5 @@
 import { collectExportData } from "../../../../src/web/export-service.ts"
+import { resolveProjectCwd } from "../../../../src/web/bridge-service.ts"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -10,7 +11,8 @@ export async function GET(request: Request): Promise<Response> {
     const format: "markdown" | "json" =
       formatParam === "json" ? "json" : "markdown"
 
-    const payload = await collectExportData(format)
+    const projectCwd = resolveProjectCwd(request);
+    const payload = await collectExportData(format, projectCwd)
     return Response.json(payload, {
       headers: {
         "Cache-Control": "no-store",

@@ -1,11 +1,13 @@
 import { collectUndoInfo, executeUndo } from "../../../../src/web/undo-service.ts"
+import { resolveProjectCwd } from "../../../../src/web/bridge-service.ts"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   try {
-    const payload = await collectUndoInfo()
+    const projectCwd = resolveProjectCwd(request);
+    const payload = await collectUndoInfo(projectCwd)
     return Response.json(payload, {
       headers: {
         "Cache-Control": "no-store",
@@ -25,9 +27,10 @@ export async function GET(): Promise<Response> {
   }
 }
 
-export async function POST(): Promise<Response> {
+export async function POST(request: Request): Promise<Response> {
   try {
-    const payload = await executeUndo()
+    const projectCwd = resolveProjectCwd(request);
+    const payload = await executeUndo(projectCwd)
     return Response.json(payload, {
       headers: {
         "Cache-Control": "no-store",
