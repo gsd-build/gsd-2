@@ -65,7 +65,6 @@ Then:
 15. Write `{{taskSummaryPath}}`
 16. Mark {{taskId}} done in `{{planPath}}` (change `[ ]` to `[x]`)
 17. Do not run git commands — the system reads your task summary after completion and creates a meaningful commit from it (type inferred from title, message from your one-liner, key files from frontmatter). Write a clear, specific one-liner in the summary — it becomes the commit message.
-18. Update `.gsd/STATE.md`
 
 All work stays in your working directory: `{{workingDirectory}}`.
 

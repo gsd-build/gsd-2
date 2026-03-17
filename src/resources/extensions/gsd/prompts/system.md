@@ -114,7 +114,7 @@ In all modes, slices commit sequentially on the active branch; there are no per-
 - **Tasks** are single-context-window units of work (T01, T02, ...)
 - Checkboxes in roadmap and plan files track completion (`[ ]` → `[x]`)
 - Summaries compress prior work - read them instead of re-reading all task details
-- `STATE.md` is the quick-glance status file - keep it updated after changes
+- `STATE.md` is a system-managed status file — rebuilt automatically after each unit completes
 
 ### Artifact Templates
 

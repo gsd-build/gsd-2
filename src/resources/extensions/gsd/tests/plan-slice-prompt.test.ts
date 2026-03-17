@@ -40,11 +40,11 @@ async function main(): Promise<void> {
     const result = loadPromptFromWorktree("plan-slice", { ...BASE_VARS, commitInstruction });
 
     assertTrue(result.includes("docs(S01): add slice plan"), "commit step present when commit_docs is not false");
-    assertTrue(result.includes("Update `.gsd/STATE.md`"), "STATE.md update step present");
+    assertTrue(!result.includes("Update `.gsd/STATE.md`"), "STATE.md update step removed — system rebuilds it");
     assertTrue(!result.includes("{{commitInstruction}}"), "no unresolved placeholder");
   }
 
-  // ─── commit_docs=false: no commit step, only STATE.md update ────────────
+  // ─── commit_docs=false: no commit step ──────────────────────────────────
   console.log("\n=== plan-slice prompt: commit_docs=false ===");
   {
     const commitInstruction = "Do not commit — planning docs are not tracked in git for this project.";
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
 
     assertTrue(!result.includes("docs(S01): add slice plan"), "commit step absent when commit_docs=false");
     assertTrue(result.includes("Do not commit"), "no-commit instruction present");
-    assertTrue(result.includes("Update `.gsd/STATE.md`"), "STATE.md update step still present");
+    assertTrue(!result.includes("Update `.gsd/STATE.md`"), "STATE.md update step removed — system rebuilds it");
     assertTrue(!result.includes("{{commitInstruction}}"), "no unresolved placeholder");
   }
 

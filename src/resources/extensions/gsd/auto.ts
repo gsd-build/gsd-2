@@ -105,7 +105,7 @@ import { GSDError, GSD_ARTIFACT_MISSING } from "./errors.js";
 import { join } from "node:path";
 import { sep as pathSep } from "node:path";
 import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync, renameSync, unlinkSync, statSync } from "node:fs";
-import { nativeIsRepo, nativeInit, nativeAddPaths, nativeCommit } from "./native-git-bridge.js";
+import { nativeIsRepo, nativeInit, nativeAddAll, nativeCommit } from "./native-git-bridge.js";
 import {
   autoCommitCurrentBranch,
   captureIntegrationBranch,
@@ -702,7 +702,7 @@ export async function startAuto(
     // Only commit .gsd/ init when commit_docs is not explicitly false
     if (commitDocs !== false) {
       try {
-        nativeAddPaths(base, [".gsd", ".gitignore"]);
+        nativeAddAll(base);
         nativeCommit(base, "chore: init gsd");
       } catch { /* nothing to commit */ }
     }

@@ -60,7 +60,6 @@ Then:
     - **Feature completeness:** Every task produces real, user-facing progress — not just internal scaffolding.
 9. If planning produced structural decisions, append them to `.gsd/DECISIONS.md`
 10. {{commitInstruction}}
-11. Update `.gsd/STATE.md`
 
 The slice directory and tasks/ subdirectory already exist. Do NOT mkdir. All work stays in your working directory: `{{workingDirectory}}`.
 

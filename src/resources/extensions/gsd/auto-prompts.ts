@@ -640,7 +640,7 @@ export async function buildPlanSlicePrompt(
   const prefs = loadEffectiveGSDPreferences();
   const commitDocsEnabled = prefs?.preferences?.git?.commit_docs !== false;
   const commitInstruction = commitDocsEnabled
-    ? `Commit: \`docs(${sid}): add slice plan\``
+    ? `Commit the plan files only: \`git add ${relSlicePath(base, mid, sid)}/ .gsd/DECISIONS.md .gitignore && git commit -m "docs(${sid}): add slice plan"\`. Do not stage .gsd/STATE.md or other runtime files — the system manages those.`
     : "Do not commit — planning docs are not tracked in git for this project.";
   return loadPrompt("plan-slice", {
     workingDirectory: base,
@@ -1080,7 +1080,7 @@ export async function buildReassessRoadmapPrompt(
   const reassessPrefs = loadEffectiveGSDPreferences();
   const reassessCommitDocsEnabled = reassessPrefs?.preferences?.git?.commit_docs !== false;
   const reassessCommitInstruction = reassessCommitDocsEnabled
-    ? `Commit: \`docs(${mid}): reassess roadmap after ${completedSliceId}\``
+    ? `Commit: \`docs(${mid}): reassess roadmap after ${completedSliceId}\`. Stage only the .gsd/milestones/ files you changed — do not stage .gsd/STATE.md or other runtime files.`
     : "Do not commit — planning docs are not tracked in git for this project.";
 
   return loadPrompt("reassess-roadmap", {

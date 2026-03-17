@@ -24,7 +24,7 @@ import {
 import { randomInt } from "node:crypto";
 import { join } from "node:path";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rmSync, unlinkSync } from "node:fs";
-import { nativeIsRepo, nativeInit, nativeAddPaths, nativeCommit } from "./native-git-bridge.js";
+import { nativeIsRepo, nativeInit, nativeAddPaths, nativeAddAll, nativeCommit } from "./native-git-bridge.js";
 import { ensureGitignore, ensurePreferences, untrackRuntimeFiles } from "./gitignore.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { detectProjectState } from "./detection.js";
@@ -40,7 +40,7 @@ function buildDocsCommitInstruction(message: string): string {
   const prefs = loadEffectiveGSDPreferences();
   const commitDocsEnabled = prefs?.preferences?.git?.commit_docs !== false;
   return commitDocsEnabled
-    ? `Commit: \`${message}\``
+    ? `Commit: \`${message}\`. Stage only the .gsd/milestones/, .gsd/PROJECT.md, .gsd/REQUIREMENTS.md, .gsd/DECISIONS.md, and .gitignore files you changed — do not stage .gsd/STATE.md or other runtime files.`
     : "Do not commit — planning docs are not tracked in git for this project.";
 }
 

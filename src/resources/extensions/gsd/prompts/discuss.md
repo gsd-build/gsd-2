@@ -200,8 +200,7 @@ When writing context.md, preserve the user's exact terminology, emphasis, and sp
 4. Write `{{contextPath}}` — use the **Context** output template below. Preserve key risks, unknowns, existing codebase constraints, integration points, and relevant requirements surfaced during discussion.
 5. Write `{{roadmapPath}}` — use the **Roadmap** output template below. Decompose into demoable vertical slices with checkboxes, risk, depends, demo sentences, proof strategy, verification classes, milestone definition of done, requirement coverage, and a boundary map. If the milestone crosses multiple runtime boundaries, include an explicit final integration slice that proves the assembled system works end-to-end in a real environment.
 6. Seed `.gsd/DECISIONS.md` — use the **Decisions** output template below. Append rows for any architectural or pattern decisions made during discussion.
-7. Update `.gsd/STATE.md`
-8. {{commitInstruction}}
+7. {{commitInstruction}}
 
 After writing the files, say exactly: "Milestone {{milestoneId}} ready." — nothing else. Auto-mode will start automatically.
 
@@ -270,8 +269,7 @@ For single-milestone projects, do NOT write this file — it is only for multi-m
 
 #### Phase 4: Finalize
 
-7. Update `.gsd/STATE.md`
-8. {{multiMilestoneCommitInstruction}}
+7. {{multiMilestoneCommitInstruction}}
 
 After writing the files, say exactly: "Milestone M001 ready." — nothing else. Auto-mode will start automatically.
 

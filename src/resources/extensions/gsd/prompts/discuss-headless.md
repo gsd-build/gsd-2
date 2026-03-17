@@ -50,8 +50,7 @@ Use these templates exactly:
 4. Write `{{contextPath}}` (using Context template) — preserve the specification's exact terminology, emphasis, and specific framing. Do not paraphrase domain-specific language into generics. Document assumptions under an "Assumptions" section.
 5. Write `{{roadmapPath}}` (using Roadmap template) — decompose into demoable vertical slices with checkboxes, risk, depends, demo sentences, proof strategy, verification classes, milestone definition of done, requirement coverage, and a boundary map. If the milestone crosses multiple runtime boundaries, include an explicit final integration slice.
 6. Seed `.gsd/DECISIONS.md` (using Decisions template)
-7. Update `.gsd/STATE.md`
-8. {{commitInstruction}}
+7. {{commitInstruction}}
 9. Say exactly: "Milestone {{milestoneId}} ready."
 
 **For multi-milestone**, write in this order:
@@ -70,8 +69,7 @@ Use these templates exactly:
    # M003: Title
    ```
    Each context file should be rich enough that a future agent — with no memory of this conversation — can understand the intent, constraints, dependencies, what the milestone unlocks, and what "done" looks like.
-8. Update `.gsd/STATE.md`
-9. {{multiMilestoneCommitInstruction}}
+8. {{multiMilestoneCommitInstruction}}
 10. Say exactly: "Milestone {{milestoneId}} ready."
 
 ## Critical Rules
