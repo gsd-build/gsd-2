@@ -66,7 +66,7 @@ test("dispatch: triage check guards against step mode", () => {
     autoSrc.indexOf("In step mode, pause and show a wizard"),
   );
   assert.ok(
-    triageBlock.includes("!stepMode"),
+    triageBlock.includes("!s.stepMode"),
     "triage block should guard against step mode",
   );
 });
@@ -77,7 +77,7 @@ test("dispatch: triage check guards against hook unit types", () => {
     autoSrc.indexOf("In step mode, pause and show a wizard"),
   );
   assert.ok(
-    triageBlock.includes('!currentUnit.type.startsWith("hook/")'),
+    triageBlock.includes('!s.currentUnit.type.startsWith("hook/")'),
     "triage block should not fire for hook units",
   );
 });
