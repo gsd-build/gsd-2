@@ -6,7 +6,7 @@
  * or AutoContext dependency. State accessors are passed as callbacks.
  */
 
-import type { ExtensionContext, ExtensionCommandContext } from "@gsd/pi-coding-agent";
+import type { ExtensionContext, ExtensionCommandContext, SessionMessageEntry } from "@gsd/pi-coding-agent";
 import type { GSDState } from "./types.js";
 import { getCurrentBranch } from "./worktree.js";
 import { getActiveHook } from "./post-unit-hooks.js";
@@ -157,6 +157,49 @@ export function formatWidgetTokens(count: number): string {
   if (count < 1000000) return `${Math.round(count / 1000)}k`;
   if (count < 10000000) return `${(count / 1000000).toFixed(1)}M`;
   return `${Math.round(count / 1000000)}M`;
+}
+
+// ─── ETA Estimation ──────────────────────────────────────────────────────────
+
+/**
+ * Estimate remaining time based on average unit duration from the metrics ledger.
+ * Returns a formatted string like "~12m remaining" or null if insufficient data.
+ */
+export function estimateTimeRemaining(): string | null {
+  const ledger = getLedger();
+  if (!ledger || ledger.units.length < 2) return null;
+
+  const sliceProgress = getRoadmapSlicesSync();
+  if (!sliceProgress || sliceProgress.total === 0) return null;
+
+  const remainingSlices = sliceProgress.total - sliceProgress.done;
+  if (remainingSlices <= 0) return null;
+
+  // Compute average duration per completed slice from the ledger
+  const completedSliceUnits = ledger.units.filter(
+    u => u.finishedAt > 0 && u.startedAt > 0,
+  );
+  if (completedSliceUnits.length < 2) return null;
+
+  const totalDuration = completedSliceUnits.reduce(
+    (sum, u) => sum + (u.finishedAt - u.startedAt), 0,
+  );
+  const avgDuration = totalDuration / completedSliceUnits.length;
+
+  // Rough estimate: remaining slices × average units per slice × avg duration
+  const completedSlices = sliceProgress.done || 1;
+  const unitsPerSlice = completedSliceUnits.length / completedSlices;
+  const estimatedMs = remainingSlices * unitsPerSlice * avgDuration;
+
+  if (estimatedMs < 5_000) return null; // Too small to display
+
+  const s = Math.floor(estimatedMs / 1000);
+  if (s < 60) return `~${s}s remaining`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `~${m}m remaining`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return rm > 0 ? `~${h}h ${rm}m remaining` : `~${h}h remaining`;
 }
 
 // ─── Slice Progress Cache ─────────────────────────────────────────────────────
@@ -346,6 +389,12 @@ export function updateProgressWidget(
               meta += theme.fg("dim", `  ·  task ${taskNum}/${activeSliceTasks.total}`);
             }
 
+            // ETA estimate
+            const eta = estimateTimeRemaining();
+            if (eta) {
+              meta += theme.fg("dim", `  ·  ${eta}`);
+            }
+
             lines.push(truncateToWidth(`${pad}${bar}  ${meta}`, width));
           }
         }
@@ -370,13 +419,16 @@ export function updateProgressWidget(
           let totalCacheRead = 0, totalCacheWrite = 0;
           if (cmdCtx) {
             for (const entry of cmdCtx.sessionManager.getEntries()) {
-              if (entry.type === "message" && (entry as any).message?.role === "assistant") {
-                const u = (entry as any).message.usage;
-                if (u) {
-                  totalInput += u.input || 0;
-                  totalOutput += u.output || 0;
-                  totalCacheRead += u.cacheRead || 0;
-                  totalCacheWrite += u.cacheWrite || 0;
+              if (entry.type === "message") {
+                const msgEntry = entry as SessionMessageEntry;
+                if (msgEntry.message?.role === "assistant") {
+                  const u = (msgEntry.message as any).usage;
+                  if (u) {
+                    totalInput += u.input || 0;
+                    totalOutput += u.output || 0;
+                    totalCacheRead += u.cacheRead || 0;
+                    totalCacheWrite += u.cacheWrite || 0;
+                  }
                 }
               }
             }

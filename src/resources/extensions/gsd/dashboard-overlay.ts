@@ -20,17 +20,9 @@ import {
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { getActiveWorktreeName } from "./worktree-command.js";
 import { getWorkerBatches, hasActiveWorkers, type WorkerEntry } from "../subagent/worker-registry.js";
-
-function formatDuration(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const rs = s % 60;
-  if (m < 60) return `${m}m ${rs}s`;
-  const h = Math.floor(m / 60);
-  const rm = m % 60;
-  return `${h}h ${rm}m`;
-}
+import { formatDuration, padRight, joinColumns, centerLine, fitColumns } from "../shared/format-utils.js";
+import { STATUS_GLYPH, STATUS_COLOR } from "../shared/ui.js";
+import { estimateTimeRemaining } from "./auto-dashboard.js";
 
 function unitLabel(type: string): string {
   switch (type) {
@@ -48,38 +40,6 @@ function unitLabel(type: string): string {
   }
 }
 
-function centerLine(content: string, width: number): string {
-  const vis = visibleWidth(content);
-  if (vis >= width) return truncateToWidth(content, width);
-  const leftPad = Math.floor((width - vis) / 2);
-  return " ".repeat(leftPad) + content;
-}
-
-function padRight(content: string, width: number): string {
-  const vis = visibleWidth(content);
-  return content + " ".repeat(Math.max(0, width - vis));
-}
-
-function joinColumns(left: string, right: string, width: number): string {
-  const leftW = visibleWidth(left);
-  const rightW = visibleWidth(right);
-  if (leftW + rightW + 2 > width) {
-    return truncateToWidth(`${left}  ${right}`, width);
-  }
-  return left + " ".repeat(width - leftW - rightW) + right;
-}
-
-function fitColumns(parts: string[], width: number, separator = "  "): string {
-  const filtered = parts.filter(Boolean);
-  if (filtered.length === 0) return "";
-  let result = filtered[0];
-  for (let i = 1; i < filtered.length; i++) {
-    const candidate = `${result}${separator}${filtered[i]}`;
-    if (visibleWidth(candidate) > width) break;
-    result = candidate;
-  }
-  return truncateToWidth(result, width);
-}
 
 export class GSDDashboardOverlay {
   private tui: { requestRender: () => void };
@@ -95,6 +55,7 @@ export class GSDDashboardOverlay {
   private loadedDashboardIdentity?: string;
   private refreshInFlight: Promise<void> | null = null;
   private disposed = false;
+  private resizeHandler: (() => void) | null = null;
 
   constructor(
     tui: { requestRender: () => void },
@@ -105,6 +66,14 @@ export class GSDDashboardOverlay {
     this.theme = theme;
     this.onClose = onClose;
     this.dashData = getAutoDashboardData();
+
+    // Invalidate cache on terminal resize
+    this.resizeHandler = () => {
+      if (this.disposed) return;
+      this.invalidate();
+      this.tui.requestRender();
+    };
+    process.stdout.on("resize", this.resizeHandler);
 
     this.scheduleRefresh(true);
 
@@ -233,7 +202,7 @@ export class GSDDashboardOverlay {
 
   handleInput(data: string): void {
     if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c")) || matchesKey(data, Key.ctrlAlt("g"))) {
-      clearInterval(this.refreshTimer);
+      this.dispose();
       this.onClose();
       return;
     }
@@ -332,12 +301,15 @@ export class GSDDashboardOverlay {
     const worktreeTag = worktreeName
       ? `  ${th.fg("warning", `⎇ ${worktreeName}`)}`
       : "";
-    const elapsed = this.dashData.active || this.dashData.paused
-      ? th.fg("dim", formatDuration(this.dashData.elapsed))
-      : isRemote
-        ? th.fg("dim", `since ${this.dashData.remoteSession!.startedAt.replace("T", " ").slice(0, 19)}`)
-        : "";
-    lines.push(row(joinColumns(`${title}  ${status}${worktreeTag}`, elapsed, contentWidth)));
+    let elapsedParts = "";
+    if (this.dashData.active || this.dashData.paused) {
+      elapsedParts = th.fg("dim", formatDuration(this.dashData.elapsed));
+      const eta = estimateTimeRemaining();
+      if (eta) elapsedParts += th.fg("dim", `  ·  ${eta}`);
+    } else if (isRemote) {
+      elapsedParts = th.fg("dim", `since ${this.dashData.remoteSession!.startedAt.replace("T", " ").slice(0, 19)}`);
+    }
+    lines.push(row(joinColumns(`${title}  ${status}${worktreeTag}`, elapsedParts, contentWidth)));
     lines.push(blank());
 
     if (this.dashData.currentUnit) {
@@ -435,23 +407,19 @@ export class GSDDashboardOverlay {
       lines.push(blank());
 
       for (const s of mv.slices) {
-        const icon = s.done ? th.fg("success", "✓")
-          : s.active ? th.fg("accent", "▸")
-          : th.fg("dim", "○");
-        const titleText = s.active ? th.fg("accent", `${s.id}: ${s.title}`)
-          : s.done ? th.fg("muted", `${s.id}: ${s.title}`)
-          : th.fg("dim", `${s.id}: ${s.title}`);
+        const sliceStatus = s.done ? "done" : s.active ? "active" : "pending";
+        const icon = th.fg(STATUS_COLOR[sliceStatus], STATUS_GLYPH[sliceStatus]);
+        const titleColor = s.active ? "accent" : s.done ? "muted" : "dim";
+        const titleText = th.fg(titleColor, `${s.id}: ${s.title}`);
         const risk = th.fg("dim", s.risk);
         lines.push(row(joinColumns(`  ${icon} ${titleText}`, risk, contentWidth)));
 
         if (s.active && s.tasks.length > 0) {
           for (const t of s.tasks) {
-            const tIcon = t.done ? th.fg("success", "✓")
-              : t.active ? th.fg("warning", "▸")
-              : th.fg("dim", "·");
-            const tTitle = t.active ? th.fg("warning", `${t.id}: ${t.title}`)
-              : t.done ? th.fg("muted", `${t.id}: ${t.title}`)
-              : th.fg("dim", `${t.id}: ${t.title}`);
+            const taskStatus = t.done ? "done" : t.active ? "active" : "pending";
+            const tIcon = th.fg(STATUS_COLOR[taskStatus], STATUS_GLYPH[taskStatus]);
+            const tColor = t.active ? "warning" : t.done ? "muted" : "dim";
+            const tTitle = th.fg(tColor, `${t.id}: ${t.title}`);
             lines.push(row(`      ${tIcon} ${truncateToWidth(tTitle, contentWidth - 6)}`));
           }
         }
@@ -477,18 +445,21 @@ export class GSDDashboardOverlay {
 
       const recent = [...this.dashData.completedUnits].reverse().slice(0, 10);
       for (const u of recent) {
-        const left = `  ${th.fg("success", "✓")} ${th.fg("muted", unitLabel(u.type))} ${th.fg("muted", u.id)}`;
-
-        // Budget indicators from ledger
+        // Budget indicators from ledger — use warning glyph for pressured units
         const ledgerEntry = ledgerLookup.get(`${u.type}:${u.id}`);
+        const hadPressure = ledgerEntry?.continueHereFired === true;
+        const hadTruncation = (ledgerEntry?.truncationSections ?? 0) > 0;
+        const unitGlyph = hadPressure
+          ? th.fg(STATUS_COLOR.warning, STATUS_GLYPH.statusWarning)
+          : th.fg(STATUS_COLOR.done, STATUS_GLYPH.done);
+        const left = `  ${unitGlyph} ${th.fg("muted", unitLabel(u.type))} ${th.fg("muted", u.id)}`;
+
         let budgetMarkers = "";
-        if (ledgerEntry) {
-          if (ledgerEntry.truncationSections && ledgerEntry.truncationSections > 0) {
-            budgetMarkers += th.fg("warning", ` ▼${ledgerEntry.truncationSections}`);
-          }
-          if (ledgerEntry.continueHereFired === true) {
-            budgetMarkers += th.fg("error", " → wrap-up");
-          }
+        if (hadTruncation) {
+          budgetMarkers += th.fg("warning", ` ▼${ledgerEntry!.truncationSections}`);
+        }
+        if (hadPressure) {
+          budgetMarkers += th.fg("error", " → wrap-up");
         }
 
         const right = th.fg("dim", formatDuration(u.finishedAt - u.startedAt));
@@ -634,6 +605,10 @@ export class GSDDashboardOverlay {
   dispose(): void {
     this.disposed = true;
     clearInterval(this.refreshTimer);
+    if (this.resizeHandler) {
+      process.stdout.removeListener("resize", this.resizeHandler);
+      this.resizeHandler = null;
+    }
   }
 }
 

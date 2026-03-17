@@ -440,7 +440,6 @@ async function loadChangelogAndVerifications(basePath: string, milestones: Visua
 
       let mtime = 0;
       try {
-        const { statSync } = await import('node:fs');
         mtime = statSync(summaryFile).mtimeMs;
       } catch {
         continue;
@@ -648,6 +647,29 @@ function loadDiscussionState(
   return states;
 }
 
+// ─── File Fingerprint Cache ───────────────────────────────────────────────────
+
+/**
+ * Mtime-based cache for parsed file contents. Avoids re-reading and re-parsing
+ * roadmap/plan files whose mtime hasn't changed since the last load.
+ */
+const fileContentCache = new Map<string, { mtime: number; content: string }>();
+
+function readFileCached(filePath: string): string | null {
+  try {
+    const mtime = statSync(filePath).mtimeMs;
+    const cached = fileContentCache.get(filePath);
+    if (cached && cached.mtime === mtime) {
+      return cached.content;
+    }
+    const content = readFileSync(filePath, 'utf-8');
+    fileContentCache.set(filePath, { mtime, content });
+    return content;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Loader ───────────────────────────────────────────────────────────────────
 
 export async function loadVisualizerData(basePath: string): Promise<VisualizerData> {
@@ -664,7 +686,7 @@ export async function loadVisualizerData(basePath: string): Promise<VisualizerDa
     const slices: VisualizerSlice[] = [];
 
     const roadmapFile = resolveMilestoneFile(basePath, mid, 'ROADMAP');
-    const roadmapContent = roadmapFile ? await loadFile(roadmapFile) : null;
+    const roadmapContent = roadmapFile ? readFileCached(roadmapFile) : null;
 
     if (roadmapContent) {
       const roadmap = parseRoadmap(roadmapContent);
@@ -678,7 +700,7 @@ export async function loadVisualizerData(basePath: string): Promise<VisualizerDa
 
         if (isActiveSlice) {
           const planFile = resolveSliceFile(basePath, mid, s.id, 'PLAN');
-          const planContent = planFile ? await loadFile(planFile) : null;
+          const planContent = planFile ? readFileCached(planFile) : null;
 
           if (planContent) {
             const plan = parsePlan(planContent);
