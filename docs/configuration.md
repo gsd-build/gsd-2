@@ -73,6 +73,15 @@ models:
 - Provider targeting: use `provider/model` format (e.g., `bedrock/claude-sonnet-4-6`) or the `provider` field in object format
 - Omit a key to use whatever model is currently active
 
+### Custom Model Definitions (`models.json`)
+
+Define custom models in `~/.gsd/agent/models.json`. This lets you add models not included in the default registry — useful for self-hosted endpoints, fine-tuned models, or new releases.
+
+GSD resolves models.json with fallback logic:
+1. `~/.gsd/agent/models.json` — primary (GSD)
+2. `~/.pi/agent/models.json` — fallback (Pi)
+3. If neither exists, creates `~/.gsd/agent/models.json`
+
 **With fallbacks:**
 
 ```yaml

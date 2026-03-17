@@ -18,6 +18,11 @@ gsd (CLI binary)
               ├─ agents/            scout, researcher, worker
               ├─ AGENTS.md          Agent routing instructions
               └─ GSD-WORKFLOW.md    Manual bootstrap protocol
+
+gsd headless              Headless mode — CI/cron orchestration via RPC child process
+gsd --mode mcp            MCP server mode — exposes tools over stdin/stdout
+
+vscode-extension/         VS Code extension — chat participant (@gsd), sidebar dashboard, RPC integration
 ```
 
 ## Key Design Decisions
@@ -47,7 +52,7 @@ Every dispatch creates a new agent session. The LLM starts with a clean context 
 | Extension | What It Provides |
 |-----------|-----------------|
 | **GSD** | Core workflow engine — auto mode, state machine, commands, dashboard |
-| **Browser Tools** | Playwright-based browser with form intelligence and semantic actions |
+| **Browser Tools** | Playwright-based browser automation — navigation, forms, screenshots, PDF export, device emulation, visual regression, structured data extraction, route mocking, accessibility tree inspection, and semantic actions |
 | **Search the Web** | Brave Search, Tavily, or Jina page extraction |
 | **Google Search** | Gemini-powered web search with AI-synthesized answers |
 | **Context7** | Up-to-date library/framework documentation |
@@ -60,6 +65,10 @@ Every dispatch creates a new agent session. The LLM starts with a clean context 
 | **LSP** | Language Server Protocol — diagnostics, definitions, references, hover, rename |
 | **Ask User Questions** | Structured user input with single/multi-select |
 | **Secure Env Collect** | Masked secret collection |
+| **Async Jobs** | Background command execution with `async_bash`, `await_job`, `cancel_job` |
+| **Remote Questions** | Discord, Slack, and Telegram integration for headless question routing |
+| **TTSR** | Tool-triggered system rules — conditional context injection based on tool usage |
+| **Universal Config** | Discovery of existing AI tool configurations (Claude Code, Cursor, Windsurf, etc.) |
 
 ## Bundled Agents
 
