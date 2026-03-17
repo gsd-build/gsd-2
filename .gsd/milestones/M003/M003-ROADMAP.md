@@ -61,7 +61,7 @@ This milestone is complete only when all are true:
 - [x] **S02: Browser slash-command dispatch for all upstream commands** `risk:high` `depends:[S01]`
   > After this: every `/gsd` subcommand typed in browser terminal dispatches to a surface, executes via RPC, or rejects with clear guidance — no silent fallthrough.
 
-- [ ] **S03: Workflow visualizer page** `risk:medium` `depends:[S01]`
+- [x] **S03: Workflow visualizer page** `risk:medium` `depends:[S01]`
   > After this: dedicated visualizer page with 7 tabbed sections (Progress, Deps, Metrics, Timeline, Agent, Changes, Export) showing real project data via API route.
 
 - [ ] **S04: Diagnostics panels — forensics, doctor, skill-health** `risk:medium` `depends:[S02]`

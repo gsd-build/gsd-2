@@ -23,8 +23,8 @@ This file is the explicit capability and coverage contract for the project.
 - Source: user
 - Primary owning slice: M003/S03
 - Supporting slices: none
-- Validation: unmapped
-- Notes: Upstream has VisualizerData interface with milestones, phase, totals, byPhase, bySlice, byModel, units, criticalPath, agentActivity, changelog.
+- Validation: S03 built: /api/visualizer GET endpoint, VisualizerView component with 7 tabs (Progress, Deps, Metrics, Timeline, Agent, Changes, Export), sidebar NavRail entry, /gsd visualize dispatch. Both builds pass. Remaining: live runtime verification with real project data at S08 parity audit.
+- Notes: Upstream VisualizerData interface with milestones, phase, totals, byPhase, bySlice, byModel, units, criticalPath, agentActivity, changelog. Map→Record conversion for criticalPath.milestoneSlack and sliceSlack. Child-process pattern required for Turbopack compatibility.
 
 ### R103 — A browser panel showing forensic anomaly scanning results — stuck loops, cost spikes, timeouts, missing artifacts, crashes, doctor issues, and error traces from auto-mode runs.
 - Class: failure-visibility
@@ -363,7 +363,7 @@ This file is the explicit capability and coverage contract for the project.
 | R032 | constraint | out-of-scope | none | none | n/a |
 | R100 | core-capability | validated | M003/S01 | none | `npm run build` exits 0, `npm run build:web-host` exits 0, `rg "^<<<<<<<|^>>>>>>>|^=======$" src/ web/ packages/ .github/` returns empty, `git log --oneline HEAD..upstream/main | wc -l` returns 0. All verified on 2026-03-16 after merging 415 upstream commits (v2.12→v2.22.0) and resolving all 50 file conflicts. |
 | R101 | primary-user-loop | active | M003/S02 | M003/S04, M003/S05, M003/S06, M003/S07 | Verified by updated `src/tests/web-command-parity-contract.test.ts` — exhaustive GSD dispatch test (118 tests) asserts every subcommand has a defined outcome (surface/prompt/local). Contract surface wiring test proves each surface opens correctly through the command-surface system. `npm run build` and `npm run build:web-host` succeed. Runtime diagnostic: `dispatchBrowserSlashCommand("/gsd <subcmd>")` returns inspectable .kind/.surface/.action fields; `getBrowserSlashCommandTerminalNotice()` confirms system notices for surface outcomes and null for passthrough. |
-| R102 | core-capability | active | M003/S03 | none | unmapped |
+| R102 | core-capability | active | M003/S03 | none | S03 built: /api/visualizer GET endpoint, VisualizerView component with 7 tabs (Progress, Deps, Metrics, Timeline, Agent, Changes, Export), sidebar NavRail entry, /gsd visualize dispatch. Both builds pass. Remaining: live runtime verification with real project data at S08 parity audit. |
 | R103 | failure-visibility | active | M003/S04 | M003/S02 | unmapped |
 | R104 | failure-visibility | active | M003/S04 | M003/S02 | unmapped |
 | R105 | operability | active | M003/S04 | M003/S02 | unmapped |
