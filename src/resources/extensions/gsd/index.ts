@@ -716,7 +716,23 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
-      await pauseAutoForProviderError(ctx.ui, errorDetail, () => pauseAuto(ctx, pi));
+      // Detect rate-limit errors and extract retry delay for auto-resume
+      const errorMsg = ("errorMessage" in lastMsg && lastMsg.errorMessage) ? String(lastMsg.errorMessage) : "";
+      const isRateLimit = /rate.?limit|too many requests|429/i.test(errorMsg);
+      const retryAfterMs = ("retryAfterMs" in lastMsg && typeof lastMsg.retryAfterMs === "number")
+        ? lastMsg.retryAfterMs
+        : (() => { const m = errorMsg.match(/reset in (\d+)s/i); return m ? Number(m[1]) * 1000 : undefined; })();
+
+      await pauseAutoForProviderError(ctx.ui, errorDetail, () => pauseAuto(ctx, pi), {
+        isRateLimit,
+        retryAfterMs,
+        resume: () => {
+          pi.sendMessage(
+            { customType: "gsd-auto-timeout-recovery", content: "Continue execution \u2014 rate limit window elapsed.", display: false },
+            { triggerTurn: true },
+          );
+        },
+      });
       return;
     }
 
