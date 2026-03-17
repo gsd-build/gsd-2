@@ -1,7 +1,7 @@
 # GSD State
 
 **Active Milestone:** M001: Verification Enforcement
-**Active Slice:** S02: Structured Evidence Format
+**Active Slice:** S03: Auto-Fix Retry Loop
 **Phase:** executing
 **Requirements Status:** 17 active · 0 validated · 2 deferred · 0 out of scope
 
@@ -18,4 +18,4 @@
 - None
 
 ## Next Action
-Execute task T01 of slice S02 (Create evidence writer module with JSON and markdown formatters).
+Execute S03/T01 (Add formatFailureContext helper and extend evidence JSON with retry fields).
