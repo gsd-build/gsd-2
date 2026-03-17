@@ -36,6 +36,7 @@ export interface HeadlessOptions {
   supervised?: boolean   // supervised mode: forward interactive requests to orchestrator
   responseTimeout?: number // timeout for orchestrator response (default 30000ms)
   answers?: string       // path to answers JSON file
+  eventFilter?: Set<string>  // filter JSONL output to specific event types
 }
 
 interface ExtensionUIRequest {
@@ -103,6 +104,9 @@ export function parseHeadlessArgs(argv: string[]): HeadlessOptions {
         }
       } else if (arg === '--answers' && i + 1 < args.length) {
         options.answers = args[++i]
+      } else if (arg === '--events' && i + 1 < args.length) {
+        options.eventFilter = new Set(args[++i].split(','))
+        options.json = true  // --events implies --json
       } else if (arg === '--supervised') {
         options.supervised = true
         options.json = true  // supervised implies json
@@ -540,9 +544,12 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
     // Answer injector: observe events for question metadata
     injector?.observeEvent(eventObj)
 
-    // --json mode: forward all events as JSONL to stdout
+    // --json mode: forward events as JSONL to stdout (filtered if --events)
     if (options.json) {
-      process.stdout.write(JSON.stringify(eventObj) + '\n')
+      const eventType = String(eventObj.type ?? '')
+      if (!options.eventFilter || options.eventFilter.has(eventType)) {
+        process.stdout.write(JSON.stringify(eventObj) + '\n')
+      }
     } else {
       // Progress output to stderr
       const line = formatProgress(eventObj, !!options.verbose)
@@ -734,6 +741,9 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
   process.stderr.write(`[headless] Status: ${status}\n`)
   process.stderr.write(`[headless] Duration: ${duration}s\n`)
   process.stderr.write(`[headless] Events: ${totalEvents} total, ${toolCallCount} tool calls\n`)
+  if (options.eventFilter) {
+    process.stderr.write(`[headless] Event filter: ${[...options.eventFilter].join(', ')}\n`)
+  }
   if (restartCount > 0) {
     process.stderr.write(`[headless] Restarts: ${restartCount}\n`)
   }

@@ -22,6 +22,7 @@ gsd headless [flags] [command] [args...]
 - `--response-timeout N` — timeout for orchestrator response in supervised mode (default 30000)
 - `--max-restarts N` — auto-restart on crash with backoff (default 3, 0 to disable)
 - `--answers <path>` — pre-supply answers and secrets from JSON file
+- `--events <types>` — filter JSONL output to specific event types (comma-separated, implies `--json`)
 
 **Exit codes:** 0=complete, 1=error/timeout, 2=blocked
 
@@ -164,6 +165,22 @@ done
 ```
 
 Event types: `agent_start`, `agent_end`, `tool_execution_start`, `tool_execution_end`, `extension_ui_request`, `message_update`, `error`.
+
+### Filtered Event Stream
+
+Use `--events` to receive only specific event types — reduces noise for orchestrators:
+
+```bash
+# Only phase-relevant events
+gsd headless --events agent_end,extension_ui_request auto 2>/dev/null
+
+# Only tool execution events
+gsd headless --events tool_execution_start,tool_execution_end auto
+```
+
+The filter applies only to stdout output. Internal processing (completion detection, supervised mode, answer injection) is unaffected — all events are still processed internally.
+
+Available event types: `agent_start`, `agent_end`, `tool_execution_start`, `tool_execution_end`, `tool_execution_update`, `extension_ui_request`, `message_start`, `message_end`, `message_update`, `turn_start`, `turn_end`.
 
 ## Answer Injection
 
