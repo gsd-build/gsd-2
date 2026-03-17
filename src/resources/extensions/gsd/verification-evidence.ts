@@ -113,8 +113,11 @@ export function writeVerificationJSON(
 /**
  * Format duration in milliseconds as seconds with 1 decimal place.
  * e.g. 2340 → "2.3s", 150 → "0.2s", 0 → "0.0s"
+ *
+ * Distinct from the shared formatDuration (which uses adaptive ms/s/m/h units);
+ * evidence tables always display seconds for consistent column alignment.
  */
-function formatDuration(ms: number): string {
+function formatDurationSecs(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
@@ -139,7 +142,7 @@ export function formatEvidenceTable(result: VerificationResult): string {
     const num = i + 1;
     const verdict =
       check.exitCode === 0 ? "✅ pass" : "❌ fail";
-    const duration = formatDuration(check.durationMs);
+    const duration = formatDurationSecs(check.durationMs);
 
     lines.push(
       `| ${num} | ${check.command} | ${check.exitCode} | ${verdict} | ${duration} |`,

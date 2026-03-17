@@ -34,17 +34,12 @@ export function restoreWindowsVTInput(): void {
 
 // ── Time Formatting ────────────────────────────────────────────────────────
 
-export function formatUptime(ms: number): string {
-	const seconds = Math.floor(ms / 1000);
-	if (seconds < 60) return `${seconds}s`;
-	const minutes = Math.floor(seconds / 60);
-	if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
-	const hours = Math.floor(minutes / 60);
-	return `${hours}h ${minutes % 60}m`;
-}
+import { formatDuration } from "../shared/format-utils.js";
+
+export const formatUptime = formatDuration;
 
 export function formatTimeAgo(timestamp: number): string {
-	return formatUptime(Date.now() - timestamp) + " ago";
+	return formatDuration(Date.now() - timestamp) + " ago";
 }
 
 

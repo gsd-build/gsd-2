@@ -20,6 +20,7 @@ import { shouldRunOnboarding, runOnboarding } from './onboarding.js'
 import chalk from 'chalk'
 import { checkForUpdates, checkAndPromptForUpdates } from './update-check.js'
 import { printHelp, printSubcommandHelp } from './help-text.js'
+import { formatTokenCount } from './resources/extensions/shared/format-utils.js'
 
 // ---------------------------------------------------------------------------
 // Minimal CLI arg parser — detects print/subagent mode flags
@@ -255,13 +256,12 @@ if (cliFlags.listModels !== undefined) {
     return a.id.localeCompare(b.id)
   })
 
-  const fmt = (n: number) => n >= 1_000_000 ? `${n / 1_000_000}M` : n >= 1_000 ? `${n / 1_000}K` : `${n}`
   const rows = filtered.map((m) => [
     m.provider,
     m.id,
     m.name,
-    fmt(m.contextWindow),
-    fmt(m.maxTokens),
+    formatTokenCount(m.contextWindow),
+    formatTokenCount(m.maxTokens),
     m.reasoning ? 'yes' : 'no',
   ])
   const hdrs = ['provider', 'model', 'name', 'context', 'max-out', 'thinking']
