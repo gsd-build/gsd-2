@@ -4,15 +4,15 @@
  * Produces a single self-contained HTML file with:
  *   - Branding header (project name, path, GSD version, generated timestamp)
  *   - Project summary & overall progress
- *   - Health & configuration overview
  *   - Progress tree (milestones → slices → tasks, with critical path)
+ *   - Execution timeline (chronological unit history)
  *   - Slice dependency graph (SVG DAG per milestone)
  *   - Cost & token metrics (bar charts, phase/slice/model/tier breakdowns)
- *   - Execution timeline (chronological unit history)
+ *   - Health & configuration overview
  *   - Changelog (completed slice summaries + file modifications)
  *   - Knowledge base (rules, patterns, lessons)
  *   - Captures log
- *   - Milestone planning / discussion state
+ *   - Artifacts & milestone planning / discussion state
  *
  * No external dependencies — all CSS and JS is inlined.
  * Printable to PDF from any browser.
@@ -46,11 +46,11 @@ export function generateHtmlReport(
 
   const sections = [
     buildSummarySection(data, opts, generated),
-    buildHealthSection(data),
     buildProgressSection(data),
+    buildTimelineSection(data),
     buildDepGraphSection(data),
     buildMetricsSection(data),
-    buildTimelineSection(data),
+    buildHealthSection(data),
     buildChangelogSection(data),
     buildKnowledgeSection(data),
     buildCapturesSection(data),
@@ -94,11 +94,11 @@ export function generateHtmlReport(
 <nav class="toc" aria-label="Report sections">
   <ul>
     <li><a href="#summary">Summary</a></li>
-    <li><a href="#health">Health</a></li>
     <li><a href="#progress">Progress</a></li>
+    <li><a href="#timeline">Timeline</a></li>
     <li><a href="#depgraph">Dependencies</a></li>
     <li><a href="#metrics">Metrics</a></li>
-    <li><a href="#timeline">Timeline</a></li>
+    <li><a href="#health">Health</a></li>
     <li><a href="#changelog">Changelog</a></li>
     <li><a href="#knowledge">Knowledge</a></li>
     <li><a href="#captures">Captures</a></li>
