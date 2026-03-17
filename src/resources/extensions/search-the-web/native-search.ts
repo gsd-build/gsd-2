@@ -5,6 +5,8 @@
  * the heavy tool-registration modules.
  */
 
+import { resolveSearchProviderFromPreferences } from "../gsd/preferences.js";
+
 /** Tool names for the Brave-backed custom search tools */
 export const BRAVE_TOOL_NAMES = ["search-the-web", "search_and_read"];
 
@@ -16,6 +18,11 @@ const THINKING_TYPES = new Set(["thinking", "redacted_thinking"]);
 
 /** When true, skip native web search injection and keep Brave/custom tools active on Anthropic. */
 export function preferBraveSearch(): boolean {
+  // preferences.md takes priority over env var
+  const prefsPref = resolveSearchProviderFromPreferences();
+  if (prefsPref === "brave" || prefsPref === "tavily" || prefsPref === "ollama") return true;
+  if (prefsPref === "native") return false;
+  // Fall back to env var
   return process.env.PREFER_BRAVE_SEARCH === "1" || process.env.PREFER_BRAVE_SEARCH === "true";
 }
 

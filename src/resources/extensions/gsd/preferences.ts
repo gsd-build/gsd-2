@@ -80,6 +80,7 @@ const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "verification_commands",
   "verification_auto_fix",
   "verification_max_retries",
+  "search_provider",
 ]);
 
 export interface GSDSkillRule {
@@ -182,6 +183,8 @@ export interface GSDPreferences {
   verification_commands?: string[];
   verification_auto_fix?: boolean;
   verification_max_retries?: number;
+  /** Search provider preference. "brave"/"tavily"/"ollama" force that backend and disable native Anthropic search. "native" forces native only. "auto" = current default behavior. */
+  search_provider?: "brave" | "tavily" | "ollama" | "native" | "auto";
 }
 
 export interface LoadedGSDPreferences {
@@ -759,6 +762,15 @@ export function resolveInlineLevel(): InlineLevel {
   }
 }
 
+/**
+ * Resolve the search provider preference from preferences.md.
+ * Returns undefined if not configured (caller falls back to existing behavior).
+ */
+export function resolveSearchProviderFromPreferences(): GSDPreferences["search_provider"] | undefined {
+  const prefs = loadEffectiveGSDPreferences();
+  return prefs?.preferences.search_provider;
+}
+
 function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPreferences {
   return {
     version: override.version ?? base.version,
@@ -801,6 +813,7 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
     verification_commands: mergeStringLists(base.verification_commands, override.verification_commands),
     verification_auto_fix: override.verification_auto_fix ?? base.verification_auto_fix,
     verification_max_retries: override.verification_max_retries ?? base.verification_max_retries,
+    search_provider: override.search_provider ?? base.search_provider,
   };
 }
 
@@ -932,6 +945,16 @@ export function validatePreferences(preferences: GSDPreferences): {
       validated.token_profile = preferences.token_profile as TokenProfile;
     } else {
       errors.push(`token_profile must be one of: budget, balanced, quality`);
+    }
+  }
+
+  // ─── Search Provider ─────────────────────────────────────────────
+  if (preferences.search_provider !== undefined) {
+    const validSearchProviders = new Set(["brave", "tavily", "ollama", "native", "auto"]);
+    if (typeof preferences.search_provider === "string" && validSearchProviders.has(preferences.search_provider)) {
+      validated.search_provider = preferences.search_provider as GSDPreferences["search_provider"];
+    } else {
+      errors.push(`search_provider must be one of: brave, tavily, ollama, native, auto`);
     }
   }
 
