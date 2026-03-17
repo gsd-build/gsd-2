@@ -118,6 +118,13 @@ This is the foundational logic — T02 wires it into the gate and evidence forma
 - `grep -n "RuntimeError" src/resources/extensions/gsd/types.ts` — shows interface and field on VerificationResult
 - `grep -n "captureRuntimeErrors" src/resources/extensions/gsd/verification-gate.ts` — shows export
 
+## Observability Impact
+
+- **New signal:** `runtimeErrors` optional array on `VerificationResult` — downstream consumers (auto.ts, verification-evidence.ts) can inspect `source`, `severity`, `message`, `blocking` per captured error.
+- **Inspection:** After this task, `captureRuntimeErrors()` can be called standalone to probe runtime health. Pass `{ getProcesses, getConsoleLogs }` for isolated testing/debugging.
+- **Failure visibility:** Blocking runtime errors (crash severity) will be surfaced in the `RuntimeError[]` return value. T02 wires these into gate pass/fail and evidence display.
+- **Graceful degradation:** When bg-shell or browser-tools modules are unavailable, the function returns `[]` — no throw, no side effect. This is verified by unit tests.
+
 ## Inputs
 
 - `src/resources/extensions/gsd/types.ts` — existing `VerificationResult` interface (line ~61) to extend

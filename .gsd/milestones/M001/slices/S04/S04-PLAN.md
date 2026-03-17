@@ -45,7 +45,7 @@
 
 ## Tasks
 
-- [ ] **T01: Implement RuntimeError type and captureRuntimeErrors function with tests** `est:30m`
+- [x] **T01: Implement RuntimeError type and captureRuntimeErrors function with tests** `est:30m`
   - Why: Core logic for scanning bg-shell processes and browser console logs, classifying errors by severity (D004), and returning structured results. This is the self-contained capture engine that T02 wires into the gate.
   - Files: `src/resources/extensions/gsd/types.ts`, `src/resources/extensions/gsd/verification-gate.ts`, `src/resources/extensions/gsd/tests/verification-gate.test.ts`
   - Do: (1) Add `RuntimeError` interface to types.ts with `source: "bg-shell" | "browser"`, `severity: "crash" | "error" | "warning"`, `message: string`, `blocking: boolean`. (2) Add optional `runtimeErrors?: RuntimeError[]` to `VerificationResult`. (3) Implement `captureRuntimeErrors()` in verification-gate.ts using dynamic `import()` for bg-shell `processes` Map and browser-tools `getConsoleLogs()`. (4) Apply D004 severity classification. (5) Truncate browser console text to 500 chars. (6) Write unit tests mocking the module singletons for all severity classes + graceful degradation when imports fail.

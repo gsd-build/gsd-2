@@ -6,7 +6,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { VerificationCheck, VerificationResult } from "./types.js";
+import type { RuntimeError, VerificationCheck, VerificationResult } from "./types.js";
 
 /** Maximum bytes of stdout/stderr to retain per command (10 KB). */
 const MAX_OUTPUT_BYTES = 10 * 1024;
@@ -216,4 +216,187 @@ export function runVerificationGate(options: RunVerificationGateOptions): Verifi
     discoverySource: source,
     timestamp,
   };
+}
+
+// ─── Runtime Error Capture ──────────────────────────────────────────────────
+
+/** Maximum characters of browser console text to retain per entry. */
+const MAX_BROWSER_TEXT_CHARS = 500;
+
+/** Fatal signals that indicate a crash regardless of other status fields. */
+const FATAL_SIGNALS = new Set(["SIGABRT", "SIGSEGV", "SIGBUS"]);
+
+/**
+ * Injectable dependencies for captureRuntimeErrors.
+ * When omitted the function uses dynamic import() to access
+ * bg-shell's processes Map and browser-tools' getConsoleLogs().
+ * Provide overrides in tests to avoid module mocking.
+ */
+export interface CaptureRuntimeErrorsOptions {
+  getProcesses?: () => Map<string, unknown>;
+  getConsoleLogs?: () => Array<{ type: string; text: string; timestamp: number; url: string }>;
+}
+
+/**
+ * Scan bg-shell processes and browser console logs for runtime errors.
+ *
+ * Severity classification follows D004:
+ *   - bg-shell status "crashed" → blocking crash
+ *   - bg-shell !alive && exitCode !== 0 && exitCode !== null → blocking crash
+ *   - bg-shell signal SIGABRT/SIGSEGV/SIGBUS → blocking crash
+ *   - Browser console error with "Unhandled"/"UnhandledRejection" → blocking crash
+ *   - Browser console error (general) → non-blocking error
+ *   - Browser console warning with deprecation text → non-blocking warning
+ *   - bg-shell alive process with recentErrors → non-blocking error
+ *
+ * Returns RuntimeError[] — empty when both sources are unavailable.
+ */
+export async function captureRuntimeErrors(
+  options?: CaptureRuntimeErrorsOptions,
+): Promise<RuntimeError[]> {
+  const errors: RuntimeError[] = [];
+
+  // ── bg-shell scan ─────────────────────────────────────────────────────
+  try {
+    let processes: Map<string, unknown>;
+    if (options?.getProcesses) {
+      processes = options.getProcesses();
+    } else {
+      const mod = await import("../bg-shell/process-manager.js");
+      processes = mod.processes;
+    }
+
+    for (const [id, raw] of processes) {
+      const proc = raw as {
+        id: string;
+        label?: string;
+        status?: string;
+        alive?: boolean;
+        exitCode?: number | null;
+        signal?: string | null;
+        recentErrors?: string[];
+      };
+
+      const name = proc.label || proc.id || id;
+
+      // Check for fatal signal first (applies regardless of alive/status)
+      if (proc.signal && FATAL_SIGNALS.has(proc.signal)) {
+        errors.push({
+          source: "bg-shell",
+          severity: "crash",
+          message: buildBgShellMessage(name, proc.exitCode, proc.signal, proc.recentErrors),
+          blocking: true,
+        });
+        continue;
+      }
+
+      // Crashed status
+      if (proc.status === "crashed") {
+        errors.push({
+          source: "bg-shell",
+          severity: "crash",
+          message: buildBgShellMessage(name, proc.exitCode, proc.signal, proc.recentErrors),
+          blocking: true,
+        });
+        continue;
+      }
+
+      // Non-zero exit on dead process
+      if (
+        !proc.alive &&
+        proc.exitCode !== 0 &&
+        proc.exitCode !== null &&
+        proc.exitCode !== undefined
+      ) {
+        errors.push({
+          source: "bg-shell",
+          severity: "crash",
+          message: buildBgShellMessage(name, proc.exitCode, proc.signal, proc.recentErrors),
+          blocking: true,
+        });
+        continue;
+      }
+
+      // Alive process with recent errors — non-blocking
+      if (proc.alive && proc.recentErrors && proc.recentErrors.length > 0) {
+        const snippet = proc.recentErrors.slice(0, 3).join("; ");
+        errors.push({
+          source: "bg-shell",
+          severity: "error",
+          message: `[${name}] recent errors: ${snippet}`,
+          blocking: false,
+        });
+      }
+    }
+  } catch {
+    // bg-shell not available — skip silently
+  }
+
+  // ── browser console scan ──────────────────────────────────────────────
+  try {
+    let logs: Array<{ type: string; text: string; timestamp: number; url: string }>;
+    if (options?.getConsoleLogs) {
+      logs = options.getConsoleLogs();
+    } else {
+      const mod = await import("../browser-tools/state.js");
+      logs = mod.getConsoleLogs();
+    }
+
+    for (const entry of logs) {
+      const text =
+        entry.text.length > MAX_BROWSER_TEXT_CHARS
+          ? entry.text.slice(0, MAX_BROWSER_TEXT_CHARS) + "…[truncated]"
+          : entry.text;
+
+      if (entry.type === "error") {
+        // Unhandled rejection / unhandled error → blocking crash
+        if (/unhandled/i.test(entry.text)) {
+          errors.push({
+            source: "browser",
+            severity: "crash",
+            message: text,
+            blocking: true,
+          });
+        } else {
+          // General console.error → non-blocking error
+          errors.push({
+            source: "browser",
+            severity: "error",
+            message: text,
+            blocking: false,
+          });
+        }
+      } else if (entry.type === "warning" && /deprecated/i.test(entry.text)) {
+        // Deprecation warning → non-blocking warning
+        errors.push({
+          source: "browser",
+          severity: "warning",
+          message: text,
+          blocking: false,
+        });
+      }
+      // Non-deprecation warnings are intentionally ignored
+    }
+  } catch {
+    // browser-tools not available — skip silently
+  }
+
+  return errors;
+}
+
+/** Build a human-readable message for a bg-shell process error. */
+function buildBgShellMessage(
+  name: string,
+  exitCode: number | null | undefined,
+  signal: string | null | undefined,
+  recentErrors: string[] | undefined,
+): string {
+  const parts: string[] = [`[${name}]`];
+  if (signal) parts.push(`signal=${signal}`);
+  if (exitCode !== null && exitCode !== undefined) parts.push(`exitCode=${exitCode}`);
+  if (recentErrors && recentErrors.length > 0) {
+    const snippet = recentErrors.slice(0, 3).join("; ");
+    parts.push(`errors: ${snippet}`);
+  }
+  return parts.join(" ");
 }

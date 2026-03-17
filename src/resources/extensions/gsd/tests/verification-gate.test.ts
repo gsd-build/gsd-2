@@ -19,7 +19,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { discoverCommands, runVerificationGate, formatFailureContext } from "../verification-gate.ts";
+import { discoverCommands, runVerificationGate, formatFailureContext, captureRuntimeErrors } from "../verification-gate.ts";
+import type { CaptureRuntimeErrorsOptions } from "../verification-gate.ts";
 import { validatePreferences } from "../preferences.ts";
 
 function makeTempDir(prefix: string): string {
@@ -558,4 +559,229 @@ test("formatFailureContext: caps total output at 10,000 chars", () => {
   const output = formatFailureContext(result);
   assert.ok(output.length <= 10_100, `total output should be capped near 10,000 chars, got ${output.length}`);
   assert.ok(output.includes("…[remaining failures truncated]"), "should include total truncation marker");
+});
+
+// ─── captureRuntimeErrors Tests (S04/T01) ─────────────────────────────────────
+
+function makeProc(overrides: Record<string, unknown>) {
+  return {
+    id: "p1",
+    label: "test-server",
+    status: "ready",
+    alive: true,
+    exitCode: null,
+    signal: null,
+    recentErrors: [] as string[],
+    ...overrides,
+  };
+}
+
+function makeLogs(entries: Array<{ type: string; text: string }>) {
+  return entries.map((e, i) => ({
+    type: e.type,
+    text: e.text,
+    timestamp: Date.now() + i,
+    url: "http://localhost:3000",
+  }));
+}
+
+test("captureRuntimeErrors: crashed bg-shell process → blocking crash error", async () => {
+  const processes = new Map<string, unknown>([
+    ["p1", makeProc({ status: "crashed", alive: false, exitCode: 1 })],
+  ]);
+  const result = await captureRuntimeErrors({
+    getProcesses: () => processes,
+    getConsoleLogs: () => [],
+  });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].source, "bg-shell");
+  assert.equal(result[0].severity, "crash");
+  assert.equal(result[0].blocking, true);
+  assert.ok(result[0].message.includes("test-server"));
+});
+
+test("captureRuntimeErrors: bg-shell non-zero exit + not alive → blocking crash error", async () => {
+  const processes = new Map<string, unknown>([
+    ["p1", makeProc({ status: "exited", alive: false, exitCode: 137 })],
+  ]);
+  const result = await captureRuntimeErrors({
+    getProcesses: () => processes,
+    getConsoleLogs: () => [],
+  });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].severity, "crash");
+  assert.equal(result[0].blocking, true);
+  assert.ok(result[0].message.includes("exitCode=137"));
+});
+
+test("captureRuntimeErrors: bg-shell SIGABRT/SIGSEGV/SIGBUS → blocking crash error", async () => {
+  for (const sig of ["SIGABRT", "SIGSEGV", "SIGBUS"]) {
+    const processes = new Map<string, unknown>([
+      ["p1", makeProc({ signal: sig, alive: false, exitCode: null })],
+    ]);
+    const result = await captureRuntimeErrors({
+      getProcesses: () => processes,
+      getConsoleLogs: () => [],
+    });
+    assert.equal(result.length, 1, `${sig} should produce 1 error`);
+    assert.equal(result[0].severity, "crash");
+    assert.equal(result[0].blocking, true);
+    assert.ok(result[0].message.includes(sig), `message should contain ${sig}`);
+  }
+});
+
+test("captureRuntimeErrors: alive bg-shell process with recentErrors → non-blocking error", async () => {
+  const processes = new Map<string, unknown>([
+    ["p1", makeProc({ alive: true, recentErrors: ["TypeError: foo", "RangeError: bar"] })],
+  ]);
+  const result = await captureRuntimeErrors({
+    getProcesses: () => processes,
+    getConsoleLogs: () => [],
+  });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].source, "bg-shell");
+  assert.equal(result[0].severity, "error");
+  assert.equal(result[0].blocking, false);
+  assert.ok(result[0].message.includes("TypeError: foo"));
+  assert.ok(result[0].message.includes("RangeError: bar"));
+});
+
+test("captureRuntimeErrors: browser unhandled rejection → blocking crash error", async () => {
+  const logs = makeLogs([
+    { type: "error", text: "Unhandled promise rejection: some error" },
+  ]);
+  const result = await captureRuntimeErrors({
+    getProcesses: () => new Map(),
+    getConsoleLogs: () => logs,
+  });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].source, "browser");
+  assert.equal(result[0].severity, "crash");
+  assert.equal(result[0].blocking, true);
+  assert.ok(result[0].message.includes("Unhandled"));
+});
+
+test("captureRuntimeErrors: browser UnhandledRejection (case variation) → blocking crash", async () => {
+  const logs = makeLogs([
+    { type: "error", text: "UnhandledRejection in module X" },
+  ]);
+  const result = await captureRuntimeErrors({
+    getProcesses: () => new Map(),
+    getConsoleLogs: () => logs,
+  });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].severity, "crash");
+  assert.equal(result[0].blocking, true);
+});
+
+test("captureRuntimeErrors: browser console.error (general) → non-blocking error", async () => {
+  const logs = makeLogs([
+    { type: "error", text: "Failed to load resource: net::ERR_FAILED" },
+  ]);
+  const result = await captureRuntimeErrors({
+    getProcesses: () => new Map(),
+    getConsoleLogs: () => logs,
+  });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].source, "browser");
+  assert.equal(result[0].severity, "error");
+  assert.equal(result[0].blocking, false);
+});
+
+test("captureRuntimeErrors: browser deprecation warning → non-blocking warning", async () => {
+  const logs = makeLogs([
+    { type: "warning", text: "Event.returnValue is deprecated. Use Event.preventDefault() instead." },
+  ]);
+  const result = await captureRuntimeErrors({
+    getProcesses: () => new Map(),
+    getConsoleLogs: () => logs,
+  });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].source, "browser");
+  assert.equal(result[0].severity, "warning");
+  assert.equal(result[0].blocking, false);
+  assert.ok(result[0].message.includes("deprecated"));
+});
+
+test("captureRuntimeErrors: non-deprecation warning is ignored", async () => {
+  const logs = makeLogs([
+    { type: "warning", text: "Some general warning about performance" },
+  ]);
+  const result = await captureRuntimeErrors({
+    getProcesses: () => new Map(),
+    getConsoleLogs: () => logs,
+  });
+  assert.equal(result.length, 0, "non-deprecation warnings should be ignored");
+});
+
+test("captureRuntimeErrors: no processes, no browser logs → empty array", async () => {
+  const result = await captureRuntimeErrors({
+    getProcesses: () => new Map(),
+    getConsoleLogs: () => [],
+  });
+  assert.deepStrictEqual(result, []);
+});
+
+test("captureRuntimeErrors: dynamic import failure → graceful empty array", async () => {
+  const result = await captureRuntimeErrors({
+    getProcesses: () => { throw new Error("module not found"); },
+    getConsoleLogs: () => { throw new Error("module not found"); },
+  });
+  assert.deepStrictEqual(result, []);
+});
+
+test("captureRuntimeErrors: browser text truncated to 500 chars", async () => {
+  const longText = "x".repeat(600);
+  const logs = makeLogs([
+    { type: "error", text: longText },
+  ]);
+  const result = await captureRuntimeErrors({
+    getProcesses: () => new Map(),
+    getConsoleLogs: () => logs,
+  });
+  assert.equal(result.length, 1);
+  assert.ok(result[0].message.length <= 500 + 20, "message should be truncated near 500 chars");
+  assert.ok(result[0].message.includes("…[truncated]"), "should include truncation marker");
+  assert.ok(!result[0].message.includes("x".repeat(501)), "should not contain 501+ x's");
+});
+
+test("captureRuntimeErrors: bg-shell recentErrors limited to 3 in message", async () => {
+  const processes = new Map<string, unknown>([
+    ["p1", makeProc({
+      status: "crashed",
+      alive: false,
+      exitCode: 1,
+      recentErrors: ["err1", "err2", "err3", "err4", "err5"],
+    })],
+  ]);
+  const result = await captureRuntimeErrors({
+    getProcesses: () => processes,
+    getConsoleLogs: () => [],
+  });
+  assert.equal(result.length, 1);
+  assert.ok(result[0].message.includes("err1"));
+  assert.ok(result[0].message.includes("err2"));
+  assert.ok(result[0].message.includes("err3"));
+  assert.ok(!result[0].message.includes("err4"), "should only include first 3 errors");
+});
+
+test("captureRuntimeErrors: mixed bg-shell and browser errors", async () => {
+  const processes = new Map<string, unknown>([
+    ["p1", makeProc({ status: "crashed", alive: false, exitCode: 1 })],
+  ]);
+  const logs = makeLogs([
+    { type: "error", text: "Unhandled rejection: boom" },
+    { type: "error", text: "general error" },
+    { type: "warning", text: "deprecated API used" },
+  ]);
+  const result = await captureRuntimeErrors({
+    getProcesses: () => processes,
+    getConsoleLogs: () => logs,
+  });
+  // 1 bg-shell crash + 1 browser crash (unhandled) + 1 browser error + 1 browser warning
+  assert.equal(result.length, 4);
+  const blocking = result.filter(r => r.blocking);
+  const nonBlocking = result.filter(r => !r.blocking);
+  assert.equal(blocking.length, 2, "should have 2 blocking errors");
+  assert.equal(nonBlocking.length, 2, "should have 2 non-blocking errors");
 });

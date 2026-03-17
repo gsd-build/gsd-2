@@ -57,12 +57,21 @@ export interface VerificationCheck {
   durationMs: number;
 }
 
+/** A runtime error captured from bg-shell processes or browser console */
+export interface RuntimeError {
+  source: "bg-shell" | "browser";
+  severity: "crash" | "error" | "warning";
+  message: string;
+  blocking: boolean;
+}
+
 /** Aggregate result from the verification gate */
 export interface VerificationResult {
   passed: boolean;              // true if all checks passed (or no checks discovered)
   checks: VerificationCheck[];  // per-command results
   discoverySource: "preference" | "task-plan" | "package-json" | "none";
   timestamp: number;            // Date.now() at gate start
+  runtimeErrors?: RuntimeError[];  // optional — populated by captureRuntimeErrors()
 }
 
 export interface SlicePlan {
