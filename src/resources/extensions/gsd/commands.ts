@@ -72,17 +72,48 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
     description: "GSD — Get Shit Done: /gsd help|next|auto|stop|pause|status|visualize|queue|quick|capture|triage|dispatch|history|undo|skip|export|cleanup|mode|prefs|config|hooks|run-hook|skill-health|doctor|forensics|migrate|remote|steer|knowledge",
     getArgumentCompletions: (prefix: string) => {
       const subcommands = [
-        "help", "next", "auto", "stop", "pause", "status", "visualize", "queue", "quick", "discuss",
-        "capture", "triage", "dispatch",
-        "history", "undo", "skip", "export", "cleanup", "mode", "prefs",
-        "config", "hooks", "run-hook", "skill-health", "doctor", "forensics", "migrate", "remote", "steer", "inspect", "knowledge",
+        { cmd: "help", desc: "Categorized command reference with descriptions" },
+        { cmd: "next", desc: "Explicit step mode (same as /gsd)" },
+        { cmd: "auto", desc: "Autonomous mode — research, plan, execute, commit, repeat" },
+        { cmd: "stop", desc: "Stop auto mode gracefully" },
+        { cmd: "pause", desc: "Pause auto-mode (preserves state, /gsd auto to resume)" },
+        { cmd: "status", desc: "Progress dashboard" },
+        { cmd: "visualize", desc: "Open workflow visualizer (progress, deps, metrics, timeline)" },
+        { cmd: "queue", desc: "Queue and reorder future milestones" },
+        { cmd: "quick", desc: "Execute a quick task without full planning overhead" },
+        { cmd: "discuss", desc: "Discuss architecture and decisions" },
+        { cmd: "capture", desc: "Fire-and-forget thought capture" },
+        { cmd: "triage", desc: "Manually trigger triage of pending captures" },
+        { cmd: "dispatch", desc: "Dispatch a specific phase directly" },
+        { cmd: "history", desc: "View execution history" },
+        { cmd: "undo", desc: "Revert last completed unit" },
+        { cmd: "skip", desc: "Prevent a unit from auto-mode dispatch" },
+        { cmd: "export", desc: "Export milestone/slice results" },
+        { cmd: "cleanup", desc: "Remove merged branches or snapshots" },
+        { cmd: "mode", desc: "Switch workflow mode (solo/team)" },
+        { cmd: "prefs", desc: "Manage preferences (model selection, timeouts, etc.)" },
+        { cmd: "config", desc: "Set API keys for external tools" },
+        { cmd: "hooks", desc: "Show configured post-unit and pre-dispatch hooks" },
+        { cmd: "run-hook", desc: "Manually trigger a specific hook" },
+        { cmd: "skill-health", desc: "Skill lifecycle dashboard" },
+        { cmd: "doctor", desc: "Runtime health checks with auto-fix" },
+        { cmd: "forensics", desc: "Examine execution logs" },
+        { cmd: "migrate", desc: "Migrate a v1 .planning directory to .gsd format" },
+        { cmd: "remote", desc: "Control remote auto-mode" },
+        { cmd: "steer", desc: "Hard-steer plan documents during execution" },
+        { cmd: "inspect", desc: "Show SQLite DB diagnostics" },
+        { cmd: "knowledge", desc: "Add persistent project knowledge (rule, pattern, or lesson)" }
       ];
       const parts = prefix.trim().split(/\s+/);
 
       if (parts.length <= 1) {
         return subcommands
-          .filter((cmd) => cmd.startsWith(parts[0] ?? ""))
-          .map((cmd) => ({ value: cmd, label: cmd }));
+          .filter((item) => item.cmd.startsWith(parts[0] ?? ""))
+          .map((item) => ({ 
+            value: item.cmd, 
+            label: item.cmd, 
+            description: item.desc 
+          }));
       }
 
       if (parts[0] === "auto" && parts.length <= 2) {
