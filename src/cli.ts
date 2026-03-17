@@ -183,7 +183,11 @@ const authStorage = AuthStorage.create(authFilePath)
 loadStoredEnvKeys(authStorage)
 migratePiCredentials(authStorage)
 
-const modelRegistry = new ModelRegistry(authStorage)
+// Resolve models.json path with fallback to ~/.pi/agent/models.json
+const { resolveModelsJsonPath } = await import('./models-resolver.js')
+const modelsJsonPath = resolveModelsJsonPath()
+
+const modelRegistry = new ModelRegistry(authStorage, modelsJsonPath)
 const settingsManager = SettingsManager.create(agentDir)
 
 // Run onboarding wizard on first launch (no LLM provider configured)
