@@ -10,6 +10,7 @@ import {
   verifyExpectedArtifact,
   diagnoseExpectedArtifact,
   buildLoopRemediationSteps,
+  selfHealRuntimeRecords,
   completedKeysPath,
   persistCompletedKey,
   removePersistedKey,
@@ -458,5 +459,66 @@ test("verifyExpectedArtifact plan-slice fails for plan with no tasks (#699)", ()
     assert.equal(result, false, "should fail when plan has no task entries (empty scaffold, #699)");
   } finally {
     cleanup(base);
+  }
+});
+
+// ─── selfHealRuntimeRecords — worktree base path (#769) ──────────────────
+
+test("selfHealRuntimeRecords clears stale record when artifact exists at worktree base (#769)", async () => {
+  // Simulate worktree layout: the runtime record AND the artifact both live
+  // under the worktree's .gsd/, not the main project root.
+  const worktreeBase = makeTmpBase();
+  const mainBase = makeTmpBase();
+  try {
+    const { writeUnitRuntimeRecord, readUnitRuntimeRecord } = await import("../unit-runtime.ts");
+
+    // Write a stale runtime record in the worktree .gsd/runtime/units/
+    writeUnitRuntimeRecord(worktreeBase, "run-uat", "M001/S01", Date.now() - 7200_000, {
+      phase: "dispatched",
+    });
+
+    // Write the UAT result artifact in the worktree .gsd/milestones/
+    const uatPath = join(worktreeBase, ".gsd", "milestones", "M001", "slices", "S01", "S01-UAT-RESULT.md");
+    writeFileSync(uatPath, "---\nresult: pass\n---\n# UAT Result\nAll tests passed.\n");
+
+    // Verify the runtime record exists before heal
+    const before = readUnitRuntimeRecord(worktreeBase, "run-uat", "M001/S01");
+    assert.ok(before, "runtime record should exist before heal");
+
+    // Mock ExtensionContext with minimal notify
+    const notifications: string[] = [];
+    const mockCtx = {
+      ui: { notify: (msg: string) => { notifications.push(msg); } },
+    } as any;
+
+    // Call selfHeal with worktreeBase — this is the fix: using the worktree path
+    // so both the runtime record and artifact are found
+    const completedKeys = new Set<string>();
+    await selfHealRuntimeRecords(worktreeBase, mockCtx, completedKeys);
+
+    // The stale record should be cleared
+    const after = readUnitRuntimeRecord(worktreeBase, "run-uat", "M001/S01");
+    assert.equal(after, null, "runtime record should be cleared after heal");
+
+    // The completion key should be persisted
+    assert.ok(completedKeys.has("run-uat/M001/S01"), "completion key should be added");
+    assert.ok(notifications.some(n => n.includes("Self-heal")), "should emit self-heal notification");
+
+    // Now verify that calling with mainBase does NOT find/clear anything (the old bug)
+    // Write a stale record at mainBase but NO artifact there
+    writeUnitRuntimeRecord(mainBase, "run-uat", "M001/S01", Date.now() - 7200_000, {
+      phase: "dispatched",
+    });
+    const mainKeys = new Set<string>();
+    await selfHealRuntimeRecords(mainBase, mockCtx, mainKeys);
+
+    // The record at mainBase should be cleared by the stale timeout (>1h),
+    // but the completion key should NOT be set (artifact doesn't exist at mainBase)
+    const afterMain = readUnitRuntimeRecord(mainBase, "run-uat", "M001/S01");
+    assert.equal(afterMain, null, "stale record at main base should be cleared by timeout");
+    assert.ok(!mainKeys.has("run-uat/M001/S01"), "completion key should NOT be set when artifact is missing");
+  } finally {
+    cleanup(worktreeBase);
+    cleanup(mainBase);
   }
 });
