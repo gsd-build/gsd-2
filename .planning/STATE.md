@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Native Desktop
 status: in_progress
-stopped_at: Completed 20.2-01-PLAN.md — headless browser mode + screenshot extraction
-last_updated: "2026-03-17T16:57:32.940Z"
+stopped_at: Completed 20.2-02-PLAN.md — browser screenshot relay pipeline complete
+last_updated: "2026-03-17T17:06:40.798Z"
 last_activity: "2026-03-14 — Plan 19-01 complete: 4 RED test stub files created (workspace-api, project-archiving, project-home-screen, project-tab-bar); 747 passing tests unaffected; WORKSPACE-01..05 test coverage established"
 progress:
   total_phases: 12
-  completed_phases: 9
+  completed_phases: 10
   total_plans: 56
-  completed_plans: 53
+  completed_plans: 54
   percent: 95
 ---
 
@@ -518,7 +518,7 @@ Phase: 19 of 20 (Project Workspace) — In Progress (1 of 5 plans done)
 Plan: 1 of 5 complete (plan 01 done — 4 Nyquist Wave 0 RED test stubs created)
 Status: Phase 19 in progress. Next: Phase 19-02 workspace-api implementation.
 Last activity: 2026-03-14 — Plan 19-01 complete: 4 RED test stub files created (workspace-api, project-archiving, project-home-screen, project-tab-bar); 747 passing tests unaffected; WORKSPACE-01..05 test coverage established
-Stopped at: Completed 20.2-01-PLAN.md — headless browser mode + screenshot extraction
+Stopped at: Completed 20.2-02-PLAN.md — browser screenshot relay pipeline complete
 
 Progress: [█████████░] 89% (40/45 plans complete)
 
@@ -669,6 +669,9 @@ Progress: [█████████░] 89% (40/45 plans complete)
 - [Phase 20.1]: CodeMirror EditorView recreated per filePath — simplest approach for language switching; handleFsRequest allowedRoot param backward-compatible; save is explicit Ctrl+S not auto-save
 - [Phase 20.2-01]: BrowserStateUpdate emitted via cast as unknown as StreamEvent — avoids modifying StreamEvent union type, consistent with process_crashed pattern
 - [Phase 20.2-01]: GSD_BROWSER_HEADLESS env var controls headless mode — browser tools default to visible when unset, headless when set to 1 (Mission Control always sets 1)
+- [Phase 20.2]: browser_state_update intercepted before generic forward in pipeline.ts with return; to prevent large base64 data polluting chat transcript
+- [Phase 20.2]: preview_open port:0 signals auto-open without server entry — guard data.port > 0 before addManualPort in usePreview
+- [Phase 20.2]: DetectedServer.label optional (label?) to match test contracts — label always set at runtime but interface allows undefined; scanForDevServers uses for-loop to avoid TS type predicate errors
 
 ### Blockers/Concerns
 

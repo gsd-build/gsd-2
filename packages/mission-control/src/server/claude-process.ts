@@ -341,12 +341,33 @@ export class ClaudeProcessManager {
   }
 
   /**
-   * Interrupt the active process by sending SIGINT.
+   * Interrupt the active process.
+   * On Windows, SIGINT is not reliably delivered to process trees spawned with
+   * shell:false, so we use taskkill /F /T to forcefully terminate the entire tree.
+   * On POSIX, we send SIGINT and escalate to SIGKILL after 3 seconds if needed.
    * No-op if no process is currently active.
    */
   interrupt(): void {
     if (!this.activeProcess) return;
-    this.activeProcess.kill("SIGINT");
+    const proc = this.activeProcess;
+
+    if (process.platform === "win32" && proc.pid) {
+      // On Windows, SIGINT is not reliably delivered to process trees.
+      // taskkill /F /T forcefully terminates the entire tree.
+      nodeSpawn("taskkill", ["/F", "/T", "/PID", String(proc.pid)], {
+        shell: false,
+        stdio: "ignore",
+      });
+    } else {
+      proc.kill("SIGINT");
+      // Escalate to SIGKILL after 3 seconds if the process is still running
+      const timer = setTimeout(() => {
+        if (this.activeProcess === proc) {
+          try { proc.kill("SIGKILL"); } catch (_) {}
+        }
+      }, 3000);
+      proc.once("close", () => clearTimeout(timer));
+    }
   }
 
   /**
