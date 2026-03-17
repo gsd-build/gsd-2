@@ -75,14 +75,20 @@ Each worktree operates on its own branch with its own commit history. Merges hap
 
 ### Commit Format
 
-Commits use conventional commit format with scope:
+Commits use conventional commit format with scope. For task completions, the message is generated from the task summary — the one-liner describes what was actually built, and key files are listed in the commit body:
 
 ```
 feat(S01/T01): core type definitions
+
+- src/types/core.ts
+- src/types/index.ts
+
 feat(S01/T02): markdown parser for plan files
 fix(M001/S03): bug fixes and doc corrections
 docs(M001/S04): workflow documentation
 ```
+
+The commit type (`feat`, `fix`, `refactor`, `docs`, `test`, `perf`, `chore`) is inferred from the task title and summary content. Non-task commits (state rebuilds, pre-switch saves) use generic `chore()` messages.
 
 ## Worktree Management
 

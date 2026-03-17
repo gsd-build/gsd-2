@@ -24,8 +24,9 @@ It checks:
 **Causes:**
 - Stale cache after a crash — the in-memory file listing doesn't reflect new artifacts
 - The LLM didn't produce the expected artifact file
+- Stale crash recovery context from a completed milestone causing phantom dispatches
 
-**Fix:** Run `/gsd doctor` to repair state, then resume with `/gsd auto`. If the issue persists, check that the expected artifact file exists on disk.
+**Fix:** Run `/gsd doctor` to repair state, then resume with `/gsd auto`. If the issue persists, check that the expected artifact file exists on disk. Skip loops are now interruptible (press Escape) and count toward the lifetime dispatch cap.
 
 ### Auto mode stops with "Loop detected"
 

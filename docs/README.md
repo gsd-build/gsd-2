@@ -14,7 +14,7 @@ Welcome to the GSD documentation. This covers everything from getting started to
 | [Token Optimization](./token-optimization.md) | Token profiles, context compression, complexity routing, and adaptive learning (v2.17) |
 | [Dynamic Model Routing](./dynamic-model-routing.md) | Complexity-based model selection, cost tables, escalation, and budget pressure (v2.19) |
 | [Captures & Triage](./captures-triage.md) | Fire-and-forget thought capture during auto-mode with automated triage (v2.19) |
-| [Workflow Visualizer](./visualizer.md) | Interactive TUI overlay for progress, dependencies, metrics, and timeline (v2.19) |
+| [Workflow Visualizer](./visualizer.md) | Interactive TUI overlay for progress, dependencies, metrics, and timeline (v2.19+) |
 | [Cost Management](./cost-management.md) | Budget ceilings, cost tracking, projections, and enforcement modes |
 | [Git Strategy](./git-strategy.md) | Worktree isolation, branching model, and merge behavior |
 | [Parallel Orchestration](./parallel-orchestration.md) | Run multiple milestones simultaneously with worker isolation and coordination |

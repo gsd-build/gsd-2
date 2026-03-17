@@ -263,6 +263,12 @@ notifications:
   on_attention: true          # notify when manual attention needed
 ```
 
+## Environment Variables
+
+| Variable | Values | Description |
+|----------|--------|-------------|
+| `PREFER_BRAVE_SEARCH` | `1` / `true` | Force Brave Search over Anthropic's native web search. By default, GSD uses Anthropic's server-side web search when connected to an Anthropic model. Set this to keep the Brave/custom search tools active instead. Requires `BRAVE_API_KEY` to be set. |
+
 ### `remote_questions`
 
 Route interactive questions to Slack or Discord for headless auto mode:

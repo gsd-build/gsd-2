@@ -29,6 +29,20 @@ Research → Plan → Execute (per task) → Complete → Reassess Roadmap → N
 
 Every task, research phase, and planning step gets a clean context window. No accumulated garbage. No degraded quality from context bloat. The dispatch prompt includes everything needed — task plans, prior summaries, dependency context, decisions register — so the LLM starts oriented instead of spending tool calls reading files.
 
+### Incremental Memory
+
+While each unit gets a fresh context window, GSD maintains an **incremental memory system** that persists knowledge across sessions. After each unit completes, a background LLM call extracts durable project knowledge — architecture patterns, gotchas, conventions, environment details — and stores it in the project database.
+
+Active memories are injected into future dispatch prompts, giving the LLM access to lessons learned without polluting the context window with full session history. Memory entries have confidence scores that increase with reinforcement and decay over time if unused.
+
+Memory categories:
+- **gotcha** — surprising behaviors, non-obvious failure modes
+- **convention** — project coding standards, naming patterns
+- **architecture** — structural decisions, module boundaries
+- **pattern** — recurring implementation approaches
+- **environment** — toolchain, runtime, deployment details
+- **preference** — user preferences discovered during execution
+
 ### Context Pre-Loading
 
 The dispatch prompt is carefully constructed with:
@@ -54,6 +68,20 @@ GSD isolates milestone work using one of three modes (configured via `git.isolat
 
 See [Git Strategy](./git-strategy.md) for details.
 
+### Meaningful Commit Messages
+
+When a task completes, GSD generates a conventional commit message from the task summary rather than using a generic `chore()` message. The commit type is inferred from the task content (`feat`, `fix`, `refactor`, `docs`, `test`, `perf`, `chore`), and the description comes from the task summary's one-liner — what was actually built, not just what was planned. Key files are listed in the commit body.
+
+```
+feat(S01/T02): Add retry-aware worker status logging
+
+- src/worker/status.ts
+- src/worker/retry.ts
+- src/tests/worker-status.test.ts
+```
+
+Non-task commits (state rebuilds, pre-switch commits) still use generic messages.
+
 ### Parallel Execution
 
 When your project has independent milestones, you can run them simultaneously. Each milestone gets its own worker process and worktree. See [Parallel Orchestration](./parallel-orchestration.md) for setup and usage.
@@ -62,9 +90,13 @@ When your project has independent milestones, you can run them simultaneously. E
 
 A lock file tracks the current unit. If the session dies, the next `/gsd auto` reads the surviving session file, synthesizes a recovery briefing from every tool call that made it to disk, and resumes with full context.
 
+Recovery is milestone-aware: if the crashed unit's milestone is already complete (summary exists), stale recovery context is discarded to prevent phantom skip loops.
+
 ### Stuck Detection
 
 If the same unit dispatches twice (the LLM didn't produce the expected artifact), GSD retries once with a deep diagnostic prompt. If it fails again, auto mode stops with the exact file it expected, so you can intervene.
+
+Skip loops are interruptible — pressing Escape breaks out immediately. Skip iterations count toward the lifetime dispatch cap, preventing unbounded retry loops from exhausting the budget.
 
 ### Post-Mortem Investigation
 

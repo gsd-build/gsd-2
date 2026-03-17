@@ -36,7 +36,14 @@ M001: User Management
   ⬜ S03: Admin panel
 ```
 
-Shows checkmarks for completed items, spinners for in-progress, and empty boxes for pending.
+Shows checkmarks for completed items, spinners for in-progress, and empty boxes for pending. Task counts and completion percentages are displayed at each level.
+
+**Feature snapshot** includes:
+- Missing slices (slices without plans or with gaps)
+- Recently updated slices (last 7 days) with completion dates
+- Recent completions with one-liner summaries
+
+**Discussion status** shows milestone discussion state — discussed, draft, or pending — so you can see at a glance which milestones have gone through requirements gathering.
 
 ### 2. Dependencies
 

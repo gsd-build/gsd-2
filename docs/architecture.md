@@ -53,7 +53,7 @@ Every dispatch creates a new agent session. The LLM starts with a clean context 
 |-----------|-----------------|
 | **GSD** | Core workflow engine — auto mode, state machine, commands, dashboard |
 | **Browser Tools** | Playwright-based browser automation — navigation, forms, screenshots, PDF export, device emulation, visual regression, structured data extraction, route mocking, accessibility tree inspection, and semantic actions |
-| **Search the Web** | Brave Search, Tavily, or Jina page extraction |
+| **Search the Web** | Brave Search, Tavily, or Jina page extraction. Anthropic native web search with TUI rendering of results (titles, URLs, errors) |
 | **Google Search** | Gemini-powered web search with AI-synthesized answers |
 | **Context7** | Up-to-date library/framework documentation |
 | **Background Shell** | Long-running process management with readiness detection |
@@ -110,10 +110,13 @@ The auto mode dispatch pipeline:
 7.  Resolve effective model (with fallbacks)
 8.  Check pending captures → triage if needed
 9.  Build dispatch prompt (applying inline level compression)
-10. Create fresh agent session
-11. Inject prompt and let LLM execute
-12. On completion: snapshot metrics, verify artifacts, persist state
-13. Loop to step 1
+10. Inject active memories from incremental memory store
+11. Create fresh agent session
+12. Inject prompt and let LLM execute
+13. On completion: snapshot metrics, verify artifacts, persist state
+14. Extract memories from session transcript (background, non-blocking)
+15. Generate meaningful commit message from task summary
+16. Loop to step 1
 ```
 
 Phase skipping (from token profile) gates steps 2-3: if a phase is skipped, the corresponding unit type is never dispatched.
