@@ -221,12 +221,25 @@ Plans:
   4. The landing page loads, shows download buttons linking to the latest GitHub Release artifacts, and is readable on a mobile browser
 **Plans**: TBD
 
+### Phase 20.1: Mission Control M2 Polish (INSERTED)
+**Goal:** Fix 10 identified bugs/regressions in the shipped M2 app (preview panel crash, logo blur, missing project name, broken session fork, stale refresh state) and add Code Explorer — a VSCode-style modal file browser with CodeMirror 6 editor
+**Requirements**: POLISH-01 through POLISH-09
+**Depends on:** Phase 20
+**Plans:** 5 plans
+
+Plans:
+- [ ] 20.1-01-PLAN.md — Logo SVG swap + project name header bar + scrollbar utility
+- [ ] 20.1-02-PLAN.md — Preview panel error boundary + multi-server scan + viewport architecture
+- [ ] 20.1-03-PLAN.md — Session fork message copy + refresh recovery banner
+- [ ] 20.1-04-PLAN.md — Code Explorer modal with CodeMirror 6 + file read/write API
+- [ ] 20.1-05-PLAN.md — Full test suite gate + human verification
+
 ---
 
 ## Progress
 
 **Execution Order:**
-12 → 13 / 14 / 15 (parallel after 12) → 16 / 17 (after 15) → 18 (after 13, 14, 16, 17) → 19 (after 18) → 20 (after 15, 19)
+12 → 13 / 14 / 15 (parallel after 12) → 16 / 17 (after 15) → 18 (after 13, 14, 16, 17) → 19 (after 18) → 20 (after 15, 19) → 20.1 (after 20)
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -255,3 +268,4 @@ Plans:
 | 18. Builder Mode | 4/4 | Complete    | 2026-03-14 | — |
 | 19. Project Workspace | 5/5 | Complete    | 2026-03-14 | — |
 | 20. Installer + Distribution | 3/3 | Complete    | 2026-03-15 | — |
+| 20.1 M2 Polish (INSERTED) | v2.0 | 0/5 | In Progress | — |
