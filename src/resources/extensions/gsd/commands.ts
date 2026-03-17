@@ -6,14 +6,14 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent";
 import { AuthStorage } from "@gsd/pi-coding-agent";
-import { existsSync, readFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { enableDebug, isDebugEnabled } from "./debug-logger.js";
 import { fileURLToPath } from "node:url";
 import { deriveState } from "./state.js";
 import { GSDDashboardOverlay } from "./dashboard-overlay.js";
 import { GSDVisualizerOverlay } from "./visualizer-overlay.js";
-import { showQueue, showDiscuss } from "./guided-flow.js";
+import { showQueue, showDiscuss, showHeadlessMilestoneCreation } from "./guided-flow.js";
 import { startAuto, stopAuto, pauseAuto, isAutoActive, isAutoPaused, isStepMode, stopAutoRemote, dispatchDirectPhase } from "./auto.js";
 import { resolveProjectRoot } from "./worktree.js";
 import { appendCapture, hasPendingCaptures, loadPendingCaptures } from "./captures.js";
@@ -77,7 +77,7 @@ function projectRoot(): string {
 
 export function registerGSDCommand(pi: ExtensionAPI): void {
   pi.registerCommand("gsd", {
-    description: "GSD — Get Shit Done: /gsd help|next|auto|stop|pause|status|visualize|queue|quick|capture|triage|dispatch|history|undo|skip|export|cleanup|mode|prefs|config|hooks|run-hook|skill-health|doctor|forensics|migrate|remote|steer|knowledge|parallel",
+    description: "GSD — Get Shit Done: /gsd help|next|auto|stop|pause|status|visualize|queue|quick|capture|triage|dispatch|history|undo|skip|export|cleanup|mode|prefs|config|hooks|run-hook|skill-health|doctor|forensics|migrate|remote|steer|knowledge|new-milestone|parallel",
     getArgumentCompletions: (prefix: string) => {
       const subcommands = [
         { cmd: "help", desc: "Categorized command reference with descriptions" },
@@ -111,6 +111,7 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         { cmd: "steer", desc: "Hard-steer plan documents during execution" },
         { cmd: "inspect", desc: "Show SQLite DB diagnostics" },
         { cmd: "knowledge", desc: "Add persistent project knowledge (rule, pattern, or lesson)" },
+        { cmd: "new-milestone", desc: "Create a milestone from a specification document (headless)" },
         { cmd: "parallel", desc: "Parallel milestone orchestration (start, status, stop, merge)" },
       ];
       const parts = prefix.trim().split(/\s+/);
@@ -463,6 +464,21 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         return;
       }
 
+      if (trimmed === "new-milestone") {
+        const basePath = projectRoot();
+        const headlessContextPath = join(basePath, ".gsd", "runtime", "headless-context.md");
+        if (existsSync(headlessContextPath)) {
+          const seedContext = readFileSync(headlessContextPath, "utf-8");
+          try { unlinkSync(headlessContextPath); } catch { /* non-fatal */ }
+          await showHeadlessMilestoneCreation(ctx, pi, basePath, seedContext);
+        } else {
+          // No headless context — fall back to interactive smart entry
+          const { showSmartEntry } = await import("./guided-flow.js");
+          await showSmartEntry(ctx, pi, basePath);
+        }
+        return;
+      }
+
       if (trimmed.startsWith("capture ") || trimmed === "capture") {
         await handleCapture(trimmed.replace(/^capture\s*/, "").trim(), ctx);
         return;
@@ -583,6 +599,7 @@ function showHelp(ctx: ExtensionCommandContext): void {
     "  /gsd stop           Stop auto-mode gracefully",
     "  /gsd pause          Pause auto-mode (preserves state, /gsd auto to resume)",
     "  /gsd discuss        Start guided milestone/slice discussion",
+    "  /gsd new-milestone  Create milestone from headless context (used by gsd headless)",
     "",
     "VISIBILITY",
     "  /gsd status         Show progress dashboard  (Ctrl+Alt+G)",

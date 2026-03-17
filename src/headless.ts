@@ -11,8 +11,8 @@
  *   2 — blocked (command reported a blocker)
  */
 
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { ChildProcess } from 'node:child_process'
 
 // RpcClient is not in @gsd/pi-coding-agent's public exports — import from dist directly.
@@ -29,6 +29,10 @@ export interface HeadlessOptions {
   model?: string
   command: string
   commandArgs: string[]
+  context?: string       // file path or '-' for stdin
+  contextText?: string   // inline text
+  auto?: boolean         // chain into auto-mode after milestone creation
+  verbose?: boolean      // show tool calls in output
 }
 
 interface ExtensionUIRequest {
@@ -80,6 +84,14 @@ export function parseHeadlessArgs(argv: string[]): HeadlessOptions {
       } else if (arg === '--model' && i + 1 < args.length) {
         // --model can also be passed from the main CLI; headless-specific takes precedence
         options.model = args[++i]
+      } else if (arg === '--context' && i + 1 < args.length) {
+        options.context = args[++i]
+      } else if (arg === '--context-text' && i + 1 < args.length) {
+        options.contextText = args[++i]
+      } else if (arg === '--auto') {
+        options.auto = true
+      } else if (arg === '--verbose') {
+        options.verbose = true
       }
     } else if (!positionalStarted) {
       positionalStarted = true
@@ -144,22 +156,26 @@ function handleExtensionUIRequest(
 // Progress Formatter
 // ---------------------------------------------------------------------------
 
-function formatProgress(event: Record<string, unknown>): string | null {
+function formatProgress(event: Record<string, unknown>, verbose: boolean): string | null {
   const type = String(event.type ?? '')
 
   switch (type) {
     case 'tool_execution_start':
-      return `[tool] ${event.toolName ?? 'unknown'}`
+      if (verbose) return `  [tool]    ${event.toolName ?? 'unknown'}`
+      return null
 
     case 'agent_start':
-      return '[agent] Session started'
+      return '[agent]   Session started'
 
     case 'agent_end':
-      return '[agent] Session ended'
+      return '[agent]   Session ended'
 
     case 'extension_ui_request':
       if (event.method === 'notify') {
-        return `[gsd] ${event.message ?? ''}`
+        return `[gsd]     ${event.message ?? ''}`
+      }
+      if (event.method === 'setStatus') {
+        return `[status]  ${event.message ?? ''}`
       }
       return null
 
@@ -186,6 +202,11 @@ function isBlockedNotification(event: Record<string, unknown>): boolean {
   return String(event.message ?? '').toLowerCase().includes('blocked')
 }
 
+function isMilestoneReadyNotification(event: Record<string, unknown>): boolean {
+  if (event.type !== 'extension_ui_request' || event.method !== 'notify') return false
+  return /milestone\s+m\d+.*ready/i.test(String(event.message ?? ''))
+}
+
 // ---------------------------------------------------------------------------
 // Quick Command Detection
 // ---------------------------------------------------------------------------
@@ -205,12 +226,76 @@ function isQuickCommand(command: string): boolean {
 // Main Orchestrator
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Context Loading (new-milestone)
+// ---------------------------------------------------------------------------
+
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = []
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk as Buffer)
+  }
+  return Buffer.concat(chunks).toString('utf-8')
+}
+
+async function loadContext(options: HeadlessOptions): Promise<string> {
+  if (options.contextText) return options.contextText
+  if (options.context === '-') {
+    return readStdin()
+  }
+  if (options.context) {
+    return readFileSync(resolve(options.context), 'utf-8')
+  }
+  throw new Error('No context provided. Use --context <file> or --context-text <text>')
+}
+
+/**
+ * Bootstrap .gsd/ directory structure for headless new-milestone.
+ * Mirrors the bootstrap logic from guided-flow.ts showSmartEntry().
+ */
+function bootstrapGsdProject(basePath: string): void {
+  const gsdDir = join(basePath, '.gsd')
+  mkdirSync(join(gsdDir, 'milestones'), { recursive: true })
+  mkdirSync(join(gsdDir, 'runtime'), { recursive: true })
+}
+
 export async function runHeadless(options: HeadlessOptions): Promise<void> {
   const startTime = Date.now()
+  const isNewMilestone = options.command === 'new-milestone'
 
-  // Validate .gsd/ directory
+  // For new-milestone, load context and bootstrap .gsd/ before spawning RPC child
+  if (isNewMilestone) {
+    if (!options.context && !options.contextText) {
+      process.stderr.write('[headless] Error: new-milestone requires --context <file> or --context-text <text>\n')
+      process.exit(1)
+    }
+
+    let contextContent: string
+    try {
+      contextContent = await loadContext(options)
+    } catch (err) {
+      process.stderr.write(`[headless] Error loading context: ${err instanceof Error ? err.message : String(err)}\n`)
+      process.exit(1)
+    }
+
+    // Bootstrap .gsd/ if needed
+    const gsdDir = join(process.cwd(), '.gsd')
+    if (!existsSync(gsdDir)) {
+      if (!options.json) {
+        process.stderr.write('[headless] Bootstrapping .gsd/ project structure...\n')
+      }
+      bootstrapGsdProject(process.cwd())
+    }
+
+    // Write context to temp file for the RPC child to read
+    const runtimeDir = join(gsdDir, 'runtime')
+    mkdirSync(runtimeDir, { recursive: true })
+    writeFileSync(join(runtimeDir, 'headless-context.md'), contextContent, 'utf-8')
+  }
+
+  // Validate .gsd/ directory (skip for new-milestone since we just bootstrapped it)
   const gsdDir = join(process.cwd(), '.gsd')
-  if (!existsSync(gsdDir)) {
+  if (!isNewMilestone && !existsSync(gsdDir)) {
     process.stderr.write('[headless] Error: No .gsd/ directory found in current directory.\n')
     process.stderr.write("[headless] Run 'gsd' interactively first to initialize a project.\n")
     process.exit(1)
@@ -240,6 +325,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
   let blocked = false
   let completed = false
   let exitCode = 0
+  let milestoneReady = false  // tracks "Milestone X ready." for auto-chaining
   const recentEvents: TrackedEvent[] = []
 
   function trackEvent(event: Record<string, unknown>): void {
@@ -302,7 +388,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
       process.stdout.write(JSON.stringify(eventObj) + '\n')
     } else {
       // Progress output to stderr
-      const line = formatProgress(eventObj)
+      const line = formatProgress(eventObj, !!options.verbose)
       if (line) process.stderr.write(line + '\n')
     }
 
@@ -312,6 +398,12 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
       if (isBlockedNotification(eventObj)) {
         blocked = true
       }
+
+      // Detect "Milestone X ready." for auto-mode chaining
+      if (isMilestoneReadyNotification(eventObj)) {
+        milestoneReady = true
+      }
+
       if (isTerminalNotification(eventObj)) {
         completed = true
       }
@@ -398,6 +490,32 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
   // Wait for completion
   if (exitCode === 0 || exitCode === 2) {
     await completionPromise
+  }
+
+  // Auto-mode chaining: if --auto and milestone creation succeeded, send /gsd auto
+  if (isNewMilestone && options.auto && milestoneReady && !blocked && exitCode === 0) {
+    if (!options.json) {
+      process.stderr.write('[headless] Milestone ready — chaining into auto-mode...\n')
+    }
+
+    // Reset completion state for the auto-mode phase
+    completed = false
+    milestoneReady = false
+    blocked = false
+    const autoCompletionPromise = new Promise<void>((resolve) => {
+      resolveCompletion = resolve
+    })
+
+    try {
+      await client.prompt('/gsd auto')
+    } catch (err) {
+      process.stderr.write(`[headless] Error: Failed to start auto-mode: ${err instanceof Error ? err.message : String(err)}\n`)
+      exitCode = 1
+    }
+
+    if (exitCode === 0 || exitCode === 2) {
+      await autoCompletionPromise
+    }
   }
 
   // Cleanup

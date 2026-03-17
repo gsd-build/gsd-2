@@ -201,6 +201,81 @@ function buildDiscussPrompt(nextId: string, preamble: string, _basePath: string)
   });
 }
 
+/**
+ * Build the discuss prompt for headless milestone creation.
+ * Uses the discuss-headless prompt template with seed context injected.
+ */
+function buildHeadlessDiscussPrompt(nextId: string, seedContext: string, _basePath: string): string {
+  const milestoneRel = `.gsd/milestones/${nextId}`;
+  const inlinedTemplates = [
+    inlineTemplate("project", "Project"),
+    inlineTemplate("requirements", "Requirements"),
+    inlineTemplate("context", "Context"),
+    inlineTemplate("roadmap", "Roadmap"),
+    inlineTemplate("decisions", "Decisions"),
+  ].join("\n\n---\n\n");
+  return loadPrompt("discuss-headless", {
+    milestoneId: nextId,
+    seedContext,
+    contextPath: `${milestoneRel}/${nextId}-CONTEXT.md`,
+    roadmapPath: `${milestoneRel}/${nextId}-ROADMAP.md`,
+    inlinedTemplates,
+  });
+}
+
+/**
+ * Bootstrap a .gsd/ project from scratch for headless use.
+ * Ensures git repo, .gsd/ structure, gitignore, and preferences all exist.
+ */
+function bootstrapGsdProject(basePath: string): void {
+  if (!nativeIsRepo(basePath)) {
+    const mainBranch = loadEffectiveGSDPreferences()?.preferences?.git?.main_branch || "main";
+    nativeInit(basePath, mainBranch);
+  }
+
+  const root = gsdRoot(basePath);
+  mkdirSync(join(root, "milestones"), { recursive: true });
+  mkdirSync(join(root, "runtime"), { recursive: true });
+
+  const commitDocs = loadEffectiveGSDPreferences()?.preferences?.git?.commit_docs;
+  ensureGitignore(basePath, { commitDocs });
+  ensurePreferences(basePath);
+  untrackRuntimeFiles(basePath);
+}
+
+/**
+ * Headless milestone creation from a seed specification document.
+ * Bootstraps the project if needed, generates the next milestone ID,
+ * and dispatches the headless discuss prompt (no Q&A rounds).
+ */
+export async function showHeadlessMilestoneCreation(
+  ctx: ExtensionCommandContext,
+  pi: ExtensionAPI,
+  basePath: string,
+  seedContext: string,
+): Promise<void> {
+  // Ensure .gsd/ is bootstrapped
+  bootstrapGsdProject(basePath);
+
+  // Generate next milestone ID
+  const existingIds = findMilestoneIds(basePath);
+  const prefs = loadEffectiveGSDPreferences();
+  const nextId = nextMilestoneId(existingIds, prefs?.preferences?.unique_milestone_ids ?? false);
+
+  // Create milestone directory
+  const milestoneDir = join(basePath, ".gsd", "milestones", nextId, "slices");
+  mkdirSync(milestoneDir, { recursive: true });
+
+  // Build and dispatch the headless discuss prompt
+  const prompt = buildHeadlessDiscussPrompt(nextId, seedContext, basePath);
+
+  // Set pending auto start (auto-mode triggers on "Milestone X ready." via checkAutoStartAfterDiscuss)
+  pendingAutoStart = { ctx, pi, basePath, milestoneId: nextId };
+
+  // Dispatch
+  dispatchWorkflow(pi, prompt);
+}
+
 export function findMilestoneIds(basePath: string): string[] {
   const dir = milestonesDir(basePath);
   try {
