@@ -2553,7 +2553,7 @@ export class AgentSession {
 		if (message.retryAfterMs !== undefined) {
 			const cap = settings.maxDelayMs > 0 ? settings.maxDelayMs : Infinity;
 			if (message.retryAfterMs > cap) {
-				// Server wants us to wait longer than our max — give up immediately
+				// Server wants us to wait longer than maxDelayMs — give up to let auto-mode handle recovery
 				this._emit({
 					type: "auto_retry_end",
 					success: false,
