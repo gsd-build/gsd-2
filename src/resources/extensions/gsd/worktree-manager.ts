@@ -70,10 +70,6 @@ function normalizePathForComparison(path: string): string {
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
-export function getMainBranch(basePath: string): string {
-  return nativeDetectMainBranch(basePath);
-}
-
 // ─── resolveGitDir ─────────────────────────────────────────────────────────
 
 /**

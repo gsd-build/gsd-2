@@ -12,7 +12,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent";
 import { loadPrompt } from "./prompt-loader.js";
-import { autoCommitCurrentBranch } from "./worktree.js";
+import { autoCommitCurrentBranch, getMainBranch } from "./worktree.js";
 import { runWorktreePostCreateHook } from "./auto-worktree.js";
 import { showConfirm } from "../shared/confirm-ui.js";
 import { gsdRoot, milestonesDir } from "./paths.js";
@@ -23,7 +23,6 @@ import {
   mergeWorktreeToMain,
   diffWorktreeAll,
   diffWorktreeNumstat,
-  getMainBranch,
   getWorktreeGSDDiff,
   getWorktreeCodeDiff,
   getWorktreeLog,
