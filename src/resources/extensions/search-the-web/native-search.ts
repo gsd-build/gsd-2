@@ -157,6 +157,10 @@ export function registerNativeSearchHooks(pi: NativeSearchPI): { getIsAnthropic:
     tools.push({
       type: "web_search_20250305",
       name: "web_search",
+      // Cap server-side searches per response to prevent the model from
+      // looping on web_search without synthesizing results (#817).
+      // 5 searches is generous — most queries need 1-2.
+      max_uses: 5,
     });
 
     return payload;
