@@ -54,6 +54,7 @@ export function generateHtmlReport(
     buildChangelogSection(data),
     buildKnowledgeSection(data),
     buildCapturesSection(data),
+    buildStatsSection(data),
     buildDiscussionSection(data),
   ];
 
@@ -102,6 +103,7 @@ export function generateHtmlReport(
     <li><a href="#changelog">Changelog</a></li>
     <li><a href="#knowledge">Knowledge</a></li>
     <li><a href="#captures">Captures</a></li>
+    <li><a href="#stats">Artifacts</a></li>
     <li><a href="#discussion">Planning</a></li>
   </ul>
 </nav>
@@ -138,6 +140,7 @@ function buildSummarySection(
   const activeMilestone = data.milestones.find(m => m.status === 'active');
   const pct = totalSlices > 0 ? Math.round((doneSlices / totalSlices) * 100) : 0;
 
+  const act = data.agentActivity;
   const statCards = [
     stat('Milestones', `${doneMilestones} / ${data.milestones.length}`),
     stat('Slices', `${doneSlices} / ${totalSlices}`),
@@ -148,14 +151,17 @@ function buildSummarySection(
     t ? stat('Tool Calls', String(t.toolCalls)) : '',
     t ? stat('Units Run', String(t.units)) : '',
     data.remainingSliceCount > 0 ? stat('Remaining Slices', String(data.remainingSliceCount)) : '',
+    act ? stat('Completion Rate', `${act.completionRate.toFixed(1)}/hr`) : '',
+    act ? stat('Session Cost', formatCost(act.sessionCost)) : '',
+    act ? stat('Session Tokens', formatTokenCount(act.sessionTokens)) : '',
   ].filter(Boolean).join('');
 
-  const activityHtml = data.agentActivity?.active ? `
+  const activityHtml = act?.active ? `
     <div class="activity-badge">
       <span class="pulse"></span>
-      Agent running — ${esc(data.agentActivity.currentUnit?.type ?? '')}
-      <span class="activity-id">${esc(data.agentActivity.currentUnit?.id ?? '')}</span>
-      — ${formatDuration(data.agentActivity.elapsed)} elapsed
+      Agent running — ${esc(act.currentUnit?.type ?? '')}
+      <span class="activity-id">${esc(act.currentUnit?.id ?? '')}</span>
+      — ${formatDuration(act.elapsed)} elapsed
     </div>` : '';
 
   const activeSliceHtml = activeMilestone ? (() => {
@@ -200,12 +206,12 @@ function buildHealthSection(data: VisualizerData): string {
   }
   rows.push(healthRow(
     'Truncation rate',
-    `${h.truncationRate.toFixed(1)}% per unit`,
+    `${h.truncationRate.toFixed(1)}% per unit (${t?.totalTruncationSections ?? 0} total)`,
     h.truncationRate > 20 ? 'warn' : h.truncationRate > 10 ? 'caution' : 'ok',
   ));
   rows.push(healthRow(
     'Continue-here rate',
-    `${h.continueHereRate.toFixed(1)}% per unit`,
+    `${h.continueHereRate.toFixed(1)}% per unit (${t?.continueHereFiredCount ?? 0} total)`,
     h.continueHereRate > 15 ? 'warn' : h.continueHereRate > 8 ? 'caution' : 'ok',
   ));
   if (h.tierSavingsLine) rows.push(healthRow('Routing savings', h.tierSavingsLine));
@@ -564,6 +570,8 @@ function buildTimelineSection(data: VisualizerData): string {
         <td>${u.toolCalls}</td>
         <td>${u.tier ? `<span class="tier-badge tier-${u.tier}">${esc(u.tier)}</span>` : '<span class="na">—</span>'}</td>
         <td>${u.modelDowngraded ? '<span class="badge badge-routed">routed</span>' : '<span class="na">—</span>'}</td>
+        <td>${(u.truncationSections ?? 0) > 0 ? `<span class="badge badge-warn">${u.truncationSections}</span>` : '<span class="na">—</span>'}</td>
+        <td>${u.continueHereFired ? '<span class="badge badge-caution">yes</span>' : '<span class="na">—</span>'}</td>
       </tr>`;
   }).join('');
 
@@ -573,7 +581,7 @@ function buildTimelineSection(data: VisualizerData): string {
         <thead><tr>
           <th>#</th><th>Type</th><th>ID</th><th>Model</th>
           <th>Started</th><th>Duration</th><th>Cost</th>
-          <th>Tokens</th><th>Tools</th><th>Tier</th><th>Routing</th>
+          <th>Tokens</th><th>Tools</th><th>Tier</th><th>Routing</th><th>Trunc</th><th>CHF</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -664,17 +672,75 @@ function buildCapturesSection(data: VisualizerData): string {
     <tr class="cap-${e.status}">
       <td class="td-date">${formatDateShort(new Date(e.timestamp).toISOString())}</td>
       <td><span class="cap-badge cap-${e.status}">${esc(e.status)}</span></td>
+      <td>${e.classification ? `<span class="cap-class">${esc(e.classification)}</span>` : '<span class="na">—</span>'}</td>
       <td>${e.resolution ? esc(e.resolution) : '<span class="na">—</span>'}</td>
       <td class="cap-text">${esc(e.text)}</td>
+      <td class="cap-rationale">${e.rationale ? esc(e.rationale) : '<span class="na">—</span>'}</td>
+      <td>${e.resolvedAt ? formatDateShort(e.resolvedAt) : '<span class="na">—</span>'}</td>
+      <td>${e.executed !== undefined ? (e.executed ? '✓' : '✗') : '<span class="na">—</span>'}</td>
     </tr>`).join('');
 
   return section('captures', `Captures ${badge}`, `
     <div class="table-scroll">
       <table class="data-table">
-        <thead><tr><th>Captured</th><th>Status</th><th>Resolution</th><th>Text</th></tr></thead>
+        <thead><tr><th>Captured</th><th>Status</th><th>Class</th><th>Resolution</th><th>Text</th><th>Rationale</th><th>Resolved</th><th>Executed</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`);
+}
+
+// ─── Section: Stats (Artifacts) ───────────────────────────────────────────────
+
+function buildStatsSection(data: VisualizerData): string {
+  const s = data.stats;
+
+  const missingHtml = s.missingCount > 0 ? `
+    <h3>Missing Changelogs <span class="sec-count">${s.missingCount}</span></h3>
+    <p class="stats-note">These completed slices have no summary artifact yet.</p>
+    <table class="data-table">
+      <thead><tr><th>Milestone</th><th>Slice</th><th>Title</th></tr></thead>
+      <tbody>
+        ${s.missingSlices.map(sl => `
+          <tr>
+            <td class="td-mono">${esc(sl.milestoneId)}</td>
+            <td class="td-mono">${esc(sl.sliceId)}</td>
+            <td>${esc(sl.title)}</td>
+          </tr>`).join('')}
+        ${s.missingCount > s.missingSlices.length
+          ? `<tr><td colspan="3" class="stats-more">… and ${s.missingCount - s.missingSlices.length} more</td></tr>`
+          : ''}
+      </tbody>
+    </table>` : '<p class="empty">All completed slices have summary artifacts. ✓</p>';
+
+  const updatedHtml = s.updatedCount > 0 ? `
+    <h3>Recently Updated Slices <span class="sec-count">${s.updatedCount}</span></h3>
+    <table class="data-table">
+      <thead><tr><th>Milestone</th><th>Slice</th><th>Title</th><th>Completed</th></tr></thead>
+      <tbody>
+        ${s.updatedSlices.map(sl => `
+          <tr>
+            <td class="td-mono">${esc(sl.milestoneId)}</td>
+            <td class="td-mono">${esc(sl.sliceId)}</td>
+            <td>${esc(sl.title)}</td>
+            <td class="td-date">${sl.completedAt ? formatDateShort(sl.completedAt) : '—'}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>` : '';
+
+  const recentHtml = s.recentEntries.length > 0 ? `
+    <h3>Recent Activity</h3>
+    <ul class="recent-list">
+      ${s.recentEntries.map(e => `
+        <li><span class="td-mono">${esc(e.milestoneId)}/${esc(e.sliceId)}</span> — ${esc(e.oneLiner)}
+          ${e.completedAt ? `<span class="cl-date">${formatDateShort(e.completedAt)}</span>` : ''}
+        </li>`).join('')}
+    </ul>` : '';
+
+  return section('stats', 'Artifacts &amp; Activity', `
+    ${missingHtml}
+    ${updatedHtml}
+    ${recentHtml}
+  `);
 }
 
 // ─── Section: Discussion ──────────────────────────────────────────────────────
@@ -986,10 +1052,20 @@ section>h2{font-size:18px;font-weight:700;margin-bottom:18px;padding-bottom:10px
 .file-list li{font-size:12px;color:var(--text2)}
 
 /* Captures */
-.cap-text{font-size:12px;max-width:480px}
+.cap-text{font-size:12px;max-width:340px}
+.cap-rationale{font-size:12px;color:var(--text2);max-width:260px}
+.cap-class{font-size:11px;padding:2px 7px;border-radius:10px;background:var(--bg3);color:var(--text2);font-weight:600}
 .cap-badge{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600}
 .cap-pending{background:rgba(210,153,34,.15);color:var(--yellow)}
 .cap-resolved{background:rgba(63,185,80,.15);color:var(--green)}
+.cap-triaged{background:rgba(88,166,255,.15);color:var(--accent)}
+
+/* Stats */
+.stats-note{font-size:12px;color:var(--text3);margin-bottom:8px}
+.stats-more{color:var(--text3);font-style:italic;font-size:12px}
+.recent-list{list-style:none;display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--text2)}
+.recent-list li{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.recent-list .cl-date{margin-left:auto;font-size:11px;color:var(--text3)}
 
 /* Discussion */
 .disc-state{font-size:12px;padding:2px 8px;border-radius:10px}
