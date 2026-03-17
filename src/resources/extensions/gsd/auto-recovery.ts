@@ -38,6 +38,7 @@ import {
 } from "./paths.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { getAutoWorktreePath } from "./auto-worktree.js";
 
 // ─── Artifact Resolution & Verification ───────────────────────────────────────
 
@@ -220,6 +221,24 @@ export function verifyExpectedArtifact(unitType: string, unitId: string, base: s
   }
 
   return true;
+}
+
+/**
+ * Worktree-aware artifact verification: checks both the given basePath and,
+ * if a worktree exists for the milestone, the worktree path. Artifacts may
+ * be written inside a worktree during run-uat or other units, but verification
+ * and recovery only check basePath — causing permanent stuck state (#769).
+ */
+export function verifyExpectedArtifactAnywhere(
+  unitType: string,
+  unitId: string,
+  basePath: string,
+  milestoneId: string | null,
+): boolean {
+  if (verifyExpectedArtifact(unitType, unitId, basePath)) return true;
+  if (!milestoneId) return false;
+  const wtPath = getAutoWorktreePath(basePath, milestoneId);
+  return wtPath ? verifyExpectedArtifact(unitType, unitId, wtPath) : false;
 }
 
 /**
@@ -494,7 +513,8 @@ export async function selfHealRuntimeRecords(
       // also checks the plan checkbox is marked [x]. Without this, a task
       // whose summary exists but checkbox is unchecked would be incorrectly
       // marked as completed, causing deriveState to re-dispatch it endlessly.
-      if (artifactPath && existsSync(artifactPath) && verifyExpectedArtifact(unitType, unitId, base)) {
+      const mid = unitId.split("/")[0] ?? null;
+      if (artifactPath && existsSync(artifactPath) && verifyExpectedArtifactAnywhere(unitType, unitId, base, mid)) {
         clearUnitRuntimeRecord(base, unitType, unitId);
         // Also persist completion key if missing
         const key = `${unitType}/${unitId}`;

@@ -114,6 +114,7 @@ import { debugLog, debugTime, debugCount, debugPeak, enableDebug, isDebugEnabled
 import {
   resolveExpectedArtifactPath,
   verifyExpectedArtifact,
+  verifyExpectedArtifactAnywhere,
   writeBlockerPlaceholder,
   diagnoseExpectedArtifact,
   skipExecuteTask,
@@ -194,6 +195,32 @@ function syncStateToProjectRoot(worktreePath: string, projectRoot: string, miles
     if (existsSync(srcMilestone)) {
       mkdirSync(dstMilestone, { recursive: true });
       cpSync(srcMilestone, dstMilestone, { recursive: true, force: true });
+    }
+  } catch { /* non-fatal */ }
+
+  // 3. Merge completed-units.json — union of both locations (#769)
+  try {
+    const srcKeysFile = join(wtGsd, "completed-units.json");
+    const dstKeysFile = join(prGsd, "completed-units.json");
+    if (existsSync(srcKeysFile)) {
+      const srcKeys: string[] = JSON.parse(readFileSync(srcKeysFile, "utf8"));
+      let dstKeys: string[] = [];
+      if (existsSync(dstKeysFile)) {
+        try { dstKeys = JSON.parse(readFileSync(dstKeysFile, "utf8")); } catch { /* corrupt — start with empty */ }
+      }
+      const merged = [...new Set([...dstKeys, ...srcKeys])];
+      mkdirSync(prGsd, { recursive: true });
+      writeFileSync(dstKeysFile, JSON.stringify(merged, null, 2));
+    }
+  } catch { /* non-fatal */ }
+
+  // 4. Sync runtime records — unit/*.json files (#769)
+  try {
+    const srcRuntime = join(wtGsd, "runtime", "units");
+    const dstRuntime = join(prGsd, "runtime", "units");
+    if (existsSync(srcRuntime)) {
+      mkdirSync(dstRuntime, { recursive: true });
+      cpSync(srcRuntime, dstRuntime, { recursive: true, force: true });
     }
   } catch { /* non-fatal */ }
 }
@@ -1098,6 +1125,14 @@ export async function startAuto(
     }
   }
 
+  // ── Merge completed-unit keys from both locations (#769) ──
+  // loadPersistedKeys was called above with the original `base`. After worktree
+  // entry, basePath may point to a worktree with its own completed-units.json.
+  // Load from both locations to prevent fragmentation-induced re-dispatch.
+  if (originalBasePath && originalBasePath !== basePath) {
+    loadPersistedKeys(basePath, completedKeySet);
+  }
+
   // ── DB lifecycle: auto-migrate or open existing database ──
   const gsdDbPath = join(basePath, ".gsd", "gsd.db");
   const gsdDirPath = join(basePath, ".gsd");
@@ -1419,7 +1454,7 @@ export async function handleAgentEnd(
     let triggerArtifactVerified = false;
     if (!currentUnit.type.startsWith("hook/")) {
       try {
-        triggerArtifactVerified = verifyExpectedArtifact(currentUnit.type, currentUnit.id, basePath);
+        triggerArtifactVerified = verifyExpectedArtifactAnywhere(currentUnit.type, currentUnit.id, basePath, currentMilestoneId);
         if (triggerArtifactVerified) {
           const completionKey = `${currentUnit.type}/${currentUnit.id}`;
           if (!completedKeySet.has(completionKey)) {
@@ -2371,7 +2406,7 @@ async function dispatchNextUnit(
   const idempotencyKey = `${unitType}/${unitId}`;
   if (completedKeySet.has(idempotencyKey)) {
     // Cross-validate: does the expected artifact actually exist?
-    const artifactExists = verifyExpectedArtifact(unitType, unitId, basePath);
+    const artifactExists = verifyExpectedArtifactAnywhere(unitType, unitId, basePath, currentMilestoneId);
     if (artifactExists) {
       // Guard against infinite skip loops: if deriveState keeps returning the
       // same completed unit, consecutive skips will trip this breaker. Evict the
@@ -2418,7 +2453,7 @@ async function dispatchNextUnit(
   // Persist it now and skip re-dispatch. This prevents infinite loops where a task
   // completes successfully but the completion key was never written (e.g., completed
   // on the first attempt before hitting the retry-threshold persistence logic).
-  if (verifyExpectedArtifact(unitType, unitId, basePath)) {
+  if (verifyExpectedArtifactAnywhere(unitType, unitId, basePath, currentMilestoneId)) {
     persistCompletedKey(basePath, idempotencyKey);
     completedKeySet.add(idempotencyKey);
     invalidateStateCache();
@@ -2502,9 +2537,10 @@ async function dispatchNextUnit(
         if (status) {
           const reconciled = skipExecuteTask(basePath, mid, sid, tid, status, "loop-recovery", prevCount);
           // reconciled: skipExecuteTask attempted to write missing artifacts.
-          // verifyExpectedArtifact: confirms physical artifacts (summary + [x]) now exist on disk.
+          // verifyExpectedArtifactAnywhere: confirms physical artifacts (summary + [x]) exist on disk,
+          // checking both basePath and worktree path (#769).
           // Both must pass before we clear the dispatch counter and advance.
-          if (reconciled && verifyExpectedArtifact(unitType, unitId, basePath)) {
+          if (reconciled && verifyExpectedArtifactAnywhere(unitType, unitId, basePath, currentMilestoneId)) {
             ctx.ui.notify(
               `Loop recovery: ${unitId} reconciled after ${prevCount + 1} dispatches — blocker artifacts written, pipeline advancing.\n   Review ${status.summaryPath} and replace the placeholder with real work.`,
               "warning",
@@ -2532,7 +2568,7 @@ async function dispatchNextUnit(
     // dispatch limit succeeded but the counter check fires before anyone
     // verifies disk state. Without this, a successful final attempt is
     // indistinguishable from a failed one.
-    if (verifyExpectedArtifact(unitType, unitId, basePath)) {
+    if (verifyExpectedArtifactAnywhere(unitType, unitId, basePath, currentMilestoneId)) {
       ctx.ui.notify(
         `Loop recovery: ${unitType} ${unitId} — artifact verified after ${prevCount + 1} dispatches. Advancing.`,
         "info",
@@ -2592,8 +2628,9 @@ async function dispatchNextUnit(
           // Retry 1+: summary exists but checkbox not marked — mark [x] and advance.
           const repaired = skipExecuteTask(basePath, mid, sid, tid, status, "self-repair", 0);
           // repaired: skipExecuteTask updated metadata (returned early-true even if regex missed).
-          // verifyExpectedArtifact: confirms the physical artifact (summary + [x]) now exists.
-          if (repaired && verifyExpectedArtifact(unitType, unitId, basePath)) {
+          // verifyExpectedArtifactAnywhere: confirms the physical artifact (summary + [x]) exists,
+          // checking both basePath and worktree path (#769).
+          if (repaired && verifyExpectedArtifactAnywhere(unitType, unitId, basePath, currentMilestoneId)) {
             ctx.ui.notify(
               `Self-repaired ${unitId}: summary existed but checkbox was unmarked. Marked [x] and advancing.`,
               "warning",
@@ -2667,7 +2704,7 @@ async function dispatchNextUnit(
     const closeoutKey = `${currentUnit.type}/${currentUnit.id}`;
     const incomingKey = `${unitType}/${unitId}`;
     const isHookUnit = currentUnit.type.startsWith("hook/");
-    const artifactVerified = isHookUnit || verifyExpectedArtifact(currentUnit.type, currentUnit.id, basePath);
+    const artifactVerified = isHookUnit || verifyExpectedArtifactAnywhere(currentUnit.type, currentUnit.id, basePath, currentMilestoneId);
     if (closeoutKey !== incomingKey && artifactVerified) {
       if (!isHookUnit) {
         // Only persist completion keys for real units — hook keys are
@@ -3410,6 +3447,7 @@ async function recoverTimedOutUnit(
 export {
   resolveExpectedArtifactPath,
   verifyExpectedArtifact,
+  verifyExpectedArtifactAnywhere,
   writeBlockerPlaceholder,
   skipExecuteTask,
   buildLoopRemediationSteps,
