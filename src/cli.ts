@@ -450,5 +450,7 @@ if (!process.stdin.isTTY) {
   process.exit(1)
 }
 
-const interactiveMode = new InteractiveMode(session)
+const interactiveMode = new InteractiveMode(session, {
+  initialMessages: cliFlags.messages,
+})
 await interactiveMode.run()

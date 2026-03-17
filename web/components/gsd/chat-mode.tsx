@@ -30,8 +30,14 @@ export interface ActionPanelConfig {
 /** Discuss action config — triggers a secondary PTY session panel. */
 const DISCUSS_ACTION: Omit<ActionPanelConfig, "sessionId"> = {
   label: "Discuss",
-  command: "/gsd",
+  command: "/gsd discuss",
   accentColor: "sky",
+}
+
+const NEXT_ACTION: Omit<ActionPanelConfig, "sessionId"> = {
+  label: "Next",
+  command: "/gsd next",
+  accentColor: "amber",
 }
 
 /** Map accentColor name → Tailwind top-border + header bg classes */
@@ -148,12 +154,13 @@ export function ChatMode({ className }: { className?: string }) {
         {/* Main ChatPane: shrinks to ~58% when action panel is open */}
         <ChatPane
           sessionId="gsd-main"
-          command="pi"
+          command="gsd"
           className={cn(
             "min-w-0 transition-[width] duration-300",
             actionPanelState ? "w-[58%]" : "flex-1",
           )}
           onOpenDiscuss={() => openPanel(DISCUSS_ACTION)}
+          onOpenNext={() => openPanel(NEXT_ACTION)}
         />
 
         {/* Vertical divider — only visible when panel is open */}
@@ -397,9 +404,8 @@ function ActionPanel({
       {/* Secondary ChatPane connected to fresh session */}
       <ChatPane
         sessionId={config.sessionId}
-        command="pi"
-        initialCommand={config.command}
-        suppressInitialEcho
+        command="gsd"
+        commandArgs={[config.command]}
         onCompletionSignal={handleCompletionSignal}
         className="flex-1 overflow-hidden"
       />
@@ -975,6 +981,18 @@ function StreamingCursor() {
   )
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function stripInitialCommandEcho(content: string, initialCommand: string): string {
+  const trimmedCommand = initialCommand.trim()
+  if (!trimmedCommand) return content
+
+  const prefixPattern = new RegExp(`^${escapeRegExp(trimmedCommand)}(?:\n+)?`)
+  return content.replace(prefixPattern, "").replace(/^\n+/, "")
+}
+
 /* ─── ChatBubble ─── */
 
 /**
@@ -1126,20 +1144,23 @@ function ChatMessageList({
 /**
  * Text input bar at the bottom of ChatPane.
  *
- * - Enter: send input + "\n" and clear
+ * - Enter: send input + "\r" and clear
  * - Shift+Enter: insert newline (multiline)
  * - Disabled when disconnected; shows "Disconnected" badge
  * - Send button visible when input has content and connected
- * - Discuss button (left of send) opens the Discuss action panel
+ * - Discuss button opens `/gsd discuss` in the action panel
+ * - Next button opens `/gsd next` in the action panel
  */
 function ChatInputBar({
   onSendInput,
   connected,
   onOpenDiscuss,
+  onOpenNext,
 }: {
   onSendInput: (data: string) => void
   connected: boolean
   onOpenDiscuss?: () => void
+  onOpenNext?: () => void
 }) {
   const [value, setValue] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -1147,7 +1168,7 @@ function ChatInputBar({
   const handleSend = useCallback(() => {
     const trimmed = value.trim()
     if (!trimmed || !connected) return
-    onSendInput(value + "\n")
+    onSendInput(value + "\r")
     setValue("")
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto"
@@ -1223,7 +1244,7 @@ function ChatInputBar({
           </div>
         </div>
 
-        {/* Discuss button — standalone, right of the input, styled to match input box */}
+        {/* Action buttons — standalone, right of the input, styled to match input box */}
         {onOpenDiscuss && (
           <button
             onClick={onOpenDiscuss}
@@ -1233,6 +1254,18 @@ function ChatInputBar({
           >
             <MessageCircle className="h-3.5 w-3.5 text-muted-foreground" />
             Discuss
+          </button>
+        )}
+
+        {onOpenNext && (
+          <button
+            onClick={onOpenNext}
+            aria-label="Open Next panel"
+            title="Next"
+            className="flex flex-shrink-0 self-stretch items-center gap-1.5 rounded-xl border border-border bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+          >
+            <Play className="h-3.5 w-3.5 text-muted-foreground" />
+            Next
           </button>
         )}
       </div>
@@ -1268,6 +1301,7 @@ function PlaceholderState({ connected }: { connected: boolean }) {
 interface ChatPaneProps {
   sessionId: string
   command?: string
+  commandArgs?: string[]
   className?: string
   /**
    * If provided, sent to the PTY exactly once after the SSE `connected` event.
@@ -1278,8 +1312,10 @@ interface ChatPaneProps {
   onCompletionSignal?: () => void
   /** Called when the Discuss button in the input bar is clicked. */
   onOpenDiscuss?: () => void
+  /** Called when the Next button in the input bar is clicked. */
+  onOpenNext?: () => void
   /**
-   * When true, the first user message that exactly matches initialCommand is hidden.
+   * When true, messages that exactly match initialCommand are hidden.
    * Used by ActionPanel to suppress the PTY echo of the dispatched slash command.
    */
   suppressInitialEcho?: boolean
@@ -1298,16 +1334,19 @@ interface ChatPaneProps {
  *   - In dev mode: window.__chatParser exposes the parser for console inspection
  *   - ChatInputBar shows "Disconnected" badge when SSE is not connected
  */
-export function ChatPane({ sessionId, command, className, initialCommand, onCompletionSignal, onOpenDiscuss, suppressInitialEcho }: ChatPaneProps) {
+export function ChatPane({ sessionId, command, commandArgs, className, initialCommand, onCompletionSignal, onOpenDiscuss, onOpenNext, suppressInitialEcho }: ChatPaneProps) {
   const parserRef = useRef<PtyChatParser | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
   const inputQueueRef = useRef<string[]>([])
   const flushingRef = useRef(false)
-  /** Ref guard: ensure `initialCommand` is sent exactly once, even across SSE reconnects. */
+  /** Ref guard: ensure `initialCommand` is sent exactly once after startup settles. */
   const hasSentInitialCommand = useRef(false)
+  const initialCommandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const parserFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [connected, setConnected] = useState(false)
+  const commandArgsKey = (commandArgs ?? []).join("\u0000")
 
   // ── Input queue flush — same pattern as shell-terminal.tsx ────────────────
 
@@ -1355,17 +1394,23 @@ export function ChatPane({ sessionId, command, className, initialCommand, onComp
       console.debug("[ChatPane] messages=%d sessionId=%s", msgs.length, sessionId)
     })
 
-    // Wire completion signal — used by ActionPanel for auto-close
+    // Wire completion signal — used by ActionPanel for auto-close after the
+    // initial command has already been dispatched.
     let unsubscribeCompletion: (() => void) | undefined
     if (onCompletionSignal) {
       unsubscribeCompletion = parser.onCompletionSignal(() => {
-        onCompletionSignal()
+        if (hasSentInitialCommand.current || !initialCommand) {
+          onCompletionSignal()
+        }
       })
     }
 
     const streamUrl = new URL("/api/terminal/stream", window.location.origin)
     streamUrl.searchParams.set("id", sessionId)
     if (command) streamUrl.searchParams.set("command", command)
+    for (const arg of commandArgs ?? []) {
+      streamUrl.searchParams.append("arg", arg)
+    }
 
     const es = new EventSource(streamUrl.toString())
     eventSourceRef.current = es
@@ -1376,14 +1421,28 @@ export function ChatPane({ sessionId, command, className, initialCommand, onComp
         if (msg.type === "connected") {
           setConnected(true)
           console.log("[ChatPane] SSE connected sessionId=%s", sessionId)
-          // Send initialCommand exactly once — ref guard prevents replay on SSE reconnect
-          if (initialCommand && !hasSentInitialCommand.current) {
-            hasSentInitialCommand.current = true
-            sendInput(initialCommand + "\n")
-            console.log("[ChatPane] initial command sent sessionId=%s command=%s", sessionId, initialCommand)
-          }
         } else if (msg.type === "output" && msg.data) {
           parser.feed(msg.data)
+
+          if (parserFlushTimerRef.current) {
+            clearTimeout(parserFlushTimerRef.current)
+          }
+          parserFlushTimerRef.current = setTimeout(() => {
+            parser.flush()
+            parserFlushTimerRef.current = null
+          }, 300)
+
+          if (initialCommand && !hasSentInitialCommand.current) {
+            if (initialCommandTimerRef.current) {
+              clearTimeout(initialCommandTimerRef.current)
+            }
+            initialCommandTimerRef.current = setTimeout(() => {
+              if (hasSentInitialCommand.current) return
+              hasSentInitialCommand.current = true
+              sendInput(initialCommand + "\r")
+              console.log("[ChatPane] initial command sent after startup idle sessionId=%s command=%s", sessionId, initialCommand)
+            }, 1500)
+          }
         }
       } catch {
         /* malformed SSE message — ignore */
@@ -1398,6 +1457,14 @@ export function ChatPane({ sessionId, command, className, initialCommand, onComp
     return () => {
       es.close()
       eventSourceRef.current = null
+      if (initialCommandTimerRef.current) {
+        clearTimeout(initialCommandTimerRef.current)
+        initialCommandTimerRef.current = null
+      }
+      if (parserFlushTimerRef.current) {
+        clearTimeout(parserFlushTimerRef.current)
+        parserFlushTimerRef.current = null
+      }
       unsubscribe()
       unsubscribeCompletion?.()
       parserRef.current = null
@@ -1406,17 +1473,22 @@ export function ChatPane({ sessionId, command, className, initialCommand, onComp
         ;(window as any).__chatParser = undefined
       }
     }
-  }, [sessionId, command, initialCommand, onCompletionSignal, sendInput])
+  }, [sessionId, command, commandArgsKey, initialCommand, onCompletionSignal, sendInput])
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  // Filter messages: when suppressInitialEcho is set, hide user messages that
+  // Filter messages: when suppressInitialEcho is set, hide or strip messages that
   // are just the PTY echo of the initialCommand (slash commands echo before being processed).
   const visibleMessages = suppressInitialEcho && initialCommand
-    ? messages.filter((msg) => {
-        if (msg.role !== "user") return true
-        const normalized = msg.content.trim()
-        return normalized !== initialCommand.trim()
+    ? messages.flatMap((msg) => {
+        const strippedContent = stripInitialCommandEcho(msg.content, initialCommand)
+        if (strippedContent === msg.content) {
+          return [msg]
+        }
+        if (strippedContent.trim().length === 0) {
+          return []
+        }
+        return [{ ...msg, content: strippedContent }]
       })
     : messages
 
@@ -1432,7 +1504,12 @@ export function ChatPane({ sessionId, command, className, initialCommand, onComp
       </div>
 
       {/* Fully wired input bar */}
-      <ChatInputBar onSendInput={sendInput} connected={connected} onOpenDiscuss={onOpenDiscuss} />
+      <ChatInputBar
+        onSendInput={sendInput}
+        connected={connected}
+        onOpenDiscuss={onOpenDiscuss}
+        onOpenNext={onOpenNext}
+      />
     </div>
   )
 }

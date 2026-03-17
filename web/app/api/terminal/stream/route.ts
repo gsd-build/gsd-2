@@ -21,11 +21,12 @@ export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const sessionId = url.searchParams.get("id") || "default";
   const command = url.searchParams.get("command") || undefined;
+  const commandArgs = url.searchParams.getAll("arg");
   const projectCwd = resolveProjectCwd(request);
 
   // Ensure the session exists
   try {
-    getOrCreateSession(sessionId, projectCwd, command);
+    getOrCreateSession(sessionId, projectCwd, command, commandArgs);
   } catch (error) {
     console.error("[pty-stream] Failed to create session:", error);
     return Response.json(

@@ -95,6 +95,14 @@ function getXtermOptions(isDark: boolean) {
   }
 }
 
+function deriveCommandLabel(command?: string): string {
+  if (!command?.trim()) return "zsh"
+  const token = command.trim().split(/\s+/)[0] || command
+  const normalized = token.replace(/\\/g, "/")
+  const parts = normalized.split("/")
+  return parts[parts.length - 1] || token
+}
+
 // ─── Single terminal instance (internal) ──────────────────────────────────────
 
 interface TerminalInstanceProps {
@@ -322,8 +330,9 @@ export function ShellTerminal({ className, command, sessionPrefix }: ShellTermin
   const { resolvedTheme } = useTheme()
   const isDark = resolvedTheme !== "light"
   const defaultId = sessionPrefix ?? (command ? "gsd-default" : "default")
+  const commandLabel = deriveCommandLabel(command)
   const [tabs, setTabs] = useState<TerminalTab[]>([
-    { id: defaultId, label: command ? "pi" : "zsh", connected: false },
+    { id: defaultId, label: commandLabel, connected: false },
   ])
   const [activeTabId, setActiveTabId] = useState(defaultId)
 
@@ -338,7 +347,7 @@ export function ShellTerminal({ className, command, sessionPrefix }: ShellTermin
       const index = tabs.length + 1
       const newTab: TerminalTab = {
         id: data.id,
-        label: command ? "pi" : "zsh",
+        label: commandLabel,
         connected: false,
       }
       setTabs((prev) => [...prev, newTab])

@@ -9,6 +9,7 @@ import { chmodSync, existsSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, join, dirname } from "node:path";
 import type { IPty } from "node-pty";
+import { resolveGsdCliEntry } from "../../src/web/cli-entry.ts";
 
 export interface PtySession {
   id: string;
@@ -89,6 +90,53 @@ function getShellArgs(_shell: string): string[] {
   return [];
 }
 
+interface TerminalSpawnSpec {
+  executable: string;
+  args: string[];
+  label: string;
+}
+
+function resolveTerminalSpawnSpec(cwd: string, command?: string, commandArgs: string[] = []): TerminalSpawnSpec {
+  if (!command) {
+    const shell = getDefaultShell();
+    return {
+      executable: shell,
+      args: getShellArgs(shell),
+      label: basename(shell),
+    };
+  }
+
+  if (command === "gsd") {
+    try {
+      const cliEntry = resolveGsdCliEntry({
+        packageRoot: process.env.GSD_WEB_PACKAGE_ROOT || process.cwd(),
+        cwd,
+        execPath: process.execPath,
+        hostKind: process.env.GSD_WEB_HOST_KIND,
+        mode: "interactive",
+        messages: commandArgs,
+      });
+
+      return {
+        executable: cliEntry.command,
+        args: cliEntry.args,
+        label: "gsd",
+      };
+    } catch (error) {
+      console.warn(
+        "[pty] Falling back to PATH-resolved gsd:",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  return {
+    executable: command,
+    args: commandArgs,
+    label: basename(command),
+  };
+}
+
 function getNodePtyCandidateRoots(): string[] {
   const roots = new Set<string>();
   roots.add(process.cwd());
@@ -146,7 +194,7 @@ function loadNodePty(): LoadedNodePty {
   );
 }
 
-export function getOrCreateSession(sessionId: string, projectCwd?: string, command?: string): PtySession {
+export function getOrCreateSession(sessionId: string, projectCwd?: string, command?: string, commandArgs: string[] = []): PtySession {
   ensureProcessCleanupHandlers();
   const map = getSessions();
   const existing = map.get(sessionId);
@@ -178,9 +226,9 @@ export function getOrCreateSession(sessionId: string, projectCwd?: string, comma
     console.warn("[pty] Could not check spawn-helper:", e);
   }
 
-  const shell = command || getDefaultShell();
   const cwd = projectCwd || getProjectCwd();
-  console.log("[pty] Spawning shell:", shell, "cwd:", cwd, "node-pty:", nodePtyRoot);
+  const spawnSpec = resolveTerminalSpawnSpec(cwd, command, commandArgs);
+  console.log("[pty] Spawning command:", spawnSpec.label, "cwd:", cwd, "node-pty:", nodePtyRoot);
 
   // Build a clean env — remove GSD-specific vars that would confuse a shell
   const cleanEnv: Record<string, string> = {};
@@ -197,11 +245,9 @@ export function getOrCreateSession(sessionId: string, projectCwd?: string, comma
   cleanEnv.LESSHISTFILE = "/dev/null";
   cleanEnv.NODE_REPL_HISTORY = "/dev/null";
 
-  const shellArgs = getShellArgs(shell);
-
   let ptyProcess: IPty;
   try {
-    ptyProcess = pty.spawn(shell, shellArgs, {
+    ptyProcess = pty.spawn(spawnSpec.executable, spawnSpec.args, {
       name: "xterm-256color",
       cols: 120,
       rows: 30,
@@ -211,7 +257,7 @@ export function getOrCreateSession(sessionId: string, projectCwd?: string, comma
     console.log("[pty] Spawned pid:", ptyProcess.pid);
   } catch (spawnError) {
     console.error("[pty] Spawn failed:", spawnError);
-    console.error("[pty] Shell:", shell, "CWD:", cwd);
+    console.error("[pty] Command:", spawnSpec.executable, "Args:", spawnSpec.args, "CWD:", cwd);
     console.error("[pty] CWD exists:", existsSync(cwd));
     throw spawnError;
   }

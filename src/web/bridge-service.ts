@@ -35,6 +35,7 @@ import {
   collectAuthoritativeAutoDashboardData,
   collectTestOnlyFallbackAutoDashboardData,
 } from "./auto-dashboard-service.ts";
+import { resolveGsdCliEntry } from "./cli-entry.ts";
 
 const DEFAULT_PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const RESPONSE_TIMEOUT_MS = 30_000;
@@ -1028,50 +1029,15 @@ export function resolveBridgeRuntimeConfig(env: NodeJS.ProcessEnv = getBridgeDep
 }
 
 function resolveBridgeCliEntry(config: BridgeRuntimeConfig, deps: BridgeServiceDeps): BridgeCliEntry {
-  const checkExists = deps.existsSync ?? existsSync;
-  const execPath = deps.execPath ?? process.execPath;
-  const env = deps.env ?? process.env;
-  const hostKind = env.GSD_WEB_HOST_KIND;
-  const sourceEntry = join(config.packageRoot, "src", "loader.ts");
-  const resolveTsLoader = join(config.packageRoot, "src", "resources", "extensions", "gsd", "tests", "resolve-ts.mjs");
-  const builtEntry = join(config.packageRoot, "dist", "loader.js");
-
-  const sourceCliEntry =
-    checkExists(sourceEntry) && checkExists(resolveTsLoader)
-      ? {
-          command: execPath,
-          args: [
-            "--import",
-            resolveTsLoader,
-            "--experimental-strip-types",
-            sourceEntry,
-            "--mode",
-            "rpc",
-            "--continue",
-            "--session-dir",
-            config.projectSessionsDir,
-          ],
-          cwd: config.projectCwd,
-        } satisfies BridgeCliEntry
-      : null;
-
-  const builtCliEntry = checkExists(builtEntry)
-    ? {
-        command: execPath,
-        args: [builtEntry, "--mode", "rpc", "--continue", "--session-dir", config.projectSessionsDir],
-        cwd: config.projectCwd,
-      } satisfies BridgeCliEntry
-    : null;
-
-  if (hostKind === "packaged-standalone") {
-    if (builtCliEntry) return builtCliEntry;
-    if (sourceCliEntry) return sourceCliEntry;
-  } else {
-    if (sourceCliEntry) return sourceCliEntry;
-    if (builtCliEntry) return builtCliEntry;
-  }
-
-  throw new Error(`RPC bridge entry not found; checked=${sourceEntry},${builtEntry}`);
+  return resolveGsdCliEntry({
+    packageRoot: config.packageRoot,
+    cwd: config.projectCwd,
+    execPath: deps.execPath ?? process.execPath,
+    hostKind: (deps.env ?? process.env).GSD_WEB_HOST_KIND,
+    mode: "rpc",
+    sessionDir: config.projectSessionsDir,
+    existsSync: deps.existsSync ?? existsSync,
+  });
 }
 
 function isRpcExtensionUiResponse(input: BridgeInput): input is RpcExtensionUIResponse {

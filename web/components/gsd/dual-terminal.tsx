@@ -137,7 +137,7 @@ export function DualTerminal() {
       <div ref={containerRef} className="flex flex-1 overflow-hidden">
         {/* Left terminal - Primary GSD instance */}
         <div style={{ width: `${splitPosition}%` }} className="h-full overflow-hidden">
-          <ShellTerminal className="h-full" command="pi" sessionPrefix="gsd-main" />
+          <ShellTerminal className="h-full" command="gsd" sessionPrefix="gsd-main" />
         </div>
 
         {/* Divider */}
@@ -150,7 +150,7 @@ export function DualTerminal() {
 
         {/* Right terminal - Interactive GSD instance */}
         <div style={{ width: `${100 - splitPosition}%` }} className="h-full overflow-hidden">
-          <ShellTerminal className="h-full" command="pi" sessionPrefix="gsd-interactive" />
+          <ShellTerminal className="h-full" command="gsd" sessionPrefix="gsd-interactive" />
         </div>
       </div>
 

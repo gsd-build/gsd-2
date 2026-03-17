@@ -326,6 +326,23 @@ export class PtyChatParser {
   }
 
   /**
+   * Flush any trailing partial buffer even if it does not end with a newline.
+   * Useful for terminal UIs that leave the final status line unterminated.
+   */
+  flush(): void {
+    if (this._buffer.length === 0) return
+
+    const stripped = stripAnsi(this._buffer)
+    this._buffer = ""
+
+    for (const rawLine of stripped.split("\n")) {
+      const line = rawLine.trimEnd()
+      if (line.length === 0) continue
+      this._handleLine(line)
+    }
+  }
+
+  /**
    * Subscribe to message events (new message or content appended).
    * Returns an unsubscribe function.
    */
