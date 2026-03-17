@@ -16,6 +16,7 @@ import type {
 	ImageContent,
 	Message,
 	Model,
+	ServerToolUseContent,
 	SimpleStreamOptions,
 	StopReason,
 	StreamFunction,
@@ -25,6 +26,7 @@ import type {
 	Tool,
 	ToolCall,
 	ToolResultMessage,
+	WebSearchResultContent,
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
@@ -291,7 +293,7 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 			const anthropicStream = client.messages.stream({ ...params, stream: true }, { signal: options?.signal });
 			stream.push({ type: "start", partial: output });
 
-			type Block = (ThinkingContent | TextContent | (ToolCall & { partialJson: string })) & { index: number };
+			type Block = (ThinkingContent | TextContent | (ToolCall & { partialJson: string }) | ServerToolUseContent | WebSearchResultContent) & { index: number };
 			const blocks = output.content as Block[];
 
 			for await (const event of anthropicStream) {
@@ -347,6 +349,27 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 						};
 						output.content.push(block);
 						stream.push({ type: "toolcall_start", contentIndex: output.content.length - 1, partial: output });
+					} else if ((event.content_block as any).type === "server_tool_use") {
+						const serverBlock = event.content_block as any;
+						const block: Block = {
+							type: "serverToolUse",
+							id: serverBlock.id,
+							name: serverBlock.name,
+							input: serverBlock.input,
+							index: event.index,
+						};
+						output.content.push(block);
+						stream.push({ type: "server_tool_use", contentIndex: output.content.length - 1, partial: output });
+					} else if ((event.content_block as any).type === "web_search_tool_result") {
+						const resultBlock = event.content_block as any;
+						const block: Block = {
+							type: "webSearchResult",
+							toolUseId: resultBlock.tool_use_id,
+							content: resultBlock.content,
+							index: event.index,
+						};
+						output.content.push(block);
+						stream.push({ type: "web_search_result", contentIndex: output.content.length - 1, partial: output });
 					}
 				} else if (event.type === "content_block_delta") {
 					if (event.delta.type === "text_delta") {
@@ -423,6 +446,7 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 								partial: output,
 							});
 						}
+						// serverToolUse and webSearchResult blocks just need index cleanup (already emitted on start)
 					}
 				} else if (event.type === "message_delta") {
 					if (event.delta.stop_reason) {
@@ -840,6 +864,19 @@ function convertMessages(
 						name: isOAuthToken ? toClaudeCodeName(block.name) : block.name,
 						input: block.arguments ?? {},
 					});
+				} else if (block.type === "serverToolUse") {
+					blocks.push({
+						type: "server_tool_use",
+						id: block.id,
+						name: block.name,
+						input: block.input ?? {},
+					} as any);
+				} else if (block.type === "webSearchResult") {
+					blocks.push({
+						type: "web_search_tool_result",
+						tool_use_id: block.toolUseId,
+						content: block.content,
+					} as any);
 				}
 			}
 			if (blocks.length === 0) continue;

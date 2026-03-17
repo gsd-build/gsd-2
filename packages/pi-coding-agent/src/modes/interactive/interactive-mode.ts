@@ -1166,6 +1166,34 @@ export class InteractiveMode {
 	}
 
 	/**
+	 * Format web search result content for display in the TUI.
+	 */
+	private formatWebSearchResult(content: unknown): string {
+		if (!content) return "Web search completed";
+
+		// Error result
+		if (typeof content === "object" && "type" in (content as any) && (content as any).type === "web_search_tool_result_error") {
+			const error = content as any;
+			return `Search error: ${error.error_code || "unknown"}`;
+		}
+
+		// Array of search results
+		if (Array.isArray(content)) {
+			const results = content.filter((r: any) => r.type === "web_search_result");
+			if (results.length === 0) return "No results found";
+			return results
+				.map((r: any) => {
+					const title = r.title || "Untitled";
+					const url = r.url || "";
+					return `${title}\n  ${url}`;
+				})
+				.join("\n");
+		}
+
+		return "Web search completed";
+	}
+
+	/**
 	 * Set up keyboard shortcuts registered by extensions.
 	 */
 	private setupExtensionShortcuts(extensionRunner: ExtensionRunner): void {
@@ -2201,6 +2229,35 @@ export class InteractiveMode {
 									component.updateArgs(content.arguments);
 								}
 							}
+						} else if (content.type === "serverToolUse") {
+							// Server-side tool (e.g., native web search) — show as pending tool execution
+							if (!this.pendingTools.has(content.id)) {
+								const component = new ToolExecutionComponent(
+									content.name,
+									content.input ?? {},
+									{
+										showImages: this.settingsManager.getShowImages(),
+									},
+									undefined,
+									this.ui,
+								);
+								component.setExpanded(this.toolOutputExpanded);
+								this.chatContainer.addChild(component);
+								this.pendingTools.set(content.id, component);
+							}
+						} else if (content.type === "webSearchResult") {
+							// Server-side tool result — resolve the pending server tool execution
+							const component = this.pendingTools.get(content.toolUseId);
+							if (component) {
+								const searchContent = content.content;
+								const isError = searchContent && typeof searchContent === "object" && "type" in (searchContent as any) && (searchContent as any).type === "web_search_tool_result_error";
+								const resultText = this.formatWebSearchResult(searchContent);
+								component.updateResult({
+									content: [{ type: "text", text: resultText }],
+									isError: !!isError,
+								});
+								this.pendingTools.delete(content.toolUseId);
+							}
 						}
 					}
 					this.ui.requestRender();
@@ -2592,6 +2649,33 @@ export class InteractiveMode {
 							}
 							component.updateResult({ content: [{ type: "text", text: errorMessage }], isError: true });
 						} else {
+							this.pendingTools.set(content.id, component);
+						}
+					} else if (content.type === "serverToolUse") {
+						// Server-side tool (e.g., native web search)
+						const component = new ToolExecutionComponent(
+							content.name,
+							content.input ?? {},
+							{ showImages: this.settingsManager.getShowImages() },
+							undefined,
+							this.ui,
+						);
+						component.setExpanded(this.toolOutputExpanded);
+						this.chatContainer.addChild(component);
+						// Find matching webSearchResult in this message's content
+						const resultBlock = message.content.find(
+							(c) => c.type === "webSearchResult" && c.toolUseId === content.id,
+						);
+						if (resultBlock && resultBlock.type === "webSearchResult") {
+							const searchContent = resultBlock.content;
+							const isError = searchContent && typeof searchContent === "object" && "type" in (searchContent as any) && (searchContent as any).type === "web_search_tool_result_error";
+							const resultText = this.formatWebSearchResult(searchContent);
+							component.updateResult({
+								content: [{ type: "text", text: resultText }],
+								isError: !!isError,
+							});
+						} else {
+							// No result yet (aborted stream?) — show as pending
 							this.pendingTools.set(content.id, component);
 						}
 					}
