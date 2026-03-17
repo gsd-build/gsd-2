@@ -15,7 +15,8 @@ export type SessionAction =
   | { type: "session_close"; sessionId: string; closeAction?: "merge" | "keep" | "delete" }
   | { type: "session_rename"; sessionId: string; name: string }
   | { type: "session_list" }
-  | { type: "session_interrupt"; sessionId: string };
+  | { type: "session_interrupt"; sessionId: string }
+  | { type: "session_force_complete"; sessionId: string };
 
 export interface WsServerOptions {
   port: number;
@@ -28,6 +29,8 @@ export interface WsServerOptions {
   onPermissionResponse?: (response: PermissionResponse, ws: ServerWebSocket) => void;
   /** Called when a client sends a session action (create/close/rename/list). */
   onSessionAction?: (action: SessionAction, ws: ServerWebSocket) => void;
+  /** Called when a new client connects, after initial state is sent. */
+  onClientConnect?: (ws: ServerWebSocket) => void;
 }
 
 export interface WsServer {
@@ -58,7 +61,7 @@ const CHAT_TOPIC = "chat";
  * - Monotonic sequence counter increments on every message sent
  */
 export function createWsServer(options: WsServerOptions): WsServer {
-  const { port, getFullState, onChatMessage, customCommands, onPermissionResponse, onSessionAction } = options;
+  const { port, getFullState, onChatMessage, customCommands, onPermissionResponse, onSessionAction, onClientConnect } = options;
   let sequence = 0;
 
   const server = Bun.serve({
@@ -86,6 +89,10 @@ export function createWsServer(options: WsServerOptions): WsServer {
         // Send custom commands if available (for slash command autocomplete)
         if (customCommands && customCommands.length > 0) {
           ws.send(JSON.stringify({ type: "custom_commands", commands: customCommands }));
+        }
+        // Send current session list so client knows activeSessionId immediately
+        if (onClientConnect) {
+          onClientConnect(ws);
         }
       },
       message(ws: ServerWebSocket, message: string | Buffer) {
@@ -119,7 +126,8 @@ export function createWsServer(options: WsServerOptions): WsServer {
               parsed.type === "session_close" ||
               parsed.type === "session_rename" ||
               parsed.type === "session_list" ||
-              parsed.type === "session_interrupt")
+              parsed.type === "session_interrupt" ||
+              parsed.type === "session_force_complete")
           ) {
             console.log(`[ws-server] Session action: ${parsed.type}`);
             onSessionAction(parsed as SessionAction, ws);
@@ -161,7 +169,7 @@ export function createWsServer(options: WsServerOptions): WsServer {
       return sequence;
     },
     get hostname(): string {
-      return server.hostname;
+      return server.hostname ?? "localhost";
     },
   };
 }

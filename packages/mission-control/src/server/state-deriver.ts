@@ -14,7 +14,7 @@
  *   M{NNN}-CONTEXT.md   — user decisions for active milestone
  */
 import matter from "gray-matter";
-import { access } from "node:fs/promises";
+import { access, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type {
   GSD2State,
@@ -54,6 +54,30 @@ async function readFileText(path: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+// -- Milestone subdirectory file reading helpers --
+
+/**
+ * Reads a milestone-level file (e.g. M002-ROADMAP.md) with subdirectory fallback.
+ * Tries .gsd/{filename} first, then .gsd/milestones/{milestone}/{filename}.
+ */
+async function readMilestoneFile(gsdDir: string, milestone: string, filename: string): Promise<string | null> {
+  return (
+    (await readFileText(join(gsdDir, filename))) ??
+    (await readFileText(join(gsdDir, "milestones", milestone, filename)))
+  );
+}
+
+/**
+ * Reads a slice-level file (e.g. S01-PLAN.md) with subdirectory fallback.
+ * Tries .gsd/{filename} first, then .gsd/milestones/{milestone}/slices/{filename}.
+ */
+async function readSliceFile(gsdDir: string, milestone: string, filename: string): Promise<string | null> {
+  return (
+    (await readFileText(join(gsdDir, filename))) ??
+    (await readFileText(join(gsdDir, "milestones", milestone, "slices", filename)))
+  );
 }
 
 // -- GSD 2 STATE.md parser --
@@ -158,6 +182,41 @@ export function parseGSD2State(raw: string): GSD2ProjectState {
       : DEFAULT_GSD2_PROJECT_STATE.last_updated,
     ...(typeof d.last_activity === "string" ? { last_activity: d.last_activity } : {}),
   };
+}
+
+/**
+ * Reads the roadmap file for the active milestone, with fallback scan of milestones/ directory.
+ * Logs all paths attempted to aid debugging when STATE.md pointers are stale or missing.
+ */
+async function readRoadmapWithFallback(gsdDir: string, active_milestone: string): Promise<string | null> {
+  const filename = `${active_milestone}-ROADMAP.md`;
+  console.log(`[state-deriver] Looking for roadmap: ${filename} (milestone: ${active_milestone})`);
+
+  const primary = await readMilestoneFile(gsdDir, active_milestone, filename);
+  if (primary) {
+    console.log(`[state-deriver] Roadmap found via primary path`);
+    return primary;
+  }
+
+  // Fallback: scan .gsd/milestones/ for any *-ROADMAP.md
+  const milestonesDir = join(gsdDir, "milestones");
+  console.log(`[state-deriver] Primary not found; scanning: ${milestonesDir}`);
+  try {
+    const entries = await readdir(milestonesDir);
+    for (const entry of entries) {
+      const roadmapPath = join(milestonesDir, entry, `${entry}-ROADMAP.md`);
+      const scanned = await readFileText(roadmapPath);
+      if (scanned) {
+        console.log(`[state-deriver] Roadmap found via scan: ${roadmapPath}`);
+        return scanned;
+      }
+    }
+  } catch (err) {
+    console.log(`[state-deriver] Milestones scan failed: ${err}`);
+  }
+
+  console.log(`[state-deriver] No roadmap found for milestone: ${active_milestone}`);
+  return null;
 }
 
 // -- Migration detection --
@@ -454,6 +513,8 @@ export async function buildFullState(gsdDir: string): Promise<GSD2State> {
   const { active_milestone, active_slice, active_task } = projectState;
 
   // Phase 2: Parallel read of all derived and static files
+  // Milestone and slice files use helpers that fall back to subdirectory layout:
+  //   .gsd/{filename} → .gsd/milestones/{M}/  and  .gsd/milestones/{M}/slices/
   const [
     roadmapRaw,
     planRaw,
@@ -464,14 +525,14 @@ export async function buildFullState(gsdDir: string): Promise<GSD2State> {
     contextRaw,
     uatRaw,
   ] = await Promise.all([
-    readFileText(join(gsdDir, `${active_milestone}-ROADMAP.md`)),
-    readFileText(join(gsdDir, `${active_slice}-PLAN.md`)),
-    readFileText(join(gsdDir, `${active_task}-SUMMARY.md`)),
+    readRoadmapWithFallback(gsdDir, active_milestone),
+    readSliceFile(gsdDir, active_milestone, `${active_slice}-PLAN.md`),
+    readSliceFile(gsdDir, active_milestone, `${active_task}-SUMMARY.md`),
     readFileText(join(gsdDir, "DECISIONS.md")),
     readFileText(join(gsdDir, "preferences.md")),
     readFileText(join(gsdDir, "PROJECT.md")),
-    readFileText(join(gsdDir, `${active_milestone}-CONTEXT.md`)),
-    readFileText(join(gsdDir, `${active_slice}-UAT.md`)),
+    readMilestoneFile(gsdDir, active_milestone, `${active_milestone}-CONTEXT.md`),
+    readSliceFile(gsdDir, active_milestone, `${active_slice}-UAT.md`),
   ]);
 
   // Phase 3: Build typed sub-state objects

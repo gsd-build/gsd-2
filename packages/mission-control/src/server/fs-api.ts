@@ -73,8 +73,9 @@ export async function listDirectory(
   for (const dirent of dirents) {
     const name = dirent.name;
 
-    // Skip hidden files/dirs (starting with .)
-    if (name.startsWith(".")) continue;
+    // Skip hidden files/dirs (starting with .) except .gsd and .planning
+    // which are first-class GSD project directories that must be visible.
+    if (name.startsWith(".") && name !== ".gsd" && name !== ".planning") continue;
 
     // Skip noise directories
     if (HIDDEN_DIRS.has(name)) continue;

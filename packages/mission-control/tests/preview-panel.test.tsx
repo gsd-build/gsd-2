@@ -244,7 +244,8 @@ describe("PreviewPanel ErrorBoundaryFrame usage", () => {
 
   test("PreviewPanel source wraps iframes in ErrorBoundaryFrame", () => {
     const src = readFileSync(PANEL_PATH, "utf-8");
-    expect(src).toContain("<ErrorBoundaryFrame>");
+    // Matches both keyed (<ErrorBoundaryFrame key={...}>) and un-keyed forms
+    expect(src).toContain("<ErrorBoundaryFrame");
     expect(src).toContain("</ErrorBoundaryFrame>");
   });
 });

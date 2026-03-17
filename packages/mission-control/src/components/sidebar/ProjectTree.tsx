@@ -13,10 +13,10 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ViewType } from "@/lib/view-types";
-import type { ProjectState } from "@/server/types";
+import type { GSD2ProjectState } from "@/server/types";
 
 interface ProjectTreeProps {
-  projectState: ProjectState | null;
+  projectState: GSD2ProjectState | null;
   activeView: ViewType;
   onSelectView: (view: ViewType) => void;
 }
@@ -52,16 +52,7 @@ export function ProjectTree({
   onSelectView,
 }: ProjectTreeProps) {
   return (
-    <div className="flex flex-col py-2">
-      {/* Project name header */}
-      {projectState && (
-        <div className="px-4 pb-2">
-          <span className="font-display text-xs uppercase tracking-wider text-slate-500">
-            {projectState.milestone_name || "Current Project"}
-          </span>
-        </div>
-      )}
-
+    <div className="flex flex-col">
       <TreeItem
         icon={<MessageSquare className="h-4 w-4 flex-shrink-0" />}
         label="Chat"

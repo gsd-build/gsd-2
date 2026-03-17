@@ -13,7 +13,7 @@ const HANDLE_CLASS =
   "bg-navy-600 hover:bg-cyan-muted transition-colors w-[2px] data-[resize-handle-active]:bg-cyan-accent";
 
 export function PanelShell() {
-  const defaultLayout = useDefaultLayout({
+  const layoutProps = useDefaultLayout({
     id: "gsd-panel-layout",
     panelIds: [...PANEL_IDS],
     storage: localStorage,
@@ -21,10 +21,10 @@ export function PanelShell() {
 
   return (
     <ResizablePanelGroup
+      {...layoutProps}
       orientation="horizontal"
       className="h-screen"
       id="gsd-panel-layout"
-      defaultLayout={defaultLayout}
     >
       <ResizablePanel
         id="sidebar"

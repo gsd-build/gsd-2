@@ -351,6 +351,21 @@ export async function startPipeline(
             }
             break;
           }
+          case "session_force_complete": {
+            const forceSession = sessionManager.getSession(action.sessionId);
+            if (forceSession) {
+              console.log(`[pipeline] Force-completing session: ${action.sessionId}`);
+              forceSession.processManager.interrupt();
+              wsServer.sendToClient(ws, {
+                type: "chat_complete",
+                sessionId: action.sessionId,
+              });
+              forceSession.activeClient = null;
+            } else {
+              console.warn(`[pipeline] session_force_complete: session not found: ${action.sessionId}`);
+            }
+            break;
+          }
         }
       } catch (err) {
         console.error(`[pipeline] Session action error:`, err);

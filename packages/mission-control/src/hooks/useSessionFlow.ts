@@ -88,7 +88,9 @@ export function useSessionFlow(
 ): UseSessionFlowResult {
   const [continueHere, setContinueHere] = useState<ContinueHereData | null>(null);
   const [dismissed, setDismissed] = useState(false);
-  const [skipOnboarding, setSkipOnboarding] = useState(false);
+  const [skipOnboarding, setSkipOnboarding] = useState(() => {
+    try { return localStorage.getItem("gsd-mc-skip-onboarding") === "true"; } catch { return false; }
+  });
   const [goHomeState, setGoHomeState] = useState(false);
   const fetchedRef = useRef(false);
 
@@ -117,6 +119,7 @@ export function useSessionFlow(
   const dismiss = useCallback(() => {
     setDismissed(true);
     setSkipOnboarding(true);
+    try { localStorage.setItem("gsd-mc-skip-onboarding", "true"); } catch {}
     setContinueHere(null);
     setGoHomeState(false); // Returning from home to project clears goHome
   }, []);

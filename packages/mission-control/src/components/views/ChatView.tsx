@@ -13,8 +13,7 @@ import { useState, useCallback, useEffect } from "react";
 import type React from "react";
 import { Monitor } from "lucide-react";
 import { MigrationBanner } from "../MigrationBanner";
-import { TaskExecutingConnected as TaskExecuting } from "@/components/active-task/TaskExecuting";
-import { TaskWaiting } from "@/components/active-task/TaskWaiting";
+import { ExecutionPanel, deriveExecutionState } from "@/components/active-task/ExecutionPanel";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { ChatDragDropUpload } from "@/components/chat/ChatDragDropUpload";
 import { SessionTabs } from "@/components/chat/SessionTabs";
@@ -117,13 +116,12 @@ export function ChatView({
   costState,
   onDismissBudgetWarning,
   isAutoMode = false,
+  onInterrupt,
   builderMode = false,
 }: ChatViewInternalProps) {
-  // TODO Phase 13-14: derive currentPlan, isExecuting, nextPlan from GSD2State
-  // GSD2State has no .phases array — task/plan display will be rebuilt in Phase 13-14
-  const currentPlan = undefined;
-  const isExecuting = false;
-  const nextPlan = undefined;
+  // Derive live execution state from streaming chat messages (no .planning files needed)
+  const { isExecuting, phase, currentTool, currentCommand, toolCallCount } =
+    deriveExecutionState(chatMessages, isChatProcessing);
 
   const hasMultipleSessions = sessions.length > 0;
 
@@ -252,50 +250,15 @@ export function ChatView({
         </div>
       )}
 
-      {/* Compact task status — only visible while GSD is actively working */}
-      {(isExecuting || isChatProcessing || isAutoMode) && (
-        <div className="border-b border-navy-600 bg-navy-900/50" data-testid="task-panel">
-          <div className="relative p-2">
-            {isExecuting && currentPlan ? (
-              <TaskExecuting
-                taskId={`${currentPlan.phase}-${String(currentPlan.plan).padStart(2, "0")}`}
-                wave={currentPlan.wave}
-                planNumber={currentPlan.plan}
-                filesCount={currentPlan.files_modified.length}
-                taskCount={currentPlan.task_count}
-                mustHaves={currentPlan.must_haves}
-                filesModified={currentPlan.files_modified}
-              />
-            ) : (
-              <TaskWaiting
-                lastCompleted={planningState?.projectState?.last_activity}
-                nextTask={nextPlan ? `Plan ${nextPlan.plan}` : undefined}
-                nextPlanNumber={nextPlan?.plan}
-              />
-            )}
-            {/* Cost badge — hidden in Builder mode (BUILDER-02) */}
-            {!builderMode && costState && costState.totalCost > 0 && (
-              <span
-                className="absolute right-2 top-2 font-mono text-xs tabular-nums"
-                style={{
-                  color:
-                    costState.level === "critical"
-                      ? "#EF4444"
-                      : costState.level === "warning"
-                        ? "#F59E0B"
-                        : "#5BC8F0",
-                }}
-                title={
-                  costState.budgetFraction !== null
-                    ? `${Math.round(costState.budgetFraction * 100)}% of budget`
-                    : "Running cost"
-                }
-              >
-                {costState.formatted}
-              </span>
-            )}
-          </div>
-        </div>
+      {/* Live execution tracker — shown when GSD is actively running tools */}
+      {isExecuting && (
+        <ExecutionPanel
+          phase={phase}
+          currentTool={currentTool}
+          currentCommand={currentCommand}
+          toolCallCount={toolCallCount}
+          onInterrupt={onInterrupt}
+        />
       )}
 
       {/* Budget warning banner — hidden in Builder mode (BUILDER-02); shown at critical level (95%+) */}
@@ -395,9 +358,9 @@ export function ChatViewConnected(props: ChatViewProps) {
   const isCrashed = props.isCrashed ?? localCrashed;
   const [budgetWarningDismissed, setBudgetWarningDismissed] = useState(false);
 
-  // Escape key handler — interrupt auto mode
+  // Escape key handler — interrupt any active GSD processing
   useEffect(() => {
-    if (!props.isAutoMode) return;
+    if (!props.isChatProcessing) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape" && props.onInterrupt) {
         e.preventDefault();
@@ -406,7 +369,7 @@ export function ChatViewConnected(props: ChatViewProps) {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [props.isAutoMode, props.onInterrupt]);
+  }, [props.isChatProcessing, props.onInterrupt]);
 
   const handleAssetUploaded = useCallback((asset: AssetItem) => {
     setPendingAttachment(asset);

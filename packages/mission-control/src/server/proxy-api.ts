@@ -73,6 +73,19 @@ export async function handleProxyRequest(
     headers.delete("x-frame-options");
     headers.delete("content-security-policy");
 
+    // Inject <base href="/api/preview/"> into HTML responses so absolute-path
+    // resources (e.g. <script src="/assets/index.js">) resolve through the proxy
+    // instead of hitting the Mission Control server root directly (black iframe fix).
+    const contentType = headers.get("content-type") ?? "";
+    if (contentType.includes("text/html")) {
+      let html = await proxied.text();
+      html = html.replace(/(<head[^>]*>)/i, '$1<base href="/api/preview/">');
+      if (!html.includes('<base href="/api/preview/">')) {
+        html = html.replace(/(<html[^>]*>)/i, '$1<base href="/api/preview/">');
+      }
+      return new Response(html, { status: proxied.status, headers });
+    }
+
     return new Response(proxied.body, {
       status: proxied.status,
       headers,

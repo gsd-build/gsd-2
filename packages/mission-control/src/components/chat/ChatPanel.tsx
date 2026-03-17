@@ -39,9 +39,13 @@ export function ChatPanelView({
   return (
     <div className="flex flex-col h-full relative">
       <div
-        className={cn("flex-1 overflow-y-auto", overlay && "opacity-30 pointer-events-none")}
+        className={cn("flex-1 overflow-y-auto scrollbar-thin", overlay && "opacity-30 pointer-events-none")}
         ref={scrollRef}
         data-testid="message-area"
+        style={{
+          scrollbarWidth: "thin",
+          scrollbarColor: "#334155 transparent",
+        }}
       >
         {messages.length === 0 ? (
           <div className="flex items-center justify-center h-full">
@@ -87,12 +91,34 @@ interface ChatPanelProps {
 /** Stateful wrapper with auto-scroll on new messages. */
 export function ChatPanel({ messages, onSend, isProcessing, overlay, builderMode = false }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Tracks whether user was at bottom *before* the last DOM update.
+  // Captured by scroll listener so large streaming deltas don't break the check.
+  const wasAtBottomRef = useRef(true);
 
+  // Update wasAtBottomRef on every user scroll (passive — no layout thrash).
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      wasAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 50;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Auto-scroll: if we were at the bottom before the update, stay there.
+  // requestAnimationFrame defers until after browser layout so scrollHeight
+  // reflects newly painted streaming content (Fix 5).
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (wasAtBottomRef.current) {
+      const raf = requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight;
+      });
+      return () => cancelAnimationFrame(raf);
     }
-  }, [messages.length]);
+  }, [messages]);
 
   return (
     <ChatPanelView

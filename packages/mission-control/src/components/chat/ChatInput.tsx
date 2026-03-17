@@ -43,8 +43,7 @@ export function ChatInputView({
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
-          disabled={disabled}
-          className="w-full rounded-2xl bg-navy-800 border border-navy-600 text-slate-200 px-5 py-3 text-sm font-mono outline-none transition-colors focus:border-cyan-accent/50 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full rounded-2xl bg-navy-800 border border-navy-600 text-slate-200 px-5 py-3 text-sm font-mono outline-none transition-colors focus:border-cyan-accent/50"
         />
       </div>
     </div>
@@ -95,7 +94,7 @@ export function ChatInput({ onSend, disabled = false, builderMode = false }: Cha
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (value.trim()) {
+      if (value.trim() && !disabled) {
         pushHistory(value);
         onSend(value);
         setValue("");
@@ -114,7 +113,7 @@ export function ChatInput({ onSend, disabled = false, builderMode = false }: Cha
   };
 
   const placeholder = disabled
-    ? "Claude is working..."
+    ? "GSD is running… (ESC to stop)"
     : builderMode
       ? "What do you want to build or change?"
       : "Type / for commands...";

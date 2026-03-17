@@ -3,7 +3,7 @@
  * Loads directory contents via /api/fs/list and lazily expands directories.
  * Enhanced with FileTypeIcon, git status coloring, and vertical indent guides.
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { Folder, FolderOpen } from "lucide-react";
 import { FileTypeIcon } from "./FileTypeIcon";
 import type { FileSystemEntry } from "@/server/fs-types";
@@ -49,7 +49,16 @@ export function FileTree({ projectRoot, onSelectFile, selectedFile, gitStatus }:
     }
   }, [entries]);
 
-  // Load root on mount
+  // Reset tree state when projectRoot changes so stale entries from the previous
+  // project don't linger in the entries map or expandedDirs set.
+  // This runs before the load effect (React processes effects in declaration order),
+  // so the state is clean when loadDir fires for the new root.
+  useEffect(() => {
+    setEntries(new Map());
+    setExpandedDirs(new Set());
+  }, [projectRoot]);
+
+  // Load root on mount (and when projectRoot changes, after the reset above)
   useEffect(() => {
     if (projectRoot) {
       loadDir(projectRoot);
@@ -83,7 +92,7 @@ export function FileTree({ projectRoot, onSelectFile, selectedFile, gitStatus }:
     return undefined;
   };
 
-  const renderEntries = (dirPath: string, depth: number): React.ReactNode => {
+  const renderEntries = (dirPath: string, depth: number): ReactNode => {
     const dirEntries = entries.get(dirPath);
     if (!dirEntries) {
       if (loading.has(dirPath)) {

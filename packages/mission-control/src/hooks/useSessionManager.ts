@@ -359,7 +359,7 @@ export interface UseSessionManagerOptions {
  * Replaces useChat for multi-session scenarios.
  */
 export function useSessionManager(
-  wsUrl: string = "ws://localhost:4011",
+  wsUrl: string = "ws://localhost:4001",
   options: UseSessionManagerOptions = {},
 ): UseSessionManagerResult {
   const [sessions, setSessions] = useState<SessionTab[]>([]);
@@ -785,11 +785,11 @@ export function useSessionManager(
     setBoundaryViolation(null);
   }, []);
 
-  // reconnectSession: clears stuck state and re-requests session list
-  const reconnectSession = useCallback((_sessionId: string) => {
+  // reconnectSession: force-completes stuck session on server, clears local processing state
+  const reconnectSession = useCallback((sessionId: string) => {
     setStuckSessionId(null);
-    // Re-request session list to get fresh processing state
-    sendRef.current(JSON.stringify({ type: "session_list" }));
+    setProcessingBySession((prev) => { const m = new Map(prev); m.set(sessionId, false); return m; });
+    sendRef.current(JSON.stringify({ type: "session_force_complete", sessionId }));
   }, []);
 
   // Cleanup stuck timer on unmount

@@ -8,18 +8,17 @@ import { PanelWrapper } from "@/components/layout/PanelWrapper";
 import { ContextBudgetChart } from "@/components/slice-detail/ContextBudgetChart";
 import { BoundaryMap } from "@/components/slice-detail/BoundaryMap";
 import { UatStatus } from "@/components/slice-detail/UatStatus";
-import type { PlanningState } from "@/server/types";
+import type { PlanningState, PlanState } from "@/server/types";
 
 interface SliceViewProps {
   planningState: PlanningState | null;
 }
 
 export function SliceView({ planningState }: SliceViewProps) {
-  const currentPhase = planningState
-    ? planningState.phases.find((p) => p.status === "in_progress") ??
-      planningState.phases[planningState.phases.length - 1]
-    : undefined;
-  const currentPhasePlans = currentPhase?.plans ?? [];
+  // GSD2 uses slices, not legacy phases. Legacy plan components receive empty arrays
+  // until they are updated to consume GSD2SliceInfo/GSD2SlicePlan types.
+  const slices = planningState?.slices ?? [];
+  const currentPhasePlans: PlanState[] = [];
 
   return (
     <>
@@ -28,12 +27,12 @@ export function SliceView({ planningState }: SliceViewProps) {
       <PanelWrapper
         title="Slice Detail"
         isLoading={planningState === null}
-        isEmpty={planningState !== null && planningState.phases.length === 0}
+        isEmpty={planningState !== null && slices.length === 0}
       >
         <div className="space-y-6 p-4">
           <ContextBudgetChart plans={currentPhasePlans} />
           <BoundaryMap plans={currentPhasePlans} />
-          <UatStatus phases={planningState?.phases ?? []} />
+          <UatStatus phases={[]} />
         </div>
       </PanelWrapper>
     </>

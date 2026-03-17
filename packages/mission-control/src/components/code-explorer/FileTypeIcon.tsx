@@ -2,6 +2,7 @@
  * FileTypeIcon — maps file extension to a colored Lucide icon.
  * Provides VSCode-like visual distinction between file types.
  */
+import type { ComponentType, CSSProperties } from "react";
 import {
   Code2, FileText, Braces, Paintbrush, Globe, Terminal,
   Settings, Lock, File, Image, Package,
@@ -13,7 +14,7 @@ interface FileTypeIconProps {
 }
 
 // Map of extension -> [LucideIcon component, color hex]
-const EXT_MAP: Record<string, [React.ComponentType<{ className?: string; style?: React.CSSProperties }>, string]> = {
+const EXT_MAP: Record<string, [ComponentType<{ className?: string; style?: CSSProperties }>, string]> = {
   // TypeScript
   ts: [Code2, "#3b82f6"],
   tsx: [Code2, "#3b82f6"],

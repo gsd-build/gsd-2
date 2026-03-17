@@ -50,4 +50,27 @@ describe("detectBoundaryViolation", () => {
     const result = detectBoundaryViolation("root is /", projectRoot);
     expect(result.violated).toBe(false);
   });
+
+  it("does not flag single-segment identifiers like /gsd or /task", () => {
+    expect(detectBoundaryViolation("running /gsd status", projectRoot).violated).toBe(false);
+    expect(detectBoundaryViolation("task /task completed", projectRoot).violated).toBe(false);
+  });
+
+  it("does not flag MSYS/Git-Bash paths that are inside the Windows project root", () => {
+    // /c/Users/user/myproject/... → C:/Users/user/myproject/... which is inside winRoot
+    const result = detectBoundaryViolation(
+      "spawning /c/Users/user/myproject/node_modules/.bin/pi",
+      winRoot
+    );
+    expect(result.violated).toBe(false);
+  });
+
+  it("does not flag known-safe GSD internal paths (/.gsd/)", () => {
+    const result = detectBoundaryViolation(
+      "loading /.gsd/agent/extensions/gsd/package.json",
+      projectRoot
+    );
+    expect(result.violated).toBe(false);
+  });
+
 });

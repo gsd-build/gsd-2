@@ -45,9 +45,14 @@ import type { IntentType } from "@/server/classify-intent-api";
 const PLANNING_DIR = ".planning";
 
 export function AppShell() {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem("gsd-mc-sidebar-collapsed") !== "false"; } catch { return true; }
+  });
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [chatWidth, setChatWidth] = useState(380);
+  const chatWidthRef = useRef(380);
+  chatWidthRef.current = chatWidth;
+  const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Restore last project path on mount so the user doesn't have to reselect after
@@ -214,20 +219,22 @@ export function AppShell() {
   const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
-    const startWidth = chatWidth;
+    const startWidth = chatWidthRef.current;
     const MIN_CHAT = 280;
     const MAX_CHAT = 600;
+    setIsDragging(true);
     const onMove = (ev: MouseEvent) => {
       const delta = ev.clientX - startX;
       setChatWidth(Math.min(MAX_CHAT, Math.max(MIN_CHAT, startWidth + delta)));
     };
     const onUp = () => {
+      setIsDragging(false);
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
-  }, [chatWidth]);
+  }, []);
 
   // Viewport-driven width: when browser agent reports a viewport size, resize chat column accordingly
   useEffect(() => {
@@ -367,6 +374,10 @@ export function AppShell() {
   // Dashboard (with optional ResumeCard overlay)
   return (
     <div className="flex flex-col h-screen bg-navy-base">
+      {/* Drag overlay — captures pointer events during panel resize to prevent hover flicker */}
+      {isDragging && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, cursor: "col-resize" }} />
+      )}
       {/* Boundary violation banner — shown when AI attempted out-of-project file access (PERM-03) */}
       {boundaryViolation && (
         <div
@@ -419,7 +430,11 @@ export function AppShell() {
       <div className="flex flex-1 min-h-0 overflow-hidden">
       <Sidebar
         collapsed={sidebarCollapsed}
-        onToggle={() => setSidebarCollapsed((prev) => !prev)}
+        onToggle={() => setSidebarCollapsed((prev) => {
+          const next = !prev;
+          try { localStorage.setItem("gsd-mc-sidebar-collapsed", String(next)); } catch {}
+          return next;
+        })}
         connectionStatus={status}
         projectState={state?.projectState ?? null}
         configState={null}
@@ -492,7 +507,7 @@ export function AppShell() {
           <>
             {/* Drag handle */}
             <div
-              className="w-1.5 flex-shrink-0 cursor-col-resize select-none bg-navy-600 hover:bg-cyan-accent/40 active:bg-cyan-accent/60 transition-colors"
+              className="w-1.5 flex-shrink-0 cursor-col-resize select-none bg-navy-600"
               onMouseDown={handleResizeMouseDown}
             />
             {/* Preview panel */}

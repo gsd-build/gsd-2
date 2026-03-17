@@ -36,7 +36,8 @@ function assetsDir(planningDir: string): string {
 }
 
 function metaFilePath(planningDir: string): string {
-  return join(planningDir, "assets-meta.json");
+  // Store meta inside the assets folder to keep project root clean
+  return join(assetsDir(planningDir), ".assets-meta.json");
 }
 
 async function readAssetsMeta(planningDir: string): Promise<Record<string, { category?: string }>> {
@@ -157,7 +158,7 @@ export async function handleAssetsRequest(
     }
 
     const assets = await Promise.all(
-      entries.map(async (name) => {
+      entries.filter((name) => !name.startsWith(".")).map(async (name) => {
         const filePath = join(dir, name);
         const info = await stat(filePath);
         return {

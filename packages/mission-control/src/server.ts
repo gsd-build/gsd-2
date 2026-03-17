@@ -22,9 +22,9 @@ const repoRoot = resolve(import.meta.dir, "../../..");
 // Start file-to-state pipeline with WebSocket server (before server so fetch can reference it)
 const pipeline = await startPipeline({
   planningDir: resolve(repoRoot, ".gsd"),
-  wsPort: 4011,
+  wsPort: 4001,
 });
-console.log("File-to-state pipeline running. WebSocket on :4011");
+console.log("File-to-state pipeline running. WebSocket on :4001");
 
 // Auto-restore last opened project so client doesn't land on onboarding after reload
 try {
@@ -47,7 +47,7 @@ try {
 }
 
 const server = Bun.serve({
-  port: 4010,
+  port: 4000,
   routes: {
     "/": homepage,
   },
@@ -255,7 +255,7 @@ process.on("SIGINT", cleanup);
 
 /** Add CORS headers to API responses (defensive — same-origin in practice). */
 function addCorsHeaders(response: Response): Response {
-  response.headers.set("Access-Control-Allow-Origin", "http://localhost:4010");
+  response.headers.set("Access-Control-Allow-Origin", "http://localhost:4000");
   response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   response.headers.set("Access-Control-Allow-Headers", "Content-Type");
   return response;
