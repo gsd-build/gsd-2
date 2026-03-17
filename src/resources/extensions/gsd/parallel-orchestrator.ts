@@ -444,7 +444,7 @@ function processWorkerLine(basePath: string, milestoneId: string, line: string):
         milestoneId,
         pid: worker.pid,
         state: worker.state,
-        currentUnit: typeof event.message === "string" ? event.message.slice(0, 80) : null,
+        currentUnit: null,
         completedUnits: worker.completedUnits,
         cost: worker.cost,
         lastHeartbeat: Date.now(),
