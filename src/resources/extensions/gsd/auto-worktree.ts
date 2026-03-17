@@ -312,7 +312,8 @@ export function createAutoWorktree(basePath: string, milestoneId: string): strin
 
 /**
  * Copy .gsd/ planning artifacts from source repo to a new worktree.
- * Copies milestones/, DECISIONS.md, REQUIREMENTS.md, PROJECT.md, QUEUE.md.
+ * Copies milestones/, DECISIONS.md, REQUIREMENTS.md, PROJECT.md, QUEUE.md,
+ * STATE.md, KNOWLEDGE.md, and OVERRIDES.md.
  * Skips runtime files (auto.lock, metrics.json, etc.) and the worktrees/ dir.
  * Best-effort — failures are non-fatal since auto-mode can recreate artifacts.
  */
@@ -330,7 +331,7 @@ function copyPlanningArtifacts(srcBase: string, wtPath: string): void {
   }
 
   // Copy top-level planning files
-  for (const file of ["DECISIONS.md", "REQUIREMENTS.md", "PROJECT.md", "QUEUE.md"]) {
+  for (const file of ["DECISIONS.md", "REQUIREMENTS.md", "PROJECT.md", "QUEUE.md", "STATE.md", "KNOWLEDGE.md", "OVERRIDES.md"]) {
     const src = join(srcGsd, file);
     if (existsSync(src)) {
       try {
