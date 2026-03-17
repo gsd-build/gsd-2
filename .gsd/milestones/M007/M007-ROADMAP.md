@@ -59,7 +59,7 @@ This milestone is complete only when all are true:
 - [x] **S02: Chat Mode view — main pane** `risk:medium` `depends:[S01]`
   > After this: "Chat" appears in the sidebar nav below Power Mode. Clicking it shows the live main GSD session rendered as a chat conversation — scrolling bubbles, assistant responses with styled markdown, user inputs as outgoing bubbles, text input bar at the bottom.
 
-- [ ] **S03: TUI prompt intercept UI** `risk:medium` `depends:[S02]`
+- [x] **S03: TUI prompt intercept UI** `risk:medium` `depends:[S02]`
   > After this: When GSD presents an arrow-key select list or a text/password input prompt, the chat view renders native UI components instead of raw escape sequences. Submitting via the native UI sends correct keystrokes to the PTY and GSD visibly advances.
 
 - [ ] **S04: Action toolbar and right panel lifecycle** `risk:low` `depends:[S02,S03]`
