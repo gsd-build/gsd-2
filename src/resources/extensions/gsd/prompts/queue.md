@@ -96,7 +96,7 @@ Then, after all milestone directories and context files are written:
 4. If `.gsd/REQUIREMENTS.md` exists and the queued work introduces new in-scope capabilities or promotes Deferred items, update it.
 5. If discussion produced decisions relevant to existing work, append to `.gsd/DECISIONS.md`.
 6. Append to `.gsd/QUEUE.md`.
-7. Commit: `docs: queue <milestone list>`
+7. {{commitInstruction}}
 
 **Do NOT write roadmaps for queued milestones.**
 **Do NOT update `.gsd/STATE.md`.**

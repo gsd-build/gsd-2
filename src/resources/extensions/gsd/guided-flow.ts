@@ -29,6 +29,17 @@ import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { showConfirm } from "../shared/confirm-ui.js";
 import { loadQueueOrder, sortByQueueOrder, saveQueueOrder } from "./queue-order.js";
 
+// ─── Commit Instruction Helpers ──────────────────────────────────────────────
+
+/** Build conditional commit instruction for planning prompts based on commit_docs preference. */
+function buildDocsCommitInstruction(message: string): string {
+  const prefs = loadEffectiveGSDPreferences();
+  const commitDocsEnabled = prefs?.preferences?.git?.commit_docs !== false;
+  return commitDocsEnabled
+    ? `Commit: \`${message}\``
+    : "Do not commit — planning docs are not tracked in git for this project.";
+}
+
 // ─── Auto-start after discuss ─────────────────────────────────────────────────
 
 /** Stashed context + flag for auto-starting after discuss phase completes */
@@ -198,6 +209,8 @@ function buildDiscussPrompt(nextId: string, preamble: string, _basePath: string)
     contextPath: `${milestoneRel}/${nextId}-CONTEXT.md`,
     roadmapPath: `${milestoneRel}/${nextId}-ROADMAP.md`,
     inlinedTemplates,
+    commitInstruction: buildDocsCommitInstruction(`docs(${nextId}): context, requirements, and roadmap`),
+    multiMilestoneCommitInstruction: buildDocsCommitInstruction("docs: project plan — N milestones"),
   });
 }
 
@@ -220,6 +233,8 @@ function buildHeadlessDiscussPrompt(nextId: string, seedContext: string, _basePa
     contextPath: `${milestoneRel}/${nextId}-CONTEXT.md`,
     roadmapPath: `${milestoneRel}/${nextId}-ROADMAP.md`,
     inlinedTemplates,
+    commitInstruction: buildDocsCommitInstruction(`docs(${nextId}): context, requirements, and roadmap`),
+    multiMilestoneCommitInstruction: buildDocsCommitInstruction("docs: project plan — N milestones"),
   });
 }
 
@@ -648,6 +663,7 @@ async function showQueueAdd(
     nextIdPlus1,
     existingMilestonesContext: existingContext,
     inlinedTemplates: queueInlinedTemplates,
+    commitInstruction: buildDocsCommitInstruction("docs: queue <milestone list>"),
   });
 
   pi.sendMessage(
@@ -834,6 +850,7 @@ async function buildDiscussSlicePrompt(
     contextPath: sliceContextPath,
     projectRoot: base,
     inlinedTemplates,
+    commitInstruction: buildDocsCommitInstruction(`docs(${mid}/${sid}): slice context from discuss`),
   });
 }
 
@@ -899,6 +916,7 @@ export async function showDiscuss(
       const structuredQuestionsAvailable = pi.getActiveTools().includes("ask_user_questions") ? "true" : "false";
       const basePrompt = loadPrompt("guided-discuss-milestone", {
         milestoneId: mid, milestoneTitle, inlinedTemplates: discussMilestoneTemplates, structuredQuestionsAvailable,
+        commitInstruction: buildDocsCommitInstruction(`docs(${mid}): milestone context from discuss`),
       });
       const seed = draftContent
         ? `${basePrompt}\n\n## Prior Discussion (Draft Seed)\n\n${draftContent}`
@@ -911,6 +929,7 @@ export async function showDiscuss(
       pendingAutoStart = { ctx, pi, basePath, milestoneId: mid, step: false };
       dispatchWorkflow(pi, loadPrompt("guided-discuss-milestone", {
         milestoneId: mid, milestoneTitle, inlinedTemplates: discussMilestoneTemplates, structuredQuestionsAvailable,
+        commitInstruction: buildDocsCommitInstruction(`docs(${mid}): milestone context from discuss`),
       }), "gsd-discuss");
     } else if (choice === "skip_milestone") {
       const milestoneIds = findMilestoneIds(basePath);
@@ -1216,6 +1235,7 @@ export async function showSmartEntry(
       const structuredQuestionsAvailable = pi.getActiveTools().includes("ask_user_questions") ? "true" : "false";
       const basePrompt = loadPrompt("guided-discuss-milestone", {
         milestoneId, milestoneTitle, inlinedTemplates: discussMilestoneTemplates, structuredQuestionsAvailable,
+        commitInstruction: buildDocsCommitInstruction(`docs(${milestoneId}): milestone context from discuss`),
       });
       const seed = draftContent
         ? `${basePrompt}\n\n## Prior Discussion (Draft Seed)\n\n${draftContent}`
@@ -1228,6 +1248,7 @@ export async function showSmartEntry(
       pendingAutoStart = { ctx, pi, basePath, milestoneId, step: stepMode };
       dispatchWorkflow(pi, loadPrompt("guided-discuss-milestone", {
         milestoneId, milestoneTitle, inlinedTemplates: discussMilestoneTemplates, structuredQuestionsAvailable,
+        commitInstruction: buildDocsCommitInstruction(`docs(${milestoneId}): milestone context from discuss`),
       }), "gsd-discuss");
     } else if (choice === "skip_milestone") {
       const milestoneIds = findMilestoneIds(basePath);
@@ -1302,6 +1323,7 @@ export async function showSmartEntry(
         const structuredQuestionsAvailable = pi.getActiveTools().includes("ask_user_questions") ? "true" : "false";
         dispatchWorkflow(pi, loadPrompt("guided-discuss-milestone", {
           milestoneId, milestoneTitle, inlinedTemplates: discussMilestoneTemplates, structuredQuestionsAvailable,
+          commitInstruction: buildDocsCommitInstruction(`docs(${milestoneId}): milestone context from discuss`),
         }));
       } else if (choice === "skip_milestone") {
         const milestoneIds = findMilestoneIds(basePath);

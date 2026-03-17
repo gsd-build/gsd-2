@@ -18,7 +18,7 @@ import type {
 
 import { deriveState } from "./state.js";
 import type { BudgetEnforcementMode, GSDState } from "./types.js";
-import { loadFile, parseRoadmap, getManifestStatus, resolveAllOverrides } from "./files.js";
+import { loadFile, parseRoadmap, getManifestStatus, resolveAllOverrides, parseSummary } from "./files.js";
 import { loadPrompt } from "./prompt-loader.js";
 export { inlinePriorMilestoneSummary } from "./files.js";
 import { collectSecretsFromManifest } from "../get-secrets-from-user.js";
@@ -94,7 +94,7 @@ import {
   parseSliceBranch,
   setActiveMilestoneId,
 } from "./worktree.js";
-import { GitServiceImpl } from "./git-service.js";
+import { GitServiceImpl, type TaskCommitContext } from "./git-service.js";
 import { getPriorSliceCompletionBlocker } from "./dispatch-guard.js";
 import { formatGitError } from "./git-self-heal.js";
 import {
@@ -1328,12 +1328,41 @@ export async function handleAgentEnd(
   // Small delay to let files settle (git commits, file writes)
   await new Promise(r => setTimeout(r, 500));
 
-  // Auto-commit any dirty files the LLM left behind on the current branch.
+  // Commit any dirty files the LLM left behind on the current branch.
+  // For execute-task units, build a meaningful commit message from the
+  // task summary (one-liner, key_files, inferred type). For other unit
+  // types, fall back to the generic chore() message.
   if (currentUnit) {
     try {
-      const commitMsg = autoCommitCurrentBranch(basePath, currentUnit.type, currentUnit.id);
+      let taskContext: TaskCommitContext | undefined;
+
+      if (currentUnit.type === "execute-task") {
+        const parts = currentUnit.id.split("/");
+        const [mid, sid, tid] = parts;
+        if (mid && sid && tid) {
+          const summaryPath = resolveTaskFile(basePath, mid, sid, tid, "SUMMARY");
+          if (summaryPath) {
+            try {
+              const summaryContent = await loadFile(summaryPath);
+              if (summaryContent) {
+                const summary = parseSummary(summaryContent);
+                taskContext = {
+                  taskId: `${sid}/${tid}`,
+                  taskTitle: summary.title?.replace(/^T\d+:\s*/, "") || tid,
+                  oneLiner: summary.oneLiner || undefined,
+                  keyFiles: summary.frontmatter.key_files?.filter(f => !f.includes("{{")) || undefined,
+                };
+              }
+            } catch {
+              // Non-fatal — fall back to generic message
+            }
+          }
+        }
+      }
+
+      const commitMsg = autoCommitCurrentBranch(basePath, currentUnit.type, currentUnit.id, taskContext);
       if (commitMsg) {
-        ctx.ui.notify(`Auto-committed uncommitted changes.`, "info");
+        ctx.ui.notify(`Committed: ${commitMsg.split("\n")[0]}`, "info");
       }
     } catch {
       // Non-fatal
@@ -1386,7 +1415,8 @@ export async function handleAgentEnd(
     }
     try {
       await rebuildState(basePath);
-      autoCommitCurrentBranch(basePath, currentUnit.type, currentUnit.id);
+      // State rebuild commit is bookkeeping — generic message is appropriate
+      autoCommitCurrentBranch(basePath, "state-rebuild", currentUnit.id);
     } catch {
       // Non-fatal
     }
