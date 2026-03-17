@@ -66,7 +66,7 @@ test("dispatch: triage check guards against step mode", () => {
     autoSrc.indexOf("In step mode, pause and show a wizard"),
   );
   assert.ok(
-    triageBlock.includes("!stepMode"),
+    triageBlock.includes("!s.stepMode"),
     "triage block should guard against step mode",
   );
 });
@@ -77,7 +77,7 @@ test("dispatch: triage check guards against hook unit types", () => {
     autoSrc.indexOf("In step mode, pause and show a wizard"),
   );
   assert.ok(
-    triageBlock.includes('!currentUnit.type.startsWith("hook/")'),
+    triageBlock.includes('!s.currentUnit.type.startsWith("hook/")'),
     "triage block should not fire for hook units",
   );
 });
@@ -88,7 +88,7 @@ test("dispatch: triage check guards against triage-on-triage", () => {
     autoSrc.indexOf("In step mode, pause and show a wizard"),
   );
   assert.ok(
-    triageBlock.includes('currentUnit.type !== "triage-captures"'),
+    triageBlock.includes('s.currentUnit.type !== "triage-captures"'),
     "triage block should not fire for triage units",
   );
 });
@@ -99,7 +99,7 @@ test("dispatch: triage check guards against quick-task triggering triage", () =>
     autoSrc.indexOf("In step mode, pause and show a wizard"),
   );
   assert.ok(
-    triageBlock.includes('currentUnit.type !== "quick-task"'),
+    triageBlock.includes('s.currentUnit.type !== "quick-task"'),
     "triage block should not fire for quick-task units",
   );
 });
@@ -231,7 +231,7 @@ test("dispatch: post-triage resolution executor fires after triage-captures unit
     autoSrc.indexOf("Path A fix: verify artifact"),
   );
   assert.ok(
-    triageCompletionBlock.includes('currentUnit.type === "triage-captures"'),
+    triageCompletionBlock.includes('s.currentUnit.type === "triage-captures"'),
     "should check for triage-captures unit completion",
   );
   assert.ok(
@@ -268,8 +268,8 @@ test("dispatch: post-triage executor queues quick-tasks", () => {
     autoSrc.indexOf("Path A fix: verify artifact"),
   );
   assert.ok(
-    triageCompletionBlock.includes("pendingQuickTasks"),
-    "should push quick-tasks to pendingQuickTasks queue",
+    triageCompletionBlock.includes("s.pendingQuickTasks"),
+    "should push quick-tasks to s.pendingQuickTasks queue",
   );
 });
 
@@ -336,9 +336,9 @@ test("dispatch: quick-task excluded from post-unit hook triggering", () => {
 // ─── pendingQuickTasks queue lifecycle ────────────────────────────────────────
 
 test("dispatch: pendingQuickTasks queue is reset on auto-mode start/stop", () => {
-  const resetMatches = autoSrc.match(/pendingQuickTasks = \[\]/g);
+  const resetMatches = autoSrc.match(/s\.pendingQuickTasks = \[\]/g);
   assert.ok(
     resetMatches && resetMatches.length >= 3,
-    "pendingQuickTasks should be reset in at least 3 places (start, stop, manual hook)",
+    "s.pendingQuickTasks should be reset in at least 3 places (start, stop, manual hook)",
   );
 });

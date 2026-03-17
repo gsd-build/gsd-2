@@ -18,6 +18,7 @@ import { ChildProcess } from 'node:child_process'
 // RpcClient is not in @gsd/pi-coding-agent's public exports — import from dist directly.
 // This relative path resolves correctly from both src/ (via tsx) and dist/ (compiled).
 import { RpcClient } from '../packages/pi-coding-agent/dist/modes/rpc/rpc-client.js'
+import { attachJsonlLineReader, serializeJsonLine } from '../packages/pi-coding-agent/dist/modes/rpc/jsonl.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,6 +34,9 @@ export interface HeadlessOptions {
   contextText?: string   // inline text
   auto?: boolean         // chain into auto-mode after milestone creation
   verbose?: boolean      // show tool calls in output
+  maxRestarts?: number   // auto-restart on crash (default 3, 0 to disable)
+  supervised?: boolean   // supervised mode: forward interactive requests to orchestrator
+  responseTimeout?: number // timeout for orchestrator response (default 30000ms)
 }
 
 interface ExtensionUIRequest {
@@ -92,6 +96,21 @@ export function parseHeadlessArgs(argv: string[]): HeadlessOptions {
         options.auto = true
       } else if (arg === '--verbose') {
         options.verbose = true
+      } else if (arg === '--max-restarts' && i + 1 < args.length) {
+        options.maxRestarts = parseInt(args[++i], 10)
+        if (Number.isNaN(options.maxRestarts) || options.maxRestarts < 0) {
+          process.stderr.write('[headless] Error: --max-restarts must be a non-negative integer\n')
+          process.exit(1)
+        }
+      } else if (arg === '--supervised') {
+        options.supervised = true
+        options.json = true  // supervised implies json
+      } else if (arg === '--response-timeout' && i + 1 < args.length) {
+        options.responseTimeout = parseInt(args[++i], 10)
+        if (Number.isNaN(options.responseTimeout) || options.responseTimeout <= 0) {
+          process.stderr.write('[headless] Error: --response-timeout must be a positive integer (milliseconds)\n')
+          process.exit(1)
+        }
       }
     } else if (!positionalStarted) {
       positionalStarted = true
@@ -102,14 +121,6 @@ export function parseHeadlessArgs(argv: string[]): HeadlessOptions {
   }
 
   return options
-}
-
-// ---------------------------------------------------------------------------
-// JSONL Helper
-// ---------------------------------------------------------------------------
-
-function serializeJsonLine(obj: Record<string, unknown>): string {
-  return JSON.stringify(obj) + '\n'
 }
 
 // ---------------------------------------------------------------------------
@@ -188,7 +199,20 @@ function formatProgress(event: Record<string, unknown>, verbose: boolean): strin
 // Completion Detection
 // ---------------------------------------------------------------------------
 
-const TERMINAL_KEYWORDS = ['complete', 'stopped', 'blocked']
+/**
+ * Detect genuine auto-mode termination notifications.
+ *
+ * Only matches the actual stop signals emitted by stopAuto():
+ *   "Auto-mode stopped..."
+ *   "Step-mode stopped..."
+ *
+ * Does NOT match progress notifications that happen to contain words like
+ * "complete" or "stopped" (e.g., "Override resolved — rewrite-docs completed",
+ * "All slices are complete — nothing to discuss", "Skipped 5+ completed units").
+ *
+ * Blocked detection is separate — checked via isBlockedNotification.
+ */
+const TERMINAL_PREFIXES = ['auto-mode stopped', 'step-mode stopped']
 const IDLE_TIMEOUT_MS = 15_000
 // new-milestone is a long-running creative task where the LLM may pause
 // between tool calls (e.g. after mkdir, before writing files). Use a
@@ -198,12 +222,14 @@ const NEW_MILESTONE_IDLE_TIMEOUT_MS = 120_000
 function isTerminalNotification(event: Record<string, unknown>): boolean {
   if (event.type !== 'extension_ui_request' || event.method !== 'notify') return false
   const message = String(event.message ?? '').toLowerCase()
-  return TERMINAL_KEYWORDS.some((kw) => message.includes(kw))
+  return TERMINAL_PREFIXES.some((prefix) => message.startsWith(prefix))
 }
 
 function isBlockedNotification(event: Record<string, unknown>): boolean {
   if (event.type !== 'extension_ui_request' || event.method !== 'notify') return false
-  return String(event.message ?? '').toLowerCase().includes('blocked')
+  const message = String(event.message ?? '').toLowerCase()
+  // Blocked notifications come through stopAuto as "Auto-mode stopped (Blocked: ...)"
+  return message.includes('blocked:')
 }
 
 function isMilestoneReadyNotification(event: Record<string, unknown>): boolean {
@@ -215,6 +241,8 @@ function isMilestoneReadyNotification(event: Record<string, unknown>): boolean {
 // Quick Command Detection
 // ---------------------------------------------------------------------------
 
+const FIRE_AND_FORGET_METHODS = new Set(['notify', 'setStatus', 'setWidget', 'setTitle', 'set_editor_text'])
+
 const QUICK_COMMANDS = new Set([
   'status', 'queue', 'history', 'hooks', 'export', 'stop', 'pause',
   'capture', 'skip', 'undo', 'knowledge', 'config', 'prefs',
@@ -224,6 +252,49 @@ const QUICK_COMMANDS = new Set([
 
 function isQuickCommand(command: string): boolean {
   return QUICK_COMMANDS.has(command)
+}
+
+// ---------------------------------------------------------------------------
+// Supervised Stdin Reader
+// ---------------------------------------------------------------------------
+
+function startSupervisedStdinReader(
+  stdinWriter: (data: string) => void,
+  client: RpcClient,
+  onResponse: (id: string) => void,
+): () => void {
+  return attachJsonlLineReader(process.stdin as import('node:stream').Readable, (line) => {
+    let msg: Record<string, unknown>
+    try {
+      msg = JSON.parse(line)
+    } catch {
+      process.stderr.write(`[headless] Warning: invalid JSON from orchestrator stdin, skipping\n`)
+      return
+    }
+
+    const type = String(msg.type ?? '')
+
+    switch (type) {
+      case 'extension_ui_response':
+        stdinWriter(line + '\n')
+        if (typeof msg.id === 'string') {
+          onResponse(msg.id)
+        }
+        break
+      case 'prompt':
+        client.prompt(String(msg.message ?? ''))
+        break
+      case 'steer':
+        client.steer(String(msg.message ?? ''))
+        break
+      case 'follow_up':
+        client.followUp(String(msg.message ?? ''))
+        break
+      default:
+        process.stderr.write(`[headless] Warning: unknown message type "${type}" from orchestrator stdin\n`)
+        break
+    }
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -264,8 +335,45 @@ function bootstrapGsdProject(basePath: string): void {
 }
 
 export async function runHeadless(options: HeadlessOptions): Promise<void> {
+  const maxRestarts = options.maxRestarts ?? 3
+  let restartCount = 0
+
+  while (true) {
+    const result = await runHeadlessOnce(options, restartCount)
+
+    // Success or blocked — exit normally
+    if (result.exitCode === 0 || result.exitCode === 2) {
+      process.exit(result.exitCode)
+    }
+
+    // Crash/error — check if we should restart
+    if (restartCount >= maxRestarts) {
+      process.stderr.write(`[headless] Max restarts (${maxRestarts}) reached. Exiting.\n`)
+      process.exit(result.exitCode)
+    }
+
+    // Don't restart if SIGINT/SIGTERM was received
+    if (result.interrupted) {
+      process.exit(result.exitCode)
+    }
+
+    restartCount++
+    const backoffMs = Math.min(5000 * restartCount, 30_000)
+    process.stderr.write(`[headless] Restarting in ${(backoffMs / 1000).toFixed(0)}s (attempt ${restartCount}/${maxRestarts})...\n`)
+    await new Promise(resolve => setTimeout(resolve, backoffMs))
+  }
+}
+
+async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): Promise<{ exitCode: number; interrupted: boolean }> {
+  let interrupted = false
   const startTime = Date.now()
   const isNewMilestone = options.command === 'new-milestone'
+
+  // Supervised mode cannot share stdin with --context -
+  if (options.supervised && options.context === '-') {
+    process.stderr.write('[headless] Error: --supervised cannot be used with --context - (both require stdin)\n')
+    process.exit(1)
+  }
 
   // For new-milestone, load context and bootstrap .gsd/ before spawning RPC child
   if (isNewMilestone) {
@@ -362,6 +470,18 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
   // Stdin writer for sending extension_ui_response to child
   let stdinWriter: ((data: string) => void) | null = null
 
+  // Supervised mode state
+  const pendingResponseTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  let supervisedFallback = false
+  let stopSupervisedReader: (() => void) | null = null
+  const onStdinClose = () => {
+    supervisedFallback = true
+    process.stderr.write('[headless] Warning: orchestrator stdin closed, falling back to auto-response\n')
+  }
+  if (options.supervised) {
+    process.stdin.on('close', onStdinClose)
+  }
+
   // Completion promise
   let resolveCompletion: () => void
   const completionPromise = new Promise<void>((resolve) => {
@@ -381,6 +501,9 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
       }, effectiveIdleTimeout)
     }
   }
+
+  // Precompute supervised response timeout
+  const responseTimeout = options.responseTimeout ?? 30_000
 
   // Overall timeout
   const timeoutTimer = setTimeout(() => {
@@ -420,7 +543,22 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
         completed = true
       }
 
-      handleExtensionUIRequest(eventObj as unknown as ExtensionUIRequest, stdinWriter)
+      const method = String(eventObj.method ?? '')
+      const shouldSupervise = options.supervised && !supervisedFallback
+        && !FIRE_AND_FORGET_METHODS.has(method)
+
+      if (shouldSupervise) {
+        // Interactive request in supervised mode — let orchestrator respond
+        const eventId = String(eventObj.id ?? '')
+        const timer = setTimeout(() => {
+          pendingResponseTimers.delete(eventId)
+          handleExtensionUIRequest(eventObj as unknown as ExtensionUIRequest, stdinWriter!)
+          process.stdout.write(JSON.stringify({ type: 'supervised_timeout', id: eventId, method }) + '\n')
+        }, responseTimeout)
+        pendingResponseTimers.set(eventId, timer)
+      } else {
+        handleExtensionUIRequest(eventObj as unknown as ExtensionUIRequest, stdinWriter)
+      }
 
       // If we detected a terminal notification, resolve after responding
       if (completed) {
@@ -444,6 +582,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
   // Signal handling
   const signalHandler = () => {
     process.stderr.write('\n[headless] Interrupted, stopping child process...\n')
+    interrupted = true
     exitCode = 1
     client.stop().finally(() => {
       clearTimeout(timeoutTimer)
@@ -474,6 +613,19 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
 
   stdinWriter = (data: string) => {
     internalProcess.stdin!.write(data)
+  }
+
+  // Start supervised stdin reader for orchestrator commands
+  if (options.supervised) {
+    stopSupervisedReader = startSupervisedStdinReader(stdinWriter, client, (id) => {
+      const timer = pendingResponseTimers.get(id)
+      if (timer) {
+        clearTimeout(timer)
+        pendingResponseTimers.delete(id)
+      }
+    })
+    // Ensure stdin is in flowing mode for JSONL reading
+    process.stdin.resume()
   }
 
   // Detect child process crash
@@ -533,6 +685,10 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
   // Cleanup
   clearTimeout(timeoutTimer)
   if (idleTimer) clearTimeout(idleTimer)
+  pendingResponseTimers.forEach((timer) => clearTimeout(timer))
+  pendingResponseTimers.clear()
+  stopSupervisedReader?.()
+  process.stdin.removeListener('close', onStdinClose)
   process.removeListener('SIGINT', signalHandler)
   process.removeListener('SIGTERM', signalHandler)
 
@@ -545,6 +701,9 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
   process.stderr.write(`[headless] Status: ${status}\n`)
   process.stderr.write(`[headless] Duration: ${duration}s\n`)
   process.stderr.write(`[headless] Events: ${totalEvents} total, ${toolCallCount} tool calls\n`)
+  if (restartCount > 0) {
+    process.stderr.write(`[headless] Restarts: ${restartCount}\n`)
+  }
 
   // On failure, print last 5 events for diagnostics
   if (exitCode !== 0) {
@@ -557,5 +716,5 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
     }
   }
 
-  process.exit(exitCode)
+  return { exitCode, interrupted }
 }

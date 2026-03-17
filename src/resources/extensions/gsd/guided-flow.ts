@@ -10,7 +10,7 @@ import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@g
 import { showNextAction } from "../shared/next-action-ui.js";
 import { loadFile, parseRoadmap } from "./files.js";
 import { loadPrompt, inlineTemplate } from "./prompt-loader.js";
-import { deriveState } from "./state.js";
+import { deriveState, invalidateStateCache } from "./state.js";
 import { startAuto } from "./auto.js";
 import { readCrashLock, clearLock, formatCrashInfo } from "./crash-recovery.js";
 import { listUnitRuntimeRecords, clearUnitRuntimeRecord } from "./unit-runtime.js";
@@ -959,10 +959,28 @@ export async function showDiscuss(
 
   // Loop: show picker, dispatch discuss, repeat until "not_yet"
   while (true) {
-    const actions = pendingSlices.map((s, i) => {
-      // Check if this slice has already been discussed (CONTEXT file exists)
+    // Build discussion-state map: which slices have CONTEXT files already?
+    const discussedMap = new Map<string, boolean>();
+    for (const s of pendingSlices) {
       const contextFile = resolveSliceFile(basePath, mid, s.id, "CONTEXT");
-      const discussed = !!contextFile;
+      discussedMap.set(s.id, !!contextFile);
+    }
+
+    // If all pending slices are discussed, notify and exit instead of looping
+    const allDiscussed = pendingSlices.every(s => discussedMap.get(s.id));
+    if (allDiscussed) {
+      ctx.ui.notify(
+        `All ${pendingSlices.length} slices discussed. Run /gsd to start planning.`,
+        "info",
+      );
+      return;
+    }
+
+    // Find the first undiscussed slice to recommend
+    const firstUndiscussedId = pendingSlices.find(s => !discussedMap.get(s.id))?.id;
+
+    const actions = pendingSlices.map((s) => {
+      const discussed = discussedMap.get(s.id) ?? false;
       const statusParts: string[] = [];
       if (state.activeSlice?.id === s.id) statusParts.push("active");
       else statusParts.push("upcoming");
@@ -972,7 +990,7 @@ export async function showDiscuss(
         id: s.id,
         label: `${s.id}: ${s.title}`,
         description: statusParts.join(" · "),
-        recommended: i === 0,
+        recommended: s.id === firstUndiscussedId,
       };
     });
 
@@ -996,6 +1014,7 @@ export async function showDiscuss(
 
     // Wait for the discuss session to finish, then loop back to the picker
     await ctx.waitForIdle();
+    invalidateStateCache();
   }
 }
 

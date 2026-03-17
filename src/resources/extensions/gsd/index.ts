@@ -44,6 +44,7 @@ import {
   resolveAllSkillReferences,
   resolveModelWithFallbacksForUnit,
   getNextFallbackModel,
+  isTransientNetworkError,
 } from "./preferences.js";
 import { hasSkillSnapshot, detectNewSkills, formatSkillsXml } from "./skill-discovery.js";
 import {
@@ -59,6 +60,8 @@ import { homedir } from "node:os";
 import { shortcutDesc } from "../shared/terminal.js";
 import { Text } from "@gsd/pi-tui";
 import { pauseAutoForProviderError } from "./provider-error-pause.js";
+import { toPosixPath } from "../shared/path-display.js";
+import { isParallelActive, shutdownParallel } from "./parallel-orchestrator.js";
 
 // ── Agent Instructions ────────────────────────────────────────────────────
 // Lightweight "always follow" files injected into every GSD agent session.
@@ -90,6 +93,11 @@ function loadAgentInstructions(): string | null {
 
 // ── Depth verification state ──────────────────────────────────────────────
 let depthVerificationDone = false;
+
+// ── Network error retry counters ──────────────────────────────────────────
+// Tracks per-model retry attempts for transient network errors.
+// Cleared when a model switch occurs or retries are exhausted.
+const networkRetryCounters = new Map<string, number>();
 
 export function isDepthVerified(): boolean {
   return depthVerificationDone;
@@ -648,12 +656,12 @@ export default function (pi: ExtensionAPI) {
         "",
         "[WORKTREE CONTEXT — OVERRIDES CURRENT WORKING DIRECTORY ABOVE]",
         `IMPORTANT: Ignore the "Current working directory" shown earlier in this prompt.`,
-        `The actual current working directory is: ${process.cwd()}`,
+        `The actual current working directory is: ${toPosixPath(process.cwd())}`,
         "",
         `You are working inside a GSD worktree.`,
         `- Worktree name: ${worktreeName}`,
-        `- Worktree path (this is the real cwd): ${process.cwd()}`,
-        `- Main project: ${worktreeMainCwd}`,
+        `- Worktree path (this is the real cwd): ${toPosixPath(process.cwd())}`,
+        `- Main project: ${toPosixPath(worktreeMainCwd)}`,
         `- Branch: worktree/${worktreeName}`,
         "",
         "All file operations, bash commands, and GSD state resolve against the worktree path above.",
@@ -665,12 +673,12 @@ export default function (pi: ExtensionAPI) {
         "",
         "[WORKTREE CONTEXT — OVERRIDES CURRENT WORKING DIRECTORY ABOVE]",
         `IMPORTANT: Ignore the "Current working directory" shown earlier in this prompt.`,
-        `The actual current working directory is: ${process.cwd()}`,
+        `The actual current working directory is: ${toPosixPath(process.cwd())}`,
         "",
         "You are working inside a GSD auto-worktree.",
         `- Milestone worktree: ${autoWorktree.worktreeName}`,
-        `- Worktree path (this is the real cwd): ${process.cwd()}`,
-        `- Main project: ${autoWorktree.originalBase}`,
+        `- Worktree path (this is the real cwd): ${toPosixPath(process.cwd())}`,
+        `- Main project: ${toPosixPath(autoWorktree.originalBase)}`,
         `- Branch: ${autoWorktree.branch}`,
         "",
         "All file operations, bash commands, and GSD state resolve against the worktree path above.",
@@ -726,6 +734,43 @@ export default function (pi: ExtensionAPI) {
           ? `: ${lastMsg.errorMessage}`
           : "";
 
+      const errorMsg = ("errorMessage" in lastMsg && lastMsg.errorMessage) ? String(lastMsg.errorMessage) : "";
+
+      // ── Transient network error retry ──────────────────────────────────
+      // Before falling back to a different model, retry the current model
+      // for transient network errors (connection reset, timeout, DNS, etc.).
+      // This prevents providers with occasional network flakiness from being
+      // immediately abandoned in favor of fallback models (#941).
+      if (isTransientNetworkError(errorMsg)) {
+        const currentModelId = ctx.model?.id ?? "unknown";
+        const retryKey = `network-retry:${currentModelId}`;
+        const maxRetries = 2;
+        const currentRetries = networkRetryCounters.get(retryKey) ?? 0;
+
+        if (currentRetries < maxRetries) {
+          networkRetryCounters.set(retryKey, currentRetries + 1);
+          const attempt = currentRetries + 1;
+          const delayMs = attempt * 3000; // 3s, 6s backoff
+          ctx.ui.notify(
+            `Network error on ${currentModelId}${errorDetail}. Retry ${attempt}/${maxRetries} in ${delayMs / 1000}s...`,
+            "warning",
+          );
+          setTimeout(() => {
+            pi.sendMessage(
+              { customType: "gsd-auto-timeout-recovery", content: "Continue execution — retrying after transient network error.", display: false },
+              { triggerTurn: true },
+            );
+          }, delayMs);
+          return;
+        }
+        // Retries exhausted — clear counter and fall through to fallback logic
+        networkRetryCounters.delete(retryKey);
+        ctx.ui.notify(
+          `Network retries exhausted for ${currentModelId}. Attempting model fallback.`,
+          "warning",
+        );
+      }
+
       const dash = getAutoDashboardData();
       if (dash.currentUnit) {
         const modelConfig = resolveModelWithFallbacksForUnit(dash.currentUnit.type);
@@ -736,6 +781,9 @@ export default function (pi: ExtensionAPI) {
           const nextModelId = getNextFallbackModel(currentModelId, modelConfig);
 
           if (nextModelId) {
+            // Clear any network retry counters when switching models
+            networkRetryCounters.clear();
+
             let modelToSet;
             const slashIdx = nextModelId.indexOf("/");
             if (slashIdx !== -1) {
@@ -770,7 +818,6 @@ export default function (pi: ExtensionAPI) {
       }
 
       // Detect rate-limit errors and extract retry delay for auto-resume
-      const errorMsg = ("errorMessage" in lastMsg && lastMsg.errorMessage) ? String(lastMsg.errorMessage) : "";
       const isRateLimit = /rate.?limit|too many requests|429/i.test(errorMsg);
       const retryAfterMs = ("retryAfterMs" in lastMsg && typeof lastMsg.retryAfterMs === "number")
         ? lastMsg.retryAfterMs
@@ -790,6 +837,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     try {
+      networkRetryCounters.clear(); // Clear network retry state on successful unit completion
       await handleAgentEnd(ctx, pi);
     } catch (err) {
       // Safety net: if handleAgentEnd throws despite its internal try-catch,
@@ -855,6 +903,12 @@ export default function (pi: ExtensionAPI) {
 
   // ── session_shutdown: save activity log on Ctrl+C / SIGTERM ─────────────
   pi.on("session_shutdown", async (_event, ctx: ExtensionContext) => {
+    if (isParallelActive()) {
+      try {
+        await shutdownParallel(process.cwd());
+      } catch { /* best-effort */ }
+    }
+
     if (!isAutoActive() && !isAutoPaused()) return;
 
     // Save the current session — the lock file stays on disk

@@ -38,15 +38,16 @@ Then:
    - Preferred: use the `bg_shell` tool if available — it manages process lifecycle correctly without stream-inheritance issues
 6. Verify must-haves are met by running concrete checks (tests, commands, observable behaviors)
 7. Run the slice-level verification checks defined in the slice plan's Verification section. Track which pass. On the final task of the slice, all must pass before marking done. On intermediate tasks, partial passes are expected — note which ones pass in the summary.
-8. If the task touches UI, browser flows, DOM behavior, or user-visible web state:
+8. After the verification gate runs (you'll see gate results in stderr/notify output), populate the `## Verification Evidence` table in your task summary with the check results. Use the `formatEvidenceTable` format: one row per check with command, exit code, verdict (✅ pass / ❌ fail), and duration. If no verification commands were discovered, note that in the section.
+9. If the task touches UI, browser flows, DOM behavior, or user-visible web state:
    - exercise the real flow in the browser
    - prefer `browser_batch` when the next few actions are obvious and sequential
    - prefer `browser_assert` for explicit pass/fail verification of the intended outcome
    - use `browser_diff` when an action's effect is ambiguous
    - use console/network/dialog diagnostics when validating async, stateful, or failure-prone UI
    - record verification in terms of explicit checks passed/failed, not only prose interpretation
-9. If the task plan includes an Observability Impact section, verify those signals directly. Skip this step if the task plan omits the section.
-10. **If execution is running long or verification fails:**
+10. If the task plan includes an Observability Impact section, verify those signals directly. Skip this step if the task plan omits the section.
+11. **If execution is running long or verification fails:**
 
     **Context budget:** You have approximately **{{verificationBudget}}** reserved for verification context. If you've used most of your context and haven't finished all steps, stop implementing and prioritize writing the task summary with clear notes on what's done and what remains. A partial summary that enables clean resumption is more valuable than one more half-finished step with no documentation. Never sacrifice summary quality for one more implementation step.
 

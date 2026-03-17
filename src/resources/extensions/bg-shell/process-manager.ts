@@ -67,6 +67,8 @@ export function getInfo(p: BgProcess): BgProcessInfo {
 		label: p.label,
 		command: p.command,
 		cwd: p.cwd,
+		ownerSessionFile: p.ownerSessionFile,
+		persistAcrossSessions: p.persistAcrossSessions,
 		startedAt: p.startedAt,
 		alive: p.alive,
 		exitCode: p.exitCode,
@@ -138,6 +140,8 @@ export function startProcess(opts: StartOptions): BgProcess {
 		label: opts.label || command.slice(0, 60),
 		command,
 		cwd: opts.cwd,
+		ownerSessionFile: opts.ownerSessionFile ?? null,
+		persistAcrossSessions: opts.persistAcrossSessions ?? false,
 		startedAt: Date.now(),
 		proc,
 		output: [],
@@ -170,6 +174,8 @@ export function startProcess(opts: StartOptions): BgProcess {
 			cwd: opts.cwd,
 			label: opts.label || command.slice(0, 60),
 			processType,
+			ownerSessionFile: opts.ownerSessionFile ?? null,
+			persistAcrossSessions: opts.persistAcrossSessions ?? false,
 			readyPattern: opts.readyPattern || null,
 			readyPort: opts.readyPort || null,
 			group: opts.group || null,
@@ -312,6 +318,8 @@ export async function restartProcess(id: string): Promise<BgProcess | null> {
 		cwd: config.cwd,
 		label: config.label,
 		type: config.processType,
+		ownerSessionFile: config.ownerSessionFile,
+		persistAcrossSessions: config.persistAcrossSessions,
 		readyPattern: config.readyPattern || undefined,
 		readyPort: config.readyPort || undefined,
 		group: config.group || undefined,
@@ -367,6 +375,41 @@ export function cleanupAll(): void {
 	processes.clear();
 }
 
+async function waitForProcessExit(bg: BgProcess, timeoutMs: number): Promise<boolean> {
+	if (!bg.alive) return true;
+	await new Promise<void>((resolve) => {
+		const done = () => resolve();
+		const timer = setTimeout(done, timeoutMs);
+		bg.proc.once("exit", () => {
+			clearTimeout(timer);
+			resolve();
+		});
+	});
+	return !bg.alive;
+}
+
+export async function cleanupSessionProcesses(
+	sessionFile: string,
+	options?: { graceMs?: number },
+): Promise<string[]> {
+	const graceMs = Math.max(0, options?.graceMs ?? 300);
+	const matches = Array.from(processes.values()).filter(
+		(bg) => bg.alive && !bg.persistAcrossSessions && bg.ownerSessionFile === sessionFile,
+	);
+	if (matches.length === 0) return [];
+
+	for (const bg of matches) {
+		killProcess(bg.id, "SIGTERM");
+	}
+	if (graceMs > 0) {
+		await Promise.all(matches.map((bg) => waitForProcessExit(bg, graceMs)));
+	}
+	for (const bg of matches) {
+		if (bg.alive) killProcess(bg.id, "SIGKILL");
+	}
+	return matches.map((bg) => bg.id);
+}
+
 // ── Persistence ────────────────────────────────────────────────────────────
 
 export function getManifestPath(cwd: string): string {
@@ -384,6 +427,8 @@ export function persistManifest(cwd: string): void {
 				label: p.label,
 				command: p.command,
 				cwd: p.cwd,
+				ownerSessionFile: p.ownerSessionFile,
+				persistAcrossSessions: p.persistAcrossSessions,
 				startedAt: p.startedAt,
 				processType: p.processType,
 				group: p.group,

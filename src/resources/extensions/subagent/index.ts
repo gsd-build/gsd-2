@@ -12,7 +12,7 @@
  * Uses JSON mode to capture structured output from subagents.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -38,6 +38,44 @@ import { registerWorker, updateWorker } from "./worker-registry.js";
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
 const COLLAPSED_ITEM_COUNT = 10;
+const liveSubagentProcesses = new Set<ChildProcess>();
+
+async function stopLiveSubagents(): Promise<void> {
+	const active = Array.from(liveSubagentProcesses);
+	if (active.length === 0) return;
+
+	for (const proc of active) {
+		try {
+			proc.kill("SIGTERM");
+		} catch {
+			/* ignore */
+		}
+	}
+
+	await Promise.all(
+		active.map(
+			(proc) =>
+				new Promise<void>((resolve) => {
+					const done = () => resolve();
+					const timer = setTimeout(done, 500);
+					proc.once("exit", () => {
+						clearTimeout(timer);
+						resolve();
+					});
+				}),
+		),
+	);
+
+	for (const proc of active) {
+		if (proc.exitCode === null) {
+			try {
+				proc.kill("SIGKILL");
+			} catch {
+				/* ignore */
+			}
+		}
+	}
+}
 
 function formatTokens(count: number): string {
 	if (count < 1000) return count.toString();
@@ -302,6 +340,7 @@ async function runSingleAgent(
 				[process.env.GSD_BIN_PATH!, ...extensionArgs, ...args],
 				{ cwd: cwd ?? defaultCwd, shell: false, stdio: ["ignore", "pipe", "pipe"] },
 			);
+			liveSubagentProcesses.add(proc);
 			let buffer = "";
 
 			const processLine = (line: string) => {
@@ -353,11 +392,13 @@ async function runSingleAgent(
 			});
 
 			proc.on("close", (code) => {
+				liveSubagentProcesses.delete(proc);
 				if (buffer.trim()) processLine(buffer);
 				resolve(code ?? 0);
 			});
 
 			proc.on("error", () => {
+				liveSubagentProcesses.delete(proc);
 				resolve(1);
 			});
 
@@ -432,6 +473,10 @@ const SubagentParams = Type.Object({
 });
 
 export default function (pi: ExtensionAPI) {
+	pi.on("session_shutdown", async () => {
+		await stopLiveSubagents();
+	});
+
 	// /subagent command - list available agents
 	pi.registerCommand("subagent", {
 		description: "List available subagents",

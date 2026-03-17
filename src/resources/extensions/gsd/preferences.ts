@@ -75,7 +75,11 @@ const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "token_profile",
   "phases",
   "auto_visualize",
+  "auto_report",
   "parallel",
+  "verification_commands",
+  "verification_auto_fix",
+  "verification_max_retries",
 ]);
 
 export interface GSDSkillRule {
@@ -172,7 +176,12 @@ export interface GSDPreferences {
   token_profile?: TokenProfile;
   phases?: PhaseSkipPreferences;
   auto_visualize?: boolean;
+  /** Generate HTML report snapshot after each milestone completion. Default: true. Set false to disable. */
+  auto_report?: boolean;
   parallel?: import("./types.js").ParallelConfig;
+  verification_commands?: string[];
+  verification_auto_fix?: boolean;
+  verification_max_retries?: number;
 }
 
 export interface LoadedGSDPreferences {
@@ -327,7 +336,7 @@ function resolveSkillReference(ref: string, cwd: string): SkillResolution {
     try {
       const entries = readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
+        if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
         if (entry.name === expanded) {
           const skillFile = join(dir, entry.name, "SKILL.md");
           if (existsSync(skillFile)) {
@@ -586,6 +595,18 @@ export function getNextFallbackModel(
   }
 }
 
+/**
+ * Detect whether an error message indicates a transient network error
+ * (worth retrying the same model) vs a permanent provider error
+ * (auth failure, quota exceeded, etc. — should fall back immediately).
+ */
+export function isTransientNetworkError(errorMsg: string): boolean {
+  if (!errorMsg) return false;
+  const hasNetworkSignal = /network|ECONNRESET|ETIMEDOUT|ECONNREFUSED|socket hang up|fetch failed|connection.*reset|dns/i.test(errorMsg);
+  const hasPermanentSignal = /auth|unauthorized|forbidden|invalid.*key|quota|billing/i.test(errorMsg);
+  return hasNetworkSignal && !hasPermanentSignal;
+}
+
 export function resolveModelWithFallbacksForUnit(unitType: string): ResolvedModelConfig | undefined {
   const prefs = loadEffectiveGSDPreferences();
   if (!prefs?.preferences.models) return undefined;
@@ -773,6 +794,9 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
     parallel: (base.parallel || override.parallel)
       ? { ...(base.parallel ?? {}), ...(override.parallel ?? {}) } as import("./types.js").ParallelConfig
       : undefined,
+    verification_commands: mergeStringLists(base.verification_commands, override.verification_commands),
+    verification_auto_fix: override.verification_auto_fix ?? base.verification_auto_fix,
+    verification_max_retries: override.verification_max_retries ?? base.verification_max_retries,
   };
 }
 
@@ -1202,6 +1226,39 @@ export function validatePreferences(preferences: GSDPreferences): {
 
     if (Object.keys(parallel).length > 0) {
       validated.parallel = parallel as unknown as import("./types.js").ParallelConfig;
+    }
+  }
+
+  // ─── Verification Preferences ───────────────────────────────────────────
+  if (preferences.verification_commands !== undefined) {
+    if (Array.isArray(preferences.verification_commands)) {
+      const allStrings = preferences.verification_commands.every(
+        (item: unknown) => typeof item === "string",
+      );
+      if (allStrings) {
+        validated.verification_commands = preferences.verification_commands;
+      } else {
+        errors.push("verification_commands must be an array of strings");
+      }
+    } else {
+      errors.push("verification_commands must be an array of strings");
+    }
+  }
+
+  if (preferences.verification_auto_fix !== undefined) {
+    if (typeof preferences.verification_auto_fix === "boolean") {
+      validated.verification_auto_fix = preferences.verification_auto_fix;
+    } else {
+      errors.push("verification_auto_fix must be a boolean");
+    }
+  }
+
+  if (preferences.verification_max_retries !== undefined) {
+    const raw = preferences.verification_max_retries;
+    if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) {
+      validated.verification_max_retries = Math.floor(raw);
+    } else {
+      errors.push("verification_max_retries must be a non-negative number");
     }
   }
 

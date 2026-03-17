@@ -437,6 +437,14 @@ export async function getOrCreateClient(config: ServerConfig, cwd: string, initT
 			env: env ? { ...process.env, ...env } : undefined,
 		});
 
+		// Handle spawn failure (e.g., ENOENT when the command doesn't exist).
+		// Without this, the error bubbles up and can crash auto-mode (#901).
+		proc.on("error", (err: NodeJS.ErrnoException) => {
+			if (err.code === "ENOENT") {
+				proc.emit("exit", 1);
+			}
+		});
+
 		const exitedPromise = new Promise<number>((resolve) => {
 			proc.on("exit", (code: number | null) => resolve(code ?? 1));
 		});

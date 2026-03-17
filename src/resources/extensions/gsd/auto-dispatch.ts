@@ -242,6 +242,32 @@ const DISPATCH_RULES: DispatchRule[] = [
     },
   },
   {
+    name: "executing → execute-task (recover missing task plan → plan-slice)",
+    match: async ({ state, mid, midTitle, basePath }) => {
+      if (state.phase !== "executing" || !state.activeTask) return null;
+      const sid = state.activeSlice!.id;
+      const sTitle = state.activeSlice!.title;
+      const tid = state.activeTask.id;
+
+      // Guard: if the slice plan exists but the individual task plan files are
+      // missing, the planner created S##-PLAN.md with task entries but never
+      // wrote the tasks/ directory files. Dispatch plan-slice to regenerate
+      // them rather than hard-stopping — fixes the infinite-loop described in
+      // issue #909.
+      const taskPlanPath = resolveTaskFile(basePath, mid, sid, tid, "PLAN");
+      if (!taskPlanPath || !existsSync(taskPlanPath)) {
+        return {
+          action: "dispatch",
+          unitType: "plan-slice",
+          unitId: `${mid}/${sid}`,
+          prompt: await buildPlanSlicePrompt(mid, midTitle, sid, sTitle, basePath),
+        };
+      }
+
+      return null;
+    },
+  },
+  {
     name: "executing → execute-task",
     match: async ({ state, mid, basePath }) => {
       if (state.phase !== "executing" || !state.activeTask) return null;
@@ -249,19 +275,6 @@ const DISPATCH_RULES: DispatchRule[] = [
       const sTitle = state.activeSlice!.title;
       const tid = state.activeTask.id;
       const tTitle = state.activeTask.title;
-
-      // Guard: refuse to dispatch execute-task when the task plan file is missing.
-      // This prevents the agent from running blind after a failed plan-slice that
-      // wrote S{sid}-PLAN.md but omitted the individual T{tid}-PLAN.md files.
-      // (See issue #739 — missing task plan caused runaway execution and EPIPE crash.)
-      const taskPlanPath = resolveTaskFile(basePath, mid, sid, tid, "PLAN");
-      if (!taskPlanPath || !existsSync(taskPlanPath)) {
-        return {
-          action: "stop",
-          reason: `Task plan ${tid}-PLAN.md is missing for ${mid}/${sid}/${tid}. Re-run plan-slice to regenerate task plans, or create the file manually and resume.`,
-          level: "error",
-        };
-      }
 
       return {
         action: "dispatch",

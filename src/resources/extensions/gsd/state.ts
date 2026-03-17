@@ -26,6 +26,7 @@ import {
   resolveSlicePath,
   resolveSliceFile,
   resolveTaskFile,
+  resolveTasksDir,
   resolveGsdRootFile,
   gsdRoot,
 } from './paths.js';
@@ -34,6 +35,7 @@ import { milestoneIdSort, findMilestoneIds } from './guided-flow.js';
 import { nativeBatchParseGsdFiles, type BatchParsedFile } from './native-parser-bridge.js';
 
 import { join, resolve } from 'path';
+import { existsSync, readdirSync } from 'node:fs';
 import { debugCount, debugTime } from './debug-logger.js';
 
 // ─── Query Functions ───────────────────────────────────────────────────────
@@ -572,6 +574,34 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
     id: activeTaskEntry.id,
     title: activeTaskEntry.title,
   };
+
+  // ── Task plan file check (#909) ──────────────────────────────────────
+  // The slice plan may reference tasks but per-task plan files may be
+  // missing — e.g. when the slice plan was pre-created during roadmapping.
+  // If the tasks dir exists but has literally zero files (empty dir from
+  // mkdir), fall back to planning so plan-slice generates task plans.
+  const tasksDir = resolveTasksDir(basePath, activeMilestone.id, activeSlice.id);
+  if (tasksDir && existsSync(tasksDir) && slicePlan.tasks.length > 0) {
+    const allFiles = readdirSync(tasksDir).filter(f => f.endsWith(".md"));
+    if (allFiles.length === 0) {
+      return {
+        activeMilestone,
+        activeSlice,
+        activeTask: null,
+        phase: 'planning',
+        recentDecisions: [],
+        blockers: [],
+        nextAction: `Task plan files missing for ${activeSlice.id}. Run plan-slice to generate task plans.`,
+        registry,
+        requirements,
+        progress: {
+          milestones: milestoneProgress,
+          slices: sliceProgress,
+          tasks: taskProgress,
+        },
+      };
+    }
+  }
 
   // ── Blocker detection: scan completed task summaries ──────────────────
   // If any completed task has blocker_discovered: true and no REPLAN.md

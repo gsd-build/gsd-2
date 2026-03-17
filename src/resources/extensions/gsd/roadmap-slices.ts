@@ -41,7 +41,7 @@ export function expandDependencies(deps: string[]): string[] {
 }
 
 function extractSlicesSection(content: string): string {
-  const headingMatch = /^## Slices\s*$/m.exec(content);
+  const headingMatch = /^## Slices\b.*$/m.exec(content);
   if (!headingMatch || headingMatch.index == null) return "";
 
   const start = headingMatch.index + headingMatch[0].length;

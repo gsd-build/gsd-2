@@ -22,8 +22,17 @@ function writeRoadmap(base: string, mid: string, content: string): void {
 
 function writePlan(base: string, mid: string, sid: string, content: string): void {
   const dir = join(base, '.gsd', 'milestones', mid, 'slices', sid);
-  mkdirSync(join(dir, 'tasks'), { recursive: true });
+  const tasksDir = join(dir, 'tasks');
+  mkdirSync(tasksDir, { recursive: true });
   writeFileSync(join(dir, `${sid}-PLAN.md`), content);
+  // Create stub task plan files for any tasks in the plan content (#909)
+  // so deriveState doesn't fall back to planning phase.
+  const taskMatches = content.matchAll(/\*\*(T\d+):/g);
+  for (const m of taskMatches) {
+    const tid = m[1];
+    const planPath = join(tasksDir, `${tid}-PLAN.md`);
+    writeFileSync(planPath, `# ${tid} Plan\n\nTask plan stub for testing.\n`);
+  }
 }
 
 function writeContinue(base: string, mid: string, sid: string, content: string): void {

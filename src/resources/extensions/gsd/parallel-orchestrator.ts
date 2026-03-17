@@ -8,7 +8,14 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import {
+  existsSync,
+  writeFileSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  mkdirSync,
+} from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gsdRoot } from "./paths.js";
@@ -58,6 +65,142 @@ export interface OrchestratorState {
 
 let state: OrchestratorState | null = null;
 
+// ─── Persistence ──────────────────────────────────────────────────────────
+
+const ORCHESTRATOR_STATE_FILE = "orchestrator.json";
+const TMP_SUFFIX = ".tmp";
+
+export interface PersistedState {
+  active: boolean;
+  workers: Array<{
+    milestoneId: string;
+    title: string;
+    pid: number;
+    worktreePath: string;
+    startedAt: number;
+    state: "running" | "paused" | "stopped" | "error";
+    completedUnits: number;
+    cost: number;
+  }>;
+  totalCost: number;
+  startedAt: number;
+  configSnapshot: { max_workers: number; budget_ceiling?: number };
+}
+
+function stateFilePath(basePath: string): string {
+  return join(gsdRoot(basePath), ORCHESTRATOR_STATE_FILE);
+}
+
+/**
+ * Persist the current orchestrator state to .gsd/orchestrator.json.
+ * Uses atomic write (tmp + rename) to prevent partial reads.
+ */
+export function persistState(basePath: string): void {
+  if (!state) return;
+  try {
+    const dir = gsdRoot(basePath);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+    const persisted: PersistedState = {
+      active: state.active,
+      workers: [...state.workers.values()].map((w) => ({
+        milestoneId: w.milestoneId,
+        title: w.title,
+        pid: w.pid,
+        worktreePath: w.worktreePath,
+        startedAt: w.startedAt,
+        state: w.state,
+        completedUnits: w.completedUnits,
+        cost: w.cost,
+      })),
+      totalCost: state.totalCost,
+      startedAt: state.startedAt,
+      configSnapshot: {
+        max_workers: state.config.max_workers,
+        budget_ceiling: state.config.budget_ceiling,
+      },
+    };
+
+    const dest = stateFilePath(basePath);
+    const tmp = dest + TMP_SUFFIX;
+    writeFileSync(tmp, JSON.stringify(persisted, null, 2), "utf-8");
+    renameSync(tmp, dest);
+  } catch { /* non-fatal */ }
+}
+
+/**
+ * Remove the persisted state file.
+ */
+function removeStateFile(basePath: string): void {
+  try {
+    const p = stateFilePath(basePath);
+    if (existsSync(p)) unlinkSync(p);
+  } catch { /* non-fatal */ }
+}
+
+function isPidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Restore orchestrator state from .gsd/orchestrator.json.
+ * Checks PID liveness for each worker:
+ * - Living PID → state "running", process stays null (no handle)
+ * - Dead PID → removed from restored state
+ * Returns null if no state file exists or no workers survive.
+ */
+export function restoreState(basePath: string): PersistedState | null {
+  try {
+    const p = stateFilePath(basePath);
+    if (!existsSync(p)) return null;
+    const raw = readFileSync(p, "utf-8");
+    const persisted = JSON.parse(raw) as PersistedState;
+
+    // Filter to only workers with living PIDs
+    persisted.workers = persisted.workers.filter((w) => {
+      if (w.state === "stopped" || w.state === "error") return false;
+      return isPidAlive(w.pid);
+    });
+
+    if (persisted.workers.length === 0) {
+      // No surviving workers — clean up and return null
+      removeStateFile(basePath);
+      return null;
+    }
+
+    return persisted;
+  } catch {
+    return null;
+  }
+}
+
+async function waitForWorkerExit(worker: WorkerInfo, timeoutMs: number): Promise<boolean> {
+  if (worker.process) {
+    await new Promise<void>((resolve) => {
+      const done = () => resolve();
+      const timer = setTimeout(done, timeoutMs);
+      worker.process!.once("exit", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    return worker.process === null || !isPidAlive(worker.pid);
+  }
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (!isPidAlive(worker.pid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return !isPidAlive(worker.pid);
+}
+
 // ─── Accessors ─────────────────────────────────────────────────────────────
 
 /** Returns true if the orchestrator is active and has been initialized. */
@@ -81,12 +224,26 @@ export function getWorkerStatuses(): WorkerInfo[] {
 /**
  * Analyze eligibility and prepare for parallel start.
  * Returns the candidates report without actually starting workers.
+ * Also detects orphaned sessions from prior crashes.
  */
 export async function prepareParallelStart(
   basePath: string,
   _prefs: GSDPreferences | undefined,
-): Promise<ParallelCandidates> {
-  return analyzeParallelEligibility(basePath);
+): Promise<ParallelCandidates & { orphans?: Array<{ milestoneId: string; pid: number; alive: boolean }> }> {
+  // Detect orphaned sessions before eligibility analysis
+  const sessions = readAllSessionStatuses(basePath);
+  const orphans: Array<{ milestoneId: string; pid: number; alive: boolean }> = [];
+  for (const session of sessions) {
+    const alive = isPidAlive(session.pid);
+    orphans.push({ milestoneId: session.milestoneId, pid: session.pid, alive });
+    if (!alive) {
+      // Clean up dead session
+      removeSessionStatus(basePath, session.milestoneId);
+    }
+  }
+
+  const candidates = await analyzeParallelEligibility(basePath);
+  return orphans.length > 0 ? { ...candidates, orphans } : candidates;
 }
 
 // ─── Start ─────────────────────────────────────────────────────────────────
@@ -106,6 +263,36 @@ export async function startParallel(
   }
 
   const config = resolveParallelConfig(prefs);
+
+  // Try to restore from a previous crash
+  const restored = restoreState(basePath);
+  if (restored && restored.workers.length > 0) {
+    // Adopt surviving workers instead of starting new ones
+    state = {
+      active: true,
+      workers: new Map(),
+      config,
+      totalCost: restored.totalCost,
+      startedAt: restored.startedAt,
+    };
+    const adopted: string[] = [];
+    for (const w of restored.workers) {
+      state.workers.set(w.milestoneId, {
+        milestoneId: w.milestoneId,
+        title: w.title,
+        pid: w.pid,
+        process: null, // no handle for adopted workers
+        worktreePath: w.worktreePath,
+        startedAt: w.startedAt,
+        state: "running",
+        completedUnits: w.completedUnits,
+        cost: w.cost,
+      });
+      adopted.push(w.milestoneId);
+    }
+    return { started: adopted, errors: [] };
+  }
+
   const now = Date.now();
 
   // Initialize orchestrator state
@@ -144,7 +331,7 @@ export async function startParallel(
       const worker: WorkerInfo = {
         milestoneId: mid,
         title: mid,
-        pid: process.pid,
+        pid: 0,  // placeholder — real PID set by spawnWorker()
         process: null,
         worktreePath: wtPath,
         startedAt: now,
@@ -155,28 +342,24 @@ export async function startParallel(
 
       state.workers.set(mid, worker);
 
-      // Write initial session status
-      const sessionStatus: SessionStatus = {
+      // Spawn BEFORE writing session status so the file gets the real worker PID.
+      const spawned = spawnWorker(basePath, mid);
+      if (!spawned) {
+        worker.state = "error";
+      }
+
+      // Write session status with real PID (or 0 if spawn failed)
+      writeSessionStatus(basePath, {
         milestoneId: mid,
         pid: worker.pid,
-        state: "running",
+        state: worker.state,
         currentUnit: null,
         completedUnits: 0,
         cost: 0,
         lastHeartbeat: now,
         startedAt: now,
         worktreePath: wtPath,
-      };
-      writeSessionStatus(basePath, sessionStatus);
-
-      // Attempt to spawn the worker process.
-      // Spawning may fail if the CLI binary is not available (e.g., in tests).
-      // The worker is still tracked and can be spawned later via spawnWorker().
-      const spawned = spawnWorker(basePath, mid);
-      if (!spawned) {
-        // Worker tracked but not yet running a process.
-        // State stays "running" so coordinator can retry or user can investigate.
-      }
+      });
 
       started.push(mid);
     } catch (err) {
@@ -189,6 +372,9 @@ export async function startParallel(
   if (started.length === 0) {
     state.active = false;
   }
+
+  // Persist state for crash recovery
+  persistState(basePath);
 
   return { started, errors };
 }
@@ -323,7 +509,7 @@ export function spawnWorker(
       w.state = "error";
     }
 
-    // Update session status
+    // Update session status and persist orchestrator state for crash recovery
     writeSessionStatus(basePath, {
       milestoneId,
       pid: w.pid,
@@ -335,6 +521,7 @@ export function spawnWorker(
       startedAt: w.startedAt,
       worktreePath: w.worktreePath,
     });
+    persistState(basePath);
   });
 
   return true;
@@ -485,10 +672,22 @@ export async function stopParallel(
       try {
         if (worker.process) {
           worker.process.kill("SIGTERM");
-        } else {
+        } else if (worker.pid !== process.pid) {
           process.kill(worker.pid, "SIGTERM");
         }
       } catch { /* process may already be dead */ }
+    }
+
+    const exitedAfterTerm = await waitForWorkerExit(worker, 750);
+    if (!exitedAfterTerm && worker.pid > 0) {
+      try {
+        if (worker.process) {
+          worker.process.kill("SIGKILL");
+        } else if (worker.pid !== process.pid) {
+          process.kill(worker.pid, "SIGKILL");
+        }
+      } catch { /* process may already be dead */ }
+      await waitForWorkerExit(worker, 250);
     }
 
     // Update in-memory state
@@ -503,6 +702,15 @@ export async function stopParallel(
   if (!milestoneId) {
     state.active = false;
   }
+
+  // Persist final state and clean up state file
+  removeStateFile(basePath);
+}
+
+export async function shutdownParallel(basePath: string): Promise<void> {
+  if (!state) return;
+  await stopParallel(basePath);
+  resetOrchestrator();
 }
 
 // ─── Pause / Resume ────────────────────────────────────────────────────────
@@ -589,6 +797,9 @@ export function refreshWorkerStatuses(basePath: string): void {
   for (const worker of state.workers.values()) {
     state.totalCost += worker.cost;
   }
+
+  // Persist updated state for crash recovery
+  persistState(basePath);
 }
 
 // ─── Budget ────────────────────────────────────────────────────────────────

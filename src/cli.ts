@@ -287,7 +287,9 @@ const configuredExists = configuredProvider && configuredModel &&
 const configuredAvailable = configuredProvider && configuredModel &&
   availableModels.some((m) => m.provider === configuredProvider && m.id === configuredModel)
 
-if (!configuredModel || !configuredExists || !configuredAvailable) {
+if (!configuredModel || !configuredExists) {
+  // Model not configured at all, or removed from registry — pick a fallback.
+  // Only fires when the model is genuinely unknown (not just temporarily unavailable).
   const piDefault = getPiDefaultModelAndProvider()
   const preferred =
     (piDefault
@@ -304,7 +306,7 @@ if (!configuredModel || !configuredExists || !configuredAvailable) {
   }
 }
 
-if (settingsManager.getDefaultThinkingLevel() !== 'off' && (!configuredExists || !configuredAvailable)) {
+if (settingsManager.getDefaultThinkingLevel() !== 'off' && !configuredExists) {
   settingsManager.setDefaultThinkingLevel('off')
 }
 
