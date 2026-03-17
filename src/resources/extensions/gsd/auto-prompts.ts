@@ -642,7 +642,6 @@ export async function buildPlanSlicePrompt(
   const commitInstruction = commitDocsEnabled
     ? `Commit: \`docs(${sid}): add slice plan\``
     : "Do not commit — planning docs are not tracked in git for this project.";
-
   return loadPrompt("plan-slice", {
     workingDirectory: base,
     milestoneId: mid, sliceId: sid, sliceTitle: sTitle,
