@@ -333,7 +333,7 @@ function resolveSkillReference(ref: string, cwd: string): SkillResolution {
     try {
       const entries = readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
+        if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
         if (entry.name === expanded) {
           const skillFile = join(dir, entry.name, "SKILL.md");
           if (existsSync(skillFile)) {
