@@ -21,6 +21,7 @@ gsd headless [flags] [command] [args...]
 - `--supervised` — forward interactive UI requests to orchestrator via stdout/stdin
 - `--response-timeout N` — timeout for orchestrator response in supervised mode (default 30000)
 - `--max-restarts N` — auto-restart on crash with backoff (default 3, 0 to disable)
+- `--answers <path>` — pre-supply answers and secrets from JSON file
 
 **Exit codes:** 0=complete, 1=error/timeout, 2=blocked
 
@@ -166,7 +167,26 @@ Event types: `agent_start`, `agent_end`, `tool_execution_start`, `tool_execution
 
 ## Answer Injection
 
-Pre-supply answers for non-interactive runs. See [references/answer-injection.md](references/answer-injection.md) for schema and usage.
+Pre-supply answers and secrets for headless runs via `--answers`:
+
+```bash
+gsd headless --answers answers.json auto
+```
+
+Answer file schema:
+```json
+{
+  "questions": { "question_id": "selected_option" },
+  "secrets": { "API_KEY": "sk-..." },
+  "defaults": { "strategy": "first_option" }
+}
+```
+
+- **questions** — question ID → answer (string or string[])
+- **secrets** — env var → value, injected into child process env
+- **defaults.strategy** — `"first_option"` (default) or `"cancel"` for unmatched
+
+See [references/answer-injection.md](references/answer-injection.md) for full details.
 
 ## GSD Project Structure
 
