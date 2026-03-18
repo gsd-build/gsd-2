@@ -397,53 +397,20 @@ export function updateProgressWidget(
         lines.push(rightAlign(`${pad}${contextLine}`, phaseBadge, width));
 
         // ── Two-column body ─────────────────────────────────────────────
-        // Left: task checklist  |  Right: progress, ETA, next, stats
+        // Left: progress, ETA, next, stats  |  Right: task checklist
         const divider = theme.fg("dim", "│");
         const colGap = 3; // space + │ + space
-        const leftColWidth = Math.floor(width * 0.55);
+        const leftColWidth = Math.floor(width * 0.45);
         const rightColWidth = width - leftColWidth - colGap;
 
-        // Build left column: task checklist
-        const leftLines: string[] = [];
         const roadmapSlices = mid ? getRoadmapSlicesSync() : null;
-        const taskDetails = roadmapSlices?.taskDetails ?? null;
-        const maxVisibleTasks = 8;
 
-        if (taskDetails && taskDetails.length > 0) {
-          const visibleTasks = taskDetails.slice(0, maxVisibleTasks);
-          for (const t of visibleTasks) {
-            const isCurrent = task && t.id === task.id;
-            const glyph = t.done
-              ? theme.fg("success", GLYPH.statusDone)
-              : isCurrent
-                ? theme.fg("accent", "▸")
-                : theme.fg("dim", " ");
-            const label = isCurrent
-              ? theme.fg("text", `${t.id}: ${t.title}`)
-              : t.done
-                ? theme.fg("dim", `${t.id}: ${t.title}`)
-                : theme.fg("text", `${t.id}: ${t.title}`);
-            leftLines.push(truncateToWidth(`${pad}${glyph} ${label}`, leftColWidth));
-          }
-          if (taskDetails.length > maxVisibleTasks) {
-            leftLines.push(truncateToWidth(
-              `${pad}${theme.fg("dim", `  …+${taskDetails.length - maxVisibleTasks} more`)}`,
-              leftColWidth,
-            ));
-          }
-        } else if (roadmapSlices?.activeSliceTasks) {
-          // Fallback: just show task count if no details
-          const { done: tDone, total: tTotal } = roadmapSlices.activeSliceTasks;
-          leftLines.push(`${pad}${theme.fg("dim", `${tDone}/${tTotal} tasks`)}`);
-        }
-
-        // Build right column: progress bar, ETA, next step, token stats
-        const rightLines: string[] = [];
-        const rpad = " ";
+        // Build left column: progress bar, ETA, next step, token stats
+        const leftLines: string[] = [];
 
         if (roadmapSlices) {
           const { done, total, activeSliceTasks } = roadmapSlices;
-          const barWidth = Math.max(6, Math.min(18, Math.floor(rightColWidth * 0.4)));
+          const barWidth = Math.max(6, Math.min(18, Math.floor(leftColWidth * 0.4)));
           const pct = total > 0 ? done / total : 0;
           const filled = Math.round(pct * barWidth);
           const bar = theme.fg("success", "█".repeat(filled))
@@ -456,18 +423,18 @@ export function updateProgressWidget(
               : Math.min(activeSliceTasks.done + 1, activeSliceTasks.total);
             meta += theme.fg("dim", ` · task ${taskNum}/${activeSliceTasks.total}`);
           }
-          rightLines.push(truncateToWidth(`${rpad}${bar} ${meta}`, rightColWidth));
+          leftLines.push(truncateToWidth(`${pad}${bar} ${meta}`, leftColWidth));
 
           const eta = estimateTimeRemaining();
           if (eta) {
-            rightLines.push(truncateToWidth(`${rpad}${theme.fg("dim", eta)}`, rightColWidth));
+            leftLines.push(truncateToWidth(`${pad}${theme.fg("dim", eta)}`, leftColWidth));
           }
         }
 
         if (next) {
-          rightLines.push(truncateToWidth(
-            `${rpad}${theme.fg("dim", "→")} ${theme.fg("dim", `then ${next}`)}`,
-            rightColWidth,
+          leftLines.push(truncateToWidth(
+            `${pad}${theme.fg("dim", "→")} ${theme.fg("dim", `then ${next}`)}`,
+            leftColWidth,
           ));
         }
 
@@ -526,7 +493,7 @@ export function updateProgressWidget(
 
           const tokenLine = sp.map(p => p.includes("\x1b[") ? p : theme.fg("dim", p))
             .join(theme.fg("dim", " "));
-          rightLines.push(truncateToWidth(`${rpad}${tokenLine}`, rightColWidth));
+          leftLines.push(truncateToWidth(`${pad}${tokenLine}`, leftColWidth));
 
           const modelId = cmdCtx?.model?.id ?? "";
           const modelProvider = cmdCtx?.model?.provider ?? "";
@@ -534,16 +501,50 @@ export function updateProgressWidget(
             ? `${modelProvider}/${modelId}`
             : modelId;
           if (modelDisplay) {
-            rightLines.push(truncateToWidth(`${rpad}${theme.fg("dim", modelDisplay)}`, rightColWidth));
+            leftLines.push(truncateToWidth(`${pad}${theme.fg("dim", modelDisplay)}`, leftColWidth));
           }
 
           // Dynamic routing savings
           if (mLedger && mLedger.units.some(u => u.tier)) {
             const savings = formatTierSavings(mLedger.units);
             if (savings) {
-              rightLines.push(truncateToWidth(`${rpad}${theme.fg("dim", savings)}`, rightColWidth));
+              leftLines.push(truncateToWidth(`${pad}${theme.fg("dim", savings)}`, leftColWidth));
             }
           }
+        }
+
+        // Build right column: task checklist
+        const rightLines: string[] = [];
+        const taskDetails = roadmapSlices?.taskDetails ?? null;
+        const maxVisibleTasks = 8;
+        const rpad = " ";
+
+        if (taskDetails && taskDetails.length > 0) {
+          const visibleTasks = taskDetails.slice(0, maxVisibleTasks);
+          for (const t of visibleTasks) {
+            const isCurrent = task && t.id === task.id;
+            const glyph = t.done
+              ? theme.fg("success", GLYPH.statusDone)
+              : isCurrent
+                ? theme.fg("accent", "▸")
+                : theme.fg("dim", " ");
+            const label = isCurrent
+              ? theme.fg("text", `${t.id}: ${t.title}`)
+              : t.done
+                ? theme.fg("dim", `${t.id}: ${t.title}`)
+                : theme.fg("text", `${t.id}: ${t.title}`);
+            rightLines.push(truncateToWidth(`${rpad}${glyph} ${label}`, rightColWidth));
+          }
+          if (taskDetails.length > maxVisibleTasks) {
+            rightLines.push(truncateToWidth(
+              `${rpad}${theme.fg("dim", `  …+${taskDetails.length - maxVisibleTasks} more`)}`,
+              rightColWidth,
+            ));
+          }
+        } else if (roadmapSlices?.activeSliceTasks) {
+          // Fallback: just show task count if no details
+          const { done: tDone, total: tTotal } = roadmapSlices.activeSliceTasks;
+          rightLines.push(`${rpad}${theme.fg("dim", `${tDone}/${tTotal} tasks`)}`);
         }
 
         // Zip left and right columns together
