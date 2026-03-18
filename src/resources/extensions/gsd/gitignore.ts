@@ -9,10 +9,12 @@
 import { join } from "node:path";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { nativeRmCached } from "./native-git-bridge.js";
+import { gsdRoot } from "./paths.js";
 
 /**
- * Patterns that are always correct regardless of project type.
- * No one ever wants these tracked.
+ * GSD runtime patterns for git index cleanup.
+ * With external state (symlink), these are a no-op in most cases,
+ * but retained for backwards compatibility during migration.
  */
 const GSD_RUNTIME_PATTERNS = [
   ".gsd/activity/",
@@ -31,8 +33,8 @@ const GSD_RUNTIME_PATTERNS = [
 ] as const;
 
 const BASELINE_PATTERNS = [
-  // ── GSD runtime (not source artifacts — planning files are tracked) ──
-  ...GSD_RUNTIME_PATTERNS,
+  // ── GSD state directory (symlink to external storage) ──
+  ".gsd",
 
   // ── OS junk ──
   ".DS_Store",
@@ -95,7 +97,32 @@ export function ensureGitignore(basePath: string, options?: { manageGitignore?: 
     existing = readFileSync(gitignorePath, "utf-8");
   }
 
-  return ensureBlanketGsdIgnore(gitignorePath, existing);
+  // Parse existing lines (trimmed, ignoring comments and blanks)
+  const existingLines = new Set(
+    existing
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith("#")),
+  );
+
+  // Find patterns not yet present
+  const missing = BASELINE_PATTERNS.filter((p) => !existingLines.has(p));
+
+  if (missing.length === 0) return false;
+
+  // Build the block to append
+  const block = [
+    "",
+    "# ── GSD baseline (auto-generated) ──",
+    ...missing,
+    "",
+  ].join("\n");
+
+  // Ensure existing content ends with a newline before appending
+  const prefix = existing && !existing.endsWith("\n") ? "\n" : "";
+  writeFileSync(gitignorePath, existing + prefix + block, "utf-8");
+
+  return true;
 }
 
 /**
@@ -129,8 +156,8 @@ export function untrackRuntimeFiles(basePath: string): void {
  * creating a duplicate when an uppercase file already exists.
  */
 export function ensurePreferences(basePath: string): boolean {
-  const preferencesPath = join(basePath, ".gsd", "preferences.md");
-  const legacyPath = join(basePath, ".gsd", "PREFERENCES.md");
+  const preferencesPath = join(gsdRoot(basePath), "preferences.md");
+  const legacyPath = join(gsdRoot(basePath), "PREFERENCES.md");
 
   if (existsSync(preferencesPath) || existsSync(legacyPath)) {
     return false;
@@ -185,31 +212,4 @@ custom_instructions:
   return true;
 }
 
-/**
- * Ensure `.gsd/` is in .gitignore as a blanket pattern.
- * .gsd/ state is managed externally and always gitignored.
- * Returns true if the file was modified, false if already complete.
- */
-function ensureBlanketGsdIgnore(gitignorePath: string, existing: string): boolean {
-  const existingLines = new Set(
-    existing
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l && !l.startsWith("#")),
-  );
-
-  // Already has blanket .gsd/ ignore
-  if (existingLines.has(".gsd/") || existingLines.has(".gsd")) return false;
-
-  const block = [
-    "",
-    "# ── GSD (managed externally) ──",
-    ".gsd/",
-    "",
-  ].join("\n");
-
-  const prefix = existing && !existing.endsWith("\n") ? "\n" : "";
-  writeFileSync(gitignorePath, existing + prefix + block, "utf-8");
-  return true;
-}
 

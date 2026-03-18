@@ -100,7 +100,7 @@ export function checkAutoStartAfterDiscuss(): boolean {
         const missing = milestoneIds.filter(id => {
           const hasContext = !!resolveMilestoneFile(basePath, id, "CONTEXT");
           const hasDraft = !!resolveMilestoneFile(basePath, id, "CONTEXT-DRAFT");
-          const hasDir = existsSync(join(basePath, ".gsd", "milestones", id));
+          const hasDir = existsSync(join(gsdRoot(basePath), "milestones", id));
           return !hasContext && !hasDraft && !hasDir;
         });
         if (missing.length > 0) {
@@ -118,7 +118,7 @@ export function checkAutoStartAfterDiscuss(): boolean {
   // The LLM writes DISCUSSION-MANIFEST.json after each Phase 3 gate decision.
   // If the manifest exists but gates_completed < total, the LLM hasn't finished
   // presenting all readiness gates to the user — block auto-start.
-  const manifestPath = join(basePath, ".gsd", "DISCUSSION-MANIFEST.json");
+  const manifestPath = join(gsdRoot(basePath), "DISCUSSION-MANIFEST.json");
   if (existsSync(manifestPath)) {
     try {
       const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
@@ -290,7 +290,7 @@ export async function showHeadlessMilestoneCreation(
   const nextId = nextMilestoneId(existingIds, prefs?.preferences?.unique_milestone_ids ?? false);
 
   // Create milestone directory
-  const milestoneDir = join(basePath, ".gsd", "milestones", nextId, "slices");
+  const milestoneDir = join(gsdRoot(basePath), "milestones", nextId, "slices");
   mkdirSync(milestoneDir, { recursive: true });
 
   // Build and dispatch the headless discuss prompt
@@ -405,7 +405,7 @@ export async function showDiscuss(
   basePath: string,
 ): Promise<void> {
   // Guard: no .gsd/ project
-  if (!existsSync(join(basePath, ".gsd"))) {
+  if (!existsSync(gsdRoot(basePath))) {
     ctx.ui.notify("No GSD project found. Run /gsd to start one first.", "warning");
     return;
   }
@@ -502,6 +502,9 @@ export async function showDiscuss(
 
   // Loop: show picker, dispatch discuss, repeat until "not_yet"
   while (true) {
+    // Invalidate caches so we pick up CONTEXT files written by the just-completed discussion
+    invalidateAllCaches();
+
     // Build discussion-state map: which slices have CONTEXT files already?
     const discussedMap = new Map<string, boolean>();
     for (const s of pendingSlices) {
@@ -748,7 +751,7 @@ export async function showSmartEntry(
   }
 
   // ── Detection preamble — run before any bootstrap ────────────────────
-  if (!existsSync(join(basePath, ".gsd"))) {
+  if (!existsSync(gsdRoot(basePath))) {
     const detection = detectProjectState(basePath);
 
     // v1 .planning/ detected — offer migration before anything else

@@ -1139,21 +1139,22 @@ async function main(): Promise<void> {
     rmSync(repo, { recursive: true, force: true });
   }
 
-  // ─── ensureGitignore: always adds blanket .gsd/ ──────────────────────
+  // ─── ensureGitignore: always adds .gsd to gitignore ──────────────────
 
-  console.log("\n=== ensureGitignore: blanket .gsd/ ===");
+  console.log("\n=== ensureGitignore: adds .gsd entry ===");
 
   {
     const { ensureGitignore } = await import("../gitignore.ts");
-    const repo = mkdtempSync(join(tmpdir(), "gsd-gitignore-blanket-"));
+    const repo = mkdtempSync(join(tmpdir(), "gsd-gitignore-external-state-"));
 
-    // Should add blanket .gsd/ to gitignore
+    // Should add .gsd to gitignore (external state dir is a symlink)
     const modified = ensureGitignore(repo);
     assertTrue(modified, "ensureGitignore: gitignore was modified");
 
     const { readFileSync } = await import("node:fs");
     const content = readFileSync(join(repo, ".gitignore"), "utf-8");
-    assertTrue(content.includes(".gsd/"), "ensureGitignore: .gitignore contains blanket .gsd/");
+    const lines = content.split("\n").map(l => l.trim()).filter(l => l && !l.startsWith("#"));
+    assertTrue(lines.includes(".gsd"), "ensureGitignore: .gitignore contains .gsd");
 
     // Idempotent — calling again doesn't add duplicates
     const modified2 = ensureGitignore(repo);
