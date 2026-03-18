@@ -44,6 +44,7 @@ import { handleInspect } from "./commands-inspect.js";
 import { handleCleanupBranches, handleCleanupSnapshots, handleSkip, handleDryRun } from "./commands-maintenance.js";
 import { handleDoctor, handleSteer, handleCapture, handleTriage, handleKnowledge, handleRunHook, handleUpdate, handleSkillHealth } from "./commands-handlers.js";
 import { handleLogs } from "./commands-logs.js";
+import { handleStart, handleTemplates, getTemplateCompletions } from "./commands-workflow-templates.js";
 
 // ─── Re-exports (preserve public API surface) ───────────────────────────────
 export { handlePrefs, handlePrefsMode, handlePrefsWizard, ensurePreferencesFile, handleImportClaude, buildCategorySummaries, serializePreferencesToFrontmatter, yamlSafeString, configureMode } from "./commands-prefs-wizard.js";
@@ -79,7 +80,7 @@ export function projectRoot(): string {
 
 export function registerGSDCommand(pi: ExtensionAPI): void {
   pi.registerCommand("gsd", {
-    description: "GSD — Get Shit Done: /gsd help|next|auto|stop|pause|status|visualize|queue|quick|capture|triage|dispatch|history|undo|skip|export|cleanup|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|forensics|migrate|remote|steer|knowledge|new-milestone|parallel|update",
+    description: "GSD — Get Shit Done: /gsd help|start|templates|next|auto|stop|pause|status|visualize|queue|quick|capture|triage|dispatch|history|undo|skip|export|cleanup|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|forensics|migrate|remote|steer|knowledge|new-milestone|parallel|update",
     getArgumentCompletions: (prefix: string) => {
       const subcommands = [
         { cmd: "help", desc: "Categorized command reference with descriptions" },
@@ -122,6 +123,8 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         { cmd: "park", desc: "Park a milestone — skip without deleting" },
         { cmd: "unpark", desc: "Reactivate a parked milestone" },
         { cmd: "update", desc: "Update GSD to the latest version" },
+        { cmd: "start", desc: "Start a workflow template (bugfix, spike, feature, etc.)" },
+        { cmd: "templates", desc: "List available workflow templates" },
       ];
       const parts = prefix.trim().split(/\s+/);
 
@@ -305,6 +308,41 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         return subs
           .filter((s) => s.cmd.startsWith(subPrefix))
           .map((s) => ({ value: `knowledge ${s.cmd}`, label: s.cmd, description: s.desc }));
+      }
+
+      if (parts[0] === "start" && parts.length <= 2) {
+        const subPrefix = parts[1] ?? "";
+        const subs = [
+          { cmd: "bugfix", desc: "Triage, fix, test, and ship a bug fix" },
+          { cmd: "small-feature", desc: "Lightweight feature with optional discussion" },
+          { cmd: "spike", desc: "Research, prototype, and document findings" },
+          { cmd: "hotfix", desc: "Minimal: fix it, test it, ship it" },
+          { cmd: "refactor", desc: "Inventory, plan waves, migrate, verify" },
+          { cmd: "security-audit", desc: "Scan, triage, remediate, re-scan" },
+          { cmd: "dep-upgrade", desc: "Assess, upgrade, fix breaks, verify" },
+          { cmd: "full-project", desc: "Complete GSD workflow with full ceremony" },
+          { cmd: "--list", desc: "List all available templates" },
+          { cmd: "--dry-run", desc: "Preview workflow without executing" },
+        ];
+        return subs
+          .filter((s) => s.cmd.startsWith(subPrefix))
+          .map((s) => ({ value: `start ${s.cmd}`, label: s.cmd, description: s.desc }));
+      }
+
+      if (parts[0] === "templates" && parts.length <= 2) {
+        const subPrefix = parts[1] ?? "";
+        const subs = [
+          { cmd: "info", desc: "Show detailed template info" },
+        ];
+        return subs
+          .filter((s) => s.cmd.startsWith(subPrefix))
+          .map((s) => ({ value: `templates ${s.cmd}`, label: s.cmd, description: s.desc }));
+      }
+
+      if (parts[0] === "templates" && parts[1] === "info" && parts.length <= 3) {
+        const namePrefix = parts[2] ?? "";
+        return getTemplateCompletions(namePrefix)
+          .map((c) => ({ value: `templates ${c.value}`, label: c.label, description: c.description }));
       }
 
       if (parts[0] === "doctor") {
@@ -798,6 +836,17 @@ Examples:
         return;
       }
 
+      // ─── Workflow Templates ────────────────────────────────────────
+      if (trimmed === "start" || trimmed.startsWith("start ")) {
+        await handleStart(trimmed.replace(/^start\s*/, "").trim(), ctx, pi);
+        return;
+      }
+
+      if (trimmed === "templates" || trimmed.startsWith("templates ")) {
+        await handleTemplates(trimmed.replace(/^templates\s*/, "").trim(), ctx);
+        return;
+      }
+
       if (trimmed === "") {
         // Bare /gsd defaults to step mode
         await startAuto(ctx, pi, projectRoot(), false, { step: true });
@@ -816,6 +865,8 @@ function showHelp(ctx: ExtensionCommandContext): void {
   const lines = [
     "GSD — Get Shit Done\n",
     "WORKFLOW",
+    "  /gsd start <tpl>   Start a workflow template (bugfix, spike, feature, hotfix, etc.)",
+    "  /gsd templates     List available workflow templates  [info <name>]",
     "  /gsd               Run next unit in step mode (same as /gsd next)",
     "  /gsd next           Execute next task, then pause  [--dry-run] [--verbose]",
     "  /gsd auto           Run all queued units continuously  [--verbose]",
