@@ -92,11 +92,12 @@ export function acquireSessionLock(basePath: string): SessionLockResult {
     return acquireFallbackLock(basePath, lp, lockData);
   }
 
+  const gsdDir = gsdRoot(basePath);
+
   try {
     // Try to acquire an exclusive OS-level lock on the lock file.
     // We lock the directory (gsdRoot) since proper-lockfile works best
     // on directories, and the lock file itself may not exist yet.
-    const gsdDir = gsdRoot(basePath);
     mkdirSync(gsdDir, { recursive: true });
 
     const release = lockfile.lockSync(gsdDir, {
