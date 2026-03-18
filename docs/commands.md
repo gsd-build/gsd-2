@@ -94,7 +94,7 @@ See [Parallel Orchestration](./parallel-orchestration.md) for full documentation
 | `gsd --list-models [search]` | List available models and exit |
 | `gsd sessions` | Interactive session picker — list all saved sessions for the current directory and choose one to resume |
 | `gsd --debug` | Enable structured JSONL diagnostic logging for troubleshooting dispatch and state issues |
-| `gsd config` | Re-run the setup wizard (LLM provider + tool keys) |
+| `gsd config` | Set up global API keys for search and docs tools (saved to `~/.gsd/agent/auth.json`, applies to all projects). See [Global API Keys](./configuration.md#global-api-keys-gsd-config). |
 | `gsd update` | Update GSD to the latest version |
 | `gsd headless new-milestone` | Create a new milestone from a context file (headless — no TUI required) |
 

@@ -50,6 +50,32 @@ token_profile: balanced
 - **Array fields** (`always_use_skills`, etc.): concatenated (global first, then project)
 - **Object fields** (`models`, `git`, `auto_supervisor`): shallow-merged, project overrides per-key
 
+## Global API Keys (`/gsd config`)
+
+Tool API keys are stored globally in `~/.gsd/agent/auth.json` and apply to all projects automatically. Set them once with `/gsd config` — no need to configure per-project `.env` files.
+
+```bash
+/gsd config
+```
+
+This opens an interactive wizard showing which keys are configured and which are missing. Select a tool to enter its key.
+
+### Supported keys
+
+| Tool | Environment Variable | Purpose | Get a key |
+|------|---------------------|---------|-----------|
+| Tavily Search | `TAVILY_API_KEY` | Web search for non-Anthropic models | [tavily.com/app/api-keys](https://tavily.com/app/api-keys) |
+| Brave Search | `BRAVE_API_KEY` | Web search for non-Anthropic models | [brave.com/search/api](https://brave.com/search/api) |
+| Context7 Docs | `CONTEXT7_API_KEY` | Library documentation lookup | [context7.com/dashboard](https://context7.com/dashboard) |
+
+### How it works
+
+1. `/gsd config` saves keys to `~/.gsd/agent/auth.json`
+2. On every session start, `loadToolApiKeys()` reads the file and sets environment variables
+3. Keys apply to all projects — no per-project setup required
+4. Environment variables (`export BRAVE_API_KEY=...`) take precedence over saved keys
+5. Anthropic models don't need Brave/Tavily — they have built-in web search
+
 ## All Settings
 
 ### `models`
