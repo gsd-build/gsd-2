@@ -61,13 +61,23 @@ function loadNative(): Record<string, unknown> {
 
   const details = errors.map((e) => `  - ${e}`).join("\n");
   const supportedPlatforms = Object.keys(platformPackageMap);
-  throw new Error(
-    `Failed to load gsd_engine native addon for ${platformTag}.\n\n` +
-      `Tried:\n${details}\n\n` +
-      `Supported platforms: ${supportedPlatforms.join(", ")}\n` +
-      `If your platform is listed, try reinstalling: npm i -g gsd-pi\n` +
-      `Otherwise, please open an issue: https://github.com/gsd-build/gsd-2/issues`,
+
+  // Graceful fallback: on unsupported platforms (e.g., win32-arm64), return a
+  // proxy that throws on individual function calls rather than crashing the
+  // entire import chain at startup (#1223). Consumers with JS fallbacks
+  // (parseRoadmap, parsePlan, fuzzyFind, etc.) catch these and degrade gracefully.
+  process.stderr.write(
+    `[gsd] Native addon not available for ${platformTag}. Falling back to JS implementations (slower).\n` +
+      `  Supported native platforms: ${supportedPlatforms.join(", ")}\n`,
   );
+  return new Proxy({} as Record<string, unknown>, {
+    get(_target, prop) {
+      if (prop === "__nativeUnavailable") return true;
+      return (..._args: unknown[]) => {
+        throw new Error(`Native function '${String(prop)}' is not available on ${platformTag}`);
+      };
+    },
+  });
 }
 
 export const native = loadNative() as {
@@ -139,4 +149,7 @@ export const native = loadNative() as {
   parsePartialJson: (text: string) => unknown;
   parseStreamingJson: (text: string) => unknown;
   xxHash32: (input: string, seed: number) => number;
-};
+} & { __nativeUnavailable?: boolean };
+
+/** True when the native addon loaded successfully. False on unsupported platforms. */
+export const nativeAvailable = !(native as Record<string, unknown>).__nativeUnavailable;
