@@ -5,7 +5,7 @@ import {
   getBudgetAlertLevel,
   getBudgetEnforcementAction,
   getNewBudgetAlertLevel,
-} from "../auto.js";
+} from "../auto-budget.js";
 
 test("getBudgetAlertLevel returns the expected threshold bucket", () => {
   assert.equal(getBudgetAlertLevel(0.10), 0);

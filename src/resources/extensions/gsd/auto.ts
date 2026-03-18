@@ -22,7 +22,6 @@ import { loadFile, getManifestStatus, resolveAllOverrides, parsePlan, parseSumma
 import { loadPrompt } from "./prompt-loader.js";
 import { runVerificationGate, formatFailureContext, captureRuntimeErrors, runDependencyAudit } from "./verification-gate.js";
 import { writeVerificationJSON } from "./verification-evidence.js";
-export { inlinePriorMilestoneSummary } from "./files.js";
 import { collectSecretsFromManifest } from "../get-secrets-from-user.js";
 import {
   gsdRoot, resolveMilestoneFile, resolveSliceFile, resolveSlicePath,
@@ -192,12 +191,6 @@ import {
   NEW_SESSION_TIMEOUT_MS, DISPATCH_HANG_TIMEOUT_MS,
 } from "./auto/session.js";
 import type { CompletedUnit, CurrentUnit, UnitRouting, StartModel, PendingVerificationRetry } from "./auto/session.js";
-export {
-  MAX_UNIT_DISPATCHES, STUB_RECOVERY_THRESHOLD, MAX_LIFETIME_DISPATCHES,
-  MAX_CONSECUTIVE_SKIPS, DISPATCH_GAP_TIMEOUT_MS, MAX_SKIP_DEPTH,
-  NEW_SESSION_TIMEOUT_MS, DISPATCH_HANG_TIMEOUT_MS,
-} from "./auto/session.js";
-export type { CompletedUnit, CurrentUnit, UnitRouting, StartModel } from "./auto/session.js";
 
 // ── ENCAPSULATION INVARIANT ─────────────────────────────────────────────────
 // ALL mutable auto-mode state lives in the AutoSession class (auto/session.ts).
@@ -268,8 +261,6 @@ export function shouldUseWorktreeIsolation(): boolean {
  * Maps toolCallId → start timestamp (ms) so the idle watchdog can detect tools that have been
  * running suspiciously long (e.g., a Bash command hung because `&` kept stdout open).
  */
-// Re-export budget utilities for external consumers
-export { getBudgetAlertLevel, getNewBudgetAlertLevel, getBudgetEnforcementAction } from "./auto-budget.js";
 
 /** Wrapper: register SIGTERM handler and store reference. */
 function registerSigtermHandler(currentBasePath: string): void {
@@ -281,8 +272,6 @@ function deregisterSigtermHandler(): void {
   _deregisterSigtermHandler(s.sigtermHandler);
   s.sigtermHandler = null;
 }
-
-export { type AutoDashboardData } from "./auto-dashboard.js";
 
 export function getAutoDashboardData(): AutoDashboardData {
   const ledger = getLedger();
@@ -934,8 +923,6 @@ async function showStepWizard(
   }
 }
 
-// describeNextUnit is imported from auto-dashboard.ts and re-exported
-export { describeNextUnit } from "./auto-dashboard.js";
 
 /** Thin wrapper: delegates to auto-dashboard.ts, passing state accessors. */
 function updateProgressWidget(
@@ -1905,5 +1892,3 @@ export async function dispatchHookUnit(
 }
 
 
-// Direct phase dispatch → auto-direct-dispatch.ts
-export { dispatchDirectPhase } from "./auto-direct-dispatch.js";

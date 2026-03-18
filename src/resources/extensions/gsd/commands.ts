@@ -13,7 +13,8 @@ import { deriveState } from "./state.js";
 import { GSDDashboardOverlay } from "./dashboard-overlay.js";
 import { GSDVisualizerOverlay } from "./visualizer-overlay.js";
 import { showQueue, showDiscuss, showHeadlessMilestoneCreation } from "./guided-flow.js";
-import { startAuto, stopAuto, pauseAuto, isAutoActive, isAutoPaused, isStepMode, stopAutoRemote, dispatchDirectPhase } from "./auto.js";
+import { startAuto, stopAuto, pauseAuto, isAutoActive, isAutoPaused, isStepMode, stopAutoRemote } from "./auto.js";
+import { dispatchDirectPhase } from "./auto-direct-dispatch.js";
 import { resolveProjectRoot } from "./worktree.js";
 import { assertSafeDirectory } from "./validate-directory.js";
 import {
