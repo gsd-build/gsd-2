@@ -6,14 +6,17 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent";
 import type { GSDState } from "./types.js";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
+import { gsdRoot } from "./paths.js";
 import { enableDebug } from "./debug-logger.js";
 import { deriveState } from "./state.js";
 import { GSDDashboardOverlay } from "./dashboard-overlay.js";
 import { GSDVisualizerOverlay } from "./visualizer-overlay.js";
 import { showQueue, showDiscuss, showHeadlessMilestoneCreation } from "./guided-flow.js";
-import { startAuto, stopAuto, pauseAuto, isAutoActive, isAutoPaused, isStepMode, stopAutoRemote, dispatchDirectPhase } from "./auto.js";
+import { startAuto, stopAuto, pauseAuto, isAutoActive, isAutoPaused, isStepMode, stopAutoRemote } from "./auto.js";
+import { dispatchDirectPhase } from "./auto-direct-dispatch.js";
 import { resolveProjectRoot } from "./worktree.js";
 import { assertSafeDirectory } from "./validate-directory.js";
 import {
@@ -21,8 +24,6 @@ import {
   getProjectGSDPreferencesPath,
   loadEffectiveGSDPreferences,
 } from "./preferences.js";
-import { loadPrompt } from "./prompt-loader.js";
-
 import { handleRemote } from "../remote-questions/mod.js";
 import { handleQuick } from "./quick.js";
 import { handleHistory } from "./history.js";
@@ -45,31 +46,8 @@ import { handleInspect } from "./commands-inspect.js";
 import { handleCleanupBranches, handleCleanupSnapshots, handleSkip, handleDryRun } from "./commands-maintenance.js";
 import { handleDoctor, handleSteer, handleCapture, handleTriage, handleKnowledge, handleRunHook, handleUpdate, handleSkillHealth } from "./commands-handlers.js";
 import { handleLogs } from "./commands-logs.js";
+import { handleStart, handleTemplates, getTemplateCompletions } from "./commands-workflow-templates.js";
 
-// ─── Re-exports (preserve public API surface) ───────────────────────────────
-export { handlePrefs, handlePrefsMode, handlePrefsWizard, ensurePreferencesFile, handleImportClaude, buildCategorySummaries, serializePreferencesToFrontmatter, yamlSafeString, configureMode } from "./commands-prefs-wizard.js";
-export { TOOL_KEYS, loadToolApiKeys, getConfigAuthStorage, handleConfig } from "./commands-config.js";
-export { type InspectData, formatInspectOutput, handleInspect } from "./commands-inspect.js";
-export { handleCleanupBranches, handleCleanupSnapshots, handleSkip, handleDryRun } from "./commands-maintenance.js";
-export { handleDoctor, handleSteer, handleCapture, handleTriage, handleKnowledge, handleRunHook, handleUpdate, handleSkillHealth } from "./commands-handlers.js";
-
-export function dispatchDoctorHeal(pi: ExtensionAPI, scope: string | undefined, reportText: string, structuredIssues: string): void {
-  const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(process.env.HOME ?? "~", ".pi", "GSD-WORKFLOW.md");
-  const workflow = readFileSync(workflowPath, "utf-8");
-  const prompt = loadPrompt("doctor-heal", {
-    doctorSummary: reportText,
-    structuredIssues,
-    scopeLabel: scope ?? "active milestone / blocking scope",
-    doctorCommandSuffix: scope ? ` ${scope}` : "",
-  });
-
-  const content = `Read the following GSD workflow protocol and execute exactly.\n\n${workflow}\n\n## Your Task\n\n${prompt}`;
-
-  pi.sendMessage(
-    { customType: "gsd-doctor-heal", content, display: false },
-    { triggerTurn: true },
-  );
-}
 
 /** Resolve the effective project root, accounting for worktree paths. */
 export function projectRoot(): string {
@@ -80,7 +58,7 @@ export function projectRoot(): string {
 
 export function registerGSDCommand(pi: ExtensionAPI): void {
   pi.registerCommand("gsd", {
-    description: "GSD — Get Shit Done: /gsd help|next|auto|stop|pause|status|visualize|queue|quick|capture|triage|dispatch|history|undo|skip|export|cleanup|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|forensics|migrate|remote|steer|knowledge|new-milestone|parallel|update",
+    description: "GSD — Get Shit Done: /gsd help|start|templates|next|auto|stop|pause|status|visualize|queue|quick|capture|triage|dispatch|history|undo|skip|export|cleanup|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|forensics|migrate|remote|steer|knowledge|new-milestone|parallel|update",
     getArgumentCompletions: (prefix: string) => {
       const subcommands = [
         { cmd: "help", desc: "Categorized command reference with descriptions" },
@@ -127,6 +105,9 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         { cmd: "agent", desc: "Manage agents (list, info, new, remove)" },
         { cmd: "components", desc: "List, inspect, and validate all components" },
         { cmd: "pipeline", desc: "Manage pipelines (list, info, run, validate)" },
+        { cmd: "start", desc: "Start a workflow template (bugfix, spike, feature, etc.)" },
+        { cmd: "templates", desc: "List available workflow templates" },
+        { cmd: "extensions", desc: "Manage extensions (list, enable, disable, info)" },
       ];
       const parts = prefix.trim().split(/\s+/);
 
@@ -310,6 +291,83 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         return subs
           .filter((s) => s.cmd.startsWith(subPrefix))
           .map((s) => ({ value: `knowledge ${s.cmd}`, label: s.cmd, description: s.desc }));
+      }
+
+      if (parts[0] === "start" && parts.length <= 2) {
+        const subPrefix = parts[1] ?? "";
+        const subs = [
+          { cmd: "bugfix", desc: "Triage, fix, test, and ship a bug fix" },
+          { cmd: "small-feature", desc: "Lightweight feature with optional discussion" },
+          { cmd: "spike", desc: "Research, prototype, and document findings" },
+          { cmd: "hotfix", desc: "Minimal: fix it, test it, ship it" },
+          { cmd: "refactor", desc: "Inventory, plan waves, migrate, verify" },
+          { cmd: "security-audit", desc: "Scan, triage, remediate, re-scan" },
+          { cmd: "dep-upgrade", desc: "Assess, upgrade, fix breaks, verify" },
+          { cmd: "full-project", desc: "Complete GSD workflow with full ceremony" },
+          { cmd: "resume", desc: "Resume an in-progress workflow" },
+          { cmd: "--list", desc: "List all available templates" },
+          { cmd: "--dry-run", desc: "Preview workflow without executing" },
+        ];
+        return subs
+          .filter((s) => s.cmd.startsWith(subPrefix))
+          .map((s) => ({ value: `start ${s.cmd}`, label: s.cmd, description: s.desc }));
+      }
+
+      if (parts[0] === "templates" && parts.length <= 2) {
+        const subPrefix = parts[1] ?? "";
+        const subs = [
+          { cmd: "info", desc: "Show detailed template info" },
+        ];
+        return subs
+          .filter((s) => s.cmd.startsWith(subPrefix))
+          .map((s) => ({ value: `templates ${s.cmd}`, label: s.cmd, description: s.desc }));
+      }
+
+      if (parts[0] === "templates" && parts[1] === "info" && parts.length <= 3) {
+        const namePrefix = parts[2] ?? "";
+        return getTemplateCompletions(namePrefix)
+          .map((c) => ({ value: `templates ${c.value}`, label: c.label, description: c.description }));
+      }
+
+      if (parts[0] === "extensions") {
+        if (parts.length <= 2) {
+          const subPrefix = parts[1] ?? "";
+          const subs = [
+            { cmd: "list", desc: "List all extensions and their status" },
+            { cmd: "enable", desc: "Enable a disabled extension" },
+            { cmd: "disable", desc: "Disable an extension" },
+            { cmd: "info", desc: "Show extension details" },
+          ];
+          return subs
+            .filter((s) => s.cmd.startsWith(subPrefix))
+            .map((s) => ({ value: `extensions ${s.cmd}`, label: s.cmd, description: s.desc }));
+        }
+        if (parts.length === 3 && ["enable", "disable", "info"].includes(parts[1])) {
+          const idPrefix = parts[2] ?? "";
+          try {
+            const extDir = join(homedir(), ".gsd", "agent", "extensions");
+            const ids: { id: string; name: string }[] = [];
+            for (const entry of readdirSync(extDir, { withFileTypes: true })) {
+              if (!entry.isDirectory()) continue;
+              const mPath = join(extDir, entry.name, "extension-manifest.json");
+              if (!existsSync(mPath)) continue;
+              try {
+                const m = JSON.parse(readFileSync(mPath, "utf-8"));
+                if (typeof m?.id === "string") ids.push({ id: m.id, name: m.name ?? m.id });
+              } catch { /* skip malformed */ }
+            }
+            return ids
+              .filter((e) => e.id.startsWith(idPrefix))
+              .map((e) => ({
+                value: `extensions ${parts[1]} ${e.id}`,
+                label: e.id,
+                description: e.name,
+              }));
+          } catch {
+            return [];
+          }
+        }
+        return [];
       }
 
       if (parts[0] === "doctor") {
@@ -689,7 +747,7 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
 
       if (trimmed === "new-milestone") {
         const basePath = projectRoot();
-        const headlessContextPath = join(basePath, ".gsd", "runtime", "headless-context.md");
+        const headlessContextPath = join(gsdRoot(basePath), "runtime", "headless-context.md");
         if (existsSync(headlessContextPath)) {
           const seedContext = readFileSync(headlessContextPath, "utf-8");
           try { unlinkSync(headlessContextPath); } catch { /* non-fatal */ }
@@ -824,9 +882,26 @@ Examples:
         return;
       }
 
+      // ─── Workflow Templates ────────────────────────────────────────
+      if (trimmed === "start" || trimmed.startsWith("start ")) {
+        await handleStart(trimmed.replace(/^start\s*/, "").trim(), ctx, pi);
+        return;
+      }
+
+      if (trimmed === "templates" || trimmed.startsWith("templates ")) {
+        await handleTemplates(trimmed.replace(/^templates\s*/, "").trim(), ctx);
+        return;
+      }
+
       if (trimmed === "") {
         // Bare /gsd defaults to step mode
         await startAuto(ctx, pi, projectRoot(), false, { step: true });
+        return;
+      }
+
+      if (trimmed === "extensions" || trimmed.startsWith("extensions ")) {
+        const { handleExtensions } = await import("./commands-extensions.js");
+        await handleExtensions(trimmed.replace(/^extensions\s*/, "").trim(), ctx);
         return;
       }
 
@@ -842,6 +917,8 @@ function showHelp(ctx: ExtensionCommandContext): void {
   const lines = [
     "GSD — Get Shit Done\n",
     "WORKFLOW",
+    "  /gsd start <tpl>   Start a workflow template (bugfix, spike, feature, hotfix, etc.)",
+    "  /gsd templates     List available workflow templates  [info <name>]",
     "  /gsd               Run next unit in step mode (same as /gsd next)",
     "  /gsd next           Execute next task, then pause  [--dry-run] [--verbose]",
     "  /gsd auto           Run all queued units continuously  [--verbose]",
@@ -872,10 +949,11 @@ function showHelp(ctx: ExtensionCommandContext): void {
     "  /gsd init           Project init wizard — detect, configure, bootstrap .gsd/",
     "  /gsd setup          Global setup status  [llm|search|remote|keys|prefs]",
     "  /gsd mode           Set workflow mode (solo/team)  [global|project]",
-    "  /gsd prefs          Manage preferences  [global|project|status|wizard|setup]",
+    "  /gsd prefs          Manage preferences  [global|project|status|wizard|setup|import-claude]",
     "  /gsd config         Set API keys for external tools",
     "  /gsd keys           API key manager  [list|add|remove|test|rotate|doctor]",
     "  /gsd hooks          Show post-unit hook configuration",
+    "  /gsd extensions     Manage extensions  [list|enable|disable|info]",
     "",
     "MAINTENANCE",
     "  /gsd doctor         Diagnose and repair .gsd/ state  [audit|fix|heal] [scope]",

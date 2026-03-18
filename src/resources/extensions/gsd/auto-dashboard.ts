@@ -11,6 +11,7 @@ import type { GSDState } from "./types.js";
 import { getCurrentBranch } from "./worktree.js";
 import { getActiveHook } from "./post-unit-hooks.js";
 import { getLedger, getProjectTotals, formatCost, formatTokenCount, formatTierSavings } from "./metrics.js";
+import { getHealthTrend, getConsecutiveErrorUnits } from "./doctor-proactive.js";
 import {
   resolveMilestoneFile,
   resolveSliceFile,
@@ -47,40 +48,34 @@ export interface AutoDashboardData {
 
 // ─── Unit Description Helpers ─────────────────────────────────────────────────
 
+/** Canonical verb and phase label for each known unit type. */
+const UNIT_TYPE_INFO: Record<string, { verb: string; phaseLabel: string }> = {
+  "research-milestone": { verb: "researching",  phaseLabel: "RESEARCH" },
+  "research-slice":     { verb: "researching",  phaseLabel: "RESEARCH" },
+  "plan-milestone":     { verb: "planning",     phaseLabel: "PLAN" },
+  "plan-slice":         { verb: "planning",     phaseLabel: "PLAN" },
+  "execute-task":       { verb: "executing",    phaseLabel: "EXECUTE" },
+  "complete-slice":     { verb: "completing",   phaseLabel: "COMPLETE" },
+  "replan-slice":       { verb: "replanning",   phaseLabel: "REPLAN" },
+  "rewrite-docs":       { verb: "rewriting",    phaseLabel: "REWRITE" },
+  "reassess-roadmap":   { verb: "reassessing",  phaseLabel: "REASSESS" },
+  "run-uat":            { verb: "running UAT",  phaseLabel: "UAT" },
+};
+
 export function unitVerb(unitType: string): string {
   if (unitType.startsWith("hook/")) return `hook: ${unitType.slice(5)}`;
-  switch (unitType) {
-    case "research-milestone":
-    case "research-slice": return "researching";
-    case "plan-milestone":
-    case "plan-slice": return "planning";
-    case "execute-task": return "executing";
-    case "complete-slice": return "completing";
-    case "replan-slice": return "replanning";
-    case "rewrite-docs": return "rewriting";
-    case "reassess-roadmap": return "reassessing";
-    case "run-uat": return "running UAT";
-    default: return unitType;
-  }
+  return UNIT_TYPE_INFO[unitType]?.verb ?? unitType;
 }
 
 export function unitPhaseLabel(unitType: string): string {
   if (unitType.startsWith("hook/")) return "HOOK";
-  switch (unitType) {
-    case "research-milestone": return "RESEARCH";
-    case "research-slice": return "RESEARCH";
-    case "plan-milestone": return "PLAN";
-    case "plan-slice": return "PLAN";
-    case "execute-task": return "EXECUTE";
-    case "complete-slice": return "COMPLETE";
-    case "replan-slice": return "REPLAN";
-    case "rewrite-docs": return "REWRITE";
-    case "reassess-roadmap": return "REASSESS";
-    case "run-uat": return "UAT";
-    default: return unitType.toUpperCase();
-  }
+  return UNIT_TYPE_INFO[unitType]?.phaseLabel ?? unitType.toUpperCase();
 }
 
+/**
+ * Describe the expected next step after the current unit completes.
+ * Unit types here mirror the keys in UNIT_TYPE_INFO above.
+ */
 function peekNext(unitType: string, state: GSDState): string {
   // Show active hook info in progress display
   const activeHookState = getActiveHook();
@@ -535,6 +530,31 @@ export function updateProgressWidget(
  * Build a compact string-array representation of the progress widget.
  * Used as a fallback when the factory-based widget cannot render (RPC mode).
  */
+// ─── Model Health Indicator ───────────────────────────────────────────────────
+
+/**
+ * Compute a traffic-light health indicator from observable signals.
+ * 🟢 progressing well — no errors, trend stable/improving
+ * 🟡 struggling — some errors or degrading trend
+ * 🔴 stuck — consecutive errors, likely needs attention
+ */
+export function getModelHealthIndicator(): { emoji: string; label: string } {
+  const trend = getHealthTrend();
+  const consecutiveErrors = getConsecutiveErrorUnits();
+
+  if (consecutiveErrors >= 3) {
+    return { emoji: "🔴", label: "stuck" };
+  }
+  if (consecutiveErrors >= 1 || trend === "degrading") {
+    return { emoji: "🟡", label: "struggling" };
+  }
+  if (trend === "improving") {
+    return { emoji: "🟢", label: "progressing well" };
+  }
+  // stable or unknown
+  return { emoji: "🟢", label: "progressing" };
+}
+
 function buildProgressTextLines(
   verb: string,
   phaseLabel: string,
@@ -583,6 +603,11 @@ function buildProgressTextLines(
   }
 
   if (next) lines.push(`  Next: ${next}`);
+
+  // Model health indicator
+  const health = getModelHealthIndicator();
+  lines.push(`  Health: ${health.emoji} ${health.label}`);
+
   lines.push(`  ${widgetPwd}`);
 
   return lines;

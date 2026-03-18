@@ -34,7 +34,6 @@ export const MODE_DEFAULTS: Record<WorkflowMode, Partial<GSDPreferences>> = {
       pre_merge_check: false,
       merge_strategy: "squash",
       isolation: "worktree",
-      commit_docs: true,
     },
     unique_milestone_ids: false,
   },
@@ -45,7 +44,6 @@ export const MODE_DEFAULTS: Record<WorkflowMode, Partial<GSDPreferences>> = {
       pre_merge_check: true,
       merge_strategy: "squash",
       isolation: "worktree",
-      commit_docs: true,
     },
     unique_milestone_ids: true,
   },
@@ -88,6 +86,14 @@ export const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "context_selection",
   "components",
 ]);
+
+/** Canonical list of all dispatch unit types. */
+export const KNOWN_UNIT_TYPES = [
+  "research-milestone", "plan-milestone", "research-slice", "plan-slice",
+  "execute-task", "complete-slice", "replan-slice", "reassess-roadmap",
+  "run-uat", "complete-milestone",
+] as const;
+export type UnitType = (typeof KNOWN_UNIT_TYPES)[number];
 
 export const SKILL_ACTIONS = new Set(["use", "prefer", "avoid"]);
 

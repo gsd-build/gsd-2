@@ -22,6 +22,33 @@ import {
 import { loadFile, saveFile, splitFrontmatter, parseFrontmatterMap } from "./files.js";
 import { runClaudeImportFlow } from "./claude-import.js";
 
+/** Extract body content after frontmatter closing delimiter, or null if none. */
+function extractBodyAfterFrontmatter(content: string): string | null {
+  const closingIdx = content.indexOf("\n---", content.indexOf("---"));
+  if (closingIdx === -1) return null;
+  const afterFrontmatter = content.slice(closingIdx + 4);
+  return afterFrontmatter.trim() ? afterFrontmatter : null;
+}
+
+// ─── Numeric validation helpers ──────────────────────────────────────────────
+
+/** Parse a string as a non-negative integer, or return null on failure. */
+function tryParseInteger(val: string): number | null {
+  return /^\d+$/.test(val) ? Number(val) : null;
+}
+
+/** Parse a string as a finite number, or return null on failure. */
+function tryParseNumber(val: string): number | null {
+  const n = Number(val);
+  return !isNaN(n) && isFinite(n) ? n : null;
+}
+
+/** Parse a string as a number in the 0–100 range, or return null on failure. */
+function tryParsePercentage(val: string): number | null {
+  const n = Number(val);
+  return !isNaN(n) && n >= 0 && n <= 100 ? n : null;
+}
+
 export async function handlePrefs(args: string, ctx: ExtensionCommandContext): Promise<void> {
   const trimmed = args.trim();
 
@@ -98,12 +125,8 @@ export async function handleImportClaude(ctx: ExtensionCommandContext, scope: "g
     const frontmatter = serializePreferencesToFrontmatter(prefs);
     let body = "\n# GSD Skill Preferences\n\nSee `~/.gsd/agent/extensions/gsd/docs/preferences-reference.md` for full field documentation and examples.\n";
     if (existsSync(path)) {
-      const existingContent = readFileSync(path, "utf-8");
-      const closingIdx = existingContent.indexOf("\n---", existingContent.indexOf("---"));
-      if (closingIdx !== -1) {
-        const afterFrontmatter = existingContent.slice(closingIdx + 4);
-        if (afterFrontmatter.trim()) body = afterFrontmatter;
-      }
+      const preserved = extractBodyAfterFrontmatter(readFileSync(path, "utf-8"));
+      if (preserved) body = preserved;
     }
     await saveFile(path, `---\n${frontmatter}---${body}`);
   };
@@ -124,14 +147,8 @@ export async function handlePrefsMode(ctx: ExtensionCommandContext, scope: "glob
 
   let body = "\n# GSD Skill Preferences\n\nSee `~/.gsd/agent/extensions/gsd/docs/preferences-reference.md` for full field documentation and examples.\n";
   if (existsSync(path)) {
-    const existingContent = readFileSync(path, "utf-8");
-    const closingIdx = existingContent.indexOf("\n---", existingContent.indexOf("---"));
-    if (closingIdx !== -1) {
-      const afterFrontmatter = existingContent.slice(closingIdx + 4);
-      if (afterFrontmatter.trim()) {
-        body = afterFrontmatter;
-      }
-    }
+    const preserved = extractBodyAfterFrontmatter(readFileSync(path, "utf-8"));
+    if (preserved) body = preserved;
   }
 
   const content = `---\n${frontmatter}---${body}`;
@@ -243,27 +260,57 @@ async function configureModels(ctx: ExtensionCommandContext, prefs: Record<strin
       group.push(m);
     }
     const providers = Array.from(byProvider.keys()).sort((a, b) => a.localeCompare(b));
-
-    const modelOptions: string[] = [];
-    for (const provider of providers) {
-      const group = byProvider.get(provider)!;
-      modelOptions.push(`─── ${provider} (${group.length}) ───`);
-      for (const m of group) {
-        modelOptions.push(`${m.id} · ${m.provider}`);
-      }
+    // Sort models within each provider
+    for (const group of byProvider.values()) {
+      group.sort((a, b) => a.id.localeCompare(b.id));
     }
-    modelOptions.push("(keep current)", "(clear)");
+
+    // Build provider menu with model counts
+    const providerOptions = providers.map(p => {
+      const count = byProvider.get(p)!.length;
+      return `${p} (${count} models)`;
+    });
+    providerOptions.push("(keep current)", "(clear)", "(type manually)");
 
     for (const phase of modelPhases) {
       const current = models[phase] ?? "";
-      const title = `Model for ${phase} phase${current ? ` (current: ${current})` : ""}:`;
-      const choice = await ctx.ui.select(title, modelOptions);
+      const phaseLabel = `Model for ${phase} phase${current ? ` (current: ${current})` : ""}`;
 
-      if (choice && typeof choice === "string" && choice !== "(keep current)") {
-        if (choice === "(clear)") {
+      // Step 1: pick provider
+      const providerChoice = await ctx.ui.select(`${phaseLabel} — choose provider:`, providerOptions);
+      if (!providerChoice || typeof providerChoice !== "string" || providerChoice === "(keep current)") continue;
+
+      if (providerChoice === "(clear)") {
+        delete models[phase];
+        continue;
+      }
+
+      if (providerChoice === "(type manually)") {
+        const input = await ctx.ui.input(
+          `${phaseLabel} — enter model ID:`,
+          current || "e.g. claude-sonnet-4-20250514",
+        );
+        if (input !== null && input !== undefined) {
+          const val = input.trim();
+          if (val) models[phase] = val;
+        }
+        continue;
+      }
+
+      // Step 2: pick model within provider
+      const providerName = providerChoice.replace(/ \(\d+ models?\)$/, "");
+      const group = byProvider.get(providerName);
+      if (!group) continue;
+
+      const modelOptions = group.map(m => m.id);
+      modelOptions.push("(keep current)", "(clear)");
+
+      const modelChoice = await ctx.ui.select(`${phaseLabel} — ${providerName}:`, modelOptions);
+      if (modelChoice && typeof modelChoice === "string" && modelChoice !== "(keep current)") {
+        if (modelChoice === "(clear)") {
           delete models[phase];
         } else {
-          models[phase] = choice.split(" · ")[0];
+          models[phase] = modelChoice;
         }
       }
     }
@@ -306,9 +353,10 @@ async function configureTimeouts(ctx: ExtensionCommandContext, prefs: Record<str
     );
     if (input !== null && input !== undefined) {
       const val = input.trim();
-      if (val && /^\d+$/.test(val)) {
-        autoSup[field.key] = Number(val);
-      } else if (val && !/^\d+$/.test(val)) {
+      const parsed = tryParseInteger(val);
+      if (val && parsed !== null) {
+        autoSup[field.key] = parsed;
+      } else if (val) {
         ctx.ui.notify(`Invalid value "${val}" for ${field.label} — must be a whole number. Keeping previous value.`, "warning");
       } else if (!val && currentStr) {
         delete autoSup[field.key];
@@ -421,16 +469,6 @@ async function configureGit(ctx: ExtensionCommandContext, prefs: Record<string, 
     git.isolation = isolationChoice;
   }
 
-  // commit_docs
-  const currentCommitDocs = git.commit_docs;
-  const commitDocsChoice = await ctx.ui.select(
-    `Track .gsd/ planning docs in git${currentCommitDocs !== undefined ? ` (current: ${currentCommitDocs})` : ""}:`,
-    ["true", "false", "(keep current)"],
-  );
-  if (commitDocsChoice && commitDocsChoice !== "(keep current)") {
-    git.commit_docs = commitDocsChoice === "true";
-  }
-
   if (Object.keys(git).length > 0) {
     prefs.git = git;
   }
@@ -467,9 +505,10 @@ async function configureBudget(ctx: ExtensionCommandContext, prefs: Record<strin
   );
   if (ceilingInput !== null && ceilingInput !== undefined) {
     const val = ceilingInput.trim().replace(/^\$/, "");
-    if (val && !isNaN(Number(val)) && isFinite(Number(val))) {
-      prefs.budget_ceiling = Number(val);
-    } else if (val && (isNaN(Number(val)) || !isFinite(Number(val)))) {
+    const parsed = tryParseNumber(val);
+    if (val && parsed !== null) {
+      prefs.budget_ceiling = parsed;
+    } else if (val) {
       ctx.ui.notify(`Invalid budget ceiling "${val}" — must be a number. Keeping previous value.`, "warning");
     } else if (!val && ceilingStr) {
       delete prefs.budget_ceiling;
@@ -493,14 +532,14 @@ async function configureBudget(ctx: ExtensionCommandContext, prefs: Record<strin
   );
   if (contextPauseInput !== null && contextPauseInput !== undefined) {
     const val = contextPauseInput.trim().replace(/%$/, "");
-    if (val && !isNaN(Number(val)) && Number(val) >= 0 && Number(val) <= 100) {
-      const num = Number(val);
-      if (num === 0) {
+    const parsed = tryParsePercentage(val);
+    if (val && parsed !== null) {
+      if (parsed === 0) {
         delete prefs.context_pause_threshold;
       } else {
-        prefs.context_pause_threshold = num;
+        prefs.context_pause_threshold = parsed;
       }
-    } else if (val && (isNaN(Number(val)) || Number(val) < 0 || Number(val) > 100)) {
+    } else if (val) {
       ctx.ui.notify(`Invalid context pause threshold "${val}" — must be 0-100. Keeping previous value.`, "warning");
     }
   }
@@ -549,13 +588,13 @@ export async function configureMode(ctx: ExtensionCommandContext, prefs: Record<
     if (modeStr.startsWith("solo")) {
       prefs.mode = "solo";
       ctx.ui.notify(
-        "Mode: solo — defaults: auto_push=true, push_branches=false, pre_merge_check=false, merge_strategy=squash, isolation=worktree, commit_docs=true, unique_milestone_ids=false",
+        "Mode: solo — defaults: auto_push=true, push_branches=false, pre_merge_check=false, merge_strategy=squash, isolation=worktree, unique_milestone_ids=false",
         "info",
       );
     } else if (modeStr.startsWith("team")) {
       prefs.mode = "team";
       ctx.ui.notify(
-        "Mode: team — defaults: auto_push=false, push_branches=true, pre_merge_check=true, merge_strategy=squash, isolation=worktree, commit_docs=true, unique_milestone_ids=true",
+        "Mode: team — defaults: auto_push=false, push_branches=true, pre_merge_check=true, merge_strategy=squash, isolation=worktree, unique_milestone_ids=true",
         "info",
       );
     } else {
@@ -622,14 +661,8 @@ export async function handlePrefsWizard(
   // Preserve existing body content (everything after closing ---)
   let body = "\n# GSD Skill Preferences\n\nSee `~/.gsd/agent/extensions/gsd/docs/preferences-reference.md` for full field documentation and examples.\n";
   if (existsSync(path)) {
-    const existingContent = readFileSync(path, "utf-8");
-    const closingIdx = existingContent.indexOf("\n---", existingContent.indexOf("---"));
-    if (closingIdx !== -1) {
-      const afterFrontmatter = existingContent.slice(closingIdx + 4); // skip past "\n---"
-      if (afterFrontmatter.trim()) {
-        body = afterFrontmatter;
-      }
-    }
+    const preserved = extractBodyAfterFrontmatter(readFileSync(path, "utf-8"));
+    if (preserved) body = preserved;
   }
 
   const content = `---\n${frontmatter}---${body}`;

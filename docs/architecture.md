@@ -63,7 +63,7 @@ Every dispatch creates a new agent session. The LLM starts with a clean context 
 | **Background Shell** | Long-running process management with readiness detection |
 | **Subagent** | Delegated tasks with isolated context windows |
 | **Mac Tools** | macOS native app automation via Accessibility APIs |
-| **MCPorter** | Lazy on-demand MCP server integration |
+| **MCP Client** | Native MCP server integration via @modelcontextprotocol/sdk |
 | **Voice** | Real-time speech-to-text (macOS, Linux) |
 | **Slash Commands** | Custom command creation |
 | **LSP** | Language Server Protocol — diagnostics, definitions, references, hover, rename |

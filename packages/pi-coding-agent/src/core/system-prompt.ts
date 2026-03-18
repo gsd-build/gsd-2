@@ -94,6 +94,17 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 		prompt += `\nCurrent date and time: ${dateTime}`;
 		prompt += `\nCurrent working directory: ${resolvedCwd}`;
 
+		// Append promptGuidelines from extension-registered tools.
+		// Without this, tools registered via pi.registerTool() with promptGuidelines
+		// have their definitions reach the API but the model has no guidance on when
+		// to use them (#1184).
+		if (promptGuidelines && promptGuidelines.length > 0) {
+			prompt += "\n\n";
+			for (const guideline of promptGuidelines) {
+				prompt += guideline + "\n";
+			}
+		}
+
 		return prompt;
 	}
 

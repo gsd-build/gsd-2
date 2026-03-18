@@ -1,10 +1,12 @@
 import { DefaultResourceLoader } from '@gsd/pi-coding-agent'
+import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { compareSemver } from './update-check.js'
 import { discoverExtensionEntryPaths } from './extension-discovery.js'
+import { loadRegistry, readManifestFromEntryPath, isExtensionEnabled, ensureRegistryEntries } from './extension-registry.js'
 
 // Resolve resources directory — prefer dist/resources/ (stable, set at build time)
 // over src/resources/ (live working tree, changes with git branch).
@@ -24,6 +26,8 @@ const resourceVersionManifestName = 'managed-resources.json'
 interface ManagedResourceManifest {
   gsdVersion: string
   syncedAt?: number
+  /** Content fingerprint of bundled resources — detects same-version content changes. */
+  contentHash?: string
 }
 
 export { discoverExtensionEntryPaths } from './extension-discovery.js'
@@ -51,7 +55,11 @@ function getBundledGsdVersion(): string {
 }
 
 function writeManagedResourceManifest(agentDir: string): void {
-  const manifest: ManagedResourceManifest = { gsdVersion: getBundledGsdVersion(), syncedAt: Date.now() }
+  const manifest: ManagedResourceManifest = {
+    gsdVersion: getBundledGsdVersion(),
+    syncedAt: Date.now(),
+    contentHash: computeResourceFingerprint(),
+  }
   writeFileSync(getManagedResourceManifestPath(agentDir), JSON.stringify(manifest))
 }
 
@@ -61,6 +69,44 @@ export function readManagedResourceVersion(agentDir: string): string | null {
     return typeof manifest?.gsdVersion === 'string' ? manifest.gsdVersion : null
   } catch {
     return null
+  }
+}
+
+function readManagedResourceManifest(agentDir: string): ManagedResourceManifest | null {
+  try {
+    return JSON.parse(readFileSync(getManagedResourceManifestPath(agentDir), 'utf-8')) as ManagedResourceManifest
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Computes a lightweight content fingerprint of the bundled resources directory.
+ *
+ * Walks all files under resourcesDir and hashes their relative paths + sizes.
+ * This catches same-version content changes (npm link dev workflow, hotfixes
+ * within a release) without the cost of reading every file's contents.
+ *
+ * ~1ms for a typical resources tree (~100 files) — just stat calls, no reads.
+ */
+function computeResourceFingerprint(): string {
+  const entries: string[] = []
+  collectFileEntries(resourcesDir, resourcesDir, entries)
+  entries.sort()
+  return createHash('sha256').update(entries.join('\n')).digest('hex').slice(0, 16)
+}
+
+function collectFileEntries(dir: string, root: string, out: string[]): void {
+  if (!existsSync(dir)) return
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      collectFileEntries(fullPath, root, out)
+    } else {
+      const rel = relative(root, fullPath)
+      const size = statSync(fullPath).size
+      out.push(`${rel}:${size}`)
+    }
   }
 }
 
@@ -173,12 +219,17 @@ function copyDirRecursive(src: string, dest: string): void {
 export function initResources(agentDir: string): void {
   mkdirSync(agentDir, { recursive: true })
 
-  // Skip the full copy when the synced version already matches the running version.
-  // This avoids ~800ms of synchronous rmSync + cpSync on every startup.
+  // Skip the full copy when both version AND content fingerprint match.
+  // Version-only checks miss same-version content changes (npm link dev workflow,
+  // hotfixes within a release). The content hash catches those at ~1ms cost.
   const currentVersion = getBundledGsdVersion()
-  const managedVersion = readManagedResourceVersion(agentDir)
-  if (managedVersion && managedVersion === currentVersion) {
-    return
+  const manifest = readManagedResourceManifest(agentDir)
+  if (manifest && manifest.gsdVersion === currentVersion) {
+    // Version matches — check content fingerprint for same-version staleness.
+    const currentHash = computeResourceFingerprint()
+    if (manifest.contentHash && manifest.contentHash === currentHash) {
+      return
+    }
   }
 
   syncResourceDir(bundledExtensionsDir, join(agentDir, 'extensions'))
@@ -190,6 +241,7 @@ export function initResources(agentDir: string): void {
   makeTreeWritable(agentDir)
 
   writeManagedResourceManifest(agentDir)
+  ensureRegistryEntries(join(agentDir, 'extensions'))
 }
 
 /**
@@ -210,12 +262,17 @@ function getBundledExtensionKeys(): Set<string> {
 }
 
 export function buildResourceLoader(agentDir: string): DefaultResourceLoader {
+  const registry = loadRegistry()
   const piAgentDir = join(homedir(), '.pi', 'agent')
   const piExtensionsDir = join(piAgentDir, 'extensions')
   const bundledKeys = getBundledExtensionKeys()
-  const piExtensionPaths = discoverExtensionEntryPaths(piExtensionsDir).filter(
-    (entryPath) => !bundledKeys.has(getExtensionKey(entryPath, piExtensionsDir)),
-  )
+  const piExtensionPaths = discoverExtensionEntryPaths(piExtensionsDir)
+    .filter((entryPath) => !bundledKeys.has(getExtensionKey(entryPath, piExtensionsDir)))
+    .filter((entryPath) => {
+      const manifest = readManifestFromEntryPath(entryPath)
+      if (!manifest) return true
+      return isExtensionEnabled(registry, manifest.id)
+    })
 
   return new DefaultResourceLoader({
     agentDir,

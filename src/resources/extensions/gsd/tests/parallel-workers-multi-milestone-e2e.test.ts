@@ -30,7 +30,7 @@ import {
   getBudgetAlertLevel,
   getNewBudgetAlertLevel,
   getBudgetEnforcementAction,
-} from '../auto.ts';
+} from '../auto-budget.ts';
 import {
   type UnitMetrics,
   type MetricsLedger,

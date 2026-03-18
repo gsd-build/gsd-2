@@ -9,6 +9,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent
 import { existsSync, readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { deriveState } from "./state.js";
+import { gsdRoot } from "./paths.js";
 import { appendCapture, hasPendingCaptures, loadPendingCaptures } from "./captures.js";
 import { appendOverride, appendKnowledge } from "./files.js";
 import {
@@ -18,19 +19,11 @@ import {
   selectDoctorScope,
   filterDoctorIssues,
 } from "./doctor.js";
-import { loadPrompt } from "./prompt-loader.js";
 import { isAutoActive } from "./auto.js";
-import { resolveProjectRoot } from "./worktree.js";
-import { assertSafeDirectory } from "./validate-directory.js";
+import { projectRoot } from "./commands.js";
+import { loadPrompt } from "./prompt-loader.js";
 
-/** Resolve the effective project root, accounting for worktree paths. */
-function projectRoot(): string {
-  const root = resolveProjectRoot(process.cwd());
-  assertSafeDirectory(root);
-  return root;
-}
-
-function dispatchDoctorHeal(pi: ExtensionAPI, scope: string | undefined, reportText: string, structuredIssues: string): void {
+export function dispatchDoctorHeal(pi: ExtensionAPI, scope: string | undefined, reportText: string, structuredIssues: string): void {
   const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(process.env.HOME ?? "~", ".pi", "GSD-WORKFLOW.md");
   const workflow = readFileSync(workflowPath, "utf-8");
   const prompt = loadPrompt("doctor-heal", {
@@ -144,7 +137,7 @@ export async function handleCapture(args: string, ctx: ExtensionCommandContext):
   const basePath = process.cwd();
 
   // Ensure .gsd/ exists — capture should work even without a milestone
-  const gsdDir = join(basePath, ".gsd");
+  const gsdDir = gsdRoot(basePath);
   if (!existsSync(gsdDir)) {
     mkdirSync(gsdDir, { recursive: true });
   }

@@ -11,7 +11,8 @@ import { truncateToWidth, visibleWidth, matchesKey, Key } from "@gsd/pi-tui";
 import { deriveState } from "./state.js";
 import { loadFile, parseRoadmap, parsePlan } from "./files.js";
 import { resolveMilestoneFile, resolveSliceFile } from "./paths.js";
-import { getAutoDashboardData, type AutoDashboardData } from "./auto.js";
+import { getAutoDashboardData } from "./auto.js";
+import type { AutoDashboardData } from "./auto-dashboard.js";
 import {
   getLedger, getProjectTotals, aggregateByPhase, aggregateBySlice,
   aggregateByModel, aggregateCacheHitRate, formatCost, formatTokenCount, formatCostProjection,

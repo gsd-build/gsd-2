@@ -13,11 +13,11 @@
  *   4. On crash recovery or fresh start, the ledger is loaded from disk
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionContext } from "@gsd/pi-coding-agent";
 import { gsdRoot } from "./paths.js";
 import { getAndClearSkills } from "./skill-telemetry.js";
+import { loadJsonFile, loadJsonFileOrNull, saveJsonFile } from "./json-persistence.js";
 
 // Re-export from shared — canonical implementation lives in format-utils.
 export { formatTokenCount } from "../shared/mod.js";
@@ -502,45 +502,31 @@ function metricsPath(base: string): string {
   return join(gsdRoot(base), "metrics.json");
 }
 
+function isMetricsLedger(data: unknown): data is MetricsLedger {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as MetricsLedger).version === 1 &&
+    Array.isArray((data as MetricsLedger).units)
+  );
+}
+
+function defaultLedger(): MetricsLedger {
+  return { version: 1, projectStartedAt: Date.now(), units: [] };
+}
+
 /**
  * Load ledger from disk without initializing in-memory state.
  * Used by history/export commands outside of auto-mode.
  */
 export function loadLedgerFromDisk(base: string): MetricsLedger | null {
-  try {
-    const raw = readFileSync(metricsPath(base), "utf-8");
-    const parsed = JSON.parse(raw);
-    if (parsed.version === 1 && Array.isArray(parsed.units)) {
-      return parsed as MetricsLedger;
-    }
-  } catch {
-    // File doesn't exist or is corrupt
-  }
-  return null;
+  return loadJsonFileOrNull(metricsPath(base), isMetricsLedger);
 }
 
 function loadLedger(base: string): MetricsLedger {
-  try {
-    const raw = readFileSync(metricsPath(base), "utf-8");
-    const parsed = JSON.parse(raw);
-    if (parsed.version === 1 && Array.isArray(parsed.units)) {
-      return parsed as MetricsLedger;
-    }
-  } catch {
-    // File doesn't exist or is corrupt — start fresh
-  }
-  return {
-    version: 1,
-    projectStartedAt: Date.now(),
-    units: [],
-  };
+  return loadJsonFile(metricsPath(base), isMetricsLedger, defaultLedger);
 }
 
 function saveLedger(base: string, data: MetricsLedger): void {
-  try {
-    mkdirSync(gsdRoot(base), { recursive: true });
-    writeFileSync(metricsPath(base), JSON.stringify(data, null, 2) + "\n", "utf-8");
-  } catch {
-    // Don't let metrics failures break auto-mode
-  }
+  saveJsonFile(metricsPath(base), data);
 }

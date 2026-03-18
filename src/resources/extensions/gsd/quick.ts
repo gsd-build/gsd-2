@@ -14,8 +14,7 @@ import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadPrompt } from "./prompt-loader.js";
 import { gsdRoot } from "./paths.js";
-import { GitServiceImpl, runGit } from "./git-service.js";
-import { loadEffectiveGSDPreferences } from "./preferences.js";
+import { createGitService, runGit } from "./git-service.js";
 
 // ─── Quick Task Helpers ───────────────────────────────────────────────────────
 
@@ -103,10 +102,9 @@ export async function handleQuick(
   const date = new Date().toISOString().split("T")[0];
 
   // Create git branch for the quick task (unless isolation: none)
-  const gitPrefs = loadEffectiveGSDPreferences()?.preferences?.git ?? {};
-  const git = new GitServiceImpl(basePath, gitPrefs);
+  const git = createGitService(basePath);
   const branchName = `gsd/quick/${taskNum}-${slug}`;
-  const skipBranch = gitPrefs.isolation === "none";
+  const skipBranch = git.prefs.isolation === "none";
 
   let branchCreated = false;
   if (!skipBranch) {

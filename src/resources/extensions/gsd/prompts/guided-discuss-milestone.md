@@ -91,7 +91,7 @@ Before moving to the wrap-up gate, verify you have covered:
 - options: "Yes, you got it (Recommended)", "Not quite — let me clarify"
 - **The question ID must contain `depth_verification`** (e.g. `depth_verification_confirm`) — this enables the write-gate downstream.
 
-**If `{{structuredQuestionsAvailable}}` is `false`:** ask in plain text: "Did I capture that correctly? Anything I missed?" Wait for confirmation before proceeding.
+**If `{{structuredQuestionsAvailable}}` is `false`:** ask in plain text: "Did I capture that correctly? If not, tell me what I missed." Wait for confirmation before proceeding.
 
 If they clarify, absorb the correction and re-verify.
 
