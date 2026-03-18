@@ -55,7 +55,7 @@ This milestone is complete only when all are true:
 
 ## Slices
 
-- [ ] **S01: Projects Page Redesign** `risk:medium` `depends:[]`
+- [x] **S01: Projects Page Redesign** `risk:medium` `depends:[]`
   > After this: Projects view shows a styled list; clicking a project expands it to reveal progress details (milestone, slice, tasks, cost).
 
 - [ ] **S02: Browser Update UI** `risk:medium` `depends:[]`

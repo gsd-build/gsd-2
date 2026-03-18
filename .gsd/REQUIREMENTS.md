@@ -349,7 +349,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R119 — Projects view is a styled list with expandable progress details.
 - Class: quality-attribute
-- Status: active
+- Status: validated
 - Description: The projects page is redesigned from a grid layout to a styled list. Clicking/selecting a project expands it to show progress details including current milestone, active slice, task progress, and cost.
 - Why it matters: The current grid layout shows minimal information per project; an expandable list provides richer context without requiring a full project switch.
 - Source: user
@@ -468,7 +468,7 @@ This file is the explicit capability and coverage contract for the project.
 | R116 | quality-attribute | active | M008/S05 | none | unmapped |
 | R117 | core-capability | active | M008/S02 | none | unmapped |
 | R118 | core-capability | active | M008/S04 | none | unmapped |
-| R119 | quality-attribute | active | M008/S01 | none | unmapped |
+| R119 | quality-attribute | validated | M008/S01 | none | npm run build:web-host exits 0. rg "grid grid-cols" returns empty. Visual: list layout, expand/collapse, progress detail. API: /api/projects?detail=true returns progress. Verified 2026-03-18. |
 | R120 | quality-attribute | active | M008/S05 | none | unmapped |
 
 ## Coverage Summary
