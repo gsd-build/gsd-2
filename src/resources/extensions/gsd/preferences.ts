@@ -1368,6 +1368,17 @@ export function validatePreferences(preferences: GSDPreferences): {
         errors.push("git.worktree_post_create must be a non-empty string (path to script)");
       }
     }
+    if (g.auto_pr !== undefined) {
+      if (typeof g.auto_pr === "boolean") git.auto_pr = g.auto_pr;
+      else errors.push("git.auto_pr must be a boolean");
+    }
+    if (g.pr_target_branch !== undefined) {
+      if (typeof g.pr_target_branch === "string" && g.pr_target_branch.trim()) {
+        git.pr_target_branch = g.pr_target_branch.trim();
+      } else {
+        errors.push("git.pr_target_branch must be a non-empty string (branch name)");
+      }
+    }
     // Deprecated: merge_to_main is ignored (branchless architecture).
     if (g.merge_to_main !== undefined) {
       warnings.push("git.merge_to_main is deprecated — milestone-level merge is now always used. Remove this setting.");

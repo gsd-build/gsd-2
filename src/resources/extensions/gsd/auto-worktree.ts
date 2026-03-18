@@ -496,7 +496,7 @@ export function mergeMilestoneToMain(
   originalBasePath_: string,
   milestoneId: string,
   roadmapContent: string,
-): { commitMessage: string; pushed: boolean } {
+): { commitMessage: string; pushed: boolean; prCreated: boolean } {
   const worktreeCwd = process.cwd();
   const milestoneBranch = autoWorktreeBranch(milestoneId);
 
@@ -611,6 +611,33 @@ export function mergeMilestoneToMain(
     }
   }
 
+  // 9b. Auto-create PR if enabled (requires push_branches + push succeeded)
+  let prCreated = false;
+  if (prefs.auto_pr === true && pushed) {
+    const remote = prefs.remote ?? "origin";
+    const prTarget = prefs.pr_target_branch ?? mainBranch;
+    try {
+      // Push the milestone branch to remote first
+      execSync(`git push ${remote} ${milestoneBranch}`, {
+        cwd: originalBasePath_,
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf-8",
+      });
+      // Create PR via gh CLI
+      execSync(
+        `gh pr create --base "${prTarget}" --head "${milestoneBranch}" --title "Milestone ${milestoneId} complete" --body "Auto-created by GSD on milestone completion."`,
+        {
+          cwd: originalBasePath_,
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf-8",
+        },
+      );
+      prCreated = true;
+    } catch {
+      // PR creation failure is non-fatal — gh may not be installed or authenticated
+    }
+  }
+
   // 10. Remove worktree directory first (must happen before branch deletion)
   try {
     removeWorktree(originalBasePath_, milestoneId, { branch: null as unknown as string, deleteBranch: false });
@@ -629,5 +656,5 @@ export function mergeMilestoneToMain(
   originalBase = null;
   nudgeGitBranchCache(previousCwd);
 
-  return { commitMessage, pushed };
+  return { commitMessage, pushed, prCreated };
 }

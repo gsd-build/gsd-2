@@ -66,6 +66,16 @@ export interface GitPreferences {
    *  Failure is non-fatal — logged as a warning.
    */
   worktree_post_create?: string;
+  /** When true, automatically create a pull request after milestone completion.
+   *  The PR targets `pr_target_branch` (default: the main branch).
+   *  Requires `push_branches: true` and a configured remote.
+   *  Default: false.
+   */
+  auto_pr?: boolean;
+  /** Target branch for auto-created PRs (e.g. "develop", "qa").
+   *  Default: the main branch (from `main_branch` or auto-detected).
+   */
+  pr_target_branch?: string;
 }
 
 export const VALID_BRANCH_NAME = /^[a-zA-Z0-9_\-\/.]+$/;
