@@ -52,6 +52,8 @@ export interface UnitMetrics {
   tier?: string;           // complexity tier (light/standard/heavy) if dynamic routing active
   modelDowngraded?: boolean; // true if dynamic routing used a cheaper model
   skills?: string[];       // skill names available/loaded during this unit (#599)
+  cacheHitRate?: number;       // percentage 0-100, computed from cacheRead/(cacheRead+input)
+  compressionSavings?: number; // percentage 0-100, char savings from prompt compression
 }
 
 /** Budget state passed to snapshotUnitMetrics for persistence in the metrics ledger. */
@@ -190,6 +192,12 @@ export function snapshotUnitMetrics(
   const skills = getAndClearSkills();
   if (skills.length > 0) {
     unit.skills = skills;
+  }
+
+  // Compute cache hit rate
+  if (tokens.cacheRead > 0 || tokens.input > 0) {
+    const totalInput = tokens.cacheRead + tokens.input;
+    unit.cacheHitRate = totalInput > 0 ? Math.round((tokens.cacheRead / totalInput) * 100) : 0;
   }
 
   ledger.units.push(unit);
@@ -379,6 +387,22 @@ export function formatTierSavings(units: UnitMetrics[]): string {
   const pct = totalUnits > 0 ? Math.round((downgraded.length / totalUnits) * 100) : 0;
 
   return `Dynamic routing: ${downgraded.length}/${totalUnits} units downgraded (${pct}%), cost: ${formatCost(downgradedCost)}`;
+}
+
+/**
+ * Compute aggregate cache hit rate across all units.
+ * Returns percentage 0-100.
+ */
+export function aggregateCacheHitRate(): number {
+  if (!ledger || ledger.units.length === 0) return 0;
+  let totalInput = 0;
+  let totalCacheRead = 0;
+  for (const unit of ledger.units) {
+    totalInput += unit.tokens.input;
+    totalCacheRead += unit.tokens.cacheRead;
+  }
+  const total = totalInput + totalCacheRead;
+  return total > 0 ? Math.round((totalCacheRead / total) * 100) : 0;
 }
 
 // ─── Formatting helpers ───────────────────────────────────────────────────────

@@ -112,6 +112,7 @@ export class AutoSession {
 
   // ── Guards ───────────────────────────────────────────────────────────────
   handlingAgentEnd = false;
+  pendingAgentEndRetry = false;
   dispatching = false;
   skipDepth = 0;
   readonly recentlyEvictedKeys = new Set<string>();
@@ -198,6 +199,7 @@ export class AutoSession {
 
     // Guards
     this.handlingAgentEnd = false;
+    this.pendingAgentEndRetry = false;
     this.dispatching = false;
     this.skipDepth = 0;
     this.recentlyEvictedKeys.clear();

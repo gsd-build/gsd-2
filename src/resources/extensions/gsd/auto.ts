@@ -1163,7 +1163,15 @@ export async function handleAgentEnd(
   pi: ExtensionAPI,
 ): Promise<void> {
   if (!s.active || !s.cmdCtx) return;
-  if (s.handlingAgentEnd) return;
+  if (s.handlingAgentEnd) {
+    // Another agent_end arrived while we're still processing the previous one.
+    // This happens when a unit dispatched inside handleAgentEnd (e.g. via hooks,
+    // triage, or quick-task early-dispatch paths) completes before the outer
+    // handleAgentEnd returns. Queue a retry so the completed unit's agent_end
+    // is not silently dropped (#1072).
+    s.pendingAgentEndRetry = true;
+    return;
+  }
   s.handlingAgentEnd = true;
 
   try {
@@ -1888,6 +1896,23 @@ export async function handleAgentEnd(
 
   } finally {
     s.handlingAgentEnd = false;
+
+    // If an agent_end event was dropped by the reentrancy guard while we were
+    // processing, re-enter handleAgentEnd on the next microtask. This prevents
+    // the summarizing phase stall (#1072) where a unit dispatched inside
+    // handleAgentEnd (hooks, triage, quick-task) completes before we return,
+    // and its agent_end is silently dropped — leaving auto-mode active but
+    // permanently stalled with no unit running and no watchdog set.
+    if (s.pendingAgentEndRetry) {
+      s.pendingAgentEndRetry = false;
+      setImmediate(() => {
+        handleAgentEnd(ctx, pi).catch((err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          ctx.ui.notify(`Deferred agent_end retry failed: ${msg}`, "error");
+          pauseAuto(ctx, pi).catch(() => {});
+        });
+      });
+    }
   }
 }
 

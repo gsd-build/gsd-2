@@ -82,6 +82,8 @@ const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "verification_auto_fix",
   "verification_max_retries",
   "search_provider",
+  "compression_strategy",
+  "context_selection",
 ]);
 
 export interface GSDSkillRule {
@@ -186,6 +188,10 @@ export interface GSDPreferences {
   verification_max_retries?: number;
   /** Search provider preference. "brave"/"tavily"/"ollama" force that backend and disable native Anthropic search. "native" forces native only. "auto" = current default behavior. */
   search_provider?: "brave" | "tavily" | "ollama" | "native" | "auto";
+  /** Compression strategy for context that exceeds budget. "truncate" (default) drops sections, "compress" applies heuristic compression first. */
+  compression_strategy?: import("./types.js").CompressionStrategy;
+  /** Context selection mode for file inlining. "full" inlines entire files, "smart" uses semantic chunking. Default derived from token profile. */
+  context_selection?: import("./types.js").ContextSelectionMode;
 }
 
 export interface LoadedGSDPreferences {
@@ -764,6 +770,30 @@ export function resolveInlineLevel(): InlineLevel {
 }
 
 /**
+ * Resolve the compression strategy from the active token profile.
+ * budget/balanced → "compress", quality → "truncate".
+ * Explicit preference always wins.
+ */
+export function resolveCompressionStrategy(): import("./types.js").CompressionStrategy {
+  const prefs = loadEffectiveGSDPreferences();
+  if (prefs?.preferences.compression_strategy) return prefs.preferences.compression_strategy;
+  const profile = resolveEffectiveProfile();
+  return profile === "quality" ? "truncate" : "compress";
+}
+
+/**
+ * Resolve the context selection mode from the active token profile.
+ * budget → "smart", balanced/quality → "full".
+ * Explicit preference always wins.
+ */
+export function resolveContextSelection(): import("./types.js").ContextSelectionMode {
+  const prefs = loadEffectiveGSDPreferences();
+  if (prefs?.preferences.context_selection) return prefs.preferences.context_selection;
+  const profile = resolveEffectiveProfile();
+  return profile === "budget" ? "smart" : "full";
+}
+
+/**
  * Resolve the search provider preference from preferences.md.
  * Returns undefined if not configured (caller falls back to existing behavior).
  */
@@ -815,6 +845,8 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
     verification_auto_fix: override.verification_auto_fix ?? base.verification_auto_fix,
     verification_max_retries: override.verification_max_retries ?? base.verification_max_retries,
     search_provider: override.search_provider ?? base.search_provider,
+    compression_strategy: override.compression_strategy ?? base.compression_strategy,
+    context_selection: override.context_selection ?? base.context_selection,
   };
 }
 
