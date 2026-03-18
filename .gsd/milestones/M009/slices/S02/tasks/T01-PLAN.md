@@ -105,3 +105,10 @@ Install the 4 CodeMirror npm packages, verify the production build passes, then 
 - `web/package.json` — four new dependencies added
 - `web/components/gsd/code-editor.tsx` — new file exporting `CodeEditor` component
 - Production build passes with CodeMirror packages included
+
+## Observability Impact
+
+- **New inspection surface:** `code-editor.tsx` uses `next/dynamic` with `ssr: false` — if the import fails, the Loader2 spinner stays visible and the browser console logs the error. No silent failure path.
+- **Language fallback:** Unsupported languages (viml, dotenv, fish, ini) produce no extension — CodeMirror renders in plain-text mode. The `CM_LANG_MAP` constant documents which extensions map to which CodeMirror language names, making the mapping inspectable.
+- **Theme diagnostic:** Two static theme objects are module-level constants. If theme colors appear wrong, inspect `darkTheme` / `lightTheme` constants in `code-editor.tsx` — no runtime CSS variable resolution, values are hardcoded oklch.
+- **Build verification:** `npm run build:web-host` catches SSR/bundling issues with CodeMirror. `npx tsc --noEmit` catches type errors. Both should be run after any change to this file.

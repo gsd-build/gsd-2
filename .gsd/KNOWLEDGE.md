@@ -79,3 +79,7 @@ When sending an initial PTY command after SSE `connected`, use `const hasSentIni
 ## Always test web in prouction
 
 npm run build:web-host >/dev/null && npm run gsd:web:stop:all >/dev/null 2>&1 || true && npm run gsd:web
+
+## @uiw/codemirror-extensions-langs Uses Short Names
+
+`loadLanguage()` from `@uiw/codemirror-extensions-langs` only works with short/file-extension names: `ts`, `js`, `py`, `rb`, `rs`, `kt`, `cs`, etc. Full language names like `typescript`, `javascript`, `python`, `ruby`, `rust` all return `null`. When mapping from shiki language names (which use full names), always map to the short form. Run `node -e "const m = require('@uiw/codemirror-extensions-langs'); console.log(m.langNames.filter(n => m.loadLanguage(n)).sort().join('\n'))"` to see all working names.

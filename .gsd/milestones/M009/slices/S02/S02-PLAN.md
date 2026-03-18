@@ -28,6 +28,20 @@
 - Browser: verify CodeMirror renders in both dark and light modes with matching theme
 - Browser: verify editor font size from `useEditorFontSize()` applies to CodeMirror
 
+## Observability / Diagnostics
+
+- **CodeMirror load failures:** If the dynamic import of CodeMirror fails (network error, bundling issue), the `next/dynamic` loading fallback stays visible (Loader2 spinner). Browser console will show the import error. No silent failure — the editor area either renders CodeMirror or shows the spinner indefinitely, making the failure visible.
+- **Language extension failures:** If `loadLanguage()` returns null for a supported language, the editor falls back to plain-text mode silently. The `CM_LANG_MAP` mapping is inspectable in `code-editor.tsx`. Future agents can verify language support by checking which extensions map to null.
+- **Save failures:** POST `/api/files` returns structured JSON `{ error: string }` on failure. The UI should surface save errors visibly (not silently swallow them). Network tab shows the POST status code.
+- **Theme mismatch:** If `useTheme()` returns an unexpected value, the editor defaults to dark theme. Visual inspection in browser confirms theme alignment.
+- **Diagnostic commands:** `npm run build:web-host` catches bundling/SSR issues. `npx tsc --noEmit` catches type errors. Browser DevTools console shows runtime import or extension errors.
+
+## Verification (extended)
+
+In addition to the verification items above:
+- Browser console: no errors during CodeMirror load or language switching
+- Browser: if CodeMirror dynamic import fails, a loading spinner remains visible (no blank/broken state)
+
 ## Integration Closure
 
 - Upstream surfaces consumed: POST `/api/files` (S01), `useEditorFontSize()` (S01), Radix Tabs (`web/components/ui/tabs.tsx`), `useTheme` from `next-themes`
@@ -36,7 +50,7 @@
 
 ## Tasks
 
-- [ ] **T01: Install CodeMirror packages and build CodeEditor component** `est:1h`
+- [x] **T01: Install CodeMirror packages and build CodeEditor component** `est:1h`
   - Why: CodeMirror packages are not yet in the project — must be installed and build-verified before any component code. Then the standalone CodeEditor wrapper encapsulates all CodeMirror concerns (theme, language, font size, dynamic import) so T02 can integrate it cleanly.
   - Files: `web/package.json`, `web/components/gsd/code-editor.tsx`
   - Do: Install `@uiw/react-codemirror`, `@uiw/codemirror-themes`, `@lezer/highlight`, `@uiw/codemirror-extensions-langs`. Verify `npm run build:web-host` passes. Then build `code-editor.tsx` with: dynamic import of CodeMirror (ssr: false), two static theme objects (dark/light) via `createTheme` using oklch values from globals.css, `loadLanguage()` for syntax highlighting with shiki-to-CM name mapping, fontSize prop consumed from `useEditorFontSize`, onChange callback. Verify build passes again.
