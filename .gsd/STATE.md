@@ -1,7 +1,7 @@
 # GSD State
 
 **Active Milestone:** M008: Web Polish
-**Active Slice:** S02: Browser Update UI
+**Active Slice:** S03: Theme Defaults & Light Mode Color Audit
 **Phase:** executing
 **Requirements Status:** 3 active · 30 validated · 2 deferred · 3 out of scope
 
@@ -22,4 +22,4 @@
 - None
 
 ## Next Action
-Execute T01 of S02 (Build update service and API route).
+Execute slice S03 (Theme Defaults & Light Mode Color Audit).
