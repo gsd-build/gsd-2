@@ -1,7 +1,7 @@
 # GSD State
 
 **Active Milestone:** M008: Web Polish
-**Active Slice:** S01: Projects Page Redesign
+**Active Slice:** S02: Browser Update UI
 **Phase:** executing
 **Requirements Status:** 3 active · 30 validated · 2 deferred · 3 out of scope
 
@@ -22,4 +22,4 @@
 - None
 
 ## Next Action
-Execute T01 of S01 (extend project discovery with progress data).
+Execute T01 of S02 (Build update service and API route).
