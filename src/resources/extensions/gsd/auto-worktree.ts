@@ -512,6 +512,11 @@ export function mergeMilestoneToMain(
   const previousCwd = process.cwd();
   process.chdir(originalBasePath_);
 
+  // 3a. Auto-commit any dirty state in the project root that syncStateToProjectRoot
+  // wrote during execution. Without this, the squash merge can fail with
+  // "Your local changes to the following files would be overwritten by merge" (#1127).
+  autoCommitDirtyState(originalBasePath_);
+
   // 4. Resolve integration branch — prefer milestone metadata, fall back to preferences / "main"
   const prefs = loadEffectiveGSDPreferences()?.preferences?.git ?? {};
   const integrationBranch = readIntegrationBranch(originalBasePath_, milestoneId);
