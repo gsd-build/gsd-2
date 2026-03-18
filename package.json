@@ -73,6 +73,9 @@
     "validate-pack": "node scripts/validate-pack.js",
     "typecheck:extensions": "tsc --noEmit --project tsconfig.extensions.json",
     "pipeline:version-stamp": "node scripts/version-stamp.mjs",
+    "release:changelog": "node scripts/generate-changelog.mjs",
+    "release:bump": "node scripts/bump-version.mjs",
+    "release:update-changelog": "node scripts/update-changelog.mjs",
     "docker:build-runtime": "docker build --target runtime -t ghcr.io/gsd-build/gsd-pi .",
     "docker:build-builder": "docker build --target builder -t ghcr.io/gsd-build/gsd-ci-builder .",
     "prepublishOnly": "npm run sync-pkg-version && npm run sync-platform-versions && ([ \"$CI\" = 'true' ] || git diff --exit-code || (echo 'ERROR: version sync changed files — commit them before publishing' && exit 1)) && npm run build && npm run typecheck:extensions && npm run validate-pack"
