@@ -23,8 +23,8 @@ export interface EvidenceCheckJSON {
 }
 
 export interface RuntimeErrorJSON {
-  source: string;
-  severity: string;
+  source: "bg-shell" | "browser";
+  severity: "crash" | "error" | "warning";
   message: string;
   blocking: boolean;
 }
