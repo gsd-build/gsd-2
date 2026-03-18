@@ -36,6 +36,7 @@ import {
   clearPathCache,
   resolveGsdRootFile,
 } from "./paths.js";
+import { isValidationTerminal } from "./state.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { atomicWriteSync } from "./atomic-write.js";
 import { dirname, join } from "node:path";
@@ -136,6 +137,20 @@ export function verifyExpectedArtifact(unitType: string, unitId: string, base: s
   // is missing on disk — treat as stale completion state so the key gets evicted (#313).
   if (!absPath) return false;
   if (!existsSync(absPath)) return false;
+
+  // validate-milestone must have a VALIDATION file with a terminal verdict.
+  // Without this check, a VALIDATION file with missing/malformed frontmatter or an
+  // unrecognized verdict is treated as "complete" by the artifact check but deriveState
+  // still returns phase:"validating-milestone" (because isValidationTerminal returns
+  // false), creating an infinite skip loop that hits the lifetime cap.
+  if (unitType === "validate-milestone") {
+    try {
+      const validationContent = readFileSync(absPath, "utf-8");
+      if (!isValidationTerminal(validationContent)) return false;
+    } catch {
+      return false;
+    }
+  }
 
   // plan-slice must produce a plan with actual task entries, not just a scaffold.
   // The plan file may exist from a prior discussion/context step with only headings
