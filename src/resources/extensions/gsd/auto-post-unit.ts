@@ -176,7 +176,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext): Promise<"d
           );
           try {
             const { formatDoctorIssuesForPrompt, formatDoctorReport } = await import("./doctor.js");
-            const { dispatchDoctorHeal } = await import("./commands.js");
+            const { dispatchDoctorHeal } = await import("./commands-handlers.js");
             const actionable = report.issues.filter(i => i.severity === "error");
             const reportText = formatDoctorReport(report, { scope: doctorScope, includeWarnings: true });
             const structuredIssues = formatDoctorIssuesForPrompt(actionable);

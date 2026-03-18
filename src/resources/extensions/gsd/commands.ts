@@ -22,8 +22,6 @@ import {
   getProjectGSDPreferencesPath,
   loadEffectiveGSDPreferences,
 } from "./preferences.js";
-import { loadPrompt } from "./prompt-loader.js";
-
 import { handleRemote } from "../remote-questions/mod.js";
 import { handleQuick } from "./quick.js";
 import { handleHistory } from "./history.js";
@@ -46,24 +44,6 @@ import { handleCleanupBranches, handleCleanupSnapshots, handleSkip, handleDryRun
 import { handleDoctor, handleSteer, handleCapture, handleTriage, handleKnowledge, handleRunHook, handleUpdate, handleSkillHealth } from "./commands-handlers.js";
 import { handleLogs } from "./commands-logs.js";
 
-
-export function dispatchDoctorHeal(pi: ExtensionAPI, scope: string | undefined, reportText: string, structuredIssues: string): void {
-  const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(process.env.HOME ?? "~", ".pi", "GSD-WORKFLOW.md");
-  const workflow = readFileSync(workflowPath, "utf-8");
-  const prompt = loadPrompt("doctor-heal", {
-    doctorSummary: reportText,
-    structuredIssues,
-    scopeLabel: scope ?? "active milestone / blocking scope",
-    doctorCommandSuffix: scope ? ` ${scope}` : "",
-  });
-
-  const content = `Read the following GSD workflow protocol and execute exactly.\n\n${workflow}\n\n## Your Task\n\n${prompt}`;
-
-  pi.sendMessage(
-    { customType: "gsd-doctor-heal", content, display: false },
-    { triggerTurn: true },
-  );
-}
 
 /** Resolve the effective project root, accounting for worktree paths. */
 export function projectRoot(): string {
