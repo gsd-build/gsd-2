@@ -89,3 +89,12 @@ Follows the exact visual patterns of the existing `PrefsPanel`, `ModelRoutingPan
 
 - `web/components/gsd/settings-panels.tsx` — new `RemoteQuestionsPanel` export added
 - `web/components/gsd/command-surface.tsx` — `RemoteQuestionsPanel` rendered in `gsd-prefs` case
+
+## Observability Impact
+
+- **Panel renders at `/gsd prefs`** — visible after Budget panel as `[data-testid="settings-remote-questions"]`
+- **Env var status** — panel displays whether the channel-specific bot token env var is set (boolean), never reveals the value
+- **Form validation feedback** — inline destructive-colored message on invalid channel ID format, per-channel pattern hints
+- **Save/disconnect feedback** — success banner (auto-clears after 3s) or error banner with descriptive message from API
+- **API fetch errors** — displayed via `SettingsError` component with the error message from `GET /api/remote-questions`
+- **Inspection:** `GET /api/remote-questions` returns `{ config, envVarSet, envVarName, status }` — inspectable via curl to verify panel data source

@@ -1,5 +1,7 @@
 "use client"
 
+import { useState, useEffect, useCallback } from "react"
+
 import {
   AlertTriangle,
   CheckCircle2,
@@ -7,6 +9,7 @@ import {
   DollarSign,
   Layers,
   LoaderCircle,
+  Radio,
   RefreshCw,
   Settings,
   Zap,
@@ -492,6 +495,340 @@ export function BudgetPanel() {
             <SettingsEmpty message="No execution metrics yet" />
           )}
         </>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// REMOTE QUESTIONS PANEL
+// ═══════════════════════════════════════════════════════════════════════
+
+type RemoteChannel = "slack" | "discord" | "telegram"
+
+const CHANNEL_OPTIONS: { value: RemoteChannel; label: string }[] = [
+  { value: "slack", label: "Slack" },
+  { value: "discord", label: "Discord" },
+  { value: "telegram", label: "Telegram" },
+]
+
+const CHANNEL_ID_PATTERNS: Record<RemoteChannel, { regex: RegExp; hint: string }> = {
+  slack: { regex: /^[A-Z0-9]{9,12}$/, hint: "9–12 uppercase alphanumeric characters (e.g. C01ABCD2EFG)" },
+  discord: { regex: /^\d{17,20}$/, hint: "17–20 digit numeric ID" },
+  telegram: { regex: /^-?\d{5,20}$/, hint: "Numeric chat ID (may start with -)" },
+}
+
+interface RemoteQuestionsApiResponse {
+  config: {
+    channel: RemoteChannel
+    channelId: string
+    timeoutMinutes: number
+    pollIntervalSeconds: number
+  } | null
+  envVarSet: boolean
+  envVarName: string | null
+  status: string
+  error?: string
+}
+
+export function RemoteQuestionsPanel() {
+  const { state, data, busy, refresh } = useSettingsData()
+  const existingConfig = data?.preferences?.remoteQuestions ?? null
+
+  // API-only state (env var info)
+  const [envVarSet, setEnvVarSet] = useState(false)
+  const [envVarName, setEnvVarName] = useState<string | null>(null)
+  const [apiStatus, setApiStatus] = useState<string>("not_configured")
+  const [apiLoading, setApiLoading] = useState(true)
+
+  // Form fields
+  const [channel, setChannel] = useState<RemoteChannel>("slack")
+  const [channelId, setChannelId] = useState("")
+  const [timeoutMinutes, setTimeoutMinutes] = useState(5)
+  const [pollIntervalSeconds, setPollIntervalSeconds] = useState(5)
+
+  // Feedback states
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+
+  // Whether a configuration currently exists (from API response, not just form state)
+  const [isConfigured, setIsConfigured] = useState(false)
+
+  // Track whether user has interacted with channel ID for validation display
+  const [channelIdTouched, setChannelIdTouched] = useState(false)
+
+  // Fetch full status from API on mount and after mutations
+  const fetchApiStatus = useCallback(async () => {
+    try {
+      setApiLoading(true)
+      const res = await fetch("/api/remote-questions", { cache: "no-store" })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: "Unknown error" }))
+        setError(body.error ?? `API error ${res.status}`)
+        return
+      }
+      const json: RemoteQuestionsApiResponse = await res.json()
+      setEnvVarSet(json.envVarSet)
+      setEnvVarName(json.envVarName)
+      setApiStatus(json.status)
+      setIsConfigured(json.status === "configured" && json.config !== null)
+      if (json.config) {
+        setChannel(json.config.channel)
+        setChannelId(json.config.channelId)
+        setTimeoutMinutes(json.config.timeoutMinutes)
+        setPollIntervalSeconds(json.config.pollIntervalSeconds)
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to fetch remote questions status")
+    } finally {
+      setApiLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetchApiStatus() }, [fetchApiStatus])
+
+  // Sync form when existingConfig changes from the settings hook
+  useEffect(() => {
+    if (existingConfig?.channel) {
+      setChannel(existingConfig.channel)
+      setChannelId(existingConfig.channelId ?? "")
+      setTimeoutMinutes(existingConfig.timeoutMinutes ?? 5)
+      setPollIntervalSeconds(existingConfig.pollIntervalSeconds ?? 5)
+    }
+  }, [existingConfig])
+
+  // Validation
+  const channelIdValid = channelId.length === 0 || CHANNEL_ID_PATTERNS[channel].regex.test(channelId)
+  const canSave = channelId.length > 0 && CHANNEL_ID_PATTERNS[channel].regex.test(channelId) && !saving && !deleting
+
+  // Clear success feedback after 3s
+  useEffect(() => {
+    if (!success) return
+    const timer = setTimeout(() => setSuccess(null), 3000)
+    return () => clearTimeout(timer)
+  }, [success])
+
+  // Save
+  const handleSave = async () => {
+    setSaving(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const res = await fetch("/api/remote-questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel, channelId, timeoutMinutes, pollIntervalSeconds }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        setError(json.error ?? `Save failed (${res.status})`)
+        return
+      }
+      setSuccess("Configuration saved")
+      setIsConfigured(true)
+      setChannelIdTouched(false)
+      refresh()
+      void fetchApiStatus()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save configuration")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Disconnect
+  const handleDisconnect = async () => {
+    setDeleting(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const res = await fetch("/api/remote-questions", { method: "DELETE" })
+      const json = await res.json()
+      if (!res.ok) {
+        setError(json.error ?? `Disconnect failed (${res.status})`)
+        return
+      }
+      setSuccess("Channel disconnected")
+      setIsConfigured(false)
+      setChannelId("")
+      setTimeoutMinutes(5)
+      setPollIntervalSeconds(5)
+      setChannel("slack")
+      setChannelIdTouched(false)
+      refresh()
+      void fetchApiStatus()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to disconnect channel")
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const derivedEnvVarName = envVarName ?? (channel ? `${channel.toUpperCase()}_BOT_TOKEN` : null)
+
+  return (
+    <div className="space-y-4" data-testid="settings-remote-questions">
+      <SettingsHeader
+        title="Remote Questions"
+        icon={<Radio className="h-3.5 w-3.5" />}
+        onRefresh={() => { refresh(); void fetchApiStatus() }}
+        refreshing={busy || apiLoading}
+      />
+
+      {error && <SettingsError message={error} />}
+      {success && (
+        <div className="rounded-lg border border-success/20 bg-success/5 px-3 py-2.5 text-xs text-success flex items-center gap-2">
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+          {success}
+        </div>
+      )}
+      {(busy || apiLoading) && !data && !isConfigured && <SettingsLoading label="Loading remote questions…" />}
+
+      {/* Current config summary (when configured) */}
+      {isConfigured && (
+        <div className="rounded-lg border border-border/30 bg-card/30 px-3 py-2.5 space-y-1.5">
+          <h4 className="text-[11px] font-medium text-foreground/70 uppercase tracking-wide">Current Channel</h4>
+          <KvRow label="Channel">
+            <span className="capitalize">{channel}</span>
+          </KvRow>
+          <KvRow label="Channel ID">
+            <span className="font-mono text-[11px]">{channelId}</span>
+          </KvRow>
+          <KvRow label="Timeout">{timeoutMinutes}m</KvRow>
+          <KvRow label="Poll Interval">{pollIntervalSeconds}s</KvRow>
+        </div>
+      )}
+
+      {!isConfigured && !apiLoading && !busy && (
+        <SettingsEmpty message="No remote channel configured" />
+      )}
+
+      {/* Form */}
+      <div className="rounded-lg border border-border/30 bg-card/30 px-3 py-3 space-y-3">
+        <h4 className="text-[11px] font-medium text-foreground/70 uppercase tracking-wide">
+          {isConfigured ? "Update Configuration" : "Configure Channel"}
+        </h4>
+
+        {/* Channel type */}
+        <div className="space-y-1">
+          <label className="text-[11px] text-muted-foreground" htmlFor="rq-channel">Channel Type</label>
+          <select
+            id="rq-channel"
+            value={channel}
+            onChange={(e) => {
+              setChannel(e.target.value as RemoteChannel)
+              setChannelIdTouched(false)
+            }}
+            className="w-full rounded-md border border-border bg-input px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          >
+            {CHANNEL_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Channel ID */}
+        <div className="space-y-1">
+          <label className="text-[11px] text-muted-foreground" htmlFor="rq-channel-id">Channel ID</label>
+          <input
+            id="rq-channel-id"
+            type="text"
+            value={channelId}
+            onChange={(e) => setChannelId(e.target.value)}
+            onBlur={() => setChannelIdTouched(true)}
+            placeholder={CHANNEL_ID_PATTERNS[channel].hint}
+            className={cn(
+              "w-full rounded-md border bg-input px-2.5 py-1.5 text-xs text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring",
+              channelIdTouched && channelId && !channelIdValid
+                ? "border-destructive/50"
+                : "border-border",
+            )}
+          />
+          {channelIdTouched && channelId && !channelIdValid && (
+            <p className="text-[10px] text-destructive">
+              Invalid format — {CHANNEL_ID_PATTERNS[channel].hint}
+            </p>
+          )}
+        </div>
+
+        {/* Timeout + Poll Interval (side by side) */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <label className="text-[11px] text-muted-foreground" htmlFor="rq-timeout">Timeout (min)</label>
+            <input
+              id="rq-timeout"
+              type="number"
+              min={1}
+              max={30}
+              value={timeoutMinutes}
+              onChange={(e) => setTimeoutMinutes(Math.max(1, Math.min(30, Number(e.target.value) || 1)))}
+              className="w-full rounded-md border border-border bg-input px-2.5 py-1.5 text-xs text-foreground tabular-nums focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[11px] text-muted-foreground" htmlFor="rq-poll">Poll Interval (sec)</label>
+            <input
+              id="rq-poll"
+              type="number"
+              min={2}
+              max={30}
+              value={pollIntervalSeconds}
+              onChange={(e) => setPollIntervalSeconds(Math.max(2, Math.min(30, Number(e.target.value) || 2)))}
+              className="w-full rounded-md border border-border bg-input px-2.5 py-1.5 text-xs text-foreground tabular-nums focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+        </div>
+
+        {/* Buttons */}
+        <div className="flex items-center gap-2 pt-1">
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleSave}
+            disabled={!canSave}
+            className="h-7 text-xs gap-1.5"
+          >
+            {saving && <LoaderCircle className="h-3 w-3 animate-spin" />}
+            {isConfigured ? "Update" : "Save"}
+          </Button>
+          {isConfigured && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleDisconnect}
+              disabled={deleting}
+              className="h-7 text-xs gap-1.5 text-destructive hover:text-destructive"
+            >
+              {deleting && <LoaderCircle className="h-3 w-3 animate-spin" />}
+              Disconnect
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Env var status */}
+      {derivedEnvVarName && !apiLoading && (
+        <div className={cn(
+          "flex items-center gap-2 rounded-lg border px-3 py-2 text-xs",
+          envVarSet
+            ? "border-success/20 bg-success/5 text-success"
+            : "border-warning/20 bg-warning/5 text-warning",
+        )}>
+          {envVarSet ? (
+            <>
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+              <span>{derivedEnvVarName} is set</span>
+            </>
+          ) : (
+            <>
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              <span>{derivedEnvVarName} not set — configure via TUI or environment</span>
+            </>
+          )}
+        </div>
       )}
     </div>
   )
