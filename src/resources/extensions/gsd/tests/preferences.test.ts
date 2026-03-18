@@ -233,6 +233,7 @@ test("parses OpenRouter model config with org/model IDs and fallbacks", () => {
 test("parses model IDs with colons (OpenRouter :free, :exacto)", () => {
   const content = `---\nmodels:\n  execution:\n    model: qwen/qwen3-coder\n    fallbacks:\n      - qwen/qwen3-coder:free\n      - qwen/qwen3-coder:exacto\n---\n`;
   const prefs = parsePreferencesMarkdown(content);
+  assert.ok(prefs);
   const models = prefs.models as GSDModelConfigV2;
   const execution = models.execution as GSDPhaseModelConfig;
   assert.deepEqual(execution.fallbacks, ["qwen/qwen3-coder:free", "qwen/qwen3-coder:exacto"]);
@@ -241,6 +242,7 @@ test("parses model IDs with colons (OpenRouter :free, :exacto)", () => {
 test("parses legacy string-per-phase model config", () => {
   const content = `---\nmodels:\n  research: claude-opus-4-6\n  execution: claude-sonnet-4-6\n---\n`;
   const prefs = parsePreferencesMarkdown(content);
+  assert.ok(prefs);
   const models = prefs.models as GSDModelConfigV2;
   assert.equal(models.research, "claude-opus-4-6");
   assert.equal(models.execution, "claude-sonnet-4-6");
@@ -249,6 +251,7 @@ test("parses legacy string-per-phase model config", () => {
 test("strips inline YAML comments from values", () => {
   const content = `---\nmodels:\n  execution:\n    model: qwen/qwen3-coder  # fast\n    fallbacks:\n      - minimax/minimax-m2.5  # backup\n---\n`;
   const prefs = parsePreferencesMarkdown(content);
+  assert.ok(prefs);
   const models = prefs.models as GSDModelConfigV2;
   const execution = models.execution as GSDPhaseModelConfig;
   assert.equal(execution.model, "qwen/qwen3-coder");
@@ -258,6 +261,7 @@ test("strips inline YAML comments from values", () => {
 test("handles Windows CRLF line endings", () => {
   const content = "---\r\nmodels:\r\n  execution:\r\n    model: qwen/qwen3-coder\r\n---\r\n";
   const prefs = parsePreferencesMarkdown(content);
+  assert.ok(prefs);
   const models = prefs.models as GSDModelConfigV2;
   const execution = models.execution as GSDPhaseModelConfig;
   assert.equal(execution.model, "qwen/qwen3-coder");
@@ -266,6 +270,7 @@ test("handles Windows CRLF line endings", () => {
 test("handles model config with explicit provider field", () => {
   const content = `---\nmodels:\n  execution:\n    model: claude-opus-4-6\n    provider: bedrock\n    fallbacks:\n      - claude-sonnet-4-6\n---\n`;
   const prefs = parsePreferencesMarkdown(content);
+  assert.ok(prefs);
   const models = prefs.models as GSDModelConfigV2;
   const execution = models.execution as GSDPhaseModelConfig;
   assert.equal(execution.model, "claude-opus-4-6");
@@ -274,5 +279,6 @@ test("handles model config with explicit provider field", () => {
 
 test("handles empty models config", () => {
   const prefs = parsePreferencesMarkdown("---\nversion: 1\n---\n");
+  assert.ok(prefs);
   assert.equal(prefs.models, undefined);
 });
