@@ -11,6 +11,7 @@ import type { GSDState } from "./types.js";
 import { getCurrentBranch } from "./worktree.js";
 import { getActiveHook } from "./post-unit-hooks.js";
 import { getLedger, getProjectTotals, formatCost, formatTokenCount, formatTierSavings } from "./metrics.js";
+import { getHealthTrend, getConsecutiveErrorUnits } from "./doctor-proactive.js";
 import {
   resolveMilestoneFile,
   resolveSliceFile,
@@ -649,6 +650,31 @@ export function updateProgressWidget(
  * Build a compact string-array representation of the progress widget.
  * Used as a fallback when the factory-based widget cannot render (RPC mode).
  */
+// ─── Model Health Indicator ───────────────────────────────────────────────────
+
+/**
+ * Compute a traffic-light health indicator from observable signals.
+ * 🟢 progressing well — no errors, trend stable/improving
+ * 🟡 struggling — some errors or degrading trend
+ * 🔴 stuck — consecutive errors, likely needs attention
+ */
+export function getModelHealthIndicator(): { emoji: string; label: string } {
+  const trend = getHealthTrend();
+  const consecutiveErrors = getConsecutiveErrorUnits();
+
+  if (consecutiveErrors >= 3) {
+    return { emoji: "🔴", label: "stuck" };
+  }
+  if (consecutiveErrors >= 1 || trend === "degrading") {
+    return { emoji: "🟡", label: "struggling" };
+  }
+  if (trend === "improving") {
+    return { emoji: "🟢", label: "progressing well" };
+  }
+  // stable or unknown
+  return { emoji: "🟢", label: "progressing" };
+}
+
 function buildProgressTextLines(
   verb: string,
   phaseLabel: string,
@@ -697,6 +723,11 @@ function buildProgressTextLines(
   }
 
   if (next) lines.push(`  Next: ${next}`);
+
+  // Model health indicator
+  const health = getModelHealthIndicator();
+  lines.push(`  Health: ${health.emoji} ${health.label}`);
+
   lines.push(`  ${widgetPwd}`);
 
   return lines;
