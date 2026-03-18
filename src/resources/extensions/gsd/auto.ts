@@ -667,6 +667,38 @@ export async function startAuto(
       s.pausedSessionFile = null;
     }
 
+    // If resuming from a secrets pause, re-collect before dispatching (#1146)
+    if (s.pausedForSecrets && s.currentMilestoneId) {
+      try {
+        const manifestStatus = await getManifestStatus(s.basePath, s.currentMilestoneId);
+        if (manifestStatus && manifestStatus.pending.length > 0) {
+          const result = await collectSecretsFromManifest(s.basePath, s.currentMilestoneId, ctx);
+          if (result && result.applied.length > 0) {
+            ctx.ui.notify(
+              `Secrets collected: ${result.applied.length} applied, ${result.skipped.length} skipped, ${result.existingSkipped.length} already set.`,
+              "info",
+            );
+          } else if (result && result.applied.length === 0 && result.skipped.length > 0) {
+            // All keys were skipped — still pending, re-pause
+            s.paused = true;
+            s.active = false;
+            ctx.ui.notify(
+              `All env variables were skipped. Auto-mode remains paused.\nCollect them with /gsd secrets, then resume with /gsd auto.`,
+              "warning",
+            );
+            ctx.ui.setStatus("gsd-auto", "paused");
+            return;
+          }
+        }
+      } catch (err) {
+        ctx.ui.notify(
+          `Secrets check error: ${err instanceof Error ? err.message : String(err)}. Continuing without secrets.`,
+          "warning",
+        );
+      }
+      s.pausedForSecrets = false;
+    }
+
     writeLock(lockBase(), "resuming", s.currentMilestoneId ?? "unknown", s.completedUnits.length);
 
     await dispatchNextUnit(ctx, pi);

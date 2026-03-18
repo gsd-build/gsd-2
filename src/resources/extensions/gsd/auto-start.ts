@@ -16,7 +16,7 @@ import type {
 import { deriveState } from "./state.js";
 import { loadFile, getManifestStatus } from "./files.js";
 import { loadEffectiveGSDPreferences, resolveSkillDiscoveryMode, getIsolationMode } from "./preferences.js";
-import { collectSecretsFromManifest } from "../get-secrets-from-user.js";
+
 import {
   gsdRoot,
   resolveMilestoneFile,
@@ -409,24 +409,25 @@ export async function bootstrapAutoSession(
   // Write initial lock file
   writeLock(lockBase(), "starting", s.currentMilestoneId ?? "unknown", 0);
 
-  // Secrets collection gate
+  // Secrets collection gate — pause instead of blocking (#1146)
   const mid = state.activeMilestone!.id;
   try {
     const manifestStatus = await getManifestStatus(base, mid);
     if (manifestStatus && manifestStatus.pending.length > 0) {
-      const result = await collectSecretsFromManifest(base, mid, ctx);
-      if (result && result.applied && result.skipped && result.existingSkipped) {
-        ctx.ui.notify(
-          `Secrets collected: ${result.applied.length} applied, ${result.skipped.length} skipped, ${result.existingSkipped.length} already set.`,
-          "info",
-        );
-      } else {
-        ctx.ui.notify("Secrets collection skipped.", "info");
-      }
+      const pendingKeys = manifestStatus.pending;
+      const keyList = pendingKeys.map((k: string) => `  • ${k}`).join("\n");
+      s.paused = true;
+      s.pausedForSecrets = true;
+      ctx.ui.notify(
+        `Auto-mode paused: ${pendingKeys.length} env variable${pendingKeys.length > 1 ? "s" : ""} needed for ${mid}.\n${keyList}\n\nCollect them with /gsd secrets, then resume with /gsd auto.`,
+        "warning",
+      );
+      ctx.ui.setStatus("gsd-auto", "paused");
+      return false;
     }
   } catch (err) {
     ctx.ui.notify(
-      `Secrets collection error: ${err instanceof Error ? err.message : String(err)}. Continuing with next task.`,
+      `Secrets check error: ${err instanceof Error ? err.message : String(err)}. Continuing without secrets.`,
       "warning",
     );
   }
