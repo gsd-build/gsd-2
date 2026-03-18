@@ -14,7 +14,7 @@ import { resolveMilestoneFile, resolveSliceFile } from "./paths.js";
 import { getAutoDashboardData, type AutoDashboardData } from "./auto.js";
 import {
   getLedger, getProjectTotals, aggregateByPhase, aggregateBySlice,
-  aggregateByModel, formatCost, formatTokenCount, formatCostProjection,
+  aggregateByModel, aggregateCacheHitRate, formatCost, formatTokenCount, formatCostProjection,
   type UnitMetrics,
 } from "./metrics.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
@@ -566,6 +566,12 @@ export class GSDDashboardOverlay {
 
       lines.push(blank());
       lines.push(row(`${th.fg("dim", "avg/unit:")} ${th.fg("text", formatCost(totals.cost / totals.units))}  ${th.fg("dim", "·")}  ${th.fg("text", formatTokenCount(Math.round(totals.tokens.total / totals.units)))} tokens`));
+
+      // Cache hit rate
+      const cacheRate = aggregateCacheHitRate();
+      if (cacheRate > 0) {
+        lines.push(row(`${th.fg("dim", "cache hit rate:")} ${th.fg("text", `${cacheRate}%`)}`));
+      }
     }
 
     lines.push(blank());

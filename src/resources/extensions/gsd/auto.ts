@@ -3091,6 +3091,14 @@ async function dispatchNextUnit(
     }
   }
 
+  // Cache-optimize prompt section ordering
+  try {
+    const { reorderForCaching } = await import("./prompt-ordering.js");
+    finalPrompt = reorderForCaching(finalPrompt);
+  } catch {
+    // Non-fatal — use original ordering
+  }
+
   // Select and apply model for this unit (dynamic routing, fallback chains, etc.)
   const modelResult = await selectAndApplyModel(ctx, pi, unitType, unitId, s.basePath, prefs, s.verbose, s.autoModeStartModel);
   s.currentUnitRouting = modelResult.routing;

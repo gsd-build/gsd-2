@@ -448,6 +448,11 @@ export function updateProgressWidget(
           if (totalOutput) sp.push(`↓${formatWidgetTokens(totalOutput)}`);
           if (totalCacheRead) sp.push(`R${formatWidgetTokens(totalCacheRead)}`);
           if (totalCacheWrite) sp.push(`W${formatWidgetTokens(totalCacheWrite)}`);
+          // Cache hit rate for current unit
+          if (totalCacheRead > 0 && totalInput > 0) {
+            const hitRate = Math.round((totalCacheRead / (totalCacheRead + totalInput)) * 100);
+            sp.push(`\u26A1${hitRate}%`);
+          }
           if (cumulativeCost) sp.push(`$${cumulativeCost.toFixed(3)}`);
 
           const cxDisplay = cxPct === "?"
