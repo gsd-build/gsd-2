@@ -126,8 +126,8 @@ const DISPATCH_RULES: DispatchRule[] = [
   {
     name: "reassess-roadmap (post-completion)",
     match: async ({ state, mid, midTitle, basePath, prefs }) => {
-      // Phase skip: skip reassess when preference or profile says so
-      if (prefs?.phases?.skip_reassess) return null;
+      // Reassess is opt-in: only fire when explicitly enabled
+      if (!prefs?.phases?.reassess_after_slice) return null;
       const needsReassess = await checkNeedsReassessment(basePath, mid, state);
       if (!needsReassess) return null;
       return {

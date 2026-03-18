@@ -589,14 +589,18 @@ export async function buildPlanMilestonePrompt(mid: string, midTitle: string, ba
   const { inlinePriorMilestoneSummary } = await import("./files.js");
   const priorSummaryInline = await inlinePriorMilestoneSummary(mid, base);
   if (priorSummaryInline) inlined.push(priorSummaryInline);
-  if (inlineLevel !== "minimal") {
-    const projectInline = await inlineProjectFromDb(base);
-    if (projectInline) inlined.push(projectInline);
-    const requirementsInline = await inlineRequirementsFromDb(base, undefined, inlineLevel);
-    if (requirementsInline) inlined.push(requirementsInline);
-    const decisionsInline = await inlineDecisionsFromDb(base, mid, undefined, inlineLevel);
-    if (decisionsInline) inlined.push(decisionsInline);
-  }
+  // Build source file paths for the planner to read on demand (reduces inlining)
+  const sourcePaths: string[] = [];
+  if (existsSync(resolveGsdRootFile(base, "PROJECT")))
+    sourcePaths.push(`- **Project**: \`${relGsdRootFile("PROJECT")}\``);
+  if (existsSync(resolveGsdRootFile(base, "REQUIREMENTS")))
+    sourcePaths.push(`- **Requirements**: \`${relGsdRootFile("REQUIREMENTS")}\``);
+  if (existsSync(resolveGsdRootFile(base, "DECISIONS")))
+    sourcePaths.push(`- **Decisions**: \`${relGsdRootFile("DECISIONS")}\``);
+  const sourceFilePaths = sourcePaths.length > 0
+    ? sourcePaths.join("\n")
+    : "_No project/requirements/decisions files found._";
+
   const knowledgeInlinePM = await inlineGsdRootFile(base, "knowledge.md", "Project Knowledge");
   if (knowledgeInlinePM) inlined.push(knowledgeInlinePM);
   inlined.push(inlineTemplate("roadmap", "Roadmap"));
@@ -615,6 +619,7 @@ export async function buildPlanMilestonePrompt(mid: string, midTitle: string, ba
 
   const outputRelPath = relMilestoneFile(base, mid, "ROADMAP");
   const secretsOutputPath = join(base, relMilestoneFile(base, mid, "SECRETS"));
+  const researchOutputRelPath = relMilestoneFile(base, mid, "RESEARCH");
   return loadPrompt("plan-milestone", {
     workingDirectory: base,
     milestoneId: mid, milestoneTitle: midTitle,
@@ -624,6 +629,9 @@ export async function buildPlanMilestonePrompt(mid: string, midTitle: string, ba
     outputPath: join(base, outputRelPath),
     secretsOutputPath,
     inlinedContext,
+    sourceFilePaths,
+    researchOutputPath: join(base, researchOutputRelPath),
+    ...buildSkillDiscoveryVars(),
   });
 }
 
@@ -686,12 +694,16 @@ export async function buildPlanSlicePrompt(
   inlined.push(await inlineFile(roadmapPath, roadmapRel, "Milestone Roadmap"));
   const researchInline = await inlineFileOptional(researchPath, researchRel, "Slice Research");
   if (researchInline) inlined.push(researchInline);
-  if (inlineLevel !== "minimal") {
-    const decisionsInline = await inlineDecisionsFromDb(base, mid, undefined, inlineLevel);
-    if (decisionsInline) inlined.push(decisionsInline);
-    const requirementsInline = await inlineRequirementsFromDb(base, sid, inlineLevel);
-    if (requirementsInline) inlined.push(requirementsInline);
-  }
+  // Build source file paths for the planner to read on demand (reduces inlining)
+  const sliceSourcePaths: string[] = [];
+  if (existsSync(resolveGsdRootFile(base, "REQUIREMENTS")))
+    sliceSourcePaths.push(`- **Requirements**: \`${relGsdRootFile("REQUIREMENTS")}\``);
+  if (existsSync(resolveGsdRootFile(base, "DECISIONS")))
+    sliceSourcePaths.push(`- **Decisions**: \`${relGsdRootFile("DECISIONS")}\``);
+  const sliceSourceFilePaths = sliceSourcePaths.length > 0
+    ? sliceSourcePaths.join("\n")
+    : "_No requirements/decisions files found._";
+
   const knowledgeInlinePS = await inlineGsdRootFile(base, "knowledge.md", "Project Knowledge");
   if (knowledgeInlinePS) inlined.push(knowledgeInlinePS);
   inlined.push(inlineTemplate("plan", "Slice Plan"));
@@ -726,6 +738,7 @@ export async function buildPlanSlicePrompt(
     dependencySummaries: depContent,
     executorContextConstraints,
     commitInstruction,
+    sourceFilePaths: sliceSourceFilePaths,
   });
 }
 

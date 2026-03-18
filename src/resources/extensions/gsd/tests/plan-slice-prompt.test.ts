@@ -25,6 +25,7 @@ const BASE_VARS = {
   outputPath: "/tmp/test-project/.gsd/milestones/M001/slices/S01/S01-PLAN.md",
   inlinedContext: "--- test inlined context ---",
   dependencySummaries: "", executorContextConstraints: "",
+  sourceFilePaths: "- **Requirements**: `.gsd/REQUIREMENTS.md`",
 };
 
 test("plan-slice prompt: commit step present when commit_docs=true", () => {

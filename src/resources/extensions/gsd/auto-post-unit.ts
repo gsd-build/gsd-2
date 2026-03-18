@@ -331,6 +331,45 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
     }
   }
 
+  // ── Mechanical completion (ADR-003) ──
+  // After task execution, attempt mechanical slice and milestone completion
+  // instead of dispatching LLM sessions for complete-slice / validate-milestone.
+  if (s.currentUnit?.type === "execute-task" && !s.stepMode) {
+    try {
+      const [mid, sid] = s.currentUnit.id.split("/");
+      if (mid && sid) {
+        const state = await deriveState(s.basePath);
+        if (state.phase === "summarizing" && state.activeSlice?.id === sid) {
+          const { mechanicalSliceCompletion } = await import("./mechanical-completion.js");
+          const ok = await mechanicalSliceCompletion(s.basePath, mid, sid);
+          if (ok) {
+            invalidateAllCaches();
+            autoCommitCurrentBranch(s.basePath, "mechanical-completion", `${mid}/${sid}`);
+            ctx.ui.notify(`Mechanical completion: ${sid} summary + roadmap updated.`, "info");
+
+            // Re-derive state — check if milestone is now ready for validation
+            invalidateAllCaches();
+            const postSliceState = await deriveState(s.basePath);
+            if (postSliceState.phase === "validating-milestone" || postSliceState.phase === "completing-milestone") {
+              const { aggregateMilestoneVerification, generateMilestoneSummary } = await import("./mechanical-completion.js");
+              const validation = await aggregateMilestoneVerification(s.basePath, mid);
+              if (validation.verdict !== "failed") {
+                await generateMilestoneSummary(s.basePath, mid);
+                invalidateAllCaches();
+                autoCommitCurrentBranch(s.basePath, "mechanical-milestone-completion", mid);
+                ctx.ui.notify(`Mechanical completion: ${mid} validation + summary written.`, "info");
+              }
+            }
+          }
+          // If !ok, summarizing phase persists → dispatch rule fires as LLM fallback
+        }
+      }
+    } catch (err) {
+      process.stderr.write(`gsd-mechanical: completion failed: ${(err as Error).message}\n`);
+      // Non-fatal — fall through to normal dispatch
+    }
+  }
+
   // ── Post-unit hooks ──
   if (s.currentUnit && !s.stepMode) {
     const hookUnit = checkPostUnitHooks(s.currentUnit.type, s.currentUnit.id, s.basePath);

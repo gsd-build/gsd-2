@@ -236,6 +236,23 @@ export function resolveTaskFiles(tasksDir: string, suffix: string): string[] {
   }
 }
 
+/**
+ * Find all task JSON files matching a pattern in a tasks directory.
+ * Returns sorted file names matching T##-SUFFIX.json or legacy T##-*-SUFFIX.json
+ */
+export function resolveTaskJsonFiles(tasksDir: string, suffix: string): string[] {
+  if (!existsSync(tasksDir)) return [];
+  try {
+    const currentPattern = new RegExp(`^T\\d+-${suffix}\\.json$`, "i");
+    const legacyPattern = new RegExp(`^T\\d+-.*-${suffix}\\.json$`, "i");
+    return cachedReaddir(tasksDir)
+      .filter(f => currentPattern.test(f) || legacyPattern.test(f))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
 // ─── Full Path Builders ────────────────────────────────────────────────────
 
 export const GSD_ROOT_FILES = {
