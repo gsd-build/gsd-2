@@ -126,6 +126,24 @@ function MilestoneContent({
     }
   }
 
+  async function handleViewTasks(sliceId: string, milestone: GSD2RoadmapState) {
+    const slice = milestone.slices.find((s) => s.id === sliceId);
+    const done = slice?.tasks?.filter((t) => t.status === 'complete').length ?? 0;
+
+    if (done === 0) {
+      // Nothing completed (or no tasks at all) — fetch and show PLAN.md content
+      setPanelState({ isOpen: true, title: `${sliceId} — Plan`, content: '', isLoading: true });
+      const res = await fetch(`/api/gsd-file?sliceId=${sliceId}&milestoneId=${milestone.milestoneId}&type=plan`);
+      const data = await res.json() as { content: string };
+      setPanelState((prev) => ({ ...prev, content: data.content, isLoading: false }));
+    } else {
+      // Show only completed tasks inline — no fetch needed
+      const completedTasks = slice?.tasks?.filter((t) => t.status === 'complete') ?? [];
+      const content = completedTasks.map((t) => `[x] ${t.id}: ${t.name}`).join('\n');
+      setPanelState({ isOpen: true, title: `${sliceId} — Tasks`, content, isLoading: false });
+    }
+  }
+
   function handleUatItemToggle(itemId: string, checked: boolean) {
     const sliceId = gsd2State?.projectState.active_slice ?? '';
     const currentItems = gsd2State?.uatFile?.items ?? [];
@@ -145,6 +163,13 @@ function MilestoneContent({
       {/* Stacked milestone sections */}
       {allMilestones.map((milestone) => {
         const isActive = milestone.milestoneId === activeMilestoneId;
+        async function handleMilestoneAction(action: SliceAction) {
+          if (action.type === 'view_tasks') {
+            await handleViewTasks(action.sliceId, milestone);
+          } else {
+            handleSliceAction(action);
+          }
+        }
         return (
           <div
             key={milestone.milestoneId}
@@ -156,7 +181,7 @@ function MilestoneContent({
               activeSliceId={isActive ? activeSliceId : ""}
               isAutoMode={isActive ? isAutoMode : false}
               gsd2State={isActive ? gsd2State : null}
-              onAction={handleSliceAction}
+              onAction={handleMilestoneAction}
               onUatItemToggle={handleUatItemToggle}
             />
           </div>

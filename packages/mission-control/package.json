@@ -28,6 +28,7 @@
     "@codemirror/view": "^6.40.0",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/share-tech-mono": "^5.2.7",
+    "@tailwindcss/typography": "^0.5.19",
     "@tauri-apps/api": "^2.10.1",
     "@types/marked": "^6.0.0",
     "bun-plugin-tailwind": "^0.1.2",

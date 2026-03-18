@@ -476,6 +476,93 @@ export function parseUat(raw: string, sliceId: string): GSD2UatFile {
   return { sliceId, items };
 }
 
+// -- Slice filesystem scanner --
+
+/**
+ * Scans a slices/ directory to discover GSD2SliceInfo entries from PLAN.md files.
+ * Used in two scenarios:
+ *   1. Milestone has no ROADMAP.md — builds a synthetic slice list from the filesystem.
+ *   2. ROADMAP.md exists — enriches its slice entries with actual task data.
+ */
+async function scanSlicesDirectory(
+  slicesDir: string,
+  milestoneId: string
+): Promise<GSD2SliceInfo[]> {
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = await readdir(slicesDir, { withFileTypes: true }) as import("node:fs").Dirent[];
+  } catch {
+    return [];
+  }
+
+  const sliceDirNames = entries
+    .filter((e) => e.isDirectory() && /^S\d+$/i.test(e.name))
+    .map((e) => e.name)
+    .sort();
+
+  const slices: GSD2SliceInfo[] = [];
+
+  for (const sliceDirName of sliceDirNames) {
+    const sliceId = sliceDirName.toUpperCase();
+    const sliceDir = join(slicesDir, sliceDirName);
+    const planRaw = await readFileText(join(sliceDir, `${sliceId}-PLAN.md`));
+    const summaryExists = !!(await readFileText(join(sliceDir, `${sliceId}-SUMMARY.md`)));
+
+    let name = sliceId;
+    let tasks: GSD2TaskEntry[] = [];
+    let costEstimate: number | null = null;
+    let status: SliceStatus = "planned";
+
+    if (planRaw) {
+      // Extract slice name from "# S01: Name" or "# S01 — Name" heading
+      const nameMatch = planRaw.match(/^#\s+S\d+[:\s]+(?:[—–-]\s*)?(.+?)(?:\s*\[|$)/m);
+      if (nameMatch) name = nameMatch[1].trim();
+
+      const planData = parsePlan(planRaw, sliceId);
+      tasks = planData.tasks;
+      costEstimate = planData.costEstimate;
+
+      if (tasks.length > 0) {
+        const doneCount = tasks.filter((t) => t.status === "complete").length;
+        if (doneCount === tasks.length) status = "complete";
+        else if (doneCount > 0) status = "in_progress";
+        else status = "planned";
+      }
+    } else {
+      // No PLAN.md — scan tasks/ subdir for T{NN}-SUMMARY.md files (completed tasks)
+      try {
+        const taskEntries = await readdir(join(sliceDir, "tasks"), { withFileTypes: true });
+        const taskFiles = taskEntries
+          .filter(e => e.isFile() && /^T\d+-SUMMARY\.md$/i.test(e.name))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        tasks = taskFiles.map(f => {
+          const id = f.name.replace(/-SUMMARY\.md$/i, "").toUpperCase();
+          return { id, name: `Task ${id}`, status: "complete" as const };
+        });
+        if (tasks.length > 0) status = "complete";
+      } catch { /* empty or missing tasks/ */ }
+    }
+
+    // SUMMARY.md presence is a strong signal the slice is complete
+    if (summaryExists && status !== "complete") {
+      status = "complete";
+    }
+
+    slices.push({
+      id: sliceId,
+      name,
+      status,
+      taskCount: tasks.length,
+      costEstimate,
+      branch: `gsd/${milestoneId}/${sliceId}`,
+      dependencies: [],
+      tasks,
+    });
+  }
+
+  return slices;
+}
+
 // -- Git branch data helper --
 
 /**
@@ -605,12 +692,38 @@ export async function buildFullState(gsdDir: string): Promise<GSD2State> {
       .map((e) => e.name)
       .sort();
 
-    for (const milestoneId of milestoneDirs) {
-      const roadmapPath = join(milestonesDir, milestoneId, `${milestoneId}-ROADMAP.md`);
+    for (const milestoneDirName of milestoneDirs) {
+      const mId = milestoneDirName.toUpperCase();
+      const milestoneSubDir = join(milestonesDir, milestoneDirName);
+      const slicesDir = join(milestoneSubDir, "slices");
+      const roadmapPath = join(milestoneSubDir, `${mId}-ROADMAP.md`);
       const raw = await readFileText(roadmapPath);
+
       if (raw) {
+        // ROADMAP.md exists — parse it, then enrich slice entries with task data from PLAN.md files
         const parsed = parseRoadmap(raw);
+        const scannedSlices = await scanSlicesDirectory(slicesDir, mId);
+        for (const slice of parsed.slices) {
+          const scanned = scannedSlices.find((s) => s.id === slice.id);
+          if (scanned?.tasks) {
+            slice.tasks = scanned.tasks;
+            if (scanned.tasks.length > 0) slice.taskCount = scanned.tasks.length;
+          }
+        }
         allMilestones.push(parsed);
+      } else {
+        // No ROADMAP.md — build synthetic roadmap by scanning slices/ directory
+        const scannedSlices = await scanSlicesDirectory(slicesDir, mId);
+        if (scannedSlices.length > 0) {
+          let milestoneName = "";
+          const summaryRaw = await readFileText(join(milestoneSubDir, `${mId}-SUMMARY.md`));
+          if (summaryRaw) {
+            const nameMatch = summaryRaw.match(/^#\s+M\d+[:\s—–-]+(.+?)$/m);
+            if (nameMatch) milestoneName = nameMatch[1].trim();
+          }
+          if (!milestoneName) milestoneName = "(no roadmap)";
+          allMilestones.push({ milestoneId: mId, milestoneName, slices: scannedSlices });
+        }
       }
     }
   } catch {

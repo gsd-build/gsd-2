@@ -46,6 +46,7 @@ export interface GSD2SliceInfo {
   costEstimate: number | null; // parsed from "~$0.40" → 0.40
   branch: string;       // "gsd/M001/S01"
   dependencies: Array<{ id: string; name: string; complete: boolean }>;
+  tasks?: GSD2TaskEntry[];  // Populated when PLAN.md is available in the milestone subdirectory
 }
 
 export interface GSD2RoadmapState {
@@ -98,6 +99,7 @@ export type SliceAction =
   | { type: 'steer'; message: string }
   | { type: 'view_plan'; sliceId: string }
   | { type: 'view_task'; sliceId: string }
+  | { type: 'view_tasks'; sliceId: string }
   | { type: 'run_uat'; sliceId: string }
   | { type: 'merge'; sliceId: string }
   | { type: 'view_diff'; sliceId: string }

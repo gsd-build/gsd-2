@@ -40,6 +40,13 @@ export function SliceComplete({
       <div className="flex items-center gap-2 mt-1">
         <button
           type="button"
+          onClick={() => onAction({ type: "view_tasks", sliceId: slice.id })}
+          className="font-mono text-xs px-3 py-1.5 rounded border border-[#1E2D3D] text-slate-300 hover:bg-[#1A2332]"
+        >
+          View tasks
+        </button>
+        <button
+          type="button"
           onClick={() => onAction({ type: "view_diff", sliceId: slice.id })}
           className="font-mono text-xs px-3 py-1.5 rounded border border-[#1E2D3D] text-slate-300 hover:bg-[#1A2332]"
         >

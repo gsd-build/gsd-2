@@ -3,6 +3,7 @@
  * when view_plan / view_task / view_diff / view_uat_results is triggered.
  */
 import { X } from "lucide-react";
+import { marked } from "marked";
 
 interface InlineReadPanelProps {
   isOpen: boolean;
@@ -14,6 +15,8 @@ interface InlineReadPanelProps {
 
 export function InlineReadPanel({ isOpen, title, content, isLoading, onClose }: InlineReadPanelProps) {
   if (!isOpen) return null;
+
+  const html = marked(content, { async: false }) as string;
 
   return (
     <div
@@ -47,7 +50,19 @@ export function InlineReadPanel({ isOpen, title, content, isLoading, onClose }: 
           {isLoading ? (
             <span className="font-mono text-xs text-slate-500">Loading...</span>
           ) : (
-            <pre className="font-mono text-xs text-slate-300 whitespace-pre-wrap break-words">{content}</pre>
+            <div
+              className="prose prose-invert prose-sm max-w-none
+                prose-headings:text-slate-100 prose-headings:font-semibold
+                prose-p:text-slate-300 prose-p:leading-relaxed
+                prose-a:text-[#5BC8F0] prose-a:no-underline hover:prose-a:underline
+                prose-strong:text-slate-200
+                prose-code:text-[#5BC8F0] prose-code:bg-[#0D1520] prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:before:content-none prose-code:after:content-none
+                prose-pre:bg-[#0D1520] prose-pre:border prose-pre:border-[#2D3B4E] prose-pre:text-xs
+                prose-li:text-slate-300
+                prose-hr:border-[#2D3B4E]
+                prose-blockquote:border-l-[#5BC8F0] prose-blockquote:text-slate-400"
+              dangerouslySetInnerHTML={{ __html: html }}
+            />
           )}
         </div>
       </div>

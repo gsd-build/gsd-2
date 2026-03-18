@@ -62,7 +62,8 @@ function spawnCapture(cmd: string, args: string[], cwd: string): Promise<string>
 async function resolveTaskId(
   gsdDir: string,
   sliceId: string,
-  explicitTaskId?: string
+  explicitTaskId?: string,
+  milestoneId?: string
 ): Promise<string> {
   if (explicitTaskId) return explicitTaskId;
 
@@ -72,7 +73,19 @@ async function resolveTaskId(
     const match = planContent.match(/\b(T\d+)\b/);
     if (match) return match[1];
   } catch {
-    // Ignore — use fallback
+    // Ignore — try milestone subdir
+  }
+
+  if (milestoneId) {
+    try {
+      const planContent = await Bun.file(
+        join(gsdDir, "milestones", milestoneId, "slices", sliceId, `${sliceId}-PLAN.md`)
+      ).text();
+      const match = planContent.match(/\b(T\d+)\b/);
+      if (match) return match[1];
+    } catch {
+      // Ignore — use fallback
+    }
   }
 
   // Fallback: S01 → T01
@@ -113,6 +126,8 @@ export async function handleGsdFileRequest(
     return Response.json({ error: "sliceId query param is required" }, { status: 400 });
   }
 
+  const milestoneId = url.searchParams.get("milestoneId") ?? "";
+
   const typeParam = url.searchParams.get("type");
   if (!typeParam || !(VALID_TYPES as readonly string[]).includes(typeParam)) {
     return Response.json(
@@ -127,23 +142,36 @@ export async function handleGsdFileRequest(
 
   switch (type) {
     case "plan": {
-      const filePath = join(gsdDir, `${sliceId}-PLAN.md`);
-      content = await readFileSafe(filePath);
+      const rootPath = join(gsdDir, `${sliceId}-PLAN.md`);
+      content = await readFileSafe(rootPath);
+      if (content === "(file not found)" && milestoneId) {
+        const subPath = join(gsdDir, "milestones", milestoneId, "slices", sliceId, `${sliceId}-PLAN.md`);
+        content = await readFileSafe(subPath);
+      }
       break;
     }
     case "task": {
       const taskId = await resolveTaskId(
         gsdDir,
         sliceId,
-        url.searchParams.get("taskId") ?? undefined
+        url.searchParams.get("taskId") ?? undefined,
+        milestoneId || undefined
       );
-      const filePath = join(gsdDir, `${taskId}-SUMMARY.md`);
-      content = await readFileSafe(filePath);
+      const rootPath = join(gsdDir, `${taskId}-SUMMARY.md`);
+      content = await readFileSafe(rootPath);
+      if (content === "(file not found)" && milestoneId) {
+        const subPath = join(gsdDir, "milestones", milestoneId, "slices", sliceId, "tasks", `${taskId}-SUMMARY.md`);
+        content = await readFileSafe(subPath);
+      }
       break;
     }
     case "uat_results": {
-      const filePath = join(gsdDir, `${sliceId}-UAT-RESULTS.md`);
-      content = await readFileSafe(filePath);
+      const rootPath = join(gsdDir, `${sliceId}-UAT-RESULTS.md`);
+      content = await readFileSafe(rootPath);
+      if (content === "(file not found)" && milestoneId) {
+        const subPath = join(gsdDir, "milestones", milestoneId, "slices", sliceId, `${sliceId}-UAT-RESULTS.md`);
+        content = await readFileSafe(subPath);
+      }
       break;
     }
     case "diff": {
