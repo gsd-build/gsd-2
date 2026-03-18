@@ -50,7 +50,7 @@
   - Do: Implement a test/harness that loads the fixture, invokes the real post-unit hook/coordinator path or closest runtime entrypoint, confirms fact-check artifacts are written, evaluates reroute eligibility via real dispatch/recovery code, and captures planner prompt output using the actual prompt builders. Stub only the external evidence-fetch edge if needed for determinism; keep runtime orchestration real.
   - Verify: `node --test src/resources/extensions/gsd/tests/factcheck-runtime-fixture.test.ts`
   - Done when: One test run proves artifact writing, reroute eligibility, and corrected prompt capture in sequence using real runtime modules.
-- [ ] **T03: Document fixture contract and downstream run procedure** `est:30m`
+- [x] **T03: Document fixture contract and downstream run procedure** `est:30m`
   - Why: S02 should be able to use the fixture immediately rather than reverse-engineering the harness.
   - Files: `.gsd/milestones/M007-aos64t/slices/S01/tasks/T03-PLAN.md`, `.gsd/milestones/M007-aos64t/slices/S01/S01-SUMMARY.md` (later), inline comments or a small README near fixture assets if warranted
   - Do: Record the fixture shape, command entrypoint, expected artifacts, and what remains for S02. Keep it concrete and aligned with the created harness.
