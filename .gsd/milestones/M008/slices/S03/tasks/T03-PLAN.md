@@ -57,6 +57,12 @@ Complete the color audit by migrating all remaining 18 component files from raw 
 - Same substitution rules as T02: `emerald-*`/`green-*` → `success`, `amber-*`/`orange-*` → `warning`, `red-*` → `destructive`, `sky-*`/`blue-*` → `info`. All shade levels map to the same token. Preserve opacity modifiers. Include hover/group-hover/focus variants.
 - `web/app/globals.css` already defines the semantic tokens — no changes needed
 
+## Observability Impact
+
+- **Grep scan signal:** `rg "emerald-|amber-|red-[0-9]|sky-|orange-|green-[0-9]|blue-[0-9]" web/components/ -g "*.tsx" -g "*.ts" | wc -l` — returns `0` when all migrations are complete. Any non-zero count identifies files that still need migration.
+- **Build signal:** `npm run build:web-host` exit code — `0` confirms all semantic token references resolve. Non-zero exit with stderr naming an unknown utility class means a token is referenced but not defined in `globals.css`.
+- **Runtime failure mode:** If a semantic token class (e.g., `bg-success`) is used but not registered in `@theme inline`, the element renders with no color (transparent). Visible as missing background/text color in the UI. DevTools → computed styles shows no value for the expected property.
+
 ## Expected Output
 
 - All 18 files modified with semantic token classes replacing raw Tailwind accent colors

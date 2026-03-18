@@ -39,7 +39,7 @@ function statusPillClass(tone: ReturnType<typeof getStatusPresentation>["tone"])
     case "success":
       return "border-success/30 bg-success/10 text-success"
     case "warning":
-      return "border-amber-500/30 bg-amber-500/10 text-amber-300"
+      return "border-warning/30 bg-warning/10 text-warning"
     case "danger":
       return "border-destructive/30 bg-destructive/10 text-destructive"
     case "info":
@@ -54,7 +54,7 @@ function connectionDotClass(tone: ReturnType<typeof getStatusPresentation>["tone
     case "success":
       return "bg-success"
     case "warning":
-      return "bg-amber-400"
+      return "bg-warning"
     case "danger":
       return "bg-destructive"
     case "info":

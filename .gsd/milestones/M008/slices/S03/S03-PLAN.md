@@ -32,7 +32,7 @@
   - Verify: `rg "emerald-|amber-|red-[0-9]|sky-|orange-|green-[0-9]|blue-[0-9]" web/components/gsd/visualizer-view.tsx web/components/gsd/command-surface.tsx web/components/gsd/remaining-command-panels.tsx web/components/gsd/knowledge-captures-panel.tsx web/components/gsd/diagnostics-panels.tsx web/components/gsd/settings-panels.tsx` returns zero hits
   - Done when: All 6 files have zero raw Tailwind accent color classes
 
-- [ ] **T03: Migrate remaining 18 files and verify full build** `est:45m`
+- [x] **T03: Migrate remaining 18 files and verify full build** `est:45m`
   - Why: R115 — completes the color audit across all remaining files and proves the migration with a full grep scan and production build
   - Files: `web/components/gsd/chat-mode.tsx`, `web/components/gsd/projects-view.tsx`, `web/components/gsd/scope-badge.tsx`, `web/components/gsd/onboarding/step-ready.tsx`, `web/components/gsd/onboarding/step-optional.tsx`, `web/components/gsd/onboarding/step-authenticate.tsx`, `web/components/gsd/activity-view.tsx`, `web/components/gsd/update-banner.tsx`, `web/components/gsd/status-bar.tsx`, `web/components/gsd/sidebar.tsx`, `web/components/gsd/shell-terminal.tsx`, `web/components/gsd/roadmap.tsx`, `web/components/gsd/onboarding/step-dev-root.tsx`, `web/components/gsd/app-shell.tsx`, `web/components/ui/toast.tsx`, `web/components/gsd/terminal.tsx`, `web/components/gsd/onboarding/step-provider.tsx`, `web/components/gsd/file-content-viewer.tsx`
   - Do: Apply the same mechanical substitution rules as T02 to all 18 remaining files. After all files are migrated, run the full-repo grep scan to confirm zero remaining raw accent colors. Then run `npm run build:web-host` to confirm all semantic token classes resolve correctly in Tailwind v4.

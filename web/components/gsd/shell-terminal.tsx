@@ -447,7 +447,7 @@ export function ShellTerminal({ className, command, commandArgs, sessionPrefix, 
                   <span
                     className={cn(
                       "absolute -bottom-0.5 -right-0.5 h-1.5 w-1.5 rounded-full border border-terminal",
-                      tab.connected ? "bg-emerald-500" : "bg-muted-foreground/40",
+                      tab.connected ? "bg-success" : "bg-muted-foreground/40",
                     )}
                   />
                 </div>
@@ -459,7 +459,7 @@ export function ShellTerminal({ className, command, commandArgs, sessionPrefix, 
                       e.stopPropagation()
                       closeTab(tab.id)
                     }}
-                    className="absolute -right-0.5 -top-0.5 z-10 hidden h-3.5 w-3.5 items-center justify-center rounded-full bg-accent text-muted-foreground hover:bg-red-500/20 hover:text-red-400 group-hover:flex"
+                    className="absolute -right-0.5 -top-0.5 z-10 hidden h-3.5 w-3.5 items-center justify-center rounded-full bg-accent text-muted-foreground hover:bg-destructive/20 hover:text-destructive group-hover:flex"
                     title="Kill terminal"
                   >
                     <X className="h-2 w-2" />

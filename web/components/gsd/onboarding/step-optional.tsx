@@ -32,7 +32,7 @@ export function StepOptional({ sections, onBack, onNext }: StepOptionalProps) {
 
       {configuredCount > 0 && (
         <div className="mt-4">
-          <Badge variant="outline" className="border-emerald-500/20 bg-emerald-500/[0.06] text-emerald-300">
+          <Badge variant="outline" className="border-success/20 bg-success/[0.06] text-success">
             {configuredCount} of {sections.length} configured
           </Badge>
         </div>
@@ -47,7 +47,7 @@ export function StepOptional({ sections, onBack, onNext }: StepOptionalProps) {
             className={cn(
               "flex items-start gap-4 rounded-xl border px-4 py-4 transition-colors",
               section.configured
-                ? "border-emerald-500/15 bg-emerald-500/[0.04]"
+                ? "border-success/15 bg-success/[0.04]"
                 : "border-border/50 bg-card/40",
             )}
             data-testid={`onboarding-optional-${section.id}`}
@@ -57,7 +57,7 @@ export function StepOptional({ sections, onBack, onNext }: StepOptionalProps) {
               className={cn(
                 "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full",
                 section.configured
-                  ? "bg-emerald-500/20 text-emerald-400"
+                  ? "bg-success/20 text-success"
                   : "bg-foreground/[0.06] text-muted-foreground",
               )}
             >
@@ -78,7 +78,7 @@ export function StepOptional({ sections, onBack, onNext }: StepOptionalProps) {
                       className={cn(
                         "text-[11px]",
                         section.configured
-                          ? "border-emerald-500/20 text-emerald-300/80"
+                          ? "border-success/20 text-success/80"
                           : "border-border/60 text-muted-foreground",
                       )}
                     >

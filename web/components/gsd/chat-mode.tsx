@@ -606,7 +606,7 @@ function MarkdownContent({ content }: { content: string }) {
             return (
               <a
                 href={href}
-                className="text-blue-400 underline underline-offset-2 hover:text-blue-300 transition-colors"
+                className="text-info underline underline-offset-2 hover:text-info transition-colors"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -2013,20 +2013,20 @@ function ToolExecutionBlock({ tool }: { tool: CompletedToolExecution }) {
           className={cn(
             "w-full rounded-lg border px-3 py-2 text-left text-xs transition-colors",
             isError
-              ? "border-red-500/30 bg-red-500/5 hover:bg-red-500/10"
+              ? "border-destructive/30 bg-destructive/5 hover:bg-destructive/10"
               : "border-border/40 bg-muted/20 hover:bg-muted/30",
           )}
         >
           {/* Header */}
           <div className="flex items-center gap-2">
-            <span className={cn("flex-shrink-0", isError ? "text-red-400" : "text-muted-foreground/60")}>
+            <span className={cn("flex-shrink-0", isError ? "text-destructive" : "text-muted-foreground/60")}>
               {icon}
             </span>
-            <span className={cn("font-mono font-medium", isError ? "text-red-400" : "text-muted-foreground")}>
+            <span className={cn("font-mono font-medium", isError ? "text-destructive" : "text-muted-foreground")}>
               {label}
             </span>
             {shortPath && (
-              <span className="truncate font-mono text-blue-400/80">{shortPath}</span>
+              <span className="truncate font-mono text-info/80">{shortPath}</span>
             )}
             {bashCommand && !shortPath && (
               <span className="truncate font-mono text-muted-foreground/70">{bashCommand.length > 60 ? bashCommand.slice(0, 60) + "…" : bashCommand}</span>
@@ -2048,8 +2048,8 @@ function ToolExecutionBlock({ tool }: { tool: CompletedToolExecution }) {
                     key={i}
                     className={cn(
                       "whitespace-pre",
-                      isAdd && "bg-green-500/10 text-green-400",
-                      isRemove && "bg-red-500/10 text-red-400",
+                      isAdd && "bg-success/10 text-success",
+                      isRemove && "bg-destructive/10 text-destructive",
                       isContext && "text-muted-foreground/60",
                       !isAdd && !isRemove && !isContext && "text-muted-foreground/40",
                     )}
@@ -2070,7 +2070,7 @@ function ToolExecutionBlock({ tool }: { tool: CompletedToolExecution }) {
 
           {/* Error message */}
           {expanded && isError && resultText && (
-            <div className="mt-2 rounded-md border border-red-500/20 bg-red-500/5 p-2 text-[11px] text-red-400 whitespace-pre-wrap">
+            <div className="mt-2 rounded-md border border-destructive/20 bg-destructive/5 p-2 text-[11px] text-destructive whitespace-pre-wrap">
               {resultText}
             </div>
           )}
@@ -2118,8 +2118,8 @@ function ThinkingIndicator({ content, isStreaming }: { content: string; isStream
           <div className="flex items-center gap-2">
             {isStreaming && (
               <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400/60" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-400" />
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning/60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
               </span>
             )}
             <span className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">
@@ -2337,7 +2337,7 @@ export function ChatPane({ className, onOpenAction }: ChatPaneProps) {
                       {state.activeToolExecution.name}
                     </span>
                     {state.activeToolExecution.args?.path && (
-                      <span className="font-mono text-xs text-blue-400/80 truncate">
+                      <span className="font-mono text-xs text-info/80 truncate">
                         {String(state.activeToolExecution.args.path)}
                       </span>
                     )}

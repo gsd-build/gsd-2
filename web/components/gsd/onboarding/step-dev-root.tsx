@@ -89,7 +89,7 @@ export function StepDevRoot({ onNext, onBack }: StepDevRootProps) {
           placeholder="/Users/you/Projects"
           className={cn(
             "h-11 font-mono text-sm",
-            error && "border-red-500/50 focus-visible:ring-red-500/30",
+            error && "border-destructive/50 focus-visible:ring-destructive/30",
           )}
           data-testid="onboarding-devroot-input"
           autoFocus
@@ -101,7 +101,7 @@ export function StepDevRoot({ onNext, onBack }: StepDevRootProps) {
         />
 
         {error && (
-          <p className="text-sm text-red-400" role="alert">
+          <p className="text-sm text-destructive" role="alert">
             {error}
           </p>
         )}

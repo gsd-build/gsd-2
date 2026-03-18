@@ -45,22 +45,22 @@ interface ProjectMetadata {
 const KIND_CONFIG: Record<ProjectDetectionKind, { label: string; className: string; icon: typeof FolderOpen }> = {
   "active-gsd": {
     label: "Active",
-    className: "bg-emerald-500/15 text-emerald-400 border-emerald-500/25",
+    className: "bg-success/15 text-success border-success/25",
     icon: Layers,
   },
   "empty-gsd": {
     label: "Initialized",
-    className: "bg-sky-500/15 text-sky-400 border-sky-500/25",
+    className: "bg-info/15 text-info border-info/25",
     icon: FolderOpen,
   },
   brownfield: {
     label: "Existing",
-    className: "bg-amber-500/15 text-amber-400 border-amber-500/25",
+    className: "bg-warning/15 text-warning border-warning/25",
     icon: GitBranch,
   },
   "v1-legacy": {
     label: "Legacy v1",
-    className: "bg-orange-500/15 text-orange-400 border-orange-500/25",
+    className: "bg-warning/15 text-warning border-warning/25",
     icon: ArrowUpCircle,
   },
   blank: {
@@ -571,7 +571,7 @@ function FolderPickerDialog({
             )}
 
             {error && (
-              <div className="px-3 py-4 text-center text-xs text-red-400">{error}</div>
+              <div className="px-3 py-4 text-center text-xs text-destructive">{error}</div>
             )}
 
             {!loading && !error && (
@@ -689,7 +689,7 @@ function DevRootSetup({ onSaved, currentRoot }: { onSaved: (root: string) => voi
             {saving ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : success ? (
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+              <CheckCircle2 className="h-3.5 w-3.5 text-success" />
             ) : (
               <>
                 <FolderOpen className="h-3.5 w-3.5" />
@@ -699,8 +699,8 @@ function DevRootSetup({ onSaved, currentRoot }: { onSaved: (root: string) => voi
           </Button>
         </div>
 
-        {error && <p className="text-xs text-red-400">{error}</p>}
-        {success && <p className="text-xs text-emerald-400">Dev root updated</p>}
+        {error && <p className="text-xs text-destructive">{error}</p>}
+        {success && <p className="text-xs text-success">Dev root updated</p>}
 
         <FolderPickerDialog
           open={pickerOpen}
@@ -742,7 +742,7 @@ function DevRootSetup({ onSaved, currentRoot }: { onSaved: (root: string) => voi
           )}
         </Button>
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
 
         <FolderPickerDialog
           open={pickerOpen}

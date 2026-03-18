@@ -97,7 +97,7 @@ export function StepAuthenticate({
           className={`mt-5 flex items-start gap-3 rounded-xl border px-4 py-3.5 text-sm ${
             lastValidation.status === "failed"
               ? "border-destructive/25 bg-destructive/10 text-destructive"
-              : "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+              : "border-success/25 bg-success/10 text-success"
           }`}
           data-testid="onboarding-validation-message"
         >
@@ -343,9 +343,9 @@ export function StepAuthenticate({
 
       {/* Success state */}
       {canProceed && (
-        <div className="mt-6 flex flex-col items-center gap-4 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-6 py-8 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/20">
-            <ShieldCheck className="h-6 w-6 text-emerald-400" />
+        <div className="mt-6 flex flex-col items-center gap-4 rounded-xl border border-success/20 bg-success/[0.06] px-6 py-8 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full border border-success/30 bg-success/20">
+            <ShieldCheck className="h-6 w-6 text-success" />
           </div>
           <div>
             <div className="text-lg font-semibold text-foreground">{provider.label} is ready</div>

@@ -8,15 +8,15 @@ function EventIcon({ type }: { type: TerminalLineType }) {
   const baseClass = "h-4 w-4"
   switch (type) {
     case "system":
-      return <Clock className={cn(baseClass, "text-blue-400")} />
+      return <Clock className={cn(baseClass, "text-info")} />
     case "success":
-      return <CheckCircle2 className={cn(baseClass, "text-emerald-400")} />
+      return <CheckCircle2 className={cn(baseClass, "text-success")} />
     case "error":
-      return <AlertCircle className={cn(baseClass, "text-red-400")} />
+      return <AlertCircle className={cn(baseClass, "text-destructive")} />
     case "output":
       return <Terminal className={cn(baseClass, "text-foreground")} />
     case "input":
-      return <Play className={cn(baseClass, "text-amber-400")} />
+      return <Play className={cn(baseClass, "text-warning")} />
     default:
       return <Clock className={cn(baseClass, "text-muted-foreground")} />
   }

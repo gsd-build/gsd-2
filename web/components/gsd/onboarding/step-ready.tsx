@@ -14,11 +14,11 @@ export function StepReady({ providerLabel, onFinish }: StepReadyProps) {
     <div className="flex flex-col items-center text-center">
       {/* Success icon */}
       <div className="relative mb-8">
-        <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-emerald-500/30 bg-emerald-500/10 shadow-lg shadow-emerald-500/5">
-          <CheckCircle2 className="h-10 w-10 text-emerald-400" strokeWidth={1.5} />
+        <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-success/30 bg-success/10 shadow-lg shadow-success/5">
+          <CheckCircle2 className="h-10 w-10 text-success" strokeWidth={1.5} />
         </div>
-        <div className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full border border-emerald-500/20 bg-emerald-500/15">
-          <Zap className="h-3.5 w-3.5 text-emerald-400" />
+        <div className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full border border-success/20 bg-success/15">
+          <Zap className="h-3.5 w-3.5 text-success" />
         </div>
       </div>
 

@@ -37,16 +37,16 @@ function phasePresentation(phase: string): { label: string; tone: PhaseTone } {
 const tonePill: Record<PhaseTone, string> = {
   success: "bg-success/15 text-success",
   active: "bg-primary/15 text-primary",
-  warning: "bg-amber-500/15 text-amber-400",
-  info: "bg-sky-500/15 text-sky-400",
+  warning: "bg-warning/15 text-warning",
+  info: "bg-info/15 text-info",
   muted: "bg-muted text-muted-foreground",
 }
 
 const toneDot: Record<PhaseTone, string> = {
   success: "bg-success",
   active: "bg-primary",
-  warning: "bg-amber-400",
-  info: "bg-sky-400",
+  warning: "bg-warning",
+  info: "bg-info",
   muted: "bg-muted-foreground/50",
 }
 

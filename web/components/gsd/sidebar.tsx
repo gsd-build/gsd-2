@@ -56,10 +56,10 @@ import { NewMilestoneDialog } from "@/components/gsd/new-milestone-dialog"
 
 const StatusIcon = ({ status }: { status: ItemStatus }) => {
   if (status === "done") {
-    return <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+    return <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
   }
   if (status === "in-progress") {
-    return <Play className="h-4 w-4 shrink-0 text-amber-400" />
+    return <Play className="h-4 w-4 shrink-0 text-warning" />
   }
   return <Circle className="h-4 w-4 shrink-0 text-muted-foreground/50" />
 }

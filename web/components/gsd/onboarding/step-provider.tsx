@@ -90,7 +90,7 @@ export function StepProvider({ providers, selectedId, onSelect, onNext, onBack }
                   <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
                     {provider.configured ? (
                       <>
-                        <ShieldCheck className="h-3 w-3 text-emerald-400/80" />
+                        <ShieldCheck className="h-3 w-3 text-success/80" />
                         <span>{configuredViaLabel(provider.configuredVia)}</span>
                       </>
                     ) : (

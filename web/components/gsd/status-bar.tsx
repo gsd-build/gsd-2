@@ -27,7 +27,7 @@ function toneClass(tone: ReturnType<typeof getStatusPresentation>["tone"]): stri
     case "success":
       return "text-success"
     case "warning":
-      return "text-amber-300"
+      return "text-warning"
     case "danger":
       return "text-destructive"
     default:
@@ -105,7 +105,7 @@ export function StatusBar() {
         )}
         {!isConnecting && (
           <div
-            className={cn("hidden items-center gap-1.5 xl:flex", validationCount > 0 ? "text-amber-300" : "text-muted-foreground")}
+            className={cn("hidden items-center gap-1.5 xl:flex", validationCount > 0 ? "text-warning" : "text-muted-foreground")}
             data-testid="status-bar-validation-count"
           >
             <AlertTriangle className="h-3 w-3 shrink-0" />

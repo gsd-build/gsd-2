@@ -226,7 +226,7 @@ export function Terminal({ className }: TerminalProps) {
               status.tone === "success"
                 ? "bg-success"
                 : status.tone === "warning"
-                  ? "bg-amber-400"
+                  ? "bg-warning"
                   : status.tone === "danger"
                     ? "bg-destructive"
                     : "bg-muted-foreground/60",

@@ -300,7 +300,7 @@ function MarkdownViewer({ content, filepath }: { content: string; filepath: stri
             },
             a({ href, children }) {
               return (
-                <a href={href} className="text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">
+                <a href={href} className="text-info hover:underline" target="_blank" rel="noopener noreferrer">
                   {children}
                 </a>
               )

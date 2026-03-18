@@ -80,9 +80,9 @@ export function UpdateBanner() {
       data-testid="update-banner"
       className={cn(
         "flex items-center gap-3 border-b px-4 py-2 text-xs",
-        isSuccess && "border-emerald-500/20 bg-emerald-500/10 text-emerald-400",
+        isSuccess && "border-success/20 bg-success/10 text-success",
         isError && "border-destructive/20 bg-destructive/10 text-destructive",
-        !isSuccess && !isError && "border-orange-500/20 bg-orange-500/10 text-orange-300",
+        !isSuccess && !isError && "border-warning/20 bg-warning/10 text-warning",
       )}
     >
       {isSuccess ? (
@@ -125,7 +125,7 @@ export function UpdateBanner() {
               onClick={() => void handleUpdate()}
               disabled={triggering}
               className={cn(
-                "flex-shrink-0 rounded border border-orange-500/30 bg-background px-2 py-0.5 text-xs font-medium text-orange-300 transition-colors hover:bg-orange-500/10",
+                "flex-shrink-0 rounded border border-warning/30 bg-background px-2 py-0.5 text-xs font-medium text-warning transition-colors hover:bg-warning/10",
                 triggering && "cursor-not-allowed opacity-50",
               )}
               data-testid="update-banner-action"
