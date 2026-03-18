@@ -410,8 +410,14 @@ async function* parseSSE(response: Response): AsyncGenerator<Record<string, unkn
 	while (true) {
 		const { done, value } = await reader.read();
 		if (done) break;
-		buffer += decoder.decode(value, { stream: true });
 
+		const decoded = decoder.decode(value, { stream: true });
+		// Avoid appending to an empty buffer — assign directly to skip the
+		// string concatenation and its intermediate allocation.
+		buffer = buffer ? buffer + decoded : decoded;
+
+		// Consume all complete SSE messages (delimited by \n\n) so the
+		// buffer only ever holds one partial message between reads.
 		let idx = buffer.indexOf("\n\n");
 		while (idx !== -1) {
 			const chunk = buffer.slice(0, idx);
