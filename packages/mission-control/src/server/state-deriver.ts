@@ -142,6 +142,25 @@ export function parseGSD2State(raw: string): GSD2ProjectState {
     // ignore
   }
 
+  // Fallback: parse markdown-format STATE.md (GSD v1/v2 prose style)
+  // Handles: **Active Milestone:** M002 — Name  and  **Active Slice:** S01
+  if (Object.keys(lastYamlData).length === 0) {
+    const mdMilestone = raw.match(/\*\*Active Milestone:\*\*\s*(M\d+)/i);
+    const mdSlice = raw.match(/\*\*Active Slice:\*\*\s*(S\d+)/i);
+    const mdTask = raw.match(/\*\*Active Task:\*\*\s*(T\d+)/i);
+    const mdPhase = raw.match(/\*\*Phase:\*\*\s*([^\n\r]+)/i);
+    const mdUpdated = raw.match(/\*\*Last Updated:\*\*\s*([^\n\r]+)/i);
+    if (mdMilestone) {
+      lastYamlData = {
+        active_milestone: mdMilestone[1].toUpperCase(),
+        active_slice: mdSlice ? mdSlice[1].toUpperCase() : DEFAULT_GSD2_PROJECT_STATE.active_slice,
+        active_task: mdTask ? mdTask[1].toUpperCase() : DEFAULT_GSD2_PROJECT_STATE.active_task,
+        status: mdPhase ? mdPhase[1].trim() : DEFAULT_GSD2_PROJECT_STATE.status,
+        last_updated: mdUpdated ? mdUpdated[1].trim() : DEFAULT_GSD2_PROJECT_STATE.last_updated,
+      };
+    }
+  }
+
   const d = lastYamlData;
 
   return {
