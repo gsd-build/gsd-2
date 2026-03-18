@@ -1439,6 +1439,23 @@ async function dispatchNextUnit(
 
   await runSecretsGate();
 
+  // ── Interactive discussion gate ──
+  // If the active milestone needs discussion (has CONTEXT-DRAFT.md but no roadmap),
+  // stop auto-mode and route to the interactive discussion flow. The guided-flow
+  // handles needs-discussion correctly — it just needs to be called instead of
+  // letting the dispatch table fire "needs-discussion → stop" (#1170).
+  if (state.phase === "needs-discussion") {
+    if (s.currentUnit) {
+      await closeoutUnit(ctx, s.basePath, s.currentUnit.type, s.currentUnit.id, s.currentUnit.startedAt, buildSnapshotOpts(s.currentUnit.type, s.currentUnit.id));
+    }
+    const cmdCtx = s.cmdCtx!;
+    const basePath = s.basePath;
+    await stopAuto(ctx, pi, `${mid}: ${midTitle} needs discussion before planning.`);
+    const { showSmartEntry } = await import("./guided-flow.js");
+    await showSmartEntry(cmdCtx, pi, basePath);
+    return;
+  }
+
   // ── Dispatch table ──
   const dispatchResult = await resolveDispatch({ basePath: s.basePath, mid, midTitle: midTitle!, state, prefs,
   });
