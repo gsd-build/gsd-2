@@ -185,6 +185,18 @@ export {
 } from "./auto/session.js";
 export type { CompletedUnit, CurrentUnit, UnitRouting, StartModel } from "./auto/session.js";
 
+// ── ENCAPSULATION INVARIANT ─────────────────────────────────────────────────
+// ALL mutable auto-mode state lives in the AutoSession class (auto/session.ts).
+// This file must NOT declare module-level `let` or `var` variables for state.
+// The single `s` instance below is the only mutable module-level binding.
+//
+// When adding features or fixing bugs:
+//   - New mutable state → add a property to AutoSession, not a module-level variable
+//   - New constants → module-level `const` is fine (immutable)
+//   - New state that needs reset on stopAuto → add to AutoSession.reset()
+//
+// Tests in auto-session-encapsulation.test.ts enforce this invariant.
+// ─────────────────────────────────────────────────────────────────────────────
 const s = new AutoSession();
 
 /** Throttle STATE.md rebuilds — at most once per 30 seconds */

@@ -8,6 +8,12 @@
  * - toJSON() provides diagnostic snapshots
  * - grep `s.` shows every state access
  * - Constructable for testing
+ *
+ * MAINTENANCE RULE: All new mutable auto-mode state MUST be added here as a
+ * class property, not as a module-level variable in auto.ts. If the state
+ * needs clearing on stop, add it to reset(). Tests in
+ * auto-session-encapsulation.test.ts enforce that auto.ts has no module-level
+ * `let` or `var` declarations.
  */
 
 import type { ExtensionCommandContext } from "@gsd/pi-coding-agent";
