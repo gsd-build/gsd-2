@@ -32,6 +32,6 @@ describe("fs-api read/write routes", () => {
 
   test("server.ts passes repoRoot to handleFsRequest", () => {
     const src = readFileSync(join(import.meta.dir, "../src/server.ts"), "utf8");
-    expect(src).toContain("handleFsRequest(req, url, repoRoot)");
+    expect(src).toContain("handleFsRequest(req, url, projectRoot)");
   });
 });

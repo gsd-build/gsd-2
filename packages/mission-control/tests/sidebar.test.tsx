@@ -33,7 +33,7 @@ describe("GsdLogo", () => {
     const result = GsdLogo({});
     const json = JSON.stringify(result);
     expect(json).toContain("img");
-    expect(json).toContain("gsd-logo-2000-transparent.svg");
+    expect(json).toContain("gsd-2-mission-control-logo.svg");
   });
 
   it("has alt text for accessibility", () => {

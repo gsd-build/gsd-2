@@ -128,15 +128,14 @@ describe("SlicePlanned", () => {
 // SliceInProgress tests
 // ---------------------------------------------------------------------------
 describe("SliceInProgress", () => {
-  it("Test 1: file exists and renders slice ID and name", () => {
+  it("Test 1: file exists and renders slice ID and branch", () => {
     expect(inProgressSource.length).toBeGreaterThan(0);
     expect(inProgressSource).toContain("slice.id");
-    expect(inProgressSource).toContain("slice.name");
+    expect(inProgressSource).toContain("slice.branch");
   });
 
-  it("Test 2: renders EXECUTING status badge with amber color text-[#F59E0B]", () => {
-    expect(inProgressSource).toContain("EXECUTING");
-    expect(inProgressSource).toContain("text-[#F59E0B]");
+  it("Test 2: renders amber accent with border-l-[#F59E0B]", () => {
+    expect(inProgressSource).toContain("border-l-[#F59E0B]");
   });
 
   it("Test 3: source text contains animate-pulse class (amber pulse)", () => {

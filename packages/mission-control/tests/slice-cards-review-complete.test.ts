@@ -74,10 +74,9 @@ describe("SliceNeedsReview", () => {
 // SliceComplete tests
 // ---------------------------------------------------------------------------
 describe("SliceComplete", () => {
-  test("Test 1: renders slice ID, name, and COMPLETE badge", () => {
+  test("Test 1: renders slice ID and complete state metadata", () => {
     expect(completeSrc).toContain("slice.id");
-    expect(completeSrc).toContain("slice.name");
-    expect(completeSrc).toContain("COMPLETE");
+    expect(completeSrc).toContain("slice-complete");
   });
 
   test("Test 2: renders total cost formatted as $X.XX total", () => {

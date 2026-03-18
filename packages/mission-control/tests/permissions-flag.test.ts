@@ -18,7 +18,7 @@ function createMockProcess() {
 }
 
 describe("ClaudeProcessManager --dangerously-skip-permissions", () => {
-  it("includes --dangerously-skip-permissions by default (skipPermissions undefined)", async () => {
+  it("does not include --dangerously-skip-permissions (gsd binary handles permissions natively)", async () => {
     const calls: string[][] = [];
     const pm = new ClaudeProcessManager("/tmp/test");
     const mockProc = createMockProcess();
@@ -30,7 +30,7 @@ describe("ClaudeProcessManager --dangerously-skip-permissions", () => {
 
     await pm.sendMessage("hello");
     expect(calls.length).toBe(1);
-    expect(calls[0]).toContain("--dangerously-skip-permissions");
+    expect(calls[0]).not.toContain("--dangerously-skip-permissions");
   });
 
   it("omits --dangerously-skip-permissions when skipPermissions is false", async () => {
@@ -48,7 +48,7 @@ describe("ClaudeProcessManager --dangerously-skip-permissions", () => {
     expect(calls[0]).not.toContain("--dangerously-skip-permissions");
   });
 
-  it("includes --dangerously-skip-permissions when skipPermissions is true", async () => {
+  it("does not include --dangerously-skip-permissions even when skipPermissions is true (gsd handles it)", async () => {
     const calls: string[][] = [];
     const pm = new ClaudeProcessManager("/tmp/test", { skipPermissions: true });
     const mockProc = createMockProcess();
@@ -60,7 +60,7 @@ describe("ClaudeProcessManager --dangerously-skip-permissions", () => {
 
     await pm.sendMessage("hello");
     expect(calls.length).toBe(1);
-    expect(calls[0]).toContain("--dangerously-skip-permissions");
+    expect(calls[0]).not.toContain("--dangerously-skip-permissions");
   });
 
   it("preserves parent_tool_use_id in forwarded events", async () => {

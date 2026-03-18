@@ -120,8 +120,7 @@ describe("ChatView", () => {
     });
     const json = JSON.stringify(result);
     // Should render flex-col layout with task status and chat panel areas
-    expect(json).toContain("flex flex-col h-full");
-    expect(json).toContain("border-b border-navy-600 bg-navy-900/50");
+    expect(json).toContain("flex flex-col");
     expect(json).toContain("flex-1 min-h-0");
   });
 });

@@ -14,7 +14,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..");
-const SRC_TAURI = join(REPO_ROOT, "src-tauri");
+const SRC_TAURI = join(import.meta.dir, "..", "src-tauri");
 
 // ---------------------------------------------------------------------------
 // TAURI-02: Bun process lifecycle

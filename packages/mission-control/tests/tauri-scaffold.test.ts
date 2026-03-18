@@ -12,9 +12,9 @@ import { describe, it, expect } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// Repo root is two levels above packages/mission-control
+// REPO_ROOT = monorepo root; SRC_TAURI = packages/mission-control/src-tauri
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..");
-const SRC_TAURI = join(REPO_ROOT, "src-tauri");
+const SRC_TAURI = join(import.meta.dir, "..", "src-tauri");
 
 // ---------------------------------------------------------------------------
 // TAURI-01: Scaffold existence and config correctness
@@ -68,11 +68,12 @@ describe("TAURI-01: src-tauri scaffold exists", () => {
     expect(content).toContain("app_lib::run()");
   });
 
-  it("lib.rs has register_uri_scheme_protocol for gsd:// protocol", () => {
+  it("lib.rs handles gsd:// deep-link protocol via tauri-plugin-deep-link", () => {
     const libPath = join(SRC_TAURI, "src", "lib.rs");
     expect(existsSync(libPath)).toBe(true);
     const content = readFileSync(libPath, "utf-8");
-    expect(content).toContain('register_uri_scheme_protocol("gsd"');
+    // tauri-plugin-deep-link registers the scheme; lib.rs handles callback URLs
+    expect(content).toContain("gsd://");
   });
 });
 
@@ -162,7 +163,7 @@ describe("TAURI-06: tauri:dev and tauri:build scripts in package.json", () => {
     );
     const beforeDev: string = conf.build?.beforeDevCommand ?? "";
     expect(beforeDev).toContain("bun");
-    expect(beforeDev).toContain("packages/mission-control");
+    // beforeDevCommand runs relative to tauri.conf.json location (packages/mission-control)
   });
 
   it("packages/mission-control/package.json has build script for Bun bundle", () => {

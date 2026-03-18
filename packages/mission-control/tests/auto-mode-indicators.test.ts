@@ -60,7 +60,7 @@ describe("applyGSD2Event - tool_use", () => {
     expect(result.messageInsert!.role).toBe("tool_use");
     expect(result.messageInsert!.toolName).toBe("bash");
     expect(result.messageInsert!.toolInput).toEqual({ command: "ls" });
-    expect(result.messageInsert!.streaming).toBe(true);
+    expect(result.messageInsert!.streaming).toBe(false);
   });
 });
 

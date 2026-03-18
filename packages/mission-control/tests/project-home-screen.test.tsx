@@ -28,7 +28,7 @@ describe("Developer empty state", () => {
     const html = renderToString(
       React.createElement(ProjectHomeScreen, { builderMode: false, projects: [] })
     );
-    expect(html).toContain("Open Folder");
+    expect(html).toContain("Open Project");
   });
 });
 

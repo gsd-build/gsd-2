@@ -87,9 +87,9 @@ describe("InlineReadPanel.tsx — source-text checks", () => {
     expect(src).toContain("isLoading");
   });
 
-  test("Test 11: renders close button with aria-label='Close panel'", () => {
+  test("Test 11: renders close button with aria-label='Close'", () => {
     src = src ?? readFileSync(panelPath, "utf-8");
-    expect(src).toContain('aria-label="Close panel"');
+    expect(src).toContain('aria-label="Close"');
   });
 
   test("Test 12: has font-mono text-xs for content display", () => {
@@ -123,5 +123,48 @@ describe("MilestoneView.tsx — InlineReadPanel wiring", () => {
     src = src ?? readFileSync(viewPath, "utf-8");
     expect(src).toContain("view_diff");
     expect(src).toContain("/api/gsd-file");
+  });
+});
+
+// ── Task 3: gsd-file-api.ts — milestoneId & dual-path fallback ──────────────
+
+describe("gsd-file-api.ts — milestoneId and dual-path fallback", () => {
+  const apiPath = resolve(ROOT, "src/server/gsd-file-api.ts");
+  let src: string;
+
+  test("Test 17: milestoneId query param is accepted without error", () => {
+    src = readFileSync(apiPath, "utf-8");
+    expect(src).toContain("milestoneId");
+    expect(src).toMatch(/searchParams\.get\(["']milestoneId["']\)/);
+  });
+
+  test("Test 18: type=plan tries root path, falls back to milestone subdir when root returns '(file not found)'", () => {
+    src = src ?? readFileSync(apiPath, "utf-8");
+    // Root path: join(gsdDir, `${sliceId}-PLAN.md`)
+    expect(src).toMatch(/join\(gsdDir,\s*`\$\{sliceId\}-PLAN\.md`\)/);
+    // Fallback check: content === "(file not found)" && milestoneId
+    expect(src).toMatch(/content\s*===\s*["']\(file not found\)["']\s*&&\s*milestoneId/);
+    // Subdir path: milestones/{milestoneId}/slices/{sliceId}
+    expect(src).toContain("milestones");
+    expect(src).toMatch(/join\(gsdDir,\s*["']milestones["']/);
+  });
+
+  test("Test 19: type=task tries root path, falls back with milestoneId", () => {
+    src = src ?? readFileSync(apiPath, "utf-8");
+    // Root path for task: join(gsdDir, `${taskId}-SUMMARY.md`)
+    expect(src).toMatch(/join\(gsdDir,\s*`\$\{taskId\}-SUMMARY\.md`\)/);
+    // Fallback path includes milestones + slices + tasks subdirectories
+    expect(src).toMatch(/["']tasks["']/);
+    expect(src).toMatch(/SUMMARY\.md/);
+  });
+
+  test("Test 20: type=uat_results tries root path, falls back with milestoneId", () => {
+    src = src ?? readFileSync(apiPath, "utf-8");
+    // Root path: join(gsdDir, `${sliceId}-UAT-RESULTS.md`)
+    expect(src).toMatch(/join\(gsdDir,\s*`\$\{sliceId\}-UAT-RESULTS\.md`\)/);
+    // Fallback: milestones/{milestoneId}/slices/{sliceId}/{sliceId}-UAT-RESULTS.md
+    // The case "uat_results" block has both root and subdir path attempts
+    expect(src).toMatch(/case\s*["']uat_results["']/);
+    expect(src).toContain("UAT-RESULTS.md");
   });
 });

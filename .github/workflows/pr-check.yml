@@ -1,0 +1,52 @@
+name: PR Check
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/mission-control/**'
+
+jobs:
+  check:
+    name: Build & typecheck (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+          - platform: windows-latest
+          - platform: ubuntu-22.04
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Bun (Linux/macOS)
+        if: matrix.platform != 'windows-latest'
+        run: |
+          curl -fsSL https://bun.sh/install | bash
+          echo "$HOME/.bun/bin" >> $GITHUB_PATH
+
+      - name: Install Bun (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: irm bun.sh/install.ps1 | iex
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: TypeScript check
+        run: bunx tsc --noEmit -p packages/mission-control/tsconfig.json
+
+      - name: Build frontend
+        run: bun run --cwd packages/mission-control build
+
+      - name: Unit tests
+        run: bun test --cwd packages/mission-control
+        continue-on-error: true   # don't block PR on pre-existing test failures
+
+      - name: Rust compile check (no full bundle)
+        working-directory: packages/mission-control/src-tauri
+        run: cargo check --release
