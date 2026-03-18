@@ -37,7 +37,7 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: unmapped
 - Notes: Supersedes original R112 scope (which specified adding to ci.yml). User wants a separate workflow file.
 
-### R121 — File viewer/editor font size is configurable from settings and persists across sessions.
+### R121 — A settings panel control for file viewer and code editor font size, persisted in localStorage, applying to both the shiki code viewer and the CodeMirror editor tab.
 - Class: quality-attribute
 - Status: active
 - Description: A settings panel control for file viewer and code editor font size, persisted in localStorage, applying to both the shiki code viewer and the CodeMirror editor tab.
@@ -48,7 +48,7 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: unmapped
 - Notes: Follows the same localStorage + custom event pattern established by useTerminalFontSize in M008.
 
-### R122 — Full code editing experience via CodeMirror 6 with custom theme derived from existing design tokens.
+### R122 — The file content viewer gains an Edit tab powered by CodeMirror 6 (@uiw/react-codemirror) with a custom theme built from the project's existing oklch CSS design tokens. Supports multi-cursor, copy/paste, undo, syntax highlighting for all supported languages.
 - Class: core-capability
 - Status: active
 - Description: The file content viewer gains an Edit tab powered by CodeMirror 6 (@uiw/react-codemirror) with a custom theme built from the project's existing oklch CSS design tokens. Supports multi-cursor, copy/paste, undo, syntax highlighting for all supported languages.
@@ -59,7 +59,7 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: unmapped
 - Notes: Shiki stays for the View tab (zero style changes). CodeMirror only used in the Edit tab. Theme must look native to the existing design system.
 
-### R123 — Markdown files display a View tab (react-markdown rendered) and an Edit tab (CodeMirror raw).
+### R123 — Markdown files in the file viewer show two tabs — View (rendered via react-markdown, matching current appearance) and Edit (raw markdown in CodeMirror). Non-markdown files also get View/Edit tabs, with View using shiki syntax highlighting.
 - Class: core-capability
 - Status: active
 - Description: Markdown files in the file viewer show two tabs — View (rendered via react-markdown, matching current appearance) and Edit (raw markdown in CodeMirror). Non-markdown files also get View/Edit tabs, with View using shiki syntax highlighting.
@@ -70,7 +70,7 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: unmapped
 - Notes: react-markdown is already a dependency used in file-content-viewer.tsx and chat-mode.tsx.
 
-### R124 — POST /api/files writes file content with path validation and security constraints.
+### R124 — A POST handler on the existing /api/files route that accepts file path and content, validates the path is within the allowed root (no traversal), and writes the file to disk. Returns success/error status.
 - Class: core-capability
 - Status: active
 - Description: A POST handler on the existing /api/files route that accepts file path and content, validates the path is within the allowed root (no traversal), and writes the file to disk. Returns success/error status.
@@ -81,7 +81,7 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: unmapped
 - Notes: Must use the same resolveSecurePath validation the GET handler uses. File size limit applies.
 
-### R125 — Merge upstream v2.22→v2.28 (349+ commits), resolve all conflicts, both builds green.
+### R125 — Merge all upstream commits from v2.22.0 to v2.28.0 into the fork, resolving all file conflicts. npm run build and npm run build:web-host both exit 0. No conflict markers remain.
 - Class: core-capability
 - Status: active
 - Description: Merge all upstream commits from v2.22.0 to v2.28.0 into the fork, resolving all file conflicts. npm run build and npm run build:web-host both exit 0. No conflict markers remain.
@@ -92,7 +92,7 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: unmapped
 - Notes: Last merge (M003, v2.12→v2.22, 415 commits) was 9 slices. This one has significant refactoring (auto.ts→6 modules, commands.ts→5 modules, preferences.ts decomposed, doctor.ts decomposed).
 
-### R126 — Zero errors, warnings, or failing tests after merge.
+### R126 — After the upstream merge, all unit tests, integration tests, and type checks pass clean. No new warnings introduced. Both builds exit 0.
 - Class: quality-attribute
 - Status: active
 - Description: After the upstream merge, all unit tests, integration tests, and type checks pass clean. No new warnings introduced. Both builds exit 0.
@@ -103,7 +103,7 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: unmapped
 - Notes: Test suite includes unit, integration, and web contract tests.
 
-### R127 — Web UI for park/discard actions on in-progress milestones.
+### R127 — The web dashboard or roadmap surface exposes park and discard actions for in-progress milestones, matching the upstream TUI capability added in the v2.22→v2.28 window.
 - Class: core-capability
 - Status: active
 - Description: The web dashboard or roadmap surface exposes park and discard actions for in-progress milestones, matching the upstream TUI capability added in the v2.22→v2.28 window.
@@ -114,7 +114,7 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: unmapped
 - Notes: Upstream PR #1107 added park/discard actions.
 
-### R128 — Web UI for session picker (browse, select, resume sessions).
+### R128 — A web surface for the session picker that lets users browse available sessions, select one, and resume it — matching the upstream /gsd sessions TUI capability.
 - Class: core-capability
 - Status: active
 - Description: A web surface for the session picker that lets users browse available sessions, select one, and resume it — matching the upstream /gsd sessions TUI capability.
@@ -125,7 +125,7 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: unmapped
 - Notes: Upstream PR #721 added gsd sessions subcommand.
 
-### R129 — Web UI for /gsd keys — only if current settings UI is insufficient.
+### R129 — Evaluate whether the existing settings panels adequately cover the API key management capability added by upstream /gsd keys. Build a dedicated panel only if the current UI is insufficient.
 - Class: core-capability
 - Status: active
 - Description: Evaluate whether the existing settings panels adequately cover the API key management capability added by upstream /gsd keys. Build a dedicated panel only if the current UI is insufficient.
@@ -136,7 +136,7 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: unmapped
 - Notes: Conditional — may result in "no new UI needed" if existing panels suffice.
 
-### R130 — Separate web.yml CI workflow builds web host, runs web contract tests, validates packaging on ubuntu and macos.
+### R130 — A new .github/workflows/web.yml that runs npm run build:web-host, web contract tests, and npm run validate-pack independently from the existing ci.yml build job. Runs on both ubuntu-latest and macos-latest.
 - Class: quality-attribute
 - Status: active
 - Description: A new .github/workflows/web.yml that runs npm run build:web-host, web contract tests, and npm run validate-pack independently from the existing ci.yml build job. Runs on both ubuntu-latest and macos-latest.
@@ -147,7 +147,7 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: unmapped
 - Notes: Supersedes R112 which specified adding to ci.yml. User wants a separate workflow.
 
-### R131 — npm tarball includes dist/web/standalone so gsd --web works after npm install -g.
+### R131 — The published npm package includes the web standalone host in dist/web/standalone, so end users running npm install -g gsd-pi followed by gsd --web get a working browser workspace without any additional build steps.
 - Class: launchability
 - Status: active
 - Description: The published npm package includes the web standalone host in dist/web/standalone, so end users running npm install -g gsd-pi followed by gsd --web get a working browser workspace without any additional build steps.
@@ -158,7 +158,7 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: unmapped
 - Notes: package.json files field already includes "dist/web" but packaging needs verification with validate-pack.
 
-### R132 — All CI workflows pass green on push to main.
+### R132 — The existing ci.yml, build-native.yml, and new web.yml all pass on push to the main branch. Any failures are resolved before the milestone is complete.
 - Class: quality-attribute
 - Status: active
 - Description: The existing ci.yml, build-native.yml, and new web.yml all pass on push to the main branch. Any failures are resolved before the milestone is complete.
@@ -168,17 +168,6 @@ This file is the explicit capability and coverage contract for the project.
 - Supporting slices: M011/S01, M011/S02
 - Validation: unmapped
 - Notes: May require fixing issues surfaced by the new web CI job.
-
-### R133 — PWA install prompt with web manifest, service worker, and app shell caching on first --web launch.
-- Class: differentiator
-- Status: active
-- Description: The GSD web workspace is a PWA with a web app manifest, Serwist-powered service worker for app shell caching, and browser install prompt. Users can install GSD as a desktop app from the browser. No offline functionality required.
-- Why it matters: A PWA install gives users a native-app-like experience with a desktop icon, standalone window, and faster startup — without the overhead of Electron or Tauri.
-- Source: user
-- Primary owning slice: M011/S04
-- Supporting slices: none
-- Validation: unmapped
-- Notes: Uses Serwist (@serwist/next) for Next.js integration. App shell caching only — no offline API or content caching.
 
 ## Validated
 
@@ -468,6 +457,17 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: useTerminalFontSize() hook persists in localStorage, TerminalSizePanel in settings provides preset controls (11–16), ShellTerminal accepts fontSize prop threaded through DualTerminal, footer terminal excluded by omission (no fontSize prop), chat mode respects setting. npm run build:web-host passes.
 - Notes: Currently hardcoded `fontSize: 13` in shell-terminal.tsx and `text-sm` in terminal.tsx.
 
+### R133 — The GSD web workspace is a PWA with a web app manifest, Serwist-powered service worker for app shell caching, and browser install prompt. Users can install GSD as a desktop app from the browser. No offline functionality required.
+- Class: differentiator
+- Status: validated
+- Description: The GSD web workspace is a PWA with a web app manifest, Serwist-powered service worker for app shell caching, and browser install prompt. Users can install GSD as a desktop app from the browser. No offline functionality required.
+- Why it matters: A PWA install gives users a native-app-like experience with a desktop icon, standalone window, and faster startup — without the overhead of Electron or Tauri.
+- Source: user
+- Primary owning slice: M011/S01
+- Supporting slices: none
+- Validation: Validated by M011/S01: `npm run build:web-host` exits 0 with Serwist configured, `sw.js` (343 precached URLs, 15.3 MB) exists in `dist/web/standalone/public/`, `manifest.json` with display:standalone and 2 icon sizes present, browser DevTools confirms SW registration and manifest detection, install prompt banner renders and triggers native install dialog in Chrome. All 8 CLI checks + 3 browser checks pass.
+- Notes: Uses Serwist (@serwist/next) for Next.js integration. App shell caching only — no offline API or content caching.
+
 ## Deferred
 
 ### R021 — Add deeper analytics/history views beyond the live dashboard and activity surfaces required for the core web workflow.
@@ -527,7 +527,7 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: n/a
 - Notes: Local host + local agent bridge is the expected shape.
 
-### R034 — PWA offline functionality (full offline caching of routes and API responses).
+### R034 — Service worker caches API responses and routes for offline use.
 - Class: anti-feature
 - Status: out-of-scope
 - Description: Service worker caches API responses and routes for offline use.
@@ -538,7 +538,7 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: n/a
 - Notes: PWA scope is limited to install prompt and app shell caching.
 
-### R035 — Web UI for headless query, onboarding wizard, and export --html.
+### R035 — Browser surfaces for gsd headless query, project onboarding detection wizard, and /gsd export --html --all.
 - Class: core-capability
 - Status: out-of-scope
 - Description: Browser surfaces for gsd headless query, project onboarding detection wizard, and /gsd export --html --all.
@@ -553,18 +553,18 @@ This file is the explicit capability and coverage contract for the project.
 
 | ID | Class | Status | Primary owner | Supporting | Proof |
 |---|---|---|---|---|---|
-| R001 | launchability | validated | M001/S01 | M001/S07 | verified |
-| R002 | launchability | validated | M001/S02 | M001/S01, M001/S07 | verified |
-| R003 | primary-user-loop | validated | M001/S01 | M001/S04 | verified |
-| R004 | primary-user-loop | validated | M001/S07 | M001/S01-S06 | verified |
-| R005 | core-capability | validated | M001/S04 | M001/S03, M001/S05, M001/S06 | verified |
-| R006 | continuity | validated | M001/S03 | M001/S07 | verified |
-| R007 | continuity | validated | M001/S06 | M001/S05, M001/S07 | verified |
-| R008 | constraint | validated | M001/S04 | M001/S07 | verified |
-| R009 | quality-attribute | validated | M001/S06 | M001/S01, M001/S03-S05, M001/S07 | verified |
-| R010 | failure-visibility | validated | M001/S06 | M001/S03, M001/S04, M001/S07 | verified |
-| R011 | core-capability | validated | M002/S01 | M002/S02-S04 | verified |
-| R020 | admin/support | active | M006 | M006/S01-S03 | mapped |
+| R001 | launchability | validated | M001/S01 | M001/S07 | verified by `src/tests/web-mode-cli.test.ts`, `src/tests/integration/web-mode-runtime.test.ts`, S01's fresh temp-home runtime/browser proof, and the launch contract that waits for `/api/boot` readiness before reporting success. |
+| R002 | launchability | validated | M001/S02 | M001/S01, M001/S07 | verified by `src/tests/web-onboarding-contract.test.ts`, `src/tests/integration/web-mode-onboarding.test.ts`, `npm run build:web-host`, packaged-host route spot-checks of `/api/boot` + `/api/onboarding` + blocked `/api/session/command`, and S02's browser/runtime proof of failed validation, successful retry, unlock, and first-command success. |
+| R003 | primary-user-loop | validated | M001/S01 | M001/S04 | verified by `/api/boot`, the slice-level runtime integration test, and browser rendering of the live current-project scope/status state. |
+| R004 | primary-user-loop | validated | M001/S07 | M001/S01, M001/S02, M001/S03, M001/S04, M001/S05, M001/S06 | verified by `src/tests/integration/web-mode-assembled.test.ts` (boot → onboarding → prompt → streaming → tool execution → blocking UI request → UI response → turn boundary), the 5-test integration regression (`web-mode-assembled`, `web-mode-runtime`, `web-mode-onboarding`), S03/S05 contract coverage for focused interactions and workflow controls, and final live browser/UAT closure at milestone completion. |
+| R005 | core-capability | validated | M001/S04 | M001/S03, M001/S05, M001/S06 | verified by `src/tests/web-state-surfaces-contract.test.ts` (17/17), `src/tests/integration/web-mode-runtime.test.ts`, the 59-test contract regression rerun, and `npm run build:web-host`. |
+| R006 | continuity | validated | M001/S03 | M001/S07 | verified by `src/tests/web-live-interaction-contract.test.ts` (10/10 — UI request lifecycle, transcript streaming, steer/abort, fire-and-forget state, failure paths), `npm run build:web-host` (focused panel and terminal controls compile and mount), and the assembled route-level lifecycle proof in S07. |
+| R007 | continuity | validated | M001/S06 | M001/S05, M001/S07 | verified by `src/tests/web-continuity-contract.test.ts` (14/14 — reconnect resync, visibility-return refresh, transcript cap, command timeout, retry affordances), sessionStorage view persistence in app-shell, and `npm run build:web-host`. |
+| R008 | constraint | validated | M001/S04 | M001/S07 | verified by `src/tests/web-state-surfaces-contract.test.ts` (17/17 — explicit mock-free invariant checks across integrated surfaces), the final 59-test contract regression rerun, and `npm run build:web-host`. |
+| R009 | quality-attribute | validated | M001/S06 | M001/S01, M001/S03, M001/S04, M001/S05, M001/S07 | verified by S06's continuity/performance hardening (`MAX_TRANSCRIPT_BLOCKS`, command timeout recovery, reconnect/visibility refresh), S07's thinner `launchWebMode` parent bootstrap and stable runtime/build regressions, and the final live browser/UAT closure for the remaining subjective acceptance bar. |
+| R010 | failure-visibility | validated | M001/S06 | M001/S03, M001/S04, M001/S07 | verified by `src/tests/web-continuity-contract.test.ts` (timeout clears stuck state with error visibility and reconnect recovery), S02's structured onboarding lock/validation diagnostics, the error-banner retry affordance in app-shell, and `npm run build:web-host`. |
+| R011 | core-capability | validated | M002/S01 | M002/S02, M002/S03, M002/S04 | verified by `src/tests/integration/web-mode-runtime.test.ts`, `src/tests/integration/web-mode-onboarding.test.ts`, `src/tests/integration/web-mode-assembled.test.ts`, `src/tests/web-command-parity-contract.test.ts`, `src/tests/web-session-parity-contract.test.ts`, `src/tests/web-live-state-contract.test.ts`, `src/tests/web-recovery-diagnostics-contract.test.ts`, `npm run build:web-host`, and the real packaged-host browser proof of refresh/reopen, daily-use browser controls, and seeded interrupted-run recovery. |
+| R020 | admin/support | active | M006 | M006/S01, M006/S02, M006/S03 | Dev root persists, project list populates, switching projects swaps all surfaces to the new project context while keeping the previous session alive, context-aware launch works. |
 | R021 | operability | deferred | none | none | unmapped |
 | R022 | operability | deferred | none | none | unmapped |
 | R030 | anti-feature | out-of-scope | none | none | n/a |
@@ -572,27 +572,23 @@ This file is the explicit capability and coverage contract for the project.
 | R032 | constraint | out-of-scope | none | none | n/a |
 | R034 | anti-feature | out-of-scope | none | none | n/a |
 | R035 | core-capability | out-of-scope | none | none | n/a |
-| R100 | core-capability | validated | M003/S01 | none | verified 2026-03-16 |
-| R101 | primary-user-loop | validated | M003/S02 | M003/S04-S07 | verified 2026-03-17 |
-| R102 | core-capability | validated | M003/S03 | none | verified 2026-03-17 |
-| R103 | failure-visibility | validated | M003/S04 | M003/S02 | verified 2026-03-17 |
-| R104 | failure-visibility | validated | M003/S04 | M003/S02 | verified 2026-03-17 |
-| R105 | operability | validated | M003/S04 | M003/S02 | verified 2026-03-17 |
-| R106 | core-capability | validated | M003/S05 | M003/S02 | verified |
-| R107 | core-capability | validated | M003/S06 | M003/S02 | verified 2026-03-17 |
-| R108 | core-capability | validated | M003/S07 | M003/S02 | verified 2026-03-17 |
-| R109 | quality-attribute | validated | M003/S08 | M003/S03-S07 | verified |
-| R110 | quality-attribute | validated | M003/S09 | M003/S01 | verified 2026-03-17 |
+| R100 | core-capability | validated | M003/S01 | none | `npm run build` exits 0, `npm run build:web-host` exits 0, `rg "^<<<<<<<|^>>>>>>>|^=======$" src/ web/ packages/ .github/` returns empty, `git log --oneline HEAD..upstream/main | wc -l` returns 0. All verified on 2026-03-16 after merging 415 upstream commits (v2.12→v2.22.0) and resolving all 50 file conflicts. |
+| R101 | primary-user-loop | validated | M003/S02 | M003/S04, M003/S05, M003/S06, M003/S07 | 118/118 parity contract tests pass, all 30 subcommands classified (20 surface with real content, 9 passthrough, 1 local help), zero placeholder surfaces remain, both builds exit 0. Verified 2026-03-17. |
+| R102 | core-capability | validated | M003/S03 | none | VisualizerView component with 7 TabsTrigger/TabsContent pairs (Progress, Deps, Metrics, Timeline, Agent, Changes, Export), /api/visualizer GET route compiled in production build, sidebar NavRail entry, /gsd visualize dispatch via view-navigate kind. Parity audit (S08) confirmed all 7 tabs match TUI visualizer. Both builds pass. Verified 2026-03-17. |
+| R103 | failure-visibility | validated | M003/S04 | M003/S02 | 28/28 diagnostics contract tests pass, /api/forensics GET returns ForensicReport JSON, ForensicsPanel renders anomaly list/recent units/crash lock/metrics. Parity audit (S08) confirmed against TUI. Both builds pass. Verified 2026-03-17. |
+| R104 | failure-visibility | validated | M003/S04 | M003/S02 | 28/28 diagnostics contract tests pass, /api/doctor GET+POST routes return structured JSON, DoctorPanel renders issue list with severity/scope badges and Apply Fixes button. Parity audit (S08) confirmed against TUI. Both builds pass. Verified 2026-03-17. |
+| R105 | operability | validated | M003/S04 | M003/S02 | 28/28 diagnostics contract tests pass, /api/skill-health GET returns SkillHealthReport JSON, SkillHealthPanel renders skill table with pass rates/trends/staleness/suggestions. Parity audit (S08) confirmed against TUI. Both builds pass. Verified 2026-03-17. |
+| R106 | core-capability | validated | M003/S05 | M003/S02 | Verified by S05: `/api/knowledge` GET returns parsed KNOWLEDGE.md entries with type classification; `/api/captures` GET returns capture entries with status/counts; POST validates and resolves captures with field-level 400 errors; KnowledgeCapturesPanel renders Knowledge tab (type badges) and Captures tab (status badges, classification labels, triage action buttons); `/gsd knowledge`, `/gsd capture`, `/gsd triage` dispatch to real panel. `npm run build` and `npm run build:web-host` pass. |
+| R107 | core-capability | validated | M003/S06 | M003/S02 | /api/settings-data GET aggregates 5 upstream modules (preferences, model-router, context-budget, routing-history, metrics). PrefsPanel, ModelRoutingPanel, BudgetPanel render real data for gsd-prefs/gsd-mode/gsd-config. Parity audit (S08) confirmed against TUI. Both builds pass. Verified 2026-03-17. |
+| R108 | core-capability | validated | M003/S07 | M003/S02 | 10 panel components (QuickPanel, HistoryPanel, UndoPanel, SteerPanel, HooksPanel, InspectPanel, ExportPanel, CleanupPanel, QueuePanel, StatusPanel), 7 API routes compiled in production build, zero placeholder surfaces remain. Parity audit (S08) confirmed all surfaces against TUI. Both builds pass. Verified 2026-03-17. |
+| R109 | quality-attribute | validated | M003/S08 | M003/S03, M003/S04, M003/S05, M003/S06, M003/S07 | S08-PARITY-AUDIT.md covers all 30 /gsd subcommands, dashboard overlay, 7 visualizer tabs, and interactive flows. 12 gaps identified — 9 intentional scope boundaries, 3 deferred. 118/118 parity contract tests pass. Zero stub surfaces remain. |
+| R110 | quality-attribute | validated | M003/S09 | M003/S01 | Unit tests 1197/0 pass/fail. Both builds exit 0. Integration tests 27/0/1-skipped. All test fixes verified 2026-03-17. |
 | R111 | quality-attribute | active | M004/S01 | M004/S02 | unmapped |
 | R112 | quality-attribute | active | M011/S01 | none | unmapped |
-| R113 | primary-user-loop | validated | M007/S02 | M007/S01, M007/S03, M007/S04 | verified |
-| R114 | quality-attribute | validated | M008/S03 | none | verified 2026-03-18 |
-| R115 | quality-attribute | validated | M008/S03 | none | verified 2026-03-18 |
-| R116 | quality-attribute | validated | M008/S05 | none | verified 2026-03-18 |
-| R117 | core-capability | validated | M008/S02 | none | verified 2026-03-18 |
-| R118 | core-capability | validated | M008/S04 | none | verified 2026-03-18 |
-| R119 | quality-attribute | validated | M008/S01 | none | verified 2026-03-18 |
-| R120 | quality-attribute | validated | M008/S05 | none | verified 2026-03-18 |
+| R113 | primary-user-loop | validated | M007/S02 | M007/S01, M007/S03, M007/S04 | All four M007 slices delivered their components: S01 (PtyChatParser + CompletionSignal), S02 (Chat Mode view, ChatPane, ChatBubble, sidebar nav), S03 (TUI prompt intercept UI — select/text/password), S04 (ChatModeHeader toolbar, ActionPanel with animated lifecycle, session DELETE cleanup). npm run build:web-host exits 0. Browser end-to-end verified: panel slides in with accent color, secondary PTY session established, X close fires DELETE, main session unaffected. Completion auto-close (1500ms after CompletionSignal) wired; live runtime UAT required to fully exercise. |
+| R116 | quality-attribute | validated | M008/S05 | none | getProgressColor() implements oklch hue interpolation (25→85→145) applied as inline backgroundColor on progress bar div, replacing bg-foreground. npm run build:web-host passes. Visual test confirms red→yellow→green gradient across 0–100% range. |
+| R119 | quality-attribute | validated | M008/S01 | none | unmapped |
+| R120 | quality-attribute | validated | M008/S05 | none | useTerminalFontSize() hook persists in localStorage, TerminalSizePanel in settings provides preset controls (11–16), ShellTerminal accepts fontSize prop threaded through DualTerminal, footer terminal excluded by omission (no fontSize prop), chat mode respects setting. npm run build:web-host passes. |
 | R121 | quality-attribute | active | M009/S01 | none | unmapped |
 | R122 | core-capability | active | M009/S02 | M009/S01 | unmapped |
 | R123 | core-capability | active | M009/S03 | M009/S02 | unmapped |
@@ -605,13 +601,11 @@ This file is the explicit capability and coverage contract for the project.
 | R130 | quality-attribute | active | M011/S01 | none | unmapped |
 | R131 | launchability | active | M011/S02 | M011/S01 | unmapped |
 | R132 | quality-attribute | active | M011/S03 | M011/S01, M011/S02 | unmapped |
-| R133 | differentiator | active | M011/S04 | none | unmapped |
+| R133 | differentiator | validated | M011/S01 | none | Validated by M011/S01: `npm run build:web-host` exits 0 with Serwist configured, `sw.js` (343 precached URLs, 15.3 MB) exists in `dist/web/standalone/public/`, `manifest.json` with display:standalone and 2 icon sizes present, browser DevTools confirms SW registration and manifest detection, install prompt banner renders and triggers native install dialog in Chrome. All 8 CLI checks + 3 browser checks pass. |
 
 ## Coverage Summary
 
-- Active requirements: 16 (R020, R111, R112, R121-R133)
-- Mapped to slices: 16
-- Validated: 30 (R001-R011, R100-R110, R113-R120)
-- Deferred: 2 (R021, R022)
-- Out of scope: 5 (R030-R032, R034-R035)
+- Active requirements: 15
+- Mapped to slices: 15
+- Validated: 27 (R001, R002, R003, R004, R005, R006, R007, R008, R009, R010, R011, R100, R101, R102, R103, R104, R105, R106, R107, R108, R109, R110, R113, R116, R119, R120, R133)
 - Unmapped active requirements: 0

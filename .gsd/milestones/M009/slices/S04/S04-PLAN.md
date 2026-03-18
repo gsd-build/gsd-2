@@ -1,17 +1,16 @@
 # S04: Final Polish & Verification
 
-**Goal:** All editor features work end-to-end — font size applies to both View and Edit tabs, shiki renders the correct theme in light and dark modes, CSS is readable in both themes, and the edit→save→view round-trip works for both code and markdown files.
-**Demo:** Toggle dark/light mode → shiki View tab switches between `github-dark-default` and `github-light-default` themes with readable CSS in both. Change editor font size in settings → both View and Edit tabs reflect the new size. Edit a `.ts` file → Save → switch to View → updated content shown. Same for a `.md` file.
+**Goal:** All three research-identified gaps are fixed (font size on View tab, shiki light theme, CSS light-mode variants), and the full editor feature set is verified end-to-end in browser — dark and light modes, code and markdown files, edit→save→view round-trip, font size persistence.
+**Demo:** Open a .ts file → View tab shows syntax highlighting in both dark/light modes → Edit tab shows CodeMirror → modify → Save → switch to View → content updated. Same for .md files. Font size change from settings applies to both tabs. Theme toggle renders correct colors everywhere.
 
 ## Must-Haves
 
-- `useEditorFontSize()` font size applied to the View tab container (both read-only and tabbed modes)
-- Shiki loads both `github-dark-default` and `github-light-default` themes
-- `useTheme()` drives shiki theme selection — dark mode uses `github-dark-default`, light mode uses `github-light-default`
-- `MarkdownViewer` re-highlights when theme changes (theme in `useEffect` dependency array)
-- `.file-viewer-code` and `.markdown-body` CSS uses design tokens or scoped `.dark` overrides — readable in both themes
+- `useEditorFontSize()` consumed in `FileContentViewer` and font size applied to View tab content (both code and markdown)
+- Shiki loads both `github-dark-default` and `github-light-default` themes; `CodeViewer` and `MarkdownViewer` select the correct theme based on `useTheme()` resolved theme
+- `.file-viewer-code` and `.markdown-body` CSS use design token custom properties that work in both light and dark modes
+- Edit→Save→View round-trip verified in browser for at least one code file and one markdown file
+- Dark/light theme toggle verified visually in browser
 - `npm run build:web-host` exits 0
-- Browser verification of edit→save→view, font size, and theme switching
 
 ## Proof Level
 
@@ -22,64 +21,50 @@
 ## Verification
 
 - `npm run build:web-host` exits 0 after T01 and T02
-- Browser: open a `.ts` file → View tab shows shiki highlighting → Edit tab shows CodeMirror → modify → Save → switch to View → content updated
-- Browser: open a `.md` file → View tab shows rendered markdown → Edit tab shows raw markdown → modify → Save → View shows updated render
-- Browser: change editor font size in settings → both View and Edit tabs reflect the new size
-- Browser: toggle dark/light mode → View tab shiki theme switches, Edit tab CodeMirror theme switches, CSS colors are readable in both
+- Browser: open a .ts file → View tab shows syntax highlighting → toggle dark/light → highlighting theme changes
+- Browser: open a .md file → View tab shows rendered markdown → toggle dark/light → text colors correct
+- Browser: edit a file in Edit tab → Save → switch to View → content updated
+- Browser: change editor font size in settings → View tab text size changes
+- Browser assertions: `text_visible` for file content, `selector_visible` for tab triggers, theme-appropriate rendering
+- Diagnostic: browser console shows no uncaught errors related to shiki, theme, or font-size hooks (`browser_get_console_logs` filtered for error-level entries)
 
 ## Integration Closure
 
-- Upstream surfaces consumed: `useEditorFontSize()` from S01, `CodeEditor` and View/Edit tabs from S02, POST `/api/files` from S01, design tokens from `globals.css`
-- New wiring introduced in this slice: `useTheme()` → shiki theme selection, `fontSize` → ReadOnlyContent container, CSS token references in `.file-viewer-code` and `.markdown-body`
-- What remains before the milestone is truly usable end-to-end: nothing — this is the final slice
+- Upstream surfaces consumed: `file-content-viewer.tsx` (S02), `code-editor.tsx` (S02), `use-editor-font-size.ts` (S01), `globals.css` design tokens, POST `/api/files` (S01)
+- New wiring introduced in this slice: `useEditorFontSize` + `useTheme` imports in `file-content-viewer.tsx`, dual shiki theme loading, CSS custom property adoption
+- What remains before the milestone is truly usable end-to-end: nothing — this slice closes M009
 
 ## Tasks
 
-- [x] **T01: Apply font size to View tab and add dual shiki theme support** `est:25m`
-  - Why: Font size from `useEditorFontSize()` only reaches the Edit tab (CodeEditor). The View tab (`ReadOnlyContent`) ignores it. Shiki only loads `github-dark-default` — in light mode, code renders dark-themed against a light background. Both `CodeViewer` and `MarkdownViewer` hardcode the dark theme name.
+- [x] **T01: Wire font size and dual shiki themes into View tab** `est:25m`
+  - Why: The View tab currently ignores the editor font size preference and only loads the dark shiki theme — meaning light mode shows dark-styled code. This task fixes both gaps in the component layer.
   - Files: `web/components/gsd/file-content-viewer.tsx`
-  - Do: (1) Import `useTheme` from `next-themes`. (2) In `ReadOnlyContent`, accept `fontSize` and `shikiTheme` props, wrap output in a div with `style={{ fontSize }}`. (3) In `getHighlighter()` singleton, load both themes: `["github-dark-default", "github-light-default"]`. (4) In `CodeViewer`, accept `shikiTheme` prop, use it in `codeToHtml()` instead of hardcoded `"github-dark-default"`. (5) In `MarkdownViewer`, accept `shikiTheme` prop, use it in `codeToHtml()`, add `shikiTheme` to the `useEffect` dependency array so code blocks re-highlight on theme change. (6) In `FileContentViewer`, call `useTheme()`, derive `shikiTheme = resolvedTheme === "light" ? "github-light-default" : "github-dark-default"`, pass `fontSize` and `shikiTheme` through `ReadOnlyContent` to child viewers. (7) In the read-only fallback path (no tabs), also wrap in a div with `style={{ fontSize }}`.
-  - Verify: `npm run build:web-host` exits 0; `grep -c "github-light-default" web/components/gsd/file-content-viewer.tsx` returns ≥2; `grep -c "useTheme" web/components/gsd/file-content-viewer.tsx` returns ≥1; `grep -c "fontSize" web/components/gsd/file-content-viewer.tsx` returns ≥5
-  - Done when: Build passes, both shiki themes loaded, useTheme drives theme selection, fontSize flows to View tab container
+  - Do: (1) Import `useEditorFontSize` and `useTheme`, (2) load both `github-dark-default` and `github-light-default` in `createHighlighter`, (3) pass resolved theme name to `CodeViewer` and `MarkdownViewer` as a prop, (4) apply font size via inline style on the View tab content container and the read-only fallback path, (5) add resolved theme to `MarkdownViewer` useEffect dependency array.
+  - Verify: `npm run build:web-host` exits 0; `rg "github-light-default" web/components/gsd/file-content-viewer.tsx` finds the new theme; `rg "useEditorFontSize" web/components/gsd/file-content-viewer.tsx` finds the import.
+  - Done when: Build passes, both shiki themes loaded, font size applied to View tab containers, theme prop threaded through CodeViewer and MarkdownViewer.
 
-- [ ] **T02: Add light-mode CSS variants for file viewer and markdown** `est:15m`
-  - Why: `.file-viewer-code` and `.markdown-body` use hardcoded dark oklch values (e.g. `.line:hover` bg `oklch(0.15 0 0)`, `.markdown-body` text `oklch(0.85 0 0)`, borders `oklch(0.22 0 0)`). In light mode these are unreadable or invisible.
+- [x] **T02: Add light-mode CSS variants for file viewer and markdown styles** `est:15m`
+  - Why: `.file-viewer-code` and `.markdown-body` styles use hardcoded dark oklch values that are unreadable in light mode. Replacing them with CSS custom properties from the existing design token system fixes both themes in one pass.
   - Files: `web/app/globals.css`
-  - Do: Replace hardcoded oklch values with CSS custom properties from the existing `:root`/`.dark` design token system where possible. Specifically: (1) `.file-viewer-code .line:hover` background → `var(--muted)`. (2) `.file-viewer-code .line::before` color → `var(--muted-foreground)`. (3) `.markdown-body` color → `var(--foreground)`. (4) `.markdown-body h1, h2` border-bottom → `var(--border)`. (5) `.markdown-body hr` border-top → `var(--border)`. (6) `.markdown-body blockquote` border-left → use a value that works in both modes (e.g. `var(--muted-foreground)`) and color → `var(--muted-foreground)`. (7) `.markdown-body strong` color → `var(--foreground)`. (8) `.markdown-body del` color → `var(--muted-foreground)`.
-  - Verify: `npm run build:web-host` exits 0; `grep -c "var(--" web/app/globals.css | grep -v "^0$"` confirms CSS variables are used; no remaining hardcoded oklch in `.file-viewer-code` or `.markdown-body` selectors (except accent-color on checkbox which is fine).
-  - Done when: Build passes, all `.file-viewer-code` and `.markdown-body` color values use CSS custom properties, both themes render readable text
+  - Do: Replace hardcoded oklch values in `.file-viewer-code` and `.markdown-body` with `var(--foreground)`, `var(--border)`, `var(--muted-foreground)`, and `var(--code-line-number)`. For values without exact token matches (line hover bg, blockquote border/color, strong color, del color), use light defaults and add `.dark` scoped overrides.
+  - Verify: `npm run build:web-host` exits 0; `rg "oklch" web/app/globals.css` shows no hardcoded oklch values in `.file-viewer-code` or `.markdown-body` sections (values should use `var()` references or be inside `.dark` scopes).
+  - Done when: Build passes, all file-viewer and markdown-body CSS properties work correctly in both `:root` (light) and `.dark` themes using the design token system.
 
-- [ ] **T03: End-to-end browser verification of all editor features** `est:20m`
-  - Why: This is the milestone's final acceptance gate. All prior work was verified structurally — this task exercises the real runtime in a browser.
+- [x] **T03: End-to-end browser verification of all editor features** `est:20m`
+  - Why: This is the final acceptance gate for M009. All editor features must be exercised in a running browser to confirm the full stack works — component rendering, API calls, theme switching, font size persistence, and save round-trips.
   - Files: none (verification only)
-  - Do: (1) Build and start the app: `npm run build:web-host && npm run gsd:web`. (2) Navigate to the file viewer, open a `.ts` file. (3) Verify View tab shows syntax highlighting. (4) Switch to Edit tab, verify CodeMirror loads. (5) Make an edit, verify Save button activates, click Save, switch to View, verify updated content. (6) Open a `.md` file, repeat edit→save→view round-trip. (7) Open settings, change editor font size, verify both View and Edit tabs reflect the change. (8) Toggle light/dark mode, verify shiki View tab switches theme, CodeMirror Edit tab switches theme, all text is readable. (9) Check browser console for errors. **Skill:** `frontend-design` may be useful for visual assessment.
-  - Verify: All 8 checks pass in browser. `npm run build:web-host` exits 0 (final confirmation).
-  - Done when: Edit→save→view works for code and markdown, font size applies to both tabs, dark/light themes render correctly in both tabs, no console errors
-
-## Observability / Diagnostics
-
-**Runtime signals:**
-- Shiki highlighter initialization failure is caught and resets the singleton (`highlighterPromise = null`) so the next call retries — visible as a missing-highlight fallback to `PlainViewer`.
-- `MarkdownViewer` and `CodeViewer` catch `codeToHtml` errors silently and fall back to plain rendering — a code block rendering as un-highlighted text indicates a theme/language loading failure.
-- `useTheme()` returns `resolvedTheme: undefined` during SSR or before hydration — the derivation defaults to `"github-dark-default"`, so the worst case is dark-theme rendering on first paint with a flash-correct on hydration.
-
-**Inspection surfaces:**
-- Browser DevTools → Elements → inspect any `.file-viewer-code` container → check `style.fontSize` reflects the settings value.
-- Browser DevTools → Elements → inspect shiki output → `<pre>` elements include `style="background-color:..."` — dark theme uses `#0d1117`, light theme uses `#fff`.
-- Browser console: no errors expected. Shiki load failures surface as `console.error` from the catch handler if the promise rejects.
-
-**Failure visibility:**
-- If the shiki singleton fails to load both themes, the `catch` resets `highlighterPromise` and the next render retries. Persistent failure shows as plain-text code without highlighting.
-- If `resolvedTheme` never resolves (broken ThemeProvider), code renders in dark theme permanently — visually obvious in light mode as dark-on-light mismatch.
-
-**Redaction constraints:** None — no secrets or PII involved in this slice.
-
-## Verification (Diagnostic / Failure Path)
-
-- Browser console check: after toggling dark/light mode and viewing a code file, `browser_get_console_logs` should show no JS errors related to shiki, theme, or font-size.
-- Fallback path: if shiki highlighting fails for a language, the `PlainViewer` line-number table should still render — verifiable by checking the View tab still shows content.
+  - Do: Start the app with `npm run build:web-host && npm run gsd:web`, open the file viewer, verify: (a) View tab renders code with correct syntax highlighting in both dark/light, (b) Edit tab shows CodeMirror, (c) edit→save→view round-trip for a code file, (d) edit→save→view round-trip for a markdown file, (e) font size change applies to both tabs, (f) dark/light theme toggle works across View and Edit tabs.
+  - Verify: All browser assertions pass; no console errors related to editor features.
+  - Done when: All six verification checks pass in browser. M009 milestone definition of done is met.
 
 ## Files Likely Touched
 
 - `web/components/gsd/file-content-viewer.tsx`
 - `web/app/globals.css`
+## Observability / Diagnostics
+
+- **Shiki failure:** If `getHighlighter()` fails, the singleton resets and retries. Components degrade to `PlainViewer` (plain text + line numbers) — no error propagates to the user.
+- **Font size inspection:** `localStorage.getItem('gsd-editor-font-size')` returns the persisted value. The custom event `editor-font-size-changed` fires on every change within the same tab. Cross-tab sync via `storage` events.
+- **Theme resolution:** `useTheme().resolvedTheme` is observable in React DevTools. When `undefined` (during hydration), the component defaults to `"dark"` — matching prior behavior. The resolved shiki theme name is passed as a prop through the component tree and visible in DevTools.
+- **CSS token adoption:** In light mode, `.file-viewer-code` and `.markdown-body` use `var()` references to design tokens defined in `:root` / `.dark` scopes. Inspect computed styles in browser DevTools to verify token resolution.
+- **Failure surfaces:** Shiki load failure → highlighted HTML is `null` → `PlainViewer` renders instead. Save failure → `saveError` state displayed as destructive text. Build failure → `npm run build:web-host` exit code and stderr.

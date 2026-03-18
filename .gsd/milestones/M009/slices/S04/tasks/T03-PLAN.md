@@ -1,5 +1,5 @@
 ---
-estimated_steps: 9
+estimated_steps: 6
 estimated_files: 0
 ---
 
@@ -10,62 +10,66 @@ estimated_files: 0
 
 ## Description
 
-This is the milestone's final acceptance gate. All prior work was verified structurally via build checks — this task exercises the real runtime in a browser. It covers the four critical flows: edit→save→view round-trip (code and markdown), font size propagation, and dark/light theme switching.
+This is the final acceptance gate for M009. All editor features must be exercised in a running browser to confirm the full stack works: component rendering, API calls, theme switching, font size persistence, and save round-trips for both code and markdown files. No code changes expected — only verification and minor fixes if issues are found.
 
-The `frontend-design` skill may be useful for visual assessment of theme alignment.
+**Relevant skill:** `frontend-design` (for visual verification of theme alignment)
+
+**Important knowledge from KNOWLEDGE.md:**
+```
+## Always test web in production
+npm run build:web-host >/dev/null && npm run gsd:web:stop:all >/dev/null 2>&1 || true && npm run gsd:web
+```
 
 ## Steps
 
-1. Build and start the app:
-   ```bash
-   npm run build:web-host >/dev/null && npm run gsd:web:stop:all >/dev/null 2>&1 || true && npm run gsd:web
-   ```
+1. **Start the app in production mode.** Run: `npm run build:web-host >/dev/null && npm run gsd:web:stop:all >/dev/null 2>&1 || true && npm run gsd:web`. Wait for the server to be ready. Navigate to the app in browser.
 
-2. Navigate to the file viewer in the browser. Open a `.ts` or `.tsx` file.
+2. **Verify code file View/Edit round-trip.** Navigate to the Files panel. Select a `.ts` file. Confirm the View tab shows syntax-highlighted code. Switch to Edit tab — confirm CodeMirror editor loads. Type a small change. Click Save. Switch back to View tab. Confirm the View tab reflects the saved change. Use `browser_assert` to verify.
 
-3. **Verify View tab:** Shiki syntax highlighting renders — code has colored tokens, line numbers visible.
+3. **Verify markdown file View/Edit round-trip.** Select a `.md` file. Confirm View tab shows rendered markdown (headings, lists, etc.). Switch to Edit tab — confirm raw markdown in CodeMirror. Make a small change. Save. Switch to View. Confirm the rendered markdown reflects the change. Use `browser_assert`.
 
-4. **Verify Edit tab:** Switch to Edit tab — CodeMirror loads (spinner then editor), content matches View tab.
+4. **Verify font size applies to both tabs.** Open settings (gsd-prefs). Find the Editor Size panel. Click a different preset (e.g. 16). Go back to the file viewer. Check that the View tab content text size visually changed. Switch to Edit tab — confirm CodeMirror text size also changed. Take screenshots for visual comparison.
 
-5. **Verify edit→save→view (code):** In Edit tab, make a small change (add a comment). Verify Save button activates. Click Save. Switch to View tab. Verify the change appears in the rendered view.
+5. **Verify dark/light theme toggle.** Toggle the theme from dark to light (or vice versa). Verify:
+   - View tab (code): shiki re-renders with the appropriate theme (light code on light background, dark code on dark background)
+   - View tab (markdown): text colors are readable, borders visible, blockquotes styled correctly
+   - Edit tab: CodeMirror theme switches (this already works from S02)
+   - No console errors related to theme switching
 
-6. **Verify edit→save→view (markdown):** Open a `.md` file. View tab shows rendered markdown (headings, lists, code blocks). Switch to Edit tab — raw markdown in CodeMirror. Make a change. Save. Switch to View. Verify change appears.
-
-7. **Verify font size:** Open settings (or navigate to the editor font size panel). Change font size. Return to file viewer. Verify both View tab text and Edit tab text reflect the new size.
-
-8. **Verify dark/light theme:** Toggle from dark to light mode (or vice versa). Verify:
-   - View tab shiki code switches theme (light bg with dark text, or dark bg with light text)
-   - Edit tab CodeMirror switches theme
-   - `.file-viewer-code` line numbers and hover highlight are readable
-   - `.markdown-body` text, headings, borders, blockquotes are readable
-   - No dark-on-dark or light-on-light contrast issues
-
-9. **Check console:** Open browser DevTools console. Verify no errors related to shiki, CodeMirror, or the editor components. Warnings about hydration or optional deps are acceptable.
+6. **Final build verification.** Run `npm run build:web-host` one last time to confirm the full build still passes after all S04 changes.
 
 ## Must-Haves
 
-- [ ] Edit→save→view works for a code file (`.ts`/`.tsx`)
-- [ ] Edit→save→view works for a markdown file (`.md`)
-- [ ] Font size change from settings applies to both View and Edit tabs
+- [ ] Code file: View → Edit → Save → View round-trip works
+- [ ] Markdown file: View → Edit → Save → View round-trip works  
+- [ ] Font size preference applies to View tab content
+- [ ] Font size preference applies to Edit tab content
 - [ ] Dark mode renders correctly in both View and Edit tabs
 - [ ] Light mode renders correctly in both View and Edit tabs
-- [ ] No console errors from editor components
-- [ ] `npm run build:web-host` exits 0 (final build confirmation)
+- [ ] No console errors related to editor features
+- [ ] `npm run build:web-host` exits 0
 
 ## Verification
 
-- All 7 must-haves checked off through browser interaction
+- Browser assertions pass for all six checks above
+- Screenshots captured for dark/light mode comparison
 - `npm run build:web-host` exits 0
-- No JS errors in browser console related to editor functionality
+- No JavaScript errors in browser console related to shiki, CodeMirror, or file operations
 
 ## Inputs
 
-- T01 output: `file-content-viewer.tsx` with dual shiki themes, `useTheme()` integration, and font size on View tab
-- T02 output: `globals.css` with CSS custom property replacements for light-mode readability
-- Running GSD instance via `npm run gsd:web`
+- Running app from `npm run gsd:web` (production build)
+- T01 changes: dual shiki themes + font size in View tab
+- T02 changes: light-mode CSS variants for file viewer and markdown
+
+## Observability Impact
+
+- **Signals changed:** None — this task is verification-only, no runtime signals are added or modified.
+- **How to inspect:** Exercise the browser flow described in Steps 1-5. Check `browser_get_console_logs` for JS errors. Check `localStorage.getItem('gsd-editor-font-size')` for font persistence. Use DevTools Computed tab on `.file-viewer-code` / `.markdown-body` elements to verify CSS token resolution.
+- **Failure state visible as:** Shiki load failure → `PlainViewer` renders (no syntax highlighting). Theme mismatch → dark code on light background or vice versa. Font size not applied → content stays at default 14px regardless of preference. Save failure → `saveError` text in the editor panel. Build failure → `npm run build:web-host` non-zero exit.
 
 ## Expected Output
 
-- All editor features verified working in browser
-- If any visual issues found during verification, fix them and re-verify (fixes are in scope for this task)
-- Final `npm run build:web-host` exits 0
+- All browser assertions pass
+- If any issues found: targeted fixes applied and re-verified
+- M009 milestone definition of done confirmed met

@@ -59,4 +59,4 @@ See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement sta
 - [x] M008: Web Polish — All 5 slices complete: projects page redesign, browser update UI, theme defaults & color audit, remote questions settings, progress bar dynamics & terminal text size.
 - [ ] M009: Editor & File Viewer Upgrade — Full code editing via CodeMirror 6, markdown view/edit tab split, file write API, editor font size setting.
 - [ ] M010: Upstream Sync v2.22→v2.28 — Merge 349+ upstream commits, selective web UI for new features, fix all errors/warnings/tests.
-- [ ] M011: CI/CD, Packaging & PWA — Separate web CI workflow, npm packaging verification, PWA install prompt.
+- [ ] M011: CI/CD, Packaging & PWA — Separate web CI workflow, npm packaging verification, PWA install prompt. **S01 complete** (PWA manifest, service worker, install prompt live). S02 remaining (web.yml CI workflow, packaging verification).

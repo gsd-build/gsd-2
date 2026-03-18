@@ -83,3 +83,11 @@ npm run build:web-host >/dev/null && npm run gsd:web:stop:all >/dev/null 2>&1 ||
 ## @uiw/codemirror-extensions-langs Uses Short Names
 
 `loadLanguage()` from `@uiw/codemirror-extensions-langs` only works with short/file-extension names: `ts`, `js`, `py`, `rb`, `rs`, `kt`, `cs`, etc. Full language names like `typescript`, `javascript`, `python`, `ruby`, `rust` all return `null`. When mapping from shiki language names (which use full names), always map to the short form. Run `node -e "const m = require('@uiw/codemirror-extensions-langs'); console.log(m.langNames.filter(n => m.loadLanguage(n)).sort().join('\n'))"` to see all working names.
+
+## Serwist Configurator Mode Requires @serwist/cli + esbuild
+
+The `serwist build` CLI command lives in `@serwist/cli`, not in the base `serwist` package. `esbuild` is a required peer dependency of `@serwist/cli`. Installing only `serwist` + `@serwist/next` gives you the config types and worker utilities but not the CLI executable. Always install all four: `serwist`, `@serwist/next`, `@serwist/cli`, `esbuild`.
+
+## Playwright Cannot Verify PWA Service Workers
+
+Playwright's embedded Chromium does not support service worker registration — attempts fail with "ServiceWorker script evaluation failed". The `beforeinstallprompt` event also never fires. PWA install prompt and SW verification must use a real Chrome/Edge browser instance. This is a Playwright limitation, not a code issue.

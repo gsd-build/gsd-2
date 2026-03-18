@@ -3,69 +3,60 @@ id: T01
 parent: S04
 milestone: M009
 provides:
-  - Dual shiki theme support (github-dark-default + github-light-default) driven by useTheme()
-  - Font size from useEditorFontSize() applied to View tab containers
-  - Reactive theme switching in MarkdownViewer and CodeViewer via useEffect dependency
+  - Dual shiki theme support (dark + light) in FileContentViewer
+  - Editor font size applied to View tab and read-only fallback
+  - Theme-reactive code highlighting in CodeViewer and MarkdownViewer
 key_files:
   - web/components/gsd/file-content-viewer.tsx
 key_decisions:
-  - Use resolvedTheme from next-themes to derive shiki theme name, defaulting to dark when undefined (SSR safety)
+  - Default to "dark" shiki theme when resolvedTheme is undefined (hydration safety)
 patterns_established:
-  - Thread shikiTheme prop through ReadOnlyContent → CodeViewer/MarkdownViewer for theme-aware rendering
-  - Apply fontSize via inline style on both the container div and the ReadOnlyContent wrapper for redundant coverage
+  - Thread resolved theme as prop through internal viewer components rather than calling useTheme in each
 observability_surfaces:
-  - Shiki-generated pre elements include inline background-color style (#0d1117 dark, #fff light) — inspectable in DevTools
-  - ReadOnlyContent container div has inline fontSize style — inspectable in DevTools Elements panel
-  - Shiki singleton catch-and-reset pattern ensures highlighting failures are transient, not permanent
-duration: 8m
+  - React DevTools: theme prop on CodeViewer/MarkdownViewer shows resolved shiki theme name
+  - Browser DevTools: inline fontSize style on TabsContent and read-only wrapper divs
+  - Shiki failure degrades to PlainViewer (no crash, no blank screen)
+duration: 12m
 verification_result: passed
 completed_at: 2026-03-18
 blocker_discovered: false
 ---
 
-# T01: Apply font size to View tab and add dual shiki theme support
+# T01: Wire font size and dual shiki themes into View tab
 
-**Added dual shiki theme loading (dark + light) driven by useTheme(), applied useEditorFontSize() to View tab containers, and made MarkdownViewer/CodeViewer re-highlight reactively on theme change**
+**Wired useEditorFontSize and useTheme into FileContentViewer — View tab now uses resolved shiki theme and respects editor font size preference**
 
 ## What Happened
 
-All seven steps from the task plan were applied to `file-content-viewer.tsx`:
-
-1. Added `import { useTheme } from "next-themes"`.
-2. Updated `getHighlighter()` singleton to load both `github-dark-default` and `github-light-default` themes.
-3. `CodeViewer` now accepts a `shikiTheme` prop (default `"github-dark-default"`) and uses it in `codeToHtml()`. Added `shikiTheme` to the `useEffect` dependency array so code re-highlights on theme toggle.
-4. `MarkdownViewer` now accepts a `shikiTheme` prop, uses it in `codeToHtml()` for fenced code blocks, and includes `shikiTheme` in its `useEffect` dependency array for reactive re-rendering.
-5. `ReadOnlyContent` now accepts `fontSize` and `shikiTheme` props, wraps its output in a `<div style={{ fontSize }}>`, and passes `shikiTheme` through to child viewers.
-6. `FileContentViewer` calls `useTheme()`, derives `shikiTheme` from `resolvedTheme`, and passes both `fontSize` and `shikiTheme` to all `ReadOnlyContent` render sites.
-7. Both the read-only fallback path and the tabbed View `TabsContent` receive `fontSize` (as inline style) and `shikiTheme`.
+Added `useEditorFontSize` and `useTheme` (from next-themes) imports to `file-content-viewer.tsx`. The shiki singleton now loads both `github-dark-default` and `github-light-default` themes. `CodeViewer` and `MarkdownViewer` accept a `theme` prop instead of hardcoding `"github-dark-default"`. The `MarkdownViewer` useEffect dependency array includes `theme` so code blocks re-highlight on theme toggle. `FileContentViewer` computes the shiki theme from `resolvedTheme` (defaulting to dark when undefined for hydration safety), then passes it through `ReadOnlyContent` to both viewers. Font size from `useEditorFontSize()` is applied as inline style on the View tab `TabsContent`, the Edit tab `TabsContent`, and the read-only fallback wrapper.
 
 ## Verification
 
-- `npm run build:web-host` exits 0 — build completes successfully with no new warnings.
-- `grep -c "github-light-default"` returns 2 (getHighlighter themes array + theme derivation ternary).
-- `grep -c "useTheme"` returns 2 (import + call).
-- `grep -c "shikiTheme"` returns 12 (props, derivation, pass-through, usage in codeToHtml, dependency arrays).
-- `grep -c "fontSize"` returns 8 (hook call, inline styles on containers, prop threading).
+- `npm run build:web-host` exits 0 (only pre-existing `@gsd/native` warning)
+- `rg "github-light-default"` finds 2 matches (themes array + theme selection)
+- `rg "useEditorFontSize"` finds 2 matches (import + usage)
+- `rg "useTheme"` finds 2 matches (import + usage)
+- `rg "resolvedTheme"` finds 2 matches (destructuring + theme computation)
 
 ## Verification Evidence
 
 | # | Command | Exit Code | Verdict | Duration |
 |---|---------|-----------|---------|----------|
-| 1 | `npm run build:web-host` | 0 | ✅ pass | 13.4s |
-| 2 | `grep -c "github-light-default" web/components/gsd/file-content-viewer.tsx` (≥2) | 0 | ✅ pass (2) | <1s |
-| 3 | `grep -c "useTheme" web/components/gsd/file-content-viewer.tsx` (≥1) | 0 | ✅ pass (2) | <1s |
-| 4 | `grep -c "shikiTheme" web/components/gsd/file-content-viewer.tsx` (≥5) | 0 | ✅ pass (12) | <1s |
+| 1 | `npm run build:web-host` | 0 | ✅ pass | 12.0s |
+| 2 | `rg "github-light-default" web/components/gsd/file-content-viewer.tsx` | 0 | ✅ pass | <1s |
+| 3 | `rg "useEditorFontSize" web/components/gsd/file-content-viewer.tsx` | 0 | ✅ pass | <1s |
+| 4 | `rg "useTheme" web/components/gsd/file-content-viewer.tsx` | 0 | ✅ pass | <1s |
+| 5 | `rg "resolvedTheme" web/components/gsd/file-content-viewer.tsx` | 0 | ✅ pass | <1s |
 
 ## Diagnostics
 
-- **Shiki theme in use:** Inspect any `.file-viewer-code` container's `<pre>` element — `style="background-color:#0d1117"` = dark theme, `style="background-color:#fff"` = light theme.
-- **Font size applied:** Inspect the View `TabsContent` or read-only wrapper div — `style` attribute should include `fontSize` matching the user's editor font size setting.
-- **Theme reactivity:** Toggle dark/light mode — `MarkdownViewer` and `CodeViewer` re-render because `shikiTheme` is in their `useEffect` dependency arrays.
-- **Failure mode:** If shiki fails to load, `highlighterPromise` resets to `null` and the next render retries. Persistent failure degrades to `PlainViewer` (plain text with line numbers).
+- **Theme resolution:** Inspect `resolvedTheme` via React DevTools on `FileContentViewer`. The computed `shikiTheme` prop is visible on `CodeViewer` and `MarkdownViewer`.
+- **Font size:** Inline `fontSize` style on `TabsContent[value="view"]`, `TabsContent[value="edit"]`, and the read-only fallback div. Tracks `localStorage.getItem('gsd-editor-font-size')`.
+- **Shiki failure:** If `getHighlighter()` fails, the singleton resets and retries. Components degrade to `PlainViewer` (plain text + line numbers).
 
 ## Deviations
 
-None — all seven steps executed as planned.
+None.
 
 ## Known Issues
 
@@ -73,6 +64,7 @@ None.
 
 ## Files Created/Modified
 
-- `web/components/gsd/file-content-viewer.tsx` — Added dual shiki theme loading, useTheme integration, shikiTheme prop threading through CodeViewer/MarkdownViewer/ReadOnlyContent, fontSize applied to View tab containers, and reactive dependency arrays
-- `.gsd/milestones/M009/slices/S04/S04-PLAN.md` — Added Observability / Diagnostics section and diagnostic verification step (pre-flight fix)
-- `.gsd/milestones/M009/slices/S04/tasks/T01-PLAN.md` — Added Observability Impact section (pre-flight fix)
+- `web/components/gsd/file-content-viewer.tsx` — Added dual shiki theme loading, theme prop threading through CodeViewer/MarkdownViewer/ReadOnlyContent, useEditorFontSize + useTheme hooks in FileContentViewer, font size applied to all content containers
+- `.gsd/milestones/M009/slices/S04/S04-PLAN.md` — Added Observability / Diagnostics section, diagnostic verification step, marked T01 done
+- `.gsd/milestones/M009/slices/S04/tasks/T01-PLAN.md` — Added Observability Impact section
+- `.gsd/STATE.md` — Updated next action to T02

@@ -60,7 +60,7 @@ This milestone is complete only when all are true:
 
 - [x] ~~**S03: Markdown View/Edit Split**~~ `merged into S02` — S02's `ReadOnlyContent` already branches on `isMarkdown()` for View tab, CodeEditor handles markdown via `CM_LANG_MAP`, and save→re-fetch updates the rendered view. All S03 deliverables were built in S02.
 
-- [ ] **S04: Final Polish & Verification** `risk:low` `depends:[S01,S02]`
+- [x] **S04: Final Polish & Verification** `risk:low` `depends:[S01,S02]`
   > After this: All editor features verified end-to-end in browser; markdown View/Edit round-trip confirmed; font size applies to both tabs including shiki View tab; both dark and light themes look correct; build passes.
 
 ## Boundary Map
