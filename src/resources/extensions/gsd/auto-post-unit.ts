@@ -35,6 +35,7 @@ import {
 import { writeUnitRuntimeRecord, clearUnitRuntimeRecord } from "./unit-runtime.js";
 import { resolveAutoSupervisorConfig, loadEffectiveGSDPreferences } from "./preferences.js";
 import { runGSDDoctor, rebuildState, summarizeDoctorIssues } from "./doctor.js";
+import { COMPLETION_TRANSITION_CODES } from "./doctor-types.js";
 import { recordHealthSnapshot, checkHealEscalation } from "./doctor-proactive.js";
 import { syncStateToProjectRoot } from "./auto-worktree-sync.js";
 import { resetRewriteCircuitBreaker } from "./auto-dispatch.js";
@@ -154,13 +155,17 @@ export async function postUnitPreVerification(pctx: PostUnitContext): Promise<"d
         ctx.ui.notify(`Post-hook: applied ${report.fixesApplied.length} fix(es).`, "info");
       }
 
-      // Proactive health tracking
-      const summary = summarizeDoctorIssues(report.issues);
+      // Proactive health tracking — exclude completion-transition codes at task level
+      // since they are expected after the last task and resolved by complete-slice
+      const issuesForHealth = effectiveFixLevel === "task"
+        ? report.issues.filter(i => !COMPLETION_TRANSITION_CODES.has(i.code))
+        : report.issues;
+      const summary = summarizeDoctorIssues(issuesForHealth);
       recordHealthSnapshot(summary.errors, summary.warnings, report.fixesApplied.length);
 
       // Check if we should escalate to LLM-assisted heal
       if (summary.errors > 0) {
-        const unresolvedErrors = report.issues
+        const unresolvedErrors = issuesForHealth
           .filter(i => i.severity === "error" && !i.fixable)
           .map(i => ({ code: i.code, message: i.message, unitId: i.unitId }));
         const escalation = checkHealEscalation(summary.errors, unresolvedErrors);

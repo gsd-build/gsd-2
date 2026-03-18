@@ -8,6 +8,7 @@ import { invalidateAllCaches } from "./cache.js";
 import { loadEffectiveGSDPreferences, type GSDPreferences } from "./preferences.js";
 
 import type { DoctorIssue, DoctorIssueCode } from "./doctor-types.js";
+import { COMPLETION_TRANSITION_CODES } from "./doctor-types.js";
 import { checkGitHealth, checkRuntimeHealth } from "./doctor-checks.js";
 
 // ── Re-exports ─────────────────────────────────────────────────────────────
@@ -356,16 +357,11 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
   // dispatch lifecycle (complete-slice, complete-milestone units), not to
   // mechanical post-hook bookkeeping. When fixLevel is "task", these are
   // detected and reported but never auto-fixed.
-  const completionTransitionCodes = new Set<DoctorIssueCode>([
-    "all_tasks_done_missing_slice_summary",
-    "all_tasks_done_missing_slice_uat",
-    "all_tasks_done_roadmap_not_checked",
-  ]);
 
   /** Whether a given issue code should be auto-fixed at the current fixLevel. */
   const shouldFix = (code: DoctorIssueCode): boolean => {
     if (!fix) return false;
-    if (fixLevel === "task" && completionTransitionCodes.has(code)) return false;
+    if (fixLevel === "task" && COMPLETION_TRANSITION_CODES.has(code)) return false;
     return true;
   };
 
