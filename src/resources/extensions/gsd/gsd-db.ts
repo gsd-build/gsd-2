@@ -348,6 +348,8 @@ function migrateSchema(db: DbAdapter): void {
 
 let currentDb: DbAdapter | null = null;
 let currentPath: string | null = null;
+/** PID that opened the current connection — used for diagnostic logging. */
+let currentPid: number = 0;
 
 // ─── Public API ────────────────────────────────────────────────────────────
 
@@ -395,6 +397,7 @@ export function openDatabase(path: string): boolean {
 
   currentDb = adapter;
   currentPath = path;
+  currentPid = process.pid;
   return true;
 }
 
@@ -410,6 +413,7 @@ export function closeDatabase(): void {
     }
     currentDb = null;
     currentPath = null;
+    currentPid = 0;
   }
 }
 
@@ -722,6 +726,21 @@ export function reconcileWorktreeDb(
     process.stderr.write(`gsd-db: worktree DB reconciliation failed: ${(err as Error).message}\n`);
     return zero;
   }
+}
+
+/**
+ * Returns the PID of the process that opened the current DB connection.
+ * Returns 0 if no connection is open.
+ */
+export function getDbOwnerPid(): number {
+  return currentPid;
+}
+
+/**
+ * Returns the path of the currently open database, or null if none.
+ */
+export function getDbPath(): string | null {
+  return currentPath;
 }
 
 // ─── Internal Access (for testing) ─────────────────────────────────────────
