@@ -27,6 +27,8 @@ const platformPackageMap: Record<string, string> = {
   "win32-x64": "win32-x64-msvc",
 };
 
+let _loadedSuccessfully = false;
+
 function loadNative(): Record<string, unknown> {
   const errors: string[] = [];
 
@@ -34,7 +36,7 @@ function loadNative(): Record<string, unknown> {
   const packageSuffix = platformPackageMap[platformTag];
   if (packageSuffix) {
     try {
-      return require(`@gsd-build/engine-${packageSuffix}`) as Record<string, unknown>;
+      _loadedSuccessfully = true; return require(`@gsd-build/engine-${packageSuffix}`) as Record<string, unknown>;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       errors.push(`@gsd-build/engine-${packageSuffix}: ${message}`);
@@ -44,7 +46,7 @@ function loadNative(): Record<string, unknown> {
   // 2. Try local release build (native/addon/gsd_engine.{platform}.node)
   const releasePath = path.join(addonDir, `gsd_engine.${platformTag}.node`);
   try {
-    return require(releasePath) as Record<string, unknown>;
+    _loadedSuccessfully = true; return require(releasePath) as Record<string, unknown>;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     errors.push(`${releasePath}: ${message}`);
@@ -53,7 +55,7 @@ function loadNative(): Record<string, unknown> {
   // 3. Try local dev build (native/addon/gsd_engine.dev.node)
   const devPath = path.join(addonDir, "gsd_engine.dev.node");
   try {
-    return require(devPath) as Record<string, unknown>;
+    _loadedSuccessfully = true; return require(devPath) as Record<string, unknown>;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     errors.push(`${devPath}: ${message}`);
@@ -72,7 +74,6 @@ function loadNative(): Record<string, unknown> {
   );
   return new Proxy({} as Record<string, unknown>, {
     get(_target, prop) {
-      if (prop === "__nativeUnavailable") return true;
       return (..._args: unknown[]) => {
         throw new Error(`Native function '${String(prop)}' is not available on ${platformTag}`);
       };
@@ -149,7 +150,7 @@ export const native = loadNative() as {
   parsePartialJson: (text: string) => unknown;
   parseStreamingJson: (text: string) => unknown;
   xxHash32: (input: string, seed: number) => number;
-} & { __nativeUnavailable?: boolean };
+};
 
 /** True when the native addon loaded successfully. False on unsupported platforms. */
-export const nativeAvailable = !(native as Record<string, unknown>).__nativeUnavailable;
+export const nativeAvailable = _loadedSuccessfully;
