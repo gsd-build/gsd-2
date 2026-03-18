@@ -1,15 +1,18 @@
 "use client"
 
-import { useEffect, useRef, useCallback, useState, KeyboardEvent } from "react"
-import { MessagesSquare, SendHorizonal, Check, Eye, EyeOff, Play, Loader2, Milestone, X, MessageCircle } from "lucide-react"
+import { useEffect, useRef, useCallback, useState, useMemo, KeyboardEvent } from "react"
+import { MessagesSquare, SendHorizonal, Check, Eye, EyeOff, Play, Loader2, Milestone, X, MessageCircle, FileEdit, FilePlus, Terminal, ChevronDown, ChevronRight, MoreHorizontal, Zap, Square, Pause, BarChart3, LayoutGrid, ListOrdered, History, Compass, PenLine, Inbox, SkipForward, Undo2, BookOpen, Settings, SlidersHorizontal, Stethoscope, FileOutput, Trash2, Globe, type LucideIcon } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
-import { PtyChatParser, ChatMessage, TuiPrompt } from "@/lib/pty-chat-parser"
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip"
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
+import { ChatMessage, TuiPrompt } from "@/lib/pty-chat-parser"
 import {
   useGSDWorkspaceState,
   useGSDWorkspaceActions,
   buildPromptCommand,
+  type CompletedToolExecution,
 } from "@/lib/gsd-workspace-store"
 import { deriveWorkflowAction } from "@/lib/workflow-actions"
 import { NewMilestoneDialog } from "@/components/gsd/new-milestone-dialog"
@@ -30,45 +33,88 @@ export interface ActionPanelConfig {
   renderMode?: "chat" | "terminal"
 }
 
-/** Discuss action config — triggers a secondary PTY session panel. */
-const DISCUSS_ACTION: Omit<ActionPanelConfig, "sessionId"> = {
-  label: "Discuss",
-  command: "/gsd discuss",
-  accentColor: "sky",
+/* ─── GSD Action Definitions ─── */
+
+/**
+ * Defines every /gsd subcommand available in the chat input bar.
+ * Top 3 are shown as standalone buttons; the rest live in the overflow menu.
+ */
+interface GSDActionDef {
+  label: string
+  command: string
+  icon: LucideIcon
+  description: string
+  category: "workflow" | "visibility" | "correction" | "knowledge" | "config" | "maintenance"
+  renderMode?: "chat" | "terminal"
+  /** Where this command executes: "main" sends to main agent, "panel" opens action panel */
+  target: "main" | "panel"
 }
 
-const NEXT_ACTION: Omit<ActionPanelConfig, "sessionId"> = {
-  label: "Next",
-  command: "/gsd next",
-  accentColor: "amber",
-  renderMode: "terminal",
+const GSD_ACTIONS: GSDActionDef[] = [
+  // ── Top 3 (standalone buttons) ──
+  { label: "Discuss",   command: "/gsd discuss",   icon: MessageCircle,     description: "Start guided milestone/slice discussion",                    category: "workflow",    target: "panel" },
+  { label: "Next",      command: "/gsd next",      icon: Play,              description: "Execute next task, then pause",                              category: "workflow",    target: "main",   renderMode: "terminal" },
+  { label: "Auto",      command: "/gsd auto",      icon: Zap,               description: "Run all queued units continuously",                         category: "workflow",    target: "main",   renderMode: "terminal" },
+  // ── Overflow: Workflow ──
+  { label: "Stop",      command: "/gsd stop",      icon: Square,            description: "Stop auto-mode gracefully",                                  category: "workflow",    target: "main",   renderMode: "terminal" },
+  { label: "Pause",     command: "/gsd pause",     icon: Pause,             description: "Pause auto-mode (preserves state)",                          category: "workflow",    target: "main",   renderMode: "terminal" },
+  // ── Overflow: Visibility ──
+  { label: "Status",    command: "/gsd status",    icon: BarChart3,         description: "Show progress dashboard",                                    category: "visibility",  target: "panel",  renderMode: "terminal" },
+  { label: "Visualize", command: "/gsd visualize", icon: LayoutGrid,        description: "Interactive TUI (progress, deps, metrics, timeline)",        category: "visibility",  target: "panel",  renderMode: "terminal" },
+  { label: "Queue",     command: "/gsd queue",     icon: ListOrdered,       description: "Show queued/dispatched units and execution order",            category: "visibility",  target: "panel",  renderMode: "terminal" },
+  { label: "History",   command: "/gsd history",   icon: History,           description: "View execution history with cost/phase/model details",        category: "visibility",  target: "panel",  renderMode: "terminal" },
+  // ── Overflow: Course correction ──
+  { label: "Steer",     command: "/gsd steer",     icon: Compass,           description: "Apply user override to active work",                         category: "correction",  target: "panel" },
+  { label: "Capture",   command: "/gsd capture",   icon: PenLine,           description: "Quick-capture a thought to CAPTURES.md",                     category: "correction",  target: "panel" },
+  { label: "Triage",    command: "/gsd triage",    icon: Inbox,             description: "Classify and route pending captures",                        category: "correction",  target: "panel",  renderMode: "terminal" },
+  { label: "Skip",      command: "/gsd skip",      icon: SkipForward,       description: "Prevent a unit from auto-mode dispatch",                     category: "correction",  target: "panel",  renderMode: "terminal" },
+  { label: "Undo",      command: "/gsd undo",      icon: Undo2,             description: "Revert last completed unit",                                 category: "correction",  target: "panel",  renderMode: "terminal" },
+  // ── Overflow: Knowledge ──
+  { label: "Knowledge", command: "/gsd knowledge", icon: BookOpen,          description: "Add rule, pattern, or lesson to KNOWLEDGE.md",               category: "knowledge",   target: "panel" },
+  // ── Overflow: Configuration ──
+  { label: "Mode",      command: "/gsd mode",      icon: SlidersHorizontal, description: "Set workflow mode (solo/team)",                               category: "config",      target: "panel",  renderMode: "terminal" },
+  { label: "Prefs",     command: "/gsd prefs",     icon: Settings,          description: "Manage preferences (global/project)",                        category: "config",      target: "panel",  renderMode: "terminal" },
+  // ── Overflow: Maintenance ──
+  { label: "Doctor",    command: "/gsd doctor",    icon: Stethoscope,       description: "Diagnose and repair .gsd/ state",                            category: "maintenance", target: "panel",  renderMode: "terminal" },
+  { label: "Export",    command: "/gsd export",    icon: FileOutput,        description: "Export milestone/slice results (JSON or Markdown)",           category: "maintenance", target: "panel",  renderMode: "terminal" },
+  { label: "Cleanup",   command: "/gsd cleanup",   icon: Trash2,            description: "Remove merged branches or snapshots",                        category: "maintenance", target: "panel",  renderMode: "terminal" },
+  { label: "Remote",    command: "/gsd remote",    icon: Globe,             description: "Control remote auto-mode (Slack/Discord)",                    category: "maintenance", target: "panel",  renderMode: "terminal" },
+]
+
+/** Top 3 shown as standalone buttons next to chat input */
+const TOP_ACTIONS = GSD_ACTIONS.slice(0, 3)
+/** Remaining actions in the overflow menu */
+const OVERFLOW_ACTIONS = GSD_ACTIONS.slice(3)
+
+const CATEGORY_LABELS: Record<GSDActionDef["category"], string> = {
+  workflow: "Workflow",
+  visibility: "Visibility",
+  correction: "Course Correction",
+  knowledge: "Knowledge",
+  config: "Configuration",
+  maintenance: "Maintenance",
 }
 
-/** Map accentColor name → Tailwind top-border + header bg classes */
-function accentClasses(color: string): { border: string; bg: string; text: string } {
-  const map: Record<string, { border: string; bg: string; text: string }> = {
-    sky: {
-      border: "border-sky-500",
-      bg: "bg-sky-500/10",
-      text: "text-sky-400",
-    },
-    amber: {
-      border: "border-amber-500",
-      bg: "bg-amber-500/10",
-      text: "text-amber-400",
-    },
-    green: {
-      border: "border-green-500",
-      bg: "bg-green-500/10",
-      text: "text-green-400",
-    },
-    purple: {
-      border: "border-purple-500",
-      bg: "bg-purple-500/10",
-      text: "text-purple-400",
-    },
+function groupByCategory(actions: GSDActionDef[]): Array<{ category: GSDActionDef["category"]; label: string; items: GSDActionDef[] }> {
+  const seen = new Map<GSDActionDef["category"], GSDActionDef[]>()
+  for (const a of actions) {
+    let group = seen.get(a.category)
+    if (!group) {
+      group = []
+      seen.set(a.category, group)
+    }
+    group.push(a)
   }
-  return map[color] ?? map["sky"]
+  return Array.from(seen.entries()).map(([cat, items]) => ({ category: cat, label: CATEGORY_LABELS[cat], items }))
+}
+
+function toActionPanelConfig(action: GSDActionDef): Omit<ActionPanelConfig, "sessionId"> {
+  return {
+    label: action.label,
+    command: action.command,
+    accentColor: "sky",
+    renderMode: action.renderMode,
+  }
 }
 
 /**
@@ -163,8 +209,13 @@ export function ChatMode({ className }: { className?: string }) {
             "min-w-0 transition-[width] duration-300",
             actionPanelState ? "w-[58%]" : "flex-1",
           )}
-          onOpenDiscuss={() => openPanel(DISCUSS_ACTION)}
-          onOpenNext={() => openPanel(NEXT_ACTION)}
+          onOpenAction={(action) => {
+            if (action.target === "main") {
+              handlePrimaryAction(action.command)
+            } else {
+              openPanel(toActionPanelConfig(action))
+            }
+          }}
         />
 
         {/* Vertical divider — only visible when panel is open */}
@@ -262,17 +313,17 @@ function ChatModeHeader({ onPrimaryAction, onSecondaryAction, onNewMilestone }: 
 
   return (
     <div className="flex items-center justify-between border-b border-border bg-card px-4 py-2">
-      {/* Left: title + state badge + workflow actions inline */}
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2">
-          <MessagesSquare className="h-4 w-4 text-muted-foreground" />
-          <span className="font-medium">Chat Mode</span>
-          <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
-            {stateBadge}
-          </span>
-        </div>
-        {/* Compact workflow action bar — same pattern as Power User Mode */}
-        <div className="flex items-center gap-2" data-testid="chat-mode-action-bar">
+      {/* Left: title + state badge */}
+      <div className="flex items-center gap-2">
+        <MessagesSquare className="h-4 w-4 text-muted-foreground" />
+        <span className="font-medium">Chat Mode</span>
+        <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+          {stateBadge}
+        </span>
+      </div>
+
+      {/* Right: workflow action buttons */}
+      <div className="flex items-center gap-2" data-testid="chat-mode-action-bar">
           {workflowAction.primary && (
             <button
               data-testid="chat-primary-action"
@@ -318,7 +369,6 @@ function ChatModeHeader({ onPrimaryAction, onSecondaryAction, onNewMilestone }: 
             </span>
           )}
         </div>
-      </div>
     </div>
   )
 }
@@ -344,7 +394,6 @@ function ActionPanel({
   config: ActionPanelConfig
   onClose: () => void
 }) {
-  const accent = accentClasses(config.accentColor)
 
   // Unmount backstop: DELETE the session if ActionPanel unmounts without closePanel being called
   // (e.g., navigating away from Chat Mode while panel is open)
@@ -379,51 +428,35 @@ function ActionPanel({
       data-session-id={config.sessionId}
       className="flex h-full flex-col overflow-hidden bg-background"
     >
-      {/* Tinted header with accent top-border */}
+      {/* Panel header */}
       <div
-        className={cn(
-          "flex h-11 flex-shrink-0 items-center justify-between border-b border-border px-4",
-          `border-t-2 ${accent.border}`,
-          accent.bg,
-        )}
+        className="flex h-11 flex-shrink-0 items-center justify-between border-b border-border bg-card px-4"
       >
         <div className="flex items-center gap-2">
-          <span className={cn("text-xs font-semibold uppercase tracking-wide", accent.text)}>
+          <span className="text-sm font-medium text-foreground">
             {config.label}
-          </span>
-          <span className="rounded-full border border-border/40 bg-background/40 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground uppercase tracking-wide">
-            action
           </span>
         </div>
         <button
           data-testid="action-panel-close"
           onClick={onClose}
           aria-label="Close action panel"
-          className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground"
+          className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
 
-      {/* Secondary ChatPane connected to fresh session */}
-      {config.renderMode === "terminal" ? (
-        <StructuredTerminalActionPane
-          sessionId={config.sessionId}
-          command="gsd"
-          commandArgs={[config.command]}
-          activityLabel={config.label}
-        />
-      ) : (
-        <ChatPane
-          sessionId={config.sessionId}
-          command="gsd"
-          commandArgs={[config.command]}
-          activityLabel={config.label}
-          suppressTerminalChrome
-          onCompletionSignal={handleCompletionSignal}
-          className="flex-1 overflow-hidden"
-        />
-      )}
+      {/* Secondary pane — always uses StructuredTerminalActionPane for its own PTY session.
+          ChatPane reads from the global workspace store which is shared with the main chat,
+          so action panels must use their own independent terminal session. */}
+      <StructuredTerminalActionPane
+        sessionId={config.sessionId}
+        command="gsd"
+        commandArgs={[config.command]}
+        activityLabel={config.label}
+        onCompletionSignal={handleCompletionSignal}
+      />
     </div>
   )
 }
@@ -441,7 +474,7 @@ function getChatHighlighter(): Promise<ShikiHighlighter> {
     chatHighlighterPromise = import("shiki")
       .then((mod) =>
         mod.createHighlighter({
-          themes: ["github-dark-default"],
+          themes: ["github-dark-default", "github-light-default"],
           langs: [
             "typescript", "tsx", "javascript", "jsx",
             "json", "jsonc", "markdown", "mdx",
@@ -475,6 +508,20 @@ function getChatHighlighter(): Promise<ShikiHighlighter> {
 function MarkdownContent({ content }: { content: string }) {
   const [rendered, setRendered] = useState<React.ReactNode | null>(null)
   const [ready, setReady] = useState(false)
+  const [isDark, setIsDark] = useState(() =>
+    typeof document !== "undefined" && document.documentElement.classList.contains("dark"),
+  )
+
+  // Watch for theme changes via MutationObserver on <html> class
+  useEffect(() => {
+    if (typeof document === "undefined") return
+    const el = document.documentElement
+    const observer = new MutationObserver(() => {
+      setIsDark(el.classList.contains("dark"))
+    })
+    observer.observe(el, { attributes: true, attributeFilter: ["class"] })
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -491,6 +538,8 @@ function MarkdownContent({ content }: { content: string }) {
         const ReactMarkdown = ReactMarkdownMod.default
         const remarkGfm = remarkGfmMod.default
 
+        const shikiTheme = isDark ? "github-dark-default" : "github-light-default"
+
         const buildComponents = (h: typeof highlighter) => ({
           code({ className, children, ...props }: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) {
             const match = /language-(\w+)/.exec(className || "")
@@ -500,7 +549,7 @@ function MarkdownContent({ content }: { content: string }) {
               try {
                 const highlighted = h.codeToHtml(codeStr, {
                   lang: match[1],
-                  theme: "github-dark-default",
+                  theme: shikiTheme,
                 })
                 return (
                   <div
@@ -524,7 +573,7 @@ function MarkdownContent({ content }: { content: string }) {
             }
 
             return (
-              <pre className="my-3 overflow-x-auto rounded-xl bg-[#0d1117] p-4 text-sm border border-border/40">
+              <pre className={cn("my-3 overflow-x-auto rounded-xl p-4 text-sm border border-border/40", isDark ? "bg-[#0d1117]" : "bg-[#f6f8fa]")}>
                 <code className="font-mono">{children}</code>
               </pre>
             )
@@ -611,7 +660,7 @@ function MarkdownContent({ content }: { content: string }) {
 
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [content]) // re-render when content changes (streaming)
+  }, [content, isDark]) // re-render when content changes (streaming) or theme toggles
 
   if (!ready) {
     // Plain text fallback while modules load
@@ -1022,9 +1071,46 @@ function stripTerminalChrome(content: string): string {
     .filter((line) => {
       const trimmed = line.trim()
       if (!trimmed) return true
+
+      // ── Per-line chrome patterns (anchored — match entire line) ──
+
+      // Update banners
       if (trimmed.startsWith("Update available:")) return false
       if (trimmed.startsWith("Run npm update -g gsd-pi")) return false
-      if (/^\$\d+(?:\.\d+)?\s+\(sub\)/.test(trimmed)) return false
+      // Cost/pricing lines: $N.NNN (...) — any dollar amount followed by parens
+      if (/^\$\d+(?:\.\d+)?\s*\(/.test(trimmed)) return false
+      // Version banners
+      if (/^Get Shit Done v/i.test(trimmed)) return false
+      // Block/box-drawing decoration-only lines
+      if (/^[█▇▆▅▄▃▂▁\s]+$/.test(trimmed)) return false
+      if (/^[█╔╗║╝╚]+/.test(trimmed)) return false
+      if (/^[─━\-│┃╭╮╰╯┌┐└┘├┤┬┴┼\s]+$/.test(trimmed)) return false
+      // Dashboard / status overlay chrome
+      if (/^GSD Dashboard/i.test(trimmed)) return false
+      if (/No unit running/i.test(trimmed)) return false
+      if (/\/gsd auto to start/i.test(trimmed)) return false
+      // pi status bar: scroll indicators, row/col
+      if (/^[↑↓]\d+\s/.test(trimmed)) return false
+      // Path-only lines (working directory display)
+      if (/^~\/\S+$/.test(trimmed)) return false
+
+      // ── Substring chrome patterns (match anywhere in line) ──
+      // If a line CONTAINS startup/plugin chrome, drop the entire line.
+      // These are startup banners that sometimes get concatenated with
+      // user input echo or prompt text on the same terminal row.
+
+      if (/Warning:.*Google/i.test(trimmed)) return false
+      if (/No authentic\w*tion set/i.test(trimmed)) return false
+      if (/Log in via Google/i.test(trimmed)) return false
+      if (/GEMINI_API_KEY/i.test(trimmed)) return false
+      if (/\bgoogle_search\b/i.test(trimmed)) return false
+      if (/Web search v\d/i.test(trimmed)) return false
+      if (/\bJina\s+✓/i.test(trimmed)) return false
+      if (/\bBrave\s+✓/i.test(trimmed)) return false
+      if (/\bAnswers\s+✓/i.test(trimmed)) return false
+      // Web search plugin loading line (multi-part on one row)
+      if (/Web search.*loaded/i.test(trimmed)) return false
+
       return true
     })
     .join("\n")
@@ -1047,22 +1133,32 @@ function createLocalMessageId(): string {
 
 function isScreenChromeLine(trimmed: string): boolean {
   if (!trimmed) return false
+  // Update / version banners
   if (trimmed.startsWith("Update available:")) return true
   if (trimmed.startsWith("Run npm update -g gsd-pi")) return true
   if (trimmed.startsWith("Get Shit Done v")) return true
-  if (trimmed.startsWith("Warning: Google") || trimmed.includes("Warning: Google")) return true
-  if (trimmed.includes("No authentication set")) return true
-  if (trimmed.startsWith("Log in via Google") || trimmed.includes("Log in via Google")) return true
-  if (trimmed.includes("google_search")) return true
-  if (trimmed.startsWith("Web search v4 loaded") || trimmed.includes("Web search v4")) return true
-  if (/^Brave\s+✓|^Answers\s+✓|^Jina\s+✓/i.test(trimmed)) return true
+  // Google auth / search plugin chrome — substring match handles wrapped lines
+  if (/Warning:.*Google/i.test(trimmed)) return true
+  if (/No authentic\w*tion set/i.test(trimmed)) return true
+  if (/Log in via Google/i.test(trimmed)) return true
+  if (/GEMINI_API_KEY/i.test(trimmed)) return true
+  if (/\bgoogle_search\b/i.test(trimmed)) return true
+  if (/Web search.*loaded/i.test(trimmed)) return true
+  if (/Web search v\d/i.test(trimmed)) return true
+  if (/\b(?:Brave|Answers|Jina)\s+✓/i.test(trimmed)) return true
+  // Block/box-drawing decoration
   if (/^[█▇▆▅▄▃▂▁\s]+$/.test(trimmed)) return true
   if (/^[█╔╗║╝╚]+/.test(trimmed)) return true
+  // Path-only lines
   if (/^~\//.test(trimmed)) return true
-  if (/^\$\d+(?:\.\d+)?\s+\(sub\)/.test(trimmed)) return true
+  // Cost lines
+  if (/^\$\d+(?:\.\d+)?\s*\(/.test(trimmed)) return true
+  // Dashboard chrome
   if (/^GSD Dashboard/i.test(trimmed)) return true
   if (/No unit running/i.test(trimmed)) return true
   if (/\/gsd auto to start/i.test(trimmed)) return true
+  // pi status bar: scroll indicators
+  if (/^[↑↓]\d+\s/.test(trimmed)) return true
   return false
 }
 
@@ -1369,21 +1465,21 @@ function ChatMessageList({
  * - Shift+Enter: insert newline (multiline)
  * - Disabled when disconnected; shows "Disconnected" badge
  * - Send button visible when input has content and connected
- * - Discuss button opens `/gsd discuss` in the action panel
- * - Next button opens `/gsd next` in the action panel
+ * - Top 3 action buttons (Discuss, Next, Auto) shown standalone
+ * - Overflow menu (⋯) contains all remaining /gsd subcommands grouped by category
+ * - Every action has a tooltip with description on hover
  */
 function ChatInputBar({
   onSendInput,
   connected,
-  onOpenDiscuss,
-  onOpenNext,
+  onOpenAction,
 }: {
   onSendInput: (data: string) => void
   connected: boolean
-  onOpenDiscuss?: () => void
-  onOpenNext?: () => void
+  onOpenAction?: (action: GSDActionDef) => void
 }) {
   const [value, setValue] = useState("")
+  const [overflowOpen, setOverflowOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const handleSend = useCallback(() => {
@@ -1414,6 +1510,7 @@ function ChatInputBar({
   }, [])
 
   const hasContent = value.trim().length > 0
+  const overflowGroups = useMemo(() => groupByCategory(OVERFLOW_ACTIONS), [])
 
   return (
     <div className="flex-shrink-0 border-t border-border bg-card/80 px-4 py-3 backdrop-blur-sm">
@@ -1465,29 +1562,94 @@ function ChatInputBar({
           </div>
         </div>
 
-        {/* Action buttons — standalone, right of the input, styled to match input box */}
-        {onOpenDiscuss && (
-          <button
-            onClick={onOpenDiscuss}
-            aria-label="Open Discuss panel"
-            title="Discuss"
-            className="flex flex-shrink-0 self-stretch items-center gap-1.5 rounded-xl border border-border bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-accent"
-          >
-            <MessageCircle className="h-3.5 w-3.5 text-muted-foreground" />
-            Discuss
-          </button>
-        )}
+        {/* ── Top 3 action buttons with tooltips ── */}
+        {onOpenAction && (
+          <TooltipProvider delayDuration={300}>
+            {TOP_ACTIONS.map((action) => {
+              const Icon = action.icon
+              return (
+                <Tooltip key={action.command}>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => onOpenAction(action)}
+                      aria-label={action.description}
+                      className="flex flex-shrink-0 items-center justify-center gap-1.5 rounded-xl border border-border bg-background px-3 py-2.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+                    >
+                      <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+                      {action.label}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" sideOffset={6}>
+                    <p className="font-medium">{action.label}</p>
+                    <p className="text-[10px] opacity-80">{action.description}</p>
+                  </TooltipContent>
+                </Tooltip>
+              )
+            })}
 
-        {onOpenNext && (
-          <button
-            onClick={onOpenNext}
-            aria-label="Open Next panel"
-            title="Next"
-            className="flex flex-shrink-0 self-stretch items-center gap-1.5 rounded-xl border border-border bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-accent"
-          >
-            <Play className="h-3.5 w-3.5 text-muted-foreground" />
-            Next
-          </button>
+            {/* ── Overflow menu ── */}
+            <Popover open={overflowOpen} onOpenChange={setOverflowOpen}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <button
+                      aria-label="More GSD commands"
+                      className={cn(
+                        "flex flex-shrink-0 items-center justify-center rounded-xl border border-border bg-background p-2.5 text-foreground transition-colors hover:bg-accent",
+                        overflowOpen && "bg-accent",
+                      )}
+                    >
+                      <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                    </button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                {!overflowOpen && (
+                  <TooltipContent side="top" sideOffset={6}>
+                    More commands
+                  </TooltipContent>
+                )}
+              </Tooltip>
+
+              <PopoverContent
+                side="top"
+                align="end"
+                sideOffset={8}
+                className="w-64 max-h-[420px] overflow-y-auto rounded-xl border border-border bg-popover p-2 shadow-lg"
+              >
+                {overflowGroups.map((group, gi) => (
+                  <div key={group.category}>
+                    {gi > 0 && <div className="my-1.5 border-t border-border/50" />}
+                    <p className="px-2 py-1 text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">
+                      {group.label}
+                    </p>
+                    {group.items.map((action) => {
+                      const Icon = action.icon
+                      return (
+                        <Tooltip key={action.command}>
+                          <TooltipTrigger asChild>
+                            <button
+                              onClick={() => {
+                                setOverflowOpen(false)
+                                onOpenAction(action)
+                              }}
+                              className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent"
+                            >
+                              <Icon className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                              <span className="flex-1 truncate">{action.label}</span>
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="left" sideOffset={8}>
+                            <p className="font-medium">{action.label}</p>
+                            <p className="text-[10px] opacity-80">{action.description}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      )
+                    })}
+                  </div>
+                ))}
+              </PopoverContent>
+            </Popover>
+          </TooltipProvider>
         )}
       </div>
       <p className="mt-1.5 text-center text-[10px] text-muted-foreground/40">
@@ -1503,10 +1665,14 @@ function PlaceholderState({
   connected,
   runningLabel,
   notice,
+  primaryAction,
+  onPrimaryAction,
 }: {
   connected: boolean
   runningLabel?: string
   notice?: string | null
+  primaryAction?: { label: string; icon: LucideIcon } | null
+  onPrimaryAction?: () => void
 }) {
   const showSpinner = connected && Boolean(runningLabel)
 
@@ -1521,15 +1687,31 @@ function PlaceholderState({
       </div>
       <div className="mt-3 space-y-1">
         <p className="text-sm font-medium text-foreground">Chat Mode</p>
-        <p className="max-w-xs text-xs text-muted-foreground">
-          {showSpinner
-            ? `Running ${runningLabel}…`
-            : notice ?? (
-              connected
-                ? "Connected — waiting for GSD output…"
-                : "Connecting to GSD session…"
-            )}
-        </p>
+        {showSpinner ? (
+          <p className="max-w-xs text-xs text-muted-foreground">
+            Running {runningLabel}…
+          </p>
+        ) : notice ? (
+          <p className="max-w-xs text-xs text-muted-foreground">{notice}</p>
+        ) : !connected ? (
+          <p className="max-w-xs text-xs text-muted-foreground">
+            Connecting to GSD session…
+          </p>
+        ) : primaryAction && onPrimaryAction ? (
+          <div className="mt-4">
+            <button
+              onClick={onPrimaryAction}
+              className="inline-flex items-center gap-2 rounded-xl border border-border bg-background px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent active:scale-[0.98]"
+            >
+              <primaryAction.icon className="h-4 w-4 text-muted-foreground" />
+              {primaryAction.label}
+            </button>
+          </div>
+        ) : (
+          <p className="max-w-xs text-xs text-muted-foreground">
+            Connected — waiting for GSD output…
+          </p>
+        )}
       </div>
     </div>
   )
@@ -1540,11 +1722,13 @@ function StructuredTerminalActionPane({
   command,
   commandArgs,
   activityLabel,
+  onCompletionSignal,
 }: {
   sessionId: string
   command?: string
   commandArgs?: string[]
   activityLabel: string
+  onCompletionSignal?: () => void
 }) {
   const terminalRef = useRef<HeadlessTerminal | null>(null)
   const hostElementRef = useRef<HTMLDivElement | null>(null)
@@ -1560,6 +1744,7 @@ function StructuredTerminalActionPane({
   const [notice, setNotice] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const lastSnapshotRef = useRef<string>("")
+  const completionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const flushInputQueue = useCallback(async () => {
     if (flushingRef.current) return
@@ -1590,7 +1775,10 @@ function StructuredTerminalActionPane({
       buffer?: {
         active?: {
           length: number
-          getLine: (index: number) => { translateToString: (trimRight?: boolean) => string } | undefined
+          getLine: (index: number) => {
+            translateToString: (trimRight?: boolean) => string
+            isWrapped: boolean
+          } | undefined
         }
       }
       rows?: number
@@ -1600,17 +1788,30 @@ function StructuredTerminalActionPane({
     const active = terminal.buffer.active
     const rows = terminal.rows ?? 30
     const start = Math.max(0, active.length - rows)
-    const lines: string[] = []
+
+    // Reconstruct logical lines by joining wrapped physical rows
+    const logicalLines: string[] = []
+    let currentLogical = ""
     for (let index = start; index < active.length; index++) {
       const line = active.getLine(index)
       if (!line) continue
-      lines.push(line.translateToString(true))
+      if (line.isWrapped) {
+        currentLogical += line.translateToString(true)
+      } else {
+        if (currentLogical) logicalLines.push(currentLogical)
+        currentLogical = line.translateToString(true)
+      }
     }
+    if (currentLogical) logicalLines.push(currentLogical)
 
-    const parsed = parseStructuredTerminalScreen(lines.join("\n"), commandArgs?.[0])
-    if (parsed.content.trim().length === 0 && !parsed.prompt) return
+    const parsed = parseStructuredTerminalScreen(logicalLines.join("\n"), commandArgs?.[0])
 
-    const snapshotKey = parsed.content + (parsed.prompt?.options.join("|") ?? "")
+    // Strip terminal chrome from parsed content
+    const cleanContent = stripTerminalChrome(parsed.content)
+
+    if (cleanContent.trim().length === 0 && !parsed.prompt) return
+
+    const snapshotKey = cleanContent + (parsed.prompt?.options.join("|") ?? "")
     if (snapshotKey === lastSnapshotRef.current) return
     lastSnapshotRef.current = snapshotKey
 
@@ -1624,14 +1825,23 @@ function StructuredTerminalActionPane({
       const newMsg: ChatMessage = {
         id: createLocalMessageId(),
         role: "assistant",
-        content: parsed.content,
+        content: cleanContent,
         complete: !parsed.prompt,
         prompt: parsed.prompt,
         timestamp: Date.now(),
       }
       return [...completed, newMsg]
     })
-  }, [commandArgs])
+
+    // Schedule completion signal — fire after screen stabilises for 2s
+    if (parsed.prompt === undefined && onCompletionSignal) {
+      if (completionTimerRef.current) clearTimeout(completionTimerRef.current)
+      completionTimerRef.current = setTimeout(() => {
+        completionTimerRef.current = null
+        onCompletionSignal()
+      }, 2000)
+    }
+  }, [commandArgs, onCompletionSignal])
 
   useEffect(() => {
     setCommandInProgress(true)
@@ -1646,7 +1856,7 @@ function StructuredTerminalActionPane({
       if (disposed) return
 
       const terminal = new Terminal({
-        cols: 120,
+        cols: 200,
         rows: 30,
         allowProposedApi: true,
         convertEol: false,
@@ -1750,275 +1960,409 @@ interface ChatPaneProps {
   command?: string
   commandArgs?: string[]
   className?: string
-  /**
-   * If provided, sent to the PTY exactly once after the SSE `connected` event.
-   * Uses a ref guard so SSE reconnects don't resend the command.
-   */
   initialCommand?: string
-  /** Called when PtyChatParser emits a CompletionSignal (GSD returned to idle). */
   onCompletionSignal?: () => void
-  /** Called when the Discuss button in the input bar is clicked. */
-  onOpenDiscuss?: () => void
-  /** Called when the Next button in the input bar is clicked. */
-  onOpenNext?: () => void
-  /** Human-readable label for the currently running startup action. */
+  onOpenAction?: (action: GSDActionDef) => void
   activityLabel?: string
-  /** When true, hide terminal update banners and footer chrome from rendered messages. */
   suppressTerminalChrome?: boolean
-  /**
-   * When true, messages that exactly match initialCommand are hidden.
-   * Used by ActionPanel to suppress the PTY echo of the dispatched slash command.
-   */
   suppressInitialEcho?: boolean
 }
 
+/* ─── ToolExecutionBlock ─── */
+
 /**
- * ChatPane — SSE connection + PtyChatParser integration.
+ * Renders a completed tool execution as a collapsible block.
+ * Edit tool shows a syntax-highlighted unified diff.
+ * Write tool shows the file path and a preview.
+ * Bash tool shows the command and output.
+ * Other tools show a compact summary.
+ */
+function ToolExecutionBlock({ tool }: { tool: CompletedToolExecution }) {
+  const [expanded, setExpanded] = useState(false)
+
+  const path = typeof tool.args?.path === "string" ? tool.args.path : typeof tool.args?.file_path === "string" ? tool.args.file_path : null
+  const shortPath = path ? (path.startsWith(process.env.HOME ?? "/Users") ? "~" + path.slice((process.env.HOME ?? "").length) : path) : null
+  const isError = tool.result?.isError ?? false
+  const diff = tool.result?.details?.diff as string | undefined
+
+  // Choose icon and label
+  const icon = tool.name === "edit" ? <FileEdit className="h-3.5 w-3.5" />
+    : tool.name === "write" ? <FilePlus className="h-3.5 w-3.5" />
+    : <Terminal className="h-3.5 w-3.5" />
+
+  const label = tool.name === "edit" ? "Edit"
+    : tool.name === "write" ? "Write"
+    : tool.name === "bash" ? "$"
+    : tool.name
+
+  // For bash, show the command
+  const bashCommand = tool.name === "bash" && typeof tool.args?.command === "string" ? tool.args.command : null
+
+  // Result text (for bash output, read result, etc.)
+  const resultText = tool.result?.content
+    ?.filter((c) => c.type === "text" && c.text)
+    .map((c) => c.text)
+    .join("\n") ?? ""
+
+  return (
+    <div className="flex justify-start gap-3">
+      <div className="w-7 flex-shrink-0" />
+      <div className="max-w-[82%] min-w-0 w-full">
+        <button
+          onClick={() => setExpanded((e) => !e)}
+          className={cn(
+            "w-full rounded-lg border px-3 py-2 text-left text-xs transition-colors",
+            isError
+              ? "border-red-500/30 bg-red-500/5 hover:bg-red-500/10"
+              : "border-border/40 bg-muted/20 hover:bg-muted/30",
+          )}
+        >
+          {/* Header */}
+          <div className="flex items-center gap-2">
+            <span className={cn("flex-shrink-0", isError ? "text-red-400" : "text-muted-foreground/60")}>
+              {icon}
+            </span>
+            <span className={cn("font-mono font-medium", isError ? "text-red-400" : "text-muted-foreground")}>
+              {label}
+            </span>
+            {shortPath && (
+              <span className="truncate font-mono text-blue-400/80">{shortPath}</span>
+            )}
+            {bashCommand && !shortPath && (
+              <span className="truncate font-mono text-muted-foreground/70">{bashCommand.length > 60 ? bashCommand.slice(0, 60) + "…" : bashCommand}</span>
+            )}
+            <span className="ml-auto flex-shrink-0 text-muted-foreground/40">
+              {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            </span>
+          </div>
+
+          {/* Expanded content */}
+          {expanded && diff && (
+            <div className="mt-2 overflow-x-auto rounded-md border border-border/30 bg-background/80 p-2 font-mono text-[11px] leading-relaxed">
+              {diff.split("\n").map((line, i) => {
+                const isAdd = line.startsWith("+")
+                const isRemove = line.startsWith("-")
+                const isContext = line.startsWith(" ")
+                return (
+                  <div
+                    key={i}
+                    className={cn(
+                      "whitespace-pre",
+                      isAdd && "bg-green-500/10 text-green-400",
+                      isRemove && "bg-red-500/10 text-red-400",
+                      isContext && "text-muted-foreground/60",
+                      !isAdd && !isRemove && !isContext && "text-muted-foreground/40",
+                    )}
+                  >
+                    {line}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Expanded: bash output or other result */}
+          {expanded && !diff && resultText && (
+            <div className="mt-2 max-h-[200px] overflow-y-auto rounded-md border border-border/30 bg-background/80 p-2 font-mono text-[11px] leading-relaxed text-muted-foreground/70 whitespace-pre-wrap">
+              {resultText.length > 2000 ? resultText.slice(0, 2000) + "\n…" : resultText}
+            </div>
+          )}
+
+          {/* Error message */}
+          {expanded && isError && resultText && (
+            <div className="mt-2 rounded-md border border-red-500/20 bg-red-500/5 p-2 text-[11px] text-red-400 whitespace-pre-wrap">
+              {resultText}
+            </div>
+          )}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/* ─── ThinkingIndicator ─── */
+
+/**
+ * Live thinking indicator — shows a spinner + the last 2 lines of the
+ * LLM's internal reasoning, truncated and styled as a muted aside.
+ * Expands on click to show the full thinking text.
+ */
+function ThinkingIndicator({ content, isStreaming }: { content: string; isStreaming: boolean }) {
+  const [expanded, setExpanded] = useState(false)
+  const hasContent = content.trim().length > 0
+
+  // Extract the last 2 non-empty lines for the preview
+  const lines = content.split("\n").filter((l) => l.trim())
+  const previewLines = lines.slice(-2)
+  const hasMore = lines.length > 2
+
+  return (
+    <div className="flex justify-start gap-3">
+      <div className="mt-1 flex-shrink-0 flex h-7 w-7 items-center justify-center rounded-full bg-card border border-border">
+        {isStreaming ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+        ) : (
+          <MessagesSquare className="h-3.5 w-3.5 text-muted-foreground" />
+        )}
+      </div>
+      <div className="max-w-[82%] min-w-0">
+        <button
+          onClick={() => hasContent && setExpanded((e) => !e)}
+          className={cn(
+            "w-full rounded-xl border border-border/40 bg-muted/20 px-3.5 py-2 text-left transition-colors",
+            hasContent && "hover:bg-muted/30 cursor-pointer",
+            !hasContent && "cursor-default",
+          )}
+        >
+          {/* Header row */}
+          <div className="flex items-center gap-2">
+            {isStreaming && (
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400/60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-400" />
+              </span>
+            )}
+            <span className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">
+              {isStreaming ? "Thinking…" : "Thought process"}
+            </span>
+            {hasContent && hasMore && !expanded && (
+              <span className="text-[10px] text-muted-foreground/40">
+                ▶ {lines.length} lines
+              </span>
+            )}
+            {hasContent && expanded && (
+              <span className="text-[10px] text-muted-foreground/40">▼</span>
+            )}
+          </div>
+
+          {/* Preview: last 2 lines */}
+          {hasContent && !expanded && (
+            <div className="mt-1 space-y-0.5">
+              {previewLines.map((line, i) => (
+                <p key={i} className="text-xs leading-relaxed text-muted-foreground/50 italic truncate">
+                  {line}
+                </p>
+              ))}
+            </div>
+          )}
+
+          {/* Expanded: full thinking text */}
+          {hasContent && expanded && (
+            <div className="mt-1 max-h-[200px] overflow-y-auto text-xs leading-relaxed text-muted-foreground/50 italic whitespace-pre-wrap">
+              {content}
+            </div>
+          )}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * ChatPane — bridge event-driven chat rendering.
  *
- * Connects to the PTY session SSE stream on mount, feeds raw output chunks
- * through PtyChatParser, and renders the resulting ChatMessage[] as styled bubbles.
+ * Consumes structured agent events from the workspace store:
+ * - streamingAssistantText: live text deltas from the LLM
+ * - streamingThinkingText: live thinking/reasoning deltas
+ * - liveTranscript: completed text blocks from previous turns
+ * - activeToolExecution: currently running tool call
+ *
+ * User messages are tracked locally and sent via submitInput().
+ * No terminal buffer parsing — all data comes from the bridge event stream.
  *
  * Observability:
- *   - console.log("[ChatPane] SSE connected sessionId=%s") on successful connect
- *   - console.log("[ChatPane] SSE error/disconnected sessionId=%s") on error
- *   - console.debug("[ChatPane] messages=%d sessionId=%s") on every parser update
- *   - In dev mode: window.__chatParser exposes the parser for console inspection
- *   - ChatInputBar shows "Disconnected" badge when SSE is not connected
+ *   - data-testid="chat-pane-store-driven" on the root element
+ *   - ChatInputBar shows "Disconnected" badge when bridge is not connected
  */
-export function ChatPane({ sessionId, command, commandArgs, className, initialCommand, onCompletionSignal, onOpenDiscuss, onOpenNext, activityLabel, suppressInitialEcho, suppressTerminalChrome }: ChatPaneProps) {
-  const parserRef = useRef<PtyChatParser | null>(null)
-  const eventSourceRef = useRef<EventSource | null>(null)
-  const inputQueueRef = useRef<string[]>([])
-  const flushingRef = useRef(false)
-  /** Ref guard: ensure `initialCommand` is sent exactly once after startup settles. */
-  const hasSentInitialCommand = useRef(false)
-  const initialCommandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const parserFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+export function ChatPane({ className, onOpenAction }: ChatPaneProps) {
+  const state = useGSDWorkspaceState()
+  const { submitInput, sendCommand } = useGSDWorkspaceActions()
+  const [userMessages, setUserMessages] = useState<ChatMessage[]>([])
 
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [connected, setConnected] = useState(false)
-  const hasBootstrapCommand = (commandArgs?.length ?? 0) > 0 || Boolean(initialCommand)
-  const [commandInProgress, setCommandInProgress] = useState(hasBootstrapCommand)
-  const [emptyResultNotice, setEmptyResultNotice] = useState<string | null>(null)
-  const commandArgsKey = (commandArgs ?? []).join("\u0000")
+  const connected = state.connectionState === "connected"
+  const isStreaming = state.boot?.bridge.sessionState?.isStreaming ?? false
+  const bridge = state.boot?.bridge ?? null
 
-  useEffect(() => {
-    setCommandInProgress(hasBootstrapCommand)
-    setEmptyResultNotice(null)
-  }, [sessionId, hasBootstrapCommand])
+  // ── Derive smart CTA for the placeholder state ──
+  const workflowAction = deriveWorkflowAction({
+    phase: state.boot?.workspace?.active.phase ?? "pre-planning",
+    autoActive: state.boot?.auto?.active ?? false,
+    autoPaused: state.boot?.auto?.paused ?? false,
+    onboardingLocked: state.boot?.onboarding.locked ?? false,
+    commandInFlight: state.commandInFlight,
+    bootStatus: state.bootStatus,
+    hasMilestones: (state.boot?.workspace?.milestones.length ?? 0) > 0,
+    projectDetectionKind: state.boot?.projectDetection?.kind ?? null,
+  })
 
-  // ── Input queue flush — same pattern as shell-terminal.tsx ────────────────
+  const placeholderCTA = useMemo((): { label: string; icon: LucideIcon } | null => {
+    if (!workflowAction.primary || workflowAction.disabled) return null
+    const phase = state.boot?.workspace?.active.phase ?? "pre-planning"
+    const autoActive = state.boot?.auto?.active ?? false
+    const autoPaused = state.boot?.auto?.paused ?? false
 
-  const flushInputQueue = useCallback(async () => {
-    if (flushingRef.current) return
-    flushingRef.current = true
-    while (inputQueueRef.current.length > 0) {
-      const data = inputQueueRef.current.shift()!
-      try {
-        await fetch("/api/terminal/input", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: sessionId, data }),
-        })
-      } catch {
-        inputQueueRef.current.unshift(data)
-        break
+    if (autoActive && !autoPaused) {
+      return { label: "Stop Auto", icon: Square }
+    }
+    if (autoPaused) {
+      return { label: "Resume Auto", icon: Play }
+    }
+    if (phase === "complete") {
+      return { label: "New Milestone", icon: Milestone }
+    }
+    if (phase === "planning") {
+      return { label: "Plan", icon: Play }
+    }
+    if (phase === "executing" || phase === "summarizing") {
+      return { label: "Start Auto", icon: Zap }
+    }
+    if (phase === "pre-planning") {
+      return { label: "Initialize Project", icon: Play }
+    }
+    return { label: "Continue", icon: Play }
+  }, [workflowAction, state.boot?.workspace?.active.phase, state.boot?.auto?.active, state.boot?.auto?.paused])
+
+  const handlePlaceholderCTA = useCallback(() => {
+    if (!workflowAction.primary) return
+    if (workflowAction.isNewMilestone) {
+      // "New Milestone" triggers /gsd auto behind the scenes to start the guided flow
+      void sendCommand(buildPromptCommand("/gsd auto", bridge))
+    } else {
+      void sendCommand(buildPromptCommand(workflowAction.primary.command, bridge))
+    }
+  }, [workflowAction, sendCommand, bridge])
+
+  /** Send user text — adds a user bubble and dispatches via the store */
+  const handleUserInput = useCallback((data: string) => {
+    const text = data.replace(/\r$/, "").trim()
+    if (!text) return
+
+    const userMsg: ChatMessage = {
+      id: createLocalMessageId(),
+      role: "user",
+      content: text,
+      complete: true,
+      timestamp: Date.now(),
+    }
+    setUserMessages((prev) => [...prev, userMsg])
+    void submitInput(text)
+  }, [submitInput])
+
+  // Build message list from store state
+  const messages = useMemo((): ChatMessage[] => {
+    const allMessages: ChatMessage[] = []
+    const transcriptBlocks = state.liveTranscript
+    const userMsgs = userMessages
+
+    // Interleave: turns alternate user → assistant.
+    // Each transcript block corresponds to one assistant turn.
+    // User messages are paired with their subsequent assistant response.
+    for (let i = 0; i < Math.max(userMsgs.length, transcriptBlocks.length); i++) {
+      // User message for this turn
+      if (i < userMsgs.length) {
+        allMessages.push(userMsgs[i])
+      }
+      // Assistant response for this turn
+      if (i < transcriptBlocks.length) {
+        const block = transcriptBlocks[i]
+        if (block.trim()) {
+          allMessages.push({
+            id: `transcript-${i}`,
+            role: "assistant",
+            content: block,
+            complete: true,
+            timestamp: Date.now() - (transcriptBlocks.length - i) * 1000,
+          })
+        }
       }
     }
-    flushingRef.current = false
-  }, [sessionId])
 
-  const sendInput = useCallback(
-    (data: string) => {
-      inputQueueRef.current.push(data)
-      void flushInputQueue()
-    },
-    [flushInputQueue],
-  )
+    // Add currently streaming content
+    const hasStreaming = state.streamingAssistantText.length > 0
+    const hasThinking = state.streamingThinkingText.length > 0
 
-  // ── SSE connection + parser lifecycle ────────────────────────────────────
-
-  useEffect(() => {
-    const parser = new PtyChatParser(sessionId)
-    parserRef.current = parser
-
-    if (process.env.NODE_ENV !== "production") {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(window as any).__chatParser = parser
-    }
-
-    const unsubscribe = parser.onMessage(() => {
-      const msgs = parser.getMessages()
-      setMessages([...msgs])
-      console.debug("[ChatPane] messages=%d sessionId=%s", msgs.length, sessionId)
-    })
-
-    // Wire completion signal — used by ActionPanel for auto-close after the
-    // initial command has already been dispatched.
-    let unsubscribeCompletion: (() => void) | undefined
-    if (onCompletionSignal) {
-      unsubscribeCompletion = parser.onCompletionSignal(() => {
-        if (hasSentInitialCommand.current || !initialCommand) {
-          setCommandInProgress(false)
-          onCompletionSignal()
-        }
+    if (hasStreaming || hasThinking) {
+      const streamingContent = state.streamingAssistantText
+      allMessages.push({
+        id: "streaming-current",
+        role: "assistant",
+        content: streamingContent || "",
+        complete: false,
+        timestamp: Date.now(),
       })
     }
 
-    const streamUrl = new URL("/api/terminal/stream", window.location.origin)
-    streamUrl.searchParams.set("id", sessionId)
-    if (command) streamUrl.searchParams.set("command", command)
-    for (const arg of commandArgs ?? []) {
-      streamUrl.searchParams.append("arg", arg)
-    }
+    return allMessages
+  }, [state.liveTranscript, state.streamingAssistantText, state.streamingThinkingText, userMessages])
 
-    const es = new EventSource(streamUrl.toString())
-    eventSourceRef.current = es
+  // Prompt submit handler for TUI prompts (select/text/password)
+  const handlePromptSubmit = useCallback((data: string) => {
+    void submitInput(data.replace(/\r$/, ""))
+  }, [submitInput])
 
-    es.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data) as { type: string; data?: string }
-        if (msg.type === "connected") {
-          setConnected(true)
-          console.log("[ChatPane] SSE connected sessionId=%s", sessionId)
-        } else if (msg.type === "output" && msg.data) {
-          parser.feed(msg.data)
-
-          if (parserFlushTimerRef.current) {
-            clearTimeout(parserFlushTimerRef.current)
-          }
-          parserFlushTimerRef.current = setTimeout(() => {
-            parser.flush()
-            parserFlushTimerRef.current = null
-
-            const hasVisibleMessage = parser.getMessages().some((message) => {
-              let content = message.content
-              if (suppressInitialEcho && initialCommand) {
-                content = stripInitialCommandEcho(content, initialCommand)
-              }
-              if (suppressTerminalChrome) {
-                content = stripTerminalChrome(content)
-              }
-              return content.trim().length > 0
-            })
-
-            if (hasVisibleMessage) {
-              setEmptyResultNotice(null)
-              setCommandInProgress(false)
-            } else if (suppressTerminalChrome && parser.getMessages().length > 0) {
-              setCommandInProgress(false)
-              setEmptyResultNotice(
-                activityLabel ? `${activityLabel} completed with no chat-visible output.` : "Command completed with no chat-visible output.",
-              )
-            }
-          }, 300)
-
-          if (initialCommand && !hasSentInitialCommand.current) {
-            if (initialCommandTimerRef.current) {
-              clearTimeout(initialCommandTimerRef.current)
-            }
-            initialCommandTimerRef.current = setTimeout(() => {
-              if (hasSentInitialCommand.current) return
-              hasSentInitialCommand.current = true
-              sendInput(initialCommand + "\r")
-              console.log("[ChatPane] initial command sent after startup idle sessionId=%s command=%s", sessionId, initialCommand)
-            }, 1500)
-          }
-        }
-      } catch {
-        /* malformed SSE message — ignore */
-      }
-    }
-
-    es.onerror = () => {
-      setConnected(false)
-      console.log("[ChatPane] SSE error/disconnected sessionId=%s", sessionId)
-    }
-
-    return () => {
-      es.close()
-      eventSourceRef.current = null
-      if (initialCommandTimerRef.current) {
-        clearTimeout(initialCommandTimerRef.current)
-        initialCommandTimerRef.current = null
-      }
-      if (parserFlushTimerRef.current) {
-        clearTimeout(parserFlushTimerRef.current)
-        parserFlushTimerRef.current = null
-      }
-      unsubscribe()
-      unsubscribeCompletion?.()
-      parserRef.current = null
-      if (process.env.NODE_ENV !== "production") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ;(window as any).__chatParser = undefined
-      }
-    }
-  }, [
-    sessionId,
-    command,
-    commandArgsKey,
-    initialCommand,
-    onCompletionSignal,
-    sendInput,
-    suppressInitialEcho,
-    suppressTerminalChrome,
-    activityLabel,
-  ])
-
-  // ── Render ────────────────────────────────────────────────────────────────
-
-  // Filter messages: when suppressInitialEcho is set, hide or strip messages that
-  // are just the PTY echo of the initialCommand (slash commands echo before being processed).
-  const visibleMessages = messages.flatMap((msg) => {
-    let content = msg.content
-
-    if (suppressInitialEcho && initialCommand) {
-      content = stripInitialCommandEcho(content, initialCommand)
-    }
-
-    if (suppressTerminalChrome) {
-      content = stripTerminalChrome(content)
-    }
-
-    if (content.trim().length === 0 && !msg.prompt) {
-      return []
-    }
-
-    if (content === msg.content) {
-      return [msg]
-    }
-
-    return [{ ...msg, content }]
-  })
+  const showPlaceholder = messages.length === 0 && !isStreaming
 
   return (
-    <div className={cn("flex flex-col overflow-hidden", className)}>
-      {/* Message list */}
+    <div
+      data-testid="chat-pane-store-driven"
+      className={cn("flex flex-col overflow-hidden", className)}
+    >
       <div className="flex flex-1 flex-col overflow-hidden">
-        {commandInProgress && activityLabel && visibleMessages.length > 0 && (
-          <div className="flex flex-shrink-0 items-center justify-center gap-2 border-b border-border/50 bg-card/60 px-4 py-2 text-xs text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            Running {activityLabel}…
-          </div>
-        )}
-        {visibleMessages.length === 0 ? (
+        {showPlaceholder ? (
           <PlaceholderState
             connected={connected}
-            runningLabel={commandInProgress ? activityLabel : undefined}
-            notice={commandInProgress ? null : emptyResultNotice}
+            runningLabel={isStreaming ? "responding" : undefined}
+            primaryAction={placeholderCTA}
+            onPrimaryAction={handlePlaceholderCTA}
           />
         ) : (
-          <ChatMessageList messages={visibleMessages} onSubmitPrompt={sendInput} />
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+            {messages.map((msg) => (
+              <ChatBubble key={msg.id} message={msg} onSubmitPrompt={handlePromptSubmit} />
+            ))}
+
+            {/* Completed tool executions for this turn */}
+            {state.completedToolExecutions.map((tool) => (
+              <ToolExecutionBlock key={tool.id} tool={tool} />
+            ))}
+
+            {/* Active tool execution indicator (inline, not header bar) */}
+            {state.activeToolExecution && (
+              <div className="flex justify-start gap-3">
+                <div className="w-7 flex-shrink-0" />
+                <div className="max-w-[82%] min-w-0">
+                  <div className="flex items-center gap-2 rounded-lg border border-border/40 bg-muted/20 px-3.5 py-2">
+                    <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/60" />
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {state.activeToolExecution.name}
+                    </span>
+                    {state.activeToolExecution.args?.path && (
+                      <span className="font-mono text-xs text-blue-400/80 truncate">
+                        {String(state.activeToolExecution.args.path)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Thinking / streaming indicator */}
+            {isStreaming && !state.activeToolExecution && (
+              <ThinkingIndicator
+                content={state.streamingThinkingText}
+                isStreaming={true}
+              />
+            )}
+
+            <div className="h-2" />
+          </div>
         )}
       </div>
 
-      {/* Fully wired input bar */}
       <ChatInputBar
-        onSendInput={sendInput}
+        onSendInput={handleUserInput}
         connected={connected}
-        onOpenDiscuss={onOpenDiscuss}
-        onOpenNext={onOpenNext}
+        onOpenAction={onOpenAction}
       />
     </div>
   )

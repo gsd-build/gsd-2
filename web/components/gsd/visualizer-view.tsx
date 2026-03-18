@@ -1113,7 +1113,7 @@ function VisualizerTabs({
 
 function VisualizerTabList() {
   return (
-    <TabsPrimitive.List className="flex shrink-0 border-b border-border bg-background px-6">
+    <TabsPrimitive.List className="flex shrink-0 justify-center border-b border-border bg-background px-6">
       {TABS.map(({ value, label, Icon }) => (
         <TabsPrimitive.Trigger
           key={value}

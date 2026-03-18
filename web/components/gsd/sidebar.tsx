@@ -26,6 +26,8 @@ import {
   Monitor,
   Sun,
   Moon,
+  PanelRightClose,
+  PanelRightOpen,
 } from "lucide-react"
 import {
   Dialog,
@@ -315,7 +317,7 @@ function ExitDialog({
 
 /* ─── Milestone Explorer (right sidebar) ─── */
 
-export function MilestoneExplorer({ isConnecting = false, width }: { isConnecting?: boolean; width?: number }) {
+export function MilestoneExplorer({ isConnecting = false, width, onCollapse }: { isConnecting?: boolean; width?: number; onCollapse?: () => void }) {
   const workspace = useGSDWorkspaceState()
   const { sendCommand, openCommandSurface, setCommandSurfaceSection } = useGSDWorkspaceActions()
   const [expandedMilestones, setExpandedMilestones] = useState<string[]>([])
@@ -432,13 +434,24 @@ export function MilestoneExplorer({ isConnecting = false, width }: { isConnectin
 
       {!isConnecting && (
         <div className="flex-1 overflow-y-auto px-1.5 py-1">
-          <div className="px-2 py-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Milestones
-            </span>
-            <div className="mt-1 text-xs text-foreground" data-testid="sidebar-current-scope">
-              {currentScopeLabel}
+          <div className="flex items-start justify-between px-2 py-1.5">
+            <div className="min-w-0">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Milestones
+              </span>
+              <div className="mt-1 text-xs text-foreground" data-testid="sidebar-current-scope">
+                {currentScopeLabel}
+              </div>
             </div>
+            {onCollapse && (
+              <button
+                onClick={onCollapse}
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                title="Collapse sidebar"
+              >
+                <PanelRightClose className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
 
           {workspace.bootStatus === "error" && milestones.length === 0 && (
@@ -607,6 +620,82 @@ export function MilestoneExplorer({ isConnecting = false, width }: { isConnectin
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      <NewMilestoneDialog open={milestoneDialogOpen} onOpenChange={setMilestoneDialogOpen} />
+    </div>
+  )
+}
+
+/* ─── Collapsed Milestone Sidebar (icon-only rail) ─── */
+
+export function CollapsedMilestoneSidebar({ onExpand }: { onExpand: () => void }) {
+  const workspace = useGSDWorkspaceState()
+  const { sendCommand } = useGSDWorkspaceActions()
+  const [milestoneDialogOpen, setMilestoneDialogOpen] = useState(false)
+
+  const liveWorkspace = getLiveWorkspaceIndex(workspace)
+  const milestones = liveWorkspace?.milestones ?? []
+  const auto = getLiveAutoDashboard(workspace)
+  const bridge = workspace.boot?.bridge ?? null
+
+  const workflowAction = deriveWorkflowAction({
+    phase: liveWorkspace?.active.phase ?? "pre-planning",
+    autoActive: auto?.active ?? false,
+    autoPaused: auto?.paused ?? false,
+    onboardingLocked: workspace.boot?.onboarding.locked ?? false,
+    commandInFlight: workspace.commandInFlight,
+    bootStatus: workspace.bootStatus,
+    hasMilestones: milestones.length > 0,
+    projectDetectionKind: workspace.boot?.projectDetection?.kind ?? null,
+  })
+
+  const handleCommand = (command: string) => {
+    void sendCommand(buildPromptCommand(command, bridge))
+  }
+
+  const handlePrimaryAction = () => {
+    if (!workflowAction.primary) return
+    if (workflowAction.isNewMilestone) {
+      setMilestoneDialogOpen(true)
+    } else {
+      handleCommand(workflowAction.primary.command)
+    }
+  }
+
+  return (
+    <div className="flex h-full w-10 flex-col items-center border-l border-border bg-sidebar py-3">
+      <button
+        onClick={onExpand}
+        className="flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        title="Expand milestone sidebar"
+      >
+        <PanelRightOpen className="h-4 w-4" />
+      </button>
+
+      {workflowAction.primary && (
+        <div className="mt-auto pb-0.5">
+          <button
+            onClick={handlePrimaryAction}
+            disabled={workflowAction.disabled}
+            className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-md transition-colors",
+              workflowAction.primary.variant === "destructive"
+                ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                : "bg-primary text-primary-foreground hover:bg-primary/90",
+              workflowAction.disabled && "cursor-not-allowed opacity-50",
+            )}
+            title={workflowAction.disabledReason ?? workflowAction.primary.label}
+          >
+            {workspace.commandInFlight ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : workflowAction.isNewMilestone ? (
+              <Milestone className="h-4 w-4" />
+            ) : (
+              <Play className="h-4 w-4" />
+            )}
+          </button>
         </div>
       )}
 

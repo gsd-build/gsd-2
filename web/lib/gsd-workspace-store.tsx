@@ -499,6 +499,19 @@ export type PendingUiRequest = Extract<
 export interface ActiveToolExecution {
   id: string
   name: string
+  args?: Record<string, unknown>
+}
+
+/** Completed tool execution with result — kept for chat rendering */
+export interface CompletedToolExecution {
+  id: string
+  name: string
+  args: Record<string, unknown>
+  result?: {
+    content?: Array<{ type: string; text?: string }>
+    details?: Record<string, unknown>
+    isError?: boolean
+  }
 }
 
 export interface WidgetContent {
@@ -524,7 +537,9 @@ export interface WorkspaceStoreState {
   // Live interaction state
   pendingUiRequests: PendingUiRequest[]
   streamingAssistantText: string
+  streamingThinkingText: string
   liveTranscript: string[]
+  completedToolExecutions: CompletedToolExecution[]
   activeToolExecution: ActiveToolExecution | null
   statusTexts: Record<string, string>
   widgetContents: Record<string, WidgetContent>
@@ -1777,7 +1792,9 @@ function createInitialState(): WorkspaceStoreState {
     // Live interaction state
     pendingUiRequests: [],
     streamingAssistantText: "",
+    streamingThinkingText: "",
     liveTranscript: [],
+    completedToolExecutions: [],
     activeToolExecution: null,
     statusTexts: {},
     widgetContents: {},
@@ -4851,7 +4868,7 @@ export class GSDWorkspaceStore {
         this.handleToolExecutionStart(event as ToolExecutionStartEvent)
         break
       case "tool_execution_end":
-        this.handleToolExecutionEnd()
+        this.handleToolExecutionEnd(event as ToolExecutionEndEvent)
         break
     }
   }
@@ -4910,10 +4927,17 @@ export class GSDWorkspaceStore {
 
   private handleMessageUpdate(event: MessageUpdateEvent): void {
     const assistantEvent = event.assistantMessageEvent
-    if (assistantEvent && assistantEvent.type === "text_delta" && typeof assistantEvent.delta === "string") {
+    if (!assistantEvent) return
+    if (assistantEvent.type === "text_delta" && typeof assistantEvent.delta === "string") {
       this.patchState({
         streamingAssistantText: this.state.streamingAssistantText + assistantEvent.delta,
       })
+    } else if (assistantEvent.type === "thinking_delta" && typeof assistantEvent.delta === "string") {
+      this.patchState({
+        streamingThinkingText: this.state.streamingThinkingText + assistantEvent.delta,
+      })
+    } else if (assistantEvent.type === "thinking_end") {
+      // Thinking block complete — keep the accumulated text, it'll be moved on turn boundary
     }
   }
 
@@ -4923,18 +4947,45 @@ export class GSDWorkspaceStore {
       this.patchState({
         liveTranscript: next.length > MAX_TRANSCRIPT_BLOCKS ? next.slice(next.length - MAX_TRANSCRIPT_BLOCKS) : next,
         streamingAssistantText: "",
+        streamingThinkingText: "",
       })
+    } else if (this.state.streamingThinkingText.length > 0) {
+      // Turn ended with only thinking, no visible text — clear thinking
+      this.patchState({ streamingThinkingText: "" })
     }
   }
 
   private handleToolExecutionStart(event: ToolExecutionStartEvent): void {
     this.patchState({
-      activeToolExecution: { id: event.toolCallId, name: event.toolName },
+      activeToolExecution: {
+        id: event.toolCallId,
+        name: event.toolName,
+        args: (event as Record<string, unknown>).args as Record<string, unknown> | undefined,
+      },
     })
   }
 
-  private handleToolExecutionEnd(): void {
-    this.patchState({ activeToolExecution: null })
+  private handleToolExecutionEnd(event: ToolExecutionEndEvent): void {
+    const active = this.state.activeToolExecution
+    if (active) {
+      const completed: CompletedToolExecution = {
+        id: active.id,
+        name: active.name,
+        args: active.args ?? {},
+        result: {
+          content: (event as Record<string, unknown>).result?.content as CompletedToolExecution["result"]["content"],
+          details: (event as Record<string, unknown>).result?.details as Record<string, unknown> | undefined,
+          isError: event.isError,
+        },
+      }
+      const next = [...this.state.completedToolExecutions, completed]
+      this.patchState({
+        activeToolExecution: null,
+        completedToolExecutions: next.length > 50 ? next.slice(next.length - 50) : next,
+      })
+    } else {
+      this.patchState({ activeToolExecution: null })
+    }
   }
 
   private recordBridgeStatus(bridge: BridgeRuntimeSnapshot): void {

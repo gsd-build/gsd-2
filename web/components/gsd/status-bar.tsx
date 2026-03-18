@@ -1,12 +1,10 @@
 "use client"
 
+import { useEffect, useState, useCallback } from "react"
 import { GitBranch, Cpu, DollarSign, Clock, Zap, AlertTriangle, Wifi, Info, LifeBuoy } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
-  formatCost,
-  formatDuration,
-  formatTokens,
   getCurrentBranch,
   getCurrentScopeLabel,
   getLiveAutoDashboard,
@@ -16,6 +14,12 @@ import {
   getVisibleWorkspaceError,
   useGSDWorkspaceState,
 } from "@/lib/gsd-workspace-store"
+import {
+  formatCost as formatProjectCost,
+  formatDuration as formatProjectDuration,
+  formatTokenCount,
+  type ProjectTotals,
+} from "@/lib/visualizer-types"
 import { ScopeBadgeInline } from "@/components/gsd/scope-badge"
 
 function toneClass(tone: ReturnType<typeof getStatusPresentation>["tone"]): string {
@@ -47,6 +51,26 @@ export function StatusBar() {
   const statusTextEntries = Object.entries(statusTexts)
   const latestStatusText = statusTextEntries.length > 0 ? statusTextEntries[statusTextEntries.length - 1][1] : null
   const isConnecting = workspace.bootStatus === "idle" || workspace.bootStatus === "loading"
+
+  // ── Project-level totals from visualizer API ──
+  const [projectTotals, setProjectTotals] = useState<ProjectTotals | null>(null)
+
+  const fetchProjectTotals = useCallback(async () => {
+    try {
+      const resp = await fetch("/api/visualizer")
+      if (!resp.ok) return
+      const json = await resp.json()
+      if (json.totals) setProjectTotals(json.totals)
+    } catch {
+      // Silently ignore — status bar is non-critical
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchProjectTotals()
+    const interval = setInterval(fetchProjectTotals, 30_000)
+    return () => clearInterval(interval)
+  }, [fetchProjectTotals])
 
   return (
     <div className="flex h-7 items-center justify-between border-t border-border bg-card px-3 text-xs">
@@ -110,15 +134,15 @@ export function StatusBar() {
       <div className="flex min-w-0 items-center gap-4">
         <div className="flex items-center gap-1.5 text-muted-foreground">
           <Clock className="h-3 w-3" />
-          {isConnecting ? <Skeleton className="h-3 w-8" /> : <span>{formatDuration(auto?.elapsed ?? 0)}</span>}
+          {isConnecting ? <Skeleton className="h-3 w-8" /> : <span>{formatProjectDuration(projectTotals?.duration ?? auto?.elapsed ?? 0)}</span>}
         </div>
         <div className="flex items-center gap-1.5 text-muted-foreground">
           <Zap className="h-3 w-3" />
-          {isConnecting ? <Skeleton className="h-3 w-6" /> : <span>{formatTokens(auto?.totalTokens ?? 0)}</span>}
+          {isConnecting ? <Skeleton className="h-3 w-6" /> : <span>{formatTokenCount(projectTotals?.tokens.total ?? auto?.totalTokens ?? 0)}</span>}
         </div>
         <div className="flex items-center gap-1.5 text-muted-foreground">
           <DollarSign className="h-3 w-3" />
-          {isConnecting ? <Skeleton className="h-3 w-10" /> : <span>{formatCost(auto?.totalCost ?? 0)}</span>}
+          {isConnecting ? <Skeleton className="h-3 w-10" /> : <span>{formatProjectCost(projectTotals?.cost ?? auto?.totalCost ?? 0)}</span>}
         </div>
         <span className="max-w-[20rem] truncate text-muted-foreground" data-testid="status-bar-unit">
           {isConnecting ? <Skeleton className="inline-block h-3 w-28 align-middle" /> : <ScopeBadgeInline label={unitLabel} />}

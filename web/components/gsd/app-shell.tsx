@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react"
-import { Sidebar, MilestoneExplorer } from "@/components/gsd/sidebar"
+import { Sidebar, MilestoneExplorer, CollapsedMilestoneSidebar } from "@/components/gsd/sidebar"
 import { ShellTerminal } from "@/components/gsd/shell-terminal"
 import { Dashboard } from "@/components/gsd/dashboard"
 import { Roadmap } from "@/components/gsd/roadmap"
@@ -81,6 +81,7 @@ function WorkspaceChrome() {
   const isDraggingSidebar = useRef(false)
   const dragStartX = useRef(0)
   const dragStartWidth = useRef(0)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [viewRestored, setViewRestored] = useState(false)
   const workspace = useGSDWorkspaceState()
   const { refreshBoot } = useGSDWorkspaceActions()
@@ -123,6 +124,25 @@ function WorkspaceChrome() {
       // sessionStorage may be unavailable
     }
   }, [activeView, projectPath])
+
+  // Restore sidebar collapsed state from localStorage
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("gsd-sidebar-collapsed")
+      if (stored === "true") setSidebarCollapsed(true)
+    } catch {
+      // localStorage may be unavailable
+    }
+  }, [])
+
+  // Persist sidebar collapsed state
+  useEffect(() => {
+    try {
+      localStorage.setItem("gsd-sidebar-collapsed", String(sidebarCollapsed))
+    } catch {
+      // localStorage may be unavailable
+    }
+  }, [sidebarCollapsed])
 
   useEffect(() => {
     if (typeof document === "undefined") return
@@ -371,13 +391,29 @@ function WorkspaceChrome() {
         </div>
 
         {/* Resizable milestone sidebar */}
-        <div
-          className="flex h-full cursor-col-resize items-center justify-center w-1 bg-border hover:bg-muted-foreground/30 transition-colors"
-          onMouseDown={handleSidebarDragStart}
-        >
-          <div className="h-8 w-1 rounded-full" />
-        </div>
-        <MilestoneExplorer isConnecting={isConnecting} width={sidebarWidth} />
+        {!sidebarCollapsed && (
+          <div
+            className="relative flex h-full items-stretch"
+            style={{ flexShrink: 0 }}
+          >
+            {/* Thin visible border */}
+            <div className="w-px bg-border" />
+            {/* Wide invisible grab area overlapping the border */}
+            <div
+              className="absolute left-[-3px] top-0 bottom-0 w-[7px] cursor-col-resize z-10 hover:bg-muted-foreground/20 transition-colors"
+              onMouseDown={handleSidebarDragStart}
+            />
+          </div>
+        )}
+        {sidebarCollapsed ? (
+          <CollapsedMilestoneSidebar onExpand={() => setSidebarCollapsed(false)} />
+        ) : (
+          <MilestoneExplorer
+            isConnecting={isConnecting}
+            width={sidebarWidth}
+            onCollapse={() => setSidebarCollapsed(true)}
+          />
+        )}
       </div>
 
       <StatusBar />

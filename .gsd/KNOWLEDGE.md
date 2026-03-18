@@ -75,3 +75,7 @@ When using `AnimatePresence` with a spring exit animation, React holds the compo
 ## hasSentInitialCommand Must Be a Ref, Not State
 
 When sending an initial PTY command after SSE `connected`, use `const hasSentInitialCommand = useRef(false)` (not `useState`). A ref update does not trigger re-render, which prevents the SSE useEffect from re-running (which would reconnect SSE and resend the command). State-based guards would create a feedback loop: state change → effect re-runs → new SSE connection → new `connected` event → command sent again.
+
+## Always test web in prouction
+
+npm run build:web-host >/dev/null && npm run gsd:web:stop:all >/dev/null 2>&1 || true && npm run gsd:web
