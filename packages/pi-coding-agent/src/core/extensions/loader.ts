@@ -55,7 +55,9 @@ const VIRTUAL_MODULES: Record<string, unknown> = {
 	"yaml": _bundledYaml,
 	"@modelcontextprotocol/sdk/client": _bundledMcpClient,
 	"@modelcontextprotocol/sdk/client/stdio": _bundledMcpStdio,
+	"@modelcontextprotocol/sdk/client/stdio.js": _bundledMcpStdio,
 	"@modelcontextprotocol/sdk/client/streamableHttp": _bundledMcpStreamableHttp,
+	"@modelcontextprotocol/sdk/client/streamableHttp.js": _bundledMcpStreamableHttp,
 	// Aliases for external PI ecosystem packages that import from the original scope
 	"@mariozechner/pi-agent-core": _bundledPiAgentCore,
 	"@mariozechner/pi-tui": _bundledPiTui,
@@ -102,7 +104,9 @@ function getAliases(): Record<string, string> {
 		"yaml": yamlRoot,
 		"@modelcontextprotocol/sdk/client": require.resolve("@modelcontextprotocol/sdk/client"),
 		"@modelcontextprotocol/sdk/client/stdio": require.resolve("@modelcontextprotocol/sdk/client/stdio.js"),
+		"@modelcontextprotocol/sdk/client/stdio.js": require.resolve("@modelcontextprotocol/sdk/client/stdio.js"),
 		"@modelcontextprotocol/sdk/client/streamableHttp": require.resolve("@modelcontextprotocol/sdk/client/streamableHttp.js"),
+		"@modelcontextprotocol/sdk/client/streamableHttp.js": require.resolve("@modelcontextprotocol/sdk/client/streamableHttp.js"),
 		// Aliases for external PI ecosystem packages that import from the original scope
 		"@mariozechner/pi-coding-agent": packageIndex,
 		"@mariozechner/pi-agent-core": resolveWorkspaceOrImport("agent/dist/index.js", "@gsd/pi-agent-core"),
