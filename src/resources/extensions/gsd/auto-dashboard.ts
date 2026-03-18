@@ -397,11 +397,14 @@ export function updateProgressWidget(
         lines.push(rightAlign(`${pad}${contextLine}`, phaseBadge, width));
 
         // ── Two-column body ─────────────────────────────────────────────
-        // Left: progress, ETA, next, stats  |  Right: task checklist
+        // Left: progress, ETA, next, stats  |  Right: task checklist (pegged right)
         const divider = theme.fg("dim", "│");
         const colGap = 3; // space + │ + space
-        const leftColWidth = Math.floor(width * 0.45);
-        const rightColWidth = width - leftColWidth - colGap;
+        const minTwoColWidth = 80; // below this, fall back to single column
+        const rightColFixed = 44; // fixed width for task checklist
+        const useTwoCol = width >= minTwoColWidth;
+        const rightColWidth = useTwoCol ? Math.min(rightColFixed, Math.floor(width * 0.55)) : 0;
+        const leftColWidth = useTwoCol ? width - rightColWidth - colGap : width;
 
         const roadmapSlices = mid ? getRoadmapSlicesSync() : null;
 
@@ -513,48 +516,58 @@ export function updateProgressWidget(
           }
         }
 
-        // Build right column: task checklist
+        // Build right column: task checklist (only in two-column mode)
         const rightLines: string[] = [];
         const taskDetails = roadmapSlices?.taskDetails ?? null;
         const maxVisibleTasks = 8;
         const rpad = " ";
 
-        if (taskDetails && taskDetails.length > 0) {
-          const visibleTasks = taskDetails.slice(0, maxVisibleTasks);
-          for (const t of visibleTasks) {
-            const isCurrent = task && t.id === task.id;
-            const glyph = t.done
-              ? theme.fg("success", GLYPH.statusDone)
-              : isCurrent
-                ? theme.fg("accent", "▸")
-                : theme.fg("dim", " ");
-            const label = isCurrent
-              ? theme.fg("text", `${t.id}: ${t.title}`)
-              : t.done
-                ? theme.fg("dim", `${t.id}: ${t.title}`)
-                : theme.fg("text", `${t.id}: ${t.title}`);
-            rightLines.push(truncateToWidth(`${rpad}${glyph} ${label}`, rightColWidth));
+        if (useTwoCol) {
+          if (taskDetails && taskDetails.length > 0) {
+            const visibleTasks = taskDetails.slice(0, maxVisibleTasks);
+            for (const t of visibleTasks) {
+              const isCurrent = task && t.id === task.id;
+              const glyph = t.done
+                ? theme.fg("success", GLYPH.statusDone)
+                : isCurrent
+                  ? theme.fg("accent", "▸")
+                  : theme.fg("dim", " ");
+              const label = isCurrent
+                ? theme.fg("text", `${t.id}: ${t.title}`)
+                : t.done
+                  ? theme.fg("dim", `${t.id}: ${t.title}`)
+                  : theme.fg("text", `${t.id}: ${t.title}`);
+              rightLines.push(truncateToWidth(`${rpad}${glyph} ${label}`, rightColWidth));
+            }
+            if (taskDetails.length > maxVisibleTasks) {
+              rightLines.push(truncateToWidth(
+                `${rpad}${theme.fg("dim", `  …+${taskDetails.length - maxVisibleTasks} more`)}`,
+                rightColWidth,
+              ));
+            }
+          } else if (roadmapSlices?.activeSliceTasks) {
+            const { done: tDone, total: tTotal } = roadmapSlices.activeSliceTasks;
+            rightLines.push(`${rpad}${theme.fg("dim", `${tDone}/${tTotal} tasks`)}`);
           }
-          if (taskDetails.length > maxVisibleTasks) {
-            rightLines.push(truncateToWidth(
-              `${rpad}${theme.fg("dim", `  …+${taskDetails.length - maxVisibleTasks} more`)}`,
-              rightColWidth,
-            ));
-          }
-        } else if (roadmapSlices?.activeSliceTasks) {
-          // Fallback: just show task count if no details
-          const { done: tDone, total: tTotal } = roadmapSlices.activeSliceTasks;
-          rightLines.push(`${rpad}${theme.fg("dim", `${tDone}/${tTotal} tasks`)}`);
         }
 
-        // Zip left and right columns together
-        const maxRows = Math.max(leftLines.length, rightLines.length);
-        if (maxRows > 0) {
-          lines.push(""); // spacer before columns
-          for (let i = 0; i < maxRows; i++) {
-            const left = padToWidth(leftLines[i] ?? "", leftColWidth);
-            const right = rightLines[i] ?? "";
-            lines.push(truncateToWidth(`${left} ${divider} ${right}`, width));
+        // Compose columns
+        if (useTwoCol) {
+          // Two-column: zip left and right with divider
+          const maxRows = Math.max(leftLines.length, rightLines.length);
+          if (maxRows > 0) {
+            lines.push(""); // spacer before columns
+            for (let i = 0; i < maxRows; i++) {
+              const left = padToWidth(leftLines[i] ?? "", leftColWidth);
+              const right = rightLines[i] ?? "";
+              lines.push(truncateToWidth(`${left} ${divider} ${right}`, width));
+            }
+          }
+        } else {
+          // Narrow single-column: stack left lines, then task summary
+          if (leftLines.length > 0) {
+            lines.push("");
+            for (const l of leftLines) lines.push(l);
           }
         }
 
