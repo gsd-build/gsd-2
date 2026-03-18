@@ -1,9 +1,9 @@
 /**
- * FileEditor — CodeMirror 6 editor with syntax highlighting, line numbers,
+ * FileEditor — CodeMirror 6 editor with full syntax highlighting, line numbers,
  * active-line borders, and VS Code dark theme.
  *
- * Language is auto-detected from filePath extension.
- * External content changes (file switch) are applied without triggering onChange.
+ * Languages: TS/TSX, JS/JSX, CSS/SCSS/SASS, JSON, Python, Markdown,
+ *            HTML, XML, SQL, Rust, Java, C/C++, YAML, Go, Shell (plain)
  */
 import { useEffect, useRef, useCallback } from "react";
 import { EditorView, keymap, highlightActiveLine, highlightActiveLineGutter } from "@codemirror/view";
@@ -15,6 +15,14 @@ import { css } from "@codemirror/lang-css";
 import { json } from "@codemirror/lang-json";
 import { python } from "@codemirror/lang-python";
 import { markdown } from "@codemirror/lang-markdown";
+import { html } from "@codemirror/lang-html";
+import { xml } from "@codemirror/lang-xml";
+import { sql } from "@codemirror/lang-sql";
+import { rust } from "@codemirror/lang-rust";
+import { java } from "@codemirror/lang-java";
+import { cpp } from "@codemirror/lang-cpp";
+import { yaml } from "@codemirror/lang-yaml";
+import { go } from "@codemirror/lang-go";
 
 interface FileEditorProps {
   content: string;
@@ -23,14 +31,12 @@ interface FileEditorProps {
   onSave: () => void;
 }
 
-/** Returns true if the content appears to be binary (contains null bytes). */
 function isBinaryContent(content: string): boolean {
   return content.slice(0, 8192).includes("\0");
 }
 
-const MAX_FILE_SIZE = 500_000; // 500KB
+const MAX_FILE_SIZE = 500000; // 500KB
 
-/** Detect CodeMirror language extension by file extension. */
 function getLanguageExtension(filePath: string) {
   const ext = filePath.replace(/\\/g, "/").split("/").pop()?.split(".").pop()?.toLowerCase() ?? "";
   switch (ext) {
@@ -39,29 +45,57 @@ function getLanguageExtension(filePath: string) {
       return javascript({ jsx: true, typescript: true });
     case "js":
     case "jsx":
+    case "mjs":
+    case "cjs":
       return javascript({ jsx: true });
     case "css":
     case "scss":
     case "sass":
       return css();
     case "json":
+    case "jsonc":
       return json();
     case "py":
+    case "pyw":
       return python();
     case "md":
     case "markdown":
+    case "mdx":
       return markdown();
+    case "html":
+    case "htm":
+    case "svelte":
+    case "vue":
+      return html();
+    case "xml":
+    case "svg":
+    case "xaml":
+      return xml();
+    case "sql":
+      return sql();
+    case "rs":
+      return rust();
+    case "java":
+      return java();
+    case "c":
+    case "cpp":
+    case "cc":
+    case "cxx":
+    case "h":
+    case "hpp":
+      return cpp();
+    case "yaml":
+    case "yml":
+      return yaml();
+    case "go":
+      return go();
     default:
       return null;
   }
 }
 
-/** Custom theme additions — VS Code-style active line borders + gutter styling. */
 const vsCodeTheme = EditorView.theme({
-  "&": {
-    height: "100%",
-    fontSize: "13px",
-  },
+  "&": { height: "100%", fontSize: "13px" },
   ".cm-scroller": {
     fontFamily: "'JetBrains Mono', 'Share Tech Mono', monospace",
     lineHeight: "1.6",
@@ -83,9 +117,7 @@ const vsCodeTheme = EditorView.theme({
     color: "#3D5166",
     paddingRight: "12px",
   },
-  ".cm-cursor": {
-    borderLeftColor: "#5BC8F0",
-  },
+  ".cm-cursor": { borderLeftColor: "#5BC8F0" },
   ".cm-selectionBackground, ::selection": {
     backgroundColor: "rgba(91,200,240,0.2) !important",
   },
@@ -99,7 +131,6 @@ export function FileEditor({ content, filePath, onChange, onSave }: FileEditorPr
   const isExternalUpdate = useRef(false);
   const langCompartment = useRef(new Compartment());
 
-  // Keep refs up to date
   onSaveRef.current = onSave;
   onChangeRef.current = onChange;
 
@@ -110,11 +141,7 @@ export function FileEditor({ content, filePath, onChange, onSave }: FileEditorPr
     const langExt = getLanguageExtension(filePath);
 
     const saveKeymap = keymap.of([
-      {
-        key: "Ctrl-s",
-        mac: "Mod-s",
-        run: () => { onSaveRef.current(); return true; },
-      },
+      { key: "Ctrl-s", mac: "Mod-s", run: () => { onSaveRef.current(); return true; } },
     ]);
 
     const updateListener = EditorView.updateListener.of((update) => {
@@ -145,44 +172,34 @@ export function FileEditor({ content, filePath, onChange, onSave }: FileEditorPr
       view.destroy();
       viewRef.current = null;
     };
-    // Only recreate on mount/unmount — content and filePath updates handled below
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update language when filePath changes
+  // Swap language when file changes
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
     const langExt = getLanguageExtension(filePath);
-    view.dispatch({
-      effects: langCompartment.current.reconfigure(langExt ?? []),
-    });
+    view.dispatch({ effects: langCompartment.current.reconfigure(langExt ?? []) });
   }, [filePath]);
 
-  // Sync external content prop → editor (e.g. when a new file is loaded)
+  // Sync external content → editor (file switch)
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
     const currentDoc = view.state.doc.toString();
-    if (currentDoc === content) return; // already in sync — no-op
+    if (currentDoc === content) return;
     isExternalUpdate.current = true;
-    view.dispatch({
-      changes: { from: 0, to: currentDoc.length, insert: content },
-    });
+    view.dispatch({ changes: { from: 0, to: currentDoc.length, insert: content } });
     isExternalUpdate.current = false;
   }, [content]);
 
-  // Ctrl+S handler kept in sync via ref — no effect needed
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-        e.preventDefault();
-        onSaveRef.current();
-      }
-    },
-    [],
-  );
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+      e.preventDefault();
+      onSaveRef.current();
+    }
+  }, []);
 
   if (isBinaryContent(content)) {
     return (

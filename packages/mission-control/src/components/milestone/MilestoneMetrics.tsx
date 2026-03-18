@@ -12,8 +12,8 @@ interface MilestoneMetricsProps {
 }
 
 function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
   return String(n);
 }
 
@@ -77,7 +77,7 @@ export function MilestoneMetrics({ gsd2State }: MilestoneMetricsProps) {
     .flatMap((m) => m.slices)
     .find((s) => s.id === activeSliceId)?.name ?? "";
   const activityLabel = projectState.auto_mode && activeSliceId
-    ? `${activeSliceId}${activeSliceName ? ` · ${activeSliceName}` : ""}`
+    ? `${activeSliceId}${activeSliceName ? ` - ${activeSliceName}` : ""}`
     : "Idle";
   const activitySub = projectState.auto_mode ? "Running" : "No active session";
 
