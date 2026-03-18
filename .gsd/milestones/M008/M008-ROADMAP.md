@@ -58,7 +58,7 @@ This milestone is complete only when all are true:
 - [x] **S01: Projects Page Redesign** `risk:medium` `depends:[]`
   > After this: Projects view shows a styled list; clicking a project expands it to reveal progress details (milestone, slice, tasks, cost).
 
-- [ ] **S02: Browser Update UI** `risk:medium` `depends:[]`
+- [x] **S02: Browser Update UI** `risk:medium` `depends:[]`
   > After this: When a new GSD version is available, a banner appears in the browser; clicking "Update" triggers async npm install and shows progress.
 
 - [ ] **S03: Theme Defaults & Light Mode Color Audit** `risk:medium` `depends:[]`
