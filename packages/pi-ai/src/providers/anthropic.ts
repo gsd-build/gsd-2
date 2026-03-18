@@ -709,10 +709,11 @@ function buildParams(
 	options?: AnthropicOptions,
 ): MessageCreateParamsStreaming {
 	const { cacheControl } = getCacheControl(model.baseUrl, options?.cacheRetention);
-	// For OAuth (Claude Max/Pro), strip variant suffixes like [1m] from model ID.
+	// Strip variant suffixes like [1m] from model ID before sending to the API.
 	// The API only accepts the base model ID (e.g. "claude-opus-4-6"),
 	// not internal variant identifiers (e.g. "claude-opus-4-6[1m]").
-	const apiModelId = isOAuthToken ? model.id.replace(/\[.*\]$/, "") : model.id;
+	// This applies to all auth methods — API keys, OAuth, and Copilot alike.
+	const apiModelId = model.id.replace(/\[.*\]$/, "");
 	const params: MessageCreateParamsStreaming = {
 		model: apiModelId,
 		messages: convertMessages(context.messages, model, isOAuthToken, cacheControl),
