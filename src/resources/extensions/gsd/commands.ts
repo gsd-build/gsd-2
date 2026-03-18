@@ -43,6 +43,7 @@ import { handleConfig } from "./commands-config.js";
 import { handleInspect } from "./commands-inspect.js";
 import { handleCleanupBranches, handleCleanupSnapshots, handleSkip, handleDryRun } from "./commands-maintenance.js";
 import { handleDoctor, handleSteer, handleCapture, handleTriage, handleKnowledge, handleRunHook, handleUpdate, handleSkillHealth } from "./commands-handlers.js";
+import { handleLogs } from "./commands-logs.js";
 
 // ─── Re-exports (preserve public API surface) ───────────────────────────────
 export { handlePrefs, handlePrefsMode, handlePrefsWizard, ensurePreferencesFile, handleImportClaude, buildCategorySummaries, serializePreferencesToFrontmatter, yamlSafeString, configureMode } from "./commands-prefs-wizard.js";
@@ -107,6 +108,7 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         { cmd: "run-hook", desc: "Manually trigger a specific hook" },
         { cmd: "skill-health", desc: "Skill lifecycle dashboard" },
         { cmd: "doctor", desc: "Runtime health checks with auto-fix" },
+        { cmd: "logs", desc: "Browse activity logs, debug logs, and metrics" },
         { cmd: "forensics", desc: "Examine execution logs" },
         { cmd: "init", desc: "Project init wizard — detect, configure, bootstrap .gsd/" },
         { cmd: "setup", desc: "Global setup status and configuration" },
@@ -182,6 +184,18 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         return subs
           .filter((s) => s.cmd.startsWith(subPrefix))
           .map((s) => ({ value: `setup ${s.cmd}`, label: s.cmd, description: s.desc }));
+      }
+
+      if (parts[0] === "logs" && parts.length <= 2) {
+        const subPrefix = parts[1] ?? "";
+        const subs = [
+          { cmd: "debug", desc: "List or view debug log files" },
+          { cmd: "tail", desc: "Show last N activity log summaries" },
+          { cmd: "clear", desc: "Remove old activity and debug logs" },
+        ];
+        return subs
+          .filter((s) => s.cmd.startsWith(subPrefix))
+          .map((s) => ({ value: `logs ${s.cmd}`, label: s.cmd, description: s.desc }));
       }
 
       if (parts[0] === "keys" && parts.length <= 2) {
@@ -389,6 +403,11 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
 
       if (trimmed === "doctor" || trimmed.startsWith("doctor ")) {
         await handleDoctor(trimmed.replace(/^doctor\s*/, "").trim(), ctx, pi);
+        return;
+      }
+
+      if (trimmed === "logs" || trimmed.startsWith("logs ")) {
+        await handleLogs(trimmed.replace(/^logs\s*/, "").trim(), ctx);
         return;
       }
 
