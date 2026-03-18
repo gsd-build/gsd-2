@@ -9,6 +9,7 @@ import { DiscordAdapter } from "./discord-adapter.js";
 import { SlackAdapter } from "./slack-adapter.js";
 import { TelegramAdapter } from "./telegram-adapter.js";
 import { createPromptRecord, writePromptRecord, markPromptAnswered, markPromptDispatched, markPromptStatus, updatePromptRecord } from "./store.js";
+import { sanitizeError } from "../shared/sanitize.js";
 
 interface ToolResult {
   content: Array<{ type: "text"; text: string }>;
@@ -175,23 +176,6 @@ function formatForTool(answer: RemoteAnswer): Record<string, { answers: string[]
     out[id] = { answers: list };
   }
   return out;
-}
-
-// Strip token-like strings from error messages before surfacing
-const TOKEN_PATTERNS = [
-  /xoxb-[A-Za-z0-9\-]+/g,    // Slack bot tokens
-  /xoxp-[A-Za-z0-9\-]+/g,    // Slack user tokens
-  /xoxa-[A-Za-z0-9\-]+/g,    // Slack app tokens
-  /\d{8,10}:[A-Za-z0-9_-]{35}/g, // Telegram bot tokens
-  /[A-Za-z0-9_\-.]{20,}/g,   // Long opaque secrets (Discord tokens, etc.)
-];
-
-export function sanitizeError(msg: string): string {
-  let sanitized = msg;
-  for (const pattern of TOKEN_PATTERNS) {
-    sanitized = sanitized.replace(pattern, "[REDACTED]");
-  }
-  return sanitized;
 }
 
 function errorResult(message: string, channel: string): ToolResult {
