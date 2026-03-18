@@ -21,6 +21,7 @@
 - `node --test src/resources/extensions/gsd/tests/factcheck-runtime-fixture.test.ts`
 - `npx tsc --noEmit`
 - Verification must prove: fixture execution writes per-claim and aggregate fact-check artifacts, produces a plan-impacting refutation, and exposes enough output for S02 to drive the full reroute proof run.
+- Failure-path verification: `node --test src/resources/extensions/gsd/tests/factcheck-runtime-fixture.test.ts --test-name-pattern "failure"` must confirm that missing/invalid fixture data produces structured error output with stage identifier and expected artifact path, not silent pass or undefined behavior.
 
 ## Observability / Diagnostics
 
@@ -37,7 +38,7 @@
 
 ## Tasks
 
-- [ ] **T01: Build synthetic research and fact-check proof fixtures** `est:45m`
+- [x] **T01: Build synthetic research and fact-check proof fixtures** `est:45m`
   - Why: S02 needs stable inputs with a known false claim and corrected value; without a deterministic fixture the live proof will be flaky or ambiguous.
   - Files: `.gsd/milestones/M007-aos64t/slices/S01/tasks/T01-PLAN.md`, `src/resources/extensions/gsd/tests/fixtures/factcheck-runtime/` or nearest existing fixture location
   - Do: Add fixture assets that model a real research output with an Unknowns Inventory containing a known refutable claim, expected corrected value, impact scope, and any required slice/milestone directory structure. Keep the fixture synthetic, explicit, and reusable by test/harness code.

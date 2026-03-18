@@ -41,3 +41,10 @@ Create deterministic fixture assets for the live-proof milestone. The fixture mu
 ## Expected Output
 
 - `src/resources/extensions/gsd/tests/fixtures/factcheck-runtime/...` — deterministic proof fixture assets for the runtime harness
+
+## Observability Impact
+
+- **What signals change:** Fixture introduces a canonical `FIXTURE-MANIFEST.json` that declares the synthetic milestone ID, slice ID, expected claim structure, and refutation expectations. This manifest becomes the contract boundary for downstream tests.
+- **How a future agent inspects:** Read `FIXTURE-MANIFEST.json` to understand fixture shape without parsing code. Manifest includes `expectedClaimCount`, `expectedRefutationClaimId`, `expectedImpact`, and `expectedCorrectedValue` fields for direct assertion use.
+- **What failure state becomes visible:** If fixture is malformed or missing required files, test code surfaces a structured error with `fixtureId`, `stage`, and `expectedPath` fields. This replaces silent undefined/inconsistent test state.
+- **Diagnostics for debugging:** Fixture includes a `FIXTURE-README.md` documenting how to load the fixture, what the false claim represents, and what assertions downstream tests should make.
