@@ -93,7 +93,14 @@ function loadAgentInstructions(): string | null {
 }
 
 // ── Depth verification state ──────────────────────────────────────────────
-let depthVerificationDone = false;
+// Tracks which milestones have passed depth verification.
+// Single-milestone flows set '*' (wildcard). Multi-milestone flows set per-ID.
+const depthVerifiedMilestones = new Set<string>();
+
+// ── Queue phase tracking ──────────────────────────────────────────────────
+// When true, the LLM is in a queue flow writing CONTEXT.md files.
+// The write-gate applies during queue flows just like discussion flows.
+let activeQueuePhase = false;
 
 // ── Network error retry counters ──────────────────────────────────────────
 // Tracks per-model retry attempts for transient network errors.
@@ -108,7 +115,29 @@ const MAX_TRANSIENT_AUTO_RESUMES = 5;
 let consecutiveTransientErrors = 0;
 
 export function isDepthVerified(): boolean {
-  return depthVerificationDone;
+  return depthVerifiedMilestones.has("*") || depthVerifiedMilestones.size > 0;
+}
+
+/** Check whether a specific milestone has passed depth verification. */
+export function isDepthVerifiedFor(milestoneId: string): boolean {
+  // Wildcard means "all milestones verified" (single-milestone flow)
+  if (depthVerifiedMilestones.has("*")) return true;
+  return depthVerifiedMilestones.has(milestoneId);
+}
+
+/** Mark a specific milestone as depth-verified. */
+export function markDepthVerified(milestoneId: string): void {
+  depthVerifiedMilestones.add(milestoneId);
+}
+
+/** Check whether a queue phase is active. */
+export function isQueuePhaseActive(): boolean {
+  return activeQueuePhase;
+}
+
+/** Set the queue phase state — called from guided-flow-queue.ts on dispatch. */
+export function setQueuePhaseActive(active: boolean): void {
+  activeQueuePhase = active;
 }
 
 // ── Write-gate: block CONTEXT.md writes during discussion without depth verification ──
@@ -119,14 +148,35 @@ export function shouldBlockContextWrite(
   inputPath: string,
   milestoneId: string | null,
   depthVerified: boolean,
+  queuePhaseActive?: boolean,
 ): { block: boolean; reason?: string } {
   if (toolName !== "write") return { block: false };
-  if (!milestoneId) return { block: false };
+
+  // Gate applies during both discussion (milestoneId set) and queue (queuePhaseActive) flows
+  const inDiscussion = milestoneId !== null;
+  const inQueue = queuePhaseActive ?? false;
+  if (!inDiscussion && !inQueue) return { block: false };
+
   if (!MILESTONE_CONTEXT_RE.test(inputPath)) return { block: false };
-  if (depthVerified) return { block: false };
+
+  // For discussion flows: check global depth verification (backward compat)
+  if (inDiscussion && depthVerified) return { block: false };
+
+  // For queue flows: extract milestone ID from the path and check per-milestone verification
+  if (inQueue) {
+    const pathMatch = inputPath.match(/\/(M\d+(?:-[a-z0-9]{6})?)-CONTEXT\.md$/);
+    const targetMid = pathMatch?.[1];
+    if (targetMid && depthVerifiedMilestones.has(targetMid)) return { block: false };
+    // Wildcard passes all
+    if (depthVerifiedMilestones.has("*")) return { block: false };
+  }
+
   return {
     block: true,
-    reason: `Blocked: Cannot write to milestone CONTEXT.md during discussion phase without depth verification. Call ask_user_questions with question id "depth_verification" first to confirm discussion depth before writing context.`,
+    reason: `Blocked: Cannot write milestone CONTEXT.md without depth verification. ` +
+      `Use ask_user_questions with a question id containing "depth_verification" first. ` +
+      `For multi-milestone flows, include the milestone ID in the question id (e.g., "depth_verification_M001"). ` +
+      `This ensures each milestone's context has been critically examined before being written.`,
   };
 }
 
@@ -532,6 +582,10 @@ export default function (pi: ExtensionAPI) {
 
   // ── session_start: render branded GSD header + load tool keys + remote status ──
   pi.on("session_start", async (_event, ctx) => {
+    // Clear depth verification and queue phase state from any prior session
+    depthVerifiedMilestones.clear();
+    activeQueuePhase = false;
+
     // Theme access throws in RPC mode (no TUI) — header is decorative, skip it
     try {
       const theme = ctx.ui.theme;
@@ -727,7 +781,8 @@ export default function (pi: ExtensionAPI) {
   pi.on("agent_end", async (event, ctx: ExtensionContext) => {
     // If discuss phase just finished, start auto-mode
     if (checkAutoStartAfterDiscuss()) {
-      depthVerificationDone = false;
+      depthVerifiedMilestones.clear();
+      activeQueuePhase = false;
       return;
     }
 
@@ -993,7 +1048,11 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // ── tool_call: block CONTEXT.md writes during discussion without depth verification ──
+  // ── tool_call: block CONTEXT.md writes without depth verification ──
+  // Active during both discussion flows (pendingAutoStart set) and
+  // queue flows (activeQueuePhase set). For multi-milestone queue flows,
+  // each milestone must pass its own depth verification before its
+  // CONTEXT.md can be written.
   pi.on("tool_call", async (event) => {
     if (!isToolCallEventType("write", event)) return;
     const result = shouldBlockContextWrite(
@@ -1001,28 +1060,47 @@ export default function (pi: ExtensionAPI) {
       event.input.path,
       getDiscussionMilestoneId(),
       isDepthVerified(),
+      activeQueuePhase,
     );
     if (result.block) return result;
   });
 
   // ── tool_result: persist discussion exchanges & detect depth gate ──────
+  // Handles both discussion flows and queue flows. For queue flows,
+  // depth verification question IDs may include milestone IDs
+  // (e.g., "depth_verification_M001") for per-milestone gating.
   pi.on("tool_result", async (event) => {
     if (event.toolName !== "ask_user_questions") return;
 
     const milestoneId = getDiscussionMilestoneId();
-    if (!milestoneId) return;
+    // Queue flows don't set pendingAutoStart, so milestoneId may be null.
+    // Depth gate detection still applies — it sets per-milestone flags.
+    const inQueue = activeQueuePhase;
 
     const details = event.details as any;
     if (details?.cancelled || !details?.response) return;
 
     // ── Depth gate detection ──────────────────────────────────────────
+    // Supports two patterns:
+    //   1. "depth_verification" — wildcard, marks all milestones verified
+    //   2. "depth_verification_M001" — per-milestone verification
     const questions: any[] = (event.input as any)?.questions ?? [];
     for (const q of questions) {
       if (typeof q.id === "string" && q.id.includes("depth_verification")) {
-        depthVerificationDone = true;
+        // Extract milestone ID from question ID if present
+        const midMatch = q.id.match(/depth_verification[_-](M\d+(?:-[a-z0-9]{6})?)/i);
+        if (midMatch) {
+          depthVerifiedMilestones.add(midMatch[1]);
+        } else {
+          // Wildcard — all milestones verified (backward compat for single-milestone)
+          depthVerifiedMilestones.add("*");
+        }
         break;
       }
     }
+
+    // Discussion persistence only applies when in a discussion flow with a known milestone
+    if (!milestoneId) return;
 
     // ── Persist exchange to DISCUSSION.md ──────────────────────────────
     const basePath = process.cwd();
