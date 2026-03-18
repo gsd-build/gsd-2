@@ -1,6 +1,6 @@
 import { DefaultResourceLoader } from '@gsd/pi-coding-agent'
 import { homedir } from 'node:os'
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { compareSemver } from './update-check.js'
@@ -127,8 +127,31 @@ function syncResourceDir(srcDir: string, destDir: string): void {
         if (existsSync(target)) rmSync(target, { recursive: true, force: true })
       }
     }
-    cpSync(srcDir, destDir, { recursive: true, force: true })
+    try {
+      cpSync(srcDir, destDir, { recursive: true, force: true })
+    } catch {
+      // Fallback for Windows paths with non-ASCII characters where cpSync
+      // fails with the \\?\ extended-length prefix (#1178).
+      copyDirRecursive(srcDir, destDir)
+    }
     makeTreeWritable(destDir)
+  }
+}
+
+/**
+ * Recursive directory copy using copyFileSync — workaround for cpSync failures
+ * on Windows paths containing non-ASCII characters (#1178).
+ */
+function copyDirRecursive(src: string, dest: string): void {
+  mkdirSync(dest, { recursive: true })
+  for (const entry of readdirSync(src, { withFileTypes: true })) {
+    const srcPath = join(src, entry.name)
+    const destPath = join(dest, entry.name)
+    if (entry.isDirectory()) {
+      copyDirRecursive(srcPath, destPath)
+    } else {
+      copyFileSync(srcPath, destPath)
+    }
   }
 }
 
