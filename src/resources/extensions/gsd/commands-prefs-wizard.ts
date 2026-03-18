@@ -22,6 +22,14 @@ import {
 import { loadFile, saveFile, splitFrontmatter, parseFrontmatterMap } from "./files.js";
 import { runClaudeImportFlow } from "./claude-import.js";
 
+/** Extract body content after frontmatter closing delimiter, or null if none. */
+function extractBodyAfterFrontmatter(content: string): string | null {
+  const closingIdx = content.indexOf("\n---", content.indexOf("---"));
+  if (closingIdx === -1) return null;
+  const afterFrontmatter = content.slice(closingIdx + 4);
+  return afterFrontmatter.trim() ? afterFrontmatter : null;
+}
+
 export async function handlePrefs(args: string, ctx: ExtensionCommandContext): Promise<void> {
   const trimmed = args.trim();
 
@@ -98,12 +106,8 @@ export async function handleImportClaude(ctx: ExtensionCommandContext, scope: "g
     const frontmatter = serializePreferencesToFrontmatter(prefs);
     let body = "\n# GSD Skill Preferences\n\nSee `~/.gsd/agent/extensions/gsd/docs/preferences-reference.md` for full field documentation and examples.\n";
     if (existsSync(path)) {
-      const existingContent = readFileSync(path, "utf-8");
-      const closingIdx = existingContent.indexOf("\n---", existingContent.indexOf("---"));
-      if (closingIdx !== -1) {
-        const afterFrontmatter = existingContent.slice(closingIdx + 4);
-        if (afterFrontmatter.trim()) body = afterFrontmatter;
-      }
+      const preserved = extractBodyAfterFrontmatter(readFileSync(path, "utf-8"));
+      if (preserved) body = preserved;
     }
     await saveFile(path, `---\n${frontmatter}---${body}`);
   };
@@ -124,14 +128,8 @@ export async function handlePrefsMode(ctx: ExtensionCommandContext, scope: "glob
 
   let body = "\n# GSD Skill Preferences\n\nSee `~/.gsd/agent/extensions/gsd/docs/preferences-reference.md` for full field documentation and examples.\n";
   if (existsSync(path)) {
-    const existingContent = readFileSync(path, "utf-8");
-    const closingIdx = existingContent.indexOf("\n---", existingContent.indexOf("---"));
-    if (closingIdx !== -1) {
-      const afterFrontmatter = existingContent.slice(closingIdx + 4);
-      if (afterFrontmatter.trim()) {
-        body = afterFrontmatter;
-      }
-    }
+    const preserved = extractBodyAfterFrontmatter(readFileSync(path, "utf-8"));
+    if (preserved) body = preserved;
   }
 
   const content = `---\n${frontmatter}---${body}`;
@@ -622,14 +620,8 @@ export async function handlePrefsWizard(
   // Preserve existing body content (everything after closing ---)
   let body = "\n# GSD Skill Preferences\n\nSee `~/.gsd/agent/extensions/gsd/docs/preferences-reference.md` for full field documentation and examples.\n";
   if (existsSync(path)) {
-    const existingContent = readFileSync(path, "utf-8");
-    const closingIdx = existingContent.indexOf("\n---", existingContent.indexOf("---"));
-    if (closingIdx !== -1) {
-      const afterFrontmatter = existingContent.slice(closingIdx + 4); // skip past "\n---"
-      if (afterFrontmatter.trim()) {
-        body = afterFrontmatter;
-      }
-    }
+    const preserved = extractBodyAfterFrontmatter(readFileSync(path, "utf-8"));
+    if (preserved) body = preserved;
   }
 
   const content = `---\n${frontmatter}---${body}`;
