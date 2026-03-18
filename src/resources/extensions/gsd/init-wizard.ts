@@ -13,6 +13,7 @@ import { showNextAction } from "../shared/mod.js";
 import { nativeIsRepo, nativeInit, nativeAddPaths, nativeCommit } from "./native-git-bridge.js";
 import { ensureGitignore, untrackRuntimeFiles } from "./gitignore.js";
 import { gsdRoot } from "./paths.js";
+import { assertSafeDirectory } from "./validate-directory.js";
 import type { ProjectDetection, ProjectSignals } from "./detection.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
@@ -434,6 +435,9 @@ function bootstrapGsdDirectory(
   prefs: ProjectPreferences,
   signals: ProjectSignals,
 ): void {
+  // Final safety check before writing any files
+  assertSafeDirectory(basePath);
+
   const gsd = gsdRoot(basePath);
   mkdirSync(join(gsd, "milestones"), { recursive: true });
 

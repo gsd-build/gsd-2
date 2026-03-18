@@ -29,6 +29,7 @@ import { ensureGitignore, ensurePreferences, untrackRuntimeFiles } from "./gitig
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { detectProjectState } from "./detection.js";
 import { showProjectInit, offerMigration } from "./init-wizard.js";
+import { assertSafeDirectory, validateDirectory } from "./validate-directory.js";
 import { showConfirm } from "../shared/mod.js";
 import { loadQueueOrder, sortByQueueOrder, saveQueueOrder } from "./queue-order.js";
 import { debugLog } from "./debug-logger.js";
@@ -1070,6 +1071,22 @@ export async function showSmartEntry(
   options?: { step?: boolean },
 ): Promise<void> {
   const stepMode = options?.step;
+
+  // ── Directory safety check — refuse to operate in system/home dirs ───
+  const dirCheck = validateDirectory(basePath);
+  if (dirCheck.severity === "blocked") {
+    ctx.ui.notify(dirCheck.reason!, "error");
+    return;
+  }
+  if (dirCheck.severity === "warning") {
+    const proceed = await showConfirm(ctx, {
+      title: "GSD — Unusual Directory",
+      message: dirCheck.reason!,
+      confirmLabel: "Continue anyway",
+      declineLabel: "Cancel",
+    });
+    if (!proceed) return;
+  }
 
   // ── Detection preamble — run before any bootstrap ────────────────────
   if (!existsSync(join(basePath, ".gsd"))) {

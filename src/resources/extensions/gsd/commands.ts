@@ -16,6 +16,7 @@ import { GSDVisualizerOverlay } from "./visualizer-overlay.js";
 import { showQueue, showDiscuss, showHeadlessMilestoneCreation } from "./guided-flow.js";
 import { startAuto, stopAuto, pauseAuto, isAutoActive, isAutoPaused, isStepMode, stopAutoRemote, dispatchDirectPhase } from "./auto.js";
 import { resolveProjectRoot } from "./worktree.js";
+import { assertSafeDirectory, validateDirectory } from "./validate-directory.js";
 import { appendCapture, hasPendingCaptures, loadPendingCaptures } from "./captures.js";
 import {
   getGlobalGSDPreferencesPath,
@@ -72,7 +73,9 @@ export function dispatchDoctorHeal(pi: ExtensionAPI, scope: string | undefined, 
 
 /** Resolve the effective project root, accounting for worktree paths. */
 function projectRoot(): string {
-  return resolveProjectRoot(process.cwd());
+  const root = resolveProjectRoot(process.cwd());
+  assertSafeDirectory(root);
+  return root;
 }
 
 export function registerGSDCommand(pi: ExtensionAPI): void {
