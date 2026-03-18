@@ -23,6 +23,8 @@ import { getActiveWorktreeName } from "./worktree-command.js";
 import { getWorkerBatches, hasActiveWorkers, type WorkerEntry } from "../subagent/worker-registry.js";
 import { formatDuration, padRight, joinColumns, centerLine, fitColumns, STATUS_GLYPH, STATUS_COLOR } from "../shared/mod.js";
 import { estimateTimeRemaining } from "./auto-dashboard.js";
+import { computeProgressScore, formatProgressLine } from "./progress-score.js";
+import { runEnvironmentChecks, type EnvironmentCheckResult } from "./doctor-environment.js";
 
 function unitLabel(type: string): string {
   switch (type) {
@@ -310,6 +312,15 @@ export class GSDDashboardOverlay {
       elapsedParts = th.fg("dim", `since ${this.dashData.remoteSession!.startedAt.replace("T", " ").slice(0, 19)}`);
     }
     lines.push(row(joinColumns(`${title}  ${status}${worktreeTag}`, elapsedParts, contentWidth)));
+
+    // Progress score — traffic light indicator (#1221)
+    if (this.dashData.active || this.dashData.paused) {
+      const progressScore = computeProgressScore();
+      const progressIcon = progressScore.level === "green" ? th.fg("success", "●")
+        : progressScore.level === "yellow" ? th.fg("warning", "●")
+          : th.fg("error", "●");
+      lines.push(row(`${progressIcon} ${th.fg("text", progressScore.summary)}`));
+    }
     lines.push(blank());
 
     if (this.dashData.currentUnit) {
@@ -576,6 +587,23 @@ export class GSDDashboardOverlay {
       const cacheRate = aggregateCacheHitRate();
       if (cacheRate > 0) {
         lines.push(row(`${th.fg("dim", "cache hit rate:")} ${th.fg("text", `${cacheRate}%`)}`));
+      }
+    }
+
+    // Environment health section (#1221) — only show issues
+    const envResults = runEnvironmentChecks(this.dashData.basePath || process.cwd());
+    const envIssues = envResults.filter(r => r.status !== "ok");
+    if (envIssues.length > 0) {
+      lines.push(blank());
+      lines.push(hr());
+      lines.push(row(th.fg("text", th.bold("Environment"))));
+      lines.push(blank());
+      for (const r of envIssues) {
+        const icon = r.status === "error" ? th.fg("error", "✗") : th.fg("warning", "⚠");
+        lines.push(row(`  ${icon} ${th.fg("text", r.message)}`));
+        if (r.detail) {
+          lines.push(row(th.fg("dim", `     ${r.detail}`)));
+        }
       }
     }
 
