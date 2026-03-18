@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useCallback, useState } from "react"
 import { useTheme } from "next-themes"
-import { Plus, X, TerminalSquare, Trash2, Loader2 } from "lucide-react"
+import { Plus, X, TerminalSquare, Trash2, Loader2, ImagePlus } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { validateImageFile } from "@/lib/image-utils"
 import "@xterm/xterm/css/xterm.css"
 
 type XTerminal = import("@xterm/xterm").Terminal
@@ -350,6 +351,68 @@ function TerminalInstance({
   )
 }
 
+// ─── Image upload helpers ─────────────────────────────────────────────────────
+
+const ALLOWED_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+])
+
+/**
+ * Upload an image file to the server's temp directory and inject the `@filepath`
+ * text into the PTY session's stdin.
+ *
+ * Observability:
+ * - console.warn on client-side validation failure
+ * - console.error on upload or inject failure
+ */
+async function uploadAndInjectImage(file: File, sessionId: string): Promise<void> {
+  // Client-side validation
+  const validation = validateImageFile(file)
+  if (!validation.valid) {
+    console.warn("[terminal-upload] validation failed:", validation.error)
+    return
+  }
+
+  // Upload to temp dir
+  const formData = new FormData()
+  formData.append("file", file)
+
+  let uploadPath: string
+  try {
+    const res = await fetch("/api/terminal/upload", {
+      method: "POST",
+      body: formData,
+    })
+    const data = await res.json() as { ok?: boolean; path?: string; error?: string }
+    if (!res.ok || !data.path) {
+      console.error("[terminal-upload] upload failed:", data.error ?? `HTTP ${res.status}`)
+      return
+    }
+    uploadPath = data.path
+  } catch (err) {
+    console.error("[terminal-upload] upload request failed:", err)
+    return
+  }
+
+  // Inject @filepath into PTY stdin
+  try {
+    const res = await fetch("/api/terminal/input", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: sessionId, data: `@${uploadPath} ` }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({})) as { error?: string }
+      console.error("[terminal-upload] inject failed:", data.error ?? `HTTP ${res.status}`)
+    }
+  } catch (err) {
+    console.error("[terminal-upload] inject request failed:", err)
+  }
+}
+
 // ─── Multi-instance terminal panel ────────────────────────────────────────────
 
 export function ShellTerminal({ className, command, commandArgs, sessionPrefix, hideSidebar = false, fontSize }: ShellTerminalProps) {
@@ -361,6 +424,76 @@ export function ShellTerminal({ className, command, commandArgs, sessionPrefix, 
     { id: defaultId, label: commandLabel, connected: false },
   ])
   const [activeTabId, setActiveTabId] = useState(defaultId)
+  const [isDragOver, setIsDragOver] = useState(false)
+  const dragCounterRef = useRef(0)
+  const terminalAreaRef = useRef<HTMLDivElement>(null)
+
+  // ── Drag-and-drop handlers ────────────────────────────────────────────────
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current += 1
+    if (dragCounterRef.current === 1) {
+      setIsDragOver(true)
+    }
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current -= 1
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0
+      setIsDragOver(false)
+    }
+  }, [])
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      dragCounterRef.current = 0
+      setIsDragOver(false)
+
+      if (!activeTabId) return
+      const files = Array.from(e.dataTransfer.files)
+      const imageFile = files.find((f) => ALLOWED_IMAGE_TYPES.has(f.type))
+      if (imageFile) {
+        void uploadAndInjectImage(imageFile, activeTabId)
+      }
+    },
+    [activeTabId],
+  )
+
+  // ── Paste handler for images ──────────────────────────────────────────────
+
+  useEffect(() => {
+    const el = terminalAreaRef.current
+    if (!el) return
+
+    const handlePaste = (e: ClipboardEvent) => {
+      if (!e.clipboardData) return
+      const files = Array.from(e.clipboardData.files)
+      const imageFile = files.find((f) => ALLOWED_IMAGE_TYPES.has(f.type))
+      if (imageFile) {
+        e.preventDefault()
+        e.stopPropagation()
+        if (activeTabId) {
+          void uploadAndInjectImage(imageFile, activeTabId)
+        }
+      }
+      // If no image files, don't prevent default — let xterm.js handle text paste
+    }
+
+    el.addEventListener("paste", handlePaste, true) // capture phase to fire before xterm
+    return () => el.removeEventListener("paste", handlePaste, true)
+  }, [activeTabId])
 
   const createTab = useCallback(async () => {
     try {
@@ -412,8 +545,15 @@ export function ShellTerminal({ className, command, commandArgs, sessionPrefix, 
 
   return (
     <div className={cn("flex bg-terminal", className)}>
-      {/* Terminal area */}
-      <div className="relative flex-1 min-w-0">
+      {/* Terminal area — receives drag/drop and paste for images */}
+      <div
+        ref={terminalAreaRef}
+        className="relative flex-1 min-w-0"
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
         {tabs.map((tab) => (
           <TerminalInstance
             key={tab.id}
@@ -426,6 +566,14 @@ export function ShellTerminal({ className, command, commandArgs, sessionPrefix, 
             onConnectionChange={(c) => updateConnection(tab.id, c)}
           />
         ))}
+
+        {/* Drop overlay */}
+        {isDragOver && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-background/80 backdrop-blur-sm border-2 border-dashed border-primary rounded-md pointer-events-none">
+            <ImagePlus className="h-8 w-8 text-primary" />
+            <span className="text-sm font-medium text-primary">Drop image here</span>
+          </div>
+        )}
       </div>
 
       {!hideSidebar && (
