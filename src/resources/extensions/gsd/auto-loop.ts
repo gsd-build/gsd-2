@@ -195,7 +195,7 @@ export interface LoopDeps {
   mergeMilestoneToMain: (basePath: string, milestoneId: string, roadmapContent: string) => { pushed: boolean };
   teardownAutoWorktree: (basePath: string, milestoneId: string) => void;
   createAutoWorktree: (basePath: string, milestoneId: string) => string;
-  captureIntegrationBranch: (basePath: string, mid: string | undefined, opts?: { commitDocs?: boolean }) => void;
+  captureIntegrationBranch: (basePath: string, mid: string, opts?: { commitDocs?: boolean }) => void;
   getIsolationMode: () => string;
   getCurrentBranch: (basePath: string) => string;
   autoWorktreeBranch: (milestoneId: string) => string;
@@ -413,9 +413,7 @@ export async function autoLoop(
         }
         deps.resolver.enterMilestone(mid, ctx.ui);
       } else {
-        if (deps.getIsolationMode() !== "none") {
-          deps.captureIntegrationBranch(s.originalBasePath || s.basePath, mid, { commitDocs: deps.loadEffectiveGSDPreferences()?.preferences?.git?.commit_docs });
-        }
+        // mid is undefined — no milestone to capture integration branch for
       }
 
       const pendingIds = state.registry

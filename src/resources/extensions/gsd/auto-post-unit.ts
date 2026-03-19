@@ -45,7 +45,6 @@ import {
 import { hasPendingCaptures, loadPendingCaptures } from "./captures.js";
 import { debugLog } from "./debug-logger.js";
 import type { AutoSession } from "./auto/session.js";
-import type { WidgetStateAccessors, AutoDashboardData } from "./auto-dashboard.js";
 import {
   updateProgressWidget as _updateProgressWidget,
   updateSliceProgressCache,

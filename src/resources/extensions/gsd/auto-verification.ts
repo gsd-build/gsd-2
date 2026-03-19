@@ -21,7 +21,7 @@ import {
   runDependencyAudit,
 } from "./verification-gate.js";
 import { writeVerificationJSON } from "./verification-evidence.js";
-import type { AutoSession, PendingVerificationRetry } from "./auto/session.js";
+import type { AutoSession } from "./auto/session.js";
 import { join } from "node:path";
 
 export interface VerificationContext {

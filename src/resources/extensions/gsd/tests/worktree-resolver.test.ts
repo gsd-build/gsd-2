@@ -99,7 +99,7 @@ function makeDeps(overrides?: Partial<WorktreeResolverDeps>): WorktreeResolverDe
   if (overrides) {
     for (const [key, val] of Object.entries(overrides)) {
       if (key !== "calls") {
-        (deps as Record<string, unknown>)[key] = val;
+        (deps as unknown as Record<string, unknown>)[key] = val;
       }
     }
   }
@@ -107,11 +107,11 @@ function makeDeps(overrides?: Partial<WorktreeResolverDeps>): WorktreeResolverDe
   return deps;
 }
 
-function makeNotifyCtx(): NotifyCtx & { messages: Array<{ msg: string; level: string }> } {
-  const messages: Array<{ msg: string; level: string }> = [];
+function makeNotifyCtx(): NotifyCtx & { messages: Array<{ msg: string; level?: string }> } {
+  const messages: Array<{ msg: string; level?: string }> = [];
   return {
     messages,
-    notify: (msg: string, level: string) => { messages.push({ msg, level }); },
+    notify: (msg: string, level?: "info" | "warning" | "error" | "success") => { messages.push({ msg, level }); },
   };
 }
 

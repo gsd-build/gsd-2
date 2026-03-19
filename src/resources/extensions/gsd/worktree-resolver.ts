@@ -35,13 +35,13 @@ export interface WorktreeResolverDeps {
   GitServiceImpl: new (basePath: string, gitConfig: unknown) => unknown;
   loadEffectiveGSDPreferences: () => { preferences?: { git?: Record<string, unknown> } } | undefined;
   invalidateAllCaches: () => void;
-  captureIntegrationBranch: (basePath: string, mid: string | undefined, opts?: { commitDocs?: boolean }) => void;
+  captureIntegrationBranch: (basePath: string, mid: string, opts?: { commitDocs?: boolean }) => void;
 }
 
 // ─── Notify Context ────────────────────────────────────────────────────────
 
 export interface NotifyCtx {
-  notify: (msg: string, level: string) => void;
+  notify: (msg: string, level?: "info" | "warning" | "error" | "success") => void;
 }
 
 // ─── WorktreeResolver ──────────────────────────────────────────────────────

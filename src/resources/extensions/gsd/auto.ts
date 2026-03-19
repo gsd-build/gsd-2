@@ -18,10 +18,7 @@ import type {
 
 import { deriveState } from "./state.js";
 import type { GSDState } from "./types.js";
-import { loadFile, getManifestStatus, resolveAllOverrides, parsePlan, parseSummary } from "./files.js";
-import { loadPrompt } from "./prompt-loader.js";
-import { runVerificationGate, formatFailureContext, captureRuntimeErrors, runDependencyAudit } from "./verification-gate.js";
-import { writeVerificationJSON } from "./verification-evidence.js";
+import { getManifestStatus } from "./files.js";
 export { inlinePriorMilestoneSummary } from "./files.js";
 import { collectSecretsFromManifest } from "../get-secrets-from-user.js";
 import {
@@ -30,16 +27,16 @@ import {
   milestonesDir, buildTaskFileName,
 } from "./paths.js";
 import { invalidateAllCaches } from "./cache.js";
-import { saveActivityLog, clearActivityLogState } from "./activity-log.js";
+import { clearActivityLogState } from "./activity-log.js";
 import { synthesizeCrashRecovery, getDeepDiagnostic } from "./session-forensics.js";
-import { writeLock, clearLock, readCrashLock, formatCrashInfo, isLockProcessAlive } from "./crash-recovery.js";
+import { writeLock, clearLock, readCrashLock, isLockProcessAlive } from "./crash-recovery.js";
 import {
   clearUnitRuntimeRecord,
   inspectExecuteTaskDurability,
   readUnitRuntimeRecord,
   writeUnitRuntimeRecord,
 } from "./unit-runtime.js";
-import { resolveAutoSupervisorConfig, loadEffectiveGSDPreferences, resolveSkillDiscoveryMode, getIsolationMode } from "./preferences.js";
+import { resolveAutoSupervisorConfig, loadEffectiveGSDPreferences, getIsolationMode } from "./preferences.js";
 import { sendDesktopNotification } from "./notifications.js";
 import type { GSDPreferences } from "./preferences.js";
 import {
@@ -70,7 +67,7 @@ import {
   checkResourcesStale,
   escapeStaleWorktree,
 } from "./auto-worktree-sync.js";
-import { initRoutingHistory, resetRoutingHistory, recordOutcome } from "./routing-history.js";
+import { resetRoutingHistory, recordOutcome } from "./routing-history.js";
 import {
   checkPostUnitHooks,
   getActiveHook,
@@ -82,8 +79,7 @@ import {
   restoreHookState,
   clearPersistedHookState,
 } from "./post-unit-hooks.js";
-import { ensureGitignore, untrackRuntimeFiles } from "./gitignore.js";
-import { runGSDDoctor, rebuildState, summarizeDoctorIssues } from "./doctor.js";
+import { runGSDDoctor, rebuildState } from "./doctor.js";
 import {
   preDispatchHealthGate,
   recordHealthSnapshot,
@@ -92,19 +88,15 @@ import {
   formatHealthSummary,
   getConsecutiveErrorUnits,
 } from "./doctor-proactive.js";
-import { snapshotSkills, clearSkillSnapshot } from "./skill-discovery.js";
-import { captureAvailableSkills, getAndClearSkills, resetSkillTelemetry } from "./skill-telemetry.js";
+import { clearSkillSnapshot } from "./skill-discovery.js";
+import { captureAvailableSkills, resetSkillTelemetry } from "./skill-telemetry.js";
 import {
   initMetrics, resetMetrics, getLedger,
   getProjectTotals, formatCost, formatTokenCount,
 } from "./metrics.js";
-import { computeBudgets, resolveExecutorContextWindow } from "./context-budget.js";
-import { GSDError, GSD_ARTIFACT_MISSING } from "./errors.js";
 import { join } from "node:path";
-import { sep as pathSep } from "node:path";
-import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync, unlinkSync, statSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync } from "node:fs";
 import { atomicWriteSync } from "./atomic-write.js";
-import { nativeIsRepo, nativeInit, nativeAddAll, nativeCommit } from "./native-git-bridge.js";
 import {
   autoCommitCurrentBranch,
   captureIntegrationBranch,
@@ -115,9 +107,8 @@ import {
   parseSliceBranch,
   setActiveMilestoneId,
 } from "./worktree.js";
-import { GitServiceImpl, type TaskCommitContext } from "./git-service.js";
+import { GitServiceImpl } from "./git-service.js";
 import { getPriorSliceCompletionBlocker } from "./dispatch-guard.js";
-import { formatGitError } from "./git-self-heal.js";
 import {
   createAutoWorktree,
   enterAutoWorktree,
@@ -129,9 +120,8 @@ import {
   autoWorktreeBranch,
 } from "./auto-worktree.js";
 import { pruneQueueOrder } from "./queue-order.js";
-import { consumeSignal } from "./session-status-io.js";
 
-import { debugLog, debugTime, debugCount, debugPeak, enableDebug, isDebugEnabled, writeDebugSummary, getDebugLogPath } from "./debug-logger.js";
+import { debugLog, isDebugEnabled, writeDebugSummary } from "./debug-logger.js";
 import {
   resolveExpectedArtifactPath,
   verifyExpectedArtifact,
@@ -141,7 +131,7 @@ import {
   buildLoopRemediationSteps,
   reconcileMergeState,
 } from "./auto-recovery.js";
-import { resolveDispatch, resetRewriteCircuitBreaker } from "./auto-dispatch.js";
+import { resolveDispatch } from "./auto-dispatch.js";
 import {
   type AutoDashboardData,
   updateProgressWidget as _updateProgressWidget,
@@ -160,12 +150,12 @@ import {
   detectWorkingTreeActivity,
 } from "./auto-supervisor.js";
 import { isDbAvailable } from "./gsd-db.js";
-import { hasPendingCaptures, loadPendingCaptures, countPendingCaptures } from "./captures.js";
+import { countPendingCaptures } from "./captures.js";
 
 // ── Extracted modules ──────────────────────────────────────────────────────
-import { startUnitSupervision, type SupervisionContext } from "./auto-timers.js";
-import { runPostUnitVerification, type VerificationContext } from "./auto-verification.js";
-import { postUnitPreVerification, postUnitPostVerification, type PostUnitContext } from "./auto-post-unit.js";
+import { startUnitSupervision } from "./auto-timers.js";
+import { runPostUnitVerification } from "./auto-verification.js";
+import { postUnitPreVerification, postUnitPostVerification } from "./auto-post-unit.js";
 import { bootstrapAutoSession, type BootstrapDeps } from "./auto-start.js";
 import { autoLoop, resolveAgentEnd, type LoopDeps } from "./auto-loop.js";
 import { WorktreeResolver, type WorktreeResolverDeps } from "./worktree-resolver.js";
@@ -180,7 +170,7 @@ import {
   MAX_UNIT_DISPATCHES, STUB_RECOVERY_THRESHOLD, MAX_LIFETIME_DISPATCHES,
   NEW_SESSION_TIMEOUT_MS,
 } from "./auto/session.js";
-import type { CompletedUnit, CurrentUnit, UnitRouting, StartModel, PendingVerificationRetry } from "./auto/session.js";
+import type { CompletedUnit, CurrentUnit, UnitRouting, StartModel } from "./auto/session.js";
 export {
   MAX_UNIT_DISPATCHES, STUB_RECOVERY_THRESHOLD, MAX_LIFETIME_DISPATCHES,
   NEW_SESSION_TIMEOUT_MS,

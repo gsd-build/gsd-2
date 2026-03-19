@@ -38,9 +38,9 @@ import {
   isInAutoWorktree,
 } from "./auto-worktree.js";
 import { readResourceVersion } from "./auto-worktree-sync.js";
-import { initMetrics, getLedger } from "./metrics.js";
+import { initMetrics } from "./metrics.js";
 import { initRoutingHistory } from "./routing-history.js";
-import { restoreHookState, resetHookState, clearPersistedHookState } from "./post-unit-hooks.js";
+import { restoreHookState, resetHookState } from "./post-unit-hooks.js";
 import { resetProactiveHealing } from "./doctor-proactive.js";
 import { snapshotSkills } from "./skill-discovery.js";
 import { isDbAvailable } from "./gsd-db.js";
