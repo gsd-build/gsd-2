@@ -26,6 +26,7 @@ import type { AutoSession, PendingVerificationRetry } from "./auto/session.js";
 import { join } from "node:path";
 import { getErrorMessage } from "./error-utils.js";
 import { parseUnitId } from "./unit-id.js";
+import { MAX_LIFETIME_DISPATCHES } from "./auto/session.js";
 
 export interface VerificationContext {
   s: AutoSession;
@@ -215,6 +216,19 @@ export async function runPostUnitVerification(
         failureContext: formatFailureContext(result),
         attempt: nextAttempt,
       };
+
+      // Warn when verification retries are consuming the unit's lifetime dispatch budget.
+      // The verification retry count and the lifetime dispatch cap are tracked
+      // independently — without this warning, the unit can silently hit the hard
+      // cap and auto-mode stops with no clear explanation (#gap-analysis C2).
+      const lifetimeCount = s.unitLifetimeDispatches.get(completionKey) ?? 0;
+      if (lifetimeCount >= MAX_LIFETIME_DISPATCHES - 1) {
+        ctx.ui.notify(
+          `Warning: verification retries have nearly exhausted the dispatch lifetime cap (${lifetimeCount + 1}/${MAX_LIFETIME_DISPATCHES}) for ${s.currentUnit.id}`,
+          "warning",
+        );
+      }
+
       ctx.ui.notify(`Verification failed — auto-fix attempt ${nextAttempt}/${maxRetries}`, "warning");
       s.completedKeySet.delete(completionKey);
       removePersistedKey(s.basePath, completionKey);

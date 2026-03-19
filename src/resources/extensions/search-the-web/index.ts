@@ -23,7 +23,10 @@ async function registerSearchTools(pi: ExtensionAPI): Promise<void> {
       registerFetchPageTool(pi);
       registerLLMContextTool(pi);
     })().catch((error) => {
-      toolsPromise = null;
+      // Cache the rejection instead of resetting to null — prevents concurrent
+      // re-initialization race condition (#gap-analysis C3).
+      toolsPromise = Promise.reject(error);
+      toolsPromise.catch(() => {});
       throw error;
     });
   }
@@ -43,6 +46,10 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    await registerSearchTools(pi);
+    try {
+      await registerSearchTools(pi);
+    } catch (error) {
+      process.stderr.write(`search-the-web: load error in non-TTY mode — ${error instanceof Error ? error.message : String(error)}\n`);
+    }
   });
 }

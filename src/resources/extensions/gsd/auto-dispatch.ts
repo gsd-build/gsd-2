@@ -391,8 +391,17 @@ const DISPATCH_RULES: DispatchRule[] = [
  */
 export async function resolveDispatch(ctx: DispatchContext): Promise<DispatchAction> {
   for (const rule of DISPATCH_RULES) {
-    const result = await rule.match(ctx);
-    if (result) return result;
+    try {
+      const result = await rule.match(ctx);
+      if (result) return result;
+    } catch (err) {
+      // A single failing rule (e.g. transient file I/O) should not break the
+      // entire dispatch chain or trigger false-positive stuck-loop detection.
+      // Log and continue to the next rule (#gap-analysis H7).
+      process.stderr.write(
+        `dispatch-rule "${rule.name}" error: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+    }
   }
 
   // No rule matched — unhandled phase

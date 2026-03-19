@@ -25,7 +25,10 @@ async function registerBgShellFeatures(pi: ExtensionAPI, state: BgShellSharedSta
       registerBgShellTool(pi, state);
       registerBgShellCommand(pi, state);
     })().catch((error) => {
-      featuresPromise = null;
+      // Cache the rejection instead of resetting to null — prevents concurrent
+      // re-initialization race condition (#gap-analysis C3).
+      featuresPromise = Promise.reject(error);
+      featuresPromise.catch(() => {});
       throw error;
     });
   }
@@ -49,6 +52,10 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    await registerBgShellFeatures(pi, state);
+    try {
+      await registerBgShellFeatures(pi, state);
+    } catch (error) {
+      process.stderr.write(`bg-shell: load error in non-TTY mode — ${error instanceof Error ? error.message : String(error)}\n`);
+    }
   });
 }

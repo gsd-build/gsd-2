@@ -12,9 +12,15 @@ function run(command: string, cwd: string): string {
   return execSync(command, { cwd, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" }).trim();
 }
 
+/** Resolve symlinks so /var and /private/var compare equal on macOS. */
+function rp(p: string): string {
+  try { return realpathSync(p); } catch { return p; }
+}
+
 async function main(): Promise<void> {
-  const base = mkdtempSync(join(tmpdir(), "gsd-repo-identity-"));
-  const stateDir = mkdtempSync(join(tmpdir(), "gsd-state-"));
+  // Resolve symlinks at creation time so /var and /private/var compare equal on macOS.
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "gsd-repo-identity-")));
+  const stateDir = realpathSync(mkdtempSync(join(tmpdir(), "gsd-state-")));
 
   try {
     process.env.GSD_STATE_DIR = stateDir;
@@ -31,14 +37,14 @@ async function main(): Promise<void> {
     run(`git worktree add -b milestone/M001 ${worktreePath}`, base);
 
     console.log("\n=== ensureGsdSymlink points worktree at main repo external state dir ===");
-    const expectedExternalState = externalGsdRoot(base);
+    const expectedExternalState = rp(externalGsdRoot(base));
     const mainState = ensureGsdSymlink(base);
-    assertEq(mainState, realpathSync(join(base, ".gsd")), "ensureGsdSymlink(base) returns the current main repo .gsd target");
+    assertEq(rp(mainState), realpathSync(join(base, ".gsd")), "ensureGsdSymlink(base) returns the current main repo .gsd target");
     const worktreeState = ensureGsdSymlink(worktreePath);
-    assertEq(worktreeState, expectedExternalState, "worktree symlink target matches main repo external state dir");
+    assertEq(rp(worktreeState), expectedExternalState, "worktree symlink target matches main repo external state dir");
     assertTrue(existsSync(join(worktreePath, ".gsd")), "worktree .gsd exists");
     assertTrue(lstatSync(join(worktreePath, ".gsd")).isSymbolicLink(), "worktree .gsd is a symlink");
-    assertEq(realpathSync(join(worktreePath, ".gsd")), expectedExternalState, "worktree .gsd symlink resolves to main repo external state dir");
+    assertEq(rp(realpathSync(join(worktreePath, ".gsd"))), expectedExternalState, "worktree .gsd symlink resolves to main repo external state dir");
 
     console.log("\n=== ensureGsdSymlink heals stale worktree symlinks ===");
     const staleState = join(stateDir, "projects", "stale-worktree-state");
@@ -46,8 +52,8 @@ async function main(): Promise<void> {
     rmSync(join(worktreePath, ".gsd"), { recursive: true, force: true });
     symlinkSync(staleState, join(worktreePath, ".gsd"), "junction");
     const healedState = ensureGsdSymlink(worktreePath);
-    assertEq(healedState, expectedExternalState, "stale worktree symlink is repaired to canonical external state dir");
-    assertEq(realpathSync(join(worktreePath, ".gsd")), expectedExternalState, "healed worktree symlink resolves to canonical external state dir");
+    assertEq(rp(healedState), expectedExternalState, "stale worktree symlink is repaired to canonical external state dir");
+    assertEq(rp(realpathSync(join(worktreePath, ".gsd"))), expectedExternalState, "healed worktree symlink resolves to canonical external state dir");
 
     console.log("\n=== ensureGsdSymlink preserves worktree .gsd directories ===");
     rmSync(join(worktreePath, ".gsd"), { recursive: true, force: true });

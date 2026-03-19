@@ -120,6 +120,22 @@ export function cleanupStrayLockFiles(basePath: string): void {
       }
     }
   } catch { /* non-fatal */ }
+
+  // Clean the canonical .gsd.lock/ directory if it's stranded (no live process
+  // holds the lock). This handles the case where onCompromised fired but the
+  // OS-level lock file wasn't cleaned up, permanently blocking future sessions
+  // (#gap-analysis H2).
+  try {
+    const canonicalLockDir = `${gsdDir}.lock`;
+    if (existsSync(canonicalLockDir)) {
+      const lp = join(gsdDir, LOCK_FILE);
+      const lockData = readExistingLockData(lp);
+      // Only clean if no process owns it (no lock file, or the owning PID is dead)
+      if (!lockData || (lockData.pid && !isPidAlive(lockData.pid))) {
+        rmSync(canonicalLockDir, { recursive: true, force: true });
+      }
+    }
+  } catch { /* non-fatal */ }
 }
 
 /**
@@ -136,10 +152,12 @@ function ensureExitHandler(): void {
       if (_releaseFunction) { _releaseFunction(); _releaseFunction = null; }
     } catch { /* best-effort */ }
     // Remove the auto.lock metadata file so crash-recovery doesn't
-    // falsely detect an interrupted session on the next startup.
+    // falsely detect an interrupted session on the next startup (#1397).
     try {
-      const lockFile = join(gsdDir, LOCK_FILE);
-      if (existsSync(lockFile)) unlinkSync(lockFile);
+      if (_lockedPath) {
+        const lockFile = join(gsdRoot(_lockedPath), LOCK_FILE);
+        if (existsSync(lockFile)) unlinkSync(lockFile);
+      }
     } catch { /* best-effort */ }
     try {
       if (_exitCleanupDir && existsSync(_exitCleanupDir)) {
@@ -204,6 +222,12 @@ export function acquireSessionLock(basePath: string): SessionLockResult {
         // Default handler throws inside setTimeout — an uncaught exception that crashes
         // or corrupts process state. Instead, set a flag so validateSessionLock() can
         // detect the compromise gracefully on the next dispatch cycle.
+        //
+        // Try to release the OS-level lock before clearing the reference so the
+        // .gsd.lock/ directory is cleaned up rather than stranded (#gap-analysis H1).
+        if (_releaseFunction) {
+          try { _releaseFunction(); } catch { /* lock may already be gone */ }
+        }
         _lockCompromised = true;
         _releaseFunction = null;
       },
@@ -242,6 +266,9 @@ export function acquireSessionLock(basePath: string): SessionLockResult {
           stale: 1_800_000, // 30 minutes — match primary lock settings
           update: 10_000,
           onCompromised: () => {
+            if (_releaseFunction) {
+              try { _releaseFunction(); } catch { /* lock may already be gone */ }
+            }
             _lockCompromised = true;
             _releaseFunction = null;
           },
@@ -312,7 +339,9 @@ export function updateSessionLock(
   completedUnits: number,
   sessionFile?: string,
 ): void {
-  if (_lockedPath !== basePath && _lockedPath !== null) return;
+  // Allow update if we hold a lock for this path, or if we don't hold any lock
+  // (fallback mode). Skip update only if we hold a lock for a DIFFERENT path.
+  if (_lockedPath !== null && _lockedPath !== basePath) return;
 
   const lp = lockPath(basePath);
   try {

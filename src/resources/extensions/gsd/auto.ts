@@ -448,6 +448,15 @@ function startDispatchGapWatchdog(ctx: ExtensionContext, pi: ExtensionAPI): void
     s.dispatchGapHandle = null;
     if (!s.active || !s.cmdCtx) return;
 
+    // If a dispatch is already in progress (e.g. deferred agent-end retry),
+    // skip this watchdog cycle — the active dispatch will re-arm the watchdog
+    // when it completes. Without this guard, the watchdog and the deferred
+    // retry can both call dispatchNextUnit() concurrently (#gap-analysis).
+    if (s.dispatching) {
+      startDispatchGapWatchdog(ctx, pi);
+      return;
+    }
+
     if (s.verbose) {
       ctx.ui.notify(
         "Dispatch gap detected — re-evaluating state.",
@@ -643,7 +652,9 @@ export async function startAuto(
     s.cmdCtx = ctx;
     s.basePath = base;
     s.unitDispatchCount.clear();
-    s.unitLifetimeDispatches.clear();
+    // Preserve unitLifetimeDispatches across resume — clearing it allows
+    // units that already hit the lifetime cap to be re-dispatched past
+    // the hard limit (#gap-analysis M2).
     s.unitConsecutiveSkips.clear();
     if (!getLedger()) initMetrics(base);
     if (s.currentMilestoneId) setActiveMilestoneId(base, s.currentMilestoneId);
@@ -1121,11 +1132,15 @@ async function dispatchNextUnit(
         );
       }
     }
-    // Reset stuck detection for new milestone
+    // Reset stuck detection for new milestone.
+    // Clear recentlyEvictedKeys too — eviction marks from the previous milestone
+    // must not carry over or they prevent re-verification of units that share
+    // IDs across milestones (#gap-analysis M1).
     s.unitDispatchCount.clear();
     s.unitRecoveryCount.clear();
-  s.unitConsecutiveSkips.clear();
+    s.unitConsecutiveSkips.clear();
     s.unitLifetimeDispatches.clear();
+    s.recentlyEvictedKeys.clear();
     try {
       const file = completedKeysPath(s.basePath);
       if (existsSync(file)) {

@@ -135,6 +135,14 @@ export function clearPathCache(): void {
   nativeTreeBase = null;
 }
 
+/**
+ * Alias for clearPathCache — named for test clarity.
+ * gsdRoot() no longer maintains its own cache, but callers that
+ * relied on _clearGsdRootCache() for test isolation still need
+ * directory-listing caches flushed.
+ */
+export const _clearGsdRootCache = clearPathCache;
+
 // ─── Name Builders ─────────────────────────────────────────────────────────
 
 /**

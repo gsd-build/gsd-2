@@ -614,13 +614,15 @@ test("session lock: both onCompromised handlers null _releaseFunction (#1315)", 
   const lockSource = readFileSync(
     "src/resources/extensions/gsd/session-lock.ts", "utf-8"
   );
-  // Extract onCompromised handler blocks — both should set _releaseFunction = null
-  const handlers = lockSource.match(/onCompromised:\s*\(\)\s*=>\s*\{[^}]+\}/g) || [];
-  assert.ok(handlers.length >= 2, `expected ≥2 onCompromised handlers, got ${handlers.length}`);
-  for (const h of handlers) {
-    assert.ok(h.includes("_releaseFunction = null"),
-      `onCompromised handler should null _releaseFunction: ${h}`);
-  }
+  // Count onCompromised handler declarations and verify each sets _releaseFunction = null.
+  // The handlers now contain nested try/catch blocks, so instead of extracting the full
+  // handler body with a simple regex, count occurrences and verify the pattern globally.
+  const handlerCount = (lockSource.match(/onCompromised:\s*\(\)\s*=>\s*\{/g) || []).length;
+  assert.ok(handlerCount >= 2, `expected ≥2 onCompromised handlers, got ${handlerCount}`);
+  // Every onCompromised handler must ultimately set _releaseFunction = null
+  const nullAssignments = (lockSource.match(/_lockCompromised = true;\s*\n\s*_releaseFunction = null;/g) || []).length;
+  assert.ok(nullAssignments >= 2,
+    `expected ≥2 _releaseFunction = null assignments after _lockCompromised = true, got ${nullAssignments}`);
 });
 
 test("session lock: exit handler uses ensureExitHandler to prevent double-registration (#1315)", async () => {

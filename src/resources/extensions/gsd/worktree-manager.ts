@@ -303,6 +303,17 @@ export function removeWorktree(
     try { nativeWorktreeRemove(basePath, wtPath, true); } catch { /* may fail */ }
   }
 
+  // If the directory is STILL there after both attempts, log a warning and
+  // skip branch deletion — deleting the branch while the directory exists
+  // creates orphaned state (#gap-analysis H5).
+  if (existsSync(wtPath)) {
+    process.stderr.write(
+      `worktree-manager: warning — worktree directory "${wtPath}" could not be removed (locked by another process?). Skipping branch deletion.\n`,
+    );
+    nativeWorktreePrune(basePath);
+    return;
+  }
+
   // Prune stale entries so git knows the worktree is gone
   nativeWorktreePrune(basePath);
 

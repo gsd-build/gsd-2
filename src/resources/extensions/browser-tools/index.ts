@@ -133,7 +133,13 @@ async function registerBrowserTools(pi: ExtensionAPI): Promise<void> {
       actionCache.registerActionCacheTools(pi, deps);
       injectionDetection.registerInjectionDetectionTools(pi, deps);
     })().catch((error) => {
-      registrationPromise = null;
+      // Cache the rejection so subsequent calls see the same error rather
+      // than retrying concurrently — resetting to null creates a race
+      // condition where multiple callers start loading simultaneously
+      // (#gap-analysis C3).
+      registrationPromise = Promise.reject(error);
+      // Prevent unhandled rejection for the cached promise
+      registrationPromise.catch(() => {});
       throw error;
     });
   }
@@ -150,7 +156,11 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    await registerBrowserTools(pi);
+    try {
+      await registerBrowserTools(pi);
+    } catch (error) {
+      process.stderr.write(`browser-tools: load error in non-TTY mode — ${error instanceof Error ? error.message : String(error)}\n`);
+    }
   });
 
   pi.on("session_shutdown", async () => {

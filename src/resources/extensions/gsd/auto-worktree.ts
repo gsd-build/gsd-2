@@ -510,14 +510,27 @@ export function mergeMilestoneToMain(
   const worktreeCwd = process.cwd();
   const milestoneBranch = autoWorktreeBranch(milestoneId);
 
-  // 1. Auto-commit dirty state in worktree before leaving
-  autoCommitDirtyState(worktreeCwd);
+  // 1. Auto-commit dirty state in worktree before leaving.
+  // If the commit fails, log a warning — the merge may still succeed if
+  // there are no uncommitted changes, but a dirty tree will cause the
+  // squash merge to fail (#gap-analysis H3/M10).
+  const commitOk = autoCommitDirtyState(worktreeCwd);
+  if (!commitOk) {
+    const status = nativeWorkingTreeStatus(worktreeCwd);
+    if (status) {
+      process.stderr.write(`auto-worktree: warning — auto-commit failed but working tree has changes. Merge may fail.\n`);
+    }
+  }
 
   // 2. Parse roadmap for slice listing
   const roadmap = parseRoadmap(roadmapContent);
   const completedSlices = roadmap.slices.filter(s => s.done);
 
-  // 3. chdir to original base
+  // 3. chdir to original base — validate directory exists first to avoid
+  // stranding the process in an invalid directory (#gap-analysis H11).
+  if (!existsSync(originalBasePath_)) {
+    throw new Error(`Cannot merge milestone: original base path "${originalBasePath_}" no longer exists`);
+  }
   const previousCwd = process.cwd();
   process.chdir(originalBasePath_);
 
@@ -538,9 +551,17 @@ export function mergeMilestoneToMain(
     if (existsSync(runtimeDir)) rmSync(runtimeDir, { recursive: true, force: true });
   } catch { /* non-fatal */ }
 
-  // 4. Resolve integration branch — prefer milestone metadata, fall back to preferences / "main"
+  // 4. Resolve integration branch — prefer milestone metadata, fall back to preferences / "main".
+  // Validate the recorded branch still exists — if a user deleted it manually, fall back
+  // to the default rather than failing with a confusing checkout error (#gap-analysis H10).
   const prefs = loadEffectiveGSDPreferences()?.preferences?.git ?? {};
-  const integrationBranch = readIntegrationBranch(originalBasePath_, milestoneId);
+  let integrationBranch = readIntegrationBranch(originalBasePath_, milestoneId);
+  if (integrationBranch && !nativeBranchExists(originalBasePath_, integrationBranch)) {
+    process.stderr.write(
+      `auto-worktree: integration branch "${integrationBranch}" for ${milestoneId} no longer exists — falling back to default\n`,
+    );
+    integrationBranch = null;
+  }
   const mainBranch = integrationBranch ?? prefs.main_branch ?? "main";
 
   // 5. Checkout integration branch (skip if already current — avoids git error
@@ -593,11 +614,30 @@ export function mergeMilestoneToMain(
           try {
             nativeCheckoutTheirs(originalBasePath_, [gsdFile]);
             nativeAddPaths(originalBasePath_, [gsdFile]);
-          } catch {
+          } catch (resolveErr) {
             // If checkout --theirs fails, try removing the file from the merge
             // (it's a runtime file that shouldn't be committed anyway)
-            nativeRmForce(originalBasePath_, [gsdFile]);
+            try {
+              nativeRmForce(originalBasePath_, [gsdFile]);
+            } catch (rmErr) {
+              // Both resolution attempts failed — log for diagnostics (#gap-analysis H4)
+              process.stderr.write(
+                `auto-worktree: failed to resolve .gsd/ conflict for "${gsdFile}": ` +
+                `checkout-theirs: ${resolveErr instanceof Error ? resolveErr.message : String(resolveErr)}, ` +
+                `rm: ${rmErr instanceof Error ? rmErr.message : String(rmErr)}\n`,
+              );
+            }
           }
+        }
+
+        // Verify all .gsd/ conflicts were actually resolved before continuing.
+        // Without this check, unresolved conflicts can be committed to main (#gap-analysis H4).
+        const remainingConflicts = nativeConflictFiles(originalBasePath_);
+        const remainingGsdConflicts = remainingConflicts.filter(f => f.startsWith(".gsd/"));
+        if (remainingGsdConflicts.length > 0) {
+          process.stderr.write(
+            `auto-worktree: ${remainingGsdConflicts.length} .gsd/ conflicts could not be auto-resolved: ${remainingGsdConflicts.join(", ")}\n`,
+          );
         }
       }
 
