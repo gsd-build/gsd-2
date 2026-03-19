@@ -137,12 +137,11 @@ function render(w: number, healthState: { icon: string; color: string; summary: 
   const phaseBadge = theme.fg("dim", phaseLabel);
   lines.push(rightAlign(actionLeft, phaseBadge, w));
 
-  // Two-column body — no divider, columns aligned by CSI cursor positioning
+  // Two-column body — pad left to fixed width, concatenate right
   const minTwoColWidth = 76;
   const hasTasks = !noMilestone;
   const useTwoCol = w >= minTwoColWidth && hasTasks;
-  const rightStartCol = useTwoCol ? Math.max(36, Math.floor(w * 0.55)) : 0;
-  const leftColWidth = useTwoCol ? rightStartCol - 2 : w;
+  const leftColWidth = useTwoCol ? Math.floor(w * 0.5) : w;
 
   // Left column
   const leftLines: string[] = [];
@@ -155,86 +154,65 @@ function render(w: number, healthState: { icon: string; color: string; summary: 
       + theme.fg("dim", "░".repeat(barWidth - filled));
     const meta = theme.fg("dim", `${slicesDone}/${slicesTotal} slices`)
       + theme.fg("dim", ` · task ${taskNum}/${taskTotal}`);
-    leftLines.push(truncateToWidth(`${pad}${bar} ${meta}`, leftColWidth));
-    leftLines.push(truncateToWidth(`${pad}${theme.fg("dim", eta)}`, leftColWidth));
+    leftLines.push(`${pad}${bar} ${meta}`);
+    leftLines.push(`${pad}${theme.fg("dim", eta)}`);
   }
 
-  // Health indicator
-  leftLines.push(truncateToWidth(
-    `${pad}${theme.fg(healthState.color, healthState.icon)} ${theme.fg(healthState.color, healthState.summary)}`,
-    leftColWidth,
-  ));
+  // Health indicator — ASCII only, no multi-byte glyphs
+  const healthIcon = healthState.color === "success" ? "o"
+    : healthState.color === "warning" ? "!"
+      : "x";
+  leftLines.push(
+    `${pad}${theme.fg(healthState.color, healthIcon)} ${theme.fg(healthState.color, healthState.summary)}`,
+  );
 
   if (nextStep) {
-    leftLines.push(truncateToWidth(
-      `${pad}${theme.fg("dim", "→")} ${theme.fg("dim", `then ${nextStep}`)}`,
-      leftColWidth,
-    ));
+    leftLines.push(
+      `${pad}${theme.fg("dim", "->")} ${theme.fg("dim", `then ${nextStep}`)}`,
+    );
   }
 
-  // Token stats — rendered below the two-column section, not in left column
-
-  // Right column: task checklist
+  // Right column: task checklist — ASCII glyphs only (* > .)
   const rightLines: string[] = [];
-  const glyphCol = rightStartCol;
-  const labelCol = rightStartCol + 2;
+
+  function fmtTask(t: typeof mockTasks[0]): string {
+    const isCurrent = t.id === currentTaskId;
+    const glyph = t.done
+      ? theme.fg("success", "*")
+      : isCurrent
+        ? theme.fg("accent", ">")
+        : theme.fg("dim", ".");
+    const label = isCurrent
+      ? theme.fg("text", `${t.id}: ${t.title}`)
+      : t.done
+        ? theme.fg("dim", `${t.id}: ${t.title}`)
+        : theme.fg("text", `${t.id}: ${t.title}`);
+    return `${glyph} ${label}`;
+  }
 
   if (useTwoCol) {
-    for (const t of mockTasks) {
-      const isCurrent = t.id === currentTaskId;
-      const glyph = t.done
-        ? theme.fg("success", GLYPH.statusDone)
-        : isCurrent
-          ? theme.fg("accent", "▸")
-          : theme.fg("dim", GLYPH.statusPending);
-      const label = isCurrent
-        ? theme.fg("text", `${t.id}: ${t.title}`)
-        : t.done
-          ? theme.fg("dim", `${t.id}: ${t.title}`)
-          : theme.fg("text", `${t.id}: ${t.title}`);
-      const moveToGlyph = `\x1b[${glyphCol}G`;
-      const moveToLabel = `\x1b[${labelCol}G`;
-      rightLines.push(`${moveToGlyph}${glyph}${moveToLabel}${label}`);
-    }
+    for (const t of mockTasks) rightLines.push(fmtTask(t));
   } else if (hasTasks) {
-    // Narrow: tasks inline in left column
-    const taskGlyphCol = visibleWidth(pad) + 1;
-    const taskLabelCol = taskGlyphCol + 2;
-    for (const t of mockTasks) {
-      const isCurrent = t.id === currentTaskId;
-      const glyph = t.done
-        ? theme.fg("success", GLYPH.statusDone)
-        : isCurrent
-          ? theme.fg("accent", "▸")
-          : theme.fg("dim", GLYPH.statusPending);
-      const label = isCurrent
-        ? theme.fg("text", `${t.id}: ${t.title}`)
-        : t.done
-          ? theme.fg("dim", `${t.id}: ${t.title}`)
-          : theme.fg("text", `${t.id}: ${t.title}`);
-      const moveToGlyph = `\x1b[${taskGlyphCol}G`;
-      const moveToLabel = `\x1b[${taskLabelCol}G`;
-      leftLines.push(truncateToWidth(`${moveToGlyph}${glyph}${moveToLabel}${label}`, leftColWidth));
-    }
+    for (const t of mockTasks) leftLines.push(`${pad}${fmtTask(t)}`);
   }
 
-  // Compose columns — right lines have CSI G positioning baked in
+  // Compose columns — pad left to fixed width, concatenate right
   if (useTwoCol) {
     const maxRows = Math.max(leftLines.length, rightLines.length);
     lines.push("");
     for (let i = 0; i < maxRows; i++) {
-      const left = leftLines[i] ?? "";
+      const left = padToWidth(truncateToWidth(leftLines[i] ?? "", leftColWidth), leftColWidth);
       const right = rightLines[i] ?? "";
       lines.push(`${left}${right}`);
     }
   } else {
     lines.push("");
-    for (const l of leftLines) lines.push(l);
+    for (const l of leftLines) lines.push(truncateToWidth(l, w));
   }
 
   // Footer: stats right-aligned, then pwd + hints
   lines.push("");
-  const statsStr = theme.fg("dim", `${tokenStats} ${modelDisplay}`);
+  const statsStr = theme.fg("dim", `i22 o11k R1.1M W38k 85%hit $18.668 35.2%/200k ${modelDisplay}`);
   lines.push(rightAlign("", statsStr, w));
   const hintStr = theme.fg("dim", "esc pause | ⌃⌥G dashboard");
   const pwdStr = theme.fg("dim", pwd);

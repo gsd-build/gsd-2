@@ -387,17 +387,16 @@ export function updateProgressWidget(
         lines.push(rightAlign(actionLeft, phaseBadge, width));
 
         // ── Two-column body ─────────────────────────────────────────────
-        // Left: progress, health, next, stats   Right: task checklist
-        // No divider — columns separated by whitespace, aligned by CSI cursor
+        // Left: progress, health, next   Right: task checklist
+        // Approach: pad each left line to a fixed visible width, then
+        // concatenate the right text. No CSI cursor positioning needed.
         const minTwoColWidth = 76;
         const roadmapSlices = mid ? getRoadmapSlicesSync() : null;
         const taskDetailsCol = roadmapSlices?.taskDetails ?? null;
         const useTwoCol = width >= minTwoColWidth && taskDetailsCol !== null && taskDetailsCol.length > 0;
-        // Right column starts at ~55% of width, leaving room for left stats
-        const rightStartCol = useTwoCol ? Math.max(36, Math.floor(width * 0.55)) : 0;
-        const leftColWidth = useTwoCol ? rightStartCol - 2 : width;
+        const leftColWidth = useTwoCol ? Math.floor(width * 0.5) : width;
 
-        // Build left column: progress bar, health, next step, token stats
+        // Build left column: progress bar, health, next step
         const leftLines: string[] = [];
 
         if (roadmapSlices) {
@@ -415,11 +414,11 @@ export function updateProgressWidget(
               : Math.min(activeSliceTasks.done + 1, activeSliceTasks.total);
             meta += theme.fg("dim", ` · task ${taskNum}/${activeSliceTasks.total}`);
           }
-          leftLines.push(truncateToWidth(`${pad}${bar} ${meta}`, leftColWidth));
+          leftLines.push(`${pad}${bar} ${meta}`);
 
           const eta = estimateTimeRemaining();
           if (eta) {
-            leftLines.push(truncateToWidth(`${pad}${theme.fg("dim", eta)}`, leftColWidth));
+            leftLines.push(`${pad}${theme.fg("dim", eta)}`);
           }
         }
 
@@ -430,19 +429,17 @@ export function updateProgressWidget(
             : score.level === "yellow" ? "warning"
               : "error";
           const healthIcon = score.level === "green" ? GLYPH.statusActive
-            : score.level === "yellow" ? "⚠"
-              : "✗";
-          leftLines.push(truncateToWidth(
+            : score.level === "yellow" ? "!"
+              : "x";
+          leftLines.push(
             `${pad}${theme.fg(healthColor, healthIcon)} ${theme.fg(healthColor, score.summary)}`,
-            leftColWidth,
-          ));
+          );
         }
 
         if (next) {
-          leftLines.push(truncateToWidth(
-            `${pad}${theme.fg("dim", "→")} ${theme.fg("dim", `then ${next}`)}`,
-            leftColWidth,
-          ));
+          leftLines.push(
+            `${pad}${theme.fg("dim", "->")} ${theme.fg("dim", `then ${next}`)}`,
+          );
         }
 
         // Token stats — built here, rendered below the two-column section
@@ -476,8 +473,8 @@ export function updateProgressWidget(
           const cxPct = cxUsage?.percent !== null ? cxPctVal.toFixed(1) : "?";
 
           const sp: string[] = [];
-          if (totalInput) sp.push(`↑${formatWidgetTokens(totalInput)}`);
-          if (totalOutput) sp.push(`↓${formatWidgetTokens(totalOutput)}`);
+          if (totalInput) sp.push(`i${formatWidgetTokens(totalInput)}`);
+          if (totalOutput) sp.push(`o${formatWidgetTokens(totalOutput)}`);
           if (totalCacheRead) sp.push(`R${formatWidgetTokens(totalCacheRead)}`);
           if (totalCacheWrite) sp.push(`W${formatWidgetTokens(totalCacheWrite)}`);
           if (totalCacheRead + totalInput > 0) {
@@ -513,74 +510,55 @@ export function updateProgressWidget(
             .join(theme.fg("dim", " "));
         })();
 
-        // Build right column: task checklist (only in two-column mode)
+        // Build right column: task checklist
+        // Each entry is "G LABEL" where G is a single ASCII char (*, >, .)
+        // so alignment is trivial — no multi-byte glyphs.
         const rightLines: string[] = [];
         const maxVisibleTasks = 8;
-        // Glyph at rightStartCol, label at rightStartCol + 2 (glyph + space)
-        const glyphCol = rightStartCol; // 1-based column for CSI G
-        const labelCol = rightStartCol + 2;
+
+        function formatTaskLine(t: { id: string; title: string; done: boolean }, isCurrent: boolean): string {
+          const glyph = t.done
+            ? theme.fg("success", "*")
+            : isCurrent
+              ? theme.fg("accent", ">")
+              : theme.fg("dim", ".");
+          const label = isCurrent
+            ? theme.fg("text", `${t.id}: ${t.title}`)
+            : t.done
+              ? theme.fg("dim", `${t.id}: ${t.title}`)
+              : theme.fg("text", `${t.id}: ${t.title}`);
+          return `${glyph} ${label}`;
+        }
 
         if (useTwoCol && taskDetailsCol) {
-          const visibleTasks = taskDetailsCol.slice(0, maxVisibleTasks);
-          for (const t of visibleTasks) {
-            const isCurrent = task && t.id === task.id;
-            const glyph = t.done
-              ? theme.fg("success", GLYPH.statusDone)
-              : isCurrent
-                ? theme.fg("accent", "▸")
-                : theme.fg("dim", GLYPH.statusPending);
-            const label = isCurrent
-              ? theme.fg("text", `${t.id}: ${t.title}`)
-              : t.done
-                ? theme.fg("dim", `${t.id}: ${t.title}`)
-                : theme.fg("text", `${t.id}: ${t.title}`);
-            const moveToGlyph = `\x1b[${glyphCol}G`;
-            const moveToLabel = `\x1b[${labelCol}G`;
-            rightLines.push(`${moveToGlyph}${glyph}${moveToLabel}${label}`);
+          for (const t of taskDetailsCol.slice(0, maxVisibleTasks)) {
+            rightLines.push(formatTaskLine(t, !!(task && t.id === task.id)));
           }
           if (taskDetailsCol.length > maxVisibleTasks) {
-            const moveToLabel = `\x1b[${labelCol}G`;
-            rightLines.push(`${moveToLabel}${theme.fg("dim", `…+${taskDetailsCol.length - maxVisibleTasks} more`)}`);
+            rightLines.push(theme.fg("dim", `  +${taskDetailsCol.length - maxVisibleTasks} more`));
           }
         } else if (!useTwoCol && taskDetailsCol && taskDetailsCol.length > 0) {
-          // Narrow single-column: task list goes into left column
-          const taskGlyphCol = visibleWidth(pad) + 1;
-          const taskLabelCol = taskGlyphCol + 2;
+          // Narrow single-column: tasks go into left column
           for (const t of taskDetailsCol.slice(0, maxVisibleTasks)) {
-            const isCurrent = task && t.id === task.id;
-            const glyph = t.done
-              ? theme.fg("success", GLYPH.statusDone)
-              : isCurrent
-                ? theme.fg("accent", "▸")
-                : theme.fg("dim", GLYPH.statusPending);
-            const label = isCurrent
-              ? theme.fg("text", `${t.id}: ${t.title}`)
-              : t.done
-                ? theme.fg("dim", `${t.id}: ${t.title}`)
-                : theme.fg("text", `${t.id}: ${t.title}`);
-            const moveToGlyph = `\x1b[${taskGlyphCol}G`;
-            const moveToLabel = `\x1b[${taskLabelCol}G`;
-            leftLines.push(truncateToWidth(`${moveToGlyph}${glyph}${moveToLabel}${label}`, leftColWidth));
+            leftLines.push(`${pad}${formatTaskLine(t, !!(task && t.id === task.id))}`);
           }
         }
 
-        // Compose columns — right column uses CSI cursor positioning so
-        // it aligns regardless of left column content width.
+        // Compose columns — pad left to fixed width, concatenate right
         if (useTwoCol) {
           const maxRows = Math.max(leftLines.length, rightLines.length);
           if (maxRows > 0) {
             lines.push("");
             for (let i = 0; i < maxRows; i++) {
-              const left = leftLines[i] ?? "";
+              const left = padToWidth(truncateToWidth(leftLines[i] ?? "", leftColWidth), leftColWidth);
               const right = rightLines[i] ?? "";
-              // Right lines already contain CSI G positioning sequences
               lines.push(`${left}${right}`);
             }
           }
         } else {
           if (leftLines.length > 0) {
             lines.push("");
-            for (const l of leftLines) lines.push(l);
+            for (const l of leftLines) lines.push(truncateToWidth(l, width));
           }
         }
 
