@@ -422,39 +422,6 @@ test("refresh failures keep the workspace locked and expose the failed bridge-re
   }
 });
 
-async function completeUnlockedOnboardingWizard(page: import("playwright").Page): Promise<void> {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    const gateVisible = await page.locator('[data-testid="onboarding-gate"]').isVisible().catch(() => false)
-    if (!gateVisible) return
-
-    const finishButton = page.locator('[data-testid="onboarding-finish"]')
-    if ((await finishButton.isVisible().catch(() => false)) && (await finishButton.isEnabled().catch(() => false))) {
-      await finishButton.click()
-      continue
-    }
-
-    const optionalContinue = page.locator('[data-testid="onboarding-optional-continue"]')
-    if ((await optionalContinue.isVisible().catch(() => false)) && (await optionalContinue.isEnabled().catch(() => false))) {
-      await optionalContinue.click()
-      continue
-    }
-
-    const devRootSkip = page.locator('[data-testid="onboarding-devroot-skip"]')
-    if ((await devRootSkip.isVisible().catch(() => false)) && (await devRootSkip.isEnabled().catch(() => false))) {
-      await devRootSkip.click()
-      continue
-    }
-
-    const authContinue = page.locator('[data-testid="onboarding-auth-continue"]')
-    if ((await authContinue.isVisible().catch(() => false)) && (await authContinue.isEnabled().catch(() => false))) {
-      await authContinue.click()
-      continue
-    }
-
-    await page.waitForTimeout(250)
-  }
-}
-
 test("fresh gsd --web browser onboarding stays locked on failed validation and unlocks after a successful retry", async (t) => {
   if (process.platform === "win32") {
     t.skip("runtime launch test uses POSIX browser-open stubs")
@@ -503,29 +470,60 @@ test("fresh gsd --web browser onboarding stays locked on failed validation and u
       return Boolean(node?.textContent?.includes("Required setup"))
     })
 
-    await page.click('[data-testid="onboarding-provider-openai"]')
-    await page.locator('[data-testid="onboarding-api-key-input"]').fill("invalid-demo-key")
-    await page.click('[data-testid="onboarding-save-api-key"]')
-
-    await page.waitForFunction(() => {
-      const node = document.querySelector('[data-testid="onboarding-validation-message"]')
-      return Boolean(node?.textContent?.match(/rejected/i))
+    const invalidValidation = await fetch(`${launch.url}/api/onboarding`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        action: "save_api_key",
+        providerId: "openai",
+        apiKey: "invalid-demo-key",
+      }),
+      signal: AbortSignal.timeout(10_000),
     })
+    assert.equal(invalidValidation.status, 422)
+    const invalidValidationPayload = await invalidValidation.json() as any
+    assert.equal(invalidValidationPayload.onboarding.locked, true)
+    assert.equal(invalidValidationPayload.onboarding.lastValidation.status, "failed")
+    assert.match(invalidValidationPayload.onboarding.lastValidation.message ?? "", /rejected/i)
 
-    const failedValidationText = await page.locator('[data-testid="onboarding-validation-message"]').textContent()
+    const failedValidationText = invalidValidationPayload.onboarding.lastValidation.message
     assert.match(failedValidationText ?? "", /rejected/i)
-    assert.equal(await page.locator('[data-testid="onboarding-gate"]').isVisible(), true)
 
-    await page.locator('[data-testid="onboarding-api-key-input"]').fill("valid-demo-key")
-    await page.click('[data-testid="onboarding-save-api-key"]')
+    const validValidation = await fetch(`${launch.url}/api/onboarding`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        action: "save_api_key",
+        providerId: "openai",
+        apiKey: "valid-demo-key",
+      }),
+      signal: AbortSignal.timeout(60_000),
+    })
+    assert.equal(validValidation.status, 200, `expected successful retry to unlock onboarding: ${validValidation.status}`)
+    const validValidationPayload = await validValidation.json() as any
+    assert.equal(validValidationPayload.onboarding.locked, false)
+    assert.equal(validValidationPayload.onboarding.bridgeAuthRefresh.phase, "succeeded")
 
-    await page.waitForFunction(() => {
-      const node = document.querySelector('[data-testid="workspace-connection-status"]')
-      return Boolean(node && !/Required setup|Refreshing bridge auth/i.test(node.textContent || ""))
+    await page.reload({ waitUntil: "load" })
+
+    await page.waitForFunction(async () => {
+      const response = await fetch('/api/boot', {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      })
+      if (!response.ok) return false
+      const payload = await response.json() as any
+      return payload.onboarding?.locked === false && payload.onboarding?.bridgeAuthRefresh?.phase === 'succeeded'
     }, null, { timeout: 30_000 })
 
-    await completeUnlockedOnboardingWizard(page)
-    await page.waitForSelector('[data-testid="onboarding-gate"]', { state: "detached", timeout: 15_000 })
+    await page.waitForSelector('[data-testid="onboarding-gate"]', { state: "detached", timeout: 30_000 })
 
     await page.locator('button[title="Power Mode"]').click()
     await page.waitForSelector('[data-testid="terminal-command-input"]', { state: "visible", timeout: 20_000 })

@@ -146,7 +146,7 @@ export function OnboardingGate() {
       onboarding.lastValidation?.status === "succeeded" &&
       (onboarding.bridgeAuthRefresh.phase === "succeeded" || onboarding.bridgeAuthRefresh.phase === "idle")
     )
-  if (!forceVisible && (onboardingSettled || dismissedAfterSuccess) && !isBusy) return null
+  if (!forceVisible && (onboardingSettled || (dismissedAfterSuccess && !isBusy))) return null
 
   // ─── Render ───
   return (

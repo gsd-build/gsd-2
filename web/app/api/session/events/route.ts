@@ -1,4 +1,8 @@
-import { getProjectBridgeServiceForCwd, resolveProjectCwd } from "../../../../../src/web/bridge-service.ts";
+import {
+  collectCurrentProjectOnboardingState,
+  getProjectBridgeServiceForCwd,
+  resolveProjectCwd,
+} from "../../../../../src/web/bridge-service.ts";
 import { cancelShutdown } from "../../../../lib/shutdown-gate";
 
 export const runtime = "nodejs";
@@ -16,6 +20,16 @@ export async function GET(request: Request): Promise<Response> {
 
   const projectCwd = resolveProjectCwd(request);
   const bridge = getProjectBridgeServiceForCwd(projectCwd);
+  const onboarding = await collectCurrentProjectOnboardingState(projectCwd);
+
+  if (onboarding.locked) {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    });
+  }
 
   try {
     await bridge.ensureStarted();

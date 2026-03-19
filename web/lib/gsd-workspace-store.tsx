@@ -1415,24 +1415,6 @@ export function getOnboardingPresentation(
     }
   }
 
-  if (state.onboardingRequestState === "saving_api_key") {
-    return {
-      phase: "validating",
-      label: "Validating credentials",
-      detail: "Checking the provider key and saving it only if validation succeeds.",
-      tone: "info",
-    }
-  }
-
-  if (state.onboardingRequestState === "starting_provider_flow" || state.onboardingRequestState === "submitting_provider_flow_input") {
-    return {
-      phase: "running_flow",
-      label: "Advancing provider sign-in",
-      detail: "The onboarding flow is running and will update here as soon as the next step is ready.",
-      tone: "info",
-    }
-  }
-
   const onboarding = state.boot.onboarding
   if (onboarding.activeFlow?.status === "awaiting_browser_auth") {
     return {
@@ -1476,6 +1458,24 @@ export function getOnboardingPresentation(
       label: "Credential validation failed",
       detail: onboarding.lastValidation.message,
       tone: "danger",
+    }
+  }
+
+  if (state.onboardingRequestState === "saving_api_key") {
+    return {
+      phase: "validating",
+      label: "Validating credentials",
+      detail: "Checking the provider key and saving it only if validation succeeds.",
+      tone: "info",
+    }
+  }
+
+  if (state.onboardingRequestState === "starting_provider_flow" || state.onboardingRequestState === "submitting_provider_flow_input") {
+    return {
+      phase: "running_flow",
+      label: "Advancing provider sign-in",
+      detail: "The onboarding flow is running and will update here as soon as the next step is ready.",
+      tone: "info",
     }
   }
 
@@ -4104,13 +4104,21 @@ export class GSDWorkspaceStore {
           bootStatus: "ready",
           boot,
           live,
-          connectionState: this.eventSource ? this.state.connectionState : "connecting",
+          connectionState: boot.onboarding.locked
+            ? "idle"
+            : this.eventSource
+              ? this.state.connectionState
+              : "connecting",
           lastBridgeError: boot.bridge.lastError,
           sessionAttached: hasAttachedSession(boot.bridge),
           lastClientError: null,
           ...(softRefresh ? {} : { terminalLines: bootSeedLines(boot) }),
         })
-        this.ensureEventStream()
+        if (boot.onboarding.locked) {
+          this.closeEventStream()
+        } else {
+          this.ensureEventStream()
+        }
       } catch (error) {
         const message = normalizeClientError(error)
         if (softRefresh) {
@@ -4133,6 +4141,18 @@ export class GSDWorkspaceStore {
     })
 
     await this.bootPromise
+  }
+
+  private async refreshBootAfterCurrentSettles(options: { soft?: boolean } = {}): Promise<void> {
+    if (this.bootPromise) {
+      try {
+        await this.bootPromise
+      } catch {
+        // Preserve the original boot failure surface, then issue a fresh refresh.
+      }
+    }
+
+    await this.refreshBoot(options)
   }
 
   private invalidateLiveFreshness(
@@ -4711,7 +4731,7 @@ export class GSDWorkspaceStore {
     this.appendOnboardingSummaryLine(onboarding)
 
     if (onboarding.lastValidation?.status === "succeeded" || onboarding.bridgeAuthRefresh.phase !== "idle") {
-      void this.refreshBoot({ soft: true })
+      void this.refreshBootAfterCurrentSettles({ soft: true })
     }
   }
 
@@ -4774,7 +4794,7 @@ export class GSDWorkspaceStore {
   }
 
   private ensureEventStream(): void {
-    if (this.eventSource || this.disposed) return
+    if (this.eventSource || this.disposed || this.state.boot?.onboarding.locked) return
 
     const stream = new EventSource(this.buildUrl("/api/session/events"))
     this.eventSource = stream
