@@ -144,7 +144,10 @@ const DISPATCH_RULES: DispatchRule[] = [
         if (!content) continue;
         const verdictMatch = content.match(/verdict:\s*([\w-]+)/i);
         const verdict = verdictMatch?.[1]?.toLowerCase();
-        if (verdict && verdict !== "pass" && verdict !== "passed") {
+        // Valid passing verdicts: pass, passed, partial (partial = issues noted but not blocking)
+        // Invalid/blocking: fail, failed, needs-remediation, or any unrecognized value
+        const passingVerdicts = new Set(["pass", "passed", "partial"]);
+        if (verdict && !passingVerdicts.has(verdict)) {
           return {
             action: "stop" as const,
             reason: `UAT verdict for ${slice.id} is "${verdict}" — blocking progression until resolved.\nReview the UAT result and update the verdict to PASS, or re-run /gsd auto after fixing.`,

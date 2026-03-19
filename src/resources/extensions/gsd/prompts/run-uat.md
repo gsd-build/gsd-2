@@ -38,6 +38,8 @@ After running all checks, compute the **overall verdict**:
 - `FAIL` — one or more checks failed
 - `PARTIAL` — some checks passed, some failed or were skipped
 
+**The verdict field MUST be exactly one of: PASS, FAIL, or PARTIAL.** Do not invent other values (e.g., "surfaced-for-human-review", "needs-attention"). If unsure, use PARTIAL.
+
 Write `{{uatResultPath}}` with:
 
 ```markdown
