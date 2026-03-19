@@ -53,6 +53,12 @@ function writeMilestoneValidation(base: string, mid: string, verdict: string = '
   writeFileSync(join(dir, `${mid}-VALIDATION.md`), `---\nverdict: ${verdict}\nremediation_round: 0\n---\n\n# Validation\nValidated.`);
 }
 
+function writeContext(base: string, mid: string, content: string): void {
+  const dir = join(base, '.gsd', 'milestones', mid);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${mid}-CONTEXT.md`), content);
+}
+
 function writeRequirements(base: string, content: string): void {
   writeFileSync(join(base, '.gsd', 'REQUIREMENTS.md'), content);
 }
@@ -91,8 +97,8 @@ async function main(): Promise<void> {
   {
     const base = createFixtureBase();
     try {
-      // Create M001 directory but no roadmap file
-      mkdirSync(join(base, '.gsd', 'milestones', 'M001'), { recursive: true });
+      // Create M001 with CONTEXT but no roadmap (discussed, not yet planned)
+      writeContext(base, 'M001', `# M001: Test Milestone\n\nDiscussed but not yet planned.`);
 
       const state = await deriveState(base);
 
@@ -411,8 +417,8 @@ Continue from step 2.
   > After this: Done.
 `);
 
-      // M003: just a dir (no roadmap → pending since M002 is already active)
-      mkdirSync(join(base, '.gsd', 'milestones', 'M003'), { recursive: true });
+      // M003: pending (has context but no roadmap → pending since M002 is already active)
+      writeContext(base, 'M003', `# M003: Third Milestone\n\nQueued for later.`);
 
       const state = await deriveState(base);
 

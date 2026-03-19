@@ -135,11 +135,11 @@ async function main(): Promise<void> {
         'M005 is marked as active in registry'
       );
 
-      // Registry should have all three milestones
+      // Registry should have only substantive milestones (ghosts excluded)
       assertEq(
         state.registry.length,
-        3,
-        'registry has 3 entries (M001, M002, M005)'
+        1,
+        'registry has 1 entry (M005 only - ghosts excluded)'
       );
 
       console.log('\n  Ghost milestone rejection test PASSED.');
