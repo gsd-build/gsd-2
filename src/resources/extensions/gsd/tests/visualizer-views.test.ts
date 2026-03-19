@@ -60,6 +60,9 @@ function makeVisualizerData(overrides: Partial<VisualizerData> = {}): Visualizer
       toolCalls: 0,
       assistantMessages: 0,
       userMessages: 0,
+      providers: [],
+      skillSummary: { total: 0, warningCount: 0, criticalCount: 0, topIssue: null },
+      environmentIssues: [],
     },
     discussion: [],
     stats: {
@@ -503,6 +506,9 @@ console.log("\n=== renderAgentView ===");
       truncationRate: 15.5, continueHereRate: 5.0,
       tierBreakdown: [], tierSavingsLine: "",
       toolCalls: 20, assistantMessages: 15, userMessages: 8,
+      providers: [],
+      skillSummary: { total: 0, warningCount: 0, criticalCount: 0, topIssue: null },
+      environmentIssues: [],
     },
     captures: { entries: [], pendingCount: 3, totalCount: 5 },
   });
@@ -669,6 +675,9 @@ console.log("\n=== renderHealthView ===");
       toolCalls: 50,
       assistantMessages: 30,
       userMessages: 15,
+      providers: [],
+      skillSummary: { total: 0, warningCount: 0, criticalCount: 0, topIssue: null },
+      environmentIssues: [],
     },
   });
 
@@ -693,6 +702,9 @@ console.log("\n=== renderHealthView ===");
       truncationRate: 0, continueHereRate: 0,
       tierBreakdown: [], tierSavingsLine: "",
       toolCalls: 0, assistantMessages: 0, userMessages: 0,
+      providers: [],
+      skillSummary: { total: 0, warningCount: 0, criticalCount: 0, topIssue: null },
+      environmentIssues: [],
     },
   });
 

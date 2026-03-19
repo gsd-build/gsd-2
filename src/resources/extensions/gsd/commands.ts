@@ -44,14 +44,28 @@ import { handleConfig } from "./commands-config.js";
 import { handleInspect } from "./commands-inspect.js";
 import { handleCleanupBranches, handleCleanupSnapshots, handleSkip, handleDryRun } from "./commands-maintenance.js";
 import { handleDoctor, handleSteer, handleCapture, handleTriage, handleKnowledge, handleRunHook, handleUpdate, handleSkillHealth } from "./commands-handlers.js";
+import { computeProgressScore, formatProgressLine } from "./progress-score.js";
+import { runEnvironmentChecks } from "./doctor-environment.js";
 import { handleLogs } from "./commands-logs.js";
 import { handleStart, handleTemplates, getTemplateCompletions } from "./commands-workflow-templates.js";
 
 
 /** Resolve the effective project root, accounting for worktree paths. */
 export function projectRoot(): string {
-  const root = resolveProjectRoot(process.cwd());
-  assertSafeDirectory(root);
+  const cwd = process.cwd();
+  const root = resolveProjectRoot(cwd);
+
+  // When running inside a GSD worktree, the resolved root may be a "dangerous"
+  // directory (e.g., $HOME used as a git repo root — #1317). The safety check
+  // should validate the actual working directory, not the upstream root,
+  // because the worktree itself is a safe project subdirectory.
+  // Only skip the root check when we can confirm we're in a valid worktree.
+  if (root !== cwd) {
+    // We're in a worktree — validate the worktree path instead of the root
+    assertSafeDirectory(cwd);
+  } else {
+    assertSafeDirectory(root);
+  }
   return root;
 }
 
@@ -1068,6 +1082,11 @@ async function handleSetup(args: string, ctx: ExtensionCommandContext): Promise<
 function formatTextStatus(state: GSDState): string {
   const lines: string[] = ["GSD Status\n"];
 
+  // Progress score — traffic light (#1221)
+  const progressScore = computeProgressScore();
+  lines.push(formatProgressLine(progressScore));
+  lines.push("");
+
   // Phase
   lines.push(`Phase: ${state.phase}`);
 
@@ -1111,6 +1130,18 @@ function formatTextStatus(state: GSDState): string {
     for (const m of state.registry) {
       const statusIcon = m.status === "complete" ? "✓" : m.status === "active" ? "▶" : m.status === "parked" ? "⏸" : "○";
       lines.push(`  ${statusIcon} ${m.id}: ${m.title} (${m.status})`);
+    }
+  }
+
+  // Environment health (#1221)
+  const envResults = runEnvironmentChecks(projectRoot());
+  const envIssues = envResults.filter(r => r.status !== "ok");
+  if (envIssues.length > 0) {
+    lines.push("");
+    lines.push("Environment:");
+    for (const r of envIssues) {
+      const icon = r.status === "error" ? "✗" : "⚠";
+      lines.push(`  ${icon} ${r.message}`);
     }
   }
 

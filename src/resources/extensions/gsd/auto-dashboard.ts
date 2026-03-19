@@ -20,6 +20,7 @@ import { parseRoadmap, parsePlan } from "./files.js";
 import { readFileSync, existsSync } from "node:fs";
 import { truncateToWidth, visibleWidth } from "@gsd/pi-tui";
 import { makeUI, GLYPH, INDENT } from "../shared/mod.js";
+import { parseUnitId } from "./unit-id.js";
 
 // ─── Dashboard Data ───────────────────────────────────────────────────────────
 
@@ -48,40 +49,34 @@ export interface AutoDashboardData {
 
 // ─── Unit Description Helpers ─────────────────────────────────────────────────
 
+/** Canonical verb and phase label for each known unit type. */
+const UNIT_TYPE_INFO: Record<string, { verb: string; phaseLabel: string }> = {
+  "research-milestone": { verb: "researching",  phaseLabel: "RESEARCH" },
+  "research-slice":     { verb: "researching",  phaseLabel: "RESEARCH" },
+  "plan-milestone":     { verb: "planning",     phaseLabel: "PLAN" },
+  "plan-slice":         { verb: "planning",     phaseLabel: "PLAN" },
+  "execute-task":       { verb: "executing",    phaseLabel: "EXECUTE" },
+  "complete-slice":     { verb: "completing",   phaseLabel: "COMPLETE" },
+  "replan-slice":       { verb: "replanning",   phaseLabel: "REPLAN" },
+  "rewrite-docs":       { verb: "rewriting",    phaseLabel: "REWRITE" },
+  "reassess-roadmap":   { verb: "reassessing",  phaseLabel: "REASSESS" },
+  "run-uat":            { verb: "running UAT",  phaseLabel: "UAT" },
+};
+
 export function unitVerb(unitType: string): string {
   if (unitType.startsWith("hook/")) return `hook: ${unitType.slice(5)}`;
-  switch (unitType) {
-    case "research-milestone":
-    case "research-slice": return "researching";
-    case "plan-milestone":
-    case "plan-slice": return "planning";
-    case "execute-task": return "executing";
-    case "complete-slice": return "completing";
-    case "replan-slice": return "replanning";
-    case "rewrite-docs": return "rewriting";
-    case "reassess-roadmap": return "reassessing";
-    case "run-uat": return "running UAT";
-    default: return unitType;
-  }
+  return UNIT_TYPE_INFO[unitType]?.verb ?? unitType;
 }
 
 export function unitPhaseLabel(unitType: string): string {
   if (unitType.startsWith("hook/")) return "HOOK";
-  switch (unitType) {
-    case "research-milestone": return "RESEARCH";
-    case "research-slice": return "RESEARCH";
-    case "plan-milestone": return "PLAN";
-    case "plan-slice": return "PLAN";
-    case "execute-task": return "EXECUTE";
-    case "complete-slice": return "COMPLETE";
-    case "replan-slice": return "REPLAN";
-    case "rewrite-docs": return "REWRITE";
-    case "reassess-roadmap": return "REASSESS";
-    case "run-uat": return "UAT";
-    default: return unitType.toUpperCase();
-  }
+  return UNIT_TYPE_INFO[unitType]?.phaseLabel ?? unitType.toUpperCase();
 }
 
+/**
+ * Describe the expected next step after the current unit completes.
+ * Unit types here mirror the keys in UNIT_TYPE_INFO above.
+ */
 function peekNext(unitType: string, state: GSDState): string {
   // Show active hook info in progress display
   const activeHookState = getActiveHook();
@@ -205,13 +200,6 @@ export function estimateTimeRemaining(): string | null {
 
 // ─── Slice Progress Cache ─────────────────────────────────────────────────────
 
-/** Cached task detail for the widget task checklist */
-interface CachedTaskDetail {
-  id: string;
-  title: string;
-  done: boolean;
-}
-
 /** Cached slice progress for the widget — avoid async in render */
 let cachedSliceProgress: {
   done: number;
@@ -219,8 +207,6 @@ let cachedSliceProgress: {
   milestoneId: string;
   /** Real task progress for the active slice, if its plan file exists */
   activeSliceTasks: { done: number; total: number } | null;
-  /** Full task list for the active slice checklist */
-  taskDetails: CachedTaskDetail[] | null;
 } | null = null;
 
 export function updateSliceProgressCache(base: string, mid: string, activeSid?: string): void {
@@ -231,7 +217,6 @@ export function updateSliceProgressCache(base: string, mid: string, activeSid?: 
     const roadmap = parseRoadmap(content);
 
     let activeSliceTasks: { done: number; total: number } | null = null;
-    let taskDetails: CachedTaskDetail[] | null = null;
     if (activeSid) {
       try {
         const planFile = resolveSliceFile(base, mid, activeSid, "PLAN");
@@ -242,7 +227,6 @@ export function updateSliceProgressCache(base: string, mid: string, activeSid?: 
             done: plan.tasks.filter(t => t.done).length,
             total: plan.tasks.length,
           };
-          taskDetails = plan.tasks.map(t => ({ id: t.id, title: t.title, done: t.done }));
         }
       } catch {
         // Non-fatal — just omit task count
@@ -254,19 +238,13 @@ export function updateSliceProgressCache(base: string, mid: string, activeSid?: 
       total: roadmap.slices.length,
       milestoneId: mid,
       activeSliceTasks,
-      taskDetails,
     };
   } catch {
     // Non-fatal — widget just won't show progress bar
   }
 }
 
-export function getRoadmapSlicesSync(): {
-  done: number;
-  total: number;
-  activeSliceTasks: { done: number; total: number } | null;
-  taskDetails: CachedTaskDetail[] | null;
-} | null {
+export function getRoadmapSlicesSync(): { done: number; total: number; activeSliceTasks: { done: number; total: number } | null } | null {
   return cachedSliceProgress;
 }
 
@@ -367,84 +345,88 @@ export function updateProgressWidget(
         const lines: string[] = [];
         const pad = INDENT.base;
 
-        // ── Top bar ─────────────────────────────────────────────────────
+        // ── Line 1: Top bar ───────────────────────────────────────────────
         lines.push(...ui.bar());
 
-        // ── Header: GSD AUTO ... elapsed ────────────────────────────────
         const dot = pulseBright
           ? theme.fg("accent", GLYPH.statusActive)
           : theme.fg("dim", GLYPH.statusPending);
         const elapsed = formatAutoElapsed(accessors.getAutoStartTime());
         const modeTag = accessors.isStepMode() ? "NEXT" : "AUTO";
-        const headerLeft = `${pad}${dot} ${theme.fg("accent", theme.bold("GSD"))} ${theme.fg("success", modeTag)}`;
+        const headerLeft = `${pad}${dot} ${theme.fg("accent", theme.bold("GSD"))}  ${theme.fg("success", modeTag)}`;
         const headerRight = elapsed ? theme.fg("dim", elapsed) : "";
         lines.push(rightAlign(headerLeft, headerRight, width));
 
-        // ── Context: project · slice · action (merged into one line) ────
-        const contextParts: string[] = [];
-        if (mid) contextParts.push(theme.fg("dim", mid.title));
+        lines.push("");
+
+        if (mid) {
+          lines.push(truncateToWidth(`${pad}${theme.fg("dim", mid.title)}`, width));
+        }
+
         if (slice && unitType !== "research-milestone" && unitType !== "plan-milestone") {
-          contextParts.push(theme.fg("text", theme.bold(`${slice.id}: ${slice.title}`)));
-        }
-        const isHook = unitType.startsWith("hook/");
-        const target = isHook
-          ? (unitId.split("/").pop() ?? unitId)
-          : (task ? `${task.id}: ${task.title}` : unitId);
-        contextParts.push(`${theme.fg("accent", "▸")} ${theme.fg("accent", verb)} ${theme.fg("text", target)}`);
-
-        const tierTag = tierBadge ? theme.fg("dim", `[${tierBadge}] `) : "";
-        const phaseBadge = `${tierTag}${theme.fg("dim", phaseLabel)}`;
-        const contextLine = contextParts.join(theme.fg("dim", " · "));
-        lines.push(rightAlign(`${pad}${contextLine}`, phaseBadge, width));
-
-        // ── Two-column body ─────────────────────────────────────────────
-        // Left: progress, ETA, next, stats (fixed)  |  Right: task checklist (fixed, adjacent)
-        // Both columns sit left-to-center; empty space is on the right.
-        const divider = theme.fg("dim", "│");
-        const minTwoColWidth = 100;
-        const rightColFixed = 44;
-        const colGap = 5; // breathing room between columns
-        // Left column takes remaining space — no truncation on wide terminals
-        const useTwoCol = width >= minTwoColWidth;
-        const rightColWidth = useTwoCol ? rightColFixed : 0;
-        const leftColWidth = useTwoCol ? width - rightColWidth - colGap : width;
-
-        const roadmapSlices = mid ? getRoadmapSlicesSync() : null;
-
-        // Build left column: progress bar, ETA, next step, token stats
-        const leftLines: string[] = [];
-
-        if (roadmapSlices) {
-          const { done, total, activeSliceTasks } = roadmapSlices;
-          const barWidth = Math.max(6, Math.min(18, Math.floor(leftColWidth * 0.4)));
-          const pct = total > 0 ? done / total : 0;
-          const filled = Math.round(pct * barWidth);
-          const bar = theme.fg("success", "█".repeat(filled))
-            + theme.fg("dim", "░".repeat(barWidth - filled));
-
-          let meta = theme.fg("dim", `${done}/${total} slices`);
-          if (activeSliceTasks && activeSliceTasks.total > 0) {
-            const taskNum = isHook
-              ? Math.max(activeSliceTasks.done, 1)
-              : Math.min(activeSliceTasks.done + 1, activeSliceTasks.total);
-            meta += theme.fg("dim", ` · task ${taskNum}/${activeSliceTasks.total}`);
-          }
-          leftLines.push(truncateToWidth(`${pad}${bar} ${meta}`, leftColWidth));
-
-          const eta = estimateTimeRemaining();
-          if (eta) {
-            leftLines.push(truncateToWidth(`${pad}${theme.fg("dim", eta)}`, leftColWidth));
-          }
-        }
-
-        if (next) {
-          leftLines.push(truncateToWidth(
-            `${pad}${theme.fg("dim", "→")} ${theme.fg("dim", `then ${next}`)}`,
-            leftColWidth,
+          lines.push(truncateToWidth(
+            `${pad}${theme.fg("text", theme.bold(`${slice.id}: ${slice.title}`))}`,
+            width,
           ));
         }
 
-        // Token stats
+        lines.push("");
+
+        const isHook = unitType.startsWith("hook/");
+        const hookParsed = isHook ? parseUnitId(unitId) : undefined;
+        const target = isHook
+          ? (hookParsed!.task ?? hookParsed!.slice ?? unitId)
+          : (task ? `${task.id}: ${task.title}` : unitId);
+        const actionLeft = `${pad}${theme.fg("accent", "▸")} ${theme.fg("accent", verb)}  ${theme.fg("text", target)}`;
+        const tierTag = tierBadge ? theme.fg("dim", `[${tierBadge}] `) : "";
+        const phaseBadge = `${tierTag}${theme.fg("dim", phaseLabel)}`;
+        lines.push(rightAlign(actionLeft, phaseBadge, width));
+        lines.push("");
+
+        if (mid) {
+          const roadmapSlices = getRoadmapSlicesSync();
+          if (roadmapSlices) {
+            const { done, total, activeSliceTasks } = roadmapSlices;
+            const barWidth = Math.max(8, Math.min(24, Math.floor(width * 0.3)));
+            const pct = total > 0 ? done / total : 0;
+            const filled = Math.round(pct * barWidth);
+            const bar = theme.fg("success", "█".repeat(filled))
+              + theme.fg("dim", "░".repeat(barWidth - filled));
+
+            let meta = theme.fg("dim", `${done}/${total} slices`);
+
+            if (activeSliceTasks && activeSliceTasks.total > 0) {
+              // For hooks, show the trigger task number (done), not the next task (done + 1)
+              const taskNum = isHook
+                ? Math.max(activeSliceTasks.done, 1)
+                : Math.min(activeSliceTasks.done + 1, activeSliceTasks.total);
+              meta += theme.fg("dim", `  ·  task ${taskNum}/${activeSliceTasks.total}`);
+            }
+
+            // ETA estimate
+            const eta = estimateTimeRemaining();
+            if (eta) {
+              meta += theme.fg("dim", `  ·  ${eta}`);
+            }
+
+            lines.push(truncateToWidth(`${pad}${bar}  ${meta}`, width));
+          }
+        }
+
+        lines.push("");
+
+        if (next) {
+          lines.push(truncateToWidth(
+            `${pad}${theme.fg("dim", "→")} ${theme.fg("dim", `then ${next}`)}`,
+            width,
+          ));
+        }
+
+        // ── Footer info (pwd, tokens, cost, context, model) ──────────────
+        lines.push("");
+        lines.push(truncateToWidth(theme.fg("dim", `${pad}${widgetPwd}`), width, theme.fg("dim", "…")));
+
+        // Token stats from current unit session + cumulative cost from metrics
         {
           const cmdCtx = accessors.getCmdCtx();
           let totalInput = 0, totalOutput = 0;
@@ -479,6 +461,7 @@ export function updateProgressWidget(
           if (totalOutput) sp.push(`↓${formatWidgetTokens(totalOutput)}`);
           if (totalCacheRead) sp.push(`R${formatWidgetTokens(totalCacheRead)}`);
           if (totalCacheWrite) sp.push(`W${formatWidgetTokens(totalCacheWrite)}`);
+          // Cache hit rate for current unit
           if (totalCacheRead + totalInput > 0) {
             const hitRate = Math.round((totalCacheRead / (totalCacheRead + totalInput)) * 100);
             sp.push(`\u26A1${hitRate}%`);
@@ -497,134 +480,33 @@ export function updateProgressWidget(
             sp.push(cxDisplay);
           }
 
-          const tokenLine = sp.map(p => p.includes("\x1b[") ? p : theme.fg("dim", p))
+          const sLeft = sp.map(p => p.includes("\x1b[") ? p : theme.fg("dim", p))
             .join(theme.fg("dim", " "));
-          leftLines.push(truncateToWidth(`${pad}${tokenLine}`, leftColWidth));
 
           const modelId = cmdCtx?.model?.id ?? "";
           const modelProvider = cmdCtx?.model?.provider ?? "";
+          const modelPhase = phaseLabel ? theme.fg("dim", `[${phaseLabel}] `) : "";
           const modelDisplay = modelProvider && modelId
             ? `${modelProvider}/${modelId}`
             : modelId;
-          if (modelDisplay) {
-            leftLines.push(truncateToWidth(`${pad}${theme.fg("dim", modelDisplay)}`, leftColWidth));
-          }
+          const sRight = modelDisplay
+            ? `${modelPhase}${theme.fg("dim", modelDisplay)}`
+            : "";
+          lines.push(rightAlign(`${pad}${sLeft}`, sRight, width));
 
-          // Dynamic routing savings
+          // Dynamic routing savings summary
           if (mLedger && mLedger.units.some(u => u.tier)) {
             const savings = formatTierSavings(mLedger.units);
             if (savings) {
-              leftLines.push(truncateToWidth(`${pad}${theme.fg("dim", savings)}`, leftColWidth));
+              lines.push(truncateToWidth(theme.fg("dim", `${pad}${savings}`), width));
             }
           }
         }
 
-        // Build right column: task checklist (pegged to right edge)
-        const rightLines: string[] = [];
-        const taskDetails = roadmapSlices?.taskDetails ?? null;
-        const maxVisibleTasks = 8;
-        const rpad = " ";
-
-        if (useTwoCol) {
-          if (taskDetails && taskDetails.length > 0) {
-            const visibleTasks = taskDetails.slice(0, maxVisibleTasks);
-            for (const t of visibleTasks) {
-              const isCurrent = task && t.id === task.id;
-              const glyph = t.done
-                ? theme.fg("success", GLYPH.statusDone)
-                : isCurrent
-                  ? theme.fg("accent", "▸")
-                  : theme.fg("dim", " ");
-              const label = isCurrent
-                ? theme.fg("text", `${t.id}: ${t.title}`)
-                : t.done
-                  ? theme.fg("dim", `${t.id}: ${t.title}`)
-                  : theme.fg("text", `${t.id}: ${t.title}`);
-              rightLines.push(truncateToWidth(`${rpad}${glyph} ${label}`, rightColWidth));
-            }
-            if (taskDetails.length > maxVisibleTasks) {
-              rightLines.push(truncateToWidth(
-                `${rpad}${theme.fg("dim", `  …+${taskDetails.length - maxVisibleTasks} more`)}`,
-                rightColWidth,
-              ));
-            }
-          } else if (roadmapSlices?.activeSliceTasks) {
-            const { done: tDone, total: tTotal } = roadmapSlices.activeSliceTasks;
-            rightLines.push(`${rpad}${theme.fg("dim", `${tDone}/${tTotal} tasks`)}`);
-          }
-        } else {
-          // Narrow single-column: task list goes into left column
-          if (taskDetails && taskDetails.length > 0) {
-            for (const t of taskDetails.slice(0, maxVisibleTasks)) {
-              const isCurrent = task && t.id === task.id;
-              const glyph = t.done
-                ? theme.fg("success", GLYPH.statusDone)
-                : isCurrent
-                  ? theme.fg("accent", "▸")
-                  : theme.fg("dim", " ");
-              const label = isCurrent
-                ? theme.fg("text", `${t.id}: ${t.title}`)
-                : t.done
-                  ? theme.fg("dim", `${t.id}: ${t.title}`)
-                  : theme.fg("text", `${t.id}: ${t.title}`);
-              leftLines.push(truncateToWidth(`${pad}${glyph} ${label}`, leftColWidth));
-            }
-          }
-          // Add progress bar inline
-          if (roadmapSlices) {
-            const { done, total, activeSliceTasks } = roadmapSlices;
-            const barWidth = Math.max(6, Math.min(18, Math.floor(leftColWidth * 0.4)));
-            const pct = total > 0 ? done / total : 0;
-            const filled = Math.round(pct * barWidth);
-            const bar = theme.fg("success", "█".repeat(filled))
-              + theme.fg("dim", "░".repeat(barWidth - filled));
-            let meta = theme.fg("dim", `${done}/${total} slices`);
-            if (activeSliceTasks && activeSliceTasks.total > 0) {
-              const taskNum = isHook
-                ? Math.max(activeSliceTasks.done, 1)
-                : Math.min(activeSliceTasks.done + 1, activeSliceTasks.total);
-              meta += theme.fg("dim", ` · task ${taskNum}/${activeSliceTasks.total}`);
-            }
-            const eta = estimateTimeRemaining();
-            if (eta) meta += theme.fg("dim", ` · ${eta}`);
-            leftLines.push(truncateToWidth(`${pad}${bar} ${meta}`, leftColWidth));
-          }
-          if (next) {
-            leftLines.push(truncateToWidth(
-              `${pad}${theme.fg("dim", "→")} ${theme.fg("dim", `then ${next}`)}`,
-              leftColWidth,
-            ));
-          }
-        }
-
-        // Compose columns
-        if (useTwoCol) {
-          const maxRows = Math.max(leftLines.length, rightLines.length);
-          if (maxRows > 0) {
-            lines.push(""); // spacer before columns
-            for (let i = 0; i < maxRows; i++) {
-              const left = padToWidth(leftLines[i] ?? "", leftColWidth);
-              const gap = " ".repeat(colGap - 2); // colGap minus divider and its trailing space
-              const right = rightLines[i] ?? "";
-              lines.push(truncateToWidth(`${left}${gap}${divider} ${right}`, width));
-            }
-          }
-        } else {
-          // Narrow single-column: just stack
-          if (leftLines.length > 0) {
-            lines.push("");
-            for (const l of leftLines) lines.push(l);
-          }
-        }
-
-        // ── Footer: pwd + hints ─────────────────────────────────────────
-        lines.push("");
         const hintParts: string[] = [];
         hintParts.push("esc pause");
         hintParts.push(process.platform === "darwin" ? "⌃⌥G dashboard" : "Ctrl+Alt+G dashboard");
-        const hintStr = theme.fg("dim", hintParts.join(" | "));
-        const pwdStr = theme.fg("dim", widgetPwd);
-        lines.push(rightAlign(`${pad}${pwdStr}`, hintStr, width));
+        lines.push(...ui.hints(hintParts));
 
         lines.push(...ui.bar());
 
@@ -741,11 +623,4 @@ function rightAlign(left: string, right: string, width: number): string {
   const rightVis = visibleWidth(right);
   const gap = Math.max(1, width - leftVis - rightVis);
   return truncateToWidth(left + " ".repeat(gap) + right, width);
-}
-
-/** Pad a string with trailing spaces to fill exactly `colWidth` (ANSI-aware). */
-function padToWidth(s: string, colWidth: number): string {
-  const vis = visibleWidth(s);
-  if (vis >= colWidth) return truncateToWidth(s, colWidth);
-  return s + " ".repeat(colWidth - vis);
 }

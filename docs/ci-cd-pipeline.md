@@ -71,10 +71,13 @@ docker run --rm -v $(pwd):/workspace ghcr.io/gsd-build/gsd-pi:latest --version
 
 The pipeline only triggers after `ci.yml` passes. Key gating tests include:
 
-- **Unit tests** (`npm run test:unit`) — includes `auto-session-encapsulation.test.ts` which enforces that all auto-mode state is encapsulated in `AutoSession`. Any PR adding module-level mutable state to `auto.ts` will fail CI and block the pipeline.
+- **Unit tests** (`npm run test:unit`) — includes `auto-session-encapsulation.test.ts` which enforces that all auto-mode state is encapsulated in `AutoSession`, plus dispatch loop regression tests that exercise the full `deriveState → resolveDispatch → idempotency` chain without an LLM. Any PR adding module-level mutable state to `auto.ts` will fail CI and block the pipeline.
 - **Integration tests** (`npm run test:integration`)
 - **Extension typecheck** (`npm run typecheck:extensions`)
 - **Package validation** (`npm run validate-pack`)
+- **Smoke tests** (`npm run test:smoke`) — run post-build in the pipeline against the local binary and again against the globally-installed `@dev` package
+- **Fixture tests** (`npm run test:fixtures`) — replay recorded LLM conversations without hitting real APIs
+- **Live regression tests** (`npm run test:live-regression`) — run against the installed binary in the Test stage to catch runtime regressions before promotion to `@next`
 
 ### Approving a Prod Release
 
@@ -119,8 +122,8 @@ For `@dev` or `@next` rollbacks, the next successful merge will overwrite the ta
 
 | Image | Base | Purpose | Tags |
 |-------|------|---------|------|
-| `ghcr.io/gsd-build/gsd-ci-builder` | `node:22-bookworm` | CI build environment with Rust toolchain | `:latest`, `:<date>` |
-| `ghcr.io/gsd-build/gsd-pi` | `node:22-slim` | User-facing runtime | `:latest`, `:next`, `:v<version>` |
+| `ghcr.io/gsd-build/gsd-ci-builder` | `node:24-bookworm` | CI build environment with Rust toolchain | `:latest`, `:<date>` |
+| `ghcr.io/gsd-build/gsd-pi` | `node:24-slim` | User-facing runtime | `:latest`, `:next`, `:v<version>` |
 
 The CI builder image is rebuilt automatically when the `Dockerfile` changes. It eliminates ~3-5 min of toolchain setup per CI run.
 

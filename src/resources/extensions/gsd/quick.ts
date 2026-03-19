@@ -14,8 +14,8 @@ import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadPrompt } from "./prompt-loader.js";
 import { gsdRoot } from "./paths.js";
-import { GitServiceImpl, runGit } from "./git-service.js";
-import { loadEffectiveGSDPreferences } from "./preferences.js";
+import { createGitService, runGit } from "./git-service.js";
+import { getErrorMessage } from "./error-utils.js";
 
 // ─── Quick Task Helpers ───────────────────────────────────────────────────────
 
@@ -103,16 +103,16 @@ export async function handleQuick(
   const date = new Date().toISOString().split("T")[0];
 
   // Create git branch for the quick task (unless isolation: none)
-  const gitPrefs = loadEffectiveGSDPreferences()?.preferences?.git ?? {};
-  const git = new GitServiceImpl(basePath, gitPrefs);
+  const git = createGitService(basePath);
   const branchName = `gsd/quick/${taskNum}-${slug}`;
-  const skipBranch = gitPrefs.isolation === "none";
+  const skipBranch = git.prefs.isolation === "none";
 
   let branchCreated = false;
+  let originalBranch: string | undefined;
   if (!skipBranch) {
     try {
-      const current = git.getCurrentBranch();
-      if (current !== branchName) {
+      originalBranch = git.getCurrentBranch();
+      if (originalBranch !== branchName) {
         // Auto-commit any dirty state before switching
         try {
           git.autoCommit("quick-task", `Q${taskNum}`, []);
@@ -123,7 +123,7 @@ export async function handleQuick(
       }
     } catch (err) {
       // Branch creation failed — continue on current branch
-      const message = err instanceof Error ? err.message : String(err);
+      const message = getErrorMessage(err);
       ctx.ui.notify(`Could not create branch ${branchName}: ${message}. Working on current branch.`, "warning");
     }
   }
@@ -156,4 +156,57 @@ export async function handleQuick(
     },
     { triggerTurn: true },
   );
+
+  // Schedule branch merge-back after the quick task agent session ends.
+  // Without this, auto-mode resumes on the quick-task branch (#1269).
+  if (branchCreated && originalBranch) {
+    _pendingQuickBranchReturn = {
+      basePath,
+      originalBranch,
+      quickBranch: branchName,
+      taskNum,
+      slug,
+      description,
+    };
+  }
+}
+
+/** Pending quick-task branch return — consumed by cleanupQuickBranch(). */
+let _pendingQuickBranchReturn: {
+  basePath: string;
+  originalBranch: string;
+  quickBranch: string;
+  taskNum: number;
+  slug: string;
+  description: string;
+} | null = null;
+
+/**
+ * Merge the quick-task branch back to the original branch and switch.
+ * Called from the agent_end handler after a quick task completes.
+ * Returns true if a branch return was performed.
+ */
+export function cleanupQuickBranch(): boolean {
+  if (!_pendingQuickBranchReturn) return false;
+  const { basePath, originalBranch, quickBranch, taskNum, slug, description } = _pendingQuickBranchReturn;
+  _pendingQuickBranchReturn = null;
+
+  try {
+    // Auto-commit any remaining work
+    try { runGit(basePath, ["add", "-A"]); } catch {}
+    try { runGit(basePath, ["commit", "-m", `quick(Q${taskNum}): ${slug}`]); } catch {}
+
+    // Switch back and merge
+    runGit(basePath, ["checkout", originalBranch]);
+    try {
+      runGit(basePath, ["merge", "--squash", quickBranch]);
+      runGit(basePath, ["commit", "-m", `quick(Q${taskNum}): ${description.slice(0, 72)}`]);
+    } catch { /* merge conflict or nothing — non-fatal */ }
+
+    // Clean up quick branch
+    try { runGit(basePath, ["branch", "-D", quickBranch]); } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }

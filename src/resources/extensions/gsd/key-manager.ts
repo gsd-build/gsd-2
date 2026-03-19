@@ -16,6 +16,7 @@ import { getEnvApiKey } from "@gsd/pi-ai";
 import { existsSync, statSync, chmodSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { mkdirSync } from "node:fs";
+import { getErrorMessage } from "./error-utils.js";
 
 // ─── Provider Registry ─────────────────────────────────────────────────────────
 
@@ -552,7 +553,7 @@ export async function testProviderKey(
     return { provider, status: "error", message: `HTTP ${res.status}`, latencyMs };
   } catch (err) {
     const latencyMs = Date.now() - start;
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = getErrorMessage(err);
     if (msg.includes("timeout") || msg.includes("AbortError")) {
       return { provider, status: "error", message: "timeout (15s)", latencyMs };
     }

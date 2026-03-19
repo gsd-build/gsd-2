@@ -18,6 +18,7 @@ import {
   writeBlockerPlaceholder,
 } from "./auto-recovery.js";
 import { existsSync } from "node:fs";
+import { parseUnitId } from "./unit-id.js";
 
 export interface RecoveryContext {
   basePath: string;
@@ -128,7 +129,7 @@ export async function recoverTimedOutUnit(
 
     // Retries exhausted — write missing durable artifacts and advance.
     const diagnostic = formatExecuteTaskRecoveryStatus(status);
-    const [mid, sid, tid] = unitId.split("/");
+    const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
     const skipped = mid && sid && tid
       ? skipExecuteTask(basePath, mid, sid, tid, status, reason, maxRecoveryAttempts)
       : false;

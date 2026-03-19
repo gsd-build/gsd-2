@@ -20,6 +20,7 @@ import { closeoutUnit, type CloseoutOptions } from "./auto-unit-closeout.js";
 import { saveActivityLog } from "./activity-log.js";
 import { recoverTimedOutUnit, type RecoveryContext } from "./auto-timeout-recovery.js";
 import type { AutoSession } from "./auto/session.js";
+import { getErrorMessage } from "./error-utils.js";
 
 export interface SupervisionContext {
   s: AutoSession;
@@ -127,7 +128,7 @@ export function startUnitSupervision(sctx: SupervisionContext): void {
       );
       await pauseAuto(ctx, pi);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = getErrorMessage(err);
       console.error(`[idle-watchdog] Unhandled error: ${message}`);
       try {
         ctx.ui.notify(`Idle watchdog error: ${message}`, "warning");
@@ -159,7 +160,7 @@ export function startUnitSupervision(sctx: SupervisionContext): void {
       );
       await pauseAuto(ctx, pi);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = getErrorMessage(err);
       console.error(`[hard-timeout] Unhandled error: ${message}`);
       try {
         ctx.ui.notify(`Hard timeout error: ${message}`, "warning");

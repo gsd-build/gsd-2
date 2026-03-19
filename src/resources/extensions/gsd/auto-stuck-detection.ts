@@ -39,6 +39,7 @@ import {
 import type { AutoSession } from "./auto/session.js";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseUnitId } from "./unit-id.js";
 
 export interface StuckContext {
   s: AutoSession;
@@ -99,7 +100,7 @@ export async function checkStuckAndRecover(sctx: StuckContext): Promise<StuckRes
 
     // Final reconciliation pass for execute-task
     if (unitType === "execute-task") {
-      const [mid, sid, tid] = unitId.split("/");
+      const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
       if (mid && sid && tid) {
         const status = await inspectExecuteTaskDurability(basePath, unitId);
         if (status) {
@@ -168,7 +169,7 @@ export async function checkStuckAndRecover(sctx: StuckContext): Promise<StuckRes
     // Adaptive self-repair: each retry attempts a different remediation step.
     if (unitType === "execute-task") {
       const status = await inspectExecuteTaskDurability(basePath, unitId);
-      const [mid, sid, tid] = unitId.split("/");
+      const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
       if (status && mid && sid && tid) {
         if (status.summaryExists && !status.taskChecked) {
           const repaired = skipExecuteTask(basePath, mid, sid, tid, status, "self-repair", 0);

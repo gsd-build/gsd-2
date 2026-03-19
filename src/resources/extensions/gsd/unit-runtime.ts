@@ -9,6 +9,7 @@ import {
 } from "./paths.js";
 import { loadFile, parseTaskPlanMustHaves, countMustHavesMentionedInSummary } from "./files.js";
 import { loadJsonFileOrNull, saveJsonFile } from "./json-persistence.js";
+import { parseUnitId } from "./unit-id.js";
 
 export type UnitRuntimePhase =
   | "dispatched"
@@ -131,7 +132,7 @@ export async function inspectExecuteTaskDurability(
   basePath: string,
   unitId: string,
 ): Promise<ExecuteTaskRecoveryStatus | null> {
-  const [mid, sid, tid] = unitId.split("/");
+  const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
   if (!mid || !sid || !tid) return null;
 
   const planAbs = resolveSliceFile(basePath, mid, sid, "PLAN");

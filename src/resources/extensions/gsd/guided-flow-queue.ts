@@ -23,17 +23,6 @@ import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { loadQueueOrder, sortByQueueOrder, saveQueueOrder } from "./queue-order.js";
 import { findMilestoneIds, nextMilestoneId } from "./milestone-ids.js";
 
-// ─── Commit Instruction Helper (local copy — avoids circular dep) ───────────
-
-/** Build conditional commit instruction for queue prompts based on commit_docs preference. */
-function buildDocsCommitInstruction(message: string): string {
-  const prefs = loadEffectiveGSDPreferences();
-  const commitDocsEnabled = prefs?.preferences?.git?.commit_docs !== false;
-  return commitDocsEnabled
-    ? `Commit: \`${message}\`. Stage only the .gsd/milestones/, .gsd/PROJECT.md, .gsd/REQUIREMENTS.md, .gsd/DECISIONS.md, and .gitignore files you changed — do not stage .gsd/STATE.md or other runtime files.`
-    : "Do not commit — planning docs are not tracked in git for this project.";
-}
-
 // ─── Queue Entry Point ──────────────────────────────────────────────────────
 
 /**
@@ -211,7 +200,7 @@ export async function showQueueAdd(
     preamble,
     existingMilestonesContext: existingContext,
     inlinedTemplates: queueInlinedTemplates,
-    commitInstruction: buildDocsCommitInstruction("docs: queue <milestone list>"),
+    commitInstruction: "Do not commit planning artifacts — .gsd/ is managed externally.",
   });
 
   pi.sendMessage(

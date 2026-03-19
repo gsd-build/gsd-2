@@ -82,7 +82,12 @@ models:
 
 **Symptoms:** Auto mode won't start, says another session is running.
 
-**Fix:** If no other session is actually running, delete `.gsd/auto.lock` manually. GSD includes stale lock detection (checks if the PID is still alive), but edge cases exist.
+**Fix:** GSD automatically detects stale locks — if the owning PID is dead, the lock is cleaned up and re-acquired on the next `/gsd auto`. This includes stranded `.gsd.lock/` directories left by `proper-lockfile` after crashes. If automatic recovery fails, delete `.gsd/auto.lock` and the `.gsd.lock/` directory manually:
+
+```bash
+rm -f .gsd/auto.lock
+rm -rf "$(dirname .gsd)/.gsd.lock"
+```
 
 ### Git merge conflicts
 

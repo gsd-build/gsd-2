@@ -5,6 +5,7 @@ import { readdirSync } from "node:fs";
 import { resolveMilestoneFile, milestonesDir } from "./paths.js";
 import { parseRoadmapSlices } from "./roadmap-slices.js";
 import { findMilestoneIds } from "./guided-flow.js";
+import { parseUnitId } from "./unit-id.js";
 
 const SLICE_DISPATCH_TYPES = new Set([
   "research-slice",
@@ -39,7 +40,7 @@ function readRoadmapFromDisk(base: string, milestoneId: string): string | null {
 export function getPriorSliceCompletionBlocker(base: string, _mainBranch: string, unitType: string, unitId: string): string | null {
   if (!SLICE_DISPATCH_TYPES.has(unitType)) return null;
 
-  const [targetMid, targetSid] = unitId.split("/");
+  const { milestone: targetMid, slice: targetSid } = parseUnitId(unitId);
   if (!targetMid || !targetSid) return null;
 
   // Use findMilestoneIds to respect custom queue order.

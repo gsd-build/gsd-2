@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gsdRoot } from "./paths.js";
 import { GIT_NO_PROMPT_ENV } from "./git-constants.js";
+import { loadEffectiveGSDPreferences } from "./preferences.js";
 
 import {
   detectWorktreeName,
@@ -32,6 +33,7 @@ import {
   nativeAddPaths,
 } from "./native-git-bridge.js";
 import { GSDError, GSD_MERGE_CONFLICT, GSD_GIT_ERROR } from "./errors.js";
+import { getErrorMessage } from "./error-utils.js";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -50,11 +52,6 @@ export interface GitPreferences {
    *  - "none": no git isolation — commits land on the user's current branch directly
    */
   isolation?: "worktree" | "branch" | "none";
-  /** When false, prevents GSD from committing .gsd/ planning artifacts to git.
-   *  The .gsd/ folder is added to .gitignore and kept local-only.
-   *  Default: true (planning docs are tracked in git).
-   */
-  commit_docs?: boolean;
   /** When false, GSD will not modify .gitignore at all — no baseline patterns
    *  are added and no self-healing occurs. Use this if you manage your own
    *  .gitignore and don't want GSD touching it.
@@ -226,7 +223,7 @@ export function readIntegrationBranch(basePath: string, milestoneId: string): st
  *
  * The file is committed immediately so the metadata is persisted in git.
  */
-export function writeIntegrationBranch(basePath: string, milestoneId: string, branch: string, options?: { commitDocs?: boolean }): void {
+export function writeIntegrationBranch(basePath: string, milestoneId: string, branch: string): void {
   // Don't record slice branches as the integration target
   if (SLICE_BRANCH_RE.test(branch)) return;
   // Validate
@@ -250,18 +247,7 @@ export function writeIntegrationBranch(basePath: string, milestoneId: string, br
 
   existing.integrationBranch = branch;
   writeFileSync(metaFile, JSON.stringify(existing, null, 2) + "\n", "utf-8");
-
-  // Commit immediately so the metadata is persisted in git.
-  // Skip when commit_docs is explicitly false — .gsd/ is local-only.
-  if (options?.commitDocs !== false) {
-    try {
-      nativeAddPaths(basePath, [metaFile]);
-      nativeCommit(basePath, `chore(${milestoneId}): record integration branch`, { allowEmpty: false });
-    } catch {
-      // Non-fatal — file is on disk even if commit fails (e.g. nothing to commit
-      // because the file was already tracked with identical content)
-    }
-  }
+  // .gsd/ is managed externally (symlinked) — metadata is not committed to git.
 }
 
 // ─── Git Helper ────────────────────────────────────────────────────────────
@@ -296,7 +282,7 @@ export function runGit(basePath: string, args: string[], options: { allowFailure
     }).trim();
   } catch (error) {
     if (options.allowFailure) return "";
-    const message = error instanceof Error ? error.message : String(error);
+    const message = getErrorMessage(error);
     throw new GSDError(GSD_GIT_ERROR, `git ${args.join(" ")} failed in ${basePath}: ${filterGitSvnNoise(message)}`);
   }
 }
@@ -350,15 +336,17 @@ export class GitServiceImpl {
    * @param extraExclusions Additional pathspec exclusions beyond RUNTIME_EXCLUSION_PATHS.
    */
   private smartStage(extraExclusions: readonly string[] = []): void {
-    // When commit_docs is false, exclude the entire .gsd/ directory from staging
-    const commitDocsDisabled = this.prefs.commit_docs === false;
-    const gsdExclusion = commitDocsDisabled ? [".gsd/"] : [];
-    const allExclusions = [...RUNTIME_EXCLUSION_PATHS, ...gsdExclusion, ...extraExclusions];
-
     // One-time cleanup: if runtime files are already tracked in the index
     // (from older versions where the fallback bug staged them), untrack them
     // in a dedicated commit. This must happen as a separate commit because
     // the git reset HEAD step below would otherwise undo the rm --cached.
+    //
+    // SAFETY: Only untrack the specific RUNTIME paths (activity/, runtime/,
+    // auto.lock, etc.) — NOT all of .gsd/. If .gsd/milestones/ files were
+    // previously tracked, they stay tracked until the milestone completes
+    // and the worktree is torn down. This prevents a mid-execution behavioral
+    // discontinuity where the first half of a milestone has .gsd/ artifacts
+    // committed but the second half doesn't (#1326).
     if (!this._runtimeFilesCleanedUp) {
       let cleaned = false;
       for (const exclusion of RUNTIME_EXCLUSION_PATHS) {
@@ -373,17 +361,19 @@ export class GitServiceImpl {
 
     // Stage everything, then unstage excluded paths.
     //
-    // Previous approach used pathspec excludes (:(exclude)...) with git add -A,
-    // but that fails when .gsd/ is in .gitignore — git exits non-zero before
-    // evaluating the excludes. The catch fallback ran plain `git add -A`,
-    // staging all tracked runtime files unconditionally and defeating the
-    // exclusion list entirely.
+    // Exclude only RUNTIME paths from staging — not the entire .gsd/ directory.
+    // When .gsd/milestones/ files are already tracked in the index (projects
+    // where .gsd/ is not gitignored, or Windows junctions that git sees as
+    // real directories), they should continue to be committed. Excluding the
+    // entire .gsd/ directory mid-milestone causes silent commit failure where
+    // the second half of a milestone's artifacts are never committed (#1326).
     //
-    // git reset HEAD silently succeeds when the path isn't staged, so no
-    // error handling is needed per-path.
+    // If .gsd/ IS in .gitignore (the default for external state projects),
+    // git add -A already skips it and the reset is a harmless no-op.
     nativeAddAll(this.basePath);
 
-    for (const exclusion of allExclusions) {
+    const runtimeExclusions = [...RUNTIME_EXCLUSION_PATHS, ...extraExclusions];
+    for (const exclusion of runtimeExclusions) {
       try { nativeResetPaths(this.basePath, [exclusion]); } catch { /* path not staged — ignore */ }
     }
   }
@@ -550,13 +540,21 @@ export class GitServiceImpl {
       execSync(command, { cwd: this.basePath, stdio: "pipe", encoding: "utf-8" });
       return { passed: true, skipped: false, command };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = getErrorMessage(err);
       return { passed: false, skipped: false, command, error: msg };
     }
   }
 
   // ─── Merge ─────────────────────────────────────────────────────────────
 
+}
+
+// ─── Factory ───────────────────────────────────────────────────────────────
+
+/** Create a GitServiceImpl with the current effective git preferences. */
+export function createGitService(basePath: string): GitServiceImpl {
+  const gitPrefs = loadEffectiveGSDPreferences()?.preferences?.git ?? {};
+  return new GitServiceImpl(basePath, gitPrefs);
 }
 
 // ─── Commit Type Inference ─────────────────────────────────────────────────

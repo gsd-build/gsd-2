@@ -1,16 +1,17 @@
 /**
- * Auto-mode Supervisor — SIGTERM handling and working-tree activity detection.
+ * Auto-mode Supervisor — signal handling and working-tree activity detection.
  *
  * Pure functions — no module-level globals or AutoContext dependency.
  */
 
 import { clearLock } from "./crash-recovery.js";
+import { releaseSessionLock } from "./session-lock.js";
 import { nativeHasChanges } from "./native-git-bridge.js";
 
-// ─── SIGTERM Handling ─────────────────────────────────────────────────────────
+// ─── Signal Handling ──────────────────────────────────────────────────────────
 
 /**
- * Register a SIGTERM handler that clears the lock file and exits cleanly.
+ * Register SIGTERM and SIGINT handlers that clear lock files and exit cleanly.
  * Captures the active base path at registration time so the handler
  * always references the correct path even if the module variable changes.
  * Removes any previously registered handler before installing the new one.
@@ -21,19 +22,25 @@ export function registerSigtermHandler(
   currentBasePath: string,
   previousHandler: (() => void) | null,
 ): () => void {
-  if (previousHandler) process.off("SIGTERM", previousHandler);
+  if (previousHandler) {
+    process.off("SIGTERM", previousHandler);
+    process.off("SIGINT", previousHandler);
+  }
   const handler = () => {
+    releaseSessionLock(currentBasePath);
     clearLock(currentBasePath);
     process.exit(0);
   };
   process.on("SIGTERM", handler);
+  process.on("SIGINT", handler);
   return handler;
 }
 
-/** Deregister the SIGTERM handler (called on stop/pause). */
+/** Deregister signal handlers (called on stop/pause). */
 export function deregisterSigtermHandler(handler: (() => void) | null): void {
   if (handler) {
     process.off("SIGTERM", handler);
+    process.off("SIGINT", handler);
   }
 }
 

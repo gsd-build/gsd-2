@@ -79,15 +79,14 @@ const BASELINE_PATTERNS = [
 ];
 
 /**
- * Ensure basePath/.gitignore contains all baseline patterns.
- * Creates the file if missing; appends only missing lines if it exists.
+ * Ensure basePath/.gitignore contains a blanket `.gsd/` ignore.
+ * Creates the file if missing; appends `.gsd/` if not present.
  * Returns true if the file was created or modified, false if already complete.
  *
- * When `commitDocs` is false, the entire `.gsd/` directory is added to
- * .gitignore instead of individual runtime patterns, keeping all GSD
- * artifacts local-only.
+ * `.gsd/` state is managed externally (symlinked to `~/.gsd/projects/<hash>/`),
+ * so the entire directory is always gitignored.
  */
-export function ensureGitignore(basePath: string, options?: { commitDocs?: boolean; manageGitignore?: boolean }): boolean {
+export function ensureGitignore(basePath: string, options?: { manageGitignore?: boolean }): boolean {
   // If manage_gitignore is explicitly false, do not touch .gitignore at all
   if (options?.manageGitignore === false) return false;
 
@@ -192,7 +191,7 @@ See \`~/.gsd/agent/extensions/gsd/docs/preferences-reference.md\` for full field
 - \`models\`: Model preferences for specific task types
 - \`skill_discovery\`: Automatic skill detection preferences
 - \`auto_supervisor\`: Supervision and gating rules for autonomous modes
-- \`git\`: Git preferences — \`main_branch\` (default branch name for new repos, e.g., "main", "master", "trunk"), \`auto_push\`, \`snapshots\`, \`commit_docs\` (set to \`false\` to keep .gsd/ local-only), etc.
+- \`git\`: Git preferences — \`main_branch\` (default branch name for new repos, e.g., "main", "master", "trunk"), \`auto_push\`, \`snapshots\`, etc.
 
 ## Examples
 

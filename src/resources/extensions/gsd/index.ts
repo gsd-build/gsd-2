@@ -64,6 +64,7 @@ import { pauseAutoForProviderError, classifyProviderError } from "./provider-err
 import { toPosixPath } from "../shared/mod.js";
 import { isParallelActive, shutdownParallel } from "./parallel-orchestrator.js";
 import { DEFAULT_BASH_TIMEOUT_SECS } from "./constants.js";
+import { getErrorMessage } from "./error-utils.js";
 
 /**
  * Ensure the GSD database is available, auto-initializing if needed.
@@ -222,11 +223,22 @@ export default function (pi: ExtensionAPI) {
   // chance to persist state and pause instead of crashing (see issue #739).
   if (!process.listeners("uncaughtException").some(l => l.name === "_gsdEpipeGuard")) {
     const _gsdEpipeGuard = (err: Error): void => {
-      if ((err as NodeJS.ErrnoException).code === "EPIPE") {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "EPIPE") {
         // Pipe closed — nothing we can write; just exit cleanly
         process.exit(0);
       }
-      // Re-throw anything that isn't EPIPE so real crashes still surface
+      // ECOMPROMISED: proper-lockfile's update timer detected mtime drift (system
+      // sleep, heavy event loop stall, or filesystem precision mismatch on Node.js
+      // v25+). The onCompromised callback already set _lockCompromised = true, but
+      // due to a subtle interaction between the synchronous fs adapter and the
+      // setTimeout boundary, the error can still propagate here as an uncaught
+      // exception. Exit cleanly so the process.once("exit") handler removes the
+      // lock directory — allowing the next session to acquire cleanly (#1322).
+      if (code === "ECOMPROMISED") {
+        process.exit(1);
+      }
+      // Re-throw anything that isn't EPIPE or ECOMPROMISED so real crashes still surface
       throw err;
     };
     process.on("uncaughtException", _gsdEpipeGuard);
@@ -374,7 +386,7 @@ export default function (pi: ExtensionAPI) {
           details: { operation: "save_decision", id },
         };
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = getErrorMessage(err);
         process.stderr.write(`gsd-db: gsd_save_decision tool failed: ${msg}\n`);
         return {
           content: [{ type: "text" as const, text: `Error saving decision: ${msg}` }],
@@ -445,7 +457,7 @@ export default function (pi: ExtensionAPI) {
           details: { operation: "update_requirement", id: params.id },
         };
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = getErrorMessage(err);
         process.stderr.write(`gsd-db: gsd_update_requirement tool failed: ${msg}\n`);
         return {
           content: [{ type: "text" as const, text: `Error updating requirement: ${msg}` }],
@@ -525,7 +537,7 @@ export default function (pi: ExtensionAPI) {
           details: { operation: "save_summary", path: relativePath, artifact_type: params.artifact_type },
         };
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = getErrorMessage(err);
         process.stderr.write(`gsd-db: gsd_save_summary tool failed: ${msg}\n`);
         return {
           content: [{ type: "text" as const, text: `Error saving artifact: ${msg}` }],
@@ -574,7 +586,7 @@ export default function (pi: ExtensionAPI) {
           details: { operation: "generate_milestone_id", id: newId, existingCount: existingIds.length, reservedCount: reservedMilestoneIds.size, uniqueEnabled },
         };
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = getErrorMessage(err);
         return {
           content: [{ type: "text" as const, text: `Error generating milestone ID: ${msg}` }],
           isError: true,
@@ -606,6 +618,12 @@ export default function (pi: ExtensionAPI) {
 
     // Load tool API keys from auth.json into environment
     loadToolApiKeys();
+
+    // Always-on health widget — ambient system health signal below the editor
+    try {
+      const { initHealthWidget } = await import("./health-widget.js");
+      initHealthWidget(ctx);
+    } catch { /* non-fatal — widget is best-effort */ }
 
     // Notify remote questions status if configured
     try {
@@ -789,6 +807,12 @@ export default function (pi: ExtensionAPI) {
 
   // ── agent_end: auto-mode advancement or auto-start after discuss ───────────
   pi.on("agent_end", async (event, ctx: ExtensionContext) => {
+    // Clean up quick-task branch if one just completed (#1269)
+    try {
+      const { cleanupQuickBranch } = await import("./quick.js");
+      cleanupQuickBranch();
+    } catch { /* non-fatal */ }
+
     // If discuss phase just finished, start auto-mode
     if (checkAutoStartAfterDiscuss()) {
       depthVerifiedMilestones.clear();
@@ -981,7 +1005,7 @@ export default function (pi: ExtensionAPI) {
     } catch (err) {
       // Safety net: if handleAgentEnd throws despite its internal try-catch,
       // ensure auto-mode stops gracefully instead of silently stalling (#381).
-      const message = err instanceof Error ? err.message : String(err);
+      const message = getErrorMessage(err);
       ctx.ui.notify(
         `Auto-mode error in agent_end handler: ${message}. Stopping auto-mode.`,
         "error",
@@ -1045,6 +1069,19 @@ export default function (pi: ExtensionAPI) {
     if (isParallelActive()) {
       try {
         await shutdownParallel(process.cwd());
+      } catch { /* best-effort */ }
+    }
+
+    // Auto-commit dirty work in CLI-spawned worktrees so nothing is lost.
+    // The CLI sets GSD_CLI_WORKTREE when launched with -w.
+    const cliWorktree = process.env.GSD_CLI_WORKTREE;
+    if (cliWorktree) {
+      try {
+        const { autoCommitCurrentBranch } = await import("./worktree.js");
+        const msg = autoCommitCurrentBranch(process.cwd(), "session-end", cliWorktree);
+        if (msg) {
+          ctx.ui.notify(`Auto-committed worktree ${cliWorktree} before exit.`, "info");
+        }
       } catch { /* best-effort */ }
     }
 

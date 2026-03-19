@@ -1086,83 +1086,64 @@ async function main(): Promise<void> {
     rmSync(repo, { recursive: true, force: true });
   }
 
-  // ─── commit_docs: false — smartStage excludes .gsd/ ──────────────────
+  // ─── smartStage excludes runtime files but allows milestone artifacts ──
 
-  console.log("\n=== commit_docs: false — smartStage excludes .gsd/ ===");
+  console.log("\n=== smartStage excludes runtime files, allows milestone artifacts ===");
 
   {
-    const repo = mkdtempSync(join(tmpdir(), "gsd-commit-docs-"));
+    const repo = mkdtempSync(join(tmpdir(), "gsd-smart-stage-excludes-"));
     run("git init -b main", repo);
     run("git config user.email test@test.com", repo);
     run("git config user.name Test", repo);
     writeFileSync(join(repo, "README.md"), "init");
     run("git add -A && git commit -m init", repo);
 
-    // Create .gsd/ planning files + a normal source file
+    // Create .gsd/ runtime files + milestone artifacts + a normal source file
     mkdirSync(join(repo, ".gsd", "milestones", "M001"), { recursive: true });
+    mkdirSync(join(repo, ".gsd", "runtime"), { recursive: true });
+    mkdirSync(join(repo, ".gsd", "activity"), { recursive: true });
     writeFileSync(join(repo, ".gsd", "milestones", "M001", "ROADMAP.md"), "# Roadmap");
     writeFileSync(join(repo, ".gsd", "preferences.md"), "---\nversion: 1\n---");
+    writeFileSync(join(repo, ".gsd", "STATE.md"), "# State");
+    writeFileSync(join(repo, ".gsd", "runtime", "units.json"), "{}");
+    writeFileSync(join(repo, ".gsd", "activity", "log.jsonl"), "{}");
     writeFileSync(join(repo, "src.ts"), "const x = 1;");
 
-    // With commit_docs: false, smartStage should exclude .gsd/
-    const svc = new GitServiceImpl(repo, { commit_docs: false });
-    const msg = svc.commit({ message: "test commit" });
-    assertTrue(msg !== null, "commit_docs=false: commit succeeds with non-.gsd files");
-
-    // .gsd/ files should NOT be in the commit
-    const committed = run("git show --name-only HEAD", repo);
-    assertTrue(!committed.includes(".gsd/"), "commit_docs=false: .gsd/ files not in commit");
-    assertTrue(committed.includes("src.ts"), "commit_docs=false: source files ARE in commit");
-
-    rmSync(repo, { recursive: true, force: true });
-  }
-
-  // ─── commit_docs: true (default) — smartStage includes .gsd/ ────────
-
-  console.log("\n=== commit_docs: true — smartStage includes .gsd/ ===");
-
-  {
-    const repo = mkdtempSync(join(tmpdir(), "gsd-commit-docs-default-"));
-    run("git init -b main", repo);
-    run("git config user.email test@test.com", repo);
-    run("git config user.name Test", repo);
-    writeFileSync(join(repo, "README.md"), "init");
-    run("git add -A && git commit -m init", repo);
-
-    mkdirSync(join(repo, ".gsd", "milestones", "M001"), { recursive: true });
-    writeFileSync(join(repo, ".gsd", "milestones", "M001", "ROADMAP.md"), "# Roadmap");
-    writeFileSync(join(repo, "src.ts"), "const x = 1;");
-
-    // Default behavior (commit_docs not set) — .gsd/ files ARE committed
+    // smartStage excludes only runtime paths, not all of .gsd/ (#1326)
     const svc = new GitServiceImpl(repo);
     const msg = svc.commit({ message: "test commit" });
-    assertTrue(msg !== null, "commit_docs=default: commit succeeds");
+    assertTrue(msg !== null, "smartStage: commit succeeds");
 
     const committed = run("git show --name-only HEAD", repo);
-    assertTrue(committed.includes(".gsd/"), "commit_docs=default: .gsd/ files ARE in commit");
-    assertTrue(committed.includes("src.ts"), "commit_docs=default: source files in commit");
+    assertTrue(committed.includes("src.ts"), "smartStage: source files ARE in commit");
+    // Runtime files should NOT be committed
+    assertTrue(!committed.includes(".gsd/STATE.md"), "smartStage: STATE.md excluded (runtime)");
+    assertTrue(!committed.includes(".gsd/runtime/"), "smartStage: runtime/ excluded");
+    assertTrue(!committed.includes(".gsd/activity/"), "smartStage: activity/ excluded");
+    // Milestone artifacts SHOULD be committed when not gitignored (#1326)
+    assertTrue(committed.includes(".gsd/milestones/"), "smartStage: milestone artifacts ARE committed");
 
     rmSync(repo, { recursive: true, force: true });
   }
 
-  // ─── writeIntegrationBranch: commitDocs false skips commit ──────────
+  // ─── writeIntegrationBranch: no commit (metadata in external storage) ──
 
-  console.log("\n=== writeIntegrationBranch: commitDocs false skips commit ===");
+  console.log("\n=== writeIntegrationBranch: no commit ===");
 
   {
     const repo = initBranchTestRepo();
     const commitsBefore = run("git rev-list --count HEAD", repo);
 
-    writeIntegrationBranch(repo, "M001", "f-123-new-thing", { commitDocs: false });
+    writeIntegrationBranch(repo, "M001", "f-123-new-thing");
 
     // File should still be written to disk
     assertEq(readIntegrationBranch(repo, "M001"), "f-123-new-thing",
-      "commitDocs=false: metadata file exists on disk");
+      "writeIntegrationBranch: metadata file exists on disk");
 
-    // But no new commit should have been created
+    // No commit — .gsd/ is managed externally
     const commitsAfter = run("git rev-list --count HEAD", repo);
     assertEq(commitsBefore, commitsAfter,
-      "commitDocs=false: no git commit created for integration branch");
+      "writeIntegrationBranch: no git commit created for integration branch");
 
     rmSync(repo, { recursive: true, force: true });
   }

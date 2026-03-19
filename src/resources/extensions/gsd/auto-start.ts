@@ -37,8 +37,8 @@ import {
 } from "./session-lock.js";
 import { selfHealRuntimeRecords } from "./auto-recovery.js";
 import { ensureGitignore, untrackRuntimeFiles } from "./gitignore.js";
-import { nativeIsRepo, nativeInit, nativeAddAll, nativeCommit } from "./native-git-bridge.js";
-import { GitServiceImpl } from "./git-service.js";
+import { nativeIsRepo, nativeInit } from "./native-git-bridge.js";
+import { createGitService } from "./git-service.js";
 import {
   captureIntegrationBranch,
   detectWorktreeName,
@@ -63,6 +63,8 @@ import { debugLog, enableDebug, isDebugEnabled, getDebugLogPath } from "./debug-
 import type { AutoSession } from "./auto/session.js";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { getErrorMessage } from "./error-utils.js";
+import { parseUnitId } from "./unit-id.js";
 
 export interface BootstrapDeps {
   shouldUseWorktreeIsolation: () => boolean;
@@ -109,9 +111,8 @@ export async function bootstrapAutoSession(
 
   // Ensure .gitignore has baseline patterns
   const gitPrefs = loadEffectiveGSDPreferences()?.preferences?.git;
-  const commitDocs = gitPrefs?.commit_docs;
   const manageGitignore = gitPrefs?.manage_gitignore;
-  ensureGitignore(base, { commitDocs, manageGitignore });
+  ensureGitignore(base, { manageGitignore });
   if (manageGitignore !== false) untrackRuntimeFiles(base);
 
   // Migrate legacy in-project .gsd/ to external state directory
@@ -127,23 +128,19 @@ export async function bootstrapAutoSession(
   const gsdDir = gsdRoot(base);
   if (!existsSync(gsdDir)) {
     mkdirSync(join(gsdDir, "milestones"), { recursive: true });
-    if (commitDocs !== false) {
-      try {
-        nativeAddAll(base);
-        nativeCommit(base, "chore: init gsd");
-      } catch { /* nothing to commit */ }
-    }
   }
 
   // Initialize GitServiceImpl
-  s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
+  s.gitService = createGitService(s.basePath);
 
-  // Check for crash from previous session (use both old and new lock data)
+  // Check for crash from previous session (use both old and new lock data).
+  // Skip if the lock PID matches this process — acquireSessionLock() writes
+  // to the same auto.lock file before this check, so we'd always false-positive.
   const crashLock = readCrashLock(base);
-  if (crashLock) {
+  if (crashLock && crashLock.pid !== process.pid) {
     // We already hold the session lock, so no concurrent session is running.
     // The crash lock is from a dead process — recover context from it.
-    const recoveredMid = crashLock.unitId.split("/")[0];
+    const recoveredMid = parseUnitId(crashLock.unitId).milestone;
     const milestoneAlreadyComplete = recoveredMid
       ? !!resolveMilestoneFile(base, recoveredMid, "SUMMARY")
       : false;
@@ -206,11 +203,11 @@ export async function bootstrapAutoSession(
         if (!midMatch) continue;
         const mid = midMatch[1];
         if (resolveMilestoneFile(base, mid, "SUMMARY")) {
-          try { unlinkSync(join(runtimeUnitsDir, file)); } catch (e) { debugLog("stale-unit-cleanup-failed", { file, error: e instanceof Error ? e.message : String(e) }); }
+          try { unlinkSync(join(runtimeUnitsDir, file)); } catch (e) { debugLog("stale-unit-cleanup-failed", { file, error: getErrorMessage(e) }); }
         }
       }
     }
-  } catch (e) { debugLog("stale-unit-dir-cleanup-failed", { error: e instanceof Error ? e.message : String(e) }); }
+  } catch (e) { debugLog("stale-unit-dir-cleanup-failed", { error: getErrorMessage(e) }); }
 
   let state = await deriveState(base);
 
@@ -323,7 +320,7 @@ export async function bootstrapAutoSession(
   // Capture integration branch
   if (s.currentMilestoneId) {
     if (getIsolationMode() !== "none") {
-      captureIntegrationBranch(base, s.currentMilestoneId, { commitDocs });
+      captureIntegrationBranch(base, s.currentMilestoneId);
     }
     setActiveMilestoneId(base, s.currentMilestoneId);
   }
@@ -337,18 +334,18 @@ export async function bootstrapAutoSession(
       if (existingWtPath) {
         const wtPath = enterAutoWorktree(base, s.currentMilestoneId);
         s.basePath = wtPath;
-        s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
+        s.gitService = createGitService(s.basePath);
         ctx.ui.notify(`Entered auto-worktree at ${wtPath}`, "info");
       } else {
         const wtPath = createAutoWorktree(base, s.currentMilestoneId);
         s.basePath = wtPath;
-        s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
+        s.gitService = createGitService(s.basePath);
         ctx.ui.notify(`Created auto-worktree at ${wtPath}`, "info");
       }
       registerSigtermHandler(s.originalBasePath);
     } catch (err) {
       ctx.ui.notify(
-        `Auto-worktree setup failed: ${err instanceof Error ? err.message : String(err)}. Continuing in project root.`,
+        `Auto-worktree setup failed: ${getErrorMessage(err)}. Continuing in project root.`,
         "warning",
       );
     }
@@ -440,7 +437,7 @@ export async function bootstrapAutoSession(
     }
   } catch (err) {
     ctx.ui.notify(
-      `Secrets check error: ${err instanceof Error ? err.message : String(err)}. Continuing without secrets.`,
+      `Secrets check error: ${getErrorMessage(err)}. Continuing without secrets.`,
       "warning",
     );
   }
@@ -458,7 +455,7 @@ export async function bootstrapAutoSession(
         ctx.ui.notify("Removed stale .git/index.lock from prior crash.", "info");
       }
     }
-  } catch (e) { debugLog("git-lock-cleanup-failed", { error: e instanceof Error ? e.message : String(e) }); }
+  } catch (e) { debugLog("git-lock-cleanup-failed", { error: getErrorMessage(e) }); }
 
   // Pre-flight: validate milestone queue
   try {

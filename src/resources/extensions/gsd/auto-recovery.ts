@@ -42,6 +42,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "
 import { atomicWriteSync } from "./atomic-write.js";
 import { loadJsonFileOrNull } from "./json-persistence.js";
 import { dirname, join } from "node:path";
+import { parseUnitId } from "./unit-id.js";
 
 // ─── Artifact Resolution & Verification ───────────────────────────────────────
 
@@ -49,9 +50,7 @@ import { dirname, join } from "node:path";
  * Resolve the expected artifact for a unit to an absolute path.
  */
 export function resolveExpectedArtifactPath(unitType: string, unitId: string, base: string): string | null {
-  const parts = unitId.split("/");
-  const mid = parts[0]!;
-  const sid = parts[1];
+  const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
   switch (unitType) {
     case "research-milestone": {
       const dir = resolveMilestonePath(base, mid);
@@ -78,7 +77,6 @@ export function resolveExpectedArtifactPath(unitType: string, unitId: string, ba
       return dir ? join(dir, buildSliceFileName(sid!, "UAT-RESULT")) : null;
     }
     case "execute-task": {
-      const tid = parts[2];
       const dir = resolveSlicePath(base, mid, sid!);
       return dir && tid ? join(dir, "tasks", buildTaskFileName(tid, "SUMMARY")) : null;
     }
@@ -167,10 +165,7 @@ export function verifyExpectedArtifact(unitType: string, unitId: string, base: s
 
   // execute-task must also have its checkbox marked [x] in the slice plan
   if (unitType === "execute-task") {
-    const parts = unitId.split("/");
-    const mid = parts[0];
-    const sid = parts[1];
-    const tid = parts[2];
+    const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
     if (mid && sid && tid) {
       const planAbs = resolveSliceFile(base, mid, sid, "PLAN");
       if (planAbs && existsSync(planAbs)) {
@@ -187,9 +182,7 @@ export function verifyExpectedArtifact(unitType: string, unitId: string, base: s
   // but omitted T{tid}-PLAN.md files would be marked complete, causing execute-task
   // to dispatch with a missing task plan (see issue #739).
   if (unitType === "plan-slice") {
-    const parts = unitId.split("/");
-    const mid = parts[0];
-    const sid = parts[1];
+    const { milestone: mid, slice: sid } = parseUnitId(unitId);
     if (mid && sid) {
       try {
         const planContent = readFileSync(absPath, "utf-8");
@@ -213,9 +206,8 @@ export function verifyExpectedArtifact(unitType: string, unitId: string, base: s
   // state machine keeps returning the same complete-slice unit (roadmap still shows
   // the slice incomplete), so dispatchNextUnit recurses forever.
   if (unitType === "complete-slice") {
-    const parts = unitId.split("/");
-    const mid = parts[0];
-    const sid = parts[1];
+    const { milestone: mid, slice: sid } = parseUnitId(unitId);
+
     if (mid && sid) {
       const dir = resolveSlicePath(base, mid, sid);
       if (dir) {
@@ -268,9 +260,7 @@ export function writeBlockerPlaceholder(unitType: string, unitId: string, base: 
 }
 
 export function diagnoseExpectedArtifact(unitType: string, unitId: string, base: string): string | null {
-  const parts = unitId.split("/");
-  const mid = parts[0];
-  const sid = parts[1];
+  const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
   switch (unitType) {
     case "research-milestone":
       return `${relMilestoneFile(base, mid!, "RESEARCH")} (milestone research)`;
@@ -281,7 +271,6 @@ export function diagnoseExpectedArtifact(unitType: string, unitId: string, base:
     case "plan-slice":
       return `${relSliceFile(base, mid!, sid!, "PLAN")} (slice plan)`;
     case "execute-task": {
-      const tid = parts[2];
       return `Task ${tid} marked [x] in ${relSliceFile(base, mid!, sid!, "PLAN")} + summary written`;
     }
     case "complete-slice":
@@ -539,10 +528,7 @@ export async function selfHealRuntimeRecords(
  * These are shown when automatic reconciliation is not possible.
  */
 export function buildLoopRemediationSteps(unitType: string, unitId: string, base: string): string | null {
-  const parts = unitId.split("/");
-  const mid = parts[0];
-  const sid = parts[1];
-  const tid = parts[2];
+  const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
   switch (unitType) {
     case "execute-task": {
       if (!mid || !sid || !tid) break;

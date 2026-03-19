@@ -38,6 +38,7 @@ import {
   analyzeParallelEligibility,
   type ParallelCandidates,
 } from "./parallel-eligibility.js";
+import { getErrorMessage } from "./error-utils.js";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -363,7 +364,7 @@ export async function startParallel(
 
       started.push(mid);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = getErrorMessage(err);
       errors.push({ mid, error: message });
     }
   }

@@ -5,6 +5,7 @@
  */
 
 import type { ExtensionCommandContext } from "@gsd/pi-coding-agent";
+import { getErrorMessage } from "./error-utils.js";
 
 export interface InspectData {
   schemaVersion: number | null;
@@ -84,7 +85,7 @@ export async function handleInspect(ctx: ExtensionCommandContext): Promise<void>
 
     ctx.ui.notify(formatInspectOutput(data), "info");
   } catch (err) {
-    process.stderr.write(`gsd-db: /gsd inspect failed: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(`gsd-db: /gsd inspect failed: ${getErrorMessage(err)}\n`);
     ctx.ui.notify("Failed to inspect GSD database. Check stderr for details.", "error");
   }
 }

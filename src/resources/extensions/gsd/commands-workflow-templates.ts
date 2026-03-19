@@ -19,9 +19,9 @@ import {
 } from "./workflow-templates.js";
 import { loadPrompt } from "./prompt-loader.js";
 import { gsdRoot } from "./paths.js";
-import { GitServiceImpl, runGit } from "./git-service.js";
-import { loadEffectiveGSDPreferences } from "./preferences.js";
+import { createGitService, runGit } from "./git-service.js";
 import { isAutoActive, isAutoPaused } from "./auto.js";
+import { getErrorMessage } from "./error-utils.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -423,9 +423,8 @@ export async function handleStart(
 
   // ─── Create git branch (unless isolation: none) ─────────────────────────
 
-  const gitPrefs = loadEffectiveGSDPreferences()?.preferences?.git ?? {};
-  const git = new GitServiceImpl(basePath, gitPrefs);
-  const skipBranch = gitPrefs.isolation === "none";
+  const git = createGitService(basePath);
+  const skipBranch = git.prefs.isolation === "none";
   const slug = slugify(description || templateId);
   const branchName = `gsd/${templateId}/${slug}`;
   let branchCreated = false;
@@ -441,7 +440,7 @@ export async function handleStart(
         branchCreated = true;
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = getErrorMessage(err);
       ctx.ui.notify(
         `Could not create branch ${branchName}: ${message}. Working on current branch.`,
         "warning",

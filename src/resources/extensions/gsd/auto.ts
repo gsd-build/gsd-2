@@ -105,6 +105,7 @@ import { computeBudgets, resolveExecutorContextWindow } from "./context-budget.j
 import { GSDError, GSD_ARTIFACT_MISSING } from "./errors.js";
 import { join } from "node:path";
 import { sep as pathSep } from "node:path";
+import { parseUnitId } from "./unit-id.js";
 import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync, unlinkSync, statSync } from "node:fs";
 import { atomicWriteSync } from "./atomic-write.js";
 import { nativeIsRepo, nativeInit, nativeAddAll, nativeCommit } from "./native-git-bridge.js";
@@ -118,7 +119,7 @@ import {
   parseSliceBranch,
   setActiveMilestoneId,
 } from "./worktree.js";
-import { GitServiceImpl, type TaskCommitContext } from "./git-service.js";
+import { createGitService, type TaskCommitContext } from "./git-service.js";
 import { getPriorSliceCompletionBlocker } from "./dispatch-guard.js";
 import { formatGitError } from "./git-self-heal.js";
 import {
@@ -189,6 +190,7 @@ import {
   NEW_SESSION_TIMEOUT_MS, DISPATCH_HANG_TIMEOUT_MS,
 } from "./auto/session.js";
 import type { CompletedUnit, CurrentUnit, UnitRouting, StartModel, PendingVerificationRetry } from "./auto/session.js";
+import { getErrorMessage } from "./error-utils.js";
 
 // ── ENCAPSULATION INVARIANT ─────────────────────────────────────────────────
 // ALL mutable auto-mode state lives in the AutoSession class (auto/session.ts).
@@ -204,8 +206,7 @@ import type { CompletedUnit, CurrentUnit, UnitRouting, StartModel, PendingVerifi
 // ─────────────────────────────────────────────────────────────────────────────
 const s = new AutoSession();
 
-/** Throttle STATE.md rebuilds — at most once per 30 seconds */
-const STATE_REBUILD_MIN_INTERVAL_MS = 30_000;
+import { STATE_REBUILD_MIN_INTERVAL_MS } from "./auto-constants.js";
 
 export function shouldUseWorktreeIsolation(): boolean {
   const prefs = loadEffectiveGSDPreferences()?.preferences?.git;
@@ -214,52 +215,7 @@ export function shouldUseWorktreeIsolation(): boolean {
   return true; // default: worktree
 }
 
-/** Crash recovery prompt — set by startAuto, consumed by first dispatchNextUnit */
-
-/** Pending verification retry — set when gate fails with retries remaining, consumed by dispatchNextUnit */
-
-/** Verification retry count per unitId — separate from s.unitDispatchCount which tracks artifact-missing retries */
-
-/** Session file path captured at pause — used to synthesize recovery briefing on resume */
-
-/** Dashboard tracking */
-
-/** Track dynamic routing decision for the current unit (for metrics) */
-
-/** Queue of quick-task captures awaiting dispatch after triage resolution */
-
-/**
- * Model captured at auto-mode start. Used to prevent model bleed between
- * concurrent GSD instances sharing the same global settings.json (#650).
- * When preferences don't specify a model for a unit type, this ensures
- * the session's original model is re-applied instead of reading from
- * the shared global settings (which another instance may have overwritten).
- */
-
-/** Track current milestone to detect transitions */
-
-/** Model the user had selected before auto-mode started */
-
-/** Progress-aware timeout supervision */
-
-/** Context-pressure continue-here monitor — fires once when context usage >= 70% */
-
-/** Dispatch gap watchdog — detects when the state machine stalls between units.
- *  After handleAgentEnd completes, if auto-mode is still active but no new unit
- *  has been dispatched (sendMessage not called), this timer fires to force a
- *  re-evaluation. Covers the case where dispatchNextUnit silently fails or
- *  an unhandled error kills the dispatch chain. */
-
-/** Prompt character measurement for token savings analysis (R051). */
-
-/** SIGTERM handler registered while auto-mode is active — cleared on stop/pause. */
-
-/**
- * Tool calls currently being executed — prevents false idle detection during long-running tools.
- * Maps toolCallId → start timestamp (ms) so the idle watchdog can detect tools that have been
- * running suspiciously long (e.g., a Bash command hung because `&` kept stdout open).
- */
-
+// All mutable state lives in AutoSession (auto/session.ts) — see encapsulation invariant above.
 /** Wrapper: register SIGTERM handler and store reference. */
 function registerSigtermHandler(currentBasePath: string): void {
   s.sigtermHandler = _registerSigtermHandler(currentBasePath, s.sigtermHandler);
@@ -405,6 +361,79 @@ function buildSnapshotOpts(unitType: string, unitId: string): { continueHereFire
   };
 }
 
+// ─── Extracted Merge Helper ───────────────────────────────────────────────
+
+/**
+ * Attempt to merge the current milestone branch to main.
+ * Handles both worktree and branch isolation modes with a single code path.
+ * Returns true if merge succeeded, false on error (non-fatal, logged).
+ *
+ * Extracted from 4 duplicate merge blocks in dispatchNextUnit to eliminate
+ * the bug factory where fixing one copy didn't fix the others (#1308).
+ */
+function tryMergeMilestone(ctx: ExtensionContext, milestoneId: string, mode: "transition" | "complete"): boolean {
+  const isolationMode = getIsolationMode();
+
+  // Worktree merge path
+  if (isInAutoWorktree(s.basePath) && s.originalBasePath) {
+    try {
+      const roadmapPath = resolveMilestoneFile(s.originalBasePath, milestoneId, "ROADMAP");
+      if (!roadmapPath) {
+        teardownAutoWorktree(s.originalBasePath, milestoneId);
+        ctx.ui.notify(`Exited worktree for ${milestoneId} (no roadmap for merge).`, "info");
+        return false;
+      }
+      const roadmapContent = readFileSync(roadmapPath, "utf-8");
+      const mergeResult = mergeMilestoneToMain(s.originalBasePath, milestoneId, roadmapContent);
+      s.basePath = s.originalBasePath;
+      s.gitService = createGitService(s.basePath);
+      ctx.ui.notify(
+        `Milestone ${milestoneId} merged to main.${mergeResult.pushed ? " Pushed to remote." : ""}`,
+        "info",
+      );
+      return true;
+    } catch (err) {
+      ctx.ui.notify(
+        `Milestone merge failed: ${err instanceof Error ? err.message : String(err)}`,
+        "warning",
+      );
+      if (s.originalBasePath) {
+        s.basePath = s.originalBasePath;
+        try { process.chdir(s.basePath); } catch { /* best-effort */ }
+      }
+      return false;
+    }
+  }
+
+  // Branch-mode merge path
+  if (isolationMode === "branch") {
+    try {
+      const currentBranch = getCurrentBranch(s.basePath);
+      const milestoneBranch = autoWorktreeBranch(milestoneId);
+      if (currentBranch === milestoneBranch) {
+        const roadmapPath = resolveMilestoneFile(s.basePath, milestoneId, "ROADMAP");
+        if (roadmapPath) {
+          const roadmapContent = readFileSync(roadmapPath, "utf-8");
+          const mergeResult = mergeMilestoneToMain(s.basePath, milestoneId, roadmapContent);
+          s.gitService = createGitService(s.basePath);
+          ctx.ui.notify(
+            `Milestone ${milestoneId} merged (branch mode).${mergeResult.pushed ? " Pushed to remote." : ""}`,
+            "info",
+          );
+          return true;
+        }
+      }
+    } catch (err) {
+      ctx.ui.notify(
+        `Milestone merge failed (branch mode): ${err instanceof Error ? err.message : String(err)}`,
+        "warning",
+      );
+    }
+  }
+
+  return false;
+}
+
 /**
  * Start a watchdog that fires if no new unit is dispatched within DISPATCH_GAP_TIMEOUT_MS
  * after handleAgentEnd completes. This catches the case where the dispatch chain silently
@@ -429,7 +458,7 @@ function startDispatchGapWatchdog(ctx: ExtensionContext, pi: ExtensionAPI): void
     try {
       await dispatchNextUnit(ctx, pi);
     } catch (retryErr) {
-      const message = retryErr instanceof Error ? retryErr.message : String(retryErr);
+      const message = getErrorMessage(retryErr);
       await stopAuto(ctx, pi, `Dispatch gap recovery failed: ${message}`);
       return;
     }
@@ -459,14 +488,14 @@ export async function stopAuto(ctx?: ExtensionContext, pi?: ExtensionAPI, reason
   // ── Auto-worktree: exit worktree and reset s.basePath on stop ──
   if (s.currentMilestoneId && isInAutoWorktree(s.basePath)) {
     try {
-      try { autoCommitCurrentBranch(s.basePath, "stop", s.currentMilestoneId); } catch (e) { debugLog("stop-auto-commit-failed", { error: e instanceof Error ? e.message : String(e) }); }
+      try { autoCommitCurrentBranch(s.basePath, "stop", s.currentMilestoneId); } catch (e) { debugLog("stop-auto-commit-failed", { error: getErrorMessage(e) }); }
       teardownAutoWorktree(s.originalBasePath, s.currentMilestoneId, { preserveBranch: true });
       s.basePath = s.originalBasePath;
-      s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
+      s.gitService = createGitService(s.basePath);
       ctx?.ui.notify("Exited auto-worktree (branch preserved for resume).", "info");
     } catch (err) {
       ctx?.ui.notify(
-        `Auto-worktree teardown failed: ${err instanceof Error ? err.message : String(err)}`,
+        `Auto-worktree teardown failed: ${getErrorMessage(err)}`,
         "warning",
       );
     }
@@ -477,7 +506,7 @@ export async function stopAuto(ctx?: ExtensionContext, pi?: ExtensionAPI, reason
     try {
       const { closeDatabase } = await import("./gsd-db.js");
       closeDatabase();
-    } catch (e) { debugLog("db-close-failed", { error: e instanceof Error ? e.message : String(e) }); }
+    } catch (e) { debugLog("db-close-failed", { error: getErrorMessage(e) }); }
   }
 
   if (s.originalBasePath) {
@@ -497,7 +526,7 @@ export async function stopAuto(ctx?: ExtensionContext, pi?: ExtensionAPI, reason
   }
 
   if (s.basePath) {
-    try { await rebuildState(s.basePath); } catch (e) { debugLog("stop-rebuild-state-failed", { error: e instanceof Error ? e.message : String(e) }); }
+    try { await rebuildState(s.basePath); } catch (e) { debugLog("stop-rebuild-state-failed", { error: getErrorMessage(e) }); }
   }
 
   if (isDebugEnabled()) {
@@ -626,17 +655,17 @@ export async function startAuto(
         if (existingWtPath) {
           const wtPath = enterAutoWorktree(s.originalBasePath, s.currentMilestoneId);
           s.basePath = wtPath;
-          s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
+          s.gitService = createGitService(s.basePath);
           ctx.ui.notify(`Re-entered auto-worktree at ${wtPath}`, "info");
         } else {
           const wtPath = createAutoWorktree(s.originalBasePath, s.currentMilestoneId);
           s.basePath = wtPath;
-          s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
+          s.gitService = createGitService(s.basePath);
           ctx.ui.notify(`Recreated auto-worktree at ${wtPath}`, "info");
         }
       } catch (err) {
         ctx.ui.notify(
-          `Auto-worktree re-entry failed: ${err instanceof Error ? err.message : String(err)}. Continuing at current path.`,
+          `Auto-worktree re-entry failed: ${getErrorMessage(err)}. Continuing at current path.`,
           "warning",
         );
       }
@@ -648,13 +677,13 @@ export async function startAuto(
     ctx.ui.setFooter(hideFooter);
     ctx.ui.notify(s.stepMode ? "Step-mode resumed." : "Auto-mode resumed.", "info");
     restoreHookState(s.basePath);
-    try { await rebuildState(s.basePath); } catch (e) { debugLog("resume-rebuild-state-failed", { error: e instanceof Error ? e.message : String(e) }); }
+    try { await rebuildState(s.basePath); } catch (e) { debugLog("resume-rebuild-state-failed", { error: getErrorMessage(e) }); }
     try {
       const report = await runGSDDoctor(s.basePath, { fix: true });
       if (report.fixesApplied.length > 0) {
         ctx.ui.notify(`Resume: applied ${report.fixesApplied.length} fix(es) to state.`, "info");
       }
-    } catch (e) { debugLog("resume-doctor-failed", { error: e instanceof Error ? e.message : String(e) }); }
+    } catch (e) { debugLog("resume-doctor-failed", { error: getErrorMessage(e) }); }
     await selfHealRuntimeRecords(s.basePath, ctx, s.completedKeySet);
     invalidateAllCaches();
 
@@ -701,7 +730,7 @@ export async function startAuto(
         }
       } catch (err) {
         ctx.ui.notify(
-          `Secrets check error: ${err instanceof Error ? err.message : String(err)}. Continuing without secrets.`,
+          `Secrets check error: ${getErrorMessage(err)}. Continuing without secrets.`,
           "warning",
         );
       }
@@ -808,7 +837,7 @@ export async function handleAgentEnd(
   try {
     await dispatchNextUnit(ctx, pi);
   } catch (dispatchErr) {
-    const message = dispatchErr instanceof Error ? dispatchErr.message : String(dispatchErr);
+    const message = getErrorMessage(dispatchErr);
     ctx.ui.notify(
       `Dispatch error after unit completion: ${message}. Retrying in ${DISPATCH_GAP_TIMEOUT_MS / 1000}s.`,
       "error",
@@ -834,9 +863,12 @@ export async function handleAgentEnd(
     // permanently stalled with no unit running and no watchdog set.
     if (s.pendingAgentEndRetry) {
       s.pendingAgentEndRetry = false;
+      // Clear gap watchdog from the previous cycle to prevent concurrent
+      // dispatch when the deferred handleAgentEnd calls dispatchNextUnit (#1272).
+      clearDispatchGapWatchdog();
       setImmediate(() => {
         handleAgentEnd(ctx, pi).catch((err) => {
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg = getErrorMessage(err);
           ctx.ui.notify(`Deferred agent_end retry failed: ${msg}`, "error");
           pauseAuto(ctx, pi).catch(() => {});
         });
@@ -976,8 +1008,12 @@ async function dispatchNextUnit(
     return;
   }
 
-  // Reentrancy guard
-  if (s.dispatching && s.skipDepth === 0) {
+  // Reentrancy guard — unconditional to prevent concurrent dispatch from
+  // gap watchdog or pendingAgentEndRetry during skip chains (#1272).
+  // Previously the guard was bypassed when skipDepth > 0, but the recursive
+  // skip chain's inner finally block resets s.dispatching = false before the
+  // outer call's finally runs, opening a window for concurrent entry.
+  if (s.dispatching) {
     debugLog("dispatchNextUnit reentrancy guard — another dispatch in progress, bailing");
     return;
   }
@@ -1080,7 +1116,7 @@ async function dispatchNextUnit(
         );
       } catch (err) {
         ctx.ui.notify(
-          `Report generation failed: ${err instanceof Error ? err.message : String(err)}`,
+          `Report generation failed: ${getErrorMessage(err)}`,
           "warning",
         );
       }
@@ -1096,35 +1132,17 @@ async function dispatchNextUnit(
         atomicWriteSync(file, JSON.stringify([]));
       }
       s.completedKeySet.clear();
-    } catch (e) { debugLog("completed-keys-reset-failed", { error: e instanceof Error ? e.message : String(e) }); }
+    } catch (e) { debugLog("completed-keys-reset-failed", { error: getErrorMessage(e) }); }
 
     // ── Worktree lifecycle on milestone transition (#616) ──
-    if (isInAutoWorktree(s.basePath) && s.originalBasePath && shouldUseWorktreeIsolation()) {
-      try {
-        const roadmapPath = resolveMilestoneFile(s.originalBasePath, s.currentMilestoneId, "ROADMAP");
-        if (roadmapPath) {
-          const roadmapContent = readFileSync(roadmapPath, "utf-8");
-          const mergeResult = mergeMilestoneToMain(s.originalBasePath, s.currentMilestoneId, roadmapContent);
-          ctx.ui.notify(
-            `Milestone ${ s.currentMilestoneId } merged to main.${mergeResult.pushed ? " Pushed to remote." : ""}`,
-            "info",
-          );
-        } else {
-          teardownAutoWorktree(s.originalBasePath, s.currentMilestoneId);
-          ctx.ui.notify(`Exited worktree for ${ s.currentMilestoneId } (no roadmap for merge).`, "info");
-        }
-      } catch (err) {
-        ctx.ui.notify(
-          `Milestone merge failed during transition: ${err instanceof Error ? err.message : String(err)}`,
-          "warning",
-        );
-        if (s.originalBasePath) {
-          try { process.chdir(s.originalBasePath); } catch { /* best-effort */ }
-        }
-      }
+    if ((isInAutoWorktree(s.basePath) || getIsolationMode() === "branch") && shouldUseWorktreeIsolation()) {
+      tryMergeMilestone(ctx, s.currentMilestoneId, "transition");
 
-      s.basePath = s.originalBasePath;
-      s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
+      // Reset to project root and re-derive state for the new milestone
+      if (s.originalBasePath) {
+        s.basePath = s.originalBasePath;
+        s.gitService = createGitService(s.basePath);
+      }
       invalidateAllCaches();
 
       state = await deriveState(s.basePath);
@@ -1132,22 +1150,22 @@ async function dispatchNextUnit(
       midTitle = state.activeMilestone?.title;
 
       if (mid) {
-        captureIntegrationBranch(s.basePath, mid, { commitDocs: loadEffectiveGSDPreferences()?.preferences?.git?.commit_docs });
+        captureIntegrationBranch(s.basePath, mid);
         try {
           const wtPath = createAutoWorktree(s.basePath, mid);
           s.basePath = wtPath;
-          s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
+          s.gitService = createGitService(s.basePath);
           ctx.ui.notify(`Created auto-worktree for ${mid} at ${wtPath}`, "info");
         } catch (err) {
           ctx.ui.notify(
-            `Auto-worktree creation for ${mid} failed: ${err instanceof Error ? err.message : String(err)}. Continuing in project root.`,
+            `Auto-worktree creation for ${mid} failed: ${getErrorMessage(err)}. Continuing in project root.`,
             "warning",
           );
         }
       }
     } else {
       if (getIsolationMode() !== "none") {
-        captureIntegrationBranch(s.originalBasePath || s.basePath, mid, { commitDocs: loadEffectiveGSDPreferences()?.preferences?.git?.commit_docs });
+        captureIntegrationBranch(s.originalBasePath || s.basePath, mid);
       }
     }
 
@@ -1169,51 +1187,8 @@ async function dispatchNextUnit(
     const incomplete = (state.registry ?? []).filter(m => m.status !== "complete" && m.status !== "parked");
     if (incomplete.length === 0) {
       // Genuinely all complete (parked milestones excluded) — merge milestone branch to main before stopping (#962)
-      if (s.currentMilestoneId && isInAutoWorktree(s.basePath) && s.originalBasePath) {
-        try {
-          const roadmapPath = resolveMilestoneFile(s.originalBasePath, s.currentMilestoneId, "ROADMAP");
-          if (roadmapPath) {
-            const roadmapContent = readFileSync(roadmapPath, "utf-8");
-            const mergeResult = mergeMilestoneToMain(s.originalBasePath, s.currentMilestoneId, roadmapContent);
-            s.basePath = s.originalBasePath;
-            s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
-            ctx.ui.notify(
-              `Milestone ${ s.currentMilestoneId } merged to main.${mergeResult.pushed ? " Pushed to remote." : ""}`,
-              "info",
-            );
-          }
-        } catch (err) {
-          ctx.ui.notify(
-            `Milestone merge failed: ${err instanceof Error ? err.message : String(err)}`,
-            "warning",
-          );
-          if (s.originalBasePath) {
-            s.basePath = s.originalBasePath;
-            try { process.chdir(s.basePath); } catch { /* best-effort */ }
-          }
-        }
-      } else if (s.currentMilestoneId && !isInAutoWorktree(s.basePath) && getIsolationMode() === "branch") {
-        try {
-          const currentBranch = getCurrentBranch(s.basePath);
-          const milestoneBranch = autoWorktreeBranch(s.currentMilestoneId);
-          if (currentBranch === milestoneBranch) {
-            const roadmapPath = resolveMilestoneFile(s.basePath, s.currentMilestoneId, "ROADMAP");
-            if (roadmapPath) {
-              const roadmapContent = readFileSync(roadmapPath, "utf-8");
-              const mergeResult = mergeMilestoneToMain(s.basePath, s.currentMilestoneId, roadmapContent);
-              s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
-              ctx.ui.notify(
-                `Milestone ${ s.currentMilestoneId } merged (branch mode).${mergeResult.pushed ? " Pushed to remote." : ""}`,
-                "info",
-              );
-            }
-          }
-        } catch (err) {
-          ctx.ui.notify(
-            `Milestone merge failed (branch mode): ${err instanceof Error ? err.message : String(err)}`,
-            "warning",
-          );
-        }
+      if (s.currentMilestoneId) {
+        tryMergeMilestone(ctx, s.currentMilestoneId, "complete");
       }
       sendDesktopNotification("GSD", "All milestones complete!", "success", "milestone");
       await stopAuto(ctx, pi, "All milestones complete");
@@ -1270,52 +1245,10 @@ async function dispatchNextUnit(
         atomicWriteSync(file, JSON.stringify([]));
       }
       s.completedKeySet.clear();
-    } catch (e) { debugLog("completed-keys-reset-failed", { error: e instanceof Error ? e.message : String(e) }); }
+    } catch (e) { debugLog("completed-keys-reset-failed", { error: getErrorMessage(e) }); }
     // ── Milestone merge ──
-    if (s.currentMilestoneId && isInAutoWorktree(s.basePath) && s.originalBasePath) {
-      try {
-        const roadmapPath = resolveMilestoneFile(s.originalBasePath, s.currentMilestoneId, "ROADMAP");
-        if (!roadmapPath) throw new GSDError(GSD_ARTIFACT_MISSING, `Cannot resolve ROADMAP file for milestone ${ s.currentMilestoneId }`);
-        const roadmapContent = readFileSync(roadmapPath, "utf-8");
-        const mergeResult = mergeMilestoneToMain(s.originalBasePath, s.currentMilestoneId, roadmapContent);
-        s.basePath = s.originalBasePath;
-        s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
-        ctx.ui.notify(
-          `Milestone ${ s.currentMilestoneId } merged to main.${mergeResult.pushed ? " Pushed to remote." : ""}`,
-          "info",
-        );
-      } catch (err) {
-        ctx.ui.notify(
-          `Milestone merge failed: ${err instanceof Error ? err.message : String(err)}`,
-          "warning",
-        );
-        if (s.originalBasePath) {
-          s.basePath = s.originalBasePath;
-          try { process.chdir(s.basePath); } catch { /* best-effort */ }
-        }
-      }
-    } else if (s.currentMilestoneId && !isInAutoWorktree(s.basePath) && getIsolationMode() === "branch") {
-      try {
-        const currentBranch = getCurrentBranch(s.basePath);
-        const milestoneBranch = autoWorktreeBranch(s.currentMilestoneId);
-        if (currentBranch === milestoneBranch) {
-          const roadmapPath = resolveMilestoneFile(s.basePath, s.currentMilestoneId, "ROADMAP");
-          if (roadmapPath) {
-            const roadmapContent = readFileSync(roadmapPath, "utf-8");
-            const mergeResult = mergeMilestoneToMain(s.basePath, s.currentMilestoneId, roadmapContent);
-            s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
-            ctx.ui.notify(
-              `Milestone ${ s.currentMilestoneId } merged (branch mode).${mergeResult.pushed ? " Pushed to remote." : ""}`,
-              "info",
-            );
-          }
-        }
-      } catch (err) {
-        ctx.ui.notify(
-          `Milestone merge failed (branch mode): ${err instanceof Error ? err.message : String(err)}`,
-          "warning",
-        );
-      }
+    if (s.currentMilestoneId) {
+      tryMergeMilestone(ctx, s.currentMilestoneId, "complete");
     }
     sendDesktopNotification("GSD", `Milestone ${mid} complete!`, "success", "milestone");
     await stopAuto(ctx, pi, `Milestone ${mid} complete`);
@@ -1411,7 +1344,7 @@ async function dispatchNextUnit(
       }
     } catch (err) {
       ctx.ui.notify(
-        `Secrets collection error: ${err instanceof Error ? err.message : String(err)}. Continuing with next task.`,
+        `Secrets collection error: ${getErrorMessage(err)}. Continuing with next task.`,
         "warning",
       );
     }
@@ -1449,15 +1382,18 @@ async function dispatchNextUnit(
   }
 
   if (dispatchResult.action !== "dispatch") {
-    await new Promise(r => setImmediate(r));
-    await dispatchNextUnit(ctx, pi);
+    // Defer re-dispatch to next microtask so s.dispatching is released first,
+    // preventing reentrancy guard bypass during concurrent entry (#1272).
+    setImmediate(() => dispatchNextUnit(ctx, pi).catch(err => {
+      ctx.ui.notify(`Deferred dispatch failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+      pauseAuto(ctx, pi).catch(() => {});
+    }));
     return;
   }
 
   unitType = dispatchResult.unitType;
   unitId = dispatchResult.unitId;
   prompt = dispatchResult.prompt;
-  let pauseAfterUatDispatch = dispatchResult.pauseAfterDispatch ?? false;
 
   // ── Pre-dispatch hooks ──
   const preDispatchResult = runPreDispatchHooks(unitType, unitId, prompt, s.basePath);
@@ -1469,8 +1405,10 @@ async function dispatchNextUnit(
   }
   if (preDispatchResult.action === "skip") {
     ctx.ui.notify(`Skipping ${unitType} ${unitId} (pre-dispatch hook).`, "info");
-    await new Promise(r => setImmediate(r));
-    await dispatchNextUnit(ctx, pi);
+    setImmediate(() => dispatchNextUnit(ctx, pi).catch(err => {
+      ctx.ui.notify(`Deferred dispatch failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+      pauseAuto(ctx, pi).catch(() => {});
+    }));
     return;
   }
   if (preDispatchResult.action === "replace") {
@@ -1501,9 +1439,16 @@ async function dispatchNextUnit(
     if (idempotencyResult.reason === "completed" || idempotencyResult.reason === "fallback-persisted" || idempotencyResult.reason === "phantom-loop-cleared" || idempotencyResult.reason === "evicted") {
       if (!s.active) return;
       s.skipDepth++;
-      await new Promise(r => setTimeout(r, idempotencyResult.reason === "phantom-loop-cleared" ? 50 : 150));
-      await dispatchNextUnit(ctx, pi);
-      s.skipDepth = Math.max(0, s.skipDepth - 1);
+      const skipDelay = idempotencyResult.reason === "phantom-loop-cleared" ? 50 : 150;
+      // Defer re-dispatch so s.dispatching is released first (#1272).
+      setTimeout(() => {
+        dispatchNextUnit(ctx, pi).catch(err => {
+          ctx.ui.notify(`Deferred skip-dispatch failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+          pauseAuto(ctx, pi).catch(() => {});
+        }).finally(() => {
+          s.skipDepth = Math.max(0, s.skipDepth - 1);
+        });
+      }, skipDelay);
       return;
     }
   } else if (idempotencyResult.action === "stop") {
@@ -1534,8 +1479,11 @@ async function dispatchNextUnit(
     return;
   }
   if (stuckResult.action === "recovered" && stuckResult.dispatchAgain) {
-    await new Promise(r => setImmediate(r));
-    await dispatchNextUnit(ctx, pi);
+    // Defer re-dispatch so s.dispatching is released first (#1272).
+    setImmediate(() => dispatchNextUnit(ctx, pi).catch(err => {
+      ctx.ui.notify(`Deferred recovery-dispatch failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+      pauseAuto(ctx, pi).catch(() => {});
+    }));
     return;
   }
 
@@ -1607,7 +1555,7 @@ async function dispatchNextUnit(
     );
     result = await Promise.race([sessionPromise, timeoutPromise]);
   } catch (sessionErr) {
-    const msg = sessionErr instanceof Error ? sessionErr.message : String(sessionErr);
+    const msg = getErrorMessage(sessionErr);
     ctx.ui.notify(`Session creation failed: ${msg}. Retrying via watchdog.`, "error");
     throw new Error(`newSession() failed: ${msg}`);
   }
@@ -1683,7 +1631,7 @@ async function dispatchNextUnit(
     const { reorderForCaching } = await import("./prompt-ordering.js");
     finalPrompt = reorderForCaching(finalPrompt);
   } catch (reorderErr) {
-    const msg = reorderErr instanceof Error ? reorderErr.message : String(reorderErr);
+    const msg = getErrorMessage(reorderErr);
     process.stderr.write(`[gsd] prompt reorder failed (non-fatal): ${msg}\n`);
   }
 
@@ -1712,13 +1660,6 @@ async function dispatchNextUnit(
     { triggerTurn: true },
   );
 
-  if (pauseAfterUatDispatch) {
-    ctx.ui.notify(
-      "UAT requires human execution. Auto-mode will pause after this unit writes the result file.",
-      "info",
-    );
-    await pauseAuto(ctx, pi);
-  }
   } finally {
     s.dispatching = false;
   }
@@ -1733,8 +1674,7 @@ async function dispatchNextUnit(
 function ensurePreconditions(
   unitType: string, unitId: string, base: string, state: GSDState,
 ): void {
-  const parts = unitId.split("/");
-  const mid = parts[0]!;
+  const { milestone: mid } = parseUnitId(unitId);
 
   const mDir = resolveMilestonePath(base, mid);
   if (!mDir) {
@@ -1742,8 +1682,8 @@ function ensurePreconditions(
     mkdirSync(join(newDir, "slices"), { recursive: true });
   }
 
-  if (parts.length >= 2) {
-    const sid = parts[1]!;
+  const sid = parseUnitId(unitId).slice;
+  if (sid) {
 
     const mDirResolved = resolveMilestonePath(base, mid);
     if (mDirResolved) {
@@ -1787,6 +1727,15 @@ export {
  */
 export function _getUnitConsecutiveSkips(): Map<string, number> { return s.unitConsecutiveSkips; }
 export function _resetUnitConsecutiveSkips(): void { s.unitConsecutiveSkips.clear(); }
+
+/**
+ * Test-only: expose dispatching / skipDepth state for reentrancy guard tests.
+ * Not part of the public API.
+ */
+export function _getDispatching(): boolean { return s.dispatching; }
+export function _setDispatching(v: boolean): void { s.dispatching = v; }
+export function _getSkipDepth(): number { return s.skipDepth; }
+export function _setSkipDepth(v: number): void { s.skipDepth = v; }
 
 /**
  * Dispatch a hook unit directly, bypassing normal pre-dispatch hooks.
@@ -1874,8 +1823,6 @@ export async function dispatchHookUnit(
   ctx.ui.setStatus("gsd-auto", s.stepMode ? "next" : "auto");
   ctx.ui.notify(`Running post-unit hook: ${hookName}`, "info");
 
-  console.log(`[dispatchHookUnit] Sending prompt of length ${hookPrompt.length}`);
-  console.log(`[dispatchHookUnit] Prompt preview: ${hookPrompt.substring(0, 200)}...`);
   pi.sendMessage(
     { customType: "gsd-auto", content: hookPrompt, display: true },
     { triggerTurn: true },

@@ -6,6 +6,8 @@
 //   (a)–(j)  extractUatType classification (17 assertions from T01)
 //   (k)      run-uat prompt template loading and content integrity (8 assertions)
 //   (l)      dispatch precondition assertions via resolveSliceFile (4 assertions)
+//   (m)      non-artifact UAT skip: human-experience UATs are not dispatched (1 assertion)
+//   (n)      stale replay guard: existing UAT-RESULT never re-dispatches (1 assertion)
 
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -14,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 import { extractUatType } from '../files.ts';
 import { resolveSliceFile } from '../paths.ts';
+import { checkNeedsRunUat } from '../auto-prompts.ts';
 import { createTestContext } from './test-helpers.ts';
 
 // ─── Worktree-aware prompt loader ──────────────────────────────────────────
@@ -252,8 +255,8 @@ async function main(): Promise<void> {
     'prompt contains artifact-driven execution language (artifact/execute/run)',
   );
   assertTrue(
-    /surfaced for human review/i.test(promptResult ?? ''),
-    'prompt contains "surfaced for human review" text for non-artifact-driven path',
+    !/surfaced for human review/i.test(promptResult ?? ''),
+    'prompt does not contain "surfaced for human review" (non-artifact UATs are skipped, not dispatched)',
   );
 
   // ─── (l) dispatch precondition assertions via resolveSliceFile ────────────
@@ -302,6 +305,102 @@ async function main(): Promise<void> {
       assertTrue(
         uatResultFilePath !== null,
         'resolveSliceFile(..., "UAT-RESULT") returns non-null when result file exists (idempotent skip state)',
+      );
+    } finally {
+      cleanup(base);
+    }
+  }
+
+  // ─── (m) non-artifact UATs are skipped (not dispatched) ─────────────────
+  console.log('\n── (m) non-artifact UAT skip');
+
+  {
+    const base = createFixtureBase();
+    try {
+      const roadmapDir = join(base, '.gsd', 'milestones', 'M001');
+      mkdirSync(roadmapDir, { recursive: true });
+      writeFileSync(
+        join(roadmapDir, 'M001-ROADMAP.md'),
+        [
+          '# M001: Test roadmap',
+          '',
+          '## Slices',
+          '',
+          '- [x] **S01: First slice** `risk:low` `depends:[]`',
+          '- [ ] **S02: Next slice** `risk:low` `depends:[S01]`',
+          '',
+          '## Boundary Map',
+          '',
+        ].join('\n'),
+      );
+
+      // human-experience UAT — should not dispatch
+      writeSliceFile(base, 'M001', 'S01', 'UAT', makeUatContent('human-experience'));
+
+      const state = {
+        activeMilestone: { id: 'M001', title: 'Test roadmap' },
+        activeSlice: { id: 'S02', title: 'Next slice' },
+        activeTask: null,
+        phase: 'planning',
+        recentDecisions: [],
+        blockers: [],
+        nextAction: 'Plan S02',
+        registry: [],
+      } as const;
+
+      const result = await checkNeedsRunUat(base, 'M001', state as any, { uat_dispatch: true } as any);
+      assertEq(
+        result,
+        null,
+        'human-experience UAT is skipped — auto-mode only dispatches artifact-driven UATs',
+      );
+    } finally {
+      cleanup(base);
+    }
+  }
+
+  // ─── (n) existing UAT-RESULT never re-dispatches ──────────────────────
+  console.log('\n── (n) stale replay guard');
+
+  {
+    const base = createFixtureBase();
+    try {
+      const roadmapDir = join(base, '.gsd', 'milestones', 'M001');
+      mkdirSync(roadmapDir, { recursive: true });
+      writeFileSync(
+        join(roadmapDir, 'M001-ROADMAP.md'),
+        [
+          '# M001: Test roadmap',
+          '',
+          '## Slices',
+          '',
+          '- [x] **S01: First slice** `risk:low` `depends:[]`',
+          '- [ ] **S02: Next slice** `risk:low` `depends:[S01]`',
+          '',
+          '## Boundary Map',
+          '',
+        ].join('\n'),
+      );
+
+      writeSliceFile(base, 'M001', 'S01', 'UAT', makeUatContent('artifact-driven'));
+      writeSliceFile(base, 'M001', 'S01', 'UAT-RESULT', '---\nverdict: FAIL\n---\n');
+
+      const state = {
+        activeMilestone: { id: 'M001', title: 'Test roadmap' },
+        activeSlice: { id: 'S02', title: 'Next slice' },
+        activeTask: null,
+        phase: 'planning',
+        recentDecisions: [],
+        blockers: [],
+        nextAction: 'Plan S02',
+        registry: [],
+      } as const;
+
+      const result = await checkNeedsRunUat(base, 'M001', state as any, { uat_dispatch: true } as any);
+      assertEq(
+        result,
+        null,
+        'existing UAT-RESULT with FAIL verdict does not re-dispatch; verdict gate owns blocking',
       );
     } finally {
       cleanup(base);

@@ -10,6 +10,7 @@ import { existsSync, readFileSync, unlinkSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { GSDError, GSD_GIT_ERROR } from "./errors.js";
 import { GIT_NO_PROMPT_ENV } from "./git-constants.js";
+import { getErrorMessage } from "./error-utils.js";
 
 // Issue #453: keep auto-mode bookkeeping on the stable git CLI path unless a
 // caller explicitly opts into the native helper.
@@ -716,7 +717,7 @@ export function nativeCommit(
     try {
       return native.gitCommit(basePath, message, options?.allowEmpty);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = getErrorMessage(e);
       if (msg.includes("nothing to commit")) return null;
       throw e;
     }

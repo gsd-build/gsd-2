@@ -18,6 +18,7 @@ import {
 import { resolveMilestoneFile } from "./paths.js";
 import { MAX_CONSECUTIVE_SKIPS, MAX_LIFETIME_DISPATCHES } from "./auto/session.js";
 import type { AutoSession } from "./auto/session.js";
+import { parseUnitId } from "./unit-id.js";
 
 export interface IdempotencyContext {
   s: AutoSession;
@@ -54,7 +55,7 @@ export function checkIdempotency(ictx: IdempotencyContext): IdempotencyResult {
       s.unitConsecutiveSkips.set(idempotencyKey, skipCount);
       if (skipCount > MAX_CONSECUTIVE_SKIPS) {
         // Cross-check: verify the unit's milestone is still active (#790)
-        const skippedMid = unitId.split("/")[0];
+        const skippedMid = parseUnitId(unitId).milestone;
         const skippedMilestoneComplete = skippedMid
           ? !!resolveMilestoneFile(basePath, skippedMid, "SUMMARY")
           : false;
@@ -110,7 +111,7 @@ export function checkIdempotency(ictx: IdempotencyContext): IdempotencyResult {
     const skipCount2 = (s.unitConsecutiveSkips.get(idempotencyKey) ?? 0) + 1;
     s.unitConsecutiveSkips.set(idempotencyKey, skipCount2);
     if (skipCount2 > MAX_CONSECUTIVE_SKIPS) {
-      const skippedMid2 = unitId.split("/")[0];
+      const skippedMid2 = parseUnitId(unitId).milestone;
       const skippedMilestoneComplete2 = skippedMid2
         ? !!resolveMilestoneFile(basePath, skippedMid2, "SUMMARY")
         : false;

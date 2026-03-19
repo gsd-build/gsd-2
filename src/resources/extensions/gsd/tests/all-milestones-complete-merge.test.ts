@@ -70,31 +70,34 @@ test("auto.ts 'all milestones complete' path merges before stopping (#962)", () 
   const incompleteIdx = autoSrc.indexOf("incomplete.length === 0");
   assert.ok(incompleteIdx > -1, "auto.ts should have 'incomplete.length === 0' check");
 
-  // The merge call must appear BETWEEN the incomplete check and the stopAuto call
-  // in that same block
+  // The merge call must appear BETWEEN the incomplete check and the stopAuto call.
+  // After the #1308 refactor, the merge is delegated to tryMergeMilestone.
   const blockAfterIncomplete = autoSrc.slice(incompleteIdx, incompleteIdx + 3000);
 
   assert.ok(
-    blockAfterIncomplete.includes("mergeMilestoneToMain"),
-    "auto.ts should call mergeMilestoneToMain in the 'all milestones complete' path",
+    blockAfterIncomplete.includes("tryMergeMilestone"),
+    "auto.ts should call tryMergeMilestone in the 'all milestones complete' path",
   );
 
   // The merge should come before stopAuto in this block
-  const mergePos = blockAfterIncomplete.indexOf("mergeMilestoneToMain");
+  const mergePos = blockAfterIncomplete.indexOf("tryMergeMilestone");
   const stopPos = blockAfterIncomplete.indexOf("stopAuto");
   assert.ok(
     mergePos < stopPos,
-    "mergeMilestoneToMain should be called before stopAuto in the 'all complete' path",
+    "tryMergeMilestone should be called before stopAuto in the 'all complete' path",
   );
 
-  // Should handle both worktree and branch isolation modes
+  // Verify tryMergeMilestone handles both worktree and branch isolation
+  const helperIdx = autoSrc.indexOf("function tryMergeMilestone");
+  assert.ok(helperIdx > -1, "tryMergeMilestone helper should exist");
+  const helperBlock = autoSrc.slice(helperIdx, helperIdx + 2000);
   assert.ok(
-    blockAfterIncomplete.includes("isInAutoWorktree"),
-    "should check isInAutoWorktree for worktree mode",
+    helperBlock.includes("isInAutoWorktree"),
+    "tryMergeMilestone should check isInAutoWorktree for worktree mode",
   );
   assert.ok(
-    blockAfterIncomplete.includes("getIsolationMode"),
-    "should check getIsolationMode for branch isolation mode",
+    helperBlock.includes("getIsolationMode") || helperBlock.includes("isolationMode"),
+    "tryMergeMilestone should check isolation mode for branch mode",
   );
 });
 
