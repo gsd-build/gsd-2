@@ -7,7 +7,7 @@
 
 import { createRequire } from 'node:module';
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { Decision, Requirement } from './types.js';
 import { GSDError, GSD_STALE_STATE } from './errors.js';
 
@@ -741,6 +741,30 @@ export function getDbOwnerPid(): number {
  */
 export function getDbPath(): string | null {
   return currentPath;
+}
+
+/**
+ * Ensure the GSD database is available, auto-initializing from disk if needed.
+ * Returns true if the DB is ready, false if initialization failed.
+ *
+ * This is the safe entry point for any code that needs to read from the DB.
+ * It will open an existing `.gsd/gsd.db` file if one exists and isn't already open.
+ */
+export async function ensureDbAvailable(): Promise<boolean> {
+  try {
+    // If already open, we're done
+    if (isDbAvailable()) return true;
+
+    // Auto-initialize: open the DB at the standard path if it exists
+    const gsdDir = join(process.cwd(), '.gsd');
+    if (!existsSync(gsdDir)) return false; // No GSD project — can't open DB
+    const dbPath = join(gsdDir, 'gsd.db');
+    if (!existsSync(dbPath)) return false; // DB file doesn't exist
+    
+    return openDatabase(dbPath);
+  } catch {
+    return false;
+  }
 }
 
 // ─── Internal Access (for testing) ─────────────────────────────────────────

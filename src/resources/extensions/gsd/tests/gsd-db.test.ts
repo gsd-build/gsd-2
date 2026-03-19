@@ -6,6 +6,7 @@ import {
   openDatabase,
   closeDatabase,
   isDbAvailable,
+  ensureDbAvailable,
   getDbProvider,
   insertDecision,
   getDecisionById,
@@ -347,6 +348,105 @@ console.log('\n=== gsd-db: query wrappers return null/empty when DB unavailable 
 
   const ar = getActiveRequirements();
   assertEq(ar, [], 'getActiveRequirements returns [] when DB closed');
+}
+
+console.log('\n=== gsd-db: ensureDbAvailable() with file-backed DB ===');
+{
+  const dbPath = tempDbPath();
+  closeDatabase();
+  _resetProvider();
+
+  try {
+    // Create a .gsd directory structure and place DB there
+    const gsdDir = path.dirname(dbPath).replace(/gsd-db-test-[^/]*/, 'gsd-test-project/.gsd');
+    fs.mkdirSync(gsdDir, { recursive: true });
+    
+    // Manually open a DB at the expected location
+    const dbAtGsd = path.join(gsdDir, 'gsd.db');
+    const success = openDatabase(dbAtGsd);
+    assertTrue(success, 'openDatabase should succeed');
+    assertTrue(isDbAvailable(), 'DB should be available after openDatabase');
+    
+    closeDatabase();
+    assertTrue(!isDbAvailable(), 'DB should be closed');
+    
+    // Now ensureDbAvailable should reopen it from disk
+    // We need to change to the test project directory
+    const originalCwd = process.cwd();
+    const projectDir = path.dirname(gsdDir);
+    process.chdir(projectDir);
+    
+    try {
+      const ensured = await ensureDbAvailable();
+      assertTrue(ensured, 'ensureDbAvailable should return true when DB exists on disk');
+      assertTrue(isDbAvailable(), 'DB should be available after ensureDbAvailable');
+    } finally {
+      process.chdir(originalCwd);
+      closeDatabase();
+    }
+  } finally {
+    try {
+      const dir = path.dirname(dbPath);
+      for (const f of fs.readdirSync(dir)) {
+        fs.unlinkSync(path.join(dir, f));
+      }
+      fs.rmdirSync(dir);
+    } catch {
+      // best effort
+    }
+  }
+}
+
+console.log('\n=== gsd-db: ensureDbAvailable() returns false when no .gsd dir ===');
+{
+  closeDatabase();
+  _resetProvider();
+
+  const originalCwd = process.cwd();
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-no-project-'));
+  
+  try {
+    process.chdir(tempDir);
+    const result = await ensureDbAvailable();
+    assertTrue(!result, 'ensureDbAvailable should return false when .gsd dir does not exist');
+    assertTrue(!isDbAvailable(), 'DB should not be available');
+  } finally {
+    process.chdir(originalCwd);
+    try {
+      fs.rmdirSync(tempDir);
+    } catch {
+      // best effort
+    }
+  }
+}
+
+console.log('\n=== gsd-db: ensureDbAvailable() returns false when DB file does not exist ===');
+{
+  closeDatabase();
+  _resetProvider();
+
+  const originalCwd = process.cwd();
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-no-db-'));
+  const gsdDir = path.join(tempDir, '.gsd');
+  fs.mkdirSync(gsdDir, { recursive: true });
+  
+  try {
+    process.chdir(tempDir);
+    const result = await ensureDbAvailable();
+    assertTrue(!result, 'ensureDbAvailable should return false when gsd.db file does not exist');
+    assertTrue(!isDbAvailable(), 'DB should not be available');
+  } finally {
+    process.chdir(originalCwd);
+    try {
+      for (const f of fs.readdirSync(gsdDir)) {
+        fs.unlinkSync(path.join(gsdDir, f));
+      }
+      fs.rmdirSync(gsdDir);
+      fs.rmdirSync(tempDir);
+    } catch {
+      // best effort
+    }
+  }
 }
 
 // ─── Final Report ──────────────────────────────────────────────────────────

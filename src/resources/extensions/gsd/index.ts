@@ -64,25 +64,7 @@ import { pauseAutoForProviderError, classifyProviderError } from "./provider-err
 import { toPosixPath } from "../shared/mod.js";
 import { isParallelActive, shutdownParallel } from "./parallel-orchestrator.js";
 import { DEFAULT_BASH_TIMEOUT_SECS } from "./constants.js";
-
-/**
- * Ensure the GSD database is available, auto-initializing if needed.
- * Returns true if the DB is ready, false if initialization failed.
- */
-async function ensureDbAvailable(): Promise<boolean> {
-  try {
-    const db = await import("./gsd-db.js");
-    if (db.isDbAvailable()) return true;
-
-    // Auto-initialize: open (and create if needed) the DB at the standard path
-    const gsdDir = join(process.cwd(), ".gsd");
-    if (!existsSync(gsdDir)) return false; // No GSD project — can't create DB
-    const dbPath = join(gsdDir, "gsd.db");
-    return db.openDatabase(dbPath);
-  } catch {
-    return false;
-  }
-}
+import { ensureDbAvailable } from "./gsd-db.js";
 
 // ── Agent Instructions ────────────────────────────────────────────────────
 // Lightweight "always follow" files injected into every GSD agent session.
