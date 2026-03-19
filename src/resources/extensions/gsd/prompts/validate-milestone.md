@@ -67,4 +67,6 @@ If verdict is `needs-remediation`:
 
 **You MUST write `{{validationPath}}` before finishing.**
 
+**File system safety:** When scanning milestone directories for evidence, use `ls` or `find` to list directory contents first — never pass a directory path (e.g. `tasks/`, `slices/`) directly to the `read` tool. The `read` tool only accepts file paths, not directories.
+
 When done, say: "Milestone {{milestoneId}} validation complete — verdict: <verdict>."
