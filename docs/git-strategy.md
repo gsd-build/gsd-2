@@ -147,6 +147,22 @@ git:
   main_branch: main           # primary branch name
   commit_docs: true           # commit .gsd/ to git
   isolation: worktree         # "worktree", "branch", or "none"
+  auto_pr: false              # create PR on milestone completion
+  pr_target_branch: develop   # PR target branch (default: main)
+```
+
+### Automatic Pull Requests
+
+For teams using Gitflow or branch-based workflows, GSD can automatically create a pull request when a milestone completes:
+
+```yaml
+git:
+  auto_push: true
+  auto_pr: true
+  pr_target_branch: develop
+```
+
+This pushes the milestone branch and creates a PR targeting `develop` (or whichever branch you specify). Requires `gh` CLI installed and authenticated. See [git.auto_pr](./configuration.md#gitauto_pr) for details.
 ```
 
 ### `commit_docs: false`

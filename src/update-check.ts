@@ -50,7 +50,7 @@ export function writeUpdateCache(cache: UpdateCheckCache, cachePath: string = CA
 function printUpdateBanner(current: string, latest: string): void {
   process.stderr.write(
     `  ${chalk.yellow('Update available:')} ${chalk.dim(`v${current}`)} → ${chalk.bold(`v${latest}`)}\n` +
-    `  ${chalk.dim('Run')} npm update -g gsd-pi ${chalk.dim('or')} /gsd:update ${chalk.dim('to upgrade')}\n\n`,
+    `  ${chalk.dim('Run')} npm update -g gsd-pi ${chalk.dim('or')} /gsd update ${chalk.dim('to upgrade')}\n\n`,
   )
 }
 

@@ -20,6 +20,9 @@ import * as _bundledPiTui from "@gsd/pi-tui";
 // The virtualModules option then makes them available to extensions.
 import * as _bundledTypebox from "@sinclair/typebox";
 import * as _bundledYaml from "yaml";
+import * as _bundledMcpClient from "@modelcontextprotocol/sdk/client";
+import * as _bundledMcpStdio from "@modelcontextprotocol/sdk/client/stdio.js";
+import * as _bundledMcpStreamableHttp from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { getAgentDir, isBunBinary } from "../../config.js";
 // NOTE: This import works because loader.ts exports are NOT re-exported from index.ts,
 // avoiding a circular dependency. Extensions can import from @gsd/pi-coding-agent.
@@ -50,6 +53,11 @@ const VIRTUAL_MODULES: Record<string, unknown> = {
 	"@gsd/pi-ai/oauth": _bundledPiAiOauth,
 	"@gsd/pi-coding-agent": _bundledPiCodingAgent,
 	"yaml": _bundledYaml,
+	"@modelcontextprotocol/sdk/client": _bundledMcpClient,
+	"@modelcontextprotocol/sdk/client/stdio": _bundledMcpStdio,
+	"@modelcontextprotocol/sdk/client/stdio.js": _bundledMcpStdio,
+	"@modelcontextprotocol/sdk/client/streamableHttp": _bundledMcpStreamableHttp,
+	"@modelcontextprotocol/sdk/client/streamableHttp.js": _bundledMcpStreamableHttp,
 	// Aliases for external PI ecosystem packages that import from the original scope
 	"@mariozechner/pi-agent-core": _bundledPiAgentCore,
 	"@mariozechner/pi-tui": _bundledPiTui,
@@ -59,6 +67,12 @@ const VIRTUAL_MODULES: Record<string, unknown> = {
 };
 
 const require = createRequire(import.meta.url);
+const EXTENSION_TIMING_ENABLED = process.env.GSD_STARTUP_TIMING === "1" || process.env.PI_TIMING === "1";
+
+function logExtensionTiming(extensionPath: string, ms: number, outcome: "loaded" | "failed"): void {
+	if (!EXTENSION_TIMING_ENABLED) return;
+	console.error(`[startup] extension ${outcome}: ${extensionPath} (${ms}ms)`);
+}
 
 /**
  * Get aliases for jiti (used in Node.js/development mode).
@@ -94,6 +108,11 @@ function getAliases(): Record<string, string> {
 		"@gsd/pi-ai/oauth": resolveWorkspaceOrImport("ai/dist/oauth.js", "@gsd/pi-ai/oauth"),
 		"@sinclair/typebox": typeboxRoot,
 		"yaml": yamlRoot,
+		"@modelcontextprotocol/sdk/client": require.resolve("@modelcontextprotocol/sdk/client"),
+		"@modelcontextprotocol/sdk/client/stdio": require.resolve("@modelcontextprotocol/sdk/client/stdio.js"),
+		"@modelcontextprotocol/sdk/client/stdio.js": require.resolve("@modelcontextprotocol/sdk/client/stdio.js"),
+		"@modelcontextprotocol/sdk/client/streamableHttp": require.resolve("@modelcontextprotocol/sdk/client/streamableHttp.js"),
+		"@modelcontextprotocol/sdk/client/streamableHttp.js": require.resolve("@modelcontextprotocol/sdk/client/streamableHttp.js"),
 		// Aliases for external PI ecosystem packages that import from the original scope
 		"@mariozechner/pi-coding-agent": packageIndex,
 		"@mariozechner/pi-agent-core": resolveWorkspaceOrImport("agent/dist/index.js", "@gsd/pi-agent-core"),
@@ -105,7 +124,31 @@ function getAliases(): Record<string, string> {
 	return _aliases;
 }
 
-const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
+function getJitiOptions() {
+	return isBunBinary ? { virtualModules: VIRTUAL_MODULES, tryNative: false } : { alias: getAliases() };
+}
+
+const _moduleImporters = new Map<string, ReturnType<typeof createJiti>>();
+
+function getModuleImporter(parentModuleUrl: string) {
+	let importer = _moduleImporters.get(parentModuleUrl);
+	if (!importer) {
+		importer = createJiti(parentModuleUrl, {
+			moduleCache: true,
+			...getJitiOptions(),
+		});
+		_moduleImporters.set(parentModuleUrl, importer);
+	}
+	return importer;
+}
+
+export async function importExtensionModule<T = unknown>(parentModuleUrl: string, specifier: string): Promise<T> {
+	const importer = getModuleImporter(parentModuleUrl);
+	const resolvedPath = fileURLToPath(new URL(specifier, parentModuleUrl));
+	return importer.import(resolvedPath) as Promise<T>;
+}
+
+const UNICODE_SPACES = /[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g;
 
 function normalizeUnicodeSpaces(str: string): string {
 	return str.replace(UNICODE_SPACES, " ");
@@ -144,6 +187,7 @@ export function createExtensionRuntime(): ExtensionRuntime {
 	const runtime: ExtensionRuntime = {
 		sendMessage: notInitialized,
 		sendUserMessage: notInitialized,
+		retryLastTurn: notInitialized,
 		appendEntry: notInitialized,
 		setSessionName: notInitialized,
 		getSessionName: notInitialized,
@@ -242,6 +286,10 @@ function createExtensionAPI(
 			runtime.sendUserMessage(content, options);
 		},
 
+		retryLastTurn(): void {
+			runtime.retryLastTurn();
+		},
+
 		appendEntry(customType: string, data?: unknown): void {
 			runtime.appendEntry(customType, data);
 		},
@@ -307,10 +355,7 @@ function createExtensionAPI(
 async function loadExtensionModule(extensionPath: string) {
 	const jiti = createJiti(import.meta.url, {
 		moduleCache: false,
-		// In Bun binary: use virtualModules for bundled packages (no filesystem resolution)
-		// Also disable tryNative so jiti handles ALL imports (not just the entry point)
-		// In Node.js/dev: use aliases to resolve to node_modules paths
-		...(isBunBinary ? { virtualModules: VIRTUAL_MODULES, tryNative: false } : { alias: getAliases() }),
+		...getJitiOptions(),
 	});
 
 	const module = await jiti.import(extensionPath, { default: true });
@@ -341,20 +386,24 @@ async function loadExtension(
 	runtime: ExtensionRuntime,
 ): Promise<{ extension: Extension | null; error: string | null }> {
 	const resolvedPath = resolvePath(extensionPath, cwd);
+	const start = Date.now();
 
 	try {
 		const factory = await loadExtensionModule(resolvedPath);
 		if (!factory) {
+			logExtensionTiming(extensionPath, Date.now() - start, "failed");
 			return { extension: null, error: `Extension does not export a valid factory function: ${extensionPath}` };
 		}
 
 		const extension = createExtension(extensionPath, resolvedPath);
 		const api = createExtensionAPI(extension, runtime, cwd, eventBus);
 		await factory(api);
+		logExtensionTiming(extensionPath, Date.now() - start, "loaded");
 
 		return { extension, error: null };
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
+		logExtensionTiming(extensionPath, Date.now() - start, "failed");
 		return { extension: null, error: `Failed to load extension: ${message}` };
 	}
 }

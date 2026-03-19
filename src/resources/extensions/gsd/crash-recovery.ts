@@ -10,9 +10,10 @@
  * so the file on disk reflects every tool call up to the crash point).
  */
 
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync, unlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { gsdRoot } from "./paths.js";
+import { atomicWriteSync } from "./atomic-write.js";
 
 const LOCK_FILE = "auto.lock";
 
@@ -49,7 +50,8 @@ export function writeLock(
       completedUnits,
       sessionFile,
     };
-    writeFileSync(lockPath(basePath), JSON.stringify(data, null, 2), "utf-8");
+    const lp = lockPath(basePath);
+    atomicWriteSync(lp, JSON.stringify(data, null, 2));
   } catch (e) { /* non-fatal: lock write failure */ void e; }
 }
 
@@ -96,11 +98,24 @@ export function isLockProcessAlive(lock: LockData): boolean {
 
 /** Format crash info for display or injection into a prompt. */
 export function formatCrashInfo(lock: LockData): string {
-  return [
+  const lines = [
     `Previous auto-mode session was interrupted.`,
     `  Was executing: ${lock.unitType} (${lock.unitId})`,
     `  Started at: ${lock.unitStartedAt}`,
     `  Units completed before crash: ${lock.completedUnits}`,
     `  PID: ${lock.pid}`,
-  ].join("\n");
+  ];
+
+  // Add recovery guidance based on what was happening when it crashed
+  if (lock.unitType === "starting" && lock.unitId === "bootstrap" && lock.completedUnits === 0) {
+    lines.push(`No work was lost. Run /gsd auto to restart.`);
+  } else if (lock.unitType.includes("research") || lock.unitType.includes("plan")) {
+    lines.push(`The ${lock.unitType} unit may be incomplete. Run /gsd auto to re-run it.`);
+  } else if (lock.unitType.includes("execute")) {
+    lines.push(`Task execution was interrupted. Run /gsd auto to resume — completed work is preserved.`);
+  } else if (lock.unitType.includes("complete")) {
+    lines.push(`Slice/milestone completion was interrupted. Run /gsd auto to finish.`);
+  }
+
+  return lines.join("\n");
 }

@@ -50,6 +50,32 @@ token_profile: balanced
 - **Array fields** (`always_use_skills`, etc.): concatenated (global first, then project)
 - **Object fields** (`models`, `git`, `auto_supervisor`): shallow-merged, project overrides per-key
 
+## Global API Keys (`/gsd config`)
+
+Tool API keys are stored globally in `~/.gsd/agent/auth.json` and apply to all projects automatically. Set them once with `/gsd config` — no need to configure per-project `.env` files.
+
+```bash
+/gsd config
+```
+
+This opens an interactive wizard showing which keys are configured and which are missing. Select a tool to enter its key.
+
+### Supported keys
+
+| Tool | Environment Variable | Purpose | Get a key |
+|------|---------------------|---------|-----------|
+| Tavily Search | `TAVILY_API_KEY` | Web search for non-Anthropic models | [tavily.com/app/api-keys](https://tavily.com/app/api-keys) |
+| Brave Search | `BRAVE_API_KEY` | Web search for non-Anthropic models | [brave.com/search/api](https://brave.com/search/api) |
+| Context7 Docs | `CONTEXT7_API_KEY` | Library documentation lookup | [context7.com/dashboard](https://context7.com/dashboard) |
+
+### How it works
+
+1. `/gsd config` saves keys to `~/.gsd/agent/auth.json`
+2. On every session start, `loadToolApiKeys()` reads the file and sets environment variables
+3. Keys apply to all projects — no per-project setup required
+4. Environment variables (`export BRAVE_API_KEY=...`) take precedence over saved keys
+5. Anthropic models don't need Brave/Tavily — they have built-in web search
+
 ## All Settings
 
 ### `models`
@@ -99,6 +125,16 @@ models:
 
 When a model fails to switch (provider unavailable, rate limited, credits exhausted), GSD automatically tries the next model in the `fallbacks` list.
 
+### Community Provider Extensions
+
+For providers not built into GSD, community extensions can add full provider support with proper model definitions, thinking format configuration, and interactive API key setup.
+
+| Extension | Provider | Models | Install |
+|-----------|----------|--------|---------|
+| [`pi-dashscope`](https://www.npmjs.com/package/pi-dashscope) | Alibaba DashScope (ModelStudio) | Qwen3, GLM-5, MiniMax M2.5, Kimi K2.5 | `gsd install npm:pi-dashscope` |
+
+Community extensions are recommended over the built-in `alibaba-coding-plan` provider for DashScope models — they use the correct OpenAI-compatible endpoint and include per-model compatibility flags for thinking mode.
+
 ### `token_profile`
 
 Coordinates model selection, phase skipping, and context compression. See [Token Optimization](./token-optimization.md).
@@ -120,6 +156,7 @@ phases:
   skip_research: false        # skip milestone-level research
   skip_reassess: false        # skip roadmap reassessment after each slice
   skip_slice_research: true   # skip per-slice research
+  require_slice_discussion: false  # pause auto-mode before each slice for discussion
 ```
 
 These are usually set automatically by `token_profile`, but can be overridden explicitly.
@@ -182,6 +219,34 @@ Enable automatic UAT (User Acceptance Test) runs after slice completion:
 uat_dispatch: true
 ```
 
+### Verification (v2.26)
+
+Configure shell commands that run automatically after every task execution. Failures trigger auto-fix retries before advancing.
+
+```yaml
+verification_commands:
+  - npm run lint
+  - npm run test
+verification_auto_fix: true       # auto-retry on failure (default: true)
+verification_max_retries: 2       # max retry attempts (default: 2)
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `verification_commands` | string[] | `[]` | Shell commands to run after task execution |
+| `verification_auto_fix` | boolean | `true` | Auto-retry when verification fails |
+| `verification_max_retries` | number | `2` | Maximum auto-fix retry attempts |
+
+### `auto_report` (v2.26)
+
+Auto-generate HTML reports after milestone completion:
+
+```yaml
+auto_report: true    # default: true
+```
+
+Reports are written to `.gsd/reports/` as self-contained HTML files with embedded CSS/JS.
+
 ### `unique_milestone_ids`
 
 Generate milestone IDs with a random suffix to avoid collisions in team workflows:
@@ -207,7 +272,10 @@ git:
   merge_strategy: squash      # how worktree branches merge: "squash" or "merge"
   isolation: worktree         # git isolation: "worktree", "branch", or "none"
   commit_docs: true           # commit .gsd/ artifacts to git (set false to keep local)
+  manage_gitignore: true      # set false to prevent GSD from modifying .gitignore
   worktree_post_create: .gsd/hooks/post-worktree-create  # script to run after worktree creation
+  auto_pr: false              # create a PR on milestone completion (requires push_branches)
+  pr_target_branch: develop   # target branch for auto-created PRs (default: main branch)
 ```
 
 | Field | Type | Default | Description |
@@ -222,7 +290,10 @@ git:
 | `merge_strategy` | string | `"squash"` | How worktree branches merge: `"squash"` (combine all commits) or `"merge"` (preserve individual commits) |
 | `isolation` | string | `"worktree"` | Auto-mode isolation: `"worktree"` (separate directory), `"branch"` (work in project root — useful for submodule-heavy repos), or `"none"` (no isolation — commits on current branch, no worktree or milestone branch) |
 | `commit_docs` | boolean | `true` | Commit `.gsd/` planning artifacts to git. Set `false` to keep local-only |
+| `manage_gitignore` | boolean | `true` | When `false`, GSD will not modify `.gitignore` at all — no baseline patterns, no self-healing. Use if you manage your own `.gitignore` |
 | `worktree_post_create` | string | (none) | Script to run after worktree creation. Receives `SOURCE_DIR` and `WORKTREE_DIR` env vars |
+| `auto_pr` | boolean | `false` | Automatically create a pull request when a milestone completes. Requires `auto_push: true` and `gh` CLI installed and authenticated |
+| `pr_target_branch` | string | (main branch) | Target branch for auto-created PRs (e.g. `develop`, `qa`). Defaults to `main_branch` if not set |
 
 #### `git.worktree_post_create`
 
@@ -248,6 +319,29 @@ ln -sf "$SOURCE_DIR/assets" "$WORKTREE_DIR/assets"
 ```
 
 The path can be absolute or relative to the project root. The script runs with a 30-second timeout. Failure is non-fatal — GSD logs a warning and continues.
+
+#### `git.auto_pr`
+
+Automatically create a pull request when a milestone completes. Designed for teams using Gitflow or branch-based workflows where work should go through PR review before merging to a target branch.
+
+```yaml
+git:
+  auto_push: true
+  auto_pr: true
+  pr_target_branch: develop  # or qa, staging, etc.
+```
+
+**Requirements:**
+- `auto_push: true` — the milestone branch must be pushed before a PR can be created
+- [`gh` CLI](https://cli.github.com/) installed and authenticated (`gh auth login`)
+
+**How it works:**
+1. Milestone completes → GSD squash-merges the worktree to the main branch
+2. Pushes the main branch to remote (if `auto_push: true`)
+3. Pushes the milestone branch to remote
+4. Creates a PR from the milestone branch to `pr_target_branch` via `gh pr create`
+
+If `pr_target_branch` is not set, the PR targets the `main_branch` (or auto-detected main branch). PR creation failure is non-fatal — GSD logs and continues.
 
 ### `notifications`
 

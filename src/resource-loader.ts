@@ -1,9 +1,12 @@
 import { DefaultResourceLoader } from '@gsd/pi-coding-agent'
+import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { compareSemver } from './update-check.js'
+import { discoverExtensionEntryPaths } from './extension-discovery.js'
+import { loadRegistry, readManifestFromEntryPath, isExtensionEnabled, ensureRegistryEntries } from './extension-registry.js'
 
 // Resolve resources directory — prefer dist/resources/ (stable, set at build time)
 // over src/resources/ (live working tree, changes with git branch).
@@ -16,77 +19,24 @@ import { compareSemver } from './update-check.js'
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const distResources = join(packageRoot, 'dist', 'resources')
 const srcResources = join(packageRoot, 'src', 'resources')
-const resourcesDir = existsSync(distResources) ? distResources : srcResources
+const resourcesDir = (existsSync(distResources) && existsSync(join(distResources, 'agents')))
+  ? distResources
+  : srcResources
 const bundledExtensionsDir = join(resourcesDir, 'extensions')
 const resourceVersionManifestName = 'managed-resources.json'
 
 interface ManagedResourceManifest {
   gsdVersion: string
   syncedAt?: number
+  /** Content fingerprint of bundled resources — detects same-version content changes. */
+  contentHash?: string
 }
 
-function isExtensionFile(name: string): boolean {
-  return name.endsWith('.ts') || name.endsWith('.js')
-}
+export { discoverExtensionEntryPaths } from './extension-discovery.js'
 
-function resolveExtensionEntries(dir: string): string[] {
-  const packageJsonPath = join(dir, 'package.json')
-  if (existsSync(packageJsonPath)) {
-    try {
-      const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
-      const declared = pkg?.pi?.extensions
-      if (Array.isArray(declared)) {
-        const resolved = declared
-          .filter((entry: unknown): entry is string => typeof entry === 'string')
-          .map((entry: string) => resolve(dir, entry))
-          .filter((entry: string) => existsSync(entry))
-        if (resolved.length > 0) {
-          return resolved
-        }
-      }
-    } catch {
-      // Ignore malformed manifests and fall back to index.ts/index.js discovery.
-    }
-  }
-
-  const indexTs = join(dir, 'index.ts')
-  if (existsSync(indexTs)) {
-    return [indexTs]
-  }
-
-  const indexJs = join(dir, 'index.js')
-  if (existsSync(indexJs)) {
-    return [indexJs]
-  }
-
-  return []
-}
-
-export function discoverExtensionEntryPaths(extensionsDir: string): string[] {
-  if (!existsSync(extensionsDir)) {
-    return []
-  }
-
-  const discovered: string[] = []
-  for (const entry of readdirSync(extensionsDir, { withFileTypes: true })) {
-    const entryPath = join(extensionsDir, entry.name)
-
-    if ((entry.isFile() || entry.isSymbolicLink()) && isExtensionFile(entry.name)) {
-      discovered.push(entryPath)
-      continue
-    }
-
-    if (entry.isDirectory() || entry.isSymbolicLink()) {
-      discovered.push(...resolveExtensionEntries(entryPath))
-    }
-  }
-
-  return discovered
-}
-
-function getExtensionKey(entryPath: string, extensionsDir: string): string {
+export function getExtensionKey(entryPath: string, extensionsDir: string): string {
   const relPath = relative(extensionsDir, entryPath)
-  return relPath.split(/[\\/]/)[0]
+  return relPath.split(/[\\/]/)[0].replace(/\.(?:ts|js)$/, '')
 }
 
 function getManagedResourceManifestPath(agentDir: string): string {
@@ -94,16 +44,24 @@ function getManagedResourceManifestPath(agentDir: string): string {
 }
 
 function getBundledGsdVersion(): string {
+  // Prefer GSD_VERSION env var (set once by loader.ts) to avoid re-reading package.json
+  if (process.env.GSD_VERSION && process.env.GSD_VERSION !== '0.0.0') {
+    return process.env.GSD_VERSION
+  }
   try {
     const pkg = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf-8'))
     return typeof pkg?.version === 'string' ? pkg.version : '0.0.0'
   } catch {
-    return process.env.GSD_VERSION || '0.0.0'
+    return '0.0.0'
   }
 }
 
 function writeManagedResourceManifest(agentDir: string): void {
-  const manifest: ManagedResourceManifest = { gsdVersion: getBundledGsdVersion(), syncedAt: Date.now() }
+  const manifest: ManagedResourceManifest = {
+    gsdVersion: getBundledGsdVersion(),
+    syncedAt: Date.now(),
+    contentHash: computeResourceFingerprint(),
+  }
   writeFileSync(getManagedResourceManifestPath(agentDir), JSON.stringify(manifest))
 }
 
@@ -113,6 +71,44 @@ export function readManagedResourceVersion(agentDir: string): string | null {
     return typeof manifest?.gsdVersion === 'string' ? manifest.gsdVersion : null
   } catch {
     return null
+  }
+}
+
+function readManagedResourceManifest(agentDir: string): ManagedResourceManifest | null {
+  try {
+    return JSON.parse(readFileSync(getManagedResourceManifestPath(agentDir), 'utf-8')) as ManagedResourceManifest
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Computes a lightweight content fingerprint of the bundled resources directory.
+ *
+ * Walks all files under resourcesDir and hashes their relative paths + sizes.
+ * This catches same-version content changes (npm link dev workflow, hotfixes
+ * within a release) without the cost of reading every file's contents.
+ *
+ * ~1ms for a typical resources tree (~100 files) — just stat calls, no reads.
+ */
+function computeResourceFingerprint(): string {
+  const entries: string[] = []
+  collectFileEntries(resourcesDir, resourcesDir, entries)
+  entries.sort()
+  return createHash('sha256').update(entries.join('\n')).digest('hex').slice(0, 16)
+}
+
+function collectFileEntries(dir: string, root: string, out: string[]): void {
+  if (!existsSync(dir)) return
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      collectFileEntries(fullPath, root, out)
+    } else {
+      const rel = relative(root, fullPath)
+      const size = statSync(fullPath).size
+      out.push(`${rel}:${size}`)
+    }
   }
 }
 
@@ -139,7 +135,12 @@ export function getNewerManagedResourceVersion(agentDir: string, currentVersion:
 function makeTreeWritable(dirPath: string): void {
   if (!existsSync(dirPath)) return
 
-  const stats = statSync(dirPath)
+  // Use lstatSync to avoid following symlinks into immutable filesystems
+  // (e.g., Nix store on NixOS/nix-darwin). Symlinks don't carry their own
+  // permissions and their targets may be read-only by design (#1298).
+  const stats = lstatSync(dirPath)
+  if (stats.isSymbolicLink()) return
+
   const isDir = stats.isDirectory()
   const currentMode = stats.mode & 0o777
 
@@ -150,13 +151,85 @@ function makeTreeWritable(dirPath: string): void {
   }
 
   if (newMode !== currentMode) {
-    chmodSync(dirPath, newMode)
+    try {
+      chmodSync(dirPath, newMode)
+    } catch {
+      // Non-fatal — may fail on read-only filesystems or insufficient permissions
+    }
   }
 
   if (isDir) {
     for (const entry of readdirSync(dirPath, { withFileTypes: true })) {
       const entryPath = join(dirPath, entry.name)
       makeTreeWritable(entryPath)
+    }
+  }
+}
+
+/**
+ * Syncs a single bundled resource directory into the agent directory.
+ *
+ * 1. Makes the destination writable (handles Nix store read-only copies).
+ * 2. Removes destination subdirs that exist in source to clear stale files,
+ *    while preserving user-created directories.
+ * 3. Copies source into destination.
+ * 4. Makes the result writable for the next upgrade cycle.
+ */
+function syncResourceDir(srcDir: string, destDir: string): void {
+  makeTreeWritable(destDir)
+  if (existsSync(srcDir)) {
+    pruneStaleSiblingFiles(srcDir, destDir)
+    for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        const target = join(destDir, entry.name)
+        if (existsSync(target)) rmSync(target, { recursive: true, force: true })
+      }
+    }
+    try {
+      cpSync(srcDir, destDir, { recursive: true, force: true })
+    } catch {
+      // Fallback for Windows paths with non-ASCII characters where cpSync
+      // fails with the \\?\ extended-length prefix (#1178).
+      copyDirRecursive(srcDir, destDir)
+    }
+    makeTreeWritable(destDir)
+  }
+}
+
+function pruneStaleSiblingFiles(srcDir: string, destDir: string): void {
+  if (!existsSync(destDir)) return
+
+  const sourceFiles = new Set(
+    readdirSync(srcDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name),
+  )
+
+  for (const entry of readdirSync(destDir, { withFileTypes: true })) {
+    if (!entry.isFile()) continue
+    if (sourceFiles.has(entry.name)) continue
+
+    const sourceJsName = entry.name.replace(/\.ts$/, '.js')
+    const sourceTsName = entry.name.replace(/\.js$/, '.ts')
+    if (sourceFiles.has(sourceJsName) || sourceFiles.has(sourceTsName)) {
+      rmSync(join(destDir, entry.name), { force: true })
+    }
+  }
+}
+
+/**
+ * Recursive directory copy using copyFileSync — workaround for cpSync failures
+ * on Windows paths containing non-ASCII characters (#1178).
+ */
+function copyDirRecursive(src: string, dest: string): void {
+  mkdirSync(dest, { recursive: true })
+  for (const entry of readdirSync(src, { withFileTypes: true })) {
+    const srcPath = join(src, entry.name)
+    const destPath = join(dest, entry.name)
+    if (entry.isDirectory()) {
+      copyDirRecursive(srcPath, destPath)
+    } else {
+      copyFileSync(srcPath, destPath)
     }
   }
 }
@@ -179,51 +252,42 @@ function makeTreeWritable(dirPath: string): void {
 export function initResources(agentDir: string): void {
   mkdirSync(agentDir, { recursive: true })
 
-  // Sync extensions — clean bundled subdirs first to remove stale leftover files,
-  // then overwrite so updates land on next launch. Only bundled subdirs are removed;
-  // user-created extension directories are preserved.
-  const destExtensions = join(agentDir, 'extensions')
-  makeTreeWritable(destExtensions)
-  for (const entry of readdirSync(bundledExtensionsDir, { withFileTypes: true })) {
-    if (entry.isDirectory()) {
-      const target = join(destExtensions, entry.name)
-      if (existsSync(target)) rmSync(target, { recursive: true, force: true })
+  // Skip the full copy when both version AND content fingerprint match.
+  // Version-only checks miss same-version content changes (npm link dev workflow,
+  // hotfixes within a release). The content hash catches those at ~1ms cost.
+  const currentVersion = getBundledGsdVersion()
+  const manifest = readManagedResourceManifest(agentDir)
+  if (manifest && manifest.gsdVersion === currentVersion) {
+    // Version matches — check content fingerprint for same-version staleness.
+    const currentHash = computeResourceFingerprint()
+    const hasStaleExtensionFiles = hasStaleCompiledExtensionSiblings(join(agentDir, 'extensions'))
+    if (manifest.contentHash && manifest.contentHash === currentHash && !hasStaleExtensionFiles) {
+      return
     }
-  }
-  cpSync(bundledExtensionsDir, destExtensions, { recursive: true, force: true })
-  makeTreeWritable(destExtensions)
-
-  // Sync agents
-  const destAgents = join(agentDir, 'agents')
-  const srcAgents = join(resourcesDir, 'agents')
-  if (existsSync(srcAgents)) {
-    makeTreeWritable(destAgents)
-    for (const entry of readdirSync(srcAgents, { withFileTypes: true })) {
-      if (entry.isDirectory()) {
-        const target = join(destAgents, entry.name)
-        if (existsSync(target)) rmSync(target, { recursive: true, force: true })
-      }
-    }
-    cpSync(srcAgents, destAgents, { recursive: true, force: true })
-    makeTreeWritable(destAgents)
   }
 
-  // Sync skills
-  const destSkills = join(agentDir, 'skills')
-  const srcSkills = join(resourcesDir, 'skills')
-  if (existsSync(srcSkills)) {
-    makeTreeWritable(destSkills)
-    for (const entry of readdirSync(srcSkills, { withFileTypes: true })) {
-      if (entry.isDirectory()) {
-        const target = join(destSkills, entry.name)
-        if (existsSync(target)) rmSync(target, { recursive: true, force: true })
-      }
-    }
-    cpSync(srcSkills, destSkills, { recursive: true, force: true })
-    makeTreeWritable(destSkills)
-  }
+  syncResourceDir(bundledExtensionsDir, join(agentDir, 'extensions'))
+  syncResourceDir(join(resourcesDir, 'agents'), join(agentDir, 'agents'))
+  syncResourceDir(join(resourcesDir, 'skills'), join(agentDir, 'skills'))
+
+  // Ensure all newly copied files are owner-writable so the next run can
+  // overwrite them (covers extensions, agents, and skills in one walk).
+  makeTreeWritable(agentDir)
 
   writeManagedResourceManifest(agentDir)
+  ensureRegistryEntries(join(agentDir, 'extensions'))
+}
+
+export function hasStaleCompiledExtensionSiblings(extensionsDir: string): boolean {
+  if (!existsSync(extensionsDir)) return false
+  for (const entry of readdirSync(extensionsDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.ts')) continue
+    const jsName = entry.name.replace(/\.ts$/, '.js')
+    if (existsSync(join(extensionsDir, jsName))) {
+      return true
+    }
+  }
+  return false
 }
 
 /**
@@ -231,15 +295,30 @@ export function initResources(agentDir: string): void {
  * ~/.gsd/agent/extensions/ (GSD's default) and ~/.pi/agent/extensions/ (pi's default).
  * This allows users to use extensions from either location.
  */
+// Cache bundled extension keys at module load — avoids re-scanning the extensions
+// directory in buildResourceLoader() (already scanned by loader.ts for env var).
+let _bundledExtensionKeys: Set<string> | null = null
+function getBundledExtensionKeys(): Set<string> {
+  if (!_bundledExtensionKeys) {
+    _bundledExtensionKeys = new Set(
+      discoverExtensionEntryPaths(bundledExtensionsDir).map((entryPath) => getExtensionKey(entryPath, bundledExtensionsDir)),
+    )
+  }
+  return _bundledExtensionKeys
+}
+
 export function buildResourceLoader(agentDir: string): DefaultResourceLoader {
+  const registry = loadRegistry()
   const piAgentDir = join(homedir(), '.pi', 'agent')
   const piExtensionsDir = join(piAgentDir, 'extensions')
-  const bundledKeys = new Set(
-    discoverExtensionEntryPaths(bundledExtensionsDir).map((entryPath) => getExtensionKey(entryPath, bundledExtensionsDir)),
-  )
-  const piExtensionPaths = discoverExtensionEntryPaths(piExtensionsDir).filter(
-    (entryPath) => !bundledKeys.has(getExtensionKey(entryPath, piExtensionsDir)),
-  )
+  const bundledKeys = getBundledExtensionKeys()
+  const piExtensionPaths = discoverExtensionEntryPaths(piExtensionsDir)
+    .filter((entryPath) => !bundledKeys.has(getExtensionKey(entryPath, piExtensionsDir)))
+    .filter((entryPath) => {
+      const manifest = readManifestFromEntryPath(entryPath)
+      if (!manifest) return true
+      return isExtensionEnabled(registry, manifest.id)
+    })
 
   return new DefaultResourceLoader({
     agentDir,

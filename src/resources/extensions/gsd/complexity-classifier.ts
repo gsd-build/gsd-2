@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { gsdRoot } from "./paths.js";
 import { getAdaptiveTierAdjustment } from "./routing-history.js";
+import { parseUnitId } from "./unit-id.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -180,15 +181,14 @@ function analyzePlanComplexity(
   basePath: string,
 ): TaskAnalysis | null {
   // Check if this is a milestone-level plan (more complex) vs single slice
-  const parts = unitId.split("/");
-  if (parts.length === 1) {
+  const { milestone: mid, slice: sid } = parseUnitId(unitId);
+  if (!sid) {
     // Milestone-level planning is always at least standard
     return { tier: "standard", reason: "milestone-level planning" };
   }
 
   // For slice planning, try to read the context/research to gauge complexity
   // If research exists and is large, bump to heavy
-  const [mid, sid] = parts;
   const researchPath = join(gsdRoot(basePath), mid, "slices", sid, "RESEARCH.md");
   try {
     if (existsSync(researchPath)) {
@@ -210,10 +210,8 @@ function analyzePlanComplexity(
  */
 function extractTaskMetadata(unitId: string, basePath: string): TaskMetadata {
   const meta: TaskMetadata = {};
-  const parts = unitId.split("/");
-  if (parts.length !== 3) return meta;
-
-  const [mid, sid, tid] = parts;
+  const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
+  if (!mid || !sid || !tid) return meta;
   const taskPlanPath = join(gsdRoot(basePath), mid, "slices", sid, "tasks", `${tid}-PLAN.md`);
 
   try {

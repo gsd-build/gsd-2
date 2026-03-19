@@ -11,13 +11,35 @@
  *   2 — blocked (command reported a blocker)
  */
 
-import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { resolve } from 'node:path'
 import { ChildProcess } from 'node:child_process'
 
-// RpcClient is not in @gsd/pi-coding-agent's public exports — import from dist directly.
-// This relative path resolves correctly from both src/ (via tsx) and dist/ (compiled).
-import { RpcClient } from '../packages/pi-coding-agent/dist/modes/rpc/rpc-client.js'
+import { RpcClient } from '@gsd/pi-coding-agent'
+import { loadAndValidateAnswerFile, AnswerInjector } from './headless-answers.js'
+
+import {
+  isTerminalNotification,
+  isBlockedNotification,
+  isMilestoneReadyNotification,
+  isQuickCommand,
+  FIRE_AND_FORGET_METHODS,
+  IDLE_TIMEOUT_MS,
+  NEW_MILESTONE_IDLE_TIMEOUT_MS,
+} from './headless-events.js'
+
+import {
+  handleExtensionUIRequest,
+  formatProgress,
+  startSupervisedStdinReader,
+} from './headless-ui.js'
+import type { ExtensionUIRequest } from './headless-ui.js'
+
+import {
+  loadContext,
+  bootstrapGsdProject,
+} from './headless-context.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,18 +55,11 @@ export interface HeadlessOptions {
   contextText?: string   // inline text
   auto?: boolean         // chain into auto-mode after milestone creation
   verbose?: boolean      // show tool calls in output
-}
-
-interface ExtensionUIRequest {
-  type: 'extension_ui_request'
-  id: string
-  method: string
-  title?: string
-  options?: string[]
-  message?: string
-  prefill?: string
-  timeout?: number
-  [key: string]: unknown
+  maxRestarts?: number   // auto-restart on crash (default 3, 0 to disable)
+  supervised?: boolean   // supervised mode: forward interactive requests to orchestrator
+  responseTimeout?: number // timeout for orchestrator response (default 30000ms)
+  answers?: string       // path to answers JSON file
+  eventFilter?: Set<string>  // filter JSONL output to specific event types
 }
 
 interface TrackedEvent {
@@ -92,6 +107,26 @@ export function parseHeadlessArgs(argv: string[]): HeadlessOptions {
         options.auto = true
       } else if (arg === '--verbose') {
         options.verbose = true
+      } else if (arg === '--max-restarts' && i + 1 < args.length) {
+        options.maxRestarts = parseInt(args[++i], 10)
+        if (Number.isNaN(options.maxRestarts) || options.maxRestarts < 0) {
+          process.stderr.write('[headless] Error: --max-restarts must be a non-negative integer\n')
+          process.exit(1)
+        }
+      } else if (arg === '--answers' && i + 1 < args.length) {
+        options.answers = args[++i]
+      } else if (arg === '--events' && i + 1 < args.length) {
+        options.eventFilter = new Set(args[++i].split(','))
+        options.json = true  // --events implies --json
+      } else if (arg === '--supervised') {
+        options.supervised = true
+        options.json = true  // supervised implies json
+      } else if (arg === '--response-timeout' && i + 1 < args.length) {
+        options.responseTimeout = parseInt(args[++i], 10)
+        if (Number.isNaN(options.responseTimeout) || options.responseTimeout <= 0) {
+          process.stderr.write('[headless] Error: --response-timeout must be a positive integer (milliseconds)\n')
+          process.exit(1)
+        }
       }
     } else if (!positionalStarted) {
       positionalStarted = true
@@ -105,163 +140,69 @@ export function parseHeadlessArgs(argv: string[]): HeadlessOptions {
 }
 
 // ---------------------------------------------------------------------------
-// JSONL Helper
-// ---------------------------------------------------------------------------
-
-function serializeJsonLine(obj: Record<string, unknown>): string {
-  return JSON.stringify(obj) + '\n'
-}
-
-// ---------------------------------------------------------------------------
-// Extension UI Auto-Responder
-// ---------------------------------------------------------------------------
-
-function handleExtensionUIRequest(
-  event: ExtensionUIRequest,
-  writeToStdin: (data: string) => void,
-): void {
-  const { id, method } = event
-  let response: Record<string, unknown>
-
-  switch (method) {
-    case 'select':
-      response = { type: 'extension_ui_response', id, value: event.options?.[0] ?? '' }
-      break
-    case 'confirm':
-      response = { type: 'extension_ui_response', id, confirmed: true }
-      break
-    case 'input':
-      response = { type: 'extension_ui_response', id, value: '' }
-      break
-    case 'editor':
-      response = { type: 'extension_ui_response', id, value: event.prefill ?? '' }
-      break
-    case 'notify':
-    case 'setStatus':
-    case 'setWidget':
-    case 'setTitle':
-    case 'set_editor_text':
-      response = { type: 'extension_ui_response', id, value: '' }
-      break
-    default:
-      process.stderr.write(`[headless] Warning: unknown extension_ui_request method "${method}", cancelling\n`)
-      response = { type: 'extension_ui_response', id, cancelled: true }
-      break
-  }
-
-  writeToStdin(serializeJsonLine(response))
-}
-
-// ---------------------------------------------------------------------------
-// Progress Formatter
-// ---------------------------------------------------------------------------
-
-function formatProgress(event: Record<string, unknown>, verbose: boolean): string | null {
-  const type = String(event.type ?? '')
-
-  switch (type) {
-    case 'tool_execution_start':
-      if (verbose) return `  [tool]    ${event.toolName ?? 'unknown'}`
-      return null
-
-    case 'agent_start':
-      return '[agent]   Session started'
-
-    case 'agent_end':
-      return '[agent]   Session ended'
-
-    case 'extension_ui_request':
-      if (event.method === 'notify') {
-        return `[gsd]     ${event.message ?? ''}`
-      }
-      if (event.method === 'setStatus') {
-        return `[status]  ${event.message ?? ''}`
-      }
-      return null
-
-    default:
-      return null
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Completion Detection
-// ---------------------------------------------------------------------------
-
-const TERMINAL_KEYWORDS = ['complete', 'stopped', 'blocked']
-const IDLE_TIMEOUT_MS = 15_000
-
-function isTerminalNotification(event: Record<string, unknown>): boolean {
-  if (event.type !== 'extension_ui_request' || event.method !== 'notify') return false
-  const message = String(event.message ?? '').toLowerCase()
-  return TERMINAL_KEYWORDS.some((kw) => message.includes(kw))
-}
-
-function isBlockedNotification(event: Record<string, unknown>): boolean {
-  if (event.type !== 'extension_ui_request' || event.method !== 'notify') return false
-  return String(event.message ?? '').toLowerCase().includes('blocked')
-}
-
-function isMilestoneReadyNotification(event: Record<string, unknown>): boolean {
-  if (event.type !== 'extension_ui_request' || event.method !== 'notify') return false
-  return /milestone\s+m\d+.*ready/i.test(String(event.message ?? ''))
-}
-
-// ---------------------------------------------------------------------------
-// Quick Command Detection
-// ---------------------------------------------------------------------------
-
-const QUICK_COMMANDS = new Set([
-  'status', 'queue', 'history', 'hooks', 'export', 'stop', 'pause',
-  'capture', 'skip', 'undo', 'knowledge', 'config', 'prefs',
-  'cleanup', 'migrate', 'doctor', 'remote', 'help', 'steer',
-  'triage', 'visualize',
-])
-
-function isQuickCommand(command: string): boolean {
-  return QUICK_COMMANDS.has(command)
-}
-
-// ---------------------------------------------------------------------------
 // Main Orchestrator
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Context Loading (new-milestone)
-// ---------------------------------------------------------------------------
-
-async function readStdin(): Promise<string> {
-  const chunks: Buffer[] = []
-  for await (const chunk of process.stdin) {
-    chunks.push(chunk as Buffer)
-  }
-  return Buffer.concat(chunks).toString('utf-8')
-}
-
-async function loadContext(options: HeadlessOptions): Promise<string> {
-  if (options.contextText) return options.contextText
-  if (options.context === '-') {
-    return readStdin()
-  }
-  if (options.context) {
-    return readFileSync(resolve(options.context), 'utf-8')
-  }
-  throw new Error('No context provided. Use --context <file> or --context-text <text>')
-}
-
-/**
- * Bootstrap .gsd/ directory structure for headless new-milestone.
- * Mirrors the bootstrap logic from guided-flow.ts showSmartEntry().
- */
-function bootstrapGsdProject(basePath: string): void {
-  const gsdDir = join(basePath, '.gsd')
-  mkdirSync(join(gsdDir, 'milestones'), { recursive: true })
-  mkdirSync(join(gsdDir, 'runtime'), { recursive: true })
-}
-
 export async function runHeadless(options: HeadlessOptions): Promise<void> {
+  const maxRestarts = options.maxRestarts ?? 3
+  let restartCount = 0
+
+  while (true) {
+    const result = await runHeadlessOnce(options, restartCount)
+
+    // Success or blocked — exit normally
+    if (result.exitCode === 0 || result.exitCode === 2) {
+      process.exit(result.exitCode)
+    }
+
+    // Crash/error — check if we should restart
+    if (restartCount >= maxRestarts) {
+      process.stderr.write(`[headless] Max restarts (${maxRestarts}) reached. Exiting.\n`)
+      process.exit(result.exitCode)
+    }
+
+    // Don't restart if SIGINT/SIGTERM was received
+    if (result.interrupted) {
+      process.exit(result.exitCode)
+    }
+
+    restartCount++
+    const backoffMs = Math.min(5000 * restartCount, 30_000)
+    process.stderr.write(`[headless] Restarting in ${(backoffMs / 1000).toFixed(0)}s (attempt ${restartCount}/${maxRestarts})...\n`)
+    await new Promise(resolve => setTimeout(resolve, backoffMs))
+  }
+}
+
+async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): Promise<{ exitCode: number; interrupted: boolean }> {
+  let interrupted = false
   const startTime = Date.now()
   const isNewMilestone = options.command === 'new-milestone'
+
+  // new-milestone involves codebase investigation + artifact writing — needs more time
+  if (isNewMilestone && options.timeout === 300_000) {
+    options.timeout = 600_000 // 10 minutes
+  }
+
+  // Supervised mode cannot share stdin with --context -
+  if (options.supervised && options.context === '-') {
+    process.stderr.write('[headless] Error: --supervised cannot be used with --context - (both require stdin)\n')
+    process.exit(1)
+  }
+
+  // Load answer injection file
+  let injector: AnswerInjector | undefined
+  if (options.answers) {
+    try {
+      const answerFile = loadAndValidateAnswerFile(resolve(options.answers))
+      injector = new AnswerInjector(answerFile)
+      if (!options.json) {
+        process.stderr.write(`[headless] Loaded answer file: ${options.answers}\n`)
+      }
+    } catch (err) {
+      process.stderr.write(`[headless] Error loading answer file: ${err instanceof Error ? err.message : String(err)}\n`)
+      process.exit(1)
+    }
+  }
 
   // For new-milestone, load context and bootstrap .gsd/ before spawning RPC child
   if (isNewMilestone) {
@@ -301,6 +242,13 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
     process.exit(1)
   }
 
+  // Query: read-only state snapshot, no RPC child needed
+  if (options.command === 'query') {
+    const { handleQuery } = await import('./headless-query.js')
+    const result = await handleQuery(process.cwd())
+    return { exitCode: result.exitCode, interrupted: false }
+  }
+
   // Resolve CLI path for the child process
   const cliPath = process.env.GSD_BIN_PATH || process.argv[1]
   if (!cliPath) {
@@ -315,6 +263,9 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
   }
   if (options.model) {
     clientOptions.model = options.model
+  }
+  if (injector) {
+    clientOptions.env = injector.getSecretEnvVars()
   }
 
   const client = new RpcClient(clientOptions)
@@ -351,6 +302,18 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
   // Stdin writer for sending extension_ui_response to child
   let stdinWriter: ((data: string) => void) | null = null
 
+  // Supervised mode state
+  const pendingResponseTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  let supervisedFallback = false
+  let stopSupervisedReader: (() => void) | null = null
+  const onStdinClose = () => {
+    supervisedFallback = true
+    process.stderr.write('[headless] Warning: orchestrator stdin closed, falling back to auto-response\n')
+  }
+  if (options.supervised) {
+    process.stdin.on('close', onStdinClose)
+  }
+
   // Completion promise
   let resolveCompletion: () => void
   const completionPromise = new Promise<void>((resolve) => {
@@ -359,6 +322,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
 
   // Idle timeout — fallback completion detection
   let idleTimer: ReturnType<typeof setTimeout> | null = null
+  const effectiveIdleTimeout = isNewMilestone ? NEW_MILESTONE_IDLE_TIMEOUT_MS : IDLE_TIMEOUT_MS
 
   function resetIdleTimer(): void {
     if (idleTimer) clearTimeout(idleTimer)
@@ -366,9 +330,12 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
       idleTimer = setTimeout(() => {
         completed = true
         resolveCompletion()
-      }, IDLE_TIMEOUT_MS)
+      }, effectiveIdleTimeout)
     }
   }
+
+  // Precompute supervised response timeout
+  const responseTimeout = options.responseTimeout ?? 30_000
 
   // Overall timeout
   const timeoutTimer = setTimeout(() => {
@@ -383,9 +350,15 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
     trackEvent(eventObj)
     resetIdleTimer()
 
-    // --json mode: forward all events as JSONL to stdout
+    // Answer injector: observe events for question metadata
+    injector?.observeEvent(eventObj)
+
+    // --json mode: forward events as JSONL to stdout (filtered if --events)
     if (options.json) {
-      process.stdout.write(JSON.stringify(eventObj) + '\n')
+      const eventType = String(eventObj.type ?? '')
+      if (!options.eventFilter || options.eventFilter.has(eventType)) {
+        process.stdout.write(JSON.stringify(eventObj) + '\n')
+      }
     } else {
       // Progress output to stderr
       const line = formatProgress(eventObj, !!options.verbose)
@@ -408,7 +381,33 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
         completed = true
       }
 
-      handleExtensionUIRequest(eventObj as unknown as ExtensionUIRequest, stdinWriter)
+      // Answer injection: try to handle with pre-supplied answers before supervised/auto
+      if (injector && !FIRE_AND_FORGET_METHODS.has(String(eventObj.method ?? ''))) {
+        if (injector.tryHandle(eventObj, stdinWriter)) {
+          if (completed) {
+            exitCode = blocked ? 2 : 0
+            resolveCompletion()
+          }
+          return
+        }
+      }
+
+      const method = String(eventObj.method ?? '')
+      const shouldSupervise = options.supervised && !supervisedFallback
+        && !FIRE_AND_FORGET_METHODS.has(method)
+
+      if (shouldSupervise) {
+        // Interactive request in supervised mode — let orchestrator respond
+        const eventId = String(eventObj.id ?? '')
+        const timer = setTimeout(() => {
+          pendingResponseTimers.delete(eventId)
+          handleExtensionUIRequest(eventObj as unknown as ExtensionUIRequest, stdinWriter!)
+          process.stdout.write(JSON.stringify({ type: 'supervised_timeout', id: eventId, method }) + '\n')
+        }, responseTimeout)
+        pendingResponseTimers.set(eventId, timer)
+      } else {
+        handleExtensionUIRequest(eventObj as unknown as ExtensionUIRequest, stdinWriter)
+      }
 
       // If we detected a terminal notification, resolve after responding
       if (completed) {
@@ -432,6 +431,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
   // Signal handling
   const signalHandler = () => {
     process.stderr.write('\n[headless] Interrupted, stopping child process...\n')
+    interrupted = true
     exitCode = 1
     client.stop().finally(() => {
       clearTimeout(timeoutTimer)
@@ -462,6 +462,19 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
 
   stdinWriter = (data: string) => {
     internalProcess.stdin!.write(data)
+  }
+
+  // Start supervised stdin reader for orchestrator commands
+  if (options.supervised) {
+    stopSupervisedReader = startSupervisedStdinReader(stdinWriter, client, (id) => {
+      const timer = pendingResponseTimers.get(id)
+      if (timer) {
+        clearTimeout(timer)
+        pendingResponseTimers.delete(id)
+      }
+    })
+    // Ensure stdin is in flowing mode for JSONL reading
+    process.stdin.resume()
   }
 
   // Detect child process crash
@@ -521,6 +534,10 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
   // Cleanup
   clearTimeout(timeoutTimer)
   if (idleTimer) clearTimeout(idleTimer)
+  pendingResponseTimers.forEach((timer) => clearTimeout(timer))
+  pendingResponseTimers.clear()
+  stopSupervisedReader?.()
+  process.stdin.removeListener('close', onStdinClose)
   process.removeListener('SIGINT', signalHandler)
   process.removeListener('SIGTERM', signalHandler)
 
@@ -533,6 +550,21 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
   process.stderr.write(`[headless] Status: ${status}\n`)
   process.stderr.write(`[headless] Duration: ${duration}s\n`)
   process.stderr.write(`[headless] Events: ${totalEvents} total, ${toolCallCount} tool calls\n`)
+  if (options.eventFilter) {
+    process.stderr.write(`[headless] Event filter: ${[...options.eventFilter].join(', ')}\n`)
+  }
+  if (restartCount > 0) {
+    process.stderr.write(`[headless] Restarts: ${restartCount}\n`)
+  }
+
+  // Answer injection stats
+  if (injector) {
+    const stats = injector.getStats()
+    process.stderr.write(`[headless] Answers: ${stats.questionsAnswered} answered, ${stats.questionsDefaulted} defaulted, ${stats.secretsProvided} secrets\n`)
+    for (const warning of injector.getUnusedWarnings()) {
+      process.stderr.write(`${warning}\n`)
+    }
+  }
 
   // On failure, print last 5 events for diagnostics
   if (exitCode !== 0) {
@@ -545,5 +577,5 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
     }
   }
 
-  process.exit(exitCode)
+  return { exitCode, interrupted }
 }

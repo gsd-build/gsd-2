@@ -16,6 +16,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { getErrorMessage } from "./error-utils.js";
 
 // ============================================================================
 // Type Definitions
@@ -194,7 +195,7 @@ export function parseMarketplaceJson(repoRoot: string):
   } catch (err) {
     return {
       success: false,
-      error: `Failed to read marketplace.json: ${err instanceof Error ? err.message : String(err)}`
+      error: `Failed to read marketplace.json: ${getErrorMessage(err)}`
     };
   }
   
@@ -204,7 +205,7 @@ export function parseMarketplaceJson(repoRoot: string):
   } catch (err) {
     return {
       success: false,
-      error: `Failed to parse marketplace.json: ${err instanceof Error ? err.message : String(err)}`
+      error: `Failed to parse marketplace.json: ${getErrorMessage(err)}`
     };
   }
   
@@ -293,7 +294,7 @@ export function inspectPlugin(
       }
     } catch (err) {
       // Fall back to marketplace inline or derived
-      result.error = `Failed to parse plugin.json: ${err instanceof Error ? err.message : String(err)}`;
+      result.error = `Failed to parse plugin.json: ${getErrorMessage(err)}`;
     }
   }
   

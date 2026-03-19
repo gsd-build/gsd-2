@@ -43,6 +43,10 @@ vscode-extension/         VS Code extension — chat participant (@gsd), sidebar
 
 Bundled extensions and agents are synced to `~/.gsd/agent/` on every launch, not just first run. This means `npm update -g` takes effect immediately.
 
+### Lazy Provider Loading
+
+LLM provider SDKs (Anthropic, OpenAI, Google, etc.) are lazy-loaded on first use rather than imported at startup. This significantly reduces cold-start time — only the provider you actually connect to gets loaded.
+
 ### Fresh Session Per Unit
 
 Every dispatch creates a new agent session. The LLM starts with a clean context window containing only the pre-inlined artifacts it needs. This prevents quality degradation from context accumulation.
@@ -59,7 +63,7 @@ Every dispatch creates a new agent session. The LLM starts with a clean context 
 | **Background Shell** | Long-running process management with readiness detection |
 | **Subagent** | Delegated tasks with isolated context windows |
 | **Mac Tools** | macOS native app automation via Accessibility APIs |
-| **MCPorter** | Lazy on-demand MCP server integration |
+| **MCP Client** | Native MCP server integration via @modelcontextprotocol/sdk |
 | **Voice** | Real-time speech-to-text (macOS, Linux) |
 | **Slash Commands** | Custom command creation |
 | **LSP** | Language Server Protocol — diagnostics, definitions, references, hover, rename |
@@ -118,14 +122,23 @@ The auto mode dispatch pipeline:
 
 Phase skipping (from token profile) gates steps 2-3: if a phase is skipped, the corresponding unit type is never dispatched.
 
-## Key Modules (v2.19)
+## Key Modules (v2.33)
 
 | Module | Purpose |
 |--------|---------|
 | `auto.ts` | Auto-mode state machine and orchestration |
+| `auto/session.ts` | `AutoSession` class — all mutable auto-mode state in one encapsulated instance |
 | `auto-dispatch.ts` | Declarative dispatch table (phase → unit mapping) |
+| `auto-idempotency.ts` | Completed-key checks, skip loop detection, key eviction |
+| `auto-stuck-detection.ts` | Stuck loop recovery and unit retry escalation |
+| `auto-start.ts` | Fresh-start bootstrap — git/state init, crash lock detection, worktree setup |
+| `auto-post-unit.ts` | Post-unit processing — commit, doctor, state rebuild, hooks |
+| `auto-verification.ts` | Post-unit verification gate (lint/test/typecheck with auto-fix retries) |
 | `auto-prompts.ts` | Prompt builders with inline level compression |
 | `auto-worktree.ts` | Worktree lifecycle (create, enter, merge, teardown) |
+| `auto-recovery.ts` | Expected artifact resolution, completed-key persistence, self-healing |
+| `auto-timeout-recovery.ts` | Timed-out unit recovery and continuation |
+| `auto-timers.ts` | Unit supervision — soft/idle/hard timeouts, continue-here monitor |
 | `complexity-classifier.ts` | Unit complexity classification (light/standard/heavy) |
 | `model-router.ts` | Dynamic model routing with cost-aware selection |
 | `model-cost-table.ts` | Built-in per-model cost data for cross-provider comparison |
@@ -134,8 +147,16 @@ Phase skipping (from token profile) gates steps 2-3: if a phase is skipped, the 
 | `triage-resolution.ts` | Capture resolution (inject, defer, replan, quick-task) |
 | `visualizer-overlay.ts` | Workflow visualizer TUI overlay |
 | `visualizer-data.ts` | Data loading for visualizer tabs |
-| `visualizer-views.ts` | Tab renderers (progress, deps, metrics, timeline) |
+| `visualizer-views.ts` | Tab renderers (progress, deps, metrics, timeline, discussion status) |
 | `metrics.ts` | Token and cost tracking ledger |
 | `state.ts` | State derivation from disk |
+| `session-lock.ts` | OS-level exclusive session locking (proper-lockfile) |
+| `crash-recovery.ts` | Lock file management for crash detection and recovery |
 | `preferences.ts` | Preference loading, merging, validation |
+| `git-service.ts` | Git operations — commit, merge, worktree sync, completed-units cross-boundary sync |
+| `unit-id.ts` | Centralized `parseUnitId()` — milestone/slice/task extraction from unit IDs |
+| `error-utils.ts` | `getErrorMessage()` — unified error-to-string conversion |
+| `roadmap-slices.ts` | Roadmap parser with prose fallback for LLM-generated variants |
+| `memory-extractor.ts` | Extract reusable knowledge from session transcripts |
+| `memory-store.ts` | Persistent memory store for cross-session knowledge |
 | `queue-order.ts` | Milestone queue ordering |

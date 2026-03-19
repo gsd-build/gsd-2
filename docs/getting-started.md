@@ -6,7 +6,20 @@
 npm install -g gsd-pi
 ```
 
-Requires Node.js ≥ 20.6.0 (22+ recommended) and Git.
+Requires Node.js ≥ 22.0.0 (24 LTS recommended) and Git.
+
+GSD checks for updates once every 24 hours. When a new version is available, you'll see an interactive prompt at startup with the option to update immediately or skip. You can also update from within a session with `/gsd update`.
+
+### Set up API keys
+
+If you use a non-Anthropic model, you'll need a search API key for web search. Run `/gsd config` to set keys globally — they're saved to `~/.gsd/agent/auth.json` and apply to all projects:
+
+```bash
+# Inside any GSD session:
+/gsd config
+```
+
+See [Global API Keys](./configuration.md#global-api-keys-gsd-config) for details on supported keys.
 
 ### VS Code Extension
 
@@ -149,3 +162,23 @@ Shows each session's date, message count, and first-message preview so you can c
 - [Auto Mode](./auto-mode.md) — deep dive into autonomous execution
 - [Configuration](./configuration.md) — model selection, timeouts, budgets
 - [Commands Reference](./commands.md) — all commands and shortcuts
+
+## Troubleshooting
+
+### `gsd` command runs `git svn dcommit` instead of GSD
+
+The [oh-my-zsh git plugin](https://github.com/ohmyzsh/ohmyzsh/tree/master/plugins/git) defines `alias gsd='git svn dcommit'`, which shadows the GSD binary.
+
+**Option 1** — Remove the alias in your `~/.zshrc` (add after the `source $ZSH/oh-my-zsh.sh` line):
+
+```bash
+unalias gsd 2>/dev/null
+```
+
+**Option 2** — Use the alternative binary name:
+
+```bash
+gsd-cli
+```
+
+Both `gsd` and `gsd-cli` point to the same binary.

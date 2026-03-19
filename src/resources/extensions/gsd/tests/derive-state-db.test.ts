@@ -103,6 +103,7 @@ async function main(): Promise<void> {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
       writeFile(base, 'milestones/M001/slices/S01/S01-PLAN.md', PLAN_CONTENT);
       writeFile(base, 'milestones/M001/slices/S01/tasks/.gitkeep', '');
+      writeFile(base, 'milestones/M001/slices/S01/tasks/T01-PLAN.md', '# T01 Plan');
       writeFile(base, 'REQUIREMENTS.md', REQUIREMENTS_CONTENT);
 
       // Derive state from files only (no DB)
@@ -166,6 +167,7 @@ async function main(): Promise<void> {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
       writeFile(base, 'milestones/M001/slices/S01/S01-PLAN.md', PLAN_CONTENT);
       writeFile(base, 'milestones/M001/slices/S01/tasks/.gitkeep', '');
+      writeFile(base, 'milestones/M001/slices/S01/tasks/T01-PLAN.md', '# T01 Plan');
 
       // No DB open — isDbAvailable() is false
       assertTrue(!isDbAvailable(), 'fallback: DB is not available');
@@ -189,6 +191,7 @@ async function main(): Promise<void> {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
       writeFile(base, 'milestones/M001/slices/S01/S01-PLAN.md', PLAN_CONTENT);
       writeFile(base, 'milestones/M001/slices/S01/tasks/.gitkeep', '');
+      writeFile(base, 'milestones/M001/slices/S01/tasks/T01-PLAN.md', '# T01 Plan');
 
       // Open DB but insert nothing — empty artifacts table
       openDatabase(':memory:');
@@ -219,6 +222,7 @@ async function main(): Promise<void> {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
       writeFile(base, 'milestones/M001/slices/S01/S01-PLAN.md', PLAN_CONTENT);
       writeFile(base, 'milestones/M001/slices/S01/tasks/.gitkeep', '');
+      writeFile(base, 'milestones/M001/slices/S01/tasks/T01-PLAN.md', '# T01 Plan');
       writeFile(base, 'REQUIREMENTS.md', REQUIREMENTS_CONTENT);
 
       // Open DB but only insert the roadmap — plan and requirements missing from DB
@@ -348,6 +352,7 @@ async function main(): Promise<void> {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
       writeFile(base, 'milestones/M001/slices/S01/S01-PLAN.md', PLAN_CONTENT);
       writeFile(base, 'milestones/M001/slices/S01/tasks/.gitkeep', '');
+      writeFile(base, 'milestones/M001/slices/S01/tasks/T01-PLAN.md', '# T01 Plan');
 
       openDatabase(':memory:');
       insertArtifactRow('milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT, {

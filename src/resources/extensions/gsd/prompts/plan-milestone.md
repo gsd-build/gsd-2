@@ -12,11 +12,35 @@ All relevant context has been preloaded below — start working immediately with
 
 ## Your Role in the Pipeline
 
-A **researcher agent** already explored the codebase and documented findings in the milestone research doc (inlined above, if present). It identified key files, technology choices, constraints, and risks. **Trust the research.** Your job is strategic decomposition — turning findings into an ordered set of demoable slices — not re-exploration. Don't read code files the research already summarized unless something is ambiguous or missing.
+You are the first deep look at this milestone. You have full tool access — explore the codebase, look up docs, investigate technology choices. Your job is to understand the landscape and then strategically decompose the work into demoable slices.
 
-After you finish, each slice goes through its own research → plan → execute cycle. Slice researchers dive deeper into the specific area. Slice planners decompose into tasks. Executors build each task. Your roadmap sets the strategic frame for all of them.
+After you finish, each slice goes through its own plan → execute cycle. Slice planners decompose into tasks. Executors build each task. Your roadmap sets the strategic frame for all of them.
 
-Narrate your decomposition reasoning — why you're grouping work this way, what risks are driving the order, what verification strategy you're choosing and why.
+### Explore First, Then Decompose
+
+Before decomposing, build your understanding:
+
+1. **Codebase exploration.** For small/familiar codebases, use `rg`, `find`, and targeted reads. For large or unfamiliar codebases, use `scout` to build a broad map efficiently before diving in.
+2. **Library docs.** Use `resolve_library` / `get_library_docs` for unfamiliar libraries — skip this for libraries already used in the codebase.
+3. **Skill Discovery ({{skillDiscoveryMode}}):**{{skillDiscoveryInstructions}}
+4. **Requirements analysis.** If `.gsd/REQUIREMENTS.md` exists, research against it. Identify which Active requirements are table stakes, likely omissions, overbuilt risks, or domain-standard behaviors.
+
+### Strategic Questions to Answer
+
+- What should be proven first?
+- What existing patterns should be reused?
+- What boundary contracts matter?
+- What constraints does the existing codebase impose?
+- Are there known failure modes that should shape slice ordering?
+- If requirements exist: what table stakes, expected behaviors, continuity expectations, launchability expectations, or failure-visibility expectations are missing, optional, or clearly out of scope?
+
+### Source Files
+
+{{sourceFilePaths}}
+
+If milestone research exists (inlined above), trust those findings and skip redundant exploration. If findings are significant and no research file exists yet, write `{{researchOutputPath}}`.
+
+Narrate your decomposition reasoning — why you're grouping work this way, what risks are driving the order, what verification strategy you're choosing and why. Use complete sentences rather than planner shorthand or fragmentary notes.
 
 Then:
 1. Use the **Roadmap** output template from the inlined context above
@@ -25,7 +49,6 @@ Then:
 4. Order by risk (high-risk first)
 5. Write `{{outputPath}}` with checkboxes, risk, depends, demo sentences, proof strategy, verification classes, milestone definition of done, **requirement coverage**, and a boundary map. Write success criteria as observable truths, not implementation tasks. If the milestone crosses multiple runtime boundaries, include an explicit final integration slice that proves the assembled system works end-to-end in a real environment
 6. If planning produced structural decisions (e.g. slice ordering rationale, technology choices, scope exclusions), append them to `.gsd/DECISIONS.md` (use the **Decisions** output template from the inlined context above if the file doesn't exist yet)
-7. Update `.gsd/STATE.md`
 
 ## Requirement Mapping Rules
 

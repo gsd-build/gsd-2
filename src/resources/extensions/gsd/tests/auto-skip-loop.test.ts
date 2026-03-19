@@ -17,8 +17,8 @@ import { tmpdir } from "node:os";
 import {
   _getUnitConsecutiveSkips,
   _resetUnitConsecutiveSkips,
-  MAX_CONSECUTIVE_SKIPS,
 } from "../auto.ts";
+import { MAX_CONSECUTIVE_SKIPS } from "../auto/session.ts";
 import { persistCompletedKey, removePersistedKey, loadPersistedKeys } from "../auto-recovery.ts";
 import { createTestContext } from "./test-helpers.ts";
 

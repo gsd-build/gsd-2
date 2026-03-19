@@ -4,41 +4,7 @@ import type { Theme } from "@gsd/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@gsd/pi-tui";
 import type { VisualizerData, VisualizerMilestone, SliceVerification, VisualizerSliceActivity, VisualizerStats, VisualizerSliceRef } from "./visualizer-data.js";
 import { formatCost, formatTokenCount, classifyUnitPhase } from "./metrics.js";
-
-// ─── Local Helpers ───────────────────────────────────────────────────────────
-
-function formatDuration(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const rs = s % 60;
-  if (m < 60) return `${m}m ${rs}s`;
-  const h = Math.floor(m / 60);
-  const rm = m % 60;
-  return `${h}h ${rm}m`;
-}
-
-function padRight(content: string, width: number): string {
-  const vis = visibleWidth(content);
-  return content + " ".repeat(Math.max(0, width - vis));
-}
-
-function joinColumns(left: string, right: string, width: number): string {
-  const leftW = visibleWidth(left);
-  const rightW = visibleWidth(right);
-  if (leftW + rightW + 2 > width) {
-    return truncateToWidth(`${left}  ${right}`, width);
-  }
-  return left + " ".repeat(width - leftW - rightW) + right;
-}
-
-function sparkline(values: number[]): string {
-  if (values.length === 0) return "";
-  const chars = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588";
-  const max = Math.max(...values);
-  if (max === 0) return chars[0].repeat(values.length);
-  return values.map(v => chars[Math.min(7, Math.floor((v / max) * 7))]).join("");
-}
+import { formatDuration, padRight, joinColumns, sparkline, STATUS_GLYPH, STATUS_COLOR } from "../shared/mod.js";
 
 function formatCompletionDate(input: string): string {
   if (!input) return "unknown";
@@ -168,18 +134,9 @@ export function renderProgressView(
     }
 
     // Milestone header line
-    const statusGlyph =
-      ms.status === "complete"
-        ? th.fg("success", "\u2713")
-        : ms.status === "active"
-          ? th.fg("accent", "\u25b8")
-          : th.fg("dim", "\u25cb");
-    const statusLabel =
-      ms.status === "complete"
-        ? th.fg("success", "complete")
-        : ms.status === "active"
-          ? th.fg("accent", "active")
-          : th.fg("dim", "pending");
+    const msStatus = ms.status === "complete" ? "done" : ms.status === "active" ? "active" : ms.status === "parked" ? "paused" : "pending";
+    const statusGlyph = th.fg(STATUS_COLOR[msStatus], STATUS_GLYPH[msStatus]);
+    const statusLabel = th.fg(STATUS_COLOR[msStatus], ms.status);
 
     const collapseIndicator = collapsed?.has(ms.id) ? "[+] " : "";
     const msLeft = `${collapseIndicator}${ms.id}: ${ms.title}`;
@@ -206,11 +163,8 @@ export function renderProgressView(
       }
 
       // Slice line
-      const slGlyph = sl.done
-        ? th.fg("success", "\u2713")
-        : sl.active
-          ? th.fg("accent", "\u25b8")
-          : th.fg("dim", "\u25cb");
+      const slStatus = sl.done ? "done" : sl.active ? "active" : "pending";
+      const slGlyph = th.fg(STATUS_COLOR[slStatus], STATUS_GLYPH[slStatus]);
       const riskColor =
         sl.risk === "high"
           ? "warning"
@@ -241,11 +195,8 @@ export function renderProgressView(
       // Show tasks for active slice
       if (sl.active && sl.tasks.length > 0) {
         for (const task of sl.tasks) {
-          const tGlyph = task.done
-            ? th.fg("success", "\u2713")
-            : task.active
-              ? th.fg("accent", "\u25b8")
-              : th.fg("dim", "\u25cb");
+          const tStatus = task.done ? "done" : task.active ? "active" : "pending";
+          const tGlyph = th.fg(STATUS_COLOR[tStatus], STATUS_GLYPH[tStatus]);
           const estimateStr = task.estimate ? th.fg("dim", ` (${task.estimate})`) : "";
           lines.push(`      ${tGlyph} ${task.id}: ${task.title}${estimateStr}`);
         }
@@ -683,10 +634,8 @@ function renderTimelineList(data: VisualizerData, th: Theme, width: number): str
     const time = `${hh}:${mm}`;
 
     const duration = unit.finishedAt - unit.startedAt;
-    const glyph =
-      unit.finishedAt > 0
-        ? th.fg("success", "\u2713")
-        : th.fg("accent", "\u25b8");
+    const unitStatus = unit.finishedAt > 0 ? "done" : "active";
+    const glyph = th.fg(STATUS_COLOR[unitStatus], STATUS_GLYPH[unitStatus]);
 
     const typeLabel = padRight(unit.type, 16);
     const idLabel = padRight(unit.id, 14);
@@ -802,9 +751,8 @@ export function renderAgentView(
   }
 
   // Status line
-  const statusDot = activity.active
-    ? th.fg("success", "\u25cf")
-    : th.fg("dim", "\u25cb");
+  const agentStatus = activity.active ? "active" : "pending";
+  const statusDot = th.fg(STATUS_COLOR[agentStatus], STATUS_GLYPH[agentStatus]);
   const statusText = activity.active ? "ACTIVE" : "IDLE";
   const elapsedStr = activity.active ? formatDuration(activity.elapsed) : "\u2014";
 
@@ -877,7 +825,7 @@ export function renderAgentView(
       const typeLabel = padRight(u.type, 16);
       lines.push(
         truncateToWidth(
-          `  ${hh}:${mm}  ${th.fg("success", "\u2713")} ${typeLabel} ${padRight(u.id, 16)} ${dur}  ${cost}`,
+          `  ${hh}:${mm}  ${th.fg(STATUS_COLOR.done, STATUS_GLYPH.done)} ${typeLabel} ${padRight(u.id, 16)} ${dur}  ${cost}`,
           width,
         ),
       );
@@ -920,7 +868,7 @@ export function renderChangelogView(
       for (const f of entry.filesModified) {
         lines.push(
           truncateToWidth(
-            `    ${th.fg("success", "\u2713")} ${f.path} \u2014 ${f.description}`,
+            `    ${th.fg(STATUS_COLOR.done, STATUS_GLYPH.done)} ${f.path} \u2014 ${f.description}`,
             width,
           ),
         );
@@ -1164,6 +1112,60 @@ export function renderHealthView(
   lines.push("");
   lines.push(`  Tool calls: ${th.fg("text", String(health.toolCalls))}`);
   lines.push(`  Messages: ${th.fg("text", String(health.assistantMessages))} sent / ${th.fg("text", String(health.userMessages))} received`);
+
+  // Environment section — issues only (from doctor-environment.ts, #1221)
+  if (health.environmentIssues?.length > 0) {
+    lines.push("");
+    lines.push(th.fg("accent", th.bold("Environment")));
+    lines.push("");
+    for (const r of health.environmentIssues) {
+      const icon = r.status === "error" ? th.fg("error", "✗") : th.fg("warning", "⚠");
+      lines.push(`  ${icon} ${th.fg("text", r.message)}`);
+      if (r.detail) lines.push(`    ${th.fg("dim", r.detail)}`);
+    }
+  }
+
+  // Providers section
+  if (health.providers?.length > 0) {
+    lines.push("");
+    lines.push(th.fg("accent", th.bold("Providers")));
+    lines.push("");
+    const categoryOrder = ["llm", "remote", "search", "tool"];
+    const categoryLabels: Record<string, string> = { llm: "LLM", remote: "Notifications", search: "Search", tool: "Tools" };
+    const grouped = new Map<string, typeof health.providers>();
+    for (const p of health.providers) {
+      const cat = p.category;
+      if (!grouped.has(cat)) grouped.set(cat, []);
+      grouped.get(cat)!.push(p);
+    }
+    for (const cat of categoryOrder) {
+      const items = grouped.get(cat);
+      if (!items || items.length === 0) continue;
+      lines.push(`  ${th.fg("dim", categoryLabels[cat] ?? cat)}`);
+      for (const p of items) {
+        const icon = p.ok ? th.fg("success", "✓") : th.fg("error", "✗");
+        const msg = p.ok ? th.fg("dim", p.message) : th.fg("text", p.message);
+        lines.push(`    ${icon} ${msg}`);
+      }
+    }
+  }
+
+  // Skills section
+  if (health.skillSummary?.total > 0) {
+    lines.push("");
+    lines.push(th.fg("accent", th.bold("Skills")));
+    lines.push("");
+    const { total, warningCount, criticalCount, topIssue } = health.skillSummary;
+    const issueColor = criticalCount > 0 ? "error" : warningCount > 0 ? "warning" : "success";
+    const issueTag = criticalCount > 0
+      ? `${criticalCount} critical`
+      : warningCount > 0
+        ? `${warningCount} warning${warningCount > 1 ? "s" : ""}`
+        : "all healthy";
+    lines.push(`  ${th.fg("text", String(total))} skills tracked  ·  ${th.fg(issueColor, issueTag)}`);
+    if (topIssue) lines.push(`  ${th.fg("warning", "⚠")} ${th.fg("dim", topIssue)}`);
+    lines.push(`  ${th.fg("dim", "→ /gsd skill-health for full report")}`);
+  }
 
   return lines;
 }

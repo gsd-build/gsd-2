@@ -9,6 +9,7 @@ import { deriveState } from "./state.js";
 import { invalidateAllCaches } from "./cache.js";
 import { gsdRoot, resolveTasksDir, resolveSlicePath, buildTaskFileName } from "./paths.js";
 import { sendDesktopNotification } from "./notifications.js";
+import { parseUnitId } from "./unit-id.js";
 
 /**
  * Undo the last completed unit: revert git commits, remove from completed-units,
@@ -62,11 +63,10 @@ export async function handleUndo(args: string, ctx: ExtensionCommandContext, _pi
   writeFileSync(completedKeysFile, JSON.stringify(keys), "utf-8");
 
   // 3. Delete summary artifact
-  const parts = unitId.split("/");
+  const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
   let summaryRemoved = false;
-  if (parts.length === 3) {
+  if (mid && sid && tid) {
     // Task-level: M001/S01/T01
-    const [mid, sid, tid] = parts;
     const tasksDir = resolveTasksDir(basePath, mid, sid);
     if (tasksDir) {
       const summaryFile = join(tasksDir, buildTaskFileName(tid, "SUMMARY"));
@@ -75,9 +75,8 @@ export async function handleUndo(args: string, ctx: ExtensionCommandContext, _pi
         summaryRemoved = true;
       }
     }
-  } else if (parts.length === 2) {
+  } else if (mid && sid) {
     // Slice-level: M001/S01
-    const [mid, sid] = parts;
     const slicePath = resolveSlicePath(basePath, mid, sid);
     if (slicePath) {
       // Try common summary filenames
@@ -93,8 +92,7 @@ export async function handleUndo(args: string, ctx: ExtensionCommandContext, _pi
 
   // 4. Uncheck task in PLAN if execute-task
   let planUpdated = false;
-  if (unitType === "execute-task" && parts.length === 3) {
-    const [mid, sid, tid] = parts;
+  if (unitType === "execute-task" && mid && sid && tid) {
     planUpdated = uncheckTaskInPlan(basePath, mid, sid, tid);
   }
 

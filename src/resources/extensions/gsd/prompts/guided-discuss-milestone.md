@@ -91,7 +91,7 @@ Before moving to the wrap-up gate, verify you have covered:
 - options: "Yes, you got it (Recommended)", "Not quite — let me clarify"
 - **The question ID must contain `depth_verification`** (e.g. `depth_verification_confirm`) — this enables the write-gate downstream.
 
-**If `{{structuredQuestionsAvailable}}` is `false`:** ask in plain text: "Did I capture that correctly? Anything I missed?" Wait for confirmation before proceeding.
+**If `{{structuredQuestionsAvailable}}` is `false`:** ask in plain text: "Did I capture that correctly? If not, tell me what I missed." Wait for confirmation before proceeding.
 
 If they clarify, absorb the correction and re-verify.
 
@@ -104,5 +104,5 @@ Once the user confirms depth:
 1. Use the **Context** output template below
 2. `mkdir -p` the milestone directory if needed
 3. Write `{{milestoneId}}-CONTEXT.md` — preserve the user's exact terminology, emphasis, and framing. Do not paraphrase nuance into generic summaries. The context file is downstream agents' only window into this conversation.
-4. Commit: `git add {{milestoneId}}-CONTEXT.md && git commit -m "docs({{milestoneId}}): milestone context from discuss"`
+4. {{commitInstruction}}
 5. Say exactly: `"{{milestoneId}} context written."` — nothing else.

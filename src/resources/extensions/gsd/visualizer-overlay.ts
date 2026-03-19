@@ -15,24 +15,21 @@ import {
   type ProgressFilter,
 } from "./visualizer-views.js";
 import { writeExportFile } from "./export.js";
+import { stripAnsi } from "../shared/mod.js";
 
 const TAB_COUNT = 10;
 const TAB_LABELS = [
   "1 Progress",
-  "2 Deps",
-  "3 Metrics",
-  "4 Timeline",
-  "5 Agent",
-  "6 Changes",
-  "7 Export",
+  "2 Timeline",
+  "3 Deps",
+  "4 Metrics",
+  "5 Health",
+  "6 Agent",
+  "7 Changes",
   "8 Knowledge",
   "9 Captures",
-  "0 Health",
+  "0 Export",
 ];
-
-function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*m/g, "");
-}
 
 export class GSDVisualizerOverlay {
   private tui: { requestRender: () => void };
@@ -62,6 +59,7 @@ export class GSDVisualizerOverlay {
   private lastVisibleRows = 20;
   collapsedMilestones = new Set<string>();
   showHelp = false;
+  private resizeHandler: (() => void) | null = null;
 
   constructor(
     tui: { requestRender: () => void },
@@ -76,8 +74,19 @@ export class GSDVisualizerOverlay {
     // Enable SGR mouse tracking
     process.stdout.write("\x1b[?1003h\x1b[?1006h");
 
+    // Invalidate cache on terminal resize
+    this.resizeHandler = () => {
+      if (this.disposed) return;
+      this.invalidate();
+      this.tui.requestRender();
+    };
+    process.stdout.on("resize", this.resizeHandler);
+
     loadVisualizerData(this.basePath).then((d) => {
       this.data = d;
+      this.loading = false;
+      this.tui.requestRender();
+    }).catch(() => {
       this.loading = false;
       this.tui.requestRender();
     });
@@ -88,8 +97,8 @@ export class GSDVisualizerOverlay {
         this.data = d;
         this.invalidate();
         this.tui.requestRender();
-      });
-    }, 2000);
+      }).catch(() => {}); // retry on next interval
+    }, 5000);
   }
 
   private parseSGRMouse(data: string): { button: number; x: number; y: number; press: boolean } | null {
@@ -262,7 +271,7 @@ export class GSDVisualizerOverlay {
     }
 
     // Export tab key handling
-    if (this.activeTab === 6 && this.data) {
+    if (this.activeTab === 9 && this.data) {
       if (data === "m" || data === "j" || data === "s") {
         this.handleExportKey(data);
         return;
@@ -372,23 +381,23 @@ export class GSDVisualizerOverlay {
         return renderProgressView(this.data, th, width, filter, this.collapsedMilestones);
       }
       case 1:
-        return renderDepsView(this.data, th, width);
-      case 2:
-        return renderMetricsView(this.data, th, width);
-      case 3:
         return renderTimelineView(this.data, th, width);
+      case 2:
+        return renderDepsView(this.data, th, width);
+      case 3:
+        return renderMetricsView(this.data, th, width);
       case 4:
-        return renderAgentView(this.data, th, width);
+        return renderHealthView(this.data, th, width);
       case 5:
-        return renderChangelogView(this.data, th, width);
+        return renderAgentView(this.data, th, width);
       case 6:
-        return renderExportView(this.data, th, width, this.lastExportPath);
+        return renderChangelogView(this.data, th, width);
       case 7:
         return renderKnowledgeView(this.data, th, width);
       case 8:
         return renderCapturesView(this.data, th, width);
       case 9:
-        return renderHealthView(this.data, th, width);
+        return renderExportView(this.data, th, width, this.lastExportPath);
       default:
         return [];
     }
@@ -470,7 +479,7 @@ export class GSDVisualizerOverlay {
       let viewLines = this.renderTabContent(this.activeTab, innerWidth);
 
       // Show export status message if present
-      if (this.exportStatus && this.activeTab === 6) {
+      if (this.exportStatus && this.activeTab === 9) {
         content.push(th.fg("success", this.exportStatus));
         content.push("");
         this.exportStatus = undefined;
@@ -547,6 +556,10 @@ export class GSDVisualizerOverlay {
   dispose(): void {
     this.disposed = true;
     clearInterval(this.refreshTimer);
+    if (this.resizeHandler) {
+      process.stdout.removeListener("resize", this.resizeHandler);
+      this.resizeHandler = null;
+    }
     // Disable SGR mouse tracking
     process.stdout.write("\x1b[?1003l\x1b[?1006l");
   }

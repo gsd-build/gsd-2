@@ -3,6 +3,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
+import {
+	COMPACTION_KEEP_RECENT_TOKENS,
+	COMPACTION_RESERVE_TOKENS,
+	RETRY_BASE_DELAY_MS,
+	RETRY_MAX_DELAY_MS,
+} from "./constants.js";
 import type { BashInterceptorRule } from "./tools/bash-interceptor.js";
 
 export interface CompactionSettings {
@@ -134,6 +140,8 @@ export interface Settings {
 	thinkingBudgets?: ThinkingBudgetsSettings; // Custom token budgets for thinking levels
 	editorPaddingX?: number; // Horizontal padding for input editor (default: 0)
 	autocompleteMaxVisible?: number; // Max visible items in autocomplete dropdown (default: 5)
+	respectGitignoreInPicker?: boolean; // When false, @ file picker shows gitignored files (default: true)
+	searchExcludeDirs?: string[]; // Directories to exclude from @ file search (e.g., ["node_modules", ".git", "dist"])
 	showHardwareCursor?: boolean; // Show terminal cursor while still positioning it for IME
 	markdown?: MarkdownSettings;
 	memory?: MemorySettings;
@@ -142,6 +150,7 @@ export interface Settings {
 	taskIsolation?: TaskIsolationSettings;
 	fallback?: FallbackSettings;
 	modelDiscovery?: ModelDiscoverySettings;
+	editMode?: "standard" | "hashline"; // Edit tool mode: "standard" (text match) or "hashline" (LINE#ID anchors). Default: "standard"
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
@@ -708,11 +717,11 @@ export class SettingsManager {
 	}
 
 	getCompactionReserveTokens(): number {
-		return this.settings.compaction?.reserveTokens ?? 16384;
+		return this.settings.compaction?.reserveTokens ?? COMPACTION_RESERVE_TOKENS;
 	}
 
 	getCompactionKeepRecentTokens(): number {
-		return this.settings.compaction?.keepRecentTokens ?? 20000;
+		return this.settings.compaction?.keepRecentTokens ?? COMPACTION_KEEP_RECENT_TOKENS;
 	}
 
 	getCompactionSettings(): { enabled: boolean; reserveTokens: number; keepRecentTokens: number } {
@@ -725,7 +734,7 @@ export class SettingsManager {
 
 	getBranchSummarySettings(): { reserveTokens: number; skipPrompt: boolean } {
 		return {
-			reserveTokens: this.settings.branchSummary?.reserveTokens ?? 16384,
+			reserveTokens: this.settings.branchSummary?.reserveTokens ?? COMPACTION_RESERVE_TOKENS,
 			skipPrompt: this.settings.branchSummary?.skipPrompt ?? false,
 		};
 	}
@@ -751,8 +760,8 @@ export class SettingsManager {
 		return {
 			enabled: this.getRetryEnabled(),
 			maxRetries: this.settings.retry?.maxRetries ?? 3,
-			baseDelayMs: this.settings.retry?.baseDelayMs ?? 2000,
-			maxDelayMs: this.settings.retry?.maxDelayMs ?? 300000,
+			baseDelayMs: this.settings.retry?.baseDelayMs ?? RETRY_BASE_DELAY_MS,
+			maxDelayMs: this.settings.retry?.maxDelayMs ?? RETRY_MAX_DELAY_MS,
 		};
 	}
 
@@ -1023,6 +1032,26 @@ export class SettingsManager {
 		this.save();
 	}
 
+	getRespectGitignoreInPicker(): boolean {
+		return this.settings.respectGitignoreInPicker ?? true;
+	}
+
+	setRespectGitignoreInPicker(value: boolean): void {
+		this.globalSettings.respectGitignoreInPicker = value;
+		this.markModified("respectGitignoreInPicker");
+		this.save();
+	}
+
+	getSearchExcludeDirs(): string[] {
+		return this.settings.searchExcludeDirs ?? [];
+	}
+
+	setSearchExcludeDirs(dirs: string[]): void {
+		this.globalSettings.searchExcludeDirs = dirs.filter(Boolean);
+		this.markModified("searchExcludeDirs");
+		this.save();
+	}
+
 	getCodeBlockIndent(): string {
 		return this.settings.markdown?.codeBlockIndent ?? "  ";
 	}
@@ -1125,6 +1154,16 @@ export class SettingsManager {
 		}
 		this.globalSettings.modelDiscovery.enabled = enabled;
 		this.markModified("modelDiscovery", "enabled");
+		this.save();
+	}
+
+	getEditMode(): "standard" | "hashline" {
+		return this.settings.editMode ?? "standard";
+	}
+
+	setEditMode(mode: "standard" | "hashline"): void {
+		this.globalSettings.editMode = mode;
+		this.markModified("editMode");
 		this.save();
 	}
 }

@@ -11,26 +11,20 @@ import { truncateToWidth, visibleWidth, matchesKey, Key } from "@gsd/pi-tui";
 import { deriveState } from "./state.js";
 import { loadFile, parseRoadmap, parsePlan } from "./files.js";
 import { resolveMilestoneFile, resolveSliceFile } from "./paths.js";
-import { getAutoDashboardData, type AutoDashboardData } from "./auto.js";
+import { getAutoDashboardData } from "./auto.js";
+import type { AutoDashboardData } from "./auto-dashboard.js";
 import {
   getLedger, getProjectTotals, aggregateByPhase, aggregateBySlice,
-  aggregateByModel, formatCost, formatTokenCount, formatCostProjection,
+  aggregateByModel, aggregateCacheHitRate, formatCost, formatTokenCount, formatCostProjection,
   type UnitMetrics,
 } from "./metrics.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { getActiveWorktreeName } from "./worktree-command.js";
 import { getWorkerBatches, hasActiveWorkers, type WorkerEntry } from "../subagent/worker-registry.js";
-
-function formatDuration(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const rs = s % 60;
-  if (m < 60) return `${m}m ${rs}s`;
-  const h = Math.floor(m / 60);
-  const rm = m % 60;
-  return `${h}h ${rm}m`;
-}
+import { formatDuration, padRight, joinColumns, centerLine, fitColumns, STATUS_GLYPH, STATUS_COLOR } from "../shared/mod.js";
+import { estimateTimeRemaining } from "./auto-dashboard.js";
+import { computeProgressScore, formatProgressLine } from "./progress-score.js";
+import { runEnvironmentChecks, type EnvironmentCheckResult } from "./doctor-environment.js";
 
 function unitLabel(type: string): string {
   switch (type) {
@@ -48,38 +42,6 @@ function unitLabel(type: string): string {
   }
 }
 
-function centerLine(content: string, width: number): string {
-  const vis = visibleWidth(content);
-  if (vis >= width) return truncateToWidth(content, width);
-  const leftPad = Math.floor((width - vis) / 2);
-  return " ".repeat(leftPad) + content;
-}
-
-function padRight(content: string, width: number): string {
-  const vis = visibleWidth(content);
-  return content + " ".repeat(Math.max(0, width - vis));
-}
-
-function joinColumns(left: string, right: string, width: number): string {
-  const leftW = visibleWidth(left);
-  const rightW = visibleWidth(right);
-  if (leftW + rightW + 2 > width) {
-    return truncateToWidth(`${left}  ${right}`, width);
-  }
-  return left + " ".repeat(width - leftW - rightW) + right;
-}
-
-function fitColumns(parts: string[], width: number, separator = "  "): string {
-  const filtered = parts.filter(Boolean);
-  if (filtered.length === 0) return "";
-  let result = filtered[0];
-  for (let i = 1; i < filtered.length; i++) {
-    const candidate = `${result}${separator}${filtered[i]}`;
-    if (visibleWidth(candidate) > width) break;
-    result = candidate;
-  }
-  return truncateToWidth(result, width);
-}
 
 export class GSDDashboardOverlay {
   private tui: { requestRender: () => void };
@@ -95,6 +57,7 @@ export class GSDDashboardOverlay {
   private loadedDashboardIdentity?: string;
   private refreshInFlight: Promise<void> | null = null;
   private disposed = false;
+  private resizeHandler: (() => void) | null = null;
 
   constructor(
     tui: { requestRender: () => void },
@@ -105,6 +68,14 @@ export class GSDDashboardOverlay {
     this.theme = theme;
     this.onClose = onClose;
     this.dashData = getAutoDashboardData();
+
+    // Invalidate cache on terminal resize
+    this.resizeHandler = () => {
+      if (this.disposed) return;
+      this.invalidate();
+      this.tui.requestRender();
+    };
+    process.stdout.on("resize", this.resizeHandler);
 
     this.scheduleRefresh(true);
 
@@ -233,7 +204,7 @@ export class GSDDashboardOverlay {
 
   handleInput(data: string): void {
     if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c")) || matchesKey(data, Key.ctrlAlt("g"))) {
-      clearInterval(this.refreshTimer);
+      this.dispose();
       this.onClose();
       return;
     }
@@ -332,12 +303,24 @@ export class GSDDashboardOverlay {
     const worktreeTag = worktreeName
       ? `  ${th.fg("warning", `⎇ ${worktreeName}`)}`
       : "";
-    const elapsed = this.dashData.active || this.dashData.paused
-      ? th.fg("dim", formatDuration(this.dashData.elapsed))
-      : isRemote
-        ? th.fg("dim", `since ${this.dashData.remoteSession!.startedAt.replace("T", " ").slice(0, 19)}`)
-        : "";
-    lines.push(row(joinColumns(`${title}  ${status}${worktreeTag}`, elapsed, contentWidth)));
+    let elapsedParts = "";
+    if (this.dashData.active || this.dashData.paused) {
+      elapsedParts = th.fg("dim", formatDuration(this.dashData.elapsed));
+      const eta = estimateTimeRemaining();
+      if (eta) elapsedParts += th.fg("dim", `  ·  ${eta}`);
+    } else if (isRemote) {
+      elapsedParts = th.fg("dim", `since ${this.dashData.remoteSession!.startedAt.replace("T", " ").slice(0, 19)}`);
+    }
+    lines.push(row(joinColumns(`${title}  ${status}${worktreeTag}`, elapsedParts, contentWidth)));
+
+    // Progress score — traffic light indicator (#1221)
+    if (this.dashData.active || this.dashData.paused) {
+      const progressScore = computeProgressScore();
+      const progressIcon = progressScore.level === "green" ? th.fg("success", "●")
+        : progressScore.level === "yellow" ? th.fg("warning", "●")
+          : th.fg("error", "●");
+      lines.push(row(`${progressIcon} ${th.fg("text", progressScore.summary)}`));
+    }
     lines.push(blank());
 
     if (this.dashData.currentUnit) {
@@ -435,23 +418,19 @@ export class GSDDashboardOverlay {
       lines.push(blank());
 
       for (const s of mv.slices) {
-        const icon = s.done ? th.fg("success", "✓")
-          : s.active ? th.fg("accent", "▸")
-          : th.fg("dim", "○");
-        const titleText = s.active ? th.fg("accent", `${s.id}: ${s.title}`)
-          : s.done ? th.fg("muted", `${s.id}: ${s.title}`)
-          : th.fg("dim", `${s.id}: ${s.title}`);
+        const sliceStatus = s.done ? "done" : s.active ? "active" : "pending";
+        const icon = th.fg(STATUS_COLOR[sliceStatus], STATUS_GLYPH[sliceStatus]);
+        const titleColor = s.active ? "accent" : s.done ? "muted" : "dim";
+        const titleText = th.fg(titleColor, `${s.id}: ${s.title}`);
         const risk = th.fg("dim", s.risk);
         lines.push(row(joinColumns(`  ${icon} ${titleText}`, risk, contentWidth)));
 
         if (s.active && s.tasks.length > 0) {
           for (const t of s.tasks) {
-            const tIcon = t.done ? th.fg("success", "✓")
-              : t.active ? th.fg("warning", "▸")
-              : th.fg("dim", "·");
-            const tTitle = t.active ? th.fg("warning", `${t.id}: ${t.title}`)
-              : t.done ? th.fg("muted", `${t.id}: ${t.title}`)
-              : th.fg("dim", `${t.id}: ${t.title}`);
+            const taskStatus = t.done ? "done" : t.active ? "active" : "pending";
+            const tIcon = th.fg(STATUS_COLOR[taskStatus], STATUS_GLYPH[taskStatus]);
+            const tColor = t.active ? "warning" : t.done ? "muted" : "dim";
+            const tTitle = th.fg(tColor, `${t.id}: ${t.title}`);
             lines.push(row(`      ${tIcon} ${truncateToWidth(tTitle, contentWidth - 6)}`));
           }
         }
@@ -477,18 +456,21 @@ export class GSDDashboardOverlay {
 
       const recent = [...this.dashData.completedUnits].reverse().slice(0, 10);
       for (const u of recent) {
-        const left = `  ${th.fg("success", "✓")} ${th.fg("muted", unitLabel(u.type))} ${th.fg("muted", u.id)}`;
-
-        // Budget indicators from ledger
+        // Budget indicators from ledger — use warning glyph for pressured units
         const ledgerEntry = ledgerLookup.get(`${u.type}:${u.id}`);
+        const hadPressure = ledgerEntry?.continueHereFired === true;
+        const hadTruncation = (ledgerEntry?.truncationSections ?? 0) > 0;
+        const unitGlyph = hadPressure
+          ? th.fg(STATUS_COLOR.warning, STATUS_GLYPH.warning)
+          : th.fg(STATUS_COLOR.done, STATUS_GLYPH.done);
+        const left = `  ${unitGlyph} ${th.fg("muted", unitLabel(u.type))} ${th.fg("muted", u.id)}`;
+
         let budgetMarkers = "";
-        if (ledgerEntry) {
-          if (ledgerEntry.truncationSections && ledgerEntry.truncationSections > 0) {
-            budgetMarkers += th.fg("warning", ` ▼${ledgerEntry.truncationSections}`);
-          }
-          if (ledgerEntry.continueHereFired === true) {
-            budgetMarkers += th.fg("error", " → wrap-up");
-          }
+        if (hadTruncation) {
+          budgetMarkers += th.fg("warning", ` ▼${ledgerEntry!.truncationSections}`);
+        }
+        if (hadPressure) {
+          budgetMarkers += th.fg("error", " → wrap-up");
         }
 
         const right = th.fg("dim", formatDuration(u.finishedAt - u.startedAt));
@@ -509,8 +491,12 @@ export class GSDDashboardOverlay {
       lines.push(row(th.fg("text", th.bold("Cost & Usage"))));
       lines.push(blank());
 
+      // Show cost or request count (for copilot/subscription users where cost is 0)
+      const costOrReqs = totals.cost > 0
+        ? `${th.fg("warning", formatCost(totals.cost))} total`
+        : `${th.fg("text", String(totals.apiRequests))} requests`;
       lines.push(row(fitColumns([
-        `${th.fg("warning", formatCost(totals.cost))} total`,
+        costOrReqs,
         `${th.fg("text", formatTokenCount(totals.tokens.total))} tokens`,
         `${th.fg("text", String(totals.toolCalls))} tools`,
         `${th.fg("text", String(totals.units))} units`,
@@ -596,6 +582,29 @@ export class GSDDashboardOverlay {
 
       lines.push(blank());
       lines.push(row(`${th.fg("dim", "avg/unit:")} ${th.fg("text", formatCost(totals.cost / totals.units))}  ${th.fg("dim", "·")}  ${th.fg("text", formatTokenCount(Math.round(totals.tokens.total / totals.units)))} tokens`));
+
+      // Cache hit rate
+      const cacheRate = aggregateCacheHitRate();
+      if (cacheRate > 0) {
+        lines.push(row(`${th.fg("dim", "cache hit rate:")} ${th.fg("text", `${cacheRate}%`)}`));
+      }
+    }
+
+    // Environment health section (#1221) — only show issues
+    const envResults = runEnvironmentChecks(this.dashData.basePath || process.cwd());
+    const envIssues = envResults.filter(r => r.status !== "ok");
+    if (envIssues.length > 0) {
+      lines.push(blank());
+      lines.push(hr());
+      lines.push(row(th.fg("text", th.bold("Environment"))));
+      lines.push(blank());
+      for (const r of envIssues) {
+        const icon = r.status === "error" ? th.fg("error", "✗") : th.fg("warning", "⚠");
+        lines.push(row(`  ${icon} ${th.fg("text", r.message)}`));
+        if (r.detail) {
+          lines.push(row(th.fg("dim", `     ${r.detail}`)));
+        }
+      }
     }
 
     lines.push(blank());
@@ -634,6 +643,10 @@ export class GSDDashboardOverlay {
   dispose(): void {
     this.disposed = true;
     clearInterval(this.refreshTimer);
+    if (this.resizeHandler) {
+      process.stdout.removeListener("resize", this.resizeHandler);
+      this.resizeHandler = null;
+    }
   }
 }
 

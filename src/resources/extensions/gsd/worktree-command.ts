@@ -12,9 +12,9 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent";
 import { loadPrompt } from "./prompt-loader.js";
-import { autoCommitCurrentBranch } from "./worktree.js";
+import { autoCommitCurrentBranch, getMainBranch, resolveGitHeadPath, nudgeGitBranchCache } from "./worktree.js";
 import { runWorktreePostCreateHook } from "./auto-worktree.js";
-import { showConfirm } from "../shared/confirm-ui.js";
+import { showConfirm } from "../shared/mod.js";
 import { gsdRoot, milestonesDir } from "./paths.js";
 import {
   createWorktree,
@@ -23,7 +23,6 @@ import {
   mergeWorktreeToMain,
   diffWorktreeAll,
   diffWorktreeNumstat,
-  getMainBranch,
   getWorktreeGSDDiff,
   getWorktreeCodeDiff,
   getWorktreeLog,
@@ -32,9 +31,10 @@ import {
 } from "./worktree-manager.js";
 import { inferCommitType } from "./git-service.js";
 import type { FileLineStat } from "./worktree-manager.js";
-import { existsSync, realpathSync, readFileSync, readdirSync, rmSync, unlinkSync, utimesSync } from "node:fs";
+import { existsSync, realpathSync, readdirSync, rmSync, unlinkSync } from "node:fs";
 import { nativeMergeAbort } from "./native-git-bridge.js";
-import { join, resolve, sep } from "node:path";
+import { join, sep } from "node:path";
+import { getErrorMessage } from "./error-utils.js";
 
 /**
  * Tracks the original project root so we can switch back.
@@ -42,62 +42,28 @@ import { join, resolve, sep } from "node:path";
  */
 let originalCwd: string | null = null;
 
+function ensureWorktreeStateInitialized(): void {
+  if (originalCwd) return;
+  const cwd = process.cwd();
+  const marker = `${sep}.gsd${sep}worktrees${sep}`;
+  const markerIdx = cwd.indexOf(marker);
+  if (markerIdx !== -1) {
+    originalCwd = cwd.slice(0, markerIdx);
+  }
+}
+
 /** Get the original project root if currently in a worktree, or null. */
 export function getWorktreeOriginalCwd(): string | null {
+  ensureWorktreeStateInitialized();
   return originalCwd;
-}
-
-/**
- * Resolve the git HEAD file path for a given directory.
- * Handles both normal repos (.git is a directory) and worktrees (.git is a file).
- */
-function resolveGitHeadPath(dir: string): string | null {
-  const gitPath = join(dir, ".git");
-  if (!existsSync(gitPath)) return null;
-
-  try {
-    const content = readFileSync(gitPath, "utf8").trim();
-    if (content.startsWith("gitdir: ")) {
-      // Worktree — .git is a file pointing to the real gitdir
-      const gitDir = resolve(dir, content.slice(8));
-      const headPath = join(gitDir, "HEAD");
-      return existsSync(headPath) ? headPath : null;
-    }
-    // Normal repo — .git is a directory
-    const headPath = join(dir, ".git", "HEAD");
-    return existsSync(headPath) ? headPath : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Nudge pi's FooterDataProvider to re-read the git branch.
- *
- * The footer caches the branch and watches a single .git dir for changes.
- * After process.chdir() into a worktree (or back), the watcher is stale —
- * it's still watching the old git dir. We touch HEAD in both the old and
- * new git dirs to ensure the watcher fires regardless of which one it's
- * monitoring. This clears cachedBranch; the next getGitBranch() call uses
- * the new process.cwd() and picks up the correct branch.
- */
-function nudgeGitBranchCache(previousCwd: string): void {
-  const now = new Date();
-  for (const dir of [previousCwd, process.cwd()]) {
-    try {
-      const headPath = resolveGitHeadPath(dir);
-      if (headPath) utimesSync(headPath, now, now);
-    } catch {
-      // Best-effort — branch display may be stale
-    }
-  }
 }
 
 /** Get the name of the active worktree, or null if not in one. */
 export function getActiveWorktreeName(): string | null {
+  ensureWorktreeStateInitialized();
   if (!originalCwd) return null;
   const cwd = process.cwd();
-  const wtDir = join(originalCwd, ".gsd", "worktrees");
+  const wtDir = join(gsdRoot(originalCwd), "worktrees");
   if (!cwd.startsWith(wtDir)) return null;
   const rel = cwd.slice(wtDir.length + 1);
   const name = rel.split("/")[0] ?? rel.split("\\")[0];
@@ -150,12 +116,13 @@ function worktreeCompletions(prefix: string) {
   return [];
 }
 
-async function worktreeHandler(
+export async function handleWorktreeCommand(
   args: string,
   ctx: ExtensionCommandContext,
   pi: ExtensionAPI,
   alias: string,
 ): Promise<void> {
+  ensureWorktreeStateInitialized();
   const trimmed = (typeof args === "string" ? args : "").trim();
   const basePath = process.cwd();
 
@@ -279,21 +246,14 @@ export function registerWorktreeCommand(pi: ExtensionAPI): void {
   // Restore worktree state after /reload.
   // The module-level originalCwd resets to null when extensions are re-loaded,
   // but process.cwd() is still inside the worktree. Detect this and recover.
-  if (!originalCwd) {
-    const cwd = process.cwd();
-    const marker = `${sep}.gsd${sep}worktrees${sep}`;
-    const markerIdx = cwd.indexOf(marker);
-    if (markerIdx !== -1) {
-      originalCwd = cwd.slice(0, markerIdx);
-    }
-  }
+  ensureWorktreeStateInitialized();
 
   pi.registerCommand("worktree", {
     description: "Git worktrees (also /wt): /worktree <name> | list | merge | remove",
     getArgumentCompletions: worktreeCompletions,
 
     async handler(args: string, ctx: ExtensionCommandContext) {
-      await worktreeHandler(args, ctx, pi, "worktree");
+      await handleWorktreeCommand(args, ctx, pi, "worktree");
     },
   });
 
@@ -302,7 +262,7 @@ export function registerWorktreeCommand(pi: ExtensionAPI): void {
     description: "Alias for /worktree",
     getArgumentCompletions: worktreeCompletions,
     async handler(args: string, ctx: ExtensionCommandContext) {
-      await worktreeHandler(args, ctx, pi, "wt");
+      await handleWorktreeCommand(args, ctx, pi, "wt");
     },
   });
 }
@@ -417,7 +377,7 @@ async function handleCreate(
       "info",
     );
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
+    const msg = getErrorMessage(error);
     ctx.ui.notify(`Failed to create worktree: ${msg}`, "error");
   }
 }
@@ -465,7 +425,7 @@ async function handleSwitch(
       "info",
     );
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
+    const msg = getErrorMessage(error);
     ctx.ui.notify(`Failed to switch to worktree: ${msg}`, "error");
   }
 }
@@ -575,7 +535,7 @@ async function handleList(
 
     ctx.ui.notify(lines.join("\n"), "info");
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
+    const msg = getErrorMessage(error);
     ctx.ui.notify(`Failed to list worktrees: ${msg}`, "error");
   }
 }
@@ -680,16 +640,6 @@ async function handleMerge(
     const commitType = inferCommitType(name);
     const commitMessage = `${commitType}(${name}): merge worktree ${name}`;
 
-    // Reconcile worktree DB into main DB before squash merge
-    const wtDbPath = join(worktreePath(basePath, name), ".gsd", "gsd.db");
-    const mainDbPath = join(basePath, ".gsd", "gsd.db");
-    if (existsSync(wtDbPath) && existsSync(mainDbPath)) {
-      try {
-        const { reconcileWorktreeDb } = await import("./gsd-db.js");
-        reconcileWorktreeDb(mainDbPath, wtDbPath);
-      } catch { /* non-fatal */ }
-    }
-
     try {
       mergeWorktreeToMain(basePath, name, commitMessage);
       ctx.ui.notify(
@@ -703,7 +653,7 @@ async function handleMerge(
       );
       return;
     } catch (mergeErr) {
-      const mergeMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
+      const mergeMsg = getErrorMessage(mergeErr);
       const isConflict = /conflict/i.test(mergeMsg);
 
       if (isConflict) {
@@ -760,7 +710,7 @@ async function handleMerge(
       "info",
     );
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
+    const msg = getErrorMessage(error);
     ctx.ui.notify(`Failed to start merge: ${msg}`, "error");
   }
 }
@@ -803,7 +753,7 @@ async function handleRemove(
 
     ctx.ui.notify(`${CLR.ok("✓")} Worktree ${CLR.name(name)} removed ${CLR.muted("(branch deleted)")}.`, "info");
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
+    const msg = getErrorMessage(error);
     ctx.ui.notify(`Failed to remove worktree: ${msg}`, "error");
   }
 }
@@ -857,7 +807,7 @@ async function handleRemoveAll(
     if (failed.length > 0) lines.push(`${CLR.warn("✗")} Failed: ${failed.map(n => CLR.name(n)).join(", ")}`);
     ctx.ui.notify(lines.join("\n"), failed.length > 0 ? "warning" : "info");
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
+    const msg = getErrorMessage(error);
     ctx.ui.notify(`Failed to remove worktrees: ${msg}`, "error");
   }
 }

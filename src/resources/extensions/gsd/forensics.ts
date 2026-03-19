@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 import { extractTrace, type ExecutionTrace } from "./session-forensics.js";
 import { nativeParseJsonlTail } from "./native-parser-bridge.js";
+import { MAX_JSONL_BYTES, parseJSONL } from "./jsonl-utils.js";
 import {
   loadLedgerFromDisk, getAverageCostPerUnitType, getProjectTotals,
   formatCost, formatTokenCount, type UnitMetrics, type MetricsLedger,
@@ -26,7 +27,7 @@ import { deriveState } from "./state.js";
 import { isAutoActive } from "./auto.js";
 import { loadPrompt } from "./prompt-loader.js";
 import { gsdRoot } from "./paths.js";
-import { formatDuration } from "./history.js";
+import { formatDuration } from "../shared/mod.js";
 import { getAutoWorktreePath } from "./auto-worktree.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -63,17 +64,6 @@ interface ForensicReport {
   doctorIssues: DoctorIssue[];
   anomalies: ForensicAnomaly[];
   recentUnits: { type: string; id: string; cost: number; duration: number; model: string; finishedAt: number }[];
-}
-
-// ─── JSONL Parser (inline — session-forensics.ts version is module-private) ──
-
-const MAX_JSONL_BYTES = 5 * 1024 * 1024;
-
-function parseJSONL(raw: string): unknown[] {
-  const source = raw.length > MAX_JSONL_BYTES ? raw.slice(-MAX_JSONL_BYTES) : raw;
-  return source.trim().split("\n").map(line => {
-    try { return JSON.parse(line); } catch { return null; }
-  }).filter(Boolean) as unknown[];
 }
 
 // ─── Entry Point ──────────────────────────────────────────────────────────────
@@ -278,7 +268,7 @@ function resolveActivityDirs(basePath: string, activeMilestone?: string | null):
   if (activeMilestone) {
     const wtPath = getAutoWorktreePath(basePath, activeMilestone);
     if (wtPath) {
-      const wtActivityDir = join(wtPath, ".gsd", "activity");
+      const wtActivityDir = join(gsdRoot(wtPath), "activity");
       if (existsSync(wtActivityDir)) {
         dirs.push(wtActivityDir);
       }
@@ -295,7 +285,7 @@ function resolveActivityDirs(basePath: string, activeMilestone?: string | null):
 // ─── Completed Keys Loader ────────────────────────────────────────────────────
 
 function loadCompletedKeys(basePath: string): string[] {
-  const file = join(basePath, ".gsd", "completed-units.json");
+  const file = join(gsdRoot(basePath), "completed-units.json");
   try {
     if (existsSync(file)) {
       return JSON.parse(readFileSync(file, "utf-8"));

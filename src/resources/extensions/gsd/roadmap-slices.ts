@@ -41,7 +41,7 @@ export function expandDependencies(deps: string[]): string[] {
 }
 
 function extractSlicesSection(content: string): string {
-  const headingMatch = /^## Slices\s*$/m.exec(content);
+  const headingMatch = /^## Slices\b.*$/m.exec(content);
   if (!headingMatch || headingMatch.index == null) return "";
 
   const start = headingMatch.index + headingMatch[0].length;
@@ -53,7 +53,12 @@ function extractSlicesSection(content: string): string {
 export function parseRoadmapSlices(content: string): RoadmapSliceEntry[] {
   const slicesSection = extractSlicesSection(content);
   const slices: RoadmapSliceEntry[] = [];
-  if (!slicesSection) return slices;
+  if (!slicesSection) {
+    // Fallback: detect prose-style slice headers (## Slice S01: Title)
+    // when the LLM writes freeform prose instead of the ## Slices checklist.
+    // This prevents a permanent "No slice eligible" block (#807).
+    return parseProseSliceHeaders(content);
+  }
 
   const checkboxItems = slicesSection.split("\n");
   let currentSlice: RoadmapSliceEntry | null = null;
@@ -86,5 +91,59 @@ export function parseRoadmapSlices(content: string): RoadmapSliceEntry[] {
   }
 
   if (currentSlice) slices.push(currentSlice);
+  return slices;
+}
+
+/**
+ * Fallback parser for prose-style roadmaps where the LLM wrote
+ * slice headers instead of the machine-readable `## Slices` checklist.
+ * Extracts slice IDs and titles so auto-mode can at least identify
+ * slices and plan them.
+ *
+ * Handles these LLM-generated variants:
+ *   ## S01: Title           (H2, colon separator)
+ *   ### S01: Title          (H3)
+ *   #### S01: Title         (H4)
+ *   ## Slice S01: Title     (with "Slice" prefix)
+ *   ## S01 — Title          (em dash)
+ *   ## S01 – Title          (en dash)
+ *   ## S01 - Title          (hyphen)
+ *   ## S01. Title           (dot separator)
+ *   ## S01 Title            (space only, no separator)
+ *   ## **S01: Title**       (bold-wrapped)
+ *   ## **S01**: Title       (bold ID only)
+ *   ## S1: Title            (non-zero-padded ID)
+ */
+function parseProseSliceHeaders(content: string): RoadmapSliceEntry[] {
+  const slices: RoadmapSliceEntry[] = [];
+  // Match H1–H4 headers containing S<digits> with optional "Slice" prefix and bold markers.
+  // Separator after the ID is flexible: colon, dash, em/en dash, dot, or just whitespace.
+  const headerPattern = /^#{1,4}\s+\*{0,2}(?:Slice\s+)?(S\d+)\*{0,2}[:\s.—–-]*\s*(.+)/gm;
+  let match: RegExpExecArray | null;
+
+  while ((match = headerPattern.exec(content)) !== null) {
+    const id = match[1]!;
+    let title = match[2]!.trim().replace(/\*{1,2}$/g, "").trim(); // strip trailing bold markers
+    if (!title) continue; // skip if we only matched the ID with no title
+
+    // Try to extract depends from prose: "Depends on: S01" or "**Depends on:** S01, S02"
+    const afterHeader = content.slice(match.index + match[0].length);
+    const nextHeader = afterHeader.search(/^#{1,4}\s/m);
+    const section = nextHeader !== -1 ? afterHeader.slice(0, nextHeader) : afterHeader.slice(0, 500);
+
+    const depsMatch = section.match(/\*{0,2}Depends\s+on:?\*{0,2}\s*(.+)/i);
+    let depends: string[] = [];
+    if (depsMatch) {
+      const rawDeps = depsMatch[1]!.replace(/none/i, "").trim();
+      if (rawDeps) {
+        depends = expandDependencies(
+          rawDeps.split(/[,;]/).map(s => s.trim().replace(/[^A-Za-z0-9]/g, "")).filter(Boolean)
+        );
+      }
+    }
+
+    slices.push({ id, title, risk: "medium" as RiskLevel, depends, done: false, demo: "" });
+  }
+
   return slices;
 }

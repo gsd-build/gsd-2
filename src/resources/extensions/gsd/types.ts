@@ -46,6 +46,49 @@ export interface TaskPlanEntry {
   verify?: string;     // e.g. "run tests" — extracted from "- Verify:" subline
 }
 
+// ─── Verification Gate ─────────────────────────────────────────────────────
+
+/** Result of a single verification command execution */
+export interface VerificationCheck {
+  command: string;       // e.g. "npm run lint"
+  exitCode: number;      // 0 = pass
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  blocking: boolean;     // true for preference/task-plan sources, false for package-json (advisory only)
+  /** True when the failure was a spawn/infra error (ETIMEDOUT, ENOENT, ENOMEM)
+   *  rather than the command itself failing. Infra errors are transient and
+   *  should not trigger auto-fix retries — the agent cannot fix the OS. */
+  infraError?: boolean;
+}
+
+/** A runtime error captured from bg-shell processes or browser console */
+export interface RuntimeError {
+  source: "bg-shell" | "browser";
+  severity: "crash" | "error" | "warning";
+  message: string;
+  blocking: boolean;
+}
+
+/** A dependency vulnerability warning from npm audit */
+export interface AuditWarning {
+  name: string;
+  severity: "low" | "moderate" | "high" | "critical";
+  title: string;
+  url: string;
+  fixAvailable: boolean;
+}
+
+/** Aggregate result from the verification gate */
+export interface VerificationResult {
+  passed: boolean;              // true if all checks passed (or no checks discovered)
+  checks: VerificationCheck[];  // per-command results
+  discoverySource: "preference" | "task-plan" | "package-json" | "none";
+  timestamp: number;            // Date.now() at gate start
+  runtimeErrors?: RuntimeError[];  // optional — populated by captureRuntimeErrors()
+  auditWarnings?: AuditWarning[];  // optional — populated by runDependencyAudit()
+}
+
 export interface SlicePlan {
   id: string;          // e.g. "S01"
   title: string;       // from the H1
@@ -153,7 +196,7 @@ export interface ActiveRef {
 export interface MilestoneRegistryEntry {
   id: string;
   title: string;
-  status: 'complete' | 'active' | 'pending';
+  status: 'complete' | 'active' | 'pending' | 'parked';
   /** Milestone IDs that must be complete before this milestone becomes active. Populated from CONTEXT.md YAML frontmatter. */
   dependsOn?: string[];
 }
@@ -265,6 +308,10 @@ export interface PhaseSkipPreferences {
   skip_reassess?: boolean;
   skip_slice_research?: boolean;
   skip_milestone_validation?: boolean;
+  /** When true, reassess-roadmap fires after each slice completion. Opt-in. */
+  reassess_after_slice?: boolean;
+  /** When true, auto-mode pauses before each slice for discussion (#789). */
+  require_slice_discussion?: boolean;
 }
 
 export interface NotificationPreferences {
@@ -366,6 +413,9 @@ export interface Requirement {
 }
 
 // ─── Parallel Orchestration Types ────────────────────────────────────────
+
+export type CompressionStrategy = 'truncate' | 'compress';
+export type ContextSelectionMode = 'full' | 'smart';
 
 export type MergeStrategy = "per-slice" | "per-milestone";
 export type AutoMergeMode = "auto" | "confirm" | "manual";

@@ -125,6 +125,10 @@ export class BgManagerOverlay {
 				restartProcess(proc.id).then(() => {
 					this.invalidate();
 					this.tui.requestRender();
+				}).catch((err) => {
+					if (process.env.GSD_DEBUG) console.error('[bg-shell] restart failed:', err);
+					this.invalidate();
+					this.tui.requestRender();
 				});
 			}
 			return;

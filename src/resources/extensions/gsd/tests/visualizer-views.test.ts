@@ -60,6 +60,9 @@ function makeVisualizerData(overrides: Partial<VisualizerData> = {}): Visualizer
       toolCalls: 0,
       assistantMessages: 0,
       userMessages: 0,
+      providers: [],
+      skillSummary: { total: 0, warningCount: 0, criticalCount: 0, topIssue: null },
+      environmentIssues: [],
     },
     discussion: [],
     stats: {
@@ -387,6 +390,7 @@ console.log("\n=== renderMetricsView ===");
       userMessages: 5,
       totalTruncationSections: 0,
       continueHereFiredCount: 0,
+      apiRequests: 5,
     },
     byPhase: [
       {
@@ -502,6 +506,9 @@ console.log("\n=== renderAgentView ===");
       truncationRate: 15.5, continueHereRate: 5.0,
       tierBreakdown: [], tierSavingsLine: "",
       toolCalls: 20, assistantMessages: 15, userMessages: 8,
+      providers: [],
+      skillSummary: { total: 0, warningCount: 0, criticalCount: 0, topIssue: null },
+      environmentIssues: [],
     },
     captures: { entries: [], pendingCount: 3, totalCount: 5 },
   });
@@ -653,7 +660,7 @@ console.log("\n=== renderHealthView ===");
       units: 10, tokens: { input: 5000, output: 2000, cacheRead: 1000, cacheWrite: 500, total: 8500 },
       cost: 5.00, duration: 120000, toolCalls: 50,
       assistantMessages: 30, userMessages: 15,
-      totalTruncationSections: 3, continueHereFiredCount: 1,
+      totalTruncationSections: 3, continueHereFiredCount: 1, apiRequests: 30,
     },
     health: {
       budgetCeiling: 20.00,
@@ -668,6 +675,9 @@ console.log("\n=== renderHealthView ===");
       toolCalls: 50,
       assistantMessages: 30,
       userMessages: 15,
+      providers: [],
+      skillSummary: { total: 0, warningCount: 0, criticalCount: 0, topIssue: null },
+      environmentIssues: [],
     },
   });
 
@@ -692,6 +702,9 @@ console.log("\n=== renderHealthView ===");
       truncationRate: 0, continueHereRate: 0,
       tierBreakdown: [], tierSavingsLine: "",
       toolCalls: 0, assistantMessages: 0, userMessages: 0,
+      providers: [],
+      skillSummary: { total: 0, warningCount: 0, criticalCount: 0, topIssue: null },
+      environmentIssues: [],
     },
   });
 
