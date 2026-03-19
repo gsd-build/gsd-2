@@ -52,7 +52,7 @@ function makeDeps(
         fn: "mergeMilestoneToMain",
         args: [basePath, milestoneId, roadmapContent],
       });
-      return { pushed: false };
+      return { pushed: false, prCreated: false };
     },
     syncWorktreeStateBack: (
       mainBasePath: string,
@@ -424,7 +424,7 @@ test("mergeAndExit in worktree mode shows pushed status", () => {
   const deps = makeDeps({
     isInAutoWorktree: () => true,
     getIsolationMode: () => "worktree",
-    mergeMilestoneToMain: () => ({ pushed: true }),
+    mergeMilestoneToMain: () => ({ pushed: true, prCreated: false }),
   });
   const ctx = makeNotifyCtx();
   const resolver = new WorktreeResolver(s, deps);
@@ -608,7 +608,7 @@ test("mergeAndEnterNext calls mergeAndExit then enterMilestone", () => {
       _roadmap: string,
     ) => {
       callOrder.push(`merge:${milestoneId}`);
-      return { pushed: false };
+      return { pushed: false, prCreated: false };
     },
     getAutoWorktreePath: () => null,
     createAutoWorktree: (basePath: string, milestoneId: string) => {
