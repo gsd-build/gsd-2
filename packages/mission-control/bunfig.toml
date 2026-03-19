@@ -1,0 +1,6 @@
+[serve.static]
+plugins = ["bun-plugin-tailwind"]
+
+[test]
+# Only run unit tests in tests/; e2e specs are Playwright tests (use npm run test:e2e)
+root = "./tests"

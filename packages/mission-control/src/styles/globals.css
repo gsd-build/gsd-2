@@ -1,0 +1,63 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "./animations.css";
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  /* Base palette (60%) */
+  --color-navy-base: #0F1419;
+  --color-navy-900: #131A21;
+  --color-navy-800: #1A2332;
+  --color-navy-700: #243044;
+  --color-navy-600: #2D3B4E;
+
+  /* Content (30%) */
+  --color-slate-400: #8899AA;
+  --color-slate-500: #6B7D8D;
+  --color-slate-600: #4A5B6B;
+
+  /* Accent (10% -- active/CTAs ONLY) */
+  --color-cyan-accent: #5BC8F0;
+  --color-cyan-hover: #7DD6F5;
+  --color-cyan-muted: #2A5A6B;
+
+  /* Status colors */
+  --color-status-success: #4ADE80;
+  --color-status-warning: #FBBF24;
+  --color-status-error: #F87171;
+
+  /* Typography */
+  --font-display: "Share Tech Mono", monospace;
+  --font-mono: "JetBrains Mono", monospace;
+
+  /* Type scale */
+  --text-xs: 10px;
+  --text-sm: 12px;
+  --text-base: 14px;
+  --text-lg: 18px;
+}
+
+body {
+  @apply bg-navy-base text-slate-400 font-mono text-base;
+}
+
+/* Thin dark scrollbars — Firefox + WebKit */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 2px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}

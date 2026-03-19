@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GSD Mission Control — Setup Required</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0F1419;
+      color: #CBD5E1;
+      font-family: 'JetBrains Mono', 'Courier New', monospace;
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px;
+    }
+
+    .container {
+      max-width: 600px;
+      width: 100%;
+    }
+
+    .logo {
+      font-family: 'Share Tech Mono', 'Courier New', monospace;
+      font-size: 24px;
+      color: #5BC8F0;
+      margin-bottom: 8px;
+      letter-spacing: 2px;
+    }
+
+    .subtitle {
+      color: #64748B;
+      margin-bottom: 40px;
+      font-size: 13px;
+    }
+
+    h1 {
+      font-family: 'Share Tech Mono', 'Courier New', monospace;
+      font-size: 20px;
+      color: #F8FAFC;
+      margin-bottom: 8px;
+    }
+
+    .intro {
+      color: #94A3B8;
+      margin-bottom: 32px;
+    }
+
+    .dep-card {
+      background: #131C2B;
+      border: 1px solid #1E2D3D;
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+
+    .dep-card.missing {
+      border-color: #F59E0B;
+    }
+
+    .dep-card.ok {
+      border-color: #22C55E;
+      opacity: 0.6;
+    }
+
+    .dep-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .dep-status {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .dep-status.missing { background: #F59E0B; }
+    .dep-status.ok { background: #22C55E; }
+
+    .dep-name {
+      font-family: 'Share Tech Mono', 'Courier New', monospace;
+      font-size: 16px;
+      color: #F8FAFC;
+    }
+
+    .dep-description {
+      color: #94A3B8;
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+
+    .install-link {
+      display: inline-block;
+      background: #5BC8F0;
+      color: #0F1419;
+      text-decoration: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+    }
+
+    .install-link:hover { background: #7DD5F5; }
+
+    .retry-section {
+      margin-top: 32px;
+      text-align: center;
+    }
+
+    .retry-btn {
+      background: transparent;
+      border: 1px solid #1E2D3D;
+      color: #5BC8F0;
+      padding: 10px 24px;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .retry-btn:hover { border-color: #5BC8F0; }
+
+    .footer {
+      margin-top: 24px;
+      text-align: center;
+      color: #475569;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">GSD</div>
+    <div class="subtitle">Mission Control</div>
+
+    <h1>Setup Required</h1>
+    <p class="intro">Before launching Mission Control, a few tools need to be installed on your system.</p>
+
+    <div id="deps"></div>
+
+    <div class="retry-section">
+      <button class="retry-btn" onclick="retryChecks()">Check Again</button>
+    </div>
+
+    <div class="footer">
+      Once installed, click "Check Again" — Mission Control will open automatically.
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const missing = (params.get('missing') || '').split(',').filter(Boolean);
+
+    const ALL_DEPS = [
+      {
+        id: 'bun',
+        name: 'Bun',
+        description: 'Bun is the JavaScript runtime that powers Mission Control\'s server. It runs the local web server on your machine.',
+        installUrl: 'https://bun.sh',
+        installLabel: 'Install Bun at bun.sh \u2192',
+      },
+      {
+        id: 'gsd',
+        name: 'GSD CLI',
+        description: 'GSD (Get Shit Done) is the AI coding agent that Mission Control orchestrates. It handles all the AI-powered build sessions.',
+        installUrl: 'https://github.com/glittercowboy/gsd-pi',
+        installLabel: 'Install GSD CLI \u2192',
+      },
+    ];
+
+    const container = document.getElementById('deps');
+    ALL_DEPS.forEach(dep => {
+      const isMissing = missing.includes(dep.id);
+      const card = document.createElement('div');
+      card.className = 'dep-card ' + (isMissing ? 'missing' : 'ok');
+      card.innerHTML =
+        '<div class="dep-header">' +
+          '<div class="dep-status ' + (isMissing ? 'missing' : 'ok') + '"></div>' +
+          '<div class="dep-name">' + dep.name + '</div>' +
+          '<span style="margin-left:auto;font-size:12px;color:' + (isMissing ? '#F59E0B' : '#22C55E') + '">' + (isMissing ? 'Not installed' : 'Installed') + '</span>' +
+        '</div>' +
+        (isMissing ?
+          '<p class="dep-description">' + dep.description + '</p>' +
+          '<a class="install-link" href="' + dep.installUrl + '" target="_blank">' + dep.installLabel + '</a>'
+        : '');
+      container.appendChild(card);
+    });
+
+    async function retryChecks() {
+      try {
+        // Tauri injects window.__TAURI__ into the webview automatically — no import needed.
+        const invoke = window.__TAURI__.invoke;
+        await invoke('retry_dep_check');
+      } catch (e) {
+        // Fallback: reload the page (Tauri will re-run checks on navigation)
+        window.location.reload();
+      }
+    }
+  </script>
+</body>
+</html>

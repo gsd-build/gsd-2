@@ -1,0 +1,27 @@
+/**
+ * GSD Animation Keyframes.
+ *
+ * - amber-pulse: Box-shadow pulse for active indicators, 150ms (Plan 03)
+ *
+ * Note: gsd-build-in and logo-scan keyframes were removed in Phase 11.1 Plan 03
+ * when LogoAnimation and LoadingLogo switched from inline pixel-art SVGs to
+ * official brand asset <img> tags.
+ */
+
+/* -- Keyframes -- */
+
+@keyframes amber-pulse {
+  from {
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.6);
+  }
+  to {
+    box-shadow: 0 0 8px 0 transparent;
+  }
+}
+
+/* -- Amber pulse for active indicators (Plan 03) -- */
+
+.amber-pulse,
+.task-advance-pulse {
+  animation: amber-pulse 150ms ease-out;
+}

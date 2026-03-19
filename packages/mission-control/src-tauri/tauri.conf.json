@@ -1,0 +1,77 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "GSD Mission Control",
+  "version": "0.1.0",
+  "identifier": "com.mzansiagentive.gsd-mission-control",
+  "build": {
+    "beforeDevCommand": "bun --hot src/server.ts",
+    "devUrl": "http://127.0.0.1:4200",
+    "beforeBuildCommand": "bun run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "GSD Mission Control",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 1024,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' http://127.0.0.1:4200; connect-src http://127.0.0.1:4200 ws://127.0.0.1:* ws://localhost:* 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": ["dep_screen.html"],
+    "macOS": {
+      "signingIdentity": null,
+      "minimumSystemVersion": "10.15"
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": [
+        { "schemes": ["gsd"] }
+      ]
+    },
+    "protocol": {
+      "asset": true,
+      "assetScope": {
+        "allow": ["**"],
+        "deny": []
+      }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ0NEIyRUNEOUM5NzQyNTIKUldSU1FwZWN6UzVMMUdVcnlZaFg1MkNhZE5uQjlyaG5menppSURwY0lJbW9pU0JXR3EzRlY4MEcK",
+      "endpoints": [
+        "https://github.com/gsd-build/gsd-2/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

@@ -58,3 +58,15 @@ docs/coherence-audit/
 # ── Stale lock files (npm is canonical) ──
 pnpm-lock.yaml
 bun.lock
+
+# ── Mission Control ──
+packages/*/node_modules/
+packages/*/bun.lock
+
+# ── Tauri build output (never commit) ──
+packages/mission-control/src-tauri/target/
+
+# ── Playwright E2E (output artifacts — never commit) ──
+packages/mission-control/e2e/reports/
+packages/mission-control/test-results/
+packages/mission-control/playwright-report/
