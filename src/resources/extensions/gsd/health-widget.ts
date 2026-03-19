@@ -11,9 +11,11 @@
 import type { ExtensionContext } from "@gsd/pi-coding-agent";
 import { runProviderChecks, summariseProviderIssues } from "./doctor-providers.js";
 import { runEnvironmentChecks } from "./doctor-environment.js";
+import { existsSync } from "node:fs";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { loadLedgerFromDisk, getProjectTotals } from "./metrics.js";
 import { projectRoot } from "./commands.js";
+import { gsdRoot } from "./paths.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -41,9 +43,10 @@ function loadHealthWidgetData(basePath: string): HealthWidgetData {
     const prefs = loadEffectiveGSDPreferences();
     budgetCeiling = prefs?.preferences?.budget_ceiling;
 
+    hasProject = existsSync(gsdRoot(basePath));
+
     const ledger = loadLedgerFromDisk(basePath);
     if (ledger) {
-      hasProject = true;
       const totals = getProjectTotals(ledger.units ?? []);
       budgetSpent = totals.cost;
     }
