@@ -260,6 +260,16 @@ export function acquireSessionLock(basePath: string): SessionLockResult {
           stale: 1_800_000, // 30 minutes — match primary lock settings
           update: 10_000,
           onCompromised: () => {
+            // Same false-positive suppression as the primary lock (#1512).
+            // Without this, the retry path fires _lockCompromised unconditionally
+            // on benign mtime drift (laptop sleep, heavy LLM event loop stalls).
+            const elapsed = Date.now() - _lockAcquiredAt;
+            if (elapsed < 1_800_000) {
+              process.stderr.write(
+                `[gsd] Lock heartbeat mismatch after ${Math.round(elapsed / 1000)}s — event loop stall, continuing.\n`,
+              );
+              return;
+            }
             _lockCompromised = true;
             _releaseFunction = null;
           },
@@ -361,6 +371,26 @@ export function updateSessionLock(
 export function validateSessionLock(basePath: string): boolean {
   // Lock was compromised by proper-lockfile (mtime drift from sleep, stall, etc.)
   if (_lockCompromised) {
+    // Recovery gate (#1512): Before declaring the lock lost, check if the lock
+    // file still contains our PID. If it does, no other process took over — the
+    // onCompromised fired from benign mtime drift (laptop sleep, event loop stall
+    // beyond the stale window). Attempt re-acquisition instead of giving up.
+    const lp = lockPath(basePath);
+    const existing = readExistingLockData(lp);
+    if (existing && existing.pid === process.pid) {
+      // Lock file still ours — try to re-acquire the OS lock
+      try {
+        const result = acquireSessionLock(basePath);
+        if (result.acquired) {
+          process.stderr.write(
+            `[gsd] Lock recovered after onCompromised — lock file PID matched, re-acquired.\n`,
+          );
+          return true;
+        }
+      } catch {
+        // Re-acquisition failed — fall through to return false
+      }
+    }
     return false;
   }
 
