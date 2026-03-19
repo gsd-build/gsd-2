@@ -589,7 +589,7 @@ test("/api/git returns a current-project-scoped repo summary and ignores changes
     writeFileSync(join(projectCwd, "untracked.txt"), "brand new\n")
     writeFileSync(join(docsDir, "outside.txt"), "baseline outside\noutside change\n")
 
-    const authoritativeRepoRoot = git(projectCwd, ["rev-parse", "--show-toplevel"])
+    const authoritativeRepoRoot = resolve(git(projectCwd, ["rev-parse", "--show-toplevel"]))
 
     await withProjectGitEnv(projectCwd, async () => {
       const response = await gitRoute.GET()

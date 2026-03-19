@@ -83,7 +83,7 @@ export async function collectVisualizerData(projectCwdOverride?: string): Promis
       process.execPath,
       [
         "--import",
-        resolveTsLoader,
+        pathToFileURL(resolveTsLoader).href,
         "--experimental-strip-types",
         "--input-type=module",
         "--eval",

@@ -180,7 +180,7 @@ export async function executeUndo(projectCwdOverride?: string): Promise<UndoResu
       process.execPath,
       [
         "--import",
-        resolveTsLoader,
+        pathToFileURL(resolveTsLoader).href,
         "--experimental-strip-types",
         "--input-type=module",
         "--eval",

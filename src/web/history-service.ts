@@ -51,7 +51,7 @@ export async function collectHistoryData(projectCwdOverride?: string): Promise<H
       process.execPath,
       [
         "--import",
-        resolveTsLoader,
+        pathToFileURL(resolveTsLoader).href,
         "--experimental-strip-types",
         "--input-type=module",
         "--eval",

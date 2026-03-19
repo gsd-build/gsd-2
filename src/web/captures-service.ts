@@ -49,7 +49,7 @@ export async function collectCapturesData(projectCwdOverride?: string): Promise<
       process.execPath,
       [
         "--import",
-        resolveTsLoader,
+        pathToFileURL(resolveTsLoader).href,
         "--experimental-strip-types",
         "--input-type=module",
         "--eval",
@@ -118,7 +118,7 @@ export async function resolveCaptureAction(request: CaptureResolveRequest, proje
       process.execPath,
       [
         "--import",
-        resolveTsLoader,
+        pathToFileURL(resolveTsLoader).href,
         "--experimental-strip-types",
         "--input-type=module",
         "--eval",

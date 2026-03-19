@@ -46,7 +46,7 @@ export async function collectSkillHealthData(projectCwdOverride?: string): Promi
       process.execPath,
       [
         "--import",
-        resolveTsLoader,
+        pathToFileURL(resolveTsLoader).href,
         "--experimental-strip-types",
         "--input-type=module",
         "--eval",

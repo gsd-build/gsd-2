@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process"
 import { existsSync } from "node:fs"
 import { join, resolve } from "node:path"
+import { pathToFileURL } from "node:url"
 
 import {
   collectCurrentProjectOnboardingState,
@@ -471,7 +472,7 @@ async function collectRecoveryDiagnosticsChildPayload(
       options.execPath ?? process.execPath,
       [
         "--import",
-        resolveTsLoader,
+        pathToFileURL(resolveTsLoader).href,
         "--experimental-strip-types",
         "--input-type=module",
         "--eval",

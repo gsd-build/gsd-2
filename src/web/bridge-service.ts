@@ -901,7 +901,7 @@ async function loadWorkspaceIndexViaChildProcess(basePath: string, packageRoot: 
       deps.execPath ?? process.execPath,
       [
         "--import",
-        resolveTsLoader,
+        pathToFileURL(resolveTsLoader).href,
         "--experimental-strip-types",
         "--input-type=module",
         "--eval",

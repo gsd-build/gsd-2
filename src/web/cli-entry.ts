@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 export interface GsdCliEntry {
   command: string;
@@ -44,7 +45,7 @@ export function resolveGsdCliEntry(options: ResolveGsdCliEntryOptions): GsdCliEn
           command: execPath,
           args: [
             "--import",
-            resolveTsLoader,
+            pathToFileURL(resolveTsLoader).href,
             "--experimental-strip-types",
             sourceEntry,
             ...extraArgs,

@@ -63,7 +63,7 @@ export async function collectCleanupData(projectCwdOverride?: string): Promise<C
       process.execPath,
       [
         "--import",
-        resolveTsLoader,
+        pathToFileURL(resolveTsLoader).href,
         "--experimental-strip-types",
         "--input-type=module",
         "--eval",
@@ -150,7 +150,7 @@ export async function executeCleanup(
       process.execPath,
       [
         "--import",
-        resolveTsLoader,
+        pathToFileURL(resolveTsLoader).href,
         "--experimental-strip-types",
         "--input-type=module",
         "--eval",
