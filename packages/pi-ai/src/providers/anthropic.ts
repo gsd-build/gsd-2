@@ -9,8 +9,6 @@ import type {
 import { getEnvApiKey } from "../env-api-keys.js";
 import { calculateCost } from "../models.js";
 import type {
-	Api,
-	AssistantMessage,
 	CacheRetention,
 	Context,
 	ImageContent,
@@ -31,6 +29,7 @@ import type {
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
+import { createProviderStream } from "../utils/stream-handler.js";
 
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
 import { adjustMaxTokensForThinking, buildBaseOptions } from "./simple-options.js";
@@ -266,29 +265,11 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 	model: Model<"anthropic-messages">,
 	context: Context,
 	options?: AnthropicOptions,
-): AssistantMessageEventStream => {
-	const stream = new AssistantMessageEventStream();
-
-	(async () => {
-		const output: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: model.api as Api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			stopReason: "stop",
-			timestamp: Date.now(),
-		};
-
-		try {
+): AssistantMessageEventStream =>
+	createProviderStream(
+		model,
+		options,
+		async (output, stream) => {
 			const apiKey = options?.apiKey ?? getEnvApiKey(model.provider) ?? "";
 
 			let copilotDynamicHeaders: Record<string, string> | undefined;
@@ -494,43 +475,27 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 					calculateCost(model, output.usage);
 				}
 			}
-
-			if (options?.signal?.aborted) {
-				throw new Error("Request was aborted");
-			}
-
-			if (output.stopReason === "aborted" || output.stopReason === "error") {
-				throw new Error("An unknown error occurred");
-			}
-
-			stream.push({ type: "done", reason: output.stopReason, message: output });
-			stream.end();
-		} catch (error) {
-			for (const block of output.content) delete (block as any).index;
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
-			if (model.provider === "alibaba-coding-plan") {
-				output.errorMessage = `[alibaba-coding-plan] ${output.errorMessage}`;
-			}
-			const AnthropicSdk = _AnthropicClass;
-			if (AnthropicSdk && error instanceof AnthropicSdk.APIError && error.headers) {
-				const retryAfterMs = extractRetryAfterMs(error.headers, error.message);
-				if (retryAfterMs !== undefined) {
-					output.retryAfterMs = retryAfterMs;
+		},
+		{
+			onError: (error, output) => {
+				if (model.provider === "alibaba-coding-plan") {
+					output.errorMessage = `[alibaba-coding-plan] ${output.errorMessage}`;
 				}
-			}
-			// Mark transient network errors as retriable so auto-mode can
-			// detect them and retry instead of stopping (#833).
-			if (isTransientNetworkError(error)) {
-				output.retryAfterMs = output.retryAfterMs ?? 5000;
-			}
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
-		}
-	})();
-
-	return stream;
-};
+				const AnthropicSdk = _AnthropicClass;
+				if (AnthropicSdk && error instanceof AnthropicSdk.APIError && error.headers) {
+					const retryAfterMs = extractRetryAfterMs(error.headers, error.message);
+					if (retryAfterMs !== undefined) {
+						output.retryAfterMs = retryAfterMs;
+					}
+				}
+				// Mark transient network errors as retriable so auto-mode can
+				// detect them and retry instead of stopping (#833).
+				if (isTransientNetworkError(error)) {
+					output.retryAfterMs = output.retryAfterMs ?? 5000;
+				}
+			},
+		},
+	);
 
 /**
  * Check if a model supports adaptive thinking (Opus 4.6 and Sonnet 4.6)

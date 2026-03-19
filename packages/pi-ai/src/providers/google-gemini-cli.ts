@@ -7,8 +7,6 @@
 import type { Content, ThinkingConfig } from "@google/genai";
 import { calculateCost } from "../models.js";
 import type {
-	Api,
-	AssistantMessage,
 	Context,
 	Model,
 	SimpleStreamOptions,
@@ -22,6 +20,7 @@ import type {
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
+import { createProviderStream } from "../utils/stream-handler.js";
 import {
 	convertMessages,
 	convertTools,
@@ -321,320 +320,237 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli", GoogleGe
 	model: Model<"google-gemini-cli">,
 	context: Context,
 	options?: GoogleGeminiCliOptions,
-): AssistantMessageEventStream => {
-	const stream = new AssistantMessageEventStream();
+): AssistantMessageEventStream =>
+	createProviderStream(model, options, async (output, stream) => {
+		// apiKey is JSON-encoded: { token, projectId }
+		const apiKeyRaw = options?.apiKey;
+		if (!apiKeyRaw) {
+			throw new Error("Google Cloud Code Assist requires OAuth authentication. Use /login to authenticate.");
+		}
 
-	(async () => {
-		const output: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: "google-gemini-cli" as Api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
+		let accessToken: string;
+		let projectId: string;
+
+		try {
+			const parsed = JSON.parse(apiKeyRaw) as { token: string; projectId: string };
+			accessToken = parsed.token;
+			projectId = parsed.projectId;
+		} catch {
+			throw new Error("Invalid Google Cloud Code Assist credentials. Use /login to re-authenticate.");
+		}
+
+		if (!accessToken || !projectId) {
+			throw new Error("Missing token or projectId in Google Cloud credentials. Use /login to re-authenticate.");
+		}
+
+		const isAntigravity = model.provider === "google-antigravity";
+		const baseUrl = model.baseUrl?.trim();
+		const endpoints = baseUrl ? [baseUrl] : isAntigravity ? ANTIGRAVITY_ENDPOINT_FALLBACKS : [DEFAULT_ENDPOINT];
+
+		let requestBody = buildRequest(model, context, projectId, options, isAntigravity);
+		const nextRequestBody = await options?.onPayload?.(requestBody, model);
+		if (nextRequestBody !== undefined) {
+			requestBody = nextRequestBody as CloudCodeAssistRequest;
+		}
+		const headers = isAntigravity ? getAntigravityHeaders() : GEMINI_CLI_HEADERS;
+
+		const requestHeaders = {
+			Authorization: `Bearer ${accessToken}`,
+			"Content-Type": "application/json",
+			Accept: "text/event-stream",
+			...headers,
+			...(needsClaudeThinkingBetaHeader(model) ? { "anthropic-beta": CLAUDE_THINKING_BETA_HEADER } : {}),
+			...options?.headers,
+		};
+		const requestBodyJson = JSON.stringify(requestBody);
+
+		// Fetch with retry logic for rate limits, transient errors, and endpoint fallbacks.
+		// On 403/404, immediately try the next endpoint (no delay).
+		// On 429/5xx, retry with backoff on the same or next endpoint.
+		let response: Response | undefined;
+		let lastError: Error | undefined;
+		let requestUrl: string | undefined;
+		let endpointIndex = 0;
+
+		for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+			if (options?.signal?.aborted) {
+				throw new Error("Request was aborted");
+			}
+
+			try {
+				const endpoint = endpoints[endpointIndex];
+				requestUrl = `${endpoint}/v1internal:streamGenerateContent?alt=sse`;
+				response = await fetch(requestUrl, {
+					method: "POST",
+					headers: requestHeaders,
+					body: requestBodyJson,
+					signal: options?.signal,
+				});
+
+				if (response.ok) {
+					break; // Success, exit retry loop
+				}
+
+				const errorText = await response.text();
+
+				// On 403/404, cascade to the next endpoint immediately (no delay)
+				if ((response.status === 403 || response.status === 404) && endpointIndex < endpoints.length - 1) {
+					endpointIndex++;
+					continue;
+				}
+
+				// Check if retryable (429, 5xx, network patterns)
+				if (attempt < MAX_RETRIES && isRetryableError(response.status, errorText)) {
+					// Advance endpoint if possible
+					if (endpointIndex < endpoints.length - 1) {
+						endpointIndex++;
+					}
+
+					// Use server-provided delay or exponential backoff
+					const serverDelay = extractRetryDelay(errorText, response);
+					const delayMs = serverDelay ?? BASE_DELAY_MS * 2 ** attempt;
+
+					// Check if server delay exceeds max allowed (default: 60s)
+					const maxDelayMs = options?.maxRetryDelayMs ?? 60000;
+					if (maxDelayMs > 0 && serverDelay && serverDelay > maxDelayMs) {
+						const delaySeconds = Math.ceil(serverDelay / 1000);
+						throw new Error(
+							`Server requested ${delaySeconds}s retry delay (max: ${Math.ceil(maxDelayMs / 1000)}s). ${extractErrorMessage(errorText)}`,
+						);
+					}
+
+					await sleep(delayMs, options?.signal);
+					continue;
+				}
+
+				// Not retryable or max retries exceeded
+				if (response.status === 404) {
+					throw new Error(
+						`Cloud Code Assist API error (404): Model "${model.id}" was not found. ` +
+						`This model may not be available via Cloud Code Assist. ` +
+						`Try using the "google" provider with a GOOGLE_API_KEY instead, ` +
+						`or switch to a supported model (e.g., gemini-2.5-pro).`,
+					);
+				}
+				throw new Error(`Cloud Code Assist API error (${response.status}): ${extractErrorMessage(errorText)}`);
+			} catch (error) {
+				// Check for abort - fetch throws AbortError, our code throws "Request was aborted"
+				if (error instanceof Error) {
+					if (error.name === "AbortError" || error.message === "Request was aborted") {
+						throw new Error("Request was aborted");
+					}
+				}
+				// Extract detailed error message from fetch errors (Node includes cause)
+				lastError = error instanceof Error ? error : new Error(String(error));
+				if (lastError.message === "fetch failed" && lastError.cause instanceof Error) {
+					lastError = new Error(`Network error: ${lastError.cause.message}`);
+				}
+				// Network errors are retryable
+				if (attempt < MAX_RETRIES) {
+					const delayMs = BASE_DELAY_MS * 2 ** attempt;
+					await sleep(delayMs, options?.signal);
+					continue;
+				}
+				throw lastError;
+			}
+		}
+
+		if (!response || !response.ok) {
+			throw lastError ?? new Error("Failed to get response after retries");
+		}
+
+		let started = false;
+		const ensureStarted = () => {
+			if (!started) {
+				stream.push({ type: "start", partial: output });
+				started = true;
+			}
+		};
+
+		const resetOutput = () => {
+			output.content = [];
+			output.usage = {
 				input: 0,
 				output: 0,
 				cacheRead: 0,
 				cacheWrite: 0,
 				totalTokens: 0,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			stopReason: "stop",
-			timestamp: Date.now(),
+			};
+			output.stopReason = "stop";
+			output.errorMessage = undefined;
+			output.timestamp = Date.now();
+			started = false;
 		};
 
-		try {
-			// apiKey is JSON-encoded: { token, projectId }
-			const apiKeyRaw = options?.apiKey;
-			if (!apiKeyRaw) {
-				throw new Error("Google Cloud Code Assist requires OAuth authentication. Use /login to authenticate.");
+		const streamResponse = async (activeResponse: Response): Promise<boolean> => {
+			if (!activeResponse.body) {
+				throw new Error("No response body");
 			}
 
-			let accessToken: string;
-			let projectId: string;
+			let hasContent = false;
+			let currentBlock: TextContent | ThinkingContent | null = null;
+			const blocks = output.content;
+			const blockIndex = () => blocks.length - 1;
+
+			// Read SSE stream
+			const reader = activeResponse.body.getReader();
+			const decoder = new TextDecoder();
+			let buffer = "";
+
+			// Set up abort handler to cancel reader when signal fires
+			const abortHandler = () => {
+				void reader.cancel().catch(() => {});
+			};
+			options?.signal?.addEventListener("abort", abortHandler);
 
 			try {
-				const parsed = JSON.parse(apiKeyRaw) as { token: string; projectId: string };
-				accessToken = parsed.token;
-				projectId = parsed.projectId;
-			} catch {
-				throw new Error("Invalid Google Cloud Code Assist credentials. Use /login to re-authenticate.");
-			}
-
-			if (!accessToken || !projectId) {
-				throw new Error("Missing token or projectId in Google Cloud credentials. Use /login to re-authenticate.");
-			}
-
-			const isAntigravity = model.provider === "google-antigravity";
-			const baseUrl = model.baseUrl?.trim();
-			const endpoints = baseUrl ? [baseUrl] : isAntigravity ? ANTIGRAVITY_ENDPOINT_FALLBACKS : [DEFAULT_ENDPOINT];
-
-			let requestBody = buildRequest(model, context, projectId, options, isAntigravity);
-			const nextRequestBody = await options?.onPayload?.(requestBody, model);
-			if (nextRequestBody !== undefined) {
-				requestBody = nextRequestBody as CloudCodeAssistRequest;
-			}
-			const headers = isAntigravity ? getAntigravityHeaders() : GEMINI_CLI_HEADERS;
-
-			const requestHeaders = {
-				Authorization: `Bearer ${accessToken}`,
-				"Content-Type": "application/json",
-				Accept: "text/event-stream",
-				...headers,
-				...(needsClaudeThinkingBetaHeader(model) ? { "anthropic-beta": CLAUDE_THINKING_BETA_HEADER } : {}),
-				...options?.headers,
-			};
-			const requestBodyJson = JSON.stringify(requestBody);
-
-			// Fetch with retry logic for rate limits, transient errors, and endpoint fallbacks.
-			// On 403/404, immediately try the next endpoint (no delay).
-			// On 429/5xx, retry with backoff on the same or next endpoint.
-			let response: Response | undefined;
-			let lastError: Error | undefined;
-			let requestUrl: string | undefined;
-			let endpointIndex = 0;
-
-			for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-				if (options?.signal?.aborted) {
-					throw new Error("Request was aborted");
-				}
-
-				try {
-					const endpoint = endpoints[endpointIndex];
-					requestUrl = `${endpoint}/v1internal:streamGenerateContent?alt=sse`;
-					response = await fetch(requestUrl, {
-						method: "POST",
-						headers: requestHeaders,
-						body: requestBodyJson,
-						signal: options?.signal,
-					});
-
-					if (response.ok) {
-						break; // Success, exit retry loop
+				while (true) {
+					// Check abort signal before each read
+					if (options?.signal?.aborted) {
+						throw new Error("Request was aborted");
 					}
 
-					const errorText = await response.text();
+					const { done, value } = await reader.read();
+					if (done) break;
 
-					// On 403/404, cascade to the next endpoint immediately (no delay)
-					if ((response.status === 403 || response.status === 404) && endpointIndex < endpoints.length - 1) {
-						endpointIndex++;
-						continue;
-					}
+					buffer += decoder.decode(value, { stream: true });
+					const lines = buffer.split("\n");
+					buffer = lines.pop() || "";
 
-					// Check if retryable (429, 5xx, network patterns)
-					if (attempt < MAX_RETRIES && isRetryableError(response.status, errorText)) {
-						// Advance endpoint if possible
-						if (endpointIndex < endpoints.length - 1) {
-							endpointIndex++;
+					for (const line of lines) {
+						if (!line.startsWith("data:")) continue;
+
+						const jsonStr = line.slice(5).trim();
+						if (!jsonStr) continue;
+
+						let chunk: CloudCodeAssistResponseChunk;
+						try {
+							chunk = JSON.parse(jsonStr);
+						} catch {
+							continue;
 						}
 
-						// Use server-provided delay or exponential backoff
-						const serverDelay = extractRetryDelay(errorText, response);
-						const delayMs = serverDelay ?? BASE_DELAY_MS * 2 ** attempt;
+						// Unwrap the response
+						const responseData = chunk.response;
+						if (!responseData) continue;
 
-						// Check if server delay exceeds max allowed (default: 60s)
-						const maxDelayMs = options?.maxRetryDelayMs ?? 60000;
-						if (maxDelayMs > 0 && serverDelay && serverDelay > maxDelayMs) {
-							const delaySeconds = Math.ceil(serverDelay / 1000);
-							throw new Error(
-								`Server requested ${delaySeconds}s retry delay (max: ${Math.ceil(maxDelayMs / 1000)}s). ${extractErrorMessage(errorText)}`,
-							);
-						}
-
-						await sleep(delayMs, options?.signal);
-						continue;
-					}
-
-					// Not retryable or max retries exceeded
-					if (response.status === 404) {
-						throw new Error(
-							`Cloud Code Assist API error (404): Model "${model.id}" was not found. ` +
-							`This model may not be available via Cloud Code Assist. ` +
-							`Try using the "google" provider with a GOOGLE_API_KEY instead, ` +
-							`or switch to a supported model (e.g., gemini-2.5-pro).`,
-						);
-					}
-					throw new Error(`Cloud Code Assist API error (${response.status}): ${extractErrorMessage(errorText)}`);
-				} catch (error) {
-					// Check for abort - fetch throws AbortError, our code throws "Request was aborted"
-					if (error instanceof Error) {
-						if (error.name === "AbortError" || error.message === "Request was aborted") {
-							throw new Error("Request was aborted");
-						}
-					}
-					// Extract detailed error message from fetch errors (Node includes cause)
-					lastError = error instanceof Error ? error : new Error(String(error));
-					if (lastError.message === "fetch failed" && lastError.cause instanceof Error) {
-						lastError = new Error(`Network error: ${lastError.cause.message}`);
-					}
-					// Network errors are retryable
-					if (attempt < MAX_RETRIES) {
-						const delayMs = BASE_DELAY_MS * 2 ** attempt;
-						await sleep(delayMs, options?.signal);
-						continue;
-					}
-					throw lastError;
-				}
-			}
-
-			if (!response || !response.ok) {
-				throw lastError ?? new Error("Failed to get response after retries");
-			}
-
-			let started = false;
-			const ensureStarted = () => {
-				if (!started) {
-					stream.push({ type: "start", partial: output });
-					started = true;
-				}
-			};
-
-			const resetOutput = () => {
-				output.content = [];
-				output.usage = {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					totalTokens: 0,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-				};
-				output.stopReason = "stop";
-				output.errorMessage = undefined;
-				output.timestamp = Date.now();
-				started = false;
-			};
-
-			const streamResponse = async (activeResponse: Response): Promise<boolean> => {
-				if (!activeResponse.body) {
-					throw new Error("No response body");
-				}
-
-				let hasContent = false;
-				let currentBlock: TextContent | ThinkingContent | null = null;
-				const blocks = output.content;
-				const blockIndex = () => blocks.length - 1;
-
-				// Read SSE stream
-				const reader = activeResponse.body.getReader();
-				const decoder = new TextDecoder();
-				let buffer = "";
-
-				// Set up abort handler to cancel reader when signal fires
-				const abortHandler = () => {
-					void reader.cancel().catch(() => {});
-				};
-				options?.signal?.addEventListener("abort", abortHandler);
-
-				try {
-					while (true) {
-						// Check abort signal before each read
-						if (options?.signal?.aborted) {
-							throw new Error("Request was aborted");
-						}
-
-						const { done, value } = await reader.read();
-						if (done) break;
-
-						buffer += decoder.decode(value, { stream: true });
-						const lines = buffer.split("\n");
-						buffer = lines.pop() || "";
-
-						for (const line of lines) {
-							if (!line.startsWith("data:")) continue;
-
-							const jsonStr = line.slice(5).trim();
-							if (!jsonStr) continue;
-
-							let chunk: CloudCodeAssistResponseChunk;
-							try {
-								chunk = JSON.parse(jsonStr);
-							} catch {
-								continue;
-							}
-
-							// Unwrap the response
-							const responseData = chunk.response;
-							if (!responseData) continue;
-
-							const candidate = responseData.candidates?.[0];
-							if (candidate?.content?.parts) {
-								for (const part of candidate.content.parts) {
-									if (part.text !== undefined) {
-										hasContent = true;
-										const isThinking = isThinkingPart(part);
-										if (
-											!currentBlock ||
-											(isThinking && currentBlock.type !== "thinking") ||
-											(!isThinking && currentBlock.type !== "text")
-										) {
-											if (currentBlock) {
-												if (currentBlock.type === "text") {
-													stream.push({
-														type: "text_end",
-														contentIndex: blocks.length - 1,
-														content: currentBlock.text,
-														partial: output,
-													});
-												} else {
-													stream.push({
-														type: "thinking_end",
-														contentIndex: blockIndex(),
-														content: currentBlock.thinking,
-														partial: output,
-													});
-												}
-											}
-											if (isThinking) {
-												currentBlock = { type: "thinking", thinking: "", thinkingSignature: undefined };
-												output.content.push(currentBlock);
-												ensureStarted();
-												stream.push({
-													type: "thinking_start",
-													contentIndex: blockIndex(),
-													partial: output,
-												});
-											} else {
-												currentBlock = { type: "text", text: "" };
-												output.content.push(currentBlock);
-												ensureStarted();
-												stream.push({ type: "text_start", contentIndex: blockIndex(), partial: output });
-											}
-										}
-										if (currentBlock.type === "thinking") {
-											currentBlock.thinking += part.text;
-											currentBlock.thinkingSignature = retainThoughtSignature(
-												currentBlock.thinkingSignature,
-												part.thoughtSignature,
-											);
-											stream.push({
-												type: "thinking_delta",
-												contentIndex: blockIndex(),
-												delta: part.text,
-												partial: output,
-											});
-										} else {
-											currentBlock.text += part.text;
-											currentBlock.textSignature = retainThoughtSignature(
-												currentBlock.textSignature,
-												part.thoughtSignature,
-											);
-											stream.push({
-												type: "text_delta",
-												contentIndex: blockIndex(),
-												delta: part.text,
-												partial: output,
-											});
-										}
-									}
-
-									if (part.functionCall) {
-										hasContent = true;
+						const candidate = responseData.candidates?.[0];
+						if (candidate?.content?.parts) {
+							for (const part of candidate.content.parts) {
+								if (part.text !== undefined) {
+									hasContent = true;
+									const isThinking = isThinkingPart(part);
+									if (
+										!currentBlock ||
+										(isThinking && currentBlock.type !== "thinking") ||
+										(!isThinking && currentBlock.type !== "text")
+									) {
 										if (currentBlock) {
 											if (currentBlock.type === "text") {
 												stream.push({
 													type: "text_end",
-													contentIndex: blockIndex(),
+													contentIndex: blocks.length - 1,
 													content: currentBlock.text,
 													partial: output,
 												});
@@ -646,169 +562,206 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli", GoogleGe
 													partial: output,
 												});
 											}
-											currentBlock = null;
 										}
-
-										const providedId = part.functionCall.id;
-										const needsNewId =
-											!providedId ||
-											output.content.some((b) => b.type === "toolCall" && b.id === providedId);
-										const toolCallId = needsNewId
-											? `${part.functionCall.name}_${Date.now()}_${++toolCallCounter}`
-											: providedId;
-
-										const toolCall: ToolCall = {
-											type: "toolCall",
-											id: toolCallId,
-											name: part.functionCall.name || "",
-											arguments: (part.functionCall.args as Record<string, unknown>) ?? {},
-											...(part.thoughtSignature && { thoughtSignature: part.thoughtSignature }),
-										};
-
-										output.content.push(toolCall);
-										ensureStarted();
-										stream.push({ type: "toolcall_start", contentIndex: blockIndex(), partial: output });
+										if (isThinking) {
+											currentBlock = { type: "thinking", thinking: "", thinkingSignature: undefined };
+											output.content.push(currentBlock);
+											ensureStarted();
+											stream.push({
+												type: "thinking_start",
+												contentIndex: blockIndex(),
+												partial: output,
+											});
+										} else {
+											currentBlock = { type: "text", text: "" };
+											output.content.push(currentBlock);
+											ensureStarted();
+											stream.push({ type: "text_start", contentIndex: blockIndex(), partial: output });
+										}
+									}
+									if (currentBlock.type === "thinking") {
+										currentBlock.thinking += part.text;
+										currentBlock.thinkingSignature = retainThoughtSignature(
+											currentBlock.thinkingSignature,
+											part.thoughtSignature,
+										);
 										stream.push({
-											type: "toolcall_delta",
+											type: "thinking_delta",
 											contentIndex: blockIndex(),
-											delta: JSON.stringify(toolCall.arguments),
+											delta: part.text,
 											partial: output,
 										});
+									} else {
+										currentBlock.text += part.text;
+										currentBlock.textSignature = retainThoughtSignature(
+											currentBlock.textSignature,
+											part.thoughtSignature,
+										);
 										stream.push({
-											type: "toolcall_end",
+											type: "text_delta",
 											contentIndex: blockIndex(),
-											toolCall,
+											delta: part.text,
 											partial: output,
 										});
 									}
 								}
-							}
 
-							if (candidate?.finishReason) {
-								output.stopReason = mapStopReasonString(candidate.finishReason);
-								if (output.content.some((b) => b.type === "toolCall")) {
-									output.stopReason = "toolUse";
+								if (part.functionCall) {
+									hasContent = true;
+									if (currentBlock) {
+										if (currentBlock.type === "text") {
+											stream.push({
+												type: "text_end",
+												contentIndex: blockIndex(),
+												content: currentBlock.text,
+												partial: output,
+											});
+										} else {
+											stream.push({
+												type: "thinking_end",
+												contentIndex: blockIndex(),
+												content: currentBlock.thinking,
+												partial: output,
+											});
+										}
+										currentBlock = null;
+									}
+
+									const providedId = part.functionCall.id;
+									const needsNewId =
+										!providedId ||
+										output.content.some((b) => b.type === "toolCall" && b.id === providedId);
+									const toolCallId = needsNewId
+										? `${part.functionCall.name}_${Date.now()}_${++toolCallCounter}`
+										: providedId;
+
+									const toolCall: ToolCall = {
+										type: "toolCall",
+										id: toolCallId,
+										name: part.functionCall.name || "",
+										arguments: (part.functionCall.args as Record<string, unknown>) ?? {},
+										...(part.thoughtSignature && { thoughtSignature: part.thoughtSignature }),
+									};
+
+									output.content.push(toolCall);
+									ensureStarted();
+									stream.push({ type: "toolcall_start", contentIndex: blockIndex(), partial: output });
+									stream.push({
+										type: "toolcall_delta",
+										contentIndex: blockIndex(),
+										delta: JSON.stringify(toolCall.arguments),
+										partial: output,
+									});
+									stream.push({
+										type: "toolcall_end",
+										contentIndex: blockIndex(),
+										toolCall,
+										partial: output,
+									});
 								}
 							}
+						}
 
-							if (responseData.usageMetadata) {
-								// promptTokenCount includes cachedContentTokenCount, so subtract to get fresh input
-								const promptTokens = responseData.usageMetadata.promptTokenCount || 0;
-								const cacheReadTokens = responseData.usageMetadata.cachedContentTokenCount || 0;
-								output.usage = {
-									input: promptTokens - cacheReadTokens,
-									output:
-										(responseData.usageMetadata.candidatesTokenCount || 0) +
-										(responseData.usageMetadata.thoughtsTokenCount || 0),
-									cacheRead: cacheReadTokens,
-									cacheWrite: 0,
-									totalTokens: responseData.usageMetadata.totalTokenCount || 0,
-									cost: {
-										input: 0,
-										output: 0,
-										cacheRead: 0,
-										cacheWrite: 0,
-										total: 0,
-									},
-								};
-								calculateCost(model, output.usage);
+						if (candidate?.finishReason) {
+							output.stopReason = mapStopReasonString(candidate.finishReason);
+							if (output.content.some((b) => b.type === "toolCall")) {
+								output.stopReason = "toolUse";
 							}
 						}
+
+						if (responseData.usageMetadata) {
+							// promptTokenCount includes cachedContentTokenCount, so subtract to get fresh input
+							const promptTokens = responseData.usageMetadata.promptTokenCount || 0;
+							const cacheReadTokens = responseData.usageMetadata.cachedContentTokenCount || 0;
+							output.usage = {
+								input: promptTokens - cacheReadTokens,
+								output:
+									(responseData.usageMetadata.candidatesTokenCount || 0) +
+									(responseData.usageMetadata.thoughtsTokenCount || 0),
+								cacheRead: cacheReadTokens,
+								cacheWrite: 0,
+								totalTokens: responseData.usageMetadata.totalTokenCount || 0,
+								cost: {
+									input: 0,
+									output: 0,
+									cacheRead: 0,
+									cacheWrite: 0,
+									total: 0,
+								},
+							};
+							calculateCost(model, output.usage);
+						}
 					}
-				} finally {
-					options?.signal?.removeEventListener("abort", abortHandler);
 				}
+			} finally {
+				options?.signal?.removeEventListener("abort", abortHandler);
+			}
 
-				if (currentBlock) {
-					if (currentBlock.type === "text") {
-						stream.push({
-							type: "text_end",
-							contentIndex: blockIndex(),
-							content: currentBlock.text,
-							partial: output,
-						});
-					} else {
-						stream.push({
-							type: "thinking_end",
-							contentIndex: blockIndex(),
-							content: currentBlock.thinking,
-							partial: output,
-						});
-					}
-				}
-
-				return hasContent;
-			};
-
-			let receivedContent = false;
-			let currentResponse = response;
-
-			for (let emptyAttempt = 0; emptyAttempt <= MAX_EMPTY_STREAM_RETRIES; emptyAttempt++) {
-				if (options?.signal?.aborted) {
-					throw new Error("Request was aborted");
-				}
-
-				if (emptyAttempt > 0) {
-					const backoffMs = EMPTY_STREAM_BASE_DELAY_MS * 2 ** (emptyAttempt - 1);
-					await sleep(backoffMs, options?.signal);
-
-					if (!requestUrl) {
-						throw new Error("Missing request URL");
-					}
-
-					currentResponse = await fetch(requestUrl, {
-						method: "POST",
-						headers: requestHeaders,
-						body: requestBodyJson,
-						signal: options?.signal,
+			if (currentBlock) {
+				if (currentBlock.type === "text") {
+					stream.push({
+						type: "text_end",
+						contentIndex: blockIndex(),
+						content: currentBlock.text,
+						partial: output,
 					});
-
-					if (!currentResponse.ok) {
-						const retryErrorText = await currentResponse.text();
-						throw new Error(`Cloud Code Assist API error (${currentResponse.status}): ${retryErrorText}`);
-					}
-				}
-
-				const streamed = await streamResponse(currentResponse);
-				if (streamed) {
-					receivedContent = true;
-					break;
-				}
-
-				if (emptyAttempt < MAX_EMPTY_STREAM_RETRIES) {
-					resetOutput();
+				} else {
+					stream.push({
+						type: "thinking_end",
+						contentIndex: blockIndex(),
+						content: currentBlock.thinking,
+						partial: output,
+					});
 				}
 			}
 
-			if (!receivedContent) {
-				throw new Error("Cloud Code Assist API returned an empty response");
-			}
+			return hasContent;
+		};
 
+		let receivedContent = false;
+		let currentResponse = response;
+
+		for (let emptyAttempt = 0; emptyAttempt <= MAX_EMPTY_STREAM_RETRIES; emptyAttempt++) {
 			if (options?.signal?.aborted) {
 				throw new Error("Request was aborted");
 			}
 
-			if (output.stopReason === "aborted" || output.stopReason === "error") {
-				throw new Error("An unknown error occurred");
-			}
+			if (emptyAttempt > 0) {
+				const backoffMs = EMPTY_STREAM_BASE_DELAY_MS * 2 ** (emptyAttempt - 1);
+				await sleep(backoffMs, options?.signal);
 
-			stream.push({ type: "done", reason: output.stopReason, message: output });
-			stream.end();
-		} catch (error) {
-			for (const block of output.content) {
-				if ("index" in block) {
-					delete (block as { index?: number }).index;
+				if (!requestUrl) {
+					throw new Error("Missing request URL");
+				}
+
+				currentResponse = await fetch(requestUrl, {
+					method: "POST",
+					headers: requestHeaders,
+					body: requestBodyJson,
+					signal: options?.signal,
+				});
+
+				if (!currentResponse.ok) {
+					const retryErrorText = await currentResponse.text();
+					throw new Error(`Cloud Code Assist API error (${currentResponse.status}): ${retryErrorText}`);
 				}
 			}
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
-		}
-	})();
 
-	return stream;
-};
+			const streamed = await streamResponse(currentResponse);
+			if (streamed) {
+				receivedContent = true;
+				break;
+			}
+
+			if (emptyAttempt < MAX_EMPTY_STREAM_RETRIES) {
+				resetOutput();
+			}
+		}
+
+		if (!receivedContent) {
+			throw new Error("Cloud Code Assist API returned an empty response");
+		}
+	});
 
 export const streamSimpleGoogleGeminiCli: StreamFunction<"google-gemini-cli", SimpleStreamOptions> = (
 	model: Model<"google-gemini-cli">,

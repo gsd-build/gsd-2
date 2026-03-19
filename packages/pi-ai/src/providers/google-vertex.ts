@@ -8,8 +8,6 @@ import type {
 } from "@google/genai";
 import { calculateCost } from "../models.js";
 import type {
-	Api,
-	AssistantMessage,
 	Context,
 	Model,
 	ThinkingLevel as PiThinkingLevel,
@@ -23,6 +21,7 @@ import type {
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
+import { createProviderStream } from "../utils/stream-handler.js";
 import type { GoogleThinkingLevel } from "./google-gemini-cli.js";
 import {
 	convertMessages,
@@ -73,114 +72,38 @@ export const streamGoogleVertex: StreamFunction<"google-vertex", GoogleVertexOpt
 	model: Model<"google-vertex">,
 	context: Context,
 	options?: GoogleVertexOptions,
-): AssistantMessageEventStream => {
-	const stream = new AssistantMessageEventStream();
+): AssistantMessageEventStream =>
+	createProviderStream(model, options, async (output, stream) => {
+		const project = resolveProject(options);
+		const location = resolveLocation(options);
+		const client = await createClient(model, project, location, options?.headers);
+		let params = buildParams(model, context, options);
+		const nextParams = await options?.onPayload?.(params, model);
+		if (nextParams !== undefined) {
+			params = nextParams as GenerateContentParameters;
+		}
+		const googleStream = await client.models.generateContentStream(params);
 
-	(async () => {
-		const output: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: "google-vertex" as Api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			stopReason: "stop",
-			timestamp: Date.now(),
-		};
-
-		try {
-			const project = resolveProject(options);
-			const location = resolveLocation(options);
-			const client = await createClient(model, project, location, options?.headers);
-			let params = buildParams(model, context, options);
-			const nextParams = await options?.onPayload?.(params, model);
-			if (nextParams !== undefined) {
-				params = nextParams as GenerateContentParameters;
-			}
-			const googleStream = await client.models.generateContentStream(params);
-
-			stream.push({ type: "start", partial: output });
-			let currentBlock: TextContent | ThinkingContent | null = null;
-			const blocks = output.content;
-			const blockIndex = () => blocks.length - 1;
-			for await (const chunk of googleStream) {
-				const candidate = chunk.candidates?.[0];
-				if (candidate?.content?.parts) {
-					for (const part of candidate.content.parts) {
-						if (part.text !== undefined) {
-							const isThinking = isThinkingPart(part);
-							if (
-								!currentBlock ||
-								(isThinking && currentBlock.type !== "thinking") ||
-								(!isThinking && currentBlock.type !== "text")
-							) {
-								if (currentBlock) {
-									if (currentBlock.type === "text") {
-										stream.push({
-											type: "text_end",
-											contentIndex: blocks.length - 1,
-											content: currentBlock.text,
-											partial: output,
-										});
-									} else {
-										stream.push({
-											type: "thinking_end",
-											contentIndex: blockIndex(),
-											content: currentBlock.thinking,
-											partial: output,
-										});
-									}
-								}
-								if (isThinking) {
-									currentBlock = { type: "thinking", thinking: "", thinkingSignature: undefined };
-									output.content.push(currentBlock);
-									stream.push({ type: "thinking_start", contentIndex: blockIndex(), partial: output });
-								} else {
-									currentBlock = { type: "text", text: "" };
-									output.content.push(currentBlock);
-									stream.push({ type: "text_start", contentIndex: blockIndex(), partial: output });
-								}
-							}
-							if (currentBlock.type === "thinking") {
-								currentBlock.thinking += part.text;
-								currentBlock.thinkingSignature = retainThoughtSignature(
-									currentBlock.thinkingSignature,
-									part.thoughtSignature,
-								);
-								stream.push({
-									type: "thinking_delta",
-									contentIndex: blockIndex(),
-									delta: part.text,
-									partial: output,
-								});
-							} else {
-								currentBlock.text += part.text;
-								currentBlock.textSignature = retainThoughtSignature(
-									currentBlock.textSignature,
-									part.thoughtSignature,
-								);
-								stream.push({
-									type: "text_delta",
-									contentIndex: blockIndex(),
-									delta: part.text,
-									partial: output,
-								});
-							}
-						}
-
-						if (part.functionCall) {
+		stream.push({ type: "start", partial: output });
+		let currentBlock: TextContent | ThinkingContent | null = null;
+		const blocks = output.content;
+		const blockIndex = () => blocks.length - 1;
+		for await (const chunk of googleStream) {
+			const candidate = chunk.candidates?.[0];
+			if (candidate?.content?.parts) {
+				for (const part of candidate.content.parts) {
+					if (part.text !== undefined) {
+						const isThinking = isThinkingPart(part);
+						if (
+							!currentBlock ||
+							(isThinking && currentBlock.type !== "thinking") ||
+							(!isThinking && currentBlock.type !== "text")
+						) {
 							if (currentBlock) {
 								if (currentBlock.type === "text") {
 									stream.push({
 										type: "text_end",
-										contentIndex: blockIndex(),
+										contentIndex: blocks.length - 1,
 										content: currentBlock.text,
 										partial: output,
 									});
@@ -192,108 +115,137 @@ export const streamGoogleVertex: StreamFunction<"google-vertex", GoogleVertexOpt
 										partial: output,
 									});
 								}
-								currentBlock = null;
 							}
-
-							const providedId = part.functionCall.id;
-							const needsNewId =
-								!providedId || output.content.some((b) => b.type === "toolCall" && b.id === providedId);
-							const toolCallId = needsNewId
-								? `${part.functionCall.name}_${Date.now()}_${++toolCallCounter}`
-								: providedId;
-
-							const toolCall: ToolCall = {
-								type: "toolCall",
-								id: toolCallId,
-								name: part.functionCall.name || "",
-								arguments: (part.functionCall.args as Record<string, any>) ?? {},
-								...(part.thoughtSignature && { thoughtSignature: part.thoughtSignature }),
-							};
-
-							output.content.push(toolCall);
-							stream.push({ type: "toolcall_start", contentIndex: blockIndex(), partial: output });
+							if (isThinking) {
+								currentBlock = { type: "thinking", thinking: "", thinkingSignature: undefined };
+								output.content.push(currentBlock);
+								stream.push({ type: "thinking_start", contentIndex: blockIndex(), partial: output });
+							} else {
+								currentBlock = { type: "text", text: "" };
+								output.content.push(currentBlock);
+								stream.push({ type: "text_start", contentIndex: blockIndex(), partial: output });
+							}
+						}
+						if (currentBlock.type === "thinking") {
+							currentBlock.thinking += part.text;
+							currentBlock.thinkingSignature = retainThoughtSignature(
+								currentBlock.thinkingSignature,
+								part.thoughtSignature,
+							);
 							stream.push({
-								type: "toolcall_delta",
+								type: "thinking_delta",
 								contentIndex: blockIndex(),
-								delta: JSON.stringify(toolCall.arguments),
+								delta: part.text,
 								partial: output,
 							});
-							stream.push({ type: "toolcall_end", contentIndex: blockIndex(), toolCall, partial: output });
+						} else {
+							currentBlock.text += part.text;
+							currentBlock.textSignature = retainThoughtSignature(
+								currentBlock.textSignature,
+								part.thoughtSignature,
+							);
+							stream.push({
+								type: "text_delta",
+								contentIndex: blockIndex(),
+								delta: part.text,
+								partial: output,
+							});
 						}
 					}
-				}
 
-				if (candidate?.finishReason) {
-					output.stopReason = mapStopReason(candidate.finishReason);
-					if (output.content.some((b) => b.type === "toolCall")) {
-						output.stopReason = "toolUse";
+					if (part.functionCall) {
+						if (currentBlock) {
+							if (currentBlock.type === "text") {
+								stream.push({
+									type: "text_end",
+									contentIndex: blockIndex(),
+									content: currentBlock.text,
+									partial: output,
+								});
+							} else {
+								stream.push({
+									type: "thinking_end",
+									contentIndex: blockIndex(),
+									content: currentBlock.thinking,
+									partial: output,
+								});
+							}
+							currentBlock = null;
+						}
+
+						const providedId = part.functionCall.id;
+						const needsNewId =
+							!providedId || output.content.some((b) => b.type === "toolCall" && b.id === providedId);
+						const toolCallId = needsNewId
+							? `${part.functionCall.name}_${Date.now()}_${++toolCallCounter}`
+							: providedId;
+
+						const toolCall: ToolCall = {
+							type: "toolCall",
+							id: toolCallId,
+							name: part.functionCall.name || "",
+							arguments: (part.functionCall.args as Record<string, any>) ?? {},
+							...(part.thoughtSignature && { thoughtSignature: part.thoughtSignature }),
+						};
+
+						output.content.push(toolCall);
+						stream.push({ type: "toolcall_start", contentIndex: blockIndex(), partial: output });
+						stream.push({
+							type: "toolcall_delta",
+							contentIndex: blockIndex(),
+							delta: JSON.stringify(toolCall.arguments),
+							partial: output,
+						});
+						stream.push({ type: "toolcall_end", contentIndex: blockIndex(), toolCall, partial: output });
 					}
 				}
+			}
 
-				if (chunk.usageMetadata) {
-					output.usage = {
-						input: chunk.usageMetadata.promptTokenCount || 0,
-						output:
-							(chunk.usageMetadata.candidatesTokenCount || 0) + (chunk.usageMetadata.thoughtsTokenCount || 0),
-						cacheRead: chunk.usageMetadata.cachedContentTokenCount || 0,
+			if (candidate?.finishReason) {
+				output.stopReason = mapStopReason(candidate.finishReason);
+				if (output.content.some((b) => b.type === "toolCall")) {
+					output.stopReason = "toolUse";
+				}
+			}
+
+			if (chunk.usageMetadata) {
+				output.usage = {
+					input: chunk.usageMetadata.promptTokenCount || 0,
+					output:
+						(chunk.usageMetadata.candidatesTokenCount || 0) + (chunk.usageMetadata.thoughtsTokenCount || 0),
+					cacheRead: chunk.usageMetadata.cachedContentTokenCount || 0,
+					cacheWrite: 0,
+					totalTokens: chunk.usageMetadata.totalTokenCount || 0,
+					cost: {
+						input: 0,
+						output: 0,
+						cacheRead: 0,
 						cacheWrite: 0,
-						totalTokens: chunk.usageMetadata.totalTokenCount || 0,
-						cost: {
-							input: 0,
-							output: 0,
-							cacheRead: 0,
-							cacheWrite: 0,
-							total: 0,
-						},
-					};
-					calculateCost(model, output.usage);
-				}
+						total: 0,
+					},
+				};
+				calculateCost(model, output.usage);
 			}
-
-			if (currentBlock) {
-				if (currentBlock.type === "text") {
-					stream.push({
-						type: "text_end",
-						contentIndex: blockIndex(),
-						content: currentBlock.text,
-						partial: output,
-					});
-				} else {
-					stream.push({
-						type: "thinking_end",
-						contentIndex: blockIndex(),
-						content: currentBlock.thinking,
-						partial: output,
-					});
-				}
-			}
-
-			if (options?.signal?.aborted) {
-				throw new Error("Request was aborted");
-			}
-
-			if (output.stopReason === "aborted" || output.stopReason === "error") {
-				throw new Error("An unknown error occurred");
-			}
-
-			stream.push({ type: "done", reason: output.stopReason, message: output });
-			stream.end();
-		} catch (error) {
-			// Remove internal index property used during streaming
-			for (const block of output.content) {
-				if ("index" in block) {
-					delete (block as { index?: number }).index;
-				}
-			}
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
 		}
-	})();
 
-	return stream;
-};
+		if (currentBlock) {
+			if (currentBlock.type === "text") {
+				stream.push({
+					type: "text_end",
+					contentIndex: blockIndex(),
+					content: currentBlock.text,
+					partial: output,
+				});
+			} else {
+				stream.push({
+					type: "thinking_end",
+					contentIndex: blockIndex(),
+					content: currentBlock.thinking,
+					partial: output,
+				});
+			}
+		}
+	});
 
 export const streamSimpleGoogleVertex: StreamFunction<"google-vertex", SimpleStreamOptions> = (
 	model: Model<"google-vertex">,

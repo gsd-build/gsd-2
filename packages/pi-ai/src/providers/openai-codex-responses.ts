@@ -18,7 +18,6 @@ if (typeof process !== "undefined" && (process.versions?.node || process.version
 import { getEnvApiKey } from "../env-api-keys.js";
 import { supportsXhigh } from "../models.js";
 import type {
-	Api,
 	AssistantMessage,
 	Context,
 	Model,
@@ -27,6 +26,7 @@ import type {
 	StreamOptions,
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
+import { createProviderStream } from "../utils/stream-handler.js";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.js";
 import { buildBaseOptions, clampReasoning } from "./simple-options.js";
 
@@ -111,29 +111,11 @@ export const streamOpenAICodexResponses: StreamFunction<"openai-codex-responses"
 	model: Model<"openai-codex-responses">,
 	context: Context,
 	options?: OpenAICodexResponsesOptions,
-): AssistantMessageEventStream => {
-	const stream = new AssistantMessageEventStream();
-
-	(async () => {
-		const output: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: "openai-codex-responses" as Api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			stopReason: "stop",
-			timestamp: Date.now(),
-		};
-
-		try {
+): AssistantMessageEventStream =>
+	createProviderStream(
+		model,
+		options,
+		async (output, stream) => {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
 			if (!apiKey) {
 				throw new Error(`No API key for provider: ${model.provider}`);
@@ -165,15 +147,8 @@ export const streamOpenAICodexResponses: StreamFunction<"openai-codex-responses"
 						options,
 					);
 
-					if (options?.signal?.aborted) {
-						throw new Error("Request was aborted");
-					}
-					stream.push({
-						type: "done",
-						reason: output.stopReason as "stop" | "length" | "toolUse",
-						message: output,
-					});
-					stream.end();
+					// WebSocket path succeeded — return and let createProviderStream
+					// handle the done event and stream.end().
 					return;
 				} catch (error) {
 					if (transport === "websocket" || websocketStarted) {
@@ -244,23 +219,11 @@ export const streamOpenAICodexResponses: StreamFunction<"openai-codex-responses"
 
 			stream.push({ type: "start", partial: output });
 			await processStream(response, output, stream, model);
-
-			if (options?.signal?.aborted) {
-				throw new Error("Request was aborted");
-			}
-
-			stream.push({ type: "done", reason: output.stopReason as "stop" | "length" | "toolUse", message: output });
-			stream.end();
-		} catch (error) {
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = error instanceof Error ? error.message : String(error);
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
-		}
-	})();
-
-	return stream;
-};
+		},
+		{
+			formatError: (error) => (error instanceof Error ? error.message : String(error)),
+		},
+	);
 
 export const streamSimpleOpenAICodexResponses: StreamFunction<"openai-codex-responses", SimpleStreamOptions> = (
 	model: Model<"openai-codex-responses">,

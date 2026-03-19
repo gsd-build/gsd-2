@@ -38,6 +38,7 @@ import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { shortHash } from "../utils/hash.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
+import { createProviderStream } from "../utils/stream-handler.js";
 import { buildBaseOptions, clampReasoning } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
 
@@ -59,13 +60,11 @@ export const streamMistral: StreamFunction<"mistral-conversations", MistralOptio
 	model: Model<"mistral-conversations">,
 	context: Context,
 	options?: MistralOptions,
-): AssistantMessageEventStream => {
-	const stream = new AssistantMessageEventStream();
-
-	(async () => {
-		const output = createOutput(model);
-
-		try {
+): AssistantMessageEventStream =>
+	createProviderStream(
+		model,
+		options,
+		async (output, stream) => {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider);
 			if (!apiKey) {
 				throw new Error(`No API key for provider: ${model.provider}`);
@@ -89,27 +88,9 @@ export const streamMistral: StreamFunction<"mistral-conversations", MistralOptio
 			const mistralStream = await mistral.chat.stream(payload, buildRequestOptions(model, options));
 			stream.push({ type: "start", partial: output });
 			await consumeChatStream(model, output, stream, mistralStream);
-
-			if (options?.signal?.aborted) {
-				throw new Error("Request was aborted");
-			}
-
-			if (output.stopReason === "aborted" || output.stopReason === "error") {
-				throw new Error("An unknown error occurred");
-			}
-
-			stream.push({ type: "done", reason: output.stopReason, message: output });
-			stream.end();
-		} catch (error) {
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = formatMistralError(error);
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
-		}
-	})();
-
-	return stream;
-};
+		},
+		{ formatError: formatMistralError },
+	);
 
 /**
  * Maps provider-agnostic `SimpleStreamOptions` to Mistral options.
@@ -133,25 +114,6 @@ export const streamSimpleMistral: StreamFunction<"mistral-conversations", Simple
 	} satisfies MistralOptions);
 };
 
-function createOutput(model: Model<"mistral-conversations">): AssistantMessage {
-	return {
-		role: "assistant",
-		content: [],
-		api: model.api,
-		provider: model.provider,
-		model: model.id,
-		usage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
-		stopReason: "stop",
-		timestamp: Date.now(),
-	};
-}
 
 function createMistralToolCallIdNormalizer(): (id: string) => string {
 	const idMap = new Map<string, string>();

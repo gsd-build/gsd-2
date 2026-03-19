@@ -22,7 +22,6 @@ import {
 
 import { calculateCost } from "../models.js";
 import type {
-	Api,
 	AssistantMessage,
 	CacheRetention,
 	Context,
@@ -42,6 +41,7 @@ import type {
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
+import { createProviderStream } from "../utils/stream-handler.js";
 import { adjustMaxTokensForThinking, buildBaseOptions, clampReasoning } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
 
@@ -63,28 +63,8 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 	model: Model<"bedrock-converse-stream">,
 	context: Context,
 	options: BedrockOptions = {},
-): AssistantMessageEventStream => {
-	const stream = new AssistantMessageEventStream();
-
-	(async () => {
-		const output: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: "bedrock-converse-stream" as Api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			stopReason: "stop",
-			timestamp: Date.now(),
-		};
-
+): AssistantMessageEventStream =>
+	createProviderStream(model, options, async (output, stream) => {
 		const blocks = output.content as Block[];
 
 		const config: BedrockRuntimeClientConfig = {
@@ -142,79 +122,54 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 			config.region = options.region || "us-east-1";
 		}
 
-		try {
-			const client = new BedrockRuntimeClient(config);
+		const client = new BedrockRuntimeClient(config);
 
-			const cacheRetention = resolveCacheRetention(options.cacheRetention);
-			let commandInput = {
-				modelId: model.id,
-				messages: convertMessages(context, model, cacheRetention),
-				system: buildSystemPrompt(context.systemPrompt, model, cacheRetention),
-				inferenceConfig: { maxTokens: options.maxTokens, temperature: options.temperature },
-				toolConfig: convertToolConfig(context.tools, options.toolChoice),
-				additionalModelRequestFields: buildAdditionalModelRequestFields(model, options),
-			};
-			const nextCommandInput = await options?.onPayload?.(commandInput, model);
-			if (nextCommandInput !== undefined) {
-				commandInput = nextCommandInput as typeof commandInput;
-			}
-			const command = new ConverseStreamCommand(commandInput);
-
-			const response = await client.send(command, { abortSignal: options.signal });
-
-			for await (const item of response.stream!) {
-				if (item.messageStart) {
-					if (item.messageStart.role !== ConversationRole.ASSISTANT) {
-						throw new Error("Unexpected assistant message start but got user message start instead");
-					}
-					stream.push({ type: "start", partial: output });
-				} else if (item.contentBlockStart) {
-					handleContentBlockStart(item.contentBlockStart, blocks, output, stream);
-				} else if (item.contentBlockDelta) {
-					handleContentBlockDelta(item.contentBlockDelta, blocks, output, stream);
-				} else if (item.contentBlockStop) {
-					handleContentBlockStop(item.contentBlockStop, blocks, output, stream);
-				} else if (item.messageStop) {
-					output.stopReason = mapStopReason(item.messageStop.stopReason);
-				} else if (item.metadata) {
-					handleMetadata(item.metadata, model, output);
-				} else if (item.internalServerException) {
-					throw new Error(`Internal server error: ${item.internalServerException.message}`);
-				} else if (item.modelStreamErrorException) {
-					throw new Error(`Model stream error: ${item.modelStreamErrorException.message}`);
-				} else if (item.validationException) {
-					throw new Error(`Validation error: ${item.validationException.message}`);
-				} else if (item.throttlingException) {
-					throw new Error(`Throttling error: ${item.throttlingException.message}`);
-				} else if (item.serviceUnavailableException) {
-					throw new Error(`Service unavailable: ${item.serviceUnavailableException.message}`);
-				}
-			}
-
-			if (options.signal?.aborted) {
-				throw new Error("Request was aborted");
-			}
-
-			if (output.stopReason === "error" || output.stopReason === "aborted") {
-				throw new Error("An unknown error occurred");
-			}
-
-			stream.push({ type: "done", reason: output.stopReason, message: output });
-			stream.end();
-		} catch (error) {
-			for (const block of output.content) {
-				delete (block as Block).index;
-				delete (block as Block).partialJson;
-			}
-			output.stopReason = options.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
+		const cacheRetention = resolveCacheRetention(options.cacheRetention);
+		let commandInput = {
+			modelId: model.id,
+			messages: convertMessages(context, model, cacheRetention),
+			system: buildSystemPrompt(context.systemPrompt, model, cacheRetention),
+			inferenceConfig: { maxTokens: options.maxTokens, temperature: options.temperature },
+			toolConfig: convertToolConfig(context.tools, options.toolChoice),
+			additionalModelRequestFields: buildAdditionalModelRequestFields(model, options),
+		};
+		const nextCommandInput = await options?.onPayload?.(commandInput, model);
+		if (nextCommandInput !== undefined) {
+			commandInput = nextCommandInput as typeof commandInput;
 		}
-	})();
+		const command = new ConverseStreamCommand(commandInput);
 
-	return stream;
-};
+		const response = await client.send(command, { abortSignal: options.signal });
+
+		for await (const item of response.stream!) {
+			if (item.messageStart) {
+				if (item.messageStart.role !== ConversationRole.ASSISTANT) {
+					throw new Error("Unexpected assistant message start but got user message start instead");
+				}
+				stream.push({ type: "start", partial: output });
+			} else if (item.contentBlockStart) {
+				handleContentBlockStart(item.contentBlockStart, blocks, output, stream);
+			} else if (item.contentBlockDelta) {
+				handleContentBlockDelta(item.contentBlockDelta, blocks, output, stream);
+			} else if (item.contentBlockStop) {
+				handleContentBlockStop(item.contentBlockStop, blocks, output, stream);
+			} else if (item.messageStop) {
+				output.stopReason = mapStopReason(item.messageStop.stopReason);
+			} else if (item.metadata) {
+				handleMetadata(item.metadata, model, output);
+			} else if (item.internalServerException) {
+				throw new Error(`Internal server error: ${item.internalServerException.message}`);
+			} else if (item.modelStreamErrorException) {
+				throw new Error(`Model stream error: ${item.modelStreamErrorException.message}`);
+			} else if (item.validationException) {
+				throw new Error(`Validation error: ${item.validationException.message}`);
+			} else if (item.throttlingException) {
+				throw new Error(`Throttling error: ${item.throttlingException.message}`);
+			} else if (item.serviceUnavailableException) {
+				throw new Error(`Service unavailable: ${item.serviceUnavailableException.message}`);
+			}
+		}
+	});
 
 export const streamSimpleBedrock: StreamFunction<"bedrock-converse-stream", SimpleStreamOptions> = (
 	model: Model<"bedrock-converse-stream">,

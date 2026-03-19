@@ -5,8 +5,6 @@ import type { ResponseCreateParamsStreaming } from "openai/resources/responses/r
 import { getEnvApiKey } from "../env-api-keys.js";
 import { supportsXhigh } from "../models.js";
 import type {
-	Api,
-	AssistantMessage,
 	Context,
 	Model,
 	SimpleStreamOptions,
@@ -14,6 +12,7 @@ import type {
 	StreamOptions,
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
+import { createProviderStream } from "../utils/stream-handler.js";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.js";
 import { buildBaseOptions, clampReasoning } from "./simple-options.js";
 
@@ -77,69 +76,26 @@ export const streamAzureOpenAIResponses: StreamFunction<"azure-openai-responses"
 	model: Model<"azure-openai-responses">,
 	context: Context,
 	options?: AzureOpenAIResponsesOptions,
-): AssistantMessageEventStream => {
-	const stream = new AssistantMessageEventStream();
-
-	// Start async processing
-	(async () => {
+): AssistantMessageEventStream =>
+	createProviderStream(model, options, async (output, stream) => {
 		const deploymentName = resolveDeploymentName(model, options);
 
-		const output: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: "azure-openai-responses" as Api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			stopReason: "stop",
-			timestamp: Date.now(),
-		};
-
-		try {
-			// Create Azure OpenAI client
-			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
-			const client = await createClient(model, apiKey, options);
-			let params = buildParams(model, context, options, deploymentName);
-			const nextParams = await options?.onPayload?.(params, model);
-			if (nextParams !== undefined) {
-				params = nextParams as ResponseCreateParamsStreaming;
-			}
-			const openaiStream = await client.responses.create(
-				params,
-				options?.signal ? { signal: options.signal } : undefined,
-			);
-			stream.push({ type: "start", partial: output });
-
-			await processResponsesStream(openaiStream, output, stream, model);
-
-			if (options?.signal?.aborted) {
-				throw new Error("Request was aborted");
-			}
-
-			if (output.stopReason === "aborted" || output.stopReason === "error") {
-				throw new Error("An unknown error occurred");
-			}
-
-			stream.push({ type: "done", reason: output.stopReason, message: output });
-			stream.end();
-		} catch (error) {
-			for (const block of output.content) delete (block as { index?: number }).index;
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
+		// Create Azure OpenAI client
+		const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
+		const client = await createClient(model, apiKey, options);
+		let params = buildParams(model, context, options, deploymentName);
+		const nextParams = await options?.onPayload?.(params, model);
+		if (nextParams !== undefined) {
+			params = nextParams as ResponseCreateParamsStreaming;
 		}
-	})();
+		const openaiStream = await client.responses.create(
+			params,
+			options?.signal ? { signal: options.signal } : undefined,
+		);
+		stream.push({ type: "start", partial: output });
 
-	return stream;
-};
+		await processResponsesStream(openaiStream, output, stream, model);
+	});
 
 export const streamSimpleAzureOpenAIResponses: StreamFunction<"azure-openai-responses", SimpleStreamOptions> = (
 	model: Model<"azure-openai-responses">,
