@@ -19,6 +19,9 @@ import { loadRegistry, readManifestFromEntryPath, isExtensionEnabled, ensureRegi
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const distResources = join(packageRoot, 'dist', 'resources')
 const srcResources = join(packageRoot, 'src', 'resources')
+// Use dist/resources only if it has the full expected structure.
+// A partial build (tsc without copy-resources) creates dist/resources/extensions/
+// but not agents/ or skills/, causing initResources to sync from an incomplete source.
 const resourcesDir = (existsSync(distResources) && existsSync(join(distResources, 'agents')))
   ? distResources
   : srcResources

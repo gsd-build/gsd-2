@@ -6,7 +6,7 @@
  * symlink replaces the original directory so all paths remain valid.
  */
 
-import { existsSync, lstatSync, mkdirSync, readdirSync, renameSync, cpSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, renameSync, cpSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { externalGsdRoot } from "./repo-identity.js";
 import { getErrorMessage } from "./error-utils.js";
@@ -99,7 +99,29 @@ export function migrateToExternalState(basePath: string): MigrationResult {
     // Create symlink .gsd -> external path
     symlinkSync(externalPath, localGsd, "junction");
 
-    // Remove .gsd.migrating
+    // Verify the symlink resolves correctly before removing the backup (#1377).
+    // On Windows, junction creation can silently succeed but resolve to the wrong
+    // target, or the external dir may not be accessible. If verification fails,
+    // restore from the backup.
+    try {
+      const resolved = realpathSync(localGsd);
+      const resolvedExternal = realpathSync(externalPath);
+      if (resolved !== resolvedExternal) {
+        // Symlink points to wrong target — restore backup
+        try { rmSync(localGsd, { force: true }); } catch { /* may not exist */ }
+        renameSync(migratingPath, localGsd);
+        return { migrated: false, error: `Migration verification failed: symlink resolves to ${resolved}, expected ${resolvedExternal}` };
+      }
+      // Verify we can read through the symlink
+      readdirSync(localGsd);
+    } catch (verifyErr) {
+      // Symlink broken or unreadable — restore backup
+      try { rmSync(localGsd, { force: true }); } catch { /* may not exist */ }
+      try { renameSync(migratingPath, localGsd); } catch { /* best-effort restore */ }
+      return { migrated: false, error: `Migration verification failed: ${getErrorMessage(verifyErr)}` };
+    }
+
+    // Remove .gsd.migrating only after symlink is verified
     rmSync(migratingPath, { recursive: true, force: true });
 
     return { migrated: true };
