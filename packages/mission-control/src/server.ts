@@ -21,8 +21,10 @@ import { freePort } from "./server/kill-port";
 
 const repoRoot = resolve(import.meta.dir, "../../..");
 
+const HTTP_PORT = parseInt(process.env.MC_PORT ?? "4200", 10);
+
 // Free the HTTP port — WS ports are freed per-window as pipelines are created
-await freePort(4200);
+await freePort(HTTP_PORT);
 
 /** Per-window pipelines: windowId → PipelineHandle */
 const windowPipelines = new Map<string, PipelineHandle>();
@@ -60,7 +62,7 @@ async function registerWindow(windowId: string): Promise<number> {
 
 
 const server = Bun.serve({
-  port: 4200,
+  port: HTTP_PORT,
   hostname: "127.0.0.1",
   routes: {
     "/": homepage,
@@ -288,7 +290,7 @@ process.on("SIGINT", cleanup);
 
 /** Add CORS headers to API responses (defensive — same-origin in practice). */
 function addCorsHeaders(response: Response): Response {
-  response.headers.set("Access-Control-Allow-Origin", "http://127.0.0.1:4200");
+  response.headers.set("Access-Control-Allow-Origin", `http://127.0.0.1:${HTTP_PORT}`);
   response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   response.headers.set("Access-Control-Allow-Headers", "Content-Type, X-Window-Id");
   return response;

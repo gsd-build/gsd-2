@@ -2,6 +2,7 @@ import { describe, expect, it, afterAll } from "bun:test";
 import { join } from "path";
 
 const MC_ROOT = join(import.meta.dir, "..");
+const TEST_PORT = 4219; // isolated port for tests — avoids conflict with dev server on :4200
 let serverProc: ReturnType<typeof Bun.spawn> | null = null;
 
 afterAll(() => {
@@ -13,10 +14,11 @@ afterAll(() => {
 
 describe("server", () => {
   it(
-    "SERV-01: starts and responds with HTML on :4000",
+    "SERV-01: starts and responds with HTML on :4219",
     async () => {
       serverProc = Bun.spawn(["bun", "run", "src/server.ts"], {
         cwd: MC_ROOT,
+        env: { ...process.env, MC_PORT: String(TEST_PORT) },
         stdout: "pipe",
         stderr: "pipe",
       });
@@ -25,7 +27,9 @@ describe("server", () => {
       let ready = false;
       for (let i = 0; i < 20; i++) {
         try {
-          const res = await fetch("http://localhost:4000");
+          const res = await fetch(`http://127.0.0.1:${TEST_PORT}`, {
+            signal: AbortSignal.timeout(500),
+          });
           if (res.ok) {
             ready = true;
             break;
@@ -38,7 +42,7 @@ describe("server", () => {
 
       expect(ready).toBe(true);
 
-      const response = await fetch("http://localhost:4000");
+      const response = await fetch(`http://127.0.0.1:${TEST_PORT}`);
       expect(response.status).toBe(200);
 
       const contentType = response.headers.get("content-type") || "";

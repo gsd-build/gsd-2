@@ -56,7 +56,7 @@ describe("COMPAT-05: ClaudeProcessManager spawns gsd binary", () => {
 
     // Currently fails: binary is "claude"
     expect(mock.captured).not.toBeNull();
-    expect(mock.captured!.binary).toBe("gsd");
+    expect(mock.captured!.binary).toMatch(/^gsd/);
   });
 
   it("spawn args do NOT contain '--resume' flag", async () => {

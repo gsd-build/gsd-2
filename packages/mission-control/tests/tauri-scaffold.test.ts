@@ -50,7 +50,7 @@ describe("TAURI-01: src-tauri scaffold exists", () => {
     const conf = JSON.parse(
       readFileSync(join(SRC_TAURI, "tauri.conf.json"), "utf-8")
     );
-    expect(conf.build?.devUrl).toBe("http://localhost:4000");
+    expect(conf.build?.devUrl).toBe("http://127.0.0.1:4200");
   });
 
   it("tauri.conf.json CSP allows WebSocket on ws://localhost:*", () => {
