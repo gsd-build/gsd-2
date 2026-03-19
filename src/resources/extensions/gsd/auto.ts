@@ -207,6 +207,7 @@ import { getErrorMessage } from "./error-utils.js";
 const s = new AutoSession();
 
 import { STATE_REBUILD_MIN_INTERVAL_MS } from "./auto-constants.js";
+import { autoSnapshotStateIfConfigured } from "./commands-state.js";
 
 export function shouldUseWorktreeIsolation(): boolean {
   const prefs = loadEffectiveGSDPreferences()?.preferences?.git;
@@ -391,6 +392,7 @@ function tryMergeMilestone(ctx: ExtensionContext, milestoneId: string, mode: "tr
         `Milestone ${milestoneId} merged to main.${mergeResult.pushed ? " Pushed to remote." : ""}`,
         "info",
       );
+      autoSnapshotStateIfConfigured(s.basePath);
       return true;
     } catch (err) {
       ctx.ui.notify(
@@ -420,6 +422,7 @@ function tryMergeMilestone(ctx: ExtensionContext, milestoneId: string, mode: "tr
             `Milestone ${milestoneId} merged (branch mode).${mergeResult.pushed ? " Pushed to remote." : ""}`,
             "info",
           );
+          autoSnapshotStateIfConfigured(s.basePath);
           return true;
         }
       }
@@ -1638,6 +1641,11 @@ async function dispatchNextUnit(
   // Select and apply model
   const modelResult = await selectAndApplyModel(ctx, pi, unitType, unitId, s.basePath, prefs, s.verbose, s.autoModeStartModel);
   s.currentUnitRouting = modelResult.routing;
+  if (modelResult.selectedModel) {
+    writeUnitRuntimeRecord(s.basePath, unitType, unitId, s.currentUnit.startedAt, {
+      model: modelResult.selectedModel,
+    });
+  }
 
   // ── Start unit supervision (delegated to auto-timers.ts) ──
   clearUnitTimeout();
@@ -1830,5 +1838,4 @@ export async function dispatchHookUnit(
 
   return true;
 }
-
 

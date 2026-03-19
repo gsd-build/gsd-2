@@ -43,6 +43,7 @@ import { handlePrefs, handlePrefsMode, handlePrefsWizard, ensurePreferencesFile 
 import { handleConfig } from "./commands-config.js";
 import { handleInspect } from "./commands-inspect.js";
 import { handleCleanupBranches, handleCleanupSnapshots, handleSkip, handleDryRun } from "./commands-maintenance.js";
+import { handleState } from "./commands-state.js";
 import { handleDoctor, handleSteer, handleCapture, handleTriage, handleKnowledge, handleRunHook, handleUpdate, handleSkillHealth } from "./commands-handlers.js";
 import { computeProgressScore, formatProgressLine } from "./progress-score.js";
 import { runEnvironmentChecks } from "./doctor-environment.js";
@@ -71,7 +72,7 @@ export function projectRoot(): string {
 
 export function registerGSDCommand(pi: ExtensionAPI): void {
   pi.registerCommand("gsd", {
-    description: "GSD — Get Shit Done: /gsd help|start|templates|next|auto|stop|pause|status|visualize|queue|quick|capture|triage|dispatch|history|undo|skip|export|cleanup|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|forensics|migrate|remote|steer|knowledge|new-milestone|parallel|update",
+    description: "GSD — Get Shit Done: /gsd help|start|templates|next|auto|stop|pause|status|visualize|queue|quick|capture|triage|dispatch|history|undo|skip|export|cleanup|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|forensics|migrate|remote|steer|knowledge|new-milestone|parallel|state|update",
     getArgumentCompletions: (prefix: string) => {
       const subcommands = [
         { cmd: "help", desc: "Categorized command reference with descriptions" },
@@ -113,6 +114,7 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         { cmd: "parallel", desc: "Parallel milestone orchestration (start, status, stop, merge)" },
         { cmd: "park", desc: "Park a milestone — skip without deleting" },
         { cmd: "unpark", desc: "Reactivate a parked milestone" },
+        { cmd: "state", desc: "Manage GSD state git repo — path, status, commit, push, remote" },
         { cmd: "update", desc: "Update GSD to the latest version" },
         { cmd: "start", desc: "Start a workflow template (bugfix, spike, feature, etc.)" },
         { cmd: "templates", desc: "List available workflow templates" },
@@ -234,6 +236,20 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         return subs
           .filter((s) => s.cmd.startsWith(subPrefix))
           .map((s) => ({ value: `remote ${s.cmd}`, label: s.cmd, description: s.desc }));
+      }
+
+      if (parts[0] === "state" && parts.length <= 2) {
+        const subPrefix = parts[1] ?? "";
+        const subs = [
+          { cmd: "path", desc: "Show state directory path and git status summary" },
+          { cmd: "status", desc: "git status of state directory" },
+          { cmd: "commit", desc: "Snapshot uncommitted state changes" },
+          { cmd: "push", desc: "Commit (if needed) and push to remote" },
+          { cmd: "remote", desc: "Show or set the origin remote URL" },
+        ];
+        return subs
+          .filter((s) => s.cmd.startsWith(subPrefix))
+          .map((s) => ({ value: `state ${s.cmd}`, label: s.cmd, description: s.desc }));
       }
 
       if (parts[0] === "next" && parts.length <= 2) {
@@ -867,6 +883,11 @@ Examples:
 
       if (trimmed === "update") {
         await handleUpdate(ctx);
+        return;
+      }
+
+      if (trimmed === "state" || trimmed.startsWith("state ")) {
+        await handleState(trimmed.replace(/^state\s*/, "").trim(), ctx, projectRoot());
         return;
       }
 

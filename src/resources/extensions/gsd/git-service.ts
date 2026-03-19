@@ -74,6 +74,13 @@ export interface GitPreferences {
    *  Default: the main branch (from `main_branch` or auto-detected).
    */
   pr_target_branch?: string;
+  /** Remote URL for the GSD state repository (~/.gsd/projects/<hash>/).
+   *  When set, GSD automatically commits and pushes the state directory
+   *  after each milestone completes. Teammates point to the same URL
+   *  to share and sync project state.
+   *  Example: "git@github.com:team/project-gsd-state.git"
+   */
+  state_remote?: string;
 }
 
 export const VALID_BRANCH_NAME = /^[a-zA-Z0-9_\-\/.]+$/;
