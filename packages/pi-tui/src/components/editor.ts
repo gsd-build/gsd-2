@@ -1,97 +1,21 @@
-import type { AutocompleteProvider, CombinedAutocompleteProvider } from "../autocomplete.js";
+import type { AutocompleteProvider } from "../autocomplete.js";
 import { getEditorKeybindings } from "../keybindings.js";
 import { decodeKittyPrintable, matchesKey } from "../keys.js";
 import { KillRing } from "../kill-ring.js";
 import { type Component, CURSOR_MARKER, type Focusable, type TUI } from "../tui.js";
 import { UndoStack } from "../undo-stack.js";
-import { getSegmenter, isPunctuationChar, isWhitespaceChar, visibleWidth } from "../utils.js";
-import { SelectList, type SelectListTheme } from "./select-list.js";
+import { getSegmenter, isWhitespaceChar, visibleWidth } from "../utils.js";
+import { EditorAutocomplete } from "./editor-autocomplete.js";
+import { computeVerticalMoveColumn, wordBoundaryBackward, wordBoundaryForward } from "./editor-cursor.js";
+import { wordWrapLine } from "./editor-word-wrap.js";
+import type { SelectListTheme } from "./select-list.js";
+
+// Re-export for backwards compatibility
+export type { TextChunk } from "./editor-word-wrap.js";
+export { wordWrapLine } from "./editor-word-wrap.js";
 
 const segmenter = getSegmenter();
 
-/**
- * Represents a chunk of text for word-wrap layout.
- * Tracks both the text content and its position in the original line.
- */
-export interface TextChunk {
-	text: string;
-	startIndex: number;
-	endIndex: number;
-}
-
-/**
- * Split a line into word-wrapped chunks.
- * Wraps at word boundaries when possible, falling back to character-level
- * wrapping for words longer than the available width.
- *
- * @param line - The text line to wrap
- * @param maxWidth - Maximum visible width per chunk
- * @returns Array of chunks with text and position information
- */
-export function wordWrapLine(line: string, maxWidth: number): TextChunk[] {
-	if (!line || maxWidth <= 0) {
-		return [{ text: "", startIndex: 0, endIndex: 0 }];
-	}
-
-	const lineWidth = visibleWidth(line);
-	if (lineWidth <= maxWidth) {
-		return [{ text: line, startIndex: 0, endIndex: line.length }];
-	}
-
-	const chunks: TextChunk[] = [];
-	const segments = [...segmenter.segment(line)];
-
-	let currentWidth = 0;
-	let chunkStart = 0;
-
-	// Wrap opportunity: the position after the last whitespace before a non-whitespace
-	// grapheme, i.e. where a line break is allowed.
-	let wrapOppIndex = -1;
-	let wrapOppWidth = 0;
-
-	for (let i = 0; i < segments.length; i++) {
-		const seg = segments[i]!;
-		const grapheme = seg.segment;
-		const gWidth = visibleWidth(grapheme);
-		const charIndex = seg.index;
-		const isWs = isWhitespaceChar(grapheme);
-
-		// Overflow check before advancing.
-		if (currentWidth + gWidth > maxWidth) {
-			if (wrapOppIndex >= 0) {
-				// Backtrack to last wrap opportunity.
-				chunks.push({ text: line.slice(chunkStart, wrapOppIndex), startIndex: chunkStart, endIndex: wrapOppIndex });
-				chunkStart = wrapOppIndex;
-				currentWidth -= wrapOppWidth;
-			} else if (chunkStart < charIndex) {
-				// No wrap opportunity: force-break at current position.
-				chunks.push({ text: line.slice(chunkStart, charIndex), startIndex: chunkStart, endIndex: charIndex });
-				chunkStart = charIndex;
-				currentWidth = 0;
-			}
-			wrapOppIndex = -1;
-		}
-
-		// Advance.
-		currentWidth += gWidth;
-
-		// Record wrap opportunity: whitespace followed by non-whitespace.
-		// Multiple spaces join (no break between them); the break point is
-		// after the last space before the next word.
-		const next = segments[i + 1];
-		if (isWs && next && !isWhitespaceChar(next.segment)) {
-			wrapOppIndex = next.index;
-			wrapOppWidth = currentWidth;
-		}
-	}
-
-	// Push final chunk.
-	chunks.push({ text: line.slice(chunkStart), startIndex: chunkStart, endIndex: line.length });
-
-	return chunks;
-}
-
-// Kitty CSI-u sequences for printable keys, including optional shifted/base codepoints.
 interface EditorState {
 	lines: string[];
 	cursorLine: number;
@@ -143,18 +67,8 @@ export class Editor implements Component, Focusable {
 	// Border color (can be changed dynamically)
 	public borderColor: (str: string) => string;
 
-	// Autocomplete support
-	private autocompleteProvider?: AutocompleteProvider;
-	private autocompleteList?: SelectList;
-	private autocompleteState: "regular" | "force" | null = null;
-	private autocompletePrefix: string = "";
-	private autocompleteMaxVisible: number = 5;
-
-	// Debounce for @ file autocomplete to prevent blocking the event loop
-	// with synchronous fuzzyFind calls on every keystroke
-	private autocompleteDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-	private lastAutocompleteLookupPrefix: string | null = null;
-	private static readonly AUTOCOMPLETE_DEBOUNCE_MS = 150;
+	// Autocomplete subsystem
+	private autocomplete: EditorAutocomplete;
 
 	// Paste tracking for large pastes
 	private pastes: Map<number, string> = new Map();
@@ -196,7 +110,7 @@ export class Editor implements Component, Focusable {
 		const paddingX = options.paddingX ?? 0;
 		this.paddingX = Number.isFinite(paddingX) ? Math.max(0, Math.floor(paddingX)) : 0;
 		const maxVisible = options.autocompleteMaxVisible ?? 5;
-		this.autocompleteMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
+		this.autocomplete = new EditorAutocomplete(tui, theme.selectList, maxVisible);
 	}
 
 	getPaddingX(): number {
@@ -212,19 +126,19 @@ export class Editor implements Component, Focusable {
 	}
 
 	getAutocompleteMaxVisible(): number {
-		return this.autocompleteMaxVisible;
+		return this.autocomplete.getMaxVisible();
 	}
 
 	setAutocompleteMaxVisible(maxVisible: number): void {
-		const newMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
-		if (this.autocompleteMaxVisible !== newMaxVisible) {
-			this.autocompleteMaxVisible = newMaxVisible;
+		const oldMaxVisible = this.autocomplete.getMaxVisible();
+		this.autocomplete.setMaxVisible(maxVisible);
+		if (oldMaxVisible !== this.autocomplete.getMaxVisible()) {
 			this.tui.requestRender();
 		}
 	}
 
 	setAutocompleteProvider(provider: AutocompleteProvider): void {
-		this.autocompleteProvider = provider;
+		this.autocomplete.setProvider(provider);
 	}
 
 	private clearLayoutCaches(): void {
@@ -377,7 +291,7 @@ export class Editor implements Component, Focusable {
 
 		// Render each visible layout line
 		// Emit hardware cursor marker only when focused and not showing autocomplete
-		const emitCursorMarker = this.focused && !this.autocompleteState;
+		const emitCursorMarker = this.focused && !this.autocomplete.isActive();
 
 		for (const layoutLine of visibleLines) {
 			let displayText = layoutLine.text;
@@ -432,8 +346,9 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Add autocomplete list if active
-		if (this.autocompleteState && this.autocompleteList) {
-			const autocompleteResult = this.autocompleteList.render(contentWidth);
+		const autocompleteList = this.autocomplete.getList();
+		if (this.autocomplete.isActive() && autocompleteList) {
+			const autocompleteResult = autocompleteList.render(contentWidth);
 			for (const line of autocompleteResult) {
 				const lineWidth = visibleWidth(line);
 				const linePadding = " ".repeat(Math.max(0, contentWidth - lineWidth));
@@ -505,67 +420,71 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Handle autocomplete mode
-		if (this.autocompleteState && this.autocompleteList) {
+		if (this.autocomplete.isActive() && this.autocomplete.getList()) {
 			if (kb.matches(data, "selectCancel")) {
-				this.cancelAutocomplete();
+				this.autocomplete.cancel();
 				return;
 			}
 
 			if (kb.matches(data, "selectUp") || kb.matches(data, "selectDown")) {
-				this.autocompleteList.handleInput(data);
+				this.autocomplete.handleListInput(data);
 				return;
 			}
 
 			if (kb.matches(data, "tab")) {
-				const selected = this.autocompleteList.getSelectedItem();
-				if (selected && this.autocompleteProvider) {
+				const selected = this.autocomplete.getSelectedItem();
+				if (selected && this.autocomplete.getProvider()) {
 					const shouldChainSlashArgumentAutocomplete = this.shouldChainSlashArgumentAutocompleteOnTabSelection();
 
 					this.pushUndoSnapshot();
 					this.lastAction = null;
-					const result = this.autocompleteProvider.applyCompletion(
+					const result = this.autocomplete.applySelected(
 						this.state.lines,
 						this.state.cursorLine,
 						this.state.cursorCol,
-						selected,
-						this.autocompletePrefix,
 					);
-					this.state.lines = result.lines;
-					this.state.cursorLine = result.cursorLine;
-					this.setCursorCol(result.cursorCol);
-					this.cancelAutocomplete();
+					if (result) {
+						this.state.lines = result.lines;
+						this.state.cursorLine = result.cursorLine;
+						this.setCursorCol(result.cursorCol);
+					}
+					this.autocomplete.cancel();
 					this.emitChange();
 
 					if (shouldChainSlashArgumentAutocomplete && this.isBareCompletedSlashCommandAtCursor()) {
-						this.tryTriggerAutocomplete();
+						this.autocomplete.tryTrigger(
+							this.state.lines,
+							this.state.cursorLine,
+							this.state.cursorCol,
+						);
 					}
 				}
 				return;
 			}
 
 			if (kb.matches(data, "selectConfirm")) {
-				const selected = this.autocompleteList.getSelectedItem();
-				if (selected && this.autocompleteProvider) {
+				const selected = this.autocomplete.getSelectedItem();
+				if (selected && this.autocomplete.getProvider()) {
 					this.pushUndoSnapshot();
 					this.lastAction = null;
-					const result = this.autocompleteProvider.applyCompletion(
+					const result = this.autocomplete.applySelected(
 						this.state.lines,
 						this.state.cursorLine,
 						this.state.cursorCol,
-						selected,
-						this.autocompletePrefix,
 					);
-					this.state.lines = result.lines;
-					this.state.cursorLine = result.cursorLine;
-					this.setCursorCol(result.cursorCol);
+					if (result) {
+						this.state.lines = result.lines;
+						this.state.cursorLine = result.cursorLine;
+						this.setCursorCol(result.cursorCol);
+					}
 
-					if (this.autocompletePrefix.startsWith("/") || this.isInSlashCommandContext(
+					if (this.autocomplete.getPrefix().startsWith("/") || this.isInSlashCommandContext(
 						(this.state.lines[this.state.cursorLine] || "").slice(0, this.state.cursorCol),
 					)) {
-						this.cancelAutocomplete();
+						this.autocomplete.cancel();
 						// Fall through to submit
 					} else {
-						this.cancelAutocomplete();
+						this.autocomplete.cancel();
 						this.emitChange();
 						return;
 					}
@@ -574,7 +493,7 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Tab - trigger completion
-		if (kb.matches(data, "tab") && !this.autocompleteState) {
+		if (kb.matches(data, "tab") && !this.autocomplete.isActive()) {
 			this.handleTabCompletion();
 			return;
 		}
@@ -934,7 +853,6 @@ export class Editor implements Component, Focusable {
 		this.emitChange();
 	}
 
-	// All the editor methods from before...
 	private insertCharacter(char: string, skipUndoCoalescing?: boolean): void {
 		this.historyIndex = -1; // Exit history browsing mode
 
@@ -961,10 +879,14 @@ export class Editor implements Component, Focusable {
 		this.emitChange();
 
 		// Check if we should trigger or update autocomplete
-		if (!this.autocompleteState) {
+		if (!this.autocomplete.isActive()) {
 			// Auto-trigger for "/" at the start of a line (slash commands)
 			if (char === "/" && this.isAtStartOfMessage()) {
-				this.tryTriggerAutocomplete();
+				this.autocomplete.tryTrigger(
+					this.state.lines,
+					this.state.cursorLine,
+					this.state.cursorCol,
+				);
 			}
 			// Auto-trigger for "@" file reference (fuzzy search)
 			else if (char === "@") {
@@ -973,7 +895,11 @@ export class Editor implements Component, Focusable {
 				// Only trigger if @ is after whitespace or at start of line
 				const charBeforeAt = textBeforeCursor[textBeforeCursor.length - 2];
 				if (textBeforeCursor.length === 1 || charBeforeAt === " " || charBeforeAt === "\t") {
-					this.tryTriggerAutocomplete();
+					this.autocomplete.tryTrigger(
+						this.state.lines,
+						this.state.cursorLine,
+						this.state.cursorCol,
+					);
 				}
 			}
 			// Also auto-trigger when typing letters in a slash command context
@@ -982,34 +908,29 @@ export class Editor implements Component, Focusable {
 				const textBeforeCursor = currentLine.slice(0, this.state.cursorCol);
 				// Check if we're in a slash command (with or without space for arguments)
 				if (this.isInSlashCommandContext(textBeforeCursor)) {
-					this.tryTriggerAutocomplete();
+					this.autocomplete.tryTrigger(
+						this.state.lines,
+						this.state.cursorLine,
+						this.state.cursorCol,
+					);
 				}
 				// Check if we're in an @ file reference context (debounce to avoid
 				// blocking the event loop with synchronous fuzzyFind on every keystroke)
 				else if (textBeforeCursor.match(/(?:^|[\s])@[^\s]*$/)) {
-					this.debouncedTriggerAutocomplete();
+					this.autocomplete.debouncedTrigger(
+						this.state.lines,
+						this.state.cursorLine,
+						this.state.cursorCol,
+					);
 				}
 			}
 		} else {
-			this.updateAutocomplete();
+			this.autocomplete.update(
+				this.state.lines,
+				this.state.cursorLine,
+				this.state.cursorCol,
+			);
 		}
-	}
-
-	/**
-	 * Debounced version of tryTriggerAutocomplete for @ file reference context.
-	 * Prevents synchronous fuzzyFind calls from blocking the event loop on every keystroke.
-	 */
-	private debouncedTriggerAutocomplete(): void {
-		if (this.autocompleteDebounceTimer) {
-			clearTimeout(this.autocompleteDebounceTimer);
-			this.autocompleteDebounceTimer = null;
-		}
-
-		this.autocompleteDebounceTimer = setTimeout(() => {
-			this.autocompleteDebounceTimer = null;
-			this.tryTriggerAutocomplete();
-			this.tui.requestRender();
-		}, Editor.AUTOCOMPLETE_DEBOUNCE_MS);
 	}
 
 	private handlePaste(pastedText: string): void {
@@ -1160,21 +1081,7 @@ export class Editor implements Component, Focusable {
 		this.emitChange();
 
 		// Update or re-trigger autocomplete after backspace
-		if (this.autocompleteState) {
-			this.updateAutocomplete();
-		} else {
-			// If autocomplete was cancelled (no matches), re-trigger if we're in a completable context
-			const currentLine = this.state.lines[this.state.cursorLine] || "";
-			const textBeforeCursor = currentLine.slice(0, this.state.cursorCol);
-			// Slash command context
-			if (this.isInSlashCommandContext(textBeforeCursor)) {
-				this.tryTriggerAutocomplete();
-			}
-			// @ file reference context (debounced to avoid blocking event loop)
-			else if (textBeforeCursor.match(/(?:^|[\s])@[^\s]*$/)) {
-				this.debouncedTriggerAutocomplete();
-			}
-		}
+		this.retriggerAutocompleteAfterDeletion();
 	}
 
 	/**
@@ -1212,71 +1119,21 @@ export class Editor implements Component, Focusable {
 				visualLines[targetVisualLine + 1]?.logicalLine !== targetVL.logicalLine;
 			const targetMaxVisualCol = isLastTargetSegment ? targetVL.length : Math.max(0, targetVL.length - 1);
 
-			const moveToVisualCol = this.computeVerticalMoveColumn(
+			const result = computeVerticalMoveColumn(
 				currentVisualCol,
 				sourceMaxVisualCol,
 				targetMaxVisualCol,
+				this.preferredVisualCol,
 			);
+
+			this.preferredVisualCol = result.preferredVisualCol;
 
 			// Set cursor position
 			this.state.cursorLine = targetVL.logicalLine;
-			const targetCol = targetVL.startCol + moveToVisualCol;
+			const targetCol = targetVL.startCol + result.column;
 			const logicalLine = this.state.lines[targetVL.logicalLine] || "";
 			this.state.cursorCol = Math.min(targetCol, logicalLine.length);
 		}
-	}
-
-	/**
-	 * Compute the target visual column for vertical cursor movement.
-	 * Implements the sticky column decision table:
-	 *
-	 * | P | S | T | U | Scenario                                             | Set Preferred | Move To     |
-	 * |---|---|---|---| ---------------------------------------------------- |---------------|-------------|
-	 * | 0 | * | 0 | - | Start nav, target fits                               | null          | current     |
-	 * | 0 | * | 1 | - | Start nav, target shorter                            | current       | target end  |
-	 * | 1 | 0 | 0 | 0 | Clamped, target fits preferred                       | null          | preferred   |
-	 * | 1 | 0 | 0 | 1 | Clamped, target longer but still can't fit preferred | keep          | target end  |
-	 * | 1 | 0 | 1 | - | Clamped, target even shorter                         | keep          | target end  |
-	 * | 1 | 1 | 0 | - | Rewrapped, target fits current                       | null          | current     |
-	 * | 1 | 1 | 1 | - | Rewrapped, target shorter than current               | current       | target end  |
-	 *
-	 * Where:
-	 * - P = preferred col is set
-	 * - S = cursor in middle of source line (not clamped to end)
-	 * - T = target line shorter than current visual col
-	 * - U = target line shorter than preferred col
-	 */
-	private computeVerticalMoveColumn(
-		currentVisualCol: number,
-		sourceMaxVisualCol: number,
-		targetMaxVisualCol: number,
-	): number {
-		const hasPreferred = this.preferredVisualCol !== null; // P
-		const cursorInMiddle = currentVisualCol < sourceMaxVisualCol; // S
-		const targetTooShort = targetMaxVisualCol < currentVisualCol; // T
-
-		if (!hasPreferred || cursorInMiddle) {
-			if (targetTooShort) {
-				// Cases 2 and 7
-				this.preferredVisualCol = currentVisualCol;
-				return targetMaxVisualCol;
-			}
-
-			// Cases 1 and 6
-			this.preferredVisualCol = null;
-			return currentVisualCol;
-		}
-
-		const targetCantFitPreferred = targetMaxVisualCol < this.preferredVisualCol!; // U
-		if (targetTooShort || targetCantFitPreferred) {
-			// Cases 4 and 5
-			return targetMaxVisualCol;
-		}
-
-		// Case 3
-		const result = this.preferredVisualCol!;
-		this.preferredVisualCol = null;
-		return result;
 	}
 
 	private moveToLineStart(): void {
@@ -1376,13 +1233,10 @@ export class Editor implements Component, Focusable {
 		} else {
 			this.pushUndoSnapshot();
 
-			// Save lastAction before cursor movement (moveWordBackwards resets it)
+			// Save lastAction before word boundary computation
 			const wasKill = this.lastAction === "kill";
 
-			const oldCursorCol = this.state.cursorCol;
-			this.moveWordBackwards();
-			const deleteFrom = this.state.cursorCol;
-			this.setCursorCol(oldCursorCol);
+			const deleteFrom = wordBoundaryBackward(currentLine, this.state.cursorCol);
 
 			const deletedText = currentLine.slice(deleteFrom, this.state.cursorCol);
 			this.killRing.push(deletedText, { prepend: true, accumulate: wasKill });
@@ -1417,13 +1271,10 @@ export class Editor implements Component, Focusable {
 		} else {
 			this.pushUndoSnapshot();
 
-			// Save lastAction before cursor movement (moveWordForwards resets it)
+			// Save lastAction before word boundary computation
 			const wasKill = this.lastAction === "kill";
 
-			const oldCursorCol = this.state.cursorCol;
-			this.moveWordForwards();
-			const deleteTo = this.state.cursorCol;
-			this.setCursorCol(oldCursorCol);
+			const deleteTo = wordBoundaryForward(currentLine, this.state.cursorCol);
 
 			const deletedText = currentLine.slice(this.state.cursorCol, deleteTo);
 			this.killRing.push(deletedText, { prepend: false, accumulate: wasKill });
@@ -1468,18 +1319,39 @@ export class Editor implements Component, Focusable {
 		this.emitChange();
 
 		// Update or re-trigger autocomplete after forward delete
-		if (this.autocompleteState) {
-			this.updateAutocomplete();
+		this.retriggerAutocompleteAfterDeletion();
+	}
+
+	/**
+	 * After a deletion (backspace or forward-delete), update or re-trigger
+	 * autocomplete if the cursor is still in a completable context.
+	 */
+	private retriggerAutocompleteAfterDeletion(): void {
+		if (this.autocomplete.isActive()) {
+			this.autocomplete.update(
+				this.state.lines,
+				this.state.cursorLine,
+				this.state.cursorCol,
+			);
 		} else {
+			// If autocomplete was cancelled (no matches), re-trigger if we're in a completable context
 			const currentLine = this.state.lines[this.state.cursorLine] || "";
 			const textBeforeCursor = currentLine.slice(0, this.state.cursorCol);
 			// Slash command context
 			if (this.isInSlashCommandContext(textBeforeCursor)) {
-				this.tryTriggerAutocomplete();
+				this.autocomplete.tryTrigger(
+					this.state.lines,
+					this.state.cursorLine,
+					this.state.cursorCol,
+				);
 			}
 			// @ file reference context (debounced to avoid blocking event loop)
 			else if (textBeforeCursor.match(/(?:^|[\s])@[^\s]*$/)) {
-				this.debouncedTriggerAutocomplete();
+				this.autocomplete.debouncedTrigger(
+					this.state.lines,
+					this.state.cursorLine,
+					this.state.cursorCol,
+				);
 			}
 		}
 	}
@@ -1633,35 +1505,7 @@ export class Editor implements Component, Focusable {
 			return;
 		}
 
-		const textBeforeCursor = currentLine.slice(0, this.state.cursorCol);
-		const graphemes = [...segmenter.segment(textBeforeCursor)];
-		let newCol = this.state.cursorCol;
-
-		// Skip trailing whitespace
-		while (graphemes.length > 0 && isWhitespaceChar(graphemes[graphemes.length - 1]?.segment || "")) {
-			newCol -= graphemes.pop()?.segment.length || 0;
-		}
-
-		if (graphemes.length > 0) {
-			const lastGrapheme = graphemes[graphemes.length - 1]?.segment || "";
-			if (isPunctuationChar(lastGrapheme)) {
-				// Skip punctuation run
-				while (graphemes.length > 0 && isPunctuationChar(graphemes[graphemes.length - 1]?.segment || "")) {
-					newCol -= graphemes.pop()?.segment.length || 0;
-				}
-			} else {
-				// Skip word run
-				while (
-					graphemes.length > 0 &&
-					!isWhitespaceChar(graphemes[graphemes.length - 1]?.segment || "") &&
-					!isPunctuationChar(graphemes[graphemes.length - 1]?.segment || "")
-				) {
-					newCol -= graphemes.pop()?.segment.length || 0;
-				}
-			}
-		}
-
-		this.setCursorCol(newCol);
+		this.setCursorCol(wordBoundaryBackward(currentLine, this.state.cursorCol));
 	}
 
 	/**
@@ -1842,36 +1686,7 @@ export class Editor implements Component, Focusable {
 			return;
 		}
 
-		const textAfterCursor = currentLine.slice(this.state.cursorCol);
-		const segments = segmenter.segment(textAfterCursor);
-		const iterator = segments[Symbol.iterator]();
-		let next = iterator.next();
-		let newCol = this.state.cursorCol;
-
-		// Skip leading whitespace
-		while (!next.done && isWhitespaceChar(next.value.segment)) {
-			newCol += next.value.segment.length;
-			next = iterator.next();
-		}
-
-		if (!next.done) {
-			const firstGrapheme = next.value.segment;
-			if (isPunctuationChar(firstGrapheme)) {
-				// Skip punctuation run
-				while (!next.done && isPunctuationChar(next.value.segment)) {
-					newCol += next.value.segment.length;
-					next = iterator.next();
-				}
-			} else {
-				// Skip word run
-				while (!next.done && !isWhitespaceChar(next.value.segment) && !isPunctuationChar(next.value.segment)) {
-					newCol += next.value.segment.length;
-					next = iterator.next();
-				}
-			}
-		}
-
-		this.setCursorCol(newCol);
+		this.setCursorCol(wordBoundaryForward(currentLine, this.state.cursorCol));
 	}
 
 	// Slash menu only allowed on the first line of the editor
@@ -1892,7 +1707,7 @@ export class Editor implements Component, Focusable {
 	}
 
 	private shouldChainSlashArgumentAutocompleteOnTabSelection(): boolean {
-		if (this.autocompleteState !== "regular") {
+		if (this.autocomplete.getState() !== "regular") {
 			return false;
 		}
 
@@ -1911,228 +1726,44 @@ export class Editor implements Component, Focusable {
 		return /^\/\S+ $/.test(textBeforeCursor);
 	}
 
-	// Autocomplete methods
-	/**
-	 * Find the best autocomplete item index for the given prefix.
-	 * Returns -1 if no match is found.
-	 *
-	 * Match priority:
-	 * 1. Exact match (prefix === item.value) -> always selected
-	 * 2. Prefix match -> first item whose value starts with prefix
-	 * 3. No match -> -1 (keep default highlight)
-	 *
-	 * Matching is case-sensitive and checks item.value only.
-	 */
-	private getBestAutocompleteMatchIndex(items: Array<{ value: string; label: string }>, prefix: string): number {
-		if (!prefix) return -1;
-
-		let firstPrefixIndex = -1;
-
-		for (let i = 0; i < items.length; i++) {
-			const value = items[i]!.value;
-			if (value === prefix) {
-				return i; // Exact match always wins
-			}
-			if (firstPrefixIndex === -1 && value.startsWith(prefix)) {
-				firstPrefixIndex = i;
-			}
-		}
-
-		return firstPrefixIndex;
-	}
-
-	private tryTriggerAutocomplete(explicitTab: boolean = false): void {
-		if (!this.autocompleteProvider) return;
-
-		// Check if we should trigger file completion on Tab
-		if (explicitTab) {
-			const provider = this.autocompleteProvider as CombinedAutocompleteProvider;
-			const shouldTrigger =
-				!provider.shouldTriggerFileCompletion ||
-				provider.shouldTriggerFileCompletion(this.state.lines, this.state.cursorLine, this.state.cursorCol);
-			if (!shouldTrigger) {
-				return;
-			}
-		}
-
-		const suggestions = this.autocompleteProvider.getSuggestions(
-			this.state.lines,
-			this.state.cursorLine,
-			this.state.cursorCol,
-		);
-
-		if (suggestions && suggestions.items.length > 0) {
-			this.autocompletePrefix = suggestions.prefix;
-			this.autocompleteList = new SelectList(suggestions.items, this.autocompleteMaxVisible, this.theme.selectList);
-
-			// If typed prefix exactly matches one of the suggestions, select that item
-			const bestMatchIndex = this.getBestAutocompleteMatchIndex(suggestions.items, suggestions.prefix);
-			if (bestMatchIndex >= 0) {
-				this.autocompleteList.setSelectedIndex(bestMatchIndex);
-			}
-
-			this.autocompleteState = "regular";
-		} else {
-			this.cancelAutocomplete();
-		}
-	}
-
 	private handleTabCompletion(): void {
-		if (!this.autocompleteProvider) return;
+		if (!this.autocomplete.getProvider()) return;
 
 		const currentLine = this.state.lines[this.state.cursorLine] || "";
 		const beforeCursor = currentLine.slice(0, this.state.cursorCol);
 
 		// Check if we're in a slash command context
 		if (this.isInSlashCommandContext(beforeCursor) && !beforeCursor.trimStart().includes(" ")) {
-			this.handleSlashCommandCompletion();
+			this.autocomplete.tryTrigger(
+				this.state.lines,
+				this.state.cursorLine,
+				this.state.cursorCol,
+				true,
+			);
 		} else {
-			this.forceFileAutocomplete(true);
-		}
-	}
-
-	private handleSlashCommandCompletion(): void {
-		this.tryTriggerAutocomplete(true);
-	}
-
-	/*
-https://github.com/EsotericSoftware/spine-runtimes/actions/runs/19536643416/job/559322883
-17 this job fails with https://github.com/EsotericSoftware/spine-runtimes/actions/runs/19
-536643416/job/55932288317 havea  look at .gi
-	 */
-	private forceFileAutocomplete(explicitTab: boolean = false): void {
-		if (!this.autocompleteProvider) return;
-
-		// Check if provider supports force file suggestions via runtime check
-		const provider = this.autocompleteProvider as {
-			getForceFileSuggestions?: CombinedAutocompleteProvider["getForceFileSuggestions"];
-		};
-		if (typeof provider.getForceFileSuggestions !== "function") {
-			this.tryTriggerAutocomplete(true);
-			return;
-		}
-
-		const suggestions = provider.getForceFileSuggestions(
-			this.state.lines,
-			this.state.cursorLine,
-			this.state.cursorCol,
-		);
-
-		if (suggestions && suggestions.items.length > 0) {
-			// If there's exactly one suggestion, apply it immediately
-			if (explicitTab && suggestions.items.length === 1) {
-				const item = suggestions.items[0]!;
+			const result = this.autocomplete.forceFile(
+				this.state.lines,
+				this.state.cursorLine,
+				this.state.cursorCol,
+				true,
+			);
+			if (result) {
+				// Single suggestion was auto-applied
 				this.pushUndoSnapshot();
 				this.lastAction = null;
-				const result = this.autocompleteProvider.applyCompletion(
-					this.state.lines,
-					this.state.cursorLine,
-					this.state.cursorCol,
-					item,
-					suggestions.prefix,
-				);
 				this.state.lines = result.lines;
 				this.state.cursorLine = result.cursorLine;
 				this.setCursorCol(result.cursorCol);
 				this.emitChange();
-				return;
 			}
-
-			this.autocompletePrefix = suggestions.prefix;
-			this.autocompleteList = new SelectList(suggestions.items, this.autocompleteMaxVisible, this.theme.selectList);
-
-			// If typed prefix exactly matches one of the suggestions, select that item
-			const bestMatchIndex = this.getBestAutocompleteMatchIndex(suggestions.items, suggestions.prefix);
-			if (bestMatchIndex >= 0) {
-				this.autocompleteList.setSelectedIndex(bestMatchIndex);
-			}
-
-			this.autocompleteState = "force";
-		} else {
-			this.cancelAutocomplete();
 		}
-	}
-
-	private cancelAutocomplete(): void {
-		this.autocompleteState = null;
-		this.autocompleteList = undefined;
-		this.autocompletePrefix = "";
-		this.clearAutocompleteDebounce();
-	}
-
-	private clearAutocompleteDebounce(): void {
-		if (this.autocompleteDebounceTimer) {
-			clearTimeout(this.autocompleteDebounceTimer);
-			this.autocompleteDebounceTimer = null;
-		}
-		this.lastAutocompleteLookupPrefix = null;
 	}
 
 	public dispose(): void {
-		this.clearAutocompleteDebounce();
+		this.autocomplete.dispose();
 	}
 
 	public isShowingAutocomplete(): boolean {
-		return this.autocompleteState !== null;
-	}
-
-	private updateAutocomplete(): void {
-		if (!this.autocompleteState || !this.autocompleteProvider) return;
-
-		if (this.autocompleteState === "force") {
-			this.forceFileAutocomplete();
-			return;
-		}
-
-		// Check if we're in an @ file reference context — these trigger expensive
-		// synchronous fuzzyFind calls that block the event loop. Debounce them so
-		// rapid typing doesn't cascade into dozens of blocking searches.
-		const currentLine = this.state.lines[this.state.cursorLine] || "";
-		const textBeforeCursor = currentLine.slice(0, this.state.cursorCol);
-		if (this.autocompletePrefix.startsWith("@") || textBeforeCursor.match(/(?:^|[\s])@[^\s]*$/)) {
-			this.debouncedUpdateAutocompleteSuggestions();
-			return;
-		}
-
-		this.applyAutocompleteSuggestions();
-	}
-
-	private debouncedUpdateAutocompleteSuggestions(): void {
-		// Clear any pending debounce
-		if (this.autocompleteDebounceTimer) {
-			clearTimeout(this.autocompleteDebounceTimer);
-			this.autocompleteDebounceTimer = null;
-		}
-
-		this.autocompleteDebounceTimer = setTimeout(() => {
-			this.autocompleteDebounceTimer = null;
-			// Guard: autocomplete may have been cancelled during debounce wait
-			if (!this.autocompleteState || !this.autocompleteProvider) return;
-			this.applyAutocompleteSuggestions();
-			this.tui.requestRender();
-		}, Editor.AUTOCOMPLETE_DEBOUNCE_MS);
-	}
-
-	private applyAutocompleteSuggestions(): void {
-		if (!this.autocompleteProvider) return;
-
-		const suggestions = this.autocompleteProvider.getSuggestions(
-			this.state.lines,
-			this.state.cursorLine,
-			this.state.cursorCol,
-		);
-		if (suggestions && suggestions.items.length > 0) {
-			this.autocompletePrefix = suggestions.prefix;
-			// Always create new SelectList to ensure update
-			this.autocompleteList = new SelectList(suggestions.items, this.autocompleteMaxVisible, this.theme.selectList);
-
-			// If typed prefix exactly matches one of the suggestions, select that item
-			const bestMatchIndex = this.getBestAutocompleteMatchIndex(suggestions.items, suggestions.prefix);
-			if (bestMatchIndex >= 0) {
-				this.autocompleteList.setSelectedIndex(bestMatchIndex);
-			}
-		} else {
-			this.cancelAutocomplete();
-		}
+		return this.autocomplete.isActive();
 	}
 }
