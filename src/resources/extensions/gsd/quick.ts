@@ -10,7 +10,7 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent";
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { loadPrompt } from "./prompt-loader.js";
 import { gsdRoot } from "./paths.js";
@@ -168,6 +168,8 @@ export async function handleQuick(
       slug,
       description,
     };
+    // Persist to disk so recovery works across session crashes (#1293).
+    persistPendingReturn(_pendingQuickBranchReturn, basePath);
   }
 }
 
@@ -181,15 +183,58 @@ let _pendingQuickBranchReturn: {
   description: string;
 } | null = null;
 
+// ─── Disk Persistence ─────────────────────────────────────────────────────
+
+/** Path to the pending quick-task return file. */
+function pendingReturnPath(basePath: string): string {
+  return join(gsdRoot(basePath), "runtime", "quick-return.json");
+}
+
+/** Write pending return state to disk. */
+function persistPendingReturn(state: NonNullable<typeof _pendingQuickBranchReturn>, basePath: string): void {
+  const filePath = pendingReturnPath(basePath);
+  mkdirSync(join(gsdRoot(basePath), "runtime"), { recursive: true });
+  writeFileSync(filePath, JSON.stringify(state, null, 2) + "\n", "utf-8");
+}
+
+/** Remove pending return file from disk. */
+function clearPendingReturn(basePath: string): void {
+  try { unlinkSync(pendingReturnPath(basePath)); } catch { /* already gone */ }
+}
+
+/** Load pending return from disk (cross-session recovery). */
+function loadPendingReturn(basePath: string): NonNullable<typeof _pendingQuickBranchReturn> | null {
+  const filePath = pendingReturnPath(basePath);
+  if (!existsSync(filePath)) return null;
+  try {
+    return JSON.parse(readFileSync(filePath, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Merge the quick-task branch back to the original branch and switch.
  * Called from the agent_end handler after a quick task completes.
+ *
+ * Checks both in-memory state (same session) and disk state (cross-session
+ * recovery for crashed/interrupted sessions).
+ *
  * Returns true if a branch return was performed.
  */
 export function cleanupQuickBranch(): boolean {
-  if (!_pendingQuickBranchReturn) return false;
-  const { basePath, originalBranch, quickBranch, taskNum, slug, description } = _pendingQuickBranchReturn;
+  // Prefer in-memory state; fall back to disk for cross-session recovery
+  let state = _pendingQuickBranchReturn;
+  if (!state) {
+    // Try loading from disk — handles the case where the session that
+    // started the quick task crashed before agent_end could run (#1293).
+    const basePath = process.cwd();
+    state = loadPendingReturn(basePath);
+  }
+  if (!state) return false;
+
   _pendingQuickBranchReturn = null;
+  const { basePath, originalBranch, quickBranch, taskNum, slug, description } = state;
 
   try {
     // Auto-commit any remaining work
@@ -205,8 +250,12 @@ export function cleanupQuickBranch(): boolean {
 
     // Clean up quick branch
     try { runGit(basePath, ["branch", "-D", quickBranch]); } catch {}
+
+    // Clean up disk state
+    clearPendingReturn(basePath);
     return true;
   } catch {
+    // Cleanup failed — leave disk state for next attempt
     return false;
   }
 }
