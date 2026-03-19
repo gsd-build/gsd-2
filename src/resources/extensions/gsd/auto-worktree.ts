@@ -801,7 +801,7 @@ export function mergeMilestoneToMain(
   originalBasePath_: string,
   milestoneId: string,
   roadmapContent: string,
-): { commitMessage: string; pushed: boolean; prCreated: boolean } {
+): { commitMessage: string; pushed: boolean; prCreated: boolean; prUrl?: string } {
   const worktreeCwd = process.cwd();
   const milestoneBranch = autoWorktreeBranch(milestoneId);
 
@@ -926,28 +926,78 @@ export function mergeMilestoneToMain(
     }
   }
 
-  // 9b. Auto-create PR if enabled (requires push_branches + push succeeded)
+  // 9b. Auto-create PR if enabled
   let prCreated = false;
-  if (prefs.auto_pr === true && pushed) {
+  let prUrl: string | undefined;
+  if (prefs.auto_pr === true) {
     const remote = prefs.remote ?? "origin";
     const prTarget = prefs.pr_target_branch ?? mainBranch;
     try {
-      // Push the milestone branch to remote first
+      // Push the milestone branch to remote so it can serve as the PR head
       execSync(`git push ${remote} ${milestoneBranch}`, {
         cwd: originalBasePath_,
         stdio: ["ignore", "pipe", "pipe"],
         encoding: "utf-8",
       });
-      // Create PR via gh CLI
-      execSync(
-        `gh pr create --base "${prTarget}" --head "${milestoneBranch}" --title "Milestone ${milestoneId} complete" --body "Auto-created by GSD on milestone completion."`,
-        {
-          cwd: originalBasePath_,
-          stdio: ["ignore", "pipe", "pipe"],
-          encoding: "utf-8",
-        },
+
+      // Build PR title from template or default
+      const milestoneTitle =
+        roadmap.title.replace(/^M\d+[^:]*:\s*/, "").trim() || milestoneId;
+      const titleTemplate = prefs.pr_title_template ?? "feat: milestone {MID} complete";
+      const prTitle = titleTemplate
+        .replace(/\{MID\}/g, milestoneId)
+        .replace(/\{summary\}/g, milestoneTitle);
+
+      // Build rich PR body
+      const bodyParts: string[] = [];
+      if (milestoneTitle && milestoneTitle !== milestoneId) {
+        bodyParts.push(`## Summary\n\n${roadmap.vision || milestoneTitle}`);
+      }
+      if (completedSlices.length > 0) {
+        const sliceLines = completedSlices
+          .map((s) => `- **${s.id}**: ${s.title}`)
+          .join("\n");
+        bodyParts.push(`## Completed\n\n${sliceLines}`);
+      }
+      bodyParts.push(
+        `---\n*Auto-created by GSD on milestone completion.*\n*Branch: \`${milestoneBranch}\`*`,
       );
+      const prBody = bodyParts.join("\n\n");
+
+      // Assemble gh pr create command
+      const ghArgs: string[] = [
+        "pr", "create",
+        "--base", prTarget,
+        "--head", milestoneBranch,
+        "--title", prTitle,
+        "--body", prBody,
+      ];
+
+      // Add labels if configured
+      if (prefs.pr_labels) {
+        for (const label of prefs.pr_labels.split(",").map((l) => l.trim()).filter(Boolean)) {
+          ghArgs.push("--label", label);
+        }
+      }
+
+      // Add reviewers if configured
+      if (prefs.pr_reviewers) {
+        for (const reviewer of prefs.pr_reviewers.split(",").map((r) => r.trim()).filter(Boolean)) {
+          ghArgs.push("--reviewer", reviewer);
+        }
+      }
+
+      // Create PR via gh CLI — capture the PR URL from stdout
+      const ghOutput = execFileSync("gh", ghArgs, {
+        cwd: originalBasePath_,
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf-8",
+      });
+      prUrl = ghOutput.trim() || undefined;
       prCreated = true;
+      if (prUrl) {
+        console.error(`[GSD] PR created: ${prUrl}`);
+      }
     } catch {
       // PR creation failure is non-fatal — gh may not be installed or authenticated
     }
@@ -963,16 +1013,20 @@ export function mergeMilestoneToMain(
     // Best-effort -- worktree dir may already be gone
   }
 
-  // 11. Delete milestone branch (after worktree removal so ref is unlocked)
-  try {
-    nativeBranchDelete(originalBasePath_, milestoneBranch);
-  } catch {
-    // Best-effort
+  // 11. Delete milestone branch unless we should keep it for the PR
+  const keepBranch =
+    prefs.keep_branch_until_merged ?? (prefs.auto_pr === true);
+  if (!keepBranch || !prCreated) {
+    try {
+      nativeBranchDelete(originalBasePath_, milestoneBranch);
+    } catch {
+      // Best-effort
+    }
   }
 
   // 12. Clear module state
   originalBase = null;
   nudgeGitBranchCache(previousCwd);
 
-  return { commitMessage, pushed, prCreated };
+  return { commitMessage, pushed, prCreated, prUrl };
 }

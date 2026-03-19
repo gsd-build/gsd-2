@@ -134,6 +134,12 @@ Setting `prefer_skills: []` does **not** disable skill discovery — it just mea
   - `isolation`: `"worktree"`, `"branch"`, or `"none"` — controls auto-mode git isolation strategy. `"worktree"` creates a milestone worktree for isolated work; `"branch"` works directly in the project root but creates a milestone branch (useful for submodule-heavy repos); `"none"` works directly on the current branch with no worktree or milestone branch (ideal for step-mode with hot reloads). Default: `"worktree"`.
   - `manage_gitignore`: boolean — when `false`, GSD will not touch `.gitignore` at all. Useful when your project has a strictly managed `.gitignore` and you don't want GSD adding entries. Default: `true`.
   - `worktree_post_create`: string — script to run after a worktree is created (both auto-mode and manual `/worktree`). Receives `SOURCE_DIR` and `WORKTREE_DIR` as environment variables. Can be absolute or relative to project root. Runs with 30-second timeout. Failure is non-fatal (logged as warning). Default: none.
+  - `auto_pr`: boolean — automatically create a GitHub pull request when a milestone is completed. The PR targets `pr_target_branch` (or the main branch by default). Requires the `gh` CLI to be installed and authenticated. Default: `false`.
+  - `pr_target_branch`: string — target branch for auto-created PRs (e.g. `"develop"`, `"qa"`). Default: the main branch (from `main_branch` or auto-detected).
+  - `pr_title_template`: string — template for PR titles. Supports `{MID}` (milestone ID) and `{summary}` (milestone title) placeholders. Default: `"feat: milestone {MID} complete"`.
+  - `pr_labels`: string — comma-separated labels to apply to auto-created PRs. Example: `"auto,milestone"`. Default: none.
+  - `pr_reviewers`: string — comma-separated GitHub usernames to request as reviewers on auto-created PRs. Example: `"alice,bob"`. Default: none.
+  - `keep_branch_until_merged`: boolean — when `true`, keep the milestone branch after PR creation instead of deleting it locally. The PR serves as the merge mechanism. Default: `true` when `auto_pr` is enabled.
 
 - `unique_milestone_ids`: boolean — when `true`, generates milestone IDs in `M{seq}-{rand6}` format (e.g. `M001-eh88as`) instead of plain sequential `M001`. Prevents ID collisions in team workflows where multiple contributors create milestones concurrently. Both formats coexist — existing `M001`-style milestones remain valid. Default: `false`.
 
@@ -430,6 +436,23 @@ git:
 ```
 
 All git fields are optional. Omit any field to use the default behavior. Project-level preferences override global preferences on a per-field basis.
+
+## Auto-PR Example
+
+```yaml
+---
+version: 1
+git:
+  auto_pr: true
+  pr_target_branch: main
+  pr_title_template: "feat({MID}): {summary}"
+  pr_labels: "auto,milestone"
+  pr_reviewers: "alice,bob"
+  keep_branch_until_merged: true
+---
+```
+
+Auto-creates a PR on milestone completion with custom title, labels, and reviewers. The milestone branch is kept until the PR is merged.
 
 ---
 

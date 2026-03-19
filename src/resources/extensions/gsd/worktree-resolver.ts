@@ -26,7 +26,7 @@ export interface WorktreeResolverDeps {
     basePath: string,
     milestoneId: string,
     roadmapContent: string,
-  ) => { pushed: boolean };
+  ) => { pushed: boolean; prCreated: boolean; prUrl?: string };
   syncWorktreeStateBack: (
     mainBasePath: string,
     worktreePath: string,
@@ -349,10 +349,11 @@ export class WorktreeResolver {
           milestoneId,
           roadmapContent,
         );
-        ctx.notify(
-          `Milestone ${milestoneId} merged to main.${mergeResult.pushed ? " Pushed to remote." : ""}`,
-          "info",
-        );
+        const parts = [`Milestone ${milestoneId} merged to main.`];
+        if (mergeResult.pushed) parts.push("Pushed to remote.");
+        if (mergeResult.prUrl) parts.push(`PR: ${mergeResult.prUrl}`);
+        else if (mergeResult.prCreated) parts.push("PR created.");
+        ctx.notify(parts.join(" "), "info");
       } else {
         // No roadmap — fall back to bare teardown
         this.deps.teardownAutoWorktree(originalBase, milestoneId);
@@ -437,10 +438,11 @@ export class WorktreeResolver {
       // Rebuild GitService after merge (branch HEAD changed)
       this.rebuildGitService();
 
-      ctx.notify(
-        `Milestone ${milestoneId} merged (branch mode).${mergeResult.pushed ? " Pushed to remote." : ""}`,
-        "info",
-      );
+      const parts = [`Milestone ${milestoneId} merged (branch mode).`];
+      if (mergeResult.pushed) parts.push("Pushed to remote.");
+      if (mergeResult.prUrl) parts.push(`PR: ${mergeResult.prUrl}`);
+      else if (mergeResult.prCreated) parts.push("PR created.");
+      ctx.notify(parts.join(" "), "info");
       debugLog("WorktreeResolver", {
         action: "mergeAndExit",
         milestoneId,

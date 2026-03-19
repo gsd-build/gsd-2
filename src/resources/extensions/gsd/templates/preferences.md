@@ -22,6 +22,12 @@ git:
   isolation:
   manage_gitignore:
   worktree_post_create:
+  auto_pr:
+  pr_target_branch:
+  pr_title_template:
+  pr_labels:
+  pr_reviewers:
+  keep_branch_until_merged:
 unique_milestone_ids:
 budget_ceiling:
 budget_enforcement:

@@ -68,7 +68,7 @@ export interface GitPreferences {
   worktree_post_create?: string;
   /** When true, automatically create a pull request after milestone completion.
    *  The PR targets `pr_target_branch` (default: the main branch).
-   *  Requires `push_branches: true` and a configured remote.
+   *  Requires a configured remote.
    *  Default: false.
    */
   auto_pr?: boolean;
@@ -76,6 +76,23 @@ export interface GitPreferences {
    *  Default: the main branch (from `main_branch` or auto-detected).
    */
   pr_target_branch?: string;
+  /** Template for auto-PR titles. Supports `{MID}` and `{summary}` placeholders.
+   *  Default: "feat: milestone {MID} complete".
+   */
+  pr_title_template?: string;
+  /** Comma-separated labels to apply to auto-created PRs.
+   *  Example: "auto,milestone".
+   */
+  pr_labels?: string;
+  /** Comma-separated GitHub usernames to request as reviewers on auto-created PRs.
+   *  Example: "alice,bob".
+   */
+  pr_reviewers?: string;
+  /** When true (default when auto_pr is enabled), keep the milestone branch
+   *  after PR creation instead of deleting it. The PR serves as the merge mechanism.
+   *  Default: true when auto_pr is enabled.
+   */
+  keep_branch_until_merged?: boolean;
 }
 
 export const VALID_BRANCH_NAME = /^[a-zA-Z0-9_\-\/.]+$/;

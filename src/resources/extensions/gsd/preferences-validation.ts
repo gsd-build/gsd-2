@@ -576,6 +576,31 @@ export function validatePreferences(preferences: GSDPreferences): {
         errors.push("git.pr_target_branch must be a non-empty string (branch name)");
       }
     }
+    if (g.pr_title_template !== undefined) {
+      if (typeof g.pr_title_template === "string" && g.pr_title_template.trim()) {
+        git.pr_title_template = g.pr_title_template.trim();
+      } else {
+        errors.push("git.pr_title_template must be a non-empty string");
+      }
+    }
+    if (g.pr_labels !== undefined) {
+      if (typeof g.pr_labels === "string") {
+        git.pr_labels = g.pr_labels.trim();
+      } else {
+        errors.push("git.pr_labels must be a string (comma-separated labels)");
+      }
+    }
+    if (g.pr_reviewers !== undefined) {
+      if (typeof g.pr_reviewers === "string") {
+        git.pr_reviewers = g.pr_reviewers.trim();
+      } else {
+        errors.push("git.pr_reviewers must be a string (comma-separated reviewers)");
+      }
+    }
+    if (g.keep_branch_until_merged !== undefined) {
+      if (typeof g.keep_branch_until_merged === "boolean") git.keep_branch_until_merged = g.keep_branch_until_merged;
+      else errors.push("git.keep_branch_until_merged must be a boolean");
+    }
     // Deprecated: merge_to_main is ignored (branchless architecture).
     if (g.merge_to_main !== undefined) {
       warnings.push("git.merge_to_main is deprecated — milestone-level merge is now always used. Remove this setting.");
