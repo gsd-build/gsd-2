@@ -57,8 +57,24 @@ export function migrateToExternalState(basePath: string): MigrationResult {
     // mkdir -p the external dir
     mkdirSync(externalPath, { recursive: true });
 
-    // Rename .gsd -> .gsd.migrating (atomic lock)
-    renameSync(localGsd, migratingPath);
+    // Rename .gsd -> .gsd.migrating (atomic lock).
+    // On Windows, NTFS may reject rename with EPERM if file descriptors are
+    // open (VS Code watchers, antivirus on-access scan). Fall back to
+    // copy+delete (#1292).
+    try {
+      renameSync(localGsd, migratingPath);
+    } catch (renameErr: any) {
+      if (renameErr?.code === "EPERM" || renameErr?.code === "EBUSY") {
+        try {
+          cpSync(localGsd, migratingPath, { recursive: true, force: true });
+          rmSync(localGsd, { recursive: true, force: true });
+        } catch (copyErr) {
+          return { migrated: false, error: `Migration rename/copy failed: ${copyErr instanceof Error ? copyErr.message : String(copyErr)}` };
+        }
+      } else {
+        throw renameErr;
+      }
+    }
 
     // Copy contents to external dir, skipping worktrees/
     const entries = readdirSync(migratingPath, { withFileTypes: true });
