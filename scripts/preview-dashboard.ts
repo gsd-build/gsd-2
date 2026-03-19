@@ -137,14 +137,12 @@ function render(w: number, healthState: { icon: string; color: string; summary: 
   const phaseBadge = theme.fg("dim", phaseLabel);
   lines.push(rightAlign(actionLeft, phaseBadge, w));
 
-  // Two-column body
+  // Two-column body — no divider, columns aligned by CSI cursor positioning
   const minTwoColWidth = 76;
-  const rightColFixed = w >= 100 ? 44 : Math.max(28, Math.floor(w * 0.4));
-  const colGap = w >= 100 ? 5 : 3;
   const hasTasks = !noMilestone;
   const useTwoCol = w >= minTwoColWidth && hasTasks;
-  const rightColWidth = useTwoCol ? rightColFixed : 0;
-  const leftColWidth = useTwoCol ? w - rightColWidth - colGap : w;
+  const rightStartCol = useTwoCol ? Math.max(36, Math.floor(w * 0.55)) : 0;
+  const leftColWidth = useTwoCol ? rightStartCol - 2 : w;
 
   // Left column
   const leftLines: string[] = [];
@@ -180,56 +178,56 @@ function render(w: number, healthState: { icon: string; color: string; summary: 
 
   // Right column: task checklist
   const rightLines: string[] = [];
-  const rpad = " ";
-  const dividerCol = leftColWidth + colGap - 1;
+  const glyphCol = rightStartCol;
+  const labelCol = rightStartCol + 2;
 
   if (useTwoCol) {
-    const taskRightLabelCol = dividerCol + 2 + visibleWidth(rpad) + 2;
     for (const t of mockTasks) {
       const isCurrent = t.id === currentTaskId;
       const glyph = t.done
         ? theme.fg("success", GLYPH.statusDone)
         : isCurrent
           ? theme.fg("accent", "▸")
-          : "";
+          : theme.fg("dim", GLYPH.statusPending);
       const label = isCurrent
         ? theme.fg("text", `${t.id}: ${t.title}`)
         : t.done
           ? theme.fg("dim", `${t.id}: ${t.title}`)
           : theme.fg("text", `${t.id}: ${t.title}`);
-      const moveToLabel = `\x1b[${taskRightLabelCol}G`;
-      rightLines.push(`${rpad}${glyph}${moveToLabel}${label}`);
+      const moveToGlyph = `\x1b[${glyphCol}G`;
+      const moveToLabel = `\x1b[${labelCol}G`;
+      rightLines.push(`${moveToGlyph}${glyph}${moveToLabel}${label}`);
     }
   } else if (hasTasks) {
-    // Narrow: tasks inline — use CSI cursor-column for label alignment
-    const taskLabelCol = visibleWidth(pad) + 3;
+    // Narrow: tasks inline in left column
+    const taskGlyphCol = visibleWidth(pad) + 1;
+    const taskLabelCol = taskGlyphCol + 2;
     for (const t of mockTasks) {
       const isCurrent = t.id === currentTaskId;
       const glyph = t.done
         ? theme.fg("success", GLYPH.statusDone)
         : isCurrent
           ? theme.fg("accent", "▸")
-          : "";
+          : theme.fg("dim", GLYPH.statusPending);
       const label = isCurrent
         ? theme.fg("text", `${t.id}: ${t.title}`)
         : t.done
           ? theme.fg("dim", `${t.id}: ${t.title}`)
           : theme.fg("text", `${t.id}: ${t.title}`);
+      const moveToGlyph = `\x1b[${taskGlyphCol}G`;
       const moveToLabel = `\x1b[${taskLabelCol}G`;
-      leftLines.push(truncateToWidth(`${pad}${glyph}${moveToLabel}${label}`, leftColWidth));
+      leftLines.push(truncateToWidth(`${moveToGlyph}${glyph}${moveToLabel}${label}`, leftColWidth));
     }
   }
 
-  // Compose columns — use ANSI cursor-column (CSI n G) to fix divider position
+  // Compose columns — right lines have CSI G positioning baked in
   if (useTwoCol) {
-    const divider = theme.fg("dim", "│");
     const maxRows = Math.max(leftLines.length, rightLines.length);
     lines.push("");
     for (let i = 0; i < maxRows; i++) {
-      const left = truncateToWidth(leftLines[i] ?? "", leftColWidth);
+      const left = leftLines[i] ?? "";
       const right = rightLines[i] ?? "";
-      const moveToCol = `\x1b[${dividerCol}G`;
-      lines.push(`${left}${moveToCol}${divider} ${right}`);
+      lines.push(`${left}${right}`);
     }
   } else {
     lines.push("");

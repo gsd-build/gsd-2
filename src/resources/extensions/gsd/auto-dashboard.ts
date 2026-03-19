@@ -388,15 +388,14 @@ export function updateProgressWidget(
 
         // ── Two-column body ─────────────────────────────────────────────
         // Left: progress, health, next, stats   Right: task checklist
-        const divider = theme.fg("dim", "│");
+        // No divider — columns separated by whitespace, aligned by CSI cursor
         const minTwoColWidth = 76;
-        const rightColFixed = width >= 100 ? 44 : Math.max(28, Math.floor(width * 0.4));
-        const colGap = width >= 100 ? 5 : 3;
         const roadmapSlices = mid ? getRoadmapSlicesSync() : null;
         const taskDetailsCol = roadmapSlices?.taskDetails ?? null;
         const useTwoCol = width >= minTwoColWidth && taskDetailsCol !== null && taskDetailsCol.length > 0;
-        const rightColWidth = useTwoCol ? rightColFixed : 0;
-        const leftColWidth = useTwoCol ? width - rightColWidth - colGap : width;
+        // Right column starts at ~55% of width, leaving room for left stats
+        const rightStartCol = useTwoCol ? Math.max(36, Math.floor(width * 0.55)) : 0;
+        const leftColWidth = useTwoCol ? rightStartCol - 2 : width;
 
         // Build left column: progress bar, health, next step, token stats
         const leftLines: string[] = [];
@@ -522,12 +521,11 @@ export function updateProgressWidget(
         // Build right column: task checklist (only in two-column mode)
         const rightLines: string[] = [];
         const maxVisibleTasks = 8;
-        const rpad = " ";
-        const dividerCol = leftColWidth + colGap - 1; // 1-based column for CSI G
+        // Glyph at rightStartCol, label at rightStartCol + 2 (glyph + space)
+        const glyphCol = rightStartCol; // 1-based column for CSI G
+        const labelCol = rightStartCol + 2;
 
         if (useTwoCol && taskDetailsCol) {
-          // Task label column: divider + space + rpad + glyph area
-          const taskRightLabelCol = dividerCol + 2 + visibleWidth(rpad) + 2;
           const visibleTasks = taskDetailsCol.slice(0, maxVisibleTasks);
           for (const t of visibleTasks) {
             const isCurrent = task && t.id === task.id;
@@ -535,56 +533,53 @@ export function updateProgressWidget(
               ? theme.fg("success", GLYPH.statusDone)
               : isCurrent
                 ? theme.fg("accent", "▸")
-                : "";
+                : theme.fg("dim", GLYPH.statusPending);
             const label = isCurrent
               ? theme.fg("text", `${t.id}: ${t.title}`)
               : t.done
                 ? theme.fg("dim", `${t.id}: ${t.title}`)
                 : theme.fg("text", `${t.id}: ${t.title}`);
-            const moveToLabel = `\x1b[${taskRightLabelCol}G`;
-            rightLines.push(`${rpad}${glyph}${moveToLabel}${label}`);
+            const moveToGlyph = `\x1b[${glyphCol}G`;
+            const moveToLabel = `\x1b[${labelCol}G`;
+            rightLines.push(`${moveToGlyph}${glyph}${moveToLabel}${label}`);
           }
           if (taskDetailsCol.length > maxVisibleTasks) {
-            rightLines.push(truncateToWidth(
-              `${rpad}${theme.fg("dim", `  …+${taskDetailsCol.length - maxVisibleTasks} more`)}`,
-              rightColWidth,
-            ));
+            const moveToLabel = `\x1b[${labelCol}G`;
+            rightLines.push(`${moveToLabel}${theme.fg("dim", `…+${taskDetailsCol.length - maxVisibleTasks} more`)}`);
           }
         } else if (!useTwoCol && taskDetailsCol && taskDetailsCol.length > 0) {
           // Narrow single-column: task list goes into left column
-          // Use CSI cursor-column to fix label position regardless of glyph width
-          const taskLabelCol = visibleWidth(pad) + 3; // pad + 2-col glyph area + space
+          const taskGlyphCol = visibleWidth(pad) + 1;
+          const taskLabelCol = taskGlyphCol + 2;
           for (const t of taskDetailsCol.slice(0, maxVisibleTasks)) {
             const isCurrent = task && t.id === task.id;
             const glyph = t.done
               ? theme.fg("success", GLYPH.statusDone)
               : isCurrent
                 ? theme.fg("accent", "▸")
-                : "";
+                : theme.fg("dim", GLYPH.statusPending);
             const label = isCurrent
               ? theme.fg("text", `${t.id}: ${t.title}`)
               : t.done
                 ? theme.fg("dim", `${t.id}: ${t.title}`)
                 : theme.fg("text", `${t.id}: ${t.title}`);
+            const moveToGlyph = `\x1b[${taskGlyphCol}G`;
             const moveToLabel = `\x1b[${taskLabelCol}G`;
-            leftLines.push(truncateToWidth(`${pad}${glyph}${moveToLabel}${label}`, leftColWidth));
+            leftLines.push(truncateToWidth(`${moveToGlyph}${glyph}${moveToLabel}${label}`, leftColWidth));
           }
         }
 
-        // Compose columns
-        // Use ANSI cursor-column (CSI n G) to place the divider at a fixed
-        // position so ambiguous-width glyphs in the left column don't shift
-        // the right column.
+        // Compose columns — right column uses CSI cursor positioning so
+        // it aligns regardless of left column content width.
         if (useTwoCol) {
           const maxRows = Math.max(leftLines.length, rightLines.length);
           if (maxRows > 0) {
             lines.push("");
             for (let i = 0; i < maxRows; i++) {
-              const left = truncateToWidth(leftLines[i] ?? "", leftColWidth);
+              const left = leftLines[i] ?? "";
               const right = rightLines[i] ?? "";
-              // CSI <col> G moves cursor to absolute column, ensuring alignment
-              const moveToCol = `\x1b[${dividerCol}G`;
-              lines.push(`${left}${moveToCol}${divider} ${right}`);
+              // Right lines already contain CSI G positioning sequences
+              lines.push(`${left}${right}`);
             }
           }
         } else {
