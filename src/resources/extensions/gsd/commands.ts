@@ -52,8 +52,20 @@ import { handleStart, handleTemplates, getTemplateCompletions } from "./commands
 
 /** Resolve the effective project root, accounting for worktree paths. */
 export function projectRoot(): string {
-  const root = resolveProjectRoot(process.cwd());
-  assertSafeDirectory(root);
+  const cwd = process.cwd();
+  const root = resolveProjectRoot(cwd);
+
+  // When running inside a GSD worktree, the resolved root may be a "dangerous"
+  // directory (e.g., $HOME used as a git repo root — #1317). The safety check
+  // should validate the actual working directory, not the upstream root,
+  // because the worktree itself is a safe project subdirectory.
+  // Only skip the root check when we can confirm we're in a valid worktree.
+  if (root !== cwd) {
+    // We're in a worktree — validate the worktree path instead of the root
+    assertSafeDirectory(cwd);
+  } else {
+    assertSafeDirectory(root);
+  }
   return root;
 }
 
