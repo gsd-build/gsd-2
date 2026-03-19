@@ -52,8 +52,13 @@ import { handleStart, handleTemplates, getTemplateCompletions } from "./commands
 
 /** Resolve the effective project root, accounting for worktree paths. */
 export function projectRoot(): string {
-  const root = resolveProjectRoot(process.cwd());
-  assertSafeDirectory(root);
+  const cwd = process.cwd();
+  const root = resolveProjectRoot(cwd);
+  // When running from inside a GSD worktree the resolved root may legitimately
+  // be $HOME (if the user's home directory is a git repo — see #1317).  Validate
+  // the CWD in that case: the worktree path itself is the meaningful location and
+  // is never $HOME.  When not in a worktree, cwd === root so nothing changes.
+  assertSafeDirectory(cwd !== root ? cwd : root);
   return root;
 }
 
