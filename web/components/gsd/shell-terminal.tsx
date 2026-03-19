@@ -5,6 +5,7 @@ import { useTheme } from "next-themes"
 import { Plus, X, TerminalSquare, Loader2, ImagePlus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { validateImageFile } from "@/lib/image-utils"
+import { filterInitialGsdHeader } from "@/lib/initial-gsd-header-filter"
 import "@xterm/xterm/css/xterm.css"
 
 type XTerminal = import("@xterm/xterm").Terminal
@@ -30,6 +31,7 @@ interface ShellTerminalProps {
   sessionPrefix?: string
   hideSidebar?: boolean
   fontSize?: number
+  hideInitialGsdHeader?: boolean
 }
 
 // ─── xterm themes ─────────────────────────────────────────────────────────────
@@ -179,6 +181,7 @@ interface TerminalInstanceProps {
   commandArgs?: string[]
   isDark: boolean
   fontSize?: number
+  hideInitialGsdHeader?: boolean
   onConnectionChange: (connected: boolean) => void
 }
 
@@ -189,6 +192,7 @@ function TerminalInstance({
   commandArgs,
   isDark,
   fontSize,
+  hideInitialGsdHeader = false,
   onConnectionChange,
 }: TerminalInstanceProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -199,6 +203,8 @@ function TerminalInstance({
   const flushingRef = useRef(false)
   const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const onConnectionChangeRef = useRef(onConnectionChange)
+  const initialHeaderSettledRef = useRef(!hideInitialGsdHeader)
+  const initialHeaderBufferRef = useRef("")
   const commandArgsKey = (commandArgs ?? []).join("\u0000")
   const [hasOutput, setHasOutput] = useState(false)
 
@@ -246,6 +252,11 @@ function TerminalInstance({
   useEffect(() => {
     onConnectionChangeRef.current = onConnectionChange
   }, [onConnectionChange])
+
+  useEffect(() => {
+    initialHeaderSettledRef.current = !hideInitialGsdHeader
+    initialHeaderBufferRef.current = ""
+  }, [hideInitialGsdHeader, sessionId])
 
   // Update xterm theme when isDark changes
   useEffect(() => {
@@ -340,8 +351,25 @@ function TerminalInstance({
               sendResize(size.cols, size.rows)
             })
           } else if (msg.type === "output" && msg.data) {
-            terminal?.write(msg.data)
-            setHasOutput(true)
+            let output = msg.data
+
+            if (hideInitialGsdHeader && !initialHeaderSettledRef.current) {
+              initialHeaderBufferRef.current += output
+              const filtered = filterInitialGsdHeader(initialHeaderBufferRef.current)
+
+              if (filtered.status === "needs-more") {
+                return
+              }
+
+              initialHeaderSettledRef.current = true
+              initialHeaderBufferRef.current = ""
+              output = filtered.text
+            }
+
+            if (output) {
+              terminal?.write(output)
+              setHasOutput(true)
+            }
           }
         } catch {
           /* malformed */
@@ -375,7 +403,7 @@ function TerminalInstance({
       termRef.current = null
       fitAddonRef.current = null
     }
-  }, [sessionId, command, commandArgs, commandArgsKey, fontSize, isDark, sendInput, sendResize])
+  }, [sessionId, command, commandArgs, commandArgsKey, fontSize, hideInitialGsdHeader, isDark, sendInput, sendResize])
 
   // Focus on click
   const handleClick = useCallback(() => {
@@ -478,7 +506,15 @@ async function uploadAndInjectImage(file: File, sessionId: string): Promise<void
 
 // ─── Multi-instance terminal panel ────────────────────────────────────────────
 
-export function ShellTerminal({ className, command, commandArgs, sessionPrefix, hideSidebar = false, fontSize }: ShellTerminalProps) {
+export function ShellTerminal({
+  className,
+  command,
+  commandArgs,
+  sessionPrefix,
+  hideSidebar = false,
+  fontSize,
+  hideInitialGsdHeader = false,
+}: ShellTerminalProps) {
   const { resolvedTheme } = useTheme()
   const isDark = resolvedTheme !== "light"
   const defaultId = sessionPrefix ?? (command ? "gsd-default" : "default")
@@ -623,6 +659,7 @@ export function ShellTerminal({ className, command, commandArgs, sessionPrefix, 
             commandArgs={tab.id === defaultId ? commandArgs : undefined}
             isDark={isDark}
             fontSize={fontSize}
+            hideInitialGsdHeader={hideInitialGsdHeader}
             onConnectionChange={(c) => updateConnection(tab.id, c)}
           />
         ))}

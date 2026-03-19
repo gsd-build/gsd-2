@@ -4,7 +4,6 @@ import { useState, useRef, useEffect } from "react"
 import { GripVertical } from "lucide-react"
 import { MainSessionTerminal } from "@/components/gsd/main-session-terminal"
 import { ShellTerminal } from "@/components/gsd/shell-terminal"
-import { TerminalTuiHeader } from "@/components/gsd/terminal-tui-header"
 import { useTerminalFontSize } from "@/lib/use-terminal-font-size"
 
 export function DualTerminal() {
@@ -54,7 +53,6 @@ export function DualTerminal() {
       <div ref={containerRef} className="flex flex-1 overflow-hidden">
         {/* Left terminal - Main bridge native TUI */}
         <div style={{ width: `${splitPosition}%` }} className="flex h-full min-w-0 flex-col overflow-hidden bg-terminal">
-          <TerminalTuiHeader fontSize={terminalFontSize} />
           <MainSessionTerminal className="min-h-0 flex-1" fontSize={terminalFontSize} />
         </div>
 
@@ -67,8 +65,14 @@ export function DualTerminal() {
         </div>
 
         {/* Right terminal - Interactive GSD instance */}
-        <div style={{ width: `${100 - splitPosition}%` }} className="h-full overflow-hidden">
-          <ShellTerminal className="h-full" command="gsd" sessionPrefix="gsd-interactive" fontSize={terminalFontSize} />
+        <div style={{ width: `${100 - splitPosition}%` }} className="h-full min-w-0 overflow-hidden bg-terminal">
+          <ShellTerminal
+            className="h-full"
+            command="gsd"
+            sessionPrefix="gsd-interactive"
+            fontSize={terminalFontSize}
+            hideInitialGsdHeader
+          />
         </div>
       </div>
     </div>
