@@ -80,8 +80,9 @@ export function findMilestoneIds(basePath: string): string[] {
       .filter((d) => d.isDirectory())
       .map((d) => {
         const match = d.name.match(/^(M\d+(?:-[a-z0-9]{6})?)/);
-        return match ? match[1] : d.name;
-      });
+        return match ? match[1] : null;
+      })
+      .filter((id): id is string => id !== null);
 
     // Apply custom queue order if available, else fall back to numeric sort
     const customOrder = loadQueueOrder(basePath);

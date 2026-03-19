@@ -245,6 +245,32 @@ console.log('\n=== E2E: backward compat without QUEUE-ORDER.json ===');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Test: non-milestone directories are filtered out (#1494)
+// ═══════════════════════════════════════════════════════════════════════════
+
+console.log('\n=== E2E: non-milestone directories filtered from findMilestoneIds (#1494) ===');
+{
+  const base = createFixtureBase();
+  try {
+    writeContext(base, 'M001', '', 'First');
+    writeContext(base, 'M002', '', 'Second');
+    // Create a rogue non-milestone directory
+    mkdirSync(join(base, '.gsd', 'milestones', 'slices'), { recursive: true });
+    mkdirSync(join(base, '.gsd', 'milestones', 'temp-backup'), { recursive: true });
+
+    invalidateStateCache();
+    const ids = findMilestoneIds(base);
+    assertEq(ids.length, 2, 'only M001 and M002 returned');
+    assertTrue(!ids.includes('slices'), 'slices directory excluded');
+    assertTrue(!ids.includes('temp-backup'), 'temp-backup directory excluded');
+    assertTrue(ids.includes('M001'), 'M001 included');
+    assertTrue(ids.includes('M002'), 'M002 included');
+  } finally {
+    cleanup(base);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Test: depends_on inline array format removal
 // ═══════════════════════════════════════════════════════════════════════════
 
