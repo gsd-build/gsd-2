@@ -11,7 +11,6 @@ import type { GSDState } from "./types.js";
 import { getCurrentBranch } from "./worktree.js";
 import { getActiveHook } from "./post-unit-hooks.js";
 import { getLedger, getProjectTotals, formatCost, formatTokenCount, formatTierSavings } from "./metrics.js";
-import { getHealthTrend, getConsecutiveErrorUnits } from "./doctor-proactive.js";
 import {
   resolveMilestoneFile,
   resolveSliceFile,
@@ -20,7 +19,6 @@ import { parseRoadmap, parsePlan } from "./files.js";
 import { readFileSync, existsSync } from "node:fs";
 import { truncateToWidth, visibleWidth } from "@gsd/pi-tui";
 import { makeUI, GLYPH, INDENT } from "../shared/mod.js";
-import { parseUnitId } from "./unit-id.js";
 
 // ─── Dashboard Data ───────────────────────────────────────────────────────────
 
@@ -49,34 +47,40 @@ export interface AutoDashboardData {
 
 // ─── Unit Description Helpers ─────────────────────────────────────────────────
 
-/** Canonical verb and phase label for each known unit type. */
-const UNIT_TYPE_INFO: Record<string, { verb: string; phaseLabel: string }> = {
-  "research-milestone": { verb: "researching",  phaseLabel: "RESEARCH" },
-  "research-slice":     { verb: "researching",  phaseLabel: "RESEARCH" },
-  "plan-milestone":     { verb: "planning",     phaseLabel: "PLAN" },
-  "plan-slice":         { verb: "planning",     phaseLabel: "PLAN" },
-  "execute-task":       { verb: "executing",    phaseLabel: "EXECUTE" },
-  "complete-slice":     { verb: "completing",   phaseLabel: "COMPLETE" },
-  "replan-slice":       { verb: "replanning",   phaseLabel: "REPLAN" },
-  "rewrite-docs":       { verb: "rewriting",    phaseLabel: "REWRITE" },
-  "reassess-roadmap":   { verb: "reassessing",  phaseLabel: "REASSESS" },
-  "run-uat":            { verb: "running UAT",  phaseLabel: "UAT" },
-};
-
 export function unitVerb(unitType: string): string {
   if (unitType.startsWith("hook/")) return `hook: ${unitType.slice(5)}`;
-  return UNIT_TYPE_INFO[unitType]?.verb ?? unitType;
+  switch (unitType) {
+    case "research-milestone":
+    case "research-slice": return "researching";
+    case "plan-milestone":
+    case "plan-slice": return "planning";
+    case "execute-task": return "executing";
+    case "complete-slice": return "completing";
+    case "replan-slice": return "replanning";
+    case "rewrite-docs": return "rewriting";
+    case "reassess-roadmap": return "reassessing";
+    case "run-uat": return "running UAT";
+    default: return unitType;
+  }
 }
 
 export function unitPhaseLabel(unitType: string): string {
   if (unitType.startsWith("hook/")) return "HOOK";
-  return UNIT_TYPE_INFO[unitType]?.phaseLabel ?? unitType.toUpperCase();
+  switch (unitType) {
+    case "research-milestone": return "RESEARCH";
+    case "research-slice": return "RESEARCH";
+    case "plan-milestone": return "PLAN";
+    case "plan-slice": return "PLAN";
+    case "execute-task": return "EXECUTE";
+    case "complete-slice": return "COMPLETE";
+    case "replan-slice": return "REPLAN";
+    case "rewrite-docs": return "REWRITE";
+    case "reassess-roadmap": return "REASSESS";
+    case "run-uat": return "UAT";
+    default: return unitType.toUpperCase();
+  }
 }
 
-/**
- * Describe the expected next step after the current unit completes.
- * Unit types here mirror the keys in UNIT_TYPE_INFO above.
- */
 function peekNext(unitType: string, state: GSDState): string {
   // Show active hook info in progress display
   const activeHookState = getActiveHook();
@@ -305,16 +309,6 @@ export function updateProgressWidget(
   }
   if (cachedBranch) widgetPwd = `${widgetPwd} (${cachedBranch})`;
 
-  // Set a string-array fallback first — this is the only version RPC mode will
-  // see, since the factory widget set below is not supported in RPC mode.
-  const progressText = buildProgressTextLines(
-    verb, phaseLabel, unitId, mid, slice, task, next,
-    accessors, tierBadge, widgetPwd,
-  );
-  ctx.ui.setWidget("gsd-progress", progressText);
-
-  // Set the factory-based widget — in TUI mode this replaces the string-array
-  // version with a dynamic, animated widget. In RPC mode this call is a no-op.
   ctx.ui.setWidget("gsd-progress", (tui, theme) => {
     let pulseBright = true;
     let cachedLines: string[] | undefined;
@@ -372,11 +366,7 @@ export function updateProgressWidget(
 
         lines.push("");
 
-        const isHook = unitType.startsWith("hook/");
-        const hookParsed = isHook ? parseUnitId(unitId) : undefined;
-        const target = isHook
-          ? (hookParsed!.task ?? hookParsed!.slice ?? unitId)
-          : (task ? `${task.id}: ${task.title}` : unitId);
+        const target = task ? `${task.id}: ${task.title}` : unitId;
         const actionLeft = `${pad}${theme.fg("accent", "▸")} ${theme.fg("accent", verb)}  ${theme.fg("text", target)}`;
         const tierTag = tierBadge ? theme.fg("dim", `[${tierBadge}] `) : "";
         const phaseBadge = `${tierTag}${theme.fg("dim", phaseLabel)}`;
@@ -396,10 +386,7 @@ export function updateProgressWidget(
             let meta = theme.fg("dim", `${done}/${total} slices`);
 
             if (activeSliceTasks && activeSliceTasks.total > 0) {
-              // For hooks, show the trigger task number (done), not the next task (done + 1)
-              const taskNum = isHook
-                ? Math.max(activeSliceTasks.done, 1)
-                : Math.min(activeSliceTasks.done + 1, activeSliceTasks.total);
+              const taskNum = Math.min(activeSliceTasks.done + 1, activeSliceTasks.total);
               meta += theme.fg("dim", `  ·  task ${taskNum}/${activeSliceTasks.total}`);
             }
 
@@ -467,7 +454,6 @@ export function updateProgressWidget(
             sp.push(`\u26A1${hitRate}%`);
           }
           if (cumulativeCost) sp.push(`$${cumulativeCost.toFixed(3)}`);
-          else if (autoTotals?.apiRequests) sp.push(`${autoTotals.apiRequests} reqs`);
 
           const cxDisplay = cxPct === "?"
             ? `?/${formatWidgetTokens(cxWindow)}`
@@ -524,95 +510,6 @@ export function updateProgressWidget(
       },
     };
   });
-}
-
-// ─── Text Fallback for RPC Mode ───────────────────────────────────────────
-
-/**
- * Build a compact string-array representation of the progress widget.
- * Used as a fallback when the factory-based widget cannot render (RPC mode).
- */
-// ─── Model Health Indicator ───────────────────────────────────────────────────
-
-/**
- * Compute a traffic-light health indicator from observable signals.
- * 🟢 progressing well — no errors, trend stable/improving
- * 🟡 struggling — some errors or degrading trend
- * 🔴 stuck — consecutive errors, likely needs attention
- */
-export function getModelHealthIndicator(): { emoji: string; label: string } {
-  const trend = getHealthTrend();
-  const consecutiveErrors = getConsecutiveErrorUnits();
-
-  if (consecutiveErrors >= 3) {
-    return { emoji: "🔴", label: "stuck" };
-  }
-  if (consecutiveErrors >= 1 || trend === "degrading") {
-    return { emoji: "🟡", label: "struggling" };
-  }
-  if (trend === "improving") {
-    return { emoji: "🟢", label: "progressing well" };
-  }
-  // stable or unknown
-  return { emoji: "🟢", label: "progressing" };
-}
-
-function buildProgressTextLines(
-  verb: string,
-  phaseLabel: string,
-  unitId: string,
-  mid: { id: string; title: string } | null,
-  slice: { id: string; title: string } | null,
-  task: { id: string; title: string } | null,
-  next: string,
-  accessors: WidgetStateAccessors,
-  tierBadge: string | undefined,
-  widgetPwd: string,
-): string[] {
-  const mode = accessors.isStepMode() ? "step" : "auto";
-  const elapsed = formatAutoElapsed(accessors.getAutoStartTime());
-  const tierStr = tierBadge ? ` [${tierBadge}]` : "";
-
-  const lines: string[] = [];
-  lines.push(`[GSD ${mode}] ${verb} ${unitId}${tierStr}${elapsed ? ` — ${elapsed}` : ""}`);
-
-  if (mid) lines.push(`  Milestone: ${mid.id} — ${mid.title}`);
-  if (slice) lines.push(`  Slice: ${slice.id} — ${slice.title}`);
-  if (task) lines.push(`  Task: ${task.id} — ${task.title}`);
-
-  // Progress bar
-  const sp = cachedSliceProgress;
-  if (sp && sp.total > 0) {
-    const pct = Math.round((sp.done / sp.total) * 100);
-    const taskInfo = sp.activeSliceTasks
-      ? ` (tasks: ${sp.activeSliceTasks.done}/${sp.activeSliceTasks.total})`
-      : "";
-    lines.push(`  Progress: ${sp.done}/${sp.total} slices (${pct}%)${taskInfo}`);
-  }
-
-  // Cost / tokens
-  const ledger = getLedger();
-  const totals = ledger ? getProjectTotals(ledger.units) : null;
-  if (totals) {
-    const parts: string[] = [];
-    if (totals.tokens.input || totals.tokens.output) {
-      parts.push(`tokens: ${formatWidgetTokens(totals.tokens.input)}↑ ${formatWidgetTokens(totals.tokens.output)}↓`);
-    }
-    if (totals.cost > 0) {
-      parts.push(`cost: ${formatCost(totals.cost)}`);
-    }
-    if (parts.length > 0) lines.push(`  ${parts.join(" — ")}`);
-  }
-
-  if (next) lines.push(`  Next: ${next}`);
-
-  // Model health indicator
-  const health = getModelHealthIndicator();
-  lines.push(`  Health: ${health.emoji} ${health.label}`);
-
-  lines.push(`  ${widgetPwd}`);
-
-  return lines;
 }
 
 // ─── Right-align Helper ───────────────────────────────────────────────────────

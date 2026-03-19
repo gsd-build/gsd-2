@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import {
   gsdRoot,
@@ -8,8 +8,6 @@ import {
   resolveTaskFile,
 } from "./paths.js";
 import { loadFile, parseTaskPlanMustHaves, countMustHavesMentionedInSummary } from "./files.js";
-import { loadJsonFileOrNull, saveJsonFile } from "./json-persistence.js";
-import { parseUnitId } from "./unit-id.js";
 
 export type UnitRuntimePhase =
   | "dispatched"
@@ -48,23 +46,13 @@ export interface AutoUnitRuntimeRecord {
   lastRecoveryReason?: "idle" | "hard";
 }
 
-function isAutoUnitRuntimeRecord(data: unknown): data is AutoUnitRuntimeRecord {
-  return (
-    typeof data === "object" &&
-    data !== null &&
-    (data as AutoUnitRuntimeRecord).version === 1 &&
-    typeof (data as AutoUnitRuntimeRecord).unitType === "string" &&
-    typeof (data as AutoUnitRuntimeRecord).unitId === "string"
-  );
-}
-
 function runtimeDir(basePath: string): string {
   return join(gsdRoot(basePath), "runtime", "units");
 }
 
 function runtimePath(basePath: string, unitType: string, unitId: string): string {
-  const sanitizedUnitType = unitType.replace(/[^a-zA-Z0-9._-]+/g, "-");
-  const sanitizedUnitId = unitId.replace(/[^a-zA-Z0-9._-]+/g, "-");
+  const sanitizedUnitType = unitType.replace(/[\/]/g, "-");
+  const sanitizedUnitId = unitId.replace(/[\/]/g, "-");
   return join(runtimeDir(basePath), `${sanitizedUnitType}-${sanitizedUnitId}.json`);
 }
 
@@ -75,6 +63,8 @@ export function writeUnitRuntimeRecord(
   startedAt: number,
   updates: Partial<AutoUnitRuntimeRecord> = {},
 ): AutoUnitRuntimeRecord {
+  const dir = runtimeDir(basePath);
+  mkdirSync(dir, { recursive: true });
   const path = runtimePath(basePath, unitType, unitId);
   const prev = readUnitRuntimeRecord(basePath, unitType, unitId);
   const next: AutoUnitRuntimeRecord = {
@@ -94,12 +84,18 @@ export function writeUnitRuntimeRecord(
     recoveryAttempts: updates.recoveryAttempts ?? prev?.recoveryAttempts ?? 0,
     lastRecoveryReason: updates.lastRecoveryReason ?? prev?.lastRecoveryReason,
   };
-  saveJsonFile(path, next);
+  writeFileSync(path, JSON.stringify(next, null, 2) + "\n", "utf-8");
   return next;
 }
 
 export function readUnitRuntimeRecord(basePath: string, unitType: string, unitId: string): AutoUnitRuntimeRecord | null {
-  return loadJsonFileOrNull(runtimePath(basePath, unitType, unitId), isAutoUnitRuntimeRecord);
+  const path = runtimePath(basePath, unitType, unitId);
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, "utf-8")) as AutoUnitRuntimeRecord;
+  } catch {
+    return null;
+  }
 }
 
 export function clearUnitRuntimeRecord(basePath: string, unitType: string, unitId: string): void {
@@ -132,7 +128,7 @@ export async function inspectExecuteTaskDurability(
   basePath: string,
   unitId: string,
 ): Promise<ExecuteTaskRecoveryStatus | null> {
-  const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
+  const [mid, sid, tid] = unitId.split("/");
   if (!mid || !sid || !tid) return null;
 
   const planAbs = resolveSliceFile(basePath, mid, sid, "PLAN");

@@ -11,10 +11,6 @@ import {
   diagnoseExpectedArtifact,
   buildLoopRemediationSteps,
   selfHealRuntimeRecords,
-  completedKeysPath,
-  persistCompletedKey,
-  removePersistedKey,
-  loadPersistedKeys,
 } from "../auto-recovery.ts";
 import { parseRoadmap, clearParseCache } from "../files.ts";
 import { invalidateAllCaches } from "../cache.ts";
@@ -198,143 +194,6 @@ test("buildLoopRemediationSteps returns null for unknown type", () => {
     assert.equal(buildLoopRemediationSteps("unknown", "M001", base), null);
   } finally {
     cleanup(base);
-  }
-});
-
-// ─── Completed-unit key persistence ───────────────────────────────────────
-
-test("completedKeysPath returns path inside .gsd", () => {
-  const path = completedKeysPath("/project");
-  assert.ok(path.includes(".gsd"));
-  assert.ok(path.includes("completed-units.json"));
-});
-
-test("persistCompletedKey and loadPersistedKeys round-trip", () => {
-  const base = makeTmpBase();
-  try {
-    persistCompletedKey(base, "execute-task/M001/S01/T01");
-    persistCompletedKey(base, "plan-slice/M001/S02");
-
-    const keys = new Set<string>();
-    loadPersistedKeys(base, keys);
-
-    assert.ok(keys.has("execute-task/M001/S01/T01"));
-    assert.ok(keys.has("plan-slice/M001/S02"));
-    assert.equal(keys.size, 2);
-  } finally {
-    cleanup(base);
-  }
-});
-
-test("persistCompletedKey is idempotent", () => {
-  const base = makeTmpBase();
-  try {
-    persistCompletedKey(base, "execute-task/M001/S01/T01");
-    persistCompletedKey(base, "execute-task/M001/S01/T01");
-
-    const keys = new Set<string>();
-    loadPersistedKeys(base, keys);
-    assert.equal(keys.size, 1);
-  } finally {
-    cleanup(base);
-  }
-});
-
-test("removePersistedKey removes a key", () => {
-  const base = makeTmpBase();
-  try {
-    persistCompletedKey(base, "a");
-    persistCompletedKey(base, "b");
-    removePersistedKey(base, "a");
-
-    const keys = new Set<string>();
-    loadPersistedKeys(base, keys);
-    assert.ok(!keys.has("a"));
-    assert.ok(keys.has("b"));
-  } finally {
-    cleanup(base);
-  }
-});
-
-test("loadPersistedKeys handles missing file gracefully", () => {
-  const base = makeTmpBase();
-  try {
-    const keys = new Set<string>();
-    assert.doesNotThrow(() => loadPersistedKeys(base, keys));
-    assert.equal(keys.size, 0);
-  } finally {
-    cleanup(base);
-  }
-});
-
-test("removePersistedKey is safe when file doesn't exist", () => {
-  const base = makeTmpBase();
-  try {
-    assert.doesNotThrow(() => removePersistedKey(base, "nonexistent"));
-  } finally {
-    cleanup(base);
-  }
-});
-
-// ─── Dual-load across worktree boundary (#769) ───────────────────────────
-
-test("loadPersistedKeys unions keys from project root and worktree", () => {
-  // Simulate two separate .gsd directories (project root + worktree)
-  // each with a different set of completed keys. Loading from both
-  // into the same Set should produce the union.
-  const projectRoot = makeTmpBase();
-  const worktree = makeTmpBase();
-  try {
-    // Persist different keys in each location
-    persistCompletedKey(projectRoot, "execute-task/M001/S01/T01");
-    persistCompletedKey(projectRoot, "plan-slice/M001/S02");
-
-    persistCompletedKey(worktree, "execute-task/M001/S01/T02");
-    persistCompletedKey(worktree, "plan-slice/M001/S02"); // overlap
-
-    // Load from both into the same set (mimicking startup dual-load)
-    const keys = new Set<string>();
-    loadPersistedKeys(projectRoot, keys);
-    loadPersistedKeys(worktree, keys);
-
-    assert.ok(keys.has("execute-task/M001/S01/T01"), "key from project root");
-    assert.ok(keys.has("plan-slice/M001/S02"), "shared key");
-    assert.ok(keys.has("execute-task/M001/S01/T02"), "key from worktree");
-    assert.equal(keys.size, 3, "union should deduplicate overlapping keys");
-  } finally {
-    cleanup(projectRoot);
-    cleanup(worktree);
-  }
-});
-
-test("completed-units.json set-union merge produces correct result", () => {
-  // Verify that a manual set-union merge correctly merges two JSON arrays
-  // of completed-unit keys.
-  const projectRoot = makeTmpBase();
-  const worktree = makeTmpBase();
-  try {
-    // Write keys to both locations
-    const prKeysFile = join(projectRoot, ".gsd", "completed-units.json");
-    const wtKeysFile = join(worktree, ".gsd", "completed-units.json");
-
-    writeFileSync(prKeysFile, JSON.stringify(["a", "b"]));
-    writeFileSync(wtKeysFile, JSON.stringify(["b", "c", "d"]));
-
-    // Perform a set-union merge of two JSON key arrays
-    const srcKeys: string[] = JSON.parse(readFileSync(wtKeysFile, "utf8"));
-    let dstKeys: string[] = [];
-    if (existsSync(prKeysFile)) {
-      dstKeys = JSON.parse(readFileSync(prKeysFile, "utf8"));
-    }
-    const merged = [...new Set([...dstKeys, ...srcKeys])];
-    writeFileSync(prKeysFile, JSON.stringify(merged, null, 2));
-
-    // Verify the merged result
-    const result: string[] = JSON.parse(readFileSync(prKeysFile, "utf8"));
-    assert.deepStrictEqual(result.sort(), ["a", "b", "c", "d"]);
-  } finally {
-    cleanup(projectRoot);
-    cleanup(worktree);
   }
 });
 
@@ -528,9 +387,9 @@ test("verifyExpectedArtifact plan-slice fails for plan with no tasks (#699)", ()
 
 // ─── selfHealRuntimeRecords — worktree base path (#769) ──────────────────
 
-test("selfHealRuntimeRecords clears stale record when artifact exists at worktree base (#769)", async () => {
-  // Simulate worktree layout: the runtime record AND the artifact both live
-  // under the worktree's .gsd/, not the main project root.
+test("selfHealRuntimeRecords clears stale dispatched records (#769)", async () => {
+  // selfHealRuntimeRecords now only clears stale dispatched records (>1h).
+  // No completedKeySet parameter — deriveState is sole authority.
   const worktreeBase = makeTmpBase();
   const mainBase = makeTmpBase();
   try {
@@ -540,10 +399,6 @@ test("selfHealRuntimeRecords clears stale record when artifact exists at worktre
     writeUnitRuntimeRecord(worktreeBase, "run-uat", "M001/S01", Date.now() - 7200_000, {
       phase: "dispatched",
     });
-
-    // Write the UAT result artifact in the worktree .gsd/milestones/
-    const uatPath = join(worktreeBase, ".gsd", "milestones", "M001", "slices", "S01", "S01-UAT-RESULT.md");
-    writeFileSync(uatPath, "---\nresult: pass\n---\n# UAT Result\nAll tests passed.\n");
 
     // Verify the runtime record exists before heal
     const before = readUnitRuntimeRecord(worktreeBase, "run-uat", "M001/S01");
@@ -555,32 +410,23 @@ test("selfHealRuntimeRecords clears stale record when artifact exists at worktre
       ui: { notify: (msg: string) => { notifications.push(msg); } },
     } as any;
 
-    // Call selfHeal with worktreeBase — this is the fix: using the worktree path
-    // so both the runtime record and artifact are found
-    const completedKeys = new Set<string>();
-    await selfHealRuntimeRecords(worktreeBase, mockCtx, completedKeys);
+    // Call selfHeal with worktreeBase — should clear the stale record
+    await selfHealRuntimeRecords(worktreeBase, mockCtx);
 
     // The stale record should be cleared
     const after = readUnitRuntimeRecord(worktreeBase, "run-uat", "M001/S01");
     assert.equal(after, null, "runtime record should be cleared after heal");
-
-    // The completion key should be persisted
-    assert.ok(completedKeys.has("run-uat/M001/S01"), "completion key should be added");
     assert.ok(notifications.some(n => n.includes("Self-heal")), "should emit self-heal notification");
 
-    // Now verify that calling with mainBase does NOT find/clear anything (the old bug)
-    // Write a stale record at mainBase but NO artifact there
+    // Write a stale record at mainBase
     writeUnitRuntimeRecord(mainBase, "run-uat", "M001/S01", Date.now() - 7200_000, {
       phase: "dispatched",
     });
-    const mainKeys = new Set<string>();
-    await selfHealRuntimeRecords(mainBase, mockCtx, mainKeys);
+    await selfHealRuntimeRecords(mainBase, mockCtx);
 
-    // The record at mainBase should be cleared by the stale timeout (>1h),
-    // but the completion key should NOT be set (artifact doesn't exist at mainBase)
+    // The record at mainBase should also be cleared by the stale timeout (>1h)
     const afterMain = readUnitRuntimeRecord(mainBase, "run-uat", "M001/S01");
     assert.equal(afterMain, null, "stale record at main base should be cleared by timeout");
-    assert.ok(!mainKeys.has("run-uat/M001/S01"), "completion key should NOT be set when artifact is missing");
   } finally {
     cleanup(worktreeBase);
     cleanup(mainBase);

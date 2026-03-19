@@ -58,7 +58,6 @@ test("verification-evidence: writeVerificationJSON writes correct JSON shape", (
           stdout: "all good",
           stderr: "",
           durationMs: 2340,
-          blocking: true,
         },
       ],
     });
@@ -106,9 +105,9 @@ test("verification-evidence: writeVerificationJSON maps exitCode to verdict corr
     const result = makeResult({
       passed: false,
       checks: [
-        { command: "lint", exitCode: 0, stdout: "", stderr: "", durationMs: 100, blocking: true },
-        { command: "test", exitCode: 1, stdout: "", stderr: "fail", durationMs: 200, blocking: true },
-        { command: "audit", exitCode: 2, stdout: "", stderr: "err", durationMs: 300, blocking: true },
+        { command: "lint", exitCode: 0, stdout: "", stderr: "", durationMs: 100 },
+        { command: "test", exitCode: 1, stdout: "", stderr: "fail", durationMs: 200 },
+        { command: "audit", exitCode: 2, stdout: "", stderr: "err", durationMs: 300 },
       ],
     });
 
@@ -134,7 +133,6 @@ test("verification-evidence: writeVerificationJSON excludes stdout/stderr from o
           stdout: "hello\n",
           stderr: "some warning",
           durationMs: 50,
-          blocking: true,
         },
       ],
     });
@@ -183,8 +181,8 @@ test("verification-evidence: writeVerificationJSON uses optional unitId when pro
 test("verification-evidence: formatEvidenceTable returns markdown table with correct columns", () => {
   const result = makeResult({
     checks: [
-      { command: "npm run typecheck", exitCode: 0, stdout: "", stderr: "", durationMs: 2340, blocking: true },
-      { command: "npm run lint", exitCode: 1, stdout: "", stderr: "err", durationMs: 1100, blocking: true },
+      { command: "npm run typecheck", exitCode: 0, stdout: "", stderr: "", durationMs: 2340 },
+      { command: "npm run lint", exitCode: 1, stdout: "", stderr: "err", durationMs: 1100 },
     ],
   });
 
@@ -216,9 +214,9 @@ test("verification-evidence: formatEvidenceTable returns no-checks message for e
 test("verification-evidence: formatEvidenceTable formats duration as seconds with 1 decimal", () => {
   const result = makeResult({
     checks: [
-      { command: "fast", exitCode: 0, stdout: "", stderr: "", durationMs: 150, blocking: true },
-      { command: "slow", exitCode: 0, stdout: "", stderr: "", durationMs: 2340, blocking: true },
-      { command: "zero", exitCode: 0, stdout: "", stderr: "", durationMs: 0, blocking: true },
+      { command: "fast", exitCode: 0, stdout: "", stderr: "", durationMs: 150 },
+      { command: "slow", exitCode: 0, stdout: "", stderr: "", durationMs: 2340 },
+      { command: "zero", exitCode: 0, stdout: "", stderr: "", durationMs: 0 },
     ],
   });
 
@@ -232,8 +230,8 @@ test("verification-evidence: formatEvidenceTable uses ✅/❌ emoji for pass/fai
   const result = makeResult({
     passed: false,
     checks: [
-      { command: "pass-cmd", exitCode: 0, stdout: "", stderr: "", durationMs: 100, blocking: true },
-      { command: "fail-cmd", exitCode: 1, stdout: "", stderr: "", durationMs: 200, blocking: true },
+      { command: "pass-cmd", exitCode: 0, stdout: "", stderr: "", durationMs: 100 },
+      { command: "fail-cmd", exitCode: 1, stdout: "", stderr: "", durationMs: 200 },
     ],
   });
 
@@ -337,8 +335,8 @@ test("verification-evidence: integration — VerificationResult → JSON → tab
     const result = makeResult({
       passed: false,
       checks: [
-        { command: "npm run typecheck", exitCode: 0, stdout: "ok", stderr: "", durationMs: 1500, blocking: true },
-        { command: "npm run test:unit", exitCode: 1, stdout: "", stderr: "1 failed", durationMs: 3200, blocking: true },
+        { command: "npm run typecheck", exitCode: 0, stdout: "ok", stderr: "", durationMs: 1500 },
+        { command: "npm run test:unit", exitCode: 1, stdout: "", stderr: "1 failed", durationMs: 3200 },
       ],
       discoverySource: "package-json",
     });
@@ -392,7 +390,7 @@ test("verification-evidence: writeVerificationJSON with retryAttempt and maxRetr
     const result = makeResult({
       passed: false,
       checks: [
-        { command: "npm run lint", exitCode: 1, stdout: "", stderr: "error", durationMs: 300, blocking: true },
+        { command: "npm run lint", exitCode: 1, stdout: "", stderr: "error", durationMs: 300 },
       ],
     });
 
@@ -417,7 +415,7 @@ test("verification-evidence: writeVerificationJSON without retry params omits re
     const result = makeResult({
       passed: true,
       checks: [
-        { command: "npm run test", exitCode: 0, stdout: "ok", stderr: "", durationMs: 100, blocking: true },
+        { command: "npm run test", exitCode: 0, stdout: "ok", stderr: "", durationMs: 100 },
       ],
     });
 
@@ -443,7 +441,7 @@ test("verification-evidence: writeVerificationJSON includes runtimeErrors when p
     const result = makeResult({
       passed: false,
       checks: [
-        { command: "npm run test", exitCode: 0, stdout: "ok", stderr: "", durationMs: 100, blocking: true },
+        { command: "npm run test", exitCode: 0, stdout: "ok", stderr: "", durationMs: 100 },
       ],
       runtimeErrors: [
         { source: "bg-shell", severity: "crash", message: "Server crashed", blocking: true },
@@ -475,7 +473,7 @@ test("verification-evidence: writeVerificationJSON omits runtimeErrors when abse
     const result = makeResult({
       passed: true,
       checks: [
-        { command: "npm run lint", exitCode: 0, stdout: "", stderr: "", durationMs: 50, blocking: true },
+        { command: "npm run lint", exitCode: 0, stdout: "", stderr: "", durationMs: 50 },
       ],
     });
 
@@ -514,7 +512,7 @@ test("verification-evidence: formatEvidenceTable appends runtime errors section"
   const result = makeResult({
     passed: false,
     checks: [
-      { command: "npm run test", exitCode: 0, stdout: "", stderr: "", durationMs: 100, blocking: true },
+      { command: "npm run test", exitCode: 0, stdout: "", stderr: "", durationMs: 100 },
     ],
     runtimeErrors: [
       { source: "bg-shell", severity: "crash", message: "Server crashed with SIGKILL", blocking: true },
@@ -539,7 +537,7 @@ test("verification-evidence: formatEvidenceTable omits runtime errors section wh
   const result = makeResult({
     passed: true,
     checks: [
-      { command: "npm run lint", exitCode: 0, stdout: "", stderr: "", durationMs: 200, blocking: true },
+      { command: "npm run lint", exitCode: 0, stdout: "", stderr: "", durationMs: 200 },
     ],
   });
 
@@ -554,7 +552,7 @@ test("verification-evidence: formatEvidenceTable truncates runtime error message
   const result = makeResult({
     passed: false,
     checks: [
-      { command: "npm run test", exitCode: 0, stdout: "", stderr: "", durationMs: 100, blocking: true },
+      { command: "npm run test", exitCode: 0, stdout: "", stderr: "", durationMs: 100 },
     ],
     runtimeErrors: [
       { source: "bg-shell", severity: "error", message: longMessage, blocking: false },
@@ -600,7 +598,7 @@ test("verification-evidence: writeVerificationJSON includes auditWarnings when p
     const result = makeResult({
       passed: true,
       checks: [
-        { command: "npm run test", exitCode: 0, stdout: "ok", stderr: "", durationMs: 100, blocking: true },
+        { command: "npm run test", exitCode: 0, stdout: "ok", stderr: "", durationMs: 100 },
       ],
       auditWarnings: SAMPLE_AUDIT_WARNINGS,
     });
@@ -629,7 +627,7 @@ test("verification-evidence: writeVerificationJSON omits auditWarnings when abse
     const result = makeResult({
       passed: true,
       checks: [
-        { command: "npm run lint", exitCode: 0, stdout: "", stderr: "", durationMs: 50, blocking: true },
+        { command: "npm run lint", exitCode: 0, stdout: "", stderr: "", durationMs: 50 },
       ],
     });
 
@@ -668,7 +666,7 @@ test("verification-evidence: formatEvidenceTable appends audit warnings section"
   const result = makeResult({
     passed: true,
     checks: [
-      { command: "npm run test", exitCode: 0, stdout: "", stderr: "", durationMs: 100, blocking: true },
+      { command: "npm run test", exitCode: 0, stdout: "", stderr: "", durationMs: 100 },
     ],
     auditWarnings: SAMPLE_AUDIT_WARNINGS,
   });
@@ -691,7 +689,7 @@ test("verification-evidence: formatEvidenceTable omits audit warnings section wh
   const result = makeResult({
     passed: true,
     checks: [
-      { command: "npm run lint", exitCode: 0, stdout: "", stderr: "", durationMs: 200, blocking: true },
+      { command: "npm run lint", exitCode: 0, stdout: "", stderr: "", durationMs: 200 },
     ],
   });
 
@@ -707,7 +705,7 @@ test("verification-evidence: integration — VerificationResult with auditWarnin
     const result = makeResult({
       passed: true,
       checks: [
-        { command: "npm run typecheck", exitCode: 0, stdout: "ok", stderr: "", durationMs: 1500, blocking: true },
+        { command: "npm run typecheck", exitCode: 0, stdout: "ok", stderr: "", durationMs: 1500 },
       ],
       auditWarnings: [
         {

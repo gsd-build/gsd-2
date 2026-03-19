@@ -1,6 +1,6 @@
 /**
  * Auto-mode Recovery — artifact resolution, verification, blocker placeholders,
- * skip artifacts, completed-unit persistence, merge state reconciliation,
+ * skip artifacts, merge state reconciliation,
  * self-heal runtime records, and loop remediation steps.
  *
  * Pure functions that receive all needed state as parameters — no module-level
@@ -35,14 +35,9 @@ import {
   resolveMilestoneFile,
   clearPathCache,
   resolveGsdRootFile,
-  gsdRoot,
 } from "./paths.js";
-import { isValidationTerminal } from "./state.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
-import { atomicWriteSync } from "./atomic-write.js";
-import { loadJsonFileOrNull } from "./json-persistence.js";
 import { dirname, join } from "node:path";
-import { parseUnitId } from "./unit-id.js";
 
 // ─── Artifact Resolution & Verification ───────────────────────────────────────
 
@@ -50,7 +45,9 @@ import { parseUnitId } from "./unit-id.js";
  * Resolve the expected artifact for a unit to an absolute path.
  */
 export function resolveExpectedArtifactPath(unitType: string, unitId: string, base: string): string | null {
-  const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
+  const parts = unitId.split("/");
+  const mid = parts[0]!;
+  const sid = parts[1];
   switch (unitType) {
     case "research-milestone": {
       const dir = resolveMilestonePath(base, mid);
@@ -77,6 +74,7 @@ export function resolveExpectedArtifactPath(unitType: string, unitId: string, ba
       return dir ? join(dir, buildSliceFileName(sid!, "UAT-RESULT")) : null;
     }
     case "execute-task": {
+      const tid = parts[2];
       const dir = resolveSlicePath(base, mid, sid!);
       return dir && tid ? join(dir, "tasks", buildTaskFileName(tid, "SUMMARY")) : null;
     }
@@ -138,21 +136,6 @@ export function verifyExpectedArtifact(unitType: string, unitId: string, base: s
   if (!absPath) return false;
   if (!existsSync(absPath)) return false;
 
-  // validate-milestone must have a VALIDATION file with a terminal verdict
-  // (pass, needs-attention, or needs-remediation). Without this check, a
-  // VALIDATION file with missing/malformed frontmatter or an unrecognized
-  // verdict is treated as "complete" by the artifact check but deriveState
-  // still returns phase:"validating-milestone" (because isValidationTerminal
-  // returns false), creating an infinite skip loop that hits the lifetime cap.
-  if (unitType === "validate-milestone") {
-    try {
-      const validationContent = readFileSync(absPath, "utf-8");
-      if (!isValidationTerminal(validationContent)) return false;
-    } catch {
-      return false;
-    }
-  }
-
   // plan-slice must produce a plan with actual task entries, not just a scaffold.
   // The plan file may exist from a prior discussion/context step with only headings
   // but no tasks. Without this check the artifact is considered "complete" and the
@@ -165,7 +148,10 @@ export function verifyExpectedArtifact(unitType: string, unitId: string, base: s
 
   // execute-task must also have its checkbox marked [x] in the slice plan
   if (unitType === "execute-task") {
-    const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
+    const parts = unitId.split("/");
+    const mid = parts[0];
+    const sid = parts[1];
+    const tid = parts[2];
     if (mid && sid && tid) {
       const planAbs = resolveSliceFile(base, mid, sid, "PLAN");
       if (planAbs && existsSync(planAbs)) {
@@ -182,7 +168,9 @@ export function verifyExpectedArtifact(unitType: string, unitId: string, base: s
   // but omitted T{tid}-PLAN.md files would be marked complete, causing execute-task
   // to dispatch with a missing task plan (see issue #739).
   if (unitType === "plan-slice") {
-    const { milestone: mid, slice: sid } = parseUnitId(unitId);
+    const parts = unitId.split("/");
+    const mid = parts[0];
+    const sid = parts[1];
     if (mid && sid) {
       try {
         const planContent = readFileSync(absPath, "utf-8");
@@ -206,8 +194,9 @@ export function verifyExpectedArtifact(unitType: string, unitId: string, base: s
   // state machine keeps returning the same complete-slice unit (roadmap still shows
   // the slice incomplete), so dispatchNextUnit recurses forever.
   if (unitType === "complete-slice") {
-    const { milestone: mid, slice: sid } = parseUnitId(unitId);
-
+    const parts = unitId.split("/");
+    const mid = parts[0];
+    const sid = parts[1];
     if (mid && sid) {
       const dir = resolveSlicePath(base, mid, sid);
       if (dir) {
@@ -221,7 +210,7 @@ export function verifyExpectedArtifact(unitType: string, unitId: string, base: s
         try {
           const roadmapContent = readFileSync(roadmapFile, "utf-8");
           const roadmap = parseRoadmap(roadmapContent);
-          const slice = (roadmap.slices ?? []).find(s => s.id === sid);
+          const slice = roadmap.slices.find(s => s.id === sid);
           if (slice && !slice.done) return false;
         } catch {
           // Corrupt/unparseable roadmap — fail verification so the unit
@@ -260,7 +249,9 @@ export function writeBlockerPlaceholder(unitType: string, unitId: string, base: 
 }
 
 export function diagnoseExpectedArtifact(unitType: string, unitId: string, base: string): string | null {
-  const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
+  const parts = unitId.split("/");
+  const mid = parts[0];
+  const sid = parts[1];
   switch (unitType) {
     case "research-milestone":
       return `${relMilestoneFile(base, mid!, "RESEARCH")} (milestone research)`;
@@ -271,6 +262,7 @@ export function diagnoseExpectedArtifact(unitType: string, unitId: string, base:
     case "plan-slice":
       return `${relSliceFile(base, mid!, sid!, "PLAN")} (slice plan)`;
     case "execute-task": {
+      const tid = parts[2];
       return `Task ${tid} marked [x] in ${relSliceFile(base, mid!, sid!, "PLAN")} + summary written`;
     }
     case "complete-slice":
@@ -341,48 +333,6 @@ export function skipExecuteTask(
   }
 
   return true;
-}
-
-// ─── Disk-backed completed-unit helpers ───────────────────────────────────────
-
-function isStringArray(data: unknown): data is string[] {
-  return Array.isArray(data) && data.every(item => typeof item === "string");
-}
-
-/** Path to the persisted completed-unit keys file. */
-export function completedKeysPath(base: string): string {
-  return join(gsdRoot(base), "completed-units.json");
-}
-
-/** Write a completed unit key to disk (read-modify-write append to set). */
-export function persistCompletedKey(base: string, key: string): void {
-  const file = completedKeysPath(base);
-  const keys = loadJsonFileOrNull(file, isStringArray) ?? [];
-  const keySet = new Set(keys);
-  if (!keySet.has(key)) {
-    keys.push(key);
-    atomicWriteSync(file, JSON.stringify(keys));
-  }
-}
-
-/** Remove a stale completed unit key from disk. */
-export function removePersistedKey(base: string, key: string): void {
-  const file = completedKeysPath(base);
-  const keys = loadJsonFileOrNull(file, isStringArray);
-  if (!keys) return;
-  const filtered = keys.filter(k => k !== key);
-  if (filtered.length !== keys.length) {
-    atomicWriteSync(file, JSON.stringify(filtered));
-  }
-}
-
-/** Load all completed unit keys from disk into the in-memory set. */
-export function loadPersistedKeys(base: string, target: Set<string>): void {
-  const file = completedKeysPath(base);
-  const keys = loadJsonFileOrNull(file, isStringArray);
-  if (keys) {
-    for (const k of keys) target.add(k);
-  }
 }
 
 // ─── Merge State Reconciliation ───────────────────────────────────────────────
@@ -468,14 +418,14 @@ export function reconcileMergeState(basePath: string, ctx: ExtensionContext): bo
 // ─── Self-Heal Runtime Records ────────────────────────────────────────────────
 
 /**
- * Self-heal: scan runtime records in .gsd/ and clear any where the expected
- * artifact already exists on disk. This repairs incomplete closeouts from
- * prior crashes — preventing spurious re-dispatch of already-completed units.
+ * Self-heal: scan runtime records in .gsd/ and clear stale ones.
+ * Clears dispatched records older than 1 hour (process crashed before
+ * completing the unit). deriveState() handles re-derivation — no need
+ * for completion key persistence here.
  */
 export async function selfHealRuntimeRecords(
   base: string,
   ctx: ExtensionContext,
-  completedKeySet: Set<string>,
 ): Promise<void> {
   try {
     const { listUnitRuntimeRecords } = await import("./unit-runtime.js");
@@ -485,26 +435,8 @@ export async function selfHealRuntimeRecords(
     const now = Date.now();
     for (const record of records) {
       const { unitType, unitId } = record;
-      const artifactPath = resolveExpectedArtifactPath(unitType, unitId, base);
 
-      // Case 1: Artifact exists — unit completed but closeout didn't finish.
-      // Use verifyExpectedArtifact (not just existsSync) so that execute-task
-      // also checks the plan checkbox is marked [x]. Without this, a task
-      // whose summary exists but checkbox is unchecked would be incorrectly
-      // marked as completed, causing deriveState to re-dispatch it endlessly.
-      if (artifactPath && existsSync(artifactPath) && verifyExpectedArtifact(unitType, unitId, base)) {
-        clearUnitRuntimeRecord(base, unitType, unitId);
-        // Also persist completion key if missing
-        const key = `${unitType}/${unitId}`;
-        if (!completedKeySet.has(key)) {
-          persistCompletedKey(base, key);
-          completedKeySet.add(key);
-        }
-        healed++;
-        continue;
-      }
-
-      // Case 2: No artifact but record is stale (dispatched > 1h ago, process crashed)
+      // Clear stale dispatched records (dispatched > 1h ago, process crashed)
       const age = now - (record.startedAt ?? 0);
       if (record.phase === "dispatched" && age > STALE_THRESHOLD_MS) {
         clearUnitRuntimeRecord(base, unitType, unitId);
@@ -528,7 +460,10 @@ export async function selfHealRuntimeRecords(
  * These are shown when automatic reconciliation is not possible.
  */
 export function buildLoopRemediationSteps(unitType: string, unitId: string, base: string): string | null {
-  const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
+  const parts = unitId.split("/");
+  const mid = parts[0];
+  const sid = parts[1];
+  const tid = parts[2];
   switch (unitType) {
     case "execute-task": {
       if (!mid || !sid || !tid) break;

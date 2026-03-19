@@ -55,11 +55,6 @@ export interface VerificationCheck {
   stdout: string;
   stderr: string;
   durationMs: number;
-  blocking: boolean;     // true for preference/task-plan sources, false for package-json (advisory only)
-  /** True when the failure was a spawn/infra error (ETIMEDOUT, ENOENT, ENOMEM)
-   *  rather than the command itself failing. Infra errors are transient and
-   *  should not trigger auto-fix retries — the agent cannot fix the OS. */
-  infraError?: boolean;
 }
 
 /** A runtime error captured from bg-shell processes or browser console */
@@ -196,7 +191,7 @@ export interface ActiveRef {
 export interface MilestoneRegistryEntry {
   id: string;
   title: string;
-  status: 'complete' | 'active' | 'pending' | 'parked';
+  status: 'complete' | 'active' | 'pending';
   /** Milestone IDs that must be complete before this milestone becomes active. Populated from CONTEXT.md YAML frontmatter. */
   dependsOn?: string[];
 }
@@ -308,8 +303,6 @@ export interface PhaseSkipPreferences {
   skip_reassess?: boolean;
   skip_slice_research?: boolean;
   skip_milestone_validation?: boolean;
-  /** When true, reassess-roadmap fires after each slice completion. Opt-in. */
-  reassess_after_slice?: boolean;
   /** When true, auto-mode pauses before each slice for discussion (#789). */
   require_slice_discussion?: boolean;
 }

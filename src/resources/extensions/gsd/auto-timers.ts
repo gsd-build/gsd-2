@@ -2,7 +2,7 @@
  * Unit supervision timers — soft timeout warning, idle watchdog,
  * hard timeout, and context-pressure monitor.
  *
- * Extracted from dispatchNextUnit() in auto.ts. All timers are set up
+ * Originally extracted from dispatchNextUnit() in auto.ts (now deleted — replaced by autoLoop).
  * via startUnitSupervision() and torn down by the caller via clearUnitTimeout().
  */
 
@@ -20,7 +20,6 @@ import { closeoutUnit, type CloseoutOptions } from "./auto-unit-closeout.js";
 import { saveActivityLog } from "./activity-log.js";
 import { recoverTimedOutUnit, type RecoveryContext } from "./auto-timeout-recovery.js";
 import type { AutoSession } from "./auto/session.js";
-import { getErrorMessage } from "./error-utils.js";
 
 export interface SupervisionContext {
   s: AutoSession;
@@ -128,7 +127,7 @@ export function startUnitSupervision(sctx: SupervisionContext): void {
       );
       await pauseAuto(ctx, pi);
     } catch (err) {
-      const message = getErrorMessage(err);
+      const message = err instanceof Error ? err.message : String(err);
       console.error(`[idle-watchdog] Unhandled error: ${message}`);
       try {
         ctx.ui.notify(`Idle watchdog error: ${message}`, "warning");
@@ -160,7 +159,7 @@ export function startUnitSupervision(sctx: SupervisionContext): void {
       );
       await pauseAuto(ctx, pi);
     } catch (err) {
-      const message = getErrorMessage(err);
+      const message = err instanceof Error ? err.message : String(err);
       console.error(`[hard-timeout] Unhandled error: ${message}`);
       try {
         ctx.ui.notify(`Hard timeout error: ${message}`, "warning");

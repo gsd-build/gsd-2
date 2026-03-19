@@ -103,17 +103,9 @@ export async function getActiveMilestoneId(basePath: string): Promise<string | n
   // Parallel worker isolation
   const milestoneLock = process.env.GSD_MILESTONE_LOCK;
   if (milestoneLock) {
-    if (!milestoneIds.includes(milestoneLock)) return null;
-    // Locked milestone that is parked should not be active
-    const lockedParked = resolveMilestoneFile(basePath, milestoneLock, "PARKED");
-    if (lockedParked) return null;
-    return milestoneLock;
+    return milestoneIds.includes(milestoneLock) ? milestoneLock : null;
   }
   for (const mid of milestoneIds) {
-    // Skip parked milestones — they are not eligible for active status
-    const parkedFile = resolveMilestoneFile(basePath, mid, "PARKED");
-    if (parkedFile) continue;
-
     const roadmapFile = resolveMilestoneFile(basePath, mid, "ROADMAP");
     const content = roadmapFile ? await loadFile(roadmapFile) : null;
     if (!content) {
@@ -232,22 +224,7 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
   const roadmapCache = new Map<string, Roadmap>();
   const completeMilestoneIds = new Set<string>();
 
-  // Track parked milestone IDs so Phase 2 can check without re-reading disk
-  const parkedMilestoneIds = new Set<string>();
-
   for (const mid of milestoneIds) {
-    // Skip parked milestones — they do NOT count as complete (don't satisfy depends_on)
-    // But still parse their roadmap for title extraction in Phase 2.
-    const parkedFile = resolveMilestoneFile(basePath, mid, "PARKED");
-    if (parkedFile) {
-      parkedMilestoneIds.add(mid);
-      // Cache roadmap for title extraction (but don't add to completeMilestoneIds)
-      const prf = resolveMilestoneFile(basePath, mid, "ROADMAP");
-      const prc = prf ? await cachedLoadFile(prf) : null;
-      if (prc) roadmapCache.set(mid, parseRoadmap(prc));
-      continue;
-    }
-
     const rf = resolveMilestoneFile(basePath, mid, "ROADMAP");
     const rc = rf ? await cachedLoadFile(rf) : null;
     if (!rc) {
@@ -270,16 +247,6 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
   let activeMilestoneHasDraft = false;
 
   for (const mid of milestoneIds) {
-    // Skip parked milestones — register them as 'parked' and move on
-    if (parkedMilestoneIds.has(mid)) {
-      const roadmap = roadmapCache.get(mid) ?? null;
-      const title = roadmap
-        ? roadmap.title.replace(/^M\d+(?:-[a-z0-9]{6})?[^:]*:\s*/, '')
-        : mid;
-      registry.push({ id: mid, title, status: 'parked' });
-      continue;
-    }
-
     const roadmap = roadmapCache.get(mid) ?? null;
 
     if (!roadmap) {
@@ -385,9 +352,8 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
   };
 
   if (!activeMilestone) {
-    // Check whether any milestones are pending (dep-blocked) or parked
+    // Check whether any milestones are pending (dep-blocked) vs all complete
     const pendingEntries = registry.filter(entry => entry.status === 'pending');
-    const parkedEntries = registry.filter(entry => entry.status === 'parked');
     if (pendingEntries.length > 0) {
       // All incomplete milestones are dep-blocked — no progress possible
       const blockerDetails = pendingEntries
@@ -403,24 +369,6 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
           ? blockerDetails
           : ['All remaining milestones are dep-blocked but no deps listed — check CONTEXT.md files'],
         nextAction: 'Resolve milestone dependencies before proceeding.',
-        registry,
-        requirements,
-        progress: {
-          milestones: milestoneProgress,
-        },
-      };
-    }
-    if (parkedEntries.length > 0) {
-      // All non-complete milestones are parked — nothing active, but not "all complete"
-      const parkedIds = parkedEntries.map(e => e.id).join(', ');
-      return {
-        activeMilestone: null,
-        activeSlice: null,
-        activeTask: null,
-        phase: 'pre-planning',
-        recentDecisions: [],
-        blockers: [],
-        nextAction: `All remaining milestones are parked (${parkedIds}). Run /gsd unpark <id> or create a new milestone.`,
         registry,
         requirements,
         progress: {

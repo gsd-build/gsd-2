@@ -261,71 +261,6 @@ test("verification-gate: each check has durationMs", () => {
   }
 });
 
-// ─── Infra Error Tagging Tests ───────────────────────────────────────────────
-
-test("verification-gate: spawnSync ETIMEDOUT → infraError: true on the check", () => {
-  const tmp = makeTempDir("vg-etimedout");
-  try {
-    // Use a short timeout against a long sleep to guarantee ETIMEDOUT
-    const result = runVerificationGate({
-      basePath: tmp,
-      unitId: "T01",
-      cwd: tmp,
-      preferenceCommands: ["sleep 60"],
-      commandTimeoutMs: 200,
-    });
-    assert.equal(result.passed, false);
-    assert.equal(result.checks.length, 1);
-    assert.ok(result.checks[0].exitCode !== 0, "should have non-zero exit code");
-    assert.equal(result.checks[0].infraError, true, "ETIMEDOUT should be tagged as infraError");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-  }
-});
-
-test("verification-gate: real command failure does NOT have infraError", () => {
-  const tmp = makeTempDir("vg-real-fail");
-  try {
-    const result = runVerificationGate({
-      basePath: tmp,
-      unitId: "T01",
-      cwd: tmp,
-      // Cross-platform: node with --eval flag and no shell-sensitive characters
-      preferenceCommands: ["node --eval \"process.exitCode=1\""],
-    });
-    assert.equal(result.passed, false);
-    assert.equal(result.checks.length, 1);
-    assert.equal(result.checks[0].exitCode, 1);
-    assert.equal(result.checks[0].infraError, undefined, "real failure should not be tagged as infraError");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-  }
-});
-
-test("verification-gate: mixed infra + real failure — only infra check is tagged", () => {
-  const tmp = makeTempDir("vg-mixed-infra");
-  try {
-    // Use a timeout that kills "sleep 60" but lets "node --eval" complete (~80ms).
-    // The gate applies the same timeout to each command sequentially.
-    const result = runVerificationGate({
-      basePath: tmp,
-      unitId: "T01",
-      cwd: tmp,
-      preferenceCommands: ["sleep 60", "node --eval \"process.exitCode=2\""],
-      commandTimeoutMs: 500,
-    });
-    assert.equal(result.passed, false);
-    assert.equal(result.checks.length, 2);
-    // First check: ETIMEDOUT → infraError
-    assert.equal(result.checks[0].infraError, true, "timed-out command should be infraError");
-    // Second check: real exit 2 → no infraError
-    assert.equal(result.checks[1].exitCode, 2);
-    assert.equal(result.checks[1].infraError, undefined, "real failure should not be infraError");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-  }
-});
-
 // ─── Preference Validation Tests ─────────────────────────────────────────────
 
 test("verification-gate: validatePreferences accepts valid verification keys", () => {
@@ -646,7 +581,7 @@ test("formatFailureContext: formats a single failure with command, exit code, st
   const result: import("../types.ts").VerificationResult = {
     passed: false,
     checks: [
-      { command: "npm run lint", exitCode: 1, stdout: "", stderr: "error: unused var", durationMs: 500, blocking: true },
+      { command: "npm run lint", exitCode: 1, stdout: "", stderr: "error: unused var", durationMs: 500 },
     ],
     discoverySource: "preference",
     timestamp: Date.now(),
@@ -663,9 +598,9 @@ test("formatFailureContext: formats multiple failures", () => {
   const result: import("../types.ts").VerificationResult = {
     passed: false,
     checks: [
-      { command: "npm run lint", exitCode: 1, stdout: "", stderr: "lint error", durationMs: 100, blocking: true },
-      { command: "npm run test", exitCode: 2, stdout: "", stderr: "test failure", durationMs: 200, blocking: true },
-      { command: "npm run typecheck", exitCode: 0, stdout: "ok", stderr: "", durationMs: 50, blocking: true },
+      { command: "npm run lint", exitCode: 1, stdout: "", stderr: "lint error", durationMs: 100 },
+      { command: "npm run test", exitCode: 2, stdout: "", stderr: "test failure", durationMs: 200 },
+      { command: "npm run typecheck", exitCode: 0, stdout: "ok", stderr: "", durationMs: 50 },
     ],
     discoverySource: "preference",
     timestamp: Date.now(),
@@ -684,7 +619,7 @@ test("formatFailureContext: truncates stderr longer than 2000 chars", () => {
   const result: import("../types.ts").VerificationResult = {
     passed: false,
     checks: [
-      { command: "big-err", exitCode: 1, stdout: "", stderr: longStderr, durationMs: 100, blocking: true },
+      { command: "big-err", exitCode: 1, stdout: "", stderr: longStderr, durationMs: 100 },
     ],
     discoverySource: "preference",
     timestamp: Date.now(),
@@ -699,8 +634,8 @@ test("formatFailureContext: returns empty string when all checks pass", () => {
   const result: import("../types.ts").VerificationResult = {
     passed: true,
     checks: [
-      { command: "npm run lint", exitCode: 0, stdout: "ok", stderr: "", durationMs: 100, blocking: true },
-      { command: "npm run test", exitCode: 0, stdout: "ok", stderr: "", durationMs: 200, blocking: true },
+      { command: "npm run lint", exitCode: 0, stdout: "ok", stderr: "", durationMs: 100 },
+      { command: "npm run test", exitCode: 0, stdout: "ok", stderr: "", durationMs: 200 },
     ],
     discoverySource: "preference",
     timestamp: Date.now(),
@@ -728,7 +663,6 @@ test("formatFailureContext: caps total output at 10,000 chars", () => {
       stdout: "",
       stderr: "e".repeat(1000), // 1000 chars each, 20 * ~1050 (with formatting) > 10,000
       durationMs: 100,
-      blocking: true,
     });
   }
   const result: import("../types.ts").VerificationResult = {
@@ -1142,132 +1076,4 @@ test("dependency-audit: subdirectory package.json does not trigger audit", () =>
   });
   assert.equal(npmAuditCalled, false, "subdirectory dependency files should not trigger audit");
   assert.deepStrictEqual(result, []);
-});
-
-// ─── Non-Blocking Discovery Tests ────────────────────────────────────────────
-
-test("non-blocking: package-json discovered commands failing → result.passed is still true", () => {
-  const tmp = makeTempDir("vg-nb-pkg-fail");
-  try {
-    writeFileSync(
-      join(tmp, "package.json"),
-      JSON.stringify({ scripts: { lint: "eslint .", test: "vitest" } }),
-    );
-    // These commands will fail because eslint/vitest don't exist in the temp dir
-    const result = runVerificationGate({
-      basePath: tmp,
-      unitId: "T01",
-      cwd: tmp,
-      // No preference commands — discovery falls through to package.json
-    });
-    assert.equal(result.discoverySource, "package-json");
-    assert.ok(result.checks.length > 0, "should have discovered package.json checks");
-    assert.equal(result.passed, true, "package-json failures should not block the gate");
-    for (const check of result.checks) {
-      assert.equal(check.blocking, false, "package-json checks should be non-blocking");
-    }
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("non-blocking: preference commands failing → result.passed is false", () => {
-  const tmp = makeTempDir("vg-nb-pref-fail");
-  try {
-    const result = runVerificationGate({
-      basePath: tmp,
-      unitId: "T01",
-      cwd: tmp,
-      preferenceCommands: ["sh -c 'exit 1'"],
-    });
-    assert.equal(result.discoverySource, "preference");
-    assert.equal(result.passed, false, "preference failures should block the gate");
-    assert.equal(result.checks[0].blocking, true, "preference checks should be blocking");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("non-blocking: task-plan commands failing → result.passed is false", () => {
-  const tmp = makeTempDir("vg-nb-tp-fail");
-  try {
-    const result = runVerificationGate({
-      basePath: tmp,
-      unitId: "T01",
-      cwd: tmp,
-      taskPlanVerify: "sh -c 'exit 1'",
-    });
-    assert.equal(result.discoverySource, "task-plan");
-    assert.equal(result.passed, false, "task-plan failures should block the gate");
-    assert.equal(result.checks[0].blocking, true, "task-plan checks should be blocking");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("non-blocking: blocking field is set correctly based on discovery source", () => {
-  const tmp = makeTempDir("vg-nb-field");
-  try {
-    // preference → blocking
-    const prefResult = runVerificationGate({
-      basePath: tmp,
-      unitId: "T01",
-      cwd: tmp,
-      preferenceCommands: ["echo ok"],
-    });
-    assert.equal(prefResult.checks[0].blocking, true);
-
-    // task-plan → blocking
-    const tpResult = runVerificationGate({
-      basePath: tmp,
-      unitId: "T01",
-      cwd: tmp,
-      taskPlanVerify: "echo ok",
-    });
-    assert.equal(tpResult.checks[0].blocking, true);
-
-    // package-json → non-blocking
-    writeFileSync(
-      join(tmp, "package.json"),
-      JSON.stringify({ scripts: { test: "echo ok" } }),
-    );
-    const pkgResult = runVerificationGate({
-      basePath: tmp,
-      unitId: "T01",
-      cwd: tmp,
-    });
-    assert.equal(pkgResult.checks[0].blocking, false);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("non-blocking: formatFailureContext only includes blocking failures", () => {
-  const result: import("../types.ts").VerificationResult = {
-    passed: true,
-    checks: [
-      { command: "npm run lint", exitCode: 1, stdout: "", stderr: "lint warning", durationMs: 100, blocking: false },
-      { command: "npm run test", exitCode: 1, stdout: "", stderr: "test error", durationMs: 200, blocking: true },
-      { command: "npm run typecheck", exitCode: 1, stdout: "", stderr: "type error", durationMs: 50, blocking: false },
-    ],
-    discoverySource: "preference",
-    timestamp: Date.now(),
-  };
-  const output = formatFailureContext(result);
-  assert.ok(output.includes("`npm run test`"), "should include blocking failure");
-  assert.ok(!output.includes("npm run lint"), "should not include non-blocking failure");
-  assert.ok(!output.includes("npm run typecheck"), "should not include non-blocking failure");
-});
-
-test("non-blocking: formatFailureContext returns empty when only non-blocking failures exist", () => {
-  const result: import("../types.ts").VerificationResult = {
-    passed: true,
-    checks: [
-      { command: "npm run lint", exitCode: 1, stdout: "", stderr: "lint warning", durationMs: 100, blocking: false },
-      { command: "npm run test", exitCode: 1, stdout: "", stderr: "test warning", durationMs: 200, blocking: false },
-    ],
-    discoverySource: "package-json",
-    timestamp: Date.now(),
-  };
-  assert.equal(formatFailureContext(result), "", "should return empty when only non-blocking failures");
 });

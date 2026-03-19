@@ -14,8 +14,6 @@ import type {
 import { resolvePostUnitHooks, resolvePreDispatchHooks } from "./preferences.js";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { gsdRoot } from "./paths.js";
-import { parseUnitId } from "./unit-id.js";
 
 // ─── Hook Queue State ──────────────────────────────────────────────────────
 
@@ -150,7 +148,7 @@ function dequeueNextHook(basePath: string): HookDispatchResult | null {
     };
 
     // Build the prompt with variable substitution
-    const { milestone: mid, slice: sid, task: tid } = parseUnitId(triggerUnitId);
+    const [mid, sid, tid] = triggerUnitId.split("/");
     const prompt = config.prompt
       .replace(/\{milestoneId\}/g, mid ?? "")
       .replace(/\{sliceId\}/g, sid ?? "")
@@ -209,14 +207,16 @@ function handleHookCompletion(basePath: string): HookDispatchResult | null {
  *   - Milestone-level (M001):    .gsd/M001/{artifact}
  */
 export function resolveHookArtifactPath(basePath: string, unitId: string, artifactName: string): string {
-  const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
-  if (mid && sid && tid) {
-    return join(gsdRoot(basePath), mid, "slices", sid, "tasks", `${tid}-${artifactName}`);
+  const parts = unitId.split("/");
+  if (parts.length === 3) {
+    const [mid, sid, tid] = parts;
+    return join(basePath, ".gsd", mid, "slices", sid, "tasks", `${tid}-${artifactName}`);
   }
-  if (mid && sid) {
-    return join(gsdRoot(basePath), mid, "slices", sid, artifactName);
+  if (parts.length === 2) {
+    const [mid, sid] = parts;
+    return join(basePath, ".gsd", mid, "slices", sid, artifactName);
   }
-  return join(gsdRoot(basePath), mid, artifactName);
+  return join(basePath, ".gsd", parts[0], artifactName);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -252,7 +252,7 @@ export function runPreDispatchHooks(
     return { action: "proceed", prompt, firedHooks: [] };
   }
 
-  const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
+  const [mid, sid, tid] = unitId.split("/");
   const substitute = (text: string): string =>
     text
       .replace(/\{milestoneId\}/g, mid ?? "")
@@ -310,7 +310,7 @@ export function runPreDispatchHooks(
 const HOOK_STATE_FILE = "hook-state.json";
 
 function hookStatePath(basePath: string): string {
-  return join(gsdRoot(basePath), HOOK_STATE_FILE);
+  return join(basePath, ".gsd", HOOK_STATE_FILE);
 }
 
 /**
@@ -323,7 +323,7 @@ export function persistHookState(basePath: string): void {
     savedAt: new Date().toISOString(),
   };
   try {
-    const dir = gsdRoot(basePath);
+    const dir = join(basePath, ".gsd");
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(hookStatePath(basePath), JSON.stringify(state, null, 2), "utf-8");
   } catch {
@@ -465,7 +465,7 @@ export function triggerHookManually(
   activeHook.cycle = currentCycle;
 
   // Build the prompt with variable substitution
-  const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
+  const [mid, sid, tid] = unitId.split("/");
   const prompt = hook.prompt
     .replace(/\{milestoneId\}/g, mid ?? "")
     .replace(/\{sliceId\}/g, sid ?? "")

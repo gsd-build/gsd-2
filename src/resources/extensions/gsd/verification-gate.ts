@@ -45,12 +45,11 @@ const PACKAGE_SCRIPT_KEYS = ["typecheck", "lint", "test"] as const;
  *   4. None found
  */
 export function discoverCommands(options: DiscoverCommandsOptions): DiscoveredCommands {
-  // 1. Preference commands (still sanitize — may contain prose from misconfiguration)
+  // 1. Preference commands
   if (options.preferenceCommands && options.preferenceCommands.length > 0) {
     const filtered = options.preferenceCommands
       .map(c => c.trim())
-      .filter(Boolean)
-      .filter(c => isLikelyCommand(c));
+      .filter(Boolean);
     if (filtered.length > 0) {
       return { commands: filtered, source: "preference" };
     }
@@ -112,9 +111,7 @@ const MAX_FAILURE_CONTEXT_CHARS = 10_000;
  * Returns an empty string when all checks pass or the checks array is empty.
  */
 export function formatFailureContext(result: VerificationResult): string {
-  // Only include blocking failures in retry context — non-blocking (advisory) failures
-  // should not be injected into retry prompts to avoid noise pollution.
-  const failures = result.checks.filter((c) => c.exitCode !== 0 && c.blocking);
+  const failures = result.checks.filter((c) => c.exitCode !== 0);
   if (failures.length === 0) return "";
 
   const blocks: string[] = [];
@@ -232,20 +229,13 @@ export interface RunVerificationGateOptions {
   commandTimeoutMs?: number;
 }
 
-/** Error codes from spawnSync that indicate infrastructure/OS-level failures
- *  rather than the command itself failing. These are transient — the agent
- *  cannot fix them, so they should not trigger auto-fix retries. */
-const INFRA_ERROR_CODES = new Set(["ETIMEDOUT", "ENOENT", "ENOMEM", "EMFILE", "ENFILE", "EAGAIN"]);
-
 /**
  * Run the verification gate: discover commands, execute each via spawnSync,
  * and return a structured result.
  *
  * - All commands run sequentially regardless of individual pass/fail.
- * - `passed` is true when every blocking command exits 0 (or no commands are discovered).
+ * - `passed` is true when every command exits 0 (or no commands are discovered).
  * - stdout/stderr per command are truncated to 10 KB.
- * - Spawn/infra errors (ETIMEDOUT, ENOENT, etc.) are tagged with `infraError: true`
- *   so the retry logic can distinguish "the OS couldn't run this" from "the tests failed".
  */
 export function runVerificationGate(options: RunVerificationGateOptions): VerificationResult {
   const timestamp = Date.now();
@@ -265,10 +255,6 @@ export function runVerificationGate(options: RunVerificationGateOptions): Verifi
     };
   }
 
-  // Commands from preference and task-plan sources are blocking;
-  // package-json discovered commands are advisory (non-blocking).
-  const blocking = source === "preference" || source === "task-plan";
-
   const checks: VerificationCheck[] = [];
 
   for (const command of commands) {
@@ -286,26 +272,12 @@ export function runVerificationGate(options: RunVerificationGateOptions): Verifi
     let stderr: string;
 
     if (result.error) {
-      // Spawn infrastructure failure — OS-level, not a test failure.
-      // Tag with infraError so the retry logic can skip auto-fix attempts.
-      const errCode = (result.error as NodeJS.ErrnoException).code;
-      const isInfra = !!errCode && INFRA_ERROR_CODES.has(errCode);
+      // Command not found or spawn failure
       exitCode = 127;
       stderr = truncate(
         (result.stderr || "") + "\n" + (result.error as Error).message,
         MAX_OUTPUT_BYTES,
       );
-
-      checks.push({
-        command,
-        exitCode,
-        stdout: truncate(result.stdout, MAX_OUTPUT_BYTES),
-        stderr,
-        durationMs,
-        blocking,
-        ...(isInfra ? { infraError: true } : {}),
-      });
-      continue;
     } else {
       // status is null when killed by signal — treat as failure
       exitCode = result.status ?? 1;
@@ -318,16 +290,11 @@ export function runVerificationGate(options: RunVerificationGateOptions): Verifi
       stdout: truncate(result.stdout, MAX_OUTPUT_BYTES),
       stderr,
       durationMs,
-      blocking,
     });
   }
 
-  // Gate passes if all blocking checks pass (non-blocking failures are advisory)
-  const blockingChecks = checks.filter(c => c.blocking);
-  const passed = blockingChecks.length === 0 || blockingChecks.every(c => c.exitCode === 0);
-
   return {
-    passed,
+    passed: checks.every(c => c.exitCode === 0),
     checks,
     discoverySource: source,
     timestamp,

@@ -12,7 +12,6 @@ import {
   formatValidationIssues,
 } from "./observability-validator.js";
 import type { ValidationIssue } from "./observability-validator.js";
-import { parseUnitId } from "./unit-id.js";
 
 export async function collectObservabilityWarnings(
   ctx: ExtensionContext,
@@ -23,7 +22,10 @@ export async function collectObservabilityWarnings(
   // Hook units have custom artifacts — skip standard observability checks
   if (unitType.startsWith("hook/")) return [];
 
-  const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
+  const parts = unitId.split("/");
+  const mid = parts[0];
+  const sid = parts[1];
+  const tid = parts[2];
 
   if (!mid || !sid) return [];
 
