@@ -148,6 +148,37 @@ async function main(): Promise<void> {
     assertTrue(true, 'no crash on missing directories');
   }
 
+  // ─── 7. milestones/ directory created in worktree when missing ────────
+  console.log('\n=== 7. milestones/ directory created in worktree when missing ===');
+  {
+    const mainBase = createBase('main');
+    const wtBase = mkdtempSync(join(tmpdir(), 'gsd-wt-sync-wt-'));
+
+    try {
+      // Worktree has .gsd/ but NO milestones/ subdirectory
+      mkdirSync(join(wtBase, '.gsd'), { recursive: true });
+
+      // Main repo has M001
+      const m001Dir = join(mainBase, '.gsd', 'milestones', 'M001');
+      mkdirSync(m001Dir, { recursive: true });
+      writeFileSync(join(m001Dir, 'M001-CONTEXT.md'), '# M001 Context');
+      writeFileSync(join(m001Dir, 'M001-ROADMAP.md'), '# M001 Roadmap');
+
+      assertTrue(!existsSync(join(wtBase, '.gsd', 'milestones')), 'milestones/ missing before sync');
+
+      const result = syncGsdStateToWorktree(mainBase, wtBase);
+
+      assertTrue(existsSync(join(wtBase, '.gsd', 'milestones')), 'milestones/ created in worktree');
+      assertTrue(existsSync(join(wtBase, '.gsd', 'milestones', 'M001')), 'M001 synced to worktree');
+      assertTrue(existsSync(join(wtBase, '.gsd', 'milestones', 'M001', 'M001-CONTEXT.md')), 'M001 CONTEXT synced');
+      assertTrue(existsSync(join(wtBase, '.gsd', 'milestones', 'M001', 'M001-ROADMAP.md')), 'M001 ROADMAP synced');
+      assertTrue(result.synced.length > 0, 'sync reported files');
+    } finally {
+      cleanup(mainBase);
+      rmSync(wtBase, { recursive: true, force: true });
+    }
+  }
+
   report();
 }
 
