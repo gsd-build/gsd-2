@@ -50,6 +50,7 @@ import {
   getAutoWorktreePath,
   isInAutoWorktree,
 } from "./auto-worktree.js";
+import { syncProjectRootToWorktree } from "./auto-worktree-sync.js";
 import { readResourceVersion } from "./resource-version.js";
 import { initMetrics, getLedger } from "./metrics.js";
 import { initRoutingHistory } from "./routing-history.js";
@@ -333,11 +334,16 @@ export async function bootstrapAutoSession(
         const wtPath = enterAutoWorktree(base, s.currentMilestoneId);
         s.basePath = wtPath;
         s.gitService = createGitService(s.basePath);
+        // Sync milestone artifacts from project root into the worktree.
+        // Critical after crash recovery: the worktree may have been created
+        // but the milestone directory was never copied before the crash (#1300).
+        syncProjectRootToWorktree(base, wtPath, s.currentMilestoneId);
         ctx.ui.notify(`Entered auto-worktree at ${wtPath}`, "info");
       } else {
         const wtPath = createAutoWorktree(base, s.currentMilestoneId);
         s.basePath = wtPath;
         s.gitService = createGitService(s.basePath);
+        syncProjectRootToWorktree(base, wtPath, s.currentMilestoneId);
         ctx.ui.notify(`Created auto-worktree at ${wtPath}`, "info");
       }
       registerSigtermHandler(s.originalBasePath);

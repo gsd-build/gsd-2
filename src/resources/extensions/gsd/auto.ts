@@ -626,11 +626,19 @@ export async function startAuto(
           const wtPath = enterAutoWorktree(s.originalBasePath, s.currentMilestoneId);
           s.basePath = wtPath;
           s.gitService = createGitService(s.basePath);
+          try {
+            const { syncProjectRootToWorktree } = await import("./auto-worktree-sync.js");
+            syncProjectRootToWorktree(s.originalBasePath, wtPath, s.currentMilestoneId);
+          } catch { /* non-fatal */ }
           ctx.ui.notify(`Re-entered auto-worktree at ${wtPath}`, "info");
         } else {
           const wtPath = createAutoWorktree(s.originalBasePath, s.currentMilestoneId);
           s.basePath = wtPath;
           s.gitService = createGitService(s.basePath);
+          try {
+            const { syncProjectRootToWorktree } = await import("./auto-worktree-sync.js");
+            syncProjectRootToWorktree(s.originalBasePath, wtPath, s.currentMilestoneId);
+          } catch { /* non-fatal */ }
           ctx.ui.notify(`Recreated auto-worktree at ${wtPath}`, "info");
         }
       } catch (err) {
