@@ -162,6 +162,77 @@ export function syncGsdStateToWorktree(mainBasePath: string, worktreePath_: stri
   return { synced };
 }
 
+/**
+ * Sync milestone artifacts from worktree back to the main external state directory.
+ * Called before milestone merge to ensure completion artifacts (SUMMARY, VALIDATION,
+ * updated ROADMAP) are visible from the project root (#1412).
+ *
+ * Only syncs .gsd/milestones/ content — root-level files (DECISIONS, REQUIREMENTS, etc.)
+ * are handled by the merge itself.
+ */
+export function syncWorktreeStateBack(mainBasePath: string, worktreePath: string, milestoneId: string): { synced: string[] } {
+  const mainGsd = gsdRoot(mainBasePath);
+  const wtGsd = gsdRoot(worktreePath);
+  const synced: string[] = [];
+
+  // If both resolve to the same directory (symlink), no sync needed
+  try {
+    const mainResolved = realpathSync(mainGsd);
+    const wtResolved = realpathSync(wtGsd);
+    if (mainResolved === wtResolved) return { synced };
+  } catch {
+    // Can't resolve — proceed with sync
+  }
+
+  const wtMilestoneDir = join(wtGsd, "milestones", milestoneId);
+  const mainMilestoneDir = join(mainGsd, "milestones", milestoneId);
+
+  if (!existsSync(wtMilestoneDir)) return { synced };
+  mkdirSync(mainMilestoneDir, { recursive: true });
+
+  // Sync milestone-level files (SUMMARY, VALIDATION, ROADMAP, CONTEXT)
+  try {
+    for (const entry of readdirSync(wtMilestoneDir, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith(".md")) {
+        const src = join(wtMilestoneDir, entry.name);
+        const dst = join(mainMilestoneDir, entry.name);
+        try {
+          cpSync(src, dst, { force: true });
+          synced.push(`milestones/${milestoneId}/${entry.name}`);
+        } catch { /* non-fatal */ }
+      }
+    }
+  } catch { /* non-fatal */ }
+
+  // Sync slice-level files (summaries, UATs)
+  const wtSlicesDir = join(wtMilestoneDir, "slices");
+  const mainSlicesDir = join(mainMilestoneDir, "slices");
+  if (existsSync(wtSlicesDir)) {
+    try {
+      for (const sliceEntry of readdirSync(wtSlicesDir, { withFileTypes: true })) {
+        if (!sliceEntry.isDirectory()) continue;
+        const sid = sliceEntry.name;
+        const wtSliceDir = join(wtSlicesDir, sid);
+        const mainSliceDir = join(mainSlicesDir, sid);
+        mkdirSync(mainSliceDir, { recursive: true });
+
+        for (const fileEntry of readdirSync(wtSliceDir, { withFileTypes: true })) {
+          if (fileEntry.isFile() && fileEntry.name.endsWith(".md")) {
+            const src = join(wtSliceDir, fileEntry.name);
+            const dst = join(mainSliceDir, fileEntry.name);
+            try {
+              cpSync(src, dst, { force: true });
+              synced.push(`milestones/${milestoneId}/slices/${sid}/${fileEntry.name}`);
+            } catch { /* non-fatal */ }
+          }
+        }
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  return { synced };
+}
+
 // ─── Worktree Post-Create Hook (#597) ────────────────────────────────────────
 
 /**

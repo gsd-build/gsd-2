@@ -131,6 +131,7 @@ import {
   getAutoWorktreeOriginalBase,
   mergeMilestoneToMain,
   autoWorktreeBranch,
+  syncWorktreeStateBack,
 } from "./auto-worktree.js";
 import { pruneQueueOrder } from "./queue-order.js";
 import { consumeSignal } from "./session-status-io.js";
@@ -377,6 +378,16 @@ function tryMergeMilestone(ctx: ExtensionContext, milestoneId: string, mode: "tr
   // Worktree merge path
   if (isInAutoWorktree(s.basePath) && s.originalBasePath) {
     try {
+      // Sync completion artifacts from worktree → external state before merge (#1412)
+      try {
+        const { synced } = syncWorktreeStateBack(s.originalBasePath, s.basePath, milestoneId);
+        if (synced.length > 0) {
+          debugLog("worktree-reverse-sync", { milestoneId, synced: synced.length });
+        }
+      } catch (syncErr) {
+        debugLog("worktree-reverse-sync-failed", { milestoneId, error: getErrorMessage(syncErr) });
+      }
+
       const roadmapPath = resolveMilestoneFile(s.originalBasePath, milestoneId, "ROADMAP");
       if (!roadmapPath) {
         teardownAutoWorktree(s.originalBasePath, milestoneId);
