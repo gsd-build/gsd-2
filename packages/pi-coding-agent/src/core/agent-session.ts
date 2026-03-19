@@ -1359,6 +1359,15 @@ export class AgentSession {
 		this.abortRetry();
 		this.agent.abort();
 		await this.agent.waitForIdle();
+		// Ensure agent_end is emitted even when abort interrupts a tool call (#1414).
+		// The agent may go idle without emitting agent_end if the abort happens
+		// between tool execution and response processing.
+		if (!this.isStreaming && this._extensionRunner) {
+			await this._extensionRunner.emit({
+				type: "agent_end",
+				messages: this.agent.state.messages,
+			});
+		}
 	}
 
 	/**
