@@ -223,11 +223,22 @@ export default function (pi: ExtensionAPI) {
   // chance to persist state and pause instead of crashing (see issue #739).
   if (!process.listeners("uncaughtException").some(l => l.name === "_gsdEpipeGuard")) {
     const _gsdEpipeGuard = (err: Error): void => {
-      if ((err as NodeJS.ErrnoException).code === "EPIPE") {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "EPIPE") {
         // Pipe closed — nothing we can write; just exit cleanly
         process.exit(0);
       }
-      // Re-throw anything that isn't EPIPE so real crashes still surface
+      // ECOMPROMISED: proper-lockfile's update timer detected mtime drift (system
+      // sleep, heavy event loop stall, or filesystem precision mismatch on Node.js
+      // v25+). The onCompromised callback already set _lockCompromised = true, but
+      // due to a subtle interaction between the synchronous fs adapter and the
+      // setTimeout boundary, the error can still propagate here as an uncaught
+      // exception. Exit cleanly so the process.once("exit") handler removes the
+      // lock directory — allowing the next session to acquire cleanly (#1322).
+      if (code === "ECOMPROMISED") {
+        process.exit(1);
+      }
+      // Re-throw anything that isn't EPIPE or ECOMPROMISED so real crashes still surface
       throw err;
     };
     process.on("uncaughtException", _gsdEpipeGuard);

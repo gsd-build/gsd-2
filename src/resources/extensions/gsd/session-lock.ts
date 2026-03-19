@@ -158,6 +158,7 @@ export function acquireSessionLock(basePath: string): SessionLockResult {
           update: 10_000,
           onCompromised: () => {
             _lockCompromised = true;
+            _releaseFunction = null;
           },
         });
         _releaseFunction = release;
