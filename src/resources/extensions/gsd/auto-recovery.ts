@@ -37,6 +37,7 @@ import {
   clearPathCache,
   resolveGsdRootFile,
 } from "./paths.js";
+import { markSliceDoneInRoadmap } from "./roadmap-mutations.js";
 import {
   existsSync,
   mkdirSync,
@@ -520,14 +521,8 @@ export async function selfHealRuntimeRecords(
                   const roadmap = parseRoadmap(roadmapContent);
                   const slice = (roadmap.slices ?? []).find(s => s.id === sid);
                   if (slice && !slice.done) {
-                    // Auto-fix: flip the checkbox
-                    const updated = roadmapContent.replace(
-                      new RegExp(`^(\\s*-\\s+)\\[ \\]\\s+\\*\\*${sid}:`, "m"),
-                      `$1[x] **${sid}:`,
-                    );
-                    if (updated !== roadmapContent) {
-                      atomicWriteSync(roadmapFile, updated);
-                      clearParseCache();
+                    // Auto-fix: flip the checkbox using shared utility
+                    if (markSliceDoneInRoadmap(base, mid, sid)) {
                       ctx.ui.notify(
                         `Self-heal: marked ${sid} done in roadmap (SUMMARY + UAT exist but checkbox was stale).`,
                         "info",
