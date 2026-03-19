@@ -39,6 +39,7 @@ import { mergeAllCompleted, mergeCompletedMilestone, formatMergeResults } from "
 import { resolveParallelConfig } from "./preferences.js";
 import { analyzeDomainSplit, formatSplitProposal } from "./team-domain.js";
 import type { DomainSplitProposal } from "./team-domain.js";
+import { loadPrompt } from "./prompt-loader.js";
 
 // ─── Imports from extracted modules ──────────────────────────────────────────
 import { handlePrefs, handlePrefsMode, handlePrefsWizard, ensurePreferencesFile } from "./commands-prefs-wizard.js";

@@ -72,6 +72,8 @@ function makeWorker(overrides: Partial<WorkerInfo> = {}): WorkerInfo {
     state: "stopped",
     completedUnits: 3,
     cost: 1.5,
+    stderrLines: [],
+    restartCount: 0,
     ...overrides,
   };
 }

@@ -111,7 +111,7 @@ describe("routeTeamSignals — point-to-point", () => {
 
     // Write a point-to-point signal from Worker A targeting Worker B
     writeTeamSignal(basePath, "M-A", {
-      type: "context-share",
+      type: "context-share" as any,
       source: "M-A",
       workerMid: "M-B",
       payload: { info: "shared context" },
@@ -181,7 +181,7 @@ describe("routeTeamSignals — broadcast", () => {
 
     // Write a broadcast signal from Worker A
     writeTeamSignal(basePath, "M-A", {
-      type: "dependency-alert",
+      type: "dependency-alert" as any,
       source: "M-A",
       workerMid: "*",
       payload: { warning: "shared dependency changed" },
@@ -363,7 +363,7 @@ describe("backward compatibility — routing with missing domain", () => {
 
     // Write a signal and route — should not crash even without domain
     writeTeamSignal(basePath, "M-1", {
-      type: "progress-update",
+      type: "progress-update" as any,
       source: "M-1",
       workerMid: "M-2",
       payload: { progress: 50 },

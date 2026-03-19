@@ -281,7 +281,7 @@ describe("parallel-orchestrator: lifecycle", () => {
 
   it("startParallel initializes orchestrator state", async () => {
     const result = await startParallel(base, ["M001", "M002"], {
-      parallel: { enabled: true, max_workers: 4, merge_strategy: "per-milestone", auto_merge: "confirm" },
+      parallel: { enabled: true, max_workers: 4, merge_strategy: "per-milestone", auto_merge: "confirm", overlap_policy: "block", max_retries: 3 },
     });
     assert.deepEqual(result.started, ["M001", "M002"]);
     assert.equal(result.errors.length, 0);
@@ -291,7 +291,7 @@ describe("parallel-orchestrator: lifecycle", () => {
 
   it("startParallel caps to max_workers", async () => {
     const result = await startParallel(base, ["M001", "M002", "M003", "M004"], {
-      parallel: { enabled: true, max_workers: 2, merge_strategy: "per-milestone", auto_merge: "confirm" },
+      parallel: { enabled: true, max_workers: 2, merge_strategy: "per-milestone", auto_merge: "confirm" } as any,
     });
     assert.deepEqual(result.started, ["M001", "M002"]);
     assert.equal(getWorkerStatuses().length, 2);
@@ -392,7 +392,7 @@ describe("parallel-orchestrator: budget", () => {
   it("isBudgetExceeded returns true when ceiling reached", async () => {
     const base = makeTmpBase();
     await startParallel(base, ["M001"], {
-      parallel: { enabled: true, max_workers: 2, budget_ceiling: 1.00, merge_strategy: "per-milestone", auto_merge: "confirm" },
+      parallel: { enabled: true, max_workers: 2, budget_ceiling: 1.00, merge_strategy: "per-milestone", auto_merge: "confirm" } as any,
     });
     // Manually set totalCost to test budget check
     const orchState = getOrchestratorState();
@@ -432,10 +432,10 @@ describe("preferences: resolveParallelConfig", () => {
 
   it("clamps max_workers to 1-4 range", () => {
     assert.equal(resolveParallelConfig({
-      parallel: { enabled: true, max_workers: 0, merge_strategy: "per-milestone", auto_merge: "confirm" },
+      parallel: { enabled: true, max_workers: 0, merge_strategy: "per-milestone", auto_merge: "confirm" } as any,
     }).max_workers, 1);
     assert.equal(resolveParallelConfig({
-      parallel: { enabled: true, max_workers: 10, merge_strategy: "per-milestone", auto_merge: "confirm" },
+      parallel: { enabled: true, max_workers: 10, merge_strategy: "per-milestone", auto_merge: "confirm" } as any,
     }).max_workers, 4);
   });
 });
@@ -449,7 +449,7 @@ describe("preferences: validatePreferences parallel config", () => {
         budget_ceiling: 50.00,
         merge_strategy: "per-slice",
         auto_merge: "manual",
-      },
+      } as any,
     });
     assert.equal(result.errors.length, 0);
     assert.ok(result.preferences.parallel);
@@ -499,6 +499,8 @@ function makeWorker(overrides: Partial<WorkerInfo> = {}): WorkerInfo {
     state: "stopped",
     completedUnits: 5,
     cost: 2.50,
+    stderrLines: [],
+    restartCount: 0,
     ...overrides,
   };
 }

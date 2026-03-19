@@ -58,6 +58,8 @@ function makePrefs(ceiling?: number): GSDPreferences {
       budget_ceiling: ceiling,
       merge_strategy: "per-milestone",
       auto_merge: "confirm",
+      overlap_policy: "block",
+      max_retries: 3,
     },
   };
 }

@@ -142,7 +142,7 @@ describe("ParallelConfig: overlap_policy and max_retries defaults", () => {
         merge_strategy: "per-milestone",
         auto_merge: "confirm",
         overlap_policy: "block",
-      },
+      } as any,
     });
     assert.equal(config.overlap_policy, "block");
   });
@@ -155,7 +155,7 @@ describe("ParallelConfig: overlap_policy and max_retries defaults", () => {
         merge_strategy: "per-milestone",
         auto_merge: "confirm",
         max_retries: 3,
-      },
+      } as any,
     });
     assert.equal(config.max_retries, 3);
   });
@@ -168,7 +168,7 @@ describe("ParallelConfig: overlap_policy and max_retries defaults", () => {
         merge_strategy: "per-milestone",
         auto_merge: "confirm",
         max_retries: -1,
-      },
+      } as any,
     });
     assert.equal(config.max_retries, 0);
   });

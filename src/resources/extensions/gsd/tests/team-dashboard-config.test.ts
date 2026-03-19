@@ -41,7 +41,7 @@ test("team config: all valid values pass validation with no errors", () => {
         awareness_depth: "full",
       },
     },
-  });
+  } as any);
   assert.equal(errors.length, 0, `unexpected errors: ${errors.join(", ")}`);
   const team = (preferences.parallel as any)?.team;
   assert.equal(team.signal_frequency, "task");
@@ -54,7 +54,7 @@ test("team config: each enum value accepted for signal_frequency", () => {
   for (const val of ["task", "slice", "manual"]) {
     const { errors } = validatePreferences({
       parallel: { team: { signal_frequency: val } },
-    });
+    } as any);
     assert.equal(errors.length, 0, `signal_frequency "${val}" should be valid`);
   }
 });
@@ -63,7 +63,7 @@ test("team config: each enum value accepted for merge_healing", () => {
   for (const val of ["auto", "confirm", "manual"]) {
     const { errors } = validatePreferences({
       parallel: { team: { merge_healing: val } },
-    });
+    } as any);
     assert.equal(errors.length, 0, `merge_healing "${val}" should be valid`);
   }
 });
@@ -72,7 +72,7 @@ test("team config: each enum value accepted for domain_detection", () => {
   for (const val of ["auto", "manual"]) {
     const { errors } = validatePreferences({
       parallel: { team: { domain_detection: val } },
-    });
+    } as any);
     assert.equal(errors.length, 0, `domain_detection "${val}" should be valid`);
   }
 });
@@ -81,7 +81,7 @@ test("team config: each enum value accepted for awareness_depth", () => {
   for (const val of ["plans", "summaries", "full"]) {
     const { errors } = validatePreferences({
       parallel: { team: { awareness_depth: val } },
-    });
+    } as any);
     assert.equal(errors.length, 0, `awareness_depth "${val}" should be valid`);
   }
 });
@@ -91,7 +91,7 @@ test("team config: each enum value accepted for awareness_depth", () => {
 test("team config: invalid signal_frequency produces descriptive error", () => {
   const { errors } = validatePreferences({
     parallel: { team: { signal_frequency: "never" } },
-  });
+  } as any);
   assert.ok(errors.length > 0);
   assert.ok(errors[0].includes("parallel.team.signal_frequency"));
   assert.ok(errors[0].includes("task, slice, manual"));
@@ -100,7 +100,7 @@ test("team config: invalid signal_frequency produces descriptive error", () => {
 test("team config: invalid merge_healing produces descriptive error", () => {
   const { errors } = validatePreferences({
     parallel: { team: { merge_healing: "aggressive" } },
-  });
+  } as any);
   assert.ok(errors.length > 0);
   assert.ok(errors[0].includes("parallel.team.merge_healing"));
   assert.ok(errors[0].includes("auto, confirm, manual"));
@@ -109,7 +109,7 @@ test("team config: invalid merge_healing produces descriptive error", () => {
 test("team config: invalid domain_detection produces descriptive error", () => {
   const { errors } = validatePreferences({
     parallel: { team: { domain_detection: "smart" } },
-  });
+  } as any);
   assert.ok(errors.length > 0);
   assert.ok(errors[0].includes("parallel.team.domain_detection"));
   assert.ok(errors[0].includes("auto, manual"));
@@ -118,7 +118,7 @@ test("team config: invalid domain_detection produces descriptive error", () => {
 test("team config: invalid awareness_depth produces descriptive error", () => {
   const { errors } = validatePreferences({
     parallel: { team: { awareness_depth: "minimal" } },
-  });
+  } as any);
   assert.ok(errors.length > 0);
   assert.ok(errors[0].includes("parallel.team.awareness_depth"));
   assert.ok(errors[0].includes("plans, summaries, full"));
@@ -126,7 +126,7 @@ test("team config: invalid awareness_depth produces descriptive error", () => {
 
 test("team config: non-object team value produces error", () => {
   const { errors } = validatePreferences({
-    parallel: { team: "invalid" as any },
+    parallel: { team: "invalid" as any } as any,
   });
   assert.ok(errors.length > 0);
   assert.ok(errors[0].includes("parallel.team must be an object"));
@@ -136,13 +136,13 @@ test("team config: multiple invalid fields produce multiple errors", () => {
   const { errors } = validatePreferences({
     parallel: {
       team: {
-        signal_frequency: 42,
-        merge_healing: true,
-        domain_detection: "smart",
-        awareness_depth: null,
+        signal_frequency: 42 as any,
+        merge_healing: true as any,
+        domain_detection: "smart" as any,
+        awareness_depth: null as any,
       },
     },
-  });
+  } as any);
   assert.equal(errors.length, 4, `expected 4 errors, got: ${errors.join("; ")}`);
 });
 
@@ -601,7 +601,7 @@ describe("dashboard worker detail: team signals section", () => {
 
   it("worker detail shows overflow indicator when > 5 signals", { todo: "async refresh race — feature proven by omit test" }, async () => {
     const now = Date.now();
-    const signals = [];
+    const signals: any[] = [];
     for (let i = 0; i < 8; i++) {
       signals.push({
         type: "contract-change" as const,
