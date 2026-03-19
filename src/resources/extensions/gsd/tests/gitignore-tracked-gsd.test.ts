@@ -10,7 +10,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -27,14 +27,19 @@ import { migrateToExternalState } from "../migrate-external.ts";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
+function git(dir: string, ...args: string[]): string {
+  return execFileSync("git", args, { cwd: dir, stdio: "pipe", encoding: "utf-8" }).trim();
+}
+
 function makeTempRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "gsd-gitignore-test-"));
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
-  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
+  git(dir, "init");
+  git(dir, "config", "user.email", "test@test.com");
+  git(dir, "config", "user.name", "Test");
   writeFileSync(join(dir, "README.md"), "# init\n");
-  execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
-  execSync("git branch -M main", { cwd: dir, stdio: "pipe" });
+  git(dir, "add", "-A");
+  git(dir, "commit", "-m", "init");
+  git(dir, "branch", "-M", "main");
   return dir;
 }
 
@@ -62,10 +67,8 @@ test("hasGitTrackedGsdFiles returns true when .gsd/ has tracked files", () => {
   try {
     mkdirSync(join(dir, ".gsd", "milestones"), { recursive: true });
     writeFileSync(join(dir, ".gsd", "PROJECT.md"), "# Test Project\n");
-    execSync("git add .gsd/PROJECT.md && git commit -m 'add gsd'", {
-      cwd: dir,
-      stdio: "pipe",
-    });
+    git(dir, "add", ".gsd/PROJECT.md");
+    git(dir, "commit", "-m", "add gsd");
     assert.equal(hasGitTrackedGsdFiles(dir), true);
   } finally {
     cleanup(dir);
@@ -93,10 +96,8 @@ test("ensureGitignore does NOT add .gsd when .gsd/ has tracked files (#1364)", (
     mkdirSync(join(dir, ".gsd", "milestones"), { recursive: true });
     writeFileSync(join(dir, ".gsd", "PROJECT.md"), "# Test Project\n");
     writeFileSync(join(dir, ".gsd", "DECISIONS.md"), "# Decisions\n");
-    execSync("git add .gsd/ && git commit -m 'track gsd state'", {
-      cwd: dir,
-      stdio: "pipe",
-    });
+    git(dir, "add", ".gsd/");
+    git(dir, "commit", "-m", "track gsd state");
 
     // Run ensureGitignore
     ensureGitignore(dir);
@@ -158,19 +159,14 @@ test("ensureGitignore with tracked .gsd/ does not cause git to see files as dele
       join(dir, ".gsd", "milestones", "M001", "M001-CONTEXT.md"),
       "# M001\n",
     );
-    execSync("git add .gsd/ && git commit -m 'track gsd state'", {
-      cwd: dir,
-      stdio: "pipe",
-    });
+    git(dir, "add", ".gsd/");
+    git(dir, "commit", "-m", "track gsd state");
 
     // Run ensureGitignore
     ensureGitignore(dir);
 
     // git status should show NO deleted files under .gsd/
-    const status = execSync("git status --porcelain .gsd/", {
-      cwd: dir,
-      encoding: "utf-8",
-    }).trim();
+    const status = git(dir, "status", "--porcelain", ".gsd/");
 
     // Filter for deletions (lines starting with " D" or "D ")
     const deletions = status
@@ -195,10 +191,8 @@ test("migrateToExternalState aborts when .gsd/ has tracked files (#1364)", () =>
     // Create tracked .gsd/ files
     mkdirSync(join(dir, ".gsd", "milestones"), { recursive: true });
     writeFileSync(join(dir, ".gsd", "PROJECT.md"), "# Project\n");
-    execSync("git add .gsd/ && git commit -m 'track gsd state'", {
-      cwd: dir,
-      stdio: "pipe",
-    });
+    git(dir, "add", ".gsd/");
+    git(dir, "commit", "-m", "track gsd state");
 
     // Attempt migration — should abort without moving anything
     const result = migrateToExternalState(dir);
