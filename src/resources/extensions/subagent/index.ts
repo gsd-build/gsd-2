@@ -23,6 +23,7 @@ import { StringEnum } from "@gsd/pi-ai";
 import { type ExtensionAPI, getMarkdownTheme } from "@gsd/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@gsd/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { formatTokenCount } from "../shared/mod.js";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
 import {
 	type IsolationEnvironment,
@@ -76,13 +77,6 @@ async function stopLiveSubagents(): Promise<void> {
 	}
 }
 
-function formatTokens(count: number): string {
-	if (count < 1000) return count.toString();
-	if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
-	if (count < 1000000) return `${Math.round(count / 1000)}k`;
-	return `${(count / 1000000).toFixed(1)}M`;
-}
-
 function formatUsageStats(
 	usage: {
 		input: number;
@@ -97,13 +91,13 @@ function formatUsageStats(
 ): string {
 	const parts: string[] = [];
 	if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? "s" : ""}`);
-	if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
-	if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
-	if (usage.cacheRead) parts.push(`R${formatTokens(usage.cacheRead)}`);
-	if (usage.cacheWrite) parts.push(`W${formatTokens(usage.cacheWrite)}`);
+	if (usage.input) parts.push(`↑${formatTokenCount(usage.input)}`);
+	if (usage.output) parts.push(`↓${formatTokenCount(usage.output)}`);
+	if (usage.cacheRead) parts.push(`R${formatTokenCount(usage.cacheRead)}`);
+	if (usage.cacheWrite) parts.push(`W${formatTokenCount(usage.cacheWrite)}`);
 	if (usage.cost) parts.push(`$${(Number(usage.cost) || 0).toFixed(4)}`);
 	if (usage.contextTokens && usage.contextTokens > 0) {
-		parts.push(`ctx:${formatTokens(usage.contextTokens)}`);
+		parts.push(`ctx:${formatTokenCount(usage.contextTokens)}`);
 	}
 	if (model) parts.push(model);
 	return parts.join(" ");
