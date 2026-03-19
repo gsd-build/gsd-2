@@ -22,7 +22,7 @@ import type {
 	StreamFn,
 } from "./types.js";
 
-const ZERO_USAGE = {
+export const ZERO_USAGE = {
 	input: 0,
 	output: 0,
 	cacheRead: 0,
@@ -51,6 +51,29 @@ function createErrorMessage(error: unknown, config: AgentLoopConfig): AssistantM
 }
 
 /**
+ * Emit a message_start + message_end pair for a single message.
+ */
+function emitMessagePair(stream: EventStream<AgentEvent, AgentMessage[]>, message: AgentMessage): void {
+	stream.push({ type: "message_start", message });
+	stream.push({ type: "message_end", message });
+}
+
+/**
+ * Emit the standard error sequence when the outer agent loop catches an error.
+ * Pushes message_start/end, turn_end, agent_end, then closes the stream.
+ */
+function emitErrorSequence(
+	stream: EventStream<AgentEvent, AgentMessage[]>,
+	errMsg: AssistantMessage,
+	newMessages: AgentMessage[],
+): void {
+	emitMessagePair(stream, errMsg);
+	stream.push({ type: "turn_end", message: errMsg, toolResults: [] });
+	stream.push({ type: "agent_end", messages: [...newMessages, errMsg] });
+	stream.end([...newMessages, errMsg]);
+}
+
+/**
  * Start an agent loop with a new prompt message.
  * The prompt is added to the context and events are emitted for it.
  */
@@ -73,19 +96,13 @@ export function agentLoop(
 		stream.push({ type: "agent_start" });
 		stream.push({ type: "turn_start" });
 		for (const prompt of prompts) {
-			stream.push({ type: "message_start", message: prompt });
-			stream.push({ type: "message_end", message: prompt });
+			emitMessagePair(stream, prompt);
 		}
 
 		try {
 			await runLoop(currentContext, newMessages, config, signal, stream, streamFn);
 		} catch (error) {
-			const errMsg = createErrorMessage(error, config);
-			stream.push({ type: "message_start", message: errMsg });
-			stream.push({ type: "message_end", message: errMsg });
-			stream.push({ type: "turn_end", message: errMsg, toolResults: [] });
-			stream.push({ type: "agent_end", messages: [...newMessages, errMsg] });
-			stream.end([...newMessages, errMsg]);
+			emitErrorSequence(stream, createErrorMessage(error, config), newMessages);
 		}
 	})();
 
@@ -126,12 +143,7 @@ export function agentLoopContinue(
 		try {
 			await runLoop(currentContext, newMessages, config, signal, stream, streamFn);
 		} catch (error) {
-			const errMsg = createErrorMessage(error, config);
-			stream.push({ type: "message_start", message: errMsg });
-			stream.push({ type: "message_end", message: errMsg });
-			stream.push({ type: "turn_end", message: errMsg, toolResults: [] });
-			stream.push({ type: "agent_end", messages: [...newMessages, errMsg] });
-			stream.end([...newMessages, errMsg]);
+			emitErrorSequence(stream, createErrorMessage(error, config), newMessages);
 		}
 	})();
 
@@ -176,8 +188,7 @@ async function runLoop(
 			// Process pending messages (inject before next assistant response)
 			if (pendingMessages.length > 0) {
 				for (const message of pendingMessages) {
-					stream.push({ type: "message_start", message });
-					stream.push({ type: "message_end", message });
+					emitMessagePair(stream, message);
 					currentContext.messages.push(message);
 					newMessages.push(message);
 				}
@@ -199,14 +210,7 @@ async function runLoop(
 					api: config.model.api,
 					provider: config.model.provider,
 					model: config.model.id,
-					usage: {
-						input: 0,
-						output: 0,
-						cacheRead: 0,
-						cacheWrite: 0,
-						totalTokens: 0,
-						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-					},
+					usage: ZERO_USAGE,
 					stopReason: signal?.aborted ? "aborted" : "error",
 					errorMessage: errorText,
 					timestamp: Date.now(),
@@ -676,8 +680,7 @@ function emitToolCallOutcome(
 		timestamp: Date.now(),
 	};
 
-	stream.push({ type: "message_start", message: toolResultMessage });
-	stream.push({ type: "message_end", message: toolResultMessage });
+	emitMessagePair(stream, toolResultMessage);
 	return toolResultMessage;
 }
 

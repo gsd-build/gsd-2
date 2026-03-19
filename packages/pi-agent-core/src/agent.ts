@@ -14,7 +14,7 @@ import {
 	type ThinkingBudgets,
 	type Transport,
 } from "@gsd/pi-ai";
-import { agentLoop, agentLoopContinue } from "./agent-loop.js";
+import { agentLoop, agentLoopContinue, ZERO_USAGE } from "./agent-loop.js";
 import type {
 	AgentContext,
 	AgentEvent,
@@ -489,10 +489,6 @@ export class Agent {
 				// Update internal state based on events
 				switch (event.type) {
 					case "message_start":
-						partial = event.message;
-						this._state.streamMessage = event.message;
-						break;
-
 					case "message_update":
 						partial = event.message;
 						this._state.streamMessage = event.message;
@@ -504,19 +500,13 @@ export class Agent {
 						this.appendMessage(event.message);
 						break;
 
-					case "tool_execution_start": {
-						const s = new Set(this._state.pendingToolCalls);
-						s.add(event.toolCallId);
-						this._state.pendingToolCalls = s;
+					case "tool_execution_start":
+						this._updatePendingToolCalls("add", event.toolCallId);
 						break;
-					}
 
-					case "tool_execution_end": {
-						const s = new Set(this._state.pendingToolCalls);
-						s.delete(event.toolCallId);
-						this._state.pendingToolCalls = s;
+					case "tool_execution_end":
+						this._updatePendingToolCalls("delete", event.toolCallId);
 						break;
-					}
 
 					case "turn_end":
 						if (event.message.role === "assistant" && (event.message as any).errorMessage) {
@@ -557,14 +547,7 @@ export class Agent {
 				api: model.api,
 				provider: model.provider,
 				model: model.id,
-				usage: {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					totalTokens: 0,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-				},
+				usage: ZERO_USAGE,
 				stopReason: this.abortController?.signal.aborted ? "aborted" : "error",
 				errorMessage: err?.message || String(err),
 				timestamp: Date.now(),
@@ -582,6 +565,12 @@ export class Agent {
 			this.runningPrompt = undefined;
 			this.resolveRunningPrompt = undefined;
 		}
+	}
+
+	private _updatePendingToolCalls(action: "add" | "delete", id: string): void {
+		const s = new Set(this._state.pendingToolCalls);
+		s[action](id);
+		this._state.pendingToolCalls = s;
 	}
 
 	private emit(e: AgentEvent) {
