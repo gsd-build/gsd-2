@@ -22,6 +22,7 @@ import type {
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
+import { createZeroUsage } from "../utils/usage-utils.js";
 import {
 	convertMessages,
 	convertTools,
@@ -331,14 +332,7 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli", GoogleGe
 			api: "google-gemini-cli" as Api,
 			provider: model.provider,
 			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
+			usage: createZeroUsage(),
 			stopReason: "stop",
 			timestamp: Date.now(),
 		};
@@ -491,14 +485,7 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli", GoogleGe
 
 			const resetOutput = () => {
 				output.content = [];
-				output.usage = {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					totalTokens: 0,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-				};
+				output.usage = createZeroUsage();
 				output.stopReason = "stop";
 				output.errorMessage = undefined;
 				output.timestamp = Date.now();

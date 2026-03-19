@@ -30,6 +30,7 @@ import type { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { shortHash } from "../utils/hash.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
+import { createZeroUsage } from "../utils/usage-utils.js";
 import { transformMessages } from "./transform-messages.js";
 
 // =============================================================================
@@ -446,15 +447,13 @@ export async function processResponsesStream<TApi extends Api>(
 			const response = event.response;
 			if (response?.usage) {
 				const cachedTokens = response.usage.input_tokens_details?.cached_tokens || 0;
-				output.usage = {
-					// OpenAI includes cached tokens in input_tokens, so subtract to get non-cached input
-					input: (response.usage.input_tokens || 0) - cachedTokens,
-					output: response.usage.output_tokens || 0,
-					cacheRead: cachedTokens,
-					cacheWrite: 0,
-					totalTokens: response.usage.total_tokens || 0,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-				};
+				const usage = createZeroUsage();
+				// OpenAI includes cached tokens in input_tokens, so subtract to get non-cached input
+				usage.input = (response.usage.input_tokens || 0) - cachedTokens;
+				usage.output = response.usage.output_tokens || 0;
+				usage.cacheRead = cachedTokens;
+				usage.totalTokens = response.usage.total_tokens || 0;
+				output.usage = usage;
 			}
 			calculateCost(model, output.usage);
 			if (options?.applyServiceTierPricing) {

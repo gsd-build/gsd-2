@@ -42,6 +42,7 @@ import type {
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
+import { createZeroUsage, normalizeToolCallId as normalizeToolCallIdBase } from "../utils/usage-utils.js";
 import { adjustMaxTokensForThinking, buildBaseOptions, clampReasoning } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
 
@@ -73,14 +74,7 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 			api: "bedrock-converse-stream" as Api,
 			provider: model.provider,
 			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
+			usage: createZeroUsage(),
 			stopReason: "stop",
 			timestamp: Date.now(),
 		};
@@ -477,8 +471,7 @@ function buildSystemPrompt(
 }
 
 function normalizeToolCallId(id: string): string {
-	const sanitized = id.replace(/[^a-zA-Z0-9_-]/g, "_");
-	return sanitized.length > 64 ? sanitized.slice(0, 64) : sanitized;
+	return normalizeToolCallIdBase(id);
 }
 
 function convertMessages(

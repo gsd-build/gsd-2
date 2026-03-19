@@ -27,6 +27,7 @@ import type {
 	StreamOptions,
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
+import { createZeroUsage } from "../utils/usage-utils.js";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.js";
 import { buildBaseOptions, clampReasoning } from "./simple-options.js";
 
@@ -121,14 +122,7 @@ export const streamOpenAICodexResponses: StreamFunction<"openai-codex-responses"
 			api: "openai-codex-responses" as Api,
 			provider: model.provider,
 			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
+			usage: createZeroUsage(),
 			stopReason: "stop",
 			timestamp: Date.now(),
 		};

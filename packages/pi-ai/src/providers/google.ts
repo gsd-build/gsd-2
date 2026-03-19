@@ -33,6 +33,7 @@ import type {
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
+import { createZeroUsage } from "../utils/usage-utils.js";
 import type { GoogleThinkingLevel } from "./google-gemini-cli.js";
 import {
 	convertMessages,
@@ -70,14 +71,7 @@ export const streamGoogle: StreamFunction<"google-generative-ai", GoogleOptions>
 			api: "google-generative-ai" as Api,
 			provider: model.provider,
 			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
+			usage: createZeroUsage(),
 			stopReason: "stop",
 			timestamp: Date.now(),
 		};
