@@ -15,6 +15,7 @@
 - `npx tsx --test src/resources/extensions/gsd/tests/summarize-metrics.test.ts` — 11+ pass (existing + new)
 - `npx tsx --test src/resources/extensions/gsd/tests/metrics-reader.test.ts` — new reader tests pass
 - `npx tsx src/resources/extensions/gsd/report-metrics.ts .gsd/activity/dispatch-metrics.jsonl` exits 0 (or prints "no metrics found" if file absent)
+- **Failure-path check:** `npx tsx src/resources/extensions/gsd/report-metrics.ts /nonexistent.jsonl` exits 0 with `_File not found: /nonexistent.jsonl_` on stdout (graceful handling, no crash)
 
 ## Tasks
 
@@ -25,7 +26,7 @@
   - Verify: `npx tsx src/resources/extensions/gsd/report-metrics.ts /nonexistent` exits 0 with message
   - Done when: CLI script runs against a real or mock JSONL file and outputs a Markdown table
 
-- [ ] **T02: Add reader and durability tests** `est:25m`
+- [x] **T02: Add reader and durability tests** `est:25m`
   - Why: Crash resilience is a slice must-have — partial writes from interrupted dispatches must not break the reader. Need tests for malformed lines, empty files, mixed valid/invalid content.
   - Files: `src/resources/extensions/gsd/tests/metrics-reader.test.ts`
   - Do: Test `readMetricsJsonl` with: valid multi-line JSONL, empty file, lines with truncated JSON, blank lines interspersed, file with only malformed content (returns empty array). Test that existing summarize-metrics tests still pass.

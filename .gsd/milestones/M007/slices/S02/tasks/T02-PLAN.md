@@ -49,3 +49,18 @@ Use the same test infrastructure as existing gsd tests (`node:test`, `node:asser
 ## Expected Output
 
 - `src/resources/extensions/gsd/tests/metrics-reader.test.ts` — new test file with 5+ test cases
+
+## Observability Impact
+
+**Signals exposed:**
+- `readMetricsJsonl` returns `skippedLines` count, enabling downstream consumers to alert on high skip rates (format drift or corruption detection)
+- Tests validate that malformed input doesn't throw — the reader must handle all edge cases gracefully
+
+**Inspection surfaces for future agents:**
+- To debug reader issues: run `npx tsx --test src/resources/extensions/gsd/tests/metrics-reader.test.ts`
+- Check `skippedLines` in return value to diagnose format problems
+- Stderr messages from CLI show parsed/skipped counts per file
+
+**Failure visibility:**
+- Test failures indicate regression in error handling
+- High `skippedLines` counts in production indicate data corruption or format drift
