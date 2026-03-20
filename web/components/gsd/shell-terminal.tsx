@@ -414,9 +414,29 @@ function TerminalInstance({
   }, [sessionId, command, commandArgs, commandArgsKey, fontSize, hideInitialGsdHeader, isDark, projectCwd, sendInput, sendResize])
 
   // Focus on click
+  const wrapperRef = useRef<HTMLDivElement>(null)
   const handleClick = useCallback(() => {
     termRef.current?.focus()
   }, [])
+
+  // Shift+Enter → newline (native DOM, capture phase)
+  // xterm.js sends \r for both Enter and Shift+Enter. The pi TUI editor
+  // recognizes \n (LF) as "insert newline".
+  useEffect(() => {
+    const el = wrapperRef.current
+    if (!el) return
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        e.preventDefault()
+        e.stopPropagation()
+        sendInput("\n")
+      }
+    }
+
+    el.addEventListener("keydown", onKeyDown, true)
+    return () => el.removeEventListener("keydown", onKeyDown, true)
+  }, [sendInput])
 
   // Auto-focus when this tab becomes visible
   useEffect(() => {
@@ -429,6 +449,7 @@ function TerminalInstance({
 
   return (
     <div
+      ref={wrapperRef}
       className={cn("relative h-full w-full bg-terminal", !visible && "hidden")}
       onClick={handleClick}
     >
@@ -533,51 +554,66 @@ export function ShellTerminal({
   ])
   const [activeTabId, setActiveTabId] = useState(defaultId)
   const [isDragOver, setIsDragOver] = useState(false)
-  const dragCounterRef = useRef(0)
   const terminalAreaRef = useRef<HTMLDivElement>(null)
 
-  // ── Drag-and-drop handlers ────────────────────────────────────────────────
+  // ── Drag-and-drop handlers (native DOM, capture phase) ──────────────────
+  // React synthetic events don't reliably fire through xterm's internal DOM.
+  // Native capture-phase listeners intercept before xterm can swallow them —
+  // same pattern used for paste below.
 
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    dragCounterRef.current += 1
-    if (dragCounterRef.current === 1) {
-      setIsDragOver(true)
-    }
-  }, [])
+  useEffect(() => {
+    const el = terminalAreaRef.current
+    if (!el) return
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-  }, [])
+    let counter = 0
 
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    dragCounterRef.current -= 1
-    if (dragCounterRef.current <= 0) {
-      dragCounterRef.current = 0
-      setIsDragOver(false)
-    }
-  }, [])
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
+    const onDragEnter = (e: DragEvent) => {
       e.preventDefault()
       e.stopPropagation()
-      dragCounterRef.current = 0
+      counter += 1
+      if (counter === 1) setIsDragOver(true)
+    }
+
+    const onDragOver = (e: DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+
+    const onDragLeave = (e: DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      counter -= 1
+      if (counter <= 0) {
+        counter = 0
+        setIsDragOver(false)
+      }
+    }
+
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      counter = 0
       setIsDragOver(false)
 
       if (!activeTabId) return
-      const files = Array.from(e.dataTransfer.files)
+      const files = Array.from(e.dataTransfer?.files ?? [])
       const imageFile = files.find((f) => ALLOWED_IMAGE_TYPES.has(f.type))
       if (imageFile) {
         void uploadAndInjectImage(imageFile, activeTabId, projectCwd)
       }
-    },
-    [activeTabId, projectCwd],
-  )
+    }
+
+    el.addEventListener("dragenter", onDragEnter, true)
+    el.addEventListener("dragover", onDragOver, true)
+    el.addEventListener("dragleave", onDragLeave, true)
+    el.addEventListener("drop", onDrop, true)
+    return () => {
+      el.removeEventListener("dragenter", onDragEnter, true)
+      el.removeEventListener("dragover", onDragOver, true)
+      el.removeEventListener("dragleave", onDragLeave, true)
+      el.removeEventListener("drop", onDrop, true)
+    }
+  }, [activeTabId, projectCwd])
 
   // ── Paste handler for images ──────────────────────────────────────────────
 
@@ -656,10 +692,6 @@ export function ShellTerminal({
       <div
         ref={terminalAreaRef}
         className="relative flex-1 min-w-0"
-        onDragEnter={handleDragEnter}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
       >
         {tabs.map((tab) => (
           <TerminalInstance

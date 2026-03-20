@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useTheme } from "next-themes"
-import { Loader2 } from "lucide-react"
+import { Loader2, ImagePlus } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { validateImageFile } from "@/lib/image-utils"
 import { buildProjectAbsoluteUrl, buildProjectPath } from "@/lib/project-url"
 import "@xterm/xterm/css/xterm.css"
 
@@ -151,6 +152,7 @@ async function settleTerminalLayout(
 export function MainSessionTerminal({ className, fontSize, projectCwd }: MainSessionTerminalProps) {
   const { resolvedTheme } = useTheme()
   const isDark = resolvedTheme !== "light"
+  const wrapperRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<XTerminal | null>(null)
   const fitAddonRef = useRef<XFitAddon | null>(null)
@@ -160,6 +162,7 @@ export function MainSessionTerminal({ className, fontSize, projectCwd }: MainSes
   const flushingRef = useRef(false)
   const [connectionState, setConnectionState] = useState<"connecting" | "connected" | "error">("connecting")
   const [hasOutput, setHasOutput] = useState(false)
+  const [isDragOver, setIsDragOver] = useState(false)
 
   const flushInputQueue = useCallback(async () => {
     if (flushingRef.current) return
@@ -322,19 +325,134 @@ export function MainSessionTerminal({ className, fontSize, projectCwd }: MainSes
     termRef.current?.focus()
   }, [])
 
+  // ── Shift+Enter → newline (native DOM, capture phase) ────────────────────
+  // xterm.js sends \r for both Enter and Shift+Enter. The pi TUI editor
+  // recognizes \n (LF) as "insert newline". Capture-phase keydown intercepts
+  // before xterm's internal textarea processes the event.
+  useEffect(() => {
+    const el = wrapperRef.current
+    if (!el) return
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        e.preventDefault()
+        e.stopPropagation()
+        sendInput("\n")
+      }
+    }
+
+    el.addEventListener("keydown", onKeyDown, true)
+    return () => el.removeEventListener("keydown", onKeyDown, true)
+  }, [sendInput])
+
+  // ── Drag-and-drop image upload (native DOM, capture phase) ──────────────
+  // React synthetic events don't reliably fire through xterm's internal DOM.
+  // Native capture-phase listeners intercept before xterm can swallow them —
+  // same pattern used for paste in ShellTerminal.
+
+  useEffect(() => {
+    const el = wrapperRef.current
+    if (!el) return
+
+    let counter = 0
+
+    const onDragEnter = (e: DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      counter += 1
+      if (counter === 1) setIsDragOver(true)
+    }
+
+    const onDragOver = (e: DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+
+    const onDragLeave = (e: DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      counter -= 1
+      if (counter <= 0) {
+        counter = 0
+        setIsDragOver(false)
+      }
+    }
+
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      counter = 0
+      setIsDragOver(false)
+
+      const files = Array.from(e.dataTransfer?.files ?? [])
+      const imageFile = files.find((f) => f.type.startsWith("image/"))
+      if (!imageFile) return
+
+      const validation = validateImageFile(imageFile)
+      if (!validation.valid) {
+        console.warn("[main-terminal-upload] validation failed:", validation.error)
+        return
+      }
+
+      const formData = new FormData()
+      formData.append("file", imageFile)
+
+      void (async () => {
+        try {
+          const res = await fetch(buildProjectPath("/api/terminal/upload", projectCwd), {
+            method: "POST",
+            body: formData,
+          })
+          const data = (await res.json()) as { ok?: boolean; path?: string; error?: string }
+          if (!res.ok || !data.path) {
+            console.error("[main-terminal-upload] upload failed:", data.error ?? `HTTP ${res.status}`)
+            return
+          }
+          console.log("[main-terminal-upload] injecting path:", data.path)
+          sendInput(`@${data.path} `)
+        } catch (err) {
+          console.error("[main-terminal-upload] upload request failed:", err)
+        }
+      })()
+    }
+
+    el.addEventListener("dragenter", onDragEnter, true)
+    el.addEventListener("dragover", onDragOver, true)
+    el.addEventListener("dragleave", onDragLeave, true)
+    el.addEventListener("drop", onDrop, true)
+    return () => {
+      el.removeEventListener("dragenter", onDragEnter, true)
+      el.removeEventListener("dragover", onDragOver, true)
+      el.removeEventListener("dragleave", onDragLeave, true)
+      el.removeEventListener("drop", onDrop, true)
+    }
+  }, [projectCwd, sendInput])
+
   useEffect(() => {
     const timer = setTimeout(() => termRef.current?.focus(), 80)
     return () => clearTimeout(timer)
   }, [])
 
   return (
-    <div className={cn("relative h-full w-full bg-terminal", className)} onClick={handleClick} data-testid="main-session-native-terminal">
+    <div
+      ref={wrapperRef}
+      className={cn("relative h-full w-full bg-terminal", className)}
+      onClick={handleClick}
+      data-testid="main-session-native-terminal"
+    >
       {!hasOutput && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-terminal">
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           <span className="text-xs text-muted-foreground">
             {connectionState === "error" ? "Reconnecting main session terminal…" : "Connecting to main session…"}
           </span>
+        </div>
+      )}
+      {/* Drop overlay */}
+      {isDragOver && (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-background/80 backdrop-blur-sm border-2 border-dashed border-primary rounded-md pointer-events-none">
+          <ImagePlus className="h-8 w-8 text-primary" />
+          <span className="text-sm font-medium text-primary">Drop image here</span>
         </div>
       )}
       <div ref={containerRef} className="h-full w-full" style={{ padding: "8px 4px 4px 8px" }} />

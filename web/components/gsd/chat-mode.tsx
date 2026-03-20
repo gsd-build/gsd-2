@@ -1295,6 +1295,62 @@ function parseStructuredTerminalScreen(screenText: string, echoedCommand?: strin
   return { content }
 }
 
+/* ─── InlineThinking ─── */
+
+/**
+ * Compact thinking indicator rendered inline inside an assistant bubble.
+ * Shows a collapsible preview of the LLM's reasoning with a toggle.
+ */
+function InlineThinking({ content, isStreaming }: { content: string; isStreaming: boolean }) {
+  const [expanded, setExpanded] = useState(false)
+  const lines = content.split("\n").filter((l) => l.trim())
+  const previewLines = lines.slice(-2)
+  const hasMore = lines.length > 2
+
+  return (
+    <div className="mb-2">
+      <button
+        onClick={() => setExpanded((e) => !e)}
+        className="w-full rounded-lg border border-border/40 bg-muted/20 px-3 py-1.5 text-left transition-colors hover:bg-muted/30"
+      >
+        <div className="flex items-center gap-2">
+          {isStreaming && (
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning/60" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
+            </span>
+          )}
+          <span className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">
+            {isStreaming ? "Thinking…" : "Thought process"}
+          </span>
+          {hasMore && !expanded && (
+            <span className="text-[10px] text-muted-foreground/40">
+              ▶ {lines.length} lines
+            </span>
+          )}
+          {expanded && (
+            <span className="text-[10px] text-muted-foreground/40">▼</span>
+          )}
+        </div>
+        {!expanded && (
+          <div className="mt-1 space-y-0.5">
+            {previewLines.map((line, i) => (
+              <p key={i} className="text-xs leading-relaxed text-muted-foreground/50 italic truncate">
+                {line}
+              </p>
+            ))}
+          </div>
+        )}
+        {expanded && (
+          <div className="mt-1 max-h-[200px] overflow-y-auto text-xs leading-relaxed text-muted-foreground/50 italic whitespace-pre-wrap">
+            {content}
+          </div>
+        )}
+      </button>
+    </div>
+  )
+}
+
 /* ─── ChatBubble ─── */
 
 /**
@@ -1309,9 +1365,13 @@ function parseStructuredTerminalScreen(screenText: string, echoedCommand?: strin
 function ChatBubble({
   message,
   onSubmitPrompt,
+  thinkingContent,
+  isThinking,
 }: {
   message: ChatMessage
   onSubmitPrompt?: (data: string) => void
+  thinkingContent?: string
+  isThinking?: boolean
 }) {
   if (message.role === "system") {
     return (
@@ -1373,7 +1433,23 @@ function ChatBubble({
         <MessagesSquare className="h-3.5 w-3.5 text-muted-foreground" />
       </div>
       <div className="max-w-[82%] min-w-0 rounded-2xl rounded-tl-md border border-border/60 bg-card px-4 py-3 shadow-sm">
-        <MarkdownContent content={message.content} />
+        {/* Inline thinking block — shown inside the bubble when thinking content exists */}
+        {thinkingContent != null && thinkingContent.trim().length > 0 && (
+          <InlineThinking content={thinkingContent} isStreaming={isThinking ?? false} />
+        )}
+        {/* Streaming-only thinking indicator with no text yet */}
+        {isThinking && (!thinkingContent || thinkingContent.trim().length === 0) && !message.content && (
+          <div className="flex items-center gap-2 py-1">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning/60" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
+            </span>
+            <span className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">
+              Thinking…
+            </span>
+          </div>
+        )}
+        {message.content && <MarkdownContent content={message.content} />}
         {!message.complete && !hasAnyPrompt && <StreamingCursor />}
         {hasSelectPrompt && (
           <TuiSelectPrompt
@@ -2247,84 +2323,6 @@ function ToolExecutionBlock({ tool }: { tool: CompletedToolExecution }) {
   )
 }
 
-/* ─── ThinkingIndicator ─── */
-
-/**
- * Live thinking indicator — shows a spinner + the last 2 lines of the
- * LLM's internal reasoning, truncated and styled as a muted aside.
- * Expands on click to show the full thinking text.
- */
-function ThinkingIndicator({ content, isStreaming }: { content: string; isStreaming: boolean }) {
-  const [expanded, setExpanded] = useState(false)
-  const hasContent = content.trim().length > 0
-
-  // Extract the last 2 non-empty lines for the preview
-  const lines = content.split("\n").filter((l) => l.trim())
-  const previewLines = lines.slice(-2)
-  const hasMore = lines.length > 2
-
-  return (
-    <div className="flex justify-start gap-3">
-      <div className="mt-1 flex-shrink-0 flex h-7 w-7 items-center justify-center rounded-full bg-card border border-border">
-        {isStreaming ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-        ) : (
-          <MessagesSquare className="h-3.5 w-3.5 text-muted-foreground" />
-        )}
-      </div>
-      <div className="max-w-[82%] min-w-0">
-        <button
-          onClick={() => hasContent && setExpanded((e) => !e)}
-          className={cn(
-            "w-full rounded-xl border border-border/40 bg-muted/20 px-3.5 py-2 text-left transition-colors",
-            hasContent && "hover:bg-muted/30 cursor-pointer",
-            !hasContent && "cursor-default",
-          )}
-        >
-          {/* Header row */}
-          <div className="flex items-center gap-2">
-            {isStreaming && (
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning/60" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
-              </span>
-            )}
-            <span className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">
-              {isStreaming ? "Thinking…" : "Thought process"}
-            </span>
-            {hasContent && hasMore && !expanded && (
-              <span className="text-[10px] text-muted-foreground/40">
-                ▶ {lines.length} lines
-              </span>
-            )}
-            {hasContent && expanded && (
-              <span className="text-[10px] text-muted-foreground/40">▼</span>
-            )}
-          </div>
-
-          {/* Preview: last 2 lines */}
-          {hasContent && !expanded && (
-            <div className="mt-1 space-y-0.5">
-              {previewLines.map((line, i) => (
-                <p key={i} className="text-xs leading-relaxed text-muted-foreground/50 italic truncate">
-                  {line}
-                </p>
-              ))}
-            </div>
-          )}
-
-          {/* Expanded: full thinking text */}
-          {hasContent && expanded && (
-            <div className="mt-1 max-h-[200px] overflow-y-auto text-xs leading-relaxed text-muted-foreground/50 italic whitespace-pre-wrap">
-              {content}
-            </div>
-          )}
-        </button>
-      </div>
-    </div>
-  )
-}
-
 /**
  * ChatPane — bridge event-driven chat rendering.
  *
@@ -2486,7 +2484,13 @@ export function ChatPane({ className, onOpenAction }: ChatPaneProps) {
             style={terminalFontSize !== 13 ? { fontSize: `${terminalFontSize}px` } : undefined}
           >
             {messages.map((msg) => (
-              <ChatBubble key={msg.id} message={msg} onSubmitPrompt={handlePromptSubmit} />
+              <ChatBubble
+                key={msg.id}
+                message={msg}
+                onSubmitPrompt={handlePromptSubmit}
+                thinkingContent={msg.id === "streaming-current" ? state.streamingThinkingText : undefined}
+                isThinking={msg.id === "streaming-current" ? (isStreaming && !state.activeToolExecution) : undefined}
+              />
             ))}
 
             {/* Completed tool executions for this turn */}
@@ -2512,14 +2516,6 @@ export function ChatPane({ className, onOpenAction }: ChatPaneProps) {
                   </div>
                 </div>
               </div>
-            )}
-
-            {/* Thinking / streaming indicator */}
-            {isStreaming && !state.activeToolExecution && (
-              <ThinkingIndicator
-                content={state.streamingThinkingText}
-                isStreaming={true}
-              />
             )}
 
             <div className="h-2" />

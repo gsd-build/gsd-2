@@ -11,6 +11,7 @@ import { derivePendingWorkflowCommandLabel } from "@/lib/workflow-action-executi
 export function DualTerminal() {
   const [splitPosition, setSplitPosition] = useState(50)
   const containerRef = useRef<HTMLDivElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   const isDragging = useRef(false)
   const [terminalFontSize] = useTerminalFontSize()
   const workspace = useGSDWorkspaceState()
@@ -45,8 +46,27 @@ export function DualTerminal() {
     }
   }, [])
 
+  // Prevent browser default file-open on drag/drop anywhere in the dual terminal.
+  // Uses native DOM listeners so xterm's internal DOM can't swallow the events first.
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+
+    const preventDragDefault = (e: DragEvent) => {
+      e.preventDefault()
+    }
+
+    // Capture phase ensures we fire before any child element can consume the event
+    el.addEventListener("dragover", preventDragDefault, true)
+    el.addEventListener("drop", preventDragDefault, true)
+    return () => {
+      el.removeEventListener("dragover", preventDragDefault, true)
+      el.removeEventListener("drop", preventDragDefault, true)
+    }
+  }, [])
+
   return (
-    <div className="flex h-full flex-col">
+    <div ref={rootRef} className="flex h-full flex-col">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border bg-card px-4 py-2">
         <span className="font-medium">Power User Mode</span>
