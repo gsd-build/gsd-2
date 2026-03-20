@@ -1234,6 +1234,74 @@ export async function buildReassessRoadmapPrompt(
   });
 }
 
+// ─── Reactive Execute Prompt ──────────────────────────────────────────────
+
+export async function buildReactiveExecutePrompt(
+  mid: string, midTitle: string, sid: string, sTitle: string,
+  readyTaskIds: string[], base: string,
+): Promise<string> {
+  const { loadSliceTaskIO, deriveTaskGraph, graphMetrics } = await import("./reactive-graph.js");
+
+  // Build graph for context
+  const taskIO = await loadSliceTaskIO(base, mid, sid);
+  const graph = deriveTaskGraph(taskIO);
+  const metrics = graphMetrics(graph);
+
+  // Build graph context section
+  const graphLines: string[] = [];
+  for (const node of graph) {
+    const status = node.done ? "✅ done" : readyTaskIds.includes(node.id) ? "🟢 ready" : "⏳ waiting";
+    const deps = node.dependsOn.length > 0 ? ` (depends on: ${node.dependsOn.join(", ")})` : "";
+    graphLines.push(`- **${node.id}: ${node.title}** — ${status}${deps}`);
+    if (node.outputFiles.length > 0) {
+      graphLines.push(`  - Outputs: ${node.outputFiles.map(f => `\`${f}\``).join(", ")}`);
+    }
+  }
+  const graphContext = [
+    `Tasks: ${metrics.taskCount}, Edges: ${metrics.edgeCount}, Ready: ${metrics.readySetSize}`,
+    "",
+    ...graphLines,
+  ].join("\n");
+
+  // Build individual subagent prompts for each ready task
+  const subagentSections: string[] = [];
+  const readyTaskListLines: string[] = [];
+
+  for (const tid of readyTaskIds) {
+    const node = graph.find((n) => n.id === tid);
+    const tTitle = node?.title ?? tid;
+    readyTaskListLines.push(`- **${tid}: ${tTitle}**`);
+
+    // Build a full execute-task prompt for this task (reuse existing builder)
+    const taskPrompt = await buildExecuteTaskPrompt(mid, sid, sTitle, tid, tTitle, base);
+
+    subagentSections.push([
+      `### ${tid}: ${tTitle}`,
+      "",
+      "Use this as the prompt for a `subagent` call:",
+      "",
+      "```",
+      taskPrompt,
+      "```",
+    ].join("\n"));
+  }
+
+  const inlinedTemplates = inlineTemplate("task-summary", "Task Summary");
+
+  return loadPrompt("reactive-execute", {
+    workingDirectory: base,
+    milestoneId: mid,
+    milestoneTitle: midTitle,
+    sliceId: sid,
+    sliceTitle: sTitle,
+    graphContext,
+    readyTaskCount: String(readyTaskIds.length),
+    readyTaskList: readyTaskListLines.join("\n"),
+    subagentPrompts: subagentSections.join("\n\n---\n\n"),
+    inlinedTemplates,
+  });
+}
+
 export async function buildRewriteDocsPrompt(
   mid: string, midTitle: string,
   activeSlice: { id: string; title: string } | null,

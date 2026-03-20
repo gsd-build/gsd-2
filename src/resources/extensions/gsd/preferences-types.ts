@@ -18,6 +18,7 @@ import type {
   ParallelConfig,
   CompressionStrategy,
   ContextSelectionMode,
+  ReactiveExecutionConfig,
 } from "./types.js";
 import type { DynamicRoutingConfig } from "./model-router.js";
 
@@ -86,12 +87,13 @@ export const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "compression_strategy",
   "context_selection",
   "widget_mode",
+  "reactive_execution",
 ]);
 
 /** Canonical list of all dispatch unit types. */
 export const KNOWN_UNIT_TYPES = [
   "research-milestone", "plan-milestone", "research-slice", "plan-slice",
-  "execute-task", "complete-slice", "replan-slice", "reassess-roadmap",
+  "execute-task", "reactive-execute", "complete-slice", "replan-slice", "reassess-roadmap",
   "run-uat", "complete-milestone",
 ] as const;
 export type UnitType = (typeof KNOWN_UNIT_TYPES)[number];
@@ -215,6 +217,8 @@ export interface GSDPreferences {
   context_selection?: ContextSelectionMode;
   /** Default widget display mode for auto-mode dashboard. "full" | "small" | "min" | "off". Default: "full". */
   widget_mode?: "full" | "small" | "min" | "off";
+  /** Reactive (graph-derived parallel) task execution within slices. Disabled by default. */
+  reactive_execution?: ReactiveExecutionConfig;
 }
 
 export interface LoadedGSDPreferences {

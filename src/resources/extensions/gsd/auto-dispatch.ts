@@ -38,6 +38,7 @@ import {
   buildRunUatPrompt,
   buildReassessRoadmapPrompt,
   buildRewriteDocsPrompt,
+  buildReactiveExecutePrompt,
   checkNeedsReassessment,
   checkNeedsRunUat,
 } from "./auto-prompts.js";
@@ -307,6 +308,83 @@ const DISPATCH_RULES: DispatchRule[] = [
           basePath,
         ),
       };
+    },
+  },
+  {
+    name: "executing → reactive-execute (parallel dispatch)",
+    match: async ({ state, mid, midTitle, basePath, prefs }) => {
+      if (state.phase !== "executing" || !state.activeTask) return null;
+      if (!state.activeSlice) return null; // fall through
+
+      // Only activate when reactive_execution is explicitly enabled
+      const reactiveConfig = prefs?.reactive_execution;
+      if (!reactiveConfig?.enabled) return null;
+
+      const sid = state.activeSlice.id;
+      const sTitle = state.activeSlice.title;
+      const maxParallel = reactiveConfig.max_parallel ?? 2;
+
+      // Dry-run mode: max_parallel=1 means graph is derived and logged but
+      // execution remains sequential
+      if (maxParallel <= 1) return null;
+
+      try {
+        const {
+          loadSliceTaskIO,
+          deriveTaskGraph,
+          isGraphAmbiguous,
+          getReadyTasks,
+          chooseNonConflictingSubset,
+          graphMetrics,
+        } = await import("./reactive-graph.js");
+
+        const taskIO = await loadSliceTaskIO(basePath, mid, sid);
+        if (taskIO.length < 2) return null; // single task, no point
+
+        const graph = deriveTaskGraph(taskIO);
+
+        // Ambiguous graph → fall through to sequential
+        if (isGraphAmbiguous(graph)) return null;
+
+        const completed = new Set(graph.filter((n) => n.done).map((n) => n.id));
+        const readyIds = getReadyTasks(graph, completed, new Set());
+
+        // Only activate reactive dispatch when >1 task is ready
+        if (readyIds.length <= 1) return null;
+
+        const selected = chooseNonConflictingSubset(
+          readyIds,
+          graph,
+          maxParallel,
+          new Set(),
+        );
+        if (selected.length <= 1) return null;
+
+        // Log graph metrics for observability
+        const metrics = graphMetrics(graph);
+        process.stderr.write(
+          `gsd-reactive: ${mid}/${sid} graph — tasks:${metrics.taskCount} edges:${metrics.edgeCount} ` +
+          `ready:${metrics.readySetSize} dispatching:${selected.length} ambiguous:${metrics.ambiguous}\n`,
+        );
+
+        return {
+          action: "dispatch",
+          unitType: "reactive-execute",
+          unitId: `${mid}/${sid}/reactive`,
+          prompt: await buildReactiveExecutePrompt(
+            mid,
+            midTitle,
+            sid,
+            sTitle,
+            selected,
+            basePath,
+          ),
+        };
+      } catch (err) {
+        // Non-fatal — fall through to sequential execution
+        process.stderr.write(`gsd-reactive: graph derivation failed: ${(err as Error).message}\n`);
+        return null;
+      }
     },
   },
   {

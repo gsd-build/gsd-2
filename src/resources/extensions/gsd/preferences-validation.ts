@@ -496,6 +496,47 @@ export function validatePreferences(preferences: GSDPreferences): {
     }
   }
 
+  // ─── Reactive Execution ─────────────────────────────────────────────────
+  if (preferences.reactive_execution !== undefined) {
+    if (typeof preferences.reactive_execution === "object" && preferences.reactive_execution !== null) {
+      const re = preferences.reactive_execution as unknown as Record<string, unknown>;
+      const validRe: Record<string, unknown> = {};
+
+      if (re.enabled !== undefined) {
+        if (typeof re.enabled === "boolean") validRe.enabled = re.enabled;
+        else errors.push("reactive_execution.enabled must be a boolean");
+      }
+      if (re.max_parallel !== undefined) {
+        const mp = typeof re.max_parallel === "number" ? re.max_parallel : Number(re.max_parallel);
+        if (Number.isFinite(mp) && mp >= 1 && mp <= 8) {
+          validRe.max_parallel = Math.floor(mp);
+        } else {
+          errors.push("reactive_execution.max_parallel must be a number between 1 and 8");
+        }
+      }
+      if (re.isolation_mode !== undefined) {
+        if (re.isolation_mode === "same-tree") {
+          validRe.isolation_mode = "same-tree";
+        } else {
+          errors.push('reactive_execution.isolation_mode must be "same-tree"');
+        }
+      }
+
+      const knownReKeys = new Set(["enabled", "max_parallel", "isolation_mode"]);
+      for (const key of Object.keys(re)) {
+        if (!knownReKeys.has(key)) {
+          warnings.push(`unknown reactive_execution key "${key}" — ignored`);
+        }
+      }
+
+      if (Object.keys(validRe).length > 0) {
+        validated.reactive_execution = validRe as unknown as import("./types.js").ReactiveExecutionConfig;
+      }
+    } else {
+      errors.push("reactive_execution must be an object");
+    }
+  }
+
   // ─── Verification Preferences ───────────────────────────────────────────
   if (preferences.verification_commands !== undefined) {
     if (Array.isArray(preferences.verification_commands)) {

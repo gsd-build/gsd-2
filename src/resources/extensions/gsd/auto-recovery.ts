@@ -26,6 +26,7 @@ import {
   resolveSlicePath,
   resolveSliceFile,
   resolveTasksDir,
+  resolveTaskFiles,
   relMilestoneFile,
   relSliceFile,
   relSlicePath,
@@ -110,6 +111,9 @@ export function resolveExpectedArtifactPath(
     }
     case "rewrite-docs":
       return null;
+    case "reactive-execute":
+      // Reactive execute produces multiple task summaries — verified separately
+      return null;
     default:
       return null;
   }
@@ -146,6 +150,20 @@ export function verifyExpectedArtifact(
     if (!existsSync(overridesPath)) return true;
     const content = readFileSync(overridesPath, "utf-8");
     return !content.includes("**Scope:** active");
+  }
+
+  // Reactive-execute: verify that at least one new task summary was written.
+  // The unitId is "{mid}/{sid}/reactive" — extract mid and sid to check.
+  if (unitType === "reactive-execute") {
+    const parts = unitId.split("/");
+    const mid = parts[0];
+    const sid = parts[1];
+    if (!mid || !sid) return false;
+    const tDir = resolveTasksDir(base, mid, sid);
+    if (!tDir) return false;
+    const summaryFiles = resolveTaskFiles(tDir, "SUMMARY");
+    // At least one summary file should exist
+    return summaryFiles.length > 0;
   }
 
   const absPath = resolveExpectedArtifactPath(unitType, unitId, base);

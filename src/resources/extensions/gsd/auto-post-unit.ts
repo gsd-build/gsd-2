@@ -217,6 +217,20 @@ export async function postUnitPreVerification(pctx: PostUnitContext): Promise<"d
       }
     }
 
+    // Reactive state cleanup on slice completion
+    if (s.currentUnit.type === "complete-slice") {
+      try {
+        const parts = s.currentUnit.id.split("/");
+        const [mid, sid] = parts;
+        if (mid && sid) {
+          const { clearReactiveState } = await import("./reactive-graph.js");
+          clearReactiveState(s.basePath, mid, sid);
+        }
+      } catch {
+        // Non-fatal
+      }
+    }
+
     // Post-triage: execute actionable resolutions
     if (s.currentUnit.type === "triage-captures") {
       try {

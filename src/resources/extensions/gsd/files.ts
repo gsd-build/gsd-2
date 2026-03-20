@@ -15,6 +15,7 @@ import type {
   Summary, SummaryFrontmatter, SummaryRequires, FileModified,
   Continue, ContinueFrontmatter, ContinueStatus,
   RequirementCounts,
+  TaskIO,
   SecretsManifest, SecretsManifestEntry, SecretsManifestEntryStatus,
   ManifestStatus,
 } from './types.js';
@@ -722,6 +723,50 @@ export function countMustHavesMentionedInSummary(
   }
 
   return count;
+}
+
+// ─── Task Plan IO Extractor ────────────────────────────────────────────────
+
+/**
+ * Extract input and output file paths from a task plan's `## Inputs` and
+ * `## Expected Output` sections. Looks for backtick-wrapped file paths on
+ * each line (e.g. `` `src/foo.ts` ``).
+ *
+ * Returns empty arrays for missing/empty sections — callers should treat
+ * tasks with no IO as ambiguous (sequential fallback trigger).
+ */
+export function parseTaskPlanIO(content: string): { inputFiles: string[]; outputFiles: string[] } {
+  const backtickPathRegex = /`([^`]+)`/g;
+
+  function extractPaths(sectionText: string | null): string[] {
+    if (!sectionText) return [];
+    const paths: string[] = [];
+    for (const line of sectionText.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      let match: RegExpExecArray | null;
+      backtickPathRegex.lastIndex = 0;
+      while ((match = backtickPathRegex.exec(trimmed)) !== null) {
+        const candidate = match[1];
+        // Filter out things that look like code tokens rather than file paths
+        // (e.g. `true`, `false`, `npm run test`). A file path has at least one
+        // dot or slash.
+        if (candidate.includes("/") || candidate.includes(".")) {
+          paths.push(candidate);
+        }
+      }
+    }
+    return paths;
+  }
+
+  const [, body] = splitFrontmatter(content);
+  const inputSection = extractSection(body, "Inputs");
+  const outputSection = extractSection(body, "Expected Output");
+
+  return {
+    inputFiles: extractPaths(inputSection),
+    outputFiles: extractPaths(outputSection),
+  };
 }
 
 // ─── UAT Type Extractor ────────────────────────────────────────────────────
