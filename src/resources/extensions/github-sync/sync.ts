@@ -356,7 +356,7 @@ async function syncTaskComplete(
       const comment = formatSummaryComment({
         oneLiner: summary.oneLiner,
         body: summary.whatHappened,
-        frontmatter: summary.frontmatter as Record<string, unknown>,
+        frontmatter: summary.frontmatter as unknown as Record<string, unknown>,
       });
       ghAddComment(basePath, mapping.repo, taskRecord.issueNumber, comment);
     }
@@ -391,7 +391,7 @@ async function syncSliceComplete(
       const comment = formatSummaryComment({
         oneLiner: summary.oneLiner,
         body: summary.whatHappened,
-        frontmatter: summary.frontmatter as Record<string, unknown>,
+        frontmatter: summary.frontmatter as unknown as Record<string, unknown>,
       });
       ghAddComment(basePath, mapping.repo, sliceRecord.prNumber, comment);
     }

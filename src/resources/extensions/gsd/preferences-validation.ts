@@ -699,7 +699,7 @@ export function validatePreferences(preferences: GSDPreferences): {
   // ─── GitHub Sync ────────────────────────────────────────────────────────
   if (preferences.github !== undefined) {
     if (typeof preferences.github === "object" && preferences.github !== null) {
-      const gh = preferences.github as Record<string, unknown>;
+      const gh = preferences.github as unknown as Record<string, unknown>;
       const validGh: Record<string, unknown> = {};
 
       if (gh.enabled !== undefined) {
@@ -739,7 +739,7 @@ export function validatePreferences(preferences: GSDPreferences): {
       }
 
       if (Object.keys(validGh).length > 0) {
-        validated.github = validGh as import("../github-sync/types.js").GitHubSyncConfig;
+        validated.github = validGh as unknown as import("../github-sync/types.js").GitHubSyncConfig;
       }
     } else {
       errors.push("github must be an object");
