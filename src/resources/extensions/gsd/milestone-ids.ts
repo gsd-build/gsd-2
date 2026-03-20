@@ -7,6 +7,7 @@
 
 import { randomInt } from "node:crypto";
 import { readdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { milestonesDir } from "./paths.js";
 import { loadQueueOrder, sortByQueueOrder } from "./queue-order.js";
 import { getErrorMessage } from "./error-utils.js";
@@ -72,6 +73,42 @@ export function nextMilestoneId(milestoneIds: string[], uniqueEnabled?: boolean)
 
 // ─── Discovery ──────────────────────────────────────────────────────────────
 
+/**
+ * Check if a milestone directory contains substantive content.
+ * Ghost milestones (empty directories or metadata-only skeletons) should be
+ * filtered out so they never become the active milestone.
+ */
+export function isSubstantiveMilestone(basePath: string, milestoneId: string): boolean {
+  const milestoneDir = join(basePath, ".gsd", "milestones", milestoneId);
+
+  const artifactFiles = [
+    `${milestoneId}-ROADMAP.md`,
+    `${milestoneId}-CONTEXT.md`,
+    `${milestoneId}-CONTEXT-DRAFT.md`,
+    `${milestoneId}-SUMMARY.md`,
+  ];
+
+  for (const file of artifactFiles) {
+    if (existsSync(join(milestoneDir, file))) {
+      return true;
+    }
+  }
+
+  const slicesDir = join(milestoneDir, "slices");
+  if (existsSync(slicesDir)) {
+    try {
+      const entries = readdirSync(slicesDir, { withFileTypes: true });
+      if (entries.some((e) => e.isDirectory())) {
+        return true;
+      }
+    } catch {
+      // unreadable slices dir → treat as non-substantive
+    }
+  }
+
+  return false;
+}
+
 /** Scan the milestones directory and return IDs sorted by queue order (or numeric fallback). */
 export function findMilestoneIds(basePath: string): string[] {
   const dir = milestonesDir(basePath);
@@ -84,11 +121,11 @@ export function findMilestoneIds(basePath: string): string[] {
       })
       .filter((id): id is string => id !== null);
 
-    // Apply custom queue order if available, else fall back to numeric sort
+    const substantiveIds = ids.filter((id) => isSubstantiveMilestone(basePath, id));
+
     const customOrder = loadQueueOrder(basePath);
-    return sortByQueueOrder(ids, customOrder);
+    return sortByQueueOrder(substantiveIds, customOrder);
   } catch (err) {
-    // Log why milestone scanning failed — silent [] here causes infinite loops (#456)
     if (existsSync(dir)) {
       console.error(`[gsd] findMilestoneIds: .gsd/milestones/ exists but readdirSync failed — ${getErrorMessage(err)}`);
     }

@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { join, sep } from "node:path";
 
 import { loadFile, parsePlan, parseRoadmap, parseSummary, saveFile, parseTaskPlanMustHaves, countMustHavesMentionedInSummary } from "./files.js";
 import { resolveMilestoneFile, resolveMilestonePath, resolveSliceFile, resolveSlicePath, resolveTaskFile, resolveTasksDir, milestonesDir, gsdRoot, relMilestoneFile, relSliceFile, relTaskFile, relSlicePath, relGsdRootFile, resolveGsdRootFile } from "./paths.js";
@@ -13,7 +13,12 @@ import { nativeIsRepo, nativeWorktreeRemove, nativeBranchList, nativeBranchDelet
 import { readCrashLock, isLockProcessAlive, clearLock } from "./crash-recovery.js";
 import { ensureGitignore } from "./gitignore.js";
 import { readAllSessionStatuses, isSessionStale, removeSessionStatus } from "./session-status-io.js";
-import { isSubstantiveMilestone, MILESTONE_ID_REGEX } from "./guided-flow.js";
+import { checkEnvironmentHealth } from "./doctor-environment.js";
+import { runProviderChecks } from "./doctor-providers.js";
+import type { DoctorIssue, DoctorIssueCode, DoctorReport } from "./doctor-types.js";
+import { COMPLETION_TRANSITION_CODES } from "./doctor-types.js";
+import { summarizeDoctorIssues } from "./doctor-format.js";
+import { isSubstantiveMilestone, MILESTONE_ID_RE } from "./milestone-ids.js";
 
 
 // ── Re-exports ─────────────────────────────────────────────────────────────
@@ -351,63 +356,6 @@ export async function selectDoctorScope(basePath: string, requestedScope?: strin
   }
 
   return state.registry[0]?.id;
-}
-
-export function filterDoctorIssues(issues: DoctorIssue[], options?: { scope?: string; includeWarnings?: boolean; includeHistorical?: boolean }): DoctorIssue[] {
-  let filtered = issues;
-  if (options?.scope) filtered = filtered.filter(issue => matchesScope(issue.unitId, options.scope));
-  if (!options?.includeWarnings) filtered = filtered.filter(issue => issue.severity === "error");
-  return filtered;
-}
-
-export function formatDoctorReport(
-  report: DoctorReport,
-  options?: { scope?: string; includeWarnings?: boolean; maxIssues?: number; title?: string },
-): string {
-  const scopedIssues = filterDoctorIssues(report.issues, {
-    scope: options?.scope,
-    includeWarnings: options?.includeWarnings ?? true,
-  });
-  const summary = summarizeDoctorIssues(scopedIssues);
-  const maxIssues = options?.maxIssues ?? 12;
-  const lines: string[] = [];
-  lines.push(options?.title ?? (summary.errors > 0 ? "GSD doctor found blocking issues." : "GSD doctor report."));
-  lines.push(`Scope: ${options?.scope ?? "all milestones"}`);
-  lines.push(`Issues: ${summary.total} total · ${summary.errors} error(s) · ${summary.warnings} warning(s) · ${summary.fixable} fixable`);
-
-  if (summary.byCode.length > 0) {
-    lines.push("Top issue types:");
-    for (const item of summary.byCode.slice(0, 5)) {
-      lines.push(`- ${item.code}: ${item.count}`);
-    }
-  }
-
-  if (scopedIssues.length > 0) {
-    lines.push("Priority issues:");
-    for (const issue of scopedIssues.slice(0, maxIssues)) {
-      const prefix = issue.severity === "error" ? "ERROR" : issue.severity === "warning" ? "WARN" : "INFO";
-      lines.push(`- [${prefix}] ${issue.unitId}: ${issue.message}${issue.file ? ` (${issue.file})` : ""}`);
-    }
-    if (scopedIssues.length > maxIssues) {
-      lines.push(`- ...and ${scopedIssues.length - maxIssues} more in scope`);
-    }
-  }
-
-  if (report.fixesApplied.length > 0) {
-    lines.push("Fixes applied:");
-    for (const fix of report.fixesApplied.slice(0, maxIssues)) lines.push(`- ${fix}`);
-    if (report.fixesApplied.length > maxIssues) lines.push(`- ...and ${report.fixesApplied.length - maxIssues} more`);
-  }
-
-  return lines.join("\n");
-}
-
-export function formatDoctorIssuesForPrompt(issues: DoctorIssue[]): string {
-  if (issues.length === 0) return "- No remaining issues in scope.";
-  return issues.map(issue => {
-    const prefix = issue.severity === "error" ? "ERROR" : issue.severity === "warning" ? "WARN" : "INFO";
-    return `- [${prefix}] ${issue.unitId} | ${issue.code} | ${issue.message}${issue.file ? ` | file: ${issue.file}` : ""} | fixable: ${issue.fixable ? "yes" : "no"}`;
-  }).join("\n");
 }
 
 async function checkGitHealth(
@@ -969,7 +917,7 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       // Extract milestone ID from directory name (e.g., "M001" or "M001-abc123")
-      const match = entry.name.match(MILESTONE_ID_REGEX);
+      const match = entry.name.match(MILESTONE_ID_RE);
       if (!match) continue; // Not a milestone directory pattern
       const milestoneId = match[1];
 

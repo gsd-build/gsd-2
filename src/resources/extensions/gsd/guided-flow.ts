@@ -32,14 +32,14 @@ import { showProjectInit, offerMigration } from "./init-wizard.js";
 import { validateDirectory } from "./validate-directory.js";
 import { showConfirm } from "../shared/mod.js";
 import { debugLog } from "./debug-logger.js";
-import { findMilestoneIds, nextMilestoneId } from "./milestone-ids.js";
+import { MILESTONE_ID_RE, findMilestoneIds, isSubstantiveMilestone } from "./milestone-ids.js";
 import { parkMilestone, discardMilestone } from "./milestone-actions.js";
 
 // ─── Re-exports (preserve public API for existing importers) ────────────────
 export {
   MILESTONE_ID_RE, generateMilestoneSuffix, nextMilestoneId,
   extractMilestoneSeq, parseMilestoneId, milestoneIdSort,
-  maxMilestoneNum, findMilestoneIds,
+  maxMilestoneNum, findMilestoneIds, isSubstantiveMilestone,
 } from "./milestone-ids.js";
 export {
   showQueue, handleQueueReorder, showQueueAdd,
