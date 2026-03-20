@@ -61,13 +61,14 @@ Then:
    - a concrete, action-oriented title
    - the inline task entry fields defined in the plan.md template (Why / Files / Do / Verify / Done when)
    - a matching task plan file with description, steps, must-haves, verification, inputs, and expected output
+   - **Inputs and Expected Output must list concrete backtick-wrapped file paths** (e.g. `` `src/types.ts` ``). These are machine-parsed to derive task dependencies — vague prose without paths breaks parallel execution. Every task must have at least one output file path.
    - Observability Impact section **only if the task touches runtime boundaries, async flows, or error paths** — omit it otherwise
 6. Write `{{outputPath}}`
 7. Write individual task plans in `{{slicePath}}/tasks/`: `T01-PLAN.md`, `T02-PLAN.md`, etc.
 8. **Self-audit the plan.** Walk through each check — if any fail, fix the plan files before moving on:
     - **Completion semantics:** If every task were completed exactly as written, the slice goal/demo should actually be true.
     - **Requirement coverage:** Every must-have in the slice maps to at least one task. No must-have is orphaned. If `REQUIREMENTS.md` exists, every Active requirement this slice owns maps to at least one task.
-    - **Task completeness:** Every task has steps, must-haves, verification, inputs, and expected output — none are blank or vague.
+    - **Task completeness:** Every task has steps, must-haves, verification, inputs, and expected output — none are blank or vague. Inputs and Expected Output list backtick-wrapped file paths, not prose descriptions.
     - **Dependency correctness:** Task ordering is consistent. No task references work from a later task.
     - **Key links planned:** For every pair of artifacts that must connect, there is an explicit step that wires them.
     - **Scope sanity:** Target 2–5 steps and 3–8 files per task. 10+ steps or 12+ files — must split. Each task must be completable in a single fresh context window.

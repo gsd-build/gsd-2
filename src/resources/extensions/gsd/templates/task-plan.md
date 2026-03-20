@@ -42,11 +42,19 @@ estimated_files: {{estimatedFiles}}
 
 ## Inputs
 
+<!-- Every input MUST be a backtick-wrapped file path. These paths are machine-parsed to
+     derive task dependencies — vague descriptions without paths break dependency detection.
+     For the first task in a slice with no prior task outputs, list the existing source files
+     this task reads or modifies. -->
+
 - `{{filePath}}` — {{whatThisTaskNeedsFromPriorWork}}
-- {{priorTaskSummaryInsight}}
 
 ## Expected Output
 
-<!-- This task should produce a real increment toward making the slice goal/demo true. A full slice plan should not be able to mark every task complete while the claimed slice behavior still does not work at the stated proof level. -->
+<!-- Every output MUST be a backtick-wrapped file path — the specific files this task creates
+     or modifies. These paths are machine-parsed to derive task dependencies.
+     This task should produce a real increment toward making the slice goal/demo true. A full
+     slice plan should not be able to mark every task complete while the claimed slice behavior
+     still does not work at the stated proof level. -->
 
-- `{{filePath}}` — {{whatThisTaskShouldProduceOrModify}}
+- `{{filePath}}` — {{whatThisTaskCreatesOrModifies}}

@@ -235,6 +235,33 @@ export function validateTaskPlanContent(file: string, content: string): Validati
     }
   }
 
+  // Rule: Inputs and Expected Output should contain backtick-wrapped file paths
+  const inputsSection = getSection(content, "Inputs", 2);
+  const outputSection = getSection(content, "Expected Output", 2);
+  const backtickPathPattern = /`[^`]*[./][^`]*`/;
+
+  if (outputSection === null || !backtickPathPattern.test(outputSection)) {
+    issues.push({
+      severity: "warning",
+      scope: "task-plan",
+      file,
+      ruleId: "missing_output_file_paths",
+      message: "Task plan `## Expected Output` is missing or has no backtick-wrapped file paths.",
+      suggestion: "List concrete output file paths in backticks (e.g. `src/types.ts`). These are machine-parsed to derive task dependencies.",
+    });
+  }
+
+  if (inputsSection !== null && inputsSection.trim().length > 0 && !backtickPathPattern.test(inputsSection)) {
+    issues.push({
+      severity: "info",
+      scope: "task-plan",
+      file,
+      ruleId: "missing_input_file_paths",
+      message: "Task plan `## Inputs` has content but no backtick-wrapped file paths.",
+      suggestion: "List input file paths in backticks (e.g. `src/config.json`). These are machine-parsed to derive task dependencies.",
+    });
+  }
+
   // ── Observability rules (gated by runtime relevance) ──
 
   const relevant = textSuggestsObservabilityRelevant(content);
