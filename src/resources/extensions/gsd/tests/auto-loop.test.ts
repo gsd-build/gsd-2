@@ -317,6 +317,8 @@ function makeMockDeps(
     },
     clearUnitTimeout: () => {},
     updateProgressWidget: () => {},
+    syncCmuxSidebar: () => {},
+    logCmuxEvent: () => {},
     invalidateAllCaches: () => {
       callLog.push("invalidateAllCaches");
     },

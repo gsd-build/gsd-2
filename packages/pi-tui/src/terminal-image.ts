@@ -41,8 +41,13 @@ export function detectCapabilities(): TerminalCapabilities {
 	const termProgram = process.env.TERM_PROGRAM?.toLowerCase() || "";
 	const term = process.env.TERM?.toLowerCase() || "";
 	const colorTerm = process.env.COLORTERM?.toLowerCase() || "";
+	const isCmux = Boolean(process.env.CMUX_WORKSPACE_ID && process.env.CMUX_SURFACE_ID);
 
 	if (process.env.KITTY_WINDOW_ID || termProgram === "kitty") {
+		return { images: "kitty", trueColor: true, hyperlinks: true };
+	}
+
+	if (isCmux) {
 		return { images: "kitty", trueColor: true, hyperlinks: true };
 	}
 

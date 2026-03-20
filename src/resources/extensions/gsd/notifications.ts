@@ -4,6 +4,7 @@
 import { execFileSync } from "node:child_process";
 import type { NotificationPreferences } from "./types.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
+import { CmuxClient, emitOsc777Notification, resolveCmuxConfig } from "../cmux/index.js";
 
 export type NotifyLevel = "info" | "success" | "warning" | "error";
 export type NotificationKind = "complete" | "error" | "budget" | "milestone" | "attention";
@@ -23,7 +24,15 @@ export function sendDesktopNotification(
   level: NotifyLevel = "info",
   kind: NotificationKind = "complete",
 ): void {
-  if (!shouldSendDesktopNotification(kind)) return;
+  const loaded = loadEffectiveGSDPreferences()?.preferences;
+  if (!shouldSendDesktopNotification(kind, loaded?.notifications)) return;
+
+  const cmux = resolveCmuxConfig(loaded);
+  if (cmux.notifications) {
+    const delivered = CmuxClient.fromPreferences(loaded).notify(title, message);
+    if (delivered) return;
+    emitOsc777Notification(title, message);
+  }
 
   try {
     const command = buildDesktopNotificationCommand(process.platform, title, message, level);

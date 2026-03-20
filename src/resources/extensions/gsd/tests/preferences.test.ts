@@ -171,6 +171,29 @@ test("notification fields validate correctly", () => {
   assert.equal(preferences.notifications?.on_complete, false);
 });
 
+test("cmux fields validate correctly", () => {
+  const { preferences, errors } = validatePreferences({
+    cmux: {
+      enabled: true,
+      notifications: true,
+      sidebar: false,
+      splits: true,
+      browser: false,
+    },
+  });
+  assert.equal(errors.length, 0);
+  assert.equal(preferences.cmux?.enabled, true);
+  assert.equal(preferences.cmux?.sidebar, false);
+  assert.equal(preferences.cmux?.splits, true);
+});
+
+test("cmux unknown keys produce warnings", () => {
+  const { warnings } = validatePreferences({
+    cmux: { enabled: true, strange_mode: true } as any,
+  });
+  assert.ok(warnings.some((warning) => warning.includes('unknown cmux key "strange_mode"')));
+});
+
 test("git fields comprehensive validation", () => {
   const { preferences, errors } = validatePreferences({
     git: {

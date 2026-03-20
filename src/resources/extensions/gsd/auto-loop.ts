@@ -25,6 +25,7 @@ import type {
 import type { DispatchAction } from "./auto-dispatch.js";
 import type { WorktreeResolver } from "./worktree-resolver.js";
 import { debugLog } from "./debug-logger.js";
+import type { CmuxLogLevel } from "../cmux/index.js";
 
 /**
  * Maximum total loop iterations before forced stop. Prevents runaway loops
@@ -275,6 +276,12 @@ export interface LoopDeps {
     unitType: string,
     unitId: string,
     state: GSDState,
+  ) => void;
+  syncCmuxSidebar: (preferences: GSDPreferences | undefined, state: GSDState) => void;
+  logCmuxEvent: (
+    preferences: GSDPreferences | undefined,
+    message: string,
+    level?: CmuxLogLevel,
   ) => void;
 
   // State and cache functions
@@ -609,6 +616,7 @@ export async function autoLoop(
 
       // Derive state
       let state = await deps.deriveState(s.basePath);
+      deps.syncCmuxSidebar(deps.loadEffectiveGSDPreferences()?.preferences, state);
       let mid = state.activeMilestone?.id;
       let midTitle = state.activeMilestone?.title;
       debugLog("autoLoop", {
@@ -629,6 +637,11 @@ export async function autoLoop(
           `Milestone ${s.currentMilestoneId} complete!`,
           "success",
           "milestone",
+        );
+        deps.logCmuxEvent(
+          deps.loadEffectiveGSDPreferences()?.preferences,
+          `Milestone ${s.currentMilestoneId} complete. Advancing to ${mid}.`,
+          "success",
         );
 
         const vizPrefs = deps.loadEffectiveGSDPreferences()?.preferences;
@@ -767,12 +780,18 @@ export async function autoLoop(
             "success",
             "milestone",
           );
+          deps.logCmuxEvent(
+            deps.loadEffectiveGSDPreferences()?.preferences,
+            "All milestones complete.",
+            "success",
+          );
           await deps.stopAuto(ctx, pi, "All milestones complete");
         } else if (state.phase === "blocked") {
           const blockerMsg = `Blocked: ${state.blockers.join(", ")}`;
           await deps.stopAuto(ctx, pi, blockerMsg);
           ctx.ui.notify(`${blockerMsg}. Fix and run /gsd auto.`, "warning");
           deps.sendDesktopNotification("GSD", blockerMsg, "error", "attention");
+          deps.logCmuxEvent(deps.loadEffectiveGSDPreferences()?.preferences, blockerMsg, "error");
         } else {
           const ids = incomplete.map((m: { id: string }) => m.id).join(", ");
           const diag = `basePath=${s.basePath}, milestones=[${state.registry.map((m: { id: string; status: string }) => `${m.id}:${m.status}`).join(", ")}], phase=${state.phase}`;
@@ -850,6 +869,11 @@ export async function autoLoop(
           "success",
           "milestone",
         );
+        deps.logCmuxEvent(
+          deps.loadEffectiveGSDPreferences()?.preferences,
+          `Milestone ${mid} complete.`,
+          "success",
+        );
         await deps.stopAuto(ctx, pi, `Milestone ${mid} complete`);
         debugLog("autoLoop", { phase: "exit", reason: "milestone-complete" });
         break;
@@ -871,6 +895,7 @@ export async function autoLoop(
         await deps.stopAuto(ctx, pi, blockerMsg);
         ctx.ui.notify(`${blockerMsg}. Fix and run /gsd auto.`, "warning");
         deps.sendDesktopNotification("GSD", blockerMsg, "error", "attention");
+        deps.logCmuxEvent(deps.loadEffectiveGSDPreferences()?.preferences, blockerMsg, "error");
         debugLog("autoLoop", { phase: "exit", reason: "blocked" });
         break;
       }
@@ -914,12 +939,14 @@ export async function autoLoop(
               "warning",
             );
             deps.sendDesktopNotification("GSD", msg, "warning", "budget");
+            deps.logCmuxEvent(prefs, msg, "warning");
             await deps.pauseAuto(ctx, pi);
             debugLog("autoLoop", { phase: "exit", reason: "budget-pause" });
             break;
           }
           ctx.ui.notify(`${msg} Continuing (enforcement: warn).`, "warning");
           deps.sendDesktopNotification("GSD", msg, "warning", "budget");
+          deps.logCmuxEvent(prefs, msg, "warning");
         } else if (newBudgetAlertLevel === 90) {
           s.lastBudgetAlertLevel =
             newBudgetAlertLevel as AutoSession["lastBudgetAlertLevel"];
@@ -932,6 +959,11 @@ export async function autoLoop(
             `Budget 90%: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`,
             "warning",
             "budget",
+          );
+          deps.logCmuxEvent(
+            prefs,
+            `Budget 90%: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`,
+            "warning",
           );
         } else if (newBudgetAlertLevel === 80) {
           s.lastBudgetAlertLevel =
@@ -946,6 +978,11 @@ export async function autoLoop(
             "warning",
             "budget",
           );
+          deps.logCmuxEvent(
+            prefs,
+            `Budget 80%: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`,
+            "warning",
+          );
         } else if (newBudgetAlertLevel === 75) {
           s.lastBudgetAlertLevel =
             newBudgetAlertLevel as AutoSession["lastBudgetAlertLevel"];
@@ -958,6 +995,11 @@ export async function autoLoop(
             `Budget 75%: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`,
             "info",
             "budget",
+          );
+          deps.logCmuxEvent(
+            prefs,
+            `Budget 75%: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`,
+            "progress",
           );
         } else if (budgetAlertLevel === 0) {
           s.lastBudgetAlertLevel = 0;

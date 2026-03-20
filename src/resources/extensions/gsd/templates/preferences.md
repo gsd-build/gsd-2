@@ -57,6 +57,12 @@ notifications:
   on_budget:
   on_milestone:
   on_attention:
+cmux:
+  enabled:
+  notifications:
+  sidebar:
+  splits:
+  browser:
 remote_questions:
   channel:
   channel_id:

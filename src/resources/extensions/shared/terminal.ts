@@ -7,9 +7,14 @@
 
 const UNSUPPORTED_TERMS = ["apple_terminal", "warpterm"];
 
+export function isCmuxTerminal(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(env.CMUX_WORKSPACE_ID && env.CMUX_SURFACE_ID);
+}
+
 export function supportsCtrlAltShortcuts(): boolean {
   const term = (process.env.TERM_PROGRAM || "").toLowerCase();
   const jetbrains = (process.env.TERMINAL_EMULATOR || "").toLowerCase().includes("jetbrains");
+  if (isCmuxTerminal()) return true;
   return !UNSUPPORTED_TERMS.some((t) => term.includes(t)) && !jetbrains;
 }
 

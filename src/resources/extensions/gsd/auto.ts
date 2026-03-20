@@ -184,6 +184,7 @@ import {
 } from "./auto-supervisor.js";
 import { isDbAvailable } from "./gsd-db.js";
 import { countPendingCaptures } from "./captures.js";
+import { clearCmuxSidebar, logCmuxEvent, syncCmuxSidebar } from "../cmux/index.js";
 
 // ── Extracted modules ──────────────────────────────────────────────────────
 import { startUnitSupervision } from "./auto-timers.js";
@@ -466,6 +467,7 @@ function handleLostSessionLock(ctx?: ExtensionContext): void {
   s.paused = false;
   clearUnitTimeout();
   deregisterSigtermHandler();
+  clearCmuxSidebar(loadEffectiveGSDPreferences()?.preferences);
   ctx?.ui.notify(
     "Session lock lost — another GSD process appears to have taken over. Stopping gracefully.",
     "error",
@@ -481,6 +483,7 @@ export async function stopAuto(
   reason?: string,
 ): Promise<void> {
   if (!s.active && !s.paused) return;
+  const loadedPreferences = loadEffectiveGSDPreferences()?.preferences;
   const reasonSuffix = reason ? ` — ${reason}` : "";
   clearUnitTimeout();
   if (lockBase()) clearLock(lockBase());
@@ -542,6 +545,13 @@ export async function stopAuto(
       });
     }
   }
+
+  clearCmuxSidebar(loadedPreferences);
+  logCmuxEvent(
+    loadedPreferences,
+    `Auto-mode stopped${reasonSuffix || ""}.`,
+    reason?.startsWith("Blocked:") ? "warning" : "info",
+  );
 
   if (isDebugEnabled()) {
     const logPath = writeDebugSummary();
@@ -708,6 +718,8 @@ function buildLoopDeps(): LoopDeps {
     pauseAuto,
     clearUnitTimeout,
     updateProgressWidget,
+    syncCmuxSidebar,
+    logCmuxEvent,
 
     // State and cache
     invalidateAllCaches,
@@ -890,6 +902,7 @@ export async function startAuto(
     restoreHookState(s.basePath);
     try {
       await rebuildState(s.basePath);
+      syncCmuxSidebar(loadEffectiveGSDPreferences()?.preferences, await deriveState(s.basePath));
     } catch (e) {
       debugLog("resume-rebuild-state-failed", {
         error: e instanceof Error ? e.message : String(e),
@@ -941,6 +954,7 @@ export async function startAuto(
       s.currentMilestoneId ?? "unknown",
       s.completedUnits.length,
     );
+    logCmuxEvent(loadEffectiveGSDPreferences()?.preferences, s.stepMode ? "Step-mode resumed." : "Auto-mode resumed.", "progress");
 
     await autoLoop(ctx, pi, s, buildLoopDeps());
     return;
@@ -964,6 +978,13 @@ export async function startAuto(
     bootstrapDeps,
   );
   if (!ready) return;
+
+  try {
+    syncCmuxSidebar(loadEffectiveGSDPreferences()?.preferences, await deriveState(s.basePath));
+  } catch {
+    // Best-effort only — sidebar sync must never block auto-mode startup
+  }
+  logCmuxEvent(loadEffectiveGSDPreferences()?.preferences, requestedStepMode ? "Step-mode started." : "Auto-mode started.", "progress");
 
   // Dispatch the first unit
   await autoLoop(ctx, pi, s, buildLoopDeps());

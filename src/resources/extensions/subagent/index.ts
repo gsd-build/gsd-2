@@ -34,6 +34,8 @@ import {
 	readIsolationMode,
 } from "./isolation.js";
 import { registerWorker, updateWorker } from "./worker-registry.js";
+import { loadEffectiveGSDPreferences } from "../gsd/preferences.js";
+import { CmuxClient, shellEscape } from "../cmux/index.js";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -257,6 +259,70 @@ function writePromptToTempFile(agentName: string, prompt: string): { dir: string
 	return { dir: tmpDir, filePath };
 }
 
+function buildSubagentProcessArgs(
+	agent: AgentConfig,
+	task: string,
+	tmpPromptPath: string | null,
+): string[] {
+	const args: string[] = ["--mode", "json", "-p", "--no-session"];
+	if (agent.model) args.push("--model", agent.model);
+	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
+	if (tmpPromptPath) args.push("--append-system-prompt", tmpPromptPath);
+	args.push(`Task: ${task}`);
+	return args;
+}
+
+function processSubagentEventLine(
+	line: string,
+	currentResult: SingleResult,
+	emitUpdate: () => void,
+): void {
+	if (!line.trim()) return;
+	let event: any;
+	try {
+		event = JSON.parse(line);
+	} catch {
+		return;
+	}
+
+	if (event.type === "message_end" && event.message) {
+		const msg = event.message as Message;
+		currentResult.messages.push(msg);
+
+		if (msg.role === "assistant") {
+			currentResult.usage.turns++;
+			const usage = msg.usage;
+			if (usage) {
+				currentResult.usage.input += usage.input || 0;
+				currentResult.usage.output += usage.output || 0;
+				currentResult.usage.cacheRead += usage.cacheRead || 0;
+				currentResult.usage.cacheWrite += usage.cacheWrite || 0;
+				currentResult.usage.cost += usage.cost?.total || 0;
+				currentResult.usage.contextTokens = usage.totalTokens || 0;
+			}
+			if (!currentResult.model && msg.model) currentResult.model = msg.model;
+			if (msg.stopReason) currentResult.stopReason = msg.stopReason;
+			if (msg.errorMessage) currentResult.errorMessage = msg.errorMessage;
+		}
+		emitUpdate();
+	}
+
+	if (event.type === "tool_result_end" && event.message) {
+		currentResult.messages.push(event.message as Message);
+		emitUpdate();
+	}
+}
+
+async function waitForFile(filePath: string, signal: AbortSignal | undefined, timeoutMs = 30 * 60 * 1000): Promise<boolean> {
+	const started = Date.now();
+	while (Date.now() - started < timeoutMs) {
+		if (signal?.aborted) return false;
+		if (fs.existsSync(filePath)) return true;
+		await new Promise((resolve) => setTimeout(resolve, 150));
+	}
+	return false;
+}
+
 type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
 
 async function runSingleAgent(
@@ -285,10 +351,6 @@ async function runSingleAgent(
 			step,
 		};
 	}
-
-	const args: string[] = ["--mode", "json", "-p", "--no-session"];
-	if (agent.model) args.push("--model", agent.model);
-	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
 
 	let tmpPromptDir: string | null = null;
 	let tmpPromptPath: string | null = null;
@@ -319,10 +381,8 @@ async function runSingleAgent(
 			const tmp = writePromptToTempFile(agent.name, agent.systemPrompt);
 			tmpPromptDir = tmp.dir;
 			tmpPromptPath = tmp.filePath;
-			args.push("--append-system-prompt", tmpPromptPath);
 		}
-
-		args.push(`Task: ${task}`);
+		const args = buildSubagentProcessArgs(agent, task, tmpPromptPath);
 		let wasAborted = false;
 
 		const exitCode = await new Promise<number>((resolve) => {
@@ -336,48 +396,11 @@ async function runSingleAgent(
 			liveSubagentProcesses.add(proc);
 			let buffer = "";
 
-			const processLine = (line: string) => {
-				if (!line.trim()) return;
-				let event: any;
-				try {
-					event = JSON.parse(line);
-				} catch {
-					return;
-				}
-
-				if (event.type === "message_end" && event.message) {
-					const msg = event.message as Message;
-					currentResult.messages.push(msg);
-
-					if (msg.role === "assistant") {
-						currentResult.usage.turns++;
-						const usage = msg.usage;
-						if (usage) {
-							currentResult.usage.input += usage.input || 0;
-							currentResult.usage.output += usage.output || 0;
-							currentResult.usage.cacheRead += usage.cacheRead || 0;
-							currentResult.usage.cacheWrite += usage.cacheWrite || 0;
-							currentResult.usage.cost += usage.cost?.total || 0;
-							currentResult.usage.contextTokens = usage.totalTokens || 0;
-						}
-						if (!currentResult.model && msg.model) currentResult.model = msg.model;
-						if (msg.stopReason) currentResult.stopReason = msg.stopReason;
-						if (msg.errorMessage) currentResult.errorMessage = msg.errorMessage;
-					}
-					emitUpdate();
-				}
-
-				if (event.type === "tool_result_end" && event.message) {
-					currentResult.messages.push(event.message as Message);
-					emitUpdate();
-				}
-			};
-
 			proc.stdout.on("data", (data) => {
 				buffer += data.toString();
 				const lines = buffer.split("\n");
 				buffer = lines.pop() || "";
-				for (const line of lines) processLine(line);
+				for (const line of lines) processSubagentEventLine(line, currentResult, emitUpdate);
 			});
 
 			proc.stderr.on("data", (data) => {
@@ -386,7 +409,7 @@ async function runSingleAgent(
 
 			proc.on("close", (code) => {
 				liveSubagentProcesses.delete(proc);
-				if (buffer.trim()) processLine(buffer);
+				if (buffer.trim()) processSubagentEventLine(buffer, currentResult, emitUpdate);
 				resolve(code ?? 0);
 			});
 
@@ -421,6 +444,120 @@ async function runSingleAgent(
 		if (tmpPromptDir)
 			try {
 				fs.rmdirSync(tmpPromptDir);
+			} catch {
+				/* ignore */
+			}
+	}
+}
+
+async function runSingleAgentInCmuxSplit(
+	cmuxClient: CmuxClient,
+	direction: "right" | "down",
+	defaultCwd: string,
+	agents: AgentConfig[],
+	agentName: string,
+	task: string,
+	cwd: string | undefined,
+	step: number | undefined,
+	signal: AbortSignal | undefined,
+	onUpdate: OnUpdateCallback | undefined,
+	makeDetails: (results: SingleResult[]) => SubagentDetails,
+): Promise<SingleResult> {
+	const agent = agents.find((a) => a.name === agentName);
+	if (!agent) {
+		return runSingleAgent(defaultCwd, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails);
+	}
+
+	let tmpPromptDir: string | null = null;
+	let tmpPromptPath: string | null = null;
+	let tmpOutputDir: string | null = null;
+
+	const currentResult: SingleResult = {
+		agent: agentName,
+		agentSource: agent.source,
+		task,
+		exitCode: 0,
+		messages: [],
+		stderr: "",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
+		model: agent.model,
+		step,
+	};
+
+	const emitUpdate = () => {
+		if (onUpdate) {
+			onUpdate({
+				content: [{ type: "text", text: getFinalOutput(currentResult.messages) || "(running...)" }],
+				details: makeDetails([currentResult]),
+			});
+		}
+	};
+
+	try {
+		if (agent.systemPrompt.trim()) {
+			const tmp = writePromptToTempFile(agent.name, agent.systemPrompt);
+			tmpPromptDir = tmp.dir;
+			tmpPromptPath = tmp.filePath;
+		}
+		tmpOutputDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagent-cmux-"));
+		const stdoutPath = path.join(tmpOutputDir, "stdout.jsonl");
+		const stderrPath = path.join(tmpOutputDir, "stderr.log");
+		const exitPath = path.join(tmpOutputDir, "exit.code");
+		const cmuxSurfaceId = await cmuxClient.createSplit(direction);
+		if (!cmuxSurfaceId) {
+			return runSingleAgent(defaultCwd, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails);
+		}
+
+		const bundledPaths = (process.env.GSD_BUNDLED_EXTENSION_PATHS ?? "").split(path.delimiter).map((s) => s.trim()).filter(Boolean);
+		const extensionArgs = bundledPaths.flatMap((p) => ["--extension", p]);
+		const processArgs = [process.env.GSD_BIN_PATH!, ...extensionArgs, ...buildSubagentProcessArgs(agent, task, tmpPromptPath)];
+		const innerScript = [
+			`cd ${shellEscape(cwd ?? defaultCwd)}`,
+			"set -o pipefail",
+			`${shellEscape(process.execPath)} ${processArgs.map(shellEscape).join(" ")} 2> >(tee ${shellEscape(stderrPath)} >&2) | tee ${shellEscape(stdoutPath)}`,
+			"status=${PIPESTATUS[0]}",
+			`printf '%s' "$status" > ${shellEscape(exitPath)}`,
+		].join("; ");
+
+		const sent = await cmuxClient.sendSurface(cmuxSurfaceId, `bash -lc ${shellEscape(innerScript)}`);
+		if (!sent) {
+			return runSingleAgent(defaultCwd, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails);
+		}
+
+		const finished = await waitForFile(exitPath, signal);
+		if (!finished) {
+			currentResult.exitCode = 1;
+			currentResult.stderr = "cmux split execution timed out or was aborted";
+			return currentResult;
+		}
+
+		if (fs.existsSync(stdoutPath)) {
+			const stdout = fs.readFileSync(stdoutPath, "utf-8");
+			for (const line of stdout.split("\n")) {
+				processSubagentEventLine(line, currentResult, emitUpdate);
+			}
+		}
+		if (fs.existsSync(stderrPath)) {
+			currentResult.stderr = fs.readFileSync(stderrPath, "utf-8");
+		}
+		currentResult.exitCode = Number.parseInt(fs.readFileSync(exitPath, "utf-8").trim() || "1", 10) || 0;
+		return currentResult;
+	} finally {
+		if (tmpPromptPath)
+			try {
+				fs.unlinkSync(tmpPromptPath);
+			} catch {
+				/* ignore */
+			}
+		if (tmpPromptDir)
+			try {
+				fs.rmdirSync(tmpPromptDir);
+			} catch {
+				/* ignore */
+			}
+		if (tmpOutputDir)
+			try {
+				fs.rmSync(tmpOutputDir, { recursive: true, force: true });
 			} catch {
 				/* ignore */
 			}
@@ -511,6 +648,8 @@ export default function (pi: ExtensionAPI) {
 			const discovery = discoverAgents(ctx.cwd, agentScope);
 			const agents = discovery.agents;
 			const confirmProjectAgents = params.confirmProjectAgents ?? false;
+			const cmuxClient = CmuxClient.fromPreferences(loadEffectiveGSDPreferences()?.preferences);
+			const cmuxSplitsEnabled = cmuxClient.getConfig().splits;
 
 			// Resolve isolation mode
 			const isolationMode = readIsolationMode();
@@ -669,28 +808,26 @@ export default function (pi: ExtensionAPI) {
 				const batchSize = params.tasks.length;
 				const results = await mapWithConcurrencyLimit(params.tasks, MAX_CONCURRENCY, async (t, index) => {
 					const workerId = registerWorker(t.agent, t.task, index, batchSize, batchId);
-					let result = await runSingleAgent(
-						ctx.cwd,
-						agents,
-						t.agent,
-						t.task,
-						t.cwd,
-						undefined,
-						signal,
-						// Per-task update callback
-						(partial) => {
-							if (partial.details?.results[0]) {
-								allResults[index] = partial.details.results[0];
-								emitParallelUpdate();
-							}
-						},
-						makeDetails("parallel"),
-					);
-
-					// Auto-retry failed tasks (likely API rate limit or transient error)
-					const isFailed = result.exitCode !== 0 || (result.messages.length === 0 && !signal?.aborted);
-					if (isFailed && MAX_RETRIES > 0 && !signal?.aborted) {
-						result = await runSingleAgent(
+					const runTask = () => cmuxSplitsEnabled
+						? runSingleAgentInCmuxSplit(
+							cmuxClient,
+							index % 2 === 0 ? "right" : "down",
+							ctx.cwd,
+							agents,
+							t.agent,
+							t.task,
+							t.cwd,
+							undefined,
+							signal,
+							(partial) => {
+								if (partial.details?.results[0]) {
+									allResults[index] = partial.details.results[0];
+									emitParallelUpdate();
+								}
+							},
+							makeDetails("parallel"),
+						)
+						: runSingleAgent(
 							ctx.cwd,
 							agents,
 							t.agent,
@@ -706,6 +843,12 @@ export default function (pi: ExtensionAPI) {
 							},
 							makeDetails("parallel"),
 						);
+					let result = await runTask();
+
+					// Auto-retry failed tasks (likely API rate limit or transient error)
+					const isFailed = result.exitCode !== 0 || (result.messages.length === 0 && !signal?.aborted);
+					if (isFailed && MAX_RETRIES > 0 && !signal?.aborted) {
+						result = await runTask();
 					}
 
 					updateWorker(workerId, result.exitCode === 0 ? "completed" : "failed");
@@ -744,17 +887,31 @@ export default function (pi: ExtensionAPI) {
 						isolation = await createIsolation(effectiveCwd, taskId, isolationMode);
 					}
 
-					const result = await runSingleAgent(
-						ctx.cwd,
-						agents,
-						params.agent,
-						params.task,
-						isolation ? isolation.workDir : params.cwd,
-						undefined,
-						signal,
-						onUpdate,
-						makeDetails("single"),
-					);
+					const result = cmuxSplitsEnabled
+						? await runSingleAgentInCmuxSplit(
+							cmuxClient,
+							"right",
+							ctx.cwd,
+							agents,
+							params.agent,
+							params.task,
+							isolation ? isolation.workDir : params.cwd,
+							undefined,
+							signal,
+							onUpdate,
+							makeDetails("single"),
+						)
+						: await runSingleAgent(
+							ctx.cwd,
+							agents,
+							params.agent,
+							params.task,
+							isolation ? isolation.workDir : params.cwd,
+							undefined,
+							signal,
+							onUpdate,
+							makeDetails("single"),
+						);
 
 					// Capture and merge delta if isolated
 					if (isolation) {

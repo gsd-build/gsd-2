@@ -65,6 +65,7 @@ import { pauseAutoForProviderError, classifyProviderError } from "./provider-err
 import { toPosixPath } from "../shared/mod.js";
 import { isParallelActive, shutdownParallel } from "./parallel-orchestrator.js";
 import { DEFAULT_BASH_TIMEOUT_SECS } from "./constants.js";
+import { markCmuxPromptShown, shouldPromptToEnableCmux } from "../cmux/index.js";
 
 // ── Agent Instructions (DEPRECATED) ──────────────────────────────────────
 // agent-instructions.md is deprecated. Use AGENTS.md or CLAUDE.md instead.
@@ -623,6 +624,13 @@ export default function (pi: ExtensionAPI) {
     const stopContextTimer = debugTime("context-inject");
     const systemContent = loadPrompt("system");
     const loadedPreferences = loadEffectiveGSDPreferences();
+    if (shouldPromptToEnableCmux(loadedPreferences?.preferences)) {
+      markCmuxPromptShown();
+      ctx.ui.notify(
+        "cmux detected. Run /gsd cmux on to enable sidebar metadata, notifications, and visual subagent splits for this project.",
+        "info",
+      );
+    }
     let preferenceBlock = "";
     if (loadedPreferences) {
       const cwd = process.cwd();

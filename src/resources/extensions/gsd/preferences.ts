@@ -45,6 +45,7 @@ export type {
   SkillDiscoveryMode,
   AutoSupervisorConfig,
   RemoteQuestionsConfig,
+  CmuxPreferences,
   GSDPreferences,
   LoadedGSDPreferences,
   SkillResolution,
@@ -240,6 +241,9 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
     context_pause_threshold: override.context_pause_threshold ?? base.context_pause_threshold,
     notifications: (base.notifications || override.notifications)
       ? { ...(base.notifications ?? {}), ...(override.notifications ?? {}) }
+      : undefined,
+    cmux: (base.cmux || override.cmux)
+      ? { ...(base.cmux ?? {}), ...(override.cmux ?? {}) }
       : undefined,
     remote_questions: override.remote_questions
       ? { ...(base.remote_questions ?? {}), ...override.remote_questions }
