@@ -179,7 +179,6 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
       // Proactive health tracking — filter to current milestone to avoid
       // cross-milestone stale errors inflating the escalation counter
       const currentMilestoneId = s.currentUnit.id.split("/")[0];
-      const doctorScope = s.currentUnit.id.split("/").slice(0, 2).join("/");
       const milestoneIssues = currentMilestoneId
         ? report.issues.filter(i =>
             i.unitId === currentMilestoneId ||
