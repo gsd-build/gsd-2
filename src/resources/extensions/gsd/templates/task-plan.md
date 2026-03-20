@@ -3,6 +3,9 @@
 # Tasks with 10+ estimated steps or 12+ estimated files trigger a warning to consider splitting.
 estimated_steps: {{estimatedSteps}}
 estimated_files: {{estimatedFiles}}
+# Installed skills the planner expects the executor to load before coding.
+skills_used:
+  - {{skillName}}
 ---
 
 # {{taskId}}: {{taskTitle}}

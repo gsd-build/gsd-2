@@ -6,19 +6,20 @@
  * utility.
  */
 
-import { loadFile, parseContinue, parsePlan, parseRoadmap, parseSummary, extractUatType, loadActiveOverrides, formatOverridesSection } from "./files.js";
+import { loadFile, parseContinue, parsePlan, parseRoadmap, parseSummary, extractUatType, loadActiveOverrides, formatOverridesSection, parseTaskPlanFile } from "./files.js";
 import type { Override, UatType } from "./files.js";
 import { loadPrompt, inlineTemplate } from "./prompt-loader.js";
 import {
   resolveMilestoneFile, resolveSliceFile, resolveSlicePath,
   resolveTasksDir, resolveTaskFiles, resolveTaskFile,
   relMilestoneFile, relSliceFile, relSlicePath, relMilestonePath,
-  resolveGsdRootFile, relGsdRootFile,
+  resolveGsdRootFile, relGsdRootFile, resolveRuntimeFile,
 } from "./paths.js";
-import { resolveSkillDiscoveryMode, resolveInlineLevel, loadEffectiveGSDPreferences } from "./preferences.js";
+import { resolveSkillDiscoveryMode, resolveInlineLevel, loadEffectiveGSDPreferences, resolveAllSkillReferences } from "./preferences.js";
 import type { GSDState, InlineLevel } from "./types.js";
 import type { GSDPreferences } from "./preferences.js";
-import { join } from "node:path";
+import { getLoadedSkills, type Skill } from "@gsd/pi-coding-agent";
+import { join, basename } from "node:path";
 import { existsSync } from "node:fs";
 import { computeBudgets, resolveExecutorContextWindow, truncateAtSectionBoundary } from "./context-budget.js";
 import { formatDecisionsCompact, formatRequirementsCompact } from "./structured-data-formatter.js";
@@ -297,7 +298,171 @@ export async function inlineProjectFromDb(
   return inlineGsdRootFile(base, "project.md", "Project");
 }
 
-// ─── Skill Discovery ──────────────────────────────────────────────────────
+// ─── Skill Activation & Discovery ─────────────────────────────────────────
+
+function normalizeSkillReference(ref: string): string {
+  const normalized = ref.replace(/\\/g, "/").trim();
+  const base = basename(normalized).replace(/\.md$/i, "");
+  const name = /^SKILL$/i.test(base)
+    ? basename(normalized.replace(/\/SKILL(?:\.md)?$/i, ""))
+    : base;
+  return name.trim().toLowerCase();
+}
+
+function tokenizeSkillContext(...parts: Array<string | null | undefined>): Set<string> {
+  const tokens = new Set<string>();
+  const addVariants = (raw: string) => {
+    const value = raw.trim().toLowerCase();
+    if (!value || value.length < 2) return;
+    tokens.add(value);
+    tokens.add(value.replace(/[-_]+/g, " "));
+    tokens.add(value.replace(/\s+/g, "-"));
+    tokens.add(value.replace(/\s+/g, ""));
+  };
+
+  for (const part of parts) {
+    if (!part) continue;
+    const text = part.toLowerCase();
+    const phraseMatches = text.match(/[a-z0-9][a-z0-9+.#/_-]{1,}/g) ?? [];
+    for (const match of phraseMatches) {
+      addVariants(match);
+      for (const piece of match.split(/[^a-z0-9+.#]+/g)) {
+        if (piece.length >= 3) addVariants(piece);
+      }
+    }
+  }
+
+  return tokens;
+}
+
+function skillMatchesContext(skill: Skill, contextTokens: Set<string>): boolean {
+  const haystacks = [
+    skill.name.toLowerCase(),
+    skill.name.toLowerCase().replace(/[-_]+/g, " "),
+    skill.description.toLowerCase(),
+  ];
+
+  return [...contextTokens].some(token =>
+    token.length >= 3 && haystacks.some(haystack => haystack.includes(token)),
+  );
+}
+
+function resolvePreferenceSkillNames(refs: string[], base: string): string[] {
+  if (refs.length === 0) return [];
+  const prefs: GSDPreferences = { always_use_skills: refs };
+  const report = resolveAllSkillReferences(prefs, base);
+  return refs.map(ref => {
+    const resolution = report.resolutions.get(ref);
+    return normalizeSkillReference(resolution?.resolvedPath ?? ref);
+  }).filter(Boolean);
+}
+
+function ruleMatchesContext(when: string, contextTokens: Set<string>): boolean {
+  const whenTokens = tokenizeSkillContext(when);
+  return [...whenTokens].some(token =>
+    contextTokens.has(token) || [...contextTokens].some(ctx => ctx.includes(token) || token.includes(ctx)),
+  );
+}
+
+function resolveSkillRuleMatches(
+  prefs: GSDPreferences | undefined,
+  contextTokens: Set<string>,
+  base: string,
+): { include: string[]; avoid: string[] } {
+  if (!prefs?.skill_rules?.length) return { include: [], avoid: [] };
+
+  const include: string[] = [];
+  const avoid: string[] = [];
+  for (const rule of prefs.skill_rules) {
+    if (!ruleMatchesContext(rule.when, contextTokens)) continue;
+    include.push(...resolvePreferenceSkillNames([...(rule.use ?? []), ...(rule.prefer ?? [])], base));
+    avoid.push(...resolvePreferenceSkillNames(rule.avoid ?? [], base));
+  }
+  return { include, avoid };
+}
+
+function resolvePreferredSkillNames(
+  prefs: GSDPreferences | undefined,
+  visibleSkills: Skill[],
+  contextTokens: Set<string>,
+  base: string,
+): string[] {
+  if (!prefs?.prefer_skills?.length) return [];
+  const preferred = new Set(resolvePreferenceSkillNames(prefs.prefer_skills, base));
+  return visibleSkills
+    .filter(skill => preferred.has(normalizeSkillReference(skill.name)) && skillMatchesContext(skill, contextTokens))
+    .map(skill => normalizeSkillReference(skill.name));
+}
+
+function formatSkillActivationBlock(skillNames: string[]): string {
+  if (skillNames.length === 0) return "";
+  const calls = skillNames.map(name => `Call Skill('${name}')`).join('. ');
+  return `<skill_activation>${calls}.</skill_activation>`;
+}
+
+export function buildSkillActivationBlock(params: {
+  base: string;
+  milestoneId: string;
+  milestoneTitle?: string;
+  sliceId?: string;
+  sliceTitle?: string;
+  taskId?: string;
+  taskTitle?: string;
+  extraContext?: string[];
+  taskPlanContent?: string | null;
+  preferences?: GSDPreferences;
+}): string {
+  const prefs = params.preferences ?? loadEffectiveGSDPreferences()?.preferences;
+  const contextTokens = tokenizeSkillContext(
+    params.milestoneId,
+    params.milestoneTitle,
+    params.sliceId,
+    params.sliceTitle,
+    params.taskId,
+    params.taskTitle,
+    ...(params.extraContext ?? []),
+    params.taskPlanContent ?? undefined,
+  );
+
+  const visibleSkills = getLoadedSkills().filter(skill => !skill.disableModelInvocation);
+  const installedNames = new Set(visibleSkills.map(skill => normalizeSkillReference(skill.name)));
+  const avoided = new Set(resolvePreferenceSkillNames(prefs?.avoid_skills ?? [], params.base));
+  const matched = new Set<string>();
+
+  for (const name of resolvePreferenceSkillNames(prefs?.always_use_skills ?? [], params.base)) {
+    matched.add(name);
+  }
+
+  const ruleMatches = resolveSkillRuleMatches(prefs, contextTokens, params.base);
+  for (const name of ruleMatches.include) matched.add(name);
+  for (const name of ruleMatches.avoid) avoided.add(name);
+
+  for (const name of resolvePreferredSkillNames(prefs, visibleSkills, contextTokens, params.base)) {
+    matched.add(name);
+  }
+
+  if (params.taskPlanContent) {
+    try {
+      const taskPlan = parseTaskPlanFile(params.taskPlanContent);
+      for (const skillName of taskPlan.frontmatter.skills_used) {
+        matched.add(normalizeSkillReference(skillName));
+      }
+    } catch {
+      // Non-fatal — malformed task plan should not break prompt construction
+    }
+  }
+
+  for (const skill of visibleSkills) {
+    if (skillMatchesContext(skill, contextTokens)) {
+      matched.add(normalizeSkillReference(skill.name));
+    }
+  }
+
+  const ordered = [...matched]
+    .filter(name => installedNames.has(name) && !avoided.has(name))
+    .sort();
+  return formatSkillActivationBlock(ordered);
+}
 
 /**
  * Build the skill discovery template variables for research prompts.
@@ -628,6 +793,12 @@ export async function buildResearchMilestonePrompt(mid: string, midTitle: string
     contextPath: contextRel,
     outputPath: join(base, outputRelPath),
     inlinedContext,
+    skillActivation: buildSkillActivationBlock({
+      base,
+      milestoneId: mid,
+      milestoneTitle: midTitle,
+      extraContext: [inlinedContext],
+    }),
     ...buildSkillDiscoveryVars(),
   });
 }
@@ -684,6 +855,12 @@ export async function buildPlanMilestonePrompt(mid: string, midTitle: string, ba
     secretsOutputPath,
     inlinedContext,
     sourceFilePaths: buildSourceFilePaths(base, mid),
+    skillActivation: buildSkillActivationBlock({
+      base,
+      milestoneId: mid,
+      milestoneTitle: midTitle,
+      extraContext: [inlinedContext],
+    }),
     ...buildSkillDiscoveryVars(),
   });
 }
@@ -730,6 +907,13 @@ export async function buildResearchSlicePrompt(
     outputPath: join(base, outputRelPath),
     inlinedContext,
     dependencySummaries: depContent,
+    skillActivation: buildSkillActivationBlock({
+      base,
+      milestoneId: mid,
+      sliceId: sid,
+      sliceTitle: sTitle,
+      extraContext: [inlinedContext, depContent],
+    }),
     ...buildSkillDiscoveryVars(),
   });
 }
@@ -788,6 +972,13 @@ export async function buildPlanSlicePrompt(
     sourceFilePaths: buildSourceFilePaths(base, mid, sid),
     executorContextConstraints,
     commitInstruction,
+    skillActivation: buildSkillActivationBlock({
+      base,
+      milestoneId: mid,
+      sliceId: sid,
+      sliceTitle: sTitle,
+      extraContext: [inlinedContext, depContent],
+    }),
   });
 }
 
@@ -891,8 +1082,16 @@ export async function buildExecuteTaskPrompt(
     finalCarryForward = truncateAtSectionBoundary(carryForwardSection, carryForwardBudget).content;
   }
 
+  // Inline RUNTIME.md if present
+  const runtimePath = resolveRuntimeFile(base);
+  const runtimeContent = existsSync(runtimePath) ? await loadFile(runtimePath) : null;
+  const runtimeContext = runtimeContent
+    ? `### Runtime Context\nSource: \`.gsd/RUNTIME.md\`\n\n${runtimeContent.trim()}`
+    : "";
+
   return loadPrompt("execute-task", {
     overridesSection,
+    runtimeContext,
     workingDirectory: base,
     milestoneId: mid, sliceId: sid, sliceTitle: sTitle, taskId: tid, taskTitle: tTitle,
     planPath: join(base, relSliceFile(base, mid, sid, "PLAN")),
@@ -906,6 +1105,16 @@ export async function buildExecuteTaskPrompt(
     taskSummaryPath,
     inlinedTemplates,
     verificationBudget,
+    skillActivation: buildSkillActivationBlock({
+      base,
+      milestoneId: mid,
+      sliceId: sid,
+      sliceTitle: sTitle,
+      taskId: tid,
+      taskTitle: tTitle,
+      taskPlanContent,
+      extraContext: [taskPlanInline, slicePlanExcerpt, finalCarryForward, resumeSection],
+    }),
   });
 }
 
@@ -1164,6 +1373,14 @@ export async function buildReplanSlicePrompt(
     inlinedContext,
     replanPath,
     captureContext,
+    skillActivation: buildSkillActivationBlock({
+      base,
+      milestoneId: mid,
+      milestoneTitle: midTitle,
+      sliceId: sid,
+      sliceTitle: sTitle,
+      extraContext: [inlinedContext, captureContext],
+    }),
   });
 }
 

@@ -81,6 +81,12 @@ export interface LoadSkillsResult {
 	diagnostics: ResourceDiagnostic[];
 }
 
+let loadedSkills: Skill[] = [];
+
+export function getLoadedSkills(): Skill[] {
+	return [...loadedSkills];
+}
+
 /**
  * Validate skill name per Agent Skills spec.
  * Returns array of validation error messages (empty if valid).
@@ -449,8 +455,10 @@ export function loadSkills(options: LoadSkillsOptions = {}): LoadSkillsResult {
 		}
 	}
 
+	loadedSkills = Array.from(skillMap.values());
+
 	return {
-		skills: Array.from(skillMap.values()),
+		skills: [...loadedSkills],
 		diagnostics: [...allDiagnostics, ...collisionDiagnostics],
 	};
 }

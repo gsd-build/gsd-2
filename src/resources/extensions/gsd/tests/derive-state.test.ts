@@ -779,6 +779,49 @@ slice: S01
     }
   }
 
+  // ─── Test: unchecked roadmap slices + summary → complete (summary is terminal) ────
+  console.log('\n=== unchecked roadmap slices + summary → complete (summary is terminal) ===');
+  {
+    const base = createFixtureBase();
+    try {
+      // M001: roadmap has unchecked slices but a summary exists — should be complete
+      writeRoadmap(base, 'M001', `# M001: First Milestone\n\n**Vision:** Already done.\n\n## Slices\n\n- [ ] **S01: Unchecked slice** \`risk:low\` \`depends:[]\`\n  > Work was done but checkbox never ticked.\n- [ ] **S02: Another unchecked** \`risk:low\` \`depends:[]\`\n  > Same.\n`);
+      writeMilestoneSummary(base, 'M001', '---\nid: M001\n---\n\n# M001: First Milestone\n\n**Completed despite unchecked roadmap.**');
+      // M002: genuinely incomplete — should be the active milestone
+      writeRoadmap(base, 'M002', `# M002: Active Milestone\n\n**Vision:** Do stuff.\n\n## Slices\n\n- [ ] **S01: Work slice** \`risk:low\` \`depends:[]\`\n  > Needs work.\n`);
+
+      const state = await deriveState(base);
+      const m001Entry = state.registry.find(e => e.id === 'M001');
+      assertEq(m001Entry?.status, 'complete', 'M001 with unchecked roadmap + summary is complete');
+      assertEq(state.activeMilestone?.id, 'M002', 'active milestone is M002, not M001');
+    } finally {
+      cleanup(base);
+    }
+  }
+
+  // ─── Test: unchecked roadmap + summary counts toward completeMilestoneIds (deps) ────
+  console.log('\n=== unchecked roadmap + summary satisfies dependency ===');
+  {
+    const base = createFixtureBase();
+    try {
+      // M001: unchecked roadmap + summary → complete
+      writeRoadmap(base, 'M001', `# M001: Foundation\n\n**Vision:** Done.\n\n## Slices\n\n- [ ] **S01: Setup** \`risk:low\` \`depends:[]\`\n  > Done.\n`);
+      writeMilestoneSummary(base, 'M001', '---\nid: M001\n---\n\n# M001: Foundation\n\n**Done.**');
+      // M002: depends on M001 — should be active since M001 is complete
+      writeRoadmap(base, 'M002', `# M002: Dependent\n\n**Vision:** Depends on M001.\n\n## Slices\n\n- [ ] **S01: Work** \`risk:low\` \`depends:[]\`\n  > Work.\n`);
+      const contextDir = join(base, '.gsd', 'milestones', 'M002');
+      mkdirSync(contextDir, { recursive: true });
+      writeFileSync(join(contextDir, 'M002-CONTEXT.md'), '---\ndepends_on:\n  - M001\n---\n\n# M002 Context\n\nDepends on M001.');
+
+      const state = await deriveState(base);
+      assertEq(state.activeMilestone?.id, 'M002', 'M002 is active — M001 dependency satisfied via summary');
+      const m002Entry = state.registry.find(e => e.id === 'M002');
+      assertEq(m002Entry?.status, 'active', 'M002 status is active, not pending');
+    } finally {
+      cleanup(base);
+    }
+  }
+
   report();
 }
 

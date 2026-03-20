@@ -5,10 +5,9 @@
  * runtime integrations so the regressions can be tested directly.
  */
 
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { detectProjectState } from "./detection.js";
 import { gsdRoot } from "./paths.js";
-import { join } from "node:path";
-import type { GSDState, Phase } from "./types.js";
 
 export type HealthWidgetProjectState = "none" | "initialized" | "active";
 
@@ -20,73 +19,17 @@ export interface HealthWidgetData {
   environmentErrorCount: number;
   environmentWarningCount: number;
   lastRefreshed: number;
-  executionPhase?: Phase;
-  executionStatus?: string;
-  executionTarget?: string;
-  nextAction?: string;
-  blocker?: string | null;
-  activeMilestoneId?: string;
-  activeSliceId?: string;
-  activeTaskId?: string;
-  progress?: GSDState["progress"];
-  eta?: string | null;
 }
 
 export function detectHealthWidgetProjectState(basePath: string): HealthWidgetProjectState {
-  const root = gsdRoot(basePath);
-  if (!existsSync(root)) return "none";
+  if (!existsSync(gsdRoot(basePath))) return "none";
 
-  // Lightweight milestone count — avoids the full detectProjectState() scan
-  // (CI markers, Makefile targets, etc.) that is unnecessary on the 60s refresh.
-  try {
-    const milestonesDir = join(root, "milestones");
-    if (existsSync(milestonesDir)) {
-      const entries = readdirSync(milestonesDir, { withFileTypes: true });
-      if (entries.some(e => e.isDirectory())) return "active";
-    }
-  } catch { /* non-fatal */ }
-
-  return "initialized";
+  const { state } = detectProjectState(basePath);
+  return state === "v2-gsd" ? "active" : "initialized";
 }
 
 function formatCost(n: number): string {
   return n >= 1 ? `$${n.toFixed(2)}` : `${(n * 100).toFixed(1)}¢`;
-}
-
-function formatProgress(progress?: GSDState["progress"]): string | null {
-  if (!progress) return null;
-
-  const parts: string[] = [];
-  parts.push(`M ${progress.milestones.done}/${progress.milestones.total}`);
-  if (progress.slices) parts.push(`S ${progress.slices.done}/${progress.slices.total}`);
-  if (progress.tasks) parts.push(`T ${progress.tasks.done}/${progress.tasks.total}`);
-  return parts.length > 0 ? `Progress: ${parts.join(" · ")}` : null;
-}
-
-function formatEnvironmentSummary(errorCount: number, warningCount: number): string | null {
-  if (errorCount <= 0 && warningCount <= 0) return null;
-
-  const parts: string[] = [];
-  if (errorCount > 0) parts.push(`${errorCount} error${errorCount > 1 ? "s" : ""}`);
-  if (warningCount > 0) parts.push(`${warningCount} warning${warningCount > 1 ? "s" : ""}`);
-  return `Env: ${parts.join(", ")}`;
-}
-
-function formatBudgetSummary(data: HealthWidgetData): string | null {
-  if (data.budgetCeiling !== undefined && data.budgetCeiling > 0) {
-    const pct = Math.min(100, (data.budgetSpent / data.budgetCeiling) * 100);
-    return `Budget: ${formatCost(data.budgetSpent)}/${formatCost(data.budgetCeiling)} (${pct.toFixed(0)}%)`;
-  }
-  if (data.budgetSpent > 0) {
-    return `Spent: ${formatCost(data.budgetSpent)}`;
-  }
-  return null;
-}
-
-function buildExecutionHeadline(data: HealthWidgetData): string {
-  const status = data.executionStatus ?? "Active project";
-  const target = data.executionTarget ?? data.blocker ?? "loading status…";
-  return `  GSD  ${status}${target ? ` - ${target}` : ""}`;
 }
 
 /**
@@ -102,28 +45,33 @@ export function buildHealthLines(data: HealthWidgetData): string[] {
     return ["  GSD  Project initialized — run /gsd to continue setup"];
   }
 
-  const lines = [buildExecutionHeadline(data)];
-  const details: string[] = [];
+  const parts: string[] = [];
 
-  const progress = formatProgress(data.progress);
-  if (progress) details.push(progress);
-
-  if (data.providerIssue) details.push(data.providerIssue);
-
-  const environment = formatEnvironmentSummary(
-    data.environmentErrorCount,
-    data.environmentWarningCount,
-  );
-  if (environment) details.push(environment);
-
-  const budget = formatBudgetSummary(data);
-  if (budget) details.push(budget);
-
-  if (data.eta) details.push(data.eta);
-
-  if (details.length > 0) {
-    lines.push(`  ${details.join("  │  ")}`);
+  const totalIssues = data.environmentErrorCount + data.environmentWarningCount + (data.providerIssue ? 1 : 0);
+  if (totalIssues === 0) {
+    parts.push("● System OK");
+  } else if (data.environmentErrorCount > 0 || data.providerIssue?.includes("✗")) {
+    parts.push(`✗ ${totalIssues} issue${totalIssues > 1 ? "s" : ""}`);
+  } else {
+    parts.push(`⚠ ${totalIssues} warning${totalIssues > 1 ? "s" : ""}`);
   }
 
-  return lines;
+  if (data.budgetCeiling !== undefined && data.budgetCeiling > 0) {
+    const pct = Math.min(100, (data.budgetSpent / data.budgetCeiling) * 100);
+    parts.push(`Budget: ${formatCost(data.budgetSpent)}/${formatCost(data.budgetCeiling)} (${pct.toFixed(0)}%)`);
+  } else if (data.budgetSpent > 0) {
+    parts.push(`Spent: ${formatCost(data.budgetSpent)}`);
+  }
+
+  if (data.providerIssue) {
+    parts.push(data.providerIssue);
+  }
+
+  if (data.environmentErrorCount > 0) {
+    parts.push(`Env: ${data.environmentErrorCount} error${data.environmentErrorCount > 1 ? "s" : ""}`);
+  } else if (data.environmentWarningCount > 0) {
+    parts.push(`Env: ${data.environmentWarningCount} warning${data.environmentWarningCount > 1 ? "s" : ""}`);
+  }
+
+  return [`  ${parts.join("  │  ")}`];
 }

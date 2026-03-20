@@ -1973,7 +1973,7 @@ export class InteractiveMode {
 	}
 
 	private setupEditorSubmitHandler(): void {
-		setupEditorSubmitHandlerController(this);
+		setupEditorSubmitHandlerController(this as any);
 	}
 
 	private subscribeToAgent(): void {
@@ -1983,7 +1983,7 @@ export class InteractiveMode {
 	}
 
 	private async handleEvent(event: AgentSessionEvent): Promise<void> {
-		await handleAgentEvent(this, event);
+		await handleAgentEvent(this as any, event);
 	}
 
 	/** Extract text content from a user message */

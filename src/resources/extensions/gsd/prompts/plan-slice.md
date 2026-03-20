@@ -47,7 +47,7 @@ Then:
 1. Read the templates:
    - `~/.gsd/agent/extensions/gsd/templates/plan.md`
    - `~/.gsd/agent/extensions/gsd/templates/task-plan.md`
-2. **Load relevant skills.** Check the `GSD Skill Preferences` block in system context and the `<available_skills>` catalog in your system prompt. `read` any skill files relevant to this slice's technology stack before decomposing. When writing task plans, note which installed skills are relevant in the task description so executors know which to load.
+2. {{skillActivation}} Record the installed skills you expect executors to use in each task plan's `skills_used` frontmatter.
 3. Define slice-level verification — the objective stopping condition for this slice:
    - For non-trivial slices: plan actual test files with real assertions. Name the files.
    - For simple slices: executable commands or script assertions are fine.

@@ -29,7 +29,11 @@ const worktreePromptsDir = join(__dirname, '..', 'prompts');
 function loadPromptFromWorktree(name: string, vars: Record<string, string> = {}): string {
   const path = join(worktreePromptsDir, `${name}.md`);
   let content = readFileSync(path, 'utf-8');
-  for (const [key, value] of Object.entries(vars)) {
+  const effectiveVars = {
+    skillActivation: 'If no installed skill clearly matches this unit, skip explicit skill activation and continue with the required workflow.',
+    ...vars,
+  };
+  for (const [key, value] of Object.entries(effectiveVars)) {
     content = content.replaceAll(`{{${key}}}`, value);
   }
   return content.trim();

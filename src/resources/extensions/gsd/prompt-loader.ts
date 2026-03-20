@@ -78,6 +78,11 @@ export function loadPrompt(name: string, vars: Record<string, string> = {}): str
     templateCache.set(name, content);
   }
 
+  const effectiveVars = {
+    skillActivation: "If a `GSD Skill Preferences` block is present in system context, use it and the `<available_skills>` catalog in your system prompt to decide which skills to load and follow for this unit, without relaxing required verification or artifact rules.",
+    ...vars,
+  };
+
   // Check BEFORE substitution: find all {{varName}} placeholders the template
   // declares and verify every one has a value in vars. Checking after substitution
   // would also flag {{...}} patterns injected by inlined content (e.g. template
@@ -86,7 +91,7 @@ export function loadPrompt(name: string, vars: Record<string, string> = {}): str
   if (declared) {
     const missing = [...new Set(declared)]
       .map(m => m.slice(2, -2))
-      .filter(key => !(key in vars));
+      .filter(key => !(key in effectiveVars));
     if (missing.length > 0) {
       throw new GSDError(
         GSD_PARSE_ERROR,
@@ -97,7 +102,7 @@ export function loadPrompt(name: string, vars: Record<string, string> = {}): str
     }
   }
 
-  for (const [key, value] of Object.entries(vars)) {
+  for (const [key, value] of Object.entries(effectiveVars)) {
     content = content.replaceAll(`{{${key}}}`, value);
   }
 

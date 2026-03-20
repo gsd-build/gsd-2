@@ -10,6 +10,8 @@ A researcher explored the codebase and a planner decomposed the work — you are
 
 {{overridesSection}}
 
+{{runtimeContext}}
+
 {{resumeSection}}
 
 {{carryForwardSection}}
@@ -26,7 +28,7 @@ A researcher explored the codebase and a planner decomposed the work — you are
 
 Then:
 0. Narrate step transitions, key implementation decisions, and verification outcomes as you work. Keep it terse — one line between tool-call clusters, not between every call — but write complete sentences in user-facing prose, not shorthand notes or scratchpad fragments.
-1. **Load relevant skills before writing code.** Check the `GSD Skill Preferences` block in system context and the `<available_skills>` catalog in your system prompt. For each skill that matches this task's technology stack (e.g., React, Next.js, accessibility, component design), `read` its SKILL.md file now. Skills contain implementation rules and patterns that should guide your code. If no skills match this task, skip this step.
+1. {{skillActivation}} Follow any activated skills before writing code. If no skills match this task, skip this step.
 2. Execute the steps in the inlined task plan, adapting minor local mismatches when the surrounding code differs from the planner's snapshot
 3. Build the real thing. If the task plan says "create login endpoint", build an endpoint that actually authenticates against a real store, not one that returns a hardcoded success response. If the task plan says "create dashboard page", build a page that renders real data from the API, not a component with hardcoded props. Stubs and mocks are for tests, not for the shipped feature.
 4. Write or update tests as part of execution — tests are verification, not an afterthought. If the slice plan defines test files in its Verification section and this is the first task, create them (they should initially fail).
