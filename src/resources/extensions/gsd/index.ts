@@ -92,6 +92,23 @@ function warnDeprecatedAgentInstructions(): void {
 // ── Depth verification state ──────────────────────────────────────────────
 let depthVerificationDone = false;
 
+// ── DB lazy-open helper ───────────────────────────────────────────────────
+// In manual sessions (no auto-mode), the DB is never opened by bootstrapAutoSession.
+// This helper ensures the DB is lazily opened on first tool call that needs it.
+async function ensureDbOpen(): Promise<boolean> {
+  try {
+    const db = await import("./gsd-db.js");
+    if (db.isDbAvailable()) return true;
+    const dbPath = join(process.cwd(), ".gsd", "gsd.db");
+    if (existsSync(dbPath)) {
+      return db.openDatabase(dbPath);
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 // ── Queue phase tracking ──────────────────────────────────────────────────
 // When true, the LLM is in a queue flow writing CONTEXT.md files.
 // The write-gate applies during queue flows just like discussion flows.
@@ -300,12 +317,8 @@ export default function (pi: ExtensionAPI) {
       when_context: Type.Optional(Type.String({ description: "When/context for the decision (e.g. milestone ID)" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      // Check DB availability
-      let dbAvailable = false;
-      try {
-        const db = await import("./gsd-db.js");
-        dbAvailable = db.isDbAvailable();
-      } catch { /* dynamic import failed */ }
+      // Ensure DB is open (lazy-open on first tool call in manual sessions)
+      const dbAvailable = await ensureDbOpen();
 
       if (!dbAvailable) {
         return {
@@ -367,11 +380,7 @@ export default function (pi: ExtensionAPI) {
       supporting_slices: Type.Optional(Type.String({ description: "Supporting slices" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      let dbAvailable = false;
-      try {
-        const db = await import("./gsd-db.js");
-        dbAvailable = db.isDbAvailable();
-      } catch { /* dynamic import failed */ }
+      const dbAvailable = await ensureDbOpen();
 
       if (!dbAvailable) {
         return {
@@ -441,11 +450,7 @@ export default function (pi: ExtensionAPI) {
       content: Type.String({ description: "The full markdown content of the artifact" }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      let dbAvailable = false;
-      try {
-        const db = await import("./gsd-db.js");
-        dbAvailable = db.isDbAvailable();
-      } catch { /* dynamic import failed */ }
+      const dbAvailable = await ensureDbOpen();
 
       if (!dbAvailable) {
         return {
