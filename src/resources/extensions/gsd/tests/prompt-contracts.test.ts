@@ -38,7 +38,7 @@ test("workflow-start prompt defaults to autonomy instead of per-phase confirmati
 test("discuss prompt allows implementation questions when they materially matter", () => {
   const prompt = readPrompt("discuss");
   assert.match(prompt, /Lead with experience, but ask implementation when it materially matters/i);
-  assert.match(prompt, /without an extra permission loop/i);
+  assert.match(prompt, /one gate, not two/i);
   assert.doesNotMatch(prompt, /Questions must be about the experience, not the implementation/i);
 });
 

@@ -11,7 +11,7 @@ After the user describes their idea, **do not ask questions yet**. First, prove 
 1. Summarize what you understood in your own words — concretely, not abstractly.
 2. Give an honest size read: roughly how many milestones, roughly how many slices in the first one. Base this on the actual work involved, not a classification label. A config change might be 1 milestone with 1 slice. A social network might be 5 milestones with 8+ slices each. Use your judgment.
 3. Include scope honesty — a bullet list of the major capabilities you're hearing: "Here's what I'm hearing: [bullet list of major capabilities]."
-4. Invite correction in one plain sentence: "Here's my read. Correct anything important I missed." — plain text, not `ask_user_questions`. If the user continues with more detail instead of correcting you, treat that as confirmation and keep moving.
+4. Invite correction in one plain sentence: "Here's my read. Correct anything important I missed." — plain text, not `ask_user_questions`.
 
 This prevents runaway questioning by forcing comprehension proof before anything else. Do not skip this step. Do not combine it with the first question round.
 
@@ -164,7 +164,7 @@ For multi-milestone projects, requirements should span the full vision. Requirem
 
 If the project is new or has no `REQUIREMENTS.md`, surface candidate requirements in chat before writing the roadmap. Ask for correction only on material omissions, wrong ownership, or wrong scope. If the user has already been specific and raises no substantive objection, treat the requirement set as confirmed and continue.
 
-**Print the requirements in chat before writing the roadmap.** Do not say "here are the requirements" and then only write them to a file. The user must see them in the terminal. Print a markdown table with columns: ID, Title, Status, Owner, Source. Group by status (Active, Deferred, Out of Scope).
+**Print the requirements in chat before writing the roadmap.** Do not say "here are the requirements" and then only write them to a file. The user must see them in the terminal. Print a markdown table with columns: ID, Title, Status, Owner, Source. Group by status (Active, Deferred, Out of Scope). After the table, ask: "Confirm, adjust, or add?"
 
 ## Scope Assessment
 
@@ -176,7 +176,7 @@ Before moving to output, confirm the size estimate from your reflection still ho
 
 Before writing any files, **print the planned roadmap in chat** so the user can see and approve it. Print a markdown table with columns: Slice, Title, Risk, Depends, Demo. One row per slice. Below the table, print the milestone definition of done as a bullet list.
 
-If the user raises a substantive objection, adjust the roadmap. If they do not object and the roadmap matches the agreed depth summary, continue to writing files without an extra permission loop.
+If the user raises a substantive objection, adjust the roadmap. Otherwise, present the roadmap and ask: "Ready to write, or want to adjust?" — one gate, not two.
 
 ### Naming Convention
 
