@@ -13,7 +13,7 @@ import {
   resolveMilestoneFile, resolveSliceFile, resolveSlicePath,
   resolveTasksDir, resolveTaskFiles, resolveTaskFile,
   relMilestoneFile, relSliceFile, relSlicePath, relMilestonePath,
-  resolveGsdRootFile, relGsdRootFile,
+  resolveGsdRootFile, relGsdRootFile, resolveRuntimeFile,
 } from "./paths.js";
 import { resolveSkillDiscoveryMode, resolveInlineLevel, loadEffectiveGSDPreferences } from "./preferences.js";
 import type { GSDState, InlineLevel } from "./types.js";
@@ -891,8 +891,16 @@ export async function buildExecuteTaskPrompt(
     finalCarryForward = truncateAtSectionBoundary(carryForwardSection, carryForwardBudget).content;
   }
 
+  // Inline RUNTIME.md if present
+  const runtimePath = resolveRuntimeFile(base);
+  const runtimeContent = existsSync(runtimePath) ? await loadFile(runtimePath) : null;
+  const runtimeContext = runtimeContent
+    ? `### Runtime Context\nSource: \`.gsd/RUNTIME.md\`\n\n${runtimeContent.trim()}`
+    : "";
+
   return loadPrompt("execute-task", {
     overridesSection,
+    runtimeContext,
     workingDirectory: base,
     milestoneId: mid, sliceId: sid, sliceTitle: sTitle, taskId: tid, taskTitle: tTitle,
     planPath: join(base, relSliceFile(base, mid, sid, "PLAN")),

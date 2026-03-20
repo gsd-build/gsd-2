@@ -478,3 +478,11 @@ export interface ReactiveExecutionState {
   };
   updatedAt: string;
 }
+
+export interface BrowserFlowResult {
+  url: string;
+  passed: boolean;
+  checksTotal: number;
+  checksPassed: number;
+  duration: number;
+}
