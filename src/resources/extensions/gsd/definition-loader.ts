@@ -275,3 +275,80 @@ export function loadDefinition(defsDir: string, name: string): WorkflowDefinitio
     })),
   };
 }
+
+// ─── Parameter Substitution ──────────────────────────────────────────────
+
+/** Regex matching `{{key}}` placeholders — captures the key name. */
+const PARAM_PATTERN = /\{\{(\w+)\}\}/g;
+
+/**
+ * Replace `{{key}}` placeholders in a single prompt string.
+ *
+ * Exported for use by the engine on iteration-instance prompts that live
+ * in GRAPH.yaml (outside the definition's step list).
+ *
+ * @throws Error if any merged param value contains `..` (path-traversal guard)
+ */
+export function substitutePromptString(
+  prompt: string,
+  merged: Record<string, string>,
+): string {
+  return prompt.replace(PARAM_PATTERN, (match, key: string) => {
+    const value = merged[key];
+    return value !== undefined ? value : match;
+  });
+}
+
+/**
+ * Replace `{{key}}` placeholders in all step prompts with param values.
+ *
+ * Merge order: `definition.params` (defaults) ← `overrides` (CLI wins).
+ * Returns a **new** WorkflowDefinition — the input is never mutated.
+ *
+ * @throws Error if any param value contains `..` (path-traversal guard)
+ * @throws Error if any `{{key}}` remains unresolved after substitution
+ */
+export function substituteParams(
+  definition: WorkflowDefinition,
+  overrides?: Record<string, string>,
+): WorkflowDefinition {
+  const merged: Record<string, string> = {
+    ...(definition.params ?? {}),
+    ...(overrides ?? {}),
+  };
+
+  // Path-traversal guard: reject any value containing ".."
+  for (const [key, value] of Object.entries(merged)) {
+    if (value.includes("..")) {
+      throw new Error(
+        `Parameter "${key}" contains disallowed '..' (path traversal): ${value}`,
+      );
+    }
+  }
+
+  // Substitute in each step prompt
+  const substitutedSteps = definition.steps.map((step) => ({
+    ...step,
+    prompt: substitutePromptString(step.prompt, merged),
+  }));
+
+  // Check for unresolved placeholders
+  const unresolved = new Set<string>();
+  for (const step of substitutedSteps) {
+    let m: RegExpExecArray | null;
+    const re = new RegExp(PARAM_PATTERN.source, "g");
+    while ((m = re.exec(step.prompt)) !== null) {
+      unresolved.add(m[1]);
+    }
+  }
+
+  if (unresolved.size > 0) {
+    const keys = [...unresolved].sort().join(", ");
+    throw new Error(`Unresolved parameter(s) in step prompts: ${keys}`);
+  }
+
+  return {
+    ...definition,
+    steps: substitutedSteps,
+  };
+}

@@ -25,6 +25,7 @@ import {
 } from "./graph.js";
 import type { WorkflowGraph } from "./graph.js";
 import type { WorkflowDefinition, VerifyPolicy, IterateConfig } from "./definition-loader.js";
+import { substituteParams, substitutePromptString } from "./definition-loader.js";
 import { injectContext } from "./context-injector.js";
 import { parse } from "yaml";
 import { readFileSync, existsSync } from "node:fs";
@@ -137,6 +138,9 @@ export class CustomWorkflowEngine implements WorkflowEngine {
         const definition: WorkflowDefinition = {
           version: (parsed.version as number) ?? 1,
           name: (parsed.name as string) ?? "",
+          params: parsed.params != null && typeof parsed.params === "object"
+            ? parsed.params as Record<string, string>
+            : undefined,
           steps: yamlSteps.map((s: Record<string, unknown>) => ({
             id: s.id as string,
             name: s.name as string,
@@ -154,6 +158,24 @@ export class CustomWorkflowEngine implements WorkflowEngine {
               : undefined,
           })),
         };
+
+        // ── Parameter substitution (S07) ─────────────────────────
+        // Read CLI overrides from PARAMS.json (written by createRun)
+        let substitutedDef = definition;
+        const paramsPath = join(this.runDir, "PARAMS.json");
+        let paramOverrides: Record<string, string> | undefined;
+        if (existsSync(paramsPath)) {
+          try {
+            paramOverrides = JSON.parse(readFileSync(paramsPath, "utf-8")) as Record<string, string>;
+          } catch {
+            // Malformed PARAMS.json — proceed without overrides
+          }
+        }
+        // Only call substituteParams when there are params or placeholders to resolve
+        const hasParams = (definition.params && Object.keys(definition.params).length > 0) || paramOverrides;
+        if (hasParams) {
+          substitutedDef = substituteParams(definition, paramOverrides);
+        }
 
         // ── Iterate expansion (S06) ──────────────────────────────
         const stepDef = definition.steps.find((s) => s.id === nextStep.id);
@@ -216,6 +238,16 @@ export class CustomWorkflowEngine implements WorkflowEngine {
 
           // Apply context injection for the instance
           let instancePrompt = firstInstance.prompt;
+
+          // Substitute params in iteration instance prompts (S07)
+          if (hasParams) {
+            const merged: Record<string, string> = {
+              ...(definition.params ?? {}),
+              ...(paramOverrides ?? {}),
+            };
+            instancePrompt = substitutePromptString(instancePrompt, merged);
+          }
+
           const instanceInjected = injectContext(firstInstance.id, definition, this.runDir);
           if (instanceInjected) {
             instancePrompt = instanceInjected + instancePrompt;
@@ -229,6 +261,12 @@ export class CustomWorkflowEngine implements WorkflowEngine {
               prompt: instancePrompt,
             },
           };
+        }
+
+        // Use substituted prompt from definition for regular steps (S07)
+        const substitutedStep = substitutedDef.steps.find((s) => s.id === nextStep.id);
+        if (substitutedStep) {
+          prompt = substitutedStep.prompt;
         }
 
         const injected = injectContext(nextStep.id, definition, this.runDir);

@@ -48,7 +48,7 @@
 
 ## Tasks
 
-- [ ] **T01: Implement `{{variable}}` parameter substitution with dispatch-time resolution** `est:25m`
+- [x] **T01: Implement `{{variable}}` parameter substitution with dispatch-time resolution** `est:25m`
   - Why: Completes R006's deferred parameterization requirement. Parameters must substitute at dispatch time (in `resolveDispatch`) not snapshot time to preserve R007's byte-exact `copyFileSync` contract. This unblocks T02's `run --param` flag.
   - Files: `src/resources/extensions/gsd/definition-loader.ts`, `src/resources/extensions/gsd/custom-workflow-engine.ts`, `src/resources/extensions/gsd/tests/param-substitution.test.ts`
   - Do: (1) Add `substituteParams(definition, overrides?)` to `definition-loader.ts` — replaces `{{key}}` in all step `prompt` fields using `definition.params` merged with optional overrides. Reject param values containing `..`. Throw on unresolved `{{key}}` that exists in prompts but has no value. (2) In `custom-workflow-engine.ts` `resolveDispatch()`, after parsing the frozen DEFINITION.yaml, call `substituteParams()` on the definition's step prompts before building the dispatch prompt. Also handle the case where params+overrides are stored in a `PARAMS.json` file alongside DEFINITION.yaml (so `run --param` overrides persist into the snapshot). (3) Write comprehensive unit tests for `substituteParams()`.
