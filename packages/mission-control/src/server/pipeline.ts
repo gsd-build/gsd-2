@@ -5,7 +5,8 @@
  * On file change: rebuilds state, computes diff, broadcasts to connected clients.
  * Multi-session: uses SessionManager to route chat messages to correct session by sessionId.
  */
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
+import { readFile } from "node:fs/promises";
 import { createFileWatcher } from "./watcher";
 import { buildFullState } from "./state-deriver";
 import { computeDiff } from "./differ";
@@ -87,9 +88,21 @@ export async function startPipeline(
   let currentState: PlanningState = await buildFullState(planningDir);
 
   // 2. Create session manager with config-bridge processFactory and restore persisted sessions
-  // GSD 2: config.json removed; skip_permissions defaults to true, worktree_enabled to false.
-  // TODO (Phase 13): read skip_permissions from .gsd/preferences.md or CLI flag.
-  const skipPermissions = true;
+  // H5: Read skip_permissions from project preferences; default to false (permissions enabled).
+  // When false, gsd runs WITH permission prompts — the safer default.
+  // Users can set skip_permissions: true in .gsd/preferences.md YAML frontmatter.
+  let skipPermissions = false;
+  try {
+    const prefsPath = join(planningDir, "preferences.md");
+    const prefsContent = await readFile(prefsPath, "utf-8");
+    // Simple YAML frontmatter parse — look for skip_permissions: true
+    const match = prefsContent.match(/skip_permissions:\s*(true|false)/);
+    if (match) {
+      skipPermissions = match[1] === "true";
+    }
+  } catch {
+    // No preferences file or read error — use default (false)
+  }
   const configuredProcessFactory = injectedProcessFactory
     ? (cwd: string) => injectedProcessFactory(cwd, { skipPermissions })
     : (cwd: string) => new ClaudeProcessManager(cwd, { skipPermissions });
@@ -498,8 +511,18 @@ export async function startPipeline(
         currentState = await buildFullState(planningDir);
 
         // Re-apply config bridge for new project
-        // GSD 2: config.json removed; skip_permissions defaults to true, worktree_enabled to false.
-        const newSkipPermissions = true;
+        // H5: Read skip_permissions from new project preferences; default to false.
+        let newSkipPermissions = false;
+        try {
+          const newPrefsPath = join(newPlanningDir, "preferences.md");
+          const newPrefsContent = await readFile(newPrefsPath, "utf-8");
+          const match = newPrefsContent.match(/skip_permissions:\s*(true|false)/);
+          if (match) {
+            newSkipPermissions = match[1] === "true";
+          }
+        } catch {
+          // Default: false
+        }
         const newConfiguredFactory = injectedProcessFactory
           ? (cwd: string) => injectedProcessFactory(cwd, { skipPermissions: newSkipPermissions })
           : (cwd: string) => new ClaudeProcessManager(cwd, { skipPermissions: newSkipPermissions });

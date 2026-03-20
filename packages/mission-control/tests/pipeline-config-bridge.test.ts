@@ -1,15 +1,13 @@
 /**
- * Pipeline config bridge tests — updated for GSD 2.
+ * Pipeline config bridge tests — updated for H5 security fix.
  *
- * Phase 12 change: config.json removed in GSD 2. The pipeline no longer reads
- * config.json for skip_permissions or worktree_enabled. These defaults are now
- * hardcoded in pipeline.ts until Phase 13 adds proper GSD 2 settings support.
+ * H5 change: skipPermissions now defaults to false (safe default — permissions enabled).
+ * Users can opt-in to skip_permissions: true via .gsd/preferences.md YAML frontmatter.
  *
- * GSD 2 defaults: skip_permissions = true, worktree_enabled = false.
- * TODO (Phase 13): derive skip_permissions from .gsd/preferences.md.
+ * GSD 2 defaults: skip_permissions = false (changed from true), worktree_enabled = false.
  */
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, rm, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startPipeline } from "../src/server/pipeline";
@@ -33,9 +31,8 @@ describe("SC-1: Config bridge — skip_permissions flows to processFactory", () 
     await rm(tempDir, { recursive: true, force: true }).catch(() => {});
   });
 
-  it("passes skipPermissions: false to processFactory when config has skip_permissions: false", async () => {
-    // GSD 2: config.json is removed. skipPermissions defaults to true in pipeline.ts.
-    // This test verifies the processFactory is called (pipeline correctly initializes).
+  it("defaults skipPermissions to false when no preferences.md exists", async () => {
+    // H5: Without preferences.md, skipPermissions defaults to false (safe default).
     const processFactoryCalls: Array<{ cwd: string; skipPermissions?: boolean }> = [];
 
     handle = await startPipeline({
@@ -57,7 +54,37 @@ describe("SC-1: Config bridge — skip_permissions flows to processFactory", () 
 
     // Factory is called during pipeline startup (session creation)
     expect(processFactoryCalls.length).toBeGreaterThan(0);
-    // GSD 2 default: skipPermissions is true (not configurable via config.json in GSD 2)
+    // H5: default is false — permissions are enabled unless user opts in
+    expect(processFactoryCalls[0].skipPermissions).toBe(false);
+  });
+
+  it("sets skipPermissions to true when preferences.md has skip_permissions: true", async () => {
+    // H5: When preferences.md has skip_permissions: true, pipeline passes it through.
+    await writeFile(
+      join(planningDir, "preferences.md"),
+      "---\nskip_permissions: true\n---\n"
+    );
+
+    const processFactoryCalls: Array<{ cwd: string; skipPermissions?: boolean }> = [];
+
+    handle = await startPipeline({
+      planningDir,
+      wsPort: 14102,
+      processFactory: (cwd: string, opts?: { skipPermissions?: boolean }) => {
+        processFactoryCalls.push({ cwd, skipPermissions: opts?.skipPermissions });
+        return {
+          isActive: true,
+          isProcessing: false,
+          sessionId: null,
+          onEvent: () => {},
+          start: async () => {},
+          sendMessage: async () => {},
+          kill: async () => {},
+        };
+      },
+    });
+
+    expect(processFactoryCalls.length).toBeGreaterThan(0);
     expect(processFactoryCalls[0].skipPermissions).toBe(true);
   });
 });

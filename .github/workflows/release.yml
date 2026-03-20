@@ -86,8 +86,10 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s \
             -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
 
+      # H8: Pinned to SHA — this action has access to Apple signing certs, GPG key, and
+      # Tauri signing key. Floating tags (v0) can be moved by upstream maintainers.
       - name: Build and release with Tauri
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@e3a53aa0ef3fd057c1e7397eaef8eaa3f2a5420f  # v0.5.18
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # macOS signing
