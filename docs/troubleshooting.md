@@ -46,7 +46,7 @@ It checks:
 **Common causes:**
 - Missing workspace packages — fixed in v2.10.4+
 - `postinstall` hangs on Linux (Playwright `--with-deps` triggering sudo) — fixed in v2.3.6+
-- Node.js version too old — requires ≥ 20.6.0
+- Node.js version too old — requires ≥ 22.0.0
 
 ### Provider errors during auto mode
 

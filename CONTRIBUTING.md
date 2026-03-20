@@ -87,10 +87,10 @@ The codebase is organized into these areas. All are open to contributions:
 
 | Area | Path | Notes |
 |------|------|-------|
-| Terminal UI | `pi-tui` | Components, themes, rendering |
-| AI/LLM layer | `pi-ai` | Provider integrations, model handling |
-| Agent core | `pi-agent-core` | Agent orchestration — RFC required for changes |
-| Coding agent | `pi-coding-agent` | The main coding agent |
+| Terminal UI | `packages/pi-tui` | Components, themes, rendering |
+| AI/LLM layer | `packages/pi-ai` | Provider integrations, model handling |
+| Agent core | `packages/pi-agent-core` | Agent orchestration — RFC required for changes |
+| Coding agent | `packages/pi-coding-agent` | The main coding agent |
 | GSD extension | `src/resources/extensions/gsd/` | GSD workflow — RFC required for auto-mode |
 | Native bindings | `native/` | Platform-specific native code |
 | CI/Build | `.github/`, `scripts/` | Workflows, build scripts |
@@ -123,7 +123,7 @@ CI must pass before your PR will be reviewed. Run these locally to save time.
 
 ## Security
 
-If you find a security vulnerability, **do not open a public issue.** Email the maintainers directly or use GitHub's private vulnerability reporting. See the supply chain attack on GSD-1 (PR #1232) for why this matters.
+If you find a security vulnerability, **do not open a public issue.** Email the maintainers directly or use GitHub's private vulnerability reporting.
 
 ## Questions?
 
