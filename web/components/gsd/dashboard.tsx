@@ -149,7 +149,7 @@ export function Dashboard({ onSwitchView, onExpandTerminal }: DashboardProps = {
 
   const handleWorkflowAction = (command: string) => {
     void sendCommand(buildPromptCommand(command, bridge))
-    onExpandTerminal?.()
+    onSwitchView?.("power")
   }
 
   const handlePrimaryAction = () => {

@@ -1,11 +1,13 @@
 "use client"
 
 import { useEffect, useState, useCallback, useRef, useSyncExternalStore } from "react"
-import { FolderOpen, Loader2, AlertCircle, Layers, Sparkles, ArrowUpCircle, GitBranch, CheckCircle2, FolderRoot, ChevronDown, ExternalLink } from "lucide-react"
+import { FolderOpen, Loader2, AlertCircle, Layers, Sparkles, ArrowUpCircle, GitBranch, CheckCircle2, FolderRoot, ChevronDown, ExternalLink, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useProjectStoreManager } from "@/lib/project-store-manager"
 import { useGSDWorkspaceState, getLiveWorkspaceIndex, getLiveAutoDashboard, formatCost, getCurrentSlice } from "@/lib/gsd-workspace-store"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 
 // ─── Types (mirroring server-side ProjectMetadata) ─────────────────────────
 
@@ -149,6 +151,7 @@ export function ProjectsView() {
 
   const [switchingTo, setSwitchingTo] = useState<string | null>(null)
   const [expandedProject, setExpandedProject] = useState<string | null>(null)
+  const [newProjectOpen, setNewProjectOpen] = useState(false)
   const switchPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const workspaceState = useGSDWorkspaceState()
 
@@ -157,6 +160,12 @@ export function ProjectsView() {
     return () => {
       if (switchPollRef.current) clearInterval(switchPollRef.current)
     }
+  }, [])
+
+  const handleProjectCreated = useCallback((newProject: ProjectMetadata) => {
+    setProjects(prev => [...prev, newProject].sort((a, b) => a.name.localeCompare(b.name)))
+    setNewProjectOpen(false)
+    handleSelectProject(newProject)
   }, [])
 
   function handleSelectProject(project: ProjectMetadata) {
@@ -272,14 +281,34 @@ export function ProjectsView() {
       <div className="h-full overflow-y-auto">
         <div className="mx-auto max-w-4xl px-6 py-6 space-y-6">
           {/* Header */}
-        <div className="space-y-1">
-          <h1 className="text-xl font-semibold text-foreground tracking-tight">Projects</h1>
-          <p className="text-sm text-muted-foreground">
-            <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">{devRoot}</code>
-            <span className="ml-2 text-muted-foreground/60">·</span>
-            <span className="ml-2">{projects.length} project{projects.length !== 1 ? "s" : ""}</span>
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h1 className="text-xl font-semibold text-foreground tracking-tight">Projects</h1>
+            <p className="text-sm text-muted-foreground">
+              <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">{devRoot}</code>
+              <span className="ml-2 text-muted-foreground/60">·</span>
+              <span className="ml-2">{projects.length} project{projects.length !== 1 ? "s" : ""}</span>
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5 shrink-0"
+            onClick={() => setNewProjectOpen(true)}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            New Project
+          </Button>
         </div>
+
+        {/* New project dialog */}
+        <NewProjectDialog
+          open={newProjectOpen}
+          onOpenChange={setNewProjectOpen}
+          devRoot={devRoot}
+          existingNames={projects.map(p => p.name)}
+          onCreated={handleProjectCreated}
+        />
 
         {/* List */}
         <div className="flex flex-col gap-2">
@@ -385,6 +414,140 @@ export function ProjectsView() {
       </div>
     </div>
     </>
+  )
+}
+
+// ─── New Project Dialog ────────────────────────────────────────────────
+
+function NewProjectDialog({
+  open,
+  onOpenChange,
+  devRoot,
+  existingNames,
+  onCreated,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  devRoot: string
+  existingNames: string[]
+  onCreated: (project: ProjectMetadata) => void
+}) {
+  const [name, setName] = useState("")
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // Focus input when dialog opens
+  useEffect(() => {
+    if (open) {
+      setName("")
+      setError(null)
+      setCreating(false)
+      // Small delay to let the dialog render
+      const t = setTimeout(() => inputRef.current?.focus(), 100)
+      return () => clearTimeout(t)
+    }
+  }, [open])
+
+  const nameValid = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name)
+  const nameConflict = existingNames.includes(name)
+  const canSubmit = name.length > 0 && nameValid && !nameConflict && !creating
+
+  const validationHint = (() => {
+    if (!name) return null
+    if (nameConflict) return "A project with this name already exists"
+    if (!nameValid) return "Use letters, numbers, hyphens, underscores, dots. Must start with a letter or number."
+    return null
+  })()
+
+  async function handleCreate() {
+    if (!canSubmit) return
+    setCreating(true)
+    setError(null)
+    try {
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ devRoot, name }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error((body as { error?: string }).error ?? `Failed (${res.status})`)
+      }
+      const project = await res.json() as ProjectMetadata
+      onCreated(project)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create project")
+      setCreating(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>New Project</DialogTitle>
+          <DialogDescription>
+            Create a new project directory in{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">{devRoot}</code>
+          </DialogDescription>
+        </DialogHeader>
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            void handleCreate()
+          }}
+          className="space-y-4 py-2"
+        >
+          <div className="space-y-2">
+            <Label htmlFor="project-name">Project name</Label>
+            <Input
+              ref={inputRef}
+              id="project-name"
+              placeholder="my-project"
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value)
+                setError(null)
+              }}
+              autoComplete="off"
+              aria-invalid={!!validationHint}
+            />
+            {validationHint && (
+              <p className="text-xs text-destructive">{validationHint}</p>
+            )}
+            {error && (
+              <p className="text-xs text-destructive">{error}</p>
+            )}
+            {name && nameValid && !nameConflict && (
+              <p className="text-xs text-muted-foreground font-mono">
+                {devRoot}/{name}
+              </p>
+            )}
+          </div>
+        </form>
+
+        <DialogFooter>
+          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={creating}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => void handleCreate()}
+            disabled={!canSubmit}
+            className="gap-1.5"
+          >
+            {creating ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Plus className="h-3.5 w-3.5" />
+            )}
+            Create
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
