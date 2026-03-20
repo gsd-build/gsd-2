@@ -13,11 +13,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
+const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
 import { gsdRoot } from "./paths.js";
 import { parse as parseYaml } from "yaml";
 import type { PostUnitHookConfig, PreDispatchHookConfig, TokenProfile } from "./types.js";
 import type { DynamicRoutingConfig } from "./model-router.js";
-import { normalizeStringArray } from "../shared/mod.js";
+import { normalizeStringArray } from "../shared/format-utils.js";
 import { resolveProfileDefaults as _resolveProfileDefaults } from "./preferences-models.js";
 
 import {
@@ -75,21 +77,20 @@ export {
   resolveProfileDefaults,
   resolveEffectiveProfile,
   resolveInlineLevel,
-  resolveCompressionStrategy,
   resolveContextSelection,
   resolveSearchProviderFromPreferences,
 } from "./preferences-models.js";
 
 // ─── Path Constants & Getters ───────────────────────────────────────────────
 
-const GLOBAL_PREFERENCES_PATH = join(homedir(), ".gsd", "preferences.md");
+const GLOBAL_PREFERENCES_PATH = join(gsdHome, "preferences.md");
 const LEGACY_GLOBAL_PREFERENCES_PATH = join(homedir(), ".pi", "agent", "gsd-preferences.md");
 function projectPreferencesPath(): string {
   return join(gsdRoot(process.cwd()), "preferences.md");
 }
 // Bootstrap in gitignore.ts historically created PREFERENCES.md (uppercase) by mistake.
 // Check uppercase as a fallback so those files aren't silently ignored.
-const GLOBAL_PREFERENCES_PATH_UPPERCASE = join(homedir(), ".gsd", "PREFERENCES.md");
+const GLOBAL_PREFERENCES_PATH_UPPERCASE = join(gsdHome, "PREFERENCES.md");
 function projectPreferencesPathUppercase(): string {
   return join(gsdRoot(process.cwd()), "PREFERENCES.md");
 }
@@ -267,7 +268,6 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
     verification_auto_fix: override.verification_auto_fix ?? base.verification_auto_fix,
     verification_max_retries: override.verification_max_retries ?? base.verification_max_retries,
     search_provider: override.search_provider ?? base.search_provider,
-    compression_strategy: override.compression_strategy ?? base.compression_strategy,
     context_selection: override.context_selection ?? base.context_selection,
     auto_visualize: override.auto_visualize ?? base.auto_visualize,
     auto_report: override.auto_report ?? base.auto_report,

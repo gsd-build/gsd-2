@@ -20,7 +20,7 @@ import {
   resolveSkillDiscoveryMode,
   getIsolationMode,
 } from "./preferences.js";
-import { ensureGsdSymlink } from "./repo-identity.js";
+import { ensureGsdSymlink, validateProjectId } from "./repo-identity.js";
 import { migrateToExternalState, recoverFailedMigration } from "./migrate-external.js";
 import { collectSecretsFromManifest } from "../get-secrets-from-user.js";
 import { gsdRoot, resolveMilestoneFile, milestonesDir } from "./paths.js";
@@ -130,6 +130,16 @@ export async function bootstrapAutoSession(
   }
 
   try {
+    // Validate GSD_PROJECT_ID early so the user gets immediate feedback
+    const customProjectId = process.env.GSD_PROJECT_ID;
+    if (customProjectId && !validateProjectId(customProjectId)) {
+      ctx.ui.notify(
+        `GSD_PROJECT_ID must contain only alphanumeric characters, hyphens, and underscores. Got: "${customProjectId}"`,
+        "error",
+      );
+      return releaseLockAndReturn();
+    }
+
     // Ensure git repo exists
     if (!nativeIsRepo(base)) {
       const mainBranch =
@@ -429,10 +439,16 @@ export async function bootstrapAutoSession(
     s.originalBasePath = base;
 
     const isUnderGsdWorktrees = (p: string): boolean => {
+      // Direct layout: /.gsd/worktrees/
       const marker = `${pathSep}.gsd${pathSep}worktrees${pathSep}`;
       if (p.includes(marker)) return true;
       const worktreesSuffix = `${pathSep}.gsd${pathSep}worktrees`;
-      return p.endsWith(worktreesSuffix);
+      if (p.endsWith(worktreesSuffix)) return true;
+      // Symlink-resolved layout: /.gsd/projects/<hash>/worktrees/
+      const symlinkRe = new RegExp(
+        `\\${pathSep}\\.gsd\\${pathSep}projects\\${pathSep}[a-f0-9]+\\${pathSep}worktrees(?:\\${pathSep}|$)`,
+      );
+      return symlinkRe.test(p);
     };
 
     if (

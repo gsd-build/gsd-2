@@ -10,7 +10,7 @@ import type { GitPreferences } from "./git-service.js";
 import type { PostUnitHookConfig, PreDispatchHookConfig, TokenProfile, PhaseSkipPreferences } from "./types.js";
 import type { DynamicRoutingConfig } from "./model-router.js";
 import { VALID_BRANCH_NAME } from "./git-service.js";
-import { normalizeStringArray } from "../shared/mod.js";
+import { normalizeStringArray } from "../shared/format-utils.js";
 
 import {
   KNOWN_PREFERENCE_KEYS,
@@ -683,16 +683,6 @@ export function validatePreferences(preferences: GSDPreferences): {
       validated.auto_report = preferences.auto_report;
     } else {
       errors.push("auto_report must be a boolean");
-    }
-  }
-
-  // ─── Compression Strategy ───────────────────────────────────────────
-  if (preferences.compression_strategy !== undefined) {
-    const validStrategies = new Set(["truncate", "compress"]);
-    if (typeof preferences.compression_strategy === "string" && validStrategies.has(preferences.compression_strategy)) {
-      validated.compression_strategy = preferences.compression_strategy as GSDPreferences["compression_strategy"];
-    } else {
-      errors.push(`compression_strategy must be one of: truncate, compress`);
     }
   }
 

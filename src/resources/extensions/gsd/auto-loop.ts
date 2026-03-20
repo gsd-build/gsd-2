@@ -5,9 +5,9 @@
  * pattern with a while loop. The agent_end event resolves a promise instead
  * of recursing.
  *
- * MAINTENANCE RULE: The only module-level mutable state here is `_activeSession`,
- * used by the agent_end bridge. Promise state itself lives on AutoSession so
- * concurrent auto sessions cannot corrupt each other.
+ * MAINTENANCE RULE: Module-level mutable state is limited to `_currentResolve`
+ * (per-unit one-shot resolver) and `_sessionSwitchInFlight` (guard for
+ * session rotation). No queue — stale agent_end events are dropped.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
@@ -18,7 +18,7 @@ import type { GSDPreferences } from "./preferences.js";
 import type { SessionLockStatus } from "./session-lock.js";
 import type { GSDState } from "./types.js";
 import type { CloseoutOptions } from "./auto-unit-closeout.js";
-import type { PostUnitContext } from "./auto-post-unit.js";
+import type { PostUnitContext, PreVerificationOpts } from "./auto-post-unit.js";
 import type {
   VerificationContext,
   VerificationResult,
@@ -35,6 +35,19 @@ import type { CmuxLogLevel } from "../cmux/index.js";
  * generous headroom including retries and sidecar work.
  */
 const MAX_LOOP_ITERATIONS = 500;
+
+/** Data-driven budget threshold notifications (75/80/90%). The 100% case is
+ *  handled inline because it requires break/pause/stop control flow. */
+const BUDGET_THRESHOLDS: Array<{
+  pct: number;
+  label: string;
+  notifyLevel: "info" | "warning";
+  cmuxLevel: "progress" | "warning";
+}> = [
+  { pct: 90, label: "Budget 90%", notifyLevel: "warning", cmuxLevel: "warning" },
+  { pct: 80, label: "Approaching budget ceiling — 80%", notifyLevel: "warning", cmuxLevel: "warning" },
+  { pct: 75, label: "Budget 75%", notifyLevel: "info", cmuxLevel: "progress" },
+];
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -54,17 +67,15 @@ export interface UnitResult {
   event?: AgentEndEvent;
 }
 
-// ─── Session-scoped promise state ───────────────────────────────────────────
+// ─── Per-unit one-shot promise state ────────────────────────────────────────
 //
-// pendingResolve and pendingAgentEndQueue live on AutoSession (not module-level)
-// so concurrent sessions cannot corrupt each other's promises.
+// A single module-level resolve function scoped to the current unit execution.
+// No queue — if an agent_end arrives with no pending resolver, it is dropped
+// (logged as warning). This is simpler and safer than the previous session-
+// scoped pendingResolve + pendingAgentEndQueue pattern.
 
-/**
- * The singleton session reference used by resolveAgentEnd. Set by autoLoop
- * on entry so that the agent_end handler in index.ts can resolve the correct
- * session's promise without needing a direct reference to `s`.
- */
-let _activeSession: AutoSession | null = null;
+let _currentResolve: ((result: UnitResult) => void) | null = null;
+let _sessionSwitchInFlight = false;
 
 // ─── resolveAgentEnd ─────────────────────────────────────────────────────────
 
@@ -73,60 +84,48 @@ let _activeSession: AutoSession | null = null;
  * in-flight unit promise. One-shot: the resolver is nulled before calling
  * to prevent double-resolution from model fallback retries.
  *
- * If no pendingResolve exists (event arrived between loop iterations),
- * the event is queued on the session so the next runUnit can drain it.
+ * If no resolver exists (event arrived between loop iterations or during
+ * session switch), the event is dropped with a debug warning.
  */
 export function resolveAgentEnd(event: AgentEndEvent): void {
-  const s = _activeSession;
-  if (!s) {
-    debugLog("resolveAgentEnd", {
-      status: "no-active-session",
-      warning: "agent_end with no active loop session",
-    });
+  if (_sessionSwitchInFlight) {
+    debugLog("resolveAgentEnd", { status: "ignored-during-switch" });
     return;
   }
-
-  if (s.pendingResolve) {
+  if (_currentResolve) {
     debugLog("resolveAgentEnd", { status: "resolving", hasEvent: true });
-    const r = s.pendingResolve;
-    s.pendingResolve = null;
+    const r = _currentResolve;
+    _currentResolve = null;
     r({ status: "completed", event });
   } else {
-    // Queue the event so the next runUnit picks it up immediately
     debugLog("resolveAgentEnd", {
-      status: "queued",
-      queueLength: s.pendingAgentEndQueue.length + 1,
-      warning:
-        "agent_end arrived between loop iterations — queued for next runUnit",
+      status: "no-pending-resolve",
+      warning: "agent_end with no pending unit",
     });
-    s.pendingAgentEndQueue.push(event);
   }
 }
 
 export function isSessionSwitchInFlight(): boolean {
-  return _activeSession?.sessionSwitchInFlight ?? false;
+  return _sessionSwitchInFlight;
 }
 
 // ─── resetPendingResolve (test helper) ───────────────────────────────────────
 
 /**
- * Reset session promise state. Only exported for test cleanup — production code
- * should never call this.
+ * Reset module-level promise state. Only exported for test cleanup —
+ * production code should never call this.
  */
 export function _resetPendingResolve(): void {
-  if (_activeSession) {
-    _activeSession.pendingResolve = null;
-    _activeSession.pendingAgentEndQueue = [];
-  }
-  _activeSession = null;
+  _currentResolve = null;
+  _sessionSwitchInFlight = false;
 }
 
 /**
- * Set the active session for resolveAgentEnd. Only exported for test setup —
- * production code sets this via autoLoop entry.
+ * No-op for backward compatibility with tests that previously set the
+ * active session. The module no longer holds a session reference.
  */
-export function _setActiveSession(session: AutoSession | null): void {
-  _activeSession = session;
+export function _setActiveSession(_session: AutoSession | null): void {
+  // No-op — kept for test backward compatibility
 }
 
 // ─── runUnit ─────────────────────────────────────────────────────────────────
@@ -150,41 +149,15 @@ export async function runUnit(
 ): Promise<UnitResult> {
   debugLog("runUnit", { phase: "start", unitType, unitId });
 
-  // ── Drain queued events from error-recovery retries ──
-  // If an agent_end arrived between iterations (e.g. from a model fallback
-  // sendMessage retry), consume it immediately instead of creating a new promise.
-  // Cap queue to 3 entries to prevent unbounded growth from stale events.
-  if (s.pendingAgentEndQueue.length > 3) {
-    debugLog("runUnit", {
-      phase: "queue-overflow",
-      dropped: s.pendingAgentEndQueue.length - 1,
-      unitType,
-      unitId,
-    });
-    s.pendingAgentEndQueue = [
-      s.pendingAgentEndQueue[s.pendingAgentEndQueue.length - 1]!,
-    ];
-  }
-  if (s.pendingAgentEndQueue.length > 0) {
-    const queued = s.pendingAgentEndQueue.shift()!;
-    debugLog("runUnit", {
-      phase: "drained-queued-event",
-      unitType,
-      unitId,
-      queueRemaining: s.pendingAgentEndQueue.length,
-    });
-    return { status: "completed", event: queued };
-  }
-
   // ── Session creation with timeout ──
   debugLog("runUnit", { phase: "session-create", unitType, unitId });
 
   let sessionResult: { cancelled: boolean };
   let sessionTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
-  s.sessionSwitchInFlight = true;
+  _sessionSwitchInFlight = true;
   try {
     const sessionPromise = s.cmdCtx!.newSession().finally(() => {
-      s.sessionSwitchInFlight = false;
+      _sessionSwitchInFlight = false;
     });
     const timeoutPromise = new Promise<{ cancelled: true }>((resolve) => {
       sessionTimeoutHandle = setTimeout(
@@ -216,11 +189,12 @@ export async function runUnit(
     return { status: "cancelled" };
   }
 
-  // ── Create the agent_end promise (session-scoped) ──
+  // ── Create the agent_end promise (per-unit one-shot) ──
   // This happens after newSession completes so session-switch agent_end events
   // from the previous session cannot resolve the new unit.
+  _sessionSwitchInFlight = false;
   const unitPromise = new Promise<UnitResult>((resolve) => {
-    s.pendingResolve = resolve;
+    _currentResolve = resolve;
   });
 
   // Ensure cwd matches basePath before dispatch (#1389).
@@ -383,6 +357,7 @@ export interface LoopDeps {
     midTitle: string;
     state: GSDState;
     prefs: GSDPreferences | undefined;
+    session?: AutoSession;
   }) => Promise<DispatchAction>;
   runPreDispatchHooks: (
     unitType: string,
@@ -500,6 +475,7 @@ export interface LoopDeps {
   // Post-unit processing
   postUnitPreVerification: (
     pctx: PostUnitContext,
+    opts?: PreVerificationOpts,
   ) => Promise<"dispatched" | "continue">;
   runPostUnitVerification: (
     vctx: VerificationContext,
@@ -530,7 +506,6 @@ export async function autoLoop(
   deps: LoopDeps,
 ): Promise<void> {
   debugLog("autoLoop", { phase: "enter" });
-  _activeSession = s;
   let iteration = 0;
   let lastDerivedUnit = "";
   let sameUnitCount = 0;
@@ -787,7 +762,7 @@ export async function autoLoop(
           (m: { status: string }) =>
             m.status !== "complete" && m.status !== "parked",
         );
-        if (incomplete.length === 0) {
+        if (incomplete.length === 0 && state.registry.length > 0) {
           // All milestones complete — merge milestone branch before stopping
           if (s.currentMilestoneId) {
             deps.resolver.mergeAndExit(s.currentMilestoneId, ctx.ui);
@@ -804,6 +779,18 @@ export async function autoLoop(
             "success",
           );
           await deps.stopAuto(ctx, pi, "All milestones complete");
+        } else if (incomplete.length === 0 && state.registry.length === 0) {
+          // Empty registry — no milestones visible, likely a path resolution bug
+          const diag = `basePath=${s.basePath}, phase=${state.phase}`;
+          ctx.ui.notify(
+            `No milestones visible in current scope. Possible path resolution issue.\n   Diagnostic: ${diag}`,
+            "error",
+          );
+          await deps.stopAuto(
+            ctx,
+            pi,
+            `No milestones found — check basePath resolution`,
+          );
         } else if (state.phase === "blocked") {
           const blockerMsg = `Blocked: ${state.blockers.join(", ")}`;
           await deps.stopAuto(ctx, pi, blockerMsg);
@@ -965,62 +952,26 @@ export async function autoLoop(
           ctx.ui.notify(`${msg} Continuing (enforcement: warn).`, "warning");
           deps.sendDesktopNotification("GSD", msg, "warning", "budget");
           deps.logCmuxEvent(prefs, msg, "warning");
-        } else if (newBudgetAlertLevel === 90) {
-          s.lastBudgetAlertLevel =
-            newBudgetAlertLevel as AutoSession["lastBudgetAlertLevel"];
-          ctx.ui.notify(
-            `Budget 90%: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`,
-            "warning",
+        } else {
+          // Data-driven 75/80/90% threshold notifications
+          const threshold = BUDGET_THRESHOLDS.find(
+            (t) => newBudgetAlertLevel === t.pct,
           );
-          deps.sendDesktopNotification(
-            "GSD",
-            `Budget 90%: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`,
-            "warning",
-            "budget",
-          );
-          deps.logCmuxEvent(
-            prefs,
-            `Budget 90%: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`,
-            "warning",
-          );
-        } else if (newBudgetAlertLevel === 80) {
-          s.lastBudgetAlertLevel =
-            newBudgetAlertLevel as AutoSession["lastBudgetAlertLevel"];
-          ctx.ui.notify(
-            `Approaching budget ceiling — 80%: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`,
-            "warning",
-          );
-          deps.sendDesktopNotification(
-            "GSD",
-            `Approaching budget ceiling — 80%: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`,
-            "warning",
-            "budget",
-          );
-          deps.logCmuxEvent(
-            prefs,
-            `Budget 80%: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`,
-            "warning",
-          );
-        } else if (newBudgetAlertLevel === 75) {
-          s.lastBudgetAlertLevel =
-            newBudgetAlertLevel as AutoSession["lastBudgetAlertLevel"];
-          ctx.ui.notify(
-            `Budget 75%: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`,
-            "info",
-          );
-          deps.sendDesktopNotification(
-            "GSD",
-            `Budget 75%: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`,
-            "info",
-            "budget",
-          );
-          deps.logCmuxEvent(
-            prefs,
-            `Budget 75%: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`,
-            "progress",
-          );
-        } else if (budgetAlertLevel === 0) {
-          s.lastBudgetAlertLevel = 0;
+          if (threshold) {
+            s.lastBudgetAlertLevel =
+              newBudgetAlertLevel as AutoSession["lastBudgetAlertLevel"];
+            const msg = `${threshold.label}: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`;
+            ctx.ui.notify(msg, threshold.notifyLevel);
+            deps.sendDesktopNotification(
+              "GSD",
+              msg,
+              threshold.notifyLevel,
+              "budget",
+            );
+            deps.logCmuxEvent(prefs, msg, threshold.cmuxLevel);
+          } else if (budgetAlertLevel === 0) {
+            s.lastBudgetAlertLevel = 0;
+          }
         }
       } else {
         s.lastBudgetAlertLevel = 0;
@@ -1091,6 +1042,7 @@ export async function autoLoop(
         midTitle: midTitle!,
         state,
         prefs,
+        session: s,
       });
 
       if (dispatchResult.action === "stop") {
@@ -1649,9 +1601,12 @@ export async function autoLoop(
           break;
         }
 
-        // Run pre-verification for the sidecar unit
+        // Run pre-verification for the sidecar unit (lightweight path)
+        const sidecarPreOpts: PreVerificationOpts = item.kind === "hook"
+          ? { skipSettleDelay: true, skipDoctor: true, skipStateRebuild: true, skipWorktreeSync: true }
+          : { skipSettleDelay: true, skipStateRebuild: true };
         const sidecarPreResult =
-          await deps.postUnitPreVerification(postUnitCtx);
+          await deps.postUnitPreVerification(postUnitCtx, sidecarPreOpts);
         if (sidecarPreResult === "dispatched") {
           // Pre-verification caused stop/pause
           debugLog("autoLoop", {
@@ -1740,6 +1695,6 @@ export async function autoLoop(
     }
   }
 
-  _activeSession = null;
+  _currentResolve = null;
   debugLog("autoLoop", { phase: "exit", totalIterations: iteration });
 }

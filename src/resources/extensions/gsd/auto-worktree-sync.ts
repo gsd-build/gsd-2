@@ -22,6 +22,8 @@ import { join, sep as pathSep } from "node:path";
 import { homedir } from "node:os";
 import { safeCopy, safeCopyRecursive } from "./safe-fs.js";
 
+const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
+
 // ─── Project Root → Worktree Sync ─────────────────────────────────────────
 
 /**
@@ -111,7 +113,7 @@ export function syncStateToProjectRoot(
  */
 export function readResourceVersion(): string | null {
   const agentDir =
-    process.env.GSD_CODING_AGENT_DIR || join(homedir(), ".gsd", "agent");
+    process.env.GSD_CODING_AGENT_DIR || join(gsdHome, "agent");
   const manifestPath = join(agentDir, "managed-resources.json");
   try {
     const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
@@ -153,9 +155,18 @@ export function checkResourcesStale(
  * Returns the corrected base path.
  */
 export function escapeStaleWorktree(base: string): string {
-  const marker = `${pathSep}.gsd${pathSep}worktrees${pathSep}`;
-  const idx = base.indexOf(marker);
-  if (idx === -1) return base;
+  // Direct layout: /.gsd/worktrees/
+  const directMarker = `${pathSep}.gsd${pathSep}worktrees${pathSep}`;
+  let idx = base.indexOf(directMarker);
+  if (idx === -1) {
+    // Symlink-resolved layout: /.gsd/projects/<hash>/worktrees/
+    const symlinkRe = new RegExp(
+      `\\${pathSep}\\.gsd\\${pathSep}projects\\${pathSep}[a-f0-9]+\\${pathSep}worktrees\\${pathSep}`,
+    );
+    const match = base.match(symlinkRe);
+    if (!match || match.index === undefined) return base;
+    idx = match.index;
+  }
 
   // base is inside .gsd/worktrees/<something> — extract the project root
   const projectRoot = base.slice(0, idx);

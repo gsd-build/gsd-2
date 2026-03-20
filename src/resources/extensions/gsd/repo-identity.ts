@@ -12,6 +12,8 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, s
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
+const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
+
 // ─── Repo Identity ──────────────────────────────────────────────────────────
 
 /**
@@ -91,13 +93,30 @@ function resolveGitRoot(basePath: string): string {
 }
 
 /**
+ * Validate a GSD_PROJECT_ID value.
+ *
+ * Must contain only alphanumeric characters, hyphens, and underscores.
+ * Call this once at startup so the user gets immediate feedback on bad values.
+ */
+export function validateProjectId(id: string): boolean {
+  return /^[a-zA-Z0-9_-]+$/.test(id);
+}
+
+/**
  * Compute a stable identity for a repository.
  *
- * SHA-256 of `${remoteUrl}\n${resolvedRoot}`, truncated to 12 hex chars.
- * Deterministic: same repo always produces the same hash regardless of
- * which worktree the caller is inside.
+ * If `GSD_PROJECT_ID` is set, returns it directly (validation is expected
+ * to have already happened at startup via `validateProjectId`).
+ *
+ * Otherwise returns SHA-256 of `${remoteUrl}\n${resolvedRoot}`, truncated
+ * to 12 hex chars. Deterministic: same repo always produces the same hash
+ * regardless of which worktree the caller is inside.
  */
 export function repoIdentity(basePath: string): string {
+  const projectId = process.env.GSD_PROJECT_ID;
+  if (projectId) {
+    return projectId;
+  }
   const remoteUrl = getRemoteUrl(basePath);
   const root = resolveGitRoot(basePath);
   const input = `${remoteUrl}\n${root}`;
@@ -113,7 +132,7 @@ export function repoIdentity(basePath: string): string {
  * otherwise `~/.gsd/projects/<hash>`.
  */
 export function externalGsdRoot(basePath: string): string {
-  const base = process.env.GSD_STATE_DIR || join(homedir(), ".gsd");
+  const base = process.env.GSD_STATE_DIR || gsdHome;
   return join(base, "projects", repoIdentity(basePath));
 }
 
