@@ -82,7 +82,7 @@ The `SKILL.md` file contains instructions the LLM follows when the skill is acti
 Place skills in your project for project-specific guidance:
 
 ```
-.pi/agent/skills/my-project-skill/
+.gsd/agent/skills/my-project-skill/
   SKILL.md
 ```
 

@@ -10,7 +10,7 @@ GSD must be installed before activating this extension:
 npm install -g gsd-pi
 ```
 
-Node.js ≥ 20.6.0 and Git are required.
+Node.js ≥ 22.0.0 and Git are required.
 
 ## Features
 
@@ -82,7 +82,7 @@ All commands are accessible via `Ctrl+Shift+P`:
 
 ## How It Works
 
-The extension spawns `gsd --mode rpc` in the background and communicates over JSON-RPC via stdin/stdout. All 25 RPC commands are supported, including streaming events for real-time sidebar updates.
+The extension spawns `gsd --mode rpc` in the background and communicates over JSON-RPC via stdin/stdout. All RPC commands are supported, including streaming events for real-time sidebar updates.
 
 ## Links
 
