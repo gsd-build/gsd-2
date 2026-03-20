@@ -697,6 +697,146 @@ async function closeoutAndStop(
   await deps.stopAuto(ctx, pi, reason);
 }
 
+// ─── runGuards ────────────────────────────────────────────────────────────────
+
+/**
+ * Phase 2: Guards — budget ceiling, context window, secrets re-check.
+ * Returns break to exit the loop, or next to proceed to dispatch.
+ */
+async function runGuards(
+  ic: IterationContext,
+  mid: string,
+): Promise<PhaseResult> {
+  const { ctx, pi, s, deps, prefs } = ic;
+
+  // Budget ceiling guard
+  const budgetCeiling = prefs?.budget_ceiling;
+  if (budgetCeiling !== undefined && budgetCeiling > 0) {
+    const currentLedger = deps.getLedger() as { units: unknown } | null;
+    const totalCost = currentLedger
+      ? deps.getProjectTotals(currentLedger.units).cost
+      : 0;
+    const budgetPct = totalCost / budgetCeiling;
+    const budgetAlertLevel = deps.getBudgetAlertLevel(budgetPct);
+    const newBudgetAlertLevel = deps.getNewBudgetAlertLevel(
+      s.lastBudgetAlertLevel,
+      budgetPct,
+    );
+    const enforcement = prefs?.budget_enforcement ?? "pause";
+    const budgetEnforcementAction = deps.getBudgetEnforcementAction(
+      enforcement,
+      budgetPct,
+    );
+
+    // Data-driven threshold check — loop descending, fire first match
+    const threshold = BUDGET_THRESHOLDS.find(
+      (t) => newBudgetAlertLevel >= t.pct,
+    );
+    if (threshold) {
+      s.lastBudgetAlertLevel =
+        newBudgetAlertLevel as AutoSession["lastBudgetAlertLevel"];
+
+      if (threshold.pct === 100 && budgetEnforcementAction !== "none") {
+        // 100% — special enforcement logic (halt/pause/warn)
+        const msg = `Budget ceiling ${deps.formatCost(budgetCeiling)} reached (spent ${deps.formatCost(totalCost)}).`;
+        if (budgetEnforcementAction === "halt") {
+          deps.sendDesktopNotification("GSD", msg, "error", "budget");
+          await deps.stopAuto(ctx, pi, "Budget ceiling reached");
+          debugLog("autoLoop", { phase: "exit", reason: "budget-halt" });
+          return { action: "break", reason: "budget-halt" };
+        }
+        if (budgetEnforcementAction === "pause") {
+          ctx.ui.notify(
+            `${msg} Pausing auto-mode — /gsd auto to override and continue.`,
+            "warning",
+          );
+          deps.sendDesktopNotification("GSD", msg, "warning", "budget");
+          deps.logCmuxEvent(prefs, msg, "warning");
+          await deps.pauseAuto(ctx, pi);
+          debugLog("autoLoop", { phase: "exit", reason: "budget-pause" });
+          return { action: "break", reason: "budget-pause" };
+        }
+        ctx.ui.notify(`${msg} Continuing (enforcement: warn).`, "warning");
+        deps.sendDesktopNotification("GSD", msg, "warning", "budget");
+        deps.logCmuxEvent(prefs, msg, "warning");
+      } else if (threshold.pct < 100) {
+        // Sub-100% — simple notification
+        const msg = `${threshold.label}: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`;
+        ctx.ui.notify(msg, threshold.notifyLevel);
+        deps.sendDesktopNotification(
+          "GSD",
+          msg,
+          threshold.notifyLevel,
+          "budget",
+        );
+        deps.logCmuxEvent(prefs, msg, threshold.cmuxLevel);
+      }
+    } else if (budgetAlertLevel === 0) {
+      s.lastBudgetAlertLevel = 0;
+    }
+  } else {
+    s.lastBudgetAlertLevel = 0;
+  }
+
+  // Context window guard
+  const contextThreshold = prefs?.context_pause_threshold ?? 0;
+  if (contextThreshold > 0 && s.cmdCtx) {
+    const contextUsage = s.cmdCtx.getContextUsage();
+    if (
+      contextUsage &&
+      contextUsage.percent !== null &&
+      contextUsage.percent >= contextThreshold
+    ) {
+      const msg = `Context window at ${contextUsage.percent}% (threshold: ${contextThreshold}%). Pausing to prevent truncated output.`;
+      ctx.ui.notify(
+        `${msg} Run /gsd auto to continue (will start fresh session).`,
+        "warning",
+      );
+      deps.sendDesktopNotification(
+        "GSD",
+        `Context ${contextUsage.percent}% — paused`,
+        "warning",
+        "attention",
+      );
+      await deps.pauseAuto(ctx, pi);
+      debugLog("autoLoop", { phase: "exit", reason: "context-window" });
+      return { action: "break", reason: "context-window" };
+    }
+  }
+
+  // Secrets re-check gate
+  try {
+    const manifestStatus = await deps.getManifestStatus(s.basePath, mid, s.originalBasePath);
+    if (manifestStatus && manifestStatus.pending.length > 0) {
+      const result = await deps.collectSecretsFromManifest(
+        s.basePath,
+        mid,
+        ctx,
+      );
+      if (
+        result &&
+        result.applied &&
+        result.skipped &&
+        result.existingSkipped
+      ) {
+        ctx.ui.notify(
+          `Secrets collected: ${result.applied.length} applied, ${result.skipped.length} skipped, ${result.existingSkipped.length} already set.`,
+          "info",
+        );
+      } else {
+        ctx.ui.notify("Secrets collection skipped.", "info");
+      }
+    }
+  } catch (err) {
+    ctx.ui.notify(
+      `Secrets collection error: ${err instanceof Error ? err.message : String(err)}. Continuing with next task.`,
+      "warning",
+    );
+  }
+
+  return { action: "next", data: undefined as void };
+}
+
 // ─── runUnitPhase ─────────────────────────────────────────────────────────────
 
 /**
@@ -1490,129 +1630,9 @@ export async function autoLoop(
 
       // ── Phase 2: Guards ─────────────────────────────────────────────────
 
-      // Budget ceiling guard
-      const budgetCeiling = prefs?.budget_ceiling;
-      if (budgetCeiling !== undefined && budgetCeiling > 0) {
-        const currentLedger = deps.getLedger() as { units: unknown } | null;
-        const totalCost = currentLedger
-          ? deps.getProjectTotals(currentLedger.units).cost
-          : 0;
-        const budgetPct = totalCost / budgetCeiling;
-        const budgetAlertLevel = deps.getBudgetAlertLevel(budgetPct);
-        const newBudgetAlertLevel = deps.getNewBudgetAlertLevel(
-          s.lastBudgetAlertLevel,
-          budgetPct,
-        );
-        const enforcement = prefs?.budget_enforcement ?? "pause";
-        const budgetEnforcementAction = deps.getBudgetEnforcementAction(
-          enforcement,
-          budgetPct,
-        );
-
-        // Data-driven threshold check — loop descending, fire first match
-        const threshold = BUDGET_THRESHOLDS.find(
-          (t) => newBudgetAlertLevel >= t.pct,
-        );
-        if (threshold) {
-          s.lastBudgetAlertLevel =
-            newBudgetAlertLevel as AutoSession["lastBudgetAlertLevel"];
-
-          if (threshold.pct === 100 && budgetEnforcementAction !== "none") {
-            // 100% — special enforcement logic (halt/pause/warn)
-            const msg = `Budget ceiling ${deps.formatCost(budgetCeiling)} reached (spent ${deps.formatCost(totalCost)}).`;
-            if (budgetEnforcementAction === "halt") {
-              deps.sendDesktopNotification("GSD", msg, "error", "budget");
-              await deps.stopAuto(ctx, pi, "Budget ceiling reached");
-              debugLog("autoLoop", { phase: "exit", reason: "budget-halt" });
-              break;
-            }
-            if (budgetEnforcementAction === "pause") {
-              ctx.ui.notify(
-                `${msg} Pausing auto-mode — /gsd auto to override and continue.`,
-                "warning",
-              );
-              deps.sendDesktopNotification("GSD", msg, "warning", "budget");
-              deps.logCmuxEvent(prefs, msg, "warning");
-              await deps.pauseAuto(ctx, pi);
-              debugLog("autoLoop", { phase: "exit", reason: "budget-pause" });
-              break;
-            }
-            ctx.ui.notify(`${msg} Continuing (enforcement: warn).`, "warning");
-            deps.sendDesktopNotification("GSD", msg, "warning", "budget");
-            deps.logCmuxEvent(prefs, msg, "warning");
-          } else if (threshold.pct < 100) {
-            // Sub-100% — simple notification
-            const msg = `${threshold.label}: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`;
-            ctx.ui.notify(msg, threshold.notifyLevel);
-            deps.sendDesktopNotification(
-              "GSD",
-              msg,
-              threshold.notifyLevel,
-              "budget",
-            );
-            deps.logCmuxEvent(prefs, msg, threshold.cmuxLevel);
-          }
-        } else if (budgetAlertLevel === 0) {
-          s.lastBudgetAlertLevel = 0;
-        }
-      } else {
-        s.lastBudgetAlertLevel = 0;
-      }
-
-      // Context window guard
-      const contextThreshold = prefs?.context_pause_threshold ?? 0;
-      if (contextThreshold > 0 && s.cmdCtx) {
-        const contextUsage = s.cmdCtx.getContextUsage();
-        if (
-          contextUsage &&
-          contextUsage.percent !== null &&
-          contextUsage.percent >= contextThreshold
-        ) {
-          const msg = `Context window at ${contextUsage.percent}% (threshold: ${contextThreshold}%). Pausing to prevent truncated output.`;
-          ctx.ui.notify(
-            `${msg} Run /gsd auto to continue (will start fresh session).`,
-            "warning",
-          );
-          deps.sendDesktopNotification(
-            "GSD",
-            `Context ${contextUsage.percent}% — paused`,
-            "warning",
-            "attention",
-          );
-          await deps.pauseAuto(ctx, pi);
-          debugLog("autoLoop", { phase: "exit", reason: "context-window" });
-          break;
-        }
-      }
-
-      // Secrets re-check gate
-      try {
-        const manifestStatus = await deps.getManifestStatus(s.basePath, mid, s.originalBasePath);
-        if (manifestStatus && manifestStatus.pending.length > 0) {
-          const result = await deps.collectSecretsFromManifest(
-            s.basePath,
-            mid,
-            ctx,
-          );
-          if (
-            result &&
-            result.applied &&
-            result.skipped &&
-            result.existingSkipped
-          ) {
-            ctx.ui.notify(
-              `Secrets collected: ${result.applied.length} applied, ${result.skipped.length} skipped, ${result.existingSkipped.length} already set.`,
-              "info",
-            );
-          } else {
-            ctx.ui.notify("Secrets collection skipped.", "info");
-          }
-        }
-      } catch (err) {
-        ctx.ui.notify(
-          `Secrets collection error: ${err instanceof Error ? err.message : String(err)}. Continuing with next task.`,
-          "warning",
-        );
+      {
+        const guardsResult = await runGuards({ ctx, pi, s, deps, prefs, iteration }, mid);
+        if (guardsResult.action === "break") break;
       }
 
       // ── Phase 3: Dispatch resolution ────────────────────────────────────
