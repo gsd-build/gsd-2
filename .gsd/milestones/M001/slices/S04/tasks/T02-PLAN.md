@@ -80,3 +80,11 @@ This task depends on T01's `definition-loader.ts` and `graphFromDefinition()`.
 
 - `src/resources/extensions/gsd/run-manager.ts` — new file (~80 lines): `createRun` + `listRuns`
 - `src/resources/extensions/gsd/custom-workflow-engine.ts` — modified: `buildGSDStateStub` accepts definitionName, `deriveState` reads definition name, `getDisplayMetadata` uses it
+
+## Observability Impact
+
+- **New signal — `createRun` return value:** Returns `{ runId, runDir }` which can be logged/traced by callers to identify the created run directory and its unique ID.
+- **New inspection surface — `DEFINITION.yaml`:** Each run directory now contains a frozen copy of the source definition. Agents or humans can `cat <runDir>/DEFINITION.yaml` to see exactly which definition was used.
+- **New inspection surface — `listRuns()`:** Enumerate all runs with metadata (name, createdAt) for debugging which runs exist and when they were created.
+- **Changed signal — `getDisplayMetadata().engineLabel`:** Now reads the workflow's `name` from `DEFINITION.yaml` instead of hardcoded `"Custom Pipeline"`. Falls back to `"Custom Pipeline"` for backward compatibility with pre-S04 runs (no DEFINITION.yaml).
+- **Failure visibility:** `createRun` propagates `loadDefinition` validation errors (with specific field names and reasons). Directory creation failures surface via Node.js fs errors. `listRuns` silently skips unparseable run directories (no crash on corrupt data).

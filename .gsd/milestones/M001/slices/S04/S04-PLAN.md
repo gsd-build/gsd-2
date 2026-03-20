@@ -48,7 +48,7 @@
   - Verify: `node --import ./src/resources/extensions/gsd/tests/resolve-ts.mjs --experimental-strip-types --test src/resources/extensions/gsd/tests/definition-loader.test.ts` — all pass; `npx tsc --noEmit --project tsconfig.extensions.json` — 0 errors
   - Done when: `loadDefinition` parses valid YAML, `validateDefinition` rejects invalid schemas, `graphFromDefinition` produces correct WorkflowGraph, all unit tests pass, zero type errors
 
-- [ ] **T02: Build run-manager.ts and update getDisplayMetadata** `est:20m`
+- [x] **T02: Build run-manager.ts and update getDisplayMetadata** `est:20m`
   - Why: The run lifecycle layer — creating run directories, snapshotting definitions, generating GRAPH.yaml — is required before the full pipeline can be exercised. Covers R007 (immutable snapshot) and R008 (GRAPH.yaml generation from definitions).
   - Files: `src/resources/extensions/gsd/run-manager.ts`, `src/resources/extensions/gsd/custom-workflow-engine.ts`
   - Do: Create `run-manager.ts` with `createRun(basePath, definitionName, defsDir?)` and `listRuns(basePath)`. `createRun` does: mkdir `workflow-runs/<name>-<timestamp>-<4char random>/`, `copyFileSync` the source YAML as DEFINITION.yaml, call `graphFromDefinition` + `writeGraph` for initial GRAPH.yaml, return `{ runDir, runId }`. In `custom-workflow-engine.ts`, update `getDisplayMetadata` to read a `_definition` name from `EngineState.raw` (set in `buildGSDStateStub`) instead of hardcoded "Custom Pipeline", falling back to "Custom Pipeline" if absent.

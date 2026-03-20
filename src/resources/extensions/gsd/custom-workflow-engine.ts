@@ -23,6 +23,9 @@ import {
   markStepComplete,
 } from "./graph.js";
 import type { WorkflowGraph } from "./graph.js";
+import { parse } from "yaml";
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 
 // ─── GSDState-compatible stub ────────────────────────────────────────────
 
@@ -36,7 +39,7 @@ import type { WorkflowGraph } from "./graph.js";
  * - phase must not be "complete" or "blocked" (those trigger early returns)
  * - arrays must be present but empty
  */
-function buildGSDStateStub(graph: WorkflowGraph) {
+function buildGSDStateStub(graph: WorkflowGraph, definitionName?: string) {
   const completed = graph.steps.filter((s) => s.status === "complete").length;
   const total = graph.steps.length;
 
@@ -51,6 +54,8 @@ function buildGSDStateStub(graph: WorkflowGraph) {
     registry: [] as unknown[],
     // Attach graph data so resolveDispatch can access it without re-reading disk
     _graph: graph,
+    // Attach definition metadata for getDisplayMetadata
+    _definition: definitionName ? { name: definitionName } : undefined,
     progress: {
       milestones: { done: 0, total: 1 },
       tasks: { done: completed, total },
@@ -75,13 +80,28 @@ export class CustomWorkflowEngine implements WorkflowEngine {
     const allComplete = total > 0 && completed === total;
     const nextStep = getNextPendingStep(graph);
 
+    // Try to read definition name from DEFINITION.yaml (present for S04+ runs)
+    let definitionName: string | undefined;
+    const defPath = join(this.runDir, "DEFINITION.yaml");
+    if (existsSync(defPath)) {
+      try {
+        const raw = readFileSync(defPath, "utf-8");
+        const parsed = parse(raw) as { name?: string };
+        if (typeof parsed?.name === "string") {
+          definitionName = parsed.name;
+        }
+      } catch {
+        // Fall through — use undefined (getDisplayMetadata will use fallback)
+      }
+    }
+
     return {
       phase: allComplete ? "complete" : "executing",
       currentMilestoneId: "custom-workflow",
       activeSliceId: nextStep?.id ?? null,
       activeTaskId: nextStep?.id ?? null,
       isComplete: allComplete,
-      raw: buildGSDStateStub(graph),
+      raw: buildGSDStateStub(graph, definitionName),
     };
   }
 
@@ -131,19 +151,20 @@ export class CustomWorkflowEngine implements WorkflowEngine {
   }
 
   getDisplayMetadata(state: EngineState): DisplayMetadata {
-    const completed = state.isComplete
-      ? (state.raw as { _graph?: WorkflowGraph })?._graph?.steps.length ?? 0
-      : (
-          (state.raw as { _graph?: WorkflowGraph })?._graph?.steps.filter(
-            (s) => s.status === "complete",
-          ) ?? []
-        ).length;
+    const rawState = state.raw as {
+      _graph?: WorkflowGraph;
+      _definition?: { name: string };
+    };
 
-    const total =
-      (state.raw as { _graph?: WorkflowGraph })?._graph?.steps.length ?? 0;
+    const completed = state.isComplete
+      ? rawState._graph?.steps.length ?? 0
+      : (rawState._graph?.steps.filter((s) => s.status === "complete") ?? [])
+          .length;
+
+    const total = rawState._graph?.steps.length ?? 0;
 
     return {
-      engineLabel: "Custom Pipeline",
+      engineLabel: rawState._definition?.name ?? "Custom Pipeline",
       currentPhase: state.phase,
       progressSummary: state.isComplete
         ? "All steps complete"
