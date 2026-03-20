@@ -82,7 +82,7 @@ export function initHealthWidget(ctx: ExtensionContext): void {
   const basePath = projectRoot();
 
   // String-array fallback — used in RPC mode (factory is a no-op there)
-  const initialData = loadBaseHealthWidgetData(basePath);
+  const initialData = loadHealthWidgetData(basePath);
   ctx.ui.setWidget("gsd-health", buildHealthLines(initialData), { placement: "belowEditor" });
 
   // Factory-based widget for TUI mode — replaces the string-array above
@@ -95,8 +95,7 @@ export function initHealthWidget(ctx: ExtensionContext): void {
       if (refreshInFlight) return;
       refreshInFlight = true;
       try {
-        const baseData = loadBaseHealthWidgetData(basePath);
-        data = await enrichHealthWidgetData(basePath, baseData);
+        data = loadHealthWidgetData(basePath);
         cachedLines = undefined;
         _tui.requestRender();
       } catch { /* non-fatal */ } finally {
