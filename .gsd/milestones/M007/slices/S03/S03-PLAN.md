@@ -37,7 +37,7 @@
   - Verify: `node -e "const m = require('fs').readFileSync('src/resources/extensions/gsd/tests/fixtures/concepts/mixed-confidence/FIXTURE-MANIFEST.json','utf8'); JSON.parse(m)"` exits 0
   - Done when: mixed-confidence fixture has valid manifest + state tree, `validateFixtureState` exported from fixture-harness.ts
 
-- [ ] **T02: End-to-end fixture harness test** `est:45m`
+- [x] **T02: End-to-end fixture harness test** `est:45m`
   - Why: Proves all 3 fixtures load correctly, state integrity passes, and metrics extraction matches expected telemetry shapes
   - Files: `src/resources/extensions/gsd/tests/fixture-e2e.test.ts`
   - Do: Write test file with 3 groups (one per fixture). Each group: (1) loadFixture into temp dir, (2) validateFixtureState passes, (3) verify manifest.claimMix totals match claims array, (4) write synthetic dispatch-metrics.jsonl matching expectedTelemetryShape, (5) read back with readMetricsJsonl and assert shape. Use `os.tmpdir() + crypto.randomUUID()` for isolation per K007/S02 patterns. Run with `npx tsx --test`.

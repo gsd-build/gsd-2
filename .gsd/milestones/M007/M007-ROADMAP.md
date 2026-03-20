@@ -13,7 +13,7 @@
   - Produce comparison tables (token count, intervention, time).
   - Verify metrics durability across unit crashes/restarts.
 
-- [ ] **S03: Fixture Harness** `risk:medium` `depends:[S02]`
+- [x] **S03: Fixture Harness** `risk:medium` `depends:[S02]`
   - Implement `experiment-runner.ts` for fixture environment restoration.
   - Create 3 concept fixtures with known success criteria (e.g., "high unknowns" scenario).
   - End-to-end verification of full run + metric extraction.
