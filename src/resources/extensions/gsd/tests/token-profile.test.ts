@@ -36,16 +36,16 @@ const typesSrc = readFileSync(join(__dirname, "..", "types.ts"), "utf-8");
 
 test("types: TokenProfile type exported with budget/balanced/quality", () => {
   assert.ok(typesSrc.includes("export type TokenProfile"), "TokenProfile should be exported");
-  assert.ok(typesSrc.includes("'budget'"), "should include budget");
-  assert.ok(typesSrc.includes("'balanced'"), "should include balanced");
-  assert.ok(typesSrc.includes("'quality'"), "should include quality");
+  assert.match(typesSrc, /["']budget["']/, "should include budget");
+  assert.match(typesSrc, /["']balanced["']/, "should include balanced");
+  assert.match(typesSrc, /["']quality["']/, "should include quality");
 });
 
 test("types: InlineLevel type exported with full/standard/minimal", () => {
   assert.ok(typesSrc.includes("export type InlineLevel"), "InlineLevel should be exported");
-  assert.ok(typesSrc.includes("'full'"), "should include full");
-  assert.ok(typesSrc.includes("'standard'"), "should include standard");
-  assert.ok(typesSrc.includes("'minimal'"), "should include minimal");
+  assert.match(typesSrc, /["']full["']/, "should include full");
+  assert.match(typesSrc, /["']standard["']/, "should include standard");
+  assert.match(typesSrc, /["']minimal["']/, "should include minimal");
 });
 
 test("types: PhaseSkipPreferences interface exported", () => {

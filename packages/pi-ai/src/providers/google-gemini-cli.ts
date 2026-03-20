@@ -112,7 +112,7 @@ const CLAUDE_THINKING_BETA_HEADER = "interleaved-thinking-2025-05-14";
  * - "Please retry in Xs" or "Please retry in Xms"
  * - "retryDelay": "34.074824224s" (JSON field)
  */
-export function extractRetryDelay(errorText: string, response?: Response | Headers): number | undefined {
+function extractRetryDelay(errorText: string, response?: Response | Headers): number | undefined {
 	const normalizeDelay = (ms: number): number | undefined => (ms > 0 ? Math.ceil(ms + 1000) : undefined);
 
 	const headers = response instanceof Headers ? response : response?.headers;
@@ -865,7 +865,7 @@ export const streamSimpleGoogleGeminiCli: StreamFunction<"google-gemini-cli", Si
 	} satisfies GoogleGeminiCliOptions);
 };
 
-export function buildRequest(
+function buildRequest(
 	model: Model<"google-gemini-cli">,
 	context: Context,
 	projectId: string,

@@ -49,18 +49,64 @@ import { runEnvironmentChecks } from "./doctor-environment.js";
 
 import { handleLogs } from "./commands-logs.js";
 import { handleStart, handleTemplates, getTemplateCompletions } from "./commands-workflow-templates.js";
+import { readSessionLockData, isSessionLockProcessAlive } from "./session-lock.js";
 
 
 /** Resolve the effective project root, accounting for worktree paths. */
 export function projectRoot(): string {
-  const root = resolveProjectRoot(process.cwd());
-  assertSafeDirectory(root);
+  const cwd = process.cwd();
+  const root = resolveProjectRoot(cwd);
+
+  // When running inside a GSD worktree, the resolved root may be a "dangerous"
+  // directory (e.g., $HOME used as a git repo root — #1317). The safety check
+  // should validate the actual working directory, not the upstream root,
+  // because the worktree itself is a safe project subdirectory.
+  // Only skip the root check when we can confirm we're in a valid worktree.
+  if (root !== cwd) {
+    // We're in a worktree — validate the worktree path instead of the root
+    assertSafeDirectory(cwd);
+  } else {
+    assertSafeDirectory(root);
+  }
   return root;
+}
+
+/**
+ * Check if another process holds the auto-mode session lock.
+ * Returns the lock data if a remote session is alive, null otherwise.
+ */
+function getRemoteAutoSession(basePath: string): { pid: number } | null {
+  const lockData = readSessionLockData(basePath);
+  if (!lockData) return null;
+  if (lockData.pid === process.pid) return null;
+  if (!isSessionLockProcessAlive(lockData)) return null;
+  return { pid: lockData.pid };
+}
+
+/**
+ * Show a steering menu when auto-mode is running in another process.
+ * Returns true if a remote session was detected (caller should return early).
+ */
+function notifyRemoteAutoActive(ctx: ExtensionCommandContext, basePath: string): boolean {
+  const remote = getRemoteAutoSession(basePath);
+  if (!remote) return false;
+  ctx.ui.notify(
+    `Auto-mode is running in another process (PID ${remote.pid}).\n` +
+    `Use these commands to interact with it:\n` +
+    `  /gsd status   — check progress\n` +
+    `  /gsd discuss  — discuss architecture decisions\n` +
+    `  /gsd queue    — queue the next milestone\n` +
+    `  /gsd steer    — apply an override to active work\n` +
+    `  /gsd capture  — fire-and-forget thought\n` +
+    `  /gsd stop     — stop auto-mode`,
+    "warning",
+  );
+  return true;
 }
 
 export function registerGSDCommand(pi: ExtensionAPI): void {
   pi.registerCommand("gsd", {
-    description: "GSD — Get Shit Done: /gsd help|start|templates|next|auto|stop|pause|status|visualize|queue|quick|capture|triage|dispatch|history|undo|skip|export|cleanup|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|forensics|migrate|remote|steer|knowledge|new-milestone|parallel|update",
+    description: "GSD — Get Shit Done: /gsd help|start|templates|next|auto|stop|pause|status|visualize|queue|quick|capture|triage|dispatch|history|undo|skip|export|cleanup|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|forensics|changelog|migrate|remote|steer|knowledge|new-milestone|parallel|update",
     getArgumentCompletions: (prefix: string) => {
       const subcommands = [
         { cmd: "help", desc: "Categorized command reference with descriptions" },
@@ -74,9 +120,11 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         { cmd: "quick", desc: "Execute a quick task without full planning overhead" },
         { cmd: "discuss", desc: "Discuss architecture and decisions" },
         { cmd: "capture", desc: "Fire-and-forget thought capture" },
+        { cmd: "changelog", desc: "Show categorized release notes" },
         { cmd: "triage", desc: "Manually trigger triage of pending captures" },
         { cmd: "dispatch", desc: "Dispatch a specific phase directly" },
         { cmd: "history", desc: "View execution history" },
+        { cmd: "rate", desc: "Rate last unit's model tier (over/ok/under) — improves adaptive routing" },
         { cmd: "undo", desc: "Revert last completed unit" },
         { cmd: "skip", desc: "Prevent a unit from auto-mode dispatch" },
         { cmd: "export", desc: "Export milestone/slice results" },
@@ -405,36 +453,46 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
     },
 
     async handler(args: string, ctx: ExtensionCommandContext) {
-      const trimmed = (typeof args === "string" ? args : "").trim();
+      await handleGSDCommand(args, ctx, pi);
+    },
+  });
+}
 
-      if (trimmed === "help" || trimmed === "h" || trimmed === "?") {
-        showHelp(ctx);
-        return;
-      }
+export async function handleGSDCommand(
+  args: string,
+  ctx: ExtensionCommandContext,
+  pi: ExtensionAPI,
+): Promise<void> {
+  const trimmed = (typeof args === "string" ? args : "").trim();
 
-      if (trimmed === "status") {
-        await handleStatus(ctx);
-        return;
-      }
+  if (trimmed === "help" || trimmed === "h" || trimmed === "?") {
+    showHelp(ctx);
+    return;
+  }
 
-      if (trimmed === "visualize") {
-        await handleVisualize(ctx);
-        return;
-      }
+  if (trimmed === "status") {
+    await handleStatus(ctx);
+    return;
+  }
 
-      if (trimmed === "mode" || trimmed.startsWith("mode ")) {
-        const modeArgs = trimmed.replace(/^mode\s*/, "").trim();
-        const scope = modeArgs === "project" ? "project" : "global";
-        const path = scope === "project" ? getProjectGSDPreferencesPath() : getGlobalGSDPreferencesPath();
-        await ensurePreferencesFile(path, ctx, scope);
-        await handlePrefsMode(ctx, scope);
-        return;
-      }
+  if (trimmed === "visualize") {
+    await handleVisualize(ctx);
+    return;
+  }
 
-      if (trimmed === "prefs" || trimmed.startsWith("prefs ")) {
-        await handlePrefs(trimmed.replace(/^prefs\s*/, "").trim(), ctx);
-        return;
-      }
+  if (trimmed === "mode" || trimmed.startsWith("mode ")) {
+    const modeArgs = trimmed.replace(/^mode\s*/, "").trim();
+    const scope = modeArgs === "project" ? "project" : "global";
+    const path = scope === "project" ? getProjectGSDPreferencesPath() : getGlobalGSDPreferencesPath();
+    await ensurePreferencesFile(path, ctx, scope);
+    await handlePrefsMode(ctx, scope);
+    return;
+  }
+
+  if (trimmed === "prefs" || trimmed.startsWith("prefs ")) {
+    await handlePrefs(trimmed.replace(/^prefs\s*/, "").trim(), ctx);
+    return;
+  }
 
       if (trimmed === "init") {
         const { detectProjectState } = await import("./detection.js");
@@ -478,11 +536,18 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         return;
       }
 
+      if (trimmed === "changelog" || trimmed.startsWith("changelog ")) {
+        const { handleChangelog } = await import("./changelog.js");
+        await handleChangelog(trimmed.replace(/^changelog\s*/, "").trim(), ctx, pi);
+        return;
+      }
+
       if (trimmed === "next" || trimmed.startsWith("next ")) {
         if (trimmed.includes("--dry-run")) {
           await handleDryRun(ctx, projectRoot());
           return;
         }
+        if (notifyRemoteAutoActive(ctx, projectRoot())) return;
         const verboseMode = trimmed.includes("--verbose");
         const debugMode = trimmed.includes("--debug");
         if (debugMode) enableDebug(projectRoot());
@@ -535,6 +600,12 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
 
       if (trimmed === "undo" || trimmed.startsWith("undo ")) {
         await handleUndo(trimmed.replace(/^undo\s*/, "").trim(), ctx, pi, projectRoot());
+        return;
+      }
+
+      if (trimmed === "rate" || trimmed.startsWith("rate ")) {
+        const { handleRate } = await import("./commands-rate.js");
+        await handleRate(trimmed.replace(/^rate\s*/, "").trim(), ctx, projectRoot());
         return;
       }
 
@@ -871,7 +942,7 @@ Examples:
       }
 
       if (trimmed === "") {
-        // Bare /gsd defaults to step mode
+        if (notifyRemoteAutoActive(ctx, projectRoot())) return;
         await startAuto(ctx, pi, projectRoot(), false, { step: true });
         return;
       }
@@ -882,12 +953,10 @@ Examples:
         return;
       }
 
-      ctx.ui.notify(
-        `Unknown: /gsd ${trimmed}. Run /gsd help for available commands.`,
-        "warning",
-      );
-    },
-  });
+  ctx.ui.notify(
+    `Unknown: /gsd ${trimmed}. Run /gsd help for available commands.`,
+    "warning",
+  );
 }
 
 function showHelp(ctx: ExtensionCommandContext): void {
@@ -909,6 +978,7 @@ function showHelp(ctx: ExtensionCommandContext): void {
     "  /gsd visualize      Interactive 10-tab TUI (progress, timeline, deps, metrics, health, agent, changes, knowledge, captures, export)",
     "  /gsd queue          Show queued/dispatched units and execution order",
     "  /gsd history        View execution history  [--cost] [--phase] [--model] [N]",
+    "  /gsd changelog      Show categorized release notes  [version]",
     "",
     "COURSE CORRECTION",
     "  /gsd steer <desc>   Apply user override to active work",

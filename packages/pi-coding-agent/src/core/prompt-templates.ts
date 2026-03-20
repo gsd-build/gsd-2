@@ -19,7 +19,7 @@ export interface PromptTemplate {
  * Parse command arguments respecting quoted strings (bash-style)
  * Returns array of arguments
  */
-export function parseCommandArgs(argsString: string): string[] {
+function parseCommandArgs(argsString: string): string[] {
 	const args: string[] = [];
 	let current = "";
 	let inQuote: string | null = null;
@@ -63,7 +63,7 @@ export function parseCommandArgs(argsString: string): string[] {
  * Note: Replacement happens on the template string only. Argument values
  * containing patterns like $1, $@, or $ARGUMENTS are NOT recursively substituted.
  */
-export function substituteArgs(content: string, args: string[]): string {
+function substituteArgs(content: string, args: string[]): string {
 	let result = content;
 
 	// Replace $1, $2, etc. with positional args FIRST (before wildcards)

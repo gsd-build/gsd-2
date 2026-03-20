@@ -14,7 +14,7 @@ import {
 	setIdleTimeout,
 	WARMUP_TIMEOUT_MS,
 } from "./client.js";
-import { getServersForFile, type LspConfig, loadConfig, hasRootMarkers, resolveCommand } from "./config.js";
+import { getServerForFile, getServersForFile, type LspConfig, loadConfig, hasRootMarkers, resolveCommand } from "./config.js";
 import { applyTextEdits, applyWorkspaceEdit } from "./edits.js";
 import { ToolAbortError, clampTimeout, throwIfAborted } from "./helpers.js";
 import { detectLspmux } from "./lspmux.js";
@@ -144,15 +144,6 @@ function getLspServers(config: LspConfig): Array<[string, ServerConfig]> {
 	return Object.entries(config.servers) as Array<[string, ServerConfig]>;
 }
 
-function getLspServersForFile(config: LspConfig, filePath: string): Array<[string, ServerConfig]> {
-	return getServersForFile(config, filePath);
-}
-
-function getLspServerForFile(config: LspConfig, filePath: string): [string, ServerConfig] | null {
-	const servers = getLspServersForFile(config, filePath);
-	return servers.length > 0 ? servers[0] : null;
-}
-
 const DIAGNOSTIC_MESSAGE_LIMIT = 50;
 const SINGLE_DIAGNOSTICS_WAIT_TIMEOUT_MS = 3000;
 const BATCH_DIAGNOSTICS_WAIT_TIMEOUT_MS = 400;
@@ -195,6 +186,73 @@ async function formatLocationWithContext(location: Location, cwd: string): Promi
 		return header;
 	}
 	return `${header}\n${context.map(lineText => `    ${lineText}`).join("\n")}`;
+}
+
+async function formatLocationResults(
+	result: Location | Location[] | LocationLink | LocationLink[] | null,
+	label: string,
+	cwd: string,
+): Promise<string> {
+	const locations = normalizeLocationResult(result);
+	if (locations.length === 0) {
+		return `No ${label} found`;
+	}
+	const lines = await Promise.all(locations.map(location => formatLocationWithContext(location, cwd)));
+	return `Found ${locations.length} ${label}(s):\n${lines.join("\n")}`;
+}
+
+async function formatCallHierarchyResults(
+	client: LspClient,
+	position: { line: number; character: number },
+	uri: string,
+	direction: "incoming" | "outgoing",
+	cwd: string,
+	signal?: AbortSignal,
+): Promise<string> {
+	const prepareResult = (await sendRequest(
+		client,
+		"textDocument/prepareCallHierarchy",
+		{ textDocument: { uri }, position },
+		signal,
+	)) as CallHierarchyItem[] | null;
+
+	if (!prepareResult || prepareResult.length === 0) {
+		return "No call hierarchy item found at this position";
+	}
+
+	const method = direction === "incoming" ? "callHierarchy/incomingCalls" : "callHierarchy/outgoingCalls";
+	const callResult = (await sendRequest(client, method, { item: prepareResult[0] }, signal)) as
+		| CallHierarchyIncomingCall[]
+		| CallHierarchyOutgoingCall[]
+		| null;
+
+	if (!callResult || callResult.length === 0) {
+		const verb = direction === "incoming" ? "incoming calls" : "outgoing calls";
+		const prep = direction === "incoming" ? "for" : "from";
+		return `No ${verb} found ${prep} ${prepareResult[0].name}`;
+	}
+
+	const lines: string[] = [];
+	const limited = callResult.slice(0, REFERENCE_CONTEXT_LIMIT);
+	for (const call of limited) {
+		const item = "from" in call ? call.from : call.to;
+		const header = formatCallHierarchyItem(item, cwd);
+		const filePath = uriToFile(item.uri);
+		const callLine = ("from" in call ? call.fromRanges[0]?.start.line : undefined) ?? item.selectionRange.start.line;
+		const context = await readLocationContext(filePath, callLine + 1, LOCATION_CONTEXT_LINES);
+		if (context.length > 0) {
+			lines.push(`  ${header}\n${context.map(l => `    ${l}`).join("\n")}`);
+		} else {
+			lines.push(`  ${header}`);
+		}
+	}
+
+	const noun = direction === "incoming" ? "caller" : "callee";
+	const prep = direction === "incoming" ? "of" : "from";
+	const truncation = callResult.length > REFERENCE_CONTEXT_LIMIT
+		? `\n  ... ${callResult.length - REFERENCE_CONTEXT_LIMIT} additional ${noun}(s) omitted`
+		: "";
+	return `${callResult.length} ${noun}(s) ${prep} ${prepareResult[0].name}:\n${lines.join("\n")}${truncation}`;
 }
 
 async function reloadServer(client: LspClient, serverName: string, signal?: AbortSignal): Promise<string> {
@@ -647,7 +705,7 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 			}
 
 			// File-specific actions
-			const serverInfo = resolvedFile ? getLspServerForFile(config, resolvedFile) : null;
+			const serverInfo = resolvedFile ? getServerForFile(config, resolvedFile) : null;
 			if (!serverInfo) {
 				return {
 					content: [{ type: "text", text: "No language server found for this action" }],
@@ -676,74 +734,35 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 
 				switch (action) {
 					case "definition": {
-						const result = (await sendRequest(
+						const result = await sendRequest(
 							client,
 							"textDocument/definition",
-							{
-								textDocument: { uri },
-								position,
-							},
+							{ textDocument: { uri }, position },
 							signal,
-						)) as Location | Location[] | LocationLink | LocationLink[] | null;
-
-						const locations = normalizeLocationResult(result);
-
-						if (locations.length === 0) {
-							output = "No definition found";
-						} else {
-							const lines = await Promise.all(
-								locations.map(location => formatLocationWithContext(location, cwd)),
-							);
-							output = `Found ${locations.length} definition(s):\n${lines.join("\n")}`;
-						}
+						);
+						output = await formatLocationResults(result as Location | Location[] | LocationLink | LocationLink[] | null, "definition", cwd);
 						break;
 					}
 
 					case "type_definition": {
-						const result = (await sendRequest(
+						const result = await sendRequest(
 							client,
 							"textDocument/typeDefinition",
-							{
-								textDocument: { uri },
-								position,
-							},
+							{ textDocument: { uri }, position },
 							signal,
-						)) as Location | Location[] | LocationLink | LocationLink[] | null;
-
-						const locations = normalizeLocationResult(result);
-
-						if (locations.length === 0) {
-							output = "No type definition found";
-						} else {
-							const lines = await Promise.all(
-								locations.map(location => formatLocationWithContext(location, cwd)),
-							);
-							output = `Found ${locations.length} type definition(s):\n${lines.join("\n")}`;
-						}
+						);
+						output = await formatLocationResults(result as Location | Location[] | LocationLink | LocationLink[] | null, "type definition", cwd);
 						break;
 					}
 
 					case "implementation": {
-						const result = (await sendRequest(
+						const result = await sendRequest(
 							client,
 							"textDocument/implementation",
-							{
-								textDocument: { uri },
-								position,
-							},
+							{ textDocument: { uri }, position },
 							signal,
-						)) as Location | Location[] | LocationLink | LocationLink[] | null;
-
-						const locations = normalizeLocationResult(result);
-
-						if (locations.length === 0) {
-							output = "No implementation found";
-						} else {
-							const lines = await Promise.all(
-								locations.map(location => formatLocationWithContext(location, cwd)),
-							);
-							output = `Found ${locations.length} implementation(s):\n${lines.join("\n")}`;
-						}
+						);
+						output = await formatLocationResults(result as Location | Location[] | LocationLink | LocationLink[] | null, "implementation", cwd);
 						break;
 					}
 
@@ -917,100 +936,12 @@ export function createLspTool(cwd: string): AgentTool<typeof lspSchema, LspToolD
 					}
 
 					case "incoming_calls": {
-						const prepareResult = (await sendRequest(
-							client,
-							"textDocument/prepareCallHierarchy",
-							{
-								textDocument: { uri },
-								position,
-							},
-							signal,
-						)) as CallHierarchyItem[] | null;
-
-						if (!prepareResult || prepareResult.length === 0) {
-							output = "No call hierarchy item found at this position";
-							break;
-						}
-
-						const incomingResult = (await sendRequest(
-							client,
-							"callHierarchy/incomingCalls",
-							{ item: prepareResult[0] },
-							signal,
-						)) as CallHierarchyIncomingCall[] | null;
-
-						if (!incomingResult || incomingResult.length === 0) {
-							output = `No incoming calls found for ${prepareResult[0].name}`;
-							break;
-						}
-
-						const incomingLines: string[] = [];
-						const limitedIncoming = incomingResult.slice(0, REFERENCE_CONTEXT_LIMIT);
-						for (const call of limitedIncoming) {
-							const header = formatCallHierarchyItem(call.from, cwd);
-							const filePath = uriToFile(call.from.uri);
-							const callLine = call.fromRanges[0]?.start.line ?? call.from.selectionRange.start.line;
-							const context = await readLocationContext(filePath, callLine + 1, LOCATION_CONTEXT_LINES);
-							if (context.length > 0) {
-								incomingLines.push(`  ${header}\n${context.map(l => `    ${l}`).join("\n")}`);
-							} else {
-								incomingLines.push(`  ${header}`);
-							}
-						}
-
-						const truncation = incomingResult.length > REFERENCE_CONTEXT_LIMIT
-							? `\n  ... ${incomingResult.length - REFERENCE_CONTEXT_LIMIT} additional caller(s) omitted`
-							: "";
-						output = `${incomingResult.length} caller(s) of ${prepareResult[0].name}:\n${incomingLines.join("\n")}${truncation}`;
+						output = await formatCallHierarchyResults(client, position, uri, "incoming", cwd, signal);
 						break;
 					}
 
 					case "outgoing_calls": {
-						const prepareResult = (await sendRequest(
-							client,
-							"textDocument/prepareCallHierarchy",
-							{
-								textDocument: { uri },
-								position,
-							},
-							signal,
-						)) as CallHierarchyItem[] | null;
-
-						if (!prepareResult || prepareResult.length === 0) {
-							output = "No call hierarchy item found at this position";
-							break;
-						}
-
-						const outgoingResult = (await sendRequest(
-							client,
-							"callHierarchy/outgoingCalls",
-							{ item: prepareResult[0] },
-							signal,
-						)) as CallHierarchyOutgoingCall[] | null;
-
-						if (!outgoingResult || outgoingResult.length === 0) {
-							output = `No outgoing calls found from ${prepareResult[0].name}`;
-							break;
-						}
-
-						const outgoingLines: string[] = [];
-						const limitedOutgoing = outgoingResult.slice(0, REFERENCE_CONTEXT_LIMIT);
-						for (const call of limitedOutgoing) {
-							const header = formatCallHierarchyItem(call.to, cwd);
-							const filePath = uriToFile(call.to.uri);
-							const callLine = call.to.selectionRange.start.line;
-							const context = await readLocationContext(filePath, callLine + 1, LOCATION_CONTEXT_LINES);
-							if (context.length > 0) {
-								outgoingLines.push(`  ${header}\n${context.map(l => `    ${l}`).join("\n")}`);
-							} else {
-								outgoingLines.push(`  ${header}`);
-							}
-						}
-
-						const outTruncation = outgoingResult.length > REFERENCE_CONTEXT_LIMIT
-							? `\n  ... ${outgoingResult.length - REFERENCE_CONTEXT_LIMIT} additional callee(s) omitted`
-							: "";
-						output = `${outgoingResult.length} callee(s) from ${prepareResult[0].name}:\n${outgoingLines.join("\n")}${outTruncation}`;
+						output = await formatCallHierarchyResults(client, position, uri, "outgoing", cwd, signal);
 						break;
 					}
 

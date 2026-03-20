@@ -14,7 +14,7 @@ const DEFAULT_LIST_TIMEOUT_MS = 1000;
 const DEFAULT_READ_TIMEOUT_MS = 3000;
 const DEFAULT_MAX_BUFFER_BYTES = 50 * 1024 * 1024;
 
-export function isWaylandSession(env: NodeJS.ProcessEnv = process.env): boolean {
+function isWaylandSession(env: NodeJS.ProcessEnv = process.env): boolean {
 	return Boolean(env.WAYLAND_DISPLAY) || env.XDG_SESSION_TYPE === "wayland";
 }
 

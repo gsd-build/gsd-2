@@ -11,7 +11,7 @@ import { uriToFile } from "./utils.js";
  * Apply text edits to a string in-memory.
  * Edits are applied in reverse order (bottom-to-top) to preserve line/character indices.
  */
-export function applyTextEditsToString(content: string, edits: TextEdit[]): string {
+function applyTextEditsToString(content: string, edits: TextEdit[]): string {
 	const lines = content.split("\n");
 
 	// Sort edits in reverse order (bottom-to-top, right-to-left)

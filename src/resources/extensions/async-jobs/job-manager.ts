@@ -149,13 +149,6 @@ export class AsyncJobManager {
 	}
 
 	/**
-	 * No-op. Retained for API compatibility with await_job tool.
-	 */
-	acknowledgeDeliveries(_jobIds: string[]): void {
-		// Delivery is fire-once; no retries to cancel.
-	}
-
-	/**
 	 * Cleanup all timers and resources.
 	 */
 	shutdown(): void {

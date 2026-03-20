@@ -17,9 +17,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 
 const projectRoot = process.cwd();
 const loaderPath = join(projectRoot, "dist", "loader.js");
@@ -86,6 +87,14 @@ function runGsd(
 function stripAnsi(s: string): string {
   // eslint-disable-next-line no-control-regex
   return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+}
+
+function createTempGitRepo(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  execFileSync("git", ["init", "-b", "main"], { cwd: dir, stdio: "pipe" });
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: dir, stdio: "pipe" });
+  execFileSync("git", ["config", "user.name", "Test User"], { cwd: dir, stdio: "pipe" });
+  return dir;
 }
 
 // ---------------------------------------------------------------------------
@@ -498,6 +507,47 @@ test("gsd headless --timeout with negative value exits 1", async () => {
     );
 
     assertNoCrashMarkers(combined);
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("gsd headless query returns JSON from the built CLI", async () => {
+  const tmpDir = createTempGitRepo("gsd-e2e-query-");
+
+  try {
+    mkdirSync(join(tmpDir, ".gsd", "milestones"), { recursive: true });
+
+    const result = await runGsd(["headless", "query"], 10_000, {}, tmpDir);
+
+    assert.ok(!result.timedOut, "process should not hang");
+    assert.strictEqual(result.code, 0, `expected exit 0, got ${result.code}`);
+
+    const combined = stripAnsi(result.stdout + result.stderr);
+    assertNoCrashMarkers(combined);
+
+    const snapshot = JSON.parse(result.stdout);
+    assert.equal(typeof snapshot.state?.phase, "string", "query output should include state.phase");
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("gsd worktree list loads the built worktree CLI without module errors", async () => {
+  const tmpDir = createTempGitRepo("gsd-e2e-worktree-");
+
+  try {
+    const result = await runGsd(["worktree", "list"], 10_000, {}, tmpDir);
+
+    assert.ok(!result.timedOut, "process should not hang");
+    assert.strictEqual(result.code, 0, `expected exit 0, got ${result.code}`);
+
+    const combined = stripAnsi(result.stdout + result.stderr);
+    assertNoCrashMarkers(combined);
+    assert.ok(
+      combined.includes("No worktrees") || combined.includes("Worktrees"),
+      `expected worktree CLI output, got:\n${combined.slice(0, 500)}`,
+    );
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
   }

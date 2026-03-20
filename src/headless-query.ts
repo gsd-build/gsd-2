@@ -16,17 +16,18 @@
 
 import { createJiti } from '@mariozechner/jiti'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
 import type { GSDState } from './resources/extensions/gsd/types.js'
+import { resolveBundledSourceResource } from './bundled-resource-path.js'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
 const jiti = createJiti(fileURLToPath(import.meta.url), { interopDefault: true, debug: false })
+const gsdExtensionPath = (...segments: string[]) =>
+  resolveBundledSourceResource(import.meta.url, 'extensions', 'gsd', ...segments)
 
 async function loadExtensionModules() {
-  const stateModule = await jiti.import(join(__dirname, 'resources/extensions/gsd/state.ts'), {}) as any
-  const dispatchModule = await jiti.import(join(__dirname, 'resources/extensions/gsd/auto-dispatch.ts'), {}) as any
-  const sessionModule = await jiti.import(join(__dirname, 'resources/extensions/gsd/session-status-io.ts'), {}) as any
-  const prefsModule = await jiti.import(join(__dirname, 'resources/extensions/gsd/preferences.ts'), {}) as any
+  const stateModule = await jiti.import(gsdExtensionPath('state.ts'), {}) as any
+  const dispatchModule = await jiti.import(gsdExtensionPath('auto-dispatch.ts'), {}) as any
+  const sessionModule = await jiti.import(gsdExtensionPath('session-status-io.ts'), {}) as any
+  const prefsModule = await jiti.import(gsdExtensionPath('preferences.ts'), {}) as any
   return {
     deriveState: stateModule.deriveState as (basePath: string) => Promise<GSDState>,
     resolveDispatch: dispatchModule.resolveDispatch as (opts: any) => Promise<any>,

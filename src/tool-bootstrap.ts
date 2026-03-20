@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, unlinkSync, symlinkSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, rmSync, statSync, symlinkSync, unlinkSync } from "node:fs";
 import { delimiter, join } from "node:path";
 
 type ManagedTool = "fd" | "rg";
@@ -40,6 +40,43 @@ function isRegularFile(path: string): boolean {
   }
 }
 
+function pathExistsIncludingBrokenSymlink(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isBrokenSymlink(path: string): boolean {
+  try {
+    const stat = lstatSync(path);
+    if (!stat.isSymbolicLink()) return false;
+    try {
+      statSync(path);
+      return false;
+    } catch {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+}
+
+function removeTargetPath(path: string): void {
+  try {
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) {
+      unlinkSync(path);
+      return;
+    }
+    rmSync(path, { force: true });
+  } catch {
+    // Path already absent.
+  }
+}
+
 export function resolveToolFromPath(tool: ManagedTool, pathValue: string | undefined = process.env.PATH): string | null {
   const spec = TOOL_SPECS[tool];
   for (const dir of splitPath(pathValue)) {
@@ -55,37 +92,28 @@ export function resolveToolFromPath(tool: ManagedTool, pathValue: string | undef
   return null;
 }
 
-function pathExists(p: string): boolean {
-  try {
-    lstatSync(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Returns true only when the path resolves to an actual file (not a broken symlink). */
-function isProvisioned(p: string): boolean {
-  try {
-    return lstatSync(p).isFile() || existsSync(p);
-  } catch {
-    return false;
-  }
-}
-
 function provisionTool(targetDir: string, tool: ManagedTool, sourcePath: string): string {
   const targetPath = join(targetDir, TOOL_SPECS[tool].targetName);
-  if (isProvisioned(targetPath)) return targetPath;
+  const brokenTarget = isBrokenSymlink(targetPath);
+  if (pathExistsIncludingBrokenSymlink(targetPath)) {
+    if (!brokenTarget) return targetPath;
+    removeTargetPath(targetPath);
+  }
 
   mkdirSync(targetDir, { recursive: true });
 
-  try {
-    symlinkSync(sourcePath, targetPath);
-  } catch {
-    try { unlinkSync(targetPath); } catch { /* already gone */ }
-    copyFileSync(sourcePath, targetPath);
-    chmodSync(targetPath, 0o755);
+  if (!brokenTarget) {
+    try {
+      symlinkSync(sourcePath, targetPath);
+      return targetPath;
+    } catch {
+      // Fall back to copying below.
+    }
   }
+
+  removeTargetPath(targetPath);
+  copyFileSync(sourcePath, targetPath);
+  chmodSync(targetPath, 0o755);
 
   return targetPath;
 }
@@ -94,7 +122,8 @@ export function ensureManagedTools(targetDir: string, pathValue: string | undefi
   const provisioned: string[] = [];
 
   for (const tool of Object.keys(TOOL_SPECS) as ManagedTool[]) {
-    if (isProvisioned(join(targetDir, TOOL_SPECS[tool].targetName))) continue;
+    const targetPath = join(targetDir, TOOL_SPECS[tool].targetName);
+    if (pathExistsIncludingBrokenSymlink(targetPath) && !isBrokenSymlink(targetPath)) continue;
     const sourcePath = resolveToolFromPath(tool, pathValue);
     if (!sourcePath) continue;
     provisioned.push(provisionTool(targetDir, tool, sourcePath));

@@ -45,12 +45,11 @@ const PACKAGE_SCRIPT_KEYS = ["typecheck", "lint", "test"] as const;
  *   4. None found
  */
 export function discoverCommands(options: DiscoverCommandsOptions): DiscoveredCommands {
-  // 1. Preference commands (still sanitize — may contain prose from misconfiguration)
+  // 1. Preference commands
   if (options.preferenceCommands && options.preferenceCommands.length > 0) {
     const filtered = options.preferenceCommands
       .map(c => c.trim())
-      .filter(Boolean)
-      .filter(c => isLikelyCommand(c));
+      .filter(Boolean);
     if (filtered.length > 0) {
       return { commands: filtered, source: "preference" };
     }
@@ -112,9 +111,7 @@ const MAX_FAILURE_CONTEXT_CHARS = 10_000;
  * Returns an empty string when all checks pass or the checks array is empty.
  */
 export function formatFailureContext(result: VerificationResult): string {
-  // Only include blocking failures in retry context — non-blocking (advisory) failures
-  // should not be injected into retry prompts to avoid noise pollution.
-  const failures = result.checks.filter((c) => c.exitCode !== 0 && c.blocking);
+  const failures = result.checks.filter((c) => c.exitCode !== 0);
   if (failures.length === 0) return "";
 
   const blocks: string[] = [];
@@ -258,10 +255,6 @@ export function runVerificationGate(options: RunVerificationGateOptions): Verifi
     };
   }
 
-  // Commands from preference and task-plan sources are blocking;
-  // package-json discovered commands are advisory (non-blocking).
-  const blocking = source === "preference" || source === "task-plan";
-
   const checks: VerificationCheck[] = [];
 
   for (const command of commands) {
@@ -297,16 +290,11 @@ export function runVerificationGate(options: RunVerificationGateOptions): Verifi
       stdout: truncate(result.stdout, MAX_OUTPUT_BYTES),
       stderr,
       durationMs,
-      blocking,
     });
   }
 
-  // Gate passes if all blocking checks pass (non-blocking failures are advisory)
-  const blockingChecks = checks.filter(c => c.blocking);
-  const passed = blockingChecks.length === 0 || blockingChecks.every(c => c.exitCode === 0);
-
   return {
-    passed,
+    passed: checks.every(c => c.exitCode === 0),
     checks,
     discoverySource: source,
     timestamp,

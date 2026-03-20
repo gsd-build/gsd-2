@@ -52,16 +52,28 @@ export interface PendingVerificationRetry {
   attempt: number;
 }
 
+/**
+ * A typed item enqueued by postUnitPostVerification for the main loop to
+ * drain via the standard runUnit path. Replaces inline dispatch
+ * (pi.sendMessage / s.cmdCtx.newSession()) for hooks, triage, and quick-tasks.
+ */
+export interface SidecarItem {
+  kind: "hook" | "triage" | "quick-task";
+  unitType: string;
+  unitId: string;
+  prompt: string;
+  /** Model override for hook units (e.g. "anthropic/claude-3-5-sonnet"). */
+  model?: string;
+  /** Capture ID for quick-task items (already marked executed at enqueue time). */
+  captureId?: string;
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 export const MAX_UNIT_DISPATCHES = 3;
 export const STUB_RECOVERY_THRESHOLD = 2;
 export const MAX_LIFETIME_DISPATCHES = 6;
-export const MAX_CONSECUTIVE_SKIPS = 3;
-export const DISPATCH_GAP_TIMEOUT_MS = 5_000;
-export const MAX_SKIP_DEPTH = 20;
 export const NEW_SESSION_TIMEOUT_MS = 30_000;
-export const DISPATCH_HANG_TIMEOUT_MS = 60_000;
 
 // ─── AutoSession ─────────────────────────────────────────────────────────────
 
@@ -69,7 +81,6 @@ export class AutoSession {
   // ── Lifecycle ────────────────────────────────────────────────────────────
   active = false;
   paused = false;
-  pausedForSecrets = false;
   stepMode = false;
   verbose = false;
   cmdCtx: ExtensionCommandContext | null = null;
@@ -83,15 +94,12 @@ export class AutoSession {
   readonly unitDispatchCount = new Map<string, number>();
   readonly unitLifetimeDispatches = new Map<string, number>();
   readonly unitRecoveryCount = new Map<string, number>();
-  readonly unitConsecutiveSkips = new Map<string, number>();
-  readonly completedKeySet = new Set<string>();
 
   // ── Timers ───────────────────────────────────────────────────────────────
   unitTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
   wrapupWarningHandle: ReturnType<typeof setTimeout> | null = null;
   idleWatchdogHandle: ReturnType<typeof setInterval> | null = null;
   continueHereHandle: ReturnType<typeof setInterval> | null = null;
-  dispatchGapHandle: ReturnType<typeof setTimeout> | null = null;
 
   // ── Current unit ─────────────────────────────────────────────────────────
   currentUnit: CurrentUnit | null = null;
@@ -113,12 +121,8 @@ export class AutoSession {
   resourceVersionOnStart: string | null = null;
   lastStateRebuildAt = 0;
 
-  // ── Guards ───────────────────────────────────────────────────────────────
-  handlingAgentEnd = false;
-  pendingAgentEndRetry = false;
-  dispatching = false;
-  skipDepth = 0;
-  readonly recentlyEvictedKeys = new Set<string>();
+  // ── Sidecar queue ─────────────────────────────────────────────────────
+  sidecarQueue: SidecarItem[] = [];
 
   // ── Metrics ──────────────────────────────────────────────────────────────
   autoStartTime = 0;
@@ -129,6 +133,29 @@ export class AutoSession {
   // ── Signal handler ───────────────────────────────────────────────────────
   sigtermHandler: (() => void) | null = null;
 
+  // ── Loop promise state ──────────────────────────────────────────────────
+  /**
+   * True only while runUnit is rotating into a fresh session. agent_end events
+   * emitted from the previous session's abort during this window must be
+   * ignored; they do not belong to the new unit.
+   */
+  sessionSwitchInFlight = false;
+
+  /**
+   * One-shot resolver for the current unit's agent_end promise.
+   * Non-null only while a unit is in-flight (between sendMessage and agent_end).
+   * Scoped to the session to prevent concurrent session corruption.
+   */
+  pendingResolve: ((result: { status: "completed" | "cancelled" | "error"; event?: { messages: unknown[] } }) => void) | null = null;
+
+  /**
+   * Queue for agent_end events that arrive when no pendingResolve exists.
+   * This happens when error-recovery sendMessage retries produce agent_end
+   * events between loop iterations. The next runUnit drains this queue
+   * instead of waiting for a new event.
+   */
+  pendingAgentEndQueue: Array<{ messages: unknown[] }> = [];
+
   // ── Methods ──────────────────────────────────────────────────────────────
 
   clearTimers(): void {
@@ -136,13 +163,11 @@ export class AutoSession {
     if (this.wrapupWarningHandle) { clearTimeout(this.wrapupWarningHandle); this.wrapupWarningHandle = null; }
     if (this.idleWatchdogHandle) { clearInterval(this.idleWatchdogHandle); this.idleWatchdogHandle = null; }
     if (this.continueHereHandle) { clearInterval(this.continueHereHandle); this.continueHereHandle = null; }
-    if (this.dispatchGapHandle) { clearTimeout(this.dispatchGapHandle); this.dispatchGapHandle = null; }
   }
 
   resetDispatchCounters(): void {
     this.unitDispatchCount.clear();
     this.unitLifetimeDispatches.clear();
-    this.unitConsecutiveSkips.clear();
   }
 
   get lockBasePath(): string {
@@ -163,7 +188,6 @@ export class AutoSession {
     // Lifecycle
     this.active = false;
     this.paused = false;
-    this.pausedForSecrets = false;
     this.stepMode = false;
     this.verbose = false;
     this.cmdCtx = null;
@@ -177,9 +201,6 @@ export class AutoSession {
     this.unitDispatchCount.clear();
     this.unitLifetimeDispatches.clear();
     this.unitRecoveryCount.clear();
-    this.unitConsecutiveSkips.clear();
-    // Note: completedKeySet is intentionally NOT cleared — it persists
-    // across restarts to prevent re-dispatching completed units.
 
     // Unit
     this.currentUnit = null;
@@ -201,21 +222,20 @@ export class AutoSession {
     this.resourceVersionOnStart = null;
     this.lastStateRebuildAt = 0;
 
-    // Guards
-    this.handlingAgentEnd = false;
-    this.pendingAgentEndRetry = false;
-    this.dispatching = false;
-    this.skipDepth = 0;
-    this.recentlyEvictedKeys.clear();
-
     // Metrics
     this.autoStartTime = 0;
     this.lastPromptCharCount = undefined;
     this.lastBaselineCharCount = undefined;
     this.pendingQuickTasks = [];
+    this.sidecarQueue = [];
 
     // Signal handler
     this.sigtermHandler = null;
+
+    // Loop promise state
+    this.sessionSwitchInFlight = false;
+    this.pendingResolve = null;
+    this.pendingAgentEndQueue = [];
   }
 
   toJSON(): Record<string, unknown> {
@@ -227,10 +247,7 @@ export class AutoSession {
       currentMilestoneId: this.currentMilestoneId,
       currentUnit: this.currentUnit,
       completedUnits: this.completedUnits.length,
-      completedKeySet: this.completedKeySet.size,
       unitDispatchCount: Object.fromEntries(this.unitDispatchCount),
-      dispatching: this.dispatching,
-      skipDepth: this.skipDepth,
     };
   }
 }

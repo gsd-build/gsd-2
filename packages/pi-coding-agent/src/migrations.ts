@@ -16,7 +16,7 @@ const EXTENSIONS_DOC_URL = "https://github.com/badlogic/pi-mono/blob/main/packag
  *
  * @returns Array of provider names that were migrated
  */
-export function migrateAuthToAuthJson(): string[] {
+function migrateAuthToAuthJson(): string[] {
 	const agentDir = getAgentDir();
 	const authPath = join(agentDir, "auth.json");
 	const oauthPath = join(agentDir, "oauth.json");
@@ -79,7 +79,7 @@ export function migrateAuthToAuthJson(): string[] {
  *
  * See: https://github.com/badlogic/pi-mono/issues/320
  */
-export function migrateSessionsFromAgentRoot(): void {
+function migrateSessionsFromAgentRoot(): void {
 	const agentDir = getAgentDir();
 
 	// Find all .jsonl files directly in agentDir (not in subdirectories)

@@ -23,6 +23,7 @@ import {
 } from "./paths.js";
 import { join } from "node:path";
 import { readFileSync, existsSync, mkdirSync, readdirSync, rmSync, unlinkSync } from "node:fs";
+import { readSessionLockData, isSessionLockProcessAlive } from "./session-lock.js";
 import { nativeIsRepo, nativeInit } from "./native-git-bridge.js";
 import { ensureGitignore, ensurePreferences, untrackRuntimeFiles } from "./gitignore.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
@@ -44,6 +45,7 @@ export {
   showQueue, handleQueueReorder, showQueueAdd,
   buildExistingMilestonesContext,
 } from "./guided-flow-queue.js";
+import { getErrorMessage } from "./error-utils.js";
 
 // ─── Commit Instruction Helpers ──────────────────────────────────────────────
 
@@ -158,9 +160,9 @@ export function checkAutoStartAfterDiscuss(): boolean {
 
   pendingAutoStart = null;
   startAuto(ctx, pi, basePath, false, { step }).catch((err) => {
-    ctx.ui.notify(`Auto-start failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+    ctx.ui.notify(`Auto-start failed: ${getErrorMessage(err)}`, "error");
     if (process.env.GSD_DEBUG) console.error('[gsd] auto start error:', err);
-    debugLog("auto-start-failed", { error: err instanceof Error ? err.message : String(err) });
+    debugLog("auto-start-failed", { error: getErrorMessage(err) });
   });
   return true;
 }
@@ -190,7 +192,7 @@ type UIContext = ExtensionContext;
  * This is the only way the wizard triggers work — everything else is the LLM's job.
  */
 function dispatchWorkflow(pi: ExtensionAPI, note: string, customType = "gsd-run"): void {
-  const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(process.env.HOME ?? "~", ".pi", "GSD-WORKFLOW.md");
+  const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(process.env.HOME ?? "~", ".gsd", "agent", "GSD-WORKFLOW.md");
   const workflow = readFileSync(workflowPath, "utf-8");
 
   pi.sendMessage(
@@ -515,8 +517,13 @@ export async function showDiscuss(
     // If all pending slices are discussed, notify and exit instead of looping
     const allDiscussed = pendingSlices.every(s => discussedMap.get(s.id));
     if (allDiscussed) {
+      const lockData = readSessionLockData(basePath);
+      const remoteAutoRunning = lockData && lockData.pid !== process.pid && isSessionLockProcessAlive(lockData);
+      const nextStep = remoteAutoRunning
+        ? "Auto-mode is already running — use /gsd status to check progress."
+        : "Run /gsd to start planning.";
       ctx.ui.notify(
-        `All ${pendingSlices.length} slices discussed. Run /gsd to start planning.`,
+        `All ${pendingSlices.length} slices discussed. ${nextStep}`,
         "info",
       );
       return;
@@ -787,21 +794,34 @@ export async function showSmartEntry(
   // ── Self-heal stale runtime records from crashed auto-mode sessions ──
   selfHealRuntimeRecords(basePath, ctx);
 
-  // Check for crash from previous auto-mode session
+  // Check for crash from previous auto-mode session.
+  // Skip if the lock was written by the current process — acquireSessionLock()
+  // writes to the same file, so we'd always false-positive (#1398).
   const crashLock = readCrashLock(basePath);
-  if (crashLock) {
+  if (crashLock && crashLock.pid !== process.pid) {
     clearLock(basePath);
-    const resume = await showNextAction(ctx, {
-      title: "GSD — Interrupted Session Detected",
-      summary: [formatCrashInfo(crashLock)],
-      actions: [
-        { id: "resume", label: "Resume with /gsd auto", description: "Pick up where it left off", recommended: true },
-        { id: "continue", label: "Continue manually", description: "Open the wizard as normal" },
-      ],
-    });
-    if (resume === "resume") {
-      await startAuto(ctx, pi, basePath, false);
-      return;
+
+    // Bootstrap crash with zero completed units = no work was lost.
+    // Auto-discard instead of prompting the user — this commonly happens
+    // when the user exits during init wizard or discuss phase before any
+    // real auto-mode work begins.
+    const isBootstrapCrash = crashLock.unitType === "starting"
+      && crashLock.unitId === "bootstrap"
+      && crashLock.completedUnits === 0;
+
+    if (!isBootstrapCrash) {
+      const resume = await showNextAction(ctx, {
+        title: "GSD — Interrupted Session Detected",
+        summary: [formatCrashInfo(crashLock)],
+        actions: [
+          { id: "resume", label: "Resume with /gsd auto", description: "Pick up where it left off", recommended: true },
+          { id: "continue", label: "Continue manually", description: "Open the wizard as normal" },
+        ],
+      });
+      if (resume === "resume") {
+        await startAuto(ctx, pi, basePath, false);
+        return;
+      }
     }
   }
 

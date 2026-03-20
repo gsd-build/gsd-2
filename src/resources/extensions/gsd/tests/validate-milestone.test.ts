@@ -104,6 +104,11 @@ test("isValidationTerminal returns true for verdict: needs-remediation (#832)", 
   assert.equal(isValidationTerminal(content), true);
 });
 
+test("isValidationTerminal returns true for verdict: passed (#1429)", () => {
+  const content = "---\nverdict: passed\nremediation_round: 0\n---\n\n# Validation";
+  assert.equal(isValidationTerminal(content), true);
+});
+
 test("isValidationTerminal returns false for missing frontmatter", () => {
   const content = "# Validation\nNo frontmatter here.";
   assert.equal(isValidationTerminal(content), false);
@@ -196,6 +201,7 @@ test("dispatch rule matches validating-milestone phase", async () => {
   try {
     // Set up minimal milestone structure for the prompt builder
     writeRoadmap(base, "M001", ALL_DONE_ROADMAP);
+    writeSliceSummary(base, "M001", "S01", "# S01 Summary\nDone."); // Guard requires slice summaries (#1368)
 
     const ctx: DispatchContext = {
       basePath: base,
@@ -231,6 +237,7 @@ test("dispatch rule skips when skip_milestone_validation preference is set", asy
   const base = makeTmpBase();
   try {
     writeRoadmap(base, "M001", ALL_DONE_ROADMAP);
+    writeSliceSummary(base, "M001", "S01", "# S01 Summary\nDone."); // Guard requires slice summaries (#1368)
 
     const ctx: DispatchContext = {
       basePath: base,

@@ -50,7 +50,7 @@ export type KeybindingsConfig = {
 /**
  * Default application keybindings.
  */
-export const DEFAULT_APP_KEYBINDINGS: Record<AppAction, KeyId | KeyId[]> = {
+const DEFAULT_APP_KEYBINDINGS: Record<AppAction, KeyId | KeyId[]> = {
 	interrupt: "escape",
 	clear: "ctrl+c",
 	exit: "ctrl+d",
@@ -75,7 +75,7 @@ export const DEFAULT_APP_KEYBINDINGS: Record<AppAction, KeyId | KeyId[]> = {
 /**
  * All default keybindings (app + editor).
  */
-export const DEFAULT_KEYBINDINGS: Required<KeybindingsConfig> = {
+const DEFAULT_KEYBINDINGS: Required<KeybindingsConfig> = {
 	...DEFAULT_EDITOR_KEYBINDINGS,
 	...DEFAULT_APP_KEYBINDINGS,
 };

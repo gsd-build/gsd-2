@@ -9,19 +9,18 @@ import type { AgentMessage } from "@gsd/pi-agent-core";
 import type { AssistantMessage, Model, Usage } from "@gsd/pi-ai";
 import { completeSimple } from "@gsd/pi-ai";
 import { COMPACTION_KEEP_RECENT_TOKENS, COMPACTION_RESERVE_TOKENS } from "../constants.js";
-import {
-	convertToLlm,
-	createBranchSummaryMessage,
-	createCompactionSummaryMessage,
-	createCustomMessage,
-} from "../messages.js";
+import { convertToLlm } from "../messages.js";
 import type { CompactionEntry, SessionEntry } from "../session-manager.js";
 import {
+	collectMessages,
 	computeFileLists,
 	createFileOps,
+	createSummarizationMessage,
 	extractFileOpsFromMessage,
+	extractTextContent,
 	type FileOperations,
 	formatFileOperations,
+	getMessageFromEntry,
 	SUMMARIZATION_SYSTEM_PROMPT,
 	serializeConversation,
 } from "./utils.js";
@@ -67,30 +66,6 @@ function extractFileOperations(
 	}
 
 	return fileOps;
-}
-
-// ============================================================================
-// Message Extraction
-// ============================================================================
-
-/**
- * Extract AgentMessage from an entry if it produces one.
- * Returns undefined for entries that don't contribute to LLM context.
- */
-function getMessageFromEntry(entry: SessionEntry): AgentMessage | undefined {
-	if (entry.type === "message") {
-		return entry.message;
-	}
-	if (entry.type === "custom_message") {
-		return createCustomMessage(entry.customType, entry.content, entry.display, entry.details, entry.timestamp);
-	}
-	if (entry.type === "branch_summary") {
-		return createBranchSummaryMessage(entry.summary, entry.fromId, entry.timestamp);
-	}
-	if (entry.type === "compaction") {
-		return createCompactionSummaryMessage(entry.summary, entry.tokensBefore, entry.timestamp);
-	}
-	return undefined;
 }
 
 /** Result from compact() - SessionManager adds uuid/parentUuid when saving */
@@ -547,21 +522,13 @@ export async function generateSummary(
 	}
 	promptText += basePrompt;
 
-	const summarizationMessages = [
-		{
-			role: "user" as const,
-			content: [{ type: "text" as const, text: promptText }],
-			timestamp: Date.now(),
-		},
-	];
-
 	const completionOptions = model.reasoning
 		? { maxTokens, signal, apiKey, reasoning: "high" as const }
 		: { maxTokens, signal, apiKey };
 
 	const response = await completeSimple(
 		model,
-		{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
+		{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: createSummarizationMessage(promptText) },
 		completionOptions,
 	);
 
@@ -569,12 +536,7 @@ export async function generateSummary(
 		throw new Error(`Summarization failed: ${response.errorMessage || "Unknown error"}`);
 	}
 
-	const textContent = response.content
-		.filter((c): c is { type: "text"; text: string } => c.type === "text")
-		.map((c) => c.text)
-		.join("\n");
-
-	return textContent;
+	return extractTextContent(response.content);
 }
 
 // ============================================================================
@@ -618,11 +580,7 @@ export function prepareCompaction(
 	const boundaryEnd = pathEntries.length;
 
 	const usageStart = prevCompactionIndex >= 0 ? prevCompactionIndex : 0;
-	const usageMessages: AgentMessage[] = [];
-	for (let i = usageStart; i < boundaryEnd; i++) {
-		const msg = getMessageFromEntry(pathEntries[i]);
-		if (msg) usageMessages.push(msg);
-	}
+	const usageMessages = collectMessages(pathEntries, usageStart, boundaryEnd);
 	const tokensBefore = estimateContextTokens(usageMessages).tokens;
 
 	const cutPoint = findCutPoint(pathEntries, boundaryStart, boundaryEnd, settings.keepRecentTokens);
@@ -637,20 +595,12 @@ export function prepareCompaction(
 	const historyEnd = cutPoint.isSplitTurn ? cutPoint.turnStartIndex : cutPoint.firstKeptEntryIndex;
 
 	// Messages to summarize (will be discarded after summary)
-	const messagesToSummarize: AgentMessage[] = [];
-	for (let i = boundaryStart; i < historyEnd; i++) {
-		const msg = getMessageFromEntry(pathEntries[i]);
-		if (msg) messagesToSummarize.push(msg);
-	}
+	const messagesToSummarize = collectMessages(pathEntries, boundaryStart, historyEnd);
 
 	// Messages for turn prefix summary (if splitting a turn)
-	const turnPrefixMessages: AgentMessage[] = [];
-	if (cutPoint.isSplitTurn) {
-		for (let i = cutPoint.turnStartIndex; i < cutPoint.firstKeptEntryIndex; i++) {
-			const msg = getMessageFromEntry(pathEntries[i]);
-			if (msg) turnPrefixMessages.push(msg);
-		}
-	}
+	const turnPrefixMessages = cutPoint.isSplitTurn
+		? collectMessages(pathEntries, cutPoint.turnStartIndex, cutPoint.firstKeptEntryIndex)
+		: [];
 
 	// Get previous summary for iterative update
 	let previousSummary: string | undefined;
@@ -789,17 +739,10 @@ async function generateTurnPrefixSummary(
 	const llmMessages = convertToLlm(messages);
 	const conversationText = serializeConversation(llmMessages);
 	const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`;
-	const summarizationMessages = [
-		{
-			role: "user" as const,
-			content: [{ type: "text" as const, text: promptText }],
-			timestamp: Date.now(),
-		},
-	];
 
 	const response = await completeSimple(
 		model,
-		{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
+		{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: createSummarizationMessage(promptText) },
 		{ maxTokens, signal, apiKey },
 	);
 
@@ -807,8 +750,5 @@ async function generateTurnPrefixSummary(
 		throw new Error(`Turn prefix summarization failed: ${response.errorMessage || "Unknown error"}`);
 	}
 
-	return response.content
-		.filter((c): c is { type: "text"; text: string } => c.type === "text")
-		.map((c) => c.text)
-		.join("\n");
+	return extractTextContent(response.content);
 }

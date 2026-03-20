@@ -5,7 +5,6 @@
  */
 
 import { clearLock } from "./crash-recovery.js";
-import { releaseSessionLock } from "./session-lock.js";
 import { nativeHasChanges } from "./native-git-bridge.js";
 
 // ─── SIGTERM Handling ─────────────────────────────────────────────────────────
@@ -24,7 +23,6 @@ export function registerSigtermHandler(
 ): () => void {
   if (previousHandler) process.off("SIGTERM", previousHandler);
   const handler = () => {
-    releaseSessionLock(currentBasePath);
     clearLock(currentBasePath);
     process.exit(0);
   };

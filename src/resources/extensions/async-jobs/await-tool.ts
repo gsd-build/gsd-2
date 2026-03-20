@@ -60,7 +60,6 @@ export function createAwaitTool(getManager: () => AsyncJobManager): ToolDefiniti
 			const running = watched.filter((j) => j.status === "running");
 			if (running.length === 0) {
 				const result = formatResults(watched);
-				manager.acknowledgeDeliveries(watched.map((j) => j.id));
 				return { content: [{ type: "text", text: result }], details: undefined };
 			}
 
@@ -69,7 +68,6 @@ export function createAwaitTool(getManager: () => AsyncJobManager): ToolDefiniti
 
 			// Collect all completed results (more may have finished while waiting)
 			const completed = watched.filter((j) => j.status !== "running");
-			manager.acknowledgeDeliveries(completed.map((j) => j.id));
 
 			const stillRunning = watched.filter((j) => j.status === "running");
 			let result = formatResults(completed);

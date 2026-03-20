@@ -42,7 +42,7 @@ The file must `export default function(pi: ExtensionAPI) { ... }`.
 
 ## Step 4: Check for Common Mistakes
 
-Read `references/key-rules-gotchas.md` and verify each rule against the extension code.
+Read `../references/key-rules-gotchas.md` and verify each rule against the extension code.
 
 ## Step 5: Add Debugging
 

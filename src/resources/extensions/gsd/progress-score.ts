@@ -28,246 +28,111 @@ export interface ProgressScore {
 }
 
 export interface ProgressSignal {
-  name: string;
-  level: ProgressLevel;
-  detail: string;
+  kind: "positive" | "negative" | "neutral";
+  label: string;
 }
 
-// ── Signal Evaluators ──────────────────────────────────────────────────────
-
-function evaluateHealthTrend(): ProgressSignal {
-  const trend = getHealthTrend();
-
-  switch (trend) {
-    case "improving":
-      return { name: "health_trend", level: "green", detail: "Health improving" };
-    case "stable":
-      return { name: "health_trend", level: "green", detail: "Health stable" };
-    case "degrading":
-      return { name: "health_trend", level: "red", detail: "Health degrading" };
-    case "unknown":
-      return { name: "health_trend", level: "green", detail: "Insufficient data" };
-  }
+function escalateLevel(level: ProgressLevel, next: ProgressLevel): ProgressLevel {
+  const ranks: Record<ProgressLevel, number> = {
+    green: 0,
+    yellow: 1,
+    red: 2,
+  };
+  return ranks[next] > ranks[level] ? next : level;
 }
 
-function evaluateErrorStreak(): ProgressSignal {
-  const streak = getConsecutiveErrorUnits();
-
-  if (streak === 0) {
-    return { name: "error_streak", level: "green", detail: "No consecutive errors" };
-  }
-  if (streak <= 2) {
-    return { name: "error_streak", level: "yellow", detail: `${streak} consecutive error unit(s)` };
-  }
-  return { name: "error_streak", level: "red", detail: `${streak} consecutive error units` };
-}
-
-function evaluateRecentErrors(): ProgressSignal {
-  const history = getHealthHistory();
-  if (history.length === 0) {
-    return { name: "recent_errors", level: "green", detail: "No health data yet" };
-  }
-
-  const latest = history[history.length - 1]!;
-
-  if (latest.errors === 0 && latest.warnings <= 1) {
-    return { name: "recent_errors", level: "green", detail: `${latest.errors}E/${latest.warnings}W` };
-  }
-  if (latest.errors === 0) {
-    return { name: "recent_errors", level: "yellow", detail: `${latest.warnings} warning(s)` };
-  }
-  if (latest.errors <= 2) {
-    return { name: "recent_errors", level: "yellow", detail: `${latest.errors} error(s), ${latest.warnings} warning(s)` };
-  }
-  return { name: "recent_errors", level: "red", detail: `${latest.errors} error(s), ${latest.warnings} warning(s)` };
-}
-
-function evaluateArtifactProduction(): ProgressSignal {
-  const history = getHealthHistory();
-  if (history.length < 2) {
-    return { name: "artifact_production", level: "green", detail: "Insufficient data" };
-  }
-
-  const totalFixes = history.reduce((sum, s) => sum + s.fixesApplied, 0);
-  const recent = history.slice(-3);
-  const recentFixes = recent.reduce((sum, s) => sum + s.fixesApplied, 0);
-
-  // If recent units are all producing fixes but errors aren't decreasing,
-  // doctor is fighting fires but not making headway
-  if (recentFixes > 3 && recent.every(s => s.errors > 0)) {
-    return { name: "artifact_production", level: "yellow", detail: "Doctor applying fixes but errors persist" };
-  }
-
-  return { name: "artifact_production", level: "green", detail: `${totalFixes} total fixes applied` };
-}
-
-function evaluateDispatchVelocity(): ProgressSignal {
-  const history = getHealthHistory();
-  if (history.length < 3) {
-    return { name: "dispatch_velocity", level: "green", detail: "Insufficient data" };
-  }
-
-  // Check time between recent snapshots — are units completing at a reasonable rate?
-  const recent = history.slice(-5);
-  if (recent.length < 2) {
-    return { name: "dispatch_velocity", level: "green", detail: "Insufficient data" };
-  }
-
-  const timeDiffs: number[] = [];
-  for (let i = 1; i < recent.length; i++) {
-    timeDiffs.push(recent[i]!.timestamp - recent[i - 1]!.timestamp);
-  }
-
-  const avgTimeMs = timeDiffs.reduce((a, b) => a + b, 0) / timeDiffs.length;
-  const avgTimeMins = Math.round(avgTimeMs / 60_000);
-
-  // If average unit time is > 15 minutes, something might be wrong
-  if (avgTimeMins > 15) {
-    return { name: "dispatch_velocity", level: "yellow", detail: `Units averaging ${avgTimeMins}min each` };
-  }
-
-  return { name: "dispatch_velocity", level: "green", detail: `Units averaging ${avgTimeMins || "<1"}min each` };
-}
-
-// ── Main API ───────────────────────────────────────────────────────────────
+// ── Public API ──────────────────────────────────────────────────────────────
 
 /**
- * Compute the current progress score by evaluating all available signals.
- * Returns a composite score with individual signal details.
+ * Compute the current progress score from health signals.
  */
 export function computeProgressScore(): ProgressScore {
-  const signals: ProgressSignal[] = [
-    evaluateHealthTrend(),
-    evaluateErrorStreak(),
-    evaluateRecentErrors(),
-    evaluateArtifactProduction(),
-    evaluateDispatchVelocity(),
-  ];
+  const signals: ProgressSignal[] = [];
+  let level: ProgressLevel = "green";
 
-  // Overall level: worst of all signals
-  const level = signals.some(s => s.level === "red")
-    ? "red"
-    : signals.some(s => s.level === "yellow")
-      ? "yellow"
-      : "green";
+  // Check consecutive errors
+  const consecutiveErrors = getConsecutiveErrorUnits();
+  if (consecutiveErrors >= 3) {
+    signals.push({ kind: "negative", label: `${consecutiveErrors} consecutive error units` });
+    level = escalateLevel(level, "red");
+  } else if (consecutiveErrors >= 1) {
+    signals.push({ kind: "negative", label: `${consecutiveErrors} consecutive error unit(s)` });
+    level = escalateLevel(level, "yellow");
+  }
 
-  // Build summary from the most important signals
-  const summary = buildSummary(level, signals);
+  // Check health trend
+  const trend = getHealthTrend();
+  if (trend === "degrading") {
+    signals.push({ kind: "negative", label: "Health trend declining" });
+    level = escalateLevel(level, "yellow");
+  } else if (trend === "improving") {
+    signals.push({ kind: "positive", label: "Health trend improving" });
+  } else if (trend === "stable") {
+    signals.push({ kind: "neutral", label: "Health trend stable" });
+  }
+
+  // Check recent history
+  const history = getHealthHistory();
+  if (history.length === 0) {
+    signals.push({ kind: "neutral", label: "No health data yet" });
+  }
+
+  const summary = level === "green"
+    ? "Progressing well"
+    : level === "yellow"
+      ? "Some issues detected"
+      : "Stuck or erroring";
 
   return { level, summary, signals };
 }
 
 /**
- * Compute progress score with additional context from the current unit.
+ * Compute progress score with additional context for dashboard display.
  */
 export function computeProgressScoreWithContext(context: {
-  currentUnitType?: string;
-  currentUnitId?: string;
-  completedUnits?: number;
-  totalUnits?: number;
-  retryCount?: number;
-  maxRetries?: number;
+  sameUnitCount?: number;
+  recoveryCount?: number;
+  completedCount?: number;
 }): ProgressScore {
   const base = computeProgressScore();
 
-  // Add retry signal if available
-  if (context.retryCount !== undefined && context.maxRetries !== undefined) {
-    const retrySignal: ProgressSignal = context.retryCount === 0
-      ? { name: "retry_count", level: "green", detail: "No retries" }
-      : context.retryCount <= 2
-        ? { name: "retry_count", level: "yellow", detail: `Retry ${context.retryCount}/${context.maxRetries}` }
-        : { name: "retry_count", level: "red", detail: `Retry ${context.retryCount}/${context.maxRetries} — looping` };
-
-    base.signals.push(retrySignal);
-
-    // Re-evaluate level
-    if (retrySignal.level === "red") base.level = "red";
-    else if (retrySignal.level === "yellow" && base.level === "green") base.level = "yellow";
+  if (context.sameUnitCount && context.sameUnitCount >= 3) {
+    base.signals.push({ kind: "negative", label: `Same unit dispatched ${context.sameUnitCount}× consecutively` });
+    base.level = escalateLevel(base.level, "red");
+    base.summary = "Stuck on same unit";
+  } else if (context.sameUnitCount && context.sameUnitCount >= 2) {
+    base.signals.push({ kind: "negative", label: `Same unit dispatched ${context.sameUnitCount}×` });
+    base.level = escalateLevel(base.level, "yellow");
   }
 
-  // Build richer summary with context
-  base.summary = buildSummaryWithContext(base.level, base.signals, context);
+  if (context.recoveryCount && context.recoveryCount > 0) {
+    base.signals.push({ kind: "negative", label: `${context.recoveryCount} recovery attempts` });
+    base.level = escalateLevel(base.level, "yellow");
+  }
+
+  if (context.completedCount && context.completedCount > 0) {
+    base.signals.push({ kind: "positive", label: `${context.completedCount} units completed` });
+  }
 
   return base;
 }
 
-// ── Formatting ─────────────────────────────────────────────────────────────
-
-function buildSummary(level: ProgressLevel, signals: ProgressSignal[]): string {
-  switch (level) {
-    case "green":
-      return "Progressing well";
-    case "yellow": {
-      const issues = signals.filter(s => s.level === "yellow").map(s => s.detail);
-      return `Struggling — ${issues[0] ?? "minor issues detected"}`;
-    }
-    case "red": {
-      const issues = signals.filter(s => s.level === "red").map(s => s.detail);
-      return `Stuck — ${issues[0] ?? "critical issues detected"}`;
-    }
-  }
-}
-
-function buildSummaryWithContext(
-  level: ProgressLevel,
-  signals: ProgressSignal[],
-  context: {
-    currentUnitType?: string;
-    currentUnitId?: string;
-    completedUnits?: number;
-    totalUnits?: number;
-    retryCount?: number;
-    maxRetries?: number;
-  },
-): string {
-  const unitLabel = context.currentUnitId
-    ? ` ${context.currentUnitId}`
-    : "";
-  const progressLabel = context.completedUnits !== undefined && context.totalUnits !== undefined
-    ? ` (${context.completedUnits} of ${context.totalUnits} done)`
-    : "";
-
-  switch (level) {
-    case "green":
-      return `Progressing well —${unitLabel}${progressLabel}`;
-    case "yellow": {
-      const issues = signals.filter(s => s.level === "yellow").map(s => s.detail);
-      const retryInfo = context.retryCount ? `, attempt ${context.retryCount}/${context.maxRetries}` : "";
-      return `Struggling —${unitLabel}${retryInfo}${progressLabel ? ` ${progressLabel}` : ""}, ${issues[0] ?? "issues detected"}`;
-    }
-    case "red": {
-      const issues = signals.filter(s => s.level === "red").map(s => s.detail);
-      return `Stuck —${unitLabel}${progressLabel ? ` ${progressLabel}` : ""}, ${issues[0] ?? "critical issues"}`;
-    }
-  }
-}
-
 /**
- * Format progress score as a single-line traffic light for TUI display.
+ * Format a one-line progress indicator for dashboard/status display.
  */
 export function formatProgressLine(score: ProgressScore): string {
-  const icon = score.level === "green" ? "\uD83D\uDFE2"
-    : score.level === "yellow" ? "\uD83D\uDFE1"
-      : "\uD83D\uDD34";
+  const icon = score.level === "green" ? "●" : score.level === "yellow" ? "◐" : "○";
   return `${icon} ${score.summary}`;
 }
 
 /**
- * Format a detailed progress report showing all signals.
+ * Format a multi-line progress report.
  */
 export function formatProgressReport(score: ProgressScore): string {
-  const lines: string[] = [];
-
-  lines.push(formatProgressLine(score));
-  lines.push("");
-  lines.push("Signals:");
-
+  const lines = [formatProgressLine(score)];
   for (const signal of score.signals) {
-    const icon = signal.level === "green" ? "\u2705"
-      : signal.level === "yellow" ? "\u26A0\uFE0F"
-        : "\uD83D\uDED1";
-    lines.push(`  ${icon} ${signal.name}: ${signal.detail}`);
+    const prefix = signal.kind === "positive" ? "  ✓" : signal.kind === "negative" ? "  ✗" : "  ·";
+    lines.push(`${prefix} ${signal.label}`);
   }
-
   return lines.join("\n");
 }

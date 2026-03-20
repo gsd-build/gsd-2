@@ -411,6 +411,13 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	// ── Session cleanup ─────────────────────────────────────────────────────
+
+	pi.on("session_shutdown", async () => {
+		resultCache.clear();
+		client = null;
+	});
+
 	// ── Startup notification ─────────────────────────────────────────────────
 
 	pi.on("session_start", async (_event, ctx) => {

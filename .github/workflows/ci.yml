@@ -27,6 +27,17 @@ jobs:
             exit 1
           fi
 
+  skill-references:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Validate skill references
+        run: node scripts/check-skill-references.mjs
+
   build:
     runs-on: ubuntu-latest
 

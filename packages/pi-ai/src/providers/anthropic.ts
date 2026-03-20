@@ -230,7 +230,7 @@ function isTransientNetworkError(error: unknown): boolean {
  * Checks: retry-after (seconds or RFC date), x-ratelimit-reset-requests, x-ratelimit-reset-tokens.
  * Returns undefined if no valid delay is found or if the delay is in the past.
  */
-export function extractRetryAfterMs(headers: Headers | { get(name: string): string | null }, errorText = ""): number | undefined {
+function extractRetryAfterMs(headers: Headers | { get(name: string): string | null }, errorText = ""): number | undefined {
 	const normalizeDelay = (ms: number): number | undefined => (ms > 0 ? Math.ceil(ms + 1000) : undefined);
 
 	const retryAfter = headers.get("retry-after");

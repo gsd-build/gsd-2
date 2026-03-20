@@ -9,10 +9,9 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { gsdRoot } from "./paths.js";
-import { resolveProjectRoot } from "./worktree.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -59,8 +58,15 @@ const VALID_CLASSIFICATIONS: readonly string[] = [
  * directory that contains `.gsd/worktrees/` — that's the project root.
  */
 export function resolveCapturesPath(basePath: string): string {
-  const projectRoot = resolveProjectRoot(resolve(basePath));
-  return join(gsdRoot(projectRoot), CAPTURES_FILENAME);
+  const resolved = resolve(basePath);
+  const worktreeMarker = `${sep}.gsd${sep}worktrees${sep}`;
+  const idx = resolved.indexOf(worktreeMarker);
+  if (idx !== -1) {
+    // basePath is inside a worktree — resolve to project root
+    const projectRoot = resolved.slice(0, idx);
+    return join(projectRoot, ".gsd", CAPTURES_FILENAME);
+  }
+  return join(gsdRoot(basePath), CAPTURES_FILENAME);
 }
 
 // ─── File I/O ─────────────────────────────────────────────────────────────────

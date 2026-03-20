@@ -15,6 +15,7 @@ import {
 	type StopReason,
 	type ToolCall,
 } from "@gsd/pi-ai";
+import { ZERO_USAGE } from "./agent-loop.js";
 
 // Create stream class matching ProxyMessageEventStream
 class ProxyMessageEventStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
@@ -82,7 +83,7 @@ export interface ProxyStreamOptions extends SimpleStreamOptions {
  * });
  * ```
  */
-export function streamProxy(model: Model<any>, context: Context, options: ProxyStreamOptions): ProxyMessageEventStream {
+function streamProxy(model: Model<any>, context: Context, options: ProxyStreamOptions): ProxyMessageEventStream {
 	const stream = new ProxyMessageEventStream();
 
 	(async () => {
@@ -94,14 +95,7 @@ export function streamProxy(model: Model<any>, context: Context, options: ProxyS
 			api: model.api,
 			provider: model.provider,
 			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
+			usage: { ...ZERO_USAGE, cost: { ...ZERO_USAGE.cost } },
 			timestamp: Date.now(),
 		};
 

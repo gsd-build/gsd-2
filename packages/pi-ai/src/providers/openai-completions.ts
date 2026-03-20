@@ -31,18 +31,15 @@ import type {
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
-import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
 import { buildBaseOptions, clampReasoning } from "./simple-options.js";
+import {
+	assertStreamSuccess,
+	buildInitialOutput,
+	createOpenAIClient,
+	finalizeStream,
+	handleStreamError,
+} from "./openai-shared.js";
 import { transformMessages } from "./transform-messages.js";
-
-let _OpenAICompletionsClass: typeof OpenAI | undefined;
-async function getOpenAICompletionsClass(): Promise<typeof OpenAI> {
-	if (!_OpenAICompletionsClass) {
-		const mod = await import("openai");
-		_OpenAICompletionsClass = mod.default;
-	}
-	return _OpenAICompletionsClass;
-}
 
 /**
  * Check if conversation messages contain tool calls or tool results.
@@ -76,27 +73,15 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 	const stream = new AssistantMessageEventStream();
 
 	(async () => {
-		const output: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: model.api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			stopReason: "stop",
-			timestamp: Date.now(),
-		};
+		const output = buildInitialOutput(model);
 
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
-			const client = await createClient(model, context, apiKey, options?.headers);
+			const isZai = model.provider === "zai" || model.baseUrl.includes("api.z.ai");
+			const client = await createOpenAIClient(model, context, apiKey, {
+				optionsHeaders: options?.headers,
+				extraClientOptions: isZai ? { timeout: 100_000, maxRetries: 4 } : undefined,
+			});
 			let params = buildParams(model, context, options);
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
@@ -292,25 +277,12 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 			}
 
 			finishCurrentBlock(currentBlock);
-			if (options?.signal?.aborted) {
-				throw new Error("Request was aborted");
-			}
-
-			if (output.stopReason === "aborted" || output.stopReason === "error") {
-				throw new Error("An unknown error occurred");
-			}
-
-			stream.push({ type: "done", reason: output.stopReason, message: output });
-			stream.end();
+			assertStreamSuccess(output, options?.signal);
+			finalizeStream(stream, output);
 		} catch (error) {
-			for (const block of output.content) delete (block as any).index;
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
 			// Some providers via OpenRouter give additional information in this field.
 			const rawMetadata = (error as any)?.error?.metadata?.raw;
-			if (rawMetadata) output.errorMessage += `\n${rawMetadata}`;
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
+			handleStreamError(stream, output, error, options?.signal, rawMetadata);
 		}
 	})();
 
@@ -337,48 +309,6 @@ export const streamSimpleOpenAICompletions: StreamFunction<"openai-completions",
 		toolChoice,
 	} satisfies OpenAICompletionsOptions);
 };
-
-async function createClient(
-	model: Model<"openai-completions">,
-	context: Context,
-	apiKey?: string,
-	optionsHeaders?: Record<string, string>,
-) {
-	if (!apiKey) {
-		if (!process.env.OPENAI_API_KEY) {
-			throw new Error(
-				"OpenAI API key is required. Set OPENAI_API_KEY environment variable or pass it as an argument.",
-			);
-		}
-		apiKey = process.env.OPENAI_API_KEY;
-	}
-
-	const headers = { ...model.headers };
-	if (model.provider === "github-copilot") {
-		const hasImages = hasCopilotVisionInput(context.messages);
-		const copilotHeaders = buildCopilotDynamicHeaders({
-			messages: context.messages,
-			hasImages,
-		});
-		Object.assign(headers, copilotHeaders);
-	}
-
-	// Merge options headers last so they can override defaults
-	if (optionsHeaders) {
-		Object.assign(headers, optionsHeaders);
-	}
-
-	const isZai = model.provider === "zai" || model.baseUrl.includes("api.z.ai");
-	const OpenAIClass = await getOpenAICompletionsClass();
-
-	return new OpenAIClass({
-		apiKey,
-		baseURL: model.baseUrl,
-		dangerouslyAllowBrowser: true,
-		defaultHeaders: headers,
-		...(isZai && { timeout: 100_000, maxRetries: 4 }),
-	});
-}
 
 function buildParams(model: Model<"openai-completions">, context: Context, options?: OpenAICompletionsOptions) {
 	const compat = getCompat(model);

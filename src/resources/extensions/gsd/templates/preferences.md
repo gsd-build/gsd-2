@@ -30,6 +30,7 @@ token_profile:
 phases:
   skip_research:
   skip_reassess:
+  reassess_after_slice:
   skip_slice_research:
 dynamic_routing:
   enabled:

@@ -108,14 +108,14 @@ test("dispatch: triage check guards against quick-task triggering triage", () =>
   );
 });
 
-test("dispatch: triage dispatch uses return-value pattern", () => {
+test("dispatch: triage dispatch keeps the loop in continue mode", () => {
   const triageBlock = postUnitSrc.slice(
     postUnitSrc.indexOf("// ── Triage check"),
     postUnitSrc.indexOf("// ── Quick-task dispatch"),
   );
   assert.ok(
-    triageBlock.includes('return "dispatched"'),
-    "triage dispatch should return 'dispatched' after sending message",
+    triageBlock.includes('return "continue"'),
+    "triage dispatch should return 'continue' after enqueuing sidecar work",
   );
 });
 
@@ -309,14 +309,14 @@ test("dispatch: quick-task dispatch marks capture as executed", () => {
   );
 });
 
-test("dispatch: quick-task dispatch uses return-value pattern", () => {
+test("dispatch: quick-task dispatch keeps the loop in continue mode", () => {
   const quickTaskSection = postUnitSrc.slice(
     postUnitSrc.indexOf("// ── Quick-task dispatch"),
     postUnitSrc.indexOf("if (s.stepMode)"),
   );
   assert.ok(
-    quickTaskSection.includes('return "dispatched"'),
-    "quick-task dispatch should return 'dispatched' after sending message",
+    quickTaskSection.includes('return "continue"'),
+    "quick-task dispatch should return 'continue' after enqueuing sidecar work",
   );
 });
 

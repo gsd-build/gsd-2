@@ -761,27 +761,36 @@ export type ToolResultEvent =
 	| LsToolResultEvent
 	| CustomToolResultEvent;
 
-// Type guards for ToolResultEvent
-export function isBashToolResult(e: ToolResultEvent): e is BashToolResultEvent {
-	return e.toolName === "bash";
-}
-export function isReadToolResult(e: ToolResultEvent): e is ReadToolResultEvent {
-	return e.toolName === "read";
-}
-export function isEditToolResult(e: ToolResultEvent): e is EditToolResultEvent {
-	return e.toolName === "edit";
-}
-export function isWriteToolResult(e: ToolResultEvent): e is WriteToolResultEvent {
-	return e.toolName === "write";
-}
-export function isGrepToolResult(e: ToolResultEvent): e is GrepToolResultEvent {
-	return e.toolName === "grep";
-}
-export function isFindToolResult(e: ToolResultEvent): e is FindToolResultEvent {
-	return e.toolName === "find";
-}
-export function isLsToolResult(e: ToolResultEvent): e is LsToolResultEvent {
-	return e.toolName === "ls";
+/**
+ * Type guard for narrowing ToolResultEvent by tool name.
+ *
+ * Built-in tools narrow automatically (no type params needed):
+ * ```ts
+ * if (isToolResultEventType("bash", event)) {
+ *   event.details;  // BashToolDetails | undefined
+ * }
+ * ```
+ *
+ * Custom tools require explicit type parameters:
+ * ```ts
+ * if (isToolResultEventType<"my_tool", MyDetails>("my_tool", event)) {
+ *   event.details;  // typed
+ * }
+ * ```
+ */
+export function isToolResultEventType(toolName: "bash", event: ToolResultEvent): event is BashToolResultEvent;
+export function isToolResultEventType(toolName: "read", event: ToolResultEvent): event is ReadToolResultEvent;
+export function isToolResultEventType(toolName: "edit", event: ToolResultEvent): event is EditToolResultEvent;
+export function isToolResultEventType(toolName: "write", event: ToolResultEvent): event is WriteToolResultEvent;
+export function isToolResultEventType(toolName: "grep", event: ToolResultEvent): event is GrepToolResultEvent;
+export function isToolResultEventType(toolName: "find", event: ToolResultEvent): event is FindToolResultEvent;
+export function isToolResultEventType(toolName: "ls", event: ToolResultEvent): event is LsToolResultEvent;
+export function isToolResultEventType<TName extends string, TDetails = unknown>(
+	toolName: TName,
+	event: ToolResultEvent,
+): event is ToolResultEvent & { toolName: TName; details: TDetails };
+export function isToolResultEventType(toolName: string, event: ToolResultEvent): boolean {
+	return event.toolName === toolName;
 }
 
 /**
@@ -1274,42 +1283,8 @@ export interface ExtensionShortcut {
 
 type HandlerFn = (...args: unknown[]) => Promise<unknown>;
 
-export type SendMessageHandler = <T = unknown>(
-	message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">,
-	options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
-) => void;
-
-export type SendUserMessageHandler = (
-	content: string | (TextContent | ImageContent)[],
-	options?: { deliverAs?: "steer" | "followUp" },
-) => void;
-
-export type AppendEntryHandler = <T = unknown>(customType: string, data?: T) => void;
-
-export type SetSessionNameHandler = (name: string) => void;
-
-export type GetSessionNameHandler = () => string | undefined;
-
-export type GetActiveToolsHandler = () => string[];
-
 /** Tool info with name, description, and parameter schema */
 export type ToolInfo = Pick<ToolDefinition, "name" | "description" | "parameters">;
-
-export type GetAllToolsHandler = () => ToolInfo[];
-
-export type GetCommandsHandler = () => SlashCommandInfo[];
-
-export type SetActiveToolsHandler = (toolNames: string[]) => void;
-
-export type RefreshToolsHandler = () => void;
-
-export type SetModelHandler = (model: Model<any>, options?: { persist?: boolean }) => Promise<boolean>;
-
-export type GetThinkingLevelHandler = () => ThinkingLevel;
-
-export type SetThinkingLevelHandler = (level: ThinkingLevel) => void;
-
-export type SetLabelHandler = (entryId: string, label: string | undefined) => void;
 
 /**
  * Shared state created by loader, used during registration and runtime.
@@ -1334,21 +1309,27 @@ export interface ExtensionRuntimeState {
  * Provided to runner.initialize(), copied into the shared runtime.
  */
 export interface ExtensionActions {
-	sendMessage: SendMessageHandler;
-	sendUserMessage: SendUserMessageHandler;
+	sendMessage: <T = unknown>(
+		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">,
+		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
+	) => void;
+	sendUserMessage: (
+		content: string | (TextContent | ImageContent)[],
+		options?: { deliverAs?: "steer" | "followUp" },
+	) => void;
 	retryLastTurn: () => void;
-	appendEntry: AppendEntryHandler;
-	setSessionName: SetSessionNameHandler;
-	getSessionName: GetSessionNameHandler;
-	setLabel: SetLabelHandler;
-	getActiveTools: GetActiveToolsHandler;
-	getAllTools: GetAllToolsHandler;
-	setActiveTools: SetActiveToolsHandler;
-	refreshTools: RefreshToolsHandler;
-	getCommands: GetCommandsHandler;
-	setModel: SetModelHandler;
-	getThinkingLevel: GetThinkingLevelHandler;
-	setThinkingLevel: SetThinkingLevelHandler;
+	appendEntry: <T = unknown>(customType: string, data?: T) => void;
+	setSessionName: (name: string) => void;
+	getSessionName: () => string | undefined;
+	setLabel: (entryId: string, label: string | undefined) => void;
+	getActiveTools: () => string[];
+	getAllTools: () => ToolInfo[];
+	setActiveTools: (toolNames: string[]) => void;
+	refreshTools: () => void;
+	getCommands: () => SlashCommandInfo[];
+	setModel: (model: Model<any>, options?: { persist?: boolean }) => Promise<boolean>;
+	getThinkingLevel: () => ThinkingLevel;
+	setThinkingLevel: (level: ThinkingLevel) => void;
 }
 
 /**

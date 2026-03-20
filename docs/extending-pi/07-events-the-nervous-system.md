@@ -72,7 +72,7 @@ pi.on("event_name", async (event, ctx: ExtensionContext) => {
 ### Type Narrowing for Tool Events
 
 ```typescript
-import { isToolCallEventType, isBashToolResult } from "@mariozechner/pi-coding-agent";
+import { isToolCallEventType, isToolResultEventType } from "@mariozechner/pi-coding-agent";
 
 pi.on("tool_call", async (event, ctx) => {
   if (isToolCallEventType("bash", event)) {
@@ -84,7 +84,7 @@ pi.on("tool_call", async (event, ctx) => {
 });
 
 pi.on("tool_result", async (event, ctx) => {
-  if (isBashToolResult(event)) {
+  if (isToolResultEventType("bash", event)) {
     // event.details is typed as BashToolDetails
   }
 });

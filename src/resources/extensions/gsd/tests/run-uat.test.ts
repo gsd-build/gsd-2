@@ -334,7 +334,7 @@ async function main(): Promise<void> {
         ].join('\n'),
       );
 
-      // human-experience UAT — should not dispatch
+      // human-experience UAT still dispatches, but auto-mode later pauses for manual review
       writeSliceFile(base, 'M001', 'S01', 'UAT', makeUatContent('human-experience'));
 
       const state = {
@@ -351,8 +351,8 @@ async function main(): Promise<void> {
       const result = await checkNeedsRunUat(base, 'M001', state as any, { uat_dispatch: true } as any);
       assertEq(
         result,
-        null,
-        'human-experience UAT is skipped — auto-mode only dispatches artifact-driven UATs',
+        { sliceId: 'S01', uatType: 'human-experience' },
+        'human-experience UAT dispatches so auto-mode can pause for manual review',
       );
     } finally {
       cleanup(base);

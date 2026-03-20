@@ -10,11 +10,24 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent";
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadPrompt } from "./prompt-loader.js";
 import { gsdRoot } from "./paths.js";
-import { createGitService, runGit } from "./git-service.js";
+import { GitServiceImpl, runGit } from "./git-service.js";
+import { loadEffectiveGSDPreferences } from "./preferences.js";
+import { nativeHasStagedChanges } from "./native-git-bridge.js";
+
+interface QuickReturnState {
+  basePath: string;
+  originalBranch: string;
+  quickBranch: string;
+  taskNum: number;
+  slug: string;
+  description: string;
+}
+
+let pendingQuickReturn: QuickReturnState | null = null;
 
 // ─── Quick Task Helpers ───────────────────────────────────────────────────────
 
@@ -64,6 +77,84 @@ function ensureQuickDir(basePath: string, taskNum: number, slug: string): string
   return taskDir;
 }
 
+function quickReturnStatePath(basePath: string): string {
+  return join(gsdRoot(basePath), "runtime", "quick-return.json");
+}
+
+function persistPendingReturn(state: QuickReturnState): void {
+  pendingQuickReturn = state;
+  mkdirSync(join(gsdRoot(state.basePath), "runtime"), { recursive: true });
+  writeFileSync(quickReturnStatePath(state.basePath), JSON.stringify(state) + "\n", "utf-8");
+}
+
+function readPendingReturn(basePath: string): QuickReturnState | null {
+  if (pendingQuickReturn && pendingQuickReturn.basePath === basePath) {
+    return pendingQuickReturn;
+  }
+
+  try {
+    const raw = readFileSync(quickReturnStatePath(basePath), "utf-8");
+    const parsed = JSON.parse(raw) as Partial<QuickReturnState>;
+    if (
+      typeof parsed.basePath === "string"
+      && typeof parsed.originalBranch === "string"
+      && typeof parsed.quickBranch === "string"
+      && typeof parsed.taskNum === "number"
+      && typeof parsed.slug === "string"
+      && typeof parsed.description === "string"
+    ) {
+      pendingQuickReturn = parsed as QuickReturnState;
+      return pendingQuickReturn;
+    }
+  } catch {
+    // No persisted quick-return state
+  }
+
+  return null;
+}
+
+function clearPendingReturn(basePath: string): void {
+  if (pendingQuickReturn?.basePath === basePath) {
+    pendingQuickReturn = null;
+  }
+  rmSync(quickReturnStatePath(basePath), { force: true });
+}
+
+function hasStagedChanges(basePath: string): boolean {
+  return nativeHasStagedChanges(basePath);
+}
+
+export function cleanupQuickBranch(basePath = process.cwd()): boolean {
+  const state = readPendingReturn(basePath);
+  if (!state) return false;
+
+  const repoPath = state.basePath;
+  const gitPrefs = loadEffectiveGSDPreferences()?.preferences?.git ?? {};
+  const git = new GitServiceImpl(repoPath, gitPrefs);
+
+  if (git.getCurrentBranch() === state.quickBranch) {
+    try {
+      git.autoCommit("quick-task", `Q${state.taskNum}`, []);
+    } catch {
+      // Best-effort: quick work may already be committed.
+    }
+  }
+
+  if (git.getCurrentBranch() !== state.originalBranch) {
+    runGit(repoPath, ["checkout", state.originalBranch]);
+  }
+
+  runGit(repoPath, ["merge", "--squash", state.quickBranch]);
+
+  if (hasStagedChanges(repoPath)) {
+    runGit(repoPath, ["commit", "-m", `quick(Q${state.taskNum}): ${state.slug}`]);
+  }
+
+  runGit(repoPath, ["branch", "-D", state.quickBranch], { allowFailure: true });
+  clearPendingReturn(repoPath);
+  return true;
+}
+
 // ─── Main Handler ─────────────────────────────────────────────────────────────
 
 export async function handleQuick(
@@ -101,32 +192,41 @@ export async function handleQuick(
   const taskDirRel = `.gsd/quick/${taskNum}-${slug}`;
   const date = new Date().toISOString().split("T")[0];
 
-  // Create git branch for the quick task (unless isolation: none)
-  const git = createGitService(basePath);
+  // Create git branch for the quick task
+  const gitPrefs = loadEffectiveGSDPreferences()?.preferences?.git ?? {};
+  const git = new GitServiceImpl(basePath, gitPrefs);
   const branchName = `gsd/quick/${taskNum}-${slug}`;
-  const skipBranch = git.prefs.isolation === "none";
+  let originalBranch = git.getCurrentBranch();
 
   let branchCreated = false;
-  if (!skipBranch) {
-    try {
-      const current = git.getCurrentBranch();
-      if (current !== branchName) {
-        // Auto-commit any dirty state before switching
-        try {
-          git.autoCommit("quick-task", `Q${taskNum}`, []);
-        } catch { /* nothing to commit — fine */ }
+  try {
+    const current = originalBranch;
+    if (current !== branchName) {
+      // Auto-commit any dirty state before switching
+      try {
+        git.autoCommit("quick-task", `Q${taskNum}`, []);
+      } catch { /* nothing to commit — fine */ }
 
-        runGit(basePath, ["checkout", "-b", branchName]);
-        branchCreated = true;
-      }
-    } catch (err) {
-      // Branch creation failed — continue on current branch
-      const message = err instanceof Error ? err.message : String(err);
-      ctx.ui.notify(`Could not create branch ${branchName}: ${message}. Working on current branch.`, "warning");
+      runGit(basePath, ["checkout", "-b", branchName]);
+      branchCreated = true;
     }
+  } catch (err) {
+    // Branch creation failed — continue on current branch
+    const message = err instanceof Error ? err.message : String(err);
+    ctx.ui.notify(`Could not create branch ${branchName}: ${message}. Working on current branch.`, "warning");
   }
 
   const actualBranch = branchCreated ? branchName : git.getCurrentBranch();
+  if (actualBranch === branchName && originalBranch !== branchName) {
+    persistPendingReturn({
+      basePath,
+      originalBranch,
+      quickBranch: branchName,
+      taskNum,
+      slug,
+      description,
+    });
+  }
 
   // Notify user
   ctx.ui.notify(

@@ -414,6 +414,13 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	// ── Session cleanup ─────────────────────────────────────────────────────
+
+	pi.on("session_shutdown", async () => {
+		searchCache.clear();
+		docCache.clear();
+	});
+
 	// ── Startup notification ─────────────────────────────────────────────────
 
 	pi.on("session_start", async (_event, ctx) => {

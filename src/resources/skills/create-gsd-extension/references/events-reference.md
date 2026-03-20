@@ -61,10 +61,10 @@ pi.on("tool_call", async (event, ctx) => {
 
 **tool_result** — Fired after tool executes. Can modify result. Handlers chain like middleware.
 ```typescript
-import { isBashToolResult } from "@mariozechner/pi-coding-agent";
+import { isToolResultEventType } from "@mariozechner/pi-coding-agent";
 
 pi.on("tool_result", async (event, ctx) => {
-  if (isBashToolResult(event)) {
+  if (isToolResultEventType("bash", event)) {
     // event.details is typed as BashToolDetails
   }
   // Return partial patch: { content, details, isError }
@@ -105,7 +105,7 @@ pi.on("model_select", async (event, ctx) => {
 Built-in type guards for tool events:
 
 ```typescript
-import { isToolCallEventType, isBashToolResult } from "@mariozechner/pi-coding-agent";
+import { isToolCallEventType, isToolResultEventType } from "@mariozechner/pi-coding-agent";
 
 // Tool calls — narrows event.input type
 if (isToolCallEventType("bash", event)) { /* event.input: { command, timeout? } */ }
@@ -114,7 +114,7 @@ if (isToolCallEventType("write", event)) { /* event.input: { path, content } */ 
 if (isToolCallEventType("edit", event)) { /* event.input: { path, oldText, newText } */ }
 
 // Tool results — narrows event.details type
-if (isBashToolResult(event)) { /* event.details: BashToolDetails */ }
+if (isToolResultEventType("bash", event)) { /* event.details: BashToolDetails */ }
 ```
 
 For custom tools, export your input type and use explicit type params:

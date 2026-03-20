@@ -192,7 +192,7 @@ const SEVERITY_NAMES: Record<DiagnosticSeverity, string> = {
 	4: "hint",
 };
 
-export function severityToString(severity?: DiagnosticSeverity): string {
+function severityToString(severity?: DiagnosticSeverity): string {
 	return SEVERITY_NAMES[severity ?? 1] ?? "unknown";
 }
 
@@ -209,21 +209,6 @@ export function sortDiagnostics(diagnostics: Diagnostic[]): Diagnostic[] {
 		if (aCol !== bCol) return aCol - bCol;
 		return a.message.localeCompare(b.message);
 	});
-}
-
-export function severityToIcon(severity?: DiagnosticSeverity): string {
-	switch (severity ?? 1) {
-		case 1:
-			return "[E]";
-		case 2:
-			return "[W]";
-		case 3:
-			return "[I]";
-		case 4:
-			return "[H]";
-		default:
-			return "[E]";
-	}
 }
 
 function stripDiagnosticNoise(message: string): string {
@@ -353,10 +338,6 @@ export function formatLocation(location: Location, cwd: string): string {
 	return `${file}:${line}:${col}`;
 }
 
-export function formatPosition(line: number, col: number): string {
-	return `${line}:${col}`;
-}
-
 // =============================================================================
 // WorkspaceEdit Formatting
 // =============================================================================
@@ -397,15 +378,6 @@ export function formatWorkspaceEdit(edit: WorkspaceEdit, cwd: string): string[] 
 	return results;
 }
 
-export function formatTextEdit(edit: TextEdit, maxLength = 50): string {
-	const range = `${edit.range.start.line + 1}:${edit.range.start.character + 1}`;
-	const preview =
-		edit.newText.length > maxLength
-			? `${edit.newText.slice(0, maxLength).replace(/\n/g, "\\n")}…`
-			: edit.newText.replace(/\n/g, "\\n");
-	return `line ${range} -> "${preview}"`;
-}
-
 // =============================================================================
 // Symbol Formatting
 // =============================================================================
@@ -441,10 +413,6 @@ const SYMBOL_KIND_LABELS: Record<number, string> = {
 
 export function symbolKindToIcon(kind: SymbolKind): string {
 	return `[${SYMBOL_KIND_LABELS[kind] ?? "?"}]`;
-}
-
-export function symbolKindToName(kind: SymbolKind): string {
-	return SYMBOL_KIND_LABELS[kind] ?? "Unknown";
 }
 
 export function formatDocumentSymbol(symbol: DocumentSymbol, indent = 0): string[] {

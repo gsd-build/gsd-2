@@ -91,7 +91,7 @@ test("compression: buildPlanMilestonePrompt minimal drops project/requirements/d
   // The plan-milestone builder should gate root file inlining on inlineLevel
   assert.ok(
     promptsSrc.includes('inlineLevel !== "minimal"') &&
-    promptsSrc.includes('inlineGsdRootFile(base, "project.md"'),
+    promptsSrc.includes("inlineProjectFromDb(base)"),
     "plan-milestone should conditionally include project.md based on level",
   );
 });

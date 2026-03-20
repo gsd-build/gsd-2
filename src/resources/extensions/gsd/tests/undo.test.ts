@@ -19,9 +19,15 @@ test("handleUndo without --force only warns and leaves completed units intact", 
   const base = makeTempDir("gsd-undo-confirm");
   try {
     mkdirSync(join(base, ".gsd"), { recursive: true });
+    mkdirSync(join(base, ".gsd", "activity"), { recursive: true });
     writeFileSync(
       join(base, ".gsd", "completed-units.json"),
       JSON.stringify(["execute-task/M001/S01/T01"]),
+      "utf-8",
+    );
+    writeFileSync(
+      join(base, ".gsd", "activity", "001-execute-task-M001-S01-T01.jsonl"),
+      "",
       "utf-8",
     );
 

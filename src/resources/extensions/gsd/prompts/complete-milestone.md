@@ -28,6 +28,8 @@ Then:
 
 **Important:** Do NOT skip the success criteria and definition of done verification (steps 3-4). The milestone summary must reflect actual verified outcomes, not assumed success. If any criterion was not met, document it clearly in the summary and do not mark the milestone as passing verification.
 
+**File system safety:** When scanning milestone directories for evidence, use `ls` or `find` to list directory contents first — never pass a directory path (e.g. `tasks/`, `slices/`) directly to the `read` tool. The `read` tool only accepts file paths, not directories.
+
 **You MUST write `{{milestoneSummaryPath}}` AND update PROJECT.md before finishing.**
 
 When done, say: "Milestone {{milestoneId}} complete."

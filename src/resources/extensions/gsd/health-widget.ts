@@ -9,33 +9,30 @@
  */
 
 import type { ExtensionContext } from "@gsd/pi-coding-agent";
+import type { GSDState } from "./types.js";
 import { runProviderChecks, summariseProviderIssues } from "./doctor-providers.js";
 import { runEnvironmentChecks } from "./doctor-environment.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { loadLedgerFromDisk, getProjectTotals } from "./metrics.js";
+import { describeNextUnit, estimateTimeRemaining, updateSliceProgressCache } from "./auto-dashboard.js";
 import { projectRoot } from "./commands.js";
-
-// ── Types ──────────────────────────────────────────────────────────────────────
-
-interface HealthWidgetData {
-  hasProject: boolean;
-  budgetCeiling: number | undefined;
-  budgetSpent: number;
-  providerIssue: string | null;      // compact summary from summariseProviderIssues()
-  environmentErrorCount: number;
-  environmentWarningCount: number;
-  lastRefreshed: number;
-}
+import { deriveState, invalidateStateCache } from "./state.js";
+import {
+  buildHealthLines,
+  detectHealthWidgetProjectState,
+  type HealthWidgetData,
+} from "./health-widget-core.js";
 
 // ── Data loader ────────────────────────────────────────────────────────────────
 
-function loadHealthWidgetData(basePath: string): HealthWidgetData {
-  let hasProject = false;
+function loadBaseHealthWidgetData(basePath: string): HealthWidgetData {
   let budgetCeiling: number | undefined;
   let budgetSpent = 0;
   let providerIssue: string | null = null;
   let environmentErrorCount = 0;
   let environmentWarningCount = 0;
+
+  const projectState = detectHealthWidgetProjectState(basePath);
 
   try {
     const prefs = loadEffectiveGSDPreferences();
@@ -43,7 +40,6 @@ function loadHealthWidgetData(basePath: string): HealthWidgetData {
 
     const ledger = loadLedgerFromDisk(basePath);
     if (ledger) {
-      hasProject = true;
       const totals = getProjectTotals(ledger.units ?? []);
       budgetSpent = totals.cost;
     }
@@ -63,7 +59,7 @@ function loadHealthWidgetData(basePath: string): HealthWidgetData {
   } catch { /* non-fatal */ }
 
   return {
-    hasProject,
+    projectState,
     budgetCeiling,
     budgetSpent,
     providerIssue,
@@ -73,54 +69,88 @@ function loadHealthWidgetData(basePath: string): HealthWidgetData {
   };
 }
 
-// ── Rendering ──────────────────────────────────────────────────────────────────
-
-function formatCost(n: number): string {
-  return n >= 1 ? `$${n.toFixed(2)}` : `${(n * 100).toFixed(1)}¢`;
+function compactText(text: string, max = 64): string {
+  const trimmed = text.replace(/\s+/g, " ").trim();
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, max - 1).trimEnd()}…`;
 }
 
-/**
- * Build compact health lines for the widget.
- * Returns a string array suitable for setWidget().
- */
-export function buildHealthLines(data: HealthWidgetData): string[] {
-  if (!data.hasProject) {
-    return ["  GSD  No project loaded — run /gsd to start"];
+function summarizeExecutionStatus(state: GSDState): string {
+  switch (state.phase) {
+    case "blocked": return "Blocked";
+    case "paused": return "Paused";
+    case "complete": return "Complete";
+    case "executing": return "Executing";
+    case "planning": return "Planning";
+    case "pre-planning": return "Pre-planning";
+    case "summarizing": return "Summarizing";
+    case "validating-milestone": return "Validating";
+    case "completing-milestone": return "Completing";
+    case "needs-discussion": return "Needs discussion";
+    case "replanning-slice": return "Replanning";
+    default: return "Active";
   }
+}
 
-  const parts: string[] = [];
-
-  // System status signal
-  const totalIssues = data.environmentErrorCount + data.environmentWarningCount + (data.providerIssue ? 1 : 0);
-  if (totalIssues === 0) {
-    parts.push("● System OK");
-  } else if (data.environmentErrorCount > 0 || data.providerIssue?.includes("✗")) {
-    parts.push(`✗ ${totalIssues} issue${totalIssues > 1 ? "s" : ""}`);
-  } else {
-    parts.push(`⚠ ${totalIssues} warning${totalIssues > 1 ? "s" : ""}`);
+function summarizeExecutionTarget(state: GSDState): string {
+  switch (state.phase) {
+    case "needs-discussion":
+      return state.activeMilestone ? `Discuss ${state.activeMilestone.id}` : "Discuss milestone draft";
+    case "pre-planning":
+      return state.activeMilestone ? `Plan ${state.activeMilestone.id}` : "Research & plan milestone";
+    case "planning":
+      return state.activeSlice ? `Plan ${state.activeSlice.id}` : "Plan next slice";
+    case "executing":
+      return state.activeTask ? `Execute ${state.activeTask.id}` : "Execute next task";
+    case "summarizing":
+      return state.activeSlice ? `Complete ${state.activeSlice.id}` : "Complete current slice";
+    case "validating-milestone":
+      return state.activeMilestone ? `Validate ${state.activeMilestone.id}` : "Validate milestone";
+    case "completing-milestone":
+      return state.activeMilestone ? `Complete ${state.activeMilestone.id}` : "Complete milestone";
+    case "replanning-slice":
+      return state.activeSlice ? `Replan ${state.activeSlice.id}` : "Replan current slice";
+    case "blocked":
+      return `waiting on ${compactText(state.blockers[0] ?? state.nextAction, 56)}`;
+    case "paused":
+      return compactText(state.nextAction || "waiting to resume", 56);
+    case "complete":
+      return "All milestones complete";
+    default:
+      return compactText(describeNextUnit(state).label, 56);
   }
+}
 
-  // Budget
-  if (data.budgetCeiling !== undefined && data.budgetCeiling > 0) {
-    const pct = Math.min(100, (data.budgetSpent / data.budgetCeiling) * 100);
-    parts.push(`Budget: ${formatCost(data.budgetSpent)}/${formatCost(data.budgetCeiling)} (${pct.toFixed(0)}%)`);
-  } else if (data.budgetSpent > 0) {
-    parts.push(`Spent: ${formatCost(data.budgetSpent)}`);
+async function enrichHealthWidgetData(basePath: string, baseData: HealthWidgetData): Promise<HealthWidgetData> {
+  if (baseData.projectState !== "active") return baseData;
+
+  try {
+    invalidateStateCache();
+    const state = await deriveState(basePath);
+
+    if (state.activeMilestone) {
+      // Warm the slice-progress cache so estimateTimeRemaining() has data
+      updateSliceProgressCache(basePath, state.activeMilestone.id, state.activeSlice?.id);
+    }
+
+    return {
+      ...baseData,
+      executionPhase: state.phase,
+      executionStatus: summarizeExecutionStatus(state),
+      executionTarget: summarizeExecutionTarget(state),
+      nextAction: state.nextAction,
+      blocker: state.blockers[0] ?? null,
+      activeMilestoneId: state.activeMilestone?.id,
+      activeSliceId: state.activeSlice?.id,
+      activeTaskId: state.activeTask?.id,
+      progress: state.progress,
+      eta: state.phase === "blocked" || state.phase === "paused" || state.phase === "complete"
+        ? null
+        : estimateTimeRemaining(),
+    };
+  } catch {
+    return baseData;
   }
-
-  // Provider issue (if any)
-  if (data.providerIssue) {
-    parts.push(data.providerIssue);
-  }
-
-  // Environment issues
-  if (data.environmentErrorCount > 0) {
-    parts.push(`Env: ${data.environmentErrorCount} error${data.environmentErrorCount > 1 ? "s" : ""}`);
-  } else if (data.environmentWarningCount > 0) {
-    parts.push(`Env: ${data.environmentWarningCount} warning${data.environmentWarningCount > 1 ? "s" : ""}`);
-  }
-
-  return [`  ${parts.join("  │  ")}`];
 }
 
 // ── Widget init ────────────────────────────────────────────────────────────────
@@ -137,20 +167,34 @@ export function initHealthWidget(ctx: ExtensionContext): void {
   const basePath = projectRoot();
 
   // String-array fallback — used in RPC mode (factory is a no-op there)
-  const initialData = loadHealthWidgetData(basePath);
+  const initialData = loadBaseHealthWidgetData(basePath);
   ctx.ui.setWidget("gsd-health", buildHealthLines(initialData), { placement: "belowEditor" });
 
   // Factory-based widget for TUI mode — replaces the string-array above
   ctx.ui.setWidget("gsd-health", (_tui, _theme) => {
     let data = initialData;
     let cachedLines: string[] | undefined;
+    let refreshInFlight = false;
 
-    const refreshTimer = setInterval(() => {
+    const refresh = async () => {
+      if (refreshInFlight) return;
+      refreshInFlight = true;
       try {
-        data = loadHealthWidgetData(basePath);
+        const baseData = loadBaseHealthWidgetData(basePath);
+        data = await enrichHealthWidgetData(basePath, baseData);
         cachedLines = undefined;
         _tui.requestRender();
-      } catch { /* non-fatal */ }
+      } catch { /* non-fatal */ } finally {
+        refreshInFlight = false;
+      }
+    };
+
+    // Fire first enrichment immediately. requestRender() inside is a no-op
+    // if the widget has not yet rendered, so this is safe before factory return.
+    void refresh();
+
+    const refreshTimer = setInterval(() => {
+      void refresh();
     }, REFRESH_INTERVAL_MS);
 
     return {

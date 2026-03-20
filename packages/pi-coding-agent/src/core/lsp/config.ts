@@ -176,7 +176,7 @@ const LOCAL_BIN_PATHS: Array<{ markers: string[]; binDir: string }> = [
 	{ markers: ["go.mod", "go.sum"], binDir: "bin" },
 ];
 
-function which(command: string): string | null {
+export function which(command: string): string | null {
 	// On Windows, prefer `where.exe` over `which` — MSYS/Git Bash's `which`
 	// returns POSIX paths (/c/Users/...) that Node's spawn() can't execute.
 	// `where.exe` returns native Windows paths (C:\Users\...).
@@ -320,13 +320,5 @@ export function getServersForFile(config: LspConfig, filePath: string): Array<[s
 }
 
 export function getServerForFile(config: LspConfig, filePath: string): [string, ServerConfig] | null {
-	const servers = getServersForFile(config, filePath);
-	return servers.length > 0 ? servers[0] : null;
-}
-
-export function hasCapability(
-	config: ServerConfig,
-	capability: keyof NonNullable<ServerConfig["capabilities"]>,
-): boolean {
-	return config.capabilities?.[capability] === true;
+	return getServersForFile(config, filePath)[0] ?? null;
 }

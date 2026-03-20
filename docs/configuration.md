@@ -76,6 +76,81 @@ This opens an interactive wizard showing which keys are configured and which are
 4. Environment variables (`export BRAVE_API_KEY=...`) take precedence over saved keys
 5. Anthropic models don't need Brave/Tavily — they have built-in web search
 
+## MCP Servers
+
+GSD can connect to external MCP servers configured in project files. This is useful for local tools, internal APIs, self-hosted services, or integrations that aren't built in as native GSD extensions.
+
+### Config file locations
+
+GSD reads MCP client configuration from these project-local paths:
+
+- `.mcp.json`
+- `.gsd/mcp.json`
+
+If both files exist, server names are merged and the first definition found wins. Use:
+
+- `.mcp.json` for repo-shared MCP configuration you may want to commit
+- `.gsd/mcp.json` for local-only MCP configuration you do **not** want to share
+
+### Supported transports
+
+| Transport | Config shape | Use when |
+|-----------|--------------|----------|
+| `stdio` | `command` + optional `args`, `env`, `cwd` | Launching a local MCP server process |
+| `http` | `url` | Connecting to an already-running MCP server over HTTP |
+
+### Example: stdio server
+
+```json
+{
+  "mcpServers": {
+    "my-server": {
+      "type": "stdio",
+      "command": "/absolute/path/to/python3",
+      "args": ["/absolute/path/to/server.py"],
+      "env": {
+        "API_URL": "http://localhost:8000"
+      }
+    }
+  }
+}
+```
+
+### Example: HTTP server
+
+```json
+{
+  "mcpServers": {
+    "my-http-server": {
+      "url": "http://localhost:8080/mcp"
+    }
+  }
+}
+```
+
+### Verifying a server
+
+After adding config, verify it from a GSD session:
+
+```text
+mcp_servers
+mcp_discover(server="my-server")
+mcp_call(server="my-server", tool="<tool_name>", args={...})
+```
+
+Recommended verification order:
+
+1. `mcp_servers` — confirms GSD can see the config file and parse the server entry
+2. `mcp_discover` — confirms the server process starts and responds to `tools/list`
+3. `mcp_call` — confirms at least one real tool invocation works
+
+### Notes
+
+- Use absolute paths for local executables and scripts when possible.
+- For `stdio` servers, prefer setting required environment variables directly in the MCP config instead of relying on an interactive shell profile.
+- If a server is team-shared and safe to commit, `.mcp.json` is usually the better home.
+- If a server depends on machine-local paths, personal services, or local-only secrets, prefer `.gsd/mcp.json`.
+
 ## All Settings
 
 ### `models`
@@ -156,10 +231,13 @@ phases:
   skip_research: false        # skip milestone-level research
   skip_reassess: false        # skip roadmap reassessment after each slice
   skip_slice_research: true   # skip per-slice research
+  reassess_after_slice: true  # enable roadmap reassessment after each slice (required for reassessment)
   require_slice_discussion: false  # pause auto-mode before each slice for discussion
 ```
 
 These are usually set automatically by `token_profile`, but can be overridden explicitly.
+
+> **Note:** Roadmap reassessment requires `reassess_after_slice: true` to be set explicitly. Without it, reassessment is skipped regardless of `skip_reassess`.
 
 ### `skill_discovery`
 

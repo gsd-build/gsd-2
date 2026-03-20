@@ -21,6 +21,7 @@ import { loadPrompt } from "./prompt-loader.js";
 import { gsdRoot } from "./paths.js";
 import { createGitService, runGit } from "./git-service.js";
 import { isAutoActive, isAutoPaused } from "./auto.js";
+import { getErrorMessage } from "./error-utils.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -439,7 +440,7 @@ export async function handleStart(
         branchCreated = true;
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = getErrorMessage(err);
       ctx.ui.notify(
         `Could not create branch ${branchName}: ${message}. Working on current branch.`,
         "warning",

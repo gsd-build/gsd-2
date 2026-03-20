@@ -9,7 +9,8 @@ import {
 	supportsLanguage,
 	type HighlightColors,
 } from "@gsd/native";
-import { getCustomThemesDir, getThemesDir } from "../../../config.js";
+import { getCustomThemesDir } from "../../../config.js";
+import { builtinThemes } from "./themes.js";
 
 // Issue #453: native preview highlighting can wedge the entire interactive
 // session after a successful file tool. Keep the safer plain-text path as the
@@ -100,7 +101,7 @@ const ThemeJsonSchema = Type.Object({
 	),
 });
 
-type ThemeJson = Static<typeof ThemeJsonSchema>;
+export type ThemeJson = Static<typeof ThemeJsonSchema>;
 
 const validateThemeJson = TypeCompiler.Compile(ThemeJsonSchema);
 
@@ -450,19 +451,8 @@ export class Theme {
 // Theme Loading
 // ============================================================================
 
-let BUILTIN_THEMES: Record<string, ThemeJson> | undefined;
-
 function getBuiltinThemes(): Record<string, ThemeJson> {
-	if (!BUILTIN_THEMES) {
-		const themesDir = getThemesDir();
-		const darkPath = path.join(themesDir, "dark.json");
-		const lightPath = path.join(themesDir, "light.json");
-		BUILTIN_THEMES = {
-			dark: JSON.parse(fs.readFileSync(darkPath, "utf-8")) as ThemeJson,
-			light: JSON.parse(fs.readFileSync(lightPath, "utf-8")) as ThemeJson,
-		};
-	}
-	return BUILTIN_THEMES;
+	return builtinThemes;
 }
 
 export function getAvailableThemes(): string[] {
@@ -488,13 +478,12 @@ export interface ThemeInfo {
 }
 
 export function getAvailableThemesWithPaths(): ThemeInfo[] {
-	const themesDir = getThemesDir();
 	const customThemesDir = getCustomThemesDir();
 	const result: ThemeInfo[] = [];
 
-	// Built-in themes
+	// Built-in themes (embedded in code, no file path)
 	for (const name of Object.keys(getBuiltinThemes())) {
-		result.push({ name, path: path.join(themesDir, `${name}.json`) });
+		result.push({ name, path: undefined });
 	}
 
 	// Custom themes
@@ -539,7 +528,7 @@ function parseThemeJson(label: string, json: unknown): ThemeJson {
 			errorMessage += "\nMissing required color tokens:\n";
 			errorMessage += missingColors.map((c) => `  - ${c}`).join("\n");
 			errorMessage += '\n\nPlease add these colors to your theme\'s "colors" object.';
-			errorMessage += "\nSee the built-in themes (dark.json, light.json) for reference values.";
+			errorMessage += "\nSee the built-in dark/light themes for reference values.";
 		}
 		if (otherErrors.length > 0) {
 			errorMessage += `\n\nOther errors:\n${otherErrors.join("\n")}`;
@@ -878,14 +867,6 @@ export function getResolvedThemeColors(themeName?: string): Record<string, strin
 		}
 	}
 	return cssColors;
-}
-
-/**
- * Check if a theme is a "light" theme (for CSS that needs light/dark variants).
- */
-export function isLightTheme(themeName?: string): boolean {
-	// Currently just check the name - could be extended to analyze colors
-	return themeName === "light";
 }
 
 /**

@@ -21,9 +21,7 @@ export interface ProcessEvent {
 		| "recovered"
 		| "exited"
 		| "crashed"
-		| "output"
 		| "port_open"
-		| "pattern_match"
 		| "port_timeout";
 	timestamp: number;
 	detail: string;
@@ -92,18 +90,10 @@ export interface BgProcess {
 	lastErrorCount: number;
 	/** Last warning count snapshot for diff detection */
 	lastWarningCount: number;
-	/** Command history for shell-type sessions */
-	commandHistory: string[];
-	/** Dedup tracker: hash → count of repeated lines (capped at LINE_DEDUP_MAX entries) */
-	lineDedup: Map<string, number>;
-	/** Total raw lines (before dedup) for token savings calc */
-	totalRawLines: number;
 	/** Tracked stdout line count (incremented in addOutputLine, avoids O(n) filter) */
 	stdoutLineCount: number;
 	/** Tracked stderr line count (incremented in addOutputLine, avoids O(n) filter) */
 	stderrLineCount: number;
-	/** Env snapshot (keys only, no values for security) */
-	envKeys: string[];
 	/** Restart count */
 	restartCount: number;
 	/** Original start config for restart */
@@ -187,8 +177,6 @@ export interface ProcessManifest {
 export const MAX_BUFFER_LINES = 5000;
 export const MAX_EVENTS = 200;
 export const DEAD_PROCESS_TTL = 10 * 60 * 1000;
-/** Maximum unique entries in the per-process lineDedup Map before LRU eviction. */
-export const LINE_DEDUP_MAX = 500;
 export const PORT_PROBE_TIMEOUT = 500;
 export const READY_POLL_INTERVAL = 250;
 export const DEFAULT_READY_TIMEOUT = 30000;

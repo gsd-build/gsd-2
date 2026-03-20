@@ -88,5 +88,3 @@ EVIDENCE: [output from ci_monitor.cjs]
 ## References
 
 - `references/gh/SKILL.md` — gh CLI reference
-- `scripts/ci_monitor.cjs` — CI monitoring tool
-- `scripts/ci_monitor.md` — Tool usage documentation

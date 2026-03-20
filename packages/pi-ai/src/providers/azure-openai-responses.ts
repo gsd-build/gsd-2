@@ -5,8 +5,6 @@ import type { ResponseCreateParamsStreaming } from "openai/resources/responses/r
 import { getEnvApiKey } from "../env-api-keys.js";
 import { supportsXhigh } from "../models.js";
 import type {
-	Api,
-	AssistantMessage,
 	Context,
 	Model,
 	SimpleStreamOptions,
@@ -15,6 +13,13 @@ import type {
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.js";
+import {
+	assertStreamSuccess,
+	buildInitialOutput,
+	clampReasoningForModel,
+	finalizeStream,
+	handleStreamError,
+} from "./openai-shared.js";
 import { buildBaseOptions, clampReasoning } from "./simple-options.js";
 
 let _AzureOpenAIClass: typeof AzureOpenAI | undefined;
@@ -24,16 +29,6 @@ async function getAzureOpenAIClass(): Promise<typeof AzureOpenAI> {
 		_AzureOpenAIClass = mod.AzureOpenAI;
 	}
 	return _AzureOpenAIClass;
-}
-
-/**
- * Clamp reasoning effort for models that don't support all levels.
- * gpt-5.x models don't support "minimal" — map to "low".
- */
-function clampReasoningForModel(modelName: string, effort: string): string {
-	const name = modelName.includes("/") ? modelName.split("/").pop()! : modelName;
-	if (name.startsWith("gpt-5") && effort === "minimal") return "low";
-	return effort;
 }
 
 const DEFAULT_AZURE_API_VERSION = "v1";
@@ -83,24 +78,7 @@ export const streamAzureOpenAIResponses: StreamFunction<"azure-openai-responses"
 	// Start async processing
 	(async () => {
 		const deploymentName = resolveDeploymentName(model, options);
-
-		const output: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: "azure-openai-responses" as Api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			stopReason: "stop",
-			timestamp: Date.now(),
-		};
+		const output = buildInitialOutput(model);
 
 		try {
 			// Create Azure OpenAI client
@@ -119,22 +97,10 @@ export const streamAzureOpenAIResponses: StreamFunction<"azure-openai-responses"
 
 			await processResponsesStream(openaiStream, output, stream, model);
 
-			if (options?.signal?.aborted) {
-				throw new Error("Request was aborted");
-			}
-
-			if (output.stopReason === "aborted" || output.stopReason === "error") {
-				throw new Error("An unknown error occurred");
-			}
-
-			stream.push({ type: "done", reason: output.stopReason, message: output });
-			stream.end();
+			assertStreamSuccess(output, options?.signal);
+			finalizeStream(stream, output);
 		} catch (error) {
-			for (const block of output.content) delete (block as { index?: number }).index;
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
+			handleStreamError(stream, output, error, options?.signal);
 		}
 	})();
 

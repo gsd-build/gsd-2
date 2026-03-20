@@ -38,9 +38,6 @@ function createTempRepo(): string {
   run("git config user.email test@test.com", dir);
   run("git config user.name Test", dir);
   writeFileSync(join(dir, "README.md"), "# test\n");
-  // Mirror production: .gsd/worktrees/ is gitignored so autoCommitDirtyState
-  // doesn't pick up the worktrees directory as dirty state (#1127 fix).
-  writeFileSync(join(dir, ".gitignore"), ".gsd/worktrees/\n");
   run("git add .", dir);
   run("git commit -m init", dir);
   run("git branch -M main", dir);
@@ -125,23 +122,23 @@ test("worktree swap on milestone transition: merge old, create new", () => {
 
 // ─── Verify the transition code path exists in auto.ts ──────────────────────
 
-test("auto.ts milestone transition block contains worktree lifecycle", () => {
+test("auto-loop.ts milestone transition block contains worktree lifecycle", () => {
   const autoSrc = readFileSync(
-    join(__dirname, "..", "auto.ts"),
+    join(__dirname, "..", "auto-loop.ts"),
     "utf-8",
   );
 
-  // The fix adds worktree merge + create inside the milestone transition block
+  // The resolver handles worktree merge + enter inside the milestone transition block
   assert.ok(
     autoSrc.includes("Worktree lifecycle on milestone transition"),
-    "auto.ts should contain the worktree lifecycle comment marker",
+    "auto-loop.ts should contain the worktree lifecycle comment marker",
   );
   assert.ok(
-    autoSrc.includes("mergeMilestoneToMain") && autoSrc.includes("mid !== s.currentMilestoneId"),
-    "auto.ts should call mergeMilestoneToMain during milestone transition",
+    autoSrc.includes("resolver.mergeAndExit") && autoSrc.includes("mid !== s.currentMilestoneId"),
+    "auto-loop.ts should call resolver.mergeAndExit during milestone transition",
   );
   assert.ok(
-    autoSrc.includes("createAutoWorktree") && autoSrc.includes("Created auto-worktree for"),
-    "auto.ts should create new worktree for incoming milestone",
+    autoSrc.includes("resolver.enterMilestone"),
+    "auto-loop.ts should call resolver.enterMilestone for incoming milestone",
   );
 });

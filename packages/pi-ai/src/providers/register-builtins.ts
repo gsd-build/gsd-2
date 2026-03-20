@@ -116,7 +116,7 @@ function streamSimpleBedrockLazy(
 	return outer;
 }
 
-export function registerBuiltInApiProviders(): void {
+function registerBuiltInApiProviders(): void {
 	registerApiProvider({
 		api: "anthropic-messages",
 		stream: streamAnthropic,

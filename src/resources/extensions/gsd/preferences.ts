@@ -15,9 +15,10 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { gsdRoot } from "./paths.js";
 import { parse as parseYaml } from "yaml";
-import type { PostUnitHookConfig, PreDispatchHookConfig } from "./types.js";
+import type { PostUnitHookConfig, PreDispatchHookConfig, TokenProfile } from "./types.js";
 import type { DynamicRoutingConfig } from "./model-router.js";
 import { normalizeStringArray } from "../shared/mod.js";
+import { resolveProfileDefaults as _resolveProfileDefaults } from "./preferences-models.js";
 
 import {
   MODE_DEFAULTS,
@@ -141,6 +142,18 @@ export function loadEffectiveGSDPreferences(): LoadedGSDPreferences | null {
     };
   }
 
+  // Apply token-profile defaults as the lowest-priority layer so that
+  // `token_profile: budget` sets models and phase-skips automatically.
+  // Explicit user preferences always override profile defaults.
+  const profile = result.preferences.token_profile as TokenProfile | undefined;
+  if (profile) {
+    const profileDefaults = _resolveProfileDefaults(profile);
+    result = {
+      ...result,
+      preferences: mergePreferences(profileDefaults as GSDPreferences, result.preferences),
+    };
+  }
+
   // Apply mode defaults as the lowest-priority layer
   if (result.preferences.mode) {
     result = {
@@ -252,6 +265,8 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
     search_provider: override.search_provider ?? base.search_provider,
     compression_strategy: override.compression_strategy ?? base.compression_strategy,
     context_selection: override.context_selection ?? base.context_selection,
+    auto_visualize: override.auto_visualize ?? base.auto_visualize,
+    auto_report: override.auto_report ?? base.auto_report,
   };
 }
 

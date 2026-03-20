@@ -618,76 +618,6 @@ export async function ensureFileOpen(client: LspClient, filePath: string, signal
 	}
 }
 
-/**
- * Sync in-memory content to the LSP client without reading from disk.
- */
-export async function syncContent(
-	client: LspClient,
-	filePath: string,
-	content: string,
-	signal?: AbortSignal,
-): Promise<void> {
-	const uri = fileToUri(filePath);
-	const lockKey = `${client.name}:${uri}`;
-	throwIfAborted(signal);
-
-	const existingLock = fileOperationLocks.get(lockKey);
-	if (existingLock) {
-		await untilAborted(signal, () => existingLock);
-	}
-
-	const syncPromise = (async () => {
-		client.diagnostics.delete(uri);
-
-		const info = client.openFiles.get(uri);
-
-		if (!info) {
-			const languageId = detectLanguageId(filePath);
-			throwIfAborted(signal);
-			await sendNotification(client, "textDocument/didOpen", {
-				textDocument: {
-					uri,
-					languageId,
-					version: 1,
-					text: content,
-				},
-			});
-			client.openFiles.set(uri, { version: 1, languageId });
-			client.lastActivity = Date.now();
-			return;
-		}
-
-		const version = ++info.version;
-		throwIfAborted(signal);
-		await sendNotification(client, "textDocument/didChange", {
-			textDocument: { uri, version },
-			contentChanges: [{ text: content }],
-		});
-		client.lastActivity = Date.now();
-	})();
-
-	fileOperationLocks.set(lockKey, syncPromise);
-	try {
-		await syncPromise;
-	} finally {
-		fileOperationLocks.delete(lockKey);
-	}
-}
-
-/**
- * Notify LSP that a file was saved.
- */
-export async function notifySaved(client: LspClient, filePath: string, signal?: AbortSignal): Promise<void> {
-	const uri = fileToUri(filePath);
-	const info = client.openFiles.get(uri);
-	if (!info) return;
-
-	throwIfAborted(signal);
-	await sendNotification(client, "textDocument/didSave", {
-		textDocument: { uri },
-	});
-	client.lastActivity = Date.now();
-}
 
 /**
  * Refresh a file in the LSP client.
@@ -761,7 +691,7 @@ export function notifyFileChanged(filePath: string): void {
 /**
  * Shutdown a specific client by key.
  */
-export function shutdownClient(key: string): void {
+function shutdownClient(key: string): void {
 	const client = clients.get(key);
 	if (!client) return;
 
@@ -865,7 +795,7 @@ export async function sendRequest(
 	return promise;
 }
 
-export async function sendNotification(client: LspClient, method: string, params: unknown): Promise<void> {
+async function sendNotification(client: LspClient, method: string, params: unknown): Promise<void> {
 	const notification: LspJsonRpcNotification = {
 		jsonrpc: "2.0",
 		method,
@@ -889,7 +819,7 @@ export async function sendNotification(client: LspClient, method: string, params
 /**
  * Shutdown all LSP clients.
  */
-export function shutdownAll(): void {
+function shutdownAll(): void {
 	const clientsToShutdown = Array.from(clients.values());
 	clients.clear();
 

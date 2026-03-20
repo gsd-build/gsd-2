@@ -11,6 +11,7 @@ import { mergeMilestoneToMain } from "./auto-worktree.js";
 import { MergeConflictError } from "./git-service.js";
 import { removeSessionStatus } from "./session-status-io.js";
 import type { WorkerInfo } from "./parallel-orchestrator.js";
+import { getErrorMessage } from "./error-utils.js";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -99,7 +100,7 @@ export async function mergeCompletedMilestone(
     return {
       milestoneId,
       success: false,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     };
   }
 }

@@ -35,7 +35,8 @@ import { getActiveAutoWorktreeContext } from "./auto-worktree.js";
 import { saveFile, formatContinue, loadFile, parseContinue, parseSummary, loadActiveOverrides, formatOverridesSection } from "./files.js";
 import { loadPrompt } from "./prompt-loader.js";
 import { deriveState } from "./state.js";
-import { isAutoActive, isAutoPaused, handleAgentEnd, pauseAuto, getAutoDashboardData, getAutoModeStartModel, markToolStart, markToolEnd } from "./auto.js";
+import { isAutoActive, isAutoPaused, pauseAuto, getAutoDashboardData, getAutoModeStartModel, markToolStart, markToolEnd } from "./auto.js";
+import { isSessionSwitchInFlight, resolveAgentEnd } from "./auto-loop.js";
 import { saveActivityLog } from "./activity-log.js";
 import { checkAutoStartAfterDiscuss, getDiscussionMilestoneId, findMilestoneIds, nextMilestoneId } from "./guided-flow.js";
 import { GSDDashboardOverlay } from "./dashboard-overlay.js";
@@ -65,57 +66,28 @@ import { toPosixPath } from "../shared/mod.js";
 import { isParallelActive, shutdownParallel } from "./parallel-orchestrator.js";
 import { DEFAULT_BASH_TIMEOUT_SECS } from "./constants.js";
 
-/**
- * Ensure the GSD database is available, auto-initializing if needed.
- * Returns true if the DB is ready, false if initialization failed.
- */
-async function ensureDbAvailable(): Promise<boolean> {
-  try {
-    const db = await import("./gsd-db.js");
-    if (db.isDbAvailable()) return true;
+// ── Agent Instructions (DEPRECATED) ──────────────────────────────────────
+// agent-instructions.md is deprecated. Use AGENTS.md or CLAUDE.md instead.
+// Pi core natively supports AGENTS.md (with CLAUDE.md fallback) per directory.
 
-    // Auto-initialize: open (and create if needed) the DB at the standard path
-    const gsdDir = gsdRoot(process.cwd());
-    if (!existsSync(gsdDir)) return false; // No GSD project — can't create DB
-    const dbPath = join(gsdDir, "gsd.db");
-    return db.openDatabase(dbPath);
-  } catch {
-    return false;
+function warnDeprecatedAgentInstructions(): void {
+  const paths = [
+    join(homedir(), ".gsd", "agent-instructions.md"),
+    join(process.cwd(), ".gsd", "agent-instructions.md"),
+  ];
+  for (const p of paths) {
+    if (existsSync(p)) {
+      console.warn(
+        `[GSD] DEPRECATED: ${p} is no longer loaded. ` +
+        `Migrate your instructions to AGENTS.md (or CLAUDE.md) in the same directory. ` +
+        `See https://github.com/gsd-build/GSD-2/issues/1492`,
+      );
+    }
   }
-}
-
-// ── Agent Instructions ────────────────────────────────────────────────────
-// Lightweight "always follow" files injected into every GSD agent session.
-// Global: ~/.gsd/agent-instructions.md   Project: .gsd/agent-instructions.md
-// Both are loaded and concatenated (global first, project appends).
-
-function loadAgentInstructions(): string | null {
-  const parts: string[] = [];
-
-  const globalPath = join(homedir(), ".gsd", "agent-instructions.md");
-  if (existsSync(globalPath)) {
-    try {
-      const content = readFileSync(globalPath, "utf-8").trim();
-      if (content) parts.push(content);
-    } catch { /* non-fatal — skip unreadable file */ }
-  }
-
-  const projectPath = join(process.cwd(), ".gsd", "agent-instructions.md");
-  if (existsSync(projectPath)) {
-    try {
-      const content = readFileSync(projectPath, "utf-8").trim();
-      if (content) parts.push(content);
-    } catch { /* non-fatal — skip unreadable file */ }
-  }
-
-  if (parts.length === 0) return null;
-  return parts.join("\n\n");
 }
 
 // ── Depth verification state ──────────────────────────────────────────────
-// Tracks which milestones have passed depth verification.
-// Single-milestone flows set '*' (wildcard). Multi-milestone flows set per-ID.
-const depthVerifiedMilestones = new Set<string>();
+let depthVerificationDone = false;
 
 // ── Queue phase tracking ──────────────────────────────────────────────────
 // When true, the LLM is in a queue flow writing CONTEXT.md files.
@@ -126,28 +98,11 @@ let activeQueuePhase = false;
 // Tracks per-model retry attempts for transient network errors.
 // Cleared when a model switch occurs or retries are exhausted.
 const networkRetryCounters = new Map<string, number>();
-
-// ── Transient error escalation ───────────────────────────────────────────
-// Tracks consecutive transient auto-resume attempts. Each attempt doubles
-// the delay. After MAX_TRANSIENT_AUTO_RESUMES consecutive failures, auto-mode
-// pauses indefinitely to avoid infinite rapid-fire retries (#1166).
-const MAX_TRANSIENT_AUTO_RESUMES = 5;
+const MAX_TRANSIENT_AUTO_RESUMES = 3;
 let consecutiveTransientErrors = 0;
 
 export function isDepthVerified(): boolean {
-  return depthVerifiedMilestones.has("*") || depthVerifiedMilestones.size > 0;
-}
-
-/** Check whether a specific milestone has passed depth verification. */
-export function isDepthVerifiedFor(milestoneId: string): boolean {
-  // Wildcard means "all milestones verified" (single-milestone flow)
-  if (depthVerifiedMilestones.has("*")) return true;
-  return depthVerifiedMilestones.has(milestoneId);
-}
-
-/** Mark a specific milestone as depth-verified. */
-export function markDepthVerified(milestoneId: string): void {
-  depthVerifiedMilestones.add(milestoneId);
+  return depthVerificationDone;
 }
 
 /** Check whether a queue phase is active. */
@@ -178,25 +133,11 @@ export function shouldBlockContextWrite(
   if (!inDiscussion && !inQueue) return { block: false };
 
   if (!MILESTONE_CONTEXT_RE.test(inputPath)) return { block: false };
-
-  // For discussion flows: check global depth verification (backward compat)
-  if (inDiscussion && depthVerified) return { block: false };
-
-  // For queue flows: extract milestone ID from the path and check per-milestone verification
-  if (inQueue) {
-    const pathMatch = inputPath.match(/\/(M\d+(?:-[a-z0-9]{6})?)-CONTEXT\.md$/);
-    const targetMid = pathMatch?.[1];
-    if (targetMid && depthVerifiedMilestones.has(targetMid)) return { block: false };
-    // Wildcard passes all
-    if (depthVerifiedMilestones.has("*")) return { block: false };
-  }
+  if (depthVerified) return { block: false };
 
   return {
     block: true,
-    reason: `Blocked: Cannot write milestone CONTEXT.md without depth verification. ` +
-      `Use ask_user_questions with a question id containing "depth_verification" first. ` +
-      `For multi-milestone flows, include the milestone ID in the question id (e.g., "depth_verification_M001"). ` +
-      `This ensures each milestone's context has been critically examined before being written.`,
+    reason: `Blocked: Cannot write to milestone CONTEXT.md during discussion phase without depth verification. Call ask_user_questions with question id "depth_verification" first to confirm discussion depth before writing context.`,
   };
 }
 
@@ -226,7 +167,16 @@ export default function (pi: ExtensionAPI) {
         // Pipe closed — nothing we can write; just exit cleanly
         process.exit(0);
       }
-      // Re-throw anything that isn't EPIPE so real crashes still surface
+      if ((err as NodeJS.ErrnoException).code === "ENOENT" &&
+          (err as any).syscall?.startsWith("spawn")) {
+        // spawn ENOENT — command not found (e.g., npx on Windows).
+        // This surfaces as an uncaught exception from child_process but
+        // is not a fatal process error. Log and continue instead of
+        // crashing auto-mode (#1384).
+        process.stderr.write(`[gsd] spawn ENOENT: ${(err as any).path ?? "unknown"} — command not found\n`);
+        return;
+      }
+      // Re-throw anything that isn't EPIPE/ENOENT so real crashes still surface
       throw err;
     };
     process.on("uncaughtException", _gsdEpipeGuard);
@@ -347,8 +297,14 @@ export default function (pi: ExtensionAPI) {
       when_context: Type.Optional(Type.String({ description: "When/context for the decision (e.g. milestone ID)" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      // Ensure DB is available (auto-initialize if needed)
-      if (!await ensureDbAvailable()) {
+      // Check DB availability
+      let dbAvailable = false;
+      try {
+        const db = await import("./gsd-db.js");
+        dbAvailable = db.isDbAvailable();
+      } catch { /* dynamic import failed */ }
+
+      if (!dbAvailable) {
         return {
           content: [{ type: "text" as const, text: "Error: GSD database is not available. Cannot save decision." }],
           isError: true,
@@ -408,8 +364,13 @@ export default function (pi: ExtensionAPI) {
       supporting_slices: Type.Optional(Type.String({ description: "Supporting slices" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      // Ensure DB is available (auto-initialize if needed)
-      if (!await ensureDbAvailable()) {
+      let dbAvailable = false;
+      try {
+        const db = await import("./gsd-db.js");
+        dbAvailable = db.isDbAvailable();
+      } catch { /* dynamic import failed */ }
+
+      if (!dbAvailable) {
         return {
           content: [{ type: "text" as const, text: "Error: GSD database is not available. Cannot update requirement." }],
           isError: true,
@@ -477,8 +438,13 @@ export default function (pi: ExtensionAPI) {
       content: Type.String({ description: "The full markdown content of the artifact" }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      // Ensure DB is available (auto-initialize if needed)
-      if (!await ensureDbAvailable()) {
+      let dbAvailable = false;
+      try {
+        const db = await import("./gsd-db.js");
+        dbAvailable = db.isDbAvailable();
+      } catch { /* dynamic import failed */ }
+
+      if (!dbAvailable) {
         return {
           content: [{ type: "text" as const, text: "Error: GSD database is not available. Cannot save artifact." }],
           isError: true,
@@ -586,9 +552,8 @@ export default function (pi: ExtensionAPI) {
 
   // ── session_start: render branded GSD header + load tool keys + remote status ──
   pi.on("session_start", async (_event, ctx) => {
-    // Clear depth verification and queue phase state from any prior session
-    depthVerifiedMilestones.clear();
-    activeQueuePhase = false;
+    // Clear per-session state that must not leak across sessions (e.g. RPC mode)
+    depthVerificationDone = false;
 
     // The right-side PTY-backed `gsd` session should look like the attached
     // bridge terminal, not a fresh standalone TUI with an extra decorative
@@ -612,12 +577,6 @@ export default function (pi: ExtensionAPI) {
     // Load tool API keys from auth.json into environment
     loadToolApiKeys();
 
-    // Always-on health widget — ambient system health signal below the editor
-    try {
-      const { initHealthWidget } = await import("./health-widget.js");
-      initHealthWidget(ctx);
-    } catch { /* non-fatal — widget is best-effort */ }
-
     // Notify remote questions status if configured
     try {
       const [{ getRemoteConfigStatus }, { getLatestPromptSummary }] = await Promise.all([
@@ -640,12 +599,12 @@ export default function (pi: ExtensionAPI) {
     description: shortcutDesc("Open GSD dashboard", "/gsd status"),
     handler: async (ctx) => {
       // Only show if .gsd/ exists
-      if (!existsSync(gsdRoot(process.cwd()))) {
+      if (!existsSync(join(process.cwd(), ".gsd"))) {
         ctx.ui.notify("No .gsd/ directory found. Run /gsd to start.", "info");
         return;
       }
 
-      const result = await ctx.ui.custom<void>(
+      await ctx.ui.custom<void>(
         (tui, theme, _kb, done) => {
           return new GSDDashboardOverlay(tui, theme, () => done());
         },
@@ -659,18 +618,12 @@ export default function (pi: ExtensionAPI) {
           },
         },
       );
-
-      // Fallback for RPC mode where ctx.ui.custom() returns undefined.
-      if (result === undefined) {
-        const { fireStatusViaCommand } = await import("./commands.js");
-        await fireStatusViaCommand(ctx);
-      }
     },
   });
 
   // ── before_agent_start: inject GSD contract into true system prompt ─────
   pi.on("before_agent_start", async (event, ctx: ExtensionContext) => {
-    if (!existsSync(gsdRoot(process.cwd()))) return;
+    if (!existsSync(join(process.cwd(), ".gsd"))) return;
 
     const stopContextTimer = debugTime("context-inject");
     const systemContent = loadPrompt("system");
@@ -726,12 +679,8 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // Load agent instructions (global + project)
-    let agentInstructionsBlock = "";
-    const agentInstructions = loadAgentInstructions();
-    if (agentInstructions) {
-      agentInstructionsBlock = `\n\n## Agent Instructions\n\nThe following instructions were provided by the user and must be followed in every session:\n\n${agentInstructions}`;
-    }
+    // Warn if deprecated agent-instructions.md files are still present
+    warnDeprecatedAgentInstructions();
 
     const injection = await buildGuidedExecuteContextInjection(event.prompt, process.cwd());
 
@@ -776,7 +725,7 @@ export default function (pi: ExtensionAPI) {
       ].join("\n");
     }
 
-    const fullSystem = `${event.systemPrompt}\n\n[SYSTEM CONTEXT — GSD]\n\n${systemContent}${preferenceBlock}${agentInstructionsBlock}${knowledgeBlock}${memoryBlock}${newSkillsBlock}${worktreeBlock}`;
+    const fullSystem = `${event.systemPrompt}\n\n[SYSTEM CONTEXT — GSD]\n\n${systemContent}${preferenceBlock}${knowledgeBlock}${memoryBlock}${newSkillsBlock}${worktreeBlock}`;
     stopContextTimer({
       systemPromptSize: fullSystem.length,
       injectionSize: injection?.length ?? 0,
@@ -802,13 +751,20 @@ export default function (pi: ExtensionAPI) {
   pi.on("agent_end", async (event, ctx: ExtensionContext) => {
     // If discuss phase just finished, start auto-mode
     if (checkAutoStartAfterDiscuss()) {
-      depthVerifiedMilestones.clear();
+      depthVerificationDone = false;
       activeQueuePhase = false;
       return;
     }
 
     // If auto-mode is already running, advance to next unit
     if (!isAutoActive()) return;
+
+    // Fresh-session auto-mode intentionally aborts the previous session during
+    // cmdCtx.newSession(). Ignore that agent_end so we neither pause nor
+    // resolve the new unit with an event from the old session.
+    if (isSessionSwitchInFlight()) {
+      return;
+    }
 
     // If the agent was aborted (user pressed Escape) or hit a provider
     // error (fetch failure, rate limit, etc.), pause auto-mode instead of
@@ -949,49 +905,45 @@ export default function (pi: ExtensionAPI) {
       const explicitRetryAfterMs = ("retryAfterMs" in lastMsg && typeof lastMsg.retryAfterMs === "number")
         ? lastMsg.retryAfterMs
         : undefined;
-      let retryAfterMs = explicitRetryAfterMs ?? classification.suggestedDelayMs;
-
-      // ── Escalating backoff for repeated transient errors ──────────────
-      // Each consecutive transient auto-resume doubles the delay. After
-      // MAX_TRANSIENT_AUTO_RESUMES consecutive failures, treat as permanent
-      // to avoid infinite rapid-fire retries (#1166).
-      let effectiveTransient = classification.isTransient;
       if (classification.isTransient) {
-        consecutiveTransientErrors++;
-        if (consecutiveTransientErrors > MAX_TRANSIENT_AUTO_RESUMES) {
-          effectiveTransient = false;
-          ctx.ui.notify(
-            `${consecutiveTransientErrors} consecutive transient errors. Pausing indefinitely — resume manually with /gsd auto.`,
-            "error",
-          );
-          consecutiveTransientErrors = 0;
-        } else {
-          // Escalate: base delay × 2^(consecutive-1) → 30s, 60s, 120s, 240s, 480s
-          retryAfterMs = retryAfterMs * 2 ** (consecutiveTransientErrors - 1);
-        }
+        consecutiveTransientErrors += 1;
+      } else {
+        consecutiveTransientErrors = 0;
+      }
+      const baseRetryAfterMs = explicitRetryAfterMs ?? classification.suggestedDelayMs;
+      const retryAfterMs = classification.isTransient ? baseRetryAfterMs * 2 ** Math.max(0, consecutiveTransientErrors - 1) : baseRetryAfterMs;
+      const allowAutoResume = classification.isTransient
+        && consecutiveTransientErrors <= MAX_TRANSIENT_AUTO_RESUMES;
+
+      if (classification.isTransient && !allowAutoResume) {
+        ctx.ui.notify(
+          `Transient provider errors persisted after ${MAX_TRANSIENT_AUTO_RESUMES} auto-resume attempts. Pausing for manual review.`,
+          "warning",
+        );
       }
 
       await pauseAutoForProviderError(ctx.ui, errorDetail, () => pauseAuto(ctx, pi), {
         isRateLimit: classification.isRateLimit,
-        isTransient: effectiveTransient,
+        isTransient: allowAutoResume,
         retryAfterMs,
-        resume: () => {
-          pi.sendMessage(
-            { customType: "gsd-auto-timeout-recovery", content: "Continue execution \u2014 provider error recovery delay elapsed.", display: false },
-            { triggerTurn: true },
-          );
-        },
+        resume: allowAutoResume
+          ? () => {
+            pi.sendMessage(
+              { customType: "gsd-auto-timeout-recovery", content: "Continue execution \u2014 provider error recovery delay elapsed.", display: false },
+              { triggerTurn: true },
+            );
+          }
+          : undefined,
       });
       return;
     }
 
     try {
+      consecutiveTransientErrors = 0;
       networkRetryCounters.clear(); // Clear network retry state on successful unit completion
-      consecutiveTransientErrors = 0; // Reset escalating backoff on success
-      await handleAgentEnd(ctx, pi);
+      resolveAgentEnd(event);
     } catch (err) {
-      // Safety net: if handleAgentEnd throws despite its internal try-catch,
-      // ensure auto-mode stops gracefully instead of silently stalling (#381).
+      // Safety net: if resolveAgentEnd throws, ensure auto-mode stops gracefully (#381).
       const message = err instanceof Error ? err.message : String(err);
       ctx.ui.notify(
         `Auto-mode error in agent_end handler: ${message}. Stopping auto-mode.`,
@@ -1059,19 +1011,6 @@ export default function (pi: ExtensionAPI) {
       } catch { /* best-effort */ }
     }
 
-    // Auto-commit dirty work in CLI-spawned worktrees so nothing is lost.
-    // The CLI sets GSD_CLI_WORKTREE when launched with -w.
-    const cliWorktree = process.env.GSD_CLI_WORKTREE;
-    if (cliWorktree) {
-      try {
-        const { autoCommitCurrentBranch } = await import("./worktree.js");
-        const msg = autoCommitCurrentBranch(process.cwd(), "session-end", cliWorktree);
-        if (msg) {
-          ctx.ui.notify(`Auto-committed worktree ${cliWorktree} before exit.`, "info");
-        }
-      } catch { /* best-effort */ }
-    }
-
     if (!isAutoActive() && !isAutoPaused()) return;
 
     // Save the current session — the lock file stays on disk
@@ -1082,11 +1021,7 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // ── tool_call: block CONTEXT.md writes without depth verification ──
-  // Active during both discussion flows (pendingAutoStart set) and
-  // queue flows (activeQueuePhase set). For multi-milestone queue flows,
-  // each milestone must pass its own depth verification before its
-  // CONTEXT.md can be written.
+  // ── tool_call: block CONTEXT.md writes during discussion without depth verification ──
   pi.on("tool_call", async (event) => {
     if (!isToolCallEventType("write", event)) return;
     const result = shouldBlockContextWrite(
@@ -1100,41 +1035,23 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ── tool_result: persist discussion exchanges & detect depth gate ──────
-  // Handles both discussion flows and queue flows. For queue flows,
-  // depth verification question IDs may include milestone IDs
-  // (e.g., "depth_verification_M001") for per-milestone gating.
   pi.on("tool_result", async (event) => {
     if (event.toolName !== "ask_user_questions") return;
 
     const milestoneId = getDiscussionMilestoneId();
-    // Queue flows don't set pendingAutoStart, so milestoneId may be null.
-    // Depth gate detection still applies — it sets per-milestone flags.
-    const inQueue = activeQueuePhase;
+    if (!milestoneId) return;
 
     const details = event.details as any;
     if (details?.cancelled || !details?.response) return;
 
     // ── Depth gate detection ──────────────────────────────────────────
-    // Supports two patterns:
-    //   1. "depth_verification" — wildcard, marks all milestones verified
-    //   2. "depth_verification_M001" — per-milestone verification
     const questions: any[] = (event.input as any)?.questions ?? [];
     for (const q of questions) {
       if (typeof q.id === "string" && q.id.includes("depth_verification")) {
-        // Extract milestone ID from question ID if present
-        const midMatch = q.id.match(/depth_verification[_-](M\d+(?:-[a-z0-9]{6})?)/i);
-        if (midMatch) {
-          depthVerifiedMilestones.add(midMatch[1]);
-        } else {
-          // Wildcard — all milestones verified (backward compat for single-milestone)
-          depthVerifiedMilestones.add("*");
-        }
+        depthVerificationDone = true;
         break;
       }
     }
-
-    // Discussion persistence only applies when in a discussion flow with a known milestone
-    if (!milestoneId) return;
 
     // ── Persist exchange to DISCUSSION.md ──────────────────────────────
     const basePath = process.cwd();

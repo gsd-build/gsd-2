@@ -277,13 +277,11 @@ test("index.ts tracks consecutive transient errors for escalating backoff", () =
 test("index.ts resets consecutive transient error counter on success", () => {
   const indexSource = readFileSync(join(__dirname, "..", "index.ts"), "utf-8");
 
-  // After successful unit completion, the counter must be reset
-  const marker = "successful unit completion";
-  const successSection = indexSource.indexOf(marker);
-  assert.ok(successSection > -1, "must have success section that clears network retries");
-  const nearbyCode = indexSource.slice(Math.max(0, successSection - 100), successSection + 200);
+  // After successful unit completion, the counter must be reset.
+  // Use a regex across the success block so CRLF checkouts on Windows do not
+  // push the reset line outside a fixed substring window.
   assert.ok(
-    nearbyCode.includes("consecutiveTransientErrors = 0"),
+    /consecutiveTransientErrors\s*=\s*0\s*;[\s\S]{0,250}successful unit completion/.test(indexSource),
     "consecutive transient error counter must be reset on successful unit completion (#1166)",
   );
 });

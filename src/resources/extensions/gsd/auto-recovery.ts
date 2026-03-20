@@ -1,6 +1,6 @@
 /**
  * Auto-mode Recovery — artifact resolution, verification, blocker placeholders,
- * skip artifacts, completed-unit persistence, merge state reconciliation,
+ * skip artifacts, merge state reconciliation,
  * self-heal runtime records, and loop remediation steps.
  *
  * Pure functions that receive all needed state as parameters — no module-level
@@ -8,10 +8,11 @@
  */
 
 import type { ExtensionContext } from "@gsd/pi-coding-agent";
-import {
-  clearUnitRuntimeRecord,
-} from "./unit-runtime.js";
+import { parseUnitId } from "./unit-id.js";
+import { atomicWriteSync } from "./atomic-write.js";
+import { clearUnitRuntimeRecord } from "./unit-runtime.js";
 import { clearParseCache, parseRoadmap, parsePlan } from "./files.js";
+import { isValidationTerminal } from "./state.js";
 import {
   nativeConflictFiles,
   nativeCommit,
@@ -35,12 +36,15 @@ import {
   resolveMilestoneFile,
   clearPathCache,
   resolveGsdRootFile,
-  gsdRoot,
 } from "./paths.js";
-import { isValidationTerminal } from "./state.js";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
-import { atomicWriteSync } from "./atomic-write.js";
-import { loadJsonFileOrNull } from "./json-persistence.js";
+import { markSliceDoneInRoadmap } from "./roadmap-mutations.js";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  unlinkSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 
 // ─── Artifact Resolution & Verification ───────────────────────────────────────
@@ -48,7 +52,11 @@ import { dirname, join } from "node:path";
 /**
  * Resolve the expected artifact for a unit to an absolute path.
  */
-export function resolveExpectedArtifactPath(unitType: string, unitId: string, base: string): string | null {
+export function resolveExpectedArtifactPath(
+  unitType: string,
+  unitId: string,
+  base: string,
+): string | null {
   const parts = unitId.split("/");
   const mid = parts[0]!;
   const sid = parts[1];
@@ -80,7 +88,9 @@ export function resolveExpectedArtifactPath(unitType: string, unitId: string, ba
     case "execute-task": {
       const tid = parts[2];
       const dir = resolveSlicePath(base, mid, sid!);
-      return dir && tid ? join(dir, "tasks", buildTaskFileName(tid, "SUMMARY")) : null;
+      return dir && tid
+        ? join(dir, "tasks", buildTaskFileName(tid, "SUMMARY"))
+        : null;
     }
     case "complete-slice": {
       const dir = resolveSlicePath(base, mid, sid!);
@@ -114,7 +124,11 @@ export function resolveExpectedArtifactPath(unitType: string, unitId: string, ba
  * the summary allowed the unit to be marked complete when the LLM
  * skipped writing the UAT file (see #176).
  */
-export function verifyExpectedArtifact(unitType: string, unitId: string, base: string): boolean {
+export function verifyExpectedArtifact(
+  unitType: string,
+  unitId: string,
+  base: string,
+): boolean {
   // Hook units have no standard artifact — always pass. Their lifecycle
   // is managed by the hook engine, not the artifact verification system.
   if (unitType.startsWith("hook/")) return true;
@@ -140,19 +154,9 @@ export function verifyExpectedArtifact(unitType: string, unitId: string, base: s
   if (!absPath) return false;
   if (!existsSync(absPath)) return false;
 
-  // validate-milestone must have a VALIDATION file with a terminal verdict
-  // (pass, needs-attention, or needs-remediation). Without this check, a
-  // VALIDATION file with missing/malformed frontmatter or an unrecognized
-  // verdict is treated as "complete" by the artifact check but deriveState
-  // still returns phase:"validating-milestone" (because isValidationTerminal
-  // returns false), creating an infinite skip loop that hits the lifetime cap.
   if (unitType === "validate-milestone") {
-    try {
-      const validationContent = readFileSync(absPath, "utf-8");
-      if (!isValidationTerminal(validationContent)) return false;
-    } catch {
-      return false;
-    }
+    const validationContent = readFileSync(absPath, "utf-8");
+    if (!isValidationTerminal(validationContent)) return false;
   }
 
   // plan-slice must produce a plan with actual task entries, not just a scaffold.
@@ -229,7 +233,7 @@ export function verifyExpectedArtifact(unitType: string, unitId: string, base: s
         try {
           const roadmapContent = readFileSync(roadmapFile, "utf-8");
           const roadmap = parseRoadmap(roadmapContent);
-          const slice = (roadmap.slices ?? []).find(s => s.id === sid);
+          const slice = roadmap.slices.find((s) => s.id === sid);
           if (slice && !slice.done) return false;
         } catch {
           // Corrupt/unparseable roadmap — fail verification so the unit
@@ -248,7 +252,12 @@ export function verifyExpectedArtifact(unitType: string, unitId: string, base: s
  * Write a placeholder artifact so the pipeline can advance past a stuck unit.
  * Returns the relative path written, or null if the path couldn't be resolved.
  */
-export function writeBlockerPlaceholder(unitType: string, unitId: string, base: string, reason: string): string | null {
+export function writeBlockerPlaceholder(
+  unitType: string,
+  unitId: string,
+  base: string,
+  reason: string,
+): string | null {
   const absPath = resolveExpectedArtifactPath(unitType, unitId, base);
   if (!absPath) return null;
   const dir = dirname(absPath);
@@ -267,7 +276,11 @@ export function writeBlockerPlaceholder(unitType: string, unitId: string, base: 
   return diagnoseExpectedArtifact(unitType, unitId, base);
 }
 
-export function diagnoseExpectedArtifact(unitType: string, unitId: string, base: string): string | null {
+export function diagnoseExpectedArtifact(
+  unitType: string,
+  unitId: string,
+  base: string,
+): string | null {
   const parts = unitId.split("/");
   const mid = parts[0];
   const sid = parts[1];
@@ -310,9 +323,13 @@ export function diagnoseExpectedArtifact(unitType: string, unitId: string, base:
  * the [x] checkbox in the slice plan. Returns true if artifacts were written.
  */
 export function skipExecuteTask(
-  base: string, mid: string, sid: string, tid: string,
+  base: string,
+  mid: string,
+  sid: string,
+  tid: string,
   status: { summaryExists: boolean; taskChecked: boolean },
-  reason: string, maxAttempts: number,
+  reason: string,
+  maxAttempts: number,
 ): boolean {
   // Write a blocker task summary if missing.
   if (!status.summaryExists) {
@@ -354,48 +371,6 @@ export function skipExecuteTask(
   return true;
 }
 
-// ─── Disk-backed completed-unit helpers ───────────────────────────────────────
-
-function isStringArray(data: unknown): data is string[] {
-  return Array.isArray(data) && data.every(item => typeof item === "string");
-}
-
-/** Path to the persisted completed-unit keys file. */
-export function completedKeysPath(base: string): string {
-  return join(gsdRoot(base), "completed-units.json");
-}
-
-/** Write a completed unit key to disk (read-modify-write append to set). */
-export function persistCompletedKey(base: string, key: string): void {
-  const file = completedKeysPath(base);
-  const keys = loadJsonFileOrNull(file, isStringArray) ?? [];
-  const keySet = new Set(keys);
-  if (!keySet.has(key)) {
-    keys.push(key);
-    atomicWriteSync(file, JSON.stringify(keys));
-  }
-}
-
-/** Remove a stale completed unit key from disk. */
-export function removePersistedKey(base: string, key: string): void {
-  const file = completedKeysPath(base);
-  const keys = loadJsonFileOrNull(file, isStringArray);
-  if (!keys) return;
-  const filtered = keys.filter(k => k !== key);
-  if (filtered.length !== keys.length) {
-    atomicWriteSync(file, JSON.stringify(filtered));
-  }
-}
-
-/** Load all completed unit keys from disk into the in-memory set. */
-export function loadPersistedKeys(base: string, target: Set<string>): void {
-  const file = completedKeysPath(base);
-  const keys = loadJsonFileOrNull(file, isStringArray);
-  if (keys) {
-    for (const k of keys) target.add(k);
-  }
-}
-
 // ─── Merge State Reconciliation ───────────────────────────────────────────────
 
 /**
@@ -405,7 +380,10 @@ export function loadPersistedKeys(base: string, target: Set<string>): void {
  *
  * Returns true if state was dirty and re-derivation is needed.
  */
-export function reconcileMergeState(basePath: string, ctx: ExtensionContext): boolean {
+export function reconcileMergeState(
+  basePath: string,
+  ctx: ExtensionContext,
+): boolean {
   const mergeHeadPath = join(basePath, ".git", "MERGE_HEAD");
   const squashMsgPath = join(basePath, ".git", "SQUASH_MSG");
   const hasMergeHead = existsSync(mergeHeadPath);
@@ -416,7 +394,7 @@ export function reconcileMergeState(basePath: string, ctx: ExtensionContext): bo
   if (conflictedFiles.length === 0) {
     // All conflicts resolved — finalize the merge/squash commit
     try {
-      nativeCommit(basePath, "");  // --no-edit equivalent: use empty message placeholder
+      nativeCommit(basePath, ""); // --no-edit equivalent: use empty message placeholder
       const mode = hasMergeHead ? "merge" : "squash commit";
       ctx.ui.notify(`Finalized leftover ${mode} from prior session.`, "info");
     } catch {
@@ -424,8 +402,8 @@ export function reconcileMergeState(basePath: string, ctx: ExtensionContext): bo
     }
   } else {
     // Still conflicted — try auto-resolving .gsd/ state file conflicts (#530)
-    const gsdConflicts = conflictedFiles.filter(f => f.startsWith(".gsd/"));
-    const codeConflicts = conflictedFiles.filter(f => !f.startsWith(".gsd/"));
+    const gsdConflicts = conflictedFiles.filter((f) => f.startsWith(".gsd/"));
+    const codeConflicts = conflictedFiles.filter((f) => !f.startsWith(".gsd/"));
 
     if (gsdConflicts.length > 0 && codeConflicts.length === 0) {
       // All conflicts are in .gsd/ state files — auto-resolve by accepting theirs
@@ -438,7 +416,10 @@ export function reconcileMergeState(basePath: string, ctx: ExtensionContext): bo
       }
       if (resolved) {
         try {
-          nativeCommit(basePath, "chore: auto-resolve .gsd/ state file conflicts");
+          nativeCommit(
+            basePath,
+            "chore: auto-resolve .gsd/ state file conflicts",
+          );
           ctx.ui.notify(
             `Auto-resolved ${gsdConflicts.length} .gsd/ state file conflict(s) from prior merge.`,
             "info",
@@ -449,11 +430,23 @@ export function reconcileMergeState(basePath: string, ctx: ExtensionContext): bo
       }
       if (!resolved) {
         if (hasMergeHead) {
-          try { nativeMergeAbort(basePath); } catch { /* best-effort */ }
+          try {
+            nativeMergeAbort(basePath);
+          } catch {
+            /* best-effort */
+          }
         } else if (hasSquashMsg) {
-          try { unlinkSync(squashMsgPath); } catch { /* best-effort */ }
+          try {
+            unlinkSync(squashMsgPath);
+          } catch {
+            /* best-effort */
+          }
         }
-        try { nativeResetHard(basePath); } catch { /* best-effort */ }
+        try {
+          nativeResetHard(basePath);
+        } catch {
+          /* best-effort */
+        }
         ctx.ui.notify(
           "Detected leftover merge state — auto-resolve failed, cleaned up. Re-deriving state.",
           "warning",
@@ -462,11 +455,23 @@ export function reconcileMergeState(basePath: string, ctx: ExtensionContext): bo
     } else {
       // Code conflicts present — abort and reset
       if (hasMergeHead) {
-        try { nativeMergeAbort(basePath); } catch { /* best-effort */ }
+        try {
+          nativeMergeAbort(basePath);
+        } catch {
+          /* best-effort */
+        }
       } else if (hasSquashMsg) {
-        try { unlinkSync(squashMsgPath); } catch { /* best-effort */ }
+        try {
+          unlinkSync(squashMsgPath);
+        } catch {
+          /* best-effort */
+        }
       }
-      try { nativeResetHard(basePath); } catch { /* best-effort */ }
+      try {
+        nativeResetHard(basePath);
+      } catch {
+        /* best-effort */
+      }
       ctx.ui.notify(
         "Detected leftover merge state with unresolved conflicts — cleaned up. Re-deriving state.",
         "warning",
@@ -479,14 +484,14 @@ export function reconcileMergeState(basePath: string, ctx: ExtensionContext): bo
 // ─── Self-Heal Runtime Records ────────────────────────────────────────────────
 
 /**
- * Self-heal: scan runtime records in .gsd/ and clear any where the expected
- * artifact already exists on disk. This repairs incomplete closeouts from
- * prior crashes — preventing spurious re-dispatch of already-completed units.
+ * Self-heal: scan runtime records in .gsd/ and clear stale ones.
+ * Clears dispatched records older than 1 hour (process crashed before
+ * completing the unit). deriveState() handles re-derivation — no need
+ * for completion key persistence here.
  */
 export async function selfHealRuntimeRecords(
   base: string,
   ctx: ExtensionContext,
-  completedKeySet: Set<string>,
 ): Promise<void> {
   try {
     const { listUnitRuntimeRecords } = await import("./unit-runtime.js");
@@ -496,26 +501,44 @@ export async function selfHealRuntimeRecords(
     const now = Date.now();
     for (const record of records) {
       const { unitType, unitId } = record;
-      const artifactPath = resolveExpectedArtifactPath(unitType, unitId, base);
 
-      // Case 1: Artifact exists — unit completed but closeout didn't finish.
-      // Use verifyExpectedArtifact (not just existsSync) so that execute-task
-      // also checks the plan checkbox is marked [x]. Without this, a task
-      // whose summary exists but checkbox is unchecked would be incorrectly
-      // marked as completed, causing deriveState to re-dispatch it endlessly.
-      if (artifactPath && existsSync(artifactPath) && verifyExpectedArtifact(unitType, unitId, base)) {
-        clearUnitRuntimeRecord(base, unitType, unitId);
-        // Also persist completion key if missing
-        const key = `${unitType}/${unitId}`;
-        if (!completedKeySet.has(key)) {
-          persistCompletedKey(base, key);
-          completedKeySet.add(key);
+      // Case 0: complete-slice with SUMMARY + UAT but unchecked roadmap (#1350).
+      // If a complete-slice was interrupted after writing artifacts but before
+      // flipping the roadmap checkbox, the verification fails and the dispatch
+      // loop relaunches the same unit forever. Auto-fix the checkbox.
+      if (unitType === "complete-slice") {
+        const { milestone: mid, slice: sid } = parseUnitId(unitId);
+        if (mid && sid) {
+          const dir = resolveSlicePath(base, mid, sid);
+          if (dir) {
+            const summaryPath = join(dir, buildSliceFileName(sid, "SUMMARY"));
+            const uatPath = join(dir, buildSliceFileName(sid, "UAT"));
+            if (existsSync(summaryPath) && existsSync(uatPath)) {
+              const roadmapFile = resolveMilestoneFile(base, mid, "ROADMAP");
+              if (roadmapFile && existsSync(roadmapFile)) {
+                try {
+                  const roadmapContent = readFileSync(roadmapFile, "utf-8");
+                  const roadmap = parseRoadmap(roadmapContent);
+                  const slice = (roadmap.slices ?? []).find(s => s.id === sid);
+                  if (slice && !slice.done) {
+                    // Auto-fix: flip the checkbox using shared utility
+                    if (markSliceDoneInRoadmap(base, mid, sid)) {
+                      ctx.ui.notify(
+                        `Self-heal: marked ${sid} done in roadmap (SUMMARY + UAT exist but checkbox was stale).`,
+                        "info",
+                      );
+                    }
+                  }
+                } catch {
+                  // Roadmap parse failure — don't block self-heal
+                }
+              }
+            }
+          }
         }
-        healed++;
-        continue;
       }
 
-      // Case 2: No artifact but record is stale (dispatched > 1h ago, process crashed)
+      // Clear stale dispatched records (dispatched > 1h ago, process crashed)
       const age = now - (record.startedAt ?? 0);
       if (record.phase === "dispatched" && age > STALE_THRESHOLD_MS) {
         clearUnitRuntimeRecord(base, unitType, unitId);
@@ -524,7 +547,10 @@ export async function selfHealRuntimeRecords(
       }
     }
     if (healed > 0) {
-      ctx.ui.notify(`Self-heal: cleared ${healed} stale runtime record(s).`, "info");
+      ctx.ui.notify(
+        `Self-heal: cleared ${healed} stale runtime record(s).`,
+        "info",
+      );
     }
   } catch (e) {
     // Non-fatal — self-heal should never block auto-mode start
@@ -538,7 +564,11 @@ export async function selfHealRuntimeRecords(
  * Build concrete, manual remediation steps for a loop-detected unit failure.
  * These are shown when automatic reconciliation is not possible.
  */
-export function buildLoopRemediationSteps(unitType: string, unitId: string, base: string): string | null {
+export function buildLoopRemediationSteps(
+  unitType: string,
+  unitId: string,
+  base: string,
+): string | null {
   const parts = unitId.split("/");
   const mid = parts[0];
   const sid = parts[1];
@@ -558,9 +588,10 @@ export function buildLoopRemediationSteps(unitType: string, unitId: string, base
     case "plan-slice":
     case "research-slice": {
       if (!mid || !sid) break;
-      const artifactRel = unitType === "plan-slice"
-        ? relSliceFile(base, mid, sid, "PLAN")
-        : relSliceFile(base, mid, sid, "RESEARCH");
+      const artifactRel =
+        unitType === "plan-slice"
+          ? relSliceFile(base, mid, sid, "PLAN")
+          : relSliceFile(base, mid, sid, "RESEARCH");
       return [
         `   1. Write ${artifactRel} manually (or with the LLM in interactive mode)`,
         `   2. Run \`gsd doctor\` to reconcile .gsd/ state`,

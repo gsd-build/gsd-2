@@ -18,15 +18,15 @@ export const isBunBinary =
 	import.meta.url.includes("$bunfs") || import.meta.url.includes("~BUN") || import.meta.url.includes("%7EBUN");
 
 /** Detect if Bun is the runtime (compiled binary or bun run) */
-export const isBunRuntime = !!process.versions.bun;
+const isBunRuntime = !!process.versions.bun;
 
 // =============================================================================
 // Install Method Detection
 // =============================================================================
 
-export type InstallMethod = "bun-binary" | "npm" | "pnpm" | "yarn" | "bun" | "unknown";
+type InstallMethod = "bun-binary" | "npm" | "pnpm" | "yarn" | "bun" | "unknown";
 
-export function detectInstallMethod(): InstallMethod {
+function detectInstallMethod(): InstallMethod {
 	if (isBunBinary) {
 		return "bun-binary";
 	}
@@ -79,7 +79,7 @@ export function getUpdateInstruction(packageName: string): string {
  */
 let _cachedPackageDir: string | undefined;
 
-export function getPackageDir(): string {
+function getPackageDir(): string {
 	if (_cachedPackageDir !== undefined) return _cachedPackageDir;
 
 	// Allow override via environment variable (useful for Nix/Guix where store paths tokenize poorly)
@@ -138,7 +138,7 @@ export function getExportTemplateDir(): string {
 }
 
 /** Get path to package.json */
-export function getPackageJsonPath(): string {
+function getPackageJsonPath(): string {
 	return join(getPackageDir(), "package.json");
 }
 
@@ -217,11 +217,6 @@ export function getAuthPath(): string {
 /** Get path to settings.json */
 export function getSettingsPath(): string {
 	return join(getAgentDir(), "settings.json");
-}
-
-/** Get path to tools directory */
-export function getToolsDir(): string {
-	return join(getAgentDir(), "tools");
 }
 
 /** Get path to managed binaries directory (fd, rg) */

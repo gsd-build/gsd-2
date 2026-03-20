@@ -308,21 +308,7 @@ export class Markdown implements Component {
 			}
 
 			case "code": {
-				const indent = this.theme.codeBlockIndent ?? "  ";
-				lines.push(this.theme.codeBlockBorder(`\`\`\`${token.lang || ""}`));
-				if (this.theme.highlightCode) {
-					const highlightedLines = this.theme.highlightCode(token.text, token.lang);
-					for (const hlLine of highlightedLines) {
-						lines.push(`${indent}${hlLine}`);
-					}
-				} else {
-					// Split code by newlines and style each line
-					const codeLines = token.text.split("\n");
-					for (const codeLine of codeLines) {
-						lines.push(`${indent}${this.theme.codeBlock(codeLine)}`);
-					}
-				}
-				lines.push(this.theme.codeBlockBorder("```"));
+				lines.push(...this.renderCodeBlock(token.text, token.lang));
 				if (nextTokenType !== "space") {
 					lines.push(""); // Add spacing after code blocks (unless space token follows)
 				}
@@ -589,20 +575,7 @@ export class Markdown implements Component {
 				lines.push(text);
 			} else if (token.type === "code") {
 				// Code block in list item
-				const indent = this.theme.codeBlockIndent ?? "  ";
-				lines.push(this.theme.codeBlockBorder(`\`\`\`${token.lang || ""}`));
-				if (this.theme.highlightCode) {
-					const highlightedLines = this.theme.highlightCode(token.text, token.lang);
-					for (const hlLine of highlightedLines) {
-						lines.push(`${indent}${hlLine}`);
-					}
-				} else {
-					const codeLines = token.text.split("\n");
-					for (const codeLine of codeLines) {
-						lines.push(`${indent}${this.theme.codeBlock(codeLine)}`);
-					}
-				}
-				lines.push(this.theme.codeBlockBorder("```"));
+				lines.push(...this.renderCodeBlock(token.text, token.lang));
 			} else {
 				// Other token types - try to render as inline
 				const text = this.renderInlineTokens([token], styleContext);
@@ -612,6 +585,29 @@ export class Markdown implements Component {
 			}
 		}
 
+		return lines;
+	}
+
+	/**
+	 * Render a fenced code block with syntax highlighting support.
+	 * Used by both renderToken (top-level code blocks) and renderListItem (code blocks inside lists).
+	 */
+	private renderCodeBlock(code: string, lang?: string): string[] {
+		const lines: string[] = [];
+		const indent = this.theme.codeBlockIndent ?? "  ";
+		lines.push(this.theme.codeBlockBorder(`\`\`\`${lang || ""}`));
+		if (this.theme.highlightCode) {
+			const highlightedLines = this.theme.highlightCode(code, lang);
+			for (const hlLine of highlightedLines) {
+				lines.push(`${indent}${hlLine}`);
+			}
+		} else {
+			const codeLines = code.split("\n");
+			for (const codeLine of codeLines) {
+				lines.push(`${indent}${this.theme.codeBlock(codeLine)}`);
+			}
+		}
+		lines.push(this.theme.codeBlockBorder("```"));
 		return lines;
 	}
 

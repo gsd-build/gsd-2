@@ -354,7 +354,8 @@ export default function (pi: ExtensionAPI) {
 				description: "Tool name on that server, e.g. 'railway_list_projects'",
 			}),
 			args: Type.Optional(
-				Type.Record(Type.String(), Type.Unknown(), {
+				Type.Object({}, {
+					additionalProperties: true,
 					description:
 						"Tool arguments as key-value pairs matching the tool's input schema",
 				}),

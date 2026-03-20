@@ -104,11 +104,15 @@ async function main(): Promise<void> {
     run("git checkout -b f-123-thing", repo);
     assertEq(getCurrentBranch(repo), "f-123-thing", "on feature branch");
 
+    const commitsBefore = run("git rev-list --count HEAD", repo);
     captureIntegrationBranch(repo, "M001");
     assertEq(readIntegrationBranch(repo, "M001"), "f-123-thing",
       "captureIntegrationBranch records the current branch");
 
-    // .gsd/ metadata is written to disk only (not committed) since commit_docs removal
+    // Metadata is stored in external state, not committed to git.
+    const commitsAfter = run("git rev-list --count HEAD", repo);
+    assertEq(commitsAfter, commitsBefore, "captureIntegrationBranch does not create a git commit");
+
     rmSync(repo, { recursive: true, force: true });
   }
 

@@ -1,14 +1,9 @@
 /**
- * agent-end-retry.test.ts — Verifies the deferred agent_end retry mechanism (#1072).
+ * agent-end-retry.test.ts — Regression checks for the post-#1419 agent_end model.
  *
- * When handleAgentEnd is already running and a second agent_end event fires
- * (e.g. a hook/triage/quick-task unit dispatched inside handleAgentEnd completes
- * before it returns), the reentrancy guard must not silently drop the event.
- * Instead, it should queue a retry via pendingAgentEndRetry so the completed
- * unit's agent_end is processed after the current handler finishes.
- *
- * Without this, auto-mode can stall permanently in the "summarizing" phase
- * with no unit running and no watchdog set.
+ * The old recursive handleAgentEnd retry path is gone. The loop now keeps
+ * pendingResolve + pendingAgentEndQueue on AutoSession, and handleAgentEnd is
+ * only a thin compatibility wrapper around resolveAgentEnd().
  */
 
 import test from "node:test";
@@ -29,79 +24,57 @@ function getSessionTsSource(): string {
   return readFileSync(SESSION_TS_PATH, "utf-8");
 }
 
-// ── AutoSession must declare pendingAgentEndRetry ────────────────────────────
-
-test("AutoSession declares pendingAgentEndRetry field", () => {
+test("AutoSession declares pending agent_end queue state", () => {
   const source = getSessionTsSource();
   assert.ok(
-    source.includes("pendingAgentEndRetry"),
-    "AutoSession (auto/session.ts) must declare pendingAgentEndRetry field for deferred retry",
+    source.includes("pendingResolve"),
+    "AutoSession must declare pendingResolve for the in-flight unit promise",
+  );
+  assert.ok(
+    source.includes("pendingAgentEndQueue"),
+    "AutoSession must declare pendingAgentEndQueue for between-iteration agent_end events",
   );
 });
 
-test("AutoSession resets pendingAgentEndRetry in reset()", () => {
+test("AutoSession reset clears pending agent_end queue state", () => {
   const source = getSessionTsSource();
-  // Find the reset() method — it's declared as "reset(): void {"
   const resetIdx = source.indexOf("reset(): void");
   assert.ok(resetIdx > -1, "AutoSession must have a reset() method");
-  const resetBlock = source.slice(resetIdx, resetIdx + 3000);
+  const resetBlock = source.slice(resetIdx, resetIdx + 4000);
   assert.ok(
-    resetBlock.includes("pendingAgentEndRetry"),
-    "reset() must clear pendingAgentEndRetry",
+    resetBlock.includes("this.pendingResolve = null"),
+    "reset() must clear pendingResolve",
+  );
+  assert.ok(
+    resetBlock.includes("this.pendingAgentEndQueue = []"),
+    "reset() must clear pendingAgentEndQueue",
   );
 });
 
-// ── handleAgentEnd reentrancy guard must queue retry ─────────────────────────
+test("legacy pendingAgentEndRetry state is gone", () => {
+  const source = getSessionTsSource();
+  assert.ok(
+    !source.includes("pendingAgentEndRetry"),
+    "AutoSession should no longer use legacy pendingAgentEndRetry state",
+  );
+});
 
-test("handleAgentEnd sets pendingAgentEndRetry when reentrant", () => {
+test("handleAgentEnd is a thin compatibility wrapper", () => {
   const source = getAutoTsSource();
-  // Find the handleAgentEnd function
   const fnIdx = source.indexOf("export async function handleAgentEnd");
   assert.ok(fnIdx > -1, "handleAgentEnd must exist in auto.ts");
-
-  // The reentrancy guard section (within ~500 chars of the function start)
-  const guardBlock = source.slice(fnIdx, fnIdx + 800);
-  assert.ok(
-    guardBlock.includes("s.handlingAgentEnd"),
-    "handleAgentEnd must check s.handlingAgentEnd",
-  );
-  assert.ok(
-    guardBlock.includes("pendingAgentEndRetry = true"),
-    "reentrancy guard must set pendingAgentEndRetry = true instead of silently dropping (#1072)",
-  );
-});
-
-// ── finally block must process pendingAgentEndRetry ──────────────────────────
-
-test("handleAgentEnd finally block retries if pendingAgentEndRetry is set", () => {
-  const source = getAutoTsSource();
-  const fnIdx = source.indexOf("export async function handleAgentEnd");
-  assert.ok(fnIdx > -1, "handleAgentEnd must exist");
-
-  // Find the finally block within handleAgentEnd (search for the closing pattern)
   const fnBlock = source.slice(fnIdx, source.indexOf("\n// ─── ", fnIdx + 100));
-  assert.ok(
-    fnBlock.includes("pendingAgentEndRetry"),
-    "handleAgentEnd finally block must check pendingAgentEndRetry",
-  );
-  assert.ok(
-    fnBlock.includes("setImmediate"),
-    "deferred retry must use setImmediate to avoid stack overflow (#1072)",
-  );
-  assert.ok(
-    fnBlock.includes("handleAgentEnd(ctx, pi)"),
-    "deferred retry must call handleAgentEnd recursively (#1072)",
-  );
-});
 
-// ── Regression: reentrancy guard must NOT silently return ─────────────────────
-
-test("reentrancy guard references issue #1072", () => {
-  const source = getAutoTsSource();
-  const fnIdx = source.indexOf("export async function handleAgentEnd");
-  const guardBlock = source.slice(fnIdx, fnIdx + 800);
   assert.ok(
-    guardBlock.includes("1072"),
-    "reentrancy guard comment must reference #1072 for traceability",
+    fnBlock.includes("resolveAgentEnd("),
+    "handleAgentEnd must delegate to resolveAgentEnd",
+  );
+  assert.ok(
+    !fnBlock.includes("pendingAgentEndRetry"),
+    "handleAgentEnd must not use legacy retry state",
+  );
+  assert.ok(
+    !fnBlock.includes("dispatchNextUnit"),
+    "handleAgentEnd must not dispatch recursively",
   );
 });

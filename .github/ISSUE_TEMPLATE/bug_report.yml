@@ -1,45 +1,47 @@
-name: Bug Report
-description: Report a bug in GSD
-labels: ["bug"]
+name: Bug report
+description: Report crashes, regressions, incorrect behavior, or broken workflows in GSD.
+title: "[Bug]: "
+labels:
+  - bug
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting a bug! Please fill out the sections below so we can reproduce and fix it.
-
-  - type: input
-    id: version
-    attributes:
-      label: GSD version
-      description: Run `gsd --version` or check `package.json`
-      placeholder: "e.g., 2.25.0"
-    validations:
-      required: true
+        Thanks for filing a bug report. Keep it concise, reproducible, and evidence-based.
 
   - type: dropdown
-    id: area
+    id: bug_type
     attributes:
-      label: Affected area
+      label: Bug type
+      description: Choose the category that best matches this report.
       options:
-        - Auto-mode / dispatch loop
-        - TUI / terminal display
-        - Planning / roadmap
-        - Phase execution
-        - Git / worktree isolation
-        - Hook orchestration
-        - State management
-        - AI provider integration
-        - CLI / commands
-        - Other
+        - Regression (worked before, now fails)
+        - Crash or hang
+        - Incorrect behavior or output
+        - Performance problem
+        - Documentation or UX problem
     validations:
       required: true
 
   - type: textarea
-    id: description
+    id: summary
     attributes:
-      label: What happened?
-      description: A clear description of the bug.
-      placeholder: "When I run X, Y happens instead of Z."
+      label: Summary
+      description: One sentence describing what is broken.
+      placeholder: Running `/gsd inspect` reports "No GSD database available" even though `.gsd/gsd.db` exists.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Provide the shortest reliable repro path.
+      placeholder: |
+        1. Run `...`
+        2. Open `...`
+        3. Execute `/gsd ...`
+        4. Observe the failure
     validations:
       required: true
 
@@ -47,102 +49,107 @@ body:
     id: expected
     attributes:
       label: Expected behavior
-      description: What should have happened instead?
+      description: What should happen if the bug does not exist?
+      placeholder: GSD should open the existing database and continue.
     validations:
       required: true
 
   - type: textarea
-    id: reproduce
+    id: actual
     attributes:
-      label: Steps to reproduce
-      description: Minimal steps to trigger the bug.
-      placeholder: |
-        1. Run `gsd ...`
-        2. Select option ...
-        3. See error
+      label: Actual behavior
+      description: What happened instead, including user-visible errors.
+      placeholder: GSD exits the unit and shows an error message.
     validations:
       required: true
 
-  - type: textarea
-    id: logs
+  - type: input
+    id: gsd_version
     attributes:
-      label: Error output / logs
-      description: Paste any error messages or relevant log output.
-      render: shell
+      label: GSD version
+      description: Run `gsd --version` and paste the exact version.
+      placeholder: "e.g. 2.33.1"
+    validations:
+      required: true
 
-  - type: dropdown
+  - type: input
+    id: node_version
+    attributes:
+      label: Node.js version
+      description: Run `node --version`.
+      placeholder: "e.g. v24.14.0"
+
+  - type: input
     id: os
     attributes:
       label: Operating system
+      description: OS and version where this occurs.
+      placeholder: macOS 15.4 / Ubuntu 24.04 / Windows 11
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Install method
+      description: How are you running GSD?
       options:
-        - macOS
-        - Linux
-        - Windows
+        - npm global install
+        - npm link / local checkout
+        - npx
+        - Docker
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected_area
+    attributes:
+      label: Affected area
+      description: Which part of GSD seems involved?
+      options:
+        - Auto-mode / dispatch loop
+        - Planning / roadmap / milestones
+        - Slice or task execution
+        - Completion / validation
+        - State / persistence / database
+        - Git / worktree isolation
+        - CLI / slash commands
+        - AI provider / model integration
+        - MCP / tools / extensions
+        - TUI / terminal UI
+        - Documentation
         - Other
     validations:
       required: true
 
   - type: input
-    id: node-version
+    id: model
     attributes:
-      label: Node.js version
-      description: Run `node --version`
-      placeholder: "e.g., v22.4.0"
-
-  - type: dropdown
-    id: model-type
-    attributes:
-      label: Model type
-      description: Is the model a cloud-hosted provider or a locally-running model?
-      options:
-        - Cloud model
-        - Local model (Ollama, llama.cpp, LM Studio, etc.)
-        - N/A
-    validations:
-      required: true
-
-  - type: dropdown
-    id: ai-provider
-    attributes:
-      label: AI provider
-      description: Which provider are you using? Select "Other" for providers not listed here.
-      options:
-        - Anthropic (Claude)
-        - OpenAI
-        - GitHub Copilot
-        - Google (Gemini)
-        - Google Vertex AI
-        - Google Gemini CLI
-        - Antigravity (Gemini 3, Claude, GPT-OSS)
-        - Amazon Bedrock
-        - Azure OpenAI
-        - OpenRouter
-        - Groq
-        - xAI (Grok)
-        - Mistral
-        - Ollama Cloud
-        - Vercel AI Gateway
-        - Other (provide details below)
-        - N/A
-    validations:
-      required: true
-
-  - type: input
-    id: model-id
-    attributes:
-      label: Model ID
-      description: The specific model used. Run `/model` in GSD or check settings.
-      placeholder: "e.g., claude-sonnet-4-6, gpt-4o, gemini-2.5-pro"
-
-  - type: input
-    id: custom-provider-docs
-    attributes:
-      label: API documentation link
-      description: Required if you selected "Other" provider above. Link to the API docs for the provider/model you're using so we can verify compatibility.
-      placeholder: "e.g., https://docs.example.com/api"
+      label: Model and provider
+      description: If relevant, include the effective model/provider used for the failing run.
+      placeholder: anthropic/claude-opus-4-1, openai/gpt-5, ollama/qwen3
 
   - type: textarea
-    id: context
+    id: logs
     attributes:
-      label: Additional context
-      description: Anything else — screenshots, config snippets, related issues.
+      label: Logs, screenshots, and evidence
+      description: Include redacted logs, screenshots, stack traces, or forensic output that prove the behavior. Do not include secrets.
+      render: shell
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Explain severity, frequency, and practical consequence.
+      placeholder: |
+        Severity: blocks milestone completion
+        Frequency: 100% repro
+        Consequence: finalization crashes even though artifacts were written
+
+  - type: textarea
+    id: additional_information
+    attributes:
+      label: Additional information
+      description: Extra context, workarounds, last known good version, related issues, or environment details.
+      placeholder: Last known good version was ..., temporary workaround is ...

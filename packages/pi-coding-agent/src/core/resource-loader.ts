@@ -4,7 +4,7 @@ import { join, resolve, sep } from "node:path";
 import chalk from "chalk";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
 import { loadThemeFromPath, type Theme } from "../modes/interactive/theme/theme.js";
-import type { ResourceDiagnostic } from "./diagnostics.js";
+import type { ResourceCollision, ResourceDiagnostic } from "./diagnostics.js";
 
 export type { ResourceCollision, ResourceDiagnostic } from "./diagnostics.js";
 
@@ -422,12 +422,12 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.agentsFiles = resolvedAgentsFiles.agentsFiles;
 
 		const baseSystemPrompt = resolvePromptInput(
-			this.systemPromptSource ?? this.discoverSystemPromptFile(),
+			this.systemPromptSource ?? this.discoverFileInSearchPaths("SYSTEM.md"),
 			"system prompt",
 		);
 		this.systemPrompt = this.systemPromptOverride ? this.systemPromptOverride(baseSystemPrompt) : baseSystemPrompt;
 
-		const appendSource = this.appendSystemPromptSource ?? this.discoverAppendSystemPromptFile();
+		const appendSource = this.appendSystemPromptSource ?? this.discoverFileInSearchPaths("APPEND_SYSTEM.md");
 		const resolvedAppend = resolvePromptInput(appendSource, "append system prompt");
 		const baseAppend = resolvedAppend ? [resolvedAppend] : [];
 		this.appendSystemPrompt = this.appendSystemPromptOverride
@@ -485,7 +485,13 @@ export class DefaultResourceLoader implements ResourceLoader {
 				promptPaths,
 				includeDefaults: false,
 			});
-			promptsResult = this.dedupePrompts(allPrompts);
+			const deduped = this.dedupeResources(allPrompts, {
+				getName: (p) => p.name,
+				getPath: (p) => p.filePath,
+				resourceType: "prompt",
+				namePrefix: "/",
+			});
+			promptsResult = { prompts: deduped.items, diagnostics: deduped.diagnostics };
 		}
 		const resolvedPrompts = this.promptsOverride ? this.promptsOverride(promptsResult) : promptsResult;
 		this.prompts = resolvedPrompts.prompts;
@@ -508,8 +514,12 @@ export class DefaultResourceLoader implements ResourceLoader {
 			themesResult = { themes: [], diagnostics: [] };
 		} else {
 			const loaded = this.loadThemes(themePaths, false);
-			const deduped = this.dedupeThemes(loaded.themes);
-			themesResult = { themes: deduped.themes, diagnostics: [...loaded.diagnostics, ...deduped.diagnostics] };
+			const deduped = this.dedupeResources(loaded.themes, {
+				getName: (t) => t.name ?? "unnamed",
+				getPath: (t) => t.sourcePath,
+				resourceType: "theme",
+			});
+			themesResult = { themes: deduped.items, diagnostics: [...loaded.diagnostics, ...deduped.diagnostics] };
 		}
 		const resolvedThemes = this.themesOverride ? this.themesOverride(themesResult) : themesResult;
 		this.themes = resolvedThemes.themes;
@@ -686,84 +696,50 @@ export class DefaultResourceLoader implements ResourceLoader {
 		return { extensions, errors };
 	}
 
-	private dedupePrompts(prompts: PromptTemplate[]): { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] } {
-		const seen = new Map<string, PromptTemplate>();
+	private dedupeResources<T>(
+		items: T[],
+		options: {
+			getName: (item: T) => string;
+			getPath: (item: T) => string | undefined;
+			resourceType: ResourceCollision["resourceType"];
+			namePrefix?: string;
+		},
+	): { items: T[]; diagnostics: ResourceDiagnostic[] } {
+		const seen = new Map<string, T>();
 		const diagnostics: ResourceDiagnostic[] = [];
+		const { getName, getPath, resourceType, namePrefix = "" } = options;
 
-		for (const prompt of prompts) {
-			const existing = seen.get(prompt.name);
-			if (existing) {
-				diagnostics.push({
-					type: "collision",
-					message: `name "/${prompt.name}" collision`,
-					path: prompt.filePath,
-					collision: {
-						resourceType: "prompt",
-						name: prompt.name,
-						winnerPath: existing.filePath,
-						loserPath: prompt.filePath,
-					},
-				});
-			} else {
-				seen.set(prompt.name, prompt);
-			}
-		}
-
-		return { prompts: Array.from(seen.values()), diagnostics };
-	}
-
-	private dedupeThemes(themes: Theme[]): { themes: Theme[]; diagnostics: ResourceDiagnostic[] } {
-		const seen = new Map<string, Theme>();
-		const diagnostics: ResourceDiagnostic[] = [];
-
-		for (const t of themes) {
-			const name = t.name ?? "unnamed";
+		for (const item of items) {
+			const name = getName(item);
 			const existing = seen.get(name);
 			if (existing) {
 				diagnostics.push({
 					type: "collision",
-					message: `name "${name}" collision`,
-					path: t.sourcePath,
+					message: `name "${namePrefix}${name}" collision`,
+					path: getPath(item),
 					collision: {
-						resourceType: "theme",
+						resourceType,
 						name,
-						winnerPath: existing.sourcePath ?? "<builtin>",
-						loserPath: t.sourcePath ?? "<builtin>",
+						winnerPath: getPath(existing) ?? "<builtin>",
+						loserPath: getPath(item) ?? "<builtin>",
 					},
 				});
 			} else {
-				seen.set(name, t);
+				seen.set(name, item);
 			}
 		}
 
-		return { themes: Array.from(seen.values()), diagnostics };
+		return { items: Array.from(seen.values()), diagnostics };
 	}
 
-	private discoverSystemPromptFile(): string | undefined {
-		const projectPath = join(this.cwd, CONFIG_DIR_NAME, "SYSTEM.md");
-		if (existsSync(projectPath)) {
-			return projectPath;
+	private discoverFileInSearchPaths(filename: string): string | undefined {
+		const searchDirs = [join(this.cwd, CONFIG_DIR_NAME), this.agentDir];
+		for (const dir of searchDirs) {
+			const filePath = join(dir, filename);
+			if (existsSync(filePath)) {
+				return filePath;
+			}
 		}
-
-		const globalPath = join(this.agentDir, "SYSTEM.md");
-		if (existsSync(globalPath)) {
-			return globalPath;
-		}
-
-		return undefined;
-	}
-
-	private discoverAppendSystemPromptFile(): string | undefined {
-		const projectPath = join(this.cwd, CONFIG_DIR_NAME, "APPEND_SYSTEM.md");
-		if (existsSync(projectPath)) {
-			return projectPath;
-		}
-
-		const globalPath = join(this.agentDir, "APPEND_SYSTEM.md");
-		if (existsSync(globalPath)) {
-			return globalPath;
-		}
-
 		return undefined;
 	}
 
@@ -827,9 +803,15 @@ export class DefaultResourceLoader implements ResourceLoader {
 			for (const toolName of ext.tools.keys()) {
 				const existingOwner = toolOwners.get(toolName);
 				if (existingOwner && existingOwner !== ext.path) {
+					// Determine if the existing owner is a built-in (not a user extension)
+					const isBuiltIn = !existingOwner.includes("/.gsd/agent/extensions/") &&
+						!existingOwner.includes("/.gsd/extensions/");
+					const hint = isBuiltIn
+						? ` (built-in tool supersedes — consider removing ${ext.path})`
+						: "";
 					conflicts.push({
 						path: ext.path,
-						message: `Tool "${toolName}" conflicts with ${existingOwner}`,
+						message: `Tool "${toolName}" conflicts with ${existingOwner}${hint}`,
 					});
 				} else {
 					toolOwners.set(toolName, ext.path);
@@ -840,9 +822,14 @@ export class DefaultResourceLoader implements ResourceLoader {
 			for (const commandName of ext.commands.keys()) {
 				const existingOwner = commandOwners.get(commandName);
 				if (existingOwner && existingOwner !== ext.path) {
+					const isBuiltIn = !existingOwner.includes("/.gsd/agent/extensions/") &&
+						!existingOwner.includes("/.gsd/extensions/");
+					const hint = isBuiltIn
+						? ` (built-in command supersedes — consider removing ${ext.path})`
+						: "";
 					conflicts.push({
 						path: ext.path,
-						message: `Command "/${commandName}" conflicts with ${existingOwner}`,
+						message: `Command "/${commandName}" conflicts with ${existingOwner}${hint}`,
 					});
 				} else {
 					commandOwners.set(commandName, ext.path);

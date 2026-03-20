@@ -16,8 +16,8 @@ import {
 import { atomicWriteFileSync } from "./fs-utils.js";
 import { readdir, readFile, stat } from "fs/promises";
 import { join, resolve } from "path";
-import lockfile from "proper-lockfile";
 import { getAgentDir as getDefaultAgentDir, getBlobsDir, getSessionsDir } from "../config.js";
+import { tryAcquireLockSync } from "./lock-utils.js";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
@@ -577,8 +577,7 @@ function resolveBlobRefsInEntries(entries: FileEntry[], blobStore: BlobStore): v
 	}
 }
 
-/** Exported for testing */
-export function loadEntriesFromFile(filePath: string): FileEntry[] {
+function loadEntriesFromFile(filePath: string): FileEntry[] {
 	if (!existsSync(filePath)) return [];
 
 	const content = readFileSync(filePath, "utf8");
@@ -620,8 +619,7 @@ function isValidSessionFile(filePath: string): boolean {
 	}
 }
 
-/** Exported for testing */
-export function findMostRecentSession(sessionDir: string): string | null {
+function findMostRecentSession(sessionDir: string): string | null {
 	try {
 		const files = readdirSync(sessionDir)
 			.filter((f) => f.endsWith(".jsonl"))
@@ -955,39 +953,12 @@ export class SessionManager {
 		}
 	}
 
-	private acquireSessionLock(path: string): (() => void) | undefined {
-		const maxAttempts = 10;
-		const delayMs = 20;
-		let lastError: unknown;
-
-		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-			try {
-				return lockfile.lockSync(path, { realpath: false });
-			} catch (error) {
-				const code =
-					typeof error === "object" && error !== null && "code" in error
-						? String((error as { code?: unknown }).code)
-						: undefined;
-				if (code !== "ELOCKED" || attempt === maxAttempts) {
-					// Non-fatal: proceed without lock rather than losing data
-					return undefined;
-				}
-				lastError = error;
-				const start = Date.now();
-				while (Date.now() - start < delayMs) {
-					// Busy-wait to avoid async
-				}
-			}
-		}
-		return undefined;
-	}
-
 	private _rewriteFile(): void {
 		if (!this.persist || !this.sessionFile) return;
 		const content = `${this.fileEntries.map((e) => JSON.stringify(e)).join("\n")}\n`;
 		let release: (() => void) | undefined;
 		try {
-			release = this.acquireSessionLock(this.sessionFile);
+			release = tryAcquireLockSync(this.sessionFile);
 			atomicWriteFileSync(this.sessionFile, content);
 		} finally {
 			release?.();
@@ -1026,7 +997,7 @@ export class SessionManager {
 
 		let release: (() => void) | undefined;
 		try {
-			release = this.acquireSessionLock(this.sessionFile);
+			release = tryAcquireLockSync(this.sessionFile);
 			if (!this.flushed) {
 				for (const e of this.fileEntries) {
 					const prepared = prepareForPersistence(e, this.blobStore) as FileEntry;

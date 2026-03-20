@@ -8,6 +8,7 @@
 
 import type { AssistantMessage, ImageContent } from "@gsd/pi-ai";
 import type { AgentSession } from "../core/agent-session.js";
+import { createDefaultCommandContextActions } from "./shared/command-context-actions.js";
 
 /**
  * Options for print mode.
@@ -37,36 +38,7 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 	}
 	// Set up extensions for print mode (no UI)
 	await session.bindExtensions({
-		commandContextActions: {
-			waitForIdle: () => session.agent.waitForIdle(),
-			newSession: async (options) => {
-				const success = await session.newSession({ parentSession: options?.parentSession });
-				if (success && options?.setup) {
-					await options.setup(session.sessionManager);
-				}
-				return { cancelled: !success };
-			},
-			fork: async (entryId) => {
-				const result = await session.fork(entryId);
-				return { cancelled: result.cancelled };
-			},
-			navigateTree: async (targetId, options) => {
-				const result = await session.navigateTree(targetId, {
-					summarize: options?.summarize,
-					customInstructions: options?.customInstructions,
-					replaceInstructions: options?.replaceInstructions,
-					label: options?.label,
-				});
-				return { cancelled: result.cancelled };
-			},
-			switchSession: async (sessionPath) => {
-				const success = await session.switchSession(sessionPath);
-				return { cancelled: !success };
-			},
-			reload: async () => {
-				await session.reload();
-			},
-		},
+		commandContextActions: createDefaultCommandContextActions(session),
 		onError: (err) => {
 			console.error(`Extension error (${err.extensionPath}): ${err.error}`);
 		},

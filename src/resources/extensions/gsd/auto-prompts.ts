@@ -55,6 +55,55 @@ function formatExecutorConstraints(): string {
   ].join("\n");
 }
 
+function buildSourceFilePaths(
+  base: string,
+  mid: string,
+  sid?: string,
+): string {
+  const paths: string[] = [];
+
+  const projectPath = resolveGsdRootFile(base, "PROJECT");
+  if (existsSync(projectPath)) {
+    paths.push(`- **Project**: \`${relGsdRootFile("PROJECT")}\``);
+  }
+
+  const requirementsPath = resolveGsdRootFile(base, "REQUIREMENTS");
+  if (existsSync(requirementsPath)) {
+    paths.push(`- **Requirements**: \`${relGsdRootFile("REQUIREMENTS")}\``);
+  }
+
+  const decisionsPath = resolveGsdRootFile(base, "DECISIONS");
+  if (existsSync(decisionsPath)) {
+    paths.push(`- **Decisions**: \`${relGsdRootFile("DECISIONS")}\``);
+  }
+
+  const contextPath = resolveMilestoneFile(base, mid, "CONTEXT");
+  if (contextPath) {
+    paths.push(`- **Milestone Context**: \`${relMilestoneFile(base, mid, "CONTEXT")}\``);
+  }
+
+  const roadmapPath = resolveMilestoneFile(base, mid, "ROADMAP");
+  if (roadmapPath) {
+    paths.push(`- **Roadmap**: \`${relMilestoneFile(base, mid, "ROADMAP")}\``);
+  }
+
+  if (sid) {
+    const researchPath = resolveSliceFile(base, mid, sid, "RESEARCH");
+    if (researchPath) {
+      paths.push(`- **Slice Research**: \`${relSliceFile(base, mid, sid, "RESEARCH")}\``);
+    }
+  } else {
+    const researchPath = resolveMilestoneFile(base, mid, "RESEARCH");
+    if (researchPath) {
+      paths.push(`- **Milestone Research**: \`${relMilestoneFile(base, mid, "RESEARCH")}\``);
+    }
+  }
+
+  return paths.length > 0
+    ? paths.join("\n")
+    : "- Use `rg --files` and targeted reads to identify the relevant source files before planning.";
+}
+
 // ─── Inline Helpers ───────────────────────────────────────────────────────
 
 /**
@@ -324,27 +373,6 @@ function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-/** Build the standard inlined-context section used by all prompt builders. */
-function buildInlinedContextSection(inlined: string[]): string {
-  return `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
-}
-
-/** Build the formatted list of available GSD source files for planners to read on demand. */
-function buildSourceFileList(base: string, opts?: { includeProject?: boolean }): string {
-  const paths: string[] = [];
-  if (opts?.includeProject && existsSync(resolveGsdRootFile(base, "PROJECT")))
-    paths.push(`- **Project**: \`${relGsdRootFile("PROJECT")}\``);
-  if (existsSync(resolveGsdRootFile(base, "REQUIREMENTS")))
-    paths.push(`- **Requirements**: \`${relGsdRootFile("REQUIREMENTS")}\``);
-  if (existsSync(resolveGsdRootFile(base, "DECISIONS")))
-    paths.push(`- **Decisions**: \`${relGsdRootFile("DECISIONS")}\``);
-  if (paths.length === 0) {
-    const types = opts?.includeProject ? "project/requirements/decisions" : "requirements/decisions";
-    return `_No ${types} files found._`;
-  }
-  return paths.join("\n");
-}
-
 // ─── Section Builders ──────────────────────────────────────────────────────
 
 export function buildResumeSection(
@@ -490,17 +518,6 @@ export async function checkNeedsReassessment(
 
   if (hasAssessment) return null;
 
-  // Fallback: check the expected path directly via existsSync.
-  // resolveSliceFile relies on directory listing (readdirSync) which may not
-  // reflect a freshly written file in git worktree directories on some
-  // filesystems (observed on macOS APFS). A direct existsSync on the
-  // constructed path bypasses directory listing entirely. (#1112)
-  const sliceDir = resolveSlicePath(base, mid, lastCompleted.id);
-  if (sliceDir) {
-    const directPath = join(sliceDir, `${lastCompleted.id}-ASSESSMENT.md`);
-    if (existsSync(directPath)) return null;
-  }
-
   // Also need a summary to reassess against
   const summaryFile = resolveSliceFile(base, mid, lastCompleted.id, "SUMMARY");
   const hasSummary = !!(summaryFile && await loadFile(summaryFile));
@@ -551,21 +568,15 @@ export async function checkNeedsRunUat(
   const uatContent = await loadFile(uatFile);
   if (!uatContent) return null;
 
-  // If a UAT result already exists, the UAT unit has already run and must not
-  // be re-dispatched. PASS means progression can continue; any non-PASS verdict
-  // must be handled by the dispatch table's verdict gate, which stops progression
-  // with a human-action message instead of replaying the same run-uat unit.
+  // If UAT result already exists, skip (idempotent)
   const uatResultFile = resolveSliceFile(base, mid, sid, "UAT-RESULT");
   if (uatResultFile) {
-    const resultContent = await loadFile(uatResultFile);
-    if (resultContent) return null;
+    const hasResult = !!(await loadFile(uatResultFile));
+    if (hasResult) return null;
   }
 
-  // Classify UAT type; skip non-artifact-driven types — auto-mode can only
-  // execute mechanical checks. Non-artifact UATs are tracked in the dashboard
-  // but don't block auto-mode progression.
+  // Classify UAT type; unknown type → treat as human-experience (human review)
   const uatType = extractUatType(uatContent) ?? "human-experience";
-  if (uatType !== "artifact-driven") return null;
 
   return { sliceId: sid, uatType };
 }
@@ -588,7 +599,7 @@ export async function buildResearchMilestonePrompt(mid: string, midTitle: string
   if (knowledgeInlineRM) inlined.push(knowledgeInlineRM);
   inlined.push(inlineTemplate("research", "Research"));
 
-  const inlinedContext = buildInlinedContextSection(inlined);
+  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
   const outputRelPath = relMilestoneFile(base, mid, "RESEARCH");
   return loadPrompt("research-milestone", {
@@ -616,8 +627,14 @@ export async function buildPlanMilestonePrompt(mid: string, midTitle: string, ba
   const { inlinePriorMilestoneSummary } = await import("./files.js");
   const priorSummaryInline = await inlinePriorMilestoneSummary(mid, base);
   if (priorSummaryInline) inlined.push(priorSummaryInline);
-  const sourceFilePaths = buildSourceFileList(base, { includeProject: true });
-
+  if (inlineLevel !== "minimal") {
+    const projectInline = await inlineProjectFromDb(base);
+    if (projectInline) inlined.push(projectInline);
+    const requirementsInline = await inlineRequirementsFromDb(base, undefined, inlineLevel);
+    if (requirementsInline) inlined.push(requirementsInline);
+    const decisionsInline = await inlineDecisionsFromDb(base, mid, undefined, inlineLevel);
+    if (decisionsInline) inlined.push(decisionsInline);
+  }
   const knowledgeInlinePM = await inlineGsdRootFile(base, "knowledge.md", "Project Knowledge");
   if (knowledgeInlinePM) inlined.push(knowledgeInlinePM);
   inlined.push(inlineTemplate("roadmap", "Roadmap"));
@@ -632,22 +649,22 @@ export async function buildPlanMilestonePrompt(mid: string, midTitle: string, ba
     inlined.push(inlineTemplate("task-plan", "Task Plan"));
   }
 
-  const inlinedContext = buildInlinedContextSection(inlined);
+  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
   const outputRelPath = relMilestoneFile(base, mid, "ROADMAP");
+  const researchOutputPath = join(base, relMilestoneFile(base, mid, "RESEARCH"));
   const secretsOutputPath = join(base, relMilestoneFile(base, mid, "SECRETS"));
-  const researchOutputRelPath = relMilestoneFile(base, mid, "RESEARCH");
   return loadPrompt("plan-milestone", {
     workingDirectory: base,
     milestoneId: mid, milestoneTitle: midTitle,
     milestonePath: relMilestonePath(base, mid),
     contextPath: contextRel,
     researchPath: researchRel,
+    researchOutputPath,
     outputPath: join(base, outputRelPath),
     secretsOutputPath,
     inlinedContext,
-    sourceFilePaths,
-    researchOutputPath: join(base, researchOutputRelPath),
+    sourceFilePaths: buildSourceFilePaths(base, mid),
     ...buildSkillDiscoveryVars(),
   });
 }
@@ -681,7 +698,7 @@ export async function buildResearchSlicePrompt(
   const overridesInline = formatOverridesSection(activeOverrides);
   if (overridesInline) inlined.unshift(overridesInline);
 
-  const inlinedContext = buildInlinedContextSection(inlined);
+  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
   const outputRelPath = relSliceFile(base, mid, sid, "RESEARCH");
   return loadPrompt("research-slice", {
@@ -711,8 +728,12 @@ export async function buildPlanSlicePrompt(
   inlined.push(await inlineFile(roadmapPath, roadmapRel, "Milestone Roadmap"));
   const researchInline = await inlineFileOptional(researchPath, researchRel, "Slice Research");
   if (researchInline) inlined.push(researchInline);
-  const sliceSourceFilePaths = buildSourceFileList(base);
-
+  if (inlineLevel !== "minimal") {
+    const decisionsInline = await inlineDecisionsFromDb(base, mid, undefined, inlineLevel);
+    if (decisionsInline) inlined.push(decisionsInline);
+    const requirementsInline = await inlineRequirementsFromDb(base, sid, inlineLevel);
+    if (requirementsInline) inlined.push(requirementsInline);
+  }
   const knowledgeInlinePS = await inlineGsdRootFile(base, "knowledge.md", "Project Knowledge");
   if (knowledgeInlinePS) inlined.push(knowledgeInlinePS);
   inlined.push(inlineTemplate("plan", "Slice Plan"));
@@ -725,13 +746,17 @@ export async function buildPlanSlicePrompt(
   const planOverridesInline = formatOverridesSection(planActiveOverrides);
   if (planOverridesInline) inlined.unshift(planOverridesInline);
 
-  const inlinedContext = buildInlinedContextSection(inlined);
+  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
   // Build executor context constraints from the budget engine
   const executorContextConstraints = formatExecutorConstraints();
 
   const outputRelPath = relSliceFile(base, mid, sid, "PLAN");
-  const commitInstruction = "Do not commit planning artifacts — .gsd/ is managed externally.";
+  const prefs = loadEffectiveGSDPreferences();
+  const commitDocsEnabled = prefs?.preferences?.git?.commit_docs !== false;
+  const commitInstruction = commitDocsEnabled
+    ? `Commit the plan files only: \`git add ${relSlicePath(base, mid, sid)}/ .gsd/DECISIONS.md .gitignore && git commit -m "docs(${sid}): add slice plan"\`. Do not stage .gsd/STATE.md or other runtime files — the system manages those.`
+    : "Do not commit — planning docs are not tracked in git for this project.";
   return loadPrompt("plan-slice", {
     workingDirectory: base,
     milestoneId: mid, sliceId: sid, sliceTitle: sTitle,
@@ -741,9 +766,9 @@ export async function buildPlanSlicePrompt(
     outputPath: join(base, outputRelPath),
     inlinedContext,
     dependencySummaries: depContent,
+    sourceFilePaths: buildSourceFilePaths(base, mid, sid),
     executorContextConstraints,
     commitInstruction,
-    sourceFilePaths: sliceSourceFilePaths,
   });
 }
 
@@ -900,7 +925,7 @@ export async function buildCompleteSlicePrompt(
   const completeOverridesInline = formatOverridesSection(completeActiveOverrides);
   if (completeOverridesInline) inlined.unshift(completeOverridesInline);
 
-  const inlinedContext = buildInlinedContextSection(inlined);
+  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
   const sliceRel = relSlicePath(base, mid, sid);
   const sliceSummaryPath = join(base, `${sliceRel}/${sid}-SUMMARY.md`);
@@ -959,7 +984,7 @@ export async function buildCompleteMilestonePrompt(
   if (contextInline) inlined.push(contextInline);
   inlined.push(inlineTemplate("milestone-summary", "Milestone Summary"));
 
-  const inlinedContext = buildInlinedContextSection(inlined);
+  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
   const milestoneSummaryPath = join(base, `${relMilestonePath(base, mid)}/${mid}-SUMMARY.md`);
 
@@ -1030,7 +1055,7 @@ export async function buildValidateMilestonePrompt(
   const contextInline = await inlineFileOptional(contextPath, contextRel, "Milestone Context");
   if (contextInline) inlined.push(contextInline);
 
-  const inlinedContext = buildInlinedContextSection(inlined);
+  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
   const validationOutputPath = join(base, `${relMilestonePath(base, mid)}/${mid}-VALIDATION.md`);
   const roadmapOutputPath = `${relMilestonePath(base, mid)}/${mid}-ROADMAP.md`;
@@ -1084,7 +1109,7 @@ export async function buildReplanSlicePrompt(
   const replanOverridesInline = formatOverridesSection(replanActiveOverrides);
   if (replanOverridesInline) inlined.unshift(replanOverridesInline);
 
-  const inlinedContext = buildInlinedContextSection(inlined);
+  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
   const replanPath = join(base, `${relSlicePath(base, mid, sid)}/${sid}-REPLAN.md`);
 
@@ -1117,7 +1142,7 @@ export async function buildReplanSlicePrompt(
 }
 
 export async function buildRunUatPrompt(
-  mid: string, sliceId: string, uatPath: string, base: string,
+  mid: string, sliceId: string, uatPath: string, uatContent: string, base: string,
 ): Promise<string> {
   const inlined: string[] = [];
   inlined.push(await inlineFile(resolveSliceFile(base, mid, sliceId, "UAT"), uatPath, `${sliceId} UAT`));
@@ -1132,9 +1157,10 @@ export async function buildRunUatPrompt(
   const projectInline = await inlineProjectFromDb(base);
   if (projectInline) inlined.push(projectInline);
 
-  const inlinedContext = buildInlinedContextSection(inlined);
+  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
   const uatResultPath = join(base, relSliceFile(base, mid, sliceId, "UAT-RESULT"));
+  const uatType = extractUatType(uatContent) ?? "human-experience";
 
   return loadPrompt("run-uat", {
     workingDirectory: base,
@@ -1142,6 +1168,7 @@ export async function buildRunUatPrompt(
     sliceId,
     uatPath,
     uatResultPath,
+    uatType,
     inlinedContext,
   });
 }
@@ -1169,7 +1196,7 @@ export async function buildReassessRoadmapPrompt(
   const knowledgeInlineRA = await inlineGsdRootFile(base, "knowledge.md", "Project Knowledge");
   if (knowledgeInlineRA) inlined.push(knowledgeInlineRA);
 
-  const inlinedContext = buildInlinedContextSection(inlined);
+  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
 
   const assessmentPath = join(base, relSliceFile(base, mid, completedSliceId, "ASSESSMENT"));
 
@@ -1187,7 +1214,11 @@ export async function buildReassessRoadmapPrompt(
     // Non-fatal — captures module may not be available
   }
 
-  const reassessCommitInstruction = "Do not commit planning artifacts — .gsd/ is managed externally.";
+  const reassessPrefs = loadEffectiveGSDPreferences();
+  const reassessCommitDocsEnabled = reassessPrefs?.preferences?.git?.commit_docs !== false;
+  const reassessCommitInstruction = reassessCommitDocsEnabled
+    ? `Commit: \`docs(${mid}): reassess roadmap after ${completedSliceId}\`. Stage only the .gsd/milestones/ files you changed — do not stage .gsd/STATE.md or other runtime files.`
+    : "Do not commit — planning docs are not tracked in git for this project.";
 
   return loadPrompt("reassess-roadmap", {
     workingDirectory: base,

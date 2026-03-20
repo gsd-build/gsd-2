@@ -11,6 +11,7 @@ import type { DoctorIssue, DoctorIssueCode } from "./doctor-types.js";
 import { COMPLETION_TRANSITION_CODES } from "./doctor-types.js";
 import { checkGitHealth, checkRuntimeHealth } from "./doctor-checks.js";
 import { checkEnvironmentHealth } from "./doctor-environment.js";
+import { runProviderChecks } from "./doctor-providers.js";
 
 // ── Re-exports ─────────────────────────────────────────────────────────────
 // All public types and functions from extracted modules are re-exported here
@@ -406,6 +407,40 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
   issues.push(...auditRequirements(requirementsContent));
 
   const state = await deriveState(basePath);
+
+  // Provider / auth health checks — only relevant when there is active work to dispatch.
+  // Skipped for idle projects (no active milestone) to avoid noise in environments
+  // where CI/test runners have no API key configured.
+  if (state.activeMilestone) {
+    try {
+      const providerResults = runProviderChecks();
+      for (const result of providerResults) {
+        if (!result.required) continue;
+        if (result.status === "error") {
+          issues.push({
+            severity: "warning",
+            code: "provider_key_missing",
+            scope: "project",
+            unitId: "project",
+            message: result.message + (result.detail ? ` — ${result.detail}` : ""),
+            fixable: false,
+          });
+        } else if (result.status === "warning") {
+          issues.push({
+            severity: "warning",
+            code: "provider_key_backedoff",
+            scope: "project",
+            unitId: "project",
+            message: result.message + (result.detail ? ` — ${result.detail}` : ""),
+            fixable: false,
+          });
+        }
+      }
+    } catch {
+      // Non-fatal — provider check failure should not block other checks
+    }
+  }
+
   for (const milestone of state.registry) {
     const milestoneId = milestone.id;
     const milestonePath = resolveMilestonePath(basePath, milestoneId);

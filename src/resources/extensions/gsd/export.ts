@@ -12,6 +12,7 @@ import {
 import type { UnitMetrics } from "./metrics.js";
 import { gsdRoot } from "./paths.js";
 import { formatDuration, fileLink } from "../shared/mod.js";
+import { getErrorMessage } from "./error-utils.js";
 
 /**
  * Open a file in the user's default browser.
@@ -226,7 +227,7 @@ export async function handleExport(args: string, ctx: ExtensionCommandContext, b
       }
     } catch (err) {
       ctx.ui.notify(
-        `HTML export failed: ${err instanceof Error ? err.message : String(err)}`,
+        `HTML export failed: ${getErrorMessage(err)}`,
         "error",
       );
     }

@@ -145,8 +145,7 @@ test("AutoSession.reset() references every instance property", () => {
   assert.ok(resetMatch, "AutoSession.reset() method not found");
   const resetBody = resetMatch![1]!;
 
-  // completedKeySet is intentionally not cleared (documented in reset())
-  const intentionallySkipped = new Set(["completedKeySet"]);
+  const intentionallySkipped = new Set<string>([]);
 
   const missingFromReset: string[] = [];
   for (const prop of properties) {
@@ -182,7 +181,6 @@ test("AutoSession.toJSON() includes key diagnostic properties", () => {
     "basePath",
     "currentMilestoneId",
     "currentUnit",
-    "dispatching",
   ];
 
   const missing = requiredDiagnostics.filter(prop => !toJSONBody.includes(prop));

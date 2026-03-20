@@ -6,6 +6,106 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.35.0] - 2026-03-19
+
+### Added
+- **gsd**: add /gsd changelog command with LLM-summarized release notes (#1465)
+
+### Fixed
+- restore lsp single-server selector export
+- **mcp**: preserve args for mcp_call tool invocations (#1354)
+- accumulate session cost independently of message array (#1423)
+- resolve CI failures — scope provider check, fix Windows path, correct severity
+- close 5 doctor coverage gaps — providers, lock dir, integration branch, orphaned worktrees
+- add PID self-check to guided-flow crash lock detection (#1398)
+- **prefs**: close merge, validation, serialization, and docs gaps
+
+### Changed
+- deduplicate error emission and message patterns in agent-core (#1444)
+- simplify settings manager with generic setter helpers (#1461)
+- consolidate theme files and remove manual schema (#1478)
+- extract overlay layout and compositing from TUI into separate module (#1482)
+- extract slash command handlers from interactive-mode (#1485)
+- remove dead code (unused exports) (#1486)
+- extract retry handler and compaction orchestrator from agent-session
+- deduplicate rendering patterns in markdown and keys
+- consolidate shared code between OpenAI providers
+- deduplicate RPC mode shared patterns
+- extract shared tree rendering utilities
+- consolidate OAuth callback server and helper utilities
+- extract shared file lock utilities
+- consolidate resource loader with generic update/dedupe methods
+- consolidate model switching logic in agent-session
+- extract shared helpers in compaction module
+- deduplicate toPosixPath, ZERO_USAGE, and shortenPath utilities
+- consolidate 9 emit methods in extension runner into shared invokeHandlers
+- consolidate extension type guards and inline handler type aliases
+- consolidate duplicate patterns in LSP module
+
+## [2.34.0] - 2026-03-19
+
+### Added
+- auto-generate OpenRouter model registry from API + add missing models (#1407) (#1426)
+
+### Fixed
+- release stranded bootstrap locks and handle re-entrant reacquire (#1352)
+- add JS fallbacks for wrapTextWithAnsi and visibleWidth when native addon unavailable (#1418) (#1428)
+- emit agent_end after abort during tool execution (#1414) (#1417)
+- auto-discard bootstrap crash locks and clean auto.lock on exit (#1397)
+- harden quick-task branch lifecycle — disk recovery + integration branch guard (#1342)
+- skip verification retry on spawn infra errors (ETIMEDOUT, ENOENT) (#1340)
+- keep external GSD state stable in worktrees (#1334)
+- stop excluding all .gsd/ from commits — only exclude runtime files (#1326) (#1328)
+- handle ECOMPROMISED in uncaughtException guard and align retry onCompromised (#1322) (#1332)
+
+## [2.33.1] - 2026-03-19
+
+### Fixed
+- clean up stale numbered lock files and harden signal/exit handling (#1315) (#1323)
+- worktree sync and home-directory safety check (#1311, #1317) (#1322)
+
+### Changed
+- remove orphaned mcporter extension manifest (#1318)
+
+## [2.33.0] - 2026-03-19
+
+### Added
+- add live regression test harness for post-build pipeline validation (#1316)
+
+### Fixed
+- align retry lock path with primary lock settings to prevent ECOMPROMISED (#1307)
+- skip symlinks in makeTreeWritable to prevent EPERM on NixOS/nix-darwin (#1303)
+- handle Windows EPERM on .gsd migration rename with copy+delete fallback (#1296)
+- add actionable recovery guidance to crash info messages (#1295)
+- resolve main repo root in worktrees for stable identity hash (#1294)
+- merge quick-task branch back to original after completion (#1293)
+
+### Changed
+- extract tryMergeMilestone to eliminate 4 duplicate merge paths in auto.ts (#1314)
+- dispatch loop hardening — defensive guards, regression tests, lock alignment (#1310)
+- extract parseUnitId() to centralize unit ID parsing (#1282)
+- extract getErrorMessage() helper to eliminate 65 inline duplicates (#1280)
+- consolidate DB-fallback inline functions in auto-prompts (#1276)
+
+## [2.32.0] - 2026-03-19
+
+### Added
+- always-on health widget and visualizer health tab expansion (#1286)
+- environment health checks, progress score, and status integration (#1263)
+
+### Fixed
+- skip crash recovery when auto.lock was written by current process (#1289)
+- load worktree-cli extension modules via jiti instead of static ESM imports (#1285)
+- **gsd**: prevent concurrent dispatch during skip chains (#1272) (#1283)
+- skip non-artifact UAT dispatch in auto-mode (#1277)
+
+### Changed
+- deduplicate knownUnitTypes and STATE_REBUILD_MIN_INTERVAL_MS constants (#1281)
+- extract prompt builder helpers for inlined context and source file lists (#1279)
+- extract createGitService() factory, remove debug logs (#1278)
+- extract dispatchUnit helper, inline dead buildDocsCommitInstruction (#1275)
+- unify unit-type switch statements into lookup map (#1273)
+
 ## [2.31.2] - 2026-03-18
 
 ### Fixed
@@ -1271,7 +1371,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - License updated to MIT
 
-[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.31.2...HEAD
+[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.35.0...HEAD
+[2.35.0]: https://github.com/gsd-build/gsd-2/compare/v2.34.0...v2.35.0
+[2.34.0]: https://github.com/gsd-build/gsd-2/compare/v2.33.1...v2.34.0
+[2.33.1]: https://github.com/gsd-build/gsd-2/compare/v2.33.0...v2.33.1
+[2.33.0]: https://github.com/gsd-build/gsd-2/compare/v2.32.0...v2.33.0
+[2.32.0]: https://github.com/gsd-build/gsd-2/compare/v2.31.2...v2.32.0
 [2.31.2]: https://github.com/gsd-build/gsd-2/compare/v2.31.1...v2.31.2
 [2.31.1]: https://github.com/gsd-build/gsd-2/compare/v2.31.0...v2.31.1
 [2.31.0]: https://github.com/gsd-build/gsd-2/compare/v2.30.0...v2.31.0

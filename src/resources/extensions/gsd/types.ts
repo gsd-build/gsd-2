@@ -4,30 +4,45 @@
 
 // ─── Enums & Literal Unions ────────────────────────────────────────────────
 
-export type RiskLevel = 'low' | 'medium' | 'high';
-export type Phase = 'pre-planning' | 'needs-discussion' | 'discussing' | 'researching' | 'planning' | 'executing' | 'verifying' | 'summarizing' | 'advancing' | 'validating-milestone' | 'completing-milestone' | 'replanning-slice' | 'complete' | 'paused' | 'blocked';
-export type ContinueStatus = 'in_progress' | 'interrupted' | 'compacted';
+export type RiskLevel = "low" | "medium" | "high";
+export type Phase =
+  | "pre-planning"
+  | "needs-discussion"
+  | "discussing"
+  | "researching"
+  | "planning"
+  | "executing"
+  | "verifying"
+  | "summarizing"
+  | "advancing"
+  | "validating-milestone"
+  | "completing-milestone"
+  | "replanning-slice"
+  | "complete"
+  | "paused"
+  | "blocked";
+export type ContinueStatus = "in_progress" | "interrupted" | "compacted";
 
 // ─── Roadmap (Milestone-level) ─────────────────────────────────────────────
 
 export interface RoadmapSliceEntry {
-  id: string;          // e.g. "S01"
-  title: string;       // e.g. "Types + File I/O + Git Operations"
+  id: string; // e.g. "S01"
+  title: string; // e.g. "Types + File I/O + Git Operations"
   risk: RiskLevel;
-  depends: string[];   // e.g. ["S01", "S02"]
+  depends: string[]; // e.g. ["S01", "S02"]
   done: boolean;
-  demo: string;        // the "After this:" sentence
+  demo: string; // the "After this:" sentence
 }
 
 export interface BoundaryMapEntry {
-  fromSlice: string;   // e.g. "S01"
-  toSlice: string;     // e.g. "S02" or "terminal"
-  produces: string;    // raw text block of what this slice produces
-  consumes: string;    // raw text block of what it consumes (or "nothing")
+  fromSlice: string; // e.g. "S01"
+  toSlice: string; // e.g. "S02" or "terminal"
+  produces: string; // raw text block of what this slice produces
+  consumes: string; // raw text block of what it consumes (or "nothing")
 }
 
 export interface Roadmap {
-  title: string;       // e.g. "M001: GSD Extension — Hierarchical Planning with Auto Mode"
+  title: string; // e.g. "M001: GSD Extension — Hierarchical Planning with Auto Mode"
   vision: string;
   successCriteria: string[];
   slices: RoadmapSliceEntry[];
@@ -37,25 +52,24 @@ export interface Roadmap {
 // ─── Slice Plan ────────────────────────────────────────────────────────────
 
 export interface TaskPlanEntry {
-  id: string;          // e.g. "T01"
-  title: string;       // e.g. "Core Type Definitions"
+  id: string; // e.g. "T01"
+  title: string; // e.g. "Core Type Definitions"
   description: string;
   done: boolean;
-  estimate: string;    // e.g. "30m", "2h" — informational only
-  files?: string[];    // e.g. ["types.ts", "files.ts"] — extracted from "- Files:" subline
-  verify?: string;     // e.g. "run tests" — extracted from "- Verify:" subline
+  estimate: string; // e.g. "30m", "2h" — informational only
+  files?: string[]; // e.g. ["types.ts", "files.ts"] — extracted from "- Files:" subline
+  verify?: string; // e.g. "run tests" — extracted from "- Verify:" subline
 }
 
 // ─── Verification Gate ─────────────────────────────────────────────────────
 
 /** Result of a single verification command execution */
 export interface VerificationCheck {
-  command: string;       // e.g. "npm run lint"
-  exitCode: number;      // 0 = pass
+  command: string; // e.g. "npm run lint"
+  exitCode: number; // 0 = pass
   stdout: string;
   stderr: string;
   durationMs: number;
-  blocking: boolean;     // true for preference/task-plan sources, false for package-json (advisory only)
 }
 
 /** A runtime error captured from bg-shell processes or browser console */
@@ -77,17 +91,17 @@ export interface AuditWarning {
 
 /** Aggregate result from the verification gate */
 export interface VerificationResult {
-  passed: boolean;              // true if all checks passed (or no checks discovered)
-  checks: VerificationCheck[];  // per-command results
+  passed: boolean; // true if all checks passed (or no checks discovered)
+  checks: VerificationCheck[]; // per-command results
   discoverySource: "preference" | "task-plan" | "package-json" | "none";
-  timestamp: number;            // Date.now() at gate start
-  runtimeErrors?: RuntimeError[];  // optional — populated by captureRuntimeErrors()
-  auditWarnings?: AuditWarning[];  // optional — populated by runDependencyAudit()
+  timestamp: number; // Date.now() at gate start
+  runtimeErrors?: RuntimeError[]; // optional — populated by captureRuntimeErrors()
+  auditWarnings?: AuditWarning[]; // optional — populated by runDependencyAudit()
 }
 
 export interface SlicePlan {
-  id: string;          // e.g. "S01"
-  title: string;       // from the H1
+  id: string; // e.g. "S01"
+  title: string; // from the H1
   goal: string;
   demo: string;
   mustHaves: string[]; // top-level must-have bullet points
@@ -157,29 +171,29 @@ export interface Continue {
 
 // ─── Secrets Manifest ──────────────────────────────────────────────────────
 
-export type SecretsManifestEntryStatus = 'pending' | 'collected' | 'skipped';
+export type SecretsManifestEntryStatus = "pending" | "collected" | "skipped";
 
 export interface SecretsManifestEntry {
-  key: string;              // e.g. "OPENAI_API_KEY"
-  service: string;          // e.g. "OpenAI"
-  dashboardUrl: string;     // e.g. "https://platform.openai.com/api-keys" — empty if unknown
-  guidance: string[];       // numbered setup steps
-  formatHint: string;       // e.g. "starts with sk-" — empty if unknown
+  key: string; // e.g. "OPENAI_API_KEY"
+  service: string; // e.g. "OpenAI"
+  dashboardUrl: string; // e.g. "https://platform.openai.com/api-keys" — empty if unknown
+  guidance: string[]; // numbered setup steps
+  formatHint: string; // e.g. "starts with sk-" — empty if unknown
   status: SecretsManifestEntryStatus;
-  destination: string;      // e.g. "dotenv", "vercel", "convex"
+  destination: string; // e.g. "dotenv", "vercel", "convex"
 }
 
 export interface SecretsManifest {
-  milestone: string;        // e.g. "M001"
-  generatedAt: string;      // ISO 8601 timestamp
+  milestone: string; // e.g. "M001"
+  generatedAt: string; // ISO 8601 timestamp
   entries: SecretsManifestEntry[];
 }
 
 export interface ManifestStatus {
-  pending: string[];    // manifest status = pending AND not in env
-  collected: string[];  // manifest status = collected AND not in env
-  skipped: string[];    // manifest status = skipped
-  existing: string[];   // key present in .env or process.env (regardless of manifest status)
+  pending: string[]; // manifest status = pending AND not in env
+  collected: string[]; // manifest status = collected AND not in env
+  skipped: string[]; // manifest status = skipped
+  existing: string[]; // key present in .env or process.env (regardless of manifest status)
 }
 
 // ─── GSD State (Derived Dashboard) ────────────────────────────────────────
@@ -192,7 +206,7 @@ export interface ActiveRef {
 export interface MilestoneRegistryEntry {
   id: string;
   title: string;
-  status: 'complete' | 'active' | 'pending' | 'parked';
+  status: "complete" | "active" | "pending" | "parked";
   /** Milestone IDs that must be complete before this milestone becomes active. Populated from CONTEXT.md YAML frontmatter. */
   dependsOn?: string[];
 }
@@ -275,13 +289,13 @@ export interface HookDispatchResult {
 
 // ─── Budget & Notification Types ──────────────────────────────────────────
 
-export type BudgetEnforcementMode = 'warn' | 'pause' | 'halt';
+export type BudgetEnforcementMode = "warn" | "pause" | "halt";
 
-export type TokenProfile = 'budget' | 'balanced' | 'quality';
+export type TokenProfile = "budget" | "balanced" | "quality";
 
-export type InlineLevel = 'full' | 'standard' | 'minimal';
+export type InlineLevel = "full" | "standard" | "minimal";
 
-export type ComplexityTier = 'light' | 'standard' | 'heavy';
+export type ComplexityTier = "light" | "standard" | "heavy";
 
 export interface ClassificationResult {
   tier: ComplexityTier;
@@ -304,19 +318,18 @@ export interface PhaseSkipPreferences {
   skip_reassess?: boolean;
   skip_slice_research?: boolean;
   skip_milestone_validation?: boolean;
-  /** When true, reassess-roadmap fires after each slice completion. Opt-in. */
   reassess_after_slice?: boolean;
   /** When true, auto-mode pauses before each slice for discussion (#789). */
   require_slice_discussion?: boolean;
 }
 
 export interface NotificationPreferences {
-  enabled?: boolean;           // default true
-  on_complete?: boolean;       // notify on each unit completion
-  on_error?: boolean;          // notify on errors
-  on_budget?: boolean;         // notify on budget thresholds
-  on_milestone?: boolean;      // notify when milestone finishes
-  on_attention?: boolean;      // notify when manual attention needed
+  enabled?: boolean; // default true
+  on_complete?: boolean; // notify on each unit completion
+  on_error?: boolean; // notify on errors
+  on_budget?: boolean; // notify on budget thresholds
+  on_milestone?: boolean; // notify when milestone finishes
+  on_attention?: boolean; // notify when manual attention needed
 }
 
 // ─── Pre-Dispatch Hook Types ──────────────────────────────────────────────
@@ -327,7 +340,7 @@ export interface PreDispatchHookConfig {
   /** Unit types this hook intercepts before dispatch (e.g., ["execute-task"]). */
   before: string[];
   /** Action to take: "modify" mutates the prompt, "skip" skips the unit, "replace" swaps it. */
-  action: 'modify' | 'skip' | 'replace';
+  action: "modify" | "skip" | "replace";
   /** For "modify": text prepended to the unit prompt. Supports {milestoneId}, {sliceId}, {taskId}. */
   prepend?: string;
   /** For "modify": text appended to the unit prompt. Supports {milestoneId}, {sliceId}, {taskId}. */
@@ -346,7 +359,7 @@ export interface PreDispatchHookConfig {
 
 export interface PreDispatchResult {
   /** What happened: the unit proceeds with modifications, was skipped, or was replaced. */
-  action: 'proceed' | 'skip' | 'replace';
+  action: "proceed" | "skip" | "replace";
   /** Modified/replacement prompt (for "proceed" and "replace"). */
   prompt?: string;
   /** Override unit type (for "replace"). */
@@ -370,7 +383,7 @@ export interface HookStatusEntry {
   /** Hook name. */
   name: string;
   /** Hook type: "post" or "pre". */
-  type: 'post' | 'pre';
+  type: "post" | "pre";
   /** Whether hook is enabled. */
   enabled: boolean;
   /** What unit types it targets. */
@@ -382,36 +395,36 @@ export interface HookStatusEntry {
 // ─── Database Types (Decisions & Requirements) ────────────────────────────
 
 export interface Decision {
-  seq: number;              // auto-increment primary key
-  id: string;               // e.g. "D001"
-  when_context: string;     // when/context of the decision
-  scope: string;            // scope (milestone, slice, global, etc.)
-  decision: string;         // what was decided
-  choice: string;           // the specific choice made
-  rationale: string;        // why this choice
-  revisable: string;        // whether/when revisable
-  superseded_by: string | null;  // ID of superseding decision, or null
+  seq: number; // auto-increment primary key
+  id: string; // e.g. "D001"
+  when_context: string; // when/context of the decision
+  scope: string; // scope (milestone, slice, global, etc.)
+  decision: string; // what was decided
+  choice: string; // the specific choice made
+  rationale: string; // why this choice
+  revisable: string; // whether/when revisable
+  superseded_by: string | null; // ID of superseding decision, or null
 }
 
 export interface Requirement {
-  id: string;               // e.g. "R001"
-  class: string;            // requirement class (functional, non-functional, etc.)
-  status: string;           // active, validated, deferred, etc.
-  description: string;      // short description
-  why: string;              // rationale
-  source: string;           // origin (milestone, user, etc.)
-  primary_owner: string;    // owning slice/milestone
+  id: string; // e.g. "R001"
+  class: string; // requirement class (functional, non-functional, etc.)
+  status: string; // active, validated, deferred, etc.
+  description: string; // short description
+  why: string; // rationale
+  source: string; // origin (milestone, user, etc.)
+  primary_owner: string; // owning slice/milestone
   supporting_slices: string; // other slices that touch this
-  validation: string;       // how to validate
-  notes: string;            // additional notes
-  full_content: string;     // full requirement text
-  superseded_by: string | null;  // ID of superseding requirement, or null
+  validation: string; // how to validate
+  notes: string; // additional notes
+  full_content: string; // full requirement text
+  superseded_by: string | null; // ID of superseding requirement, or null
 }
 
 // ─── Parallel Orchestration Types ────────────────────────────────────────
 
-export type CompressionStrategy = 'truncate' | 'compress';
-export type ContextSelectionMode = 'full' | 'smart';
+export type CompressionStrategy = "truncate" | "compress";
+export type ContextSelectionMode = "full" | "smart";
 
 export type MergeStrategy = "per-slice" | "per-milestone";
 export type AutoMergeMode = "auto" | "confirm" | "manual";

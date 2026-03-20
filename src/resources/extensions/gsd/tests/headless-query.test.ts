@@ -159,4 +159,26 @@ describe('headless query', () => {
     assert.equal(snap.state.activeMilestone!.id, 'M001')
     assert.equal(snap.next.action, 'dispatch')
   })
+
+  it('reports all milestones complete with a clean stop reason', async () => {
+    writeRoadmap(base, 'M001', `# M001: Test Milestone
+
+## Slices
+
+- [x] **S01: First Slice** \`risk:low\` \`depends:[]\`
+  > Done.
+`)
+    writeFileSync(
+      join(base, '.gsd', 'milestones', 'M001', 'M001-SUMMARY.md'),
+      '# M001 Summary\n\nComplete.',
+    )
+
+    const result = await handleQuery(base)
+    const snap = result.data as QuerySnapshot
+
+    assert.equal(result.exitCode, 0)
+    assert.equal(snap.state.phase, 'complete')
+    assert.equal(snap.next.action, 'stop')
+    assert.equal(snap.next.reason, 'All milestones complete.')
+  })
 })

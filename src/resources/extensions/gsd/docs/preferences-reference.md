@@ -21,7 +21,12 @@ Full documentation for `~/.gsd/preferences.md` (global) and `.gsd/preferences.md
 **Empty arrays (`[]`) are equivalent to omitting the field entirely.** During validation, GSD deletes empty arrays from the preferences object (see `validatePreferences()` in `preferences.ts`):
 
 ```typescript
-for (const key of ["always_use_skills", "prefer_skills", "avoid_skills", "custom_instructions"] as const) {
+for (const key of [
+  "always_use_skills",
+  "prefer_skills",
+  "avoid_skills",
+  "custom_instructions",
+] as const) {
   if (validated[key] && validated[key]!.length === 0) {
     delete validated[key];
   }
@@ -50,6 +55,7 @@ Preferences are loaded from two locations and merged:
 2. **Project:** `.gsd/preferences.md` — applies to the current project only
 
 **Merge behavior** (see `mergePreferences()` in `preferences.ts`):
+
 - **Scalar fields** (`skill_discovery`, `budget_ceiling`, etc.): Project wins if defined, otherwise global. Uses nullish coalescing (`??`).
 - **Array fields** (`always_use_skills`, `prefer_skills`, etc.): Concatenated via `mergeStringLists()` (global first, then project).
 - **Object fields** (`models`, `git`, `auto_supervisor`): Shallow merge via spread operator `{ ...base, ...override }`.
@@ -60,10 +66,10 @@ For `models`, project settings override global at the phase level. If global has
 
 These are **separate concerns**:
 
-| Field | What it controls | Code reference |
-|-------|-----------------|----------------|
-| `skill_discovery` | **Whether** GSD looks for relevant skills during research | `resolveSkillDiscoveryMode()` in `preferences.ts` |
-| `always_use_skills`, `prefer_skills`, `avoid_skills` | **Which** skills to use when they're found relevant | `renderPreferencesForSystemPrompt()` in `preferences.ts` |
+| Field                                                | What it controls                                          | Code reference                                           |
+| ---------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------- |
+| `skill_discovery`                                    | **Whether** GSD looks for relevant skills during research | `resolveSkillDiscoveryMode()` in `preferences.ts`        |
+| `always_use_skills`, `prefer_skills`, `avoid_skills` | **Which** skills to use when they're found relevant       | `renderPreferencesForSystemPrompt()` in `preferences.ts` |
 
 Setting `prefer_skills: []` does **not** disable skill discovery — it just means you have no preference overrides. Use `skill_discovery: off` to disable discovery entirely.
 
@@ -75,14 +81,14 @@ Setting `prefer_skills: []` does **not** disable skill discovery — it just mea
 
 - `mode`: workflow mode — `"solo"` or `"team"`. Sets sensible defaults for git and project settings based on your workflow. Mode defaults are the lowest priority layer — any explicit preference overrides them. Omit to configure everything manually.
 
-  | Setting | `solo` | `team` |
-  |---|---|---|
-  | `git.auto_push` | `true` | `false` |
-  | `git.push_branches` | `false` | `true` |
-  | `git.pre_merge_check` | `false` | `true` |
-  | `git.merge_strategy` | `"squash"` | `"squash"` |
-  | `git.isolation` | `"worktree"` | `"worktree"` |
-  | `unique_milestone_ids` | `false` | `true` |
+  | Setting                | `solo`       | `team`       |
+  | ---------------------- | ------------ | ------------ |
+  | `git.auto_push`        | `true`       | `false`      |
+  | `git.push_branches`    | `false`      | `true`       |
+  | `git.pre_merge_check`  | `false`      | `true`       |
+  | `git.merge_strategy`   | `"squash"`   | `"squash"`   |
+  | `git.isolation`        | `"worktree"` | `"worktree"` |
+  | `unique_milestone_ids` | `false`      | `true`       |
 
   Quick setup: `/gsd mode` (global) or `/gsd mode project` (project-level).
 
@@ -128,6 +134,10 @@ Setting `prefer_skills: []` does **not** disable skill discovery — it just mea
   - `isolation`: `"worktree"`, `"branch"`, or `"none"` — controls auto-mode git isolation strategy. `"worktree"` creates a milestone worktree for isolated work; `"branch"` works directly in the project root but creates a milestone branch (useful for submodule-heavy repos); `"none"` works directly on the current branch with no worktree or milestone branch (ideal for step-mode with hot reloads). Default: `"worktree"`.
   - `manage_gitignore`: boolean — when `false`, GSD will not touch `.gitignore` at all. Useful when your project has a strictly managed `.gitignore` and you don't want GSD adding entries. Default: `true`.
   - `worktree_post_create`: string — script to run after a worktree is created (both auto-mode and manual `/worktree`). Receives `SOURCE_DIR` and `WORKTREE_DIR` as environment variables. Can be absolute or relative to project root. Runs with 30-second timeout. Failure is non-fatal (logged as warning). Default: none.
+  - `auto_pr`: boolean — automatically create a GitHub pull request after a milestone branch is merged. Requires `gh` CLI to be installed. Default: `false`.
+  - `pr_target_branch`: string — branch to target when `auto_pr` is enabled. Defaults to `main_branch` when omitted.
+  - **Deprecated:** `commit_docs` — no longer valid; `.gsd/` is always gitignored. Remove this setting.
+  - **Deprecated:** `merge_to_main` — no longer valid; milestone-level merge is always used. Remove this setting.
 
 - `unique_milestone_ids`: boolean — when `true`, generates milestone IDs in `M{seq}-{rand6}` format (e.g. `M001-eh88as`) instead of plain sequential `M001`. Prevents ID collisions in team workflows where multiple contributors create milestones concurrently. Both formats coexist — existing `M001`-style milestones remain valid. Default: `false`.
 
@@ -141,11 +151,12 @@ Setting `prefer_skills: []` does **not** disable skill discovery — it just mea
 
 - `context_pause_threshold`: number (0-100) — context window usage percentage at which auto-mode should pause to suggest checkpointing. Set to `0` to disable. Default: `0` (disabled).
 
-- `token_profile`: `"budget"`, `"balanced"`, or `"quality"` — coordinates model selection, phase skipping, and context compression. `budget` skips research/reassessment and uses cheaper models; `balanced` (default) runs all phases; `quality` prefers higher-quality models. See token-optimization docs.
+- `token_profile`: `"budget"`, `"balanced"`, or `"quality"` — coordinates model selection, phase skipping, and context compression. `budget` skips research/reassessment and uses cheaper models; `balanced` (default) skips research/reassessment to reduce token burn; `quality` prefers higher-quality models. See token-optimization docs.
 
 - `phases`: fine-grained control over which phases run. Usually set by `token_profile`, but can be overridden. Keys:
   - `skip_research`: boolean — skip milestone-level research. Default: `false`.
-  - `skip_reassess`: boolean — skip roadmap reassessment after each slice. Default: `false`.
+  - `reassess_after_slice`: boolean — run roadmap reassessment after each completed slice. Default: `false`.
+  - `skip_reassess`: boolean — force-disable roadmap reassessment even if `reassess_after_slice` is enabled. Default: `false`.
   - `skip_slice_research`: boolean — skip per-slice research. Default: `false`.
 
 - `remote_questions`: route interactive questions to Slack/Discord for headless auto-mode. Keys:
@@ -173,6 +184,12 @@ Setting `prefer_skills: []` does **not** disable skill discovery — it just mea
 - `auto_visualize`: boolean — show a visualizer hint after each milestone completion in auto-mode. Default: `false`.
 
 - `auto_report`: boolean — generate an HTML report snapshot after each milestone completion. Default: `true`.
+
+- `search_provider`: `"brave"`, `"tavily"`, `"ollama"`, `"native"`, or `"auto"` — selects the search backend for research phases. `"native"` forces Anthropic's built-in web search only; provider values force that backend and disable native search; `"auto"` uses the default heuristic. Default: `"auto"`.
+
+- `compression_strategy`: `"truncate"` or `"compress"` — controls how context that exceeds the budget is reduced. `"truncate"` (default) drops sections from the end. `"compress"` applies heuristic compression before truncating, preserving more content at the cost of some fidelity. Default: `"truncate"`.
+
+- `context_selection`: `"full"` or `"smart"` — controls how files are inlined into context. `"full"` inlines entire files; `"smart"` uses semantic chunking to include only the most relevant sections. Default is derived from `token_profile`.
 
 - `parallel`: configures parallel orchestration for running multiple slices concurrently. Keys:
   - `enabled`: boolean — enable parallel execution. Default: `false`.
@@ -359,11 +376,11 @@ If you use a bare model ID (no provider prefix) and it exists in multiple provid
 ---
 version: 1
 models:
-  research: openrouter/deepseek/deepseek-r1  # $0.28/$0.42 per 1M tokens
+  research: openrouter/deepseek/deepseek-r1 # $0.28/$0.42 per 1M tokens
   planning:
-    model: claude-opus-4-6                   # $5/$25 — best for architecture
+    model: claude-opus-4-6 # $5/$25 — best for architecture
     fallbacks:
-      - openrouter/z-ai/glm-5                # $1/$3.20 — strong alternative
+      - openrouter/z-ai/glm-5 # $1/$3.20 — strong alternative
   execution: openrouter/minimax/minimax-m2.5 # $0.30/$1.20 — cheapest quality
   completion: openrouter/minimax/minimax-m2.5
 ---

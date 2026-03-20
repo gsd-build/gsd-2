@@ -163,8 +163,6 @@ When performing an audit, structure findings as:
 ## References
 
 For detailed guidelines on specific areas:
-- [Performance Optimization](../performance/SKILL.md)
 - [Core Web Vitals](../core-web-vitals/SKILL.md)
 - [Accessibility](../accessibility/SKILL.md)
-- [SEO](../seo/SKILL.md)
 - [Best Practices](../best-practices/SKILL.md)

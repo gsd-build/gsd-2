@@ -151,6 +151,3 @@ export const native = loadNative() as {
   parseStreamingJson: (text: string) => unknown;
   xxHash32: (input: string, seed: number) => number;
 };
-
-/** True when the native addon loaded successfully. False on unsupported platforms. */
-export const nativeAvailable = _loadedSuccessfully;

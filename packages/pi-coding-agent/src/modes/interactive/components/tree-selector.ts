@@ -14,6 +14,12 @@ import type { SessionTreeNode } from "../../../core/session-manager.js";
 import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
 import { keyHint } from "./keybinding-hints.js";
+import {
+	applyRowHighlight,
+	computeScrollWindow,
+	renderCursor,
+	renderScrollPosition,
+} from "./tree-render-utils.js";
 
 /** Gutter info: position (displayIndent where connector was) and whether to show │ */
 interface GutterInfo {
@@ -595,14 +601,11 @@ class TreeList implements Component {
 			return lines;
 		}
 
-		const startIndex = Math.max(
-			0,
-			Math.min(
-				this.selectedIndex - Math.floor(this.maxVisibleLines / 2),
-				this.filteredNodes.length - this.maxVisibleLines,
-			),
+		const { startIndex, endIndex } = computeScrollWindow(
+			this.selectedIndex,
+			this.filteredNodes.length,
+			this.maxVisibleLines,
 		);
-		const endIndex = Math.min(startIndex + this.maxVisibleLines, this.filteredNodes.length);
 
 		for (let i = startIndex; i < endIndex; i++) {
 			const flatNode = this.filteredNodes[i];
@@ -610,7 +613,7 @@ class TreeList implements Component {
 			const isSelected = i === this.selectedIndex;
 
 			// Build line: cursor + prefix + path marker + label + content
-			const cursor = isSelected ? theme.fg("accent", "› ") : "  ";
+			const cursor = renderCursor(isSelected);
 
 			// If multiple roots, shift display (roots at 0, not 1)
 			const displayIndent = this.multipleRoots ? Math.max(0, flatNode.indent - 1) : flatNode.indent;
@@ -664,19 +667,11 @@ class TreeList implements Component {
 			const label = flatNode.node.label ? theme.fg("warning", `[${flatNode.node.label}] `) : "";
 			const content = this.getEntryDisplayText(flatNode.node, isSelected);
 
-			let line = cursor + theme.fg("dim", prefix) + foldMarker + pathMarker + label + content;
-			if (isSelected) {
-				line = theme.bg("selectedBg", line);
-			}
-			lines.push(truncateToWidth(line, width));
+			const line = cursor + theme.fg("dim", prefix) + foldMarker + pathMarker + label + content;
+			lines.push(applyRowHighlight(line, isSelected, width));
 		}
 
-		lines.push(
-			truncateToWidth(
-				theme.fg("muted", `  (${this.selectedIndex + 1}/${this.filteredNodes.length})${this.getFilterLabel()}`),
-				width,
-			),
-		);
+		lines.push(renderScrollPosition(this.selectedIndex, this.filteredNodes.length, width, this.getFilterLabel()));
 
 		return lines;
 	}

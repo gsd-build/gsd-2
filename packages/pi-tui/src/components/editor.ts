@@ -28,7 +28,7 @@ export interface TextChunk {
  * @param maxWidth - Maximum visible width per chunk
  * @returns Array of chunks with text and position information
  */
-export function wordWrapLine(line: string, maxWidth: number): TextChunk[] {
+function wordWrapLine(line: string, maxWidth: number): TextChunk[] {
 	if (!line || maxWidth <= 0) {
 		return [{ text: "", startIndex: 0, endIndex: 0 }];
 	}

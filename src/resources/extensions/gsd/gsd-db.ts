@@ -5,10 +5,11 @@
 // Exposes a unified sync API for decisions and requirements storage.
 // Schema is initialized on first open with WAL mode for file-backed DBs.
 
-import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
-import type { Decision, Requirement } from './types.js';
-import { GSDError, GSD_STALE_STATE } from './errors.js';
+import { createRequire } from "node:module";
+import { existsSync, copyFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import type { Decision, Requirement } from "./types.js";
+import { GSDError, GSD_STALE_STATE } from "./errors.js";
 
 // Create a require function for loading native modules in ESM context
 const _require = createRequire(import.meta.url);
@@ -20,7 +21,7 @@ const _require = createRequire(import.meta.url);
  * Both expose prepare().run/get/all — the adapter normalizes row objects.
  */
 interface DbStatement {
-  run(...params: unknown[]): void;
+  run(...params: unknown[]): unknown;
   get(...params: unknown[]): Record<string, unknown> | undefined;
   all(...params: unknown[]): Record<string, unknown>[];
 }
@@ -31,7 +32,7 @@ interface DbAdapter {
   close(): void;
 }
 
-type ProviderName = 'node:sqlite' | 'better-sqlite3';
+type ProviderName = "node:sqlite" | "better-sqlite3";
 
 let providerName: ProviderName | null = null;
 let providerModule: unknown = null;
@@ -46,18 +47,20 @@ function suppressSqliteWarning(): void {
   // @ts-expect-error — overriding process.emit with filtered version
   process.emit = function (event: string, ...args: unknown[]): boolean {
     if (
-      event === 'warning' &&
+      event === "warning" &&
       args[0] &&
-      typeof args[0] === 'object' &&
-      'name' in args[0] &&
-      (args[0] as { name: string }).name === 'ExperimentalWarning' &&
-      'message' in args[0] &&
-      typeof (args[0] as { message: string }).message === 'string' &&
-      (args[0] as { message: string }).message.includes('SQLite')
+      typeof args[0] === "object" &&
+      "name" in args[0] &&
+      (args[0] as { name: string }).name === "ExperimentalWarning" &&
+      "message" in args[0] &&
+      typeof (args[0] as { message: string }).message === "string" &&
+      (args[0] as { message: string }).message.includes("SQLite")
     ) {
       return false;
     }
-    return origEmit.apply(process, [event, ...args] as Parameters<typeof process.emit>) as unknown as boolean;
+    return origEmit.apply(process, [event, ...args] as Parameters<
+      typeof process.emit
+    >) as unknown as boolean;
   };
 }
 
@@ -68,10 +71,10 @@ function loadProvider(): void {
   // Try node:sqlite first
   try {
     suppressSqliteWarning();
-    const mod = _require('node:sqlite');
+    const mod = _require("node:sqlite");
     if (mod.DatabaseSync) {
       providerModule = mod;
-      providerName = 'node:sqlite';
+      providerName = "node:sqlite";
       return;
     }
   } catch {
@@ -80,17 +83,19 @@ function loadProvider(): void {
 
   // Try better-sqlite3
   try {
-    const mod = _require('better-sqlite3');
-    if (typeof mod === 'function' || (mod && mod.default)) {
+    const mod = _require("better-sqlite3");
+    if (typeof mod === "function" || (mod && mod.default)) {
       providerModule = mod.default || mod;
-      providerName = 'better-sqlite3';
+      providerName = "better-sqlite3";
       return;
     }
   } catch {
     // better-sqlite3 not available
   }
 
-  process.stderr.write('gsd-db: No SQLite provider available (tried node:sqlite, better-sqlite3)\n');
+  process.stderr.write(
+    "gsd-db: No SQLite provider available (tried node:sqlite, better-sqlite3)\n",
+  );
 }
 
 // ─── Database Adapter ──────────────────────────────────────────────────────
@@ -101,13 +106,13 @@ function loadProvider(): void {
 function normalizeRow(row: unknown): Record<string, unknown> | undefined {
   if (row == null) return undefined;
   if (Object.getPrototypeOf(row) === null) {
-    return { ...row as Record<string, unknown> };
+    return { ...(row as Record<string, unknown>) };
   }
   return row as Record<string, unknown>;
 }
 
 function normalizeRows(rows: unknown[]): Record<string, unknown>[] {
-  return rows.map(r => normalizeRow(r)!);
+  return rows.map((r) => normalizeRow(r)!);
 }
 
 function createAdapter(rawDb: unknown): DbAdapter {
@@ -128,8 +133,8 @@ function createAdapter(rawDb: unknown): DbAdapter {
     prepare(sql: string): DbStatement {
       const stmt = db.prepare(sql);
       return {
-        run(...params: unknown[]): void {
-          stmt.run(...params);
+        run(...params: unknown[]): unknown {
+          return stmt.run(...params);
         },
         get(...params: unknown[]): Record<string, unknown> | undefined {
           return normalizeRow(stmt.get(...params));
@@ -149,8 +154,10 @@ function openRawDb(path: string): unknown {
   loadProvider();
   if (!providerModule || !providerName) return null;
 
-  if (providerName === 'node:sqlite') {
-    const { DatabaseSync } = providerModule as { DatabaseSync: new (path: string) => unknown };
+  if (providerName === "node:sqlite") {
+    const { DatabaseSync } = providerModule as {
+      DatabaseSync: new (path: string) => unknown;
+    };
     return new DatabaseSync(path);
   }
 
@@ -166,10 +173,10 @@ const SCHEMA_VERSION = 3;
 function initSchema(db: DbAdapter, fileBacked: boolean): void {
   // WAL mode for file-backed databases (must be outside transaction)
   if (fileBacked) {
-    db.exec('PRAGMA journal_mode=WAL');
+    db.exec("PRAGMA journal_mode=WAL");
   }
 
-  db.exec('BEGIN');
+  db.exec("BEGIN");
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS schema_version (
@@ -245,24 +252,37 @@ function initSchema(db: DbAdapter, fileBacked: boolean): void {
       )
     `);
 
-    db.exec('CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(superseded_by)');
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(superseded_by)",
+    );
 
     // Views — DROP + CREATE since CREATE VIEW IF NOT EXISTS doesn't update definitions
-    db.exec(`CREATE VIEW IF NOT EXISTS active_decisions AS SELECT * FROM decisions WHERE superseded_by IS NULL`);
-    db.exec(`CREATE VIEW IF NOT EXISTS active_requirements AS SELECT * FROM requirements WHERE superseded_by IS NULL`);
-    db.exec(`CREATE VIEW IF NOT EXISTS active_memories AS SELECT * FROM memories WHERE superseded_by IS NULL`);
+    db.exec(
+      `CREATE VIEW IF NOT EXISTS active_decisions AS SELECT * FROM decisions WHERE superseded_by IS NULL`,
+    );
+    db.exec(
+      `CREATE VIEW IF NOT EXISTS active_requirements AS SELECT * FROM requirements WHERE superseded_by IS NULL`,
+    );
+    db.exec(
+      `CREATE VIEW IF NOT EXISTS active_memories AS SELECT * FROM memories WHERE superseded_by IS NULL`,
+    );
 
     // Insert schema version if not already present
-    const existing = db.prepare('SELECT count(*) as cnt FROM schema_version').get();
-    if (existing && (existing['cnt'] as number) === 0) {
-      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)').run(
-        { ':version': SCHEMA_VERSION, ':applied_at': new Date().toISOString() },
-      );
+    const existing = db
+      .prepare("SELECT count(*) as cnt FROM schema_version")
+      .get();
+    if (existing && (existing["cnt"] as number) === 0) {
+      db.prepare(
+        "INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)",
+      ).run({
+        ":version": SCHEMA_VERSION,
+        ":applied_at": new Date().toISOString(),
+      });
     }
 
-    db.exec('COMMIT');
+    db.exec("COMMIT");
   } catch (err) {
-    db.exec('ROLLBACK');
+    db.exec("ROLLBACK");
     throw err;
   }
 
@@ -275,12 +295,12 @@ function initSchema(db: DbAdapter, fileBacked: boolean): void {
  * and applies DDL for each version step up to SCHEMA_VERSION.
  */
 function migrateSchema(db: DbAdapter): void {
-  const row = db.prepare('SELECT MAX(version) as v FROM schema_version').get();
-  const currentVersion = row ? (row['v'] as number) : 0;
+  const row = db.prepare("SELECT MAX(version) as v FROM schema_version").get();
+  const currentVersion = row ? (row["v"] as number) : 0;
 
   if (currentVersion >= SCHEMA_VERSION) return;
 
-  db.exec('BEGIN');
+  db.exec("BEGIN");
   try {
     // v1 → v2: add artifacts table
     if (currentVersion < 2) {
@@ -296,9 +316,9 @@ function migrateSchema(db: DbAdapter): void {
         )
       `);
 
-      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)').run(
-        { ':version': 2, ':applied_at': new Date().toISOString() },
-      );
+      db.prepare(
+        "INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)",
+      ).run({ ":version": 2, ":applied_at": new Date().toISOString() });
     }
 
     // v2 → v3: add memories + memory_processed_units tables
@@ -327,18 +347,22 @@ function migrateSchema(db: DbAdapter): void {
         )
       `);
 
-      db.exec('CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(superseded_by)');
-      db.exec('DROP VIEW IF EXISTS active_memories');
-      db.exec('CREATE VIEW active_memories AS SELECT * FROM memories WHERE superseded_by IS NULL');
-
-      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)').run(
-        { ':version': 3, ':applied_at': new Date().toISOString() },
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(superseded_by)",
       );
+      db.exec("DROP VIEW IF EXISTS active_memories");
+      db.exec(
+        "CREATE VIEW active_memories AS SELECT * FROM memories WHERE superseded_by IS NULL",
+      );
+
+      db.prepare(
+        "INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)",
+      ).run({ ":version": 3, ":applied_at": new Date().toISOString() });
     }
 
-    db.exec('COMMIT');
+    db.exec("COMMIT");
   } catch (err) {
-    db.exec('ROLLBACK');
+    db.exec("ROLLBACK");
     throw err;
   }
 }
@@ -385,12 +409,16 @@ export function openDatabase(path: string): boolean {
   if (!rawDb) return false;
 
   const adapter = createAdapter(rawDb);
-  const fileBacked = path !== ':memory:';
+  const fileBacked = path !== ":memory:";
 
   try {
     initSchema(adapter, fileBacked);
   } catch (err) {
-    try { adapter.close(); } catch { /* swallow */ }
+    try {
+      adapter.close();
+    } catch {
+      /* swallow */
+    }
     throw err;
   }
 
@@ -420,14 +448,15 @@ export function closeDatabase(): void {
  * Runs a function inside a transaction. Rolls back on error.
  */
 export function transaction<T>(fn: () => T): T {
-  if (!currentDb) throw new GSDError(GSD_STALE_STATE, 'gsd-db: No database open');
-  currentDb.exec('BEGIN');
+  if (!currentDb)
+    throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  currentDb.exec("BEGIN");
   try {
     const result = fn();
-    currentDb.exec('COMMIT');
+    currentDb.exec("COMMIT");
     return result;
   } catch (err) {
-    currentDb.exec('ROLLBACK');
+    currentDb.exec("ROLLBACK");
     throw err;
   }
 }
@@ -437,21 +466,24 @@ export function transaction<T>(fn: () => T): T {
 /**
  * Insert a decision. The `seq` field is auto-generated.
  */
-export function insertDecision(d: Omit<Decision, 'seq'>): void {
-  if (!currentDb) throw new GSDError(GSD_STALE_STATE, 'gsd-db: No database open');
-  currentDb.prepare(
-    `INSERT INTO decisions (id, when_context, scope, decision, choice, rationale, revisable, superseded_by)
+export function insertDecision(d: Omit<Decision, "seq">): void {
+  if (!currentDb)
+    throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  currentDb
+    .prepare(
+      `INSERT INTO decisions (id, when_context, scope, decision, choice, rationale, revisable, superseded_by)
      VALUES (:id, :when_context, :scope, :decision, :choice, :rationale, :revisable, :superseded_by)`,
-  ).run({
-    ':id': d.id,
-    ':when_context': d.when_context,
-    ':scope': d.scope,
-    ':decision': d.decision,
-    ':choice': d.choice,
-    ':rationale': d.rationale,
-    ':revisable': d.revisable,
-    ':superseded_by': d.superseded_by,
-  });
+    )
+    .run({
+      ":id": d.id,
+      ":when_context": d.when_context,
+      ":scope": d.scope,
+      ":decision": d.decision,
+      ":choice": d.choice,
+      ":rationale": d.rationale,
+      ":revisable": d.revisable,
+      ":superseded_by": d.superseded_by,
+    });
 }
 
 /**
@@ -459,18 +491,18 @@ export function insertDecision(d: Omit<Decision, 'seq'>): void {
  */
 export function getDecisionById(id: string): Decision | null {
   if (!currentDb) return null;
-  const row = currentDb.prepare('SELECT * FROM decisions WHERE id = ?').get(id);
+  const row = currentDb.prepare("SELECT * FROM decisions WHERE id = ?").get(id);
   if (!row) return null;
   return {
-    seq: row['seq'] as number,
-    id: row['id'] as string,
-    when_context: row['when_context'] as string,
-    scope: row['scope'] as string,
-    decision: row['decision'] as string,
-    choice: row['choice'] as string,
-    rationale: row['rationale'] as string,
-    revisable: row['revisable'] as string,
-    superseded_by: (row['superseded_by'] as string) ?? null,
+    seq: row["seq"] as number,
+    id: row["id"] as string,
+    when_context: row["when_context"] as string,
+    scope: row["scope"] as string,
+    decision: row["decision"] as string,
+    choice: row["choice"] as string,
+    rationale: row["rationale"] as string,
+    revisable: row["revisable"] as string,
+    superseded_by: (row["superseded_by"] as string) ?? null,
   };
 }
 
@@ -479,16 +511,16 @@ export function getDecisionById(id: string): Decision | null {
  */
 export function getActiveDecisions(): Decision[] {
   if (!currentDb) return [];
-  const rows = currentDb.prepare('SELECT * FROM active_decisions').all();
-  return rows.map(row => ({
-    seq: row['seq'] as number,
-    id: row['id'] as string,
-    when_context: row['when_context'] as string,
-    scope: row['scope'] as string,
-    decision: row['decision'] as string,
-    choice: row['choice'] as string,
-    rationale: row['rationale'] as string,
-    revisable: row['revisable'] as string,
+  const rows = currentDb.prepare("SELECT * FROM active_decisions").all();
+  return rows.map((row) => ({
+    seq: row["seq"] as number,
+    id: row["id"] as string,
+    when_context: row["when_context"] as string,
+    scope: row["scope"] as string,
+    decision: row["decision"] as string,
+    choice: row["choice"] as string,
+    rationale: row["rationale"] as string,
+    revisable: row["revisable"] as string,
     superseded_by: null,
   }));
 }
@@ -499,24 +531,27 @@ export function getActiveDecisions(): Decision[] {
  * Insert a requirement.
  */
 export function insertRequirement(r: Requirement): void {
-  if (!currentDb) throw new GSDError(GSD_STALE_STATE, 'gsd-db: No database open');
-  currentDb.prepare(
-    `INSERT INTO requirements (id, class, status, description, why, source, primary_owner, supporting_slices, validation, notes, full_content, superseded_by)
+  if (!currentDb)
+    throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  currentDb
+    .prepare(
+      `INSERT INTO requirements (id, class, status, description, why, source, primary_owner, supporting_slices, validation, notes, full_content, superseded_by)
      VALUES (:id, :class, :status, :description, :why, :source, :primary_owner, :supporting_slices, :validation, :notes, :full_content, :superseded_by)`,
-  ).run({
-    ':id': r.id,
-    ':class': r.class,
-    ':status': r.status,
-    ':description': r.description,
-    ':why': r.why,
-    ':source': r.source,
-    ':primary_owner': r.primary_owner,
-    ':supporting_slices': r.supporting_slices,
-    ':validation': r.validation,
-    ':notes': r.notes,
-    ':full_content': r.full_content,
-    ':superseded_by': r.superseded_by,
-  });
+    )
+    .run({
+      ":id": r.id,
+      ":class": r.class,
+      ":status": r.status,
+      ":description": r.description,
+      ":why": r.why,
+      ":source": r.source,
+      ":primary_owner": r.primary_owner,
+      ":supporting_slices": r.supporting_slices,
+      ":validation": r.validation,
+      ":notes": r.notes,
+      ":full_content": r.full_content,
+      ":superseded_by": r.superseded_by,
+    });
 }
 
 /**
@@ -524,21 +559,23 @@ export function insertRequirement(r: Requirement): void {
  */
 export function getRequirementById(id: string): Requirement | null {
   if (!currentDb) return null;
-  const row = currentDb.prepare('SELECT * FROM requirements WHERE id = ?').get(id);
+  const row = currentDb
+    .prepare("SELECT * FROM requirements WHERE id = ?")
+    .get(id);
   if (!row) return null;
   return {
-    id: row['id'] as string,
-    class: row['class'] as string,
-    status: row['status'] as string,
-    description: row['description'] as string,
-    why: row['why'] as string,
-    source: row['source'] as string,
-    primary_owner: row['primary_owner'] as string,
-    supporting_slices: row['supporting_slices'] as string,
-    validation: row['validation'] as string,
-    notes: row['notes'] as string,
-    full_content: row['full_content'] as string,
-    superseded_by: (row['superseded_by'] as string) ?? null,
+    id: row["id"] as string,
+    class: row["class"] as string,
+    status: row["status"] as string,
+    description: row["description"] as string,
+    why: row["why"] as string,
+    source: row["source"] as string,
+    primary_owner: row["primary_owner"] as string,
+    supporting_slices: row["supporting_slices"] as string,
+    validation: row["validation"] as string,
+    notes: row["notes"] as string,
+    full_content: row["full_content"] as string,
+    superseded_by: (row["superseded_by"] as string) ?? null,
   };
 }
 
@@ -547,19 +584,19 @@ export function getRequirementById(id: string): Requirement | null {
  */
 export function getActiveRequirements(): Requirement[] {
   if (!currentDb) return [];
-  const rows = currentDb.prepare('SELECT * FROM active_requirements').all();
-  return rows.map(row => ({
-    id: row['id'] as string,
-    class: row['class'] as string,
-    status: row['status'] as string,
-    description: row['description'] as string,
-    why: row['why'] as string,
-    source: row['source'] as string,
-    primary_owner: row['primary_owner'] as string,
-    supporting_slices: row['supporting_slices'] as string,
-    validation: row['validation'] as string,
-    notes: row['notes'] as string,
-    full_content: row['full_content'] as string,
+  const rows = currentDb.prepare("SELECT * FROM active_requirements").all();
+  return rows.map((row) => ({
+    id: row["id"] as string,
+    class: row["class"] as string,
+    status: row["status"] as string,
+    description: row["description"] as string,
+    why: row["why"] as string,
+    source: row["source"] as string,
+    primary_owner: row["primary_owner"] as string,
+    supporting_slices: row["supporting_slices"] as string,
+    validation: row["validation"] as string,
+    notes: row["notes"] as string,
+    full_content: row["full_content"] as string,
     superseded_by: null,
   }));
 }
@@ -602,45 +639,51 @@ export function _resetProvider(): void {
 /**
  * Insert or replace a decision. Uses the `id` UNIQUE constraint for idempotency.
  */
-export function upsertDecision(d: Omit<Decision, 'seq'>): void {
-  if (!currentDb) throw new GSDError(GSD_STALE_STATE, 'gsd-db: No database open');
-  currentDb.prepare(
-    `INSERT OR REPLACE INTO decisions (id, when_context, scope, decision, choice, rationale, revisable, superseded_by)
+export function upsertDecision(d: Omit<Decision, "seq">): void {
+  if (!currentDb)
+    throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  currentDb
+    .prepare(
+      `INSERT OR REPLACE INTO decisions (id, when_context, scope, decision, choice, rationale, revisable, superseded_by)
      VALUES (:id, :when_context, :scope, :decision, :choice, :rationale, :revisable, :superseded_by)`,
-  ).run({
-    ':id': d.id,
-    ':when_context': d.when_context,
-    ':scope': d.scope,
-    ':decision': d.decision,
-    ':choice': d.choice,
-    ':rationale': d.rationale,
-    ':revisable': d.revisable,
-    ':superseded_by': d.superseded_by ?? null,
-  });
+    )
+    .run({
+      ":id": d.id,
+      ":when_context": d.when_context,
+      ":scope": d.scope,
+      ":decision": d.decision,
+      ":choice": d.choice,
+      ":rationale": d.rationale,
+      ":revisable": d.revisable,
+      ":superseded_by": d.superseded_by ?? null,
+    });
 }
 
 /**
  * Insert or replace a requirement. Uses the `id` PK for idempotency.
  */
 export function upsertRequirement(r: Requirement): void {
-  if (!currentDb) throw new GSDError(GSD_STALE_STATE, 'gsd-db: No database open');
-  currentDb.prepare(
-    `INSERT OR REPLACE INTO requirements (id, class, status, description, why, source, primary_owner, supporting_slices, validation, notes, full_content, superseded_by)
+  if (!currentDb)
+    throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  currentDb
+    .prepare(
+      `INSERT OR REPLACE INTO requirements (id, class, status, description, why, source, primary_owner, supporting_slices, validation, notes, full_content, superseded_by)
      VALUES (:id, :class, :status, :description, :why, :source, :primary_owner, :supporting_slices, :validation, :notes, :full_content, :superseded_by)`,
-  ).run({
-    ':id': r.id,
-    ':class': r.class,
-    ':status': r.status,
-    ':description': r.description,
-    ':why': r.why,
-    ':source': r.source,
-    ':primary_owner': r.primary_owner,
-    ':supporting_slices': r.supporting_slices,
-    ':validation': r.validation,
-    ':notes': r.notes,
-    ':full_content': r.full_content,
-    ':superseded_by': r.superseded_by ?? null,
-  });
+    )
+    .run({
+      ":id": r.id,
+      ":class": r.class,
+      ":status": r.status,
+      ":description": r.description,
+      ":why": r.why,
+      ":source": r.source,
+      ":primary_owner": r.primary_owner,
+      ":supporting_slices": r.supporting_slices,
+      ":validation": r.validation,
+      ":notes": r.notes,
+      ":full_content": r.full_content,
+      ":superseded_by": r.superseded_by ?? null,
+    });
 }
 
 /**
@@ -655,7 +698,7 @@ export function upsertRequirement(r: Requirement): void {
 export function clearArtifacts(): void {
   if (!currentDb) return;
   try {
-    currentDb.exec('DELETE FROM artifacts');
+    currentDb.exec("DELETE FROM artifacts");
   } catch {
     // Clearing a cache should never be fatal
   }
@@ -669,17 +712,169 @@ export function insertArtifact(a: {
   task_id: string | null;
   full_content: string;
 }): void {
-  if (!currentDb) throw new GSDError(GSD_STALE_STATE, 'gsd-db: No database open');
-  currentDb.prepare(
-    `INSERT OR REPLACE INTO artifacts (path, artifact_type, milestone_id, slice_id, task_id, full_content, imported_at)
+  if (!currentDb)
+    throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  currentDb
+    .prepare(
+      `INSERT OR REPLACE INTO artifacts (path, artifact_type, milestone_id, slice_id, task_id, full_content, imported_at)
      VALUES (:path, :artifact_type, :milestone_id, :slice_id, :task_id, :full_content, :imported_at)`,
-  ).run({
-    ':path': a.path,
-    ':artifact_type': a.artifact_type,
-    ':milestone_id': a.milestone_id,
-    ':slice_id': a.slice_id,
-    ':task_id': a.task_id,
-    ':full_content': a.full_content,
-    ':imported_at': new Date().toISOString(),
-  });
+    )
+    .run({
+      ":path": a.path,
+      ":artifact_type": a.artifact_type,
+      ":milestone_id": a.milestone_id,
+      ":slice_id": a.slice_id,
+      ":task_id": a.task_id,
+      ":full_content": a.full_content,
+      ":imported_at": new Date().toISOString(),
+    });
+}
+
+// ─── Worktree DB Helpers ──────────────────────────────────────────────────
+
+export function copyWorktreeDb(srcDbPath: string, destDbPath: string): boolean {
+  try {
+    if (!existsSync(srcDbPath)) return false;
+    const destDir = dirname(destDbPath);
+    mkdirSync(destDir, { recursive: true });
+    copyFileSync(srcDbPath, destDbPath);
+    return true;
+  } catch (err) {
+    process.stderr.write(
+      `gsd-db: failed to copy DB to worktree: ${(err as Error).message}\n`,
+    );
+    return false;
+  }
+}
+
+export function reconcileWorktreeDb(
+  mainDbPath: string,
+  worktreeDbPath: string,
+): {
+  decisions: number;
+  requirements: number;
+  artifacts: number;
+  conflicts: string[];
+} {
+  const zero = {
+    decisions: 0,
+    requirements: 0,
+    artifacts: 0,
+    conflicts: [] as string[],
+  };
+  if (!existsSync(worktreeDbPath)) return zero;
+  if (worktreeDbPath.includes("'")) {
+    process.stderr.write(
+      `gsd-db: worktree DB reconciliation failed: path contains unsafe characters\n`,
+    );
+    return zero;
+  }
+  if (!currentDb) {
+    const opened = openDatabase(mainDbPath);
+    if (!opened) {
+      process.stderr.write(
+        `gsd-db: worktree DB reconciliation failed: cannot open main DB\n`,
+      );
+      return zero;
+    }
+  }
+  const adapter = currentDb!;
+  const conflicts: string[] = [];
+  try {
+    adapter.exec(`ATTACH DATABASE '${worktreeDbPath}' AS wt`);
+    try {
+      const decConf = adapter
+        .prepare(
+          `SELECT m.id FROM decisions m INNER JOIN wt.decisions w ON m.id = w.id WHERE m.decision != w.decision OR m.choice != w.choice OR m.rationale != w.rationale OR m.superseded_by IS NOT w.superseded_by`,
+        )
+        .all();
+      for (const row of decConf)
+        conflicts.push(
+          `decision ${(row as Record<string, unknown>)["id"]}: modified in both`,
+        );
+      const reqConf = adapter
+        .prepare(
+          `SELECT m.id FROM requirements m INNER JOIN wt.requirements w ON m.id = w.id WHERE m.description != w.description OR m.status != w.status OR m.notes != w.notes OR m.superseded_by IS NOT w.superseded_by`,
+        )
+        .all();
+      for (const row of reqConf)
+        conflicts.push(
+          `requirement ${(row as Record<string, unknown>)["id"]}: modified in both`,
+        );
+      const merged = { decisions: 0, requirements: 0, artifacts: 0 };
+      adapter.exec("BEGIN");
+      try {
+        const dR = adapter
+          .prepare(
+            `
+          INSERT OR REPLACE INTO decisions (
+            id, when_context, scope, decision, choice, rationale, revisable, superseded_by
+          )
+          SELECT
+            id, when_context, scope, decision, choice, rationale, revisable, superseded_by
+          FROM wt.decisions
+        `,
+          )
+          .run();
+        merged.decisions =
+          typeof dR === "object" && dR !== null
+            ? ((dR as { changes?: number }).changes ?? 0)
+            : 0;
+        const rR = adapter
+          .prepare(
+            `
+          INSERT OR REPLACE INTO requirements (
+            id, class, status, description, why, source, primary_owner,
+            supporting_slices, validation, notes, full_content, superseded_by
+          )
+          SELECT
+            id, class, status, description, why, source, primary_owner,
+            supporting_slices, validation, notes, full_content, superseded_by
+          FROM wt.requirements
+        `,
+          )
+          .run();
+        merged.requirements =
+          typeof rR === "object" && rR !== null
+            ? ((rR as { changes?: number }).changes ?? 0)
+            : 0;
+        const aR = adapter
+          .prepare(
+            `
+          INSERT OR REPLACE INTO artifacts (
+            path, artifact_type, milestone_id, slice_id, task_id, full_content, imported_at
+          )
+          SELECT
+            path, artifact_type, milestone_id, slice_id, task_id, full_content, imported_at
+          FROM wt.artifacts
+        `,
+          )
+          .run();
+        merged.artifacts =
+          typeof aR === "object" && aR !== null
+            ? ((aR as { changes?: number }).changes ?? 0)
+            : 0;
+        adapter.exec("COMMIT");
+      } catch (txErr) {
+        try {
+          adapter.exec("ROLLBACK");
+        } catch {
+          /* best-effort */
+        }
+        throw txErr;
+      }
+      return { ...merged, conflicts };
+    } finally {
+      try {
+        adapter.exec("DETACH DATABASE wt");
+      } catch {
+        /* best-effort */
+      }
+    }
+  } catch (err) {
+    process.stderr.write(
+      `gsd-db: worktree DB reconciliation failed: ${(err as Error).message}\n`,
+    );
+    return { ...zero, conflicts };
+  }
 }

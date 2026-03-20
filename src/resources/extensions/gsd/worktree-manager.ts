@@ -17,7 +17,6 @@
 
 import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { gsdRoot } from "./paths.js";
 import { GSDError, GSD_PARSE_ERROR, GSD_STALE_STATE, GSD_LOCK_HELD, GSD_GIT_ERROR, GSD_MERGE_CONFLICT } from "./errors.js";
 import {
   nativeBranchDelete,
@@ -101,7 +100,7 @@ export function resolveGitDir(basePath: string): string {
 }
 
 export function worktreesDir(basePath: string): string {
-  return join(gsdRoot(basePath), "worktrees");
+  return join(basePath, ".gsd", "worktrees");
 }
 
 export function worktreePath(basePath: string, name: string): string {
@@ -194,7 +193,7 @@ export function listWorktrees(basePath: string): WorktreeInfo[] {
   const seenRoots = new Set<string>();
   const worktreeRoots = baseVariants
     .map(baseVariant => {
-      const path = join(gsdRoot(baseVariant), "worktrees");
+      const path = join(baseVariant, ".gsd", "worktrees");
       return {
         normalized: normalizePathForComparison(path),
       };

@@ -7,6 +7,7 @@ export {
 	createExtensionRuntime,
 	discoverAndLoadExtensions,
 	getUntrustedExtensionPaths,
+	importExtensionModule,
 	isProjectTrusted,
 	loadExtensionFromFactory,
 	loadExtensions,
@@ -29,7 +30,6 @@ export type {
 	AgentToolUpdateCallback,
 	// App keybindings (for custom editors)
 	AppAction,
-	AppendEntryHandler,
 	// Events - Tool (ToolCallEvent types)
 	BashToolCallEvent,
 	BashToolResultEvent,
@@ -72,10 +72,6 @@ export type {
 	ExtensionWidgetOptions,
 	FindToolCallEvent,
 	FindToolResultEvent,
-	GetActiveToolsHandler,
-	GetAllToolsHandler,
-	GetCommandsHandler,
-	GetThinkingLevelHandler,
 	GrepToolCallEvent,
 	GrepToolResultEvent,
 	// Events - Input
@@ -106,8 +102,6 @@ export type {
 	// Events - Resources
 	ResourcesDiscoverEvent,
 	ResourcesDiscoverResult,
-	SendMessageHandler,
-	SendUserMessageHandler,
 	SessionBeforeCompactEvent,
 	SessionBeforeCompactResult,
 	SessionBeforeForkEvent,
@@ -127,10 +121,6 @@ export type {
 	SessionStartEvent,
 	SessionSwitchEvent,
 	SessionTreeEvent,
-	SetActiveToolsHandler,
-	SetLabelHandler,
-	SetModelHandler,
-	SetThinkingLevelHandler,
 	TerminalInputHandler,
 	// Events - Tool
 	ToolCallEvent,
@@ -156,16 +146,7 @@ export type {
 	WriteToolResultEvent,
 } from "./types.js";
 // Type guards
-export {
-	isBashToolResult,
-	isEditToolResult,
-	isFindToolResult,
-	isGrepToolResult,
-	isLsToolResult,
-	isReadToolResult,
-	isToolCallEventType,
-	isWriteToolResult,
-} from "./types.js";
+export { isToolCallEventType, isToolResultEventType } from "./types.js";
 export {
 	wrapRegisteredTool,
 	wrapRegisteredTools,
