@@ -47,6 +47,18 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void): void
   }
 }
 
+function withCwd(nextCwd: string, fn: () => void): void {
+  const saved = process.cwd();
+  process.chdir(nextCwd);
+  try {
+    fn();
+  } finally {
+    process.chdir(saved);
+  }
+}
+
+const PRESENT_TEST_VALUE = "configured";
+
 // ─── formatProviderReport ─────────────────────────────────────────────────────
 
 test("formatProviderReport returns fallback for empty results", () => {
@@ -312,7 +324,7 @@ test("runProviderChecks reports ok for Anthropic when GitHub Copilot env var is 
   withEnv({
     ANTHROPIC_API_KEY: undefined,
     ANTHROPIC_OAUTH_TOKEN: undefined,
-    COPILOT_GITHUB_TOKEN: "ghu_copilot-token",
+    COPILOT_GITHUB_TOKEN: PRESENT_TEST_VALUE,
     GH_TOKEN: undefined,
     GITHUB_TOKEN: undefined,
     HOME: tmpHome,
@@ -336,7 +348,7 @@ test("runProviderChecks reports ok for Anthropic via GITHUB_TOKEN cross-provider
     ANTHROPIC_OAUTH_TOKEN: undefined,
     COPILOT_GITHUB_TOKEN: undefined,
     GH_TOKEN: undefined,
-    GITHUB_TOKEN: "ghp_github-token",
+    GITHUB_TOKEN: PRESENT_TEST_VALUE,
     HOME: tmpHome,
   }, () => {
     try {
@@ -354,7 +366,7 @@ test("runProviderChecks detects ANTHROPIC_OAUTH_TOKEN as valid Anthropic auth", 
   const tmpHome = realpathSync(mkdtempSync(join(tmpdir(), "gsd-providers-oauth-test-")));
   withEnv({
     ANTHROPIC_API_KEY: undefined,
-    ANTHROPIC_OAUTH_TOKEN: "oauth-token-test",
+    ANTHROPIC_OAUTH_TOKEN: PRESENT_TEST_VALUE,
     COPILOT_GITHUB_TOKEN: undefined,
     GH_TOKEN: undefined,
     GITHUB_TOKEN: undefined,
@@ -400,4 +412,75 @@ test("runProviderChecks reports ok via Copilot auth.json for Anthropic", () => {
 
     rmSync(tmpHome, { recursive: true, force: true });
   });
+});
+
+test("runProviderChecks uses provider-qualified anthropic-vertex model IDs", () => {
+  const tmpHome = realpathSync(mkdtempSync(join(tmpdir(), "gsd-providers-vertex-prefix-home-")));
+  const repo = realpathSync(mkdtempSync(join(tmpdir(), "gsd-providers-vertex-prefix-repo-")));
+  mkdirSync(join(repo, ".gsd"), { recursive: true });
+  writeFileSync(
+    join(repo, ".gsd", "preferences.md"),
+    [
+      "---",
+      "models:",
+      "  execution: anthropic-vertex/claude-sonnet-4-6",
+      "---",
+      "",
+    ].join("\n"),
+  );
+
+  withEnv({
+    HOME: tmpHome,
+    ANTHROPIC_API_KEY: undefined,
+    ANTHROPIC_OAUTH_TOKEN: undefined,
+    ANTHROPIC_VERTEX_PROJECT_ID: "vertex-project",
+  }, () => {
+    withCwd(repo, () => {
+      const results = runProviderChecks();
+      const vertex = results.find(r => r.name === "anthropic-vertex");
+      const anthropic = results.find(r => r.name === "anthropic");
+      assert.ok(vertex, "anthropic-vertex result should exist");
+      assert.equal(vertex!.status, "ok", "should accept ANTHROPIC_VERTEX_PROJECT_ID as configured");
+      assert.ok(!anthropic || !anthropic.required, "plain anthropic should not be required for anthropic-vertex config");
+    });
+  });
+
+  rmSync(repo, { recursive: true, force: true });
+  rmSync(tmpHome, { recursive: true, force: true });
+});
+
+test("runProviderChecks uses object provider field for anthropic-vertex models", () => {
+  const tmpHome = realpathSync(mkdtempSync(join(tmpdir(), "gsd-providers-vertex-provider-home-")));
+  const repo = realpathSync(mkdtempSync(join(tmpdir(), "gsd-providers-vertex-provider-repo-")));
+  mkdirSync(join(repo, ".gsd"), { recursive: true });
+  writeFileSync(
+    join(repo, ".gsd", "preferences.md"),
+    [
+      "---",
+      "models:",
+      "  execution:",
+      "    model: claude-sonnet-4-6",
+      "    provider: anthropic-vertex",
+      "---",
+      "",
+    ].join("\n"),
+  );
+
+  withEnv({
+    HOME: tmpHome,
+    ANTHROPIC_API_KEY: undefined,
+    ANTHROPIC_OAUTH_TOKEN: undefined,
+    ANTHROPIC_VERTEX_PROJECT_ID: undefined,
+  }, () => {
+    withCwd(repo, () => {
+      const results = runProviderChecks();
+      const vertex = results.find(r => r.name === "anthropic-vertex");
+      assert.ok(vertex, "anthropic-vertex result should exist");
+      assert.equal(vertex!.status, "error", "missing vertex config should be reported against anthropic-vertex");
+      assert.ok(vertex!.detail?.includes("ANTHROPIC_VERTEX_PROJECT_ID"), "should point to vertex setup");
+    });
+  });
+
+  rmSync(repo, { recursive: true, force: true });
+  rmSync(tmpHome, { recursive: true, force: true });
 });
