@@ -360,4 +360,115 @@ console.log('\n=== Clean slice plan: no plan-quality issues ===');
   assertEq(planQualityIssues.length, 0, 'clean slice plan produces no empty_task_entry issues');
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// validateTaskPlanContent — missing output file paths
+// ═══════════════════════════════════════════════════════════════════════════
+
+console.log('\n=== validateTaskPlanContent: missing output file paths ===');
+{
+  const content = `# T01: Some Task
+
+## Description
+
+Do something.
+
+## Steps
+
+1. Do the thing
+
+## Verification
+
+- Check it works
+
+## Expected Output
+
+This task produces the main output.
+`;
+
+  const issues = validateTaskPlanContent('T01-PLAN.md', content);
+  const outputIssues = issues.filter(i => i.ruleId === 'missing_output_file_paths');
+  assertTrue(outputIssues.length >= 1, 'Expected Output without file paths triggers missing_output_file_paths');
+}
+
+console.log('\n=== validateTaskPlanContent: valid output file paths ===');
+{
+  const content = `# T01: Some Task
+
+## Description
+
+Do something.
+
+## Steps
+
+1. Do the thing
+
+## Verification
+
+- Check it works
+
+## Expected Output
+
+- \`src/types.ts\` — New type definitions
+`;
+
+  const issues = validateTaskPlanContent('T01-PLAN.md', content);
+  const outputIssues = issues.filter(i => i.ruleId === 'missing_output_file_paths');
+  assertEq(outputIssues.length, 0, 'Expected Output with file paths does not trigger warning');
+}
+
+console.log('\n=== validateTaskPlanContent: missing input file paths (info severity) ===');
+{
+  const content = `# T01: Some Task
+
+## Description
+
+Do something.
+
+## Steps
+
+1. Do the thing
+
+## Verification
+
+- Check it works
+
+## Inputs
+
+Prior task summary insights about the architecture.
+
+## Expected Output
+
+- \`src/output.ts\` — Output file
+`;
+
+  const issues = validateTaskPlanContent('T01-PLAN.md', content);
+  const inputIssues = issues.filter(i => i.ruleId === 'missing_input_file_paths');
+  assertTrue(inputIssues.length >= 1, 'Inputs without file paths triggers missing_input_file_paths');
+  if (inputIssues.length > 0) {
+    assertEq(inputIssues[0].severity, 'info', 'missing_input_file_paths is info severity (not warning)');
+  }
+}
+
+console.log('\n=== validateTaskPlanContent: no Expected Output section at all ===');
+{
+  const content = `# T01: Some Task
+
+## Description
+
+Do something.
+
+## Steps
+
+1. Do the thing
+
+## Verification
+
+- Check it works
+`;
+
+  const issues = validateTaskPlanContent('T01-PLAN.md', content);
+  const outputIssues = issues.filter(i => i.ruleId === 'missing_output_file_paths');
+  assertTrue(outputIssues.length >= 1, 'Missing Expected Output section triggers missing_output_file_paths');
+}
+
 report();
