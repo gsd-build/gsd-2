@@ -45,7 +45,7 @@
   - Verify: `npx tsc --noEmit` passes with no errors from the new files
   - Done when: Three new files exist, compile cleanly, and have no imports from existing GSD modules except standard library types
 
-- [ ] **T02: Define LoopDeps sub-interfaces and add activeEngineId to AutoSession** `est:1h`
+- [x] **T02: Define LoopDeps sub-interfaces and add activeEngineId to AutoSession** `est:1h`
   - Why: R003 requires decomposing the dependency surface into logical groups. The sub-interfaces formalize the 45+ imports in `auto.ts` into typed role-based contracts. Adding `activeEngineId` to `AutoSession` enables S02's engine resolution. This is the riskiest task — if the grouping is wrong it creates coupling that S02 has to undo.
   - Files: `src/resources/extensions/gsd/loop-deps-groups.ts`, `src/resources/extensions/gsd/auto/session.ts`
   - Do: Read all 66 import statements in `auto.ts` and group them into role-based sub-interfaces. Start with the grouping from research (GitOps, StateOps, DispatchOps, ModelOps, BudgetOps, VerificationOps, RecoveryOps, SupervisionOps, PostUnitOps, DashboardOps, SessionOps, ObservabilityOps, HealthOps) but merge groups that are too small or tightly coupled. Each sub-interface should have typed method signatures matching the actual exported functions from those modules. Import types from existing modules where needed (this file CAN import from existing GSD modules — it wraps them). Add `activeEngineId: string | null` to `AutoSession` with default `null`, add it to `reset()`, and add it to `toJSON()`. The encapsulation test (`auto-session-encapsulation.test.ts`) will verify `reset()` coverage automatically.

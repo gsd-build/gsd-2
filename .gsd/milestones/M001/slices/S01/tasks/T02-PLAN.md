@@ -76,3 +76,10 @@ Also add `activeEngineId: string | null` to `AutoSession` to enable S02's engine
 
 - `src/resources/extensions/gsd/loop-deps-groups.ts` — 8-10 role-based sub-interfaces with typed method signatures
 - `src/resources/extensions/gsd/auto/session.ts` — modified with `activeEngineId` field, passing all encapsulation tests
+
+## Observability Impact
+
+- **No new runtime signals.** `loop-deps-groups.ts` is pure interfaces erased at runtime by `--experimental-strip-types`. `activeEngineId` is a class field that appears in `toJSON()` diagnostic snapshots.
+- **Typecheck signal:** `npx tsc --noEmit --project tsconfig.extensions.json` validates all new interface signatures compile cleanly. Failure means a mismatched import or type incompatibility.
+- **Encapsulation test signal:** `auto-session-encapsulation.test.ts` validates `activeEngineId` is covered by `reset()`. Failure means the field was added without lifecycle coverage.
+- **Future agent inspection:** To verify this task's output, run `npx tsc --noEmit --project tsconfig.extensions.json` (zero errors) and `grep "^export interface" src/resources/extensions/gsd/loop-deps-groups.ts | wc -l` (expect 11: 10 sub-interfaces + 1 composite).
