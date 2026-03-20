@@ -353,6 +353,8 @@ export interface PreDispatchHookConfig {
   skip_if?: string;
   /** Model override when this hook fires. */
   model?: string;
+  /** Additional context text appended to the unit prompt when this hook fires. */
+  additional_context?: string;
   /** Set false to disable without removing config. Default true. */
   enabled?: boolean;
 }
@@ -366,6 +368,8 @@ export interface PreDispatchResult {
   unitType?: string;
   /** Model override. */
   model?: string;
+  /** Additional context concatenated from all fired hooks' additional_context fields. */
+  additionalContext?: string;
   /** Names of hooks that fired, for logging. */
   firedHooks: string[];
 }

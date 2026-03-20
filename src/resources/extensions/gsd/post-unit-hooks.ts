@@ -265,6 +265,7 @@ export function runPreDispatchHooks(
 
   const firedHooks: string[] = [];
   let currentPrompt = prompt;
+  const additionalContextParts: string[] = [];
 
   for (const hook of hooks) {
     if (hook.action === "skip") {
@@ -284,6 +285,7 @@ export function runPreDispatchHooks(
         prompt: substitute(hook.prompt ?? ""),
         unitType: hook.unit_type,
         model: hook.model,
+        additionalContext: hook.additional_context ? substitute(hook.additional_context) : undefined,
         firedHooks,
       };
     }
@@ -296,6 +298,9 @@ export function runPreDispatchHooks(
       if (hook.append) {
         currentPrompt = `${currentPrompt}\n\n${substitute(hook.append)}`;
       }
+      if (hook.additional_context) {
+        additionalContextParts.push(substitute(hook.additional_context));
+      }
     }
   }
 
@@ -303,6 +308,7 @@ export function runPreDispatchHooks(
     action: "proceed",
     prompt: currentPrompt,
     model: hooks.find(h => h.action === "modify" && h.model)?.model,
+    additionalContext: additionalContextParts.length > 0 ? additionalContextParts.join("\n\n") : undefined,
     firedHooks,
   };
 }

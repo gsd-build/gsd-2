@@ -35,7 +35,19 @@ export async function selectAndApplyModel(
   verbose: boolean,
   autoModeStartModel: { provider: string; id: string } | null,
   retryContext?: { isRetry: boolean; previousTier?: string },
+  hookModelOverride?: string,
 ): Promise<ModelSelectionResult> {
+  // If a pre-dispatch hook specified a model override, resolve and apply it directly.
+  if (hookModelOverride) {
+    const availableModels = ctx.modelRegistry.getAvailable();
+    const overrideModel = resolveModelId(hookModelOverride, availableModels, ctx.model?.provider);
+    if (overrideModel) {
+      await pi.setModel(overrideModel, { persist: false });
+      return { routing: null };
+    }
+    // Model not found — fall through to normal routing
+  }
+
   const modelConfig = resolveModelWithFallbacksForUnit(unitType);
   let routing: { tier: string; modelDowngraded: boolean } | null = null;
 

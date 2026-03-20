@@ -85,6 +85,7 @@ import {
 import { closeoutUnit } from "./auto-unit-closeout.js";
 import { recoverTimedOutUnit } from "./auto-timeout-recovery.js";
 import { selectAndApplyModel } from "./auto-model-selection.js";
+import { getActiveMemoriesRanked, formatMemoriesForPrompt } from "./memory-store.js";
 import {
   syncProjectRootToWorktree,
   syncStateToProjectRoot,
@@ -788,6 +789,12 @@ function buildLoopDeps(): LoopDeps {
     // Model selection + supervision
     selectAndApplyModel,
     startUnitSupervision,
+
+    // Per-dispatch memory refresh
+    refreshMemoryBlock: () => {
+      const memories = getActiveMemoriesRanked(30);
+      return formatMemoriesForPrompt(memories, 2000);
+    },
 
     // Prompt helpers
     getDeepDiagnostic,

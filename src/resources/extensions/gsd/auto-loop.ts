@@ -390,6 +390,8 @@ export interface LoopDeps {
     action: string;
     prompt?: string;
     unitType?: string;
+    model?: string;
+    additionalContext?: string;
   };
   getPriorSliceCompletionBlocker: (
     basePath: string,
@@ -464,6 +466,7 @@ export interface LoopDeps {
     verbose: boolean,
     startModel: { provider: string; id: string } | null,
     retryContext?: { isRetry: boolean; previousTier?: string },
+    hookModelOverride?: string,
   ) => Promise<{ routing: { tier: string; modelDowngraded: boolean } | null }>;
   startUnitSupervision: (sctx: {
     s: AutoSession;
@@ -481,6 +484,7 @@ export interface LoopDeps {
   getDeepDiagnostic: (basePath: string) => string | null;
   isDbAvailable: () => boolean;
   reorderForCaching: (prompt: string) => string;
+  refreshMemoryBlock: () => string;
 
   // Filesystem
   existsSync: (path: string) => boolean;
@@ -1196,6 +1200,9 @@ export async function autoLoop(
       } else if (preDispatchResult.prompt) {
         prompt = preDispatchResult.prompt;
       }
+      if (preDispatchResult.additionalContext) {
+        prompt = `${prompt}\n\n${preDispatchResult.additionalContext}`;
+      }
 
       const priorSliceBlocker = deps.getPriorSliceCompletionBlocker(
         s.basePath,
@@ -1354,6 +1361,12 @@ export async function autoLoop(
         finalPrompt = `${finalPrompt}${repairBlock}`;
       }
 
+      // Per-dispatch memory refresh
+      const memoryBlock = deps.refreshMemoryBlock();
+      if (memoryBlock) {
+        finalPrompt = `${finalPrompt}\n\n${memoryBlock}`;
+      }
+
       // Prompt char measurement
       s.lastPromptCharCount = finalPrompt.length;
       s.lastBaselineCharCount = undefined;
@@ -1397,6 +1410,7 @@ export async function autoLoop(
         s.verbose,
         s.autoModeStartModel,
         { isRetry, previousTier },
+        preDispatchResult?.model,
       );
       s.currentUnitRouting =
         modelResult.routing as AutoSession["currentUnitRouting"];
@@ -1582,6 +1596,8 @@ export async function autoLoop(
           prefs,
           s.verbose,
           s.autoModeStartModel,
+          undefined,
+          item.model,
         );
 
         // Supervision
