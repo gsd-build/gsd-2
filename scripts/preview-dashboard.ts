@@ -226,11 +226,14 @@ function render(w: number, healthState: { icon: string; color: string; summary: 
   lines.push("");
   const hitColor = mockHitRate >= 70 ? "success" : mockHitRate >= 40 ? "warning" : "error";
   const statsParts = [
-    theme.fg("dim", `i${mockInput} o${mockOutput} R${mockCacheRead} W${mockCacheWrite}`),
+    theme.fg("dim", `↑${mockInput}`),
+    theme.fg("dim", `↓${mockOutput}`),
+    theme.fg("dim", `R${mockCacheRead}`),
+    theme.fg("dim", `W${mockCacheWrite}`),
     theme.fg(hitColor, `${mockHitRate}%hit`),
     theme.fg("warning", mockCost),
     theme.fg("dim", mockCtxUsage),
-    theme.fg("muted", modelDisplay),
+    theme.fg("dim", modelDisplay),
   ];
   const statsStr = statsParts.join(theme.fg("dim", " "));
   lines.push(rightAlign("", statsStr, w));

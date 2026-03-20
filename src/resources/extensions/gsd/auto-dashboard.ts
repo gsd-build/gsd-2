@@ -473,8 +473,8 @@ export function updateProgressWidget(
           const cxPct = cxUsage?.percent !== null ? cxPctVal.toFixed(1) : "?";
 
           const sp: string[] = [];
-          if (totalInput) sp.push(`i${formatWidgetTokens(totalInput)}`);
-          if (totalOutput) sp.push(`o${formatWidgetTokens(totalOutput)}`);
+          if (totalInput) sp.push(`↑${formatWidgetTokens(totalInput)}`);
+          if (totalOutput) sp.push(`↓${formatWidgetTokens(totalOutput)}`);
           if (totalCacheRead) sp.push(`R${formatWidgetTokens(totalCacheRead)}`);
           if (totalCacheWrite) sp.push(`W${formatWidgetTokens(totalCacheWrite)}`);
           if (totalCacheRead + totalInput > 0) {
