@@ -36,14 +36,16 @@ import type { CmuxLogLevel } from "../cmux/index.js";
  */
 const MAX_LOOP_ITERATIONS = 500;
 
-/** Data-driven budget threshold notifications (75/80/90%). The 100% case is
- *  handled inline because it requires break/pause/stop control flow. */
+/** Data-driven budget threshold notifications (descending). The 100% entry
+ *  triggers special enforcement logic (halt/pause/warn); sub-100 entries fire
+ *  a simple notification. */
 const BUDGET_THRESHOLDS: Array<{
   pct: number;
   label: string;
-  notifyLevel: "info" | "warning";
-  cmuxLevel: "progress" | "warning";
+  notifyLevel: "info" | "warning" | "error";
+  cmuxLevel: "progress" | "warning" | "error";
 }> = [
+  { pct: 100, label: "Budget ceiling reached", notifyLevel: "error", cmuxLevel: "error" },
   { pct: 90, label: "Budget 90%", notifyLevel: "warning", cmuxLevel: "warning" },
   { pct: 80, label: "Approaching budget ceiling — 80%", notifyLevel: "warning", cmuxLevel: "warning" },
   { pct: 75, label: "Budget 75%", notifyLevel: "info", cmuxLevel: "progress" },
@@ -145,7 +147,6 @@ export async function runUnit(
   unitType: string,
   unitId: string,
   prompt: string,
-  _prefs: GSDPreferences | undefined,
 ): Promise<UnitResult> {
   debugLog("runUnit", { phase: "start", unitType, unitId });
 
@@ -489,6 +490,96 @@ export interface LoopDeps {
   getSessionFile: (ctx: ExtensionContext) => string;
 }
 
+// ─── generateMilestoneReport ──────────────────────────────────────────────────
+
+/**
+ * Generate and write an HTML milestone report snapshot.
+ * Extracted from the milestone-transition block in autoLoop.
+ */
+async function generateMilestoneReport(
+  s: AutoSession,
+  ctx: ExtensionContext,
+  milestoneId: string,
+): Promise<void> {
+  const { loadVisualizerData } = await import("./visualizer-data.js");
+  const { generateHtmlReport } = await import("./export-html.js");
+  const { writeReportSnapshot } = await import("./reports.js");
+  const { basename } = await import("node:path");
+
+  const snapData = await loadVisualizerData(s.basePath);
+  const completedMs = snapData.milestones.find(
+    (m: { id: string }) => m.id === milestoneId,
+  );
+  const msTitle = completedMs?.title ?? milestoneId;
+  const gsdVersion = process.env.GSD_VERSION ?? "0.0.0";
+  const projName = basename(s.basePath);
+  const doneSlices = snapData.milestones.reduce(
+    (acc: number, m: { slices: { done: boolean }[] }) =>
+      acc + m.slices.filter((sl: { done: boolean }) => sl.done).length,
+    0,
+  );
+  const totalSlices = snapData.milestones.reduce(
+    (acc: number, m: { slices: unknown[] }) => acc + m.slices.length,
+    0,
+  );
+  const outPath = writeReportSnapshot({
+    basePath: s.basePath,
+    html: generateHtmlReport(snapData, {
+      projectName: projName,
+      projectPath: s.basePath,
+      gsdVersion,
+      milestoneId,
+      indexRelPath: "index.html",
+    }),
+    milestoneId,
+    milestoneTitle: msTitle,
+    kind: "milestone",
+    projectName: projName,
+    projectPath: s.basePath,
+    gsdVersion,
+    totalCost: snapData.totals?.cost ?? 0,
+    totalTokens: snapData.totals?.tokens.total ?? 0,
+    totalDuration: snapData.totals?.duration ?? 0,
+    doneSlices,
+    totalSlices,
+    doneMilestones: snapData.milestones.filter(
+      (m: { status: string }) => m.status === "complete",
+    ).length,
+    totalMilestones: snapData.milestones.length,
+    phase: snapData.phase,
+  });
+  ctx.ui.notify(
+    `Report saved: .gsd/reports/${basename(outPath)} — open index.html to browse progression.`,
+    "info",
+  );
+}
+
+// ─── closeoutAndStop ──────────────────────────────────────────────────────────
+
+/**
+ * If a unit is in-flight, close it out, then stop auto-mode.
+ * Extracted from ~4 identical if-closeout-then-stop sequences in autoLoop.
+ */
+async function closeoutAndStop(
+  ctx: ExtensionContext,
+  pi: ExtensionAPI,
+  s: AutoSession,
+  deps: LoopDeps,
+  reason: string,
+): Promise<void> {
+  if (s.currentUnit) {
+    await deps.closeoutUnit(
+      ctx,
+      s.basePath,
+      s.currentUnit.type,
+      s.currentUnit.id,
+      s.currentUnit.startedAt,
+      deps.buildSnapshotOpts(s.currentUnit.type, s.currentUnit.id),
+    );
+  }
+  await deps.stopAuto(ctx, pi, reason);
+}
+
 // ─── autoLoop ────────────────────────────────────────────────────────────────
 
 /**
@@ -643,57 +734,7 @@ export async function autoLoop(
         }
         if (vizPrefs?.auto_report !== false) {
           try {
-            const { loadVisualizerData } = await import("./visualizer-data.js");
-            const { generateHtmlReport } = await import("./export-html.js");
-            const { writeReportSnapshot } = await import("./reports.js");
-            const { basename } = await import("node:path");
-            const snapData = await loadVisualizerData(s.basePath);
-            const completedMs = snapData.milestones.find(
-              (m: { id: string }) => m.id === s.currentMilestoneId,
-            );
-            const msTitle = completedMs?.title ?? s.currentMilestoneId;
-            const gsdVersion = process.env.GSD_VERSION ?? "0.0.0";
-            const projName = basename(s.basePath);
-            const doneSlices = snapData.milestones.reduce(
-              (acc: number, m: { slices: { done: boolean }[] }) =>
-                acc +
-                m.slices.filter((sl: { done: boolean }) => sl.done).length,
-              0,
-            );
-            const totalSlices = snapData.milestones.reduce(
-              (acc: number, m: { slices: unknown[] }) => acc + m.slices.length,
-              0,
-            );
-            const outPath = writeReportSnapshot({
-              basePath: s.basePath,
-              html: generateHtmlReport(snapData, {
-                projectName: projName,
-                projectPath: s.basePath,
-                gsdVersion,
-                milestoneId: s.currentMilestoneId,
-                indexRelPath: "index.html",
-              }),
-              milestoneId: s.currentMilestoneId!,
-              milestoneTitle: msTitle,
-              kind: "milestone",
-              projectName: projName,
-              projectPath: s.basePath,
-              gsdVersion,
-              totalCost: snapData.totals?.cost ?? 0,
-              totalTokens: snapData.totals?.tokens.total ?? 0,
-              totalDuration: snapData.totals?.duration ?? 0,
-              doneSlices,
-              totalSlices,
-              doneMilestones: snapData.milestones.filter(
-                (m: { status: string }) => m.status === "complete",
-              ).length,
-              totalMilestones: snapData.milestones.length,
-              phase: snapData.phase,
-            });
-            ctx.ui.notify(
-              `Report saved: .gsd/reports/${(await import("node:path")).basename(outPath)} — open index.html to browse progression.`,
-              "info",
-            );
+            await generateMilestoneReport(s, ctx, s.currentMilestoneId!);
           } catch (err) {
             ctx.ui.notify(
               `Report generation failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -831,20 +872,10 @@ export async function autoLoop(
       }
 
       if (!mid || !midTitle) {
-        if (s.currentUnit) {
-          await deps.closeoutUnit(
-            ctx,
-            s.basePath,
-            s.currentUnit.type,
-            s.currentUnit.id,
-            s.currentUnit.startedAt,
-            deps.buildSnapshotOpts(s.currentUnit.type, s.currentUnit.id),
-          );
-        }
         const noMilestoneReason = !mid
           ? "No active milestone after merge reconciliation"
           : `Milestone ${mid} has no title after reconciliation`;
-        await deps.stopAuto(ctx, pi, noMilestoneReason);
+        await closeoutAndStop(ctx, pi, s, deps, noMilestoneReason);
         debugLog("autoLoop", {
           phase: "exit",
           reason: "no-milestone-after-reconciliation",
@@ -854,17 +885,7 @@ export async function autoLoop(
 
       // Terminal: complete
       if (state.phase === "complete") {
-        if (s.currentUnit) {
-          await deps.closeoutUnit(
-            ctx,
-            s.basePath,
-            s.currentUnit.type,
-            s.currentUnit.id,
-            s.currentUnit.startedAt,
-            deps.buildSnapshotOpts(s.currentUnit.type, s.currentUnit.id),
-          );
-        }
-        // Milestone merge on complete
+        // Milestone merge on complete (before closeout so branch state is clean)
         if (s.currentMilestoneId) {
           deps.resolver.mergeAndExit(s.currentMilestoneId, ctx.ui);
         }
@@ -879,25 +900,15 @@ export async function autoLoop(
           `Milestone ${mid} complete.`,
           "success",
         );
-        await deps.stopAuto(ctx, pi, `Milestone ${mid} complete`);
+        await closeoutAndStop(ctx, pi, s, deps, `Milestone ${mid} complete`);
         debugLog("autoLoop", { phase: "exit", reason: "milestone-complete" });
         break;
       }
 
       // Terminal: blocked
       if (state.phase === "blocked") {
-        if (s.currentUnit) {
-          await deps.closeoutUnit(
-            ctx,
-            s.basePath,
-            s.currentUnit.type,
-            s.currentUnit.id,
-            s.currentUnit.startedAt,
-            deps.buildSnapshotOpts(s.currentUnit.type, s.currentUnit.id),
-          );
-        }
         const blockerMsg = `Blocked: ${state.blockers.join(", ")}`;
-        await deps.stopAuto(ctx, pi, blockerMsg);
+        await closeoutAndStop(ctx, pi, s, deps, blockerMsg);
         ctx.ui.notify(`${blockerMsg}. Fix and run /gsd auto.`, "warning");
         deps.sendDesktopNotification("GSD", blockerMsg, "error", "attention");
         deps.logCmuxEvent(deps.loadEffectiveGSDPreferences()?.preferences, blockerMsg, "error");
@@ -928,38 +939,39 @@ export async function autoLoop(
           budgetPct,
         );
 
-        if (newBudgetAlertLevel === 100 && budgetEnforcementAction !== "none") {
-          const msg = `Budget ceiling ${deps.formatCost(budgetCeiling)} reached (spent ${deps.formatCost(totalCost)}).`;
+        // Data-driven threshold check — loop descending, fire first match
+        const threshold = BUDGET_THRESHOLDS.find(
+          (t) => newBudgetAlertLevel >= t.pct,
+        );
+        if (threshold) {
           s.lastBudgetAlertLevel =
             newBudgetAlertLevel as AutoSession["lastBudgetAlertLevel"];
-          if (budgetEnforcementAction === "halt") {
-            deps.sendDesktopNotification("GSD", msg, "error", "budget");
-            await deps.stopAuto(ctx, pi, "Budget ceiling reached");
-            debugLog("autoLoop", { phase: "exit", reason: "budget-halt" });
-            break;
-          }
-          if (budgetEnforcementAction === "pause") {
-            ctx.ui.notify(
-              `${msg} Pausing auto-mode — /gsd auto to override and continue.`,
-              "warning",
-            );
+
+          if (threshold.pct === 100 && budgetEnforcementAction !== "none") {
+            // 100% — special enforcement logic (halt/pause/warn)
+            const msg = `Budget ceiling ${deps.formatCost(budgetCeiling)} reached (spent ${deps.formatCost(totalCost)}).`;
+            if (budgetEnforcementAction === "halt") {
+              deps.sendDesktopNotification("GSD", msg, "error", "budget");
+              await deps.stopAuto(ctx, pi, "Budget ceiling reached");
+              debugLog("autoLoop", { phase: "exit", reason: "budget-halt" });
+              break;
+            }
+            if (budgetEnforcementAction === "pause") {
+              ctx.ui.notify(
+                `${msg} Pausing auto-mode — /gsd auto to override and continue.`,
+                "warning",
+              );
+              deps.sendDesktopNotification("GSD", msg, "warning", "budget");
+              deps.logCmuxEvent(prefs, msg, "warning");
+              await deps.pauseAuto(ctx, pi);
+              debugLog("autoLoop", { phase: "exit", reason: "budget-pause" });
+              break;
+            }
+            ctx.ui.notify(`${msg} Continuing (enforcement: warn).`, "warning");
             deps.sendDesktopNotification("GSD", msg, "warning", "budget");
             deps.logCmuxEvent(prefs, msg, "warning");
-            await deps.pauseAuto(ctx, pi);
-            debugLog("autoLoop", { phase: "exit", reason: "budget-pause" });
-            break;
-          }
-          ctx.ui.notify(`${msg} Continuing (enforcement: warn).`, "warning");
-          deps.sendDesktopNotification("GSD", msg, "warning", "budget");
-          deps.logCmuxEvent(prefs, msg, "warning");
-        } else {
-          // Data-driven 75/80/90% threshold notifications
-          const threshold = BUDGET_THRESHOLDS.find(
-            (t) => newBudgetAlertLevel === t.pct,
-          );
-          if (threshold) {
-            s.lastBudgetAlertLevel =
-              newBudgetAlertLevel as AutoSession["lastBudgetAlertLevel"];
+          } else if (threshold.pct < 100) {
+            // Sub-100% — simple notification
             const msg = `${threshold.label}: ${deps.formatCost(totalCost)} / ${deps.formatCost(budgetCeiling)}`;
             ctx.ui.notify(msg, threshold.notifyLevel);
             deps.sendDesktopNotification(
@@ -969,9 +981,9 @@ export async function autoLoop(
               "budget",
             );
             deps.logCmuxEvent(prefs, msg, threshold.cmuxLevel);
-          } else if (budgetAlertLevel === 0) {
-            s.lastBudgetAlertLevel = 0;
           }
+        } else if (budgetAlertLevel === 0) {
+          s.lastBudgetAlertLevel = 0;
         }
       } else {
         s.lastBudgetAlertLevel = 0;
@@ -1046,17 +1058,7 @@ export async function autoLoop(
       });
 
       if (dispatchResult.action === "stop") {
-        if (s.currentUnit) {
-          await deps.closeoutUnit(
-            ctx,
-            s.basePath,
-            s.currentUnit.type,
-            s.currentUnit.id,
-            s.currentUnit.startedAt,
-            deps.buildSnapshotOpts(s.currentUnit.type, s.currentUnit.id),
-          );
-        }
-        await deps.stopAuto(ctx, pi, dispatchResult.reason);
+        await closeoutAndStop(ctx, pi, s, deps, dispatchResult.reason);
         debugLog("autoLoop", { phase: "exit", reason: "dispatch-stop" });
         break;
       }
@@ -1215,12 +1217,12 @@ export async function autoLoop(
         );
 
         if (s.currentUnitRouting) {
-          const isRetry =
+          const isRetryForOutcome =
             s.currentUnit.type === unitType && s.currentUnit.id === unitId;
           deps.recordOutcome(
             s.currentUnit.type,
             s.currentUnitRouting.tier as "light" | "standard" | "heavy",
-            !isRetry,
+            !isRetryForOutcome,
           );
         }
 
@@ -1415,7 +1417,6 @@ export async function autoLoop(
         unitType,
         unitId,
         finalPrompt,
-        prefs,
       );
       debugLog("autoLoop", {
         phase: "runUnit-end",
@@ -1587,7 +1588,6 @@ export async function autoLoop(
           item.unitType,
           item.unitId,
           item.prompt,
-          prefs,
         );
         deps.clearUnitTimeout();
 

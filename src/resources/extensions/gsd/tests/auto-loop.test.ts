@@ -104,7 +104,6 @@ test("resolveAgentEnd resolves a pending runUnit promise", async () => {
     "task",
     "T01",
     "do stuff",
-    undefined,
   );
 
   // Give the microtask queue a tick so runUnit reaches the await
@@ -136,7 +135,7 @@ test("double resolveAgentEnd only resolves once (second is dropped)", async () =
   const event1 = makeEvent([{ id: 1 }]);
   const event2 = makeEvent([{ id: 2 }]);
 
-  const resultPromise = runUnit(ctx, pi, s, "task", "T01", "prompt", undefined);
+  const resultPromise = runUnit(ctx, pi, s, "task", "T01", "prompt");
 
   await new Promise((r) => setTimeout(r, 10));
 
@@ -161,7 +160,7 @@ test("runUnit returns cancelled when session creation fails", async () => {
   const pi = makeMockPi();
   const s = makeMockSession({ newSessionThrows: "connection refused" });
 
-  const result = await runUnit(ctx, pi, s, "task", "T01", "prompt", undefined);
+  const result = await runUnit(ctx, pi, s, "task", "T01", "prompt");
 
   assert.equal(result.status, "cancelled");
   assert.equal(result.event, undefined);
@@ -177,7 +176,7 @@ test("runUnit returns cancelled when session creation times out", async () => {
   // Session returns cancelled: true (simulates the timeout race outcome)
   const s = makeMockSession({ newSessionResult: { cancelled: true } });
 
-  const result = await runUnit(ctx, pi, s, "task", "T01", "prompt", undefined);
+  const result = await runUnit(ctx, pi, s, "task", "T01", "prompt");
 
   assert.equal(result.status, "cancelled");
   assert.equal(result.event, undefined);
@@ -192,7 +191,7 @@ test("runUnit returns cancelled when s.active is false before sendMessage", asyn
   const s = makeMockSession();
   s.active = false;
 
-  const result = await runUnit(ctx, pi, s, "task", "T01", "prompt", undefined);
+  const result = await runUnit(ctx, pi, s, "task", "T01", "prompt");
 
   assert.equal(result.status, "cancelled");
   assert.equal(pi.calls.length, 0);
@@ -212,7 +211,7 @@ test("runUnit only arms resolve after newSession completes", async () => {
     },
   });
 
-  const resultPromise = runUnit(ctx, pi, s, "task", "T01", "prompt", undefined);
+  const resultPromise = runUnit(ctx, pi, s, "task", "T01", "prompt");
 
   await new Promise((r) => setTimeout(r, 30));
 
