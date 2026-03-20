@@ -26,6 +26,7 @@ import type {
 import type { DispatchAction } from "./auto-dispatch.js";
 import type { WorktreeResolver } from "./worktree-resolver.js";
 import { debugLog } from "./debug-logger.js";
+import { resetToolLoopGuard, disableToolLoopGuard } from "./auto-tool-loop-guard.js";
 import type { CmuxLogLevel } from "../cmux/index.js";
 
 /**
@@ -231,6 +232,9 @@ export async function runUnit(
       process.chdir(s.basePath);
     }
   } catch { /* non-fatal — chdir may fail if dir was removed */ }
+
+  // ── Reset intra-unit tool loop guard ──
+  resetToolLoopGuard();
 
   // ── Send the prompt ──
   debugLog("runUnit", { phase: "send-message", unitType, unitId });

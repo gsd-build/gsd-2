@@ -66,6 +66,7 @@ import { toPosixPath } from "../shared/mod.js";
 import { isParallelActive, shutdownParallel } from "./parallel-orchestrator.js";
 import { DEFAULT_BASH_TIMEOUT_SECS } from "./constants.js";
 import { markCmuxPromptShown, shouldPromptToEnableCmux } from "../cmux/index.js";
+import { recordToolCall, resetToolLoopGuard, disableToolLoopGuard } from "./auto-tool-loop-guard.js";
 
 // ── Agent Instructions (DEPRECATED) ──────────────────────────────────────
 // agent-instructions.md is deprecated. Use AGENTS.md or CLAUDE.md instead.
@@ -1103,6 +1104,17 @@ export default function (pi: ExtensionAPI) {
   pi.on("tool_execution_start", async (event) => {
     if (!isAutoActive()) return;
     markToolStart(event.toolCallId);
+
+    // Intra-unit tool-call loop detection
+    const loopCheck = recordToolCall(event.toolName, event.args ?? {});
+    if (!loopCheck.allowed) {
+      ctx.ui.notify(
+        `Tool loop detected: ${event.toolName} called ${loopCheck.count} times with identical arguments. Aborting unit.`,
+        "error",
+      );
+      disableToolLoopGuard();
+      await pauseAuto(ctx, pi);
+    }
   });
 
   pi.on("tool_execution_end", async (event) => {

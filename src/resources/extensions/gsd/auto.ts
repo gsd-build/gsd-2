@@ -156,6 +156,7 @@ import {
 import { pruneQueueOrder } from "./queue-order.js";
 
 import { debugLog, isDebugEnabled, writeDebugSummary } from "./debug-logger.js";
+import { disableToolLoopGuard } from "./auto-tool-loop-guard.js";
 import {
   resolveExpectedArtifactPath,
   verifyExpectedArtifact,
@@ -534,6 +535,7 @@ export async function stopAuto(
   reason?: string,
 ): Promise<void> {
   if (!s.active && !s.paused) return;
+  disableToolLoopGuard();
   const loadedPreferences = loadEffectiveGSDPreferences()?.preferences;
   const reasonSuffix = reason ? ` — ${reason}` : "";
   clearUnitTimeout();
@@ -671,6 +673,7 @@ export async function pauseAuto(
   _pi?: ExtensionAPI,
 ): Promise<void> {
   if (!s.active) return;
+  disableToolLoopGuard();
   clearUnitTimeout();
 
   s.pausedSessionFile = ctx?.sessionManager?.getSessionFile() ?? null;
