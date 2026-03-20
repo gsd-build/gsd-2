@@ -1548,3 +1548,176 @@ test("autoLoop lifecycle: advances through research → plan → execute → ver
     "dispatched unit types should follow the full lifecycle sequence",
   );
 });
+
+// ── Sidecar routing pattern tests ─────────────────────────────────────────────
+
+test("sidecar item skips resolveDispatch (bypass of Phases 1-3)", async () => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  ctx.ui.setStatus = () => {};
+  ctx.ui.notify = () => {};
+  ctx.sessionManager = { getSessionFile: () => "/tmp/session.json" };
+  const pi = makeMockPi();
+  const s = makeLoopSession();
+
+  // Pre-load sidecar queue before the loop starts
+  s.sidecarQueue.push({
+    kind: "hook" as const,
+    unitType: "hook/review",
+    unitId: "M001/S01/T01/review",
+    prompt: "review the code",
+  });
+
+  let resolveDispatchCallCount = 0;
+
+  const deps = makeMockDeps({
+    resolveDispatch: async () => {
+      resolveDispatchCallCount++;
+      deps.callLog.push("resolveDispatch");
+      return {
+        action: "dispatch" as const,
+        unitType: "execute-task",
+        unitId: "M001/S01/T01",
+        prompt: "do the thing",
+      };
+    },
+    postUnitPostVerification: async () => {
+      deps.callLog.push("postUnitPostVerification");
+      // Stop after the sidecar runs
+      s.active = false;
+      return "continue" as const;
+    },
+  });
+
+  const loopPromise = autoLoop(ctx, pi, s, deps);
+
+  // Wait for the sidecar unit's runUnit to reach the agent_end await
+  await new Promise((r) => setTimeout(r, 50));
+  resolveAgentEnd(makeEvent());
+
+  await loopPromise;
+
+  // resolveDispatch must never be called — sidecar bypasses Phase 3 entirely
+  assert.equal(
+    resolveDispatchCallCount,
+    0,
+    "resolveDispatch should not be called when sidecar item is dequeued",
+  );
+});
+
+test("hook sidecar skips runPostUnitVerification", async () => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  ctx.ui.setStatus = () => {};
+  ctx.ui.notify = () => {};
+  ctx.sessionManager = { getSessionFile: () => "/tmp/session.json" };
+  const pi = makeMockPi();
+  const s = makeLoopSession();
+
+  let postUnitVerCallCount = 0;
+  let postVerCallCount = 0;
+
+  const deps = makeMockDeps({
+    runPostUnitVerification: async () => {
+      postUnitVerCallCount++;
+      deps.callLog.push("runPostUnitVerification");
+      return "continue" as const;
+    },
+    postUnitPostVerification: async () => {
+      postVerCallCount++;
+      deps.callLog.push("postUnitPostVerification");
+      if (postVerCallCount === 1) {
+        // After main unit: enqueue a hook sidecar
+        s.sidecarQueue.push({
+          kind: "hook" as const,
+          unitType: "hook/review",
+          unitId: "M001/S01/T01/review",
+          prompt: "review the code",
+        });
+        return "continue" as const;
+      }
+      // After hook sidecar: stop
+      s.active = false;
+      return "continue" as const;
+    },
+  });
+
+  const loopPromise = autoLoop(ctx, pi, s, deps);
+
+  // Main unit reaches agent_end await
+  await new Promise((r) => setTimeout(r, 50));
+  resolveAgentEnd(makeEvent());
+
+  // Hook sidecar reaches agent_end await
+  await new Promise((r) => setTimeout(r, 50));
+  resolveAgentEnd(makeEvent());
+
+  await loopPromise;
+
+  // runPostUnitVerification called once for main unit, NOT for hook sidecar
+  assert.equal(
+    postUnitVerCallCount,
+    1,
+    "runPostUnitVerification should be called once (for main unit), not for hook sidecar",
+  );
+});
+
+test("non-hook sidecar (triage) runs runPostUnitVerification", async () => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  ctx.ui.setStatus = () => {};
+  ctx.ui.notify = () => {};
+  ctx.sessionManager = { getSessionFile: () => "/tmp/session.json" };
+  const pi = makeMockPi();
+  const s = makeLoopSession();
+
+  let postUnitVerCallCount = 0;
+  let postVerCallCount = 0;
+
+  const deps = makeMockDeps({
+    runPostUnitVerification: async () => {
+      postUnitVerCallCount++;
+      deps.callLog.push("runPostUnitVerification");
+      return "continue" as const;
+    },
+    postUnitPostVerification: async () => {
+      postVerCallCount++;
+      deps.callLog.push("postUnitPostVerification");
+      if (postVerCallCount === 1) {
+        // After main unit: enqueue a triage sidecar (non-hook)
+        s.sidecarQueue.push({
+          kind: "triage" as const,
+          unitType: "triage",
+          unitId: "M001/S01/T01/triage",
+          prompt: "triage the output",
+        });
+        return "continue" as const;
+      }
+      // After triage sidecar: stop
+      s.active = false;
+      return "continue" as const;
+    },
+  });
+
+  const loopPromise = autoLoop(ctx, pi, s, deps);
+
+  // Main unit reaches agent_end await
+  await new Promise((r) => setTimeout(r, 50));
+  resolveAgentEnd(makeEvent());
+
+  // Triage sidecar reaches agent_end await
+  await new Promise((r) => setTimeout(r, 50));
+  resolveAgentEnd(makeEvent());
+
+  await loopPromise;
+
+  // runPostUnitVerification called twice: once for main unit, once for triage sidecar
+  assert.equal(
+    postUnitVerCallCount,
+    2,
+    "runPostUnitVerification should be called twice (main unit + triage sidecar)",
+  );
+});
