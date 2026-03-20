@@ -307,11 +307,6 @@ export function gsdRoot(basePath: string): string {
   return result;
 }
 
-/** @internal Test helper for clearing memoized gsdRoot results. */
-export function _clearGsdRootCache(): void {
-  gsdRootCache.clear();
-}
-
 function probeGsdRoot(rawBasePath: string): string {
   // 1. Fast path — check the input path directly
   const local = join(rawBasePath, ".gsd");
