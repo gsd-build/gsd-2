@@ -280,6 +280,21 @@ async function markSliceDoneInRoadmap(basePath: string, milestoneId: string, sli
   }
 }
 
+async function markSliceUndoneInRoadmap(basePath: string, milestoneId: string, sliceId: string, fixesApplied: string[]): Promise<void> {
+  const roadmapPath = resolveMilestoneFile(basePath, milestoneId, "ROADMAP");
+  if (!roadmapPath) return;
+  const content = await loadFile(roadmapPath);
+  if (!content) return;
+  const updated = content.replace(
+    new RegExp(`^(\\s*-\\s+)\\[x\\]\\s+\\*\\*${sliceId}:`, "m"),
+    `$1[ ] **${sliceId}:`,
+  );
+  if (updated !== content) {
+    await saveFile(roadmapPath, updated);
+    fixesApplied.push(`unmarked ${sliceId} in ${roadmapPath} (premature completion)`);
+  }
+}
+
 function matchesScope(unitId: string, scope?: string): boolean {
   if (!scope) return true;
   return unitId === scope || unitId.startsWith(`${scope}/`) || unitId.startsWith(`${scope}`);
@@ -863,6 +878,12 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
           file: relSliceFile(basePath, milestoneId, slice.id, "SUMMARY"),
           fixable: true,
         });
+        if (!allTasksDone) {
+          dryRunCanFix("slice_checked_missing_summary", `uncheck ${slice.id} in roadmap (tasks incomplete)`);
+          if (shouldFix("slice_checked_missing_summary")) {
+            await markSliceUndoneInRoadmap(basePath, milestoneId, slice.id, fixesApplied);
+          }
+        }
       }
 
       if (slice.done && !hasSliceUat) {
