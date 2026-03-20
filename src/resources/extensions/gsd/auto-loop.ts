@@ -30,6 +30,8 @@ import { gsdRoot } from "./paths.js";
 import { atomicWriteSync } from "./atomic-write.js";
 import { join } from "node:path";
 import type { CmuxLogLevel } from "../cmux/index.js";
+import { resolveEngine } from "./engine-resolver.js";
+import type { EngineState } from "./engine-types.js";
 
 /**
  * Maximum total loop iterations before forced stop. Prevents runaway loops
@@ -328,6 +330,7 @@ export interface LoopDeps {
     unitType: string,
     unitId: string,
     state: GSDState,
+    displayMeta?: import("./engine-types.js").DisplayMetadata,
   ) => void;
   syncCmuxSidebar: (preferences: GSDPreferences | undefined, state: GSDState) => void;
   logCmuxEvent: (
@@ -749,6 +752,9 @@ export async function autoLoop(
       let mid: string | undefined;
       let midTitle: string | undefined;
       let observabilityIssues: unknown[] = [];
+      let isCustomEngine = false;
+      let customEngine: ReturnType<typeof resolveEngine> | null = null;
+      let engineState: EngineState | null = null;
 
       if (!sidecarItem) {
       // ── Phase 1: Pre-dispatch ───────────────────────────────────────────
@@ -801,7 +807,14 @@ export async function autoLoop(
       }
 
       // Derive state
-      state = await deps.deriveState(s.basePath);
+      isCustomEngine = !!s.activeEngineId?.startsWith("custom:");
+      customEngine = isCustomEngine ? resolveEngine(s) : null;
+      engineState = isCustomEngine
+        ? await customEngine!.engine.deriveState(s.basePath)
+        : null;
+      state = isCustomEngine
+        ? (engineState!.raw as GSDState)
+        : await deps.deriveState(s.basePath);
       deps.syncCmuxSidebar(prefs, state);
       mid = state.activeMilestone?.id;
       midTitle = state.activeMilestone?.title;
@@ -876,6 +889,7 @@ export async function autoLoop(
         deps.invalidateAllCaches();
 
         state = await deps.deriveState(s.basePath);
+        if (isCustomEngine) engineState = { phase: state.phase, currentMilestoneId: state.activeMilestone?.id ?? null, activeSliceId: state.activeSlice?.id ?? null, activeTaskId: state.activeTask?.id ?? null, isComplete: state.phase === "complete", raw: state };
         mid = state.activeMilestone?.id;
         midTitle = state.activeMilestone?.title;
 
@@ -1004,6 +1018,7 @@ export async function autoLoop(
       if (deps.reconcileMergeState(s.basePath, ctx)) {
         deps.invalidateAllCaches();
         state = await deps.deriveState(s.basePath);
+        if (isCustomEngine) engineState = { phase: state.phase, currentMilestoneId: state.activeMilestone?.id ?? null, activeSliceId: state.activeSlice?.id ?? null, activeTaskId: state.activeTask?.id ?? null, isComplete: state.phase === "complete", raw: state };
         mid = state.activeMilestone?.id;
         midTitle = state.activeMilestone?.title;
       }
@@ -1201,14 +1216,24 @@ export async function autoLoop(
       // ── Phase 3: Dispatch resolution ────────────────────────────────────
 
       debugLog("autoLoop", { phase: "dispatch-resolve", iteration });
-      const dispatchResult = await deps.resolveDispatch({
-        basePath: s.basePath,
-        mid,
-        midTitle: midTitle!,
-        state,
-        prefs,
-        session: s,
-      });
+      let dispatchResult: Awaited<ReturnType<typeof deps.resolveDispatch>>;
+      if (isCustomEngine && customEngine && engineState) {
+        const engineDispatch = await customEngine.engine.resolveDispatch(engineState, { basePath: s.basePath });
+        dispatchResult = engineDispatch.action === "dispatch"
+          ? { action: "dispatch" as const, unitType: engineDispatch.step.unitType, unitId: engineDispatch.step.unitId, prompt: engineDispatch.step.prompt, pauseAfterDispatch: false }
+          : engineDispatch.action === "stop"
+            ? engineDispatch
+            : { action: "skip" as const };
+      } else {
+        dispatchResult = await deps.resolveDispatch({
+          basePath: s.basePath,
+          mid,
+          midTitle: midTitle!,
+          state,
+          prefs,
+          session: s,
+        });
+      }
 
       if (dispatchResult.action === "stop") {
         await closeoutAndStop(ctx, pi, s, deps, dispatchResult.reason);
@@ -1401,7 +1426,11 @@ export async function autoLoop(
       ctx.ui.setStatus("gsd-auto", "auto");
       if (mid)
         deps.updateSliceProgressCache(s.basePath, mid, state.activeSlice?.id);
-      deps.updateProgressWidget(ctx, unitType, unitId, state);
+      // Custom workflow: pass DisplayMetadata for step N/M progress in widget
+      const dispatchDisplayMeta = isCustomEngine && customEngine && engineState
+        ? customEngine.engine.getDisplayMetadata(engineState)
+        : undefined;
+      deps.updateProgressWidget(ctx, unitType, unitId, state, dispatchDisplayMeta);
 
       deps.ensurePreconditions(unitType, unitId, s.basePath, state);
 
@@ -1624,6 +1653,55 @@ export async function autoLoop(
 
       // Clear unit timeout (unit completed)
       deps.clearUnitTimeout();
+
+      // ── Custom workflow: reconcile + verify (skip dev post-unit processing) ──
+      if (s.activeEngineId?.startsWith("custom:")) {
+        const { engine, policy } = resolveEngine(s);
+        const engineState = await engine.deriveState(s.basePath);
+
+        if (s.currentUnit) {
+          const reconcileResult = await engine.reconcile(engineState, {
+            unitType: s.currentUnit.type,
+            unitId: s.currentUnit.id,
+            startedAt: s.currentUnit.startedAt,
+            finishedAt: Date.now(),
+          });
+
+          const verifyOutcome = await policy.verify(
+            s.currentUnit.type,
+            s.currentUnit.id,
+            { basePath: s.basePath },
+          );
+
+          if (verifyOutcome === "pause") {
+            ctx.ui.notify(
+              `Verification paused for step ${s.currentUnit.id}`,
+              "warning",
+            );
+            await deps.pauseAuto(ctx, pi);
+            break;
+          }
+
+          if (verifyOutcome === "retry") {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TS narrows to never after earlier null assignment in same loop body
+            const prevAttempt = (s as any).pendingVerificationRetry?.attempt ?? 0;
+            s.pendingVerificationRetry = {
+              unitId: s.currentUnit.id,
+              attempt: prevAttempt + 1,
+              failureContext: `Verification failed for step ${s.currentUnit.id}. Check the step's produces artifacts and verify config.`,
+            };
+            continue;
+          }
+
+          if (reconcileResult.outcome === "stop") {
+            await deps.stopAuto(ctx, pi, reconcileResult.reason ?? "Workflow complete");
+            break;
+          }
+        }
+
+        // Continue loop for next step
+        continue;
+      }
 
       // Post-unit context for pre/post verification
       const postUnitCtx: PostUnitContext = {

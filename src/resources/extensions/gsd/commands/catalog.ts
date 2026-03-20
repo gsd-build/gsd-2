@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { loadRegistry } from "../workflow-templates.js";
+import { getWorkflowCompletions } from "../commands-workflow.js";
 
 const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
 
@@ -14,7 +15,7 @@ export interface GsdCommandDefinition {
 type CompletionMap = Record<string, readonly GsdCommandDefinition[]>;
 
 export const GSD_COMMAND_DESCRIPTION =
-  "GSD — Get Shit Done: /gsd help|start|templates|next|auto|stop|pause|status|widget|visualize|queue|quick|capture|triage|dispatch|history|undo|rate|skip|export|cleanup|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|logs|forensics|changelog|migrate|remote|steer|knowledge|new-milestone|parallel|cmux|park|unpark|init|setup|inspect|extensions|update";
+  "GSD — Get Shit Done: /gsd help|start|templates|next|auto|stop|pause|status|widget|visualize|queue|quick|capture|triage|dispatch|history|undo|rate|skip|export|cleanup|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|logs|forensics|changelog|migrate|remote|steer|knowledge|new-milestone|parallel|cmux|park|unpark|init|setup|inspect|workflow|extensions|update";
 
 export const TOP_LEVEL_SUBCOMMANDS: readonly GsdCommandDefinition[] = [
   { cmd: "help", desc: "Categorized command reference with descriptions" },
@@ -63,6 +64,7 @@ export const TOP_LEVEL_SUBCOMMANDS: readonly GsdCommandDefinition[] = [
   { cmd: "update", desc: "Update GSD to the latest version" },
   { cmd: "start", desc: "Start a workflow template (bugfix, spike, feature, etc.)" },
   { cmd: "templates", desc: "List available workflow templates" },
+  { cmd: "workflow", desc: "Custom workflow engine (new, run, list, pause, resume, validate)" },
   { cmd: "extensions", desc: "Manage extensions (list, enable, disable, info)" },
 ];
 
@@ -290,6 +292,10 @@ export function getGsdArgumentCompletions(prefix: string) {
 
   if (command === "undo" && parts.length <= 2) {
     return [{ value: "undo --force", label: "--force", description: "Skip confirmation prompt" }];
+  }
+
+  if (command === "workflow") {
+    return getWorkflowCompletions(parts.slice(1).join(" "));
   }
 
   const nested = NESTED_COMPLETIONS[command];

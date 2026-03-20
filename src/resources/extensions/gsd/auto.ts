@@ -166,6 +166,8 @@ import {
   reconcileMergeState,
 } from "./auto-recovery.js";
 import { resolveDispatch } from "./auto-dispatch.js";
+import { resolveEngine } from "./engine-resolver.js";
+import type { EngineState } from "./engine-types.js";
 import {
   type AutoDashboardData,
   updateProgressWidget as _updateProgressWidget,
@@ -1107,6 +1109,7 @@ function updateProgressWidget(
   unitType: string,
   unitId: string,
   state: GSDState,
+  displayMeta?: import("./engine-types.js").DisplayMetadata,
 ): void {
   const badge = s.currentUnitRouting?.tier
     ? ({ light: "L", standard: "S", heavy: "H" }[s.currentUnitRouting.tier] ??
@@ -1119,6 +1122,7 @@ function updateProgressWidget(
     state,
     widgetStateAccessors,
     badge,
+    displayMeta,
   );
 }
 
@@ -1327,3 +1331,9 @@ export async function dispatchHookUnit(
 
 // Direct phase dispatch → auto-direct-dispatch.ts
 export { dispatchDirectPhase } from "./auto-direct-dispatch.js";
+
+/** Set the active engine ID (e.g. "custom:<runDir>") for custom workflow runs. */
+export function setActiveEngineId(id: string | null): void { s.activeEngineId = id; }
+
+/** Get the active engine ID. Used by resume logic to re-derive custom workflow runs. */
+export function getActiveEngineId(): string | null { return s.activeEngineId; }

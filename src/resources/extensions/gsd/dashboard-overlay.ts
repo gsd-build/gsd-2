@@ -136,6 +136,42 @@ export class GSDDashboardOverlay {
   private async loadData(): Promise<boolean> {
     const base = this.dashData.basePath || process.cwd();
     try {
+      // Custom workflow engine — use DisplayMetadata instead of dev state
+      const { getActiveEngineId } = await import("./auto.js");
+      const activeEngineId = getActiveEngineId();
+      if (activeEngineId?.startsWith("custom:")) {
+        try {
+          const { resolveEngine } = await import("./engine-resolver.js");
+          const session = { activeEngineId } as any;
+          const { engine } = resolveEngine(session);
+          const engineState = await engine.deriveState(base);
+          const meta = engine.getDisplayMetadata(engineState);
+          this.milestoneData = {
+            id: "workflow",
+            title: meta.engineLabel ?? "Custom Workflow",
+            slices: meta.progressSummary ? [{
+              id: "progress",
+              title: meta.progressSummary,
+              done: false,
+              risk: "low",
+              active: true,
+              tasks: [],
+              taskProgress: meta.stepCount ? {
+                total: meta.stepCount.total,
+                done: meta.stepCount.completed,
+              } : undefined,
+            }] : [],
+            phase: engineState.isComplete ? "complete" : "executing",
+            progress: {
+              milestones: { total: 1, done: engineState.isComplete ? 1 : 0 },
+            },
+          };
+          return true;
+        } catch {
+          // Fall through to dev path on engine resolution failure
+        }
+      }
+
       const state = await deriveState(base);
       if (!state.activeMilestone) {
         this.milestoneData = null;

@@ -64,6 +64,7 @@ export function unitVerb(unitType: string): string {
     case "rewrite-docs": return "rewriting";
     case "reassess-roadmap": return "reassessing";
     case "run-uat": return "running UAT";
+    case "custom-step": return "running";
     default: return unitType;
   }
 }
@@ -81,6 +82,7 @@ export function unitPhaseLabel(unitType: string): string {
     case "rewrite-docs": return "REWRITE";
     case "reassess-roadmap": return "REASSESS";
     case "run-uat": return "UAT";
+    case "custom-step": return "WORKFLOW";
     default: return unitType.toUpperCase();
   }
 }
@@ -399,6 +401,7 @@ export function updateProgressWidget(
   state: GSDState,
   accessors: WidgetStateAccessors,
   tierBadge?: string,
+  displayMeta?: import("./engine-types.js").DisplayMetadata,
 ): void {
   if (!ctx.hasUI) return;
 
@@ -588,6 +591,32 @@ export function updateProgressWidget(
 
         // ── Mode: full — complete two-column layout ───────────────────
         lines.push("");
+
+        // Custom workflow rendering — use DisplayMetadata when available
+        if (displayMeta?.stepCount) {
+          const { completed, total } = displayMeta.stepCount;
+          if (displayMeta.engineLabel) {
+            lines.push(truncateToWidth(`${pad}${theme.fg("dim", displayMeta.engineLabel)}`, width));
+          }
+          if (displayMeta.progressSummary) {
+            lines.push(truncateToWidth(`${pad}${theme.fg("text", theme.bold(displayMeta.progressSummary))}`, width));
+          }
+          lines.push("");
+          const actionLeft = `${pad}${theme.fg("accent", "▸")} ${theme.fg("accent", verb)}  ${theme.fg("text", unitId)}`;
+          lines.push(rightAlign(actionLeft, theme.fg("dim", phaseLabel), width));
+          lines.push("");
+          const barWidth = Math.max(6, Math.min(18, Math.floor(width * 0.25)));
+          const pct = total > 0 ? completed / total : 0;
+          const filled = Math.round(pct * barWidth);
+          const bar = theme.fg("success", "━".repeat(filled))
+            + theme.fg("dim", "─".repeat(barWidth - filled));
+          const meta = `${theme.fg("text", `${completed}`)}${theme.fg("dim", `/${total} steps`)}`;
+          lines.push(`${pad}${bar} ${meta}`);
+          lines.push(...ui.bar());
+          cachedLines = lines;
+          cachedWidth = width;
+          return lines;
+        }
 
         // Context section: milestone + slice + model
         const hasContext = !!(mid || (slice && unitType !== "research-milestone" && unitType !== "plan-milestone"));

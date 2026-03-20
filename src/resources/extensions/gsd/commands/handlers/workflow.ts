@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { handleQuick } from "../../quick.js";
 import { showDiscuss, showHeadlessMilestoneCreation, showQueue } from "../../guided-flow.js";
 import { handleStart, handleTemplates } from "../../commands-workflow-templates.js";
+import { handleWorkflow as handleCustomWorkflow, getWorkflowCompletions } from "../../commands-workflow.js";
 import { gsdRoot } from "../../paths.js";
 import { deriveState } from "../../state.js";
 import { isParked, parkMilestone, unparkMilestone } from "../../milestone-actions.js";
@@ -96,6 +97,10 @@ export async function handleWorkflowCommand(trimmed: string, ctx: ExtensionComma
       success ? `Unparked ${targetId}. It will resume its normal position in the queue.` : `Could not unpark ${targetId} — milestone not found or not parked.`,
       success ? "info" : "warning",
     );
+    return true;
+  }
+  if (trimmed === "workflow" || trimmed.startsWith("workflow ")) {
+    await handleCustomWorkflow(trimmed.replace(/^workflow\s*/, "").trim(), ctx, pi);
     return true;
   }
   return false;
