@@ -24,6 +24,7 @@ import { deriveState } from "./state.js";
 import { resolveMilestoneIntegrationBranch } from "./git-service.js";
 import { nativeIsRepo } from "./native-git-bridge.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
+import { runEnvironmentChecks } from "./doctor-environment.js";
 
 // ── Health Score Tracking ──────────────────────────────────────────────────
 
@@ -292,6 +293,19 @@ export async function preDispatchHealthGate(basePath: string): Promise<PreDispat
     }
   } catch {
     // Non-fatal — dispatch continues if state/branch check fails
+  }
+
+  // ── Disk space check ──
+  // Catches low-disk conditions before dispatch rather than letting the unit
+  // fail mid-execution with ENOSPC (which wastes a full LLM turn).
+  try {
+    const envResults = runEnvironmentChecks(basePath);
+    const diskError = envResults.find(r => r.name === "disk_space" && r.status === "error");
+    if (diskError) {
+      issues.push(`${diskError.message}${diskError.detail ? ` — ${diskError.detail}` : ""}`);
+    }
+  } catch {
+    // Non-fatal — dispatch continues if env check fails
   }
 
   // If we had critical issues that couldn't be auto-healed, block dispatch

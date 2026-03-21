@@ -26,6 +26,7 @@ import {
   runFinalize,
 } from "./phases.js";
 import { debugLog } from "../debug-logger.js";
+import { isInfrastructureError } from "./infra-errors.js";
 
 /**
  * Main auto-mode execution loop. Iterates: derive → dispatch → guards →
@@ -155,8 +156,32 @@ export async function autoLoop(
       debugLog("autoLoop", { phase: "iteration-complete", iteration });
     } catch (loopErr) {
       // ── Blanket catch: absorb unexpected exceptions, apply graduated recovery ──
-      consecutiveErrors++;
       const msg = loopErr instanceof Error ? loopErr.message : String(loopErr);
+
+      // ── Infrastructure errors: immediate stop, no retry ──
+      // These are unrecoverable (disk full, OOM, etc.). Retrying just burns
+      // LLM budget on guaranteed failures.
+      const infraCode = isInfrastructureError(loopErr);
+      if (infraCode) {
+        debugLog("autoLoop", {
+          phase: "infrastructure-error",
+          iteration,
+          code: infraCode,
+          error: msg,
+        });
+        ctx.ui.notify(
+          `Auto-mode stopped: infrastructure error ${infraCode} — ${msg}`,
+          "error",
+        );
+        await deps.stopAuto(
+          ctx,
+          pi,
+          `Infrastructure error (${infraCode}): not recoverable by retry`,
+        );
+        break;
+      }
+
+      consecutiveErrors++;
       debugLog("autoLoop", {
         phase: "iteration-error",
         iteration,
