@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
 
-import { repoIdentity, externalGsdRoot, ensureGsdSymlink, validateProjectId, readRepoMeta } from "../repo-identity.ts";
+import { repoIdentity, externalGsdRoot, ensureGsdSymlink, validateProjectId, readRepoMeta, isInheritedRepo } from "../repo-identity.ts";
 import { createTestContext } from "./test-helpers.ts";
 
 const { assertEq, assertTrue, report } = createTestContext();
@@ -116,6 +116,66 @@ async function main(): Promise<void> {
 
       rmSync(movedBase, { recursive: true, force: true });
       delete process.env.GSD_PROJECT_ID;
+    }
+
+    console.log("\n=== isInheritedRepo detects subdirectory of parent repo without .gsd (#1639) ===");
+    {
+      const parentRepo = realpathSync(mkdtempSync(join(tmpdir(), "gsd-inherited-parent-")));
+      run("git init -b main", parentRepo);
+      run('git config user.name "Pi Test"', parentRepo);
+      run('git config user.email "pi@example.com"', parentRepo);
+      writeFileSync(join(parentRepo, "README.md"), "# Parent\n", "utf-8");
+      run("git add README.md", parentRepo);
+      run('git commit -m "init"', parentRepo);
+
+      // Create a subdirectory — no .gsd at parent
+      const subdir = join(parentRepo, "newproject");
+      mkdirSync(subdir, { recursive: true });
+      assertTrue(isInheritedRepo(subdir), "subdirectory of parent repo without .gsd is inherited");
+
+      // After adding .gsd at parent, subdirectory is a legitimate child
+      mkdirSync(join(parentRepo, ".gsd"), { recursive: true });
+      assertTrue(!isInheritedRepo(subdir), "subdirectory of parent repo WITH .gsd is NOT inherited");
+
+      // The git root itself is never inherited
+      assertTrue(!isInheritedRepo(parentRepo), "git root is not inherited");
+
+      // A standalone repo (not a subdir) is not inherited
+      const standaloneRepo = realpathSync(mkdtempSync(join(tmpdir(), "gsd-inherited-standalone-")));
+      run("git init -b main", standaloneRepo);
+      run('git config user.name "Pi Test"', standaloneRepo);
+      run('git config user.email "pi@example.com"', standaloneRepo);
+      assertTrue(!isInheritedRepo(standaloneRepo), "standalone repo is not inherited");
+
+      rmSync(parentRepo, { recursive: true, force: true });
+      rmSync(standaloneRepo, { recursive: true, force: true });
+    }
+
+    console.log("\n=== subdirectory of parent repo gets unique identity after git init (#1639) ===");
+    {
+      const parentRepo = realpathSync(mkdtempSync(join(tmpdir(), "gsd-identity-parent-")));
+      run("git init -b main", parentRepo);
+      run('git config user.name "Pi Test"', parentRepo);
+      run('git config user.email "pi@example.com"', parentRepo);
+      run('git remote add origin git@github.com:example/parent-project.git', parentRepo);
+      writeFileSync(join(parentRepo, "README.md"), "# Parent\n", "utf-8");
+      run("git add README.md", parentRepo);
+      run('git commit -m "init"', parentRepo);
+
+      const subdir = join(parentRepo, "childproject");
+      mkdirSync(subdir, { recursive: true });
+
+      // Before git init, subdirectory shares parent's identity
+      const parentIdentity = repoIdentity(parentRepo);
+      const subdirIdentityBefore = repoIdentity(subdir);
+      assertEq(subdirIdentityBefore, parentIdentity, "subdirectory shares parent identity before its own git init");
+
+      // After git init, subdirectory gets its own identity
+      run("git init -b main", subdir);
+      const subdirIdentityAfter = repoIdentity(subdir);
+      assertTrue(subdirIdentityAfter !== parentIdentity, "subdirectory gets unique identity after git init");
+
+      rmSync(parentRepo, { recursive: true, force: true });
     }
 
     console.log("\n=== validateProjectId rejects invalid values ===");

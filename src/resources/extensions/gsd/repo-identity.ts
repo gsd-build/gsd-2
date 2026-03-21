@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
 
@@ -92,6 +92,50 @@ export function readRepoMeta(externalPath: string): RepoMeta | null {
     return isRepoMeta(parsed) ? parsed : null;
   } catch {
     return null;
+  }
+}
+
+// ─── Inherited-Repo Detection ───────────────────────────────────────────────
+
+/**
+ * Check whether `basePath` is inheriting a parent directory's git repo
+ * rather than being the git root itself.
+ *
+ * Returns true when ALL of:
+ *   1. basePath is inside a git repo (git rev-parse succeeds)
+ *   2. The resolved git root is a proper ancestor of basePath
+ *   3. There is no `.gsd` directory at the git root (the parent project
+ *      has not been initialised with GSD)
+ *
+ * When true, the caller should run `git init` at basePath so that
+ * `repoIdentity()` produces a hash unique to this directory, preventing
+ * cross-project state leaks (#1639).
+ *
+ * When the git root already has `.gsd`, the directory is a legitimate
+ * subdirectory of an existing GSD project — `cd src/ && /gsd` should
+ * still load the parent project's milestones.
+ */
+export function isInheritedRepo(basePath: string): boolean {
+  try {
+    const root = resolveGitRoot(basePath);
+    const normalizedBase = canonicalizeExistingPath(basePath);
+    const normalizedRoot = canonicalizeExistingPath(root);
+    if (normalizedBase === normalizedRoot) return false; // basePath IS the root
+
+    // The git root is a proper ancestor. Check whether it already has .gsd
+    // (i.e. the parent project was initialised with GSD).
+    if (existsSync(join(root, ".gsd"))) return false;
+
+    // Also walk up from basePath to the git root checking for .gsd
+    let dir = normalizedBase;
+    while (dir !== normalizedRoot && dir !== dirname(dir)) {
+      if (existsSync(join(dir, ".gsd"))) return false;
+      dir = dirname(dir);
+    }
+
+    return true;
+  } catch {
+    return false;
   }
 }
 

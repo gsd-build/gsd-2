@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { readFileSync, existsSync, mkdirSync, readdirSync, rmSync, unlinkSync } from "node:fs";
 import { readSessionLockData, isSessionLockProcessAlive } from "./session-lock.js";
 import { nativeIsRepo, nativeInit } from "./native-git-bridge.js";
+import { isInheritedRepo } from "./repo-identity.js";
 import { ensureGitignore, ensurePreferences, untrackRuntimeFiles } from "./gitignore.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { detectProjectState } from "./detection.js";
@@ -346,7 +347,7 @@ function buildHeadlessDiscussPrompt(nextId: string, seedContext: string, _basePa
  * Ensures git repo, .gsd/ structure, gitignore, and preferences all exist.
  */
 function bootstrapGsdProject(basePath: string): void {
-  if (!nativeIsRepo(basePath)) {
+  if (!nativeIsRepo(basePath) || isInheritedRepo(basePath)) {
     const mainBranch = loadEffectiveGSDPreferences()?.preferences?.git?.main_branch || "main";
     nativeInit(basePath, mainBranch);
   }
@@ -870,7 +871,10 @@ export async function showSmartEntry(
   }
 
   // ── Ensure git repo exists — GSD needs it for worktree isolation ──────
-  if (!nativeIsRepo(basePath)) {
+  // Also handle inherited repos: if basePath is a subdirectory of another
+  // git repo that has no .gsd, create a fresh repo to prevent cross-project
+  // state leaks (#1639).
+  if (!nativeIsRepo(basePath) || isInheritedRepo(basePath)) {
     const mainBranch = loadEffectiveGSDPreferences()?.preferences?.git?.main_branch || "main";
     nativeInit(basePath, mainBranch);
   }

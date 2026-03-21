@@ -20,7 +20,7 @@ import {
   resolveSkillDiscoveryMode,
   getIsolationMode,
 } from "./preferences.js";
-import { ensureGsdSymlink, validateProjectId } from "./repo-identity.js";
+import { ensureGsdSymlink, isInheritedRepo, validateProjectId } from "./repo-identity.js";
 import { migrateToExternalState, recoverFailedMigration } from "./migrate-external.js";
 import { collectSecretsFromManifest } from "../get-secrets-from-user.js";
 import { gsdRoot, resolveMilestoneFile, milestonesDir } from "./paths.js";
@@ -140,8 +140,13 @@ export async function bootstrapAutoSession(
       return releaseLockAndReturn();
     }
 
-    // Ensure git repo exists
-    if (!nativeIsRepo(base)) {
+    // Ensure git repo exists.
+    // Guard against inherited repos: if `base` is a subdirectory of another
+    // git repo that has no .gsd (i.e. the parent project was never initialised
+    // with GSD), create a fresh git repo at `base` so it gets its own identity
+    // hash. Without this, repoIdentity() resolves to the parent repo's hash
+    // and loads milestones from an unrelated project (#1639).
+    if (!nativeIsRepo(base) || isInheritedRepo(base)) {
       const mainBranch =
         loadEffectiveGSDPreferences()?.preferences?.git?.main_branch || "main";
       nativeInit(base, mainBranch);
