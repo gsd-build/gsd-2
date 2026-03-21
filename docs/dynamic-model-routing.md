@@ -106,7 +106,7 @@ The routing history (`.gsd/routing-history.json`) tracks success/failure per tie
 
 Dynamic routing and token profiles are complementary:
 
-- **Token profiles** (`budget`/`balanced`/`quality`) control phase skipping and context compression
+- **Token profiles** (`budget`/`balanced`/`quality`) control phase skipping and context inlining
 - **Dynamic routing** controls per-unit model selection within the configured phase model
 
 When both are active, token profiles set the baseline models and dynamic routing further optimizes within those baselines. The `budget` token profile + dynamic routing provides maximum cost savings.

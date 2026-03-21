@@ -113,7 +113,7 @@ The auto mode dispatch pipeline:
 6.  Dynamic model routing (if enabled) → select cheapest model for tier
 7.  Resolve effective model (with fallbacks)
 8.  Check pending captures → triage if needed
-9.  Build dispatch prompt (applying inline level compression)
+9.  Build dispatch prompt (applying inline level gating)
 10. Create fresh agent session
 11. Inject prompt and let LLM execute
 12. On completion: snapshot metrics, verify artifacts, persist state
@@ -134,7 +134,7 @@ Phase skipping (from token profile) gates steps 2-3: if a phase is skipped, the 
 | `auto-start.ts` | Fresh-start bootstrap — git/state init, crash lock detection, worktree setup |
 | `auto-post-unit.ts` | Post-unit processing — commit, doctor, state rebuild, hooks |
 | `auto-verification.ts` | Post-unit verification gate (lint/test/typecheck with auto-fix retries) |
-| `auto-prompts.ts` | Prompt builders with inline level compression |
+| `auto-prompts.ts` | Prompt builders with inline level gating |
 | `auto-worktree.ts` | Worktree lifecycle (create, enter, merge, teardown) |
 | `auto-recovery.ts` | Expected artifact resolution, completed-key persistence, self-healing |
 | `auto-timeout-recovery.ts` | Timed-out unit recovery and continuation |

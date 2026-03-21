@@ -6,6 +6,45 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **gsd**: `.gsd/RUNTIME.md` template for declared runtime context — stack, environment, dev server details inlined into execute-task prompts (#1626)
+- **gsd**: create draft PR on milestone completion when `git.auto_pr` enabled (#1627)
+- **gsd**: browser-executable and runtime-executable UAT dispatch types (#1620)
+- **gsd**: GitHub sync extension — auto-sync milestones, slices, and tasks to GitHub Issues, PRs, and Milestones (#1603)
+- **gsd**: 13 enhancements to `/gsd doctor` — now runs 20 checks covering git health and runtime state (#1583)
+- **ui**: minimal GSD welcome screen on startup with model, provider, and search tool info (#1584)
+- add `GSD_PROJECT_ID` env var to override automatic project identity hash (#1600)
+- add `GSD_HOME` env var to override global `~/.gsd` directory (#1566)
+- apply model preferences in guided flow for milestone planning (#1614)
+
+### Fixed
+- auto-resolve npm subpath exports in extension loader (#1624)
+- create node_modules symlink for dynamic import resolution in extensions (#1623)
+- filter cross-milestone errors from health tracker escalation (#1621)
+- move unit closeout to run immediately after completion (#1612)
+- use pathspec exclusions in smartStage to prevent hanging on large repos (#1613)
+- add auto-fix for premature slice completion deadlock in doctor (#1611)
+- resolve `${VAR}` env references in MCP client `.mcp.json` configs (#1609)
+- return "dispatched" after doctor heal to prevent session race (#1610)
+- update Anthropic OAuth endpoints to `platform.claude.com` (#1608)
+- lazy-open GSD database on first tool call in manual sessions (#1606)
+- detect anthropic-vertex in provider doctor (#1598)
+- tighten prompt automation contracts (#1556)
+- harden auto-mode agent loop — session teardown, unit correlation, sidecar perf (#1592)
+- break remaining shared/mod.js barrel imports in report generation chain (#1588)
+- detect worktree paths resolved through .gsd symlinks (#1585)
+- apply pi manifest opt-out to extension-discovery.ts (#1545)
+
+### Changed
+- **gsd**: remove prompt compression subsystem (~4,100 lines) — replaced by section-boundary truncation (#1597)
+- **gsd**: replace stuck counter with sliding-window detection (#1618)
+- **gsd**: unify sidecar mini-loop into main dispatch path (#1617)
+- **gsd**: add 30K char hard cap on prompt preamble (#1619)
+- **auto-loop**: initial cleanup — hoist constant, cache prefs per iteration (#1616)
+- **auto-loop**: 5 code smell fixes (#1602)
+- **gsd**: replace session-scoped promise bridge with per-unit one-shot (#1595)
+- **gsd**: crashproof stopAuto with independent try/catch per cleanup step (#1596)
+
 ## [2.38.0] - 2026-03-20
 
 ### Added

@@ -24,18 +24,24 @@ One command. Walk away. Come back to a built project with clean git history.
 
 ---
 
-## What's New in v2.38
+## What's New (post v2.38)
 
-- **Reactive task execution (ADR-004)** — graph-derived parallel task dispatch within slices. When enabled, GSD derives a dependency graph from IO annotations in task plans and dispatches multiple non-conflicting tasks in parallel via subagents. Backward compatible — disabled by default. Enable with `reactive_execution: true` in preferences.
-- **Anthropic Vertex AI provider** — run Claude models (Opus 4.6, Sonnet 4.6, Haiku 4.5) through Google Vertex AI. Set `ANTHROPIC_VERTEX_PROJECT_ID` to activate.
-- **CI optimization** — GitHub Actions minutes reduced ~60-70% (~10k → ~3-4k/month)
-- **Reactive batch verification** — dependency-based carry-forward for verification results across parallel task batches
-- **Backtick file path enforcement** — task plan IO sections now require backtick-wrapped paths for reliable parsing
+- **RUNTIME.md template** — declare your project's stack, environment, dev server, and runtime context in `.gsd/RUNTIME.md`. Automatically inlined into every execute-task prompt so the agent knows your tech stack from the start.
+- **GitHub sync extension** — opt-in extension that syncs GSD milestones → GitHub Milestones, slices → draft PRs, tasks → sub-issues. Bootstrap with `/github-sync bootstrap`.
+- **Draft PRs on milestone completion** — when `git.auto_pr: true`, GSD now creates **draft** pull requests (not ready for review) so your team can review before marking ready.
+- **Browser & runtime UAT types** — two new UAT dispatch modes: `browser-executable` (Playwright-driven UI verification with screenshots) and `runtime-executable` (command/script execution with exit-code verdicts).
+- **Welcome screen** — branded startup screen showing active model, provider, search tools, and quick-start hints.
+- **`GSD_PROJECT_ID` env var** — override the automatic project identity hash with a custom identifier for CI or multi-checkout setups.
+- **Enhanced `/gsd doctor`** — now runs 20 checks (up from 7) covering orphaned worktrees, stale locks, gitignore drift, metrics corruption, large planning files, and more.
+- **Prompt compression removed** — the complex semantic compression subsystem (~4,100 lines) was replaced by simpler section-boundary truncation, improving stability.
+- **Sliding-window stuck detection** — replaces the old counter-based approach with a time-windowed signal for more accurate stall detection.
 
 See the full [Changelog](./CHANGELOG.md) for details.
 
-### Previous highlights (v2.34–v2.37)
+### Previous highlights (v2.34–v2.38)
 
+- **Reactive task execution (ADR-004)** — graph-derived parallel task dispatch within slices
+- **Anthropic Vertex AI provider** — Claude models through Google Vertex AI
 - **cmux integration** — sidebar status, progress bars, and notifications for cmux terminal multiplexer users
 - **Redesigned dashboard** — two-column layout with 4 widget modes (full → small → min → off)
 - **AGENTS.md support** — deprecated `agent-instructions.md` in favor of standard `AGENTS.md` / `CLAUDE.md`
@@ -91,7 +97,7 @@ GSD v2 solves all of these because it's not a prompt framework anymore — it's 
 | Crash recovery       | None                         | Lock files + session forensics                          |
 | Git strategy         | LLM writes git commands      | Worktree isolation, sequential commits, squash merge    |
 | Cost tracking        | None                         | Per-unit token/cost ledger with dashboard               |
-| Stuck detection      | None                         | Retry once, then stop with diagnostics                  |
+| Stuck detection      | None                         | Sliding-window detection with retry and diagnostics     |
 | Timeout supervision  | None                         | Soft/idle/hard timeouts with recovery steering          |
 | Context injection    | "Read this file"             | Pre-inlined into dispatch prompt                        |
 | Roadmap reassessment | Manual                       | Automatic after each slice completes                    |
@@ -352,6 +358,7 @@ Every dispatch is carefully constructed. The LLM never wastes tool calls on orie
 | `T01-PLAN.md`      | Individual task plan with verification criteria                 |
 | `T01-SUMMARY.md`   | What happened — YAML frontmatter + narrative                    |
 | `S01-UAT.md`       | Human test script derived from slice outcomes                   |
+| `RUNTIME.md`       | Declared runtime context — stack, environment, dev server       |
 
 ### Git Strategy
 
@@ -489,7 +496,7 @@ See the full [Token Optimization Guide](./docs/token-optimization.md) for detail
 
 ### Bundled Tools
 
-GSD ships with 19 extensions, all loaded automatically:
+GSD ships with 20 extensions, all loaded automatically:
 
 | Extension              | What it provides                                                                                                       |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
@@ -511,6 +518,7 @@ GSD ships with 19 extensions, all loaded automatically:
 | **Remote Questions**   | Route decisions to Slack/Discord when human input is needed in headless/CI mode                                         |
 | **Universal Config**   | Discover and import MCP servers and rules from other AI coding tools                                                    |
 | **AWS Auth**           | Automatic Bedrock credential refresh for AWS-hosted models                                                              |
+| **GitHub Sync**        | Opt-in sync of milestones, slices, and tasks to GitHub Issues, PRs, and Milestones (`/github-sync bootstrap`)           |
 | **TTSR**               | Tool-use type-safe runtime validation                                                                                   |
 
 ### Bundled Agents

@@ -32,7 +32,7 @@
 | `/gsd mode` | Switch workflow mode (solo/team) with coordinated defaults for milestone IDs, git commit behavior, and documentation |
 | `/gsd config` | Re-run the provider setup wizard (LLM provider + tool keys) |
 | `/gsd keys` | API key manager — list, add, remove, test, rotate, doctor |
-| `/gsd doctor` | Runtime health checks (7 checks) with auto-fix for common state corruption issues |
+| `/gsd doctor` | Runtime health checks (20 checks) with auto-fix for common issues — covers git health (orphaned worktrees, stale branches, corrupt merge state) and runtime state (stale locks, metrics corruption, large planning files, gitignore drift) |
 | `/gsd skill-health` | Skill lifecycle dashboard — usage stats, success rates, token trends, staleness warnings |
 | `/gsd skill-health <name>` | Detailed view for a single skill |
 | `/gsd skill-health --declining` | Show only skills flagged for declining performance |
@@ -64,6 +64,15 @@
 | `/gsd parallel merge [MID]` | Merge completed milestones back to main |
 
 See [Parallel Orchestration](./parallel-orchestration.md) for full documentation.
+
+## GitHub Sync
+
+| Command | Description |
+|---------|-------------|
+| `/github-sync bootstrap` | Initialize GitHub sync — creates mapping file and syncs current state |
+| `/github-sync status` | Show sync status for current milestone |
+
+The GitHub sync extension (opt-in) maps GSD milestones → GitHub Milestones + tracking issues, slices → draft PRs, tasks → sub-issues. Requires `gh` CLI and authentication.
 
 ## Git Commands
 

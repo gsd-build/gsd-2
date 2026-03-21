@@ -47,6 +47,8 @@ Run `gsd` in any directory:
 gsd
 ```
 
+GSD displays a welcome screen showing your active model, provider, and configured search tools, then drops you into an interactive session.
+
 On first launch, GSD runs a setup wizard:
 
 1. **LLM Provider** — select from 20+ providers (Anthropic, OpenAI, Google, OpenRouter, GitHub Copilot, Amazon Bedrock, Azure, and more). OAuth flows handle Claude Max and Copilot subscriptions automatically; otherwise paste an API key.

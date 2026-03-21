@@ -40,6 +40,7 @@ The dispatch prompt is carefully constructed with:
 | Dependency summaries | Cross-slice context |
 | Roadmap excerpt | Overall direction |
 | Decisions register | Architectural context |
+| RUNTIME.md | Project stack, environment, and dev server context |
 
 The amount of context inlined is controlled by your [token profile](./token-optimization.md). Budget mode inlines minimal context; quality mode inlines everything.
 
@@ -89,7 +90,7 @@ Commits are generated from task summaries — not generic "complete task" messag
 
 ### Stuck Detection
 
-If the same unit dispatches twice (the LLM didn't produce the expected artifact), GSD retries once with a deep diagnostic prompt. If it fails again, auto mode stops with the exact file it expected, so you can intervene.
+GSD uses sliding-window detection to identify stuck loops. Rather than a simple counter, it tracks repeated dispatch signals over a time window. If the same unit dispatches repeatedly without progress (the LLM didn't produce the expected artifact), GSD retries once with a deep diagnostic prompt. If it fails again, auto mode stops with the exact file it expected, so you can intervene.
 
 ### Post-Mortem Investigation
 

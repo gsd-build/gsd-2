@@ -151,11 +151,42 @@ Recommended verification order:
 - If a server is team-shared and safe to commit, `.mcp.json` is usually the better home.
 - If a server depends on machine-local paths, personal services, or local-only secrets, prefer `.gsd/mcp.json`.
 
+## Runtime Context (`RUNTIME.md`)
+
+GSD supports a `.gsd/RUNTIME.md` file that declares your project's runtime context. When present, its contents are inlined into every execute-task prompt, giving the agent immediate awareness of your technology stack.
+
+A template is created automatically during project initialization. You can also create one manually:
+
+```markdown
+## Stack
+- **Language:** TypeScript 5.x
+- **Framework:** Express 5
+- **Build:** esbuild
+- **Test runner:** vitest
+- **Linter:** eslint + prettier
+
+## Environment
+- **Node version:** 24 LTS
+- **Package manager:** npm
+- **Required env vars:** DATABASE_URL, REDIS_URL
+
+## Dev Server
+- **Start command:** npm run dev
+- **Default port:** 3000
+- **Health check:** http://localhost:3000/health
+
+## Notes
+- Uses ESM throughout, no CommonJS
+```
+
+This replaces ad-hoc "read my package.json" tool calls — the agent starts every task already knowing your stack.
+
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GSD_HOME` | `~/.gsd` | Global GSD directory. All paths derive from this unless individually overridden. |
+| `GSD_PROJECT_ID` | (auto) | Override the automatic project identity hash. Default is SHA-256(remote_url + repo_root) truncated to 12 hex chars. Must contain only alphanumeric characters, hyphens, and underscores. Maps to `~/.gsd/projects/<id>/`. Useful for CI or multi-checkout setups where the same project needs a stable identity. |
 | `GSD_STATE_DIR` | `$GSD_HOME` | Per-project state root. Controls where `projects/<repo-hash>/` directories are created. Takes precedence over `GSD_HOME` for project state. |
 | `GSD_CODING_AGENT_DIR` | `$GSD_HOME/agent` | Agent directory containing managed resources, extensions, and auth. Takes precedence over `GSD_HOME` for agent paths. |
 
@@ -220,7 +251,7 @@ Community extensions are recommended over the built-in `alibaba-coding-plan` pro
 
 ### `token_profile`
 
-Coordinates model selection, phase skipping, and context compression. See [Token Optimization](./token-optimization.md).
+Coordinates model selection, phase skipping, and context inlining. See [Token Optimization](./token-optimization.md).
 
 Values: `budget`, `balanced` (default), `quality`
 
@@ -378,7 +409,7 @@ git:
 | `commit_docs` | boolean | `true` | Commit `.gsd/` planning artifacts to git. Set `false` to keep local-only |
 | `manage_gitignore` | boolean | `true` | When `false`, GSD will not modify `.gitignore` at all — no baseline patterns, no self-healing. Use if you manage your own `.gitignore` |
 | `worktree_post_create` | string | (none) | Script to run after worktree creation. Receives `SOURCE_DIR` and `WORKTREE_DIR` env vars |
-| `auto_pr` | boolean | `false` | Automatically create a pull request when a milestone completes. Requires `auto_push: true` and `gh` CLI installed and authenticated |
+| `auto_pr` | boolean | `false` | Automatically create a **draft** pull request when a milestone completes. Requires `auto_push: true` and `gh` CLI installed and authenticated |
 | `pr_target_branch` | string | (main branch) | Target branch for auto-created PRs (e.g. `develop`, `qa`). Defaults to `main_branch` if not set |
 
 #### `git.worktree_post_create`
@@ -408,7 +439,7 @@ The path can be absolute or relative to the project root. The script runs with a
 
 #### `git.auto_pr`
 
-Automatically create a pull request when a milestone completes. Designed for teams using Gitflow or branch-based workflows where work should go through PR review before merging to a target branch.
+Automatically create a **draft** pull request when a milestone completes. Designed for teams using Gitflow or branch-based workflows where work should go through PR review before merging to a target branch. Draft PRs signal that the work is complete but not yet reviewed.
 
 ```yaml
 git:
@@ -425,7 +456,7 @@ git:
 1. Milestone completes → GSD squash-merges the worktree to the main branch
 2. Pushes the main branch to remote (if `auto_push: true`)
 3. Pushes the milestone branch to remote
-4. Creates a PR from the milestone branch to `pr_target_branch` via `gh pr create`
+4. Creates a **draft** PR from the milestone branch to `pr_target_branch` via `gh pr create --draft`
 
 If `pr_target_branch` is not set, the PR targets the `main_branch` (or auto-detected main branch). PR creation failure is non-fatal — GSD logs and continues.
 

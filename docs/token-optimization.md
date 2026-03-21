@@ -2,7 +2,7 @@
 
 *Introduced in v2.17.0*
 
-GSD 2.17 introduces a coordinated token optimization system that can reduce token usage by 40-60% without sacrificing output quality for most workloads. The system has three pillars: **token profiles**, **context compression**, and **complexity-based task routing**.
+GSD includes a coordinated token optimization system that can reduce token usage by 40-60% without sacrificing output quality for most workloads. The system has three pillars: **token profiles**, **context management**, and **complexity-based task routing**.
 
 ## Token Profiles
 
@@ -19,7 +19,7 @@ Three profiles are available:
 
 ### `budget` — Maximum Savings (40-60% reduction)
 
-Optimized for cost-sensitive workflows. Uses cheaper models, skips optional phases, and compresses dispatch context to the minimum needed.
+Optimized for cost-sensitive workflows. Uses cheaper models, skips optional phases, and reduces dispatch context to the minimum needed.
 
 | Dimension | Setting |
 |-----------|---------|
@@ -37,7 +37,7 @@ Best for: prototyping, small projects, well-understood codebases, cost-conscious
 
 ### `balanced` — Smart Defaults (default)
 
-The default profile. Keeps the important phases, skips the ones with diminishing returns for most projects, and uses standard context compression.
+The default profile. Keeps the important phases, skips the ones with diminishing returns for most projects, and uses standard context inlining.
 
 | Dimension | Setting |
 |-----------|---------|
@@ -53,7 +53,7 @@ The default profile. Keeps the important phases, skips the ones with diminishing
 
 Best for: most projects, day-to-day development.
 
-### `quality` — Full Context (no compression)
+### `quality` — Full Context
 
 Every phase runs. Every context artifact is inlined. No shortcuts.
 
@@ -65,7 +65,7 @@ Every phase runs. Every context artifact is inlined. No shortcuts.
 
 Best for: complex architectures, greenfield projects requiring deep research, critical production work.
 
-## Context Compression
+## Context Inline Levels
 
 Each token profile maps to an **inline level** that controls how much context is pre-loaded into dispatch prompts:
 
@@ -75,7 +75,7 @@ Each token profile maps to an **inline level** that controls how much context is
 | `balanced` | `standard` | Task plan, prior summaries, slice plan, roadmap excerpt. Drops some supplementary templates. |
 | `quality` | `full` | Everything — all plans, summaries, decisions, requirements, templates, and root files. |
 
-### How Compression Works
+### How Context Inlining Works
 
 Dispatch prompt builders accept an `inlineLevel` parameter. At each level, specific artifacts are gated:
 
@@ -271,31 +271,11 @@ preferences.md
 
 The profile is resolved once and flows through the entire dispatch pipeline. Explicit preferences override profile defaults at every layer.
 
-## Prompt Compression
+## Context Management
 
-*Introduced in v2.29.0*
+When context exceeds the token budget for a dispatch prompt, GSD uses **section-boundary truncation** — dropping entire sections at markdown heading boundaries, lowest-priority sections first. This is deterministic, fast, and predictable.
 
-GSD can apply deterministic prompt compression before falling back to section-boundary truncation. This preserves more information when context exceeds the budget.
-
-### Compression Strategy
-
-Set via preferences:
-
-```yaml
----
-version: 1
-compression_strategy: compress
----
-```
-
-Two strategies are available:
-
-| Strategy | Behavior | Default For |
-|----------|----------|------------|
-| `truncate` | Drop entire sections at boundaries (pre-v2.29 behavior) | `quality` profile |
-| `compress` | Apply heuristic text compression first, then truncate if still over budget | `budget` and `balanced` profiles |
-
-Compression removes redundant whitespace, abbreviates verbose phrases, deduplicates repeated content, and removes low-information boilerplate — all deterministically with no LLM calls.
+A 30K character hard cap on prompt preambles prevents pathological cases from consuming the entire context window.
 
 ### Context Selection
 
@@ -313,14 +293,10 @@ context_selection: smart
 | `full` | Inline entire files | `balanced` and `quality` profiles |
 | `smart` | Use TF-IDF semantic chunking for large files (>3KB), including only relevant portions | `budget` profile |
 
-### Structured Data Compression
+### Structured Data Formatting
 
 At `budget` and `balanced` inline levels, decisions and requirements are formatted in a compact notation that saves 30-50% tokens compared to full markdown tables.
 
-### Summary Distillation
-
-When a slice has 3+ dependency summaries and the total exceeds the summary budget, GSD extracts essential structured data (provides, requires, key_files, key_decisions) and drops verbose prose sections before falling back to section-boundary truncation.
-
 ### Cache Hit Rate Tracking
 
-The metrics ledger now tracks `cacheHitRate` per unit (percentage of input tokens served from cache) and provides `aggregateCacheHitRate()` for session-wide cache performance.
+The metrics ledger tracks `cacheHitRate` per unit (percentage of input tokens served from cache) and provides `aggregateCacheHitRate()` for session-wide cache performance.
