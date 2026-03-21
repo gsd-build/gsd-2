@@ -204,6 +204,9 @@ async function main(): Promise<void> {
     "/real/project",
     "uses GSD_PROJECT_ROOT when set",
   );
+  delete process.env.GSD_PROJECT_ROOT;
+
+  // Without GSD_PROJECT_ROOT, direct layout still works (no ~/.gsd collision)
   assertEq(
     resolveProjectRoot("/some/repo"),
     "/some/repo",

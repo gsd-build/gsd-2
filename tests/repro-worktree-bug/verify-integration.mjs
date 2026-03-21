@@ -41,7 +41,7 @@ function findWorktreeSegment(normalizedPath) {
 function resolveProjectRootFromGitFile(worktreePath) {
   try {
     let dir = worktreePath;
-    while (true) {
+    for (let i = 0; i < 10; i++) {
       const gitPath = join(dir, ".git");
       if (existsSync(gitPath)) {
         const content = readFileSync(gitPath, "utf8").trim();
@@ -81,13 +81,14 @@ function normalizePathForCompare(path) {
 }
 
 function resolveProjectRoot(basePath) {
-  const normalizedPath = basePath.replaceAll("\\", "/");
-  const seg = findWorktreeSegment(normalizedPath);
-  if (!seg) return basePath;
-
+  // Layer 1: If the coordinator passed the real project root, use it.
   if (process.env.GSD_PROJECT_ROOT) {
     return process.env.GSD_PROJECT_ROOT;
   }
+
+  const normalizedPath = basePath.replaceAll("\\", "/");
+  const seg = findWorktreeSegment(normalizedPath);
+  if (!seg) return basePath;
 
   const sepChar = basePath.includes("\\") ? "\\" : "/";
   const gsdMarker = `${sepChar}.gsd${sepChar}`;

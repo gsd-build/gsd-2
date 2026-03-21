@@ -243,6 +243,15 @@ export function ensureGsdSymlink(projectPath: string): string {
   const localGsd = join(projectPath, ".gsd");
   const inWorktree = isInsideWorktree(projectPath);
 
+  // Guard: Never create a symlink at ~/.gsd — that's the user-level GSD home,
+  // not a project .gsd. This can happen if resolveProjectRoot() or
+  // escapeStaleWorktree() returned ~ as the project root (#1676).
+  const localGsdNormalized = localGsd.replaceAll("\\", "/");
+  const gsdHomePath = gsdHome.replaceAll("\\", "/");
+  if (localGsdNormalized === gsdHomePath) {
+    return localGsd;
+  }
+
   // Ensure external directory exists
   mkdirSync(externalPath, { recursive: true });
 

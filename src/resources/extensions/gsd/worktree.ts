@@ -123,15 +123,14 @@ export function detectWorktreeName(basePath: string): string | null {
  * operate against the real project root, not a worktree subdirectory.
  */
 export function resolveProjectRoot(basePath: string): string {
-  const normalizedPath = basePath.replaceAll("\\", "/");
-  const seg = findWorktreeSegment(normalizedPath);
-  if (!seg) return basePath;
-
   // Layer 1: If the coordinator passed the real project root, use it.
-  // Only apply this override when basePath actually looks like a worktree path.
   if (process.env.GSD_PROJECT_ROOT) {
     return process.env.GSD_PROJECT_ROOT;
   }
+
+  const normalizedPath = basePath.replaceAll("\\", "/");
+  const seg = findWorktreeSegment(normalizedPath);
+  if (!seg) return basePath;
 
   // Candidate root via the string-slice heuristic
   const sepChar = basePath.includes("\\") ? "\\" : "/";
@@ -173,7 +172,7 @@ function resolveProjectRootFromGitFile(worktreePath: string): string | null {
   try {
     // Walk up from the worktree path to find the .git file
     let dir = worktreePath;
-    while (true) {
+    for (let i = 0; i < 10; i++) {
       const gitPath = join(dir, ".git");
       if (existsSync(gitPath)) {
         const content = readFileSync(gitPath, "utf8").trim();
