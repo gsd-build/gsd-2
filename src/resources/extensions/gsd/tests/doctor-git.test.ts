@@ -554,6 +554,32 @@ async function main(): Promise<void> {
       console.log("\n=== worktree_branch_merged (skipped on Windows) ===");
     }
 
+    // ─── Test: merged milestone/* worktree removes milestone branch ────
+    if (process.platform !== "win32") {
+    console.log("\n=== worktree_branch_merged (milestone branch cleanup) ===");
+    {
+      const dir = createRepoWithActiveMilestone();
+      cleanups.push(dir);
+
+      mkdirSync(join(dir, ".gsd", "worktrees"), { recursive: true });
+      run("git worktree add -b milestone/M001 .gsd/worktrees/M001", dir);
+      const wtPath = join(dir, ".gsd", "worktrees", "M001");
+      writeFileSync(join(wtPath, "feature.txt"), "feature\n");
+      run("git add -A", wtPath);
+      run("git -c user.email=test@test.com -c user.name=Test commit -m \"feature work\"", wtPath);
+      run("git merge milestone/M001 --no-edit", dir);
+
+      const fixed = await runGSDDoctor(dir, { fix: true });
+      assertTrue(fixed.fixesApplied.some(f => f.includes("removed merged worktree")), "fix removes merged milestone worktree");
+      assertTrue(!existsSync(wtPath), "milestone worktree directory removed after fix");
+
+      const branches = run("git branch --list milestone/M001", dir);
+      assertEq(branches, "", "milestone/M001 branch deleted after merged worktree cleanup");
+    }
+    } else {
+      console.log("\n=== worktree_branch_merged (milestone branch cleanup — skipped on Windows) ===");
+    }
+
     // ─── Test: worktree_branch_merged NOT flagged for unmerged worktree ─
     if (process.platform !== "win32") {
     console.log("\n=== worktree_branch_merged (no false positive) ===");
@@ -587,6 +613,8 @@ async function main(): Promise<void> {
       // Create legacy gsd/M001/S01 branches
       run("git branch gsd/M001/S01", dir);
       run("git branch gsd/M001/S02", dir);
+      // Active quick branches share gsd/*/* shape and must NOT be deleted.
+      run("git branch gsd/quick/1-fix-typo", dir);
 
       const detect = await runGSDDoctor(dir);
       const legacyIssues = detect.issues.filter(i => i.code === "legacy_slice_branches");
@@ -598,7 +626,7 @@ async function main(): Promise<void> {
 
       // Verify branches are gone
       const remaining = run("git branch --list gsd/*/*", dir);
-      assertEq(remaining, "", "no legacy branches remain after fix");
+      assertEq(remaining, "  gsd/quick/1-fix-typo", "quick branch preserved; legacy branches removed");
     }
     } else {
       console.log("\n=== legacy_slice_branches (fixable — skipped on Windows) ===");

@@ -6,48 +6,136 @@
 
 import type { ExtensionCommandContext } from "@gsd/pi-coding-agent";
 import { deriveState } from "./state.js";
+import { nativeBranchList, nativeDetectMainBranch, nativeBranchListMerged, nativeBranchDelete, nativeForEachRef, nativeUpdateRef } from "./native-git-bridge.js";
 
-/**
- * Cleanup branches — delegates to doctor fix for branch-related issue codes.
- * Handles both legacy slice branches (gsd/MILESTONE/SLICE) and stale milestone branches.
- */
 export async function handleCleanupBranches(ctx: ExtensionCommandContext, basePath: string): Promise<void> {
-  const { runGSDDoctor } = await import("./doctor.js");
-  const report = await runGSDDoctor(basePath, { fix: true });
-
-  const branchFixes = report.fixesApplied.filter(f =>
-    f.includes("legacy slice branch") || f.includes("stale branch"),
-  );
-  const branchIssues = report.issues.filter(i =>
-    i.code === "legacy_slice_branches" || i.code === "stale_milestone_branch",
-  );
-
-  if (branchFixes.length > 0) {
-    ctx.ui.notify(branchFixes.join("\n"), "success");
-  } else if (branchIssues.length > 0) {
-    ctx.ui.notify(branchIssues.map(i => i.message).join("\n"), "info");
-  } else {
+  let branches: string[];
+  try {
+    branches = nativeBranchList(basePath, "gsd/*");
+  } catch {
     ctx.ui.notify("No GSD branches to clean up.", "info");
+    return;
   }
+
+  const quickBranches = branches.filter((b) => b.startsWith("gsd/quick/"));
+
+  const mainBranch = nativeDetectMainBranch(basePath);
+  let merged: string[];
+  try {
+    merged = nativeBranchListMerged(basePath, mainBranch, "gsd/*");
+  } catch {
+    merged = [];
+  }
+
+  const mergedNonQuick = merged.filter((b) => !b.startsWith("gsd/quick/"));
+  let deletedMerged = 0;
+  for (const branch of mergedNonQuick) {
+    try {
+      nativeBranchDelete(basePath, branch, false);
+      deletedMerged++;
+    } catch {
+      /* skip branches that cannot be deleted */
+    }
+  }
+
+  // Also delete stale milestone branches for completed milestones when detached
+  // from any registered worktree.
+  let deletedStaleMilestones = 0;
+  try {
+    const { listWorktrees } = await import("./worktree-manager.js");
+    const { resolveMilestoneFile } = await import("./paths.js");
+    const { loadFile, parseRoadmap } = await import("./files.js");
+    const { isMilestoneComplete } = await import("./state.js");
+
+    const attachedBranches = new Set(
+      listWorktrees(basePath).map((wt) => wt.branch),
+    );
+    const milestoneBranches = nativeBranchList(basePath, "milestone/*");
+    for (const branch of milestoneBranches) {
+      if (attachedBranches.has(branch)) continue;
+      const milestoneId = branch.replace(/^milestone\//, "");
+      const roadmapPath = resolveMilestoneFile(basePath, milestoneId, "ROADMAP");
+      if (!roadmapPath) continue;
+      let roadmapContent: string | null = null;
+      try {
+        roadmapContent = await loadFile(roadmapPath);
+      } catch {
+        roadmapContent = null;
+      }
+      if (!roadmapContent) continue;
+      if (!isMilestoneComplete(parseRoadmap(roadmapContent))) continue;
+      try {
+        nativeBranchDelete(basePath, branch, true);
+        deletedStaleMilestones++;
+      } catch {
+        /* non-fatal */
+      }
+    }
+  } catch {
+    /* non-fatal */
+  }
+
+  const summary: string[] = [];
+  if (deletedMerged > 0) {
+    summary.push(`Cleaned up ${deletedMerged} merged branch${deletedMerged === 1 ? "" : "es"}.`);
+  }
+  if (deletedStaleMilestones > 0) {
+    summary.push(`Deleted ${deletedStaleMilestones} stale milestone branch${deletedStaleMilestones === 1 ? "" : "es"}.`);
+  }
+  if (quickBranches.length > 0) {
+    summary.push(`Skipped ${quickBranches.length} quick branch${quickBranches.length === 1 ? "" : "es"} (gsd/quick/*).`);
+  }
+
+  if (summary.length === 0) {
+    const nonQuickCount = branches.filter((b) => !b.startsWith("gsd/quick/")).length;
+    ctx.ui.notify(
+      nonQuickCount > 0
+        ? `${nonQuickCount} GSD branch${nonQuickCount === 1 ? "" : "es"} found, none merged into ${mainBranch} yet.`
+        : "No non-quick GSD branches to clean up.",
+      "info",
+    );
+    return;
+  }
+
+  ctx.ui.notify(summary.join(" "), "success");
 }
 
-/**
- * Cleanup snapshots — delegates to doctor fix for snapshot_ref_bloat.
- */
 export async function handleCleanupSnapshots(ctx: ExtensionCommandContext, basePath: string): Promise<void> {
-  const { runGSDDoctor } = await import("./doctor.js");
-  const report = await runGSDDoctor(basePath, { fix: true });
-
-  const snapshotFixes = report.fixesApplied.filter(f => f.includes("snapshot ref"));
-  const snapshotIssues = report.issues.filter(i => i.code === "snapshot_ref_bloat");
-
-  if (snapshotFixes.length > 0) {
-    ctx.ui.notify(snapshotFixes.join("\n"), "success");
-  } else if (snapshotIssues.length > 0) {
-    ctx.ui.notify(snapshotIssues.map(i => i.message).join("\n"), "info");
-  } else {
+  let refs: string[];
+  try {
+    refs = nativeForEachRef(basePath, "refs/gsd/snapshots/");
+  } catch {
     ctx.ui.notify("No snapshot refs to clean up.", "info");
+    return;
   }
+
+  if (refs.length === 0) {
+    ctx.ui.notify("No snapshot refs to clean up.", "info");
+    return;
+  }
+
+  const byLabel = new Map<string, string[]>();
+  for (const ref of refs) {
+    const parts = ref.split("/");
+    const label = parts.slice(0, -1).join("/");
+    if (!byLabel.has(label)) byLabel.set(label, []);
+    byLabel.get(label)!.push(ref);
+  }
+
+  let pruned = 0;
+  for (const [, labelRefs] of byLabel) {
+    const sorted = labelRefs.sort();
+    for (const old of sorted.slice(0, -5)) {
+      try {
+        nativeUpdateRef(basePath, old);
+        pruned++;
+      } catch {
+        /* skip individual failures */
+      }
+    }
+  }
+
+  ctx.ui.notify(`Pruned ${pruned} old snapshot refs. ${refs.length - pruned} remain.`, "success");
 }
 
 export async function handleCleanupWorktrees(ctx: ExtensionCommandContext, basePath: string): Promise<void> {

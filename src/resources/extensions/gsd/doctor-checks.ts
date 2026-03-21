@@ -204,7 +204,8 @@ export async function checkGitHealth(
 
   // ── Legacy slice branches ──────────────────────────────────────────────
   try {
-    const branchList = nativeBranchList(basePath, "gsd/*/*");
+    const branchList = nativeBranchList(basePath, "gsd/*/*")
+      .filter((branch) => !branch.startsWith("gsd/quick/"));
     if (branchList.length > 0) {
       issues.push({
         severity: "info",
@@ -346,7 +347,7 @@ export async function checkGitHealth(
         if (health.safeToRemove && shouldFix("worktree_branch_merged") && !isCwd) {
           try {
             const { removeWorktree } = await import("./worktree-manager.js");
-            removeWorktree(basePath, wt.name, { deleteBranch: true });
+            removeWorktree(basePath, wt.name, { deleteBranch: true, branch: wt.branch });
             fixesApplied.push(`removed merged worktree "${wt.name}" and deleted branch ${wt.branch}`);
           } catch {
             fixesApplied.push(`failed to remove merged worktree "${wt.name}"`);
