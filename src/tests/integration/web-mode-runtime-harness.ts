@@ -28,6 +28,8 @@ export type RuntimeLaunchResult = {
   stdout: string
   url: string
   port: number
+  /** Auth token extracted from the browser URL fragment, if present. */
+  authToken: string | null
   launchCwd: string
   tempHome: string
   browserLogPath: string
@@ -180,12 +182,25 @@ export async function launchPackagedWebHost(options: {
       try {
         const url = parseStartedUrl(stderr)
         const parsed = new URL(url)
+        // Extract the auth token from the browser-open stub log.
+        // The launcher passes `http://host:port/#token=<hex>` to `open`.
+        let authToken: string | null = null
+        try {
+          if (existsSync(browserLogPath)) {
+            const openedUrl = readFileSync(browserLogPath, "utf-8").trim()
+            const tokenMatch = openedUrl.match(/#token=([a-fA-F0-9]+)/)
+            if (tokenMatch) authToken = tokenMatch[1]
+          }
+        } catch {
+          // Non-fatal — tests that don't need the token can proceed without it
+        }
         finish({
           exitCode: code,
           stderr,
           stdout,
           url,
           port: Number(parsed.port),
+          authToken,
           launchCwd: options.launchCwd,
           tempHome: options.tempHome,
           browserLogPath,
@@ -197,7 +212,7 @@ export async function launchPackagedWebHost(options: {
   })
 }
 
-export async function waitForHttpOk(url: string, timeoutMs = 60_000): Promise<void> {
+export async function waitForHttpOk(url: string, timeoutMs = 60_000, headers?: Record<string, string>): Promise<void> {
   const deadline = Date.now() + timeoutMs
   let lastError: unknown = null
 
@@ -205,7 +220,7 @@ export async function waitForHttpOk(url: string, timeoutMs = 60_000): Promise<vo
     try {
       const remainingMs = Math.max(5_000, deadline - Date.now())
       const requestTimeoutMs = Math.min(15_000, remainingMs)
-      const response = await fetch(url, { method: "GET", signal: AbortSignal.timeout(requestTimeoutMs) })
+      const response = await fetch(url, { method: "GET", headers, signal: AbortSignal.timeout(requestTimeoutMs) })
       if (response.ok) return
       lastError = new Error(`Unexpected ${response.status} for ${url}`)
     } catch (error) {
@@ -216,6 +231,15 @@ export async function waitForHttpOk(url: string, timeoutMs = 60_000): Promise<vo
   }
 
   throw new Error(`Timed out waiting for ${url}: ${lastError instanceof Error ? lastError.message : String(lastError)}`)
+}
+
+/**
+ * Build an Authorization header object from a launch result's auth token.
+ * Returns an empty object if no token is present (server launched without auth).
+ */
+export function runtimeAuthHeaders(launch: RuntimeLaunchResult): Record<string, string> {
+  if (!launch.authToken) return {}
+  return { Authorization: `Bearer ${launch.authToken}` }
 }
 
 export async function killProcessOnPort(port: number): Promise<void> {

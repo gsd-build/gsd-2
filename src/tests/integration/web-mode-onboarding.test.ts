@@ -12,6 +12,7 @@ import { chromium } from "playwright";
 import {
   killProcessOnPort,
   launchPackagedWebHost,
+  runtimeAuthHeaders,
   waitForHttpOk,
 } from "./web-mode-runtime-harness.ts";
 
@@ -450,12 +451,13 @@ test("fresh gsd --web browser onboarding stays locked on failed validation and u
     assert.equal(launch.exitCode, 0, `expected the web launcher to exit cleanly:\n${launch.stderr}`)
     assert.match(launch.stderr, /status=started/, "expected a started diagnostic line on stderr")
 
-    await waitForHttpOk(`${launch.url}/api/boot`)
+    const auth = runtimeAuthHeaders(launch)
+    await waitForHttpOk(`${launch.url}/api/boot`, undefined, auth)
 
     // 1. Boot reports locked before any credentials are saved
     const bootBefore = await fetch(`${launch.url}/api/boot`, {
       method: "GET",
-      headers: { Accept: "application/json" },
+      headers: { Accept: "application/json", ...auth },
       signal: AbortSignal.timeout(10_000),
     })
     assert.equal(bootBefore.ok, true, `expected boot endpoint to respond successfully: ${bootBefore.status}`)
@@ -466,7 +468,7 @@ test("fresh gsd --web browser onboarding stays locked on failed validation and u
     // 2. Invalid key → stays locked with failed validation
     const invalidValidation = await fetch(`${launch.url}/api/onboarding`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "application/json", ...auth },
       body: JSON.stringify({ action: "save_api_key", providerId: "openai", apiKey: "invalid-demo-key" }),
       signal: AbortSignal.timeout(10_000),
     })
@@ -479,7 +481,7 @@ test("fresh gsd --web browser onboarding stays locked on failed validation and u
     // 3. Valid key → unlocks
     const validValidation = await fetch(`${launch.url}/api/onboarding`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "application/json", ...auth },
       body: JSON.stringify({ action: "save_api_key", providerId: "openai", apiKey: "valid-demo-key" }),
       signal: AbortSignal.timeout(60_000),
     })
@@ -491,7 +493,7 @@ test("fresh gsd --web browser onboarding stays locked on failed validation and u
     // 4. Boot confirms unlocked
     const bootAfter = await fetch(`${launch.url}/api/boot`, {
       method: "GET",
-      headers: { Accept: "application/json" },
+      headers: { Accept: "application/json", ...auth },
       signal: AbortSignal.timeout(10_000),
     })
     assert.equal(bootAfter.ok, true)
