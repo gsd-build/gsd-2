@@ -24,35 +24,75 @@ One command. Walk away. Come back to a built project with clean git history.
 
 ---
 
-## What's New in v2.39–v2.40
+## What's New in v2.41.0
 
-- **GitHub sync extension** — auto-sync milestones, slices, and tasks to GitHub Issues, PRs, and Milestones. Opt in with `github.enabled: true` in preferences. Requires `gh` CLI.
-- **Skill tool resolution** — skills are now resolved and activated automatically in dispatched prompts based on `always_use_skills`, `prefer_skills`, and `skill_rules` preferences. Skills are matched to dispatch context at build time.
-- **Health check phase 2** — `/gsd doctor` issues now surface in real time across the dashboard widget, workflow visualizer, and HTML reports with severity levels (error/warning/info).
-- **Forensics upgrade** — `/gsd forensics` is now a full-access GSD debugger with structured anomaly detection (stuck loops, cost spikes, timeouts, missing artifacts), unit traces, and LLM-guided root-cause analysis.
-- **Auto PR on milestone completion** — set `git.auto_pr: true` to automatically create a draft PR when a milestone completes. Requires `auto_push: true` and `gh` CLI.
-- **RUNTIME.md template** — declare project-level runtime context (API endpoints, env vars, deployment info) in `.gsd/RUNTIME.md`. Inlined into task execution prompts to prevent hallucination.
-- **Welcome screen** — branded startup UI showing version, active model, available tool keys, and quick-start commands.
-- **`GSD_HOME` and `GSD_PROJECT_ID` env vars** — override the global `~/.gsd` directory and per-project identity hash for CI/CD and multi-clone environments.
-- **Browser and runtime UAT types** — new `browser-executable` and `runtime-executable` UAT types control when auto-mode pauses for validation.
-- **Pipeline decomposition** — auto-loop rewritten from recursive dispatch to a linear phase pipeline (pre-dispatch → dispatch → post-unit → verification → stuck detection) for better debuggability.
-- **Sliding-window stuck detection** — replaces the simple counter with a pattern-aware sliding window, reducing false positives on legitimate retries.
-- **Data-loss recovery** — automatic detection and recovery of `.gsd/` data loss from v2.30.0–v2.38.0 migration issues, with atomic migration and rollback on failure.
-- **Model preferences in guided flow** — per-phase model selection now applies in step mode, not just auto mode.
+### New Features
 
-See the full [Changelog](./CHANGELOG.md) for details.
+- **Browser-based web interface** — run GSD from the browser with `pi --web`. Full project management, real-time progress, and multi-project support via server-sent events. (#1717)
+- **Doctor: worktree lifecycle checks** — `/gsd doctor` now validates worktree health, detects orphaned worktrees, consolidates cleanup, and enhances `/worktree list` with lifecycle status. (#1814)
+- **CI: docs-only PR detection** — PRs that only change documentation skip build and test steps, with a new prompt injection scan for security. (#1699)
+- **Custom Models guide** — new documentation for adding custom providers (Ollama, vLLM, LM Studio, proxies) via `models.json`. (#1670)
 
-### Previous highlights (v2.34–v2.38)
+### Data Loss Prevention (Critical Fixes)
 
-- **Reactive task execution (ADR-004)** — graph-derived parallel task dispatch within slices
-- **Anthropic Vertex AI provider** — Claude on Google Vertex AI
-- **cmux integration** — sidebar status, progress bars, and notifications for cmux terminal multiplexer users
-- **Redesigned dashboard** — two-column layout with 4 widget modes (full → small → min → off)
-- **AGENTS.md support** — deprecated `agent-instructions.md` in favor of standard `AGENTS.md` / `CLAUDE.md`
-- **AI-powered triage** — automated issue and PR triage via Claude Haiku
-- **Auto-generated OpenRouter registry** — model registry built from OpenRouter API
-- **`/gsd changelog`** — LLM-summarized release notes for any version
-- **Search budget enforcement** — session-level cap prevents unbounded web search
+This release includes 7 fixes preventing silent data loss in auto-mode:
+
+- **Hallucination guard** — execute-task agents that complete with zero tool calls are now rejected as hallucinated. Previously, agents could produce detailed but fabricated summaries without writing any code, wasting ~$25/milestone. (#1838)
+- **Merge anchor verification** — before deleting a milestone worktree/branch, GSD now verifies the code is actually on the integration branch. Prevents orphaning commits when squash-merge produces an empty diff. (#1829)
+- **Dirty working tree detection** — `nativeMergeSquash` now distinguishes dirty-tree rejections from content conflicts, preventing silent commit loss when synced `.gsd/` files block the merge. (#1752)
+- **Doctor cleanup safety** — the `orphaned_completed_units` check no longer auto-fixes during post-task health checks. Previously, timing races could cause the doctor to remove valid completion keys, reverting users to earlier tasks. (#1825)
+- **Root file reverse-sync** — worktree teardown now syncs root-level `.gsd/` files (PROJECT.md, REQUIREMENTS.md, completed-units.json) back to the project root. Previously these were lost on milestone closeout. (#1831)
+- **Empty merge guard** — milestone branches with unanchored code changes are preserved instead of deleted when squash-merge produces nothing to commit. (#1755)
+- **Crash-safe task closeout** — orphaned checkboxes in PLAN.md are unchecked on retry, preventing phantom task completion. (#1759)
+
+### Auto-Mode Stability
+
+- **Terminal hang fix** — `stopAuto()` now resolves pending promises, preventing the terminal from freezing permanently after stopping auto-mode. (#1818)
+- **Signal handler coverage** — SIGHUP and SIGINT now clean up lock files, not just SIGTERM. Prevents stranded locks on VS-Code crash. (#1821)
+- **Needs-discussion routing** — milestones in `needs-discussion` phase now route to the smart entry UI instead of hard-stopping, breaking the infinite loop. (#1820)
+- **Infrastructure error handling** — auto-mode stops immediately on ENOSPC, ENOMEM, and similar unrecoverable errors instead of retrying. (#1780)
+- **Dependency-aware dispatch** — slice dispatch now uses declared `depends_on` instead of positional ordering. (#1770)
+- **Queue mode depth verification** — the write gate now processes depth verification in queue mode, fixing a deadlock where CONTEXT.md writes were permanently blocked. (#1823)
+
+### Roadmap Parser Improvements
+
+- **Table format support** — roadmaps using markdown tables (`| S01 | Title | Risk | Status |`) are now parsed correctly. (#1741)
+- **Prose header fallback** — when `## Slices` contains H3 headers instead of checkboxes, the prose parser is invoked as a fallback. (#1744)
+- **Completion marker detection** — prose headers with `✓` or `(Complete)` markers are correctly identified as done. (#1816)
+- **Zero-slice stub handling** — stub roadmaps from `/gsd queue` return `pre-planning` instead of `blocked`. (#1826)
+- **Immediate roadmap fix** — roadmap checkbox and UAT stub are fixed immediately after last task instead of deferring to `complete-slice`. (#1819)
+
+### State & Git Improvements
+
+- **CONTEXT-DRAFT.md fallback** — `depends_on` is read from CONTEXT-DRAFT.md when CONTEXT.md doesn't exist, preventing draft milestones from being promoted past dependency constraints. (#1743)
+- **Unborn branch support** — `nativeBranchExists` handles repos with zero commits, preventing dispatch deadlock on new repos. (#1815)
+- **Ghost milestone detection** — empty `.gsd/milestones/` directories are skipped instead of crashing `deriveState()`. (#1817)
+- **Default branch detection** — milestone merge detects `master` vs `main` instead of hardcoding. (#1669)
+- **Milestone title extraction** — titles are pulled from CONTEXT.md headings when no ROADMAP exists. (#1729)
+
+### Windows & Platform
+
+- **Windows path handling** — 8.3 short paths, `pathToFileURL` for ESM imports, and `realpathSync.native` fixes across the test suite and verification gate. (#1804)
+- **DEP0190 fix** — `spawnSync` deprecation warning eliminated by passing commands to shell explicitly. (#1827)
+- **Web build skip on Windows** — Next.js webpack EPERM errors on system directories are handled gracefully.
+
+### Developer Experience
+
+- **@ file finder fix** — typing `@` no longer freezes the TUI. The fix adds debounce, dedup, and empty-query short-circuit. (#1832)
+- **Tool-call loop guard** — detects and breaks infinite tool-call loops within a single unit, preventing stack overflow. (#1801)
+- **Completion deferral fix** — roadmap checkbox and UAT stub are fixed at task level, closing the fragile handoff window between last task and `complete-slice`. (#1819)
+
+See the full [Changelog](./CHANGELOG.md) for all 70+ fixes in this release.
+
+### Previous highlights (v2.39–v2.40)
+
+- **GitHub sync extension** — auto-sync milestones to GitHub Issues, PRs, and Milestones
+- **Skill tool resolution** — skills auto-activate in dispatched prompts
+- **Health check phase 2** — real-time doctor issues in dashboard and visualizer
+- **Forensics upgrade** — full-access GSD debugger with anomaly detection
+- **Pipeline decomposition** — auto-loop rewritten as linear phase pipeline
+- **Sliding-window stuck detection** — pattern-aware, fewer false positives
+- **Data-loss recovery** — automatic detection and recovery from v2.30–v2.38 migration issues
 
 ---
 
