@@ -203,7 +203,7 @@ export class CmuxClient {
   }
 
   private canRun(): boolean {
-    return this.config.available && this.config.cliAvailable;
+    return this.config.enabled && this.config.available && this.config.cliAvailable;
   }
 
   private appendWorkspace(args: string[]): string[] {
@@ -380,7 +380,7 @@ export class CmuxClient {
    * Useful for labelling auto-mode runs with the active milestone/slice.
    */
   renameTab(title: string, surfaceId?: string): void {
-    if (!this.config.available || !this.config.cliAvailable) return;
+    if (!this.canRun()) return;
     const surface = surfaceId ?? this.config.surfaceId;
     if (!surface) return;
     this.runSync(["rename-tab", "--surface", surface, "--", title]);
@@ -391,7 +391,7 @@ export class CmuxClient {
    * (e.g. when auto-mode hits a blocker).
    */
   triggerFlash(surfaceId?: string): void {
-    if (!this.config.available || !this.config.cliAvailable) return;
+    if (!this.canRun()) return;
     const args = this.appendWorkspace(["trigger-flash"]);
     const surface = surfaceId ?? this.config.surfaceId;
     this.runSync(surface ? [...args, "--surface", surface] : args);

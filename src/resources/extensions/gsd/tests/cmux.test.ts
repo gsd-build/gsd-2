@@ -378,6 +378,30 @@ describe("CmuxClient new methods respect feature flags", () => {
     assert.doesNotThrow(() => client.triggerFlash());
   });
 
+  test("renameTab no-ops when cmux enabled is false", () => {
+    const config = resolveCmuxConfig({ cmux: { enabled: false } }, env, socketExists, cliAvail);
+    const client = new CmuxClient(config) as unknown as { renameTab: (title: string) => void; runSync: (args: string[]) => string | null };
+    let called = false;
+    client.runSync = () => {
+      called = true;
+      return "OK";
+    };
+    client.renameTab("test");
+    assert.equal(called, false);
+  });
+
+  test("triggerFlash no-ops when cmux enabled is false", () => {
+    const config = resolveCmuxConfig({ cmux: { enabled: false } }, env, socketExists, cliAvail);
+    const client = new CmuxClient(config) as unknown as { triggerFlash: () => void; runSync: (args: string[]) => string | null };
+    let called = false;
+    client.runSync = () => {
+      called = true;
+      return "OK";
+    };
+    client.triggerFlash();
+    assert.equal(called, false);
+  });
+
   test("openBrowserSplit returns null when browser feature is off", async () => {
     const config = resolveCmuxConfig({ cmux: { browser: false } }, env, socketExists, cliAvail);
     const client = new CmuxClient(config);
