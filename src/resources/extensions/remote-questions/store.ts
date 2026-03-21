@@ -5,9 +5,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RemotePrompt, RemotePromptRecord, RemotePromptRef, RemoteAnswer, RemotePromptStatus } from "./types.js";
-import { appRoot as gsdHome } from "../../../app-paths.js";
+import { homedir } from "node:os";
 
 function runtimeDir(): string {
+  const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
   return join(gsdHome, "runtime", "remote-questions");
 }
 

@@ -4,8 +4,8 @@
 
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { readPromptRecord } from "./store.js";
-import { appRoot as gsdHome } from "../../../app-paths.js";
 
 export interface LatestPromptSummary {
   id: string;
@@ -14,6 +14,7 @@ export interface LatestPromptSummary {
 }
 
 export function getLatestPromptSummary(): LatestPromptSummary | null {
+  const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
   const runtimeDir = join(gsdHome, "runtime", "remote-questions");
   if (!existsSync(runtimeDir)) return null;
   const files = readdirSync(runtimeDir).filter((f) => f.endsWith(".json"));

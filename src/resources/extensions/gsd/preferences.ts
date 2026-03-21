@@ -13,7 +13,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { appRoot as gsdHome } from "../../../app-paths.js";
+import { appRoot as gsdHomeDefault } from "../../../app-paths.js";
+
+/** Resolve GSD home dynamically so runtime GSD_HOME overrides are respected. */
+function gsdHome(): string {
+  return process.env.GSD_HOME || gsdHomeDefault;
+}
 
 import { gsdRoot } from "./paths.js";
 import { parse as parseYaml } from "yaml";
@@ -84,7 +89,7 @@ export {
 // ─── Path Constants & Getters ───────────────────────────────────────────────
 
 function globalPreferencesPath(): string {
-  return join(gsdHome, "preferences.md");
+  return join(gsdHome(), "preferences.md");
 }
 
 function legacyGlobalPreferencesPath(): string {
@@ -97,7 +102,7 @@ function projectPreferencesPath(): string {
 // Bootstrap in gitignore.ts historically created PREFERENCES.md (uppercase) by mistake.
 // Check uppercase as a fallback so those files aren't silently ignored.
 function globalPreferencesPathUppercase(): string {
-  return join(gsdHome, "PREFERENCES.md");
+  return join(gsdHome(), "PREFERENCES.md");
 }
 function projectPreferencesPathUppercase(): string {
   return join(gsdRoot(process.cwd()), "PREFERENCES.md");

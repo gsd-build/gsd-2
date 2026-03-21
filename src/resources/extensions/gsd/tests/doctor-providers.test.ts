@@ -196,7 +196,7 @@ test("runProviderChecks detects Anthropic key from ANTHROPIC_API_KEY env var", (
   // Isolate from real HOME so loadEffectiveGSDPreferences returns null (default → anthropic)
   // and auth.json lookups hit an empty directory.
   const tmpHome = realpathSync(mkdtempSync(join(tmpdir(), "gsd-providers-env-test-")));
-  withEnv({ ANTHROPIC_API_KEY: "sk-ant-test-key", ANTHROPIC_OAUTH_TOKEN: undefined, HOME: tmpHome }, () => {
+  withEnv({ ANTHROPIC_API_KEY: "sk-ant-test-key", ANTHROPIC_OAUTH_TOKEN: undefined, HOME: tmpHome, GSD_HOME: join(tmpHome, ".gsd") }, () => {
     try {
       const results = runProviderChecks();
       const anthropic = results.find(r => r.name === "anthropic");
@@ -219,6 +219,7 @@ test("runProviderChecks returns error for Anthropic when no key present", () => 
     GH_TOKEN: undefined,
     GITHUB_TOKEN: undefined,
     HOME: tmpHome,
+    GSD_HOME: join(tmpHome, ".gsd"),
   }, () => {
     try {
       const results = runProviderChecks();
@@ -240,19 +241,17 @@ test("runProviderChecks optional providers have required=false", () => {
 });
 
 test("runProviderChecks optional providers show unconfigured when no key", () => {
+  const tmpHome = mkdtempSync(join(tmpdir(), "gsd-providers-test-"));
   withEnv(
-    { BRAVE_API_KEY: undefined, TAVILY_API_KEY: undefined, JINA_API_KEY: undefined, CONTEXT7_API_KEY: undefined },
+    { BRAVE_API_KEY: undefined, TAVILY_API_KEY: undefined, JINA_API_KEY: undefined, CONTEXT7_API_KEY: undefined, HOME: tmpHome, GSD_HOME: join(tmpHome, ".gsd") },
     () => {
-      const origHome = process.env.HOME;
-      process.env.HOME = mkdtempSync(join(tmpdir(), "gsd-providers-test-"));
       try {
         const results = runProviderChecks();
         const brave = results.find(r => r.name === "brave");
         assert.ok(brave, "brave should be present");
         assert.equal(brave!.status, "unconfigured", "should be unconfigured");
       } finally {
-        rmSync(process.env.HOME!, { recursive: true, force: true });
-        process.env.HOME = origHome;
+        rmSync(tmpHome, { recursive: true, force: true });
       }
     }
   );
@@ -282,7 +281,7 @@ test("runProviderChecks detects key from auth.json", () => {
     };
     writeFileSync(join(agentDir, "auth.json"), JSON.stringify(authData));
 
-    withEnv({ HOME: tmpHome }, () => {
+    withEnv({ HOME: tmpHome, GSD_HOME: join(tmpHome, ".gsd") }, () => {
       const results = runProviderChecks();
       const anthropic = results.find(r => r.name === "anthropic");
       assert.ok(anthropic, "anthropic should be present");
@@ -306,7 +305,7 @@ test("runProviderChecks ignores empty placeholder keys in auth.json", () => {
     };
     writeFileSync(join(agentDir, "auth.json"), JSON.stringify(authData));
 
-    withEnv({ HOME: tmpHome }, () => {
+    withEnv({ HOME: tmpHome, GSD_HOME: join(tmpHome, ".gsd") }, () => {
       const results = runProviderChecks();
       const anthropic = results.find(r => r.name === "anthropic");
       assert.ok(anthropic, "anthropic should be present");
@@ -328,6 +327,7 @@ test("runProviderChecks reports ok for Anthropic when GitHub Copilot env var is 
     GH_TOKEN: undefined,
     GITHUB_TOKEN: undefined,
     HOME: tmpHome,
+    GSD_HOME: join(tmpHome, ".gsd"),
   }, () => {
     try {
       const results = runProviderChecks();
@@ -350,6 +350,7 @@ test("runProviderChecks reports ok for Anthropic via GITHUB_TOKEN cross-provider
     GH_TOKEN: undefined,
     GITHUB_TOKEN: PRESENT_TEST_VALUE,
     HOME: tmpHome,
+    GSD_HOME: join(tmpHome, ".gsd"),
   }, () => {
     try {
       const results = runProviderChecks();
@@ -371,6 +372,7 @@ test("runProviderChecks detects ANTHROPIC_OAUTH_TOKEN as valid Anthropic auth", 
     GH_TOKEN: undefined,
     GITHUB_TOKEN: undefined,
     HOME: tmpHome,
+    GSD_HOME: join(tmpHome, ".gsd"),
   }, () => {
     try {
       const results = runProviderChecks();
@@ -402,7 +404,7 @@ test("runProviderChecks reports ok via Copilot auth.json for Anthropic", () => {
     };
     writeFileSync(join(agentDir, "auth.json"), JSON.stringify(authData));
 
-    withEnv({ HOME: tmpHome }, () => {
+    withEnv({ HOME: tmpHome, GSD_HOME: join(tmpHome, ".gsd") }, () => {
       const results = runProviderChecks();
       const anthropic = results.find(r => r.name === "anthropic");
       assert.ok(anthropic, "anthropic result should exist");
@@ -431,6 +433,7 @@ test("runProviderChecks uses provider-qualified anthropic-vertex model IDs", () 
 
   withEnv({
     HOME: tmpHome,
+    GSD_HOME: join(tmpHome, ".gsd"),
     ANTHROPIC_API_KEY: undefined,
     ANTHROPIC_OAUTH_TOKEN: undefined,
     ANTHROPIC_VERTEX_PROJECT_ID: "vertex-project",
@@ -468,6 +471,7 @@ test("runProviderChecks uses object provider field for anthropic-vertex models",
 
   withEnv({
     HOME: tmpHome,
+    GSD_HOME: join(tmpHome, ".gsd"),
     ANTHROPIC_API_KEY: undefined,
     ANTHROPIC_OAUTH_TOKEN: undefined,
     ANTHROPIC_VERTEX_PROJECT_ID: undefined,
