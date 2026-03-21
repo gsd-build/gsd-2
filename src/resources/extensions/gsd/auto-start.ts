@@ -299,7 +299,7 @@ export async function bootstrapAutoSession(
     let hasSurvivorBranch = false;
     if (
       state.activeMilestone &&
-      (state.phase === "pre-planning" || state.phase === "needs-discussion") &&
+      state.phase === "pre-planning" &&
       shouldUseWorktreeIsolation() &&
       !detectWorktreeName(base) &&
       !base.includes(`${pathSep}.gsd${pathSep}worktrees${pathSep}`)
@@ -388,6 +388,27 @@ export async function bootstrapAutoSession(
             );
             return releaseLockAndReturn();
           }
+        }
+      }
+
+      // Active milestone has CONTEXT-DRAFT but no full context — needs discussion
+      if (state.phase === "needs-discussion") {
+        const { showSmartEntry } = await import("./guided-flow.js");
+        await showSmartEntry(ctx, pi, base, { step: requestedStepMode });
+
+        invalidateAllCaches();
+        const postState = await deriveState(base);
+        if (
+          postState.activeMilestone &&
+          postState.phase !== "needs-discussion"
+        ) {
+          state = postState;
+        } else {
+          ctx.ui.notify(
+            "Discussion completed but milestone draft was not promoted. Run /gsd to try again.",
+            "warning",
+          );
+          return releaseLockAndReturn();
         }
       }
     }
