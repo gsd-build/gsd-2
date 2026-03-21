@@ -12,6 +12,7 @@ import {
   initRegistry,
   resetRegistry,
   convertDispatchRules,
+  getOrCreateRegistry,
 } from "../rule-registry.ts";
 import type { UnifiedRule } from "../rule-types.ts";
 import type { DispatchAction, DispatchContext } from "../auto-dispatch.ts";
@@ -301,5 +302,86 @@ describe("RuleRegistry", () => {
     for (let i = 0; i < originalNames.length; i++) {
       assertEq(listedNames[i], originalNames[i], `name at index ${i} matches: "${originalNames[i]}"`);
     }
+  });
+
+  // ── getOrCreateRegistry (lazy init for facades) ────────────────────
+
+  test("getOrCreateRegistry lazily creates a registry with empty dispatch rules", () => {
+    // After resetRegistry(), getRegistry() would throw. getOrCreateRegistry() should not.
+    const registry = getOrCreateRegistry();
+    assertTrue(registry instanceof RuleRegistry, "returns a RuleRegistry instance");
+    const dispatchRules = registry.listRules().filter(r => r.when === "dispatch");
+    assertEq(dispatchRules.length, 0, "lazily-created registry has 0 dispatch rules");
+  });
+
+  test("getOrCreateRegistry returns existing registry when initialized", () => {
+    const rules = [mockDispatchRule("explicit-init", "planning")];
+    const explicit = initRegistry(rules);
+    const lazy = getOrCreateRegistry();
+    assertEq(lazy, explicit, "getOrCreateRegistry returns the same singleton as initRegistry");
+    const dispatchRules = lazy.listRules().filter(r => r.when === "dispatch");
+    assertEq(dispatchRules.length, 1, "singleton has the explicitly initialized dispatch rule");
+  });
+
+  // ── Hook-derived rules in listRules ────────────────────────────────
+
+  test("listRules returns only dispatch rules when no hooks are configured", () => {
+    const converted = convertDispatchRules(DISPATCH_RULES);
+    const registry = new RuleRegistry(converted);
+    const allRules = registry.listRules();
+    const postUnitRules = allRules.filter(r => r.when === "post-unit");
+    const preDispatchRules = allRules.filter(r => r.when === "pre-dispatch");
+
+    // No preferences file = no hooks
+    assertEq(postUnitRules.length, 0, "no post-unit rules when no hooks configured");
+    assertEq(preDispatchRules.length, 0, "no pre-dispatch rules when no hooks configured");
+    assertEq(allRules.length, DISPATCH_RULES.length, "total rules equals dispatch rules only");
+  });
+
+  test("listRules dispatch rules appear first, hooks after", () => {
+    const converted = convertDispatchRules(DISPATCH_RULES);
+    const registry = new RuleRegistry(converted);
+    const allRules = registry.listRules();
+
+    // Verify dispatch rules come first (indices 0..N-1)
+    for (let i = 0; i < converted.length; i++) {
+      assertEq(allRules[i].when, "dispatch", `rule at index ${i} is a dispatch rule`);
+      assertEq(allRules[i].name, converted[i].name, `dispatch rule at index ${i} has correct name`);
+    }
+  });
+
+  // ── Facade delegation (post-unit-hooks.ts imports work through registry) ──
+
+  test("evaluatePostUnit returns null for hook-on-hook prevention", () => {
+    const registry = new RuleRegistry([]);
+    const result = registry.evaluatePostUnit("hook/code-review", "M001/S01/T01", "/tmp/test");
+    assertEq(result, null, "hook units don't trigger other hooks");
+  });
+
+  test("evaluatePostUnit returns null for triage-captures", () => {
+    const registry = new RuleRegistry([]);
+    const result = registry.evaluatePostUnit("triage-captures", "M001/S01/T01", "/tmp/test");
+    assertEq(result, null, "triage-captures skipped");
+  });
+
+  test("evaluatePostUnit returns null for quick-task", () => {
+    const registry = new RuleRegistry([]);
+    const result = registry.evaluatePostUnit("quick-task", "M001/S01/T01", "/tmp/test");
+    assertEq(result, null, "quick-task skipped");
+  });
+
+  test("evaluatePreDispatch bypasses hook units", () => {
+    const registry = new RuleRegistry([]);
+    const result = registry.evaluatePreDispatch("hook/review", "M001/S01/T01", "prompt", "/tmp/test");
+    assertEq(result.action, "proceed", "hook units always proceed");
+    assertEq(result.prompt, "prompt", "prompt unchanged");
+    assertEq(result.firedHooks.length, 0, "no hooks fired");
+  });
+
+  test("evaluatePreDispatch proceeds with empty hooks", () => {
+    const registry = new RuleRegistry([]);
+    const result = registry.evaluatePreDispatch("execute-task", "M001/S01/T01", "original prompt", "/tmp/test");
+    assertEq(result.action, "proceed", "proceeds when no hooks");
+    assertEq(result.prompt, "original prompt", "prompt unchanged");
   });
 });

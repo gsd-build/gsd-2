@@ -21,9 +21,9 @@ import { resolvePostUnitHooks, resolvePreDispatchHooks } from "./preferences.js"
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-// ─── Artifact Path Resolution (mirrors post-unit-hooks.ts) ────────────────
+// ─── Artifact Path Resolution ──────────────────────────────────────────────
 
-function resolveHookArtifactPath(basePath: string, unitId: string, artifactName: string): string {
+export function resolveHookArtifactPath(basePath: string, unitId: string, artifactName: string): string {
   const parts = unitId.split("/");
   if (parts.length === 3) {
     const [mid, sid, tid] = parts;
@@ -575,6 +575,18 @@ export function initRegistry(dispatchRules: UnifiedRule[]): RuleRegistry {
   const registry = new RuleRegistry(dispatchRules);
   setRegistry(registry);
   return registry;
+}
+
+/**
+ * Get the singleton registry, lazily creating one with empty dispatch rules
+ * if not yet initialized. This ensures facade functions work even when
+ * the full registry hasn't been set up (e.g. during testing).
+ */
+export function getOrCreateRegistry(): RuleRegistry {
+  if (!_registry) {
+    _registry = new RuleRegistry([]);
+  }
+  return _registry;
 }
 
 /** Reset the singleton (for testing). */
