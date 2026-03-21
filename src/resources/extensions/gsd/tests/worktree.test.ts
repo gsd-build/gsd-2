@@ -191,11 +191,22 @@ async function main(): Promise<void> {
 
   // ── resolveProjectRoot: symlink-resolved paths ──────────────────────────
   console.log("\n=== resolveProjectRoot (symlink-resolved paths) ===");
+
+  // BUG FIX: symlink-resolved paths that land inside ~/.gsd should NOT
+  // resolve to the home directory. When the .git file fallback can't find
+  // the real project root (no git worktree metadata in these synthetic paths),
+  // resolveProjectRoot returns the input unchanged rather than returning ~.
+  
+  // With GSD_PROJECT_ROOT env var set (layer 1 — coordinator passes it)
+  process.env.GSD_PROJECT_ROOT = "/real/project";
   assertEq(
     resolveProjectRoot("/Users/fran/.gsd/projects/89e1c9ad49bf/worktrees/M001"),
-    "/Users/fran",
-    "resolves to user home for symlink-resolved path",
+    "/real/project",
+    "uses GSD_PROJECT_ROOT when set",
   );
+  delete process.env.GSD_PROJECT_ROOT;
+
+  // Without GSD_PROJECT_ROOT, direct layout still works (no ~/.gsd collision)
   assertEq(
     resolveProjectRoot("/foo/.gsd/worktrees/M001"),
     "/foo",
@@ -206,10 +217,12 @@ async function main(): Promise<void> {
     "/some/repo",
     "returns unchanged for non-worktree path",
   );
+
+  // Without GSD_PROJECT_ROOT, direct layout with nested subdirs
   assertEq(
-    resolveProjectRoot("/data/.gsd/projects/deadbeef/worktrees/M003/nested"),
+    resolveProjectRoot("/data/.gsd/worktrees/M003/nested"),
     "/data",
-    "resolves correctly with nested subdirs after worktree name",
+    "resolves correctly with nested subdirs after worktree name (direct layout)",
   );
 
   rmSync(base, { recursive: true, force: true });
