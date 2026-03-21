@@ -5,6 +5,9 @@ import { motion } from "motion/react"
 import {
   ArrowRight,
   CheckCircle2,
+  Eye,
+  EyeOff,
+  KeyRound,
   LoaderCircle,
   MessageSquare,
   SkipForward,
@@ -26,6 +29,7 @@ interface RemoteQuestionsApiResponse {
     pollIntervalSeconds: number
   } | null
   envVarSet: boolean
+  tokenSet: boolean
   envVarName: string | null
   status: string
   error?: string
@@ -49,6 +53,12 @@ const CHANNEL_ID_PATTERNS: Record<RemoteChannel, RegExp> = {
   telegram: /^-?\d{5,20}$/,
 }
 
+const ENV_KEYS: Record<RemoteChannel, string> = {
+  slack: "SLACK_BOT_TOKEN",
+  discord: "DISCORD_BOT_TOKEN",
+  telegram: "TELEGRAM_BOT_TOKEN",
+}
+
 // ─── Component ──────────────────────────────────────────────────────
 
 interface StepRemoteProps {
@@ -64,12 +74,18 @@ export function StepRemote({ onBack, onNext }: StepRemoteProps) {
   const [success, setSuccess] = useState(false)
   const [alreadyConfigured, setAlreadyConfigured] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [botToken, setBotToken] = useState("")
+  const [showToken, setShowToken] = useState(false)
+  const [savingToken, setSavingToken] = useState(false)
+  const [tokenSet, setTokenSet] = useState(false)
+  const [tokenSuccess, setTokenSuccess] = useState<string | null>(null)
 
   // Check if already configured
   useEffect(() => {
     fetch("/api/remote-questions", { cache: "no-store" })
       .then((res) => res.json())
       .then((data: RemoteQuestionsApiResponse) => {
+        if (data.tokenSet) setTokenSet(true)
         if (data.status === "configured" && data.config) {
           setAlreadyConfigured(true)
           setChannel(data.config.channel)
@@ -115,6 +131,30 @@ export function StepRemote({ onBack, onNext }: StepRemoteProps) {
       setSaving(false)
     }
   }, [channel, channelId, channelIdValid])
+
+  const handleSaveToken = useCallback(async () => {
+    if (!channel || !botToken.trim()) return
+    setSavingToken(true)
+    setError(null)
+    setTokenSuccess(null)
+    try {
+      const res = await fetch("/api/remote-questions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel, token: botToken.trim() }),
+      })
+      const json = await res.json()
+      if (!res.ok) { setError(json.error ?? `Token save failed (${res.status})`); return }
+      setTokenSuccess(`Token saved (${json.masked})`)
+      setTokenSet(true)
+      setBotToken("")
+      setShowToken(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save token")
+    } finally {
+      setSavingToken(false)
+    }
+  }, [channel, botToken])
 
   return (
     <div className="flex flex-col items-center">
@@ -219,6 +259,58 @@ export function StepRemote({ onBack, onNext }: StepRemoteProps) {
                 Doesn't match the expected format for {channel}
               </p>
             )}
+          </div>
+        )}
+
+        {/* Bot token input */}
+        {channel && !loading && (
+          <div className="space-y-2">
+            <div className="text-xs font-medium text-muted-foreground/60">
+              Bot token
+              {tokenSet && (
+                <span className="ml-2 text-success">✓ configured</span>
+              )}
+            </div>
+
+            {tokenSuccess && (
+              <div className="flex items-center gap-2 rounded-xl border border-success/15 bg-success/[0.04] px-3 py-2 text-xs text-muted-foreground">
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
+                {tokenSuccess}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Input
+                  type={showToken ? "text" : "password"}
+                  value={botToken}
+                  onChange={(e) => setBotToken(e.target.value)}
+                  placeholder={`Paste your ${ENV_KEYS[channel]}`}
+                  disabled={savingToken}
+                  className="pr-9 font-mono text-sm"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && botToken.trim()) void handleSaveToken()
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowToken((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                >
+                  {showToken ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleSaveToken()}
+                disabled={!botToken.trim() || savingToken}
+                className="gap-1.5 transition-transform active:scale-[0.96]"
+              >
+                {savingToken ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+                Save
+              </Button>
+            </div>
           </div>
         )}
 

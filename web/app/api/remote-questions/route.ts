@@ -1,5 +1,5 @@
 import { homedir } from "node:os"
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs"
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml"
 
@@ -30,6 +30,56 @@ const MIN_POLL_INTERVAL_SECONDS = 2
 const MAX_POLL_INTERVAL_SECONDS = 30
 
 const VALID_CHANNELS: readonly RemoteChannel[] = ["slack", "discord", "telegram"] as const
+
+// Map channel → auth.json provider ID (matches key-manager.ts PROVIDER_REGISTRY)
+const AUTH_PROVIDER_IDS: Record<RemoteChannel, string> = {
+  slack: "slack_bot",
+  discord: "discord_bot",
+  telegram: "telegram_bot",
+}
+
+// ─── Auth.json Helpers ────────────────────────────────────────────────────────
+
+function getAuthPath(): string {
+  return join(homedir(), ".gsd", "agent", "auth.json")
+}
+
+function readAuthData(): Record<string, unknown> {
+  const authPath = getAuthPath()
+  if (!existsSync(authPath)) return {}
+  try {
+    const content = readFileSync(authPath, "utf-8")
+    const parsed = JSON.parse(content)
+    return typeof parsed === "object" && parsed !== null ? parsed as Record<string, unknown> : {}
+  } catch { return {} }
+}
+
+function writeAuthData(data: Record<string, unknown>): void {
+  const authPath = getAuthPath()
+  const parentDir = dirname(authPath)
+  if (!existsSync(parentDir)) mkdirSync(parentDir, { recursive: true, mode: 0o700 })
+  writeFileSync(authPath, JSON.stringify(data, null, 2), "utf-8")
+  chmodSync(authPath, 0o600)
+}
+
+function hasStoredBotToken(channel: RemoteChannel): boolean {
+  const data = readAuthData()
+  const providerId = AUTH_PROVIDER_IDS[channel]
+  const entry = data[providerId]
+  if (!entry) return false
+  // Could be a single credential or an array
+  const creds = Array.isArray(entry) ? entry : [entry]
+  return creds.some((c: unknown) => {
+    if (typeof c !== "object" || c === null) return false
+    const cred = c as Record<string, unknown>
+    return cred.type === "api_key" && typeof cred.key === "string" && cred.key.length > 0
+  })
+}
+
+function maskToken(token: string): string {
+  if (token.length <= 8) return token.slice(0, 2) + "***" + token.slice(-2)
+  return token.slice(0, 4) + "***" + token.slice(-4)
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -88,6 +138,7 @@ interface RemoteQuestionsResponse {
     pollIntervalSeconds: number
   } | null
   envVarSet: boolean
+  tokenSet: boolean
   envVarName: string | null
   status: string
 }
@@ -102,6 +153,7 @@ export async function GET(): Promise<Response> {
       const response: RemoteQuestionsResponse = {
         config: null,
         envVarSet: false,
+        tokenSet: false,
         envVarName: null,
         status: "not_configured",
       }
@@ -118,6 +170,7 @@ export async function GET(): Promise<Response> {
       const response: RemoteQuestionsResponse = {
         config: null,
         envVarSet: false,
+        tokenSet: false,
         envVarName: null,
         status: "not_configured",
       }
@@ -131,6 +184,7 @@ export async function GET(): Promise<Response> {
       const response: RemoteQuestionsResponse = {
         config: null,
         envVarSet: false,
+        tokenSet: false,
         envVarName: null,
         status: "invalid_channel",
       }
@@ -144,6 +198,7 @@ export async function GET(): Promise<Response> {
     const pollIntervalSeconds = clamp(rq.poll_interval_seconds as number | undefined, DEFAULT_POLL_INTERVAL_SECONDS, MIN_POLL_INTERVAL_SECONDS, MAX_POLL_INTERVAL_SECONDS)
     const envVarName = ENV_KEYS[channel]
     const envVarSet = !!process.env[envVarName]
+    const tokenSet = hasStoredBotToken(channel) || envVarSet
 
     const response: RemoteQuestionsResponse = {
       config: {
@@ -153,6 +208,7 @@ export async function GET(): Promise<Response> {
         pollIntervalSeconds,
       },
       envVarSet,
+      tokenSet,
       envVarName,
       status: "configured",
     }
@@ -284,6 +340,64 @@ export async function DELETE(): Promise<Response> {
     const message = error instanceof Error ? error.message : String(error)
     return Response.json(
       { error: `Failed to remove remote questions config: ${message}` },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
+    )
+  }
+}
+
+// ─── PATCH (save bot token) ───────────────────────────────────────────────────
+
+export async function PATCH(request: Request): Promise<Response> {
+  try {
+    const body = await request.json() as Record<string, unknown>
+    const { channel, token } = body as { channel: unknown; token: unknown }
+
+    if (!isValidChannel(channel)) {
+      return Response.json(
+        { error: `Invalid channel type: must be one of ${VALID_CHANNELS.join(", ")}` },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
+      )
+    }
+
+    if (typeof token !== "string" || !token.trim()) {
+      return Response.json(
+        { error: "token is required and must be a non-empty string" },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
+      )
+    }
+
+    const trimmedToken = token.trim()
+    const providerId = AUTH_PROVIDER_IDS[channel]
+
+    // Read existing auth data, merge the new credential
+    const authData = readAuthData()
+    const existingEntry = authData[providerId]
+    const existingCreds: unknown[] = existingEntry
+      ? (Array.isArray(existingEntry) ? existingEntry : [existingEntry])
+      : []
+
+    // Replace any existing api_key credential, keep OAuth
+    const oauthCreds = existingCreds.filter((c: unknown) => {
+      if (typeof c !== "object" || c === null) return false
+      return (c as Record<string, unknown>).type === "oauth"
+    })
+    const newCred = { type: "api_key", key: trimmedToken }
+    const merged = [...oauthCreds, newCred]
+    authData[providerId] = merged.length === 1 ? merged[0] : merged
+    writeAuthData(authData)
+
+    // Also set in process.env so it's available immediately
+    const envVar = ENV_KEYS[channel]
+    process.env[envVar] = trimmedToken
+
+    return Response.json(
+      { success: true, masked: maskToken(trimmedToken) },
+      { headers: { "Cache-Control": "no-store" } },
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return Response.json(
+      { error: `Failed to save bot token: ${message}` },
       { status: 500, headers: { "Cache-Control": "no-store" } },
     )
   }

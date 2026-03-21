@@ -7,6 +7,9 @@ import {
   CheckCircle2,
   Cpu,
   DollarSign,
+  Eye,
+  EyeOff,
+  KeyRound,
   LoaderCircle,
   Radio,
   RefreshCw,
@@ -499,21 +502,26 @@ export function BudgetPanel() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// REMOTE QUESTIONS PANEL
+// REMOTE QUESTIONS PANEL (Integrations tab)
 // ═══════════════════════════════════════════════════════════════════════
 
 type RemoteChannel = "slack" | "discord" | "telegram"
 
-const CHANNEL_OPTIONS: { value: RemoteChannel; label: string }[] = [
-  { value: "slack", label: "Slack" },
-  { value: "discord", label: "Discord" },
-  { value: "telegram", label: "Telegram" },
+const CHANNEL_OPTIONS: {
+  value: RemoteChannel
+  label: string
+  description: string
+  idPlaceholder: string
+}[] = [
+  { value: "slack", label: "Slack", description: "Get pinged in a Slack channel", idPlaceholder: "Channel ID (e.g. C01ABCD2EFG)" },
+  { value: "discord", label: "Discord", description: "Get pinged in a Discord channel", idPlaceholder: "Channel ID (17–20 digit number)" },
+  { value: "telegram", label: "Telegram", description: "Get pinged via Telegram bot", idPlaceholder: "Chat ID (numeric, may start with -)" },
 ]
 
-const CHANNEL_ID_PATTERNS: Record<RemoteChannel, { regex: RegExp; hint: string }> = {
-  slack: { regex: /^[A-Z0-9]{9,12}$/, hint: "9–12 uppercase alphanumeric characters (e.g. C01ABCD2EFG)" },
-  discord: { regex: /^\d{17,20}$/, hint: "17–20 digit numeric ID" },
-  telegram: { regex: /^-?\d{5,20}$/, hint: "Numeric chat ID (may start with -)" },
+const CHANNEL_ID_PATTERNS: Record<RemoteChannel, RegExp> = {
+  slack: /^[A-Z0-9]{9,12}$/,
+  discord: /^\d{17,20}$/,
+  telegram: /^-?\d{5,20}$/,
 }
 
 interface RemoteQuestionsApiResponse {
@@ -524,6 +532,7 @@ interface RemoteQuestionsApiResponse {
     pollIntervalSeconds: number
   } | null
   envVarSet: boolean
+  tokenSet: boolean
   envVarName: string | null
   status: string
   error?: string
@@ -533,30 +542,27 @@ export function RemoteQuestionsPanel() {
   const { data, busy, refresh } = useSettingsData()
   const existingConfig = data?.preferences?.remoteQuestions ?? null
 
-  // API-only state (env var info)
   const [envVarSet, setEnvVarSet] = useState(false)
   const [envVarName, setEnvVarName] = useState<string | null>(null)
   const [apiLoading, setApiLoading] = useState(true)
+  const [tokenSet, setTokenSet] = useState(false)
 
-  // Form fields
   const [channel, setChannel] = useState<RemoteChannel>("slack")
   const [channelId, setChannelId] = useState("")
   const [timeoutMinutes, setTimeoutMinutes] = useState(5)
   const [pollIntervalSeconds, setPollIntervalSeconds] = useState(5)
+  const [botToken, setBotToken] = useState("")
+  const [showToken, setShowToken] = useState(false)
+  const [savingToken, setSavingToken] = useState(false)
+  const [tokenSuccess, setTokenSuccess] = useState<string | null>(null)
 
-  // Feedback states
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-
-  // Whether a configuration currently exists (from API response, not just form state)
   const [isConfigured, setIsConfigured] = useState(false)
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
-  // Track whether user has interacted with channel ID for validation display
-  const [channelIdTouched, setChannelIdTouched] = useState(false)
-
-  // Fetch full status from API on mount and after mutations
   const fetchApiStatus = useCallback(async () => {
     try {
       setApiLoading(true)
@@ -569,6 +575,7 @@ export function RemoteQuestionsPanel() {
       const json: RemoteQuestionsApiResponse = await res.json()
       setEnvVarSet(json.envVarSet)
       setEnvVarName(json.envVarName)
+      setTokenSet(json.tokenSet)
       setIsConfigured(json.status === "configured" && json.config !== null)
       if (json.config) {
         setChannel(json.config.channel)
@@ -585,7 +592,6 @@ export function RemoteQuestionsPanel() {
 
   useEffect(() => { void fetchApiStatus() }, [fetchApiStatus])
 
-  // Sync form when existingConfig changes from the settings hook
   useEffect(() => {
     if (existingConfig?.channel) {
       setChannel(existingConfig.channel)
@@ -595,18 +601,15 @@ export function RemoteQuestionsPanel() {
     }
   }, [existingConfig])
 
-  // Validation
-  const channelIdValid = channelId.length === 0 || CHANNEL_ID_PATTERNS[channel].regex.test(channelId)
-  const canSave = channelId.length > 0 && CHANNEL_ID_PATTERNS[channel].regex.test(channelId) && !saving && !deleting
+  const channelIdValid = channelId.trim().length > 0 && CHANNEL_ID_PATTERNS[channel].test(channelId.trim())
+  const canSave = channelIdValid && !saving && !deleting
 
-  // Clear success feedback after 3s
   useEffect(() => {
     if (!success) return
     const timer = setTimeout(() => setSuccess(null), 3000)
     return () => clearTimeout(timer)
   }, [success])
 
-  // Save
   const handleSave = async () => {
     setSaving(true)
     setError(null)
@@ -615,16 +618,12 @@ export function RemoteQuestionsPanel() {
       const res = await fetch("/api/remote-questions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel, channelId, timeoutMinutes, pollIntervalSeconds }),
+        body: JSON.stringify({ channel, channelId: channelId.trim(), timeoutMinutes, pollIntervalSeconds }),
       })
       const json = await res.json()
-      if (!res.ok) {
-        setError(json.error ?? `Save failed (${res.status})`)
-        return
-      }
+      if (!res.ok) { setError(json.error ?? `Save failed (${res.status})`); return }
       setSuccess("Configuration saved")
       setIsConfigured(true)
-      setChannelIdTouched(false)
       refresh()
       void fetchApiStatus()
     } catch (e) {
@@ -634,7 +633,6 @@ export function RemoteQuestionsPanel() {
     }
   }
 
-  // Disconnect
   const handleDisconnect = async () => {
     setDeleting(true)
     setError(null)
@@ -642,17 +640,14 @@ export function RemoteQuestionsPanel() {
     try {
       const res = await fetch("/api/remote-questions", { method: "DELETE" })
       const json = await res.json()
-      if (!res.ok) {
-        setError(json.error ?? `Disconnect failed (${res.status})`)
-        return
-      }
+      if (!res.ok) { setError(json.error ?? `Disconnect failed (${res.status})`); return }
       setSuccess("Channel disconnected")
       setIsConfigured(false)
       setChannelId("")
       setTimeoutMinutes(5)
       setPollIntervalSeconds(5)
       setChannel("slack")
-      setChannelIdTouched(false)
+      setTokenSet(false)
       refresh()
       void fetchApiStatus()
     } catch (e) {
@@ -662,97 +657,189 @@ export function RemoteQuestionsPanel() {
     }
   }
 
-  const derivedEnvVarName = envVarName ?? (channel ? `${channel.toUpperCase()}_BOT_TOKEN` : null)
+  const handleSaveToken = async () => {
+    if (!botToken.trim()) return
+    setSavingToken(true)
+    setError(null)
+    setTokenSuccess(null)
+    try {
+      const res = await fetch("/api/remote-questions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel, token: botToken.trim() }),
+      })
+      const json = await res.json()
+      if (!res.ok) { setError(json.error ?? `Token save failed (${res.status})`); return }
+      setTokenSuccess(`Token saved (${json.masked})`)
+      setTokenSet(true)
+      setBotToken("")
+      setShowToken(false)
+      void fetchApiStatus()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save token")
+    } finally {
+      setSavingToken(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!tokenSuccess) return
+    const timer = setTimeout(() => setTokenSuccess(null), 3000)
+    return () => clearTimeout(timer)
+  }, [tokenSuccess])
+
+  const derivedEnvVarName = envVarName ?? `${channel.toUpperCase()}_BOT_TOKEN`
+  const selectedChannelOption = CHANNEL_OPTIONS.find((o) => o.value === channel)!
+
+  if ((busy || apiLoading) && !data && !isConfigured) {
+    return (
+      <div className="space-y-5" data-testid="settings-remote-questions">
+        <SettingsHeader title="Integrations" icon={<Radio className="h-3.5 w-3.5" />} subtitle="Remote notifications" onRefresh={() => { refresh(); void fetchApiStatus() }} refreshing />
+        <SettingsLoading label="Loading integration status…" />
+      </div>
+    )
+  }
 
   return (
-    <div className="space-y-4" data-testid="settings-remote-questions">
+    <div className="space-y-5" data-testid="settings-remote-questions">
       <SettingsHeader
-        title="Remote Questions"
+        title="Integrations"
         icon={<Radio className="h-3.5 w-3.5" />}
+        subtitle="Remote notifications"
         onRefresh={() => { refresh(); void fetchApiStatus() }}
         refreshing={busy || apiLoading}
       />
 
+      {/* Intro */}
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        Connect a chat channel so the agent pings you when it needs input
+        instead of waiting silently.
+      </p>
+
+      {/* Feedback banners */}
       {error && <SettingsError message={error} />}
       {success && (
-        <div className="rounded-lg border border-success/20 bg-success/5 px-3 py-2.5 text-xs text-success flex items-center gap-2">
-          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+        <div className="flex items-center gap-2.5 rounded-xl border border-success/15 bg-success/[0.04] px-4 py-3 text-sm text-muted-foreground">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
           {success}
         </div>
       )}
-      {(busy || apiLoading) && !data && !isConfigured && <SettingsLoading label="Loading remote questions…" />}
 
-      {/* Current config summary (when configured) */}
+      {/* ── Connected state banner ───────────────────────────────── */}
       {isConfigured && (
-        <div className="rounded-lg border border-border/30 bg-card/30 px-3 py-2.5 space-y-1.5">
-          <h4 className="text-[11px] font-medium text-foreground/70 uppercase tracking-wide">Current Channel</h4>
-          <KvRow label="Channel">
-            <span className="capitalize">{channel}</span>
-          </KvRow>
-          <KvRow label="Channel ID">
-            <span className="font-mono text-[11px]">{channelId}</span>
-          </KvRow>
-          <KvRow label="Timeout">{timeoutMinutes}m</KvRow>
-          <KvRow label="Poll Interval">{pollIntervalSeconds}s</KvRow>
+        <div className="rounded-xl border border-success/15 bg-success/[0.04] px-4 py-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-success/20 bg-success/10">
+                <CheckCircle2 className="h-4.5 w-4.5 text-success" />
+              </div>
+              <div>
+                <div className="text-sm font-medium text-foreground">
+                  Connected to {selectedChannelOption.label}
+                </div>
+                <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+                  {channelId}
+                </div>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => void handleDisconnect()}
+              disabled={deleting}
+              className="h-7 text-xs text-destructive/70 hover:text-destructive"
+            >
+              {deleting ? <LoaderCircle className="h-3 w-3 animate-spin" /> : "Disconnect"}
+            </Button>
+          </div>
+          <div className="mt-3 flex gap-4 border-t border-success/10 pt-3 text-[11px] text-muted-foreground">
+            <span>Timeout: {timeoutMinutes}m</span>
+            <span>Poll: {pollIntervalSeconds}s</span>
+          </div>
         </div>
       )}
 
-      {!isConfigured && !apiLoading && !busy && (
-        <SettingsEmpty message="No remote channel configured" />
-      )}
-
-      {/* Form */}
-      <div className="rounded-lg border border-border/30 bg-card/30 px-3 py-3 space-y-3">
-        <h4 className="text-[11px] font-medium text-foreground/70 uppercase tracking-wide">
-          {isConfigured ? "Update Configuration" : "Configure Channel"}
-        </h4>
-
-        {/* Channel type */}
-        <div className="space-y-1">
-          <label className="text-[11px] text-muted-foreground" htmlFor="rq-channel">Channel Type</label>
-          <select
-            id="rq-channel"
-            value={channel}
-            onChange={(e) => {
-              setChannel(e.target.value as RemoteChannel)
-              setChannelIdTouched(false)
-            }}
-            className="w-full rounded-md border border-border bg-input px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-          >
-            {CHANNEL_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+      {/* ── Channel picker (card-based) ──────────────────────────── */}
+      <div className="space-y-2">
+        <div className="text-xs font-medium text-muted-foreground/60">
+          {isConfigured ? "Switch channel" : "Choose a channel"}
         </div>
+        <div className="grid grid-cols-3 gap-2">
+          {CHANNEL_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => {
+                setChannel(opt.value)
+                setError(null)
+              }}
+              disabled={saving}
+              className={cn(
+                "rounded-xl border px-3 py-3 text-left transition-all duration-200",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "active:scale-[0.97]",
+                channel === opt.value
+                  ? "border-foreground/30 bg-foreground/[0.06]"
+                  : "border-border/40 bg-card/20 hover:border-foreground/15 hover:bg-card/50",
+              )}
+            >
+              <div className="text-sm font-medium text-foreground">{opt.label}</div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground/60">{opt.description}</div>
+            </button>
+          ))}
+        </div>
+      </div>
 
-        {/* Channel ID */}
-        <div className="space-y-1">
-          <label className="text-[11px] text-muted-foreground" htmlFor="rq-channel-id">Channel ID</label>
-          <input
-            id="rq-channel-id"
-            type="text"
-            value={channelId}
-            onChange={(e) => setChannelId(e.target.value)}
-            onBlur={() => setChannelIdTouched(true)}
-            placeholder={CHANNEL_ID_PATTERNS[channel].hint}
-            className={cn(
-              "w-full rounded-md border bg-input px-2.5 py-1.5 text-xs text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring",
-              channelIdTouched && channelId && !channelIdValid
-                ? "border-destructive/50"
-                : "border-border",
-            )}
-          />
-          {channelIdTouched && channelId && !channelIdValid && (
-            <p className="text-[10px] text-destructive">
-              Invalid format — {CHANNEL_ID_PATTERNS[channel].hint}
-            </p>
+      {/* ── Channel ID input ─────────────────────────────────────── */}
+      <div className="space-y-2">
+        <div className="text-xs font-medium text-muted-foreground/60">Channel ID</div>
+        <input
+          type="text"
+          value={channelId}
+          onChange={(e) => { setChannelId(e.target.value); if (error) setError(null) }}
+          placeholder={selectedChannelOption.idPlaceholder}
+          disabled={saving}
+          className={cn(
+            "w-full rounded-xl border bg-card/20 px-4 py-2.5 font-mono text-sm text-foreground",
+            "placeholder:text-muted-foreground/40",
+            "focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent",
+            "transition-colors",
+            channelId.trim().length > 0 && !CHANNEL_ID_PATTERNS[channel].test(channelId.trim())
+              ? "border-destructive/40"
+              : "border-border/40",
           )}
-        </div>
+          onKeyDown={(e) => { if (e.key === "Enter" && canSave) void handleSave() }}
+        />
+        {channelId.trim().length > 0 && !CHANNEL_ID_PATTERNS[channel].test(channelId.trim()) && (
+          <p className="text-[11px] text-destructive/70">
+            Doesn't match the expected format for {selectedChannelOption.label}
+          </p>
+        )}
+      </div>
 
-        {/* Timeout + Poll Interval (side by side) */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <label className="text-[11px] text-muted-foreground" htmlFor="rq-timeout">Timeout (min)</label>
+      {/* ── Advanced (collapsed by default) ──────────────────────── */}
+      <button
+        type="button"
+        onClick={() => setShowAdvanced((v) => !v)}
+        className="flex items-center gap-1.5 text-[11px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+      >
+        <svg
+          className={cn("h-3 w-3 transition-transform", showAdvanced && "rotate-90")}
+          viewBox="0 0 16 16"
+          fill="currentColor"
+        >
+          <path d="M6 4l4 4-4 4" />
+        </svg>
+        Advanced settings
+      </button>
+
+      {showAdvanced && (
+        <div className="grid grid-cols-2 gap-3 pl-4">
+          <div className="space-y-1.5">
+            <label className="text-[11px] text-muted-foreground/60" htmlFor="rq-timeout">
+              Timeout (min)
+            </label>
             <input
               id="rq-timeout"
               type="number"
@@ -760,11 +847,13 @@ export function RemoteQuestionsPanel() {
               max={30}
               value={timeoutMinutes}
               onChange={(e) => setTimeoutMinutes(Math.max(1, Math.min(30, Number(e.target.value) || 1)))}
-              className="w-full rounded-md border border-border bg-input px-2.5 py-1.5 text-xs text-foreground tabular-nums focus:outline-none focus:ring-1 focus:ring-ring"
+              className="w-full rounded-lg border border-border/40 bg-card/20 px-3 py-2 text-xs text-foreground tabular-nums focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
-          <div className="space-y-1">
-            <label className="text-[11px] text-muted-foreground" htmlFor="rq-poll">Poll Interval (sec)</label>
+          <div className="space-y-1.5">
+            <label className="text-[11px] text-muted-foreground/60" htmlFor="rq-poll">
+              Poll interval (sec)
+            </label>
             <input
               id="rq-poll"
               type="number"
@@ -772,60 +861,90 @@ export function RemoteQuestionsPanel() {
               max={30}
               value={pollIntervalSeconds}
               onChange={(e) => setPollIntervalSeconds(Math.max(2, Math.min(30, Number(e.target.value) || 2)))}
-              className="w-full rounded-md border border-border bg-input px-2.5 py-1.5 text-xs text-foreground tabular-nums focus:outline-none focus:ring-1 focus:ring-ring"
+              className="w-full rounded-lg border border-border/40 bg-card/20 px-3 py-2 text-xs text-foreground tabular-nums focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
         </div>
+      )}
 
-        {/* Buttons */}
-        <div className="flex items-center gap-2 pt-1">
+      {/* ── Save button ──────────────────────────────────────────── */}
+      {channelId.trim().length > 0 && (
+        <Button
+          type="button"
+          onClick={() => void handleSave()}
+          disabled={!canSave}
+          className="gap-2 transition-transform active:scale-[0.96]"
+        >
+          {saving ? (
+            <LoaderCircle className="h-4 w-4 animate-spin" />
+          ) : (
+            <CheckCircle2 className="h-4 w-4" />
+          )}
+          {isConfigured ? "Update connection" : "Save & connect"}
+        </Button>
+      )}
+
+      {/* ── Bot token ─────────────────────────────────────────── */}
+      <div className="space-y-3">
+        <div className="text-xs font-medium text-muted-foreground/60">Bot token</div>
+
+        {tokenSuccess && (
+          <div className="flex items-center gap-2.5 rounded-xl border border-success/15 bg-success/[0.04] px-4 py-2.5 text-xs text-muted-foreground">
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
+            {tokenSuccess}
+          </div>
+        )}
+
+        {tokenSet && !tokenSuccess && (
+          <div className="flex items-center gap-2.5 rounded-xl border border-success/15 bg-success/[0.04] px-4 py-2.5 text-xs text-muted-foreground">
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
+            <span className="font-mono text-[11px]">{derivedEnvVarName}</span> is configured
+          </div>
+        )}
+
+        {!tokenSet && (
+          <div className="flex items-center gap-2.5 rounded-xl border border-warning/15 bg-warning/[0.04] px-4 py-2.5 text-xs text-muted-foreground">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warning" />
+            <span><span className="font-mono text-[11px]">{derivedEnvVarName}</span> not configured</span>
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <input
+              type={showToken ? "text" : "password"}
+              value={botToken}
+              onChange={(e) => setBotToken(e.target.value)}
+              placeholder={`Paste your ${selectedChannelOption.label} bot token`}
+              disabled={savingToken}
+              className={cn(
+                "w-full rounded-xl border border-border/40 bg-card/20 pl-4 pr-10 py-2.5 font-mono text-sm text-foreground",
+                "placeholder:text-muted-foreground/40",
+                "focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent",
+                "transition-colors",
+              )}
+              onKeyDown={(e) => { if (e.key === "Enter" && botToken.trim()) void handleSaveToken() }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowToken((v) => !v)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+            >
+              {showToken ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            </button>
+          </div>
           <Button
             type="button"
             size="sm"
-            onClick={handleSave}
-            disabled={!canSave}
-            className="h-7 text-xs gap-1.5"
+            onClick={() => void handleSaveToken()}
+            disabled={!botToken.trim() || savingToken}
+            className="h-[42px] gap-1.5 px-4"
           >
-            {saving && <LoaderCircle className="h-3 w-3 animate-spin" />}
-            {isConfigured ? "Update" : "Save"}
+            {savingToken ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+            Save
           </Button>
-          {isConfigured && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={handleDisconnect}
-              disabled={deleting}
-              className="h-7 text-xs gap-1.5 text-destructive hover:text-destructive"
-            >
-              {deleting && <LoaderCircle className="h-3 w-3 animate-spin" />}
-              Disconnect
-            </Button>
-          )}
         </div>
       </div>
-
-      {/* Env var status */}
-      {derivedEnvVarName && !apiLoading && (
-        <div className={cn(
-          "flex items-center gap-2 rounded-lg border px-3 py-2 text-xs",
-          envVarSet
-            ? "border-success/20 bg-success/5 text-success"
-            : "border-warning/20 bg-warning/5 text-warning",
-        )}>
-          {envVarSet ? (
-            <>
-              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-              <span>{derivedEnvVarName} is set</span>
-            </>
-          ) : (
-            <>
-              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-              <span>{derivedEnvVarName} not set — configure via TUI or environment</span>
-            </>
-          )}
-        </div>
-      )}
     </div>
   )
 }
