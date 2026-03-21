@@ -1,4 +1,7 @@
 
+# ── Agent planning artifacts (local only) ──
+.plans/
+
 # ── GSD project state (development-only, lives in worktree branches) ──
 package-lock.json
 .claude/
