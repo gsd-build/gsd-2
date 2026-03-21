@@ -808,7 +808,7 @@ export function nativeCheckoutBranch(basePath: string, branch: string): void {
     native.gitCheckoutBranch(basePath, branch);
     return;
   }
-  execSync(`git checkout ${branch}`, {
+  execFileSync("git", ["checkout", branch], {
     cwd: basePath,
     stdio: ["ignore", "pipe", "pipe"],
     encoding: "utf-8",
@@ -843,7 +843,7 @@ export function nativeMergeSquash(basePath: string, branch: string): GitMergeRes
   }
 
   try {
-    execSync(`git merge --squash ${branch}`, {
+    execFileSync("git", ["merge", "--squash", branch], {
       cwd: basePath,
       stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf-8",

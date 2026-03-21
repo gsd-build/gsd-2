@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 import { shortcutDesc } from "../shared/mod.js";
 import type { AssistantMessage } from "@gsd/pi-ai";
 import { isKeyRelease, Key, matchesKey, truncateToWidth, visibleWidth } from "@gsd/pi-tui";
-import { spawn, execSync, type ChildProcess } from "node:child_process";
+import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -32,7 +32,7 @@ function linuxPython(): string {
 function ensureBinary(): boolean {
 	if (fs.existsSync(RECOGNIZER_BIN)) return true;
 	try {
-		execSync(`swiftc "${SWIFT_SRC}" -o "${RECOGNIZER_BIN}" -framework Speech -framework AVFoundation`, {
+		execFileSync("swiftc", [SWIFT_SRC, "-o", RECOGNIZER_BIN, "-framework", "Speech", "-framework", "AVFoundation"], {
 			timeout: 60000,
 		});
 		return true;
@@ -54,7 +54,7 @@ function ensureLinuxReady(ctx: ExtensionContext): boolean {
 
 	// Check python3 exists
 	try {
-		execSync("which python3", { stdio: "pipe" });
+		execFileSync("which", ["python3"], { stdio: "pipe" });
 	} catch {
 		ctx.ui.notify("Voice: python3 not found — install with: sudo apt install python3", "error");
 		return false;
@@ -63,7 +63,7 @@ function ensureLinuxReady(ctx: ExtensionContext): boolean {
 	// Check that sounddevice is importable
 	const py = linuxPython();
 	try {
-		execSync(`${py} -c "import sounddevice"`, {
+		execFileSync(py, ["-c", "import sounddevice"], {
 			stdio: "pipe",
 			timeout: 10000,
 		});

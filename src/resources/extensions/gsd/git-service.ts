@@ -683,10 +683,11 @@ export function createDraftPR(
   body: string,
 ): string | null {
   try {
-    const result = execSync(
-      `gh pr create --draft --title ${JSON.stringify(title)} --body ${JSON.stringify(body)}`,
-      { cwd: basePath, encoding: "utf8", timeout: 30000, env: GIT_NO_PROMPT_ENV },
-    );
+    const result = execFileSync("gh", [
+      "pr", "create", "--draft",
+      "--title", title,
+      "--body", body,
+    ], { cwd: basePath, encoding: "utf8", timeout: 30000, env: GIT_NO_PROMPT_ENV });
     return result.trim();
   } catch {
     return null;

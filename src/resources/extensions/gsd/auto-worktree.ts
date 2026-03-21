@@ -25,7 +25,7 @@ import {
   isDbAvailable,
 } from "./gsd-db.js";
 import { atomicWriteSync } from "./atomic-write.js";
-import { execSync, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { safeCopy, safeCopyRecursive } from "./safe-fs.js";
 import { gsdRoot } from "./paths.js";
 import {
@@ -477,7 +477,7 @@ export function runWorktreePostCreateHook(
   }
 
   try {
-    execSync(resolved, {
+    execFileSync(resolved, [], {
       cwd: worktreeDir,
       env: {
         ...process.env,
@@ -1172,7 +1172,7 @@ export function mergeMilestoneToMain(
   if (prefs.auto_push === true && !nothingToCommit) {
     const remote = prefs.remote ?? "origin";
     try {
-      execSync(`git push ${remote} ${mainBranch}`, {
+      execFileSync("git", ["push", remote, mainBranch], {
         cwd: originalBasePath_,
         stdio: ["ignore", "pipe", "pipe"],
         encoding: "utf-8",
@@ -1190,20 +1190,23 @@ export function mergeMilestoneToMain(
     const prTarget = prefs.pr_target_branch ?? mainBranch;
     try {
       // Push the milestone branch to remote first
-      execSync(`git push ${remote} ${milestoneBranch}`, {
+      execFileSync("git", ["push", remote, milestoneBranch], {
         cwd: originalBasePath_,
         stdio: ["ignore", "pipe", "pipe"],
         encoding: "utf-8",
       });
       // Create PR via gh CLI
-      execSync(
-        `gh pr create --base "${prTarget}" --head "${milestoneBranch}" --title "Milestone ${milestoneId} complete" --body "Auto-created by GSD on milestone completion."`,
-        {
-          cwd: originalBasePath_,
-          stdio: ["ignore", "pipe", "pipe"],
-          encoding: "utf-8",
-        },
-      );
+      execFileSync("gh", [
+        "pr", "create",
+        "--base", prTarget,
+        "--head", milestoneBranch,
+        "--title", `Milestone ${milestoneId} complete`,
+        "--body", "Auto-created by GSD on milestone completion.",
+      ], {
+        cwd: originalBasePath_,
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf-8",
+      });
       prCreated = true;
     } catch {
       // PR creation failure is non-fatal — gh may not be installed or authenticated
