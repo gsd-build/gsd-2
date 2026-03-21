@@ -249,6 +249,18 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
       debugLog("postUnit", { phase: "prune-bg-shell", error: String(e) });
     }
 
+    // Tear down browser between units to prevent Chrome process accumulation (#1733)
+    try {
+      const { getBrowser } = await import("../browser-tools/state.js");
+      if (getBrowser()) {
+        const { closeBrowser } = await import("../browser-tools/lifecycle.js");
+        await closeBrowser();
+        debugLog("postUnit", { phase: "browser-teardown", status: "closed" });
+      }
+    } catch (e) {
+      debugLog("postUnit", { phase: "browser-teardown", error: String(e) });
+    }
+
     // Sync worktree state back to project root (skipped for lightweight sidecars)
     if (!opts?.skipWorktreeSync && s.originalBasePath && s.originalBasePath !== s.basePath) {
       try {

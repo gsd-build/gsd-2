@@ -691,6 +691,15 @@ export async function stopAuto(
     }
   } finally {
     // ── Critical invariants: these MUST execute regardless of errors ──
+    // Browser teardown — prevent orphaned Chrome processes across retries (#1733)
+    try {
+      const { getBrowser } = await import("../browser-tools/state.js");
+      if (getBrowser()) {
+        const { closeBrowser } = await import("../browser-tools/lifecycle.js");
+        await closeBrowser();
+      }
+    } catch { /* non-fatal: browser-tools may not be loaded */ }
+
     // External cleanup (not covered by session reset)
     clearInFlightTools();
     clearSliceProgressCache();
