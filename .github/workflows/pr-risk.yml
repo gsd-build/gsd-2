@@ -1,7 +1,10 @@
 name: PR Risk Report
 
+# pull_request_target runs in the base repo context so the token has
+# pull-requests: write even for cross-fork PRs. We never execute code
+# from the fork — changed files are fetched via the GitHub API only.
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
 
 permissions:
@@ -14,22 +17,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      # Checkout the BASE branch — our trusted script and map, not fork code.
+      - name: Checkout base
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          ref: ${{ github.base_ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
+      # Use the GitHub API to get changed files — no fork code is executed.
       - name: Get changed files
-        id: changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git fetch origin ${{ github.base_ref }} --depth=1
-          git diff --name-only origin/${{ github.base_ref }}...HEAD > /tmp/changed-files.txt
-          echo "count=$(wc -l < /tmp/changed-files.txt | tr -d ' ')" >> $GITHUB_OUTPUT
+          gh api \
+            repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files \
+            --paginate \
+            --jq '.[].filename' > /tmp/changed-files.txt
+          echo "Changed files:"
           cat /tmp/changed-files.txt
 
       - name: Run risk check
@@ -40,8 +48,9 @@ jobs:
           echo "$REPORT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-          # Extract risk level for the PR label step
-          RISK_LEVEL=$(cat /tmp/changed-files.txt | node scripts/pr-risk-check.mjs --json 2>/dev/null | node -e "process.stdin.resume(); let d=''; process.stdin.on('data',c=>d+=c); process.stdin.on('end',()=>console.log(JSON.parse(d).risk))" || echo "low")
+          RISK_LEVEL=$(cat /tmp/changed-files.txt | node scripts/pr-risk-check.mjs --json 2>/dev/null \
+            | node -e "let d=''; process.stdin.on('data',c=>d+=c); process.stdin.on('end',()=>{ try { console.log(JSON.parse(d).risk) } catch { console.log('low') } })" \
+            || echo "low")
           echo "level=$RISK_LEVEL" >> $GITHUB_OUTPUT
 
       - name: Write step summary
