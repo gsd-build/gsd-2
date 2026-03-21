@@ -44,7 +44,7 @@ Narrate your decomposition reasoning — why you're grouping work this way, what
 
 Then:
 1. Use the **Roadmap** output template from the inlined context above
-2. If a `GSD Skill Preferences` block is present in system context, use it to decide which skills to load and follow during planning, without overriding required roadmap formatting
+2. {{skillActivation}}
 3. Create the roadmap: decompose into demoable vertical slices — as many as the work genuinely needs, no more. A simple feature might be 1 slice. Don't decompose for decomposition's sake.
 4. Order by risk (high-risk first)
 5. Write `{{outputPath}}` with checkboxes, risk, depends, demo sentences, proof strategy, verification classes, milestone definition of done, **requirement coverage**, and a boundary map. Write success criteria as observable truths, not implementation tasks. If the milestone crosses multiple runtime boundaries, include an explicit final integration slice that proves the assembled system works end-to-end in a real environment

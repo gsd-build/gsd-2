@@ -1,4 +1,4 @@
-import { parseRoadmap, parsePlan, parseSummary, parseContinue, parseRequirementCounts, parseSecretsManifest, formatSecretsManifest } from '../files.ts';
+import { parseRoadmap, parsePlan, parseTaskPlanFile, parseSummary, parseContinue, parseRequirementCounts, parseSecretsManifest, formatSecretsManifest } from '../files.ts';
 import { createTestContext } from './test-helpers.ts';
 
 const { assertEq, assertTrue, report } = createTestContext();
@@ -241,7 +241,15 @@ console.log('\n=== parseRoadmap: missing risk defaults to low ===');
 
 console.log('\n=== parsePlan: full plan ===');
 {
-  const content = `# S01: Parser Test Suite
+  const content = `---
+estimated_steps: 6
+estimated_files: 3
+skills_used:
+  - typescript
+  - testing
+---
+
+# S01: Parser Test Suite
 
 **Goal:** All 5 parsers have test coverage with edge cases.
 **Demo:** \`node --test tests/parsers.test.ts\` passes with zero failures.
@@ -266,6 +274,13 @@ console.log('\n=== parsePlan: full plan ===');
 - \`types.ts\` — add observability_surfaces
 - \`files.ts\` — update parseSummary
 `;
+
+  const taskPlan = parseTaskPlanFile(content);
+  assertEq(taskPlan.frontmatter.estimated_steps, 6, 'task plan frontmatter estimated_steps');
+  assertEq(taskPlan.frontmatter.estimated_files, 3, 'task plan frontmatter estimated_files');
+  assertEq(taskPlan.frontmatter.skills_used.length, 2, 'task plan frontmatter skills_used count');
+  assertEq(taskPlan.frontmatter.skills_used[0], 'typescript', 'first task plan skill');
+  assertEq(taskPlan.frontmatter.skills_used[1], 'testing', 'second task plan skill');
 
   const p = parsePlan(content);
 
@@ -293,6 +308,97 @@ console.log('\n=== parsePlan: full plan ===');
   // Files likely touched
   assertEq(p.filesLikelyTouched.length, 3, 'files likely touched count');
   assertTrue(p.filesLikelyTouched[0].includes('tests/parsers.test.ts'), 'first file');
+}
+
+console.log('\n=== parseTaskPlanFile: defaults missing frontmatter fields ===');
+{
+  const content = `# T01: Minimal task plan
+
+## Description
+
+No frontmatter here.
+`;
+
+  const taskPlan = parseTaskPlanFile(content);
+  assertEq(taskPlan.frontmatter.estimated_steps, undefined, 'estimated_steps defaults undefined');
+  assertEq(taskPlan.frontmatter.estimated_files, undefined, 'estimated_files defaults undefined');
+  assertEq(taskPlan.frontmatter.skills_used.length, 0, 'skills_used defaults empty array');
+}
+
+console.log('\n=== parseTaskPlanFile: accepts scalar skills_used and numeric strings ===');
+{
+  const content = `---
+estimated_steps: "9"
+estimated_files: "4"
+skills_used: react-best-practices
+---
+
+# T02: Scalar skill handoff
+`;
+
+  const taskPlan = parseTaskPlanFile(content);
+  assertEq(taskPlan.frontmatter.estimated_steps, 9, 'string estimated_steps parsed');
+  assertEq(taskPlan.frontmatter.estimated_files, 4, 'string estimated_files parsed');
+  assertEq(taskPlan.frontmatter.skills_used.length, 1, 'scalar skills_used normalized to array');
+  assertEq(taskPlan.frontmatter.skills_used[0], 'react-best-practices', 'scalar skill preserved');
+}
+
+console.log('\n=== parseTaskPlanFile: filters blank skills_used items ===');
+{
+  const content = `---
+skills_used:
+  - react
+  -
+  - testing
+---
+
+# T03: Blank skills filtered
+`;
+
+  const taskPlan = parseTaskPlanFile(content);
+  assertEq(taskPlan.frontmatter.skills_used.length, 2, 'blank skill entries removed');
+  assertEq(taskPlan.frontmatter.skills_used[0], 'react', 'first remaining skill');
+  assertEq(taskPlan.frontmatter.skills_used[1], 'testing', 'second remaining skill');
+}
+
+console.log('\n=== parseTaskPlanFile: invalid numeric frontmatter ignored ===');
+{
+  const content = `---
+estimated_steps: many
+estimated_files: unknown
+---
+
+# T04: Invalid estimates
+`;
+
+  const taskPlan = parseTaskPlanFile(content);
+  assertEq(taskPlan.frontmatter.estimated_steps, undefined, 'invalid estimated_steps ignored');
+  assertEq(taskPlan.frontmatter.estimated_files, undefined, 'invalid estimated_files ignored');
+}
+
+console.log('\n=== parseTaskPlanFile: parsePlan ignores task-plan frontmatter ===');
+{
+  const content = `---
+estimated_steps: 2
+estimated_files: 1
+skills_used:
+  - react
+---
+
+# S11: Frontmatter Compatible
+
+**Goal:** Plan parser ignores task-plan handoff metadata.
+**Demo:** Slice content still parses.
+
+## Tasks
+
+- [ ] **T01: Compatible task** \`est:5m\`
+  Description.
+`;
+
+  const p = parsePlan(content);
+  assertEq(p.id, 'S11', 'plan id still parsed with frontmatter');
+  assertEq(p.tasks.length, 1, 'task still parsed with frontmatter');
 }
 
 console.log('\n=== parsePlan: multi-line task description concatenation ===');
@@ -324,14 +430,34 @@ console.log('\n=== parsePlan: multi-line task description concatenation ===');
   const p = parsePlan(content);
 
   assertEq(p.tasks.length, 2, 'two tasks');
-  // Multi-line descriptions should be concatenated with spaces
   assertTrue(p.tasks[0].description.includes('First line'), 'T01 desc has first line');
   assertTrue(p.tasks[0].description.includes('Second line'), 'T01 desc has second line');
   assertTrue(p.tasks[0].description.includes('Third line'), 'T01 desc has third line');
-  // Verify concatenation with space separator
   assertTrue(p.tasks[0].description.includes('description. Second'), 'lines joined with space');
-
   assertEq(p.tasks[1].description, 'Just one line.', 'T02 single-line desc');
+}
+
+console.log('\n=== parsePlan: frontmatter does not pollute task descriptions ===');
+{
+  const content = `---
+estimated_steps: 2
+estimated_files: 1
+skills_used:
+  - react
+---
+
+# S12: Frontmatter + multiline
+
+## Tasks
+
+- [ ] **T01: Multi-line Task** \`est:30m\`
+  First line of description.
+  Second line of description.
+`;
+
+  const p = parsePlan(content);
+  assertEq(p.tasks.length, 1, 'one task parsed with frontmatter');
+  assertEq(p.tasks[0].description, 'First line of description. Second line of description.', 'frontmatter excluded from description');
 }
 
 console.log('\n=== parsePlan: task with missing estimate ===');
@@ -351,12 +477,10 @@ console.log('\n=== parsePlan: task with missing estimate ===');
 `;
 
   const p = parsePlan(content);
-
   assertEq(p.tasks.length, 2, 'two tasks parsed');
   assertEq(p.tasks[0].id, 'T01', 'T01 id');
   assertEq(p.tasks[0].title, 'No Estimate Task', 'T01 title without estimate');
   assertEq(p.tasks[0].done, false, 'T01 not done');
-  // The estimate backtick text appears in description if present, but parser doesn't crash without it
   assertEq(p.tasks[1].id, 'T02', 'T02 id');
 }
 
@@ -379,7 +503,6 @@ console.log('\n=== parsePlan: empty tasks section ===');
 `;
 
   const p = parsePlan(content);
-
   assertEq(p.id, 'S04', 'plan id with empty tasks');
   assertEq(p.tasks.length, 0, 'no tasks');
   assertEq(p.mustHaves.length, 1, 'one must-have');
@@ -398,7 +521,6 @@ console.log('\n=== parsePlan: no H1 ===');
 `;
 
   const p = parsePlan(content);
-
   assertEq(p.id, '', 'empty id without H1');
   assertEq(p.title, '', 'empty title without H1');
   assertEq(p.goal, 'A plan without a heading.', 'goal still parsed');
@@ -408,8 +530,6 @@ console.log('\n=== parsePlan: no H1 ===');
 
 console.log('\n=== parsePlan: task estimate backtick in description ===');
 {
-  // The `est:45m` text appears after the bold closing but before the description lines
-  // It should end up as part of the description or be ignored gracefully
   const content = `# S05: Estimate Handling
 
 **Goal:** Test estimate text handling.
@@ -425,9 +545,6 @@ console.log('\n=== parsePlan: task estimate backtick in description ===');
   assertEq(p.tasks.length, 1, 'one task');
   assertEq(p.tasks[0].id, 'T01', 'task id');
   assertEq(p.tasks[0].title, 'With Estimate', 'title excludes estimate');
-  // The `est:45m` backtick text after ** is not part of the title or description
-  // It's on the same line after the regex match captures, so it's in the remainder
-  // The description should be the continuation lines
   assertTrue(p.tasks[0].description.includes('Main description'), 'description from continuation line');
 }
 

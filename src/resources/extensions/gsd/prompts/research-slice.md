@@ -42,7 +42,7 @@ An honest "this is straightforward, here's the pattern to follow" is more valuab
 
 Research what this slice needs. Narrate key findings and surprises as you go — what exists, what's missing, what constrains the approach.
 0. If `REQUIREMENTS.md` was preloaded above, identify which Active requirements this slice owns or supports. Research should target these requirements — surfacing risks, unknowns, and implementation constraints that could affect whether the slice actually delivers them.
-1. **Load relevant skills.** Check the `GSD Skill Preferences` block in system context and the `<available_skills>` catalog in your system prompt. `read` any skill files relevant to this slice's technology stack before exploring code. Reference specific rules from loaded skills in your findings where they inform the implementation approach.
+1. {{skillActivation}} Reference specific rules from loaded skills in your findings where they inform the implementation approach.
 2. **Skill Discovery ({{skillDiscoveryMode}}):**{{skillDiscoveryInstructions}}
 3. Explore relevant code for this slice's scope. For targeted exploration, use `rg`, `find`, and reads. For broad or unfamiliar subsystems, use `scout` to map the relevant area first.
 4. Use `resolve_library` / `get_library_docs` for unfamiliar libraries — skip this for libraries already used in the codebase

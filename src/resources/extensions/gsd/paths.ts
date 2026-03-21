@@ -356,6 +356,10 @@ export function milestonesDir(basePath: string): string {
   return join(gsdRoot(basePath), "milestones");
 }
 
+export function resolveRuntimeFile(basePath: string): string {
+  return join(gsdRoot(basePath), "RUNTIME.md");
+}
+
 export function resolveGsdRootFile(basePath: string, key: GSDRootFileKey): string {
   const root = gsdRoot(basePath);
   const canonical = join(root, GSD_ROOT_FILES[key]);

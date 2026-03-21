@@ -128,6 +128,10 @@ interface KeyLookup {
 function resolveKey(providerId: string): KeyLookup {
   const info = PROVIDER_REGISTRY.find(p => p.id === providerId);
 
+  if (providerId === "anthropic-vertex" && process.env.ANTHROPIC_VERTEX_PROJECT_ID) {
+    return { found: true, source: "env", backedOff: false };
+  }
+
   // Check auth.json
   const authPath = getAuthPath();
   if (existsSync(authPath)) {

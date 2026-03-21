@@ -37,6 +37,21 @@ export interface AuditWarningJSON {
   fixAvailable: boolean;
 }
 
+export interface BrowserEvidenceCheckJSON {
+  description: string;
+  passed: boolean;
+  actual?: string;
+  evidence?: string;
+  error?: string;
+}
+
+export interface BrowserEvidenceJSON {
+  url: string;
+  passed: boolean;
+  checks: BrowserEvidenceCheckJSON[];
+  duration: number;
+}
+
 export interface EvidenceJSON {
   schemaVersion: 1;
   taskId: string;
@@ -49,6 +64,7 @@ export interface EvidenceJSON {
   maxRetries?: number;
   runtimeErrors?: RuntimeErrorJSON[];
   auditWarnings?: AuditWarningJSON[];
+  browser?: BrowserEvidenceJSON;
 }
 
 /**

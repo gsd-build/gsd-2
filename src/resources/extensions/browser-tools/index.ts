@@ -33,6 +33,7 @@ async function registerBrowserTools(pi: ExtensionAPI): Promise<void> {
         codegen,
         actionCache,
         injectionDetection,
+        verify,
       ] = await Promise.all([
         importExtensionModule<typeof import("./lifecycle.js")>(import.meta.url, "./lifecycle.js"),
         importExtensionModule<typeof import("./capture.js")>(import.meta.url, "./capture.js"),
@@ -60,6 +61,7 @@ async function registerBrowserTools(pi: ExtensionAPI): Promise<void> {
         importExtensionModule<typeof import("./tools/codegen.js")>(import.meta.url, "./tools/codegen.js"),
         importExtensionModule<typeof import("./tools/action-cache.js")>(import.meta.url, "./tools/action-cache.js"),
         importExtensionModule<typeof import("./tools/injection-detect.js")>(import.meta.url, "./tools/injection-detect.js"),
+        importExtensionModule<typeof import("./tools/verify.js")>(import.meta.url, "./tools/verify.js"),
       ]);
 
       const deps = {
@@ -132,6 +134,7 @@ async function registerBrowserTools(pi: ExtensionAPI): Promise<void> {
       codegen.registerCodegenTools(pi, deps);
       actionCache.registerActionCacheTools(pi, deps);
       injectionDetection.registerInjectionDetectionTools(pi, deps);
+      verify.registerVerifyTools(pi, deps);
     })().catch((error) => {
       registrationPromise = null;
       throw error;

@@ -213,6 +213,7 @@ export {
 // Skills
 export {
 	formatSkillsForPrompt,
+	getLoadedSkills,
 	type LoadSkillsFromDirOptions,
 	type LoadSkillsResult,
 	loadSkills,

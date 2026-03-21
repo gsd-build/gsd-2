@@ -14,7 +14,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
 import { gsdRoot } from "./paths.js";
 import { parse as parseYaml } from "yaml";
 import type { PostUnitHookConfig, PreDispatchHookConfig, TokenProfile } from "./types.js";
@@ -83,24 +82,36 @@ export {
 
 // ─── Path Constants & Getters ───────────────────────────────────────────────
 
-const GLOBAL_PREFERENCES_PATH = join(gsdHome, "preferences.md");
-const LEGACY_GLOBAL_PREFERENCES_PATH = join(homedir(), ".pi", "agent", "gsd-preferences.md");
+function gsdHome(): string {
+  return process.env.GSD_HOME || join(homedir(), ".gsd");
+}
+
+function globalPreferencesPath(): string {
+  return join(gsdHome(), "preferences.md");
+}
+
+function legacyGlobalPreferencesPath(): string {
+  return join(homedir(), ".pi", "agent", "gsd-preferences.md");
+}
+
 function projectPreferencesPath(): string {
   return join(gsdRoot(process.cwd()), "preferences.md");
 }
 // Bootstrap in gitignore.ts historically created PREFERENCES.md (uppercase) by mistake.
 // Check uppercase as a fallback so those files aren't silently ignored.
-const GLOBAL_PREFERENCES_PATH_UPPERCASE = join(gsdHome, "PREFERENCES.md");
+function globalPreferencesPathUppercase(): string {
+  return join(gsdHome(), "PREFERENCES.md");
+}
 function projectPreferencesPathUppercase(): string {
   return join(gsdRoot(process.cwd()), "PREFERENCES.md");
 }
 
 export function getGlobalGSDPreferencesPath(): string {
-  return GLOBAL_PREFERENCES_PATH;
+  return globalPreferencesPath();
 }
 
 export function getLegacyGlobalGSDPreferencesPath(): string {
-  return LEGACY_GLOBAL_PREFERENCES_PATH;
+  return legacyGlobalPreferencesPath();
 }
 
 export function getProjectGSDPreferencesPath(): string {
@@ -110,9 +121,9 @@ export function getProjectGSDPreferencesPath(): string {
 // ─── Loading ────────────────────────────────────────────────────────────────
 
 export function loadGlobalGSDPreferences(): LoadedGSDPreferences | null {
-  return loadPreferencesFile(GLOBAL_PREFERENCES_PATH, "global")
-    ?? loadPreferencesFile(GLOBAL_PREFERENCES_PATH_UPPERCASE, "global")
-    ?? loadPreferencesFile(LEGACY_GLOBAL_PREFERENCES_PATH, "global");
+  return loadPreferencesFile(globalPreferencesPath(), "global")
+    ?? loadPreferencesFile(globalPreferencesPathUppercase(), "global")
+    ?? loadPreferencesFile(legacyGlobalPreferencesPath(), "global");
 }
 
 export function loadProjectGSDPreferences(): LoadedGSDPreferences | null {

@@ -21,7 +21,7 @@ Write for the roadmap planner. It needs to understand: what exists in the codeba
 A milestone adding a small feature to an established codebase needs targeted research — check the relevant code, confirm the approach, note constraints. A milestone introducing new technology, building a new system, or spanning multiple unfamiliar subsystems needs deep research — explore broadly, look up docs, investigate alternatives. Match your effort to the actual uncertainty, not the template's section count. Include only sections that have real content.
 
 Then research the codebase and relevant technologies. Narrate key findings and surprises as you go — what exists, what's missing, what constrains the approach.
-1. If a `GSD Skill Preferences` block is present in system context, use it to decide which skills to load and follow during research, without relaxing required verification or artifact rules
+1. {{skillActivation}}
 2. **Skill Discovery ({{skillDiscoveryMode}}):**{{skillDiscoveryInstructions}}
 3. Explore relevant code. For small/familiar codebases, use `rg`, `find`, and targeted reads. For large or unfamiliar codebases, use `scout` to build a broad map efficiently before diving in.
 4. Use `resolve_library` / `get_library_docs` for unfamiliar libraries — skip this for libraries already used in the codebase
