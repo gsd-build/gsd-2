@@ -57,6 +57,10 @@ export async function handleOpsCommand(trimmed: string, ctx: ExtensionCommandCon
     await handleUndo(trimmed.replace(/^undo\s*/, "").trim(), ctx, pi, projectRoot());
     return true;
   }
+  if (trimmed === "skip") {
+    ctx.ui.notify("Usage: /gsd skip <unit-id>  Example: /gsd skip M001/S01/T03", "warning");
+    return true;
+  }
   if (trimmed.startsWith("skip ")) {
     await handleSkip(trimmed.replace(/^skip\s*/, "").trim(), ctx, projectRoot());
     return true;
