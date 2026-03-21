@@ -771,6 +771,63 @@ async function main(): Promise<void> {
       assertTrue(existsSync(join(repo, "real-code.ts")), "real-code.ts merged to main");
     }
 
+    // ─── Test 20: #1890 — QUEUE.md and future milestone dirs cleaned before merge ──
+    console.log("\n=== #1890: QUEUE.md and future milestone dirs cleaned before merge ===");
+    {
+      const repo = freshRepo();
+      const wtPath = createAutoWorktree(repo, "M200");
+
+      addSliceToMilestone(repo, wtPath, "M200", "S01", "Queue cleanup test", [
+        { file: "queue-test.ts", content: "export const queueTest = true;\n", message: "add queue-test" },
+      ]);
+
+      writeFileSync(join(repo, ".gsd", "QUEUE.md"), "# Queue\n- Next task\n");
+
+      const futureMs1 = join(repo, ".gsd", "milestones", "M201");
+      mkdirSync(futureMs1, { recursive: true });
+      writeFileSync(join(futureMs1, "M201-CONTEXT.md"), "# M201 Context\n");
+      writeFileSync(join(futureMs1, "M201-ROADMAP.md"), "# M201 Roadmap\n");
+
+      const futureMs2 = join(repo, ".gsd", "milestones", "M202");
+      mkdirSync(futureMs2, { recursive: true });
+      writeFileSync(join(futureMs2, "M202-CONTEXT.md"), "# M202 Context\n");
+
+      const untrackedBefore = run(
+        "git ls-files --others --exclude-standard .gsd/",
+        repo,
+      );
+      assertTrue(untrackedBefore.includes("QUEUE.md"), "QUEUE.md is untracked before merge");
+      assertTrue(untrackedBefore.includes("M201"), "M201 dir is untracked before merge");
+      assertTrue(untrackedBefore.includes("M202"), "M202 dir is untracked before merge");
+
+      const roadmap = makeRoadmap("M200", "Queue cleanup milestone", [
+        { id: "S01", title: "Queue cleanup test" },
+      ]);
+
+      let threw = false;
+      let errMsg = "";
+      try {
+        const result = mergeMilestoneToMain(repo, "M200", roadmap);
+        assertTrue(
+          result.commitMessage.includes("feat(M200)"),
+          "#1890 merge succeeds after cleaning QUEUE.md and future milestone dirs",
+        );
+      } catch (err: unknown) {
+        threw = true;
+        errMsg = err instanceof Error ? err.message : String(err);
+      }
+      assertTrue(!threw, `#1890 merge must not fail on QUEUE.md/future milestone dirs (got: ${errMsg})`);
+      assertTrue(existsSync(join(repo, "queue-test.ts")), "queue-test.ts on main after merge");
+
+      const untrackedAfter = run(
+        "git ls-files --others --exclude-standard .gsd/ || true",
+        repo,
+      );
+      assertTrue(!untrackedAfter.includes("QUEUE.md"), "#1890: QUEUE.md cleaned before merge");
+      assertTrue(!untrackedAfter.includes("M201"), "#1890: future milestone M201 cleaned before merge");
+      assertTrue(!untrackedAfter.includes("M202"), "#1890: future milestone M202 cleaned before merge");
+    }
+
   } finally {
     process.chdir(savedCwd);
     for (const d of tempDirs) {

@@ -83,39 +83,36 @@ function clearProjectRootStateFiles(basePath: string, milestoneId: string): void
     }
   }
 
-  // Clean up entire synced milestone directory and runtime/units.
-  // syncStateToProjectRoot() copies these into the project root during
-  // execution.  If they remain as untracked files when we attempt
-  // `git merge --squash`, git rejects the merge with "local changes would
-  // be overwritten", causing silent data loss (#1738).
-  const syncedDirs = [
-    join(gsdDir, "milestones", milestoneId),
-    join(gsdDir, "runtime", "units"),
-  ];
-
-  for (const dir of syncedDirs) {
-    try {
-      if (existsSync(dir)) {
-        // Only remove files that are untracked by git — tracked files are
-        // managed by the branch checkout and should not be deleted.
-        const untrackedOutput = execFileSync(
-          "git",
-          ["ls-files", "--others", "--exclude-standard", dir],
-          { cwd: basePath, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" },
-        ).trim();
-        if (untrackedOutput) {
-          for (const f of untrackedOutput.split("\n").filter(Boolean)) {
-            try {
-              unlinkSync(join(basePath, f));
-            } catch {
-              /* non-fatal */
-            }
-          }
+  // Clean up ALL untracked files under .gsd/.
+  // syncWorktreeStateBack() syncs QUEUE.md, completed-units.json, and ALL
+  // milestone directories (including future milestones created by
+  // complete-milestone) into the project root during execution. If any of
+  // these remain as untracked files when we attempt `git merge --squash`,
+  // git rejects the merge with "local changes would be overwritten",
+  // causing silent data loss (#1738, #1890).
+  //
+  // Rather than maintaining a manual whitelist of dirs to clean, we scan
+  // the entire .gsd/ tree for untracked files and remove them all. This
+  // covers the current milestone dir, runtime/units/, future milestone
+  // dirs (M005-CONTEXT.md, M006-CONTEXT.md, etc.), and root-level files
+  // like QUEUE.md.
+  try {
+    const untrackedOutput = execFileSync(
+      "git",
+      ["ls-files", "--others", "--exclude-standard", gsdDir],
+      { cwd: basePath, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" },
+    ).trim();
+    if (untrackedOutput) {
+      for (const f of untrackedOutput.split("\n").filter(Boolean)) {
+        try {
+          unlinkSync(join(basePath, f));
+        } catch {
+          /* non-fatal */
         }
       }
-    } catch {
-      /* non-fatal — git command may fail if not in repo */
     }
+  } catch {
+    /* non-fatal — git command may fail if not in repo */
   }
 }
 // ─── Worktree ↔ Main Repo Sync (#1311) ──────────────────────────────────────
