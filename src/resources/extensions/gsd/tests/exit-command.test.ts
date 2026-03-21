@@ -97,7 +97,7 @@ test("/exit still shuts down gracefully when stopAuto throws (ESM module cache m
 
   assert.equal(shutdownCalls, 1, "shutdown must still be called even when stopAuto throws");
   assert.equal(notifications.length, 1, "should emit exactly one warning notification");
-  assert.equal(notifications[0].level, "warn", "notification level should be warn");
+  assert.equal(notifications[0].level, "warning", "notification level should be warning");
   assert.ok(
     notifications[0].msg.includes("module version mismatch"),
     "notification should mention module version mismatch",
