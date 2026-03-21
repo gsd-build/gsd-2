@@ -303,6 +303,8 @@ function makeMockDeps(
     updateProgressWidget: () => {},
     syncCmuxSidebar: () => {},
     logCmuxEvent: () => {},
+    cmuxRenameTab: () => {},
+    cmuxTriggerFlash: () => {},
     invalidateAllCaches: () => {
       callLog.push("invalidateAllCaches");
     },

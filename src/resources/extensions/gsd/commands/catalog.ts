@@ -57,7 +57,7 @@ export const TOP_LEVEL_SUBCOMMANDS: readonly GsdCommandDefinition[] = [
   { cmd: "knowledge", desc: "Add persistent project knowledge (rule, pattern, or lesson)" },
   { cmd: "new-milestone", desc: "Create a milestone from a specification document (headless)" },
   { cmd: "parallel", desc: "Parallel milestone orchestration (start, status, stop, merge)" },
-  { cmd: "cmux", desc: "Manage cmux integration (status, sidebar, notifications, splits)" },
+  { cmd: "cmux", desc: "Manage cmux integration (status, sidebar, notifications, splits, browser, markdown, flash, read-screen)" },
   { cmd: "park", desc: "Park a milestone — skip without deleting" },
   { cmd: "unpark", desc: "Reactivate a parked milestone" },
   { cmd: "update", desc: "Update GSD to the latest version" },
@@ -266,7 +266,10 @@ export function getGsdArgumentCompletions(prefix: string) {
         { cmd: "notifications", desc: "Toggle cmux desktop notifications" },
         { cmd: "sidebar", desc: "Toggle cmux sidebar metadata" },
         { cmd: "splits", desc: "Toggle cmux visual subagent splits" },
-        { cmd: "browser", desc: "Toggle future browser integration flag" },
+        { cmd: "browser", desc: "Toggle cmux browser split feature" },
+        { cmd: "markdown", desc: "Open a file in cmux markdown viewer" },
+        { cmd: "flash", desc: "Trigger unread-flash on current surface" },
+        { cmd: "read-screen", desc: "Read terminal text from current surface" },
       ], "cmux");
     }
     if (parts.length <= 3 && ["notifications", "sidebar", "splits", "browser"].includes(subcommand)) {

@@ -130,6 +130,24 @@ export function buildCmuxStatusLabel(state: GSDState): string {
   return `${parts.join(" ")} · ${state.phase}`;
 }
 
+/**
+ * Build a concise tab title for the GSD surface during auto-mode.
+ * Shorter than the sidebar label — suitable for a tab strip.
+ * e.g. "gsd · M001 S02/T03" or "gsd · executing"
+ */
+export function buildCmuxTabTitle(state: GSDState): string {
+  const parts: string[] = ["gsd"];
+  if (state.activeMilestone) parts.push(state.activeMilestone.id);
+  if (state.activeSlice) {
+    const slicePart = state.activeTask
+      ? `${state.activeSlice.id}/${state.activeTask.id}`
+      : state.activeSlice.id;
+    parts.push(slicePart);
+  }
+  if (!state.activeMilestone) parts.push(state.phase);
+  return parts.join(" · ");
+}
+
 export function buildCmuxProgress(state: GSDState): CmuxSidebarProgress | null {
   const progress = state.progress;
   if (!progress) return null;
@@ -286,12 +304,6 @@ export class CmuxClient {
     return this.runSync(args) !== null;
   }
 
-  async listSurfaceIds(): Promise<string[]> {
-    const stdout = await this.runAsync(this.appendWorkspace(["list-surfaces", "--json", "--id-format", "both"]));
-    const parsed = stdout ? parseJson(stdout) : null;
-    return extractSurfaceIds(parsed);
-  }
-
   async createSplit(direction: "right" | "down" | "left" | "up"): Promise<string | null> {
     return this.createSplitFrom(this.config.surfaceId, direction);
   }
@@ -301,15 +313,11 @@ export class CmuxClient {
     direction: "right" | "down" | "left" | "up",
   ): Promise<string | null> {
     if (!this.config.splits) return null;
-    const before = new Set(await this.listSurfaceIds());
     const args = ["new-split", direction];
     const scopedArgs = this.appendSurface(this.appendWorkspace(args), sourceSurfaceId);
-    await this.runAsync(scopedArgs);
-    const after = await this.listSurfaceIds();
-    for (const id of after) {
-      if (!before.has(id)) return id;
-    }
-    return null;
+    const stdout = await this.runAsync(scopedArgs);
+    // Output format: "OK surface:N workspace:M"
+    return stdout ? parseSurfaceRef(stdout) : null;
   }
 
   /**
@@ -363,8 +371,71 @@ export class CmuxClient {
 
   async sendSurface(surfaceId: string, text: string): Promise<boolean> {
     const payload = text.endsWith("\n") ? text : `${text}\n`;
-    const stdout = await this.runAsync(["send-surface", "--surface", surfaceId, payload]);
+    const stdout = await this.runAsync(["send", "--surface", surfaceId, payload]);
     return stdout !== null;
+  }
+
+  /**
+   * Rename the current surface's tab title.
+   * Useful for labelling auto-mode runs with the active milestone/slice.
+   */
+  renameTab(title: string, surfaceId?: string): void {
+    if (!this.config.available || !this.config.cliAvailable) return;
+    const surface = surfaceId ?? this.config.surfaceId;
+    if (!surface) return;
+    this.runSync(["rename-tab", "--surface", surface, "--", title]);
+  }
+
+  /**
+   * Trigger the unread-flash indicator on a surface to draw user attention
+   * (e.g. when auto-mode hits a blocker).
+   */
+  triggerFlash(surfaceId?: string): void {
+    if (!this.config.available || !this.config.cliAvailable) return;
+    const args = this.appendWorkspace(["trigger-flash"]);
+    const surface = surfaceId ?? this.config.surfaceId;
+    this.runSync(surface ? [...args, "--surface", surface] : args);
+  }
+
+  /**
+   * Read visible terminal text from a surface.
+   * Returns null when unavailable or on error.
+   */
+  async readScreen(surfaceId?: string, lines?: number): Promise<string | null> {
+    if (!this.canRun()) return null;
+    const surface = surfaceId ?? this.config.surfaceId;
+    const args = this.appendWorkspace(["read-screen"]);
+    if (surface) args.push("--surface", surface);
+    if (lines !== undefined) args.push("--lines", String(lines));
+    return this.runAsync(args);
+  }
+
+  /**
+   * Open a markdown file in a live-rendered split panel.
+   * Returns the new surface ref, or null on failure.
+   */
+  async openMarkdown(filePath: string): Promise<string | null> {
+    if (!this.canRun()) return null;
+    const stdout = await this.runAsync(
+      this.appendWorkspace(["markdown", "open", filePath]),
+    );
+    // Output: "OK surface=surface:N pane=pane:M path=..."
+    return stdout ? parseSurfaceRef(stdout) : null;
+  }
+
+  /**
+   * Open a browser split pointed at a URL.
+   * Only runs when config.browser is enabled.
+   * Returns the new surface ref, or null on failure.
+   */
+  async openBrowserSplit(url: string): Promise<string | null> {
+    if (!this.config.browser) return null;
+    if (!this.canRun()) return null;
+    const stdout = await this.runAsync(
+      this.appendWorkspace(["browser", "open-split", url]),
+    );
+    // Output: "OK surface=surface:N pane=pane:M placement=split"
+    return stdout ? parseSurfaceRef(stdout) : null;
   }
 }
 
@@ -402,6 +473,14 @@ export function logCmuxEvent(
   CmuxClient.fromPreferences(preferences).log(message, level);
 }
 
+export function cmuxRenameTab(preferences: GSDPreferences | undefined, title: string): void {
+  CmuxClient.fromPreferences(preferences).renameTab(title);
+}
+
+export function cmuxTriggerFlash(preferences: GSDPreferences | undefined): void {
+  CmuxClient.fromPreferences(preferences).triggerFlash();
+}
+
 export function shellEscape(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
@@ -418,27 +497,15 @@ function parseJson(text: string): unknown {
   }
 }
 
-function extractSurfaceIds(value: unknown): string[] {
-  const found = new Set<string>();
-
-  const visit = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const item of node) visit(item);
-      return;
-    }
-    if (!node || typeof node !== "object") return;
-
-    for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
-      if (
-        typeof child === "string"
-        && (key === "surface_id" || key === "surface" || (key === "id" && child.includes("surface")))
-      ) {
-        found.add(child);
-      }
-      visit(child);
-    }
-  };
-
-  visit(value);
-  return Array.from(found);
+/**
+ * Parse a surface ref from cmux CLI output.
+ *
+ * Handles two output formats:
+ *   "OK surface:N workspace:M"        (new-split)
+ *   "OK surface=surface:N pane=..."   (markdown open, browser open-split)
+ */
+function parseSurfaceRef(output: string): string | null {
+  // Format 1: "OK surface:N ..."  (second token is the ref directly)
+  const direct = output.match(/\bsurface:\d+\b/);
+  return direct ? direct[0] : null;
 }

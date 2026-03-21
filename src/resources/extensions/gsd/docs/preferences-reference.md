@@ -178,7 +178,7 @@ Setting `prefer_skills: []` does **not** disable skill discovery — it just mea
   - `notifications`: boolean — route desktop notifications through cmux. Default: `true` when enabled.
   - `sidebar`: boolean — publish status, progress, and log metadata to the cmux sidebar. Default: `true` when enabled.
   - `splits`: boolean — run supported subagent work in visible cmux splits. Default: `false` (opt-in).
-  - `browser`: boolean — reserved for a future browser integration; **not yet implemented**. Default: `false`.
+  - `browser`: boolean — open browser splits via `cmux browser open-split` for web verification. Default: `false` (opt-in).
 
 - `dynamic_routing`: configures the dynamic model router that adjusts model selection based on task complexity. Keys:
   - `enabled`: boolean — enable dynamic routing. Default: `false`.

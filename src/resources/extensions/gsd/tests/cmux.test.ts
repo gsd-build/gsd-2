@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import {
   buildCmuxProgress,
   buildCmuxStatusLabel,
+  buildCmuxTabTitle,
+  CmuxClient,
   detectCmuxEnvironment,
   markCmuxPromptShown,
   resetCmuxPromptState,
@@ -261,5 +263,139 @@ describe("cmux extension discovery opt-out", () => {
       !pkg.pi.extensions?.length,
       "pi.extensions must be empty or absent — cmux is a library, not an extension",
     );
+  });
+});
+
+// ─── buildCmuxTabTitle ────────────────────────────────────────────────────────
+
+describe("buildCmuxTabTitle", () => {
+  const base: GSDState = {
+    activeMilestone: null,
+    activeSlice: null,
+    activeTask: null,
+    phase: "pre-planning",
+    recentDecisions: [],
+    blockers: [],
+    nextAction: "",
+    registry: [],
+    progress: null,
+  };
+
+  test("no active milestone → gsd · <phase>", () => {
+    assert.equal(buildCmuxTabTitle({ ...base, phase: "pre-planning" }), "gsd · pre-planning");
+  });
+
+  test("milestone only → gsd · M001", () => {
+    assert.equal(
+      buildCmuxTabTitle({ ...base, activeMilestone: { id: "M001", title: "T" }, phase: "planning" }),
+      "gsd · M001",
+    );
+  });
+
+  test("milestone + slice → gsd · M001 · S02", () => {
+    assert.equal(
+      buildCmuxTabTitle({
+        ...base,
+        activeMilestone: { id: "M001", title: "T" },
+        activeSlice: { id: "S02", title: "T" },
+        phase: "executing",
+      }),
+      "gsd · M001 · S02",
+    );
+  });
+
+  test("milestone + slice + task → gsd · M001 · S02/T03", () => {
+    assert.equal(
+      buildCmuxTabTitle({
+        ...base,
+        activeMilestone: { id: "M001", title: "T" },
+        activeSlice: { id: "S02", title: "T" },
+        activeTask: { id: "T03", title: "T" },
+        phase: "executing",
+      }),
+      "gsd · M001 · S02/T03",
+    );
+  });
+});
+
+// ─── parseSurfaceRef (via createSplitFrom) ────────────────────────────────────
+
+describe("createSplitFrom parses surface ref directly from new-split output", () => {
+  function makeClientWithOutput(output: string | null) {
+    const config = resolveCmuxConfig(
+      { cmux: { splits: true } },
+      { CMUX_WORKSPACE_ID: "workspace:1", CMUX_SURFACE_ID: "surface:1", CMUX_SOCKET_PATH: "/tmp/cmux.sock" },
+      () => true,
+      () => true,
+    );
+    // Patch runAsync to return fixed output without actually calling cmux
+    const client = new CmuxClient(config) as unknown as Record<string, unknown>;
+    (client as { runAsync: (args: string[]) => Promise<string | null> }).runAsync = async () => output;
+    return client as unknown as CmuxClient;
+  }
+
+  test("parses 'OK surface:N workspace:M' format", async () => {
+    const client = makeClientWithOutput("OK surface:105 workspace:2\n");
+    const result = await client.createSplit("right");
+    assert.equal(result, "surface:105");
+  });
+
+  test("parses 'OK surface=surface:N pane=...' format", async () => {
+    const client = makeClientWithOutput("OK surface=surface:109 pane=pane:70 placement=split\n");
+    const result = await client.createSplit("right");
+    assert.equal(result, "surface:109");
+  });
+
+  test("returns null when output is null (CLI failure)", async () => {
+    const client = makeClientWithOutput(null);
+    const result = await client.createSplit("right");
+    assert.equal(result, null);
+  });
+
+  test("returns null when output has no surface ref", async () => {
+    const client = makeClientWithOutput("Error: something went wrong\n");
+    const result = await client.createSplit("right");
+    assert.equal(result, null);
+  });
+});
+
+// ─── new methods — smoke-test guard calls ─────────────────────────────────────
+
+describe("CmuxClient new methods respect feature flags", () => {
+  const env = { CMUX_WORKSPACE_ID: "workspace:1", CMUX_SURFACE_ID: "surface:1", CMUX_SOCKET_PATH: "/tmp/cmux.sock" };
+  const socketExists = () => true;
+  const cliAvail = () => true;
+
+  test("renameTab no-ops when cliAvailable is false", () => {
+    const config = resolveCmuxConfig({ cmux: {} }, env, socketExists, () => false);
+    const client = new CmuxClient(config);
+    assert.doesNotThrow(() => client.renameTab("test"));
+  });
+
+  test("triggerFlash no-ops when cliAvailable is false", () => {
+    const config = resolveCmuxConfig({ cmux: {} }, env, socketExists, () => false);
+    const client = new CmuxClient(config);
+    assert.doesNotThrow(() => client.triggerFlash());
+  });
+
+  test("openBrowserSplit returns null when browser feature is off", async () => {
+    const config = resolveCmuxConfig({ cmux: { browser: false } }, env, socketExists, cliAvail);
+    const client = new CmuxClient(config);
+    const result = await client.openBrowserSplit("https://example.com");
+    assert.equal(result, null);
+  });
+
+  test("readScreen returns null when cliAvailable is false", async () => {
+    const config = resolveCmuxConfig({ cmux: {} }, env, socketExists, () => false);
+    const client = new CmuxClient(config);
+    const result = await client.readScreen();
+    assert.equal(result, null);
+  });
+
+  test("openMarkdown returns null when cliAvailable is false", async () => {
+    const config = resolveCmuxConfig({ cmux: {} }, env, socketExists, () => false);
+    const client = new CmuxClient(config);
+    const result = await client.openMarkdown("/tmp/test.md");
+    assert.equal(result, null);
   });
 });
