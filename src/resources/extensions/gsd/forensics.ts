@@ -123,7 +123,7 @@ export async function handleForensics(
 
 // ─── Report Builder ───────────────────────────────────────────────────────────
 
-async function buildForensicReport(basePath: string): Promise<ForensicReport> {
+export async function buildForensicReport(basePath: string): Promise<ForensicReport> {
   const anomalies: ForensicAnomaly[] = [];
 
   // 1. Derive current state

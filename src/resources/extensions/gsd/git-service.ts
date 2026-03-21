@@ -15,6 +15,7 @@ import { gsdRoot } from "./paths.js";
 import { GIT_NO_PROMPT_ENV } from "./git-constants.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 
+
 import {
   detectWorktreeName,
   SLICE_BRANCH_RE,

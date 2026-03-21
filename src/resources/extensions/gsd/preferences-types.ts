@@ -98,6 +98,7 @@ export const KNOWN_UNIT_TYPES = [
 ] as const;
 export type UnitType = (typeof KNOWN_UNIT_TYPES)[number];
 
+
 export const SKILL_ACTIONS = new Set(["use", "prefer", "avoid"]);
 
 export interface GSDSkillRule {

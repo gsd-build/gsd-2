@@ -239,6 +239,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - prevent false-positive 'Session lock lost' during auto-mode (#1257)
 
+
 ## [2.31.0] - 2026-03-18
 
 ### Added
