@@ -324,6 +324,60 @@ async function main(): Promise<void> {
       assertTrue(existsSync(join(repo, "skip-checkout.ts")), "skip-checkout.ts merged to main");
     }
 
+    // ─── Test 7: Untracked doctor-created files don't block squash merge ──
+    // Regresses the bug where doctor creates placeholder files (e.g., S02-SUMMARY.md)
+    // in the shared .gsd/milestones/<milestoneId>/ directory. These files are untracked
+    // on main but tracked on the milestone branch — git merge --squash would reject the
+    // merge with "untracked working tree files would be overwritten".
+    console.log("\n=== untracked doctor-created files cleared before squash merge ===");
+    {
+      const repo = createTempRepo();
+      tempDirs.push(repo);
+
+      const wt = await createAutoWorktree(repo, "M070");
+      tempDirs.push(wt);
+
+      addSliceToMilestone(repo, wt, "M070", "S01", "Slice one", [
+        { file: "feature.ts", content: "export const x = 1;\n", message: "add feature" },
+      ]);
+
+      // Simulate doctor creating a placeholder summary file in the shared .gsd/ dir.
+      // On main, this file is untracked. On milestone/M070, it is tracked.
+      const sliceDir = join(repo, ".gsd", "milestones", "M070", "slices", "S01");
+      mkdirSync(sliceDir, { recursive: true });
+
+      // Commit the summary to the milestone branch (as if doctor ran in the worktree)
+      run("git checkout milestone/M070", wt);
+      mkdirSync(join(wt, ".gsd", "milestones", "M070", "slices", "S01"), { recursive: true });
+      writeFileSync(join(wt, ".gsd", "milestones", "M070", "slices", "S01", "S01-SUMMARY.md"), "# S01 Summary\n");
+      run("git add .", wt);
+      run(`git commit -m "add S01-SUMMARY.md"`, wt);
+      run("git checkout milestone/M070", wt);
+
+      // Now create the same file as an UNTRACKED file in the project root —
+      // simulating doctor creating a placeholder stub in the shared .gsd/ symlink.
+      writeFileSync(join(sliceDir, "S01-SUMMARY.md"), "# placeholder\n");
+
+      const roadmap = makeRoadmap("M070", "Doctor untracked file regression", [
+        { id: "S01", title: "Slice one" },
+      ]);
+
+      let threw = false;
+      let thrownMsg = "";
+      try {
+        mergeMilestoneToMain(repo, "M070", roadmap);
+      } catch (err) {
+        threw = true;
+        thrownMsg = err instanceof Error ? err.message : String(err);
+      }
+
+      assertTrue(!threw, `merge must not fail due to untracked doctor-created files (got: ${thrownMsg})`);
+
+      // The milestone branch's tracked version should now be on main
+      const summaryOnMain = join(repo, ".gsd", "milestones", "M070", "slices", "S01", "S01-SUMMARY.md");
+      assertTrue(existsSync(summaryOnMain), "S01-SUMMARY.md from milestone branch is on main after merge");
+    }
+
   } finally {
     process.chdir(savedCwd);
     for (const d of tempDirs) {

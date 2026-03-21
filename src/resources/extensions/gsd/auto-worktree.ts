@@ -75,6 +75,31 @@ function clearProjectRootStateFiles(basePath: string, milestoneId: string): void
       /* non-fatal — file may not exist */
     }
   }
+
+  // Remove untracked files that doctor or other tooling may have created under
+  // .gsd/milestones/<milestoneId>/ in the project root working tree. These
+  // files are not committed to the integration branch but ARE tracked on the
+  // milestone branch — git merge --squash rejects the merge with "untracked
+  // working tree files would be overwritten" when it finds them.
+  //
+  // The canonical versions come from the milestone branch via the squash merge,
+  // so removing untracked local copies here is safe and correct. Only
+  // untracked (non-gitignored) files are removed; gitignored files are never
+  // flagged by git during merges and therefore never need cleanup.
+  const milestonePlanningDir = join(gsdDir, "milestones", milestoneId);
+  if (existsSync(milestonePlanningDir)) {
+    try {
+      const output = execSync(
+        `git ls-files --others --exclude-standard "${milestonePlanningDir}"`,
+        { cwd: basePath, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] },
+      ).trim();
+      for (const relPath of output.split("\n").filter(Boolean)) {
+        try { unlinkSync(join(basePath, relPath)); } catch { /* non-fatal */ }
+      }
+    } catch {
+      // Non-fatal: git unavailable, repo not initialised, or no untracked files
+    }
+  }
 }
 // ─── Worktree ↔ Main Repo Sync (#1311) ──────────────────────────────────────
 
