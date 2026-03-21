@@ -329,6 +329,32 @@ Flags are composable: `--discuss --research --full` gives everything.
 
 ---
 
+### `/gsd:fast`
+
+Execute a trivial task inline — no subagents, no planning overhead.
+
+**Usage:**
+```
+/gsd:fast Fix the typo in the README
+/gsd:fast Add a missing semicolon in config.ts
+```
+
+**What it does:** Executes directly in the current context without spawning any subagents or generating PLAN.md files. No commits, no state tracking.
+
+> Use `fast` for truly trivial tasks: typo fixes, config tweaks, small refactors, forgotten commits. If the task needs research, multiple steps, or verification — use `/gsd:quick` instead.
+
+**quick vs fast:**
+
+| | `/gsd:fast` | `/gsd:quick` |
+|-|------------|-------------|
+| Subagents | None | gsd-planner + gsd-executor |
+| PLAN.md | No | Yes |
+| STATE.md tracking | No | Yes |
+| Atomic commit | No | Yes |
+| Best for | < 2 min trivial tasks | Multi-step ad-hoc work |
+
+---
+
 ## Phase Management
 
 ### `/gsd:add-phase`
@@ -525,6 +551,60 @@ List pending todos and interactively select one to work on.
 
 ---
 
+### `/gsd:add-backlog`
+
+Park an idea in the backlog when it's not ready for active planning.
+
+**Usage:**
+```
+/gsd:add-backlog "Add SSO support with SAML"
+/gsd:add-backlog "Migrate to a monorepo structure"
+```
+
+**What it does:**
+- Creates a phase entry using `999.x` numbering (e.g., `999.1`, `999.2`)
+- Adds a `## Backlog` section to ROADMAP.md if it doesn't exist
+- Creates the phase directory — so you can run `/gsd:discuss-phase 999.1` to build up context over time
+- Commits the entry
+
+Backlog items are intentionally unsequenced — they don't block active work and accumulate context until you're ready.
+
+---
+
+### `/gsd:review-backlog`
+
+Review all backlog items and promote, keep, or remove them.
+
+**Usage:**
+```
+/gsd:review-backlog
+```
+
+Presents each `999.x` item with its description and any accumulated artifacts (CONTEXT.md, RESEARCH.md). For each item you choose:
+- **Promote** — moves it to the active milestone sequence (renumbers, updates ROADMAP.md)
+- **Keep** — stays in the backlog
+- **Remove** — deletes the directory and ROADMAP.md entry
+
+---
+
+### `/gsd:plant-seed`
+
+Capture a forward-looking idea with trigger conditions so it surfaces automatically at the right milestone.
+
+**Usage:**
+```
+/gsd:plant-seed
+/gsd:plant-seed "Add AI-powered search when we hit 10k users"
+```
+
+**What it does:**
+- Creates `.planning/seeds/SEED-NNN-slug.md` with the full WHY, WHEN to surface, and context breadcrumbs
+- Seeds are automatically scanned by `/gsd:new-milestone` — relevant seeds surface at the start of a new milestone cycle
+
+**Seed vs backlog:** Use `plant-seed` for ideas tied to a future condition ("when we have X", "after we ship Y"). Use `add-backlog` for ideas you'll want to plan soon.
+
+---
+
 ## Research & Analysis
 
 ### `/gsd:map-codebase`
@@ -619,6 +699,51 @@ Audits implemented UI across 6 dimensions: layout, typography, color, spacing, i
 
 ---
 
+### `/gsd:audit-uat`
+
+Cross-phase audit of all outstanding UAT and verification items.
+
+**Usage:**
+```
+/gsd:audit-uat
+```
+
+**What it does:**
+- Scans all phases for pending, skipped, blocked, and `human_needed` UAT items
+- Cross-references against the current codebase to detect stale documentation
+- Produces a prioritized human test plan
+
+Use when you want a full picture of what still needs manual validation across the entire milestone — not just one phase.
+
+---
+
+### `/gsd:review`
+
+Request cross-AI peer review of phase plans from external AI CLIs.
+
+**Usage:**
+```
+/gsd:review --phase 4
+/gsd:review --phase 4 --gemini
+/gsd:review --phase 4 --all
+```
+
+**What it does:**
+1. Builds a structured review prompt from the phase's PLAN.md and CONTEXT.md
+2. Invokes external AI CLIs (Gemini, Claude, Codex) to independently review the plan
+3. Collects responses and writes `{N}-REVIEWS.md`
+
+**Flags:**
+
+| Flag | Effect |
+|------|--------|
+| `--gemini` | Include Gemini CLI review |
+| `--claude` | Include Claude CLI review (separate session) |
+| `--codex` | Include Codex CLI review |
+| `--all` | Include all available CLIs |
+
+---
+
 ## Work Sessions
 
 ### `/gsd:pause-work`
@@ -657,6 +782,28 @@ Generate a session report with token usage estimates, work summary, and outcomes
 ```
 
 Useful at the end of a long coding session to capture what was accomplished and how much was spent.
+
+---
+
+### `/gsd:thread`
+
+Manage persistent context threads for cross-session work that doesn't belong to any specific phase.
+
+**Usage:**
+```
+/gsd:thread                          # list all threads
+/gsd:thread "Debug the TCP timeout issue"   # create new thread
+/gsd:thread debug-tcp-timeout        # resume existing thread
+```
+
+**Modes:**
+- **No args** — lists all threads with status and last-updated date
+- **New description** — creates `.planning/threads/{slug}.md` with goal, context, and next steps
+- **Existing thread name** — resumes thread, loads its context into the session
+
+**Thread vs pause-work:** Use `thread` for ongoing investigations or cross-cutting concerns that span multiple sessions and aren't tied to a phase. Use `pause-work` for mid-phase handoffs.
+
+Threads can be promoted to phases (`/gsd:add-phase`) or backlog items (`/gsd:add-backlog`) when they mature.
 
 ---
 
@@ -805,6 +952,23 @@ Generate a developer behavioral profile from session history.
 ```
 
 Analyzes how you work and produces profile artifacts that help Claude tailor its behavior to your preferences.
+
+---
+
+### `/gsd:pr-branch`
+
+Create a clean PR branch by filtering out `.planning/` commits — ready for code review.
+
+**Usage:**
+```
+/gsd:pr-branch
+/gsd:pr-branch main
+/gsd:pr-branch develop
+```
+
+**What it does:** Creates a new branch that contains only your code changes — no PLAN.md, SUMMARY.md, STATE.md, or other GSD planning artifacts. Reviewers see a clean diff without planning noise.
+
+> Use this before opening a PR so your teammates don't have to wade through GSD internal files in the diff.
 
 ---
 
