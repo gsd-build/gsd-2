@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
+import { authFetch } from "@/lib/auth"
 
 interface StepDevRootProps {
   onNext: () => void
@@ -50,7 +51,7 @@ function InlineFolderBrowser({
     setError(null)
     try {
       const param = targetPath ? `?path=${encodeURIComponent(targetPath)}` : ""
-      const res = await fetch(`/api/browse-directories${param}`)
+      const res = await authFetch(`/api/browse-directories${param}`)
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error((body as { error?: string }).error ?? `${res.status}`)
@@ -176,7 +177,7 @@ export function StepDevRoot({ onNext, onBack }: StepDevRootProps) {
     setError(null)
 
     try {
-      const res = await fetch("/api/preferences", {
+      const res = await authFetch("/api/preferences", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ devRoot: trimmed }),

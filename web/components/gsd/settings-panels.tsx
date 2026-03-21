@@ -34,6 +34,7 @@ import {
 } from "@/lib/gsd-workspace-store"
 import { useTerminalFontSize } from "@/lib/use-terminal-font-size"
 import { useEditorFontSize } from "@/lib/use-editor-font-size"
+import { authFetch } from "@/lib/auth"
 
 // ═══════════════════════════════════════════════════════════════════════
 // SHARED INFRASTRUCTURE
@@ -566,7 +567,7 @@ export function RemoteQuestionsPanel() {
   const fetchApiStatus = useCallback(async () => {
     try {
       setApiLoading(true)
-      const res = await fetch("/api/remote-questions", { cache: "no-store" })
+      const res = await authFetch("/api/remote-questions", { cache: "no-store" })
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: "Unknown error" }))
         setError(body.error ?? `API error ${res.status}`)
@@ -615,7 +616,7 @@ export function RemoteQuestionsPanel() {
     setError(null)
     setSuccess(null)
     try {
-      const res = await fetch("/api/remote-questions", {
+      const res = await authFetch("/api/remote-questions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ channel, channelId: channelId.trim(), timeoutMinutes, pollIntervalSeconds }),
@@ -638,7 +639,7 @@ export function RemoteQuestionsPanel() {
     setError(null)
     setSuccess(null)
     try {
-      const res = await fetch("/api/remote-questions", { method: "DELETE" })
+      const res = await authFetch("/api/remote-questions", { method: "DELETE" })
       const json = await res.json()
       if (!res.ok) { setError(json.error ?? `Disconnect failed (${res.status})`); return }
       setSuccess("Channel disconnected")
@@ -663,7 +664,7 @@ export function RemoteQuestionsPanel() {
     setError(null)
     setTokenSuccess(null)
     try {
-      const res = await fetch("/api/remote-questions", {
+      const res = await authFetch("/api/remote-questions", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ channel, token: botToken.trim() }),

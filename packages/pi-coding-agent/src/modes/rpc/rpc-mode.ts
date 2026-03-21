@@ -399,7 +399,9 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 	// Do not block the initial RPC handshake on extension session_start hooks:
 	// browser boot only needs get_state, and several startup-only notifications
 	// (MCP availability, web-search status, etc.) can complete in the background.
-	void session.bindExtensions({
+	// Track readiness so consumers can know when extension commands are available.
+	let extensionsReady = false;
+	const extensionsReadyPromise = session.bindExtensions({
 		uiContext: createExtensionUIContext(),
 		commandContextActions: createDefaultCommandContextActions(session),
 		shutdownHandler: () => {
@@ -408,13 +410,18 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 		onError: (err) => {
 			output({ type: "extension_error", extensionPath: err.extensionPath, event: err.event, error: err.error });
 		},
+	}).then(() => {
+		extensionsReady = true;
+		output({ type: "extensions_ready" });
 	}).catch((error) => {
+		extensionsReady = true; // Mark ready even on failure so consumers don't wait forever
 		output({
 			type: "extension_error",
 			event: "session_start",
 			error: error instanceof Error ? error.message : String(error),
 		});
 	});
+	void extensionsReadyPromise;
 
 	// Output all agent events as JSON
 	session.subscribe((event) => {
@@ -486,6 +493,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 					retryAttempt: session.retryAttempt,
 					messageCount: session.messages.length,
 					pendingMessageCount: session.pendingMessageCount,
+					extensionsReady,
 				};
 				return success(id, "get_state", state);
 			}

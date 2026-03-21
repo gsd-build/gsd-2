@@ -35,6 +35,7 @@ import {
   formatTokenCount,
   formatDuration,
 } from "@/lib/visualizer-types"
+import { authFetch } from "@/lib/auth"
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
 
@@ -1170,7 +1171,7 @@ export function VisualizerView() {
 
   const fetchData = useCallback(async () => {
     try {
-      const resp = await fetch(buildProjectUrl("/api/visualizer", projectCwd))
+      const resp = await authFetch(buildProjectUrl("/api/visualizer", projectCwd))
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({ error: "Unknown error" }))
         throw new Error(body.error || `HTTP ${resp.status}`)

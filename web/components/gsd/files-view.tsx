@@ -22,6 +22,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useGSDWorkspaceState, buildProjectUrl } from "@/lib/gsd-workspace-store"
+import { authFetch } from "@/lib/auth"
 import { FileContentViewer } from "@/components/gsd/file-content-viewer"
 import { ChatPane } from "@/components/gsd/chat-mode"
 
@@ -559,7 +560,7 @@ export function FilesView() {
     try {
       setLoading(true)
       setError(null)
-      const res = await fetch(buildProjectUrl(`/api/files?root=${root}`, projectCwd))
+      const res = await authFetch(buildProjectUrl(`/api/files?root=${root}`, projectCwd))
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         throw new Error(data.error || `Failed to fetch files (${res.status})`)
@@ -627,7 +628,7 @@ export function FilesView() {
 
     // Fetch content
     try {
-      const res = await fetch(buildProjectUrl(`/api/files?root=${root}&path=${encodeURIComponent(path)}`, projectCwd))
+      const res = await authFetch(buildProjectUrl(`/api/files?root=${root}&path=${encodeURIComponent(path)}`, projectCwd))
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         const errMsg = data.error || `Failed to fetch file (${res.status})`
@@ -735,7 +736,7 @@ export function FilesView() {
     const toPath = toDir ? `${toDir}/${fileName}` : fileName
 
     try {
-      const res = await fetch(buildProjectUrl("/api/files", projectCwd), {
+      const res = await authFetch(buildProjectUrl("/api/files", projectCwd), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ from: fromPath, to: toPath, root: activeRoot }),
@@ -824,7 +825,7 @@ export function FilesView() {
   const handleCreateCommit = useCallback(async (parentDir: string, name: string, type: "file" | "directory") => {
     const newPath = parentDir ? `${parentDir}/${name}` : name
     try {
-      const res = await fetch(buildProjectUrl("/api/files", projectCwd), {
+      const res = await authFetch(buildProjectUrl("/api/files", projectCwd), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: newPath, type, root: activeRoot }),
@@ -864,7 +865,7 @@ export function FilesView() {
     }
 
     try {
-      const res = await fetch(buildProjectUrl("/api/files", projectCwd), {
+      const res = await authFetch(buildProjectUrl("/api/files", projectCwd), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ from: oldPath, to: newPath, root: activeRoot }),
@@ -964,7 +965,7 @@ export function FilesView() {
   const handleDuplicate = useCallback(async (path: string) => {
     // Read original content
     try {
-      const res = await fetch(buildProjectUrl(`/api/files?root=${activeRoot}&path=${encodeURIComponent(path)}`, projectCwd))
+      const res = await authFetch(buildProjectUrl(`/api/files?root=${activeRoot}&path=${encodeURIComponent(path)}`, projectCwd))
       if (!res.ok) return
       const data = await res.json()
       if (typeof data.content !== "string") return
@@ -982,7 +983,7 @@ export function FilesView() {
       const newPath = parentDir ? `${parentDir}/${newName}` : newName
 
       // Create with content
-      const createRes = await fetch(buildProjectUrl("/api/files", projectCwd), {
+      const createRes = await authFetch(buildProjectUrl("/api/files", projectCwd), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: newPath, content: data.content, root: activeRoot }),
@@ -1003,7 +1004,7 @@ export function FilesView() {
   const handleSave = useCallback(async (newContent: string) => {
     if (!activeTab) return
     const { root, path, key } = activeTab
-    const res = await fetch(buildProjectUrl("/api/files", projectCwd), {
+    const res = await authFetch(buildProjectUrl("/api/files", projectCwd), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path, content: newContent, root }),
@@ -1013,7 +1014,7 @@ export function FilesView() {
       throw new Error(data.error || `Save failed (${res.status})`)
     }
     // Re-fetch to sync the view tab
-    const refetch = await fetch(buildProjectUrl(`/api/files?root=${root}&path=${encodeURIComponent(path)}`, projectCwd))
+    const refetch = await authFetch(buildProjectUrl(`/api/files?root=${root}&path=${encodeURIComponent(path)}`, projectCwd))
     if (refetch.ok) {
       const data = await refetch.json()
       setOpenTabs((prev) =>
@@ -1077,7 +1078,7 @@ export function FilesView() {
       // Fetch new content, then store diff
       ;(async () => {
         try {
-          const res = await fetch(buildProjectUrl(`/api/files?root=${root}&path=${encodeURIComponent(relativePath)}`, projectCwd))
+          const res = await authFetch(buildProjectUrl(`/api/files?root=${root}&path=${encodeURIComponent(relativePath)}`, projectCwd))
           if (!res.ok) return
           const data = await res.json()
           const newContent: string | null = data.content ?? null

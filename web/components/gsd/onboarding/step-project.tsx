@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useProjectStoreManager } from "@/lib/project-store-manager"
 import { cn } from "@/lib/utils"
+import { authFetch } from "@/lib/auth"
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -120,12 +121,12 @@ export function StepProject({ onFinish, onBack, onBeforeSwitch }: StepProjectPro
       setLoading(true)
       setError(null)
       try {
-        const prefsRes = await fetch("/api/preferences")
+        const prefsRes = await authFetch("/api/preferences")
         if (!prefsRes.ok) throw new Error("Failed to load preferences")
         const prefs = await prefsRes.json()
         if (!prefs.devRoot) { setDevRoot(null); setProjects([]); setLoading(false); return }
         setDevRoot(prefs.devRoot)
-        const projRes = await fetch(`/api/projects?root=${encodeURIComponent(prefs.devRoot)}&detail=true`)
+        const projRes = await authFetch(`/api/projects?root=${encodeURIComponent(prefs.devRoot)}&detail=true`)
         if (!projRes.ok) throw new Error("Failed to discover projects")
         const discovered = (await projRes.json()) as ProjectMetadata[]
         if (!cancelled) setProjects(discovered)
@@ -178,7 +179,7 @@ export function StepProject({ onFinish, onBack, onBeforeSwitch }: StepProjectPro
     setCreating(true)
     setCreateError(null)
     try {
-      const res = await fetch("/api/projects", {
+      const res = await authFetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ devRoot, name: newName }),

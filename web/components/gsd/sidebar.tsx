@@ -53,6 +53,7 @@ import { deriveWorkflowAction } from "@/lib/workflow-actions"
 import { executeWorkflowActionInPowerMode } from "@/lib/workflow-action-execution"
 import { useProjectStoreManager } from "@/lib/project-store-manager"
 import { Skeleton } from "@/components/ui/skeleton"
+import { authFetch } from "@/lib/auth"
 
 const StatusIcon = ({ status }: { status: ItemStatus }) => {
   if (status === "done") {
@@ -200,7 +201,7 @@ export function NavRail({ activeView, onViewChange, isConnecting = false }: NavR
             setExitDialogOpen(false)
           }}
           onStopServer={async () => {
-            await fetch("/api/shutdown", { method: "POST" }).catch(() => {})
+            await authFetch("/api/shutdown", { method: "POST" }).catch(() => {})
             setTimeout(() => {
               try { window.close() } catch { /* ignore */ }
               setTimeout(() => { window.location.href = "about:blank" }, 300)

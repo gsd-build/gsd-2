@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { exec, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
@@ -519,6 +520,7 @@ export async function launchWebMode(
   stderr.write(`[gsd] Starting web mode…\n`)
 
   const port = options.port ?? await (deps.resolvePort ?? reserveWebPort)(host)
+  const authToken = randomBytes(32).toString('hex')
   const url = `http://${host}:${port}`
   const env = {
     ...(deps.env ?? process.env),
@@ -526,6 +528,7 @@ export async function launchWebMode(
     PORT: String(port),
     GSD_WEB_HOST: host,
     GSD_WEB_PORT: String(port),
+    GSD_WEB_AUTH_TOKEN: authToken,
     GSD_WEB_PROJECT_CWD: options.cwd,
     GSD_WEB_PROJECT_SESSIONS_DIR: options.projectSessionsDir,
     GSD_WEB_PACKAGE_ROOT: resolution.packageRoot,
@@ -625,7 +628,7 @@ export async function launchWebMode(
       // Register in multi-instance registry
       registerInstance(options.cwd, { pid, port, url })
     }
-    ;(deps.openBrowser ?? openBrowser)(url)
+    ;(deps.openBrowser ?? openBrowser)(`${url}/#token=${authToken}`)
   } catch (error) {
     const failure: WebModeLaunchFailure = {
       mode: 'web',

@@ -64,6 +64,7 @@ import type {
   SessionBrowserSortMode,
   SessionManageResponse,
 } from "./session-browser-contract"
+import { authFetch, appendAuthParam } from "./auth"
 
 export type WorkspaceStatus = "idle" | "loading" | "ready" | "error"
 export type WorkspaceConnectionState =
@@ -2008,7 +2009,7 @@ export class GSDWorkspaceStore {
     })
 
     try {
-      const response = await fetch(this.buildUrl("/api/git"), {
+      const response = await authFetch(this.buildUrl("/api/git"), {
         method: "GET",
         cache: "no-store",
         headers: {
@@ -2138,7 +2139,7 @@ export class GSDWorkspaceStore {
     })
 
     try {
-      const response = await fetch(this.buildUrl("/api/recovery"), {
+      const response = await authFetch(this.buildUrl("/api/recovery"), {
         method: "GET",
         cache: "no-store",
         headers: {
@@ -2334,7 +2335,7 @@ export class GSDWorkspaceStore {
   loadForensicsDiagnostics = async (): Promise<ForensicReport | null> => {
     this.patchDiagnosticsPhaseState("forensics", { phase: "loading", error: null })
     try {
-      const response = await fetch(this.buildUrl("/api/forensics"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
+      const response = await authFetch(this.buildUrl("/api/forensics"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
       const payload = await response.json().catch(() => null)
       if (!response.ok || !payload) {
         const message = payload?.error ?? `Forensics request failed with ${response.status}`
@@ -2354,7 +2355,7 @@ export class GSDWorkspaceStore {
     this.patchDoctorState({ phase: "loading", error: null })
     try {
       const url = scope ? `/api/doctor?scope=${encodeURIComponent(scope)}` : "/api/doctor"
-      const response = await fetch(url, { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
+      const response = await authFetch(url, { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
       const payload = await response.json().catch(() => null)
       if (!response.ok || !payload) {
         const message = payload?.error ?? `Doctor request failed with ${response.status}`
@@ -2373,7 +2374,7 @@ export class GSDWorkspaceStore {
   applyDoctorFixes = async (scope?: string): Promise<DoctorFixResult | null> => {
     this.patchDoctorState({ fixPending: true, lastFixError: null, lastFixResult: null })
     try {
-      const response = await fetch(this.buildUrl("/api/doctor"), {
+      const response = await authFetch(this.buildUrl("/api/doctor"), {
         method: "POST",
         cache: "no-store",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -2400,7 +2401,7 @@ export class GSDWorkspaceStore {
   loadSkillHealthDiagnostics = async (): Promise<SkillHealthReport | null> => {
     this.patchDiagnosticsPhaseState("skillHealth", { phase: "loading", error: null })
     try {
-      const response = await fetch(this.buildUrl("/api/skill-health"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
+      const response = await authFetch(this.buildUrl("/api/skill-health"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
       const payload = await response.json().catch(() => null)
       if (!response.ok || !payload) {
         const message = payload?.error ?? `Skill health request failed with ${response.status}`
@@ -2419,7 +2420,7 @@ export class GSDWorkspaceStore {
   loadKnowledgeData = async (): Promise<KnowledgeData | null> => {
     this.patchKnowledgeCapturesPhaseState("knowledge", { phase: "loading", error: null })
     try {
-      const response = await fetch(this.buildUrl("/api/knowledge"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
+      const response = await authFetch(this.buildUrl("/api/knowledge"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
       const payload = await response.json().catch(() => null)
       if (!response.ok || !payload) {
         const message = payload?.error ?? `Knowledge request failed with ${response.status}`
@@ -2438,7 +2439,7 @@ export class GSDWorkspaceStore {
   loadCapturesData = async (): Promise<CapturesData | null> => {
     this.patchKnowledgeCapturesPhaseState("captures", { phase: "loading", error: null })
     try {
-      const response = await fetch(this.buildUrl("/api/captures"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
+      const response = await authFetch(this.buildUrl("/api/captures"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
       const payload = await response.json().catch(() => null)
       if (!response.ok || !payload) {
         const message = payload?.error ?? `Captures request failed with ${response.status}`
@@ -2457,7 +2458,7 @@ export class GSDWorkspaceStore {
   loadSettingsData = async (): Promise<SettingsData | null> => {
     this.patchSettingsPhaseState({ phase: "loading", error: null })
     try {
-      const response = await fetch(this.buildUrl("/api/settings-data"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
+      const response = await authFetch(this.buildUrl("/api/settings-data"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
       const payload = await response.json().catch(() => null)
       if (!response.ok || !payload) {
         const message = payload?.error ?? `Settings request failed with ${response.status}`
@@ -2478,7 +2479,7 @@ export class GSDWorkspaceStore {
   loadHistoryData = async (): Promise<HistoryData | null> => {
     this.patchRemainingCommandsPhaseState("history", { phase: "loading", error: null })
     try {
-      const response = await fetch(this.buildUrl("/api/history"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
+      const response = await authFetch(this.buildUrl("/api/history"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
       const payload = await response.json().catch(() => null)
       if (!response.ok || !payload) {
         const message = payload?.error ?? `History request failed with ${response.status}`
@@ -2497,7 +2498,7 @@ export class GSDWorkspaceStore {
   loadInspectData = async (): Promise<InspectData | null> => {
     this.patchRemainingCommandsPhaseState("inspect", { phase: "loading", error: null })
     try {
-      const response = await fetch(this.buildUrl("/api/inspect"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
+      const response = await authFetch(this.buildUrl("/api/inspect"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
       const payload = await response.json().catch(() => null)
       if (!response.ok || !payload) {
         const message = payload?.error ?? `Inspect request failed with ${response.status}`
@@ -2516,7 +2517,7 @@ export class GSDWorkspaceStore {
   loadHooksData = async (): Promise<HooksData | null> => {
     this.patchRemainingCommandsPhaseState("hooks", { phase: "loading", error: null })
     try {
-      const response = await fetch(this.buildUrl("/api/hooks"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
+      const response = await authFetch(this.buildUrl("/api/hooks"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
       const payload = await response.json().catch(() => null)
       if (!response.ok || !payload) {
         const message = payload?.error ?? `Hooks request failed with ${response.status}`
@@ -2536,7 +2537,7 @@ export class GSDWorkspaceStore {
     this.patchRemainingCommandsPhaseState("exportData", { phase: "loading", error: null })
     try {
       const url = format ? `/api/export-data?format=${encodeURIComponent(format)}` : "/api/export-data"
-      const response = await fetch(url, { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
+      const response = await authFetch(url, { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
       const payload = await response.json().catch(() => null)
       if (!response.ok || !payload) {
         const message = payload?.error ?? `Export request failed with ${response.status}`
@@ -2555,7 +2556,7 @@ export class GSDWorkspaceStore {
   loadUndoInfo = async (): Promise<UndoInfo | null> => {
     this.patchRemainingCommandsPhaseState("undo", { phase: "loading", error: null })
     try {
-      const response = await fetch(this.buildUrl("/api/undo"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
+      const response = await authFetch(this.buildUrl("/api/undo"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
       const payload = await response.json().catch(() => null)
       if (!response.ok || !payload) {
         const message = payload?.error ?? `Undo info request failed with ${response.status}`
@@ -2574,7 +2575,7 @@ export class GSDWorkspaceStore {
   loadCleanupData = async (): Promise<CleanupData | null> => {
     this.patchRemainingCommandsPhaseState("cleanup", { phase: "loading", error: null })
     try {
-      const response = await fetch(this.buildUrl("/api/cleanup"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
+      const response = await authFetch(this.buildUrl("/api/cleanup"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
       const payload = await response.json().catch(() => null)
       if (!response.ok || !payload) {
         const message = payload?.error ?? `Cleanup data request failed with ${response.status}`
@@ -2593,7 +2594,7 @@ export class GSDWorkspaceStore {
   loadSteerData = async (): Promise<SteerData | null> => {
     this.patchRemainingCommandsPhaseState("steer", { phase: "loading", error: null })
     try {
-      const response = await fetch(this.buildUrl("/api/steer"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
+      const response = await authFetch(this.buildUrl("/api/steer"), { method: "GET", cache: "no-store", headers: { Accept: "application/json" } })
       const payload = await response.json().catch(() => null)
       if (!response.ok || !payload) {
         const message = payload?.error ?? `Steer data request failed with ${response.status}`
@@ -2611,7 +2612,7 @@ export class GSDWorkspaceStore {
 
   executeUndoAction = async (): Promise<UndoResult | null> => {
     try {
-      const response = await fetch(this.buildUrl("/api/undo"), {
+      const response = await authFetch(this.buildUrl("/api/undo"), {
         method: "POST",
         cache: "no-store",
         headers: { Accept: "application/json" },
@@ -2632,7 +2633,7 @@ export class GSDWorkspaceStore {
 
   executeCleanupAction = async (branches: string[], snapshots: string[]): Promise<CleanupResult | null> => {
     try {
-      const response = await fetch(this.buildUrl("/api/cleanup"), {
+      const response = await authFetch(this.buildUrl("/api/cleanup"), {
         method: "POST",
         cache: "no-store",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -2655,7 +2656,7 @@ export class GSDWorkspaceStore {
   resolveCaptureAction = async (request: CaptureResolveRequest): Promise<CaptureResolveResult | null> => {
     this.patchKnowledgeCapturesState({ resolveRequest: { pending: true, lastError: null, lastResult: null } })
     try {
-      const response = await fetch(this.buildUrl("/api/captures"), {
+      const response = await authFetch(this.buildUrl("/api/captures"), {
         method: "POST",
         cache: "no-store",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -2735,7 +2736,7 @@ export class GSDWorkspaceStore {
     params.set("nameFilter", requestedSessionBrowser.nameFilter)
 
     try {
-      const response = await fetch(this.buildUrl(`/api/session/browser?${params.toString()}`), {
+      const response = await authFetch(this.buildUrl(`/api/session/browser?${params.toString()}`), {
         method: "GET",
         cache: "no-store",
         headers: {
@@ -2897,7 +2898,7 @@ export class GSDWorkspaceStore {
     })
 
     try {
-      const response = await fetch(this.buildUrl("/api/session/manage"), {
+      const response = await authFetch(this.buildUrl("/api/session/manage"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -3948,7 +3949,7 @@ export class GSDWorkspaceStore {
   respondToUiRequest = async (id: string, response: Record<string, unknown>): Promise<void> => {
     this.patchState({ commandInFlight: "extension_ui_response" })
     try {
-      const result = await fetch(this.buildUrl("/api/session/command"), {
+      const result = await authFetch(this.buildUrl("/api/session/command"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ type: "extension_ui_response", id, ...response }),
@@ -3974,7 +3975,7 @@ export class GSDWorkspaceStore {
   dismissUiRequest = async (id: string): Promise<void> => {
     this.patchState({ commandInFlight: "extension_ui_response" })
     try {
-      const result = await fetch(this.buildUrl("/api/session/command"), {
+      const result = await authFetch(this.buildUrl("/api/session/command"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ type: "extension_ui_response", id, cancelled: true }),
@@ -4111,7 +4112,7 @@ export class GSDWorkspaceStore {
       }
 
       try {
-        const response = await fetch(this.buildUrl("/api/boot"), {
+        const response = await authFetch(this.buildUrl("/api/boot"), {
           method: "GET",
           cache: "no-store",
           headers: {
@@ -4310,7 +4311,7 @@ export class GSDWorkspaceStore {
     }
 
     try {
-      const response = await fetch(this.buildUrl(`/api/live-state?${params.toString()}`), {
+      const response = await authFetch(this.buildUrl(`/api/live-state?${params.toString()}`), {
         method: "GET",
         cache: "no-store",
         headers: {
@@ -4625,7 +4626,7 @@ export class GSDWorkspaceStore {
     }, COMMAND_TIMEOUT_MS)
 
     try {
-      const response = await fetch(this.buildUrl("/api/session/command"), {
+      const response = await authFetch(this.buildUrl("/api/session/command"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -4699,7 +4700,7 @@ export class GSDWorkspaceStore {
 
   private async fetchOnboardingState(silent = false): Promise<WorkspaceOnboardingState> {
     const previousFlowStatus = this.state.boot?.onboarding.activeFlow?.status ?? null
-    const response = await fetch(this.buildUrl("/api/onboarding"), {
+    const response = await authFetch(this.buildUrl("/api/onboarding"), {
       method: "GET",
       cache: "no-store",
       headers: {
@@ -4728,7 +4729,7 @@ export class GSDWorkspaceStore {
   }
 
   private async postOnboardingAction(body: Record<string, unknown>): Promise<WorkspaceOnboardingState> {
-    const response = await fetch(this.buildUrl("/api/onboarding"), {
+    const response = await authFetch(this.buildUrl("/api/onboarding"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -4823,7 +4824,7 @@ export class GSDWorkspaceStore {
   private ensureEventStream(): void {
     if (this.eventSource || this.disposed || this.state.boot?.onboarding.locked) return
 
-    const stream = new EventSource(this.buildUrl("/api/session/events"))
+    const stream = new EventSource(appendAuthParam(this.buildUrl("/api/session/events")))
     this.eventSource = stream
 
     stream.onopen = () => {

@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
+import { authFetch } from "@/lib/auth"
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -82,7 +83,7 @@ export function StepRemote({ onBack, onNext }: StepRemoteProps) {
 
   // Check if already configured
   useEffect(() => {
-    fetch("/api/remote-questions", { cache: "no-store" })
+    authFetch("/api/remote-questions", { cache: "no-store" })
       .then((res) => res.json())
       .then((data: RemoteQuestionsApiResponse) => {
         if (data.tokenSet) setTokenSet(true)
@@ -108,7 +109,7 @@ export function StepRemote({ onBack, onNext }: StepRemoteProps) {
     setError(null)
 
     try {
-      const res = await fetch("/api/remote-questions", {
+      const res = await authFetch("/api/remote-questions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -138,7 +139,7 @@ export function StepRemote({ onBack, onNext }: StepRemoteProps) {
     setError(null)
     setTokenSuccess(null)
     try {
-      const res = await fetch("/api/remote-questions", {
+      const res = await authFetch("/api/remote-questions", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ channel, token: botToken.trim() }),

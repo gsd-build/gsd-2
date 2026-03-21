@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 import { validateImageFile } from "@/lib/image-utils"
 import { filterInitialGsdHeader } from "@/lib/initial-gsd-header-filter"
 import { buildProjectAbsoluteUrl, buildProjectPath } from "@/lib/project-url"
+import { authFetch, appendAuthParam } from "@/lib/auth"
 import "@xterm/xterm/css/xterm.css"
 
 type XTerminal = import("@xterm/xterm").Terminal
@@ -216,7 +217,7 @@ function TerminalInstance({
     (cols: number, rows: number) => {
       if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current)
       resizeTimeoutRef.current = setTimeout(() => {
-        void fetch(buildProjectPath("/api/terminal/resize", projectCwd), {
+        void authFetch(buildProjectPath("/api/terminal/resize", projectCwd), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id: sessionId, cols, rows }),
@@ -232,7 +233,7 @@ function TerminalInstance({
     while (inputQueueRef.current.length > 0) {
       const data = inputQueueRef.current.shift()!
       try {
-        await fetch(buildProjectPath("/api/terminal/input", projectCwd), {
+        await authFetch(buildProjectPath("/api/terminal/input", projectCwd), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id: sessionId, data }),
@@ -343,7 +344,7 @@ function TerminalInstance({
       for (const arg of commandArgs ?? []) {
         streamUrl.searchParams.append("arg", arg)
       }
-      const es = new EventSource(streamUrl.toString())
+      const es = new EventSource(appendAuthParam(streamUrl.toString()))
       eventSourceRef.current = es
 
       es.onmessage = (event) => {
@@ -502,7 +503,7 @@ async function uploadAndInjectImage(file: File, sessionId: string, projectCwd?: 
 
   let uploadPath: string
   try {
-    const res = await fetch(buildProjectPath("/api/terminal/upload", projectCwd), {
+    const res = await authFetch(buildProjectPath("/api/terminal/upload", projectCwd), {
       method: "POST",
       body: formData,
     })
@@ -519,7 +520,7 @@ async function uploadAndInjectImage(file: File, sessionId: string, projectCwd?: 
 
   // Inject @filepath into PTY stdin
   try {
-    const res = await fetch(buildProjectPath("/api/terminal/input", projectCwd), {
+    const res = await authFetch(buildProjectPath("/api/terminal/input", projectCwd), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: sessionId, data: `@${uploadPath} ` }),
@@ -641,7 +642,7 @@ export function ShellTerminal({
 
   const createTab = useCallback(async () => {
     try {
-      const res = await fetch(buildProjectPath("/api/terminal/sessions", projectCwd), {
+      const res = await authFetch(buildProjectPath("/api/terminal/sessions", projectCwd), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(command ? { command } : {}),
@@ -665,7 +666,7 @@ export function ShellTerminal({
       if (tabs.length <= 1) return
       const deleteUrl = buildProjectAbsoluteUrl("/api/terminal/sessions", window.location.origin, projectCwd)
       deleteUrl.searchParams.set("id", id)
-      void fetch(deleteUrl.toString(), {
+      void authFetch(deleteUrl.toString(), {
         method: "DELETE",
       })
       const remaining = tabs.filter((t) => t.id !== id)

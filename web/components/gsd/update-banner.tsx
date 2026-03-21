@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { cn } from "@/lib/utils"
+import { authFetch } from "@/lib/auth"
 
 interface UpdateInfo {
   currentVersion: string
@@ -22,7 +23,7 @@ export function UpdateBanner() {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/update")
+      const res = await authFetch("/api/update")
       if (!res.ok) return
       const data: UpdateInfo = await res.json()
       setInfo(data)
@@ -52,7 +53,7 @@ export function UpdateBanner() {
   const handleUpdate = async () => {
     setTriggering(true)
     try {
-      const res = await fetch("/api/update", { method: "POST" })
+      const res = await authFetch("/api/update", { method: "POST" })
       if (res.ok || res.status === 202) {
         // Immediately poll to pick up the "running" status
         await fetchStatus()

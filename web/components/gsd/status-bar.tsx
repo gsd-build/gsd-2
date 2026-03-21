@@ -22,6 +22,7 @@ import {
   type ProjectTotals,
 } from "@/lib/visualizer-types"
 import { ScopeBadgeInline } from "@/components/gsd/scope-badge"
+import { authFetch } from "@/lib/auth"
 
 function toneClass(tone: ReturnType<typeof getStatusPresentation>["tone"]): string {
   switch (tone) {
@@ -59,7 +60,7 @@ export function StatusBar() {
 
   const fetchProjectTotals = useCallback(async () => {
     try {
-      const resp = await fetch(buildProjectUrl("/api/visualizer", projectCwd))
+      const resp = await authFetch(buildProjectUrl("/api/visualizer", projectCwd))
       if (!resp.ok) return
       const json = await resp.json()
       if (json.totals) setProjectTotals(json.totals)

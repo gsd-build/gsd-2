@@ -41,6 +41,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { authFetch } from "@/lib/auth"
 import {
   Dialog,
   DialogContent,
@@ -271,7 +272,7 @@ export function ProjectsPanel({
   const [error, setError] = useState<string | null>(null)
 
   const loadProjects = useCallback(async (root: string) => {
-    const projRes = await fetch(`/api/projects?root=${encodeURIComponent(root)}&detail=true`)
+    const projRes = await authFetch(`/api/projects?root=${encodeURIComponent(root)}&detail=true`)
     if (!projRes.ok) throw new Error(`Failed to discover projects: ${projRes.status}`)
     return (await projRes.json()) as ProjectMetadata[]
   }, [])
@@ -285,7 +286,7 @@ export function ProjectsPanel({
       setLoading(true)
       setError(null)
       try {
-        const prefsRes = await fetch("/api/preferences")
+        const prefsRes = await authFetch("/api/preferences")
         if (!prefsRes.ok) throw new Error(`Failed to load preferences: ${prefsRes.status}`)
         const prefs = await prefsRes.json()
 
@@ -556,7 +557,7 @@ function NewProjectDialog({
     setCreating(true)
     setError(null)
     try {
-      const res = await fetch("/api/projects", {
+      const res = await authFetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ devRoot, name }),
@@ -664,7 +665,7 @@ function FolderPickerDialog({
     setError(null)
     try {
       const param = targetPath ? `?path=${encodeURIComponent(targetPath)}` : ""
-      const res = await fetch(`/api/browse-directories${param}`)
+      const res = await authFetch(`/api/browse-directories${param}`)
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error((body as { error?: string }).error ?? `${res.status}`)
@@ -787,7 +788,7 @@ function DevRootSetup({
       setSuccess(false)
 
       try {
-        const res = await fetch("/api/preferences", {
+        const res = await authFetch("/api/preferences", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ devRoot: selectedPath }),
@@ -895,7 +896,7 @@ export function DevRootSettingsSection() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch("/api/preferences")
+    authFetch("/api/preferences")
       .then((r) => r.json())
       .then((prefs) => setDevRoot(prefs.devRoot ?? null))
       .catch(() => setDevRoot(null))
@@ -945,7 +946,7 @@ export function ProjectSelectionGate() {
   const [filter, setFilter] = useState("")
 
   const loadProjects = useCallback(async (root: string) => {
-    const projRes = await fetch(`/api/projects?root=${encodeURIComponent(root)}&detail=true`)
+    const projRes = await authFetch(`/api/projects?root=${encodeURIComponent(root)}&detail=true`)
     if (!projRes.ok) throw new Error(`Failed to discover projects: ${projRes.status}`)
     return (await projRes.json()) as ProjectMetadata[]
   }, [])
@@ -957,7 +958,7 @@ export function ProjectSelectionGate() {
       setLoading(true)
       setError(null)
       try {
-        const prefsRes = await fetch("/api/preferences")
+        const prefsRes = await authFetch("/api/preferences")
         if (!prefsRes.ok) throw new Error(`Failed to load preferences: ${prefsRes.status}`)
         const prefs = await prefsRes.json()
 

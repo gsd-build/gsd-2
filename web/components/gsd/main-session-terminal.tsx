@@ -6,6 +6,7 @@ import { Loader2, ImagePlus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { validateImageFile } from "@/lib/image-utils"
 import { buildProjectAbsoluteUrl, buildProjectPath } from "@/lib/project-url"
+import { authFetch, appendAuthParam } from "@/lib/auth"
 import "@xterm/xterm/css/xterm.css"
 
 type XTerminal = import("@xterm/xterm").Terminal
@@ -170,7 +171,7 @@ export function MainSessionTerminal({ className, fontSize, projectCwd }: MainSes
     while (inputQueueRef.current.length > 0) {
       const data = inputQueueRef.current.shift()!
       try {
-        await fetch(buildProjectPath("/api/bridge-terminal/input", projectCwd), {
+        await authFetch(buildProjectPath("/api/bridge-terminal/input", projectCwd), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ data }),
@@ -191,7 +192,7 @@ export function MainSessionTerminal({ className, fontSize, projectCwd }: MainSes
   const sendResize = useCallback((cols: number, rows: number) => {
     if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current)
     resizeTimeoutRef.current = setTimeout(() => {
-      void fetch(buildProjectPath("/api/bridge-terminal/resize", projectCwd), {
+      void authFetch(buildProjectPath("/api/bridge-terminal/resize", projectCwd), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cols, rows }),
@@ -261,7 +262,7 @@ export function MainSessionTerminal({ className, fontSize, projectCwd }: MainSes
           streamUrl.searchParams.set("rows", String(preferredSize.rows))
         }
 
-        const es = new EventSource(streamUrl.toString())
+        const es = new EventSource(appendAuthParam(streamUrl.toString()))
         eventSourceRef.current = es
         setConnectionState((current) => (current === "connected" ? current : "connecting"))
 
@@ -399,7 +400,7 @@ export function MainSessionTerminal({ className, fontSize, projectCwd }: MainSes
 
       void (async () => {
         try {
-          const res = await fetch(buildProjectPath("/api/terminal/upload", projectCwd), {
+          const res = await authFetch(buildProjectPath("/api/terminal/upload", projectCwd), {
             method: "POST",
             body: formData,
           })

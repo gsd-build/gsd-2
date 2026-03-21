@@ -5,11 +5,13 @@ export function setupEditorSubmitHandler(host: InteractiveModeStateHost & {
 	getSlashCommandContext: () => any;
 	handleBashCommand: (command: string, excludeFromContext?: boolean) => Promise<void>;
 	showWarning: (message: string) => void;
+	showError: (message: string) => void;
 	updateEditorBorderColor: () => void;
 	isExtensionCommand: (text: string) => boolean;
 	queueCompactionMessage: (text: string, mode: "steer" | "followUp") => void;
 	updatePendingMessagesDisplay: () => void;
 	flushPendingBashComponents: () => void;
+	options?: { submitPromptsDirectly?: boolean };
 }): void {
 	host.defaultEditor.onSubmit = async (text: string) => {
 		text = text.trim();
@@ -68,13 +70,13 @@ export function setupEditorSubmitHandler(host: InteractiveModeStateHost & {
 			return;
 		}
 
-		if ((host as any).options?.submitPromptsDirectly) {
+		if (host.options?.submitPromptsDirectly) {
 			host.editor.addToHistory?.(text);
 			try {
 				await host.session.prompt(text);
 			} catch (error: unknown) {
 				const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-				(host as any).showError?.(errorMessage);
+				host.showError(errorMessage);
 			}
 			return;
 		}
@@ -82,4 +84,3 @@ export function setupEditorSubmitHandler(host: InteractiveModeStateHost & {
 		host.editor.addToHistory?.(text);
 	};
 }
-

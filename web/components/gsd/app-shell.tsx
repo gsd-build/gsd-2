@@ -33,6 +33,7 @@ import { ScopeBadge } from "@/components/gsd/scope-badge"
 import { Badge } from "@/components/ui/badge"
 import { ProjectsPanel, ProjectSelectionGate } from "@/components/gsd/projects-view"
 import { UpdateBanner } from "@/components/gsd/update-banner"
+import { getAuthToken } from "@/lib/auth"
 
 const KNOWN_VIEWS = new Set(["dashboard", "power", "chat", "roadmap", "files", "activity", "visualize"])
 
@@ -419,6 +420,10 @@ function WorkspaceChrome() {
 }
 
 export function GSDAppShell() {
+  // Extract the auth token from the URL fragment on first render.
+  // Must happen before any API calls fire.
+  getAuthToken()
+
   return (
     <ProjectStoreManagerProvider>
       <ProjectAwareWorkspace />

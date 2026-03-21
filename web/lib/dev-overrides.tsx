@@ -1,6 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
+import { authFetch } from "@/lib/auth"
 
 // ─── Dev mode detection ─────────────────────────────────────────────
 
@@ -81,7 +82,7 @@ export function DevOverridesProvider({ children }: { children: ReactNode }) {
 
   // Fetch authoritative dev-mode flag from the server at mount
   useEffect(() => {
-    fetch("/api/dev-mode", { cache: "no-store" })
+    authFetch("/api/dev-mode", { cache: "no-store" })
       .then((res) => res.json())
       .then((data: { isDevMode?: boolean }) => {
         if (data.isDevMode) {

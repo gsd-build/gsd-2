@@ -109,6 +109,8 @@ export interface RpcSessionState {
 	retryAttempt: number;
 	messageCount: number;
 	pendingMessageCount: number;
+	/** Whether extension loading has completed. Commands from `get_commands` may be incomplete until true. */
+	extensionsReady: boolean;
 }
 
 // ============================================================================
