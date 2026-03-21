@@ -38,6 +38,20 @@ import { join, resolve } from 'path';
 import { existsSync, readdirSync } from 'node:fs';
 import { debugCount, debugTime } from './debug-logger.js';
 
+// ─── Title Extraction ─────────────────────────────────────────────────────
+
+/**
+ * Extract a milestone title from a CONTEXT.md or CONTEXT-DRAFT.md file.
+ * Looks for a `# Mxxx: Title` heading and strips the milestone ID prefix.
+ * Returns `fallback` if no heading is found or content is empty.
+ */
+export function extractContextTitle(content: string | null, fallback: string): string {
+  if (!content) return fallback;
+  const h1 = content.split('\n').find(l => l.startsWith('# '));
+  if (!h1) return fallback;
+  return h1.slice(2).trim().replace(/^M\d+(?:-[a-z0-9]{6})?[^:]*:\s*/, '') || fallback;
+}
+
 // ─── Query Functions ───────────────────────────────────────────────────────
 
 /**
@@ -297,9 +311,20 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
     // Skip parked milestones — register them as 'parked' and move on
     if (parkedMilestoneIds.has(mid)) {
       const roadmap = roadmapCache.get(mid) ?? null;
-      const title = roadmap
-        ? roadmap.title.replace(/^M\d+(?:-[a-z0-9]{6})?[^:]*:\s*/, '')
-        : mid;
+      let title: string;
+      if (roadmap) {
+        title = roadmap.title.replace(/^M\d+(?:-[a-z0-9]{6})?[^:]*:\s*/, '');
+      } else {
+        const ctxFile = resolveMilestoneFile(basePath, mid, "CONTEXT");
+        const ctxContent = ctxFile ? await cachedLoadFile(ctxFile) : null;
+        if (ctxContent) {
+          title = extractContextTitle(ctxContent, mid);
+        } else {
+          const draftFile = resolveMilestoneFile(basePath, mid, "CONTEXT-DRAFT");
+          const draftContent = draftFile ? await cachedLoadFile(draftFile) : null;
+          title = extractContextTitle(draftContent, mid);
+        }
+      }
       registry.push({ id: mid, title, status: 'parked' });
       continue;
     }
@@ -319,17 +344,19 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
         continue;
       }
       // No roadmap and no summary — treat as incomplete/active
+      // Extract title from CONTEXT.md or CONTEXT-DRAFT.md if available
+      const contextFile = resolveMilestoneFile(basePath, mid, "CONTEXT");
+      const draftFile = resolveMilestoneFile(basePath, mid, "CONTEXT-DRAFT");
+      const contextContent = contextFile ? await cachedLoadFile(contextFile) : null;
+      const draftContent = draftFile ? await cachedLoadFile(draftFile) : null;
+      const ctxTitle = contextContent
+        ? extractContextTitle(contextContent, mid)
+        : extractContextTitle(draftContent, mid);
+
       if (!activeMilestoneFound) {
         // Check for CONTEXT-DRAFT.md to distinguish draft-seeded from blank milestones.
         // A draft seed means the milestone has discussion material but no full context yet.
-        const contextFile = resolveMilestoneFile(basePath, mid, "CONTEXT");
-        const draftFile = resolveMilestoneFile(basePath, mid, "CONTEXT-DRAFT");
         if (!contextFile && draftFile) activeMilestoneHasDraft = true;
-
-        // Extract title from CONTEXT.md or CONTEXT-DRAFT.md heading before falling back to mid.
-        const contextContent = contextFile ? await cachedLoadFile(contextFile) : null;
-        const draftContent = draftFile && !contextContent ? await cachedLoadFile(draftFile) : null;
-        const title = extractContextTitle(contextContent || draftContent, mid);
 
         // Check milestone-level dependencies before promoting to active.
         // Without this, a queued milestone with depends_on in its CONTEXT
@@ -338,20 +365,14 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
         const deps = parseContextDependsOn(contextContent ?? draftContent);
         const depsUnmet = deps.some(dep => !completeMilestoneIds.has(dep));
         if (depsUnmet) {
-          registry.push({ id: mid, title, status: 'pending', dependsOn: deps });
+          registry.push({ id: mid, title: ctxTitle, status: 'pending', dependsOn: deps });
         } else {
-          activeMilestone = { id: mid, title };
+          activeMilestone = { id: mid, title: ctxTitle };
           activeMilestoneFound = true;
-          registry.push({ id: mid, title, status: 'active', ...(deps.length > 0 ? { dependsOn: deps } : {}) });
+          registry.push({ id: mid, title: ctxTitle, status: 'active', ...(deps.length > 0 ? { dependsOn: deps } : {}) });
         }
       } else {
-        // For milestones after the active one, also try to extract title from context files.
-        const contextFile = resolveMilestoneFile(basePath, mid, "CONTEXT");
-        const draftFile = resolveMilestoneFile(basePath, mid, "CONTEXT-DRAFT");
-        const contextContent = contextFile ? await cachedLoadFile(contextFile) : null;
-        const draftContent = draftFile && !contextContent ? await cachedLoadFile(draftFile) : null;
-        const title = extractContextTitle(contextContent || draftContent, mid);
-        registry.push({ id: mid, title, status: 'pending' });
+        registry.push({ id: mid, title: ctxTitle, status: 'pending' });
       }
       continue;
     }
