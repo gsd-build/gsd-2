@@ -21,7 +21,7 @@ Welcome to the GSD documentation. This covers everything from getting started to
 | [Working in Teams](./working-in-teams.md) | Unique milestone IDs, `.gitignore` setup, and shared planning artifacts |
 | [Skills](./skills.md) | Bundled skills, skill discovery, and custom skill authoring |
 | [Migration from v1](./migration.md) | Migrating `.planning` directories from the original GSD |
-| [Troubleshooting](./troubleshooting.md) | Common issues, `/gsd doctor`, and recovery procedures |
+| [Troubleshooting](./troubleshooting.md) | Common issues, `/gsd doctor` (real-time visibility v2.40), `/gsd forensics` (full debugger v2.40), and recovery procedures |
 | [VS Code Extension](../vscode-extension/README.md) | Chat participant, sidebar dashboard, and RPC integration for VS Code |
 
 ## Architecture & Internals
