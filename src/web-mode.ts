@@ -406,20 +406,24 @@ async function spawnDetachedProcess(
   })
 }
 
-async function requestLocalJson(url: string, timeoutMs: number): Promise<{ statusCode: number; body: string }> {
+async function requestLocalJson(url: string, timeoutMs: number, authToken?: string): Promise<{ statusCode: number; body: string }> {
   return await new Promise((resolve, reject) => {
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      // Keep launch readiness on the cheapest uncompressed path. The
+      // packaged host can spend noticeable time compressing the large boot
+      // snapshot, which adds avoidable startup jitter for a local health
+      // check that only needs the JSON payload itself.
+      'Accept-Encoding': 'identity',
+    }
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`
+    }
     const request = httpRequest(
       url,
       {
         method: 'GET',
-        headers: {
-          Accept: 'application/json',
-          // Keep launch readiness on the cheapest uncompressed path. The
-          // packaged host can spend noticeable time compressing the large boot
-          // snapshot, which adds avoidable startup jitter for a local health
-          // check that only needs the JSON payload itself.
-          'Accept-Encoding': 'identity',
-        },
+        headers,
       },
       (response) => {
         const statusCode = response.statusCode ?? 0
@@ -440,7 +444,7 @@ async function requestLocalJson(url: string, timeoutMs: number): Promise<{ statu
   })
 }
 
-async function waitForBootReady(url: string, timeoutMs = 180_000, stderr?: WritableLike): Promise<void> {
+async function waitForBootReady(url: string, timeoutMs = 180_000, stderr?: WritableLike, authToken?: string): Promise<void> {
   const deadline = Date.now() + timeoutMs
   const startedAt = Date.now()
   let lastError: string | null = null
@@ -454,7 +458,7 @@ async function waitForBootReady(url: string, timeoutMs = 180_000, stderr?: Writa
   while (Date.now() < deadline) {
     try {
       // Give the packaged host enough time to finish a cold /api/boot render.
-      const response = await requestLocalJson(`${url}/api/boot`, 45_000)
+      const response = await requestLocalJson(`${url}/api/boot`, 45_000, authToken)
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         if (!hostUp) {
@@ -599,7 +603,7 @@ export async function launchWebMode(
   }
 
   try {
-    const bootReadyFn = deps.waitForBootReady ?? ((u: string) => waitForBootReady(u, 180_000, stderr))
+    const bootReadyFn = deps.waitForBootReady ?? ((u: string) => waitForBootReady(u, 180_000, stderr, authToken))
     await bootReadyFn(url)
   } catch (error) {
     const failure: WebModeLaunchFailure = {
