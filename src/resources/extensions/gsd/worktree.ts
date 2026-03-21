@@ -197,7 +197,7 @@ function resolveProjectRootFromGitFile(worktreePath: string): string | null {
         break;
       }
       const parent = resolve(dir, "..");
-      if (parent === dir) break;
+      if (parent === dir) break; // reached filesystem root
       dir = parent;
     }
   } catch {
