@@ -333,9 +333,9 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
 
         // Check milestone-level dependencies before promoting to active.
         // Without this, a queued milestone with depends_on in its CONTEXT
-        // frontmatter would be promoted to active even when its deps are unmet
-        // (the dep check only existed in the has-roadmap path previously).
-        const deps = parseContextDependsOn(contextContent);
+        // or CONTEXT-DRAFT frontmatter would be promoted to active even when
+        // its deps are unmet.
+        const deps = parseContextDependsOn(contextContent ?? draftContent);
         const depsUnmet = deps.some(dep => !completeMilestoneIds.has(dep));
         if (depsUnmet) {
           registry.push({ id: mid, title, status: 'pending', dependsOn: deps });
@@ -397,8 +397,10 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
       } else if (!activeMilestoneFound) {
         // Check milestone-level dependencies before promoting to active
         const contextFile = resolveMilestoneFile(basePath, mid, "CONTEXT");
+        const draftFile = resolveMilestoneFile(basePath, mid, "CONTEXT-DRAFT");
         const contextContent = contextFile ? await cachedLoadFile(contextFile) : null;
-        const deps = parseContextDependsOn(contextContent);
+        const draftContent = draftFile && !contextContent ? await cachedLoadFile(draftFile) : null;
+        const deps = parseContextDependsOn(contextContent ?? draftContent);
         const depsUnmet = deps.some(dep => !completeMilestoneIds.has(dep));
         if (depsUnmet) {
           registry.push({ id: mid, title, status: 'pending', dependsOn: deps });
@@ -469,6 +471,10 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
     }
     // All milestones complete
     const lastEntry = registry[registry.length - 1];
+    const activeReqs = requirements.active ?? 0;
+    const completionNote = activeReqs > 0
+      ? `All milestones complete. ${activeReqs} active requirement${activeReqs === 1 ? '' : 's'} in REQUIREMENTS.md ${activeReqs === 1 ? 'has' : 'have'} not been mapped to a milestone.`
+      : 'All milestones complete.';
     return {
       activeMilestone: lastEntry ? { id: lastEntry.id, title: lastEntry.title } : null,
       activeSlice: null,
@@ -476,7 +482,7 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
       phase: 'complete',
       recentDecisions: [],
       blockers: [],
-      nextAction: 'All milestones complete.',
+      nextAction: completionNote,
       registry,
       requirements,
       progress: {
@@ -736,6 +742,39 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
       };
     }
     // REPLAN.md exists — loop protection: fall through to normal executing
+  }
+
+  // ── REPLAN-TRIGGER detection: triage-initiated replan ──────────────────
+  // Manual `/gsd triage` writes REPLAN-TRIGGER.md when a capture is classified
+  // as "replan". Detect it here and transition to replanning-slice so the
+  // dispatch loop picks it up (instead of silently advancing past it).
+  if (!blockerTaskId) {
+    const replanTriggerFile = resolveSliceFile(basePath, activeMilestone.id, activeSlice.id, "REPLAN-TRIGGER");
+    if (replanTriggerFile) {
+      // Same loop protection: if REPLAN.md already exists, a replan was
+      // already performed — skip further replanning and continue executing.
+      const replanFile = resolveSliceFile(basePath, activeMilestone.id, activeSlice.id, "REPLAN");
+      if (!replanFile) {
+        return {
+          activeMilestone,
+          activeSlice,
+          activeTask,
+          phase: 'replanning-slice',
+          recentDecisions: [],
+          blockers: ['Triage replan trigger detected — slice replan required'],
+          nextAction: `Triage replan triggered for slice ${activeSlice.id}. Replan before continuing.`,
+
+          activeWorkspace: undefined,
+          registry,
+          requirements,
+          progress: {
+            milestones: milestoneProgress,
+            slices: sliceProgress,
+            tasks: taskProgress,
+          },
+        };
+      }
+    }
   }
 
   // Check for interrupted work
