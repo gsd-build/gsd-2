@@ -26,7 +26,20 @@ const autoSrc = [
   readFileSync(join(__dirname, "..", "auto-start.ts"), "utf-8"),
 ].join("\n");
 const hooksSrc = readFileSync(hooksPath, "utf-8");
-const autoPromptsSrc = (() => { try { return readFileSync(autoPromptsPath, "utf-8"); } catch { return autoSrc; } })();
+// After prompts decomposition, search across all split prompt modules
+const autoPromptsSrc = (() => {
+  const parts: string[] = [];
+  const promptModules = [
+    autoPromptsPath,
+    join(__dirname, "..", "auto-slice-prompts.ts"),
+    join(__dirname, "..", "auto-task-prompts.ts"),
+    join(__dirname, "..", "auto-milestone-prompts.ts"),
+  ];
+  for (const p of promptModules) {
+    try { parts.push(readFileSync(p, "utf-8")); } catch { /* skip missing */ }
+  }
+  return parts.length > 0 ? parts.join("\n") : autoSrc;
+})();
 
 // ─── Hook exclusion ──────────────────────────────────────────────────────────
 
