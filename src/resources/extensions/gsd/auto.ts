@@ -535,6 +535,33 @@ function handleLostSessionLock(
   ctx?.ui.setFooter(undefined);
 }
 
+/**
+ * Lightweight cleanup after autoLoop exits via step-wizard break.
+ *
+ * Unlike stopAuto (which tears down the entire session), this only clears
+ * the stale unit state, progress widget, status badge, and restores CWD so
+ * the dashboard does not show an orphaned timer and the shell is usable.
+ */
+function cleanupAfterLoopExit(ctx: ExtensionContext): void {
+  s.currentUnit = null;
+  s.active = false;
+  clearUnitTimeout();
+
+  ctx.ui.setStatus("gsd-auto", undefined);
+  ctx.ui.setWidget("gsd-progress", undefined);
+  ctx.ui.setFooter(undefined);
+
+  // Restore CWD out of worktree back to original project root
+  if (s.originalBasePath) {
+    s.basePath = s.originalBasePath;
+    try {
+      process.chdir(s.basePath);
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
 export async function stopAuto(
   ctx?: ExtensionContext,
   pi?: ExtensionAPI,
@@ -1121,6 +1148,7 @@ export async function startAuto(
     await selfHealRuntimeRecords(s.basePath, ctx);
 
     await autoLoop(ctx, pi, s, buildLoopDeps());
+    cleanupAfterLoopExit(ctx);
     return;
   }
 
@@ -1155,6 +1183,7 @@ export async function startAuto(
 
   // Dispatch the first unit
   await autoLoop(ctx, pi, s, buildLoopDeps());
+  cleanupAfterLoopExit(ctx);
 }
 
 // ─── Agent End Handler ────────────────────────────────────────────────────────
