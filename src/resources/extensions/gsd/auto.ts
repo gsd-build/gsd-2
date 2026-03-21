@@ -18,6 +18,11 @@ import type {
 
 import { deriveState } from "./state.js";
 import type { GSDState } from "./types.js";
+import {
+  assessInterruptedSession,
+  readPausedSessionMetadata,
+  type InterruptedSessionAssessment,
+} from "./interrupted-session.js";
 import { getManifestStatus } from "./files.js";
 export { inlinePriorMilestoneSummary } from "./files.js";
 import { collectSecretsFromManifest } from "../get-secrets-from-user.js";
@@ -44,6 +49,7 @@ import {
   clearLock,
   readCrashLock,
   isLockProcessAlive,
+  formatCrashInfo,
 } from "./crash-recovery.js";
 import {
   acquireSessionLock,
@@ -918,37 +924,301 @@ export async function startAuto(
   pi: ExtensionAPI,
   base: string,
   verboseMode: boolean,
-  options?: { step?: boolean },
+  options?: {
+    step?: boolean;
+    interrupted?: InterruptedSessionAssessment;
+  },
 ): Promise<void> {
   const requestedStepMode = options?.step ?? false;
+  const interruptedAssessment = options?.interrupted ?? null;
 
   // Escape stale worktree cwd from a previous milestone (#608).
   base = escapeStaleWorktree(base);
+
+  const freshStartAssessment = interruptedAssessment
+    ?? await assessInterruptedSession(base);
+
+  if (freshStartAssessment.classification === "running") {
+    const pid = freshStartAssessment.lock?.pid;
+    ctx.ui.notify(
+      pid
+        ? `Another auto-mode session (PID ${pid}) appears to be running.\nStop it with \`kill ${pid}\` before starting a new session.`
+        : "Another auto-mode session appears to be running.",
+      "error",
+    );
+    return;
+  }
 
   // If resuming from paused state, just re-activate and dispatch next unit.
   // Check persisted paused-session first (#1383) — survives /exit.
   if (!s.paused) {
     try {
-      const pausedPath = join(gsdRoot(base), "runtime", "paused-session.json");
-      if (existsSync(pausedPath)) {
-        const meta = JSON.parse(readFileSync(pausedPath, "utf-8"));
-        if (meta.milestoneId) {
-          s.currentMilestoneId = meta.milestoneId;
-          s.originalBasePath = meta.originalBasePath || base;
-          s.stepMode = meta.stepMode ?? requestedStepMode;
-          s.paused = true;
-          // Clean up the persisted file — we're consuming it
-          try { unlinkSync(pausedPath); } catch { /* non-fatal */ }
-          ctx.ui.notify(
-            `Resuming paused session for ${meta.milestoneId}${meta.worktreePath ? ` (worktree)` : ""}.`,
-            "info",
-          );
-        }
+      const meta = freshStartAssessment.pausedSession ?? readPausedSessionMetadata(base);
+      if (meta?.milestoneId) {
+        s.currentMilestoneId = meta.milestoneId;
+        s.originalBasePath = meta.originalBasePath || base;
+        s.stepMode = meta.stepMode ?? requestedStepMode;
+        s.pausedSessionFile = meta.sessionFile ?? null;
+        s.paused = true;
+        const pausedPath = join(gsdRoot(base), "runtime", "paused-session.json");
+        try { unlinkSync(pausedPath); } catch { /* non-fatal */ }
+        ctx.ui.notify(
+          `Resuming paused session for ${meta.milestoneId}${meta.worktreePath ? ` (worktree)` : ""}.`,
+          "info",
+        );
       }
     } catch {
       // Malformed or missing — proceed with fresh bootstrap
     }
   }
+
+  if (freshStartAssessment.classification !== "running" && freshStartAssessment.lock) {
+    clearLock(base);
+  }
+
+  if (!s.paused) {
+    s.pendingCrashRecovery =
+      freshStartAssessment.classification === "recoverable"
+        ? freshStartAssessment.recoveryPrompt
+        : null;
+
+    if (freshStartAssessment.classification === "recoverable" && freshStartAssessment.lock) {
+      const info = formatCrashInfo(freshStartAssessment.lock);
+      if (freshStartAssessment.recoveryToolCallCount > 0) {
+        ctx.ui.notify(
+          `${info}\nRecovered ${freshStartAssessment.recoveryToolCallCount} tool calls from crashed session. Resuming with full context.`,
+          "warning",
+        );
+      } else if (freshStartAssessment.hasResumableDiskState) {
+        ctx.ui.notify(`${info}\nResuming from disk state.`, "warning");
+      }
+    }
+  }
+
+  if (s.paused) {
+    const resumeLock = acquireSessionLock(base);
+    if (!resumeLock.acquired) {
+      ctx.ui.notify(`Cannot resume: ${resumeLock.reason}`, "error");
+      return;
+    }
+
+    s.paused = false;
+    s.active = true;
+    s.verbose = verboseMode;
+    s.stepMode = requestedStepMode;
+    s.cmdCtx = ctx;
+    s.basePath = base;
+    s.unitDispatchCount.clear();
+    s.unitLifetimeDispatches.clear();
+    if (!getLedger()) initMetrics(base);
+    if (s.currentMilestoneId) setActiveMilestoneId(base, s.currentMilestoneId);
+
+    // ── Auto-worktree: re-enter worktree on resume ──
+    if (
+      s.currentMilestoneId &&
+      shouldUseWorktreeIsolation() &&
+      s.originalBasePath &&
+      !isInAutoWorktree(s.basePath) &&
+      !detectWorktreeName(s.basePath) &&
+      !detectWorktreeName(s.originalBasePath)
+    ) {
+      buildResolver().enterMilestone(s.currentMilestoneId, {
+        notify: ctx.ui.notify.bind(ctx.ui),
+      });
+    }
+
+    registerSigtermHandler(lockBase());
+
+    ctx.ui.setStatus("gsd-auto", s.stepMode ? "next" : "auto");
+    ctx.ui.setFooter(hideFooter);
+    ctx.ui.notify(
+      s.stepMode ? "Step-mode resumed." : "Auto-mode resumed.",
+      "info",
+    );
+    restoreHookState(s.basePath);
+    try {
+      await rebuildState(s.basePath);
+      syncCmuxSidebar(loadEffectiveGSDPreferences()?.preferences, await deriveState(s.basePath));
+    } catch (e) {
+      debugLog("resume-rebuild-state-failed", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+    try {
+      const report = await runGSDDoctor(s.basePath, { fix: true });
+      if (report.fixesApplied.length > 0) {
+        ctx.ui.notify(
+          `Resume: applied ${report.fixesApplied.length} fix(es) to state.`,
+          "info",
+        );
+      }
+    } catch (e) {
+      debugLog("resume-doctor-failed", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+    invalidateAllCaches();
+
+    if (s.pausedSessionFile) {
+      const activityDir = join(gsdRoot(s.basePath), "activity");
+      const recovery = synthesizeCrashRecovery(
+        s.basePath,
+        s.currentUnit?.type ?? "unknown",
+        s.currentUnit?.id ?? "unknown",
+        s.pausedSessionFile ?? undefined,
+        activityDir,
+      );
+      if (recovery && recovery.trace.toolCallCount > 0) {
+        s.pendingCrashRecovery = recovery.prompt;
+        ctx.ui.notify(
+          `Recovered ${recovery.trace.toolCallCount} tool calls from paused session. Resuming with context.`,
+          "info",
+        );
+      }
+      s.pausedSessionFile = null;
+    }
+
+    updateSessionLock(
+      lockBase(),
+      "resuming",
+      s.currentMilestoneId ?? "unknown",
+      s.completedUnits.length,
+    );
+    writeLock(
+      lockBase(),
+      "resuming",
+      s.currentMilestoneId ?? "unknown",
+      s.completedUnits.length,
+    );
+    logCmuxEvent(loadEffectiveGSDPreferences()?.preferences, s.stepMode ? "Step-mode resumed." : "Auto-mode resumed.", "progress");
+
+    await autoLoop(ctx, pi, s, buildLoopDeps());
+    return;
+  }
+
+  // ── Fresh start path — delegated to auto-start.ts ──
+  const bootstrapDeps: BootstrapDeps = {
+    shouldUseWorktreeIsolation,
+    registerSigtermHandler,
+    lockBase,
+    buildResolver,
+  };
+
+  const ready = await bootstrapAutoSession(
+    s,
+    ctx,
+    pi,
+    base,
+    verboseMode,
+    requestedStepMode,
+    bootstrapDeps,
+    freshStartAssessment,
+  );
+  if (!ready) return;
+
+  try {
+    syncCmuxSidebar(loadEffectiveGSDPreferences()?.preferences, await deriveState(s.basePath));
+  } catch {
+    // Best-effort only — sidebar sync must never block auto-mode startup
+  }
+  logCmuxEvent(loadEffectiveGSDPreferences()?.preferences, requestedStepMode ? "Step-mode started." : "Auto-mode started.", "progress");
+
+  // Dispatch the first unit
+  await autoLoop(ctx, pi, s, buildLoopDeps());
+}
+
+// ─── Agent End Handler ────────────────────────────────────────────────────────
+
+/**
+ * Deprecated thin wrapper — kept as export for backward compatibility.
+ * The actual agent_end processing now happens via resolveAgentEnd() in auto-loop.ts,
+ * which is called directly from index.ts. The autoLoop() while loop handles all
+ * post-unit processing (verification, hooks, dispatch) that this function used to do.
+ *
+ * If called by straggler code, it simply resolves the pending promise so the loop
+ * can continue.
+ */
+export async function handleAgentEnd(
+  ctx: ExtensionContext,
+  pi: ExtensionAPI,
+): Promise<void> {
+  if (!s.active || !s.cmdCtx) return;
+  clearUnitTimeout();
+  resolveAgentEnd({ messages: [] });
+}
+// describeNextUnit is imported from auto-dashboard.ts and re-exported
+export { describeNextUnit } from "./auto-dashboard.js";
+
+/** Thin wrapper: delegates to auto-dashboard.ts, passing state accessors. */
+function updateProgressWidget(
+  ctx: ExtensionContext,
+  unitType: string,
+  unitId: string,
+  state: GSDState,
+): void {
+  const badge = s.currentUnitRouting?.tier
+    ? ({ light: "L", standard: "S", heavy: "H" }[s.currentUnitRouting.tier] ??
+      undefined)
+    : undefined;
+  _updateProgressWidget(
+    ctx,
+    unitType,
+    unitId,
+    state,
+    widgetStateAccessors,
+    badge,
+  );
+}
+
+/** State accessors for the widget — closures over module globals. */
+const widgetStateAccessors: WidgetStateAccessors = {
+  getAutoStartTime: () => s.autoStartTime,
+  isStepMode: () => s.stepMode,
+  getCmdCtx: () => s.cmdCtx,
+  getBasePath: () => s.basePath,
+  isVerbose: () => s.verbose,
+  isSessionSwitching: isSessionSwitchInFlight,
+};
+
+// ─── Preconditions ────────────────────────────────────────────────────────────
+
+/**
+ * Ensure directories, branches, and other prerequisites exist before
+ * dispatching a unit. The LLM should never need to mkdir or git checkout.
+ */
+function ensurePreconditions(
+  unitType: string,
+  unitId: string,
+  base: string,
+  state: GSDState,
+): void {
+  const parts = unitId.split("/");
+  const mid = parts[0]!;
+
+  const mDir = resolveMilestonePath(base, mid);
+  if (!mDir) {
+    const newDir = join(milestonesDir(base), mid);
+    mkdirSync(join(newDir, "slices"), { recursive: true });
+  }
+
+  if (parts.length >= 2) {
+    const sid = parts[1]!;
+
+    const mDirResolved = resolveMilestonePath(base, mid);
+    if (mDirResolved) {
+      const slicesDir = join(mDirResolved, "slices");
+      const sDir = resolveDir(slicesDir, sid);
+      if (!sDir) {
+        mkdirSync(join(slicesDir, sid, "tasks"), { recursive: true });
+      }
+      const resolvedSliceDir = resolveDir(slicesDir, sid) ?? sid;
+      const tasksDir = join(slicesDir, resolvedSliceDir, "tasks");
+      if (!existsSync(tasksDir)) {
+        mkdirSync(tasksDir, { recursive: true });
+      }
+    }
+  }
+}
 
   if (s.paused) {
     const resumeLock = acquireSessionLock(base);
