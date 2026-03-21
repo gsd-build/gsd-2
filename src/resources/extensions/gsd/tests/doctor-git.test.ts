@@ -318,8 +318,8 @@ async function main(): Promise<void> {
         missingBranchIssues[0]?.message.includes("feat/does-not-exist"),
         "message includes the missing branch name",
       );
-      assertEq(missingBranchIssues[0]?.fixable, true, "integration_branch_missing is auto-fixable via fallback");
-      assertEq(missingBranchIssues[0]?.severity, "warning", "severity is warning (fallback available)");
+      assertEq(missingBranchIssues[0]?.fixable, true, "integration_branch_missing is auto-fixable when fallback exists");
+      assertEq(missingBranchIssues[0]?.severity, "warning", "severity is warning when fallback branch exists");
     }
     } else {
       console.log("\n=== integration_branch_missing (skipped on Windows) ===");

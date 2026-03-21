@@ -187,7 +187,7 @@ import {
 } from "./auto-supervisor.js";
 import { isDbAvailable } from "./gsd-db.js";
 import { countPendingCaptures } from "./captures.js";
-import { clearCmuxSidebar, logCmuxEvent, syncCmuxSidebar } from "../cmux/index.js";
+import { clearCmuxSidebar, cmuxRenameTab, cmuxTriggerFlash, logCmuxEvent, syncCmuxSidebar } from "../cmux/index.js";
 
 // ── Extracted modules ──────────────────────────────────────────────────────
 import { startUnitSupervision } from "./auto-timers.js";
@@ -730,6 +730,25 @@ export async function pauseAuto(
   // Unblock any pending unit promise so the auto-loop is not orphaned.
   resolveAgentEndCancelled();
 
+  // Mark paused before aborting so any abort-triggered agent_end hooks don't
+  // recursively re-enter pause handling while auto is still considered active.
+  s.active = false;
+  s.paused = true;
+  s.pendingVerificationRetry = null;
+  s.verificationRetryCount.clear();
+
+  // Abort any in-flight agent operation so isStreaming resets to false before
+  // returning control to the interactive loop. Without this, input-controller
+  // routes all user input as "steer" messages (never calling onInputCallback),
+  // leaving getUserInput() pending indefinitely and the TUI appearing frozen.
+  if (ctx && !ctx.isIdle()) {
+    try {
+      await Promise.resolve(ctx.abort());
+    } catch (e) {
+      debugLog("pause-abort", { error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
   s.pausedSessionFile = ctx?.sessionManager?.getSessionFile() ?? null;
 
   // Persist paused-session metadata so resume survives /exit (#1383).
@@ -776,10 +795,6 @@ export async function pauseAuto(
 
   deregisterSigtermHandler();
 
-  s.active = false;
-  s.paused = true;
-  s.pendingVerificationRetry = null;
-  s.verificationRetryCount.clear();
   ctx?.ui.setStatus("gsd-auto", "paused");
   ctx?.ui.setWidget("gsd-progress", undefined);
   ctx?.ui.setFooter(undefined);
@@ -843,6 +858,8 @@ function buildLoopDeps(): LoopDeps {
     updateProgressWidget,
     syncCmuxSidebar,
     logCmuxEvent,
+    cmuxRenameTab,
+    cmuxTriggerFlash,
 
     // State and cache
     invalidateAllCaches,

@@ -28,6 +28,7 @@
  * individual methods don't need it.
  */
 
+import { createRequire as _createRequire } from "node:module";
 import { type Theme } from "@gsd/pi-coding-agent";
 
 // ─── Lazy @gsd/pi-tui resolution ─────────────────────────────────────────────
@@ -35,13 +36,14 @@ import { type Theme } from "@gsd/pi-coding-agent";
 // shared/mod barrel) does not blow up when @gsd/pi-tui cannot be resolved —
 // e.g. for commands like /exit that never render TUI components.
 
-import { createRequire } from "node:module";
-
 type PiTuiFns = typeof import("@gsd/pi-tui");
 let _piTui: PiTuiFns | undefined;
 function piTui(): PiTuiFns {
 	if (!_piTui) {
-		const _require = createRequire(import.meta.url);
+		// eslint-disable-next-line @typescript-eslint/no-require-imports
+		const _require = typeof require !== "undefined"
+			? require
+			: _createRequire(import.meta.url);
 		_piTui = _require("@gsd/pi-tui") as PiTuiFns;
 	}
 	return _piTui;

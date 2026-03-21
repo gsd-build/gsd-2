@@ -26,6 +26,7 @@ import { runUnit } from "./run-unit.js";
 import { debugLog } from "../debug-logger.js";
 import { gsdRoot } from "../paths.js";
 import { atomicWriteSync } from "../atomic-write.js";
+import { buildCmuxTabTitle } from "../../cmux/index.js";
 import { join } from "node:path";
 
 // ─── generateMilestoneReport ──────────────────────────────────────────────────
@@ -181,6 +182,7 @@ export async function runPreDispatch(
   // Derive state
   let state = await deps.deriveState(s.basePath);
   deps.syncCmuxSidebar(prefs, state);
+  deps.cmuxRenameTab(prefs, buildCmuxTabTitle(state));
   let mid = state.activeMilestone?.id;
   let midTitle = state.activeMilestone?.title;
   debugLog("autoLoop", {
@@ -372,6 +374,7 @@ export async function runPreDispatch(
       ctx.ui.notify(`${blockerMsg}. Fix and run /gsd auto.`, "warning");
       deps.sendDesktopNotification("GSD", blockerMsg, "error", "attention");
       deps.logCmuxEvent(prefs, blockerMsg, "error");
+      deps.cmuxTriggerFlash(prefs);
     } else {
       const ids = incomplete.map((m: { id: string }) => m.id).join(", ");
       const diag = `basePath=${s.basePath}, milestones=[${state.registry.map((m: { id: string; status: string }) => `${m.id}:${m.status}`).join(", ")}], phase=${state.phase}`;
@@ -464,6 +467,7 @@ export async function runPreDispatch(
     ctx.ui.notify(`${blockerMsg}. Fix and run /gsd auto.`, "warning");
     deps.sendDesktopNotification("GSD", blockerMsg, "error", "attention");
     deps.logCmuxEvent(prefs, blockerMsg, "error");
+    deps.cmuxTriggerFlash(prefs);
     debugLog("autoLoop", { phase: "exit", reason: "blocked" });
     return { action: "break", reason: "blocked" };
   }

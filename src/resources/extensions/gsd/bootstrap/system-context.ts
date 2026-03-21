@@ -46,7 +46,7 @@ export async function buildBeforeAgentStartResult(
   if (shouldPromptToEnableCmux(loadedPreferences?.preferences)) {
     markCmuxPromptShown();
     ctx.ui.notify(
-      "cmux detected. Run /gsd cmux on to enable sidebar metadata, notifications, and visual subagent splits for this project.",
+      "cmux detected — sidebar and notifications auto-enabled. Run /gsd cmux splits on to enable visual subagent splits, or /gsd cmux off to disable.",
       "info",
     );
   }

@@ -174,11 +174,11 @@ Setting `prefer_skills: []` does **not** disable skill discovery — it just mea
   - `on_attention`: boolean — notify when manual attention is needed. Default: `true`.
 
 - `cmux`: configures cmux terminal integration when GSD is running inside a cmux workspace. Keys:
-  - `enabled`: boolean — master toggle for cmux integration. Default: `false`.
+  - `enabled`: boolean — master toggle for cmux integration. **Default: auto-enabled when cmux is detected** (i.e. when `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID` are set). Set to `false` to explicitly disable.
   - `notifications`: boolean — route desktop notifications through cmux. Default: `true` when enabled.
   - `sidebar`: boolean — publish status, progress, and log metadata to the cmux sidebar. Default: `true` when enabled.
-  - `splits`: boolean — run supported subagent work in visible cmux splits. Default: `false`.
-  - `browser`: boolean — reserve the future browser integration flag. Default: `false`.
+  - `splits`: boolean — run supported subagent work in visible cmux splits. Default: `false` (opt-in).
+  - `browser`: boolean — open browser splits via `cmux browser open-split` for web verification. Default: `false` (opt-in).
 
 - `dynamic_routing`: configures the dynamic model router that adjusts model selection based on task complexity. Keys:
   - `enabled`: boolean — enable dynamic routing. Default: `false`.
@@ -488,15 +488,23 @@ Disables per-unit completion notifications (noisy in long runs) while keeping er
 ---
 version: 1
 cmux:
-  enabled: true
-  notifications: true
-  sidebar: true
   splits: true
-  browser: false
 ---
 ```
 
-Enables cmux-aware notifications, sidebar metadata, and visible subagent splits when GSD is running inside a cmux terminal.
+cmux is **auto-enabled** when GSD detects a cmux environment (`CMUX_WORKSPACE_ID` + `CMUX_SURFACE_ID`). Sidebar metadata and notifications are on by default. You only need a config block to opt into splits, opt out of a feature, or disable cmux entirely.
+
+To disable cmux entirely:
+```yaml
+cmux:
+  enabled: false
+```
+
+To disable just one feature (e.g. sidebar):
+```yaml
+cmux:
+  sidebar: false
+```
 
 ---
 

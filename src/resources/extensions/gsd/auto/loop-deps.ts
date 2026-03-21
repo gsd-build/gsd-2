@@ -49,6 +49,8 @@ export interface LoopDeps {
     message: string,
     level?: CmuxLogLevel,
   ) => void;
+  cmuxRenameTab: (preferences: GSDPreferences | undefined, title: string) => void;
+  cmuxTriggerFlash: (preferences: GSDPreferences | undefined) => void;
 
   // State and cache functions
   invalidateAllCaches: () => void;
