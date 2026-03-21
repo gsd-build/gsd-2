@@ -14,6 +14,7 @@ import {
   useGSDWorkspaceActions,
   buildPromptCommand,
   type CompletedToolExecution,
+  type ActiveToolExecution,
   type PendingUiRequest,
 } from "@/lib/gsd-workspace-store"
 import { deriveWorkflowAction } from "@/lib/workflow-actions"
@@ -1333,7 +1334,7 @@ function ChatInputBar({
             aria-label="Send message"
             placeholder={
               connected
-                ? "Send a message… (Enter to send, Shift+Enter for newline)"
+                ? "Message…"
                 : "Connecting…"
             }
             className="min-h-[40px] flex-1 resize-none bg-transparent px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none disabled:cursor-not-allowed disabled:text-muted-foreground"
@@ -1467,9 +1468,6 @@ function ChatInputBar({
           </TooltipProvider>
         )}
       </div>
-      <p className="mt-1.5 text-center text-[10px] text-muted-foreground/40">
-        GSD session · Shift+Enter for newline
-      </p>
     </div>
   )
 }
@@ -1964,8 +1962,7 @@ function ToolExecutionBlock({ tool }: { tool: CompletedToolExecution }) {
  */
 export function ChatPane({ className, onOpenAction }: ChatPaneProps) {
   const state = useGSDWorkspaceState()
-  const { submitInput, sendCommand } = useGSDWorkspaceActions()
-  const [userMessages, setUserMessages] = useState<ChatMessage[]>([])
+  const { submitInput, sendCommand, pushChatUserMessage } = useGSDWorkspaceActions()
   const [terminalFontSize] = useTerminalFontSize()
 
   const connected = state.connectionState === "connected"
@@ -2029,64 +2026,107 @@ export function ChatPane({ className, onOpenAction }: ChatPaneProps) {
       timestamp: Date.now(),
       images: images?.map((i) => ({ data: i.data, mimeType: i.mimeType })),
     }
-    setUserMessages((prev) => [...prev, userMsg])
+    pushChatUserMessage(userMsg)
     void submitInput(text, images)
-  }, [submitInput])
+  }, [submitInput, pushChatUserMessage])
 
-  // Build message list from store state
-  const messages = useMemo((): ChatMessage[] => {
-    const allMessages: ChatMessage[] = []
+  // Build unified timeline from store state.
+  // Interleaves messages, tool executions, and UI requests in chronological order
+  // so tool calls appear inline where they happened, not stacked at the bottom.
+  type TimelineItem =
+    | { kind: "message"; message: ChatMessage }
+    | { kind: "tool"; tool: CompletedToolExecution }
+    | { kind: "active-tool"; tool: ActiveToolExecution }
+    | { kind: "ui-request"; request: PendingUiRequest }
+
+  const timeline = useMemo((): TimelineItem[] => {
+    const items: TimelineItem[] = []
     const transcriptBlocks = state.liveTranscript
-    const userMsgs = userMessages
+    const userMsgs = state.chatUserMessages
     const latestUserTimestamp = userMsgs.at(-1)?.timestamp ?? 0
 
     // Interleave: turns alternate user → assistant.
-    // Each transcript block corresponds to one assistant turn.
-    // User messages are paired with their subsequent assistant response.
+    // Each transcript block is one completed assistant turn.
     for (let i = 0; i < Math.max(userMsgs.length, transcriptBlocks.length); i++) {
-      // User message for this turn
       if (i < userMsgs.length) {
-        allMessages.push(userMsgs[i])
+        items.push({ kind: "message", message: userMsgs[i] })
       }
-      // Assistant response for this turn
       if (i < transcriptBlocks.length) {
         const block = transcriptBlocks[i]
         if (block.trim()) {
-          allMessages.push({
-            id: `transcript-${i}`,
-            role: "assistant",
-            content: block,
-            complete: true,
-            timestamp: i + 1,
+          items.push({
+            kind: "message",
+            message: {
+              id: `transcript-${i}`,
+              role: "assistant",
+              content: block,
+              complete: true,
+              timestamp: i + 1,
+            },
           })
         }
       }
     }
 
-    // Add currently streaming content
+    // Tool executions for the current turn — after the last completed message
+    for (const tool of state.completedToolExecutions) {
+      items.push({ kind: "tool", tool })
+    }
+
+    // Active tool execution indicator
+    if (state.activeToolExecution) {
+      items.push({ kind: "active-tool", tool: state.activeToolExecution })
+    }
+
+    // Currently streaming content — after tool executions
     const hasStreaming = state.streamingAssistantText.length > 0
     const hasThinking = state.streamingThinkingText.length > 0
 
     if (hasStreaming || hasThinking) {
-      const streamingContent = state.streamingAssistantText
-      allMessages.push({
-        id: "streaming-current",
-        role: "assistant",
-        content: streamingContent || "",
-        complete: false,
-        timestamp: latestUserTimestamp + transcriptBlocks.length + 1,
+      items.push({
+        kind: "message",
+        message: {
+          id: "streaming-current",
+          role: "assistant",
+          content: state.streamingAssistantText || "",
+          complete: false,
+          timestamp: latestUserTimestamp + transcriptBlocks.length + 1,
+        },
       })
     }
 
-    return allMessages
-  }, [state.liveTranscript, state.streamingAssistantText, state.streamingThinkingText, userMessages])
+    // Pending UI requests — at the end
+    for (const req of state.pendingUiRequests) {
+      items.push({ kind: "ui-request", request: req })
+    }
+
+    return items
+  }, [state.liveTranscript, state.streamingAssistantText, state.streamingThinkingText, state.completedToolExecutions, state.activeToolExecution, state.pendingUiRequests, state.chatUserMessages])
 
   // Prompt submit handler for TUI prompts (select/text/password)
   const handlePromptSubmit = useCallback((data: string) => {
     void submitInput(data.replace(/\r$/, ""))
   }, [submitInput])
 
-  const showPlaceholder = messages.length === 0 && !isStreaming
+  const showPlaceholder = timeline.length === 0 && !isStreaming
+
+  // Auto-scroll ref
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const isNearBottomRef = useRef(true)
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100
+  }, [])
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    if (isNearBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [timeline])
 
   return (
     <div
@@ -2103,49 +2143,48 @@ export function ChatPane({ className, onOpenAction }: ChatPaneProps) {
           />
         ) : (
           <div
+            ref={scrollRef}
+            onScroll={handleScroll}
             className="flex-1 overflow-y-auto px-4 py-4 space-y-4"
             style={terminalFontSize !== 13 ? { fontSize: `${terminalFontSize}px` } : undefined}
           >
-            {messages.map((msg) => (
-              <ChatBubble
-                key={msg.id}
-                message={msg}
-                onSubmitPrompt={handlePromptSubmit}
-                thinkingContent={msg.id === "streaming-current" ? state.streamingThinkingText : undefined}
-                isThinking={msg.id === "streaming-current" ? (isStreaming && !state.activeToolExecution) : undefined}
-              />
-            ))}
-
-            {/* Completed tool executions for this turn */}
-            {state.completedToolExecutions.map((tool) => (
-              <ToolExecutionBlock key={tool.id} tool={tool} />
-            ))}
-
-            {/* Active tool execution indicator (inline, not header bar) */}
-            {state.activeToolExecution && (
-              <div className="flex justify-start gap-3">
-                <div className="w-7 flex-shrink-0" />
-                <div className="max-w-[82%] min-w-0">
-                  <div className="flex items-center gap-2 rounded-lg border border-border/40 bg-muted/20 px-3.5 py-2">
-                    <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/60" />
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {state.activeToolExecution.name}
-                    </span>
-                    {Boolean(state.activeToolExecution.args?.path) && (
-                      <span className="font-mono text-xs text-info/80 truncate">
-                        {String(state.activeToolExecution.args?.path)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Pending UI requests — inline interactive controls from the agent */}
-            {state.pendingUiRequests.map((req) => (
-              <InlineUiRequest key={req.id} request={req} />
-            ))}
-
+            {timeline.map((item, idx) => {
+              switch (item.kind) {
+                case "message":
+                  return (
+                    <ChatBubble
+                      key={item.message.id}
+                      message={item.message}
+                      onSubmitPrompt={handlePromptSubmit}
+                      thinkingContent={item.message.id === "streaming-current" ? state.streamingThinkingText : undefined}
+                      isThinking={item.message.id === "streaming-current" ? (isStreaming && !state.activeToolExecution) : undefined}
+                    />
+                  )
+                case "tool":
+                  return <ToolExecutionBlock key={item.tool.id} tool={item.tool} />
+                case "active-tool":
+                  return (
+                    <div key={`active-${item.tool.id}`} className="flex justify-start gap-3">
+                      <div className="w-7 flex-shrink-0" />
+                      <div className="max-w-[82%] min-w-0">
+                        <div className="flex items-center gap-2 rounded-lg border border-border/40 bg-muted/20 px-3.5 py-2">
+                          <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/60" />
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {item.tool.name}
+                          </span>
+                          {Boolean(item.tool.args?.path) && (
+                            <span className="font-mono text-xs text-info/80 truncate">
+                              {String(item.tool.args?.path)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                case "ui-request":
+                  return <InlineUiRequest key={item.request.id} request={item.request} />
+              }
+            })}
             <div className="h-2" />
           </div>
         )}

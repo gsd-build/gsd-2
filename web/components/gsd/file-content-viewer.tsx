@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react"
-import { Loader2, Save } from "lucide-react"
+import { Loader2, Save, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { CodeEditor } from "@/components/gsd/code-editor"
@@ -347,6 +347,168 @@ function MarkdownViewer({ content, filepath, shikiTheme = "github-dark-default" 
   return <div className="markdown-body">{rendered}</div>
 }
 
+/* ── Inline diff viewer — shows before/after with red/green line highlights ── */
+
+function computeDiffLines(before: string, after: string): Array<{ type: "add" | "remove" | "context"; lineNum: number | null; text: string }> {
+  const oldLines = before.split("\n")
+  const newLines = after.split("\n")
+  const result: Array<{ type: "add" | "remove" | "context"; lineNum: number | null; text: string }> = []
+
+  // Simple LCS-based diff for inline display
+  const n = oldLines.length
+  const m = newLines.length
+
+  // For files that are too large, fall back to showing just additions/removals
+  if (n + m > 5000) {
+    oldLines.forEach((l, i) => result.push({ type: "remove", lineNum: i + 1, text: l }))
+    newLines.forEach((l, i) => result.push({ type: "add", lineNum: i + 1, text: l }))
+    return result
+  }
+
+  // Build edit script using O(ND) algorithm (simplified Myers)
+  const max = n + m
+  const v = new Int32Array(2 * max + 1)
+  const trace: Int32Array[] = []
+
+  outer:
+  for (let d = 0; d <= max; d++) {
+    const vCopy = new Int32Array(v)
+    trace.push(vCopy)
+    for (let k = -d; k <= d; k += 2) {
+      let x: number
+      if (k === -d || (k !== d && v[k - 1 + max] < v[k + 1 + max])) {
+        x = v[k + 1 + max]
+      } else {
+        x = v[k - 1 + max] + 1
+      }
+      let y = x - k
+      while (x < n && y < m && oldLines[x] === newLines[y]) {
+        x++
+        y++
+      }
+      v[k + max] = x
+      if (x >= n && y >= m) break outer
+    }
+  }
+
+  // Backtrack to produce diff
+  type Edit = { type: "add" | "remove" | "context"; oldIdx: number; newIdx: number }
+  const edits: Edit[] = []
+  let x = n, y = m
+  for (let d = trace.length - 1; d >= 0; d--) {
+    const vPrev = trace[d]
+    const k = x - y
+    let prevK: number
+    if (k === -d || (k !== d && vPrev[k - 1 + max] < vPrev[k + 1 + max])) {
+      prevK = k + 1
+    } else {
+      prevK = k - 1
+    }
+    const prevX = vPrev[prevK + max]
+    const prevY = prevX - prevK
+
+    // Diag moves = context lines
+    while (x > prevX && y > prevY) {
+      x--; y--
+      edits.push({ type: "context", oldIdx: x, newIdx: y })
+    }
+    if (d > 0) {
+      if (x === prevX) {
+        // Insert
+        y--
+        edits.push({ type: "add", oldIdx: x, newIdx: y })
+      } else {
+        // Delete
+        x--
+        edits.push({ type: "remove", oldIdx: x, newIdx: y })
+      }
+    }
+  }
+
+  edits.reverse()
+
+  // Convert to output lines, showing only changed regions with ±3 lines of context
+  const CONTEXT = 3
+  const important = new Set<number>()
+  edits.forEach((e, i) => {
+    if (e.type !== "context") {
+      for (let j = Math.max(0, i - CONTEXT); j <= Math.min(edits.length - 1, i + CONTEXT); j++) {
+        important.add(j)
+      }
+    }
+  })
+
+  let lastIncluded = -1
+  for (let i = 0; i < edits.length; i++) {
+    if (!important.has(i)) continue
+    if (lastIncluded >= 0 && i - lastIncluded > 1) {
+      result.push({ type: "context", lineNum: null, text: "···" })
+    }
+    const e = edits[i]
+    if (e.type === "context") {
+      result.push({ type: "context", lineNum: e.newIdx + 1, text: newLines[e.newIdx] })
+    } else if (e.type === "remove") {
+      result.push({ type: "remove", lineNum: e.oldIdx + 1, text: oldLines[e.oldIdx] })
+    } else {
+      result.push({ type: "add", lineNum: e.newIdx + 1, text: newLines[e.newIdx] })
+    }
+    lastIncluded = i
+  }
+
+  return result
+}
+
+function InlineDiffViewer({ before, after, onDismiss }: { before: string; after: string; onDismiss?: () => void }) {
+  const lines = useMemo(() => computeDiffLines(before, after), [before, after])
+
+  return (
+    <div className="flex-1 overflow-y-auto font-mono text-sm leading-relaxed">
+      <table className="w-full border-collapse">
+        <tbody>
+          {lines.map((line, i) => (
+            <tr
+              key={i}
+              className={cn(
+                line.type === "add" && "bg-emerald-500/10",
+                line.type === "remove" && "bg-red-500/10",
+              )}
+            >
+              <td className="select-none w-[1ch] pl-2 pr-1 text-center align-top">
+                {line.type === "add" ? (
+                  <span className="text-emerald-400/80">+</span>
+                ) : line.type === "remove" ? (
+                  <span className="text-red-400/80">−</span>
+                ) : null}
+              </td>
+              <td
+                className={cn(
+                  "select-none pr-3 text-right align-top min-w-[3ch]",
+                  line.type === "add" ? "text-emerald-400/40" :
+                  line.type === "remove" ? "text-red-400/40" :
+                  "text-muted-foreground/30",
+                )}
+              >
+                {line.lineNum ?? ""}
+              </td>
+              <td
+                className={cn(
+                  "whitespace-pre pr-4",
+                  line.type === "add" && "text-emerald-300",
+                  line.type === "remove" && "text-red-300 line-through decoration-red-400/30",
+                  line.type === "context" && line.text === "···" && "text-muted-foreground/30 text-center italic",
+                  line.type === "context" && line.text !== "···" && "text-muted-foreground/70",
+                )}
+              >
+                {line.text || " "}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 /* ── Read-only content renderer (shared between standalone and tab modes) ── */
 
 function ReadOnlyContent({ content, filepath, fontSize, shikiTheme }: { content: string; filepath: string; fontSize?: number; shikiTheme?: string }) {
@@ -373,6 +535,12 @@ interface FileContentViewerProps {
   path?: string
   /** Required for editing — called with new content when the user saves */
   onSave?: (newContent: string) => Promise<void>
+  /** When set, shows an inline diff overlay (before/after content) */
+  diff?: { before: string; after: string }
+  /** Called to dismiss the diff overlay */
+  onDismissDiff?: () => void
+  /** When true, MD files default to Edit tab so the raw changes are visible */
+  agentOpened?: boolean
 }
 
 export function FileContentViewer({
@@ -382,6 +550,9 @@ export function FileContentViewer({
   root,
   path,
   onSave,
+  diff,
+  onDismissDiff,
+  agentOpened,
 }: FileContentViewerProps) {
   const canEdit = root !== undefined && path !== undefined && onSave !== undefined
 
@@ -436,28 +607,53 @@ export function FileContentViewer({
     )
   }
 
+  // ── Diff overlay mode: agent just edited this file ──
+  if (diff) {
+    return (
+      <div className={cn("flex flex-1 flex-col overflow-hidden min-h-0", className)}>
+        <div className="flex items-center gap-2 border-b border-border px-4 h-9">
+          <span className="text-sm font-medium font-mono truncate">{filepath}</span>
+          <span className="ml-2 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-400 uppercase tracking-wide">
+            Changed
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={onDismissDiff}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            >
+              <X className="h-3 w-3" />
+              Dismiss
+            </button>
+          </div>
+        </div>
+        <InlineDiffViewer before={diff.before} after={diff.after} onDismiss={onDismissDiff} />
+      </div>
+    )
+  }
+
   // ── Editable mode: markdown keeps View/Edit tabs ──
   if (isMarkdown(filepath)) {
     return (
-      <Tabs defaultValue="view" className={cn("flex flex-1 flex-col overflow-hidden min-h-0", className)}>
-        <div className="flex items-center gap-2 border-b border-border px-4">
-          <TabsList className="h-8 bg-transparent p-0">
+      <Tabs key={agentOpened ? "agent-edit" : "normal"} defaultValue={agentOpened ? "edit" : "view"} className={cn("flex flex-1 flex-col overflow-hidden min-h-0", className)}>
+        <div className="flex items-center gap-2 border-b border-border px-4 h-9">
+          <span className="text-sm font-medium font-mono truncate mr-2">{filepath}</span>
+          <TabsList className="h-7 bg-transparent p-0 ml-auto">
             <TabsTrigger
               value="view"
-              className="h-7 rounded-md px-2.5 text-xs data-[state=active]:bg-muted"
+              className="h-6 rounded-md px-2 text-xs data-[state=active]:bg-muted"
             >
               View
             </TabsTrigger>
             <TabsTrigger
               value="edit"
-              className="h-7 rounded-md px-2.5 text-xs data-[state=active]:bg-muted"
+              className="h-6 rounded-md px-2 text-xs data-[state=active]:bg-muted"
             >
               Edit
             </TabsTrigger>
           </TabsList>
 
-          {/* Save button — visible when editing */}
-          <div className="ml-auto flex items-center gap-2">
+          {/* Save button */}
+          <div className="flex items-center gap-2">
             {saveError && (
               <span className="text-xs text-destructive max-w-[200px] truncate" title={saveError}>
                 {saveError}
@@ -503,8 +699,9 @@ export function FileContentViewer({
   // ── Editable mode: non-markdown gets single CodeEditor view ──
   return (
     <div className={cn("flex flex-1 flex-col overflow-hidden min-h-0", className)}>
-      {/* Header bar with save button */}
-      <div className="flex items-center gap-2 border-b border-border px-4 py-1.5">
+      {/* Header bar with filepath and save button */}
+      <div className="flex items-center gap-2 border-b border-border px-4 h-9">
+        <span className="text-sm font-medium font-mono truncate">{filepath}</span>
         <div className="ml-auto flex items-center gap-2">
           {saveError && (
             <span className="text-xs text-destructive max-w-[200px] truncate" title={saveError}>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import {
   FileText,
   ChevronRight,
@@ -18,10 +18,12 @@ import {
   Trash2,
   Copy,
   ClipboardCopy,
+  Bot,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useGSDWorkspaceState, buildProjectUrl } from "@/lib/gsd-workspace-store"
 import { FileContentViewer } from "@/components/gsd/file-content-viewer"
+import { ChatPane } from "@/components/gsd/chat-mode"
 
 type RootMode = "gsd" | "project"
 
@@ -446,6 +448,10 @@ interface OpenTab {
   content: string | null
   loading: boolean
   error: string | null
+  /** When set, the viewer shows an inline diff overlay */
+  diff?: { before: string; after: string } | null
+  /** Set when the agent just opened/edited this file — causes MD files to default to Edit tab */
+  agentOpened?: boolean
 }
 
 function tabKey(root: RootMode, path: string): string {
@@ -462,11 +468,14 @@ function tabLabel(tab: OpenTab): string {
 
 /* ── Main view ── */
 
+type LeftPanel = "tree" | "agent"
+
 export function FilesView() {
   const workspace = useGSDWorkspaceState()
   const projectCwd = workspace.boot?.project.cwd
 
   const [activeRoot, setActiveRoot] = useState<RootMode>("gsd")
+  const [leftPanel, setLeftPanel] = useState<LeftPanel>("tree")
   const [gsdTree, setGsdTree] = useState<FileNode[] | null>(null)
   const [projectTree, setProjectTree] = useState<FileNode[] | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1027,17 +1036,102 @@ export function FilesView() {
     }
   }, [gsdTree, openTabs.length, openFileTab])
 
+  // ── Agent file-edit auto-open: watch tool executions for edit/write tools ──
+  const lastSeenToolCountRef = useRef(0)
+  const completedTools = workspace.completedToolExecutions
+  const activeToolExec = workspace.activeToolExecution
+  const diffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (completedTools.length <= lastSeenToolCountRef.current) return
+    const newTools = completedTools.slice(lastSeenToolCountRef.current)
+    lastSeenToolCountRef.current = completedTools.length
+
+    for (const tool of newTools) {
+      if (tool.name !== "edit" && tool.name !== "write") continue
+      const filePath = typeof tool.args?.path === "string" ? tool.args.path : null
+      if (!filePath) continue
+
+      // Determine root and relative path
+      const gsdPrefix = ".gsd/"
+      let root: RootMode = "project"
+      let relativePath = filePath
+
+      // Strip leading project cwd if present
+      if (projectCwd && relativePath.startsWith(projectCwd)) {
+        relativePath = relativePath.slice(projectCwd.length)
+        if (relativePath.startsWith("/")) relativePath = relativePath.slice(1)
+      }
+
+      if (relativePath.startsWith(gsdPrefix)) {
+        root = "gsd"
+        relativePath = relativePath.slice(gsdPrefix.length)
+      }
+
+      const key = tabKey(root, relativePath)
+
+      // Capture old content before re-fetching (for diff)
+      const existingTab = openTabs.find((t) => t.key === key)
+      const oldContent = existingTab?.content ?? null
+
+      // Fetch new content, then store diff
+      ;(async () => {
+        try {
+          const res = await fetch(buildProjectUrl(`/api/files?root=${root}&path=${encodeURIComponent(relativePath)}`, projectCwd))
+          if (!res.ok) return
+          const data = await res.json()
+          const newContent: string | null = data.content ?? null
+
+          if (newContent !== null) {
+            const diffData = oldContent !== null && oldContent !== newContent
+              ? { before: oldContent, after: newContent }
+              : null
+
+            setOpenTabs((prev) => {
+              const exists = prev.find((t) => t.key === key)
+              if (exists) {
+                return prev.map((t) =>
+                  t.key === key ? { ...t, content: newContent, loading: false, error: null, diff: diffData, agentOpened: true } : t,
+                )
+              }
+              // New tab
+              return [...prev, { key, root, path: relativePath, content: newContent, loading: false, error: null, diff: diffData, agentOpened: true }]
+            })
+            setActiveTabKey(key)
+
+            // Auto-clear diff after 8 seconds
+            if (diffData) {
+              if (diffTimerRef.current) clearTimeout(diffTimerRef.current)
+              diffTimerRef.current = setTimeout(() => {
+                setOpenTabs((prev) =>
+                  prev.map((t) => t.key === key ? { ...t, diff: null } : t),
+                )
+              }, 8000)
+            }
+          }
+        } catch { /* ignore */ }
+      })()
+    }
+  }, [completedTools, projectCwd, openTabs])
+
+  // While a file-modifying tool is active, show which file is being worked on
+  const activeEditFile = useMemo(() => {
+    if (!activeToolExec) return null
+    if (activeToolExec.name !== "edit" && activeToolExec.name !== "write") return null
+    return typeof activeToolExec.args?.path === "string" ? activeToolExec.args.path : null
+  }, [activeToolExec])
+
   return (
     <div className="flex h-full">
-      {/* File tree panel */}
-      <div className="flex-shrink-0 border-r border-border overflow-y-auto flex flex-col" style={{ width: treeWidth }}>
+      {/* Left panel (file tree or agent chat) */}
+      <div className="flex-shrink-0 border-r border-border overflow-hidden flex flex-col" style={{ width: treeWidth }}>
         {/* Tab bar */}
         <div className="flex border-b border-border flex-shrink-0">
           <button
-            onClick={() => handleTreeRootChange("gsd")}
+            onClick={() => { setLeftPanel("tree"); handleTreeRootChange("gsd") }}
             className={cn(
               "flex-1 px-3 py-2 text-xs font-medium transition-colors",
-              activeRoot === "gsd"
+              leftPanel === "tree" && activeRoot === "gsd"
                 ? "border-b-2 border-foreground text-foreground"
                 : "text-muted-foreground hover:text-foreground",
             )}
@@ -1045,21 +1139,39 @@ export function FilesView() {
             GSD
           </button>
           <button
-            onClick={() => handleTreeRootChange("project")}
+            onClick={() => { setLeftPanel("tree"); handleTreeRootChange("project") }}
             className={cn(
               "flex-1 px-3 py-2 text-xs font-medium transition-colors",
-              activeRoot === "project"
+              leftPanel === "tree" && activeRoot === "project"
                 ? "border-b-2 border-foreground text-foreground"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
             Project
           </button>
+          <button
+            onClick={() => setLeftPanel("agent")}
+            className={cn(
+              "flex-1 px-3 py-2 text-xs font-medium transition-colors flex items-center justify-center gap-1.5",
+              leftPanel === "agent"
+                ? "border-b-2 border-foreground text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Bot className="h-3 w-3" />
+            Agent
+          </button>
         </div>
 
-        {/* Tree content */}
-        <div
-          className={cn("flex-1 overflow-y-auto py-2", treeRootDragOver && "bg-accent/30")}
+        {/* Panel content */}
+        {leftPanel === "agent" ? (
+          <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+            <ChatPane className="flex-1 min-h-0" />
+          </div>
+        ) : (
+          /* Tree content */
+          <div
+            className={cn("flex-1 overflow-y-auto py-2", treeRootDragOver && "bg-accent/30")}
           onDragOver={(e) => {
             // Only highlight if dragging directly over the root area, not a folder
             if ((e.target as HTMLElement).closest("[data-tree-item]")) return
@@ -1143,6 +1255,7 @@ export function FilesView() {
             </>
           ) : null}
         </div>
+        )}
       </div>
 
       {/* Resize drag handle */}
@@ -1197,9 +1310,6 @@ export function FilesView() {
         {/* Active tab content */}
         {activeTab ? (
           <>
-            <div className="flex h-9 items-center border-b border-border px-4">
-              <span className="text-sm font-medium font-mono">{tabDisplayPath(activeTab)}</span>
-            </div>
             {activeTab.loading ? (
               <div className="flex flex-1 items-center justify-center text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -1217,6 +1327,13 @@ export function FilesView() {
                 root={activeTab.root}
                 path={activeTab.path}
                 onSave={handleSave}
+                diff={activeTab.diff ?? undefined}
+                agentOpened={activeTab.agentOpened}
+                onDismissDiff={() => {
+                  setOpenTabs((prev) =>
+                    prev.map((t) => t.key === activeTab.key ? { ...t, diff: null, agentOpened: false } : t),
+                  )
+                }}
               />
             ) : (
               <div className="flex flex-1 items-center justify-center text-muted-foreground italic">

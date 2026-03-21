@@ -56,6 +56,7 @@ import type {
 } from "./remaining-command-types"
 import { isGitSummaryResponse, type GitSummaryResponse } from "./git-summary-contract"
 import type { PendingImage } from "./image-utils"
+import type { ChatMessage } from "./pty-chat-parser"
 import type {
   SessionBrowserNameFilter,
   SessionBrowserResponse,
@@ -540,6 +541,8 @@ export interface WorkspaceStoreState {
   liveTranscript: string[]
   completedToolExecutions: CompletedToolExecution[]
   activeToolExecution: ActiveToolExecution | null
+  /** User messages in chat — persisted in store so they survive component unmount/remount */
+  chatUserMessages: ChatMessage[]
   statusTexts: Record<string, string>
   widgetContents: Record<string, WidgetContent>
   titleOverride: string | null
@@ -1790,6 +1793,7 @@ function createInitialState(): WorkspaceStoreState {
     liveTranscript: [],
     completedToolExecutions: [],
     activeToolExecution: null,
+    chatUserMessages: [],
     statusTexts: {},
     widgetContents: {},
     titleOverride: null,
@@ -3974,6 +3978,10 @@ export class GSDWorkspaceStore {
     await this.sendCommand({ type: "abort" })
   }
 
+  pushChatUserMessage = (msg: ChatMessage) => {
+    this.patchState({ chatUserMessages: [...this.state.chatUserMessages, msg] })
+  }
+
   submitInput = async (input: string, images?: PendingImage[]): Promise<BrowserSlashCommandDispatchResult | null> => {
     const trimmed = input.trim()
     if (!trimmed) return null
@@ -5132,6 +5140,7 @@ export function useGSDWorkspaceActions(): Pick<
   | "dismissUiRequest"
   | "sendSteer"
   | "sendAbort"
+  | "pushChatUserMessage"
 > {
   const store = useWorkspaceStore()
   return {
@@ -5195,6 +5204,7 @@ export function useGSDWorkspaceActions(): Pick<
     dismissUiRequest: store.dismissUiRequest,
     sendSteer: store.sendSteer,
     sendAbort: store.sendAbort,
+    pushChatUserMessage: store.pushChatUserMessage,
   }
 }
 
