@@ -53,7 +53,30 @@ import { handleStart, handleTemplates, getTemplateCompletions } from "./commands
 import { readSessionLockData, isSessionLockProcessAlive } from "./session-lock.js";
 import { handleCmux } from "./commands-cmux.js";
 import { showNextAction } from "../shared/mod.js";
+import {
+  getInstallReferenceCompletions,
+  installEcosystemCatalog as installEcosystemCatalogRuntime,
+} from "./install-ecosystem-catalog.js";
 
+type InstallCommandRuntime = {
+  installEcosystemCatalog: typeof installEcosystemCatalogRuntime;
+};
+
+let installCommandRuntimeOverride: Partial<InstallCommandRuntime> | null = null;
+
+function getInstallCommandRuntime(): InstallCommandRuntime {
+  return {
+    installEcosystemCatalog: installCommandRuntimeOverride?.installEcosystemCatalog ?? installEcosystemCatalogRuntime,
+  };
+}
+
+export function __setInstallCommandRuntimeForTests(runtime: Partial<InstallCommandRuntime>): void {
+  installCommandRuntimeOverride = runtime;
+}
+
+export function __resetInstallCommandRuntimeForTests(): void {
+  installCommandRuntimeOverride = null;
+}
 
 /** Resolve the effective project root, accounting for worktree paths. */
 export function projectRoot(): string {
@@ -466,6 +489,13 @@ export function registerGSDCommand(pi: ExtensionAPI): void {
         const namePrefix = parts[2] ?? "";
         return getTemplateCompletions(namePrefix)
           .map((c) => ({ value: `templates ${c.value}`, label: c.label, description: c.description }));
+      }
+
+      if (parts[0] === "install" && parts.length <= 2) {
+        const referencePrefix = parts[1] ?? "";
+        return getInstallReferenceCompletions()
+          .filter((item) => item.cmd.startsWith(referencePrefix))
+          .map((item) => ({ value: `install ${item.cmd}`, label: item.cmd, description: item.desc }));
       }
 
       if (parts[0] === "extensions") {
@@ -1068,6 +1098,11 @@ Examples:
         return;
       }
 
+      if (trimmed === "install" || trimmed.startsWith("install ")) {
+        await handleInstallCommand(trimmed.replace(/^install\s*/, "").trim(), ctx, pi);
+        return;
+      }
+
       if (trimmed === "") {
         if (!(await guardRemoteSession(ctx, pi))) return;
         await startAuto(ctx, pi, projectRoot(), false, { step: true });
@@ -1084,6 +1119,92 @@ Examples:
     `Unknown: /gsd ${trimmed}. Run /gsd help for available commands.`,
     "warning",
   );
+}
+
+async function handleInstallCommand(
+  reference: string,
+  ctx: ExtensionCommandContext,
+  pi: ExtensionAPI,
+): Promise<void> {
+  const payload = (data: Record<string, unknown>) => {
+    pi.sendMessage({ customType: "gsd-install", content: JSON.stringify(data), display: false });
+  };
+
+  if (!reference) {
+    const message = "Usage: /gsd install gsd-build/<slug>";
+    ctx.ui.notify(message, "warning");
+    payload({ status: "error", code: "catalog/usage", message });
+    return;
+  }
+
+  if (!ctx.hasUI || typeof ctx.ui.select !== "function") {
+    const message = "/gsd install requires an interactive terminal so you can choose project-local or user-global.";
+    ctx.ui.notify(message, "error");
+    payload({ status: "error", code: "catalog/ui-required", message, reference });
+    return;
+  }
+
+  const prompt = `Install ${reference} into which scope?`;
+  const choices = ["project-local", "user-global", "Cancel"] as const;
+  const rawChoice = await ctx.ui.select(prompt, [...choices]);
+  const choice = Array.isArray(rawChoice) ? rawChoice[0] : rawChoice;
+  if (!choice || choice === "Cancel") {
+    const message = `Install cancelled for ${reference}.`;
+    ctx.ui.notify(message, "info");
+    payload({ status: "cancelled", reference, prompt, choices });
+    return;
+  }
+
+  const scope = choice === "project-local" ? "project-local" : choice === "user-global" ? "user-global" : null;
+  if (!scope) {
+    const message = `Install cancelled for ${reference}.`;
+    ctx.ui.notify(message, "info");
+    payload({ status: "cancelled", reference, prompt, choices });
+    return;
+  }
+
+  try {
+    const result = await getInstallCommandRuntime().installEcosystemCatalog(reference, {
+      scope,
+      cwd: projectRoot(),
+    });
+
+    await ctx.waitForIdle();
+
+    try {
+      await ctx.reload();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(`Installed ${reference}, but reload failed: ${message}`, "error");
+      payload({
+        status: "error",
+        code: "catalog/reload-failed",
+        phase: "reload",
+        message,
+        reference,
+        result,
+      });
+      return;
+    }
+
+    const notificationLines = [
+      `Installed ${reference}.`,
+      `- Scope: ${result.chosenScope}`,
+      `- Source: ${result.resolvedSource}`,
+      `- Managed path: ${result.actualManagedPath}`,
+      `- Settings entry: ${result.settingsEntryAdded ? "added" : "already present"}`,
+      `- Reload: completed`,
+      `- Activation: Reload completed; ${result.slug} is now available from ${result.actualManagedPath}.`,
+    ];
+    ctx.ui.notify(notificationLines.join("\n"), "success");
+    payload({ status: "success", reference, prompt, choices, result });
+  } catch (error) {
+    const phase = typeof (error as { phase?: unknown })?.phase === "string" ? (error as { phase: string }).phase : "install";
+    const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "catalog/install-failed";
+    const message = error instanceof Error ? error.message : String(error);
+    ctx.ui.notify(`${phase}/${code}: ${message}`, "error");
+    payload({ status: "error", phase, code, message, reference });
+  }
 }
 
 function showHelp(ctx: ExtensionCommandContext): void {

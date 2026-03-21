@@ -1,4 +1,5 @@
 import { importExtensionModule, type ExtensionAPI, type ExtensionCommandContext } from "@gsd/pi-coding-agent";
+import { getInstallReferenceCompletions } from "./install-ecosystem-catalog.js";
 
 const TOP_LEVEL_SUBCOMMANDS = [
   { cmd: "help", desc: "Categorized command reference with descriptions" },
@@ -207,6 +208,13 @@ function getGsdArgumentCompletions(prefix: string) {
     return filterStartsWith(partial, [
       { cmd: "info", desc: "Show detailed template info" },
     ], "templates");
+  }
+
+  if (parts[0] === "install" && parts.length <= 2) {
+    const partial = parts[1] ?? "";
+    return getInstallReferenceCompletions()
+      .filter((item) => item.cmd.startsWith(partial))
+      .map((item) => ({ value: `install ${item.cmd}`, label: item.cmd, description: item.desc }));
   }
 
   if (parts[0] === "extensions" && parts.length <= 2) {
