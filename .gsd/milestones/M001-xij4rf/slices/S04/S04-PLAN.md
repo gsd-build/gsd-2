@@ -21,7 +21,7 @@
 
 ## Tasks
 
-- [ ] **T01: Rename tools to canonical names and register backward-compatible aliases** `est:30m`
+- [x] **T01: Rename tools to canonical names and register backward-compatible aliases** `est:30m`
   - Why: Core change — implements R013 (canonical naming) and R014 (alias continuity) in the tool registration code
   - Files: `src/resources/extensions/gsd/bootstrap/db-tools.ts`, `src/resources/extensions/gsd/tests/tool-naming.test.ts`
   - Do: Extract each tool definition into a const, change `name` to canonical form, update `promptGuidelines` to use new names, add alias registrations with old names and "(alias for ...)" descriptions, write test verifying both names register with same execute function
@@ -34,6 +34,13 @@
   - Do: Replace old tool names with canonical names in manifest `provides.tools`, prompt `.md` files, source code comments, and test file comments. In `docs/troubleshooting.md`, mention both canonical and alias names. Do NOT change `CHANGELOG.md` (historical).
   - Verify: `grep -c "gsd_decision_save\|gsd_requirement_update\|gsd_summary_save\|gsd_milestone_generate_id" src/resources/extensions/gsd/extension-manifest.json` returns 4 and `grep -rn "gsd_save_decision\|gsd_update_requirement\|gsd_save_summary\|gsd_generate_milestone_id" src/resources/extensions/gsd/prompts/ src/resources/extensions/gsd/guided-flow.ts src/resources/extensions/gsd/guided-flow-queue.ts src/resources/extensions/gsd/milestone-ids.ts` returns 0 matches
   - Done when: All non-historical, non-alias references use canonical names; manifest lists canonical names; grep for old names in prompt/comment files returns zero hits
+
+## Observability / Diagnostics
+
+- **Runtime signals:** `process.stderr.write` lines in each tool's error path now use canonical names (`gsd_decision_save`, `gsd_requirement_update`, `gsd_summary_save`), making log grep patterns consistent with the tool registry.
+- **Inspection surface:** `registerDbTools` registers 8 tools. An agent or developer can verify by calling the mock-PI pattern from `tool-naming.test.ts` and checking `pi.tools.length === 8`.
+- **Failure visibility:** If alias registration fails (e.g. `registerTool` throws on duplicate names), the error surfaces immediately at extension load time — no silent degradation.
+- **Redaction:** No secrets or PII involved in tool naming; no redaction constraints apply.
 
 ## Files Likely Touched
 
