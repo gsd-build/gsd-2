@@ -1116,6 +1116,9 @@ test("writeBlockerPlaceholder creates file and returns diagnosis for known type"
     const content = readFileSync(researchFile, "utf-8");
     assert.ok(content.includes("BLOCKER"), "file should contain BLOCKER marker");
     assert.ok(content.includes("exhausted retries"), "file should contain the reason");
+
+    assert.ok(result!.includes("RESEARCH"), "diagnosis should reference the RESEARCH artifact path");
+    assert.ok(result!.includes("M001"), "diagnosis should reference the milestone ID");
   } finally {
     cleanup(base);
   }

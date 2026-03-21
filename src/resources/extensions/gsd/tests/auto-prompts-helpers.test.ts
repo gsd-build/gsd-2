@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { extractMarkdownSection, escapeRegExp, buildSkillDiscoveryVars } from "../auto-prompts.ts";
 
 // ─── extractMarkdownSection ────────────────────────────────────────────────
@@ -72,8 +75,63 @@ test("escapeRegExp escapes brackets so they match literals", () => {
 
 // ─── buildSkillDiscoveryVars ───────────────────────────────────────────────
 
-test("buildSkillDiscoveryVars returns expected shape", () => {
-  const result = buildSkillDiscoveryVars();
-  assert.ok(typeof result.skillDiscoveryMode === "string" && result.skillDiscoveryMode.length > 0);
-  assert.ok(typeof result.skillDiscoveryInstructions === "string");
+test("buildSkillDiscoveryVars mode:off — returns disabled instructions", () => {
+  const tmpGSDHome = mkdtempSync(join(tmpdir(), "gsd-test-"));
+  const originalGSDHome = process.env.GSD_HOME;
+  try {
+    process.env.GSD_HOME = tmpGSDHome;
+    writeFileSync(join(tmpGSDHome, "preferences.md"), [
+      "---",
+      "version: 1",
+      'skill_discovery: "off"',
+      "---",
+    ].join("\n"));
+    const result = buildSkillDiscoveryVars();
+    assert.equal(result.skillDiscoveryMode, "off");
+    assert.ok(result.skillDiscoveryInstructions.includes("disabled"), "instructions should mention disabled");
+  } finally {
+    process.env.GSD_HOME = originalGSDHome;
+    rmSync(tmpGSDHome, { recursive: true, force: true });
+  }
+});
+
+test("buildSkillDiscoveryVars mode:suggest — identifies skills but does not install", () => {
+  const tmpGSDHome = mkdtempSync(join(tmpdir(), "gsd-test-"));
+  const originalGSDHome = process.env.GSD_HOME;
+  try {
+    process.env.GSD_HOME = tmpGSDHome;
+    writeFileSync(join(tmpGSDHome, "preferences.md"), [
+      "---",
+      "version: 1",
+      'skill_discovery: "suggest"',
+      "---",
+    ].join("\n"));
+    const result = buildSkillDiscoveryVars();
+    assert.equal(result.skillDiscoveryMode, "suggest");
+    assert.ok(result.skillDiscoveryInstructions.includes("npx skills find"), "instructions should include find command");
+    assert.ok(!result.skillDiscoveryInstructions.includes("Install"), "suggest mode should not include Install instructions");
+  } finally {
+    process.env.GSD_HOME = originalGSDHome;
+    rmSync(tmpGSDHome, { recursive: true, force: true });
+  }
+});
+
+test("buildSkillDiscoveryVars mode:auto — includes auto-install instructions", () => {
+  const tmpGSDHome = mkdtempSync(join(tmpdir(), "gsd-test-"));
+  const originalGSDHome = process.env.GSD_HOME;
+  try {
+    process.env.GSD_HOME = tmpGSDHome;
+    writeFileSync(join(tmpGSDHome, "preferences.md"), [
+      "---",
+      "version: 1",
+      'skill_discovery: "auto"',
+      "---",
+    ].join("\n"));
+    const result = buildSkillDiscoveryVars();
+    assert.equal(result.skillDiscoveryMode, "auto");
+    assert.ok(result.skillDiscoveryInstructions.includes("Install"), "auto mode should include Install instructions");
+  } finally {
+    process.env.GSD_HOME = originalGSDHome;
+    rmSync(tmpGSDHome, { recursive: true, force: true });
+  }
 });
