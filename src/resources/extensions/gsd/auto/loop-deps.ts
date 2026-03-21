@@ -19,6 +19,7 @@ import type {
 import type { DispatchAction } from "../auto-dispatch.js";
 import type { WorktreeResolver } from "../worktree-resolver.js";
 import type { CmuxLogLevel } from "../../cmux/index.js";
+import type { JournalEntry } from "../journal.js";
 
 /**
  * Dependencies injected by the caller (auto.ts startAuto) so autoLoop
@@ -285,4 +286,7 @@ export interface LoopDeps {
 
   // Session manager
   getSessionFile: (ctx: ExtensionContext) => string;
+
+  // Journal
+  emitJournalEvent: (entry: JournalEntry) => void;
 }

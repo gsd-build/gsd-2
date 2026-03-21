@@ -54,8 +54,10 @@ export type DispatchAction =
       unitId: string;
       prompt: string;
       pauseAfterDispatch?: boolean;
+      /** Name of the matched dispatch rule from the unified registry (journal provenance). */
+      matchedRule?: string;
     }
-  | { action: "stop"; reason: string; level: "info" | "warning" | "error" }
+  | { action: "stop"; reason: string; level: "info" | "warning" | "error"; matchedRule?: string }
   | { action: "skip" };
 
 export interface DispatchContext {
@@ -633,7 +635,10 @@ export async function resolveDispatch(
 
   for (const rule of DISPATCH_RULES) {
     const result = await rule.match(ctx);
-    if (result) return result;
+    if (result) {
+      if (result.action !== "skip") result.matchedRule = rule.name;
+      return result;
+    }
   }
 
   // No rule matched — unhandled phase
@@ -641,6 +646,7 @@ export async function resolveDispatch(
     action: "stop",
     reason: `Unhandled phase "${ctx.state.phase}" — run /gsd doctor to diagnose.`,
     level: "info",
+    matchedRule: "<no-match>",
   };
 }
 

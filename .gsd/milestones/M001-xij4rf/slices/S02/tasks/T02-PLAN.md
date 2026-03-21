@@ -64,3 +64,11 @@ Add the type-level plumbing that enables journal emission with rule provenance a
 - `src/resources/extensions/gsd/auto/loop-deps.ts` — `emitJournalEvent` on `LoopDeps`
 - `src/resources/extensions/gsd/auto.ts` — wiring in `buildLoopDeps()`
 - `src/resources/extensions/gsd/tests/rule-registry.test.ts` — new matchedRule test
+
+## Observability Impact
+
+- **New signal:** `DispatchAction.matchedRule` — every dispatch and stop result now carries the name of the matched rule (or `"<no-match>"` on fallback). Downstream journal emission (T03) will include this in `dispatch-match` and `dispatch-stop` events.
+- **New signal:** `IterationContext.flowId` — UUID generated per iteration; `nextSeq()` provides monotonic ordering within a flow. These enable `queryJournal(basePath, { flowId })` to reconstruct a full iteration trace.
+- **New integration seam:** `LoopDeps.emitJournalEvent` — loop.ts and phases.ts call through deps (never import journal.ts directly). A future agent can verify journal wiring by checking that `emitJournalEvent` appears on the `LoopDeps` interface.
+- **Inspection:** `evaluateDispatch()` result now always has `matchedRule` — callers can log which rule fired. In tests: `result.matchedRule === rule.name` confirms provenance.
+- **Failure state:** If `matchedRule` is missing from a dispatch result, the registry was bypassed (inline fallback used). The `"<no-match>"` sentinel on stop actions makes unhandled phases visible in journal events.

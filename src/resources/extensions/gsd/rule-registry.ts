@@ -129,12 +129,16 @@ export class RuleRegistry {
   async evaluateDispatch(ctx: DispatchContext): Promise<DispatchAction> {
     for (const rule of this.dispatchRules) {
       const result = await rule.where(ctx);
-      if (result) return result;
+      if (result) {
+        if (result.action !== "skip") result.matchedRule = rule.name;
+        return result;
+      }
     }
     return {
       action: "stop",
       reason: `Unhandled phase "${ctx.state.phase}" — run /gsd doctor to diagnose.`,
       level: "info",
+      matchedRule: "<no-match>",
     };
   }
 

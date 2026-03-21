@@ -384,4 +384,30 @@ describe("RuleRegistry", () => {
     assertEq(result.action, "proceed", "proceeds when no hooks");
     assertEq(result.prompt, "original prompt", "prompt unchanged");
   });
+
+  // ── matchedRule provenance (S02 journal support) ───────────────────
+
+  test("evaluateDispatch result includes matchedRule on dispatch match", async () => {
+    const rules: UnifiedRule[] = [
+      mockDispatchRule("my-planning-rule", "planning"),
+    ];
+    const registry = new RuleRegistry(rules);
+    const ctx = makeContext("planning");
+    const result = await registry.evaluateDispatch(ctx);
+
+    assertEq(result.action, "dispatch", "result is a dispatch action");
+    assertEq(result.matchedRule, "my-planning-rule", "matchedRule is the rule name");
+  });
+
+  test("evaluateDispatch result includes matchedRule '<no-match>' on fallback stop", async () => {
+    const rules: UnifiedRule[] = [
+      mockDispatchRule("only-planning", "planning"),
+    ];
+    const registry = new RuleRegistry(rules);
+    const ctx = makeContext("some-unknown-phase");
+    const result = await registry.evaluateDispatch(ctx);
+
+    assertEq(result.action, "stop", "result is a stop action");
+    assertEq(result.matchedRule, "<no-match>", "matchedRule is '<no-match>' on fallback");
+  });
 });
