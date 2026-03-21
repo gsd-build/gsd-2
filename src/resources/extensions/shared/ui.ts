@@ -28,6 +28,7 @@
  * individual methods don't need it.
  */
 
+import { createRequire as _createRequire } from "node:module";
 import { type Theme } from "@gsd/pi-coding-agent";
 
 // ─── Lazy @gsd/pi-tui resolution ─────────────────────────────────────────────
@@ -40,7 +41,10 @@ let _piTui: PiTuiFns | undefined;
 function piTui(): PiTuiFns {
 	if (!_piTui) {
 		// eslint-disable-next-line @typescript-eslint/no-require-imports
-		_piTui = require("@gsd/pi-tui") as PiTuiFns;
+		const _require = typeof require !== "undefined"
+			? require
+			: _createRequire(import.meta.url);
+		_piTui = _require("@gsd/pi-tui") as PiTuiFns;
 	}
 	return _piTui;
 }

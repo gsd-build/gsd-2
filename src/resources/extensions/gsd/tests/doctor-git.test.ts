@@ -307,6 +307,12 @@ async function main(): Promise<void> {
       const dir = createRepoWithActiveMilestone();
       cleanups.push(dir);
 
+      // Remove the "main" branch and enter detached HEAD so
+      // nativeDetectMainBranch() won't find any fallback branch
+      const headSha = run("git rev-parse HEAD", dir).trim();
+      run("git checkout --detach " + headSha, dir);
+      run("git branch -D main", dir);
+
       // Write integration branch metadata for M001 pointing to a non-existent branch
       const metaPath = join(dir, ".gsd", "milestones", "M001", "M001-META.json");
       writeFileSync(metaPath, JSON.stringify({ integrationBranch: "feat/does-not-exist" }, null, 2));
