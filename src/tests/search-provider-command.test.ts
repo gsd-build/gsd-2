@@ -138,8 +138,8 @@ test('direct arg "tavily" sets preference and notifies', async () => {
 
       // Notification sent
       assert.equal(ctx.ui.notifyCalls.length, 1, 'should notify once')
-      assert.match(ctx.ui.notifyCalls[0].message, /Search provider set to tavily/)
-      assert.match(ctx.ui.notifyCalls[0].message, /Effective provider: tavily/)
+      assert.match(ctx.ui.notifyCalls[0].message, /Search provider set to tavily/, 'notification should confirm provider set')
+      assert.match(ctx.ui.notifyCalls[0].message, /Effective provider: tavily/, 'notification should show effective provider')
     })
   } finally {
     cleanup()

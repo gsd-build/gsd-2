@@ -133,11 +133,11 @@ test("executeTavilySearch sends POST to Tavily API and produces CachedSearchResu
     const data = await response.json() as { results: Array<{ title: string; url: string; content: string; score: number; published_date?: string }> };
 
     // Verify request shape
-    assert.equal(captured.url, "https://api.tavily.com/search");
-    assert.equal(captured.method, "POST");
-    assert.equal(captured.headers?.["Content-Type"], "application/json");
-    assert.equal(captured.headers?.["Authorization"], "Bearer tvly-test-key-12345");
-    assert.deepEqual(captured.body, requestBody);
+    assert.equal(captured.url, "https://api.tavily.com/search", "request URL");
+    assert.equal(captured.method, "POST", "HTTP method");
+    assert.equal(captured.headers?.["Content-Type"], "application/json", "Content-Type header");
+    assert.equal(captured.headers?.["Authorization"], "Bearer tvly-test-key-12345", "Authorization header");
+    assert.deepEqual(captured.body, requestBody, "request body");
 
     // Verify response mapping
     const mapped = data.results.map(normalizeTavilyResult);
