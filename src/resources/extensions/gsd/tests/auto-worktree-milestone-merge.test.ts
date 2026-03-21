@@ -182,7 +182,7 @@ async function main(): Promise<void> {
     }
 
     // ─── Test 3: Nothing to commit — preserves branch (#1738) ──────────
-    console.log("\n=== nothing to commit — preserves branch (#1738) ===");
+    console.log("\n=== nothing to commit — safe when no code changes (#1738, #1792) ===");
     {
       const repo = freshRepo();
       const wtPath = createAutoWorktree(repo, "M030");
@@ -190,7 +190,8 @@ async function main(): Promise<void> {
       // Don't add any slices/changes — milestone branch is identical to main
       const roadmap = makeRoadmap("M030", "Empty milestone", []);
 
-      // Should throw to prevent silent branch deletion when squash is empty
+      // Should NOT throw — milestone branch is identical to main, nothing to lose.
+      // The anchor check (#1792) verifies no code files differ and passes through.
       let threw = false;
       let errorMsg = "";
       try {
@@ -199,12 +200,7 @@ async function main(): Promise<void> {
         threw = true;
         errorMsg = err instanceof Error ? err.message : String(err);
       }
-      assertTrue(threw, "throws on nothing-to-commit to preserve branch");
-      assertTrue(errorMsg.includes("empty commit"), "error message mentions empty commit");
-
-      // Milestone branch must still exist — not deleted
-      const branches = run("git branch", repo);
-      assertTrue(branches.includes("milestone/M030"), "milestone branch preserved when squash is empty");
+      assertTrue(!threw, `safe empty milestone should not throw (got: ${errorMsg})`);
 
       // Main log unchanged (only init commit)
       const mainLog = run("git log --oneline main", repo);
@@ -412,22 +408,17 @@ async function main(): Promise<void> {
       // Make no changes — squash will produce nothing to commit
       const roadmap = makeRoadmap("M080", "Empty milestone", []);
 
+      // With the #1792 anchor check, empty milestones with no code changes
+      // are safe to proceed — no data to lose.
       let threw = false;
+      let errMsg = "";
       try {
         mergeMilestoneToMain(repo, "M080", roadmap);
       } catch (err: unknown) {
         threw = true;
-        const msg = err instanceof Error ? err.message : String(err);
-        assertTrue(msg.includes("empty commit"), "#1738 error says empty commit");
-        assertTrue(msg.includes("preserved"), "#1738 error says branch preserved");
+        errMsg = err instanceof Error ? err.message : String(err);
       }
-      assertTrue(threw, "#1738 throws to prevent silent data loss");
-
-      const branches = run("git branch", repo);
-      assertTrue(
-        branches.includes("milestone/M080"),
-        "#1738 milestone branch NOT deleted on empty squash",
-      );
+      assertTrue(!threw, `empty milestone with no code changes should not throw (got: ${errMsg})`);
     }
 
     // ─── Test 10: #1738 Bug 3 — clearProjectRootStateFiles cleans synced dirs ──
@@ -507,6 +498,75 @@ async function main(): Promise<void> {
         branches.includes("milestone/M100"),
         "#1738 e2e: milestone branch preserved on dirty tree rejection",
       );
+    }
+
+    // ─── Test 12: Throw on unanchored code changes after empty commit (#1792) ─
+    console.log("\n=== throw on unanchored code changes after empty commit (#1792) ===");
+    {
+      const repo = freshRepo();
+      const wtPath = createAutoWorktree(repo, "M120");
+
+      addSliceToMilestone(repo, wtPath, "M120", "S01", "Critical feature", [
+        { file: "critical.ts", content: "export const critical = true;\n", message: "add critical feature" },
+      ]);
+
+      // Simulate: merge then revert — git considers branch "already merged"
+      // but code is NOT on main (reverted).
+      run(`git merge milestone/M120 --no-ff -m "merge M120"`, repo);
+      run("git revert HEAD --no-edit -m 1", repo);
+
+      const roadmap = makeRoadmap("M120", "Critical milestone", [
+        { id: "S01", title: "Critical feature" },
+      ]);
+
+      let threw = false;
+      let errMsg = "";
+      try {
+        mergeMilestoneToMain(repo, "M120", roadmap);
+      } catch (err) {
+        threw = true;
+        errMsg = err instanceof Error ? err.message : String(err);
+      }
+      assertTrue(threw, "throws when milestone has unanchored code changes (#1792)");
+      assertTrue(
+        errMsg.includes("code file(s) not on"),
+        "error message mentions unanchored code files (#1792)",
+      );
+
+      const branches = run("git branch", repo);
+      assertTrue(
+        branches.includes("milestone/M120"),
+        "milestone branch preserved when code is unanchored (#1792)",
+      );
+    }
+
+    // ─── Test 13: Safe teardown when nothing-to-commit and work already on main (#1792) ─
+    console.log("\n=== safe teardown — nothing to commit, work already on main (#1792) ===");
+    {
+      const repo = freshRepo();
+      const wtPath = createAutoWorktree(repo, "M130");
+
+      addSliceToMilestone(repo, wtPath, "M130", "S01", "Already landed", [
+        { file: "landed.ts", content: "export const landed = true;\n", message: "add landed feature" },
+      ]);
+
+      run("git merge --squash milestone/M130", repo);
+      run('git commit -m "pre-land milestone work"', repo);
+
+      const roadmap = makeRoadmap("M130", "Pre-landed milestone", [
+        { id: "S01", title: "Already landed" },
+      ]);
+
+      let threw = false;
+      let errMsg = "";
+      try {
+        mergeMilestoneToMain(repo, "M130", roadmap);
+      } catch (err) {
+        threw = true;
+        errMsg = err instanceof Error ? err.message : String(err);
+      }
+      assertTrue(!threw, `safe nothing-to-commit should not throw (got: ${errMsg})`);
+      assertTrue(existsSync(join(repo, "landed.ts")), "landed.ts present on main");
     }
 
   } finally {
