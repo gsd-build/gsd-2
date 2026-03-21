@@ -439,7 +439,11 @@ function ProjectAwareWorkspace() {
   // Shut down all projects when the tab actually closes
   useEffect(() => {
     const handlePageHide = () => {
-      navigator.sendBeacon("/api/shutdown", "")
+      // sendBeacon cannot set custom headers, so pass the auth token as a
+      // query parameter instead (the proxy accepts `_token` as a fallback).
+      const token = getAuthToken()
+      const url = token ? `/api/shutdown?_token=${token}` : "/api/shutdown"
+      navigator.sendBeacon(url, "")
     }
 
     window.addEventListener("pagehide", handlePageHide)
