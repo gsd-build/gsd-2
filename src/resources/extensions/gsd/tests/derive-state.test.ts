@@ -957,6 +957,28 @@ slice: S01
     }
   }
 
+  // ─── Test: zero-slice roadmap → pre-planning, not blocked (#1785) ────
+  console.log('\n=== zero-slice roadmap → pre-planning, not blocked (#1785) ===');
+  {
+    const base = createFixtureBase();
+    try {
+      // Write a stub roadmap with zero slices (placeholder text, no slice definitions)
+      writeRoadmap(base, 'M001', `# M001: Stub Milestone\n\n**Vision:** Placeholder.\n\n## Slices\n\n_No slices defined yet._\n`);
+
+      const state = await deriveState(base);
+
+      assertEq(state.phase, 'pre-planning', 'phase is pre-planning when roadmap has zero slices');
+      assertTrue(state.activeMilestone !== null, 'activeMilestone is set');
+      assertEq(state.activeMilestone?.id, 'M001', 'activeMilestone is M001');
+      assertEq(state.activeSlice, null, 'activeSlice is null');
+      assertEq(state.activeTask, null, 'activeTask is null');
+      assertEq(state.blockers.length, 0, 'no blockers reported');
+      assertTrue(state.nextAction.includes('M001'), 'nextAction references M001');
+    } finally {
+      cleanup(base);
+    }
+  }
+
   report();
 }
 

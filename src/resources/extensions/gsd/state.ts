@@ -550,6 +550,30 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
     };
   }
 
+  // ── Zero-slice roadmap guard (#1785) ─────────────────────────────────
+  // A stub roadmap (placeholder text, no slice definitions) has a truthy
+  // roadmap object but an empty slices array. Without this check the
+  // slice-finding loop below finds nothing and returns phase: "blocked".
+  // An empty slices array means the roadmap still needs slice definitions,
+  // so the correct phase is pre-planning.
+  if (activeRoadmap.slices.length === 0) {
+    return {
+      activeMilestone,
+      activeSlice: null,
+      activeTask: null,
+      phase: 'pre-planning',
+      recentDecisions: [],
+      blockers: [],
+      nextAction: `Milestone ${activeMilestone.id} has a roadmap but no slices defined. Add slices to the roadmap.`,
+      registry,
+      requirements,
+      progress: {
+        milestones: milestoneProgress,
+        slices: { done: 0, total: 0 },
+      },
+    };
+  }
+
   // Check if active milestone needs validation or completion (all slices done)
   if (isMilestoneComplete(activeRoadmap)) {
     const validationFile = resolveMilestoneFile(basePath, activeMilestone.id, "VALIDATION");
