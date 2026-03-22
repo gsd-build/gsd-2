@@ -8,7 +8,7 @@
  * Uses temp directories with real .gsd/milestones/M001/ structure.
  */
 
-import test from 'node:test';
+import test, { describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -28,12 +28,34 @@ function writeManifest(base: string, content: string): void {
   writeFileSync(join(mDir, 'M001-SECRETS.md'), content);
 }
 
-// ─── Mixed statuses ──────────────────────────────────────────────────────────
+// ─── Tests that require env var save/restore ──────────────────────────────────
 
-test('getManifestStatus: mixed statuses — categorizes entries correctly', async () => {
-  const tmp = makeTempDir('manifest-mixed');
-  const savedVal = process.env.GSD_TEST_EXISTING_KEY_001;
-  try {
+describe('getManifestStatus with env var isolation', () => {
+  let tmp: string;
+  let savedGsdTestExistingKey001: string | undefined;
+  let savedGsdTestOverrideKey: string | undefined;
+
+  beforeEach(() => {
+    tmp = makeTempDir('manifest-test');
+    savedGsdTestExistingKey001 = process.env.GSD_TEST_EXISTING_KEY_001;
+    savedGsdTestOverrideKey = process.env.GSD_TEST_OVERRIDE_KEY;
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    if (savedGsdTestExistingKey001 !== undefined) {
+      process.env.GSD_TEST_EXISTING_KEY_001 = savedGsdTestExistingKey001;
+    } else {
+      delete process.env.GSD_TEST_EXISTING_KEY_001;
+    }
+    if (savedGsdTestOverrideKey !== undefined) {
+      process.env.GSD_TEST_OVERRIDE_KEY = savedGsdTestOverrideKey;
+    } else {
+      delete process.env.GSD_TEST_OVERRIDE_KEY;
+    }
+  });
+
+  test('getManifestStatus: mixed statuses — categorizes entries correctly', async () => {
     process.env.GSD_TEST_EXISTING_KEY_001 = 'some-value';
 
     writeManifest(tmp, `# Secrets Manifest
@@ -80,18 +102,47 @@ test('getManifestStatus: mixed statuses — categorizes entries correctly', asyn
     assert.deepStrictEqual(result!.collected, ['COLLECTED_KEY']);
     assert.deepStrictEqual(result!.skipped, ['SKIPPED_KEY']);
     assert.deepStrictEqual(result!.existing, ['GSD_TEST_EXISTING_KEY_001']);
-  } finally {
-    delete process.env.GSD_TEST_EXISTING_KEY_001;
-    if (savedVal !== undefined) process.env.GSD_TEST_EXISTING_KEY_001 = savedVal;
-    rmSync(tmp, { recursive: true, force: true });
-  }
+  });
+
+  test('getManifestStatus: key in env overrides manifest status — collected key in env goes to existing', async () => {
+    process.env.GSD_TEST_OVERRIDE_KEY = 'already-here';
+
+    writeManifest(tmp, `# Secrets Manifest
+
+**Milestone:** M001
+**Generated:** 2025-06-20T10:00:00Z
+
+### GSD_TEST_OVERRIDE_KEY
+
+**Service:** Override
+**Status:** collected
+**Destination:** dotenv
+
+1. Was collected but now in env
+`);
+
+    const result = await getManifestStatus(tmp, 'M001');
+    assert.notStrictEqual(result, null);
+    assert.deepStrictEqual(result!.pending, []);
+    assert.deepStrictEqual(result!.collected, []);
+    assert.deepStrictEqual(result!.skipped, []);
+    assert.deepStrictEqual(result!.existing, ['GSD_TEST_OVERRIDE_KEY']);
+  });
 });
 
-// ─── All pending ─────────────────────────────────────────────────────────────
+// ─── Tests without env var dependencies ──────────────────────────────────────
 
-test('getManifestStatus: all pending — 3 pending entries, none in env', async () => {
-  const tmp = makeTempDir('manifest-pending');
-  try {
+describe('getManifestStatus basic cases', () => {
+  let tmp: string;
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  // ─── All pending ─────────────────────────────────────────────────────────────
+
+  test('getManifestStatus: all pending — 3 pending entries, none in env', async () => {
+    tmp = makeTempDir('manifest-pending');
     // Ensure none of these are in process.env
     delete process.env.PEND_A;
     delete process.env.PEND_B;
@@ -133,16 +184,12 @@ test('getManifestStatus: all pending — 3 pending entries, none in env', async 
     assert.deepStrictEqual(result!.collected, []);
     assert.deepStrictEqual(result!.skipped, []);
     assert.deepStrictEqual(result!.existing, []);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
+  });
 
-// ─── All collected ───────────────────────────────────────────────────────────
+  // ─── All collected ───────────────────────────────────────────────────────────
 
-test('getManifestStatus: all collected — 2 collected entries, none in env', async () => {
-  const tmp = makeTempDir('manifest-collected');
-  try {
+  test('getManifestStatus: all collected — 2 collected entries, none in env', async () => {
+    tmp = makeTempDir('manifest-collected');
     delete process.env.COLL_X;
     delete process.env.COLL_Y;
 
@@ -174,64 +221,21 @@ test('getManifestStatus: all collected — 2 collected entries, none in env', as
     assert.deepStrictEqual(result!.collected, ['COLL_X', 'COLL_Y']);
     assert.deepStrictEqual(result!.skipped, []);
     assert.deepStrictEqual(result!.existing, []);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
+  });
 
-// ─── Key in env overrides manifest status ────────────────────────────────────
+  // ─── Missing manifest ────────────────────────────────────────────────────────
 
-test('getManifestStatus: key in env overrides manifest status — collected key in env goes to existing', async () => {
-  const tmp = makeTempDir('manifest-override');
-  const savedVal = process.env.GSD_TEST_OVERRIDE_KEY;
-  try {
-    process.env.GSD_TEST_OVERRIDE_KEY = 'already-here';
-
-    writeManifest(tmp, `# Secrets Manifest
-
-**Milestone:** M001
-**Generated:** 2025-06-20T10:00:00Z
-
-### GSD_TEST_OVERRIDE_KEY
-
-**Service:** Override
-**Status:** collected
-**Destination:** dotenv
-
-1. Was collected but now in env
-`);
-
-    const result = await getManifestStatus(tmp, 'M001');
-    assert.notStrictEqual(result, null);
-    assert.deepStrictEqual(result!.pending, []);
-    assert.deepStrictEqual(result!.collected, []);
-    assert.deepStrictEqual(result!.skipped, []);
-    assert.deepStrictEqual(result!.existing, ['GSD_TEST_OVERRIDE_KEY']);
-  } finally {
-    delete process.env.GSD_TEST_OVERRIDE_KEY;
-    if (savedVal !== undefined) process.env.GSD_TEST_OVERRIDE_KEY = savedVal;
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-// ─── Missing manifest ────────────────────────────────────────────────────────
-
-test('getManifestStatus: missing manifest — returns null', async () => {
-  const tmp = makeTempDir('manifest-missing');
-  try {
+  test('getManifestStatus: missing manifest — returns null', async () => {
+    tmp = makeTempDir('manifest-missing');
     // No .gsd directory at all
     const result = await getManifestStatus(tmp, 'M001');
     assert.strictEqual(result, null);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
+  });
 
-// ─── Empty manifest (no entries) ─────────────────────────────────────────────
+  // ─── Empty manifest (no entries) ─────────────────────────────────────────────
 
-test('getManifestStatus: empty manifest — exists but no H3 sections', async () => {
-  const tmp = makeTempDir('manifest-empty');
-  try {
+  test('getManifestStatus: empty manifest — exists but no H3 sections', async () => {
+    tmp = makeTempDir('manifest-empty');
     writeManifest(tmp, `# Secrets Manifest
 
 **Milestone:** M001
@@ -244,16 +248,12 @@ test('getManifestStatus: empty manifest — exists but no H3 sections', async ()
     assert.deepStrictEqual(result!.collected, []);
     assert.deepStrictEqual(result!.skipped, []);
     assert.deepStrictEqual(result!.existing, []);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
+  });
 
-// ─── Env via .env file (not just process.env) ────────────────────────────────
+  // ─── Env via .env file (not just process.env) ────────────────────────────────
 
-test('getManifestStatus: key in .env file counts as existing', async () => {
-  const tmp = makeTempDir('manifest-dotenv');
-  try {
+  test('getManifestStatus: key in .env file counts as existing', async () => {
+    tmp = makeTempDir('manifest-dotenv');
     delete process.env.DOTENV_ONLY_KEY;
 
     writeManifest(tmp, `# Secrets Manifest
@@ -277,7 +277,5 @@ test('getManifestStatus: key in .env file counts as existing', async () => {
     assert.notStrictEqual(result, null);
     assert.deepStrictEqual(result!.existing, ['DOTENV_ONLY_KEY']);
     assert.deepStrictEqual(result!.pending, []);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
+  });
 });
