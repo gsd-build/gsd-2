@@ -41,17 +41,20 @@ export function registerJournalTools(pi: ExtensionAPI): void {
         if (limited.length === 0) {
           return {
             content: [{ type: "text" as const, text: "No matching journal entries found." }],
+            details: { operation: "journal_query", count: 0 } as any,
           };
         }
 
         return {
           content: [{ type: "text" as const, text: JSON.stringify(limited, null, 2) }],
+          details: { operation: "journal_query", count: limited.length } as any,
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         process.stderr.write(`gsd-journal: gsd_journal_query tool failed: ${msg}\n`);
         return {
           content: [{ type: "text" as const, text: `Error querying journal: ${msg}` }],
+          details: { operation: "journal_query", error: msg } as any,
         };
       }
     },

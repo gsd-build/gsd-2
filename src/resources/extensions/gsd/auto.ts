@@ -169,7 +169,7 @@ import {
 } from "./auto-recovery.js";
 import { resolveDispatch, DISPATCH_RULES } from "./auto-dispatch.js";
 import { initRegistry, convertDispatchRules } from "./rule-registry.js";
-import { emitJournalEvent as _emitJournalEvent } from "./journal.js";
+import { emitJournalEvent as _emitJournalEvent, type JournalEntry } from "./journal.js";
 import {
   type AutoDashboardData,
   updateProgressWidget as _updateProgressWidget,
@@ -995,7 +995,7 @@ function buildLoopDeps(): LoopDeps {
     },
 
     // Journal
-    emitJournalEvent: (entry) => _emitJournalEvent(s.basePath, entry),
+    emitJournalEvent: (entry: JournalEntry) => _emitJournalEvent(s.basePath, entry),
   } as unknown as LoopDeps;
 }
 

@@ -14,7 +14,7 @@
 
 import { appendFileSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { gsdRoot } from "./paths.ts";
+import { gsdRoot } from "./paths.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
