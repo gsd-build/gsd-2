@@ -19,6 +19,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execSync } from "node:child_process";
 
 import {
   writeSessionStatus,
@@ -51,6 +52,7 @@ import {
   resetOrchestrator,
   refreshWorkerStatuses,
 } from "../parallel-orchestrator.js";
+import { worktreePath } from "../worktree-manager.js";
 
 import { validatePreferences, resolveParallelConfig } from "../preferences.js";
 
@@ -62,6 +64,38 @@ import type { WorkerInfo } from "../parallel-orchestrator.js";
 function makeTmpBase(): string {
   const base = mkdtempSync(join(tmpdir(), "gsd-parallel-test-"));
   mkdirSync(join(base, ".gsd"), { recursive: true });
+  return base;
+}
+
+function run(command: string, cwd: string): string {
+  return execSync(command, { cwd, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" }).trim();
+}
+
+function makeGitBaseRepo(): string {
+  const base = mkdtempSync(join(tmpdir(), "gsd-parallel-git-test-"));
+  run("git init -b main", base);
+  run('git config user.name "Test User"', base);
+  run('git config user.email "test@example.com"', base);
+  mkdirSync(join(base, ".gsd", "milestones", "M001"), { recursive: true });
+  writeFileSync(join(base, ".gitignore"), ".gsd\n", "utf-8");
+  writeFileSync(join(base, ".gsd", "PROJECT.md"), "# Project\n", "utf-8");
+  writeFileSync(join(base, ".gsd", "REQUIREMENTS.md"), "# Requirements\n", "utf-8");
+  writeFileSync(join(base, ".gsd", "DECISIONS.md"), "# Decisions\n", "utf-8");
+  writeFileSync(join(base, ".gsd", "KNOWLEDGE.md"), "# Knowledge\n", "utf-8");
+  writeFileSync(join(base, ".gsd", "milestones", "M001", "M001-CONTEXT.md"), "# M001: Done\n", "utf-8");
+  writeFileSync(
+    join(base, ".gsd", "milestones", "M001", "M001-ROADMAP.md"),
+    "# M001: Done\n\n## Slices\n- [x] **S01: Finished** `risk:low` `depends:[]`\n  > done\n",
+    "utf-8",
+  );
+  writeFileSync(
+    join(base, ".gsd", "milestones", "M001", "M001-SUMMARY.md"),
+    "---\nid: M001\ntitle: Done\nstatus: complete\n---\n\n# M001 Summary\n",
+    "utf-8",
+  );
+  run("git add .gitignore", base);
+  run("git add -f .gsd/PROJECT.md .gsd/REQUIREMENTS.md .gsd/DECISIONS.md .gsd/KNOWLEDGE.md .gsd/milestones/M001", base);
+  run('git commit -m "seed tracked M001"', base);
   return base;
 }
 
@@ -343,6 +377,37 @@ describe("parallel-orchestrator: lifecycle", () => {
     // State is "running" if spawn succeeds, "error" if binary not found (CI)
     assert.ok(status.state === "running" || status.state === "error",
       `expected running or error, got ${status.state}`);
+  });
+
+  it("startParallel syncs untracked next-milestone artifacts into the worker worktree", async () => {
+    const repo = makeGitBaseRepo();
+    try {
+      mkdirSync(join(repo, ".gsd", "milestones", "M002"), { recursive: true });
+      writeFileSync(
+        join(repo, ".gsd", "milestones", "M002", "M002-ROADMAP.md"),
+        "# M002: Next\n\n## Slices\n- [ ] **S01: Work** `risk:low` `depends:[]`\n  > do work\n",
+        "utf-8",
+      );
+      writeFileSync(
+        join(repo, ".gsd", "milestones", "M002", "M002-META.json"),
+        '{"integrationBranch":"main"}\n',
+        "utf-8",
+      );
+
+      const result = await startParallel(repo, ["M002"], {
+        parallel: { enabled: true, max_workers: 1, merge_strategy: "per-milestone", auto_merge: "confirm" },
+      });
+      assert.deepEqual(result.started, ["M002"]);
+
+      const wtRoadmap = join(worktreePath(repo, "M002"), ".gsd", "milestones", "M002", "M002-ROADMAP.md");
+      assert.equal(existsSync(wtRoadmap), true, "worktree should receive untracked M002 roadmap from project root sync");
+      assert.match(readFileSync(wtRoadmap, "utf-8"), /# M002: Next/);
+
+      await stopParallel(repo);
+    } finally {
+      resetOrchestrator();
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 
   it("stopParallel stops all workers", async () => {

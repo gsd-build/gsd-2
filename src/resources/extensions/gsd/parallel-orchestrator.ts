@@ -21,7 +21,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gsdRoot } from "./paths.js";
 import { createWorktree, worktreePath } from "./worktree-manager.js";
-import { autoWorktreeBranch, runWorktreePostCreateHook } from "./auto-worktree.js";
+import { autoWorktreeBranch, runWorktreePostCreateHook, syncGsdStateToWorktree } from "./auto-worktree.js";
 import { nativeBranchExists } from "./native-git-bridge.js";
 import { readIntegrationBranch } from "./git-service.js";
 import { resolveParallelConfig } from "./preferences.js";
@@ -489,6 +489,13 @@ function createMilestoneWorktree(basePath: string, milestoneId: string): string 
     const integrationBranch = readIntegrationBranch(basePath, milestoneId) ?? undefined;
     info = createWorktree(basePath, milestoneId, { branch, startPoint: integrationBranch });
   }
+
+  // Parallel workers bootstrap from the worktree path. If the next milestone
+  // only exists as untracked .gsd state in the project root, a raw git
+  // worktree checkout won't contain it yet. Sync planning artifacts into the
+  // worktree before the worker process starts so bootstrap deriveState() sees
+  // the locked milestone immediately.
+  syncGsdStateToWorktree(basePath, info.path);
 
   // Run post-create hook if configured
   runWorktreePostCreateHook(basePath, info.path);
