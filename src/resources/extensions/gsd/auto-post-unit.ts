@@ -64,6 +64,13 @@ import { _resetHasChangesCache } from "./native-git-bridge.js";
 /** Throttle STATE.md rebuilds — at most once per 30 seconds */
 const STATE_REBUILD_MIN_INTERVAL_MS = 30_000;
 
+/**
+ * Maximum number of artifact-verification retries before giving up.
+ * Matches the bounded-retry pattern in auto-verification.ts (runPostUnitVerification).
+ * Without this cap, a unit whose artifact is never written retries forever (#2007).
+ */
+export const MAX_ARTIFACT_RETRIES = 3;
+
 export interface PreVerificationOpts {
   skipSettleDelay?: boolean;
   skipDoctor?: boolean;
@@ -375,18 +382,31 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
         if (hasExpectedArtifact) {
           const retryKey = `${s.currentUnit.type}:${s.currentUnit.id}`;
           const attempt = (s.verificationRetryCount.get(retryKey) ?? 0) + 1;
-          s.verificationRetryCount.set(retryKey, attempt);
-          s.pendingVerificationRetry = {
-            unitId: s.currentUnit.id,
-            failureContext: `Artifact verification failed: expected artifact for ${s.currentUnit.type} "${s.currentUnit.id}" was not found on disk after unit execution (attempt ${attempt}).`,
-            attempt,
-          };
-          debugLog("postUnit", { phase: "artifact-verify-retry", unitType: s.currentUnit.type, unitId: s.currentUnit.id, attempt });
-          ctx.ui.notify(
-            `Artifact missing for ${s.currentUnit.type} ${s.currentUnit.id} — retrying (attempt ${attempt})`,
-            "warning",
-          );
-          return "retry";
+
+          if (attempt > MAX_ARTIFACT_RETRIES) {
+            // Cap reached — stop retrying to prevent unbounded loops (#2007)
+            s.verificationRetryCount.delete(retryKey);
+            s.pendingVerificationRetry = null;
+            debugLog("postUnit", { phase: "artifact-verify-exhausted", unitType: s.currentUnit.type, unitId: s.currentUnit.id, attempts: attempt - 1 });
+            ctx.ui.notify(
+              `Artifact verification failed ${attempt - 1} times for ${s.currentUnit.type} ${s.currentUnit.id} — giving up`,
+              "error",
+            );
+            // Fall through — stuck detection or next-iteration dispatch will handle it
+          } else {
+            s.verificationRetryCount.set(retryKey, attempt);
+            s.pendingVerificationRetry = {
+              unitId: s.currentUnit.id,
+              failureContext: `Artifact verification failed: expected artifact for ${s.currentUnit.type} "${s.currentUnit.id}" was not found on disk after unit execution (attempt ${attempt}/${MAX_ARTIFACT_RETRIES}).`,
+              attempt,
+            };
+            debugLog("postUnit", { phase: "artifact-verify-retry", unitType: s.currentUnit.type, unitId: s.currentUnit.id, attempt, maxRetries: MAX_ARTIFACT_RETRIES });
+            ctx.ui.notify(
+              `Artifact missing for ${s.currentUnit.type} ${s.currentUnit.id} — retrying (attempt ${attempt}/${MAX_ARTIFACT_RETRIES})`,
+              "warning",
+            );
+            return "retry";
+          }
         }
       }
     } else {

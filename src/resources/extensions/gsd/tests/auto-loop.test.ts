@@ -1358,7 +1358,7 @@ test("stuck detection: window resets recovery when deriveState returns a differe
   );
 });
 
-test("stuck detection: does not push to window during verification retry", async () => {
+test("stuck detection: pushes to window but skips detection during verification retry (#2007)", async () => {
   _resetPendingResolve();
 
   const ctx = makeMockCtx();
@@ -1417,8 +1417,8 @@ test("stuck detection: does not push to window during verification retry", async
 
   await loopPromise;
 
-  // Even though same unit was derived 4 times, verification retries should
-  // not push to the sliding window, so stuck detection should not have fired
+  // Even though same unit was derived 4 times and pushed to the window,
+  // stuck detection is skipped during verification retries (#2007)
   assert.ok(
     !stopReason.includes("Stuck"),
     `stuck detection should not fire during verification retries, got: ${stopReason}`,
