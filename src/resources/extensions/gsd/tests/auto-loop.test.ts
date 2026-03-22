@@ -7,6 +7,7 @@ import {
   resolveAgentEnd,
   runUnit,
   autoLoop,
+  detectStuck,
   _resetPendingResolve,
   _setActiveSession,
   isSessionSwitchInFlight,
@@ -37,9 +38,6 @@ function makeMockSession(opts?: {
   const session = {
     active: true,
     verbose: false,
-    sessionSwitchInFlight: false,
-    pendingResolve: null,
-    pendingAgentEndQueue: [],
     cmdCtx: {
       newSession: () => {
         opts?.onNewSessionStart?.(session);
@@ -96,7 +94,6 @@ test("resolveAgentEnd resolves a pending runUnit promise", async () => {
   const ctx = makeMockCtx();
   const pi = makeMockPi();
   const s = makeMockSession();
-  _setActiveSession(s);
   const event = makeEvent();
 
   // Start runUnit — it will create the promise and send a message,
@@ -108,7 +105,6 @@ test("resolveAgentEnd resolves a pending runUnit promise", async () => {
     "task",
     "T01",
     "do stuff",
-    undefined,
   );
 
   // Give the microtask queue a tick so runUnit reaches the await
@@ -122,44 +118,35 @@ test("resolveAgentEnd resolves a pending runUnit promise", async () => {
   assert.deepEqual(result.event, event);
 });
 
-test("resolveAgentEnd queues event when no promise is pending", () => {
+test("resolveAgentEnd drops event when no promise is pending", () => {
   _resetPendingResolve();
-  const s = makeMockSession();
-  _setActiveSession(s);
 
-  // Should not throw — queues the event for the next runUnit
+  // Should not throw — event is dropped (logged as warning)
   assert.doesNotThrow(() => {
     resolveAgentEnd(makeEvent());
   });
-  assert.equal(s.pendingAgentEndQueue.length, 1, "event should be queued");
 });
 
-test("double resolveAgentEnd only resolves once (second is queued)", async () => {
+test("double resolveAgentEnd only resolves once (second is dropped)", async () => {
   _resetPendingResolve();
 
   const ctx = makeMockCtx();
   const pi = makeMockPi();
   const s = makeMockSession();
-  _setActiveSession(s);
   const event1 = makeEvent([{ id: 1 }]);
   const event2 = makeEvent([{ id: 2 }]);
 
-  const resultPromise = runUnit(ctx, pi, s, "task", "T01", "prompt", undefined);
+  const resultPromise = runUnit(ctx, pi, s, "task", "T01", "prompt");
 
   await new Promise((r) => setTimeout(r, 10));
 
   // First resolve — should work
   resolveAgentEnd(event1);
 
-  // Second resolve — should be queued (no pending promise)
+  // Second resolve — should be dropped (no pending resolver)
   assert.doesNotThrow(() => {
     resolveAgentEnd(event2);
   });
-  assert.equal(
-    s.pendingAgentEndQueue.length,
-    1,
-    "second event should be queued",
-  );
 
   const result = await resultPromise;
   assert.equal(result.status, "completed");
@@ -174,7 +161,7 @@ test("runUnit returns cancelled when session creation fails", async () => {
   const pi = makeMockPi();
   const s = makeMockSession({ newSessionThrows: "connection refused" });
 
-  const result = await runUnit(ctx, pi, s, "task", "T01", "prompt", undefined);
+  const result = await runUnit(ctx, pi, s, "task", "T01", "prompt");
 
   assert.equal(result.status, "cancelled");
   assert.equal(result.event, undefined);
@@ -190,7 +177,7 @@ test("runUnit returns cancelled when session creation times out", async () => {
   // Session returns cancelled: true (simulates the timeout race outcome)
   const s = makeMockSession({ newSessionResult: { cancelled: true } });
 
-  const result = await runUnit(ctx, pi, s, "task", "T01", "prompt", undefined);
+  const result = await runUnit(ctx, pi, s, "task", "T01", "prompt");
 
   assert.equal(result.status, "cancelled");
   assert.equal(result.event, undefined);
@@ -205,35 +192,31 @@ test("runUnit returns cancelled when s.active is false before sendMessage", asyn
   const s = makeMockSession();
   s.active = false;
 
-  const result = await runUnit(ctx, pi, s, "task", "T01", "prompt", undefined);
+  const result = await runUnit(ctx, pi, s, "task", "T01", "prompt");
 
   assert.equal(result.status, "cancelled");
   assert.equal(pi.calls.length, 0);
 });
 
-test("runUnit only arms pendingResolve after newSession completes", async () => {
+test("runUnit only arms resolve after newSession completes", async () => {
   _resetPendingResolve();
 
   let sawSwitchFlag = false;
-  let sawPendingResolve: unknown = "unset";
 
   const ctx = makeMockCtx();
   const pi = makeMockPi();
   const s = makeMockSession({
     newSessionDelayMs: 20,
-    onNewSessionStart: (session) => {
-      sawSwitchFlag = session.sessionSwitchInFlight;
-      sawPendingResolve = session.pendingResolve;
+    onNewSessionStart: () => {
+      sawSwitchFlag = isSessionSwitchInFlight();
     },
   });
-  _setActiveSession(s);
 
-  const resultPromise = runUnit(ctx, pi, s, "task", "T01", "prompt", undefined);
+  const resultPromise = runUnit(ctx, pi, s, "task", "T01", "prompt");
 
   await new Promise((r) => setTimeout(r, 30));
 
   assert.equal(sawSwitchFlag, true, "session switch guard should be active during newSession");
-  assert.equal(sawPendingResolve, null, "pendingResolve should not be armed before newSession completes");
   assert.equal(isSessionSwitchInFlight(), false, "session switch guard should clear after newSession settles");
 
   resolveAgentEnd(makeEvent());
@@ -275,24 +258,23 @@ test("auto-loop.ts contains a while keyword", () => {
   );
 });
 
-test("auto-loop.ts one-shot pattern: pendingResolve is nulled before calling resolver", () => {
+test("auto-loop.ts one-shot pattern: _currentResolve is nulled before calling resolver", () => {
   const src = readFileSync(
     resolve(import.meta.dirname, "..", "auto-loop.ts"),
     "utf-8",
   );
   // The one-shot pattern requires: save ref, null the variable, then call
-  // Look for the pattern: s.pendingResolve = null appearing before r(
   const resolveBlock = src.slice(
     src.indexOf("export function resolveAgentEnd"),
     src.indexOf("export function resolveAgentEnd") + 600,
   );
-  const nullIdx = resolveBlock.indexOf("pendingResolve = null");
+  const nullIdx = resolveBlock.indexOf("_currentResolve = null");
   const callIdx = resolveBlock.indexOf("r({");
-  assert.ok(nullIdx > 0, "should null pendingResolve in resolveAgentEnd");
+  assert.ok(nullIdx > 0, "should null _currentResolve in resolveAgentEnd");
   assert.ok(callIdx > 0, "should call resolver in resolveAgentEnd");
   assert.ok(
     nullIdx < callIdx,
-    "pendingResolve should be nulled before calling the resolver (one-shot)",
+    "_currentResolve should be nulled before calling the resolver (one-shot)",
   );
 });
 
@@ -462,8 +444,6 @@ function makeLoopSession(overrides?: Partial<Record<string, unknown>>) {
     pendingQuickTasks: [],
     sidecarQueue: [],
     autoModeStartModel: null,
-    pendingResolve: null,
-    pendingAgentEndQueue: [],
     unitDispatchCount: new Map<string, number>(),
     unitLifetimeDispatches: new Map<string, number>(),
     unitRecoveryCount: new Map<string, number>(),
@@ -982,21 +962,25 @@ test("auto.ts startAuto calls autoLoop (not dispatchNextUnit as first dispatch)"
   );
 });
 
-test("index.ts agent_end handler calls resolveAgentEnd (not handleAgentEnd)", () => {
-  const src = readFileSync(
-    resolve(import.meta.dirname, "..", "index.ts"),
+test("agent_end handler calls resolveAgentEnd (not handleAgentEnd)", () => {
+  const hooksSrc = readFileSync(
+    resolve(import.meta.dirname, "..", "bootstrap", "register-hooks.ts"),
     "utf-8",
   );
-  // Find the agent_end handler success path
-  const handlerIdx = src.indexOf('pi.on("agent_end"');
-  assert.ok(handlerIdx > -1, "index.ts must have an agent_end handler");
-  const handlerBlock = src.slice(handlerIdx, handlerIdx + 10000);
+  // Verify the agent_end hook is registered
+  const handlerIdx = hooksSrc.indexOf('pi.on("agent_end"');
+  assert.ok(handlerIdx > -1, "register-hooks.ts must have an agent_end handler");
+
+  const recoverySrc = readFileSync(
+    resolve(import.meta.dirname, "..", "bootstrap", "agent-end-recovery.ts"),
+    "utf-8",
+  );
   assert.ok(
-    handlerBlock.includes("resolveAgentEnd(event)"),
+    recoverySrc.includes("resolveAgentEnd(event)"),
     "agent_end success path must call resolveAgentEnd(event) instead of handleAgentEnd(ctx, pi)",
   );
   assert.ok(
-    handlerBlock.includes("isSessionSwitchInFlight()"),
+    recoverySrc.includes("isSessionSwitchInFlight()"),
     "agent_end handler must ignore session-switch agent_end events from cmdCtx.newSession()",
   );
 });
@@ -1063,7 +1047,7 @@ test("handleAgentEnd in auto.ts is a thin wrapper calling resolveAgentEnd", () =
 
 // ── Stuck counter tests ──────────────────────────────────────────────────────
 
-test("stuck counter: stops when deriveState returns same unit 5 consecutive times", async () => {
+test("stuck detection: stops when sliding window detects same unit 3 consecutive times", async () => {
   _resetPendingResolve();
 
   const ctx = makeMockCtx();
@@ -1098,20 +1082,15 @@ test("stuck counter: stops when deriveState returns same unit 5 consecutive time
 
   const loopPromise = autoLoop(ctx, pi, s, deps);
 
-  // The loop will dispatch the same unit each iteration. On iteration 1, sameUnitCount
-  // starts at 0 and the unit key is set. On iterations 2-5, sameUnitCount increments.
-  // At sameUnitCount=5 (iteration 6), stopAuto is called.
-  // Each iteration requires resolving an agent_end event.
-  // But the stuck counter fires BEFORE runUnit, so we only need to resolve 4 times
-  // (iterations 1-4 each run a unit, iteration 5 increments to 5 and stops).
+  // Sliding window: iteration 1 pushes [A], iteration 2 pushes [A,A],
+  // iteration 3 pushes [A,A,A] → Rule 2 fires (3 consecutive) → Level 1 recovery.
+  // Level 1 invalidates caches and continues. Iteration 4 pushes [A,A,A,A] →
+  // Rule 2 fires again → Level 2 hard stop.
+  // Iterations 1-3 each run a unit (3 resolves needed). Iteration 3 triggers
+  // Level 1 (cache invalidation + continue). Iteration 4 triggers Level 2 (stop
+  // before runUnit), so no 4th resolve needed.
 
-  // Actually: iteration 1 sets lastDerivedUnit (sameUnitCount=0).
-  // Iteration 2: derivedKey === lastDerivedUnit → sameUnitCount=1.
-  // Iteration 3: sameUnitCount=2. Iteration 4: sameUnitCount=3.
-  // Iteration 5: sameUnitCount=4. Iteration 6: sameUnitCount=5 → stop.
-  // So we need to resolve 5 agent_end events (iterations 1-5 each run a unit).
-
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 3; i++) {
     await new Promise((r) => setTimeout(r, 30));
     resolveAgentEnd(makeEvent());
   }
@@ -1127,16 +1106,12 @@ test("stuck counter: stops when deriveState returns same unit 5 consecutive time
     `stop reason should mention 'Stuck', got: ${stopReason}`,
   );
   assert.ok(
-    stopReason.includes("execute-task"),
-    "stop reason should include unitType",
-  );
-  assert.ok(
     stopReason.includes("M001/S01/T01"),
     "stop reason should include unitId",
   );
 });
 
-test("stuck counter: resets when deriveState returns a different unit", async () => {
+test("stuck detection: window resets recovery when deriveState returns a different unit", async () => {
   _resetPendingResolve();
 
   const ctx = makeMockCtx();
@@ -1197,10 +1172,11 @@ test("stuck counter: resets when deriveState returns a different unit", async ()
 
   await loopPromise;
 
-  // The counter should have reset when T02 was derived — no stuck stop
+  // Level 1 recovery fires on iteration 3 (cache invalidation + continue),
+  // then iteration 4 derives T02 — no Level 2 hard stop.
   assert.ok(
     !stopCalled,
-    "stopAuto should NOT have been called — counter reset on unit change",
+    "stopAuto should NOT have been called — different unit broke stuck pattern",
   );
   assert.ok(
     deriveCallCount >= 4,
@@ -1208,7 +1184,7 @@ test("stuck counter: resets when deriveState returns a different unit", async ()
   );
 });
 
-test("stuck counter: does not increment during verification retry", async () => {
+test("stuck detection: does not push to window during verification retry", async () => {
   _resetPendingResolve();
 
   const ctx = makeMockCtx();
@@ -1270,10 +1246,10 @@ test("stuck counter: does not increment during verification retry", async () => 
   await loopPromise;
 
   // Even though same unit was derived 4 times, verification retries should
-  // not count, so stuck counter should not have fired
+  // not push to the sliding window, so stuck detection should not have fired
   assert.ok(
     !stopReason.includes("Stuck"),
-    `stuck counter should not fire during verification retries, got: ${stopReason}`,
+    `stuck detection should not fire during verification retries, got: ${stopReason}`,
   );
   assert.equal(
     verifyCallCount,
@@ -1282,24 +1258,106 @@ test("stuck counter: does not increment during verification retry", async () => 
   );
 });
 
-test("stuck counter: logs debug output with stuck-detected phase", () => {
-  // Structural test: verify the auto-loop.ts source contains both
-  // stuck-detected and stuck-counter-reset debug log phases
+// ── detectStuck unit tests ────────────────────────────────────────────────────
+
+test("detectStuck: returns null for fewer than 2 entries", () => {
+  assert.equal(detectStuck([]), null);
+  assert.equal(detectStuck([{ key: "A" }]), null);
+});
+
+test("detectStuck: Rule 1 — same error twice in a row", () => {
+  const result = detectStuck([
+    { key: "A", error: "ENOENT: file not found" },
+    { key: "A", error: "ENOENT: file not found" },
+  ]);
+  assert.ok(result?.stuck, "should detect same error repeated");
+  assert.ok(result?.reason.includes("Same error repeated"));
+});
+
+test("detectStuck: Rule 1 — different errors do not trigger", () => {
+  const result = detectStuck([
+    { key: "A", error: "ENOENT: file not found" },
+    { key: "A", error: "EACCES: permission denied" },
+  ]);
+  assert.equal(result, null);
+});
+
+test("detectStuck: Rule 2 — same unit 3 consecutive times", () => {
+  const result = detectStuck([
+    { key: "execute-task/M001/S01/T01" },
+    { key: "execute-task/M001/S01/T01" },
+    { key: "execute-task/M001/S01/T01" },
+  ]);
+  assert.ok(result?.stuck);
+  assert.ok(result?.reason.includes("3 consecutive times"));
+});
+
+test("detectStuck: Rule 2 — 2 consecutive does not trigger", () => {
+  assert.equal(detectStuck([
+    { key: "A" },
+    { key: "A" },
+  ]), null);
+});
+
+test("detectStuck: Rule 3 — oscillation A→B→A→B", () => {
+  const result = detectStuck([
+    { key: "A" },
+    { key: "B" },
+    { key: "A" },
+    { key: "B" },
+  ]);
+  assert.ok(result?.stuck);
+  assert.ok(result?.reason.includes("Oscillation"));
+});
+
+test("detectStuck: Rule 3 — non-oscillation pattern A→B→C→B", () => {
+  assert.equal(detectStuck([
+    { key: "A" },
+    { key: "B" },
+    { key: "C" },
+    { key: "B" },
+  ]), null);
+});
+
+test("detectStuck: Rule 1 takes priority over Rule 2 when both match", () => {
+  const result = detectStuck([
+    { key: "A", error: "test error" },
+    { key: "A", error: "test error" },
+    { key: "A", error: "test error" },
+  ]);
+  assert.ok(result?.stuck);
+  // Rule 1 fires first
+  assert.ok(result?.reason.includes("Same error repeated"));
+});
+
+test("detectStuck: truncates long error strings", () => {
+  const longError = "x".repeat(500);
+  const result = detectStuck([
+    { key: "A", error: longError },
+    { key: "A", error: longError },
+  ]);
+  assert.ok(result?.stuck);
+  assert.ok(result!.reason.length < 300, "reason should be truncated");
+});
+
+test("stuck detection: logs debug output with stuck-detected phase", () => {
+  // Structural test: verify the auto-loop.ts source contains
+  // stuck-detected and stuck-counter-reset debug log phases, plus detectStuck
   const src = readFileSync(
     resolve(import.meta.dirname, "..", "auto-loop.ts"),
     "utf-8",
   );
   assert.ok(
     src.includes('"stuck-detected"'),
-    "auto-loop.ts must log phase: 'stuck-detected' when stuck counter fires",
+    "auto-loop.ts must log phase: 'stuck-detected' when stuck detection fires",
   );
   assert.ok(
     src.includes('"stuck-counter-reset"'),
-    "auto-loop.ts must log phase: 'stuck-counter-reset' when counter resets on new unit",
+    "auto-loop.ts must log phase: 'stuck-counter-reset' when recovery resets on new unit",
   );
   assert.ok(
-    src.includes("sameUnitCount"),
-    "auto-loop.ts must track sameUnitCount for stuck detection",
+    src.includes("detectStuck"),
+    "auto-loop.ts must use detectStuck for sliding window analysis",
   );
 });
 

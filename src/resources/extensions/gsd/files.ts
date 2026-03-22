@@ -7,11 +7,11 @@ import { promises as fs } from 'node:fs';
 import { resolve } from 'node:path';
 import { atomicWriteAsync } from './atomic-write.js';
 import { resolveMilestoneFile, relMilestoneFile, resolveGsdRootFile } from './paths.js';
-import { milestoneIdSort, findMilestoneIds } from './guided-flow.js';
+import { milestoneIdSort, findMilestoneIds } from './milestone-ids.js';
 
 import type {
   Roadmap, BoundaryMapEntry,
-  SlicePlan, TaskPlanEntry,
+  SlicePlan, TaskPlanEntry, TaskPlanFile, TaskPlanFrontmatter,
   Summary, SummaryFrontmatter, SummaryRequires, FileModified,
   Continue, ContinueFrontmatter, ContinueStatus,
   RequirementCounts,
@@ -20,7 +20,7 @@ import type {
   ManifestStatus,
 } from './types.js';
 
-import { checkExistingEnvKeys } from '../get-secrets-from-user.js';
+import { checkExistingEnvKeys } from './env-utils.js';
 import { parseRoadmapSlices } from './roadmap-slices.js';
 import { nativeParseRoadmap, nativeExtractSection, nativeParsePlanFile, nativeParseSummaryFile, NATIVE_UNAVAILABLE } from './native-parser-bridge.js';
 import { debugTime, debugCount } from './debug-logger.js';
@@ -277,14 +277,52 @@ export function formatSecretsManifest(manifest: SecretsManifest): string {
 
 // ─── Slice Plan Parser ─────────────────────────────────────────────────────
 
+function normalizeTaskPlanFrontmatter(frontmatter: Record<string, unknown>): TaskPlanFrontmatter {
+  const estimatedStepsRaw = frontmatter.estimated_steps;
+  const estimatedFilesRaw = frontmatter.estimated_files;
+  const skillsUsedRaw = frontmatter.skills_used;
+
+  const parseOptionalNumber = (value: unknown): number | undefined => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = parseInt(value, 10);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return undefined;
+  };
+
+  const estimated_steps = parseOptionalNumber(estimatedStepsRaw);
+  const estimated_files = parseOptionalNumber(estimatedFilesRaw);
+  const skills_used = Array.isArray(skillsUsedRaw)
+    ? skillsUsedRaw.map(v => String(v).trim()).filter(Boolean)
+    : typeof skillsUsedRaw === 'string' && skillsUsedRaw.trim()
+      ? [skillsUsedRaw.trim()]
+      : [];
+
+  return {
+    ...(estimated_steps !== undefined ? { estimated_steps } : {}),
+    ...(estimated_files !== undefined ? { estimated_files } : {}),
+    skills_used,
+  };
+}
+
+export function parseTaskPlanFile(content: string): TaskPlanFile {
+  const [fmLines] = splitFrontmatter(content);
+  const fm = fmLines ? parseFrontmatterMap(fmLines) : {};
+  return {
+    frontmatter: normalizeTaskPlanFrontmatter(fm),
+  };
+}
+
 export function parsePlan(content: string): SlicePlan {
   return cachedParse(content, 'plan', _parsePlanImpl);
 }
 
 function _parsePlanImpl(content: string): SlicePlan {
   const stopTimer = debugTime("parse-plan");
+  const [, body] = splitFrontmatter(content);
   // Try native parser first for better performance
-  const nativeResult = nativeParsePlanFile(content);
+  const nativeResult = nativeParsePlanFile(body);
   if (nativeResult) {
     stopTimer({ native: true });
     return {
@@ -306,7 +344,7 @@ function _parsePlanImpl(content: string): SlicePlan {
     };
   }
 
-  const lines = content.split('\n');
+  const lines = body.split('\n');
 
   const h1 = lines.find(l => l.startsWith('# '));
   let id = '';
@@ -321,13 +359,13 @@ function _parsePlanImpl(content: string): SlicePlan {
     }
   }
 
-  const goal = extractBoldField(content, 'Goal') || '';
-  const demo = extractBoldField(content, 'Demo') || '';
+  const goal = extractBoldField(body, 'Goal') || '';
+  const demo = extractBoldField(body, 'Demo') || '';
 
-  const mhSection = extractSection(content, 'Must-Haves');
+  const mhSection = extractSection(body, 'Must-Haves');
   const mustHaves = mhSection ? parseBullets(mhSection) : [];
 
-  const tasksSection = extractSection(content, 'Tasks');
+  const tasksSection = extractSection(body, 'Tasks');
   const tasks: TaskPlanEntry[] = [];
 
   if (tasksSection) {
@@ -375,7 +413,7 @@ function _parsePlanImpl(content: string): SlicePlan {
     if (currentTask) tasks.push(currentTask);
   }
 
-  const filesSection = extractSection(content, 'Files Likely Touched');
+  const filesSection = extractSection(body, 'Files Likely Touched');
   const filesLikelyTouched = filesSection ? parseBullets(filesSection) : [];
 
   const result = { id, title, goal, demo, mustHaves, tasks, filesLikelyTouched };
@@ -775,7 +813,7 @@ export function parseTaskPlanIO(content: string): { inputFiles: string[]; output
  * The four UAT classification types recognised by GSD auto-mode.
  * `undefined` is returned (not this union) when no type can be determined.
  */
-export type UatType = 'artifact-driven' | 'live-runtime' | 'human-experience' | 'mixed';
+export type UatType = 'artifact-driven' | 'live-runtime' | 'human-experience' | 'mixed' | 'browser-executable' | 'runtime-executable';
 
 /**
  * Extract the UAT type from a UAT file's raw content.
@@ -799,6 +837,8 @@ export function extractUatType(content: string): UatType | undefined {
   const rawValue = modeBullet.slice('UAT mode:'.length).trim().toLowerCase();
 
   if (rawValue.startsWith('artifact-driven')) return 'artifact-driven';
+  if (rawValue.startsWith('browser-executable')) return 'browser-executable';
+  if (rawValue.startsWith('runtime-executable')) return 'runtime-executable';
   if (rawValue.startsWith('live-runtime')) return 'live-runtime';
   if (rawValue.startsWith('human-experience')) return 'human-experience';
   if (rawValue.startsWith('mixed')) return 'mixed';

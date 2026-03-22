@@ -31,7 +31,7 @@ import {
   gsdRoot,
 } from './paths.js';
 
-import { milestoneIdSort, findMilestoneIds } from './guided-flow.js';
+import { milestoneIdSort, findMilestoneIds } from './milestone-ids.js';
 import { nativeBatchParseGsdFiles, type BatchParsedFile } from './native-parser-bridge.js';
 
 import { join, resolve } from 'path';
@@ -126,7 +126,12 @@ export async function getActiveMilestoneId(basePath: string): Promise<string | n
       // A draft milestone is still "active" — this function only determines which milestone is current.
     }
     const roadmap = parseRoadmap(content);
-    if (!isMilestoneComplete(roadmap)) return mid;
+    if (!isMilestoneComplete(roadmap)) {
+      // Summary is the terminal artifact — if it exists, the milestone is
+      // complete even when roadmap checkboxes weren't ticked (#864).
+      const summaryFile = resolveMilestoneFile(basePath, mid, "SUMMARY");
+      if (!summaryFile) return mid;
+    }
   }
   return null;
 }
@@ -258,7 +263,13 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
     }
     const rmap = parseRoadmap(rc);
     roadmapCache.set(mid, rmap);
-    if (!isMilestoneComplete(rmap)) continue;
+    if (!isMilestoneComplete(rmap)) {
+      // Summary is the terminal artifact — if it exists, the milestone is
+      // complete even when roadmap checkboxes weren't ticked (#864).
+      const sf = resolveMilestoneFile(basePath, mid, "SUMMARY");
+      if (sf) completeMilestoneIds.add(mid);
+      continue;
+    }
     const sf = resolveMilestoneFile(basePath, mid, "SUMMARY");
     if (sf) completeMilestoneIds.add(mid);
   }
@@ -357,26 +368,33 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
       } else {
         registry.push({ id: mid, title, status: 'complete' });
       }
-    } else if (!activeMilestoneFound) {
-      // Check milestone-level dependencies before promoting to active
-      const contextFile = resolveMilestoneFile(basePath, mid, "CONTEXT");
-      const contextContent = contextFile ? await cachedLoadFile(contextFile) : null;
-      const deps = parseContextDependsOn(contextContent);
-      const depsUnmet = deps.some(dep => !completeMilestoneIds.has(dep));
-      if (depsUnmet) {
-        registry.push({ id: mid, title, status: 'pending', dependsOn: deps });
-        // Do NOT set activeMilestoneFound — let the loop continue to the next milestone
-      } else {
-        activeMilestone = { id: mid, title };
-        activeRoadmap = roadmap;
-        activeMilestoneFound = true;
-        registry.push({ id: mid, title, status: 'active', ...(deps.length > 0 ? { dependsOn: deps } : {}) });
-      }
     } else {
-      const contextFile2 = resolveMilestoneFile(basePath, mid, "CONTEXT");
-      const contextContent2 = contextFile2 ? await cachedLoadFile(contextFile2) : null;
-      const deps2 = parseContextDependsOn(contextContent2);
-      registry.push({ id: mid, title, status: 'pending', ...(deps2.length > 0 ? { dependsOn: deps2 } : {}) });
+      // Roadmap slices not all checked — but if a summary exists, the milestone
+      // is still complete. The summary is the terminal artifact (#864).
+      const summaryFile = resolveMilestoneFile(basePath, mid, "SUMMARY");
+      if (summaryFile) {
+        registry.push({ id: mid, title, status: 'complete' });
+      } else if (!activeMilestoneFound) {
+        // Check milestone-level dependencies before promoting to active
+        const contextFile = resolveMilestoneFile(basePath, mid, "CONTEXT");
+        const contextContent = contextFile ? await cachedLoadFile(contextFile) : null;
+        const deps = parseContextDependsOn(contextContent);
+        const depsUnmet = deps.some(dep => !completeMilestoneIds.has(dep));
+        if (depsUnmet) {
+          registry.push({ id: mid, title, status: 'pending', dependsOn: deps });
+          // Do NOT set activeMilestoneFound — let the loop continue to the next milestone
+        } else {
+          activeMilestone = { id: mid, title };
+          activeRoadmap = roadmap;
+          activeMilestoneFound = true;
+          registry.push({ id: mid, title, status: 'active', ...(deps.length > 0 ? { dependsOn: deps } : {}) });
+        }
+      } else {
+        const contextFile2 = resolveMilestoneFile(basePath, mid, "CONTEXT");
+        const contextContent2 = contextFile2 ? await cachedLoadFile(contextFile2) : null;
+        const deps2 = parseContextDependsOn(contextContent2);
+        registry.push({ id: mid, title, status: 'pending', ...(deps2.length > 0 ? { dependsOn: deps2 } : {}) });
+      }
     }
   }
 

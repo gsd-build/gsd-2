@@ -24,7 +24,7 @@ import {
   nativeDetectMainBranch,
   nativeBranchExists,
   nativeHasChanges,
-  nativeAddAll,
+  nativeAddAllWithExclusions,
   nativeResetPaths,
   nativeHasStagedChanges,
   nativeCommit,
@@ -95,6 +95,8 @@ export interface TaskCommitContext {
   oneLiner?: string;
   /** Files modified by this task (from task summary frontmatter) */
   keyFiles?: string[];
+  /** GitHub issue number — appends "Resolves #N" trailer when set. */
+  issueNumber?: number;
 }
 
 /**
@@ -118,12 +120,22 @@ export function buildTaskCommitMessage(ctx: TaskCommitContext): string {
   const subject = `${type}(${scope}): ${truncated}`;
 
   // Build body with key files if available
+  const bodyParts: string[] = [];
+
   if (ctx.keyFiles && ctx.keyFiles.length > 0) {
     const fileLines = ctx.keyFiles
       .slice(0, 8) // cap at 8 files to keep commit concise
       .map(f => `- ${f}`)
       .join("\n");
-    return `${subject}\n\n${fileLines}`;
+    bodyParts.push(fileLines);
+  }
+
+  if (ctx.issueNumber) {
+    bodyParts.push(`Resolves #${ctx.issueNumber}`);
+  }
+
+  if (bodyParts.length > 0) {
+    return `${subject}\n\n${bodyParts.join("\n\n")}`;
   }
 
   return subject;
@@ -373,7 +385,9 @@ export class GitServiceImpl {
       this._runtimeFilesCleanedUp = true;
     }
 
-    // Stage everything, then unstage excluded paths.
+    // Stage everything using pathspec exclusions so excluded paths are never
+    // hashed by git. The old approach of `git add -A` followed by unstaging
+    // hangs indefinitely on repos with large untracked artifact trees (#1605).
     //
     // Exclude only RUNTIME paths from staging — not the entire .gsd/ directory.
     // When .gsd/milestones/ files are already tracked in the index (projects
@@ -383,13 +397,9 @@ export class GitServiceImpl {
     // the second half of a milestone's artifacts are never committed (#1326).
     //
     // If .gsd/ IS in .gitignore (the default for external state projects),
-    // git add -A already skips it and the reset is a harmless no-op.
-    nativeAddAll(this.basePath);
-
-    const runtimeExclusions = [...RUNTIME_EXCLUSION_PATHS, ...extraExclusions];
-    for (const exclusion of runtimeExclusions) {
-      try { nativeResetPaths(this.basePath, [exclusion]); } catch { /* path not staged — ignore */ }
-    }
+    // git add -A already skips it and the exclusions are harmless no-ops.
+    const allExclusions = [...RUNTIME_EXCLUSION_PATHS, ...extraExclusions];
+    nativeAddAllWithExclusions(this.basePath, allExclusions);
   }
 
   /** Tracks whether runtime file cleanup has run this session. */
@@ -572,6 +582,30 @@ export class GitServiceImpl {
 
   // ─── Merge ─────────────────────────────────────────────────────────────
 
+}
+
+// ─── Draft PR Creation ─────────────────────────────────────────────────────
+
+/**
+ * Create a draft pull request for a completed milestone using `gh pr create`.
+ * Returns the PR URL on success, or null on failure.
+ * Non-fatal: callers should treat failure as best-effort.
+ */
+export function createDraftPR(
+  basePath: string,
+  milestoneId: string,
+  title: string,
+  body: string,
+): string | null {
+  try {
+    const result = execSync(
+      `gh pr create --draft --title ${JSON.stringify(title)} --body ${JSON.stringify(body)}`,
+      { cwd: basePath, encoding: "utf8", timeout: 30000, env: GIT_NO_PROMPT_ENV },
+    );
+    return result.trim();
+  } catch {
+    return null;
+  }
 }
 
 // ─── Factory ───────────────────────────────────────────────────────────────

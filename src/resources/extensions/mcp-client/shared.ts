@@ -303,12 +303,20 @@ function createClient(): Client {
 	return new Client({ name: "gsd", version: "1.0.0" });
 }
 
+function resolveEnv(env: Record<string, string>): Record<string, string> {
+	const resolved: Record<string, string> = {};
+	for (const [key, value] of Object.entries(env)) {
+		resolved[key] = value.replace(/\$\{([^}]+)\}/g, (_match, varName) => process.env[varName] ?? "");
+	}
+	return resolved;
+}
+
 function createTransport(config: McpServerConfig): StdioClientTransport | StreamableHTTPClientTransport {
 	if (config.transport === "stdio" && config.command) {
 		return new StdioClientTransport({
 			command: config.command,
 			args: config.args,
-			env: config.env ? { ...process.env, ...config.env } as Record<string, string> : undefined,
+			env: config.env ? { ...process.env, ...resolveEnv(config.env) } as Record<string, string> : undefined,
 			cwd: config.cwd,
 			stderr: "pipe",
 		});

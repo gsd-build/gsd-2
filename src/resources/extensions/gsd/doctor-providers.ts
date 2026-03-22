@@ -51,10 +51,12 @@ function modelToProviderId(model: string): string | null {
     const prefix = model.split("/")[0].toLowerCase();
     // Map known prefixes to registry IDs
     const prefixMap: Record<string, string> = {
+      "anthropic-vertex": "anthropic-vertex",
       openrouter: "openrouter",
       groq: "groq",
       mistral: "mistral",
       google: "google",
+      "google-vertex": "google-vertex",
       anthropic: "anthropic",
       openai: "openai",
       "github-copilot": "github-copilot",
@@ -88,11 +90,20 @@ function collectConfiguredModelProviders(): Set<string> {
 
     const modelEntries = typeof models === "object" ? Object.values(models) : [];
     for (const entry of modelEntries) {
-      const modelId = typeof entry === "string" ? entry
-        : typeof entry === "object" && entry !== null && "model" in entry
-          ? String((entry as { model: unknown }).model)
-          : null;
-      if (modelId) {
+      if (typeof entry === "string") {
+        const pid = modelToProviderId(entry);
+        if (pid) providers.add(pid);
+        continue;
+      }
+
+      if (typeof entry === "object" && entry !== null && "model" in entry) {
+        const configuredProvider = "provider" in entry ? (entry as { provider?: unknown }).provider : undefined;
+        if (typeof configuredProvider === "string" && configuredProvider.trim().length > 0) {
+          providers.add(configuredProvider);
+          continue;
+        }
+
+        const modelId = String((entry as { model: unknown }).model);
         const pid = modelToProviderId(modelId);
         if (pid) providers.add(pid);
       }
@@ -116,6 +127,10 @@ interface KeyLookup {
 
 function resolveKey(providerId: string): KeyLookup {
   const info = PROVIDER_REGISTRY.find(p => p.id === providerId);
+
+  if (providerId === "anthropic-vertex" && process.env.ANTHROPIC_VERTEX_PROJECT_ID) {
+    return { found: true, source: "env", backedOff: false };
+  }
 
   // Check auth.json
   const authPath = getAuthPath();
@@ -175,7 +190,9 @@ function checkLlmProviders(): ProviderCheckResult[] {
 
   for (const providerId of required) {
     const info = PROVIDER_REGISTRY.find(p => p.id === providerId);
-    const label = info?.label ?? providerId;
+    const label = providerId === "anthropic-vertex"
+      ? "Anthropic Vertex"
+      : info?.label ?? providerId;
     const lookup = resolveKey(providerId);
 
     if (!lookup.found) {
@@ -196,14 +213,18 @@ function checkLlmProviders(): ProviderCheckResult[] {
         continue;
       }
 
-      const envVar = info?.envVar ?? `${providerId.toUpperCase()}_API_KEY`;
+      const envVar = providerId === "anthropic-vertex"
+        ? "ANTHROPIC_VERTEX_PROJECT_ID"
+        : info?.envVar ?? `${providerId.toUpperCase()}_API_KEY`;
       results.push({
         name: providerId,
         label,
         category: "llm",
         status: "error",
-        message: `${label} — no API key found`,
-        detail: info?.hasOAuth
+        message: `${label} — not configured`,
+        detail: providerId === "anthropic-vertex"
+          ? "Set ANTHROPIC_VERTEX_PROJECT_ID and authenticate with Google ADC"
+          : info?.hasOAuth
           ? `Run /gsd keys to authenticate`
           : `Set ${envVar} or run /gsd keys`,
         required: true,

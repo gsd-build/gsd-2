@@ -16,11 +16,11 @@ import type {
   InlineLevel,
   PhaseSkipPreferences,
   ParallelConfig,
-  CompressionStrategy,
   ContextSelectionMode,
   ReactiveExecutionConfig,
 } from "./types.js";
 import type { DynamicRoutingConfig } from "./model-router.js";
+import type { GitHubSyncConfig } from "../github-sync/types.js";
 
 // ─── Workflow Modes ──────────────────────────────────────────────────────────
 
@@ -84,10 +84,10 @@ export const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "verification_auto_fix",
   "verification_max_retries",
   "search_provider",
-  "compression_strategy",
   "context_selection",
   "widget_mode",
   "reactive_execution",
+  "github",
 ]);
 
 /** Canonical list of all dispatch unit types. */
@@ -211,14 +211,14 @@ export interface GSDPreferences {
   verification_max_retries?: number;
   /** Search provider preference. "brave"/"tavily"/"ollama" force that backend and disable native Anthropic search. "native" forces native only. "auto" = current default behavior. */
   search_provider?: "brave" | "tavily" | "ollama" | "native" | "auto";
-  /** Compression strategy for context that exceeds budget. "truncate" (default) drops sections, "compress" applies heuristic compression first. */
-  compression_strategy?: CompressionStrategy;
   /** Context selection mode for file inlining. "full" inlines entire files, "smart" uses semantic chunking. Default derived from token profile. */
   context_selection?: ContextSelectionMode;
   /** Default widget display mode for auto-mode dashboard. "full" | "small" | "min" | "off". Default: "full". */
   widget_mode?: "full" | "small" | "min" | "off";
   /** Reactive (graph-derived parallel) task execution within slices. Disabled by default. */
   reactive_execution?: ReactiveExecutionConfig;
+  /** GitHub sync configuration. Opt-in: syncs GSD events to GitHub Issues, Milestones, and PRs. */
+  github?: GitHubSyncConfig;
 }
 
 export interface LoadedGSDPreferences {

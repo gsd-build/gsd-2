@@ -50,7 +50,7 @@ export function parseFrontmatterMap(lines: string[]): Record<string, unknown> {
     }
 
     // Array item (2-space indent)
-    const arrayMatch = line.match(/^  - (.*)$/);
+    const arrayMatch = line.match(/^  - ?(.*)$/);
     if (arrayMatch && currentKey) {
       // If there's a pending nested object, push it
       if (currentObj && Object.keys(currentObj).length > 0) {

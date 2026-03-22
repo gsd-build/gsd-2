@@ -6,25 +6,32 @@
  * utility.
  */
 
-import { loadFile, parseContinue, parsePlan, parseRoadmap, parseSummary, extractUatType, loadActiveOverrides, formatOverridesSection } from "./files.js";
+import { loadFile, parseContinue, parsePlan, parseRoadmap, parseSummary, extractUatType, loadActiveOverrides, formatOverridesSection, parseTaskPlanFile } from "./files.js";
 import type { Override, UatType } from "./files.js";
 import { loadPrompt, inlineTemplate } from "./prompt-loader.js";
 import {
   resolveMilestoneFile, resolveSliceFile, resolveSlicePath,
   resolveTasksDir, resolveTaskFiles, resolveTaskFile,
   relMilestoneFile, relSliceFile, relSlicePath, relMilestonePath,
-  resolveGsdRootFile, relGsdRootFile,
+  resolveGsdRootFile, relGsdRootFile, resolveRuntimeFile,
 } from "./paths.js";
-import { resolveSkillDiscoveryMode, resolveInlineLevel, loadEffectiveGSDPreferences } from "./preferences.js";
+import { resolveSkillDiscoveryMode, resolveInlineLevel, loadEffectiveGSDPreferences, resolveAllSkillReferences } from "./preferences.js";
 import type { GSDState, InlineLevel } from "./types.js";
 import type { GSDPreferences } from "./preferences.js";
-import { join } from "node:path";
+import { getLoadedSkills, type Skill } from "@gsd/pi-coding-agent";
+import { join, basename } from "node:path";
 import { existsSync } from "node:fs";
-import { computeBudgets, resolveExecutorContextWindow } from "./context-budget.js";
-import { compressToTarget } from "./prompt-compressor.js";
-import { distillSummaries } from "./summary-distiller.js";
+import { computeBudgets, resolveExecutorContextWindow, truncateAtSectionBoundary } from "./context-budget.js";
 import { formatDecisionsCompact, formatRequirementsCompact } from "./structured-data-formatter.js";
-import { chunkByRelevance, formatChunks } from "./semantic-chunker.js";
+
+// ─── Preamble Cap ─────────────────────────────────────────────────────────────
+
+const MAX_PREAMBLE_CHARS = 30_000;
+
+function capPreamble(preamble: string): string {
+  if (preamble.length <= MAX_PREAMBLE_CHARS) return preamble;
+  return truncateAtSectionBoundary(preamble, MAX_PREAMBLE_CHARS).content;
+}
 
 // ─── Executor Constraints ─────────────────────────────────────────────────────
 
@@ -159,16 +166,9 @@ export async function inlineFileSmart(
     return `### ${label}\nSource: \`${relPath}\`\n\n${content.trim()}`;
   }
 
-  // Use semantic chunking for large files
-  const result = chunkByRelevance(content, query, { maxChunks: 5, minScore: 0.05 });
-
-  // If chunking didn't save much (< 20%), just include full content
-  if (result.savingsPercent < 20) {
-    return `### ${label}\nSource: \`${relPath}\`\n\n${content.trim()}`;
-  }
-
-  const formatted = formatChunks(result, relPath);
-  return `### ${label} (${result.omittedChunks} sections omitted for relevance)\nSource: \`${relPath}\`\n\n${formatted}`;
+  // For large files, truncate at section boundary
+  const truncated = truncateAtSectionBoundary(content, threshold).content;
+  return `### ${label}\nSource: \`${relPath}\`\n\n${truncated}`;
 }
 
 /**
@@ -202,21 +202,6 @@ export async function inlineDependencySummaries(
 
   const result = sections.join("\n\n");
   if (budgetChars !== undefined && result.length > budgetChars) {
-    // For 3+ summaries, try distillation first (preserves more information)
-    if (sections.length >= 3) {
-      const rawSummaries = sections.map(s => {
-        // Extract content after the header line
-        const lines = s.split("\n");
-        const contentStart = lines.findIndex(l => l.startsWith("Source:"));
-        return contentStart >= 0 ? lines.slice(contentStart + 1).join("\n").trim() : s;
-      });
-      const distilled = distillSummaries(rawSummaries, budgetChars);
-      if (distilled.content.length <= budgetChars) {
-        return distilled.content;
-      }
-    }
-    // Fall back to section-boundary truncation
-    const { truncateAtSectionBoundary } = await import("./context-budget.js");
     return truncateAtSectionBoundary(result, budgetChars).content;
   }
   return result;
@@ -313,7 +298,171 @@ export async function inlineProjectFromDb(
   return inlineGsdRootFile(base, "project.md", "Project");
 }
 
-// ─── Skill Discovery ──────────────────────────────────────────────────────
+// ─── Skill Activation & Discovery ─────────────────────────────────────────
+
+function normalizeSkillReference(ref: string): string {
+  const normalized = ref.replace(/\\/g, "/").trim();
+  const base = basename(normalized).replace(/\.md$/i, "");
+  const name = /^SKILL$/i.test(base)
+    ? basename(normalized.replace(/\/SKILL(?:\.md)?$/i, ""))
+    : base;
+  return name.trim().toLowerCase();
+}
+
+function tokenizeSkillContext(...parts: Array<string | null | undefined>): Set<string> {
+  const tokens = new Set<string>();
+  const addVariants = (raw: string) => {
+    const value = raw.trim().toLowerCase();
+    if (!value || value.length < 2) return;
+    tokens.add(value);
+    tokens.add(value.replace(/[-_]+/g, " "));
+    tokens.add(value.replace(/\s+/g, "-"));
+    tokens.add(value.replace(/\s+/g, ""));
+  };
+
+  for (const part of parts) {
+    if (!part) continue;
+    const text = part.toLowerCase();
+    const phraseMatches = text.match(/[a-z0-9][a-z0-9+.#/_-]{1,}/g) ?? [];
+    for (const match of phraseMatches) {
+      addVariants(match);
+      for (const piece of match.split(/[^a-z0-9+.#]+/g)) {
+        if (piece.length >= 3) addVariants(piece);
+      }
+    }
+  }
+
+  return tokens;
+}
+
+function skillMatchesContext(skill: Skill, contextTokens: Set<string>): boolean {
+  const haystacks = [
+    skill.name.toLowerCase(),
+    skill.name.toLowerCase().replace(/[-_]+/g, " "),
+    skill.description.toLowerCase(),
+  ];
+
+  return [...contextTokens].some(token =>
+    token.length >= 3 && haystacks.some(haystack => haystack.includes(token)),
+  );
+}
+
+function resolvePreferenceSkillNames(refs: string[], base: string): string[] {
+  if (refs.length === 0) return [];
+  const prefs: GSDPreferences = { always_use_skills: refs };
+  const report = resolveAllSkillReferences(prefs, base);
+  return refs.map(ref => {
+    const resolution = report.resolutions.get(ref);
+    return normalizeSkillReference(resolution?.resolvedPath ?? ref);
+  }).filter(Boolean);
+}
+
+function ruleMatchesContext(when: string, contextTokens: Set<string>): boolean {
+  const whenTokens = tokenizeSkillContext(when);
+  return [...whenTokens].some(token =>
+    contextTokens.has(token) || [...contextTokens].some(ctx => ctx.includes(token) || token.includes(ctx)),
+  );
+}
+
+function resolveSkillRuleMatches(
+  prefs: GSDPreferences | undefined,
+  contextTokens: Set<string>,
+  base: string,
+): { include: string[]; avoid: string[] } {
+  if (!prefs?.skill_rules?.length) return { include: [], avoid: [] };
+
+  const include: string[] = [];
+  const avoid: string[] = [];
+  for (const rule of prefs.skill_rules) {
+    if (!ruleMatchesContext(rule.when, contextTokens)) continue;
+    include.push(...resolvePreferenceSkillNames([...(rule.use ?? []), ...(rule.prefer ?? [])], base));
+    avoid.push(...resolvePreferenceSkillNames(rule.avoid ?? [], base));
+  }
+  return { include, avoid };
+}
+
+function resolvePreferredSkillNames(
+  prefs: GSDPreferences | undefined,
+  visibleSkills: Skill[],
+  contextTokens: Set<string>,
+  base: string,
+): string[] {
+  if (!prefs?.prefer_skills?.length) return [];
+  const preferred = new Set(resolvePreferenceSkillNames(prefs.prefer_skills, base));
+  return visibleSkills
+    .filter(skill => preferred.has(normalizeSkillReference(skill.name)) && skillMatchesContext(skill, contextTokens))
+    .map(skill => normalizeSkillReference(skill.name));
+}
+
+function formatSkillActivationBlock(skillNames: string[]): string {
+  if (skillNames.length === 0) return "";
+  const calls = skillNames.map(name => `Call Skill('${name}')`).join('. ');
+  return `<skill_activation>${calls}.</skill_activation>`;
+}
+
+export function buildSkillActivationBlock(params: {
+  base: string;
+  milestoneId: string;
+  milestoneTitle?: string;
+  sliceId?: string;
+  sliceTitle?: string;
+  taskId?: string;
+  taskTitle?: string;
+  extraContext?: string[];
+  taskPlanContent?: string | null;
+  preferences?: GSDPreferences;
+}): string {
+  const prefs = params.preferences ?? loadEffectiveGSDPreferences()?.preferences;
+  const contextTokens = tokenizeSkillContext(
+    params.milestoneId,
+    params.milestoneTitle,
+    params.sliceId,
+    params.sliceTitle,
+    params.taskId,
+    params.taskTitle,
+    ...(params.extraContext ?? []),
+    params.taskPlanContent ?? undefined,
+  );
+
+  const visibleSkills = getLoadedSkills().filter(skill => !skill.disableModelInvocation);
+  const installedNames = new Set(visibleSkills.map(skill => normalizeSkillReference(skill.name)));
+  const avoided = new Set(resolvePreferenceSkillNames(prefs?.avoid_skills ?? [], params.base));
+  const matched = new Set<string>();
+
+  for (const name of resolvePreferenceSkillNames(prefs?.always_use_skills ?? [], params.base)) {
+    matched.add(name);
+  }
+
+  const ruleMatches = resolveSkillRuleMatches(prefs, contextTokens, params.base);
+  for (const name of ruleMatches.include) matched.add(name);
+  for (const name of ruleMatches.avoid) avoided.add(name);
+
+  for (const name of resolvePreferredSkillNames(prefs, visibleSkills, contextTokens, params.base)) {
+    matched.add(name);
+  }
+
+  if (params.taskPlanContent) {
+    try {
+      const taskPlan = parseTaskPlanFile(params.taskPlanContent);
+      for (const skillName of taskPlan.frontmatter.skills_used) {
+        matched.add(normalizeSkillReference(skillName));
+      }
+    } catch {
+      // Non-fatal — malformed task plan should not break prompt construction
+    }
+  }
+
+  for (const skill of visibleSkills) {
+    if (skillMatchesContext(skill, contextTokens)) {
+      matched.add(normalizeSkillReference(skill.name));
+    }
+  }
+
+  const ordered = [...matched]
+    .filter(name => installedNames.has(name) && !avoided.has(name))
+    .sort();
+  return formatSkillActivationBlock(ordered);
+}
 
 /**
  * Build the skill discovery template variables for research prompts.
@@ -610,8 +759,8 @@ export async function checkNeedsRunUat(
     if (hasResult) return null;
   }
 
-  // Classify UAT type; unknown type → treat as human-experience (human review)
-  const uatType = extractUatType(uatContent) ?? "human-experience";
+  // Classify UAT type; default to artifact-driven (LLM-executed UATs are always artifact-driven)
+  const uatType = extractUatType(uatContent) ?? "artifact-driven";
 
   return { sliceId: sid, uatType };
 }
@@ -634,7 +783,7 @@ export async function buildResearchMilestonePrompt(mid: string, midTitle: string
   if (knowledgeInlineRM) inlined.push(knowledgeInlineRM);
   inlined.push(inlineTemplate("research", "Research"));
 
-  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
+  const inlinedContext = capPreamble(`## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`);
 
   const outputRelPath = relMilestoneFile(base, mid, "RESEARCH");
   return loadPrompt("research-milestone", {
@@ -644,6 +793,12 @@ export async function buildResearchMilestonePrompt(mid: string, midTitle: string
     contextPath: contextRel,
     outputPath: join(base, outputRelPath),
     inlinedContext,
+    skillActivation: buildSkillActivationBlock({
+      base,
+      milestoneId: mid,
+      milestoneTitle: midTitle,
+      extraContext: [inlinedContext],
+    }),
     ...buildSkillDiscoveryVars(),
   });
 }
@@ -684,7 +839,7 @@ export async function buildPlanMilestonePrompt(mid: string, midTitle: string, ba
     inlined.push(inlineTemplate("task-plan", "Task Plan"));
   }
 
-  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
+  const inlinedContext = capPreamble(`## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`);
 
   const outputRelPath = relMilestoneFile(base, mid, "ROADMAP");
   const researchOutputPath = join(base, relMilestoneFile(base, mid, "RESEARCH"));
@@ -700,6 +855,12 @@ export async function buildPlanMilestonePrompt(mid: string, midTitle: string, ba
     secretsOutputPath,
     inlinedContext,
     sourceFilePaths: buildSourceFilePaths(base, mid),
+    skillActivation: buildSkillActivationBlock({
+      base,
+      milestoneId: mid,
+      milestoneTitle: midTitle,
+      extraContext: [inlinedContext],
+    }),
     ...buildSkillDiscoveryVars(),
   });
 }
@@ -733,7 +894,7 @@ export async function buildResearchSlicePrompt(
   const overridesInline = formatOverridesSection(activeOverrides);
   if (overridesInline) inlined.unshift(overridesInline);
 
-  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
+  const inlinedContext = capPreamble(`## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`);
 
   const outputRelPath = relSliceFile(base, mid, sid, "RESEARCH");
   return loadPrompt("research-slice", {
@@ -746,6 +907,13 @@ export async function buildResearchSlicePrompt(
     outputPath: join(base, outputRelPath),
     inlinedContext,
     dependencySummaries: depContent,
+    skillActivation: buildSkillActivationBlock({
+      base,
+      milestoneId: mid,
+      sliceId: sid,
+      sliceTitle: sTitle,
+      extraContext: [inlinedContext, depContent],
+    }),
     ...buildSkillDiscoveryVars(),
   });
 }
@@ -781,7 +949,7 @@ export async function buildPlanSlicePrompt(
   const planOverridesInline = formatOverridesSection(planActiveOverrides);
   if (planOverridesInline) inlined.unshift(planOverridesInline);
 
-  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
+  const inlinedContext = capPreamble(`## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`);
 
   // Build executor context constraints from the budget engine
   const executorContextConstraints = formatExecutorConstraints();
@@ -804,6 +972,13 @@ export async function buildPlanSlicePrompt(
     sourceFilePaths: buildSourceFilePaths(base, mid, sid),
     executorContextConstraints,
     commitInstruction,
+    skillActivation: buildSkillActivationBlock({
+      base,
+      milestoneId: mid,
+      sliceId: sid,
+      sliceTitle: sTitle,
+      extraContext: [inlinedContext, depContent],
+    }),
   });
 }
 
@@ -900,19 +1075,23 @@ export async function buildExecuteTaskPrompt(
   const budgets = computeBudgets(contextWindow);
   const verificationBudget = `~${Math.round(budgets.verificationBudgetChars / 1000)}K chars`;
 
-  // Compress carry-forward section when it exceeds 40% of inline context budget.
-  // Only compress when compression_strategy is "compress" (budget/balanced profiles).
+  // Truncate carry-forward section when it exceeds 40% of inline context budget.
   const carryForwardBudget = Math.floor(budgets.inlineContextBudgetChars * 0.4);
   let finalCarryForward = carryForwardSection;
   if (carryForwardSection.length > carryForwardBudget) {
-    const { resolveCompressionStrategy } = await import("./preferences.js");
-    if (resolveCompressionStrategy() === "compress") {
-      finalCarryForward = compressToTarget(carryForwardSection, carryForwardBudget).content;
-    }
+    finalCarryForward = truncateAtSectionBoundary(carryForwardSection, carryForwardBudget).content;
   }
+
+  // Inline RUNTIME.md if present
+  const runtimePath = resolveRuntimeFile(base);
+  const runtimeContent = existsSync(runtimePath) ? await loadFile(runtimePath) : null;
+  const runtimeContext = runtimeContent
+    ? `### Runtime Context\nSource: \`.gsd/RUNTIME.md\`\n\n${runtimeContent.trim()}`
+    : "";
 
   return loadPrompt("execute-task", {
     overridesSection,
+    runtimeContext,
     workingDirectory: base,
     milestoneId: mid, sliceId: sid, sliceTitle: sTitle, taskId: tid, taskTitle: tTitle,
     planPath: join(base, relSliceFile(base, mid, sid, "PLAN")),
@@ -926,6 +1105,16 @@ export async function buildExecuteTaskPrompt(
     taskSummaryPath,
     inlinedTemplates,
     verificationBudget,
+    skillActivation: buildSkillActivationBlock({
+      base,
+      milestoneId: mid,
+      sliceId: sid,
+      sliceTitle: sTitle,
+      taskId: tid,
+      taskTitle: tTitle,
+      taskPlanContent,
+      extraContext: [taskPlanInline, slicePlanExcerpt, finalCarryForward, resumeSection],
+    }),
   });
 }
 
@@ -971,7 +1160,7 @@ export async function buildCompleteSlicePrompt(
   const completeOverridesInline = formatOverridesSection(completeActiveOverrides);
   if (completeOverridesInline) inlined.unshift(completeOverridesInline);
 
-  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
+  const inlinedContext = capPreamble(`## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`);
 
   const sliceRel = relSlicePath(base, mid, sid);
   const sliceSummaryPath = join(base, `${sliceRel}/${sid}-SUMMARY.md`);
@@ -1030,7 +1219,7 @@ export async function buildCompleteMilestonePrompt(
   if (contextInline) inlined.push(contextInline);
   inlined.push(inlineTemplate("milestone-summary", "Milestone Summary"));
 
-  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
+  const inlinedContext = capPreamble(`## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`);
 
   const milestoneSummaryPath = join(base, `${relMilestonePath(base, mid)}/${mid}-SUMMARY.md`);
 
@@ -1101,7 +1290,7 @@ export async function buildValidateMilestonePrompt(
   const contextInline = await inlineFileOptional(contextPath, contextRel, "Milestone Context");
   if (contextInline) inlined.push(contextInline);
 
-  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
+  const inlinedContext = capPreamble(`## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`);
 
   const validationOutputPath = join(base, `${relMilestonePath(base, mid)}/${mid}-VALIDATION.md`);
   const roadmapOutputPath = `${relMilestonePath(base, mid)}/${mid}-ROADMAP.md`;
@@ -1155,7 +1344,7 @@ export async function buildReplanSlicePrompt(
   const replanOverridesInline = formatOverridesSection(replanActiveOverrides);
   if (replanOverridesInline) inlined.unshift(replanOverridesInline);
 
-  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
+  const inlinedContext = capPreamble(`## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`);
 
   const replanPath = join(base, `${relSlicePath(base, mid, sid)}/${sid}-REPLAN.md`);
 
@@ -1184,6 +1373,14 @@ export async function buildReplanSlicePrompt(
     inlinedContext,
     replanPath,
     captureContext,
+    skillActivation: buildSkillActivationBlock({
+      base,
+      milestoneId: mid,
+      milestoneTitle: midTitle,
+      sliceId: sid,
+      sliceTitle: sTitle,
+      extraContext: [inlinedContext, captureContext],
+    }),
   });
 }
 
@@ -1203,10 +1400,10 @@ export async function buildRunUatPrompt(
   const projectInline = await inlineProjectFromDb(base);
   if (projectInline) inlined.push(projectInline);
 
-  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
+  const inlinedContext = capPreamble(`## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`);
 
   const uatResultPath = join(base, relSliceFile(base, mid, sliceId, "UAT-RESULT"));
-  const uatType = extractUatType(uatContent) ?? "human-experience";
+  const uatType = extractUatType(uatContent) ?? "artifact-driven";
 
   return loadPrompt("run-uat", {
     workingDirectory: base,
@@ -1242,7 +1439,7 @@ export async function buildReassessRoadmapPrompt(
   const knowledgeInlineRA = await inlineGsdRootFile(base, "knowledge.md", "Project Knowledge");
   if (knowledgeInlineRA) inlined.push(knowledgeInlineRA);
 
-  const inlinedContext = `## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`;
+  const inlinedContext = capPreamble(`## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`);
 
   const assessmentPath = join(base, relSliceFile(base, mid, completedSliceId, "ASSESSMENT"));
 

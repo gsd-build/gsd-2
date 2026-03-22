@@ -61,6 +61,16 @@ export interface TaskPlanEntry {
   verify?: string; // e.g. "run tests" — extracted from "- Verify:" subline
 }
 
+export interface TaskPlanFrontmatter {
+  estimated_steps?: number; // optional scope estimate for plan quality validator
+  estimated_files?: number; // optional file-count estimate for scope warning heuristics
+  skills_used: string[]; // installed skill slugs/names to hand off to execute-task prompts
+}
+
+export interface TaskPlanFile {
+  frontmatter: TaskPlanFrontmatter;
+}
+
 // ─── Verification Gate ─────────────────────────────────────────────────────
 
 /** Result of a single verification command execution */
@@ -423,7 +433,6 @@ export interface Requirement {
 
 // ─── Parallel Orchestration Types ────────────────────────────────────────
 
-export type CompressionStrategy = "truncate" | "compress";
 export type ContextSelectionMode = "full" | "smart";
 
 export type MergeStrategy = "per-slice" | "per-milestone";
@@ -478,4 +487,12 @@ export interface ReactiveExecutionState {
     ambiguous: boolean;
   };
   updatedAt: string;
+}
+
+export interface BrowserFlowResult {
+  url: string;
+  passed: boolean;
+  checksTotal: number;
+  checksPassed: number;
+  duration: number;
 }

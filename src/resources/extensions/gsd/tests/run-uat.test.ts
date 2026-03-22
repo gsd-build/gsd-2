@@ -29,7 +29,11 @@ const worktreePromptsDir = join(__dirname, '..', 'prompts');
 function loadPromptFromWorktree(name: string, vars: Record<string, string> = {}): string {
   const path = join(worktreePromptsDir, `${name}.md`);
   let content = readFileSync(path, 'utf-8');
-  for (const [key, value] of Object.entries(vars)) {
+  const effectiveVars = {
+    skillActivation: 'If no installed skill clearly matches this unit, skip explicit skill activation and continue with the required workflow.',
+    ...vars,
+  };
+  for (const [key, value] of Object.entries(effectiveVars)) {
     content = content.replaceAll(`{{${key}}}`, value);
   }
   return content.trim();
@@ -210,7 +214,7 @@ async function main(): Promise<void> {
   const sliceId = 'S01';
   const uatPath = '.gsd/milestones/M001/slices/S01/S01-UAT.md';
   const uatResultPath = '.gsd/milestones/M001/slices/S01/S01-UAT-RESULT.md';
-  const uatType = 'artifact-driven';
+  const uatType = 'live-runtime';
   const inlinedContext = '<!-- no context -->';
 
   let promptResult: string | undefined;
@@ -247,12 +251,20 @@ async function main(): Promise<void> {
     `prompt contains uatResultPath value after substitution`,
   );
   assertTrue(
+    promptResult?.includes(`Detected UAT mode:** \`${uatType}\``) ?? false,
+    `prompt contains detected dynamic uatType value "${uatType}" after substitution`,
+  );
+  assertTrue(
+    promptResult?.includes(`uatType: ${uatType}`) ?? false,
+    `prompt contains dynamic uatType frontmatter value "${uatType}" after substitution`,
+  );
+  assertTrue(
     !/\{\{[^}]+\}\}/.test(promptResult ?? ''),
     'no unreplaced {{...}} tokens remain after variable substitution',
   );
   assertTrue(
-    /artifact|execute|run/i.test(promptResult ?? ''),
-    'prompt contains artifact-driven execution language (artifact/execute/run)',
+    /browser|runtime|execute|run/i.test(promptResult ?? ''),
+    'prompt contains runtime execution language (browser/runtime/execute/run)',
   );
   assertTrue(
     !/surfaced for human review/i.test(promptResult ?? ''),

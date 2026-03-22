@@ -40,6 +40,35 @@ export function markSliceDoneInRoadmap(basePath: string, mid: string, sid: strin
 }
 
 /**
+ * Mark a slice as not done ([ ]) in the milestone roadmap.
+ * Idempotent — no-op if already unchecked or if the slice isn't found.
+ *
+ * @returns true if the roadmap was modified, false if no change was needed
+ */
+export function markSliceUndoneInRoadmap(basePath: string, mid: string, sid: string): boolean {
+  const roadmapFile = resolveMilestoneFile(basePath, mid, "ROADMAP");
+  if (!roadmapFile) return false;
+
+  let content: string;
+  try {
+    content = readFileSync(roadmapFile, "utf-8");
+  } catch {
+    return false;
+  }
+
+  const updated = content.replace(
+    new RegExp(`^(\\s*-\\s+)\\[x\\]\\s+\\*\\*${sid}:`, "m"),
+    `$1[ ] **${sid}:`,
+  );
+
+  if (updated === content) return false;
+
+  atomicWriteSync(roadmapFile, updated);
+  clearParseCache();
+  return true;
+}
+
+/**
  * Mark a task as done ([x]) in the slice plan.
  * Idempotent — no-op if already checked or if the task isn't found.
  *

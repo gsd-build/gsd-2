@@ -22,7 +22,7 @@ The following user thoughts were captured during execution and deferred to futur
 
 {{deferredCaptures}}
 
-If a `GSD Skill Preferences` block is present in system context, use it to decide which skills to load and follow during reassessment, without relaxing required verification or artifact rules.
+{{skillActivation}}
 
 Then assess whether the remaining roadmap still makes sense given what was just built.
 

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
 
-import { externalGsdRoot, ensureGsdSymlink } from "../repo-identity.ts";
+import { repoIdentity, externalGsdRoot, ensureGsdSymlink, validateProjectId } from "../repo-identity.ts";
 import { createTestContext } from "./test-helpers.ts";
 
 const { assertEq, assertTrue, report } = createTestContext();
@@ -57,6 +57,26 @@ async function main(): Promise<void> {
     assertEq(preservedDirState, join(worktreePath, ".gsd"), "worktree .gsd directory is left in place for sync-based refresh");
     assertTrue(lstatSync(join(worktreePath, ".gsd")).isDirectory(), "worktree .gsd directory remains a directory");
     assertTrue(existsSync(join(worktreePath, ".gsd", "milestones", "stale.txt")), "existing worktree .gsd directory contents remain available for sync logic");
+
+    console.log("\n=== GSD_PROJECT_ID overrides computed repo hash ===");
+    process.env.GSD_PROJECT_ID = "my-project";
+    assertEq(repoIdentity(base), "my-project", "repoIdentity returns GSD_PROJECT_ID when set");
+    assertEq(externalGsdRoot(base), join(stateDir, "projects", "my-project"), "externalGsdRoot uses GSD_PROJECT_ID");
+    delete process.env.GSD_PROJECT_ID;
+
+    console.log("\n=== GSD_PROJECT_ID falls back to hash when unset ===");
+    const hashIdentity = repoIdentity(base);
+    assertTrue(/^[0-9a-f]{12}$/.test(hashIdentity), "repoIdentity returns 12-char hex hash when GSD_PROJECT_ID is unset");
+
+    console.log("\n=== validateProjectId rejects invalid values ===");
+    for (const invalid of ["has spaces", "path/traversal", "dot..dot", "back\\slash"]) {
+      assertTrue(!validateProjectId(invalid), `validateProjectId rejects invalid value: "${invalid}"`);
+    }
+
+    console.log("\n=== validateProjectId accepts valid values ===");
+    for (const valid of ["my-project", "foo_bar", "abc123", "A-Z_0-9"]) {
+      assertTrue(validateProjectId(valid), `validateProjectId accepts valid value: "${valid}"`);
+    }
   } finally {
     delete process.env.GSD_STATE_DIR;
     rmSync(base, { recursive: true, force: true });
