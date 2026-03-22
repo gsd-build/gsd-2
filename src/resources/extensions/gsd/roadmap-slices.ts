@@ -248,23 +248,36 @@ function parseProseSliceHeaders(content: string): RoadmapSliceEntry[] {
       title = title.replace(/\s*\(Complete\)\s*$/i, "");
     }
 
-    // Try to extract depends from prose: "Depends on: S01" or "**Depends on:** S01, S02"
+    // Extract the section text between this header and the next
     const afterHeader = content.slice(match.index + match[0].length);
     const nextHeader = afterHeader.search(/^#{1,4}\s/m);
     const section = nextHeader !== -1 ? afterHeader.slice(0, nextHeader) : afterHeader.slice(0, 500);
 
-    const depsMatch = section.match(/\*{0,2}Depends\s+on:?\*{0,2}\s*(.+)/i);
+    // 1. Try backtick `depends:[...]` format first (same as checkbox parser)
+    const backtickDepsMatch = section.match(/`depends:\[([^\]]*)\]`/);
+    const backtickRiskMatch = section.match(/`risk:(\w+)`/);
+    const risk = (backtickRiskMatch ? backtickRiskMatch[1] : "medium") as RiskLevel;
+
     let depends: string[] = [];
-    if (depsMatch) {
-      const rawDeps = depsMatch[1]!.replace(/none/i, "").trim();
-      if (rawDeps) {
-        depends = expandDependencies(
-          rawDeps.split(/[,;]/).map(s => s.trim().replace(/[^A-Za-z0-9]/g, "")).filter(Boolean)
-        );
+    if (backtickDepsMatch) {
+      const raw = backtickDepsMatch[1]!.trim();
+      if (raw) {
+        depends = expandDependencies(raw.split(",").map(s => s.trim()));
+      }
+    } else {
+      // 2. Fallback: prose "Depends on:" format, but validate tokens are slice IDs
+      const depsMatch = section.match(/\*{0,2}Depends\s+on:?\*{0,2}\s*(.+)/i);
+      if (depsMatch) {
+        const rawDeps = depsMatch[1]!.replace(/none/i, "").trim();
+        if (rawDeps) {
+          depends = expandDependencies(
+            rawDeps.split(/[,;]/).map(s => s.trim().replace(/[^A-Za-z0-9]/g, "")).filter(s => /^S\d+$/.test(s))
+          );
+        }
       }
     }
 
-    slices.push({ id, title, risk: "medium" as RiskLevel, depends, done, demo: "" });
+    slices.push({ id, title, risk, depends, done, demo: "" });
   }
 
   return slices;

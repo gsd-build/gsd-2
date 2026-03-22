@@ -236,6 +236,84 @@ test("parseRoadmapSlices: ## Slices with valid checkboxes does NOT invoke prose 
   assert.equal(slices[0]?.done, true);
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Regression #2055: parseProseSliceHeaders garbage deps, missing backtick parsing
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("parseProseSliceHeaders: backtick depends parsed instead of prose false-positive (#2055)", () => {
+  const proseContent = `# M010: Research
+
+### S01 — Auth & RLS Isolation
+\`risk:critical\` \`depends:[]\` \`verification:integration\`
+
+Every other slice **depends on** a client being able to authenticate and see only their own data. If RLS isolation fails, the entire portal is a security breach. This is the highest-risk work in the milestone and must be proven before building any UI.
+
+### S02 — Portal Layout & Dashboard
+\`risk:medium\` \`depends:[S01]\` \`verification:browser,snapshot\`
+
+Basic portal chrome and the first authenticated page.
+
+### S03 — Inbox & Notifications
+\`risk:low\` \`depends:[S01,S02]\` \`verification:browser\`
+
+Show notifications for the user.
+`;
+  const slices = parseRoadmapSlices(proseContent);
+  assert.equal(slices.length, 3);
+
+  // Bug 1: S01 should have NO deps — the prose "depends on" is natural language, not a dep declaration.
+  // The backtick `depends:[]` should win.
+  assert.deepEqual(slices[0]?.depends, [], "S01 backtick depends:[] should yield empty deps, not garbage from prose");
+
+  // Bug 2: S02 should depend on S01 via backtick annotation
+  assert.deepEqual(slices[1]?.depends, ["S01"], "S02 backtick depends:[S01] should be parsed");
+
+  // S03 depends on S01 and S02
+  assert.deepEqual(slices[2]?.depends, ["S01", "S02"], "S03 backtick depends:[S01,S02] should be parsed");
+
+  // Bug 3: risk should come from backtick annotations, not hardcoded "medium"
+  assert.equal(slices[0]?.risk, "critical", "S01 risk should be 'critical' from backtick annotation");
+  assert.equal(slices[1]?.risk, "medium", "S02 risk should be 'medium' from backtick annotation");
+  assert.equal(slices[2]?.risk, "low", "S03 risk should be 'low' from backtick annotation");
+});
+
+test("parseProseSliceHeaders: prose 'Depends on:' fallback validates slice ID pattern (#2055)", () => {
+  const proseContent = `# M011: Test
+
+## S01: Foundation
+**Depends on:** None
+
+## S02: Features
+**Depends on:** S01
+
+## S03: Polish
+**Depends on:** S01, S02
+`;
+  const slices = parseRoadmapSlices(proseContent);
+  assert.equal(slices.length, 3);
+  assert.deepEqual(slices[0]?.depends, [], "None should yield empty deps");
+  assert.deepEqual(slices[1]?.depends, ["S01"]);
+  assert.deepEqual(slices[2]?.depends, ["S01", "S02"]);
+});
+
+test("parseProseSliceHeaders: prose 'depends on' in natural language without backtick annotation is ignored (#2055)", () => {
+  // No backtick annotations at all — prose "depends on" in a sentence should NOT extract garbage
+  const proseContent = `# M012: Test
+
+## S01: Auth
+This feature depends on a working database connection and proper credentials.
+
+## S02: Dashboard
+Builds the main UI.
+`;
+  const slices = parseRoadmapSlices(proseContent);
+  assert.equal(slices.length, 2);
+  // Without backtick annotations, the prose sentence should not produce garbage deps
+  // because the extracted tokens don't match S\d+ pattern
+  assert.deepEqual(slices[0]?.depends, [], "natural language 'depends on' should not produce garbage deps");
+  assert.deepEqual(slices[1]?.depends, []);
+});
+
 test("parseRoadmapSlices: ## Slices with only non-matching lines returns prose fallback results", () => {
   const weirdContent = `# M020: Odd
 
