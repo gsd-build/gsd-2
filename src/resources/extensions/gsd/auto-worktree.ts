@@ -471,13 +471,21 @@ export function runWorktreePostCreateHook(
   }
   if (!hookPath) return null;
 
-  // Resolve relative paths against the source project root
-  const resolved = isAbsolute(hookPath) ? hookPath : join(sourceDir, hookPath);
+  // Resolve relative paths against the source project root.
+  // On Windows, convert 8.3 short paths (e.g. RUNNER~1) to long paths
+  // so execFileSync can locate the file correctly.
+  let resolved = isAbsolute(hookPath) ? hookPath : join(sourceDir, hookPath);
   if (!existsSync(resolved)) {
     return `Worktree post-create hook not found: ${resolved}`;
   }
+  if (process.platform === "win32") {
+    try { resolved = realpathSync.native(resolved); } catch { /* keep original */ }
+  }
 
   try {
+    // .bat/.cmd files on Windows require shell mode — execFileSync cannot
+    // spawn them directly (EINVAL).
+    const needsShell = process.platform === "win32" && /\.(bat|cmd)$/i.test(resolved);
     execFileSync(resolved, [], {
       cwd: worktreeDir,
       env: {
@@ -488,6 +496,7 @@ export function runWorktreePostCreateHook(
       stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf-8",
       timeout: 30_000, // 30 second timeout
+      shell: needsShell,
     });
     return null;
   } catch (err) {
@@ -961,7 +970,7 @@ export function mergeMilestoneToMain(
   originalBasePath_: string,
   milestoneId: string,
   roadmapContent: string,
-): { commitMessage: string; pushed: boolean; prCreated: boolean } {
+): { commitMessage: string; pushed: boolean; prCreated: boolean; codeFilesChanged: boolean } {
   const worktreeCwd = process.cwd();
   const milestoneBranch = autoWorktreeBranch(milestoneId);
 
@@ -1178,6 +1187,27 @@ export function mergeMilestoneToMain(
     }
   }
 
+  // 8c. Detect whether any non-.gsd/ code files were actually merged (#1906).
+  // When a milestone only produced .gsd/ metadata (summaries, roadmaps) but no
+  // real code, the user sees "milestone complete" but nothing changed in their
+  // codebase. Surface this so the caller can warn the user.
+  let codeFilesChanged = false;
+  if (!nothingToCommit) {
+    try {
+      const mergedFiles = nativeDiffNumstat(
+        originalBasePath_,
+        "HEAD~1",
+        "HEAD",
+      );
+      codeFilesChanged = mergedFiles.some(
+        (entry) => !entry.path.startsWith(".gsd/"),
+      );
+    } catch {
+      // If HEAD~1 doesn't exist (first commit), assume code was changed
+      codeFilesChanged = true;
+    }
+  }
+
   // 9. Auto-push if enabled
   let pushed = false;
   if (prefs.auto_push === true && !nothingToCommit) {
@@ -1273,5 +1303,5 @@ export function mergeMilestoneToMain(
   originalBase = null;
   nudgeGitBranchCache(previousCwd);
 
-  return { commitMessage, pushed, prCreated };
+  return { commitMessage, pushed, prCreated, codeFilesChanged };
 }

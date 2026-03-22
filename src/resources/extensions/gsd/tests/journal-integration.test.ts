@@ -64,7 +64,7 @@ function makeMockDeps(
     pruneQueueOrder: () => {},
     isInAutoWorktree: () => false,
     shouldUseWorktreeIsolation: () => false,
-    mergeMilestoneToMain: () => ({ pushed: false, codeFilesChanged: true }),
+    mergeMilestoneToMain: () => ({ pushed: false, codeFilesChanged: false }),
     teardownAutoWorktree: () => {},
     createAutoWorktree: () => "/tmp/wt",
     captureIntegrationBranch: () => {},

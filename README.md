@@ -28,7 +28,7 @@ One command. Walk away. Come back to a built project with clean git history.
 
 ### New Features
 
-- **Browser-based web interface** — run GSD from the browser with `pi --web`. Full project management, real-time progress, and multi-project support via server-sent events. (#1717)
+- **Browser-based web interface** — run GSD from the browser with `gsd --web`. Full project management, real-time progress, and multi-project support via server-sent events. (#1717)
 - **Doctor: worktree lifecycle checks** — `/gsd doctor` now validates worktree health, detects orphaned worktrees, consolidates cleanup, and enhances `/worktree list` with lifecycle status. (#1814)
 - **CI: docs-only PR detection** — PRs that only change documentation skip build and test steps, with a new prompt injection scan for security. (#1699)
 - **Custom Models guide** — new documentation for adding custom providers (Ollama, vLLM, LM Studio, proxies) via `models.json`. (#1670)

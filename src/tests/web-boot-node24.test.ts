@@ -7,6 +7,9 @@ import { resolveTypeStrippingFlag } from "../web/ts-subprocess-flags.ts"
 // Bug 1 — resolveTypeStrippingFlag selects the correct flag
 // ---------------------------------------------------------------------------
 
+const [nodeMajor, nodeMinor] = process.versions.node.split(".").map(Number)
+const isNode22_7OrNewer = nodeMajor > 22 || (nodeMajor === 22 && nodeMinor >= 7)
+
 test("resolveTypeStrippingFlag returns --experimental-strip-types for paths outside node_modules", () => {
   const flag = resolveTypeStrippingFlag("/home/user/projects/gsd")
   assert.equal(flag, "--experimental-strip-types")
@@ -18,28 +21,42 @@ test("resolveTypeStrippingFlag returns --experimental-strip-types for path with 
   assert.equal(flag, "--experimental-strip-types")
 })
 
-test("resolveTypeStrippingFlag returns --experimental-transform-types for paths under node_modules/ on Node >= 22.7", () => {
-  const [major, minor] = process.versions.node.split(".").map(Number)
-  const flag = resolveTypeStrippingFlag("/usr/lib/node_modules/gsd-pi")
-
-  if (major > 22 || (major === 22 && minor >= 7)) {
+test(
+  "resolveTypeStrippingFlag returns --experimental-transform-types for paths under node_modules/ on Node >= 22.7",
+  { skip: !isNode22_7OrNewer },
+  () => {
+    const flag = resolveTypeStrippingFlag("/usr/lib/node_modules/gsd-pi")
     assert.equal(flag, "--experimental-transform-types")
-  } else {
+  },
+)
+
+test(
+  "resolveTypeStrippingFlag returns --experimental-strip-types for paths under node_modules/ on Node < 22.7",
+  { skip: isNode22_7OrNewer },
+  () => {
+    const flag = resolveTypeStrippingFlag("/usr/lib/node_modules/gsd-pi")
     // On older Node, falls back to strip-types since transform-types isn't available
     assert.equal(flag, "--experimental-strip-types")
-  }
-})
+  },
+)
 
-test("resolveTypeStrippingFlag handles Windows-style paths under node_modules", () => {
-  const [major, minor] = process.versions.node.split(".").map(Number)
-  const flag = resolveTypeStrippingFlag("C:\\Users\\dev\\AppData\\node_modules\\gsd-pi")
-
-  if (major > 22 || (major === 22 && minor >= 7)) {
+test(
+  "resolveTypeStrippingFlag handles Windows-style paths under node_modules on Node >= 22.7",
+  { skip: !isNode22_7OrNewer },
+  () => {
+    const flag = resolveTypeStrippingFlag("C:\\Users\\dev\\AppData\\node_modules\\gsd-pi")
     assert.equal(flag, "--experimental-transform-types")
-  } else {
+  },
+)
+
+test(
+  "resolveTypeStrippingFlag handles Windows-style paths under node_modules on Node < 22.7",
+  { skip: isNode22_7OrNewer },
+  () => {
+    const flag = resolveTypeStrippingFlag("C:\\Users\\dev\\AppData\\node_modules\\gsd-pi")
     assert.equal(flag, "--experimental-strip-types")
-  }
-})
+  },
+)
 
 // ---------------------------------------------------------------------------
 // Bug 2 — waitForBootReady fails fast on consecutive 5xx
@@ -49,75 +66,60 @@ test("resolveTypeStrippingFlag handles Windows-style paths under node_modules", 
 // by verifying the launchWebMode deps injection. We test the core logic
 // pattern directly: 3 consecutive 5xx should abort without waiting for timeout.
 
-test("waitForBootReady pattern: consecutive 5xx detection aborts early", async () => {
-  // Simulate the retry logic extracted from waitForBootReady
-  let consecutive5xx = 0
-  const MAX_CONSECUTIVE_5XX = 3
-  const responses = [500, 500, 500] // three deterministic 500s
-  let abortedEarly = false
+type RetryEvent = { type: "response"; status: number } | { type: "error" }
 
-  for (const statusCode of responses) {
-    if (statusCode >= 500) {
-      consecutive5xx++
-      if (consecutive5xx >= MAX_CONSECUTIVE_5XX) {
-        abortedEarly = true
-        break
-      }
-    } else {
-      consecutive5xx = 0
-    }
-  }
+/**
+ * Simulate the consecutive-5xx abort logic extracted from waitForBootReady.
+ * Returns { abortedEarly, consecutiveCount }.
+ */
+function simulateConsecutive5xxDetection(
+  events: RetryEvent[],
+  maxConsecutive: number,
+): { abortedEarly: boolean; consecutiveCount: number } {
+  return events.reduce(
+    (acc, event) => {
+      if (acc.abortedEarly) return acc
+      const is5xx = event.type === "response" && event.status >= 500
+      const consecutive = is5xx ? acc.consecutiveCount + 1 : 0
+      const abortedEarly = consecutive >= maxConsecutive
+      return { abortedEarly, consecutiveCount: consecutive }
+    },
+    { abortedEarly: false, consecutiveCount: 0 },
+  )
+}
 
+test("waitForBootReady pattern: consecutive 5xx detection aborts early", () => {
+  const responses: RetryEvent[] = [
+    { type: "response", status: 500 },
+    { type: "response", status: 500 },
+    { type: "response", status: 500 },
+  ]
+  const { abortedEarly, consecutiveCount } = simulateConsecutive5xxDetection(responses, 3)
   assert.equal(abortedEarly, true, "should abort after 3 consecutive 5xx responses")
-  assert.equal(consecutive5xx, 3)
+  assert.equal(consecutiveCount, 3)
 })
 
 test("waitForBootReady pattern: non-5xx responses reset the consecutive counter", () => {
-  let consecutive5xx = 0
-  const MAX_CONSECUTIVE_5XX = 3
   // 500, 500, connection-refused (resets), 500, 500 — should NOT trigger abort
-  const events = [
+  const events: RetryEvent[] = [
     { type: "response", status: 500 },
     { type: "response", status: 500 },
     { type: "error" }, // connection refused resets counter
     { type: "response", status: 500 },
     { type: "response", status: 500 },
   ]
-  let abortedEarly = false
-
-  for (const event of events) {
-    if (event.type === "response" && (event.status ?? 0) >= 500) {
-      consecutive5xx++
-      if (consecutive5xx >= MAX_CONSECUTIVE_5XX) {
-        abortedEarly = true
-        break
-      }
-    } else {
-      consecutive5xx = 0
-    }
-  }
-
+  const { abortedEarly } = simulateConsecutive5xxDetection(events, 3)
   assert.equal(abortedEarly, false, "should not abort when errors reset the counter")
 })
 
 test("waitForBootReady pattern: mixed 4xx and 5xx only counts 5xx", () => {
-  let consecutive5xx = 0
-  const MAX_CONSECUTIVE_5XX = 3
-  const responses = [500, 404, 500, 500]
-  let abortedEarly = false
-
-  for (const statusCode of responses) {
-    if (statusCode >= 500) {
-      consecutive5xx++
-      if (consecutive5xx >= MAX_CONSECUTIVE_5XX) {
-        abortedEarly = true
-        break
-      }
-    } else {
-      consecutive5xx = 0
-    }
-  }
-
+  const responses: RetryEvent[] = [
+    { type: "response", status: 500 },
+    { type: "response", status: 404 },
+    { type: "response", status: 500 },
+    { type: "response", status: 500 },
+  ]
+  const { abortedEarly } = simulateConsecutive5xxDetection(responses, 3)
   assert.equal(abortedEarly, false, "404 should reset the consecutive 5xx counter")
 })
 
