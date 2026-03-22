@@ -168,6 +168,25 @@ test("readPausedSessionMetadata reads paused-session metadata when present", () 
   }
 });
 
+test("assessInterruptedSession returns none when no lock and no paused session exist", async () => {
+  const base = makeTmpBase();
+  try {
+    const assessment = await assessInterruptedSession(base);
+    assert.equal(assessment.classification, "none");
+    assert.equal(assessment.lock, null);
+    assert.equal(assessment.pausedSession, null);
+    assert.equal(assessment.state, null);
+    assert.equal(assessment.recovery, null);
+    assert.equal(assessment.recoveryPrompt, null);
+    assert.equal(assessment.recoveryToolCallCount, 0);
+    assert.equal(assessment.artifactSatisfied, false);
+    assert.equal(assessment.hasResumableDiskState, false);
+    assert.equal(assessment.isBootstrapCrash, false);
+  } finally {
+    cleanup(base);
+  }
+});
+
 test("assessInterruptedSession classifies stale complete repo as stale and suppresses recovery", async () => {
   const base = makeTmpBase();
   try {

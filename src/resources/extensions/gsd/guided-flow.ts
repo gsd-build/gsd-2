@@ -909,8 +909,9 @@ export async function showSmartEntry(
     }
   }
 
-  const state = interrupted.state ?? await deriveState(basePath);
-
+  // Always derive from the project root — the assessment may have derived
+  // state from a worktree path that was cleaned up in the stale branch above.
+  const state = await deriveState(basePath);
 
   if (!state.activeMilestone) {
     // Guard: if a discuss session is already in flight, don't re-inject the prompt.
