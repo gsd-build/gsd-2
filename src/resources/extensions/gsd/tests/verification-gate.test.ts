@@ -15,7 +15,7 @@
  *  11. Dependency audit — git diff detection, npm audit parsing, graceful failures
  */
 
-import test from "node:test";
+import test, { describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -23,7 +23,6 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { discoverCommands, runVerificationGate, formatFailureContext, captureRuntimeErrors, runDependencyAudit, isLikelyCommand } from "../verification-gate.ts";
-import type { CaptureRuntimeErrorsOptions, DependencyAuditOptions } from "../verification-gate.ts";
 import { validatePreferences } from "../preferences.ts";
 
 function makeTempDir(prefix: string): string {
@@ -37,37 +36,35 @@ function makeTempDir(prefix: string): string {
 
 // ─── Discovery Tests ─────────────────────────────────────────────────────────
 
-test("verification-gate: discoverCommands from preference commands", () => {
-  const tmp = makeTempDir("vg-pref");
-  try {
+describe("discoverCommands", () => {
+  let tmp: string;
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("verification-gate: discoverCommands from preference commands", () => {
+    tmp = makeTempDir("vg-pref");
     const result = discoverCommands({
       preferenceCommands: ["npm run lint", "npm run test"],
       cwd: tmp,
     });
     assert.deepStrictEqual(result.commands, ["npm run lint", "npm run test"]);
     assert.equal(result.source, "preference");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
+  });
 
-test("verification-gate: discoverCommands from task plan verify field", () => {
-  const tmp = makeTempDir("vg-taskplan");
-  try {
+  test("verification-gate: discoverCommands from task plan verify field", () => {
+    tmp = makeTempDir("vg-taskplan");
     const result = discoverCommands({
       taskPlanVerify: "npm run lint && npm run test",
       cwd: tmp,
     });
     assert.deepStrictEqual(result.commands, ["npm run lint", "npm run test"]);
     assert.equal(result.source, "task-plan");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
+  });
 
-test("verification-gate: discoverCommands from package.json scripts", () => {
-  const tmp = makeTempDir("vg-pkg");
-  try {
+  test("verification-gate: discoverCommands from package.json scripts", () => {
+    tmp = makeTempDir("vg-pkg");
     writeFileSync(
       join(tmp, "package.json"),
       JSON.stringify({
@@ -86,14 +83,10 @@ test("verification-gate: discoverCommands from package.json scripts", () => {
       "npm run test",
     ]);
     assert.equal(result.source, "package-json");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
+  });
 
-test("verification-gate: first-non-empty-wins — preference beats task plan and package.json", () => {
-  const tmp = makeTempDir("vg-precedence");
-  try {
+  test("verification-gate: first-non-empty-wins — preference beats task plan and package.json", () => {
+    tmp = makeTempDir("vg-precedence");
     writeFileSync(
       join(tmp, "package.json"),
       JSON.stringify({ scripts: { lint: "eslint ." } }),
@@ -105,14 +98,10 @@ test("verification-gate: first-non-empty-wins — preference beats task plan and
     });
     assert.deepStrictEqual(result.commands, ["custom-check"]);
     assert.equal(result.source, "preference");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
+  });
 
-test("verification-gate: task plan verify beats package.json", () => {
-  const tmp = makeTempDir("vg-tp-beats-pkg");
-  try {
+  test("verification-gate: task plan verify beats package.json", () => {
+    tmp = makeTempDir("vg-tp-beats-pkg");
     writeFileSync(
       join(tmp, "package.json"),
       JSON.stringify({ scripts: { lint: "eslint ." } }),
@@ -123,25 +112,17 @@ test("verification-gate: task plan verify beats package.json", () => {
     });
     assert.deepStrictEqual(result.commands, ["custom-verify"]);
     assert.equal(result.source, "task-plan");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
+  });
 
-test("verification-gate: missing package.json → 0 checks, source none", () => {
-  const tmp = makeTempDir("vg-no-pkg");
-  try {
+  test("verification-gate: missing package.json → 0 checks, source none", () => {
+    tmp = makeTempDir("vg-no-pkg");
     const result = discoverCommands({ cwd: tmp });
     assert.deepStrictEqual(result.commands, []);
     assert.equal(result.source, "none");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
+  });
 
-test("verification-gate: package.json with no matching scripts → 0 checks", () => {
-  const tmp = makeTempDir("vg-no-scripts");
-  try {
+  test("verification-gate: package.json with no matching scripts → 0 checks", () => {
+    tmp = makeTempDir("vg-no-scripts");
     writeFileSync(
       join(tmp, "package.json"),
       JSON.stringify({ scripts: { build: "tsc", start: "node index.js" } }),
@@ -149,14 +130,10 @@ test("verification-gate: package.json with no matching scripts → 0 checks", ()
     const result = discoverCommands({ cwd: tmp });
     assert.deepStrictEqual(result.commands, []);
     assert.equal(result.source, "none");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
+  });
 
-test("verification-gate: empty preference array falls through to task plan", () => {
-  const tmp = makeTempDir("vg-empty-pref");
-  try {
+  test("verification-gate: empty preference array falls through to task plan", () => {
+    tmp = makeTempDir("vg-empty-pref");
     const result = discoverCommands({
       preferenceCommands: [],
       taskPlanVerify: "echo ok",
@@ -164,16 +141,109 @@ test("verification-gate: empty preference array falls through to task plan", () 
     });
     assert.deepStrictEqual(result.commands, ["echo ok"]);
     assert.equal(result.source, "task-plan");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
+  });
+
+  test("verification-gate: package.json with only test script → returns only npm run test", () => {
+    tmp = makeTempDir("vg-only-test");
+    writeFileSync(
+      join(tmp, "package.json"),
+      JSON.stringify({
+        scripts: {
+          test: "vitest",
+          build: "tsc",
+          start: "node index.js",
+        },
+      }),
+    );
+    const result = discoverCommands({ cwd: tmp });
+    assert.deepStrictEqual(result.commands, ["npm run test"]);
+    assert.equal(result.source, "package-json");
+  });
+
+  test("verification-gate: taskPlanVerify with single command (no &&)", () => {
+    tmp = makeTempDir("vg-tp-single");
+    const result = discoverCommands({
+      taskPlanVerify: "npm test",
+      cwd: tmp,
+    });
+    assert.deepStrictEqual(result.commands, ["npm test"]);
+    assert.equal(result.source, "task-plan");
+  });
+
+  test("verification-gate: whitespace-only preference commands fall through", () => {
+    tmp = makeTempDir("vg-ws-pref");
+    writeFileSync(
+      join(tmp, "package.json"),
+      JSON.stringify({ scripts: { lint: "eslint ." } }),
+    );
+    const result = discoverCommands({
+      preferenceCommands: ["  ", ""],
+      cwd: tmp,
+    });
+    // Whitespace-only strings are trimmed to empty and filtered out
+    assert.equal(result.source, "package-json");
+    assert.deepStrictEqual(result.commands, ["npm run lint"]);
+  });
+
+  test("verification-gate: prose taskPlanVerify is rejected, falls through to package.json", () => {
+    tmp = makeTempDir("vg-prose-reject");
+    writeFileSync(
+      join(tmp, "package.json"),
+      JSON.stringify({ scripts: { test: "vitest" } }),
+    );
+    const result = discoverCommands({
+      taskPlanVerify: "Document exists, contains all 5 scale names, all 14 semantic tokens",
+      cwd: tmp,
+    });
+    // Prose should be rejected, so it falls through to package.json
+    assert.equal(result.source, "package-json");
+    assert.deepStrictEqual(result.commands, ["npm run test"]);
+  });
+
+  test("verification-gate: prose taskPlanVerify with no package.json → source none", () => {
+    tmp = makeTempDir("vg-prose-none");
+    const result = discoverCommands({
+      taskPlanVerify: "Verify the output matches expected format and all fields are present",
+      cwd: tmp,
+    });
+    assert.equal(result.source, "none");
+    assert.deepStrictEqual(result.commands, []);
+  });
+
+  test("verification-gate: valid command in taskPlanVerify still works", () => {
+    tmp = makeTempDir("vg-valid-cmd");
+    const result = discoverCommands({
+      taskPlanVerify: "npm run lint && npm run test",
+      cwd: tmp,
+    });
+    assert.equal(result.source, "task-plan");
+    assert.deepStrictEqual(result.commands, ["npm run lint", "npm run test"]);
+  });
+
+  test("verification-gate: mixed prose and commands in taskPlanVerify — only commands kept", () => {
+    tmp = makeTempDir("vg-mixed");
+    const result = discoverCommands({
+      taskPlanVerify: "Check that everything works && npm run test",
+      cwd: tmp,
+    });
+    // "Check that everything works" is prose (starts with capital, 4+ words)
+    // "npm run test" is a valid command
+    assert.equal(result.source, "task-plan");
+    assert.deepStrictEqual(result.commands, ["npm run test"]);
+  });
 });
 
 // ─── Execution Tests ─────────────────────────────────────────────────────────
 
-test("verification-gate: all commands pass → gate passes", () => {
-  const tmp = makeTempDir("vg-pass");
-  try {
+describe("runVerificationGate", () => {
+  let tmp: string;
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("verification-gate: all commands pass → gate passes", () => {
+    tmp = makeTempDir("vg-pass");
     const result = runVerificationGate({
       basePath: tmp,
       unitId: "T01",
@@ -188,14 +258,10 @@ test("verification-gate: all commands pass → gate passes", () => {
     assert.ok(result.checks[0].stdout.includes("hello"));
     assert.ok(result.checks[1].stdout.includes("world"));
     assert.equal(typeof result.timestamp, "number");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
+  });
 
-test("verification-gate: one command fails → gate fails with exit code + stderr", () => {
-  const tmp = makeTempDir("vg-fail");
-  try {
+  test("verification-gate: one command fails → gate fails with exit code + stderr", () => {
+    tmp = makeTempDir("vg-fail");
     const result = runVerificationGate({
       basePath: tmp,
       unitId: "T01",
@@ -207,14 +273,10 @@ test("verification-gate: one command fails → gate fails with exit code + stder
     assert.equal(result.checks[0].exitCode, 0);
     assert.equal(result.checks[1].exitCode, 1);
     assert.ok(result.checks[1].stderr.includes("err"));
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
+  });
 
-test("verification-gate: no commands discovered → gate passes with 0 checks", () => {
-  const tmp = makeTempDir("vg-empty");
-  try {
+  test("verification-gate: no commands discovered → gate passes with 0 checks", () => {
+    tmp = makeTempDir("vg-empty");
     const result = runVerificationGate({
       basePath: tmp,
       unitId: "T01",
@@ -223,14 +285,10 @@ test("verification-gate: no commands discovered → gate passes with 0 checks", 
     assert.equal(result.passed, true);
     assert.equal(result.checks.length, 0);
     assert.equal(result.discoverySource, "none");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
+  });
 
-test("verification-gate: command not found → exit code 127", () => {
-  const tmp = makeTempDir("vg-notfound");
-  try {
+  test("verification-gate: command not found → exit code 127", () => {
+    tmp = makeTempDir("vg-notfound");
     const result = runVerificationGate({
       basePath: tmp,
       unitId: "T01",
@@ -241,14 +299,10 @@ test("verification-gate: command not found → exit code 127", () => {
     assert.equal(result.checks.length, 1);
     assert.ok(result.checks[0].exitCode !== 0, "should have non-zero exit code");
     assert.ok(result.checks[0].durationMs >= 0);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
+  });
 
-test("verification-gate: no DEP0190 deprecation warning when running commands", () => {
-  const tmp = makeTempDir("vg-dep0190");
-  try {
+  test("verification-gate: no DEP0190 deprecation warning when running commands", () => {
+    tmp = makeTempDir("vg-dep0190");
     // Run a subprocess with --throw-deprecation so any DeprecationWarning
     // becomes a thrown error (non-zero exit). The fix passes the command
     // string to sh -c explicitly instead of using spawnSync(cmd, {shell:true}).
@@ -282,14 +336,10 @@ test("verification-gate: no DEP0190 deprecation warning when running commands", 
       0,
       `Expected exit 0 (no deprecation) but got ${child.status}. stderr: ${child.stderr}`,
     );
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
+  });
 
-test("verification-gate: each check has durationMs", () => {
-  const tmp = makeTempDir("vg-duration");
-  try {
+  test("verification-gate: each check has durationMs", () => {
+    tmp = makeTempDir("vg-duration");
     const result = runVerificationGate({
       basePath: tmp,
       unitId: "T01",
@@ -299,9 +349,44 @@ test("verification-gate: each check has durationMs", () => {
     assert.equal(result.checks.length, 1);
     assert.equal(typeof result.checks[0].durationMs, "number");
     assert.ok(result.checks[0].durationMs >= 0);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
+  });
+
+  test("verification-gate: one command fails — remaining commands still run (non-short-circuit)", () => {
+    tmp = makeTempDir("vg-no-short-circuit");
+    // First fails, second and third should still execute
+    const result = runVerificationGate({
+      basePath: tmp,
+      unitId: "T02",
+      cwd: tmp,
+      preferenceCommands: [
+        "sh -c 'exit 1'",
+        "echo second",
+        "echo third",
+      ],
+    });
+    assert.equal(result.passed, false);
+    assert.equal(result.checks.length, 3, "all 3 commands should run");
+    assert.equal(result.checks[0].exitCode, 1, "first command fails");
+    assert.equal(result.checks[1].exitCode, 0, "second command runs and passes");
+    assert.ok(result.checks[1].stdout.includes("second"));
+    assert.equal(result.checks[2].exitCode, 0, "third command runs and passes");
+    assert.ok(result.checks[2].stdout.includes("third"));
+  });
+
+  test("verification-gate: gate execution uses cwd for spawnSync", () => {
+    tmp = makeTempDir("vg-cwd");
+    // pwd should report the temp dir
+    const result = runVerificationGate({
+      basePath: tmp,
+      unitId: "T02",
+      cwd: tmp,
+      preferenceCommands: ["pwd"],
+    });
+    assert.equal(result.passed, true);
+    assert.equal(result.checks.length, 1);
+    // The stdout should contain the tmp dir path (resolving symlinks)
+    assert.ok(result.checks[0].stdout.trim().length > 0, "pwd should produce output");
+  });
 });
 
 // ─── Preference Validation Tests ─────────────────────────────────────────────
@@ -361,60 +446,42 @@ test("verification-gate: validatePreferences floors verification_max_retries", (
   assert.equal(result.errors.length, 0);
 });
 
-// ─── Additional Discovery Tests (T02) ───────────────────────────────────────
-
-test("verification-gate: package.json with only test script → returns only npm run test", () => {
-  const tmp = makeTempDir("vg-only-test");
-  try {
-    writeFileSync(
-      join(tmp, "package.json"),
-      JSON.stringify({
-        scripts: {
-          test: "vitest",
-          build: "tsc",
-          start: "node index.js",
-        },
-      }),
-    );
-    const result = discoverCommands({ cwd: tmp });
-    assert.deepStrictEqual(result.commands, ["npm run test"]);
-    assert.equal(result.source, "package-json");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
+test("verification-gate: verification_commands produces no unknown-key warnings", () => {
+  const result = validatePreferences({
+    verification_commands: ["npm test"],
+  });
+  const unknownWarnings = (result.warnings ?? []).filter(w => w.includes("unknown"));
+  assert.equal(unknownWarnings.length, 0, "verification_commands is a known key");
+  assert.equal(result.errors.length, 0);
 });
 
-test("verification-gate: taskPlanVerify with single command (no &&)", () => {
-  const tmp = makeTempDir("vg-tp-single");
-  try {
-    const result = discoverCommands({
-      taskPlanVerify: "npm test",
-      cwd: tmp,
-    });
-    assert.deepStrictEqual(result.commands, ["npm test"]);
-    assert.equal(result.source, "task-plan");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
+test("verification-gate: verification_auto_fix produces no unknown-key warnings", () => {
+  const result = validatePreferences({
+    verification_auto_fix: true,
+  });
+  const unknownWarnings = (result.warnings ?? []).filter(w => w.includes("unknown"));
+  assert.equal(unknownWarnings.length, 0, "verification_auto_fix is a known key");
+  assert.equal(result.errors.length, 0);
 });
 
-test("verification-gate: whitespace-only preference commands fall through", () => {
-  const tmp = makeTempDir("vg-ws-pref");
-  try {
-    writeFileSync(
-      join(tmp, "package.json"),
-      JSON.stringify({ scripts: { lint: "eslint ." } }),
-    );
-    const result = discoverCommands({
-      preferenceCommands: ["  ", ""],
-      cwd: tmp,
-    });
-    // Whitespace-only strings are trimmed to empty and filtered out
-    assert.equal(result.source, "package-json");
-    assert.deepStrictEqual(result.commands, ["npm run lint"]);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
+test("verification-gate: verification_max_retries produces no unknown-key warnings", () => {
+  const result = validatePreferences({
+    verification_max_retries: 2,
+  });
+  const unknownWarnings = (result.warnings ?? []).filter(w => w.includes("unknown"));
+  assert.equal(unknownWarnings.length, 0, "verification_max_retries is a known key");
+  assert.equal(result.errors.length, 0);
+});
+
+test("verification-gate: verification_max_retries -1 produces a validation error", () => {
+  const result = validatePreferences({
+    verification_max_retries: -1,
+  });
+  assert.ok(
+    result.errors.some(e => e.includes("verification_max_retries")),
+    "negative max_retries should error",
+  );
+  assert.equal(result.preferences.verification_max_retries, undefined);
 });
 
 // ─── isLikelyCommand Tests (issue #1066) ────────────────────────────────────
@@ -466,156 +533,6 @@ test("isLikelyCommand: empty or whitespace-only strings are rejected", () => {
 test("isLikelyCommand: short lowercase tokens without flags are accepted (could be custom scripts)", () => {
   assert.equal(isLikelyCommand("custom-verify"), true);
   assert.equal(isLikelyCommand("mycheck"), true);
-});
-
-test("verification-gate: prose taskPlanVerify is rejected, falls through to package.json", () => {
-  const tmp = makeTempDir("vg-prose-reject");
-  try {
-    writeFileSync(
-      join(tmp, "package.json"),
-      JSON.stringify({ scripts: { test: "vitest" } }),
-    );
-    const result = discoverCommands({
-      taskPlanVerify: "Document exists, contains all 5 scale names, all 14 semantic tokens",
-      cwd: tmp,
-    });
-    // Prose should be rejected, so it falls through to package.json
-    assert.equal(result.source, "package-json");
-    assert.deepStrictEqual(result.commands, ["npm run test"]);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("verification-gate: prose taskPlanVerify with no package.json → source none", () => {
-  const tmp = makeTempDir("vg-prose-none");
-  try {
-    const result = discoverCommands({
-      taskPlanVerify: "Verify the output matches expected format and all fields are present",
-      cwd: tmp,
-    });
-    assert.equal(result.source, "none");
-    assert.deepStrictEqual(result.commands, []);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("verification-gate: valid command in taskPlanVerify still works", () => {
-  const tmp = makeTempDir("vg-valid-cmd");
-  try {
-    const result = discoverCommands({
-      taskPlanVerify: "npm run lint && npm run test",
-      cwd: tmp,
-    });
-    assert.equal(result.source, "task-plan");
-    assert.deepStrictEqual(result.commands, ["npm run lint", "npm run test"]);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("verification-gate: mixed prose and commands in taskPlanVerify — only commands kept", () => {
-  const tmp = makeTempDir("vg-mixed");
-  try {
-    const result = discoverCommands({
-      taskPlanVerify: "Check that everything works && npm run test",
-      cwd: tmp,
-    });
-    // "Check that everything works" is prose (starts with capital, 4+ words)
-    // "npm run test" is a valid command
-    assert.equal(result.source, "task-plan");
-    assert.deepStrictEqual(result.commands, ["npm run test"]);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-// ─── Additional Execution Tests (T02) ───────────────────────────────────────
-
-test("verification-gate: one command fails — remaining commands still run (non-short-circuit)", () => {
-  const tmp = makeTempDir("vg-no-short-circuit");
-  try {
-    // First fails, second and third should still execute
-    const result = runVerificationGate({
-      basePath: tmp,
-      unitId: "T02",
-      cwd: tmp,
-      preferenceCommands: [
-        "sh -c 'exit 1'",
-        "echo second",
-        "echo third",
-      ],
-    });
-    assert.equal(result.passed, false);
-    assert.equal(result.checks.length, 3, "all 3 commands should run");
-    assert.equal(result.checks[0].exitCode, 1, "first command fails");
-    assert.equal(result.checks[1].exitCode, 0, "second command runs and passes");
-    assert.ok(result.checks[1].stdout.includes("second"));
-    assert.equal(result.checks[2].exitCode, 0, "third command runs and passes");
-    assert.ok(result.checks[2].stdout.includes("third"));
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("verification-gate: gate execution uses cwd for spawnSync", () => {
-  const tmp = makeTempDir("vg-cwd");
-  try {
-    // pwd should report the temp dir
-    const result = runVerificationGate({
-      basePath: tmp,
-      unitId: "T02",
-      cwd: tmp,
-      preferenceCommands: ["pwd"],
-    });
-    assert.equal(result.passed, true);
-    assert.equal(result.checks.length, 1);
-    // The stdout should contain the tmp dir path (resolving symlinks)
-    assert.ok(result.checks[0].stdout.trim().length > 0, "pwd should produce output");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-// ─── Additional Preference Validation Tests (T02) ──────────────────────────
-
-test("verification-gate: verification_commands produces no unknown-key warnings", () => {
-  const result = validatePreferences({
-    verification_commands: ["npm test"],
-  });
-  const unknownWarnings = (result.warnings ?? []).filter(w => w.includes("unknown"));
-  assert.equal(unknownWarnings.length, 0, "verification_commands is a known key");
-  assert.equal(result.errors.length, 0);
-});
-
-test("verification-gate: verification_auto_fix produces no unknown-key warnings", () => {
-  const result = validatePreferences({
-    verification_auto_fix: true,
-  });
-  const unknownWarnings = (result.warnings ?? []).filter(w => w.includes("unknown"));
-  assert.equal(unknownWarnings.length, 0, "verification_auto_fix is a known key");
-  assert.equal(result.errors.length, 0);
-});
-
-test("verification-gate: verification_max_retries produces no unknown-key warnings", () => {
-  const result = validatePreferences({
-    verification_max_retries: 2,
-  });
-  const unknownWarnings = (result.warnings ?? []).filter(w => w.includes("unknown"));
-  assert.equal(unknownWarnings.length, 0, "verification_max_retries is a known key");
-  assert.equal(result.errors.length, 0);
-});
-
-test("verification-gate: verification_max_retries -1 produces a validation error", () => {
-  const result = validatePreferences({
-    verification_max_retries: -1,
-  });
-  assert.ok(
-    result.errors.some(e => e.includes("verification_max_retries")),
-    "negative max_retries should error",
-  );
-  assert.equal(result.preferences.verification_max_retries, undefined);
 });
 
 // ─── formatFailureContext Tests (S03/T01) ─────────────────────────────────────

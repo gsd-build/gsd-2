@@ -7,7 +7,7 @@
  * rather than hard-coding package.json / src/ only.
  */
 
-import test from "node:test";
+import test, { describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -67,112 +67,76 @@ test("PROJECT_FILES is exported and contains expected multi-ecosystem entries", 
   assert.ok(PROJECT_FILES.includes("Package.swift"), "includes Swift marker");
 });
 
-test("health check passes for Rust project (Cargo.toml, no package.json)", () => {
-  const dir = createGitRepo();
-  try {
+describe("health check with temp git repos", () => {
+  let dir: string;
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("health check passes for Rust project (Cargo.toml, no package.json)", () => {
+    dir = createGitRepo();
     writeFileSync(join(dir, "Cargo.toml"), "[package]\nname = \"test\"\n");
     mkdirSync(join(dir, "crates"), { recursive: true });
     assert.ok(wouldPassHealthCheck(dir, existsSync), "Rust project should pass health check");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  });
 
-test("health check passes for Go project (go.mod, no package.json)", () => {
-  const dir = createGitRepo();
-  try {
+  test("health check passes for Go project (go.mod, no package.json)", () => {
+    dir = createGitRepo();
     writeFileSync(join(dir, "go.mod"), "module example.com/test\n\ngo 1.21\n");
     assert.ok(wouldPassHealthCheck(dir, existsSync), "Go project should pass health check");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  });
 
-test("health check passes for Python project (pyproject.toml, no package.json)", () => {
-  const dir = createGitRepo();
-  try {
+  test("health check passes for Python project (pyproject.toml, no package.json)", () => {
+    dir = createGitRepo();
     writeFileSync(join(dir, "pyproject.toml"), "[project]\nname = \"test\"\n");
     assert.ok(wouldPassHealthCheck(dir, existsSync), "Python project should pass health check");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  });
 
-test("health check passes for Java project (pom.xml, no package.json)", () => {
-  const dir = createGitRepo();
-  try {
+  test("health check passes for Java project (pom.xml, no package.json)", () => {
+    dir = createGitRepo();
     writeFileSync(join(dir, "pom.xml"), "<project></project>\n");
     assert.ok(wouldPassHealthCheck(dir, existsSync), "Java project should pass health check");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  });
 
-test("health check passes for Swift project (Package.swift, no package.json)", () => {
-  const dir = createGitRepo();
-  try {
+  test("health check passes for Swift project (Package.swift, no package.json)", () => {
+    dir = createGitRepo();
     writeFileSync(join(dir, "Package.swift"), "// swift-tools-version:5.7\n");
     assert.ok(wouldPassHealthCheck(dir, existsSync), "Swift project should pass health check");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  });
 
-test("health check passes for C/C++ project (CMakeLists.txt, no package.json)", () => {
-  const dir = createGitRepo();
-  try {
+  test("health check passes for C/C++ project (CMakeLists.txt, no package.json)", () => {
+    dir = createGitRepo();
     writeFileSync(join(dir, "CMakeLists.txt"), "cmake_minimum_required(VERSION 3.20)\n");
     assert.ok(wouldPassHealthCheck(dir, existsSync), "C/C++ project should pass health check");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  });
 
-test("health check passes for Elixir project (mix.exs, no package.json)", () => {
-  const dir = createGitRepo();
-  try {
+  test("health check passes for Elixir project (mix.exs, no package.json)", () => {
+    dir = createGitRepo();
     writeFileSync(join(dir, "mix.exs"), "defmodule Test.MixProject do\nend\n");
     assert.ok(wouldPassHealthCheck(dir, existsSync), "Elixir project should pass health check");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  });
 
-test("health check passes for JS project (package.json, backward compat)", () => {
-  const dir = createGitRepo();
-  try {
+  test("health check passes for JS project (package.json, backward compat)", () => {
+    dir = createGitRepo();
     writeFileSync(join(dir, "package.json"), '{"name":"test"}\n');
     assert.ok(wouldPassHealthCheck(dir, existsSync), "JS project should pass health check");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  });
 
-test("health check passes for src/-only project (backward compat)", () => {
-  const dir = createGitRepo();
-  try {
+  test("health check passes for src/-only project (backward compat)", () => {
+    dir = createGitRepo();
     mkdirSync(join(dir, "src"), { recursive: true });
     assert.ok(wouldPassHealthCheck(dir, existsSync), "src/-only project should pass health check");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  });
 
-test("health check fails for directory with no .git", () => {
-  const dir = mkdtempSync(join(tmpdir(), "wt-dispatch-test-nogit-"));
-  try {
+  test("health check fails for directory with no .git", () => {
+    dir = mkdtempSync(join(tmpdir(), "wt-dispatch-test-nogit-"));
     writeFileSync(join(dir, "Cargo.toml"), "[package]\nname = \"test\"\n");
     assert.ok(!wouldPassHealthCheck(dir, existsSync), "no-git directory should fail health check");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  });
 
-test("health check fails for empty git repo with no project files", () => {
-  const dir = createGitRepo();
-  try {
+  test("health check fails for empty git repo with no project files", () => {
+    dir = createGitRepo();
     assert.ok(!wouldPassHealthCheck(dir, existsSync), "empty git repo should fail health check");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  });
 });
