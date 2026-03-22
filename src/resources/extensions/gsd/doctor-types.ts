@@ -88,7 +88,10 @@ export type DoctorIssueCode =
  * Only the slice summary is deferred here because it requires LLM-generated
  * content.  Roadmap checkbox and UAT stub are mechanical bookkeeping and are
  * fixed immediately to avoid inconsistent state if the session stops before
- * complete-slice runs (#1808).
+ * complete-slice runs (#1808).  Note: the roadmap checkbox fix is additionally
+ * gated on the summary existing on disk — at task fixLevel the deferred summary
+ * means the roadmap must also wait to prevent a premature validating-milestone
+ * transition (#1910).
  */
 export const COMPLETION_TRANSITION_CODES = new Set<DoctorIssueCode>([
   "all_tasks_done_missing_slice_summary",

@@ -960,7 +960,13 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
           fixable: true,
         });
         dryRunCanFix("all_tasks_done_roadmap_not_checked", `mark ${slice.id} done in roadmap`);
-        if (shouldFix("all_tasks_done_roadmap_not_checked") && (hasSliceSummary || existsSync(join(slicePath, `${slice.id}-SUMMARY.md`)))) {
+        // Gate on summary existing on disk — not issue detection (#1910).
+        // At fixLevel="task" the summary is deferred (COMPLETION_TRANSITION_CODES),
+        // so the roadmap checkbox must also wait to avoid a premature
+        // validating-milestone transition.  At fixLevel="all" the stub may have
+        // been created by ensureSliceSummaryStub above, so re-check the filesystem.
+        const summaryExistsNow = hasSliceSummary || existsSync(join(slicePath, `${slice.id}-SUMMARY.md`));
+        if (shouldFix("all_tasks_done_roadmap_not_checked") && summaryExistsNow) {
           await markSliceDoneInRoadmap(basePath, milestoneId, slice.id, fixesApplied);
         }
       }
