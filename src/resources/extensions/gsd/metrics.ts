@@ -159,7 +159,8 @@ export function classifyIntervention(entry: { role: string; content?: string | u
 /**
  * Extract fact-check metrics from a slice's factcheck directory.
  * Reads FACTCHECK-STATUS.json for counts and sums scoutTokens from claim files.
- * Returns null if the factcheck directory doesn't exist.
+ * Returns null when: no factcheck directory, no status file, invalid JSON,
+ * or status.counts is absent.
  */
 export function extractFactCheckMetrics(sliceDir: string): FactCheckMetrics | null {
   const factcheckDir = join(sliceDir, "factcheck");
@@ -316,9 +317,7 @@ export function snapshotUnitMetrics(
     ...(opts?.interventions ? { interventions: opts.interventions } : {}),
     ...(opts?.factCheck ? { factCheck: opts.factCheck } : {}),
     // wallClockMs: explicit value, or derived from timestamps
-    ...(opts?.wallClockMs !== undefined
-      ? { wallClockMs: opts.wallClockMs }
-      : { wallClockMs: Date.now() - startedAt }),
+    wallClockMs: opts?.wallClockMs ?? (unit.finishedAt - startedAt),
   };
 
   // Auto-capture skill telemetry (#599)

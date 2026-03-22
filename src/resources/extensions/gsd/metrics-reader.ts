@@ -7,7 +7,7 @@
  * @module metrics-reader
  */
 
-import { readFileSync, existsSync, statSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import type { UnitMetrics } from "./metrics.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -71,8 +71,15 @@ export function readMetricsJsonl(filePath: string): ReadMetricsResult {
     // Try to parse as JSON
     try {
       const parsed = JSON.parse(line);
-      // Basic validation: must have type and id fields
-      if (typeof parsed === "object" && parsed !== null && "type" in parsed && "id" in parsed) {
+      // Validate required UnitMetrics fields
+      if (
+        typeof parsed === "object" && parsed !== null &&
+        typeof parsed.type === "string" &&
+        typeof parsed.id === "string" &&
+        typeof parsed.startedAt === "number" &&
+        typeof parsed.finishedAt === "number" &&
+        typeof parsed.tokens === "object" && parsed.tokens !== null
+      ) {
         result.units.push(parsed as UnitMetrics);
       } else {
         result.skippedLines++;

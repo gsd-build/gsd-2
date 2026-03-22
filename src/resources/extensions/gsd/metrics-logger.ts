@@ -2,7 +2,7 @@
  * GSD Metrics Logger — Write unit-level telemetry to .gsd/activity/
  *
  * Each unit dispatch writes its complete UnitMetrics object as a single-line 
- * JSON entry in a .metrics.jsonl file.
+ * JSON entry in a dispatch-metrics.jsonl file.
  */
 
 import { mkdirSync, appendFileSync } from "node:fs";
@@ -19,8 +19,8 @@ export function persistUnitMetrics(basePath: string, metrics: UnitMetrics): void
     const activityDir = join(gsdRoot(basePath), "activity");
     mkdirSync(activityDir, { recursive: true });
     
-    // We use a shared metrics.jsonl file per milestone/slice context to avoid 
-    // creating thousands of tiny files.
+    // Write to dispatch-metrics.jsonl — a shared JSONL file per activity directory
+    // to avoid creating thousands of tiny files.
     const metricsPath = join(activityDir, "dispatch-metrics.jsonl");
     
     const line = JSON.stringify(metrics) + "\n";
