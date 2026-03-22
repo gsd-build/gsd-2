@@ -10,6 +10,10 @@
  *   gsd mobile --tls              Enable TLS with auto-generated self-signed cert
  *   gsd mobile --tls-cert <path>  Use a custom TLS certificate
  *   gsd mobile --tls-key <path>   Use a custom TLS key
+ *   gsd mobile --expose ssh --remote-host user@server.com  Expose via SSH tunnel
+ *   gsd mobile --expose cloudflare                         Expose via Cloudflare
+ *   gsd mobile --expose lan                                Show LAN connection info
+ *   gsd mobile connect ws://remote:3001/mobile             Connect to remote server
  *   gsd mobile setup              Run interactive setup
  *   gsd mobile pair               Generate a new pairing code
  *   gsd mobile devices            List paired devices
@@ -25,9 +29,11 @@ import { homedir } from "node:os";
 import { MobileSocketServer, type MobileSocketServerOptions, type MobileSocketServerInfo } from "./server.ts";
 import { MobileAuthManager } from "./auth.ts";
 import { loadConfig, saveConfig, updatePassword, updateUsername, type ServerConfig } from "./config.ts";
+import { startTunnel, detectAvailableMethods, printTunnelInstructions, type TunnelMethod, type TunnelResult } from "./tunnel.ts";
+import { RemoteClient } from "./remote-client.ts";
 
 export interface MobileCLIOptions {
-  command?: "start" | "setup" | "pair" | "devices" | "revoke" | "revoke-all";
+  command?: "start" | "setup" | "pair" | "devices" | "revoke" | "revoke-all" | "connect";
   port?: number;
   host?: string;
   tls?: boolean;
@@ -39,6 +45,16 @@ export interface MobileCLIOptions {
   /** BridgeService factory — the caller must provide this */
   createBridge: () => any;
   version?: string;
+  /** Expose method for port forwarding */
+  expose?: TunnelMethod;
+  /** SSH remote host for --expose ssh */
+  remoteHost?: string;
+  /** Remote port for SSH forwarding */
+  remotePort?: number;
+  /** Remote server URL for "connect" command */
+  connectUrl?: string;
+  /** Pairing code for "connect" command */
+  connectCode?: string;
 }
 
 export async function runMobileCLI(options: MobileCLIOptions): Promise<void> {
@@ -102,6 +118,11 @@ export async function runMobileCLI(options: MobileCLIOptions): Promise<void> {
       const auth = new MobileAuthManager(gsdConfigDir);
       auth.revokeAll();
       console.log("  All devices have been revoked.");
+      return;
+    }
+
+    case "connect": {
+      await connectToRemoteServer(options);
       return;
     }
 
@@ -182,9 +203,31 @@ async function startMobileServer(options: MobileCLIOptions): Promise<void> {
 
   printServerBanner(info, config);
 
+  // Start tunnel if --expose was specified
+  let tunnel: TunnelResult | null = null;
+  if (options.expose) {
+    try {
+      console.log(`  Starting ${options.expose} tunnel...`);
+      tunnel = await startTunnel({
+        localPort: info.port,
+        method: options.expose,
+        remoteHost: options.remoteHost,
+        remotePort: options.remotePort,
+      });
+      printTunnelInstructions(tunnel, formatPairingCode(info.pairingCode));
+    } catch (err) {
+      console.error(`  Failed to start tunnel: ${err instanceof Error ? err.message : err}`);
+      console.log("");
+      console.log("  The server is still running locally. Connect via LAN or set up");
+      console.log("  port forwarding manually.");
+      console.log("");
+    }
+  }
+
   // Handle shutdown
   const shutdown = async () => {
     console.log("\n  Shutting down mobile socket server...");
+    tunnel?.stop();
     await server.stop();
     process.exit(0);
   };
@@ -199,6 +242,123 @@ async function startMobileServer(options: MobileCLIOptions): Promise<void> {
   }, 5 * 60 * 1000);
 
   // Keep the process alive
+  await new Promise<void>(() => {});
+}
+
+async function connectToRemoteServer(options: MobileCLIOptions): Promise<void> {
+  const url = options.connectUrl;
+  if (!url) {
+    console.error("  Error: Server URL required.");
+    console.error("  Usage: gsd mobile connect ws://host:port/mobile --code 123456");
+    process.exitCode = 1;
+    return;
+  }
+
+  // Normalize URL
+  let wsUrl = url;
+  if (!wsUrl.startsWith("ws://") && !wsUrl.startsWith("wss://")) {
+    wsUrl = `ws://${wsUrl}`;
+  }
+  if (!wsUrl.endsWith("/mobile")) {
+    wsUrl = wsUrl.replace(/\/$/, "") + "/mobile";
+  }
+
+  const gsdConfigDir = options.gsdConfigDir ?? join(homedir(), ".gsd");
+  const tokenFile = join(gsdConfigDir, "mobile-remote-token.json");
+
+  // Load saved device token if available
+  let savedToken: string | undefined;
+  let savedDeviceId: string | undefined;
+  if (existsSync(tokenFile)) {
+    try {
+      const data = JSON.parse(require("node:fs").readFileSync(tokenFile, "utf-8"));
+      if (data.serverUrl === wsUrl && data.deviceToken) {
+        savedToken = data.deviceToken;
+        savedDeviceId = data.deviceId;
+      }
+    } catch { /* ignore */ }
+  }
+
+  const client = new RemoteClient({
+    serverUrl: wsUrl,
+    deviceToken: savedToken,
+    pairingCode: options.connectCode,
+    deviceName: `GSD CLI (${require("node:os").hostname()})`,
+    autoReconnect: true,
+    maxReconnectAttempts: 10,
+  });
+
+  // Save token when we get paired
+  client.on("paired", (data: { deviceToken: string; deviceId: string }) => {
+    const { writeFileSync } = require("node:fs");
+    writeFileSync(tokenFile, JSON.stringify({
+      serverUrl: wsUrl,
+      deviceToken: data.deviceToken,
+      deviceId: data.deviceId,
+    }, null, 2), "utf-8");
+    require("node:fs").chmodSync(tokenFile, 0o600);
+    console.log(`  Device paired and token saved.`);
+  });
+
+  client.on("authenticated", (data: { serverVersion: string; projectCwd: string }) => {
+    console.log("");
+    console.log("  ┌──────────────────────────────────────────────────┐");
+    console.log("  │         Connected to Remote GSD Server           │");
+    console.log("  └──────────────────────────────────────────────────┘");
+    console.log("");
+    console.log(`  Server:     ${wsUrl}`);
+    console.log(`  Version:    ${data.serverVersion}`);
+    console.log(`  Project:    ${data.projectCwd}`);
+    console.log("");
+    console.log("  Session is now accessible from this GSD instance.");
+    console.log("  Press Ctrl+C to disconnect.");
+    console.log("");
+  });
+
+  client.on("disconnected", (reason: string) => {
+    console.log(`  Disconnected: ${reason}`);
+  });
+
+  client.on("error", (err: Error) => {
+    console.error(`  Error: ${err.message}`);
+  });
+
+  client.on("message", (msg: Record<string, unknown>) => {
+    // Log significant events
+    if (msg.type === "session_changed") {
+      console.log(`  Session changed: ${msg.sessionName || msg.sessionId} (by ${msg.changedBy})`);
+    } else if (msg.type === "bridge_status") {
+      console.log(`  Bridge: ${msg.phase}${msg.isStreaming ? " (streaming)" : ""}`);
+    } else if (msg.type === "handoff_result") {
+      if (msg.success) {
+        console.log(`  Handoff complete: ${msg.sessionName || msg.sessionId}`);
+      } else {
+        console.log(`  Handoff failed: ${msg.error}`);
+      }
+    }
+  });
+
+  console.log(`  Connecting to ${wsUrl}...`);
+
+  try {
+    await client.connect();
+  } catch (err) {
+    console.error(`  Failed to connect: ${err instanceof Error ? err.message : err}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  // Handle shutdown
+  const shutdown = () => {
+    console.log("\n  Disconnecting...");
+    client.disconnect();
+    process.exit(0);
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
+  // Keep alive
   await new Promise<void>(() => {});
 }
 

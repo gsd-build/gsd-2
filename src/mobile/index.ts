@@ -24,6 +24,8 @@ export { MobileSocketServer, type MobileSocketServerOptions, type MobileSocketSe
 export { MobileAuthManager, type PairedDevice } from "./auth.ts";
 export { MobileConnection, type MobileConnectionConfig, type HandoffCallback } from "./connection.ts";
 export { runMobileCLI, type MobileCLIOptions } from "./cli.ts";
+export { RemoteClient, type RemoteClientOptions } from "./remote-client.ts";
+export { startTunnel, detectAvailableMethods, printTunnelInstructions, type TunnelMethod, type TunnelOptions, type TunnelResult } from "./tunnel.ts";
 export { SimpleWebSocket, upgradeToWebSocket } from "./websocket.ts";
 export {
   loadConfig,
