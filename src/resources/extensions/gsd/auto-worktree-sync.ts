@@ -102,6 +102,16 @@ export function syncStateToProjectRoot(
     join(prGsd, "runtime", "units"),
     { force: true },
   );
+
+  // 5. completed-units.json — unit completion tracking for crash recovery
+  // and forensics. Without this, the project root has no record of completed
+  // units, so crash recovery and forensics report completedUnits: 0 even
+  // when units finished successfully in the worktree (#1944).
+  safeCopy(
+    join(wtGsd, "completed-units.json"),
+    join(prGsd, "completed-units.json"),
+    { force: true },
+  );
 }
 
 // ─── Resource Staleness ───────────────────────────────────────────────────

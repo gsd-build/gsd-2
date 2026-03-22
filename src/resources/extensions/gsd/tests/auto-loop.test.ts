@@ -2112,3 +2112,88 @@ test("autoLoop stops when worktree has no project files for execute-task (#1833)
     "should notify about missing project files in worktree",
   );
 });
+
+// ─── #1944: Step-mode exit must call pauseAuto ────────────────────────────
+
+test("step-wizard break calls pauseAuto before exiting (#1944)", async (t) => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  ctx.ui.setStatus = () => {};
+  ctx.sessionManager = { getSessionFile: () => "/tmp/session.json" };
+  const pi = makeMockPi();
+
+  let loopCount = 0;
+  const s = makeLoopSession({ stepMode: true });
+
+  const deps = makeMockDeps({
+    deriveState: async () => {
+      deps.callLog.push("deriveState");
+      return {
+        phase: "executing",
+        activeMilestone: { id: "M001", title: "Test", status: "active" },
+        activeSlice: { id: "S01", title: "Slice 1" },
+        activeTask: { id: "T01" },
+        registry: [{ id: "M001", status: "active" }],
+        blockers: [],
+      } as any;
+    },
+    resolveDispatch: async () => {
+      deps.callLog.push("resolveDispatch");
+      return {
+        action: "dispatch" as const,
+        unitType: "execute-task",
+        unitId: "M001/S01/T01",
+        prompt: "do the thing",
+      };
+    },
+    postUnitPostVerification: async () => {
+      deps.callLog.push("postUnitPostVerification");
+      loopCount++;
+      return "step-wizard" as const;
+    },
+  });
+
+  const loopPromise = autoLoop(ctx, pi, s, deps);
+
+  // Give the loop time to reach runUnit's await
+  await new Promise((r) => setTimeout(r, 50));
+
+  // Resolve the unit's agent_end
+  resolveAgentEnd(makeEvent());
+
+  await loopPromise;
+
+  // pauseAuto MUST be called before the loop exits on step-wizard
+  assert.ok(
+    deps.callLog.includes("pauseAuto"),
+    `step-wizard exit must call pauseAuto to persist session state for clean resume. Call log: ${deps.callLog.join(", ")}`,
+  );
+
+  // stopAuto should NOT be called — step-wizard is a pause, not a stop
+  assert.ok(
+    !deps.callLog.includes("stopAuto"),
+    "step-wizard exit should not call stopAuto",
+  );
+});
+
+// ─── #1944: syncStateToProjectRoot must sync completed-units.json ─────────
+
+test("syncStateToProjectRoot copies completed-units.json (#1944)", () => {
+  const source = readFileSync(
+    resolve(import.meta.dirname, "..", "auto-worktree-sync.ts"),
+    "utf-8",
+  );
+
+  const fnIdx = source.indexOf("export function syncStateToProjectRoot");
+  assert.ok(fnIdx > -1, "syncStateToProjectRoot must exist in auto-worktree-sync.ts");
+
+  // Extract the function body (up to the next export or top-level comment block)
+  const nextExportIdx = source.indexOf("\n// ─── ", fnIdx + 50);
+  const fnBlock = source.slice(fnIdx, nextExportIdx > -1 ? nextExportIdx : undefined);
+
+  assert.ok(
+    fnBlock.includes("completed-units.json"),
+    "syncStateToProjectRoot must sync completed-units.json from worktree to project root",
+  );
+});
