@@ -300,6 +300,9 @@ export interface ExtensionCommandContext extends ExtensionContext {
 	/** Best-effort cancellation for an in-flight session switch. */
 	cancelPendingSessionSwitch?(): void;
 
+	/** Clear queued steering/follow-up messages from the current session. */
+	clearQueue?(): { steering: string[]; followUp: string[] };
+
 	/** Start a new session, optionally with initialization. */
 	newSession(options?: {
 		parentSession?: string;
@@ -1357,6 +1360,7 @@ export interface ExtensionContextActions {
 export interface ExtensionCommandContextActions {
 	waitForIdle: () => Promise<void>;
 	cancelPendingSessionSwitch?: () => void;
+	clearQueue?: () => { steering: string[]; followUp: string[] };
 	newSession: (options?: {
 		parentSession?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;

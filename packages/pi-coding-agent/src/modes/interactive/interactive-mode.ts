@@ -1102,6 +1102,7 @@ export class InteractiveMode {
 				commandContextActions: {
 					waitForIdle: () => this.session.agent.waitForIdle(),
 					cancelPendingSessionSwitch: () => this.session.cancelPendingSessionSwitch(),
+					clearQueue: () => this.session.clearQueue(),
 					newSession: async (options) => {
 						if (this.loadingAnimation) {
 							this.loadingAnimation.stop();
@@ -1163,8 +1164,8 @@ export class InteractiveMode {
 						return { cancelled: false };
 					},
 					switchSession: async (sessionPath) => {
-						await this.handleResumeSession(sessionPath);
-						return { cancelled: false };
+						const resumed = await this.handleResumeSession(sessionPath);
+						return { cancelled: !resumed };
 					},
 					reload: async () => {
 						await this.handleReloadCommand();
@@ -3248,7 +3249,7 @@ export class InteractiveMode {
 		});
 	}
 
-	private async handleResumeSession(sessionPath: string): Promise<void> {
+	private async handleResumeSession(sessionPath: string): Promise<boolean> {
 		// Stop loading animation
 		if (this.loadingAnimation) {
 			this.loadingAnimation.stop();
@@ -3264,7 +3265,10 @@ export class InteractiveMode {
 		this.pendingTools.clear();
 
 		// Switch session via AgentSession (emits extension session events)
-		await this.session.switchSession(sessionPath);
+		const switched = await this.session.switchSession(sessionPath);
+		if (!switched) {
+			return false;
+		}
 
 		// Clear and re-render the chat
 		this.chatContainer.clear();
@@ -3275,6 +3279,8 @@ export class InteractiveMode {
 		} else {
 			this.showStatus("Resumed session");
 		}
+
+		return true;
 	}
 
 	private showProviderManager(): void {

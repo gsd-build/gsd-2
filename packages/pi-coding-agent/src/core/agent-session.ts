@@ -1534,6 +1534,7 @@ export class AgentSession {
 		this._disconnectFromAgent();
 		await this.abort();
 		if (wasCancelled()) {
+			this._reconnectToAgent();
 			return false;
 		}
 		this.agent.reset();
@@ -1564,6 +1565,7 @@ export class AgentSession {
 		if (options?.setup) {
 			await options.setup(this.sessionManager);
 			if (wasCancelled()) {
+				this._reconnectToAgent();
 				return false;
 			}
 			// Sync agent state with session manager after setup
@@ -1572,6 +1574,7 @@ export class AgentSession {
 		}
 
 		if (wasCancelled()) {
+			this._reconnectToAgent();
 			return false;
 		}
 		this._reconnectToAgent();

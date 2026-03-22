@@ -21,6 +21,7 @@ export function createDefaultCommandContextActions(session: AgentSession): Exten
 	return {
 		waitForIdle: () => session.agent.waitForIdle(),
 		cancelPendingSessionSwitch: () => session.cancelPendingSessionSwitch(),
+		clearQueue: () => session.clearQueue(),
 
 		newSession: async (options) => {
 			const success = await session.newSession(options);
