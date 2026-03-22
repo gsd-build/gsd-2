@@ -88,9 +88,9 @@ test("authoritative built-ins never fall through to prompt/follow_up in browser 
   )
 
   for (const builtin of BUILTIN_SLASH_COMMANDS) {
-    await t.test(`/${builtin.name} -> ${EXPECTED_BUILTIN_OUTCOMES.get(builtin.name)}`, () => {
+    const expectedKind = EXPECTED_BUILTIN_OUTCOMES.get(builtin.name)
+    await t.test(`/${builtin.name} -> ${expectedKind}`, () => {
       const outcome = dispatchBrowserSlashCommand(`/${builtin.name}`)
-      const expectedKind = EXPECTED_BUILTIN_OUTCOMES.get(builtin.name)
 
       assert.ok(expectedKind, `missing explicit browser expectation for /${builtin.name}`)
       assert.notEqual(
@@ -99,40 +99,45 @@ test("authoritative built-ins never fall through to prompt/follow_up in browser 
         `/${builtin.name} must not fall through to prompt/follow_up in browser mode`,
       )
       assert.equal(outcome.kind, expectedKind, `/${builtin.name} resolved to ${outcome.kind}`)
+    })
 
-      if (outcome.kind === "reject") {
+    if (expectedKind === "reject") {
+      await t.test(`/${builtin.name} reject notice is browser-visible`, () => {
+        const outcome = dispatchBrowserSlashCommand(`/${builtin.name}`)
         const notice = getBrowserSlashCommandTerminalNotice(outcome)
         assert.ok(notice, `/${builtin.name} should produce a browser-visible reject notice`)
         assert.equal(notice.type, "error", `/${builtin.name} reject notice should be an error line`)
         assert.match(notice.message, new RegExp(`/${builtin.name}`), `/${builtin.name} notice should name the command`)
         assert.match(notice.message, /blocked instead of falling through to the model/i)
-      }
-    })
+      })
+    }
   }
 })
 
 test("browser-local aliases and legacy helpers stay explicit", async (t) => {
-  const explicitCases = [
-    { input: "/state", expectedKind: "rpc", expectedCommandType: "get_state" },
-    { input: "/new-session", expectedKind: "rpc", expectedCommandType: "new_session" },
-    { input: "/refresh", expectedKind: "local", expectedAction: "refresh_workspace" },
-    { input: "/clear", expectedKind: "local", expectedAction: "clear_terminal" },
-  ] as const
+  await t.test("/state dispatches to rpc get_state", () => {
+    const outcome = dispatchBrowserSlashCommand("/state")
+    assert.equal(outcome.kind, "rpc")
+    assert.equal((outcome as any).command.type, "get_state")
+  })
 
-  for (const scenario of explicitCases) {
-    await t.test(scenario.input, () => {
-      const outcome = dispatchBrowserSlashCommand(scenario.input)
-      assert.equal(outcome.kind, scenario.expectedKind, `${scenario.input} resolved to ${outcome.kind}`)
+  await t.test("/new-session dispatches to rpc new_session", () => {
+    const outcome = dispatchBrowserSlashCommand("/new-session")
+    assert.equal(outcome.kind, "rpc")
+    assert.equal((outcome as any).command.type, "new_session")
+  })
 
-      if (outcome.kind === "rpc") {
-        assert.equal(outcome.command.type, scenario.expectedCommandType)
-      }
+  await t.test("/refresh dispatches to local refresh_workspace", () => {
+    const outcome = dispatchBrowserSlashCommand("/refresh")
+    assert.equal(outcome.kind, "local")
+    assert.equal((outcome as any).action, "refresh_workspace")
+  })
 
-      if (outcome.kind === "local") {
-        assert.equal(outcome.action, scenario.expectedAction)
-      }
-    })
-  }
+  await t.test("/clear dispatches to local clear_terminal", () => {
+    const outcome = dispatchBrowserSlashCommand("/clear")
+    assert.equal(outcome.kind, "local")
+    assert.equal((outcome as any).action, "clear_terminal")
+  })
 })
 
 test("registered GSD command roots stay on the prompt/extension path", async () => {
@@ -144,9 +149,10 @@ test("registered GSD command roots stay on the prompt/extension path", async () 
   )
 
   // Non-gsd roots are extension commands that pass through to the bridge
-  for (const root of registeredRoots.filter((r) => r !== "gsd")) {
-    assertPromptPassthrough(`/${root}`)
-  }
+  assertPromptPassthrough("/exit")
+  assertPromptPassthrough("/kill")
+  assertPromptPassthrough("/worktree")
+  assertPromptPassthrough("/wt")
 
   // Bare /gsd passes through to bridge (equivalent to /gsd next)
   const bareGsd = dispatchBrowserSlashCommand("/gsd")
@@ -234,39 +240,35 @@ test("every registered /gsd subcommand has an explicit browser dispatch outcome"
         expectedKind,
         `/gsd ${subcommand} should dispatch to ${expectedKind}, got ${outcome.kind}`,
       )
-
-      if (expectedKind === "surface") {
-        assert.equal(
-          outcome.surface,
-          `gsd-${subcommand}`,
-          `/gsd ${subcommand} should open the gsd-${subcommand} surface`,
-        )
-      }
-
-      if (expectedKind === "prompt") {
-        assert.equal(
-          outcome.command.message,
-          `/gsd ${subcommand}`,
-          `/gsd ${subcommand} should preserve exact input text for bridge delivery`,
-        )
-      }
-
-      if (expectedKind === "local") {
-        assert.equal(
-          outcome.action,
-          "gsd_help",
-          `/gsd ${subcommand} should dispatch to gsd_help action`,
-        )
-      }
-
-      if (expectedKind === "view-navigate") {
-        assert.equal(
-          outcome.view,
-          subcommand,
-          `/gsd ${subcommand} should navigate to the ${subcommand} view`,
-        )
-      }
     })
+
+    if (expectedKind === "surface") {
+      await t.test(`/gsd ${subcommand} opens gsd-${subcommand} surface`, () => {
+        const outcome = dispatchBrowserSlashCommand(`/gsd ${subcommand}`) as any
+        assert.equal(outcome.surface, `gsd-${subcommand}`, `/gsd ${subcommand} should open the gsd-${subcommand} surface`)
+      })
+    }
+
+    if (expectedKind === "prompt") {
+      await t.test(`/gsd ${subcommand} preserves exact input text`, () => {
+        const outcome = dispatchBrowserSlashCommand(`/gsd ${subcommand}`) as any
+        assert.equal(outcome.command.message, `/gsd ${subcommand}`, `/gsd ${subcommand} should preserve exact input text for bridge delivery`)
+      })
+    }
+
+    if (expectedKind === "local") {
+      await t.test(`/gsd ${subcommand} dispatches to gsd_help action`, () => {
+        const outcome = dispatchBrowserSlashCommand(`/gsd ${subcommand}`) as any
+        assert.equal(outcome.action, "gsd_help", `/gsd ${subcommand} should dispatch to gsd_help action`)
+      })
+    }
+
+    if (expectedKind === "view-navigate") {
+      await t.test(`/gsd ${subcommand} navigates to the ${subcommand} view`, () => {
+        const outcome = dispatchBrowserSlashCommand(`/gsd ${subcommand}`) as any
+        assert.equal(outcome.view, subcommand, `/gsd ${subcommand} should navigate to the ${subcommand} view`)
+      })
+    }
   }
 })
 

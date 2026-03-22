@@ -286,10 +286,8 @@ test('tab completion returns all 4 options when prefix is empty', async () => {
     assert.deepEqual(values, ['tavily', 'brave', 'ollama', 'auto'])
 
     // Each item has label and description
-    for (const item of items!) {
-      assert.ok(item.label, 'each item should have a label')
-      assert.ok(item.description, 'each item should have a description')
-    }
+    assert.ok(items!.every((i: any) => i.label), 'every item should have a label')
+    assert.ok(items!.every((i: any) => i.description), 'every item should have a description')
   })
 })
 

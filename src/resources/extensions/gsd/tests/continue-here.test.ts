@@ -72,18 +72,17 @@ describe("continue-here", () => {
       const budget = computeBudgets(128_000);
       const threshold = budget.continueThresholdPercent;
 
-      // Simulate repeated polls with percent above threshold
-      let fired = false;
-      let fireCount = 0;
+      // Simulate repeated polls with percent above threshold using a reducer
+      // so there is no control flow inside the test body.
       const usagePercents = [75, 80, 85, 90, 95];
-
-      for (const percent of usagePercents) {
-        if (fired) continue; // one-shot guard
-        if (percent >= threshold) {
-          fired = true;
-          fireCount++;
-        }
-      }
+      const { fired, fireCount } = usagePercents.reduce(
+        (acc, percent) => {
+          if (acc.fired) return acc; // one-shot guard
+          if (percent >= threshold) return { fired: true, fireCount: acc.fireCount + 1 };
+          return acc;
+        },
+        { fired: false, fireCount: 0 },
+      );
 
       assert.equal(fireCount, 1, "must fire exactly once");
       assert.equal(fired, true);
@@ -97,15 +96,19 @@ describe("continue-here", () => {
       { name: "1M", contextWindow: 1_000_000 },
     ];
 
-    it("all model sizes produce continueThresholdPercent of 70", () => {
-      for (const { name, contextWindow } of modelSizes) {
-        const budget = computeBudgets(contextWindow);
-        assert.equal(
-          budget.continueThresholdPercent,
-          70,
-          `${name} model should have 70% threshold`,
-        );
-      }
+    it("128K model produces continueThresholdPercent of 70", () => {
+      const budget = computeBudgets(128_000);
+      assert.equal(budget.continueThresholdPercent, 70, "128K model should have 70% threshold");
+    });
+
+    it("200K model produces continueThresholdPercent of 70", () => {
+      const budget = computeBudgets(200_000);
+      assert.equal(budget.continueThresholdPercent, 70, "200K model should have 70% threshold");
+    });
+
+    it("1M model produces continueThresholdPercent of 70", () => {
+      const budget = computeBudgets(1_000_000);
+      assert.equal(budget.continueThresholdPercent, 70, "1M model should have 70% threshold");
     });
 
     it("larger models produce larger verificationBudgetChars", () => {

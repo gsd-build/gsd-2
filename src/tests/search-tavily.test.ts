@@ -47,6 +47,22 @@ function makeTavilyResponse(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function normalizeHeaders(headers: HeadersInit | undefined): Record<string, string> | undefined {
+  if (headers == null) return undefined;
+  if (headers instanceof Headers) {
+    const result: Record<string, string> = {};
+    headers.forEach((v, k) => { result[k] = v; });
+    return result;
+  }
+  if (Array.isArray(headers)) return Object.fromEntries(headers);
+  return headers as Record<string, string>;
+}
+
+function parseJsonBody(body: BodyInit | null | undefined): Record<string, unknown> | undefined {
+  if (body == null || typeof body !== "string") return undefined;
+  try { return JSON.parse(body); } catch { return undefined; }
+}
+
 /**
  * Install a mock global fetch that captures request details and returns a
  * Tavily response fixture. Returns an object with the captured request info.
@@ -64,24 +80,9 @@ function mockFetch(responseBody: unknown, status = 200) {
   globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     captured.url = url;
-    captured.method = init?.method || "GET";
-
-    // Capture headers
-    if (init?.headers) {
-      if (init.headers instanceof Headers) {
-        captured.headers = {};
-        init.headers.forEach((v, k) => { captured.headers![k] = v; });
-      } else if (Array.isArray(init.headers)) {
-        captured.headers = Object.fromEntries(init.headers);
-      } else {
-        captured.headers = init.headers as Record<string, string>;
-      }
-    }
-
-    // Capture body
-    if (init?.body && typeof init.body === "string") {
-      try { captured.body = JSON.parse(init.body); } catch { /* ignore */ }
-    }
+    captured.method = init?.method ?? "GET";
+    captured.headers = normalizeHeaders(init?.headers);
+    captured.body = parseJsonBody(init?.body);
 
     return new Response(JSON.stringify(responseBody), {
       status,
