@@ -99,7 +99,9 @@ export function detectStaleSkills(
   const stale: string[] = [];
 
   // Check all installed skills, not just those with usage data
-  const installed = loadSkills({ cwd: basePath }).skills.map((skill) => skill.name);
+  const installed = loadSkills({ cwd: basePath }).skills
+    .filter((skill) => !skill.disableModelInvocation)
+    .map((skill) => skill.name);
 
   for (const skill of installed) {
     const lastTs = lastUsed.get(skill);

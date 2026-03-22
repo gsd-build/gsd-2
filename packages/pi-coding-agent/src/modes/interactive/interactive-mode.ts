@@ -1117,6 +1117,7 @@ export class InteractiveMode {
 						}
 
 						// Clear UI state
+						this.resetExtensionUI();
 						this.chatContainer.clear();
 						this.pendingMessagesContainer.clear();
 						this.compactionQueuedMessages = [];
@@ -1137,6 +1138,7 @@ export class InteractiveMode {
 							return { cancelled: true };
 						}
 
+						this.resetExtensionUI();
 						this.chatContainer.clear();
 						this.renderInitialMessages();
 						this.editor.setText(result.selectedText);
@@ -1155,6 +1157,7 @@ export class InteractiveMode {
 							return { cancelled: true };
 						}
 
+						this.resetExtensionUI();
 						this.chatContainer.clear();
 						this.renderInitialMessages();
 						if (result.editorText && !this.editor.getText().trim()) {
@@ -3265,6 +3268,7 @@ export class InteractiveMode {
 		}
 
 		// Clear UI state only after the switch succeeds
+		this.resetExtensionUI();
 		this.pendingMessagesContainer.clear();
 		this.compactionQueuedMessages = [];
 		this.pendingBashComponents = [];
