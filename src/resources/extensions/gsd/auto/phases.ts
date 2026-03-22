@@ -877,6 +877,7 @@ export async function runUnitPhase(
   if (mid)
     deps.updateSliceProgressCache(s.basePath, mid, state.activeSlice?.id);
   deps.updateProgressWidget(ctx, unitType, unitId, state);
+  deps.syncCmuxSidebar(prefs, state);
 
   deps.ensurePreconditions(unitType, unitId, s.basePath, state);
 

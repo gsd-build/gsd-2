@@ -8,6 +8,7 @@ import {
   buildCmuxStatusLabel,
   detectCmuxEnvironment,
   markCmuxPromptShown,
+  phaseVisuals,
   resetCmuxPromptState,
   resolveCmuxConfig,
   shouldPromptToEnableCmux,
@@ -190,6 +191,55 @@ describe("createGridLayout", () => {
     const surfaces = await mock.createGridLayout(0);
     assert.equal(surfaces.length, 0);
     assert.equal(mock.calls.length, 0);
+  });
+});
+
+describe("phaseVisuals", () => {
+  test("returns distinct visuals for all execution phases", () => {
+    // These were previously falling through to the default rocket icon
+    const executing = phaseVisuals("executing");
+    assert.equal(executing.icon, "zap");
+
+    const summarizing = phaseVisuals("summarizing");
+    assert.equal(summarizing.icon, "file-text");
+
+    const advancing = phaseVisuals("advancing");
+    assert.equal(advancing.icon, "arrow-right");
+
+    const discussing = phaseVisuals("discussing");
+    assert.equal(discussing.icon, "message-circle");
+
+    const needsDiscussion = phaseVisuals("needs-discussion");
+    assert.equal(needsDiscussion.icon, "message-circle");
+
+    const prePlanning = phaseVisuals("pre-planning");
+    assert.equal(prePlanning.icon, "list");
+  });
+
+  test("returns correct visuals for terminal and planning phases", () => {
+    assert.equal(phaseVisuals("blocked").icon, "triangle-alert");
+    assert.equal(phaseVisuals("paused").icon, "pause");
+    assert.equal(phaseVisuals("complete").icon, "check");
+    assert.equal(phaseVisuals("completing-milestone").icon, "check");
+    assert.equal(phaseVisuals("planning").icon, "compass");
+    assert.equal(phaseVisuals("researching").icon, "compass");
+    assert.equal(phaseVisuals("replanning-slice").icon, "compass");
+    assert.equal(phaseVisuals("validating-milestone").icon, "shield-check");
+    assert.equal(phaseVisuals("verifying").icon, "shield-check");
+  });
+
+  test("all Phase values produce a non-empty icon and color", () => {
+    const allPhases = [
+      "pre-planning", "needs-discussion", "discussing", "researching",
+      "planning", "executing", "verifying", "summarizing", "advancing",
+      "validating-milestone", "completing-milestone", "replanning-slice",
+      "complete", "paused", "blocked",
+    ] as const;
+    for (const phase of allPhases) {
+      const visuals = phaseVisuals(phase);
+      assert.ok(visuals.icon.length > 0, `icon missing for phase: ${phase}`);
+      assert.ok(visuals.color.length > 0, `color missing for phase: ${phase}`);
+    }
   });
 });
 

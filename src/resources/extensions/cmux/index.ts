@@ -142,7 +142,7 @@ export function buildCmuxProgress(state: GSDState): CmuxSidebarProgress | null {
     ?? choose(progress.milestones.done, progress.milestones.total, "milestones");
 }
 
-function phaseVisuals(phase: Phase): { icon: string; color: string } {
+export function phaseVisuals(phase: Phase): { icon: string; color: string } {
   switch (phase) {
     case "blocked":
       return { icon: "triangle-alert", color: "#ef4444" };
@@ -158,6 +158,17 @@ function phaseVisuals(phase: Phase): { icon: string; color: string } {
     case "validating-milestone":
     case "verifying":
       return { icon: "shield-check", color: "#06b6d4" };
+    case "executing":
+      return { icon: "zap", color: "#4ade80" };
+    case "summarizing":
+      return { icon: "file-text", color: "#60a5fa" };
+    case "advancing":
+      return { icon: "arrow-right", color: "#4ade80" };
+    case "discussing":
+    case "needs-discussion":
+      return { icon: "message-circle", color: "#a78bfa" };
+    case "pre-planning":
+      return { icon: "list", color: "#94a3b8" };
     default:
       return { icon: "rocket", color: "#4ade80" };
   }
