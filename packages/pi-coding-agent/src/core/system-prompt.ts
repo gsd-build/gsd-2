@@ -84,9 +84,12 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 			}
 		}
 
-		// Append skills section (only if read tool is available)
-		const customPromptHasRead = !selectedTools || selectedTools.includes("read");
-		if (customPromptHasRead && skills.length > 0) {
+		// Append skills section when the Skill tool is available.
+		// Before PR #1661 skills depended on the read tool; now Skill is a
+		// standalone built-in, so gate on either tool for backward compat.
+		const customPromptHasSkillTool =
+			!selectedTools || selectedTools.includes("read") || selectedTools.includes("Skill");
+		if (customPromptHasSkillTool && skills.length > 0) {
 			prompt += formatSkillsForPrompt(skills);
 		}
 
@@ -232,8 +235,10 @@ Pi documentation (read only when the user asks about pi itself, its SDK, extensi
 		}
 	}
 
-	// Append skills section (only if read tool is available)
-	if (hasRead && skills.length > 0) {
+	// Append skills section when the Skill tool is available.
+	// Gate on either "read" (legacy) or "Skill" (post-#1661 built-in).
+	const hasSkillTool = tools.includes("Skill");
+	if ((hasRead || hasSkillTool) && skills.length > 0) {
 		prompt += formatSkillsForPrompt(skills);
 	}
 
