@@ -6,6 +6,7 @@ import { resolveMilestoneFile, resolveMilestonePath, resolveSliceFile, resolveSl
 import { deriveState, isMilestoneComplete } from "./state.js";
 import { invalidateAllCaches } from "./cache.js";
 import { loadEffectiveGSDPreferences, type GSDPreferences } from "./preferences.js";
+import { markSliceDoneInRoadmap, markSliceUndoneInRoadmap } from "./roadmap-mutations.js";
 
 import type { DoctorIssue, DoctorIssueCode, DoctorReport } from "./doctor-types.js";
 import { COMPLETION_TRANSITION_CODES, GLOBAL_STATE_CODES } from "./doctor-types.js";
@@ -280,35 +281,9 @@ async function markTaskUndoneInPlan(basePath: string, milestoneId: string, slice
   }
 }
 
-async function markSliceDoneInRoadmap(basePath: string, milestoneId: string, sliceId: string, fixesApplied: string[]): Promise<void> {
-  const roadmapPath = resolveMilestoneFile(basePath, milestoneId, "ROADMAP");
-  if (!roadmapPath) return;
-  const content = await loadFile(roadmapPath);
-  if (!content) return;
-  const updated = content.replace(
-    new RegExp(`^(\\s*-\\s+)\\[ \\]\\s+\\*\\*${sliceId}:`, "m"),
-    `$1[x] **${sliceId}:`,
-  );
-  if (updated !== content) {
-    await saveFile(roadmapPath, updated);
-    fixesApplied.push(`marked ${sliceId} done in ${roadmapPath}`);
-  }
-}
-
-async function markSliceUndoneInRoadmap(basePath: string, milestoneId: string, sliceId: string, fixesApplied: string[]): Promise<void> {
-  const roadmapPath = resolveMilestoneFile(basePath, milestoneId, "ROADMAP");
-  if (!roadmapPath) return;
-  const content = await loadFile(roadmapPath);
-  if (!content) return;
-  const updated = content.replace(
-    new RegExp(`^(\\s*-\\s+)\\[x\\]\\s+\\*\\*${sliceId}:`, "m"),
-    `$1[ ] **${sliceId}:`,
-  );
-  if (updated !== content) {
-    await saveFile(roadmapPath, updated);
-    fixesApplied.push(`unmarked ${sliceId} in ${roadmapPath} (premature completion)`);
-  }
-}
+// markSliceDoneInRoadmap and markSliceUndoneInRoadmap are imported from
+// roadmap-mutations.ts — the shared, synchronous implementations that return
+// a boolean indicating whether the roadmap was modified.
 
 function matchesScope(unitId: string, scope?: string): boolean {
   if (!scope) return true;
@@ -881,7 +856,9 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
       // this, state.ts skips done slices and the unchecked tasks never run,
       // causing doctor to fire again on every start (infinite loop).
       if (taskUncheckedByDoctor && slice.done) {
-        await markSliceUndoneInRoadmap(basePath, milestoneId, slice.id, fixesApplied);
+        if (markSliceUndoneInRoadmap(basePath, milestoneId, slice.id)) {
+          fixesApplied.push(`unmarked ${slice.id} in ${milestoneId} roadmap (premature completion)`);
+        }
       }
 
       // Blocker-without-replan detection
@@ -961,7 +938,9 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
         });
         dryRunCanFix("all_tasks_done_roadmap_not_checked", `mark ${slice.id} done in roadmap`);
         if (shouldFix("all_tasks_done_roadmap_not_checked") && (hasSliceSummary || existsSync(join(slicePath, `${slice.id}-SUMMARY.md`)))) {
-          await markSliceDoneInRoadmap(basePath, milestoneId, slice.id, fixesApplied);
+          if (markSliceDoneInRoadmap(basePath, milestoneId, slice.id)) {
+            fixesApplied.push(`marked ${slice.id} done in ${milestoneId} roadmap`);
+          }
         }
       }
 
@@ -978,7 +957,9 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
         if (!allTasksDone) {
           dryRunCanFix("slice_checked_missing_summary", `uncheck ${slice.id} in roadmap (tasks incomplete)`);
           if (shouldFix("slice_checked_missing_summary")) {
-            await markSliceUndoneInRoadmap(basePath, milestoneId, slice.id, fixesApplied);
+            if (markSliceUndoneInRoadmap(basePath, milestoneId, slice.id)) {
+              fixesApplied.push(`unmarked ${slice.id} in ${milestoneId} roadmap (tasks incomplete)`);
+            }
           }
         }
       }
