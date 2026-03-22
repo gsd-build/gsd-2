@@ -179,6 +179,7 @@ export async function autoLoop(
         // ── Unit execution (shared with dev path) ──
         const unitPhaseResult = await runUnitPhase(ic, iterData, loopState);
         if (unitPhaseResult.action === "break") break;
+        if (unitPhaseResult.action === "continue") continue;
 
         // ── Verify first, then reconcile (only mark complete on pass) ──
         debugLog("autoLoop", { phase: "custom-engine-verify", iteration, unitId: iterData.unitId });

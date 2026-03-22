@@ -133,7 +133,7 @@ import { join } from "node:path";
 import { readFileSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { atomicWriteSync } from "./atomic-write.js";
 import { clearAutoResumeTimers } from "./auto-resume-timers.js";
-import { resetProviderRecoveryState } from "./provider-recovery-state.js";
+import { clearNetworkRetryCounts, resetProviderRecoveryState } from "./provider-recovery-state.js";
 import {
   autoCommitCurrentBranch,
   captureIntegrationBranch,
@@ -805,7 +805,9 @@ export async function pauseAuto(
 ): Promise<void> {
   if (!s.active) return;
   clearAutoResumeTimers();
-  resetProviderRecoveryState();
+  // Only clear network retry counters — preserve consecutiveTransientErrors
+  // so MAX_TRANSIENT_AUTO_RESUMES escalation works across pause/resume cycles.
+  clearNetworkRetryCounts();
   clearUnitTimeout();
   // Unblock any pending unit promise so the auto-loop is not orphaned.
   resolveAgentEndCancelled("paused");
