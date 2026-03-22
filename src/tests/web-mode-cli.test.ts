@@ -668,3 +668,121 @@ test('resolveContextAwareCwd returns cwd unchanged when outside dev root', () =>
     rmSync(tmp, { recursive: true, force: true })
   }
 })
+
+// ─── Stale instance cleanup tests ─────────────────────────────────────
+
+test('launchWebMode kills stale instance for same cwd before spawning', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-stale-'))
+  const standaloneRoot = join(tmp, 'dist', 'web', 'standalone')
+  const serverPath = join(standaloneRoot, 'server.js')
+  mkdirSync(standaloneRoot, { recursive: true })
+  writeFileSync(serverPath, 'console.log("stub")\n')
+
+  const registryPath = join(tmp, 'web-instances.json')
+  const pidFilePath = join(tmp, 'web-server.pid')
+  const cwd = '/tmp/stale-project'
+
+  // Pre-register a stale instance for the same cwd
+  webMode.registerInstance(cwd, { pid: 77777, port: 3000, url: 'http://127.0.0.1:3000' }, registryPath)
+
+  let stderrOutput = ''
+  let spawnCalled = false
+
+  try {
+    const status = await webMode.launchWebMode(
+      {
+        cwd,
+        projectSessionsDir: '/tmp/.gsd/sessions/stale',
+        agentDir: '/tmp/.gsd/agent',
+        packageRoot: tmp,
+      },
+      {
+        initResources: () => {},
+        resolvePort: async () => 45200,
+        execPath: '/custom/node',
+        env: { TEST_ENV: '1' },
+        spawn: (command, args, options) => {
+          spawnCalled = true
+          return {
+            pid: 88888,
+            once: () => undefined,
+            unref: () => {},
+          } as any
+        },
+        waitForBootReady: async () => undefined,
+        openBrowser: () => {},
+        pidFilePath,
+        writePidFile: webMode.writePidFile,
+        registryPath,
+        stderr: {
+          write(chunk: string) {
+            stderrOutput += chunk
+            return true
+          },
+        },
+      },
+    )
+
+    assert.equal(status.ok, true)
+    assert.equal(spawnCalled, true)
+    // Stale instance for same cwd should have been cleaned up
+    assert.match(stderrOutput, /Cleaning up stale/)
+    // New instance should be registered
+    const registry = webMode.readInstanceRegistry(registryPath)
+    assert.equal(registry[resolve(cwd)]?.pid, 88888)
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('launchWebMode does not log cleanup when no stale instance exists', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-no-stale-'))
+  const standaloneRoot = join(tmp, 'dist', 'web', 'standalone')
+  const serverPath = join(standaloneRoot, 'server.js')
+  mkdirSync(standaloneRoot, { recursive: true })
+  writeFileSync(serverPath, 'console.log("stub")\n')
+
+  const registryPath = join(tmp, 'web-instances.json')
+  const pidFilePath = join(tmp, 'web-server.pid')
+
+  let stderrOutput = ''
+
+  try {
+    const status = await webMode.launchWebMode(
+      {
+        cwd: '/tmp/clean-project',
+        projectSessionsDir: '/tmp/.gsd/sessions/clean',
+        agentDir: '/tmp/.gsd/agent',
+        packageRoot: tmp,
+      },
+      {
+        initResources: () => {},
+        resolvePort: async () => 45201,
+        execPath: '/custom/node',
+        env: { TEST_ENV: '1' },
+        spawn: () => ({
+          pid: 88889,
+          once: () => undefined,
+          unref: () => {},
+        } as any),
+        waitForBootReady: async () => undefined,
+        openBrowser: () => {},
+        pidFilePath,
+        writePidFile: webMode.writePidFile,
+        registryPath,
+        stderr: {
+          write(chunk: string) {
+            stderrOutput += chunk
+            return true
+          },
+        },
+      },
+    )
+
+    assert.equal(status.ok, true)
+    // No cleanup message when no stale instance exists
+    assert.equal(stderrOutput.includes('Cleaning up stale'), false)
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})

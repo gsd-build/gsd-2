@@ -102,6 +102,8 @@ export interface WebModeDeps {
   writePidFile?: (path: string, pid: number) => void
   readPidFile?: (path: string) => number | null
   deletePidFile?: (path: string) => void
+  /** Path to the multi-instance registry JSON (for testing). */
+  registryPath?: string
 }
 
 export interface WebModeStopResult {
@@ -514,6 +516,30 @@ async function waitForBootReady(url: string, timeoutMs = 180_000, stderr?: Writa
   throw new Error(lastError ?? 'timed out waiting for boot readiness')
 }
 
+/**
+ * If a previous web server instance is registered for the same `cwd`, attempt
+ * to kill it and remove its registry entry so the new launch can bind the port
+ * cleanly.  This handles the "orphan process" scenario where a prior `gsd --web`
+ * was terminated without clean shutdown (e.g. terminal closed).
+ */
+function cleanupStaleInstance(cwd: string, stderr: WritableLike, registryPath?: string): void {
+  const registry = readInstanceRegistry(registryPath)
+  const key = resolve(cwd)
+  const stale = registry[key]
+  if (!stale) return
+
+  stderr.write(`[gsd] Cleaning up stale web server for ${key} (pid=${stale.pid}, port=${stale.port})…\n`)
+  const result = killPid(stale.pid)
+  if (result === 'killed') {
+    stderr.write(`[gsd] Killed stale web server (pid=${stale.pid}).\n`)
+  } else if (result === 'already-dead') {
+    stderr.write(`[gsd] Stale web server was already stopped (pid=${stale.pid}) — clearing entry.\n`)
+  } else {
+    stderr.write(`[gsd] Could not kill stale web server (pid=${stale.pid}): ${result.error}\n`)
+  }
+  unregisterInstance(cwd, registryPath)
+}
+
 export async function launchWebMode(
   options: WebModeLaunchOptions,
   deps: WebModeDeps = {},
@@ -545,6 +571,11 @@ export async function launchWebMode(
   }
 
   stderr.write(`[gsd] Starting web mode…\n`)
+
+  // Kill any stale server instance for this project before reserving a port.
+  // This prevents EADDRINUSE when the previous `gsd --web` was terminated
+  // without a clean shutdown (e.g. terminal closed, crash).
+  cleanupStaleInstance(options.cwd, stderr, deps.registryPath)
 
   const port = options.port ?? await (deps.resolvePort ?? reserveWebPort)(host)
   const authToken = randomBytes(32).toString('hex')
@@ -654,7 +685,7 @@ export async function launchWebMode(
       const pidFilePath = deps.pidFilePath ?? defaultWebPidFilePath
       ;(deps.writePidFile ?? writePidFile)(pidFilePath, pid)
       // Register in multi-instance registry
-      registerInstance(options.cwd, { pid, port, url })
+      registerInstance(options.cwd, { pid, port, url }, deps.registryPath)
     }
     ;(deps.openBrowser ?? openBrowser)(`${url}/#token=${authToken}`)
   } catch (error) {
