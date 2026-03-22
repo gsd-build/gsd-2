@@ -452,5 +452,6 @@ export function buildResourceLoader(agentDir: string): DefaultResourceLoader {
   return new DefaultResourceLoader({
     agentDir,
     additionalExtensionPaths: piExtensionPaths,
+    bundledExtensionKeys: bundledKeys,
   })
 }
