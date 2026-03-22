@@ -10,7 +10,7 @@ import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@g
 import { showNextAction } from "../shared/tui.js";
 import { loadFile, parseRoadmap } from "./files.js";
 import { loadPrompt, inlineTemplate } from "./prompt-loader.js";
-import { buildSkillActivationBlock } from "./auto-prompts.js";
+import { buildSkillActivationBlock, buildDiscussMilestonePrompt } from "./auto-prompts.js";
 import { deriveState } from "./state.js";
 import { invalidateAllCaches } from "./cache.js";
 import { startAuto } from "./auto.js";
@@ -603,9 +603,47 @@ export async function showDiscuss(
       discussedMap.set(s.id, !!contextFile);
     }
 
-    // If all pending slices are discussed, notify and exit instead of looping
+    // If all pending slices are discussed, check for pending milestones before giving up
     const allDiscussed = pendingSlices.every(s => discussedMap.get(s.id));
     if (allDiscussed) {
+      // Before returning, check if any pending milestones need discussion (#2039)
+      const pendingMilestones = state.registry.filter(
+        m => m.status === "pending" && m.id !== mid,
+      );
+      const undiscussedMilestones = pendingMilestones.filter(m => {
+        const rmFile = resolveMilestoneFile(basePath, m.id, "ROADMAP");
+        return !rmFile; // no roadmap = could benefit from discussion
+      });
+
+      if (undiscussedMilestones.length > 0) {
+        const actions = undiscussedMilestones.map((m, i) => ({
+          id: m.id,
+          label: `${m.id}: ${m.title}`,
+          description: "pending \u00b7 no roadmap yet",
+          recommended: i === 0,
+        }));
+
+        const choice = await showNextAction(ctx, {
+          title: "GSD \u2014 Discuss a queued milestone",
+          summary: [
+            `All ${mid} slices are discussed.`,
+            `${undiscussedMilestones.length} queued milestone(s) can be discussed:`,
+          ],
+          actions,
+          notYetMessage: "Run /gsd discuss when ready.",
+        });
+
+        if (choice !== "not_yet") {
+          const chosen = undiscussedMilestones.find(m => m.id === choice);
+          if (chosen) {
+            const prompt = await buildDiscussMilestonePrompt(chosen.id, chosen.title, basePath);
+            await dispatchWorkflow(pi, prompt, "gsd-discuss", ctx, "plan-milestone");
+          }
+        }
+        return;
+      }
+
+      // Truly nothing to discuss anywhere
       const lockData = readSessionLockData(basePath);
       const remoteAutoRunning = lockData && lockData.pid !== process.pid && isSessionLockProcessAlive(lockData);
       const nextStep = remoteAutoRunning
