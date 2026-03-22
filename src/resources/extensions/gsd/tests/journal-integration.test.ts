@@ -414,14 +414,48 @@ test("runUnitPhase emits unit-end with cancelled status when session creation fa
   const loopState: LoopState = { recentUnits: [{ key: "execute-task/M001/S01/T01" }], stuckRecoveryAttempts: 0 };
 
   const result = await runUnitPhase(ic, iterData, loopState);
-  assert.equal(result.action, "break");
-  assert.equal(result.reason, "session-failed");
+  assert.equal(result.action, "continue");
 
   const startEvents = capture.events.filter(e => e.eventType === "unit-start");
   const endEvents = capture.events.filter(e => e.eventType === "unit-end");
   assert.equal(startEvents.length, 1, "should emit exactly one unit-start");
   assert.equal(endEvents.length, 1, "should emit exactly one unit-end for cancelled unit");
   assert.equal((endEvents[0].data as any).status, "cancelled");
+  assert.equal((endEvents[0].data as any).artifactVerified, false);
+  assert.equal(endEvents[0].causedBy?.seq, startEvents[0].seq);
+});
+
+test("runUnitPhase emits unit-end with error status when setup fails after unit-start", async () => {
+  const capture = createEventCapture();
+  const deps = makeMockDeps(capture, {
+    selectAndApplyModel: async () => {
+      throw new Error("model selection failed");
+    },
+  });
+  const ic = makeIC(deps);
+
+  const iterData: IterationData = {
+    unitType: "execute-task",
+    unitId: "M001/S01/T01",
+    prompt: "do stuff",
+    finalPrompt: "do stuff",
+    pauseAfterUatDispatch: false,
+    observabilityIssues: [],
+    state: { phase: "executing", activeMilestone: { id: "M001" }, activeSlice: { id: "S01" }, registry: [], blockers: [] } as any,
+    mid: "M001",
+    midTitle: "Test",
+    isRetry: false,
+    previousTier: undefined,
+  };
+  const loopState: LoopState = { recentUnits: [{ key: "execute-task/M001/S01/T01" }], stuckRecoveryAttempts: 0 };
+
+  await assert.rejects(() => runUnitPhase(ic, iterData, loopState), /model selection failed/);
+
+  const startEvents = capture.events.filter(e => e.eventType === "unit-start");
+  const endEvents = capture.events.filter(e => e.eventType === "unit-end");
+  assert.equal(startEvents.length, 1, "should emit exactly one unit-start");
+  assert.equal(endEvents.length, 1, "should emit exactly one unit-end for setup failure");
+  assert.equal((endEvents[0].data as any).status, "error");
   assert.equal((endEvents[0].data as any).artifactVerified, false);
   assert.equal(endEvents[0].causedBy?.seq, startEvents[0].seq);
 });

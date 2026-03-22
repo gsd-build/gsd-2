@@ -153,6 +153,7 @@ export async function autoLoop(
 
       const unitPhaseResult = await runUnitPhase(ic, iterData, loopState, sidecarItem);
       if (unitPhaseResult.action === "break") break;
+      if (unitPhaseResult.action === "continue") continue;
 
       // ── Phase 5: Finalize ───────────────────────────────────────────────
 

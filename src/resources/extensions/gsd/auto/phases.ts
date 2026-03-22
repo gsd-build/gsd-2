@@ -856,6 +856,12 @@ export async function runUnitPhase(
   s.currentUnit = { type: unitType, id: unitId, startedAt: Date.now() };
   const unitStartSeq = ic.nextSeq();
   deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: unitStartSeq, eventType: "unit-start", data: { unitType, unitId } });
+  let unitEndEmitted = false;
+  const emitUnitEnd = (status: "completed" | "cancelled" | "error", artifactVerified: boolean): void => {
+    if (unitEndEmitted) return;
+    unitEndEmitted = true;
+    deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "unit-end", data: { unitType, unitId, status, artifactVerified }, causedBy: { flowId: ic.flowId, seq: unitStartSeq } });
+  };
   deps.captureAvailableSkills();
   deps.writeUnitRuntimeRecord(
     s.basePath,
@@ -871,6 +877,8 @@ export async function runUnitPhase(
       lastProgressKind: "dispatch",
     },
   );
+
+  try {
 
   // Status bar + progress widget
   ctx.ui.setStatus("gsd-auto", "auto");
@@ -1076,14 +1084,14 @@ export async function runUnitPhase(
   }
 
   if (unitResult.status === "cancelled") {
-	deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "unit-end", data: { unitType, unitId, status: unitResult.status, artifactVerified: false }, causedBy: { flowId: ic.flowId, seq: unitStartSeq } });
+  deps.clearUnitTimeout();
+  emitUnitEnd(unitResult.status, false);
     ctx.ui.notify(
-      `Session creation timed out or was cancelled for ${unitType} ${unitId}. Will retry.`,
+    `Session creation timed out or was cancelled for ${unitType} ${unitId}. Retrying.`,
       "warning",
     );
-    await deps.stopAuto(ctx, pi, "Session creation failed");
-    debugLog("autoLoop", { phase: "exit", reason: "session-failed" });
-    return { action: "break", reason: "session-failed" };
+  debugLog("autoLoop", { phase: "continue", reason: "session-failed-retry" });
+  return { action: "continue" };
   }
 
   // ── Immediate unit closeout (metrics, activity log, memory) ────────
@@ -1119,7 +1127,8 @@ export async function runUnitPhase(
           `${unitType} ${unitId} completed with 0 tool calls — hallucinated summary, will retry`,
           "warning",
         );
-        deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "unit-end", data: { unitType, unitId, status: unitResult.status, artifactVerified: false }, causedBy: { flowId: ic.flowId, seq: unitStartSeq } });
+		deps.clearUnitTimeout();
+		emitUnitEnd(unitResult.status, false);
         // Do NOT add to completedUnits — fall through to next iteration
         // where dispatch will re-derive and re-dispatch this task.
         return { action: "next", data: { unitStartedAt: s.currentUnit.startedAt } };
@@ -1161,9 +1170,14 @@ export async function runUnitPhase(
     s.unitRecoveryCount.delete(`${unitType}/${unitId}`);
   }
 
-  deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "unit-end", data: { unitType, unitId, status: unitResult.status, artifactVerified }, causedBy: { flowId: ic.flowId, seq: unitStartSeq } });
+  emitUnitEnd(unitResult.status, artifactVerified);
 
   return { action: "next", data: { unitStartedAt: s.currentUnit.startedAt } };
+  } catch (err) {
+	deps.clearUnitTimeout();
+	emitUnitEnd("error", false);
+	throw err;
+  }
 }
 
 // ─── runFinalize ──────────────────────────────────────────────────────────────

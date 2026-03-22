@@ -14,6 +14,8 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const AUTO_TS_PATH = join(__dirname, "..", "auto.ts");
+const BOOTSTRAP_AGENT_END_PATH = join(__dirname, "..", "bootstrap", "agent-end-recovery.ts");
+const REGISTER_HOOKS_PATH = join(__dirname, "..", "bootstrap", "register-hooks.ts");
 const AUTO_RESOLVE_TS_PATH = join(__dirname, "..", "auto", "resolve.ts");
 const SESSION_TS_PATH = join(__dirname, "..", "auto", "session.ts");
 
@@ -23,6 +25,14 @@ function getAutoTsSource(): string {
 
 function getAutoResolveTsSource(): string {
   return readFileSync(AUTO_RESOLVE_TS_PATH, "utf-8");
+}
+
+function getBootstrapAgentEndSource(): string {
+  return readFileSync(BOOTSTRAP_AGENT_END_PATH, "utf-8");
+}
+
+function getRegisterHooksSource(): string {
+  return readFileSync(REGISTER_HOOKS_PATH, "utf-8");
 }
 
 function getSessionTsSource(): string {
@@ -79,6 +89,26 @@ test("handleAgentEnd is a thin compatibility wrapper", () => {
   assert.ok(
     !fnBlock.includes("dispatchNextUnit"),
     "handleAgentEnd must not dispatch recursively",
+  );
+});
+
+test("bootstrap register-hooks wires agent_end to the live bootstrap handler", () => {
+  const source = getRegisterHooksSource();
+  assert.ok(
+    source.includes('await handleAgentEnd(pi, event, ctx);'),
+    "register-hooks must route agent_end events through bootstrap/agent-end-recovery.ts",
+  );
+});
+
+test("bootstrap handleAgentEnd guards session switches and resolves agent_end on the live path", () => {
+  const source = getBootstrapAgentEndSource();
+  assert.ok(
+    source.includes("isSessionSwitchInFlight()"),
+    "bootstrap handleAgentEnd must guard against session-switch agent_end events",
+  );
+  assert.ok(
+    source.includes("resolveAgentEnd(event)"),
+    "bootstrap handleAgentEnd must resolve the pending unit on the live path",
   );
 });
 
