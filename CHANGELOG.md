@@ -6,6 +6,45 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.42.0] - 2026-03-22
+
+### Added
+- **gsd**: declarative workflow engine — YAML-defined workflows through the auto-loop (#2024)
+- **gsd**: unified rule registry, event journal, journal query tool, and tool naming convention (#1928)
+- **ci**: PR risk checker — classify changed files by system and surface risk level (#1930)
+- ADR attribution — distinguish human vs agent vs collaborative decisions (#1830)
+- add /gsd fast command and gate service tier icon to supported models (#1848) (#1862)
+- add --host, --port, --allowed-origins flags for web mode (#1847) (#1873)
+
+### Fixed
+- **tests**: wrap rmSync cleanup in try/catch for Windows EPERM
+- **tests**: add maxRetries to rmSync cleanup for Windows EPERM compatibility
+- recursive key sorting in tool-call loop guard hash function (#1962)
+- use path.sep for cross-platform path traversal guards and test assertions
+- **tests**: use cross-platform path split in run-manager timestamp test
+- prevent SIGTSTP crash on Windows (#2018)
+- add missing codeFilesChanged to journal integration test mock
+- **repo-identity**: use native realpath on Windows to resolve 8.3 short paths (#1960)
+- **doctor**: gate roadmap checkbox on summary existing on disk, not issue detection (#1915)
+- warn when milestone merge contains only metadata and no code (#1906) (#1927)
+- **worktree**: resolve 8.3 short paths and use shell mode for .bat hooks on Windows (#1956)
+- **web**: persist auth token in sessionStorage to survive page refreshes (#1877)
+- clean up SQUASH_MSG after squash-merge and guard worktree teardown against uncommitted changes (#1868)
+- populate RecoveryContext in hook unit supervision to prevent crash on stalled tool recovery (#1867)
+- resolve worktree path from git registry when .gsd/ symlink is shadowed (#1866)
+- resolve Node v24 web boot failure — ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING (#1864)
+- **auto**: broaden worktree health check to all ecosystems (#1860)
+- **doctor**: cascade slice uncheck when task_done_missing_summary unchecks tasks (#1850) (#1858)
+- defend exit path against ESM module cache mismatch (#1854)
+- escape parentheses in paths before bash shell-out, fix __extensionDir fallback (#1872)
+- use PowerShell Start-Process for Windows browser launch, prevent URL wrapping (#1870)
+- clear stale unit state and restore CWD when step-wizard exits auto-loop (#1869)
+- prevent cross-project state leak in brand-new directories (#1639) (#1861)
+- reconcile worktree HEAD with milestone branch ref before squash merge (#1846) (#1859)
+- normalize Windows backslash paths in bash command strings (#1436) (#1863)
+- parsePlan and verifyExpectedArtifact recognize heading-style task entries (#1691) (#1857)
+- sync all milestone dirs regardless of naming convention (#1547) (#1845)
+
 ## [2.41.0] - 2026-03-21
 
 ### Added
@@ -1598,7 +1637,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - License updated to MIT
 
-[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.41.0...HEAD
+[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.42.0...HEAD
+[2.42.0]: https://github.com/gsd-build/gsd-2/compare/v2.41.0...v2.42.0
 [2.41.0]: https://github.com/gsd-build/gsd-2/compare/v2.40.0...v2.41.0
 [2.40.0]: https://github.com/gsd-build/gsd-2/compare/v2.39.0...v2.40.0
 [2.39.0]: https://github.com/gsd-build/gsd-2/compare/v2.38.0...v2.39.0
