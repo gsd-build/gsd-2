@@ -144,16 +144,20 @@ export function parseRoadmapSlices(content: string): RoadmapSliceEntry[] {
     return parseProseSliceHeaders(content);
   }
 
+  // Strip HTML comments before parsing — they can contain format-rule
+  // examples that match the checkbox regex and corrupt slice state (#2022).
+  const strippedSection = slicesSection.replace(/<!--[\s\S]*?-->/g, "");
+
   // Try table format first — if the section contains pipe-delimited rows with
   // slice IDs, parse them as a table (#1736).
-  const tableSlices = parseTableSlices(slicesSection);
+  const tableSlices = parseTableSlices(strippedSection);
   if (tableSlices.length > 0) {
     return tableSlices;
   }
 
   // Standard checkbox format
   const slices: RoadmapSliceEntry[] = [];
-  const checkboxItems = slicesSection.split("\n");
+  const checkboxItems = strippedSection.split("\n");
   let currentSlice: RoadmapSliceEntry | null = null;
 
   for (const line of checkboxItems) {

@@ -253,3 +253,82 @@ Do the second thing.
   assert.equal(slices[0]?.id, "S01");
   assert.equal(slices[1]?.id, "S02");
 });
+
+// ── Regression tests for #2022 ─────────────────────────────────────────────
+
+test("parseRoadmapSlices: HTML comments with checkbox examples do not corrupt slice parsing (#2022)", () => {
+  const roadmapWithComment = `# M004: Milestone Four
+
+**Vision:** Ship the feature.
+
+## Slices
+
+- [x] **S01: Dependency Updates** \`risk:low\` \`depends:[]\`
+  > After this: All deps updated.
+- [ ] **S02: Core Implementation** \`risk:medium\` \`depends:[S01]\`
+  > After this: Core works.
+
+<!--
+  Format rules (parsers depend on this exact structure):
+  - Checkbox line: - [ ] **S01: Title** \`risk:high|medium|low\` \`depends:[S01,S02]\`
+  - Demo line:     > After this: what the user can see or do
+-->
+
+## Boundary Map
+### S01 → S02
+Produces: deps.json
+`;
+  const slices = parseRoadmapSlices(roadmapWithComment);
+  assert.equal(slices.length, 2, "should find exactly 2 real slices, ignoring comment content");
+  assert.equal(slices[0]?.id, "S01");
+  assert.equal(slices[0]?.done, true, "S01 should be done (checked [x])");
+  assert.equal(slices[0]?.title, "Dependency Updates");
+  assert.equal(slices[1]?.id, "S02");
+  assert.equal(slices[1]?.done, false);
+});
+
+test("parseRoadmapSlices: HTML comment before real slices does not shadow them (#2022)", () => {
+  const roadmapCommentFirst = `# M005: Comment First
+
+## Slices
+
+<!--
+  - [ ] **S01: Fake Entry** \`risk:high\` \`depends:[]\`
+  - [ ] **S02: Another Fake** \`risk:low\` \`depends:[S01]\`
+-->
+
+- [x] **S01: Real Entry** \`risk:low\` \`depends:[]\`
+- [x] **S02: Also Real** \`risk:medium\` \`depends:[S01]\`
+
+## Boundary Map
+`;
+  const slices = parseRoadmapSlices(roadmapCommentFirst);
+  assert.equal(slices.length, 2, "should parse only real slices outside comment");
+  assert.equal(slices[0]?.id, "S01");
+  assert.equal(slices[0]?.done, true, "real S01 should be done");
+  assert.equal(slices[0]?.title, "Real Entry");
+  assert.equal(slices[1]?.id, "S02");
+  assert.equal(slices[1]?.done, true, "real S02 should be done");
+  assert.equal(slices[1]?.title, "Also Real");
+});
+
+test("parseRoadmapSlices: multiline HTML comment spanning multiple lines stripped (#2022)", () => {
+  const roadmapMultilineComment = `# M006: Multiline
+
+## Slices
+
+- [x] **S01: Done** \`risk:low\` \`depends:[]\`
+<!-- This is a
+multi-line comment
+- [ ] **S01: Ghost** \`risk:high\` \`depends:[]\`
+that should be ignored -->
+- [ ] **S02: Pending** \`risk:medium\` \`depends:[S01]\`
+`;
+  const slices = parseRoadmapSlices(roadmapMultilineComment);
+  assert.equal(slices.length, 2);
+  assert.equal(slices[0]?.id, "S01");
+  assert.equal(slices[0]?.done, true);
+  assert.equal(slices[0]?.title, "Done");
+  assert.equal(slices[1]?.id, "S02");
+  assert.equal(slices[1]?.done, false);
+});
