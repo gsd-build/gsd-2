@@ -17,6 +17,7 @@ import type { StateManifest } from "./workflow-manifest.js";
 import { renderAllProjections } from "./workflow-projections.js";
 import { acquireSyncLock, releaseSyncLock } from "./sync-lock.js";
 import { _getAdapter } from "./gsd-db.js";
+import { reconcileWorktreeLogs } from "./workflow-reconcile.js";
 
 const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
 
@@ -136,6 +137,14 @@ export function syncStateToProjectRoot(
     if (db) {
       writeManifest(projectRoot, db);
       renderAllProjections(projectRoot, milestoneId);
+    }
+    // Event-based reconciliation (Phase 3 — SYNC-04)
+    // Replays diverged events from worktree into project root.
+    // If conflicts detected, merge is blocked and CONFLICTS.md is written.
+    const reconcileResult = reconcileWorktreeLogs(projectRoot, worktreePath);
+    if (reconcileResult.conflicts.length > 0) {
+      process.stderr.write(`[gsd] sync blocked: ${reconcileResult.conflicts.length} conflict(s) — see .gsd/CONFLICTS.md\n`);
+      return; // Do not proceed with sync — conflicts must be resolved first
     }
     // D-02: runtime artifacts still file-copied
     safeCopyRecursive(

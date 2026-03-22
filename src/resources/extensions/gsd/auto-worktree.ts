@@ -21,10 +21,10 @@ import { isAbsolute, join } from "node:path";
 import { GSDError, GSD_IO_ERROR, GSD_GIT_ERROR } from "./errors.js";
 import {
   copyWorktreeDb,
-  reconcileWorktreeDb,
   isDbAvailable,
 } from "./gsd-db.js";
 import { atomicWriteSync } from "./atomic-write.js";
+import { reconcileWorktreeLogs } from "./workflow-reconcile.js";
 import { execFileSync } from "node:child_process";
 import { safeCopy, safeCopyRecursive } from "./safe-fs.js";
 import { gsdRoot } from "./paths.js";
@@ -968,14 +968,16 @@ export function mergeMilestoneToMain(
   // 1. Auto-commit dirty state in worktree before leaving
   autoCommitDirtyState(worktreeCwd);
 
-  // Reconcile worktree DB into main DB before leaving worktree context
+  // Event-based reconciliation — replaces reconcileWorktreeDb (Phase 3 — SYNC-04)
+  // Takes base paths (directories containing .gsd/), not db file paths.
   if (isDbAvailable()) {
     try {
-      const worktreeDbPath = join(worktreeCwd, ".gsd", "gsd.db");
-      const mainDbPath = join(originalBasePath_, ".gsd", "gsd.db");
-      reconcileWorktreeDb(mainDbPath, worktreeDbPath);
+      const result = reconcileWorktreeLogs(originalBasePath_, worktreeCwd);
+      if (result.conflicts.length > 0) {
+        process.stderr.write(`[gsd] merge blocked: ${result.conflicts.length} conflict(s)\n`);
+      }
     } catch {
-      /* non-fatal */
+      // Fall through — reconciliation not available (pre-engine project)
     }
   }
 
