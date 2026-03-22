@@ -591,6 +591,57 @@ async function main(): Promise<void> {
     }
   }
 
+
+  // --- 16. syncProjectRootToWorktree does not clobber existing worktree files (#2144)
+  console.log('\n=== 16. root->worktree sync preserves existing worktree files (#2144) ===');
+  {
+    const mainBase = createBase('main');
+    const wtBase = createBase('wt');
+
+    try {
+      // Main (project root) has a stale roadmap with [ ] checkboxes
+      const mainM001 = join(mainBase, '.gsd', 'milestones', 'M001');
+      mkdirSync(join(mainM001, 'slices', 'S01'), { recursive: true });
+      writeFileSync(join(mainM001, 'M001-ROADMAP.md'), '- [ ] **S01: Do thing** `risk:high`');
+      writeFileSync(join(mainM001, 'slices', 'S01', 'S01-PLAN.md'), '# S01 Plan');
+
+      // Worktree has an updated roadmap with [x] (slice completed) and a new S02 research
+      const wtM001 = join(wtBase, '.gsd', 'milestones', 'M001');
+      mkdirSync(join(wtM001, 'slices', 'S01'), { recursive: true });
+      mkdirSync(join(wtM001, 'slices', 'S02'), { recursive: true });
+      writeFileSync(join(wtM001, 'M001-ROADMAP.md'), '- [x] **S01: Do thing** `risk:high`');
+      writeFileSync(join(wtM001, 'slices', 'S01', 'S01-PLAN.md'), '# S01 Plan');
+      writeFileSync(join(wtM001, 'slices', 'S01', 'S01-SUMMARY.md'), '# S01 Summary -- done');
+      writeFileSync(join(wtM001, 'slices', 'S02', 'S02-RESEARCH.md'), '# S02 Research');
+
+      syncProjectRootToWorktree(mainBase, wtBase, 'M001');
+
+      // The worktree roadmap must NOT be overwritten -- [x] must survive
+      const roadmap = readFileSync(join(wtBase, '.gsd', 'milestones', 'M001', 'M001-ROADMAP.md'), 'utf-8');
+      assertTrue(
+        roadmap.includes('[x]'),
+        '#2144: worktree roadmap [x] preserved after root->worktree sync',
+      );
+      assertTrue(
+        !roadmap.includes('[ ]'),
+        '#2144: stale [ ] from project root did not overwrite worktree',
+      );
+
+      // Existing worktree files must survive
+      assertTrue(
+        existsSync(join(wtBase, '.gsd', 'milestones', 'M001', 'slices', 'S01', 'S01-SUMMARY.md')),
+        '#2144: S01-SUMMARY.md preserved in worktree',
+      );
+      assertTrue(
+        existsSync(join(wtBase, '.gsd', 'milestones', 'M001', 'slices', 'S02', 'S02-RESEARCH.md')),
+        '#2144: S02-RESEARCH.md preserved in worktree',
+      );
+    } finally {
+      cleanup(mainBase);
+      cleanup(wtBase);
+    }
+  }
+
   report();
 }
 
