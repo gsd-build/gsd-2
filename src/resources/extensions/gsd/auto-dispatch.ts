@@ -26,6 +26,8 @@ import {
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { hasImplementationArtifacts } from "./auto-recovery.js";
+import { getCurrentBranch } from "./worktree.js";
+import { QUICK_BRANCH_RE } from "./git-service.js";
 import {
   buildDiscussMilestonePrompt,
   buildResearchMilestonePrompt,
@@ -91,6 +93,26 @@ const MAX_REWRITE_ATTEMPTS = 3;
 // ─── Rules ────────────────────────────────────────────────────────────────
 
 export const DISPATCH_RULES: DispatchRule[] = [
+  {
+    name: "quick-branch-guard",
+    match: async ({ basePath }) => {
+      let branch: string;
+      try {
+        branch = getCurrentBranch(basePath);
+      } catch {
+        return null; // Cannot determine branch — let other rules decide
+      }
+      if (!QUICK_BRANCH_RE.test(branch)) return null;
+      return {
+        action: "stop",
+        reason:
+          `Auto-mode is on quick-task branch "${branch}". ` +
+          "Refusing to dispatch milestone work on a quick branch to prevent silent work loss. " +
+          "Return to the original branch first (run cleanupQuickBranch or checkout manually).",
+        level: "error",
+      };
+    },
+  },
   {
     name: "rewrite-docs (override gate)",
     match: async ({ mid, midTitle, state, basePath, session }) => {

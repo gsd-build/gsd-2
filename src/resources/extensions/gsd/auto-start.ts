@@ -186,6 +186,23 @@ export async function bootstrapAutoSession(
       }
     }
 
+    // Recover from stale quick-task branch (#2086): if auto-mode is starting
+    // while the checkout is still on a gsd/quick/* branch (because
+    // cleanupQuickBranch was never called — #1935), merge the quick work back
+    // and return to the original branch before proceeding.
+    try {
+      const { cleanupQuickBranch } = await import("./quick.js");
+      const quickCleaned = cleanupQuickBranch(base);
+      if (quickCleaned) {
+        ctx.ui.notify(
+          "Recovered from stale quick-task branch. Quick work merged back to original branch.",
+          "info",
+        );
+      }
+    } catch {
+      // Non-fatal — quick module may fail; the dispatch guard will catch it
+    }
+
     // Initialize GitServiceImpl
     s.gitService = new GitServiceImpl(
       s.basePath,
