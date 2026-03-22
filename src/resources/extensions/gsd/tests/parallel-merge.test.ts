@@ -33,6 +33,7 @@ import {
   formatMergeResults,
   type MergeResult,
 } from "../parallel-merge.ts";
+import { createAutoWorktree } from "../auto-worktree.ts";
 import type { WorkerInfo } from "../parallel-orchestrator.ts";
 import {
   writeSessionStatus,
@@ -293,6 +294,31 @@ test("mergeCompletedMilestone — clean merge, session status cleaned up", async
     // Verify milestone branch deleted
     const branches = run("git branch", repo);
     assert.ok(!branches.includes("milestone/M010"), "milestone branch should be deleted");
+  } finally {
+    process.chdir(savedCwd);
+    cleanup(repo);
+  }
+});
+
+test("mergeCompletedMilestone — uses milestone worktree when invoked from coordinator root", async () => {
+  const savedCwd = process.cwd();
+  const repo = createTempRepo();
+
+  try {
+    setupRoadmap(repo, "M012", "Worktree Merge", ["S01: Worktree feature"]);
+    const wtPath = createAutoWorktree(repo, "M012");
+
+    writeFileSync(join(wtPath, "worktree-feature.ts"), "export const worktreeFeature = true;\n");
+    run("git add .", wtPath);
+    run('git commit -m "feat(M012): worktree feature"', wtPath);
+
+    process.chdir(repo);
+    const result = await mergeCompletedMilestone(repo, "M012");
+
+    assert.equal(result.success, true, `merge should succeed from coordinator root: ${result.error}`);
+    assert.ok(existsSync(join(repo, "worktree-feature.ts")), "worktree feature should be merged to main");
+    const branches = run("git branch", repo);
+    assert.ok(!branches.includes("milestone/M012"), "milestone branch should be deleted after merge");
   } finally {
     process.chdir(savedCwd);
     cleanup(repo);

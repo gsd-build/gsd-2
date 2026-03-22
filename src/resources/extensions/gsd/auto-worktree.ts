@@ -971,10 +971,13 @@ export function mergeMilestoneToMain(
   milestoneId: string,
   roadmapContent: string,
 ): { commitMessage: string; pushed: boolean; prCreated: boolean; codeFilesChanged: boolean } {
-  const worktreeCwd = process.cwd();
+  const currentCwd = process.cwd();
+  const worktreeCwd = getAutoWorktreePath(originalBasePath_, milestoneId) ?? currentCwd;
   const milestoneBranch = autoWorktreeBranch(milestoneId);
 
-  // 1. Auto-commit dirty state in worktree before leaving
+  // 1. Auto-commit dirty state in the milestone worktree before leaving.
+  // Parallel merge runs from the coordinator in the project root, so
+  // process.cwd() is not necessarily the worktree being merged.
   autoCommitDirtyState(worktreeCwd);
 
   // Reconcile worktree DB into main DB before leaving worktree context
@@ -993,7 +996,7 @@ export function mergeMilestoneToMain(
   const completedSlices = roadmap.slices.filter((s) => s.done);
 
   // 3. chdir to original base
-  const previousCwd = process.cwd();
+  const previousCwd = currentCwd;
   process.chdir(originalBasePath_);
 
   // 4. Resolve integration branch — prefer milestone metadata, then preferences,
