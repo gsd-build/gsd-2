@@ -1665,9 +1665,17 @@ export class DefaultPackageManager implements PackageManager {
 			userOverrides.extensions,
 			globalBaseDir,
 		);
+		// Ecosystem skills (~/.agents/skills/) take priority over legacy config-dir skills.
+		// Skip legacy dir entirely when migration has completed (marker file present).
+		const legacySkillsMigrated =
+			resolve(userDirs.skills) !== resolve(userAgentsSkillsDir) &&
+			existsSync(join(userDirs.skills, ".migrated-to-agents"));
+		const legacyUserSkillEntries = legacySkillsMigrated
+			? []
+			: collectAutoSkillEntries(userDirs.skills);
 		addResources(
 			"skills",
-			[...collectAutoSkillEntries(userDirs.skills), ...collectAutoSkillEntries(userAgentsSkillsDir)],
+			[...collectAutoSkillEntries(userAgentsSkillsDir), ...legacyUserSkillEntries],
 			userMetadata,
 			userOverrides.skills,
 			globalBaseDir,
