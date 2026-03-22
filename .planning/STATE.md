@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** One sheriff in town — all state mutations flow through a single typed engine
-**Current focus:** Phase 2 — Sync Migration + Prompt Migration
+**Current focus:** Phase 3 — Event Reconciliation + Mandatory Tools
 
 ## Current Position
 
-Phase: 2 of 5 (Sync Migration + Prompt Migration)
-Plan: 3 of 3 in current phase (all complete)
-Status: Phase 2 Complete
-Last activity: 2026-03-22 — Completed 2-02 Sync Migration
+Phase: 3 of 5 (Event Reconciliation + Mandatory Tools)
+Plan: 2 of 5 in current phase
+Status: Executing
+Last activity: 2026-03-22 — Completed 3-02: Write intercept + prompt migration
 
-Progress: [██████░░░░] 40%
+Progress: [███████░░░] 44%
 
 ## Performance Metrics
 
@@ -29,9 +29,10 @@ Progress: [██████░░░░] 40%
 |-------|-------|-------|----------|
 | 1 - Engine Foundation | 5 | 23 min | 5 min |
 | 2 - Sync + Prompt Migration | 2 | 5 min | 3 min |
+| 3 - Event Reconciliation + Mandatory Tools | 2 (so far) | ~8 min | 4 min |
 
 **Recent Trend:**
-- Last 5 plans: 1-01 (6 min), 1-02 (5 min), 1-03 (4 min), 1-04 (4 min), 1-05 (4 min)
+- Last 5 plans: 1-05 (4 min), 2-01 (2 min), 2-02 (3 min), 3-01 (~4 min), 3-02 (4 min)
 - Trend: Steady
 
 *Updated after each plan completion*
@@ -66,6 +67,11 @@ Recent decisions affecting current work:
 - 2-02: Runtime artifacts (units/) always file-copied even in engine path (D-02 hybrid)
 - 2-03: Hard switch with no fallback — prompts do not offer checkbox-edit escape hatch per D-07
 - 2-03: plan-slice migration is additive — file-write steps preserved, tool call added as new step 8
+- 3-01: Static import of reconcileWorktreeLogs in auto-worktree.ts (mergeMilestoneToMain is sync, cannot await import)
+- 3-01: reconcileWorktreeLogs takes base paths (not db file paths) matching event log location
+- 3-02: realpathSync try/catch in isBlockedStateFile handles files that don't exist yet (pre-write path matching)
+- 3-02: discuss.md/discuss-headless.md REQUIREMENTS.md writes left as-is — initial project setup, not status updates
+- 3-02: complete-slice.md and reassess-roadmap.md residual REQUIREMENTS.md writes replaced with gsd_save_decision (found during audit)
 
 ### Pending Todos
 
@@ -78,5 +84,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-22
-Stopped at: Completed 2-02-PLAN.md — Sync migration (snapshot/restore replaces file-copy)
+Stopped at: Completed 3-02-PLAN.md — Write intercept + prompt migration (PMG-04, PMG-05)
 Resume file: None

@@ -66,8 +66,8 @@ Requirements for v1.0 milestone. Each maps to roadmap phases.
 - [ ] **PMG-01**: execute-task.md instructs agents to call `complete_task()` tool, not edit checkboxes
 - [ ] **PMG-02**: complete-slice.md instructs agents to call `complete_slice()` tool
 - [ ] **PMG-03**: plan-slice.md instructs agents to call `plan_slice()` tool
-- [ ] **PMG-04**: All remaining prompts migrated (complete-milestone, research, validate)
-- [ ] **PMG-05**: Agent writes to .gsd/ state files trigger warnings
+- [x] **PMG-04**: All remaining prompts migrated (complete-milestone, research, validate)
+- [x] **PMG-05**: Agent writes to .gsd/ state files trigger warnings
 
 ### Migration
 
@@ -160,8 +160,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PMG-01 | Phase 2 | Pending |
 | PMG-02 | Phase 2 | Pending |
 | PMG-03 | Phase 2 | Pending |
-| PMG-04 | Phase 3 | Pending |
-| PMG-05 | Phase 3 | Pending |
+| PMG-04 | Phase 3 | Complete (3-02) |
+| PMG-05 | Phase 3 | Complete (3-02) |
 | MIG-01 | Phase 3 | Pending |
 | MIG-02 | Phase 3 | Pending |
 | MIG-03 | Phase 3 | Pending |
