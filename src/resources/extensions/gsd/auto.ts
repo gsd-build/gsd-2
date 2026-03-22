@@ -32,6 +32,7 @@ import {
   resolveTaskFile,
   milestonesDir,
   buildTaskFileName,
+  clearPathCache,
 } from "./paths.js";
 import { invalidateAllCaches } from "./cache.js";
 import { clearActivityLogState } from "./activity-log.js";
@@ -1302,6 +1303,7 @@ function ensurePreconditions(
   if (!mDir) {
     const newDir = join(milestonesDir(base), mid);
     mkdirSync(join(newDir, "slices"), { recursive: true });
+    clearPathCache();
   }
 
   if (parts.length >= 2) {
@@ -1313,11 +1315,13 @@ function ensurePreconditions(
       const sDir = resolveDir(slicesDir, sid);
       if (!sDir) {
         mkdirSync(join(slicesDir, sid, "tasks"), { recursive: true });
+        clearPathCache();
       }
       const resolvedSliceDir = resolveDir(slicesDir, sid) ?? sid;
       const tasksDir = join(slicesDir, resolvedSliceDir, "tasks");
       if (!existsSync(tasksDir)) {
         mkdirSync(tasksDir, { recursive: true });
+        clearPathCache();
       }
     }
   }
