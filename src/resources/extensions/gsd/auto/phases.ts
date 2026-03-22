@@ -1260,7 +1260,11 @@ export async function runFinalize(
   }
 
   if (postResult === "step-wizard") {
-    // Step mode — exit the loop (caller handles wizard)
+    // Step mode — persist session state so the next /gsd auto takes the
+    // resume path instead of fresh-bootstrap (which resets completedUnits).
+    // Without this, s.active stays true, the crash lock is stale, and the
+    // session lock is unreleased (#1944).
+    await deps.pauseAuto(ctx, pi);
     debugLog("autoLoop", { phase: "exit", reason: "step-wizard" });
     return { action: "break", reason: "step-wizard" };
   }
