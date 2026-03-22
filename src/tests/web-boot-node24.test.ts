@@ -151,3 +151,26 @@ test("boot route returns { error } JSON on handler failure", async () => {
     "boot route must return status 500 on error",
   )
 })
+
+// ---------------------------------------------------------------------------
+// Bug 4 — bridge-service must import readdirSync for session listing (#1936)
+// ---------------------------------------------------------------------------
+
+test("bridge-service imports readdirSync from node:fs (#1936)", async () => {
+  // The boot payload calls listProjectSessions which uses readdirSync.
+  // A missing import causes ReferenceError → HTTP 500 on /api/boot.
+  const { readFileSync } = await import("node:fs")
+  const { join } = await import("node:path")
+
+  const bridgeSource = readFileSync(
+    join(process.cwd(), "src", "web", "bridge-service.ts"),
+    "utf-8",
+  )
+
+  assert.match(
+    bridgeSource,
+    /import\s*\{[^}]*readdirSync[^}]*\}\s*from\s*["']node:fs["']/,
+    "bridge-service.ts must import readdirSync from node:fs — " +
+      "removing it breaks /api/boot with ReferenceError (see #1936)",
+  )
+})

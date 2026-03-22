@@ -659,3 +659,77 @@ test("bridge command/runtime failures are inspectable and redact secret material
     fixture.cleanup();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Bug — readdirSync must be available in bridge-service for session listing
+// (Fixes #1936: /api/boot returns 500 when readdirSync is missing)
+// ---------------------------------------------------------------------------
+
+test("/api/boot lists sessions from the real filesystem via readdirSync (#1936)", async () => {
+  const fixture = makeWorkspaceFixture();
+  const sessionPath = createSessionFile(fixture.projectCwd, fixture.sessionsDir, "sess-fs", "FS Session");
+  const harness = createHarness((command, current) => {
+    if (command.type === "get_state") {
+      current.emit({
+        id: command.id,
+        type: "response",
+        command: "get_state",
+        success: true,
+        data: {
+          sessionId: "sess-fs",
+          sessionFile: sessionPath,
+          thinkingLevel: "off",
+          isStreaming: false,
+          isCompacting: false,
+          steeringMode: "all",
+          followUpMode: "all",
+          autoCompactionEnabled: false,
+          autoRetryEnabled: false,
+          retryInProgress: false,
+          retryAttempt: 0,
+          messageCount: 0,
+          pendingMessageCount: 0,
+        },
+      });
+      return;
+    }
+    assert.fail(`unexpected command during boot: ${command.type}`);
+  });
+
+  // Deliberately omit listSessions so the real listProjectSessions (which
+  // calls readdirSync) is exercised. If readdirSync is missing from the
+  // bridge-service node:fs import, this test will throw ReferenceError.
+  bridge.configureBridgeServiceForTests({
+    env: {
+      ...process.env,
+      GSD_WEB_PROJECT_CWD: fixture.projectCwd,
+      GSD_WEB_PROJECT_SESSIONS_DIR: fixture.sessionsDir,
+      GSD_WEB_PACKAGE_ROOT: repoRoot,
+    },
+    spawn: harness.spawn,
+    indexWorkspace: async () => fakeWorkspaceIndex(),
+    getAutoDashboardData: () => fakeAutoDashboardData(),
+    getOnboardingNeeded: () => false,
+  });
+
+  try {
+    const response = await bootRoute.GET();
+    assert.equal(response.status, 200, "/api/boot must not return 500 — readdirSync must be available");
+    const payload = await response.json() as any;
+
+    // The real listProjectSessions should have found the session file via readdirSync
+    assert.ok(
+      Array.isArray(payload.resumableSessions),
+      "boot payload must include resumableSessions array",
+    );
+    assert.equal(
+      payload.resumableSessions.length,
+      1,
+      "readdirSync-based session listing must find the test session file",
+    );
+    assert.equal(payload.resumableSessions[0].id, "sess-fs");
+  } finally {
+    await bridge.resetBridgeServiceForTests();
+    fixture.cleanup();
+  }
+});
