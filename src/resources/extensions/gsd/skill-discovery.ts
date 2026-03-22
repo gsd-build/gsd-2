@@ -8,9 +8,9 @@
  * making them visible to all subsequent units without requiring a reload.
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { getAgentDir } from "@gsd/pi-coding-agent";
+import { getAgentDir, loadSkillsFromDir } from "@gsd/pi-coding-agent";
 
 const SKILLS_DIR = join(getAgentDir(), "skills");
 
@@ -18,12 +18,6 @@ export interface DiscoveredSkill {
   name: string;
   description: string;
   location: string;
-}
-
-interface SkillFrontmatter {
-  name?: string;
-  description?: string;
-  disableModelInvocation?: boolean;
 }
 
 /** Snapshot of skill names at auto-mode start */
@@ -63,15 +57,13 @@ export function detectNewSkills(): DiscoveredSkill[] {
   for (const dir of current) {
     if (baselineSkills.has(dir)) continue;
 
-    const skillMdPath = join(SKILLS_DIR, dir, "SKILL.md");
-    if (!existsSync(skillMdPath)) continue;
-
-    const meta = parseSkillFrontmatter(skillMdPath);
-    if (meta && !meta.disableModelInvocation) {
+    const result = loadSkillsFromDir({ dir: join(SKILLS_DIR, dir), source: "user" });
+    const skill = result.skills[0];
+    if (skill && !skill.disableModelInvocation) {
       newSkills.push({
-        name: meta.name || dir,
-        description: meta.description || `Skill: ${dir}`,
-        location: skillMdPath,
+        name: skill.name,
+        description: skill.description,
+        location: skill.filePath,
       });
     }
   }
@@ -110,32 +102,6 @@ function listSkillDirs(): string[] {
       .map(d => d.name);
   } catch {
     return [];
-  }
-}
-
-function parseSkillFrontmatter(path: string): SkillFrontmatter | null {
-  try {
-    const content = readFileSync(path, "utf-8");
-    // Use indexOf instead of [\s\S]*? regex to avoid backtracking (#468)
-    if (!content.startsWith('---\n')) return null;
-    const endIdx = content.indexOf('\n---', 4);
-    if (endIdx === -1) return null;
-
-    const fm = content.slice(4, endIdx);
-    const result: SkillFrontmatter = {};
-
-    const nameMatch = fm.match(/^name:\s*(.+)$/m);
-    if (nameMatch) result.name = nameMatch[1].trim();
-
-    const descMatch = fm.match(/^description:\s*(.+)$/m);
-    if (descMatch) result.description = descMatch[1].trim();
-
-    const disableMatch = fm.match(/^disable-model-invocation:\s*(true|false)$/m);
-    if (disableMatch) result.disableModelInvocation = disableMatch[1] === "true";
-
-    return result;
-  } catch {
-    return null;
   }
 }
 

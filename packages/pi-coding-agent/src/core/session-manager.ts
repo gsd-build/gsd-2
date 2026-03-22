@@ -15,7 +15,7 @@ import {
 } from "fs";
 import { atomicWriteFileSync } from "./fs-utils.js";
 import { readdir, readFile, stat } from "fs/promises";
-import { join, resolve } from "path";
+import { dirname, join, resolve } from "path";
 import { getAgentDir as getDefaultAgentDir, getBlobsDir, getSessionsDir } from "../config.js";
 import { tryAcquireLockSync } from "./lock-utils.js";
 import {
@@ -874,6 +874,7 @@ export class SessionManager {
 	/** Switch to a different session file (used for resume and branching) */
 	setSessionFile(sessionFile: string): void {
 		this.sessionFile = resolve(sessionFile);
+		this.sessionDir = dirname(this.sessionFile);
 		if (existsSync(this.sessionFile)) {
 			this.fileEntries = loadEntriesFromFile(this.sessionFile);
 
@@ -890,6 +891,7 @@ export class SessionManager {
 
 			const header = this.fileEntries.find((e) => e.type === "session") as SessionHeader | undefined;
 			this.sessionId = header?.id ?? randomUUID();
+			this.cwd = header?.cwd ?? this.cwd;
 
 			if (migrateToCurrentVersion(this.fileEntries)) {
 				this._rewriteFile();

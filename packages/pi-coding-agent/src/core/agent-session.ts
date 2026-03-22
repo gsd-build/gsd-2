@@ -2409,6 +2409,19 @@ export class AgentSession {
 		// Set new session
 		this.sessionManager.setSessionFile(sessionPath);
 		this.agent.sessionId = this.sessionManager.getSessionId();
+		const previousCwd = this._cwd;
+		this._cwd = this.sessionManager.getCwd();
+		if (this._cwd !== previousCwd) {
+			try {
+				process.chdir(this._cwd);
+			} catch {
+				/* best-effort */
+			}
+			this._buildRuntime({
+				activeToolNames: this.getActiveToolNames(),
+				includeAllExtensionTools: true,
+			});
+		}
 
 		// Reload messages
 		const sessionContext = this.sessionManager.buildSessionContext();
