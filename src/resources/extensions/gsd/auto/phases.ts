@@ -1092,7 +1092,7 @@ export async function runUnitPhase(
         "warning",
       );
       debugLog("autoLoop", { phase: "session-retry", unitType, unitId, attempt: priorRetries + 1 });
-      return { action: "next" };
+      return { action: "next", data: { unitStartedAt: Date.now() } };
     }
 
     // ── Heal stale slice roadmap before stopping (#2091) ──
