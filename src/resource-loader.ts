@@ -602,7 +602,7 @@ export function buildResourceLoader(agentDir: string): DefaultResourceLoader {
   return new DefaultResourceLoader({
     agentDir,
     additionalExtensionPaths: piExtensionPaths,
-    bundledExtensionNames: bundledKeys,
+    bundledExtensionKeys: bundledKeys,
     extensionPathsTransform: (paths: string[]) => {
       // 1. Filter community extensions through the GSD registry
       const filteredPaths = paths.filter((entryPath) => {
