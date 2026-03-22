@@ -1,27 +1,15 @@
-import { execFile } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { pathToFileURL } from "node:url"
 
 import { resolveBridgeRuntimeConfig } from "./bridge-service.ts"
-import { resolveTypeStrippingFlag } from "./ts-subprocess-flags.ts"
+import { resolveSubprocessModule } from "./subprocess-module-resolver.ts"
+import { runSubprocess } from "./subprocess-runner.ts"
 import type { UndoInfo, UndoResult } from "../../web/lib/remaining-command-types.ts"
 
 const UNDO_MAX_BUFFER = 2 * 1024 * 1024
+const UNDO_TIMEOUT_MS = 20_000
 const UNDO_MODULE_ENV = "GSD_UNDO_MODULE"
 const PATHS_MODULE_ENV = "GSD_PATHS_MODULE"
-
-function resolveUndoModulePath(packageRoot: string): string {
-  return join(packageRoot, "src", "resources", "extensions", "gsd", "undo.ts")
-}
-
-function resolvePathsModulePath(packageRoot: string): string {
-  return join(packageRoot, "src", "resources", "extensions", "gsd", "paths.ts")
-}
-
-function resolveTsLoaderPath(packageRoot: string): string {
-  return join(packageRoot, "src", "resources", "extensions", "gsd", "tests", "resolve-ts.mjs")
-}
 
 /**
  * Collects information about the last completed unit for display in the undo panel.
@@ -124,15 +112,8 @@ export async function executeUndo(projectCwdOverride?: string): Promise<UndoResu
   const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { packageRoot, projectCwd } = config
 
-  const resolveTsLoader = resolveTsLoaderPath(packageRoot)
-  const undoModulePath = resolveUndoModulePath(packageRoot)
-  const pathsModulePath = resolvePathsModulePath(packageRoot)
-
-  if (!existsSync(resolveTsLoader) || !existsSync(undoModulePath) || !existsSync(pathsModulePath)) {
-    throw new Error(
-      `undo service modules not found; checked=${resolveTsLoader},${undoModulePath},${pathsModulePath}`,
-    )
-  }
+  const resolvedUndo = resolveSubprocessModule(packageRoot, "undo.ts")
+  const resolvedPaths = resolveSubprocessModule(packageRoot, "paths.ts")
 
   const script = [
     'const { pathToFileURL } = await import("node:url");',
@@ -177,43 +158,20 @@ export async function executeUndo(projectCwdOverride?: string): Promise<UndoResu
     'process.stdout.write(JSON.stringify({ success: true, message: results.join("\\n") }));',
   ].join(" ")
 
-  return await new Promise<UndoResult>((resolveResult, reject) => {
-    execFile(
-      process.execPath,
-      [
-        "--import",
-        pathToFileURL(resolveTsLoader).href,
-        resolveTypeStrippingFlag(packageRoot),
-        "--input-type=module",
-        "--eval",
-        script,
-      ],
-      {
-        cwd: packageRoot,
-        env: {
-          ...process.env,
-          [UNDO_MODULE_ENV]: undoModulePath,
-          [PATHS_MODULE_ENV]: pathsModulePath,
-          GSD_UNDO_BASE: projectCwd,
-        },
-        maxBuffer: UNDO_MAX_BUFFER,
+  return runSubprocess<UndoResult>(
+    process.execPath,
+    [...resolvedUndo.nodeArgs, script],
+    {
+      cwd: packageRoot,
+      env: {
+        ...process.env,
+        [UNDO_MODULE_ENV]: resolvedUndo.modulePath,
+        [PATHS_MODULE_ENV]: resolvedPaths.modulePath,
+        GSD_UNDO_BASE: projectCwd,
       },
-      (error, stdout, stderr) => {
-        if (error) {
-          reject(new Error(`undo subprocess failed: ${stderr || error.message}`))
-          return
-        }
-
-        try {
-          resolveResult(JSON.parse(stdout) as UndoResult)
-        } catch (parseError) {
-          reject(
-            new Error(
-              `undo subprocess returned invalid JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
-            ),
-          )
-        }
-      },
-    )
-  })
+      maxBuffer: UNDO_MAX_BUFFER,
+      timeout: UNDO_TIMEOUT_MS,
+    },
+    "undo",
+  )
 }

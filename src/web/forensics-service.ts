@@ -1,22 +1,11 @@
-import { execFile } from "node:child_process"
-import { existsSync } from "node:fs"
-import { join } from "node:path"
-import { pathToFileURL } from "node:url"
-
 import { resolveBridgeRuntimeConfig } from "./bridge-service.ts"
-import { resolveTypeStrippingFlag } from "./ts-subprocess-flags.ts"
+import { resolveSubprocessModule } from "./subprocess-module-resolver.ts"
+import { runSubprocess } from "./subprocess-runner.ts"
 import type { ForensicReport } from "../../web/lib/diagnostics-types.ts"
 
 const FORENSICS_MAX_BUFFER = 2 * 1024 * 1024
+const FORENSICS_TIMEOUT_MS = 20_000
 const FORENSICS_MODULE_ENV = "GSD_FORENSICS_MODULE"
-
-function resolveForensicsModulePath(packageRoot: string): string {
-  return join(packageRoot, "src", "resources", "extensions", "gsd", "forensics.ts")
-}
-
-function resolveTsLoaderPath(packageRoot: string): string {
-  return join(packageRoot, "src", "resources", "extensions", "gsd", "tests", "resolve-ts.mjs")
-}
 
 /**
  * Loads forensic report data via a child process. Converts the full upstream
@@ -29,14 +18,7 @@ export async function collectForensicsData(projectCwdOverride?: string): Promise
   const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { packageRoot, projectCwd } = config
 
-  const resolveTsLoader = resolveTsLoaderPath(packageRoot)
-  const forensicsModulePath = resolveForensicsModulePath(packageRoot)
-
-  if (!existsSync(resolveTsLoader) || !existsSync(forensicsModulePath)) {
-    throw new Error(
-      `forensics data provider not found; checked=${resolveTsLoader},${forensicsModulePath}`,
-    )
-  }
+  const resolved = resolveSubprocessModule(packageRoot, "forensics.ts")
 
   // The child script loads the upstream module, calls buildForensicReport(),
   // simplifies the output for browser consumption, and writes JSON to stdout.
@@ -74,42 +56,19 @@ export async function collectForensicsData(projectCwdOverride?: string): Promise
     'process.stdout.write(JSON.stringify(result));',
   ].join(" ")
 
-  return await new Promise<ForensicReport>((resolveResult, reject) => {
-    execFile(
-      process.execPath,
-      [
-        "--import",
-        pathToFileURL(resolveTsLoader).href,
-        resolveTypeStrippingFlag(packageRoot),
-        "--input-type=module",
-        "--eval",
-        script,
-      ],
-      {
-        cwd: packageRoot,
-        env: {
-          ...process.env,
-          [FORENSICS_MODULE_ENV]: forensicsModulePath,
-          GSD_FORENSICS_BASE: projectCwd,
-        },
-        maxBuffer: FORENSICS_MAX_BUFFER,
+  return runSubprocess<ForensicReport>(
+    process.execPath,
+    [...resolved.nodeArgs, script],
+    {
+      cwd: packageRoot,
+      env: {
+        ...process.env,
+        [FORENSICS_MODULE_ENV]: resolved.modulePath,
+        GSD_FORENSICS_BASE: projectCwd,
       },
-      (error, stdout, stderr) => {
-        if (error) {
-          reject(new Error(`forensics data subprocess failed: ${stderr || error.message}`))
-          return
-        }
-
-        try {
-          resolveResult(JSON.parse(stdout) as ForensicReport)
-        } catch (parseError) {
-          reject(
-            new Error(
-              `forensics data subprocess returned invalid JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
-            ),
-          )
-        }
-      },
-    )
-  })
+      maxBuffer: FORENSICS_MAX_BUFFER,
+      timeout: FORENSICS_TIMEOUT_MS,
+    },
+    "forensics data",
+  )
 }

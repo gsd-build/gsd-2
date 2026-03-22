@@ -1,22 +1,13 @@
-import { execFile } from "node:child_process"
-import { existsSync } from "node:fs"
-import { join } from "node:path"
-import { pathToFileURL } from "node:url"
-
 import { resolveBridgeRuntimeConfig } from "./bridge-service.ts"
-import { resolveTypeStrippingFlag } from "./ts-subprocess-flags.ts"
+import { resolveSubprocessModule } from "./subprocess-module-resolver.ts"
+import { runSubprocess } from "./subprocess-runner.ts"
 import type { HistoryData } from "../../web/lib/remaining-command-types.ts"
 
 const HISTORY_MAX_BUFFER = 2 * 1024 * 1024
+const HISTORY_TIMEOUT_MS = 15_000
 const HISTORY_MODULE_ENV = "GSD_HISTORY_MODULE"
 
-function resolveHistoryModulePath(packageRoot: string): string {
-  return join(packageRoot, "src", "resources", "extensions", "gsd", "metrics.ts")
-}
 
-function resolveTsLoaderPath(packageRoot: string): string {
-  return join(packageRoot, "src", "resources", "extensions", "gsd", "tests", "resolve-ts.mjs")
-}
 
 /**
  * Loads history/metrics data via a child process.
@@ -26,15 +17,7 @@ function resolveTsLoaderPath(packageRoot: string): string {
 export async function collectHistoryData(projectCwdOverride?: string): Promise<HistoryData> {
   const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { packageRoot, projectCwd } = config
-
-  const resolveTsLoader = resolveTsLoaderPath(packageRoot)
-  const historyModulePath = resolveHistoryModulePath(packageRoot)
-
-  if (!existsSync(resolveTsLoader) || !existsSync(historyModulePath)) {
-    throw new Error(
-      `history data provider not found; checked=${resolveTsLoader},${historyModulePath}`,
-    )
-  }
+  const resolved = resolveSubprocessModule(packageRoot, "metrics.ts")
 
   const script = [
     'const { pathToFileURL } = await import("node:url");',
@@ -48,42 +31,19 @@ export async function collectHistoryData(projectCwdOverride?: string): Promise<H
     'process.stdout.write(JSON.stringify({ units, totals, byPhase, bySlice, byModel }));',
   ].join(" ")
 
-  return await new Promise<HistoryData>((resolveResult, reject) => {
-    execFile(
-      process.execPath,
-      [
-        "--import",
-        pathToFileURL(resolveTsLoader).href,
-        resolveTypeStrippingFlag(packageRoot),
-        "--input-type=module",
-        "--eval",
-        script,
-      ],
-      {
-        cwd: packageRoot,
-        env: {
-          ...process.env,
-          [HISTORY_MODULE_ENV]: historyModulePath,
-          GSD_HISTORY_BASE: projectCwd,
-        },
-        maxBuffer: HISTORY_MAX_BUFFER,
+  return runSubprocess<HistoryData>(
+    process.execPath,
+    [...resolved.nodeArgs, script],
+    {
+      cwd: packageRoot,
+      env: {
+        ...process.env,
+        [HISTORY_MODULE_ENV]: resolved.modulePath,
+        GSD_HISTORY_BASE: projectCwd,
       },
-      (error, stdout, stderr) => {
-        if (error) {
-          reject(new Error(`history data subprocess failed: ${stderr || error.message}`))
-          return
-        }
-
-        try {
-          resolveResult(JSON.parse(stdout) as HistoryData)
-        } catch (parseError) {
-          reject(
-            new Error(
-              `history data subprocess returned invalid JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
-            ),
-          )
-        }
-      },
-    )
-  })
+      maxBuffer: HISTORY_MAX_BUFFER,
+      timeout: HISTORY_TIMEOUT_MS,
+    },
+    "history data",
+  )
 }

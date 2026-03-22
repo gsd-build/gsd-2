@@ -1,12 +1,12 @@
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 
 import type { AutoDashboardData } from "./bridge-service.ts";
-import { resolveTypeStrippingFlag } from "./ts-subprocess-flags.ts"
+import { resolveSubprocessModule } from "./subprocess-module-resolver.ts";
+import { runSubprocess } from "./subprocess-runner.ts";
 
 const AUTO_DASHBOARD_MAX_BUFFER = 1024 * 1024;
+const AUTO_DASHBOARD_TIMEOUT_MS = 10_000;
 const TEST_AUTO_DASHBOARD_MODULE_ENV = "GSD_WEB_TEST_AUTO_DASHBOARD_MODULE";
 const TEST_AUTO_DASHBOARD_FALLBACK_ENV = "GSD_WEB_TEST_USE_FALLBACK_AUTO_DASHBOARD";
 const AUTO_DASHBOARD_MODULE_ENV = "GSD_AUTO_DASHBOARD_MODULE";
@@ -32,14 +32,6 @@ function fallbackAutoDashboardData(): AutoDashboardData {
   };
 }
 
-function resolveAutoDashboardModulePath(packageRoot: string, env: NodeJS.ProcessEnv): string {
-  return env[TEST_AUTO_DASHBOARD_MODULE_ENV] || join(packageRoot, "src", "resources", "extensions", "gsd", "auto.ts");
-}
-
-function resolveTsLoaderPath(packageRoot: string): string {
-  return join(packageRoot, "src", "resources", "extensions", "gsd", "tests", "resolve-ts.mjs");
-}
-
 export function collectTestOnlyFallbackAutoDashboardData(): AutoDashboardData {
   return fallbackAutoDashboardData();
 }
@@ -54,11 +46,35 @@ export async function collectAuthoritativeAutoDashboardData(
   }
 
   const checkExists = options.existsSync ?? existsSync;
-  const resolveTsLoader = resolveTsLoaderPath(packageRoot);
-  const autoModulePath = resolveAutoDashboardModulePath(packageRoot, env);
 
-  if (!checkExists(resolveTsLoader) || !checkExists(autoModulePath)) {
-    throw new Error(`authoritative auto dashboard provider not found; checked=${resolveTsLoader},${autoModulePath}`);
+  // When a test override module is set, it is a .ts file that must go through
+  // the ts-loader path. Build the module path manually and bypass the
+  // resolver's compiled-first logic.
+  const testOverridePath = env[TEST_AUTO_DASHBOARD_MODULE_ENV];
+  let resolved;
+  if (testOverridePath) {
+    const tsLoaderPath = join(
+      packageRoot,
+      "src",
+      "resources",
+      "extensions",
+      "gsd",
+      "tests",
+      "resolve-ts.mjs",
+    );
+    const { pathToFileURL } = await import("node:url");
+    resolved = {
+      modulePath: testOverridePath,
+      nodeArgs: [
+        "--import",
+        pathToFileURL(tsLoaderPath).href,
+        "--experimental-strip-types",
+        "--input-type=module",
+        "--eval",
+      ],
+    };
+  } else {
+    resolved = resolveSubprocessModule(packageRoot, "auto.ts", checkExists);
   }
 
   const script = [
@@ -68,41 +84,18 @@ export async function collectAuthoritativeAutoDashboardData(
     'process.stdout.write(JSON.stringify(result));',
   ].join(" ");
 
-  return await new Promise<AutoDashboardData>((resolveResult, reject) => {
-    execFile(
-      options.execPath ?? process.execPath,
-      [
-        "--import",
-        pathToFileURL(resolveTsLoader).href,
-        resolveTypeStrippingFlag(packageRoot),
-        "--input-type=module",
-        "--eval",
-        script,
-      ],
-      {
-        cwd: packageRoot,
-        env: {
-          ...env,
-          [AUTO_DASHBOARD_MODULE_ENV]: autoModulePath,
-        },
-        maxBuffer: AUTO_DASHBOARD_MAX_BUFFER,
+  return runSubprocess<AutoDashboardData>(
+    options.execPath ?? process.execPath,
+    [...resolved.nodeArgs, script],
+    {
+      cwd: packageRoot,
+      env: {
+        ...env,
+        [AUTO_DASHBOARD_MODULE_ENV]: resolved.modulePath,
       },
-      (error, stdout, stderr) => {
-        if (error) {
-          reject(new Error(`authoritative auto dashboard subprocess failed: ${stderr || error.message}`));
-          return;
-        }
-
-        try {
-          resolveResult(JSON.parse(stdout) as AutoDashboardData);
-        } catch (parseError) {
-          reject(
-            new Error(
-              `authoritative auto dashboard subprocess returned invalid JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
-            ),
-          );
-        }
-      },
-    );
-  });
+      maxBuffer: AUTO_DASHBOARD_MAX_BUFFER,
+      timeout: AUTO_DASHBOARD_TIMEOUT_MS,
+    },
+    "authoritative auto dashboard",
+  );
 }

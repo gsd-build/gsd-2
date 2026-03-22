@@ -1,22 +1,13 @@
-import { execFile } from "node:child_process"
-import { existsSync } from "node:fs"
-import { join } from "node:path"
-import { pathToFileURL } from "node:url"
-
 import { resolveBridgeRuntimeConfig } from "./bridge-service.ts"
-import { resolveTypeStrippingFlag } from "./ts-subprocess-flags.ts"
+import { resolveSubprocessModule } from "./subprocess-module-resolver.ts"
+import { runSubprocess } from "./subprocess-runner.ts"
 import type { ExportResult } from "../../web/lib/remaining-command-types.ts"
 
 const EXPORT_MAX_BUFFER = 4 * 1024 * 1024
+const EXPORT_TIMEOUT_MS = 20_000
 const EXPORT_MODULE_ENV = "GSD_EXPORT_MODULE"
 
-function resolveExportModulePath(packageRoot: string): string {
-  return join(packageRoot, "src", "resources", "extensions", "gsd", "export.ts")
-}
 
-function resolveTsLoaderPath(packageRoot: string): string {
-  return join(packageRoot, "src", "resources", "extensions", "gsd", "tests", "resolve-ts.mjs")
-}
 
 /**
  * Generates an export file via a child process and returns its content.
@@ -29,15 +20,7 @@ export async function collectExportData(
 ): Promise<ExportResult> {
   const config = resolveBridgeRuntimeConfig(undefined, projectCwdOverride)
   const { packageRoot, projectCwd } = config
-
-  const resolveTsLoader = resolveTsLoaderPath(packageRoot)
-  const exportModulePath = resolveExportModulePath(packageRoot)
-
-  if (!existsSync(resolveTsLoader) || !existsSync(exportModulePath)) {
-    throw new Error(
-      `export data provider not found; checked=${resolveTsLoader},${exportModulePath}`,
-    )
-  }
+  const resolved = resolveSubprocessModule(packageRoot, "export.ts")
 
   const script = [
     'const { pathToFileURL } = await import("node:url");',
@@ -55,43 +38,20 @@ export async function collectExportData(
     '}',
   ].join(" ")
 
-  return await new Promise<ExportResult>((resolveResult, reject) => {
-    execFile(
-      process.execPath,
-      [
-        "--import",
-        pathToFileURL(resolveTsLoader).href,
-        resolveTypeStrippingFlag(packageRoot),
-        "--input-type=module",
-        "--eval",
-        script,
-      ],
-      {
-        cwd: packageRoot,
-        env: {
-          ...process.env,
-          [EXPORT_MODULE_ENV]: exportModulePath,
-          GSD_EXPORT_BASE: projectCwd,
-          GSD_EXPORT_FORMAT: format,
-        },
-        maxBuffer: EXPORT_MAX_BUFFER,
+  return runSubprocess<ExportResult>(
+    process.execPath,
+    [...resolved.nodeArgs, script],
+    {
+      cwd: packageRoot,
+      env: {
+        ...process.env,
+        [EXPORT_MODULE_ENV]: resolved.modulePath,
+        GSD_EXPORT_BASE: projectCwd,
+        GSD_EXPORT_FORMAT: format,
       },
-      (error, stdout, stderr) => {
-        if (error) {
-          reject(new Error(`export data subprocess failed: ${stderr || error.message}`))
-          return
-        }
-
-        try {
-          resolveResult(JSON.parse(stdout) as ExportResult)
-        } catch (parseError) {
-          reject(
-            new Error(
-              `export data subprocess returned invalid JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
-            ),
-          )
-        }
-      },
-    )
-  })
+      maxBuffer: EXPORT_MAX_BUFFER,
+      timeout: EXPORT_TIMEOUT_MS,
+    },
+    "export data",
+  )
 }

@@ -4,7 +4,6 @@ import { StringDecoder } from "node:string_decoder";
 import type { Readable } from "node:stream";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { resolveTypeStrippingFlag } from "./ts-subprocess-flags.ts";
 
 import type { AgentSessionEvent, SessionStateChangeReason } from "../../packages/pi-coding-agent/src/core/agent-session.ts";
 import type {
@@ -38,6 +37,7 @@ import {
   collectTestOnlyFallbackAutoDashboardData,
 } from "./auto-dashboard-service.ts";
 import { resolveGsdCliEntry } from "./cli-entry.ts";
+import { resolveSubprocessModule } from "./subprocess-module-resolver.ts";
 
 const DEFAULT_PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const RESPONSE_TIMEOUT_MS = 30_000;
@@ -905,12 +905,8 @@ async function loadCachedWorkspaceIndex(
 
 async function loadWorkspaceIndexViaChildProcess(basePath: string, packageRoot: string): Promise<GSDWorkspaceIndex> {
   const deps = getBridgeDeps();
-  const resolveTsLoader = join(packageRoot, "src", "resources", "extensions", "gsd", "tests", "resolve-ts.mjs");
-  const workspaceModulePath = join(packageRoot, "src", "resources", "extensions", "gsd", "workspace-index.ts");
   const checkExists = deps.existsSync ?? existsSync;
-  if (!checkExists(resolveTsLoader) || !checkExists(workspaceModulePath)) {
-    throw new Error(`workspace index loader not found; checked=${resolveTsLoader},${workspaceModulePath}`);
-  }
+  const resolved = resolveSubprocessModule(packageRoot, "workspace-index.ts", checkExists);
 
   const script = [
     'const { pathToFileURL } = await import("node:url");',
@@ -922,19 +918,12 @@ async function loadWorkspaceIndexViaChildProcess(basePath: string, packageRoot: 
   return await new Promise<GSDWorkspaceIndex>((resolveResult, reject) => {
     execFile(
       deps.execPath ?? process.execPath,
-      [
-        "--import",
-        pathToFileURL(resolveTsLoader).href,
-        resolveTypeStrippingFlag(packageRoot),
-        "--input-type=module",
-        "--eval",
-        script,
-      ],
+      [...resolved.nodeArgs, script],
       {
         cwd: packageRoot,
         env: {
           ...(deps.env ?? process.env),
-          GSD_WORKSPACE_MODULE: workspaceModulePath,
+          GSD_WORKSPACE_MODULE: resolved.modulePath,
           GSD_WORKSPACE_BASE: basePath,
         },
         maxBuffer: 1024 * 1024,

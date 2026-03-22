@@ -1,14 +1,13 @@
-import { execFile } from "node:child_process"
 import { existsSync } from "node:fs"
 import { join, resolve } from "node:path"
-import { pathToFileURL } from "node:url"
 
 import {
   collectCurrentProjectOnboardingState,
   collectSelectiveLiveStatePayload,
   resolveBridgeRuntimeConfig,
 } from "./bridge-service.ts"
-import { resolveTypeStrippingFlag } from "./ts-subprocess-flags.ts"
+import { resolveSubprocessModule } from "./subprocess-module-resolver.ts"
+import { runSubprocess } from "./subprocess-runner.ts"
 import type {
   WorkspaceRecoveryBrowserAction,
   WorkspaceRecoveryCodeSummary,
@@ -19,6 +18,7 @@ import type {
 } from "../../web/lib/command-surface-contract.ts"
 
 const RECOVERY_DIAGNOSTICS_MAX_BUFFER = 1024 * 1024
+const RECOVERY_DIAGNOSTICS_TIMEOUT_MS = 45_000
 
 type RecoveryDiagnosticsSeverity = "info" | "warning" | "error"
 
@@ -356,18 +356,6 @@ function resolveSummary(options: {
   }
 }
 
-function resolveTsLoaderPath(packageRoot: string): string {
-  return join(packageRoot, "src", "resources", "extensions", "gsd", "tests", "resolve-ts.mjs")
-}
-
-function resolveDoctorModulePath(packageRoot: string): string {
-  return join(packageRoot, "src", "resources", "extensions", "gsd", "doctor.ts")
-}
-
-function resolveSessionForensicsModulePath(packageRoot: string): string {
-  return join(packageRoot, "src", "resources", "extensions", "gsd", "session-forensics.ts")
-}
-
 async function collectRecoveryDiagnosticsChildPayload(
   packageRoot: string,
   basePath: string,
@@ -378,15 +366,8 @@ async function collectRecoveryDiagnosticsChildPayload(
 ): Promise<RecoveryDiagnosticsChildPayload> {
   const env = options.env ?? process.env
   const checkExists = options.existsSync ?? existsSync
-  const resolveTsLoader = resolveTsLoaderPath(packageRoot)
-  const doctorModulePath = resolveDoctorModulePath(packageRoot)
-  const sessionForensicsModulePath = resolveSessionForensicsModulePath(packageRoot)
-
-  if (!checkExists(resolveTsLoader) || !checkExists(doctorModulePath) || !checkExists(sessionForensicsModulePath)) {
-    throw new Error(
-      `recovery diagnostics providers not found; checked=${resolveTsLoader},${doctorModulePath},${sessionForensicsModulePath}`,
-    )
-  }
+  const resolvedDoctor = resolveSubprocessModule(packageRoot, "doctor.ts", checkExists)
+  const resolvedForensics = resolveSubprocessModule(packageRoot, "session-forensics.ts", checkExists)
 
   const script = [
     'const { pathToFileURL } = await import("node:url");',
@@ -468,50 +449,27 @@ async function collectRecoveryDiagnosticsChildPayload(
     '}));',
   ].join(" ")
 
-  return await new Promise<RecoveryDiagnosticsChildPayload>((resolveResult, reject) => {
-    execFile(
-      options.execPath ?? process.execPath,
-      [
-        "--import",
-        pathToFileURL(resolveTsLoader).href,
-        resolveTypeStrippingFlag(packageRoot),
-        "--input-type=module",
-        "--eval",
-        script,
-      ],
-      {
-        cwd: packageRoot,
-        env: {
-          ...env,
-          GSD_RECOVERY_BASE: basePath,
-          GSD_RECOVERY_SCOPE: scope ?? "",
-          GSD_RECOVERY_UNIT_TYPE: unit?.type ?? "execute-project",
-          GSD_RECOVERY_UNIT_ID: unit?.id ?? "project",
-          GSD_RECOVERY_SESSION_FILE: sessionFile ?? "",
-          GSD_RECOVERY_ACTIVITY_DIR: join(basePath, ".gsd", "activity"),
-          GSD_RECOVERY_DOCTOR_MODULE: doctorModulePath,
-          GSD_RECOVERY_FORENSICS_MODULE: sessionForensicsModulePath,
-        },
-        maxBuffer: RECOVERY_DIAGNOSTICS_MAX_BUFFER,
+  return runSubprocess<RecoveryDiagnosticsChildPayload>(
+    options.execPath ?? process.execPath,
+    [...resolvedDoctor.nodeArgs, script],
+    {
+      cwd: packageRoot,
+      env: {
+        ...env,
+        GSD_RECOVERY_BASE: basePath,
+        GSD_RECOVERY_SCOPE: scope ?? "",
+        GSD_RECOVERY_UNIT_TYPE: unit?.type ?? "execute-project",
+        GSD_RECOVERY_UNIT_ID: unit?.id ?? "project",
+        GSD_RECOVERY_SESSION_FILE: sessionFile ?? "",
+        GSD_RECOVERY_ACTIVITY_DIR: join(basePath, ".gsd", "activity"),
+        GSD_RECOVERY_DOCTOR_MODULE: resolvedDoctor.modulePath,
+        GSD_RECOVERY_FORENSICS_MODULE: resolvedForensics.modulePath,
       },
-      (error, stdout, stderr) => {
-        if (error) {
-          reject(new Error(`recovery diagnostics subprocess failed: ${stderr || error.message}`))
-          return
-        }
-
-        try {
-          resolveResult(JSON.parse(stdout) as RecoveryDiagnosticsChildPayload)
-        } catch (parseError) {
-          reject(
-            new Error(
-              `recovery diagnostics subprocess returned invalid JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
-            ),
-          )
-        }
-      },
-    )
-  })
+      maxBuffer: RECOVERY_DIAGNOSTICS_MAX_BUFFER,
+      timeout: RECOVERY_DIAGNOSTICS_TIMEOUT_MS,
+    },
+    "recovery diagnostics",
+  )
 }
 
 export async function collectCurrentProjectRecoveryDiagnostics(
