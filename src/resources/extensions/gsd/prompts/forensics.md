@@ -101,9 +101,14 @@ Explain your findings:
 - **Code snippet** — the problematic code and what it should do instead
 - **Recovery** — what the user can do right now to get unstuck
 
-Then **offer GitHub issue creation**: "Would you like me to create a GitHub issue for this on gsd-build/gsd-2?"
+Before offering to create a new issue, search for existing matches:
 
-If yes, create using `gh issue create` with this format:
+1. Derive 2–3 search keywords from your findings: the primary affected module, the defect type, and the key error pattern if one exists.
+2. Run `gh search issues "<keywords>" -R gsd-build/gsd-2 --state open -L 5` for 1–2 focused queries.
+3. If related open issues exist, show them with issue number, title, and URL, then ask: "These existing issues look related — would you like to comment on one of these instead, or create a new issue?"
+4. If no relevant matches exist, then **offer GitHub issue creation**: "Would you like me to create a GitHub issue for this on gsd-build/gsd-2?"
+
+If the user chooses a new issue, create it using `gh issue create` with this format:
 
 ```
 ## Problem
