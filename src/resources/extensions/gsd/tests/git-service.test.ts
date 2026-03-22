@@ -1411,6 +1411,55 @@ async function main(): Promise<void> {
     rmSync(repo, { recursive: true, force: true });
   }
 
+  // ─── autoCommit: symlinked .gsd stages new milestone artifacts (#2104) ──
+
+  console.log("\n=== autoCommit: symlinked .gsd stages new milestone artifacts (#2104) ===");
+
+  {
+    // Reproduction: when .gsd is a symlink (external state project),
+    // autoCommit silently fails to stage NEW .gsd/milestones/ files because:
+    //   1. nativeAddAllWithExclusions falls back to plain `git add -A` (symlink)
+    //   2. `.gsd` is in .gitignore → new .gsd/ files are invisible to `git add`
+    // The fix: smartStage() force-adds .gsd/milestones/ after the normal staging.
+    const repo = initTempRepo();
+
+    // Create an external .gsd directory and symlink it into the repo
+    const externalGsd = mkdtempSync(join(tmpdir(), "gsd-external-symlink-"));
+    mkdirSync(join(externalGsd, "milestones", "M009"), { recursive: true });
+    mkdirSync(join(externalGsd, "activity"), { recursive: true });
+    mkdirSync(join(externalGsd, "runtime"), { recursive: true });
+
+    symlinkSync(externalGsd, join(repo, ".gsd"));
+
+    // .gitignore blocks .gsd (as ensureGitignore would do for symlink projects)
+    writeFileSync(join(repo, ".gitignore"), ".gsd\n");
+    run("git add .gitignore && git commit -m 'add gitignore'", repo);
+
+    // Simulate new milestone artifacts created during execution
+    writeFileSync(join(externalGsd, "milestones", "M009", "M009-SUMMARY.md"), "# M009 Summary");
+    writeFileSync(join(externalGsd, "milestones", "M009", "S01-SUMMARY.md"), "# S01 Summary");
+    writeFileSync(join(externalGsd, "milestones", "M009", "T01-VERIFY.json"), '{"passed":true}');
+
+    // Also create a normal source file change
+    createFile(repo, "src/feature.ts", "export const feature = true;");
+
+    const svc = new GitServiceImpl(repo);
+    const msg = svc.autoCommit("complete-milestone", "M009");
+    assertTrue(msg !== null, "symlink autoCommit: commit succeeds");
+
+    const committed = run("git show --name-only HEAD", repo);
+    assertTrue(committed.includes("src/feature.ts"), "symlink autoCommit: source file committed");
+    assertTrue(committed.includes(".gsd/milestones/M009/M009-SUMMARY.md"),
+      "symlink autoCommit: new M009-SUMMARY.md is committed (not silently dropped)");
+    assertTrue(committed.includes(".gsd/milestones/M009/S01-SUMMARY.md"),
+      "symlink autoCommit: new S01-SUMMARY.md is committed");
+    assertTrue(committed.includes(".gsd/milestones/M009/T01-VERIFY.json"),
+      "symlink autoCommit: new T01-VERIFY.json is committed");
+
+    try { rmSync(repo, { recursive: true, force: true }); } catch {}
+    try { rmSync(externalGsd, { recursive: true, force: true }); } catch {}
+  }
+
   report();
 }
 

@@ -9,8 +9,8 @@
  */
 
 import { execFileSync, execSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { gsdRoot } from "./paths.js";
 import { GIT_NO_PROMPT_ENV } from "./git-constants.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
@@ -486,10 +486,79 @@ export class GitServiceImpl {
     // git add -A already skips it and the exclusions are harmless no-ops.
     const allExclusions = [...RUNTIME_EXCLUSION_PATHS, ...extraExclusions];
     nativeAddAllWithExclusions(this.basePath, allExclusions);
+
+    // Force-add .gsd/milestones/ when .gsd is a symlink (#2104).
+    // When .gsd is a symlink (external state projects), ensureGitignore adds
+    // `.gsd` to .gitignore. The nativeAddAllWithExclusions call above falls
+    // back to plain `git add -A` (symlink pathspec rejection), which respects
+    // .gitignore and silently skips new .gsd/milestones/ files.
+    //
+    // `git add -f` also fails with "beyond a symbolic link", so we use
+    // `git hash-object -w` + `git update-index --add --cacheinfo` to bypass
+    // the symlink restriction entirely. This stages each milestone artifact
+    // individually by hashing the file content and updating the index directly.
+    const gsdPath = join(this.basePath, ".gsd");
+    const milestonesDir = join(gsdPath, "milestones");
+    try {
+      if (
+        existsSync(gsdPath) &&
+        lstatSync(gsdPath).isSymbolicLink() &&
+        existsSync(milestonesDir)
+      ) {
+        this._forceAddMilestoneArtifacts(milestonesDir);
+      }
+    } catch {
+      // Non-fatal: if force-add fails, the commit proceeds without these files.
+      // This matches existing behavior where milestone artifacts were silently
+      // omitted — but now we at least attempt to include them.
+    }
   }
 
   /** Tracks whether runtime file cleanup has run this session. */
   private _runtimeFilesCleanedUp = false;
+
+  /**
+   * Recursively collect all files under a directory.
+   * Returns paths relative to `basePath` (e.g. ".gsd/milestones/M009/SUMMARY.md").
+   */
+  private _collectFiles(dir: string): string[] {
+    const files: string[] = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...this._collectFiles(full));
+      } else if (entry.isFile()) {
+        files.push(relative(this.basePath, full));
+      }
+    }
+    return files;
+  }
+
+  /**
+   * Stage milestone artifacts through a symlinked .gsd directory (#2104).
+   *
+   * `git add` (even with `-f`) refuses to stage files "beyond a symbolic link".
+   * This method bypasses that restriction by hashing each file with
+   * `git hash-object -w` and inserting the blob into the index with
+   * `git update-index --add --cacheinfo 100644 <hash> <path>`.
+   */
+  private _forceAddMilestoneArtifacts(milestonesDir: string): void {
+    const files = this._collectFiles(milestonesDir);
+    for (const filePath of files) {
+      const hash = execFileSync("git", ["hash-object", "-w", filePath], {
+        cwd: this.basePath,
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf-8",
+        env: GIT_NO_PROMPT_ENV,
+      }).trim();
+      execFileSync("git", ["update-index", "--add", "--cacheinfo", "100644", hash, filePath], {
+        cwd: this.basePath,
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf-8",
+        env: GIT_NO_PROMPT_ENV,
+      });
+    }
+  }
 
   /**
    * Stage files (smart staging) and commit.
