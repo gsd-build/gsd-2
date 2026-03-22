@@ -1,16 +1,22 @@
 /**
  * GSD Mobile Socket System
  *
- * Self-hosted WebSocket server for accessing GSD sessions from a mobile device.
+ * Self-hosted, installable WebSocket server for accessing GSD sessions
+ * from a mobile device. Includes a branded admin dashboard, secure
+ * user/pass authentication, and device pairing.
  *
  * Architecture:
  *   Mobile App ←→ WebSocket ←→ MobileSocketServer ←→ BridgeService ←→ Agent Session
+ *   Browser    ←→ HTTP      ←→ Admin Dashboard    ←→ Config/Auth
  *
  * Key modules:
  *   - protocol.ts   — Message type definitions for the WebSocket protocol
  *   - auth.ts       — Token-based device pairing and authentication
+ *   - config.ts     — Server configuration and credential management
+ *   - websocket.ts  — Zero-dependency RFC 6455 WebSocket implementation
  *   - connection.ts — Per-client WebSocket connection handler
- *   - server.ts     — Self-hosted WebSocket server with TLS support
+ *   - server.ts     — Self-hosted server with dashboard, auth, and TLS
+ *   - dashboard.ts  — Branded admin UI (GSD monochrome dark theme)
  *   - cli.ts        — CLI interface for managing the mobile server
  */
 
@@ -19,6 +25,21 @@ export { MobileAuthManager, type PairedDevice } from "./auth.ts";
 export { MobileConnection, type MobileConnectionConfig } from "./connection.ts";
 export { runMobileCLI, type MobileCLIOptions } from "./cli.ts";
 export { SimpleWebSocket, upgradeToWebSocket } from "./websocket.ts";
+export {
+  loadConfig,
+  saveConfig,
+  updatePassword,
+  updateUsername,
+  verifyPassword,
+  type ServerConfig,
+} from "./config.ts";
+export {
+  renderLoginPage,
+  renderDashboard,
+  renderSettingsPage,
+  type DashboardData,
+  type SettingsData,
+} from "./dashboard.ts";
 
 // Re-export protocol types for mobile app development
 export type {
