@@ -292,6 +292,25 @@ async function markSliceDoneInRoadmap(basePath: string, milestoneId: string, sli
   if (updated !== content) {
     await saveFile(roadmapPath, updated);
     fixesApplied.push(`marked ${sliceId} done in ${roadmapPath}`);
+
+    // Also patch the worktree copy so syncStateToProjectRoot doesn't revert the fix (#1925)
+    const wtBase = join(basePath, ".gsd", "worktrees", milestoneId);
+    if (existsSync(wtBase)) {
+      const wtRoadmapPath = resolveMilestoneFile(wtBase, milestoneId, "ROADMAP");
+      if (wtRoadmapPath) {
+        const wtContent = await loadFile(wtRoadmapPath);
+        if (wtContent) {
+          const wtUpdated = wtContent.replace(
+            new RegExp(`^(\\s*-\\s+)\\[ \\]\\s+\\*\\*${sliceId}:`, "m"),
+            `$1[x] **${sliceId}:`,
+          );
+          if (wtUpdated !== wtContent) {
+            await saveFile(wtRoadmapPath, wtUpdated);
+            fixesApplied.push(`marked ${sliceId} done in worktree roadmap`);
+          }
+        }
+      }
+    }
   }
 }
 
@@ -307,6 +326,25 @@ async function markSliceUndoneInRoadmap(basePath: string, milestoneId: string, s
   if (updated !== content) {
     await saveFile(roadmapPath, updated);
     fixesApplied.push(`unmarked ${sliceId} in ${roadmapPath} (premature completion)`);
+
+    // Also patch the worktree copy so syncStateToProjectRoot doesn't revert the fix (#1925)
+    const wtBase = join(basePath, ".gsd", "worktrees", milestoneId);
+    if (existsSync(wtBase)) {
+      const wtRoadmapPath = resolveMilestoneFile(wtBase, milestoneId, "ROADMAP");
+      if (wtRoadmapPath) {
+        const wtContent = await loadFile(wtRoadmapPath);
+        if (wtContent) {
+          const wtUpdated = wtContent.replace(
+            new RegExp(`^(\\s*-\\s+)\\[x\\]\\s+\\*\\*${sliceId}:`, "m"),
+            `$1[ ] **${sliceId}:`,
+          );
+          if (wtUpdated !== wtContent) {
+            await saveFile(wtRoadmapPath, wtUpdated);
+            fixesApplied.push(`unmarked ${sliceId} in worktree roadmap`);
+          }
+        }
+      }
+    }
   }
 }
 
