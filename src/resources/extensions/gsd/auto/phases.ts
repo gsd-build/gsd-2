@@ -27,6 +27,9 @@ import { debugLog } from "../debug-logger.js";
 import { gsdRoot } from "../paths.js";
 import { atomicWriteSync } from "../atomic-write.js";
 import { PROJECT_FILES } from "../detection.js";
+import { tryHealStaleSliceRoadmap } from "../auto-recovery.js";
+import { clearParseCache } from "../files.js";
+import { clearPathCache } from "../paths.js";
 import { join } from "node:path";
 
 // ─── generateMilestoneReport ──────────────────────────────────────────────────
@@ -1076,8 +1079,43 @@ export async function runUnitPhase(
   }
 
   if (unitResult.status === "cancelled") {
+    // ── Bounded retry for transient session creation failure (#2091) ──
+    const retryKey = `session-cancel:${unitType}:${unitId}`;
+    const priorRetries = loopState.sessionRetries?.get(retryKey) ?? 0;
+    const MAX_SESSION_RETRIES = 1;
+
+    if (priorRetries < MAX_SESSION_RETRIES) {
+      if (!loopState.sessionRetries) loopState.sessionRetries = new Map();
+      loopState.sessionRetries.set(retryKey, priorRetries + 1);
+      ctx.ui.notify(
+        `Session creation failed for ${unitType} ${unitId} — retrying (attempt ${priorRetries + 1}/${MAX_SESSION_RETRIES}).`,
+        "warning",
+      );
+      debugLog("autoLoop", { phase: "session-retry", unitType, unitId, attempt: priorRetries + 1 });
+      return { action: "next" };
+    }
+
+    // ── Heal stale slice roadmap before stopping (#2091) ──
+    // If the current unit's slice has SUMMARY + UAT on disk but the
+    // roadmap checkbox is still unchecked, flip it so auto-mode
+    // doesn't strand the project in a recoverable state.
+    const parts = unitId.split("/");
+    const healMid = parts[0];
+    const healSid = parts[1];
+    if (healMid && healSid) {
+      clearPathCache();
+      clearParseCache();
+      if (tryHealStaleSliceRoadmap(s.basePath, healMid, healSid)) {
+        ctx.ui.notify(
+          `Healed stale roadmap: marked ${healSid} done (SUMMARY + UAT already exist).`,
+          "info",
+        );
+        debugLog("autoLoop", { phase: "session-cancel-heal", unitType, unitId, healSid });
+      }
+    }
+
     ctx.ui.notify(
-      `Session creation timed out or was cancelled for ${unitType} ${unitId}. Will retry.`,
+      `Session creation timed out or was cancelled for ${unitType} ${unitId}. Stopping auto-mode.`,
       "warning",
     );
     await deps.stopAuto(ctx, pi, "Session creation failed");

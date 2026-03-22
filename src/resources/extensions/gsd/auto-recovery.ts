@@ -672,38 +672,20 @@ export async function selfHealRuntimeRecords(
     for (const record of records) {
       const { unitType, unitId } = record;
 
-      // Case 0: complete-slice with SUMMARY + UAT but unchecked roadmap (#1350).
-      // If a complete-slice was interrupted after writing artifacts but before
-      // flipping the roadmap checkbox, the verification fails and the dispatch
-      // loop relaunches the same unit forever. Auto-fix the checkbox.
-      if (unitType === "complete-slice") {
+      // Case 0: complete-slice or execute-task with SUMMARY + UAT but unchecked
+      // roadmap (#1350, #2091). If a complete-slice was interrupted after writing
+      // artifacts but before flipping the roadmap checkbox, or if the final
+      // execute-task of a slice wrote closeout artifacts but auto-mode died before
+      // dispatching complete-slice, the verification fails and the dispatch loop
+      // relaunches the same unit forever. Auto-fix the checkbox.
+      if (unitType === "complete-slice" || unitType === "execute-task") {
         const { milestone: mid, slice: sid } = parseUnitId(unitId);
         if (mid && sid) {
-          const dir = resolveSlicePath(base, mid, sid);
-          if (dir) {
-            const summaryPath = join(dir, buildSliceFileName(sid, "SUMMARY"));
-            const uatPath = join(dir, buildSliceFileName(sid, "UAT"));
-            if (existsSync(summaryPath) && existsSync(uatPath)) {
-              const roadmapFile = resolveMilestoneFile(base, mid, "ROADMAP");
-              if (roadmapFile && existsSync(roadmapFile)) {
-                try {
-                  const roadmapContent = readFileSync(roadmapFile, "utf-8");
-                  const roadmap = parseRoadmap(roadmapContent);
-                  const slice = (roadmap.slices ?? []).find(s => s.id === sid);
-                  if (slice && !slice.done) {
-                    // Auto-fix: flip the checkbox using shared utility
-                    if (markSliceDoneInRoadmap(base, mid, sid)) {
-                      ctx.ui.notify(
-                        `Self-heal: marked ${sid} done in roadmap (SUMMARY + UAT exist but checkbox was stale).`,
-                        "info",
-                      );
-                    }
-                  }
-                } catch {
-                  // Roadmap parse failure — don't block self-heal
-                }
-              }
-            }
+          if (tryHealStaleSliceRoadmap(base, mid, sid)) {
+            ctx.ui.notify(
+              `Self-heal: marked ${sid} done in roadmap (SUMMARY + UAT exist but checkbox was stale).`,
+              "info",
+            );
           }
         }
       }
@@ -725,6 +707,45 @@ export async function selfHealRuntimeRecords(
   } catch (e) {
     // Non-fatal — self-heal should never block auto-mode start
     void e;
+  }
+}
+
+// ─── Stale Slice Roadmap Healing (#2091) ──────────────────────────────────────
+
+/**
+ * Check whether a slice has both SUMMARY and UAT artifacts on disk but its
+ * roadmap checkbox is still unchecked. If so, mark it done.
+ *
+ * This covers the gap where the final `execute-task` of a slice wrote the
+ * closeout artifacts but auto-mode died before `complete-slice` could run
+ * and flip the roadmap checkbox.
+ *
+ * Returns true if the roadmap was healed, false otherwise.
+ */
+export function tryHealStaleSliceRoadmap(
+  basePath: string,
+  mid: string,
+  sid: string,
+): boolean {
+  try {
+    const dir = resolveSlicePath(basePath, mid, sid);
+    if (!dir) return false;
+
+    const summaryPath = join(dir, buildSliceFileName(sid, "SUMMARY"));
+    const uatPath = join(dir, buildSliceFileName(sid, "UAT"));
+    if (!existsSync(summaryPath) || !existsSync(uatPath)) return false;
+
+    const roadmapFile = resolveMilestoneFile(basePath, mid, "ROADMAP");
+    if (!roadmapFile || !existsSync(roadmapFile)) return false;
+
+    const roadmapContent = readFileSync(roadmapFile, "utf-8");
+    const roadmap = parseRoadmap(roadmapContent);
+    const slice = (roadmap.slices ?? []).find(s => s.id === sid);
+    if (!slice || slice.done) return false;
+
+    return markSliceDoneInRoadmap(basePath, mid, sid);
+  } catch {
+    return false;
   }
 }
 

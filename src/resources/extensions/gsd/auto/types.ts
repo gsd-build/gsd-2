@@ -78,6 +78,8 @@ export interface IterationContext {
 export interface LoopState {
   recentUnits: Array<{ key: string; error?: string }>;
   stuckRecoveryAttempts: number;
+  /** Bounded retry counter for session creation failures (#2091). */
+  sessionRetries?: Map<string, number>;
 }
 
 export interface PreDispatchData {

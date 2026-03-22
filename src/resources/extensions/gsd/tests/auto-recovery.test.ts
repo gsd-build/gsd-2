@@ -12,9 +12,11 @@ import {
   buildLoopRemediationSteps,
   selfHealRuntimeRecords,
   hasImplementationArtifacts,
+  tryHealStaleSliceRoadmap,
 } from "../auto-recovery.ts";
 import { parseRoadmap, clearParseCache } from "../files.ts";
 import { invalidateAllCaches } from "../cache.ts";
+import { clearPathCache } from "../paths.ts";
 import { deriveState, invalidateStateCache } from "../state.ts";
 
 function makeTmpBase(): string {
@@ -702,6 +704,157 @@ test("verifyExpectedArtifact complete-milestone passes with impl files (#1703)",
 
     const result = verifyExpectedArtifact("complete-milestone", "M001", base);
     assert.equal(result, true, "complete-milestone should pass verification with implementation files");
+  } finally {
+    cleanup(base);
+  }
+});
+
+// ─── #2091: tryHealStaleSliceRoadmap ──────────────────────────────────────────
+
+test("tryHealStaleSliceRoadmap marks slice done when SUMMARY + UAT exist and roadmap unchecked (#2091)", () => {
+  const base = makeTmpBase();
+  try {
+    const mid = "M001";
+    const sid = "S01";
+    const sliceDir = join(base, ".gsd", "milestones", mid, "slices", sid);
+    mkdirSync(sliceDir, { recursive: true });
+
+    // Write slice closeout artifacts (as the final execute-task would)
+    writeFileSync(join(sliceDir, `${sid}-SUMMARY.md`), "# Slice Summary\nDone.");
+    writeFileSync(join(sliceDir, `${sid}-UAT.md`), "# UAT\nPassed.");
+
+    // Write roadmap with slice unchecked
+    const milestoneDir = join(base, ".gsd", "milestones", mid);
+    writeFileSync(join(milestoneDir, `${mid}-ROADMAP.md`), [
+      "# Roadmap",
+      "",
+      "## Slices",
+      "",
+      "- [ ] **S01: First slice**",
+    ].join("\n"));
+
+    clearPathCache();
+    clearParseCache();
+    const healed = tryHealStaleSliceRoadmap(base, mid, sid);
+    assert.equal(healed, true, "should heal stale roadmap when SUMMARY + UAT exist");
+
+    // Verify the roadmap was updated
+    clearPathCache();
+    clearParseCache();
+    const roadmapContent = readFileSync(join(milestoneDir, `${mid}-ROADMAP.md`), "utf-8");
+    assert.ok(roadmapContent.includes("[x]"), "roadmap should have slice marked done");
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("tryHealStaleSliceRoadmap returns false when SUMMARY missing (#2091)", () => {
+  const base = makeTmpBase();
+  try {
+    const mid = "M001";
+    const sid = "S01";
+    const sliceDir = join(base, ".gsd", "milestones", mid, "slices", sid);
+    mkdirSync(sliceDir, { recursive: true });
+
+    // Only UAT exists, no SUMMARY
+    writeFileSync(join(sliceDir, `${sid}-UAT.md`), "# UAT\nPassed.");
+
+    const milestoneDir = join(base, ".gsd", "milestones", mid);
+    writeFileSync(join(milestoneDir, `${mid}-ROADMAP.md`), [
+      "# Roadmap",
+      "",
+      "## Slices",
+      "",
+      "- [ ] **S01: First slice**",
+    ].join("\n"));
+
+    clearPathCache();
+    clearParseCache();
+    const healed = tryHealStaleSliceRoadmap(base, mid, sid);
+    assert.equal(healed, false, "should not heal when SUMMARY is missing");
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("tryHealStaleSliceRoadmap returns false when slice already checked (#2091)", () => {
+  const base = makeTmpBase();
+  try {
+    const mid = "M001";
+    const sid = "S01";
+    const sliceDir = join(base, ".gsd", "milestones", mid, "slices", sid);
+    mkdirSync(sliceDir, { recursive: true });
+
+    writeFileSync(join(sliceDir, `${sid}-SUMMARY.md`), "# Slice Summary\nDone.");
+    writeFileSync(join(sliceDir, `${sid}-UAT.md`), "# UAT\nPassed.");
+
+    const milestoneDir = join(base, ".gsd", "milestones", mid);
+    writeFileSync(join(milestoneDir, `${mid}-ROADMAP.md`), [
+      "# Roadmap",
+      "",
+      "## Slices",
+      "",
+      "- [x] **S01: First slice**",
+    ].join("\n"));
+
+    clearPathCache();
+    clearParseCache();
+    const healed = tryHealStaleSliceRoadmap(base, mid, sid);
+    assert.equal(healed, false, "should not heal when slice already done");
+  } finally {
+    cleanup(base);
+  }
+});
+
+// ─── #2091: selfHeal covers execute-task with stale slice roadmap ────────────
+
+test("selfHealRuntimeRecords heals stale roadmap for execute-task with SUMMARY + UAT (#2091)", async () => {
+  const base = makeTmpBase();
+  try {
+    const { writeUnitRuntimeRecord } = await import("../unit-runtime.ts");
+    const mid = "M001";
+    const sid = "S01";
+    const tid = "T03";
+
+    // Write a stale execute-task runtime record
+    writeUnitRuntimeRecord(base, "execute-task", `${mid}/${sid}/${tid}`, Date.now() - 7200_000, {
+      phase: "dispatched",
+    });
+
+    // Write slice closeout artifacts (as the final execute-task would)
+    const sliceDir = join(base, ".gsd", "milestones", mid, "slices", sid);
+    mkdirSync(sliceDir, { recursive: true });
+    writeFileSync(join(sliceDir, `${sid}-SUMMARY.md`), "# Slice Summary\nDone.");
+    writeFileSync(join(sliceDir, `${sid}-UAT.md`), "# UAT\nPassed.");
+
+    // Write roadmap with slice unchecked
+    const milestoneDir = join(base, ".gsd", "milestones", mid);
+    writeFileSync(join(milestoneDir, `${mid}-ROADMAP.md`), [
+      "# Roadmap",
+      "",
+      "## Slices",
+      "",
+      "- [ ] **S01: First slice**",
+    ].join("\n"));
+
+    clearPathCache();
+    clearParseCache();
+    const notifications: string[] = [];
+    const mockCtx = {
+      ui: { notify: (msg: string) => { notifications.push(msg); } },
+    } as any;
+
+    await selfHealRuntimeRecords(base, mockCtx);
+
+    // Verify the roadmap was healed
+    clearPathCache();
+    clearParseCache();
+    const roadmapContent = readFileSync(join(milestoneDir, `${mid}-ROADMAP.md`), "utf-8");
+    assert.ok(roadmapContent.includes("[x]"), "roadmap should have slice marked done after self-heal");
+    assert.ok(
+      notifications.some(n => n.includes("Self-heal") && n.includes(sid)),
+      "should emit self-heal notification for stale roadmap fix",
+    );
   } finally {
     cleanup(base);
   }
