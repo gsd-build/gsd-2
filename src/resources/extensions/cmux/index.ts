@@ -200,6 +200,7 @@ export class CmuxClient {
       return execFileSync("cmux", args, {
         encoding: "utf-8",
         timeout: 3000,
+        stdio: ["ignore", "pipe", "pipe"],
         env: process.env,
       });
     } catch {
@@ -213,6 +214,7 @@ export class CmuxClient {
       const result = await execFileAsync("cmux", args, {
         encoding: "utf-8",
         timeout: 5000,
+        stdio: ["ignore", "pipe", "pipe"],
         env: process.env,
       });
       return result.stdout;
