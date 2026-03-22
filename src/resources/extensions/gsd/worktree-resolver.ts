@@ -28,7 +28,7 @@ export interface WorktreeResolverDeps {
     basePath: string,
     milestoneId: string,
     roadmapContent: string,
-  ) => { pushed: boolean };
+  ) => { pushed: boolean; codeFilesChanged: boolean };
   syncWorktreeStateBack: (
     mainBasePath: string,
     worktreePath: string,
@@ -338,11 +338,31 @@ export class WorktreeResolver {
         });
       }
 
-      const roadmapPath = this.deps.resolveMilestoneFile(
+      // Resolve roadmap — try project root first, then worktree path as fallback.
+      // The worktree may hold the only copy when syncWorktreeStateBack fails
+      // silently or .gsd/ is not symlinked. Without the fallback, a missing
+      // roadmap triggers bare teardown which deletes the branch and orphans all
+      // milestone commits (#1573).
+      let roadmapPath = this.deps.resolveMilestoneFile(
         originalBase,
         milestoneId,
         "ROADMAP",
       );
+      if (!roadmapPath && this.s.basePath !== originalBase) {
+        roadmapPath = this.deps.resolveMilestoneFile(
+          this.s.basePath,
+          milestoneId,
+          "ROADMAP",
+        );
+        if (roadmapPath) {
+          debugLog("WorktreeResolver", {
+            action: "mergeAndExit",
+            milestoneId,
+            phase: "roadmap-fallback",
+            note: "resolved from worktree path",
+          });
+        }
+      }
 
       if (roadmapPath) {
         const roadmapContent = this.deps.readFileSync(roadmapPath, "utf-8");
@@ -351,16 +371,32 @@ export class WorktreeResolver {
           milestoneId,
           roadmapContent,
         );
-        ctx.notify(
-          `Milestone ${milestoneId} merged to main.${mergeResult.pushed ? " Pushed to remote." : ""}`,
-          "info",
-        );
+        if (mergeResult.codeFilesChanged) {
+          ctx.notify(
+            `Milestone ${milestoneId} merged to main.${mergeResult.pushed ? " Pushed to remote." : ""}`,
+            "info",
+          );
+        } else {
+          // (#1906) Milestone produced only .gsd/ metadata — no actual code was
+          // merged. This typically means the LLM wrote planning artifacts
+          // (summaries, roadmaps) but never implemented the code. Surface this
+          // clearly so the user knows the milestone is not truly complete.
+          ctx.notify(
+            `WARNING: Milestone ${milestoneId} merged to main but contained NO code changes — only .gsd/ metadata files. ` +
+              `The milestone summary may describe planned work that was never implemented. ` +
+              `Review the milestone output and re-run if code is missing.`,
+            "warning",
+          );
+        }
       } else {
-        // No roadmap — fall back to bare teardown
-        this.deps.teardownAutoWorktree(originalBase, milestoneId);
+        // No roadmap at either location — teardown but PRESERVE the branch so
+        // commits are not orphaned. The user can merge manually later (#1573).
+        this.deps.teardownAutoWorktree(originalBase, milestoneId, {
+          preserveBranch: true,
+        });
         ctx.notify(
-          `Exited worktree for ${milestoneId} (no roadmap for merge).`,
-          "info",
+          `Exited worktree for ${milestoneId} (no roadmap found — branch preserved for manual merge).`,
+          "warning",
         );
       }
     } catch (err) {
@@ -372,7 +408,14 @@ export class WorktreeResolver {
         error: msg,
         fallback: "chdir-to-project-root",
       });
-      ctx.notify(`Milestone merge failed: ${msg}`, "warning");
+      // Surface a clear, actionable error. The worktree and milestone branch are
+      // intentionally preserved — nothing has been deleted. The user can retry
+      // /complete-milestone or merge manually once the underlying issue is fixed
+      // (e.g. checkout to wrong branch, unresolved conflicts). (#1668)
+      ctx.notify(
+        `Milestone merge failed: ${msg}. Your worktree and milestone branch are preserved — retry /complete-milestone or merge manually.`,
+        "warning",
+      );
 
       // Clean up stale merge state left by failed squash-merge (#1389)
       try {
@@ -448,10 +491,18 @@ export class WorktreeResolver {
       // Rebuild GitService after merge (branch HEAD changed)
       this.rebuildGitService();
 
-      ctx.notify(
-        `Milestone ${milestoneId} merged (branch mode).${mergeResult.pushed ? " Pushed to remote." : ""}`,
-        "info",
-      );
+      if (mergeResult.codeFilesChanged) {
+        ctx.notify(
+          `Milestone ${milestoneId} merged (branch mode).${mergeResult.pushed ? " Pushed to remote." : ""}`,
+          "info",
+        );
+      } else {
+        ctx.notify(
+          `WARNING: Milestone ${milestoneId} merged (branch mode) but contained NO code changes — only .gsd/ metadata. ` +
+            `Review the milestone output and re-run if code is missing.`,
+          "warning",
+        );
+      }
       debugLog("WorktreeResolver", {
         action: "mergeAndExit",
         milestoneId,
