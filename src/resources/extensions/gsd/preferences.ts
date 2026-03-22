@@ -200,7 +200,18 @@ function loadPreferencesFile(path: string, scope: "global" | "project"): LoadedG
 export function parsePreferencesMarkdown(content: string): GSDPreferences | null {
   // Use indexOf instead of [\s\S]*? regex to avoid backtracking (#468)
   const startMarker = content.startsWith('---\r\n') ? '---\r\n' : '---\n';
-  if (!content.startsWith(startMarker)) return null;
+  if (!content.startsWith(startMarker)) {
+    // Warn when a non-empty file exists but lacks frontmatter delimiters (#2036).
+    // This catches the case where a GSD agent recovery session writes
+    // preferences in markdown heading+list format instead of YAML frontmatter.
+    if (content.trim().length > 0) {
+      process.stderr.write(
+        `[GSD] Warning: preferences file was not parsed — content does not use YAML frontmatter delimiters (---). ` +
+        `Wrap your preferences in --- fences. See https://github.com/gsd-build/gsd-2/issues/2036\n`,
+      );
+    }
+    return null;
+  }
   const searchStart = startMarker.length;
   const endIdx = content.indexOf('\n---', searchStart);
   if (endIdx === -1) return null;
