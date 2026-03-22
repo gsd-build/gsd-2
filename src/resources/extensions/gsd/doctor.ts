@@ -475,6 +475,12 @@ export async function readDoctorHistory(basePath: string, lastN = 50): Promise<D
 }
 
 export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; dryRun?: boolean; scope?: string; fixLevel?: "task" | "all"; isolationMode?: "none" | "worktree" | "branch"; includeBuild?: boolean; includeTests?: boolean }): Promise<DoctorReport> {
+  // Always start from a clean slate. The extension process persists module-level
+  // caches (dirEntryCache, _parseCache, _stateCache) across calls. Without this,
+  // a second doctor run in the same session reads stale cached directory listings
+  // and detects the same issues that the first run already fixed on disk (#FIXME).
+  invalidateAllCaches();
+
   const issues: DoctorIssue[] = [];
   const fixesApplied: string[] = [];
   const fix = options?.fix === true;
@@ -1024,6 +1030,11 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
   }
 
   if (fix && !dryRun && fixesApplied.length > 0) {
+    // Invalidate before rebuilding STATE.md so deriveState() reads the files
+    // doctor just wrote (stub summaries, checked roadmap boxes, etc.) rather
+    // than the cached pre-fix snapshot. Without this, STATE.md can be written
+    // with data that predates the fixes applied in this same run.
+    invalidateAllCaches();
     await updateStateFile(basePath, fixesApplied);
   }
 
