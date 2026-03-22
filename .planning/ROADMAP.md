@@ -48,7 +48,12 @@ Plans:
   2. Concurrent worktree sync attempts are blocked by advisory lock with no data corruption
   3. An agent executing a task calls `complete_task()` as its final step rather than editing a checkbox — confirmed via telemetry
   4. `engine.replay(event)` applies a command from another engine's event log correctly
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 2-01-PLAN.md — Advisory sync lock + engine.replay() method
+- [ ] 2-02-PLAN.md — Sync function migration (snapshot/restore with locking)
+- [ ] 2-03-PLAN.md — Prompt migration (3 prompts to tool-call instructions)
 
 ### Phase 3: Event Reconciliation + Mandatory Tools
 **Goal**: Worktree merge uses event-based reconciliation (no more INSERT OR REPLACE), remaining prompts migrated to tools, agent writes to state files produce warnings, and legacy projects can migrate via `gsd migrate`
@@ -92,7 +97,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Engine Foundation + Team Infrastructure | 5/5 | Complete | 2026-03-22 |
-| 2. Sync Migration + Prompt Migration | 0/TBD | Not started | - |
+| 2. Sync Migration + Prompt Migration | 0/3 | Not started | - |
 | 3. Event Reconciliation + Mandatory Tools | 0/TBD | Not started | - |
 | 4. Remove Parsing from Hot Path | 0/TBD | Not started | - |
 | 5. Dead Code Cleanup | 0/TBD | Not started | - |
