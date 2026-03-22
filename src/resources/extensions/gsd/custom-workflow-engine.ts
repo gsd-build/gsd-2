@@ -20,14 +20,19 @@ import type {
   ReconcileResult,
   DisplayMetadata,
 } from "./engine-types.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { parse } from "yaml";
 import {
   readGraph,
   writeGraph,
   getNextPendingStep,
   markStepComplete,
+  expandIteration,
   type WorkflowGraph,
 } from "./graph.ts";
 import { injectContext } from "./context-injector.ts";
+import type { WorkflowDefinition, StepDefinition } from "./definition-loader.ts";
 
 export class CustomWorkflowEngine implements WorkflowEngine {
   readonly engineId = "custom";
@@ -64,15 +69,24 @@ export class CustomWorkflowEngine implements WorkflowEngine {
    * Resolve the next dispatch action from graph state.
    *
    * Uses getNextPendingStep to find the first step whose dependencies
-   * are all satisfied. Returns a dispatch with unitType "custom-step"
-   * and unitId in "<workflowName>/<stepId>" format.
+   * are all satisfied. If the step has an `iterate` config in the frozen
+   * DEFINITION.yaml, expands it into instance steps before dispatching.
+   *
+   * Returns a dispatch with unitType "custom-step" and unitId in
+   * "<workflowName>/<stepId>" format.
+   *
+   * Observability:
+   * - Iterate expansion is logged to stderr with item count and parent step ID.
+   * - Missing source artifacts throw with the full resolved path for diagnosis.
+   * - Zero-match expansions return a stop action with level "info".
+   * - Expanded GRAPH.yaml is written to disk before dispatch — inspectable on disk.
    */
   async resolveDispatch(
     state: EngineState,
     _context: { basePath: string },
   ): Promise<EngineDispatchAction> {
-    const graph = state.raw as WorkflowGraph;
-    const next = getNextPendingStep(graph);
+    let graph = state.raw as WorkflowGraph;
+    let next = getNextPendingStep(graph);
 
     if (!next) {
       return {
@@ -80,6 +94,48 @@ export class CustomWorkflowEngine implements WorkflowEngine {
         reason: "All steps complete",
         level: "info",
       };
+    }
+
+    // Check frozen DEFINITION.yaml for iterate config on this step
+    const defPath = join(this.runDir, "DEFINITION.yaml");
+    const defRaw = readFileSync(defPath, "utf-8");
+    const def = parse(defRaw) as WorkflowDefinition;
+    const stepDef = def.steps.find((s: StepDefinition) => s.id === next!.id);
+
+    if (stepDef?.iterate) {
+      const iterate = stepDef.iterate;
+
+      // Read source artifact
+      const sourcePath = join(this.runDir, iterate.source);
+      let sourceContent: string;
+      try {
+        sourceContent = readFileSync(sourcePath, "utf-8");
+      } catch {
+        throw new Error(
+          `Iterate source artifact not found: ${sourcePath} (step "${next.id}", source: "${iterate.source}")`,
+        );
+      }
+
+      // Extract items via regex with global+multiline flags
+      const items = [...sourceContent.matchAll(new RegExp(iterate.pattern, "gm"))].map(
+        (m) => m[1],
+      );
+
+      // Expand the graph
+      const expandedGraph = expandIteration(graph, next.id, items, next.prompt);
+      writeGraph(this.runDir, expandedGraph);
+      graph = expandedGraph;
+
+      // Re-query for first instance step
+      next = getNextPendingStep(expandedGraph);
+
+      if (!next) {
+        return {
+          action: "stop",
+          reason: "Iterate expansion produced no instances",
+          level: "info",
+        };
+      }
     }
 
     // Enrich prompt with context from prior step artifacts

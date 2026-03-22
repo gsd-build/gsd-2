@@ -7,7 +7,7 @@
 
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse } from "yaml";
@@ -15,6 +15,7 @@ import { parse } from "yaml";
 import { CustomWorkflowEngine } from "../custom-workflow-engine.ts";
 import { CustomExecutionPolicy } from "../custom-execution-policy.ts";
 import { writeGraph, readGraph, type WorkflowGraph, type GraphStep } from "../graph.ts";
+import { stringify } from "yaml";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -50,7 +51,7 @@ function makeGraph(steps: GraphStep[], name = "test-wf"): WorkflowGraph {
   };
 }
 
-/** Write a graph to a temp dir and return engine + dir. */
+/** Write a graph to a temp dir and return engine + dir. Also writes a minimal DEFINITION.yaml so resolveDispatch/injectContext can read it. */
 function setupEngine(
   steps: GraphStep[],
   name = "test-wf",
@@ -58,6 +59,21 @@ function setupEngine(
   const runDir = makeTmpDir();
   const graph = makeGraph(steps, name);
   writeGraph(runDir, graph);
+
+  // Write a minimal DEFINITION.yaml matching the graph steps
+  const def = {
+    version: 1,
+    name,
+    steps: steps.map((s) => ({
+      id: s.id,
+      name: s.title,
+      prompt: s.prompt,
+      requires: s.dependsOn,
+      produces: [],
+    })),
+  };
+  writeFileSync(join(runDir, "DEFINITION.yaml"), stringify(def), "utf-8");
+
   return { engine: new CustomWorkflowEngine(runDir), runDir };
 }
 
