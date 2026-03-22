@@ -44,11 +44,24 @@ export function syncProjectRootToWorktree(
   const prGsd = join(projectRoot, ".gsd");
   const wtGsd = join(worktreePath, ".gsd");
 
-  // Copy milestone directory from project root to worktree if the project root
-  // has newer artifacts (e.g. slices that don't exist in the worktree yet)
+  // Copy milestone directory from project root to worktree — additive only.
+  // force:false prevents cpSync from overwriting existing worktree files.
+  // Without this, worktree-authoritative files (e.g. VALIDATION.md written
+  // by validate-milestone) get clobbered by stale project root copies,
+  // causing an infinite re-validation loop (#1886).
   safeCopyRecursive(
     join(prGsd, "milestones", milestoneId),
     join(wtGsd, "milestones", milestoneId),
+    { force: false },
+  );
+
+  // Forward-sync completed-units.json from project root to worktree.
+  // Project root is authoritative for completion state after crash recovery;
+  // without this, the worktree re-dispatches already-completed units (#1886).
+  safeCopy(
+    join(prGsd, "completed-units.json"),
+    join(wtGsd, "completed-units.json"),
+    { force: true },
   );
 
   // Delete worktree gsd.db so it rebuilds from the freshly synced files.
