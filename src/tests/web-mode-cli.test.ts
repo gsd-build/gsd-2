@@ -189,6 +189,125 @@ test('launchWebMode prefers the packaged standalone host and opens the resolved 
   }
 })
 
+// ─── Issue #2082: auth token URL must be printed to terminal ────────────
+
+test('launchWebMode prints full auth token URL to stderr', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-token-url-'))
+  const standaloneRoot = join(tmp, 'dist', 'web', 'standalone')
+  const serverPath = join(standaloneRoot, 'server.js')
+  mkdirSync(standaloneRoot, { recursive: true })
+  writeFileSync(serverPath, 'console.log("stub")\n')
+
+  let openedUrl = ''
+  let stderrOutput = ''
+  const pidFilePath = join(tmp, 'web-server.pid')
+
+  try {
+    const status = await webMode.launchWebMode(
+      {
+        cwd: '/tmp/current-project',
+        projectSessionsDir: '/tmp/.gsd/sessions/--tmp-current-project--',
+        agentDir: '/tmp/.gsd/agent',
+        packageRoot: tmp,
+      },
+      {
+        initResources: () => {},
+        resolvePort: async () => 45200,
+        execPath: '/custom/node',
+        env: { TEST_ENV: '1' },
+        spawn: (command, args, options) => ({
+          pid: 88888,
+          once: () => undefined,
+          unref: () => {},
+        } as any),
+        waitForBootReady: async () => undefined,
+        openBrowser: (url) => {
+          openedUrl = url
+        },
+        pidFilePath,
+        writePidFile: webMode.writePidFile,
+        stderr: {
+          write(chunk: string) {
+            stderrOutput += chunk
+            return true
+          },
+        },
+      },
+    )
+
+    assert.equal(status.ok, true)
+    // The auth token URL must appear in stderr so users in headless
+    // environments can copy-paste it (issue #2082).
+    const authToken = openedUrl.replace('http://127.0.0.1:45200/#token=', '')
+    assert.equal(authToken.length, 64, 'auth token should be 64 hex chars')
+    assert.match(
+      stderrOutput,
+      new RegExp(`http://127\\.0\\.0\\.1:45200/#token=${authToken}`),
+      'stderr must contain the full auth token URL',
+    )
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('launchWebMode reports browser open failure to stderr instead of swallowing it', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-browser-fail-'))
+  const standaloneRoot = join(tmp, 'dist', 'web', 'standalone')
+  const serverPath = join(standaloneRoot, 'server.js')
+  mkdirSync(standaloneRoot, { recursive: true })
+  writeFileSync(serverPath, 'console.log("stub")\n')
+
+  let stderrOutput = ''
+  const pidFilePath = join(tmp, 'web-server.pid')
+
+  try {
+    const status = await webMode.launchWebMode(
+      {
+        cwd: '/tmp/current-project',
+        projectSessionsDir: '/tmp/.gsd/sessions/--tmp-current-project--',
+        agentDir: '/tmp/.gsd/agent',
+        packageRoot: tmp,
+      },
+      {
+        initResources: () => {},
+        resolvePort: async () => 45201,
+        execPath: '/custom/node',
+        env: { TEST_ENV: '1' },
+        spawn: (command, args, options) => ({
+          pid: 88889,
+          once: () => undefined,
+          unref: () => {},
+        } as any),
+        waitForBootReady: async () => undefined,
+        openBrowser: () => {
+          throw new Error('xdg-open failed')
+        },
+        pidFilePath,
+        writePidFile: webMode.writePidFile,
+        stderr: {
+          write(chunk: string) {
+            stderrOutput += chunk
+            return true
+          },
+        },
+      },
+    )
+
+    // The launch should still succeed — a browser failure is non-fatal
+    assert.equal(status.ok, true, 'browser failure should not fail the launch')
+    // The stderr should mention the browser failure
+    assert.match(stderrOutput, /[Cc]ould not open browser/i, 'stderr should report browser open failure')
+    // The full auth token URL must still be printed so the user can copy it
+    assert.match(
+      stderrOutput,
+      /http:\/\/127\.0\.0\.1:45201\/#token=[a-f0-9]{64}/,
+      'stderr must contain the full auth token URL even when browser fails',
+    )
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
 test('stopWebMode kills process by PID and removes PID file', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-stop-'))
   const pidFilePath = join(tmp, 'web-server.pid')

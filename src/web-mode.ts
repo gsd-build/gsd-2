@@ -656,7 +656,6 @@ export async function launchWebMode(
       // Register in multi-instance registry
       registerInstance(options.cwd, { pid, port, url })
     }
-    ;(deps.openBrowser ?? openBrowser)(`${url}/#token=${authToken}`)
   } catch (error) {
     const failure: WebModeLaunchFailure = {
       mode: 'web',
@@ -669,10 +668,19 @@ export async function launchWebMode(
       hostKind: resolution.kind,
       hostPath: resolution.entryPath,
       hostRoot: resolution.hostRoot,
-      failureReason: `browser-open:${error instanceof Error ? error.message : String(error)}`,
+      failureReason: `pid-registry:${error instanceof Error ? error.message : String(error)}`,
     }
     emitLaunchStatus(stderr, failure)
     return failure
+  }
+
+  // Attempt to open the browser — treat failure as non-fatal since headless
+  // environments (WSL, SSH, Docker, Codespaces) may not have a browser.
+  const fullUrl = `${url}/#token=${authToken}`
+  try {
+    ;(deps.openBrowser ?? openBrowser)(fullUrl)
+  } catch (error) {
+    stderr.write(`[gsd] Could not open browser automatically: ${error instanceof Error ? error.message : String(error)}\n`)
   }
 
   const success: WebModeLaunchSuccess = {
@@ -688,6 +696,7 @@ export async function launchWebMode(
     hostRoot: resolution.hostRoot,
   }
   stderr.write(`[gsd] Ready → ${url}\n`)
+  stderr.write(`[gsd] Open in browser: ${fullUrl}\n`)
   emitLaunchStatus(stderr, success)
   return success
 }
