@@ -305,8 +305,9 @@ export const DISPATCH_RULES: DispatchRule[] = [
     name: "factcheck-reroute → plan-slice",
     match: async ({ state, mid, midTitle, basePath }) => {
       if (state.phase !== "planning") return null;
-      const sid = state.activeSlice!.id;
-      const sTitle = state.activeSlice!.title;
+      if (!state.activeSlice) return null;
+      const sid = state.activeSlice.id;
+      const sTitle = state.activeSlice.title;
 
       // Check for FACTCHECK-STATUS.json in the slice's factcheck/ subdirectory
       const sliceDir = resolveSlicePath(basePath, mid, sid);

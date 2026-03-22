@@ -105,8 +105,11 @@ Then:
 18. Write `{{taskSummaryPath}}`
 19. Mark {{taskId}} done in `{{planPath}}` (change `[ ]` to `[x]`)
 20. Do not run git commands — the system auto-commits your changes after this unit completes.
+<<<<<<< HEAD
 21. Update `.gsd/STATE.md`
 >>>>>>> 8524093e (feat(gsd): evidence-grounded prompt contract — unknowns inventory, verification protocol, and factcheck reroute)
+=======
+>>>>>>> 65fe80ad (fix: address Copilot review — null guard, remove STATE.md steps, align gate fields, fallback claimId)
 
 All work stays in your working directory: `{{workingDirectory}}`.
 

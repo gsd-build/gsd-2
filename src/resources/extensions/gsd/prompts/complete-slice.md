@@ -39,8 +39,11 @@ Then:
 11. Mark {{sliceId}} done in `{{roadmapPath}}` (change `[ ]` to `[x]`)
 12. Do not run git commands — the system auto-commits your changes and handles the merge after this unit succeeds.
 13. Update `.gsd/PROJECT.md` if it exists — refresh current state if needed.
+<<<<<<< HEAD
 14. Update `.gsd/STATE.md`
 >>>>>>> 8524093e (feat(gsd): evidence-grounded prompt contract — unknowns inventory, verification protocol, and factcheck reroute)
+=======
+>>>>>>> 65fe80ad (fix: address Copilot review — null guard, remove STATE.md steps, align gate fields, fallback claimId)
 
    **Identity:** `sliceId`, `milestoneId`, `sliceTitle`
 

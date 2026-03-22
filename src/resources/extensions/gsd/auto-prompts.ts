@@ -632,7 +632,7 @@ export async function loadFactcheckEvidence(
     const status = JSON.parse(statusContent);
 
     // Only inject when there are refutations that impact the plan
-    if (status.overallStatus !== "has-refutations") return null;
+    if (status.overallStatus !== "has-refutations" && status.planImpacting !== true) return null;
     if (!status.planImpactingClaims || status.planImpactingClaims.length === 0) return null;
 
     // Load all claim annotations
@@ -658,7 +658,7 @@ export async function loadFactcheckEvidence(
         // Only include REFUTED claims with corrected values
         if (claim.verdict === "refuted" && claim.correctedValue) {
           refutedClaims.push({
-            claimId: claim.claimId,
+            claimId: claim.claimId || claimId,
             description: claim.notes || `Claim ${claimId}`,
             correctedValue: claim.correctedValue,
             impact: claim.impact || "unknown",

@@ -53,7 +53,6 @@ Then:
    - If a claim marked `training-data` affects the approach for a slice, note that the slice must verify it.
    - Do not silently drop unresolved unknowns. Every unresolved item must be assigned to a slice.
 7. If planning produced structural decisions (e.g. slice ordering rationale, technology choices, scope exclusions), append them to `.gsd/DECISIONS.md` (use the **Decisions** output template from the inlined context above if the file doesn't exist yet)
-8. Update `.gsd/STATE.md`
 
 ## Requirement Mapping Rules
 
