@@ -70,17 +70,24 @@ export async function checkGitHealth(
         });
 
         if (shouldFix("orphaned_auto_worktree")) {
-          // Never remove a worktree matching current working directory
+          // If cwd is inside the worktree, chdir out first — matching the
+          // pattern in removeWorktree() (#1946). Without this, git cannot
+          // remove the worktree and the doctor enters a deadlock where it
+          // detects the orphan every run but never cleans it up.
           const cwd = process.cwd();
           if (wt.path === cwd || cwd.startsWith(wt.path + sep)) {
-            fixesApplied.push(`skipped removing worktree at ${wt.path} (is cwd)`);
-          } else {
             try {
-              nativeWorktreeRemove(basePath, wt.path, true);
-              fixesApplied.push(`removed orphaned worktree ${wt.path}`);
+              process.chdir(basePath);
             } catch {
-              fixesApplied.push(`failed to remove worktree ${wt.path}`);
+              fixesApplied.push(`skipped removing worktree at ${wt.path} (cannot chdir to basePath)`);
+              continue;
             }
+          }
+          try {
+            nativeWorktreeRemove(basePath, wt.path, true);
+            fixesApplied.push(`removed orphaned worktree ${wt.path}`);
+          } catch {
+            fixesApplied.push(`failed to remove worktree ${wt.path}`);
           }
         }
       }

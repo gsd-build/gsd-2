@@ -149,6 +149,56 @@ async function main(): Promise<void> {
       console.log("\n=== orphaned_auto_worktree (skipped on Windows) ===");
     }
 
+    // ─── Test 1b: Orphaned worktree fix when cwd is inside worktree (#1946) ──
+    // Reproduces the deadlock: if process.cwd() is inside the orphaned worktree,
+    // the doctor must chdir out before removing it — not skip the removal.
+    if (process.platform !== "win32") {
+    console.log("\n=== orphaned_auto_worktree (cwd inside worktree) ===");
+    {
+      const dir = createRepoWithCompletedMilestone();
+      cleanups.push(dir);
+
+      // Create worktree with milestone/M001 branch under .gsd/worktrees/
+      mkdirSync(join(dir, ".gsd", "worktrees"), { recursive: true });
+      run("git worktree add -b milestone/M001 .gsd/worktrees/M001", dir);
+
+      const wtPath = realpathSync(join(dir, ".gsd", "worktrees", "M001"));
+
+      // Simulate the deadlock: set cwd inside the orphaned worktree
+      const previousCwd = process.cwd();
+      process.chdir(wtPath);
+      try {
+        const fixed = await runGSDDoctor(dir, { fix: true, isolationMode: "worktree" });
+
+        // The fix must NOT skip removal — it should chdir out and remove
+        assertTrue(
+          !fixed.fixesApplied.some(f => f.includes("skipped removing worktree")),
+          "does NOT skip removal when cwd is inside worktree",
+        );
+        assertTrue(
+          fixed.fixesApplied.some(f => f.includes("removed orphaned worktree")),
+          "removes orphaned worktree even when cwd was inside it",
+        );
+
+        // Verify worktree is gone
+        const wtList = run("git worktree list", dir);
+        assertTrue(!wtList.includes("milestone/M001"), "worktree removed after fix with cwd inside");
+
+        // Verify cwd was moved out (should be basePath, not still inside worktree)
+        const newCwd = process.cwd();
+        assertTrue(
+          !newCwd.startsWith(wtPath),
+          "cwd moved out of worktree after fix",
+        );
+      } finally {
+        // Restore cwd — the worktree dir may be gone, so chdir to previousCwd
+        try { process.chdir(previousCwd); } catch { process.chdir(dir); }
+      }
+    }
+    } else {
+      console.log("\n=== orphaned_auto_worktree (cwd inside worktree — skipped on Windows) ===");
+    }
+
     // ─── Test 2: Stale milestone branch detection & fix ────────────────
     // Skip on Windows: git branch glob matching and path resolution
     // behave differently in Windows temp dirs.
