@@ -7,6 +7,49 @@
 import type { DbAdapter } from "./gsd-db.js";
 import { _getAdapter, isDbAvailable } from "./gsd-db.js";
 import type { GSDState, ActiveRef, Phase, MilestoneRegistryEntry } from "./types.js";
+import {
+  completeTask as _completeTask,
+  completeSlice as _completeSlice,
+  planSlice as _planSlice,
+  saveDecision as _saveDecision,
+  startTask as _startTask,
+  recordVerification as _recordVerification,
+  reportBlocker as _reportBlocker,
+} from "./workflow-commands.js";
+import type {
+  CompleteTaskParams,
+  CompleteTaskResult,
+  CompleteSliceParams,
+  CompleteSliceResult,
+  PlanSliceParams,
+  PlanSliceResult,
+  SaveDecisionParams,
+  SaveDecisionResult,
+  StartTaskParams,
+  StartTaskResult,
+  RecordVerificationParams,
+  RecordVerificationResult,
+  ReportBlockerParams,
+  ReportBlockerResult,
+} from "./workflow-commands.js";
+
+// Re-export param/result types so consumers can import from one place
+export type {
+  CompleteTaskParams,
+  CompleteTaskResult,
+  CompleteSliceParams,
+  CompleteSliceResult,
+  PlanSliceParams,
+  PlanSliceResult,
+  SaveDecisionParams,
+  SaveDecisionResult,
+  StartTaskParams,
+  StartTaskResult,
+  RecordVerificationParams,
+  RecordVerificationResult,
+  ReportBlockerParams,
+  ReportBlockerResult,
+} from "./workflow-commands.js";
 
 // ─── Row Interfaces ──────────────────────────────────────────────────────
 
@@ -113,6 +156,36 @@ export class WorkflowEngine {
         "SELECT * FROM tasks WHERE milestone_id = ? AND slice_id = ? ORDER BY seq, id",
       )
       .all(milestoneId, sliceId) as unknown as TaskRow[];
+  }
+
+  // ── Command handlers (delegated to workflow-commands.ts) ───────────
+
+  completeTask(params: CompleteTaskParams): CompleteTaskResult {
+    return _completeTask(this.db, params);
+  }
+
+  completeSlice(params: CompleteSliceParams): CompleteSliceResult {
+    return _completeSlice(this.db, params);
+  }
+
+  planSlice(params: PlanSliceParams): PlanSliceResult {
+    return _planSlice(this.db, params);
+  }
+
+  saveDecision(params: SaveDecisionParams): SaveDecisionResult {
+    return _saveDecision(this.db, params);
+  }
+
+  startTask(params: StartTaskParams): StartTaskResult {
+    return _startTask(this.db, params);
+  }
+
+  recordVerification(params: RecordVerificationParams): RecordVerificationResult {
+    return _recordVerification(this.db, params);
+  }
+
+  reportBlocker(params: ReportBlockerParams): ReportBlockerResult {
+    return _reportBlocker(this.db, params);
   }
 
   // ── State derivation ───────────────────────────────────────────────
