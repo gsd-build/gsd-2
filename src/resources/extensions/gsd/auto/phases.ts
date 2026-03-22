@@ -259,6 +259,18 @@ export async function runPreDispatch(
     mid = state.activeMilestone?.id;
     midTitle = state.activeMilestone?.title;
 
+    // Stop auto-mode when the next milestone needs discussion (#1905).
+    // Creating a worktree/branch here would produce a survivor branch that
+    // triggers a restart→stop cycle on the next bootstrap.
+    if (mid && state.phase === "needs-discussion") {
+      await deps.stopAuto(
+        ctx,
+        pi,
+        `${mid} needs discussion before planning. Run /gsd to discuss.`,
+      );
+      return { action: "break", reason: "needs-discussion" };
+    }
+
     if (mid) {
       if (deps.getIsolationMode() !== "none") {
         deps.captureIntegrationBranch(s.basePath, mid, {
