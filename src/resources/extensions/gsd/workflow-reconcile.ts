@@ -5,8 +5,8 @@
 // Copyright (c) 2026 Jeremy McSpadden <jeremy@fluxlabs.net>
 
 import { join } from "node:path";
-import { mkdirSync } from "node:fs";
-import { readEvents, findForkPoint } from "./workflow-events.js";
+import { mkdirSync, existsSync, readFileSync, unlinkSync } from "node:fs";
+import { readEvents, findForkPoint, appendEvent } from "./workflow-events.js";
 import type { WorkflowEvent } from "./workflow-events.js";
 import { getEngine } from "./workflow-engine.js";
 import { writeManifest } from "./workflow-manifest.js";
@@ -244,4 +244,149 @@ export function reconcileWorktreeLogs(
 
   // Step 9: Return result
   return { autoMerged: merged.length, conflicts: [] };
+}
+
+// ─── Conflict Resolution (D-06) ─────────────────────────────────────────────
+
+/**
+ * Parse CONFLICTS.md and return structured ConflictEntry[].
+ * Returns empty array when CONFLICTS.md does not exist.
+ *
+ * Parses the format written by writeConflictsFile:
+ *   ## Conflict N: {entityType} {entityId}
+ *   **Main side events:**
+ *   - {cmd} at {ts} (hash: {hash})
+ *     params: {JSON}
+ *   **Worktree side events:**
+ *   - {cmd} at {ts} (hash: {hash})
+ *     params: {JSON}
+ */
+export function listConflicts(basePath: string): ConflictEntry[] {
+  const conflictsPath = join(basePath, ".gsd", "CONFLICTS.md");
+  if (!existsSync(conflictsPath)) return [];
+
+  const content = readFileSync(conflictsPath, "utf-8");
+  const conflicts: ConflictEntry[] = [];
+
+  // Split into per-conflict sections on "## Conflict N:" headings
+  const sections = content.split(/^## Conflict \d+:/m).slice(1);
+
+  for (const section of sections) {
+    // Extract entity type and id from first line: " {entityType} {entityId}"
+    const headingMatch = section.match(/^\s+(\S+)\s+(\S+)/);
+    if (!headingMatch) continue;
+    const entityType = headingMatch[1]!;
+    const entityId = headingMatch[2]!;
+
+    // Split into main/worktree blocks
+    const mainMatch = section.split("**Main side events:**")[1];
+    const wtMatch = mainMatch?.split("**Worktree side events:**");
+
+    const mainBlock = wtMatch?.[0] ?? "";
+    const wtBlock = wtMatch?.[1] ?? "";
+
+    const mainSideEvents = parseEventBlock(mainBlock);
+    const worktreeSideEvents = parseEventBlock(wtBlock);
+
+    conflicts.push({ entityType, entityId, mainSideEvents, worktreeSideEvents });
+  }
+
+  return conflicts;
+}
+
+/**
+ * Parse a block of event lines from CONFLICTS.md into WorkflowEvent[].
+ * Each event spans two lines:
+ *   - {cmd} at {ts} (hash: {hash})
+ *     params: {JSON}
+ */
+function parseEventBlock(block: string): WorkflowEvent[] {
+  const events: WorkflowEvent[] = [];
+  // Find lines starting with "- " (event lines)
+  const lines = block.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i]!.trim();
+    if (line.startsWith("- ")) {
+      // Parse: - {cmd} at {ts} (hash: {hash})
+      const eventMatch = line.match(/^-\s+(\S+)\s+at\s+(\S+)\s+\(hash:\s+(\S+)\)$/);
+      if (eventMatch) {
+        const cmd = eventMatch[1]!;
+        const ts = eventMatch[2]!;
+        const hash = eventMatch[3]!;
+
+        // Next line: "  params: {JSON}"
+        let params: Record<string, unknown> = {};
+        const nextLine = lines[i + 1];
+        if (nextLine) {
+          const paramsMatch = nextLine.trim().match(/^params:\s+(.+)$/);
+          if (paramsMatch) {
+            try {
+              params = JSON.parse(paramsMatch[1]!) as Record<string, unknown>;
+            } catch {
+              // Keep empty params on parse error
+            }
+            i++; // consume params line
+          }
+        }
+
+        events.push({ cmd, params, ts, hash, actor: "agent" });
+      }
+    }
+    i++;
+  }
+  return events;
+}
+
+/**
+ * Resolve a single conflict by picking one side's events.
+ * Replays the picked events through the engine, appends them to the event log,
+ * and updates or removes CONFLICTS.md.
+ */
+export function resolveConflict(
+  basePath: string,
+  entityKey: string,  // e.g. "task:T01"
+  pick: "main" | "worktree",
+): void {
+  const conflicts = listConflicts(basePath);
+  const colonIdx = entityKey.indexOf(":");
+  const entityType = entityKey.slice(0, colonIdx);
+  const entityId = entityKey.slice(colonIdx + 1);
+
+  const idx = conflicts.findIndex((c) => c.entityType === entityType && c.entityId === entityId);
+  if (idx === -1) throw new Error(`No conflict found for entity ${entityKey}`);
+
+  const conflict = conflicts[idx]!;
+  const eventsToReplay = pick === "main" ? conflict.mainSideEvents : conflict.worktreeSideEvents;
+
+  // Replay resolved events through the engine (updates DB state)
+  const engine = getEngine(basePath);
+  engine.replayAll(eventsToReplay);
+
+  // Append resolved events to the event log
+  for (const event of eventsToReplay) {
+    appendEvent(basePath, { cmd: event.cmd, params: event.params, ts: event.ts, actor: event.actor });
+  }
+
+  // Remove resolved conflict from list
+  conflicts.splice(idx, 1);
+
+  // Update or remove CONFLICTS.md
+  if (conflicts.length === 0) {
+    removeConflictsFile(basePath);
+  } else {
+    // Re-write CONFLICTS.md with remaining conflicts (worktreePath unknown — use empty string)
+    writeConflictsFile(basePath, conflicts, "");
+  }
+}
+
+/**
+ * Remove CONFLICTS.md — called when all conflicts are resolved.
+ * No-op if CONFLICTS.md does not exist.
+ */
+export function removeConflictsFile(basePath: string): void {
+  const conflictsPath = join(basePath, ".gsd", "CONFLICTS.md");
+  if (existsSync(conflictsPath)) {
+    unlinkSync(conflictsPath);
+  }
 }
