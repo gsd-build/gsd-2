@@ -121,6 +121,7 @@ export function printHelp(version: string): void {
   process.stdout.write('  --worktree, -w [name]    Start in an isolated worktree (auto-named if omitted)\n')
   process.stdout.write('  --model <id>             Override model (e.g. claude-opus-4-6)\n')
   process.stdout.write('  --no-session             Disable session persistence\n')
+  process.stdout.write('  --no-picker              Skip the startup session picker (always start fresh)\n')
   process.stdout.write('  --extension <path>       Load additional extension\n')
   process.stdout.write('  --tools <a,b,c>          Restrict available tools\n')
   process.stdout.write('  --list-models [search]   List available models and exit\n')

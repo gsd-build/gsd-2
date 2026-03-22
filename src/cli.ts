@@ -37,6 +37,7 @@ interface CliFlags {
   print?: boolean
   continue?: boolean
   noSession?: boolean
+  noPicker?: boolean
   worktree?: boolean | string
   model?: string
   listModels?: string | true
@@ -80,6 +81,8 @@ function parseCliArgs(argv: string[]): CliFlags {
       flags.continue = true
     } else if (arg === '--no-session') {
       flags.noSession = true
+    } else if (arg === '--no-picker') {
+      flags.noPicker = true
     } else if (arg === '--model' && i + 1 < args.length) {
       flags.model = args[++i]
     } else if (arg === '--extension' && i + 1 < args.length) {
@@ -187,61 +190,66 @@ if (cliFlags.web || (cliFlags.messages[0] === 'web' && cliFlags.messages[1] !== 
 }
 
 
-// `gsd sessions` — list past sessions and pick one to resume
-if (cliFlags.messages[0] === 'sessions') {
-  const cwd = process.cwd()
-  const safePath = `--${cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`
-  const projectSessionsDir = join(sessionsDir, safePath)
+// ---------------------------------------------------------------------------
+// Session picker — shared by `gsd sessions` subcommand and startup-without-args
+// ---------------------------------------------------------------------------
+// Session picker — delegates to src/session-picker.ts
+// ---------------------------------------------------------------------------
+async function runSessionPicker(exitOnCancel: boolean): Promise<void> {
+  const { runSessionPicker: _pick } = await import('./session-picker.js')
+  const { SessionManager } = await import('@gsd/pi-coding-agent')
+  const { getProjectSessionsDir } = await import('./project-sessions.js')
 
-  process.stderr.write(chalk.dim(`Loading sessions for ${cwd}...\n`))
-  const sessions = await SessionManager.list(cwd, projectSessionsDir)
+  const cwd = process.cwd()
+  const pickerSessionsDir = getProjectSessionsDir(cwd)
+  const sessions = await SessionManager.list(cwd, pickerSessionsDir)
 
   if (sessions.length === 0) {
-    process.stderr.write(chalk.yellow('No sessions found for this directory.\n'))
-    process.exit(0)
+    if (exitOnCancel) {
+      process.stderr.write(chalk.yellow('No sessions found for this directory.\n'))
+      process.exit(0)
+    }
+    return
   }
 
-  process.stderr.write(chalk.bold(`\n  Sessions (${sessions.length}):\n\n`))
+  const result = await _pick(exitOnCancel, cwd, sessions)
 
-  const maxShow = 20
-  const toShow = sessions.slice(0, maxShow)
-  for (let i = 0; i < toShow.length; i++) {
-    const s = toShow[i]
-    const date = s.modified.toLocaleString()
-    const msgs = s.messageCount
-    const name = s.name ? ` ${chalk.cyan(s.name)}` : ''
-    const preview = s.firstMessage
-      ? s.firstMessage.replace(/\n/g, ' ').substring(0, 80)
-      : chalk.dim('(empty)')
-    const num = String(i + 1).padStart(3)
-    process.stderr.write(`  ${chalk.bold(num)}. ${chalk.green(date)} ${chalk.dim(`(${msgs} msgs)`)}${name}\n`)
-    process.stderr.write(`       ${chalk.dim(preview)}\n\n`)
+  if (result.kind === 'cancelled') {
+    if (exitOnCancel) {
+      process.stderr.write(chalk.dim('  Cancelled.\n\n'))
+      process.exit(0)
+    }
+    return
   }
 
-  if (sessions.length > maxShow) {
-    process.stderr.write(chalk.dim(`  ... and ${sessions.length - maxShow} more\n\n`))
+  if (result.kind === 'new') {
+    process.stderr.write(chalk.dim('  Starting new conversation...\n\n'))
+    return
   }
 
-  // Interactive selection
-  const readline = await import('node:readline')
-  const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
-  const answer = await new Promise<string>((resolve) => {
-    rl.question(chalk.bold('  Enter session number to resume (or q to quit): '), resolve)
-  })
-  rl.close()
-
-  const choice = parseInt(answer, 10)
-  if (isNaN(choice) || choice < 1 || choice > toShow.length) {
-    process.stderr.write(chalk.dim('Cancelled.\n'))
-    process.exit(0)
-  }
-
-  const selected = toShow[choice - 1]
-  process.stderr.write(chalk.green(`\nResuming session from ${selected.modified.toLocaleString()}...\n\n`))
-
-  // Mark for the interactive session below to open this specific session
+  // result.kind === 'selected'
+  const { formatDate } = await import('./session-picker.js')
+  process.stderr.write(chalk.green(`  Resuming session from ${formatDate(result.session.modified)}...\n\n`))
   cliFlags.continue = true
-  cliFlags._selectedSessionPath = selected.path
+  cliFlags._selectedSessionPath = result.session.path
+}
+
+// `gsd sessions` — explicit subcommand: show full picker, exit process on cancel
+if (cliFlags.messages[0] === 'sessions') {
+  await runSessionPicker(true)
+}
+
+// Startup without arguments — show compact picker so the user can choose a
+// previous session or start fresh. Skip in non-interactive / subagent / print modes.
+if (
+  cliFlags.messages.length === 0 &&
+  !cliFlags.continue &&
+  !cliFlags.noSession &&
+  !cliFlags.noPicker &&
+  !isPrintMode &&
+  process.stdin.isTTY
+) {
+  await runSessionPicker(false)
 }
 
 // `gsd headless` — run auto-mode without TUI
