@@ -106,6 +106,21 @@ async function main(): Promise<void> {
     assertTrue(state.includes("# GSD State"), "writes state file");
   }
 
+  // Idempotency: a second fix run on the same base must report no errors.
+  // This regresses the cache staleness bug where module-level dirEntryCache /
+  // _parseCache retained pre-fix directory listings across calls, causing the
+  // same issues to be re-detected even though the first run had written the
+  // fix artifacts to disk.
+  console.log("\n=== doctor fix idempotency (second run must be clean) ===");
+  {
+    const report2 = await runGSDDoctor(tmpBase, { fix: true });
+    const errors2 = report2.issues.filter(i => i.severity === "error");
+    if (errors2.length > 0) {
+      console.error("second doctor run still has errors:", errors2.map(i => i.code));
+    }
+    assertTrue(errors2.length === 0, "second fix run finds no errors — caches were properly invalidated between runs");
+  }
+
   rmSync(tmpBase, { recursive: true, force: true });
 
   // ─── Milestone summary detection: missing summary ──────────────────────
