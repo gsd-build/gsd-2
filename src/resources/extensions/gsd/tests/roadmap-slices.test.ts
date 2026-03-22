@@ -253,3 +253,22 @@ Do the second thing.
   assert.equal(slices[0]?.id, "S01");
   assert.equal(slices[1]?.id, "S02");
 });
+
+test("parseRoadmapSlices: prose 'depends on' in Risk line is NOT extracted as dependency", () => {
+  // Bug: "depends on" in natural language prose matched the dependency regex,
+  // extracting garbage like "LangFusetagbasedquerysupport" as a slice ID.
+  const content = `# M005: Prose Deps Bug
+
+## S01: LangFuse Integration
+- **Risk:** medium — depends on LangFuse tag-based query support
+- **Depends on:** none
+
+## S02: Dashboard
+- **Risk:** low
+- **Depends on:** S01
+`;
+  const slices = parseRoadmapSlices(content);
+  assert.equal(slices.length, 2);
+  assert.deepEqual(slices[0]?.depends, [], "S01 should have no deps — prose 'depends on' in Risk line ignored");
+  assert.deepEqual(slices[1]?.depends, ["S01"], "S02 depends on S01 from structured field");
+});

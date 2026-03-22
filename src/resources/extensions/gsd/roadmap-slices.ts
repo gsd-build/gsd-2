@@ -248,18 +248,23 @@ function parseProseSliceHeaders(content: string): RoadmapSliceEntry[] {
       title = title.replace(/\s*\(Complete\)\s*$/i, "");
     }
 
-    // Try to extract depends from prose: "Depends on: S01" or "**Depends on:** S01, S02"
+    // Extract dependencies — handles multiple LLM-generated variants:
+    //   "**Depends on:** S01"  |  "- **Depends:** S01"  |  "Depends: S01, S02"
+    //   "**Depends on:** none" |  "- **Depends:** none"
+    // The regex is anchored to start-of-line (^) to avoid matching prose like
+    // "depends on LangFuse tag-based query support" inside Risk descriptions.
+    // Extracted tokens are filtered to valid slice ID patterns as defense-in-depth.
     const afterHeader = content.slice(match.index + match[0].length);
     const nextHeader = afterHeader.search(/^#{1,4}\s/m);
     const section = nextHeader !== -1 ? afterHeader.slice(0, nextHeader) : afterHeader.slice(0, 500);
 
-    const depsMatch = section.match(/\*{0,2}Depends\s+on:?\*{0,2}\s*(.+)/i);
+    const depsMatch = section.match(/^[-*\s]*\*{0,2}Depends(?:\s+on)?:?\*{0,2}\s*(.+)/im);
     let depends: string[] = [];
     if (depsMatch) {
       const rawDeps = depsMatch[1]!.replace(/none/i, "").trim();
       if (rawDeps) {
         depends = expandDependencies(
-          rawDeps.split(/[,;]/).map(s => s.trim().replace(/[^A-Za-z0-9]/g, "")).filter(Boolean)
+          rawDeps.split(/[,;\s]+/).map(s => s.trim().replace(/[^A-Za-z0-9]/g, "")).filter(s => /^S\d+$/i.test(s))
         );
       }
     }
