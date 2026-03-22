@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-03-22)
 ## Current Position
 
 Phase: 2 of 5 (Sync Migration + Prompt Migration)
-Plan: 3 of 3 in current phase
-Status: Executing Phase 2
-Last activity: 2026-03-22 — Completed 2-03 Prompt Migration
+Plan: 3 of 3 in current phase (all complete)
+Status: Phase 2 Complete
+Last activity: 2026-03-22 — Completed 2-02 Sync Migration
 
 Progress: [██████░░░░] 40%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6
+- Total plans completed: 7
 - Average duration: 4 min
 - Total execution time: 0.4 hours
 
@@ -28,7 +28,7 @@ Progress: [██████░░░░] 40%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 - Engine Foundation | 5 | 23 min | 5 min |
-| 2 - Sync + Prompt Migration | 1 | 2 min | 2 min |
+| 2 - Sync + Prompt Migration | 2 | 5 min | 3 min |
 
 **Recent Trend:**
 - Last 5 plans: 1-01 (6 min), 1-02 (5 min), 1-03 (4 min), 1-04 (4 min), 1-05 (4 min)
@@ -61,6 +61,9 @@ Recent decisions affecting current work:
 - 2-01: Sync lock uses atomicWriteSync for crash-safe lock file creation
 - 2-01: replay() suppresses afterCommand entirely per D-11 — projections still render but no event/manifest writes
 - 2-01: acquireSyncLock accepts optional timeoutMs for testability (default 5000ms)
+- 2-02: Capability check via state-manifest.json existence determines engine vs legacy sync path (D-03)
+- 2-02: Read manifest + call restore() directly, not bootstrapFromManifest (pitfall #1: different source/target paths)
+- 2-02: Runtime artifacts (units/) always file-copied even in engine path (D-02 hybrid)
 - 2-03: Hard switch with no fallback — prompts do not offer checkbox-edit escape hatch per D-07
 - 2-03: plan-slice migration is additive — file-write steps preserved, tool call added as new step 8
 
@@ -75,5 +78,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-22
-Stopped at: Completed 2-03-PLAN.md — Prompt migration (3 prompts migrated to tool calls)
+Stopped at: Completed 2-02-PLAN.md — Sync migration (snapshot/restore replaces file-copy)
 Resume file: None
