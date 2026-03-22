@@ -4,7 +4,7 @@ import { StringDecoder } from "node:string_decoder";
 import type { Readable } from "node:stream";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { resolveTypeStrippingFlag } from "./ts-subprocess-flags.ts";
+import { resolveTypeStrippingFlag, isUnderNodeModules } from "./ts-subprocess-flags.ts";
 
 import type { AgentSessionEvent, SessionStateChangeReason } from "../../packages/pi-coding-agent/src/core/agent-session.ts";
 import type {
@@ -903,13 +903,60 @@ async function loadCachedWorkspaceIndex(
   return cloneWorkspaceIndex(await promise);
 }
 
+/**
+ * Resolves the subprocess configuration for the workspace-index module.
+ *
+ * When packageRoot is under node_modules/ and the compiled dist/workspace-index.js
+ * exists, returns a config that uses the compiled JS directly — no type-stripping
+ * flags, no TS loader. This avoids ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING.
+ *
+ * Falls back to the TypeScript source with appropriate type-stripping flags
+ * when running from a development checkout or when the compiled file is missing.
+ */
+export function resolveWorkspaceIndexSubprocessConfig(
+  packageRoot: string,
+  options: { existsSync?: (path: string) => boolean },
+): { modulePath: string; args: string[] } {
+  const checkExists = options.existsSync ?? existsSync;
+
+  const distModulePath = join(packageRoot, "dist", "resources", "extensions", "gsd", "workspace-index.js");
+  const srcModulePath = join(packageRoot, "src", "resources", "extensions", "gsd", "workspace-index.ts");
+  const resolveTsLoader = join(packageRoot, "src", "resources", "extensions", "gsd", "tests", "resolve-ts.mjs");
+
+  // Prefer compiled JS when under node_modules/ to avoid type-stripping errors
+  if (isUnderNodeModules(packageRoot) && checkExists(distModulePath)) {
+    return {
+      modulePath: distModulePath,
+      args: ["--input-type=module"],
+    };
+  }
+
+  // Development mode: use TypeScript source with type-stripping
+  return {
+    modulePath: srcModulePath,
+    args: [
+      "--import", pathToFileURL(resolveTsLoader).href,
+      resolveTypeStrippingFlag(packageRoot),
+      "--input-type=module",
+    ],
+  };
+}
+
 async function loadWorkspaceIndexViaChildProcess(basePath: string, packageRoot: string): Promise<GSDWorkspaceIndex> {
   const deps = getBridgeDeps();
-  const resolveTsLoader = join(packageRoot, "src", "resources", "extensions", "gsd", "tests", "resolve-ts.mjs");
-  const workspaceModulePath = join(packageRoot, "src", "resources", "extensions", "gsd", "workspace-index.ts");
   const checkExists = deps.existsSync ?? existsSync;
-  if (!checkExists(resolveTsLoader) || !checkExists(workspaceModulePath)) {
-    throw new Error(`workspace index loader not found; checked=${resolveTsLoader},${workspaceModulePath}`);
+  const subprocessConfig = resolveWorkspaceIndexSubprocessConfig(packageRoot, { existsSync: checkExists });
+
+  // For TS source paths, verify the TS loader also exists
+  if (subprocessConfig.modulePath.endsWith(".ts")) {
+    const resolveTsLoader = join(packageRoot, "src", "resources", "extensions", "gsd", "tests", "resolve-ts.mjs");
+    if (!checkExists(resolveTsLoader) || !checkExists(subprocessConfig.modulePath)) {
+      throw new Error(`workspace index loader not found; checked=${resolveTsLoader},${subprocessConfig.modulePath}`);
+    }
+  } else {
+    if (!checkExists(subprocessConfig.modulePath)) {
+      throw new Error(`workspace index loader not found; checked=${subprocessConfig.modulePath}`);
+    }
   }
 
   const script = [
@@ -923,10 +970,7 @@ async function loadWorkspaceIndexViaChildProcess(basePath: string, packageRoot: 
     execFile(
       deps.execPath ?? process.execPath,
       [
-        "--import",
-        pathToFileURL(resolveTsLoader).href,
-        resolveTypeStrippingFlag(packageRoot),
-        "--input-type=module",
+        ...subprocessConfig.args,
         "--eval",
         script,
       ],
@@ -934,7 +978,7 @@ async function loadWorkspaceIndexViaChildProcess(basePath: string, packageRoot: 
         cwd: packageRoot,
         env: {
           ...(deps.env ?? process.env),
-          GSD_WORKSPACE_MODULE: workspaceModulePath,
+          GSD_WORKSPACE_MODULE: subprocessConfig.modulePath,
           GSD_WORKSPACE_BASE: basePath,
         },
         maxBuffer: 1024 * 1024,

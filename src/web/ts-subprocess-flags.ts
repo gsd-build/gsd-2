@@ -23,7 +23,7 @@ export function resolveTypeStrippingFlag(packageRoot: string): string {
  * Returns true when the given path sits inside a `node_modules/` directory.
  * Handles both Unix and Windows path separators.
  */
-function isUnderNodeModules(filePath: string): boolean {
+export function isUnderNodeModules(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, "/")
   return normalized.includes("/node_modules/")
 }

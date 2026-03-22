@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type { AutoDashboardData } from "./bridge-service.ts";
-import { resolveTypeStrippingFlag } from "./ts-subprocess-flags.ts"
+import { resolveTypeStrippingFlag, isUnderNodeModules } from "./ts-subprocess-flags.ts"
 
 const AUTO_DASHBOARD_MAX_BUFFER = 1024 * 1024;
 const TEST_AUTO_DASHBOARD_MODULE_ENV = "GSD_WEB_TEST_AUTO_DASHBOARD_MODULE";
@@ -15,6 +15,11 @@ export interface AutoDashboardServiceOptions {
   execPath?: string;
   env?: NodeJS.ProcessEnv;
   existsSync?: (path: string) => boolean;
+}
+
+export interface SubprocessConfig {
+  modulePath: string;
+  args: string[];
 }
 
 function fallbackAutoDashboardData(): AutoDashboardData {
@@ -32,12 +37,63 @@ function fallbackAutoDashboardData(): AutoDashboardData {
   };
 }
 
-function resolveAutoDashboardModulePath(packageRoot: string, env: NodeJS.ProcessEnv): string {
-  return env[TEST_AUTO_DASHBOARD_MODULE_ENV] || join(packageRoot, "src", "resources", "extensions", "gsd", "auto.ts");
-}
-
 function resolveTsLoaderPath(packageRoot: string): string {
   return join(packageRoot, "src", "resources", "extensions", "gsd", "tests", "resolve-ts.mjs");
+}
+
+/**
+ * Resolves the subprocess configuration for the auto-dashboard module.
+ *
+ * When packageRoot is under node_modules/ (packaged-standalone mode) and the
+ * compiled dist/auto.js exists, returns a config that uses the compiled JS
+ * directly — no type-stripping flags, no TS loader. This avoids
+ * ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING on all Node versions.
+ *
+ * Falls back to the TypeScript source with appropriate type-stripping flags
+ * when running from a development checkout or when the compiled file is missing.
+ */
+export function resolveAutoDashboardSubprocessConfig(
+  packageRoot: string,
+  options: { existsSync?: (path: string) => boolean; env?: NodeJS.ProcessEnv },
+): SubprocessConfig {
+  const checkExists = options.existsSync ?? existsSync;
+  const env = options.env ?? process.env;
+
+  // Test override path takes precedence
+  const testModulePath = env[TEST_AUTO_DASHBOARD_MODULE_ENV];
+  if (testModulePath) {
+    const resolveTsLoader = resolveTsLoaderPath(packageRoot);
+    return {
+      modulePath: testModulePath,
+      args: [
+        "--import", pathToFileURL(resolveTsLoader).href,
+        resolveTypeStrippingFlag(packageRoot),
+        "--input-type=module",
+      ],
+    };
+  }
+
+  const distModulePath = join(packageRoot, "dist", "resources", "extensions", "gsd", "auto.js");
+  const srcModulePath = join(packageRoot, "src", "resources", "extensions", "gsd", "auto.ts");
+  const resolveTsLoader = resolveTsLoaderPath(packageRoot);
+
+  // Prefer compiled JS when under node_modules/ to avoid type-stripping errors
+  if (isUnderNodeModules(packageRoot) && checkExists(distModulePath)) {
+    return {
+      modulePath: distModulePath,
+      args: ["--input-type=module"],
+    };
+  }
+
+  // Development mode: use TypeScript source with type-stripping
+  return {
+    modulePath: srcModulePath,
+    args: [
+      "--import", pathToFileURL(resolveTsLoader).href,
+      resolveTypeStrippingFlag(packageRoot),
+      "--input-type=module",
+    ],
+  };
 }
 
 export function collectTestOnlyFallbackAutoDashboardData(): AutoDashboardData {
@@ -54,11 +110,21 @@ export async function collectAuthoritativeAutoDashboardData(
   }
 
   const checkExists = options.existsSync ?? existsSync;
-  const resolveTsLoader = resolveTsLoaderPath(packageRoot);
-  const autoModulePath = resolveAutoDashboardModulePath(packageRoot, env);
+  const subprocessConfig = resolveAutoDashboardSubprocessConfig(packageRoot, {
+    existsSync: checkExists,
+    env,
+  });
 
-  if (!checkExists(resolveTsLoader) || !checkExists(autoModulePath)) {
-    throw new Error(`authoritative auto dashboard provider not found; checked=${resolveTsLoader},${autoModulePath}`);
+  // For TS source paths, verify the TS loader also exists
+  if (subprocessConfig.modulePath.endsWith(".ts")) {
+    const resolveTsLoader = resolveTsLoaderPath(packageRoot);
+    if (!checkExists(resolveTsLoader) || !checkExists(subprocessConfig.modulePath)) {
+      throw new Error(`authoritative auto dashboard provider not found; checked=${resolveTsLoader},${subprocessConfig.modulePath}`);
+    }
+  } else {
+    if (!checkExists(subprocessConfig.modulePath)) {
+      throw new Error(`authoritative auto dashboard provider not found; checked=${subprocessConfig.modulePath}`);
+    }
   }
 
   const script = [
@@ -72,10 +138,7 @@ export async function collectAuthoritativeAutoDashboardData(
     execFile(
       options.execPath ?? process.execPath,
       [
-        "--import",
-        pathToFileURL(resolveTsLoader).href,
-        resolveTypeStrippingFlag(packageRoot),
-        "--input-type=module",
+        ...subprocessConfig.args,
         "--eval",
         script,
       ],
@@ -83,7 +146,7 @@ export async function collectAuthoritativeAutoDashboardData(
         cwd: packageRoot,
         env: {
           ...env,
-          [AUTO_DASHBOARD_MODULE_ENV]: autoModulePath,
+          [AUTO_DASHBOARD_MODULE_ENV]: subprocessConfig.modulePath,
         },
         maxBuffer: AUTO_DASHBOARD_MAX_BUFFER,
       },
