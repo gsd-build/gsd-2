@@ -33,7 +33,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans:** 5 plans
 
 Plans:
-- [ ] 1-01-PLAN.md — Schema v5 migration + WorkflowEngine class skeleton
+- [x] 1-01-PLAN.md — Schema v5 migration + WorkflowEngine class skeleton
 - [ ] 1-02-PLAN.md — All 7 command handlers (complete_task through report_blocker)
 - [ ] 1-03-PLAN.md — Projection renderers (PLAN, ROADMAP, SUMMARY, STATE markdown)
 - [ ] 1-04-PLAN.md — Agent tool registration + deriveState() engine bridge + telemetry
