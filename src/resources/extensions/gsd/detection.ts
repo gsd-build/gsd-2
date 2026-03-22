@@ -87,6 +87,20 @@ export const PROJECT_FILES = [
   "mix.exs",
   "deno.json",
   "deno.jsonc",
+  "Directory.Build.props",
+  "global.json",
+] as const;
+
+/**
+ * File extensions that mark a project root when found in any filename.
+ * Used for ecosystems like C#/.NET where project files have variable names
+ * (e.g., MyApp.sln, MyApp.csproj).
+ */
+export const PROJECT_FILE_EXTENSIONS = [
+  ".sln",
+  ".csproj",
+  ".fsproj",
+  ".vbproj",
 ] as const;
 
 const LANGUAGE_MAP: Record<string, string> = {
@@ -106,6 +120,8 @@ const LANGUAGE_MAP: Record<string, string> = {
   "mix.exs": "elixir",
   "deno.json": "typescript/deno",
   "deno.jsonc": "typescript/deno",
+  "Directory.Build.props": "csharp/dotnet",
+  "global.json": "csharp/dotnet",
 };
 
 const MONOREPO_MARKERS = [
