@@ -508,3 +508,216 @@ Only `STATE.md` is blocked from agent writes. ROADMAP.md, PLAN.md, SUMMARY.md ar
 ### Recommendation stands: Merge the Stack, cherry-pick from #2141.
 
 The stack has more architectural risk items (6 findings) but they are all fixable without changing the architecture. PR #2141's critical finding — split authority between DB and files — is an architectural flaw that cannot be fixed without expanding scope to match the stack's 17-tool coverage, at which point you'd be rebuilding the engine anyway.
+
+---
+
+## 14. ADR vs Implementation — PR #2141 (Lex)
+
+*Systematic comparison of what Issue #2041 promised vs what the code delivers.*
+
+### 14.1 Tool Schema Fidelity
+
+**`gsd_complete_task`** — **PARTIAL (10/12 fields)**
+
+| ADR Field | Status |
+|-----------|--------|
+| taskId, sliceId, milestoneId | DELIVERED |
+| oneLiner, narrative, verification | DELIVERED |
+| keyFiles, keyDecisions | DELIVERED |
+| deviations, knownIssues | DELIVERED |
+| blockerDiscovered | DELIVERED |
+| verificationEvidence[] | DELIVERED |
+| patternsEstablished | MISSING — only on complete_slice |
+| observabilitySurfaces | MISSING — only on complete_slice |
+
+**`gsd_complete_slice`** — **PARTIAL (missing forwardIntelligence)**
+
+Most fields delivered, plus bonus fields beyond ADR (requirementsInvalidated, requirementsSurfaced, filesModified, provides/requires/affects, drillDownPaths). However, the ADR's signature feature — `forwardIntelligence` — is completely absent:
+
+| Missing forwardIntelligence field | Impact |
+|----------------------------------|--------|
+| whatNextSliceShouldKnow | No inter-slice knowledge transfer |
+| whatsFragile | Next slice doesn't know what's brittle |
+| authoritativeDiagnostics | No diagnostic hand-off |
+| whatAssumptionsChanged | Assumption drift not tracked |
+
+This was the ADR's most architecturally significant feature — the mechanism for one slice's completion to feed intelligence to the next slice's planning. It was not implemented.
+
+**`plan_slice`** — **MISSING** — no tool, no handler, no types
+
+**`plan_milestone`** — **MISSING**
+
+**`complete_milestone`** — **MISSING**
+
+**`research-*` tools** — **MISSING**
+
+**Tool summary: 2 of 6+ promised tools delivered.**
+
+### 14.2 Database Schema Fidelity
+
+All 4 tables exist (milestones, slices, tasks, verification_evidence). Column coverage is ~75% with naming deviations:
+
+| ADR Column | Actual | Status |
+|-----------|--------|--------|
+| `summary_content` (milestones) | — | MISSING |
+| `goal` (slices) | — | MISSING |
+| `sequence` (slices, tasks) | — | MISSING (ordering by ID) |
+| `plan_content` (slices, tasks) | — | MISSING |
+| `summary_content` (slices) | `full_summary_md` | DEVIATED |
+| `uat_content` (slices) | `full_uat_md` | DEVIATED |
+| `created_at`, `started_at` (tasks) | — | MISSING |
+| `depends_on` (slices) | `depends` (JSON array) | DEVIATED |
+
+### 14.3 Migration Phase Completion
+
+| Phase | ADR Description | Status |
+|-------|----------------|--------|
+| Phase 1: Tool layer + DB schema | Tool handlers + tables | **DELIVERED** |
+| Phase 2: Prompt migration | Prompts instruct tool calls | **PARTIAL** — execute-task and complete-slice updated; plan-slice, research prompts unchanged |
+| Phase 3: State derivation migration | deriveState() from DB | **DELIVERED** — deriveStateFromDb() with dual-path |
+| Phase 4: Remove reconciliation code | Remove doctor fix logic | **PARTIAL** — 7 issue codes removed, ~311 of ~800 lines |
+| Phase 5: Cleanup | Dead code removal | **MISSING** |
+
+### 14.4 Code Removal vs Promises
+
+| ADR Category | Promised | Actual | Status |
+|-------------|----------|--------|--------|
+| Doctor fix logic | ~800 lines | ~311 lines | PARTIAL |
+| Doctor placeholder generation | ~90 lines | ~70 lines | PARTIAL |
+| Doctor health scoring | ~430 lines | 0 lines | NOT REMOVED |
+| Stuck detection | ~75 lines | ~60 lines | PARTIAL |
+| Self-heal runtime records | ~70 lines | ~33 lines | PARTIAL |
+| Completed-units tracking | ~100 lines | 0 lines | NOT REMOVED |
+| Markdown parsers | ~300 lines | 0 lines (721 lines ADDED) | INVERTED |
+| Checkbox mutation functions | ~200 lines | 134 lines (roadmap-mutations.ts) | PARTIAL |
+| **Total promised removal** | **~2,500+** | **~608** | **24% delivered** |
+
+**Net line change: +7,387** (ADR promised -2,000)
+
+### 14.5 Success Criteria
+
+| Criterion | Status |
+|-----------|--------|
+| Zero doctor fix runs in normal operation | PARTIAL — 7 codes removed, remaining codes still active |
+| No "non-fatal" catch blocks for state inconsistency | NOT VERIFIED |
+| Auto-mode never stops for bookkeeping failures | PARTIAL |
+| Net code reduction of 2,000+ lines | **NOT MET** — net +7,387 |
+| deriveState() in <1ms | DELIVERED (DB path) |
+
+### 14.6 Overall Verdict — PR #2141
+
+**The PR delivers a solid Phase 1 foundation** — DB schema, two completion tools with rich schemas, deriveStateFromDb(), auto-migration, crash recovery. Measured against its own ADR, it implements **~30-40% of total scope**. The ADR's most distinctive feature (forwardIntelligence) and most impactful promise (net code reduction) are both undelivered. The PR is accurately scoped as "M001" but the ADR reads as a complete architectural plan.
+
+---
+
+## 15. ADR vs Implementation — Stack #2217–#2246 (Jeremy)
+
+*Systematic comparison of what ADR-004 promised vs what the code delivers.*
+
+### 15.1 Three-Layer Architecture
+
+| Layer | Status | Evidence |
+|-------|--------|----------|
+| Layer 1: Command API (17 tools) | **DELIVERED** | 17 tools registered in `bootstrap/workflow-tools.ts`, prompts updated |
+| Layer 2: State Engine (WorkflowEngine) | **DELIVERED** | `workflow-engine.ts` — 718 lines, wraps DbAdapter, 17 command methods |
+| Layer 3: Markdown Projections | **DELIVERED** | `workflow-projections.ts` — 413 lines, renders PLAN/ROADMAP/SUMMARY/STATE from DB |
+
+### 15.2 Core Principles
+
+| Principle | Status | Detail |
+|-----------|--------|--------|
+| "One sheriff in town" | **PARTIAL** | Status mutations go through engine. Content files (CONTEXT.md, REQUIREMENTS.md, KNOWLEDGE.md) still written directly by agents. `saveContext`, `saveKnowledge` are pass-through stubs returning `{ saved: true }` without DB writes. |
+| "Commands, not file edits" | **PARTIAL** | Write-intercept only blocks STATE.md. PLAN.md, ROADMAP.md, SUMMARY.md not blocked — agents can still write them. Comments in write-intercept.ts call these "agent-authored content." |
+| "Separate workflow truth from telemetry" | **DELIVERED** | Engine owns workflow state; event log tracks operational events separately |
+| "Completed decoupled from housekeeping" | **DELIVERED** | Engine commits status atomically; afterCommand projections/manifest/events are non-fatal |
+| "Markdown kept but demoted" | **PARTIAL** | Legacy `deriveState()` in state.ts still has full markdown parsing fallback (~200 lines, labeled "disaster recovery D-15" but fully operational). `parseRoadmap` still called in 41 files. |
+| "Event sourcing lite" | **DELIVERED** | JSONL event log with SHA-256 content hashes, compaction at milestone completion, replay for cross-worktree sync |
+
+### 15.3 Doctor Kill List Execution
+
+| Kill Target | Status |
+|-------------|--------|
+| Checkbox/file mismatch reconciliation | **NOT KILLED** — doctor-types.ts still defines `task_done_missing_summary`, `task_summary_without_done_checkbox`, `all_tasks_done_roadmap_not_checked`, etc. |
+| Placeholder summary generation | **NOT KILLED** — doctor.ts still references placeholder logic |
+| "Self-healing" state drift fixes | **NOT KILLED** — doctor-checks.ts still has STATE.md drift detection/repair |
+| Health scoring for bookkeeping | **NOT KILLED** — doctor-proactive.ts still active with health scoring |
+| Stuck detection for completion-state | **NOT KILLED** — auto/detect-stuck.ts still exists and used |
+| completed-units.json cleanup | **KILLED** — no references remain in codebase |
+
+**Kill list: 1 of 6 targets killed.**
+
+### 15.4 Code Impact vs Promises
+
+| ADR Promise | Actual | Status |
+|-------------|--------|--------|
+| Deletions: 4,500–6,500 lines | ~3,790 lines | MISSING ~700-2,700 lines |
+| Additions: 2,000–2,500 lines | ~10,763 lines | DEVIATED — 4x estimate |
+| Net: -2,500 to -4,000 lines | **+6,973 lines net** | **INVERTED** |
+
+### 15.5 What Was Delivered Well
+
+| Feature | Status |
+|---------|--------|
+| WorkflowEngine class with 17 command methods | DELIVERED |
+| All commands wrapped in transaction() | DELIVERED |
+| Append-only JSONL event log | DELIVERED |
+| Event replay for cross-worktree sync | DELIVERED |
+| Content hash for fork-point detection | DELIVERED |
+| Event compaction at milestone completion | DELIVERED |
+| Markdown projections (DB → markdown) | DELIVERED |
+| Advisory sync lock | DELIVERED |
+| completed-units.json elimination | DELIVERED |
+| Prompt migration to tool calls | DELIVERED |
+| Projection drift detection in doctor | DELIVERED |
+
+### 15.6 Success Criteria
+
+| Criterion | Status |
+|-----------|--------|
+| 1. Zero doctor fix runs in normal operation | **NOT MET** — reconciliation codes still active |
+| 2. No "non-fatal" catch blocks | **NOT MET** — afterCommand has 3 non-fatal catch blocks |
+| 3. Auto-mode never stops for bookkeeping | **PARTIAL** — engine path is non-fatal, legacy path can still surface failures |
+| 4. Net code reduction of 2,500+ lines | **NOT MET** — net +6,973 lines |
+| 5. deriveState() in <1ms | **PARTIAL** — engine path sub-ms, legacy fallback not sub-ms, both active |
+| 6. No unbounded retry loops | **MET** — all retry paths have count caps or time deadlines |
+| 7. Forensics powered by event log | **PARTIAL** — event log supplements but doesn't replace activity-log-based forensics |
+
+### 15.7 Overall Verdict — Stack
+
+**The stack delivers the complete Phase 0/Phase 1 additive foundation** — engine, commands, events, projections, tools, prompts, sync locks, write intercept. It does **not** deliver the Phase 2–4 subtractive work — doctor kill list (1/6), dead code removal, parser cleanup, markdown demotion. The codebase now has **two complete state derivation systems** running in parallel (engine + legacy markdown parser), which is the transitional dual-write state the ADR described for Phase 0, not the final architecture.
+
+---
+
+## 16. Side-by-Side ADR Delivery Scorecard
+
+| Dimension | PR #2141 vs ADR #2041 | Stack vs ADR-004 |
+|-----------|----------------------|------------------|
+| Tool count delivered | 2 of 6+ (33%) | 17 of 17 (100%) |
+| Tool schema richness | Rich but missing forwardIntelligence | Lean params (by design) |
+| DB schema match | ~75% column coverage | Engine-specific schema (different approach) |
+| Migration phases complete | 2 of 5 | 2 of 5 |
+| Doctor kill list executed | 7 of ~15 issue codes | 1 of 6 targets |
+| Code removal delivered | ~608 of ~2,500 lines (24%) | ~3,790 of ~4,500-6,500 lines (58-84%) |
+| Net line impact | +7,387 (promised -2,000) | +6,973 (promised -2,500 to -4,000) |
+| Success criteria met | 1 of 5 | 1 of 7 |
+| Event sourcing | Not in ADR, not implemented | Promised and DELIVERED |
+| Worktree coordination | Not in ADR, not implemented | Promised and DELIVERED |
+| CLI recovery tools | Not in ADR, DELIVERED (bonus) | Not promised, not implemented |
+| forwardIntelligence | Promised, MISSING | Not promised |
+
+### The Uncomfortable Truth
+
+**Neither implementation delivers what its ADR promised.** Both are additive Phase 0/1 foundations that add the engine layer on top of the existing system without executing the subtractive cleanup phases. Both result in **net code increases of ~7,000 lines** where both ADRs promised **net reductions of 2,000-4,000 lines**.
+
+The difference: the stack's additive work is **architecturally complete** (17 tools, event log, sync locks) while PR #2141's additive work is **architecturally partial** (2 tools, no events, no sync). Both still need Phases 2-4 to deliver on their ADR promises.
+
+### What Remains for Both
+
+To fulfill either ADR's success criteria, the following Phase 2-4 work is needed:
+
+1. **Kill the doctor reconciliation codes** — both implementations left them alive
+2. **Remove the legacy deriveState() markdown parsing path** — both have it as fallback
+3. **Block agent writes to all state files** — not just STATE.md
+4. **Remove stuck detection for completion-state** — still active in both
+5. **Remove health scoring for bookkeeping failures** — still active
+6. **Achieve net code reduction** — currently net +7,000 in both cases
