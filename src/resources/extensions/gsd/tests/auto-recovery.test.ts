@@ -158,8 +158,7 @@ test("buildLoopRemediationSteps returns steps for execute-task", () => {
     const steps = buildLoopRemediationSteps("execute-task", "M001/S01/T01", base);
     assert.ok(steps);
     assert.ok(steps!.includes("T01"));
-    assert.ok(steps!.includes("gsd doctor"));
-    assert.ok(steps!.includes("[x]"));
+    assert.ok(steps!.includes("gsd undo-task"));
   } finally {
     cleanup(base);
   }
@@ -171,7 +170,7 @@ test("buildLoopRemediationSteps returns steps for plan-slice", () => {
     const steps = buildLoopRemediationSteps("plan-slice", "M001/S01", base);
     assert.ok(steps);
     assert.ok(steps!.includes("PLAN"));
-    assert.ok(steps!.includes("gsd doctor"));
+    assert.ok(steps!.includes("gsd recover"));
   } finally {
     cleanup(base);
   }
@@ -183,7 +182,7 @@ test("buildLoopRemediationSteps returns steps for complete-slice", () => {
     const steps = buildLoopRemediationSteps("complete-slice", "M001/S01", base);
     assert.ok(steps);
     assert.ok(steps!.includes("S01"));
-    assert.ok(steps!.includes("ROADMAP"));
+    assert.ok(steps!.includes("gsd reset-slice"));
   } finally {
     cleanup(base);
   }

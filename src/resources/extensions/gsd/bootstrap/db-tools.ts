@@ -290,4 +290,198 @@ export function registerDbTools(pi: ExtensionAPI): void {
 
   pi.registerTool(milestoneGenerateIdTool);
   registerAlias(pi, milestoneGenerateIdTool, "gsd_generate_milestone_id", "gsd_milestone_generate_id");
+
+  // ─── gsd_task_complete (gsd_complete_task alias) ────────────────────────
+
+  const taskCompleteExecute = async (_toolCallId: any, params: any, _signal: any, _onUpdate: any, _ctx: any) => {
+    const dbAvailable = await ensureDbOpen();
+    if (!dbAvailable) {
+      return {
+        content: [{ type: "text" as const, text: "Error: GSD database is not available. Cannot complete task." }],
+        details: { operation: "complete_task", error: "db_unavailable" } as any,
+      };
+    }
+    try {
+      const { handleCompleteTask } = await import("../tools/complete-task.js");
+      const result = await handleCompleteTask(params, process.cwd());
+      if ("error" in result) {
+        return {
+          content: [{ type: "text" as const, text: `Error completing task: ${result.error}` }],
+          details: { operation: "complete_task", error: result.error } as any,
+        };
+      }
+      return {
+        content: [{ type: "text" as const, text: `Completed task ${result.taskId} (${result.sliceId}/${result.milestoneId})` }],
+        details: {
+          operation: "complete_task",
+          taskId: result.taskId,
+          sliceId: result.sliceId,
+          milestoneId: result.milestoneId,
+          summaryPath: result.summaryPath,
+        } as any,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`gsd-db: complete_task tool failed: ${msg}\n`);
+      return {
+        content: [{ type: "text" as const, text: `Error completing task: ${msg}` }],
+        details: { operation: "complete_task", error: msg } as any,
+      };
+    }
+  };
+
+  const taskCompleteTool = {
+    name: "gsd_task_complete",
+    label: "Complete Task",
+    description:
+      "Record a completed task to the GSD database, render a SUMMARY.md to disk, and toggle the plan checkbox — all in one atomic operation. " +
+      "Writes the task row inside a transaction, then performs filesystem writes outside the transaction.",
+    promptSnippet: "Complete a GSD task (DB write + summary render + checkbox toggle)",
+    promptGuidelines: [
+      "Use gsd_task_complete (or gsd_complete_task) when a task is finished and needs to be recorded.",
+      "All string fields are required. verificationEvidence is an array of objects with command, exitCode, verdict, durationMs.",
+      "The tool validates required fields and returns an error message if any are missing.",
+      "On success, returns the summaryPath where the SUMMARY.md was written.",
+      "Idempotent — calling with the same params twice will upsert (INSERT OR REPLACE) without error.",
+    ],
+    parameters: Type.Object({
+      taskId: Type.String({ description: "Task ID (e.g. T01)" }),
+      sliceId: Type.String({ description: "Slice ID (e.g. S01)" }),
+      milestoneId: Type.String({ description: "Milestone ID (e.g. M001)" }),
+      oneLiner: Type.String({ description: "One-line summary of what was accomplished" }),
+      narrative: Type.String({ description: "Detailed narrative of what happened during the task" }),
+      verification: Type.String({ description: "What was verified and how — commands run, tests passed, behavior confirmed" }),
+      deviations: Type.String({ description: "Deviations from the task plan, or 'None.'" }),
+      knownIssues: Type.String({ description: "Known issues discovered but not fixed, or 'None.'" }),
+      keyFiles: Type.Array(Type.String(), { description: "List of key files created or modified" }),
+      keyDecisions: Type.Array(Type.String(), { description: "List of key decisions made during this task" }),
+      blockerDiscovered: Type.Boolean({ description: "Whether a plan-invalidating blocker was discovered" }),
+      verificationEvidence: Type.Array(
+        Type.Object({
+          command: Type.String({ description: "Verification command that was run" }),
+          exitCode: Type.Number({ description: "Exit code of the command" }),
+          verdict: Type.String({ description: "Pass/fail verdict (e.g. '✅ pass', '❌ fail')" }),
+          durationMs: Type.Number({ description: "Duration of the command in milliseconds" }),
+        }),
+        { description: "Array of verification evidence entries" },
+      ),
+    }),
+    execute: taskCompleteExecute,
+  };
+
+  pi.registerTool(taskCompleteTool);
+  registerAlias(pi, taskCompleteTool, "gsd_complete_task", "gsd_task_complete");
+
+  // ─── gsd_slice_complete (gsd_complete_slice alias) ─────────────────────
+
+  const sliceCompleteExecute = async (_toolCallId: any, params: any, _signal: any, _onUpdate: any, _ctx: any) => {
+    const dbAvailable = await ensureDbOpen();
+    if (!dbAvailable) {
+      return {
+        content: [{ type: "text" as const, text: "Error: GSD database is not available. Cannot complete slice." }],
+        details: { operation: "complete_slice", error: "db_unavailable" } as any,
+      };
+    }
+    try {
+      const { handleCompleteSlice } = await import("../tools/complete-slice.js");
+      const result = await handleCompleteSlice(params, process.cwd());
+      if ("error" in result) {
+        return {
+          content: [{ type: "text" as const, text: `Error completing slice: ${result.error}` }],
+          details: { operation: "complete_slice", error: result.error } as any,
+        };
+      }
+      return {
+        content: [{ type: "text" as const, text: `Completed slice ${result.sliceId} (${result.milestoneId})` }],
+        details: {
+          operation: "complete_slice",
+          sliceId: result.sliceId,
+          milestoneId: result.milestoneId,
+          summaryPath: result.summaryPath,
+          uatPath: result.uatPath,
+        } as any,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`gsd-db: complete_slice tool failed: ${msg}\n`);
+      return {
+        content: [{ type: "text" as const, text: `Error completing slice: ${msg}` }],
+        details: { operation: "complete_slice", error: msg } as any,
+      };
+    }
+  };
+
+  const sliceCompleteTool = {
+    name: "gsd_slice_complete",
+    label: "Complete Slice",
+    description:
+      "Record a completed slice to the GSD database, render SUMMARY.md + UAT.md to disk, and toggle the roadmap checkbox — all in one atomic operation. " +
+      "Validates all tasks are complete before proceeding. Writes the slice row inside a transaction, then performs filesystem writes outside the transaction.",
+    promptSnippet: "Complete a GSD slice (DB write + summary/UAT render + roadmap checkbox toggle)",
+    promptGuidelines: [
+      "Use gsd_slice_complete (or gsd_complete_slice) when all tasks in a slice are finished and the slice needs to be recorded.",
+      "All tasks in the slice must have status 'complete' — the handler validates this before proceeding.",
+      "On success, returns summaryPath and uatPath where the files were written.",
+      "Idempotent — calling with the same params twice will not crash.",
+    ],
+    parameters: Type.Object({
+      sliceId: Type.String({ description: "Slice ID (e.g. S01)" }),
+      milestoneId: Type.String({ description: "Milestone ID (e.g. M001)" }),
+      sliceTitle: Type.String({ description: "Title of the slice" }),
+      oneLiner: Type.String({ description: "One-line summary of what the slice accomplished" }),
+      narrative: Type.String({ description: "Detailed narrative of what happened across all tasks" }),
+      verification: Type.String({ description: "What was verified across all tasks" }),
+      deviations: Type.String({ description: "Deviations from the slice plan, or 'None.'" }),
+      knownLimitations: Type.String({ description: "Known limitations or gaps, or 'None.'" }),
+      followUps: Type.String({ description: "Follow-up work discovered during execution, or 'None.'" }),
+      keyFiles: Type.Array(Type.String(), { description: "Key files created or modified" }),
+      keyDecisions: Type.Array(Type.String(), { description: "Key decisions made during this slice" }),
+      patternsEstablished: Type.Array(Type.String(), { description: "Patterns established by this slice" }),
+      observabilitySurfaces: Type.Array(Type.String(), { description: "Observability surfaces added" }),
+      provides: Type.Array(Type.String(), { description: "What this slice provides to downstream slices" }),
+      requirementsSurfaced: Type.Array(Type.String(), { description: "New requirements surfaced" }),
+      drillDownPaths: Type.Array(Type.String(), { description: "Paths to task summaries for drill-down" }),
+      affects: Type.Array(Type.String(), { description: "Downstream slices affected" }),
+      requirementsAdvanced: Type.Array(
+        Type.Object({
+          id: Type.String({ description: "Requirement ID" }),
+          how: Type.String({ description: "How it was advanced" }),
+        }),
+        { description: "Requirements advanced by this slice" },
+      ),
+      requirementsValidated: Type.Array(
+        Type.Object({
+          id: Type.String({ description: "Requirement ID" }),
+          proof: Type.String({ description: "What proof validates it" }),
+        }),
+        { description: "Requirements validated by this slice" },
+      ),
+      requirementsInvalidated: Type.Array(
+        Type.Object({
+          id: Type.String({ description: "Requirement ID" }),
+          what: Type.String({ description: "What changed" }),
+        }),
+        { description: "Requirements invalidated or re-scoped" },
+      ),
+      filesModified: Type.Array(
+        Type.Object({
+          path: Type.String({ description: "File path" }),
+          description: Type.String({ description: "What changed" }),
+        }),
+        { description: "Files modified with descriptions" },
+      ),
+      requires: Type.Array(
+        Type.Object({
+          slice: Type.String({ description: "Dependency slice ID" }),
+          provides: Type.String({ description: "What was consumed from it" }),
+        }),
+        { description: "Upstream slice dependencies consumed" },
+      ),
+      uatContent: Type.String({ description: "UAT test content (markdown body)" }),
+    }),
+    execute: sliceCompleteExecute,
+  };
+
+  pi.registerTool(sliceCompleteTool);
+  registerAlias(pi, sliceCompleteTool, "gsd_complete_slice", "gsd_slice_complete");
 }

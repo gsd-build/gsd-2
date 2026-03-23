@@ -5,7 +5,6 @@ import { execSync } from "node:child_process";
 import {
   resolveExpectedArtifactPath,
   writeBlockerPlaceholder,
-  skipExecuteTask,
   verifyExpectedArtifact,
   buildLoopRemediationSteps,
 } from "../auto.ts";
@@ -157,129 +156,6 @@ function cleanup(base: string): void {
   }
 }
 
-// ═══ skipExecuteTask ═════════════════════════════════════════════════════════
-
-{
-  console.log("\n=== skipExecuteTask: writes summary and checks plan checkbox ===");
-  const base = createFixtureBase();
-  try {
-    const planPath = join(base, ".gsd", "milestones", "M001", "slices", "S01", "S01-PLAN.md");
-    writeFileSync(planPath, [
-      "# S01: Test Slice",
-      "",
-      "## Tasks",
-      "",
-      "- [ ] **T01: First task** `est:10m`",
-      "  Do the first thing.",
-      "- [ ] **T02: Second task** `est:15m`",
-      "  Do the second thing.",
-    ].join("\n"), "utf-8");
-
-    const result = skipExecuteTask(
-      base, "M001", "S01", "T01",
-      { summaryExists: false, taskChecked: false },
-      "idle", 2,
-    );
-
-    assertTrue(result === true, "should return true");
-
-    // Check summary was written
-    const summaryPath = join(base, ".gsd", "milestones", "M001", "slices", "S01", "tasks", "T01-SUMMARY.md");
-    assertTrue(existsSync(summaryPath), "task summary should exist");
-    const summaryContent = readFileSync(summaryPath, "utf-8");
-    assertTrue(summaryContent.includes("BLOCKER"), "summary should contain BLOCKER");
-    assertTrue(summaryContent.includes("T01"), "summary should mention task ID");
-
-    // Check plan checkbox was marked
-    const planContent = readFileSync(planPath, "utf-8");
-    assertTrue(planContent.includes("- [x] **T01:"), "T01 should be checked");
-    assertTrue(planContent.includes("- [ ] **T02:"), "T02 should remain unchecked");
-  } finally {
-    cleanup(base);
-  }
-}
-
-{
-  console.log("\n=== skipExecuteTask: skips summary if already exists ===");
-  const base = createFixtureBase();
-  try {
-    const planPath = join(base, ".gsd", "milestones", "M001", "slices", "S01", "S01-PLAN.md");
-    writeFileSync(planPath, "- [ ] **T01: Task** `est:10m`\n", "utf-8");
-
-    // Pre-write a summary
-    const summaryPath = join(base, ".gsd", "milestones", "M001", "slices", "S01", "tasks", "T01-SUMMARY.md");
-    writeFileSync(summaryPath, "# Real summary\nActual work done.", "utf-8");
-
-    const result = skipExecuteTask(
-      base, "M001", "S01", "T01",
-      { summaryExists: true, taskChecked: false },
-      "idle", 2,
-    );
-
-    assertTrue(result === true, "should return true");
-
-    // Summary should be untouched (not overwritten with blocker)
-    const content = readFileSync(summaryPath, "utf-8");
-    assertTrue(content.includes("Real summary"), "original summary should be preserved");
-    assertTrue(!content.includes("BLOCKER"), "should not contain BLOCKER");
-
-    // Plan checkbox should still be marked
-    const planContent = readFileSync(planPath, "utf-8");
-    assertTrue(planContent.includes("- [x] **T01:"), "T01 should be checked");
-  } finally {
-    cleanup(base);
-  }
-}
-
-{
-  console.log("\n=== skipExecuteTask: skips checkbox if already checked ===");
-  const base = createFixtureBase();
-  try {
-    const planPath = join(base, ".gsd", "milestones", "M001", "slices", "S01", "S01-PLAN.md");
-    writeFileSync(planPath, "- [x] **T01: Task** `est:10m`\n", "utf-8");
-
-    const result = skipExecuteTask(
-      base, "M001", "S01", "T01",
-      { summaryExists: false, taskChecked: true },
-      "idle", 2,
-    );
-
-    assertTrue(result === true, "should return true");
-
-    // Summary should be written (since summaryExists was false)
-    const summaryPath = join(base, ".gsd", "milestones", "M001", "slices", "S01", "tasks", "T01-SUMMARY.md");
-    assertTrue(existsSync(summaryPath), "task summary should exist");
-
-    // Plan checkbox should be untouched
-    const planContent = readFileSync(planPath, "utf-8");
-    assertTrue(planContent.includes("- [x] **T01:"), "T01 should remain checked");
-  } finally {
-    cleanup(base);
-  }
-}
-
-{
-  console.log("\n=== skipExecuteTask: handles special regex chars in task ID ===");
-  const base = createFixtureBase();
-  try {
-    const planPath = join(base, ".gsd", "milestones", "M001", "slices", "S01", "S01-PLAN.md");
-    writeFileSync(planPath, "- [ ] **T01.1: Sub-task** `est:10m`\n", "utf-8");
-
-    const result = skipExecuteTask(
-      base, "M001", "S01", "T01.1",
-      { summaryExists: false, taskChecked: false },
-      "idle", 2,
-    );
-
-    assertTrue(result === true, "should return true");
-
-    const planContent = readFileSync(planPath, "utf-8");
-    assertTrue(planContent.includes("- [x] **T01.1:"), "T01.1 should be checked (regex chars escaped)");
-  } finally {
-    cleanup(base);
-  }
-}
-
 // ═══ verifyExpectedArtifact: complete-slice roadmap check ════════════════════
 // Regression for #indefinite-hang: complete-slice must verify roadmap [x] or
 // the idempotency skip loops forever after a crash that wrote SUMMARY+UAT but
@@ -370,12 +246,9 @@ const ROADMAP_COMPLETE = `# M001: Test Milestone
     mkdirSync(join(base, ".gsd", "milestones", "M002", "slices", "S03", "tasks"), { recursive: true });
     const result = buildLoopRemediationSteps("execute-task", "M002/S03/T01", base);
     assertTrue(result !== null, "should return remediation steps");
-    assertTrue(result!.includes("T01-SUMMARY.md"), "steps mention the summary file");
-    assertTrue(result!.includes("S03-PLAN.md"), "steps mention the slice plan");
+    assertTrue(result!.includes("gsd undo-task"), "steps include undo-task command");
     assertTrue(result!.includes("T01"), "steps mention the task ID");
-    assertTrue(result!.includes("gsd doctor"), "steps include gsd doctor command");
-    // Exact slice plan checkbox syntax (no trailing **)
-    assertTrue(result!.includes('"- [x] **T01:"'), "steps show exact checkbox syntax without trailing **");
+    assertTrue(result!.includes("gsd undo-task"), "steps include gsd undo-task command");
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
@@ -389,7 +262,7 @@ const ROADMAP_COMPLETE = `# M001: Test Milestone
     const result = buildLoopRemediationSteps("plan-slice", "M001/S01", base);
     assertTrue(result !== null, "should return remediation steps for plan-slice");
     assertTrue(result!.includes("S01-PLAN.md"), "steps mention the slice plan file");
-    assertTrue(result!.includes("gsd doctor"), "steps include gsd doctor command");
+    assertTrue(result!.includes("gsd recover"), "steps include gsd recover command");
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
@@ -403,7 +276,7 @@ const ROADMAP_COMPLETE = `# M001: Test Milestone
     const result = buildLoopRemediationSteps("research-slice", "M001/S01", base);
     assertTrue(result !== null, "should return remediation steps for research-slice");
     assertTrue(result!.includes("S01-RESEARCH.md"), "steps mention the slice research file");
-    assertTrue(result!.includes("gsd doctor"), "steps include gsd doctor command");
+    assertTrue(result!.includes("gsd recover"), "steps include gsd recover command");
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
@@ -415,47 +288,6 @@ const ROADMAP_COMPLETE = `# M001: Test Milestone
   try {
     const result = buildLoopRemediationSteps("unknown-type", "M001/S01", base);
     assertEq(result, null, "unknown type returns null");
-  } finally {
-    rmSync(base, { recursive: true, force: true });
-  }
-}
-
-{
-  console.log("\n=== skipExecuteTask: loop-recovery writes blocker when both summary and checkbox missing ===");
-  const base = mkdtempSync(join(tmpdir(), "gsd-loop-recovery-test-"));
-  try {
-    mkdirSync(join(base, ".gsd", "milestones", "M002", "slices", "S03", "tasks"), { recursive: true });
-    const planPath = join(base, ".gsd", "milestones", "M002", "slices", "S03", "S03-PLAN.md");
-    writeFileSync(planPath, [
-      "# S03: Harden guided session",
-      "",
-      "## Tasks",
-      "",
-      "- [ ] **T01: Harden contract usage** `est:30m`",
-      "  Harden guided session contract usage in desktop flow.",
-    ].join("\n"), "utf-8");
-
-    const result = skipExecuteTask(
-      base, "M002", "S03", "T01",
-      { summaryExists: false, taskChecked: false },
-      "loop-recovery",
-      // 3 == MAX_UNIT_DISPATCHES: represents the prevCount when the final
-      // reconciliation path runs (loop detected, reconciling before halting).
-      3,
-    );
-
-    assertTrue(result === true, "loop-recovery should succeed");
-
-    // Blocker summary written
-    const summaryPath = join(base, ".gsd", "milestones", "M002", "slices", "S03", "tasks", "T01-SUMMARY.md");
-    assertTrue(existsSync(summaryPath), "blocker summary should be written");
-    const summaryContent = readFileSync(summaryPath, "utf-8");
-    assertTrue(summaryContent.includes("BLOCKER"), "summary should be a blocker placeholder");
-    assertTrue(summaryContent.includes("loop-recovery"), "summary should mention the recovery reason");
-
-    // Checkbox marked
-    const planContent = readFileSync(planPath, "utf-8");
-    assertTrue(planContent.includes("- [x] **T01:"), "T01 checkbox should be marked [x] after loop-recovery");
   } finally {
     rmSync(base, { recursive: true, force: true });
   }

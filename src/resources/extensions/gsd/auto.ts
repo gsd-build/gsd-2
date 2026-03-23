@@ -163,7 +163,6 @@ import {
   verifyExpectedArtifact,
   writeBlockerPlaceholder,
   diagnoseExpectedArtifact,
-  skipExecuteTask,
   buildLoopRemediationSteps,
   reconcileMergeState,
 } from "./auto-recovery.js";
@@ -1480,6 +1479,5 @@ export {
   resolveExpectedArtifactPath,
   verifyExpectedArtifact,
   writeBlockerPlaceholder,
-  skipExecuteTask,
   buildLoopRemediationSteps,
 } from "./auto-recovery.js";

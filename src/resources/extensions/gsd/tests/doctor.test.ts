@@ -65,21 +65,19 @@ async function main(): Promise<void> {
   console.log("\n=== doctor diagnose ===");
   {
     const report = await runGSDDoctor(tmpBase, { fix: false });
-    assertTrue(!report.ok, "report is not ok when completion artifacts are missing");
-    assertTrue(report.issues.some(issue => issue.code === "all_tasks_done_missing_slice_summary"), "detects missing slice summary");
-    assertTrue(report.issues.some(issue => issue.code === "all_tasks_done_missing_slice_uat"), "detects missing slice UAT");
+    // Reconciliation issue codes have been removed — doctor should NOT report them
+    assertTrue(!report.issues.some(issue => issue.code === "all_tasks_done_missing_slice_summary" as any), "does not report removed code all_tasks_done_missing_slice_summary");
+    assertTrue(!report.issues.some(issue => issue.code === "all_tasks_done_missing_slice_uat" as any), "does not report removed code all_tasks_done_missing_slice_uat");
+    assertTrue(!report.issues.some(issue => issue.code === "all_tasks_done_roadmap_not_checked" as any), "does not report removed code all_tasks_done_roadmap_not_checked");
   }
 
   console.log("\n=== doctor formatting ===");
   {
     const report = await runGSDDoctor(tmpBase, { fix: false });
     const summary = summarizeDoctorIssues(report.issues);
-    assertEq(summary.errors, 2, "two blocking errors in summary");
     const scoped = filterDoctorIssues(report.issues, { scope: "M001/S01", includeWarnings: true });
-    assertTrue(scoped.length >= 2, "scope filter keeps slice issues");
     const text = formatDoctorReport(report, { scope: "M001/S01", includeWarnings: true, maxIssues: 5 });
     assertTrue(text.includes("Scope: M001/S01"), "formatted report shows scope");
-    assertTrue(text.includes("Top issue types:"), "formatted report shows grouped issue types");
   }
 
   console.log("\n=== doctor default scope ===");
@@ -91,19 +89,11 @@ async function main(): Promise<void> {
   console.log("\n=== doctor fix ===");
   {
     const report = await runGSDDoctor(tmpBase, { fix: true });
-    if (report.fixesApplied.length < 3) console.error(report);
-    assertTrue(report.fixesApplied.length >= 3, "applies multiple fixes");
-    assertTrue(existsSync(join(sDir, "S01-SUMMARY.md")), "creates placeholder slice summary");
-    assertTrue(existsSync(join(sDir, "S01-UAT.md")), "creates placeholder UAT");
-
-    const plan = readFileSync(join(sDir, "S01-PLAN.md"), "utf-8");
-    assertTrue(plan.includes("- [x] **T01:"), "marks task checkbox done");
-
-    const roadmap = readFileSync(join(mDir, "M001-ROADMAP.md"), "utf-8");
-    assertTrue(roadmap.includes("- [x] **S01:"), "marks slice checkbox done");
-
-    const state = readFileSync(join(gsd, "STATE.md"), "utf-8");
-    assertTrue(state.includes("# GSD State"), "writes state file");
+    // With reconciliation removed, doctor no longer creates placeholder summaries,
+    // UAT files, or marks checkboxes. It only applies infrastructure fixes.
+    // The task checkbox marking (task_summary_without_done_checkbox) is also removed.
+    // Just verify it doesn't crash and produces a report.
+    assertTrue(report.issues !== undefined, "doctor produces a report with issues array");
   }
 
   rmSync(tmpBase, { recursive: true, force: true });

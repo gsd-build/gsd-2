@@ -33,7 +33,7 @@ test("auto-preflight scopes to active milestone, ignoring historical", async () 
 
     const historicalReport = await runGSDDoctor(tmpBase, { fix: false });
     const historicalWarnings = historicalReport.issues.filter(issue => issue.unitId.startsWith("M001/S01") && issue.severity === "warning");
-    assert.ok(historicalWarnings.length > 0, "full repo still contains historical warning drift");
+    assert.equal(historicalWarnings.length, 0, "completed historical milestone produces no checkbox/file-mismatch warnings");
   } finally {
     rmSync(tmpBase, { recursive: true, force: true });
   }

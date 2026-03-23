@@ -168,7 +168,7 @@ function openRawDb(path: string): unknown {
 
 // ─── Schema ────────────────────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 7;
 
 function initSchema(db: DbAdapter, fileBacked: boolean): void {
   // WAL mode for file-backed databases (must be outside transaction)
@@ -250,6 +250,73 @@ function initSchema(db: DbAdapter, fileBacked: boolean): void {
         unit_key TEXT PRIMARY KEY,
         activity_file TEXT,
         processed_at TEXT NOT NULL
+      )
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS milestones (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'active',
+        depends_on TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL DEFAULT '',
+        completed_at TEXT DEFAULT NULL
+      )
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS slices (
+        milestone_id TEXT NOT NULL,
+        id TEXT NOT NULL,
+        title TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending',
+        risk TEXT NOT NULL DEFAULT 'medium',
+        depends TEXT NOT NULL DEFAULT '[]',
+        demo TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT '',
+        completed_at TEXT DEFAULT NULL,
+        full_summary_md TEXT NOT NULL DEFAULT '',
+        full_uat_md TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (milestone_id, id),
+        FOREIGN KEY (milestone_id) REFERENCES milestones(id)
+      )
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS tasks (
+        milestone_id TEXT NOT NULL,
+        slice_id TEXT NOT NULL,
+        id TEXT NOT NULL,
+        title TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending',
+        one_liner TEXT NOT NULL DEFAULT '',
+        narrative TEXT NOT NULL DEFAULT '',
+        verification_result TEXT NOT NULL DEFAULT '',
+        duration TEXT NOT NULL DEFAULT '',
+        completed_at TEXT DEFAULT NULL,
+        blocker_discovered INTEGER DEFAULT 0,
+        deviations TEXT NOT NULL DEFAULT '',
+        known_issues TEXT NOT NULL DEFAULT '',
+        key_files TEXT NOT NULL DEFAULT '[]',
+        key_decisions TEXT NOT NULL DEFAULT '[]',
+        full_summary_md TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (milestone_id, slice_id, id),
+        FOREIGN KEY (milestone_id, slice_id) REFERENCES slices(milestone_id, id)
+      )
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS verification_evidence (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id TEXT NOT NULL DEFAULT '',
+        slice_id TEXT NOT NULL DEFAULT '',
+        milestone_id TEXT NOT NULL DEFAULT '',
+        command TEXT NOT NULL DEFAULT '',
+        exit_code INTEGER DEFAULT 0,
+        verdict TEXT NOT NULL DEFAULT '',
+        duration_ms INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT '',
+        FOREIGN KEY (milestone_id, slice_id, task_id) REFERENCES tasks(milestone_id, slice_id, id)
       )
     `);
 
@@ -375,6 +442,96 @@ function migrateSchema(db: DbAdapter): void {
       db.prepare(
         "INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)",
       ).run({ ":version": 4, ":applied_at": new Date().toISOString() });
+    }
+
+    // v4 → v5: add milestones, slices, tasks, verification_evidence tables
+    if (currentVersion < 5) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS milestones (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'active',
+          created_at TEXT NOT NULL,
+          completed_at TEXT DEFAULT NULL
+        )
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS slices (
+          milestone_id TEXT NOT NULL,
+          id TEXT NOT NULL,
+          title TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'pending',
+          risk TEXT NOT NULL DEFAULT 'medium',
+          created_at TEXT NOT NULL DEFAULT '',
+          completed_at TEXT DEFAULT NULL,
+          PRIMARY KEY (milestone_id, id),
+          FOREIGN KEY (milestone_id) REFERENCES milestones(id)
+        )
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS tasks (
+          milestone_id TEXT NOT NULL,
+          slice_id TEXT NOT NULL,
+          id TEXT NOT NULL,
+          title TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'pending',
+          one_liner TEXT NOT NULL DEFAULT '',
+          narrative TEXT NOT NULL DEFAULT '',
+          verification_result TEXT NOT NULL DEFAULT '',
+          duration TEXT NOT NULL DEFAULT '',
+          completed_at TEXT DEFAULT NULL,
+          blocker_discovered INTEGER DEFAULT 0,
+          deviations TEXT NOT NULL DEFAULT '',
+          known_issues TEXT NOT NULL DEFAULT '',
+          key_files TEXT NOT NULL DEFAULT '[]',
+          key_decisions TEXT NOT NULL DEFAULT '[]',
+          full_summary_md TEXT NOT NULL DEFAULT '',
+          PRIMARY KEY (milestone_id, slice_id, id),
+          FOREIGN KEY (milestone_id, slice_id) REFERENCES slices(milestone_id, id)
+        )
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS verification_evidence (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id TEXT NOT NULL DEFAULT '',
+          slice_id TEXT NOT NULL DEFAULT '',
+          milestone_id TEXT NOT NULL DEFAULT '',
+          command TEXT NOT NULL DEFAULT '',
+          exit_code INTEGER DEFAULT 0,
+          verdict TEXT NOT NULL DEFAULT '',
+          duration_ms INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT '',
+          FOREIGN KEY (milestone_id, slice_id, task_id) REFERENCES tasks(milestone_id, slice_id, id)
+        )
+      `);
+
+      db.prepare(
+        "INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)",
+      ).run({ ":version": 5, ":applied_at": new Date().toISOString() });
+    }
+
+    // v5 → v6: add full_summary_md and full_uat_md columns to slices table
+    if (currentVersion < 6) {
+      db.exec(`ALTER TABLE slices ADD COLUMN full_summary_md TEXT NOT NULL DEFAULT ''`);
+      db.exec(`ALTER TABLE slices ADD COLUMN full_uat_md TEXT NOT NULL DEFAULT ''`);
+
+      db.prepare(
+        "INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)",
+      ).run({ ":version": 6, ":applied_at": new Date().toISOString() });
+    }
+
+    // v6 → v7: add depends/demo columns to slices, depends_on to milestones
+    if (currentVersion < 7) {
+      db.exec(`ALTER TABLE slices ADD COLUMN depends TEXT NOT NULL DEFAULT '[]'`);
+      db.exec(`ALTER TABLE slices ADD COLUMN demo TEXT NOT NULL DEFAULT ''`);
+      db.exec(`ALTER TABLE milestones ADD COLUMN depends_on TEXT NOT NULL DEFAULT '[]'`);
+
+      db.prepare(
+        "INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)",
+      ).run({ ":version": 7, ":applied_at": new Date().toISOString() });
     }
 
     db.exec("COMMIT");
@@ -751,7 +908,487 @@ export function insertArtifact(a: {
     });
 }
 
+// ─── Milestone / Slice / Task Accessors ───────────────────────────────────
+
+/**
+ * Insert a milestone row (INSERT OR IGNORE — idempotent).
+ * Parent rows may not exist yet when the first task in a milestone completes.
+ */
+export function insertMilestone(m: {
+  id: string;
+  title?: string;
+  status?: string;
+  depends_on?: string[];
+}): void {
+  if (!currentDb)
+    throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  currentDb
+    .prepare(
+      `INSERT OR IGNORE INTO milestones (id, title, status, depends_on, created_at)
+     VALUES (:id, :title, :status, :depends_on, :created_at)`,
+    )
+    .run({
+      ":id": m.id,
+      ":title": m.title ?? "",
+      ":status": m.status ?? "active",
+      ":depends_on": JSON.stringify(m.depends_on ?? []),
+      ":created_at": new Date().toISOString(),
+    });
+}
+
+/**
+ * Insert a slice row (INSERT OR IGNORE — idempotent).
+ */
+export function insertSlice(s: {
+  id: string;
+  milestoneId: string;
+  title?: string;
+  status?: string;
+  risk?: string;
+  depends?: string[];
+  demo?: string;
+}): void {
+  if (!currentDb)
+    throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  currentDb
+    .prepare(
+      `INSERT OR IGNORE INTO slices (milestone_id, id, title, status, risk, depends, demo, created_at)
+     VALUES (:milestone_id, :id, :title, :status, :risk, :depends, :demo, :created_at)`,
+    )
+    .run({
+      ":milestone_id": s.milestoneId,
+      ":id": s.id,
+      ":title": s.title ?? "",
+      ":status": s.status ?? "pending",
+      ":risk": s.risk ?? "medium",
+      ":depends": JSON.stringify(s.depends ?? []),
+      ":demo": s.demo ?? "",
+      ":created_at": new Date().toISOString(),
+    });
+}
+
+/**
+ * Insert or replace a task row (full upsert for task completion).
+ * key_files and key_decisions are stored as JSON arrays.
+ */
+export function insertTask(t: {
+  id: string;
+  sliceId: string;
+  milestoneId: string;
+  title?: string;
+  status?: string;
+  oneLiner?: string;
+  narrative?: string;
+  verificationResult?: string;
+  duration?: string;
+  blockerDiscovered?: boolean;
+  deviations?: string;
+  knownIssues?: string;
+  keyFiles?: string[];
+  keyDecisions?: string[];
+  fullSummaryMd?: string;
+}): void {
+  if (!currentDb)
+    throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  currentDb
+    .prepare(
+      `INSERT OR REPLACE INTO tasks (
+        milestone_id, slice_id, id, title, status, one_liner, narrative,
+        verification_result, duration, completed_at, blocker_discovered,
+        deviations, known_issues, key_files, key_decisions, full_summary_md
+      ) VALUES (
+        :milestone_id, :slice_id, :id, :title, :status, :one_liner, :narrative,
+        :verification_result, :duration, :completed_at, :blocker_discovered,
+        :deviations, :known_issues, :key_files, :key_decisions, :full_summary_md
+      )`,
+    )
+    .run({
+      ":milestone_id": t.milestoneId,
+      ":slice_id": t.sliceId,
+      ":id": t.id,
+      ":title": t.title ?? "",
+      ":status": t.status ?? "pending",
+      ":one_liner": t.oneLiner ?? "",
+      ":narrative": t.narrative ?? "",
+      ":verification_result": t.verificationResult ?? "",
+      ":duration": t.duration ?? "",
+      ":completed_at": t.status === "done" ? new Date().toISOString() : null,
+      ":blocker_discovered": t.blockerDiscovered ? 1 : 0,
+      ":deviations": t.deviations ?? "",
+      ":known_issues": t.knownIssues ?? "",
+      ":key_files": JSON.stringify(t.keyFiles ?? []),
+      ":key_decisions": JSON.stringify(t.keyDecisions ?? []),
+      ":full_summary_md": t.fullSummaryMd ?? "",
+    });
+}
+
+/**
+ * Update a task's status and optionally its completed_at timestamp.
+ */
+export function updateTaskStatus(
+  milestoneId: string,
+  sliceId: string,
+  taskId: string,
+  status: string,
+  completedAt?: string,
+): void {
+  if (!currentDb)
+    throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  currentDb
+    .prepare(
+      `UPDATE tasks SET status = :status, completed_at = :completed_at
+     WHERE milestone_id = :milestone_id AND slice_id = :slice_id AND id = :id`,
+    )
+    .run({
+      ":status": status,
+      ":completed_at": completedAt ?? null,
+      ":milestone_id": milestoneId,
+      ":slice_id": sliceId,
+      ":id": taskId,
+    });
+}
+
+export interface SliceRow {
+  milestone_id: string;
+  id: string;
+  title: string;
+  status: string;
+  risk: string;
+  depends: string[];
+  demo: string;
+  created_at: string;
+  completed_at: string | null;
+  full_summary_md: string;
+  full_uat_md: string;
+}
+
+function rowToSlice(row: Record<string, unknown>): SliceRow {
+  return {
+    milestone_id: row["milestone_id"] as string,
+    id: row["id"] as string,
+    title: row["title"] as string,
+    status: row["status"] as string,
+    risk: row["risk"] as string,
+    depends: JSON.parse((row["depends"] as string) || "[]"),
+    demo: (row["demo"] as string) ?? "",
+    created_at: row["created_at"] as string,
+    completed_at: (row["completed_at"] as string) ?? null,
+    full_summary_md: (row["full_summary_md"] as string) ?? "",
+    full_uat_md: (row["full_uat_md"] as string) ?? "",
+  };
+}
+
+/**
+ * Get a single slice by its composite PK. Returns null if not found.
+ */
+export function getSlice(
+  milestoneId: string,
+  sliceId: string,
+): SliceRow | null {
+  if (!currentDb) return null;
+  const row = currentDb
+    .prepare(
+      "SELECT * FROM slices WHERE milestone_id = :mid AND id = :sid",
+    )
+    .get({ ":mid": milestoneId, ":sid": sliceId });
+  if (!row) return null;
+  return rowToSlice(row);
+}
+
+/**
+ * Update a slice's status and optionally its completed_at timestamp.
+ */
+export function updateSliceStatus(
+  milestoneId: string,
+  sliceId: string,
+  status: string,
+  completedAt?: string,
+): void {
+  if (!currentDb)
+    throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  currentDb
+    .prepare(
+      `UPDATE slices SET status = :status, completed_at = :completed_at
+     WHERE milestone_id = :milestone_id AND id = :id`,
+    )
+    .run({
+      ":status": status,
+      ":completed_at": completedAt ?? null,
+      ":milestone_id": milestoneId,
+      ":id": sliceId,
+    });
+}
+
+export interface TaskRow {
+  milestone_id: string;
+  slice_id: string;
+  id: string;
+  title: string;
+  status: string;
+  one_liner: string;
+  narrative: string;
+  verification_result: string;
+  duration: string;
+  completed_at: string | null;
+  blocker_discovered: boolean;
+  deviations: string;
+  known_issues: string;
+  key_files: string[];
+  key_decisions: string[];
+  full_summary_md: string;
+}
+
+function rowToTask(row: Record<string, unknown>): TaskRow {
+  return {
+    milestone_id: row["milestone_id"] as string,
+    slice_id: row["slice_id"] as string,
+    id: row["id"] as string,
+    title: row["title"] as string,
+    status: row["status"] as string,
+    one_liner: row["one_liner"] as string,
+    narrative: row["narrative"] as string,
+    verification_result: row["verification_result"] as string,
+    duration: row["duration"] as string,
+    completed_at: (row["completed_at"] as string) ?? null,
+    blocker_discovered: (row["blocker_discovered"] as number) === 1,
+    deviations: row["deviations"] as string,
+    known_issues: row["known_issues"] as string,
+    key_files: JSON.parse((row["key_files"] as string) || "[]"),
+    key_decisions: JSON.parse((row["key_decisions"] as string) || "[]"),
+    full_summary_md: row["full_summary_md"] as string,
+  };
+}
+
+/**
+ * Get a single task by its composite PK. Returns null if not found.
+ */
+export function getTask(
+  milestoneId: string,
+  sliceId: string,
+  taskId: string,
+): TaskRow | null {
+  if (!currentDb) return null;
+  const row = currentDb
+    .prepare(
+      "SELECT * FROM tasks WHERE milestone_id = :mid AND slice_id = :sid AND id = :tid",
+    )
+    .get({ ":mid": milestoneId, ":sid": sliceId, ":tid": taskId });
+  if (!row) return null;
+  return rowToTask(row);
+}
+
+/**
+ * Get all tasks for a given slice. Returns empty array if none found.
+ */
+export function getSliceTasks(
+  milestoneId: string,
+  sliceId: string,
+): TaskRow[] {
+  if (!currentDb) return [];
+  const rows = currentDb
+    .prepare(
+      "SELECT * FROM tasks WHERE milestone_id = :mid AND slice_id = :sid ORDER BY id",
+    )
+    .all({ ":mid": milestoneId, ":sid": sliceId });
+  return rows.map(rowToTask);
+}
+
+/**
+ * Insert a single verification evidence row for a task.
+ */
+export function insertVerificationEvidence(e: {
+  taskId: string;
+  sliceId: string;
+  milestoneId: string;
+  command: string;
+  exitCode: number;
+  verdict: string;
+  durationMs: number;
+}): void {
+  if (!currentDb)
+    throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  currentDb
+    .prepare(
+      `INSERT INTO verification_evidence (task_id, slice_id, milestone_id, command, exit_code, verdict, duration_ms, created_at)
+     VALUES (:task_id, :slice_id, :milestone_id, :command, :exit_code, :verdict, :duration_ms, :created_at)`,
+    )
+    .run({
+      ":task_id": e.taskId,
+      ":slice_id": e.sliceId,
+      ":milestone_id": e.milestoneId,
+      ":command": e.command,
+      ":exit_code": e.exitCode,
+      ":verdict": e.verdict,
+      ":duration_ms": e.durationMs,
+      ":created_at": new Date().toISOString(),
+    });
+}
+
 // ─── Worktree DB Helpers ──────────────────────────────────────────────────
+
+// ─── Milestone Row Interface ──────────────────────────────────────────────
+
+export interface MilestoneRow {
+  id: string;
+  title: string;
+  status: string;
+  depends_on: string[];
+  created_at: string;
+  completed_at: string | null;
+}
+
+function rowToMilestone(row: Record<string, unknown>): MilestoneRow {
+  return {
+    id: row["id"] as string,
+    title: row["title"] as string,
+    status: row["status"] as string,
+    depends_on: JSON.parse((row["depends_on"] as string) || "[]"),
+    created_at: row["created_at"] as string,
+    completed_at: (row["completed_at"] as string) ?? null,
+  };
+}
+
+// ─── Artifact Row Interface ───────────────────────────────────────────────
+
+export interface ArtifactRow {
+  path: string;
+  artifact_type: string;
+  milestone_id: string | null;
+  slice_id: string | null;
+  task_id: string | null;
+  full_content: string;
+  imported_at: string;
+}
+
+function rowToArtifact(row: Record<string, unknown>): ArtifactRow {
+  return {
+    path: row["path"] as string,
+    artifact_type: row["artifact_type"] as string,
+    milestone_id: (row["milestone_id"] as string) ?? null,
+    slice_id: (row["slice_id"] as string) ?? null,
+    task_id: (row["task_id"] as string) ?? null,
+    full_content: row["full_content"] as string,
+    imported_at: row["imported_at"] as string,
+  };
+}
+
+// ─── New Accessors (S03: Markdown Renderer) ───────────────────────────────
+
+/**
+ * Get all milestones ordered by ID. Returns empty array if none found.
+ */
+export function getAllMilestones(): MilestoneRow[] {
+  if (!currentDb) return [];
+  const rows = currentDb
+    .prepare("SELECT * FROM milestones ORDER BY id")
+    .all();
+  return rows.map(rowToMilestone);
+}
+
+/**
+ * Get a single milestone by ID. Returns null if not found.
+ */
+export function getMilestone(id: string): MilestoneRow | null {
+  if (!currentDb) return null;
+  const row = currentDb
+    .prepare("SELECT * FROM milestones WHERE id = :id")
+    .get({ ":id": id });
+  if (!row) return null;
+  return rowToMilestone(row);
+}
+
+/**
+ * Get the first active milestone (not complete or parked), sorted by ID.
+ * Returns null if no active milestones exist.
+ */
+export function getActiveMilestoneFromDb(): MilestoneRow | null {
+  if (!currentDb) return null;
+  const row = currentDb
+    .prepare(
+      "SELECT * FROM milestones WHERE status NOT IN ('complete', 'parked') ORDER BY id LIMIT 1",
+    )
+    .get();
+  if (!row) return null;
+  return rowToMilestone(row);
+}
+
+/**
+ * Get the first active slice for a milestone.
+ * Active = status NOT IN ('complete', 'done') with all dependencies satisfied.
+ * Returns null if no active slices exist.
+ */
+export function getActiveSliceFromDb(milestoneId: string): SliceRow | null {
+  if (!currentDb) return null;
+  const rows = currentDb
+    .prepare(
+      "SELECT * FROM slices WHERE milestone_id = :mid AND status NOT IN ('complete', 'done') ORDER BY id",
+    )
+    .all({ ":mid": milestoneId });
+  if (rows.length === 0) return null;
+
+  // Build set of completed slice IDs for dependency checking
+  const completedRows = currentDb
+    .prepare(
+      "SELECT id FROM slices WHERE milestone_id = :mid AND status IN ('complete', 'done')",
+    )
+    .all({ ":mid": milestoneId });
+  const completedIds = new Set(completedRows.map((r) => r["id"] as string));
+
+  // Find first slice whose deps are all satisfied
+  for (const row of rows) {
+    const slice = rowToSlice(row);
+    const deps = slice.depends;
+    if (deps.length === 0 || deps.every((d) => completedIds.has(d))) {
+      return slice;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Get the first active task for a slice.
+ * Active = status NOT IN ('complete', 'done'), sorted by ID.
+ * Returns null if no active tasks exist.
+ */
+export function getActiveTaskFromDb(
+  milestoneId: string,
+  sliceId: string,
+): TaskRow | null {
+  if (!currentDb) return null;
+  const row = currentDb
+    .prepare(
+      "SELECT * FROM tasks WHERE milestone_id = :mid AND slice_id = :sid AND status NOT IN ('complete', 'done') ORDER BY id LIMIT 1",
+    )
+    .get({ ":mid": milestoneId, ":sid": sliceId });
+  if (!row) return null;
+  return rowToTask(row);
+}
+
+/**
+ * Get all slices for a milestone, ordered by ID. Returns empty array if none found.
+ */
+export function getMilestoneSlices(milestoneId: string): SliceRow[] {
+  if (!currentDb) return [];
+  const rows = currentDb
+    .prepare("SELECT * FROM slices WHERE milestone_id = :mid ORDER BY id")
+    .all({ ":mid": milestoneId });
+  return rows.map(rowToSlice);
+}
+
+/**
+ * Get an artifact by its path. Returns null if not found.
+ */
+export function getArtifact(path: string): ArtifactRow | null {
+  if (!currentDb) return null;
+  const row = currentDb
+    .prepare("SELECT * FROM artifacts WHERE path = :path")
+    .get({ ":path": path });
+  if (!row) return null;
+  return rowToArtifact(row);
+}
+
+// ─── Worktree DB Helpers (continued) ──────────────────────────────────────
 
 export function copyWorktreeDb(srcDbPath: string, destDbPath: string): boolean {
   try {

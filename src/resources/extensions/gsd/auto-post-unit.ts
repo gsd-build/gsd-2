@@ -17,6 +17,7 @@ import { loadFile, parseSummary, resolveAllOverrides } from "./files.js";
 import { loadPrompt } from "./prompt-loader.js";
 import {
   resolveSliceFile,
+  resolveSlicePath,
   resolveTaskFile,
   resolveMilestoneFile,
   resolveTasksDir,
@@ -37,7 +38,8 @@ import { writeUnitRuntimeRecord, clearUnitRuntimeRecord } from "./unit-runtime.j
 import { runGSDDoctor, rebuildState, summarizeDoctorIssues } from "./doctor.js";
 import { recordHealthSnapshot, checkHealEscalation } from "./doctor-proactive.js";
 import { syncStateToProjectRoot } from "./auto-worktree-sync.js";
-import { isDbAvailable } from "./gsd-db.js";
+import { isDbAvailable, getTask, getSlice, updateTaskStatus } from "./gsd-db.js";
+import { renderPlanCheckboxes } from "./markdown-renderer.js";
 import { consumeSignal } from "./session-status-io.js";
 import {
   checkPostUnitHooks,
@@ -55,11 +57,64 @@ import {
   unitVerb,
   hideFooter,
 } from "./auto-dashboard.js";
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, unlinkSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { uncheckTaskInPlan } from "./undo.js";
 import { atomicWriteSync } from "./atomic-write.js";
 import { _resetHasChangesCache } from "./native-git-bridge.js";
+
+// ─── Rogue File Detection ──────────────────────────────────────────────────
+
+export interface RogueFileWrite {
+  path: string;
+  unitType: string;
+  unitId: string;
+}
+
+/**
+ * Detect summary files written directly to disk without the LLM calling
+ * the completion tool. A "rogue" file is one that exists on disk but has
+ * no corresponding DB row with status "complete".
+ *
+ * This is a safety-net diagnostic (D003). The existing migrateFromMarkdown()
+ * in postUnitPostVerification() eventually ingests rogue files, but explicit
+ * detection provides immediate diagnostics so operators know the prompt failed.
+ */
+export function detectRogueFileWrites(
+  unitType: string,
+  unitId: string,
+  basePath: string,
+): RogueFileWrite[] {
+  if (!isDbAvailable()) return [];
+
+  const parts = unitId.split("/");
+  const rogues: RogueFileWrite[] = [];
+
+  if (unitType === "execute-task") {
+    const [mid, sid, tid] = parts;
+    if (!mid || !sid || !tid) return [];
+
+    const summaryPath = resolveTaskFile(basePath, mid, sid, tid, "SUMMARY");
+    if (!summaryPath || !existsSync(summaryPath)) return [];
+
+    const dbRow = getTask(mid, sid, tid);
+    if (!dbRow || dbRow.status !== "complete") {
+      rogues.push({ path: summaryPath, unitType, unitId });
+    }
+  } else if (unitType === "complete-slice") {
+    const [mid, sid] = parts;
+    if (!mid || !sid) return [];
+
+    const summaryPath = resolveSliceFile(basePath, mid, sid, "SUMMARY");
+    if (!summaryPath || !existsSync(summaryPath)) return [];
+
+    const dbRow = getSlice(mid, sid);
+    if (!dbRow || dbRow.status !== "complete") {
+      rogues.push({ path: summaryPath, unitType, unitId });
+    }
+  }
+
+  return rogues;
+}
 
 /** Throttle STATE.md rebuilds — at most once per 30 seconds */
 const STATE_REBUILD_MIN_INTERVAL_MS = 30_000;
@@ -355,6 +410,17 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
       }
     }
 
+    // Rogue file detection — safety net for LLM bypassing completion tools (D003)
+    try {
+      const rogueFiles = detectRogueFileWrites(s.currentUnit.type, s.currentUnit.id, s.basePath);
+      for (const rogue of rogueFiles) {
+        process.stderr.write(`gsd-rogue: detected rogue file write: ${rogue.path} (unit: ${rogue.unitId})\n`);
+        ctx.ui.notify(`Rogue file write detected: ${rogue.path}`, "warning");
+      }
+    } catch (e) {
+      debugLog("postUnit", { phase: "rogue-detection", error: String(e) });
+    }
+
     // Artifact verification
     let triggerArtifactVerified = false;
     if (!s.currentUnit.type.startsWith("hook/")) {
@@ -474,9 +540,31 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
           const parts = trigger.unitId.split("/");
           const [mid, sid, tid] = parts;
 
-          // 1. Uncheck [x] → [ ] in PLAN.md
+          // 1. Reset task status in DB and re-render plan checkboxes
           if (mid && sid && tid) {
-            uncheckTaskInPlan(s.basePath, mid, sid, tid);
+            try {
+              updateTaskStatus(mid, sid, tid, "pending");
+              await renderPlanCheckboxes(s.basePath, mid, sid);
+            } catch {
+              // DB may be unavailable — fall back to direct file-based uncheck
+              try {
+                const slicePath = resolveSlicePath(s.basePath, mid, sid);
+                if (slicePath) {
+                  const { readdirSync } = await import("node:fs");
+                  const planCandidates = readdirSync(slicePath)
+                    .filter((f: string) => f.includes("PLAN") && (f.startsWith(sid) || f.startsWith(`${sid}-`)));
+                  if (planCandidates.length > 0) {
+                    const planFile = join(slicePath, planCandidates[0]);
+                    let content = readFileSync(planFile, "utf-8");
+                    const regex = new RegExp(`^(\\s*-\\s*)\\[x\\](\\s*\\**${tid}\\**[:\\s])`, "mi");
+                    if (regex.test(content)) {
+                      content = content.replace(regex, "$1[ ]$2");
+                      writeFileSync(planFile, content, "utf-8");
+                    }
+                  }
+                }
+              } catch { /* non-fatal: file-based fallback failure */ }
+            }
           }
 
           // 2. Delete SUMMARY.md for the task

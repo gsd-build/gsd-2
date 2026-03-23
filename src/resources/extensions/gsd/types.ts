@@ -499,3 +499,53 @@ export interface BrowserFlowResult {
   checksPassed: number;
   duration: number;
 }
+
+// ─── Complete Task Params (gsd_complete_task tool input) ─────────────────
+
+export interface CompleteTaskParams {
+  taskId: string;
+  sliceId: string;
+  milestoneId: string;
+  oneLiner: string;
+  narrative: string;
+  verification: string;
+  keyFiles: string[];
+  keyDecisions: string[];
+  deviations: string;
+  knownIssues: string;
+  blockerDiscovered: boolean;
+  verificationEvidence: Array<{
+    command: string;
+    exitCode: number;
+    verdict: string;
+    durationMs: number;
+  }>;
+}
+
+// ─── Complete Slice Params (gsd_complete_slice tool input) ───────────────
+
+export interface CompleteSliceParams {
+  sliceId: string;
+  milestoneId: string;
+  sliceTitle: string;
+  oneLiner: string;
+  narrative: string;
+  verification: string;
+  keyFiles: string[];
+  keyDecisions: string[];
+  patternsEstablished: string[];
+  observabilitySurfaces: string[];
+  deviations: string;
+  knownLimitations: string;
+  followUps: string;
+  requirementsAdvanced: Array<{ id: string; how: string }>;
+  requirementsValidated: Array<{ id: string; proof: string }>;
+  requirementsSurfaced: string[];
+  requirementsInvalidated: Array<{ id: string; what: string }>;
+  filesModified: Array<{ path: string; description: string }>;
+  uatContent: string;
+  provides: string[];
+  requires: Array<{ slice: string; provides: string }>;
+  affects: string[];
+  drillDownPaths: string[];
+}
