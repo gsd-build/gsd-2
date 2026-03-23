@@ -40,7 +40,6 @@ const ROUTES: Route[] = [
   { keywords: ["session report", "session summary", "cost summary", "how much"], command: "session-report" },
   { keywords: ["backlog", "parking lot", "later", "someday"], command: "backlog" },
   { keywords: ["add tests", "write tests", "generate tests", "test coverage"], command: "add-tests" },
-  { keywords: ["map codebase", "analyze code", "codebase analysis"], command: "map-codebase" },
   { keywords: ["next", "step", "next step", "what's next"], command: "next" },
 ];
 

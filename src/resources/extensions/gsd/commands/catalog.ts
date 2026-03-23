@@ -15,7 +15,7 @@ export interface GsdCommandDefinition {
 type CompletionMap = Record<string, readonly GsdCommandDefinition[]>;
 
 export const GSD_COMMAND_DESCRIPTION =
-  "GSD — Get Shit Done: /gsd help|start|templates|next|auto|stop|pause|status|widget|visualize|queue|quick|discuss|capture|triage|dispatch|history|undo|undo-task|reset-slice|rate|skip|export|cleanup|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|logs|forensics|changelog|migrate|remote|steer|knowledge|new-milestone|parallel|cmux|park|unpark|init|setup|inspect|extensions|update|fast|mcp|rethink|ship|add-slice|insert-slice|remove-slice|do|session-report|backlog|pr-branch|add-tests|map-codebase";
+  "GSD — Get Shit Done: /gsd help|start|templates|next|auto|stop|pause|status|widget|visualize|queue|quick|discuss|capture|triage|dispatch|history|undo|undo-task|reset-slice|rate|skip|export|cleanup|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|logs|forensics|changelog|migrate|remote|steer|knowledge|new-milestone|parallel|cmux|park|unpark|init|setup|inspect|extensions|update|fast|mcp|rethink|ship|add-slice|insert-slice|remove-slice|do|session-report|backlog|pr-branch|add-tests";
 
 export const TOP_LEVEL_SUBCOMMANDS: readonly GsdCommandDefinition[] = [
   { cmd: "help", desc: "Categorized command reference with descriptions" },
@@ -80,7 +80,6 @@ export const TOP_LEVEL_SUBCOMMANDS: readonly GsdCommandDefinition[] = [
   { cmd: "backlog", desc: "Manage backlog items (add, promote, remove, list)" },
   { cmd: "pr-branch", desc: "Create clean PR branch filtering .gsd/ commits" },
   { cmd: "add-tests", desc: "Generate tests for completed slices" },
-  { cmd: "map-codebase", desc: "Parallel codebase analysis (tech, arch, quality, concerns)" },
 ];
 
 const NESTED_COMPLETIONS: CompletionMap = {
@@ -260,12 +259,6 @@ const NESTED_COMPLETIONS: CompletionMap = {
   "pr-branch": [
     { cmd: "--dry-run", desc: "Preview what would be filtered" },
     { cmd: "--name", desc: "Custom branch name" },
-  ],
-  "map-codebase": [
-    { cmd: "tech", desc: "Technology stack analysis" },
-    { cmd: "arch", desc: "Architecture patterns" },
-    { cmd: "quality", desc: "Code quality assessment" },
-    { cmd: "concerns", desc: "Risk areas and concerns" },
   ],
 };
 

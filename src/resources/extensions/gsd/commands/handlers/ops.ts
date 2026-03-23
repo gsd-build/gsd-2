@@ -226,10 +226,5 @@ Examples:
     await handleAddTests(trimmed.replace(/^add-tests\s*/, "").trim(), ctx, pi);
     return true;
   }
-  if (trimmed === "map-codebase" || trimmed.startsWith("map-codebase ")) {
-    const { handleMapCodebase } = await import("../../commands-map-codebase.js");
-    await handleMapCodebase(trimmed.replace(/^map-codebase\s*/, "").trim(), ctx, pi);
-    return true;
-  }
   return false;
 }

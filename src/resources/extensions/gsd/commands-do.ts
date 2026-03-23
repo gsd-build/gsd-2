@@ -36,7 +36,6 @@ const ROUTES: Route[] = [
   { keywords: ["backlog", "parking lot", "later", "someday"], command: "backlog" },
   { keywords: ["pr branch", "clean branch", "filter commits"], command: "pr-branch" },
   { keywords: ["add tests", "write tests", "generate tests", "test coverage"], command: "add-tests" },
-  { keywords: ["map codebase", "analyze code", "codebase analysis", "explore code"], command: "map-codebase" },
   { keywords: ["next", "step", "next step", "what's next"], command: "next" },
   { keywords: ["migrate", "migration", "convert", "upgrade"], command: "migrate" },
   { keywords: ["steer", "change direction", "pivot", "redirect"], command: "steer" },
