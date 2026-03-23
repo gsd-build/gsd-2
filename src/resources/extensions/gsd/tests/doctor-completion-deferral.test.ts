@@ -80,7 +80,7 @@ test("COMPLETION_TRANSITION_CODES only contains slice summary code", () => {
   );
 });
 
-test("fixLevel:task — fixes roadmap checkbox and UAT stub immediately, defers only summary (#1808)", async () => {
+test("fixLevel:task — detects completion issues, fixes roadmap checkbox, defers summary and UAT to engine (#1808)", async () => {
   const tmp = makeTmp("partial-deferral");
   try {
     buildScaffold(tmp);
@@ -93,15 +93,17 @@ test("fixLevel:task — fixes roadmap checkbox and UAT stub immediately, defers 
     assert.ok(codes.includes("all_tasks_done_missing_slice_uat"), "should detect missing UAT");
     assert.ok(codes.includes("all_tasks_done_roadmap_not_checked"), "should detect unchecked roadmap");
 
-    // Summary should NOT be created (still deferred — needs LLM content)
+    // Summary should NOT be created (deferred — engine creates it via tool calls)
     const sliceSummaryPath = join(tmp, ".gsd", "milestones", "M001", "slices", "S01", "S01-SUMMARY.md");
-    assert.ok(!existsSync(sliceSummaryPath), "should NOT have created summary stub (deferred)");
+    assert.ok(!existsSync(sliceSummaryPath), "should NOT have created summary stub (deferred to engine)");
 
-    // UAT stub SHOULD be created (mechanical bookkeeping, no longer deferred)
-    const sliceUatPath = join(tmp, ".gsd", "milestones", "M001", "slices", "S01", "S01-UAT.md");
-    assert.ok(existsSync(sliceUatPath), "should have created UAT stub immediately");
+    // UAT is no longer created by doctor (engine handles it via tool calls)
+    // Doctor only detects the issue, doesn't fix it
+    const sliceUatIssue = report.issues.find(i => i.code === "all_tasks_done_missing_slice_uat");
+    assert.ok(sliceUatIssue, "should report UAT as missing");
+    assert.strictEqual(sliceUatIssue!.fixable, false, "UAT issue should not be fixable by doctor");
 
-    // Roadmap checkbox SHOULD be marked done (mechanical bookkeeping, no longer deferred)
+    // Roadmap checkbox SHOULD be marked done (mechanical bookkeeping)
     const roadmapContent = readFileSync(join(tmp, ".gsd", "milestones", "M001", "M001-ROADMAP.md"), "utf8");
     assert.ok(roadmapContent.includes("- [x] **S01"), "roadmap should show S01 as checked");
   } finally {
@@ -109,7 +111,7 @@ test("fixLevel:task — fixes roadmap checkbox and UAT stub immediately, defers 
   }
 });
 
-test("fixLevel:task — session crash after last task leaves roadmap and UAT consistent (#1808)", async () => {
+test("fixLevel:task — session crash after last task leaves roadmap consistent (#1808)", async () => {
   const tmp = makeTmp("crash-consistency");
   try {
     buildScaffold(tmp);
@@ -121,21 +123,17 @@ test("fixLevel:task — session crash after last task leaves roadmap and UAT con
     // A new session starts and runs doctor again at task level.
     const report2 = await runGSDDoctor(tmp, { fix: true, fixLevel: "task" });
 
-    // The only remaining issue should be the deferred summary.
-    // Roadmap and UAT should already be fixed from the first run.
+    // Roadmap should already be fixed from the first run.
     const remainingCodes = report2.issues.map(i => i.code);
     assert.ok(
       !remainingCodes.includes("all_tasks_done_roadmap_not_checked"),
       "roadmap should already be fixed from first doctor run"
     );
-    assert.ok(
-      !remainingCodes.includes("all_tasks_done_missing_slice_uat"),
-      "UAT should already be fixed from first doctor run"
-    );
-    // Summary is still missing (deferred), that is expected
+    // Summary and UAT are still missing — doctor reports but doesn't fix
+    // (engine handles these via tool calls)
     assert.ok(
       remainingCodes.includes("all_tasks_done_missing_slice_summary"),
-      "summary should still be detected as missing (deferred)"
+      "summary should still be detected as missing (engine creates it)"
     );
   } finally {
     rmSync(tmp, { recursive: true, force: true });

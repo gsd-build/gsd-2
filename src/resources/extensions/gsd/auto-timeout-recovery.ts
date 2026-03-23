@@ -30,6 +30,10 @@ export async function recoverTimedOutUnit(
 ): Promise<"recovered" | "paused"> {
   const { basePath, verbose, unitRecoveryCount } = rctx;
 
+  if (!basePath || !unitRecoveryCount) {
+    throw new TypeError(`recoverTimedOutUnit: invalid RecoveryContext — missing required path or recovery count`);
+  }
+
   const maxRecoveryAttempts = reason === "idle" ? 2 : 1;
 
   const recoveryKey = `${unitType}/${unitId}`;

@@ -3,8 +3,22 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { deriveState, invalidateStateCache } from '../state.ts';
-import { openDatabase, closeDatabase, insertArtifact, isDbAvailable } from '../gsd-db.ts';
+import { openDatabase, closeDatabase, insertArtifact, isDbAvailable, _getAdapter } from '../gsd-db.ts';
+import { resetEngine } from '../workflow-engine.ts';
 import { createTestContext } from './test-helpers.ts';
+
+/**
+ * Drop engine tables (milestones, slices, tasks) so isEngineAvailable() returns false.
+ * This test validates the legacy artifacts-table path, not the engine bridge.
+ */
+function dropEngineTables(): void {
+  resetEngine();
+  const db = _getAdapter();
+  if (!db) return;
+  db.prepare('DROP TABLE IF EXISTS milestones').run();
+  db.prepare('DROP TABLE IF EXISTS slices').run();
+  db.prepare('DROP TABLE IF EXISTS tasks').run();
+}
 
 const { assertEq, assertTrue, report } = createTestContext();
 
@@ -110,8 +124,11 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const fileState = await deriveState(base);
 
-      // Now open DB, insert matching artifacts
+      // Now open DB, insert matching artifacts.
+      // Drop engine tables so isEngineAvailable() returns false —
+      // this test validates the legacy artifacts-table path, not the engine bridge.
       openDatabase(':memory:');
+      dropEngineTables();
       assertTrue(isDbAvailable(), 'db-match: DB is available after open');
 
       insertArtifactRow('milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT, {
@@ -193,8 +210,10 @@ async function main(): Promise<void> {
       writeFile(base, 'milestones/M001/slices/S01/tasks/.gitkeep', '');
       writeFile(base, 'milestones/M001/slices/S01/tasks/T01-PLAN.md', '# T01 Plan');
 
-      // Open DB but insert nothing — empty artifacts table
+      // Open DB but insert nothing — empty artifacts table.
+      // Drop engine tables to prevent auto-migration from firing.
       openDatabase(':memory:');
+      dropEngineTables();
       assertTrue(isDbAvailable(), 'empty-db: DB is available');
 
       invalidateStateCache();
@@ -225,8 +244,10 @@ async function main(): Promise<void> {
       writeFile(base, 'milestones/M001/slices/S01/tasks/T01-PLAN.md', '# T01 Plan');
       writeFile(base, 'REQUIREMENTS.md', REQUIREMENTS_CONTENT);
 
-      // Open DB but only insert the roadmap — plan and requirements missing from DB
+      // Open DB but only insert the roadmap — plan and requirements missing from DB.
+      // Drop engine tables to prevent auto-migration from firing.
       openDatabase(':memory:');
+      dropEngineTables();
       insertArtifactRow('milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT, {
         artifact_type: 'roadmap',
         milestone_id: 'M001',
@@ -311,8 +332,10 @@ async function main(): Promise<void> {
       writeFile(base, 'milestones/M001/M001-SUMMARY.md', summaryContent);
       writeFile(base, 'milestones/M002/M002-ROADMAP.md', activeRoadmap);
 
-      // Put roadmap content in DB only
+      // Put roadmap content in DB only.
+      // Drop engine tables to prevent auto-migration from firing.
       openDatabase(':memory:');
+      dropEngineTables();
       insertArtifactRow('milestones/M001/M001-ROADMAP.md', completedRoadmap, {
         artifact_type: 'roadmap',
         milestone_id: 'M001',
@@ -355,6 +378,7 @@ async function main(): Promise<void> {
       writeFile(base, 'milestones/M001/slices/S01/tasks/T01-PLAN.md', '# T01 Plan');
 
       openDatabase(':memory:');
+      dropEngineTables();
       insertArtifactRow('milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT, {
         artifact_type: 'roadmap',
         milestone_id: 'M001',

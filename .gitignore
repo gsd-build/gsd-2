@@ -2,6 +2,8 @@
 # ── GSD project state (development-only, lives in worktree branches) ──
 package-lock.json
 .claude/
+.plans/
+.planning/
 RELEASE-GUIDE.md
 *.tgz
 *.tsbuildinfo

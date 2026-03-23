@@ -52,15 +52,21 @@ export async function checkGitHealth(
       const milestoneId = wt.branch.replace(/^milestone\//, "");
       const milestoneEntry = state.registry.find(m => m.id === milestoneId);
 
-      // Check if milestone is complete via engine
+      // Check if milestone is complete via engine, fall back to state registry
       let isComplete = false;
-      if (milestoneEntry && isEngineAvailable(basePath)) {
-        try {
-          const engine = new WorkflowEngine(basePath);
-          const milestoneRow = engine.getMilestone(milestoneId);
-          isComplete = milestoneRow?.status === "complete";
-        } catch {
-          // Engine not available — fall back to not complete
+      if (milestoneEntry) {
+        if (isEngineAvailable(basePath)) {
+          try {
+            const engine = new WorkflowEngine(basePath);
+            const milestoneRow = engine.getMilestone(milestoneId);
+            isComplete = milestoneRow?.status === "complete";
+          } catch {
+            // Engine not available — try registry
+          }
+        }
+        if (!isComplete) {
+          // Fallback: check registry status
+          isComplete = milestoneEntry.status === "complete";
         }
       }
 
@@ -109,8 +115,13 @@ export async function checkGitHealth(
               const milestoneRow = engine.getMilestone(milestoneId);
               branchMilestoneComplete = milestoneRow?.status === "complete";
             } catch {
-              // Engine not available — skip
+              // Engine not available — try fallback
             }
+          }
+          if (!branchMilestoneComplete) {
+            // Fallback: check state registry
+            const branchEntry = state.registry.find(m => m.id === milestoneId);
+            branchMilestoneComplete = branchEntry?.status === "complete";
           }
           if (!branchMilestoneComplete) continue;
 
@@ -611,12 +622,20 @@ export async function checkRuntimeHealth(
       if (shouldFix("state_file_missing")) {
         try {
           renderStateProjection(basePath);
-          fixesApplied.push("re-rendered STATE.md from engine state");
         } catch {
-          // Fallback: derive state and write directly
-          const state = await deriveState(basePath);
-          await saveFile(stateFilePath, buildStateMarkdownForCheck(state));
-          fixesApplied.push("created STATE.md from derived state");
+          // renderStateProjection failed silently
+        }
+        // Check if projection succeeded; if not, fall back to deriveState
+        if (!existsSync(stateFilePath)) {
+          try {
+            const state = await deriveState(basePath);
+            await saveFile(stateFilePath, buildStateMarkdownForCheck(state));
+            fixesApplied.push("created STATE.md from derived state");
+          } catch {
+            // Both paths failed — non-fatal
+          }
+        } else {
+          fixesApplied.push("re-rendered STATE.md from engine state");
         }
       }
     }

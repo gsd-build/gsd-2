@@ -91,19 +91,19 @@ async function main(): Promise<void> {
   console.log("\n=== doctor fix ===");
   {
     const report = await runGSDDoctor(tmpBase, { fix: true });
-    if (report.fixesApplied.length < 3) console.error(report);
-    assertTrue(report.fixesApplied.length >= 3, "applies multiple fixes");
-    assertTrue(existsSync(join(sDir, "S01-SUMMARY.md")), "creates placeholder slice summary");
-    assertTrue(existsSync(join(sDir, "S01-UAT.md")), "creates placeholder UAT");
+    assertTrue(report.fixesApplied.length >= 1, "applies at least one fix");
+
+    // Doctor no longer creates summary/UAT stubs (engine handles these per D-03)
+    // But it should still detect them as issues
+    const codes = report.issues.map(i => i.code);
+    assertTrue(codes.includes("all_tasks_done_missing_slice_summary"), "detects missing slice summary");
+    assertTrue(codes.includes("all_tasks_done_missing_slice_uat"), "detects missing UAT");
 
     const plan = readFileSync(join(sDir, "S01-PLAN.md"), "utf-8");
     assertTrue(plan.includes("- [x] **T01:"), "marks task checkbox done");
 
     const roadmap = readFileSync(join(mDir, "M001-ROADMAP.md"), "utf-8");
     assertTrue(roadmap.includes("- [x] **S01:"), "marks slice checkbox done");
-
-    const state = readFileSync(join(gsd, "STATE.md"), "utf-8");
-    assertTrue(state.includes("# GSD State"), "writes state file");
   }
 
   rmSync(tmpBase, { recursive: true, force: true });

@@ -92,7 +92,7 @@ test("fixLevel:task — defers only summary stub, fixes roadmap and UAT immediat
   }
 });
 
-test("fixLevel:all (default) — detects AND fixes completion issues", async () => {
+test("fixLevel:all (default) — detects completion issues and fixes roadmap", async () => {
   const tmp = makeTmp("all-level");
   try {
     buildScaffold(tmp);
@@ -104,10 +104,11 @@ test("fixLevel:all (default) — detects AND fixes completion issues", async () 
     assert.ok(codes.includes("all_tasks_done_missing_slice_summary"), "should detect missing summary");
     assert.ok(codes.includes("all_tasks_done_roadmap_not_checked"), "should detect unchecked roadmap");
 
-    // SHOULD have fixed them
+    // Summary is NOT created by doctor (engine handles it via tool calls per D-03)
     const sliceSummaryPath = join(tmp, ".gsd", "milestones", "M001", "slices", "S01", "S01-SUMMARY.md");
-    assert.ok(existsSync(sliceSummaryPath), "should have created summary stub");
+    assert.ok(!existsSync(sliceSummaryPath), "summary should NOT be created by doctor (engine handles it)");
 
+    // Roadmap SHOULD be fixed
     const roadmapContent = readFileSync(join(tmp, ".gsd", "milestones", "M001", "M001-ROADMAP.md"), "utf8");
     assert.ok(roadmapContent.includes("- [x] **S01"), "roadmap should show S01 as checked");
   } finally {

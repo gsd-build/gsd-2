@@ -8,6 +8,9 @@ import { join } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
 
 import type { MilestoneRow, SliceRow, TaskRow } from "./workflow-engine.js";
+// Lazy-resolved to break circular dep (workflow-engine imports workflow-projections).
+// Safe because getEngine is only called inside functions, not at module evaluation.
+import { getEngine } from "./workflow-engine.js";
 import type { GSDState, MilestoneRegistryEntry } from "./types.js";
 
 // ─── PLAN.md Projection ──────────────────────────────────────────────────
@@ -261,8 +264,6 @@ export function renderStateContent(state: GSDState): string {
  */
 export function renderStateProjection(basePath: string): void {
   try {
-    // Dynamic import to avoid circular dependency at module level
-    const { getEngine } = require("./workflow-engine.js") as typeof import("./workflow-engine.js");
     const engine = getEngine(basePath);
     const state = engine.deriveState();
     const content = renderStateContent(state);

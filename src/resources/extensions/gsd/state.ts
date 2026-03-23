@@ -182,8 +182,8 @@ export async function deriveState(basePath: string): Promise<GSDState> {
   }
 
   // Engine bridge (Phase 3 — MIG-03)
-  // When WorkflowEngine is available, use engine exclusively.
-  // Auto-migrate from markdown if tables are empty (D-11).
+  // When WorkflowEngine is available AND has populated data, use engine.
+  // Falls through to legacy markdown parse if engine tables are empty.
   try {
     const { isEngineAvailable, getEngine } = await import('./workflow-engine.js');
     if (isEngineAvailable(basePath)) {
@@ -206,10 +206,14 @@ export async function deriveState(basePath: string): Promise<GSDState> {
       }
 
       const engineState = engine.deriveState();
-      // Cache the engine result with the same TTL as the markdown path
-      _stateCache = { basePath, result: engineState, timestamp: Date.now() };
-      _telemetry.engineDeriveCount++;
-      return engineState;
+      // Only use engine result if it has actual data (registry populated).
+      // If the milestones table exists but is empty (schema created, no migration yet),
+      // fall through to legacy markdown parse which reads from disk.
+      if (engineState.registry && engineState.registry.length > 0) {
+        _stateCache = { basePath, result: engineState, timestamp: Date.now() };
+        _telemetry.engineDeriveCount++;
+        return engineState;
+      }
     }
   } catch {
     // Fall through to legacy markdown parse — engine not yet initialized or import failed

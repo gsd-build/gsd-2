@@ -541,35 +541,50 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
       }
     }
 
-    // Use engine queries for milestone/slice data instead of parseRoadmap
-    let engineSlices: import("./workflow-engine.js").SliceRow[] = [];
-    let engineAvailable = false;
+    // Use engine queries for milestone/slice data, fall back to parsing roadmap from disk
+    let roadmapSlices: RoadmapSliceEntry[] = [];
     if (isEngineAvailable(basePath)) {
       try {
         const engine = new WorkflowEngine(basePath);
-        engineSlices = engine.getSlices(milestoneId);
-        engineAvailable = true;
+        const engineSlices = engine.getSlices(milestoneId);
+        roadmapSlices = engineSlices.map(s => ({
+          id: s.id,
+          title: s.title,
+          done: s.status === "done",
+          risk: (s.risk || "medium") as import("./types.js").RiskLevel,
+          depends: s.depends_on ? s.depends_on.split(",").map(d => d.trim()).filter(Boolean) : [],
+          demo: '',
+        }));
       } catch {
-        // Engine not available — skip engine-based checks
+        // Engine query failed — fall through to markdown parsing
       }
     }
 
-    // Build a roadmap-compatible structure from engine data
+    // Fallback: parse roadmap from disk if engine didn't provide slices
+    if (roadmapSlices.length === 0) {
+      try {
+        const { parseRoadmap } = await import("./legacy/parsers.js");
+        const roadmapFile = resolveMilestoneFile(basePath, milestoneId, "ROADMAP");
+        if (roadmapFile) {
+          const content = await loadFile(roadmapFile);
+          if (content) {
+            const parsed = parseRoadmap(content);
+            roadmapSlices = parsed.slices;
+          }
+        }
+      } catch {
+        // Markdown parsing also failed — skip this milestone
+      }
+    }
+
     const roadmap = {
       title: milestone.title,
       vision: '',
       successCriteria: [] as string[],
-      slices: engineSlices.map(s => ({
-        id: s.id,
-        title: s.title,
-        done: s.status === "done",
-        risk: (s.risk || "medium") as import("./types.js").RiskLevel,
-        depends: s.depends_on ? s.depends_on.split(",").map(d => d.trim()).filter(Boolean) : [],
-        demo: '',
-      })) as RoadmapSliceEntry[],
+      slices: roadmapSlices,
       boundaryMap: [] as any[],
     };
-    if (!engineAvailable) continue;
+    if (roadmap.slices.length === 0) continue;
 
     // ── Circular dependency detection ──────────────────────────────────────
     for (const cycle of detectCircularDependencies(roadmap.slices)) {
@@ -686,9 +701,9 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
         }
       }
 
-      // Use engine to get tasks for this slice
+      // Use engine to get tasks for this slice, fall back to parsing plan from disk
       let plan: { tasks: Array<{ id: string; done: boolean }> } | null = null;
-      if (engineAvailable) {
+      if (isEngineAvailable(basePath)) {
         try {
           const engine = new WorkflowEngine(basePath);
           const tasks = engine.getTasks(milestoneId, slice.id);
@@ -698,7 +713,22 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
             };
           }
         } catch {
-          // Engine query failed — fall through to missing plan check
+          // Engine query failed — fall through to disk parsing
+        }
+      }
+      if (!plan) {
+        try {
+          const { parsePlan } = await import("./legacy/parsers.js");
+          const planFile = resolveSliceFile(basePath, milestoneId, slice.id, "PLAN");
+          if (planFile) {
+            const planContent = await loadFile(planFile);
+            if (planContent) {
+              const parsed = parsePlan(planContent);
+              plan = { tasks: parsed.tasks.map(t => ({ id: t.id, done: t.done })) };
+            }
+          }
+        } catch {
+          // Disk parsing also failed
         }
       }
       if (!plan) {
@@ -836,29 +866,59 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
         await markSliceUndoneInRoadmap(basePath, milestoneId, slice.id, fixesApplied);
       }
 
-      // Blocker-without-replan detection (using engine task blocker field)
+      // Blocker-without-replan detection
       const replanPath = resolveSliceFile(basePath, milestoneId, slice.id, "REPLAN");
-      if (!replanPath && engineAvailable) {
-        try {
-          const engine = new WorkflowEngine(basePath);
-          const tasks = engine.getTasks(milestoneId, slice.id);
-          for (const task of tasks) {
-            if (task.status !== "done") continue;
-            if (task.blocker) {
-              issues.push({
-                severity: "warning",
-                code: "blocker_discovered_no_replan",
-                scope: "slice",
-                unitId,
-                message: `Task ${task.id} has a blocker recorded but no REPLAN.md exists for ${slice.id} \u2014 slice may be stuck`,
-                file: relSliceFile(basePath, milestoneId, slice.id, "REPLAN"),
-                fixable: false,
-              });
-              break;
+      if (!replanPath) {
+        let blockerFound = false;
+        // Try engine first for blocker field
+        if (isEngineAvailable(basePath)) {
+          try {
+            const engine = new WorkflowEngine(basePath);
+            const tasks = engine.getTasks(milestoneId, slice.id);
+            for (const task of tasks) {
+              if (task.status !== "done") continue;
+              if (task.blocker) {
+                issues.push({
+                  severity: "warning",
+                  code: "blocker_discovered_no_replan",
+                  scope: "slice",
+                  unitId,
+                  message: `Task ${task.id} has a blocker recorded but no REPLAN.md exists for ${slice.id} \u2014 slice may be stuck`,
+                  file: relSliceFile(basePath, milestoneId, slice.id, "REPLAN"),
+                  fixable: false,
+                });
+                blockerFound = true;
+                break;
+              }
             }
+          } catch {
+            // Non-fatal — try disk fallback
           }
-        } catch {
-          // Non-fatal — blocker detection failed
+        }
+        // Fallback: check task summary frontmatter for blocker_discovered: true
+        if (!blockerFound && tasksDir) {
+          try {
+            for (const task of plan.tasks) {
+              if (!task.done) continue;
+              const summaryFile = resolveTaskFile(basePath, milestoneId, slice.id, task.id, "SUMMARY");
+              if (!summaryFile) continue;
+              const summaryContent = await loadFile(summaryFile);
+              if (summaryContent && /^blocker_discovered:\s*true/m.test(summaryContent)) {
+                issues.push({
+                  severity: "warning",
+                  code: "blocker_discovered_no_replan",
+                  scope: "slice",
+                  unitId,
+                  message: `Task ${task.id} has a blocker recorded but no REPLAN.md exists for ${slice.id} \u2014 slice may be stuck`,
+                  file: relSliceFile(basePath, milestoneId, slice.id, "REPLAN"),
+                  fixable: false,
+                });
+                break;
+              }
+            }
+          } catch {
+            // Non-fatal — blocker detection from disk failed
+          }
         }
       }
 
