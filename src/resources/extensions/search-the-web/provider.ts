@@ -10,15 +10,8 @@
  */
 
 import { AuthStorage } from '@gsd/pi-coding-agent'
-import { homedir } from 'os'
-import { join } from 'path'
 import { resolveSearchProviderFromPreferences } from '../gsd/preferences.js'
-
-// Compute authFilePath locally instead of importing from app-paths.ts,
-// because extensions are copied to ~/.gsd/agent/extensions/ at runtime
-// where the relative import '../../../app-paths.ts' doesn't resolve.
-const gsdHome = process.env.GSD_HOME || join(homedir(), '.gsd')
-const authFilePath = join(gsdHome, 'agent', 'auth.json')
+import { authFilePath } from '../../../app-paths.js'
 
 export type SearchProvider = 'tavily' | 'brave' | 'ollama'
 export type SearchProviderPreference = SearchProvider | 'auto'

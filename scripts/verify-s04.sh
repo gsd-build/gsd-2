@@ -10,7 +10,7 @@ FAIL=0
 pass() { echo "  PASS: $1"; }
 fail() { echo "  FAIL: $1"; FAIL=1; }
 
-SMOKE_PREFIX=/tmp/gsd-smoke-prefix
+SMOKE_PREFIX="${TMPDIR:-/tmp}/gsd-smoke-prefix"
 TARBALL=""
 
 # Capture ~/.gsd/agent/sessions/ count before any smoke runs (for Check 9)

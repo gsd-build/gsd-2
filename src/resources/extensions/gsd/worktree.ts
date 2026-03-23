@@ -150,7 +150,16 @@ export function resolveProjectRoot(basePath: string): string {
     // The candidate is the home directory (or within it in a way that .gsd
     // maps to the user-level GSD dir). Try to recover the real project root
     // from the worktree's .git file.
-    const realRoot = resolveProjectRootFromGitFile(basePath);
+    //
+    // Extract the worktree root directory from the path using the segment
+    // position — this is more reliable than walking up from a deep subdirectory,
+    // which can fail when symlinks cause path resolution differences.
+    const afterMarker = normalizedPath.slice(seg.afterWorktrees);
+    const worktreeName = afterMarker.split("/")[0];
+    const worktreeRoot = worktreeName
+      ? basePath.slice(0, seg.afterWorktrees + worktreeName.length)
+      : basePath;
+    const realRoot = resolveProjectRootFromGitFile(worktreeRoot);
     if (realRoot) return realRoot;
     // If git file resolution failed, return basePath unchanged rather than ~
     return basePath;

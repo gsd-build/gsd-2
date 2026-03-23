@@ -7,6 +7,7 @@ import { AuthStorage } from "@gsd/pi-coding-agent";
 import { Editor, type EditorTheme, Key, matchesKey, truncateToWidth } from "@gsd/pi-tui";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { authFilePath } from "../../../app-paths.js";
 import { getGlobalGSDPreferencesPath, loadEffectiveGSDPreferences } from "../gsd/preferences.js";
 import { getRemoteConfigStatus, isValidChannelId, resolveRemoteConfig } from "./config.js";
 import { maskEditorLine, sanitizeError } from "../shared/mod.js";
@@ -300,9 +301,8 @@ async function promptSlackChannelId(ctx: ExtensionCommandContext): Promise<strin
 }
 
 function getAuthStorage(): AuthStorage {
-  const authPath = join(process.env.HOME ?? "", ".gsd", "agent", "auth.json");
-  mkdirSync(dirname(authPath), { recursive: true });
-  return AuthStorage.create(authPath);
+  mkdirSync(dirname(authFilePath), { recursive: true });
+  return AuthStorage.create(authFilePath);
 }
 
 function saveProviderToken(provider: string, token: string): void {

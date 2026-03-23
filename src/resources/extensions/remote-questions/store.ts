@@ -4,15 +4,12 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import type { RemotePrompt, RemotePromptRecord, RemotePromptRef, RemoteAnswer, RemotePromptStatus } from "./types.js";
-
-function getGsdHome(): string {
-  return process.env.GSD_HOME || join(homedir(), ".gsd");
-}
+import { homedir } from "node:os";
 
 function runtimeDir(): string {
-  return join(getGsdHome(), "runtime", "remote-questions");
+  const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
+  return join(gsdHome, "runtime", "remote-questions");
 }
 
 function recordPath(id: string): string {

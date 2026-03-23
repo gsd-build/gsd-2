@@ -9,9 +9,7 @@
 import type { ExtensionCommandContext } from "@gsd/pi-coding-agent";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { homedir } from "node:os";
-
-const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
+import { appRoot as gsdHome } from "../../../app-paths.js";
 
 // ─── Types (mirrored from extension-registry.ts) ────────────────────────────
 

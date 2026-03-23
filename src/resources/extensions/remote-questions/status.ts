@@ -7,10 +7,6 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { readPromptRecord } from "./store.js";
 
-function getGsdHome(): string {
-  return process.env.GSD_HOME || join(homedir(), ".gsd");
-}
-
 export interface LatestPromptSummary {
   id: string;
   status: string;
@@ -18,7 +14,8 @@ export interface LatestPromptSummary {
 }
 
 export function getLatestPromptSummary(): LatestPromptSummary | null {
-  const runtimeDir = join(getGsdHome(), "runtime", "remote-questions");
+  const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
+  const runtimeDir = join(gsdHome, "runtime", "remote-questions");
   if (!existsSync(runtimeDir)) return null;
   const files = readdirSync(runtimeDir).filter((f) => f.endsWith(".json"));
   if (files.length === 0) return null;

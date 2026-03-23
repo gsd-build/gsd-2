@@ -8,10 +8,8 @@
 import { existsSync, readdirSync, unlinkSync } from "node:fs";
 import { loadJsonFileOrNull } from "./json-persistence.js";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { resolveProjectRoot } from "./worktree.js";
-
-const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
+import { appRoot as gsdHome } from "../../../app-paths.js";
 
 // ─── Resource Staleness ───────────────────────────────────────────────────
 

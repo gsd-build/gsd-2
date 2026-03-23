@@ -23,6 +23,7 @@ import {
   relMilestoneFile, relSliceFile,
 } from "./paths.js";
 import { join } from "node:path";
+import { agentDir } from "../../../app-paths.js";
 import { readFileSync, existsSync, mkdirSync, readdirSync, rmSync, unlinkSync } from "node:fs";
 import { readSessionLockData, isSessionLockProcessAlive } from "./session-lock.js";
 import { nativeIsRepo, nativeInit } from "./native-git-bridge.js";
@@ -242,7 +243,7 @@ async function dispatchWorkflow(
     }
   }
 
-  const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(process.env.HOME ?? "~", ".gsd", "agent", "GSD-WORKFLOW.md");
+  const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(agentDir, "GSD-WORKFLOW.md");
   const workflow = readFileSync(workflowPath, "utf-8");
 
   pi.sendMessage(

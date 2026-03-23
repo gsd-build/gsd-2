@@ -7,7 +7,7 @@ import type { GSDPreferences } from "../gsd/preferences.js";
 import type { GSDState, Phase } from "../gsd/types.js";
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_SOCKET_PATH = "/tmp/cmux.sock";
+const DEFAULT_SOCKET_PATH = join(tmpdir(), "cmux.sock");
 const STATUS_KEY = "gsd";
 const lastSidebarSnapshots = new Map<string, string>();
 let cmuxPromptedThisSession = false;

@@ -29,7 +29,7 @@ import * as _bundledMcpServerStdio from "@modelcontextprotocol/sdk/server/stdio.
 import * as _bundledMcpServerSse from "@modelcontextprotocol/sdk/server/sse.js";
 import * as _bundledMcpServerStreamableHttp from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import * as _bundledMcpTypes from "@modelcontextprotocol/sdk/types.js";
-import { getAgentDir, isBunBinary } from "../../config.js";
+import { CONFIG_DIR_NAME, getAgentDir, isBunBinary } from "../../config.js";
 // NOTE: This import works because loader.ts exports are NOT re-exported from index.ts,
 // avoiding a circular dependency. Extensions can import from @gsd/pi-coding-agent.
 import * as _bundledPiCodingAgent from "../../index.js";
@@ -856,7 +856,7 @@ export async function discoverAndLoadExtensions(
 
 	// 1. Project-local extensions: cwd/.pi/extensions/
 	// Only loaded when the project path has been explicitly trusted (TOFU model).
-	const localExtDir = path.join(cwd, ".pi", "extensions");
+	const localExtDir = path.join(cwd, CONFIG_DIR_NAME, "extensions");
 	const localDiscovered = discoverExtensionsInDir(localExtDir);
 	if (localDiscovered.length > 0) {
 		const untrusted = getUntrustedExtensionPaths(cwd, localDiscovered, agentDir);

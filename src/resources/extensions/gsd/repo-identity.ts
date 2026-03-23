@@ -9,10 +9,8 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-
-const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
+import { appRoot as gsdHome } from "../../../app-paths.js";
 
 // ─── Repo Metadata ───────────────────────────────────────────────────────────
 

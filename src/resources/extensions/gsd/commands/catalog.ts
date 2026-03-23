@@ -1,11 +1,9 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { loadRegistry } from "../workflow-templates.js";
 import { resolveProjectRoot } from "../worktree.js";
-
-const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
+import { appRoot as gsdHome } from "../../../../app-paths.js";
 
 export interface GsdCommandDefinition {
   cmd: string;

@@ -13,6 +13,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { appRoot as gsdHomeDefault } from "../../../app-paths.js";
+
+/** Resolve GSD home dynamically so runtime GSD_HOME overrides are respected. */
+function gsdHome(): string {
+  return process.env.GSD_HOME || gsdHomeDefault;
+}
 
 import { gsdRoot } from "./paths.js";
 import { parse as parseYaml } from "yaml";
@@ -81,10 +87,6 @@ export {
 } from "./preferences-models.js";
 
 // ─── Path Constants & Getters ───────────────────────────────────────────────
-
-function gsdHome(): string {
-  return process.env.GSD_HOME || join(homedir(), ".gsd");
-}
 
 function globalPreferencesPath(): string {
   return join(gsdHome(), "preferences.md");

@@ -307,7 +307,17 @@ async function main(): Promise<void> {
       const dir = createRepoWithActiveMilestone();
       cleanups.push(dir);
 
-      // Write integration branch metadata for M001 pointing to a non-existent branch
+      // Switch to a throwaway branch, delete "main", then detach HEAD so
+      // nativeDetectMainBranch finds no branch at all (no origin/HEAD, no
+      // main/master refs, and --show-current returns empty on detached HEAD).
+      run("git checkout -b no-fallback-branch", dir);
+      run("git branch -D main", dir);
+      run("git checkout --detach", dir);
+      run("git branch -D no-fallback-branch", dir);
+
+      // Write integration branch metadata for M001 pointing to a non-existent branch.
+      // With no fallback branch available, resolveMilestoneIntegrationBranch returns
+      // status "missing" — severity error, fixable false.
       const metaPath = join(dir, ".gsd", "milestones", "M001", "M001-META.json");
       writeFileSync(metaPath, JSON.stringify({ integrationBranch: "feat/does-not-exist" }, null, 2));
 
@@ -318,8 +328,8 @@ async function main(): Promise<void> {
         missingBranchIssues[0]?.message.includes("feat/does-not-exist"),
         "message includes the missing branch name",
       );
-      assertEq(missingBranchIssues[0]?.fixable, true, "integration_branch_missing is auto-fixable via fallback");
-      assertEq(missingBranchIssues[0]?.severity, "warning", "severity is warning (fallback available)");
+      assertEq(missingBranchIssues[0]?.fixable, false, "integration_branch_missing is not auto-fixable when no fallback exists");
+      assertEq(missingBranchIssues[0]?.severity, "error", "severity is error when no fallback branch exists");
     }
     } else {
       console.log("\n=== integration_branch_missing (skipped on Windows) ===");

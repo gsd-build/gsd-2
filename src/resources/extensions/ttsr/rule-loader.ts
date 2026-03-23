@@ -7,9 +7,7 @@
  */
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
-import { homedir } from "node:os";
-
-const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
+import { appRoot as gsdHome } from "../../../app-paths.js";
 import type { Rule } from "./ttsr-manager.js";
 import { splitFrontmatter, parseFrontmatterMap } from "../shared/frontmatter.js";
 

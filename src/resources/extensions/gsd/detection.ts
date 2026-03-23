@@ -10,8 +10,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { gsdRoot } from "./paths.js";
-
-const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
+import { appRoot as gsdHome } from "../../../app-paths.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 

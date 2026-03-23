@@ -804,8 +804,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 				const existingOwner = toolOwners.get(toolName);
 				if (existingOwner && existingOwner !== ext.path) {
 					// Determine if the existing owner is a built-in (not a user extension)
-					const isBuiltIn = !existingOwner.includes("/.gsd/agent/extensions/") &&
-						!existingOwner.includes("/.gsd/extensions/");
+					const isBuiltIn = !existingOwner.includes(`/${CONFIG_DIR_NAME}/agent/extensions/`) &&
+						!existingOwner.includes(`/${CONFIG_DIR_NAME}/extensions/`);
 					const hint = isBuiltIn
 						? ` (built-in tool supersedes — consider removing ${ext.path})`
 						: "";
@@ -822,8 +822,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 			for (const commandName of ext.commands.keys()) {
 				const existingOwner = commandOwners.get(commandName);
 				if (existingOwner && existingOwner !== ext.path) {
-					const isBuiltIn = !existingOwner.includes("/.gsd/agent/extensions/") &&
-						!existingOwner.includes("/.gsd/extensions/");
+					const isBuiltIn = !existingOwner.includes(`/${CONFIG_DIR_NAME}/agent/extensions/`) &&
+						!existingOwner.includes(`/${CONFIG_DIR_NAME}/extensions/`);
 					const hint = isBuiltIn
 						? ` (built-in command supersedes — consider removing ${ext.path})`
 						: "";

@@ -11,6 +11,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
+import { appRoot as gsdHome } from "../../../app-paths.js";
 
 const execFile = promisify(execFileCb);
 
@@ -56,8 +57,6 @@ interface Baseline {
 function encodeCwd(cwd: string): string {
 	return cwd.replace(/\//g, "--");
 }
-
-const gsdHome = process.env.GSD_HOME || path.join(os.homedir(), ".gsd");
 
 function getIsolationBaseDir(cwd: string, taskId: string): string {
 	return path.join(gsdHome, "wt", encodeCwd(cwd), taskId);

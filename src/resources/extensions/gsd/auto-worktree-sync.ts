@@ -19,10 +19,8 @@ import {
   readdirSync,
 } from "node:fs";
 import { join, sep as pathSep } from "node:path";
-import { homedir } from "node:os";
 import { safeCopy, safeCopyRecursive } from "./safe-fs.js";
-
-const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
+import { appRoot as gsdHome } from "../../../app-paths.js";
 
 // ─── Project Root → Worktree Sync ─────────────────────────────────────────
 
