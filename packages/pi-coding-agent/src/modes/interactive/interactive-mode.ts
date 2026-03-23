@@ -1519,6 +1519,13 @@ export class InteractiveMode {
 		options: string[],
 		opts?: ExtensionUIDialogOptions,
 	): Promise<string | undefined> {
+		// If a previous selector is still active, dispose it before creating a
+		// new one.  This avoids leaking the previous promise and DOM state when
+		// showExtensionSelector is called rapidly.
+		if (this.extensionSelector) {
+			this.hideExtensionSelector();
+		}
+
 		return new Promise((resolve) => {
 			if (opts?.signal?.aborted) {
 				resolve(undefined);
@@ -2331,18 +2338,24 @@ export class InteractiveMode {
 		const ignoreSigint = () => {};
 		process.on("SIGINT", ignoreSigint);
 
-		// Set up handler to restore TUI when resumed
-		process.once("SIGCONT", () => {
+		try {
+			// Set up handler to restore TUI when resumed
+			process.once("SIGCONT", () => {
+				process.removeListener("SIGINT", ignoreSigint);
+				this.ui.start();
+				this.ui.requestRender(true);
+			});
+
+			// Stop the TUI (restore terminal to normal mode)
+			this.ui.stop();
+
+			// Send SIGTSTP to process group (pid=0 means all processes in group)
+			process.kill(0, "SIGTSTP");
+		} catch {
+			// If suspend fails (e.g. SIGTSTP not supported), ensure the
+			// SIGINT listener doesn't leak.
 			process.removeListener("SIGINT", ignoreSigint);
-			this.ui.start();
-			this.ui.requestRender(true);
-		});
-
-		// Stop the TUI (restore terminal to normal mode)
-		this.ui.stop();
-
-		// Send SIGTSTP to process group (pid=0 means all processes in group)
-		process.kill(0, "SIGTSTP");
+		}
 	}
 
 	private async handleFollowUp(): Promise<void> {
