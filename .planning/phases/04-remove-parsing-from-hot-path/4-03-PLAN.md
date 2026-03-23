@@ -2,7 +2,7 @@
 phase: 04-remove-parsing-from-hot-path
 plan: 03
 type: execute
-wave: 2
+wave: 3
 depends_on: [4-01]
 files_modified:
   - src/resources/extensions/gsd/auto-recovery.ts
