@@ -88,7 +88,7 @@ Plans:
 - [x] 4-00-PLAN.md — Wave 0 test scaffolds (checkEngineHealth, import boundary, removed exports)
 - [x] 4-01-PLAN.md — Parser relocation (create legacy/parsers.ts, update all imports)
 - [x] 4-02-PLAN.md — Doctor surgery (remove reconciliation, add engine health checks)
-- [ ] 4-03-PLAN.md — Recovery + forensics simplification (engine queries, event log)
+- [x] 4-03-PLAN.md — Recovery + forensics simplification (engine queries, event log)
 
 ### Phase 5: Dead Code Cleanup
 **Goal**: All code made dead by Phases 1-4 is removed, leaving no completed-units.json paths, no selfHeal, no checkbox mutations, and no oscillation detection

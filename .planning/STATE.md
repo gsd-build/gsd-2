@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-03-22)
 ## Current Position
 
 Phase: 4 of 5 (Remove Parsing from Hot Path) — IN PROGRESS
-Plan: 3 of 4 in current phase (4-00, 4-01, 4-02 complete)
+Plan: 4 of 4 in current phase (4-00, 4-01, 4-02, 4-03 complete)
 Status: Executing
-Last activity: 2026-03-23 — Plan 4-02 complete (Doctor surgery: checkEngineHealth + reconciliation removal)
+Last activity: 2026-03-23 — Plan 4-03 complete (Recovery + Forensics surgery)
 
-Progress: [██████████████░] 75%
+Progress: [██████████████░] 80%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 15
+- Total plans completed: 16
 - Average duration: 5 min
-- Total execution time: 1.3 hours
+- Total execution time: 1.5 hours
 
 **By Phase:**
 
@@ -30,10 +30,10 @@ Progress: [██████████████░] 75%
 | 1 - Engine Foundation | 5 | 23 min | 5 min |
 | 2 - Sync + Prompt Migration | 2 | 5 min | 3 min |
 | 3 - Event Reconciliation + Mandatory Tools | 5 | ~23 min | 5 min |
-| 4 - Remove Parsing from Hot Path | 3 (so far) | 30 min | 10 min |
+| 4 - Remove Parsing from Hot Path | 4 | 42 min | 10 min |
 
 **Recent Trend:**
-- Last 5 plans: 3-05 (3 min), 4-00 (5 min), 4-01 (15 min), 4-02 (10 min)
+- Last 5 plans: 4-00 (5 min), 4-01 (15 min), 4-02 (10 min), 4-03 (12 min)
 - Trend: Steady
 
 *Updated after each plan completion*
@@ -92,6 +92,10 @@ Recent decisions affecting current work:
 - 4-02: RoadmapSliceEntry built from engine SliceRow with risk/demo defaults for isMilestoneComplete compat
 - 4-02: STATE.md missing fix uses renderStateProjection() with deriveState() fallback
 - 4-02: Blocker-without-replan detection uses engine task.blocker field instead of parseSummary
+- 4-03: Fallback verifyExpectedArtifact checks file existence only (no roadmap checkbox) for non-engine projects
+- 4-03: auto-timeout-recovery.ts uses dynamic import of workflow-engine.js for engine.reportBlocker
+- 4-03: state.ts fallback path restored with parsers from legacy/parsers.js (not files.js)
+- 4-03: forensics loadCompletedKeysFromEventLog derives keys from complete_task/complete_slice/plan_slice events
 
 ### Pending Todos
 
@@ -104,5 +108,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-23
-Stopped at: Completed 4-02-PLAN.md (Doctor surgery: checkEngineHealth + reconciliation removal)
+Stopped at: Completed 4-03-PLAN.md (Recovery + Forensics surgery)
 Resume file: None
