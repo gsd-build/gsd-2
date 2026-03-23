@@ -3401,14 +3401,6 @@ export class InteractiveMode {
 		this.ui.setFocus(dialog);
 		this.ui.requestRender();
 
-		// Promise for manual code input (racing with callback server)
-		let manualCodeResolve: ((code: string) => void) | undefined;
-		let manualCodeReject: ((err: Error) => void) | undefined;
-		const manualCodePromise = new Promise<string>((resolve, reject) => {
-			manualCodeResolve = resolve;
-			manualCodeReject = reject;
-		});
-
 		// Restore editor helper — also disposes the dialog to reject any
 		// dangling promises and prevent the UI from getting stuck.
 		const restoreEditor = () => {
@@ -3424,23 +3416,7 @@ export class InteractiveMode {
 				onAuth: (info: { url: string; instructions?: string }) => {
 					dialog.showAuth(info.url, info.instructions);
 
-					if (usesCallbackServer) {
-						// Show input for manual paste, racing with callback
-						dialog
-							.showManualInput("Paste redirect URL below, or complete login in browser:")
-							.then((value) => {
-								if (value && manualCodeResolve) {
-									manualCodeResolve(value);
-									manualCodeResolve = undefined;
-								}
-							})
-							.catch(() => {
-								if (manualCodeReject) {
-									manualCodeReject(new Error("Login cancelled"));
-									manualCodeReject = undefined;
-								}
-							});
-					} else if (providerId === "github-copilot") {
+					if (!usesCallbackServer && providerId === "github-copilot") {
 						// GitHub Copilot polls after onAuth
 						dialog.showWaiting("Waiting for browser authentication...");
 					}
@@ -3455,7 +3431,12 @@ export class InteractiveMode {
 					dialog.showProgress(message);
 				},
 
-				onManualCodeInput: () => manualCodePromise,
+				// Callback-server providers race browser callback with pasted redirect URL.
+				// Keep manual-input promise ownership inside provider flow to avoid
+				// orphaned rejections when the callback is not consumed.
+				onManualCodeInput: usesCallbackServer
+					? () => dialog.showManualInput("Paste redirect URL below, or complete login in browser:")
+					: undefined,
 
 				signal: dialog.signal,
 			});
@@ -3487,12 +3468,6 @@ export class InteractiveMode {
 			this.showStatus(`Logged in to ${providerName}. Credentials saved to ${getAuthPath()}`);
 		} catch (error: unknown) {
 			restoreEditor();
-			// Also reject the manual code promise if it's still pending
-			if (manualCodeReject) {
-				manualCodeReject(new Error("Login cancelled"));
-				manualCodeReject = undefined;
-				manualCodeResolve = undefined;
-			}
 			const errorMsg = error instanceof Error ? error.message : String(error);
 			if (errorMsg !== "Login cancelled" && !errorMsg.includes("Superseded") && !errorMsg.includes("disposed")) {
 				this.showError(`Failed to login to ${providerName}: ${errorMsg}`);
