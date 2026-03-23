@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Sync Migration + Prompt Migration** - Migrate worktree sync to snapshot/restore and migrate key prompts to tool calls (completed 2026-03-22)
 - [x] **Phase 3: Event Reconciliation + Mandatory Tools** - Replace INSERT OR REPLACE with event-based merge, complete prompt migration, add gsd migrate (completed 2026-03-22)
 - [x] **Phase 4: Remove Parsing from Hot Path** - Reduce doctor to infrastructure checks and move markdown parsers to legacy (completed 2026-03-22)
-- [ ] **Phase 5: Dead Code Cleanup** - Remove all dead code unlocked by prior phases (~4,600 lines)
+- [x] **Phase 5: Dead Code Cleanup** - Remove all dead code unlocked by prior phases (~4,600 lines) (completed 2026-03-22)
 
 ## Phase Details
 
@@ -100,7 +100,12 @@ Plans:
   3. `auto-post-unit.ts` contains no doctor fix runs or STATE.md rebuild logic
   4. Stuck detection no longer contains oscillation detection — only same-error-twice detection remains
   5. Net line deletion across the milestone is at least 4,000 lines with all tests passing
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [x] 5-01-PLAN.md — Remove verifyExpectedArtifact, selfHeal remnants, auto-post-unit doctor/STATE blocks
+- [x] 5-02-PLAN.md — Remove completed-units.json, unit-runtime.ts, oscillation detection
+- [x] 5-03-PLAN.md — Final cleanup sweep, completedUnits state type removal, verification
 
 ## Progress
 
@@ -113,4 +118,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Sync Migration + Prompt Migration | 3/3 | Complete | 2026-03-22 |
 | 3. Event Reconciliation + Mandatory Tools | 5/5 | Complete | 2026-03-22 |
 | 4. Remove Parsing from Hot Path | 4/4 | Complete | 2026-03-22 |
-| 5. Dead Code Cleanup | 0/TBD | Not started | - |
+| 5. Dead Code Cleanup | 3/3 | Complete | 2026-03-22 |
