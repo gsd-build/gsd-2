@@ -19,6 +19,8 @@ import {
   parseRoadmap,
   parsePlan,
   parseSummary,
+} from '../legacy/parsers.ts';
+import {
   parseRequirementCounts,
 } from '../files.ts';
 import type {

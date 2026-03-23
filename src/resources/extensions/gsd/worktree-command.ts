@@ -663,15 +663,17 @@ async function handleMerge(
     const commitType = inferCommitType(name);
     const commitMessage = `${commitType}(${name}): merge worktree ${name}`;
 
-    // Reconcile worktree DB into main DB before squash merge
-    const wtDbPath = join(worktreePath(basePath, name), ".gsd", "gsd.db");
-    const mainDbPath = join(basePath, ".gsd", "gsd.db");
-    if (existsSync(wtDbPath) && existsSync(mainDbPath)) {
-      try {
-        const { reconcileWorktreeDb } = await import("./gsd-db.js");
-        reconcileWorktreeDb(mainDbPath, wtDbPath);
-      } catch { /* non-fatal */ }
-    }
+    // Event-based reconciliation (Phase 3 — SYNC-04)
+    // Takes base paths (directories containing .gsd/), not db file paths.
+    const wtBasePath = worktreePath(basePath, name);
+    const mainBasePath = basePath;
+    try {
+      const { reconcileWorktreeLogs } = await import("./workflow-reconcile.js");
+      const result = reconcileWorktreeLogs(mainBasePath, wtBasePath);
+      if (result.conflicts.length > 0) {
+        process.stderr.write(`[gsd] merge blocked: ${result.conflicts.length} conflict(s)\n`);
+      }
+    } catch { /* non-fatal */ }
 
     try {
       mergeWorktreeToMain(basePath, name, commitMessage);

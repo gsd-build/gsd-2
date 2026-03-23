@@ -19,7 +19,6 @@ import type {
 import type { DispatchAction } from "../auto-dispatch.js";
 import type { WorktreeResolver } from "../worktree-resolver.js";
 import type { CmuxLogLevel } from "../../cmux/index.js";
-import type { JournalEntry } from "../journal.js";
 
 /**
  * Dependencies injected by the caller (auto.ts startAuto) so autoLoop
@@ -80,7 +79,6 @@ export interface LoopDeps {
     basePath: string,
     unitType: string,
     unitId: string,
-    completedUnits: number,
     sessionFile?: string,
   ) => void;
   handleLostSessionLock: (
@@ -103,7 +101,7 @@ export interface LoopDeps {
     basePath: string,
     milestoneId: string,
     roadmapContent: string,
-  ) => { pushed: boolean; codeFilesChanged: boolean };
+  ) => { pushed: boolean };
   teardownAutoWorktree: (basePath: string, milestoneId: string) => void;
   createAutoWorktree: (basePath: string, milestoneId: string) => string;
   captureIntegrationBranch: (
@@ -188,29 +186,11 @@ export interface LoopDeps {
     startedAt: number,
     opts?: CloseoutOptions & Record<string, unknown>,
   ) => Promise<void>;
-  verifyExpectedArtifact: (
-    unitType: string,
-    unitId: string,
-    basePath: string,
-  ) => boolean;
-  clearUnitRuntimeRecord: (
-    basePath: string,
-    unitType: string,
-    unitId: string,
-  ) => void;
-  writeUnitRuntimeRecord: (
-    basePath: string,
-    unitType: string,
-    unitId: string,
-    startedAt: number,
-    record: Record<string, unknown>,
-  ) => void;
   recordOutcome: (unitType: string, tier: string, success: boolean) => void;
   writeLock: (
     lockBase: string,
     unitType: string,
     unitId: string,
-    completedCount: number,
     sessionFile?: string,
   ) => void;
   captureAvailableSkills: () => void;
@@ -286,7 +266,4 @@ export interface LoopDeps {
 
   // Session manager
   getSessionFile: (ctx: ExtensionContext) => string;
-
-  // Journal
-  emitJournalEvent: (entry: JournalEntry) => void;
 }

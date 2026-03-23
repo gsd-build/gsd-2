@@ -23,7 +23,9 @@ import {
 } from "./metrics.js";
 import { readCrashLock, isLockProcessAlive, formatCrashInfo, type LockData } from "./crash-recovery.js";
 import { runGSDDoctor, formatDoctorIssuesForPrompt, type DoctorIssue } from "./doctor.js";
-import { verifyExpectedArtifact } from "./auto-recovery.js";
+import { WorkflowEngine, isEngineAvailable } from "./workflow-engine.js";
+import { resolveExpectedArtifactPath } from "./auto-artifact-paths.js";
+import { readEvents } from "./workflow-events.js";
 import { deriveState } from "./state.js";
 import { isAutoActive } from "./auto.js";
 import { loadPrompt } from "./prompt-loader.js";
@@ -151,7 +153,7 @@ export async function buildForensicReport(basePath: string): Promise<ForensicRep
   const metrics = loadLedgerFromDisk(basePath);
 
   // 4. Load completed keys
-  const completedKeys = loadCompletedKeys(basePath);
+  const completedKeys = loadCompletedKeysFromEventLog(basePath);
 
   // 5. Check crash lock
   const crashLock = readCrashLock(basePath);
@@ -288,14 +290,32 @@ function resolveActivityDirs(basePath: string, activeMilestone?: string | null):
   return dirs;
 }
 
-// ─── Completed Keys Loader ────────────────────────────────────────────────────
+// ─── Completed Keys from Event Log ────────────────────────────────────────────
 
-function loadCompletedKeys(basePath: string): string[] {
-  const file = join(gsdRoot(basePath), "completed-units.json");
+function loadCompletedKeysFromEventLog(basePath: string): string[] {
   try {
-    if (existsSync(file)) {
-      return JSON.parse(readFileSync(file, "utf-8"));
+    const logPath = join(gsdRoot(basePath), "event-log.jsonl");
+    const events = readEvents(logPath);
+    const keys: string[] = [];
+    for (const event of events) {
+      if (event.cmd === "complete_task") {
+        const p = event.params as { milestoneId?: string; sliceId?: string; taskId?: string };
+        if (p.milestoneId && p.sliceId && p.taskId) {
+          keys.push(`execute-task/${p.milestoneId}/${p.sliceId}/${p.taskId}`);
+        }
+      } else if (event.cmd === "complete_slice") {
+        const p = event.params as { milestoneId?: string; sliceId?: string };
+        if (p.milestoneId && p.sliceId) {
+          keys.push(`complete-slice/${p.milestoneId}/${p.sliceId}`);
+        }
+      } else if (event.cmd === "plan_slice") {
+        const p = event.params as { milestoneId?: string; sliceId?: string };
+        if (p.milestoneId && p.sliceId) {
+          keys.push(`plan-slice/${p.milestoneId}/${p.sliceId}`);
+        }
+      }
     }
+    return keys;
   } catch { /* non-fatal */ }
   return [];
 }
@@ -364,18 +384,78 @@ function detectTimeouts(traces: UnitTrace[], anomalies: ForensicAnomaly[]): void
   }
 }
 
+/**
+ * Check whether an artifact is present for a completed unit.
+ * Uses engine query if available, falls back to file-existence check.
+ */
+function checkArtifactPresent(unitType: string, unitId: string, basePath: string): boolean {
+  // Hook units always pass
+  if (unitType.startsWith("hook/")) return true;
+
+  try {
+    const parts = unitId.split("/");
+    const mid = parts[0];
+    const sid = parts[1];
+    const tid = parts[2];
+
+    if (isEngineAvailable(basePath) && mid) {
+      const engine = new WorkflowEngine(basePath);
+      if (unitType === "execute-task" && sid && tid) {
+        const taskRow = engine.getTask(mid, sid, tid);
+        return !!(taskRow && taskRow.status === "done");
+      }
+      if (unitType === "complete-slice" && sid) {
+        const sliceRow = engine.getSlice(mid, sid);
+        return !!(sliceRow && sliceRow.status === "done");
+      }
+      if (unitType === "plan-slice" && sid) {
+        return engine.getTasks(mid, sid).length > 0;
+      }
+    }
+
+    // Fallback: file-existence check
+    const artifactPath = resolveExpectedArtifactPath(unitType, unitId, basePath);
+    if (!artifactPath) return true; // no known artifact — treat as present
+    return existsSync(artifactPath);
+  } catch {
+    return true; // non-fatal: fail open
+  }
+}
+
 function detectMissingArtifacts(completedKeys: string[], basePath: string, activeMilestone: string | null, anomalies: ForensicAnomaly[]): void {
   // Also check the worktree path for artifacts — they may exist there but not at root
   const wtBasePath = activeMilestone ? getAutoWorktreePath(basePath, activeMilestone) : null;
 
+  // Detect stuck loops from event log: same task completed more than once
+  const completionCounts = new Map<string, number>();
   for (const key of completedKeys) {
+    completionCounts.set(key, (completionCounts.get(key) ?? 0) + 1);
+  }
+  for (const [key, count] of completionCounts) {
+    if (count > 1) {
+      const slashIdx = key.indexOf("/");
+      if (slashIdx === -1) continue;
+      anomalies.push({
+        type: "stuck-loop",
+        severity: count >= 3 ? "error" : "warning",
+        unitType: key.slice(0, slashIdx),
+        unitId: key.slice(slashIdx + 1),
+        summary: `Event log shows ${key} completed ${count} times`,
+        details: `Multiple completion events for the same unit suggest a stuck loop or repeated dispatch.`,
+      });
+    }
+  }
+
+  // Check for completed events without corresponding artifacts on disk
+  const uniqueKeys = new Set(completedKeys);
+  for (const key of uniqueKeys) {
     const slashIdx = key.indexOf("/");
     if (slashIdx === -1) continue;
     const unitType = key.slice(0, slashIdx);
     const unitId = key.slice(slashIdx + 1);
 
-    const rootHasArtifact = verifyExpectedArtifact(unitType, unitId, basePath);
-    const wtHasArtifact = wtBasePath ? verifyExpectedArtifact(unitType, unitId, wtBasePath) : false;
+    const rootHasArtifact = checkArtifactPresent(unitType, unitId, basePath);
+    const wtHasArtifact = wtBasePath ? checkArtifactPresent(unitType, unitId, wtBasePath) : false;
 
     if (!rootHasArtifact && !wtHasArtifact) {
       anomalies.push({
@@ -383,8 +463,8 @@ function detectMissingArtifacts(completedKeys: string[], basePath: string, activ
         severity: "error",
         unitType,
         unitId,
-        summary: `Completed key ${key} but artifact missing or invalid`,
-        details: `The unit is recorded as completed but verifyExpectedArtifact() returns false at both project root and worktree. The completion state is stale.`,
+        summary: `Event log records ${key} as completed but artifact missing or invalid`,
+        details: `The unit has a completion event in the event log but artifact check returns false at both project root and worktree.`,
       });
     }
   }

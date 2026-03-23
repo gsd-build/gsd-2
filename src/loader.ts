@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 // GSD Startup Loader
-// Copyright (c) 2026 Jeremy McSpadden <jeremy@fluxlabs.net>
 import { fileURLToPath } from 'url'
 import { dirname, resolve, join, relative, delimiter } from 'path'
 import { existsSync, readFileSync, mkdirSync, symlinkSync, cpSync } from 'fs'

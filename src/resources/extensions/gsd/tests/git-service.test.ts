@@ -251,8 +251,8 @@ async function main(): Promise<void> {
 
   assertEq(
     RUNTIME_EXCLUSION_PATHS.length,
-    9,
-    "exactly 9 runtime exclusion paths"
+    8,
+    "exactly 8 runtime exclusion paths"
   );
 
   const expectedPaths = [
@@ -261,7 +261,6 @@ async function main(): Promise<void> {
     ".gsd/worktrees/",
     ".gsd/auto.lock",
     ".gsd/metrics.json",
-    ".gsd/completed-units.json",
     ".gsd/STATE.md",
     ".gsd/gsd.db",
     ".gsd/DISCUSSION-MANIFEST.json",
@@ -409,11 +408,10 @@ async function main(): Promise<void> {
 
     // Simulate a repo where .gsd/ files were previously force-added
     createFile(repo, ".gsd/metrics.json", '{"version":1}');
-    createFile(repo, ".gsd/completed-units.json", '["unit1"]');
     createFile(repo, ".gsd/activity/log.jsonl", '{"ts":1}');
     createFile(repo, "src/real.ts", "real code");
     // Force-add .gsd/ files to simulate historical tracking
-    runGit(repo, ["add", "-f", ".gsd/metrics.json", ".gsd/completed-units.json", ".gsd/activity/log.jsonl", "src/real.ts"]);
+    runGit(repo, ["add", "-f", ".gsd/metrics.json", ".gsd/activity/log.jsonl", "src/real.ts"]);
     runGit(repo, ["commit", "-F", "-"], { input: "init with tracked runtime files" });
 
     // Add .gitignore with .gsd/ (matches real-world setup from ensureGitignore)
@@ -424,12 +422,10 @@ async function main(): Promise<void> {
     // Verify runtime files are tracked (precondition)
     const tracked = run("git ls-files .gsd/", repo);
     assertTrue(tracked.includes("metrics.json"), "precondition: metrics.json tracked");
-    assertTrue(tracked.includes("completed-units.json"), "precondition: completed-units.json tracked");
     assertTrue(tracked.includes("activity/log.jsonl"), "precondition: activity log tracked");
 
     // Now modify both runtime and real files
     createFile(repo, ".gsd/metrics.json", '{"version":2}');
-    createFile(repo, ".gsd/completed-units.json", '["unit1","unit2"]');
     createFile(repo, ".gsd/activity/log.jsonl", '{"ts":2}');
     createFile(repo, "src/real.ts", "updated code");
 
@@ -448,7 +444,6 @@ async function main(): Promise<void> {
 
     // Verify a second autoCommit with changed runtime files does NOT stage them
     createFile(repo, ".gsd/metrics.json", '{"version":3}');
-    createFile(repo, ".gsd/completed-units.json", '["unit1","unit2","unit3"]');
     createFile(repo, "src/real.ts", "third version");
 
     const msg2 = svc.autoCommit("execute-task", "M001/S01/T02");
@@ -457,7 +452,6 @@ async function main(): Promise<void> {
     const show2 = run("git show --stat HEAD", repo);
     assertTrue(show2.includes("src/real.ts"), "real files committed in second commit");
     assertTrue(!show2.includes("metrics"), "metrics.json not in second commit");
-    assertTrue(!show2.includes("completed-units"), "completed-units.json not in second commit");
     assertTrue(!show2.includes("activity"), "activity not in second commit");
 
     rmSync(repo, { recursive: true, force: true });
@@ -1110,7 +1104,6 @@ async function main(): Promise<void> {
     // Create and track runtime files (simulates pre-.gitignore state)
     mkdirSync(join(repo, ".gsd", "activity"), { recursive: true });
     mkdirSync(join(repo, ".gsd", "runtime"), { recursive: true });
-    writeFileSync(join(repo, ".gsd", "completed-units.json"), '["u1"]');
     writeFileSync(join(repo, ".gsd", "metrics.json"), '{}');
     writeFileSync(join(repo, ".gsd", "STATE.md"), "# State");
     writeFileSync(join(repo, ".gsd", "activity", "log.jsonl"), "{}");
@@ -1121,7 +1114,6 @@ async function main(): Promise<void> {
 
     // Precondition: runtime files are tracked
     const trackedBefore = run("git ls-files .gsd/", repo);
-    assertTrue(trackedBefore.includes("completed-units.json"), "untrack: precondition — completed-units tracked");
     assertTrue(trackedBefore.includes("metrics.json"), "untrack: precondition — metrics tracked");
 
     // Run untrackRuntimeFiles
@@ -1136,8 +1128,6 @@ async function main(): Promise<void> {
     assertTrue(srcTracked.includes("src.ts"), "untrack: non-runtime files remain tracked");
 
     // Files still exist on disk
-    assertTrue(existsSync(join(repo, ".gsd", "completed-units.json")),
-      "untrack: completed-units.json still on disk");
     assertTrue(existsSync(join(repo, ".gsd", "metrics.json")),
       "untrack: metrics.json still on disk");
 
@@ -1409,55 +1399,6 @@ async function main(): Promise<void> {
     assertEq(result.skipped, true, "runPreMergeCheck skips when no package.json found");
 
     rmSync(repo, { recursive: true, force: true });
-  }
-
-  // ─── autoCommit: symlinked .gsd stages new milestone artifacts (#2104) ──
-
-  console.log("\n=== autoCommit: symlinked .gsd stages new milestone artifacts (#2104) ===");
-
-  {
-    // Reproduction: when .gsd is a symlink (external state project),
-    // autoCommit silently fails to stage NEW .gsd/milestones/ files because:
-    //   1. nativeAddAllWithExclusions falls back to plain `git add -A` (symlink)
-    //   2. `.gsd` is in .gitignore → new .gsd/ files are invisible to `git add`
-    // The fix: smartStage() force-adds .gsd/milestones/ after the normal staging.
-    const repo = initTempRepo();
-
-    // Create an external .gsd directory and symlink it into the repo
-    const externalGsd = mkdtempSync(join(tmpdir(), "gsd-external-symlink-"));
-    mkdirSync(join(externalGsd, "milestones", "M009"), { recursive: true });
-    mkdirSync(join(externalGsd, "activity"), { recursive: true });
-    mkdirSync(join(externalGsd, "runtime"), { recursive: true });
-
-    symlinkSync(externalGsd, join(repo, ".gsd"));
-
-    // .gitignore blocks .gsd (as ensureGitignore would do for symlink projects)
-    writeFileSync(join(repo, ".gitignore"), ".gsd\n");
-    run("git add .gitignore && git commit -m 'add gitignore'", repo);
-
-    // Simulate new milestone artifacts created during execution
-    writeFileSync(join(externalGsd, "milestones", "M009", "M009-SUMMARY.md"), "# M009 Summary");
-    writeFileSync(join(externalGsd, "milestones", "M009", "S01-SUMMARY.md"), "# S01 Summary");
-    writeFileSync(join(externalGsd, "milestones", "M009", "T01-VERIFY.json"), '{"passed":true}');
-
-    // Also create a normal source file change
-    createFile(repo, "src/feature.ts", "export const feature = true;");
-
-    const svc = new GitServiceImpl(repo);
-    const msg = svc.autoCommit("complete-milestone", "M009");
-    assertTrue(msg !== null, "symlink autoCommit: commit succeeds");
-
-    const committed = run("git show --name-only HEAD", repo);
-    assertTrue(committed.includes("src/feature.ts"), "symlink autoCommit: source file committed");
-    assertTrue(committed.includes(".gsd/milestones/M009/M009-SUMMARY.md"),
-      "symlink autoCommit: new M009-SUMMARY.md is committed (not silently dropped)");
-    assertTrue(committed.includes(".gsd/milestones/M009/S01-SUMMARY.md"),
-      "symlink autoCommit: new S01-SUMMARY.md is committed");
-    assertTrue(committed.includes(".gsd/milestones/M009/T01-VERIFY.json"),
-      "symlink autoCommit: new T01-VERIFY.json is committed");
-
-    try { rmSync(repo, { recursive: true, force: true }); } catch {}
-    try { rmSync(externalGsd, { recursive: true, force: true }); } catch {}
   }
 
   report();

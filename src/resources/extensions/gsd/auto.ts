@@ -53,12 +53,6 @@ import {
 } from "./session-lock.js";
 import type { SessionLockStatus } from "./session-lock.js";
 import {
-  clearUnitRuntimeRecord,
-  inspectExecuteTaskDurability,
-  readUnitRuntimeRecord,
-  writeUnitRuntimeRecord,
-} from "./unit-runtime.js";
-import {
   resolveAutoSupervisorConfig,
   loadEffectiveGSDPreferences,
   getIsolationMode,
@@ -85,7 +79,6 @@ import {
 } from "./auto-observability.js";
 import { closeoutUnit } from "./auto-unit-closeout.js";
 import { recoverTimedOutUnit } from "./auto-timeout-recovery.js";
-import { selfHealRuntimeRecords } from "./auto-recovery.js";
 import { selectAndApplyModel, resolveModelId } from "./auto-model-selection.js";
 import {
   syncProjectRootToWorktree,
@@ -159,17 +152,11 @@ import { pruneQueueOrder } from "./queue-order.js";
 
 import { debugLog, isDebugEnabled, writeDebugSummary } from "./debug-logger.js";
 import {
-  resolveExpectedArtifactPath,
-  verifyExpectedArtifact,
-  writeBlockerPlaceholder,
-  diagnoseExpectedArtifact,
-  skipExecuteTask,
   buildLoopRemediationSteps,
   reconcileMergeState,
 } from "./auto-recovery.js";
-import { resolveDispatch, DISPATCH_RULES } from "./auto-dispatch.js";
-import { initRegistry, convertDispatchRules } from "./rule-registry.js";
-import { emitJournalEvent as _emitJournalEvent, type JournalEntry } from "./journal.js";
+import { resolveExpectedArtifactPath } from "./auto-artifact-paths.js";
+import { resolveDispatch } from "./auto-dispatch.js";
 import {
   type AutoDashboardData,
   updateProgressWidget as _updateProgressWidget,
@@ -218,7 +205,6 @@ import {
   NEW_SESSION_TIMEOUT_MS,
 } from "./auto/session.js";
 import type {
-  CompletedUnit,
   CurrentUnit,
   UnitRouting,
   StartModel,
@@ -230,7 +216,6 @@ export {
   NEW_SESSION_TIMEOUT_MS,
 } from "./auto/session.js";
 export type {
-  CompletedUnit,
   CurrentUnit,
   UnitRouting,
   StartModel,
@@ -340,7 +325,6 @@ export function getAutoDashboardData(): AutoDashboardData {
       ? (s.autoStartTime > 0 ? Date.now() - s.autoStartTime : 0)
       : 0,
     currentUnit: s.currentUnit ? { ...s.currentUnit } : null,
-    completedUnits: [...s.completedUnits],
     basePath: s.basePath,
     totalCost: totals?.cost ?? 0,
     totalTokens: totals?.tokens.total ?? 0,
@@ -356,22 +340,6 @@ export function isAutoActive(): boolean {
 
 export function isAutoPaused(): boolean {
   return s.paused;
-}
-
-export function setActiveEngineId(id: string | null): void {
-  s.activeEngineId = id;
-}
-
-export function getActiveEngineId(): string | null {
-  return s.activeEngineId;
-}
-
-export function setActiveRunDir(runDir: string | null): void {
-  s.activeRunDir = runDir;
-}
-
-export function getActiveRunDir(): string | null {
-  return s.activeRunDir;
 }
 
 /**
@@ -452,7 +420,6 @@ export function checkRemoteAutoSession(projectRoot: string): {
   unitType?: string;
   unitId?: string;
   startedAt?: string;
-  completedUnits?: number;
 } {
   const lock = readCrashLock(projectRoot);
   if (!lock) return { running: false };
@@ -468,7 +435,6 @@ export function checkRemoteAutoSession(projectRoot: string): {
     unitType: lock.unitType,
     unitId: lock.unitId,
     startedAt: lock.startedAt,
-    completedUnits: lock.completedUnits,
   };
 }
 
@@ -496,23 +462,19 @@ function clearUnitTimeout(): void {
   clearInFlightTools();
 }
 
-/** Build snapshot metric opts, enriching with continueHereFired from the runtime record. */
+/** Build snapshot metric opts. */
 function buildSnapshotOpts(
-  unitType: string,
-  unitId: string,
+  _unitType: string,
+  _unitId: string,
 ): {
   continueHereFired?: boolean;
   promptCharCount?: number;
   baselineCharCount?: number;
 } & Record<string, unknown> {
-  const runtime = s.currentUnit
-    ? readUnitRuntimeRecord(s.basePath, unitType, unitId)
-    : null;
   return {
     promptCharCount: s.lastPromptCharCount,
     baselineCharCount: s.lastBaselineCharCount,
     ...(s.currentUnitRouting ?? {}),
-    ...(runtime?.continueHereFired ? { continueHereFired: true } : {}),
   };
 }
 
@@ -798,8 +760,6 @@ export async function pauseAuto(
       stepMode: s.stepMode,
       pausedAt: new Date().toISOString(),
       sessionFile: s.pausedSessionFile,
-      activeEngineId: s.activeEngineId,
-      activeRunDir: s.activeRunDir,
     };
     const runtimeDir = join(gsdRoot(s.originalBasePath || s.basePath), "runtime");
     mkdirSync(runtimeDir, { recursive: true });
@@ -818,11 +778,6 @@ export async function pauseAuto(
       await closeoutUnit(ctx, s.basePath, s.currentUnit.type, s.currentUnit.id, s.currentUnit.startedAt);
     } catch {
       // Non-fatal — best-effort closeout on pause
-    }
-    try {
-      clearUnitRuntimeRecord(s.basePath, s.currentUnit.type, s.currentUnit.id);
-    } catch {
-      // Non-fatal
     }
     s.currentUnit = null;
   }
@@ -896,11 +851,6 @@ function buildResolver(): WorktreeResolver {
  * This bundles all private functions that autoLoop needs without exporting them.
  */
 function buildLoopDeps(): LoopDeps {
-  // Initialize the unified rule registry with converted dispatch rules.
-  // Must happen before LoopDeps is assembled so facade functions
-  // (resolveDispatch, runPreDispatchHooks, etc.) delegate to the registry.
-  initRegistry(convertDispatchRules(DISPATCH_RULES));
-
   return {
     lockBase,
     buildSnapshotOpts,
@@ -967,9 +917,6 @@ function buildLoopDeps(): LoopDeps {
 
     // Unit closeout + runtime records
     closeoutUnit,
-    verifyExpectedArtifact,
-    clearUnitRuntimeRecord,
-    writeUnitRuntimeRecord,
     recordOutcome,
     writeLock,
     captureAvailableSkills,
@@ -1011,9 +958,6 @@ function buildLoopDeps(): LoopDeps {
         return "";
       }
     },
-
-    // Journal
-    emitJournalEvent: (entry: JournalEntry) => _emitJournalEvent(s.basePath, entry),
   } as unknown as LoopDeps;
 }
 
@@ -1036,19 +980,7 @@ export async function startAuto(
       const pausedPath = join(gsdRoot(base), "runtime", "paused-session.json");
       if (existsSync(pausedPath)) {
         const meta = JSON.parse(readFileSync(pausedPath, "utf-8"));
-        if (meta.activeEngineId && meta.activeEngineId !== "dev") {
-          // Custom workflow resume — restore engine state
-          s.activeEngineId = meta.activeEngineId;
-          s.activeRunDir = meta.activeRunDir ?? null;
-          s.originalBasePath = meta.originalBasePath || base;
-          s.stepMode = meta.stepMode ?? requestedStepMode;
-          s.paused = true;
-          try { unlinkSync(pausedPath); } catch { /* non-fatal */ }
-          ctx.ui.notify(
-            `Resuming paused custom workflow${meta.activeRunDir ? ` (${meta.activeRunDir})` : ""}.`,
-            "info",
-          );
-        } else if (meta.milestoneId) {
+        if (meta.milestoneId) {
           // Validate the milestone still exists and isn't already complete (#1664).
           const mDir = resolveMilestonePath(base, meta.milestoneId);
           const summaryFile = resolveMilestoneFile(base, meta.milestoneId, "SUMMARY");
@@ -1142,14 +1074,7 @@ export async function startAuto(
     }
     invalidateAllCaches();
 
-    // Clean stale runtime records left from the paused session
-    try {
-      await selfHealRuntimeRecords(s.basePath, ctx);
-    } catch (e) {
-      debugLog("resume-self-heal-runtime-failed", {
-        error: e instanceof Error ? e.message : String(e),
-      });
-    }
+    // Engine is authoritative — no stale record cleanup needed (D-05)
 
     if (s.pausedSessionFile) {
       const activityDir = join(gsdRoot(s.basePath), "activity");
@@ -1174,18 +1099,15 @@ export async function startAuto(
       lockBase(),
       "resuming",
       s.currentMilestoneId ?? "unknown",
-      s.completedUnits.length,
     );
     writeLock(
       lockBase(),
       "resuming",
       s.currentMilestoneId ?? "unknown",
-      s.completedUnits.length,
     );
     logCmuxEvent(loadEffectiveGSDPreferences()?.preferences, s.stepMode ? "Step-mode resumed." : "Auto-mode resumed.", "progress");
 
-    // Clear orphaned runtime records from prior process deaths before entering the loop
-    await selfHealRuntimeRecords(s.basePath, ctx);
+    // Engine is authoritative — no stale record cleanup needed (D-05)
 
     await autoLoop(ctx, pi, s, buildLoopDeps());
     cleanupAfterLoopExit(ctx);
@@ -1218,8 +1140,7 @@ export async function startAuto(
   }
   logCmuxEvent(loadEffectiveGSDPreferences()?.preferences, requestedStepMode ? "Step-mode started." : "Auto-mode started.", "progress");
 
-  // Clear orphaned runtime records from prior process deaths before entering the loop
-  await selfHealRuntimeRecords(s.basePath, ctx);
+  // Engine is authoritative — no stale record cleanup needed (D-05)
 
   // Dispatch the first unit
   await autoLoop(ctx, pi, s, buildLoopDeps());
@@ -1361,7 +1282,6 @@ export async function dispatchHookUnit(
     s.basePath = targetBasePath;
     s.autoStartTime = Date.now();
     s.currentUnit = null;
-    s.completedUnits = [];
     s.pendingQuickTasks = [];
   }
 
@@ -1386,20 +1306,6 @@ export async function dispatchHookUnit(
     startedAt: hookStartedAt,
   };
 
-  writeUnitRuntimeRecord(
-    s.basePath,
-    hookUnitType,
-    triggerUnitId,
-    hookStartedAt,
-    {
-      phase: "dispatched",
-      wrapupWarningSent: false,
-      timeoutAt: null,
-      lastProgressAt: hookStartedAt,
-      progressCount: 0,
-      lastProgressKind: "dispatch",
-    },
-  );
 
   if (hookModel) {
     const availableModels = ctx.modelRegistry.getAvailable();
@@ -1424,7 +1330,6 @@ export async function dispatchHookUnit(
     lockBase(),
     hookUnitType,
     triggerUnitId,
-    s.completedUnits.length,
     sessionFile,
   );
 
@@ -1435,16 +1340,7 @@ export async function dispatchHookUnit(
     s.unitTimeoutHandle = null;
     if (!s.active) return;
     if (s.currentUnit) {
-      writeUnitRuntimeRecord(
-        s.basePath,
-        hookUnitType,
-        triggerUnitId,
-        hookStartedAt,
-        {
-          phase: "timeout",
-          timeoutAt: Date.now(),
-        },
-      );
+      // Hook unit timed out — no action needed, will be handled by pauseAuto below
     }
     ctx.ui.notify(
       `Hook ${hookName} exceeded ${supervisor.hard_timeout_minutes ?? 30}min timeout. Pausing auto-mode.`,
@@ -1477,9 +1373,6 @@ export { dispatchDirectPhase } from "./auto-direct-dispatch.js";
 
 // Re-export recovery functions for external consumers
 export {
-  resolveExpectedArtifactPath,
-  verifyExpectedArtifact,
-  writeBlockerPlaceholder,
-  skipExecuteTask,
   buildLoopRemediationSteps,
 } from "./auto-recovery.js";
+export { resolveExpectedArtifactPath } from "./auto-artifact-paths.js";

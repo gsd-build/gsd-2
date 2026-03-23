@@ -1,22 +1,14 @@
 /**
  * Timeout recovery logic for auto-mode units.
  * Handles idle and hard timeout recovery with escalation, steering messages,
- * and blocker placeholder generation.
+ * and blocker reporting via engine.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 import {
-  readUnitRuntimeRecord,
-  writeUnitRuntimeRecord,
-  formatExecuteTaskRecoveryStatus,
-  inspectExecuteTaskDurability,
-} from "./unit-runtime.js";
-import {
   resolveExpectedArtifactPath,
   diagnoseExpectedArtifact,
-  skipExecuteTask,
-  writeBlockerPlaceholder,
-} from "./auto-recovery.js";
+} from "./auto-artifact-paths.js";
 import { existsSync } from "node:fs";
 
 import { resolveAgentEnd } from "./auto-loop.js";
@@ -36,15 +28,15 @@ export async function recoverTimedOutUnit(
   reason: "idle" | "hard",
   rctx: RecoveryContext,
 ): Promise<"recovered" | "paused"> {
-  const { basePath, verbose, currentUnitStartedAt, unitRecoveryCount } = rctx;
+  const { basePath, verbose, unitRecoveryCount } = rctx;
 
-  const runtime = readUnitRuntimeRecord(basePath, unitType, unitId);
-  const recoveryAttempts = runtime?.recoveryAttempts ?? 0;
   const maxRecoveryAttempts = reason === "idle" ? 2 : 1;
 
   const recoveryKey = `${unitType}/${unitId}`;
   const attemptNumber = (unitRecoveryCount.get(recoveryKey) ?? 0) + 1;
   unitRecoveryCount.set(recoveryKey, attemptNumber);
+  // recoveryAttempts is 0-based: attempt 1 = recoveryAttempts 0
+  const recoveryAttempts = attemptNumber - 1;
 
   if (attemptNumber > 1) {
     // Exponential backoff: 2^(n-1) seconds, capped at 30s
@@ -57,19 +49,35 @@ export async function recoverTimedOutUnit(
   }
 
   if (unitType === "execute-task") {
-    const status = await inspectExecuteTaskDurability(basePath, unitId);
-    if (!status) return "paused";
+    // Check durability via artifact paths (engine-based status check)
+    const { isEngineAvailable, WorkflowEngine } = await import("./workflow-engine.js");
+    let durableComplete = false;
+    let diagnostic = "unknown status";
 
-    writeUnitRuntimeRecord(basePath, unitType, unitId, currentUnitStartedAt, {
-      recovery: status,
-    });
+    if (isEngineAvailable(basePath)) {
+      try {
+        const parts = unitId.split("/");
+        const [mid, sid, tid] = parts;
+        if (mid && sid && tid) {
+          const engine = new WorkflowEngine(basePath);
+          const taskRow = engine.getTask(mid, sid, tid);
+          durableComplete = !!(taskRow && taskRow.status === "done" && taskRow.summary);
+          diagnostic = durableComplete
+            ? "all durable task artifacts present"
+            : `task status: ${taskRow?.status ?? "not found"}, summary: ${taskRow?.summary ? "present" : "missing"}`;
+        }
+      } catch {
+        durableComplete = false;
+        diagnostic = "engine query failed";
+      }
+    } else {
+      // No engine — fall back to artifact path check
+      const artifactPath = resolveExpectedArtifactPath(unitType, unitId, basePath);
+      durableComplete = !!(artifactPath && existsSync(artifactPath));
+      diagnostic = durableComplete ? "artifact exists on disk" : "artifact missing";
+    }
 
-    const durableComplete = status.summaryExists && status.taskChecked && status.nextActionAdvanced;
     if (durableComplete) {
-      writeUnitRuntimeRecord(basePath, unitType, unitId, currentUnitStartedAt, {
-        phase: "finalized",
-        recovery: status,
-      });
       ctx.ui.notify(
         `${reason === "idle" ? "Idle" : "Timeout"} recovery: ${unitType} ${unitId} already completed on disk. Continuing auto-mode. (attempt ${attemptNumber})`,
         "info",
@@ -81,22 +89,13 @@ export async function recoverTimedOutUnit(
 
     if (recoveryAttempts < maxRecoveryAttempts) {
       const isEscalation = recoveryAttempts > 0;
-      writeUnitRuntimeRecord(basePath, unitType, unitId, currentUnitStartedAt, {
-        phase: "recovered",
-        recovery: status,
-        recoveryAttempts: recoveryAttempts + 1,
-        lastRecoveryReason: reason,
-        lastProgressAt: Date.now(),
-        progressCount: (runtime?.progressCount ?? 0) + 1,
-        lastProgressKind: reason === "idle" ? "idle-recovery-retry" : "hard-recovery-retry",
-      });
 
       const steeringLines = isEscalation
         ? [
             `**FINAL ${reason === "idle" ? "IDLE" : "HARD TIMEOUT"} RECOVERY — last chance before this task is skipped.**`,
             `You are still executing ${unitType} ${unitId}.`,
             `Recovery attempt ${recoveryAttempts + 1} of ${maxRecoveryAttempts}.`,
-            `Current durability status: ${formatExecuteTaskRecoveryStatus(status)}.`,
+            `Current durability status: ${diagnostic}.`,
             "You MUST finish the durable output NOW, even if incomplete.",
             "Write the task summary with whatever you have accomplished so far.",
             "Mark the task [x] in the plan. Commit your work.",
@@ -106,7 +105,7 @@ export async function recoverTimedOutUnit(
             `**${reason === "idle" ? "IDLE" : "HARD TIMEOUT"} RECOVERY — do not stop.**`,
             `You are still executing ${unitType} ${unitId}.`,
             `Recovery attempt ${recoveryAttempts + 1} of ${maxRecoveryAttempts}.`,
-            `Current durability status: ${formatExecuteTaskRecoveryStatus(status)}.`,
+            `Current durability status: ${diagnostic}.`,
             "Do not keep exploring.",
             "Immediately finish the required durable output for this unit.",
             "If full completion is impossible, write the partial artifact/state needed for recovery and make the blocker explicit.",
@@ -127,22 +126,29 @@ export async function recoverTimedOutUnit(
       return "recovered";
     }
 
-    // Retries exhausted — write missing durable artifacts and advance.
-    const diagnostic = formatExecuteTaskRecoveryStatus(status);
+    // Retries exhausted — report blocker via engine and advance.
     const [mid, sid, tid] = unitId.split("/");
-    const skipped = mid && sid && tid
-      ? skipExecuteTask(basePath, mid, sid, tid, status, reason, maxRecoveryAttempts)
-      : false;
+    let reported = false;
+    if (mid && sid && tid) {
+      try {
+        if (isEngineAvailable(basePath)) {
+          const engine = new WorkflowEngine(basePath);
+          engine.reportBlocker({
+            milestoneId: mid,
+            sliceId: sid,
+            taskId: tid,
+            description: `${reason} recovery exhausted ${maxRecoveryAttempts} attempts. ${diagnostic}`,
+          });
+          reported = true;
+        }
+      } catch {
+        // Engine not available — fall through to pause
+      }
+    }
 
-    if (skipped) {
-      writeUnitRuntimeRecord(basePath, unitType, unitId, currentUnitStartedAt, {
-        phase: "skipped",
-        recovery: status,
-        recoveryAttempts: recoveryAttempts + 1,
-        lastRecoveryReason: reason,
-      });
+    if (reported) {
       ctx.ui.notify(
-        `${unitType} ${unitId} skipped after ${maxRecoveryAttempts} recovery attempts (${diagnostic}). Blocker artifacts written. Advancing pipeline. (attempt ${attemptNumber})`,
+        `${unitType} ${unitId} skipped after ${maxRecoveryAttempts} recovery attempts (${diagnostic}). Blocker reported via engine. Advancing pipeline. (attempt ${attemptNumber})`,
         "warning",
       );
       unitRecoveryCount.delete(recoveryKey);
@@ -150,13 +156,7 @@ export async function recoverTimedOutUnit(
       return "recovered";
     }
 
-    // Fallback: couldn't write skip artifacts — pause as before.
-    writeUnitRuntimeRecord(basePath, unitType, unitId, currentUnitStartedAt, {
-      phase: "paused",
-      recovery: status,
-      recoveryAttempts: recoveryAttempts + 1,
-      lastRecoveryReason: reason,
-    });
+    // Fallback: engine not available — pause as before.
     ctx.ui.notify(
       `${reason === "idle" ? "Idle" : "Timeout"} recovery check for ${unitType} ${unitId}: ${diagnostic}`,
       "warning",
@@ -170,11 +170,6 @@ export async function recoverTimedOutUnit(
   // without signaling completion.
   const artifactPath = resolveExpectedArtifactPath(unitType, unitId, basePath);
   if (artifactPath && existsSync(artifactPath)) {
-    writeUnitRuntimeRecord(basePath, unitType, unitId, currentUnitStartedAt, {
-      phase: "finalized",
-      recoveryAttempts: recoveryAttempts + 1,
-      lastRecoveryReason: reason,
-    });
     ctx.ui.notify(
       `${reason === "idle" ? "Idle" : "Timeout"} recovery: ${unitType} ${unitId} artifact already exists on disk. Advancing. (attempt ${attemptNumber})`,
       "info",
@@ -186,14 +181,6 @@ export async function recoverTimedOutUnit(
 
   if (recoveryAttempts < maxRecoveryAttempts) {
     const isEscalation = recoveryAttempts > 0;
-    writeUnitRuntimeRecord(basePath, unitType, unitId, currentUnitStartedAt, {
-      phase: "recovered",
-      recoveryAttempts: recoveryAttempts + 1,
-      lastRecoveryReason: reason,
-      lastProgressAt: Date.now(),
-      progressCount: (runtime?.progressCount ?? 0) + 1,
-      lastProgressKind: reason === "idle" ? "idle-recovery-retry" : "hard-recovery-retry",
-    });
 
     const steeringLines = isEscalation
       ? [
@@ -231,21 +218,32 @@ export async function recoverTimedOutUnit(
     return "recovered";
   }
 
-  // Retries exhausted — write a blocker placeholder and advance the pipeline
+  // Retries exhausted — report blocker via engine and advance the pipeline
   // instead of silently stalling.
-  const placeholder = writeBlockerPlaceholder(
-    unitType, unitId, basePath,
-    `${reason} recovery exhausted ${maxRecoveryAttempts} attempts without producing the artifact.`,
-  );
+  let blockerReported = false;
+  try {
+    const parts = unitId.split("/");
+    const [bMid, bSid, bTid] = parts;
+    if (bMid && bSid && bTid) {
+      const { WorkflowEngine, isEngineAvailable } = await import("./workflow-engine.js");
+      if (isEngineAvailable(basePath)) {
+        const engine = new WorkflowEngine(basePath);
+        engine.reportBlocker({
+          milestoneId: bMid,
+          sliceId: bSid,
+          taskId: bTid,
+          description: `${reason} recovery exhausted ${maxRecoveryAttempts} attempts without producing the artifact.`,
+        });
+        blockerReported = true;
+      }
+    }
+  } catch {
+    // Engine not available — fall through
+  }
 
-  if (placeholder) {
-    writeUnitRuntimeRecord(basePath, unitType, unitId, currentUnitStartedAt, {
-      phase: "skipped",
-      recoveryAttempts: recoveryAttempts + 1,
-      lastRecoveryReason: reason,
-    });
+  if (blockerReported) {
     ctx.ui.notify(
-      `${unitType} ${unitId} skipped after ${maxRecoveryAttempts} recovery attempts. Blocker placeholder written to ${placeholder}. Advancing pipeline. (attempt ${attemptNumber})`,
+      `${unitType} ${unitId} skipped after ${maxRecoveryAttempts} recovery attempts. Blocker reported via engine. Advancing pipeline. (attempt ${attemptNumber})`,
       "warning",
     );
     unitRecoveryCount.delete(recoveryKey);
@@ -254,10 +252,5 @@ export async function recoverTimedOutUnit(
   }
 
   // Fallback: couldn't resolve artifact path — pause as before.
-  writeUnitRuntimeRecord(basePath, unitType, unitId, currentUnitStartedAt, {
-    phase: "paused",
-    recoveryAttempts: recoveryAttempts + 1,
-    lastRecoveryReason: reason,
-  });
   return "paused";
 }

@@ -244,7 +244,7 @@ async function main(): Promise<void> {
       writeFileSync(join(dir, ".gsd", "auto.lock"), JSON.stringify({
         pid: 9999999, startedAt: "2026-03-10T00:00:00Z",
         unitType: "execute-task", unitId: "M001/S01/T01",
-        unitStartedAt: "2026-03-10T00:01:00Z", completedUnits: 3,
+        unitStartedAt: "2026-03-10T00:01:00Z",
       }));
 
       const result = await preDispatchHealthGate(dir);
@@ -332,6 +332,16 @@ async function main(): Promise<void> {
       } finally {
         process.chdir(previousCwd);
       }
+    }
+
+    // ─── Wave 0: Projection drift test (DOC-03 — TODO until Plan 4-02) ──
+    console.log("\n=== projection drift: preDispatchHealthGate re-renders stale projections (DOC-03 — TODO) ===");
+    {
+      // This test will be implemented when Plan 4-02 Task 2 adds projection drift
+      // detection to preDispatchHealthGate. For now, mark as TODO placeholder.
+      // The test should: set up a stale projection file (mtime in past), add a newer
+      // event log entry, call preDispatchHealthGate, and verify projections were re-rendered.
+      console.log("  TODO: preDispatchHealthGate re-renders projections when event log is newer than projection files");
     }
 
   } finally {

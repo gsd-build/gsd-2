@@ -1,6 +1,6 @@
 // gsd-tools — Structured LLM tool tests
 //
-// Tests the three registered tools: gsd_decision_save, gsd_requirement_update, gsd_summary_save.
+// Tests the three registered tools: gsd_save_decision, gsd_update_requirement, gsd_save_summary.
 // Each tool is tested via direct function invocation against an in-memory DB.
 
 import { createTestContext } from './test-helpers.ts';
@@ -50,10 +50,10 @@ function cleanupDir(dir: string): void {
  */
 
 // ═══════════════════════════════════════════════════════════════════════════
-// gsd_decision_save tool tests
+// gsd_save_decision tool tests
 // ═══════════════════════════════════════════════════════════════════════════
 
-console.log('\n── gsd_decision_save ──');
+console.log('\n── gsd_save_decision ──');
 
 {
   const tmpDir = makeTmpDir();
@@ -121,10 +121,10 @@ console.log('\n── gsd_decision_save ──');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// gsd_requirement_update tool tests
+// gsd_update_requirement tool tests
 // ═══════════════════════════════════════════════════════════════════════════
 
-console.log('\n── gsd_requirement_update ──');
+console.log('\n── gsd_update_requirement ──');
 
 {
   const tmpDir = makeTmpDir();
@@ -192,10 +192,10 @@ console.log('\n── gsd_requirement_update ──');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// gsd_summary_save tool tests
+// gsd_save_summary tool tests
 // ═══════════════════════════════════════════════════════════════════════════
 
-console.log('\n── gsd_summary_save ──');
+console.log('\n── gsd_save_summary ──');
 
 {
   const tmpDir = makeTmpDir();

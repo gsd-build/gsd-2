@@ -847,7 +847,6 @@ export function nativeMergeSquash(basePath: string, branch: string): GitMergeRes
       cwd: basePath,
       stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf-8",
-      env: GIT_NO_PROMPT_ENV,
     });
     return { success: true, conflicts: [] };
   } catch (err: unknown) {

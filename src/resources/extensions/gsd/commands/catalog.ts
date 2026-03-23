@@ -3,7 +3,6 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { loadRegistry } from "../workflow-templates.js";
-import { resolveProjectRoot } from "../worktree.js";
 
 const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
 
@@ -15,7 +14,7 @@ export interface GsdCommandDefinition {
 type CompletionMap = Record<string, readonly GsdCommandDefinition[]>;
 
 export const GSD_COMMAND_DESCRIPTION =
-  "GSD — Get Shit Done: /gsd help|start|templates|next|auto|stop|pause|status|widget|visualize|queue|quick|discuss|capture|triage|dispatch|history|undo|rate|skip|export|cleanup|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|logs|forensics|changelog|migrate|remote|steer|knowledge|new-milestone|parallel|cmux|park|unpark|init|setup|inspect|extensions|update|fast";
+  "GSD — Get Shit Done: /gsd help|start|templates|next|auto|stop|pause|status|widget|visualize|queue|quick|discuss|capture|triage|dispatch|history|undo|rate|skip|export|cleanup|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|logs|forensics|changelog|migrate|resolve-conflict|remote|steer|knowledge|new-milestone|parallel|cmux|park|unpark|init|setup|inspect|extensions|update|fast";
 
 export const TOP_LEVEL_SUBCOMMANDS: readonly GsdCommandDefinition[] = [
   { cmd: "help", desc: "Categorized command reference with descriptions" },
@@ -52,6 +51,7 @@ export const TOP_LEVEL_SUBCOMMANDS: readonly GsdCommandDefinition[] = [
   { cmd: "init", desc: "Project init wizard — detect, configure, bootstrap .gsd/" },
   { cmd: "setup", desc: "Global setup status and configuration" },
   { cmd: "migrate", desc: "Migrate a v1 .planning directory to .gsd format" },
+  { cmd: "resolve-conflict", desc: "Resolve worktree merge conflicts" },
   { cmd: "remote", desc: "Control remote auto-mode" },
   { cmd: "steer", desc: "Hard-steer plan documents during execution" },
   { cmd: "inspect", desc: "Show SQLite DB diagnostics" },
@@ -66,7 +66,6 @@ export const TOP_LEVEL_SUBCOMMANDS: readonly GsdCommandDefinition[] = [
   { cmd: "templates", desc: "List available workflow templates" },
   { cmd: "extensions", desc: "Manage extensions (list, enable, disable, info)" },
   { cmd: "fast", desc: "Toggle OpenAI service tier (on/off/flex/status)" },
-  { cmd: "workflow", desc: "Custom workflow lifecycle (new, run, list, validate, pause, resume)" },
 ];
 
 const NESTED_COMPLETIONS: CompletionMap = {
@@ -208,14 +207,6 @@ const NESTED_COMPLETIONS: CompletionMap = {
     { cmd: "ok", desc: "Model was appropriate for this task" },
     { cmd: "under", desc: "Model was underqualified for this task" },
   ],
-  workflow: [
-    { cmd: "new", desc: "Create a new workflow definition (via skill)" },
-    { cmd: "run", desc: "Create a run and start auto-mode" },
-    { cmd: "list", desc: "List workflow runs" },
-    { cmd: "validate", desc: "Validate a workflow definition YAML" },
-    { cmd: "pause", desc: "Pause custom workflow auto-mode" },
-    { cmd: "resume", desc: "Resume paused custom workflow auto-mode" },
-  ],
 };
 
 function filterOptions(
@@ -317,28 +308,6 @@ export function getGsdArgumentCompletions(prefix: string) {
 
   if (command === "undo" && parts.length <= 2) {
     return [{ value: "undo --force", label: "--force", description: "Skip confirmation prompt" }];
-  }
-
-  // Workflow definition-name completion for `workflow run <name>` and `workflow validate <name>`
-  if (command === "workflow" && (subcommand === "run" || subcommand === "validate") && parts.length <= 3) {
-    try {
-      const defsDir = join(resolveProjectRoot(process.cwd()), ".gsd", "workflow-defs");
-      if (existsSync(defsDir)) {
-        return readdirSync(defsDir)
-          .filter((f) => f.endsWith(".yaml") && f.startsWith(third))
-          .map((f) => {
-            const name = f.replace(/\.yaml$/, "");
-            return {
-              value: `workflow ${subcommand} ${name}`,
-              label: name,
-              description: `Workflow definition: ${name}`,
-            };
-          });
-      }
-    } catch {
-      // ignore filesystem errors during completion
-    }
-    return [];
   }
 
   const nested = NESTED_COMPLETIONS[command];

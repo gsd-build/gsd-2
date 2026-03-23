@@ -12,7 +12,8 @@
 import type { GSDState } from "./types.js";
 import type { GSDPreferences } from "./preferences.js";
 import type { UatType } from "./files.js";
-import { loadFile, extractUatType, loadActiveOverrides, parseRoadmap } from "./files.js";
+import { loadFile, extractUatType, loadActiveOverrides } from "./files.js";
+import { parseRoadmap } from "./legacy/parsers.js";
 import {
   resolveMilestoneFile,
   resolveMilestonePath,
@@ -54,11 +55,9 @@ export type DispatchAction =
       unitId: string;
       prompt: string;
       pauseAfterDispatch?: boolean;
-      /** Name of the matched dispatch rule from the unified registry (journal provenance). */
-      matchedRule?: string;
     }
-  | { action: "stop"; reason: string; level: "info" | "warning" | "error"; matchedRule?: string }
-  | { action: "skip"; matchedRule?: string };
+  | { action: "stop"; reason: string; level: "info" | "warning" | "error" }
+  | { action: "skip" };
 
 export interface DispatchContext {
   basePath: string;
@@ -69,7 +68,7 @@ export interface DispatchContext {
   session?: import("./auto/session.js").AutoSession;
 }
 
-export interface DispatchRule {
+interface DispatchRule {
   /** Human-readable name for debugging and test identification */
   name: string;
   /** Return a DispatchAction if this rule matches, null to fall through */
@@ -90,7 +89,7 @@ const MAX_REWRITE_ATTEMPTS = 3;
 
 // ─── Rules ────────────────────────────────────────────────────────────────
 
-export const DISPATCH_RULES: DispatchRule[] = [
+const DISPATCH_RULES: DispatchRule[] = [
   {
     name: "rewrite-docs (override gate)",
     match: async ({ mid, midTitle, state, basePath, session }) => {
@@ -610,35 +609,18 @@ export const DISPATCH_RULES: DispatchRule[] = [
   },
 ];
 
-import { getRegistry } from "./rule-registry.js";
-
 // ─── Resolver ─────────────────────────────────────────────────────────────
 
 /**
  * Evaluate dispatch rules in order. Returns the first matching action,
  * or a "stop" action if no rule matches (unhandled phase).
- *
- * Delegates to the RuleRegistry when initialized; falls back to inline
- * loop over DISPATCH_RULES for backward compatibility (tests that import
- * resolveDispatch directly without registry initialization).
  */
 export async function resolveDispatch(
   ctx: DispatchContext,
 ): Promise<DispatchAction> {
-  // Delegate to registry when available
-  try {
-    const registry = getRegistry();
-    return await registry.evaluateDispatch(ctx);
-  } catch {
-    // Registry not initialized — fall back to inline loop
-  }
-
   for (const rule of DISPATCH_RULES) {
     const result = await rule.match(ctx);
-    if (result) {
-      if (result.action !== "skip") result.matchedRule = rule.name;
-      return result;
-    }
+    if (result) return result;
   }
 
   // No rule matched — unhandled phase
@@ -646,7 +628,6 @@ export async function resolveDispatch(
     action: "stop",
     reason: `Unhandled phase "${ctx.state.phase}" — run /gsd doctor to diagnose.`,
     level: "info",
-    matchedRule: "<no-match>",
   };
 }
 

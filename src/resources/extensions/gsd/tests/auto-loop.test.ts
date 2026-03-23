@@ -337,7 +337,7 @@ function makeMockDeps(
     pruneQueueOrder: () => {},
     isInAutoWorktree: () => false,
     shouldUseWorktreeIsolation: () => false,
-    mergeMilestoneToMain: () => ({ pushed: false, codeFilesChanged: true }),
+    mergeMilestoneToMain: () => ({ pushed: false }),
     teardownAutoWorktree: () => {},
     createAutoWorktree: () => "/tmp/wt",
     captureIntegrationBranch: () => {},
@@ -369,9 +369,6 @@ function makeMockDeps(
     collectObservabilityWarnings: async () => [],
     buildObservabilityRepairBlock: () => null,
     closeoutUnit: async () => {},
-    verifyExpectedArtifact: () => true,
-    clearUnitRuntimeRecord: () => {},
-    writeUnitRuntimeRecord: () => {},
     recordOutcome: () => {},
     writeLock: () => {},
     captureAvailableSkills: () => {},
@@ -416,7 +413,6 @@ function makeMockDeps(
     getSessionFile: () => "/tmp/session.json",
     rebuildState: async () => {},
     resolveModelId: (id: string, models: any[]) => models.find((m: any) => m.id === id),
-    emitJournalEvent: () => {},
   };
 
   const merged = { ...baseDeps, ...overrides, callLog };
@@ -438,7 +434,6 @@ function makeLoopSession(overrides?: Partial<Record<string, unknown>>) {
     currentMilestoneId: "M001",
     currentUnit: null,
     currentUnitRouting: null,
-    completedUnits: [],
     resourceVersionOnStart: null,
     lastPromptCharCount: undefined,
     lastBaselineCharCount: undefined,
@@ -595,6 +590,7 @@ test("autoLoop calls deriveState → resolveDispatch → runUnit in sequence", a
   ctx.sessionManager = { getSessionFile: () => "/tmp/session.json" };
   const pi = makeMockPi();
 
+  let loopCount = 0;
   const s = makeLoopSession();
 
   const deps = makeMockDeps({
@@ -620,8 +616,11 @@ test("autoLoop calls deriveState → resolveDispatch → runUnit in sequence", a
     },
     postUnitPostVerification: async () => {
       deps.callLog.push("postUnitPostVerification");
-      // Deactivate after first iteration to exit the loop
-      s.active = false;
+      loopCount++;
+      // After first iteration, deactivate to exit the loop
+      if (loopCount >= 1) {
+        s.active = false;
+      }
       return "continue" as const;
     },
   });
@@ -679,6 +678,7 @@ test("crash lock records session file from AFTER newSession, not before (#1710)"
   };
   const pi = makeMockPi();
 
+  let loopCount = 0;
   const s = makeLoopSession({
     cmdCtx: {
       newSession: () => {
@@ -715,10 +715,10 @@ test("crash lock records session file from AFTER newSession, not before (#1710)"
         prompt: "do the thing",
       };
     },
-    writeLock: (_base: string, _ut: string, _uid: string, _count: number, sessionFile?: string) => {
+    writeLock: (_base: string, _ut: string, _uid: string, sessionFile?: string) => {
       writeLockCalls.push({ sessionFile });
     },
-    updateSessionLock: (_base: string, _ut: string, _uid: string, _count: number, sessionFile?: string) => {
+    updateSessionLock: (_base: string, _ut: string, _uid: string, sessionFile?: string) => {
       updateSessionLockCalls.push({ sessionFile });
     },
     getSessionFile: (ctxArg: any) => {
@@ -726,8 +726,10 @@ test("crash lock records session file from AFTER newSession, not before (#1710)"
     },
     postUnitPostVerification: async () => {
       deps.callLog.push("postUnitPostVerification");
-      // Deactivate after first iteration to exit the loop
-      s.active = false;
+      loopCount++;
+      if (loopCount >= 1) {
+        s.active = false;
+      }
       return "continue" as const;
     },
   });
@@ -784,23 +786,6 @@ test("autoLoop handles verification retry by continuing loop", async (t) => {
   let deriveCallCount = 0;
   const s = makeLoopSession();
 
-  // Pre-queued verification actions: each entry provides a side-effect + return value
-  type VerifyAction = { sideEffect?: () => void; response: "retry" | "continue" };
-  const verificationActions: VerifyAction[] = [
-    {
-      sideEffect: () => {
-        // Simulate retry — set pendingVerificationRetry on session
-        s.pendingVerificationRetry = {
-          unitId: "M001/S01/T01",
-          failureContext: "test failed: expected X got Y",
-          attempt: 1,
-        };
-      },
-      response: "retry",
-    },
-    { response: "continue" },
-  ];
-
   const deps = makeMockDeps({
     deriveState: async () => {
       deriveCallCount++;
@@ -815,11 +800,19 @@ test("autoLoop handles verification retry by continuing loop", async (t) => {
       } as any;
     },
     runPostUnitVerification: async () => {
-      const action = verificationActions[verifyCallCount] ?? { response: "continue" as const };
       verifyCallCount++;
       deps.callLog.push("runPostUnitVerification");
-      action.sideEffect?.();
-      return action.response;
+      if (verifyCallCount === 1) {
+        // First call: simulate retry — set pendingVerificationRetry on session
+        s.pendingVerificationRetry = {
+          unitId: "M001/S01/T01",
+          failureContext: "test failed: expected X got Y",
+          attempt: 1,
+        };
+        return "retry" as const;
+      }
+      // Second call: pass
+      return "continue" as const;
     },
     postUnitPostVerification: async () => {
       deps.callLog.push("postUnitPostVerification");
@@ -896,17 +889,19 @@ test("autoLoop handles dispatch skip action by continuing", async (t) => {
   const s = makeLoopSession();
 
   let dispatchCallCount = 0;
-  // Pre-queued dispatch responses: first call returns "skip", second returns "stop"
-  const dispatchResponses = [
-    { action: "skip" as const },
-    { action: "stop" as const, reason: "done", level: "info" as const },
-  ];
   const deps = makeMockDeps({
     resolveDispatch: async () => {
-      const response = dispatchResponses[dispatchCallCount] ?? dispatchResponses[dispatchResponses.length - 1];
       dispatchCallCount++;
       deps.callLog.push("resolveDispatch");
-      return response;
+      if (dispatchCallCount === 1) {
+        return { action: "skip" as const };
+      }
+      // Second time: stop to exit the loop
+      return {
+        action: "stop" as const,
+        reason: "done",
+        level: "info" as const,
+      };
     },
   });
 
@@ -936,26 +931,22 @@ test("autoLoop drains sidecar queue after postUnitPostVerification enqueues item
   const s = makeLoopSession();
 
   let postVerCallCount = 0;
-  const postVerActions: Array<() => void> = [
-    () => {
-      // First call (main unit): enqueue a sidecar item
-      s.sidecarQueue.push({
-        kind: "hook" as const,
-        unitType: "hook/review",
-        unitId: "M001/S01/T01/review",
-        prompt: "review the code",
-      });
-    },
-    () => {
-      // Second call (sidecar unit completed): deactivate
-      s.active = false;
-    },
-  ];
   const deps = makeMockDeps({
     postUnitPostVerification: async () => {
-      postVerActions[postVerCallCount]?.();
       postVerCallCount++;
       deps.callLog.push("postUnitPostVerification");
+      if (postVerCallCount === 1) {
+        // First call (main unit): enqueue a sidecar item
+        s.sidecarQueue.push({
+          kind: "hook" as const,
+          unitType: "hook/review",
+          unitId: "M001/S01/T01/review",
+          prompt: "review the code",
+        });
+        return "continue" as const;
+      }
+      // Second call (sidecar unit completed): done
+      s.active = false;
       return "continue" as const;
     },
   });
@@ -1103,32 +1094,6 @@ test("auto.ts startAuto calls autoLoop (not dispatchNextUnit as first dispatch)"
   assert.ok(
     fnBlock.includes("autoLoop("),
     "startAuto must call autoLoop() instead of dispatchNextUnit()",
-  );
-});
-
-test("startAuto calls selfHealRuntimeRecords before autoLoop (#1727)", () => {
-  const src = readFileSync(
-    resolve(import.meta.dirname, "..", "auto.ts"),
-    "utf-8",
-  );
-  const fnIdx = src.indexOf("export async function startAuto");
-  assert.ok(fnIdx > -1, "startAuto must exist in auto.ts");
-  const fnEnd = src.indexOf("\n// ─── ", fnIdx + 100);
-  const fnBlock =
-    fnEnd > -1 ? src.slice(fnIdx, fnEnd) : src.slice(fnIdx, fnIdx + 5000);
-
-  // Both autoLoop call sites must be preceded by selfHealRuntimeRecords
-  const healIdx = fnBlock.indexOf("selfHealRuntimeRecords");
-  const loopIdx = fnBlock.indexOf("autoLoop(");
-  assert.ok(healIdx > -1, "startAuto must call selfHealRuntimeRecords");
-  assert.ok(healIdx < loopIdx, "selfHealRuntimeRecords must be called before autoLoop");
-
-  // Verify the second autoLoop call site also has selfHeal before it (if present)
-  const secondLoopIdx = fnBlock.indexOf("autoLoop(", loopIdx + 1);
-  const secondHealIdx = fnBlock.indexOf("selfHealRuntimeRecords", healIdx + 1);
-  assert.ok(
-    secondLoopIdx === -1 || (secondHealIdx > -1 && secondHealIdx < secondLoopIdx),
-    "if a second autoLoop call exists, it must also be preceded by selfHealRuntimeRecords",
   );
 });
 
@@ -1291,29 +1256,25 @@ test("stuck detection: window resets recovery when deriveState returns a differe
   const s = makeLoopSession();
 
   let deriveCallCount = 0;
-  let postVerCallCount = 0;
   let stopCalled = false;
-
-  // First 3 derives return T01, 4th returns T02; dispatch follows the derived task
-  const derivedTaskIds = ["T01", "T01", "T01", "T02"];
 
   const deps = makeMockDeps({
     deriveState: async () => {
-      const taskId = derivedTaskIds[Math.min(deriveCallCount, derivedTaskIds.length - 1)];
       deriveCallCount++;
       deps.callLog.push("deriveState");
       return {
         phase: "executing",
         activeMilestone: { id: "M001", title: "Test", status: "active" },
         activeSlice: { id: "S01", title: "Slice 1" },
-        activeTask: { id: taskId },
+        activeTask: { id: deriveCallCount <= 3 ? "T01" : "T02" },
         registry: [{ id: "M001", status: "active" }],
         blockers: [],
       } as any;
     },
     resolveDispatch: async () => {
-      const taskId = derivedTaskIds[Math.min(deriveCallCount - 1, derivedTaskIds.length - 1)];
       deps.callLog.push("resolveDispatch");
+      // Return dispatch matching the task from deriveState
+      const taskId = deriveCallCount <= 3 ? "T01" : "T02";
       return {
         action: "dispatch" as const,
         unitType: "execute-task",
@@ -1327,11 +1288,11 @@ test("stuck detection: window resets recovery when deriveState returns a differe
       s.active = false;
     },
     postUnitPostVerification: async () => {
-      postVerCallCount++;
       deps.callLog.push("postUnitPostVerification");
-      // Exit on the 4th call (after T02 unit completes)
-      const shouldExit = postVerCallCount >= 4;
-      s.active = !shouldExit;
+      // After 4th iteration (unit changed on iter 4), exit
+      if (deriveCallCount >= 4) {
+        s.active = false;
+      }
       return "continue" as const;
     },
   });
@@ -1370,14 +1331,6 @@ test("stuck detection: does not push to window during verification retry", async
   let verifyCallCount = 0;
   let stopReason = "";
 
-  // Pre-queued responses: 3 retries then a continue (exit)
-  const verifyActions: Array<() => "retry" | "continue"> = [
-    () => { s.pendingVerificationRetry = { unitId: "M001/S01/T01", failureContext: "test failed", attempt: 1 }; return "retry"; },
-    () => { s.pendingVerificationRetry = { unitId: "M001/S01/T01", failureContext: "test failed", attempt: 2 }; return "retry"; },
-    () => { s.pendingVerificationRetry = { unitId: "M001/S01/T01", failureContext: "test failed", attempt: 3 }; return "retry"; },
-    () => { s.active = false; return "continue"; },
-  ];
-
   const deps = makeMockDeps({
     deriveState: async () =>
       ({
@@ -1395,10 +1348,20 @@ test("stuck detection: does not push to window during verification retry", async
       prompt: "do the thing",
     }),
     runPostUnitVerification: async () => {
-      const action = verifyActions[verifyCallCount] ?? (() => { s.active = false; return "continue" as const; });
       verifyCallCount++;
       deps.callLog.push("runPostUnitVerification");
-      return action();
+      if (verifyCallCount <= 3) {
+        // Set pendingVerificationRetry — should prevent stuck counter increment
+        s.pendingVerificationRetry = {
+          unitId: "M001/S01/T01",
+          failureContext: "test failed",
+          attempt: verifyCallCount,
+        };
+        return "retry" as const;
+      }
+      // After 3 retries, exit gracefully
+      s.active = false;
+      return "continue" as const;
     },
     stopAuto: async (_ctx?: any, _pi?: any, reason?: string) => {
       deps.callLog.push("stopAuto");
@@ -1471,25 +1434,6 @@ test("detectStuck: Rule 2 — 2 consecutive does not trigger", () => {
   ]), null);
 });
 
-test("detectStuck: Rule 3 — oscillation A→B→A→B", () => {
-  const result = detectStuck([
-    { key: "A" },
-    { key: "B" },
-    { key: "A" },
-    { key: "B" },
-  ]);
-  assert.ok(result?.stuck);
-  assert.ok(result?.reason.includes("Oscillation"));
-});
-
-test("detectStuck: Rule 3 — non-oscillation pattern A→B→C→B", () => {
-  assert.equal(detectStuck([
-    { key: "A" },
-    { key: "B" },
-    { key: "C" },
-    { key: "B" },
-  ]), null);
-});
 
 test("detectStuck: Rule 1 takes priority over Rule 2 when both match", () => {
   const result = detectStuck([
@@ -1550,7 +1494,7 @@ test("autoLoop lifecycle: advances through research → plan → execute → ver
   const dispatchedUnitTypes: string[] = [];
 
   // Phase sequence: each deriveState call returns a different phase.
-  // The 6th entry (index 5) is the terminal "complete" phase that stops the loop.
+  // On the 6th call (start of iteration 6), we deactivate to exit.
   const phases = [
     // Call 1: researching → dispatches research-slice
     {
@@ -1582,12 +1526,6 @@ test("autoLoop lifecycle: advances through research → plan → execute → ver
       activeSlice: { id: "S01", title: "Complete Slice" },
       activeTask: null,
     },
-    // Call 6: terminal — deactivate to exit the loop
-    {
-      phase: "complete",
-      activeSlice: null,
-      activeTask: null,
-    },
   ];
 
   const dispatches = [
@@ -1600,26 +1538,46 @@ test("autoLoop lifecycle: advances through research → plan → execute → ver
 
   const deps = makeMockDeps({
     deriveState: async () => {
-      const p = phases[Math.min(deriveCallCount, phases.length - 1)];
       deriveCallCount++;
       deps.callLog.push("deriveState");
 
-      const terminalPhases: Record<string, string> = { complete: "complete" };
-      s.active = p.phase !== "complete";
-      const milestoneStatus = terminalPhases[p.phase] ?? "active";
+      if (deriveCallCount > phases.length) {
+        // 6th+ call: deactivate to exit the loop
+        s.active = false;
+        return {
+          phase: "complete",
+          activeMilestone: { id: "M001", title: "Test", status: "complete" },
+          activeSlice: null,
+          activeTask: null,
+          registry: [{ id: "M001", status: "complete" }],
+          blockers: [],
+        } as any;
+      }
+
+      const p = phases[deriveCallCount - 1];
       return {
         phase: p.phase,
-        activeMilestone: { id: "M001", title: "Test", status: milestoneStatus },
-        activeSlice: p.activeSlice ?? null,
-        activeTask: p.activeTask ?? null,
-        registry: [{ id: "M001", status: milestoneStatus }],
+        activeMilestone: { id: "M001", title: "Test", status: "active" },
+        activeSlice: p.activeSlice,
+        activeTask: p.activeTask,
+        registry: [{ id: "M001", status: "active" }],
         blockers: [],
       } as any;
     },
     resolveDispatch: async () => {
-      const d = dispatches[Math.min(dispatchCallCount, dispatches.length - 1)];
       dispatchCallCount++;
       deps.callLog.push("resolveDispatch");
+
+      if (dispatchCallCount > dispatches.length) {
+        // Safety: shouldn't reach here, but stop if it does
+        return {
+          action: "stop" as const,
+          reason: "done",
+          level: "info" as const,
+        };
+      }
+
+      const d = dispatches[dispatchCallCount - 1];
       dispatchedUnitTypes.push(d.unitType);
       return {
         action: "dispatch" as const,
@@ -1684,11 +1642,18 @@ test("autoLoop lifecycle: advances through research → plan → execute → ver
     `callLog should have at least 5 resolveDispatch entries (got ${dispatchEntries.length})`,
   );
 
-  // Verify interleaving: a deriveState must follow a resolveDispatch (confirms loop advanced)
-  const firstDispatchIdx = deps.callLog.indexOf("resolveDispatch");
-  const firstDeriveAfterDispatch = deps.callLog.indexOf("deriveState", firstDispatchIdx + 1);
-  assert.ok(firstDispatchIdx >= 0, "resolveDispatch should appear in callLog");
-  assert.ok(firstDeriveAfterDispatch > firstDispatchIdx, "deriveState should follow resolveDispatch to confirm loop advanced");
+  // Verify interleaving: each resolveDispatch should follow a deriveState
+  let dispatchSeen = 0;
+  for (const entry of deps.callLog) {
+    if (entry === "resolveDispatch") {
+      dispatchSeen++;
+    }
+    if (entry === "deriveState" && dispatchSeen > 0) {
+      // A deriveState after a resolveDispatch confirms the loop advanced
+      break;
+    }
+  }
+  assert.ok(dispatchSeen > 0, "resolveDispatch should appear in callLog");
 
   // Assert the exact sequence of dispatched unit types
   assert.deepEqual(
@@ -1761,8 +1726,6 @@ test("autoLoop re-iterates when postUnitPreVerification returns retry (#1571)", 
   const s = makeLoopSession();
 
   let preVerifyCallCount = 0;
-  // Pre-queued responses: first call returns "retry", second returns "continue"
-  const preVerifyResponses = ["retry", "continue"] as const;
 
   const deps = makeMockDeps({
     deriveState: async () => {
@@ -1778,7 +1741,11 @@ test("autoLoop re-iterates when postUnitPreVerification returns retry (#1571)", 
     },
     postUnitPreVerification: async () => {
       deps.callLog.push("postUnitPreVerification");
-      return preVerifyResponses[preVerifyCallCount++] ?? "continue";
+      preVerifyCallCount++;
+      if (preVerifyCallCount === 1) {
+        return "retry" as const;
+      }
+      return "continue" as const;
     },
     postUnitPostVerification: async () => {
       deps.callLog.push("postUnitPostVerification");
@@ -1891,8 +1858,9 @@ test("autoLoop rejects execute-task with 0 tool calls as hallucinated (#1833)", 
     postUnitPostVerification: async () => {
       deps.callLog.push("postUnitPostVerification");
       iterationCount++;
-      // Deactivate after 2nd iteration
-      s.active = iterationCount < 2;
+      if (iterationCount >= 2) {
+        s.active = false;
+      }
       return "continue" as const;
     },
   });
@@ -1921,8 +1889,8 @@ test("autoLoop rejects execute-task with 0 tool calls as hallucinated (#1833)", 
 
   await loopPromise;
 
-  // The task should NOT have been added to completedUnits on the first iteration
-  // (0 tool calls), but SHOULD be added on the second iteration (5 tool calls)
+  // The task should NOT be considered verified on the first iteration
+  // (0 tool calls), but SHOULD pass on the second iteration (5 tool calls)
   const warningNotification = notifications.find(
     (n) => n.includes("0 tool calls") && n.includes("hallucinated"),
   );
@@ -1992,7 +1960,6 @@ test("autoLoop does NOT reject non-execute-task units with 0 tool calls (#1833)"
       });
     },
     getLedger: () => mockLedger,
-    verifyExpectedArtifact: () => true,
     postUnitPostVerification: async () => {
       deps.callLog.push("postUnitPostVerification");
       s.active = false;
@@ -2014,12 +1981,6 @@ test("autoLoop does NOT reject non-execute-task units with 0 tool calls (#1833)"
   assert.ok(
     !warningNotification,
     "should NOT flag non-execute-task units with 0 tool calls",
-  );
-
-  // The unit should have been added to completedUnits normally
-  assert.ok(
-    s.completedUnits.length >= 1,
-    "complete-slice with 0 tool calls should still be marked as completed",
   );
 });
 

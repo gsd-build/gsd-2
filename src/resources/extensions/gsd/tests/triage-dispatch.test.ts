@@ -15,7 +15,6 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const hooksPath = join(__dirname, "..", "post-unit-hooks.ts");
-const registryPath = join(__dirname, "..", "rule-registry.ts");
 const autoPromptsPath = join(__dirname, "..", "auto-prompts.ts");
 
 // After decomposition, triage/dispatch logic lives in auto-post-unit.ts
@@ -26,11 +25,7 @@ const autoSrc = [
   postUnitSrc,
   readFileSync(join(__dirname, "..", "auto-start.ts"), "utf-8"),
 ].join("\n");
-// Hook exclusion logic lives in the rule-registry (facade delegates there)
-const hooksSrc = [
-  readFileSync(hooksPath, "utf-8"),
-  readFileSync(registryPath, "utf-8"),
-].join("\n");
+const hooksSrc = readFileSync(hooksPath, "utf-8");
 const autoPromptsSrc = (() => { try { return readFileSync(autoPromptsPath, "utf-8"); } catch { return autoSrc; } })();
 
 // ─── Hook exclusion ──────────────────────────────────────────────────────────

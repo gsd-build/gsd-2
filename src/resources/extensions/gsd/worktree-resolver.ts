@@ -28,7 +28,7 @@ export interface WorktreeResolverDeps {
     basePath: string,
     milestoneId: string,
     roadmapContent: string,
-  ) => { pushed: boolean; codeFilesChanged: boolean };
+  ) => { pushed: boolean };
   syncWorktreeStateBack: (
     mainBasePath: string,
     worktreePath: string,
@@ -371,23 +371,10 @@ export class WorktreeResolver {
           milestoneId,
           roadmapContent,
         );
-        if (mergeResult.codeFilesChanged) {
-          ctx.notify(
-            `Milestone ${milestoneId} merged to main.${mergeResult.pushed ? " Pushed to remote." : ""}`,
-            "info",
-          );
-        } else {
-          // (#1906) Milestone produced only .gsd/ metadata — no actual code was
-          // merged. This typically means the LLM wrote planning artifacts
-          // (summaries, roadmaps) but never implemented the code. Surface this
-          // clearly so the user knows the milestone is not truly complete.
-          ctx.notify(
-            `WARNING: Milestone ${milestoneId} merged to main but contained NO code changes — only .gsd/ metadata files. ` +
-              `The milestone summary may describe planned work that was never implemented. ` +
-              `Review the milestone output and re-run if code is missing.`,
-            "warning",
-          );
-        }
+        ctx.notify(
+          `Milestone ${milestoneId} merged to main.${mergeResult.pushed ? " Pushed to remote." : ""}`,
+          "info",
+        );
       } else {
         // No roadmap at either location — teardown but PRESERVE the branch so
         // commits are not orphaned. The user can merge manually later (#1573).
@@ -491,18 +478,10 @@ export class WorktreeResolver {
       // Rebuild GitService after merge (branch HEAD changed)
       this.rebuildGitService();
 
-      if (mergeResult.codeFilesChanged) {
-        ctx.notify(
-          `Milestone ${milestoneId} merged (branch mode).${mergeResult.pushed ? " Pushed to remote." : ""}`,
-          "info",
-        );
-      } else {
-        ctx.notify(
-          `WARNING: Milestone ${milestoneId} merged (branch mode) but contained NO code changes — only .gsd/ metadata. ` +
-            `Review the milestone output and re-run if code is missing.`,
-          "warning",
-        );
-      }
+      ctx.notify(
+        `Milestone ${milestoneId} merged (branch mode).${mergeResult.pushed ? " Pushed to remote." : ""}`,
+        "info",
+      );
       debugLog("WorktreeResolver", {
         action: "mergeAndExit",
         milestoneId,

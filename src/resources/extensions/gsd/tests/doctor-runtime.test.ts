@@ -74,7 +74,6 @@ async function main(): Promise<void> {
         unitType: "execute-task",
         unitId: "M001/S01/T01",
         unitStartedAt: "2026-03-10T00:01:00Z",
-        completedUnits: 3,
       };
       writeFileSync(join(dir, ".gsd", "auto.lock"), JSON.stringify(lockData, null, 2));
 
@@ -264,32 +263,6 @@ node_modules/
       console.log("\n=== gitignore — blanket .gsd/ (skipped on Windows) ===");
     }
 
-    // ─── Test 9: Orphaned completed-units detection & fix ─────────────
-    console.log("\n=== orphaned_completed_units ===");
-    {
-      const dir = createMinimalProject();
-      cleanups.push(dir);
-
-      // Write completed-units.json with keys that reference non-existent artifacts
-      const completedKeys = [
-        "execute-task/M001/S01/T99",  // T99 doesn't exist
-        "complete-slice/M001/S99",     // S99 doesn't exist
-      ];
-      writeFileSync(join(dir, ".gsd", "completed-units.json"), JSON.stringify(completedKeys));
-
-      const detect = await runGSDDoctor(dir);
-      const orphanIssues = detect.issues.filter(i => i.code === "orphaned_completed_units");
-      assertTrue(orphanIssues.length > 0, "detects orphaned completed-unit keys");
-      assertTrue(orphanIssues[0]?.message.includes("2 completed-unit key"), "message includes count");
-
-      const fixed = await runGSDDoctor(dir, { fix: true });
-      assertTrue(fixed.fixesApplied.some(f => f.includes("removed") && f.includes("orphaned")), "fix removes orphaned keys");
-
-      // Verify keys were cleaned
-      const content = JSON.parse(readFileSync(join(dir, ".gsd", "completed-units.json"), "utf-8"));
-      assertEq(content.length, 0, "all orphaned keys removed");
-    }
-
     // ─── Test: Stranded lock directory detection & fix ────────────────
     // Skip on Windows: proper-lockfile uses advisory file locking on Windows,
     // not the directory-based mechanism. The .gsd.lock/ directory pattern is
@@ -334,7 +307,6 @@ node_modules/
         unitType: "execute-task",
         unitId: "M001/S01/T01",
         unitStartedAt: new Date().toISOString(),
-        completedUnits: 1,
       };
       writeFileSync(join(dir, ".gsd", "auto.lock"), JSON.stringify(liveLockData, null, 2));
 
@@ -346,44 +318,18 @@ node_modules/
       console.log("\n=== stranded_lock_directory (skipped on Windows) ===");
     }
 
-    // ─── Test: orphaned_completed_units NOT auto-fixed at fixLevel="task" (#1809) ──
-    // Regression: task-level doctor was removing completed-unit keys whose artifacts
-    // were temporarily missing, causing deriveState to revert the user to S01 and
-    // effectively discarding hours of work.
-    console.log("\n=== orphaned_completed_units protected at fixLevel=task (#1809) ===");
+    // ─── Wave 0: checkEngineHealth tests (DOC-05 — RED until Plan 4-02) ──────
+    // These tests target checkEngineHealth() which does not exist yet.
+    // They are scaffolded as TODO placeholders until 4-02 implements the function.
+    console.log("\n=== checkEngineHealth tests (DOC-05 — TODO until 4-02) ===");
     {
-      const dir = createMinimalProject();
-      cleanups.push(dir);
-
-      // Write completed-units.json with keys that reference non-existent artifacts.
-      // At fixLevel="task" (auto-mode post-unit), these must NOT be removed.
-      const completedKeys = [
-        "execute-task/M001/S01/T99",  // artifact missing
-        "complete-slice/M001/S99",     // artifact missing
-      ];
-      writeFileSync(join(dir, ".gsd", "completed-units.json"), JSON.stringify(completedKeys));
-
-      // fixLevel="task" — the level used by auto-post-unit after every task
-      const taskLevelFix = await runGSDDoctor(dir, { fix: true, fixLevel: "task" });
-      const taskLevelOrphan = taskLevelFix.issues.filter(i => i.code === "orphaned_completed_units");
-      assertTrue(taskLevelOrphan.length > 0, "orphaned_completed_units detected at task fixLevel");
-
-      // Verify keys were NOT removed — the fix must be suppressed at task level
-      const afterTaskFix = JSON.parse(readFileSync(join(dir, ".gsd", "completed-units.json"), "utf-8"));
-      assertEq(afterTaskFix.length, 2, "completed-unit keys preserved at fixLevel=task (data loss prevention)");
-      assertTrue(
-        !taskLevelFix.fixesApplied.some(f => f.includes("orphaned")),
-        "no orphaned-units fix applied at fixLevel=task",
-      );
-
-      // fixLevel="all" (explicit manual doctor) — fix SHOULD apply
-      const allLevelFix = await runGSDDoctor(dir, { fix: true, fixLevel: "all" });
-      assertTrue(
-        allLevelFix.fixesApplied.some(f => f.includes("orphaned")),
-        "orphaned-units fix applied at fixLevel=all (manual doctor)",
-      );
-      const afterAllFix = JSON.parse(readFileSync(join(dir, ".gsd", "completed-units.json"), "utf-8"));
-      assertEq(afterAllFix.length, 0, "orphaned keys removed at fixLevel=all");
+      // checkEngineHealth is not yet implemented. Mark tests as TODO.
+      // When Plan 4-02 creates checkEngineHealth in doctor-checks.ts, these
+      // will be converted from console placeholders to real assertions.
+      console.log("  TODO: checkEngineHealth reports db_orphaned_task when task references non-existent slice");
+      console.log("  TODO: checkEngineHealth reports db_orphaned_slice when slice references non-existent milestone");
+      console.log("  TODO: checkEngineHealth reports db_done_task_no_summary when done task has no summary");
+      console.log("  TODO: checkEngineHealth reports db_duplicate_id when duplicate IDs exist");
     }
 
   } finally {

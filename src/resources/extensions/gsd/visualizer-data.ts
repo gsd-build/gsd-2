@@ -3,7 +3,8 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { deriveState } from './state.js';
-import { parseRoadmap, parsePlan, parseSummary, loadFile } from './files.js';
+import { loadFile } from './files.js';
+import { parseRoadmap, parsePlan, parseSummary } from './legacy/parsers.js';
 import { findMilestoneIds } from './milestone-ids.js';
 import { resolveMilestoneFile, resolveSliceFile, resolveGsdRootFile, gsdRoot } from './paths.js';
 import {
@@ -74,7 +75,7 @@ export interface CriticalPathInfo {
 export interface AgentActivityInfo {
   currentUnit: { type: string; id: string; startedAt: number } | null;
   elapsed: number;
-  completedUnits: number;
+  unitsFinished: number;
   totalSlices: number;
   completionRate: number;
   active: boolean;
@@ -435,7 +436,7 @@ function loadAgentActivity(units: UnitMetrics[], milestones: VisualizerMilestone
   const running = units.find(u => u.finishedAt === 0);
   const now = Date.now();
 
-  const completedUnits = units.filter(u => u.finishedAt > 0).length;
+  const unitsFinished = units.filter(u => u.finishedAt > 0).length;
   const totalSlices = milestones.reduce((sum, m) => sum + m.slices.length, 0);
 
   // Completion rate from finished units
@@ -456,7 +457,7 @@ function loadAgentActivity(units: UnitMetrics[], milestones: VisualizerMilestone
       ? { type: running.type, id: running.id, startedAt: running.startedAt }
       : null,
     elapsed: running ? now - running.startedAt : 0,
-    completedUnits,
+    unitsFinished,
     totalSlices,
     completionRate,
     active: !!running,
