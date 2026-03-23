@@ -687,6 +687,8 @@ export class AgentSession {
 	 * Call this when completely done with the session.
 	 */
 	dispose(): void {
+		this._extensionErrorUnsubscriber?.();
+		this._extensionErrorUnsubscriber = undefined;
 		this._disconnectFromAgent();
 		this._eventListeners = [];
 	}
@@ -1928,7 +1930,11 @@ export class AgentSession {
 		runner.setUIContext(this._extensionUIContext);
 		runner.bindCommandContext(this._extensionCommandContextActions);
 
-		this._extensionErrorUnsubscriber?.();
+		try {
+			this._extensionErrorUnsubscriber?.();
+		} catch {
+			// Ignore errors from previous unsubscriber
+		}
 		this._extensionErrorUnsubscriber = this._extensionErrorListener
 			? runner.onError(this._extensionErrorListener)
 			: undefined;
