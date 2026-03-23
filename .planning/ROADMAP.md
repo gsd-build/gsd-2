@@ -100,7 +100,12 @@ Plans:
   3. `auto-post-unit.ts` contains no doctor fix runs or STATE.md rebuild logic
   4. Stuck detection no longer contains oscillation detection — only same-error-twice detection remains
   5. Net line deletion across the milestone is at least 4,000 lines with all tests passing
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 5-01-PLAN.md — Remove verifyExpectedArtifact, selfHeal remnants, auto-post-unit doctor/STATE blocks
+- [ ] 5-02-PLAN.md — Remove completed-units.json, unit-runtime.ts, oscillation detection
+- [ ] 5-03-PLAN.md — Final cleanup sweep, completedUnits state type removal, verification
 
 ## Progress
 
@@ -113,4 +118,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Sync Migration + Prompt Migration | 3/3 | Complete | 2026-03-22 |
 | 3. Event Reconciliation + Mandatory Tools | 5/5 | Complete | 2026-03-22 |
 | 4. Remove Parsing from Hot Path | 4/4 | Complete | 2026-03-22 |
-| 5. Dead Code Cleanup | 0/TBD | Not started | - |
+| 5. Dead Code Cleanup | 0/3 | Not started | - |
