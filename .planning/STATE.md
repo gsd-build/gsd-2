@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-03-22)
 ## Current Position
 
 Phase: 5 of 5 (Dead Code Cleanup) — IN PROGRESS
-Plan: 1 of 3 in current phase (5-01 complete)
+Plan: 2 of 3 in current phase (5-01, 5-02 complete)
 Status: Executing
-Last activity: 2026-03-22 — Plan 5-01 complete (selfHeal + verifyExpectedArtifact + doctor/STATE blocks removed)
+Last activity: 2026-03-22 — Plan 5-02 complete (completed-units.json, unit-runtime.ts, oscillation detection removed)
 
 Progress: [████████████████░░] 87%
 
