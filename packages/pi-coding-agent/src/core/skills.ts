@@ -1,9 +1,9 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "fs";
 import ignore from "ignore";
-import { homedir } from "os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
 import { parseFrontmatter } from "../utils/frontmatter.js";
+import { normalizePath } from "../utils/normalize-path.js";
 import type { ResourceDiagnostic } from "./diagnostics.js";
 
 /** Max name length per spec */
@@ -333,14 +333,6 @@ export interface LoadSkillsOptions {
 	skillPaths?: string[];
 	/** Include default skills directories. Default: true */
 	includeDefaults?: boolean;
-}
-
-function normalizePath(input: string): string {
-	const trimmed = input.trim();
-	if (trimmed === "~") return homedir();
-	if (trimmed.startsWith("~/")) return join(homedir(), trimmed.slice(2));
-	if (trimmed.startsWith("~")) return join(homedir(), trimmed.slice(1));
-	return trimmed;
 }
 
 function resolveSkillPath(p: string, cwd: string): string {

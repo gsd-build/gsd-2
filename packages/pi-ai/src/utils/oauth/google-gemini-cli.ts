@@ -107,9 +107,8 @@ async function startCallbackServer(): Promise<CallbackServerInfo> {
 					cancelled = true;
 				},
 				waitForCode: async () => {
-					const sleep = () => new Promise((r) => setTimeout(r, 100));
 					while (!result && !cancelled) {
-						await sleep();
+						await new Promise((r) => setTimeout(r, 100));
 					}
 					return result;
 				},
@@ -166,13 +165,6 @@ interface GoogleRpcErrorResponse {
 }
 
 /**
- * Wait helper for onboarding retries
- */
-function wait(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
  * Get default tier from allowed tiers
  */
 function getDefaultTier(allowedTiers?: Array<{ id?: string; isDefault?: boolean }>): { id?: string } {
@@ -201,7 +193,7 @@ async function pollOperation(
 	while (true) {
 		if (attempt > 0) {
 			onProgress?.(`Waiting for project provisioning (attempt ${attempt + 1})...`);
-			await wait(5000);
+			await new Promise((r) => setTimeout(r, 5000));
 		}
 
 		const response = await fetch(`${CODE_ASSIST_ENDPOINT}/v1internal/${operationName}`, {

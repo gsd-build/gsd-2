@@ -255,11 +255,10 @@ function startLocalOAuthServer(state: string): Promise<OAuthServerInfo> {
 						cancelled = true;
 					},
 					waitForCode: async () => {
-						const sleep = () => new Promise((r) => setTimeout(r, 100));
 						for (let i = 0; i < 600; i += 1) {
 							if (lastCode) return { code: lastCode };
 							if (cancelled) return null;
-							await sleep();
+							await new Promise((r) => setTimeout(r, 100));
 						}
 						return null;
 					},

@@ -1,8 +1,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
-import { homedir } from "os";
 import { basename, isAbsolute, join, resolve, sep } from "path";
 import { CONFIG_DIR_NAME, getPromptsDir } from "../config.js";
 import { parseFrontmatter } from "../utils/frontmatter.js";
+import { normalizePath } from "../utils/normalize-path.js";
 
 /**
  * Represents a prompt template loaded from a markdown file
@@ -183,14 +183,6 @@ export interface LoadPromptTemplatesOptions {
 	promptPaths?: string[];
 	/** Include default prompt directories. Default: true */
 	includeDefaults?: boolean;
-}
-
-function normalizePath(input: string): string {
-	const trimmed = input.trim();
-	if (trimmed === "~") return homedir();
-	if (trimmed.startsWith("~/")) return join(homedir(), trimmed.slice(2));
-	if (trimmed.startsWith("~")) return join(homedir(), trimmed.slice(1));
-	return trimmed;
 }
 
 function resolvePromptPath(p: string, cwd: string): string {
