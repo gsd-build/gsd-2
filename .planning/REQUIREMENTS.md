@@ -77,11 +77,11 @@ Requirements for v1.0 milestone. Each maps to roadmap phases.
 
 ### Doctor Reduction
 
-- [ ] **DOC-01**: Remove checkbox/file mismatch reconciliation checks
-- [ ] **DOC-02**: Remove placeholder summary generation
-- [ ] **DOC-03**: Remove health scoring for bookkeeping failures
-- [ ] **DOC-04**: Keep git health, disk health, environment health, provider health
-- [ ] **DOC-05**: Add DB constraint violation detection and projection drift detection
+- [x] **DOC-01**: Remove checkbox/file mismatch reconciliation checks
+- [x] **DOC-02**: Remove placeholder summary generation
+- [x] **DOC-03**: Remove health scoring for bookkeeping failures
+- [x] **DOC-04**: Keep git health, disk health, environment health, provider health
+- [x] **DOC-05**: Add DB constraint violation detection and projection drift detection
 
 ### Dead Code Cleanup
 
@@ -165,11 +165,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MIG-01 | Phase 3 | Pending |
 | MIG-02 | Phase 3 | Pending |
 | MIG-03 | Phase 3 | Pending |
-| DOC-01 | Phase 4 | Pending |
-| DOC-02 | Phase 4 | Pending |
-| DOC-03 | Phase 4 | Pending |
-| DOC-04 | Phase 4 | Pending |
-| DOC-05 | Phase 4 | Pending |
+| DOC-01 | Phase 4 (4-02) | Complete |
+| DOC-02 | Phase 4 (4-02) | Complete |
+| DOC-03 | Phase 4 (4-02) | Complete |
+| DOC-04 | Phase 4 (4-02) | Complete |
+| DOC-05 | Phase 4 (4-02) | Complete |
 | CLN-01 | Phase 5 | Pending |
 | CLN-02 | Phase 5 | Pending |
 | CLN-03 | Phase 5 | Pending |

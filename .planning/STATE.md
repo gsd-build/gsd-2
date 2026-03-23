@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-03-22)
 ## Current Position
 
 Phase: 4 of 5 (Remove Parsing from Hot Path) — IN PROGRESS
-Plan: 2 of 4 in current phase (4-00, 4-01 complete)
+Plan: 3 of 4 in current phase (4-00, 4-01, 4-02 complete)
 Status: Executing
-Last activity: 2026-03-23 — Plan 4-01 complete (Parser relocation to legacy/parsers.ts)
+Last activity: 2026-03-23 — Plan 4-02 complete (Doctor surgery: checkEngineHealth + reconciliation removal)
 
-Progress: [████████████░] 70%
+Progress: [██████████████░] 75%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 14
-- Average duration: 4 min
-- Total execution time: 1.1 hours
+- Total plans completed: 15
+- Average duration: 5 min
+- Total execution time: 1.3 hours
 
 **By Phase:**
 
@@ -30,10 +30,10 @@ Progress: [████████████░] 70%
 | 1 - Engine Foundation | 5 | 23 min | 5 min |
 | 2 - Sync + Prompt Migration | 2 | 5 min | 3 min |
 | 3 - Event Reconciliation + Mandatory Tools | 5 | ~23 min | 5 min |
-| 4 - Remove Parsing from Hot Path | 2 (so far) | 20 min | 10 min |
+| 4 - Remove Parsing from Hot Path | 3 (so far) | 30 min | 10 min |
 
 **Recent Trend:**
-- Last 5 plans: 3-02 (4 min), 3-05 (3 min), 4-00 (5 min), 4-01 (15 min)
+- Last 5 plans: 3-05 (3 min), 4-00 (5 min), 4-01 (15 min), 4-02 (10 min)
 - Trend: Steady
 
 *Updated after each plan completion*
@@ -88,6 +88,10 @@ Recent decisions affecting current work:
 - 4-01: Exported cachedParse from files.ts so legacy/parsers.ts shares the same parse cache
 - 4-01: Hot-path usage sites stubbed with safe defaults (false/null/empty) to keep TypeScript compiling
 - 4-01: auto-prompts.ts and auto-dispatch.ts added as display callers (not in plan but required for compile)
+- 4-02: Escalation logic kept as-is in doctor-proactive.ts: tracks generic errors, not bookkeeping-specific
+- 4-02: RoadmapSliceEntry built from engine SliceRow with risk/demo defaults for isMilestoneComplete compat
+- 4-02: STATE.md missing fix uses renderStateProjection() with deriveState() fallback
+- 4-02: Blocker-without-replan detection uses engine task.blocker field instead of parseSummary
 
 ### Pending Todos
 
@@ -100,5 +104,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-23
-Stopped at: Completed 4-01-PLAN.md (Parser relocation to legacy/parsers.ts)
+Stopped at: Completed 4-02-PLAN.md (Doctor surgery: checkEngineHealth + reconciliation removal)
 Resume file: None
