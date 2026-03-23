@@ -90,6 +90,8 @@ export const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "github",
   "service_tier",
   "forensics_dedup",
+  "deep_abstraction",
+  "deep_abstraction_threshold",
 ]);
 
 /** Canonical list of all dispatch unit types. */
@@ -226,6 +228,10 @@ export interface GSDPreferences {
   service_tier?: "priority" | "flex";
   /** Opt-in: search existing issues and PRs before filing from /gsd forensics. Uses additional AI tokens. */
   forensics_dedup?: boolean;
+  /** Deep abstraction mode for dense discussion inputs. 'auto' = activate above threshold, 'always' = always activate, 'off' = disabled. Default: 'auto'. */
+  deep_abstraction?: 'auto' | 'always' | 'off';
+  /** Word count threshold for triggering deep abstraction when mode is 'auto'. Default: 300. */
+  deep_abstraction_threshold?: number;
 }
 
 export interface LoadedGSDPreferences {

@@ -1,3 +1,10 @@
+---
+research_depth: {{researchDepth}}
+research_signals:
+  - {{signal}}
+research_focus: {{researchFocus}}
+---
+
 # {{milestoneId}}: {{milestoneTitle}}
 
 **Gathered:** {{date}}

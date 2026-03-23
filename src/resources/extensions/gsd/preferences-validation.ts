@@ -747,5 +747,24 @@ export function validatePreferences(preferences: GSDPreferences): {
     }
   }
 
+  // ─── Deep Abstraction ───────────────────────────────────────────────────
+  if (preferences.deep_abstraction !== undefined) {
+    const validModes = new Set(['auto', 'always', 'off']);
+    if (typeof preferences.deep_abstraction === 'string' && validModes.has(preferences.deep_abstraction)) {
+      validated.deep_abstraction = preferences.deep_abstraction as GSDPreferences['deep_abstraction'];
+    } else {
+      errors.push(`deep_abstraction must be one of: auto, always, off`);
+    }
+  }
+
+  if (preferences.deep_abstraction_threshold !== undefined) {
+    const raw = preferences.deep_abstraction_threshold;
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+      validated.deep_abstraction_threshold = Math.floor(raw);
+    } else {
+      errors.push('deep_abstraction_threshold must be a positive number');
+    }
+  }
+
   return { preferences: validated, errors, warnings };
 }

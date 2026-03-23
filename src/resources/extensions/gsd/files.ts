@@ -879,6 +879,26 @@ export function parseContextDependsOn(content: string | null): string[] {
 }
 
 /**
+ * Parse research depth calibration from CONTEXT.md YAML frontmatter.
+ * Returns { depth, signals, focus } where each is null when absent.
+ */
+export function parseResearchDepth(content: string | null): {
+  depth: string | null;
+  signals: string[] | null;
+  focus: string | null;
+} {
+  if (!content) return { depth: null, signals: null, focus: null };
+  const [fmLines] = splitFrontmatter(content);
+  if (!fmLines) return { depth: null, signals: null, focus: null };
+  const fm = parseFrontmatterMap(fmLines);
+  const depth = typeof fm['research_depth'] === 'string' ? fm['research_depth'] : null;
+  const rawSignals = fm['research_signals'];
+  const signals = Array.isArray(rawSignals) ? rawSignals.map(s => String(s).trim()).filter(Boolean) : null;
+  const focus = typeof fm['research_focus'] === 'string' ? fm['research_focus'] : null;
+  return { depth, signals, focus };
+}
+
+/**
  * Inline the prior milestone's SUMMARY.md as context for the current milestone's planning prompt.
  * Returns null when: (1) `mid` is the first milestone, (2) prior milestone has no SUMMARY file.
  *

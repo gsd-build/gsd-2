@@ -342,6 +342,8 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
       : undefined,
     service_tier: override.service_tier ?? base.service_tier,
     forensics_dedup: override.forensics_dedup ?? base.forensics_dedup,
+    deep_abstraction: override.deep_abstraction ?? base.deep_abstraction,
+    deep_abstraction_threshold: override.deep_abstraction_threshold ?? base.deep_abstraction_threshold,
   };
 }
 

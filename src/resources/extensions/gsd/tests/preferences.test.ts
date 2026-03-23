@@ -17,6 +17,7 @@ import {
   parsePreferencesMarkdown,
 } from "../preferences.ts";
 import type { GSDPreferences, GSDModelConfigV2, GSDPhaseModelConfig } from "../preferences.ts";
+import { KNOWN_PREFERENCE_KEYS } from "../preferences-types.ts";
 
 // ── Git preferences ──────────────────────────────────────────────────────────
 
@@ -351,4 +352,67 @@ test("handles empty models config", () => {
   const prefs = parsePreferencesMarkdown("---\nversion: 1\n---\n");
   assert.notEqual(prefs, null);
   assert.equal(prefs!.models, undefined);
+});
+
+// ── Deep abstraction preferences ─────────────────────────────────────────────
+
+test("deep_abstraction accepts valid modes: auto, always, off", () => {
+  for (const mode of ["auto", "always", "off"] as const) {
+    const { errors, preferences } = validatePreferences({ deep_abstraction: mode });
+    assert.equal(errors.length, 0, `deep_abstraction ${mode}: no errors`);
+    assert.equal(preferences.deep_abstraction, mode);
+  }
+});
+
+test("deep_abstraction rejects invalid value", () => {
+  const { errors, preferences } = validatePreferences({ deep_abstraction: "invalid" as any });
+  assert.ok(errors.length > 0);
+  assert.ok(errors[0].includes("auto, always, off"));
+  assert.equal(preferences.deep_abstraction, undefined);
+});
+
+test("deep_abstraction_threshold accepts positive numbers", () => {
+  const { errors, preferences } = validatePreferences({ deep_abstraction_threshold: 300 });
+  assert.equal(errors.length, 0);
+  assert.equal(preferences.deep_abstraction_threshold, 300);
+});
+
+test("deep_abstraction_threshold floors fractional values", () => {
+  const { errors, preferences } = validatePreferences({ deep_abstraction_threshold: 250.7 });
+  assert.equal(errors.length, 0);
+  assert.equal(preferences.deep_abstraction_threshold, 250);
+});
+
+test("deep_abstraction_threshold rejects zero", () => {
+  const { errors, preferences } = validatePreferences({ deep_abstraction_threshold: 0 });
+  assert.ok(errors.length > 0);
+  assert.ok(errors[0].includes("positive number"));
+  assert.equal(preferences.deep_abstraction_threshold, undefined);
+});
+
+test("deep_abstraction_threshold rejects negative numbers", () => {
+  const { errors, preferences } = validatePreferences({ deep_abstraction_threshold: -100 });
+  assert.ok(errors.length > 0);
+  assert.ok(errors[0].includes("positive number"));
+  assert.equal(preferences.deep_abstraction_threshold, undefined);
+});
+
+test("deep_abstraction_threshold rejects non-numbers", () => {
+  const { errors, preferences } = validatePreferences({ deep_abstraction_threshold: "abc" as any });
+  assert.ok(errors.length > 0);
+  assert.ok(errors[0].includes("positive number"));
+  assert.equal(preferences.deep_abstraction_threshold, undefined);
+});
+
+test("deep_abstraction and deep_abstraction_threshold are in KNOWN_PREFERENCE_KEYS", () => {
+  assert.ok(KNOWN_PREFERENCE_KEYS.has("deep_abstraction"), "deep_abstraction in known keys");
+  assert.ok(KNOWN_PREFERENCE_KEYS.has("deep_abstraction_threshold"), "deep_abstraction_threshold in known keys");
+
+  // Verify they don't produce unknown-key warnings
+  const { warnings } = validatePreferences({ deep_abstraction: "auto", deep_abstraction_threshold: 300 });
+  assert.equal(
+    warnings.filter(w => w.includes("unknown") && (w.includes("deep_abstraction"))).length,
+    0,
+    "no unknown-key warning for deep_abstraction keys"
+  );
 });
