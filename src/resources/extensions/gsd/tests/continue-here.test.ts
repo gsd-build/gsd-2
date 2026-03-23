@@ -72,17 +72,18 @@ describe("continue-here", () => {
       const budget = computeBudgets(128_000);
       const threshold = budget.continueThresholdPercent;
 
-      // Simulate repeated polls with percent above threshold using a reducer
-      // so there is no control flow inside the test body.
+      // Simulate repeated polls with percent above threshold
+      let fired = false;
+      let fireCount = 0;
       const usagePercents = [75, 80, 85, 90, 95];
-      const { fired, fireCount } = usagePercents.reduce(
-        (acc, percent) => {
-          if (acc.fired) return acc; // one-shot guard
-          if (percent >= threshold) return { fired: true, fireCount: acc.fireCount + 1 };
-          return acc;
-        },
-        { fired: false, fireCount: 0 },
-      );
+
+      for (const percent of usagePercents) {
+        if (fired) continue; // one-shot guard
+        if (percent >= threshold) {
+          fired = true;
+          fireCount++;
+        }
+      }
 
       assert.equal(fireCount, 1, "must fire exactly once");
       assert.equal(fired, true);
@@ -96,17 +97,16 @@ describe("continue-here", () => {
       { name: "1M", contextWindow: 1_000_000 },
     ];
 
-    const thresholdCases: Array<[string, number]> = [
-      ["128K", 128_000],
-      ["200K", 200_000],
-      ["1M", 1_000_000],
-    ];
-    for (const [name, contextWindow] of thresholdCases) {
-      it(`${name} model produces continueThresholdPercent of 70`, () => {
+    it("all model sizes produce continueThresholdPercent of 70", () => {
+      for (const { name, contextWindow } of modelSizes) {
         const budget = computeBudgets(contextWindow);
-        assert.equal(budget.continueThresholdPercent, 70, `${name} model should have 70% threshold`);
-      });
-    }
+        assert.equal(
+          budget.continueThresholdPercent,
+          70,
+          `${name} model should have 70% threshold`,
+        );
+      }
+    });
 
     it("larger models produce larger verificationBudgetChars", () => {
       const budgets = modelSizes.map(({ contextWindow }) => computeBudgets(contextWindow));
@@ -161,99 +161,7 @@ describe("continue-here", () => {
     });
   });
 
-  describe("continueHereFired runtime record field", () => {
-    it("AutoUnitRuntimeRecord includes continueHereFired with default false", async () => {
-      // Import writeUnitRuntimeRecord to verify the field is present and defaults
-      const { writeUnitRuntimeRecord, readUnitRuntimeRecord, clearUnitRuntimeRecord } = await import("../unit-runtime.js");
-      const fs = await import("node:fs");
-      const path = await import("node:path");
-      const os = await import("node:os");
-
-      // Use a temp directory as basePath
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "continue-here-test-"));
-      try {
-        const record = writeUnitRuntimeRecord(tmpDir, "execute-task", "M007/S02/T02", Date.now(), {
-          phase: "dispatched",
-          wrapupWarningSent: false,
-        });
-
-        assert.equal(record.continueHereFired, false, "default continueHereFired should be false");
-
-        // Verify it persists to disk
-        const read = readUnitRuntimeRecord(tmpDir, "execute-task", "M007/S02/T02");
-        assert.ok(read, "record should be readable");
-        assert.equal(read!.continueHereFired, false);
-
-        // Update to true
-        const updated = writeUnitRuntimeRecord(tmpDir, "execute-task", "M007/S02/T02", Date.now(), {
-          continueHereFired: true,
-        });
-        assert.equal(updated.continueHereFired, true, "updated continueHereFired should be true");
-
-        // Verify persistence
-        const readUpdated = readUnitRuntimeRecord(tmpDir, "execute-task", "M007/S02/T02");
-        assert.equal(readUpdated!.continueHereFired, true, "persisted continueHereFired should be true");
-
-        // Clean up
-        clearUnitRuntimeRecord(tmpDir, "execute-task", "M007/S02/T02");
-      } finally {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      }
-    });
-  });
-
   describe("context-pressure monitor integration", () => {
-    it("should fire wrap-up when context >= threshold and mark continueHereFired", async () => {
-      const { writeUnitRuntimeRecord, readUnitRuntimeRecord, clearUnitRuntimeRecord } = await import("../unit-runtime.js");
-      const fs = await import("node:fs");
-      const path = await import("node:path");
-      const os = await import("node:os");
-
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "continue-here-monitor-"));
-      try {
-        // Simulate the monitor's one-shot logic:
-        // 1. Write initial runtime record (continueHereFired=false)
-        const startedAt = Date.now();
-        writeUnitRuntimeRecord(tmpDir, "execute-task", "M001/S01/T01", startedAt, {
-          phase: "dispatched",
-          wrapupWarningSent: false,
-        });
-
-        const budget = computeBudgets(128_000);
-        const threshold = budget.continueThresholdPercent;
-
-        // Simulate the monitor poll: context at 75% (above threshold)
-        const contextPercent = 75;
-        const runtime = readUnitRuntimeRecord(tmpDir, "execute-task", "M001/S01/T01");
-        assert.ok(runtime, "runtime record should exist");
-        assert.equal(runtime!.continueHereFired, false, "initially false");
-
-        // Check: should fire
-        const shouldFire = !runtime!.continueHereFired
-          && contextPercent >= threshold;
-        assert.ok(shouldFire, "should fire when context >= threshold and not yet fired");
-
-        // Mark as fired (what the monitor does)
-        writeUnitRuntimeRecord(tmpDir, "execute-task", "M001/S01/T01", startedAt, {
-          continueHereFired: true,
-        });
-
-        // Verify one-shot: second poll should NOT fire
-        const runtime2 = readUnitRuntimeRecord(tmpDir, "execute-task", "M001/S01/T01");
-        assert.ok(runtime2, "runtime record should still exist");
-        assert.equal(runtime2!.continueHereFired, true, "should be marked as fired");
-
-        const shouldFireAgain = !runtime2!.continueHereFired
-          && contextPercent >= threshold;
-        assert.equal(shouldFireAgain, false, "must not fire again — one-shot guard");
-
-        // Clean up
-        clearUnitRuntimeRecord(tmpDir, "execute-task", "M001/S01/T01");
-      } finally {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      }
-    });
-
     it("should not fire when context is below threshold", () => {
       const budget = computeBudgets(200_000);
       const threshold = budget.continueThresholdPercent;

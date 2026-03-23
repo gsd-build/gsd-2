@@ -12,13 +12,17 @@ import type {
 } from './types.js';
 
 import {
-  parseRoadmap,
-  parsePlan,
-  parseSummary,
   loadFile,
   parseRequirementCounts,
   parseContextDependsOn,
 } from './files.js';
+
+// Legacy parsers for fallback path (non-engine projects)
+import {
+  parseRoadmap,
+  parsePlan,
+  parseSummary,
+} from './legacy/parsers.js';
 
 import {
   resolveMilestonePath,
@@ -102,6 +106,15 @@ interface StateCache {
 const CACHE_TTL_MS = 100;
 let _stateCache: StateCache | null = null;
 
+// ── Telemetry: track engine vs markdown state derivation (TOOL-03) ────────
+let _telemetry = { engineDeriveCount: 0, markdownDeriveCount: 0 };
+export function getDeriveTelemetry(): { engineDeriveCount: number; markdownDeriveCount: number } {
+  return { ..._telemetry };
+}
+export function resetDeriveTelemetry(): void {
+  _telemetry = { engineDeriveCount: 0, markdownDeriveCount: 0 };
+}
+
 /**
  * Invalidate the deriveState() cache. Call this whenever planning files on disk
  * may have changed (unit completion, merges, file writes).
@@ -142,8 +155,6 @@ export async function getActiveMilestoneId(basePath: string): Promise<string | n
     }
     const roadmap = parseRoadmap(content);
     if (!isMilestoneComplete(roadmap)) {
-      // Summary is the terminal artifact — if it exists, the milestone is
-      // complete even when roadmap checkboxes weren't ticked (#864).
       const summaryFile = resolveMilestoneFile(basePath, mid, "SUMMARY");
       if (!summaryFile) return mid;
     }
@@ -170,11 +181,46 @@ export async function deriveState(basePath: string): Promise<GSDState> {
     return _stateCache.result;
   }
 
+  // Engine bridge (Phase 3 — MIG-03)
+  // When WorkflowEngine is available, use engine exclusively.
+  // Auto-migrate from markdown if tables are empty (D-11).
+  try {
+    const { isEngineAvailable, getEngine } = await import('./workflow-engine.js');
+    if (isEngineAvailable(basePath)) {
+      const engine = getEngine(basePath);
+
+      // Auto-migration trigger (D-11): if engine tables empty AND markdown exists
+      try {
+        const { needsAutoMigration, migrateFromMarkdown, validateMigration } = await import('./workflow-migration.js');
+        if (needsAutoMigration(basePath)) {
+          migrateFromMarkdown(basePath);
+          // D-14: validate migration output, log discrepancies
+          const { discrepancies } = validateMigration(basePath);
+          if (discrepancies.length > 0) {
+            process.stderr.write(`workflow-migration: ${discrepancies.length} discrepancy(ies) after migration (engine state is authoritative)\n`);
+          }
+        }
+      } catch (migErr) {
+        process.stderr.write(`workflow-migration: auto-migration failed: ${(migErr as Error).message}\n`);
+        // Continue — engine may still have valid state from prior migration
+      }
+
+      const engineState = engine.deriveState();
+      // Cache the engine result with the same TTL as the markdown path
+      _stateCache = { basePath, result: engineState, timestamp: Date.now() };
+      _telemetry.engineDeriveCount++;
+      return engineState;
+    }
+  } catch {
+    // Fall through to legacy markdown parse — engine not yet initialized or import failed
+  }
+
   const stopTimer = debugTime("derive-state-impl");
-  const result = await _deriveStateImpl(basePath);
+  const result = await _deriveStateLegacy(basePath);
   stopTimer({ phase: result.phase, milestone: result.activeMilestone?.id });
   debugCount("deriveStateCalls");
   _stateCache = { basePath, result, timestamp: Date.now() };
+  _telemetry.markdownDeriveCount++;
   return result;
 }
 
@@ -190,7 +236,9 @@ function extractContextTitle(content: string | null, fallback: string): string {
   return h1.slice(2).trim().replace(/^M\d+(?:-[a-z0-9]{6})?[^:]*:\s*/, '') || fallback;
 }
 
-async function _deriveStateImpl(basePath: string): Promise<GSDState> {
+// Legacy markdown parser — preserved for disaster recovery only (D-15).
+// After Phase 3 auto-migration, this path should only be hit when engine is truly unavailable.
+async function _deriveStateLegacy(basePath: string): Promise<GSDState> {
   const milestoneIds = findMilestoneIds(basePath);
 
   // ── Parallel worker isolation ──────────────────────────────────────────
@@ -290,11 +338,8 @@ async function _deriveStateImpl(basePath: string): Promise<GSDState> {
     }
     const rmap = parseRoadmap(rc);
     roadmapCache.set(mid, rmap);
-    if (!isMilestoneComplete(rmap)) {
-      // Summary is the terminal artifact — if it exists, the milestone is
-      // complete even when roadmap checkboxes weren't ticked (#864).
-      const sf = resolveMilestoneFile(basePath, mid, "SUMMARY");
-      if (sf) completeMilestoneIds.add(mid);
+    if (isMilestoneComplete(rmap)) {
+      completeMilestoneIds.add(mid);
       continue;
     }
     const sf = resolveMilestoneFile(basePath, mid, "SUMMARY");

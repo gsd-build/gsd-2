@@ -10,6 +10,7 @@ import { existsSync, copyFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Decision, Requirement } from "./types.js";
 import { GSDError, GSD_STALE_STATE } from "./errors.js";
+import { migrateToV5 } from "./workflow-engine-schema.js";
 
 // Create a require function for loading native modules in ESM context
 const _require = createRequire(import.meta.url);
@@ -20,13 +21,13 @@ const _require = createRequire(import.meta.url);
  * Minimal interface over both node:sqlite DatabaseSync and better-sqlite3 Database.
  * Both expose prepare().run/get/all — the adapter normalizes row objects.
  */
-interface DbStatement {
+export interface DbStatement {
   run(...params: unknown[]): unknown;
   get(...params: unknown[]): Record<string, unknown> | undefined;
   all(...params: unknown[]): Record<string, unknown>[];
 }
 
-interface DbAdapter {
+export interface DbAdapter {
   exec(sql: string): void;
   prepare(sql: string): DbStatement;
   close(): void;
@@ -168,7 +169,7 @@ function openRawDb(path: string): unknown {
 
 // ─── Schema ────────────────────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 function initSchema(db: DbAdapter, fileBacked: boolean): void {
   // WAL mode for file-backed databases (must be outside transaction)
@@ -267,6 +268,9 @@ function initSchema(db: DbAdapter, fileBacked: boolean): void {
     db.exec(
       `CREATE VIEW IF NOT EXISTS active_memories AS SELECT * FROM memories WHERE superseded_by IS NULL`,
     );
+
+    // v5: WorkflowEngine tables (milestones, slices, tasks, verification_evidence)
+    migrateToV5(db);
 
     // Insert schema version if not already present
     const existing = db
@@ -377,6 +381,15 @@ function migrateSchema(db: DbAdapter): void {
       ).run({ ":version": 4, ":applied_at": new Date().toISOString() });
     }
 
+    // v4 → v5: add WorkflowEngine tables (milestones, slices, tasks, verification_evidence)
+    if (currentVersion < 5) {
+      migrateToV5(db);
+
+      db.prepare(
+        "INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)",
+      ).run({ ":version": 5, ":applied_at": new Date().toISOString() });
+    }
+
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");
@@ -458,6 +471,13 @@ export function closeDatabase(): void {
     currentDb = null;
     currentPath = null;
     currentPid = 0;
+  }
+  // Reset engine singleton so next openDatabase gets a fresh one
+  try {
+    const { resetEngine } = require("./workflow-engine.js") as typeof import("./workflow-engine.js");
+    resetEngine();
+  } catch {
+    // workflow-engine may not be loaded yet — safe to skip
   }
 }
 

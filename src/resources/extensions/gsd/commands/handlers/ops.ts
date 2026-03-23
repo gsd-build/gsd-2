@@ -147,8 +147,86 @@ Examples:
     return true;
   }
   if (trimmed === "migrate" || trimmed.startsWith("migrate ")) {
+    const migrateArgs = trimmed.replace(/^migrate\s*/, "").trim();
+
+    // D-12: explicit engine migration failsafe (markdown .gsd/ -> engine DB state)
+    if (migrateArgs === "--engine" || migrateArgs.startsWith("--engine ")) {
+      try {
+        const { migrateFromMarkdown, validateMigration } = await import("../../workflow-migration.js");
+        ctx.ui.notify("Running engine migration (markdown -> engine DB)...", "info");
+        migrateFromMarkdown(process.cwd());
+        const { discrepancies } = validateMigration(process.cwd());
+        if (discrepancies.length > 0) {
+          ctx.ui.notify(
+            `Migration complete with ${discrepancies.length} discrepancy(ies):\n${discrepancies.map(d => `  - ${d}`).join("\n")}`,
+            "warning",
+          );
+        } else {
+          ctx.ui.notify("Engine migration complete — all entities migrated successfully.", "info");
+        }
+      } catch (err) {
+        ctx.ui.notify(
+          `Engine migration failed: ${err instanceof Error ? err.message : String(err)}`,
+          "error",
+        );
+      }
+      return true;
+    }
+
+    // Existing v1-to-v2 migration (.planning/ -> .gsd/)
     const { handleMigrate } = await import("../../migrate/command.js");
-    await handleMigrate(trimmed.replace(/^migrate\s*/, "").trim(), ctx, pi);
+    await handleMigrate(migrateArgs, ctx, pi);
+    return true;
+  }
+  if (trimmed === "resolve-conflict" || trimmed.startsWith("resolve-conflict ")) {
+    const args = trimmed.replace(/^resolve-conflict\s*/, "").trim();
+    try {
+      const { listConflicts, resolveConflict } = await import("../../workflow-reconcile.js");
+
+      // No args: list current conflicts
+      if (!args) {
+        const conflicts = listConflicts(process.cwd());
+        if (conflicts.length === 0) {
+          ctx.ui.notify("No merge conflicts found.", "info");
+        } else {
+          const lines = conflicts.map((c, i) =>
+            `${i + 1}. ${c.entityType}:${c.entityId} — ${c.mainSideEvents.length} main event(s), ${c.worktreeSideEvents.length} worktree event(s)`
+          );
+          ctx.ui.notify(
+            `${conflicts.length} conflict(s):\n${lines.join("\n")}\n\nResolve with: /gsd resolve-conflict --entity {type}:{id} --pick [main|worktree]`,
+            "info",
+          );
+        }
+        return true;
+      }
+
+      // Parse --entity and --pick flags
+      const entityMatch = args.match(/--entity\s+(\S+)/);
+      const pickMatch = args.match(/--pick\s+(main|worktree)/);
+
+      if (!entityMatch || !pickMatch) {
+        ctx.ui.notify(
+          "Usage: /gsd resolve-conflict --entity {type}:{id} --pick [main|worktree]\n" +
+          "  Example: /gsd resolve-conflict --entity task:T01 --pick main\n" +
+          "  Run without args to list current conflicts.",
+          "error",
+        );
+        return true;
+      }
+
+      resolveConflict(process.cwd(), entityMatch[1]!, pickMatch[1] as "main" | "worktree");
+      ctx.ui.notify(`Resolved conflict for ${entityMatch[1]} — picked ${pickMatch[1]} side.`, "info");
+
+      // Check remaining conflicts
+      const remaining = listConflicts(process.cwd());
+      if (remaining.length === 0) {
+        ctx.ui.notify("All conflicts resolved. Re-run sync to complete the merge.", "info");
+      } else {
+        ctx.ui.notify(`${remaining.length} conflict(s) remaining.`, "info");
+      }
+    } catch (err) {
+      ctx.ui.notify(`resolve-conflict failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+    }
     return true;
   }
   if (trimmed === "remote" || trimmed.startsWith("remote ")) {

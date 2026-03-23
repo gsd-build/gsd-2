@@ -21,10 +21,10 @@ import { isAbsolute, join } from "node:path";
 import { GSDError, GSD_IO_ERROR, GSD_GIT_ERROR } from "./errors.js";
 import {
   copyWorktreeDb,
-  reconcileWorktreeDb,
   isDbAvailable,
 } from "./gsd-db.js";
 import { atomicWriteSync } from "./atomic-write.js";
+import { reconcileWorktreeLogs } from "./workflow-reconcile.js";
 import { execFileSync } from "node:child_process";
 import { safeCopy, safeCopyRecursive } from "./safe-fs.js";
 import { gsdRoot } from "./paths.js";
@@ -41,7 +41,7 @@ import {
 } from "./worktree.js";
 import { MergeConflictError, readIntegrationBranch, RUNTIME_EXCLUSION_PATHS } from "./git-service.js";
 import { debugLog } from "./debug-logger.js";
-import { parseRoadmap } from "./files.js";
+import { parseRoadmap } from "./legacy/parsers.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import {
   nativeGetCurrentBranch,
@@ -161,7 +161,6 @@ export function syncGsdStateToWorktree(
     "KNOWLEDGE.md",
     "OVERRIDES.md",
     "QUEUE.md",
-    "completed-units.json",
   ];
   for (const f of rootFiles) {
     const src = join(mainGsd, f);
@@ -309,8 +308,8 @@ export function syncWorktreeStateBack(
   // ── 1. Sync root-level .gsd/ files back ──────────────────────────────
   // The worktree is authoritative — complete-milestone updates REQUIREMENTS,
   // PROJECT, etc. These must overwrite main's copies so they survive teardown.
-  // Also includes QUEUE.md and completed-units.json which are written during
-  // milestone closeout and lost on teardown without explicit sync (#1787).
+  // Also includes QUEUE.md which is written during milestone closeout and
+  // lost on teardown without explicit sync (#1787).
   const rootFiles = [
     "DECISIONS.md",
     "REQUIREMENTS.md",
@@ -318,7 +317,6 @@ export function syncWorktreeStateBack(
     "KNOWLEDGE.md",
     "OVERRIDES.md",
     "QUEUE.md",
-    "completed-units.json",
   ];
   for (const f of rootFiles) {
     const src = join(wtGsd, f);
@@ -471,21 +469,13 @@ export function runWorktreePostCreateHook(
   }
   if (!hookPath) return null;
 
-  // Resolve relative paths against the source project root.
-  // On Windows, convert 8.3 short paths (e.g. RUNNER~1) to long paths
-  // so execFileSync can locate the file correctly.
-  let resolved = isAbsolute(hookPath) ? hookPath : join(sourceDir, hookPath);
+  // Resolve relative paths against the source project root
+  const resolved = isAbsolute(hookPath) ? hookPath : join(sourceDir, hookPath);
   if (!existsSync(resolved)) {
     return `Worktree post-create hook not found: ${resolved}`;
   }
-  if (process.platform === "win32") {
-    try { resolved = realpathSync.native(resolved); } catch { /* keep original */ }
-  }
 
   try {
-    // .bat/.cmd files on Windows require shell mode — execFileSync cannot
-    // spawn them directly (EINVAL).
-    const needsShell = process.platform === "win32" && /\.(bat|cmd)$/i.test(resolved);
     execFileSync(resolved, [], {
       cwd: worktreeDir,
       env: {
@@ -496,7 +486,6 @@ export function runWorktreePostCreateHook(
       stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf-8",
       timeout: 30_000, // 30 second timeout
-      shell: needsShell,
     });
     return null;
   } catch (err) {
@@ -530,7 +519,7 @@ export function autoWorktreeBranch(milestoneId: string): string {
  * syncStateToProjectRoot() runs after every task completion but the final
  * git commit may not have happened before the crash. On restart the worktree
  * is re-attached to the branch HEAD, which has [ ] for the crashed task,
- * causing verifyExpectedArtifact() to fail and triggering an infinite
+ * causing artifact verification to fail and triggering an infinite
  * dispatch/skip loop.
  *
  * Fix: after re-attaching, read every *.md plan file in the milestone
@@ -671,7 +660,7 @@ export function createAutoWorktree(
     // the project root filesystem because syncStateToProjectRoot() ran after
     // task completion but the auto-commit never fired. On restart the worktree
     // is re-created from the branch HEAD (which has [ ] for the crashed task),
-    // causing verifyExpectedArtifact() to return false → stale-key eviction →
+    // causing artifact verification to return false → stale-key eviction →
     // infinite dispatch/skip loop. Reconciling here ensures the worktree sees
     // the same [x] state that syncStateToProjectRoot() wrote to the root.
     reconcilePlanCheckboxes(basePath, info.path, milestoneId);
@@ -970,21 +959,23 @@ export function mergeMilestoneToMain(
   originalBasePath_: string,
   milestoneId: string,
   roadmapContent: string,
-): { commitMessage: string; pushed: boolean; prCreated: boolean; codeFilesChanged: boolean } {
+): { commitMessage: string; pushed: boolean; prCreated: boolean } {
   const worktreeCwd = process.cwd();
   const milestoneBranch = autoWorktreeBranch(milestoneId);
 
   // 1. Auto-commit dirty state in worktree before leaving
   autoCommitDirtyState(worktreeCwd);
 
-  // Reconcile worktree DB into main DB before leaving worktree context
+  // Event-based reconciliation — replaces reconcileWorktreeDb (Phase 3 — SYNC-04)
+  // Takes base paths (directories containing .gsd/), not db file paths.
   if (isDbAvailable()) {
     try {
-      const worktreeDbPath = join(worktreeCwd, ".gsd", "gsd.db");
-      const mainDbPath = join(originalBasePath_, ".gsd", "gsd.db");
-      reconcileWorktreeDb(mainDbPath, worktreeDbPath);
+      const result = reconcileWorktreeLogs(originalBasePath_, worktreeCwd);
+      if (result.conflicts.length > 0) {
+        process.stderr.write(`[gsd] merge blocked: ${result.conflicts.length} conflict(s)\n`);
+      }
     } catch {
-      /* non-fatal */
+      // Fall through — reconciliation not available (pre-engine project)
     }
   }
 
@@ -1187,27 +1178,6 @@ export function mergeMilestoneToMain(
     }
   }
 
-  // 8c. Detect whether any non-.gsd/ code files were actually merged (#1906).
-  // When a milestone only produced .gsd/ metadata (summaries, roadmaps) but no
-  // real code, the user sees "milestone complete" but nothing changed in their
-  // codebase. Surface this so the caller can warn the user.
-  let codeFilesChanged = false;
-  if (!nothingToCommit) {
-    try {
-      const mergedFiles = nativeDiffNumstat(
-        originalBasePath_,
-        "HEAD~1",
-        "HEAD",
-      );
-      codeFilesChanged = mergedFiles.some(
-        (entry) => !entry.path.startsWith(".gsd/"),
-      );
-    } catch {
-      // If HEAD~1 doesn't exist (first commit), assume code was changed
-      codeFilesChanged = true;
-    }
-  }
-
   // 9. Auto-push if enabled
   let pushed = false;
   if (prefs.auto_push === true && !nothingToCommit) {
@@ -1303,5 +1273,5 @@ export function mergeMilestoneToMain(
   originalBase = null;
   nudgeGitBranchCache(previousCwd);
 
-  return { commitMessage, pushed, prCreated, codeFilesChanged };
+  return { commitMessage, pushed, prCreated };
 }

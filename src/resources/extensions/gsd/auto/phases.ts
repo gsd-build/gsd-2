@@ -24,8 +24,6 @@ import {
 import { detectStuck } from "./detect-stuck.js";
 import { runUnit } from "./run-unit.js";
 import { debugLog } from "../debug-logger.js";
-import { gsdRoot } from "../paths.js";
-import { atomicWriteSync } from "../atomic-write.js";
 import { PROJECT_FILES } from "../detection.js";
 import { join } from "node:path";
 
@@ -193,7 +191,6 @@ export async function runPreDispatch(
 
   // ── Milestone transition ────────────────────────────────────────────
   if (mid && s.currentMilestoneId && mid !== s.currentMilestoneId) {
-    deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "milestone-transition", data: { from: s.currentMilestoneId, to: mid } });
     ctx.ui.notify(
       `Milestone ${s.currentMilestoneId} complete. Advancing to ${mid}: ${midTitle}.`,
       "info",
@@ -277,15 +274,6 @@ export async function runPreDispatch(
       )
       .map((m: { id: string }) => m.id);
     deps.pruneQueueOrder(s.basePath, pendingIds);
-
-    // Reset completed-units tracking for the new milestone — stale entries
-    // from the previous milestone cause the dispatch loop to skip units
-    // that haven't actually been completed in the new milestone's context.
-    s.completedUnits = [];
-    try {
-      const completedKeysPath = join(gsdRoot(s.basePath), "completed-units.json");
-      atomicWriteSync(completedKeysPath, JSON.stringify([], null, 2));
-    } catch { /* non-fatal */ }
 
     // Rebuild STATE.md immediately so it reflects the new active milestone.
     // This bypasses the 30-second throttle in the normal rebuild path —
@@ -388,7 +376,6 @@ export async function runPreDispatch(
       );
     }
     debugLog("autoLoop", { phase: "exit", reason: "no-active-milestone" });
-    deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "terminal", data: { reason: "no-active-milestone" } });
     return { action: "break", reason: "no-active-milestone" };
   }
 
@@ -457,7 +444,6 @@ export async function runPreDispatch(
     );
     await closeoutAndStop(ctx, pi, s, deps, `Milestone ${mid} complete`);
     debugLog("autoLoop", { phase: "exit", reason: "milestone-complete" });
-    deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "terminal", data: { reason: "milestone-complete", milestoneId: mid } });
     return { action: "break", reason: "milestone-complete" };
   }
 
@@ -469,7 +455,6 @@ export async function runPreDispatch(
     deps.sendDesktopNotification("GSD", blockerMsg, "error", "attention");
     deps.logCmuxEvent(prefs, blockerMsg, "error");
     debugLog("autoLoop", { phase: "exit", reason: "blocked" });
-    deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "terminal", data: { reason: "blocked", blockers: state.blockers } });
     return { action: "break", reason: "blocked" };
   }
 
@@ -502,7 +487,6 @@ export async function runDispatch(
   });
 
   if (dispatchResult.action === "stop") {
-    deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "dispatch-stop", rule: dispatchResult.matchedRule, data: { reason: dispatchResult.reason } });
     await closeoutAndStop(ctx, pi, s, deps, dispatchResult.reason);
     debugLog("autoLoop", { phase: "exit", reason: "dispatch-stop" });
     return { action: "break", reason: "dispatch-stop" };
@@ -513,8 +497,6 @@ export async function runDispatch(
     await new Promise((r) => setImmediate(r));
     return { action: "continue" };
   }
-
-  deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "dispatch-match", rule: dispatchResult.matchedRule, data: { unitType: dispatchResult.unitType, unitId: dispatchResult.unitId } });
 
   let unitType = dispatchResult.unitType;
   let unitId = dispatchResult.unitId;
@@ -539,13 +521,34 @@ export async function runDispatch(
       });
 
       if (loopState.stuckRecoveryAttempts === 0) {
-        // Level 1: try verifying the artifact, then cache invalidation + retry
+        // Level 1: try checking engine for unit completion, then cache invalidation + retry
         loopState.stuckRecoveryAttempts++;
-        const artifactExists = deps.verifyExpectedArtifact(
-          unitType,
-          unitId,
-          s.basePath,
-        );
+        let artifactExists = false;
+        try {
+          const { isEngineAvailable, WorkflowEngine } = await import("../workflow-engine.js");
+          if (isEngineAvailable(s.basePath)) {
+            const engine = new WorkflowEngine(s.basePath);
+            const parts = unitId.split("/");
+            const mid = parts[0];
+            const sid = parts[1];
+            const tid = parts[2];
+            if (unitType === "execute-task" && mid && sid && tid) {
+              const taskRow = engine.getTask(mid, sid, tid);
+              artifactExists = !!(taskRow && taskRow.status === "done");
+            } else if (unitType === "complete-slice" && mid && sid) {
+              const sliceRow = engine.getSlice(mid, sid);
+              artifactExists = !!(sliceRow && sliceRow.status === "done");
+            } else if (unitType === "plan-slice" && mid && sid) {
+              artifactExists = engine.getTasks(mid, sid).length > 0;
+            } else {
+              artifactExists = true; // no engine check — fall back to optimistic
+            }
+          } else {
+            artifactExists = true; // no engine — fail open
+          }
+        } catch {
+          artifactExists = true; // non-fatal
+        }
         if (artifactExists) {
           debugLog("autoLoop", {
             phase: "stuck-recovery",
@@ -608,7 +611,6 @@ export async function runDispatch(
       `Pre-dispatch hook${preDispatchResult.firedHooks.length > 1 ? "s" : ""}: ${preDispatchResult.firedHooks.join(", ")}`,
       "info",
     );
-    deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "pre-dispatch-hook", data: { firedHooks: preDispatchResult.firedHooks, action: preDispatchResult.action } });
   }
   if (preDispatchResult.action === "skip") {
     ctx.ui.notify(
@@ -854,23 +856,8 @@ export async function runUnitPhase(
   const previousTier = s.currentUnitRouting?.tier;
 
   s.currentUnit = { type: unitType, id: unitId, startedAt: Date.now() };
-  const unitStartSeq = ic.nextSeq();
-  deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: unitStartSeq, eventType: "unit-start", data: { unitType, unitId } });
   deps.captureAvailableSkills();
-  deps.writeUnitRuntimeRecord(
-    s.basePath,
-    unitType,
-    unitId,
-    s.currentUnit.startedAt,
-    {
-      phase: "dispatched",
-      wrapupWarningSent: false,
-      timeoutAt: null,
-      lastProgressAt: s.currentUnit.startedAt,
-      progressCount: 0,
-      lastProgressKind: "dispatch",
-    },
-  );
+  // Unit runtime record removed — engine task status is authoritative
 
   // Status bar + progress widget
   ctx.ui.setStatus("gsd-auto", "auto");
@@ -1016,7 +1003,6 @@ export async function runUnitPhase(
     deps.lockBase(),
     unitType,
     unitId,
-    s.completedUnits.length,
   );
 
   debugLog("autoLoop", {
@@ -1047,14 +1033,12 @@ export async function runUnitPhase(
     deps.lockBase(),
     unitType,
     unitId,
-    s.completedUnits.length,
     sessionFile,
   );
   deps.writeLock(
     deps.lockBase(),
     unitType,
     unitId,
-    s.completedUnits.length,
     sessionFile,
   );
 
@@ -1118,7 +1102,7 @@ export async function runUnitPhase(
           `${unitType} ${unitId} completed with 0 tool calls — hallucinated summary, will retry`,
           "warning",
         );
-        // Do NOT add to completedUnits — fall through to next iteration
+        // Do NOT mark as verified — fall through to next iteration
         // where dispatch will re-derive and re-dispatch this task.
         return { action: "next", data: { unitStartedAt: s.currentUnit.startedAt } };
       }
@@ -1133,33 +1117,39 @@ export async function runUnitPhase(
     );
   }
 
-  const skipArtifactVerification = unitType.startsWith("hook/") || unitType === "custom-step";
-  const artifactVerified =
-    skipArtifactVerification ||
-    deps.verifyExpectedArtifact(unitType, unitId, s.basePath);
-  if (artifactVerified) {
-    s.completedUnits.push({
-      type: unitType,
-      id: unitId,
-      startedAt: s.currentUnit.startedAt,
-      finishedAt: Date.now(),
-    });
-    if (s.completedUnits.length > 200) {
-      s.completedUnits = s.completedUnits.slice(-200);
-    }
-    // Flush completed-units to disk so the record survives crashes
+  const isHookUnit = unitType.startsWith("hook/");
+  let artifactVerified = isHookUnit;
+  if (!isHookUnit) {
     try {
-      const completedKeysPath = join(gsdRoot(s.basePath), "completed-units.json");
-      const keys = s.completedUnits.map((u) => `${u.type}/${u.id}`);
-      atomicWriteSync(completedKeysPath, JSON.stringify(keys, null, 2));
-    } catch { /* non-fatal: disk flush failure */ }
-
-    deps.clearUnitRuntimeRecord(s.basePath, unitType, unitId);
+      const { isEngineAvailable, WorkflowEngine } = await import("../workflow-engine.js");
+      const parts = unitId.split("/");
+      const mid = parts[0];
+      const sid = parts[1];
+      const tid = parts[2];
+      if (isEngineAvailable(s.basePath) && mid) {
+        const engine = new WorkflowEngine(s.basePath);
+        if (unitType === "execute-task" && sid && tid) {
+          const taskRow = engine.getTask(mid, sid, tid);
+          artifactVerified = !!(taskRow && taskRow.status === "done" && taskRow.summary);
+        } else if (unitType === "complete-slice" && sid) {
+          const sliceRow = engine.getSlice(mid, sid);
+          artifactVerified = !!(sliceRow && sliceRow.status === "done");
+        } else if (unitType === "plan-slice" && sid) {
+          artifactVerified = engine.getTasks(mid, sid).length > 0;
+        } else {
+          artifactVerified = true; // no specific engine check — fall through
+        }
+      } else {
+        artifactVerified = true; // no engine — fail open
+      }
+    } catch {
+      artifactVerified = true; // non-fatal
+    }
+  }
+  if (artifactVerified) {
     s.unitDispatchCount.delete(`${unitType}/${unitId}`);
     s.unitRecoveryCount.delete(`${unitType}/${unitId}`);
   }
-
-  deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "unit-end", data: { unitType, unitId, status: unitResult.status, artifactVerified }, causedBy: { flowId: ic.flowId, seq: unitStartSeq } });
 
   return { action: "next", data: { unitStartedAt: s.currentUnit.startedAt } };
 }
@@ -1199,8 +1189,8 @@ export async function runFinalize(
   // Sidecar items use lightweight pre-verification opts
   const preVerificationOpts: PreVerificationOpts | undefined = sidecarItem
     ? sidecarItem.kind === "hook"
-      ? { skipSettleDelay: true, skipDoctor: true, skipStateRebuild: true, skipWorktreeSync: true }
-      : { skipSettleDelay: true, skipStateRebuild: true }
+      ? { skipSettleDelay: true, skipWorktreeSync: true }
+      : { skipSettleDelay: true }
     : undefined;
   const preResult = await deps.postUnitPreVerification(postUnitCtx, preVerificationOpts);
   if (preResult === "dispatched") {
