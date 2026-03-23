@@ -715,10 +715,10 @@ test("crash lock records session file from AFTER newSession, not before (#1710)"
         prompt: "do the thing",
       };
     },
-    writeLock: (_base: string, _ut: string, _uid: string, _count: number, sessionFile?: string) => {
+    writeLock: (_base: string, _ut: string, _uid: string, sessionFile?: string) => {
       writeLockCalls.push({ sessionFile });
     },
-    updateSessionLock: (_base: string, _ut: string, _uid: string, _count: number, sessionFile?: string) => {
+    updateSessionLock: (_base: string, _ut: string, _uid: string, sessionFile?: string) => {
       updateSessionLockCalls.push({ sessionFile });
     },
     getSessionFile: (ctxArg: any) => {

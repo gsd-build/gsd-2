@@ -114,15 +114,16 @@ describe("Workflow Tools", () => {
       const engine = getEngine(process.cwd());
       const state = engine.deriveState();
 
-      assert.ok(state.progress.milestones, "should have milestone progress");
-      assert.equal(state.progress.milestones.total, 1);
-      assert.equal(state.progress.milestones.done, 0);
+      assert.ok(state.progress, "should have progress");
+      assert.ok(state.progress!.milestones, "should have milestone progress");
+      assert.equal(state.progress!.milestones.total, 1);
+      assert.equal(state.progress!.milestones.done, 0);
 
       // Slice and task progress should be present since there's an active milestone/slice
-      assert.ok(state.progress.slices, "should have slice progress");
-      assert.ok(state.progress.tasks, "should have task progress");
-      assert.equal(state.progress.tasks!.total, 2);
-      assert.equal(state.progress.tasks!.done, 0);
+      assert.ok(state.progress!.slices, "should have slice progress");
+      assert.ok(state.progress!.tasks, "should have task progress");
+      assert.equal(state.progress!.tasks!.total, 2);
+      assert.equal(state.progress!.tasks!.done, 0);
     });
   });
 
