@@ -103,7 +103,7 @@ test("npm pack produces tarball with required files", async (t) => {
 
   assert.ok(existsSync(tarballPath), "tarball created");
 
-    t.after(() => {
+  t.after(() => {
     rmSync(tarballPath, { force: true });
     rmSync(sandbox.rootDir, { recursive: true, force: true });
   });
@@ -125,17 +125,17 @@ test("npm pack produces tarball with required files", async (t) => {
   const pkg = JSON.parse(pkgJson);
   assert.equal(pkg.piConfig?.name, "gsd", "pkg/package.json piConfig.name is gsd");
   assert.equal(pkg.piConfig?.configDir, ".gsd", "pkg/package.json piConfig.configDir is .gsd");
-
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 2. npm pack → install → gsd binary resolves
 // ═══════════════════════════════════════════════════════════════════════════
-test("tarball installs and gsd binary resolves", async (t) => {{
+
+test("tarball installs and gsd binary resolves", async (t) => {
   const sandbox = createNpmSandbox("gsd-install-test-");
   const tarballPath = packTarball(sandbox);
 
-    t.after(() => {
+  t.after(() => {
     rmSync(tarballPath, { force: true });
     rmSync(sandbox.rootDir, { recursive: true, force: true });
   });
@@ -170,7 +170,6 @@ test("tarball installs and gsd binary resolves", async (t) => {{
     "index.ts",
   );
   assert.ok(existsSync(installedGsdExt), "bundled gsd extension present in installed package");
-
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -229,7 +228,9 @@ test("gsd launches and loads extensions without errors", async () => {
     !output.includes("ERR_MODULE_NOT_FOUND"),
     "no ERR_MODULE_NOT_FOUND",
   );
-});test("gsd exits early with a clear message when synced resources are newer than the binary", async (t) => { {
+});
+
+test("gsd exits early with a clear message when synced resources are newer than the binary", async (t) => {
   const fakeHome = mkdtempSync(join(tmpdir(), "gsd-version-skew-"));
   const fakeAgentDir = join(fakeHome, ".gsd", "agent");
   mkdirSync(fakeAgentDir, { recursive: true });
@@ -238,7 +239,7 @@ test("gsd launches and loads extensions without errors", async () => {
     JSON.stringify({ gsdVersion: "999.0.0" }),
   );
 
-    t.after(() => { rmSync(fakeHome, { recursive: true, force: true }); });
+  t.after(() => { rmSync(fakeHome, { recursive: true, force: true }); });
 
   const result = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
     let stderr = "";
@@ -270,5 +271,4 @@ test("gsd launches and loads extensions without errors", async () => {
   assert.match(result.stderr, /Version mismatch detected/, "prints a friendly skew header");
   assert.match(result.stderr, /npm install -g gsd-pi@latest|gsd update/, "prints upgrade guidance");
   assert.doesNotMatch(result.stderr, /\[gsd\] Extension load error/, "fails before extension loading");
-
 });

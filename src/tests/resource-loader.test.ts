@@ -54,7 +54,7 @@ test("hasStaleCompiledExtensionSiblings only flags top-level .ts/.js sibling pai
   const tmp = mkdtempSync(join(tmpdir(), "gsd-resource-loader-"));
   const extensionsDir = join(tmp, "extensions");
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }); });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }); });
 
   mkdirSync(join(extensionsDir, "gsd"), { recursive: true });
   writeFileSync(join(extensionsDir, "gsd", "index.ts"), "export {};\n");
@@ -65,15 +65,15 @@ test("hasStaleCompiledExtensionSiblings only flags top-level .ts/.js sibling pai
 
   writeFileSync(join(extensionsDir, "ask-user-questions.ts"), "export {};\n");
   assert.equal(hasStaleCompiledExtensionSiblings(extensionsDir), true);
-
 });
-test("buildResourceLoader excludes duplicate top-level pi extensions when bundled resources use .js", async (t) => {{
+
+test("buildResourceLoader excludes duplicate top-level pi extensions when bundled resources use .js", async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), "gsd-resource-loader-home-"));
   const piExtensionsDir = join(tmp, ".pi", "agent", "extensions");
   const fakeAgentDir = join(tmp, ".gsd", "agent");
   const restoreHomeEnv = overrideHomeEnv(tmp);
 
-    t.after(() => {
+  t.after(() => {
     restoreHomeEnv();
     rmSync(tmp, { recursive: true, force: true });
   });
@@ -96,15 +96,16 @@ test("buildResourceLoader excludes duplicate top-level pi extensions when bundle
     true,
     "non-duplicate pi extensions should still load",
   );
+});
 
-});test("initResources prunes stale top-level extension siblings next to bundled compiled extensions", async (t) => { {
+test("initResources prunes stale top-level extension siblings next to bundled compiled extensions", async (t) => {
   const { initResources } = await import("../resource-loader.ts");
   const tmp = mkdtempSync(join(tmpdir(), "gsd-resource-loader-sync-"));
   const fakeAgentDir = join(tmp, "agent");
   const bundledTsPath = join(fakeAgentDir, "extensions", "ask-user-questions.ts");
   const bundledJsPath = join(fakeAgentDir, "extensions", "ask-user-questions.js");
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }); });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }); });
 
   initResources(fakeAgentDir);
 
@@ -125,5 +126,4 @@ test("buildResourceLoader excludes duplicate top-level pi extensions when bundle
 
   assert.equal(existsSync(staleSiblingPath), false, "stale top-level sibling should be removed during sync");
   assert.equal(existsSync(bundledPath), true, "bundled extension should remain after cleanup");
-
 });

@@ -353,7 +353,7 @@ test("assembled lifecycle: boot → onboard → prompt → streaming text → to
     validateApiKey: async () => ({ ok: true, message: "openai credentials validated" }),
   });
 
-    t.after(() => {
+  t.after(async () => {
     onboarding.resetOnboardingServiceForTests();
     await bridge.resetBridgeServiceForTests();
     fixture.cleanup();
@@ -575,9 +575,9 @@ test("assembled lifecycle: boot → onboard → prompt → streaming text → to
       `complete pipeline must include ${required} (got: ${allEventTypes.join(", ")})`,
     );
   }
-
 });
-test("assembled settings controls keep retry visibility and daily-use mutations authoritative", async (t) => {{
+
+test("assembled settings controls keep retry visibility and daily-use mutations authoritative", async (t) => {
   const fixture = makeWorkspaceFixture();
   const sessionPath = createSessionFile(fixture.projectCwd, fixture.sessionsDir, "sess-settings", "Settings Session");
   const bridgeCommands: any[] = [];
@@ -696,7 +696,7 @@ test("assembled settings controls keep retry visibility and daily-use mutations 
     } as any),
   });
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     onboarding.resetOnboardingServiceForTests();
     fixture.cleanup();
@@ -777,8 +777,9 @@ test("assembled settings controls keep retry visibility and daily-use mutations 
     ["set_steering_mode", "set_follow_up_mode", "set_auto_compaction", "set_auto_retry", "abort_retry"],
     "settings parity must route through the live bridge instead of browser-local toggles",
   );
+});
 
-});test("assembled recovery route exposes actionable browser diagnostics without raw transcript leakage", async (t) => { {
+test("assembled recovery route exposes actionable browser diagnostics without raw transcript leakage", async (t) => {
   const fixture = makeWorkspaceFixture();
   const sessionPath = createSessionFile(fixture.projectCwd, fixture.sessionsDir, "sess-recovery", "Recovery Session");
 
@@ -872,7 +873,7 @@ test("assembled settings controls keep retry visibility and daily-use mutations 
     }),
   });
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     fixture.cleanup();
   });
@@ -890,8 +891,9 @@ test("assembled settings controls keep retry visibility and daily-use mutations 
   assert.ok(payload.actions.browser.some((action: { id: string }) => action.id === "open_auth_controls"));
   assert.equal(payload.interruptedRun.detected, true);
   assert.doesNotMatch(JSON.stringify(payload), /sk-assembled-recovery-secret-0001|sk-assembled-auth-secret-0002/);
+});
 
-})test("assembled slash-command behavior keeps built-ins safe while preserving GSD prompt commands", async (t) => {> {
+test("assembled slash-command behavior keeps built-ins safe while preserving GSD prompt commands", async (t) => {
   const fixture = makeWorkspaceFixture();
   const sessionPath = createSessionFile(fixture.projectCwd, fixture.sessionsDir, "sess-slash", "Slash Session");
   const bridgeCommands: any[] = [];
@@ -964,7 +966,7 @@ test("assembled settings controls keep retry visibility and daily-use mutations 
     } as any),
   });
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     onboarding.resetOnboardingServiceForTests();
     fixture.cleanup();
@@ -1037,5 +1039,4 @@ test("assembled settings controls keep retry visibility and daily-use mutations 
   );
   const promptCommand = bridgeCommands.find((command) => command.type === "prompt");
   assert.equal(promptCommand?.message, "/gsd auto", "GSD passthrough commands must stay on the extension prompt path");
-
 });

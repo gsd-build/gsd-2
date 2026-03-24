@@ -31,17 +31,17 @@ function withEnv(
       process.env[key] = vars[key]
     }
   }
-  try {
-    fn()
-  } finally {
+  t.after(() => {
     for (const key of Object.keys(originals)) {
-      if (originals[key] === undefined) {
-        delete process.env[key]
-      } else {
-        process.env[key] = originals[key]
-      }
+    if (originals[key] === undefined) {
+    delete process.env[key]
+    } else {
+    process.env[key] = originals[key]
     }
-  }
+    }
+  });
+
+  fn()
 }
 
 function makeTmpAuth(data: Record<string, unknown> = {}): { authPath: string; cleanup: () => void } {
@@ -125,7 +125,7 @@ test('direct arg "tavily" sets preference and notifies', async (t) => {
   const cmd = await loadCommand()
   const { authPath, cleanup } = makeTmpAuth()
 
-    t.after(() => { cleanup() });
+  t.after(() => { cleanup() });
 
   await withEnv({ TAVILY_API_KEY: 'tvly-test', BRAVE_API_KEY: undefined }, async () => {
     // Pre-set to auto so we can verify the change
@@ -142,17 +142,17 @@ test('direct arg "tavily" sets preference and notifies', async (t) => {
     assert.match(ctx.ui.notifyCalls[0].message, /Search provider set to tavily/, 'notification should confirm provider set')
     assert.match(ctx.ui.notifyCalls[0].message, /Effective provider: tavily/, 'notification should show effective provider')
   })
-
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 2. Direct arg — brave
 // ═══════════════════════════════════════════════════════════════════════════
-test('direct arg "brave" sets preference and notifies', async (t) => {{
+
+test('direct arg "brave" sets preference and notifies', async (t) => {
   const cmd = await loadCommand()
   const { authPath, cleanup } = makeTmpAuth()
 
-    t.after(() => { cleanup() });
+  t.after(() => { cleanup() });
 
   await withEnv({ TAVILY_API_KEY: undefined, BRAVE_API_KEY: 'BSA-test' }, async () => {
     const ctx = makeMockCtx()
@@ -163,16 +163,17 @@ test('direct arg "brave" sets preference and notifies', async (t) => {{
     assert.match(ctx.ui.notifyCalls[0].message, /Search provider set to brave/)
     assert.match(ctx.ui.notifyCalls[0].message, /Effective provider: brave/)
   })
-
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 3. Direct arg — auto
-// ═══════════════════════════════════════════════════════════════════════════test('direct arg "auto" sets preference and notifies', async (t) => { {
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('direct arg "auto" sets preference and notifies', async (t) => {
   const cmd = await loadCommand()
   const { authPath, cleanup } = makeTmpAuth()
 
-    t.after(() => { cleanup() });
+  t.after(() => { cleanup() });
 
   await withEnv({ TAVILY_API_KEY: 'tvly-test', BRAVE_API_KEY: 'BSA-test' }, async () => {
     const ctx = makeMockCtx()
@@ -184,7 +185,6 @@ test('direct arg "brave" sets preference and notifies', async (t) => {{
     // auto with both keys → tavily
     assert.match(ctx.ui.notifyCalls[0].message, /Effective provider: tavily/)
   })
-
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -219,14 +219,16 @@ test('no arg shows select UI with 3 options, user picks brave', async () => {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 5. Cancel (select returns undefined) — no side effects
-// ══════════════════════════════════════════════════════════════════════════test('cancel (select returns undefined) produces no side effects', async (t) => {> {
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('cancel (select returns undefined) produces no side effects', async (t) => {
   const { getSearchProviderPreference, setSearchProviderPreference } = await import(
     '../resources/extensions/search-the-web/provider.ts'
   )
   const cmd = await loadCommand()
   const { authPath, cleanup } = makeTmpAuth()
 
-    t.after(() => { cleanup() });
+  t.after(() => { cleanup() });
 
   await withEnv({ TAVILY_API_KEY: 'tvly-test', BRAVE_API_KEY: undefined }, async () => {
     setSearchProviderPreference('tavily', authPath)
@@ -240,7 +242,6 @@ test('no arg shows select UI with 3 options, user picks brave', async () => {
     // No notification (no side effects)
     assert.equal(ctx.ui.notifyCalls.length, 0, 'cancel should produce no notification')
   })
-
 })
 
 // ═══════════════════════════════════════════════════════════════════════════

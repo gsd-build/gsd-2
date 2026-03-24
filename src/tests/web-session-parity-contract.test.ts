@@ -313,7 +313,7 @@ test("/api/session/browser stays current-project scoped and carries threaded/sea
 
   configureBridgeFixture(fixture, harness)
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests()
     onboarding.resetOnboardingServiceForTests()
     fixture.cleanup()
@@ -352,9 +352,9 @@ test("/api/session/browser stays current-project scoped and carries threaded/sea
   assert.equal(searchPayload.query.nameFilter, "named")
   assert.equal(searchPayload.sessions[0].id, "sess-named")
   assert.equal(searchPayload.sessions[0].name, "Release Notes")
-
 })
-test("/api/session/manage renames the active session through bridge-aware RPC instead of mutating the file directly", async (t) => {{
+
+test("/api/session/manage renames the active session through bridge-aware RPC instead of mutating the file directly", async (t) => {
   const fixture = makeWorkspaceFixture()
   const activePath = createSessionFile({
     projectCwd: fixture.projectCwd,
@@ -415,7 +415,7 @@ test("/api/session/manage renames the active session through bridge-aware RPC in
     } as any),
   })
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests()
     onboarding.resetOnboardingServiceForTests()
     fixture.cleanup()
@@ -441,8 +441,9 @@ test("/api/session/manage renames the active session through bridge-aware RPC in
   assert.equal(payload.mutation, "rpc")
   assert.ok(harness.commands.some((command) => command.type === "set_session_name" && command.name === "Active Renamed"))
   assert.equal(getLatestSessionName(activePath), "Before Active Rename")
+})
 
-})test("/api/session/manage renames inactive sessions via authoritative session-file mutation and rejects out-of-scope paths", async (t) => { {
+test("/api/session/manage renames inactive sessions via authoritative session-file mutation and rejects out-of-scope paths", async (t) => {
   const fixture = makeWorkspaceFixture()
   const activePath = createSessionFile({
     projectCwd: fixture.projectCwd,
@@ -519,7 +520,7 @@ test("/api/session/manage renames the active session through bridge-aware RPC in
     } as any),
   })
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests()
     onboarding.resetOnboardingServiceForTests()
     fixture.cleanup()
@@ -560,14 +561,15 @@ test("/api/session/manage renames the active session through bridge-aware RPC in
   assert.equal(outsidePayload.success, false)
   assert.equal(outsidePayload.code, "not_found")
   assert.equal(getLatestSessionName(outsidePath), "Outside Session")
+})
 
-}test("/api/git returns a current-project-scoped repo summary and ignores changes outside the current project subtree", async (t) => {> {
+test("/api/git returns a current-project-scoped repo summary and ignores changes outside the current project subtree", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "gsd-web-git-summary-"))
   const repoRoot = join(root, "repo")
   const projectCwd = join(repoRoot, "apps", "current-project")
   const docsDir = join(repoRoot, "docs")
 
-    t.after(() => { rmSync(root, { recursive: true, force: true }) });
+  t.after(() => { rmSync(root, { recursive: true, force: true }) });
 
   mkdirSync(projectCwd, { recursive: true })
   mkdirSync(docsDir, { recursive: true })
@@ -612,11 +614,12 @@ test("/api/session/manage renames the active session through bridge-aware RPC in
       ["dirty.txt", "staged.txt", "untracked.txt"],
     )
   })
+})
 
-test("/api/git exposes an explicit not-a-repo state instead of failing silently", async (t) => {=> {
+test("/api/git exposes an explicit not-a-repo state instead of failing silently", async (t) => {
   const projectCwd = mkdtempSync(join(tmpdir(), "gsd-web-not-repo-"))
 
-    t.after(() => { rmSync(projectCwd, { recursive: true, force: true }) });
+  t.after(() => { rmSync(projectCwd, { recursive: true, force: true }) });
 
   await withProjectGitEnv(projectCwd, async () => {
     const response = await gitRoute.GET()
@@ -629,7 +632,6 @@ test("/api/git exposes an explicit not-a-repo state instead of failing silently"
     assert.equal(payload.project.repoRoot, null)
     assert.match(payload.message, /not inside a Git repository/i)
   })
-
 })
 
 test("browser session, settings, and git surfaces keep inspectable browse/manage/state markers on the shared surface", () => {

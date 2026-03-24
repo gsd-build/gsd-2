@@ -304,7 +304,7 @@ test("successful browser onboarding restarts the stale bridge child and unlocks 
     validateApiKey: async () => ({ ok: true, message: "openai credentials validated" }),
   });
 
-    t.after(() => {
+  t.after(async () => {
     onboarding.resetOnboardingServiceForTests();
     await bridge.resetBridgeServiceForTests();
     fixture.cleanup();
@@ -360,9 +360,9 @@ test("successful browser onboarding restarts the stale bridge child and unlocks 
   assert.equal(firstPromptPayload.command, "prompt");
   assert.equal(harness.promptCount, 1);
   assert.deepEqual(harness.generations[1]?.promptMessages, ["first unlocked prompt"]);
-
 });
-test("refresh failures keep the workspace locked and expose the failed bridge-refresh reason", async (t) => {{
+
+test("refresh failures keep the workspace locked and expose the failed bridge-refresh reason", async (t) => {
   const fixture = makeWorkspaceFixture();
   const authStorage = AuthStorage.inMemory({});
   const harness = configureBridgeRuntime(fixture, authStorage, { failRestart: true });
@@ -371,7 +371,7 @@ test("refresh failures keep the workspace locked and expose the failed bridge-re
     validateApiKey: async () => ({ ok: true, message: "openai credentials validated" }),
   });
 
-    t.after(() => {
+  t.after(async () => {
     onboarding.resetOnboardingServiceForTests();
     await bridge.resetBridgeServiceForTests();
     fixture.cleanup();
@@ -421,7 +421,6 @@ test("refresh failures keep the workspace locked and expose the failed bridge-re
   assert.equal(failedBootPayload.onboarding.lockReason, "bridge_refresh_failed");
   assert.equal(failedBootPayload.onboarding.bridgeAuthRefresh.phase, "failed");
   assert.match(failedBootPayload.onboarding.bridgeAuthRefresh.error, /could not attach/i);
-
 });
 
 test("fresh gsd --web browser onboarding stays locked on failed validation and unlocks after a successful retry", async (t) => {
@@ -435,7 +434,7 @@ test("fresh gsd --web browser onboarding stays locked on failed validation and u
   const browserLogPath = join(tempRoot, "browser-open.log")
   let port: number | null = null
 
-    t.after(() => {
+  t.after(async () => {
     if (port !== null) {
     await killProcessOnPort(port)
     }
@@ -507,5 +506,4 @@ test("fresh gsd --web browser onboarding stays locked on failed validation and u
   const bootAfterPayload = await bootAfter.json() as any
   assert.equal(bootAfterPayload.onboarding.locked, false)
   assert.equal(bootAfterPayload.onboarding.lockReason, null)
-
 })

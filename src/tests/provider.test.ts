@@ -28,17 +28,17 @@ function withEnv(
       process.env[key] = vars[key]
     }
   }
-  try {
-    fn()
-  } finally {
+  t.after(() => {
     for (const key of Object.keys(originals)) {
-      if (originals[key] === undefined) {
-        delete process.env[key]
-      } else {
-        process.env[key] = originals[key]
-      }
+    if (originals[key] === undefined) {
+    delete process.env[key]
+    } else {
+    process.env[key] = originals[key]
     }
-  }
+    }
+  });
+
+  fn()
 }
 
 function makeTmpAuth(data: Record<string, unknown> = {}): { authPath: string; cleanup: () => void } {
@@ -57,14 +57,13 @@ test('resolveSearchProvider returns tavily when only TAVILY_API_KEY is set', asy
     '../resources/extensions/search-the-web/provider.ts'
   )
   const { authPath, cleanup } = makeTmpAuth()
-    t.after(() => { cleanup() });
+  t.after(() => { cleanup() });
 
   withEnv({ TAVILY_API_KEY: 'tvly-test', BRAVE_API_KEY: undefined }, () => {
     // Override preference read to use our temp auth (auto)
     const result = resolveSearchProvider('auto')
     assert.equal(result, 'tavily')
   })
-
 })
 
 test('resolveSearchProvider returns brave when only BRAVE_API_KEY is set', async () => {
@@ -146,34 +145,37 @@ test('resolveSearchProvider falls back to other provider when preferred key miss
 // ═══════════════════════════════════════════════════════════════════════════
 // 2. Preference get/set round-trip
 // ═══════════════════════════════════════════════════════════════════════════
-test('getSearchProviderPreference returns auto when no preference stored', async (t) => {{
+
+test('getSearchProviderPreference returns auto when no preference stored', async (t) => {
   const { getSearchProviderPreference } = await import(
     '../resources/extensions/search-the-web/provider.ts'
   )
   const { authPath, cleanup } = makeTmpAuth()
-    t.after(() => { cleanup() });
+  t.after(() => { cleanup() });
 
   const pref = getSearchProviderPreference(authPath)
   assert.equal(pref, 'auto')
+})
 
-})test('getSearchProviderPreference reads from auth.json via AuthStorage', async (t) => { {
+test('getSearchProviderPreference reads from auth.json via AuthStorage', async (t) => {
   const { getSearchProviderPreference } = await import(
     '../resources/extensions/search-the-web/provider.ts'
   )
   const { authPath, cleanup } = makeTmpAuth({
     search_provider: { type: 'api_key', key: 'tavily' },
   })
-    t.after(() => { cleanup() });
+  t.after(() => { cleanup() });
 
   const pref = getSearchProviderPreference(authPath)
   assert.equal(pref, 'tavily')
+})
 
-}test('setSearchProviderPreference writes to auth.json via AuthStorage', async (t) => {> {
+test('setSearchProviderPreference writes to auth.json via AuthStorage', async (t) => {
   const { getSearchProviderPreference, setSearchProviderPreference } = await import(
     '../resources/extensions/search-the-web/provider.ts'
   )
   const { authPath, cleanup } = makeTmpAuth()
-    t.after(() => { cleanup() });
+  t.after(() => { cleanup() });
 
   setSearchProviderPreference('brave', authPath)
   const pref = getSearchProviderPreference(authPath)
@@ -186,19 +188,19 @@ test('getSearchProviderPreference returns auto when no preference stored', async
   // Round-trip: change to auto
   setSearchProviderPreference('auto', authPath)
   assert.equal(getSearchProviderPreference(authPath), 'auto')
+})
 
-test('getSearchProviderPreference returns auto for invalid stored value', async (t) => {=> {
+test('getSearchProviderPreference returns auto for invalid stored value', async (t) => {
   const { getSearchProviderPreference } = await import(
     '../resources/extensions/search-the-web/provider.ts'
   )
   const { authPath, cleanup } = makeTmpAuth({
     search_provider: { type: 'api_key', key: 'google' },
   })
-    t.after(() => { cleanup() });
+  t.after(() => { cleanup() });
 
   const pref = getSearchProviderPreference(authPath)
   assert.equal(pref, 'auto', 'invalid stored value falls back to auto')
-
 })
 
 // ═══════════════════════════════════════════════════════════════════════════

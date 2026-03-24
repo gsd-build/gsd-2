@@ -197,7 +197,7 @@ test("/api/bridge-terminal/stream attaches to the main bridge runtime and forwar
     spawn: harness.spawn,
   });
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     fixture.cleanup();
   });
@@ -213,9 +213,9 @@ test("/api/bridge-terminal/stream attaches to the main bridge runtime and forwar
 
   assert.ok(harness.commands.some((command) => command.type === "terminal_resize" && command.cols === 132 && command.rows === 41));
   assert.ok(harness.commands.some((command) => command.type === "terminal_redraw"));
-
 });
-test("bridge-terminal input and resize routes forward browser terminal traffic onto the authoritative bridge session", async (t) => {{
+
+test("bridge-terminal input and resize routes forward browser terminal traffic onto the authoritative bridge session", async (t) => {
   const fixture = makeWorkspaceFixture();
   const harness = createHarness((command, current) => {
     if (command.type === "get_state") {
@@ -266,7 +266,7 @@ test("bridge-terminal input and resize routes forward browser terminal traffic o
     spawn: harness.spawn,
   });
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     fixture.cleanup();
   });
@@ -289,8 +289,9 @@ test("bridge-terminal input and resize routes forward browser terminal traffic o
 
   assert.ok(harness.commands.some((command) => command.type === "terminal_input" && command.data === "hello from xterm"));
   assert.ok(harness.commands.some((command) => command.type === "terminal_resize" && command.cols === 140 && command.rows === 48));
+});
 
-});test("session_state_changed from the native main-session TUI refreshes bridge state and emits matching live invalidations", async (t) => { {
+test("session_state_changed from the native main-session TUI refreshes bridge state and emits matching live invalidations", async (t) => {
   const fixture = makeWorkspaceFixture();
   const sessionAPath = join(fixture.sessionsDir, "sess-a.jsonl");
   const sessionBPath = join(fixture.sessionsDir, "sess-b.jsonl");
@@ -337,7 +338,7 @@ test("bridge-terminal input and resize routes forward browser terminal traffic o
     spawn: harness.spawn,
   });
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     fixture.cleanup();
   });
@@ -363,5 +364,4 @@ test("bridge-terminal input and resize routes forward browser terminal traffic o
   );
 
   unsubscribe();
-
 });

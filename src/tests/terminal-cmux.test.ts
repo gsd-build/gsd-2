@@ -16,7 +16,7 @@ test("detectCapabilities treats cmux as kitty-capable", (t) => {
     CMUX_SURFACE_ID: "surface:2",
     TERM_PROGRAM: "ghostty",
   };
-    t.after(() => {
+  t.after(() => {
     process.env = originalEnv;
     resetCapabilitiesCache();
   });
@@ -27,5 +27,4 @@ test("detectCapabilities treats cmux as kitty-capable", (t) => {
     trueColor: true,
     hyperlinks: true,
   });
-
 });

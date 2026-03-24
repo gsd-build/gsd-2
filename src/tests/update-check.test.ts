@@ -43,40 +43,41 @@ test('compareSemver handles versions with different segment counts', () => {
 
 test('readUpdateCache returns null for nonexistent file', (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-update-cache-'))
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   const result = readUpdateCache(join(tmp, 'nonexistent'))
   assert.equal(result, null)
-
 })
-test('readUpdateCache returns null for malformed JSON', (t) => {{
+
+test('readUpdateCache returns null for malformed JSON', (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-update-cache-'))
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   const cachePath = join(tmp, '.update-check')
   writeFileSync(cachePath, 'not json')
   const result = readUpdateCache(cachePath)
   assert.equal(result, null)
+})
 
-})test('writeUpdateCache + readUpdateCache round-trips correctly', (t) => { {
+test('writeUpdateCache + readUpdateCache round-trips correctly', (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-update-cache-'))
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   const cachePath = join(tmp, '.update-check')
   const cache = { lastCheck: Date.now(), latestVersion: '3.0.0' }
   writeUpdateCache(cache, cachePath)
   const result = readUpdateCache(cachePath)
   assert.deepEqual(result, cache)
+})
 
-}test('writeUpdateCache creates parent directories', (t) => {> {
+test('writeUpdateCache creates parent directories', (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-update-cache-'))
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   const cachePath = join(tmp, 'nested', 'dir', '.update-check')
   writeUpdateCache({ lastCheck: Date.now(), latestVersion: '1.0.0' }, cachePath)
   const raw = readFileSync(cachePath, 'utf-8')
   assert.ok(raw.includes('1.0.0'))
-
 })
 
 // ---------------------------------------------------------------------------
@@ -102,7 +103,7 @@ function startMockRegistry(responseBody: object, statusCode = 200): Promise<{ ur
 test('checkForUpdates calls onUpdate when newer version is available', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-update-'))
   const registry = await startMockRegistry({ version: '99.0.0' })
-    t.after(() => {
+  t.after(async () => {
     await registry.close()
     rmSync(tmp, { recursive: true, force: true })
   });
@@ -127,12 +128,12 @@ test('checkForUpdates calls onUpdate when newer version is available', async (t)
   assert.ok(called, 'onUpdate should have been called')
   assert.equal(reportedCurrent, '1.0.0')
   assert.equal(reportedLatest, '99.0.0')
-
 })
-test('checkForUpdates does not call onUpdate when already on latest', async (t) => {{
+
+test('checkForUpdates does not call onUpdate when already on latest', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-update-'))
   const registry = await startMockRegistry({ version: '1.0.0' })
-    t.after(() => {
+  t.after(async () => {
     await registry.close()
     rmSync(tmp, { recursive: true, force: true })
   });
@@ -149,11 +150,12 @@ test('checkForUpdates does not call onUpdate when already on latest', async (t) 
   })
 
   assert.ok(!called, 'onUpdate should not be called when versions match')
+})
 
-})test('checkForUpdates does not call onUpdate when current is ahead', async (t) => { {
+test('checkForUpdates does not call onUpdate when current is ahead', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-update-'))
   const registry = await startMockRegistry({ version: '1.0.0' })
-    t.after(() => {
+  t.after(async () => {
     await registry.close()
     rmSync(tmp, { recursive: true, force: true })
   });
@@ -170,12 +172,13 @@ test('checkForUpdates does not call onUpdate when already on latest', async (t) 
   })
 
   assert.ok(!called, 'onUpdate should not be called when current is ahead')
+})
 
-}test('checkForUpdates writes cache after successful fetch', async (t) => {> {
+test('checkForUpdates writes cache after successful fetch', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-update-'))
   const cachePath = join(tmp, '.update-check')
   const registry = await startMockRegistry({ version: '5.0.0' })
-    t.after(() => {
+  t.after(async () => {
     await registry.close()
     rmSync(tmp, { recursive: true, force: true })
   });
@@ -193,8 +196,9 @@ test('checkForUpdates does not call onUpdate when already on latest', async (t) 
   assert.ok(cache, 'cache should exist after fetch')
   assert.equal(cache!.latestVersion, '5.0.0')
   assert.ok(cache!.lastCheck > 0)
+})
 
-test('checkForUpdates uses cache and skips fetch when checked recently', async (t) => {=> {
+test('checkForUpdates uses cache and skips fetch when checked recently', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-update-'))
   const cachePath = join(tmp, '.update-check')
   // Write a fresh cache entry
@@ -202,7 +206,7 @@ test('checkForUpdates uses cache and skips fetch when checked recently', async (
 
   // Start server that would return a different version — should NOT be reached
   const registry = await startMockRegistry({ version: '20.0.0' })
-    t.after(() => {
+  t.after(async () => {
     await registry.close()
     rmSync(tmp, { recursive: true, force: true })
   });
@@ -220,12 +224,14 @@ test('checkForUpdates uses cache and skips fetch when checked recently', async (
 
   // Should use cached version (10.0.0), not the server's (20.0.0)
   assert.equal(reportedLatest, '10.0.0')
-test('checkForUpdates skips notification when cache is fresh and versions match', async (t) => { => {
+})
+
+test('checkForUpdates skips notification when cache is fresh and versions match', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-update-'))
   const cachePath = join(tmp, '.update-check')
   writeUpdateCache({ lastCheck: Date.now(), latestVersion: '1.0.0' }, cachePath)
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   let called = false
 
@@ -237,10 +243,13 @@ test('checkForUpdates skips notification when cache is fresh and versions match'
     onUpdate: () => { called = true },
   })
 
-  assert.ok(!called, 'onUpdate should not be called when cached version matches current')test('checkForUpdates handles server error gracefully', async (t) => {) => {
+  assert.ok(!called, 'onUpdate should not be called when cached version matches current')
+})
+
+test('checkForUpdates handles server error gracefully', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-update-'))
   const registry = await startMockRegistry({}, 500)
-    t.after(() => {
+  t.after(async () => {
     await registry.close()
     rmSync(tmp, { recursive: true, force: true })
   });
@@ -256,14 +265,17 @@ test('checkForUpdates skips notification when cache is fresh and versions match'
     onUpdate: () => { called = true },
   })
 
-  assert.ok(!called, 'onUpdate should not be called on server error'test('checkForUpdates handles network timeout gracefully', async (t) => {() => {
+  assert.ok(!called, 'onUpdate should not be called on server error')
+})
+
+test('checkForUpdates handles network timeout gracefully', async (t) => {
   // Start a server that never responds
   const server = createServer(() => { /* intentionally never respond */ })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const addr = server.address() as { port: number }
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-update-'))
 
-    t.after(() => {
+  t.after(async () => {
     await new Promise<void>((r) => server.close(() => r()))
     rmSync(tmp, { recursive: true, force: true })
   });
@@ -279,10 +291,13 @@ test('checkForUpdates skips notification when cache is fresh and versions match'
     onUpdate: () => { called = true },
   })
 
-  assert.ok(!called, 'onUpdate should not be called on timeouttest('checkForUpdates handles missing version field in response', async (t) => { () => {
+  assert.ok(!called, 'onUpdate should not be called on timeout')
+})
+
+test('checkForUpdates handles missing version field in response', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-update-'))
   const registry = await startMockRegistry({ name: 'gsd-pi' }) // no version field
-    t.after(() => {
+  t.after(async () => {
     await registry.close()
     rmSync(tmp, { recursive: true, force: true })
   });
@@ -299,5 +314,4 @@ test('checkForUpdates skips notification when cache is fresh and versions match'
   })
 
   assert.ok(!called, 'onUpdate should not be called when response has no version')
-
 })

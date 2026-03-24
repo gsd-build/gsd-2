@@ -26,65 +26,63 @@ function makeGsdFixture(): { root: string; gsdDir: string; cleanup: () => void }
 }
 
 // ─── Group 1: Workspace index — risk/depends/demo fields ─────────────
-test("indexWorkspace extracts risk, depends, and demo from roadmap", async () => {
+test("indexWorkspace extracts risk, depends, and demo from roadmap", async (t) => {
   const { root, gsdDir, cleanup } = makeGsdFixture();
 
-  try {
-    const milestoneDir = join(gsdDir, "milestones", "M001");
-    const sliceDir = join(milestoneDir, "slices", "S01");
-    const tasksDir = join(sliceDir, "tasks");
-    mkdirSync(tasksDir, { recursive: true });
+  t.after(() => { cleanup(); });
 
-    writeFileSync(
-      join(milestoneDir, "M001-ROADMAP.md"),
-      [
-        "# M001: Test Milestone",
-        "",
-        "## Slices",
-        "- [ ] **S01: Feature slice** `risk:high` `depends:[S00]`",
-        "  > After this: users can see the dashboard",
-      ].join("\n"),
-    );
+  const milestoneDir = join(gsdDir, "milestones", "M001");
+  const sliceDir = join(milestoneDir, "slices", "S01");
+  const tasksDir = join(sliceDir, "tasks");
+  mkdirSync(tasksDir, { recursive: true });
 
-    writeFileSync(
-      join(sliceDir, "S01-PLAN.md"),
-      [
-        "# S01: Feature slice",
-        "",
-        "**Goal:** Build the feature",
-        "**Demo:** Dashboard renders",
-        "",
-        "## Tasks",
-        "- [ ] **T01: Build thing** `est:30m`",
-        "  Do the work.",
-      ].join("\n"),
-    );
+  writeFileSync(
+    join(milestoneDir, "M001-ROADMAP.md"),
+    [
+      "# M001: Test Milestone",
+      "",
+      "## Slices",
+      "- [ ] **S01: Feature slice** `risk:high` `depends:[S00]`",
+      "  > After this: users can see the dashboard",
+    ].join("\n"),
+  );
 
-    writeFileSync(join(tasksDir, "T01-PLAN.md"), "# T01: Build thing\n\n## Steps\n- do it\n");
+  writeFileSync(
+    join(sliceDir, "S01-PLAN.md"),
+    [
+      "# S01: Feature slice",
+      "",
+      "**Goal:** Build the feature",
+      "**Demo:** Dashboard renders",
+      "",
+      "## Tasks",
+      "- [ ] **T01: Build thing** `est:30m`",
+      "  Do the work.",
+    ].join("\n"),
+  );
 
-    const index = await workspaceIndex.indexWorkspace(root);
+  writeFileSync(join(tasksDir, "T01-PLAN.md"), "# T01: Build thing\n\n## Steps\n- do it\n");
 
-    assert.equal(index.milestones.length, 1);
-    assert.equal(index.milestones[0].id, "M001");
+  const index = await workspaceIndex.indexWorkspace(root);
 
-    const slice = index.milestones[0].slices[0];
-    assert.equal(slice.id, "S01");
-    assert.equal(slice.risk, "high");
-    assert.deepEqual(slice.depends, ["S00"]);
-    assert.equal(slice.demo, "users can see the dashboard");
-    assert.equal(slice.done, false);
-    assert.equal(slice.tasks.length, 1);
-    assert.equal(slice.tasks[0].id, "T01");
-    assert.equal(slice.tasks[0].done, false);
-  } finally {
-    cleanup();
-  }
+  assert.equal(index.milestones.length, 1);
+  assert.equal(index.milestones[0].id, "M001");
+
+  const slice = index.milestones[0].slices[0];
+  assert.equal(slice.id, "S01");
+  assert.equal(slice.risk, "high");
+  assert.deepEqual(slice.depends, ["S00"]);
+  assert.equal(slice.demo, "users can see the dashboard");
+  assert.equal(slice.done, false);
+  assert.equal(slice.tasks.length, 1);
+  assert.equal(slice.tasks[0].id, "T01");
+  assert.equal(slice.tasks[0].done, false);
 });
 
 test("indexWorkspace handles slices without risk/depends/demo", async (t) => {
   const { root, gsdDir, cleanup } = makeGsdFixture();
 
-    t.after(() => { cleanup(); });
+  t.after(() => { cleanup(); });
 
   const milestoneDir = join(gsdDir, "milestones", "M001");
   const sliceDir = join(milestoneDir, "slices", "S01");
@@ -108,7 +106,6 @@ test("indexWorkspace handles slices without risk/depends/demo", async (t) => {
   assert.deepEqual(slice.depends, []);
   assert.equal(slice.demo, "");
   assert.equal(slice.done, true);
-
 });
 
 // ─── Group 2: Shared status helpers ──────────────────────────────────
@@ -193,11 +190,12 @@ test("getTaskStatus returns correct statuses", () => {
   );
 });
 
-// ─── Group 3: Files API — tree listing ───────────────────────────────test("files API returns tree listing of .gsd/ directory", async (t) => {{
+// ─── Group 3: Files API — tree listing ───────────────────────────────
+test("files API returns tree listing of .gsd/ directory", async (t) => {
   const { root, gsdDir, cleanup } = makeGsdFixture();
   const origEnv = process.env.GSD_WEB_PROJECT_CWD;
 
-    t.after(() => {
+  t.after(() => {
     process.env.GSD_WEB_PROJECT_CWD = origEnv;
     cleanup();
   });
@@ -230,14 +228,14 @@ test("getTaskStatus returns correct statuses", () => {
   assert.equal(milestones.type, "directory");
   assert.ok(Array.isArray(milestones.children));
   assert.ok(milestones.children.length > 0);
-
 });
 
-// ─── Group 4: Files API — file content ──────────────────────────────test("files API returns file content for valid path", async (t) => { {
+// ─── Group 4: Files API — file content ───────────────────────────────
+test("files API returns file content for valid path", async (t) => {
   const { root, gsdDir, cleanup } = makeGsdFixture();
   const origEnv = process.env.GSD_WEB_PROJECT_CWD;
 
-    t.after(() => {
+  t.after(() => {
     process.env.GSD_WEB_PROJECT_CWD = origEnv;
     cleanup();
   });
@@ -253,12 +251,13 @@ test("getTaskStatus returns correct statuses", () => {
 
   const data = await response.json();
   assert.equal(data.content, fileContent);
+});
 
-})test("files API returns content for nested files", async (t) => {> {
+test("files API returns content for nested files", async (t) => {
   const { root, gsdDir, cleanup } = makeGsdFixture();
   const origEnv = process.env.GSD_WEB_PROJECT_CWD;
 
-    t.after(() => {
+  t.after(() => {
     process.env.GSD_WEB_PROJECT_CWD = origEnv;
     cleanup();
   });
@@ -277,14 +276,14 @@ test("getTaskStatus returns correct statuses", () => {
 
   const data = await response.json();
   assert.equal(data.content, "# Roadmap content");
-
 });
 
-// ─── Group 5: Files API — security: path traversal rejection ──────test("files API rejects path traversal with ../", async (t) => {=> {
+// ─── Group 5: Files API — security: path traversal rejection ─────────
+test("files API rejects path traversal with ../", async (t) => {
   const { root, cleanup } = makeGsdFixture();
   const origEnv = process.env.GSD_WEB_PROJECT_CWD;
 
-    t.after(() => {
+  t.after(() => {
     process.env.GSD_WEB_PROJECT_CWD = origEnv;
     cleanup();
   });
@@ -299,12 +298,13 @@ test("getTaskStatus returns correct statuses", () => {
 
   const data = await response.json();
   assert.ok(data.error, "Expected error message in response");
+});
 
-test("files API rejects absolute paths", async (t) => { => {
+test("files API rejects absolute paths", async (t) => {
   const { root, cleanup } = makeGsdFixture();
   const origEnv = process.env.GSD_WEB_PROJECT_CWD;
 
-    t.after(() => {
+  t.after(() => {
     process.env.GSD_WEB_PROJECT_CWD = origEnv;
     cleanup();
   });
@@ -319,11 +319,13 @@ test("files API rejects absolute paths", async (t) => { => {
 
   const data = await response.json();
   assert.ok(data.error);
-test("files API returns 404 for missing files", async (t) => {) => {
+});
+
+test("files API returns 404 for missing files", async (t) => {
   const { root, cleanup } = makeGsdFixture();
   const origEnv = process.env.GSD_WEB_PROJECT_CWD;
 
-    t.after(() => {
+  t.after(() => {
     process.env.GSD_WEB_PROJECT_CWD = origEnv;
     cleanup();
   });
@@ -337,11 +339,14 @@ test("files API returns 404 for missing files", async (t) => {) => {
   assert.equal(response.status, 404);
 
   const data = await response.json();
-  assert.ok(data.error);test("files API returns empty tree when .gsd/ does not exist", async (t) => {() => {
+  assert.ok(data.error);
+});
+
+test("files API returns empty tree when .gsd/ does not exist", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "gsd-state-surfaces-empty-"));
   const origEnv = process.env.GSD_WEB_PROJECT_CWD;
 
-    t.after(() => {
+  t.after(() => {
     process.env.GSD_WEB_PROJECT_CWD = origEnv;
     rmSync(root, { recursive: true, force: true });
   });
@@ -354,7 +359,6 @@ test("files API returns 404 for missing files", async (t) => {) => {
 
   const data = await response.json();
   assert.deepEqual(data.tree, []);
-
 });
 
 // ─── Group 6: Mock-free invariant — no static mock data ──────────────

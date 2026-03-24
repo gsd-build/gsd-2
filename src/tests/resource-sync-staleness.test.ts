@@ -25,14 +25,13 @@ test("resource manifest includes contentHash", async (t) => {
   const tmpDir = mkdtempSync(join(tmpdir(), "gsd-resource-test-"));
   const manifestPath = join(tmpDir, "managed-resources.json");
 
-    t.after(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+  t.after(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
   writeFileSync(manifestPath, JSON.stringify(manifest));
   const read = JSON.parse(readFileSync(manifestPath, "utf-8"));
   assert.equal(read.gsdVersion, "2.28.0");
   assert.equal(read.contentHash, "abc123def456");
   assert.equal(typeof read.syncedAt, "number");
-
 });
 
 test("missing contentHash in manifest triggers re-sync (upgrade path)", () => {

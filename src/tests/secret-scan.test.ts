@@ -24,35 +24,33 @@ function scanContent(
   filename = "test-file.ts",
 ): { status: number; stdout: string; stderr: string } {
   const dir = mkdtempSync(join(tmpdir(), "secret-scan-test-"));
-  try {
-    // Initialize a git repo so `git diff --cached` works
-    spawnSync("git", ["init"], { cwd: dir });
-    spawnSync("git", ["config", "user.email", "test@test.com"], { cwd: dir });
-    spawnSync("git", ["config", "user.name", "Test"], { cwd: dir });
+  t.after(() => { rmSync(dir, { recursive: true, force: true }); });
 
-    // Write and stage the file
-    const filePath = join(dir, filename);
-    const parentDir = join(dir, ...filename.split("/").slice(0, -1));
-    if (filename.includes("/")) {
-      mkdirSync(parentDir, { recursive: true });
-    }
-    writeFileSync(filePath, content);
-    spawnSync("git", ["add", filename], { cwd: dir });
+  // Initialize a git repo so `git diff --cached` works
+  spawnSync("git", ["init"], { cwd: dir });
+  spawnSync("git", ["config", "user.email", "test@test.com"], { cwd: dir });
+  spawnSync("git", ["config", "user.name", "Test"], { cwd: dir });
 
-    const result = spawnSync("bash", [scanScript], {
-      cwd: dir,
-      encoding: "utf-8",
-      env: { ...process.env, TERM: "dumb" },
-    });
-
-    return {
-      status: result.status ?? 1,
-      stdout: result.stdout ?? "",
-      stderr: result.stderr ?? "",
-    };
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+  // Write and stage the file
+  const filePath = join(dir, filename);
+  const parentDir = join(dir, ...filename.split("/").slice(0, -1));
+  if (filename.includes("/")) {
+    mkdirSync(parentDir, { recursive: true });
   }
+  writeFileSync(filePath, content);
+  spawnSync("git", ["add", filename], { cwd: dir });
+
+  const result = spawnSync("bash", [scanScript], {
+    cwd: dir,
+    encoding: "utf-8",
+    env: { ...process.env, TERM: "dumb" },
+  });
+
+  return {
+    status: result.status ?? 1,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+  };
 }
 
 // ── Detection tests ──────────────────────────────────────────────────
@@ -155,7 +153,7 @@ test("skips package-lock.json", { skip: isWindows }, () => {
 
 test("reports no files cleanly", { skip: isWindows }, (t) => {
   const dir = mkdtempSync(join(tmpdir(), "secret-scan-empty-"));
-    t.after(() => { rmSync(dir, { recursive: true, force: true }); });
+  t.after(() => { rmSync(dir, { recursive: true, force: true }); });
 
   spawnSync("git", ["init"], { cwd: dir });
   const result = spawnSync("bash", [scanScript], {
@@ -164,7 +162,6 @@ test("reports no files cleanly", { skip: isWindows }, (t) => {
   });
   assert.equal(result.status, 0);
   assert.match(result.stdout, /no files to scan/);
-
 });
 
 // ── Multiple findings ────────────────────────────────────────────────
@@ -184,9 +181,10 @@ test("reports multiple secrets in one file", { skip: isWindows }, () => {
 });
 
 // ── CI mode (--diff) ─────────────────────────────────────────────────
-test("CI mode scans diff against ref", { skip: isWindows }, (t) => {{
+
+test("CI mode scans diff against ref", { skip: isWindows }, (t) => {
   const dir = mkdtempSync(join(tmpdir(), "secret-scan-ci-"));
-    t.after(() => { rmSync(dir, { recursive: true, force: true }); });
+  t.after(() => { rmSync(dir, { recursive: true, force: true }); });
 
   spawnSync("git", ["init"], { cwd: dir });
   spawnSync("git", ["config", "user.email", "test@test.com"], { cwd: dir });
@@ -212,5 +210,4 @@ test("CI mode scans diff against ref", { skip: isWindows }, (t) => {{
 
   assert.equal(result.status, 1, `CI mode should detect: ${result.stdout}`);
   assert.match(result.stdout, /AWS Access Key/);
-
 });

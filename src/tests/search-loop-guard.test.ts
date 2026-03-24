@@ -122,7 +122,7 @@ test("search loop guard fires after MAX_CONSECUTIVE_DUPES duplicates", async (t)
   delete process.env.OLLAMA_API_KEY;
   const restoreFetch = mockFetch(makeBraveResponse());
 
-    t.after(() => {
+  t.after(() => {
     restoreFetch();
     restoreSearchEnv();
   });
@@ -148,16 +148,16 @@ test("search loop guard fires after MAX_CONSECUTIVE_DUPES duplicates", async (t)
     result4.content[0].text.includes("Search loop detected"),
     "error message should mention search loop"
   );
-
 });
-test("search loop guard resets at session_start boundary", async (t) => {{
+
+test("search loop guard resets at session_start boundary", async (t) => {
   process.env.BRAVE_API_KEY = "test-key-loop-guard-session";
   delete process.env.TAVILY_API_KEY;
   delete process.env.OLLAMA_API_KEY;
   const restoreFetch = mockFetch(makeBraveResponse());
   const query = "session boundary query";
 
-    t.after(() => {
+  t.after(() => {
     restoreFetch();
     restoreSearchEnv();
   });
@@ -190,8 +190,9 @@ test("search loop guard resets at session_start boundary", async (t) => {{
     true,
     "first identical query in a new session should not be blocked by prior session state",
   );
+});
 
-});test("search loop guard stays armed after firing — subsequent duplicates immediately re-trigger (#1671)", async (t) => { {
+test("search loop guard stays armed after firing — subsequent duplicates immediately re-trigger (#1671)", async (t) => {
   process.env.BRAVE_API_KEY = "test-key-loop-guard-2";
   delete process.env.TAVILY_API_KEY;
   delete process.env.OLLAMA_API_KEY;
@@ -200,7 +201,7 @@ test("search loop guard resets at session_start boundary", async (t) => {{
   // Use a unique query so module-level state from previous test doesn't interfere
   const query = "persistent loop query";
 
-    t.after(() => {
+  t.after(() => {
     restoreFetch();
     restoreSearchEnv();
   });
@@ -233,8 +234,9 @@ test("search loop guard resets at session_start boundary", async (t) => {{
     guardThird.isError, true,
     "call 6 should STILL trigger the loop guard"
   );
+});
 
-})test("search loop guard resets cleanly when a different query is issued", async (t) => {> {
+test("search loop guard resets cleanly when a different query is issued", async (t) => {
   process.env.BRAVE_API_KEY = "test-key-loop-guard-3";
   delete process.env.TAVILY_API_KEY;
   delete process.env.OLLAMA_API_KEY;
@@ -243,7 +245,7 @@ test("search loop guard resets at session_start boundary", async (t) => {{
   const queryA = "query alpha reset test";
   const queryB = "query beta reset test";
 
-    t.after(() => {
+  t.after(() => {
     restoreFetch();
     restoreSearchEnv();
   });
@@ -264,5 +266,4 @@ test("search loop guard resets at session_start boundary", async (t) => {{
     resultB.isError, true,
     "a different query after guard should not be treated as a loop"
   );
-
 });

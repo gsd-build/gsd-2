@@ -247,7 +247,7 @@ test("/api/recovery returns structured recovery diagnostics and redacts secrets"
     }),
   })
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests()
     fixture.cleanup()
   });
@@ -277,9 +277,9 @@ test("/api/recovery returns structured recovery diagnostics and redacts secrets"
   const serialized = JSON.stringify(payload)
   assert.doesNotMatch(serialized, /sk-test-recovery-secret-9999|sk-onboarding-secret-1234/)
   assert.doesNotMatch(serialized, /Crash Recovery Briefing|Completed Tool Calls|toolCallId/)
-
 })
-test("/api/recovery prefers the current-project resumable session when the live bridge session is out of scope", async (t) => {{
+
+test("/api/recovery prefers the current-project resumable session when the live bridge session is out of scope", async (t) => {
   const fixture = makeRecoveryFixture()
   const sessionPath = createRecoverySessionFile(fixture.projectCwd, fixture.sessionsDir, "sess-recovery")
   const externalSessionPath = join(fixture.projectCwd, "..", "agent-sessions", "2026-03-15T03-40-00-000Z_sess-external.jsonl")
@@ -308,7 +308,7 @@ test("/api/recovery prefers the current-project resumable session when the live 
     getOnboardingState: async () => readyOnboardingState(),
   })
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests()
     fixture.cleanup()
   });
@@ -325,8 +325,9 @@ test("/api/recovery prefers the current-project resumable session when the live 
     payload.actions.browser.map((action: { id: string }) => action.id),
     ["refresh_diagnostics", "refresh_workspace", "open_retry_controls", "open_resume_controls"],
   )
+})
 
-})test("/api/recovery returns a structured empty-project payload without leaking raw diagnostics", async (t) => { {
+test("/api/recovery returns a structured empty-project payload without leaking raw diagnostics", async (t) => {
   const fixture = makeEmptyProjectFixture()
   const harness = createHarness((command, current) => {
     if (command.type === "get_state") {
@@ -358,7 +359,7 @@ test("/api/recovery prefers the current-project resumable session when the live 
     getOnboardingState: async () => readyOnboardingState(),
   })
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests()
     fixture.cleanup()
   });
@@ -376,5 +377,4 @@ test("/api/recovery prefers the current-project resumable session when the live 
     payload.actions.browser.map((action: { id: string }) => action.id),
     ["refresh_diagnostics", "refresh_workspace"],
   )
-
 })

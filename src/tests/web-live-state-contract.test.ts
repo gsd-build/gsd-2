@@ -381,7 +381,7 @@ test("/api/session/events exposes explicit live_state_invalidation events for ag
 
   setupBridge(harness, fixture);
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     onboarding.resetOnboardingServiceForTests();
     fixture.cleanup();
@@ -427,9 +427,9 @@ test("/api/session/events exposes explicit live_state_invalidation events for ag
 
   controller.abort();
   await waitForMicrotasks();
-
 });
-test("workspace cache only busts on real boundaries and session mutations emit targeted invalidations", async (t) => {{
+
+test("workspace cache only busts on real boundaries and session mutations emit targeted invalidations", async (t) => {
   const fixture = makeWorkspaceFixture();
   const activeSessionPath = createSessionFile(
     fixture.projectCwd,
@@ -489,7 +489,7 @@ test("workspace cache only busts on real boundaries and session mutations emit t
     },
   });
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     onboarding.resetOnboardingServiceForTests();
     fixture.cleanup();
@@ -584,5 +584,4 @@ test("workspace cache only busts on real boundaries and session mutations emit t
   assert.equal(renameInvalidation.workspaceIndexCacheInvalidated, false);
 
   unsubscribe();
-
 });

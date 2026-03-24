@@ -247,7 +247,7 @@ test("multi-project: getProjectBridgeServiceForCwd returns distinct instances fo
     getOnboardingNeeded: () => false,
   });
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     fixtureA.cleanup();
     fixtureB.cleanup();
@@ -261,9 +261,9 @@ test("multi-project: getProjectBridgeServiceForCwd returns distinct instances fo
   const snapB = bridgeB.getSnapshot();
   assert.equal(snapA.projectCwd, fixtureA.projectCwd);
   assert.equal(snapB.projectCwd, fixtureB.projectCwd);
-
 });
-test("multi-project: getProjectBridgeServiceForCwd returns same instance for same path", async (t) => {{
+
+test("multi-project: getProjectBridgeServiceForCwd returns same instance for same path", async (t) => {
   const fixtureA = makeWorkspaceFixture("idempotent");
 
   bridge.configureBridgeServiceForTests({
@@ -279,7 +279,7 @@ test("multi-project: getProjectBridgeServiceForCwd returns same instance for sam
     getOnboardingNeeded: () => false,
   });
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     fixtureA.cleanup();
   });
@@ -287,8 +287,9 @@ test("multi-project: getProjectBridgeServiceForCwd returns same instance for sam
   const first = bridge.getProjectBridgeServiceForCwd(fixtureA.projectCwd);
   const second = bridge.getProjectBridgeServiceForCwd(fixtureA.projectCwd);
   assert.strictEqual(first, second, "same path must return the same instance");
+});
 
-});test("multi-project: each bridge receives commands independently", async (t) => { {
+test("multi-project: each bridge receives commands independently", async (t) => {
   const fixtureA = makeWorkspaceFixture("cmd-A");
   const fixtureB = makeWorkspaceFixture("cmd-B");
   const sessionPathA = createSessionFile(fixtureA.projectCwd, fixtureA.sessionsDir, "sess-A", "Session A");
@@ -319,7 +320,7 @@ test("multi-project: getProjectBridgeServiceForCwd returns same instance for sam
     getOnboardingNeeded: () => false,
   });
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     fixtureA.cleanup();
     fixtureB.cleanup();
@@ -353,8 +354,9 @@ test("multi-project: getProjectBridgeServiceForCwd returns same instance for sam
     harnessB.commands.every((c: any) => c.type === "get_state"),
     "harness B only got get_state commands",
   );
+});
 
-})test("multi-project: SSE subscribers are isolated per bridge", async (t) => {> {
+test("multi-project: SSE subscribers are isolated per bridge", async (t) => {
   const fixtureA = makeWorkspaceFixture("sse-A");
   const fixtureB = makeWorkspaceFixture("sse-B");
 
@@ -373,7 +375,7 @@ test("multi-project: getProjectBridgeServiceForCwd returns same instance for sam
     getOnboardingNeeded: () => false,
   });
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     fixtureA.cleanup();
     fixtureB.cleanup();
@@ -419,7 +421,6 @@ test("multi-project: getProjectBridgeServiceForCwd returns same instance for sam
   unsubB();
   unsubA2();
   unsubB2();
-
 });
 
 test("multi-project: resolveProjectCwd reads ?project= from request URL", () => {
@@ -442,14 +443,15 @@ test("multi-project: resolveProjectCwd falls back to GSD_WEB_PROJECT_CWD when no
     getOnboardingNeeded: () => false,
   });
 
-    t.after(() => { bridge.configureBridgeServiceForTests(null); });
+  t.after(() => { bridge.configureBridgeServiceForTests(null); });
 
   const result = bridge.resolveProjectCwd(
     new Request("http://localhost/api/boot"),
   );
   assert.equal(result, "/fallback/path");
+});
 
-}test("multi-project: getProjectBridgeService backward compat shim works", async (t) => {=> {
+test("multi-project: getProjectBridgeService backward compat shim works", async (t) => {
   const fixture = makeWorkspaceFixture("compat");
   const harness = createHarness("sess-compat");
 
@@ -466,7 +468,7 @@ test("multi-project: resolveProjectCwd falls back to GSD_WEB_PROJECT_CWD when no
     getOnboardingNeeded: () => false,
   });
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     fixture.cleanup();
   });
@@ -480,8 +482,9 @@ test("multi-project: resolveProjectCwd falls back to GSD_WEB_PROJECT_CWD when no
   // Same instance as getProjectBridgeServiceForCwd with the same path
   const directService = bridge.getProjectBridgeServiceForCwd(fixture.projectCwd);
   assert.strictEqual(service, directService, "backward compat shim should return same instance as direct lookup");
+});
 
-test("multi-project: resetBridgeServiceForTests clears all registry entries", async (t) => { => {
+test("multi-project: resetBridgeServiceForTests clears all registry entries", async (t) => {
   const fixtureA = makeWorkspaceFixture("reset-A");
   const fixtureB = makeWorkspaceFixture("reset-B");
 
@@ -498,7 +501,7 @@ test("multi-project: resetBridgeServiceForTests clears all registry entries", as
     getOnboardingNeeded: () => false,
   });
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     fixtureA.cleanup();
     fixtureB.cleanup();
@@ -532,5 +535,4 @@ test("multi-project: resetBridgeServiceForTests clears all registry entries", as
   assert.notStrictEqual(afterA, beforeA, "reset must create fresh instances for path A");
   assert.notStrictEqual(afterB, beforeB, "reset must create fresh instances for path B");
   assert.notStrictEqual(afterA, afterB, "new instances should still be distinct");
-
 });

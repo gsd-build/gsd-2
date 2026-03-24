@@ -409,7 +409,7 @@ test("gsd -h is equivalent to --help", async () => {
 test("gsd headless without .gsd/ directory exits 1 with clean error", async (t) => {
   const tmpDir = mkdtempSync(join(tmpdir(), "gsd-e2e-no-gsd-"));
 
-    t.after(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+  t.after(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
   const result = await runGsd(["headless"], 10_000, {}, tmpDir);
 
@@ -423,16 +423,16 @@ test("gsd headless without .gsd/ directory exits 1 with clean error", async (t) 
   );
 
   assertNoCrashMarkers(combined);
-
 });
 
 // ---------------------------------------------------------------------------
 // 14. gsd headless new-milestone without --context exits 1
 // ---------------------------------------------------------------------------
-test("gsd headless new-milestone without --context exits 1", async (t) => {{
+
+test("gsd headless new-milestone without --context exits 1", async (t) => {
   const tmpDir = mkdtempSync(join(tmpdir(), "gsd-e2e-no-ctx-"));
 
-    t.after(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+  t.after(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
   const result = await runGsd(["headless", "new-milestone"], 10_000, {}, tmpDir);
 
@@ -446,15 +446,16 @@ test("gsd headless new-milestone without --context exits 1", async (t) => {{
   );
 
   assertNoCrashMarkers(combined);
-
 });
 
 // ---------------------------------------------------------------------------
 // 15. gsd headless --timeout with invalid value exits 1
-// ---------------------------------------------------------------------------test("gsd headless --timeout with invalid value exits 1", async (t) => { {
+// ---------------------------------------------------------------------------
+
+test("gsd headless --timeout with invalid value exits 1", async (t) => {
   const tmpDir = mkdtempSync(join(tmpdir(), "gsd-e2e-bad-timeout-"));
 
-    t.after(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+  t.after(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
   const result = await runGsd(
     ["headless", "--timeout", "not-a-number", "auto"],
@@ -473,15 +474,16 @@ test("gsd headless new-milestone without --context exits 1", async (t) => {{
   );
 
   assertNoCrashMarkers(combined);
-
 });
 
 // ---------------------------------------------------------------------------
 // 16. gsd headless --timeout with negative value exits 1
-// --------------------------------------------------------------------------test("gsd headless --timeout with negative value exits 1", async (t) => {> {
+// ---------------------------------------------------------------------------
+
+test("gsd headless --timeout with negative value exits 1", async (t) => {
   const tmpDir = mkdtempSync(join(tmpdir(), "gsd-e2e-neg-timeout-"));
 
-    t.after(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+  t.after(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
   const result = await runGsd(
     ["headless", "--timeout", "-5000", "auto"],
@@ -500,11 +502,12 @@ test("gsd headless new-milestone without --context exits 1", async (t) => {{
   );
 
   assertNoCrashMarkers(combined);
+});
 
-}test("gsd headless query returns JSON from the built CLI", async (t) => {=> {
+test("gsd headless query returns JSON from the built CLI", async (t) => {
   const tmpDir = createTempGitRepo("gsd-e2e-query-");
 
-    t.after(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+  t.after(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
   mkdirSync(join(tmpDir, ".gsd", "milestones"), { recursive: true });
 
@@ -521,11 +524,12 @@ test("gsd headless new-milestone without --context exits 1", async (t) => {{
 
   const snapshot = JSON.parse(result.stdout);
   assert.equal(typeof snapshot.state?.phase, "string", "query output should include state.phase");
+});
 
-test("gsd worktree list loads the built worktree CLI without module errors", async (t) => { => {
+test("gsd worktree list loads the built worktree CLI without module errors", async (t) => {
   const tmpDir = createTempGitRepo("gsd-e2e-worktree-");
 
-    t.after(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+  t.after(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
   // Cold packaged startup in a fresh temp repo is now regularly >10s because
   // the built CLI loads bundled TS resources through jiti before listing.
@@ -540,7 +544,6 @@ test("gsd worktree list loads the built worktree CLI without module errors", asy
     combined.includes("No worktrees") || combined.includes("Worktrees"),
     `expected worktree CLI output, got:\n${combined.slice(0, 500)}`,
   );
-
 });
 
 // ===========================================================================

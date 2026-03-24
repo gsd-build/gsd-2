@@ -18,14 +18,14 @@ function makeExecutable(dir: string, name: string, content = "#!/bin/sh\nexit 0\
 
 test("resolveToolFromPath finds fd via fdfind fallback", (t) => {
   const tmp = mkdtempSync(join(tmpdir(), "gsd-tool-bootstrap-resolve-"));
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }); });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }); });
 
   makeExecutable(tmp, "fdfind");
   const resolved = resolveToolFromPath("fd", tmp);
   assert.equal(resolved, join(tmp, "fdfind"));
-
 });
-test("ensureManagedTools provisions fd and rg into managed bin dir", (t) => {{
+
+test("ensureManagedTools provisions fd and rg into managed bin dir", (t) => {
   const tmp = mkdtempSync(join(tmpdir(), "gsd-tool-bootstrap-provision-"));
   const sourceBin = join(tmp, "source-bin");
   const targetBin = join(tmp, "target-bin");
@@ -33,7 +33,7 @@ test("ensureManagedTools provisions fd and rg into managed bin dir", (t) => {{
   mkdirSync(sourceBin, { recursive: true });
   mkdirSync(targetBin, { recursive: true });
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }); });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }); });
 
   makeExecutable(sourceBin, "fdfind");
   makeExecutable(sourceBin, "rg");
@@ -45,8 +45,9 @@ test("ensureManagedTools provisions fd and rg into managed bin dir", (t) => {{
   assert.ok(existsSync(join(targetBin, RG_TARGET)));
   assert.ok(lstatSync(join(targetBin, FD_TARGET)).isSymbolicLink() || lstatSync(join(targetBin, FD_TARGET)).isFile());
   assert.ok(lstatSync(join(targetBin, RG_TARGET)).isSymbolicLink() || lstatSync(join(targetBin, RG_TARGET)).isFile());
+});
 
-});test("ensureManagedTools copies executable when symlink target already exists as a broken link", (t) => { {
+test("ensureManagedTools copies executable when symlink target already exists as a broken link", (t) => {
   const tmp = mkdtempSync(join(tmpdir(), "gsd-tool-bootstrap-copy-"));
   const sourceBin = join(tmp, "source-bin");
   const targetBin = join(tmp, "target-bin");
@@ -55,7 +56,7 @@ test("ensureManagedTools provisions fd and rg into managed bin dir", (t) => {{
   mkdirSync(sourceBin, { recursive: true });
   mkdirSync(targetBin, { recursive: true });
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }); });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }); });
 
   makeExecutable(sourceBin, "fdfind", "#!/bin/sh\necho fd\n");
   makeExecutable(sourceBin, "rg", "#!/bin/sh\necho rg\n");
@@ -66,5 +67,4 @@ test("ensureManagedTools provisions fd and rg into managed bin dir", (t) => {{
   assert.equal(provisioned.length, 2);
   assert.ok(lstatSync(targetFd).isFile(), "fd fallback should replace broken symlink with a copied file");
   assert.match(readFileSync(targetFd, "utf8"), /echo fd/);
-
 });

@@ -42,7 +42,7 @@ test('cli.ts branches to web mode before interactive startup and preserves cwd-s
 
   let launchInputs: { cwd: string; projectSessionsDir: string; agentDir: string } | undefined
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   const cliSource = readFileSync(join(projectRoot, 'src', 'cli.ts'), 'utf-8')
   const branchIndex = cliSource.indexOf('const webBranch = await runWebCliBranch')
@@ -81,9 +81,9 @@ test('cli.ts branches to web mode before interactive startup and preserves cwd-s
     port: undefined,
     allowedOrigins: undefined,
   })
-
 })
-test('launchWebMode prefers the packaged standalone host and opens the resolved URL', async (t) => {{
+
+test('launchWebMode prefers the packaged standalone host and opens the resolved URL', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-host-'))
   const standaloneRoot = join(tmp, 'dist', 'web', 'standalone')
   const serverPath = join(standaloneRoot, 'server.js')
@@ -101,7 +101,7 @@ test('launchWebMode prefers the packaged standalone host and opens the resolved 
 
   const pidFilePath = join(tmp, 'web-server.pid')
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   const status = await webMode.launchWebMode(
     {
@@ -183,7 +183,6 @@ test('launchWebMode prefers the packaged standalone host and opens the resolved 
   // PID file must be written with the spawned process's PID
   assert.deepEqual(writtenPid, { path: pidFilePath, pid: 99999 })
   assert.equal(webMode.readPidFile(pidFilePath), 99999)
-
 })
 
 test('stopWebMode kills process by PID and removes PID file', (t) => {
@@ -192,7 +191,7 @@ test('stopWebMode kills process by PID and removes PID file', (t) => {
   let stderrOutput = ''
   let killedPid: number | undefined
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   webMode.writePidFile(pidFilePath, 12345)
 
@@ -207,14 +206,14 @@ test('stopWebMode kills process by PID and removes PID file', (t) => {
   // Since PID 12345 is almost certainly dead, stopWebMode should succeed by treating ESRCH as "already gone"
   assert.equal(result.ok, true)
   assert.match(stderrOutput, /pid=12345/)
-
 })
-test('stopWebMode reports error when no PID file exists', (t) => {{
+
+test('stopWebMode reports error when no PID file exists', (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-stop-nopid-'))
   const pidFilePath = join(tmp, 'web-server.pid')
   let stderrOutput = ''
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   const result = webMode.stopWebMode({
     pidFilePath,
@@ -226,13 +225,14 @@ test('stopWebMode reports error when no PID file exists', (t) => {{
   assert.equal(result.ok, false)
   assert.equal(result.reason, 'no-pid-file')
   assert.match(stderrOutput, /not running/)
+})
 
-})test('runWebCliBranch handles "web stop" subcommand without --web flag', async (t) => { {
+test('runWebCliBranch handles "web stop" subcommand without --web flag', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-branch-stop-'))
   const pidFilePath = join(tmp, 'web-server.pid')
   let stderrOutput = ''
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   const flags = cliWeb.parseCliArgs(['node', 'dist/loader.js', 'web', 'stop'])
   assert.equal(flags.web, undefined)
@@ -250,7 +250,6 @@ test('stopWebMode reports error when no PID file exists', (t) => {{
   assert.equal(result.exitCode, 1) // no PID file — expected failure
   if (result.action !== 'stop') throw new Error('expected action=stop')
   assert.equal(result.stopResult.ok, false)
-
 })
 
 // ─── Path argument tests ──────────────────────────────────────────────
@@ -273,13 +272,15 @@ test('parseCliArgs does not capture --web followed by a flag as path', () => {
   assert.equal(flags.web, true)
   assert.equal(flags.webPath, undefined)
   assert.equal(flags.model, 'test')
-}test('gsd web <path> is handled as web start with path', async (t) => {> {
+})
+
+test('gsd web <path> is handled as web start with path', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-path-'))
   const projectDir = join(tmp, 'my-project')
   mkdirSync(projectDir, { recursive: true })
   let launchedCwd = ''
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   const flags = cliWeb.parseCliArgs(['node', 'dist/loader.js', 'web', projectDir])
   assert.deepEqual(flags.messages, ['web', projectDir])
@@ -306,14 +307,15 @@ test('parseCliArgs does not capture --web followed by a flag as path', () => {
   if (!result.handled) throw new Error('expected web branch to be handled')
   assert.equal(result.exitCode, 0)
   assert.equal(launchedCwd, projectDir)
+})
 
-test('gsd web start <path> resolves path and launches', async (t) => {=> {
+test('gsd web start <path> resolves path and launches', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-start-path-'))
   const projectDir = join(tmp, 'another-project')
   mkdirSync(projectDir, { recursive: true })
   let launchedCwd = ''
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   const flags = cliWeb.parseCliArgs(['node', 'dist/loader.js', 'web', 'start', projectDir])
   assert.deepEqual(flags.messages, ['web', 'start', projectDir])
@@ -340,13 +342,15 @@ test('gsd web start <path> resolves path and launches', async (t) => {=> {
   if (!result.handled) throw new Error('expected web branch to be handled')
   assert.equal(result.exitCode, 0)
   assert.equal(launchedCwd, projectDir)
-test('gsd --web <path> resolves path and launches', async (t) => { => {
+})
+
+test('gsd --web <path> resolves path and launches', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-flag-path-'))
   const projectDir = join(tmp, 'flagged-project')
   mkdirSync(projectDir, { recursive: true })
   let launchedCwd = ''
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   const flags = cliWeb.parseCliArgs(['node', 'dist/loader.js', '--web', projectDir])
   assert.equal(flags.web, true)
@@ -374,7 +378,6 @@ test('gsd --web <path> resolves path and launches', async (t) => { => {
   if (!result.handled) throw new Error('expected web branch to be handled')
   assert.equal(result.exitCode, 0)
   assert.equal(launchedCwd, projectDir)
-
 })
 
 test('gsd --web <nonexistent-path> fails with clear error', async () => {
@@ -392,12 +395,15 @@ test('gsd --web <nonexistent-path> fails with clear error', async () => {
   assert.equal(result.status.ok, false)
   if (result.status.ok) throw new Error('expected failed status')
   assert.match(result.status.failureReason, /does not exist/)
-  assert.match(stderrOutput, /does not exist/test('launch failure surfaces status and reason before browser open', async (t) => {) => {
+  assert.match(stderrOutput, /does not exist/)
+})
+
+test('launch failure surfaces status and reason before browser open', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-missing-host-'))
   let openedUrl = ''
   let stderrOutput = ''
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   const status = await webMode.launchWebMode(
     {
@@ -427,14 +433,15 @@ test('gsd --web <nonexistent-path> fails with clear error', async () => {
   assert.match(status.failureReason, /host bootstrap not found/)
   assert.match(stderrOutput, /status=failed/)
   assert.match(stderrOutput, /reason=host bootstrap not found/)
-
 })
 
-// ─── Instance registry tests ─────────────────────────────────────────test('registerInstance and readInstanceRegistry round-trip', (t) => { {
+// ─── Instance registry tests ─────────────────────────────────────────
+
+test('registerInstance and readInstanceRegistry round-trip', (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-registry-'))
   const registryPath = join(tmp, 'web-instances.json')
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   webMode.registerInstance('/tmp/project-a', { pid: 1001, port: 3000, url: 'http://127.0.0.1:3000' }, registryPath)
   webMode.registerInstance('/tmp/project-b', { pid: 1002, port: 3001, url: 'http://127.0.0.1:3001' }, registryPath)
@@ -444,12 +451,13 @@ test('gsd --web <nonexistent-path> fails with clear error', async () => {
   assert.equal(registry[resolve('/tmp/project-a')]?.pid, 1001)
   assert.equal(registry[resolve('/tmp/project-b')]?.port, 3001)
   assert.ok(registry[resolve('/tmp/project-a')]?.startedAt)
+})
 
-}test('unregisterInstance removes a single entry', (t) => {> {
+test('unregisterInstance removes a single entry', (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-unreg-'))
   const registryPath = join(tmp, 'web-instances.json')
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   webMode.registerInstance('/tmp/project-a', { pid: 1001, port: 3000, url: 'http://127.0.0.1:3000' }, registryPath)
   webMode.registerInstance('/tmp/project-b', { pid: 1002, port: 3001, url: 'http://127.0.0.1:3001' }, registryPath)
@@ -459,7 +467,6 @@ test('gsd --web <nonexistent-path> fails with clear error', async () => {
   assert.equal(Object.keys(registry).length, 1)
   assert.equal(registry[resolve('/tmp/project-a')], undefined)
   assert.equal(registry[resolve('/tmp/project-b')]?.pid, 1002)
-
 })
 
 test('stopWebMode with projectCwd reports not-found when not in registry', () => {
@@ -493,11 +500,14 @@ test('gsd web stop all is parsed and dispatched', async () => {
   if (!result.handled) throw new Error('expected handled')
   assert.equal(result.exitCode, 0)
   assert.equal(stopOptions?.all, true)
-  assert.equal(stopOptions?.projectCwd, undefinetest('gsd web stop <path> is parsed and dispatched with resolved path', async (t) => {() => {
+  assert.equal(stopOptions?.projectCwd, undefined)
+})
+
+test('gsd web stop <path> is parsed and dispatched with resolved path', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-stop-path-'))
   let stopOptions: { projectCwd?: string; all?: boolean } | undefined
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   const flags = cliWeb.parseCliArgs(['node', 'dist/loader.js', 'web', 'stop', tmp])
   const result = await cliWeb.runWebCliBranch(flags, {
@@ -514,86 +524,104 @@ test('gsd web stop all is parsed and dispatched', async () => {
   assert.equal(result.exitCode, 0)
   assert.equal(stopOptions?.projectCwd, tmp)
   assert.equal(stopOptions?.all, false)
-
 })
 
-// ─── Context-aware launch detection tests ────────────────────────────test('resolveContextAwareCwd returns project cwd when inside a project under dev root', (t) => {=> {
+// ─── Context-aware launch detection tests ──────────────────────────────
+
+test('resolveContextAwareCwd returns project cwd when inside a project under dev root', (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-ctx-aware-'))
   const devRoot = join(tmp, 'devroot')
   const projectA = join(devRoot, 'projectA')
   const prefsPath = join(tmp, 'web-preferences.json')
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   mkdirSync(projectA, { recursive: true })
   writeFileSync(prefsPath, JSON.stringify({ devRoot }))
 
   const result = cliWeb.resolveContextAwareCwd(projectA, prefsPath)
   assert.equal(result, projectA)
-test('resolveContextAwareCwd returns cwd unchanged when AT dev root', (t) => { => {
+})
+
+test('resolveContextAwareCwd returns cwd unchanged when AT dev root', (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-ctx-aware-'))
   const devRoot = join(tmp, 'devroot')
   const prefsPath = join(tmp, 'web-preferences.json')
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   mkdirSync(devRoot, { recursive: true })
   writeFileSync(prefsPath, JSON.stringify({ devRoot }))
 
   const result = cliWeb.resolveContextAwareCwd(devRoot, prefsPath)
-  assert.equal(result, devRoot)test('resolveContextAwareCwd returns cwd unchanged when no dev root configured', (t) => {) => {
+  assert.equal(result, devRoot)
+})
+
+test('resolveContextAwareCwd returns cwd unchanged when no dev root configured', (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-ctx-aware-'))
   const prefsPath = join(tmp, 'web-preferences.json')
   const cwd = join(tmp, 'somedir')
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   mkdirSync(cwd, { recursive: true })
   writeFileSync(prefsPath, JSON.stringify({ theme: 'dark' }))
 
   const result = cliWeb.resolveContextAwareCwd(cwd, prefsPath)
-  assert.equal(result, cwdtest('resolveContextAwareCwd returns cwd unchanged when prefs file missing', (t) => {() => {
+  assert.equal(result, cwd)
+})
+
+test('resolveContextAwareCwd returns cwd unchanged when prefs file missing', (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-ctx-aware-'))
   const prefsPath = join(tmp, 'nonexistent-prefs.json')
   const cwd = join(tmp, 'somedir')
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   mkdirSync(cwd, { recursive: true })
 
   const result = cliWeb.resolveContextAwareCwd(cwd, prefsPath)
-  assert.equal(result, cwtest('resolveContextAwareCwd returns cwd unchanged when dev root path is stale', (t) => { () => {
+  assert.equal(result, cwd)
+})
+
+test('resolveContextAwareCwd returns cwd unchanged when dev root path is stale', (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-ctx-aware-'))
   const prefsPath = join(tmp, 'web-preferences.json')
   const cwd = join(tmp, 'somedir')
   const staleDevRoot = join(tmp, 'nonexistent-devroot')
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   mkdirSync(cwd, { recursive: true })
   writeFileSync(prefsPath, JSON.stringify({ devRoot: staleDevRoot }))
 
   const result = cliWeb.resolveContextAwareCwd(cwd, prefsPath)
-  assert.equal(result, ctest('resolveContextAwareCwd resolves nested cwd to one-level-deep project', (t) => {, () => {
+  assert.equal(result, cwd)
+})
+
+test('resolveContextAwareCwd resolves nested cwd to one-level-deep project', (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-ctx-aware-'))
   const devRoot = join(tmp, 'devroot')
   const projectA = join(devRoot, 'projectA')
   const nested = join(projectA, 'src', 'components', 'deep')
   const prefsPath = join(tmp, 'web-preferences.json')
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   mkdirSync(nested, { recursive: true })
   writeFileSync(prefsPath, JSON.stringify({ devRoot }))
 
   const result = cliWeb.resolveContextAwareCwd(nested, prefsPath)
-  assert.equal(result, projetest('resolveContextAwareCwd returns cwd unchanged when outside dev root', (t) => {', () => {
+  assert.equal(result, projectA)
+})
+
+test('resolveContextAwareCwd returns cwd unchanged when outside dev root', (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-ctx-aware-'))
   const devRoot = join(tmp, 'devroot')
   const outsideDir = join(tmp, 'elsewhere')
   const prefsPath = join(tmp, 'web-preferences.json')
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   mkdirSync(devRoot, { recursive: true })
   mkdirSync(outsideDir, { recursive: true })
@@ -601,10 +629,11 @@ test('resolveContextAwareCwd returns cwd unchanged when AT dev root', (t) => { =
 
   const result = cliWeb.resolveContextAwareCwd(outsideDir, prefsPath)
   assert.equal(result, outsideDir)
-
 })
 
-// ─── Stale instance cleanup tests ───────────────────────────────test('launchWebMode kills stale instance for same cwd before spawning', async (t) => { () => {
+// ─── Stale instance cleanup tests ─────────────────────────────────────
+
+test('launchWebMode kills stale instance for same cwd before spawning', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-stale-'))
   const standaloneRoot = join(tmp, 'dist', 'web', 'standalone')
   const serverPath = join(standaloneRoot, 'server.js')
@@ -621,7 +650,7 @@ test('resolveContextAwareCwd returns cwd unchanged when AT dev root', (t) => { =
   let stderrOutput = ''
   let spawnCalled = false
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   const status = await webMode.launchWebMode(
     {
@@ -663,7 +692,10 @@ test('resolveContextAwareCwd returns cwd unchanged when AT dev root', (t) => { =
   assert.match(stderrOutput, /Cleaning up stale/)
   // New instance should be registered
   const registry = webMode.readInstanceRegistry(registryPath)
-  assert.equal(registry[resolve(cwd)]?.pid, 888test('launchWebMode does not log cleanup when no stale instance exists', async (t) => {c () => {
+  assert.equal(registry[resolve(cwd)]?.pid, 88888)
+})
+
+test('launchWebMode does not log cleanup when no stale instance exists', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-web-no-stale-'))
   const standaloneRoot = join(tmp, 'dist', 'web', 'standalone')
   const serverPath = join(standaloneRoot, 'server.js')
@@ -675,7 +707,7 @@ test('resolveContextAwareCwd returns cwd unchanged when AT dev root', (t) => { =
 
   let stderrOutput = ''
 
-    t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
   const status = await webMode.launchWebMode(
     {
@@ -711,5 +743,4 @@ test('resolveContextAwareCwd returns cwd unchanged when AT dev root', (t) => { =
   assert.equal(status.ok, true)
   // No cleanup message when no stale instance exists
   assert.equal(stderrOutput.includes('Cleaning up stale'), false)
-
 })

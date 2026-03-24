@@ -90,7 +90,7 @@ test("executeTavilySearch sends POST to Tavily API and produces CachedSearchResu
 
   const { captured, restore } = mockFetch(makeTavilyResponse());
 
-    t.after(() => {
+  t.after(() => {
     restore();
     if (origKey !== undefined) process.env.TAVILY_API_KEY = origKey;
     else delete process.env.TAVILY_API_KEY;
@@ -139,7 +139,6 @@ test("executeTavilySearch sends POST to Tavily API and produces CachedSearchResu
   assert.ok(mapped[0].age, "Published date should produce an age string");
   assert.equal(mapped[1].title, "Second Result");
   assert.equal(mapped[1].age, undefined, "No published_date → no age");
-
 });
 
 // =============================================================================
@@ -153,7 +152,7 @@ test("resolveSearchProvider returns 'tavily' when TAVILY_API_KEY is set and BRAV
   process.env.TAVILY_API_KEY = "tvly-test-key";
   delete process.env.BRAVE_API_KEY;
 
-    t.after(() => {
+  t.after(() => {
     if (origTavily !== undefined) process.env.TAVILY_API_KEY = origTavily;
     else delete process.env.TAVILY_API_KEY;
     if (origBrave !== undefined) process.env.BRAVE_API_KEY = origBrave;
@@ -162,16 +161,16 @@ test("resolveSearchProvider returns 'tavily' when TAVILY_API_KEY is set and BRAV
 
   const provider = resolveSearchProvider();
   assert.equal(provider, "tavily");
-
 });
-test("resolveSearchProvider returns 'brave' when only BRAVE_API_KEY is set", (t) => {{
+
+test("resolveSearchProvider returns 'brave' when only BRAVE_API_KEY is set", (t) => {
   const origTavily = process.env.TAVILY_API_KEY;
   const origBrave = process.env.BRAVE_API_KEY;
 
   delete process.env.TAVILY_API_KEY;
   process.env.BRAVE_API_KEY = "BSA-test-key";
 
-    t.after(() => {
+  t.after(() => {
     if (origTavily !== undefined) process.env.TAVILY_API_KEY = origTavily;
     else delete process.env.TAVILY_API_KEY;
     if (origBrave !== undefined) process.env.BRAVE_API_KEY = origBrave;
@@ -180,15 +179,16 @@ test("resolveSearchProvider returns 'brave' when only BRAVE_API_KEY is set", (t)
 
   const provider = resolveSearchProvider();
   assert.equal(provider, "brave");
+});
 
-});test("resolveSearchProvider returns null when neither key is set", (t) => { {
+test("resolveSearchProvider returns null when neither key is set", (t) => {
   const origTavily = process.env.TAVILY_API_KEY;
   const origBrave = process.env.BRAVE_API_KEY;
 
   delete process.env.TAVILY_API_KEY;
   delete process.env.BRAVE_API_KEY;
 
-    t.after(() => {
+  t.after(() => {
     if (origTavily !== undefined) process.env.TAVILY_API_KEY = origTavily;
     else delete process.env.BRAVE_API_KEY;
     if (origBrave !== undefined) process.env.BRAVE_API_KEY = origBrave;
@@ -197,7 +197,6 @@ test("resolveSearchProvider returns 'brave' when only BRAVE_API_KEY is set", (t)
 
   const provider = resolveSearchProvider();
   assert.equal(provider, null);
-
 });
 
 // =============================================================================
@@ -245,7 +244,8 @@ test("no-key error message contains both TAVILY_API_KEY and BRAVE_API_KEY", () =
 // =============================================================================
 // Test: Tavily answer mapping — answer field flows through as summary text
 // =============================================================================
-test("Tavily answer field maps to summaryText in CachedSearchResult", async (t) => {{
+
+test("Tavily answer field maps to summaryText in CachedSearchResult", async (t) => {
   const origKey = process.env.TAVILY_API_KEY;
   process.env.TAVILY_API_KEY = "tvly-test-key";
 
@@ -255,7 +255,7 @@ test("Tavily answer field maps to summaryText in CachedSearchResult", async (t) 
 
   const { captured, restore } = mockFetch(responseWithAnswer);
 
-    t.after(() => {
+  t.after(() => {
     restore();
     if (origKey !== undefined) process.env.TAVILY_API_KEY = origKey;
     else delete process.env.TAVILY_API_KEY;
@@ -278,7 +278,6 @@ test("Tavily answer field maps to summaryText in CachedSearchResult", async (t) 
   // The answer should flow to summaryText (not summarizerKey)
   const summaryText = data.answer || undefined;
   assert.ok(summaryText, "Answer should be truthy and used as summaryText");
-
 });
 
 // =============================================================================
@@ -306,40 +305,40 @@ test("freshness='week' maps to time_range='week' in Tavily request body", () => 
 // Test: Domain mapping — include_domains, not site: prefix
 // =============================================================================
 
-test("Tavily domain filter uses include_domains, not site: prefix in query", async () => {
+test("Tavily domain filter uses include_domains, not site: prefix in query", async (t) => {
   const origKey = process.env.TAVILY_API_KEY;
   process.env.TAVILY_API_KEY = "tvly-test-key";
 
   const { captured, restore } = mockFetch(makeTavilyResponse());
 
-  try {
-    // Simulate what executeTavilySearch builds for domain filtering
-    const domain = "example.com";
-    const query = "typescript tutorial";
-
-    const requestBody: Record<string, unknown> = {
-      query, // Note: NO site: prefix
-      max_results: 10,
-      search_depth: "basic",
-      include_domains: [domain],
-    };
-
-    await globalThis.fetch("https://api.tavily.com/search", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer tvly-test-key" },
-      body: JSON.stringify(requestBody),
-    });
-
-    // Verify domain passed as include_domains, not in query
-    assert.deepEqual(captured.body?.include_domains, ["example.com"]);
-    assert.equal(captured.body?.query, "typescript tutorial", "Query must NOT contain site: prefix for Tavily");
-    assert.ok(
-      !(captured.body?.query as string).includes("site:"),
-      "Query must not include site: prefix for Tavily path"
-    );
-  } finally {
+  t.after(() => {
     restore();
     if (origKey !== undefined) process.env.TAVILY_API_KEY = origKey;
     else delete process.env.TAVILY_API_KEY;
-  }
+  });
+
+  // Simulate what executeTavilySearch builds for domain filtering
+  const domain = "example.com";
+  const query = "typescript tutorial";
+
+  const requestBody: Record<string, unknown> = {
+    query, // Note: NO site: prefix
+    max_results: 10,
+    search_depth: "basic",
+    include_domains: [domain],
+  };
+
+  await globalThis.fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer tvly-test-key" },
+    body: JSON.stringify(requestBody),
+  });
+
+  // Verify domain passed as include_domains, not in query
+  assert.deepEqual(captured.body?.include_domains, ["example.com"]);
+  assert.equal(captured.body?.query, "typescript tutorial", "Query must NOT contain site: prefix for Tavily");
+  assert.ok(
+    !(captured.body?.query as string).includes("site:"),
+    "Query must not include site: prefix for Tavily path"
+  );
 });

@@ -24,7 +24,7 @@ test("resolveGsdCliEntry prefers the built loader for packaged standalone intera
     "src/resources/extensions/gsd/tests/resolve-ts.mjs",
   ]);
 
-    t.after(() => { rmSync(packageRoot, { recursive: true, force: true }); });
+  t.after(() => { rmSync(packageRoot, { recursive: true, force: true }); });
 
   const entry = resolveGsdCliEntry({
     packageRoot,
@@ -39,16 +39,16 @@ test("resolveGsdCliEntry prefers the built loader for packaged standalone intera
     args: [join(packageRoot, "dist", "loader.js")],
     cwd: "/tmp/project-a",
   });
-
 });
-test("resolveGsdCliEntry prefers the source loader for source-dev interactive sessions", (t) => {{
+
+test("resolveGsdCliEntry prefers the source loader for source-dev interactive sessions", (t) => {
   const packageRoot = makeFixture([
     "dist/loader.js",
     "src/loader.ts",
     "src/resources/extensions/gsd/tests/resolve-ts.mjs",
   ]);
 
-    t.after(() => { rmSync(packageRoot, { recursive: true, force: true }); });
+  t.after(() => { rmSync(packageRoot, { recursive: true, force: true }); });
 
   const entry = resolveGsdCliEntry({
     packageRoot,
@@ -68,11 +68,12 @@ test("resolveGsdCliEntry prefers the source loader for source-dev interactive se
     ],
     cwd: "/tmp/project-b",
   });
+});
 
-});test("resolveGsdCliEntry appends rpc arguments for bridge sessions", (t) => { {
+test("resolveGsdCliEntry appends rpc arguments for bridge sessions", (t) => {
   const packageRoot = makeFixture(["dist/loader.js"]);
 
-    t.after(() => { rmSync(packageRoot, { recursive: true, force: true }); });
+  t.after(() => { rmSync(packageRoot, { recursive: true, force: true }); });
 
   const entry = resolveGsdCliEntry({
     packageRoot,
@@ -95,5 +96,4 @@ test("resolveGsdCliEntry prefers the source loader for source-dev interactive se
     ],
     cwd: "/tmp/project-c",
   });
-
 });

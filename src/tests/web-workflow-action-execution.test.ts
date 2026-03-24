@@ -40,10 +40,9 @@ test("navigateToGSDView dispatches the shared browser navigation event", (t) => 
 
   ;(globalThis as { window?: EventTarget }).window = fakeWindow
 
-    t.after(() => { ;(globalThis as { window?: EventTarget }).window = originalWindow });
+  t.after(() => { ;(globalThis as { window?: EventTarget }).window = originalWindow });
 
   navigateToGSDView("power")
-
 
   assert.deepEqual(seen, ["power"])
 })
@@ -62,7 +61,7 @@ test("executeWorkflowActionInPowerMode calls dispatch and navigates to the appro
   ;(globalThis as { window?: EventTarget }).window = fakeWindow
   ;(globalThis as any).localStorage = { getItem: () => null, setItem: () => {} }
 
-    t.after(() => {
+  t.after(() => {
     ;(globalThis as { window?: EventTarget }).window = originalWindow
     ;(globalThis as any).localStorage = originalLocalStorage
   });
@@ -74,7 +73,6 @@ test("executeWorkflowActionInPowerMode calls dispatch and navigates to the appro
   })
   // dispatch is fire-and-forget, give it a tick to resolve
   await new Promise((resolve) => setTimeout(resolve, 10))
-
 
   assert.equal(dispatchCalled, true, "dispatch should have been called")
   assert.ok(seenViews.length > 0, "should navigate to a view")

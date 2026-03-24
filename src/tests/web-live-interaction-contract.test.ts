@@ -392,7 +392,7 @@ test("(a) SSE emits extension_ui_request with method 'select' → typed payload 
 
   setupBridge(harness, fixture);
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     onboarding.resetOnboardingServiceForTests();
     fixture.cleanup();
@@ -432,7 +432,6 @@ test("(a) SSE emits extension_ui_request with method 'select' → typed payload 
   assert.equal(state.pendingUiRequests[0].method, "select");
   assert.deepEqual(state.pendingUiRequests[0].options, ["file-a.ts", "file-b.ts", "file-c.ts"]);
   assert.equal(state.pendingUiRequests[0].allowMultiple, true);
-
 });
 
 test("(b) Multiple concurrent UI requests queue correctly keyed by id", async () => {
@@ -480,7 +479,8 @@ test("(b) Multiple concurrent UI requests queue correctly keyed by id", async ()
   assert.equal(state.pendingUiRequests[3].method, "editor");
   assert.equal(state.pendingUiRequests[3].prefill, "initial text");
 });
-test("(c) Responding to a UI request posts extension_ui_response with correct id and value to the bridge", async (t) => {{
+
+test("(c) Responding to a UI request posts extension_ui_response with correct id and value to the bridge", async (t) => {
   const fixture = makeWorkspaceFixture();
   const sessionPath = createSessionFile(fixture.projectCwd, fixture.sessionsDir, "sess-respond", "Respond Session");
   const harness = createHarness((command, current) => {
@@ -499,7 +499,7 @@ test("(c) Responding to a UI request posts extension_ui_response with correct id
 
   setupBridge(harness, fixture);
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     onboarding.resetOnboardingServiceForTests();
     fixture.cleanup();
@@ -523,8 +523,9 @@ test("(c) Responding to a UI request posts extension_ui_response with correct id
   assert.ok(uiResponseCmd, "extension_ui_response was sent to the bridge");
   assert.equal(uiResponseCmd.id, "req-42");
   assert.equal(uiResponseCmd.value, "option-b");
+});
 
-});test("(d) Dismissing a UI request posts cancelled: true and removes from pending", async (t) => { {
+test("(d) Dismissing a UI request posts cancelled: true and removes from pending", async (t) => {
   const fixture = makeWorkspaceFixture();
   const sessionPath = createSessionFile(fixture.projectCwd, fixture.sessionsDir, "sess-dismiss", "Dismiss Session");
   const harness = createHarness((command, current) => {
@@ -542,7 +543,7 @@ test("(c) Responding to a UI request posts extension_ui_response with correct id
 
   setupBridge(harness, fixture);
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     onboarding.resetOnboardingServiceForTests();
     fixture.cleanup();
@@ -581,8 +582,9 @@ test("(c) Responding to a UI request posts extension_ui_response with correct id
     pendingUiRequests: state.pendingUiRequests.filter((r: any) => r.id !== "req-99"),
   };
   assert.equal(state.pendingUiRequests.length, 0);
+});
 
-})test("(e) SSE emits message_update with text delta → streamingAssistantText accumulates", async (t) => {> {
+test("(e) SSE emits message_update with text delta → streamingAssistantText accumulates", async (t) => {
   let state = createMinimalLiveState();
 
   state = routeEvent(state, {
@@ -623,7 +625,7 @@ test("(c) Responding to a UI request posts extension_ui_response with correct id
 
   setupBridge(harness, fixture);
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     onboarding.resetOnboardingServiceForTests();
     fixture.cleanup();
@@ -648,7 +650,6 @@ test("(c) Responding to a UI request posts extension_ui_response with correct id
   assert.ok(msgEvent, "message_update event received via SSE");
   assert.equal(msgEvent.assistantMessageEvent.type, "text_delta");
   assert.equal(msgEvent.assistantMessageEvent.delta, "streamed text");
-
 });
 
 test("(f) agent_end moves streaming text to transcript and resets streaming text", async () => {
@@ -810,7 +811,9 @@ test("(g-2) tool_execution_start/end update activeToolExecution", async () => {
     isError: false,
   });
   assert.equal(state.activeToolExecution, null);
-}test("(h) steer and abort commands post the correct RPC command type", async (t) => {=> {
+});
+
+test("(h) steer and abort commands post the correct RPC command type", async (t) => {
   const fixture = makeWorkspaceFixture();
   const sessionPath = createSessionFile(fixture.projectCwd, fixture.sessionsDir, "sess-steer", "Steer Session");
   const harness = createHarness((command, current) => {
@@ -850,7 +853,7 @@ test("(g-2) tool_execution_start/end update activeToolExecution", async () => {
 
   setupBridge(harness, fixture);
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     onboarding.resetOnboardingServiceForTests();
     fixture.cleanup();
@@ -887,7 +890,6 @@ test("(g-2) tool_execution_start/end update activeToolExecution", async () => {
 
   const abortCmd = harness.commands.find((c) => c.type === "abort");
   assert.ok(abortCmd, "abort command was sent to the bridge");
-
 });
 
 test("(failure-path) UI response errors are visible as lastClientError and pending requests persist on failure", async () => {
@@ -916,7 +918,9 @@ test("(failure-path) UI response errors are visible as lastClientError and pendi
     pendingUiRequests: state.pendingUiRequests.filter((r: any) => r.id !== "req-fail"),
   };
   assert.equal(successState.pendingUiRequests.length, 0, "request removed on success");
-test("(session-controls) browser session RPCs round-trip through /api/session/command", async (t) => { => {
+});
+
+test("(session-controls) browser session RPCs round-trip through /api/session/command", async (t) => {
   const fixture = makeWorkspaceFixture();
   const activeSessionPath = createSessionFile(fixture.projectCwd, fixture.sessionsDir, "sess-session", "Session Surface");
   const nextSessionPath = createSessionFile(fixture.projectCwd, fixture.sessionsDir, "sess-next", "Next Session");
@@ -1032,7 +1036,7 @@ test("(session-controls) browser session RPCs round-trip through /api/session/co
 
   setupBridge(harness, fixture);
 
-    t.after(() => {
+  t.after(async () => {
     await bridge.resetBridgeServiceForTests();
     onboarding.resetOnboardingServiceForTests();
     fixture.cleanup();
@@ -1113,5 +1117,4 @@ test("(session-controls) browser session RPCs round-trip through /api/session/co
     ["get_session_stats", "export_html", "switch_session", "get_fork_messages", "fork", "compact"],
     "browser session controls should hit the live command route with the expected RPC sequence",
   );
-
 });

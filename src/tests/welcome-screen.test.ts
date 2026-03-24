@@ -14,12 +14,12 @@ function capture(opts: Parameters<typeof printWelcomeScreen>[0]): string {
   const origIsTTY = (process.stderr as any).isTTY
   ;(process.stderr as any).isTTY = true
 
-  try {
-    printWelcomeScreen(opts)
-  } finally {
+  t.after(() => {
     ;(process.stderr as any).write = original
     ;(process.stderr as any).isTTY = origIsTTY
-  }
+  });
+
+  printWelcomeScreen(opts)
 
   return chunks.join('')
 }
@@ -58,14 +58,13 @@ test('skips when not a TTY', (t) => {
   const origIsTTY = (process.stderr as any).isTTY
   ;(process.stderr as any).isTTY = false
 
-    t.after(() => {
+  t.after(() => {
     ;(process.stderr as any).write = original
     ;(process.stderr as any).isTTY = origIsTTY
   });
 
   printWelcomeScreen({ version: '1.0.0' })
   assert.equal(chunks.join(''), '', 'should produce no output when not TTY')
-
 })
 
 test('renders without model or provider', () => {
