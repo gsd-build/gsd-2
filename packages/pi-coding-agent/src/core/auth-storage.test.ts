@@ -287,7 +287,7 @@ describe("AuthStorage — oauth credential for non-OAuth provider (#2083)", () =
 		assert.equal(key, undefined);
 	});
 
-	it("falls through to env var when openrouter has type:oauth credential", async () => {
+	it("falls through to env var when openrouter has type:oauth credential", async (t) => {
 		const storage = inMemory({
 			openrouter: {
 				type: "oauth",
@@ -299,17 +299,17 @@ describe("AuthStorage — oauth credential for non-OAuth provider (#2083)", () =
 
 		// Simulate OPENROUTER_API_KEY being set via env
 		const origEnv = process.env.OPENROUTER_API_KEY;
-		try {
-			process.env.OPENROUTER_API_KEY = "sk-or-v1-env-key";
-			const key = await storage.getApiKey("openrouter");
-			assert.equal(key, "sk-or-v1-env-key");
-		} finally {
+		t.after(() => {
 			if (origEnv === undefined) {
 				delete process.env.OPENROUTER_API_KEY;
 			} else {
 				process.env.OPENROUTER_API_KEY = origEnv;
 			}
-		}
+		});
+
+		process.env.OPENROUTER_API_KEY = "sk-or-v1-env-key";
+		const key = await storage.getApiKey("openrouter");
+		assert.equal(key, "sk-or-v1-env-key");
 	});
 
 	it("falls through to fallback resolver when openrouter has type:oauth credential", async () => {
