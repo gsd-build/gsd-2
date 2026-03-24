@@ -46,7 +46,7 @@ test("app-paths resolve to ~/.gsd/", async () => {
 // 2. loader env vars
 // ═══════════════════════════════════════════════════════════════════════════
 
-test("loader sets all 4 GSD_ env vars and PI_PACKAGE_DIR", async () => {
+test("loader sets all 4 GSD_ env vars and PI_PACKAGE_DIR", async (t) => {
   // Run loader in a subprocess that prints env vars and exits before TUI starts
   const script = `
     import { fileURLToPath } from 'url';
