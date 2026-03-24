@@ -762,6 +762,40 @@ A heading-style task.
   assertEq(p.tasks[2].done, true, 'mixed T03 done');
 }
 
+console.log('\n=== parsePlan: heading + checkbox same ID on adjacent lines deduplicates (#2353) ===');
+{
+  const content = `# S20: Dedup Plan
+
+**Goal:** Test deduplication.
+**Demo:** No double-counted tasks.
+
+## Tasks
+
+### T07 — Implement auth middleware \`est:30m\`
+- [x] **T07: Implement auth middleware** \`est:30m\`
+  Handles JWT validation.
+
+### T08 — Write integration tests \`est:20m\`
+- [ ] **T08: Write integration tests** \`est:20m\`
+  Cover all endpoints.
+
+- [x] **T09: Deploy to staging** \`est:10m\`
+  Final step.
+`;
+
+  const p = parsePlan(content);
+  assertEq(p.tasks.length, 3, 'dedup: should have 3 tasks, not 5 or 4');
+  assertEq(p.tasks[0].id, 'T07', 'dedup T07 id');
+  assertEq(p.tasks[0].done, true, 'dedup T07 done from checkbox [x]');
+  assertEq(p.tasks[0].title, 'Implement auth middleware', 'dedup T07 title from heading');
+  assertEq(p.tasks[0].estimate, '30m', 'dedup T07 estimate');
+  assertEq(p.tasks[1].id, 'T08', 'dedup T08 id');
+  assertEq(p.tasks[1].done, false, 'dedup T08 not done from checkbox [ ]');
+  assertEq(p.tasks[1].title, 'Write integration tests', 'dedup T08 title');
+  assertEq(p.tasks[2].id, 'T09', 'dedup T09 id');
+  assertEq(p.tasks[2].done, true, 'dedup T09 done');
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // parseSummary tests
 // ═══════════════════════════════════════════════════════════════════════════

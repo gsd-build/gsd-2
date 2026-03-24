@@ -384,13 +384,24 @@ function _parsePlanImpl(content: string): SlicePlan {
           const estMatch = rest.match(/`est:([^`]+)`/);
           const estimate = estMatch ? estMatch[1] : '';
 
-          currentTask = {
-            id: cbMatch[2],
-            title: cbMatch[3],
-            description: '',
-            done: cbMatch[1].toLowerCase() === 'x',
-            estimate,
-          };
+          // Deduplicate: if previous entry (just pushed) has the same task ID,
+          // merge checkbox status into it rather than creating a duplicate (#2353)
+          const prevIdx = tasks.length - 1;
+          const prev = prevIdx >= 0 ? tasks[prevIdx] : null;
+          if (prev && prev.id === cbMatch[2]) {
+            prev.done = cbMatch[1].toLowerCase() === 'x';
+            if (estimate) prev.estimate = estimate;
+            currentTask = prev;
+            tasks.splice(prevIdx, 1);
+          } else {
+            currentTask = {
+              id: cbMatch[2],
+              title: cbMatch[3],
+              description: '',
+              done: cbMatch[1].toLowerCase() === 'x',
+              estimate,
+            };
+          }
         } else {
           const rest = hdMatch![2] || '';
           const titleEstMatch = rest.match(/^(.+?)\s*`est:([^`]+)`\s*$/);
