@@ -2,11 +2,10 @@ import { mkdtempSync, mkdirSync, rmSync, realpathSync, symlinkSync } from "node:
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
+import test from "node:test";
+import assert from "node:assert/strict";
 
 import { gsdRoot, _clearGsdRootCache } from "../paths.ts";
-import { createTestContext } from "./test-helpers.ts";
-
-const { assertEq, assertTrue, report } = createTestContext();
 
 /** Create a tmp dir and resolve symlinks + 8.3 short names (macOS /var→/private/var, Windows RUNNER~1→runneradmin). */
 function tmp(): string {
@@ -25,19 +24,17 @@ function initGit(dir: string): void {
 
 // ── tests ──────────────────────────────────────────────────────────────────
 
-{
-  // Case 1: .gsd exists at basePath — fast path
+test("Case 1: .gsd exists at basePath — fast path", () => {
   const root = tmp();
   try {
     mkdirSync(join(root, ".gsd"));
     _clearGsdRootCache();
     const result = gsdRoot(root);
-    assertEq(result, join(root, ".gsd"), "fast path: returns basePath/.gsd");
+    assert.equal(result, join(root, ".gsd"), "fast path: returns basePath/.gsd");
   } finally { cleanup(root); }
-}
+});
 
-{
-  // Case 2: .gsd exists at git root, cwd is a subdirectory
+test("Case 2: .gsd exists at git root, cwd is a subdirectory", () => {
   const root = tmp();
   try {
     initGit(root);
@@ -46,58 +43,49 @@ function initGit(dir: string): void {
     mkdirSync(sub, { recursive: true });
     _clearGsdRootCache();
     const result = gsdRoot(sub);
-    assertEq(result, join(root, ".gsd"), "git-root probe: finds .gsd at git root from subdirectory");
+    assert.equal(result, join(root, ".gsd"), "git-root probe: finds .gsd at git root from subdirectory");
   } finally { cleanup(root); }
-}
+});
 
-{
-  // Case 3: .gsd in an ancestor — walk-up finds it (git repo with no .gsd at root)
+test("Case 3: .gsd in an ancestor — walk-up finds it", () => {
   const root = tmp();
   try {
-    // Init a git repo so git probe returns root — but put .gsd one level deeper
-    // to force the walk-up path: root/project/.gsd, cwd = root/project/src/deep
     initGit(root);
     const project = join(root, "project");
     mkdirSync(join(project, ".gsd"), { recursive: true });
     const deep = join(project, "src", "deep");
     mkdirSync(deep, { recursive: true });
     _clearGsdRootCache();
-    // git probe returns root (no .gsd there), so walk-up takes over and finds project/.gsd
     const result = gsdRoot(deep);
-    assertEq(result, join(project, ".gsd"), "walk-up: finds .gsd in ancestor when git root has none");
+    assert.equal(result, join(project, ".gsd"), "walk-up: finds .gsd in ancestor when git root has none");
   } finally { cleanup(root); }
-}
+});
 
-{
-  // Case 4: .gsd nowhere — fallback returns original basePath/.gsd
-  // Use an isolated git repo so we fully control the environment above basePath
+test("Case 4: .gsd nowhere — fallback returns basePath/.gsd", () => {
   const root = tmp();
   try {
-    initGit(root);                          // git root = root, no .gsd anywhere
+    initGit(root);
     const sub = join(root, "src");
     mkdirSync(sub, { recursive: true });
     _clearGsdRootCache();
     const result = gsdRoot(sub);
-    // git probe finds root (no .gsd), walk-up finds nothing → fallback = sub/.gsd
-    assertEq(result, join(sub, ".gsd"), "fallback: returns basePath/.gsd when .gsd not found anywhere");
+    assert.equal(result, join(sub, ".gsd"), "fallback: returns basePath/.gsd when .gsd not found anywhere");
   } finally { cleanup(root); }
-}
+});
 
-{
-  // Case 5: cache — second call returns same value without re-probing
+test("Case 5: cache — second call returns same value without re-probing", () => {
   const root = tmp();
   try {
     mkdirSync(join(root, ".gsd"));
     _clearGsdRootCache();
     const first = gsdRoot(root);
     const second = gsdRoot(root);
-    assertEq(first, second, "cache: same result returned on second call");
-    assertTrue(first === second, "cache: identity check (same string)");
+    assert.equal(first, second, "cache: same result returned on second call");
+    assert.ok(first === second, "cache: identity check (same string)");
   } finally { cleanup(root); }
-}
+});
 
-{
-  // Case 6: .gsd at git root takes precedence over subdirectory .gsd (#2255)
+test("Case 6: git-root .gsd takes precedence over subdirectory .gsd (#2255)", () => {
   const outer = tmp();
   try {
     initGit(outer);
@@ -106,15 +94,11 @@ function initGit(dir: string): void {
     mkdirSync(join(inner, ".gsd"), { recursive: true });
     _clearGsdRootCache();
     const result = gsdRoot(inner);
-    assertEq(result, join(outer, ".gsd"), "precedence: git-root .gsd wins over subdirectory .gsd (#2255)");
+    assert.equal(result, join(outer, ".gsd"), "precedence: git-root .gsd wins over subdirectory .gsd");
   } finally { cleanup(outer); }
-}
+});
 
-{
-  // Case 7: subdirectory .gsd symlink does not shadow git-root .gsd (#2255)
-  // Reproduces the exact scenario: user runs from a sub-dir, ensureGsdSymlink
-  // created a .gsd symlink there pointing to an empty external state dir.
-  // probeGsdRoot must still find the real .gsd at the git root.
+test("Case 7: subdirectory .gsd symlink does not shadow git-root .gsd (#2255)", () => {
   const outer = tmp();
   const emptyExternal = tmp();
   try {
@@ -122,18 +106,14 @@ function initGit(dir: string): void {
     mkdirSync(join(outer, ".gsd", "milestones"), { recursive: true });
     const sub = join(outer, "apps", "my_app", "scripts");
     mkdirSync(sub, { recursive: true });
-    // Simulate ensureGsdSymlink having created a symlink in the sub-dir
     symlinkSync(emptyExternal, join(sub, ".gsd"), "junction");
     _clearGsdRootCache();
     const result = gsdRoot(sub);
-    assertEq(result, join(outer, ".gsd"), "subdirectory symlink: git-root .gsd wins over sub-dir symlink (#2255)");
+    assert.equal(result, join(outer, ".gsd"), "subdirectory symlink: git-root .gsd wins over sub-dir symlink");
   } finally { cleanup(outer); cleanup(emptyExternal); }
-}
+});
 
-{
-  // Case 8: subdirectory .gsd symlink to POPULATED state dir still loses to git-root .gsd (#2255)
-  // Even when the subdirectory symlink points to a fully-populated .gsd with milestones,
-  // the git-root .gsd takes precedence — the canonical project .gsd always lives at git root.
+test("Case 8: populated subdirectory symlink still loses to git-root .gsd (#2255)", () => {
   const outer = tmp();
   const populatedExternal = tmp();
   try {
@@ -141,13 +121,10 @@ function initGit(dir: string): void {
     mkdirSync(join(outer, ".gsd", "milestones", "M001"), { recursive: true });
     const sub = join(outer, "packages", "app");
     mkdirSync(sub, { recursive: true });
-    // Create a populated external state dir with its own milestones
     mkdirSync(join(populatedExternal, "milestones", "M002"), { recursive: true });
     symlinkSync(populatedExternal, join(sub, ".gsd"), "junction");
     _clearGsdRootCache();
     const result = gsdRoot(sub);
-    assertEq(result, join(outer, ".gsd"), "populated subdirectory symlink: git-root .gsd still wins (#2255)");
+    assert.equal(result, join(outer, ".gsd"), "populated subdirectory symlink: git-root .gsd still wins");
   } finally { cleanup(outer); cleanup(populatedExternal); }
-}
-
-report();
+});
