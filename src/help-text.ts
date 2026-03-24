@@ -35,7 +35,7 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   install: [
     'Usage: gsd install <source> [-l, --local]',
     '',
-    'Install a package/extension source and run any declared post-install hooks.',
+    'Install a package/extension source and run declared lifecycle hooks.',
     '',
     'Examples:',
     '  gsd install npm:@foo/bar',

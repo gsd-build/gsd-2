@@ -94,9 +94,11 @@ export type {
 	// Provider Registration
 	ProviderConfig,
 	ProviderModelConfig,
-	PostInstallContext,
-	PostInstallHandler,
-	PostInstallScope,
+	LifecycleHookContext,
+	LifecycleHookHandler,
+	LifecycleHookMap,
+	LifecycleHookPhase,
+	LifecycleHookScope,
 	ReadToolCallEvent,
 	ReadToolResultEvent,
 	// Commands

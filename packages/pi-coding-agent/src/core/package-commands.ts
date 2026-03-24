@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import { DefaultPackageManager } from "./package-manager.js";
-import { runPostInstallHooks } from "./post-install-hooks.js";
+import { prepareLifecycleHooks, runLifecycleHooks } from "./lifecycle-hooks.js";
 import { SettingsManager } from "./settings-manager.js";
 
 export type PackageCommand = "install" | "remove" | "update" | "list";
@@ -61,7 +61,7 @@ function printPackageCommandHelp(
 			stdout.write(`${chalk.bold("Usage:")}
   ${getPackageCommandUsage(appName, "install")}
 
-Install a package and add it to settings.
+Install a package, add it to settings, and run lifecycle hooks.
 
 Options:
   -l, --local    Install project-locally (.pi/settings.json)
@@ -192,9 +192,7 @@ export async function runPackageCommand(
 	try {
 		switch (parsed.command) {
 			case "install": {
-				await packageManager.install(source!, { local: parsed.local });
-				packageManager.addSourceToSettings(source!, { local: parsed.local });
-				const hookResult = await runPostInstallHooks({
+				const lifecycleOptions = {
 					source: source!,
 					local: parsed.local,
 					cwd: options.cwd,
@@ -203,17 +201,50 @@ export async function runPackageCommand(
 					packageManager,
 					stdout,
 					stderr,
+				};
+
+				const beforeInstallHooks = await prepareLifecycleHooks(lifecycleOptions, "source");
+				const beforeInstallResult = await runLifecycleHooks(beforeInstallHooks, "beforeInstall");
+
+				await packageManager.install(source!, { local: parsed.local });
+				packageManager.addSourceToSettings(source!, { local: parsed.local });
+
+				const afterInstallHooks = await prepareLifecycleHooks(lifecycleOptions, "installed", {
+					verifyRuntimeDependencies: true,
 				});
-				if (hookResult.hookErrors > 0) {
-					stderr.write(chalk.yellow(`Post-install completed with ${hookResult.hookErrors} hook error(s).`) + "\n");
+				const afterInstallResult = await runLifecycleHooks(afterInstallHooks, "afterInstall");
+
+				const hookErrors = beforeInstallResult.hookErrors + afterInstallResult.hookErrors;
+				if (hookErrors > 0) {
+					stderr.write(chalk.yellow(`Lifecycle hooks completed with ${hookErrors} hook error(s).`) + "\n");
 				}
 				stdout.write(chalk.green(`Installed ${source}`) + "\n");
 				return { handled: true, exitCode: 0 };
 			}
 
 			case "remove": {
+				const lifecycleOptions = {
+					source: source!,
+					local: parsed.local,
+					cwd: options.cwd,
+					agentDir: options.agentDir,
+					appName: options.appName,
+					packageManager,
+					stdout,
+					stderr,
+				};
+				const removeHooks = await prepareLifecycleHooks(lifecycleOptions, "installed");
+				const beforeRemoveResult = await runLifecycleHooks(removeHooks, "beforeRemove");
+
 				await packageManager.remove(source!, { local: parsed.local });
 				const removed = packageManager.removeSourceFromSettings(source!, { local: parsed.local });
+
+				const afterRemoveResult = await runLifecycleHooks(removeHooks, "afterRemove");
+				const hookErrors = beforeRemoveResult.hookErrors + afterRemoveResult.hookErrors;
+				if (hookErrors > 0) {
+					stderr.write(chalk.yellow(`Lifecycle hooks completed with ${hookErrors} hook error(s).`) + "\n");
+				}
+
 				if (!removed) {
 					stderr.write(chalk.red(`No matching package found for ${source}`) + "\n");
 					return { handled: true, exitCode: 1 };

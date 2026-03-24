@@ -949,15 +949,18 @@ export interface RegisteredCommand {
 	handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
 }
 
-export type PostInstallScope = "user" | "project";
+export type LifecycleHookScope = "user" | "project";
+export type LifecycleHookPhase = "beforeInstall" | "afterInstall" | "beforeRemove" | "afterRemove";
 
-export interface PostInstallContext {
+export interface LifecycleHookContext {
+	/** Lifecycle phase currently being executed. */
+	phase: LifecycleHookPhase;
 	/** Package source string passed to install (npm:, git:, https://, local path). */
 	source: string;
-	/** Resolved installed package path (or resolved local path). */
-	installedPath: string;
+	/** Resolved installed package path (or resolved local path), when available for this phase. */
+	installedPath?: string;
 	/** Where the package was installed. */
-	scope: PostInstallScope;
+	scope: LifecycleHookScope;
 	/** Current working directory for the install invocation. */
 	cwd: string;
 	/** Whether install is running in an interactive TTY. */
@@ -970,7 +973,8 @@ export interface PostInstallContext {
 	error(message: string): void;
 }
 
-export type PostInstallHandler = (ctx: PostInstallContext) => Promise<void> | void;
+export type LifecycleHookHandler = (ctx: LifecycleHookContext) => Promise<void> | void;
+export type LifecycleHookMap = Record<LifecycleHookPhase, LifecycleHookHandler[]>;
 
 // ============================================================================
 // Extension API
@@ -1042,13 +1046,17 @@ export interface ExtensionAPI {
 	/** Register a custom command. */
 	registerCommand(name: string, options: Omit<RegisteredCommand, "name">): void;
 
-	/**
-	 * Register a post-install hook.
-	 *
-	 * Called after native package installation succeeds (`pi install`, `gsd install`).
-	 * Hooks are generic and can perform any extension-defined setup.
-	 */
-	registerPostInstall(handler: PostInstallHandler): void;
+	/** Register a lifecycle hook run before package installation starts. */
+	registerBeforeInstall(handler: LifecycleHookHandler): void;
+
+	/** Register a lifecycle hook run after package installation completes. */
+	registerAfterInstall(handler: LifecycleHookHandler): void;
+
+	/** Register a lifecycle hook run before package removal starts. */
+	registerBeforeRemove(handler: LifecycleHookHandler): void;
+
+	/** Register a lifecycle hook run after package removal completes. */
+	registerAfterRemove(handler: LifecycleHookHandler): void;
 
 	/** Register a keyboard shortcut. */
 	registerShortcut(
@@ -1413,7 +1421,7 @@ export interface Extension {
 	commands: Map<string, RegisteredCommand>;
 	flags: Map<string, ExtensionFlag>;
 	shortcuts: Map<KeyId, ExtensionShortcut>;
-	postInstallHandlers: PostInstallHandler[];
+	lifecycleHooks: LifecycleHookMap;
 }
 
 /** Result of loading extensions. */

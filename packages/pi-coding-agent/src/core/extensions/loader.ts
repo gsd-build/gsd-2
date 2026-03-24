@@ -42,7 +42,7 @@ import type {
 	Extension,
 	ExtensionAPI,
 	ExtensionFactory,
-	PostInstallHandler,
+	LifecycleHookHandler,
 	ExtensionRuntime,
 	LoadExtensionsResult,
 	MessageRenderer,
@@ -464,8 +464,20 @@ function createExtensionAPI(
 			extension.commands.set(name, { name, ...options });
 		},
 
-		registerPostInstall(handler: PostInstallHandler): void {
-			extension.postInstallHandlers.push(handler);
+		registerBeforeInstall(handler: LifecycleHookHandler): void {
+			extension.lifecycleHooks.beforeInstall.push(handler);
+		},
+
+		registerAfterInstall(handler: LifecycleHookHandler): void {
+			extension.lifecycleHooks.afterInstall.push(handler);
+		},
+
+		registerBeforeRemove(handler: LifecycleHookHandler): void {
+			extension.lifecycleHooks.beforeRemove.push(handler);
+		},
+
+		registerAfterRemove(handler: LifecycleHookHandler): void {
+			extension.lifecycleHooks.afterRemove.push(handler);
 		},
 
 		registerShortcut(
@@ -655,7 +667,12 @@ function createExtension(extensionPath: string, resolvedPath: string): Extension
 		commands: new Map(),
 		flags: new Map(),
 		shortcuts: new Map(),
-		postInstallHandlers: [],
+		lifecycleHooks: {
+			beforeInstall: [],
+			afterInstall: [],
+			beforeRemove: [],
+			afterRemove: [],
+		},
 	};
 }
 
