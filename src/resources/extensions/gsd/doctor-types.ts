@@ -70,7 +70,10 @@ export type DoctorIssueCode =
   | "large_planning_file"
   // Slow environment checks (opt-in via --build / --test flags)
   | "env_build"
-  | "env_test";
+  | "env_test"
+  // Task completion-transition checks (#2202)
+  | "task_done_missing_summary"
+  | "task_summary_without_done_checkbox";
 
 /**
  * Issue codes that represent global or completion-critical state.
@@ -86,6 +89,17 @@ export type DoctorIssueCode =
 export const GLOBAL_STATE_CODES = new Set<DoctorIssueCode>([
   "orphaned_project_state",
   "orphaned_completed_units",
+]);
+
+/**
+ * Issue codes that represent task completion-state transitions (checking /
+ * unchecking done boxes, creating stub summaries).  When fixLevel is "task",
+ * dry-run reporting should still surface these so the caller knows a real fix
+ * would mutate plan files.
+ */
+export const COMPLETION_TRANSITION_CODES = new Set<DoctorIssueCode>([
+  "task_done_missing_summary",
+  "task_summary_without_done_checkbox",
 ]);
 
 export interface DoctorIssue {
