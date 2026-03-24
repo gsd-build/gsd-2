@@ -24,6 +24,7 @@ import {
 import { detectStuck } from "./detect-stuck.js";
 import { runUnit } from "./run-unit.js";
 import { debugLog } from "../debug-logger.js";
+import { drainLogs, summarizeLogs, formatForNotification } from "../workflow-logger.js";
 import { gsdRoot } from "../paths.js";
 import { atomicWriteSync } from "../atomic-write.js";
 import { PROJECT_FILES } from "../detection.js";
@@ -564,19 +565,26 @@ export async function runDispatch(
         deps.invalidateAllCaches();
       } else {
         // Level 2: hard stop — genuinely stuck
+        // Drain logger for root cause context
+        const logSummary = summarizeLogs();
+        const stuckReason = logSummary
+          ? `${stuckSignal.reason}. Root cause: ${logSummary}`
+          : stuckSignal.reason;
+        drainLogs(); // clear buffer
+
         debugLog("autoLoop", {
           phase: "stuck-detected",
           unitType,
           unitId,
-          reason: stuckSignal.reason,
+          reason: stuckReason,
         });
         await deps.stopAuto(
           ctx,
           pi,
-          `Stuck: ${stuckSignal.reason}`,
+          `Stuck: ${stuckReason}`,
         );
         ctx.ui.notify(
-          `Stuck on ${unitType} ${unitId} — ${stuckSignal.reason}. The expected artifact was not written.`,
+          `Stuck on ${unitType} ${unitId} — ${stuckReason}`,
           "error",
         );
         return { action: "break", reason: "stuck-detected" };
@@ -1071,6 +1079,23 @@ export async function runUnitPhase(
         lastEntry.error = msgStr.slice(0, 200);
       }
     }
+  }
+
+  // ── Workflow logger drain ──────────────────────────────────────────
+  // Surface any warnings/errors accumulated during this unit (blocked
+  // writes, tool failures, loop guard triggers, etc.)
+  const logEntries = drainLogs();
+  if (logEntries.length > 0) {
+    const hasLogErrors = logEntries.some(e => e.severity === "error");
+    const lastEntry = loopState.recentUnits[loopState.recentUnits.length - 1];
+    if (lastEntry && !lastEntry.error && hasLogErrors) {
+      // Tag the window entry so stuck detection catches it via Rule 1
+      lastEntry.error = formatForNotification(logEntries.filter(e => e.severity === "error")).slice(0, 200);
+    }
+    ctx.ui.notify(
+      `Engine: ${formatForNotification(logEntries)}`,
+      hasLogErrors ? "error" : "warning",
+    );
   }
 
   if (unitResult.status === "cancelled") {

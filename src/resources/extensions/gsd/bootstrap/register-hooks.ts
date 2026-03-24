@@ -15,6 +15,7 @@ import { getAutoDashboardData, isAutoActive, isAutoPaused, markToolEnd, markTool
 import { isParallelActive, shutdownParallel } from "../parallel-orchestrator.js";
 import { checkToolCallLoop, resetToolCallLoopGuard } from "./tool-call-loop-guard.js";
 import { saveActivityLog } from "../activity-log.js";
+import { logWarning } from "../workflow-logger.js";
 
 // Skip the welcome screen on the very first session_start — cli.ts already
 // printed it before the TUI launched. Only re-print on /clear (subsequent sessions).
@@ -125,6 +126,7 @@ export function registerHooks(pi: ExtensionAPI): void {
     // ── Loop guard: block repeated identical tool calls ──
     const loopCheck = checkToolCallLoop(event.toolName, event.input as Record<string, unknown>);
     if (loopCheck.block) {
+      logWarning("intercept", `tool-call loop guard blocked ${event.toolName}`, { tool: event.toolName });
       return { block: true, reason: loopCheck.reason };
     }
 
