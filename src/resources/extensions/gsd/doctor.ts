@@ -874,6 +874,29 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
         allTasksDone = allTasksDone && task.done;
       }
 
+      // ── Roadmap checkbox vs actual completion mismatch (#1925) ──────────
+      // When all tasks are done and a slice summary exists, but the roadmap
+      // still shows the slice as unchecked, fix both the main roadmap and
+      // the worktree copy so syncStateToProjectRoot doesn't revert the fix.
+      if (allTasksDone && !slice.done) {
+        const sliceSummaryPath = resolveSliceFile(basePath, milestoneId, slice.id, "SUMMARY");
+        const hasSliceSummary = !!(sliceSummaryPath && await loadFile(sliceSummaryPath));
+        if (hasSliceSummary) {
+          issues.push({
+            severity: "warning",
+            code: "roadmap_checkbox_stale",
+            scope: "slice",
+            unitId,
+            message: `All tasks in ${slice.id} are done and slice summary exists, but roadmap checkbox is unchecked`,
+            file: relMilestoneFile(basePath, milestoneId, "ROADMAP"),
+            fixable: true,
+          });
+          if (shouldFix("roadmap_checkbox_stale")) {
+            await markSliceDoneInRoadmap(basePath, milestoneId, slice.id, fixesApplied);
+          }
+        }
+      }
+
       // Blocker-without-replan detection
       const replanPath = resolveSliceFile(basePath, milestoneId, slice.id, "REPLAN");
       if (!replanPath) {

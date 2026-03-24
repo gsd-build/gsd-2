@@ -56,6 +56,7 @@ export type DoctorIssueCode =
   | "task_file_not_in_plan"
   | "stale_replan_file"
   | "future_timestamp"
+  | "roadmap_checkbox_stale"
   // Worktree lifecycle checks
   | "worktree_branch_merged"
   | "worktree_stale"
