@@ -15,15 +15,17 @@ const scriptProbe = spawnSync(scriptBin, ["--version"], { encoding: "utf-8" });
 const scriptMissing = (scriptProbe.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
 
 const skipReason =
-  process.platform === "win32"
-    ? "requires POSIX PTY (script)"
-    : scriptMissing
-      ? `${scriptBin} not found in PATH`
-      : !existsSync(loaderPath)
-        ? "dist/loader.js not found — run npm run build"
-        : !existsSync(extensionPath)
-          ? "test extension fixture missing"
-          : undefined;
+  process.env.CI
+    ? "requires interactive PTY — skip in CI"
+    : process.platform === "win32"
+      ? "requires POSIX PTY (script)"
+      : scriptMissing
+        ? `${scriptBin} not found in PATH`
+        : !existsSync(loaderPath)
+          ? "dist/loader.js not found — run npm run build"
+          : !existsSync(extensionPath)
+            ? "test extension fixture missing"
+            : undefined;
 
 type PtyResult = {
   output: string;
