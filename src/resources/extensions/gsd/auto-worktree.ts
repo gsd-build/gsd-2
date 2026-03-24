@@ -36,6 +36,7 @@ import {
   removeWorktree,
   resolveGitDir,
   worktreePath,
+  isInsideWorktreesDir,
 } from "./worktree-manager.js";
 import {
   detectWorktreeName,
@@ -1204,12 +1205,19 @@ export function teardownAutoWorktree(
         `Remove it manually with: rm -rf "${wtDir.replaceAll("\\", "/")}"`,
       { worktree: milestoneId },
     );
-    // Attempt a direct filesystem removal as a fallback
-    try {
-      rmSync(wtDir, { recursive: true, force: true });
-    } catch (err) {
-      // Non-fatal — the warning above tells the user how to clean up
-      logWarning("worktree", `worktree directory removal failed: ${err instanceof Error ? err.message : String(err)}`);
+    // Attempt a direct filesystem removal as a fallback — but ONLY if the
+    // path is safely inside .gsd/worktrees/ to prevent #2365 data loss.
+    if (isInsideWorktreesDir(originalBasePath, wtDir)) {
+      try {
+        rmSync(wtDir, { recursive: true, force: true });
+      } catch (err) {
+        // Non-fatal — the warning above tells the user how to clean up
+        logWarning("worktree", `worktree directory removal failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    } else {
+      console.error(
+        `[GSD] REFUSING fallback rmSync — path is outside .gsd/worktrees/: ${wtDir}`,
+      );
     }
   }
 }
