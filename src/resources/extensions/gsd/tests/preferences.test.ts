@@ -15,6 +15,7 @@ import {
   applyModeDefaults,
   getIsolationMode,
   parsePreferencesMarkdown,
+  _resetParseWarningFlag,
 } from "../preferences.ts";
 import type { GSDPreferences, GSDModelConfigV2, GSDPhaseModelConfig } from "../preferences.ts";
 
@@ -351,4 +352,30 @@ test("handles empty models config", () => {
   const prefs = parsePreferencesMarkdown("---\nversion: 1\n---\n");
   assert.notEqual(prefs, null);
   assert.equal(prefs!.models, undefined);
+});
+
+// ── Warn-once for unrecognized format (#2373) ────────────────────────────────
+
+test("unrecognized format warning is emitted at most once (#2373)", () => {
+  const warnings: string[] = [];
+  const origWarn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args.join(" "));
+  try {
+    // Reset internal warned flag so the test starts clean
+    _resetParseWarningFlag();
+
+    const unrecognized = "This is just plain text with no frontmatter or headings.";
+
+    // Call multiple times — simulates repeated preference loads
+    parsePreferencesMarkdown(unrecognized);
+    parsePreferencesMarkdown(unrecognized);
+    parsePreferencesMarkdown(unrecognized);
+
+    const relevant = warnings.filter(w => w.includes("unrecognized format"));
+    assert.equal(relevant.length, 1, `expected exactly 1 warning, got ${relevant.length}: ${JSON.stringify(relevant)}`);
+  } finally {
+    console.warn = origWarn;
+    // Reset so other tests aren't affected by the flag state
+    _resetParseWarningFlag();
+  }
 });

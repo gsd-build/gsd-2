@@ -196,6 +196,13 @@ function loadPreferencesFile(path: string, scope: "global" | "project"): LoadedG
   };
 }
 
+let _warnedUnrecognizedFormat = false;
+
+/** @internal Reset the warn-once flag — exported for testing only. */
+export function _resetParseWarningFlag(): void {
+  _warnedUnrecognizedFormat = false;
+}
+
 /** @internal Exported for testing only */
 export function parsePreferencesMarkdown(content: string): GSDPreferences | null {
   // Use indexOf instead of [\s\S]*? regex to avoid backtracking (#468)
@@ -214,7 +221,10 @@ export function parsePreferencesMarkdown(content: string): GSDPreferences | null
     return parseHeadingListFormat(content);
   }
 
-  console.warn("[parsePreferencesMarkdown] preferences.md exists but uses an unrecognized format — skipping.");
+  if (!_warnedUnrecognizedFormat) {
+    _warnedUnrecognizedFormat = true;
+    console.warn("[parsePreferencesMarkdown] preferences.md exists but uses an unrecognized format — skipping.");
+  }
   return null;
 }
 
