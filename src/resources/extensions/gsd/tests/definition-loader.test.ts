@@ -65,7 +65,7 @@ steps:
 
 test("loadDefinition: valid 3-step YAML returns correct structure", (t) => {
   const dir = writeDefYaml(VALID_3STEP_YAML);
-  t.after(() => try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* Windows EPERM */ });
+  t.after(() => { try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* Windows EPERM */ } });
 
   const def = loadDefinition(dir, "test-workflow");
 
@@ -223,7 +223,7 @@ test("validateDefinition: missing step name → error", () => {
 
 test("loadDefinition: missing file → descriptive error", (t) => {
   const dir = makeTmpDir();
-  t.after(() => try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* Windows EPERM */ });
+  t.after(() => { try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* Windows EPERM */ } });
 
   assert.throws(
     () => loadDefinition(dir, "nonexistent"),
@@ -244,7 +244,7 @@ steps:
     name: "A"
     prompt: "do A"
 `);
-  t.after(() => try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* Windows EPERM */ });
+  t.after(() => { try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* Windows EPERM */ } });
 
   assert.throws(
     () => loadDefinition(dir, "test-workflow"),
@@ -271,7 +271,7 @@ steps:
     prompt: "do second"
     depends_on: [first]
 `);
-  t.after(() => try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* Windows EPERM */ });
+  t.after(() => { try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* Windows EPERM */ } });
 
   const def = loadDefinition(dir, "test-workflow");
   assert.deepEqual(def.steps[1].requires, ["first"]);
@@ -290,7 +290,7 @@ steps:
     prompt: "do second"
     context_from: [first]
 `);
-  t.after(() => try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* Windows EPERM */ });
+  t.after(() => { try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* Windows EPERM */ } });
 
   const def = loadDefinition(dir, "test-workflow");
   assert.deepEqual(def.steps[1].contextFrom, ["first"]);
@@ -724,7 +724,7 @@ steps:
     name: "A"
     prompt: "do A"
 `);
-  t.after(() => try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* Windows EPERM */ });
+  t.after(() => { try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* Windows EPERM */ } });
 
   const def = loadDefinition(dir, "test-workflow");
   assert.equal(def.params, undefined);
@@ -739,7 +739,7 @@ steps:
     name: "A"
     prompt: "do A"
 `);
-  t.after(() => try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* Windows EPERM */ });
+  t.after(() => { try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* Windows EPERM */ } });
 
   const def = loadDefinition(dir, "test-workflow");
   assert.equal(def.description, undefined);
@@ -754,7 +754,7 @@ steps:
     name: "A"
     prompt: "do A"
 `);
-  t.after(() => try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* Windows EPERM */ });
+  t.after(() => { try { rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* Windows EPERM */ } });
 
   const def = loadDefinition(dir, "test-workflow");
   assert.deepEqual(def.steps[0].requires, []);
