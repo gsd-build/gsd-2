@@ -178,6 +178,39 @@ async function main(): Promise<void> {
       rmSync(parentRepo, { recursive: true, force: true });
     }
 
+    console.log("\n=== ensureGsdSymlink from subdirectory does not create .gsd in subdir when git-root .gsd exists (#2380) ===");
+    {
+      const repo = realpathSync(mkdtempSync(join(tmpdir(), "gsd-subdir-symlink-")));
+      run("git init -b main", repo);
+      run('git config user.name "Pi Test"', repo);
+      run('git config user.email "pi@example.com"', repo);
+      run('git remote add origin git@github.com:example/subdir-test.git', repo);
+      writeFileSync(join(repo, "README.md"), "# Subdir Test\n", "utf-8");
+      run("git add README.md", repo);
+      run('git commit -m "init"', repo);
+
+      // Set up .gsd symlink at the git root (normal project initialisation)
+      const rootResult = ensureGsdSymlink(repo);
+      assertTrue(existsSync(join(repo, ".gsd")), "root .gsd exists after ensureGsdSymlink");
+      assertTrue(lstatSync(join(repo, ".gsd")).isSymbolicLink(), "root .gsd is a symlink");
+
+      // Create a subdirectory and call ensureGsdSymlink from there
+      const subdir = join(repo, "src", "lib");
+      mkdirSync(subdir, { recursive: true });
+      ensureGsdSymlink(subdir);
+
+      // Bug: ensureGsdSymlink should NOT create a .gsd in the subdirectory
+      // because the git root already has a valid .gsd symlink.
+      assertTrue(!existsSync(join(subdir, ".gsd")), "no .gsd created in subdirectory when git-root .gsd exists (#2380)");
+      assertTrue(!existsSync(join(repo, "src", ".gsd")), "no .gsd created in intermediate directory");
+
+      // The root .gsd should still be intact
+      assertTrue(existsSync(join(repo, ".gsd")), "root .gsd still exists");
+      assertTrue(lstatSync(join(repo, ".gsd")).isSymbolicLink(), "root .gsd is still a symlink");
+
+      rmSync(repo, { recursive: true, force: true });
+    }
+
     console.log("\n=== validateProjectId rejects invalid values ===");
     for (const invalid of ["has spaces", "path/traversal", "dot..dot", "back\\slash"]) {
       assertTrue(!validateProjectId(invalid), `validateProjectId rejects invalid value: "${invalid}"`);
