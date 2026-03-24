@@ -400,7 +400,7 @@ describe("auto-worktree-milestone-merge", () => {
     assert.ok(existsSync(join(repo, "sync-test.ts")), "sync-test.ts on main after merge");
   });
 
-  test("#1738 e2e: dirty tree rejection preserves branch", () => {
+  test("#1738 e2e: dirty tree is stashed before merge (#2151)", () => {
     const repo = freshRepo();
     const wtPath = createAutoWorktree(repo, "M100");
 
@@ -414,22 +414,16 @@ describe("auto-worktree-milestone-merge", () => {
       { id: "S01", title: "E2E test" },
     ]);
 
+    // Since #2151, dirty files are stashed before the squash merge instead
+    // of causing an immediate rejection.  The merge should succeed.
     let threw = false;
-    let errorMsg = "";
     try {
-      mergeMilestoneToMain(repo, "M100", roadmap);
-    } catch (err: unknown) {
+      const result = mergeMilestoneToMain(repo, "M100", roadmap);
+      assert.ok(result.commitMessage.includes("feat(M100)"), "#2151: merge succeeds after stashing dirty files");
+    } catch {
       threw = true;
-      errorMsg = err instanceof Error ? err.message : String(err);
     }
-    assert.ok(threw, "#1738 e2e: throws on dirty working tree");
-    assert.ok(
-      errorMsg.includes("dirty") || errorMsg.includes("untracked") || errorMsg.includes("overwritten"),
-      "#1738 e2e: error identifies dirty tree cause",
-    );
-
-    const branches = run("git branch", repo);
-    assert.ok(branches.includes("milestone/M100"), "#1738 e2e: milestone branch preserved on dirty tree rejection");
+    assert.ok(!threw, "#2151: dirty tree no longer rejects — stash handles it");
   });
 
   test("throw on unanchored code changes after empty commit (#1792)", () => {
