@@ -158,6 +158,29 @@ PRs go through automated review first, then human review. To help us review effi
 - Respond to review comments. If you disagree, explain why — discussion is welcome.
 - If your PR has been open for a while without review, ping in Discord. We're a small team and things slip.
 
+### What reviewers verify
+
+Reading a diff is not the same as verifying a change. Our review standard is execution-based, not static-analysis-based.
+
+**What reviewers do:**
+
+1. **Build the branch** — run `npm run build` on the PR branch. A diff that doesn't compile is not reviewable.
+2. **Run the test suite** — run `npm test` on the PR branch. CI status is a signal, not a substitute for local verification.
+3. **Trace root cause for bug fixes** — confirm the diff addresses the root cause described in the issue, not just the symptom.
+4. **Check for a regression test** — bug fixes must include a test that would have caught the original bug. If it's absent, the fix is incomplete.
+
+**What "looks right" means:**
+
+"Looks right" is the starting point for review, not the conclusion. "The tests pass" only means the tests pass — not that the claimed bug is fixed or the feature works as described. A well-written commit message on a broken change is still a broken change.
+
+### What contributors must provide to unblock review
+
+- **Bug fixes** — include a regression test. A fix without a test is an assertion, not a proof.
+- **Features** — include tests covering the primary success path and at least one failure path.
+- **Behavior changes** — update or replace any existing tests that cover the changed behavior. Don't leave passing-but-wrong tests in place.
+
+If your PR claims to fix issue #N, reviewers will verify the fix addresses the root cause described in #N — not just that CI is green.
+
 ## Local development
 
 ```bash
