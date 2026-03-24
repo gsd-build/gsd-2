@@ -15,7 +15,7 @@
  *   4. remove()  — git worktree remove + branch cleanup
  */
 
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { GSDError, GSD_PARSE_ERROR, GSD_STALE_STATE, GSD_LOCK_HELD, GSD_GIT_ERROR, GSD_MERGE_CONFLICT } from "./errors.js";
 import {
@@ -183,6 +183,21 @@ export function createWorktree(basePath: string, name: string, opts: { branch?: 
     }
   } else {
     nativeWorktreeAdd(basePath, wtPath, branch, true, startPoint);
+  }
+
+  // Symlink node_modules from the project root into the worktree (#2378).
+  // Git worktrees don't include gitignored directories, so node_modules is
+  // missing — causing UAT commands and dev servers to fail. A symlink lets
+  // the worktree share the project root's installed dependencies.
+  const srcNodeModules = join(basePath, "node_modules");
+  const dstNodeModules = join(wtPath, "node_modules");
+  if (existsSync(srcNodeModules) && !existsSync(dstNodeModules)) {
+    try {
+      symlinkSync(srcNodeModules, dstNodeModules, "junction");
+    } catch {
+      // Non-fatal — the worktree is still usable, just without node_modules.
+      // The user can run `npm install` manually or configure a post-create hook.
+    }
   }
 
   return {
