@@ -45,52 +45,56 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 	});
 
 	// Always subscribe to enable session persistence via _handleAgentEvent
-	session.subscribe((event) => {
+	const unsubscribe = session.subscribe((event) => {
 		// In JSON mode, output all events
 		if (mode === "json") {
 			console.log(JSON.stringify(event));
 		}
 	});
 
-	// Send initial message with attachments
-	if (initialMessage) {
-		await session.prompt(initialMessage, { images: initialImages });
-	}
+	try {
+		// Send initial message with attachments
+		if (initialMessage) {
+			await session.prompt(initialMessage, { images: initialImages });
+		}
 
-	// Send remaining messages
-	for (const message of messages) {
-		await session.prompt(message);
-	}
+		// Send remaining messages
+		for (const message of messages) {
+			await session.prompt(message);
+		}
 
-	// In text mode, output final response
-	if (mode === "text") {
-		const state = session.state;
-		const lastMessage = state.messages[state.messages.length - 1];
+		// In text mode, output final response
+		if (mode === "text") {
+			const state = session.state;
+			const lastMessage = state.messages[state.messages.length - 1];
 
-		if (lastMessage?.role === "assistant") {
-			const assistantMsg = lastMessage as AssistantMessage;
+			if (lastMessage?.role === "assistant") {
+				const assistantMsg = lastMessage as AssistantMessage;
 
-			// Check for error/aborted
-			if (assistantMsg.stopReason === "error" || assistantMsg.stopReason === "aborted") {
-				console.error(assistantMsg.errorMessage || `Request ${assistantMsg.stopReason}`);
-				process.exit(1);
-			}
+				// Check for error/aborted
+				if (assistantMsg.stopReason === "error" || assistantMsg.stopReason === "aborted") {
+					console.error(assistantMsg.errorMessage || `Request ${assistantMsg.stopReason}`);
+					process.exit(1);
+				}
 
-			// Output text content
-			for (const content of assistantMsg.content) {
-				if (content.type === "text") {
-					console.log(content.text);
+				// Output text content
+				for (const content of assistantMsg.content) {
+					if (content.type === "text") {
+						console.log(content.text);
+					}
 				}
 			}
 		}
-	}
 
-	// Ensure stdout is fully flushed before returning
-	// This prevents race conditions where the process exits before all output is written
-	await new Promise<void>((resolve, reject) => {
-		process.stdout.write("", (err) => {
-			if (err) reject(err);
-			else resolve();
+		// Ensure stdout is fully flushed before returning
+		// This prevents race conditions where the process exits before all output is written
+		await new Promise<void>((resolve, reject) => {
+			process.stdout.write("", (err) => {
+				if (err) reject(err);
+				else resolve();
+			});
 		});
-	});
+	} finally {
+		unsubscribe();
+	}
 }
