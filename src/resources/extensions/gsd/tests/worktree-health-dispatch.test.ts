@@ -138,9 +138,7 @@ describe("health check without git repo", () => {
   test("health check fails for directory with no .git", () => {
     writeFileSync(join(dir, "Cargo.toml"), "[package]\nname = \"test\"\n");
     assert.ok(!wouldPassHealthCheck(dir, existsSync), "no-git directory should fail health check");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  });
 });
 
 // ─── C# / .NET ecosystem (#2106) ─────────────────────────────────────────────
