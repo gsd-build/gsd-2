@@ -343,6 +343,9 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
     service_tier: override.service_tier ?? base.service_tier,
     forensics_dedup: override.forensics_dedup ?? base.forensics_dedup,
     show_token_cost: override.show_token_cost ?? base.show_token_cost,
+    slice_parallel: (base.slice_parallel || override.slice_parallel)
+      ? { ...(base.slice_parallel ?? {}), ...(override.slice_parallel ?? {}) }
+      : undefined,
   };
 }
 
