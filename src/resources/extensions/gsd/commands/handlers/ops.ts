@@ -201,5 +201,10 @@ Examples:
     await handleExtensions(trimmed.replace(/^extensions\s*/, "").trim(), ctx);
     return true;
   }
+  if (trimmed === "rethink") {
+    const { handleRethink } = await import("../../rethink.js");
+    await handleRethink(trimmed, ctx, pi);
+    return true;
+  }
   return false;
 }
