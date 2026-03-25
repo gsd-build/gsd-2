@@ -145,7 +145,7 @@ function openRawDb(path: string): unknown {
   return new Database(path);
 }
 
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 
 function initSchema(db: DbAdapter, fileBacked: boolean): void {
   if (fileBacked) db.exec("PRAGMA journal_mode=WAL");
@@ -612,6 +612,23 @@ function migrateSchema(db: DbAdapter): void {
 
       db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
         ":version": 10,
+        ":applied_at": new Date().toISOString(),
+      });
+    }
+
+    if (currentVersion < 11) {
+      // Add unique constraint to replan_history for idempotency:
+      // one replan record per blocker task per slice per milestone.
+      // SQLite can't add a UNIQUE constraint to an existing table via ALTER TABLE,
+      // so we create a unique index instead (equivalent for INSERT OR REPLACE behavior).
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_replan_history_unique
+        ON replan_history(milestone_id, slice_id, task_id)
+        WHERE slice_id IS NOT NULL AND task_id IS NOT NULL
+      `);
+
+      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
+        ":version": 11,
         ":applied_at": new Date().toISOString(),
       });
     }
@@ -1587,8 +1604,10 @@ export function insertReplanHistory(entry: {
   replacementArtifactPath?: string | null;
 }): void {
   if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  // INSERT OR REPLACE: idempotent on (milestone_id, slice_id, task_id) via schema v11 unique index.
+  // Retrying the same replan silently updates summary instead of accumulating duplicate rows.
   currentDb.prepare(
-    `INSERT INTO replan_history (milestone_id, slice_id, task_id, summary, previous_artifact_path, replacement_artifact_path, created_at)
+    `INSERT OR REPLACE INTO replan_history (milestone_id, slice_id, task_id, summary, previous_artifact_path, replacement_artifact_path, created_at)
      VALUES (:milestone_id, :slice_id, :task_id, :summary, :previous_artifact_path, :replacement_artifact_path, :created_at)`,
   ).run({
     ":milestone_id": entry.milestoneId,

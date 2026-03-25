@@ -127,7 +127,7 @@ console.log('\n=== complete-slice: schema v6 migration ===');
 
   // Verify schema version is current (v10 after M001 planning migrations)
   const versionRow = adapter.prepare('SELECT MAX(version) as v FROM schema_version').get();
-  assertEq(versionRow?.['v'], 10, 'schema version should be 10');
+  assertEq(versionRow?.['v'], 11, 'schema version should be 11');
 
   // Verify slices table has full_summary_md and full_uat_md columns
   const cols = adapter.prepare("PRAGMA table_info(slices)").all();
@@ -188,9 +188,10 @@ console.log('\n=== complete-slice: handler happy path ===');
 
   const { basePath, roadmapPath } = createTempProject();
 
-  // Set up DB state: milestone, slice, 2 complete tasks
+  // Set up DB state: milestone, slices (S01 + S02), 2 complete tasks
   insertMilestone({ id: 'M001' });
   insertSlice({ id: 'S01', milestoneId: 'M001' });
+  insertSlice({ id: 'S02', milestoneId: 'M001', title: 'Second Slice' });
   insertTask({ id: 'T01', sliceId: 'S01', milestoneId: 'M001', status: 'complete', title: 'Task 1' });
   insertTask({ id: 'T02', sliceId: 'S01', milestoneId: 'M001', status: 'complete', title: 'Task 2' });
 
@@ -230,10 +231,13 @@ console.log('\n=== complete-slice: handler happy path ===');
     assertMatch(uatContent, /Milestone:\*\* M001/, 'UAT should reference milestone');
     assertMatch(uatContent, /Smoke Test/, 'UAT should contain smoke test from params');
 
-    // (c) Verify roadmap checkbox toggled to [x]
+    // (c) Verify roadmap shows S01 complete (✅) and S02 pending (⬜) in table format
+    // Projection renders roadmap as a Slice Overview table, not checkbox list
     const roadmapContent = fs.readFileSync(roadmapPath, 'utf-8');
-    assertMatch(roadmapContent, /\[x\]\s+\*\*S01:/, 'S01 should be checked in roadmap');
-    assertMatch(roadmapContent, /\[ \]\s+\*\*S02:/, 'S02 should still be unchecked in roadmap');
+    assertMatch(roadmapContent, /\| S01 \|/, 'S01 should appear in roadmap table');
+    assertTrue(roadmapContent.includes('✅'), 'completed S01 should show ✅ in roadmap table');
+    assertMatch(roadmapContent, /\| S02 \|/, 'S02 should appear in roadmap table');
+    assertTrue(roadmapContent.includes('⬜'), 'pending S02 should show ⬜ in roadmap table');
 
     // (d) Verify full_summary_md and full_uat_md stored in DB for D004 recovery
     const sliceAfter = getSlice('M001', 'S01');
@@ -353,20 +357,17 @@ console.log('\n=== complete-slice: handler idempotency ===');
   const r1 = await handleCompleteSlice(params, basePath);
   assertTrue(!('error' in r1), 'first call should succeed');
 
-  // Second call with same params — should not crash
+  // Second call — state machine guard rejects (slice is already complete)
   const r2 = await handleCompleteSlice(params, basePath);
-  assertTrue(!('error' in r2), 'second call should succeed (idempotent)');
+  assertTrue('error' in r2, 'second call should return error (slice already complete)');
+  if ('error' in r2) {
+    assertMatch(r2.error, /already complete/, 'error should mention already complete');
+  }
 
   // Verify only 1 slice row (not duplicated)
   const adapter = _getAdapter()!;
   const sliceRows = adapter.prepare("SELECT * FROM slices WHERE milestone_id = 'M001' AND id = 'S01'").all();
-  assertEq(sliceRows.length, 1, 'should have exactly 1 slice row after 2 calls');
-
-  // Files should still exist
-  if (!('error' in r2)) {
-    assertTrue(fs.existsSync(r2.summaryPath), 'summary should still exist after second call');
-    assertTrue(fs.existsSync(r2.uatPath), 'UAT should still exist after second call');
-  }
+  assertEq(sliceRows.length, 1, 'should have exactly 1 slice row after calls');
 
   cleanupDir(basePath);
   cleanup(dbPath);

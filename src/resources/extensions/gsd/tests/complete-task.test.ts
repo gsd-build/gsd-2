@@ -109,9 +109,9 @@ console.log('\n=== complete-task: schema v5 migration ===');
 
   const adapter = _getAdapter()!;
 
-  // Verify schema version is current (v10 after M001 planning migrations)
+  // Verify schema version is current (v11 after state machine migration)
   const versionRow = adapter.prepare('SELECT MAX(version) as v FROM schema_version').get();
-  assertEq(versionRow?.['v'], 10, 'schema version should be 10');
+  assertEq(versionRow?.['v'], 11, 'schema version should be 11');
 
   // Verify all 4 new tables exist
   const tables = adapter.prepare(
@@ -283,6 +283,11 @@ console.log('\n=== complete-task: handler happy path ===');
 
   const { basePath, planPath } = createTempProject();
 
+  // Seed milestone + slice + both tasks so projection renders T01 ([x]) and T02 ([ ])
+  insertMilestone({ id: 'M001', title: 'Test Milestone' });
+  insertSlice({ id: 'S01', milestoneId: 'M001', title: 'Test Slice' });
+  insertTask({ id: 'T02', sliceId: 'S01', milestoneId: 'M001', status: 'pending', title: 'Second task' });
+
   const params = makeValidParams();
   const result = await handleCompleteTask(params, basePath);
 
@@ -384,24 +389,30 @@ console.log('\n=== complete-task: handler idempotency ===');
 
   const { basePath, planPath } = createTempProject();
 
+  // Seed milestone + slice so state machine guards pass
+  insertMilestone({ id: 'M001', title: 'Test Milestone' });
+  insertSlice({ id: 'S01', milestoneId: 'M001', title: 'Test Slice' });
+
   const params = makeValidParams();
 
-  // First call
+  // First call should succeed
   const r1 = await handleCompleteTask(params, basePath);
   assertTrue(!('error' in r1), 'first call should succeed');
 
-  // Second call with same params — should not crash (INSERT OR REPLACE)
-  const r2 = await handleCompleteTask(params, basePath);
-  assertTrue(!('error' in r2), 'second call should succeed (idempotent)');
-
-  // Verify only 1 task row (upserted, not duplicated)
+  // Verify only 1 task row
   const tasks = getSliceTasks('M001', 'S01');
-  assertEq(tasks.length, 1, 'should have exactly 1 task row after 2 calls (upsert)');
+  assertEq(tasks.length, 1, 'should have exactly 1 task row after first call');
 
-  // File should still exist
-  if (!('error' in r2)) {
-    assertTrue(fs.existsSync(r2.summaryPath), 'summary should still exist after second call');
+  // Second call with same params — state machine guard rejects (task is already complete)
+  const r2 = await handleCompleteTask(params, basePath);
+  assertTrue('error' in r2, 'second call should return error (task already complete)');
+  if ('error' in r2) {
+    assertMatch(r2.error, /already complete/, 'error should mention already complete');
   }
+
+  // Still only 1 task row (no duplication from rejected second call)
+  const tasksAfter = getSliceTasks('M001', 'S01');
+  assertEq(tasksAfter.length, 1, 'should still have exactly 1 task row after rejected second call');
 
   cleanupDir(basePath);
   cleanup(dbPath);
@@ -420,6 +431,10 @@ console.log('\n=== complete-task: handler with missing plan file ===');
   const basePath = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-no-plan-'));
   const tasksDir = path.join(basePath, '.gsd', 'milestones', 'M001', 'slices', 'S01', 'tasks');
   fs.mkdirSync(tasksDir, { recursive: true });
+
+  // Seed milestone + slice so state machine guards pass
+  insertMilestone({ id: 'M001', title: 'Test Milestone' });
+  insertSlice({ id: 'S01', milestoneId: 'M001', title: 'Test Slice' });
 
   const params = makeValidParams();
   const result = await handleCompleteTask(params, basePath);
