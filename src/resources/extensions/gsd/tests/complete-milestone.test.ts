@@ -115,6 +115,102 @@ describe("complete-milestone", () => {
     assert.ok(prompt.includes("Milestone M002 complete"), "prompt contains completion sentinel for M002");
   });
 
+  test("prompt contains verification gate that blocks completion on failure", () => {
+    const prompt = loadPromptFromWorktree("complete-milestone", {
+      workingDirectory: "/tmp/test-project",
+      milestoneId: "M001",
+      milestoneTitle: "Gate Test",
+      roadmapPath: ".gsd/milestones/M001/M001-ROADMAP.md",
+      inlinedContext: "context",
+    });
+
+    // Verification gate section must exist
+    assert.ok(
+      prompt.includes("Verification Gate"),
+      "prompt contains 'Verification Gate' section",
+    );
+
+    // Failure path must block gsd_complete_milestone
+    assert.ok(
+      prompt.includes("Do NOT call `gsd_complete_milestone`"),
+      "failure path explicitly blocks calling the completion tool",
+    );
+
+    // Failure path must have its own sentinel distinct from success
+    assert.ok(
+      prompt.includes("verification FAILED"),
+      "failure path outputs a FAILED sentinel",
+    );
+
+    // verificationPassed parameter must be referenced
+    assert.ok(
+      prompt.includes("verificationPassed"),
+      "prompt references verificationPassed parameter",
+    );
+  });
+
+  test("handleCompleteMilestone rejects when verificationPassed is false", async () => {
+    const { handleCompleteMilestone } = await import("../tools/complete-milestone.ts");
+    const base = createFixtureBase();
+    try {
+      const result = await handleCompleteMilestone({
+        milestoneId: "M001",
+        title: "Test Milestone",
+        oneLiner: "Test",
+        narrative: "Test narrative",
+        successCriteriaResults: "None met",
+        definitionOfDoneResults: "Incomplete",
+        requirementOutcomes: "None validated",
+        keyDecisions: [],
+        keyFiles: [],
+        lessonsLearned: [],
+        followUps: "",
+        deviations: "",
+        verificationPassed: false,
+      }, base);
+
+      assert.ok("error" in result, "returns error when verificationPassed is false");
+      assert.ok(
+        (result as { error: string }).error.includes("verification did not pass"),
+        "error message mentions verification did not pass",
+      );
+    } finally {
+      cleanup(base);
+    }
+  });
+
+  test("handleCompleteMilestone rejects when verificationPassed is omitted", async () => {
+    const { handleCompleteMilestone } = await import("../tools/complete-milestone.ts");
+    const base = createFixtureBase();
+    try {
+      // Simulate omitted verificationPassed (undefined coerced via any)
+      const params: any = {
+        milestoneId: "M001",
+        title: "Test Milestone",
+        oneLiner: "Test",
+        narrative: "Test narrative",
+        successCriteriaResults: "Results",
+        definitionOfDoneResults: "Done results",
+        requirementOutcomes: "Outcomes",
+        keyDecisions: [],
+        keyFiles: [],
+        lessonsLearned: [],
+        followUps: "",
+        deviations: "",
+        // verificationPassed intentionally omitted
+      };
+      const result = await handleCompleteMilestone(params, base);
+
+      assert.ok("error" in result, "returns error when verificationPassed is omitted");
+      assert.ok(
+        (result as { error: string }).error.includes("verification did not pass"),
+        "error message mentions verification did not pass",
+      );
+    } finally {
+      cleanup(base);
+    }
+  });
+
   test("diagnoseExpectedArtifact logic for complete-milestone", async () => {
     // Import the path helpers used by diagnoseExpectedArtifact
     const { relMilestoneFile } = await import("../paths.ts");

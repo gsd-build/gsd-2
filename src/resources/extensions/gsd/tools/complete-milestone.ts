@@ -31,6 +31,7 @@ export interface CompleteMilestoneParams {
   lessonsLearned: string[];
   followUps: string;
   deviations: string;
+  verificationPassed: boolean;
 }
 
 export interface CompleteMilestoneResult {
@@ -106,6 +107,11 @@ export async function handleCompleteMilestone(
   }
   if (!params.title || typeof params.title !== "string" || params.title.trim() === "") {
     return { error: "title is required and must be a non-empty string" };
+  }
+
+  // ── Verify that verification passed ─────────────────────────────────────
+  if (params.verificationPassed !== true) {
+    return { error: "verification did not pass — milestone completion blocked. verificationPassed must be explicitly set to true after all verification steps succeed" };
   }
 
   // ── Verify all slices are complete ───────────────────────────────────────

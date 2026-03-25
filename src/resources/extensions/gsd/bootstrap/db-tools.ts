@@ -853,6 +853,7 @@ export function registerDbTools(pi: ExtensionAPI): void {
     promptGuidelines: [
       "Use gsd_complete_milestone when all slices in a milestone are finished and the milestone needs to be recorded.",
       "All slices in the milestone must have status 'complete' — the handler validates this before proceeding.",
+      "verificationPassed must be explicitly set to true — the handler rejects completion if verification did not pass.",
       "On success, returns summaryPath where the MILESTONE-SUMMARY.md was written.",
     ],
     parameters: Type.Object({
@@ -868,6 +869,7 @@ export function registerDbTools(pi: ExtensionAPI): void {
       lessonsLearned: Type.Array(Type.String(), { description: "Lessons learned during the milestone" }),
       followUps: Type.Optional(Type.String({ description: "Follow-up items for future milestones" })),
       deviations: Type.Optional(Type.String({ description: "Deviations from the original plan" })),
+      verificationPassed: Type.Boolean({ description: "Must be true — confirms that code change verification, success criteria, and definition of done checks all passed before completion" }),
     }),
     execute: milestoneCompleteExecute,
   };
