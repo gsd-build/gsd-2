@@ -610,14 +610,48 @@ export async function stopAuto(
     }
 
     // ── Step 4: Auto-worktree exit ──
+    // When the milestone is complete (has a SUMMARY), merge the worktree branch
+    // back to main so code isn't stranded on the worktree branch (#2317).
+    // For incomplete milestones, preserve the branch for later resumption.
     try {
       if (s.currentMilestoneId) {
         const notifyCtx = ctx
           ? { notify: ctx.ui.notify.bind(ctx.ui) }
           : { notify: () => {} };
-        buildResolver().exitMilestone(s.currentMilestoneId, notifyCtx, {
-          preserveBranch: true,
-        });
+        const resolver = buildResolver();
+
+        // Check if the milestone is complete — SUMMARY file is the authoritative signal.
+        let milestoneComplete = false;
+        try {
+          const summaryPath = resolveMilestoneFile(
+            s.originalBasePath || s.basePath,
+            s.currentMilestoneId,
+            "SUMMARY",
+          );
+          if (!summaryPath) {
+            // Also check in the worktree path (SUMMARY may not be synced yet)
+            const wtSummaryPath = resolveMilestoneFile(
+              s.basePath,
+              s.currentMilestoneId,
+              "SUMMARY",
+            );
+            milestoneComplete = wtSummaryPath !== null;
+          } else {
+            milestoneComplete = true;
+          }
+        } catch {
+          // Non-fatal — fall through to preserveBranch path
+        }
+
+        if (milestoneComplete) {
+          // Milestone is complete — merge worktree branch back to main
+          resolver.mergeAndExit(s.currentMilestoneId, notifyCtx);
+        } else {
+          // Milestone still in progress — preserve branch for later resumption
+          resolver.exitMilestone(s.currentMilestoneId, notifyCtx, {
+            preserveBranch: true,
+          });
+        }
       }
     } catch (e) {
       debugLog("stop-cleanup-worktree", { error: e instanceof Error ? e.message : String(e) });
