@@ -27,7 +27,7 @@ console.log("\n=== #2330: Merge conflict stops auto loop ===");
 const methodStart = resolverSrc.indexOf("Worktree-mode merge:");
 assertTrue(methodStart > 0, "worktree-resolver has _mergeWorktreeMode method");
 
-const methodBody = resolverSrc.slice(methodStart, methodStart + 5000);
+const methodBody = resolverSrc.slice(methodStart, methodStart + 6000);
 const rethrowsConflict =
   methodBody.includes("MergeConflictError") &&
   methodBody.includes("throw err");
