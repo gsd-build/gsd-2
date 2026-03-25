@@ -1,3 +1,5 @@
+import { describe, test } from 'node:test';
+import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -12,10 +14,6 @@ import {
   insertSlice,
   insertTask,
 } from '../gsd-db.ts';
-import { createTestContext } from './test-helpers.ts';
-
-const { assertEq, assertTrue, report } = createTestContext();
-
 // ─── Fixture Helpers ───────────────────────────────────────────────────────
 
 function createFixtureBase(): string {
@@ -100,11 +98,10 @@ const REQUIREMENTS_CONTENT = `# Requirements
 - Description: Already validated.
 `;
 
-async function main(): Promise<void> {
+describe('derive-state-db', async () => {
 
   // ─── Test 1: DB-backed deriveState produces identical GSDState ─────────
-  console.log('\n=== derive-state-db: DB path matches file path ===');
-  {
+  test('derive-state-db: DB path matches file path', async () => {
     const base = createFixtureBase();
     try {
       // Write files to disk (for file-only path)
@@ -120,7 +117,7 @@ async function main(): Promise<void> {
 
       // Now open DB, insert matching artifacts
       openDatabase(':memory:');
-      assertTrue(isDbAvailable(), 'db-match: DB is available after open');
+      assert.ok(isDbAvailable(), 'db-match: DB is available after open');
 
       insertArtifactRow('milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT, {
         artifact_type: 'roadmap',
@@ -140,36 +137,35 @@ async function main(): Promise<void> {
       const dbState = await deriveState(base);
 
       // Field-by-field equality
-      assertEq(dbState.phase, fileState.phase, 'db-match: phase matches');
-      assertEq(dbState.activeMilestone?.id, fileState.activeMilestone?.id, 'db-match: activeMilestone.id matches');
-      assertEq(dbState.activeMilestone?.title, fileState.activeMilestone?.title, 'db-match: activeMilestone.title matches');
-      assertEq(dbState.activeSlice?.id, fileState.activeSlice?.id, 'db-match: activeSlice.id matches');
-      assertEq(dbState.activeSlice?.title, fileState.activeSlice?.title, 'db-match: activeSlice.title matches');
-      assertEq(dbState.activeTask?.id, fileState.activeTask?.id, 'db-match: activeTask.id matches');
-      assertEq(dbState.activeTask?.title, fileState.activeTask?.title, 'db-match: activeTask.title matches');
-      assertEq(dbState.blockers, fileState.blockers, 'db-match: blockers match');
-      assertEq(dbState.registry.length, fileState.registry.length, 'db-match: registry length matches');
-      assertEq(dbState.registry[0]?.status, fileState.registry[0]?.status, 'db-match: registry[0] status matches');
-      assertEq(dbState.requirements?.active, fileState.requirements?.active, 'db-match: requirements.active matches');
-      assertEq(dbState.requirements?.validated, fileState.requirements?.validated, 'db-match: requirements.validated matches');
-      assertEq(dbState.requirements?.total, fileState.requirements?.total, 'db-match: requirements.total matches');
-      assertEq(dbState.progress?.milestones?.done, fileState.progress?.milestones?.done, 'db-match: milestones.done matches');
-      assertEq(dbState.progress?.milestones?.total, fileState.progress?.milestones?.total, 'db-match: milestones.total matches');
-      assertEq(dbState.progress?.slices?.done, fileState.progress?.slices?.done, 'db-match: slices.done matches');
-      assertEq(dbState.progress?.slices?.total, fileState.progress?.slices?.total, 'db-match: slices.total matches');
-      assertEq(dbState.progress?.tasks?.done, fileState.progress?.tasks?.done, 'db-match: tasks.done matches');
-      assertEq(dbState.progress?.tasks?.total, fileState.progress?.tasks?.total, 'db-match: tasks.total matches');
+      assert.deepStrictEqual(dbState.phase, fileState.phase, 'db-match: phase matches');
+      assert.deepStrictEqual(dbState.activeMilestone?.id, fileState.activeMilestone?.id, 'db-match: activeMilestone.id matches');
+      assert.deepStrictEqual(dbState.activeMilestone?.title, fileState.activeMilestone?.title, 'db-match: activeMilestone.title matches');
+      assert.deepStrictEqual(dbState.activeSlice?.id, fileState.activeSlice?.id, 'db-match: activeSlice.id matches');
+      assert.deepStrictEqual(dbState.activeSlice?.title, fileState.activeSlice?.title, 'db-match: activeSlice.title matches');
+      assert.deepStrictEqual(dbState.activeTask?.id, fileState.activeTask?.id, 'db-match: activeTask.id matches');
+      assert.deepStrictEqual(dbState.activeTask?.title, fileState.activeTask?.title, 'db-match: activeTask.title matches');
+      assert.deepStrictEqual(dbState.blockers, fileState.blockers, 'db-match: blockers match');
+      assert.deepStrictEqual(dbState.registry.length, fileState.registry.length, 'db-match: registry length matches');
+      assert.deepStrictEqual(dbState.registry[0]?.status, fileState.registry[0]?.status, 'db-match: registry[0] status matches');
+      assert.deepStrictEqual(dbState.requirements?.active, fileState.requirements?.active, 'db-match: requirements.active matches');
+      assert.deepStrictEqual(dbState.requirements?.validated, fileState.requirements?.validated, 'db-match: requirements.validated matches');
+      assert.deepStrictEqual(dbState.requirements?.total, fileState.requirements?.total, 'db-match: requirements.total matches');
+      assert.deepStrictEqual(dbState.progress?.milestones?.done, fileState.progress?.milestones?.done, 'db-match: milestones.done matches');
+      assert.deepStrictEqual(dbState.progress?.milestones?.total, fileState.progress?.milestones?.total, 'db-match: milestones.total matches');
+      assert.deepStrictEqual(dbState.progress?.slices?.done, fileState.progress?.slices?.done, 'db-match: slices.done matches');
+      assert.deepStrictEqual(dbState.progress?.slices?.total, fileState.progress?.slices?.total, 'db-match: slices.total matches');
+      assert.deepStrictEqual(dbState.progress?.tasks?.done, fileState.progress?.tasks?.done, 'db-match: tasks.done matches');
+      assert.deepStrictEqual(dbState.progress?.tasks?.total, fileState.progress?.tasks?.total, 'db-match: tasks.total matches');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 2: Fallback when DB unavailable ─────────────────────────────
-  console.log('\n=== derive-state-db: fallback when DB unavailable ===');
-  {
+  test('derive-state-db: fallback when DB unavailable', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
@@ -178,22 +174,21 @@ async function main(): Promise<void> {
       writeFile(base, 'milestones/M001/slices/S01/tasks/T01-PLAN.md', '# T01 Plan');
 
       // No DB open — isDbAvailable() is false
-      assertTrue(!isDbAvailable(), 'fallback: DB is not available');
+      assert.ok(!isDbAvailable(), 'fallback: DB is not available');
       invalidateStateCache();
       const state = await deriveState(base);
 
-      assertEq(state.phase, 'executing', 'fallback: phase is executing');
-      assertEq(state.activeMilestone?.id, 'M001', 'fallback: activeMilestone is M001');
-      assertEq(state.activeSlice?.id, 'S01', 'fallback: activeSlice is S01');
-      assertEq(state.activeTask?.id, 'T01', 'fallback: activeTask is T01');
+      assert.deepStrictEqual(state.phase, 'executing', 'fallback: phase is executing');
+      assert.deepStrictEqual(state.activeMilestone?.id, 'M001', 'fallback: activeMilestone is M001');
+      assert.deepStrictEqual(state.activeSlice?.id, 'S01', 'fallback: activeSlice is S01');
+      assert.deepStrictEqual(state.activeTask?.id, 'T01', 'fallback: activeTask is T01');
     } finally {
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 3: Empty DB falls back to file reads ────────────────────────
-  console.log('\n=== derive-state-db: empty DB falls back to files ===');
-  {
+  test('derive-state-db: empty DB falls back to files', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
@@ -203,27 +198,26 @@ async function main(): Promise<void> {
 
       // Open DB but insert nothing — empty artifacts table
       openDatabase(':memory:');
-      assertTrue(isDbAvailable(), 'empty-db: DB is available');
+      assert.ok(isDbAvailable(), 'empty-db: DB is available');
 
       invalidateStateCache();
       const state = await deriveState(base);
 
       // Should still work via cachedLoadFile → loadFile disk fallback
-      assertEq(state.phase, 'executing', 'empty-db: phase is executing');
-      assertEq(state.activeMilestone?.id, 'M001', 'empty-db: activeMilestone is M001');
-      assertEq(state.activeSlice?.id, 'S01', 'empty-db: activeSlice is S01');
-      assertEq(state.activeTask?.id, 'T01', 'empty-db: activeTask is T01');
+      assert.deepStrictEqual(state.phase, 'executing', 'empty-db: phase is executing');
+      assert.deepStrictEqual(state.activeMilestone?.id, 'M001', 'empty-db: activeMilestone is M001');
+      assert.deepStrictEqual(state.activeSlice?.id, 'S01', 'empty-db: activeSlice is S01');
+      assert.deepStrictEqual(state.activeTask?.id, 'T01', 'empty-db: activeTask is T01');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 4: Partial DB content fills gaps from disk ──────────────────
-  console.log('\n=== derive-state-db: partial DB fills gaps from disk ===');
-  {
+  test('derive-state-db: partial DB fills gaps from disk', async () => {
     const base = createFixtureBase();
     try {
       // Write all files to disk
@@ -244,25 +238,24 @@ async function main(): Promise<void> {
       const state = await deriveState(base);
 
       // Should work: roadmap from DB, plan from disk fallback
-      assertEq(state.phase, 'executing', 'partial-db: phase is executing');
-      assertEq(state.activeMilestone?.id, 'M001', 'partial-db: activeMilestone is M001');
-      assertEq(state.activeSlice?.id, 'S01', 'partial-db: activeSlice is S01');
-      assertEq(state.activeTask?.id, 'T01', 'partial-db: activeTask is T01');
+      assert.deepStrictEqual(state.phase, 'executing', 'partial-db: phase is executing');
+      assert.deepStrictEqual(state.activeMilestone?.id, 'M001', 'partial-db: activeMilestone is M001');
+      assert.deepStrictEqual(state.activeSlice?.id, 'S01', 'partial-db: activeSlice is S01');
+      assert.deepStrictEqual(state.activeTask?.id, 'T01', 'partial-db: activeTask is T01');
       // Requirements loaded from disk fallback
-      assertEq(state.requirements?.active, 2, 'partial-db: requirements.active from disk');
-      assertEq(state.requirements?.validated, 1, 'partial-db: requirements.validated from disk');
-      assertEq(state.requirements?.total, 3, 'partial-db: requirements.total from disk');
+      assert.deepStrictEqual(state.requirements?.active, 2, 'partial-db: requirements.active from disk');
+      assert.deepStrictEqual(state.requirements?.validated, 1, 'partial-db: requirements.validated from disk');
+      assert.deepStrictEqual(state.requirements?.total, 3, 'partial-db: requirements.total from disk');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 5: Requirements counting from disk (DB no longer used for content) ─
-  console.log('\n=== derive-state-db: requirements from disk content ===');
-  {
+  test('derive-state-db: requirements from disk content', async () => {
     const base = createFixtureBase();
     try {
       // Write minimal milestone dir (needed for milestone discovery)
@@ -274,17 +267,16 @@ async function main(): Promise<void> {
       const state = await deriveState(base);
 
       // Requirements should come from disk
-      assertEq(state.requirements?.active, 2, 'req-from-disk: requirements.active = 2');
-      assertEq(state.requirements?.validated, 1, 'req-from-disk: requirements.validated = 1');
-      assertEq(state.requirements?.total, 3, 'req-from-disk: requirements.total = 3');
+      assert.deepStrictEqual(state.requirements?.active, 2, 'req-from-disk: requirements.active = 2');
+      assert.deepStrictEqual(state.requirements?.validated, 1, 'req-from-disk: requirements.validated = 1');
+      assert.deepStrictEqual(state.requirements?.total, 3, 'req-from-disk: requirements.total = 3');
     } finally {
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 6: DB content with multi-milestone registry ─────────────────
-  console.log('\n=== derive-state-db: multi-milestone from DB ===');
-  {
+  test('derive-state-db: multi-milestone from DB', async () => {
     const base = createFixtureBase();
 
     const completedRoadmap = `# M001: First Milestone
@@ -337,24 +329,23 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const state = await deriveState(base);
 
-      assertEq(state.registry.length, 2, 'multi-ms-db: registry has 2 entries');
-      assertEq(state.registry[0]?.id, 'M001', 'multi-ms-db: registry[0] is M001');
-      assertEq(state.registry[0]?.status, 'complete', 'multi-ms-db: M001 is complete');
-      assertEq(state.registry[1]?.id, 'M002', 'multi-ms-db: registry[1] is M002');
-      assertEq(state.registry[1]?.status, 'active', 'multi-ms-db: M002 is active');
-      assertEq(state.activeMilestone?.id, 'M002', 'multi-ms-db: activeMilestone is M002');
-      assertEq(state.phase, 'planning', 'multi-ms-db: phase is planning (no plan for S01)');
+      assert.deepStrictEqual(state.registry.length, 2, 'multi-ms-db: registry has 2 entries');
+      assert.deepStrictEqual(state.registry[0]?.id, 'M001', 'multi-ms-db: registry[0] is M001');
+      assert.deepStrictEqual(state.registry[0]?.status, 'complete', 'multi-ms-db: M001 is complete');
+      assert.deepStrictEqual(state.registry[1]?.id, 'M002', 'multi-ms-db: registry[1] is M002');
+      assert.deepStrictEqual(state.registry[1]?.status, 'active', 'multi-ms-db: M002 is active');
+      assert.deepStrictEqual(state.activeMilestone?.id, 'M002', 'multi-ms-db: activeMilestone is M002');
+      assert.deepStrictEqual(state.phase, 'planning', 'multi-ms-db: phase is planning (no plan for S01)');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 7: Cache invalidation works for DB path ─────────────────────
-  console.log('\n=== derive-state-db: cache invalidation ===');
-  {
+  test('derive-state-db: cache invalidation', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
@@ -375,7 +366,7 @@ async function main(): Promise<void> {
 
       invalidateStateCache();
       const state1 = await deriveState(base);
-      assertEq(state1.activeTask?.id, 'T01', 'cache-inv: first call gets T01');
+      assert.deepStrictEqual(state1.activeTask?.id, 'T01', 'cache-inv: first call gets T01');
 
       // Simulate task completion by updating the plan in DB
       const updatedPlan = PLAN_CONTENT.replace('- [ ] **T01:', '- [x] **T01:');
@@ -389,28 +380,27 @@ async function main(): Promise<void> {
 
       // Without invalidation, should return cached result (T01 still active)
       const state2 = await deriveState(base);
-      assertEq(state2.activeTask?.id, 'T01', 'cache-inv: cached result still has T01');
+      assert.deepStrictEqual(state2.activeTask?.id, 'T01', 'cache-inv: cached result still has T01');
 
       // After invalidation, should pick up updated content
       invalidateStateCache();
       const state3 = await deriveState(base);
-      assertEq(state3.phase, 'summarizing', 'cache-inv: after invalidation, phase is summarizing (all tasks done)');
-      assertEq(state3.activeTask, null, 'cache-inv: activeTask is null after all done');
+      assert.deepStrictEqual(state3.phase, 'summarizing', 'cache-inv: after invalidation, phase is summarizing (all tasks done)');
+      assert.deepStrictEqual(state3.activeTask, null, 'cache-inv: activeTask is null after all done');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ═════════════════════════════════════════════════════════════════════════
   // New: deriveStateFromDb() cross-validation tests
   // ═════════════════════════════════════════════════════════════════════════
 
   // ─── Test 8: Pre-planning — milestone exists, no roadmap, no slices ───
-  console.log('\n=== derive-state-db: pre-planning via DB ===');
-  {
+  test('derive-state-db: pre-planning via DB', async () => {
     const base = createFixtureBase();
     try {
       // Create milestone dir on disk with a CONTEXT file (not a ghost)
@@ -427,23 +417,22 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const dbState = await deriveStateFromDb(base);
 
-      assertEq(dbState.phase, fileState.phase, 'pre-plan-db: phase matches');
-      assertEq(dbState.activeMilestone?.id, fileState.activeMilestone?.id, 'pre-plan-db: activeMilestone.id matches');
-      assertEq(dbState.activeSlice, fileState.activeSlice, 'pre-plan-db: activeSlice matches');
-      assertEq(dbState.activeTask, fileState.activeTask, 'pre-plan-db: activeTask matches');
-      assertEq(dbState.registry.length, fileState.registry.length, 'pre-plan-db: registry length matches');
-      assertEq(dbState.registry[0]?.status, fileState.registry[0]?.status, 'pre-plan-db: registry[0] status matches');
+      assert.deepStrictEqual(dbState.phase, fileState.phase, 'pre-plan-db: phase matches');
+      assert.deepStrictEqual(dbState.activeMilestone?.id, fileState.activeMilestone?.id, 'pre-plan-db: activeMilestone.id matches');
+      assert.deepStrictEqual(dbState.activeSlice, fileState.activeSlice, 'pre-plan-db: activeSlice matches');
+      assert.deepStrictEqual(dbState.activeTask, fileState.activeTask, 'pre-plan-db: activeTask matches');
+      assert.deepStrictEqual(dbState.registry.length, fileState.registry.length, 'pre-plan-db: registry length matches');
+      assert.deepStrictEqual(dbState.registry[0]?.status, fileState.registry[0]?.status, 'pre-plan-db: registry[0] status matches');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 9: Executing — active task with partial completion ──────────
-  console.log('\n=== derive-state-db: executing via DB ===');
-  {
+  test('derive-state-db: executing via DB', async () => {
     const base = createFixtureBase();
     try {
       // Build filesystem fixture
@@ -466,24 +455,23 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const dbState = await deriveStateFromDb(base);
 
-      assertEq(dbState.phase, 'executing', 'exec-db: phase is executing');
-      assertEq(dbState.activeMilestone?.id, 'M001', 'exec-db: activeMilestone is M001');
-      assertEq(dbState.activeSlice?.id, 'S01', 'exec-db: activeSlice is S01');
-      assertEq(dbState.activeTask?.id, 'T01', 'exec-db: activeTask is T01');
-      assertEq(dbState.progress?.tasks?.done, 1, 'exec-db: tasks.done = 1');
-      assertEq(dbState.progress?.tasks?.total, 2, 'exec-db: tasks.total = 2');
-      assertEq(dbState.phase, fileState.phase, 'exec-db: phase matches filesystem');
+      assert.deepStrictEqual(dbState.phase, 'executing', 'exec-db: phase is executing');
+      assert.deepStrictEqual(dbState.activeMilestone?.id, 'M001', 'exec-db: activeMilestone is M001');
+      assert.deepStrictEqual(dbState.activeSlice?.id, 'S01', 'exec-db: activeSlice is S01');
+      assert.deepStrictEqual(dbState.activeTask?.id, 'T01', 'exec-db: activeTask is T01');
+      assert.deepStrictEqual(dbState.progress?.tasks?.done, 1, 'exec-db: tasks.done = 1');
+      assert.deepStrictEqual(dbState.progress?.tasks?.total, 2, 'exec-db: tasks.total = 2');
+      assert.deepStrictEqual(dbState.phase, fileState.phase, 'exec-db: phase matches filesystem');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 10: Summarizing — all tasks complete, no slice summary ──────
-  console.log('\n=== derive-state-db: summarizing via DB ===');
-  {
+  test('derive-state-db: summarizing via DB', async () => {
     const base = createFixtureBase();
     try {
       const allDonePlan = `# S01: First Slice
@@ -517,21 +505,20 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const dbState = await deriveStateFromDb(base);
 
-      assertEq(dbState.phase, 'summarizing', 'summarize-db: phase is summarizing');
-      assertEq(dbState.phase, fileState.phase, 'summarize-db: phase matches filesystem');
-      assertEq(dbState.activeSlice?.id, 'S01', 'summarize-db: activeSlice is S01');
-      assertEq(dbState.activeTask, null, 'summarize-db: activeTask is null');
+      assert.deepStrictEqual(dbState.phase, 'summarizing', 'summarize-db: phase is summarizing');
+      assert.deepStrictEqual(dbState.phase, fileState.phase, 'summarize-db: phase matches filesystem');
+      assert.deepStrictEqual(dbState.activeSlice?.id, 'S01', 'summarize-db: activeSlice is S01');
+      assert.deepStrictEqual(dbState.activeTask, null, 'summarize-db: activeTask is null');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 11: Complete — all milestones complete ──────────────────────
-  console.log('\n=== derive-state-db: all complete via DB ===');
-  {
+  test('derive-state-db: all complete via DB', async () => {
     const base = createFixtureBase();
     try {
       const completedRoadmap = `# M001: Done Milestone
@@ -557,21 +544,20 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const dbState = await deriveStateFromDb(base);
 
-      assertEq(dbState.phase, 'complete', 'complete-db: phase is complete');
-      assertEq(dbState.phase, fileState.phase, 'complete-db: phase matches filesystem');
-      assertEq(dbState.registry.length, 1, 'complete-db: registry has 1 entry');
-      assertEq(dbState.registry[0]?.status, 'complete', 'complete-db: M001 is complete');
+      assert.deepStrictEqual(dbState.phase, 'complete', 'complete-db: phase is complete');
+      assert.deepStrictEqual(dbState.phase, fileState.phase, 'complete-db: phase matches filesystem');
+      assert.deepStrictEqual(dbState.registry.length, 1, 'complete-db: registry has 1 entry');
+      assert.deepStrictEqual(dbState.registry[0]?.status, 'complete', 'complete-db: M001 is complete');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 12: Blocked — slice deps unmet ──────────────────────────────
-  console.log('\n=== derive-state-db: blocked slice via DB ===');
-  {
+  test('derive-state-db: blocked slice via DB', async () => {
     const base = createFixtureBase();
     try {
       // Roadmap with S02 depending on S01, but S01 not done
@@ -601,20 +587,19 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const dbState = await deriveStateFromDb(base);
 
-      assertEq(dbState.phase, 'blocked', 'blocked-db: phase is blocked');
-      assertEq(dbState.phase, fileState.phase, 'blocked-db: phase matches filesystem');
-      assertTrue(dbState.blockers.length > 0, 'blocked-db: has blockers');
+      assert.deepStrictEqual(dbState.phase, 'blocked', 'blocked-db: phase is blocked');
+      assert.deepStrictEqual(dbState.phase, fileState.phase, 'blocked-db: phase matches filesystem');
+      assert.ok(dbState.blockers.length > 0, 'blocked-db: has blockers');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 13: Parked milestone ────────────────────────────────────────
-  console.log('\n=== derive-state-db: parked milestone via DB ===');
-  {
+  test('derive-state-db: parked milestone via DB', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
@@ -631,20 +616,19 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const dbState = await deriveStateFromDb(base);
 
-      assertEq(dbState.phase, fileState.phase, 'parked-db: phase matches filesystem');
-      assertEq(dbState.activeMilestone?.id, 'M002', 'parked-db: activeMilestone is M002');
-      assertTrue(dbState.registry.some(e => e.id === 'M001' && e.status === 'parked'), 'parked-db: M001 is parked in registry');
+      assert.deepStrictEqual(dbState.phase, fileState.phase, 'parked-db: phase matches filesystem');
+      assert.deepStrictEqual(dbState.activeMilestone?.id, 'M002', 'parked-db: activeMilestone is M002');
+      assert.ok(dbState.registry.some(e => e.id === 'M001' && e.status === 'parked'), 'parked-db: M001 is parked in registry');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 14: Validating-milestone — all slices done, no terminal validation ─
-  console.log('\n=== derive-state-db: validating-milestone via DB ===');
-  {
+  test('derive-state-db: validating-milestone via DB', async () => {
     const base = createFixtureBase();
     try {
       const doneRoadmap = `# M001: Validate Test
@@ -669,20 +653,19 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const dbState = await deriveStateFromDb(base);
 
-      assertEq(dbState.phase, 'validating-milestone', 'validate-db: phase is validating-milestone');
-      assertEq(dbState.phase, fileState.phase, 'validate-db: phase matches filesystem');
-      assertEq(dbState.activeMilestone?.id, 'M001', 'validate-db: activeMilestone is M001');
+      assert.deepStrictEqual(dbState.phase, 'validating-milestone', 'validate-db: phase is validating-milestone');
+      assert.deepStrictEqual(dbState.phase, fileState.phase, 'validate-db: phase matches filesystem');
+      assert.deepStrictEqual(dbState.activeMilestone?.id, 'M001', 'validate-db: activeMilestone is M001');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 15: Completing-milestone — terminal validation, no summary ──
-  console.log('\n=== derive-state-db: completing-milestone via DB ===');
-  {
+  test('derive-state-db: completing-milestone via DB', async () => {
     const base = createFixtureBase();
     try {
       const doneRoadmap = `# M001: Complete Test
@@ -707,19 +690,18 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const dbState = await deriveStateFromDb(base);
 
-      assertEq(dbState.phase, 'completing-milestone', 'completing-db: phase is completing-milestone');
-      assertEq(dbState.phase, fileState.phase, 'completing-db: phase matches filesystem');
+      assert.deepStrictEqual(dbState.phase, 'completing-milestone', 'completing-db: phase is completing-milestone');
+      assert.deepStrictEqual(dbState.phase, fileState.phase, 'completing-db: phase matches filesystem');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 16: Replanning-slice — REPLAN-TRIGGER file exists ───────────
-  console.log('\n=== derive-state-db: replanning-slice via DB ===');
-  {
+  test('derive-state-db: replanning-slice via DB', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
@@ -749,19 +731,18 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const dbState = await deriveStateFromDb(base);
 
-      assertEq(dbState.phase, 'replanning-slice', 'replan-db: phase is replanning-slice');
-      assertEq(dbState.phase, fileState.phase, 'replan-db: phase matches filesystem');
+      assert.deepStrictEqual(dbState.phase, 'replanning-slice', 'replan-db: phase is replanning-slice');
+      assert.deepStrictEqual(dbState.phase, fileState.phase, 'replan-db: phase matches filesystem');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 17: Performance — deriveStateFromDb < 1ms on populated DB ───
-  console.log('\n=== derive-state-db: performance assertion ===');
-  {
+  test('derive-state-db: performance assertion', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
@@ -789,18 +770,17 @@ async function main(): Promise<void> {
       console.log(`  deriveStateFromDb() took ${elapsed.toFixed(3)}ms`);
       // Use 10ms threshold — catches real regressions without flaking on
       // CI runners under load (1ms threshold failed at 1.050ms on GitHub Actions)
-      assertTrue(elapsed < 10, `perf-db: deriveStateFromDb() <10ms (got ${elapsed.toFixed(3)}ms)`);
+      assert.ok(elapsed < 10, `perf-db: deriveStateFromDb() <10ms (got ${elapsed.toFixed(3)}ms)`);
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 18: Multi-milestone with deps — M001 complete, M002 depends on M001, M003 depends on M002 ─
-  console.log('\n=== derive-state-db: multi-milestone deps via DB ===');
-  {
+  test('derive-state-db: multi-milestone deps via DB', async () => {
     const base = createFixtureBase();
     try {
       const m1Roadmap = `# M001: First
@@ -841,29 +821,28 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const dbState = await deriveStateFromDb(base);
 
-      assertEq(dbState.registry.length, fileState.registry.length, 'multi-deps-db: registry length matches');
-      assertEq(dbState.activeMilestone?.id, 'M002', 'multi-deps-db: activeMilestone is M002 (M001 complete, M003 dep unmet)');
-      assertEq(dbState.activeMilestone?.id, fileState.activeMilestone?.id, 'multi-deps-db: activeMilestone matches filesystem');
-      assertEq(dbState.phase, fileState.phase, 'multi-deps-db: phase matches filesystem');
+      assert.deepStrictEqual(dbState.registry.length, fileState.registry.length, 'multi-deps-db: registry length matches');
+      assert.deepStrictEqual(dbState.activeMilestone?.id, 'M002', 'multi-deps-db: activeMilestone is M002 (M001 complete, M003 dep unmet)');
+      assert.deepStrictEqual(dbState.activeMilestone?.id, fileState.activeMilestone?.id, 'multi-deps-db: activeMilestone matches filesystem');
+      assert.deepStrictEqual(dbState.phase, fileState.phase, 'multi-deps-db: phase matches filesystem');
 
       // Check registry statuses
       const m1reg = dbState.registry.find(e => e.id === 'M001');
       const m2reg = dbState.registry.find(e => e.id === 'M002');
       const m3reg = dbState.registry.find(e => e.id === 'M003');
-      assertEq(m1reg?.status, 'complete', 'multi-deps-db: M001 is complete');
-      assertEq(m2reg?.status, 'active', 'multi-deps-db: M002 is active');
-      assertEq(m3reg?.status, 'pending', 'multi-deps-db: M003 is pending (dep M002 unmet)');
+      assert.deepStrictEqual(m1reg?.status, 'complete', 'multi-deps-db: M001 is complete');
+      assert.deepStrictEqual(m2reg?.status, 'active', 'multi-deps-db: M002 is active');
+      assert.deepStrictEqual(m3reg?.status, 'pending', 'multi-deps-db: M003 is pending (dep M002 unmet)');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 19: K002 — both 'complete' and 'done' treated as done ───────
-  console.log('\n=== derive-state-db: K002 status handling ===');
-  {
+  test('derive-state-db: K002 status handling', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
@@ -882,20 +861,19 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const dbState = await deriveStateFromDb(base);
 
-      assertEq(dbState.phase, 'executing', 'k002-db: phase is executing');
-      assertEq(dbState.activeTask?.id, 'T01', 'k002-db: activeTask is T01 (T02 done)');
-      assertEq(dbState.progress?.tasks?.done, 1, 'k002-db: tasks.done counts done status');
+      assert.deepStrictEqual(dbState.phase, 'executing', 'k002-db: phase is executing');
+      assert.deepStrictEqual(dbState.activeTask?.id, 'T01', 'k002-db: activeTask is T01 (T02 done)');
+      assert.deepStrictEqual(dbState.progress?.tasks?.done, 1, 'k002-db: tasks.done counts done status');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 20: Dual-path wiring — deriveState() uses DB when populated ─
-  console.log('\n=== derive-state-db: dual-path wiring ===');
-  {
+  test('derive-state-db: dual-path wiring', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
@@ -914,21 +892,20 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const state = await deriveState(base);
 
-      assertEq(state.phase, 'executing', 'dual-path: phase is executing');
-      assertEq(state.activeMilestone?.id, 'M001', 'dual-path: activeMilestone is M001');
-      assertEq(state.activeSlice?.id, 'S01', 'dual-path: activeSlice is S01');
-      assertEq(state.activeTask?.id, 'T01', 'dual-path: activeTask is T01');
+      assert.deepStrictEqual(state.phase, 'executing', 'dual-path: phase is executing');
+      assert.deepStrictEqual(state.activeMilestone?.id, 'M001', 'dual-path: activeMilestone is M001');
+      assert.deepStrictEqual(state.activeSlice?.id, 'S01', 'dual-path: activeSlice is S01');
+      assert.deepStrictEqual(state.activeTask?.id, 'T01', 'dual-path: activeTask is T01');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 21: Ghost milestone skipped ─────────────────────────────────
-  console.log('\n=== derive-state-db: ghost milestone skipped ===');
-  {
+  test('derive-state-db: ghost milestone skipped', async () => {
     const base = createFixtureBase();
     try {
       // Ghost: milestone dir exists with only META.json, no context/roadmap/summary
@@ -949,21 +926,20 @@ async function main(): Promise<void> {
       const dbState = await deriveStateFromDb(base);
 
       // Ghost should be skipped — M002 should be active
-      assertEq(dbState.activeMilestone?.id, 'M002', 'ghost-db: activeMilestone is M002 (ghost skipped)');
-      assertEq(dbState.activeMilestone?.id, fileState.activeMilestone?.id, 'ghost-db: matches filesystem');
+      assert.deepStrictEqual(dbState.activeMilestone?.id, 'M002', 'ghost-db: activeMilestone is M002 (ghost skipped)');
+      assert.deepStrictEqual(dbState.activeMilestone?.id, fileState.activeMilestone?.id, 'ghost-db: matches filesystem');
       // Ghost should not appear in registry
-      assertTrue(!dbState.registry.some(e => e.id === 'M001'), 'ghost-db: M001 not in registry');
+      assert.ok(!dbState.registry.some(e => e.id === 'M001'), 'ghost-db: M001 not in registry');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 22: Needs-discussion — CONTEXT-DRAFT exists ─────────────────
-  console.log('\n=== derive-state-db: needs-discussion via DB ===');
-  {
+  test('derive-state-db: needs-discussion via DB', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-CONTEXT-DRAFT.md', '# M001: Draft\n\nDraft content.');
@@ -977,20 +953,13 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const dbState = await deriveStateFromDb(base);
 
-      assertEq(dbState.phase, 'needs-discussion', 'discuss-db: phase is needs-discussion');
-      assertEq(dbState.phase, fileState.phase, 'discuss-db: phase matches filesystem');
+      assert.deepStrictEqual(dbState.phase, 'needs-discussion', 'discuss-db: phase is needs-discussion');
+      assert.deepStrictEqual(dbState.phase, fileState.phase, 'discuss-db: phase matches filesystem');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
-
-  report();
-}
-
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
+  });
 });

@@ -1,3 +1,5 @@
+import { describe, test } from 'node:test';
+import assert from 'node:assert/strict';
 // gsd-recover.test.ts — Tests for the `gsd recover` recovery logic.
 // Verifies: populate DB → clear hierarchy → recover from markdown → state matches.
 
@@ -22,10 +24,6 @@ import {
 } from '../gsd-db.ts';
 import { migrateHierarchyToDb } from '../md-importer.ts';
 import { deriveStateFromDb, invalidateStateCache } from '../state.ts';
-import { createTestContext } from './test-helpers.ts';
-
-const { assertEq, assertTrue, report } = createTestContext();
-
 // ─── Fixture Helpers ───────────────────────────────────────────────────────
 
 function createFixtureBase(): string {
@@ -148,10 +146,8 @@ function clearHierarchyTables(): void {
 
 // ─── Tests ────────────────────────────────────────────────────────────────
 
-async function main() {
-  // ─── Test (a): Full recovery round-trip ─────────────────────────────────
-  console.log('\n=== recover: full round-trip (populate → clear → recover → verify) ===');
-  {
+describe('gsd-recover', async () => {
+  test('full round-trip (populate, clear, recover, verify)', async () => {
     const base = createFixtureBase();
     try {
       // Set up markdown fixtures
@@ -163,14 +159,14 @@ async function main() {
       // Step 1: Open DB and populate from markdown
       openDatabase(':memory:');
       const counts1 = migrateHierarchyToDb(base);
-      assertEq(counts1.milestones, 1, 'round-trip: initial migration — 1 milestone');
-      assertEq(counts1.slices, 2, 'round-trip: initial migration — 2 slices');
-      assertTrue(counts1.tasks >= 5, 'round-trip: initial migration — at least 5 tasks');
+      assert.deepStrictEqual(counts1.milestones, 1, 'round-trip: initial migration - 1 milestone');
+      assert.deepStrictEqual(counts1.slices, 2, 'round-trip: initial migration - 2 slices');
+      assert.ok(counts1.tasks >= 5, 'round-trip: initial migration - at least 5 tasks');
 
       // Step 2: Capture state from DB before clearing
       invalidateStateCache();
       const stateBefore = await deriveStateFromDb(base);
-      assertTrue(stateBefore.activeMilestone !== null, 'round-trip: state before has active milestone');
+      assert.ok(stateBefore.activeMilestone !== null, 'round-trip: state before has active milestone');
       const milestonesBefore = getAllMilestones();
       const slicesBefore = getMilestoneSlices('M001');
       const s01TasksBefore = getSliceTasks('M001', 'S01');
@@ -179,30 +175,30 @@ async function main() {
       // Step 3: Clear hierarchy tables
       clearHierarchyTables();
       const milestonesAfterClear = getAllMilestones();
-      assertEq(milestonesAfterClear.length, 0, 'round-trip: milestones cleared');
+      assert.deepStrictEqual(milestonesAfterClear.length, 0, 'round-trip: milestones cleared');
 
       // Step 4: Recover from markdown
       const counts2 = migrateHierarchyToDb(base);
-      assertEq(counts2.milestones, counts1.milestones, 'round-trip: recovery milestone count matches');
-      assertEq(counts2.slices, counts1.slices, 'round-trip: recovery slice count matches');
-      assertEq(counts2.tasks, counts1.tasks, 'round-trip: recovery task count matches');
+      assert.deepStrictEqual(counts2.milestones, counts1.milestones, 'round-trip: recovery milestone count matches');
+      assert.deepStrictEqual(counts2.slices, counts1.slices, 'round-trip: recovery slice count matches');
+      assert.deepStrictEqual(counts2.tasks, counts1.tasks, 'round-trip: recovery task count matches');
 
       // Step 5: Verify state matches
       invalidateStateCache();
       const stateAfter = await deriveStateFromDb(base);
 
-      assertEq(stateAfter.phase, stateBefore.phase, 'round-trip: phase matches');
-      assertEq(
+      assert.deepStrictEqual(stateAfter.phase, stateBefore.phase, 'round-trip: phase matches');
+      assert.deepStrictEqual(
         stateAfter.activeMilestone?.id,
         stateBefore.activeMilestone?.id,
         'round-trip: active milestone ID matches',
       );
-      assertEq(
+      assert.deepStrictEqual(
         stateAfter.activeSlice?.id,
         stateBefore.activeSlice?.id,
         'round-trip: active slice ID matches',
       );
-      assertEq(
+      assert.deepStrictEqual(
         stateAfter.activeTask?.id,
         stateBefore.activeTask?.id,
         'round-trip: active task ID matches',
@@ -210,32 +206,30 @@ async function main() {
 
       // Verify row-level data matches
       const milestonesAfter = getAllMilestones();
-      assertEq(milestonesAfter.length, milestonesBefore.length, 'round-trip: milestone row count');
-      assertEq(milestonesAfter[0]?.id, milestonesBefore[0]?.id, 'round-trip: milestone ID');
-      assertEq(milestonesAfter[0]?.title, milestonesBefore[0]?.title, 'round-trip: milestone title');
+      assert.deepStrictEqual(milestonesAfter.length, milestonesBefore.length, 'round-trip: milestone row count');
+      assert.deepStrictEqual(milestonesAfter[0]?.id, milestonesBefore[0]?.id, 'round-trip: milestone ID');
+      assert.deepStrictEqual(milestonesAfter[0]?.title, milestonesBefore[0]?.title, 'round-trip: milestone title');
 
       const slicesAfter = getMilestoneSlices('M001');
-      assertEq(slicesAfter.length, slicesBefore.length, 'round-trip: slice row count');
-      assertEq(slicesAfter[0]?.id, slicesBefore[0]?.id, 'round-trip: S01 ID');
-      assertEq(slicesAfter[0]?.status, slicesBefore[0]?.status, 'round-trip: S01 status');
-      assertEq(slicesAfter[1]?.id, slicesBefore[1]?.id, 'round-trip: S02 ID');
+      assert.deepStrictEqual(slicesAfter.length, slicesBefore.length, 'round-trip: slice row count');
+      assert.deepStrictEqual(slicesAfter[0]?.id, slicesBefore[0]?.id, 'round-trip: S01 ID');
+      assert.deepStrictEqual(slicesAfter[0]?.status, slicesBefore[0]?.status, 'round-trip: S01 status');
+      assert.deepStrictEqual(slicesAfter[1]?.id, slicesBefore[1]?.id, 'round-trip: S02 ID');
 
       const s01TasksAfter = getSliceTasks('M001', 'S01');
-      assertEq(s01TasksAfter.length, s01TasksBefore.length, 'round-trip: S01 task count');
+      assert.deepStrictEqual(s01TasksAfter.length, s01TasksBefore.length, 'round-trip: S01 task count');
 
       const s02TasksAfter = getSliceTasks('M001', 'S02');
-      assertEq(s02TasksAfter.length, s02TasksBefore.length, 'round-trip: S02 task count');
+      assert.deepStrictEqual(s02TasksAfter.length, s02TasksBefore.length, 'round-trip: S02 task count');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
-  // ─── Test (a2): v8 planning columns populated after recovery ───────────
-  console.log('\n=== recover: v8 planning columns populated ===');
-  {
+  test('v8 planning columns populated', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_M001);
@@ -248,75 +242,70 @@ async function main() {
 
       // Milestone planning columns
       const milestone = getMilestone('M001');
-      assertTrue(milestone !== null, 'v8: milestone exists');
-      assertEq(milestone!.vision, 'Test recovery round-trip.', 'v8: milestone vision populated');
-      assertTrue(milestone!.success_criteria.length >= 2, 'v8: milestone success_criteria has entries');
-      assertEq(milestone!.success_criteria[0], 'All recovery tests pass', 'v8: first success criterion');
-      assertTrue(milestone!.boundary_map_markdown.includes('Boundary Map'), 'v8: boundary_map_markdown populated');
-      assertTrue(milestone!.boundary_map_markdown.includes('S01'), 'v8: boundary_map_markdown has S01');
+      assert.ok(milestone !== null, 'v8: milestone exists');
+      assert.deepStrictEqual(milestone!.vision, 'Test recovery round-trip.', 'v8: milestone vision populated');
+      assert.ok(milestone!.success_criteria.length >= 2, 'v8: milestone success_criteria has entries');
+      assert.deepStrictEqual(milestone!.success_criteria[0], 'All recovery tests pass', 'v8: first success criterion');
+      assert.ok(milestone!.boundary_map_markdown.includes('Boundary Map'), 'v8: boundary_map_markdown populated');
+      assert.ok(milestone!.boundary_map_markdown.includes('S01'), 'v8: boundary_map_markdown has S01');
 
       // Tool-only fields left empty per D004
-      assertEq(milestone!.key_risks.length, 0, 'v8: key_risks left empty (tool-only per D004)');
-      assertEq(milestone!.requirement_coverage, '', 'v8: requirement_coverage left empty (tool-only per D004)');
+      assert.deepStrictEqual(milestone!.key_risks.length, 0, 'v8: key_risks left empty (tool-only per D004)');
+      assert.deepStrictEqual(milestone!.requirement_coverage, '', 'v8: requirement_coverage left empty (tool-only per D004)');
 
       // Slice planning columns
       const sliceS01 = getSlice('M001', 'S01');
-      assertTrue(sliceS01 !== null, 'v8: slice S01 exists');
-      assertEq(sliceS01!.goal, 'Setup fixtures.', 'v8: S01 goal populated');
+      assert.ok(sliceS01 !== null, 'v8: slice S01 exists');
+      assert.deepStrictEqual(sliceS01!.goal, 'Setup fixtures.', 'v8: S01 goal populated');
 
       const sliceS02 = getSlice('M001', 'S02');
-      assertTrue(sliceS02 !== null, 'v8: slice S02 exists');
-      assertEq(sliceS02!.goal, 'Build core.', 'v8: S02 goal populated');
+      assert.ok(sliceS02 !== null, 'v8: slice S02 exists');
+      assert.deepStrictEqual(sliceS02!.goal, 'Build core.', 'v8: S02 goal populated');
 
       // Slice tool-only fields left empty per D004
-      assertEq(sliceS01!.proof_level, '', 'v8: S01 proof_level left empty (tool-only per D004)');
+      assert.deepStrictEqual(sliceS01!.proof_level, '', 'v8: S01 proof_level left empty (tool-only per D004)');
 
-      // Task planning columns — S01/T01
+      // Task planning columns - S01/T01
       const taskS01T01 = getTask('M001', 'S01', 'T01');
-      assertTrue(taskS01T01 !== null, 'v8: task S01/T01 exists');
-      assertTrue(taskS01T01!.files.length >= 2, 'v8: S01/T01 files populated');
-      assertTrue(taskS01T01!.files.includes('init.ts'), 'v8: S01/T01 files includes init.ts');
-      assertTrue(taskS01T01!.files.includes('config.ts'), 'v8: S01/T01 files includes config.ts');
-      assertEq(taskS01T01!.verify, '`node test-init.ts`', 'v8: S01/T01 verify populated');
+      assert.ok(taskS01T01 !== null, 'v8: task S01/T01 exists');
+      assert.ok(taskS01T01!.files.length >= 2, 'v8: S01/T01 files populated');
+      assert.ok(taskS01T01!.files.includes('init.ts'), 'v8: S01/T01 files includes init.ts');
+      assert.ok(taskS01T01!.files.includes('config.ts'), 'v8: S01/T01 files includes config.ts');
+      assert.deepStrictEqual(taskS01T01!.verify, '`node test-init.ts`', 'v8: S01/T01 verify populated');
 
-      // Task planning columns — S02/T02
+      // Task planning columns - S02/T02
       const taskS02T02 = getTask('M001', 'S02', 'T02');
-      assertTrue(taskS02T02 !== null, 'v8: task S02/T02 exists');
-      assertTrue(taskS02T02!.files.length >= 2, 'v8: S02/T02 files populated');
-      assertTrue(taskS02T02!.files.includes('test-core.ts'), 'v8: S02/T02 files includes test-core.ts');
-      assertEq(taskS02T02!.verify, '`npm test`', 'v8: S02/T02 verify populated');
+      assert.ok(taskS02T02 !== null, 'v8: task S02/T02 exists');
+      assert.ok(taskS02T02!.files.length >= 2, 'v8: S02/T02 files populated');
+      assert.ok(taskS02T02!.files.includes('test-core.ts'), 'v8: S02/T02 files includes test-core.ts');
+      assert.deepStrictEqual(taskS02T02!.verify, '`npm test`', 'v8: S02/T02 verify populated');
 
-      // Task with no Files/Verify — not applicable since all fixtures now have them,
-      // but confirm a task from S02 has correct data
       const taskS02T03 = getTask('M001', 'S02', 'T03');
-      assertTrue(taskS02T03 !== null, 'v8: task S02/T03 exists');
-      assertTrue(taskS02T03!.files.includes('polish.ts'), 'v8: S02/T03 files includes polish.ts');
-      assertEq(taskS02T03!.verify, '`node test-polish.ts`', 'v8: S02/T03 verify populated');
+      assert.ok(taskS02T03 !== null, 'v8: task S02/T03 exists');
+      assert.ok(taskS02T03!.files.includes('polish.ts'), 'v8: S02/T03 files includes polish.ts');
+      assert.deepStrictEqual(taskS02T03!.verify, '`node test-polish.ts`', 'v8: S02/T03 verify populated');
 
       // Diagnostic: v8 planning columns queryable via SQL
       const db = _getAdapter()!;
       const milestoneRow = db.prepare("SELECT vision, success_criteria, boundary_map_markdown FROM milestones WHERE id = 'M001'").get() as any;
-      assertTrue(milestoneRow.vision.length > 0, 'v8-diag: vision column queryable');
-      assertTrue(milestoneRow.boundary_map_markdown.length > 0, 'v8-diag: boundary_map_markdown column queryable');
+      assert.ok(milestoneRow.vision.length > 0, 'v8-diag: vision column queryable');
+      assert.ok(milestoneRow.boundary_map_markdown.length > 0, 'v8-diag: boundary_map_markdown column queryable');
 
       const sliceRow = db.prepare("SELECT goal FROM slices WHERE milestone_id = 'M001' AND id = 'S01'").get() as any;
-      assertTrue(sliceRow.goal.length > 0, 'v8-diag: goal column queryable');
+      assert.ok(sliceRow.goal.length > 0, 'v8-diag: goal column queryable');
 
       const taskRow = db.prepare("SELECT files, verify FROM tasks WHERE milestone_id = 'M001' AND slice_id = 'S01' AND id = 'T01'").get() as any;
-      assertTrue(taskRow.files.length > 2, 'v8-diag: files column queryable (JSON array)');
-      assertTrue(taskRow.verify.length > 0, 'v8-diag: verify column queryable');
+      assert.ok(taskRow.files.length > 2, 'v8-diag: files column queryable (JSON array)');
+      assert.ok(taskRow.verify.length > 0, 'v8-diag: verify column queryable');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
-
-  // ─── Test (b): Idempotent recovery — double recover ────────────────────
-  console.log('\n=== recover: idempotent — double recovery produces same state ===');
-  {
+  test('idempotent - double recovery produces same state', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_M001);
@@ -337,18 +326,18 @@ async function main() {
       invalidateStateCache();
       const state2 = await deriveStateFromDb(base);
 
-      assertEq(state2.phase, state1.phase, 'idempotent: phase matches');
-      assertEq(
+      assert.deepStrictEqual(state2.phase, state1.phase, 'idempotent: phase matches');
+      assert.deepStrictEqual(
         state2.activeMilestone?.id,
         state1.activeMilestone?.id,
         'idempotent: active milestone matches',
       );
-      assertEq(
+      assert.deepStrictEqual(
         state2.activeSlice?.id,
         state1.activeSlice?.id,
         'idempotent: active slice matches',
       );
-      assertEq(
+      assert.deepStrictEqual(
         state2.activeTask?.id,
         state1.activeTask?.id,
         'idempotent: active task matches',
@@ -359,11 +348,9 @@ async function main() {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
-  // ─── Test (c): Recovery preserves non-hierarchy data ───────────────────
-  console.log('\n=== recover: preserves decisions/requirements ===');
-  {
+  test('preserves decisions/requirements', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_M001);
@@ -402,35 +389,33 @@ async function main() {
 
       // Verify decisions and requirements survived
       const decisions = db.prepare('SELECT * FROM decisions').all();
-      assertEq(decisions.length, 1, 'preserve: decision survives clear');
-      assertEq((decisions[0] as any).id, 'D001', 'preserve: decision ID intact');
+      assert.deepStrictEqual(decisions.length, 1, 'preserve: decision survives clear');
+      assert.deepStrictEqual((decisions[0] as any).id, 'D001', 'preserve: decision ID intact');
 
       const requirements = db.prepare('SELECT * FROM requirements').all();
-      assertEq(requirements.length, 1, 'preserve: requirement survives clear');
-      assertEq((requirements[0] as any).id, 'R001', 'preserve: requirement ID intact');
+      assert.deepStrictEqual(requirements.length, 1, 'preserve: requirement survives clear');
+      assert.deepStrictEqual((requirements[0] as any).id, 'R001', 'preserve: requirement ID intact');
 
       // Recover hierarchy
       migrateHierarchyToDb(base);
       const milestones = getAllMilestones();
-      assertTrue(milestones.length > 0, 'preserve: milestones recovered after clear');
+      assert.ok(milestones.length > 0, 'preserve: milestones recovered after clear');
 
       // Verify non-hierarchy data still intact after recovery
       const decisionsAfter = db.prepare('SELECT * FROM decisions').all();
-      assertEq(decisionsAfter.length, 1, 'preserve: decision still present after recovery');
+      assert.deepStrictEqual(decisionsAfter.length, 1, 'preserve: decision still present after recovery');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
-  // ─── Test (d): Recovery from empty markdown dir ────────────────────────
-  console.log('\n=== recover: empty milestones dir ===');
-  {
+  test('empty milestones dir', async () => {
     const base = createFixtureBase();
     try {
-      // No milestones written — just the empty dir
+      // No milestones written - just the empty dir
       openDatabase(':memory:');
 
       // Pre-populate to simulate existing state
@@ -439,24 +424,17 @@ async function main() {
       // Clear and recover from empty
       clearHierarchyTables();
       const counts = migrateHierarchyToDb(base);
-      assertEq(counts.milestones, 0, 'empty: zero milestones recovered');
-      assertEq(counts.slices, 0, 'empty: zero slices recovered');
-      assertEq(counts.tasks, 0, 'empty: zero tasks recovered');
+      assert.deepStrictEqual(counts.milestones, 0, 'empty: zero milestones recovered');
+      assert.deepStrictEqual(counts.slices, 0, 'empty: zero slices recovered');
+      assert.deepStrictEqual(counts.tasks, 0, 'empty: zero tasks recovered');
 
       const all = getAllMilestones();
-      assertEq(all.length, 0, 'empty: no milestones in DB after recovery');
+      assert.deepStrictEqual(all.length, 0, 'empty: no milestones in DB after recovery');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
-
-  report();
-}
-
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
+  });
 });

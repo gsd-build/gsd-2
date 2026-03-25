@@ -1,3 +1,5 @@
+import { describe, test } from 'node:test';
+import assert from 'node:assert/strict';
 // derive-state-crossval.test.ts — Cross-validation: deriveStateFromDb() vs _deriveStateImpl()
 // Proves both paths produce field-identical GSDState across 7 fixture scenarios,
 // plus an auto-migration round-trip test.
@@ -19,10 +21,7 @@ import {
   insertTask,
 } from '../gsd-db.ts';
 import { migrateHierarchyToDb } from '../md-importer.ts';
-import { createTestContext } from './test-helpers.ts';
 import type { GSDState } from '../types.ts';
-
-const { assertEq, assertTrue, report } = createTestContext();
 
 // ─── Fixture Helpers ───────────────────────────────────────────────────────
 
@@ -48,29 +47,29 @@ function cleanup(base: string): void {
  */
 function assertStatesEqual(dbState: GSDState, fileState: GSDState, prefix: string): void {
   // Phase
-  assertEq(dbState.phase, fileState.phase, `${prefix}: phase`);
+  assert.deepStrictEqual(dbState.phase, fileState.phase, `${prefix}: phase`);
 
   // Active refs
-  assertEq(dbState.activeMilestone?.id ?? null, fileState.activeMilestone?.id ?? null, `${prefix}: activeMilestone.id`);
-  assertEq(dbState.activeMilestone?.title ?? null, fileState.activeMilestone?.title ?? null, `${prefix}: activeMilestone.title`);
-  assertEq(dbState.activeSlice?.id ?? null, fileState.activeSlice?.id ?? null, `${prefix}: activeSlice.id`);
-  assertEq(dbState.activeSlice?.title ?? null, fileState.activeSlice?.title ?? null, `${prefix}: activeSlice.title`);
-  assertEq(dbState.activeTask?.id ?? null, fileState.activeTask?.id ?? null, `${prefix}: activeTask.id`);
-  assertEq(dbState.activeTask?.title ?? null, fileState.activeTask?.title ?? null, `${prefix}: activeTask.title`);
+  assert.deepStrictEqual(dbState.activeMilestone?.id ?? null, fileState.activeMilestone?.id ?? null, `${prefix}: activeMilestone.id`);
+  assert.deepStrictEqual(dbState.activeMilestone?.title ?? null, fileState.activeMilestone?.title ?? null, `${prefix}: activeMilestone.title`);
+  assert.deepStrictEqual(dbState.activeSlice?.id ?? null, fileState.activeSlice?.id ?? null, `${prefix}: activeSlice.id`);
+  assert.deepStrictEqual(dbState.activeSlice?.title ?? null, fileState.activeSlice?.title ?? null, `${prefix}: activeSlice.title`);
+  assert.deepStrictEqual(dbState.activeTask?.id ?? null, fileState.activeTask?.id ?? null, `${prefix}: activeTask.id`);
+  assert.deepStrictEqual(dbState.activeTask?.title ?? null, fileState.activeTask?.title ?? null, `${prefix}: activeTask.title`);
 
   // Blockers
-  assertEq(dbState.blockers.length, fileState.blockers.length, `${prefix}: blockers.length`);
+  assert.deepStrictEqual(dbState.blockers.length, fileState.blockers.length, `${prefix}: blockers.length`);
 
   // Next action (may differ in wording between paths — compare presence)
-  assertTrue(typeof dbState.nextAction === 'string', `${prefix}: nextAction is string`);
+  assert.ok(typeof dbState.nextAction === 'string', `${prefix}: nextAction is string`);
 
   // Registry — length and each entry
-  assertEq(dbState.registry.length, fileState.registry.length, `${prefix}: registry.length`);
+  assert.deepStrictEqual(dbState.registry.length, fileState.registry.length, `${prefix}: registry.length`);
   for (let i = 0; i < fileState.registry.length; i++) {
-    assertEq(dbState.registry[i]?.id, fileState.registry[i]?.id, `${prefix}: registry[${i}].id`);
-    assertEq(dbState.registry[i]?.status, fileState.registry[i]?.status, `${prefix}: registry[${i}].status`);
+    assert.deepStrictEqual(dbState.registry[i]?.id, fileState.registry[i]?.id, `${prefix}: registry[${i}].id`);
+    assert.deepStrictEqual(dbState.registry[i]?.status, fileState.registry[i]?.status, `${prefix}: registry[${i}].status`);
     // dependsOn may or may not be present
-    assertEq(
+    assert.deepStrictEqual(
       JSON.stringify(dbState.registry[i]?.dependsOn ?? []),
       JSON.stringify(fileState.registry[i]?.dependsOn ?? []),
       `${prefix}: registry[${i}].dependsOn`,
@@ -78,28 +77,27 @@ function assertStatesEqual(dbState: GSDState, fileState: GSDState, prefix: strin
   }
 
   // Requirements
-  assertEq(dbState.requirements?.active ?? 0, fileState.requirements?.active ?? 0, `${prefix}: requirements.active`);
-  assertEq(dbState.requirements?.validated ?? 0, fileState.requirements?.validated ?? 0, `${prefix}: requirements.validated`);
-  assertEq(dbState.requirements?.total ?? 0, fileState.requirements?.total ?? 0, `${prefix}: requirements.total`);
+  assert.deepStrictEqual(dbState.requirements?.active ?? 0, fileState.requirements?.active ?? 0, `${prefix}: requirements.active`);
+  assert.deepStrictEqual(dbState.requirements?.validated ?? 0, fileState.requirements?.validated ?? 0, `${prefix}: requirements.validated`);
+  assert.deepStrictEqual(dbState.requirements?.total ?? 0, fileState.requirements?.total ?? 0, `${prefix}: requirements.total`);
 
   // Progress
-  assertEq(dbState.progress?.milestones?.done, fileState.progress?.milestones?.done, `${prefix}: progress.milestones.done`);
-  assertEq(dbState.progress?.milestones?.total, fileState.progress?.milestones?.total, `${prefix}: progress.milestones.total`);
-  assertEq(dbState.progress?.slices?.done ?? 0, fileState.progress?.slices?.done ?? 0, `${prefix}: progress.slices.done`);
-  assertEq(dbState.progress?.slices?.total ?? 0, fileState.progress?.slices?.total ?? 0, `${prefix}: progress.slices.total`);
-  assertEq(dbState.progress?.tasks?.done ?? 0, fileState.progress?.tasks?.done ?? 0, `${prefix}: progress.tasks.done`);
-  assertEq(dbState.progress?.tasks?.total ?? 0, fileState.progress?.tasks?.total ?? 0, `${prefix}: progress.tasks.total`);
+  assert.deepStrictEqual(dbState.progress?.milestones?.done, fileState.progress?.milestones?.done, `${prefix}: progress.milestones.done`);
+  assert.deepStrictEqual(dbState.progress?.milestones?.total, fileState.progress?.milestones?.total, `${prefix}: progress.milestones.total`);
+  assert.deepStrictEqual(dbState.progress?.slices?.done ?? 0, fileState.progress?.slices?.done ?? 0, `${prefix}: progress.slices.done`);
+  assert.deepStrictEqual(dbState.progress?.slices?.total ?? 0, fileState.progress?.slices?.total ?? 0, `${prefix}: progress.slices.total`);
+  assert.deepStrictEqual(dbState.progress?.tasks?.done ?? 0, fileState.progress?.tasks?.done ?? 0, `${prefix}: progress.tasks.done`);
+  assert.deepStrictEqual(dbState.progress?.tasks?.total ?? 0, fileState.progress?.tasks?.total ?? 0, `${prefix}: progress.tasks.total`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Scenario fixtures
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function main(): Promise<void> {
+describe('derive-state-crossval', async () => {
 
   // ─── Scenario A: Pre-planning — milestone with CONTEXT but no roadmap ──
-  console.log('\n=== crossval A: pre-planning ===');
-  {
+  test('crossval A: pre-planning', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-CONTEXT.md', '# M001: New Project\n\nWe are exploring scope.');
@@ -116,18 +114,17 @@ async function main(): Promise<void> {
       const dbState = await deriveStateFromDb(base);
 
       assertStatesEqual(dbState, fileState, 'A-preplan');
-      assertEq(dbState.phase, 'pre-planning', 'A-preplan: phase is pre-planning');
+      assert.deepStrictEqual(dbState.phase, 'pre-planning', 'A-preplan: phase is pre-planning');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Scenario B: Executing — 2 slices, first complete, second active ──
-  console.log('\n=== crossval B: executing ===');
-  {
+  test('crossval B: executing', async () => {
     const base = createFixtureBase();
     try {
       const roadmap = `# M001: Test Project
@@ -182,20 +179,19 @@ skills_used: []
       const dbState = await deriveStateFromDb(base);
 
       assertStatesEqual(dbState, fileState, 'B-executing');
-      assertEq(dbState.phase, 'executing', 'B-executing: phase is executing');
-      assertEq(dbState.activeSlice?.id, 'S02', 'B-executing: activeSlice is S02');
-      assertEq(dbState.activeTask?.id, 'T02', 'B-executing: activeTask is T02');
+      assert.deepStrictEqual(dbState.phase, 'executing', 'B-executing: phase is executing');
+      assert.deepStrictEqual(dbState.activeSlice?.id, 'S02', 'B-executing: activeSlice is S02');
+      assert.deepStrictEqual(dbState.activeTask?.id, 'T02', 'B-executing: activeTask is T02');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Scenario C: Summarizing — all tasks done, no slice summary ────────
-  console.log('\n=== crossval C: summarizing ===');
-  {
+  test('crossval C: summarizing', async () => {
     const base = createFixtureBase();
     try {
       const roadmap = `# M001: Summarize Test
@@ -245,20 +241,19 @@ skills_used: []
       const dbState = await deriveStateFromDb(base);
 
       assertStatesEqual(dbState, fileState, 'C-summarizing');
-      assertEq(dbState.phase, 'summarizing', 'C-summarizing: phase is summarizing');
-      assertEq(dbState.activeSlice?.id, 'S01', 'C-summarizing: activeSlice is S01');
-      assertEq(dbState.activeTask, null, 'C-summarizing: no activeTask');
+      assert.deepStrictEqual(dbState.phase, 'summarizing', 'C-summarizing: phase is summarizing');
+      assert.deepStrictEqual(dbState.activeSlice?.id, 'S01', 'C-summarizing: activeSlice is S01');
+      assert.deepStrictEqual(dbState.activeTask, null, 'C-summarizing: no activeTask');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Scenario D: Multi-milestone — M001 complete, M002 active ─────────
-  console.log('\n=== crossval D: multi-milestone ===');
-  {
+  test('crossval D: multi-milestone', async () => {
     const base = createFixtureBase();
     try {
       const m1Roadmap = `# M001: First Milestone
@@ -313,24 +308,23 @@ skills_used: []
       const dbState = await deriveStateFromDb(base);
 
       assertStatesEqual(dbState, fileState, 'D-multims');
-      assertEq(dbState.activeMilestone?.id, 'M002', 'D-multims: activeMilestone is M002');
-      assertEq(dbState.registry.length, 2, 'D-multims: 2 milestones in registry');
+      assert.deepStrictEqual(dbState.activeMilestone?.id, 'M002', 'D-multims: activeMilestone is M002');
+      assert.deepStrictEqual(dbState.registry.length, 2, 'D-multims: 2 milestones in registry');
 
       const m1 = dbState.registry.find(e => e.id === 'M001');
       const m2 = dbState.registry.find(e => e.id === 'M002');
-      assertEq(m1?.status, 'complete', 'D-multims: M001 complete');
-      assertEq(m2?.status, 'active', 'D-multims: M002 active');
+      assert.deepStrictEqual(m1?.status, 'complete', 'D-multims: M001 complete');
+      assert.deepStrictEqual(m2?.status, 'active', 'D-multims: M002 active');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Scenario E: Blocked — circular slice deps ────────────────────────
-  console.log('\n=== crossval E: blocked ===');
-  {
+  test('crossval E: blocked', async () => {
     const base = createFixtureBase();
     try {
       const roadmap = `# M001: Blocked Test
@@ -357,19 +351,18 @@ skills_used: []
       const dbState = await deriveStateFromDb(base);
 
       assertStatesEqual(dbState, fileState, 'E-blocked');
-      assertEq(dbState.phase, 'blocked', 'E-blocked: phase is blocked');
-      assertTrue(dbState.blockers.length > 0, 'E-blocked: has blockers');
+      assert.deepStrictEqual(dbState.phase, 'blocked', 'E-blocked: phase is blocked');
+      assert.ok(dbState.blockers.length > 0, 'E-blocked: has blockers');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Scenario F: Parked — PARKED file on milestone ────────────────────
-  console.log('\n=== crossval F: parked ===');
-  {
+  test('crossval F: parked', async () => {
     const base = createFixtureBase();
     try {
       const roadmap = `# M001: Parked Milestone
@@ -396,20 +389,19 @@ skills_used: []
       const dbState = await deriveStateFromDb(base);
 
       assertStatesEqual(dbState, fileState, 'F-parked');
-      assertEq(dbState.activeMilestone?.id, 'M002', 'F-parked: activeMilestone is M002');
-      assertTrue(dbState.registry.some(e => e.id === 'M001' && e.status === 'parked'), 'F-parked: M001 parked');
+      assert.deepStrictEqual(dbState.activeMilestone?.id, 'M002', 'F-parked: activeMilestone is M002');
+      assert.ok(dbState.registry.some(e => e.id === 'M001' && e.status === 'parked'), 'F-parked: M001 parked');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Scenario G: Auto-migration round-trip ────────────────────────────
   // Create a markdown-only fixture (no DB). Migrate to DB. Both paths identical.
-  console.log('\n=== crossval G: auto-migration round-trip ===');
-  {
+  test('crossval G: auto-migration round-trip', async () => {
     const base = createFixtureBase();
     try {
       const roadmap = `# M001: Migration Test
@@ -489,9 +481,9 @@ skills_used: []
       const counts = migrateHierarchyToDb(base);
 
       // Verify migration populated correctly
-      assertTrue(counts.milestones >= 1, 'G-roundtrip: migrated milestones');
-      assertTrue(counts.slices >= 2, 'G-roundtrip: migrated slices');
-      assertTrue(counts.tasks >= 3, 'G-roundtrip: migrated tasks');
+      assert.ok(counts.milestones >= 1, 'G-roundtrip: migrated milestones');
+      assert.ok(counts.slices >= 2, 'G-roundtrip: migrated slices');
+      assert.ok(counts.tasks >= 3, 'G-roundtrip: migrated tasks');
 
       // Step 3: Get DB-backed state
       invalidateStateCache();
@@ -499,29 +491,22 @@ skills_used: []
 
       // Step 4: Deep cross-validation
       assertStatesEqual(dbState, fileState, 'G-roundtrip');
-      assertEq(dbState.phase, 'executing', 'G-roundtrip: phase is executing');
-      assertEq(dbState.activeSlice?.id, 'S02', 'G-roundtrip: activeSlice is S02');
-      assertEq(dbState.activeTask?.id, 'T02', 'G-roundtrip: activeTask is T02');
-      assertEq(dbState.requirements?.active, 1, 'G-roundtrip: requirements.active = 1');
-      assertEq(dbState.requirements?.validated, 1, 'G-roundtrip: requirements.validated = 1');
-      assertEq(dbState.requirements?.deferred, 1, 'G-roundtrip: requirements.deferred = 1');
-      assertEq(dbState.requirements?.total, 3, 'G-roundtrip: requirements.total = 3');
-      assertEq(dbState.progress?.slices?.done, 1, 'G-roundtrip: slices.done = 1');
-      assertEq(dbState.progress?.slices?.total, 3, 'G-roundtrip: slices.total = 3');
-      assertEq(dbState.progress?.tasks?.done, 1, 'G-roundtrip: tasks.done = 1');
-      assertEq(dbState.progress?.tasks?.total, 3, 'G-roundtrip: tasks.total = 3');
+      assert.deepStrictEqual(dbState.phase, 'executing', 'G-roundtrip: phase is executing');
+      assert.deepStrictEqual(dbState.activeSlice?.id, 'S02', 'G-roundtrip: activeSlice is S02');
+      assert.deepStrictEqual(dbState.activeTask?.id, 'T02', 'G-roundtrip: activeTask is T02');
+      assert.deepStrictEqual(dbState.requirements?.active, 1, 'G-roundtrip: requirements.active = 1');
+      assert.deepStrictEqual(dbState.requirements?.validated, 1, 'G-roundtrip: requirements.validated = 1');
+      assert.deepStrictEqual(dbState.requirements?.deferred, 1, 'G-roundtrip: requirements.deferred = 1');
+      assert.deepStrictEqual(dbState.requirements?.total, 3, 'G-roundtrip: requirements.total = 3');
+      assert.deepStrictEqual(dbState.progress?.slices?.done, 1, 'G-roundtrip: slices.done = 1');
+      assert.deepStrictEqual(dbState.progress?.slices?.total, 3, 'G-roundtrip: slices.total = 3');
+      assert.deepStrictEqual(dbState.progress?.tasks?.done, 1, 'G-roundtrip: tasks.done = 1');
+      assert.deepStrictEqual(dbState.progress?.tasks?.total, 3, 'G-roundtrip: tasks.total = 3');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
-
-  report();
-}
-
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
+  });
 });

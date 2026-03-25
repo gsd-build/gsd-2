@@ -1,4 +1,5 @@
-import { createTestContext } from './test-helpers.ts';
+import { describe, test } from 'node:test';
+import assert from 'node:assert/strict';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
@@ -12,8 +13,6 @@ import {
 import {
   saveDecisionToDb,
 } from '../db-writer.ts';
-
-const { assertEq, assertTrue, report } = createTestContext();
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Helpers
@@ -35,206 +34,199 @@ function cleanupDir(dir: string): void {
 // Bug reproduction: freeform DECISIONS.md content destroyed (#2301)
 // ═══════════════════════════════════════════════════════════════════════════
 
-console.log('\n── parseDecisionsTable silently drops freeform content ──');
+describe('freeform-decisions', () => {
+  test('parseDecisionsTable silently drops freeform content', () => {
+    const freeform = `# Project Decisions
 
-{
-  const freeform = `# Project Decisions
+  ## Architecture
+  We decided to use a microservices architecture because monoliths don't scale.
 
-## Architecture
-We decided to use a microservices architecture because monoliths don't scale.
+  ## Database
+  PostgreSQL was chosen for its reliability and JSONB support.
 
-## Database
-PostgreSQL was chosen for its reliability and JSONB support.
+  ## Deployment
+  - Kubernetes for orchestration
+  - Helm charts for packaging
+  `;
 
-## Deployment
-- Kubernetes for orchestration
-- Helm charts for packaging
-`;
+    const parsed = parseDecisionsTable(freeform);
+    assert.deepStrictEqual(parsed.length, 0, 'freeform content yields zero parsed decisions (expected — it is not a table)');
+  });
 
-  const parsed = parseDecisionsTable(freeform);
-  assertEq(parsed.length, 0, 'freeform content yields zero parsed decisions (expected — it is not a table)');
-}
+  test('saveDecisionToDb destroys freeform DECISIONS.md content', async () => {
+    const tmpDir = makeTmpDir();
+    const dbPath = path.join(tmpDir, '.gsd', 'gsd.db');
+    const mdPath = path.join(tmpDir, '.gsd', 'DECISIONS.md');
+    openDatabase(dbPath);
 
-console.log('\n── saveDecisionToDb destroys freeform DECISIONS.md content ──');
+    const freeformContent = `# Project Decisions
 
-{
-  const tmpDir = makeTmpDir();
-  const dbPath = path.join(tmpDir, '.gsd', 'gsd.db');
-  const mdPath = path.join(tmpDir, '.gsd', 'DECISIONS.md');
-  openDatabase(dbPath);
+  ## Architecture
+  We decided to use a microservices architecture because monoliths don't scale.
 
-  const freeformContent = `# Project Decisions
+  ## Database
+  PostgreSQL was chosen for its reliability and JSONB support.
 
-## Architecture
-We decided to use a microservices architecture because monoliths don't scale.
+  ## Deployment
+  - Kubernetes for orchestration
+  - Helm charts for packaging
+  `;
 
-## Database
-PostgreSQL was chosen for its reliability and JSONB support.
+    // Pre-populate DECISIONS.md with freeform content
+    fs.writeFileSync(mdPath, freeformContent, 'utf-8');
 
-## Deployment
-- Kubernetes for orchestration
-- Helm charts for packaging
-`;
+    try {
+      // Save a new decision — this should NOT destroy the freeform content
+      const result = await saveDecisionToDb({
+        scope: 'testing',
+        decision: 'Use Jest for unit tests',
+        choice: 'Jest',
+        rationale: 'Well-known, good DX',
+        when_context: 'M001',
+      }, tmpDir);
 
-  // Pre-populate DECISIONS.md with freeform content
-  fs.writeFileSync(mdPath, freeformContent, 'utf-8');
+      assert.deepStrictEqual(result.id, 'D001', 'decision ID assigned correctly');
 
-  try {
-    // Save a new decision — this should NOT destroy the freeform content
-    const result = await saveDecisionToDb({
-      scope: 'testing',
-      decision: 'Use Jest for unit tests',
-      choice: 'Jest',
-      rationale: 'Well-known, good DX',
-      when_context: 'M001',
-    }, tmpDir);
+      // Read back the file
+      const afterContent = fs.readFileSync(mdPath, 'utf-8');
 
-    assertEq(result.id, 'D001', 'decision ID assigned correctly');
+      // The freeform content MUST still be present
+      assert.ok(
+        afterContent.includes('microservices architecture'),
+        'freeform architecture section preserved after saveDecisionToDb',
+      );
+      assert.ok(
+        afterContent.includes('PostgreSQL was chosen'),
+        'freeform database section preserved after saveDecisionToDb',
+      );
+      assert.ok(
+        afterContent.includes('Kubernetes for orchestration'),
+        'freeform deployment section preserved after saveDecisionToDb',
+      );
 
-    // Read back the file
-    const afterContent = fs.readFileSync(mdPath, 'utf-8');
+      // The new decision MUST also be present
+      assert.ok(
+        afterContent.includes('D001'),
+        'new decision D001 present in file',
+      );
+      assert.ok(
+        afterContent.includes('Use Jest for unit tests'),
+        'new decision text present in file',
+      );
 
-    // The freeform content MUST still be present
-    assertTrue(
-      afterContent.includes('microservices architecture'),
-      'freeform architecture section preserved after saveDecisionToDb',
-    );
-    assertTrue(
-      afterContent.includes('PostgreSQL was chosen'),
-      'freeform database section preserved after saveDecisionToDb',
-    );
-    assertTrue(
-      afterContent.includes('Kubernetes for orchestration'),
-      'freeform deployment section preserved after saveDecisionToDb',
-    );
+      // Save a second decision — freeform content must still survive
+      const result2 = await saveDecisionToDb({
+        scope: 'ci',
+        decision: 'Use GitHub Actions for CI',
+        choice: 'GitHub Actions',
+        rationale: 'Native integration',
+        when_context: 'M001',
+      }, tmpDir);
 
-    // The new decision MUST also be present
-    assertTrue(
-      afterContent.includes('D001'),
-      'new decision D001 present in file',
-    );
-    assertTrue(
-      afterContent.includes('Use Jest for unit tests'),
-      'new decision text present in file',
-    );
+      assert.deepStrictEqual(result2.id, 'D002', 'second decision ID assigned correctly');
 
-    // Save a second decision — freeform content must still survive
-    const result2 = await saveDecisionToDb({
-      scope: 'ci',
-      decision: 'Use GitHub Actions for CI',
-      choice: 'GitHub Actions',
-      rationale: 'Native integration',
-      when_context: 'M001',
-    }, tmpDir);
+      const afterContent2 = fs.readFileSync(mdPath, 'utf-8');
 
-    assertEq(result2.id, 'D002', 'second decision ID assigned correctly');
+      assert.ok(
+        afterContent2.includes('microservices architecture'),
+        'freeform content still preserved after second save',
+      );
+      assert.ok(
+        afterContent2.includes('D001'),
+        'first decision still present after second save',
+      );
+      assert.ok(
+        afterContent2.includes('D002'),
+        'second decision present after second save',
+      );
+      assert.ok(
+        afterContent2.includes('Use GitHub Actions for CI'),
+        'second decision text present in file',
+      );
+    } finally {
+      closeDatabase();
+      cleanupDir(tmpDir);
+    }
+  });
 
-    const afterContent2 = fs.readFileSync(mdPath, 'utf-8');
+  test('saveDecisionToDb with table-format DECISIONS.md still regenerates normally', async () => {
+    const tmpDir = makeTmpDir();
+    const dbPath = path.join(tmpDir, '.gsd', 'gsd.db');
+    const mdPath = path.join(tmpDir, '.gsd', 'DECISIONS.md');
+    openDatabase(dbPath);
 
-    assertTrue(
-      afterContent2.includes('microservices architecture'),
-      'freeform content still preserved after second save',
-    );
-    assertTrue(
-      afterContent2.includes('D001'),
-      'first decision still present after second save',
-    );
-    assertTrue(
-      afterContent2.includes('D002'),
-      'second decision present after second save',
-    );
-    assertTrue(
-      afterContent2.includes('Use GitHub Actions for CI'),
-      'second decision text present in file',
-    );
-  } finally {
-    closeDatabase();
-    cleanupDir(tmpDir);
-  }
-}
+    // Pre-populate with canonical table format
+    const tableContent = `# Decisions Register
 
-console.log('\n── saveDecisionToDb with table-format DECISIONS.md still regenerates normally ──');
+  <!-- Append-only. Never edit or remove existing rows.
+       To reverse a decision, add a new row that supersedes it.
+       Read this file at the start of any planning or research phase. -->
 
-{
-  const tmpDir = makeTmpDir();
-  const dbPath = path.join(tmpDir, '.gsd', 'gsd.db');
-  const mdPath = path.join(tmpDir, '.gsd', 'DECISIONS.md');
-  openDatabase(dbPath);
+  | # | When | Scope | Decision | Choice | Rationale | Revisable? | Made By |
+  |---|------|-------|----------|--------|-----------|------------|---------|
+  | D001 | M001 | arch | Use REST API | REST | Simpler | Yes | human |
+  `;
 
-  // Pre-populate with canonical table format
-  const tableContent = `# Decisions Register
+    fs.writeFileSync(mdPath, tableContent, 'utf-8');
 
-<!-- Append-only. Never edit or remove existing rows.
-     To reverse a decision, add a new row that supersedes it.
-     Read this file at the start of any planning or research phase. -->
+    try {
+      const result = await saveDecisionToDb({
+        scope: 'testing',
+        decision: 'Use Vitest',
+        choice: 'Vitest',
+        rationale: 'Fast',
+        when_context: 'M001',
+      }, tmpDir);
 
-| # | When | Scope | Decision | Choice | Rationale | Revisable? | Made By |
-|---|------|-------|----------|--------|-----------|------------|---------|
-| D001 | M001 | arch | Use REST API | REST | Simpler | Yes | human |
-`;
+      // The pre-existing table decision was NOT in DB, so it won't appear after regen.
+      // But the new decision should be there.
+      assert.deepStrictEqual(result.id, 'D001', 'gets D001 since DB was empty');
 
-  fs.writeFileSync(mdPath, tableContent, 'utf-8');
+      const afterContent = fs.readFileSync(mdPath, 'utf-8');
+      // Table-format file gets fully regenerated — this is the normal path
+      assert.ok(
+        afterContent.includes('# Decisions Register'),
+        'table-format file still has header after save',
+      );
+      assert.ok(
+        afterContent.includes('Use Vitest'),
+        'new decision present in regenerated table',
+      );
+    } finally {
+      closeDatabase();
+      cleanupDir(tmpDir);
+    }
+  });
 
-  try {
-    const result = await saveDecisionToDb({
-      scope: 'testing',
-      decision: 'Use Vitest',
-      choice: 'Vitest',
-      rationale: 'Fast',
-      when_context: 'M001',
-    }, tmpDir);
+  test('saveDecisionToDb with no existing DECISIONS.md creates table', async () => {
+    const tmpDir = makeTmpDir();
+    const dbPath = path.join(tmpDir, '.gsd', 'gsd.db');
+    const mdPath = path.join(tmpDir, '.gsd', 'DECISIONS.md');
+    openDatabase(dbPath);
 
-    // The pre-existing table decision was NOT in DB, so it won't appear after regen.
-    // But the new decision should be there.
-    assertEq(result.id, 'D001', 'gets D001 since DB was empty');
+    // No DECISIONS.md exists at all
+    assert.ok(!fs.existsSync(mdPath), 'DECISIONS.md does not exist initially');
 
-    const afterContent = fs.readFileSync(mdPath, 'utf-8');
-    // Table-format file gets fully regenerated — this is the normal path
-    assertTrue(
-      afterContent.includes('# Decisions Register'),
-      'table-format file still has header after save',
-    );
-    assertTrue(
-      afterContent.includes('Use Vitest'),
-      'new decision present in regenerated table',
-    );
-  } finally {
-    closeDatabase();
-    cleanupDir(tmpDir);
-  }
-}
+    try {
+      const result = await saveDecisionToDb({
+        scope: 'arch',
+        decision: 'Brand new decision',
+        choice: 'Option A',
+        rationale: 'Best fit',
+      }, tmpDir);
 
-console.log('\n── saveDecisionToDb with no existing DECISIONS.md creates table ──');
+      assert.deepStrictEqual(result.id, 'D001', 'first decision gets D001');
+      assert.ok(fs.existsSync(mdPath), 'DECISIONS.md created');
 
-{
-  const tmpDir = makeTmpDir();
-  const dbPath = path.join(tmpDir, '.gsd', 'gsd.db');
-  const mdPath = path.join(tmpDir, '.gsd', 'DECISIONS.md');
-  openDatabase(dbPath);
+      const content = fs.readFileSync(mdPath, 'utf-8');
+      assert.ok(content.includes('# Decisions Register'), 'new file has header');
+      assert.ok(content.includes('Brand new decision'), 'new file has decision');
+    } finally {
+      closeDatabase();
+      cleanupDir(tmpDir);
+    }
+  });
 
-  // No DECISIONS.md exists at all
-  assertTrue(!fs.existsSync(mdPath), 'DECISIONS.md does not exist initially');
+  // ═══════════════════════════════════════════════════════════════════════════
 
-  try {
-    const result = await saveDecisionToDb({
-      scope: 'arch',
-      decision: 'Brand new decision',
-      choice: 'Option A',
-      rationale: 'Best fit',
-    }, tmpDir);
-
-    assertEq(result.id, 'D001', 'first decision gets D001');
-    assertTrue(fs.existsSync(mdPath), 'DECISIONS.md created');
-
-    const content = fs.readFileSync(mdPath, 'utf-8');
-    assertTrue(content.includes('# Decisions Register'), 'new file has header');
-    assertTrue(content.includes('Brand new decision'), 'new file has decision');
-  } finally {
-    closeDatabase();
-    cleanupDir(tmpDir);
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-
-report();
+});

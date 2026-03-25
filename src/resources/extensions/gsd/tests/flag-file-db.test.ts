@@ -1,3 +1,5 @@
+import { describe, test } from 'node:test';
+import assert from 'node:assert/strict';
 /**
  * flag-file-db.test.ts — Verify that REPLAN.md and REPLAN-TRIGGER.md
  * flag-file detection in deriveStateFromDb() works from DB-only data
@@ -24,10 +26,6 @@ import {
   insertReplanHistory,
   _getAdapter,
 } from '../gsd-db.ts';
-import { createTestContext } from './test-helpers.ts';
-
-const { assertEq, assertTrue, report } = createTestContext();
-
 // ─── Fixture Helpers ───────────────────────────────────────────────────────
 
 function createFixtureBase(): string {
@@ -78,11 +76,10 @@ const TASK_SUMMARY_STUB = `---\nblocker_discovered: false\n---\n# T01 Summary\nD
 // Tests
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function main(): Promise<void> {
+describe('flag-file-db', async () => {
 
   // ─── Test 1: blocker_discovered + no replan_history → replanning-slice ──
-  console.log('\n=== flag-file-db: blocker + no history → replanning ===');
-  {
+  test('flag-file-db: blocker + no history → replanning', async () => {
     const base = createFixtureBase();
     try {
       // Write disk files needed by deriveStateFromDb (roadmap check, task dir check)
@@ -91,7 +88,7 @@ async function main(): Promise<void> {
       writeFile(base, 'milestones/M001/slices/S01/tasks/T02-PLAN.md', TASK_PLAN_STUB);
 
       openDatabase(':memory:');
-      assertTrue(isDbAvailable(), 'test1: DB is available');
+      assert.ok(isDbAvailable(), 'test1: DB is available');
 
       insertMilestone({ id: 'M001', title: 'Flag-File DB Test', status: 'active' });
       insertSlice({ id: 'S01', milestoneId: 'M001', title: 'Test Slice', status: 'active', risk: 'low', depends: [] });
@@ -102,20 +99,19 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const state = await deriveStateFromDb(base);
 
-      assertEq(state.phase, 'replanning-slice', 'test1: phase is replanning-slice');
-      assertTrue(state.blockers.length > 0, 'test1: has blockers');
-      assertTrue(state.blockers[0]?.includes('blocker'), 'test1: blocker message mentions blocker');
+      assert.deepStrictEqual(state.phase, 'replanning-slice', 'test1: phase is replanning-slice');
+      assert.ok(state.blockers.length > 0, 'test1: has blockers');
+      assert.ok(state.blockers[0]?.includes('blocker'), 'test1: blocker message mentions blocker');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 2: blocker_discovered + replan_history exists → loop protection → executing ──
-  console.log('\n=== flag-file-db: blocker + history → loop protection ===');
-  {
+  test('flag-file-db: blocker + history → loop protection', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
@@ -139,18 +135,17 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const state = await deriveStateFromDb(base);
 
-      assertEq(state.phase, 'executing', 'test2: phase is executing (loop protection)');
+      assert.deepStrictEqual(state.phase, 'executing', 'test2: phase is executing (loop protection)');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 3: replan_triggered_at set + no replan_history → replanning-slice ──
-  console.log('\n=== flag-file-db: trigger column + no history → replanning ===');
-  {
+  test('flag-file-db: trigger column + no history → replanning', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
@@ -173,20 +168,19 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const state = await deriveStateFromDb(base);
 
-      assertEq(state.phase, 'replanning-slice', 'test3: phase is replanning-slice');
-      assertTrue(state.blockers.length > 0, 'test3: has blockers');
-      assertTrue(state.blockers[0]?.includes('Triage replan trigger'), 'test3: blocker message mentions triage trigger');
+      assert.deepStrictEqual(state.phase, 'replanning-slice', 'test3: phase is replanning-slice');
+      assert.ok(state.blockers.length > 0, 'test3: has blockers');
+      assert.ok(state.blockers[0]?.includes('Triage replan trigger'), 'test3: blocker message mentions triage trigger');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 4: replan_triggered_at set + replan_history exists → loop protection ──
-  console.log('\n=== flag-file-db: trigger column + history → loop protection ===');
-  {
+  test('flag-file-db: trigger column + history → loop protection', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
@@ -216,18 +210,17 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const state = await deriveStateFromDb(base);
 
-      assertEq(state.phase, 'executing', 'test4: phase is executing (loop protection)');
+      assert.deepStrictEqual(state.phase, 'executing', 'test4: phase is executing (loop protection)');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Test 5: no blocker, no trigger → phase is executing ──────────────
-  console.log('\n=== flag-file-db: no blocker, no trigger → executing ===');
-  {
+  test('flag-file-db: no blocker, no trigger → executing', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
@@ -245,20 +238,19 @@ async function main(): Promise<void> {
       invalidateStateCache();
       const state = await deriveStateFromDb(base);
 
-      assertEq(state.phase, 'executing', 'test5: phase is executing');
-      assertEq(state.activeTask?.id, 'T02', 'test5: activeTask is T02');
-      assertEq(state.blockers.length, 0, 'test5: no blockers');
+      assert.deepStrictEqual(state.phase, 'executing', 'test5: phase is executing');
+      assert.deepStrictEqual(state.activeTask?.id, 'T02', 'test5: activeTask is T02');
+      assert.deepStrictEqual(state.blockers.length, 0, 'test5: no blockers');
 
       closeDatabase();
     } finally {
       closeDatabase();
       cleanup(base);
     }
-  }
+  });
 
   // ─── Diagnostic test: DB column inspection ──────────────────────────
-  console.log('\n=== flag-file-db: replan_triggered_at column is queryable ===');
-  {
+  test('flag-file-db: replan_triggered_at column is queryable', () => {
     openDatabase(':memory:');
 
     insertMilestone({ id: 'M001', title: 'Diagnostic', status: 'active' });
@@ -269,7 +261,7 @@ async function main(): Promise<void> {
     const before = adapter!.prepare(
       "SELECT id, replan_triggered_at FROM slices WHERE milestone_id = :mid",
     ).get({ ":mid": "M001" }) as Record<string, unknown>;
-    assertEq(before["replan_triggered_at"], null, 'diagnostic: replan_triggered_at initially null');
+    assert.deepStrictEqual(before["replan_triggered_at"], null, 'diagnostic: replan_triggered_at initially null');
 
     // After setting
     adapter!.prepare(
@@ -279,12 +271,8 @@ async function main(): Promise<void> {
     const after = adapter!.prepare(
       "SELECT id, replan_triggered_at FROM slices WHERE milestone_id = :mid",
     ).get({ ":mid": "M001" }) as Record<string, unknown>;
-    assertEq(after["replan_triggered_at"], "2025-01-01T00:00:00Z", 'diagnostic: replan_triggered_at is set');
+    assert.deepStrictEqual(after["replan_triggered_at"], "2025-01-01T00:00:00Z", 'diagnostic: replan_triggered_at is set');
 
     closeDatabase();
-  }
-
-  report();
-}
-
-main();
+  });
+});

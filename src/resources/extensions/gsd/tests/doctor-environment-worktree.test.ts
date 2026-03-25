@@ -1,3 +1,5 @@
+import { describe, test } from 'node:test';
+import assert from 'node:assert/strict';
 /**
  * doctor-environment-worktree.test.ts — Worktree-aware dependency checks (#2303).
  *
@@ -19,10 +21,6 @@ import {
   environmentResultsToDoctorIssues,
   checkEnvironmentHealth,
 } from "../doctor-environment.ts";
-import { createTestContext } from "./test-helpers.ts";
-
-const { assertEq, assertTrue, report } = createTestContext();
-
 /** Create a directory tree with files. */
 function createDir(files: Record<string, string> = {}): string {
   const dir = mkdtempSync(join(tmpdir(), "gsd-wt-env-"));
@@ -34,13 +32,12 @@ function createDir(files: Record<string, string> = {}): string {
   return dir;
 }
 
-async function main(): Promise<void> {
+describe('doctor-environment-worktree', async () => {
   const cleanups: string[] = [];
 
   try {
     // ── Reproduction: worktree path without node_modules ───────────────
-    console.log("\n=== worktree: missing node_modules should NOT error when project root has them ===");
-    {
+    test('worktree: missing node_modules should NOT error when project root has them', () => {
       // Simulate project root with node_modules
       const projectRoot = createDir({
         "package.json": JSON.stringify({ name: "test-project" }),
@@ -62,15 +59,14 @@ async function main(): Promise<void> {
 
       // Before fix: this would return status "error" with "node_modules missing"
       // After fix: should return "ok" because project root has node_modules
-      assertTrue(
+      assert.ok(
         depsCheck === undefined || depsCheck.status !== "error",
         "worktree should not report env_dependencies error when project root has node_modules",
       );
-    }
+    });
 
     // ── Worktree with NO node_modules anywhere should still error ──────
-    console.log("\n=== worktree: missing node_modules everywhere should still error ===");
-    {
+    test('worktree: missing node_modules everywhere should still error', () => {
       const projectRoot = createDir({
         "package.json": JSON.stringify({ name: "test-project" }),
       });
@@ -86,13 +82,12 @@ async function main(): Promise<void> {
 
       const results = runEnvironmentChecks(worktreeDir);
       const depsCheck = results.find(r => r.name === "dependencies");
-      assertTrue(depsCheck !== undefined, "dependencies check still runs in worktree");
-      assertEq(depsCheck!.status, "error", "reports error when node_modules missing everywhere");
-    }
+      assert.ok(depsCheck !== undefined, "dependencies check still runs in worktree");
+      assert.deepStrictEqual(depsCheck!.status, "error", "reports error when node_modules missing everywhere");
+    });
 
     // ── Worktree env_dependencies not in doctor issues ──────────────────
-    console.log("\n=== worktree: checkEnvironmentHealth should not add env_dependencies for valid worktree ===");
-    {
+    test('worktree: checkEnvironmentHealth should not add env_dependencies for valid worktree', async () => {
       const projectRoot = createDir({
         "package.json": JSON.stringify({ name: "test-project" }),
       });
@@ -109,29 +104,27 @@ async function main(): Promise<void> {
       const issues: any[] = [];
       await checkEnvironmentHealth(worktreeDir, issues);
       const depIssue = issues.find(i => i.code === "env_dependencies");
-      assertEq(
+      assert.deepStrictEqual(
         depIssue,
         undefined,
         "no env_dependencies issue for worktree with project root node_modules",
       );
-    }
+    });
 
     // ── Non-worktree path still catches missing node_modules ───────────
-    console.log("\n=== non-worktree: missing node_modules still detected ===");
-    {
+    test('non-worktree: missing node_modules still detected', () => {
       const dir = createDir({
         "package.json": JSON.stringify({ name: "test" }),
       });
       cleanups.push(dir);
       const results = runEnvironmentChecks(dir);
       const depsCheck = results.find(r => r.name === "dependencies");
-      assertTrue(depsCheck !== undefined, "dependencies check runs");
-      assertEq(depsCheck!.status, "error", "missing node_modules is an error for non-worktree");
-    }
+      assert.ok(depsCheck !== undefined, "dependencies check runs");
+      assert.deepStrictEqual(depsCheck!.status, "error", "missing node_modules is an error for non-worktree");
+    });
 
     // ── GSD_WORKTREE env var detection ─────────────────────────────────
-    console.log("\n=== GSD_WORKTREE env: should resolve project root node_modules ===");
-    {
+    test('GSD_WORKTREE env: should resolve project root node_modules', () => {
       const projectRoot = createDir({
         "package.json": JSON.stringify({ name: "test-project" }),
       });
@@ -150,7 +143,7 @@ async function main(): Promise<void> {
         process.env.GSD_WORKTREE = projectRoot;
         const results = runEnvironmentChecks(someDir);
         const depsCheck = results.find(r => r.name === "dependencies");
-        assertTrue(
+        assert.ok(
           depsCheck === undefined || depsCheck.status !== "error",
           "GSD_WORKTREE env allows fallback to project root node_modules",
         );
@@ -161,15 +154,11 @@ async function main(): Promise<void> {
           process.env.GSD_WORKTREE = origEnv;
         }
       }
-    }
+    });
 
   } finally {
     for (const dir of cleanups) {
       try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
     }
   }
-
-  report();
-}
-
-main();
+});
