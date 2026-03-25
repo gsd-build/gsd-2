@@ -10,30 +10,30 @@ import { runGSDDoctor } from "../doctor.ts";
 describe('requirements', () => {
   test('requirement counts parser', () => {
     const counts = parseRequirementCounts(`# Requirements
-  
-  ## Active
-  
-  ### R001 — Foo
-  - Status: active
-  
-  ### R002 — Bar
-  - Status: blocked
-  
-  ## Validated
-  
-  ### R010 — Baz
-  - Status: validated
-  
-  ## Deferred
-  
-  ### R020 — Qux
-  - Status: deferred
-  
-  ## Out of Scope
-  
-  ### R030 — No
-  - Status: out-of-scope
-  `);
+
+## Active
+
+### R001 — Foo
+- Status: active
+
+### R002 — Bar
+- Status: blocked
+
+## Validated
+
+### R010 — Baz
+- Status: validated
+
+## Deferred
+
+### R020 — Qux
+- Status: deferred
+
+## Out of Scope
+
+### R030 — No
+- Status: out-of-scope
+`);
     assert.deepStrictEqual(counts.active, 2, "counts active requirements by section");
     assert.deepStrictEqual(counts.validated, 1, "counts validated requirements");
     assert.deepStrictEqual(counts.deferred, 1, "counts deferred requirements");
