@@ -250,9 +250,9 @@ const STATE_REBUILD_MIN_INTERVAL_MS = 30_000;
 
 export function shouldUseWorktreeIsolation(): boolean {
   const prefs = loadEffectiveGSDPreferences()?.preferences?.git;
-  if (prefs?.isolation === "none") return false;
-  if (prefs?.isolation === "branch") return false;
-  return true; // default: worktree
+  if (prefs?.isolation === "worktree") return true;
+  // Default is false — worktree isolation requires explicit opt-in
+  return false;
 }
 
 /** Crash recovery prompt — set by startAuto, consumed by the main loop */

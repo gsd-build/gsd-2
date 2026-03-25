@@ -497,13 +497,17 @@ export function resolvePreDispatchHooks(): PreDispatchHookConfig[] {
 
 /**
  * Resolve the effective git isolation mode from preferences.
- * Returns "worktree" (default), "branch", or "none".
+ * Returns "none" (default), "worktree", or "branch".
+ *
+ * Default is "none" so GSD works out of the box without preferences.md.
+ * Worktree isolation requires explicit opt-in because it depends on git
+ * branch infrastructure that must be set up before use.
  */
 export function getIsolationMode(): "none" | "worktree" | "branch" {
   const prefs = loadEffectiveGSDPreferences()?.preferences?.git;
-  if (prefs?.isolation === "none") return "none";
+  if (prefs?.isolation === "worktree") return "worktree";
   if (prefs?.isolation === "branch") return "branch";
-  return "worktree"; // default
+  return "none"; // default — no isolation, work on current branch
 }
 
 export function resolveParallelConfig(prefs: GSDPreferences | undefined): import("./types.js").ParallelConfig {

@@ -25,7 +25,7 @@ export async function checkGitHealth(
   issues: DoctorIssue[],
   fixesApplied: string[],
   shouldFix: (code: DoctorIssueCode) => boolean,
-  isolationMode: "none" | "worktree" | "branch" = "worktree",
+  isolationMode: "none" | "worktree" | "branch" = "none",
 ): Promise<void> {
   // Degrade gracefully if not a git repo
   if (!nativeIsRepo(basePath)) {

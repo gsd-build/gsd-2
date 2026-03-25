@@ -41,18 +41,16 @@ test("git.merge_to_main produces deprecation warning", () => {
 });
 
 
-test("getIsolationMode defaults to worktree when preferences have no isolation setting", () => {
+test("getIsolationMode defaults to none when preferences have no isolation setting", () => {
   // Validate the default via validatePreferences: when no isolation is set,
-  // preferences.git.isolation is undefined, and getIsolationMode returns "worktree".
-  // We test the function's logic by verifying its documented default.
+  // preferences.git.isolation is undefined, and getIsolationMode returns "none".
+  // Default changed from "worktree" to "none" so GSD works out of the box
+  // without preferences.md (#2480).
   const { preferences } = validatePreferences({});
   assert.equal(preferences.git?.isolation, undefined, "no isolation in empty prefs");
-  // The function returns "worktree" when prefs?.git?.isolation is not "none" or "branch"
-  // This is a compile-time-verifiable truth from the function body — test it directly
-  // by constructing the same conditions getIsolationMode checks.
   const isolation = preferences.git?.isolation;
-  const expected = isolation === "none" ? "none" : isolation === "branch" ? "branch" : "worktree";
-  assert.equal(expected, "worktree", "default isolation mode is worktree");
+  const expected = isolation === "worktree" ? "worktree" : isolation === "branch" ? "branch" : "none";
+  assert.equal(expected, "none", "default isolation mode is none");
 });
 
 // ── Mode defaults ────────────────────────────────────────────────────────────
@@ -63,7 +61,7 @@ test("solo mode applies correct defaults", () => {
   assert.equal(result.git?.push_branches, false);
   assert.equal(result.git?.pre_merge_check, false);
   assert.equal(result.git?.merge_strategy, "squash");
-  assert.equal(result.git?.isolation, "worktree");
+  assert.equal(result.git?.isolation, "none");
   assert.equal(result.unique_milestone_ids, false);
 });
 
