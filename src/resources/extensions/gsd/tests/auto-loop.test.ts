@@ -367,9 +367,6 @@ function makeMockDeps(
     getPriorSliceCompletionBlocker: () => null,
     getMainBranch: () => "main",
     closeoutUnit: async () => {},
-    verifyExpectedArtifact: () => true,
-    clearUnitRuntimeRecord: () => {},
-    writeUnitRuntimeRecord: () => {},
     recordOutcome: () => {},
     writeLock: () => {},
     captureAvailableSkills: () => {},
@@ -713,10 +710,10 @@ test("crash lock records session file from AFTER newSession, not before (#1710)"
         prompt: "do the thing",
       };
     },
-    writeLock: (_base: string, _ut: string, _uid: string, _count: number, sessionFile?: string) => {
+    writeLock: (_base: string, _ut: string, _uid: string, sessionFile?: string) => {
       writeLockCalls.push({ sessionFile });
     },
-    updateSessionLock: (_base: string, _ut: string, _uid: string, _count: number, sessionFile?: string) => {
+    updateSessionLock: (_base: string, _ut: string, _uid: string, sessionFile?: string) => {
       updateSessionLockCalls.push({ sessionFile });
     },
     getSessionFile: (ctxArg: any) => {
@@ -1104,7 +1101,7 @@ test("auto.ts startAuto calls autoLoop (not dispatchNextUnit as first dispatch)"
   );
 });
 
-test("startAuto calls selfHealRuntimeRecords before autoLoop (#1727)", () => {
+test("startAuto calls selfHealRuntimeRecords before autoLoop (#1727)", { skip: "selfHealRuntimeRecords moved to crash-recovery pipeline in v3" }, () => {
   const src = readFileSync(
     resolve(import.meta.dirname, "..", "auto.ts"),
     "utf-8",
@@ -1990,7 +1987,6 @@ test("autoLoop does NOT reject non-execute-task units with 0 tool calls (#1833)"
       });
     },
     getLedger: () => mockLedger,
-    verifyExpectedArtifact: () => true,
     postUnitPostVerification: async () => {
       deps.callLog.push("postUnitPostVerification");
       s.active = false;
@@ -2014,10 +2010,10 @@ test("autoLoop does NOT reject non-execute-task units with 0 tool calls (#1833)"
     "should NOT flag non-execute-task units with 0 tool calls",
   );
 
-  // The unit should have been added to completedUnits normally
+  // Verify the loop ran to completion (postUnitPostVerification was called)
   assert.ok(
-    s.completedUnits.length >= 1,
-    "complete-slice with 0 tool calls should still be marked as completed",
+    deps.callLog.includes("postUnitPostVerification"),
+    "complete-slice with 0 tool calls should still complete the post-unit pipeline",
   );
 });
 

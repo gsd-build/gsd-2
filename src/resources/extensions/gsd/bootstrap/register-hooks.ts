@@ -7,6 +7,7 @@ import { buildMilestoneFileName, resolveMilestonePath, resolveSliceFile, resolve
 import { buildBeforeAgentStartResult } from "./system-context.js";
 import { handleAgentEnd } from "./agent-end-recovery.js";
 import { clearDiscussionFlowState, isDepthVerified, isQueuePhaseActive, markDepthVerified, resetWriteGateState, shouldBlockContextWrite } from "./write-gate.js";
+import { isBlockedStateFile, isBashWriteToStateFile, BLOCKED_WRITE_ERROR } from "../write-intercept.js";
 import { getDiscussionMilestoneId } from "../guided-flow.js";
 import { loadToolApiKeys } from "../commands-config.js";
 import { loadFile, saveFile, formatContinue } from "../files.js";
@@ -135,7 +136,28 @@ export function registerHooks(pi: ExtensionAPI): void {
       return { block: true, reason: loopCheck.reason };
     }
 
+    // ── Single-writer engine: block direct writes to STATE.md ──────────
+    // Covers write, edit, and bash tools to prevent bypass vectors.
+    if (isToolCallEventType("write", event)) {
+      if (isBlockedStateFile(event.input.path)) {
+        return { block: true, reason: BLOCKED_WRITE_ERROR };
+      }
+    }
+
+    if (isToolCallEventType("edit", event)) {
+      if (isBlockedStateFile(event.input.path)) {
+        return { block: true, reason: BLOCKED_WRITE_ERROR };
+      }
+    }
+
+    if (isToolCallEventType("bash", event)) {
+      if (isBashWriteToStateFile(event.input.command)) {
+        return { block: true, reason: BLOCKED_WRITE_ERROR };
+      }
+    }
+
     if (!isToolCallEventType("write", event)) return;
+
     const result = shouldBlockContextWrite(
       event.toolName,
       event.input.path,

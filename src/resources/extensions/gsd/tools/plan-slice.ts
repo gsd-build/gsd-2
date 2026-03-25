@@ -1,6 +1,7 @@
 import { clearParseCache } from "../files.js";
 import {
   transaction,
+  getMilestone,
   getSlice,
   insertTask,
   upsertSlicePlanning,
@@ -9,6 +10,9 @@ import {
 } from "../gsd-db.js";
 import { invalidateStateCache } from "../state.js";
 import { renderPlanFromDb } from "../markdown-renderer.js";
+import { renderAllProjections } from "../workflow-projections.js";
+import { writeManifest } from "../workflow-manifest.js";
+import { appendEvent } from "../workflow-events.js";
 
 export interface PlanSliceTaskInput {
   taskId: string;
@@ -32,6 +36,10 @@ export interface PlanSliceParams {
   integrationClosure: string;
   observabilityImpact: string;
   tasks: PlanSliceTaskInput[];
+  /** Optional caller-provided identity for audit trail */
+  actorName?: string;
+  /** Optional caller-provided reason this action was triggered */
+  triggerReason?: string;
 }
 
 export interface PlanSliceResult {
@@ -136,9 +144,20 @@ export async function handlePlanSlice(
     return { error: `validation failed: ${(err as Error).message}` };
   }
 
+  const parentMilestone = getMilestone(params.milestoneId);
+  if (!parentMilestone) {
+    return { error: `milestone not found: ${params.milestoneId}` };
+  }
+  if (parentMilestone.status === "complete" || parentMilestone.status === "done") {
+    return { error: `cannot plan slice in a closed milestone: ${params.milestoneId} (status: ${parentMilestone.status})` };
+  }
+
   const parentSlice = getSlice(params.milestoneId, params.sliceId);
   if (!parentSlice) {
     return { error: `missing parent slice: ${params.milestoneId}/${params.sliceId}` };
+  }
+  if (parentSlice.status === "complete" || parentSlice.status === "done") {
+    return { error: `cannot re-plan slice ${params.sliceId}: it is already complete — use gsd_slice_reopen first` };
   }
 
   try {
@@ -180,6 +199,25 @@ export async function handlePlanSlice(
     const renderResult = await renderPlanFromDb(basePath, params.milestoneId, params.sliceId);
     invalidateStateCache();
     clearParseCache();
+
+    // ── Post-mutation hook: projections, manifest, event log ─────────────
+    try {
+      await renderAllProjections(basePath, params.milestoneId);
+      writeManifest(basePath);
+      appendEvent(basePath, {
+        cmd: "plan-slice",
+        params: { milestoneId: params.milestoneId, sliceId: params.sliceId },
+        ts: new Date().toISOString(),
+        actor: "agent",
+        actor_name: params.actorName,
+        trigger_reason: params.triggerReason,
+      });
+    } catch (hookErr) {
+      process.stderr.write(
+        `gsd: plan-slice post-mutation hook warning: ${(hookErr as Error).message}\n`,
+      );
+    }
+
     return {
       milestoneId: params.milestoneId,
       sliceId: params.sliceId,

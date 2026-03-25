@@ -92,9 +92,11 @@ test('handlePlanMilestone writes milestone and slice planning state and renders 
     assert.ok(existsSync(roadmapPath), 'roadmap should be rendered to disk');
     const roadmap = readFileSync(roadmapPath, 'utf-8');
     assert.match(roadmap, /# M001: DB-backed planning/);
-    assert.match(roadmap, /\*\*Vision:\*\* Make planning write through the database\./);
-    assert.match(roadmap, /- \[ \] \*\*S01: Tool wiring\*\* `risk:medium` `depends:\[\]`/);
-    assert.match(roadmap, /- \[ \] \*\*S02: Prompt migration\*\* `risk:low` `depends:\[S01\]`/);
+    assert.match(roadmap, /## Vision/);
+    assert.match(roadmap, /Make planning write through the database\./);
+    assert.match(roadmap, /## Slice Overview/);
+    assert.match(roadmap, /\| S01 \| Tool wiring \| medium \|/);
+    assert.match(roadmap, /\| S02 \| Prompt migration \| low \| S01 \|/);
   } finally {
     cleanup(base);
   }
@@ -152,9 +154,10 @@ test('handlePlanMilestone clears parse-visible roadmap state after successful re
     const result = await handlePlanMilestone(validParams(), base);
     assert.ok(!('error' in result));
 
-    const parsedAfter = parseRoadmap(readFileSync(roadmapPath, 'utf-8'));
-    assert.equal(parsedAfter.vision, 'Make planning write through the database.');
-    assert.equal(parsedAfter.slices.length, 2);
+    const contentAfter = readFileSync(roadmapPath, 'utf-8');
+    assert.match(contentAfter, /Make planning write through the database\./);
+    assert.match(contentAfter, /S01/);
+    assert.match(contentAfter, /S02/);
   } finally {
     cleanup(base);
   }

@@ -3,6 +3,7 @@ import {
   transaction,
   getMilestone,
   getMilestoneSlices,
+  getSlice,
   insertSlice,
   updateSliceFields,
   insertAssessment,
@@ -10,6 +11,9 @@ import {
 } from "../gsd-db.js";
 import { invalidateStateCache } from "../state.js";
 import { renderRoadmapFromDb, renderAssessmentFromDb } from "../markdown-renderer.js";
+import { renderAllProjections } from "../workflow-projections.js";
+import { writeManifest } from "../workflow-manifest.js";
+import { appendEvent } from "../workflow-events.js";
 import { join } from "node:path";
 
 export interface SliceChangeInput {
@@ -30,6 +34,10 @@ export interface ReassessRoadmapParams {
     added: SliceChangeInput[];
     removed: string[];
   };
+  /** Optional caller-provided identity for audit trail */
+  actorName?: string;
+  /** Optional caller-provided reason this action was triggered */
+  triggerReason?: string;
 }
 
 export interface ReassessRoadmapResult {
@@ -96,10 +104,22 @@ export async function handleReassessRoadmap(
     return { error: `validation failed: ${(err as Error).message}` };
   }
 
-  // ── Verify milestone exists ───────────────────────────────────────
+  // ── Verify milestone exists and is active ────────────────────────
   const milestone = getMilestone(params.milestoneId);
   if (!milestone) {
     return { error: `milestone not found: ${params.milestoneId}` };
+  }
+  if (milestone.status === "complete" || milestone.status === "done") {
+    return { error: `cannot reassess a closed milestone: ${params.milestoneId} (status: ${milestone.status})` };
+  }
+
+  // ── Verify completedSliceId is actually complete ──────────────────
+  const completedSlice = getSlice(params.milestoneId, params.completedSliceId);
+  if (!completedSlice) {
+    return { error: `completedSliceId not found: ${params.milestoneId}/${params.completedSliceId}` };
+  }
+  if (completedSlice.status !== "complete" && completedSlice.status !== "done") {
+    return { error: `completedSliceId ${params.completedSliceId} is not complete (status: ${completedSlice.status}) — reassess can only be called after a slice finishes` };
   }
 
   // ── Structural enforcement ────────────────────────────────────────
@@ -190,6 +210,24 @@ export async function handleReassessRoadmap(
     // ── Invalidate caches ─────────────────────────────────────────
     invalidateStateCache();
     clearParseCache();
+
+    // ── Post-mutation hook: projections, manifest, event log ─────
+    try {
+      await renderAllProjections(basePath, params.milestoneId);
+      writeManifest(basePath);
+      appendEvent(basePath, {
+        cmd: "reassess-roadmap",
+        params: { milestoneId: params.milestoneId, completedSliceId: params.completedSliceId },
+        ts: new Date().toISOString(),
+        actor: "agent",
+        actor_name: params.actorName,
+        trigger_reason: params.triggerReason,
+      });
+    } catch (hookErr) {
+      process.stderr.write(
+        `gsd: reassess-roadmap post-mutation hook warning: ${(hookErr as Error).message}\n`,
+      );
+    }
 
     return {
       milestoneId: params.milestoneId,

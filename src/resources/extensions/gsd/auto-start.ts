@@ -494,7 +494,6 @@ export async function bootstrapAutoSession(
     });
     s.autoStartTime = Date.now();
     s.resourceVersionOnStart = readResourceVersion();
-    s.completedUnits = [];
     s.pendingQuickTasks = [];
     s.currentUnit = null;
     s.currentMilestoneId = state.activeMilestone?.id ?? null;
@@ -624,9 +623,8 @@ export async function bootstrapAutoSession(
       lockBase(),
       "starting",
       s.currentMilestoneId ?? "unknown",
-      0,
     );
-    writeLock(lockBase(), "starting", s.currentMilestoneId ?? "unknown", 0);
+    writeLock(lockBase(), "starting", s.currentMilestoneId ?? "unknown");
 
     // Secrets collection gate
     const mid = state.activeMilestone!.id;

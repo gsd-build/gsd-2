@@ -58,17 +58,18 @@ test("guided-resume-task prompt preserves recovery state until work is supersede
   assert.doesNotMatch(prompt, /Delete the continue file after reading it/i);
 });
 
-// ─── Prompt migration: execute-task → gsd_task_complete ───────────────
+// ─── Prompt migration: execute-task → gsd_complete_task ───────────────
 
-test("execute-task prompt references gsd_task_complete tool", () => {
+test("execute-task prompt references gsd_complete_task tool", () => {
   const prompt = readPrompt("execute-task");
-  assert.match(prompt, /gsd_task_complete/);
+  assert.match(prompt, /gsd_complete_task/);
 });
 
-test("execute-task prompt does not instruct LLM to write summary file manually", () => {
+test("execute-task prompt instructs writing task summary before tool call", () => {
   const prompt = readPrompt("execute-task");
-  // Should not contain "Write {{taskSummaryPath}}" as an action instruction
-  assert.doesNotMatch(prompt, /^\d+\.\s+Write `?\{\{taskSummaryPath\}\}`?/m);
+  // The prompt instructs writing the summary file AND calling the tool
+  assert.match(prompt, /\{\{taskSummaryPath\}\}/);
+  assert.match(prompt, /gsd_complete_task/);
 });
 
 test("execute-task prompt does not instruct LLM to toggle checkboxes manually", () => {
@@ -93,12 +94,11 @@ test("guided-execute-task prompt does not instruct manual file write", () => {
   assert.doesNotMatch(prompt, /Write `?\{\{taskId\}\}-SUMMARY\.md`?.*mark it done/i);
 });
 
-// ─── Prompt migration: complete-slice → gsd_slice_complete ────────────
-// These tests are for T02 — expected to fail until that task runs.
+// ─── Prompt migration: complete-slice → gsd_complete_slice ────────────
 
-test("complete-slice prompt references gsd_slice_complete tool", () => {
+test("complete-slice prompt references gsd_complete_slice tool", () => {
   const prompt = readPrompt("complete-slice");
-  assert.match(prompt, /gsd_slice_complete/);
+  assert.match(prompt, /gsd_complete_slice/);
 });
 
 test("complete-slice prompt does not instruct LLM to toggle checkboxes manually", () => {
@@ -111,10 +111,12 @@ test("guided-complete-slice prompt references gsd_slice_complete tool", () => {
   assert.match(prompt, /gsd_slice_complete/);
 });
 
-test("complete-slice prompt does not instruct LLM to write summary/UAT files manually", () => {
+test("complete-slice prompt instructs writing summary and UAT files before tool call", () => {
   const prompt = readPrompt("complete-slice");
-  assert.doesNotMatch(prompt, /^\d+\.\s+Write `?\{\{sliceSummaryPath\}\}/m);
-  assert.doesNotMatch(prompt, /^\d+\.\s+Write `?\{\{sliceUatPath\}\}/m);
+  // The prompt instructs writing the summary AND UAT files, then calling the tool
+  assert.match(prompt, /\{\{sliceSummaryPath\}\}/);
+  assert.match(prompt, /\{\{sliceUatPath\}\}/);
+  assert.match(prompt, /gsd_complete_slice/);
 });
 
 test("complete-slice prompt preserves decisions and knowledge review steps", () => {
@@ -127,7 +129,6 @@ test("complete-slice prompt still contains template variables for context", () =
   const prompt = readPrompt("complete-slice");
   assert.match(prompt, /\{\{sliceSummaryPath\}\}/);
   assert.match(prompt, /\{\{sliceUatPath\}\}/);
-  assert.match(prompt, /\{\{roadmapPath\}\}/);
 });
 
 test("plan-milestone prompt references DB-backed planning tool and explicitly forbids manual roadmap writes", () => {

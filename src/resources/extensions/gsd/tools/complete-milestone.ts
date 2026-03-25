@@ -11,12 +11,17 @@ import { mkdirSync } from "node:fs";
 
 import {
   transaction,
+  getMilestone,
   getMilestoneSlices,
+  getSliceTasks,
   _getAdapter,
 } from "../gsd-db.js";
 import { resolveMilestonePath, clearPathCache } from "../paths.js";
 import { saveFile, clearParseCache } from "../files.js";
 import { invalidateStateCache } from "../state.js";
+import { renderAllProjections } from "../workflow-projections.js";
+import { writeManifest } from "../workflow-manifest.js";
+import { appendEvent } from "../workflow-events.js";
 
 export interface CompleteMilestoneParams {
   milestoneId: string;
@@ -32,6 +37,10 @@ export interface CompleteMilestoneParams {
   followUps: string;
   deviations: string;
   verificationPassed: boolean;
+  /** Optional caller-provided identity for audit trail */
+  actorName?: string;
+  /** Optional caller-provided reason this action was triggered */
+  triggerReason?: string;
 }
 
 export interface CompleteMilestoneResult {
@@ -114,22 +123,48 @@ export async function handleCompleteMilestone(
     return { error: "verification did not pass — milestone completion blocked. verificationPassed must be explicitly set to true after all verification steps succeed" };
   }
 
-  // ── Verify all slices are complete ───────────────────────────────────────
-  const slices = getMilestoneSlices(params.milestoneId);
-  if (slices.length === 0) {
-    return { error: `no slices found for milestone ${params.milestoneId}` };
-  }
-
-  const incompleteSlices = slices.filter(s => s.status !== "complete" && s.status !== "done");
-  if (incompleteSlices.length > 0) {
-    const incompleteIds = incompleteSlices.map(s => `${s.id} (status: ${s.status})`).join(", ");
-    return { error: `incomplete slices: ${incompleteIds}` };
-  }
-
-  // ── DB writes inside a transaction ──────────────────────────────────────
+  // ── Guards + DB writes inside a single transaction (prevents TOCTOU) ───
   const completedAt = new Date().toISOString();
+  let guardError: string | null = null;
 
   transaction(() => {
+    // State machine preconditions (inside txn for atomicity)
+    const milestone = getMilestone(params.milestoneId);
+    if (!milestone) {
+      guardError = `milestone not found: ${params.milestoneId}`;
+      return;
+    }
+    if (milestone.status === "complete" || milestone.status === "done") {
+      guardError = `milestone ${params.milestoneId} is already complete`;
+      return;
+    }
+
+    // Verify all slices are complete
+    const slices = getMilestoneSlices(params.milestoneId);
+    if (slices.length === 0) {
+      guardError = `no slices found for milestone ${params.milestoneId}`;
+      return;
+    }
+
+    const incompleteSlices = slices.filter(s => s.status !== "complete" && s.status !== "done");
+    if (incompleteSlices.length > 0) {
+      const incompleteIds = incompleteSlices.map(s => `${s.id} (status: ${s.status})`).join(", ");
+      guardError = `incomplete slices: ${incompleteIds}`;
+      return;
+    }
+
+    // Deep check: verify all tasks in all slices are complete
+    for (const slice of slices) {
+      const tasks = getSliceTasks(params.milestoneId, slice.id);
+      const incompleteTasks = tasks.filter(t => t.status !== "complete" && t.status !== "done");
+      if (incompleteTasks.length > 0) {
+        const ids = incompleteTasks.map(t => `${t.id} (status: ${t.status})`).join(", ");
+        guardError = `slice ${slice.id} has incomplete tasks: ${ids}`;
+        return;
+      }
+    }
+
+    // All guards passed — perform write
     const adapter = _getAdapter()!;
     adapter.prepare(
       `UPDATE milestones SET status = 'complete', completed_at = :completed_at WHERE id = :mid`,
@@ -138,6 +173,10 @@ export async function handleCompleteMilestone(
       ":mid": params.milestoneId,
     });
   });
+
+  if (guardError) {
+    return { error: guardError };
+  }
 
   // ── Filesystem operations (outside transaction) ─────────────────────────
   const summaryMd = renderMilestoneSummaryMarkdown(params);
@@ -174,6 +213,24 @@ export async function handleCompleteMilestone(
   invalidateStateCache();
   clearPathCache();
   clearParseCache();
+
+  // ── Post-mutation hook: projections, manifest, event log ───────────────
+  try {
+    await renderAllProjections(basePath, params.milestoneId);
+    writeManifest(basePath);
+    appendEvent(basePath, {
+      cmd: "complete-milestone",
+      params: { milestoneId: params.milestoneId },
+      ts: new Date().toISOString(),
+      actor: "agent",
+      actor_name: params.actorName,
+      trigger_reason: params.triggerReason,
+    });
+  } catch (hookErr) {
+    process.stderr.write(
+      `gsd: complete-milestone post-mutation hook warning: ${(hookErr as Error).message}\n`,
+    );
+  }
 
   return {
     milestoneId: params.milestoneId,

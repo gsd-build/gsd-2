@@ -7,7 +7,7 @@ import {
   writeBlockerPlaceholder,
   verifyExpectedArtifact,
   buildLoopRemediationSteps,
-} from "../auto.ts";
+} from "../auto-recovery.ts";
 import { describe, test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 

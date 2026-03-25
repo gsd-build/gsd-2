@@ -72,9 +72,11 @@ Then:
     - **Key links planned:** For every pair of artifacts that must connect, there is an explicit step that wires them.
     - **Scope sanity:** Target 2–5 steps and 3–8 files per task. 10+ steps or 12+ files — must split. Each task must be completable in a single fresh context window.
     - **Feature completeness:** Every task produces real, user-facing progress — not just internal scaffolding.
-8. If planning produced structural decisions, append them to `.gsd/DECISIONS.md`
-9. {{commitInstruction}}
+10. If planning produced structural decisions, append them to `.gsd/DECISIONS.md`
+11. {{commitInstruction}}
 
 The slice directory and tasks/ subdirectory already exist. Do NOT mkdir. All work stays in your working directory: `{{workingDirectory}}`.
+
+**You MUST write the file `{{outputPath}}` before finishing.**
 
 When done, say: "Slice {{sliceId}} planned."

@@ -53,12 +53,6 @@ import {
 } from "./session-lock.js";
 import type { SessionLockStatus } from "./session-lock.js";
 import {
-  clearUnitRuntimeRecord,
-  inspectExecuteTaskDurability,
-  readUnitRuntimeRecord,
-  writeUnitRuntimeRecord,
-} from "./unit-runtime.js";
-import {
   resolveAutoSupervisorConfig,
   loadEffectiveGSDPreferences,
   getIsolationMode,
@@ -81,7 +75,6 @@ import {
 } from "./auto-tool-tracking.js";
 import { closeoutUnit } from "./auto-unit-closeout.js";
 import { recoverTimedOutUnit } from "./auto-timeout-recovery.js";
-import { selfHealRuntimeRecords } from "./auto-recovery.js";
 import { selectAndApplyModel, resolveModelId } from "./auto-model-selection.js";
 import {
   syncProjectRootToWorktree,
@@ -155,10 +148,6 @@ import { pruneQueueOrder } from "./queue-order.js";
 
 import { debugLog, isDebugEnabled, writeDebugSummary } from "./debug-logger.js";
 import {
-  resolveExpectedArtifactPath,
-  verifyExpectedArtifact,
-  writeBlockerPlaceholder,
-  diagnoseExpectedArtifact,
   buildLoopRemediationSteps,
   reconcileMergeState,
 } from "./auto-recovery.js";
@@ -213,7 +202,6 @@ import {
   NEW_SESSION_TIMEOUT_MS,
 } from "./auto/session.js";
 import type {
-  CompletedUnit,
   CurrentUnit,
   UnitRouting,
   StartModel,
@@ -225,7 +213,6 @@ export {
   NEW_SESSION_TIMEOUT_MS,
 } from "./auto/session.js";
 export type {
-  CompletedUnit,
   CurrentUnit,
   UnitRouting,
   StartModel,
@@ -335,7 +322,6 @@ export function getAutoDashboardData(): AutoDashboardData {
       ? (s.autoStartTime > 0 ? Date.now() - s.autoStartTime : 0)
       : 0,
     currentUnit: s.currentUnit ? { ...s.currentUnit } : null,
-    completedUnits: [...s.completedUnits],
     basePath: s.basePath,
     totalCost: totals?.cost ?? 0,
     totalTokens: totals?.tokens.total ?? 0,
@@ -447,7 +433,6 @@ export function checkRemoteAutoSession(projectRoot: string): {
   unitType?: string;
   unitId?: string;
   startedAt?: string;
-  completedUnits?: number;
 } {
   const lock = readCrashLock(projectRoot);
   if (!lock) return { running: false };
@@ -463,7 +448,6 @@ export function checkRemoteAutoSession(projectRoot: string): {
     unitType: lock.unitType,
     unitId: lock.unitId,
     startedAt: lock.startedAt,
-    completedUnits: lock.completedUnits,
   };
 }
 
@@ -491,23 +475,19 @@ function clearUnitTimeout(): void {
   clearInFlightTools();
 }
 
-/** Build snapshot metric opts, enriching with continueHereFired from the runtime record. */
+/** Build snapshot metric opts. */
 function buildSnapshotOpts(
-  unitType: string,
-  unitId: string,
+  _unitType: string,
+  _unitId: string,
 ): {
   continueHereFired?: boolean;
   promptCharCount?: number;
   baselineCharCount?: number;
 } & Record<string, unknown> {
-  const runtime = s.currentUnit
-    ? readUnitRuntimeRecord(s.basePath, unitType, unitId)
-    : null;
   return {
     promptCharCount: s.lastPromptCharCount,
     baselineCharCount: s.lastBaselineCharCount,
     ...(s.currentUnitRouting ?? {}),
-    ...(runtime?.continueHereFired ? { continueHereFired: true } : {}),
   };
 }
 
@@ -848,11 +828,6 @@ export async function pauseAuto(
     } catch {
       // Non-fatal — best-effort closeout on pause
     }
-    try {
-      clearUnitRuntimeRecord(s.basePath, s.currentUnit.type, s.currentUnit.id);
-    } catch {
-      // Non-fatal
-    }
     s.currentUnit = null;
   }
 
@@ -993,9 +968,6 @@ function buildLoopDeps(): LoopDeps {
     getMainBranch,
     // Unit closeout + runtime records
     closeoutUnit,
-    verifyExpectedArtifact,
-    clearUnitRuntimeRecord,
-    writeUnitRuntimeRecord,
     recordOutcome,
     writeLock,
     captureAvailableSkills,
@@ -1168,15 +1140,6 @@ export async function startAuto(
     }
     invalidateAllCaches();
 
-    // Clean stale runtime records left from the paused session
-    try {
-      await selfHealRuntimeRecords(s.basePath, ctx);
-    } catch (e) {
-      debugLog("resume-self-heal-runtime-failed", {
-        error: e instanceof Error ? e.message : String(e),
-      });
-    }
-
     if (s.pausedSessionFile) {
       const activityDir = join(gsdRoot(s.basePath), "activity");
       const recovery = synthesizeCrashRecovery(
@@ -1200,18 +1163,13 @@ export async function startAuto(
       lockBase(),
       "resuming",
       s.currentMilestoneId ?? "unknown",
-      s.completedUnits.length,
     );
     writeLock(
       lockBase(),
       "resuming",
       s.currentMilestoneId ?? "unknown",
-      s.completedUnits.length,
     );
     logCmuxEvent(loadEffectiveGSDPreferences()?.preferences, s.stepMode ? "Step-mode resumed." : "Auto-mode resumed.", "progress");
-
-    // Clear orphaned runtime records from prior process deaths before entering the loop
-    await selfHealRuntimeRecords(s.basePath, ctx);
 
     await autoLoop(ctx, pi, s, buildLoopDeps());
     cleanupAfterLoopExit(ctx);
@@ -1243,9 +1201,6 @@ export async function startAuto(
     // Best-effort only — sidebar sync must never block auto-mode startup
   }
   logCmuxEvent(loadEffectiveGSDPreferences()?.preferences, requestedStepMode ? "Step-mode started." : "Auto-mode started.", "progress");
-
-  // Clear orphaned runtime records from prior process deaths before entering the loop
-  await selfHealRuntimeRecords(s.basePath, ctx);
 
   // Dispatch the first unit
   await autoLoop(ctx, pi, s, buildLoopDeps());
@@ -1387,7 +1342,6 @@ export async function dispatchHookUnit(
     s.basePath = targetBasePath;
     s.autoStartTime = Date.now();
     s.currentUnit = null;
-    s.completedUnits = [];
     s.pendingQuickTasks = [];
   }
 
@@ -1412,21 +1366,6 @@ export async function dispatchHookUnit(
     startedAt: hookStartedAt,
   };
 
-  writeUnitRuntimeRecord(
-    s.basePath,
-    hookUnitType,
-    triggerUnitId,
-    hookStartedAt,
-    {
-      phase: "dispatched",
-      wrapupWarningSent: false,
-      timeoutAt: null,
-      lastProgressAt: hookStartedAt,
-      progressCount: 0,
-      lastProgressKind: "dispatch",
-    },
-  );
-
   if (hookModel) {
     const availableModels = ctx.modelRegistry.getAvailable();
     const match = resolveModelId(hookModel, availableModels, ctx.model?.provider);
@@ -1450,7 +1389,6 @@ export async function dispatchHookUnit(
     lockBase(),
     hookUnitType,
     triggerUnitId,
-    s.completedUnits.length,
     sessionFile,
   );
 
@@ -1460,18 +1398,6 @@ export async function dispatchHookUnit(
   s.unitTimeoutHandle = setTimeout(async () => {
     s.unitTimeoutHandle = null;
     if (!s.active) return;
-    if (s.currentUnit) {
-      writeUnitRuntimeRecord(
-        s.basePath,
-        hookUnitType,
-        triggerUnitId,
-        hookStartedAt,
-        {
-          phase: "timeout",
-          timeoutAt: Date.now(),
-        },
-      );
-    }
     ctx.ui.notify(
       `Hook ${hookName} exceeded ${supervisor.hard_timeout_minutes ?? 30}min timeout. Pausing auto-mode.`,
       "warning",
@@ -1503,8 +1429,6 @@ export { dispatchDirectPhase } from "./auto-direct-dispatch.js";
 
 // Re-export recovery functions for external consumers
 export {
-  resolveExpectedArtifactPath,
-  verifyExpectedArtifact,
-  writeBlockerPlaceholder,
   buildLoopRemediationSteps,
 } from "./auto-recovery.js";
+export { resolveExpectedArtifactPath } from "./auto-artifact-paths.js";

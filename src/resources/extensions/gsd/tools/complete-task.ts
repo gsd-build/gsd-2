@@ -17,12 +17,19 @@ import {
   insertSlice,
   insertTask,
   insertVerificationEvidence,
+  getMilestone,
+  getSlice,
+  getTask,
   _getAdapter,
 } from "../gsd-db.js";
 import { resolveSliceFile, resolveTasksDir, clearPathCache } from "../paths.js";
+import { checkOwnership, taskUnitKey } from "../unit-ownership.js";
 import { saveFile, clearParseCache } from "../files.js";
 import { invalidateStateCache } from "../state.js";
 import { renderPlanCheckboxes } from "../markdown-renderer.js";
+import { renderAllProjections } from "../workflow-projections.js";
+import { writeManifest } from "../workflow-manifest.js";
+import { appendEvent } from "../workflow-events.js";
 
 export interface CompleteTaskResult {
   taskId: string;
@@ -131,10 +138,43 @@ export async function handleCompleteTask(
     return { error: "milestoneId is required and must be a non-empty string" };
   }
 
-  // ── DB writes inside a transaction ──────────────────────────────────────
+  // ── Ownership check (opt-in: only enforced when claim file exists) ──────
+  const ownershipErr = checkOwnership(
+    basePath,
+    taskUnitKey(params.milestoneId, params.sliceId, params.taskId),
+    params.actorName,
+  );
+  if (ownershipErr) {
+    return { error: ownershipErr };
+  }
+
+  // ── Guards + DB writes inside a single transaction (prevents TOCTOU) ───
   const completedAt = new Date().toISOString();
+  let guardError: string | null = null;
 
   transaction(() => {
+    // State machine preconditions (inside txn for atomicity).
+    // Milestone/slice not existing is OK — insertMilestone/insertSlice below will auto-create.
+    // Only block if they exist and are closed.
+    const milestone = getMilestone(params.milestoneId);
+    if (milestone && (milestone.status === "complete" || milestone.status === "done")) {
+      guardError = `cannot complete task in a closed milestone: ${params.milestoneId} (status: ${milestone.status})`;
+      return;
+    }
+
+    const slice = getSlice(params.milestoneId, params.sliceId);
+    if (slice && (slice.status === "complete" || slice.status === "done")) {
+      guardError = `cannot complete task in a closed slice: ${params.sliceId} (status: ${slice.status})`;
+      return;
+    }
+
+    const existingTask = getTask(params.milestoneId, params.sliceId, params.taskId);
+    if (existingTask && (existingTask.status === "complete" || existingTask.status === "done")) {
+      guardError = `task ${params.taskId} is already complete — use gsd_task_reopen first if you need to redo it`;
+      return;
+    }
+
+    // All guards passed — perform writes
     insertMilestone({ id: params.milestoneId });
     insertSlice({ id: params.sliceId, milestoneId: params.milestoneId });
     insertTask({
@@ -166,6 +206,10 @@ export async function handleCompleteTask(
       });
     }
   });
+
+  if (guardError) {
+    return { error: guardError };
+  }
 
   // ── Filesystem operations (outside transaction) ─────────────────────────
   // If disk render fails, roll back the DB status so deriveState() and
@@ -235,6 +279,24 @@ export async function handleCompleteTask(
   invalidateStateCache();
   clearPathCache();
   clearParseCache();
+
+  // ── Post-mutation hook: projections, manifest, event log ───────────────
+  try {
+    await renderAllProjections(basePath, params.milestoneId);
+    writeManifest(basePath);
+    appendEvent(basePath, {
+      cmd: "complete-task",
+      params: { milestoneId: params.milestoneId, sliceId: params.sliceId, taskId: params.taskId },
+      ts: new Date().toISOString(),
+      actor: "agent",
+      actor_name: params.actorName,
+      trigger_reason: params.triggerReason,
+    });
+  } catch (hookErr) {
+    process.stderr.write(
+      `gsd: complete-task post-mutation hook warning: ${(hookErr as Error).message}\n`,
+    );
+  }
 
   return {
     taskId: params.taskId,
