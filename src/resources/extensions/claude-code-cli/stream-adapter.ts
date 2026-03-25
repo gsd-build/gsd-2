@@ -147,6 +147,8 @@ async function pumpSdkMessages(
 	/** Track the last text content seen across all assistant turns for the final message. */
 	let lastTextContent = "";
 	let lastThinkingContent = "";
+	/** Collect tool calls from intermediate SDK turns for tool_execution events. */
+	const intermediateToolCalls: AssistantMessage["content"] = [];
 
 	try {
 		// Dynamic import — the SDK is an optional dependency.
@@ -225,7 +227,14 @@ async function pumpSdkMessages(
 
 					const assistantEvent = builder.handleEvent(event);
 					if (assistantEvent) {
-						stream.push(assistantEvent);
+						// Skip toolcall events — the agent loop's externalToolExecution
+						// path emits tool_execution_start/end events after streamSimple
+						// returns. Streaming toolcall events would render tool calls
+						// out of order in the TUI's accumulated message content.
+						const t = assistantEvent.type;
+						if (t !== "toolcall_start" && t !== "toolcall_delta" && t !== "toolcall_end") {
+							stream.push(assistantEvent);
+						}
 					}
 					break;
 				}
@@ -251,13 +260,16 @@ async function pumpSdkMessages(
 					const userMsg = msg as SDKUserMessage;
 					if (userMsg.parent_tool_use_id !== null) break;
 
-					// Capture accumulated text from the builder before resetting
+					// Capture content from the completed turn before resetting
 					if (builder) {
 						for (const block of builder.message.content) {
 							if (block.type === "text" && block.text) {
 								lastTextContent = block.text;
 							} else if (block.type === "thinking" && block.thinking) {
 								lastThinkingContent = block.thinking;
+							} else if (block.type === "toolCall") {
+								// Collect tool calls for externalToolExecution rendering
+								intermediateToolCalls.push(block);
 							}
 						}
 					}
@@ -269,15 +281,22 @@ async function pumpSdkMessages(
 				case "result": {
 					const result = msg as SDKResultMessage;
 
-					// Build final message with all content from the last assistant turn.
-					// Tool calls are preserved — the agent loop's externalToolExecution
-					// mode handles them without local dispatch.
-					let finalContent: AssistantMessage["content"] = [];
+					// Build final message. Include intermediate tool calls so the
+					// agent loop's externalToolExecution path emits tool_execution
+					// events for proper TUI rendering, followed by the text response.
+					const finalContent: AssistantMessage["content"] = [];
 
+					// Add tool calls from intermediate turns first (renders above text)
+					finalContent.push(...intermediateToolCalls);
+
+					// Add text/thinking from the last turn
 					if (builder && builder.message.content.length > 0) {
-						finalContent = [...builder.message.content];
+						for (const block of builder.message.content) {
+							if (block.type === "text" || block.type === "thinking") {
+								finalContent.push(block);
+							}
+						}
 					} else {
-						// Fall back to captured text from complete assistant messages
 						if (lastThinkingContent) {
 							finalContent.push({ type: "thinking", thinking: lastThinkingContent });
 						}
