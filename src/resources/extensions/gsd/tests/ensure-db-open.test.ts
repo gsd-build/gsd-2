@@ -136,9 +136,10 @@ describe('ensure-db-open', () => {
   // ensureDbOpen returns false for empty .gsd/ (no Markdown, no DB)
   // ═══════════════════════════════════════════════════════════════════════════
 
-  test('ensureDbOpen: empty .gsd/ returns false', async () => {
+  test('ensureDbOpen: empty .gsd/ creates empty DB (#2510)', async () => {
     const tmpDir = makeTmpDir();
-    fs.mkdirSync(path.join(tmpDir, '.gsd'), { recursive: true });
+    const gsdDir = path.join(tmpDir, '.gsd');
+    fs.mkdirSync(gsdDir, { recursive: true });
     // .gsd/ exists but no DECISIONS.md, REQUIREMENTS.md, or milestones/
 
     try { closeDatabase(); } catch { /* ok */ }
@@ -148,9 +149,12 @@ describe('ensure-db-open', () => {
     try {
       const { ensureDbOpen } = await import('../bootstrap/dynamic-tools.ts');
       const result = await ensureDbOpen();
-      assert.ok(result === false, 'ensureDbOpen should return false for empty .gsd/');
+      assert.ok(result === true, 'ensureDbOpen should create empty DB for fresh .gsd/');
+      assert.ok(fs.existsSync(path.join(gsdDir, 'gsd.db')), 'DB file should be created');
+      assert.ok(isDbAvailable(), 'DB should be available');
     } finally {
       process.cwd = origCwd;
+      closeDatabase();
       cleanupDir(tmpDir);
     }
   });

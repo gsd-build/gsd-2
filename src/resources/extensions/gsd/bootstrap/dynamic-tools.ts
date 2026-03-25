@@ -67,6 +67,9 @@ export async function ensureDbOpen(): Promise<boolean> {
         }
         return opened;
       }
+
+      // .gsd/ exists but has no Markdown content (fresh project) — create empty DB
+      return db.openDatabase(dbPath);
     }
 
     return false;

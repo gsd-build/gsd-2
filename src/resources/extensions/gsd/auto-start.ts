@@ -549,17 +549,17 @@ export async function bootstrapAutoSession(
       const hasDecisions = existsSync(join(gsdDirPath, "DECISIONS.md"));
       const hasRequirements = existsSync(join(gsdDirPath, "REQUIREMENTS.md"));
       const hasMilestones = existsSync(join(gsdDirPath, "milestones"));
-      if (hasDecisions || hasRequirements || hasMilestones) {
-        try {
-          const { openDatabase: openDb } = await import("./gsd-db.js");
+      try {
+        const { openDatabase: openDb } = await import("./gsd-db.js");
+        openDb(gsdDbPath);
+        if (hasDecisions || hasRequirements || hasMilestones) {
           const { migrateFromMarkdown } = await import("./md-importer.js");
-          openDb(gsdDbPath);
           migrateFromMarkdown(s.basePath);
-        } catch (err) {
-          process.stderr.write(
-            `gsd-migrate: auto-migration failed: ${(err as Error).message}\n`,
-          );
         }
+      } catch (err) {
+        process.stderr.write(
+          `gsd-migrate: auto-migration failed: ${(err as Error).message}\n`,
+        );
       }
     }
     if (existsSync(gsdDbPath) && !isDbAvailable()) {
