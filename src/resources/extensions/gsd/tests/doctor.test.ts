@@ -1,4 +1,4 @@
-import { describe, test } from 'node:test';
+import { after, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -91,7 +91,7 @@ describe('doctor', async () => {
     assert.ok(report.issues !== undefined, "doctor produces a report with issues array");
   });
 
-  rmSync(tmpBase, { recursive: true, force: true });
+  after(() => rmSync(tmpBase, { recursive: true, force: true }));
 
   // ─── Milestone summary detection: missing summary ──────────────────────
   test('doctor detects missing milestone summary', async () => {
