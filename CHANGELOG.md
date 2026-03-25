@@ -6,6 +6,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.47.0] - 2026-03-25
+
+### Added
+- **agent-core**: add externalToolExecution mode for external providers
+- **provider**: add Claude Code CLI provider extension
+
+### Fixed
+- **claude-code-cli**: render tool calls above text response
+- **ci**: update FILE-SYSTEM-MAP.md path after docs→docs-internal move
+- isInheritedRepo false negative when parent has stale .gsd; defense-in-depth local .git check in bootstrap
+- **claude-code-cli**: resolve SDK executable path and update model IDs
+- make planning doctrine demoable definition audience-appropriate
+- **prompts**: migrate remaining 4 prompts to use DB-backed tool API instead of direct write
+- make workflow event hash platform-deterministic
+- reconcile stale task DB status from disk artifacts (#2514)
+
 ## [2.46.1] - 2026-03-25
 
 ### Fixed
@@ -1829,7 +1845,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - License updated to MIT
 
-[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.46.1...HEAD
+[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.47.0...HEAD
+[2.47.0]: https://github.com/gsd-build/gsd-2/compare/v2.46.1...v2.47.0
 [2.46.1]: https://github.com/gsd-build/gsd-2/compare/v2.46.0...v2.46.1
 [2.46.0]: https://github.com/gsd-build/gsd-2/compare/v2.45.0...v2.46.0
 [2.45.0]: https://github.com/gsd-build/gsd-2/compare/v2.44.0...v2.45.0
