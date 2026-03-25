@@ -54,11 +54,35 @@ const CAPABILITY_PATCHES: CapabilityPatch[] = [
 	},
 ];
 
+/**
+ * Apply capability patches to a list of models.
+ *
+ * Models constructed outside the static pi-ai registry (custom models from
+ * models.json, extension-registered models, discovered models) do not pass
+ * through the module-init patch loop. Call this function after assembling
+ * any model list to ensure capabilities are set correctly.
+ *
+ * Explicit `capabilities` already set on a model take precedence over patches.
+ */
+export function applyCapabilityPatches(models: Model<Api>[]): Model<Api>[] {
+	return models.map((model) => {
+		for (const patch of CAPABILITY_PATCHES) {
+			if (patch.match(model)) {
+				return {
+					...model,
+					capabilities: { ...patch.caps, ...model.capabilities },
+				};
+			}
+		}
+		return model;
+	});
+}
+
+// Apply patches to the static registry at module load
 for (const [, providerModels] of modelRegistry) {
 	for (const [id, model] of providerModels) {
 		for (const patch of CAPABILITY_PATCHES) {
 			if (patch.match(model)) {
-				// Merge: explicit model-level capabilities take precedence over patches
 				providerModels.set(id, {
 					...model,
 					capabilities: { ...patch.caps, ...model.capabilities },
