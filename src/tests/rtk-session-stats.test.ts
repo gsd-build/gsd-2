@@ -98,7 +98,7 @@ test("RTK session stats fall back to the managed RTK path when GSD_RTK_PATH is u
   });
   const managedHome = mkdtempSync(join(tmpdir(), "gsd-rtk-home-"));
   const managedDir = join(managedHome, "agent", "bin");
-  const managedPath = join(managedDir, process.platform === "win32" ? "rtk.exe" : "rtk");
+  const managedPath = join(managedDir, process.platform === "win32" ? "rtk.cmd" : "rtk");
   mkdirSync(managedDir, { recursive: true });
   copyFileSync(fake.path, managedPath);
   if (process.platform !== "win32") {
