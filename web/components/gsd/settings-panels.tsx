@@ -9,6 +9,7 @@ import {
   DollarSign,
   Eye,
   EyeOff,
+  FlaskConical,
   KeyRound,
   LoaderCircle,
   Radio,
@@ -1051,6 +1052,165 @@ export function GeneralPanel() {
     </div>
   )
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// EXPERIMENTAL PANEL
+// ═══════════════════════════════════════════════════════════════════════
+
+interface ExperimentalFlag {
+  key: string
+  label: string
+  description: string
+  warning?: string
+}
+
+const EXPERIMENTAL_FLAGS: ExperimentalFlag[] = [
+  {
+    key: "rtk",
+    label: "RTK Shell Compression",
+    description:
+      "Wraps shell commands through the RTK binary to reduce token usage during command execution. RTK is downloaded automatically on first use.",
+    warning: "Experimental — may change or be removed without notice.",
+  },
+]
+
+export function ExperimentalPanel() {
+  const { state, data, busy, refresh } = useSettingsData()
+  const prefs = data?.preferences ?? null
+
+  const [flags, setFlags] = useState<Record<string, boolean>>({})
+  const [saving, setSaving] = useState<Record<string, boolean>>({})
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  // Trigger a settings load if data hasn't been fetched yet (e.g. navigating
+  // directly to the Experimental tab without going through gsd-prefs first).
+  useEffect(() => {
+    if (!data && !busy && state.phase === "idle") {
+      refresh()
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync local state from loaded prefs
+  useEffect(() => {
+    if (!prefs) return
+    setFlags({ rtk: prefs.experimental?.rtk === true })
+  }, [prefs])
+
+  async function toggle(flagKey: string, next: boolean) {
+    setSaving((s) => ({ ...s, [flagKey]: true }))
+    setSaveError(null)
+    try {
+      const res = await authFetch("/api/experimental", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ flag: flagKey, enabled: next }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string }
+        throw new Error(body.error ?? `HTTP ${res.status}`)
+      }
+      setFlags((f) => ({ ...f, [flagKey]: next }))
+      // Refresh settings data so PrefsPanel reflects the change
+      refresh()
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving((s) => ({ ...s, [flagKey]: false }))
+    }
+  }
+
+  return (
+    <div className="space-y-4" data-testid="settings-experimental">
+      <SettingsHeader
+        title="Experimental"
+        icon={<FlaskConical className="h-3.5 w-3.5" />}
+        subtitle="Opt-in features — may change without notice"
+        onRefresh={refresh}
+        refreshing={busy}
+      />
+
+      {state.error && <SettingsError message={state.error} />}
+      {saveError && <SettingsError message={saveError} />}
+      {busy && !data && <SettingsLoading label="Loading preferences…" />}
+
+      <div className="space-y-3">
+        {EXPERIMENTAL_FLAGS.map((flag) => {
+          const enabled = flags[flag.key] ?? false
+          const isSaving = saving[flag.key] ?? false
+
+          return (
+            <div
+              key={flag.key}
+              className="rounded-lg border border-border/40 bg-card/30 px-3 py-3 space-y-2"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-foreground">{flag.label}</span>
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                        enabled
+                          ? "bg-success/10 text-success"
+                          : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {enabled ? "on" : "off"}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    {flag.description}
+                  </p>
+                  {flag.warning && (
+                    <div className="flex items-center gap-1 text-[10px] text-warning">
+                      <AlertTriangle className="h-3 w-3 shrink-0" />
+                      <span>{flag.warning}</span>
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => toggle(flag.key, !enabled)}
+                  disabled={isSaving || busy || !data}
+                  className={cn(
+                    "shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed",
+                    enabled ? "bg-success" : "bg-muted-foreground/30",
+                  )}
+                  role="switch"
+                  aria-checked={enabled}
+                  aria-label={`Toggle ${flag.label}`}
+                >
+                  <span
+                    className={cn(
+                      "inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform",
+                      enabled ? "translate-x-4" : "translate-x-0.5",
+                    )}
+                  />
+                  {isSaving && (
+                    <span className="absolute inset-0 flex items-center justify-center">
+                      <LoaderCircle className="h-3 w-3 animate-spin text-white" />
+                    </span>
+                  )}
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {data && (
+        <p className="text-[11px] text-muted-foreground">
+          Changes are written to{" "}
+          <span className="font-mono">{prefs?.path ?? "~/.gsd/preferences.md"}</span>
+          {" "}and take effect on the next session.
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// LEGACY EXPORTS
+// ═══════════════════════════════════════════════════════════════════════
 
 // Legacy exports for backward compatibility with gsd-prefs mega-scroll
 export const TerminalSizePanel = GeneralPanel

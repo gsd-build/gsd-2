@@ -30,6 +30,7 @@ function fallbackAutoDashboardData(): AutoDashboardData {
     totalCost: 0,
     totalTokens: 0,
     rtkSavings: null,
+    rtkEnabled: false,
   };
 }
 

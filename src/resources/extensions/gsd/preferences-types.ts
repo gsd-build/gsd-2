@@ -93,6 +93,7 @@ export const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "service_tier",
   "forensics_dedup",
   "show_token_cost",
+  "experimental",
 ]);
 
 /** Canonical list of all dispatch unit types. */
@@ -182,6 +183,20 @@ export interface CmuxPreferences {
   browser?: boolean;
 }
 
+/**
+ * Opt-in experimental features. All features in this block are disabled by
+ * default and must be explicitly enabled. They may change or be removed without
+ * a deprecation cycle while in experimental status.
+ */
+export interface ExperimentalPreferences {
+  /**
+   * Enable RTK (Real-Time Kompression) shell-command compression.
+   * RTK wraps shell commands to reduce token usage during command execution.
+   * Default: false (opt-in required).
+   */
+  rtk?: boolean;
+}
+
 export interface GSDPreferences {
   version?: number;
   mode?: WorkflowMode;
@@ -233,6 +248,11 @@ export interface GSDPreferences {
   forensics_dedup?: boolean;
   /** Opt-in: show per-prompt and cumulative session token cost in the footer. Default: false. */
   show_token_cost?: boolean;
+  /**
+   * Opt-in experimental features. All features here are disabled by default.
+   * See the preferences reference for details on each feature.
+   */
+  experimental?: ExperimentalPreferences;
 }
 
 export interface LoadedGSDPreferences {

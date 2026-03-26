@@ -377,3 +377,53 @@ test("unrecognized format warning is emitted at most once (#2373)", () => {
     _resetParseWarningFlag();
   }
 });
+
+// ── Experimental preferences ─────────────────────────────────────────────────
+
+test("experimental.rtk: true is accepted and stored", () => {
+  const result = validatePreferences({ experimental: { rtk: true } });
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.preferences.experimental?.rtk, true);
+});
+
+test("experimental.rtk: false is accepted and stored", () => {
+  const result = validatePreferences({ experimental: { rtk: false } });
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.preferences.experimental?.rtk, false);
+});
+
+test("experimental.rtk: non-boolean produces error", () => {
+  const result = validatePreferences({ experimental: { rtk: "yes" } } as unknown as GSDPreferences);
+  assert.ok(result.errors.some(e => e.includes("experimental.rtk")), `expected rtk error in: ${JSON.stringify(result.errors)}`);
+});
+
+test("experimental: non-object produces error", () => {
+  const result = validatePreferences({ experimental: true } as unknown as GSDPreferences);
+  assert.ok(result.errors.some(e => e.includes("experimental must be an object")));
+});
+
+test("experimental: unknown key produces warning", () => {
+  const result = validatePreferences({ experimental: { rtk: true, future_flag: true } } as unknown as GSDPreferences);
+  assert.ok(result.warnings.some(w => w.includes("future_flag")), `expected unknown-key warning in: ${JSON.stringify(result.warnings)}`);
+  assert.equal(result.preferences.experimental?.rtk, true);
+});
+
+test("experimental: omitting rtk defaults to undefined (opt-in)", () => {
+  const result = validatePreferences({ version: 1 });
+  assert.equal(result.preferences.experimental, undefined);
+});
+
+test("experimental.rtk parses correctly from preferences markdown", () => {
+  const content = "---\nversion: 1\nexperimental:\n  rtk: true\n---\n";
+  const prefs = parsePreferencesMarkdown(content);
+  assert.notEqual(prefs, null);
+  assert.equal(prefs!.experimental?.rtk, true);
+});
+
+test("experimental.rtk defaults to off in new project preferences", () => {
+  // No experimental key → feature is disabled
+  const content = "---\nversion: 1\n---\n";
+  const prefs = parsePreferencesMarkdown(content);
+  assert.notEqual(prefs, null);
+  assert.equal(prefs!.experimental?.rtk, undefined);
+});

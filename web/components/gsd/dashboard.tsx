@@ -119,6 +119,7 @@ export function Dashboard({ onSwitchView, onExpandTerminal }: DashboardProps = {
   const totalCost = auto?.totalCost ?? 0
   const totalTokens = auto?.totalTokens ?? 0
   const rtkSavings = auto?.rtkSavings ?? null
+  const rtkEnabled = auto?.rtkEnabled === true
 
   const currentSlice = getCurrentSlice(workspace)
   const doneTasks = currentSlice?.tasks.filter((t) => t.done).length ?? 0
@@ -268,12 +269,14 @@ export function Dashboard({ onSwitchView, onExpandTerminal }: DashboardProps = {
             value={isConnecting ? null : formatTokens(totalTokens)}
             icon={<Zap className="h-5 w-5" />}
           />
-          <MetricCard
-            label="RTK Saved"
-            value={rtkValue}
-            subtext={rtkSubtext}
-            icon={<TrendingDown className="h-5 w-5" />}
-          />
+          {rtkEnabled && (
+            <MetricCard
+              label="RTK Saved"
+              value={rtkValue}
+              subtext={rtkSubtext}
+              icon={<TrendingDown className="h-5 w-5" />}
+            />
+          )}
 
         </div>
 

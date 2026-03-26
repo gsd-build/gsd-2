@@ -241,6 +241,9 @@ Setting `prefer_skills: []` does **not** disable skill discovery — it just mea
 
   **Known unit types for `before`/`after`:** `research-milestone`, `plan-milestone`, `research-slice`, `plan-slice`, `execute-task`, `complete-slice`, `replan-slice`, `reassess-roadmap`, `run-uat`.
 
+- `experimental`: opt-in experimental features. All features here are **off by default** — you must explicitly set each one to `true` to enable it. Features in this block may change or be removed without a deprecation cycle while in experimental status. Keys:
+  - `rtk`: boolean — enable RTK (Real-Time Kompression) shell-command compression. When enabled, GSD wraps shell commands through the RTK binary to reduce token usage during command execution. RTK is downloaded automatically on first use if not already installed. **Default: `false`** (opt-in required). Set `GSD_RTK_DISABLED=1` in the environment to force-disable regardless of this preference.
+
 ---
 
 ## Best Practices
@@ -652,3 +655,15 @@ verification_max_retries: 2
 ```
 
 Runs test, lint, and typecheck after each task. On failure, auto-fix is attempted up to 2 times before reporting the issue.
+
+## Experimental Features Example
+
+```yaml
+---
+version: 1
+experimental:
+  rtk: true
+---
+```
+
+Opts in to RTK shell-command compression. RTK is downloaded automatically on first use. Set `GSD_RTK_DISABLED=1` to force-disable at the environment level regardless of this setting.

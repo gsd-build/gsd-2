@@ -11,6 +11,7 @@ import {
   Download,
   ExternalLink,
   FileText,
+  FlaskConical,
   FolderRoot,
   GitBranch,
   KeyRound,
@@ -56,7 +57,7 @@ import {
 } from "@/lib/dev-overrides"
 import { DoctorPanel, ForensicsPanel, SkillHealthPanel } from "./diagnostics-panels"
 import { KnowledgeCapturesPanel } from "./knowledge-captures-panel"
-import { PrefsPanel, ModelRoutingPanel, BudgetPanel, RemoteQuestionsPanel, GeneralPanel } from "./settings-panels"
+import { PrefsPanel, ModelRoutingPanel, BudgetPanel, RemoteQuestionsPanel, GeneralPanel, ExperimentalPanel } from "./settings-panels"
 import { DevRootSettingsSection } from "./projects-view"
 import {
   QuickPanel,
@@ -82,7 +83,7 @@ import {
 
 // ─── Section metadata ────────────────────────────────────────────────
 
-const SETTINGS_SURFACE_SECTIONS = ["general", "model", "session-behavior", "recovery", "auth", "integrations", "workspace"] as const
+const SETTINGS_SURFACE_SECTIONS = ["general", "model", "session-behavior", "recovery", "auth", "integrations", "workspace", "experimental"] as const
 const ADMIN_SECTION: CommandSurfaceSection = "admin"
 const GIT_SURFACE_SECTIONS = ["git"] as const
 const SESSION_SURFACE_SECTIONS = ["resume", "name", "fork", "session", "compact"] as const
@@ -125,6 +126,7 @@ function sectionLabel(section: CommandSurfaceSection): string {
     compact: "Compact",
     workspace: "Workspace",
     integrations: "Integrations",
+    experimental: "Experimental",
   }
   return labels[section] ?? section
 }
@@ -149,6 +151,7 @@ function sectionIcon(section: CommandSurfaceSection) {
     compact: <Archive className="h-4 w-4" />,
     workspace: <FolderRoot className="h-4 w-4" />,
     integrations: <Radio className="h-4 w-4" />,
+    experimental: <FlaskConical className="h-4 w-4" />,
   }
   return icons[section] ?? null
 }
@@ -435,7 +438,8 @@ export function CommandSurface() {
     } else if (
       (commandSurface.section === "gsd-prefs" ||
        commandSurface.section === "gsd-mode" ||
-       commandSurface.section === "gsd-config") &&
+       commandSurface.section === "gsd-config" ||
+       commandSurface.section === "experimental") &&
       settingsData.phase === "idle"
     ) {
       void loadSettingsData()
@@ -2053,6 +2057,7 @@ export function CommandSurface() {
   const renderSection = () => {
     switch (commandSurface.section) {
       case "general": return <GeneralPanel />
+      case "experimental": return <ExperimentalPanel />
       case "model": return (
         <div className="space-y-8">
           {renderModelSection()}
@@ -2139,6 +2144,7 @@ export function CommandSurface() {
           <BudgetPanel />
           <RemoteQuestionsPanel />
           <GeneralPanel />
+          <ExperimentalPanel />
         </div>
       )
       case "gsd-mode": return <ModelRoutingPanel />

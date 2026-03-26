@@ -420,6 +420,8 @@ export interface AutoDashboardData {
   totalCost: number;
   totalTokens: number;
   rtkSavings?: RtkSessionSavings | null;
+  /** Whether RTK is enabled via experimental.rtk preference. False when not opted in. */
+  rtkEnabled?: boolean;
 }
 
 export interface BridgeLastError {

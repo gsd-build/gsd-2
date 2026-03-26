@@ -306,6 +306,7 @@ export function getAutoDashboardData(): AutoDashboardData {
   const rtkSavings = sessionId && s.basePath
     ? getRtkSessionSavings(s.basePath, sessionId)
     : null;
+  const rtkEnabled = loadEffectiveGSDPreferences()?.preferences.experimental?.rtk === true;
   // Pending capture count — lazy check, non-fatal
   let pendingCaptureCount = 0;
   try {
@@ -329,6 +330,7 @@ export function getAutoDashboardData(): AutoDashboardData {
     totalTokens: totals?.tokens.total ?? 0,
     pendingCaptureCount,
     rtkSavings,
+    rtkEnabled,
   };
 }
 

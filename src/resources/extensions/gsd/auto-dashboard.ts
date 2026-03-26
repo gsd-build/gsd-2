@@ -66,6 +66,8 @@ export interface AutoDashboardData {
   pendingCaptureCount: number;
   /** RTK token savings for the current session, or null when unavailable. */
   rtkSavings?: RtkSessionSavings | null;
+  /** Whether RTK is enabled via experimental.rtk preference. False when not opted in. */
+  rtkEnabled?: boolean;
   /** Cross-process: another auto-mode session detected via auto.lock (PID, startedAt) */
   remoteSession?: { pid: number; startedAt: string; unitType: string; unitId: string };
 }

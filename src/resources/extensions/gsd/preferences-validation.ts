@@ -793,5 +793,31 @@ export function validatePreferences(preferences: GSDPreferences): {
     }
   }
 
+  // ─── Experimental Features ────────────────────────────────────────
+  if (preferences.experimental !== undefined) {
+    if (typeof preferences.experimental === "object" && preferences.experimental !== null) {
+      const exp = preferences.experimental as unknown as Record<string, unknown>;
+      const validExp: import("./preferences-types.js").ExperimentalPreferences = {};
+
+      if (exp.rtk !== undefined) {
+        if (typeof exp.rtk === "boolean") validExp.rtk = exp.rtk;
+        else errors.push("experimental.rtk must be a boolean");
+      }
+
+      const knownExpKeys = new Set(["rtk"]);
+      for (const key of Object.keys(exp)) {
+        if (!knownExpKeys.has(key)) {
+          warnings.push(`unknown experimental key "${key}" — ignored`);
+        }
+      }
+
+      if (Object.keys(validExp).length > 0) {
+        validated.experimental = validExp;
+      }
+    } else {
+      errors.push("experimental must be an object");
+    }
+  }
+
   return { preferences: validated, errors, warnings };
 }

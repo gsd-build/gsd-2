@@ -4,6 +4,7 @@ import {
   formatRtkSavingsLabel,
   getRtkSessionSavings,
 } from "../shared/rtk-session-stats.js";
+import { loadEffectiveGSDPreferences } from "./preferences.js";
 
 const STATUS_KEY = "gsd-rtk";
 const REFRESH_INTERVAL_MS = 30_000;
@@ -17,8 +18,13 @@ function clearTimer(): void {
   }
 }
 
+function isRtkEnabledInPrefs(): boolean {
+  return loadEffectiveGSDPreferences()?.preferences.experimental?.rtk === true;
+}
+
 function updateStatus(ctx: ExtensionContext): void {
   if (!ctx.hasUI) return;
+  if (!isRtkEnabledInPrefs()) return;
 
   const basePath = ctx.cwd;
   const sessionId = ctx.sessionManager.getSessionId();
@@ -29,6 +35,11 @@ function updateStatus(ctx: ExtensionContext): void {
 
 export function startRtkStatusUpdates(ctx: ExtensionContext): void {
   clearTimer();
+  if (!isRtkEnabledInPrefs()) {
+    // Ensure any previously set status is cleared (e.g. preference was toggled off)
+    ctx.ui.setStatus(STATUS_KEY, undefined);
+    return;
+  }
   updateStatus(ctx);
   if (!ctx.hasUI) return;
   refreshTimer = setInterval(() => {
