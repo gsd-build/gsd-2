@@ -27,7 +27,8 @@ process.exit(match.status ?? 0);
     const jsPath = join(dir, "fake-rtk.js");
     const cmdPath = join(dir, "rtk.cmd");
     writeFileSync(jsPath, jsSource, "utf-8");
-    writeFileSync(cmdPath, `@echo off\r\n"${process.execPath}" "%~dp0\\fake-rtk.js" %*\r\n`, "utf-8");
+    // Use the absolute jsPath so the .cmd works even when copied to another directory.
+    writeFileSync(cmdPath, `@echo off\r\n"${process.execPath}" "${jsPath}" %*\r\n`, "utf-8");
     return {
       path: cmdPath,
       cleanup: () => rmSync(dir, { recursive: true, force: true }),

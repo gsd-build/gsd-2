@@ -238,6 +238,15 @@ export function resolveRtkBinaryPath(options: ResolveRtkBinaryPathOptions = {}):
   if (existsSync(managedPath)) {
     return managedPath;
   }
+  // On Windows, also check for rtk.cmd in the managed dir (used by test fake RTK
+  // and any wrapper-style installs where a .cmd launcher accompanies the binary).
+  if (platform === "win32") {
+    const managedDir = options.targetDir ?? getManagedRtkDir(env);
+    const managedCmd = join(managedDir, "rtk.cmd");
+    if (existsSync(managedCmd)) {
+      return managedCmd;
+    }
+  }
 
   return resolveSystemRtkPath(options.pathValue ?? getPathValue(env), platform);
 }
@@ -267,6 +276,8 @@ export function rewriteCommandWithRtk(command: string, options: RewriteCommandOp
     env: buildRtkEnv(options.env ?? process.env),
     stdio: ["ignore", "pipe", "ignore"],
     timeout: options.timeoutMs ?? RTK_REWRITE_TIMEOUT_MS,
+    // .cmd/.bat wrappers (used by fake-rtk in tests) require shell:true on Windows
+    shell: /\.(cmd|bat)$/i.test(binaryPath),
   });
 
   if (result.error) return command;
