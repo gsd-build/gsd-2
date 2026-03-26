@@ -769,9 +769,10 @@ describe('derive-state-db', async () => {
       const elapsed = performance.now() - start;
 
       console.log(`  deriveStateFromDb() took ${elapsed.toFixed(3)}ms`);
-      // Use 10ms threshold — catches real regressions without flaking on
-      // CI runners under load (1ms threshold failed at 1.050ms on GitHub Actions)
-      assert.ok(elapsed < 10, `perf-db: deriveStateFromDb() <10ms (got ${elapsed.toFixed(3)}ms)`);
+      // Use 25ms threshold — catches real regressions without flaking on
+      // slower CI runners (Windows agents measured at ~12ms under load;
+      // the 10ms threshold was too tight for those environments).
+      assert.ok(elapsed < 25, `perf-db: deriveStateFromDb() <25ms (got ${elapsed.toFixed(3)}ms)`);
 
       closeDatabase();
     } finally {

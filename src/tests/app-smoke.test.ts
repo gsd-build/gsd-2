@@ -34,7 +34,9 @@ function assertExtensionIndexExists(agentDir: string, extensionName: string): vo
 
 test("app-paths resolve to ~/.gsd/", async () => {
   const { appRoot, agentDir, sessionsDir, authFilePath } = await import("../app-paths.ts");
-  const home = process.env.HOME!;
+  // Use homedir() — process.env.HOME is undefined on Windows (uses USERPROFILE instead)
+  const { homedir } = await import("node:os");
+  const home = homedir();
 
   assert.equal(appRoot, join(home, ".gsd"), "appRoot is ~/.gsd/");
   assert.equal(agentDir, join(home, ".gsd", "agent"), "agentDir is ~/.gsd/agent/");

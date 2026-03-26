@@ -79,9 +79,18 @@ export function resolveRtkBinaryPath(options: ResolveRtkBinaryPathOptions = {}):
     return explicitPath;
   }
 
-  const managedPath = join(getManagedRtkDir(env), getRtkBinaryName(platform));
+  const managedDir = getManagedRtkDir(env);
+  const managedPath = join(managedDir, getRtkBinaryName(platform));
   if (existsSync(managedPath)) {
     return managedPath;
+  }
+  // On Windows, also check for rtk.cmd in the managed dir (used by test fake RTK
+  // and any wrapper-style installs where a .cmd launcher accompanies the binary).
+  if (platform === "win32") {
+    const managedCmd = join(managedDir, "rtk.cmd");
+    if (existsSync(managedCmd)) {
+      return managedCmd;
+    }
   }
 
   return resolveSystemRtkPath(options.pathValue ?? getPathValue(env), platform);

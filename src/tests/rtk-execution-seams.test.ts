@@ -48,7 +48,9 @@ function withManagedFakeRtk<T>(mapping: Record<string, string | { status?: numbe
   const fake = createFakeRtk(mapping);
   const managedHome = mkdtempSync(join(tmpdir(), "gsd-rtk-managed-home-"));
   const managedDir = join(managedHome, "agent", "bin");
-  const managedPath = join(managedDir, process.platform === "win32" ? "rtk.exe" : "rtk");
+  // On Windows, place the fake as rtk.cmd so resolveRtkBinaryPath's .cmd fallback finds it.
+  // Placing it as rtk.exe (a PE binary slot) with .cmd content fails on Windows.
+  const managedPath = join(managedDir, process.platform === "win32" ? "rtk.cmd" : "rtk");
   mkdirSync(managedDir, { recursive: true });
   copyFileSync(fake.path, managedPath);
   if (process.platform !== "win32") {
@@ -170,6 +172,10 @@ test("async_bash executes the RTK-rewritten command", async () => {
 });
 
 test("bg_shell start and runOnSession both execute RTK-rewritten commands", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("bg_shell requires bash; Windows CI runners don't have Git Bash");
+    return;
+  }
   t.after(cleanupAll);
 
   await withFakeRtk({ "echo raw": "echo rewritten" }, async () => {
