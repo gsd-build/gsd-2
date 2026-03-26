@@ -145,46 +145,47 @@ export async function runPreDispatch(
     return { action: "break", reason: "resources-stale" };
   }
 
-  deps.invalidateAllCaches();
+  deps.invalidateAllCachesIfDirty();
   s.lastPromptCharCount = undefined;
   s.lastBaselineCharCount = undefined;
 
-  // Pre-dispatch health gate
-  try {
-    const healthGate = await deps.preDispatchHealthGate(s.basePath);
-    if (healthGate.fixesApplied.length > 0) {
-      ctx.ui.notify(
-        `Pre-dispatch: ${healthGate.fixesApplied.join(", ")}`,
-        "info",
-      );
-    }
-    if (!healthGate.proceed) {
-      ctx.ui.notify(
-        healthGate.reason ?? "Pre-dispatch health check failed.",
-        "error",
-      );
-      await deps.pauseAuto(ctx, pi);
-      debugLog("autoLoop", { phase: "exit", reason: "health-gate-failed" });
-      return { action: "break", reason: "health-gate-failed" };
-    }
-  } catch (e) {
-    logWarning("engine", "Pre-dispatch health gate threw unexpectedly", { error: String(e) });
-  }
-
-  // Sync project root artifacts into worktree
-  if (
-    s.originalBasePath &&
+  // Run health gate and worktree sync in parallel — they are independent.
+  // Worktree sync is synchronous so we wrap it in a resolved promise.
+  const needsWorktreeSync = s.originalBasePath &&
     s.basePath !== s.originalBasePath &&
-    s.currentMilestoneId
-  ) {
-    deps.syncProjectRootToWorktree(
-      s.originalBasePath,
-      s.basePath,
-      s.currentMilestoneId,
+    s.currentMilestoneId;
+
+  const [healthGateResult] = await Promise.all([
+    deps.preDispatchHealthGate(s.basePath).catch((e: unknown) => {
+      logWarning("engine", "Pre-dispatch health gate threw unexpectedly", { error: String(e) });
+      return { proceed: true, fixesApplied: [] as string[] } as const;
+    }),
+    needsWorktreeSync
+      ? Promise.resolve(deps.syncProjectRootToWorktree(
+          s.originalBasePath!,
+          s.basePath,
+          s.currentMilestoneId!,
+        ))
+      : Promise.resolve(),
+  ]);
+
+  if (healthGateResult.fixesApplied.length > 0) {
+    ctx.ui.notify(
+      `Pre-dispatch: ${healthGateResult.fixesApplied.join(", ")}`,
+      "info",
     );
   }
+  if (!healthGateResult.proceed) {
+    ctx.ui.notify(
+      (healthGateResult as { reason?: string }).reason ?? "Pre-dispatch health check failed.",
+      "error",
+    );
+    await deps.pauseAuto(ctx, pi);
+    debugLog("autoLoop", { phase: "exit", reason: "health-gate-failed" });
+    return { action: "break", reason: "health-gate-failed" };
+  }
 
-  // Derive state
+  // Derive state (after worktree sync has completed)
   let state = await deps.deriveState(s.basePath);
   deps.syncCmuxSidebar(prefs, state);
   let mid = state.activeMilestone?.id;

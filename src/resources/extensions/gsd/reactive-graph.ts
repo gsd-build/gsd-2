@@ -132,6 +132,43 @@ export function isGraphAmbiguous(graph: DerivedTaskNode[]): boolean {
 }
 
 /**
+ * Returns the set of task IDs that have no IO annotations (ambiguous).
+ * Used by "auto" mode to exclude ambiguous tasks from parallel dispatch
+ * while still parallelizing the annotated ones.
+ */
+export function getAmbiguousTaskIds(graph: DerivedTaskNode[]): Set<string> {
+  const result = new Set<string>();
+  for (const node of graph) {
+    if (!node.done && node.inputFiles.length === 0 && node.outputFiles.length === 0) {
+      result.add(node.id);
+    }
+  }
+  return result;
+}
+
+/**
+ * Suggest a max_parallel value based on graph topology, clamped to userMax.
+ * - Linear chain (every task depends on the previous) → 1
+ * - Wide graph (many independent roots) → min(readyCount, 6)
+ */
+export function suggestMaxParallel(
+  graph: DerivedTaskNode[],
+  completed: Set<string>,
+  inFlight: Set<string>,
+  userMax: number,
+): number {
+  const ready = getReadyTasks(graph, completed, inFlight);
+  if (ready.length <= 1) return 1;
+
+  // Check for linear chain: each incomplete node depends on exactly one other
+  const incomplete = graph.filter(n => !n.done && !completed.has(n.id));
+  const isLinear = incomplete.every(n => n.dependsOn.length <= 1);
+  if (isLinear && ready.length <= 1) return 1;
+
+  return Math.min(ready.length, 6, userMax);
+}
+
+/**
  * Detect deadlock: no tasks are ready and none are in-flight, yet incomplete
  * tasks remain. This indicates a circular dependency or impossible state.
  */
