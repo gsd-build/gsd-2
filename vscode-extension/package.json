@@ -101,6 +101,22 @@
       {
         "command": "gsd.listCommands",
         "title": "GSD: List Available Commands"
+      },
+      {
+        "command": "gsd.toggleAutoRetry",
+        "title": "GSD: Toggle Auto-Retry"
+      },
+      {
+        "command": "gsd.abortRetry",
+        "title": "GSD: Abort Retry"
+      },
+      {
+        "command": "gsd.setSessionName",
+        "title": "GSD: Set Session Name"
+      },
+      {
+        "command": "gsd.copyLastResponse",
+        "title": "GSD: Copy Last Response"
       }
     ],
     "keybindings": [
@@ -118,6 +134,21 @@
         "command": "gsd.cycleThinking",
         "key": "ctrl+shift+g ctrl+shift+t",
         "mac": "cmd+shift+g cmd+shift+t"
+      },
+      {
+        "command": "gsd.abort",
+        "key": "ctrl+shift+g ctrl+shift+a",
+        "mac": "cmd+shift+g cmd+shift+a"
+      },
+      {
+        "command": "gsd.steer",
+        "key": "ctrl+shift+g ctrl+shift+i",
+        "mac": "cmd+shift+g cmd+shift+i"
+      },
+      {
+        "command": "gsd.sendMessage",
+        "key": "ctrl+shift+g ctrl+shift+p",
+        "mac": "cmd+shift+g cmd+shift+p"
       }
     ],
     "viewsContainers": {

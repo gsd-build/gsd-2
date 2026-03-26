@@ -35,7 +35,43 @@ export function activate(context: vscode.ExtensionContext): void {
 		outputChannel.appendLine(`[stderr] ${msg}`);
 	});
 
-	client.onConnectionChange((connected) => {
+	// -- Persistent status bar item ----------------------------------------
+
+	const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
+	statusBarItem.command = "workbench.view.extension.gsd";
+	statusBarItem.text = "$(hubot) GSD";
+	statusBarItem.tooltip = "GSD Agent — click to open";
+	statusBarItem.show();
+	context.subscriptions.push(statusBarItem);
+
+	async function refreshStatusBar(): Promise<void> {
+		if (!client?.isConnected) {
+			statusBarItem.text = "$(hubot) GSD";
+			statusBarItem.tooltip = "GSD: Disconnected";
+			return;
+		}
+		try {
+			const [state, stats] = await Promise.all([
+				client.getState().catch(() => null),
+				client.getSessionStats().catch(() => null),
+			]);
+			const modelId = state?.model?.id ?? "";
+			const costPart = stats?.totalCost !== undefined ? ` | $${stats.totalCost.toFixed(4)}` : "";
+			const streamPart = state?.isStreaming ? " $(sync~spin)" : "";
+			statusBarItem.text = `$(hubot) GSD${modelId ? ` | ${modelId}` : ""}${costPart}${streamPart}`;
+			statusBarItem.tooltip = state?.model
+				? `GSD: Connected — ${state.model.provider}/${state.model.id}`
+				: "GSD: Connected";
+		} catch {
+			// ignore fetch errors
+		}
+	}
+
+	const statusBarTimer = setInterval(() => refreshStatusBar(), 10_000);
+	context.subscriptions.push({ dispose: () => clearInterval(statusBarTimer) });
+
+	client.onConnectionChange(async (connected) => {
+		await refreshStatusBar();
 		if (connected) {
 			vscode.window.setStatusBarMessage("$(hubot) GSD connected", 3000);
 		} else {
@@ -68,6 +104,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				const autoCompaction = vscode.workspace.getConfiguration("gsd").get<boolean>("autoCompaction", true);
 				await client!.setAutoCompaction(autoCompaction).catch(() => {});
 				sidebarProvider?.refresh();
+				refreshStatusBar();
 				vscode.window.showInformationMessage("GSD agent started.");
 			} catch (err) {
 				handleError(err, "Failed to start GSD");
@@ -340,6 +377,71 @@ export function activate(context: vscode.ExtensionContext): void {
 				}
 			} catch (err) {
 				handleError(err, "Failed to list commands");
+			}
+		}),
+	);
+
+	// Toggle Auto-Retry
+	context.subscriptions.push(
+		vscode.commands.registerCommand("gsd.toggleAutoRetry", async () => {
+			if (!requireConnected()) return;
+			try {
+				const next = !client!.autoRetryEnabled;
+				await client!.setAutoRetry(next);
+				vscode.window.showInformationMessage(`Auto-retry ${next ? "enabled" : "disabled"}.`);
+				sidebarProvider?.refresh();
+			} catch (err) {
+				handleError(err, "Failed to toggle auto-retry");
+			}
+		}),
+	);
+
+	// Abort Retry
+	context.subscriptions.push(
+		vscode.commands.registerCommand("gsd.abortRetry", async () => {
+			if (!requireConnected()) return;
+			try {
+				await client!.abortRetry();
+				vscode.window.showInformationMessage("Retry aborted.");
+			} catch (err) {
+				handleError(err, "Failed to abort retry");
+			}
+		}),
+	);
+
+	// Set Session Name
+	context.subscriptions.push(
+		vscode.commands.registerCommand("gsd.setSessionName", async () => {
+			if (!requireConnected()) return;
+			const name = await vscode.window.showInputBox({
+				prompt: "Enter a name for this session",
+				placeHolder: "e.g. auth-refactor",
+			});
+			if (!name) return;
+			try {
+				await client!.setSessionName(name);
+				sidebarProvider?.refresh();
+				vscode.window.showInformationMessage(`Session named "${name}".`);
+			} catch (err) {
+				handleError(err, "Failed to set session name");
+			}
+		}),
+	);
+
+	// Copy Last Response
+	context.subscriptions.push(
+		vscode.commands.registerCommand("gsd.copyLastResponse", async () => {
+			if (!requireConnected()) return;
+			try {
+				const text = await client!.getLastAssistantText();
+				if (!text) {
+					vscode.window.showInformationMessage("No response to copy.");
+					return;
+				}
+				await vscode.env.clipboard.writeText(text);
+				vscode.window.showInformationMessage("Last response copied to clipboard.");
+			} catch (err) {
+				handleError(err, "Failed to copy last response");
 			}
 		}),
 	);
