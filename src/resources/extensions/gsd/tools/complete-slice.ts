@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 
 import type { CompleteSliceParams } from "../types.js";
+import { isClosedStatus } from "../status-guards.js";
 import {
   transaction,
   insertMilestone,
@@ -225,13 +226,13 @@ export async function handleCompleteSlice(
     // Milestone/slice not existing is OK — insertMilestone/insertSlice below will auto-create.
     // Only block if they exist and are closed.
     const milestone = getMilestone(params.milestoneId);
-    if (milestone && (milestone.status === "complete" || milestone.status === "done")) {
+    if (milestone && isClosedStatus(milestone.status)) {
       guardError = `cannot complete slice in a closed milestone: ${params.milestoneId} (status: ${milestone.status})`;
       return;
     }
 
     const slice = getSlice(params.milestoneId, params.sliceId);
-    if (slice && (slice.status === "complete" || slice.status === "done")) {
+    if (slice && isClosedStatus(slice.status)) {
       guardError = `slice ${params.sliceId} is already complete — use gsd_slice_reopen first if you need to redo it`;
       return;
     }
@@ -243,7 +244,7 @@ export async function handleCompleteSlice(
       return;
     }
 
-    const incompleteTasks = tasks.filter(t => t.status !== "complete" && t.status !== "done");
+    const incompleteTasks = tasks.filter(t => !isClosedStatus(t.status));
     if (incompleteTasks.length > 0) {
       const incompleteIds = incompleteTasks.map(t => `${t.id} (status: ${t.status})`).join(", ");
       guardError = `incomplete tasks: ${incompleteIds}`;

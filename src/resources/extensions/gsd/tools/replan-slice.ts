@@ -10,6 +10,8 @@ import {
   deleteTask,
 } from "../gsd-db.js";
 import { invalidateStateCache } from "../state.js";
+import { isClosedStatus } from "../status-guards.js";
+import { isNonEmptyString } from "../validation.js";
 import { renderPlanFromDb, renderReplanFromDb } from "../markdown-renderer.js";
 import { renderAllProjections } from "../workflow-projections.js";
 import { writeManifest } from "../workflow-manifest.js";
@@ -48,9 +50,6 @@ export interface ReplanSliceResult {
   planPath: string;
 }
 
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0;
-}
 
 function validateParams(params: ReplanSliceParams): ReplanSliceParams {
   if (!isNonEmptyString(params?.milestoneId)) throw new Error("milestoneId is required");
@@ -104,7 +103,7 @@ export async function handleReplanSlice(
         guardError = `missing parent slice: ${params.milestoneId}/${params.sliceId}`;
         return;
       }
-      if (parentSlice.status === "complete" || parentSlice.status === "done") {
+      if (isClosedStatus(parentSlice.status)) {
         guardError = `cannot replan a closed slice: ${params.sliceId} (status: ${parentSlice.status})`;
         return;
       }
@@ -115,7 +114,7 @@ export async function handleReplanSlice(
         guardError = `blockerTaskId not found: ${params.milestoneId}/${params.sliceId}/${params.blockerTaskId}`;
         return;
       }
-      if (blockerTask.status !== "complete" && blockerTask.status !== "done") {
+      if (!isClosedStatus(blockerTask.status)) {
         guardError = `blockerTaskId ${params.blockerTaskId} is not complete (status: ${blockerTask.status}) — the blocker task must be finished before a replan is triggered`;
         return;
       }
@@ -124,7 +123,7 @@ export async function handleReplanSlice(
       const existingTasks = getSliceTasks(params.milestoneId, params.sliceId);
       const completedTaskIds = new Set<string>();
       for (const task of existingTasks) {
-        if (task.status === "complete" || task.status === "done") {
+        if (isClosedStatus(task.status)) {
           completedTaskIds.add(task.id);
         }
       }
