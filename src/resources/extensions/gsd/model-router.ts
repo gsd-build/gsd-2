@@ -256,6 +256,25 @@ function buildFallbackChain(selectedModelId: string, phaseConfig: ResolvedModelC
 }
 
 /**
+ * Load capability overrides from user preferences' modelOverrides section.
+ * Returns a map of model ID → partial capability overrides to deep-merge with built-in profiles.
+ *
+ * Per D-17: partial capability overrides via models.json modelOverrides, deep-merged with defaults.
+ */
+export function loadCapabilityOverrides(
+  prefs: { modelOverrides?: Record<string, { capabilities?: Partial<ModelCapabilities> }> },
+): Record<string, Partial<ModelCapabilities>> {
+  const result: Record<string, Partial<ModelCapabilities>> = {};
+  if (!prefs.modelOverrides) return result;
+  for (const [modelId, overrideEntry] of Object.entries(prefs.modelOverrides)) {
+    if (overrideEntry.capabilities) {
+      result[modelId] = overrideEntry.capabilities;
+    }
+  }
+  return result;
+}
+
+/**
  * Resolve the model to use for a given complexity tier.
  *
  * Downgrade-only: the returned model is always equal to or cheaper than
@@ -266,12 +285,13 @@ function buildFallbackChain(selectedModelId: string, phaseConfig: ResolvedModelC
  *         when capability_routing is enabled and multiple eligible models exist.
  * STEP 3: Fallback chain assembly.
  *
- * @param classification    The complexity classification result
- * @param phaseConfig       The user's configured model for this phase (ceiling)
- * @param routingConfig     Dynamic routing configuration
- * @param availableModelIds List of available model IDs (from registry)
- * @param unitType          The unit type for capability requirement computation (optional)
- * @param taskMetadata      Task metadata for refined requirement vectors (optional)
+ * @param classification      The complexity classification result
+ * @param phaseConfig         The user's configured model for this phase (ceiling)
+ * @param routingConfig       Dynamic routing configuration
+ * @param availableModelIds   List of available model IDs (from registry)
+ * @param unitType            The unit type for capability requirement computation (optional)
+ * @param taskMetadata        Task metadata for refined requirement vectors (optional)
+ * @param capabilityOverrides User-provided capability overrides (deep-merged with built-in profiles, optional)
  */
 export function resolveModelForComplexity(
   classification: ClassificationResult,
@@ -280,6 +300,7 @@ export function resolveModelForComplexity(
   availableModelIds: string[],
   unitType?: string,
   taskMetadata?: TaskMetadata,
+  capabilityOverrides?: Record<string, Partial<ModelCapabilities>>,
 ): RoutingDecision {
   // If no phase config or routing disabled, pass through
   if (!phaseConfig || !routingConfig.enabled) {
@@ -343,7 +364,7 @@ export function resolveModelForComplexity(
   // STEP 2: Capability scoring (when enabled and multiple eligible models exist)
   if (routingConfig.capability_routing !== false && eligible.length > 1 && unitType) {
     const requirements = computeTaskRequirements(unitType, taskMetadata);
-    const scored = scoreEligibleModels(eligible, requirements);
+    const scored = scoreEligibleModels(eligible, requirements, capabilityOverrides);
     const winner = scored[0];
     if (winner) {
       const capScores: Record<string, number> = {};
