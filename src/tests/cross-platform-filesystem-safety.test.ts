@@ -41,7 +41,7 @@ function collectProductionFiles(dir: string): SourceFile[] {
     const content = readFileSync(full, "utf-8");
     results.push({
       abs: full,
-      rel: relative(SRC_ROOT, full),
+      rel: relative(SRC_ROOT, full).replaceAll("\\", "/"),
       content,
       lines: content.split("\n"),
     });
