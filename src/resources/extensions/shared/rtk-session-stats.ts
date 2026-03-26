@@ -123,6 +123,8 @@ export function readCurrentRtkGainSummary(env: NodeJS.ProcessEnv = process.env):
     env: buildRtkEnv(env),
     stdio: ["ignore", "pipe", "ignore"],
     timeout: CURRENT_SUMMARY_TIMEOUT_MS,
+    // .cmd/.bat wrappers (used by fake-rtk in tests) require shell:true on Windows
+    shell: /\.(cmd|bat)$/i.test(binaryPath),
   });
 
   if (result.error || result.status !== 0) {

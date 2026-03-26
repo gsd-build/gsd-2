@@ -99,6 +99,8 @@ export function rewriteCommandWithRtk(command: string, env: NodeJS.ProcessEnv = 
     env: buildRtkEnv(env),
     stdio: ["ignore", "pipe", "ignore"],
     timeout: RTK_REWRITE_TIMEOUT_MS,
+    // .cmd/.bat wrappers (used by fake-rtk in tests) require shell:true on Windows
+    shell: /\.(cmd|bat)$/i.test(binaryPath),
   });
 
   if (result.error) return command;

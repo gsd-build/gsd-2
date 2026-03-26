@@ -23,6 +23,12 @@ export function resolve(specifier, context, nextResolve) {
     specifier = new URL("packages/pi-agent-core/src/index.ts", ROOT).href;
   } else if (specifier === "@gsd/pi-tui") {
     specifier = new URL("packages/pi-tui/src/index.ts", ROOT).href;
+  } else if (specifier === "@gsd/native") {
+    specifier = new URL("packages/native/src/index.ts", ROOT).href;
+  } else if (specifier.startsWith("@gsd/native/")) {
+    // Sub-path imports like @gsd/native/fd, @gsd/native/text, etc.
+    const subpath = specifier.slice("@gsd/native/".length);
+    specifier = new URL(`packages/native/src/${subpath}/index.ts`, ROOT).href;
   }
   // 2. Redirect packages/*/dist/ → packages/*/src/ with .js→.ts for strip-types
   //    Also handles local imports — skip rewrite for dist/ paths that are real compiled artifacts.
