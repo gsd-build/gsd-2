@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   resolveModelForComplexity,
+  resolveModelForTier,
   escalateTier,
   defaultRoutingConfig,
 } from "../model-router.js";
@@ -209,4 +210,53 @@ test("cross-provider: configured primary available by bare ID wins over equivale
   );
   assert.equal(result.modelId, "claude-opus-4-6");
   assert.equal(result.wasDowngraded, false);
+});
+
+// ─── resolveModelForTier (provider-agnostic tier resolution) ────────────────
+
+test("resolveModelForTier: returns canonical Anthropic model when no available models", () => {
+  assert.equal(resolveModelForTier("heavy", []), "claude-opus-4-6");
+  assert.equal(resolveModelForTier("standard", []), "claude-sonnet-4-6");
+  assert.equal(resolveModelForTier("light", []), "claude-haiku-4-5");
+});
+
+test("resolveModelForTier: returns canonical model when it is available", () => {
+  assert.equal(
+    resolveModelForTier("heavy", ["claude-opus-4-6", "claude-sonnet-4-6"]),
+    "claude-opus-4-6",
+  );
+});
+
+test("resolveModelForTier: picks cross-provider equivalent when Anthropic unavailable", () => {
+  // Only OpenAI models available
+  const result = resolveModelForTier("heavy", ["gpt-4o", "gpt-4o-mini", "o1"]);
+  // o1 is the heavy-tier model in the OpenAI lineup
+  assert.equal(result, "o1");
+});
+
+test("resolveModelForTier: picks standard-tier cross-provider model", () => {
+  const result = resolveModelForTier("standard", ["gpt-4o", "gpt-4o-mini"]);
+  assert.equal(result, "gpt-4o");
+});
+
+test("resolveModelForTier: picks light-tier cross-provider model", () => {
+  const result = resolveModelForTier("light", ["gpt-4o", "gpt-4o-mini"]);
+  assert.equal(result, "gpt-4o-mini");
+});
+
+test("resolveModelForTier: falls back to canonical when no tier match available", () => {
+  // Only unknown models available — should return canonical
+  const result = resolveModelForTier("heavy", ["some-custom-model"]);
+  // Custom models default to heavy tier in getModelTier, so it should match
+  assert.equal(result, "some-custom-model");
+});
+
+test("resolveModelForTier: handles provider-prefixed available models", () => {
+  const result = resolveModelForTier("heavy", ["anthropic/claude-opus-4-6"]);
+  assert.equal(result, "claude-opus-4-6");
+});
+
+test("resolveModelForTier: picks Gemini models when only Google available", () => {
+  const result = resolveModelForTier("light", ["gemini-2.5-pro", "gemini-2.0-flash"]);
+  assert.equal(result, "gemini-2.0-flash");
 });

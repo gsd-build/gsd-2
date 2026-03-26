@@ -209,6 +209,56 @@ export function defaultRoutingConfig(): DynamicRoutingConfig {
   };
 }
 
+// ─── Tier-Based Model Resolution (for profile defaults) ─────────────────────
+
+/**
+ * Canonical Anthropic model IDs per tier. Used as the reference defaults
+ * when the user's available models include Anthropic models.
+ */
+const CANONICAL_TIER_MODELS: Record<ComplexityTier, string> = {
+  light: "claude-haiku-4-5",
+  standard: "claude-sonnet-4-6",
+  heavy: "claude-opus-4-6",
+};
+
+/**
+ * Resolve a concrete model ID for a given capability tier using the
+ * available model list. Provider-agnostic: picks the best available
+ * model at the requested tier, falling back to the canonical Anthropic
+ * ID when no available models can be inspected (e.g., at preferences
+ * load time before the model registry is populated).
+ *
+ * @param tier              The capability tier to resolve
+ * @param availableModelIds List of available model IDs, or empty if unknown
+ * @param crossProvider     Whether to consider models from other providers
+ */
+export function resolveModelForTier(
+  tier: ComplexityTier,
+  availableModelIds: string[],
+  crossProvider = true,
+): string {
+  // If no available models known, return canonical Anthropic default
+  if (availableModelIds.length === 0) {
+    return CANONICAL_TIER_MODELS[tier];
+  }
+
+  // Check if canonical model is available first (fast path)
+  const canonical = CANONICAL_TIER_MODELS[tier];
+  if (isModelAvailable(canonical, availableModelIds)) {
+    return canonical;
+  }
+
+  // Find the best available model at this tier using cost-based selection
+  const result = findModelForTier(
+    tier,
+    defaultRoutingConfig(),
+    availableModelIds,
+    crossProvider,
+  );
+
+  return result ?? CANONICAL_TIER_MODELS[tier];
+}
+
 // ─── Internal ────────────────────────────────────────────────────────────────
 
 /**
