@@ -6,7 +6,7 @@
  * utility.
  */
 
-import { loadFile, parseContinue, parsePlan, parseRoadmap, parseSummary, extractUatType, loadActiveOverrides, formatOverridesSection, parseTaskPlanFile } from "./files.js";
+import { loadFile, parseContinue, parseSummary, extractUatType, loadActiveOverrides, formatOverridesSection, parseTaskPlanFile } from "./files.js";
 import type { Override, UatType } from "./files.js";
 import { loadPrompt, inlineTemplate } from "./prompt-loader.js";
 import {
@@ -16,6 +16,7 @@ import {
   resolveGsdRootFile, relGsdRootFile, resolveRuntimeFile,
 } from "./paths.js";
 import { resolveSkillDiscoveryMode, resolveInlineLevel, loadEffectiveGSDPreferences, resolveAllSkillReferences } from "./preferences.js";
+import { parseRoadmap } from "./parsers-legacy.js";
 import type { GSDState, InlineLevel } from "./types.js";
 import type { GSDPreferences } from "./preferences.js";
 import { getLoadedSkills, type Skill } from "@gsd/pi-coding-agent";
@@ -177,17 +178,41 @@ export async function inlineFileSmart(
 export async function inlineDependencySummaries(
   mid: string, sid: string, base: string, budgetChars?: number,
 ): Promise<string> {
-  const roadmapFile = resolveMilestoneFile(base, mid, "ROADMAP");
-  const roadmapContent = roadmapFile ? await loadFile(roadmapFile) : null;
-  if (!roadmapContent) return "- (no dependencies)";
+  // DB primary path — get slice depends directly
+  let depends: string[] | null = null;
+  try {
+    const { isDbAvailable, getSlice } = await import("./gsd-db.js");
+    if (isDbAvailable()) {
+      const slice = getSlice(mid, sid);
+      if (slice) {
+        if (slice.depends.length === 0) return "- (no dependencies)";
+        depends = slice.depends as string[];
+      }
+      // If slice not found in DB, fall through to file-based parsing
+    }
+  } catch { /* fall through */ }
 
-  const roadmap = parseRoadmap(roadmapContent);
-  const sliceEntry = roadmap.slices.find(s => s.id === sid);
-  if (!sliceEntry || sliceEntry.depends.length === 0) return "- (no dependencies)";
+  // If DB didn't provide depends, fall back to roadmap parsing
+  if (!depends) {
+    const roadmapPath = resolveMilestoneFile(base, mid, "ROADMAP");
+    if (roadmapPath) {
+      const roadmapContent = await loadFile(roadmapPath);
+      if (roadmapContent) {
+        const parsed = parseRoadmap(roadmapContent);
+        const slice = parsed.slices.find(s => s.id === sid);
+        if (slice && slice.depends.length > 0) {
+          depends = slice.depends;
+        }
+      }
+    }
+    if (!depends) {
+      return "- (no dependencies)";
+    }
+  }
 
   const sections: string[] = [];
   const seen = new Set<string>();
-  for (const dep of sliceEntry.depends) {
+  for (const dep of depends) {
     if (seen.has(dep)) continue;
     seen.add(dep);
     const summaryFile = resolveSliceFile(base, mid, dep, "SUMMARY");
@@ -394,9 +419,17 @@ function resolvePreferredSkillNames(
     .map(skill => normalizeSkillReference(skill.name));
 }
 
+/** Skill names must be lowercase alphanumeric with hyphens — reject anything else
+ *  to prevent prompt injection via crafted directory names. */
+const SAFE_SKILL_NAME = /^[a-z0-9][a-z0-9-]*$/;
+
 function formatSkillActivationBlock(skillNames: string[]): string {
-  if (skillNames.length === 0) return "";
-  const calls = skillNames.map(name => `Call Skill('${name}')`).join('. ');
+  const safe = skillNames.filter(name => SAFE_SKILL_NAME.test(name));
+  if (safe.length === 0) return "";
+  // Use explicit parameter syntax so LLMs pass { skill: "..." } instead of { name: "..." }.
+  // The function-call-like syntax `Skill('name')` led LLMs to infer a positional
+  // parameter name, causing tool validation failures — see #2224.
+  const calls = safe.map(name => `Call Skill({ skill: '${name}' })`).join('. ');
   return `<skill_activation>${calls}.</skill_activation>`;
 }
 
@@ -420,8 +453,6 @@ export function buildSkillActivationBlock(params: {
     params.sliceTitle,
     params.taskId,
     params.taskTitle,
-    ...(params.extraContext ?? []),
-    params.taskPlanContent ?? undefined,
   );
 
   const visibleSkills = (typeof getLoadedSkills === 'function' ? getLoadedSkills() : []).filter(skill => !skill.disableModelInvocation);
@@ -449,12 +480,6 @@ export function buildSkillActivationBlock(params: {
       }
     } catch {
       // Non-fatal — malformed task plan should not break prompt construction
-    }
-  }
-
-  for (const skill of visibleSkills) {
-    if (skillMatchesContext(skill, contextTokens)) {
-      matched.add(normalizeSkillReference(skill.name));
     }
   }
 
@@ -684,31 +709,44 @@ export async function getDependencyTaskSummaryPaths(
 export async function checkNeedsReassessment(
   base: string, mid: string, state: GSDState,
 ): Promise<{ sliceId: string } | null> {
-  const roadmapFile = resolveMilestoneFile(base, mid, "ROADMAP");
-  const roadmapContent = roadmapFile ? await loadFile(roadmapFile) : null;
+  // DB primary path — fall through to file-based when DB has no data for this milestone
+  try {
+    const { isDbAvailable, getMilestoneSlices } = await import("./gsd-db.js");
+    if (isDbAvailable()) {
+      const slices = getMilestoneSlices(mid);
+      if (slices.length > 0) {
+        const completedSliceIds = slices.filter(s => s.status === "complete").map(s => s.id);
+        const hasIncomplete = slices.some(s => s.status !== "complete");
+        if (completedSliceIds.length === 0 || !hasIncomplete) return null;
+        const lastCompleted = completedSliceIds[completedSliceIds.length - 1];
+        const assessmentFile = resolveSliceFile(base, mid, lastCompleted, "ASSESSMENT");
+        const hasAssessment = !!(assessmentFile && await loadFile(assessmentFile));
+        if (hasAssessment) return null;
+        const summaryFile = resolveSliceFile(base, mid, lastCompleted, "SUMMARY");
+        const hasSummary = !!(summaryFile && await loadFile(summaryFile));
+        if (!hasSummary) return null;
+        return { sliceId: lastCompleted };
+      }
+    }
+  } catch { /* fall through */ }
+
+  // File-based fallback using roadmap checkboxes
+  const roadmapPath = resolveMilestoneFile(base, mid, "ROADMAP");
+  if (!roadmapPath) return null;
+  const roadmapContent = await loadFile(roadmapPath);
   if (!roadmapContent) return null;
-
-  const roadmap = parseRoadmap(roadmapContent);
-  const completedSlices = roadmap.slices.filter(s => s.done);
-  const incompleteSlices = roadmap.slices.filter(s => !s.done);
-
-  // No completed slices or all slices done — skip
-  if (completedSlices.length === 0 || incompleteSlices.length === 0) return null;
-
-  // Check the last completed slice
-  const lastCompleted = completedSlices[completedSlices.length - 1];
-  const assessmentFile = resolveSliceFile(base, mid, lastCompleted.id, "ASSESSMENT");
-  const hasAssessment = !!(assessmentFile && await loadFile(assessmentFile));
-
-  if (hasAssessment) return null;
-
-  // Also need a summary to reassess against
-  const summaryFile = resolveSliceFile(base, mid, lastCompleted.id, "SUMMARY");
-  const hasSummary = !!(summaryFile && await loadFile(summaryFile));
-
-  if (!hasSummary) return null;
-
-  return { sliceId: lastCompleted.id };
+  const parsed = parseRoadmap(roadmapContent);
+  const fileCompletedIds = parsed.slices.filter(s => s.done).map(s => s.id);
+  const fileHasIncomplete = parsed.slices.some(s => !s.done);
+  if (fileCompletedIds.length === 0 || !fileHasIncomplete) return null;
+  const lastDone = fileCompletedIds[fileCompletedIds.length - 1];
+  const assessFile = resolveSliceFile(base, mid, lastDone, "ASSESSMENT");
+  const hasAssess = !!(assessFile && await loadFile(assessFile));
+  if (hasAssess) return null;
+  const summFile = resolveSliceFile(base, mid, lastDone, "SUMMARY");
+  const hasSumm = !!(summFile && await loadFile(summFile));
+  if (!hasSumm) return null;
+  return { sliceId: lastDone };
 }
 
 /**
@@ -725,44 +763,51 @@ export async function checkNeedsReassessment(
 export async function checkNeedsRunUat(
   base: string, mid: string, state: GSDState, prefs: GSDPreferences | undefined,
 ): Promise<{ sliceId: string; uatType: UatType } | null> {
-  const roadmapFile = resolveMilestoneFile(base, mid, "ROADMAP");
-  const roadmapContent = roadmapFile ? await loadFile(roadmapFile) : null;
-  if (!roadmapContent) return null;
+  // DB primary path — fall through to file-based when DB has no data for this milestone
+  try {
+    const { isDbAvailable, getMilestoneSlices } = await import("./gsd-db.js");
+    if (isDbAvailable()) {
+      const slices = getMilestoneSlices(mid);
+      if (slices.length > 0) {
+        const completedSlices = slices.filter(s => s.status === "complete");
+        const incompleteSlices = slices.filter(s => s.status !== "complete");
+        if (completedSlices.length === 0) return null;
+        if (incompleteSlices.length === 0) return null;
+        if (!prefs?.uat_dispatch) return null;
+        const lastCompleted = completedSlices[completedSlices.length - 1];
+        const sid = lastCompleted.id;
+        const uatFile = resolveSliceFile(base, mid, sid, "UAT");
+        if (!uatFile) return null;
+        const uatContent = await loadFile(uatFile);
+        if (!uatContent) return null;
+        // If the UAT file already contains a verdict, UAT has been run — skip
+        if (/verdict:\s*[\w-]+/i.test(uatContent)) return null;
+        const uatType = extractUatType(uatContent) ?? "artifact-driven";
+        return { sliceId: sid, uatType };
+      }
+    }
+  } catch { /* fall through */ }
 
-  const roadmap = parseRoadmap(roadmapContent);
-  const completedSlices = roadmap.slices.filter(s => s.done);
-  const incompleteSlices = roadmap.slices.filter(s => !s.done);
-
-  // No completed slices — nothing to UAT yet
-  if (completedSlices.length === 0) return null;
-
-  // All slices done — milestone complete path, skip (reassessment handles)
-  if (incompleteSlices.length === 0) return null;
-
-  // uat_dispatch must be opted in
+  // File-based fallback using roadmap checkboxes
   if (!prefs?.uat_dispatch) return null;
-
-  // Take the last completed slice
-  const lastCompleted = completedSlices[completedSlices.length - 1];
-  const sid = lastCompleted.id;
-
-  // UAT file must exist
-  const uatFile = resolveSliceFile(base, mid, sid, "UAT");
-  if (!uatFile) return null;
-  const uatContent = await loadFile(uatFile);
-  if (!uatContent) return null;
-
-  // If UAT result already exists, skip (idempotent)
-  const uatResultFile = resolveSliceFile(base, mid, sid, "UAT-RESULT");
-  if (uatResultFile) {
-    const hasResult = !!(await loadFile(uatResultFile));
-    if (hasResult) return null;
-  }
-
-  // Classify UAT type; default to artifact-driven (LLM-executed UATs are always artifact-driven)
-  const uatType = extractUatType(uatContent) ?? "artifact-driven";
-
-  return { sliceId: sid, uatType };
+  const roadmapPath = resolveMilestoneFile(base, mid, "ROADMAP");
+  if (!roadmapPath) return null;
+  const roadmapContent = await loadFile(roadmapPath);
+  if (!roadmapContent) return null;
+  const parsed = parseRoadmap(roadmapContent);
+  const completedFileSlices = parsed.slices.filter(s => s.done);
+  const incompleteFileSlices = parsed.slices.filter(s => !s.done);
+  if (completedFileSlices.length === 0 || incompleteFileSlices.length === 0) return null;
+  const lastCompletedFile = completedFileSlices[completedFileSlices.length - 1];
+  const uatSid = lastCompletedFile.id;
+  const uatFileFb = resolveSliceFile(base, mid, uatSid, "UAT");
+  if (!uatFileFb) return null;
+  const uatContentFb = await loadFile(uatFileFb);
+  if (!uatContentFb) return null;
+  // If the UAT file already contains a verdict, UAT has been run — skip
+  if (/verdict:\s*[\w-]+/i.test(uatContentFb)) return null;
+  const uatTypeFb = extractUatType(uatContentFb) ?? "artifact-driven";
+  return { sliceId: uatSid, uatType: uatTypeFb };
 }
 
 // ─── Prompt Builders ──────────────────────────────────────────────────────
@@ -983,11 +1028,7 @@ export async function buildPlanSlicePrompt(
   const executorContextConstraints = formatExecutorConstraints();
 
   const outputRelPath = relSliceFile(base, mid, sid, "PLAN");
-  const prefs = loadEffectiveGSDPreferences();
-  const commitDocsEnabled = prefs?.preferences?.git?.commit_docs !== false;
-  const commitInstruction = commitDocsEnabled
-    ? `Commit the plan files only: \`git add ${relSlicePath(base, mid, sid)}/ .gsd/DECISIONS.md .gitignore && git commit -m "docs(${sid}): add slice plan"\`. Do not stage .gsd/STATE.md or other runtime files — the system manages those.`
-    : "Do not commit — planning docs are not tracked in git for this project.";
+  const commitInstruction = "Do not commit — .gsd/ planning docs are managed externally and not tracked in git.";
   return loadPrompt("plan-slice", {
     workingDirectory: base,
     milestoneId: mid, sliceId: sid, sliceTitle: sTitle,
@@ -1216,17 +1257,27 @@ export async function buildCompleteMilestonePrompt(
   inlined.push(await inlineFile(roadmapPath, roadmapRel, "Milestone Roadmap"));
 
   // Inline all slice summaries (deduplicated by slice ID)
-  const roadmapContent = roadmapPath ? await loadFile(roadmapPath) : null;
-  if (roadmapContent) {
-    const roadmap = parseRoadmap(roadmapContent);
-    const seenSlices = new Set<string>();
-    for (const slice of roadmap.slices) {
-      if (seenSlices.has(slice.id)) continue;
-      seenSlices.add(slice.id);
-      const summaryPath = resolveSliceFile(base, mid, slice.id, "SUMMARY");
-      const summaryRel = relSliceFile(base, mid, slice.id, "SUMMARY");
-      inlined.push(await inlineFile(summaryPath, summaryRel, `${slice.id} Summary`));
+  let sliceIds: string[] = [];
+  try {
+    const { isDbAvailable, getMilestoneSlices } = await import("./gsd-db.js");
+    if (isDbAvailable()) {
+      sliceIds = getMilestoneSlices(mid).map(s => s.id);
     }
+  } catch { /* fall through */ }
+  // File-based fallback: parse roadmap for slice IDs when DB has no data
+  if (sliceIds.length === 0 && roadmapPath) {
+    const roadmapContent = await loadFile(roadmapPath);
+    if (roadmapContent) {
+      sliceIds = parseRoadmap(roadmapContent).slices.map(s => s.id);
+    }
+  }
+  const seenSlices = new Set<string>();
+  for (const sid of sliceIds) {
+    if (seenSlices.has(sid)) continue;
+    seenSlices.add(sid);
+    const summaryPath = resolveSliceFile(base, mid, sid, "SUMMARY");
+    const summaryRel = relSliceFile(base, mid, sid, "SUMMARY");
+    inlined.push(await inlineFile(summaryPath, summaryRel, `${sid} Summary`));
   }
 
   // Inline root GSD files (skip for minimal — completion can read these if needed)
@@ -1258,6 +1309,12 @@ export async function buildCompleteMilestonePrompt(
     roadmapPath: roadmapRel,
     inlinedContext,
     milestoneSummaryPath,
+    skillActivation: buildSkillActivationBlock({
+      base,
+      milestoneId: mid,
+      milestoneTitle: midTitle,
+      extraContext: [inlinedContext],
+    }),
   });
 }
 
@@ -1272,22 +1329,32 @@ export async function buildValidateMilestonePrompt(
   inlined.push(await inlineFile(roadmapPath, roadmapRel, "Milestone Roadmap"));
 
   // Inline all slice summaries and UAT results
-  const roadmapContent = roadmapPath ? await loadFile(roadmapPath) : null;
-  if (roadmapContent) {
-    const roadmap = parseRoadmap(roadmapContent);
-    const seenSlices = new Set<string>();
-    for (const slice of roadmap.slices) {
-      if (seenSlices.has(slice.id)) continue;
-      seenSlices.add(slice.id);
-      const summaryPath = resolveSliceFile(base, mid, slice.id, "SUMMARY");
-      const summaryRel = relSliceFile(base, mid, slice.id, "SUMMARY");
-      inlined.push(await inlineFile(summaryPath, summaryRel, `${slice.id} Summary`));
-
-      const uatPath = resolveSliceFile(base, mid, slice.id, "UAT-RESULT");
-      const uatRel = relSliceFile(base, mid, slice.id, "UAT-RESULT");
-      const uatInline = await inlineFileOptional(uatPath, uatRel, `${slice.id} UAT Result`);
-      if (uatInline) inlined.push(uatInline);
+  let valSliceIds: string[] = [];
+  try {
+    const { isDbAvailable, getMilestoneSlices } = await import("./gsd-db.js");
+    if (isDbAvailable()) {
+      valSliceIds = getMilestoneSlices(mid).map(s => s.id);
     }
+  } catch { /* fall through */ }
+  // File-based fallback: parse roadmap for slice IDs when DB has no data
+  if (valSliceIds.length === 0 && roadmapPath) {
+    const roadmapContent = await loadFile(roadmapPath);
+    if (roadmapContent) {
+      valSliceIds = parseRoadmap(roadmapContent).slices.map(s => s.id);
+    }
+  }
+  const seenValSlices = new Set<string>();
+  for (const sid of valSliceIds) {
+    if (seenValSlices.has(sid)) continue;
+    seenValSlices.add(sid);
+    const summaryPath = resolveSliceFile(base, mid, sid, "SUMMARY");
+    const summaryRel = relSliceFile(base, mid, sid, "SUMMARY");
+    inlined.push(await inlineFile(summaryPath, summaryRel, `${sid} Summary`));
+
+    const uatPath = resolveSliceFile(base, mid, sid, "UAT");
+    const uatRel = relSliceFile(base, mid, sid, "UAT");
+    const uatInline = await inlineFileOptional(uatPath, uatRel, `${sid} UAT Result`);
+    if (uatInline) inlined.push(uatInline);
   }
 
   // Inline existing VALIDATION file if this is a re-validation round
@@ -1331,6 +1398,12 @@ export async function buildValidateMilestonePrompt(
     inlinedContext,
     validationPath: validationOutputPath,
     remediationRound: String(remediationRound),
+    skillActivation: buildSkillActivationBlock({
+      base,
+      milestoneId: mid,
+      milestoneTitle: midTitle,
+      extraContext: [inlinedContext],
+    }),
   });
 }
 
@@ -1430,7 +1503,7 @@ export async function buildRunUatPrompt(
 
   const inlinedContext = capPreamble(`## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`);
 
-  const uatResultPath = join(base, relSliceFile(base, mid, sliceId, "UAT-RESULT"));
+  const uatResultPath = join(base, relSliceFile(base, mid, sliceId, "UAT"));
   const uatType = extractUatType(uatContent) ?? "artifact-driven";
 
   return loadPrompt("run-uat", {
@@ -1441,6 +1514,12 @@ export async function buildRunUatPrompt(
     uatResultPath,
     uatType,
     inlinedContext,
+    skillActivation: buildSkillActivationBlock({
+      base,
+      milestoneId: mid,
+      sliceId,
+      extraContext: [inlinedContext],
+    }),
   });
 }
 
@@ -1485,11 +1564,7 @@ export async function buildReassessRoadmapPrompt(
     // Non-fatal — captures module may not be available
   }
 
-  const reassessPrefs = loadEffectiveGSDPreferences();
-  const reassessCommitDocsEnabled = reassessPrefs?.preferences?.git?.commit_docs !== false;
-  const reassessCommitInstruction = reassessCommitDocsEnabled
-    ? `Commit: \`docs(${mid}): reassess roadmap after ${completedSliceId}\`. Stage only the .gsd/milestones/ files you changed — do not stage .gsd/STATE.md or other runtime files.`
-    : "Do not commit — planning docs are not tracked in git for this project.";
+  const reassessCommitInstruction = "Do not commit — .gsd/ planning docs are managed externally and not tracked in git.";
 
   return loadPrompt("reassess-roadmap", {
     workingDirectory: base,
@@ -1497,11 +1572,16 @@ export async function buildReassessRoadmapPrompt(
     milestoneTitle: midTitle,
     completedSliceId,
     roadmapPath: roadmapRel,
-    completedSliceSummaryPath: summaryRel,
     assessmentPath,
     inlinedContext,
     deferredCaptures,
     commitInstruction: reassessCommitInstruction,
+    skillActivation: buildSkillActivationBlock({
+      base,
+      milestoneId: mid,
+      milestoneTitle: midTitle,
+      extraContext: [inlinedContext, deferredCaptures],
+    }),
   });
 }
 
@@ -1598,16 +1678,28 @@ export async function buildRewriteDocsPrompt(
       docList.push(`- Slice plan: \`${slicePlanRel}\``);
       const tDir = resolveTasksDir(base, mid, sid);
       if (tDir) {
-        const planContent = await loadFile(slicePlanPath);
-        if (planContent) {
-          const plan = parsePlan(planContent);
-          for (const task of plan.tasks) {
-            if (!task.done) {
-              const taskPlanPath = resolveTaskFile(base, mid, sid, task.id, "PLAN");
-              if (taskPlanPath) {
-                const taskRelPath = `${relSlicePath(base, mid, sid)}/tasks/${task.id}-PLAN.md`;
-                docList.push(`- Task plan: \`${taskRelPath}\``);
-              }
+        // DB primary path — get incomplete tasks
+        let incompleteTasks: { id: string }[] | null = null;
+        try {
+          const { isDbAvailable, getSliceTasks } = await import("./gsd-db.js");
+          if (isDbAvailable()) {
+            incompleteTasks = getSliceTasks(mid, sid)
+              .filter(t => t.status !== "complete" && t.status !== "done")
+              .map(t => ({ id: t.id }));
+          }
+        } catch { /* fall through */ }
+
+        if (!incompleteTasks) {
+          // DB unavailable — no task data to inline
+          incompleteTasks = [];
+        }
+
+        if (incompleteTasks) {
+          for (const task of incompleteTasks) {
+            const taskPlanPath = resolveTaskFile(base, mid, sid, task.id, "PLAN");
+            if (taskPlanPath) {
+              const taskRelPath = `${relSlicePath(base, mid, sid)}/tasks/${task.id}-PLAN.md`;
+              docList.push(`- Task plan: \`${taskRelPath}\``);
             }
           }
         }

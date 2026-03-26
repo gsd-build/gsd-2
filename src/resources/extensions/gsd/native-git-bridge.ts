@@ -58,6 +58,8 @@ interface GitBatchInfo {
 interface GitMergeResult {
   success: boolean;
   conflicts: string[];
+  /** Filenames extracted from git stderr when a dirty working tree blocks the merge (#2151). */
+  dirtyFiles?: string[];
 }
 
 // ─── Native Module Loading ──────────────────────────────────────────────────
@@ -847,6 +849,7 @@ export function nativeMergeSquash(basePath: string, branch: string): GitMergeRes
       cwd: basePath,
       stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf-8",
+      env: GIT_NO_PROMPT_ENV,
     });
     return { success: true, conflicts: [] };
   } catch (err: unknown) {
@@ -862,7 +865,16 @@ export function nativeMergeSquash(basePath: string, branch: string): GitMergeRes
       stderr.includes("not possible because you have unmerged files") ||
       stderr.includes("overwritten by merge")
     ) {
-      return { success: false, conflicts: ["__dirty_working_tree__"] };
+      // Extract filenames from git stderr so callers can report which files
+      // are dirty instead of generically blaming .gsd/ (#2151).
+      // Git lists them as tab-indented lines between the "would be overwritten"
+      // header and the "Please commit" footer.
+      const dirtyFiles = stderr
+        .split("\n")
+        .filter((line) => line.startsWith("\t"))
+        .map((line) => line.trim())
+        .filter(Boolean);
+      return { success: false, conflicts: ["__dirty_working_tree__"], dirtyFiles };
     }
 
     // Check for real content conflicts

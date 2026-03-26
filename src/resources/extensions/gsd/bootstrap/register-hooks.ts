@@ -7,6 +7,7 @@ import { buildMilestoneFileName, resolveMilestonePath, resolveSliceFile, resolve
 import { buildBeforeAgentStartResult } from "./system-context.js";
 import { handleAgentEnd } from "./agent-end-recovery.js";
 import { clearDiscussionFlowState, isDepthVerified, isQueuePhaseActive, markDepthVerified, resetWriteGateState, shouldBlockContextWrite } from "./write-gate.js";
+import { isBlockedStateFile, isBashWriteToStateFile, BLOCKED_WRITE_ERROR } from "../write-intercept.js";
 import { getDiscussionMilestoneId } from "../guided-flow.js";
 import { loadToolApiKeys } from "../commands-config.js";
 import { loadFile, saveFile, formatContinue } from "../files.js";
@@ -20,21 +21,34 @@ import { saveActivityLog } from "../activity-log.js";
 // printed it before the TUI launched. Only re-print on /clear (subsequent sessions).
 let isFirstSession = true;
 
+async function syncServiceTierStatus(ctx: ExtensionContext): Promise<void> {
+  const { getEffectiveServiceTier, formatServiceTierFooterStatus } = await import("../service-tier.js");
+  ctx.ui.setStatus("gsd-fast", formatServiceTierFooterStatus(getEffectiveServiceTier(), ctx.model?.id));
+}
+
 export function registerHooks(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     resetWriteGateState();
     resetToolCallLoopGuard();
+    await syncServiceTierStatus(ctx);
+
+    // Apply show_token_cost preference (#1515)
+    try {
+      const { loadEffectiveGSDPreferences } = await import("../preferences.js");
+      const prefs = loadEffectiveGSDPreferences();
+      process.env.GSD_SHOW_TOKEN_COST = prefs?.preferences.show_token_cost ? "1" : "";
+    } catch { /* non-fatal */ }
     if (isFirstSession) {
       isFirstSession = false;
     } else {
       try {
         const gsdBinPath = process.env.GSD_BIN_PATH;
         if (gsdBinPath) {
-          const { dirname } = await import('node:path');
+          const { dirname } = await import("node:path");
           const { printWelcomeScreen } = await import(
-            join(dirname(gsdBinPath), 'welcome-screen.js')
+            join(dirname(gsdBinPath), "welcome-screen.js")
           ) as { printWelcomeScreen: (opts: { version: string; modelName?: string; provider?: string }) => void };
-          printWelcomeScreen({ version: process.env.GSD_VERSION || '0.0.0' });
+          printWelcomeScreen({ version: process.env.GSD_VERSION || "0.0.0" });
         }
       } catch { /* non-fatal */ }
     }
@@ -122,7 +136,28 @@ export function registerHooks(pi: ExtensionAPI): void {
       return { block: true, reason: loopCheck.reason };
     }
 
+    // ── Single-writer engine: block direct writes to STATE.md ──────────
+    // Covers write, edit, and bash tools to prevent bypass vectors.
+    if (isToolCallEventType("write", event)) {
+      if (isBlockedStateFile(event.input.path)) {
+        return { block: true, reason: BLOCKED_WRITE_ERROR };
+      }
+    }
+
+    if (isToolCallEventType("edit", event)) {
+      if (isBlockedStateFile(event.input.path)) {
+        return { block: true, reason: BLOCKED_WRITE_ERROR };
+      }
+    }
+
+    if (isToolCallEventType("bash", event)) {
+      if (isBashWriteToStateFile(event.input.command)) {
+        return { block: true, reason: BLOCKED_WRITE_ERROR };
+      }
+    }
+
     if (!isToolCallEventType("write", event)) return;
+
     const result = shouldBlockContextWrite(
       event.toolName,
       event.input.path,
@@ -192,8 +227,11 @@ export function registerHooks(pi: ExtensionAPI): void {
     markToolEnd(event.toolCallId);
   });
 
+  pi.on("model_select", async (_event, ctx) => {
+    await syncServiceTierStatus(ctx);
+  });
+
   pi.on("before_provider_request", async (event) => {
-    if (!isAutoActive()) return;
     const modelId = event.model?.id;
     if (!modelId) return;
     const { getEffectiveServiceTier, supportsServiceTier } = await import("../service-tier.js");
@@ -205,4 +243,3 @@ export function registerHooks(pi: ExtensionAPI): void {
     return payload;
   });
 }
-

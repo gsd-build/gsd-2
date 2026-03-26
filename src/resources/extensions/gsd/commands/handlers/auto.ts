@@ -1,9 +1,32 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent";
 
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { enableDebug } from "../../debug-logger.js";
 import { getAutoDashboardData, isAutoActive, isAutoPaused, pauseAuto, startAuto, stopAuto, stopAutoRemote } from "../../auto.js";
 import { handleRate } from "../../commands-rate.js";
 import { guardRemoteSession, projectRoot } from "../context.js";
+
+/**
+ * Parse --yolo flag and optional file path from the auto command string.
+ * Supports: `/gsd auto --yolo path/to/file.md` or `/gsd auto -y path/to/file.md`
+ */
+function parseYoloFlag(trimmed: string): { yoloSeedFile: string | null; rest: string } {
+  const yoloRe = /(?:--yolo|-y)\s+("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\S+)/;
+  const match = trimmed.match(yoloRe);
+  if (!match) return { yoloSeedFile: null, rest: trimmed };
+
+  // Strip quotes if present
+  let filePath = match[1];
+  if ((filePath.startsWith('"') && filePath.endsWith('"')) ||
+      (filePath.startsWith("'") && filePath.endsWith("'"))) {
+    filePath = filePath.slice(1, -1);
+  }
+
+  const rest = trimmed.replace(match[0], "").replace(/\s+/g, " ").trim();
+  return { yoloSeedFile: filePath, rest };
+}
 
 export async function handleAutoCommand(trimmed: string, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<boolean> {
   if (trimmed === "next" || trimmed.startsWith("next ")) {
@@ -21,11 +44,31 @@ export async function handleAutoCommand(trimmed: string, ctx: ExtensionCommandCo
   }
 
   if (trimmed === "auto" || trimmed.startsWith("auto ")) {
-    const verboseMode = trimmed.includes("--verbose");
-    const debugMode = trimmed.includes("--debug");
+    const { yoloSeedFile, rest } = parseYoloFlag(trimmed);
+    const verboseMode = rest.includes("--verbose");
+    const debugMode = rest.includes("--debug");
     if (debugMode) enableDebug(projectRoot());
     if (!(await guardRemoteSession(ctx, pi))) return true;
-    await startAuto(ctx, pi, projectRoot(), verboseMode);
+
+    if (yoloSeedFile) {
+      const resolved = resolve(projectRoot(), yoloSeedFile);
+      if (!existsSync(resolved)) {
+        ctx.ui.notify(`Yolo seed file not found: ${resolved}`, "error");
+        return true;
+      }
+      const seedContent = readFileSync(resolved, "utf-8").trim();
+      if (!seedContent) {
+        ctx.ui.notify(`Yolo seed file is empty: ${resolved}`, "error");
+        return true;
+      }
+      // Headless path: bootstrap project, dispatch non-interactive discuss,
+      // then auto-mode starts automatically via checkAutoStartAfterDiscuss
+      // when the LLM says "Milestone X ready."
+      const { showHeadlessMilestoneCreation } = await import("../../guided-flow.js");
+      await showHeadlessMilestoneCreation(ctx, pi, projectRoot(), seedContent);
+    } else {
+      await startAuto(ctx, pi, projectRoot(), verboseMode);
+    }
     return true;
   }
 

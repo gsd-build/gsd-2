@@ -15,6 +15,7 @@ import {
   applyModeDefaults,
   getIsolationMode,
   parsePreferencesMarkdown,
+  _resetParseWarningFlag,
 } from "../preferences.ts";
 import type { GSDPreferences, GSDModelConfigV2, GSDPhaseModelConfig } from "../preferences.ts";
 
@@ -40,18 +41,16 @@ test("git.merge_to_main produces deprecation warning", () => {
 });
 
 
-test("getIsolationMode defaults to worktree when preferences have no isolation setting", () => {
+test("getIsolationMode defaults to none when preferences have no isolation setting", () => {
   // Validate the default via validatePreferences: when no isolation is set,
-  // preferences.git.isolation is undefined, and getIsolationMode returns "worktree".
-  // We test the function's logic by verifying its documented default.
+  // preferences.git.isolation is undefined, and getIsolationMode returns "none".
+  // Default changed from "worktree" to "none" so GSD works out of the box
+  // without preferences.md (#2480).
   const { preferences } = validatePreferences({});
   assert.equal(preferences.git?.isolation, undefined, "no isolation in empty prefs");
-  // The function returns "worktree" when prefs?.git?.isolation is not "none" or "branch"
-  // This is a compile-time-verifiable truth from the function body — test it directly
-  // by constructing the same conditions getIsolationMode checks.
   const isolation = preferences.git?.isolation;
-  const expected = isolation === "none" ? "none" : isolation === "branch" ? "branch" : "worktree";
-  assert.equal(expected, "worktree", "default isolation mode is worktree");
+  const expected = isolation === "worktree" ? "worktree" : isolation === "branch" ? "branch" : "none";
+  assert.equal(expected, "none", "default isolation mode is none");
 });
 
 // ── Mode defaults ────────────────────────────────────────────────────────────
@@ -62,7 +61,7 @@ test("solo mode applies correct defaults", () => {
   assert.equal(result.git?.push_branches, false);
   assert.equal(result.git?.pre_merge_check, false);
   assert.equal(result.git?.merge_strategy, "squash");
-  assert.equal(result.git?.isolation, "worktree");
+  assert.equal(result.git?.isolation, "none");
   assert.equal(result.unique_milestone_ids, false);
 });
 
@@ -351,4 +350,30 @@ test("handles empty models config", () => {
   const prefs = parsePreferencesMarkdown("---\nversion: 1\n---\n");
   assert.notEqual(prefs, null);
   assert.equal(prefs!.models, undefined);
+});
+
+// ── Warn-once for unrecognized format (#2373) ────────────────────────────────
+
+test("unrecognized format warning is emitted at most once (#2373)", () => {
+  const warnings: string[] = [];
+  const origWarn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args.join(" "));
+  try {
+    // Reset internal warned flag so the test starts clean
+    _resetParseWarningFlag();
+
+    const unrecognized = "This is just plain text with no frontmatter or headings.";
+
+    // Call multiple times — simulates repeated preference loads
+    parsePreferencesMarkdown(unrecognized);
+    parsePreferencesMarkdown(unrecognized);
+    parsePreferencesMarkdown(unrecognized);
+
+    const relevant = warnings.filter(w => w.includes("unrecognized format"));
+    assert.equal(relevant.length, 1, `expected exactly 1 warning, got ${relevant.length}: ${JSON.stringify(relevant)}`);
+  } finally {
+    console.warn = origWarn;
+    // Reset so other tests aren't affected by the flag state
+    _resetParseWarningFlag();
+  }
 });

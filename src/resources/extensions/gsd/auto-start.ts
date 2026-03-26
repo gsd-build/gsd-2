@@ -58,7 +58,7 @@ import { initRoutingHistory } from "./routing-history.js";
 import { restoreHookState, resetHookState } from "./post-unit-hooks.js";
 import { resetProactiveHealing, setLevelChangeCallback } from "./doctor-proactive.js";
 import { snapshotSkills } from "./skill-discovery.js";
-import { isDbAvailable } from "./gsd-db.js";
+import { isDbAvailable, getMilestone } from "./gsd-db.js";
 import { hideFooter } from "./auto-dashboard.js";
 import {
   debugLog,
@@ -140,13 +140,14 @@ export async function bootstrapAutoSession(
       return releaseLockAndReturn();
     }
 
-    // Ensure git repo exists.
-    // Guard against inherited repos: if `base` is a subdirectory of another
-    // git repo that has no .gsd (i.e. the parent project was never initialised
-    // with GSD), create a fresh git repo at `base` so it gets its own identity
-    // hash. Without this, repoIdentity() resolves to the parent repo's hash
-    // and loads milestones from an unrelated project (#1639).
-    if (!nativeIsRepo(base) || isInheritedRepo(base)) {
+    // Ensure git repo exists *locally* at base.
+    // nativeIsRepo() uses `git rev-parse` which traverses up to parent dirs,
+    // so a parent repo can make it return true even when base has no .git of
+    // its own. Check for a local .git instead (defense-in-depth for the case
+    // where isInheritedRepo() returns a false negative, e.g. stale .gsd at
+    // the parent git root). See #2393 and related issue.
+    const hasLocalGit = existsSync(join(base, ".git"));
+    if (!hasLocalGit || isInheritedRepo(base)) {
       const mainBranch =
         loadEffectiveGSDPreferences()?.preferences?.git?.main_branch || "main";
       nativeInit(base, mainBranch);
@@ -167,22 +168,19 @@ export async function bootstrapAutoSession(
     // ensureGitignore checks for git-tracked .gsd/ files and skips the
     // ".gsd" pattern if the project intentionally tracks .gsd/ in git.
     const gitPrefs = loadEffectiveGSDPreferences()?.preferences?.git;
-    const commitDocs = gitPrefs?.commit_docs;
     const manageGitignore = gitPrefs?.manage_gitignore;
-    ensureGitignore(base, { commitDocs, manageGitignore });
+    ensureGitignore(base, { manageGitignore });
     if (manageGitignore !== false) untrackRuntimeFiles(base);
 
     // Bootstrap .gsd/ if it doesn't exist
     const gsdDir = join(base, ".gsd");
     if (!existsSync(gsdDir)) {
       mkdirSync(join(gsdDir, "milestones"), { recursive: true });
-      if (commitDocs !== false) {
-        try {
-          nativeAddAll(base);
-          nativeCommit(base, "chore: init gsd");
-        } catch {
-          /* nothing to commit */
-        }
+      try {
+        nativeAddAll(base);
+        nativeCommit(base, "chore: init gsd");
+      } catch {
+        /* nothing to commit */
       }
     }
 
@@ -300,11 +298,14 @@ export async function bootstrapAutoSession(
       }
     }
 
-    // Milestone branch recovery (#601)
+    // Milestone branch recovery (#601, #2358)
+    // Detect survivor milestone branches in both pre-planning and complete phases.
+    // In phase=complete, the milestone artifacts exist but finalization (merge,
+    // worktree cleanup) was never run — the survivor branch must be merged.
     let hasSurvivorBranch = false;
     if (
       state.activeMilestone &&
-      state.phase === "pre-planning" &&
+      (state.phase === "pre-planning" || state.phase === "complete") &&
       shouldUseWorktreeIsolation() &&
       !detectWorktreeName(base) &&
       !base.includes(`${pathSep}.gsd${pathSep}worktrees${pathSep}`)
@@ -344,6 +345,26 @@ export async function bootstrapAutoSession(
         );
         return releaseLockAndReturn();
       }
+    }
+
+    // Survivor branch exists and milestone is complete (#2358):
+    // The milestone artifacts were written but finalization (merge, worktree
+    // cleanup) never ran. Run mergeAndExit to finalize, then re-derive state
+    // so the normal "all milestones complete" or "next milestone" path runs.
+    if (hasSurvivorBranch && state.phase === "complete") {
+      const mid = state.activeMilestone!.id;
+      ctx.ui.notify(
+        `Milestone ${mid} is complete but branch/worktree was not finalized. Running merge now.`,
+        "info",
+      );
+      const resolver = buildResolver();
+      resolver.mergeAndExit(mid, {
+        notify: ctx.ui.notify.bind(ctx.ui),
+      });
+      invalidateAllCaches();
+      state = await deriveState(base);
+      // Clear survivor flag — finalization is done
+      hasSurvivorBranch = false;
     }
 
     if (!hasSurvivorBranch) {
@@ -474,7 +495,6 @@ export async function bootstrapAutoSession(
     });
     s.autoStartTime = Date.now();
     s.resourceVersionOnStart = readResourceVersion();
-    s.completedUnits = [];
     s.pendingQuickTasks = [];
     s.currentUnit = null;
     s.currentMilestoneId = state.activeMilestone?.id ?? null;
@@ -487,7 +507,7 @@ export async function bootstrapAutoSession(
     // Capture integration branch
     if (s.currentMilestoneId) {
       if (getIsolationMode() !== "none") {
-        captureIntegrationBranch(base, s.currentMilestoneId, { commitDocs });
+        captureIntegrationBranch(base, s.currentMilestoneId);
       }
       setActiveMilestoneId(base, s.currentMilestoneId);
     }
@@ -530,17 +550,17 @@ export async function bootstrapAutoSession(
       const hasDecisions = existsSync(join(gsdDirPath, "DECISIONS.md"));
       const hasRequirements = existsSync(join(gsdDirPath, "REQUIREMENTS.md"));
       const hasMilestones = existsSync(join(gsdDirPath, "milestones"));
-      if (hasDecisions || hasRequirements || hasMilestones) {
-        try {
-          const { openDatabase: openDb } = await import("./gsd-db.js");
+      try {
+        const { openDatabase: openDb } = await import("./gsd-db.js");
+        openDb(gsdDbPath);
+        if (hasDecisions || hasRequirements || hasMilestones) {
           const { migrateFromMarkdown } = await import("./md-importer.js");
-          openDb(gsdDbPath);
           migrateFromMarkdown(s.basePath);
-        } catch (err) {
-          process.stderr.write(
-            `gsd-migrate: auto-migration failed: ${(err as Error).message}\n`,
-          );
         }
+      } catch (err) {
+        process.stderr.write(
+          `gsd-migrate: auto-migration failed: ${(err as Error).message}\n`,
+        );
       }
     }
     if (existsSync(gsdDbPath) && !isDbAvailable()) {
@@ -552,6 +572,20 @@ export async function bootstrapAutoSession(
           `gsd-db: failed to open existing database: ${(err as Error).message}\n`,
         );
       }
+    }
+
+    // Gate: abort bootstrap if the DB file exists but the provider is
+    // still unavailable after both open attempts above. Without this,
+    // auto-mode starts but every gsd_task_complete / gsd_slice_complete
+    // call returns "db_unavailable", triggering artifact-retry which
+    // re-dispatches the same task — producing an infinite loop (#2419).
+    if (existsSync(gsdDbPath) && !isDbAvailable()) {
+      ctx.ui.notify(
+        "SQLite database exists but failed to open. Auto-mode cannot proceed without a working database provider. " +
+          "Check for corrupt gsd.db or missing native SQLite bindings.",
+        "error",
+      );
+      return releaseLockAndReturn();
     }
 
     // Initialize metrics
@@ -590,9 +624,8 @@ export async function bootstrapAutoSession(
       lockBase(),
       "starting",
       s.currentMilestoneId ?? "unknown",
-      0,
     );
-    writeLock(lockBase(), "starting", s.currentMilestoneId ?? "unknown", 0);
+    writeLock(lockBase(), "starting", s.currentMilestoneId ?? "unknown");
 
     // Secrets collection gate
     const mid = state.activeMilestone!.id;
@@ -650,6 +683,12 @@ export async function bootstrapAutoSession(
         if (milestoneIds.length > 1) {
           const issues: string[] = [];
           for (const id of milestoneIds) {
+            // Skip completed/parked milestones — a leftover CONTEXT-DRAFT.md
+            // on a finished milestone is harmless residue, not an actionable warning.
+            if (isDbAvailable()) {
+              const ms = getMilestone(id);
+              if (ms?.status === "complete" || ms?.status === "parked") continue;
+            }
             const draft = resolveMilestoneFile(base, id, "CONTEXT-DRAFT");
             if (draft)
               issues.push(

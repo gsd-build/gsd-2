@@ -12,7 +12,9 @@
 import type { GSDState } from "./types.js";
 import type { GSDPreferences } from "./preferences.js";
 import type { UatType } from "./files.js";
-import { loadFile, extractUatType, loadActiveOverrides, parseRoadmap } from "./files.js";
+import { loadFile, extractUatType, loadActiveOverrides } from "./files.js";
+import { isDbAvailable, getMilestoneSlices } from "./gsd-db.js";
+
 import {
   resolveMilestoneFile,
   resolveMilestonePath,
@@ -170,21 +172,39 @@ export const DISPATCH_RULES: DispatchRule[] = [
       if (!prefs?.uat_dispatch) return null;
 
       const roadmapFile = resolveMilestoneFile(basePath, mid, "ROADMAP");
-      const roadmapContent = roadmapFile ? await loadFile(roadmapFile) : null;
-      if (!roadmapContent) return null;
 
-      const roadmap = parseRoadmap(roadmapContent);
-      for (const slice of roadmap.slices.filter(s => s.done)) {
-        const resultFile = resolveSliceFile(basePath, mid, slice.id, "UAT-RESULT");
+      // DB-first: get completed slices from DB
+      let completedSliceIds: string[];
+      if (isDbAvailable()) {
+        completedSliceIds = getMilestoneSlices(mid)
+          .filter(s => s.status === "complete")
+          .map(s => s.id);
+      } else {
+        return null;
+      }
+
+      for (const sliceId of completedSliceIds) {
+        const resultFile = resolveSliceFile(basePath, mid, sliceId, "UAT");
         if (!resultFile) continue;
         const content = await loadFile(resultFile);
         if (!content) continue;
         const verdictMatch = content.match(/verdict:\s*([\w-]+)/i);
         const verdict = verdictMatch?.[1]?.toLowerCase();
-        if (verdict && verdict !== "pass" && verdict !== "passed") {
+
+        // Determine acceptable verdicts based on UAT type.
+        // mixed / human-experience / live-runtime modes may legitimately
+        // produce PARTIAL when all automatable checks pass but human-only
+        // checks remain — this should not block progression.
+        const acceptableVerdicts: string[] = ["pass", "passed"];
+        const uatType = extractUatType(content);
+        if (uatType === "mixed" || uatType === "human-experience" || uatType === "live-runtime") {
+          acceptableVerdicts.push("partial");
+        }
+
+        if (verdict && !acceptableVerdicts.includes(verdict)) {
           return {
             action: "stop" as const,
-            reason: `UAT verdict for ${slice.id} is "${verdict}" — blocking progression until resolved.\nReview the UAT result and update the verdict to PASS, or re-run /gsd auto after fixing.`,
+            reason: `UAT verdict for ${sliceId} is "${verdict}" — blocking progression until resolved.\nReview the UAT result and update the verdict to PASS, or re-run /gsd auto after fixing.`,
             level: "warning" as const,
           };
         }
@@ -501,15 +521,19 @@ export const DISPATCH_RULES: DispatchRule[] = [
       // Safety guard (#1368): verify all roadmap slices have SUMMARY files before
       // allowing milestone validation. If any slice lacks a summary, the milestone
       // is not genuinely complete — something skipped earlier slices.
-      const roadmapFile = resolveMilestoneFile(basePath, mid, "ROADMAP");
-      const roadmapContent = roadmapFile ? await loadFile(roadmapFile) : null;
-      if (roadmapContent) {
-        const roadmap = parseRoadmap(roadmapContent);
+      let sliceIds: string[];
+      if (isDbAvailable()) {
+        sliceIds = getMilestoneSlices(mid).map(s => s.id);
+      } else {
+        sliceIds = [];
+      }
+
+      if (sliceIds.length > 0) {
         const missingSlices: string[] = [];
-        for (const slice of roadmap.slices) {
-          const summaryPath = resolveSliceFile(basePath, mid, slice.id, "SUMMARY");
+        for (const sid of sliceIds) {
+          const summaryPath = resolveSliceFile(basePath, mid, sid, "SUMMARY");
           if (!summaryPath || !existsSync(summaryPath)) {
-            missingSlices.push(slice.id);
+            missingSlices.push(sid);
           }
         }
         if (missingSlices.length > 0) {
@@ -558,15 +582,19 @@ export const DISPATCH_RULES: DispatchRule[] = [
       if (state.phase !== "completing-milestone") return null;
 
       // Safety guard (#1368): verify all roadmap slices have SUMMARY files.
-      const roadmapFile = resolveMilestoneFile(basePath, mid, "ROADMAP");
-      const roadmapContent = roadmapFile ? await loadFile(roadmapFile) : null;
-      if (roadmapContent) {
-        const roadmap = parseRoadmap(roadmapContent);
+      let sliceIds: string[];
+      if (isDbAvailable()) {
+        sliceIds = getMilestoneSlices(mid).map(s => s.id);
+      } else {
+        sliceIds = [];
+      }
+
+      if (sliceIds.length > 0) {
         const missingSlices: string[] = [];
-        for (const slice of roadmap.slices) {
-          const summaryPath = resolveSliceFile(basePath, mid, slice.id, "SUMMARY");
+        for (const sid of sliceIds) {
+          const summaryPath = resolveSliceFile(basePath, mid, sid, "SUMMARY");
           if (!summaryPath || !existsSync(summaryPath)) {
-            missingSlices.push(slice.id);
+            missingSlices.push(sid);
           }
         }
         if (missingSlices.length > 0) {

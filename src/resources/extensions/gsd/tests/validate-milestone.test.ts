@@ -375,7 +375,7 @@ test("buildLoopRemediationSteps returns steps for validate-milestone", () => {
     assert.ok(result);
     assert.ok(result!.includes("VALIDATION"));
     assert.ok(result!.includes("verdict: pass"));
-    assert.ok(result!.includes("gsd doctor"));
+    assert.ok(result!.includes("gsd recover"));
   } finally {
     cleanup(base);
   }

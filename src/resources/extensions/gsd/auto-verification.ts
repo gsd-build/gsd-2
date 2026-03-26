@@ -11,8 +11,8 @@
  */
 
 import type { ExtensionContext, ExtensionAPI } from "@gsd/pi-coding-agent";
-import { loadFile, parsePlan } from "./files.js";
 import { resolveSliceFile, resolveSlicePath } from "./paths.js";
+import { isDbAvailable, getTask } from "./gsd-db.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import {
   runVerificationGate,
@@ -64,15 +64,10 @@ export async function runPostUnitVerification(
     let taskPlanVerify: string | undefined;
     if (parts.length >= 3) {
       const [mid, sid, tid] = parts;
-      const planFile = resolveSliceFile(s.basePath, mid, sid, "PLAN");
-      if (planFile) {
-        const planContent = await loadFile(planFile);
-        if (planContent) {
-          const slicePlan = parsePlan(planContent);
-          const taskEntry = slicePlan?.tasks?.find((t) => t.id === tid);
-          taskPlanVerify = taskEntry?.verify;
-        }
+      if (isDbAvailable()) {
+        taskPlanVerify = getTask(mid, sid, tid)?.verify;
       }
+      // When DB unavailable, taskPlanVerify stays undefined — gate runs without task-specific checks
     }
 
     const result = runVerificationGate({

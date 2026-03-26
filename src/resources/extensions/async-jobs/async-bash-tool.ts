@@ -109,6 +109,10 @@ function executeBashInBackground(
 	timeout?: number,
 ): Promise<string> {
 	return new Promise<string>((resolve, reject) => {
+		let settled = false;
+		const safeResolve = (value: string) => { if (!settled) { settled = true; resolve(value); } };
+		const safeReject = (err: unknown) => { if (!settled) { settled = true; reject(err); } };
+
 		const { shell, args } = getShellConfig();
 		const resolvedCommand = sanitizeCommand(command);
 
@@ -121,11 +125,39 @@ function executeBashInBackground(
 
 		let timedOut = false;
 		let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+		let sigkillHandle: ReturnType<typeof setTimeout> | undefined;
+		let hardDeadlineHandle: ReturnType<typeof setTimeout> | undefined;
+
+		/** Grace period (ms) between SIGTERM and SIGKILL. */
+		const SIGKILL_GRACE_MS = 5_000;
+		/** Hard deadline (ms) after SIGKILL to force-resolve the promise. */
+		const HARD_DEADLINE_MS = 3_000;
 
 		if (timeout !== undefined && timeout > 0) {
 			timeoutHandle = setTimeout(() => {
 				timedOut = true;
 				if (child.pid) killTree(child.pid);
+
+				// If the process ignores SIGTERM, escalate to SIGKILL
+				sigkillHandle = setTimeout(() => {
+					if (child.pid) {
+						try { process.kill(-child.pid, "SIGKILL"); } catch { /* ignore */ }
+						try { process.kill(child.pid, "SIGKILL"); } catch { /* ignore */ }
+					}
+
+					// Hard deadline: if even SIGKILL doesn't trigger 'close',
+					// force-resolve so the job doesn't hang forever (#2186).
+					hardDeadlineHandle = setTimeout(() => {
+						const output = Buffer.concat(chunks).toString("utf-8");
+						safeResolve(
+							output
+								? `${output}\n\nCommand timed out after ${timeout} seconds (force-killed)`
+								: `Command timed out after ${timeout} seconds (force-killed)`,
+						);
+					}, HARD_DEADLINE_MS);
+					if (typeof hardDeadlineHandle === "object" && "unref" in hardDeadlineHandle) hardDeadlineHandle.unref();
+				}, SIGKILL_GRACE_MS);
+				if (typeof sigkillHandle === "object" && "unref" in sigkillHandle) sigkillHandle.unref();
 			}, timeout * 1000);
 		}
 
@@ -168,24 +200,28 @@ function executeBashInBackground(
 
 		child.on("error", (err) => {
 			if (timeoutHandle) clearTimeout(timeoutHandle);
+			if (sigkillHandle) clearTimeout(sigkillHandle);
+			if (hardDeadlineHandle) clearTimeout(hardDeadlineHandle);
 			signal.removeEventListener("abort", onAbort);
-			reject(err);
+			safeReject(err);
 		});
 
 		child.on("close", (code) => {
 			if (timeoutHandle) clearTimeout(timeoutHandle);
+			if (sigkillHandle) clearTimeout(sigkillHandle);
+			if (hardDeadlineHandle) clearTimeout(hardDeadlineHandle);
 			signal.removeEventListener("abort", onAbort);
 			if (spillStream) spillStream.end();
 
 			if (signal.aborted) {
 				const output = Buffer.concat(chunks).toString("utf-8");
-				resolve(output ? `${output}\n\nCommand aborted` : "Command aborted");
+				safeResolve(output ? `${output}\n\nCommand aborted` : "Command aborted");
 				return;
 			}
 
 			if (timedOut) {
 				const output = Buffer.concat(chunks).toString("utf-8");
-				resolve(output ? `${output}\n\nCommand timed out after ${timeout} seconds` : `Command timed out after ${timeout} seconds`);
+				safeResolve(output ? `${output}\n\nCommand timed out after ${timeout} seconds` : `Command timed out after ${timeout} seconds`);
 				return;
 			}
 
@@ -208,7 +244,7 @@ function executeBashInBackground(
 				text += `\n\nCommand exited with code ${code}`;
 			}
 
-			resolve(text);
+			safeResolve(text);
 		});
 	});
 }

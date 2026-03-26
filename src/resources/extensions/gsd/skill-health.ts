@@ -283,7 +283,8 @@ export function computeStaleAvoidList(
   staleDays?: number,
 ): string[] {
   const ledger = loadLedgerFromDisk(basePath);
-  const units = (ledger?.units ?? []).filter(u => u.skills && u.skills.length > 0);
+  if (!ledger) return [];
+  const units = ledger.units.filter(u => u.skills && u.skills.length > 0);
   const stale = detectStaleSkills(units, staleDays ?? DEFAULT_STALE_DAYS);
   const avoidSet = new Set(currentAvoidList);
 

@@ -1519,6 +1519,13 @@ export class InteractiveMode {
 		options: string[],
 		opts?: ExtensionUIDialogOptions,
 	): Promise<string | undefined> {
+		// If a previous selector is still active, dispose it before creating a
+		// new one.  This avoids leaking the previous promise and DOM state when
+		// showExtensionSelector is called rapidly.
+		if (this.extensionSelector) {
+			this.hideExtensionSelector();
+		}
+
 		return new Promise((resolve) => {
 			if (opts?.signal?.aborted) {
 				resolve(undefined);
@@ -2092,11 +2099,13 @@ export class InteractiveMode {
 							const userComponent = new UserMessageComponent(
 								skillBlock.userMessage,
 								this.getMarkdownThemeWithSettings(),
+								message.timestamp,
+								this.settingsManager.getTimestampFormat(),
 							);
 							this.chatContainer.addChild(userComponent);
 						}
 					} else {
-						const userComponent = new UserMessageComponent(textContent, this.getMarkdownThemeWithSettings());
+						const userComponent = new UserMessageComponent(textContent, this.getMarkdownThemeWithSettings(), message.timestamp, this.settingsManager.getTimestampFormat());
 						this.chatContainer.addChild(userComponent);
 					}
 					if (options?.populateHistory) {
@@ -2110,6 +2119,7 @@ export class InteractiveMode {
 					message,
 					this.hideThinkingBlock,
 					this.getMarkdownThemeWithSettings(),
+					this.settingsManager.getTimestampFormat(),
 				);
 				this.chatContainer.addChild(assistantComponent);
 				break;
@@ -2321,23 +2331,34 @@ export class InteractiveMode {
 	}
 
 	private handleCtrlZ(): void {
+		// On Windows, SIGTSTP doesn't exist - Ctrl+Z is not supported
+		if (process.platform === "win32") {
+			return;
+		}
+
 		// Ignore SIGINT while suspended so Ctrl+C in the terminal does not
 		// kill the backgrounded process. The handler is removed on resume.
 		const ignoreSigint = () => {};
 		process.on("SIGINT", ignoreSigint);
 
-		// Set up handler to restore TUI when resumed
-		process.once("SIGCONT", () => {
+		try {
+			// Set up handler to restore TUI when resumed
+			process.once("SIGCONT", () => {
+				process.removeListener("SIGINT", ignoreSigint);
+				this.ui.start();
+				this.ui.requestRender(true);
+			});
+
+			// Stop the TUI (restore terminal to normal mode)
+			this.ui.stop();
+
+			// Send SIGTSTP to process group (pid=0 means all processes in group)
+			process.kill(0, "SIGTSTP");
+		} catch {
+			// If suspend fails (e.g. SIGTSTP not supported), ensure the
+			// SIGINT listener doesn't leak.
 			process.removeListener("SIGINT", ignoreSigint);
-			this.ui.start();
-			this.ui.requestRender(true);
-		});
-
-		// Stop the TUI (restore terminal to normal mode)
-		this.ui.stop();
-
-		// Send SIGTSTP to process group (pid=0 means all processes in group)
-		process.kill(0, "SIGTSTP");
+		}
 	}
 
 	private async handleFollowUp(): Promise<void> {
@@ -2455,7 +2476,14 @@ export class InteractiveMode {
 		// Determine editor (respect $VISUAL, then $EDITOR)
 		const editorCmd = process.env.VISUAL || process.env.EDITOR;
 		if (!editorCmd) {
-			this.showWarning("No editor configured. Set $VISUAL or $EDITOR environment variable.");
+			let msg = "No editor configured. Set $VISUAL or $EDITOR environment variable.";
+			if (process.env.TERM_PROGRAM === "iTerm.app") {
+				msg +=
+					"\n\nTip: If you meant to open the GSD dashboard (Ctrl+Alt+G), set Left Option Key to" +
+					" \"Esc+\" in iTerm2 → Profiles → Keys. With the default \"Normal\" setting," +
+					" Ctrl+Alt+G sends Ctrl+G instead.";
+			}
+			this.showWarning(msg);
 			return;
 		}
 
@@ -2770,6 +2798,7 @@ export class InteractiveMode {
 					respectGitignoreInPicker: this.settingsManager.getRespectGitignoreInPicker(),
 					quietStartup: this.settingsManager.getQuietStartup(),
 					clearOnShrink: this.settingsManager.getClearOnShrink(),
+					timestampFormat: this.settingsManager.getTimestampFormat(),
 				},
 				{
 					onAutoCompactChange: (enabled) => {
@@ -2872,6 +2901,9 @@ export class InteractiveMode {
 					onRespectGitignoreInPickerChange: (enabled) => {
 						this.settingsManager.setRespectGitignoreInPicker(enabled);
 						this.autocompleteProvider?.setRespectGitignore(enabled);
+					},
+					onTimestampFormatChange: (format) => {
+						this.settingsManager.setTimestampFormat(format);
 					},
 					onCancel: () => {
 						done();
@@ -3396,14 +3428,6 @@ export class InteractiveMode {
 		this.ui.setFocus(dialog);
 		this.ui.requestRender();
 
-		// Promise for manual code input (racing with callback server)
-		let manualCodeResolve: ((code: string) => void) | undefined;
-		let manualCodeReject: ((err: Error) => void) | undefined;
-		const manualCodePromise = new Promise<string>((resolve, reject) => {
-			manualCodeResolve = resolve;
-			manualCodeReject = reject;
-		});
-
 		// Restore editor helper — also disposes the dialog to reject any
 		// dangling promises and prevent the UI from getting stuck.
 		const restoreEditor = () => {
@@ -3419,23 +3443,7 @@ export class InteractiveMode {
 				onAuth: (info: { url: string; instructions?: string }) => {
 					dialog.showAuth(info.url, info.instructions);
 
-					if (usesCallbackServer) {
-						// Show input for manual paste, racing with callback
-						dialog
-							.showManualInput("Paste redirect URL below, or complete login in browser:")
-							.then((value) => {
-								if (value && manualCodeResolve) {
-									manualCodeResolve(value);
-									manualCodeResolve = undefined;
-								}
-							})
-							.catch(() => {
-								if (manualCodeReject) {
-									manualCodeReject(new Error("Login cancelled"));
-									manualCodeReject = undefined;
-								}
-							});
-					} else if (providerId === "github-copilot") {
+					if (!usesCallbackServer && providerId === "github-copilot") {
 						// GitHub Copilot polls after onAuth
 						dialog.showWaiting("Waiting for browser authentication...");
 					}
@@ -3450,7 +3458,12 @@ export class InteractiveMode {
 					dialog.showProgress(message);
 				},
 
-				onManualCodeInput: () => manualCodePromise,
+				// Callback-server providers race browser callback with pasted redirect URL.
+				// Keep manual-input promise ownership inside provider flow to avoid
+				// orphaned rejections when the callback is not consumed.
+				onManualCodeInput: usesCallbackServer
+					? () => dialog.showManualInput("Paste redirect URL below, or complete login in browser:")
+					: undefined,
 
 				signal: dialog.signal,
 			});
@@ -3482,12 +3495,6 @@ export class InteractiveMode {
 			this.showStatus(`Logged in to ${providerName}. Credentials saved to ${getAuthPath()}`);
 		} catch (error: unknown) {
 			restoreEditor();
-			// Also reject the manual code promise if it's still pending
-			if (manualCodeReject) {
-				manualCodeReject(new Error("Login cancelled"));
-				manualCodeReject = undefined;
-				manualCodeResolve = undefined;
-			}
 			const errorMsg = error instanceof Error ? error.message : String(error);
 			if (errorMsg !== "Login cancelled" && !errorMsg.includes("Superseded") && !errorMsg.includes("disposed")) {
 				this.showError(`Failed to login to ${providerName}: ${errorMsg}`);

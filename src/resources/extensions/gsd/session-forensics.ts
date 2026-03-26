@@ -172,7 +172,17 @@ export function extractTrace(entries: unknown[]): ExecutionTrace {
       }
 
       if (isError && resultText) {
-        errors.push(resultText.slice(0, 300));
+        // Filter out benign "errors" that are normal during code exploration:
+        // - grep/rg/find returning exit code 1 (no matches) is expected POSIX behavior
+        // - User interrupts (Escape/skip) are intentional, not failures
+        const trimmed = resultText.trim();
+        const isBenignNoMatch = pending?.name === "bash" &&
+          /^\(no output\)\s*\n\s*Command exited with code 1$/m.test(trimmed);
+        const isUserSkip = /^Skipped due to queued user message/i.test(trimmed);
+
+        if (!isBenignNoMatch && !isUserSkip) {
+          errors.push(resultText.slice(0, 300));
+        }
       }
     }
   }

@@ -54,6 +54,7 @@ export type RpcEventListener = (event: AgentEvent) => void;
 export class RpcClient {
 	private process: ChildProcess | null = null;
 	private stopReadingStdout: (() => void) | null = null;
+	private _stderrHandler?: (data: Buffer) => void;
 	private eventListeners: RpcEventListener[] = [];
 	private pendingRequests: Map<string, { resolve: (response: RpcResponse) => void; reject: (error: Error) => void }> =
 		new Map();
@@ -90,9 +91,10 @@ export class RpcClient {
 		});
 
 		// Collect stderr for debugging
-		this.process.stderr?.on("data", (data) => {
+		this._stderrHandler = (data: Buffer) => {
 			this.stderr += data.toString();
-		});
+		};
+		this.process.stderr?.on("data", this._stderrHandler);
 
 		// Set up strict JSONL reader for stdout.
 		this.stopReadingStdout = attachJsonlLineReader(this.process.stdout!, (line) => {
@@ -127,6 +129,10 @@ export class RpcClient {
 
 		this.stopReadingStdout?.();
 		this.stopReadingStdout = null;
+		if (this._stderrHandler) {
+			this.process.stderr?.removeListener("data", this._stderrHandler);
+			this._stderrHandler = undefined;
+		}
 		this.process.kill("SIGTERM");
 
 		// Wait for process to exit
@@ -482,8 +488,6 @@ export class RpcClient {
 		const fullCommand = { ...command, id } as RpcCommand;
 
 		return new Promise((resolve, reject) => {
-			this.pendingRequests.set(id, { resolve, reject });
-
 			const timeout = setTimeout(() => {
 				this.pendingRequests.delete(id);
 				reject(new Error(`Timeout waiting for response to ${command.type}. Stderr: ${this.stderr}`));

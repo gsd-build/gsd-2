@@ -92,6 +92,16 @@ export const PROJECT_FILES = [
   "mix.exs",
   "deno.json",
   "deno.jsonc",
+  // .NET
+  ".sln",
+  ".csproj",
+  "Directory.Build.props",
+  // Git submodules
+  ".gitmodules",
+  // Xcode
+  "project.yml",
+  ".xcodeproj",
+  ".xcworkspace",
   // Cloud platform config files
   "firebase.json",
   "cdk.json",
@@ -186,6 +196,13 @@ const LANGUAGE_MAP: Record<string, string> = {
   "mix.exs": "elixir",
   "deno.json": "typescript/deno",
   "deno.jsonc": "typescript/deno",
+  ".sln": "dotnet",
+  ".csproj": "dotnet",
+  "Directory.Build.props": "dotnet",
+  "project.yml": "swift/xcode",
+  ".xcodeproj": "swift/xcode",
+  ".xcworkspace": "swift/xcode",
+  "Dockerfile": "docker",
   "manage.py": "python",
   "requirements.txt": "python",
 };

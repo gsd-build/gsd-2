@@ -149,7 +149,11 @@ async function getOrConnect(name: string, signal?: AbortSignal): Promise<Client>
 			stderr: "pipe",
 		});
 	} else if (config.transport === "http" && config.url) {
-		transport = new StreamableHTTPClientTransport(new URL(config.url));
+		const resolvedUrl = config.url.replace(
+			/\$\{([^}]+)\}/g,
+			(_, name) => process.env[name] ?? "",
+		);
+		transport = new StreamableHTTPClientTransport(new URL(resolvedUrl));
 	} else {
 		throw new Error(`Server "${name}" has unsupported transport: ${config.transport}`);
 	}
@@ -207,6 +211,26 @@ function formatToolList(serverName: string, tools: McpToolSchema[]): string {
 
 	lines.push(`Call with: mcp_call(server="${serverName}", tool="<tool_name>", args={...})`);
 	return lines.join("\n");
+}
+
+// ─── Status helper (consumed by /gsd mcp) ─────────────────────────────────────
+
+/**
+ * Return the live connection status for a named MCP server.
+ * Safe to call even when the server has never been connected.
+ */
+export function getConnectionStatus(name: string): {
+	connected: boolean;
+	tools: string[];
+	error?: string;
+} {
+	const conn = connections.get(name);
+	const cached = toolCache.get(name);
+	return {
+		connected: !!conn,
+		tools: cached ? cached.map((t) => t.name) : [],
+		error: undefined,
+	};
 }
 
 // ─── Extension ────────────────────────────────────────────────────────────────

@@ -92,7 +92,6 @@ export interface IterationData {
   prompt: string;
   finalPrompt: string;
   pauseAfterUatDispatch: boolean;
-  observabilityIssues: unknown[];
   state: GSDState;
   mid: string | undefined;
   midTitle: string | undefined;

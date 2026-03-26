@@ -1,9 +1,10 @@
 import { MODELS } from "./models.generated.js";
+import { CUSTOM_MODELS } from "./models.custom.js";
 import type { Api, KnownProvider, Model, Usage } from "./types.js";
 
 const modelRegistry: Map<string, Map<string, Model<Api>>> = new Map();
 
-// Initialize registry from MODELS on module load
+// Initialize registry from auto-generated MODELS (models.dev catalog)
 for (const [provider, models] of Object.entries(MODELS)) {
 	const providerModels = new Map<string, Model<Api>>();
 	for (const [id, model] of Object.entries(models)) {
@@ -12,12 +13,30 @@ for (const [provider, models] of Object.entries(MODELS)) {
 	modelRegistry.set(provider, providerModels);
 }
 
+// Merge manually-maintained custom providers that are NOT in models.dev.
+// Custom models are additive — they never overwrite generated entries.
+// See: https://github.com/gsd-build/gsd-2/issues/2339
+for (const [provider, models] of Object.entries(CUSTOM_MODELS)) {
+	if (!modelRegistry.has(provider)) {
+		modelRegistry.set(provider, new Map<string, Model<Api>>());
+	}
+	const providerModels = modelRegistry.get(provider)!;
+	for (const [id, model] of Object.entries(models)) {
+		if (!providerModels.has(id)) {
+			providerModels.set(id, model as Model<Api>);
+		}
+	}
+}
+
+/** Providers that have entries in the generated MODELS constant */
+type GeneratedProvider = keyof typeof MODELS & KnownProvider;
+
 type ModelApi<
-	TProvider extends KnownProvider,
+	TProvider extends GeneratedProvider,
 	TModelId extends keyof (typeof MODELS)[TProvider],
 > = (typeof MODELS)[TProvider][TModelId] extends { api: infer TApi } ? (TApi extends Api ? TApi : never) : never;
 
-export function getModel<TProvider extends KnownProvider, TModelId extends keyof (typeof MODELS)[TProvider]>(
+export function getModel<TProvider extends GeneratedProvider, TModelId extends keyof (typeof MODELS)[TProvider]>(
 	provider: TProvider,
 	modelId: TModelId,
 ): Model<ModelApi<TProvider, TModelId>> {
@@ -31,9 +50,9 @@ export function getProviders(): KnownProvider[] {
 
 export function getModels<TProvider extends KnownProvider>(
 	provider: TProvider,
-): Model<ModelApi<TProvider, keyof (typeof MODELS)[TProvider]>>[] {
+): Model<Api>[] {
 	const models = modelRegistry.get(provider);
-	return models ? (Array.from(models.values()) as Model<ModelApi<TProvider, keyof (typeof MODELS)[TProvider]>>[]) : [];
+	return models ? (Array.from(models.values()) as Model<Api>[]) : [];
 }
 
 export function calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage): Usage["cost"] {

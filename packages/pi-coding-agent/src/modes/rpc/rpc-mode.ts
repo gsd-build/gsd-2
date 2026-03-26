@@ -424,7 +424,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 	void extensionsReadyPromise;
 
 	// Output all agent events as JSON
-	session.subscribe((event) => {
+	const unsubscribe = session.subscribe((event) => {
 		output(event);
 	});
 
@@ -710,8 +710,8 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 			}
 
 			default: {
-				const unknownCommand = command as { type: string };
-				return error(undefined, unknownCommand.type, `Unknown command: ${unknownCommand.type}`);
+				const unknownCommand = command as { type: string; id?: string };
+				return error(unknownCommand.id, unknownCommand.type, `Unknown command: ${unknownCommand.type}`);
 			}
 		}
 	};
@@ -730,6 +730,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 			await currentRunner.emit({ type: "session_shutdown" });
 		}
 
+		unsubscribe();
 		embeddedInteractiveMode?.stop();
 		detachInput();
 		process.stdin.pause();

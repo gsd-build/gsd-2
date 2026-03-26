@@ -8,6 +8,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 import { readUnitRuntimeRecord, writeUnitRuntimeRecord } from "./unit-runtime.js";
+import { isDbAvailable, getMilestoneSlices, getSliceTasks } from "./gsd-db.js";
 import { resolveAutoSupervisorConfig } from "./preferences.js";
 import type { GSDPreferences } from "./preferences.js";
 import { computeBudgets, resolveExecutorContextWindow } from "./context-budget.js";
@@ -32,6 +33,8 @@ export interface SupervisionContext {
   buildSnapshotOpts: () => CloseoutOptions & Record<string, unknown>;
   buildRecoveryContext: () => RecoveryContext;
   pauseAuto: (ctx?: ExtensionContext, pi?: ExtensionAPI) => Promise<void>;
+  /** Optional task estimate string (e.g. "30m", "2h") for timeout scaling (#2243). */
+  taskEstimate?: string;
 }
 
 /**
@@ -41,13 +44,71 @@ export interface SupervisionContext {
  * 3. Hard timeout (pause + recovery)
  * 4. Context-pressure monitor (continue-here)
  */
+
+/**
+ * Parse a task estimate string (e.g. "30m", "2h", "1h30m") into minutes.
+ * Returns null if the string cannot be parsed.
+ */
+export function parseEstimateMinutes(estimate: string): number | null {
+  if (!estimate || typeof estimate !== "string") return null;
+  const trimmed = estimate.trim();
+  if (!trimmed) return null;
+
+  let totalMinutes = 0;
+  let matched = false;
+
+  // Match hours component
+  const hoursMatch = trimmed.match(/(\d+)\s*h/i);
+  if (hoursMatch) {
+    totalMinutes += Number(hoursMatch[1]) * 60;
+    matched = true;
+  }
+
+  // Match minutes component
+  const minutesMatch = trimmed.match(/(\d+)\s*m/i);
+  if (minutesMatch) {
+    totalMinutes += Number(minutesMatch[1]);
+    matched = true;
+  }
+
+  return matched ? totalMinutes : null;
+}
+
 export function startUnitSupervision(sctx: SupervisionContext): void {
   const { s, ctx, pi, unitType, unitId, prefs, buildSnapshotOpts, buildRecoveryContext, pauseAuto } = sctx;
 
   const supervisor = resolveAutoSupervisorConfig();
-  const softTimeoutMs = (supervisor.soft_timeout_minutes ?? 0) * 60 * 1000;
-  const idleTimeoutMs = (supervisor.idle_timeout_minutes ?? 0) * 60 * 1000;
-  const hardTimeoutMs = (supervisor.hard_timeout_minutes ?? 0) * 60 * 1000;
+
+  // Scale timeouts based on task estimate annotations (#2243).
+  // If the task has an est: annotation, use it to extend the hard and soft timeouts
+  // so longer tasks don't get prematurely timed out.
+  let taskEstimate = sctx.taskEstimate;
+  if (!taskEstimate && unitType === "task" && isDbAvailable()) {
+    // Look up the task estimate from the DB (#2243).
+    try {
+      if (s.currentMilestoneId) {
+        const slices = getMilestoneSlices(s.currentMilestoneId);
+        for (const slice of slices) {
+          const tasks = getSliceTasks(s.currentMilestoneId, slice.id);
+          const task = tasks.find(t => t.id === unitId);
+          if (task?.estimate) {
+            taskEstimate = task.estimate;
+            break;
+          }
+        }
+      }
+    } catch {
+      // Non-fatal — fall through with no estimate
+    }
+  }
+  const estimateMinutes = taskEstimate ? parseEstimateMinutes(taskEstimate) : null;
+  const timeoutScale = estimateMinutes && estimateMinutes > 0
+    ? Math.max(1, estimateMinutes / 10)  // 10min task = 1x, 30min = 3x, 2h = 12x
+    : 1;
+
+  const softTimeoutMs = (supervisor.soft_timeout_minutes ?? 0) * 60 * 1000 * timeoutScale;
+  const idleTimeoutMs = (supervisor.idle_timeout_minutes ?? 0) * 60 * 1000;  // idle not scaled — idle is idle
+  const hardTimeoutMs = (supervisor.hard_timeout_minutes ?? 0) * 60 * 1000 * timeoutScale;
 
   // ── 1. Soft timeout warning ──
   s.wrapupWarningHandle = setTimeout(() => {

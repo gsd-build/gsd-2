@@ -90,8 +90,8 @@ export function parseHeadlessArgs(argv: string[]): HeadlessOptions {
     if (!positionalStarted && arg.startsWith('--')) {
       if (arg === '--timeout' && i + 1 < args.length) {
         options.timeout = parseInt(args[++i], 10)
-        if (Number.isNaN(options.timeout) || options.timeout <= 0) {
-          process.stderr.write('[headless] Error: --timeout must be a positive integer (milliseconds)\n')
+        if (Number.isNaN(options.timeout) || options.timeout < 0) {
+          process.stderr.write('[headless] Error: --timeout must be a non-negative integer (milliseconds, 0 to disable)\n')
           process.exit(1)
         }
       } else if (arg === '--json') {
@@ -181,6 +181,14 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
   // new-milestone involves codebase investigation + artifact writing — needs more time
   if (isNewMilestone && options.timeout === 300_000) {
     options.timeout = 600_000 // 10 minutes
+  }
+
+  // auto-mode sessions are long-running (minutes to hours) with their own internal
+  // per-unit timeout via auto-supervisor. Disable the overall timeout unless the
+  // user explicitly set --timeout.
+  const isAutoMode = options.command === 'auto'
+  if (isAutoMode && options.timeout === 300_000) {
+    options.timeout = 0
   }
 
   // Supervised mode cannot share stdin with --context -
@@ -337,12 +345,14 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
   // Precompute supervised response timeout
   const responseTimeout = options.responseTimeout ?? 30_000
 
-  // Overall timeout
-  const timeoutTimer = setTimeout(() => {
-    process.stderr.write(`[headless] Timeout after ${options.timeout / 1000}s\n`)
-    exitCode = 1
-    resolveCompletion()
-  }, options.timeout)
+  // Overall timeout (disabled when options.timeout === 0, e.g. auto-mode)
+  const timeoutTimer = options.timeout > 0
+    ? setTimeout(() => {
+        process.stderr.write(`[headless] Timeout after ${options.timeout / 1000}s\n`)
+        exitCode = 1
+        resolveCompletion()
+      }, options.timeout)
+    : null
 
   // Event handler
   client.onEvent((event) => {
@@ -434,7 +444,7 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
     interrupted = true
     exitCode = 1
     client.stop().finally(() => {
-      clearTimeout(timeoutTimer)
+      if (timeoutTimer) clearTimeout(timeoutTimer)
       if (idleTimer) clearTimeout(idleTimer)
       process.exit(exitCode)
     })
@@ -447,7 +457,7 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
     await client.start()
   } catch (err) {
     process.stderr.write(`[headless] Error: Failed to start RPC session: ${err instanceof Error ? err.message : String(err)}\n`)
-    clearTimeout(timeoutTimer)
+    if (timeoutTimer) clearTimeout(timeoutTimer)
     process.exit(1)
   }
 
@@ -456,7 +466,7 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
   if (!internalProcess?.stdin) {
     process.stderr.write('[headless] Error: Cannot access child process stdin\n')
     await client.stop()
-    clearTimeout(timeoutTimer)
+    if (timeoutTimer) clearTimeout(timeoutTimer)
     process.exit(1)
   }
 
@@ -511,7 +521,9 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
       process.stderr.write('[headless] Milestone ready — chaining into auto-mode...\n')
     }
 
-    // Reset completion state for the auto-mode phase
+    // Reset completion state for the auto-mode phase.
+    // Disable the overall timeout — auto-mode has its own internal supervisor.
+    if (timeoutTimer) clearTimeout(timeoutTimer)
     completed = false
     milestoneReady = false
     blocked = false
@@ -532,7 +544,7 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
   }
 
   // Cleanup
-  clearTimeout(timeoutTimer)
+  if (timeoutTimer) clearTimeout(timeoutTimer)
   if (idleTimer) clearTimeout(idleTimer)
   pendingResponseTimers.forEach((timer) => clearTimeout(timer))
   pendingResponseTimers.clear()

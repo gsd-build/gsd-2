@@ -11,6 +11,7 @@ import { NEW_SESSION_TIMEOUT_MS } from "./session.js";
 import type { UnitResult } from "./types.js";
 import { _setCurrentResolve, _setSessionSwitchInFlight } from "./resolve.js";
 import { debugLog } from "../debug-logger.js";
+import { logWarning, logError } from "../workflow-logger.js";
 
 /**
  * Execute a single unit: create a new session, send the prompt, and await
@@ -85,7 +86,9 @@ export async function runUnit(
     if (process.cwd() !== s.basePath) {
       process.chdir(s.basePath);
     }
-  } catch { /* non-fatal — chdir may fail if dir was removed */ }
+  } catch (e) {
+    logWarning("engine", "Failed to chdir to basePath before dispatch", { basePath: s.basePath, error: String(e) });
+  }
 
   // ── Send the prompt ──
   debugLog("runUnit", { phase: "send-message", unitType, unitId });
@@ -115,8 +118,8 @@ export async function runUnit(
     if (typeof cmdCtxAny?.clearQueue === "function") {
       (cmdCtxAny.clearQueue as () => unknown)();
     }
-  } catch {
-    // Non-fatal — clearQueue may not be available in all contexts
+  } catch (e) {
+    logWarning("engine", "clearQueue failed after unit completion", { error: String(e) });
   }
 
   return result;

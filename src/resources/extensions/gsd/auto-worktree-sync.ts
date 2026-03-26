@@ -44,11 +44,24 @@ export function syncProjectRootToWorktree(
   const prGsd = join(projectRoot, ".gsd");
   const wtGsd = join(worktreePath, ".gsd");
 
-  // Copy milestone directory from project root to worktree if the project root
-  // has newer artifacts (e.g. slices that don't exist in the worktree yet)
+  // Copy milestone directory from project root to worktree — additive only.
+  // force:false prevents cpSync from overwriting existing worktree files.
+  // Without this, worktree-authoritative files (e.g. VALIDATION.md written
+  // by validate-milestone) get clobbered by stale project root copies,
+  // causing an infinite re-validation loop (#1886).
   safeCopyRecursive(
     join(prGsd, "milestones", milestoneId),
     join(wtGsd, "milestones", milestoneId),
+    { force: false },
+  );
+
+  // Forward-sync completed-units.json from project root to worktree.
+  // Project root is authoritative for completion state after crash recovery;
+  // without this, the worktree re-dispatches already-completed units (#1886).
+  safeCopy(
+    join(prGsd, "completed-units.json"),
+    join(wtGsd, "completed-units.json"),
+    { force: true },
   );
 
   // Delete worktree gsd.db so it rebuilds from the freshly synced files.
@@ -92,6 +105,11 @@ export function syncStateToProjectRoot(
     join(prGsd, "milestones", milestoneId),
     { force: true },
   );
+
+  // 3. metrics.json — session cost/token tracking (#2313).
+  // Without this, metrics accumulated in the worktree are invisible from the
+  // project root and never appear in the dashboard or skill-health reports.
+  safeCopy(join(wtGsd, "metrics.json"), join(prGsd, "metrics.json"), { force: true });
 
   // 4. Runtime records — unit dispatch state used by selfHealRuntimeRecords().
   // Without this, a crash during a unit leaves the runtime record only in the

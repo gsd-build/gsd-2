@@ -255,6 +255,10 @@ export class AgentSession {
 	private _cumulativeOutputTokens = 0;
 	private _cumulativeToolCalls = 0;
 
+	/** Cost of the most recent assistant response (for per-prompt display). */
+	private _lastTurnCost = 0;
+
+
 	// Bash execution state
 	private _bashAbortController: AbortController | undefined = undefined;
 	private _pendingBashMessages: BashExecutionMessage[] = [];
@@ -454,6 +458,7 @@ export class AgentSession {
 
 				// Accumulate session stats that survive compaction (#1423)
 				const assistantMsg = event.message as AssistantMessage;
+				this._lastTurnCost = assistantMsg.usage?.cost?.total ?? 0;
 				this._cumulativeCost += assistantMsg.usage?.cost?.total ?? 0;
 				this._cumulativeInputTokens += assistantMsg.usage?.input ?? 0;
 				this._cumulativeOutputTokens += assistantMsg.usage?.output ?? 0;
@@ -687,6 +692,8 @@ export class AgentSession {
 	 * Call this when completely done with the session.
 	 */
 	dispose(): void {
+		this._extensionErrorUnsubscriber?.();
+		this._extensionErrorUnsubscriber = undefined;
 		this._disconnectFromAgent();
 		this._eventListeners = [];
 	}
@@ -1047,9 +1054,8 @@ export class AgentSession {
 			});
 		}
 
-		// Validate API key
-		const apiKey = await this._modelRegistry.getApiKey(this.model, this.sessionId);
-		if (!apiKey) {
+		// Validate provider readiness
+		if (!this._modelRegistry.isProviderRequestReady(this.model.provider)) {
 			const isOAuth = this._modelRegistry.isUsingOAuth(this.model);
 			if (isOAuth) {
 				throw new Error(
@@ -1607,12 +1613,11 @@ export class AgentSession {
 
 	/**
 	 * Set model directly.
-	 * Validates API key, saves to session and settings.
-	 * @throws Error if no API key available for the model
+	 * Validates provider readiness, saves to session and settings.
+	 * @throws Error if provider is not ready (missing credentials for apiKey/oauth providers)
 	 */
 	async setModel(model: Model<any>, options?: { persist?: boolean }): Promise<void> {
-		const apiKey = await this._modelRegistry.getApiKey(model, this.sessionId);
-		if (!apiKey) {
+		if (!this._modelRegistry.isProviderRequestReady(model.provider)) {
 			throw new Error(`No API key for ${model.provider}/${model.id}`);
 		}
 
@@ -1633,30 +1638,14 @@ export class AgentSession {
 		return this._cycleAvailableModel(direction, options);
 	}
 
-	private async _getScopedModelsWithApiKey(): Promise<Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>> {
-		const apiKeysByProvider = new Map<string, string | undefined>();
-		const result: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }> = [];
-
-		for (const scoped of this._scopedModels) {
-			const provider = scoped.model.provider;
-			let apiKey: string | undefined;
-			if (apiKeysByProvider.has(provider)) {
-				apiKey = apiKeysByProvider.get(provider);
-			} else {
-				apiKey = await this._modelRegistry.getApiKeyForProvider(provider, this.sessionId);
-				apiKeysByProvider.set(provider, apiKey);
-			}
-
-			if (apiKey) {
-				result.push(scoped);
-			}
-		}
-
-		return result;
+	private _getReadyScopedModels(): Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }> {
+		return this._scopedModels.filter((scoped) =>
+			this._modelRegistry.isProviderRequestReady(scoped.model.provider),
+		);
 	}
 
 	private async _cycleScopedModel(direction: "forward" | "backward", options?: { persist?: boolean }): Promise<ModelCycleResult | undefined> {
-		const scopedModels = await this._getScopedModelsWithApiKey();
+		const scopedModels = this._getReadyScopedModels();
 		if (scopedModels.length <= 1) return undefined;
 
 		const currentModel = this.model;
@@ -1686,11 +1675,6 @@ export class AgentSession {
 		const len = availableModels.length;
 		const nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
 		const nextModel = availableModels[nextIndex];
-
-		const apiKey = await this._modelRegistry.getApiKey(nextModel, this.sessionId);
-		if (!apiKey) {
-			throw new Error(`No API key for ${nextModel.provider}/${nextModel.id}`);
-		}
 
 		const thinkingLevel = this._getThinkingLevelForModelSwitch();
 		await this._applyModelChange(nextModel, thinkingLevel, "cycle", options);
@@ -1928,7 +1912,11 @@ export class AgentSession {
 		runner.setUIContext(this._extensionUIContext);
 		runner.bindCommandContext(this._extensionCommandContextActions);
 
-		this._extensionErrorUnsubscriber?.();
+		try {
+			this._extensionErrorUnsubscriber?.();
+		} catch {
+			// Ignore errors from previous unsubscriber
+		}
 		this._extensionErrorUnsubscriber = this._extensionErrorListener
 			? runner.onError(this._extensionErrorListener)
 			: undefined;
@@ -2026,8 +2014,7 @@ export class AgentSession {
 				refreshTools: () => this._refreshToolRegistry(),
 				getCommands,
 				setModel: async (model, options) => {
-					const key = await this.modelRegistry.getApiKey(model, this.sessionId);
-					if (!key) return false;
+					if (!this.modelRegistry.isProviderRequestReady(model.provider)) return false;
 					await this.setModel(model, options);
 					return true;
 				},
@@ -2597,10 +2584,10 @@ export class AgentSession {
 		let summaryDetails: unknown;
 		if (options.summarize && entriesToSummarize.length > 0 && !extensionSummary) {
 			const model = this.model!;
-			const apiKey = await this._modelRegistry.getApiKey(model, this.sessionId);
-			if (!apiKey) {
+			if (!this._modelRegistry.isProviderRequestReady(model.provider)) {
 				throw new Error(`No API key for ${model.provider}`);
 			}
+			const apiKey = await this._modelRegistry.getApiKey(model, this.sessionId);
 			const branchSummarySettings = this.settingsManager.getBranchSummarySettings();
 			const result = await generateBranchSummary(entriesToSummarize, {
 				model,
@@ -2772,6 +2759,14 @@ export class AgentSession {
 			},
 			cost: Math.max(totalCost, this._cumulativeCost),
 		};
+	}
+
+	/**
+	 * Get the cost of the most recent assistant response.
+	 * Returns 0 if no assistant message has been received yet.
+	 */
+	getLastTurnCost(): number {
+		return this._lastTurnCost;
 	}
 
 	getContextUsage(): ContextUsage | undefined {

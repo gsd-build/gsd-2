@@ -9,6 +9,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/gsd-build/GSD-2?style=for-the-badge&logo=github&color=181717)](https://github.com/gsd-build/GSD-2)
 [![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/gsd)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
+[![$GSD Token](https://img.shields.io/badge/$GSD-Dexscreener-1C1C1C?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIxMCIgZmlsbD0iIzAwRkYwMCIvPjwvc3ZnPg==&logoColor=00FF00)](https://dexscreener.com/solana/dwudwjvan7bzkw9zwlbyv6kspdlvhwzrqy6ebk8xzxkv)
 
 The original GSD went viral as a prompt framework for Claude Code. It worked, but it was fighting the tool — injecting prompts through slash commands, hoping the LLM would follow instructions, with no actual control over context windows, sessions, or execution.
 
@@ -21,6 +22,58 @@ One command. Walk away. Come back to a built project with clean git history.
 > **📋 NOTICE: New to Node on Mac?** If you installed Node.js via Homebrew, you may be running a development release instead of LTS. **[Read this guide](./docs/node-lts-macos.md)** to pin Node 24 LTS and avoid compatibility issues.
 
 </div>
+
+---
+
+## What's New in v2.46.0
+
+### Single-Writer State Engine
+
+The biggest architectural change since DB-backed planning tools. The single-writer engine enforces disciplined state transitions through three iterations:
+
+- **v2 — discipline layer** — adds a write-side discipline layer on top of the DB architecture, ensuring all state mutations flow through controlled tool calls.
+- **v3 — state machine guards, actor identity, reversibility** — introduces formal state machine guards, tracks which actor (human vs agent) initiated each transition, and makes transitions reversible.
+- **Hardened** — closes TOCTOU race conditions, intercepts bypass attempts, and resolves status inconsistencies.
+
+All prompts are now aligned with the single-writer tool API, and a new **workflow-logger** is wired into the engine, tool, manifest, and reconcile paths for full observability. (#2494)
+
+### v2.45.0 — New Commands and Capabilities
+
+- **`/gsd rethink`** — conversational project reorganization. Rethink your milestone structure, slice decomposition, or overall approach through guided discussion. (#2459)
+- **`/gsd mcp`** — MCP server status and connectivity. Check which MCP servers are configured, connected, and healthy. (#2362)
+- **Complete offline mode** — GSD now works fully offline with local models. (#2429)
+- **Global KNOWLEDGE.md injection** — `~/.gsd/agent/KNOWLEDGE.md` is injected into the system prompt, so cross-project knowledge persists globally. (#2331)
+- **Mobile-responsive web UI** — the browser interface now works on phones and tablets. (#2354)
+- **DB tool previews** — `renderCall`/`renderResult` previews on DB tools show what each tool call does before and after execution. (#2273)
+- **Message timestamps** — user and assistant messages now include timestamps. (#2368)
+
+### Key Changes
+
+- **Default isolation mode changed to `none`** — `git.isolation` now defaults to `none` instead of `worktree`. Projects that rely on worktree isolation should set `git.isolation: worktree` explicitly in preferences. (#2481)
+- **Startup checks** — GSD now validates Node.js version and git availability at startup, with clear error messages. (#2463)
+- **Worktree lifecycle journaling** — worktree create, switch, merge, and remove events are recorded in the event journal. (#2486)
+- **Milestone verification gate** — milestone completion is blocked when verification fails, preventing premature closure. (#2500)
+
+### Key Fixes
+
+- **Auto-mode stability** — recovery attempts reset on unit re-dispatch (#2424), survivor branch recovery handles `phase=complete` (#2427), and auto mode stops on real merge conflicts (#2428).
+- **Supervision timeouts** — now respect task `est:` annotations, so complex tasks get proportionally longer timeouts. (#2434)
+- **`auto_pr: true` fixed** — three interacting bugs prevented auto-PR creation; all three are resolved. (#2433)
+- **Rich task plan preservation** — plans survive DB roundtrip without losing structured content. (#2453)
+- **Artifact truncation prevention** — `saveArtifactToDb` no longer overwrites larger files with truncated content. (#2447)
+- **Worktree teardown** — submodule state is detected and preserved during teardown (#2425), and worktree merge back to main works after `stopAuto` on milestone completion (#2430).
+- **Windows portability** — `retentionDays=0` handling and CRLF fixes on Windows. (#2460)
+- **Voice on Linux** — misleading portaudio error on PEP 668 systems replaced with actionable guidance. (#2407)
+
+### Previous highlights (v2.42–v2.44)
+
+- **Non-API-key provider extensions** — support for Claude Code CLI and similar providers. (#2382)
+- **Docker sandbox template** — official Docker template for isolated auto mode. (#2360)
+- **DB-backed planning tools** — write-side state transitions use atomic SQLite tool calls. (#2141)
+- **Declarative workflow engine** — YAML workflows through auto-loop. (#2024)
+- **`/gsd fast`** — toggle service tier for prioritized API routing. (#1862)
+- **Forensics dedup** — duplicate detection before issue creation. (#2105)
+- **Startup optimizations** — pre-compiled extensions, compile cache, batch discovery. (#2125)
 
 ---
 
@@ -84,12 +137,14 @@ This release includes 7 fixes preventing silent data loss in auto-mode:
 
 See the full [Changelog](./CHANGELOG.md) for all 70+ fixes in this release.
 
-### Previous highlights (v2.39–v2.40)
+### Previous highlights (v2.39–v2.41)
 
+- **Browser-based web interface** — run GSD from the browser with `gsd --web`
 - **GitHub sync extension** — auto-sync milestones to GitHub Issues, PRs, and Milestones
 - **Skill tool resolution** — skills auto-activate in dispatched prompts
 - **Health check phase 2** — real-time doctor issues in dashboard and visualizer
 - **Forensics upgrade** — full-access GSD debugger with anomaly detection
+- **7 data-loss prevention fixes** — hallucination guard, merge anchor verification, dirty tree detection, and more
 - **Pipeline decomposition** — auto-loop rewritten as linear phase pipeline
 - **Sliding-window stuck detection** — pattern-aware, fewer false positives
 - **Data-loss recovery** — automatic detection and recovery from v2.30–v2.38 migration issues
@@ -98,7 +153,7 @@ See the full [Changelog](./CHANGELOG.md) for all 70+ fixes in this release.
 
 ## Documentation
 
-Full documentation is available in the [`docs/`](./docs/) directory:
+Full documentation is available at **[gsd.build](https://gsd.build)** (powered by Mintlify) and in the [`docs/`](./docs/) directory:
 
 - **[Getting Started](./docs/getting-started.md)** — install, first run, basic usage
 - **[Auto Mode](./docs/auto-mode.md)** — autonomous execution deep-dive
@@ -118,7 +173,9 @@ Full documentation is available in the [`docs/`](./docs/) directory:
 - **[Visualizer](./docs/visualizer.md)** — workflow visualizer with stats and discussion status
 - **[Remote Questions](./docs/remote-questions.md)** — route decisions to Slack or Discord when human input is needed
 - **[Dynamic Model Routing](./docs/dynamic-model-routing.md)** — complexity-based model selection and budget pressure
+- **[Web Interface](./docs/web-interface.md)** — browser-based project management and real-time progress
 - **[Pipeline Simplification (ADR-003)](./docs/ADR-003-pipeline-simplification.md)** — merged research into planning, mechanical completion
+- **[Docker Sandbox](./docker/README.md)** — run GSD auto mode in an isolated Docker container
 - **[Migration from v1](./docs/migration.md)** — `.planning` → `.gsd` migration
 
 ---
@@ -218,7 +275,7 @@ Auto mode is a state machine driven by files on disk. It reads `.gsd/STATE.md`, 
 
 2. **Context pre-loading** — The dispatch prompt includes inlined task plans, slice plans, prior task summaries, dependency summaries, roadmap excerpts, and decisions register. The LLM starts with everything it needs instead of spending tool calls reading files.
 
-3. **Git worktree isolation** — Each milestone runs in its own git worktree with a `milestone/<MID>` branch. All slice work commits sequentially — no branch switching, no merge conflicts. When the milestone completes, it's squash-merged to main as one clean commit.
+3. **Git isolation** — When `git.isolation` is set to `worktree` or `branch`, each milestone runs on its own `milestone/<MID>` branch (in a worktree or in-place). All slice work commits sequentially — no branch switching, no merge conflicts. When the milestone completes, it's squash-merged to main as one clean commit. The default is `none` (work on the current branch), configurable via preferences.
 
 4. **Crash recovery** — A lock file tracks the current unit. If the session dies, the next `/gsd auto` reads the surviving session file, synthesizes a recovery briefing from every tool call that made it to disk, and resumes with full context. Parallel orchestrator state is persisted to disk with PID liveness detection, so multi-worker sessions survive crashes too. In headless mode, crashes trigger automatic restart with exponential backoff (default 3 attempts).
 
@@ -354,6 +411,8 @@ On first run, GSD launches a branded setup wizard that walks you through LLM pro
 | `/gsd stop`             | Stop auto mode gracefully                                       |
 | `/gsd steer`            | Hard-steer plan documents during execution                      |
 | `/gsd discuss`          | Discuss architecture and decisions (works alongside auto mode)  |
+| `/gsd rethink`          | Conversational project reorganization                           |
+| `/gsd mcp`              | MCP server status and connectivity                              |
 | `/gsd status`           | Progress dashboard                                              |
 | `/gsd queue`            | Queue future milestones (safe during auto mode)                 |
 | `/gsd prefs`            | Model selection, timeouts, budget ceiling                       |
@@ -501,7 +560,7 @@ auto_report: true
 | `skill_rules`          | Situational rules for skill routing                                                                   |
 | `skill_staleness_days` | Skills unused for N days get deprioritized (default: 60, 0 = disabled)                                |
 | `unique_milestone_ids` | Uses unique milestone names to avoid clashes when working in teams of people                          |
-| `git.isolation`        | `worktree` (default), `branch`, or `none` — disable worktree isolation for projects that don't need it           |
+| `git.isolation`        | `none` (default), `worktree`, or `branch` — enable worktree or branch isolation for milestone work               |
 | `git.manage_gitignore` | Set `false` to prevent GSD from modifying `.gitignore`                                                           |
 | `verification_commands`| Array of shell commands to run after task execution (e.g., `["npm run lint", "npm run test"]`)        |
 | `verification_auto_fix`| Auto-retry on verification failures (default: true)                                                   |
