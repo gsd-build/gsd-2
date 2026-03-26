@@ -472,9 +472,13 @@ function formatTraceSummary(trace: ExecutionTrace): string {
   if (trace.errors.length > 0) {
     parts.push(`Errors: ${trace.errors.slice(-3).join("; ")}`);
   }
-  if (trace.lastReasoning) {
-    parts.push(`Last reasoning: "${trace.lastReasoning}"`);
-  }
+  // NOTE: lastReasoning is intentionally excluded from the retry diagnostic.
+  // This summary is injected into retry prompts via getDeepDiagnostic() →
+  // phases.ts. Including prior assistant free-text causes hallucination loops
+  // when the previous turn was truncated or malformed. Crash recovery has its
+  // own path (formatCrashRecoveryBriefing) that handles lastReasoning safely
+  // with explicit "Last Agent Reasoning Before Interruption" framing.
+  // See: https://github.com/gsd-build/gsd-2/issues/2195
   return parts.join("\n");
 }
 
