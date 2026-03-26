@@ -57,13 +57,13 @@ export function setActiveMilestoneId(basePath: string, milestoneId: string | nul
  * record when the user starts from a different branch (#300). Always a no-op
  * if on a GSD slice branch.
  */
-export function captureIntegrationBranch(basePath: string, milestoneId: string, options?: { commitDocs?: boolean }): void {
+export function captureIntegrationBranch(basePath: string, milestoneId: string): void {
   // In a worktree, the base branch is implicit (worktree/<name>).
   // Writing it to META.json would leave stale metadata after merge back to main.
   if (detectWorktreeName(basePath)) return;
   const svc = getService(basePath);
   const current = svc.getCurrentBranch();
-  writeIntegrationBranch(basePath, milestoneId, current, options);
+  writeIntegrationBranch(basePath, milestoneId, current);
 }
 
 // ─── Pure Utility Functions (unchanged) ────────────────────────────────────
@@ -235,8 +235,9 @@ export function getSliceBranchName(milestoneId: string, sliceId: string, worktre
   return `gsd/${milestoneId}/${sliceId}`;
 }
 
-/** Regex that matches both plain and worktree-namespaced slice branches. */
-export const SLICE_BRANCH_RE = /^gsd\/(?:([a-zA-Z0-9_-]+)\/)?(M\d+(?:-[a-z0-9]{6})?)\/(S\d+)$/;
+/** Re-export for backward compatibility — canonical definition in branch-patterns.ts */
+export { SLICE_BRANCH_RE } from "./branch-patterns.js";
+import { SLICE_BRANCH_RE } from "./branch-patterns.js";
 
 /**
  * Parse a slice branch name into its components.

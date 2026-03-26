@@ -22,6 +22,8 @@ export interface Job {
 	promise: Promise<void>;
 	resultText?: string;
 	errorText?: string;
+	/** Set by await_job when results are consumed. Suppresses follow-up delivery. */
+	awaited?: boolean;
 }
 
 export interface JobManagerOptions {
