@@ -17,7 +17,7 @@ import { isParallelActive, shutdownParallel } from "../parallel-orchestrator.js"
 import { checkToolCallLoop, resetToolCallLoopGuard } from "./tool-call-loop-guard.js";
 import { saveActivityLog } from "../activity-log.js";
 import { startRtkStatusUpdates, stopRtkStatusUpdates } from "../rtk-status.js";
-import { rewriteCommandWithRtk } from "../shared/rtk.js";
+import { rewriteCommandWithRtk } from "../../shared/rtk.js";
 
 // Skip the welcome screen on the very first session_start — cli.ts already
 // printed it before the TUI launched. Only re-print on /clear (subsequent sessions).
