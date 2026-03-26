@@ -367,38 +367,37 @@ if (cliFlags.listModels !== undefined) {
 
 // Validate configured model on startup — catches stale settings from prior installs
 // (e.g. grok-2 which no longer exists) and fresh installs with no settings.
-// Only resets the default when the configured model no longer exists in the registry;
-// never overwrites a valid user choice.
-const configuredProvider = settingsManager.getDefaultProvider()
-const configuredModel = settingsManager.getDefaultModel()
-const allModels = modelRegistry.getAll()
-const availableModels = modelRegistry.getAvailable()
-const configuredExists = configuredProvider && configuredModel &&
-  allModels.some((m) => m.provider === configuredProvider && m.id === configuredModel)
-const configuredAvailable = configuredProvider && configuredModel &&
-  availableModels.some((m) => m.provider === configuredProvider && m.id === configuredModel)
+// Deferred to after createAgentSession so extension-provided models (e.g. claude-code)
+// are registered in the model registry before validation runs.
+function validateDefaultModel(): void {
+  const cfgProvider = settingsManager.getDefaultProvider()
+  const cfgModel = settingsManager.getDefaultModel()
+  const all = modelRegistry.getAll()
+  const available = modelRegistry.getAvailable()
+  const exists = cfgProvider && cfgModel &&
+    all.some((m) => m.provider === cfgProvider && m.id === cfgModel)
 
-if (!configuredModel || !configuredExists) {
-  // Model not configured at all, or removed from registry — pick a fallback.
-  // Only fires when the model is genuinely unknown (not just temporarily unavailable).
-  const piDefault = getPiDefaultModelAndProvider()
-  const preferred =
-    (piDefault
-      ? availableModels.find((m) => m.provider === piDefault.provider && m.id === piDefault.model)
-      : undefined) ||
-    availableModels.find((m) => m.provider === 'openai' && m.id === 'gpt-5.4') ||
-    availableModels.find((m) => m.provider === 'openai') ||
-    availableModels.find((m) => m.provider === 'anthropic' && m.id === 'claude-opus-4-6') ||
-    availableModels.find((m) => m.provider === 'anthropic' && m.id.includes('opus')) ||
-    availableModels.find((m) => m.provider === 'anthropic') ||
-    availableModels[0]
-  if (preferred) {
-    settingsManager.setDefaultModelAndProvider(preferred.provider, preferred.id)
+  if (!cfgModel || !exists) {
+    // Model not configured at all, or removed from registry — pick a fallback.
+    const piDefault = getPiDefaultModelAndProvider()
+    const preferred =
+      (piDefault
+        ? available.find((m) => m.provider === piDefault.provider && m.id === piDefault.model)
+        : undefined) ||
+      available.find((m) => m.provider === 'openai' && m.id === 'gpt-5.4') ||
+      available.find((m) => m.provider === 'openai') ||
+      available.find((m) => m.provider === 'anthropic' && m.id === 'claude-opus-4-6') ||
+      available.find((m) => m.provider === 'anthropic' && m.id.includes('opus')) ||
+      available.find((m) => m.provider === 'anthropic') ||
+      available[0]
+    if (preferred) {
+      settingsManager.setDefaultModelAndProvider(preferred.provider, preferred.id)
+    }
   }
-}
 
-if (settingsManager.getDefaultThinkingLevel() !== 'off' && !configuredExists) {
-  settingsManager.setDefaultThinkingLevel('off')
+  if (settingsManager.getDefaultThinkingLevel() !== 'off' && !exists) {
+    settingsManager.setDefaultThinkingLevel('off')
+  }
 }
 
 // GSD always uses quiet startup — the gsd extension renders its own branded header
@@ -458,6 +457,9 @@ if (isPrintMode) {
       process.stderr.write(`[gsd] ${prefix}: ${err.error}\n`)
     }
   }
+
+  // Validate default model now that extensions have registered their models
+  validateDefaultModel()
 
   // Apply --model override if specified
   if (cliFlags.model) {
@@ -589,6 +591,9 @@ if (extensionsResult.errors.length > 0) {
     process.stderr.write(`[gsd] ${prefix}: ${err.error}\n`)
   }
 }
+
+// Validate default model now that extensions have registered their models
+validateDefaultModel()
 
 // Restore scoped models from settings on startup.
 // The upstream InteractiveMode reads enabledModels from settings when /scoped-models is opened,
