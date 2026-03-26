@@ -7,7 +7,7 @@ import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { CmuxClient, emitOsc777Notification, resolveCmuxConfig } from "../cmux/index.js";
 
 export type NotifyLevel = "info" | "success" | "warning" | "error";
-export type NotificationKind = "complete" | "error" | "budget" | "milestone" | "attention";
+export type NotificationKind = "complete" | "error" | "budget" | "milestone" | "attention" | "chat_response";
 
 interface NotificationCommand {
   file: string;
@@ -58,6 +58,8 @@ export function shouldSendDesktopNotification(
       return preferences?.on_milestone ?? true;
     case "attention":
       return preferences?.on_attention ?? true;
+    case "chat_response":
+      return preferences?.on_chat_response ?? true;
     case "complete":
     default:
       return preferences?.on_complete ?? true;
@@ -93,4 +95,54 @@ function normalizeNotificationText(s: string): string {
 
 function escapeAppleScript(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+/**
+ * Check if the terminal app is currently frontmost (user is looking at it).
+ * Uses TERM_PROGRAM env var to identify the terminal, then queries via AppleScript.
+ * Returns true if focused (skip notification), false if not focused or unknown.
+ */
+export function isTerminalFocused(): boolean {
+  if (process.platform !== "darwin") return false;
+
+  const termProgram = process.env.TERM_PROGRAM;
+  const bundleMap: Record<string, string> = {
+    "ghostty": "com.mitchellh.ghostty",
+    "iTerm.app": "com.googlecode.iterm2",
+    "Apple_Terminal": "com.apple.Terminal",
+    "WarpTerminal": "dev.warp.Warp-Stable",
+    "vscode": "com.microsoft.VSCode",
+    "Alacritty": "org.alacritty",
+    "kitty": "net.kovidgoyal.kitty",
+  };
+
+  const appIdentifier = (termProgram && bundleMap[termProgram]) || termProgram;
+  if (!appIdentifier) return false;
+
+  try {
+    // Use the native AppleScript name for known apps, fall back to System Events
+    if (termProgram && bundleMap[termProgram]) {
+      // Known app — query directly by name (more reliable than System Events)
+      const appName = termProgram === "ghostty" ? "Ghostty"
+        : termProgram === "iTerm.app" ? "iTerm"
+        : termProgram === "Apple_Terminal" ? "Terminal"
+        : termProgram;
+      const result = execFileSync("osascript", [
+        "-e", `tell application "${appName}" to return frontmost`,
+      ], { timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+      return result === "true";
+    }
+    return false;
+  } catch {
+    return false; // Can't detect — notify to be safe
+  }
+}
+
+/**
+ * Send a chat response notification, suppressing if the terminal is focused.
+ * Used by the agent_end hook for interactive (non-auto) sessions.
+ */
+export function sendChatResponseNotification(title: string, message: string): void {
+  if (isTerminalFocused()) return;
+  sendDesktopNotification(title, message, "info", "chat_response");
 }

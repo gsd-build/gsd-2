@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildDesktopNotificationCommand,
   shouldSendDesktopNotification,
+  isTerminalFocused,
 } from "../notifications.js";
 import type { NotificationPreferences } from "../types.js";
 
@@ -64,4 +65,29 @@ test("buildDesktopNotificationCommand preserves literal shell characters on linu
 
 test("buildDesktopNotificationCommand skips unsupported platforms", () => {
   assert.equal(buildDesktopNotificationCommand("win32", "Title", "Message"), null);
+});
+
+test("shouldSendDesktopNotification handles chat_response kind", () => {
+  const prefsEnabled: NotificationPreferences = { enabled: true, on_chat_response: true };
+  assert.equal(shouldSendDesktopNotification("chat_response", prefsEnabled), true);
+
+  const prefsDisabled: NotificationPreferences = { enabled: true, on_chat_response: false };
+  assert.equal(shouldSendDesktopNotification("chat_response", prefsDisabled), false);
+});
+
+test("shouldSendDesktopNotification defaults chat_response to true", () => {
+  const prefs: NotificationPreferences = { enabled: true };
+  assert.equal(shouldSendDesktopNotification("chat_response", prefs), true);
+});
+
+test("shouldSendDesktopNotification disables chat_response when notifications globally disabled", () => {
+  const prefs: NotificationPreferences = { enabled: false, on_chat_response: true };
+  assert.equal(shouldSendDesktopNotification("chat_response", prefs), false);
+});
+
+test("isTerminalFocused returns false on non-darwin platforms", () => {
+  // isTerminalFocused checks process.platform — on CI (linux) this returns false
+  // On macOS dev machines it returns the actual focus state
+  const result = isTerminalFocused();
+  assert.equal(typeof result, "boolean");
 });

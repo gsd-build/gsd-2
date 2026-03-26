@@ -482,17 +482,20 @@ github:
 
 ### `notifications`
 
-Control what notifications GSD sends during auto mode:
+Control what notifications GSD sends during auto mode and interactive chat:
 
 ```yaml
 notifications:
   enabled: true
-  on_complete: true           # notify on unit completion
-  on_error: true              # notify on errors
-  on_budget: true             # notify on budget thresholds
-  on_milestone: true          # notify when milestone finishes
-  on_attention: true          # notify when manual attention needed
+  on_complete: true           # notify on unit completion (auto-mode)
+  on_error: true              # notify on errors (auto-mode)
+  on_budget: true             # notify on budget thresholds (auto-mode)
+  on_milestone: true          # notify when milestone finishes (auto-mode)
+  on_attention: true          # notify when manual attention needed (auto-mode)
+  on_chat_response: true      # notify when assistant finishes in interactive chat
 ```
+
+The `on_chat_response` notification is suppressed when the terminal app is frontmost — it only fires when you've switched away from the terminal. Clicking the notification brings the terminal back to the foreground.
 
 ### `remote_questions`
 

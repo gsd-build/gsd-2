@@ -16,6 +16,7 @@ import { getAutoDashboardData, isAutoActive, isAutoPaused, markToolEnd, markTool
 import { isParallelActive, shutdownParallel } from "../parallel-orchestrator.js";
 import { checkToolCallLoop, resetToolCallLoopGuard } from "./tool-call-loop-guard.js";
 import { saveActivityLog } from "../activity-log.js";
+import { sendChatResponseNotification } from "../notifications.js";
 
 // Skip the welcome screen on the very first session_start — cli.ts already
 // printed it before the TUI launched. Only re-print on /clear (subsequent sessions).
@@ -84,6 +85,11 @@ export function registerHooks(pi: ExtensionAPI): void {
   pi.on("agent_end", async (event, ctx: ExtensionContext) => {
     resetToolCallLoopGuard();
     await handleAgentEnd(pi, event, ctx);
+
+    // Notify interactive chat users when the response is ready (skip auto-mode)
+    if (!isAutoActive() && !isAutoPaused()) {
+      sendChatResponseNotification("GSD", "Response ready — check your terminal");
+    }
   });
 
   pi.on("session_before_compact", async () => {

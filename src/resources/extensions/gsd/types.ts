@@ -341,6 +341,7 @@ export interface NotificationPreferences {
   on_budget?: boolean; // notify on budget thresholds
   on_milestone?: boolean; // notify when milestone finishes
   on_attention?: boolean; // notify when manual attention needed
+  on_chat_response?: boolean; // notify when assistant finishes in interactive chat (default true)
 }
 
 // ─── Pre-Dispatch Hook Types ──────────────────────────────────────────────
