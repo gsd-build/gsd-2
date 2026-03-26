@@ -1,8 +1,11 @@
 // GSD Extension — Workflow Logger Tests
 // Tests for the centralized warning/error accumulator.
 
-import { describe, test, beforeEach } from "node:test";
+import { describe, test, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   logWarning,
   logError,
@@ -14,6 +17,7 @@ import {
   hasAnyIssues,
   summarizeLogs,
   formatForNotification,
+  setLogBasePath,
   _resetLogs,
 } from "../workflow-logger.ts";
 
@@ -219,6 +223,40 @@ describe("workflow-logger", () => {
       const formatted = formatForNotification(entries);
       assert.equal(formatted, "[tool] failed");
       assert.ok(!formatted.includes("complete_task"));
+    });
+  });
+
+  describe("audit log persistence", () => {
+    test("writes entry to .gsd/audit-log.jsonl after setLogBasePath", () => {
+      const dir = mkdtempSync(join(tmpdir(), "wl-audit-"));
+      after(() => rmSync(dir, { recursive: true, force: true }));
+
+      setLogBasePath(dir);
+      logWarning("engine", "audit test entry");
+
+      const auditPath = join(dir, ".gsd", "audit-log.jsonl");
+      assert.ok(existsSync(auditPath), "audit-log.jsonl should exist");
+      const content = readFileSync(auditPath, "utf-8");
+      const entry = JSON.parse(content.trim());
+      assert.equal(entry.severity, "warn");
+      assert.equal(entry.component, "engine");
+      assert.equal(entry.message, "audit test entry");
+    });
+
+    test("_resetLogs does not clear the audit base path", () => {
+      const dir = mkdtempSync(join(tmpdir(), "wl-reset-"));
+      after(() => rmSync(dir, { recursive: true, force: true }));
+
+      setLogBasePath(dir);
+      _resetLogs();
+      // After reset, logging should still write to disk
+      logWarning("engine", "post-reset entry");
+
+      const auditPath = join(dir, ".gsd", "audit-log.jsonl");
+      assert.ok(existsSync(auditPath), "audit-log.jsonl should exist after _resetLogs");
+      const content = readFileSync(auditPath, "utf-8");
+      const entry = JSON.parse(content.trim());
+      assert.equal(entry.message, "post-reset entry");
     });
   });
 

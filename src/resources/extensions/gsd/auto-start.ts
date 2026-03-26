@@ -67,6 +67,7 @@ import {
   getDebugLogPath,
 } from "./debug-logger.js";
 import { parseUnitId } from "./unit-id.js";
+import { setLogBasePath } from "./workflow-logger.js";
 import type { AutoSession } from "./auto/session.js";
 import {
   existsSync,
@@ -461,6 +462,7 @@ export async function bootstrapAutoSession(
     s.verbose = verboseMode;
     s.cmdCtx = ctx;
     s.basePath = base;
+    setLogBasePath(base);
     s.unitDispatchCount.clear();
     s.unitRecoveryCount.clear();
     s.lastBudgetAlertLevel = 0;

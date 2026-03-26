@@ -114,6 +114,7 @@ import {
   formatCost,
   formatTokenCount,
 } from "./metrics.js";
+import { setLogBasePath } from "./workflow-logger.js";
 import { join } from "node:path";
 import { readFileSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { atomicWriteSync } from "./atomic-write.js";
@@ -1102,6 +1103,7 @@ export async function startAuto(
     s.stepMode = requestedStepMode;
     s.cmdCtx = ctx;
     s.basePath = base;
+    setLogBasePath(base);
     s.unitDispatchCount.clear();
     s.unitLifetimeDispatches.clear();
     if (!getLedger()) initMetrics(base);
