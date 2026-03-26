@@ -52,7 +52,11 @@ export function resolveExpectedArtifactPath(
     }
     case "run-uat": {
       const dir = resolveSlicePath(base, mid, sid!);
-      return dir ? join(dir, buildSliceFileName(sid!, "UAT")) : null;
+      // The run-uat agent writes its verdict to S{sid}-ASSESSMENT.md via
+      // gsd_summary_save(artifact_type="ASSESSMENT"). S{sid}-UAT.md is the
+      // *input* test-case file and always pre-exists — checking it would make
+      // artifact verification a no-op. (#2652)
+      return dir ? join(dir, buildSliceFileName(sid!, "ASSESSMENT")) : null;
     }
     case "execute-task": {
       const dir = resolveSlicePath(base, mid, sid!);
@@ -118,7 +122,8 @@ export function diagnoseExpectedArtifact(
     case "reassess-roadmap":
       return `${relSliceFile(base, mid, sid!, "ASSESSMENT")} (roadmap reassessment)`;
     case "run-uat":
-      return `${relSliceFile(base, mid, sid!, "UAT")} (UAT result)`;
+      // Verdict is written to ASSESSMENT, not UAT (UAT is the input file). (#2652)
+      return `${relSliceFile(base, mid, sid!, "ASSESSMENT")} (UAT verdict)`;
     case "validate-milestone":
       return `${relMilestoneFile(base, mid, "VALIDATION")} (milestone validation report)`;
     case "complete-milestone":
