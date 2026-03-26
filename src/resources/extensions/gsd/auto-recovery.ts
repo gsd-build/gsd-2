@@ -12,7 +12,7 @@ import { parseUnitId } from "./unit-id.js";
 import { atomicWriteSync } from "./atomic-write.js";
 import { clearParseCache } from "./files.js";
 import { parseRoadmap as parseLegacyRoadmap, parsePlan as parseLegacyPlan } from "./parsers-legacy.js";
-import { isDbAvailable, getTask, getSlice, getSliceTasks } from "./gsd-db.js";
+import { isDbAvailable, getTask, getSlice, getSliceTasks, updateTaskStatus } from "./gsd-db.js";
 import { isValidationTerminal } from "./state.js";
 import {
   nativeConflictFiles,
@@ -425,6 +425,20 @@ export function writeBlockerPlaceholder(
     `Review and replace this file before relying on downstream artifacts.`,
   ].join("\n");
   writeFileSync(absPath, content, "utf-8");
+
+  // Mark the task as complete in the DB so verifyExpectedArtifact passes.
+  // Without this, the DB status stays "pending" and the dispatch loop
+  // re-derives the same task indefinitely (#2531).
+  if (unitType === "execute-task" && isDbAvailable()) {
+    const parts = unitId.split("/");
+    const mid = parts[0];
+    const sid = parts[1];
+    const tid = parts[2];
+    if (mid && sid && tid) {
+      try { updateTaskStatus(mid, sid, tid, "complete", new Date().toISOString()); } catch { /* non-fatal */ }
+    }
+  }
+
   return diagnoseExpectedArtifact(unitType, unitId, base);
 }
 
