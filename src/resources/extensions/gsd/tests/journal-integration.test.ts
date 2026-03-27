@@ -260,6 +260,61 @@ test("runDispatch emits dispatch-stop when dispatch returns stop action", async 
   assert.equal(stopEvents[0].flowId, ic.flowId);
 });
 
+test("runDispatch checks prior-slice completion against the project root in worktree mode", async () => {
+  const capture = createEventCapture();
+  const guardCalls: Array<{ fn: string; args: unknown[] }> = [];
+  const deps = makeMockDeps(capture, {
+    getMainBranch: (basePath: string) => {
+      guardCalls.push({ fn: "getMainBranch", args: [basePath] });
+      return "main";
+    },
+    getPriorSliceCompletionBlocker: (
+      basePath: string,
+      mainBranch: string,
+      unitType: string,
+      unitId: string,
+    ) => {
+      guardCalls.push({
+        fn: "getPriorSliceCompletionBlocker",
+        args: [basePath, mainBranch, unitType, unitId],
+      });
+      return null;
+    },
+  });
+  const ic = makeIC(deps, {
+    s: {
+      ...makeSession(),
+      basePath: "/tmp/project/.gsd/worktrees/M029-xoklo9",
+      originalBasePath: "/tmp/project",
+    } as any,
+  });
+  const preData: PreDispatchData = {
+    state: {
+      phase: "executing",
+      activeMilestone: { id: "M029-xoklo9", title: "Test", status: "active" },
+      activeSlice: { id: "S01", title: "Slice 1" },
+      registry: [{ id: "M029-xoklo9", status: "active" }],
+      blockers: [],
+    } as any,
+    mid: "M029-xoklo9",
+    midTitle: "Test Milestone",
+  };
+
+  const result = await runDispatch(ic, preData, {
+    recentUnits: [],
+    stuckRecoveryAttempts: 0,
+  });
+
+  assert.equal(result.action, "next");
+  assert.deepEqual(guardCalls, [
+    { fn: "getMainBranch", args: ["/tmp/project"] },
+    {
+      fn: "getPriorSliceCompletionBlocker",
+      args: ["/tmp/project", "main", "execute-task", "M001/S01/T01"],
+    },
+  ]);
+});
+
 test("runUnitPhase emits unit-start and unit-end with causedBy reference", async () => {
   const capture = createEventCapture();
 

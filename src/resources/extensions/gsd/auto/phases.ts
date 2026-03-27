@@ -46,6 +46,17 @@ export function _resolveReportBasePath(s: Pick<AutoSession, "originalBasePath" |
 }
 
 /**
+ * Resolve the authoritative project base for dispatch guards.
+ * Prior-milestone completion lives at the project root, even when the active
+ * unit is running inside an auto worktree.
+ */
+export function _resolveDispatchGuardBasePath(
+  s: Pick<AutoSession, "originalBasePath" | "basePath">,
+): string {
+  return s.originalBasePath || s.basePath;
+}
+
+/**
  * Generate and write an HTML milestone report snapshot.
  * Extracted from the milestone-transition block in autoLoop.
  */
@@ -667,9 +678,10 @@ export async function runDispatch(
     prompt = preDispatchResult.prompt;
   }
 
+  const guardBasePath = _resolveDispatchGuardBasePath(s);
   const priorSliceBlocker = deps.getPriorSliceCompletionBlocker(
-    s.basePath,
-    deps.getMainBranch(s.basePath),
+    guardBasePath,
+    deps.getMainBranch(guardBasePath),
     unitType,
     unitId,
   );
