@@ -9,7 +9,7 @@
 
 import { existsSync, statSync, readFileSync, openSync, readSync, closeSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 
 import type { Theme } from "@gsd/pi-coding-agent";
 import { truncateToWidth, visibleWidth, matchesKey, Key } from "@gsd/pi-tui";
@@ -129,8 +129,9 @@ function querySliceProgress(basePath: string, mid: string): SliceProgress[] {
 
   try {
     const sql = `SELECT s.id, s.status, COUNT(t.id), SUM(CASE WHEN t.status='complete' THEN 1 ELSE 0 END) FROM slices s LEFT JOIN tasks t ON s.milestone_id=t.milestone_id AND s.id=t.slice_id WHERE s.milestone_id='${mid}' GROUP BY s.id ORDER BY s.id`;
-    const out = execSync(`sqlite3 "${dbPath}" "${sql}"`, { timeout: 3000, encoding: "utf-8" }).trim();
-    if (!out) return [];
+    const result = spawnSync("sqlite3", [dbPath, sql], { timeout: 3000, encoding: "utf-8" });
+    const out = (result.stdout || "").trim();
+    if (!out || result.status !== 0) return [];
     return out.split("\n").map((line) => {
       const [id, status, total, done] = line.split("|");
       return { id, status, total: parseInt(total, 10), done: parseInt(done || "0", 10) };
@@ -167,8 +168,9 @@ function queryRecentCompletions(basePath: string, mid: string): string[] {
   if (!existsSync(dbPath)) return [];
   try {
     const sql = `SELECT id, slice_id, one_liner FROM tasks WHERE milestone_id='${mid}' AND status='complete' AND completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT 5`;
-    const out = execSync(`sqlite3 "${dbPath}" "${sql}"`, { timeout: 3000, encoding: "utf-8" }).trim();
-    if (!out) return [];
+    const result = spawnSync("sqlite3", [dbPath, sql], { timeout: 3000, encoding: "utf-8" });
+    const out = (result.stdout || "").trim();
+    if (!out || result.status !== 0) return [];
     return out.split("\n").map((line) => {
       const [taskId, sliceId, oneLiner] = line.split("|");
       return `✓ ${mid}/${sliceId}/${taskId}${oneLiner ? ": " + oneLiner : ""}`;
