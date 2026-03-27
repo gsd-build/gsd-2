@@ -9,7 +9,7 @@
 - [x] **Phase 2: Foundation** — Process lifecycle, tmux pane management, file watching infrastructure (completed 2026-03-27)
 - [x] **Phase 3: Core Renderer** — Tree model, lifecycle badges, status icons, ANSI-safe layout (completed 2026-03-27)
 - [x] **Phase 4: Renderer Entry + Command Integration** — Subprocess wiring, viewport scrolling, `/gsd watch` registration (completed 2026-03-27)
-- [ ] **Phase 5: Navigation** — Vim keybindings, expand/collapse, help overlay, collapse state persistence
+- [x] **Phase 5: Navigation** — Vim keybindings, expand/collapse, help overlay, collapse state persistence (completed 2026-03-27)
 
 ## Phase Details
 
@@ -66,11 +66,11 @@ Plans:
   2. Pressing ? displays a help overlay listing all keybindings; pressing ? again or Esc dismisses it.
   3. Collapsing a parent node, then triggering a file-change refresh, leaves that node in its collapsed state — the user's expand/collapse choices are not reset by automatic refreshes.
   4. Deleting a phase directory that was previously collapsed causes no crash or visual corruption on the next refresh.
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 - [x] 05-01-PLAN.md — VisibleNode type, collapse-aware renderTreeLines, collapsed indicator (NAV-01, NAV-03)
-- [ ] 05-02-PLAN.md — Navigation state, key parsing, cursor highlight, help overlay, cursor-sticky refresh (NAV-01, NAV-02, NAV-03)
+- [x] 05-02-PLAN.md — Navigation state, key parsing, cursor highlight, help overlay, cursor-sticky refresh (NAV-01, NAV-02, NAV-03)
 
 ## Progress
 
@@ -79,7 +79,7 @@ Plans:
 | 2. Foundation | 3/3 | Complete   | 2026-03-27 |
 | 3. Core Renderer | 2/2 | Complete   | 2026-03-27 |
 | 4. Renderer Entry + Command Integration | 1/1 | Complete   | 2026-03-27 |
-| 5. Navigation | 1/2 | In Progress|  |
+| 5. Navigation | 2/2 | Complete   | 2026-03-27 |
 
 ---
 *Roadmap created: 2026-03-26 for milestone v1.1 GSD Watch*
