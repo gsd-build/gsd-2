@@ -20,7 +20,16 @@ import {
   scrollViewport,
   resetViewportState,
   getViewportOffset,
+  parseNavKey,
+  resetNavigationState,
+  getCursorIndex,
+  getCollapsedPhases,
+  isHelpOverlayVisible,
+  applyCursorHighlight,
+  renderHelpOverlayLines,
+  ensureCursorInViewport,
 } from "../watch/renderer-entry.js";
+import { visibleWidth } from "@gsd/pi-tui";
 
 describe("CLEANUP_SIGNALS", () => {
   test("Test 1: CLEANUP_SIGNALS contains exactly SIGTERM, SIGHUP, SIGINT", () => {
@@ -407,5 +416,131 @@ describe("arrow key and quit sequence isolation", () => {
     assert.equal(firstQ, false, "first q should not quit");
     const secondQ = parseQuitSequence("q");
     assert.equal(secondQ, true, "second q should quit (parseArrowKey did not corrupt quit state)");
+  });
+});
+
+// ─── Navigation Tests (Tests 29–47) ──────────────────────────────────────────
+
+describe("parseNavKey", () => {
+  test("Test 29: parseNavKey(\"j\") returns \"cursor-down\"", () => {
+    assert.equal(parseNavKey("j"), "cursor-down");
+  });
+
+  test("Test 30: parseNavKey(\"k\") returns \"cursor-up\"", () => {
+    assert.equal(parseNavKey("k"), "cursor-up");
+  });
+
+  test("Test 31: parseNavKey(\"h\") returns \"collapse\"", () => {
+    assert.equal(parseNavKey("h"), "collapse");
+  });
+
+  test("Test 32: parseNavKey(\"l\") returns \"expand\"", () => {
+    assert.equal(parseNavKey("l"), "expand");
+  });
+
+  test("Test 33: parseNavKey(\"g\") returns \"jump-top\"", () => {
+    assert.equal(parseNavKey("g"), "jump-top");
+  });
+
+  test("Test 34: parseNavKey(\"G\") returns \"jump-bottom\"", () => {
+    assert.equal(parseNavKey("G"), "jump-bottom");
+  });
+
+  test("Test 35: parseNavKey(\"?\") returns \"help\"", () => {
+    assert.equal(parseNavKey("?"), "help");
+  });
+
+  test("Test 36: parseNavKey(\"x\") returns null (non-nav key)", () => {
+    assert.equal(parseNavKey("x"), null);
+  });
+
+  test("Test 37: parseNavKey(\"\\x1b[A\") returns null (arrow key is not a nav key)", () => {
+    assert.equal(parseNavKey("\x1b[A"), null);
+  });
+});
+
+describe("resetNavigationState", () => {
+  test("Test 38: resetNavigationState() sets cursorIndex to 0, clears collapsedPhases, sets helpOverlayVisible to false", () => {
+    // The state starts clean, but we call reset to ensure deterministic behavior
+    resetNavigationState();
+    assert.equal(getCursorIndex(), 0, "cursorIndex should be 0 after reset");
+    assert.equal(getCollapsedPhases().size, 0, "collapsedPhases should be empty after reset");
+    assert.equal(isHelpOverlayVisible(), false, "helpOverlayVisible should be false after reset");
+  });
+});
+
+describe("applyCursorHighlight", () => {
+  test("Test 39: applyCursorHighlight wraps a line in \\x1b[7m...\\x1b[0m and pads to width", () => {
+    const result = applyCursorHighlight("hello", 10);
+    assert.ok(result.startsWith("\x1b[7m"), "should start with reverse video escape");
+    assert.ok(result.endsWith("\x1b[0m"), "should end with SGR reset escape");
+  });
+
+  test("Test 40: applyCursorHighlight pads short line (10 visible chars) to full width (40) with spaces inside reverse video", () => {
+    const line = "0123456789"; // 10 visible chars
+    const width = 40;
+    const result = applyCursorHighlight(line, width);
+    // Strip ANSI escapes to measure the visible content
+    const inner = result.replace(/\x1b\[\d+m/g, "");
+    const innerWidth = visibleWidth(inner);
+    assert.equal(innerWidth, width, `expected padded width ${width}, got ${innerWidth}`);
+  });
+});
+
+describe("renderHelpOverlayLines", () => {
+  test("Test 41: renderHelpOverlayLines(60) returns array containing \"KEYBINDINGS\" header", () => {
+    const lines = renderHelpOverlayLines(60);
+    assert.ok(lines.some(l => l.includes("KEYBINDINGS")), "expected KEYBINDINGS header in overlay lines");
+  });
+
+  test("Test 42: renderHelpOverlayLines(60) returns array containing \"BADGE LEGEND\" header", () => {
+    const lines = renderHelpOverlayLines(60);
+    assert.ok(lines.some(l => l.includes("BADGE LEGEND")), "expected BADGE LEGEND header in overlay lines");
+  });
+
+  test("Test 43: renderHelpOverlayLines(60) includes \"j / k\" keybinding entry", () => {
+    const lines = renderHelpOverlayLines(60);
+    assert.ok(lines.some(l => l.includes("j / k")), "expected j / k keybinding entry in overlay lines");
+  });
+
+  test("Test 44: renderHelpOverlayLines(60) includes all 7 badge legend entries (CONTEXT through HUMAN-UAT)", () => {
+    const lines = renderHelpOverlayLines(60);
+    const combined = lines.join("\n");
+    const expectedBadges = ["CONTEXT", "RESEARCH", "UI-SPEC", "PLAN", "SUMMARY", "VERIFICATION", "HUMAN-UAT"];
+    for (const badge of expectedBadges) {
+      assert.ok(combined.includes(badge), `expected badge legend entry: ${badge}`);
+    }
+  });
+});
+
+describe("ensureCursorInViewport", () => {
+  beforeEach(() => {
+    resetViewportState();
+  });
+
+  test("Test 45: ensureCursorInViewport adjusts viewportOffset when cursorIndex is below viewport (cursor > offset + contentHeight - 1)", () => {
+    // Set viewport offset to 0, contentHeight=5, cursor=7 → cursor is below viewport (7 >= 0+5)
+    ensureCursorInViewport(7, 20, 5);
+    // Expected: viewportOffset = 7 - 5 + 1 = 3
+    assert.equal(getViewportOffset(), 3, `expected viewportOffset=3, got ${getViewportOffset()}`);
+  });
+
+  test("Test 46: ensureCursorInViewport adjusts viewportOffset when cursorIndex is above viewport (cursor < offset)", () => {
+    // First scroll down to set offset=10
+    scrollViewport(10, 30, 5);
+    assert.equal(getViewportOffset(), 10, "precondition: offset should be 10");
+    // Now cursor=3 is above viewport (3 < 10)
+    ensureCursorInViewport(3, 30, 5);
+    // Expected: viewportOffset = cursor = 3
+    assert.equal(getViewportOffset(), 3, `expected viewportOffset=3 (set to cursor), got ${getViewportOffset()}`);
+  });
+
+  test("Test 47: ensureCursorInViewport does NOT adjust viewportOffset when cursor is within viewport bounds", () => {
+    // Set offset=2 via scrollViewport, contentHeight=5, cursor=4 → in view (2 <= 4 < 2+5=7)
+    scrollViewport(2, 30, 5);
+    assert.equal(getViewportOffset(), 2, "precondition: offset should be 2");
+    ensureCursorInViewport(4, 30, 5);
+    // Viewport offset should remain 2
+    assert.equal(getViewportOffset(), 2, `expected viewportOffset unchanged at 2, got ${getViewportOffset()}`);
   });
 });
