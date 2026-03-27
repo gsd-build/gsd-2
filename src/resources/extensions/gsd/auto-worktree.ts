@@ -1408,30 +1408,45 @@ export function mergeMilestoneToMain(
         : nativeConflictFiles(originalBasePath_);
 
     if (conflictedFiles.length > 0) {
-      // Separate .gsd/ state file conflicts from real code conflicts.
-      // GSD state files (STATE.md, auto.lock, etc.)
-      // diverge between branches during normal operation — always prefer the
-      // milestone branch version since it has the latest execution state.
-      const gsdConflicts = conflictedFiles.filter((f) => f.startsWith(".gsd/"));
+      // Patterns for machine-generated build artifacts that can be safely
+      // auto-resolved by accepting --theirs. These files are regenerable
+      // and never contain meaningful manual edits.
+      const SAFE_AUTO_RESOLVE_PATTERNS: RegExp[] = [
+        /\.tsbuildinfo$/,
+        /\.pyc$/,
+        /\/__pycache__\//,
+        /\.DS_Store$/,
+        /\.map$/,
+      ];
+
+      const isSafeToAutoResolve = (filePath: string): boolean =>
+        filePath.startsWith(".gsd/") ||
+        SAFE_AUTO_RESOLVE_PATTERNS.some((re) => re.test(filePath));
+
+      // Separate auto-resolvable conflicts (GSD state files + build artifacts)
+      // from real code conflicts. GSD state files diverge between branches
+      // during normal operation. Build artifacts are machine-generated and
+      // regenerable. Both are safe to accept from the milestone branch.
+      const autoResolvable = conflictedFiles.filter(isSafeToAutoResolve);
       const codeConflicts = conflictedFiles.filter(
-        (f) => !f.startsWith(".gsd/"),
+        (f) => !isSafeToAutoResolve(f),
       );
 
-      // Auto-resolve .gsd/ conflicts by accepting the milestone branch version
-      if (gsdConflicts.length > 0) {
-        for (const gsdFile of gsdConflicts) {
+      // Auto-resolve safe conflicts by accepting the milestone branch version
+      if (autoResolvable.length > 0) {
+        for (const safeFile of autoResolvable) {
           try {
-            nativeCheckoutTheirs(originalBasePath_, [gsdFile]);
-            nativeAddPaths(originalBasePath_, [gsdFile]);
+            nativeCheckoutTheirs(originalBasePath_, [safeFile]);
+            nativeAddPaths(originalBasePath_, [safeFile]);
           } catch {
             // If checkout --theirs fails, try removing the file from the merge
             // (it's a runtime file that shouldn't be committed anyway)
-            nativeRmForce(originalBasePath_, [gsdFile]);
+            nativeRmForce(originalBasePath_, [safeFile]);
           }
         }
       }
 
-      // If there are still non-.gsd conflicts, escalate
+      // If there are still real code conflicts, escalate
       if (codeConflicts.length > 0) {
         // Pop stash before throwing so local work is not lost (#2151).
         if (stashed) {
