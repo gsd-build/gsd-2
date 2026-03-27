@@ -1517,7 +1517,7 @@ export function mergeMilestoneToMain(
         } catch { /* stash may already be consumed */ }
       } else {
         // Non-.gsd conflicts remain — leave stash for manual resolution
-        logWarning("worktree", "Stash pop conflict on non-.gsd files after merge", {
+        logWarning("reconcile", "Stash pop conflict on non-.gsd files after merge", {
           files: nonGsdUU,
         });
       }
