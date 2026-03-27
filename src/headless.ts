@@ -17,7 +17,9 @@ import { join } from 'node:path'
 import { resolve } from 'node:path'
 import { ChildProcess } from 'node:child_process'
 
-import { RpcClient } from '@gsd/pi-coding-agent'
+import { RpcClient, SessionManager } from '@gsd/pi-coding-agent'
+import type { SessionInfo } from '@gsd/pi-coding-agent'
+import { getProjectSessionsDir } from './project-sessions.js'
 import { loadAndValidateAnswerFile, AnswerInjector } from './headless-answers.js'
 
 import {
@@ -35,7 +37,7 @@ import {
   mapStatusToExitCode,
 } from './headless-events.js'
 
-import type { OutputFormat } from './headless-types.js'
+import type { OutputFormat, HeadlessJsonResult } from './headless-types.js'
 import { VALID_OUTPUT_FORMATS } from './headless-types.js'
 
 import {
@@ -78,6 +80,39 @@ interface TrackedEvent {
   type: string
   timestamp: number
   detail?: string
+}
+
+// ---------------------------------------------------------------------------
+// Resume Session Resolution
+// ---------------------------------------------------------------------------
+
+export interface ResumeSessionResult {
+  session?: SessionInfo
+  error?: string
+}
+
+/**
+ * Resolve a session prefix to a single session.
+ * Exact id match is preferred over prefix match.
+ * Returns `{ session }` on unique match or `{ error }` on 0/ambiguous matches.
+ */
+export function resolveResumeSession(sessions: SessionInfo[], prefix: string): ResumeSessionResult {
+  // Exact match takes priority
+  const exact = sessions.find(s => s.id === prefix)
+  if (exact) {
+    return { session: exact }
+  }
+
+  // Prefix match
+  const matches = sessions.filter(s => s.id.startsWith(prefix))
+  if (matches.length === 0) {
+    return { error: `No session matching '${prefix}' found` }
+  }
+  if (matches.length > 1) {
+    const list = matches.map(s => `  ${s.id}`).join('\n')
+    return { error: `Ambiguous session prefix '${prefix}' matches ${matches.length} sessions:\n${list}` }
+  }
+  return { session: matches[0] }
 }
 
 // ---------------------------------------------------------------------------
@@ -325,6 +360,40 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
   let milestoneReady = false  // tracks "Milestone X ready." for auto-chaining
   const recentEvents: TrackedEvent[] = []
 
+  // JSON batch mode: cost aggregation (cumulative-max pattern per K004)
+  let cumulativeCostUsd = 0
+  let cumulativeInputTokens = 0
+  let cumulativeOutputTokens = 0
+  let cumulativeCacheReadTokens = 0
+  let cumulativeCacheWriteTokens = 0
+  let lastSessionId: string | undefined
+
+  // Emit HeadlessJsonResult to stdout for --output-format json batch mode
+  function emitBatchJsonResult(): void {
+    if (options.outputFormat !== 'json') return
+    const duration = Date.now() - startTime
+    const status: HeadlessJsonResult['status'] = blocked ? 'blocked'
+      : exitCode === EXIT_CANCELLED ? 'cancelled'
+      : exitCode === EXIT_ERROR ? (totalEvents === 0 ? 'error' : 'timeout')
+      : 'success'
+    const result: HeadlessJsonResult = {
+      status,
+      exitCode,
+      sessionId: lastSessionId,
+      duration,
+      cost: {
+        total: cumulativeCostUsd,
+        input_tokens: cumulativeInputTokens,
+        output_tokens: cumulativeOutputTokens,
+        cache_read_tokens: cumulativeCacheReadTokens,
+        cache_write_tokens: cumulativeCacheWriteTokens,
+      },
+      toolCalls: toolCallCount,
+      events: totalEvents,
+    }
+    process.stdout.write(JSON.stringify(result) + '\n')
+  }
+
   function trackEvent(event: Record<string, unknown>): void {
     totalEvents++
     const type = String(event.type ?? 'unknown')
@@ -404,13 +473,35 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
     // Answer injector: observe events for question metadata
     injector?.observeEvent(eventObj)
 
-    // --json mode: forward events as JSONL to stdout (filtered if --events)
-    if (options.json) {
+    // --json / --output-format stream-json: forward events as JSONL to stdout (filtered if --events)
+    // --output-format json (batch mode): suppress streaming, track cost for final result
+    if (options.json && options.outputFormat === 'stream-json') {
       const eventType = String(eventObj.type ?? '')
       if (!options.eventFilter || options.eventFilter.has(eventType)) {
         process.stdout.write(JSON.stringify(eventObj) + '\n')
       }
-    } else {
+    } else if (options.outputFormat === 'json') {
+      // Batch mode: silently track cost_update events (cumulative-max per K004)
+      const eventType = String(eventObj.type ?? '')
+      if (eventType === 'cost_update') {
+        const data = eventObj as Record<string, unknown>
+        const cumCost = data.cumulativeCost as Record<string, unknown> | undefined
+        if (cumCost) {
+          cumulativeCostUsd = Math.max(cumulativeCostUsd, Number(cumCost.costUsd ?? 0))
+          const tokens = data.tokens as Record<string, number> | undefined
+          if (tokens) {
+            cumulativeInputTokens = Math.max(cumulativeInputTokens, tokens.input ?? 0)
+            cumulativeOutputTokens = Math.max(cumulativeOutputTokens, tokens.output ?? 0)
+            cumulativeCacheReadTokens = Math.max(cumulativeCacheReadTokens, tokens.cacheRead ?? 0)
+            cumulativeCacheWriteTokens = Math.max(cumulativeCacheWriteTokens, tokens.cacheWrite ?? 0)
+          }
+        }
+      }
+      // Track sessionId from init_result
+      if (eventType === 'init_result') {
+        lastSessionId = String((eventObj as Record<string, unknown>).sessionId ?? '')
+      }
+    } else if (!options.json) {
       // Progress output to stderr
       const line = formatProgress(eventObj, !!options.verbose)
       if (line) process.stderr.write(line + '\n')
@@ -494,11 +585,17 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
     process.stderr.write('\n[headless] Interrupted, stopping child process...\n')
     interrupted = true
     exitCode = EXIT_CANCELLED
-    client.stop().finally(() => {
-      if (timeoutTimer) clearTimeout(timeoutTimer)
-      if (idleTimer) clearTimeout(idleTimer)
-      process.exit(exitCode)
-    })
+    // Kill child process — don't await, just fire and exit.
+    // The main flow may be awaiting a promise that resolves when the child dies,
+    // which would race with this handler. Exit synchronously to ensure correct exit code.
+    try { client.stop().catch(() => {}) } catch {}
+    if (timeoutTimer) clearTimeout(timeoutTimer)
+    if (idleTimer) clearTimeout(idleTimer)
+    // Emit batch JSON result if in json mode before exiting
+    if (options.outputFormat === 'json') {
+      emitBatchJsonResult()
+    }
+    process.exit(exitCode)
   }
   process.on('SIGINT', signalHandler)
   process.on('SIGTERM', signalHandler)
@@ -522,6 +619,28 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
   }
 
   clientStarted = true
+
+  // --resume: resolve session ID and switch to it
+  if (options.resumeSession) {
+    const projectSessionsDir = getProjectSessionsDir(process.cwd())
+    const sessions = await SessionManager.list(process.cwd(), projectSessionsDir)
+    const result = resolveResumeSession(sessions, options.resumeSession)
+    if (result.error) {
+      process.stderr.write(`[headless] Error: ${result.error}\n`)
+      await client.stop()
+      if (timeoutTimer) clearTimeout(timeoutTimer)
+      process.exit(1)
+    }
+    const matched = result.session!
+    const switchResult = await client.switchSession(matched.path)
+    if (switchResult.cancelled) {
+      process.stderr.write(`[headless] Error: Session switch to '${matched.id}' was cancelled by an extension\n`)
+      await client.stop()
+      if (timeoutTimer) clearTimeout(timeoutTimer)
+      process.exit(1)
+    }
+    process.stderr.write(`[headless] Resuming session ${matched.id}\n`)
+  }
 
   // Build injector adapter — wraps client.sendUIResponse for AnswerInjector's writeToStdin interface
   injectorStdinAdapter = (data: string) => {
@@ -653,6 +772,9 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
       }
     }
   }
+
+  // Emit structured JSON result in batch mode
+  emitBatchJsonResult()
 
   return { exitCode, interrupted }
 }
