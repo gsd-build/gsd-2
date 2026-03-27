@@ -212,6 +212,7 @@ export interface LoopDeps {
   ) => Promise<{
     routing: { tier: string; modelDowngraded: boolean } | null;
     appliedModel: { provider: string; id: string } | null;
+    priorTools?: string[];
   }>;
   resolveModelId: <T extends { id: string; provider: string }>(
     modelId: string,
