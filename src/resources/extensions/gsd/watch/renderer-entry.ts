@@ -262,7 +262,7 @@ export function renderTree(projectRoot: string): void {
   const height = getEffectiveHeight();
   const milestone = buildMilestoneTree(projectRoot);
 
-  const lines = renderTreeLines(milestone, width);
+  const { lines } = renderTreeLines(milestone, width);
 
   // Store totalLines for use by scrollViewport calls (arrow key and resize handlers)
   lastRenderedLines = lines;
