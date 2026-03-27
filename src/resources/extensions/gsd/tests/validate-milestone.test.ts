@@ -110,6 +110,16 @@ test("isValidationTerminal returns true for verdict: passed (#1429)", () => {
   assert.equal(isValidationTerminal(content), true);
 });
 
+test("isValidationTerminal returns true for verdict: fail (#2769)", () => {
+  const content = "---\nverdict: fail\nremediation_round: 1\n---\n\n# Validation";
+  assert.equal(isValidationTerminal(content), true);
+});
+
+test("isValidationTerminal returns true for any arbitrary verdict string (#2769)", () => {
+  const content = "---\nverdict: custom-verdict\nremediation_round: 0\n---\n\n# Validation";
+  assert.equal(isValidationTerminal(content), true);
+});
+
 test("isValidationTerminal returns false for missing frontmatter", () => {
   const content = "# Validation\nNo frontmatter here.";
   assert.equal(isValidationTerminal(content), false);
