@@ -18,6 +18,26 @@ export interface ModelSelectionResult {
   routing: { tier: string; modelDowngraded: boolean } | null;
 }
 
+export function resolvePreferredModelConfig(
+  unitType: string,
+  autoModeStartModel: { provider: string; id: string } | null,
+) {
+  const explicitConfig = resolveModelWithFallbacksForUnit(unitType);
+  if (explicitConfig) return explicitConfig;
+
+  const routingConfig = resolveDynamicRoutingConfig();
+  if (!routingConfig.enabled || !routingConfig.tier_models) return undefined;
+
+  const ceilingModel = routingConfig.tier_models.heavy
+    ?? (autoModeStartModel ? `${autoModeStartModel.provider}/${autoModeStartModel.id}` : undefined);
+  if (!ceilingModel) return undefined;
+
+  return {
+    primary: ceilingModel,
+    fallbacks: [],
+  };
+}
+
 /**
  * Select and apply the appropriate model for a unit dispatch.
  * Handles: per-unit-type model preferences, dynamic complexity routing,
@@ -36,7 +56,7 @@ export async function selectAndApplyModel(
   autoModeStartModel: { provider: string; id: string } | null,
   retryContext?: { isRetry: boolean; previousTier?: string },
 ): Promise<ModelSelectionResult> {
-  const modelConfig = resolveModelWithFallbacksForUnit(unitType);
+  const modelConfig = resolvePreferredModelConfig(unitType, autoModeStartModel);
   let routing: { tier: string; modelDowngraded: boolean } | null = null;
 
   if (modelConfig) {
