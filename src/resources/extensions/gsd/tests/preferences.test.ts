@@ -352,6 +352,40 @@ test("handles empty models config", () => {
   assert.equal(prefs!.models, undefined);
 });
 
+test("parses raw YAML blocks under headings", () => {
+  const content = `## Parallel
+enabled: true
+max_workers: 3
+`;
+  const prefs = parsePreferencesMarkdown(content);
+  assert.notEqual(prefs, null);
+  assert.equal(prefs!.parallel?.enabled, true);
+  assert.equal(prefs!.parallel?.max_workers, 3);
+});
+
+test("unwraps nested top-level preference key under descriptive headings", () => {
+  const content = `## Parallel Orchestration
+parallel:
+  enabled: true
+  max_workers: 3
+`;
+  const prefs = parsePreferencesMarkdown(content);
+  assert.notEqual(prefs, null);
+  assert.equal(prefs!.parallel?.enabled, true);
+  assert.equal(prefs!.parallel?.max_workers, 3);
+});
+
+test("preserves legacy heading list format", () => {
+  const content = `## Git
+- isolation: branch
+- auto_push: true
+`;
+  const prefs = parsePreferencesMarkdown(content);
+  assert.notEqual(prefs, null);
+  assert.equal(prefs!.git?.isolation, "branch");
+  assert.equal(prefs!.git?.auto_push, true);
+});
+
 // ── Warn-once for unrecognized format (#2373) ────────────────────────────────
 
 test("unrecognized format warning is emitted at most once (#2373)", () => {
