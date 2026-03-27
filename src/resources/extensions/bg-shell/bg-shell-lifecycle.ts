@@ -22,7 +22,7 @@ import {
 	loadManifest,
 	pruneDeadProcesses,
 } from "./process-manager.js";
-import { formatUptime, resolveBgShellPersistenceCwd } from "./utilities.js";
+import { formatUptime, getBgShellLiveCwd, resolveBgShellPersistenceCwd } from "./utilities.js";
 import { formatTokenCount } from "../shared/format-utils.js";
 
 import type { BgShellSharedState } from "./index.js";
@@ -213,7 +213,7 @@ export function registerBgShellLifecycle(pi: ExtensionAPI, state: BgShellSharedS
 			return {
 				render(width: number): string[] {
 					// ── Line 1: pwd (branch) [session]  ...  bg status ──
-					let pwd = process.cwd();
+					let pwd = getBgShellLiveCwd(state.latestCtx?.cwd);
 					const home = process.env.HOME || process.env.USERPROFILE;
 					if (home && pwd.startsWith(home)) {
 						pwd = `~${pwd.slice(home.length)}`;
