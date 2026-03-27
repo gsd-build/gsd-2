@@ -232,6 +232,13 @@ async function runLoop(
 			const toolCalls = message.content.filter((c) => c.type === "toolCall");
 			hasMoreToolCalls = toolCalls.length > 0;
 
+			// pause_turn: server-side tool (e.g. web_search) paused mid-execution.
+			// Continue the inner loop so the LLM is re-invoked with the partial
+			// assistant message already in context — it will resume where it left off.
+			if (message.stopReason === "pauseTurn") {
+				hasMoreToolCalls = true;
+			}
+
 			const toolResults: ToolResultMessage[] = [];
 			if (hasMoreToolCalls) {
 				const toolExecution = await executeToolCalls(
