@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: milestone
 current_phase: 05
-current_plan: 2
+current_plan: 1
 status: executing
-stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-03-27T13:51:36.705Z"
+stopped_at: Completed 05-02-PLAN.md
+last_updated: "2026-03-27T13:58:32.321Z"
 last_activity: 2026-03-27
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 8
-  completed_plans: 7
+  completed_plans: 8
 ---
 
 # Project State
@@ -75,6 +75,8 @@ Phases complete: 0/4 | Plans complete: 0/?
 - [Phase 04]: lastRenderedLines module-level cache stores previous render output for arrow key and resize handlers
 - [Phase 05]: Option A: extend renderTreeLines() return to { lines, nodes } rather than separate buildVisibleNodes() pass
 - [Phase 05]: collapsedPhases defaults to new Set() in renderTreeLines for backward compatibility
+- [Phase 05]: NavKey parsed before ArrowKey in stdin handler so j/k/h/l/g/G/? never reach parseArrowKey or parseQuitSequence
+- [Phase 05]: Help overlay guard placed first in stdin handler — single Esc consumed as dismiss, never reaches parseQuitSequence
 
 ## Critical Pitfalls (from research)
 
@@ -93,5 +95,5 @@ None.
 
 ## Last Session
 
-**Stopped at:** Completed 05-01-PLAN.md
+**Stopped at:** Completed 05-02-PLAN.md
 **Timestamp:** 2026-03-27T04:40:43Z
