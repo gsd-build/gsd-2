@@ -573,7 +573,31 @@ function gatherActivityLogMeta(basePath: string, activeMilestone?: string | null
   }
 }
 
-// ─── Completed Keys Loader ────────────────────────────────────────────────────
+// ─── Completed Keys Helpers ───────────────────────────────────────────────────
+
+/**
+ * Parse a completed-unit key into { unitType, unitId }.
+ *
+ * Most unit types are a single segment ("execute-task", "complete-slice", …)
+ * so the key format is simply "unitType/unitId". Hook units are the exception:
+ * their type is compound ("hook/<hookName>"), making the key look like
+ * "hook/telegram-progress/M007/S01". Splitting naïvely on the first slash
+ * yields unitType="hook" which bypasses verifyExpectedArtifact()'s
+ * startsWith("hook/") guard and produces false-positive missing-artifact
+ * errors (#2826).
+ *
+ * Returns null for malformed keys (no slash, or hook/ with no second slash).
+ */
+export function splitCompletedKey(key: string): { unitType: string; unitId: string } | null {
+  if (key.startsWith("hook/")) {
+    const secondSlash = key.indexOf("/", 5); // skip past "hook/"
+    if (secondSlash === -1) return null;      // malformed — "hook/" with no hook name
+    return { unitType: key.slice(0, secondSlash), unitId: key.slice(secondSlash + 1) };
+  }
+  const slashIdx = key.indexOf("/");
+  if (slashIdx === -1) return null;
+  return { unitType: key.slice(0, slashIdx), unitId: key.slice(slashIdx + 1) };
+}
 
 function loadCompletedKeys(basePath: string): string[] {
   const file = join(gsdRoot(basePath), "completed-units.json");
@@ -654,22 +678,9 @@ function detectMissingArtifacts(completedKeys: string[], basePath: string, activ
   const wtBasePath = activeMilestone ? getAutoWorktreePath(basePath, activeMilestone) : null;
 
   for (const key of completedKeys) {
-    // Hook unit types are compound: "hook/<hookName>". Split on the *second*
-    // slash so unitType = "hook/telegram-progress" (not just "hook"), which
-    // lets verifyExpectedArtifact() match its startsWith("hook/") guard (#2826).
-    let unitType: string;
-    let unitId: string;
-    if (key.startsWith("hook/")) {
-      const secondSlash = key.indexOf("/", 5); // skip past "hook/"
-      if (secondSlash === -1) continue;         // malformed key — skip
-      unitType = key.slice(0, secondSlash);
-      unitId   = key.slice(secondSlash + 1);
-    } else {
-      const slashIdx = key.indexOf("/");
-      if (slashIdx === -1) continue;
-      unitType = key.slice(0, slashIdx);
-      unitId   = key.slice(slashIdx + 1);
-    }
+    const parsed = splitCompletedKey(key);
+    if (!parsed) continue;
+    const { unitType, unitId } = parsed;
 
     const rootHasArtifact = verifyExpectedArtifact(unitType, unitId, basePath);
     const wtHasArtifact = wtBasePath ? verifyExpectedArtifact(unitType, unitId, wtBasePath) : false;

@@ -11,6 +11,7 @@ import { readCrashLock, isLockProcessAlive, clearLock } from "./crash-recovery.j
 import { ensureGitignore } from "./gitignore.js";
 import { readAllSessionStatuses, isSessionStale, removeSessionStatus } from "./session-status-io.js";
 import { recoverFailedMigration } from "./migrate-external.js";
+import { splitCompletedKey } from "./forensics.js";
 
 export async function checkRuntimeHealth(
   basePath: string,
@@ -118,22 +119,9 @@ export async function checkRuntimeHealth(
       const orphaned: string[] = [];
 
       for (const key of keys) {
-        // Key format: "unitType/unitId" e.g. "execute-task/M001/S01/T01"
-        // Hook units use a compound type: "hook/<hookName>/<unitId...>"
-        // so we must split on the second slash, not the first (#2826).
-        let unitType: string;
-        let unitId: string;
-        if (key.startsWith("hook/")) {
-          const secondSlash = key.indexOf("/", 5); // skip past "hook/"
-          if (secondSlash === -1) continue;         // malformed key — skip
-          unitType = key.slice(0, secondSlash);
-          unitId   = key.slice(secondSlash + 1);
-        } else {
-          const slashIdx = key.indexOf("/");
-          if (slashIdx === -1) continue;
-          unitType = key.slice(0, slashIdx);
-          unitId   = key.slice(slashIdx + 1);
-        }
+        const parsed = splitCompletedKey(key);
+        if (!parsed) continue;
+        const { unitType, unitId } = parsed;
 
         // Only validate artifact-producing unit types
         const { verifyExpectedArtifact } = await import("./auto-recovery.js");
