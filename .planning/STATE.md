@@ -5,14 +5,14 @@ milestone_name: milestone
 current_phase: 02
 current_plan: 1
 status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-03-27T04:39:13.149Z"
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-03-27T04:44:59.947Z"
 last_activity: 2026-03-27
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 3
 ---
 
 # Project State
@@ -61,6 +61,10 @@ Phases complete: 0/4 | Plans complete: 0/?
 | Flat icons, no color for badges | Explicit user preference; simplifies rendering and avoids terminal color compatibility issues | Roadmap |
 
 - [Phase 02]: Use function-based ignored predicate in chokidar v5 (glob array patterns unreliable in v5)
+- [Phase 02-foundation]: isMainModule guard uses process.argv[1] endsWith check so tests can import exported helpers without running subprocess main block
+- [Phase 02-foundation]: Exported resetQuitState() for test beforeEach isolation instead of module re-loading
+- [Phase 02-02]: Dynamic import used for watch orchestrator in core.ts to avoid loading at startup (matches cmux pattern)
+- [Phase 02-02]: Watch lock stored in .gsd/watch.lock; isWatchPidAlive uses EPERM-aware process.kill(pid,0) pattern from crash-recovery.ts
 
 ## Critical Pitfalls (from research)
 
@@ -79,5 +83,5 @@ None.
 
 ## Last Session
 
-**Stopped at:** Completed 02-01-PLAN.md
-**Timestamp:** 2026-03-26T23:30:00Z
+**Stopped at:** Completed 02-02-PLAN.md
+**Timestamp:** 2026-03-27T04:40:43Z

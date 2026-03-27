@@ -11,7 +11,7 @@ Requirements for GSD Watch milestone. Each maps to roadmap phases.
 
 - [ ] **TMUX-01**: `/gsd watch` detects non-tmux sessions and displays a clear error message
 - [ ] **TMUX-02**: `/gsd watch` opens a 35%-width right-side tmux split pane
-- [ ] **TMUX-03**: Watch pane exits cleanly on qq, Esc Esc, or Ctrl+C with proper SIGHUP/SIGINT/SIGTERM handling
+- [x] **TMUX-03**: Watch pane exits cleanly on qq, Esc Esc, or Ctrl+C with proper SIGHUP/SIGINT/SIGTERM handling
 
 ### Display
 
@@ -62,7 +62,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | TMUX-01 | Phase 2 | Pending |
 | TMUX-02 | Phase 2 | Pending |
-| TMUX-03 | Phase 2 | Pending |
+| TMUX-03 | Phase 2 | Complete |
 | DISP-03 | Phase 2 | Complete |
 | DISP-01 | Phase 3 | Pending |
 | DISP-02 | Phase 3 | Pending |
