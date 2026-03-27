@@ -296,6 +296,142 @@ export function adjustToolSet(
 }
 
 /**
+ * Apply tool compatibility adjustment for a provider and return prior tool state.
+ *
+ * Checks the current active tools against the provider's capabilities and
+ * removes incompatible tools. Returns the prior tool names so the caller
+ * can restore them after dispatch (prevents session drift).
+ *
+ * Used by all dispatch paths: auto-loop, direct dispatch, guided-flow, hooks.
+ */
+export function applyToolCompatibilityAdjustment(
+  pi: {
+    getActiveTools(): string[];
+    getAllTools(): Array<{ name: string; compatibility?: { producesImages?: boolean; schemaFeatures?: string[] }; priority?: number }>;
+    setActiveTools(toolNames: string[]): void;
+  },
+  modelApi: string | undefined,
+  notify?: (message: string, level: "info" | "warning") => void,
+): { priorTools?: string[] } {
+  if (!modelApi) return {};
+
+  const priorToolNames = pi.getActiveTools();
+  if (priorToolNames.length === 0) return {};
+
+  const activeToolNames = new Set(priorToolNames);
+  const activeTools = pi.getAllTools().filter((tool: { name: string }) => activeToolNames.has(tool.name));
+  const providerCaps = getProviderCapabilities(modelApi);
+  const adjusted = adjustToolSet(activeTools, providerCaps);
+  if (adjusted.length >= activeTools.length) return {};
+
+  pi.setActiveTools(adjusted.map((t: { name: string }) => t.name));
+  notify?.(`Tool adjustment: ${activeTools.length - adjusted.length} tool(s) filtered for ${modelApi}`, "info");
+  return { priorTools: priorToolNames };
+}
+
+// ─── Plan-Time Capability Validation (ADR-004/005) ──────────────────────────
+
+/** A capability gap detected during plan-time validation. */
+export interface CapabilityWarning {
+  taskId: string;
+  taskTitle: string;
+  capability: string;
+  detail: string;
+}
+
+// Keywords that signal a task needs image support
+const IMAGE_KEYWORDS = /\bscreenshot|image|diagram|visual|render|preview|capture|photo|png|jpg|svg\b/i;
+// File extensions that signal image involvement
+const IMAGE_EXTENSIONS = /\.(png|jpg|jpeg|gif|svg|webp|bmp|ico|avif)$/i;
+
+/**
+ * Validate that planned tasks can be executed by the available model pool.
+ *
+ * Checks each task's description and file list against provider capabilities
+ * to detect tasks that require capabilities no available model supports.
+ *
+ * Pure function — does not modify state. Returns warnings for unresolvable gaps.
+ *
+ * @param tasks     Task descriptions from the plan
+ * @param models    Available models with their API strings
+ * @returns Array of capability warnings (empty = no gaps detected)
+ */
+export function validatePlanCapabilities(
+  tasks: Array<{ taskId: string; title: string; description: string; files: string[] }>,
+  models: Array<{ id: string; api: string }>,
+): CapabilityWarning[] {
+  if (tasks.length === 0 || models.length === 0) return [];
+
+  // Build a set of capabilities ANY model in the pool supports
+  const poolCaps = {
+    imageToolResults: false,
+    structuredOutput: false,
+    toolCalling: false,
+  };
+  for (const model of models) {
+    const caps = getProviderCapabilities(model.api);
+    if (caps.imageToolResults) poolCaps.imageToolResults = true;
+    if (caps.structuredOutput) poolCaps.structuredOutput = true;
+    if (caps.toolCalling) poolCaps.toolCalling = true;
+  }
+
+  // If the pool supports everything, no warnings needed
+  if (poolCaps.imageToolResults && poolCaps.structuredOutput && poolCaps.toolCalling) {
+    return [];
+  }
+
+  const warnings: CapabilityWarning[] = [];
+
+  for (const task of tasks) {
+    const text = `${task.title} ${task.description}`;
+    const hasImageFiles = task.files.some(f => IMAGE_EXTENSIONS.test(f));
+
+    // Check: task needs image support but no model provides it
+    if (!poolCaps.imageToolResults && (IMAGE_KEYWORDS.test(text) || hasImageFiles)) {
+      warnings.push({
+        taskId: task.taskId,
+        taskTitle: task.title,
+        capability: "imageToolResults",
+        detail: hasImageFiles
+          ? `Task references image files (${task.files.filter(f => IMAGE_EXTENSIONS.test(f)).join(", ")}) but no available model supports image tool results.`
+          : "Task description suggests image/screenshot work but no available model supports image tool results.",
+      });
+    }
+
+    // Check: no model supports tool calling at all (rare but possible with local models)
+    if (!poolCaps.toolCalling) {
+      warnings.push({
+        taskId: task.taskId,
+        taskTitle: task.title,
+        capability: "toolCalling",
+        detail: "No available model supports tool calling. Task execution requires tool use.",
+      });
+    }
+  }
+
+  return warnings;
+}
+
+/**
+ * Format capability warnings for display in plan output or notifications.
+ */
+export function formatCapabilityWarnings(warnings: CapabilityWarning[]): string {
+  if (warnings.length === 0) return "";
+  const lines = warnings.map(w =>
+    `- **${w.taskId}** (${w.taskTitle}): ${w.capability} — ${w.detail}`,
+  );
+  return [
+    "## Capability Warnings",
+    "",
+    "The following tasks may not execute correctly with the current model pool:",
+    "",
+    ...lines,
+    "",
+    "Consider configuring a model that supports these capabilities, or restructure tasks to avoid the dependency.",
+  ].join("\n");
+}
+
+/**
  * Resolve a model ID string to a model object from the available models list.
  * Handles formats: "provider/model", "bare-id", "org/model-name" (OpenRouter).
  */

@@ -65,6 +65,55 @@ function formatExecutorConstraints(): string {
   ].join("\n");
 }
 
+// ─── Capability Constraints (ADR-004/005) ───────────────────────────────────
+
+/**
+ * Format model pool capability constraints for injection into plan prompts.
+ * Informs the planner about what the execution model pool can/can't do,
+ * so it avoids creating tasks that require unsupported capabilities.
+ */
+function formatCapabilityConstraints(): string {
+  try {
+    const prefs = loadEffectiveGSDPreferences()?.preferences;
+    const gaps: string[] = [];
+
+    // Check if override preferences explicitly set limitations
+    if (prefs?.provider_capabilities) {
+      for (const [api, overrides] of Object.entries(prefs.provider_capabilities)) {
+        const castOverrides = overrides as Record<string, unknown>;
+        if (castOverrides.imageToolResults === false) {
+          gaps.push(`Provider \`${api}\` does not support image tool results — avoid tasks requiring screenshots or image processing.`);
+        }
+      }
+    }
+
+    // Always inform about known cross-provider limitations
+    const constraints = [
+      "## Model Capability Constraints",
+      "",
+      "When planning tasks, be aware of these execution model limitations:",
+      "- **Image tool results:** OpenAI, Mistral, and Bedrock providers do NOT support image content in tool results. Do not plan tasks that depend on screenshot capture or image analysis unless the execution model is Anthropic or Google.",
+      "- **Schema features:** Google/Gemini providers do not support `patternProperties` in tool schemas.",
+      "- **Thinking persistence:** OpenAI preserves thinking as text-only; Mistral has no thinking support.",
+    ];
+
+    if (gaps.length > 0) {
+      constraints.push("");
+      constraints.push("**Active capability restrictions for this project:**");
+      for (const gap of gaps) {
+        constraints.push(`- ${gap}`);
+      }
+    }
+
+    constraints.push("");
+    constraints.push("Design tasks to work within these constraints. If a task requires capabilities that may not be available, note the requirement explicitly in the task description.");
+
+    return constraints.join("\n");
+  } catch {
+    return ""; // Fail-open: if capability detection fails, don't block planning
+  }
+}
+
 function buildSourceFilePaths(
   base: string,
   mid: string,
@@ -1059,6 +1108,13 @@ export async function buildPlanSlicePrompt(
   // Build executor context constraints from the budget engine
   const executorContextConstraints = formatExecutorConstraints();
 
+  // ADR-004/005: Inject capability constraints so the planner avoids
+  // creating tasks that the model pool cannot execute.
+  const capabilityConstraints = formatCapabilityConstraints();
+  const combinedConstraints = capabilityConstraints
+    ? `${executorContextConstraints}\n\n${capabilityConstraints}`
+    : executorContextConstraints;
+
   const outputRelPath = relSliceFile(base, mid, sid, "PLAN");
   const commitInstruction = "Do not commit — .gsd/ planning docs are managed externally and not tracked in git.";
   return loadPrompt("plan-slice", {
@@ -1071,7 +1127,7 @@ export async function buildPlanSlicePrompt(
     inlinedContext,
     dependencySummaries: depContent,
     sourceFilePaths: buildSourceFilePaths(base, mid, sid),
-    executorContextConstraints,
+    executorContextConstraints: combinedConstraints,
     commitInstruction,
     skillActivation: buildSkillActivationBlock({
       base,

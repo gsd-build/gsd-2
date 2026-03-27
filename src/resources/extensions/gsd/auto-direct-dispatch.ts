@@ -29,6 +29,8 @@ import {
 } from "./auto-prompts.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { pauseAuto } from "./auto.js";
+import { applyToolCompatibilityAdjustment } from "./auto-model-selection.js";
+import { setProviderCapabilityOverrides } from "@gsd/pi-ai";
 
 export async function dispatchDirectPhase(
   ctx: ExtensionCommandContext,
@@ -244,8 +246,22 @@ export async function dispatchDirectPhase(
   }
 
   ctx.ui.notify(`Dispatching ${unitType} for ${unitId}...`, "info");
+
+  // ADR-005: Apply provider capability overrides and tool filtering.
+  // Direct dispatch previously bypassed all capability validation.
+  const prefs = loadEffectiveGSDPreferences()?.preferences;
+  if (prefs) {
+    setProviderCapabilityOverrides(prefs.provider_capabilities);
+  }
+  const modelApi = ctx.model && "api" in ctx.model ? (ctx.model as { api: string }).api : undefined;
+  const toolAdjustment = applyToolCompatibilityAdjustment(pi, modelApi, ctx.ui.notify.bind(ctx.ui));
+
   const result = await ctx.newSession();
   if (result.cancelled) {
+    // Restore tools if session cancelled to prevent drift
+    if (toolAdjustment.priorTools) {
+      pi.setActiveTools(toolAdjustment.priorTools);
+    }
     ctx.ui.notify("Session creation cancelled.", "warning");
     return;
   }
@@ -253,4 +269,8 @@ export async function dispatchDirectPhase(
     { customType: "gsd-dispatch", content: prompt, display: false },
     { triggerTurn: true },
   );
+
+  // Note: tool restoration after dispatch completion is handled by the
+  // session lifecycle — direct dispatches create a new session, so the
+  // prior session's tool set is not affected.
 }

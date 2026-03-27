@@ -203,14 +203,59 @@ describe("Tool-Compatibility Filter (ADR-005 Step 2)", () => {
       assert.deepEqual(tools, ["Bash", "Read", "Write", "Edit"]);
     });
 
-    test("research-milestone requires Read", () => {
-      const tools = getRequiredToolNames("research-milestone");
-      assert.deepEqual(tools, ["Read"]);
+    test("reactive-execute requires Bash, Read, Write, Edit", () => {
+      const tools = getRequiredToolNames("reactive-execute");
+      assert.deepEqual(tools, ["Bash", "Read", "Write", "Edit"]);
     });
 
-    test("research-slice requires Read", () => {
+    test("rewrite-docs requires Bash, Read, Write, Edit", () => {
+      const tools = getRequiredToolNames("rewrite-docs");
+      assert.deepEqual(tools, ["Bash", "Read", "Write", "Edit"]);
+    });
+
+    test("research-milestone requires Read, WebSearch, WebFetch", () => {
+      const tools = getRequiredToolNames("research-milestone");
+      assert.deepEqual(tools, ["Read", "WebSearch", "WebFetch"]);
+    });
+
+    test("research-slice requires Read, WebSearch, WebFetch", () => {
       const tools = getRequiredToolNames("research-slice");
-      assert.deepEqual(tools, ["Read"]);
+      assert.deepEqual(tools, ["Read", "WebSearch", "WebFetch"]);
+    });
+
+    test("plan-milestone requires Read, Write", () => {
+      const tools = getRequiredToolNames("plan-milestone");
+      assert.deepEqual(tools, ["Read", "Write"]);
+    });
+
+    test("plan-slice requires Read, Write", () => {
+      const tools = getRequiredToolNames("plan-slice");
+      assert.deepEqual(tools, ["Read", "Write"]);
+    });
+
+    test("replan-slice requires Read, Write", () => {
+      const tools = getRequiredToolNames("replan-slice");
+      assert.deepEqual(tools, ["Read", "Write"]);
+    });
+
+    test("run-uat requires Read, Bash", () => {
+      const tools = getRequiredToolNames("run-uat");
+      assert.deepEqual(tools, ["Read", "Bash"]);
+    });
+
+    test("complete-slice requires Read, Write", () => {
+      const tools = getRequiredToolNames("complete-slice");
+      assert.deepEqual(tools, ["Read", "Write"]);
+    });
+
+    test("complete-milestone requires Read, Write", () => {
+      const tools = getRequiredToolNames("complete-milestone");
+      assert.deepEqual(tools, ["Read", "Write"]);
+    });
+
+    test("validate-milestone requires Read, Write", () => {
+      const tools = getRequiredToolNames("validate-milestone");
+      assert.deepEqual(tools, ["Read", "Write"]);
     });
 
     test("unknown unit type returns empty array (no filtering)", () => {
@@ -233,12 +278,13 @@ describe("Tool-Compatibility Filter (ADR-005 Step 2)", () => {
           Array.isArray(result),
           `getRequiredToolNames("${unitType}") must return an array (got ${typeof result})`,
         );
-        // Verify the return is one of the known constant arrays, not a new allocation
-        // (which would indicate the function fell through to the default without consideration)
       }
       // Verify that execute-type units get tools and non-execute units are explicitly handled
       assert.ok(getRequiredToolNames("execute-task").length > 0, "execute-task should require tools");
       assert.ok(getRequiredToolNames("research-milestone").length > 0, "research-milestone should require tools");
+      assert.ok(getRequiredToolNames("plan-slice").length > 0, "plan-slice should require tools");
+      assert.ok(getRequiredToolNames("run-uat").length > 0, "run-uat should require tools");
+      assert.ok(getRequiredToolNames("complete-slice").length > 0, "complete-slice should require tools");
     });
   });
 });

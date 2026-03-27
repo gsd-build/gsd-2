@@ -293,21 +293,61 @@ export interface ToolCompatibilityInfo {
 
 // Hoisted constants to avoid per-call array allocation
 const EXECUTE_REQUIRED_TOOLS: readonly string[] = ["Bash", "Read", "Write", "Edit"];
-const RESEARCH_REQUIRED_TOOLS: readonly string[] = ["Read"];
+const RESEARCH_REQUIRED_TOOLS: readonly string[] = ["Read", "WebSearch", "WebFetch"];
+const PLAN_REQUIRED_TOOLS: readonly string[] = ["Read", "Write"];
+const UAT_REQUIRED_TOOLS: readonly string[] = ["Read", "Bash"];
+const COMPLETION_REQUIRED_TOOLS: readonly string[] = ["Read", "Write"];
 const NO_REQUIRED_TOOLS: readonly string[] = [];
 
 /**
  * Maps unit types to the tool names they require.
+ * Used by filterModelsByToolCompatibility() (ADR-005 Step 2) to exclude
+ * models whose provider cannot support the tools a unit type needs.
+ *
  * Units with no required tools get an empty array (no filtering applied).
  */
 export function getRequiredToolNames(unitType: string): readonly string[] {
-  if (unitType === "execute-task" || unitType === "execute-plan") {
-    return EXECUTE_REQUIRED_TOOLS;
+  switch (unitType) {
+    // Execution phases — need full code editing capabilities
+    case "execute-task":
+    case "execute-plan":
+    case "reactive-execute":
+    case "rewrite-docs":
+      return EXECUTE_REQUIRED_TOOLS;
+
+    // Research phases — need web search and file reading
+    case "research-milestone":
+    case "research-slice":
+      return RESEARCH_REQUIRED_TOOLS;
+
+    // Planning phases — read context, write plans
+    case "plan-milestone":
+    case "plan-slice":
+    case "replan-slice":
+      return PLAN_REQUIRED_TOOLS;
+
+    // UAT/verification — read artifacts, run commands
+    case "run-uat":
+      return UAT_REQUIRED_TOOLS;
+
+    // Completion phases — read summaries, write closeout docs
+    case "complete-slice":
+    case "complete-milestone":
+    case "validate-milestone":
+      return COMPLETION_REQUIRED_TOOLS;
+
+    // Reassessment — reads roadmap and slices, writes assessment
+    case "reassess-roadmap":
+      return COMPLETION_REQUIRED_TOOLS;
+
+    // Gate evaluation — lightweight judgment, minimal tool use
+    case "gate-evaluate":
+      return NO_REQUIRED_TOOLS;
+
+    default:
+      // Hooks (hook/*), discuss-*, and unknown unit types — no filtering (fail-open)
+      return NO_REQUIRED_TOOLS;
   }
-  if (unitType === "research-milestone" || unitType === "research-slice") {
-    return RESEARCH_REQUIRED_TOOLS;
-  }
-  return NO_REQUIRED_TOOLS;
 }
 
 /**

@@ -38,6 +38,8 @@ import { debugLog } from "./debug-logger.js";
 import { findMilestoneIds, nextMilestoneId, reserveMilestoneId, getReservedMilestoneIds, clearReservedMilestoneIds } from "./milestone-ids.js";
 import { parkMilestone, discardMilestone } from "./milestone-actions.js";
 import { resolveModelWithFallbacksForUnit } from "./preferences-models.js";
+import { applyToolCompatibilityAdjustment } from "./auto-model-selection.js";
+import { setProviderCapabilityOverrides } from "@gsd/pi-ai";
 
 // ─── Re-exports (preserve public API for existing importers) ────────────────
 export {
@@ -242,6 +244,15 @@ async function dispatchWorkflow(
         }
       }
     }
+
+    // ADR-005: Apply capability overrides and tool filtering for guided-flow dispatch.
+    // Previously this path set the model but never filtered incompatible tools.
+    const prefs = loadEffectiveGSDPreferences()?.preferences;
+    if (prefs) {
+      setProviderCapabilityOverrides(prefs.provider_capabilities);
+    }
+    const modelApi = ctx.model && "api" in ctx.model ? (ctx.model as { api: string }).api : undefined;
+    applyToolCompatibilityAdjustment(pi, modelApi, ctx.ui.notify.bind(ctx.ui));
   }
 
   const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(process.env.HOME ?? "~", ".gsd", "agent", "GSD-WORKFLOW.md");
