@@ -74,8 +74,10 @@ export async function selectAndApplyModel(
   retryContext?: { isRetry: boolean; previousTier?: string },
 ): Promise<ModelSelectionResult> {
   // ADR-005 Phase 6: Apply provider capability overrides from preferences.
-  // This ensures user-specified capability overrides take effect before any routing decisions.
-  setProviderCapabilityOverrides(prefs?.provider_capabilities);
+  // Only update when prefs are available — preserve prior overrides when prefs are transiently undefined.
+  if (prefs) {
+    setProviderCapabilityOverrides(prefs.provider_capabilities);
+  }
 
   const modelConfig = resolvePreferredModelConfig(unitType, autoModeStartModel);
   let routing: { tier: string; modelDowngraded: boolean } | null = null;
@@ -143,7 +145,7 @@ export async function selectAndApplyModel(
         const requiredTools: ToolCompatibilityInfo[] = requiredToolNames
           .map(name => {
             const toolInfo = allToolInfos.find(t => t.name === name);
-            return toolInfo ? { name: toolInfo.name, compatibility: (toolInfo as any).compatibility } : { name };
+            return toolInfo ? { name: toolInfo.name, compatibility: toolInfo.compatibility } : { name };
           });
 
         const compatibleModelIds = filterModelsByToolCompatibility(
@@ -216,7 +218,9 @@ export async function selectAndApplyModel(
 
         // ADR-005: Adjust tool set for selected model's provider capabilities.
         // Save prior tools so caller can restore after dispatch (prevents session drift).
-        const modelApi = (model as any).api as string | undefined;
+        // Note: model objects from getAvailable() are Model<Api> with .api field,
+        // but resolveModelId's generic constraint only requires { id, provider }.
+        const modelApi = "api" in model ? (model as { api: string }).api : undefined;
         if (modelApi) {
           const priorToolNames = pi.getActiveTools();
           const providerCaps = getProviderCapabilities(modelApi);

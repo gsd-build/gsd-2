@@ -488,21 +488,23 @@ export interface ToolCompatibilityInfo {
   compatibility?: ToolCompatibility;
 }
 
+// Hoisted constants to avoid per-call array allocation
+const EXECUTE_REQUIRED_TOOLS: readonly string[] = ["Bash", "Read", "Write", "Edit"];
+const RESEARCH_REQUIRED_TOOLS: readonly string[] = ["Read"];
+const NO_REQUIRED_TOOLS: readonly string[] = [];
+
 /**
  * Maps unit types to the tool names they require.
  * Units with no required tools get an empty array (no filtering applied).
  */
-export function getRequiredToolNames(unitType: string): string[] {
-  // Execute tasks need full tool access
+export function getRequiredToolNames(unitType: string): readonly string[] {
   if (unitType === "execute-task" || unitType === "execute-plan") {
-    return ["Bash", "Read", "Write", "Edit"];
+    return EXECUTE_REQUIRED_TOOLS;
   }
-  // Research units need read access
   if (unitType === "research-milestone" || unitType === "research-slice") {
-    return ["Read"];
+    return RESEARCH_REQUIRED_TOOLS;
   }
-  // All other unit types have no hard tool requirements
-  return [];
+  return NO_REQUIRED_TOOLS;
 }
 
 /**

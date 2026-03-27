@@ -780,6 +780,10 @@ export class AgentSession {
 			name: t.name,
 			description: t.description,
 			parameters: t.parameters,
+			// ADR-005: compatibility and priority exist on the underlying ToolDefinition
+			// objects but are not typed on AgentTool. Access via runtime property check.
+			compatibility: (t as any).compatibility,
+			priority: (t as any).priority,
 		}));
 	}
 

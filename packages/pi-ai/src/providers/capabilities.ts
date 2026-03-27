@@ -120,12 +120,17 @@ const API_VARIANT_ALIASES: Record<string, string> = {
 // Loaded from preferences `provider_capabilities` key and deep-merged with
 // built-in defaults. Call setProviderCapabilityOverrides() at preferences load.
 
+// Module-level singleton — safe because auto-loop dispatches are sequential.
+// If parallel dispatch is added, this must become per-dispatch or use a lock.
 let capabilityOverrides: Record<string, Partial<ProviderCapabilities>> = {};
+let lastOverrideInput: Record<string, Record<string, unknown>> | undefined | null = null;
 
 /**
  * Apply provider capability overrides from user preferences.
  * Call this when preferences are loaded/reloaded.
  * Overrides are deep-merged: only specified fields are changed, others keep built-in defaults.
+ *
+ * Skips re-parsing when the same reference is passed (common in sequential dispatches).
  *
  * Keys should be API protocol strings (e.g., "openai-responses").
  * Unknown keys that don't match any canonical or alias API will still be stored —
@@ -134,6 +139,10 @@ let capabilityOverrides: Record<string, Partial<ProviderCapabilities>> = {};
 export function setProviderCapabilityOverrides(
 	overrides: Record<string, Record<string, unknown>> | undefined,
 ): void {
+	// Skip reparse if same reference as last call
+	if (overrides === lastOverrideInput) return;
+	lastOverrideInput = overrides;
+
 	if (!overrides) {
 		capabilityOverrides = {};
 		return;
@@ -152,6 +161,7 @@ export function setProviderCapabilityOverrides(
  */
 export function clearProviderCapabilityOverrides(): void {
 	capabilityOverrides = {};
+	lastOverrideInput = null;
 }
 
 /**
@@ -182,8 +192,21 @@ export function getProviderCapabilities(api: Api): ProviderCapabilities {
 	const override = capabilityOverrides[api];
 	if (!override) return base;
 
-	// Deep-merge: override fields replace base fields
-	return { ...base, ...override } as ProviderCapabilities;
+	// Deep-merge: nested objects (toolCallIdFormat) are merged, not replaced.
+	// RegExp fields from YAML arrive as strings — convert them.
+	const merged = { ...base, ...override };
+	if (override.toolCallIdFormat) {
+		merged.toolCallIdFormat = {
+			...base.toolCallIdFormat,
+			...(override.toolCallIdFormat as Record<string, unknown>),
+		};
+		// Convert string allowedChars to RegExp (YAML/JSON can't represent RegExp)
+		const chars = merged.toolCallIdFormat.allowedChars;
+		if (typeof chars === "string") {
+			merged.toolCallIdFormat.allowedChars = new RegExp(chars);
+		}
+	}
+	return merged as ProviderCapabilities;
 }
 
 /**
