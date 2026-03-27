@@ -2,24 +2,24 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: milestone
-current_phase: 4
-current_plan: Not started
-status: planning
-stopped_at: Completed 03-02-PLAN.md
-last_updated: "2026-03-27T05:51:43.666Z"
+current_phase: 04
+current_plan: 2
+status: executing
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-03-27T12:53:17.817Z"
 last_activity: 2026-03-27
 progress:
   total_phases: 4
-  completed_phases: 2
-  total_plans: 5
-  completed_plans: 5
+  completed_phases: 3
+  total_plans: 6
+  completed_plans: 6
 ---
 
 # Project State
 
-**Current Phase:** 4
-**Current Plan:** Not started
-**Status:** Ready to plan
+**Current Phase:** 04
+**Current Plan:** 1
+**Status:** Executing Phase 04
 **Last activity:** 2026-03-27
 
 ## Project Reference
@@ -27,7 +27,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-26)
 
 **Core value:** Developers can see and track their project progress in real-time without leaving their terminal workflow.
-**Current focus:** Phase 03 — core-renderer
+**Current focus:** Phase 04 — renderer-entry-command-integration
 
 ## Progress Bar
 
@@ -70,6 +70,9 @@ Phases complete: 0/4 | Plans complete: 0/?
 - [Phase 03]: scanPlans filters /^\d{2}-\d{2}-PLAN\.md$/ strictly — plan files only in plans array
 - [Phase 03-core-renderer]: Badge string formatted as ' ' + 7 circles — leading space provides visual separation; MIN_NAME_WITH_BADGES=4 drops badges entirely when space is tight
 - [Phase 03-core-renderer]: renderPlaceholder retained in renderer-entry.ts for backward compatibility — renderTree replaces all 3 call sites in main block
+- [Phase 04]: parseArrowKey runs first in stdin handler before parseQuitSequence to prevent \x1b prefix collision
+- [Phase 04]: scrollable = total > height (full height) before reducing contentHeight prevents blank status bar row when tree fits
+- [Phase 04]: lastRenderedLines module-level cache stores previous render output for arrow key and resize handlers
 
 ## Critical Pitfalls (from research)
 
@@ -88,5 +91,5 @@ None.
 
 ## Last Session
 
-**Stopped at:** Completed 03-02-PLAN.md
+**Stopped at:** Completed 04-01-PLAN.md
 **Timestamp:** 2026-03-27T04:40:43Z

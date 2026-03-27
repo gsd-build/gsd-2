@@ -18,7 +18,7 @@ Requirements for GSD Watch milestone. Each maps to roadmap phases.
 - [x] **DISP-01**: Sidebar renders a hierarchical tree of milestones, phases, and plans with status icons
 - [x] **DISP-02**: Each phase displays 7 lifecycle badges (flat icons, no color) derived from file presence (CONTEXT, RESEARCH, UI-SPEC, PLAN, SUMMARY, VERIFICATION, HUMAN-UAT)
 - [x] **DISP-03**: Sidebar auto-refreshes on `.planning/` file changes via chokidar with 300ms debounce
-- [ ] **DISP-04**: Sidebar supports viewport scrolling when tree exceeds terminal height
+- [x] **DISP-04**: Sidebar supports viewport scrolling when tree exceeds terminal height
 
 ### Navigation
 
@@ -66,7 +66,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DISP-03 | Phase 2 | Complete |
 | DISP-01 | Phase 3 | Complete |
 | DISP-02 | Phase 3 | Complete |
-| DISP-04 | Phase 4 | Pending |
+| DISP-04 | Phase 4 | Complete |
 | NAV-01 | Phase 5 | Pending |
 | NAV-02 | Phase 5 | Pending |
 | NAV-03 | Phase 5 | Pending |

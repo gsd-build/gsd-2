@@ -8,7 +8,7 @@
 
 - [x] **Phase 2: Foundation** — Process lifecycle, tmux pane management, file watching infrastructure (completed 2026-03-27)
 - [x] **Phase 3: Core Renderer** — Tree model, lifecycle badges, status icons, ANSI-safe layout (completed 2026-03-27)
-- [ ] **Phase 4: Renderer Entry + Command Integration** — Subprocess wiring, viewport scrolling, `/gsd watch` registration
+- [x] **Phase 4: Renderer Entry + Command Integration** — Subprocess wiring, viewport scrolling, `/gsd watch` registration (completed 2026-03-27)
 - [ ] **Phase 5: Navigation** — Vim keybindings, expand/collapse, help overlay, collapse state persistence
 
 ## Phase Details
@@ -52,10 +52,10 @@ Plans:
   1. A project with more than 15 visible tree nodes causes the sidebar to show a scrollable viewport — nodes above and below the visible area are accessible without truncation.
   2. Running `/gsd watch` through the full GSD command chain (dispatcher -> handler -> orchestrator -> renderer subprocess) produces a working sidebar pane.
   3. The renderer subprocess can be invoked directly from the command line (bypassing the GSD dispatcher) for isolated testing.
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
-- [ ] 04-01-PLAN.md — Viewport scrolling with arrow keys, status bar, smart auto-follow, and resize clamping (DISP-04)
+- [x] 04-01-PLAN.md — Viewport scrolling with arrow keys, status bar, smart auto-follow, and resize clamping (DISP-04)
 
 ### Phase 5: Navigation
 **Goal**: The user can move through the tree with vim keys, collapse and expand nodes, view a help overlay of all keybindings, and expand/collapse state survives automatic file-change refreshes.
@@ -74,7 +74,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 2. Foundation | 3/3 | Complete   | 2026-03-27 |
 | 3. Core Renderer | 2/2 | Complete   | 2026-03-27 |
-| 4. Renderer Entry + Command Integration | 0/1 | In progress | — |
+| 4. Renderer Entry + Command Integration | 1/1 | Complete   | 2026-03-27 |
 | 5. Navigation | 0/? | Not started | — |
 
 ---
