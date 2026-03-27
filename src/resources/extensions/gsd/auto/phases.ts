@@ -993,6 +993,9 @@ export async function runUnitPhase(
   s.currentUnitModel =
     modelResult.appliedModel as AutoSession["currentUnitModel"];
 
+  // ADR-005: Capture prior tools for restore after dispatch (prevents session drift).
+  const priorTools = modelResult.priorTools;
+
   // Status bar + progress widget
   ctx.ui.setStatus("gsd-auto", "auto");
   if (mid)
@@ -1123,14 +1126,23 @@ export async function runUnitPhase(
     unitType,
     unitId,
   });
-  const unitResult = await runUnit(
-    ctx,
-    pi,
-    s,
-    unitType,
-    unitId,
-    finalPrompt,
-  );
+  let unitResult;
+  try {
+    unitResult = await runUnit(
+      ctx,
+      pi,
+      s,
+      unitType,
+      unitId,
+      finalPrompt,
+    );
+  } finally {
+    // ADR-005: Restore prior tool set after dispatch to prevent session drift.
+    // Must be in finally to handle both success and error paths.
+    if (priorTools) {
+      pi.setActiveTools(priorTools);
+    }
+  }
   debugLog("autoLoop", {
     phase: "runUnit-end",
     iteration: ic.iteration,
