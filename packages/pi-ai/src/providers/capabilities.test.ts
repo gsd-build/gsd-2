@@ -276,5 +276,40 @@ describe("Provider Capability Registry", () => {
 			const google = getProviderCapabilities("google-generative-ai");
 			assert.equal(google.imageToolResults, true);
 		});
+
+		test("partial toolCallIdFormat override preserves other nested fields (deep merge)", () => {
+			setProviderCapabilityOverrides({
+				"anthropic-messages": {
+					toolCallIdFormat: { maxLength: 128 },
+				} as any,
+			});
+			const caps = getProviderCapabilities("anthropic-messages");
+			assert.equal(caps.toolCallIdFormat.maxLength, 128);
+			// allowedChars should be preserved from built-in, not lost
+			assert.ok(caps.toolCallIdFormat.allowedChars instanceof RegExp);
+			assert.ok(caps.toolCallIdFormat.allowedChars.test("abc123"));
+		});
+
+		test("string allowedChars in override is converted to RegExp", () => {
+			setProviderCapabilityOverrides({
+				"anthropic-messages": {
+					toolCallIdFormat: { maxLength: 256, allowedChars: "^[a-z]+$" },
+				} as any,
+			});
+			const caps = getProviderCapabilities("anthropic-messages");
+			assert.equal(caps.toolCallIdFormat.maxLength, 256);
+			assert.ok(caps.toolCallIdFormat.allowedChars instanceof RegExp);
+			assert.ok(caps.toolCallIdFormat.allowedChars.test("abc"));
+			assert.ok(!caps.toolCallIdFormat.allowedChars.test("ABC123"));
+		});
+
+		test("same reference skips reparse (caching)", () => {
+			const overrides = { "openai-responses": { imageToolResults: true } };
+			setProviderCapabilityOverrides(overrides);
+			assert.equal(getProviderCapabilities("openai-responses").imageToolResults, true);
+			// Call again with same reference — should be a no-op (cached)
+			setProviderCapabilityOverrides(overrides);
+			assert.equal(getProviderCapabilities("openai-responses").imageToolResults, true);
+		});
 	});
 });
