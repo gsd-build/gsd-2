@@ -31,7 +31,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. After a password change, all existing sessions are invalid — previously authenticated browsers are redirected to the login page on their next request
 **Plans**: 3 plans
 Plans:
-- [ ] 01-01-PLAN.md — Crypto module + auth storage + rate limiter (dedicated web-auth.json, not preferences)
+- [x] 01-01-PLAN.md — Crypto module + auth storage + rate limiter (dedicated web-auth.json, not preferences)
 - [ ] 01-02-PLAN.md — Auth API routes (login/logout/status/set-password) + proxy.ts cookie auth + secret injection
 - [ ] 01-03-PLAN.md — Login gate UI + dual-mode authFetch + page.tsx wiring
 **UI hint**: yes
@@ -89,7 +89,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Password Auth and Cookie Sessions | 0/3 | Planning complete | - |
+| 1. Password Auth and Cookie Sessions | 1/3 | In Progress|  |
 | 2. Tailscale Serve Integration | 0/2 | Planning complete | - |
 | 3. SSE Cursor-Based Event Replay | 0/3 | Planning complete | - |
 | 4. Remote Access Settings UI | 0/4 | Planning complete | - |
