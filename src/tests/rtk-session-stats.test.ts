@@ -40,10 +40,10 @@ test("RTK session savings diff from a persisted baseline", () => {
   const previous = process.env.GSD_RTK_PATH;
   try {
     process.env.GSD_RTK_PATH = first.path;
-    ensureRtkSessionBaseline(basePath, "sess-1");
+    ensureRtkSessionBaseline(join(basePath, ".gsd", "runtime"), "sess-1");
 
     process.env.GSD_RTK_PATH = second.path;
-    const savings = getRtkSessionSavings(basePath, "sess-1");
+    const savings = getRtkSessionSavings(join(basePath, ".gsd", "runtime"), "sess-1");
     assert.ok(savings, "expected RTK savings snapshot");
     assert.equal(savings?.commands, 4);
     assert.equal(savings?.inputTokens, 600);
@@ -73,10 +73,10 @@ test("RTK session savings baseline resets cleanly when tracking totals go backwa
   const previous = process.env.GSD_RTK_PATH;
   try {
     process.env.GSD_RTK_PATH = first.path;
-    ensureRtkSessionBaseline(basePath, "sess-2");
+    ensureRtkSessionBaseline(join(basePath, ".gsd", "runtime"), "sess-2");
 
     process.env.GSD_RTK_PATH = second.path;
-    const savings = getRtkSessionSavings(basePath, "sess-2");
+    const savings = getRtkSessionSavings(join(basePath, ".gsd", "runtime"), "sess-2");
     assert.ok(savings, "expected RTK savings snapshot");
     assert.equal(savings?.commands, 0);
     assert.equal(savings?.savedTokens, 0);
@@ -118,10 +118,10 @@ test("RTK session stats fall back to the managed RTK path when GSD_RTK_PATH is u
     };
     delete env.GSD_RTK_PATH;
 
-    const baseline = ensureRtkSessionBaseline(basePath, "sess-managed", env);
+    const baseline = ensureRtkSessionBaseline(join(basePath, ".gsd", "runtime"), "sess-managed", env);
     assert.ok(baseline, "expected baseline from managed RTK path");
 
-    const savings = getRtkSessionSavings(basePath, "sess-managed", env);
+    const savings = getRtkSessionSavings(join(basePath, ".gsd", "runtime"), "sess-managed", env);
     assert.ok(savings, "expected savings snapshot from managed RTK path");
     assert.equal(savings?.commands, 0);
   } finally {
@@ -175,9 +175,9 @@ test("clearRtkSessionBaseline removes a stored session entry", () => {
 
   try {
     process.env.GSD_RTK_PATH = fake.path;
-    ensureRtkSessionBaseline(basePath, "sess-clear");
-    clearRtkSessionBaseline(basePath, "sess-clear");
-    const savings = getRtkSessionSavings(basePath, "sess-clear");
+    ensureRtkSessionBaseline(join(basePath, ".gsd", "runtime"), "sess-clear");
+    clearRtkSessionBaseline(join(basePath, ".gsd", "runtime"), "sess-clear");
+    const savings = getRtkSessionSavings(join(basePath, ".gsd", "runtime"), "sess-clear");
     assert.ok(savings, "expected savings snapshot after baseline recreation");
     assert.equal(savings?.commands, 0);
   } finally {

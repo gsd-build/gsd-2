@@ -1,10 +1,12 @@
 import type { ExtensionContext } from "@gsd/pi-coding-agent";
+import { join } from "node:path";
 import {
   ensureRtkSessionBaseline,
   formatRtkSavingsLabel,
   getRtkSessionSavings,
 } from "../shared/rtk-session-stats.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
+import { gsdRoot } from "./paths.js";
 
 const STATUS_KEY = "gsd-rtk";
 const REFRESH_INTERVAL_MS = 30_000;
@@ -28,8 +30,9 @@ function updateStatus(ctx: ExtensionContext): void {
 
   const basePath = ctx.cwd;
   const sessionId = ctx.sessionManager.getSessionId();
-  ensureRtkSessionBaseline(basePath, sessionId);
-  const savings = getRtkSessionSavings(basePath, sessionId);
+  const runtimeDir = join(gsdRoot(basePath), "runtime");
+  ensureRtkSessionBaseline(runtimeDir, sessionId);
+  const savings = getRtkSessionSavings(runtimeDir, sessionId);
   ctx.ui.setStatus(STATUS_KEY, formatRtkSavingsLabel(savings) ?? undefined);
 }
 

@@ -307,7 +307,7 @@ export function getAutoDashboardData(): AutoDashboardData {
   const totals = ledger ? getProjectTotals(ledger.units) : null;
   const sessionId = s.cmdCtx?.sessionManager?.getSessionId?.() ?? null;
   const rtkSavings = sessionId && s.basePath
-    ? getRtkSessionSavings(s.basePath, sessionId)
+    ? getRtkSessionSavings(join(gsdRoot(s.basePath), "runtime"), sessionId)
     : null;
   const rtkEnabled = loadEffectiveGSDPreferences()?.preferences.experimental?.rtk === true;
   // Pending capture count — lazy check, non-fatal
