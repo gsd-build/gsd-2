@@ -46,7 +46,10 @@ Plans:
   2. Running `gsd --web --tailscale` with all preflight checks passing prints `https://<hostname>.<tailnet>.ts.net` to the terminal and the URL is reachable from another device on the tailnet
   3. Pressing Ctrl+C or sending SIGTERM runs `tailscale serve reset` before the process exits — subsequent runs start clean without "background configuration already exists" errors
   4. Starting `gsd --web --tailscale` after a prior crash (orphaned serve config) recovers automatically via startup reset and reaches the running state without manual intervention
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 02-01-PLAN.md — Tailscale CLI wrapper module (pure functions + I/O) with unit tests
+- [ ] 02-02-PLAN.md — CLI flag parsing + web-mode.ts Tailscale lifecycle integration + tests
 
 ### Phase 3: SSE Cursor-Based Event Replay
 **Goal**: Reconnecting browsers recover all agent output that occurred while the browser was closed, with a visible "Catching up..." indicator during replay, and stale cursors trigger a full state refresh rather than missed or duplicate events
@@ -68,7 +71,11 @@ Plans:
   2. When Tailscale is connected, the Remote Access section displays the tailnet URL as a copyable link and shows an accurate connection status
   3. Clicking "Set up Tailscale" in settings launches a step-by-step assistant that detects the OS, provides the correct install command (brew on macOS, official script on Linux), runs `tailscale up`, surfaces the auth URL when browser login is required, and confirms successful connection with hostname and tailnet info
   4. Attempting to start `gsd --web --tailscale` without a password configured returns an error message that directs the user to set a password first
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 04-01-PLAN.md — Password change API endpoint + Tailscale status API endpoint
+- [ ] 04-02-PLAN.md — Tailscale setup assistant streaming API endpoint
+- [ ] 04-03-PLAN.md — RemoteAccessPanel UI component + settings section registration
 **UI hint**: yes
 
 ## Progress
@@ -79,6 +86,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Password Auth and Cookie Sessions | 0/4 | Planning complete | - |
-| 2. Tailscale Serve Integration | 0/? | Not started | - |
+| 2. Tailscale Serve Integration | 0/2 | Planning complete | - |
 | 3. SSE Cursor-Based Event Replay | 0/? | Not started | - |
-| 4. Remote Access Settings UI | 0/? | Not started | - |
+| 4. Remote Access Settings UI | 0/3 | Planning complete | - |
