@@ -6,6 +6,7 @@ import { createServer } from 'node:net'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { appRoot, webPidFilePath as defaultWebPidFilePath } from './app-paths.js'
+import { getOrCreateSessionSecret } from './web/web-session-auth.js'
 
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -580,6 +581,15 @@ export async function launchWebMode(
   const port = options.port ?? await (deps.resolvePort ?? reserveWebPort)(host)
   const authToken = randomBytes(32).toString('hex')
   const url = `http://${host}:${port}`
+
+  // Read or create session secret for cookie auth verification in proxy.ts (Edge Runtime)
+  let sessionSecret = ''
+  try {
+    sessionSecret = await getOrCreateSessionSecret()
+  } catch {
+    // Non-fatal — cookie auth will be disabled, bearer token auth still works
+  }
+
   const env = {
     ...(deps.env ?? process.env),
     HOSTNAME: host,
@@ -587,6 +597,7 @@ export async function launchWebMode(
     GSD_WEB_HOST: host,
     GSD_WEB_PORT: String(port),
     GSD_WEB_AUTH_TOKEN: authToken,
+    GSD_WEB_SESSION_SECRET: sessionSecret,
     GSD_WEB_PROJECT_CWD: options.cwd,
     GSD_WEB_PROJECT_SESSIONS_DIR: options.projectSessionsDir,
     GSD_WEB_PACKAGE_ROOT: resolution.packageRoot,
