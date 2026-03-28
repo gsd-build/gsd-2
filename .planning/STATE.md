@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-password-auth-and-cookie-sessions plan 01
-last_updated: "2026-03-28T19:19:14.129Z"
+stopped_at: Completed 01-password-auth-and-cookie-sessions plan 02
+last_updated: "2026-03-28T19:27:47.451Z"
 last_activity: 2026-03-28
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 12
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-03-28)
 ## Current Position
 
 Phase: 01 (password-auth-and-cookie-sessions) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-03-28
 
@@ -53,6 +53,7 @@ Progress: [░░░░░░░░░░] 0%
 
 *Updated after each plan completion*
 | Phase 01-password-auth-and-cookie-sessions P01 | 15 | 2 tasks | 6 files |
+| Phase 01-password-auth-and-cookie-sessions P02 | 15 | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -68,6 +69,8 @@ Recent decisions affecting current work:
 - [Init]: jose ^6.2.2 needed for Edge Runtime HMAC — node:crypto unavailable in Next.js middleware
 - [Phase 01-password-auth-and-cookie-sessions]: Named password storage web-password-storage.ts (not web-auth-storage.ts) to avoid conflict with existing OAuth storage module
 - [Phase 01-password-auth-and-cookie-sessions]: Use .ts import extensions throughout (not .js) to match project convention and Node 22+ native TypeScript test execution
+- [Phase 01-password-auth-and-cookie-sessions]: Auth routes use .ts import extensions (not .js) to match Next.js workspace convention
+- [Phase 01-password-auth-and-cookie-sessions]: verifySessionCookieEdge uses crypto.subtle directly (not jose) — custom HMAC token, no jose benefit, zero deps
 
 ### Pending Todos
 
@@ -81,6 +84,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-28T19:19:14.126Z
-Stopped at: Completed 01-password-auth-and-cookie-sessions plan 01
+Last session: 2026-03-28T19:27:47.449Z
+Stopped at: Completed 01-password-auth-and-cookie-sessions plan 02
 Resume file: None
