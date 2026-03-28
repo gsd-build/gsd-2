@@ -6,6 +6,7 @@
 import { join } from "node:path";
 import { gsdRoot } from "./paths.js";
 import type { ComplexityTier } from "./types.js";
+import type { ProviderSwitchReport } from "@gsd/pi-ai";
 import { loadJsonFile, saveJsonFile } from "./json-persistence.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -27,8 +28,16 @@ export interface RoutingHistoryData {
   patterns: Record<string, PatternHistory>;
   /** User feedback entries (from /gsd:rate-unit) */
   feedback: FeedbackEntry[];
+  /** Cross-provider switch reports from recent dispatches (ADR-005) */
+  switchReports: SwitchReportEntry[];
   /** Last updated timestamp */
   updatedAt: string;
+}
+
+export interface SwitchReportEntry {
+  unitType: string;
+  report: ProviderSwitchReport;
+  timestamp: string;
 }
 
 export interface FeedbackEntry {
@@ -82,6 +91,7 @@ export function recordOutcome(
   tier: ComplexityTier,
   success: boolean,
   tags?: string[],
+  switchReport?: ProviderSwitchReport,
 ): void {
   if (!history) return;
 
@@ -100,6 +110,19 @@ export function recordOutcome(
       const tagOutcome = history.patterns[tagPattern][tier];
       if (success) tagOutcome.success++;
       else tagOutcome.fail++;
+    }
+  }
+
+  // Store cross-provider switch report if present (ADR-005)
+  if (switchReport) {
+    history.switchReports.push({
+      unitType,
+      report: switchReport,
+      timestamp: new Date().toISOString(),
+    });
+    // Cap switch reports at 100 entries
+    if (history.switchReports.length > 100) {
+      history.switchReports = history.switchReports.slice(-100);
     }
   }
 
@@ -260,6 +283,7 @@ function createEmptyHistory(): RoutingHistoryData {
     version: 1,
     patterns: {},
     feedback: [],
+    switchReports: [],
     updatedAt: new Date().toISOString(),
   };
 }
@@ -279,7 +303,12 @@ function isRoutingHistoryData(data: unknown): data is RoutingHistoryData {
 }
 
 function loadHistory(base: string): RoutingHistoryData {
-  return loadJsonFile(historyPath(base), isRoutingHistoryData, createEmptyHistory);
+  const data = loadJsonFile(historyPath(base), isRoutingHistoryData, createEmptyHistory);
+  // Backfill switchReports for legacy data files that predate ADR-005
+  if (!Array.isArray(data.switchReports)) {
+    data.switchReports = [];
+  }
+  return data;
 }
 
 function saveHistory(base: string, data: RoutingHistoryData): void {

@@ -7,6 +7,7 @@ import {
   isToolCompatibleWithProvider,
   filterModelsByToolCompatibility,
   getRequiredToolNames,
+  resolveModelForComplexity,
   type ToolCompatibilityInfo,
 } from "../model-router.js";
 import { KNOWN_UNIT_TYPES } from "../preferences-types.js";
@@ -285,6 +286,92 @@ describe("Tool-Compatibility Filter (ADR-005 Step 2)", () => {
       assert.ok(getRequiredToolNames("plan-slice").length > 0, "plan-slice should require tools");
       assert.ok(getRequiredToolNames("run-uat").length > 0, "run-uat should require tools");
       assert.ok(getRequiredToolNames("complete-slice").length > 0, "complete-slice should require tools");
+    });
+  });
+
+  // ─── Filter-Position Integration Test ──────────────────────────────────────
+
+  describe("filter runs BEFORE scoring (position invariant)", () => {
+    test("incompatible model is never selected by resolveModelForComplexity even if it would be cheapest", () => {
+      // Setup: Two light-tier models. gpt-4o-mini is cheaper but its provider (OpenAI)
+      // doesn't support imageToolResults. Claude Haiku does (Anthropic supports images).
+      // If the filter runs BEFORE scoring, gpt-4o-mini gets excluded and Haiku is selected.
+      // If the filter ran AFTER scoring (wrong), gpt-4o-mini would be selected as cheapest-in-tier.
+      const modelApiLookup: Record<string, string> = {
+        "claude-haiku-4-5": "anthropic-messages",
+        "gpt-4o-mini": "openai-responses",
+      };
+
+      const imageTools: ToolCompatibilityInfo[] = [
+        { name: "Bash" }, // no metadata — always passes
+        { name: "screenshot", compatibility: { producesImages: true } },
+      ];
+
+      // All models available
+      const allModelIds = ["claude-haiku-4-5", "gpt-4o-mini"];
+
+      // Step 1: Filter by tool compatibility (as auto-model-selection.ts does)
+      const compatibleModelIds = filterModelsByToolCompatibility(
+        allModelIds,
+        imageTools,
+        modelApiLookup,
+      );
+
+      // OpenAI doesn't support imageToolResults — gpt-4o-mini should be filtered out
+      assert.ok(
+        !compatibleModelIds.includes("gpt-4o-mini"),
+        "gpt-4o-mini should be filtered out (OpenAI has no image tool support)",
+      );
+      assert.ok(
+        compatibleModelIds.includes("claude-haiku-4-5"),
+        "claude-haiku-4-5 should remain (Anthropic supports image tools)",
+      );
+
+      // Step 2: Route with the filtered model set
+      const routingResult = resolveModelForComplexity(
+        { tier: "light", reason: "simple task", confidence: 0.9 },
+        { primary: "claude-haiku-4-5", fallbacks: [] },
+        { enabled: true, cross_provider: true },
+        compatibleModelIds, // <-- filtered set, NOT allModelIds
+      );
+
+      // The routing result should NEVER include the filtered-out model
+      assert.notEqual(
+        routingResult.modelId,
+        "gpt-4o-mini",
+        "incompatible model must never be selected — filter must run BEFORE scoring",
+      );
+      assert.ok(
+        !routingResult.fallbacks.includes("gpt-4o-mini"),
+        "incompatible model must not appear in fallback chain",
+      );
+    });
+
+    test("filter removal does not prevent routing when compatible models remain", () => {
+      const modelApiLookup: Record<string, string> = {
+        "claude-sonnet-4-6": "anthropic-messages",
+        "gpt-4o": "openai-responses",
+        "mistral-large": "mistral-conversations",
+      };
+
+      // Tool that requires schema features Mistral may not support
+      const tools: ToolCompatibilityInfo[] = [
+        { name: "search", compatibility: { schemaFeatures: ["patternProperties"] } },
+      ];
+
+      const allModelIds = ["claude-sonnet-4-6", "gpt-4o", "mistral-large"];
+      const compatibleModelIds = filterModelsByToolCompatibility(allModelIds, tools, modelApiLookup);
+
+      // Routing should still work with the remaining compatible models
+      const routingResult = resolveModelForComplexity(
+        { tier: "standard", reason: "moderate task", confidence: 0.8 },
+        { primary: "claude-sonnet-4-6", fallbacks: ["gpt-4o"] },
+        { enabled: true, cross_provider: true },
+        compatibleModelIds,
+      );
+
+      // Should route to a compatible model, not the filtered one
+      assert.notEqual(routingResult.modelId, "mistral-large");
     });
   });
 });

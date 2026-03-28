@@ -228,7 +228,7 @@ export async function selectAndApplyModel(
               const removed = allTools.length - adjusted.length;
               ctx.ui.notify(`Tool adjustment: ${removed} tool(s) filtered for ${modelApi}`, "info");
             }
-            return { routing, priorTools: priorToolNames };
+            return { routing, appliedModel: model as unknown as Model<Api>, priorTools: priorToolNames };
           }
         }
 
