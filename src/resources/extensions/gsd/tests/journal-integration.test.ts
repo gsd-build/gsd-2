@@ -378,6 +378,52 @@ test("runUnitPhase emits unit-start and unit-end with causedBy reference", async
   assert.equal(endEvents[0].causedBy!.seq, startEvents[0].seq, "unit-end causedBy.seq must match unit-start.seq");
 });
 
+test("runUnitPhase tolerates stopAuto clearing s.currentUnit before resumption", async () => {
+  const capture = createEventCapture();
+  const closeoutCalls: Array<{ startedAt: number }> = [];
+  const { resolveAgentEnd, _resetPendingResolve } = await import("../auto-loop.js");
+  _resetPendingResolve();
+
+  const deps = makeMockDeps(capture, {
+    closeoutUnit: async (_ctx, _basePath, _unitType, _unitId, startedAt) => {
+      closeoutCalls.push({ startedAt });
+    },
+  });
+  const ic = makeIC(deps);
+  ic.s.currentUnit = {
+    type: "execute-task",
+    id: "M001/S01/T01",
+    startedAt: 123456789,
+  };
+  const iterData: IterationData = {
+    unitType: "execute-task",
+    unitId: "M001/S01/T01",
+    prompt: "do stuff",
+    finalPrompt: "do stuff",
+    pauseAfterUatDispatch: false,
+    state: { phase: "executing", activeMilestone: { id: "M001" }, activeSlice: { id: "S01" }, registry: [], blockers: [] } as any,
+    mid: "M001",
+    midTitle: "Test",
+    isRetry: false,
+    previousTier: undefined,
+  };
+  const loopState: LoopState = { recentUnits: [{ key: "execute-task/M001/S01/T01" }], stuckRecoveryAttempts: 0 };
+
+  const unitPromise = runUnitPhase(ic, iterData, loopState);
+  await new Promise(r => setTimeout(r, 50));
+
+  // Simulate stopAuto() finishing cleanup before runUnitPhase resumes.
+  ic.s.currentUnit = null;
+  resolveAgentEnd({ messages: [{ role: "assistant" }] });
+
+  const result = await unitPromise;
+  assert.equal(result.action, "next");
+  assert.equal(closeoutCalls.length, 0, "closeoutUnit should be skipped once stopAuto clears s.currentUnit");
+
+  const endEvents = capture.events.filter(e => e.eventType === "unit-end");
+  assert.equal(endEvents.length, 1, "runUnitPhase should still emit unit-end");
+});
+
 test("all events from a mock iteration have monotonically increasing seq and same flowId", async () => {
   const capture = createEventCapture();
   const { resolveAgentEnd, _resetPendingResolve } = await import("../auto-loop.js");
