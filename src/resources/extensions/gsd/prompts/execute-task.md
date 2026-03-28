@@ -10,6 +10,8 @@ A researcher explored the codebase and a planner decomposed the work — you are
 
 {{overridesSection}}
 
+{{milestoneIntentSection}}
+
 {{runtimeContext}}
 
 {{phaseAnchorSection}}
@@ -17,6 +19,8 @@ A researcher explored the codebase and a planner decomposed the work — you are
 {{resumeSection}}
 
 {{carryForwardSection}}
+
+{{crossContextSection}}
 
 {{taskPlanInline}}
 
