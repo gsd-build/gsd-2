@@ -249,6 +249,75 @@ function postInstallValidate(
   return extensionId;
 }
 
+// ─── Uninstall helpers ───────────────────────────────────────────────────────
+
+/**
+ * Scan installed extensions to find which ones depend on the target ID.
+ * Used for dependency warning on uninstall (D-06).
+ */
+function findDependents(targetId: string, installedExtDir: string): string[] {
+  const dependents: string[] = [];
+  if (!existsSync(installedExtDir)) return dependents;
+  for (const entry of readdirSync(installedExtDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const manifest = readManifest(join(installedExtDir, entry.name));
+    if (!manifest) continue;
+    if (manifest.dependencies?.extensions?.includes(targetId)) {
+      dependents.push(manifest.id);
+    }
+  }
+  return dependents;
+}
+
+function handleUninstall(id: string | undefined, ctx: ExtensionCommandContext): void {
+  if (!id) {
+    ctx.ui.notify("Usage: /gsd extensions uninstall <id>", "warning");
+    return;
+  }
+
+  const registry = loadRegistry();
+  const entry = registry.entries[id];
+
+  // Check if extension exists and is user-installed
+  if (!entry || entry.source !== "user") {
+    ctx.ui.notify(
+      `Extension "${id}" not found in registry. Run /gsd extensions list to see installed extensions.`,
+      "warning",
+    );
+    return;
+  }
+
+  const installedExtDir = getInstalledExtDir();
+  const extDir = join(installedExtDir, id);
+
+  // Check for dependents and warn (D-06: warn-then-proceed)
+  const dependents = findDependents(id, installedExtDir);
+  if (dependents.length > 0) {
+    ctx.ui.notify(
+      `Warning: the following installed extensions depend on "${id}": ${dependents.join(", ")}. Removing anyway.`,
+      "warning",
+    );
+  }
+
+  // Remove directory first, then registry entry (Pitfall 4 from RESEARCH.md)
+  // If rm fails, do NOT remove registry entry — leaves a recoverable state
+  try {
+    if (existsSync(extDir)) {
+      rmSync(extDir, { recursive: true, force: true });
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    ctx.ui.notify(`Failed to remove extension directory for "${id}": ${msg}`, "error");
+    return; // Do NOT remove registry entry — directory still exists
+  }
+
+  // Remove registry entry (D-07)
+  delete registry.entries[id];
+  saveRegistry(registry);
+
+  ctx.ui.notify(`Uninstalled "${id}". Restart GSD to deactivate.`, "info");
+}
+
 // ─── Install subcommand ──────────────────────────────────────────────────────
 
 async function handleInstall(specifier: string | undefined, ctx: ExtensionCommandContext): Promise<void> {
@@ -413,6 +482,11 @@ export async function handleExtensions(args: string, ctx: ExtensionCommandContex
 
   if (subCmd === "install") {
     await handleInstall(parts[1], ctx);
+    return;
+  }
+
+  if (subCmd === "uninstall") {
+    handleUninstall(parts[1], ctx);
     return;
   }
 
