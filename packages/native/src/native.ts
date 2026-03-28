@@ -8,12 +8,7 @@
  *   3. native/addon/gsd_engine.dev.node (local debug build)
  */
 
-import { createRequire } from "node:module";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const require = createRequire(import.meta.url);
 
 const addonDir = path.resolve(__dirname, "..", "..", "..", "native", "addon");
 const platformTag = `${process.platform}-${process.arch}`;
