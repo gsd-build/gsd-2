@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 01-password-auth-and-cookie-sessions plan 02
-last_updated: "2026-03-28T19:27:47.451Z"
+status: verifying
+stopped_at: Completed 01-password-auth-and-cookie-sessions plan 03
+last_updated: "2026-03-28T19:32:01.993Z"
 last_activity: 2026-03-28
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 12
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-03-28)
 
 Phase: 01 (password-auth-and-cookie-sessions) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-03-28
 
 Progress: [░░░░░░░░░░] 0%
@@ -54,6 +54,7 @@ Progress: [░░░░░░░░░░] 0%
 *Updated after each plan completion*
 | Phase 01-password-auth-and-cookie-sessions P01 | 15 | 2 tasks | 6 files |
 | Phase 01-password-auth-and-cookie-sessions P02 | 15 | 2 tasks | 6 files |
+| Phase 01-password-auth-and-cookie-sessions P03 | 2 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -71,6 +72,8 @@ Recent decisions affecting current work:
 - [Phase 01-password-auth-and-cookie-sessions]: Use .ts import extensions throughout (not .js) to match project convention and Node 22+ native TypeScript test execution
 - [Phase 01-password-auth-and-cookie-sessions]: Auth routes use .ts import extensions (not .js) to match Next.js workspace convention
 - [Phase 01-password-auth-and-cookie-sessions]: verifySessionCookieEdge uses crypto.subtle directly (not jose) — custom HMAC token, no jose benefit, zero deps
+- [Phase 01-password-auth-and-cookie-sessions]: authFetch HTTPS path passes requests through for cookie auth; on 401 clears local state and reloads to login page
+- [Phase 01-password-auth-and-cookie-sessions]: LoginGate uses window.location.protocol check to skip auth gate on HTTP localhost
 
 ### Pending Todos
 
@@ -84,6 +87,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-28T19:27:47.449Z
-Stopped at: Completed 01-password-auth-and-cookie-sessions plan 02
+Last session: 2026-03-28T19:32:01.990Z
+Stopped at: Completed 01-password-auth-and-cookie-sessions plan 03
 Resume file: None

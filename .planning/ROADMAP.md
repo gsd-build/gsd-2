@@ -12,7 +12,7 @@ Four phases deliver secure remote access to the GSD web UI over a Tailscale tail
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Password Auth and Cookie Sessions** - Complete password-protected login flow with HMAC-signed session cookies
+- [x] **Phase 1: Password Auth and Cookie Sessions** - Complete password-protected login flow with HMAC-signed session cookies (completed 2026-03-28)
 - [ ] **Phase 2: Tailscale Serve Integration** - `gsd --web --tailscale` exposes the app via HTTPS within the tailnet
 - [ ] **Phase 3: SSE Cursor-Based Event Replay** - Reconnecting browsers recover all missed agent output from a persistent log
 - [ ] **Phase 4: Remote Access Settings UI** - In-app Remote Access section with password management and Tailscale setup assistant
@@ -33,7 +33,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 - [x] 01-01-PLAN.md — Crypto module + auth storage + rate limiter (dedicated web-auth.json, not preferences)
 - [x] 01-02-PLAN.md — Auth API routes (login/logout/status/set-password) + proxy.ts cookie auth + secret injection
-- [ ] 01-03-PLAN.md — Login gate UI + dual-mode authFetch + page.tsx wiring
+- [x] 01-03-PLAN.md — Login gate UI + dual-mode authFetch + page.tsx wiring
 **UI hint**: yes
 
 ### Phase 2: Tailscale Serve Integration
@@ -89,7 +89,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Password Auth and Cookie Sessions | 2/3 | In Progress|  |
+| 1. Password Auth and Cookie Sessions | 3/3 | Complete   | 2026-03-28 |
 | 2. Tailscale Serve Integration | 0/2 | Planning complete | - |
 | 3. SSE Cursor-Based Event Replay | 0/3 | Planning complete | - |
 | 4. Remote Access Settings UI | 0/4 | Planning complete | - |
