@@ -122,6 +122,39 @@ export function clearPendingAutoStart(basePath: string): void {
   pendingAutoStartMap.delete(resolvePath(basePath));
 }
 
+// ─── @internal Test seams ────────────────────────────────────────────────────
+
+/** @internal Test-seam: resets all pending auto-start entries for test isolation. */
+export function _resetPendingAutoStartMap(): void {
+  pendingAutoStartMap.clear();
+}
+
+/** @internal Test-seam: returns the number of pending auto-start entries. */
+export function _pendingAutoStartMapSize(): number {
+  return pendingAutoStartMap.size;
+}
+
+/** @internal Test-seam: returns whether a basePath has a pending entry (normalized). */
+export function _hasPendingAutoStart(basePath: string): boolean {
+  return pendingAutoStartMap.has(resolvePath(basePath));
+}
+
+/** @internal Test-seam: directly registers a pending auto-start entry (bypasses callers).
+ *  Exposes maybeRegisterAutoStart for unit tests that need to verify Map isolation
+ *  without going through the full showSmartEntry call path. */
+export function _registerAutoStartForTest(
+  basePath: string,
+  entry: {
+    ctx: ExtensionCommandContext;
+    pi: ExtensionAPI;
+    milestoneId: string;
+    step?: boolean;
+    onAutoStart: OnAutoStart;
+  },
+): void {
+  maybeRegisterAutoStart(basePath, { ...entry, basePath, onAutoStart: entry.onAutoStart });
+}
+
 /** Returns the milestoneId being discussed, or null if no discussion is active */
 export function getDiscussionMilestoneId(): string | null {
   // Return the milestoneId from whichever session is active (first match).
