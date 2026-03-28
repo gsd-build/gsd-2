@@ -76,24 +76,45 @@ export function summarizeToolArgs(toolName: unknown, toolInput: unknown): string
   const name = String(toolName ?? '')
   const input = (toolInput && typeof toolInput === 'object') ? toolInput as Record<string, unknown> : {}
 
+  // Helper: extract file path from either 'path' or 'file_path' (tools use both)
+  const filePath = (): string => shortPath(input.path ?? input.file_path) || ''
+
   switch (name) {
     case 'Read':
     case 'read':
-      return shortPath(input.file_path) || ''
+      return filePath()
     case 'Write':
     case 'write':
-      return shortPath(input.file_path) || ''
+      return filePath()
     case 'Edit':
     case 'edit':
-      return shortPath(input.file_path) || ''
+      return filePath()
+    case 'hashline_edit':
+      return filePath()
     case 'Bash':
     case 'bash': {
       const cmd = String(input.command ?? '')
       return cmd.length > 80 ? cmd.slice(0, 77) + '...' : cmd
     }
+    case 'async_bash': {
+      const cmd = String(input.command ?? '')
+      return cmd.length > 80 ? cmd.slice(0, 77) + '...' : cmd
+    }
+    case 'await_job': {
+      const jobs = input.jobs
+      if (Array.isArray(jobs) && jobs.length > 0) return jobs.join(', ')
+      return ''
+    }
+    case 'cancel_job':
+      return String(input.job_id ?? '')
     case 'Glob':
     case 'glob':
       return String(input.pattern ?? '')
+    case 'find': {
+      const pat = String(input.pattern ?? '')
+      const p = shortPath(input.path)
+      return p ? `${pat} in ${p}` : pat
+    }
     case 'Grep':
     case 'grep':
     case 'Search':
@@ -102,12 +123,32 @@ export function summarizeToolArgs(toolName: unknown, toolInput: unknown): string
       const g = input.glob ? ` ${input.glob}` : ''
       return `${pat}${g}`
     }
+    case 'ls':
+      return shortPath(input.path) || ''
+    case 'lsp': {
+      const action = String(input.action ?? '')
+      const file = shortPath(input.file)
+      const sym = input.symbol ? ` ${input.symbol}` : ''
+      return file ? `${action} ${file}${sym}` : action
+    }
     case 'Task':
     case 'task': {
       const desc = String(input.description ?? input.prompt ?? '')
       return desc.length > 60 ? desc.slice(0, 57) + '...' : desc
     }
+    case 'subagent': {
+      const agent = String(input.agent ?? '')
+      const t = String(input.task ?? '')
+      const summary = t.length > 50 ? t.slice(0, 47) + '...' : t
+      return agent ? `${agent}: ${summary}` : summary
+    }
+    case 'browser_navigate':
+      return String(input.url ?? '')
     default: {
+      // GSD tools: show milestone/slice/task IDs when present
+      if (name.startsWith('gsd_')) {
+        return summarizeGsdTool(name, input)
+      }
       // Fallback: show first string-valued key up to 60 chars
       for (const v of Object.values(input)) {
         if (typeof v === 'string' && v.length > 0) {
@@ -117,6 +158,29 @@ export function summarizeToolArgs(toolName: unknown, toolInput: unknown): string
       return ''
     }
   }
+}
+
+/** Summarize GSD extension tool args into a compact identifier string. */
+function summarizeGsdTool(name: string, input: Record<string, unknown>): string {
+  const parts: string[] = []
+  if (input.milestoneId) parts.push(String(input.milestoneId))
+  if (input.sliceId) parts.push(String(input.sliceId))
+  if (input.taskId) parts.push(String(input.taskId))
+  if (parts.length > 0) {
+    const id = parts.join('/')
+    // For completion tools, add the one-liner if present
+    if (name.includes('complete') && typeof input.oneLiner === 'string') {
+      const ol = input.oneLiner.length > 50 ? input.oneLiner.slice(0, 47) + '...' : input.oneLiner
+      return `${id} ${ol}`
+    }
+    return id
+  }
+  // Fallback for GSD tools without IDs (e.g. gsd_decision_save)
+  if (input.decision) {
+    const d = String(input.decision)
+    return d.length > 60 ? d.slice(0, 57) + '...' : d
+  }
+  return ''
 }
 
 function shortPath(p: unknown): string {
@@ -268,11 +332,44 @@ export function formatProgress(event: Record<string, unknown>, ctx: ProgressCont
 
 /**
  * Format a thinking preview line from accumulated LLM text deltas.
+ * Used as a fallback when streaming is not enabled — shows a truncated one-liner.
  */
 export function formatThinkingLine(text: string): string {
   const trimmed = text.replace(/\s+/g, ' ').trim()
   const truncated = trimmed.length > 120 ? trimmed.slice(0, 117) + '...' : trimmed
   return `${c.dim}${c.italic}[thinking] ${truncated}${c.reset}`
+}
+
+// ---------------------------------------------------------------------------
+// Streaming Text / Thinking Formatters
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a text_start marker — printed once when the assistant begins a text block.
+ */
+export function formatTextStart(): string {
+  return `${c.dim}[text]${c.reset}`
+}
+
+/**
+ * Format a text_end marker — printed after the last text_delta.
+ */
+export function formatTextEnd(): string {
+  return '' // empty — newline handled by caller
+}
+
+/**
+ * Format a thinking_start marker.
+ */
+export function formatThinkingStart(): string {
+  return `${c.dim}${c.italic}[thinking]${c.reset}`
+}
+
+/**
+ * Format a thinking_end marker.
+ */
+export function formatThinkingEnd(): string {
+  return '' // empty — newline handled by caller
 }
 
 /**

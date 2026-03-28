@@ -27,7 +27,7 @@ describe('formatProgress', () => {
       const result = formatProgress({
         type: 'tool_execution_start',
         toolName: 'Read',
-        args: { file_path: 'src/main.ts' },
+        args: { path: 'src/main.ts' },
       }, ctx())
       assert.ok(result)
       assert.ok(result.includes('Read'))
@@ -179,12 +179,20 @@ describe('formatProgress', () => {
 })
 
 describe('summarizeToolArgs', () => {
-  it('extracts file_path for Read', () => {
-    assert.equal(summarizeToolArgs('Read', { file_path: 'src/index.ts' }), 'src/index.ts')
+  it('extracts path for Read', () => {
+    assert.equal(summarizeToolArgs('Read', { path: 'src/index.ts' }), 'src/index.ts')
   })
 
-  it('extracts file_path for write', () => {
-    assert.equal(summarizeToolArgs('write', { file_path: '/tmp/out.json' }), '/tmp/out.json')
+  it('extracts path for write', () => {
+    assert.equal(summarizeToolArgs('write', { path: '/tmp/out.json' }), '/tmp/out.json')
+  })
+
+  it('extracts file_path for legacy compatibility', () => {
+    assert.equal(summarizeToolArgs('read', { file_path: 'src/foo.ts' }), 'src/foo.ts')
+  })
+
+  it('prefers path over file_path when both present', () => {
+    assert.equal(summarizeToolArgs('read', { path: 'real.ts', file_path: 'legacy.ts' }), 'real.ts')
   })
 
   it('extracts command for bash', () => {
@@ -198,17 +206,69 @@ describe('summarizeToolArgs', () => {
     assert.ok(result.length < 100)
   })
 
+  it('extracts command for async_bash', () => {
+    assert.equal(summarizeToolArgs('async_bash', { command: 'npm run build' }), 'npm run build')
+  })
+
+  it('extracts jobs for await_job', () => {
+    assert.equal(summarizeToolArgs('await_job', { jobs: ['bg_abc', 'bg_def'] }), 'bg_abc, bg_def')
+  })
+
   it('extracts pattern for grep', () => {
     const result = summarizeToolArgs('grep', { pattern: 'TODO', glob: '*.ts' })
     assert.equal(result, 'TODO *.ts')
   })
 
+  it('extracts pattern and path for find', () => {
+    assert.equal(summarizeToolArgs('find', { pattern: '*.ts', path: 'src' }), '*.ts in src')
+  })
+
+  it('extracts action and file for lsp', () => {
+    const result = summarizeToolArgs('lsp', { action: 'definition', file: 'src/main.ts', symbol: 'foo' })
+    assert.equal(result, 'definition src/main.ts foo')
+  })
+
+  it('extracts path for ls', () => {
+    assert.equal(summarizeToolArgs('ls', { path: 'src/utils' }), 'src/utils')
+  })
+
+  it('summarizes gsd tool with milestone/slice/task IDs', () => {
+    assert.equal(summarizeToolArgs('gsd_task_complete', {
+      milestoneId: 'M001', sliceId: 'S01', taskId: 'T01', oneLiner: 'Built the thing',
+    }), 'M001/S01/T01 Built the thing')
+  })
+
+  it('summarizes gsd_plan_milestone with milestone ID', () => {
+    assert.equal(summarizeToolArgs('gsd_plan_milestone', { milestoneId: 'M002' }), 'M002')
+  })
+
+  it('summarizes gsd_decision_save with decision text', () => {
+    const result = summarizeToolArgs('gsd_decision_save', { decision: 'Use SQLite for persistence' })
+    assert.equal(result, 'Use SQLite for persistence')
+  })
+
   it('returns first string value for unknown tools', () => {
-    assert.equal(summarizeToolArgs('gsd_task_complete', { taskId: 'T01' }), 'T01')
+    assert.equal(summarizeToolArgs('custom_tool', { someKey: 'hello' }), 'hello')
   })
 
   it('returns empty string for no args', () => {
     assert.equal(summarizeToolArgs('unknown', {}), '')
+  })
+
+  it('extracts path for edit', () => {
+    assert.equal(summarizeToolArgs('edit', { path: 'src/config.ts' }), 'src/config.ts')
+  })
+
+  it('extracts path for hashline_edit', () => {
+    assert.equal(summarizeToolArgs('hashline_edit', { path: 'src/main.ts' }), 'src/main.ts')
+  })
+
+  it('extracts agent and task for subagent', () => {
+    assert.equal(summarizeToolArgs('subagent', { agent: 'scout', task: 'Find auth patterns' }), 'scout: Find auth patterns')
+  })
+
+  it('extracts url for browser_navigate', () => {
+    assert.equal(summarizeToolArgs('browser_navigate', { url: 'http://localhost:3000' }), 'http://localhost:3000')
   })
 })
 

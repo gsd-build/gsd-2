@@ -44,6 +44,10 @@ import {
   handleExtensionUIRequest,
   formatProgress,
   formatThinkingLine,
+  formatTextStart,
+  formatTextEnd,
+  formatThinkingStart,
+  formatThinkingEnd,
   startSupervisedStdinReader,
 } from './headless-ui.js'
 import type { ExtensionUIRequest, ProgressContext } from './headless-ui.js'
@@ -374,6 +378,9 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
   const toolStartTimes = new Map<string, number>()
   let lastCostData: { costUsd: number; inputTokens: number; outputTokens: number } | undefined
   let thinkingBuffer = ''
+  // Streaming state: tracks whether we're inside a text or thinking block
+  let inTextBlock = false
+  let inThinkingBlock = false
 
   // Emit HeadlessJsonResult to stdout for --output-format json batch mode
   function emitBatchJsonResult(): void {
@@ -526,11 +533,56 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
         }
       }
 
-      // Accumulate thinking text from message_update text_delta events
+      // Stream assistant text and thinking deltas in verbose mode
       if (eventType === 'message_update') {
         const ame = eventObj.assistantMessageEvent as Record<string, unknown> | undefined
-        if (ame?.type === 'text_delta') {
-          thinkingBuffer += String(ame.text ?? '')
+        if (ame && options.verbose) {
+          const ameType = String(ame.type ?? '')
+
+          // --- Text streaming ---
+          if (ameType === 'text_start') {
+            inTextBlock = true
+            process.stderr.write(formatTextStart())
+          } else if (ameType === 'text_delta') {
+            const delta = String(ame.delta ?? ame.text ?? '')
+            if (delta) {
+              if (!inTextBlock) {
+                // Edge case: delta without start
+                inTextBlock = true
+                process.stderr.write(formatTextStart())
+              }
+              process.stderr.write(delta)
+            }
+          } else if (ameType === 'text_end') {
+            if (inTextBlock) {
+              process.stderr.write(formatTextEnd() + '\n')
+              inTextBlock = false
+            }
+          }
+
+          // --- Thinking streaming ---
+          else if (ameType === 'thinking_start') {
+            inThinkingBlock = true
+            process.stderr.write(formatThinkingStart())
+          } else if (ameType === 'thinking_delta') {
+            const delta = String(ame.delta ?? ame.text ?? '')
+            if (delta) {
+              if (!inThinkingBlock) {
+                inThinkingBlock = true
+                process.stderr.write(formatThinkingStart())
+              }
+              process.stderr.write(delta)
+            }
+          } else if (ameType === 'thinking_end') {
+            if (inThinkingBlock) {
+              process.stderr.write(formatThinkingEnd() + '\n')
+              inThinkingBlock = false
+            }
+          }
+        }
+        // Non-verbose: accumulate text_delta for truncated one-liner
+        else if (ame?.type === 'text_delta') {
+          thinkingBuffer += String(ame.delta ?? ame.text ?? '')
         }
       }
 
@@ -540,8 +592,19 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
         if (toolCallId) toolStartTimes.set(toolCallId, Date.now())
       }
 
-      // Flush thinking buffer before tool calls or message end
-      if (options.verbose && thinkingBuffer.trim() &&
+      // Close any open streaming blocks before tool calls or message end
+      if (options.verbose && (eventType === 'tool_execution_start' || eventType === 'message_end')) {
+        if (inTextBlock) {
+          process.stderr.write('\n')
+          inTextBlock = false
+        }
+        if (inThinkingBlock) {
+          process.stderr.write('\n')
+          inThinkingBlock = false
+        }
+      }
+      // Non-verbose: flush accumulated buffer as truncated one-liner
+      else if (!options.verbose && thinkingBuffer.trim() &&
           (eventType === 'tool_execution_start' || eventType === 'message_end')) {
         process.stderr.write(formatThinkingLine(thinkingBuffer) + '\n')
         thinkingBuffer = ''
