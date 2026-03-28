@@ -10,11 +10,15 @@ A researcher explored the codebase and a planner decomposed the work — you are
 
 {{overridesSection}}
 
+{{milestoneIntentSection}}
+
 {{runtimeContext}}
 
 {{resumeSection}}
 
 {{carryForwardSection}}
+
+{{crossContextSection}}
 
 {{taskPlanInline}}
 
