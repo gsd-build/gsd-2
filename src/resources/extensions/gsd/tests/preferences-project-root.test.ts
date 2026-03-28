@@ -5,7 +5,7 @@
  * Regression guard for #2985.
  */
 
-import test from "node:test";
+import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -17,94 +17,70 @@ import { _clearGsdRootCache } from "../paths.ts";
 
 function makeTmpProject(prefsContent: string): string {
   const base = mkdtempSync(join(tmpdir(), "gsd-prefs-root-"));
-  const gsd = join(base, ".gsd");
-  mkdirSync(gsd, { recursive: true });
-  writeFileSync(join(gsd, "PREFERENCES.md"), prefsContent);
+  mkdirSync(join(base, ".gsd"), { recursive: true });
+  writeFileSync(join(base, ".gsd", "PREFERENCES.md"), prefsContent);
   return base;
 }
 
 // ── loadProjectGSDPreferences ─────────────────────────────────────────────────
 
-test("loadProjectGSDPreferences: explicit projectRoot reads PREFERENCES.md from that dir", () => {
-  const projectRoot = makeTmpProject("---\nversion: 1\nuat_dispatch: true\n---\n");
-  try {
+describe("loadProjectGSDPreferences", () => {
+  let tmpDirs: string[] = [];
+
+  function tmpProject(prefsContent: string): string {
+    const dir = makeTmpProject(prefsContent);
+    tmpDirs.push(dir);
+    return dir;
+  }
+
+  beforeEach(() => {
+    tmpDirs = [];
     _clearGsdRootCache();
+  });
+
+  afterEach(() => {
+    _clearGsdRootCache();
+    for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("reads PREFERENCES.md from the explicit projectRoot", () => {
+    const projectRoot = tmpProject("---\nversion: 1\nuat_dispatch: true\n---\n");
     const loaded = loadProjectGSDPreferences(projectRoot);
+
     assert.ok(loaded !== null, "should find PREFERENCES.md in the given projectRoot");
     assert.equal(loaded!.preferences.uat_dispatch, true);
     assert.ok(
       loaded!.path.startsWith(projectRoot),
       `path ${loaded!.path} should be under projectRoot ${projectRoot}`,
     );
-  } finally {
-    _clearGsdRootCache();
-    rmSync(projectRoot, { recursive: true, force: true });
-  }
-});
+  });
 
-test("loadProjectGSDPreferences: does NOT read from process.cwd() when explicit projectRoot is given", () => {
-  // Use a temp dir that has no PREFERENCES.md at all.
-  const emptyRoot = mkdtempSync(join(tmpdir(), "gsd-prefs-empty-"));
-  try {
-    _clearGsdRootCache();
-    // process.cwd() is the repo root which may or may not have a PREFERENCES.md,
-    // but emptyRoot definitely does not.
+  it("does NOT fall back to process.cwd() when an explicit projectRoot is given", () => {
+    // emptyRoot has no PREFERENCES.md — if process.cwd() were used we might
+    // accidentally find one in the repo root.
+    const emptyRoot = mkdtempSync(join(tmpdir(), "gsd-prefs-empty-"));
+    tmpDirs.push(emptyRoot);
+
     const loaded = loadProjectGSDPreferences(emptyRoot);
     assert.equal(loaded, null, "should return null when no PREFERENCES.md under projectRoot");
-  } finally {
-    _clearGsdRootCache();
-    rmSync(emptyRoot, { recursive: true, force: true });
-  }
-});
+  });
 
-test("loadProjectGSDPreferences: falls back to process.cwd() when no projectRoot given", () => {
-  // We cannot easily assert *which* project root is used without controlling
-  // process.cwd(), but we can assert that calling without an argument doesn't
-  // throw and returns either null or a LoadedGSDPreferences object.
-  _clearGsdRootCache();
-  let threw = false;
-  try {
-    const result = loadProjectGSDPreferences();
-    // result is null or a valid object — both are acceptable
-    assert.ok(result === null || typeof result === "object");
-  } catch {
-    threw = true;
-  } finally {
-    _clearGsdRootCache();
-  }
-  assert.equal(threw, false, "loadProjectGSDPreferences() without args must not throw");
-});
+  it("falls back to process.cwd() without arguments and does not throw", () => {
+    // We cannot control process.cwd() here, but the call must not throw and
+    // must return either null or a valid preferences object.
+    assert.doesNotThrow(() => {
+      const result = loadProjectGSDPreferences();
+      assert.ok(result === null || typeof result === "object");
+    });
+  });
 
-// ── loadEffectiveGSDPreferences ───────────────────────────────────────────────
-
-test("loadEffectiveGSDPreferences: explicit projectRoot is forwarded to project prefs lookup", () => {
-  const projectRoot = makeTmpProject("---\nversion: 1\nuat_dispatch: false\n---\n");
-  try {
-    _clearGsdRootCache();
-    const loaded = loadEffectiveGSDPreferences(projectRoot);
-    // If no global preferences exist the function may return null (that's fine),
-    // but if it does return something, the path must reference our projectRoot.
-    if (loaded !== null) {
-      // uat_dispatch from the project prefs should be visible in merged result
-      // only if project prefs were actually read from projectRoot.
-      assert.ok(
-        loaded.path.startsWith(projectRoot) || loaded.preferences.uat_dispatch === false,
-        "effective preferences should reflect the supplied projectRoot",
-      );
-    }
-  } finally {
-    _clearGsdRootCache();
-    rmSync(projectRoot, { recursive: true, force: true });
-  }
-});
-
-test("loadEffectiveGSDPreferences: different roots load independent project preferences", () => {
-  const rootA = makeTmpProject("---\nversion: 1\nuat_dispatch: true\n---\n");
-  const rootB = makeTmpProject("---\nversion: 1\nuat_dispatch: false\n---\n");
-  try {
-    _clearGsdRootCache();
+  it("loads independent preferences for different project roots", () => {
+    const rootA = tmpProject("---\nversion: 1\nuat_dispatch: true\n---\n");
     const loadedA = loadProjectGSDPreferences(rootA);
+
     _clearGsdRootCache();
+
+    const rootB = tmpProject("---\nversion: 1\nuat_dispatch: false\n---\n");
     const loadedB = loadProjectGSDPreferences(rootB);
 
     assert.ok(loadedA !== null, "rootA should have preferences");
@@ -112,9 +88,39 @@ test("loadEffectiveGSDPreferences: different roots load independent project pref
     assert.equal(loadedA!.preferences.uat_dispatch, true, "rootA: uat_dispatch=true");
     assert.equal(loadedB!.preferences.uat_dispatch, false, "rootB: uat_dispatch=false");
     assert.notEqual(loadedA!.path, loadedB!.path, "paths must differ between roots");
-  } finally {
-    _clearGsdRootCache();
-    rmSync(rootA, { recursive: true, force: true });
-    rmSync(rootB, { recursive: true, force: true });
+  });
+});
+
+// ── loadEffectiveGSDPreferences ───────────────────────────────────────────────
+
+describe("loadEffectiveGSDPreferences", () => {
+  let tmpDirs: string[] = [];
+
+  function tmpProject(prefsContent: string): string {
+    const dir = makeTmpProject(prefsContent);
+    tmpDirs.push(dir);
+    return dir;
   }
+
+  beforeEach(() => {
+    tmpDirs = [];
+    _clearGsdRootCache();
+  });
+
+  afterEach(() => {
+    _clearGsdRootCache();
+    for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("forwards the explicit projectRoot to the project prefs lookup", () => {
+    const projectRoot = tmpProject("---\nversion: 1\nuat_dispatch: false\n---\n");
+    const loaded = loadEffectiveGSDPreferences(projectRoot);
+
+    if (loaded !== null) {
+      assert.ok(
+        loaded.path.startsWith(projectRoot) || loaded.preferences.uat_dispatch === false,
+        "effective preferences should reflect the supplied projectRoot",
+      );
+    }
+  });
 });
