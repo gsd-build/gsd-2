@@ -20,6 +20,17 @@ export interface JournalResource {
   cwd: string;
 }
 
+export function isJournalResource(value: unknown): value is JournalResource {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof (value as Record<string, unknown>).gsdVersion === "string" &&
+    typeof (value as Record<string, unknown>).model === "string" &&
+    typeof (value as Record<string, unknown>).cwd === "string"
+  );
+}
+
 // ─── Error type ───────────────────────────────────────────────────────────────
 
 /** Classification of why a unit ended in a non-completed state. */
