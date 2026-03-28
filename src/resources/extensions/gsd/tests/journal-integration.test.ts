@@ -190,6 +190,45 @@ function makeSession() {
   } as any;
 }
 
+// ─── Async helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Poll until the per-unit resolve function is registered inside auto/resolve.ts.
+ * This replaces the flaky `await new Promise(r => setTimeout(r, 50))` pattern —
+ * we wait for the actual condition rather than an arbitrary time budget.
+ */
+async function waitForPendingResolve(): Promise<void> {
+  const { _hasPendingResolve } = await import("../auto-loop.js");
+  for (let i = 0; i < 200; i++) {
+    if (_hasPendingResolve()) return;
+    await new Promise<void>((r) => setImmediate(r));
+  }
+  throw new Error("Timed out waiting for pending resolve to be registered");
+}
+
+// ─── Factories ───────────────────────────────────────────────────────────────
+
+/** Standard IterationData used across unit-phase tests. */
+function makeStandardIterData(): IterationData {
+  return {
+    unitType: "execute-task",
+    unitId: "M001/S01/T01",
+    prompt: "do stuff",
+    finalPrompt: "do stuff",
+    pauseAfterUatDispatch: false,
+    state: { phase: "executing", activeMilestone: { id: "M001" }, activeSlice: { id: "S01" }, registry: [], blockers: [] } as any,
+    mid: "M001",
+    midTitle: "Test",
+    isRetry: false,
+    previousTier: undefined,
+  };
+}
+
+/** Standard LoopState used across unit-phase tests. */
+function makeStandardLoopState(): LoopState {
+  return { recentUnits: [], stuckRecoveryAttempts: 0 };
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 test("runDispatch emits dispatch-match with correct rule and flowId", async () => {
@@ -348,8 +387,8 @@ test("runUnitPhase emits unit-start and unit-end with causedBy reference", async
   // Start runUnitPhase (it will block on runUnit internally)
   const unitPromise = runUnitPhase(ic, iterData, loopState);
 
-  // Give it time to reach the await inside runUnit
-  await new Promise(r => setTimeout(r, 50));
+  // Wait until runUnit has registered its one-shot resolve before firing agent_end.
+  await waitForPendingResolve();
 
   // Resolve the agent_end
   resolveAgentEnd({ messages: [{ role: "assistant" }] });
@@ -407,7 +446,7 @@ test("all events from a mock iteration have monotonically increasing seq and sam
   // Phase 2: Unit execution
   const iterData = (dispatchResult as { action: "next"; data: IterationData }).data;
   const unitPromise = runUnitPhase(ic, iterData, loopState);
-  await new Promise(r => setTimeout(r, 50));
+  await waitForPendingResolve();
   resolveAgentEnd({ messages: [{ role: "assistant" }] });
   await unitPromise;
 
@@ -549,22 +588,11 @@ test("unit-start includes sessionId and messageOffset", async () => {
       },
     } as any,
   });
-  const iterData: IterationData = {
-    unitType: "execute-task",
-    unitId: "M001/S01/T01",
-    prompt: "do stuff",
-    finalPrompt: "do stuff",
-    pauseAfterUatDispatch: false,
-    state: { phase: "executing", activeMilestone: { id: "M001" }, activeSlice: { id: "S01" }, registry: [], blockers: [] } as any,
-    mid: "M001",
-    midTitle: "Test",
-    isRetry: false,
-    previousTier: undefined,
-  };
-  const loopState: LoopState = { recentUnits: [], stuckRecoveryAttempts: 0 };
+  const iterData = makeStandardIterData();
+  const loopState = makeStandardLoopState();
 
   const unitPromise = runUnitPhase(ic, iterData, loopState);
-  await new Promise(r => setTimeout(r, 50));
+  await waitForPendingResolve();
   resolveAgentEnd({ messages: [{ role: "assistant" }] });
   await unitPromise;
 
@@ -581,22 +609,11 @@ test("unit-end includes durationMs", async () => {
 
   const deps = makeMockDeps(capture);
   const ic = makeIC(deps);
-  const iterData: IterationData = {
-    unitType: "execute-task",
-    unitId: "M001/S01/T01",
-    prompt: "do stuff",
-    finalPrompt: "do stuff",
-    pauseAfterUatDispatch: false,
-    state: { phase: "executing", activeMilestone: { id: "M001" }, activeSlice: { id: "S01" }, registry: [], blockers: [] } as any,
-    mid: "M001",
-    midTitle: "Test",
-    isRetry: false,
-    previousTier: undefined,
-  };
-  const loopState: LoopState = { recentUnits: [], stuckRecoveryAttempts: 0 };
+  const iterData = makeStandardIterData();
+  const loopState = makeStandardLoopState();
 
   const unitPromise = runUnitPhase(ic, iterData, loopState);
-  await new Promise(r => setTimeout(r, 50));
+  await waitForPendingResolve();
   resolveAgentEnd({ messages: [{ role: "assistant" }] });
   await unitPromise;
 
@@ -613,22 +630,11 @@ test("unit-end includes error and errorType when agent messages contain errors",
 
   const deps = makeMockDeps(capture);
   const ic = makeIC(deps);
-  const iterData: IterationData = {
-    unitType: "execute-task",
-    unitId: "M001/S01/T01",
-    prompt: "do stuff",
-    finalPrompt: "do stuff",
-    pauseAfterUatDispatch: false,
-    state: { phase: "executing", activeMilestone: { id: "M001" }, activeSlice: { id: "S01" }, registry: [], blockers: [] } as any,
-    mid: "M001",
-    midTitle: "Test",
-    isRetry: false,
-    previousTier: undefined,
-  };
-  const loopState: LoopState = { recentUnits: [], stuckRecoveryAttempts: 0 };
+  const iterData = makeStandardIterData();
+  const loopState = makeStandardLoopState();
 
   const unitPromise = runUnitPhase(ic, iterData, loopState);
-  await new Promise(r => setTimeout(r, 50));
+  await waitForPendingResolve();
   resolveAgentEnd({ messages: [{ role: "assistant", content: "Bash tool failed: permission denied" }] });
   await unitPromise;
 
@@ -684,6 +690,43 @@ test("stuck-detected event is emitted on level 1 recovery", async () => {
   assert.equal(loopState.lastStuckRef!.seq, stuckEvents[0].seq);
 });
 
+test("stuck-detected event is emitted on level 2 hard stop", async () => {
+  const capture = createEventCapture();
+  const deps = makeMockDeps(capture, {
+    resolveDispatch: async () => ({
+      action: "dispatch" as const,
+      unitType: "execute-task",
+      unitId: "M001/S01/T01",
+      prompt: "do the thing",
+      matchedRule: "test-rule",
+    }),
+  });
+  const ic = makeIC(deps);
+  const preData: PreDispatchData = {
+    state: { phase: "executing", activeMilestone: { id: "M001", title: "T", status: "active" }, activeSlice: { id: "S01" }, activeTask: { id: "T01" }, registry: [{ id: "M001", status: "active" }], blockers: [] } as any,
+    mid: "M001",
+    midTitle: "Test",
+  };
+  // stuckRecoveryAttempts: 1 means level 1 was already attempted.
+  // Two existing entries of the same key — dispatch pushes a third → triggers stuck again → level 2.
+  const loopState: LoopState = {
+    recentUnits: [
+      { key: "execute-task/M001/S01/T01" },
+      { key: "execute-task/M001/S01/T01" },
+    ],
+    stuckRecoveryAttempts: 1,
+  };
+
+  const result = await runDispatch(ic, preData, loopState);
+  assert.equal(result.action, "break", "level 2 stuck causes a hard break");
+
+  const stuckEvents = capture.events.filter(e => e.eventType === "stuck-detected");
+  assert.equal(stuckEvents.length, 1, "should emit exactly one stuck-detected event");
+  assert.equal((stuckEvents[0].data as any).level, 2, "event level must be 2 for hard stop");
+  assert.equal((stuckEvents[0].data as any).unitType, "execute-task");
+  assert.equal((stuckEvents[0].data as any).unitId, "M001/S01/T01");
+});
+
 test("milestone-transition event is emitted when milestone changes", async () => {
   const capture = createEventCapture();
   const deps = makeMockDeps(capture, {
@@ -735,7 +778,7 @@ test("unit-end event contains errorContext when unit is cancelled with structure
   const loopState: LoopState = { recentUnits: [{ key: "execute-task/M001/S01/T01" }], stuckRecoveryAttempts: 0 };
 
   const unitPromise = runUnitPhase(ic, iterData, loopState);
-  await new Promise(r => setTimeout(r, 50));
+  await waitForPendingResolve();
 
   // Resolve with errorContext (simulates a timeout cancel)
   resolveAgentEndCancelled({ message: "Hard timeout error: exceeded limit", category: "timeout", isTransient: true });
