@@ -2,10 +2,12 @@ import test, { describe } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   buildCmuxProgress,
   buildCmuxStatusLabel,
+  CmuxClient,
   detectCmuxEnvironment,
   markCmuxPromptShown,
   resetCmuxPromptState,
@@ -190,6 +192,109 @@ describe("createGridLayout", () => {
     const surfaces = await mock.createGridLayout(0);
     assert.equal(surfaces.length, 0);
     assert.equal(mock.calls.length, 0);
+  });
+});
+
+describe("CmuxClient CLI commands", () => {
+  function writeFakeCmux(tempRoot: string, logPath: string): string {
+    const binDir = path.join(tempRoot, "bin");
+    fs.mkdirSync(binDir, { recursive: true });
+    const scriptPath = path.join(binDir, "cmux");
+    fs.writeFileSync(
+      scriptPath,
+      [
+        "#!/bin/sh",
+        "printf '%s\\n' \"$*\" >> \"$CMUX_FAKE_LOG\"",
+        "cmd=\"$1\"",
+        "case \"$cmd\" in",
+        "  list-pane-surfaces)",
+        "    printf '* surface:2  wrapper  [selected]\\n'",
+        "    ;;",
+        "  new-split)",
+        "    printf 'OK surface:10 workspace:1\\n'",
+        "    ;;",
+        "  send)",
+        "    printf 'OK surface:10 workspace:1\\n'",
+        "    ;;",
+        "  *)",
+        "    echo \"unexpected cmux command: $cmd\" >&2",
+        "    exit 1",
+        "    ;;",
+        "esac",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    return binDir;
+  }
+
+  function makeClient(): CmuxClient {
+    return new CmuxClient({
+      available: true,
+      cliAvailable: true,
+      socketPath: "/tmp/cmux.sock",
+      workspaceId: "workspace:1",
+      surfaceId: "surface:2",
+      enabled: true,
+      notifications: false,
+      sidebar: false,
+      splits: true,
+      browser: false,
+    });
+  }
+
+  async function withFakeCmux(fn: (logPath: string) => Promise<void>): Promise<void> {
+    const tempRoot = fs.mkdtempSync(path.join(tmpdir(), "cmux-cli-test-"));
+    const logPath = path.join(tempRoot, "cmux.log");
+    const binDir = writeFakeCmux(tempRoot, logPath);
+    const savedPath = process.env.PATH;
+    const savedLog = process.env.CMUX_FAKE_LOG;
+    process.env.PATH = `${binDir}${path.delimiter}${savedPath ?? ""}`;
+    process.env.CMUX_FAKE_LOG = logPath;
+    try {
+      await fn(logPath);
+    } finally {
+      if (savedPath === undefined) delete process.env.PATH;
+      else process.env.PATH = savedPath;
+      if (savedLog === undefined) delete process.env.CMUX_FAKE_LOG;
+      else process.env.CMUX_FAKE_LOG = savedLog;
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  }
+
+  test("listSurfaceIds uses list-pane-surfaces output", async () => {
+    await withFakeCmux(async (logPath) => {
+      const client = makeClient();
+      const surfaceIds = await client.listSurfaceIds();
+      assert.deepEqual(surfaceIds, ["surface:2"]);
+
+      const log = fs.readFileSync(logPath, "utf8");
+      assert.match(log, /list-pane-surfaces --workspace workspace:1/, "should call list-pane-surfaces");
+      assert.doesNotMatch(log, /list-surfaces/, "should not call the removed list-surfaces command");
+    });
+  });
+
+  test("createSplitFrom parses the new surface id from new-split output", async () => {
+    await withFakeCmux(async (logPath) => {
+      const client = makeClient();
+      const surfaceId = await client.createSplitFrom("surface:2", "right");
+      assert.equal(surfaceId, "surface:10");
+
+      const log = fs.readFileSync(logPath, "utf8");
+      assert.match(log, /new-split right --workspace workspace:1 --surface surface:2/, "should call new-split in the active workspace/surface");
+    });
+  });
+
+  test("sendSurface uses the supported send command", async () => {
+    await withFakeCmux(async (logPath) => {
+      const client = makeClient();
+      const sent = await client.sendSurface("surface:10", "echo hello");
+      assert.equal(sent, true);
+
+      const log = fs.readFileSync(logPath, "utf8");
+      assert.match(log, /send --surface surface:10/, "should call send with the target surface");
+      assert.doesNotMatch(log, /send-surface/, "should not call the removed send-surface command");
+    });
   });
 });
 
