@@ -13,6 +13,7 @@ import { isDbAvailable, getMilestoneSlices } from "./gsd-db.js";
 import { loadPrompt, inlineTemplate } from "./prompt-loader.js";
 import { buildSkillActivationBlock } from "./auto-prompts.js";
 import { deriveState } from "./state.js";
+import { parseRoadmap } from "./parsers-legacy.js";
 import { invalidateAllCaches } from "./cache.js";
 import { startAuto } from "./auto.js";
 import { readCrashLock, clearLock, formatCrashInfo } from "./crash-recovery.js";
@@ -204,6 +205,21 @@ function parseMilestoneSequenceFromProject(content: string): string[] {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type UIContext = ExtensionContext;
+
+type DiscussSlice = { id: string; done: boolean; title: string };
+
+export function normalizeDiscussSlices(
+  dbSlices: Array<{ id: string; status: string; title: string }>,
+  roadmapContent: string | null,
+): DiscussSlice[] {
+  if (dbSlices.length > 0) {
+    return dbSlices.map(s => ({ id: s.id, done: s.status === "complete", title: s.title }));
+  }
+
+  if (!roadmapContent) return [];
+
+  return parseRoadmap(roadmapContent).slices.map(s => ({ id: s.id, done: s.done, title: s.title }));
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -604,19 +620,14 @@ export async function showDiscuss(
   // Guard: no roadmap yet (unless DB has slices)
   const roadmapFile = resolveMilestoneFile(basePath, mid, "ROADMAP");
   const roadmapContent = roadmapFile ? await loadFile(roadmapFile) : null;
-  if (!roadmapContent && !isDbAvailable()) {
+  const dbSlices = isDbAvailable() ? getMilestoneSlices(mid) : [];
+  if (!roadmapContent && dbSlices.length === 0) {
     ctx.ui.notify("No roadmap yet for this milestone. Run /gsd to plan first.", "warning");
     return;
   }
 
-  // Normalize slices: prefer DB, fall back to parser
-  type NormSlice = { id: string; done: boolean; title: string };
-  let normSlices: NormSlice[];
-  if (isDbAvailable()) {
-    normSlices = getMilestoneSlices(mid).map(s => ({ id: s.id, done: s.status === "complete", title: s.title }));
-  } else {
-    normSlices = [];
-  }
+  // Normalize slices: prefer DB rows when present, otherwise fall back to the roadmap parser.
+  const normSlices = normalizeDiscussSlices(dbSlices, roadmapContent);
   const pendingSlices = normSlices.filter(s => !s.done);
 
   if (pendingSlices.length === 0) {
