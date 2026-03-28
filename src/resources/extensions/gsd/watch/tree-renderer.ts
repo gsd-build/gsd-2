@@ -16,6 +16,7 @@ export type VisibleNodeKind = "milestone" | "phase" | "plan";
  */
 export interface VisibleNode {
   kind: VisibleNodeKind;
+  milestoneIdx?: number; // index into milestones array, for milestone-level identity
   dirName?: string;   // defined when kind === "phase"
   planId?: string;    // defined when kind === "plan"
 }
@@ -41,6 +42,17 @@ const MIN_NAME_WITH_BADGES = 4;
 /** Collapsed indicator appended to collapsed phase lines. Per D-08. */
 const COLLAPSED_INDICATOR = " ▸";
 
+// ─── Safety Clamp ─────────────────────────────────────────────────────────────
+
+/**
+ * Hard-clamp a line to the given width. Ensures no line ever overflows
+ * the terminal pane, even if individual truncation calculations are off.
+ */
+function clampLine(line: string, width: number): string {
+  if (visibleWidth(line) <= width) return line;
+  return truncateToWidth(line, width, "…");
+}
+
 // ─── Badge Formatting ─────────────────────────────────────────────────────────
 
 /**
@@ -62,7 +74,7 @@ function formatMilestoneLine(milestone: MilestoneNode, width: number): string {
   const iconWidth = visibleWidth(icon + " ");
   const available = width - iconWidth;
   const name = truncateToWidth(milestone.label, available, "…");
-  return icon + " " + name;
+  return clampLine(icon + " " + name, width);
 }
 
 // ─── Phase Line ───────────────────────────────────────────────────────────────
@@ -96,7 +108,7 @@ function formatPhaseLine(phase: PhaseNode, prefix: string, width: number): strin
     badgePart = "";
   }
 
-  return prefix + icon + " " + namePart + badgePart;
+  return clampLine(prefix + icon + " " + namePart + badgePart, width);
 }
 
 // ─── Plan Line ────────────────────────────────────────────────────────────────
@@ -111,39 +123,25 @@ function formatPlanLine(plan: PlanNode, prefix: string, width: number): string {
   const statusWidth = visibleWidth(icon + " ");
   const available = width - prefixWidth - statusWidth;
   const name = truncateToWidth(plan.label, available, "…");
-  return prefix + icon + " " + name;
+  return clampLine(prefix + icon + " " + name, width);
 }
 
-// ─── Main Export ─────────────────────────────────────────────────────────────
+// ─── Single Milestone Renderer ───────────────────────────────────────────────
 
 /**
- * Render the milestone tree as an array of terminal-safe strings, alongside
- * a parallel VisibleNode array identifying each line's tree node.
- *
- * Uses box-drawing characters (├──, └──, │) for the tree hierarchy.
- * Status icons: ✓ done, ◆ active, ○ pending, ✘ blocked.
- * Lifecycle badges appear on phase lines as ●/○ circles.
- * Width-aware: drops badges before truncating names (D-12).
- * Plan lines hidden below MIN_WIDTH_FOR_PLANS (D-13).
- *
- * @param milestone - The root milestone node to render.
- * @param width - Terminal column width for truncation.
- * @param collapsedPhases - Optional set of phase dirName values that are collapsed.
- *   Collapsed phases skip their plan lines and append ▸ to the phase line (D-08).
- *   Defaults to empty Set (all phases expanded) for backward compatibility.
- * @returns Object with parallel `lines` (string[]) and `nodes` (VisibleNode[]) arrays.
+ * Render a single milestone's phases and plans into lines/nodes arrays.
  */
-export function renderTreeLines(
+function renderSingleMilestone(
   milestone: MilestoneNode,
+  milestoneIdx: number,
   width: number,
-  collapsedPhases: Set<string> = new Set()
-): { lines: string[]; nodes: VisibleNode[] } {
-  const lines: string[] = [];
-  const nodes: VisibleNode[] = [];
-
+  collapsedPhases: Set<string>,
+  lines: string[],
+  nodes: VisibleNode[]
+): void {
   // Milestone header (root node — no tree prefix)
   lines.push(formatMilestoneLine(milestone, width));
-  nodes.push({ kind: "milestone" });
+  nodes.push({ kind: "milestone", milestoneIdx });
 
   const phases = milestone.phases;
   for (let pi = 0; pi < phases.length; pi++) {
@@ -157,11 +155,9 @@ export function renderTreeLines(
 
     if (isCollapsed) {
       // Append ▸ indicator to collapsed phase lines (D-08).
-      // Ensure the indicator fits within width — truncate if necessary.
       const indicatorWidth = visibleWidth(COLLAPSED_INDICATOR);
       const currentWidth = visibleWidth(phaseLine);
       if (currentWidth + indicatorWidth > width) {
-        // Truncate the phase line to make room for ▸
         phaseLine = truncateToWidth(phaseLine, width - indicatorWidth, "…") + COLLAPSED_INDICATOR;
       } else {
         phaseLine = phaseLine + COLLAPSED_INDICATOR;
@@ -169,7 +165,7 @@ export function renderTreeLines(
     }
 
     lines.push(phaseLine);
-    nodes.push({ kind: "phase", dirName: phase.dirName });
+    nodes.push({ kind: "phase", dirName: phase.dirName, milestoneIdx });
 
     // Skip plan lines for collapsed phases (D-07, D-08)
     if (isCollapsed) {
@@ -184,17 +180,66 @@ export function renderTreeLines(
         const isLastPlan = pj === plans.length - 1;
 
         // Continuation prefix based on whether this is the last phase
-        // Non-last phase: │   (keeps vertical line for next phase)
-        // Last phase:     "    " (spaces — no more phases below)
         const continuation = isLastPhase ? "    " : "│   ";
-
-        // Plan connector: ├── for non-last, └── for last
         const connector = isLastPlan ? "└── " : "├── ";
         const planPrefix = continuation + connector;
 
         lines.push(formatPlanLine(plan, planPrefix, width));
-        nodes.push({ kind: "plan", planId: plan.id });
+        nodes.push({ kind: "plan", planId: plan.id, milestoneIdx });
       }
+    }
+  }
+}
+
+// ─── Main Export ─────────────────────────────────────────────────────────────
+
+/**
+ * Render the project tree as an array of terminal-safe strings, alongside
+ * a parallel VisibleNode array identifying each line's tree node.
+ *
+ * Accepts a single milestone or an array of milestones (from DB or filesystem).
+ * Each milestone renders as a root header with its phases/plans underneath.
+ * Collapsed milestones show only their header line with a ▸ indicator.
+ *
+ * @param milestones - The milestone node(s) to render.
+ * @param width - Terminal column width for truncation.
+ * @param collapsedPhases - Optional set of phase dirName values that are collapsed.
+ * @param collapsedMilestones - Optional set of milestone indices that are collapsed.
+ * @returns Object with parallel `lines` (string[]) and `nodes` (VisibleNode[]) arrays.
+ */
+export function renderTreeLines(
+  milestones: MilestoneNode | MilestoneNode[],
+  width: number,
+  collapsedPhases: Set<string> = new Set(),
+  collapsedMilestones: Set<number> = new Set()
+): { lines: string[]; nodes: VisibleNode[] } {
+  const lines: string[] = [];
+  const nodes: VisibleNode[] = [];
+
+  // Normalize to array for uniform handling
+  const milestoneArray = Array.isArray(milestones) ? milestones : [milestones];
+
+  for (let mi = 0; mi < milestoneArray.length; mi++) {
+    // Add blank separator between milestones (only for multi-milestone)
+    if (mi > 0 && milestoneArray.length > 1) {
+      lines.push("");
+      nodes.push({ kind: "milestone", milestoneIdx: mi }); // spacer node
+    }
+
+    if (collapsedMilestones.has(mi)) {
+      // Collapsed milestone: show header with ▸ indicator only
+      let headerLine = formatMilestoneLine(milestoneArray[mi], width);
+      const indicatorWidth = visibleWidth(COLLAPSED_INDICATOR);
+      const currentWidth = visibleWidth(headerLine);
+      if (currentWidth + indicatorWidth > width) {
+        headerLine = truncateToWidth(headerLine, width - indicatorWidth, "…") + COLLAPSED_INDICATOR;
+      } else {
+        headerLine = headerLine + COLLAPSED_INDICATOR;
+      }
+      lines.push(headerLine);
+      nodes.push({ kind: "milestone", milestoneIdx: mi });
+    } else {
+      renderSingleMilestone(milestoneArray[mi], mi, width, collapsedPhases, lines, nodes);
     }
   }
 

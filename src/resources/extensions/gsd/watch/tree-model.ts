@@ -1,9 +1,33 @@
-// GSD Watch — Tree data model: filesystem scan, status derivation, badge detection
+// GSD Watch — Tree data model: DB-first status, filesystem fallback, badge detection
 // Copyright (c) 2026 Jeremy McSpadden <jeremy@fluxlabs.net>
 
 import { readdirSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { MilestoneNode, PhaseNode, PlanNode, NodeStatus } from "./types.js";
+import { mapDbStatus } from "./types.js";
+
+// ─── Plan Label Extraction ──────────────────────────────────────────────────
+
+/**
+ * Extract a human-readable plan label from a PLAN.md file.
+ * Reads the first line of the <objective> block if present.
+ * Falls back to "Plan NN" if no objective found or file unreadable.
+ */
+export function extractPlanLabel(planFilePath: string, fallback: string): string {
+  try {
+    const content = readFileSync(planFilePath, "utf-8");
+    const match = content.match(/<objective>\s*\n(.+)/);
+    if (match && match[1]) {
+      const line = match[1].trim();
+      // Strip leading markdown formatting (e.g. "## " or "### ")
+      const cleaned = line.replace(/^#+\s*/, "");
+      if (cleaned.length > 0) return cleaned;
+    }
+  } catch {
+    // Fall through to fallback
+  }
+  return fallback;
+}
 
 // ─── Badge Suffixes ───────────────────────────────────────────────────────────
 
@@ -58,7 +82,7 @@ export function formatPhaseLabel(dirName: string): string {
   return `${num}. ${humanizePhaseLabel(dirName)}`;
 }
 
-// ─── Status Derivation ────────────────────────────────────────────────────────
+// ─── Status Derivation (filesystem fallback) ─────────────────────────────────
 
 /**
  * Derive plan status from whether a summary file exists.
@@ -107,7 +131,7 @@ export function deriveMilestoneStatus(phases: PhaseNode[]): NodeStatus {
   return "pending";
 }
 
-// ─── Plan Scanning ────────────────────────────────────────────────────────────
+// ─── Plan Scanning (filesystem fallback) ─────────────────────────────────────
 
 /**
  * Scan a phase directory for plan files and return sorted PlanNode array.
@@ -123,7 +147,8 @@ export function scanPlans(phaseDir: string, phaseFiles: string[]): PlanNode[] {
     const planId = file.replace(/-PLAN\.md$/, "");
     // Extract zero-padded plan number for label: "01" from "03-01"
     const planNumber = planId.split("-")[1];
-    const label = `Plan ${planNumber}`;
+    const fallback = `Plan ${planNumber}`;
+    const label = extractPlanLabel(join(phaseDir, file), fallback);
     const status = derivePlanStatus(planId, phaseFiles);
     const hasSummary = phaseFiles.some((f) => f.endsWith(`${planId}-SUMMARY.md`));
 
@@ -159,15 +184,11 @@ export function readMilestoneLabel(projectRoot: string): string {
   return "Project";
 }
 
-// ─── Main Export ─────────────────────────────────────────────────────────────
+// ─── Filesystem Tree Builder (fallback) ──────────────────────────────────────
 
 /**
  * Build the milestone tree by scanning the .planning/phases/ directory.
- *
- * Returns a typed MilestoneNode with:
- * - phases sorted by numeric prefix
- * - 7-element badge arrays derived from file presence
- * - plan/phase/milestone status derived from filesystem state
+ * Used when no GSD database is available.
  */
 export function buildMilestoneTree(projectRoot: string): MilestoneNode {
   const phasesDir = join(projectRoot, ".planning", "phases");
@@ -206,4 +227,141 @@ export function buildMilestoneTree(projectRoot: string): MilestoneNode {
   const milestoneStatus = deriveMilestoneStatus(phases);
 
   return { label, status: milestoneStatus, phases };
+}
+
+// ─── DB → Phase Dir Matching ─────────────────────────────────────────────────
+
+/**
+ * Normalize a title string to match filesystem phase dir format.
+ * "Test Infrastructure Foundation" → "test-infrastructure-foundation"
+ */
+function normalizeTitle(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+/**
+ * Build a lookup map from normalized phase dir name → dir entry for badge detection.
+ * Keys are the name portion after the numeric prefix (e.g. "test-infrastructure-foundation").
+ */
+function buildPhaseDirMap(phasesDir: string): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!existsSync(phasesDir)) return map;
+  try {
+    const entries = readdirSync(phasesDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory() && /^\d{2}-/.test(entry.name)) {
+        const normalized = entry.name.replace(/^\d+-/, "");
+        map.set(normalized, entry.name);
+      }
+    }
+  } catch {
+    // Non-fatal — badges will be empty
+  }
+  return map;
+}
+
+/**
+ * Try to find the matching filesystem phase directory for a DB slice title.
+ * Returns the directory name (e.g. "20-test-infrastructure-foundation") or null.
+ */
+function matchSliceToPhaseDir(sliceTitle: string, phaseDirMap: Map<string, string>): string | null {
+  const normalized = normalizeTitle(sliceTitle);
+  return phaseDirMap.get(normalized) ?? null;
+}
+
+/**
+ * Get badges for a slice by finding its matching filesystem phase directory.
+ * Returns 7-element boolean array, all false if no match found.
+ */
+function getBadgesForSlice(sliceTitle: string, phasesDir: string, phaseDirMap: Map<string, string>): boolean[] {
+  const dirName = matchSliceToPhaseDir(sliceTitle, phaseDirMap);
+  if (!dirName) return [false, false, false, false, false, false, false];
+  try {
+    const phaseDir = join(phasesDir, dirName);
+    const phaseFiles = readdirSync(phaseDir);
+    return detectBadges(phaseFiles);
+  } catch {
+    return [false, false, false, false, false, false, false];
+  }
+}
+
+// ─── DB-backed Tree Builder ──────────────────────────────────────────────────
+
+/** Interface for DB query results to avoid importing full gsd-db types. */
+interface DbMilestone { id: string; title: string; status: string; }
+interface DbSlice { milestone_id: string; id: string; title: string; status: string; }
+interface DbTask { milestone_id: string; slice_id: string; id: string; title: string; status: string; }
+
+/** Query callback type — injected by the renderer to avoid circular imports. */
+export interface DbQueries {
+  getAllMilestones(): DbMilestone[];
+  getMilestoneSlices(milestoneId: string): DbSlice[];
+  getSliceTasks(milestoneId: string, sliceId: string): DbTask[];
+}
+
+/**
+ * Build the project tree from the GSD database.
+ * Returns milestones in display order: active first, then completed (newest first).
+ */
+export function buildProjectTreeFromDb(
+  queries: DbQueries,
+  projectRoot: string
+): MilestoneNode[] {
+  const phasesDir = join(projectRoot, ".planning", "phases");
+  const phaseDirMap = buildPhaseDirMap(phasesDir);
+  const allMilestones = queries.getAllMilestones();
+
+  // Sort: active milestones first, then completed in reverse order
+  const active = allMilestones.filter(m => m.status !== "complete" && m.status !== "done");
+  const completed = allMilestones.filter(m => m.status === "complete" || m.status === "done");
+  const sorted = [...active, ...completed.reverse()];
+
+  return sorted.map((m) => {
+    const slices = queries.getMilestoneSlices(m.id);
+    const phases: PhaseNode[] = slices.map((s, idx) => {
+      const tasks = queries.getSliceTasks(m.id, s.id);
+      const badges = getBadgesForSlice(s.title, phasesDir, phaseDirMap);
+      const dirName = matchSliceToPhaseDir(s.title, phaseDirMap) ?? `${m.id}-${s.id}`;
+
+      const plans: PlanNode[] = tasks.map((t) => ({
+        id: `${m.id}-${s.id}-${t.id}`,
+        label: t.title,
+        status: mapDbStatus(t.status),
+        hasSummary: t.status === "complete" || t.status === "done",
+      }));
+
+      return {
+        number: idx + 1,
+        dirName,
+        label: `${s.id}: ${s.title}`,
+        status: mapDbStatus(s.status),
+        badges,
+        plans,
+      };
+    });
+
+    return {
+      label: m.title,
+      status: mapDbStatus(m.status),
+      phases,
+    };
+  });
+}
+
+/**
+ * Build the full project tree.
+ * Tries DB first (source of truth), falls back to filesystem scanning.
+ * Returns an array of MilestoneNodes — one per milestone from DB, or a single
+ * filesystem-derived milestone when no DB is available.
+ */
+export function buildProjectTree(
+  projectRoot: string,
+  dbQueries: DbQueries | null
+): MilestoneNode[] {
+  if (dbQueries) {
+    const milestones = buildProjectTreeFromDb(dbQueries, projectRoot);
+    if (milestones.length > 0) return milestones;
+  }
+  // Fallback: filesystem-only project
+  return [buildMilestoneTree(projectRoot)];
 }

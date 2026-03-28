@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { startPlanningWatcher } from "./watcher.js";
 import { clearWatchLock } from "./orchestrator.js";
 import { gsdRoot } from "../paths.js";
-import { buildMilestoneTree } from "./tree-model.js";
+import { buildProjectTree } from "./tree-model.js";
+import type { DbQueries } from "./tree-model.js";
 import { renderTreeLines } from "./tree-renderer.js";
 import type { VisibleNode } from "./tree-renderer.js";
 import { visibleWidth, truncateToWidth } from "@gsd/pi-tui";
@@ -132,11 +133,17 @@ let cursorIndex = 0;
 /** Set of phase dirName values that are collapsed (hiding child plans). */
 let collapsedPhases: Set<string> = new Set();
 
+/** Set of milestone indices that are collapsed (hiding all phases/plans). */
+let collapsedMilestones: Set<number> = new Set();
+
 /** Whether the help overlay is currently visible (replaces tree content). */
 let helpOverlayVisible = false;
 
 /** Parallel node metadata from the most recent renderTreeLines() call. */
 let lastRenderedNodes: VisibleNode[] = [];
+
+/** Whether auto-collapse has run (only on first render). */
+let autoCollapseApplied = false;
 
 /**
  * Reset all navigation state.
@@ -145,8 +152,10 @@ let lastRenderedNodes: VisibleNode[] = [];
 export function resetNavigationState(): void {
   cursorIndex = 0;
   collapsedPhases = new Set();
+  collapsedMilestones = new Set();
   helpOverlayVisible = false;
   lastRenderedNodes = [];
+  autoCollapseApplied = false;
 }
 
 /** Returns the current cursor index. Exported for test assertions. */
@@ -251,6 +260,24 @@ export type ArrowDirection = "up" | "down" | null;
 export function parseArrowKey(chunk: string): ArrowDirection {
   if (chunk === "\x1b[A") return "up";
   if (chunk === "\x1b[B") return "down";
+  return null;
+}
+
+// ─── Mouse Scroll Parser ──────────────────────────────────────────────────────
+
+export type MouseScrollDirection = "up" | "down" | null;
+
+/**
+ * Parse SGR mouse escape sequences for scroll wheel events.
+ * SGR format: \x1b[<button;col;rowM  or  \x1b[<button;col;rowm
+ * Scroll up: button=64, scroll down: button=65.
+ */
+export function parseMouseScroll(chunk: string): MouseScrollDirection {
+  const match = chunk.match(/^\x1b\[<(\d+);\d+;\d+[mM]$/);
+  if (!match) return null;
+  const button = parseInt(match[1], 10);
+  if (button === 64) return "up";
+  if (button === 65) return "down";
   return null;
 }
 
@@ -388,8 +415,17 @@ export function renderPlaceholder(projectRoot: string): void {
 /** Cache of last rendered lines — used by arrow key handler and resize handler. */
 let lastRenderedLines: string[] = [];
 
+/** Injected DB queries — set on startup if DB is available. */
+let dbQueries: DbQueries | null = null;
+
+/** Set the DB queries for tree building. Called once on startup. */
+export function setDbQueries(q: DbQueries | null): void {
+  dbQueries = q;
+}
+
 /**
  * Render the full project tree to stdout through the viewport.
+ * Uses DB as source of truth when available, falls back to filesystem.
  * Updates lastRenderedLines and lastRenderedNodes so navigation and resize handlers work.
  * Applies cursor highlight (reverse video) to the cursor row (D-01).
  * When help overlay is visible, renders overlay content instead of tree (D-12).
@@ -398,15 +434,33 @@ let lastRenderedLines: string[] = [];
 export function renderTree(projectRoot: string): void {
   const width = getEffectiveWidth();
   const height = getEffectiveHeight();
-  const milestone = buildMilestoneTree(projectRoot);
+  const milestones = buildProjectTree(projectRoot, dbQueries);
+
+  // Auto-collapse on first render: collapse completed milestones and done phases
+  if (!autoCollapseApplied && milestones.length > 1) {
+    autoCollapseApplied = true;
+    for (let mi = 0; mi < milestones.length; mi++) {
+      const m = milestones[mi];
+      if (m.status === "done") {
+        collapsedMilestones.add(mi);
+      } else {
+        // For active milestones, collapse done phases so focus is on active work
+        for (const phase of m.phases) {
+          if (phase.status === "done") {
+            collapsedPhases.add(phase.dirName);
+          }
+        }
+      }
+    }
+  }
 
   // Prune stale collapse entries (D-11): remove any dirName that no longer exists
-  const activeDirNames = new Set(milestone.phases.map(p => p.dirName));
+  const activeDirNames = new Set(milestones.flatMap(m => m.phases.map(p => p.dirName)));
   for (const d of collapsedPhases) {
     if (!activeDirNames.has(d)) collapsedPhases.delete(d);
   }
 
-  const { lines, nodes } = renderTreeLines(milestone, width, collapsedPhases);
+  const { lines, nodes } = renderTreeLines(milestones, width, collapsedPhases, collapsedMilestones);
 
   // Clamp cursor to valid range after nodes may have changed
   cursorIndex = Math.max(0, Math.min(cursorIndex, nodes.length - 1));
@@ -434,17 +488,29 @@ export function renderTree(projectRoot: string): void {
 
 // ─── Shutdown ─────────────────────────────────────────────────────────────────
 
+/** Enable mouse reporting: basic tracking + SGR extended mode for scroll wheel events. */
+function enableMouseReporting(): void {
+  process.stdout.write("\x1b[?1000h\x1b[?1006h");
+}
+
+/** Disable mouse reporting — must be called before exit to restore terminal state. */
+function disableMouseReporting(): void {
+  process.stdout.write("\x1b[?1000l\x1b[?1006l");
+}
+
 /**
  * Perform a clean shutdown:
- *   1. Disable raw mode on stdin (if TTY)
- *   2. Close the file watcher
- *   3. Remove the watch lock file
- *   4. Exit with code 0
+ *   1. Disable mouse reporting
+ *   2. Disable raw mode on stdin (if TTY)
+ *   3. Close the file watcher
+ *   4. Remove the watch lock file
+ *   5. Exit with code 0
  */
 async function shutdown(
   watcher: FSWatcher,
   gsdDir: string
 ): Promise<void> {
+  disableMouseReporting();
   if (process.stdin.isTTY) process.stdin.setRawMode(false);
   await watcher.close();
   clearWatchLock(gsdDir);
@@ -469,6 +535,29 @@ if (isMainModule) {
 
   const gsdDir = gsdRoot(projectRoot);
   const planningDir = join(projectRoot, ".planning");
+
+  // Open GSD database if available (source of truth for progress tracking)
+  const dbPath = join(gsdDir, "gsd.db");
+  if (existsSync(dbPath)) {
+    try {
+      const db = await import("../gsd-db.js");
+      if (db.openDatabase(dbPath)) {
+        setDbQueries({
+          getAllMilestones: () => db.getAllMilestones().map((m: { id: string; title: string; status: string }) => ({
+            id: m.id, title: m.title, status: m.status
+          })),
+          getMilestoneSlices: (mid: string) => db.getMilestoneSlices(mid).map((s: { milestone_id: string; id: string; title: string; status: string }) => ({
+            milestone_id: s.milestone_id, id: s.id, title: s.title, status: s.status
+          })),
+          getSliceTasks: (mid: string, sid: string) => db.getSliceTasks(mid, sid).map((t: { milestone_id: string; slice_id: string; id: string; title: string; status: string }) => ({
+            milestone_id: t.milestone_id, slice_id: t.slice_id, id: t.id, title: t.title, status: t.status
+          })),
+        });
+      }
+    } catch {
+      // DB unavailable — fall back to filesystem
+    }
+  }
 
   // Render initial tree
   renderTree(projectRoot);
@@ -537,6 +626,7 @@ if (isMainModule) {
     process.stdin.setRawMode(true);
     process.stdin.resume();
     process.stdin.setEncoding("utf-8");
+    enableMouseReporting();
     process.stdin.on("data", (chunk: string) => {
       // 1. Help overlay guard (D-15): when overlay is visible, only ?, Esc, Ctrl+C are active
       if (helpOverlayVisible) {
@@ -577,17 +667,21 @@ if (isMainModule) {
             break;
           case "collapse": {
             const node = lastRenderedNodes[cursorIndex];
-            if (node?.kind === "phase" && node.dirName !== undefined) {
+            if (node?.kind === "milestone" && node.milestoneIdx !== undefined) {
+              collapsedMilestones.add(node.milestoneIdx);
+            } else if (node?.kind === "phase" && node.dirName !== undefined) {
               collapsedPhases.add(node.dirName);
-              // Clamp cursor after collapse (fewer visible nodes)
-              cursorIndex = Math.max(0, Math.min(cursorIndex, lastRenderedNodes.length - 1));
             }
             renderTree(projectRoot);
+            // Clamp cursor after collapse (fewer visible nodes)
+            cursorIndex = Math.max(0, Math.min(cursorIndex, lastRenderedNodes.length - 1));
             break;
           }
           case "expand": {
             const node = lastRenderedNodes[cursorIndex];
-            if (node?.kind === "phase" && node.dirName !== undefined) {
+            if (node?.kind === "milestone" && node.milestoneIdx !== undefined) {
+              collapsedMilestones.delete(node.milestoneIdx);
+            } else if (node?.kind === "phase" && node.dirName !== undefined) {
               collapsedPhases.delete(node.dirName);
             }
             renderTree(projectRoot);
@@ -623,7 +717,19 @@ if (isMainModule) {
         return; // consumed — do NOT pass to parseQuitSequence
       }
 
-      // 4. Quit sequences (qq, EscEsc, Ctrl+C)
+      // 4. Mouse scroll wheel — SGR encoded sequences
+      const mouseScroll = parseMouseScroll(chunk);
+      if (mouseScroll !== null) {
+        const height = getEffectiveHeight();
+        const total = lastRenderedLines.length;
+        const scrollable = total > height;
+        const contentHeight = scrollable ? height - 1 : height;
+        scrollViewport(mouseScroll === "up" ? -3 : 3, total, contentHeight);
+        renderTree(projectRoot);
+        return;
+      }
+
+      // 5. Quit sequences (qq, EscEsc, Ctrl+C)
       if (parseQuitSequence(chunk)) {
         void shutdown(watcher, gsdDir);
       }

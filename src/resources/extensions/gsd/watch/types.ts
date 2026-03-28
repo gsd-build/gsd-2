@@ -29,6 +29,14 @@ export const WATCH_LOCK_FILE = "watch.lock";
 /** Status of a tree node: done, active, pending, or blocked. Per D-09. */
 export type NodeStatus = "done" | "active" | "pending" | "blocked";
 
+/** Map DB status strings to NodeStatus. DB uses "complete"/"done"/"active"/"pending"/"blocked"/"parked". */
+export function mapDbStatus(dbStatus: string): NodeStatus {
+  if (dbStatus === "complete" || dbStatus === "done") return "done";
+  if (dbStatus === "active") return "active";
+  if (dbStatus === "blocked") return "blocked";
+  return "pending"; // covers "pending", "parked", unknown
+}
+
 /** A single plan within a phase. */
 export interface PlanNode {
   id: string;          // e.g. "03-01"
