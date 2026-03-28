@@ -117,7 +117,7 @@ interface ForensicReport {
 
 // ─── Duplicate Detection ──────────────────────────────────────────────────────
 
-const DEDUP_PROMPT_SECTION = `
+export const DEDUP_PROMPT_SECTION = `
 ## Pre-Investigation: Duplicate Check (REQUIRED)
 
 Before reading GSD source code or performing deep analysis, you MUST search for existing issues and PRs that may already address this bug. This avoids wasting tokens on already-fixed bugs.
@@ -154,6 +154,11 @@ For each result, compare it against the user's reported symptoms and the forensi
 - **Open issue matches** → Report "Existing issue #Y covers this." Offer to add forensic evidence. Skip full investigation unless user asks for deeper analysis.
 - **No matches** → Proceed to full investigation below.
 `;
+
+/** Pure helper: returns the dedup prompt section based on the preference value. */
+export function resolveDedupSection(forensicsDedup: boolean | undefined): string {
+  return forensicsDedup === true ? DEDUP_PROMPT_SECTION : "";
+}
 
 async function writeForensicsDedupPref(ctx: ExtensionCommandContext, enabled: boolean): Promise<void> {
   const prefsPath = getGlobalGSDPreferencesPath();
@@ -230,7 +235,7 @@ export async function handleForensics(
     }
   }
 
-  const dedupSection = dedupEnabled ? DEDUP_PROMPT_SECTION : "";
+  const dedupSection = resolveDedupSection(dedupEnabled);
 
   ctx.ui.notify("Building forensic report...", "info");
 
