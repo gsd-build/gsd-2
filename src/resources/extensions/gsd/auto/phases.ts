@@ -1237,7 +1237,7 @@ export async function runUnitPhase(
     errorType = errorContextCategoryToJournalType(errFromCtx.category);
   } else if (unitResult.status !== "completed") {
     errorDetail = `${unitResult.status}:${unitType}/${unitId}`;
-    errorType = unitResult.status === "error" ? "unknown" : "timeout";
+    errorType = unitResult.status === "error" ? "unknown" : "aborted";
   } else if (errFromMsg) {
     errorDetail = errFromMsg.detail;
     errorType = errFromMsg.type;
