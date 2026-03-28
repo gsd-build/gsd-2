@@ -10,24 +10,24 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Authentication
 
 - [x] **AUTH-01**: User can set a password via GSD settings (CLI or web UI), stored as scrypt hash
-- [ ] **AUTH-02**: User can log in via a password prompt page with GSD2 logo
-- [ ] **AUTH-03**: Successful login sets an HttpOnly/Secure/SameSite=Strict session cookie (30-day lifetime)
+- [x] **AUTH-02**: User can log in via a password prompt page with GSD2 logo
+- [x] **AUTH-03**: Successful login sets an HttpOnly/Secure/SameSite=Strict session cookie (30-day lifetime)
 - [x] **AUTH-04**: Session cookie is HMAC-SHA256 signed with an auto-generated server secret
 - [x] **AUTH-05**: Login endpoint is rate-limited (5 attempts per minute)
-- [ ] **AUTH-06**: User can log out (clears cookie) from the UI
+- [x] **AUTH-06**: User can log out (clears cookie) from the UI
 - [x] **AUTH-07**: Changing password rotates signing secret, invalidating all existing sessions
-- [ ] **AUTH-08**: Proxy middleware checks cookie first, then bearer token — localhost flow unchanged
-- [ ] **AUTH-09**: Auth endpoints (`/api/auth/*`) are exempt from token/cookie auth checks
+- [x] **AUTH-08**: Proxy middleware checks cookie first, then bearer token — localhost flow unchanged
+- [x] **AUTH-09**: Auth endpoints (`/api/auth/*`) are exempt from token/cookie auth checks
 - [x] **AUTH-10**: HMAC comparison uses timing-safe equality to prevent timing attacks
 
 ### Tailscale Integration
 
 - [ ] **TAIL-01**: `gsd --web --tailscale` flag activates Tailscale Serve mode
-- [ ] **TAIL-02**: Preflight checks verify Tailscale CLI installed, connected, and password configured
-- [ ] **TAIL-03**: Auto-detects Tailscale hostname via `tailscale status --json` and configures allowed origins
-- [ ] **TAIL-04**: Runs `tailscale serve --bg` to expose the app via HTTPS within the tailnet
+- [x] **TAIL-02**: Preflight checks verify Tailscale CLI installed, connected, and password configured
+- [x] **TAIL-03**: Auto-detects Tailscale hostname via `tailscale status --json` and configures allowed origins
+- [x] **TAIL-04**: Runs `tailscale serve --bg` to expose the app via HTTPS within the tailnet
 - [ ] **TAIL-05**: Prints the Tailscale URL (`https://<hostname>.<tailnet>.ts.net`) on startup
-- [ ] **TAIL-06**: Runs `tailscale serve reset` on startup (clean orphaned config from prior crashes)
+- [x] **TAIL-06**: Runs `tailscale serve reset` on startup (clean orphaned config from prior crashes)
 - [ ] **TAIL-07**: Runs `tailscale serve reset` on graceful shutdown (SIGTERM/SIGINT)
 - [ ] **TAIL-08**: `--tailscale` implies daemon mode (server stays alive when browser closes)
 - [ ] **TAIL-09**: Setup assistant detects Tailscale installation and guides install (brew on macOS, official script on Linux)
@@ -85,21 +85,21 @@ Deferred to future release. Tracked but not in current roadmap.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | AUTH-01 | Phase 1 | Complete |
-| AUTH-02 | Phase 1 | Pending |
-| AUTH-03 | Phase 1 | Pending |
+| AUTH-02 | Phase 1 | Complete |
+| AUTH-03 | Phase 1 | Complete |
 | AUTH-04 | Phase 1 | Complete |
 | AUTH-05 | Phase 1 | Complete |
-| AUTH-06 | Phase 1 | Pending |
+| AUTH-06 | Phase 1 | Complete |
 | AUTH-07 | Phase 1 | Complete |
-| AUTH-08 | Phase 1 | Pending |
-| AUTH-09 | Phase 1 | Pending |
+| AUTH-08 | Phase 1 | Complete |
+| AUTH-09 | Phase 1 | Complete |
 | AUTH-10 | Phase 1 | Complete |
 | TAIL-01 | Phase 2 | Pending |
-| TAIL-02 | Phase 2 | Pending |
-| TAIL-03 | Phase 2 | Pending |
-| TAIL-04 | Phase 2 | Pending |
+| TAIL-02 | Phase 2 | Complete |
+| TAIL-03 | Phase 2 | Complete |
+| TAIL-04 | Phase 2 | Complete |
 | TAIL-05 | Phase 2 | Pending |
-| TAIL-06 | Phase 2 | Pending |
+| TAIL-06 | Phase 2 | Complete |
 | TAIL-07 | Phase 2 | Pending |
 | TAIL-08 | Phase 2 | Pending |
 | TAIL-09 | Phase 4 | Pending |

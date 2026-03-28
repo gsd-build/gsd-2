@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Completed 01-password-auth-and-cookie-sessions plan 03
-last_updated: "2026-03-28T19:36:36.908Z"
+status: executing
+stopped_at: Completed 02-tailscale-serve-integration plan 01
+last_updated: "2026-03-28T19:42:13.040Z"
 last_activity: 2026-03-28
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 12
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-28)
 
 **Core value:** Agent workflows run uninterrupted when the browser is closed — reconnect anytime from any device on the tailnet and pick up where you left off.
-**Current focus:** Phase 01 — password-auth-and-cookie-sessions
+**Current focus:** Phase 02 — tailscale-serve-integration
 
 ## Current Position
 
-Phase: 02
-Plan: Not started
-Status: Phase complete — ready for verification
+Phase: 02 (tailscale-serve-integration) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
 Last activity: 2026-03-28
 
 Progress: [░░░░░░░░░░] 0%
@@ -55,6 +55,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01-password-auth-and-cookie-sessions P01 | 15 | 2 tasks | 6 files |
 | Phase 01-password-auth-and-cookie-sessions P02 | 15 | 2 tasks | 6 files |
 | Phase 01-password-auth-and-cookie-sessions P03 | 2 | 2 tasks | 3 files |
+| Phase 02-tailscale-serve-integration P01 | 4 | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,8 @@ Recent decisions affecting current work:
 - [Phase 01-password-auth-and-cookie-sessions]: verifySessionCookieEdge uses crypto.subtle directly (not jose) — custom HMAC token, no jose benefit, zero deps
 - [Phase 01-password-auth-and-cookie-sessions]: authFetch HTTPS path passes requests through for cookie auth; on 401 clears local state and reloads to login page
 - [Phase 01-password-auth-and-cookie-sessions]: LoginGate uses window.location.protocol check to skip auth gate on HTTP localhost
+- [Phase 02-tailscale-serve-integration]: _deps object pattern for testability — Node.js strip-only mode cannot mock named exports from node:child_process
+- [Phase 02-tailscale-serve-integration]: stopTailscaleServe split into strict/lenient modes — startup reset throws, shutdown cleanup swallows
 
 ### Pending Todos
 
@@ -87,6 +90,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-28T19:32:01.990Z
-Stopped at: Completed 01-password-auth-and-cookie-sessions plan 03
+Last session: 2026-03-28T19:42:13.037Z
+Stopped at: Completed 02-tailscale-serve-integration plan 01
 Resume file: None

@@ -47,7 +47,7 @@ Plans:
   4. Starting `gsd --web --tailscale` after a prior crash (orphaned serve config) recovers automatically via startup reset and reaches the running state without manual intervention
 **Plans**: 2 plans
 Plans:
-- [ ] 02-01-PLAN.md — Tailscale CLI wrapper module (pure functions + I/O) with unit tests
+- [x] 02-01-PLAN.md — Tailscale CLI wrapper module (pure functions + I/O) with unit tests
 - [ ] 02-02-PLAN.md — CLI flag parsing + web-mode.ts Tailscale lifecycle integration + tests
 
 ### Phase 3: SSE Cursor-Based Event Replay
@@ -90,6 +90,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Password Auth and Cookie Sessions | 3/3 | Complete   | 2026-03-28 |
-| 2. Tailscale Serve Integration | 0/2 | Planning complete | - |
+| 2. Tailscale Serve Integration | 1/2 | In Progress|  |
 | 3. SSE Cursor-Based Event Replay | 0/3 | Planning complete | - |
 | 4. Remote Access Settings UI | 0/4 | Planning complete | - |
