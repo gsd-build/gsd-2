@@ -58,6 +58,14 @@ test("guided-resume-task prompt preserves recovery state until work is supersede
   assert.doesNotMatch(prompt, /Delete the continue file after reading it/i);
 });
 
+test("forensics prompt searches existing issues before offering to create a new one", () => {
+  const prompt = readPrompt("forensics");
+  assert.match(prompt, /Before offering to create a new issue, search for existing matches/i);
+  assert.match(prompt, /gh search issues/i);
+  assert.match(prompt, /These existing issues look related/i);
+  assert.match(prompt, /Would you like me to create a GitHub issue for this on gsd-build\/gsd-2\?/i);
+});
+
 // ─── Prompt migration: execute-task → gsd_complete_task ───────────────
 
 test("execute-task prompt references gsd_complete_task tool", () => {
