@@ -69,6 +69,7 @@ import {
 } from "./debug-logger.js";
 import { parseUnitId } from "./unit-id.js";
 import { setLogBasePath } from "./workflow-logger.js";
+import { clearPendingAutoStart } from "./guided-flow.js";
 import type { AutoSession } from "./auto/session.js";
 import {
   existsSync,
@@ -77,8 +78,7 @@ import {
   statSync,
   unlinkSync,
 } from "node:fs";
-import { join, resolve as resolvePath } from "node:path";
-import { sep as pathSep } from "node:path";
+import { join, resolve as resolvePath, sep as pathSep } from "node:path";
 
 import type { WorktreeResolver } from "./worktree-resolver.js";
 
@@ -151,7 +151,10 @@ export async function bootstrapAutoSession(
     return false;
   }
 
+  const baseKey = resolvePath(base);
+
   function releaseLockAndReturn(): false {
+    _consecutiveCompleteBootstraps.delete(baseKey);
     releaseSessionLock(base);
     clearLock(base);
     return false;
@@ -393,11 +396,10 @@ export async function bootstrapAutoSession(
         // Guard against recursive dialog loop (#1348):
         // If we've entered this branch multiple times in quick succession,
         // the discuss workflow isn't producing a milestone. Break the cycle.
-        const _baseKey = resolvePath(base);
-        const _count = (_consecutiveCompleteBootstraps.get(_baseKey) ?? 0) + 1;
-        _consecutiveCompleteBootstraps.set(_baseKey, _count);
+        const _count = (_consecutiveCompleteBootstraps.get(baseKey) ?? 0) + 1;
+        _consecutiveCompleteBootstraps.set(baseKey, _count);
         if (_count > MAX_CONSECUTIVE_COMPLETE_BOOTSTRAPS) {
-          _consecutiveCompleteBootstraps.delete(_baseKey);
+          _consecutiveCompleteBootstraps.delete(baseKey);
           ctx.ui.notify(
             "All milestones are complete and the discussion didn't produce a new one. " +
             "Run /gsd to start a new milestone manually.",
@@ -416,7 +418,7 @@ export async function bootstrapAutoSession(
           postState.phase !== "complete" &&
           postState.phase !== "pre-planning"
         ) {
-          _consecutiveCompleteBootstraps.delete(resolvePath(base)); // Successfully advanced past "complete"
+          _consecutiveCompleteBootstraps.delete(baseKey); // Successfully advanced past "complete"
           state = postState;
         } else if (
           postState.activeMilestone &&
@@ -495,7 +497,7 @@ export async function bootstrapAutoSession(
     }
 
     // Successfully resolved an active milestone — reset the re-entry guard
-    _consecutiveCompleteBootstraps.delete(resolvePath(base));
+    _consecutiveCompleteBootstraps.delete(baseKey);
 
     // ── Initialize session state ──
     s.active = true;
@@ -524,8 +526,12 @@ export async function bootstrapAutoSession(
     s.originalModelId = ctx.model?.id ?? null;
     s.originalModelProvider = ctx.model?.provider ?? null;
 
-    // Register SIGTERM handler
+    // Register SIGTERM handler and clear any stale pending auto-start entry.
+    // The entry may have been created by showSmartEntry → maybeRegisterAutoStart
+    // above; if the session exits abnormally this prevents a stale map entry
+    // from blocking re-entry for the same basePath.
     registerSigtermHandler(base);
+    clearPendingAutoStart(base);
 
     // Capture integration branch
     if (s.currentMilestoneId) {
