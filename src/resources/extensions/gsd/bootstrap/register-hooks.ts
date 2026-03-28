@@ -267,4 +267,12 @@ export function registerHooks(pi: ExtensionAPI): void {
     payload.service_tier = tier;
     return payload;
   });
+
+  // Capability-aware model routing hook (ADR-004)
+  // Extensions can override model selection by returning { modelId: "..." }
+  // Return undefined to let the built-in capability scoring proceed.
+  pi.on("before_model_select", async (_event) => {
+    // Default: no override — let capability scoring handle selection
+    return undefined;
+  });
 }

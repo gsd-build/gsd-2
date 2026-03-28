@@ -428,6 +428,8 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		unregisterProvider: (name) => {
 			runtime.pendingProviderRegistrations = runtime.pendingProviderRegistrations.filter((r) => r.name !== name);
 		},
+		// Stub replaced by ExtensionRunner at construction time via bindEmitMethods().
+		emitBeforeModelSelect: async () => undefined,
 	};
 
 	return runtime;
@@ -577,6 +579,10 @@ function createExtensionAPI(
 
 		unregisterProvider(name: string) {
 			runtime.unregisterProvider(name);
+		},
+
+		async emitBeforeModelSelect(event: Omit<import("./types.js").BeforeModelSelectEvent, "type">): Promise<import("./types.js").BeforeModelSelectResult | undefined> {
+			return runtime.emitBeforeModelSelect(event);
 		},
 
 		events: eventBus,

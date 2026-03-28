@@ -10,7 +10,7 @@ import type { GSDPreferences } from "./preferences.js";
 import { resolveModelWithFallbacksForUnit, resolveDynamicRoutingConfig } from "./preferences.js";
 import type { ComplexityTier } from "./complexity-classifier.js";
 import { classifyUnitComplexity, tierLabel } from "./complexity-classifier.js";
-import { resolveModelForComplexity, escalateTier } from "./model-router.js";
+import { resolveModelForComplexity, escalateTier, getEligibleModels, loadCapabilityOverrides } from "./model-router.js";
 import { getLedger, getProjectTotals } from "./metrics.js";
 import { unitPhaseLabel } from "./auto-dashboard.js";
 
@@ -107,7 +107,65 @@ export async function selectAndApplyModel(
           }
         }
 
-        const routingResult = resolveModelForComplexity(classification, modelConfig, routingConfig, availableModelIds);
+        // Load user capability overrides from preferences (D-17: deep-merged with built-in profiles)
+        const capabilityOverrides = loadCapabilityOverrides(
+          (prefs as { modelOverrides?: Record<string, { capabilities?: Record<string, number> }> } | undefined) ?? {},
+        );
+
+        // Fire before_model_select hook (ADR-004, D-03)
+        // Hook can override model selection entirely by returning { modelId }
+        let hookOverride: string | undefined;
+        if (routingConfig.hooks !== false) {
+          const eligible = getEligibleModels(
+            classification.tier,
+            availableModelIds,
+            routingConfig,
+          );
+          const hookResult = await pi.emitBeforeModelSelect({
+            unitType,
+            unitId,
+            classification: {
+              tier: classification.tier,
+              reason: classification.reason,
+              downgraded: classification.downgraded,
+            },
+            taskMetadata: classification.taskMetadata as Record<string, unknown> | undefined,
+            eligibleModels: eligible,
+            phaseConfig: modelConfig ? {
+              primary: modelConfig.primary,
+              fallbacks: modelConfig.fallbacks ?? [],
+            } : undefined,
+          });
+          if (hookResult?.modelId) {
+            hookOverride = hookResult.modelId;
+          }
+        }
+
+        let routingResult: ReturnType<typeof resolveModelForComplexity>;
+        if (hookOverride) {
+          // Hook override bypasses capability scoring entirely
+          routingResult = {
+            modelId: hookOverride,
+            fallbacks: [
+              ...(modelConfig?.fallbacks ?? []).filter(f => f !== hookOverride),
+              ...(modelConfig?.primary && modelConfig.primary !== hookOverride ? [modelConfig.primary] : []),
+            ],
+            tier: classification.tier,
+            wasDowngraded: hookOverride !== modelConfig?.primary,
+            reason: `hook override: ${hookOverride}`,
+            selectionMethod: "tier-only",
+          };
+        } else {
+          routingResult = resolveModelForComplexity(
+            classification,
+            modelConfig,
+            routingConfig,
+            availableModelIds,
+            unitType,
+            classification.taskMetadata,
+            capabilityOverrides,
+          );
+        }
 
         if (routingResult.wasDowngraded) {
           effectiveModelConfig = {
@@ -115,10 +173,23 @@ export async function selectAndApplyModel(
             fallbacks: routingResult.fallbacks,
           };
           if (verbose) {
-            ctx.ui.notify(
-              `Dynamic routing [${tierLabel(classification.tier)}]: ${routingResult.modelId} (${classification.reason})`,
-              "info",
-            );
+            if (routingResult.selectionMethod === "capability-scored" && routingResult.capabilityScores) {
+              // Verbose scoring breakdown for capability-scored decisions (D-20)
+              const tierLbl = tierLabel(classification.tier);
+              const scores = Object.entries(routingResult.capabilityScores)
+                .sort(([, a], [, b]) => b - a)
+                .map(([id, score]) => `${id}: ${score.toFixed(1)}`)
+                .join(", ");
+              ctx.ui.notify(
+                `Dynamic routing [${tierLbl}]: ${routingResult.modelId} (capability-scored) — ${scores}`,
+                "info",
+              );
+            } else {
+              ctx.ui.notify(
+                `Dynamic routing [${tierLabel(classification.tier)}]: ${routingResult.modelId} (${classification.reason})`,
+                "info",
+              );
+            }
           }
         }
         routingTierLabel = ` [${tierLabel(classification.tier)}]`;
