@@ -52,7 +52,7 @@ completed: 2026-03-28
 - **Duration:** ~5 min
 - **Started:** 2026-03-28T20:23:00Z
 - **Completed:** 2026-03-28T20:27:55Z
-- **Tasks completed:** 2/3 (Task 3 is checkpoint:human-verify, pending user verification)
+- **Tasks completed:** 2/3 (Task 3 is checkpoint:human-verify, deferred to UAT)
 - **Files modified:** 3
 
 ## Accomplishments
@@ -75,7 +75,7 @@ Each task was committed atomically:
 1. **Task 1: Register remote-access section in settings surface** - `31bb5e9a`
 2. **Task 2: Build RemoteAccessPanel with password form, Tailscale status with toggle, and setup assistant** - `eada9f59`
 
-**Task 3 (checkpoint:human-verify):** Awaiting user visual verification
+**Task 3 (checkpoint:human-verify):** Deferred to UAT — user chose "Continue without validation"
 
 ## Files Created/Modified
 
