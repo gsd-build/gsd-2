@@ -414,6 +414,84 @@ test("runProviderChecks reports ok via Copilot auth.json for Anthropic", () => {
   });
 });
 
+test("runProviderChecks reports Gemini models as available via Google Gemini CLI", () => {
+  withEnv({ GEMINI_API_KEY: undefined }, () => {
+    const tmpHome = realpathSync(mkdtempSync(join(tmpdir(), "gsd-providers-gemini-cli-home-")));
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "gsd-providers-gemini-cli-repo-")));
+    const agentDir = join(tmpHome, ".gsd", "agent");
+    mkdirSync(agentDir, { recursive: true });
+    mkdirSync(join(repo, ".gsd"), { recursive: true });
+    writeFileSync(
+      join(repo, ".gsd", "PREFERENCES.md"),
+      [
+        "---",
+        "models:",
+        "  execution: gemini-2.5-pro",
+        "---",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(agentDir, "auth.json"),
+      JSON.stringify({
+        "google-gemini-cli": { type: "oauth", apiKey: "ya29.gemini-cli", expires: Date.now() + 3_600_000 },
+      }),
+    );
+
+    withEnv({ HOME: tmpHome }, () => {
+      withCwd(repo, () => {
+        const results = runProviderChecks();
+        const google = results.find(r => r.name === "google");
+        assert.ok(google, "google result should exist");
+        assert.equal(google!.status, "ok", "should be ok when Gemini CLI auth is available");
+        assert.ok(google!.message.includes("Google Gemini CLI"), "should mention Gemini CLI as the serving route");
+      });
+    });
+
+    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  });
+});
+
+test("runProviderChecks reports OpenAI models as available via Codex auth", () => {
+  withEnv({ OPENAI_API_KEY: undefined }, () => {
+    const tmpHome = realpathSync(mkdtempSync(join(tmpdir(), "gsd-providers-codex-home-")));
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "gsd-providers-codex-repo-")));
+    const agentDir = join(tmpHome, ".gsd", "agent");
+    mkdirSync(agentDir, { recursive: true });
+    mkdirSync(join(repo, ".gsd"), { recursive: true });
+    writeFileSync(
+      join(repo, ".gsd", "PREFERENCES.md"),
+      [
+        "---",
+        "models:",
+        "  execution: gpt-5.4",
+        "---",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(agentDir, "auth.json"),
+      JSON.stringify({
+        "openai-codex": { type: "oauth", apiKey: "codex-session-token", expires: Date.now() + 3_600_000 },
+      }),
+    );
+
+    withEnv({ HOME: tmpHome }, () => {
+      withCwd(repo, () => {
+        const results = runProviderChecks();
+        const openai = results.find(r => r.name === "openai");
+        assert.ok(openai, "openai result should exist");
+        assert.equal(openai!.status, "ok", "should be ok when Codex auth is available");
+        assert.ok(openai!.message.includes("Codex"), "should mention Codex as the serving route");
+      });
+    });
+
+    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  });
+});
+
 test("runProviderChecks uses provider-qualified anthropic-vertex model IDs", () => {
   const tmpHome = realpathSync(mkdtempSync(join(tmpdir(), "gsd-providers-vertex-prefix-home-")));
   const repo = realpathSync(mkdtempSync(join(tmpdir(), "gsd-providers-vertex-prefix-repo-")));

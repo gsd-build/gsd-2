@@ -56,9 +56,11 @@ function modelToProviderId(model: string): string | null {
       groq: "groq",
       mistral: "mistral",
       google: "google",
+      "google-gemini-cli": "google-gemini-cli",
       "google-vertex": "google-vertex",
       anthropic: "anthropic",
       openai: "openai",
+      "openai-codex": "openai-codex",
       "github-copilot": "github-copilot",
     };
     if (prefixMap[prefix]) return prefixMap[prefix];
@@ -181,7 +183,8 @@ function resolveKey(providerId: string): KeyLookup {
  */
 const PROVIDER_ROUTES: Record<string, string[]> = {
   anthropic: ["github-copilot"],
-  openai: ["github-copilot"],
+  openai: ["github-copilot", "openai-codex"],
+  google: ["google-gemini-cli"],
 };
 
 function checkLlmProviders(): ProviderCheckResult[] {
