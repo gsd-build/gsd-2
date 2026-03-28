@@ -37,7 +37,7 @@ Before asking your first question, do a mandatory investigation pass. This is no
 3. **Web search** — `search-the-web` if the domain is unfamiliar, if you need current best practices, or if the user referenced external services/APIs you need facts about. Use `fetch_page` for full content when snippets aren't enough.
 
 **Web search budget:** You have a limited number of web searches per turn (typically 3-5). The discuss phase spans many turns (investigation, question rounds, focused research, requirements), so budget carefully:
-- Prefer `resolve_library` / `get_library_docs` over `web_search` for library documentation — they don't consume the web search budget.
+- Prefer `resolve_library` / `get_library_docs` over `search-the-web` for library documentation — they don't consume the web search budget.
 - Prefer `search_and_read` for one-shot topic research — it combines search + page fetch in a single call.
 - Target 2-3 web searches in the investigation pass. Save remaining budget for the focused research pass before roadmap creation.
 - Do NOT repeat the same or similar queries. If a search didn't find what you need, rephrase once or move on.
