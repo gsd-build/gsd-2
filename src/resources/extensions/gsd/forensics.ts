@@ -28,6 +28,7 @@ import { deriveState } from "./state.js";
 import { isAutoActive } from "./auto.js";
 import { loadPrompt } from "./prompt-loader.js";
 import { gsdRoot } from "./paths.js";
+import { getForensicsSessionKey, persistActiveForensicsSession } from "./forensics-session.js";
 import { formatDuration } from "../shared/format-utils.js";
 import { getAutoWorktreePath } from "./auto-worktree.js";
 import { loadEffectiveGSDPreferences, loadGlobalGSDPreferences, getGlobalGSDPreferencesPath } from "./preferences.js";
@@ -226,6 +227,10 @@ export async function handleForensics(
 
   const report = await buildForensicReport(basePath);
   const savedPath = saveForensicReport(basePath, report, problemDescription);
+  const sessionKey = getForensicsSessionKey(ctx);
+  if (sessionKey) {
+    await persistActiveForensicsSession(basePath, sessionKey, savedPath);
+  }
 
   // Derive GSD source dir for prompt — fall back to ~/.gsd/agent/extensions/gsd/
   // when import.meta.url resolves to the npm-global install path (Windows).

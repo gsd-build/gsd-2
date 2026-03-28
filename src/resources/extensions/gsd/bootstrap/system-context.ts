@@ -15,6 +15,7 @@ import { deriveState } from "../state.js";
 import { formatOverridesSection, loadActiveOverrides, loadFile, parseContinue, parseSummary } from "../files.js";
 import { toPosixPath } from "../../shared/mod.js";
 import { markCmuxPromptShown, shouldPromptToEnableCmux } from "../../cmux/index.js";
+import { getForensicsSessionKey, loadActiveForensicsContext } from "../forensics-session.js";
 
 const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
 
@@ -97,23 +98,25 @@ export async function buildBeforeAgentStartResult(
   warnDeprecatedAgentInstructions();
 
   const injection = await buildGuidedExecuteContextInjection(event.prompt, process.cwd());
+  const forensicsInjection = loadActiveForensicsContext(process.cwd(), getForensicsSessionKey(ctx), event.prompt);
   const worktreeBlock = buildWorktreeContextBlock();
   const fullSystem = `${event.systemPrompt}\n\n[SYSTEM CONTEXT — GSD]\n\n${systemContent}${preferenceBlock}${knowledgeBlock}${memoryBlock}${newSkillsBlock}${worktreeBlock}`;
+  const combinedInjection = [injection, forensicsInjection].filter((value): value is string => Boolean(value));
 
   stopContextTimer({
     systemPromptSize: fullSystem.length,
-    injectionSize: injection?.length ?? 0,
+    injectionSize: combinedInjection.join("\n\n---\n\n").length,
     hasPreferences: preferenceBlock.length > 0,
     hasNewSkills: newSkillsBlock.length > 0,
   });
 
   return {
     systemPrompt: fullSystem,
-    ...(injection
+    ...(combinedInjection.length > 0
       ? {
         message: {
-          customType: "gsd-guided-context",
-          content: injection,
+          customType: forensicsInjection ? "gsd-forensics-context" : "gsd-guided-context",
+          content: combinedInjection.join("\n\n---\n\n"),
           display: false as const,
         },
       }
@@ -374,4 +377,3 @@ function escapeRegExp(value: string): string {
 function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
-
