@@ -1220,25 +1220,43 @@ export function getActiveAutoWorktreeContext(): {
 // ─── Merge Milestone -> Main ───────────────────────────────────────────────
 
 /**
- * Pop the most recent stash entry, auto-resolving conflicts (#3141).
- * On conflict: .gsd/ files accept HEAD, non-.gsd files also accept HEAD
- * (merge just committed, so HEAD is authoritative). Always drops the stash.
+ * Resolve the top stash ref (if present) and return its commit hash.
  */
-function popStashSafely(basePath: string): void {
+function topStashRef(basePath: string): string | null {
   try {
-    execFileSync("git", ["stash", "pop"], {
+    const ref = execFileSync("git", ["rev-parse", "--verify", "-q", "refs/stash"], {
+      cwd: basePath,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf-8",
+    }).trim();
+    return ref || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pop a specific stash entry, auto-resolving only .gsd/ conflicts.
+ * Non-.gsd conflicts are preserved for manual recovery.
+ */
+function popStashSafely(basePath: string, stashRef: string): void {
+  try {
+    execFileSync("git", ["stash", "pop", stashRef], {
       cwd: basePath,
       stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf-8",
     });
     return;
   } catch {
-    // Pop conflicted — auto-resolve ALL conflicts by accepting HEAD
+    // Pop conflicted — auto-resolve only .gsd/ conflicts by accepting HEAD
   }
 
   const uu = nativeConflictFiles(basePath);
-  if (uu.length > 0) {
-    for (const f of uu) {
+  const gsdUU = uu.filter((f) => f.startsWith(".gsd/"));
+  const nonGsdUU = uu.filter((f) => !f.startsWith(".gsd/"));
+
+  if (gsdUU.length > 0) {
+    for (const f of gsdUU) {
       try {
         execFileSync("git", ["checkout", "HEAD", "--", f], {
           cwd: basePath,
@@ -1250,14 +1268,21 @@ function popStashSafely(basePath: string): void {
         nativeRmForce(basePath, [f]);
       }
     }
-    logWarning("reconcile", "Auto-resolved stash pop conflicts by accepting HEAD", {
-      files: uu.join(", "),
+    logWarning("reconcile", "Auto-resolved .gsd stash pop conflicts by accepting HEAD", {
+      files: gsdUU.join(", "),
     });
   }
 
-  // Always drop the stash — it's been applied (with resolutions)
+  if (nonGsdUU.length > 0) {
+    logWarning("reconcile", "Stash pop conflict on non-.gsd files after merge", {
+      files: nonGsdUU.join(", "),
+    });
+    return;
+  }
+
+  // All conflicts were .gsd/ files — safe to drop the stash entry.
   try {
-    execFileSync("git", ["stash", "drop"], {
+    execFileSync("git", ["stash", "drop", stashRef], {
       cwd: basePath,
       stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf-8",
@@ -1274,9 +1299,11 @@ function popStashSafely(basePath: string): void {
  *  3. If stash fails (e.g., conflict markers from prior ops), abort+reset via git-self-heal
  *  4. If still dirty, throw with diagnostic file listing
  *
- * Returns whether files were stashed (caller must pop after merge).
+ * Returns whether files were stashed and the exact stash ref to pop.
  */
-export function ensureCleanWorkingTree(basePath: string): { stashed: boolean; cleaned: string[] } {
+export function ensureCleanWorkingTree(
+  basePath: string,
+): { stashed: boolean; cleaned: string[]; stashRef: string | null } {
   const cleaned: string[] = [];
 
   // Step 1: Discard .gsd/ tracked file changes — these are runtime state, not user code
@@ -1300,23 +1327,31 @@ export function ensureCleanWorkingTree(basePath: string): { stashed: boolean; cl
       encoding: "utf-8",
     }).trim();
   } catch {
-    return { stashed: false, cleaned };
+    return { stashed: false, cleaned, stashRef: null };
   }
 
   if (!status) {
-    return { stashed: false, cleaned };
+    return { stashed: false, cleaned, stashRef: null };
   }
 
   // Step 3: Stash dirty files including untracked (matches pre-#3141 behavior)
   let stashed = false;
+  let stashRef: string | null = null;
   try {
+    const beforeStash = topStashRef(basePath);
     execFileSync(
       "git",
       ["stash", "push", "--include-untracked", "-m", `gsd: pre-merge clean state`],
       { cwd: basePath, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" },
     );
-    stashed = true;
-    cleaned.push("stashed tracked dirty files");
+    const afterStash = topStashRef(basePath);
+    if (afterStash && afterStash !== beforeStash) {
+      stashed = true;
+      stashRef = afterStash;
+      cleaned.push("stashed tracked dirty files");
+    } else {
+      cleaned.push("stash reported no tracked changes");
+    }
   } catch (stashErr) {
     // Stash can fail when conflict markers exist — escalate to abort+reset
     logWarning("reconcile", "git stash failed, escalating to abort+reset", {
@@ -1352,8 +1387,8 @@ export function ensureCleanWorkingTree(basePath: string): { stashed: boolean; cl
     cleaned.push("abort+reset succeeded");
   }
 
-  debugLog("ensureCleanWorkingTree", { basePath, stashed, cleaned });
-  return { stashed, cleaned };
+  debugLog("ensureCleanWorkingTree", { basePath, stashed, stashRef, cleaned });
+  return { stashed, cleaned, stashRef };
 }
 
 /**
@@ -1555,8 +1590,10 @@ export function mergeMilestoneToMain(
   // Replaces the old stash-and-pray pattern with a guaranteed-clean-or-throw approach.
   // Uses ensureCleanWorkingTree() escalation ladder: discard .gsd/ → stash → abort+reset → throw.
   let stashed = false;
+  let stashRef: string | null = null;
   const cleanResult = ensureCleanWorkingTree(originalBasePath_);
   stashed = cleanResult.stashed;
+  stashRef = cleanResult.stashRef;
   if (cleanResult.cleaned.length > 0) {
     debugLog("mergeMilestoneToMain", { phase: "pre-merge-clean", cleaned: cleanResult.cleaned });
   }
@@ -1570,8 +1607,8 @@ export function mergeMilestoneToMain(
     // milestone branch so commits are not lost.
     if (mergeResult.conflicts.includes("__dirty_working_tree__")) {
       // Pop stash before throwing so local work is not lost (#3141).
-      if (stashed) {
-        popStashSafely(originalBasePath_);
+      if (stashed && stashRef) {
+        popStashSafely(originalBasePath_, stashRef);
       }
       // Restore cwd so the caller is not stranded on the integration branch
       process.chdir(previousCwd);
@@ -1620,8 +1657,8 @@ export function mergeMilestoneToMain(
       // If there are still real code conflicts, escalate
       if (codeConflicts.length > 0) {
         // Pop stash before throwing so local work is not lost (#2151, #3141).
-        if (stashed) {
-          popStashSafely(originalBasePath_);
+        if (stashed && stashRef) {
+          popStashSafely(originalBasePath_, stashRef);
         }
         throw new MergeConflictError(
           codeConflicts,
@@ -1650,10 +1687,10 @@ export function mergeMilestoneToMain(
 
   // 9a-ii. Restore stashed files now that the merge+commit is complete (#2151, #3141).
   // Pop after commit so stashed changes do not interfere with the squash merge
-  // or the commit content. Uses popStashSafely() which auto-resolves all
-  // conflicts by accepting HEAD (the just-committed version) and drops the stash.
-  if (stashed) {
-    popStashSafely(originalBasePath_);
+  // or the commit content. Uses popStashSafely() which auto-resolves only
+  // .gsd/ conflicts and preserves non-.gsd conflicts for manual recovery.
+  if (stashed && stashRef) {
+    popStashSafely(originalBasePath_, stashRef);
   }
 
   // 9b. Safety check (#1792): if nothing was committed, verify the milestone

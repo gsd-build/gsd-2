@@ -107,6 +107,7 @@ describe("ensureCleanWorkingTree", () => {
       true,
       "should stash when tracked non-.gsd/ files are dirty",
     );
+    assert.ok(result.stashRef, "stashRef should be set when a stash entry is created");
     assert.ok(
       result.cleaned.some((c) => c.includes("stash")),
       "cleaned array should mention stash operation",
@@ -119,6 +120,33 @@ describe("ensureCleanWorkingTree", () => {
     // Verify stash contains our change
     const stashList = run("git stash list", repoDir);
     assert.ok(stashList.includes("gsd:"), "stash should contain the gsd pre-merge entry");
+  });
+
+  test("does not mark stashed=true when only untracked files are dirty", () => {
+    // Create a pre-existing stash entry that should remain untouched.
+    writeFileSync(join(repoDir, "README.md"), "# Stashed baseline\n", "utf-8");
+    run("git stash push -m \"preexisting stash\"", repoDir);
+
+    // Leave only an untracked file dirty.
+    writeFileSync(join(repoDir, "new-untracked.txt"), "hello\n", "utf-8");
+
+    const result = ensureCleanWorkingTree(repoDir);
+    assert.strictEqual(
+      result.stashed,
+      false,
+      "untracked-only changes should not be reported as a created stash",
+    );
+    assert.strictEqual(
+      result.stashRef,
+      null,
+      "stashRef should remain null when no new stash entry is created",
+    );
+
+    const stashList = run("git stash list", repoDir);
+    assert.ok(
+      stashList.includes("preexisting stash"),
+      "pre-existing stash should still exist and remain untouched",
+    );
   });
 
   // ─── Case 4: stash fails → abort+reset path ───────────────────────────────
