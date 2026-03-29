@@ -33,7 +33,7 @@ export function resolveProjectRootDbPath(basePath: string): string {
   }
 
   // Symlink-resolved layout: /.gsd/projects/<hash>/worktrees/M001/...
-  // The project root is everything before /.gsd/projects/ (#2517)
+  // The project root is everything before /.gsd/projects/ (#2517, #2561)
   const symlinkMarker = `${sep}.gsd${sep}projects${sep}`;
   const symlinkIdx = basePath.indexOf(symlinkMarker);
   if (symlinkIdx !== -1) {
