@@ -1264,6 +1264,7 @@ function CopyableUrl({ url }: { url: string }) {
 }
 
 function PasswordSubsection({ onPasswordChange }: { onPasswordChange: () => void }) {
+  const [currentPassword, setCurrentPassword] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -1293,7 +1294,7 @@ function PasswordSubsection({ onPasswordChange }: { onPasswordChange: () => void
       const res = await authFetch("/api/settings/password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ newPassword: password }),
+        body: JSON.stringify({ ...(configured ? { currentPassword } : {}), newPassword: password }),
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: "Failed to save" })) as { error?: string }
@@ -1301,6 +1302,7 @@ function PasswordSubsection({ onPasswordChange }: { onPasswordChange: () => void
         return
       }
       toast.success("Password updated. Other devices have been logged out.")
+      setCurrentPassword("")
       setPassword("")
       setConfigured(true)
       onPasswordChange()
@@ -1322,7 +1324,17 @@ function PasswordSubsection({ onPasswordChange }: { onPasswordChange: () => void
           ? "Changing your password will log out all other devices."
           : "Set a password to enable remote access via Tailscale."}
       </p>
-      <form onSubmit={handleSave} className="flex items-end gap-2">
+      <form onSubmit={handleSave} className="space-y-2">
+        {configured && (
+          <Input
+            type="password"
+            placeholder="Current password"
+            value={currentPassword}
+            onChange={(e) => { setCurrentPassword(e.target.value); setError(null) }}
+            className="text-sm"
+          />
+        )}
+        <div className="flex items-end gap-2">
         <div className="relative flex-1">
           <Input
             type={showPassword ? "text" : "password"}
@@ -1342,9 +1354,10 @@ function PasswordSubsection({ onPasswordChange }: { onPasswordChange: () => void
             {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
           </Button>
         </div>
-        <Button type="submit" size="sm" disabled={saving || password.length < 4}>
+        <Button type="submit" size="sm" disabled={saving || password.length < 4 || (configured === true && currentPassword.length === 0)}>
           {saving ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : "Save"}
         </Button>
+        </div>
       </form>
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
