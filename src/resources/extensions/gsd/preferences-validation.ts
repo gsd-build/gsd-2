@@ -523,7 +523,15 @@ export function validatePreferences(preferences: GSDPreferences): {
         }
       }
 
-      const knownReKeys = new Set(["enabled", "max_parallel", "isolation_mode"]);
+      if (re.subagent_model !== undefined) {
+        if (typeof re.subagent_model === "string" && re.subagent_model.length > 0) {
+          validRe.subagent_model = re.subagent_model;
+        } else {
+          errors.push("reactive_execution.subagent_model must be a non-empty string");
+        }
+      }
+
+      const knownReKeys = new Set(["enabled", "max_parallel", "isolation_mode", "subagent_model"]);
       for (const key of Object.keys(re)) {
         if (!knownReKeys.has(key)) {
           warnings.push(`unknown reactive_execution key "${key}" — ignored`);
