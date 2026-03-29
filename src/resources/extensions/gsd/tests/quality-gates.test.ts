@@ -1,14 +1,13 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractSection } from "../files.ts";
-import { createTestContext } from "./test-helpers.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const templatesDir = join(__dirname, "..", "templates");
 const promptsDir = join(__dirname, "..", "prompts");
-
-const { assertTrue, report } = createTestContext();
 
 function loadTemplate(name: string): string {
   return readFileSync(join(templatesDir, `${name}.md`), "utf-8");
@@ -22,89 +21,86 @@ function loadPrompt(name: string): string {
 // Level 1: Templates contain quality gate headings
 // ═══════════════════════════════════════════════════════════════════════════
 
-console.log("\n=== Level 1: Templates contain quality gate headings ===");
-{
+test("Level 1: Templates contain quality gate headings", () => {
   const plan = loadTemplate("plan");
-  assertTrue(plan.includes("## Threat Surface"), "plan.md contains ## Threat Surface");
-  assertTrue(plan.includes("## Requirement Impact"), "plan.md contains ## Requirement Impact");
+  assert.ok(plan.includes("## Threat Surface"), "plan.md contains ## Threat Surface");
+  assert.ok(plan.includes("## Requirement Impact"), "plan.md contains ## Requirement Impact");
 
   const taskPlan = loadTemplate("task-plan");
-  assertTrue(taskPlan.includes("## Failure Modes"), "task-plan.md contains ## Failure Modes");
-  assertTrue(taskPlan.includes("## Load Profile"), "task-plan.md contains ## Load Profile");
-  assertTrue(taskPlan.includes("## Negative Tests"), "task-plan.md contains ## Negative Tests");
+  assert.ok(taskPlan.includes("## Failure Modes"), "task-plan.md contains ## Failure Modes");
+  assert.ok(taskPlan.includes("## Load Profile"), "task-plan.md contains ## Load Profile");
+  assert.ok(taskPlan.includes("## Negative Tests"), "task-plan.md contains ## Negative Tests");
 
   const sliceSummary = loadTemplate("slice-summary");
-  assertTrue(sliceSummary.includes("## Operational Readiness"), "slice-summary.md contains ## Operational Readiness");
+  assert.ok(sliceSummary.includes("## Operational Readiness"), "slice-summary.md contains ## Operational Readiness");
 
   const roadmap = loadTemplate("roadmap");
-  assertTrue(roadmap.includes("## Horizontal Checklist"), "roadmap.md contains ## Horizontal Checklist");
+  assert.ok(roadmap.includes("## Horizontal Checklist"), "roadmap.md contains ## Horizontal Checklist");
 
   const milestoneSummary = loadTemplate("milestone-summary");
-  assertTrue(milestoneSummary.includes("## Decision Re-evaluation"), "milestone-summary.md contains ## Decision Re-evaluation");
-}
+  assert.ok(milestoneSummary.includes("## Decision Re-evaluation"), "milestone-summary.md contains ## Decision Re-evaluation");
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Level 2: Prompts reference quality gates
 // ═══════════════════════════════════════════════════════════════════════════
 
-console.log("\n=== Level 2: Prompts reference quality gates ===");
-{
+test("Level 2: Prompts reference quality gates", () => {
   const planSlice = loadPrompt("plan-slice");
-  assertTrue(planSlice.includes("Threat Surface"), "plan-slice.md mentions Threat Surface");
-  assertTrue(planSlice.includes("Requirement Impact"), "plan-slice.md mentions Requirement Impact");
-  assertTrue(planSlice.toLowerCase().includes("quality gate"), "plan-slice.md mentions quality gate");
+  assert.ok(planSlice.includes("Threat Surface"), "plan-slice.md mentions Threat Surface");
+  assert.ok(planSlice.includes("Requirement Impact"), "plan-slice.md mentions Requirement Impact");
+  assert.ok(planSlice.toLowerCase().includes("quality gate"), "plan-slice.md mentions quality gate");
 
   const guidedPlanSlice = loadPrompt("guided-plan-slice");
-  assertTrue(
+  assert.ok(
     guidedPlanSlice.includes("Threat Surface") || guidedPlanSlice.includes("Q3"),
     "guided-plan-slice.md mentions Threat Surface or Q3"
   );
 
   const executeTask = loadPrompt("execute-task");
-  assertTrue(executeTask.includes("Failure Modes"), "execute-task.md mentions Failure Modes");
-  assertTrue(executeTask.includes("Load Profile"), "execute-task.md mentions Load Profile");
-  assertTrue(executeTask.includes("Negative Tests"), "execute-task.md mentions Negative Tests");
+  assert.ok(executeTask.includes("Failure Modes"), "execute-task.md mentions Failure Modes");
+  assert.ok(executeTask.includes("Load Profile"), "execute-task.md mentions Load Profile");
+  assert.ok(executeTask.includes("Negative Tests"), "execute-task.md mentions Negative Tests");
 
   const guidedExecuteTask = loadPrompt("guided-execute-task");
-  assertTrue(
+  assert.ok(
     guidedExecuteTask.includes("Failure Modes") || guidedExecuteTask.includes("Q5"),
     "guided-execute-task.md mentions Failure Modes or Q5"
   );
 
   const completeSlice = loadPrompt("complete-slice");
-  assertTrue(completeSlice.includes("Operational Readiness"), "complete-slice.md mentions Operational Readiness");
+  assert.ok(completeSlice.includes("Operational Readiness"), "complete-slice.md mentions Operational Readiness");
 
   const guidedCompleteSlice = loadPrompt("guided-complete-slice");
-  assertTrue(
+  assert.ok(
     guidedCompleteSlice.includes("Operational Readiness") || guidedCompleteSlice.includes("Q8"),
     "guided-complete-slice.md mentions Operational Readiness or Q8"
   );
 
   const completeMilestone = loadPrompt("complete-milestone");
-  assertTrue(completeMilestone.includes("Horizontal Checklist"), "complete-milestone.md mentions Horizontal Checklist");
-  assertTrue(completeMilestone.includes("Decision Re-evaluation"), "complete-milestone.md mentions Decision Re-evaluation");
+  assert.ok(completeMilestone.includes("Horizontal Checklist"), "complete-milestone.md mentions Horizontal Checklist");
+  assert.ok(completeMilestone.includes("Decision Re-evaluation"), "complete-milestone.md mentions Decision Re-evaluation");
 
   const planMilestone = loadPrompt("plan-milestone");
-  assertTrue(planMilestone.toLowerCase().includes("horizontal checklist"), "plan-milestone.md mentions horizontal checklist");
+  assert.ok(planMilestone.toLowerCase().includes("horizontal checklist"), "plan-milestone.md mentions horizontal checklist");
 
   const guidedPlanMilestone = loadPrompt("guided-plan-milestone");
-  assertTrue(guidedPlanMilestone.includes("Horizontal Checklist"), "guided-plan-milestone.md mentions Horizontal Checklist");
+  assert.ok(guidedPlanMilestone.includes("Horizontal Checklist"), "guided-plan-milestone.md mentions Horizontal Checklist");
 
   const reassess = loadPrompt("reassess-roadmap");
-  assertTrue(reassess.includes("Threat Surface"), "reassess-roadmap.md mentions Threat Surface");
-  assertTrue(reassess.includes("Operational Readiness"), "reassess-roadmap.md mentions Operational Readiness");
-  assertTrue(reassess.includes("Horizontal Checklist"), "reassess-roadmap.md mentions Horizontal Checklist");
+  assert.ok(reassess.includes("Threat Surface"), "reassess-roadmap.md mentions Threat Surface");
+  assert.ok(reassess.includes("Operational Readiness"), "reassess-roadmap.md mentions Operational Readiness");
+  assert.ok(reassess.includes("Horizontal Checklist"), "reassess-roadmap.md mentions Horizontal Checklist");
 
   const replan = loadPrompt("replan-slice");
-  assertTrue(replan.includes("Threat Surface"), "replan-slice.md mentions Threat Surface");
-}
+  assert.ok(replan.includes("Threat Surface"), "replan-slice.md mentions Threat Surface");
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Level 3: Parser backward compatibility — extractSection handles new headings
 // ═══════════════════════════════════════════════════════════════════════════
 
-console.log("\n=== Level 3: extractSection backward compatibility ===");
-{
+test("Level 3: extractSection backward compatibility", () => {
   // Old-style slice plan (no quality gate sections)
   const oldPlan = `# S01: Auth Flow
 
@@ -158,38 +154,38 @@ console.log("\n=== Level 3: extractSection backward compatibility ===");
 `;
 
   // Old plan: quality gate sections return null (not found)
-  assertTrue(
+  assert.ok(
     extractSection(oldPlan, "Threat Surface") === null,
     "extractSection returns null for Threat Surface on old plan"
   );
-  assertTrue(
+  assert.ok(
     extractSection(oldPlan, "Requirement Impact") === null,
     "extractSection returns null for Requirement Impact on old plan"
   );
 
   // Old plan: core sections still parse correctly
   const oldMustHaves = extractSection(oldPlan, "Must-Haves");
-  assertTrue(
+  assert.ok(
     oldMustHaves !== null && oldMustHaves.includes("Login form works"),
     "extractSection still parses Must-Haves on old plan"
   );
 
   // New plan: quality gate sections are extracted
   const threatSurface = extractSection(newPlan, "Threat Surface");
-  assertTrue(
+  assert.ok(
     threatSurface !== null && threatSurface.includes("Credential stuffing"),
     "extractSection extracts Threat Surface content from new plan"
   );
 
   const reqImpact = extractSection(newPlan, "Requirement Impact");
-  assertTrue(
+  assert.ok(
     reqImpact !== null && reqImpact.includes("R001"),
     "extractSection extracts Requirement Impact content from new plan"
   );
 
   // New plan: core sections still parse correctly
   const newMustHaves = extractSection(newPlan, "Must-Haves");
-  assertTrue(
+  assert.ok(
     newMustHaves !== null && newMustHaves.includes("Login form works"),
     "extractSection still parses Must-Haves on new plan"
   );
@@ -223,13 +219,13 @@ Build the login endpoint.
 1. Create route
 `;
 
-  assertTrue(
+  assert.ok(
     extractSection(oldTaskPlan, "Failure Modes") === null,
     "extractSection returns null for Failure Modes on old task plan"
   );
 
   const failureModes = extractSection(newTaskPlan, "Failure Modes");
-  assertTrue(
+  assert.ok(
     failureModes !== null && failureModes.includes("Auth DB"),
     "extractSection extracts Failure Modes content from new task plan"
   );
@@ -268,35 +264,34 @@ All tests pass.
 None.
 `;
 
-  assertTrue(
+  assert.ok(
     extractSection(oldSummary, "Operational Readiness") === null,
     "extractSection returns null for Operational Readiness on old summary"
   );
 
   const opReadiness = extractSection(newSummary, "Operational Readiness");
-  assertTrue(
+  assert.ok(
     opReadiness !== null && opReadiness.includes("/health endpoint"),
     "extractSection extracts Operational Readiness content from new summary"
   );
-}
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Level 4: Template section ordering is correct
 // ═══════════════════════════════════════════════════════════════════════════
 
-console.log("\n=== Level 4: Template section ordering ===");
-{
+test("Level 4: Template section ordering", () => {
   const plan = loadTemplate("plan");
   const mustHavesIdx = plan.indexOf("## Must-Haves");
   const threatIdx = plan.indexOf("## Threat Surface");
   const proofIdx = plan.indexOf("## Proof Level");
-  assertTrue(
+  assert.ok(
     mustHavesIdx < threatIdx && threatIdx < proofIdx,
     "plan.md: Threat Surface is between Must-Haves and Proof Level"
   );
 
   const reqImpactIdx = plan.indexOf("## Requirement Impact");
-  assertTrue(
+  assert.ok(
     threatIdx < reqImpactIdx && reqImpactIdx < proofIdx,
     "plan.md: Requirement Impact is between Threat Surface and Proof Level"
   );
@@ -305,14 +300,14 @@ console.log("\n=== Level 4: Template section ordering ===");
   const descIdx = taskPlan.indexOf("## Description");
   const failIdx = taskPlan.indexOf("## Failure Modes");
   const stepsIdx = taskPlan.indexOf("## Steps");
-  assertTrue(
+  assert.ok(
     descIdx < failIdx && failIdx < stepsIdx,
     "task-plan.md: Failure Modes is between Description and Steps"
   );
 
   const loadIdx = taskPlan.indexOf("## Load Profile");
   const negIdx = taskPlan.indexOf("## Negative Tests");
-  assertTrue(
+  assert.ok(
     failIdx < loadIdx && loadIdx < negIdx && negIdx < stepsIdx,
     "task-plan.md: Failure Modes < Load Profile < Negative Tests < Steps"
   );
@@ -321,7 +316,7 @@ console.log("\n=== Level 4: Template section ordering ===");
   const reqInvalidIdx = sliceSummary.indexOf("## Requirements Invalidated");
   const opIdx = sliceSummary.indexOf("## Operational Readiness");
   const devIdx = sliceSummary.indexOf("## Deviations");
-  assertTrue(
+  assert.ok(
     reqInvalidIdx < opIdx && opIdx < devIdx,
     "slice-summary.md: Operational Readiness is between Requirements Invalidated and Deviations"
   );
@@ -329,7 +324,7 @@ console.log("\n=== Level 4: Template section ordering ===");
   const roadmap = loadTemplate("roadmap");
   const horizIdx = roadmap.indexOf("## Horizontal Checklist");
   const boundaryIdx = roadmap.indexOf("## Boundary Map");
-  assertTrue(
+  assert.ok(
     horizIdx > 0 && horizIdx < boundaryIdx,
     "roadmap.md: Horizontal Checklist is before Boundary Map"
   );
@@ -338,10 +333,8 @@ console.log("\n=== Level 4: Template section ordering ===");
   const reqChangesIdx = milestoneSummary.indexOf("## Requirement Changes");
   const decRevalIdx = milestoneSummary.indexOf("## Decision Re-evaluation");
   const fwdIntelIdx = milestoneSummary.indexOf("## Forward Intelligence");
-  assertTrue(
+  assert.ok(
     reqChangesIdx < decRevalIdx && decRevalIdx < fwdIntelIdx,
     "milestone-summary.md: Decision Re-evaluation is between Requirement Changes and Forward Intelligence"
   );
-}
-
-report();
+});
