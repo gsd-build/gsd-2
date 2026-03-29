@@ -4,6 +4,7 @@ import { isNonEmptyString, validateStringArray } from "../validation.js";
 import {
   transaction,
   getMilestone,
+  getSlice,
   insertMilestone,
   insertSlice,
   upsertMilestonePlanning,
@@ -226,11 +227,18 @@ export async function handlePlanMilestone(
       });
 
       for (const slice of params.slices) {
+        // Preserve completed/done status on re-plan (#2558).
+        // Without this, a re-plan after milestone transition would reset
+        // already-completed slices back to "pending".
+        const existing = getSlice(params.milestoneId, slice.sliceId);
+        const status = existing && (existing.status === "complete" || existing.status === "done")
+          ? existing.status
+          : "pending";
         insertSlice({
           id: slice.sliceId,
           milestoneId: params.milestoneId,
           title: slice.title,
-          status: "pending",
+          status,
           risk: slice.risk,
           depends: slice.depends,
           demo: slice.demo,

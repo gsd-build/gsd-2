@@ -1169,13 +1169,25 @@ export function insertSlice(s: {
 }): void {
   if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
   currentDb.prepare(
-    `INSERT OR IGNORE INTO slices (
+    `INSERT INTO slices (
       milestone_id, id, title, status, risk, depends, demo, created_at,
       goal, success_criteria, proof_level, integration_closure, observability_impact, sequence
     ) VALUES (
       :milestone_id, :id, :title, :status, :risk, :depends, :demo, :created_at,
       :goal, :success_criteria, :proof_level, :integration_closure, :observability_impact, :sequence
-    )`,
+    )
+    ON CONFLICT (milestone_id, id) DO UPDATE SET
+      title = excluded.title,
+      status = CASE WHEN slices.status IN ('complete', 'done') THEN slices.status ELSE excluded.status END,
+      risk = excluded.risk,
+      depends = excluded.depends,
+      demo = excluded.demo,
+      goal = excluded.goal,
+      success_criteria = excluded.success_criteria,
+      proof_level = excluded.proof_level,
+      integration_closure = excluded.integration_closure,
+      observability_impact = excluded.observability_impact,
+      sequence = excluded.sequence`,
   ).run({
     ":milestone_id": s.milestoneId,
     ":id": s.id,
@@ -1850,20 +1862,32 @@ export function reconcileWorktreeDb(
           FROM wt.milestones
         `).run());
 
-        // Merge slices — preserve worktree progress (status, summaries, planning)
+        // Merge slices — preserve worktree progress but never downgrade completed status (#2558).
+        // Uses INSERT OR REPLACE with a subquery that picks the best status — if the main DB
+        // already has a completed slice, keep that status even if the worktree copy is stale.
         merged.slices = countChanges(adapter.prepare(`
           INSERT OR REPLACE INTO slices (
             milestone_id, id, title, status, risk, depends, demo, created_at, completed_at,
             full_summary_md, full_uat_md, goal, success_criteria, proof_level,
             integration_closure, observability_impact, sequence, replan_triggered_at
           )
-          SELECT milestone_id, id, title, status, risk, depends, demo, created_at, completed_at,
-                 full_summary_md, full_uat_md, goal, success_criteria, proof_level,
-                 integration_closure, observability_impact, sequence, replan_triggered_at
-          FROM wt.slices
+          SELECT w.milestone_id, w.id, w.title,
+                 CASE
+                   WHEN m.status IN ('complete', 'done') AND w.status NOT IN ('complete', 'done')
+                   THEN m.status ELSE w.status
+                 END,
+                 w.risk, w.depends, w.demo, w.created_at,
+                 CASE
+                   WHEN m.status IN ('complete', 'done') AND w.status NOT IN ('complete', 'done')
+                   THEN m.completed_at ELSE w.completed_at
+                 END,
+                 w.full_summary_md, w.full_uat_md, w.goal, w.success_criteria, w.proof_level,
+                 w.integration_closure, w.observability_impact, w.sequence, w.replan_triggered_at
+          FROM wt.slices w
+          LEFT JOIN slices m ON m.milestone_id = w.milestone_id AND m.id = w.id
         `).run());
 
-        // Merge tasks — preserve execution results, status, summaries
+        // Merge tasks — preserve execution results, never downgrade completed status (#2558)
         merged.tasks = countChanges(adapter.prepare(`
           INSERT OR REPLACE INTO tasks (
             milestone_id, slice_id, id, title, status, one_liner, narrative,
@@ -1872,12 +1896,23 @@ export function reconcileWorktreeDb(
             description, estimate, files, verify, inputs, expected_output,
             observability_impact, full_plan_md, sequence
           )
-          SELECT milestone_id, slice_id, id, title, status, one_liner, narrative,
-                 verification_result, duration, completed_at, blocker_discovered,
-                 deviations, known_issues, key_files, key_decisions, full_summary_md,
-                 description, estimate, files, verify, inputs, expected_output,
-                 observability_impact, full_plan_md, sequence
-          FROM wt.tasks
+          SELECT w.milestone_id, w.slice_id, w.id, w.title,
+                 CASE
+                   WHEN m.status IN ('complete', 'done') AND w.status NOT IN ('complete', 'done')
+                   THEN m.status ELSE w.status
+                 END,
+                 w.one_liner, w.narrative,
+                 w.verification_result, w.duration,
+                 CASE
+                   WHEN m.status IN ('complete', 'done') AND w.status NOT IN ('complete', 'done')
+                   THEN m.completed_at ELSE w.completed_at
+                 END,
+                 w.blocker_discovered,
+                 w.deviations, w.known_issues, w.key_files, w.key_decisions, w.full_summary_md,
+                 w.description, w.estimate, w.files, w.verify, w.inputs, w.expected_output,
+                 w.observability_impact, w.full_plan_md, w.sequence
+          FROM wt.tasks w
+          LEFT JOIN tasks m ON m.milestone_id = w.milestone_id AND m.slice_id = w.slice_id AND m.id = w.id
         `).run());
 
         // Merge memories — keep worktree-learned insights
