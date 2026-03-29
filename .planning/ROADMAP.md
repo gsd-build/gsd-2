@@ -85,7 +85,7 @@ Plans:
 
 Plans:
 - [x] 06-01-PLAN.md — SessionStatePayload type and session_state store handler
-- [ ] 06-02-PLAN.md — Three-state button (Start/Stop/Resume) with spinner in dashboard, sidebar, chat-mode
+- [x] 06-02-PLAN.md — Three-state button (Start/Stop/Resume) with spinner in dashboard, sidebar, chat-mode
 - [x] 06-03-PLAN.md — ProjectCard session badge (green/amber/gray dot) and session subtitle
 
 ## Progress

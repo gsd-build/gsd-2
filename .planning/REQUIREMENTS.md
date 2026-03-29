@@ -14,7 +14,7 @@
 ### Auto-Mode State
 
 - [x] **AUTO-01**: "Auto Mode Active/Inactive" label in dashboard correctly reflects the agent's actual auto-mode state
-- [ ] **AUTO-02**: "Start Auto" button shows "Auto Running" (disabled) when auto-mode is already active
+- [x] **AUTO-02**: "Start Auto" button shows "Auto Running" (disabled) when auto-mode is already active
 - [x] **AUTO-03**: Auto-mode state change (start/stop/pause) reflects in the UI within 2 seconds
 
 ## Out of Scope
