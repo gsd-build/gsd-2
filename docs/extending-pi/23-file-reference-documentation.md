@@ -1,10 +1,7 @@
 # File Reference — Documentation
 
 
-All paths relative to:
-```
-/Users/lexchristopherson/.nvm/versions/node/v22.20.0/lib/node_modules/@mariozechner/pi-coding-agent/
-```
+All paths relative to the `@gsd/pi-coding-agent` package root (e.g., `<pi-install-dir>/`).
 
 | File | What It Covers |
 |------|---------------|

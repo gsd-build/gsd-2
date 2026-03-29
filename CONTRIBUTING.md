@@ -136,6 +136,36 @@ Before writing code, understand these principles:
 
 See [VISION.md](VISION.md) for the full list of what we won't accept.
 
+## Extension contributions
+
+GSD is extension-first. If your feature can be an extension, build it as an extension. See [docs/extension-sdk/](docs/extension-sdk/) for the authoritative guide.
+
+### Extension tiers
+
+| Tier | Ships with GSD | Can be disabled | Review bar |
+|------|---------------|-----------------|------------|
+| **core** | Yes | No | RFC required. Reserved for foundational systems (GSD workflow, built-in tools). |
+| **bundled** | Yes | Yes | Standard PR review. Default for new features shipped with GSD. |
+| **community** | No | Yes | User-installed. No review needed — lives in `~/.gsd/agent/extensions/` or `.gsd/extensions/`. |
+
+### Required for bundled extension PRs
+
+1. **`extension-manifest.json`** — every extension directory must include one. See [Manifest Spec](docs/extension-sdk/manifest-spec.md).
+2. **Tests** — at minimum, test tool registration, command handling, and any event hooks. See [Testing](docs/extension-sdk/testing.md).
+3. **State reconstruction** — if your extension has stateful tools, handle `session_start`, `session_switch`, and `session_tree` events. See [Building Extensions](docs/extension-sdk/building-extensions.md#state-management).
+4. **`provides` must be accurate** — every tool, command, hook, and shortcut your extension registers must be listed in the manifest.
+5. **Use `@gsd/pi-coding-agent`** for types, `@sinclair/typebox` for schemas, `@gsd/pi-tui` for UI. Do not import from `@mariozechner/*` (legacy).
+
+### Promoting community → bundled
+
+If you've built a community extension that should ship with GSD:
+
+1. Open an issue describing the extension and why it should be bundled.
+2. Move the source into `src/resources/extensions/<name>/`.
+3. Change the tier to `"bundled"` in the manifest.
+4. Add tests meeting the standards above.
+5. Open a PR following the normal process.
+
 ## Scope areas
 
 The codebase is organized into these areas. All are open to contributions:

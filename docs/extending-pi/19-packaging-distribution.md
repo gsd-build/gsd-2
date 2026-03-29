@@ -50,7 +50,7 @@ If no `pi` manifest exists, pi auto-discovers:
 
 ### Dependencies
 
-- List `@mariozechner/pi-ai`, `@mariozechner/pi-coding-agent`, `@mariozechner/pi-tui`, `@sinclair/typebox` in `peerDependencies` with `"*"` — they're bundled by pi.
+- List `@gsd/pi-ai`, `@gsd/pi-coding-agent`, `@gsd/pi-tui`, `@sinclair/typebox` in `peerDependencies` with `"*"` — they're bundled by pi.
 - Other npm deps go in `dependencies`. Pi runs `npm install` on package installation.
 
 ---

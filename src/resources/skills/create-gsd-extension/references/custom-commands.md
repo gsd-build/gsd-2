@@ -19,7 +19,7 @@ pi.registerCommand("deploy", {
 Add tab-completion for command arguments:
 
 ```typescript
-import type { AutocompleteItem } from "@mariozechner/pi-tui";
+import type { AutocompleteItem } from "@gsd/pi-tui";
 
 pi.registerCommand("deploy", {
   description: "Deploy to an environment",

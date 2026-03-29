@@ -277,7 +277,7 @@ bottom-left  bottom-center  bottom-right
 Replace the main input editor permanently:
 
 ```typescript
-import { CustomEditor } from "@mariozechner/pi-coding-agent";
+import { CustomEditor } from "@gsd/pi-coding-agent";
 
 class VimEditor extends CustomEditor {
   private mode: "normal" | "insert" = "insert";
@@ -307,7 +307,7 @@ ctx.ui.setEditorComponent(undefined);  // Restore default
 </custom_editor>
 
 <built_in_components>
-**From `@mariozechner/pi-tui`:**
+**From `@gsd/pi-tui`:**
 
 | Component | Constructor | Purpose |
 |-----------|-------------|---------|
@@ -352,7 +352,7 @@ const settings = new SettingsList(items, 15, getSettingsListTheme(),
 );
 ```
 
-**From `@mariozechner/pi-coding-agent`:**
+**From `@gsd/pi-coding-agent`:**
 
 | Component | Constructor | Purpose |
 |-----------|-------------|---------|
@@ -363,7 +363,7 @@ const settings = new SettingsList(items, 15, getSettingsListTheme(),
 
 <keyboard_input>
 ```typescript
-import { matchesKey, Key } from "@mariozechner/pi-tui";
+import { matchesKey, Key } from "@gsd/pi-tui";
 
 handleInput(data: string) {
   // Basic keys
@@ -403,7 +403,7 @@ handleInput(data: string) {
 **Cardinal rule: each line from render() must not exceed `width` visible characters.**
 
 ```typescript
-import { visibleWidth, truncateToWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
+import { visibleWidth, truncateToWidth, wrapTextWithAnsi } from "@gsd/pi-tui";
 
 visibleWidth("\x1b[32mHello\x1b[0m");  // Returns 5 (ignores ANSI codes)
 truncateToWidth("Very long text here", 10);         // "Very lo..."
@@ -470,7 +470,7 @@ Always use theme from callback params, never import directly.
 
 **Syntax highlighting:**
 ```typescript
-import { highlightCode, getLanguageFromPath } from "@mariozechner/pi-coding-agent";
+import { highlightCode, getLanguageFromPath } from "@gsd/pi-coding-agent";
 const lang = getLanguageFromPath("/file.rs");  // "rust"
 const highlighted = highlightCode(code, lang, theme);
 ```

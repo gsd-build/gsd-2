@@ -4,7 +4,7 @@
 ### SSH Example Pattern
 
 ```typescript
-import { createReadTool, createBashTool, createWriteTool } from "@mariozechner/pi-coding-agent";
+import { createReadTool, createBashTool, createWriteTool } from "@gsd/pi-coding-agent";
 
 export default function (pi: ExtensionAPI) {
   pi.registerFlag("ssh", { description: "SSH target", type: "string" });

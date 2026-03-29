@@ -6,7 +6,7 @@ Remote execution via pluggable operations, spawnHook for bash, and tool override
 Built-in tools support pluggable operations for SSH, containers, etc.:
 
 ```typescript
-import { createReadTool, createBashTool, createWriteTool } from "@mariozechner/pi-coding-agent";
+import { createReadTool, createBashTool, createWriteTool } from "@gsd/pi-coding-agent";
 
 // Create tool with custom remote operations
 const remoteBash = createBashTool(cwd, {
@@ -37,7 +37,7 @@ const bashTool = createBashTool(cwd, {
 Full SSH pattern with flag-based switching:
 
 ```typescript
-import { createBashTool, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { createBashTool, type ExtensionAPI } from "@gsd/pi-coding-agent";
 
 export default function (pi: ExtensionAPI) {
   pi.registerFlag("ssh", { description: "SSH target", type: "string" });
@@ -65,7 +65,7 @@ export default function (pi: ExtensionAPI) {
 Override built-in tools for logging/access control — omit renderCall/renderResult to keep built-in rendering:
 
 ```typescript
-import { createReadTool } from "@mariozechner/pi-coding-agent";
+import { createReadTool } from "@gsd/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
 pi.registerTool({

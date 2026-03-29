@@ -6,8 +6,8 @@ Custom rendering for tools and messages — control how they appear in the TUI.
 Tools can provide `renderCall` (how the call looks) and `renderResult` (how the result looks):
 
 ```typescript
-import { Text } from "@mariozechner/pi-tui";
-import { keyHint } from "@mariozechner/pi-coding-agent";
+import { Text } from "@gsd/pi-tui";
+import { keyHint } from "@gsd/pi-coding-agent";
 
 pi.registerTool({
   name: "my_tool",
@@ -54,7 +54,7 @@ If you omit `renderCall`/`renderResult`, the built-in renderer is used. Useful f
 Key hint helpers for showing keybinding info in render output:
 
 ```typescript
-import { keyHint, appKeyHint, editorKey, rawKeyHint } from "@mariozechner/pi-coding-agent";
+import { keyHint, appKeyHint, editorKey, rawKeyHint } from "@gsd/pi-coding-agent";
 
 // Editor action hint (respects user keybinding config)
 keyHint("expandTools", "to expand")    // e.g., "Ctrl+O to expand"
@@ -69,7 +69,7 @@ rawKeyHint("Ctrl+O", "to expand")
 Register a renderer for custom message types:
 
 ```typescript
-import { Text } from "@mariozechner/pi-tui";
+import { Text } from "@gsd/pi-tui";
 
 pi.registerMessageRenderer("my-extension", (message, options, theme) => {
   const { expanded } = options;
@@ -92,7 +92,7 @@ pi.sendMessage({
 
 <syntax_highlighting>
 ```typescript
-import { highlightCode, getLanguageFromPath } from "@mariozechner/pi-coding-agent";
+import { highlightCode, getLanguageFromPath } from "@gsd/pi-coding-agent";
 
 const lang = getLanguageFromPath("/path/to/file.rs");  // "rust"
 const highlighted = highlightCode(code, lang, theme);

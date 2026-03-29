@@ -1,10 +1,7 @@
 # File Reference — Example Extensions
 
 
-All paths relative to:
-```
-/Users/lexchristopherson/.nvm/versions/node/v22.20.0/lib/node_modules/@mariozechner/pi-coding-agent/examples/extensions/
-```
+All paths relative to `<pi-install-dir>/examples/extensions/`.
 
 ### Lifecycle & Safety
 | File | What It Demonstrates |
@@ -127,6 +124,6 @@ All paths relative to:
 
 *This document was generated from the Pi extension documentation and examples. Source docs are at:*
 ```
-/Users/lexchristopherson/.nvm/versions/node/v22.20.0/lib/node_modules/@mariozechner/pi-coding-agent/docs/
-/Users/lexchristopherson/.nvm/versions/node/v22.20.0/lib/node_modules/@mariozechner/pi-coding-agent/examples/extensions/
+<pi-install-dir>/docs/
+<pi-install-dir>/examples/extensions/
 ```

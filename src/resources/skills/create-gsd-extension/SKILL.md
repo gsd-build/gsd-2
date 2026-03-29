@@ -17,8 +17,8 @@ description: Create, debug, and iterate on GSD extensions (TypeScript modules th
 3. **Commands** — Give users slash commands (`pi.registerCommand()`). Users type `/mycommand`.
 
 **Non-negotiable rules:**
-- Use `StringEnum` from `@mariozechner/pi-ai` for string enum params (NOT `Type.Union`/`Type.Literal` — breaks Google's API)
-- Truncate tool output to 50KB / 2000 lines max (use `truncateHead`/`truncateTail` from `@mariozechner/pi-coding-agent`)
+- Use `StringEnum` from `@gsd/pi-ai` for string enum params (NOT `Type.Union`/`Type.Literal` — breaks Google's API)
+- Truncate tool output to 50KB / 2000 lines max (use `truncateHead`/`truncateTail` from `@gsd/pi-coding-agent`)
 - Store stateful tool state in `details` for branching support
 - Check `signal?.aborted` in long-running tool executions
 - Use `pi.exec()` not `child_process` for shell commands
@@ -32,10 +32,10 @@ description: Create, debug, and iterate on GSD extensions (TypeScript modules th
 
 | Package | Purpose |
 |---------|---------|
-| `@mariozechner/pi-coding-agent` | `ExtensionAPI`, `ExtensionContext`, `Theme`, event types, tool utilities, `DynamicBorder`, `BorderedLoader`, `CustomEditor`, `highlightCode` |
+| `@gsd/pi-coding-agent` | `ExtensionAPI`, `ExtensionContext`, `Theme`, event types, tool utilities, `DynamicBorder`, `BorderedLoader`, `CustomEditor`, `highlightCode` |
 | `@sinclair/typebox` | `Type.Object`, `Type.String`, `Type.Number`, `Type.Optional`, `Type.Boolean`, `Type.Array` |
-| `@mariozechner/pi-ai` | `StringEnum` (required for string enums), `Type` re-export |
-| `@mariozechner/pi-tui` | `Text`, `Box`, `Container`, `Spacer`, `Markdown`, `SelectList`, `Input`, `matchesKey`, `Key`, `truncateToWidth`, `visibleWidth` |
+| `@gsd/pi-ai` | `StringEnum` (required for string enums), `Type` re-export |
+| `@gsd/pi-tui` | `Text`, `Box`, `Container`, `Spacer`, `Markdown`, `SelectList`, `Input`, `matchesKey`, `Key`, `truncateToWidth`, `visibleWidth` |
 | Node.js built-ins | `node:fs`, `node:path`, `node:child_process`, etc. |
 
 </essential_principles>
@@ -63,6 +63,9 @@ All domain knowledge in `references/`:
 **Capabilities:** custom-tools.md, custom-commands.md, custom-ui.md, custom-rendering.md
 **Patterns:** state-management.md, system-prompt-modification.md, compaction-session-control.md
 **Infrastructure:** model-provider-management.md, remote-execution-overrides.md, packaging-distribution.md, mode-behavior.md
+**Spec:** `docs/extension-sdk/manifest-spec.md` — manifest format, tiers, validation
+**Testing:** `docs/extension-sdk/testing.md` — mock patterns, test conventions
+**SDK:** `docs/extension-sdk/` — the authoritative GSD-2 extension guide
 **Gotchas:** key-rules-gotchas.md
 </reference_index>
 
@@ -76,6 +79,7 @@ All domain knowledge in `references/`:
 
 <success_criteria>
 Extension is complete when:
+- `extension-manifest.json` exists with accurate `provides` listing all registered tools/commands/hooks/shortcuts
 - TypeScript compiles without errors (jiti handles this at runtime)
 - Extension loads on GSD startup or `/reload` without errors
 - Tools appear in the LLM's system prompt and are callable

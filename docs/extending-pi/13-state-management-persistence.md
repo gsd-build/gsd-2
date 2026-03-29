@@ -52,4 +52,42 @@ pi.on("session_start", async (_event, ctx) => {
 });
 ```
 
+### Pattern: Complete State Reconstruction
+
+The `session_start` hook alone is not sufficient for full state consistency. Extensions must also handle `session_switch` and `session_tree` to reconstruct state whenever the active conversation changes:
+
+- **`session_start`** — Initial load or reload (app startup, extension reload)
+- **`session_switch`** — User switches between sessions (different conversations)
+- **`session_tree`** — User navigates to a different conversation branch
+
+Without all three hooks, in-memory state can become stale or inconsistent when the user changes context.
+
+```typescript
+// Complete state reconstruction — handles all session lifecycle events
+function reconstructState(ctx: ExtensionContext): string[] {
+  const items: string[] = [];
+  for (const entry of ctx.sessionManager.getBranch()) {
+    if (entry.type === "message" && entry.message.role === "toolResult") {
+      if (entry.message.toolName === "my_tool") {
+        items.length = 0;
+        items.push(...(entry.message.details?.items ?? []));
+      }
+    }
+  }
+  return items;
+}
+
+export default function (pi: ExtensionAPI) {
+  let items: string[] = [];
+
+  const rebuild = async (_event: unknown, ctx: ExtensionContext) => {
+    items = reconstructState(ctx);
+  };
+
+  pi.on("session_start", rebuild);
+  pi.on("session_switch", rebuild);  // User switched to a different session
+  pi.on("session_tree", rebuild);    // User navigated to a different branch
+}
+```
+
 ---

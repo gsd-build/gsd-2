@@ -34,22 +34,19 @@ Identify what the extension needs from the user's description:
 
 ## Step 3: Choose Extension Structure
 
-**Single file** — for small extensions (1-2 tools/commands, simple hooks):
-```
-~/.gsd/agent/extensions/my-extension.ts
-```
-
-**Directory with index.ts** — for multi-file extensions:
+**Directory with index.ts** — the standard pattern for all extensions:
 ```
 ~/.gsd/agent/extensions/my-extension/
-├── index.ts
-├── tools.ts
-└── utils.ts
+├── extension-manifest.json   # Required — declares capabilities
+├── index.ts                  # Entry point (must export default function)
+├── tools.ts                  # Optional — tool implementations
+└── utils.ts                  # Optional — shared utilities
 ```
 
 **Package with dependencies** — when npm packages are needed:
 ```
 ~/.gsd/agent/extensions/my-extension/
+├── extension-manifest.json
 ├── package.json
 ├── src/index.ts
 └── node_modules/
@@ -64,12 +61,34 @@ For packages, `package.json` needs:
 }
 ```
 
+## Step 3b: Create the Extension Manifest
+
+Every extension must include an `extension-manifest.json`:
+
+```json
+{
+  "id": "my-extension",
+  "name": "My Extension",
+  "version": "1.0.0",
+  "description": "What this extension does in one line",
+  "tier": "community",
+  "requires": { "platform": ">=2.29.0" },
+  "provides": {
+    "tools": ["my_tool"],
+    "commands": ["mycommand"],
+    "hooks": ["session_start"]
+  }
+}
+```
+
+Only include non-empty arrays in `provides`. See `docs/extension-sdk/manifest-spec.md` for the full spec.
+
 ## Step 4: Write the Extension
 
 Start with the skeleton:
 
 ```typescript
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@gsd/pi-coding-agent";
 
 export default function (pi: ExtensionAPI) {
   // Register events, tools, commands here
@@ -81,7 +100,7 @@ Then add capabilities based on Step 2. Reference the appropriate reference files
 **Tool registration pattern:**
 ```typescript
 import { Type } from "@sinclair/typebox";
-import { StringEnum } from "@mariozechner/pi-ai";
+import { StringEnum } from "@gsd/pi-ai";
 
 pi.registerTool({
   name: "my_tool",
@@ -144,7 +163,8 @@ Fix issues, add features, refine. Use `/reload` for hot-reload during developmen
 
 <success_criteria>
 Extension creation is complete when:
-- [ ] Extension file(s) written to correct location
+- [ ] Extension directory created with index.ts and extension-manifest.json
+- [ ] Manifest `provides` accurately lists all registered tools, commands, hooks, shortcuts
 - [ ] All imports resolve (TypeBox, pi-ai, pi-coding-agent, pi-tui as needed)
 - [ ] Tools use `StringEnum` for string enums (not `Type.Union`/`Type.Literal`)
 - [ ] Tool output is truncated if variable-length

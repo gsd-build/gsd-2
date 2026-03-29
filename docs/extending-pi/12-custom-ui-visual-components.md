@@ -115,8 +115,8 @@ const result = await ctx.ui.custom<string | null>(
 ### 12.5 Custom Editor (Replace Main Input)
 
 ```typescript
-import { CustomEditor } from "@mariozechner/pi-coding-agent";
-import { matchesKey, truncateToWidth } from "@mariozechner/pi-tui";
+import { CustomEditor } from "@gsd/pi-coding-agent";
+import { matchesKey, truncateToWidth } from "@gsd/pi-tui";
 
 class VimEditor extends CustomEditor {
   private mode: "normal" | "insert" = "insert";
@@ -145,7 +145,7 @@ ctx.ui.setEditorComponent(undefined);  // Restore default
 
 ### 12.6 Built-in TUI Components
 
-Import from `@mariozechner/pi-tui`:
+Import from `@gsd/pi-tui`:
 
 | Component | Purpose |
 |-----------|---------|
@@ -159,7 +159,7 @@ Import from `@mariozechner/pi-tui`:
 | `SettingsList` | Toggle settings UI |
 | `Input` | Text input field |
 
-Import from `@mariozechner/pi-coding-agent`:
+Import from `@gsd/pi-coding-agent`:
 
 | Component | Purpose |
 |-----------|---------|
@@ -169,7 +169,7 @@ Import from `@mariozechner/pi-coding-agent`:
 ### 12.7 Keyboard Input
 
 ```typescript
-import { matchesKey, Key } from "@mariozechner/pi-tui";
+import { matchesKey, Key } from "@gsd/pi-tui";
 
 handleInput(data: string) {
   if (matchesKey(data, Key.up)) { /* arrow up */ }
@@ -185,7 +185,7 @@ handleInput(data: string) {
 **Critical:** Each line from `render()` must not exceed the `width` parameter.
 
 ```typescript
-import { visibleWidth, truncateToWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
+import { visibleWidth, truncateToWidth, wrapTextWithAnsi } from "@gsd/pi-tui";
 
 render(width: number): string[] {
   return [truncateToWidth(this.text, width)];

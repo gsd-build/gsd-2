@@ -47,7 +47,7 @@ pi.on("before_agent_start", async (event, ctx) => {
 
 **tool_call** — Fired before tool executes. Can block.
 ```typescript
-import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
+import { isToolCallEventType } from "@gsd/pi-coding-agent";
 
 pi.on("tool_call", async (event, ctx) => {
   if (isToolCallEventType("bash", event)) {
@@ -61,7 +61,7 @@ pi.on("tool_call", async (event, ctx) => {
 
 **tool_result** — Fired after tool executes. Can modify result. Handlers chain like middleware.
 ```typescript
-import { isToolResultEventType } from "@mariozechner/pi-coding-agent";
+import { isToolResultEventType } from "@gsd/pi-coding-agent";
 
 pi.on("tool_result", async (event, ctx) => {
   if (isToolResultEventType("bash", event)) {
@@ -105,7 +105,7 @@ pi.on("model_select", async (event, ctx) => {
 Built-in type guards for tool events:
 
 ```typescript
-import { isToolCallEventType, isToolResultEventType } from "@mariozechner/pi-coding-agent";
+import { isToolCallEventType, isToolResultEventType } from "@gsd/pi-coding-agent";
 
 // Tool calls — narrows event.input type
 if (isToolCallEventType("bash", event)) { /* event.input: { command, timeout? } */ }

@@ -221,41 +221,26 @@ function sendPrompt(description: string, result: RoundResult, pi: ExtensionAPI):
 		: "";
 
 	const docHints: string[] = [
-		"- `~/.gsd/agent/docs/extending-pi/01-what-are-extensions.md` — capabilities overview",
-		"- `~/.gsd/agent/docs/extending-pi/03-getting-started.md` — minimal extension, hot reload",
-		"- `~/.gsd/agent/docs/extending-pi/08-extensioncontext-what-you-can-access.md` — ExtensionContext API",
-		"- `~/.gsd/agent/docs/extending-pi/09-extensionapi-what-you-can-do.md` — ExtensionAPI: registration, messaging",
-		"- `~/.gsd/agent/docs/extending-pi/22-key-rules-gotchas.md` — must-read rules before shipping",
+		"- `docs/extension-sdk/README.md` — overview, quick start, directory layout",
+		"- `docs/extension-sdk/api-reference.md` — ExtensionAPI and ExtensionContext surfaces",
+		"- `docs/extension-sdk/building-extensions.md` — tools, commands, events, UI, state",
+		"- `docs/extension-sdk/rules.md` — non-negotiable rules and gotchas",
 	];
 
 	if (uiSelected.includes("custom component")) {
-		docHints.push("- `~/.gsd/agent/docs/extending-pi/12-custom-ui-visual-components.md` — dialogs, widgets, overlays");
-		docHints.push("- `~/.gsd/agent/docs/pi-ui-tui/06-ctx-ui-custom-full-custom-components.md` — ctx.ui.custom() API");
-		docHints.push("- `~/.gsd/agent/docs/pi-ui-tui/07-built-in-components-the-building-blocks.md` — Text, Box, SelectList");
-		docHints.push("- `~/.gsd/agent/docs/pi-ui-tui/09-keyboard-input-how-to-handle-keys.md` — Key, matchesKey");
-		docHints.push("- `~/.gsd/agent/docs/pi-ui-tui/10-line-width-the-cardinal-rule.md` — truncation, width rules");
-		docHints.push("- `~/.gsd/agent/docs/pi-ui-tui/19-building-a-complete-component-step-by-step.md` — step-by-step guide");
-		docHints.push("- `~/.gsd/agent/docs/pi-ui-tui/21-common-mistakes-and-how-to-avoid-them.md` — pitfalls");
+		docHints.push("- `docs/extension-sdk/building-extensions.md#custom-components` — ctx.ui.custom() API");
+		docHints.push("- `docs/pi-ui-tui/06-ctx-ui-custom-full-custom-components.md` — step-by-step component guide");
+		docHints.push("- `docs/pi-ui-tui/07-built-in-components-the-building-blocks.md` — Text, Box, SelectList");
+		docHints.push("- `docs/pi-ui-tui/09-keyboard-input-how-to-handle-keys.md` — Key, matchesKey");
+		docHints.push("- `docs/pi-ui-tui/10-line-width-the-cardinal-rule.md` — truncation, width rules");
 	} else if (uiSelected.includes("Dialogs")) {
-		docHints.push("- `~/.gsd/agent/docs/pi-ui-tui/04-built-in-dialog-methods.md` — select, confirm, input, editor");
+		docHints.push("- `docs/extension-sdk/building-extensions.md#built-in-dialogs` — select, confirm, input");
 	} else if (uiSelected.includes("Status")) {
-		docHints.push("- `~/.gsd/agent/docs/pi-ui-tui/05-persistent-ui-elements.md` — status, widgets, footer, header");
-	}
-
-	if (uiSelected.includes("tool") || result.answers["purpose"]) {
-		docHints.push("- `~/.gsd/agent/docs/extending-pi/14-custom-rendering-controlling-what-the-user-sees.md` — renderCall / renderResult");
-	}
-
-	if (eventsSelected && !eventsSelected.includes("standalone")) {
-		docHints.push("- `~/.gsd/agent/docs/extending-pi/07-events-the-nervous-system.md` — all events reference");
-	}
-
-	if (eventsSelected.includes("context / prompt")) {
-		docHints.push("- `~/.gsd/agent/docs/extending-pi/15-system-prompt-modification.md` — system prompt hooks");
+		docHints.push("- `docs/extension-sdk/building-extensions.md#persistent-ui-elements` — status, widgets");
 	}
 
 	if (persistenceSelected.includes("session")) {
-		docHints.push("- `~/.gsd/agent/docs/extending-pi/13-state-management-persistence.md` — pi.appendEntry, session state");
+		docHints.push("- `docs/extension-sdk/building-extensions.md#state-management` — state reconstruction, appendEntry");
 	}
 
 	const prompt = `Create a new pi extension based on this description:
@@ -270,13 +255,30 @@ ${docHints.join("\n")}
 
 ## Output
 
-Write the complete implementation as a single self-contained extension file:
+Write the complete implementation as a directory-based extension:
 
-\`~/.gsd/agent/extensions/<kebab-case-name>.ts\`
+\`~/.gsd/agent/extensions/<kebab-case-name>/index.ts\`
+\`~/.gsd/agent/extensions/<kebab-case-name>/extension-manifest.json\`
 
-Then register it in the main extensions index:
+The manifest must follow this format:
+\`\`\`json
+{
+  "id": "<kebab-case-name>",
+  "name": "<Human Name>",
+  "version": "1.0.0",
+  "description": "<one-line description>",
+  "tier": "community",
+  "requires": { "platform": ">=2.29.0" },
+  "provides": {
+    "tools": ["<tool_names_registered>"],
+    "commands": ["<command_names_registered>"],
+    "hooks": ["<event_names_subscribed>"],
+    "shortcuts": ["<shortcut_keys_registered>"]
+  }
+}
+\`\`\`
 
-\`~/.gsd/agent/extensions/index.ts\` — import and call the new extension's default export alongside existing ones
+Only include non-empty arrays in \`provides\`. See \`docs/extension-sdk/manifest-spec.md\` for the full spec.
 
 ## Rules you must follow exactly
 

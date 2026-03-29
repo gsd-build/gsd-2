@@ -5,7 +5,7 @@ Complete custom tools reference — registration, parameters, execution, output 
 <registration>
 ```typescript
 import { Type } from "@sinclair/typebox";
-import { StringEnum } from "@mariozechner/pi-ai";
+import { StringEnum } from "@gsd/pi-ai";
 
 pi.registerTool({
   name: "my_tool",                    // Unique identifier (snake_case)
@@ -60,7 +60,7 @@ pi.registerTool({
 **⚠️ MUST use `StringEnum` for string enum parameters:**
 
 ```typescript
-import { StringEnum } from "@mariozechner/pi-ai";
+import { StringEnum } from "@gsd/pi-ai";
 
 // ✅ Correct — works with all providers including Google
 action: StringEnum(["list", "add", "remove"] as const)
@@ -77,7 +77,7 @@ Tools MUST truncate output to avoid context overflow. Built-in limit: 50KB / 200
 import {
   truncateHead, truncateTail, formatSize,
   DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES,
-} from "@mariozechner/pi-coding-agent";
+} from "@gsd/pi-coding-agent";
 
 async execute(toolCallId, params, signal, onUpdate, ctx) {
   const output = await runCommand();
@@ -129,7 +129,7 @@ Use `pi.setActiveTools(names)` to enable/disable tools at runtime.
 Register a tool with the same name as a built-in (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`) to override it. **Must match exact result shape including `details` type.**
 
 ```typescript
-import { createReadTool } from "@mariozechner/pi-coding-agent";
+import { createReadTool } from "@gsd/pi-coding-agent";
 
 pi.registerTool({
   name: "read",

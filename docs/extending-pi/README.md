@@ -29,6 +29,8 @@
 - [23. File Reference — Documentation](./23-file-reference-documentation.md)
 - [24. File Reference — Example Extensions](./24-file-reference-example-extensions.md)
 - [25. Slash Command Subcommand Patterns](./25-slash-command-subcommand-patterns.md)
+- [26. Extension Manifest Spec](./26-extension-manifest-spec.md)
+- [27. Testing Extensions](./27-testing-extensions.md)
 
 ---
 
