@@ -26,7 +26,7 @@ import { runUnit } from "./run-unit.js";
 import { debugLog } from "../debug-logger.js";
 import { PROJECT_FILES } from "../detection.js";
 import { MergeConflictError } from "../git-service.js";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { existsSync, cpSync } from "node:fs";
 import { logWarning, logError } from "../workflow-logger.js";
 import { gsdRoot } from "../paths.js";
@@ -230,6 +230,7 @@ export async function runPreDispatch(
       `Milestone ${s.currentMilestoneId} complete!`,
       "success",
       "milestone",
+      basename(s.originalBasePath || s.basePath),
     );
     deps.logCmuxEvent(
       prefs,
@@ -388,6 +389,7 @@ export async function runPreDispatch(
         "All milestones complete!",
         "success",
         "milestone",
+        basename(s.originalBasePath || s.basePath),
       );
       deps.logCmuxEvent(
         prefs,
@@ -411,7 +413,7 @@ export async function runPreDispatch(
       const blockerMsg = `Blocked: ${state.blockers.join(", ")}`;
       await deps.stopAuto(ctx, pi, blockerMsg);
       ctx.ui.notify(`${blockerMsg}. Fix and run /gsd auto.`, "warning");
-      deps.sendDesktopNotification("GSD", blockerMsg, "error", "attention");
+      deps.sendDesktopNotification("GSD", blockerMsg, "error", "attention", basename(s.originalBasePath || s.basePath));
       deps.logCmuxEvent(prefs, blockerMsg, "error");
     } else {
       const ids = incomplete.map((m: { id: string }) => m.id).join(", ");
@@ -492,6 +494,7 @@ export async function runPreDispatch(
       `Milestone ${mid} complete!`,
       "success",
       "milestone",
+      basename(s.originalBasePath || s.basePath),
     );
     deps.logCmuxEvent(
       prefs,
@@ -509,7 +512,7 @@ export async function runPreDispatch(
     const blockerMsg = `Blocked: ${state.blockers.join(", ")}`;
     await closeoutAndStop(ctx, pi, s, deps, blockerMsg);
     ctx.ui.notify(`${blockerMsg}. Fix and run /gsd auto.`, "warning");
-    deps.sendDesktopNotification("GSD", blockerMsg, "error", "attention");
+    deps.sendDesktopNotification("GSD", blockerMsg, "error", "attention", basename(s.originalBasePath || s.basePath));
     deps.logCmuxEvent(prefs, blockerMsg, "error");
     debugLog("autoLoop", { phase: "exit", reason: "blocked" });
     deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "terminal", data: { reason: "blocked", blockers: state.blockers } });
@@ -755,7 +758,7 @@ export async function runGuards(
         // 100% — special enforcement logic (halt/pause/warn)
         const msg = `Budget ceiling ${deps.formatCost(budgetCeiling)} reached (spent ${deps.formatCost(totalCost)}).`;
         if (budgetEnforcementAction === "halt") {
-          deps.sendDesktopNotification("GSD", msg, "error", "budget");
+          deps.sendDesktopNotification("GSD", msg, "error", "budget", basename(s.originalBasePath || s.basePath));
           await deps.stopAuto(ctx, pi, "Budget ceiling reached");
           debugLog("autoLoop", { phase: "exit", reason: "budget-halt" });
           return { action: "break", reason: "budget-halt" };
@@ -765,14 +768,14 @@ export async function runGuards(
             `${msg} Pausing auto-mode — /gsd auto to override and continue.`,
             "warning",
           );
-          deps.sendDesktopNotification("GSD", msg, "warning", "budget");
+          deps.sendDesktopNotification("GSD", msg, "warning", "budget", basename(s.originalBasePath || s.basePath));
           deps.logCmuxEvent(prefs, msg, "warning");
           await deps.pauseAuto(ctx, pi);
           debugLog("autoLoop", { phase: "exit", reason: "budget-pause" });
           return { action: "break", reason: "budget-pause" };
         }
         ctx.ui.notify(`${msg} Continuing (enforcement: warn).`, "warning");
-        deps.sendDesktopNotification("GSD", msg, "warning", "budget");
+        deps.sendDesktopNotification("GSD", msg, "warning", "budget", basename(s.originalBasePath || s.basePath));
         deps.logCmuxEvent(prefs, msg, "warning");
       } else if (threshold.pct < 100) {
         // Sub-100% — simple notification
@@ -783,6 +786,7 @@ export async function runGuards(
           msg,
           threshold.notifyLevel,
           "budget",
+          basename(s.originalBasePath || s.basePath),
         );
         deps.logCmuxEvent(prefs, msg, threshold.cmuxLevel);
       }
@@ -812,6 +816,7 @@ export async function runGuards(
         `Context ${contextUsage.percent}% — paused`,
         "warning",
         "attention",
+        basename(s.originalBasePath || s.basePath),
       );
       await deps.pauseAuto(ctx, pi);
       debugLog("autoLoop", { phase: "exit", reason: "context-window" });

@@ -93,6 +93,7 @@ export interface LoopDeps {
     body: string,
     kind: string,
     category: string,
+    projectName?: string,
   ) => void;
   setActiveMilestoneId: (basePath: string, mid: string) => void;
   pruneQueueOrder: (basePath: string, pendingIds: string[]) => void;
