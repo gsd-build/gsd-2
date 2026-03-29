@@ -7,6 +7,9 @@
  * deriveStateFromDb reconciles disk milestones with DB milestones.
  */
 
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -17,11 +20,7 @@ import {
   closeDatabase,
   insertMilestone,
   insertSlice,
-  insertTask,
 } from "../gsd-db.ts";
-import { createTestContext } from "./test-helpers.ts";
-
-const { assertEq, assertTrue, report } = createTestContext();
 
 function createFixtureBase(): string {
   const base = mkdtempSync(join(tmpdir(), "gsd-disk-reconcile-"));
@@ -57,9 +56,7 @@ const ROADMAP_CONTENT = `# M002: Disk-Only Milestone
   > Do something.
 `;
 
-async function main(): Promise<void> {
-  console.log("\n=== #2416: deriveStateFromDb reconciles disk milestones ===");
-
+test('#2416: deriveStateFromDb reconciles disk milestones', async () => {
   // Set up: M001 in DB, M002 on disk only
   const base = createFixtureBase();
   const dbPath = join(base, ".gsd", "gsd.db");
@@ -83,25 +80,25 @@ async function main(): Promise<void> {
 
     // M002 should be visible in the registry
     const m002Entry = state.registry.find((m) => m.id === "M002");
-    assertTrue(
+    assert.ok(
       m002Entry !== undefined,
       "M002 (disk-only milestone) should appear in state.registry (#2416)",
     );
 
     // M001 should still be in the registry
     const m001Entry = state.registry.find((m) => m.id === "M001");
-    assertTrue(
+    assert.ok(
       m001Entry !== undefined,
       "M001 (DB milestone) should still appear in state.registry",
     );
 
     // The active milestone should be M002 (since M001 is complete)
-    assertTrue(
+    assert.ok(
       state.activeMilestone !== null,
       "There should be an active milestone",
     );
     if (state.activeMilestone) {
-      assertEq(
+      assert.strictEqual(
         state.activeMilestone.id,
         "M002",
         "Active milestone should be M002 (disk-only, not complete) (#2416)",
@@ -111,11 +108,4 @@ async function main(): Promise<void> {
     closeDatabase();
     cleanup(base);
   }
-
-  report();
-}
-
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
 });
