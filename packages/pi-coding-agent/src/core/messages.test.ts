@@ -8,7 +8,16 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { convertToLlm, type CustomMessage } from "./messages.ts";
+import { convertToLlm, type CustomMessage } from "./messages.js";
+
+/** Extract the first content block from a message, asserting array content. */
+function firstTextBlock(msg: ReturnType<typeof convertToLlm>[number]) {
+	const { content } = msg;
+	assert.ok(Array.isArray(content), "Expected content to be an array");
+	const block = content[0];
+	assert.ok(typeof block === "object" && block !== null, "Expected first block to be an object");
+	return block;
+}
 
 test("convertToLlm wraps custom messages with system notification prefix", () => {
 	const customMsg: CustomMessage = {
@@ -25,7 +34,7 @@ test("convertToLlm wraps custom messages with system notification prefix", () =>
 
 	// The content must include a system notification wrapper so the LLM
 	// does not confuse it with user input (#3026).
-	const text = result[0].content[0];
+	const text = firstTextBlock(result[0]);
 	assert.equal(text.type, "text");
 	assert.ok(
 		"text" in text && text.text.includes("[system notification"),
@@ -46,7 +55,7 @@ test("convertToLlm wraps custom messages with array content", () => {
 	assert.equal(result.length, 1);
 	assert.equal(result[0].role, "user");
 
-	const text = result[0].content[0];
+	const text = firstTextBlock(result[0]);
 	assert.equal(text.type, "text");
 	assert.ok(
 		"text" in text && text.text.includes("[system notification"),
@@ -64,7 +73,7 @@ test("convertToLlm includes customType in notification wrapper", () => {
 	};
 
 	const result = convertToLlm([customMsg]);
-	const text = result[0].content[0];
+	const text = firstTextBlock(result[0]);
 	assert.ok(
 		"text" in text && text.text.includes("async_job_result"),
 		"Notification wrapper should include the customType for context",
@@ -81,7 +90,7 @@ test("convertToLlm notification wrapper instructs LLM not to treat as user input
 	};
 
 	const result = convertToLlm([customMsg]);
-	const text = result[0].content[0];
+	const text = firstTextBlock(result[0]);
 	assert.ok(
 		"text" in text && text.text.includes("not user input"),
 		"Notification should explicitly state this is not user input",
@@ -97,7 +106,7 @@ test("convertToLlm preserves user messages without wrapper", () => {
 
 	const result = convertToLlm([userMsg]);
 	assert.equal(result.length, 1);
-	const text = result[0].content[0];
+	const text = firstTextBlock(result[0]);
 	assert.ok(
 		"text" in text && text.text === "Hello world",
 		"User messages should pass through unchanged",
