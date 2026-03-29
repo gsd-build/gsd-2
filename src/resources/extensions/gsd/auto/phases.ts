@@ -934,30 +934,10 @@ export async function runUnitPhase(
     },
   );
 
-  // Select and apply model (with tier escalation on retry — normal units only)
-  const modelResult = await deps.selectAndApplyModel(
-    ctx,
-    pi,
-    unitType,
-    unitId,
-    s.basePath,
-    prefs,
-    s.verbose,
-    s.autoModeStartModel,
-    sidecarItem ? undefined : { isRetry, previousTier },
-  );
-  s.currentUnitRouting =
-    modelResult.routing as AutoSession["currentUnitRouting"];
-  s.currentUnitModel =
-    modelResult.appliedModel as AutoSession["currentUnitModel"];
-
-  // Status bar + progress widget
+  // Status bar (widget + preconditions deferred until after model selection — see #2899)
   ctx.ui.setStatus("gsd-auto", "auto");
   if (mid)
     deps.updateSliceProgressCache(s.basePath, mid, state.activeSlice?.id);
-  deps.updateProgressWidget(ctx, unitType, unitId, state);
-
-  deps.ensurePreconditions(unitType, unitId, s.basePath, state);
 
   // Prompt injection
   let finalPrompt = prompt;
@@ -1023,6 +1003,23 @@ export async function runUnitPhase(
     logWarning("engine", "Prompt reorder failed", { error: msg });
   }
 
+  // Select and apply model (with tier escalation on retry — normal units only)
+  const modelResult = await deps.selectAndApplyModel(
+    ctx,
+    pi,
+    unitType,
+    unitId,
+    s.basePath,
+    prefs,
+    s.verbose,
+    s.autoModeStartModel,
+    sidecarItem ? undefined : { isRetry, previousTier },
+  );
+  s.currentUnitRouting =
+    modelResult.routing as AutoSession["currentUnitRouting"];
+  s.currentUnitModel =
+    modelResult.appliedModel as AutoSession["currentUnitModel"];
+
   // Apply sidecar/pre-dispatch hook model override (takes priority over standard model selection)
   const hookModelOverride = sidecarItem?.model ?? iterData.hookModelOverride;
   if (hookModelOverride) {
@@ -1047,6 +1044,17 @@ export async function runUnitPhase(
       );
     }
   }
+
+  // Store the final dispatched model ID so the dashboard can read it (#2899).
+  // This accounts for hook model overrides applied after selectAndApplyModel.
+  s.currentDispatchedModelId = s.currentUnitModel
+    ? `${(s.currentUnitModel as any).provider ?? ""}/${(s.currentUnitModel as any).id ?? ""}`
+    : null;
+
+  // Progress widget + preconditions — deferred to after model selection so the
+  // widget's first render tick shows the correct model (#2899).
+  deps.updateProgressWidget(ctx, unitType, unitId, state);
+  deps.ensurePreconditions(unitType, unitId, s.basePath, state);
 
   // Start unit supervision
   deps.clearUnitTimeout();
