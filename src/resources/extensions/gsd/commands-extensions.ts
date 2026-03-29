@@ -10,6 +10,7 @@ import type { ExtensionCommandContext } from "@gsd/pi-coding-agent";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { logWarning } from "./workflow-logger.js";
 
 const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
 
@@ -79,7 +80,7 @@ function saveRegistry(registry: ExtensionRegistry): void {
     const tmp = filePath + ".tmp";
     writeFileSync(tmp, JSON.stringify(registry, null, 2), "utf-8");
     renameSync(tmp, filePath);
-  } catch { /* non-fatal */ }
+  } catch (err) { logWarning("state", "Failed to save extension registry", { error: err instanceof Error ? err.message : String(err) }); }
 }
 
 function isEnabled(registry: ExtensionRegistry, id: string): boolean {

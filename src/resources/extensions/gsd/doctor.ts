@@ -8,6 +8,7 @@ import { resolveMilestoneFile, resolveMilestonePath, resolveSliceFile, resolveSl
 import { deriveState, isMilestoneComplete } from "./state.js";
 import { invalidateAllCaches } from "./cache.js";
 import { loadEffectiveGSDPreferences, type GSDPreferences } from "./preferences.js";
+import { debugLog } from "./debug-logger.js";
 
 import type { DoctorIssue, DoctorIssueCode, DoctorReport } from "./doctor-types.js";
 import { GLOBAL_STATE_CODES } from "./doctor-types.js";
@@ -308,7 +309,9 @@ async function appendDoctorHistory(basePath: string, report: DoctorReport): Prom
     } satisfies DoctorHistoryEntry);
     const existing = existsSync(historyPath) ? readFileSync(historyPath, "utf-8") : "";
     await saveFile(historyPath, existing + entry + "\n");
-  } catch { /* non-fatal */ }
+  } catch (err) {
+    debugLog("appendDoctorHistory", { action: "write-history-failed", error: err instanceof Error ? err.message : String(err) });
+  }
 }
 
 /** Read the last N doctor history entries. Returns most-recent-first. */
@@ -318,7 +321,10 @@ export async function readDoctorHistory(basePath: string, lastN = 50): Promise<D
     if (!existsSync(historyPath)) return [];
     const lines = readFileSync(historyPath, "utf-8").split("\n").filter(l => l.trim());
     return lines.slice(-lastN).reverse().map(l => JSON.parse(l) as DoctorHistoryEntry);
-  } catch { return []; }
+  } catch (err) {
+    debugLog("readDoctorHistory", { action: "read-history-failed", error: err instanceof Error ? err.message : String(err) });
+    return [];
+  }
 }
 
 export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; dryRun?: boolean; scope?: string; fixLevel?: "task" | "all"; isolationMode?: "none" | "worktree" | "branch"; includeBuild?: boolean; includeTests?: boolean }): Promise<DoctorReport> {
@@ -426,8 +432,8 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
           });
         }
       }
-    } catch {
-      // Non-fatal — provider check failure should not block other checks
+    } catch (err) {
+      debugLog("runGSDDoctor", { action: "provider-check-failed", error: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -453,7 +459,7 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
             fixesApplied.push(`sanitized delimiter characters in ${milestoneId} title`);
             wasFixed = true;
           }
-        } catch { /* non-fatal — report the warning below */ }
+        } catch (err) { debugLog("runGSDDoctor", { action: "sanitize-delimiter-title-failed", milestoneId, error: err instanceof Error ? err.message : String(err) }); }
       }
       if (!wasFixed) {
         issues.push({

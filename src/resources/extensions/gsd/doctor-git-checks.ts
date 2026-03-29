@@ -13,6 +13,7 @@ import { RUNTIME_EXCLUSION_PATHS, resolveMilestoneIntegrationBranch, writeIntegr
 import { nativeIsRepo, nativeWorktreeList, nativeWorktreeRemove, nativeBranchList, nativeBranchDelete, nativeLsFiles, nativeRmCached } from "./native-git-bridge.js";
 import { getAllWorktreeHealth } from "./worktree-health.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
+import { debugLog } from "./debug-logger.js";
 
 export async function checkGitHealth(
   basePath: string,
@@ -138,11 +139,11 @@ export async function checkGitHealth(
           }
         }
       }
-    } catch {
-      // git branch list failed — skip stale branch check
+    } catch (err) {
+      debugLog("checkGitHealth", { action: "stale-branch-list-failed", error: err instanceof Error ? err.message : String(err) });
     }
-  } catch {
-    // listWorktrees or deriveState failed — skip worktree/branch checks
+  } catch (err) {
+    debugLog("checkGitHealth", { action: "worktree-branch-checks-failed", error: err instanceof Error ? err.message : String(err) });
   }
   } // end isolationMode !== "none"
 
@@ -174,8 +175,8 @@ export async function checkGitHealth(
         fixesApplied.push(`cleaned merge state: ${result.cleaned.join(", ")}`);
       }
     }
-  } catch {
-    // Can't check .git dir — skip
+  } catch (err) {
+    debugLog("checkGitHealth", { action: "corrupt-merge-state-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── Tracked runtime files ──────────────────────────────────────────────
@@ -187,8 +188,8 @@ export async function checkGitHealth(
         if (files.length > 0) {
           trackedPaths.push(...files);
         }
-      } catch {
-        // Individual ls-files can fail — continue
+      } catch (err) {
+        debugLog("checkGitHealth", { action: "ls-files-failed", exclusion, error: err instanceof Error ? err.message : String(err) });
       }
     }
 
@@ -213,8 +214,8 @@ export async function checkGitHealth(
         }
       }
     }
-  } catch {
-    // git ls-files failed — skip
+  } catch (err) {
+    debugLog("checkGitHealth", { action: "tracked-runtime-files-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── Legacy slice branches ──────────────────────────────────────────────
@@ -237,15 +238,15 @@ export async function checkGitHealth(
           try {
             nativeBranchDelete(basePath, branch, true);
             deleted++;
-          } catch { /* skip branches that can't be deleted */ }
+          } catch (err) { debugLog("checkGitHealth", { action: "delete-legacy-branch-failed", branch, error: err instanceof Error ? err.message : String(err) }); }
         }
         if (deleted > 0) {
           fixesApplied.push(`deleted ${deleted} legacy slice branch(es)`);
         }
       }
     }
-  } catch {
-    // git branch list failed — skip
+  } catch (err) {
+    debugLog("checkGitHealth", { action: "legacy-branch-list-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── Integration branch existence ──────────────────────────────────────
@@ -286,8 +287,8 @@ export async function checkGitHealth(
         });
       }
     }
-  } catch {
-    // Non-fatal — integration branch check failed
+  } catch (err) {
+    debugLog("checkGitHealth", { action: "integration-branch-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── Orphaned worktree directories ────────────────────────────────────
@@ -333,8 +334,8 @@ export async function checkGitHealth(
         }
       }
     }
-  } catch {
-    // Non-fatal — orphaned worktree directory check failed
+  } catch (err) {
+    debugLog("checkGitHealth", { action: "orphaned-worktree-dir-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── Worktree lifecycle checks ──────────────────────────────────────────
@@ -409,7 +410,7 @@ export async function checkGitHealth(
         });
       }
     }
-  } catch {
-    // Non-fatal — worktree lifecycle check failed
+  } catch (err) {
+    debugLog("checkGitHealth", { action: "worktree-lifecycle-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 }

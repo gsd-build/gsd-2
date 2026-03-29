@@ -99,9 +99,7 @@ export function startUnitSupervision(sctx: SupervisionContext): void {
           }
         }
       }
-    } catch {
-      // Non-fatal — fall through with no estimate
-    }
+    } catch { /* cosmetic: DB estimate lookup failed — use default timeout */ }
   }
   const estimateMinutes = taskEstimate ? parseEstimateMinutes(taskEstimate) : null;
   const timeoutScale = estimateMinutes && estimateMinutes > 0

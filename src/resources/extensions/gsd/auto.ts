@@ -565,8 +565,8 @@ function cleanupAfterLoopExit(ctx: ExtensionContext): void {
   try {
     if (lockBase()) clearLock(lockBase());
     if (lockBase()) releaseSessionLock(lockBase());
-  } catch {
-    /* best-effort — mirror stopAuto cleanup */
+  } catch (err) {
+    debugLog("milestoneCompleteExit", { action: "lock-cleanup", error: err instanceof Error ? err.message : String(err) });
   }
 
   ctx.ui.setStatus("gsd-auto", undefined);
@@ -651,8 +651,8 @@ export async function stopAuto(
           } else {
             milestoneComplete = true;
           }
-        } catch {
-          // Non-fatal — fall through to preserveBranch path
+        } catch (err) {
+          debugLog("stopAuto", { action: "milestone-completeness-check", error: err instanceof Error ? err.message : String(err) });
         }
 
         if (milestoneComplete) {
@@ -760,7 +760,9 @@ export async function stopAuto(
     try {
       const pausedPath = join(gsdRoot(s.originalBasePath || s.basePath), "runtime", "paused-session.json");
       if (existsSync(pausedPath)) unlinkSync(pausedPath);
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      debugLog("stopAuto", { action: "remove-paused-session", error: err instanceof Error ? err.message : String(err) });
+    }
 
     // ── Step 13: Restore original model (before reset clears IDs) ──
     try {
@@ -794,7 +796,7 @@ export async function stopAuto(
         const { closeBrowser } = await import("../browser-tools/lifecycle.js");
         await closeBrowser();
       }
-    } catch { /* non-fatal: browser-tools may not be loaded */ }
+    } catch { /* cosmetic: browser-tools may not be loaded */ }
 
     // External cleanup (not covered by session reset)
     clearInFlightTools();
@@ -852,16 +854,16 @@ export async function pauseAuto(
       JSON.stringify(pausedMeta, null, 2),
       "utf-8",
     );
-  } catch {
-    // Non-fatal — resume will still work via full bootstrap, just without worktree context
+  } catch (err) {
+    debugLog("pauseAuto", { action: "persist-paused-session", error: err instanceof Error ? err.message : String(err) });
   }
 
   // Close out the current unit so its runtime record doesn't stay at "dispatched"
   if (s.currentUnit && ctx) {
     try {
       await closeoutUnit(ctx, s.basePath, s.currentUnit.type, s.currentUnit.id, s.currentUnit.startedAt);
-    } catch {
-      // Non-fatal — best-effort closeout on pause
+    } catch (err) {
+      debugLog("pauseAuto", { action: "closeout-unit", error: err instanceof Error ? err.message : String(err) });
     }
     s.currentUnit = null;
   }
@@ -1044,7 +1046,7 @@ function buildLoopDeps(): LoopDeps {
     getSessionFile: (ctx: ExtensionContext) => {
       try {
         return ctx.sessionManager?.getSessionFile() ?? "";
-      } catch {
+      } catch { /* cosmetic: session file path unavailable */
         return "";
       }
     },
@@ -1115,8 +1117,8 @@ export async function startAuto(
           }
         }
       }
-    } catch {
-      // Malformed or missing — proceed with fresh bootstrap
+    } catch (err) {
+      debugLog("startAuto", { action: "parse-paused-session", error: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -1242,9 +1244,7 @@ export async function startAuto(
 
   try {
     syncCmuxSidebar(loadEffectiveGSDPreferences()?.preferences, await deriveState(s.basePath));
-  } catch {
-    // Best-effort only — sidebar sync must never block auto-mode startup
-  }
+  } catch { /* cosmetic: sidebar sync must never block auto-mode startup */ }
   logCmuxEvent(loadEffectiveGSDPreferences()?.preferences, requestedStepMode ? "Step-mode started." : "Auto-mode started.", "progress");
 
   // Dispatch the first unit
@@ -1415,8 +1415,8 @@ export async function dispatchHookUnit(
     if (match) {
       try {
         await pi.setModel(match);
-      } catch {
-        /* non-fatal */
+      } catch (err) {
+        debugLog("dispatchHookUnit", { action: "set-hook-model", error: err instanceof Error ? err.message : String(err) });
       }
     } else {
       ctx.ui.notify(
@@ -1453,7 +1453,9 @@ export async function dispatchHookUnit(
   ctx.ui.notify(`Running post-unit hook: ${hookName}`, "info");
 
   // Ensure cwd matches basePath before hook dispatch (#1389)
-  try { if (process.cwd() !== s.basePath) process.chdir(s.basePath); } catch {}
+  try { if (process.cwd() !== s.basePath) process.chdir(s.basePath); } catch (err) {
+    debugLog("dispatchHookUnit", { action: "chdir-before-hook", error: err instanceof Error ? err.message : String(err) });
+  }
 
   debugLog("dispatchHookUnit", {
     phase: "send-message",

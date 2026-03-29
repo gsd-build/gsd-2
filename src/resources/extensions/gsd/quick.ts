@@ -17,6 +17,7 @@ import { gsdRoot } from "./paths.js";
 import { GitServiceImpl, runGit } from "./git-service.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { nativeHasStagedChanges } from "./native-git-bridge.js";
+import { debugLog } from "./debug-logger.js";
 
 interface QuickReturnState {
   basePath: string;
@@ -135,8 +136,8 @@ export function cleanupQuickBranch(basePath = process.cwd()): boolean {
   if (git.getCurrentBranch() === state.quickBranch) {
     try {
       git.autoCommit("quick-task", `Q${state.taskNum}`, []);
-    } catch {
-      // Best-effort: quick work may already be committed.
+    } catch (err) {
+      debugLog("cleanupQuickBranch", { action: "auto-commit-failed", error: err instanceof Error ? err.message : String(err) });
     }
   }
 

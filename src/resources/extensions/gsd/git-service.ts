@@ -14,6 +14,8 @@ import { join } from "node:path";
 import { gsdRoot } from "./paths.js";
 import { GIT_NO_PROMPT_ENV } from "./git-constants.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
+import { debugLog } from "./debug-logger.js";
+import { logWarning } from "./workflow-logger.js";
 
 
 import {
@@ -228,7 +230,8 @@ export function readIntegrationBranch(basePath: string, milestoneId: string): st
       return branch;
     }
     return null;
-  } catch {
+  } catch (err) {
+    debugLog("readIntegrationBranch", { action: "read-failed", milestoneId, error: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }
@@ -278,7 +281,9 @@ export function writeIntegrationBranch(
     if (existsSync(metaFile)) {
       existing = JSON.parse(readFileSync(metaFile, "utf-8"));
     }
-  } catch { /* corrupt file — overwrite */ }
+  } catch (err) {
+    debugLog("writeIntegrationBranch", { action: "corrupt-meta-file", milestoneId, error: err instanceof Error ? err.message : String(err) });
+  }
 
   existing.integrationBranch = branch;
   writeFileSync(metaFile, JSON.stringify(existing, null, 2) + "\n", "utf-8");
@@ -358,8 +363,8 @@ export function resolveMilestoneIntegrationBranch(
         reason: `Recorded integration branch "${recordedBranch}" for milestone ${milestoneId} no longer exists; using detected fallback branch "${detectedBranch}" instead.`,
       };
     }
-  } catch {
-    // Fall through to the explicit missing result below.
+  } catch (err) {
+    debugLog("resolveMilestoneIntegrationBranch", { action: "fallback-detection-failed", milestoneId, error: err instanceof Error ? err.message : String(err) });
   }
 
   return {
@@ -651,6 +656,7 @@ export class GitServiceImpl {
           return { passed: true, skipped: true };
         }
       } catch {
+        // non-fatal: no package.json or unreadable — skip pre-merge check
         return { passed: true, skipped: true };
       }
     }
@@ -690,7 +696,11 @@ export function createDraftPR(
     if (opts?.base) args.push("--base", opts.base);
     const result = execFileSync("gh", args, { cwd: basePath, encoding: "utf8", timeout: 30000, env: GIT_NO_PROMPT_ENV });
     return result.trim();
-  } catch {
+  } catch (err) {
+    logWarning("state", "Draft PR creation failed", {
+      milestoneId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }

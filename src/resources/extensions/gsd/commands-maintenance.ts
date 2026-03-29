@@ -7,6 +7,7 @@
 import type { ExtensionCommandContext } from "@gsd/pi-coding-agent";
 import { deriveState } from "./state.js";
 import { nativeBranchList, nativeDetectMainBranch, nativeBranchListMerged, nativeBranchDelete, nativeForEachRef, nativeUpdateRef } from "./native-git-bridge.js";
+import { logWarning } from "./workflow-logger.js";
 
 export async function handleCleanupBranches(ctx: ExtensionCommandContext, basePath: string): Promise<void> {
   let branches: string[];
@@ -33,8 +34,8 @@ export async function handleCleanupBranches(ctx: ExtensionCommandContext, basePa
     try {
       nativeBranchDelete(basePath, branch, false);
       deletedMerged++;
-    } catch {
-      /* skip branches that cannot be deleted */
+    } catch (err) {
+      logWarning("engine", `Failed to delete merged branch ${branch}`, { error: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -66,7 +67,7 @@ export async function handleCleanupBranches(ctx: ExtensionCommandContext, basePa
           try {
             nativeBranchDelete(basePath, branch, true);
             deletedStaleMilestones++;
-          } catch { /* non-fatal */ }
+          } catch (err) { logWarning("engine", `Failed to delete stale milestone branch ${branch}`, { error: err instanceof Error ? err.message : String(err) }); }
           continue;
         }
       }
@@ -85,12 +86,12 @@ export async function handleCleanupBranches(ctx: ExtensionCommandContext, basePa
       try {
         nativeBranchDelete(basePath, branch, true);
         deletedStaleMilestones++;
-      } catch {
-        /* non-fatal */
+      } catch (err) {
+        logWarning("engine", `Failed to delete milestone branch ${branch}`, { error: err instanceof Error ? err.message : String(err) });
       }
     }
-  } catch {
-    /* non-fatal */
+  } catch (err) {
+    logWarning("engine", "Stale milestone branch cleanup failed", { error: err instanceof Error ? err.message : String(err) });
   }
 
   const summary: string[] = [];
@@ -147,8 +148,8 @@ export async function handleCleanupSnapshots(ctx: ExtensionCommandContext, baseP
       try {
         nativeUpdateRef(basePath, old);
         pruned++;
-      } catch {
-        /* skip individual failures */
+      } catch (err) {
+        logWarning("engine", `Failed to prune snapshot ref ${old}`, { error: err instanceof Error ? err.message : String(err) });
       }
     }
   }
@@ -197,7 +198,8 @@ export async function handleCleanupWorktrees(ctx: ExtensionCommandContext, baseP
         removeWorktree(basePath, wt.name, { deleteBranch: true });
         lines.push(`  ✓ ${wt.name}  removed (branch ${wt.branch} deleted)`);
         removed++;
-      } catch {
+      } catch (err) {
+        logWarning("engine", `Failed to remove worktree ${wt.name}`, { error: err instanceof Error ? err.message : String(err) });
         lines.push(`  ✗ ${wt.name}  failed to remove`);
       }
     }
@@ -454,7 +456,8 @@ export async function handleCleanupProjects(args: string, ctx: ExtensionCommandC
       try {
         fsRmSync(pathJoin(projectsDir, e.hash), { recursive: true, force: true });
         removed++;
-      } catch {
+      } catch (err) {
+        logWarning("engine", `Failed to remove orphaned project dir ${e.hash}`, { error: err instanceof Error ? err.message : String(err) });
         failed.push(e.hash);
       }
     }

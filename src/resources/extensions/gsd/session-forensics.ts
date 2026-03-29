@@ -285,7 +285,7 @@ export function synthesizeCrashRecovery(
     const prompt = formatRecoveryPrompt(unitType, unitId, trace, gitChanges);
 
     return { unitType, unitId, trace, gitChanges, prompt };
-  } catch {
+  } catch { /* cosmetic: crash recovery synthesis is best-effort */
     return null;
   }
 }
@@ -302,7 +302,7 @@ export function getDeepDiagnostic(basePath: string, worktreePath?: string): stri
       const wtActivityDir = join(gsdRoot(worktreePath), "activity");
       trace = readLastActivityLog(wtActivityDir);
     }
-  } catch { /* non-fatal — fall through to root */ }
+  } catch { /* cosmetic: worktree activity log read failed — fall through to root */ }
 
   // Fall back to root activity logs
   if (!trace || trace.toolCallCount === 0) {

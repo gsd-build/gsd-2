@@ -14,6 +14,7 @@ import { join, dirname, normalize } from "node:path";
 import { spawnSync } from "node:child_process";
 import { nativeScanGsdTree, type GsdTreeEntry } from "./native-parser-bridge.js";
 import { DIR_CACHE_MAX } from "./constants.js";
+import { debugLog } from "./debug-logger.js";
 
 // ─── Directory Listing Cache ──────────────────────────────────────────────────
 
@@ -330,7 +331,7 @@ function probeGsdRoot(rawBasePath: string): string {
       const r = out.stdout.trim();
       if (r) gitRoot = normalize(r);
     }
-  } catch { /* git not available */ }
+  } catch (err) { debugLog("probeGsdRoot", { action: "git-rev-parse-failed", error: err instanceof Error ? err.message : String(err) }); }
 
   if (gitRoot) {
     const candidate = join(gitRoot, ".gsd");

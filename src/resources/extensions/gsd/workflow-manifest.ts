@@ -7,6 +7,7 @@ import {
 } from "./gsd-db.js";
 import type { Decision } from "./types.js";
 import { atomicWriteSync } from "./atomic-write.js";
+import { logWarning } from "./workflow-logger.js";
 import { readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -172,7 +173,7 @@ export function snapshotState(): StateManifest {
   db.exec("COMMIT");
   return result;
   } catch (err) {
-    try { db.exec("ROLLBACK"); } catch { /* ignore rollback failure */ }
+    try { db.exec("ROLLBACK"); } catch (rollbackErr) { logWarning("state", "ROLLBACK failed during manifest snapshot", { error: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr) }); }
     throw err;
   }
 }

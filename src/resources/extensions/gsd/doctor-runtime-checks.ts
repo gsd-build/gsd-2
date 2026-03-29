@@ -11,6 +11,7 @@ import { readCrashLock, isLockProcessAlive, clearLock } from "./crash-recovery.j
 import { ensureGitignore } from "./gitignore.js";
 import { readAllSessionStatuses, isSessionStale, removeSessionStatus } from "./session-status-io.js";
 import { recoverFailedMigration } from "./migrate-external.js";
+import { debugLog } from "./debug-logger.js";
 
 export async function checkRuntimeHealth(
   basePath: string,
@@ -42,8 +43,8 @@ export async function checkRuntimeHealth(
         }
       }
     }
-  } catch {
-    // Non-fatal — crash lock check failed
+  } catch (err) {
+    debugLog("checkRuntimeHealth", { action: "crash-lock-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── Stranded lock directory ────────────────────────────────────────────
@@ -80,8 +81,8 @@ export async function checkRuntimeHealth(
         }
       }
     }
-  } catch {
-    // Non-fatal — stranded lock directory check failed
+  } catch (err) {
+    debugLog("checkRuntimeHealth", { action: "stranded-lock-dir-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── Stale parallel sessions ────────────────────────────────────────────
@@ -105,8 +106,8 @@ export async function checkRuntimeHealth(
         }
       }
     }
-  } catch {
-    // Non-fatal — parallel session check failed
+  } catch (err) {
+    debugLog("checkRuntimeHealth", { action: "parallel-session-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── Orphaned completed-units keys ─────────────────────────────────────
@@ -150,8 +151,8 @@ export async function checkRuntimeHealth(
         }
       }
     }
-  } catch {
-    // Non-fatal — completed-units check failed
+  } catch (err) {
+    debugLog("checkRuntimeHealth", { action: "completed-units-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── Stale hook state ──────────────────────────────────────────────────
@@ -187,8 +188,8 @@ export async function checkRuntimeHealth(
         }
       }
     }
-  } catch {
-    // Non-fatal — hook state check failed
+  } catch (err) {
+    debugLog("checkRuntimeHealth", { action: "hook-state-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── Activity log bloat ────────────────────────────────────────────────
@@ -227,8 +228,8 @@ export async function checkRuntimeHealth(
         }
       }
     }
-  } catch {
-    // Non-fatal — activity log check failed
+  } catch (err) {
+    debugLog("checkRuntimeHealth", { action: "activity-log-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── STATE.md health ───────────────────────────────────────────────────
@@ -289,8 +290,8 @@ export async function checkRuntimeHealth(
         }
       }
     }
-  } catch {
-    // Non-fatal — STATE.md check failed
+  } catch (err) {
+    debugLog("checkRuntimeHealth", { action: "state-file-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── Gitignore drift ───────────────────────────────────────────────────
@@ -334,8 +335,8 @@ export async function checkRuntimeHealth(
         }
       }
     }
-  } catch {
-    // Non-fatal — gitignore check failed
+  } catch (err) {
+    debugLog("checkRuntimeHealth", { action: "gitignore-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── External state symlink health ──────────────────────────────────────
@@ -381,8 +382,8 @@ export async function checkRuntimeHealth(
         }
       }
     }
-  } catch {
-    // Non-fatal — external state check failed
+  } catch (err) {
+    debugLog("checkRuntimeHealth", { action: "external-state-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── Numbered .gsd collision variants (#2205) ───────────────────────────
@@ -412,8 +413,8 @@ export async function checkRuntimeHealth(
         }
       }
     }
-  } catch {
-    // Non-fatal — variant check failed
+  } catch (err) {
+    debugLog("checkRuntimeHealth", { action: "numbered-gsd-variant-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── Metrics ledger integrity ───────────────────────────────────────────
@@ -446,8 +447,8 @@ export async function checkRuntimeHealth(
         });
       }
     }
-  } catch {
-    // Non-fatal — metrics check failed
+  } catch (err) {
+    debugLog("checkRuntimeHealth", { action: "metrics-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── Metrics ledger bloat ──────────────────────────────────────────────
@@ -482,8 +483,8 @@ export async function checkRuntimeHealth(
         // JSON parse failed — already handled by the integrity check above
       }
     }
-  } catch {
-    // Non-fatal — metrics bloat check failed
+  } catch (err) {
+    debugLog("checkRuntimeHealth", { action: "metrics-bloat-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── Large planning file detection ──────────────────────────────────────
@@ -523,8 +524,8 @@ export async function checkRuntimeHealth(
         });
       }
     }
-  } catch {
-    // Non-fatal — large file scan failed
+  } catch (err) {
+    debugLog("checkRuntimeHealth", { action: "large-file-scan-failed", error: err instanceof Error ? err.message : String(err) });
   }
 
   // ── Snapshot ref bloat ────────────────────────────────────────────────
@@ -567,8 +568,8 @@ export async function checkRuntimeHealth(
         }
       }
     }
-  } catch {
-    // Non-fatal — snapshot ref check failed
+  } catch (err) {
+    debugLog("checkRuntimeHealth", { action: "snapshot-ref-check-failed", error: err instanceof Error ? err.message : String(err) });
   }
 }
 

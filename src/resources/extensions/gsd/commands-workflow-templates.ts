@@ -22,6 +22,7 @@ import { gsdRoot } from "./paths.js";
 import { createGitService, runGit } from "./git-service.js";
 import { isAutoActive, isAutoPaused } from "./auto.js";
 import { getErrorMessage } from "./error-utils.js";
+import { debugLog } from "./debug-logger.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -435,7 +436,7 @@ export async function handleStart(
       if (current !== branchName) {
         try {
           git.autoCommit("workflow-template", templateId, []);
-        } catch { /* nothing to commit */ }
+        } catch (err) { debugLog("handleStart", { action: "auto-commit-before-branch-failed", error: err instanceof Error ? err.message : String(err) }); }
         runGit(basePath, ["checkout", "-b", branchName]);
         branchCreated = true;
       }

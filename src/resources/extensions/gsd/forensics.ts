@@ -28,6 +28,7 @@ import { deriveState } from "./state.js";
 import { isAutoActive } from "./auto.js";
 import { loadPrompt } from "./prompt-loader.js";
 import { gsdRoot } from "./paths.js";
+import { debugLog } from "./debug-logger.js";
 import { formatDuration } from "../shared/format-utils.js";
 import { getAutoWorktreePath } from "./auto-worktree.js";
 import { loadEffectiveGSDPreferences, loadGlobalGSDPreferences, getGlobalGSDPreferencesPath } from "./preferences.js";
@@ -264,7 +265,7 @@ export async function buildForensicReport(basePath: string): Promise<ForensicRep
     const state = await deriveState(basePath);
     activeMilestone = state.activeMilestone?.id ?? null;
     activeSlice = state.activeSlice?.id ?? null;
-  } catch { /* state derivation failure is non-fatal */ }
+  } catch (err) { debugLog("buildForensicReport", { action: "derive-state-failed", error: err instanceof Error ? err.message : String(err) }); }
 
   // 1b. Check for active auto-worktree
   const activeWorktree = activeMilestone ? getAutoWorktreePath(basePath, activeMilestone) : null;
@@ -286,7 +287,7 @@ export async function buildForensicReport(basePath: string): Promise<ForensicRep
   try {
     const report = await runGSDDoctor(basePath, { scope: undefined });
     doctorIssues = report.issues;
-  } catch { /* doctor failure is non-fatal */ }
+  } catch (err) { debugLog("buildForensicReport", { action: "doctor-run-failed", error: err instanceof Error ? err.message : String(err) }); }
 
   // 7. Build recent units from metrics
   const recentUnits: ForensicReport["recentUnits"] = [];
@@ -529,7 +530,8 @@ function scanJournalForForensics(basePath: string): JournalSummary | null {
       newestEntry,
       fileCount: files.length,
     };
-  } catch {
+  } catch (err) {
+    debugLog("scanJournalForForensics", { action: "journal-scan-failed", error: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }
@@ -568,7 +570,8 @@ function gatherActivityLogMeta(basePath: string, activeMilestone?: string | null
 
     if (fileCount === 0) return null;
     return { fileCount, totalSizeBytes, oldestFile, newestFile };
-  } catch {
+  } catch (err) {
+    debugLog("gatherActivityLogMeta", { action: "activity-meta-scan-failed", error: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }
@@ -581,7 +584,9 @@ function loadCompletedKeys(basePath: string): string[] {
     if (existsSync(file)) {
       return JSON.parse(readFileSync(file, "utf-8"));
     }
-  } catch { /* non-fatal */ }
+  } catch (err) {
+    debugLog("loadCompletedKeys", { action: "load-completed-keys-failed", error: err instanceof Error ? err.message : String(err) });
+  }
   return [];
 }
 

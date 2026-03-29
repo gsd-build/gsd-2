@@ -34,6 +34,8 @@ import type { FileLineStat } from "./worktree-manager.js";
 import { existsSync, realpathSync, readdirSync, rmSync, unlinkSync } from "node:fs";
 import { nativeMergeAbort } from "./native-git-bridge.js";
 import { join, sep } from "node:path";
+import { debugLog } from "./debug-logger.js";
+import { logWarning } from "./workflow-logger.js";
 
 /**
  * Tracks the original project root so we can switch back.
@@ -76,6 +78,7 @@ function worktreeCompletions(prefix: string) {
         .map(wt => ({ value: wt.name, label: wt.name }));
       return [...cmdCompletions, ...nameCompletions];
     } catch {
+      // non-fatal: worktree listing unavailable for completions
       return cmdCompletions;
     }
   }
@@ -96,6 +99,7 @@ function worktreeCompletions(prefix: string) {
 
       return nameCompletions;
     } catch {
+      // non-fatal: worktree listing unavailable for completions
       return [];
     }
   }
@@ -283,6 +287,7 @@ function hasExistingMilestones(wtPath: string): boolean {
       .filter(d => d.isDirectory() && /^M\d+(?:-[a-z0-9]{6})?/.test(d.name));
     return entries.length > 0;
   } catch {
+    // non-fatal: milestones directory unreadable
     return false;
   }
 }
@@ -518,7 +523,9 @@ async function handleList(
     try {
       const statuses = getAllWorktreeHealth(mainBase);
       for (const s of statuses) healthMap.set(s.worktree.name, s);
-    } catch { /* health check failed — show list without status */ }
+    } catch (err) {
+      debugLog("handleList", { action: "health-check-failed", error: err instanceof Error ? err.message : String(err) });
+    }
 
     const cwd = process.cwd();
     const lines = [CLR.header("GSD Worktrees"), ""];
@@ -670,7 +677,12 @@ async function handleMerge(
       try {
         const { reconcileWorktreeDb } = await import("./gsd-db.js");
         reconcileWorktreeDb(mainDbPath, wtDbPath);
-      } catch { /* non-fatal */ }
+      } catch (err) {
+        logWarning("reconcile", "Worktree DB reconciliation failed during merge", {
+          worktree: name,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
 
     try {
@@ -693,7 +705,9 @@ async function handleMerge(
         // Abort the failed merge so the working tree is clean for LLM retry
         try {
           nativeMergeAbort(basePath);
-        } catch { /* already clean */ }
+        } catch (err) {
+          debugLog("handleMerge", { action: "merge-abort-failed", error: err instanceof Error ? err.message : String(err) });
+        }
 
         ctx.ui.notify(
           `${CLR.muted("Deterministic merge hit conflicts — falling back to LLM-guided merge.")}`,
@@ -824,7 +838,11 @@ async function handleRemoveAll(
       try {
         removeWorktree(mainBase, wt.name, { deleteBranch: true });
         removed.push(wt.name);
-      } catch {
+      } catch (err) {
+        logWarning("reconcile", `Failed to remove worktree "${wt.name}" during remove-all`, {
+          worktree: wt.name,
+          error: err instanceof Error ? err.message : String(err),
+        });
         failed.push(wt.name);
       }
     }
