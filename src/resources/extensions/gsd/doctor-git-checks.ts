@@ -10,7 +10,7 @@ import { deriveState, isMilestoneComplete } from "./state.js";
 import { listWorktrees, resolveGitDir, worktreesDir } from "./worktree-manager.js";
 import { abortAndReset } from "./git-self-heal.js";
 import { RUNTIME_EXCLUSION_PATHS, resolveMilestoneIntegrationBranch, writeIntegrationBranch } from "./git-service.js";
-import { nativeIsRepo, nativeWorktreeList, nativeWorktreeRemove, nativeBranchList, nativeBranchDelete, nativeLsFiles, nativeRmCached } from "./native-git-bridge.js";
+import { nativeIsRepo, nativeWorktreeList, nativeWorktreeRemove, nativeBranchList, nativeBranchDelete, nativeLsFiles, nativeRmCached, nativeHasChanges, nativeLastCommitEpoch, nativeGetCurrentBranch, nativeAddTracked, nativeCommit } from "./native-git-bridge.js";
 import { getAllWorktreeHealth } from "./worktree-health.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 
@@ -335,6 +335,54 @@ export async function checkGitHealth(
     }
   } catch {
     // Non-fatal — orphaned worktree directory check failed
+  }
+
+  // ── Stale uncommitted changes ────────────────────────────────────────────
+  // If the working tree has uncommitted changes and the last commit was
+  // longer ago than the configured threshold, flag it and optionally
+  // auto-commit a safety snapshot so work isn't lost.
+  try {
+    const prefs = loadEffectiveGSDPreferences()?.preferences ?? {};
+    const thresholdMinutes = prefs.stale_commit_threshold_minutes ?? 30;
+
+    if (thresholdMinutes > 0) {
+      const dirty = nativeHasChanges(basePath);
+      if (dirty) {
+        const branch = nativeGetCurrentBranch(basePath);
+        const lastEpoch = nativeLastCommitEpoch(basePath, branch || "HEAD");
+        const nowEpoch = Math.floor(Date.now() / 1000);
+        const minutesSinceCommit = lastEpoch > 0 ? (nowEpoch - lastEpoch) / 60 : Infinity;
+
+        if (minutesSinceCommit >= thresholdMinutes) {
+          const mins = Math.floor(minutesSinceCommit);
+          issues.push({
+            severity: "warning",
+            code: "stale_uncommitted_changes",
+            scope: "project",
+            unitId: "project",
+            message: `Uncommitted changes detected with no commit in ${mins} minute${mins === 1 ? "" : "s"} (threshold: ${thresholdMinutes}m). Snapshotting tracked files.`,
+            fixable: true,
+          });
+
+          if (shouldFix("stale_uncommitted_changes")) {
+            try {
+              nativeAddTracked(basePath);
+              const commitMsg = `gsd snapshot: uncommitted changes after ${mins}m inactivity`;
+              const result = nativeCommit(basePath, commitMsg);
+              if (result) {
+                fixesApplied.push(`created gsd snapshot after ${mins}m of uncommitted changes`);
+              } else {
+                fixesApplied.push("gsd snapshot skipped — nothing to commit after staging tracked files");
+              }
+            } catch {
+              fixesApplied.push("failed to create gsd snapshot commit");
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // Non-fatal — stale commit check failed
   }
 
   // ── Worktree lifecycle checks ──────────────────────────────────────────

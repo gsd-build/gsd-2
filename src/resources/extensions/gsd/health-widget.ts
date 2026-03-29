@@ -13,6 +13,7 @@ import type { GSDState } from "./types.js";
 import { runProviderChecks, summariseProviderIssues } from "./doctor-providers.js";
 import { runEnvironmentChecks } from "./doctor-environment.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
+import { nativeIsRepo, nativeHasChanges, nativeLastCommitEpoch, nativeGetCurrentBranch } from "./native-git-bridge.js";
 import { loadLedgerFromDisk, getProjectTotals } from "./metrics.js";
 import { describeNextUnit, estimateTimeRemaining, updateSliceProgressCache } from "./auto-dashboard.js";
 import { projectRoot } from "./commands/context.js";
@@ -31,6 +32,7 @@ function loadHealthWidgetData(basePath: string): HealthWidgetData {
   let providerIssue: string | null = null;
   let environmentErrorCount = 0;
   let environmentWarningCount = 0;
+  let staleCommitMinutes: number | null = null;
 
   const projectState = detectHealthWidgetProjectState(basePath);
 
@@ -58,6 +60,25 @@ function loadHealthWidgetData(basePath: string): HealthWidgetData {
     }
   } catch { /* non-fatal */ }
 
+  // ── Stale uncommitted changes check ──
+  try {
+    if (nativeIsRepo(basePath)) {
+      const prefs = loadEffectiveGSDPreferences();
+      const thresholdMinutes = prefs?.preferences?.stale_commit_threshold_minutes ?? 30;
+
+      if (thresholdMinutes > 0 && nativeHasChanges(basePath)) {
+        const branch = nativeGetCurrentBranch(basePath);
+        const lastEpoch = nativeLastCommitEpoch(basePath, branch || "HEAD");
+        const nowEpoch = Math.floor(Date.now() / 1000);
+        const minutesSinceCommit = lastEpoch > 0 ? (nowEpoch - lastEpoch) / 60 : Infinity;
+
+        if (minutesSinceCommit >= thresholdMinutes) {
+          staleCommitMinutes = minutesSinceCommit;
+        }
+      }
+    }
+  } catch { /* non-fatal */ }
+
   return {
     projectState,
     budgetCeiling,
@@ -65,6 +86,7 @@ function loadHealthWidgetData(basePath: string): HealthWidgetData {
     providerIssue,
     environmentErrorCount,
     environmentWarningCount,
+    staleCommitMinutes,
     lastRefreshed: Date.now(),
   };
 }

@@ -34,6 +34,7 @@ function activeData(overrides: Partial<HealthWidgetData> = {}): HealthWidgetData
     providerIssue: null,
     environmentErrorCount: 0,
     environmentWarningCount: 0,
+    staleCommitMinutes: null,
     lastRefreshed: Date.now(),
     ...overrides,
   };
@@ -96,6 +97,19 @@ test("buildHealthLines: active state with issues reports issue summary", (t) => 
   assert.match(lines[0]!, /✗ 2 issues/);
   assert.match(lines[0]!, /✗ OpenAI key missing/);
   assert.match(lines[0]!, /Env: 1 error/);
+});
+
+test("buildHealthLines: stale uncommitted changes shows warning", (t) => {
+  const lines = buildHealthLines(activeData({ staleCommitMinutes: 45 }));
+  assert.equal(lines.length, 1);
+  assert.match(lines[0]!, /Uncommitted changes \(45m\)/);
+  assert.match(lines[0]!, /\/gsd doctor fix/);
+});
+
+test("buildHealthLines: no stale commit warning when null", (t) => {
+  const lines = buildHealthLines(activeData({ staleCommitMinutes: null }));
+  assert.equal(lines.length, 1);
+  assert.ok(!lines[0]!.includes("Uncommitted changes"), "no stale commit warning when null");
 });
 
 test("detectHealthWidgetProjectState: metrics file alone does not imply project", (t) => {

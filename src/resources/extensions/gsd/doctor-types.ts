@@ -61,6 +61,8 @@ export type DoctorIssueCode =
   | "worktree_stale"
   | "worktree_dirty"
   | "worktree_unpushed"
+  // Stale commit safety check
+  | "stale_uncommitted_changes"
   // Snapshot ref bloat
   | "snapshot_ref_bloat"
   // Runtime data integrity

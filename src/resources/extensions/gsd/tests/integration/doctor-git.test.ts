@@ -645,6 +645,78 @@ describe('doctor-git', async () => {
     } else {
     }
 
+    // ─── Test: stale_uncommitted_changes detection & auto-snapshot ──────
+    test('stale_uncommitted_changes (detected and auto-committed)', async () => {
+      const dir = createRepoWithActiveMilestone();
+      cleanups.push(dir);
+
+      // Make the last commit appear old by amending its date to 45 min ago
+      const pastDate = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+      run(`git commit --amend --no-edit --date="${pastDate}"`, dir);
+      // Also set committer date so git log %ct reflects it
+      execSync(`git commit --amend --no-edit`, {
+        cwd: dir,
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf-8",
+        env: { ...process.env, GIT_COMMITTER_DATE: pastDate },
+      });
+
+      // Modify an already-tracked file (nativeAddTracked uses git add -u,
+      // which only stages tracked files — new untracked files are not staged)
+      writeFileSync(join(dir, "README.md"), "# test\nmodified content\n");
+
+      const detect = await runGSDDoctor(dir);
+      const staleIssues = detect.issues.filter(i => i.code === "stale_uncommitted_changes");
+      assert.ok(staleIssues.length > 0, "detects stale uncommitted changes");
+      assert.ok(staleIssues[0]?.message.includes("minute"), "message mentions minutes");
+      assert.ok(staleIssues[0]?.fixable === true, "stale uncommitted changes is fixable");
+
+      // Fix should create a gsd snapshot commit
+      const fixed = await runGSDDoctor(dir, { fix: true });
+      assert.ok(
+        fixed.fixesApplied.some(f => f.includes("gsd snapshot")),
+        "fix creates a gsd snapshot commit",
+      );
+
+      // Verify the snapshot commit was created with the gsd snapshot tag
+      const log = run("git log -1 --oneline", dir);
+      assert.ok(log.includes("gsd snapshot"), "commit is tagged with gsd snapshot");
+    });
+
+    // ─── Test: stale_uncommitted_changes NOT flagged when recent commit ──
+    test('stale_uncommitted_changes (no false positive on recent commit)', async () => {
+      const dir = createRepoWithActiveMilestone();
+      cleanups.push(dir);
+
+      // Create uncommitted changes (but last commit is fresh — just created)
+      writeFileSync(join(dir, "fresh-dirty.txt"), "recent changes\n");
+
+      const detect = await runGSDDoctor(dir);
+      const staleIssues = detect.issues.filter(i => i.code === "stale_uncommitted_changes");
+      assert.deepStrictEqual(staleIssues.length, 0, "recent commit with dirty tree NOT flagged as stale");
+    });
+
+    // ─── Test: stale_uncommitted_changes NOT flagged when tree is clean ──
+    test('stale_uncommitted_changes (no false positive on clean tree)', async () => {
+      const dir = createRepoWithActiveMilestone();
+      cleanups.push(dir);
+
+      // Make the last commit appear old
+      const pastDate = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+      run(`git commit --amend --no-edit --date="${pastDate}"`, dir);
+      execSync(`git commit --amend --no-edit`, {
+        cwd: dir,
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf-8",
+        env: { ...process.env, GIT_COMMITTER_DATE: pastDate },
+      });
+
+      // No uncommitted changes — tree is clean
+      const detect = await runGSDDoctor(dir);
+      const staleIssues = detect.issues.filter(i => i.code === "stale_uncommitted_changes");
+      assert.deepStrictEqual(staleIssues.length, 0, "old commit with clean tree NOT flagged as stale");
+    });
+
   } finally {
     for (const dir of cleanups) {
       try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
