@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Active Session Indicators
-status: verifying
-stopped_at: Completed 05-02-PLAN.md
-last_updated: "2026-03-29T08:40:59.773Z"
+status: executing
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-03-29T08:58:14.158Z"
 last_activity: 2026-03-29
 progress:
   total_phases: 2
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  total_plans: 5
+  completed_plans: 3
   percent: 0
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-29)
 
 **Core value:** Agent workflows run uninterrupted when the browser is closed — reconnect anytime from any device on the tailnet and pick up where you left off.
-**Current focus:** Phase 05 — session-state-api
+**Current focus:** Phase 06 — active-session-ui
 
 ## Current Position
 
-Phase: 05 (session-state-api) — EXECUTING
-Plan: 2 of 2
-Status: Phase complete — ready for verification
+Phase: 06 (active-session-ui) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
 Last activity: 2026-03-29
 
 Progress: [░░░░░░░░░░] 0%
@@ -54,6 +54,7 @@ Progress: [░░░░░░░░░░] 0%
 *Updated after each plan completion*
 | Phase 05-session-state-api P01 | 5 | 2 tasks | 2 files |
 | Phase 05 P02 | 8 | 2 tasks | 2 files |
+| Phase 06-active-session-ui P01 | 2 | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,7 @@ Recent decisions affecting current work:
 - [Phase 05-session-state-api]: GET /api/session/state returns 9-field payload: bridgePhase, isStreaming, isCompacting, retryInProgress, sessionId, autoActive, autoPaused, currentUnit, updatedAt
 - [Phase 05]: Emit session_state asynchronously in subscribe callback — avoids blocking synchronous event queue
 - [Phase 05]: SSE session_state event order: bridge_status (sync), live_state_invalidation (sync), session_state x2 (async after await)
+- [Phase 06-active-session-ui]: SessionStatePayload added to WorkspaceEvent union with session_state in Exclude<> catch-all; handleSessionStateEvent guards against null pre-boot auto state
 
 ### Pending Todos
 
@@ -82,6 +84,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-29T08:40:59.771Z
-Stopped at: Completed 05-02-PLAN.md
+Last session: 2026-03-29T08:58:14.156Z
+Stopped at: Completed 06-01-PLAN.md
 Resume file: None
