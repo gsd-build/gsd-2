@@ -744,6 +744,7 @@ export function registerDbTools(pi: ExtensionAPI): void {
       "All tasks in the slice must have status 'complete' — the handler validates this before proceeding.",
       "On success, returns summaryPath and uatPath where the files were written.",
       "Idempotent — calling with the same params twice will not crash.",
+      "CRITICAL — all array parameters (keyFiles, keyDecisions, patternsEstablished, provides, drillDownPaths, affects, observabilitySurfaces, requirementsSurfaced, requirementsAdvanced, requirementsValidated, requirementsInvalidated, filesModified, requires) MUST be JSON arrays: [\"item1\", \"item2\"]. Never use YAML-style bullets (- item). The arguments are JSON, not YAML.",
     ],
     parameters: Type.Object({
       sliceId: Type.String({ description: "Slice ID (e.g. S01)" }),
