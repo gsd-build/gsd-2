@@ -577,10 +577,14 @@ export async function runDispatch(
   // ── Sliding-window stuck detection with graduated recovery ──
   const derivedKey = `${unitType}/${unitId}`;
 
-  if (!s.pendingVerificationRetry) {
-    loopState.recentUnits.push({ key: derivedKey });
-    if (loopState.recentUnits.length > STUCK_WINDOW_SIZE) loopState.recentUnits.shift();
+  // Always record this dispatch in the sliding window so detectStuck() has
+  // accurate history. Skipping the push when pendingVerificationRetry is set
+  // caused infinite artifact-retry loops to be invisible to stuck detection
+  // (#2007). Only the *response* to a stuck signal is suppressed during retries.
+  loopState.recentUnits.push({ key: derivedKey });
+  if (loopState.recentUnits.length > STUCK_WINDOW_SIZE) loopState.recentUnits.shift();
 
+  if (!s.pendingVerificationRetry) {
     const stuckSignal = detectStuck(loopState.recentUnits);
     if (stuckSignal) {
       debugLog("autoLoop", {

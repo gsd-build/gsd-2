@@ -197,9 +197,7 @@ import { reorderForCaching } from "./prompt-ordering.js";
 
 import {
   AutoSession,
-  MAX_UNIT_DISPATCHES,
   STUB_RECOVERY_THRESHOLD,
-  MAX_LIFETIME_DISPATCHES,
   NEW_SESSION_TIMEOUT_MS,
 } from "./auto/session.js";
 import type {
@@ -208,9 +206,7 @@ import type {
   StartModel,
 } from "./auto/session.js";
 export {
-  MAX_UNIT_DISPATCHES,
   STUB_RECOVERY_THRESHOLD,
-  MAX_LIFETIME_DISPATCHES,
   NEW_SESSION_TIMEOUT_MS,
 } from "./auto/session.js";
 export type {

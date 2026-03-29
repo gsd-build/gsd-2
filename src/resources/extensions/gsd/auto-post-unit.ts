@@ -206,6 +206,17 @@ export function detectRogueFileWrites(
   return rogues;
 }
 
+/** Throttle STATE.md rebuilds — at most once per 30 seconds */
+const STATE_REBUILD_MIN_INTERVAL_MS = 30_000;
+
+/**
+ * Maximum number of times to retry a unit whose expected artifact is missing
+ * after execution. Matches the bounded pattern used by runPostUnitVerification
+ * in auto-verification.ts. Exceeding this limit pauses auto-mode instead of
+ * looping indefinitely (#2007).
+ */
+const MAX_ARTIFACT_VERIFICATION_RETRIES = 3;
+
 export interface PreVerificationOpts {
   skipSettleDelay?: boolean;
   skipWorktreeSync?: boolean;
@@ -465,20 +476,32 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
       // When artifact verification fails for a unit type that has a known expected
       // artifact, return "retry" so the caller re-dispatches with failure context
       // instead of blindly re-dispatching the same unit (#1571).
+      // Retries are capped at MAX_ARTIFACT_VERIFICATION_RETRIES to prevent
+      // unbounded loops (#2007).
       if (!triggerArtifactVerified) {
         const hasExpectedArtifact = resolveExpectedArtifactPath(s.currentUnit.type, s.currentUnit.id, s.basePath) !== null;
         if (hasExpectedArtifact) {
           const retryKey = `${s.currentUnit.type}:${s.currentUnit.id}`;
           const attempt = (s.verificationRetryCount.get(retryKey) ?? 0) + 1;
+          if (attempt > MAX_ARTIFACT_VERIFICATION_RETRIES) {
+            s.verificationRetryCount.delete(retryKey);
+            debugLog("postUnit", { phase: "artifact-verify-exhausted", unitType: s.currentUnit.type, unitId: s.currentUnit.id, attempt });
+            ctx.ui.notify(
+              `Artifact still missing for ${s.currentUnit.type} ${s.currentUnit.id} after ${MAX_ARTIFACT_VERIFICATION_RETRIES} retries — pausing auto-mode`,
+              "error",
+            );
+            await pauseAuto(ctx, pi);
+            return "dispatched";
+          }
           s.verificationRetryCount.set(retryKey, attempt);
           s.pendingVerificationRetry = {
             unitId: s.currentUnit.id,
-            failureContext: `Artifact verification failed: expected artifact for ${s.currentUnit.type} "${s.currentUnit.id}" was not found on disk after unit execution (attempt ${attempt}).`,
+            failureContext: `Artifact verification failed: expected artifact for ${s.currentUnit.type} "${s.currentUnit.id}" was not found on disk after unit execution (attempt ${attempt}/${MAX_ARTIFACT_VERIFICATION_RETRIES}).`,
             attempt,
           };
           debugLog("postUnit", { phase: "artifact-verify-retry", unitType: s.currentUnit.type, unitId: s.currentUnit.id, attempt });
           ctx.ui.notify(
-            `Artifact missing for ${s.currentUnit.type} ${s.currentUnit.id} — retrying (attempt ${attempt})`,
+            `Artifact missing for ${s.currentUnit.type} ${s.currentUnit.id} — retrying (attempt ${attempt}/${MAX_ARTIFACT_VERIFICATION_RETRIES})`,
             "warning",
           );
           return "retry";
