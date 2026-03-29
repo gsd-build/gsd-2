@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
 import { handleValidateMilestone } from "../tools/validate-milestone.js";
-import { openDatabase, closeDatabase, _getAdapter, insertMilestone } from "../gsd-db.js";
+import { openDatabase, closeDatabase, _getAdapter, insertMilestone, insertSlice } from "../gsd-db.js";
 import { clearPathCache } from "../paths.js";
 import { clearParseCache } from "../files.js";
 
@@ -45,6 +45,7 @@ describe("handleValidateMilestone write ordering (#2725)", () => {
     const dbPath = join(base, ".gsd", "gsd.db");
     openDatabase(dbPath);
     insertMilestone({ id: "M001" });
+    insertSlice({ id: "S01", milestoneId: "M001" });
 
     const result = await handleValidateMilestone(VALID_PARAMS, base);
     assert.ok(!("error" in result), `unexpected error: ${"error" in result ? result.error : ""}`);
@@ -71,6 +72,7 @@ describe("handleValidateMilestone write ordering (#2725)", () => {
     const dbPath = join(base, ".gsd", "gsd.db");
     openDatabase(dbPath);
     insertMilestone({ id: "M001" });
+    insertSlice({ id: "S01", milestoneId: "M001" });
 
     const result = await handleValidateMilestone(
       { ...VALID_PARAMS, verificationClasses: undefined },
@@ -88,6 +90,7 @@ describe("handleValidateMilestone write ordering (#2725)", () => {
     const dbPath = join(base, ".gsd", "gsd.db");
     openDatabase(dbPath);
     insertMilestone({ id: "M001" });
+    insertSlice({ id: "S01", milestoneId: "M001" });
 
     // Force disk write failure by replacing the milestone directory with a
     // regular file. saveFile() will fail because it cannot write inside a

@@ -481,7 +481,8 @@ test("mergeAndExit resolves roadmap from worktree when missing at project root (
 
   // Should have called mergeMilestoneToMain, not bare teardown
   assert.equal(findCalls(deps.calls, "mergeMilestoneToMain").length, 1);
-  assert.equal(findCalls(deps.calls, "teardownAutoWorktree").length, 0);
+  // #2945 Bug 3: secondary teardown is now called after merge for cleanup
+  assert.equal(findCalls(deps.calls, "teardownAutoWorktree").length, 1);
   assert.equal(s.basePath, "/project"); // restored
   assert.ok(ctx.messages.some((m) => m.msg.includes("merged to main")));
 });
