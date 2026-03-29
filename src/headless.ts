@@ -458,6 +458,13 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
 
   function resetIdleTimer(): void {
     if (idleTimer) clearTimeout(idleTimer)
+    // Auto-mode has its own supervision via auto-timers.ts (idle + hard
+    // timeout with graduated recovery). The headless idle timer must NOT
+    // run for auto/next sessions — a single slow tool call (e.g. reading
+    // from cloud storage, large builds) can exceed 15s without emitting
+    // events, causing the headless wrapper to kill the session mid-task.
+    // Auto-mode exits via terminal notification ("Auto-mode stopped...").
+    if (isMultiTurnCommand) return
     if (toolCallCount > 0) {
       idleTimer = setTimeout(() => {
         completed = true
