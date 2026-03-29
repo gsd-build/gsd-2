@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Active Session Indicators
-status: executing
-stopped_at: Completed 06-03-PLAN.md
-last_updated: "2026-03-29T09:02:23.270Z"
+status: verifying
+stopped_at: Completed 06-02-PLAN.md
+last_updated: "2026-03-29T09:05:00.991Z"
 last_activity: 2026-03-29
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 5
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-03-29)
 
 Phase: 06 (active-session-ui) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-03-29
 
 Progress: [░░░░░░░░░░] 0%
@@ -56,6 +56,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 05 P02 | 8 | 2 tasks | 2 files |
 | Phase 06-active-session-ui P01 | 2 | 2 tasks | 1 files |
 | Phase 06-active-session-ui P03 | 2 | 2 tasks | 1 files |
+| Phase 06-active-session-ui P02 | 5 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -75,6 +76,8 @@ Recent decisions affecting current work:
 - [Phase 06-active-session-ui]: SessionStatePayload added to WorkspaceEvent union with session_state in Exclude<> catch-all; handleSessionStateEvent guards against null pre-boot auto state
 - [Phase 06-active-session-ui]: ProjectSessionState defined as local interface with 4 fields needed for badge rendering
 - [Phase 06-active-session-ui]: Session state fetched once in ProjectsPanel.load() after projects discovery — avoids N requests
+- [Phase 06-active-session-ui]: ChatInputBar stale boot?.auto?.active read also fixed to use getLiveAutoDashboard
+- [Phase 06-active-session-ui]: Dashboard primary action Button added to header JSX (was missing despite handler being defined)
 
 ### Pending Todos
 
@@ -87,6 +90,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-29T09:02:23.267Z
-Stopped at: Completed 06-03-PLAN.md
+Last session: 2026-03-29T09:05:00.988Z
+Stopped at: Completed 06-02-PLAN.md
 Resume file: None
