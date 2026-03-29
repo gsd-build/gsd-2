@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { repairToolJson, hasYamlBulletLists } from "../repair-tool-json.ts";
+import { repairToolJson, hasYamlBulletLists } from "../repair-tool-json.js";
 
 describe("repairToolJson — YAML bullet list repair (#2660)", () => {
 	// ── Detection ──────────────────────────────────────────────────────────
