@@ -191,7 +191,7 @@ export function escalateTier(currentTier: ComplexityTier): ComplexityTier | null
  */
 export function defaultRoutingConfig(): DynamicRoutingConfig {
   return {
-    enabled: false,
+    enabled: true,
     escalate_on_failure: true,
     budget_pressure: true,
     cross_provider: true,
