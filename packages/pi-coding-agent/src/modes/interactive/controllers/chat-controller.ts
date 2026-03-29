@@ -337,5 +337,12 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 			host.showError(event.reason);
 			host.ui.requestRender();
 			break;
+
+		case "image_overflow_recovery":
+			host.showStatus(
+				`Removed ${event.strippedCount} older image(s) to comply with API limits. Retrying...`,
+			);
+			host.ui.requestRender();
+			break;
 	}
 }
