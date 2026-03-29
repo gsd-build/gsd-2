@@ -109,12 +109,12 @@ function makeGSDState(overrides?: Partial<GSDState>): GSDState {
     activeMilestone: { id: 'M001', title: 'Topic-to-pipeline foundation' },
     activeSlice: { id: 'S01', title: 'Auth Layer' },
     activeTask: null,
-    phase: 'execute',
+    phase: 'executing',
     recentDecisions: [],
     blockers: [],
     nextAction: 'Continue execution',
     registry: [],
-    requirements: null,
+    requirements: undefined,
     ...overrides,
   };
 }
