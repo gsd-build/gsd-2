@@ -1,10 +1,13 @@
 // GSD Extension — Dynamic Model Router
 // Maps complexity tiers to models, enforcing downgrade-only semantics.
 // The user's configured model is always the ceiling.
+// Copyright (c) 2026 Jeremy McSpadden <jeremy@fluxlabs.net>
 
 import type { ComplexityTier, ClassificationResult } from "./complexity-classifier.js";
 import { tierOrdinal } from "./complexity-classifier.js";
 import type { ResolvedModelConfig } from "./preferences.js";
+import { getProviderCapabilities, type ProviderCapabilities } from "@gsd/pi-ai";
+import type { ToolCompatibility } from "@gsd/pi-coding-agent";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -278,4 +281,128 @@ function getModelCost(modelId: string): number {
 
   // Unknown cost — assume expensive to avoid routing to unknown cheap models
   return 999;
+}
+
+// ─── Tool-Compatibility Filter (ADR-005 Step 2) ────────────────────────────
+
+/** Lightweight tool info for compatibility filtering (avoids importing full ToolDefinition) */
+export interface ToolCompatibilityInfo {
+  name: string;
+  compatibility?: ToolCompatibility;
+}
+
+// Hoisted constants to avoid per-call array allocation
+const EXECUTE_REQUIRED_TOOLS: readonly string[] = ["Bash", "Read", "Write", "Edit"];
+const RESEARCH_REQUIRED_TOOLS: readonly string[] = ["Read", "WebSearch", "WebFetch"];
+const PLAN_REQUIRED_TOOLS: readonly string[] = ["Read", "Write"];
+const UAT_REQUIRED_TOOLS: readonly string[] = ["Read", "Bash"];
+const COMPLETION_REQUIRED_TOOLS: readonly string[] = ["Read", "Write"];
+const NO_REQUIRED_TOOLS: readonly string[] = [];
+
+/**
+ * Maps unit types to the tool names they require.
+ * Used by filterModelsByToolCompatibility() (ADR-005 Step 2) to exclude
+ * models whose provider cannot support the tools a unit type needs.
+ *
+ * Units with no required tools get an empty array (no filtering applied).
+ */
+export function getRequiredToolNames(unitType: string): readonly string[] {
+  switch (unitType) {
+    // Execution phases — need full code editing capabilities
+    case "execute-task":
+    case "execute-plan":
+    case "reactive-execute":
+    case "rewrite-docs":
+      return EXECUTE_REQUIRED_TOOLS;
+
+    // Research phases — need web search and file reading
+    case "research-milestone":
+    case "research-slice":
+      return RESEARCH_REQUIRED_TOOLS;
+
+    // Planning phases — read context, write plans
+    case "plan-milestone":
+    case "plan-slice":
+    case "replan-slice":
+      return PLAN_REQUIRED_TOOLS;
+
+    // UAT/verification — read artifacts, run commands
+    case "run-uat":
+      return UAT_REQUIRED_TOOLS;
+
+    // Completion phases — read summaries, write closeout docs
+    case "complete-slice":
+    case "complete-milestone":
+    case "validate-milestone":
+      return COMPLETION_REQUIRED_TOOLS;
+
+    // Reassessment — reads roadmap and slices, writes assessment
+    case "reassess-roadmap":
+      return COMPLETION_REQUIRED_TOOLS;
+
+    // Gate evaluation — lightweight judgment, minimal tool use
+    case "gate-evaluate":
+      return NO_REQUIRED_TOOLS;
+
+    default:
+      // Hooks (hook/*), discuss-*, and unknown unit types — no filtering (fail-open)
+      return NO_REQUIRED_TOOLS;
+  }
+}
+
+/**
+ * Check if a single tool is compatible with a provider's capabilities.
+ *
+ * Tools without compatibility metadata are ALWAYS compatible (fail-open).
+ * This is a critical invariant — see ADR-005 Pitfall 6.
+ */
+export function isToolCompatibleWithProvider(
+  tool: ToolCompatibilityInfo,
+  providerCaps: ProviderCapabilities,
+): boolean {
+  const compat = tool.compatibility;
+  if (!compat) return true; // No metadata = universally compatible
+
+  // Hard filter: provider doesn't support image tool results
+  if (compat.producesImages && !providerCaps.imageToolResults) return false;
+
+  // Hard filter: tool uses schema features the provider doesn't support
+  if (compat.schemaFeatures?.some(f => providerCaps.unsupportedSchemaFeatures.includes(f))) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Filter model IDs to only those whose provider can support all required tools.
+ *
+ * @param modelIds       Candidate model IDs (already tier-filtered)
+ * @param requiredTools  Tools the unit type needs (from getRequiredToolNames + tool registry)
+ * @param modelApiLookup Map from model ID to its API string (for registry lookup)
+ * @returns Filtered model IDs, or the original list if filter would remove ALL models (fail-open)
+ */
+export function filterModelsByToolCompatibility(
+  modelIds: string[],
+  requiredTools: ToolCompatibilityInfo[],
+  modelApiLookup: Record<string, string>,
+): string[] {
+  // No required tools with compatibility metadata = no filtering needed
+  if (requiredTools.length === 0) return modelIds;
+
+  // Only filter based on tools that actually have compatibility metadata
+  const toolsWithMetadata = requiredTools.filter(t => t.compatibility);
+  if (toolsWithMetadata.length === 0) return modelIds;
+
+  const filtered = modelIds.filter(modelId => {
+    const api = modelApiLookup[modelId];
+    if (!api) return true; // Unknown model API = pass through (fail-open)
+    const caps = getProviderCapabilities(api);
+    return toolsWithMetadata.every(tool => isToolCompatibleWithProvider(tool, caps));
+  });
+
+  // If filter removed ALL models, return original set (fail-open at set level)
+  if (filtered.length === 0) return modelIds;
+
+  return filtered;
 }

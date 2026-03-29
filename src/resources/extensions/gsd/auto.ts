@@ -78,7 +78,8 @@ import {
 } from "./auto-tool-tracking.js";
 import { closeoutUnit } from "./auto-unit-closeout.js";
 import { recoverTimedOutUnit } from "./auto-timeout-recovery.js";
-import { selectAndApplyModel, resolveModelId } from "./auto-model-selection.js";
+import { selectAndApplyModel, resolveModelId, applyToolCompatibilityAdjustment } from "./auto-model-selection.js";
+import { setProviderCapabilityOverrides } from "@gsd/pi-ai";
 import { resetRoutingHistory, recordOutcome } from "./routing-history.js";
 import {
   checkPostUnitHooks,
@@ -1426,6 +1427,17 @@ export async function dispatchHookUnit(
       );
     }
   }
+
+  // ADR-005: Apply capability overrides and tool filtering for hook dispatch.
+  // Previously hooks ran with zero capability validation.
+  const hookPrefs = loadEffectiveGSDPreferences()?.preferences;
+  if (hookPrefs) {
+    setProviderCapabilityOverrides(hookPrefs.provider_capabilities);
+  }
+  const hookModelApi = ctx.model && "api" in ctx.model ? (ctx.model as { api: string }).api : undefined;
+  const hookToolAdjustment = applyToolCompatibilityAdjustment(
+    pi, hookModelApi, ctx.ui.notify.bind(ctx.ui),
+  );
 
   const sessionFile = ctx.sessionManager.getSessionFile();
   writeLock(

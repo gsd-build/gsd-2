@@ -10,15 +10,29 @@ import type { GSDPreferences } from "./preferences.js";
 import { resolveModelWithFallbacksForUnit, resolveDynamicRoutingConfig } from "./preferences.js";
 import type { ComplexityTier } from "./complexity-classifier.js";
 import { classifyUnitComplexity, tierLabel } from "./complexity-classifier.js";
-import { resolveModelForComplexity, escalateTier } from "./model-router.js";
+import {
+  resolveModelForComplexity,
+  escalateTier,
+  getRequiredToolNames,
+  filterModelsByToolCompatibility,
+  type ToolCompatibilityInfo,
+} from "./model-router.js";
 import { getLedger, getProjectTotals } from "./metrics.js";
 import { unitPhaseLabel } from "./auto-dashboard.js";
+import { getProviderCapabilities, setProviderCapabilityOverrides, type ProviderCapabilities } from "@gsd/pi-ai";
+import { isToolCompatibleWithProvider } from "./model-router.js";
 
 export interface ModelSelectionResult {
   /** Routing metadata for metrics recording */
   routing: { tier: string; modelDowngraded: boolean } | null;
   /** Concrete model applied before dispatch so it can be restored after a fresh session. */
   appliedModel: Model<Api> | null;
+  /**
+   * Prior active tools saved before adjustToolSet filtering.
+   * Caller MUST restore these in a finally block after dispatch to prevent session drift.
+   * Undefined when no tool adjustment was applied.
+   */
+  priorTools?: string[];
 }
 
 export function resolvePreferredModelConfig(
@@ -59,6 +73,17 @@ export async function selectAndApplyModel(
   autoModeStartModel: { provider: string; id: string } | null,
   retryContext?: { isRetry: boolean; previousTier?: string },
 ): Promise<ModelSelectionResult> {
+  // ADR-005 Phase 6: Apply provider capability overrides from preferences.
+  // Only update when prefs are available — preserve prior overrides when prefs are transiently undefined.
+  if (prefs) {
+    const overrideWarnings = setProviderCapabilityOverrides(prefs.provider_capabilities);
+    if (verbose && overrideWarnings.length > 0) {
+      for (const warn of overrideWarnings) {
+        ctx.ui.notify(warn, "warning");
+      }
+    }
+  }
+
   const modelConfig = resolvePreferredModelConfig(unitType, autoModeStartModel);
   let routing: { tier: string; modelDowngraded: boolean } | null = null;
   let appliedModel: Model<Api> | null = null;
@@ -107,7 +132,37 @@ export async function selectAndApplyModel(
           }
         }
 
-        const routingResult = resolveModelForComplexity(classification, modelConfig, routingConfig, availableModelIds);
+        // ADR-005 Step 2: Filter models by tool compatibility BEFORE scoring.
+        // Build a lookup from model ID → API string for the compatibility filter.
+        const modelApiLookup: Record<string, string> = {};
+        for (const m of availableModels) {
+          modelApiLookup[m.id] = m.api;
+        }
+
+        // Get required tools for this unit type, enriched with compatibility metadata
+        const requiredToolNames = getRequiredToolNames(unitType);
+        const allToolInfos = pi.getAllTools();
+        const requiredTools: ToolCompatibilityInfo[] = requiredToolNames
+          .map(name => {
+            const toolInfo = allToolInfos.find(t => t.name === name);
+            return toolInfo ? { name: toolInfo.name, compatibility: toolInfo.compatibility } : { name };
+          });
+
+        const compatibleModelIds = filterModelsByToolCompatibility(
+          availableModelIds,
+          requiredTools,
+          modelApiLookup,
+        );
+
+        if (verbose && compatibleModelIds.length < availableModelIds.length) {
+          const filtered = availableModelIds.length - compatibleModelIds.length;
+          ctx.ui.notify(
+            `Tool compatibility: filtered ${filtered} model(s) incompatible with ${unitType} tools`,
+            "info",
+          );
+        }
+
+        const routingResult = resolveModelForComplexity(classification, modelConfig, routingConfig, compatibleModelIds);
 
         if (routingResult.wasDowngraded) {
           effectiveModelConfig = {
@@ -156,6 +211,27 @@ export async function selectAndApplyModel(
           : ` (fallback from ${effectiveModelConfig.primary})`;
         const phase = unitPhaseLabel(unitType);
         ctx.ui.notify(`Model [${phase}]${routingTierLabel}: ${model.provider}/${model.id}${fallbackNote}`, "info");
+
+        // ADR-005: Adjust tool set for selected model's provider capabilities.
+        // Save prior tools so caller can restore after dispatch (prevents session drift).
+        // Note: model objects from getAvailable() are Model<Api> with .api field,
+        // but resolveModelId's generic constraint only requires { id, provider }.
+        const modelApi = "api" in model ? (model as { api: string }).api : undefined;
+        if (modelApi) {
+          const priorToolNames = pi.getActiveTools();
+          const providerCaps = getProviderCapabilities(modelApi);
+          const allTools = pi.getAllTools();
+          const adjusted = adjustToolSet(allTools, providerCaps);
+          if (adjusted.length < allTools.length) {
+            pi.setActiveTools(adjusted.map(t => t.name));
+            if (verbose) {
+              const removed = allTools.length - adjusted.length;
+              ctx.ui.notify(`Tool adjustment: ${removed} tool(s) filtered for ${modelApi}`, "info");
+            }
+            return { routing, appliedModel: model as unknown as Model<Api>, priorTools: priorToolNames };
+          }
+        }
+
         break;
       } else {
         const nextModel = modelsToTry[modelsToTry.indexOf(modelId) + 1];
@@ -188,6 +264,171 @@ export async function selectAndApplyModel(
   }
 
   return { routing, appliedModel };
+}
+
+/**
+ * Filter the active tool set based on provider capabilities.
+ * Pure function — does not call pi API, returns filtered tool list.
+ *
+ * - Tools without compatibility metadata always pass (fail-open)
+ * - Tools with producesImages that the provider can't handle are removed
+ * - Tools with unsupported schema features are removed
+ * - If maxTools exceeded, lowest-priority tools are pruned
+ */
+export function adjustToolSet(
+  registeredTools: Array<{ name: string; compatibility?: { producesImages?: boolean; schemaFeatures?: string[] }; priority?: number }>,
+  providerCaps: ProviderCapabilities,
+): Array<{ name: string; compatibility?: { producesImages?: boolean; schemaFeatures?: string[] }; priority?: number }> {
+  let filtered = registeredTools.filter(tool => {
+    return isToolCompatibleWithProvider(
+      { name: tool.name, compatibility: tool.compatibility as any },
+      providerCaps,
+    );
+  });
+
+  // Prune if exceeding maxTools (0 = unlimited)
+  if (providerCaps.maxTools > 0 && filtered.length > providerCaps.maxTools) {
+    filtered.sort((a, b) => (b.priority ?? 1) - (a.priority ?? 1));
+    filtered = filtered.slice(0, providerCaps.maxTools);
+  }
+
+  return filtered;
+}
+
+/**
+ * Apply tool compatibility adjustment for a provider and return prior tool state.
+ *
+ * Checks the current active tools against the provider's capabilities and
+ * removes incompatible tools. Returns the prior tool names so the caller
+ * can restore them after dispatch (prevents session drift).
+ *
+ * Used by all dispatch paths: auto-loop, direct dispatch, guided-flow, hooks.
+ */
+export function applyToolCompatibilityAdjustment(
+  pi: {
+    getActiveTools(): string[];
+    getAllTools(): Array<{ name: string; compatibility?: { producesImages?: boolean; schemaFeatures?: string[] }; priority?: number }>;
+    setActiveTools(toolNames: string[]): void;
+  },
+  modelApi: string | undefined,
+  notify?: (message: string, level: "info" | "warning") => void,
+): { priorTools?: string[] } {
+  if (!modelApi) return {};
+
+  const priorToolNames = pi.getActiveTools();
+  if (priorToolNames.length === 0) return {};
+
+  const activeToolNames = new Set(priorToolNames);
+  const activeTools = pi.getAllTools().filter((tool: { name: string }) => activeToolNames.has(tool.name));
+  const providerCaps = getProviderCapabilities(modelApi);
+  const adjusted = adjustToolSet(activeTools, providerCaps);
+  if (adjusted.length >= activeTools.length) return {};
+
+  pi.setActiveTools(adjusted.map((t: { name: string }) => t.name));
+  notify?.(`Tool adjustment: ${activeTools.length - adjusted.length} tool(s) filtered for ${modelApi}`, "info");
+  return { priorTools: priorToolNames };
+}
+
+// ─── Plan-Time Capability Validation (ADR-004/005) ──────────────────────────
+
+/** A capability gap detected during plan-time validation. */
+export interface CapabilityWarning {
+  taskId: string;
+  taskTitle: string;
+  capability: string;
+  detail: string;
+}
+
+// Keywords that signal a task needs image support
+const IMAGE_KEYWORDS = /\bscreenshot|image|diagram|visual|render|preview|capture|photo|png|jpg|svg\b/i;
+// File extensions that signal image involvement
+const IMAGE_EXTENSIONS = /\.(png|jpg|jpeg|gif|svg|webp|bmp|ico|avif)$/i;
+
+/**
+ * Validate that planned tasks can be executed by the available model pool.
+ *
+ * Checks each task's description and file list against provider capabilities
+ * to detect tasks that require capabilities no available model supports.
+ *
+ * Pure function — does not modify state. Returns warnings for unresolvable gaps.
+ *
+ * @param tasks     Task descriptions from the plan
+ * @param models    Available models with their API strings
+ * @returns Array of capability warnings (empty = no gaps detected)
+ */
+export function validatePlanCapabilities(
+  tasks: Array<{ taskId: string; title: string; description: string; files: string[] }>,
+  models: Array<{ id: string; api: string }>,
+): CapabilityWarning[] {
+  if (tasks.length === 0 || models.length === 0) return [];
+
+  // Build a set of capabilities ANY model in the pool supports
+  const poolCaps = {
+    imageToolResults: false,
+    structuredOutput: false,
+    toolCalling: false,
+  };
+  for (const model of models) {
+    const caps = getProviderCapabilities(model.api);
+    if (caps.imageToolResults) poolCaps.imageToolResults = true;
+    if (caps.structuredOutput) poolCaps.structuredOutput = true;
+    if (caps.toolCalling) poolCaps.toolCalling = true;
+  }
+
+  // If the pool supports everything, no warnings needed
+  if (poolCaps.imageToolResults && poolCaps.structuredOutput && poolCaps.toolCalling) {
+    return [];
+  }
+
+  const warnings: CapabilityWarning[] = [];
+
+  for (const task of tasks) {
+    const text = `${task.title} ${task.description}`;
+    const hasImageFiles = task.files.some(f => IMAGE_EXTENSIONS.test(f));
+
+    // Check: task needs image support but no model provides it
+    if (!poolCaps.imageToolResults && (IMAGE_KEYWORDS.test(text) || hasImageFiles)) {
+      warnings.push({
+        taskId: task.taskId,
+        taskTitle: task.title,
+        capability: "imageToolResults",
+        detail: hasImageFiles
+          ? `Task references image files (${task.files.filter(f => IMAGE_EXTENSIONS.test(f)).join(", ")}) but no available model supports image tool results.`
+          : "Task description suggests image/screenshot work but no available model supports image tool results.",
+      });
+    }
+
+    // Check: no model supports tool calling at all (rare but possible with local models)
+    if (!poolCaps.toolCalling) {
+      warnings.push({
+        taskId: task.taskId,
+        taskTitle: task.title,
+        capability: "toolCalling",
+        detail: "No available model supports tool calling. Task execution requires tool use.",
+      });
+    }
+  }
+
+  return warnings;
+}
+
+/**
+ * Format capability warnings for display in plan output or notifications.
+ */
+export function formatCapabilityWarnings(warnings: CapabilityWarning[]): string {
+  if (warnings.length === 0) return "";
+  const lines = warnings.map(w =>
+    `- **${w.taskId}** (${w.taskTitle}): ${w.capability} — ${w.detail}`,
+  );
+  return [
+    "## Capability Warnings",
+    "",
+    "The following tasks may not execute correctly with the current model pool:",
+    "",
+    ...lines,
+    "",
+    "Consider configuring a model that supports these capabilities, or restructure tasks to avoid the dependency.",
+  ].join("\n");
 }
 
 /**

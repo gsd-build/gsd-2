@@ -131,6 +131,7 @@ export type {
 	ToolCallEvent,
 	ToolCallEventResult,
 	// Tools
+	ToolCompatibility,
 	ToolDefinition,
 	// Events - Tool Execution
 	ToolExecutionEndEvent,
