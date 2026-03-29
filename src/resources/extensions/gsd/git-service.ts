@@ -32,6 +32,8 @@ import {
   nativeRmCached,
   nativeUpdateRef,
   nativeAddPaths,
+  nativeResetSoft,
+  nativeCommitSubject,
 } from "./native-git-bridge.js";
 import { GSDError, GSD_MERGE_CONFLICT, GSD_GIT_ERROR } from "./errors.js";
 import { getErrorMessage } from "./error-utils.js";
@@ -540,7 +542,43 @@ export class GitServiceImpl {
       ? buildTaskCommitMessage(taskContext)
       : `chore: auto-commit after ${unitType}\n\nGSD-Unit: ${unitId}`;
     nativeCommit(this.basePath, message, { allowEmpty: false });
+
+    // Absorb any preceding gsd snapshot commits into this real commit.
+    // Walk backwards from HEAD~1 counting consecutive snapshot subjects,
+    // then soft-reset to before them and re-commit with the same message.
+    this.absorbSnapshotCommits(message);
+
     return message;
+  }
+
+  /**
+   * Squash consecutive `gsd snapshot:` commits that sit immediately below
+   * HEAD into the current HEAD commit. This keeps the git history clean
+   * after automated snapshot commits are superseded by real work.
+   *
+   * Does nothing if there are no snapshot commits to absorb.
+   */
+  private absorbSnapshotCommits(headMessage: string): void {
+    try {
+      const GSD_SNAPSHOT_PREFIX = "gsd snapshot:";
+      let count = 0;
+
+      // Walk back from HEAD~1 counting consecutive snapshot commits
+      for (let i = 1; i <= 50; i++) {
+        const subject = nativeCommitSubject(this.basePath, `HEAD~${i}`);
+        if (!subject.startsWith(GSD_SNAPSHOT_PREFIX)) break;
+        count = i;
+      }
+
+      if (count === 0) return;
+
+      // Soft reset to before the snapshot commits + the real commit we just made
+      nativeResetSoft(this.basePath, `HEAD~${count + 1}`);
+      // Re-commit everything (index is preserved by soft reset)
+      nativeCommit(this.basePath, headMessage, { allowEmpty: false });
+    } catch {
+      // Non-fatal — if squash fails, the commits remain unsquashed
+    }
   }
 
   // ─── Branch Queries ────────────────────────────────────────────────────

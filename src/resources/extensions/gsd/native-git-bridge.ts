@@ -681,6 +681,16 @@ export function nativeAddAll(basePath: string): void {
 }
 
 /**
+ * Stage only already-tracked files (git add -u).
+ * Does NOT add new untracked files — only updates modifications and deletions
+ * for files git already knows about. Safe for automated snapshots where
+ * pulling in unknown untracked files (secrets, binaries) would be dangerous.
+ */
+export function nativeAddTracked(basePath: string): void {
+  gitFileExec(basePath, ["add", "-u"]);
+}
+
+/**
  * Stage all files with pathspec exclusions (git add -A -- ':!pattern' ...).
  * Excluded paths are never hashed by git, preventing hangs on large
  * untracked artifact trees (57GB+, 11K+ files). See #1605.
@@ -929,6 +939,37 @@ export function nativeResetHard(basePath: string): void {
     return;
   }
   execSync("git reset --hard HEAD", { cwd: basePath, stdio: "pipe" });
+}
+
+/**
+ * Soft reset to a target ref (git reset --soft <ref>).
+ * Moves HEAD to `target` while keeping all changes staged in the index.
+ * Used to squash snapshot commits back into a single real commit.
+ */
+export function nativeResetSoft(basePath: string, target: string): void {
+  execFileSync("git", ["reset", "--soft", target], {
+    cwd: basePath,
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf-8",
+    env: GIT_NO_PROMPT_ENV,
+  });
+}
+
+/**
+ * Get the subject line of a commit (git log -1 --format=%s <ref>).
+ * Returns empty string if the ref doesn't exist.
+ */
+export function nativeCommitSubject(basePath: string, ref: string): string {
+  try {
+    return execFileSync("git", ["log", "-1", "--format=%s", ref], {
+      cwd: basePath,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf-8",
+      env: GIT_NO_PROMPT_ENV,
+    }).trim();
+  } catch {
+    return "";
+  }
 }
 
 /**

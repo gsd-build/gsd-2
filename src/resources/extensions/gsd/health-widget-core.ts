@@ -18,6 +18,8 @@ export interface HealthWidgetData {
   providerIssue: string | null;
   environmentErrorCount: number;
   environmentWarningCount: number;
+  /** Minutes since last commit when working tree is dirty, or null if clean/recent. */
+  staleCommitMinutes: number | null;
   lastRefreshed: number;
 }
 
@@ -71,6 +73,11 @@ export function buildHealthLines(data: HealthWidgetData): string[] {
     parts.push(`Env: ${data.environmentErrorCount} error${data.environmentErrorCount > 1 ? "s" : ""}`);
   } else if (data.environmentWarningCount > 0) {
     parts.push(`Env: ${data.environmentWarningCount} warning${data.environmentWarningCount > 1 ? "s" : ""}`);
+  }
+
+  if (data.staleCommitMinutes !== null) {
+    const mins = Math.floor(data.staleCommitMinutes);
+    parts.push(`⚠ Uncommitted changes (${mins}m) — run /gsd doctor fix`);
   }
 
   return [`  ${parts.join("  │  ")}`];
