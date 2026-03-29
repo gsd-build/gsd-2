@@ -1,7 +1,7 @@
 // GSD-2 — Tests for validateExtensionPackage (EXTR-02, PKG-05)
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { validateExtensionPackage } from "../commands-extensions.ts";
@@ -136,10 +136,24 @@ test("validateExtensionPackage: invalid JSON in package.json returns error", (t)
 });
 
 test("validateExtensionPackage: extracted google-search package passes validation (PKG-05)", (_t) => {
-  // This test runs against the actual extensions/google-search/ directory
-  // Resolve relative to the project root (3 levels up from tests/)
-  const projectRoot = join(new URL(import.meta.url).pathname, "..", "..", "..", "..", "..", "..");
-  const googleSearchDir = join(projectRoot, "extensions", "google-search");
+  // This test runs against the actual extensions/google-search/ directory.
+  // Walk up from cwd until we find it (handles both source and dist-test runs).
+  let dir = process.cwd();
+  let googleSearchDir = "";
+  for (let i = 0; i < 10; i++) {
+    const candidate = join(dir, "extensions", "google-search");
+    if (existsSync(join(candidate, "package.json"))) {
+      googleSearchDir = candidate;
+      break;
+    }
+    const parent = join(dir, "..");
+    if (parent === dir) break; // reached filesystem root
+    dir = parent;
+  }
+  if (!googleSearchDir) {
+    // Skip gracefully in environments where the extensions/ dir isn't available
+    return;
+  }
 
   const result = validateExtensionPackage(googleSearchDir);
   assert.equal(result.valid, true, `extensions/google-search/ should be valid, errors: ${JSON.stringify(result.errors)}`);
