@@ -82,3 +82,26 @@ test("#2572: 'SyntaxError' with JSON context (truncated stream) is transient", (
   assert.equal(isTransient(result), true, "'SyntaxError...JSON' should be transient");
   assert.equal(result.kind, "stream", "JSON parse errors are stream kind");
 });
+
+// --- #2916: additional V8 JSON parse variants not covered by the original STREAM_RE ---
+
+test("#2916: 'No number after minus sign in JSON' (YAML bullets in tool args) is transient", () => {
+  const result = classifyError("No number after minus sign in JSON at position 1012 (line 1 column 1013)");
+  assert.equal(isTransient(result), true, "'No number after minus sign in JSON' should be transient");
+  assert.equal(result.kind, "stream", "V8 JSON parse errors are stream kind");
+  assert.equal("retryAfterMs" in result && result.retryAfterMs, 15_000, "should use 15s backoff");
+});
+
+test("#2916: 'Invalid number in JSON' is transient", () => {
+  const result = classifyError("Invalid number in JSON at position 55 (line 1 column 56)");
+  assert.equal(isTransient(result), true, "'Invalid number in JSON' should be transient");
+  assert.equal(result.kind, "stream", "V8 JSON parse errors are stream kind");
+  assert.equal("retryAfterMs" in result && result.retryAfterMs, 15_000, "should use 15s backoff");
+});
+
+test("#2916: 'No number after minus sign' without JSON context stays non-transient", () => {
+  // Guard: the pattern must not match errors unrelated to JSON stream truncation
+  const result = classifyError("No number after minus sign at position 5");
+  assert.equal(isTransient(result), false, "without 'in JSON' context should not be transient");
+  assert.equal(result.kind, "unknown");
+});
