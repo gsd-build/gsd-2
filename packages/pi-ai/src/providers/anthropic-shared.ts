@@ -393,10 +393,14 @@ export function convertMessages(
 	return params;
 }
 
-export function convertTools(tools: Tool[], isOAuthToken: boolean): Anthropic.Messages.Tool[] {
+export function convertTools(
+	tools: Tool[],
+	isOAuthToken: boolean,
+	cacheControl?: { type: "ephemeral"; ttl?: "1h" },
+): Anthropic.Messages.Tool[] {
 	if (!tools) return [];
 
-	return tools.map((tool) => {
+	const result = tools.map((tool) => {
 		const jsonSchema = tool.parameters as any;
 
 		return {
@@ -409,6 +413,13 @@ export function convertTools(tools: Tool[], isOAuthToken: boolean): Anthropic.Me
 			},
 		};
 	});
+
+	// Add cache breakpoint to last tool — covers entire tool block
+	if (cacheControl && result.length > 0) {
+		(result[result.length - 1] as any).cache_control = cacheControl;
+	}
+
+	return result;
 }
 
 export function buildParams(
@@ -456,7 +467,7 @@ export function buildParams(
 	}
 
 	if (context.tools) {
-		params.tools = convertTools(context.tools, isOAuthToken);
+		params.tools = convertTools(context.tools, isOAuthToken, cacheControl);
 	}
 
 	if (options?.thinkingEnabled && model.reasoning) {

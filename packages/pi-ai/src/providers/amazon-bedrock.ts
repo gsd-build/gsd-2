@@ -151,7 +151,7 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 				messages: convertMessages(context, model, cacheRetention),
 				system: buildSystemPrompt(context.systemPrompt, model, cacheRetention),
 				inferenceConfig: { maxTokens: options.maxTokens, temperature: options.temperature },
-				toolConfig: convertToolConfig(context.tools, options.toolChoice),
+				toolConfig: convertToolConfig(context.tools, options.toolChoice, model, cacheRetention),
 				additionalModelRequestFields: buildAdditionalModelRequestFields(model, options),
 			};
 			const nextCommandInput = await options?.onPayload?.(commandInput, model);
@@ -633,6 +633,8 @@ function convertMessages(
 function convertToolConfig(
 	tools: Tool[] | undefined,
 	toolChoice: BedrockOptions["toolChoice"],
+	model: Model<"bedrock-converse-stream">,
+	cacheRetention: CacheRetention,
 ): ToolConfiguration | undefined {
 	if (!tools?.length || toolChoice === "none") return undefined;
 
@@ -643,6 +645,16 @@ function convertToolConfig(
 			inputSchema: { json: tool.parameters },
 		},
 	}));
+
+	// Add cachePoint after last tool for supported models
+	if (cacheRetention !== "none" && supportsPromptCaching(model)) {
+		bedrockTools.push({
+			cachePoint: {
+				type: CachePointType.DEFAULT,
+				...(cacheRetention === "long" ? { ttl: CacheTTL.ONE_HOUR } : {}),
+			},
+		} as any);
+	}
 
 	let bedrockToolChoice: ToolChoice | undefined;
 	switch (toolChoice) {

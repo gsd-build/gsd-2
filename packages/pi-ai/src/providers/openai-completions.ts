@@ -343,6 +343,7 @@ function buildParams(model: Model<"openai-completions">, context: Context, optio
 
 	if (context.tools) {
 		params.tools = convertTools(context.tools, compat);
+		maybeAddOpenRouterAnthropicToolCacheControl(model, params.tools);
 	} else if (hasToolHistory(context.messages)) {
 		// Anthropic (via LiteLLM/proxy) requires tools param when conversation has tool_calls/tool_results
 		params.tools = [];
@@ -377,6 +378,19 @@ function buildParams(model: Model<"openai-completions">, context: Context, optio
 	}
 
 	return params;
+}
+
+function maybeAddOpenRouterAnthropicToolCacheControl(
+	model: Model<"openai-completions">,
+	tools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined,
+): void {
+	if (model.provider !== "openrouter" || !model.id.startsWith("anthropic/")) return;
+	if (!tools?.length) return;
+
+	const lastTool = tools[tools.length - 1];
+	if ("function" in lastTool) {
+		Object.assign(lastTool.function, { cache_control: { type: "ephemeral" } });
+	}
 }
 
 function mapReasoningEffort(
