@@ -79,6 +79,15 @@ export async function handleAgentEnd(
     // ── 1. Classify ──────────────────────────────────────────────────────
     const cls = classifyError(errorMsg, explicitRetryAfterMs);
 
+    // Cap rate-limit backoff for CLI-style providers (openai-codex, google-gemini-cli)
+    // which use per-user quotas with shorter windows (#2922).
+    if (cls.kind === "rate-limit") {
+      const currentProvider = ctx.model?.provider;
+      if (currentProvider === "openai-codex" || currentProvider === "google-gemini-cli") {
+        cls.retryAfterMs = Math.min(cls.retryAfterMs, 30_000);
+      }
+    }
+
     // ── 2. Decide & Act ──────────────────────────────────────────────────
 
     // --- Network errors: same-model retry with backoff ---
