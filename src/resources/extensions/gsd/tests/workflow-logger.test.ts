@@ -317,6 +317,54 @@ describe("workflow-logger", () => {
     });
   });
 
+  describe("new log components (db, dispatch)", () => {
+    test("logError with 'db' component stores correct component", () => {
+      logError("db", "failed to copy DB to worktree", { error: "ENOENT" });
+      const entries = peekLogs();
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].severity, "error");
+      assert.equal(entries[0].component, "db");
+      assert.equal(entries[0].message, "failed to copy DB to worktree");
+      assert.deepEqual(entries[0].context, { error: "ENOENT" });
+    });
+
+    test("logError with 'dispatch' component stores correct component", () => {
+      logError("dispatch", "reactive graph derivation failed", { error: "timeout" });
+      const entries = peekLogs();
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].severity, "error");
+      assert.equal(entries[0].component, "dispatch");
+      assert.deepEqual(entries[0].context, { error: "timeout" });
+    });
+
+    test("logWarning with 'reconcile' component for centralized logging path", () => {
+      logWarning("reconcile", "could not acquire sync lock — another reconciliation may be in progress");
+      const entries = peekLogs();
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].severity, "warn");
+      assert.equal(entries[0].component, "reconcile");
+    });
+
+    test("summarizeLogs includes db and dispatch entries", () => {
+      logError("db", "worktree DB reconciliation failed: path contains unsafe characters");
+      logWarning("dispatch", "graph derivation timeout");
+      const summary = summarizeLogs()!;
+      assert.ok(summary.includes("1 error(s)"));
+      assert.ok(summary.includes("1 warning(s)"));
+      assert.ok(summary.includes("unsafe characters"));
+      assert.ok(summary.includes("graph derivation timeout"));
+    });
+
+    test("formatForNotification renders db and dispatch components", () => {
+      logError("db", "copy failed");
+      logWarning("dispatch", "slow derivation");
+      const entries = drainLogs();
+      const formatted = formatForNotification(entries);
+      assert.ok(formatted.includes("[db] copy failed"));
+      assert.ok(formatted.includes("[dispatch] slow derivation"));
+    });
+  });
+
   describe("stderr output", () => {
     test("writes WARN prefix to stderr for warnings", (t) => {
       const written: string[] = [];
