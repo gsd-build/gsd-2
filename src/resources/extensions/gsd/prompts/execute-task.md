@@ -68,7 +68,7 @@ Then:
 17. If you discover a non-obvious rule, recurring gotcha, or useful pattern during execution, append it to `.gsd/KNOWLEDGE.md`. Only add entries that would save future agents from repeating your investigation. Don't add obvious things.
 18. Read the template at `~/.gsd/agent/extensions/gsd/templates/task-summary.md`
 19. Write `{{taskSummaryPath}}`
-20. Call `gsd_complete_task` with milestone_id, slice_id, task_id, and a summary of what was accomplished. This is your final required step — do NOT manually edit PLAN.md checkboxes. The tool marks the task complete, updates the DB, and renders PLAN.md automatically.
+20. Call `gsd_complete_task` with milestoneId, sliceId, taskId, and a summary of what was accomplished. This is your final required step — do NOT manually edit PLAN.md checkboxes. The tool marks the task complete, updates the DB, and renders PLAN.md automatically.
 21. Do not run git commands — the system reads your task summary after completion and creates a meaningful commit from it (type inferred from title, message from your one-liner, key files from frontmatter). Write a clear, specific one-liner in the summary — it becomes the commit message.
 
 All work stays in your working directory: `{{workingDirectory}}`.
