@@ -78,6 +78,7 @@ import {
 import { join } from "node:path";
 import { sep as pathSep } from "node:path";
 
+import { resolveProjectRootDbPath } from "./bootstrap/dynamic-tools.js";
 import type { WorktreeResolver } from "./worktree-resolver.js";
 
 export interface BootstrapDeps {
@@ -95,6 +96,26 @@ export interface BootstrapDeps {
  * Returns false if the bootstrap aborted (e.g., guided flow returned,
  * concurrent session detected). Returns true when ready to dispatch.
  */
+
+/**
+ * Open the project-root DB before the first deriveState call (#2841).
+ * When auto-mode starts cold (no prior DB handle), state derivation that
+ * touches DB-backed helpers (queue-order, task status) silently falls back
+ * to markdown-only data, producing stale or incomplete state.  Opening the
+ * DB first ensures deriveState sees the full picture on its very first run.
+ */
+async function openProjectDbIfPresent(basePath: string): Promise<void> {
+  const gsdDbPath = resolveProjectRootDbPath(basePath);
+  if (!existsSync(gsdDbPath)) return;
+  if (isDbAvailable()) return;
+
+  try {
+    const { openDatabase } = await import("./gsd-db.js");
+    openDatabase(gsdDbPath);
+  } catch {
+    /* non-fatal — DB lifecycle block below will retry */
+  }
+}
 
 /** Guard: tracks consecutive bootstrap attempts that found phase === "complete".
  *  Prevents the recursive dialog loop described in #1348 where
@@ -272,6 +293,10 @@ export async function bootstrapAutoSession(
       gsdRoot(base),
       (mid) => !!resolveMilestoneFile(base, mid, "SUMMARY"),
     );
+
+    // Open the project-root DB before deriveState so DB-backed state
+    // derivation (queue-order, task status) works on a cold start (#2841).
+    await openProjectDbIfPresent(base);
 
     let state = await deriveState(base);
 
