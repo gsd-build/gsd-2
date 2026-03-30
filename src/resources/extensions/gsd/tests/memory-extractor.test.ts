@@ -1,4 +1,4 @@
-import { parseMemoryResponse, _resetExtractionState } from '../memory-extractor.ts';
+import { parseMemoryResponse, _resetExtractionState, extractTranscriptFromActivity } from '../memory-extractor.ts';
 import {
   openDatabase,
   closeDatabase,
@@ -167,5 +167,59 @@ test('memory-extractor: reset extraction state', () => {
   // Just verify it doesn't throw
   _resetExtractionState();
   assert.ok(true, '_resetExtractionState should not throw');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Regression: extractTranscriptFromActivity — issue #3182
+// Activity log wraps messages as { type: "message", message: { role, content } }.
+// The original code read entry.role directly (always undefined on the outer
+// object), silently dropping every assistant turn and producing empty transcripts.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('extractTranscriptFromActivity (#3182)', () => {
+  test('extracts text from wrapped { type, message } format', () => {
+    // Before fix: entry.role is undefined on the outer object → silently skipped
+    const line = JSON.stringify({
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Hello world' }],
+      },
+    });
+    const result = extractTranscriptFromActivity(line);
+    assert.ok(
+      result.includes('Hello world'),
+      `Expected result to contain "Hello world", got: ${JSON.stringify(result)}`,
+    );
+  });
+
+  test('ignores non-assistant messages in wrapped format', () => {
+    const line = JSON.stringify({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: 'User input' }],
+      },
+    });
+    const result = extractTranscriptFromActivity(line);
+    assert.equal(
+      result.trim(),
+      '',
+      `Expected empty result for user message, got: ${JSON.stringify(result)}`,
+    );
+  });
+
+  test('backward-compatible with bare { role, content } format', () => {
+    // Legacy format without outer wrapper — must work before and after fix
+    const line = JSON.stringify({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Legacy format' }],
+    });
+    const result = extractTranscriptFromActivity(line);
+    assert.ok(
+      result.includes('Legacy format'),
+      `Expected result to contain "Legacy format", got: ${JSON.stringify(result)}`,
+    );
+  });
 });
 
