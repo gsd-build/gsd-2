@@ -649,15 +649,42 @@ function detectTimeouts(traces: UnitTrace[], anomalies: ForensicAnomaly[]): void
   }
 }
 
+/**
+ * Parse a completed-unit key into its unitType and unitId.
+ *
+ * Hook units use a compound slash-delimited type ("hook/<hookName>"), so a
+ * naive `key.indexOf("/")` would split "hook/telegram-progress/M007/S01" into
+ * unitType="hook" (wrong) instead of "hook/telegram-progress".
+ *
+ * Returns `null` for malformed keys that cannot be split.
+ */
+export function splitCompletedKey(key: string): { unitType: string; unitId: string } | null {
+  if (key.startsWith("hook/")) {
+    // Hook unit types are two segments: "hook/<hookName>/<unitId...>"
+    const secondSlash = key.indexOf("/", 5); // skip past "hook/"
+    if (secondSlash === -1) return null;     // malformed — no unitId after hook name
+    return {
+      unitType: key.slice(0, secondSlash),
+      unitId: key.slice(secondSlash + 1),
+    };
+  }
+
+  const slashIdx = key.indexOf("/");
+  if (slashIdx === -1) return null;
+  return {
+    unitType: key.slice(0, slashIdx),
+    unitId: key.slice(slashIdx + 1),
+  };
+}
+
 function detectMissingArtifacts(completedKeys: string[], basePath: string, activeMilestone: string | null, anomalies: ForensicAnomaly[]): void {
   // Also check the worktree path for artifacts — they may exist there but not at root
   const wtBasePath = activeMilestone ? getAutoWorktreePath(basePath, activeMilestone) : null;
 
   for (const key of completedKeys) {
-    const slashIdx = key.indexOf("/");
-    if (slashIdx === -1) continue;
-    const unitType = key.slice(0, slashIdx);
-    const unitId = key.slice(slashIdx + 1);
+    const parsed = splitCompletedKey(key);
+    if (!parsed) continue;
+    const { unitType, unitId } = parsed;
 
     const rootHasArtifact = verifyExpectedArtifact(unitType, unitId, basePath);
     const wtHasArtifact = wtBasePath ? verifyExpectedArtifact(unitType, unitId, wtBasePath) : false;
