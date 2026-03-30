@@ -519,7 +519,9 @@ export async function updateRequirementInDb(
       await saveFile(filePath, md);
     } catch (diskErr) {
       logError('manifest', 'disk write failed, reverting DB row', { fn: 'updateRequirementInDb', error: String((diskErr as Error).message) });
-      db.upsertRequirement(existing);
+      if (existing) {
+        db.upsertRequirement(existing);
+      }
       throw diskErr;
     }
     // Invalidate file-read caches so deriveState() sees the updated markdown.
