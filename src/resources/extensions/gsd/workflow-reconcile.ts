@@ -9,6 +9,7 @@ import {
   insertVerificationEvidence,
   upsertDecision,
   openDatabase,
+  setTaskBlockerDiscovered,
 } from "./gsd-db.js";
 import { writeManifest } from "./workflow-manifest.js";
 import { atomicWriteSync } from "./atomic-write.js";
@@ -55,13 +56,11 @@ function replayEvents(events: WorkflowEvent[]): void {
         break;
       }
       case "report_blocker": {
-        // report_blocker marks the task with blocker_discovered = 1
-        // The DB helper updateTaskStatus doesn't handle blockers,
-        // so we just update status to "blocked" as a best-effort replay.
         const milestoneId = p["milestoneId"] as string;
         const sliceId = p["sliceId"] as string;
         const taskId = p["taskId"] as string;
         updateTaskStatus(milestoneId, sliceId, taskId, "blocked");
+        setTaskBlockerDiscovered(milestoneId, sliceId, taskId, true);
         break;
       }
       case "record_verification": {

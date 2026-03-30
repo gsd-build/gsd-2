@@ -108,9 +108,19 @@ export async function runUnit(
     { triggerTurn: true },
   );
 
-  // ── Await agent_end ──
+  // ── Await agent_end with absolute timeout (H4 fix) ──
+  // If supervision fails to resolve unitPromise within 30s, treat as cancelled.
+  // Without this, a crashed agent that never emits agent_end hangs the loop (#3161).
   debugLog("runUnit", { phase: "awaiting-agent-end", unitType, unitId });
-  const result = await unitPromise;
+  const UNIT_HARD_TIMEOUT_MS = 30_000;
+  let unitTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const timeoutResult = new Promise<UnitResult>((resolve) => {
+    unitTimeoutHandle = setTimeout(() => {
+      resolve({ status: "cancelled", errorContext: { message: "Unit hard timeout — supervision may have failed", category: "timeout", isTransient: true } });
+    }, UNIT_HARD_TIMEOUT_MS);
+  });
+  const result = await Promise.race([unitPromise, timeoutResult]);
+  if (unitTimeoutHandle) clearTimeout(unitTimeoutHandle);
   debugLog("runUnit", {
     phase: "agent-end-received",
     unitType,

@@ -178,8 +178,8 @@ export async function handleCompleteTask(
     }
 
     // All guards passed — perform writes
-    insertMilestone({ id: params.milestoneId });
-    insertSlice({ id: params.sliceId, milestoneId: params.milestoneId });
+    insertMilestone({ id: params.milestoneId, title: params.milestoneId });
+    insertSlice({ id: params.sliceId, milestoneId: params.milestoneId, title: params.sliceId });
     insertTask({
       id: params.taskId,
       sliceId: params.sliceId,

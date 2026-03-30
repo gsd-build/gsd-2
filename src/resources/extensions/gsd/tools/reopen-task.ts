@@ -22,6 +22,9 @@ import { isClosedStatus } from "../status-guards.js";
 import { renderAllProjections } from "../workflow-projections.js";
 import { writeManifest } from "../workflow-manifest.js";
 import { appendEvent } from "../workflow-events.js";
+import { existsSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
+import { resolveTasksDir, clearPathCache } from "../paths.js";
 
 export interface ReopenTaskParams {
   milestoneId: string;
@@ -98,6 +101,20 @@ export async function handleReopenTask(
 
   // ── Invalidate caches ────────────────────────────────────────────────────
   invalidateStateCache();
+
+  // ── Clean up stale filesystem artifacts (M12 fix) ────────────────────────
+  // Without this, the DB-filesystem reconciler sees the SUMMARY.md and
+  // auto-corrects the task back to "complete", making reopen a no-op (#3161).
+  try {
+    const tasksDir = resolveTasksDir(basePath, params.milestoneId, params.sliceId);
+    if (tasksDir) {
+      const summaryPath = join(tasksDir, `${params.taskId}-SUMMARY.md`);
+      if (existsSync(summaryPath)) unlinkSync(summaryPath);
+    }
+  } catch {
+    // Non-fatal — stale artifact may cause reconciler interference but won't crash
+  }
+  clearPathCache();
 
   // ── Post-mutation hook ───────────────────────────────────────────────────
   try {
