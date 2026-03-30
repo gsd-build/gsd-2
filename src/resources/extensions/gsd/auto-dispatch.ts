@@ -129,6 +129,21 @@ export function setRewriteCount(basePath: string, count: number): void {
   writeFileSync(filePath, JSON.stringify({ count, updatedAt: new Date().toISOString() }) + "\n");
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Returns true when the verification_operational value indicates that no
+ * operational verification is needed.  Covers common phrasings the planning
+ * agent may use: "None", "None required", "N/A", "Not applicable", etc.
+ *
+ * @see https://github.com/gsd-build/gsd-2/issues/2931
+ */
+export function isVerificationNotApplicable(value: string): boolean {
+  const v = (value ?? "").toLowerCase().trim();
+  if (!v || v === "none") return true;
+  return /^(?:none[\s._-]*(?:required|needed|planned)?|n\/?a|not[\s._-]+(?:applicable|required|needed)|no[\s._-]+operational[\s\S]*)$/i.test(v);
+}
+
 // ─── Rules ────────────────────────────────────────────────────────────────
 
 export const DISPATCH_RULES: DispatchRule[] = [
@@ -672,7 +687,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
         if (isDbAvailable()) {
           const milestone = getMilestone(mid);
           if (milestone?.verification_operational &&
-              milestone.verification_operational.toLowerCase() !== "none") {
+              !isVerificationNotApplicable(milestone.verification_operational)) {
             const validationPath = resolveMilestoneFile(basePath, mid, "VALIDATION");
             if (validationPath) {
               const validationContent = await loadFile(validationPath);
