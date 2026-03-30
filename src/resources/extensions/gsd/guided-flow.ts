@@ -10,6 +10,7 @@ import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@g
 import { showNextAction } from "../shared/tui.js";
 import { loadFile } from "./files.js";
 import { isDbAvailable, getMilestoneSlices } from "./gsd-db.js";
+import { parseRoadmapSlices } from "./roadmap-slices.js";
 import { loadPrompt, inlineTemplate } from "./prompt-loader.js";
 import { buildSkillActivationBlock } from "./auto-prompts.js";
 import { deriveState } from "./state.js";
@@ -616,6 +617,12 @@ export async function showDiscuss(
     normSlices = getMilestoneSlices(mid).map(s => ({ id: s.id, done: s.status === "complete", title: s.title }));
   } else {
     normSlices = [];
+  }
+  // DB is open but returned zero slices despite a roadmap existing —
+  // the DB may be empty due to WAL loss or truncation (see #2815, #2892).
+  // Fall back to roadmap parsing to prevent false "all complete" exit.
+  if (normSlices.length === 0 && roadmapContent) {
+    normSlices = parseRoadmapSlices(roadmapContent).map(s => ({ id: s.id, done: s.done, title: s.title }));
   }
   const pendingSlices = normSlices.filter(s => !s.done);
 
