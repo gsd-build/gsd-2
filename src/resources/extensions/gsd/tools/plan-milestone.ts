@@ -191,15 +191,19 @@ export async function handlePlanMilestone(
         return;
       }
 
-      // Guard: refuse to re-plan a milestone that has completed slices (#2960).
-      // INSERT OR IGNORE on slices won't overwrite existing rows, but a full
-      // re-plan after worktree recreation or DB resync can create new slice rows
-      // that shadow completed work. Block early when any slice is already done.
+      // Guard: refuse to re-plan a milestone that would drop completed slices (#2960).
+      // Allow re-planning when all completed slices are still present in the
+      // incoming plan — their status is preserved below (#2558). Block only when
+      // the new plan omits a completed slice, which could shadow completed work.
       const existingSlices = getMilestoneSlices(params.milestoneId);
       const completedSlices = existingSlices.filter(s => isClosedStatus(s.status));
       if (completedSlices.length > 0) {
-        guardError = `cannot re-plan milestone ${params.milestoneId}: ${completedSlices.length} slice(s) already completed (${completedSlices.map(s => s.id).join(", ")}). Use gsd_reassess_roadmap to modify the roadmap.`;
-        return;
+        const incomingSliceIds = new Set(params.slices.map(s => s.sliceId));
+        const droppedCompleted = completedSlices.filter(s => !incomingSliceIds.has(s.id));
+        if (droppedCompleted.length > 0) {
+          guardError = `cannot re-plan milestone ${params.milestoneId}: ${droppedCompleted.length} completed slice(s) would be dropped (${droppedCompleted.map(s => s.id).join(", ")}). Use gsd_reassess_roadmap to modify the roadmap.`;
+          return;
+        }
       }
 
       // Validate depends_on: all dependencies must exist and be complete
