@@ -6,6 +6,7 @@
 import { existsSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteSync } from "./atomic-write.js";
+import { debugLog } from "./debug-logger.js";
 
 const STALE_THRESHOLD_MS = 60_000; // 60 seconds
 const DEFAULT_TIMEOUT_MS = 5_000;  // 5 seconds
@@ -47,7 +48,7 @@ export function acquireSyncLock(
         const age = Date.now() - stat.mtimeMs;
         if (age > STALE_THRESHOLD_MS) {
           // Stale lock — override it
-          try { unlinkSync(lp); } catch { /* race: already removed */ }
+          try { unlinkSync(lp); } catch { /* non-fatal race: already removed by another process */ }
         } else {
           // Lock is held and not stale — wait or give up
           if (Date.now() >= deadline) {
@@ -69,8 +70,8 @@ export function acquireSyncLock(
       };
       atomicWriteSync(lp, JSON.stringify(lockData, null, 2));
       return { acquired: true };
-    } catch {
-      // Write failed (race condition with another process) — retry or give up
+    } catch (err) {
+      debugLog("acquireSyncLock", { action: "lock-write-failed", error: err instanceof Error ? err.message : String(err) });
       if (Date.now() >= deadline) {
         return { acquired: false };
       }
@@ -89,6 +90,6 @@ export function releaseSyncLock(basePath: string): void {
       unlinkSync(lp);
     }
   } catch {
-    // Non-fatal — lock may have been released by another process
+    // non-fatal: lock may have been released by another process
   }
 }

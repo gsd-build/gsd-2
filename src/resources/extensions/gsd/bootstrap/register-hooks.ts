@@ -17,6 +17,7 @@ import { isParallelActive, shutdownParallel } from "../parallel-orchestrator.js"
 import { checkToolCallLoop, resetToolCallLoopGuard } from "./tool-call-loop-guard.js";
 import { saveActivityLog } from "../activity-log.js";
 import { startRtkStatusUpdates, stopRtkStatusUpdates } from "../rtk-status.js";
+import { debugLog } from "../debug-logger.js";
 import { rewriteCommandWithRtk } from "../../shared/rtk.js";
 
 // Skip the welcome screen on the very first session_start — cli.ts already
@@ -48,7 +49,7 @@ export function registerHooks(pi: ExtensionAPI): void {
       const { loadEffectiveGSDPreferences } = await import("../preferences.js");
       const prefs = loadEffectiveGSDPreferences();
       process.env.GSD_SHOW_TOKEN_COST = prefs?.preferences.show_token_cost ? "1" : "";
-    } catch { /* non-fatal */ }
+    } catch (err) { debugLog("session_start", { action: "load-prefs-failed", error: err instanceof Error ? err.message : String(err) }); }
     if (isFirstSession) {
       isFirstSession = false;
     } else {
@@ -61,7 +62,7 @@ export function registerHooks(pi: ExtensionAPI): void {
           ) as { printWelcomeScreen: (opts: { version: string; modelName?: string; provider?: string }) => void };
           printWelcomeScreen({ version: process.env.GSD_VERSION || "0.0.0" });
         }
-      } catch { /* non-fatal */ }
+      } catch (err) { debugLog("session_start", { action: "welcome-screen-failed", error: err instanceof Error ? err.message : String(err) }); }
     }
     loadToolApiKeys();
     try {
@@ -143,8 +144,8 @@ export function registerHooks(pi: ExtensionAPI): void {
     if (isParallelActive()) {
       try {
         await shutdownParallel(process.cwd());
-      } catch {
-        // best-effort
+      } catch (err) {
+        debugLog("session_shutdown", { action: "parallel-shutdown-failed", error: err instanceof Error ? err.message : String(err) });
       }
     }
     if (!isAutoActive() && !isAutoPaused()) return;

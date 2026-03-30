@@ -10,6 +10,7 @@ import { existsSync, copyFileSync, mkdirSync, realpathSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Decision, Requirement, GateRow, GateId, GateScope, GateStatus, GateVerdict } from "./types.js";
 import { GSDError, GSD_STALE_STATE } from "./errors.js";
+import { debugLog } from "./debug-logger.js";
 
 const _require = createRequire(import.meta.url);
 
@@ -805,8 +806,8 @@ export function closeDatabase(): void {
     } catch { /* non-fatal */ }
     try {
       currentDb.close();
-    } catch {
-      // swallow close errors
+    } catch (err) {
+      debugLog("closeDatabase", { action: "close-failed", error: err instanceof Error ? err.message : String(err) });
     }
     currentDb = null;
     currentPath = null;
@@ -1765,7 +1766,9 @@ export function reconcileWorktreeDb(
   // ATTACHing a WAL-mode DB to itself corrupts the WAL (#2823).
   try {
     if (realpathSync(mainDbPath) === realpathSync(worktreeDbPath)) return zero;
-  } catch { /* path resolution failed — fall through to existing checks */ }
+  } catch (err) {
+    debugLog("reconcileWorktreeDb", { action: "path-resolution-failed", mainDbPath, worktreeDbPath, error: err instanceof Error ? err.message : String(err) });
+  }
   // Sanitize path: reject any characters that could break ATTACH syntax.
   // ATTACH DATABASE doesn't support parameterized paths in all providers,
   // so we use strict allowlist validation instead.
@@ -1902,12 +1905,16 @@ export function reconcileWorktreeDb(
 
         adapter.exec("COMMIT");
       } catch (txErr) {
-        try { adapter.exec("ROLLBACK"); } catch { /* best effort */ }
+        try { adapter.exec("ROLLBACK"); } catch (rbErr) {
+          debugLog("reconcileWorktreeDb", { action: "rollback-failed", error: rbErr instanceof Error ? rbErr.message : String(rbErr) });
+        }
         throw txErr;
       }
       return { ...merged, conflicts };
     } finally {
-      try { adapter.exec("DETACH DATABASE wt"); } catch { /* best effort */ }
+      try { adapter.exec("DETACH DATABASE wt"); } catch (detachErr) {
+        debugLog("reconcileWorktreeDb", { action: "detach-failed", error: detachErr instanceof Error ? detachErr.message : String(detachErr) });
+      }
     }
   } catch (err) {
     process.stderr.write(`gsd-db: worktree DB reconciliation failed: ${(err as Error).message}\n`);

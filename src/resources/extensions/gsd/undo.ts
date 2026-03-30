@@ -12,6 +12,7 @@ import { deriveState } from "./state.js";
 import { invalidateAllCaches } from "./cache.js";
 import { gsdRoot, resolveTasksDir, resolveSlicePath, resolveTaskFile, buildTaskFileName, buildSliceFileName } from "./paths.js";
 import { sendDesktopNotification } from "./notifications.js";
+import { logWarning } from "./workflow-logger.js";
 import { getTask, getSlice, getSliceTasks, updateTaskStatus, updateSliceStatus } from "./gsd-db.js";
 import { renderPlanCheckboxes, renderRoadmapCheckboxes } from "./markdown-renderer.js";
 
@@ -110,8 +111,8 @@ export async function handleUndo(args: string, ctx: ExtensionCommandContext, _pi
         try {
           nativeRevertCommit(basePath, sha);
           commitsReverted++;
-        } catch {
-          // Revert conflict or already reverted — skip
+        } catch (err) {
+          logWarning("engine", `Git revert failed for commit ${sha}`, { error: err instanceof Error ? err.message : String(err) });
           try { nativeRevertAbort(basePath); } catch { /* no-op */ }
           break;
         }
@@ -445,7 +446,7 @@ export function findCommitsForUnit(activityDir: string, unitType: string, unitId
         }
       } catch { /* malformed JSON line — skip */ }
     }
-  } catch { /* activity dir issues — skip */ }
+  } catch (err) { logWarning("engine", "Failed to scan activity dir for commits", { error: err instanceof Error ? err.message : String(err) }); }
 
   return commits;
 }

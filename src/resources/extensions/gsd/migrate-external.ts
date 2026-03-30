@@ -13,6 +13,7 @@ import { externalGsdRoot } from "./repo-identity.js";
 import { getErrorMessage } from "./error-utils.js";
 import { hasGitTrackedGsdFiles } from "./gitignore.js";
 import { GIT_NO_PROMPT_ENV } from "./git-constants.js";
+import { logWarning } from "./workflow-logger.js";
 
 export interface MigrationResult {
   migrated: boolean;
@@ -116,8 +117,8 @@ export function migrateToExternalState(basePath: string): MigrationResult {
         } else {
           cpSync(src, dst, { force: true });
         }
-      } catch {
-        // Non-fatal: continue with other files
+      } catch (err) {
+        logWarning("migration", `Failed to copy ${entry.name} during external migration`, { error: err instanceof Error ? err.message : String(err) });
       }
     }
 
@@ -157,8 +158,8 @@ export function migrateToExternalState(basePath: string): MigrationResult {
         env: GIT_NO_PROMPT_ENV,
         timeout: 10_000,
       });
-    } catch {
-      // Non-fatal — git may be unavailable or nothing was tracked
+    } catch (err) {
+      logWarning("migration", "git rm --cached .gsd failed during migration cleanup", { error: err instanceof Error ? err.message : String(err) });
     }
 
     // Remove .gsd.migrating only after symlink is verified and index is clean
@@ -171,8 +172,8 @@ export function migrateToExternalState(basePath: string): MigrationResult {
       if (existsSync(migratingPath) && !existsSync(localGsd)) {
         renameSync(migratingPath, localGsd);
       }
-    } catch {
-      // Rollback failed -- leave .gsd.migrating for doctor to detect
+    } catch (rollbackErr) {
+      logWarning("migration", "Migration rollback failed — .gsd.migrating left for doctor to detect", { error: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr) });
     }
 
     return {

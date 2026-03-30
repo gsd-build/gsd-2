@@ -205,9 +205,7 @@ export async function bootstrapAutoSession(
       try {
         nativeAddAll(base);
         nativeCommit(base, "chore: init gsd");
-      } catch {
-        /* nothing to commit */
-      }
+      } catch { /* cosmetic: nothing to commit on fresh init */ }
     }
 
     // Initialize GitServiceImpl
@@ -715,8 +713,8 @@ export async function bootstrapAutoSession(
           }
         }
       }
-    } catch {
-      /* non-fatal */
+    } catch (err) {
+      debugLog("bootstrapAutoSession", { action: "preflight-validation", error: err instanceof Error ? err.message : String(err) });
     }
 
     return true;

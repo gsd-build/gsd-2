@@ -22,6 +22,7 @@ import {
   nativeMergeAbort,
   nativeResetHard,
 } from "./native-git-bridge.js";
+import { logWarning } from "./workflow-logger.js";
 import {
   resolveSlicePath,
   resolveSliceFile,
@@ -245,9 +246,7 @@ export function verifyExpectedArtifact(
       for (const gid of gateIds) {
         if (pendingIds.has(gid)) return false;
       }
-    } catch {
-      // DB unavailable — treat as verified to avoid blocking
-    }
+    } catch { /* cosmetic: DB unavailable — treat as verified to avoid blocking */ }
     return true;
   }
 
@@ -334,9 +333,7 @@ export function verifyExpectedArtifact(
             }
           }
         }
-      } catch {
-        // Parse failure — don't block; slice plan may have non-standard format
-      }
+      } catch { /* cosmetic: parse failure — slice plan may have non-standard format */ }
     }
   }
 
@@ -417,7 +414,13 @@ export function writeBlockerPlaceholder(
   if (unitType === "execute-task" && isDbAvailable()) {
     const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
     if (mid && sid && tid) {
-      try { updateTaskStatus(mid, sid, tid, "complete", new Date().toISOString()); } catch { /* non-fatal */ }
+      try {
+        updateTaskStatus(mid, sid, tid, "complete", new Date().toISOString());
+      } catch (err) {
+        logWarning("state", `Failed to mark blocker task ${tid} complete in DB`, {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   }
 
@@ -438,20 +441,26 @@ function abortAndResetMerge(
   if (hasMergeHead) {
     try {
       nativeMergeAbort(basePath);
-    } catch {
-      /* best-effort */
+    } catch (err) {
+      logWarning("state", "merge abort failed during reconciliation", {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   } else if (squashMsgPath) {
     try {
       unlinkSync(squashMsgPath);
-    } catch {
-      /* best-effort */
+    } catch (err) {
+      logWarning("state", "SQUASH_MSG removal failed during reconciliation", {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
   try {
     nativeResetHard(basePath);
-  } catch {
-    /* best-effort */
+  } catch (err) {
+    logWarning("state", "hard reset failed during merge reconciliation", {
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -479,8 +488,10 @@ export function reconcileMergeState(
       nativeCommit(basePath, ""); // --no-edit equivalent: use empty message placeholder
       const mode = hasMergeHead ? "merge" : "squash commit";
       ctx.ui.notify(`Finalized leftover ${mode} from prior session.`, "info");
-    } catch {
-      // Commit may already exist; non-fatal
+    } catch (err) {
+      logWarning("state", "Failed to finalize leftover merge commit", {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   } else {
     // Still conflicted — try auto-resolving .gsd/ state file conflicts (#530)
@@ -493,7 +504,10 @@ export function reconcileMergeState(
       try {
         nativeCheckoutTheirs(basePath, gsdConflicts);
         nativeAddPaths(basePath, gsdConflicts);
-      } catch {
+      } catch (err) {
+        logWarning("state", "Auto-resolve .gsd/ conflicts failed during checkout-theirs", {
+          error: err instanceof Error ? err.message : String(err),
+        });
         resolved = false;
       }
       if (resolved) {
@@ -506,7 +520,10 @@ export function reconcileMergeState(
             `Auto-resolved ${gsdConflicts.length} .gsd/ state file conflict(s) from prior merge.`,
             "info",
           );
-        } catch {
+        } catch (err) {
+          logWarning("state", "Auto-resolve .gsd/ conflicts commit failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
           resolved = false;
         }
       }

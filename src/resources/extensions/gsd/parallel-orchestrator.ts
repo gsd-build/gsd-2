@@ -41,6 +41,8 @@ import {
   type ParallelCandidates,
 } from "./parallel-eligibility.js";
 import { getErrorMessage } from "./error-utils.js";
+import { debugLog } from "./debug-logger.js";
+import { logWarning } from "./workflow-logger.js";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -126,7 +128,11 @@ export function persistState(basePath: string): void {
     const tmp = dest + TMP_SUFFIX;
     writeFileSync(tmp, JSON.stringify(persisted, null, 2), "utf-8");
     renameSync(tmp, dest);
-  } catch { /* non-fatal */ }
+  } catch (err) {
+    logWarning("state", "Failed to persist orchestrator state for crash recovery", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 /**
@@ -136,7 +142,9 @@ function removeStateFile(basePath: string): void {
   try {
     const p = stateFilePath(basePath);
     if (existsSync(p)) unlinkSync(p);
-  } catch { /* non-fatal */ }
+  } catch {
+    // non-fatal: state file may already be removed
+  }
 }
 
 function isPidAlive(pid: number): boolean {
@@ -176,7 +184,8 @@ export function restoreState(basePath: string): PersistedState | null {
     }
 
     return persisted;
-  } catch {
+  } catch (err) {
+    debugLog("restoreState", { action: "restore-failed", error: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }
@@ -430,9 +439,13 @@ export async function startParallel(
       let wtPath: string;
       try {
         wtPath = createMilestoneWorktree(basePath, mid);
-      } catch {
+      } catch (err) {
         // Worktree creation may fail in test environments or when git
         // is not available. Fall back to a placeholder path.
+        logWarning("state", `Worktree creation failed for milestone ${mid}, using placeholder path`, {
+          milestoneId: mid,
+          error: err instanceof Error ? err.message : String(err),
+        });
         wtPath = worktreePath(basePath, mid);
       }
 
@@ -564,7 +577,11 @@ export function spawnWorker(
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
     });
-  } catch {
+  } catch (err) {
+    logWarning("state", `Failed to spawn worker process for milestone ${milestoneId}`, {
+      milestoneId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return false;
   }
 
@@ -695,6 +712,7 @@ function resolveGsdBin(): string | null {
   try {
     thisDir = dirname(fileURLToPath(import.meta.url));
   } catch {
+    // non-fatal: import.meta.url unavailable in some environments
     thisDir = process.cwd();
   }
   const candidates = [
@@ -817,7 +835,7 @@ export async function stopParallel(
         } else if (worker.pid !== process.pid) {
           process.kill(worker.pid, "SIGTERM");
         }
-      } catch { /* process may already be dead */ }
+      } catch { /* non-fatal: process may already be dead */ }
     }
 
     // Wait for the headless process to cascade SIGTERM to its RPC child.
@@ -833,7 +851,7 @@ export async function stopParallel(
         } else if (worker.pid !== process.pid) {
           process.kill(worker.pid, "SIGKILL");
         }
-      } catch { /* process may already be dead */ }
+      } catch { /* non-fatal: process may already be dead */ }
       await waitForWorkerExit(worker, 250);
     }
 

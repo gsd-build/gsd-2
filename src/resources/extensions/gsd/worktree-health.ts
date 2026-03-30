@@ -8,6 +8,7 @@
  */
 
 import { existsSync } from "node:fs";
+import { debugLog } from "./debug-logger.js";
 import {
   nativeDetectMainBranch,
   nativeHasChanges,
@@ -66,7 +67,9 @@ export function getWorktreeHealth(
   let mergedIntoMain = false;
   try {
     mergedIntoMain = nativeIsAncestor(basePath, wt.branch, mainBranch);
-  } catch { /* default false */ }
+  } catch (err) {
+    debugLog("getWorktreeHealth", { action: "is-ancestor-check-failed", branch: wt.branch, error: err instanceof Error ? err.message : String(err) });
+  }
 
   // Dirty status: check from inside the worktree itself
   let dirty = false;
@@ -78,7 +81,9 @@ export function getWorktreeHealth(
         const status = nativeWorkingTreeStatus(wt.path);
         dirtyFileCount = status.split("\n").filter(l => l.trim()).length;
       }
-    } catch { /* default clean */ }
+    } catch (err) {
+      debugLog("getWorktreeHealth", { action: "dirty-check-failed", worktree: wt.name, error: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   // Unpushed commits
@@ -86,13 +91,17 @@ export function getWorktreeHealth(
   try {
     const count = nativeUnpushedCount(basePath, wt.branch);
     unpushedCommits = count >= 0 ? count : 0;
-  } catch { /* default 0 */ }
+  } catch (err) {
+    debugLog("getWorktreeHealth", { action: "unpushed-count-failed", branch: wt.branch, error: err instanceof Error ? err.message : String(err) });
+  }
 
   // Last commit age
   let lastCommitEpoch = 0;
   try {
     lastCommitEpoch = nativeLastCommitEpoch(basePath, wt.branch);
-  } catch { /* default 0 */ }
+  } catch (err) {
+    debugLog("getWorktreeHealth", { action: "last-commit-epoch-failed", branch: wt.branch, error: err instanceof Error ? err.message : String(err) });
+  }
 
   const nowEpoch = Math.floor(Date.now() / 1000);
   const lastCommitAgeDays = lastCommitEpoch > 0

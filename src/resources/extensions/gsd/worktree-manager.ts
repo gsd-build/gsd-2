@@ -95,8 +95,11 @@ export function resolveGitDir(basePath: string): string {
     if (content.startsWith("gitdir: ")) {
       return resolve(basePath, content.slice(8));
     }
-  } catch {
-    // Not a file or unreadable — fall through to default
+  } catch (err) {
+    logWarning("state", "Failed to read .git file for gitdir resolution", {
+      path: gitPath,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
   return join(basePath, ".git");
 }
@@ -302,7 +305,12 @@ export function removeWorktree(
     if (entry?.path) {
       wtPath = entry.path;
     }
-  } catch { /* fall back to computed path */ }
+  } catch (err) {
+    logWarning("reconcile", "Failed to resolve worktree path from git worktree list", {
+      worktree: name,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   const resolvedWtPath = existsSync(wtPath) ? realpathSync(wtPath) : wtPath;
 
@@ -316,7 +324,7 @@ export function removeWorktree(
   if (!existsSync(wtPath)) {
     nativeWorktreePrune(basePath);
     if (deleteBranch) {
-      try { nativeBranchDelete(basePath, branch, true); } catch { /* branch may not exist */ }
+      try { nativeBranchDelete(basePath, branch, true); } catch { /* non-fatal: branch may not exist */ }
     }
     return;
   }
@@ -350,26 +358,41 @@ export function removeWorktree(
           logWarning("reconcile", `Submodule changes detected — stash failed, changes may be lost during force removal`, { worktree: name, path: resolvedWtPath });
         }
       }
-    } catch {
-      // submodule status failed — proceed with normal removal
+    } catch (err) {
+      logWarning("reconcile", "Submodule status check failed during worktree removal", {
+        worktree: name,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
   // Remove worktree: try non-force first when submodules have changes,
   // falling back to force only after submodule state has been preserved.
   const useForce = hasSubmoduleChanges ? false : force;
-  try { nativeWorktreeRemove(basePath, resolvedWtPath, useForce); } catch { /* may fail */ }
+  try { nativeWorktreeRemove(basePath, resolvedWtPath, useForce); } catch (err) {
+    logWarning("reconcile", "Initial worktree remove attempt failed", {
+      worktree: name,
+      force: String(useForce),
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   // If the directory is still there (e.g. locked), try harder with force
   if (existsSync(resolvedWtPath)) {
-    try { nativeWorktreeRemove(basePath, resolvedWtPath, true); } catch { /* may fail */ }
+    try { nativeWorktreeRemove(basePath, resolvedWtPath, true); } catch (err) {
+      logWarning("reconcile", "Force worktree remove also failed — directory may need manual cleanup", {
+        worktree: name,
+        path: resolvedWtPath,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   // Prune stale entries so git knows the worktree is gone
   nativeWorktreePrune(basePath);
 
   if (deleteBranch) {
-    try { nativeBranchDelete(basePath, branch, true); } catch { /* branch may not exist */ }
+    try { nativeBranchDelete(basePath, branch, true); } catch { /* non-fatal: branch may not exist */ }
   }
 }
 

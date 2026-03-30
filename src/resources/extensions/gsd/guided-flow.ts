@@ -132,7 +132,7 @@ export function checkAutoStartAfterDiscuss(): boolean {
           );
         }
       }
-    } catch { /* non-fatal — PROJECT.md parsing failure shouldn't block auto-start */ }
+    } catch (err) { debugLog("onDiscussionComplete", { action: "project-md-parse-failed", error: err instanceof Error ? err.message : String(err) }); }
   }
 
   // Gate 4: Discussion manifest process verification (multi-milestone only)
@@ -164,7 +164,7 @@ export function checkAutoStartAfterDiscuss(): boolean {
           );
         }
       }
-    } catch { /* malformed manifest — warn but don't block */ }
+    } catch (err) { debugLog("onDiscussionComplete", { action: "manifest-parse-failed", error: err instanceof Error ? err.message : String(err) }); }
   }
 
   // Draft promotion cleanup: if a CONTEXT-DRAFT.md exists alongside the new
@@ -834,8 +834,8 @@ function selfHealRuntimeRecords(basePath: string, ctx: ExtensionContext): { clea
       ctx.ui.notify(`Self-heal: cleared ${cleared} stale runtime record(s) from a previous session.`, "info");
     }
     return { cleared };
-  } catch {
-    // Non-fatal — self-heal should never block the wizard
+  } catch (err) {
+    debugLog("selfHealStaleRuntime", { action: "self-heal-failed", error: err instanceof Error ? err.message : String(err) });
     return { cleared: 0 };
   }
 }
