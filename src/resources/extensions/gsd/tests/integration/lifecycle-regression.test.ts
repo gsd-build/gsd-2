@@ -67,7 +67,7 @@ const FAST_PREFS: GSDPreferences = {
   },
   uat_dispatch: false,
   gate_evaluation: { enabled: false },
-  reactive_execution: { enabled: false },
+  reactive_execution: { enabled: false, max_parallel: 1, isolation_mode: "same-tree" },
 };
 
 /** Build a DispatchContext from current state */

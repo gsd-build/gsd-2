@@ -54,6 +54,7 @@ import {
   getReplanHistory,
   getSlice,
   insertMilestone,
+  insertSlice,
   insertTask,
   updateTaskStatus,
   getPendingSliceGateCount,

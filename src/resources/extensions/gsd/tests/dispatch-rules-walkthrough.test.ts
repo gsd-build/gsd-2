@@ -75,7 +75,7 @@ function makeState(phase: GSDState["phase"], overrides: Partial<GSDState> = {}):
     blockers: [],
     nextAction: "run /gsd auto",
     registry: [{ id: "M001", title: "Test Milestone", status: "active" }],
-    requirements: { total: 0, mapped: 0, active: 0 } as GSDState["requirements"],
+    requirements: { total: 0, active: 0, validated: 0, deferred: 0, outOfScope: 0, blocked: 0 } as GSDState["requirements"],
     progress: {
       milestones: { done: 0, total: 1 },
       slices: { done: 0, total: 1 },
