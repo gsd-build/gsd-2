@@ -386,8 +386,8 @@ export function loadDefinition(defsDir: string, name: string): WorkflowDefinitio
 
 // ─── Parameter Substitution ──────────────────────────────────────────────
 
-/** Regex matching `{{key}}` placeholders — captures the key name. */
-const PARAM_PATTERN = /\{\{(\w+)\}\}/g;
+/** Regex matching `{{key}}` and `{{ key }}` placeholders — captures the key name. */
+const PARAM_PATTERN = /\{\{\s*(\w+)\s*\}\}/g;
 
 /**
  * Replace `{{key}}` placeholders in a single prompt string.
