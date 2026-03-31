@@ -24,6 +24,18 @@ type ProviderConfigRecord = {
   providers?: Record<string, unknown>
 }
 
+interface CustomOpenAIProviderConfigRecord {
+  baseUrl?: unknown
+  models?: Array<{
+    id?: unknown
+  }>
+}
+
+export interface CustomOpenAIProviderSnapshot {
+  baseUrl: string
+  modelId: string
+}
+
 export function normalizeCustomOpenAIProviderInput(input: CustomOpenAIProviderInput): CustomOpenAIProviderInput {
   const baseUrl = input.baseUrl.trim()
   const apiKey = input.apiKey.trim()
@@ -91,14 +103,35 @@ export function removeCustomOpenAIProviderConfig(modelsJsonPath = getCustomOpenA
 }
 
 export function hasCustomOpenAIProviderConfig(modelsJsonPath = resolveModelsJsonPath()): boolean {
+  return getCustomOpenAIProviderSnapshot(modelsJsonPath) !== null
+}
+
+export function getCustomOpenAIProviderSnapshot(
+  modelsJsonPath = resolveModelsJsonPath(),
+): CustomOpenAIProviderSnapshot | null {
   if (!existsSync(modelsJsonPath)) {
-    return false
+    return null
   }
 
   try {
     const parsed = JSON.parse(readFileSync(modelsJsonPath, "utf-8")) as ProviderConfigRecord
-    return typeof parsed.providers === "object" && parsed.providers !== null && CUSTOM_OPENAI_PROVIDER_ID in parsed.providers
+    if (typeof parsed.providers !== "object" || parsed.providers === null) {
+      return null
+    }
+
+    const provider = parsed.providers[CUSTOM_OPENAI_PROVIDER_ID] as CustomOpenAIProviderConfigRecord | undefined
+    if (!provider || typeof provider !== "object") {
+      return null
+    }
+
+    const baseUrl = typeof provider.baseUrl === "string" ? provider.baseUrl.trim() : ""
+    const modelId = typeof provider.models?.[0]?.id === "string" ? provider.models[0].id.trim() : ""
+    if (!baseUrl || !modelId) {
+      return null
+    }
+
+    return { baseUrl, modelId }
   } catch {
-    return false
+    return null
   }
 }

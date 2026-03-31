@@ -609,6 +609,19 @@ export function CommandSurface() {
   const surfaceSections = availableSectionsForSurface(commandSurface.activeSurface, devOverrides.isDevMode)
   const surfaceKindLabel = `/${commandSurface.activeSurface ?? "settings"}`
 
+  useEffect(() => {
+    if (!selectedAuthProvider || selectedAuthProvider.id !== "custom-openai") return
+    const configuration = selectedAuthProvider.configuration
+    if (!configuration) return
+
+    setCustomBaseUrls((prev) =>
+      prev[selectedAuthProvider.id] !== undefined ? prev : { ...prev, [selectedAuthProvider.id]: configuration.baseUrl },
+    )
+    setCustomModelIds((prev) =>
+      prev[selectedAuthProvider.id] !== undefined ? prev : { ...prev, [selectedAuthProvider.id]: configuration.modelId },
+    )
+  }, [selectedAuthProvider])
+
   const triggerRecoveryBrowserAction = (actionId: string) => {
     switch (actionId) {
       case "refresh_diagnostics":

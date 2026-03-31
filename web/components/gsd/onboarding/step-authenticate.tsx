@@ -149,6 +149,15 @@ export function StepAuthenticate({
   }, [lastValidation?.checkedAt, lastValidation?.providerId, lastValidation?.status])
 
   useEffect(() => {
+    if (provider.id !== "custom-openai" || !provider.configuration) return
+    const t = window.setTimeout(() => {
+      setCustomBaseUrl((current) => current || provider.configuration?.baseUrl || "")
+      setCustomModelId((current) => current || provider.configuration?.modelId || "")
+    }, 0)
+    return () => window.clearTimeout(t)
+  }, [provider.configuration, provider.id])
+
+  useEffect(() => {
     const t = window.setTimeout(() => setFlowInput(""), 0)
     return () => window.clearTimeout(t)
   }, [activeFlow?.flowId])

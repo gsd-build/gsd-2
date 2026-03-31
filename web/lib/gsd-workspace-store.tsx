@@ -225,6 +225,10 @@ export interface WorkspaceOnboardingProviderState {
   recommended: boolean
   configured: boolean
   configuredVia: "auth_file" | "environment" | "runtime" | null
+  configuration: {
+    baseUrl: string
+    modelId: string
+  } | null
   supports: {
     apiKey: boolean
     oauth: boolean

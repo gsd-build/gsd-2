@@ -6,6 +6,7 @@ import { authFilePath } from "../app-paths.ts";
 import {
   CUSTOM_OPENAI_PROVIDER_ID,
   CUSTOM_OPENAI_PROVIDER_LABEL,
+  getCustomOpenAIProviderSnapshot,
   hasCustomOpenAIProviderConfig,
   normalizeCustomOpenAIProviderInput,
   removeCustomOpenAIProviderConfig,
@@ -70,6 +71,10 @@ export interface OnboardingProviderState {
   recommended: boolean;
   configured: boolean;
   configuredVia: OnboardingCredentialSource | null;
+  configuration: {
+    baseUrl: string;
+    modelId: string;
+  } | null;
   supports: {
     apiKey: boolean;
     oauth: boolean;
@@ -722,6 +727,7 @@ export class OnboardingService {
     getEnvApiKeyFn: GetEnvApiKeyFn,
   ): OnboardingProviderState[] {
     const oauthProviders = new Map(authStorage.getOAuthProviders().map((provider) => [provider.id, provider]));
+    const customProviderSnapshot = getCustomOpenAIProviderSnapshot(this.deps.modelsJsonPath);
 
     return REQUIRED_PROVIDER_CATALOG.map((provider) => {
       const oauthProvider = oauthProviders.get(provider.id);
@@ -738,6 +744,7 @@ export class OnboardingService {
         recommended: Boolean(provider.recommended),
         configured: configuredVia !== null,
         configuredVia,
+        configuration: provider.id === CUSTOM_OPENAI_PROVIDER_ID ? customProviderSnapshot : null,
         supports: {
           apiKey: provider.supportsApiKey,
           oauth: provider.supportsOAuth,

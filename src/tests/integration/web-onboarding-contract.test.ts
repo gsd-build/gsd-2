@@ -646,6 +646,11 @@ test("custom-openai stays unconfigured until both auth and models.json provider 
     providerId: "custom-openai",
     source: "auth_file",
   });
+  const customAfterSave = savePayload.onboarding.required.providers.find((provider: any) => provider.id === "custom-openai");
+  assert.deepEqual(customAfterSave.configuration, {
+    baseUrl: "https://proxy.example.com/v1",
+    modelId: "gpt-4o-mini",
+  });
   assert.equal(savePayload.onboarding.lastValidation.status, "succeeded");
   assert.equal(harness.spawnCalls, 2);
   assert.equal(authStorage.hasAuth("custom-openai"), true);
@@ -661,6 +666,11 @@ test("custom-openai stays unconfigured until both auth and models.json provider 
   const bootAfterPayload = (await bootAfter.json()) as any;
   assert.equal(bootAfterPayload.onboarding.locked, false);
   assert.equal(bootAfterPayload.onboarding.required.satisfiedBy.providerId, "custom-openai");
+  const customAfterBoot = bootAfterPayload.onboarding.required.providers.find((provider: any) => provider.id === "custom-openai");
+  assert.deepEqual(customAfterBoot.configuration, {
+    baseUrl: "https://proxy.example.com/v1",
+    modelId: "gpt-4o-mini",
+  });
 });
 
 test("save_custom_provider rejects invalid input without persisting auth or models config", async (t) => {
