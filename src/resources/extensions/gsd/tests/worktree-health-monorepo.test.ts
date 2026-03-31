@@ -42,7 +42,20 @@ assertTrue(
   "Health check should walk parent directories for project markers (monorepo support) (#2347)",
 );
 
-// ── Test 3: The greenfield warning should only trigger when no parent has markers ─
+// ── Test 3: The parent walk stops at a .git boundary ──────────────────
+
+// The parent directory walk must not escape the git repository root.
+// Without this guard, ancestor directories like ~ or /usr/local that
+// happen to contain package.json would cause false positive health checks.
+const hasGitBoundary = healthCheckRegion.includes('.git') &&
+  (healthCheckRegion.includes('break') || healthCheckRegion.includes('stop'));
+
+assertTrue(
+  hasGitBoundary,
+  "Parent directory walk must stop at .git repository boundary to prevent false positives",
+);
+
+// ── Test 4: The greenfield warning should only trigger when no parent has markers ─
 
 // The original code was:
 //   const hasProjectFile = PROJECT_FILES.some((f) => deps.existsSync(join(s.basePath, f)));

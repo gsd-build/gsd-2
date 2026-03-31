@@ -957,6 +957,9 @@ export async function runUnitPhase(
       let checkDir = dirname(s.basePath);
       const { root } = parsePath(checkDir);
       while (checkDir !== root) {
+        // Stop at git repository boundary — ancestors above the repo root
+        // (e.g. ~ or /usr/local) may contain unrelated project files.
+        if (deps.existsSync(join(checkDir, ".git"))) break;
         if (PROJECT_FILES.some((f) => deps.existsSync(join(checkDir, f)))) {
           hasProjectFileInParent = true;
           break;
