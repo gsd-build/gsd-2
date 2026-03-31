@@ -44,7 +44,8 @@ export function stripIdPrefix(title: string, id: string): string {
 export function renderPlanContent(sliceRow: SliceRow, taskRows: TaskRow[]): string {
   const lines: string[] = [];
 
-  lines.push(`# ${sliceRow.id}: ${sliceRow.title}`);
+  const displayTitle = stripIdPrefix(sliceRow.title, sliceRow.id);
+  lines.push(`# ${sliceRow.id}: ${displayTitle}`);
   lines.push("");
   // #2945: never use full_summary_md/full_uat_md as display fallbacks —
   // they contain multi-line rendered markdown that corrupts single-line fields.

@@ -168,6 +168,35 @@ test('#2630 renderStateContent: registry entry with pre-existing ID prefix rende
   );
 });
 
+// ─── Bug D: PLAN.md slice title double-prefix ──────────────────────────────
+// When sliceRow.title already contains "S04: ", the H1 should NOT become
+// "# S04: S04: Dependency-driven scene pipeline and state truth"
+
+test('#2630 renderPlanContent: slice title with pre-existing ID prefix renders without duplication', () => {
+  const slice = makeSliceRow({ title: 'S04: Dependency-driven scene pipeline and state truth' });
+  const content = renderPlanContent(slice, []);
+
+  // The H1 must be exactly "# S04: Dependency-driven scene pipeline and state truth"
+  assert.ok(
+    content.includes('# S04: Dependency-driven scene pipeline and state truth'),
+    `expected single prefix in H1, got: ${content.split('\n')[0]}`,
+  );
+  assert.ok(
+    !content.includes('S04: S04:'),
+    `found double prefix in PLAN.md H1: ${content.split('\n')[0]}`,
+  );
+});
+
+test('#2630 renderPlanContent: slice title without prefix still renders correctly', () => {
+  const slice = makeSliceRow({ title: 'Dependency-driven scene pipeline and state truth' });
+  const content = renderPlanContent(slice, []);
+
+  assert.ok(
+    content.startsWith('# S04: Dependency-driven scene pipeline and state truth'),
+    `expected prefixed H1, got: ${content.split('\n')[0]}`,
+  );
+});
+
 // ─── Bug B: full_uat_md as demo fallback ─────────────────────────────────
 // When slice.demo is empty and full_uat_md is a multi-line UAT document,
 // the renderers must NOT inject the entire UAT body.
