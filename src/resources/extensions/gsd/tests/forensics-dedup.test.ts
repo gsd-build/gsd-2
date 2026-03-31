@@ -8,6 +8,7 @@ import { KNOWN_PREFERENCE_KEYS } from "../preferences-types.js";
 import { DEDUP_PROMPT_SECTION, resolveDedupSection } from "../forensics.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const gsdDir = join(__dirname, "..");
 
 describe("forensics dedup (#2096)", () => {
   it("forensics_dedup is in KNOWN_PREFERENCE_KEYS", () => {
