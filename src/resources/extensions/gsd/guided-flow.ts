@@ -87,7 +87,7 @@ type PendingAutoStart = {
 let pendingAutoStart: PendingAutoStart | null = null;
 
 /** Set pendingAutoStart only if no discussion is currently in flight. Silently ignored if one is already active. */
-function setPendingAutoStart(value: PendingAutoStart): void {
+export function setPendingAutoStart(value: PendingAutoStart): void {
   if (pendingAutoStart !== null) {
     debugLog("setPendingAutoStart-skipped", {
       reason: "discussion already in flight",
@@ -100,8 +100,13 @@ function setPendingAutoStart(value: PendingAutoStart): void {
 }
 
 /** Force-replace pendingAutoStart regardless of whether a discussion is already in flight. */
-function forcePendingAutoStart(value: PendingAutoStart): void {
+export function forcePendingAutoStart(value: PendingAutoStart): void {
   pendingAutoStart = value;
+}
+
+/** Reset pendingAutoStart to null. FOR TESTS ONLY — do not call in production code. */
+export function _clearPendingAutoStartForTest(): void {
+  pendingAutoStart = null;
 }
 
 /** Returns the milestoneId being discussed, or null if no discussion is active */
