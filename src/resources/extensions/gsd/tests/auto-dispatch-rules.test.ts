@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { resolveDispatch, DISPATCH_RULES } from "../auto-dispatch.ts";
+import { resolveDispatch, DISPATCH_RULES, getRewriteCount, setRewriteCount } from "../auto-dispatch.ts";
 import type { DispatchContext } from "../auto-dispatch.ts";
 import type { GSDState } from "../types.ts";
 import {
@@ -109,9 +109,9 @@ test("rewrite-docs gate: pending override, count=0 → dispatches rewrite-docs a
   t.after(() => { _clearGsdRootCache(); rmSync(tmp, { recursive: true, force: true }); });
 
   writeOverridesFile(tmp, "active");
+  // count starts at 0 (no file written)
 
-  const session = { rewriteAttemptCount: 0 } as { rewriteAttemptCount: number };
-  const ctx = makeCtx(tmp, { phase: "executing" }, { session: session as DispatchContext["session"] });
+  const ctx = makeCtx(tmp, { phase: "executing" });
 
   const rule = DISPATCH_RULES.find(r => r.name === "rewrite-docs (override gate)")!;
   const result = await rule.match(ctx);
@@ -119,7 +119,7 @@ test("rewrite-docs gate: pending override, count=0 → dispatches rewrite-docs a
   assert.ok(result !== null, "should not return null");
   assert.equal(result!.action, "dispatch", "rewrite-docs override should produce a dispatch action");
   assert.equal(result.unitType, "rewrite-docs", "override gate should dispatch rewrite-docs unit type");
-  assert.equal(session.rewriteAttemptCount, 1, "counter should be incremented to 1");
+  assert.equal(getRewriteCount(tmp), 1, "counter should be incremented to 1");
 });
 
 test("rewrite-docs gate: pending override, count=1 → dispatches rewrite-docs and increments counter to 2", async (t) => {
@@ -127,16 +127,16 @@ test("rewrite-docs gate: pending override, count=1 → dispatches rewrite-docs a
   t.after(() => { _clearGsdRootCache(); rmSync(tmp, { recursive: true, force: true }); });
 
   writeOverridesFile(tmp, "active");
+  setRewriteCount(tmp, 1);
 
-  const session = { rewriteAttemptCount: 1 } as { rewriteAttemptCount: number };
-  const ctx = makeCtx(tmp, { phase: "executing" }, { session: session as DispatchContext["session"] });
+  const ctx = makeCtx(tmp, { phase: "executing" });
 
   const rule = DISPATCH_RULES.find(r => r.name === "rewrite-docs (override gate)")!;
   const result = await rule.match(ctx);
 
   assert.ok(result !== null, "should dispatch");
   assert.equal(result!.action, "dispatch", "rewrite-docs override should produce a dispatch action");
-  assert.equal(session.rewriteAttemptCount, 2, "counter should increment to 2");
+  assert.equal(getRewriteCount(tmp), 2, "counter should increment to 2");
 });
 
 test("rewrite-docs gate: pending overrides, count=3 → resolves all overrides, resets counter, falls through", async (t) => {
@@ -144,15 +144,15 @@ test("rewrite-docs gate: pending overrides, count=3 → resolves all overrides, 
   t.after(() => { _clearGsdRootCache(); rmSync(tmp, { recursive: true, force: true }); });
 
   writeOverridesFile(tmp, "active");
+  setRewriteCount(tmp, 3);
 
-  const session = { rewriteAttemptCount: 3 } as { rewriteAttemptCount: number };
-  const ctx = makeCtx(tmp, { phase: "executing" }, { session: session as DispatchContext["session"] });
+  const ctx = makeCtx(tmp, { phase: "executing" });
 
   const rule = DISPATCH_RULES.find(r => r.name === "rewrite-docs (override gate)")!;
   const result = await rule.match(ctx);
 
   assert.equal(result, null, "should fall through (return null) at MAX_REWRITE_ATTEMPTS");
-  assert.equal(session.rewriteAttemptCount, 0, "counter should be reset to 0");
+  assert.equal(getRewriteCount(tmp), 0, "counter should be reset to 0");
 });
 
 // ─── 2. uat-verdict-gate ──────────────────────────────────────────────────
@@ -214,9 +214,9 @@ test("uat-verdict-gate: DB available, completed slice has FAIL verdict → stops
   insertMilestone({ id: "M001", title: "Test" });
   insertSlice({ id: "S01", milestoneId: "M001", status: "complete" });
 
-  // Write UAT-RESULT file with FAIL verdict
+  // Write UAT file with FAIL verdict (uat-verdict-gate reads resolveSliceFile(..., "UAT") = S01-UAT.md)
   scaffoldSlice(tmp, "M001", "S01", {
-    "S01-UAT-RESULT.md": "verdict: fail\n\nSome checks failed.\n",
+    "S01-UAT.md": "---\nverdict: fail\n---\n\nSome checks failed.\n",
   });
 
   const ctx = makeCtx(
@@ -429,9 +429,11 @@ test("run-uat: UAT result already exists → falls through (already ran)", async
   insertSlice({ id: "S01", milestoneId: "M001", status: "complete" });
   insertSlice({ id: "S02", milestoneId: "M001", status: "pending" });
 
+  // checkNeedsRunUat checks S01-UAT.md for a verdict, then S01-ASSESSMENT.md.
+  // Writing the result to S01-ASSESSMENT.md signals that UAT already ran.
   scaffoldSlice(tmp, "M001", "S01", {
     "S01-UAT.md": "---\nuat_type: artifact-driven\n---\n\n# UAT\n",
-    "S01-UAT-RESULT.md": "verdict: PASS\n\nAll good.\n",
+    "S01-ASSESSMENT.md": "---\nverdict: PASS\n---\n\nAll good.\n",
   });
 
   const ctx = makeCtx(
