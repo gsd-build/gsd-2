@@ -2107,11 +2107,11 @@ test("autoLoop rejects execute-task with 0 tool calls as hallucinated (#1833)", 
   // The task should NOT have been added to completedUnits on the first iteration
   // (0 tool calls), but SHOULD be added on the second iteration (5 tool calls)
   const warningNotification = notifications.find(
-    (n) => n.includes("0 tool calls") && n.includes("hallucinated"),
+    (n) => n.includes("0 tool calls") && n.includes("will retry"),
   );
   assert.ok(
     warningNotification,
-    "should notify about 0 tool calls hallucination",
+    "should notify about 0 tool calls retry",
   );
 
   // Verify deriveState was called at least twice (two iterations)
@@ -2122,7 +2122,7 @@ test("autoLoop rejects execute-task with 0 tool calls as hallucinated (#1833)", 
   );
 });
 
-test("autoLoop does NOT reject non-execute-task units with 0 tool calls (#1833)", async () => {
+test("autoLoop rejects complete-slice units with 0 tool calls (#2653)", async () => {
   _resetPendingResolve();
 
   const ctx = makeMockCtx();
@@ -2130,6 +2130,7 @@ test("autoLoop does NOT reject non-execute-task units with 0 tool calls (#1833)"
   ctx.sessionManager = { getSessionFile: () => "/tmp/session.json" };
   const pi = makeMockPi();
 
+  let iterationCount = 0;
   const notifications: string[] = [];
   ctx.ui.notify = (msg: string) => { notifications.push(msg); };
 
@@ -2163,7 +2164,6 @@ test("autoLoop does NOT reject non-execute-task units with 0 tool calls (#1833)"
       };
     },
     closeoutUnit: async () => {
-      // complete-slice with 0 tool calls is fine (e.g. it may just update status)
       mockLedger.units.push({
         type: "complete-slice",
         id: "M001/S01",
@@ -2177,7 +2177,8 @@ test("autoLoop does NOT reject non-execute-task units with 0 tool calls (#1833)"
     getLedger: () => mockLedger,
     postUnitPostVerification: async () => {
       deps.callLog.push("postUnitPostVerification");
-      s.active = false;
+      iterationCount++;
+      s.active = iterationCount < 2;
       return "continue" as const;
     },
   });
@@ -2187,21 +2188,40 @@ test("autoLoop does NOT reject non-execute-task units with 0 tool calls (#1833)"
   await new Promise((r) => setTimeout(r, 50));
   resolveAgentEnd(makeEvent());
 
+  await new Promise((r) => setTimeout(r, 50));
+  mockLedger.units.length = 0;
+  (deps as any).closeoutUnit = async () => {
+    mockLedger.units.push({
+      type: "complete-slice",
+      id: "M001/S01",
+      startedAt: s.currentUnit?.startedAt ?? Date.now(),
+      toolCalls: 2,
+      assistantMessages: 1,
+      tokens: { input: 50, output: 100, total: 150, cacheRead: 0, cacheWrite: 0 },
+      cost: 0.10,
+    });
+  };
+  resolveAgentEnd(makeEvent());
+
   await loopPromise;
 
-  // Should NOT have a hallucination warning for non-execute-task units
   const warningNotification = notifications.find(
-    (n) => n.includes("0 tool calls") && n.includes("hallucinated"),
+    (n) => n.includes("0 tool calls") && n.includes("will retry"),
   );
   assert.ok(
-    !warningNotification,
-    "should NOT flag non-execute-task units with 0 tool calls",
+    warningNotification,
+    "should warn when complete-slice completes with 0 tool calls",
   );
 
-  // Verify the loop ran to completion (postUnitPostVerification was called)
+  const deriveCount = deps.callLog.filter((c) => c === "deriveState").length;
+  assert.ok(
+    deriveCount >= 2,
+    `deriveState should be called at least 2 times for retry (got ${deriveCount})`,
+  );
+
   assert.ok(
     deps.callLog.includes("postUnitPostVerification"),
-    "complete-slice with 0 tool calls should still complete the post-unit pipeline",
+    "post-unit pipeline should run once the retried complete-slice records tool calls",
   );
 });
 

@@ -1160,11 +1160,14 @@ export async function runUnitPhase(
     );
   }
 
-  // ── Zero tool-call guard (#1833) ──────────────────────────────────
-  // An execute-task agent that completes with 0 tool calls made no
-  // real changes — its summary is hallucinated. Treat as failed so
-  // the task is retried instead of silently marked complete.
-  if (unitType === "execute-task") {
+  // ── Zero tool-call guard (#1833, #2653) ───────────────────────────
+  // Some units must mutate real project state to be meaningful. If they
+  // complete with 0 successful tool calls, the summary is untrustworthy:
+  // - execute-task likely hallucinated implementation work
+  // - complete-slice likely exhausted context before it could update DB/files
+  // Let the loop retry/re-derive instead of entering post-unit verification
+  // with a no-op result that can dead-end downstream dispatch.
+  if (unitType === "execute-task" || unitType === "complete-slice") {
     const currentLedger = deps.getLedger() as { units: Array<{ type: string; id: string; startedAt: number; toolCalls: number }> } | null;
     if (currentLedger?.units) {
       const lastUnit = [...currentLedger.units].reverse().find(
@@ -1175,10 +1178,10 @@ export async function runUnitPhase(
           phase: "zero-tool-calls",
           unitType,
           unitId,
-          warning: "Task completed with 0 tool calls — likely hallucinated, marking as failed",
+          warning: "Unit completed with 0 tool calls — likely no-op result, marking for retry",
         });
         ctx.ui.notify(
-          `${unitType} ${unitId} completed with 0 tool calls — hallucinated summary, will retry`,
+          `${unitType} ${unitId} completed with 0 tool calls — likely no-op result, will retry`,
           "warning",
         );
         // Fall through to next iteration where dispatch will re-derive
