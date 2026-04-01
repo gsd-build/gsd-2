@@ -69,6 +69,7 @@ import {
 } from "./auto-budget.js";
 import {
   markToolStart as _markToolStart,
+  markToolActivity as _markToolActivity,
   markToolEnd as _markToolEnd,
   getOldestInFlightToolAgeMs as _getOldestInFlightToolAgeMs,
   getInFlightToolCount,
@@ -383,6 +384,10 @@ export function getAutoModeStartModel(): {
 // Tool tracking — delegates to auto-tool-tracking.ts
 export function markToolStart(toolCallId: string, toolName?: string): void {
   _markToolStart(toolCallId, s.active, toolName);
+}
+
+export function markToolActivity(toolCallId: string): void {
+  _markToolActivity(toolCallId);
 }
 
 export function markToolEnd(toolCallId: string): void {

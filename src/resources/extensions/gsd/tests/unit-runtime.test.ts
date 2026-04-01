@@ -33,6 +33,21 @@ console.log("\n=== runtime record write/read/update ===");
   assert.deepStrictEqual(loaded!.phase, "wrapup-warning-sent", "updated phase readable");
 }
 
+console.log("\n=== runtime record honors explicit timeoutAt null reset ===");
+{
+  writeUnitRuntimeRecord(base, "execute-task", "M100/S02/T11", 1001, {
+    phase: "timeout",
+    timeoutAt: 123456,
+  });
+  const reset = writeUnitRuntimeRecord(base, "execute-task", "M100/S02/T11", 1002, {
+    phase: "dispatched",
+    timeoutAt: null,
+  });
+  assert.deepStrictEqual(reset.timeoutAt, null, "explicit null should clear timeoutAt");
+  const loaded = readUnitRuntimeRecord(base, "execute-task", "M100/S02/T11");
+  assert.deepStrictEqual(loaded!.timeoutAt, null, "cleared timeoutAt should persist to disk");
+}
+
 console.log("\n=== execute-task durability inspection ===");
 {
   let status = await inspectExecuteTaskDurability(base, "M100/S02/T09");

@@ -14,7 +14,7 @@ import type { GSDPreferences } from "./preferences.js";
 import { computeBudgets, resolveExecutorContextWindow } from "./context-budget.js";
 import {
   getInFlightToolCount,
-  getOldestInFlightToolStart,
+  getOldestInFlightToolLastActivity,
   clearInFlightTools,
   hasInteractiveToolInFlight,
 } from "./auto-tool-tracking.js";
@@ -166,9 +166,9 @@ export function startUnitSupervision(sctx: SupervisionContext): void {
           });
           return;
         }
-        const oldestStart = getOldestInFlightToolStart()!;
-        const toolAgeMs = Date.now() - oldestStart;
-        if (toolAgeMs < idleTimeoutMs) {
+        const lastActivityAt = getOldestInFlightToolLastActivity()!;
+        const toolIdleMs = Date.now() - lastActivityAt;
+        if (toolIdleMs < idleTimeoutMs) {
           writeUnitRuntimeRecord(s.basePath, unitType, unitId, s.currentUnit.startedAt, {
             lastProgressAt: Date.now(),
             lastProgressKind: "tool-in-flight",
@@ -182,7 +182,7 @@ export function startUnitSupervision(sctx: SupervisionContext): void {
         stalledToolDetected = true;
         clearInFlightTools();
         ctx.ui.notify(
-          `Stalled tool detected: a tool has been in-flight for ${Math.round(toolAgeMs / 60000)}min. Treating as hung — attempting idle recovery.`,
+          `Stalled tool detected: a tool has been idle for ${Math.round(toolIdleMs / 60000)}min. Treating as hung — attempting idle recovery.`,
           "warning",
         );
       }

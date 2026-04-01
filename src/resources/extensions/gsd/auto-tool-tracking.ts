@@ -6,6 +6,7 @@
 
 interface InFlightTool {
   startedAt: number;
+  lastActivityAt: number;
   toolName: string;
 }
 
@@ -24,7 +25,21 @@ const INTERACTIVE_TOOLS = new Set(["ask_user_questions", "secure_env_collect"]);
  */
 export function markToolStart(toolCallId: string, isActive: boolean, toolName?: string): void {
   if (!isActive) return;
-  inFlightTools.set(toolCallId, { startedAt: Date.now(), toolName: toolName ?? "unknown" });
+  const now = Date.now();
+  inFlightTools.set(toolCallId, {
+    startedAt: now,
+    lastActivityAt: now,
+    toolName: toolName ?? "unknown",
+  });
+}
+
+/**
+ * Refresh the last-activity timestamp for an in-flight tool.
+ */
+export function markToolActivity(toolCallId: string): void {
+  const entry = inFlightTools.get(toolCallId);
+  if (!entry) return;
+  entry.lastActivityAt = Date.now();
 }
 
 /**
@@ -39,11 +54,11 @@ export function markToolEnd(toolCallId: string): void {
  */
 export function getOldestInFlightToolAgeMs(): number {
   if (inFlightTools.size === 0) return 0;
-  let oldestStart = Infinity;
+  let oldestActivity = Infinity;
   for (const t of inFlightTools.values()) {
-    if (t.startedAt < oldestStart) oldestStart = t.startedAt;
+    if (t.lastActivityAt < oldestActivity) oldestActivity = t.lastActivityAt;
   }
-  return Date.now() - oldestStart;
+  return Date.now() - oldestActivity;
 }
 
 /**
@@ -61,6 +76,18 @@ export function getOldestInFlightToolStart(): number | undefined {
   let oldest = Infinity;
   for (const t of inFlightTools.values()) {
     if (t.startedAt < oldest) oldest = t.startedAt;
+  }
+  return oldest;
+}
+
+/**
+ * Returns the most stale last-activity timestamp, or undefined if none.
+ */
+export function getOldestInFlightToolLastActivity(): number | undefined {
+  if (inFlightTools.size === 0) return undefined;
+  let oldest = Infinity;
+  for (const t of inFlightTools.values()) {
+    if (t.lastActivityAt < oldest) oldest = t.lastActivityAt;
   }
   return oldest;
 }

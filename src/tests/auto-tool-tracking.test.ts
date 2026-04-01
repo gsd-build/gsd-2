@@ -2,6 +2,7 @@ import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   markToolStart,
+  markToolActivity,
   markToolEnd,
   getOldestInFlightToolAgeMs,
   getInFlightToolCount,
@@ -34,6 +35,16 @@ describe("auto-tool-tracking", () => {
     markToolStart("tool-1", true);
     // Age should be very small (< 100ms)
     assert.ok(getOldestInFlightToolAgeMs() < 100);
+  });
+
+  it("refreshes idle age on tool activity", async () => {
+    markToolStart("tool-1", true);
+    await new Promise(resolve => setTimeout(resolve, 15));
+    const beforeRefresh = getOldestInFlightToolAgeMs();
+    markToolActivity("tool-1");
+    const afterRefresh = getOldestInFlightToolAgeMs();
+    assert.ok(beforeRefresh >= 10, `expected age before refresh to grow, got ${beforeRefresh}`);
+    assert.ok(afterRefresh < beforeRefresh, `expected activity refresh to reduce age (${afterRefresh} < ${beforeRefresh})`);
   });
 
   it("clears all in-flight tools", () => {

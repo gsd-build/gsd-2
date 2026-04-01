@@ -57,6 +57,13 @@ function runtimePath(basePath: string, unitType: string, unitId: string): string
   return join(runtimeDir(basePath), `${sanitizedUnitType}-${sanitizedUnitId}.json`);
 }
 
+function hasOwnUpdate<K extends keyof AutoUnitRuntimeRecord>(
+  updates: Partial<AutoUnitRuntimeRecord>,
+  key: K,
+): boolean {
+  return Object.prototype.hasOwnProperty.call(updates, key);
+}
+
 export function writeUnitRuntimeRecord(
   basePath: string,
   unitType: string,
@@ -77,7 +84,7 @@ export function writeUnitRuntimeRecord(
     phase: updates.phase ?? prev?.phase ?? "dispatched",
     wrapupWarningSent: updates.wrapupWarningSent ?? prev?.wrapupWarningSent ?? false,
     continueHereFired: updates.continueHereFired ?? prev?.continueHereFired ?? false,
-    timeoutAt: updates.timeoutAt ?? prev?.timeoutAt ?? null,
+    timeoutAt: hasOwnUpdate(updates, "timeoutAt") ? updates.timeoutAt ?? null : prev?.timeoutAt ?? null,
     lastProgressAt: updates.lastProgressAt ?? prev?.lastProgressAt ?? Date.now(),
     progressCount: updates.progressCount ?? prev?.progressCount ?? 0,
     lastProgressKind: updates.lastProgressKind ?? prev?.lastProgressKind ?? "dispatch",

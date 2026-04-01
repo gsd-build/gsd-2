@@ -13,7 +13,8 @@ import { getDiscussionMilestoneId } from "../guided-flow.js";
 import { loadToolApiKeys } from "../commands-config.js";
 import { loadFile, saveFile, formatContinue } from "../files.js";
 import { deriveState } from "../state.js";
-import { getAutoDashboardData, isAutoActive, isAutoPaused, markToolEnd, markToolStart, recordToolInvocationError } from "../auto.js";
+<<<<<<< HEAD
+import { getAutoDashboardData, isAutoActive, isAutoPaused, markToolActivity, markToolEnd, markToolStart, recordToolInvocationError } from "../auto.js";
 import { isParallelActive, shutdownParallel } from "../parallel-orchestrator.js";
 import { checkToolCallLoop, resetToolCallLoopGuard } from "./tool-call-loop-guard.js";
 import { saveActivityLog } from "../activity-log.js";
@@ -286,7 +287,12 @@ export function registerHooks(pi: ExtensionAPI): void {
 
   pi.on("tool_execution_start", async (event) => {
     if (!isAutoActive()) return;
-    markToolStart(event.toolCallId);
+    markToolStart(event.toolCallId, event.toolName);
+  });
+
+  pi.on("tool_execution_update", async (event) => {
+    if (!isAutoActive()) return;
+    markToolActivity(event.toolCallId);
   });
 
   pi.on("tool_execution_end", async (event) => {

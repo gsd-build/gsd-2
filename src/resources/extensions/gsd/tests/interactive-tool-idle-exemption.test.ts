@@ -6,6 +6,7 @@ import { describe, test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   markToolStart,
+  markToolActivity,
   markToolEnd,
   hasInteractiveToolInFlight,
   getInFlightToolCount,
@@ -105,6 +106,17 @@ describe("existing tracking behavior preserved with toolName", () => {
     markToolStart("call-1", true, "read");
     const age = getOldestInFlightToolAgeMs();
     assert.ok(age >= 0, `age should be non-negative, got ${age}`);
+  });
+
+  test("markToolActivity refreshes idle age without changing tool count", async () => {
+    markToolStart("call-1", true, "bash");
+    await new Promise(resolve => setTimeout(resolve, 15));
+    const before = getOldestInFlightToolAgeMs();
+    markToolActivity("call-1");
+    const after = getOldestInFlightToolAgeMs();
+    assert.equal(getInFlightToolCount(), 1);
+    assert.ok(before >= 10, `expected age before refresh to grow, got ${before}`);
+    assert.ok(after < before, `expected refreshed age to shrink (${after} < ${before})`);
   });
 
   test("clearInFlightTools resets all state", () => {

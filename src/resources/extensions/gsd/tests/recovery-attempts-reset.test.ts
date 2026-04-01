@@ -81,10 +81,10 @@ try {
     );
   }
 
-  // ═══ Verify the BUG scenario: omitting recoveryAttempts carries it over ═══
+  // ═══ Verify timeoutAt clears on re-dispatch when explicitly reset ═════════
 
   {
-    console.log("\n=== #2322: demonstrates bug — omitting recoveryAttempts carries it over ===");
+    console.log("\n=== #3360: timeoutAt clears on re-dispatch when explicitly reset ===");
 
     const unitType = "execute-task";
     const unitId = "M001/S01/T02";
@@ -97,11 +97,13 @@ try {
 
     // Timeout bumps recoveryAttempts to 1
     writeUnitRuntimeRecord(base, unitType, unitId, startedAt1, {
+      phase: "timeout",
+      timeoutAt: startedAt1 + 600000,
       recoveryAttempts: 1,
       lastRecoveryReason: "hard",
     });
 
-    // Re-dispatch WITHOUT resetting recoveryAttempts (the bug)
+    // Re-dispatch with timeoutAt explicitly reset to null.
     const startedAt2 = Date.now();
     writeUnitRuntimeRecord(base, unitType, unitId, startedAt2, {
       phase: "dispatched",
@@ -110,15 +112,13 @@ try {
       lastProgressAt: startedAt2,
       progressCount: 0,
       lastProgressKind: "dispatch",
-      // recoveryAttempts: NOT included — this is the bug
     });
 
-    const afterBuggyRedispatch = readUnitRuntimeRecord(base, unitType, unitId);
-    // This DEMONSTRATES the bug: recoveryAttempts is still 1
+    const afterRedispatch = readUnitRuntimeRecord(base, unitType, unitId);
     assertEq(
-      afterBuggyRedispatch?.recoveryAttempts,
-      1,
-      "BUG DEMO: recoveryAttempts carries over when not explicitly reset",
+      afterRedispatch?.timeoutAt,
+      null,
+      "timeoutAt should clear when re-dispatch explicitly resets it to null",
     );
   }
 
