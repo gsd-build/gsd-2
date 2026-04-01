@@ -98,7 +98,6 @@ export interface BootstrapDeps {
  * Returns false if the bootstrap aborted (e.g., guided flow returned,
  * concurrent session detected). Returns true when ready to dispatch.
  */
-
 /** Guard: tracks consecutive bootstrap attempts that found phase === "complete".
  *  Prevents the recursive dialog loop described in #1348 where
  *  bootstrapAutoSession → showSmartEntry → checkAutoStartAfterDiscuss → startAuto
@@ -731,4 +730,3 @@ export async function bootstrapAutoSession(
     throw err;
   }
 }
-

@@ -186,7 +186,11 @@ import {
   postUnitPreVerification,
   postUnitPostVerification,
 } from "./auto-post-unit.js";
-import { bootstrapAutoSession, openProjectDbIfPresent, type BootstrapDeps } from "./auto-start.js";
+import {
+  bootstrapAutoSession,
+  openProjectDbIfPresent,
+  type BootstrapDeps,
+} from "./auto-start.js";
 import { autoLoop, resolveAgentEnd, resolveAgentEndCancelled, _resetPendingResolve, isSessionSwitchInFlight, type LoopDeps, type ErrorContext } from "./auto-loop.js";
 // Slice-level parallelism (#2340)
 import { getEligibleSlices } from "./slice-parallel-eligibility.js";
@@ -1202,6 +1206,7 @@ export async function startAuto(
     s.unitLifetimeDispatches.clear();
     if (!getLedger()) initMetrics(base);
     if (s.currentMilestoneId) setActiveMilestoneId(base, s.currentMilestoneId);
+    await openProjectDbIfPresent(base);
 
     // ── Auto-worktree: re-enter worktree on resume ──
     if (
@@ -1547,4 +1552,3 @@ export {
   buildLoopRemediationSteps,
 } from "./auto-recovery.js";
 export { resolveExpectedArtifactPath } from "./auto-artifact-paths.js";
-
