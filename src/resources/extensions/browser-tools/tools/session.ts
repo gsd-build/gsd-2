@@ -280,7 +280,7 @@ export function registerSessionTools(pi: ExtensionAPI, deps: ToolDeps): void {
 					lastExportedAt: harState.lastExportedAt,
 				};
 				return {
-					content: [{ type: "text", text: `${baseSummary.summary}\nFailure hypothesis: ${failureHypothesis.summary}` }],
+					content: [{ type: "text", text: `${baseSummary.summary}\nFailure hypothesis: ${failureHypothesis}` }],
 					details: {
 						...baseSummary,
 						failureHypothesis,
@@ -369,7 +369,7 @@ export function registerSessionTools(pi: ExtensionAPI, deps: ToolDeps): void {
 					accessibility: await deps.writeArtifactFile(path.join(bundleDir, "accessibility.md"), accessibility.snapshot),
 				};
 				return {
-					content: [{ type: "text", text: `Debug bundle written: ${bundleDir}\n${sessionSummary.summary}\nFailure hypothesis: ${failureHypothesis.summary}` }],
+					content: [{ type: "text", text: `Debug bundle written: ${bundleDir}\n${sessionSummary.summary}\nFailure hypothesis: ${failureHypothesis}` }],
 					details: {
 						bundleDir,
 						artifacts,
