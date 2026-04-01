@@ -6,7 +6,7 @@ import { isToolCallEventType } from "@gsd/pi-coding-agent";
 import { buildMilestoneFileName, resolveMilestonePath, resolveSliceFile, resolveSlicePath } from "../paths.js";
 import { buildBeforeAgentStartResult } from "./system-context.js";
 import { handleAgentEnd } from "./agent-end-recovery.js";
-import { clearDiscussionFlowState, isDepthVerified, isQueuePhaseActive, markDepthVerified, resetWriteGateState, shouldBlockContextWrite, shouldBlockQueueExecution } from "./write-gate.js";
+import { clearDiscussionFlowState, isDepthVerified, isQueuePhaseActive, markDepthVerified, resetWriteGateState, shouldBlockContextWrite, shouldBlockDiscussionExecution, shouldBlockQueueExecution } from "./write-gate.js";
 import { isBlockedStateFile, isBashWriteToStateFile, BLOCKED_WRITE_ERROR } from "../write-intercept.js";
 import { cleanupQuickBranch } from "../quick.js";
 import { getDiscussionMilestoneId } from "../guided-flow.js";
@@ -182,6 +182,23 @@ export function registerHooks(pi: ExtensionAPI): void {
       if (queueGuard.block) return queueGuard;
     }
 
+    const basePath = process.cwd();
+    const discussionMilestoneId = getDiscussionMilestoneId(basePath);
+    if (discussionMilestoneId) {
+      let discussionInput = "";
+      if (isToolCallEventType("write", event)) {
+        discussionInput = event.input.path;
+      } else if (isToolCallEventType("edit", event)) {
+        discussionInput = event.input.path;
+      } else if (isToolCallEventType("bash", event)) {
+        discussionInput = event.input.command;
+      }
+      if (discussionInput) {
+        const discussionGuard = shouldBlockDiscussionExecution(event.toolName, discussionInput, true);
+        if (discussionGuard.block) return discussionGuard;
+      }
+    }
+
     // ── Single-writer engine: block direct writes to STATE.md ──────────
     // Covers write, edit, and bash tools to prevent bypass vectors.
     if (isToolCallEventType("write", event)) {
@@ -207,7 +224,7 @@ export function registerHooks(pi: ExtensionAPI): void {
     const result = shouldBlockContextWrite(
       event.toolName,
       event.input.path,
-      getDiscussionMilestoneId(),
+      discussionMilestoneId,
       isDepthVerified(),
       isQueuePhaseActive(),
     );
@@ -236,7 +253,7 @@ export function registerHooks(pi: ExtensionAPI): void {
 
   pi.on("tool_result", async (event) => {
     if (event.toolName !== "ask_user_questions") return;
-    const milestoneId = getDiscussionMilestoneId();
+    const milestoneId = getDiscussionMilestoneId(process.cwd());
     const queueActive = isQueuePhaseActive();
     if (!milestoneId && !queueActive) return;
 
