@@ -11,6 +11,8 @@ import {
   insertSlice,
   insertTask,
   updateTaskStatus,
+  getMilestone,
+  getSlice,
   getTask,
   getSliceTasks,
   insertVerificationEvidence,
@@ -283,9 +285,10 @@ console.log('\n=== complete-task: handler happy path ===');
 
   const { basePath, planPath } = createTempProject();
 
-  // Seed milestone + slice + both tasks so projection renders T01 ([x]) and T02 ([ ])
+  // Seed milestone + slice + both tasks so completion updates an existing plan.
   insertMilestone({ id: 'M001', title: 'Test Milestone' });
   insertSlice({ id: 'S01', milestoneId: 'M001', title: 'Test Slice' });
+  insertTask({ id: 'T01', sliceId: 'S01', milestoneId: 'M001', status: 'pending', title: 'Test task' });
   insertTask({ id: 'T02', sliceId: 'S01', milestoneId: 'M001', status: 'pending', title: 'Second task' });
 
   const params = makeValidParams();
@@ -378,6 +381,39 @@ console.log('\n=== complete-task: handler validation errors ===');
   cleanup(dbPath);
 }
 
+console.log('\n=== complete-task: rejects non-planned hierarchy ===');
+{
+  const dbPath = tempDbPath();
+  openDatabase(dbPath);
+
+  const params = makeValidParams();
+
+  const missingMilestone = await handleCompleteTask(params, '/tmp/fake');
+  assertTrue('error' in missingMilestone, 'should reject missing milestone');
+  if ('error' in missingMilestone) {
+    assertMatch(missingMilestone.error, /milestone M001 does not exist/, 'missing milestone error should be explicit');
+  }
+  assertEq(getMilestone('M001'), null, 'missing milestone must not be auto-created');
+
+  insertMilestone({ id: 'M001', title: 'Test Milestone' });
+  const missingSlice = await handleCompleteTask(params, '/tmp/fake');
+  assertTrue('error' in missingSlice, 'should reject missing slice');
+  if ('error' in missingSlice) {
+    assertMatch(missingSlice.error, /slice S01 does not exist/, 'missing slice error should be explicit');
+  }
+  assertEq(getSlice('M001', 'S01'), null, 'missing slice must not be auto-created');
+
+  insertSlice({ id: 'S01', milestoneId: 'M001', title: 'Test Slice' });
+  const missingTask = await handleCompleteTask(params, '/tmp/fake');
+  assertTrue('error' in missingTask, 'should reject missing task');
+  if ('error' in missingTask) {
+    assertMatch(missingTask.error, /task T01 does not exist/, 'missing task error should be explicit');
+  }
+  assertEq(getTask('M001', 'S01', 'T01'), null, 'missing task must not be auto-created');
+
+  cleanup(dbPath);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // complete-task: Handler idempotency
 // ═══════════════════════════════════════════════════════════════════════════
@@ -389,9 +425,10 @@ console.log('\n=== complete-task: handler idempotency ===');
 
   const { basePath, planPath } = createTempProject();
 
-  // Seed milestone + slice so state machine guards pass
+  // Seed milestone + slice + task so the first completion updates planned work.
   insertMilestone({ id: 'M001', title: 'Test Milestone' });
   insertSlice({ id: 'S01', milestoneId: 'M001', title: 'Test Slice' });
+  insertTask({ id: 'T01', sliceId: 'S01', milestoneId: 'M001', status: 'pending', title: 'Test task' });
 
   const params = makeValidParams();
 
@@ -432,9 +469,10 @@ console.log('\n=== complete-task: handler with missing plan file ===');
   const tasksDir = path.join(basePath, '.gsd', 'milestones', 'M001', 'slices', 'S01', 'tasks');
   fs.mkdirSync(tasksDir, { recursive: true });
 
-  // Seed milestone + slice so state machine guards pass
+  // Seed milestone + slice + task so state machine guards pass
   insertMilestone({ id: 'M001', title: 'Test Milestone' });
   insertSlice({ id: 'S01', milestoneId: 'M001', title: 'Test Slice' });
+  insertTask({ id: 'T01', sliceId: 'S01', milestoneId: 'M001', status: 'pending', title: 'Test task' });
 
   const params = makeValidParams();
   const result = await handleCompleteTask(params, basePath);

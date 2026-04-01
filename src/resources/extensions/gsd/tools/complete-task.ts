@@ -118,29 +118,37 @@ export async function handleCompleteTask(
 
   transaction(() => {
     // State machine preconditions (inside txn for atomicity).
-    // Milestone/slice not existing is OK — insertMilestone/insertSlice below will auto-create.
-    // Only block if they exist and are closed.
     const milestone = getMilestone(params.milestoneId);
+    if (!milestone) {
+      guardError = `milestone ${params.milestoneId} does not exist — complete_task can only update planned hierarchy`;
+      return;
+    }
     if (milestone && isClosedStatus(milestone.status)) {
       guardError = `cannot complete task in a closed milestone: ${params.milestoneId} (status: ${milestone.status})`;
       return;
     }
 
     const slice = getSlice(params.milestoneId, params.sliceId);
+    if (!slice) {
+      guardError = `slice ${params.sliceId} does not exist in milestone ${params.milestoneId} — complete_task can only update planned hierarchy`;
+      return;
+    }
     if (slice && isClosedStatus(slice.status)) {
       guardError = `cannot complete task in a closed slice: ${params.sliceId} (status: ${slice.status})`;
       return;
     }
 
     const existingTask = getTask(params.milestoneId, params.sliceId, params.taskId);
+    if (!existingTask) {
+      guardError = `task ${params.taskId} does not exist in ${params.milestoneId}/${params.sliceId} — complete_task can only update planned tasks`;
+      return;
+    }
     if (existingTask && isClosedStatus(existingTask.status)) {
       guardError = `task ${params.taskId} is already complete — use gsd_task_reopen first if you need to redo it`;
       return;
     }
 
     // All guards passed — perform writes
-    insertMilestone({ id: params.milestoneId });
-    insertSlice({ id: params.sliceId, milestoneId: params.milestoneId });
     insertTask({
       id: params.taskId,
       sliceId: params.sliceId,

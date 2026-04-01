@@ -10,6 +10,7 @@ import {
   insertMilestone,
   insertSlice,
   insertTask,
+  getMilestone,
   getSlice,
   updateSliceStatus,
   getSliceTasks,
@@ -331,6 +332,31 @@ console.log('\n=== complete-slice: handler validation errors ===');
   if ('error' in r2) {
     assertMatch(r2.error, /milestoneId/, 'error should mention milestoneId');
   }
+
+  cleanup(dbPath);
+}
+
+console.log('\n=== complete-slice: rejects non-planned hierarchy ===');
+{
+  const dbPath = tempDbPath();
+  openDatabase(dbPath);
+
+  const params = makeValidSliceParams();
+
+  const missingMilestone = await handleCompleteSlice(params, '/tmp/fake');
+  assertTrue('error' in missingMilestone, 'should reject missing milestone');
+  if ('error' in missingMilestone) {
+    assertMatch(missingMilestone.error, /milestone M001 does not exist/, 'missing milestone error should be explicit');
+  }
+  assertEq(getMilestone('M001'), null, 'missing milestone must not be auto-created');
+
+  insertMilestone({ id: 'M001' });
+  const missingSlice = await handleCompleteSlice(params, '/tmp/fake');
+  assertTrue('error' in missingSlice, 'should reject missing slice');
+  if ('error' in missingSlice) {
+    assertMatch(missingSlice.error, /slice S01 does not exist/, 'missing slice error should be explicit');
+  }
+  assertEq(getSlice('M001', 'S01'), null, 'missing slice must not be auto-created');
 
   cleanup(dbPath);
 }
