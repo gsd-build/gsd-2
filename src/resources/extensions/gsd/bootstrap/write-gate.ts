@@ -124,3 +124,41 @@ export function shouldBlockQueueExecution(
   return { block: false };
 }
 
+/**
+ * Interactive discuss-mode execution guard (#3381).
+ *
+ * During a guided discuss session, the agent may investigate freely but must
+ * not mutate project source files before it creates planning artifacts under
+ * .gsd/. This blocks write/edit/bash attempts that would bypass the discuss
+ * protocol and jump straight into implementation.
+ */
+export function shouldBlockDiscussionExecution(
+  toolName: string,
+  input: string,
+  discussionPhaseActive: boolean,
+): { block: boolean; reason?: string } {
+  if (!discussionPhaseActive) return { block: false };
+
+  // Read-only / discussion / planning tools remain allowed.
+  if (QUEUE_SAFE_TOOLS.has(toolName)) return { block: false };
+
+  if (toolName === "write" || toolName === "edit") {
+    if (GSD_DIR_RE.test(input)) return { block: false };
+    return {
+      block: true,
+      reason: `Blocked: /gsd discuss is a planning workflow — finish the discussion and write planning artifacts under .gsd/ before modifying project files. ` +
+        `Cannot ${toolName} "${input}" during discuss mode.`,
+    };
+  }
+
+  if (toolName === "bash") {
+    if (BASH_READ_ONLY_RE.test(input)) return { block: false };
+    return {
+      block: true,
+      reason: `Blocked: /gsd discuss is a planning workflow — finish the discussion and write planning artifacts under .gsd/ before running implementation commands. ` +
+        `Cannot run "${input.slice(0, 80)}${input.length > 80 ? "…" : ""}" during discuss mode.`,
+    };
+  }
+
+  return { block: false };
+}

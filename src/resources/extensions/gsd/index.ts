@@ -5,6 +5,7 @@ export {
   isQueuePhaseActive,
   setQueuePhaseActive,
   shouldBlockContextWrite,
+  shouldBlockDiscussionExecution,
   shouldBlockQueueExecution,
 } from "./bootstrap/write-gate.js";
 
