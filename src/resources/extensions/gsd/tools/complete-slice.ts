@@ -239,15 +239,21 @@ export async function handleCompleteSlice(
 
   transaction(() => {
     // State machine preconditions (inside txn for atomicity).
-    // Milestone/slice not existing is OK — insertMilestone/insertSlice below will auto-create.
-    // Only block if they exist and are closed.
     const milestone = getMilestone(params.milestoneId);
+    if (!milestone) {
+      guardError = `milestone ${params.milestoneId} does not exist — complete_slice can only update planned hierarchy`;
+      return;
+    }
     if (milestone && isClosedStatus(milestone.status)) {
       guardError = `cannot complete slice in a closed milestone: ${params.milestoneId} (status: ${milestone.status})`;
       return;
     }
 
     const slice = getSlice(params.milestoneId, params.sliceId);
+    if (!slice) {
+      guardError = `slice ${params.sliceId} does not exist in milestone ${params.milestoneId} — complete_slice can only update planned hierarchy`;
+      return;
+    }
     if (slice && isClosedStatus(slice.status)) {
       guardError = `slice ${params.sliceId} is already complete — use gsd_slice_reopen first if you need to redo it`;
       return;
@@ -268,8 +274,6 @@ export async function handleCompleteSlice(
     }
 
     // All guards passed — perform writes
-    insertMilestone({ id: params.milestoneId });
-    insertSlice({ id: params.sliceId, milestoneId: params.milestoneId });
     updateSliceStatus(params.milestoneId, params.sliceId, "complete", completedAt);
   });
 
