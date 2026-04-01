@@ -176,7 +176,7 @@ test('memory-extractor: reset extraction state', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('memory-extractor: buildMemoryLLMCall resolves API key from modelRegistry for OAuth users', async () => {
-  const OAUTH_TOKEN = 'sk-ant-oat-test-oauth-token-12345';
+  const oauthCredentialValue = 'oauth-placeholder-value';
   let getApiKeyCalled = false;
 
   const fakeModel = {
@@ -191,7 +191,7 @@ test('memory-extractor: buildMemoryLLMCall resolves API key from modelRegistry f
       getAvailable: () => [fakeModel],
       getApiKey: async (_model: any) => {
         getApiKeyCalled = true;
-        return OAUTH_TOKEN;
+        return oauthCredentialValue;
       },
     },
   } as any;
