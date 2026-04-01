@@ -74,6 +74,7 @@ const LLM_PROVIDER_IDS = [
   'xai',
   'openrouter',
   'mistral',
+  'ollama',
   'ollama-cloud',
   'custom-openai',
 ]
@@ -90,6 +91,7 @@ const OTHER_PROVIDERS = [
   { value: 'xai', label: 'xAI (Grok)' },
   { value: 'openrouter', label: 'OpenRouter' },
   { value: 'mistral', label: 'Mistral' },
+  { value: 'ollama', label: 'Ollama (Local)' },
   { value: 'ollama-cloud', label: 'Ollama Cloud' },
   { value: 'custom-openai', label: 'Custom (OpenAI-compatible)' },
 ]
@@ -335,6 +337,9 @@ async function runLlmStep(p: ClackModule, pc: PicoModule, authStorage: AuthStora
     if (provider === 'custom-openai') {
       return await runCustomOpenAIFlow(p, pc, authStorage)
     }
+    if (provider === 'ollama') {
+      return await runOllamaLocalFlow(p, pc, authStorage)
+    }
     const label = provider === 'anthropic' ? 'Anthropic'
       : provider === 'openai' ? 'OpenAI'
       : OTHER_PROVIDERS.find(op => op.value === provider)?.label ?? String(provider)
@@ -441,6 +446,54 @@ async function runApiKeyFlow(
 
   authStorage.set(providerId, { type: 'api_key', key: trimmed })
   p.log.success(`API key saved for ${pc.green(providerLabel)}`)
+  return true
+}
+
+// ─── Ollama Local Flow ───────────────────────────────────────────────────────
+
+async function runOllamaLocalFlow(
+  p: ClackModule,
+  pc: PicoModule,
+  authStorage: AuthStorage,
+): Promise<boolean> {
+  const host = process.env.OLLAMA_HOST || 'http://localhost:11434'
+
+  const s = p.spinner()
+  s.start(`Checking Ollama at ${host}...`)
+
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 3000)
+    const response = await fetch(host, { signal: controller.signal })
+    clearTimeout(timeout)
+
+    if (response.ok) {
+      s.stop(`Ollama is running at ${pc.green(host)}`)
+      // Store a placeholder so the provider is recognized as authenticated
+      authStorage.set('ollama', { type: 'api_key', key: 'ollama' })
+      p.log.success(`${pc.green('Ollama (Local)')} configured — no API key needed`)
+      p.log.info(pc.dim('Models are discovered automatically from your local Ollama instance.'))
+      return true
+    } else {
+      s.stop('Ollama check failed')
+      p.log.warn(`Ollama responded with status ${response.status} at ${host}`)
+    }
+  } catch {
+    s.stop('Ollama not detected')
+    p.log.warn(`Could not reach Ollama at ${host}`)
+    p.log.info(pc.dim('Install Ollama from https://ollama.com and run "ollama serve"'))
+    p.log.info(pc.dim('Set OLLAMA_HOST if using a non-default address.'))
+  }
+
+  // Even if not reachable now, save the config — the extension will detect it at runtime
+  const proceed = await p.confirm({
+    message: 'Save Ollama as your provider anyway? (it will auto-detect when running)',
+  })
+
+  if (p.isCancel(proceed) || !proceed) return false
+
+  authStorage.set('ollama', { type: 'api_key', key: 'ollama' })
+  p.log.success(`${pc.green('Ollama (Local)')} saved — models will appear when Ollama is running`)
   return true
 }
 

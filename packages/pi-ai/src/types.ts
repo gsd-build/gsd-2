@@ -43,6 +43,7 @@ export type KnownProvider =
 	| "opencode-go"
 	| "kimi-coding"
 	| "alibaba-coding-plan"
+	| "ollama"
 	| "ollama-cloud";
 export type Provider = KnownProvider | string;
 
