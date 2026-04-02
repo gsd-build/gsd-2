@@ -17,7 +17,8 @@
  */
 
 import { importExtensionModule, type ExtensionAPI } from "@gsd/pi-coding-agent";
-import type { OpenAICompletionsCompat } from "@gsd/pi-ai";
+import type { OpenAICompletionsCompat, Model } from "@gsd/pi-ai";
+import { streamOpenAICompletions } from "@gsd/pi-ai";
 import * as client from "./ollama-client.js";
 import { discoverModels, getOllamaOpenAIBaseUrl } from "./ollama-discovery.js";
 import { registerOllamaCommands } from "./ollama-commands.js";
@@ -74,6 +75,8 @@ async function probeAndRegister(pi: ExtensionAPI): Promise<boolean> {
 		authMode: "none",
 		baseUrl,
 		api: "openai-completions",
+		streamSimple: (model, context, options) =>
+			streamOpenAICompletions(model as Model<"openai-completions">, context, { ...options, apiKey: "ollama" }),
 		isReady: () => true,
 		models: models.map((m) => ({
 			id: m.id,
