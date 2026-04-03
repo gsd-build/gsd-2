@@ -227,6 +227,18 @@ export async function nextDecisionId(): Promise<string> {
   }
 }
 
+/** Synchronous variant for use inside db.transaction(). */
+function nextDecisionIdSync(adapter: ReturnType<typeof import('./gsd-db.js')._getAdapter>): string {
+  if (!adapter) return 'D001';
+  const row = adapter
+    .prepare('SELECT MAX(CAST(SUBSTR(id, 2) AS INTEGER)) as max_num FROM decisions')
+    .get();
+  const maxNum = row ? (row['max_num'] as number | null) : null;
+  if (maxNum == null || isNaN(maxNum)) return 'D001';
+  const next = maxNum + 1;
+  return `D${String(next).padStart(3, '0')}`;
+}
+
 // ─── Next Requirement ID ─────────────────────────────────────────────────
 
 /**
@@ -367,22 +379,25 @@ export async function saveDecisionToDb(
   try {
     const db = await import('./gsd-db.js');
 
-    const id = await nextDecisionId();
+    const adapter = db._getAdapter();
 
-    db.upsertDecision({
-      id,
-      when_context: fields.when_context ?? '',
-      scope: fields.scope,
-      decision: fields.decision,
-      choice: fields.choice,
-      rationale: fields.rationale,
-      revisable: fields.revisable ?? 'Yes',
-      made_by: fields.made_by ?? 'agent',
-      superseded_by: null,
+    const id = db.transaction(() => {
+      const nextId = nextDecisionIdSync(adapter);
+      db.upsertDecision({
+        id: nextId,
+        when_context: fields.when_context ?? '',
+        scope: fields.scope,
+        decision: fields.decision,
+        choice: fields.choice,
+        rationale: fields.rationale,
+        revisable: fields.revisable ?? 'Yes',
+        made_by: fields.made_by ?? 'agent',
+        superseded_by: null,
+      });
+      return nextId;
     });
 
     // Fetch all decisions (including superseded for the full register)
-    const adapter = db._getAdapter();
     let allDecisions: Decision[] = [];
     if (adapter) {
       const rows = adapter.prepare('SELECT * FROM decisions ORDER BY seq').all();

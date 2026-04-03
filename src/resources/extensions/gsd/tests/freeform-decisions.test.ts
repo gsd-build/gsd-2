@@ -227,6 +227,33 @@ describe('freeform-decisions', () => {
     }
   });
 
+  test('parallel saveDecisionToDb calls assign unique IDs', async () => {
+    const tmpDir = makeTmpDir();
+    const dbPath = path.join(tmpDir, '.gsd', 'gsd.db');
+    openDatabase(dbPath);
+
+    try {
+      const [r1, r2, r3] = await Promise.all([
+        saveDecisionToDb({ scope: 'a', decision: 'Decision A', choice: 'A', rationale: 'A' }, tmpDir),
+        saveDecisionToDb({ scope: 'b', decision: 'Decision B', choice: 'B', rationale: 'B' }, tmpDir),
+        saveDecisionToDb({ scope: 'c', decision: 'Decision C', choice: 'C', rationale: 'C' }, tmpDir),
+      ]);
+
+      const ids = new Set([r1.id, r2.id, r3.id]);
+      assert.strictEqual(ids.size, 3, `expected 3 unique IDs but got: ${[r1.id, r2.id, r3.id]}`);
+
+      // Verify all 3 decisions exist in the markdown file
+      const mdPath = path.join(tmpDir, '.gsd', 'DECISIONS.md');
+      const content = fs.readFileSync(mdPath, 'utf-8');
+      assert.ok(content.includes('Decision A'), 'Decision A in file');
+      assert.ok(content.includes('Decision B'), 'Decision B in file');
+      assert.ok(content.includes('Decision C'), 'Decision C in file');
+    } finally {
+      closeDatabase();
+      cleanupDir(tmpDir);
+    }
+  });
+
   // ═══════════════════════════════════════════════════════════════════════════
 
 });
