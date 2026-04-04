@@ -206,5 +206,10 @@ Examples:
     await handleRethink(trimmed, ctx, pi);
     return true;
   }
+  if (trimmed === "codebase" || trimmed.startsWith("codebase ")) {
+    const { handleCodebase } = await import("../../commands-codebase.js");
+    await handleCodebase(trimmed.replace(/^codebase\s*/, "").trim(), ctx, pi);
+    return true;
+  }
   return false;
 }

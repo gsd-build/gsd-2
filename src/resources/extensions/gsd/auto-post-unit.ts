@@ -13,6 +13,7 @@
 
 import type { ExtensionContext, ExtensionAPI } from "@gsd/pi-coding-agent";
 import { deriveState } from "./state.js";
+import { logWarning, logError } from "./workflow-logger.js";
 import { loadFile, parseSummary, resolveAllOverrides } from "./files.js";
 import { loadPrompt } from "./prompt-loader.js";
 import {
@@ -412,10 +413,10 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
           );
         }
         for (const action of triageResult.actions) {
-          process.stderr.write(`gsd-triage: ${action}\n`);
+          logWarning("engine", `triage resolution: ${action}`);
         }
       } catch (err) {
-        process.stderr.write(`gsd-triage: resolution execution failed: ${(err as Error).message}\n`);
+        logError("engine", "triage resolution failed", { error: (err as Error).message });
       }
     }
 
@@ -423,7 +424,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
     try {
       const rogueFiles = detectRogueFileWrites(s.currentUnit.type, s.currentUnit.id, s.basePath);
       for (const rogue of rogueFiles) {
-        process.stderr.write(`gsd-rogue: detected rogue file write: ${rogue.path} (unit: ${rogue.unitId})\n`);
+        logWarning("engine", "rogue file write detected", { path: rogue.path, unitId: rogue.unitId });
         ctx.ui.notify(`Rogue file write detected: ${rogue.path}`, "warning");
       }
     } catch (e) {
@@ -465,7 +466,20 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
       // When artifact verification fails for a unit type that has a known expected
       // artifact, return "retry" so the caller re-dispatches with failure context
       // instead of blindly re-dispatching the same unit (#1571).
-      if (!triggerArtifactVerified) {
+      //
+      // HOWEVER, if the DB is unavailable (db_unavailable), the artifact was never
+      // written because the completion tool failed at the infra level. Retrying
+      // can never succeed and produces a costly re-dispatch loop (#2517).
+      if (!triggerArtifactVerified && !isDbAvailable()) {
+        // DB infra failure — do NOT retry; the completion tool returned
+        // db_unavailable so the artifact was never written. Retrying would
+        // produce an infinite re-dispatch loop (#2517).
+        debugLog("postUnit", { phase: "artifact-verify-skip-db-unavailable", unitType: s.currentUnit.type, unitId: s.currentUnit.id });
+        ctx.ui.notify(
+          `Artifact missing for ${s.currentUnit.type} ${s.currentUnit.id} but DB is unavailable — skipping retry to avoid loop (#2517)`,
+          "error",
+        );
+      } else if (!triggerArtifactVerified) {
         const hasExpectedArtifact = resolveExpectedArtifactPath(s.currentUnit.type, s.currentUnit.id, s.basePath) !== null;
         if (hasExpectedArtifact) {
           const retryKey = `${s.currentUnit.type}:${s.currentUnit.id}`;

@@ -58,9 +58,8 @@ import { initRoutingHistory } from "./routing-history.js";
 import { restoreHookState, resetHookState } from "./post-unit-hooks.js";
 import { resetProactiveHealing, setLevelChangeCallback } from "./doctor-proactive.js";
 import { snapshotSkills } from "./skill-discovery.js";
-import { isDbAvailable, getMilestone, openDatabase } from "./gsd-db.js";
+import { isDbAvailable, getMilestone } from "./gsd-db.js";
 import { hideFooter } from "./auto-dashboard.js";
-import { resolveProjectRootDbPath } from "./bootstrap/dynamic-tools.js";
 import {
   debugLog,
   enableDebug,
@@ -68,7 +67,6 @@ import {
   getDebugLogPath,
 } from "./debug-logger.js";
 import { parseUnitId } from "./unit-id.js";
-import { setLogBasePath } from "./workflow-logger.js";
 import type { AutoSession } from "./auto/session.js";
 import {
   existsSync,
@@ -80,6 +78,7 @@ import {
 import { join } from "node:path";
 import { sep as pathSep } from "node:path";
 
+import { resolveProjectRootDbPath } from "./bootstrap/dynamic-tools.js";
 import type { WorktreeResolver } from "./worktree-resolver.js";
 
 export interface BootstrapDeps {
@@ -98,26 +97,32 @@ export interface BootstrapDeps {
  * concurrent session detected). Returns true when ready to dispatch.
  */
 
+/**
+ * Open the project-root DB before the first deriveState call (#2841).
+ * When auto-mode starts cold (no prior DB handle), state derivation that
+ * touches DB-backed helpers (queue-order, task status) silently falls back
+ * to markdown-only data, producing stale or incomplete state.  Opening the
+ * DB first ensures deriveState sees the full picture on its very first run.
+ */
+async function openProjectDbIfPresent(basePath: string): Promise<void> {
+  const gsdDbPath = resolveProjectRootDbPath(basePath);
+  if (!existsSync(gsdDbPath)) return;
+  if (isDbAvailable()) return;
+
+  try {
+    const { openDatabase } = await import("./gsd-db.js");
+    openDatabase(gsdDbPath);
+  } catch {
+    /* non-fatal — DB lifecycle block below will retry */
+  }
+}
+
 /** Guard: tracks consecutive bootstrap attempts that found phase === "complete".
  *  Prevents the recursive dialog loop described in #1348 where
  *  bootstrapAutoSession → showSmartEntry → checkAutoStartAfterDiscuss → startAuto
  *  cycles indefinitely when the discuss workflow doesn't produce a milestone. */
 let _consecutiveCompleteBootstraps = 0;
 const MAX_CONSECUTIVE_COMPLETE_BOOTSTRAPS = 2;
-
-async function openProjectDbIfPresent(basePath: string): Promise<void> {
-  const gsdDbPath = resolveProjectRootDbPath(basePath);
-  if (!existsSync(gsdDbPath) || isDbAvailable()) return;
-
-  try {
-    openDatabase(gsdDbPath);
-  } catch (err) {
-    process.stderr.write(
-      `gsd-db: failed to open existing database: ${(err as Error).message}\n`,
-    );
-  }
-}
-
 export async function bootstrapAutoSession(
   s: AutoSession,
   ctx: ExtensionCommandContext,
@@ -198,10 +203,13 @@ export async function bootstrapAutoSession(
     ensureGitignore(base, { manageGitignore });
     if (manageGitignore !== false) untrackRuntimeFiles(base);
 
-    // Bootstrap .gsd/ if it doesn't exist
+    // Bootstrap milestones/ if it doesn't exist.
+    // Check milestones/ directly — ensureGsdSymlink above already created .gsd/,
+    // so checking .gsd/ existence would be dead code (#2942).
     const gsdDir = join(base, ".gsd");
-    if (!existsSync(gsdDir)) {
-      mkdirSync(join(gsdDir, "milestones"), { recursive: true });
+    const milestonesPath = join(gsdDir, "milestones");
+    if (!existsSync(milestonesPath)) {
+      mkdirSync(milestonesPath, { recursive: true });
       try {
         nativeAddAll(base);
         nativeCommit(base, "chore: init gsd");
@@ -280,10 +288,6 @@ export async function bootstrapAutoSession(
       ctx.ui.notify(`Debug logging enabled → ${getDebugLogPath()}`, "info");
     }
 
-    // Open the project DB before the first derive so resume uses DB truth
-    // immediately on cold starts instead of falling back to markdown (#2841).
-    await openProjectDbIfPresent(base);
-
     // Invalidate caches before initial state derivation
     invalidateAllCaches();
 
@@ -292,6 +296,10 @@ export async function bootstrapAutoSession(
       gsdRoot(base),
       (mid) => !!resolveMilestoneFile(base, mid, "SUMMARY"),
     );
+
+    // Open the project-root DB before deriveState so DB-backed state
+    // derivation (queue-order, task status) works on a cold start (#2841).
+    await openProjectDbIfPresent(base);
 
     let state = await deriveState(base);
 
@@ -490,7 +498,6 @@ export async function bootstrapAutoSession(
     s.verbose = verboseMode;
     s.cmdCtx = ctx;
     s.basePath = base;
-    setLogBasePath(base);
     s.unitDispatchCount.clear();
     s.unitRecoveryCount.clear();
     s.lastBudgetAlertLevel = 0;
@@ -554,14 +561,15 @@ export async function bootstrapAutoSession(
     }
 
     // ── DB lifecycle ──
-    const gsdDbPath = resolveProjectRootDbPath(s.basePath);
+    const gsdDbPath = join(s.basePath, ".gsd", "gsd.db");
     const gsdDirPath = join(s.basePath, ".gsd");
     if (existsSync(gsdDirPath) && !existsSync(gsdDbPath)) {
       const hasDecisions = existsSync(join(gsdDirPath, "DECISIONS.md"));
       const hasRequirements = existsSync(join(gsdDirPath, "REQUIREMENTS.md"));
       const hasMilestones = existsSync(join(gsdDirPath, "milestones"));
       try {
-        openDatabase(gsdDbPath);
+        const { openDatabase: openDb } = await import("./gsd-db.js");
+        openDb(gsdDbPath);
         if (hasDecisions || hasRequirements || hasMilestones) {
           const { migrateFromMarkdown } = await import("./md-importer.js");
           migrateFromMarkdown(s.basePath);
@@ -574,7 +582,8 @@ export async function bootstrapAutoSession(
     }
     if (existsSync(gsdDbPath) && !isDbAvailable()) {
       try {
-        openDatabase(gsdDbPath);
+        const { openDatabase: openDb } = await import("./gsd-db.js");
+        openDb(gsdDbPath);
       } catch (err) {
         process.stderr.write(
           `gsd-db: failed to open existing database: ${(err as Error).message}\n`,

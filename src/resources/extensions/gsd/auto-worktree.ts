@@ -15,6 +15,7 @@ import {
   realpathSync,
   rmSync,
   unlinkSync,
+  statSync,
   lstatSync as lstatSyncFn,
 } from "node:fs";
 import { isAbsolute, join, sep as pathSep } from "node:path";
@@ -62,6 +63,7 @@ import {
   nativeDiffNumstat,
   nativeUpdateRef,
   nativeIsAncestor,
+  nativeMergeAbort,
 } from "./native-git-bridge.js";
 
 const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
@@ -84,6 +86,7 @@ const ROOT_STATE_FILES = [
   "QUEUE.md",
   "completed-units.json",
   "metrics.json",
+  "mcp.json",
   // NOTE: project preferences are intentionally NOT in ROOT_STATE_FILES.
   // Forward-sync (main → worktree) is handled explicitly in syncGsdStateToWorktree().
   // Back-sync (worktree → main) must NEVER overwrite the project root's copy
@@ -99,6 +102,67 @@ function isSamePath(a: string, b: string): boolean {
     return realpathSync(a) === realpathSync(b);
   } catch {
     return false;
+  }
+}
+
+// ─── ASSESSMENT Force-Sync Helper (#2821) ─────────────────────────────────
+
+/** Regex matching YAML frontmatter `verdict:` field. */
+const VERDICT_RE = /verdict:\s*[\w-]+/i;
+
+/**
+ * Walk a milestone directory and force-overwrite ASSESSMENT files in the
+ * destination when the source copy contains a `verdict:` field.
+ *
+ * This is the targeted fix for the UAT stuck-loop (#2821): the main
+ * safeCopyRecursive uses force:false to protect worktree-authoritative
+ * files (#1886), but ASSESSMENT files written by run-uat must be
+ * forward-synced when the project root has a verdict. Without this,
+ * the worktree retains a stale FAIL or missing ASSESSMENT and
+ * checkNeedsRunUat re-dispatches run-uat indefinitely.
+ *
+ * Only overwrites when the source has a verdict — never clobbers a
+ * worktree ASSESSMENT with a verdictless project-root copy.
+ */
+function forceOverwriteAssessmentsWithVerdict(
+  srcMilestoneDir: string,
+  dstMilestoneDir: string,
+): void {
+  if (!existsSync(srcMilestoneDir)) return;
+
+  // Walk slices/<SID>/ looking for *-ASSESSMENT.md files
+  const slicesDir = join(srcMilestoneDir, "slices");
+  if (!existsSync(slicesDir)) return;
+
+  try {
+    for (const sliceEntry of readdirSync(slicesDir, { withFileTypes: true })) {
+      if (!sliceEntry.isDirectory()) continue;
+      const srcSliceDir = join(slicesDir, sliceEntry.name);
+      const dstSliceDir = join(dstMilestoneDir, "slices", sliceEntry.name);
+
+      try {
+        for (const fileEntry of readdirSync(srcSliceDir, { withFileTypes: true })) {
+          if (!fileEntry.isFile()) continue;
+          if (!fileEntry.name.endsWith("-ASSESSMENT.md")) continue;
+
+          const srcFile = join(srcSliceDir, fileEntry.name);
+          try {
+            const srcContent = readFileSync(srcFile, "utf-8");
+            if (!VERDICT_RE.test(srcContent)) continue; // no verdict in source — skip
+
+            // Source has a verdict — force-copy into worktree
+            mkdirSync(dstSliceDir, { recursive: true });
+            safeCopy(srcFile, join(dstSliceDir, fileEntry.name), { force: true });
+          } catch {
+            /* non-fatal per file */
+          }
+        }
+      } catch {
+        /* non-fatal per slice */
+      }
+    }
+  } catch {
+    /* non-fatal */
   }
 }
 
@@ -214,6 +278,19 @@ export function syncProjectRootToWorktree(
     { force: false },
   );
 
+  // Force-sync ASSESSMENT files that have a verdict from project root (#2821).
+  // The additive-only copy above preserves worktree-authoritative files, but
+  // ASSESSMENT files are special: after run-uat writes a verdict and post-unit
+  // syncs it to the project root, the worktree may retain a stale copy (e.g.
+  // verdict:fail while the project root has verdict:pass from a retry). On
+  // session resume the DB is rebuilt from disk, and if the stale ASSESSMENT
+  // persists, checkNeedsRunUat finds no passing verdict → re-dispatches
+  // run-uat indefinitely (stuck-loop ×9).
+  forceOverwriteAssessmentsWithVerdict(
+    join(prGsd, "milestones", milestoneId),
+    join(wtGsd, "milestones", milestoneId),
+  );
+
   // Forward-sync completed-units.json from project root to worktree.
   // Project root is authoritative for completion state after crash recovery;
   // without this, the worktree re-dispatches already-completed units (#1886).
@@ -223,12 +300,18 @@ export function syncProjectRootToWorktree(
     { force: true },
   );
 
-  // Delete worktree gsd.db so it rebuilds from the freshly synced files.
-  // Stale DB rows are the root cause of the infinite skip loop (#853).
+  // Delete worktree gsd.db ONLY if it is empty (0 bytes).
+  // An empty DB is stale/corrupt and should be rebuilt (#853).
+  // A non-empty DB was populated by gsd-migrate on respawn and must be
+  // preserved — deleting it truncates the file to 0 bytes when
+  // openDatabase re-creates it, causing "no such table" failures (#2815).
   try {
     const wtDb = join(wtGsd, "gsd.db");
     if (existsSync(wtDb)) {
-      unlinkSync(wtDb);
+      const size = statSync(wtDb).size;
+      if (size === 0) {
+        unlinkSync(wtDb);
+      }
     }
   } catch {
     /* non-fatal */
@@ -1004,6 +1087,7 @@ function copyPlanningArtifacts(srcBase: string, wtPath: string): void {
     "STATE.md",
     "KNOWLEDGE.md",
     "OVERRIDES.md",
+    "mcp.json",
   ]) {
     safeCopy(join(srcGsd, file), join(dstGsd, file), { force: true });
   }
@@ -1414,9 +1498,19 @@ export function mergeMilestoneToMain(
       encoding: "utf-8",
     }).trim();
     if (status) {
+      // Use --include-untracked to stash untracked files that would block
+      // the squash merge, but EXCLUDE .gsd/milestones/ (#2505).
+      // --include-untracked without exclusion sweeps queued milestone
+      // CONTEXT files into the stash. If stash pop later fails, those files
+      // are permanently trapped in the stash entry and lost on the next
+      // stash push or drop.
       execFileSync(
         "git",
-        ["stash", "push", "--include-untracked", "-m", `gsd: pre-merge stash for ${milestoneId}`],
+        [
+          "stash", "push", "--include-untracked",
+          "-m", `gsd: pre-merge stash for ${milestoneId}`,
+          "--", ":(exclude).gsd/milestones",
+        ],
         { cwd: originalBasePath_, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" },
       );
       stashed = true;
@@ -1426,6 +1520,65 @@ export function mergeMilestoneToMain(
     // report the dirty tree if it fails.
   }
 
+  // 7a. Shelter queued milestone directories before the squash merge (#2505).
+  // The milestone branch may contain copies of queued milestone dirs (via
+  // copyPlanningArtifacts), so `git merge --squash` rejects when those same
+  // files exist as untracked in the working tree. Temporarily move them to
+  // a backup location, then restore after the merge+commit.
+  const milestonesDir = join(gsdRoot(originalBasePath_), "milestones");
+  const shelterDir = join(gsdRoot(originalBasePath_), ".milestone-shelter");
+  const shelteredDirs: string[] = [];
+
+  // Helper: restore sheltered milestone directories (#2505).
+  // Called on both success and error paths to ensure queued CONTEXT files
+  // are never permanently lost.
+  const restoreShelter = (): void => {
+    if (shelteredDirs.length === 0) return;
+    for (const dirName of shelteredDirs) {
+      try {
+        mkdirSync(milestonesDir, { recursive: true });
+        cpSync(join(shelterDir, dirName), join(milestonesDir, dirName), { recursive: true, force: true });
+      } catch { /* best-effort */ }
+    }
+    try { rmSync(shelterDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+  };
+
+  try {
+    if (existsSync(milestonesDir)) {
+      const entries = readdirSync(milestonesDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        // Only shelter directories that do NOT belong to the milestone being merged
+        if (entry.name === milestoneId) continue;
+        const srcDir = join(milestonesDir, entry.name);
+        const dstDir = join(shelterDir, entry.name);
+        try {
+          mkdirSync(shelterDir, { recursive: true });
+          cpSync(srcDir, dstDir, { recursive: true, force: true });
+          rmSync(srcDir, { recursive: true, force: true });
+          shelteredDirs.push(entry.name);
+        } catch {
+          // Non-fatal — if shelter fails, the merge may still succeed
+        }
+      }
+    }
+  } catch {
+    // Non-fatal — proceed with merge; untracked files may block it
+  }
+
+  // 7b. Clean up stale merge state before attempting squash merge (#2912).
+  // A leftover MERGE_HEAD (from a previous failed merge, libgit2 native path,
+  // or interrupted operation) causes `git merge --squash` to refuse with
+  // "fatal: You have not concluded your merge (MERGE_HEAD exists)".
+  // Defensively remove merge artifacts before starting.
+  try {
+    const gitDir_ = resolveGitDir(originalBasePath_);
+    for (const f of ["SQUASH_MSG", "MERGE_MSG", "MERGE_HEAD"]) {
+      const p = join(gitDir_, f);
+      if (existsSync(p)) unlinkSync(p);
+    }
+  } catch { /* best-effort */ }
+
   // 8. Squash merge — auto-resolve .gsd/ state file conflicts (#530)
   const mergeResult = nativeMergeSquash(originalBasePath_, milestoneBranch);
 
@@ -1434,6 +1587,16 @@ export function mergeMilestoneToMain(
     // untracked .gsd/ files left by syncStateToProjectRoot).  Preserve the
     // milestone branch so commits are not lost.
     if (mergeResult.conflicts.includes("__dirty_working_tree__")) {
+      // Defensively clean merge state — the native path may leave MERGE_HEAD
+      // even when the merge is rejected (#2912).
+      try {
+        const gitDir_ = resolveGitDir(originalBasePath_);
+        for (const f of ["SQUASH_MSG", "MERGE_MSG", "MERGE_HEAD"]) {
+          const p = join(gitDir_, f);
+          if (existsSync(p)) unlinkSync(p);
+        }
+      } catch { /* best-effort */ }
+
       // Pop stash before throwing so local work is not lost.
       if (stashed) {
         try {
@@ -1444,6 +1607,7 @@ export function mergeMilestoneToMain(
           });
         } catch { /* stash pop conflict is non-fatal */ }
       }
+      restoreShelter();
       // Restore cwd so the caller is not stranded on the integration branch
       process.chdir(previousCwd);
       // Surface the actual dirty filenames from git stderr instead of
@@ -1490,6 +1654,18 @@ export function mergeMilestoneToMain(
 
       // If there are still real code conflicts, escalate
       if (codeConflicts.length > 0) {
+        // Abort merge state so MERGE_HEAD is not left on disk (#2912).
+        // libgit2's merge creates MERGE_HEAD even for squash merges; if left
+        // dangling, subsequent merges fail and doctor reports corrupt state.
+        try { nativeMergeAbort(originalBasePath_); } catch { /* best-effort */ }
+        try {
+          const gitDir_ = resolveGitDir(originalBasePath_);
+          for (const f of ["SQUASH_MSG", "MERGE_MSG", "MERGE_HEAD"]) {
+            const p = join(gitDir_, f);
+            if (existsSync(p)) unlinkSync(p);
+          }
+        } catch { /* best-effort */ }
+
         // Pop stash before throwing so local work is not lost (#2151).
         if (stashed) {
           try {
@@ -1500,6 +1676,7 @@ export function mergeMilestoneToMain(
             });
           } catch { /* stash pop conflict is non-fatal */ }
         }
+        restoreShelter();
         throw new MergeConflictError(
           codeConflicts,
           "squash",
@@ -1515,14 +1692,18 @@ export function mergeMilestoneToMain(
   const commitResult = nativeCommit(originalBasePath_, commitMessage);
   const nothingToCommit = commitResult === null;
 
-  // 9a. Clean up SQUASH_MSG left by git merge --squash (#1853).
+  // 9a. Clean up merge state files left by git merge --squash (#1853, #2912).
   // git only removes SQUASH_MSG when the commit reads it directly (plain
   // `git commit`).  nativeCommit uses `-F -` (stdin) or libgit2, neither
-  // of which trigger git's SQUASH_MSG cleanup.  If left on disk, doctor
-  // reports `corrupt_merge_state` on every subsequent run.
+  // of which trigger git's SQUASH_MSG cleanup.  MERGE_HEAD is created by
+  // libgit2's merge even in squash mode and is not removed by nativeCommit.
+  // If left on disk, doctor reports `corrupt_merge_state` on every subsequent run.
   try {
-    const squashMsgPath = join(resolveGitDir(originalBasePath_), "SQUASH_MSG");
-    if (existsSync(squashMsgPath)) unlinkSync(squashMsgPath);
+    const gitDir_ = resolveGitDir(originalBasePath_);
+    for (const f of ["SQUASH_MSG", "MERGE_MSG", "MERGE_HEAD"]) {
+      const p = join(gitDir_, f);
+      if (existsSync(p)) unlinkSync(p);
+    }
   } catch { /* best-effort */ }
 
   // 9a-ii. Restore stashed files now that the merge+commit is complete (#2151).
@@ -1580,6 +1761,9 @@ export function mergeMilestoneToMain(
       }
     }
   }
+
+  // 9a-iii. Restore sheltered queued milestone directories (#2505).
+  restoreShelter();
 
   // 9b. Safety check (#1792): if nothing was committed, verify the milestone
   // work is already on the integration branch before allowing teardown.

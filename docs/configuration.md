@@ -159,6 +159,8 @@ Recommended verification order:
 | `GSD_PROJECT_ID` | (auto-hash) | Override the automatic project identity hash. Per-project state goes to `$GSD_HOME/projects/<GSD_PROJECT_ID>/` instead of the computed hash. Useful for CI/CD or sharing state across clones of the same repo. (v2.39) |
 | `GSD_STATE_DIR` | `$GSD_HOME` | Per-project state root. Controls where `projects/<repo-hash>/` directories are created. Takes precedence over `GSD_HOME` for project state. |
 | `GSD_CODING_AGENT_DIR` | `$GSD_HOME/agent` | Agent directory containing managed resources, extensions, and auth. Takes precedence over `GSD_HOME` for agent paths. |
+| `GSD_ALLOWED_COMMAND_PREFIXES` | (built-in list) | Comma-separated command prefixes allowed for `!command` value resolution. Overrides `allowedCommandPrefixes` in settings.json. See [Custom Models — Command Allowlist](custom-models.md#command-allowlist). |
+| `GSD_FETCH_ALLOWED_URLS` | (none) | Comma-separated hostnames exempted from `fetch_page` URL blocking. Overrides `fetchAllowedUrls` in settings.json. See [URL Blocking](#url-blocking-fetch_page). |
 
 ## All Settings
 
@@ -345,6 +347,43 @@ verification_max_retries: 2       # max retry attempts (default: 2)
 | `verification_commands` | string[] | `[]` | Shell commands to run after task execution |
 | `verification_auto_fix` | boolean | `true` | Auto-retry when verification fails |
 | `verification_max_retries` | number | `2` | Maximum auto-fix retry attempts |
+
+### URL Blocking (`fetch_page`)
+
+The `fetch_page` tool blocks requests to private and internal network addresses to prevent server-side request forgery (SSRF). This protects against the agent being tricked into accessing internal services, cloud metadata endpoints, or local files.
+
+**Blocked by default:**
+
+| Category | Examples |
+|----------|----------|
+| Private IP ranges | `10.x.x.x`, `172.16-31.x.x`, `192.168.x.x`, `127.x.x.x` |
+| Link-local / cloud metadata | `169.254.x.x` (AWS/GCP instance metadata) |
+| Cloud metadata hostnames | `metadata.google.internal`, `instance-data` |
+| Localhost | `localhost` (any port) |
+| Non-HTTP protocols | `file://`, `ftp://` |
+| IPv6 private ranges | `::1`, `fc00:`, `fd`, `fe80:` |
+
+Public URLs (`https://example.com`, `http://8.8.8.8`) are not affected.
+
+**Allowing specific internal hosts:**
+
+If you need the agent to fetch from internal URLs (self-hosted docs, internal APIs behind a VPN), add their hostnames to `fetchAllowedUrls` in global settings (`~/.gsd/agent/settings.json`):
+
+```json
+{
+  "fetchAllowedUrls": ["internal-docs.company.com", "192.168.1.50"]
+}
+```
+
+Alternatively, set the `GSD_FETCH_ALLOWED_URLS` environment variable (comma-separated). The env var takes precedence over settings.json:
+
+```bash
+export GSD_FETCH_ALLOWED_URLS="internal-docs.company.com,192.168.1.50"
+```
+
+Allowed hostnames bypass the blocklist checks. The protocol restriction (HTTP/HTTPS only) still applies — `file://` and `ftp://` cannot be allowlisted.
+
+> **Note:** This setting is global-only. Project-level settings.json cannot override the URL allowlist — this prevents a cloned repo from directing `fetch_page` at internal infrastructure.
 
 ### `auto_report` (v2.26)
 

@@ -118,6 +118,44 @@ test("classifyError: rate limit takes precedence over auth keywords", () => {
   assert.ok(isTransient(result));
 });
 
+// ── STREAM_RE: V8 JSON parse error variants (#2916) ────────────────────────
+
+test("classifyError: 'Expected comma/brace after property value in JSON' is transient stream", () => {
+  const result = classifyError(
+    "Expected ',' or '}' after property value in JSON at position 2056 (line 1 column 2057)"
+  );
+  assert.equal(result.kind, "stream");
+  assert.ok(isTransient(result));
+  assert.ok("retryAfterMs" in result && result.retryAfterMs === 15_000);
+});
+
+test("classifyError: 'Expected colon after property name in JSON' is transient stream", () => {
+  const result = classifyError(
+    "Expected ':' after property name in JSON at position 500 (line 1 column 501)"
+  );
+  assert.equal(result.kind, "stream");
+  assert.ok(isTransient(result));
+  assert.ok("retryAfterMs" in result && result.retryAfterMs === 15_000);
+});
+
+test("classifyError: 'Expected property name or brace in JSON' is transient stream", () => {
+  const result = classifyError(
+    "Expected property name or '}' in JSON at position 42 (line 1 column 43)"
+  );
+  assert.equal(result.kind, "stream");
+  assert.ok(isTransient(result));
+  assert.ok("retryAfterMs" in result && result.retryAfterMs === 15_000);
+});
+
+test("classifyError: 'Unterminated string in JSON' is transient stream", () => {
+  const result = classifyError(
+    "Unterminated string in JSON at position 100 (line 1 column 101)"
+  );
+  assert.equal(result.kind, "stream");
+  assert.ok(isTransient(result));
+  assert.ok("retryAfterMs" in result && result.retryAfterMs === 15_000);
+});
+
 // ── isTransientNetworkError ──────────────────────────────────────────────────
 
 test("isTransientNetworkError detects ECONNRESET", () => {

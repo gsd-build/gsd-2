@@ -71,3 +71,15 @@ test('renders without model or provider', () => {
   const out = strip(capture({ version: '3.0.0' }))
   assert.ok(out.includes('v3.0.0'), 'version missing when no model provided')
 })
+
+test('renders remote channel in tools row', () => {
+  const out = strip(capture({ version: '1.0.0', remoteChannel: 'discord' }))
+  assert.ok(out.includes('Discord'), 'remote channel name missing')
+})
+
+test('omits remote channel when not provided', () => {
+  const out = strip(capture({ version: '1.0.0' }))
+  assert.ok(!out.includes('Discord'), 'should not show Discord when no remote')
+  assert.ok(!out.includes('Slack'), 'should not show Slack when no remote')
+  assert.ok(!out.includes('Telegram'), 'should not show Telegram when no remote')
+})

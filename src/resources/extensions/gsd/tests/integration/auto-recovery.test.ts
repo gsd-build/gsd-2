@@ -111,7 +111,51 @@ test("resolveExpectedArtifactPath returns correct path for all slice-level types
 
   const uatResult = resolveExpectedArtifactPath("run-uat", "M001/S01", base);
   assert.ok(uatResult);
-  assert.ok(uatResult!.includes("UAT"));
+  assert.ok(uatResult!.includes("ASSESSMENT"));
+});
+
+// ─── run-uat artifact path contract (#2873) ──────────────────────────────
+
+test("resolveExpectedArtifactPath for run-uat returns ASSESSMENT path, not UAT (#2873)", (t) => {
+  // The run-uat prompt instructs the agent to call gsd_summary_save with
+  // artifact_type: "ASSESSMENT", which writes S##-ASSESSMENT.md. The artifact
+  // verification path must match — otherwise verification fails and auto-mode
+  // retries the unit in an infinite loop.
+  const base = makeTmpBase();
+  t.after(() => cleanup(base));
+
+  const result = resolveExpectedArtifactPath("run-uat", "M001/S01", base);
+  assert.ok(result, "run-uat should resolve to a non-null artifact path");
+  assert.ok(
+    result!.endsWith("S01-ASSESSMENT.md"),
+    `run-uat artifact path should end with S01-ASSESSMENT.md, got: ${result}`,
+  );
+});
+
+test("diagnoseExpectedArtifact for run-uat references ASSESSMENT (#2873)", (t) => {
+  const base = makeTmpBase();
+  t.after(() => cleanup(base));
+
+  const diag = diagnoseExpectedArtifact("run-uat", "M001/S01", base);
+  assert.ok(diag, "run-uat should have a diagnostic message");
+  assert.ok(
+    diag!.includes("ASSESSMENT"),
+    `run-uat diagnostic should reference ASSESSMENT, got: ${diag}`,
+  );
+});
+
+test("verifyExpectedArtifact passes for run-uat when ASSESSMENT file exists (#2873)", (t) => {
+  // Regression test: run-uat writes S##-ASSESSMENT.md via gsd_summary_save,
+  // but verification looked for S##-UAT.md, causing false stuck retries.
+  const base = makeTmpBase();
+  t.after(() => cleanup(base));
+
+  // Write the ASSESSMENT file (what gsd_summary_save actually produces)
+  const assessPath = join(base, ".gsd", "milestones", "M001", "slices", "S01", "S01-ASSESSMENT.md");
+  writeFileSync(assessPath, "---\nverdict: PASS\n---\n# UAT Assessment\n");
+
+  const verified = verifyExpectedArtifact("run-uat", "M001/S01", base);
+  assert.ok(verified, "verifyExpectedArtifact should pass when ASSESSMENT file exists");
 });
 
 // ─── diagnoseExpectedArtifact ─────────────────────────────────────────────
@@ -695,6 +739,72 @@ test("verifyExpectedArtifact complete-milestone fails with only .gsd/ files (#17
 
   const result = verifyExpectedArtifact("complete-milestone", "M001", base);
   assert.equal(result, false, "complete-milestone should fail verification when only .gsd/ files present");
+});
+
+// ─── reconcileMergeState: silent nativeCommit failure (#2542) ─────────────
+
+import { reconcileMergeState } from "../../auto-recovery.ts";
+import { chmodSync } from "node:fs";
+
+function makeMockCtx(): { ctx: any; notifications: Array<{ msg: string; level: string }> } {
+  const notifications: Array<{ msg: string; level: string }> = [];
+  const ctx = {
+    ui: {
+      notify(msg: string, level: string) {
+        notifications.push({ msg, level });
+      },
+    },
+  };
+  return { ctx, notifications };
+}
+
+test("reconcileMergeState returns false and notifies error when nativeCommit fails (#2542)", (t) => {
+  const base = makeGitBase();
+  t.after(() => cleanup(base));
+
+  // Create a second branch with a commit, then start a merge on main
+  execFileSync("git", ["checkout", "-b", "feature"], { cwd: base, stdio: "ignore" });
+  writeFileSync(join(base, "feature.txt"), "feature content");
+  execFileSync("git", ["add", "."], { cwd: base, stdio: "ignore" });
+  execFileSync("git", ["commit", "-m", "add feature"], { cwd: base, stdio: "ignore" });
+  execFileSync("git", ["checkout", "main"], { cwd: base, stdio: "ignore" });
+
+  // Start merge (no conflicts — fast path with MERGE_HEAD)
+  execFileSync("git", ["merge", "--no-ff", "--no-commit", "feature"], { cwd: base, stdio: "ignore" });
+
+  // Verify MERGE_HEAD exists
+  assert.ok(existsSync(join(base, ".git", "MERGE_HEAD")), "MERGE_HEAD should exist");
+
+  // Make .git/objects read-only so git cannot write the commit object,
+  // causing nativeCommit to throw a non-"nothing to commit" error.
+  const objectsDir = join(base, ".git", "objects");
+  chmodSync(objectsDir, 0o444);
+  t.after(() => { try { chmodSync(objectsDir, 0o755); } catch { /* cleanup */ } });
+
+  const { ctx, notifications } = makeMockCtx();
+  const result = reconcileMergeState(base, ctx);
+
+  // The function should return false to signal reconciliation failure
+  // (Currently it silently swallows the error and returns true — this test should FAIL before the fix)
+  assert.equal(result, false, "reconcileMergeState should return false when nativeCommit fails");
+  const errorNotifications = notifications.filter(n => n.level === "error");
+  assert.ok(errorNotifications.length > 0, "should notify an error when nativeCommit fails");
+  assert.ok(
+    errorNotifications[0].msg.includes("Failed to finalize"),
+    "error notification should describe the commit failure",
+  );
+});
+
+test("reconcileMergeState returns true when no merge state present", (t) => {
+  // When there's no MERGE_HEAD or SQUASH_MSG, reconcileMergeState returns false (no dirty state)
+  const base = makeGitBase();
+  t.after(() => cleanup(base));
+
+  const { ctx, notifications } = makeMockCtx();
+  const result = reconcileMergeState(base, ctx);
+
+  assert.equal(result, false, "should return false when no merge state exists");
+  assert.equal(notifications.length, 0, "should not notify when no merge state present");
 });
 
 test("verifyExpectedArtifact complete-milestone passes with impl files (#1703)", (t) => {

@@ -68,6 +68,28 @@ export async function handleAgentEnd(
 
   const lastMsg = event.messages[event.messages.length - 1];
   if (lastMsg && "stopReason" in lastMsg && lastMsg.stopReason === "aborted") {
+    // Empty content with aborted stopReason is a non-fatal agent stop (the LLM
+    // chose to end without producing output). Only pause on genuine fatal aborts
+    // that carry error context — e.g. errorMessage field or non-empty content
+    // indicating a mid-stream failure. (#2695)
+    const content = "content" in lastMsg ? lastMsg.content : undefined;
+    const hasEmptyContent = Array.isArray(content) && content.length === 0;
+    const hasErrorMessage = "errorMessage" in lastMsg && !!lastMsg.errorMessage;
+
+    if (hasEmptyContent && !hasErrorMessage) {
+      // Non-fatal: treat as a normal agent end so the loop can continue
+      // instead of entering a stuck re-dispatch cycle.
+      try {
+        resetRetryState(retryState);
+        resolveAgentEnd(event);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        ctx.ui.notify(`Auto-mode error after empty-content abort: ${message}. Stopping auto-mode.`, "error");
+        try { await pauseAuto(ctx, pi); } catch { /* best-effort */ }
+      }
+      return;
+    }
+
     await pauseAuto(ctx, pi);
     return;
   }
@@ -78,6 +100,15 @@ export async function handleAgentEnd(
 
     // ── 1. Classify ──────────────────────────────────────────────────────
     const cls = classifyError(errorMsg, explicitRetryAfterMs);
+
+    // Cap rate-limit backoff for CLI-style providers (openai-codex, google-gemini-cli)
+    // which use per-user quotas with shorter windows (#2922).
+    if (cls.kind === "rate-limit") {
+      const currentProvider = ctx.model?.provider;
+      if (currentProvider === "openai-codex" || currentProvider === "google-gemini-cli") {
+        cls.retryAfterMs = Math.min(cls.retryAfterMs, 30_000);
+      }
+    }
 
     // ── 2. Decide & Act ──────────────────────────────────────────────────
 

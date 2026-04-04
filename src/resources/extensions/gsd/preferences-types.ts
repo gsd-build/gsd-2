@@ -100,6 +100,7 @@ export const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "service_tier",
   "forensics_dedup",
   "show_token_cost",
+  "stale_commit_threshold_minutes",
   "experimental",
 ]);
 
@@ -107,7 +108,8 @@ export const KNOWN_PREFERENCE_KEYS = new Set<string>([
 export const KNOWN_UNIT_TYPES = [
   "research-milestone", "plan-milestone", "research-slice", "plan-slice",
   "execute-task", "reactive-execute", "gate-evaluate", "complete-slice", "replan-slice", "reassess-roadmap",
-  "run-uat", "complete-milestone",
+  "run-uat", "complete-milestone", "validate-milestone", "rewrite-docs",
+  "discuss-milestone", "discuss-slice", "worktree-merge",
 ] as const;
 export type UnitType = (typeof KNOWN_UNIT_TYPES)[number];
 
@@ -260,6 +262,13 @@ export interface GSDPreferences {
   forensics_dedup?: boolean;
   /** Opt-in: show per-prompt and cumulative session token cost in the footer. Default: false. */
   show_token_cost?: boolean;
+  /**
+   * Minutes without a commit before flagging uncommitted changes as stale.
+   * When the threshold is exceeded and the working tree is dirty, doctor will
+   * auto-commit a safety snapshot tagged with `[gsd safety]`. Default: 30.
+   * Set to 0 to disable.
+   */
+  stale_commit_threshold_minutes?: number;
   /**
    * Opt-in experimental features. All features here are disabled by default.
    * See the preferences reference for details on each feature.

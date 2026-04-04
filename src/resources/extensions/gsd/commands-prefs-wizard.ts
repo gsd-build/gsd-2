@@ -184,11 +184,23 @@ export function buildCategorySummaries(prefs: Record<string, unknown>): Record<s
 
   // Git
   const git = prefs.git as Record<string, unknown> | undefined;
+  const staleThreshold = prefs.stale_commit_threshold_minutes;
+  const absorbSnapshots = git?.absorb_snapshot_commits;
   let gitSummary = "(defaults)";
-  if (git && Object.keys(git).length > 0) {
-    const branch = git.main_branch ?? "main";
-    const push = git.auto_push ? "on" : "off";
-    gitSummary = `main: ${branch}, push: ${push}`;
+  {
+    const parts: string[] = [];
+    if (git && Object.keys(git).length > 0) {
+      const branch = git.main_branch ?? "main";
+      const push = git.auto_push ? "on" : "off";
+      parts.push(`main: ${branch}, push: ${push}`);
+    }
+    if (staleThreshold !== undefined) {
+      parts.push(`stale: ${staleThreshold === 0 ? "off" : `${staleThreshold}m`}`);
+    }
+    if (absorbSnapshots !== undefined) {
+      parts.push(`absorb: ${absorbSnapshots ? "on" : "off"}`);
+    }
+    if (parts.length > 0) gitSummary = parts.join(", ");
   }
 
   // Skills
@@ -469,8 +481,38 @@ async function configureGit(ctx: ExtensionCommandContext, prefs: Record<string, 
     git.isolation = isolationChoice;
   }
 
+  // absorb_snapshot_commits (git sub-key)
+  const currentAbsorb = git.absorb_snapshot_commits;
+  const absorbStr = currentAbsorb !== undefined ? String(currentAbsorb) : "";
+  const absorbChoice = await ctx.ui.select(
+    `Absorb snapshot commits into real commits${absorbStr ? ` (current: ${absorbStr})` : " (default: true)"}:`,
+    ["true", "false", "(keep current)"],
+  );
+  if (absorbChoice && absorbChoice !== "(keep current)") {
+    git.absorb_snapshot_commits = absorbChoice === "true";
+  }
+
   if (Object.keys(git).length > 0) {
     prefs.git = git;
+  }
+
+  // stale_commit_threshold_minutes (top-level pref, shown in Git section)
+  const currentThreshold = prefs.stale_commit_threshold_minutes;
+  const thresholdStr = currentThreshold !== undefined ? String(currentThreshold) : "";
+  const thresholdInput = await ctx.ui.input(
+    `Stale commit threshold (minutes, 0 to disable)${thresholdStr ? ` (current: ${thresholdStr})` : " (default: 30)"}:`,
+    thresholdStr || "30",
+  );
+  if (thresholdInput !== null && thresholdInput !== undefined) {
+    const val = thresholdInput.trim();
+    const parsed = tryParseInteger(val);
+    if (val && parsed !== null && parsed >= 0) {
+      prefs.stale_commit_threshold_minutes = parsed;
+    } else if (val && parsed === null) {
+      ctx.ui.notify(`Invalid value "${val}" — must be a whole number. Keeping previous value.`, "warning");
+    } else if (!val && currentThreshold !== undefined) {
+      delete prefs.stale_commit_threshold_minutes;
+    }
   }
 }
 

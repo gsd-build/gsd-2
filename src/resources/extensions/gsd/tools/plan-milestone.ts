@@ -4,6 +4,7 @@ import { isNonEmptyString, validateStringArray } from "../validation.js";
 import {
   transaction,
   getMilestone,
+  getMilestoneSlices,
   insertMilestone,
   insertSlice,
   upsertMilestonePlanning,
@@ -189,6 +190,17 @@ export async function handlePlanMilestone(
         return;
       }
 
+      // Guard: refuse to re-plan a milestone that has completed slices (#2960).
+      // INSERT OR IGNORE on slices won't overwrite existing rows, but a full
+      // re-plan after worktree recreation or DB resync can create new slice rows
+      // that shadow completed work. Block early when any slice is already done.
+      const existingSlices = getMilestoneSlices(params.milestoneId);
+      const completedSlices = existingSlices.filter(s => isClosedStatus(s.status));
+      if (completedSlices.length > 0) {
+        guardError = `cannot re-plan milestone ${params.milestoneId}: ${completedSlices.length} slice(s) already completed (${completedSlices.map(s => s.id).join(", ")}). Use gsd_reassess_roadmap to modify the roadmap.`;
+        return;
+      }
+
       // Validate depends_on: all dependencies must exist and be complete
       if (params.dependsOn && params.dependsOn.length > 0) {
         for (const depId of params.dependsOn) {
@@ -223,7 +235,7 @@ export async function handlePlanMilestone(
         definitionOfDone: params.definitionOfDone,
         requirementCoverage: params.requirementCoverage,
         boundaryMapMarkdown: params.boundaryMapMarkdown,
-      });
+      }, params.title);
 
       for (const slice of params.slices) {
         insertSlice({

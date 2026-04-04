@@ -659,6 +659,7 @@ export type BridgeLiveStateDomain = "auto" | "workspace" | "recovery" | "resumab
 export type BridgeLiveStateInvalidationSource = "bridge_event" | "rpc_command" | "session_manage";
 export type BridgeLiveStateInvalidationReason =
   | "agent_end"
+  | "turn_end"
   | "auto_retry_start"
   | "auto_retry_end"
   | "auto_compaction_start"
@@ -771,6 +772,7 @@ async function loadSessionBrowserSessionsViaChildProcess(config: BridgeRuntimeCo
           GSD_SESSION_BROWSER_DIR: config.projectSessionsDir,
         },
         maxBuffer: 1024 * 1024,
+        windowsHide: true,
       },
       (error, stdout, stderr) => {
         if (error) {
@@ -832,6 +834,7 @@ async function appendSessionInfoViaChildProcess(
           GSD_TARGET_SESSION_NAME: name,
         },
         maxBuffer: 1024 * 1024,
+        windowsHide: true,
       },
       (error, _stdout, stderr) => {
         if (error) {
@@ -1030,6 +1033,7 @@ async function loadWorkspaceIndexViaChildProcess(basePath: string, packageRoot: 
           GSD_WORKSPACE_BASE: basePath,
         },
         maxBuffer: 1024 * 1024,
+        windowsHide: true,
       },
       (error, stdout, stderr) => {
         if (error) {
@@ -1249,6 +1253,13 @@ function createLiveStateInvalidationFromBridgeEvent(
         reason: "agent_end",
         source: "bridge_event",
         domains: ["auto", "workspace", "recovery"],
+        workspaceIndexCacheInvalidated: true,
+      };
+    case "turn_end":
+      return {
+        reason: "turn_end",
+        source: "bridge_event",
+        domains: ["workspace"],
         workspaceIndexCacheInvalidated: true,
       };
     case "auto_retry_start":
@@ -1616,6 +1627,7 @@ export class BridgeService {
       cwd: cliEntry.cwd,
       env: childEnv,
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     }) as SpawnedRpcChild;
 
     this.process = child;
@@ -1771,6 +1783,7 @@ export class BridgeService {
       const eventType = (event as { type?: string }).type;
       if (
         eventType === "agent_end" ||
+        eventType === "turn_end" ||
         eventType === "auto_retry_start" ||
         eventType === "auto_retry_end" ||
         eventType === "auto_compaction_start" ||

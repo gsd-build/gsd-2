@@ -181,7 +181,8 @@ function resolveKey(providerId: string): KeyLookup {
  */
 const PROVIDER_ROUTES: Record<string, string[]> = {
   anthropic: ["github-copilot"],
-  openai: ["github-copilot"],
+  openai: ["github-copilot", "openai-codex"],
+  google: ["google-gemini-cli"],
 };
 
 function checkLlmProviders(): ProviderCheckResult[] {

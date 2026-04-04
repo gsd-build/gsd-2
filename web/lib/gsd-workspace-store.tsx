@@ -125,37 +125,7 @@ export interface BridgeRuntimeSnapshot {
   lastError: BridgeLastError | null
 }
 
-export interface WorkspaceTaskTarget {
-  id: string
-  title: string
-  done: boolean
-  planPath?: string
-  summaryPath?: string
-}
-
-export type RiskLevel = "low" | "medium" | "high"
-
-export interface WorkspaceSliceTarget {
-  id: string
-  title: string
-  done: boolean
-  planPath?: string
-  summaryPath?: string
-  uatPath?: string
-  tasksDir?: string
-  branch?: string
-  risk?: RiskLevel
-  depends?: string[]
-  demo?: string
-  tasks: WorkspaceTaskTarget[]
-}
-
-export interface WorkspaceMilestoneTarget {
-  id: string
-  title: string
-  roadmapPath?: string
-  slices: WorkspaceSliceTarget[]
-}
+export type { WorkspaceTaskTarget, RiskLevel, WorkspaceSliceTarget, WorkspaceMilestoneTarget } from "./workspace-types.js"
 
 export interface WorkspaceScopeTarget {
   scope: string
@@ -349,6 +319,7 @@ export type LiveStateInvalidationDomain = "auto" | "workspace" | "recovery" | "r
 export type LiveStateInvalidationSource = "bridge_event" | "rpc_command" | "session_manage"
 export type LiveStateInvalidationReason =
   | "agent_end"
+  | "turn_end"
   | "auto_retry_start"
   | "auto_retry_end"
   | "auto_compaction_start"
@@ -5081,10 +5052,16 @@ export class GSDWorkspaceStore {
       const nextThinking = [...this.state.liveThinkingTranscript, ""]
       const nextSegments = [...this.state.completedTurnSegments, finalSegments]
       const overflow = nextTranscript.length > MAX_TRANSCRIPT_BLOCKS ? nextTranscript.length - MAX_TRANSCRIPT_BLOCKS : 0
+      // When overflow trims the front of parallel arrays, also trim
+      // chatUserMessages to keep index-based interleaving aligned (#2707).
+      const trimmedUserMsgs = overflow > 0
+        ? this.state.chatUserMessages.slice(overflow)
+        : undefined
       this.patchState({
         liveTranscript: overflow > 0 ? nextTranscript.slice(overflow) : nextTranscript,
         liveThinkingTranscript: overflow > 0 ? nextThinking.slice(overflow) : nextThinking,
         completedTurnSegments: overflow > 0 ? nextSegments.slice(overflow) : nextSegments,
+        ...(trimmedUserMsgs !== undefined ? { chatUserMessages: trimmedUserMsgs } : {}),
         streamingAssistantText: "",
         streamingThinkingText: "",
         currentTurnSegments: [],

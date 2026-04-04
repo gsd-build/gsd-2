@@ -1455,4 +1455,72 @@ describe('git-service', async () => {
     try { rmSync(repo, { recursive: true, force: true }); } catch {}
     try { rmSync(externalGsd, { recursive: true, force: true }); } catch {}
   });
+
+  // ─── autoCommit: absorbs preceding gsd snapshot commits ─────────────────
+
+  test('autoCommit: absorbs preceding gsd snapshot commits', () => {
+    const repo = initTempRepo();
+
+    // Simulate 2 gsd snapshot commits
+    createFile(repo, "file1.ts", "v1");
+    run("git add -A", repo);
+    run('git commit -m "gsd snapshot: uncommitted changes after 35m inactivity"', repo);
+
+    createFile(repo, "file2.ts", "v2");
+    run("git add -A", repo);
+    run('git commit -m "gsd snapshot: pre-dispatch, uncommitted changes after 40m inactivity"', repo);
+
+    // Verify we have 3 commits (init + 2 snapshots)
+    const countBefore = run("git rev-list --count HEAD", repo);
+    assert.deepStrictEqual(countBefore, "3", "precondition: 3 commits before autoCommit");
+
+    // Now make a real change and autoCommit
+    createFile(repo, "feature.ts", "real work");
+
+    const svc = new GitServiceImpl(repo);
+    const msg = svc.autoCommit("execute-task", "S01/T01");
+    assert.ok(msg !== null, "autoCommit succeeds");
+
+    // Should be 2 commits: init + squashed real commit (snapshots absorbed)
+    const countAfter = run("git rev-list --count HEAD", repo);
+    assert.deepStrictEqual(countAfter, "2", "snapshot commits absorbed into real commit");
+
+    // All files should be present
+    const files = run("git show --name-only HEAD", repo);
+    assert.ok(files.includes("file1.ts"), "file1.ts from snapshot 1 preserved");
+    assert.ok(files.includes("file2.ts"), "file2.ts from snapshot 2 preserved");
+    assert.ok(files.includes("feature.ts"), "feature.ts from real commit preserved");
+
+    // No gsd snapshot commits in log
+    const log = run("git log --oneline", repo);
+    assert.ok(!log.includes("gsd snapshot"), "no gsd snapshot commits remain in history");
+
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  // ─── autoCommit: does not absorb non-snapshot commits ───────────────────
+
+  test('autoCommit: does not absorb non-snapshot commits', () => {
+    const repo = initTempRepo();
+
+    // Create a normal (non-snapshot) commit
+    createFile(repo, "earlier.ts", "earlier work");
+    run("git add -A", repo);
+    run('git commit -m "feat: earlier work"', repo);
+
+    const countBefore = run("git rev-list --count HEAD", repo);
+    assert.deepStrictEqual(countBefore, "2", "precondition: 2 commits before autoCommit");
+
+    // Make a real change and autoCommit
+    createFile(repo, "feature.ts", "new work");
+
+    const svc = new GitServiceImpl(repo);
+    svc.autoCommit("execute-task", "S01/T02");
+
+    // Should be 3 commits — earlier commit not absorbed
+    const countAfter = run("git rev-list --count HEAD", repo);
+    assert.deepStrictEqual(countAfter, "3", "non-snapshot commits NOT absorbed");
+
+    rmSync(repo, { recursive: true, force: true });
+  });
 });

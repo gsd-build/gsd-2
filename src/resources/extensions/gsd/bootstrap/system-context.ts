@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -6,6 +6,7 @@ import type { ExtensionContext } from "@gsd/pi-coding-agent";
 
 import { debugTime } from "../debug-logger.js";
 import { loadPrompt } from "../prompt-loader.js";
+import { readForensicsMarker } from "../forensics.js";
 import { resolveAllSkillReferences, renderPreferencesForSystemPrompt, loadEffectiveGSDPreferences } from "../preferences.js";
 import { resolveGsdRootFile, resolveSliceFile, resolveSlicePath, resolveTaskFile, resolveTaskFiles, resolveTasksDir, relSliceFile, relSlicePath, relTaskFile } from "../paths.js";
 import { hasSkillSnapshot, detectNewSkills, formatSkillsXml } from "../skill-discovery.js";
@@ -94,30 +95,54 @@ export async function buildBeforeAgentStartResult(
     }
   }
 
+  let codebaseBlock = "";
+  const codebasePath = resolveGsdRootFile(process.cwd(), "CODEBASE");
+  if (existsSync(codebasePath)) {
+    try {
+      const rawContent = readFileSync(codebasePath, "utf-8").trim();
+      if (rawContent) {
+        // Cap injection size to ~2 000 tokens to avoid bloating every request.
+        // Full map is always available at .gsd/CODEBASE.md.
+        const MAX_CODEBASE_CHARS = 8_000;
+        const generatedMatch = rawContent.match(/Generated: (\S+)/);
+        const generatedAt = generatedMatch?.[1] ?? "unknown";
+        const content = rawContent.length > MAX_CODEBASE_CHARS
+          ? rawContent.slice(0, MAX_CODEBASE_CHARS) + "\n\n*(truncated — see .gsd/CODEBASE.md for full map)*"
+          : rawContent;
+        codebaseBlock = `\n\n[PROJECT CODEBASE — File structure and descriptions (generated ${generatedAt}, may be stale — run /gsd codebase update to refresh)]\n\n${content}`;
+      }
+    } catch {
+      // skip
+    }
+  }
+
   warnDeprecatedAgentInstructions();
 
   const injection = await buildGuidedExecuteContextInjection(event.prompt, process.cwd());
+
+  // Re-inject forensics context on follow-up turns (#2941)
+  const forensicsInjection = !injection ? buildForensicsContextInjection(process.cwd()) : null;
+
   const worktreeBlock = buildWorktreeContextBlock();
-  const fullSystem = `${event.systemPrompt}\n\n[SYSTEM CONTEXT — GSD]\n\n${systemContent}${preferenceBlock}${knowledgeBlock}${memoryBlock}${newSkillsBlock}${worktreeBlock}`;
+  const fullSystem = `${event.systemPrompt}\n\n[SYSTEM CONTEXT — GSD]\n\n${systemContent}${preferenceBlock}${knowledgeBlock}${codebaseBlock}${memoryBlock}${newSkillsBlock}${worktreeBlock}`;
 
   stopContextTimer({
     systemPromptSize: fullSystem.length,
-    injectionSize: injection?.length ?? 0,
+    injectionSize: injection?.length ?? forensicsInjection?.length ?? 0,
     hasPreferences: preferenceBlock.length > 0,
     hasNewSkills: newSkillsBlock.length > 0,
   });
 
+  // Determine which context message to inject (guided execute takes priority)
+  const contextMessage = injection
+    ? { customType: "gsd-guided-context", content: injection, display: false as const }
+    : forensicsInjection
+      ? { customType: "gsd-forensics", content: forensicsInjection, display: false as const }
+      : null;
+
   return {
     systemPrompt: fullSystem,
-    ...(injection
-      ? {
-        message: {
-          customType: "gsd-guided-context",
-          content: injection,
-          display: false as const,
-        },
-      }
-      : {}),
+    ...(contextMessage ? { message: contextMessage } : {}),
   };
 }
 
@@ -373,5 +398,40 @@ function escapeRegExp(value: string): string {
 
 function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+// ─── Forensics Context Re-injection (#2941) ──────────────────────────────────
+
+/**
+ * Check for an active forensics session and return the prompt content
+ * so it can be re-injected on follow-up turns.
+ */
+function buildForensicsContextInjection(basePath: string): string | null {
+  const marker = readForensicsMarker(basePath);
+  if (!marker) return null;
+
+  // Expire markers older than 2 hours to avoid stale context
+  const age = Date.now() - new Date(marker.createdAt).getTime();
+  if (age > 2 * 60 * 60 * 1000) {
+    clearForensicsMarker(basePath);
+    return null;
+  }
+
+  return marker.promptContent;
+}
+
+/**
+ * Remove the active forensics marker file, e.g. when the investigation
+ * is complete or the session expires.
+ */
+export function clearForensicsMarker(basePath: string): void {
+  const markerPath = join(basePath, ".gsd", "runtime", "active-forensics.json");
+  if (existsSync(markerPath)) {
+    try {
+      unlinkSync(markerPath);
+    } catch {
+      // non-fatal
+    }
+  }
 }
 

@@ -350,7 +350,13 @@ export class WorktreeResolver {
       data: { milestoneId, mode },
     });
 
-    if (mode === "none") {
+    // #2625: If we are physically inside an auto-worktree, we MUST merge
+    // regardless of the current isolation config. This prevents data loss when
+    // the default isolation mode changes between versions (e.g., "worktree" ->
+    // "none"): the worktree branch still holds real commits that need merging.
+    const inWorktree = this.deps.isInAutoWorktree(this.s.basePath) && this.s.originalBasePath;
+
+    if (mode === "none" && !inWorktree) {
       debugLog("WorktreeResolver", {
         action: "mergeAndExit",
         milestoneId,
@@ -361,8 +367,7 @@ export class WorktreeResolver {
     }
 
     if (
-      mode === "worktree" ||
-      (this.deps.isInAutoWorktree(this.s.basePath) && this.s.originalBasePath)
+      mode === "worktree" || inWorktree
     ) {
       this._mergeWorktreeMode(milestoneId, ctx);
     } else if (mode === "branch") {
@@ -432,6 +437,20 @@ export class WorktreeResolver {
           milestoneId,
           roadmapContent,
         );
+
+        // #2945 Bug 3: mergeMilestoneToMain performs best-effort worktree
+        // cleanup internally (step 12), but it can silently fail on Windows
+        // or when the worktree directory is locked. Perform a secondary
+        // teardown here to ensure the worktree is properly cleaned up.
+        // This is idempotent — if the worktree was already removed,
+        // teardownAutoWorktree handles the no-op case gracefully.
+        try {
+          this.deps.teardownAutoWorktree(originalBase, milestoneId);
+        } catch {
+          // Best-effort — the primary cleanup in mergeMilestoneToMain may
+          // have already removed the worktree.
+        }
+
         if (mergeResult.codeFilesChanged) {
           ctx.notify(
             `Milestone ${milestoneId} merged to main.${mergeResult.pushed ? " Pushed to remote." : ""}`,

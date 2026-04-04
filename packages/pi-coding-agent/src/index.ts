@@ -68,6 +68,7 @@ export type {
 	Extension,
 	ExtensionActions,
 	ExtensionAPI,
+	ExtensionManifest,
 	ExtensionCommandContext,
 	ExtensionCommandContextActions,
 	ExtensionContext,
@@ -119,6 +120,8 @@ export type {
 	ToolCallEvent,
 	ToolDefinition,
 	ToolInfo,
+	SortResult,
+	SortWarning,
 	ToolRenderResultOptions,
 	ToolResultEvent,
 	TurnEndEvent,
@@ -137,6 +140,9 @@ export {
 	importExtensionModule,
 	isToolCallEventType,
 	isToolResultEventType,
+	readManifest,
+	readManifestFromEntryPath,
+	sortExtensionPaths,
 	wrapRegisteredTool,
 	wrapRegisteredTools,
 	wrapToolsWithExtensions,
@@ -219,6 +225,11 @@ export {
 	SettingsManager,
 	type TaskIsolationSettings,
 } from "./core/settings-manager.js";
+export {
+	SAFE_COMMAND_PREFIXES,
+	setAllowedCommandPrefixes,
+	getAllowedCommandPrefixes,
+} from "./core/resolve-config-value.js";
 // Skills
 export {
 	ECOSYSTEM_SKILLS_DIR,

@@ -202,6 +202,35 @@ test("reassess-roadmap prompt names gsd_reassess_roadmap as the tool to use", ()
   assert.match(prompt, /gsd_reassess_roadmap/);
 });
 
+// ─── Bug #2933: prompt parameter names must match camelCase TypeBox schema ───
+
+test("execute-task prompt uses camelCase parameter names matching TypeBox schema", () => {
+  const prompt = readPrompt("execute-task");
+  // The gsd_complete_task tool schema uses camelCase: milestoneId, sliceId, taskId
+  // Prompts must NOT tell the LLM to use snake_case (milestone_id, slice_id, task_id)
+  const toolCallLine = prompt.split("\n").find((l) => /gsd_complete_task/.test(l) || /gsd_task_complete/.test(l));
+  assert.ok(toolCallLine, "prompt must contain a gsd_complete_task or gsd_task_complete tool call line");
+  assert.doesNotMatch(toolCallLine!, /milestone_id/, "must use milestoneId, not milestone_id");
+  assert.doesNotMatch(toolCallLine!, /slice_id/, "must use sliceId, not slice_id");
+  assert.doesNotMatch(toolCallLine!, /task_id/, "must use taskId, not task_id");
+  // Positive: must mention the camelCase names
+  assert.match(toolCallLine!, /milestoneId/);
+  assert.match(toolCallLine!, /sliceId/);
+  assert.match(toolCallLine!, /taskId/);
+});
+
+test("complete-slice prompt uses camelCase parameter names matching TypeBox schema", () => {
+  const prompt = readPrompt("complete-slice");
+  // The gsd_complete_slice tool schema uses camelCase: milestoneId, sliceId
+  const toolCallLine = prompt.split("\n").find((l) => /gsd_complete_slice/.test(l) || /gsd_slice_complete/.test(l));
+  assert.ok(toolCallLine, "prompt must contain a gsd_complete_slice or gsd_slice_complete tool call line");
+  assert.doesNotMatch(toolCallLine!, /milestone_id/, "must use milestoneId, not milestone_id");
+  assert.doesNotMatch(toolCallLine!, /slice_id/, "must use sliceId, not slice_id");
+  // Positive: must mention the camelCase names
+  assert.match(toolCallLine!, /milestoneId/);
+  assert.match(toolCallLine!, /sliceId/);
+});
+
 test("reactive-execute prompt references tool calls instead of checkbox updates", () => {
   const prompt = readPrompt("reactive-execute");
   assert.doesNotMatch(prompt, /checkbox updates/);

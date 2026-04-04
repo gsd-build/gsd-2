@@ -1,18 +1,52 @@
 import { join } from "node:path";
 import { mkdirSync, existsSync, readFileSync, unlinkSync } from "node:fs";
+import { logWarning, logError } from "./workflow-logger.js";
 import { readEvents, findForkPoint, appendEvent, getSessionId } from "./workflow-events.js";
 import type { WorkflowEvent } from "./workflow-events.js";
 import {
   transaction,
   updateTaskStatus,
   updateSliceStatus,
+  getSliceTasks,
   insertVerificationEvidence,
   upsertDecision,
   openDatabase,
 } from "./gsd-db.js";
+import { isClosedStatus } from "./status-guards.js";
 import { writeManifest } from "./workflow-manifest.js";
 import { atomicWriteSync } from "./atomic-write.js";
 import { acquireSyncLock, releaseSyncLock } from "./sync-lock.js";
+
+// ─── Replay Helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Replay a complete_slice event with task validation.
+ *
+ * #2945 Bug 2: The original replay blindly called updateSliceStatus("done")
+ * without checking whether all tasks in the slice are actually complete.
+ * During API overload or partial execution, a complete_slice event could
+ * be logged even when tasks were skipped, causing the milestone completion
+ * guard to see the slice as "done" and allow premature milestone completion.
+ *
+ * This function validates that every task in the slice has a closed status
+ * before marking the slice as done. If any task is still pending, the slice
+ * status is left unchanged.
+ */
+export function replaySliceComplete(milestoneId: string, sliceId: string, ts: string): void {
+  const tasks = getSliceTasks(milestoneId, sliceId);
+  // If there are tasks and any are not closed, skip the status update
+  if (tasks.length > 0) {
+    const incompleteTasks = tasks.filter(t => !isClosedStatus(t.status));
+    if (incompleteTasks.length > 0) {
+      process.stderr.write(
+        `[gsd] reconcile: skipping complete_slice replay for ${sliceId} — ` +
+        `${incompleteTasks.length} task(s) still pending\n`,
+      );
+      return;
+    }
+  }
+  updateSliceStatus(milestoneId, sliceId, "done", ts);
+}
 
 // ─── Public Types ─────────────────────────────────────────────────────────────
 
@@ -82,7 +116,8 @@ function replayEvents(events: WorkflowEvent[]): void {
       case "complete_slice": {
         const milestoneId = p["milestoneId"] as string;
         const sliceId = p["sliceId"] as string;
-        updateSliceStatus(milestoneId, sliceId, "done", event.ts);
+        // #2945 Bug 2: validate tasks before marking slice done
+        replaySliceComplete(milestoneId, sliceId, event.ts);
         break;
       }
       case "plan_slice": {
@@ -274,9 +309,7 @@ export function reconcileWorktreeLogs(
   // Acquire advisory lock to prevent concurrent reconcile + append races
   const lock = acquireSyncLock(mainBasePath);
   if (!lock.acquired) {
-    process.stderr.write(
-      `[gsd] reconcile: could not acquire sync lock — another reconciliation may be in progress\n`,
-    );
+    logWarning("reconcile", "could not acquire sync lock — another reconciliation may be in progress");
     return { autoMerged: 0, conflicts: [] };
   }
 
@@ -315,9 +348,7 @@ function _reconcileWorktreeLogsInner(
   if (conflicts.length > 0) {
     // D-04: atomic all-or-nothing — block entire merge
     writeConflictsFile(mainBasePath, conflicts, worktreeBasePath);
-    process.stderr.write(
-      `[gsd] reconcile: ${conflicts.length} conflict(s) detected — see ${join(mainBasePath, ".gsd", "CONFLICTS.md")}\n`,
-    );
+    logError("reconcile", `${conflicts.length} conflict(s) detected`, { count: String(conflicts.length), path: join(mainBasePath, ".gsd", "CONFLICTS.md") });
     return { autoMerged: 0, conflicts };
   }
 
@@ -341,9 +372,7 @@ function _reconcileWorktreeLogsInner(
   try {
     writeManifest(mainBasePath);
   } catch (err) {
-    process.stderr.write(
-      `[gsd] reconcile: manifest write failed (non-fatal): ${(err as Error).message}\n`,
-    );
+    logWarning("reconcile", "manifest write failed (non-fatal)", { error: (err as Error).message });
   }
 
   return { autoMerged: merged.length, conflicts: [] };

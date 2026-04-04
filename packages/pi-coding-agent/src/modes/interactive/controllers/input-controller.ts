@@ -8,6 +8,7 @@ export function setupEditorSubmitHandler(host: InteractiveModeStateHost & {
 	showError: (message: string) => void;
 	updateEditorBorderColor: () => void;
 	isExtensionCommand: (text: string) => boolean;
+	isKnownSlashCommand: (text: string) => boolean;
 	queueCompactionMessage: (text: string, mode: "steer" | "followUp") => void;
 	updatePendingMessagesDisplay: () => void;
 	flushPendingBashComponents: () => void;
@@ -20,6 +21,12 @@ export function setupEditorSubmitHandler(host: InteractiveModeStateHost & {
 		if (text.startsWith("/")) {
 			const handled = await dispatchSlashCommand(text, host.getSlashCommandContext());
 			if (handled) {
+				host.editor.setText("");
+				return;
+			}
+			if (!host.isKnownSlashCommand(text)) {
+				const command = text.split(/\s/)[0];
+				host.showError(`Unknown command: ${command}. Use slash autocomplete to see available commands.`);
 				host.editor.setText("");
 				return;
 			}
@@ -46,7 +53,12 @@ export function setupEditorSubmitHandler(host: InteractiveModeStateHost & {
 			if (host.isExtensionCommand(text)) {
 				host.editor.addToHistory?.(text);
 				host.editor.setText("");
-				await host.session.prompt(text);
+				try {
+					await host.session.prompt(text);
+				} catch (error: unknown) {
+					const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+					host.showError(errorMessage);
+				}
 			} else {
 				host.queueCompactionMessage(text, "steer");
 			}
@@ -82,5 +94,13 @@ export function setupEditorSubmitHandler(host: InteractiveModeStateHost & {
 		}
 
 		host.editor.addToHistory?.(text);
+		// submitPromptsDirectly is false — still dispatch via session.prompt so user input
+		// is not silently discarded.
+		try {
+			await host.session.prompt(text);
+		} catch (error: unknown) {
+			const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+			host.showError(errorMessage);
+		}
 	};
 }

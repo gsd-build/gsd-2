@@ -237,6 +237,33 @@ describe("complete-milestone", () => {
     }
   });
 
+  test("step 11 specifies write tool for PROJECT.md update (#2946)", () => {
+    const prompt = loadPromptFromWorktree("complete-milestone", {
+      workingDirectory: "/tmp/test-project",
+      milestoneId: "M001",
+      milestoneTitle: "Tool Guidance Test",
+      roadmapPath: ".gsd/milestones/M001/M001-ROADMAP.md",
+      inlinedContext: "context",
+      milestoneSummaryPath: ".gsd/milestones/M001/M001-SUMMARY.md",
+      skillActivation: "",
+    });
+
+    // Step 11 must explicitly name the `write` tool so the LLM doesn't
+    // confuse it with `edit` (which requires path + oldText + newText).
+    // See: https://github.com/gsd-build/gsd-2/issues/2946
+    assert.ok(
+      /PROJECT\.md.*\bwrite\b/i.test(prompt) || /\bwrite\b.*PROJECT\.md/i.test(prompt),
+      "step 11 must name the `write` tool when updating PROJECT.md",
+    );
+
+    // The prompt must NOT leave tool choice ambiguous for PROJECT.md
+    // Verify it mentions the required parameter (`content` or `path`)
+    assert.ok(
+      prompt.includes("`.gsd/PROJECT.md`") || prompt.includes('".gsd/PROJECT.md"'),
+      "step 11 must reference the PROJECT.md path explicitly",
+    );
+  });
+
   test("deriveState completing-milestone integration", async () => {
     const { deriveState, isMilestoneComplete } = await import("../state.ts");
     const { invalidateAllCaches: invalidateAllCachesDynamic } = await import("../cache.ts");
