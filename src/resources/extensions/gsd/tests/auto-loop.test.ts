@@ -265,6 +265,31 @@ test("runUnit re-applies the selected unit model after newSession before dispatc
   assert.equal(pi.calls.length, 1);
 });
 
+test("runUnit clears currentUnitModel when setModel restore fails after newSession (#3418)", async () => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  const pi = makeMockPi();
+  // setModel returns false — restore failed, unit will run on session default
+  pi.setModel = async () => false;
+
+  const s = makeMockSession();
+  s.currentUnitModel = { provider: "anthropic", id: "claude-opus-4-6" };
+
+  const resultPromise = runUnit(ctx, pi, s, "task", "T01", "prompt");
+
+  await new Promise((r) => setTimeout(r, 10));
+  resolveAgentEnd(makeEvent());
+  await resultPromise;
+
+  // Widget must not show the override model when execution fell back to session default
+  assert.equal(
+    s.currentUnitModel,
+    null,
+    "currentUnitModel must be cleared when setModel restore fails so widget does not show wrong model (#3418)",
+  );
+});
+
 // ─── Structural assertions ───────────────────────────────────────────────────
 
 test("auto-loop.ts exports autoLoop, runUnit, resolveAgentEnd", async () => {
@@ -343,6 +368,26 @@ test("auto/phases.ts: selectAndApplyModel called exactly once and before updateP
   assert.ok(
     modelIdx < widgetIdx,
     "selectAndApplyModel must be called BEFORE updateProgressWidget (#2899/#2907)",
+  );
+});
+
+test("auto/phases.ts: updateProgressWidget runs after hook model override block (#3412)", () => {
+  const src = readFileSync(
+    resolve(import.meta.dirname, "..", "auto", "phases.ts"),
+    "utf-8",
+  );
+  const fnStart = src.indexOf("export async function runUnitPhase");
+  assert.ok(fnStart > 0, "runUnitPhase should exist in phases.ts");
+  const fnBody = src.slice(fnStart, fnStart + 10000);
+
+  const hookOverrideIdx = fnBody.indexOf("const hookModelOverride = sidecarItem?.model ?? iterData.hookModelOverride;");
+  const widgetIdx = fnBody.indexOf("updateProgressWidget(");
+
+  assert.ok(hookOverrideIdx > 0, "hook model override block should exist in runUnitPhase");
+  assert.ok(widgetIdx > 0, "updateProgressWidget should exist in runUnitPhase");
+  assert.ok(
+    hookOverrideIdx < widgetIdx,
+    "updateProgressWidget must run after hook model override so widget shows final unit model",
   );
 });
 
