@@ -39,7 +39,6 @@ import { debugLog } from "./debug-logger.js";
 import { findMilestoneIds, nextMilestoneId, reserveMilestoneId, getReservedMilestoneIds, clearReservedMilestoneIds } from "./milestone-ids.js";
 import { parkMilestone, discardMilestone } from "./milestone-actions.js";
 import { selectAndApplyModel, applyToolCompatibilityAdjustment } from "./auto-model-selection.js";
-import { resolveModelWithFallbacksForUnit } from "./preferences-models.js";
 import { setProviderCapabilityOverrides } from "@gsd/pi-ai";
 
 // ─── Re-exports (preserve public API for existing importers) ────────────────
@@ -291,7 +290,6 @@ async function dispatchWorkflow(
 
     // ADR-005: Apply capability overrides and tool filtering for guided-flow dispatch.
     // Previously this path set the model but never filtered incompatible tools.
-    const prefs = loadEffectiveGSDPreferences()?.preferences;
     if (prefs) {
       setProviderCapabilityOverrides(prefs.provider_capabilities);
     }
