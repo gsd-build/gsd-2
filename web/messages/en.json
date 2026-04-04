@@ -23,12 +23,14 @@
       "projects": "Projects",
       "git": "Git",
       "settings": "Settings",
-      "exit": "Exit"
+      "exit": "Exit",
+      "language": "Language"
     },
     "tooltip": {
       "connecting": "Connecting…",
       "collapseSidebar": "Collapse sidebar",
-      "expandMilestoneSidebar": "Expand milestone sidebar"
+      "expandMilestoneSidebar": "Expand milestone sidebar",
+      "language": "Switch language (currently: {language})"
     },
     "theme": {
       "light": "Light",
@@ -294,6 +296,12 @@
       "noPreferences": "No preferences file found",
       "noRouting": "No routing history yet",
       "noMetrics": "No execution metrics yet"
+    },
+    "language": {
+      "title": "Language",
+      "description": "Choose the display language for the interface",
+      "english": "English",
+      "german": "Deutsch"
     }
   },
   "chat": {

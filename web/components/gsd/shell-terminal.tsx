@@ -130,6 +130,7 @@ function TerminalInstance({
   projectCwd,
   onConnectionChange,
 }: TerminalInstanceProps) {
+  const t = useTranslations("terminal")
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<XTerminal | null>(null)
   const fitAddonRef = useRef<XFitAddon | null>(null)

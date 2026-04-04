@@ -454,6 +454,7 @@ export function KnowledgeCapturesPanel({ initialTab }: KnowledgeCapturesPanelPro
             resolveError={resolveState.lastError}
             onRefresh={() => void loadCapturesData()}
             onResolve={handleResolve}
+            t={t}
           />
         )}
       </div>

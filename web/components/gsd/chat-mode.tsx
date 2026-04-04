@@ -622,7 +622,7 @@ function TuiTextPrompt({
 }: {
   prompt: TuiPrompt
   onSubmit: (data: string) => void
-  tPrompts: ReturnType<typeof useTranslations<"chatMode.prompts">>
+  tPrompts: ReturnType<typeof useTranslations<"chatMode.prompt">>
 }) {
   const [value, setValue] = useState("")
   const [submitted, setSubmitted] = useState(false)
@@ -721,7 +721,7 @@ function TuiPasswordPrompt({
 }: {
   prompt: TuiPrompt
   onSubmit: (data: string) => void
-  tPrompts: ReturnType<typeof useTranslations<"chatMode.prompts">>
+  tPrompts: ReturnType<typeof useTranslations<"chatMode.prompt">>
 }) {
   const [value, setValue] = useState("")
   const [submitted, setSubmitted] = useState(false)
@@ -986,7 +986,7 @@ function ChatBubble({
   onSubmitPrompt?: (data: string) => void
   isThinking?: boolean
   tUI: ReturnType<typeof useTranslations<"chatMode.ui">>
-  tPrompts: ReturnType<typeof useTranslations<"chatMode.prompts">>
+  tPrompts: ReturnType<typeof useTranslations<"chatMode.prompt">>
 }) {
   if (message.role === "system") {
     return (
@@ -1107,7 +1107,7 @@ function ChatMessageList({
   onSubmitPrompt: (data: string) => void
   fontSize?: number
   tUI: ReturnType<typeof useTranslations<"chatMode.ui">>
-  tPrompts: ReturnType<typeof useTranslations<"chatMode.prompts">>
+  tPrompts: ReturnType<typeof useTranslations<"chatMode.prompt">>
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
@@ -1605,7 +1605,7 @@ function PlaceholderState({
  * these same requests in non-chat views. Whichever the user interacts with
  * first resolves the request — the store deduplicates.
  */
-function InlineUiRequest({ request, tPrompts }: { request: PendingUiRequest; tPrompts: ReturnType<typeof useTranslations<"chatMode.prompts">> }) {
+function InlineUiRequest({ request, tPrompts }: { request: PendingUiRequest; tPrompts: ReturnType<typeof useTranslations<"chatMode.prompt">> }) {
   const { respondToUiRequest, dismissUiRequest } = useGSDWorkspaceActions()
   const isSubmitting = useGSDWorkspaceState().commandInFlight === "extension_ui_response"
 
@@ -1652,7 +1652,7 @@ function InlineSelect({
   request: Extract<PendingUiRequest, { method: "select" }>
   onSubmit: (value: Record<string, unknown>) => void
   disabled: boolean
-  tPrompts: ReturnType<typeof useTranslations<"chatMode.prompts">>
+  tPrompts: ReturnType<typeof useTranslations<"chatMode.prompt">>
 }) {
   const isMulti = Boolean(request.allowMultiple)
   const [singleValue, setSingleValue] = useState("")
@@ -1750,7 +1750,7 @@ function InlineConfirm({
   onSubmit: (value: Record<string, unknown>) => void
   onDismiss: () => void
   disabled: boolean
-  tPrompts: ReturnType<typeof useTranslations<"chatMode.prompts">>
+  tPrompts: ReturnType<typeof useTranslations<"chatMode.prompt">>
 }) {
   const [resolved, setResolved] = useState<boolean | null>(null)
 
@@ -1795,7 +1795,7 @@ function InlineInput({
   request: Extract<PendingUiRequest, { method: "input" }>
   onSubmit: (value: Record<string, unknown>) => void
   disabled: boolean
-  tPrompts: ReturnType<typeof useTranslations<"chatMode.prompts">>
+  tPrompts: ReturnType<typeof useTranslations<"chatMode.prompt">>
 }) {
   const [value, setValue] = useState("")
   const [submitted, setSubmitted] = useState(false)
@@ -1854,7 +1854,7 @@ function InlineEditor({
   request: Extract<PendingUiRequest, { method: "editor" }>
   onSubmit: (value: Record<string, unknown>) => void
   disabled: boolean
-  tPrompts: ReturnType<typeof useTranslations<"chatMode.prompts">>
+  tPrompts: ReturnType<typeof useTranslations<"chatMode.prompt">>
 }) {
   const [value, setValue] = useState(request.prefill || "")
   const [submitted, setSubmitted] = useState(false)
@@ -2038,7 +2038,7 @@ export function ChatPane({ className, onOpenAction }: ChatPaneProps) {
 
   // ── Translation hooks ──
   const tUI = useTranslations("chatMode.ui")
-  const tPrompts = useTranslations("chatMode.prompts")
+  const tPrompts = useTranslations("chatMode.prompt")
   const tActions = useTranslations("chatMode.actions")
   const tCategories = useTranslations("chatMode.categories")
 
