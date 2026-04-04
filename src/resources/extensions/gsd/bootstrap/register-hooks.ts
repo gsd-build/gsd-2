@@ -287,14 +287,16 @@ export function registerHooks(pi: ExtensionAPI): void {
         }
 
         // Tool result truncation: cap individual tool result content length
+        // Creates new objects to avoid mutating shared conversation state.
         const maxChars = cmConfig?.tool_result_max_chars ?? 800;
-        const messages = payload.messages;
-        if (Array.isArray(messages)) {
-          for (const msg of messages) {
+        const msgs = payload.messages;
+        if (Array.isArray(msgs)) {
+          payload.messages = msgs.map((msg: Record<string, unknown>) => {
             if (typeof msg?.content === "string" && (msg.type === "toolResult" || msg.role === "tool") && msg.content.length > maxChars) {
-              msg.content = msg.content.slice(0, maxChars) + "\n…[truncated]";
+              return { ...msg, content: (msg.content as string).slice(0, maxChars) + "\n…[truncated]" };
             }
-          }
+            return msg;
+          });
         }
       } catch { /* non-fatal */ }
     }

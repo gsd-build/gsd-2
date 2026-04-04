@@ -101,6 +101,7 @@ export const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "forensics_dedup",
   "show_token_cost",
   "stale_commit_threshold_minutes",
+  "context_management",
   "experimental",
 ]);
 
