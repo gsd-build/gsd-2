@@ -226,7 +226,7 @@ export function parsePreferencesMarkdown(content: string): GSDPreferences | null
   if (content.trim().length > 0 && !_warnedUnrecognizedFormat) {
     _warnedUnrecognizedFormat = true;
     console.warn(
-      "[GSD] Warning: preferences file was not parsed — content does not use YAML frontmatter delimiters (---). " +
+      "[GSD] Warning: preferences file has unrecognized format — content does not use YAML frontmatter delimiters (---). " +
       "Wrap your preferences in --- fences. See https://github.com/gsd-build/gsd-2/issues/2036",
     );
   }
