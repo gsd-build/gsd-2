@@ -77,6 +77,7 @@ export type CommandSurfacePendingAction =
   | "load_session_browser"
   | "rename_session"
   | "save_api_key"
+  | "save_custom_provider"
   | "start_provider_flow"
   | "submit_provider_flow_input"
   | "cancel_provider_flow"

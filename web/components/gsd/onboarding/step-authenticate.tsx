@@ -81,6 +81,7 @@ interface StepAuthenticateProps {
   requestState: WorkspaceOnboardingRequestState
   requestProviderId: string | null
   onSaveApiKey: (providerId: string, apiKey: string) => Promise<WorkspaceOnboardingState | null>
+  onSaveCustomProvider: (providerId: string, baseUrl: string, apiKey: string, modelId: string) => Promise<WorkspaceOnboardingState | null>
   onStartFlow: (providerId: string) => void
   onSubmitFlowInput: (flowId: string, input: string) => void
   onCancelFlow: (flowId: string) => void
@@ -97,6 +98,7 @@ export function StepAuthenticate({
   requestState,
   requestProviderId,
   onSaveApiKey,
+  onSaveCustomProvider,
   onStartFlow,
   onSubmitFlowInput,
   onCancelFlow,
@@ -106,6 +108,8 @@ export function StepAuthenticate({
   bridgeRefreshError,
 }: StepAuthenticateProps) {
   const [apiKey, setApiKey] = useState("")
+  const [customBaseUrl, setCustomBaseUrl] = useState("")
+  const [customModelId, setCustomModelId] = useState("")
   const [flowInput, setFlowInput] = useState("")
   const [copied, setCopied] = useState(false)
 
@@ -116,8 +120,8 @@ export function StepAuthenticate({
   const canProceed = isValidated && isBridgeDone
   const validationFailed = lastValidation?.status === "failed" && lastValidation.providerId === provider.id
   const parsedError = validationFailed ? parseValidationError(lastValidation.message) : null
+  const isCustomOpenAI = provider.id === "custom-openai"
 
-  const isOAuthOnly = !provider.supports.apiKey && provider.supports.oauth
   const hasOAuth = provider.supports.oauth && provider.supports.oauthAvailable
   const hasApiKey = provider.supports.apiKey
 
@@ -133,6 +137,25 @@ export function StepAuthenticate({
     const t = window.setTimeout(() => setApiKey(""), 0)
     return () => window.clearTimeout(t)
   }, [lastValidation?.checkedAt, lastValidation?.status])
+
+  useEffect(() => {
+    if (lastValidation?.status !== "succeeded" || lastValidation.providerId !== "custom-openai") return
+    const t = window.setTimeout(() => {
+      setApiKey("")
+      setCustomBaseUrl("")
+      setCustomModelId("")
+    }, 0)
+    return () => window.clearTimeout(t)
+  }, [lastValidation?.checkedAt, lastValidation?.providerId, lastValidation?.status])
+
+  useEffect(() => {
+    if (provider.id !== "custom-openai" || !provider.configuration) return
+    const t = window.setTimeout(() => {
+      setCustomBaseUrl((current) => current || provider.configuration?.baseUrl || "")
+      setCustomModelId((current) => current || provider.configuration?.modelId || "")
+    }, 0)
+    return () => window.clearTimeout(t)
+  }, [provider.configuration, provider.id])
 
   useEffect(() => {
     const t = window.setTimeout(() => setFlowInput(""), 0)
@@ -227,7 +250,7 @@ export function StepAuthenticate({
         )}
 
         {/* ─── API key form ─── */}
-        {hasApiKey && !canProceed && (
+        {hasApiKey && !canProceed && !isCustomOpenAI && (
           <div className="space-y-3 rounded-xl border border-border/50 bg-card/50 p-4">
             <div className="text-sm font-medium text-foreground">API key</div>
             <form
@@ -270,8 +293,71 @@ export function StepAuthenticate({
           </div>
         )}
 
+        {isCustomOpenAI && !canProceed && (
+          <div className="space-y-3 rounded-xl border border-border/50 bg-card/50 p-4">
+            <div className="text-sm font-medium text-foreground">Custom OpenAI-compatible provider</div>
+            <form
+              className="space-y-3"
+              onSubmit={async (e) => {
+                e.preventDefault()
+                if (!customBaseUrl.trim() || !apiKey.trim() || !customModelId.trim()) return
+                const next = await onSaveCustomProvider(provider.id, customBaseUrl, apiKey, customModelId)
+                if (next && !next.locked && (next.bridgeAuthRefresh.phase === "succeeded" || next.bridgeAuthRefresh.phase === "idle")) {
+                  onNext()
+                }
+              }}
+            >
+              <Input
+                data-testid="onboarding-custom-base-url-input"
+                type="url"
+                autoComplete="off"
+                value={customBaseUrl}
+                onChange={(e) => setCustomBaseUrl(e.target.value)}
+                placeholder="https://my-proxy.example.com/v1"
+                disabled={isBusy}
+                className="text-sm"
+              />
+              <Input
+                data-testid="onboarding-api-key-input"
+                type="password"
+                autoComplete="off"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="Paste API key"
+                disabled={isBusy}
+                className="font-mono text-sm"
+              />
+              <Input
+                data-testid="onboarding-custom-model-id-input"
+                type="text"
+                autoComplete="off"
+                value={customModelId}
+                onChange={(e) => setCustomModelId(e.target.value)}
+                placeholder="gpt-4o"
+                disabled={isBusy}
+                className="font-mono text-sm"
+              />
+              <div className="flex items-center gap-2">
+                <Button
+                  type="submit"
+                  disabled={!customBaseUrl.trim() || !apiKey.trim() || !customModelId.trim() || isBusy}
+                  className="gap-2 transition-transform active:scale-[0.96]"
+                  data-testid="onboarding-save-custom-provider"
+                >
+                  {isThisProviderBusy && requestState === "saving_custom_provider" ? (
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <KeyRound className="h-4 w-4" />
+                  )}
+                  Save provider
+                </Button>
+              </div>
+            </form>
+          </div>
+        )}
+
         {/* ─── OAuth section ─── */}
-        {hasOAuth && !canProceed && (
+        {hasOAuth && !canProceed && !isCustomOpenAI && (
           <div className="space-y-3">
             {/* Divider between API key and OAuth */}
             {hasApiKey && (

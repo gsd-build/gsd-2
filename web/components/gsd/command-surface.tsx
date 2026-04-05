@@ -351,6 +351,7 @@ export function CommandSurface() {
     forkSessionFromSurface,
     compactSessionFromSurface,
     saveApiKeyFromSurface,
+    saveCustomProviderFromSurface,
     startProviderFlowFromSurface,
     submitProviderFlowInputFromSurface,
     cancelProviderFlowFromSurface,
@@ -374,6 +375,8 @@ export function CommandSurface() {
   const currentModelLabel = getModelLabel(workspace.boot?.bridge)
   const currentSessionLabel = getSessionLabelFromBridge(workspace.boot?.bridge)
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({})
+  const [customBaseUrls, setCustomBaseUrls] = useState<Record<string, string>>({})
+  const [customModelIds, setCustomModelIds] = useState<Record<string, string>>({})
   const [flowInput, setFlowInput] = useState("")
   const commandSurfaceViewportRef = useRef<HTMLDivElement>(null)
 
@@ -600,9 +603,24 @@ export function CommandSurface() {
   const autoRetryBusy = settingsRequests.autoRetry.pending
   const abortRetryBusy = settingsRequests.abortRetry.pending
   const selectedProviderApiKey = selectedAuthProvider ? apiKeys[selectedAuthProvider.id] ?? "" : ""
+  const selectedProviderBaseUrl = selectedAuthProvider ? customBaseUrls[selectedAuthProvider.id] ?? "" : ""
+  const selectedProviderModelId = selectedAuthProvider ? customModelIds[selectedAuthProvider.id] ?? "" : ""
   const devOverrides = useDevOverrides()
   const surfaceSections = availableSectionsForSurface(commandSurface.activeSurface, devOverrides.isDevMode)
   const surfaceKindLabel = `/${commandSurface.activeSurface ?? "settings"}`
+
+  useEffect(() => {
+    if (!selectedAuthProvider || selectedAuthProvider.id !== "custom-openai") return
+    const configuration = selectedAuthProvider.configuration
+    if (!configuration) return
+
+    setCustomBaseUrls((prev) =>
+      prev[selectedAuthProvider.id] !== undefined ? prev : { ...prev, [selectedAuthProvider.id]: configuration.baseUrl },
+    )
+    setCustomModelIds((prev) =>
+      prev[selectedAuthProvider.id] !== undefined ? prev : { ...prev, [selectedAuthProvider.id]: configuration.modelId },
+    )
+  }, [selectedAuthProvider])
 
   const triggerRecoveryBrowserAction = (actionId: string) => {
     switch (actionId) {
@@ -1797,7 +1815,74 @@ export function CommandSurface() {
             </div>
 
             {/* API key form */}
-            {selectedAuthProvider.supports.apiKey && (
+            {selectedAuthProvider.id === "custom-openai" ? (
+              <form
+                className="space-y-3"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  if (!selectedProviderBaseUrl.trim() || !selectedProviderApiKey.trim() || !selectedProviderModelId.trim()) return
+                  void saveCustomProviderFromSurface(
+                    selectedAuthProvider.id,
+                    selectedProviderBaseUrl,
+                    selectedProviderApiKey,
+                    selectedProviderModelId,
+                  )
+                }}
+              >
+                <div className="space-y-2">
+                  <Input
+                    type="url"
+                    autoComplete="off"
+                    value={selectedProviderBaseUrl}
+                    onChange={(e) =>
+                      setCustomBaseUrls((prev) => ({ ...prev, [selectedAuthProvider.id]: e.target.value }))
+                    }
+                    placeholder="https://my-proxy.example.com/v1"
+                    className="h-8 text-xs"
+                    disabled={authBusy}
+                    data-testid="command-surface-custom-base-url-input"
+                  />
+                  <Input
+                    type="password"
+                    autoComplete="off"
+                    value={selectedProviderApiKey}
+                    onChange={(e) =>
+                      setApiKeys((prev) => ({ ...prev, [selectedAuthProvider.id]: e.target.value }))
+                    }
+                    placeholder="Paste API key"
+                    className="h-8 flex-1 text-xs"
+                    disabled={authBusy}
+                    data-testid="command-surface-api-key-input"
+                  />
+                  <Input
+                    type="text"
+                    autoComplete="off"
+                    value={selectedProviderModelId}
+                    onChange={(e) =>
+                      setCustomModelIds((prev) => ({ ...prev, [selectedAuthProvider.id]: e.target.value }))
+                    }
+                    placeholder="gpt-4o"
+                    className="h-8 text-xs font-mono"
+                    disabled={authBusy}
+                    data-testid="command-surface-custom-model-id-input"
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={!selectedProviderBaseUrl.trim() || !selectedProviderApiKey.trim() || !selectedProviderModelId.trim() || authBusy}
+                  data-testid="command-surface-save-custom-provider"
+                  className="h-8 gap-1.5"
+                >
+                  {commandSurface.pendingAction === "save_custom_provider" ? (
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <KeyRound className="h-3.5 w-3.5" />
+                  )}
+                  Save provider
+                </Button>
+              </form>
+            ) : selectedAuthProvider.supports.apiKey && (
               <form
                 className="space-y-3"
                 onSubmit={(e) => {
@@ -1839,7 +1924,7 @@ export function CommandSurface() {
 
             {/* OAuth / sign-in buttons */}
             <div className="flex flex-wrap gap-2">
-              {selectedAuthProvider.supports.oauth && selectedAuthProvider.supports.oauthAvailable && (
+              {selectedAuthProvider.id !== "custom-openai" && selectedAuthProvider.supports.oauth && selectedAuthProvider.supports.oauthAvailable && (
                 <Button
                   type="button"
                   variant="outline"

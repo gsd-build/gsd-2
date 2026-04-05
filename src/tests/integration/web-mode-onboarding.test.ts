@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -506,4 +506,75 @@ test("fresh gsd --web browser onboarding stays locked on failed validation and u
   const bootAfterPayload = await bootAfter.json() as any
   assert.equal(bootAfterPayload.onboarding.locked, false)
   assert.equal(bootAfterPayload.onboarding.lockReason, null)
+})
+
+test("fresh gsd --web browser onboarding can unlock through save_custom_provider for custom-openai", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("runtime launch test uses POSIX browser-open stubs")
+    return
+  }
+
+  const tempRoot = mkdtempSync(join(tmpdir(), "gsd-web-onboarding-custom-openai-"))
+  const tempHome = join(tempRoot, "home")
+  const browserLogPath = join(tempRoot, "browser-open.log")
+  const expectedModelsPath = join(tempHome, ".gsd", "agent", "models.json")
+  let port: number | null = null
+
+  t.after(async () => {
+    if (port !== null) {
+      await killProcessOnPort(port)
+    }
+    rmSync(tempRoot, { recursive: true, force: true })
+  })
+
+  const launch = await launchPackagedWebHost({
+    launchCwd: repoRoot,
+    tempHome,
+    browserLogPath,
+    env: {
+      GSD_WEB_TEST_FAKE_API_KEY_VALIDATION: "1",
+      ANTHROPIC_API_KEY: "",
+      OPENAI_API_KEY: "",
+      GOOGLE_API_KEY: "",
+      CUSTOM_OPENAI_API_KEY: "",
+    },
+  })
+  port = launch.port
+
+  assert.equal(launch.exitCode, 0, `expected the web launcher to exit cleanly:\n${launch.stderr}`)
+  const auth = runtimeAuthHeaders(launch)
+  await waitForHttpOk(`${launch.url}/api/boot`, undefined, auth)
+
+  const saveResponse = await fetch(`${launch.url}/api/onboarding`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json", ...auth },
+    body: JSON.stringify({
+      action: "save_custom_provider",
+      providerId: "custom-openai",
+      baseUrl: "https://proxy.example.com/v1",
+      apiKey: "sk-custom-runtime",
+      modelId: "gpt-4o-mini",
+    }),
+    signal: AbortSignal.timeout(60_000),
+  })
+
+  assert.equal(saveResponse.status, 200, `expected custom provider onboarding save to succeed: ${saveResponse.status}`)
+  const savePayload = await saveResponse.json() as any
+  assert.equal(savePayload.onboarding.locked, false)
+  assert.equal(savePayload.onboarding.required.satisfiedBy.providerId, "custom-openai")
+  assert.equal(existsSync(expectedModelsPath), true)
+
+  const modelsConfig = JSON.parse(readFileSync(expectedModelsPath, "utf-8")) as any
+  assert.equal(modelsConfig.providers["custom-openai"].baseUrl, "https://proxy.example.com/v1")
+  assert.equal(modelsConfig.providers["custom-openai"].models[0].id, "gpt-4o-mini")
+
+  const bootAfter = await fetch(`${launch.url}/api/boot`, {
+    method: "GET",
+    headers: { Accept: "application/json", ...auth },
+    signal: AbortSignal.timeout(10_000),
+  })
+  assert.equal(bootAfter.ok, true)
+  const bootAfterPayload = await bootAfter.json() as any
+  assert.equal(bootAfterPayload.onboarding.locked, false)
+  assert.equal(bootAfterPayload.onboarding.required.satisfiedBy.providerId, "custom-openai")
 })

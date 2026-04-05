@@ -11,6 +11,7 @@ type OnboardingAction =
   | { action: "discover_providers" }
   | { action: "recheck" }
   | { action: "save_api_key"; providerId: string; apiKey: string }
+  | { action: "save_custom_provider"; providerId: string; baseUrl: string; apiKey: string; modelId: string }
   | { action: "start_provider_flow"; providerId: string }
   | { action: "continue_provider_flow"; flowId: string; input: string }
   | { action: "cancel_provider_flow"; flowId: string }
@@ -90,6 +91,28 @@ export async function POST(request: Request): Promise<Response> {
                   : onboarding.lockReason === "bridge_refresh_pending"
                     ? 202
                     : 200,
+            headers: noStoreHeaders(),
+          },
+        );
+      }
+      case "save_custom_provider": {
+        const onboarding = await onboardingService.saveCustomProvider(
+          payload.providerId,
+          payload.baseUrl,
+          payload.apiKey,
+          payload.modelId,
+        );
+        return Response.json(
+          { onboarding },
+          {
+            status:
+              onboarding.lastValidation?.status === "failed"
+                ? 422
+                : onboarding.lockReason === "bridge_refresh_failed"
+                ? 503
+                : onboarding.lockReason === "bridge_refresh_pending"
+                  ? 202
+                  : 200,
             headers: noStoreHeaders(),
           },
         );

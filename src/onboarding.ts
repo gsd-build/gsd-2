@@ -11,11 +11,9 @@
  */
 
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
 import type { AuthStorage } from '@gsd/pi-coding-agent'
 import { renderLogo } from './logo.js'
-import { agentDir } from './app-paths.js'
+import { getCustomOpenAIModelsJsonPath, saveCustomOpenAIProviderConfig } from './custom-openai-config.js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -541,53 +539,15 @@ async function runCustomOpenAIFlow(
   if (p.isCancel(modelId) || !modelId) return false
   const trimmedModelId = (modelId as string).trim()
 
-  // Save API key to auth storage
-  authStorage.set('custom-openai', { type: 'api_key', key: trimmedKey })
-
-  // Write or merge into models.json
-  const modelsJsonPath = join(agentDir, 'models.json')
-  let config: { providers: Record<string, any> } = { providers: {} }
-
-  if (existsSync(modelsJsonPath)) {
-    try {
-      config = JSON.parse(readFileSync(modelsJsonPath, 'utf-8'))
-      if (!config.providers) config.providers = {}
-    } catch {
-      // If existing file is corrupt, start fresh
-      config = { providers: {} }
-    }
-  }
-
-  config.providers['custom-openai'] = {
+  saveCustomOpenAIProviderConfig(authStorage, {
     baseUrl: trimmedUrl,
-    apiKey: `env:CUSTOM_OPENAI_API_KEY`,
-    api: 'openai-completions',
-    models: [
-      {
-        id: trimmedModelId,
-        name: trimmedModelId,
-        reasoning: false,
-        input: ['text'],
-        contextWindow: 128000,
-        maxTokens: 16384,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      },
-    ],
-  }
-
-  // Ensure parent directory exists
-  const dir = dirname(modelsJsonPath)
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true })
-  }
-  writeFileSync(modelsJsonPath, JSON.stringify(config, null, 2), 'utf-8')
-
-  // Also set env var so the current session picks up the key via fallback resolver
-  process.env.CUSTOM_OPENAI_API_KEY = trimmedKey
+    apiKey: trimmedKey,
+    modelId: trimmedModelId,
+  })
 
   p.log.success(`Custom endpoint saved: ${pc.green(trimmedUrl)}`)
   p.log.info(`Model: ${pc.cyan(trimmedModelId)}`)
-  p.log.info(`Config written to ${pc.dim(modelsJsonPath)}`)
+  p.log.info(`Config written to ${pc.dim(getCustomOpenAIModelsJsonPath())}`)
   return true
 }
 
@@ -989,4 +949,3 @@ async function runDiscordChannelStep(p: ClackModule, pc: PicoModule, token: stri
   p.log.success(`Discord channel: ${pc.green(channelName ? `#${channelName}` : channelId)}`)
   return channelName ?? null
 }
-

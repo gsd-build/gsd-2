@@ -3,6 +3,15 @@ import { randomUUID } from "node:crypto";
 import { getEnvApiKey } from "../../packages/pi-ai/src/web-runtime-env-api-keys.ts";
 import type { OAuthAuthInfo, OAuthPrompt, OAuthProviderInterface } from "../../packages/pi-ai/dist/oauth.js";
 import { authFilePath } from "../app-paths.ts";
+import {
+  CUSTOM_OPENAI_PROVIDER_ID,
+  CUSTOM_OPENAI_PROVIDER_LABEL,
+  getCustomOpenAIProviderSnapshot,
+  hasCustomOpenAIProviderConfig,
+  normalizeCustomOpenAIProviderInput,
+  removeCustomOpenAIProviderConfig,
+  saveCustomOpenAIProviderConfig,
+} from "../custom-openai-config.ts";
 import { createOnboardingAuthStorage, type OnboardingAuthStorage as AuthStorageInstance } from "./web-auth-storage.ts";
 
 type RequiredProviderCatalogEntry = {
@@ -31,6 +40,7 @@ let onboardingBridgeAuthRefresher: BridgeAuthRefresher | null = null;
 type OnboardingServiceDeps = {
   env?: NodeJS.ProcessEnv;
   authPath?: string;
+  modelsJsonPath?: string;
   authStorage?: AuthStorageInstance;
   createAuthStorage?: (authPath: string) => AuthStorageInstance | Promise<AuthStorageInstance>;
   validateApiKey?: (providerId: string, apiKey: string) => Promise<ValidationProbeResult>;
@@ -61,6 +71,10 @@ export interface OnboardingProviderState {
   recommended: boolean;
   configured: boolean;
   configuredVia: OnboardingCredentialSource | null;
+  configuration: {
+    baseUrl: string;
+    modelId: string;
+  } | null;
   supports: {
     apiKey: boolean;
     oauth: boolean;
@@ -153,6 +167,7 @@ const REQUIRED_PROVIDER_CATALOG: RequiredProviderCatalogEntry[] = [
   { id: "xai", label: "xAI (Grok)", supportsApiKey: true, supportsOAuth: false },
   { id: "openrouter", label: "OpenRouter", supportsApiKey: true, supportsOAuth: false },
   { id: "mistral", label: "Mistral", supportsApiKey: true, supportsOAuth: false },
+  { id: CUSTOM_OPENAI_PROVIDER_ID, label: CUSTOM_OPENAI_PROVIDER_LABEL, supportsApiKey: true, supportsOAuth: false },
 ];
 
 const OPTIONAL_SECTION_CATALOG: OptionalSectionCatalogEntry[] = [
@@ -234,6 +249,15 @@ function hasStoredCredentialValue(authStorage: AuthStorageInstance, providerId: 
     if (credential.type === "oauth") return true;
     return typeof credential.key === "string" && credential.key.trim().length > 0;
   });
+}
+
+function hasConfiguredCustomOpenAI(
+  authStorage: AuthStorageInstance,
+  getEnvApiKeyFn: GetEnvApiKeyFn,
+  modelsJsonPath?: string,
+): boolean {
+  const hasCredential = resolveCredentialSource(authStorage, CUSTOM_OPENAI_PROVIDER_ID, getEnvApiKeyFn) !== null;
+  return hasCredential && hasCustomOpenAIProviderConfig(modelsJsonPath);
 }
 
 function resolveCredentialSource(
@@ -434,6 +458,9 @@ export class OnboardingService {
     if (!provider) {
       throw new Error(`Unknown onboarding provider: ${providerId}`);
     }
+    if (providerId === CUSTOM_OPENAI_PROVIDER_ID) {
+      throw new Error(`${CUSTOM_OPENAI_PROVIDER_LABEL} must be configured with the custom provider action`);
+    }
     if (!provider.supportsApiKey) {
       throw new Error(`${providerId} must be configured with browser sign-in`);
     }
@@ -476,6 +503,43 @@ export class OnboardingService {
     };
     await this.refreshBridgeAuth();
 
+    return await this.buildState();
+  }
+
+  async saveCustomProvider(providerId: string, baseUrl: string, apiKey: string, modelId: string): Promise<OnboardingState> {
+    if (providerId !== CUSTOM_OPENAI_PROVIDER_ID) {
+      throw new Error(`Unsupported custom provider: ${providerId}`);
+    }
+
+    let normalized;
+    try {
+      normalized = normalizeCustomOpenAIProviderInput({ baseUrl, apiKey, modelId });
+    } catch (error) {
+      this.lastValidation = {
+        status: "failed",
+        providerId,
+        method: "api_key",
+        checkedAt: nowIso(this.deps.now ?? (() => new Date())),
+        message: sanitizeMessage(error),
+        persisted: false,
+      };
+      return await this.buildState();
+    }
+
+    const authStorage = await this.getAuthStorage();
+    authStorage.reload();
+    saveCustomOpenAIProviderConfig(authStorage, normalized, this.deps.modelsJsonPath);
+
+    const checkedAt = nowIso(this.deps.now ?? (() => new Date()));
+    this.lastValidation = {
+      status: "succeeded",
+      providerId,
+      method: "api_key",
+      checkedAt,
+      message: `${CUSTOM_OPENAI_PROVIDER_LABEL} saved`,
+      persisted: true,
+    };
+    await this.refreshBridgeAuth();
     return await this.buildState();
   }
 
@@ -577,6 +641,10 @@ export class OnboardingService {
     }
 
     authStorage.logout(resolvedProviderId);
+    if (resolvedProviderId === CUSTOM_OPENAI_PROVIDER_ID) {
+      removeCustomOpenAIProviderConfig(this.deps.modelsJsonPath);
+      delete process.env.CUSTOM_OPENAI_API_KEY;
+    }
     this.lastValidation = null;
     await this.refreshBridgeAuth();
     return await this.buildState();
@@ -659,10 +727,16 @@ export class OnboardingService {
     getEnvApiKeyFn: GetEnvApiKeyFn,
   ): OnboardingProviderState[] {
     const oauthProviders = new Map(authStorage.getOAuthProviders().map((provider) => [provider.id, provider]));
+    const customProviderSnapshot = getCustomOpenAIProviderSnapshot(this.deps.modelsJsonPath);
 
     return REQUIRED_PROVIDER_CATALOG.map((provider) => {
       const oauthProvider = oauthProviders.get(provider.id);
-      const configuredVia = resolveCredentialSource(authStorage, provider.id, getEnvApiKeyFn);
+      const configuredVia =
+        provider.id === CUSTOM_OPENAI_PROVIDER_ID
+          ? hasConfiguredCustomOpenAI(authStorage, getEnvApiKeyFn, this.deps.modelsJsonPath)
+            ? resolveCredentialSource(authStorage, provider.id, getEnvApiKeyFn)
+            : null
+          : resolveCredentialSource(authStorage, provider.id, getEnvApiKeyFn);
       return {
         id: provider.id,
         label: oauthProvider?.name ?? provider.label,
@@ -670,6 +744,7 @@ export class OnboardingService {
         recommended: Boolean(provider.recommended),
         configured: configuredVia !== null,
         configuredVia,
+        configuration: provider.id === CUSTOM_OPENAI_PROVIDER_ID ? customProviderSnapshot : null,
         supports: {
           apiKey: provider.supportsApiKey,
           oauth: provider.supportsOAuth,

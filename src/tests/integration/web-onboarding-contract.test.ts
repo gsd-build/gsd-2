@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -35,6 +35,7 @@ const ONBOARDING_ENV_KEYS = [
   "AI_GATEWAY_API_KEY",
   "ZAI_API_KEY",
   "MISTRAL_API_KEY",
+  "CUSTOM_OPENAI_API_KEY",
   "MINIMAX_API_KEY",
   "MINIMAX_CN_API_KEY",
   "HF_TOKEN",
@@ -345,6 +346,7 @@ test("boot and onboarding routes expose locked required state plus explicitly sk
     "xai",
     "openrouter",
     "mistral",
+    "custom-openai",
   ]);
   const anthropicProvider = bootPayload.onboarding.required.providers.find((provider: any) => provider.id === "anthropic");
   assert.equal(anthropicProvider.supports.apiKey, true);
@@ -595,6 +597,125 @@ test("successful API-key validation persists the credential and unlocks onboardi
   assert.equal(bootPayload.onboardingNeeded, false);
 });
 
+test("custom-openai stays unconfigured until both auth and models.json provider config exist, then unlocks through save_custom_provider", async (t) => {
+  const fixture = makeWorkspaceFixture();
+  clearOnboardingEnv();
+  const authStorage = AuthStorage.inMemory({
+    "custom-openai": { type: "api_key", key: "sk-auth-only" },
+  } as any);
+  const harness = configureBridgeFixture(fixture, "sess-custom-openai");
+  const modelsDir = join(tmpdir(), `gsd-custom-openai-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const modelsJsonPath = join(modelsDir, "models.json");
+  onboarding.configureOnboardingServiceForTests({
+    authStorage,
+    getEnvApiKey: noEnvApiKey,
+    modelsJsonPath,
+  });
+
+  t.after(async () => {
+    onboarding.resetOnboardingServiceForTests();
+    await bridge.resetBridgeServiceForTests();
+    restoreOnboardingEnv();
+    rmSync(modelsDir, { recursive: true, force: true });
+    fixture.cleanup();
+  });
+
+  const bootBefore = await bootRoute.GET(projectRequest(fixture.projectCwd, "/api/boot"));
+  const bootBeforePayload = (await bootBefore.json()) as any;
+  const customBefore = bootBeforePayload.onboarding.required.providers.find((provider: any) => provider.id === "custom-openai");
+  assert.equal(customBefore.configured, false);
+  assert.equal(bootBeforePayload.onboarding.locked, true);
+
+  const saveResponse = await onboardingRoute.POST(
+    projectRequest(fixture.projectCwd, "/api/onboarding", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "save_custom_provider",
+        providerId: "custom-openai",
+        baseUrl: "https://proxy.example.com/v1",
+        apiKey: "sk-custom-live",
+        modelId: "gpt-4o-mini",
+      }),
+    }),
+  );
+
+  assert.equal(saveResponse.status, 200);
+  const savePayload = (await saveResponse.json()) as any;
+  assert.equal(savePayload.onboarding.locked, false);
+  assert.deepEqual(savePayload.onboarding.required.satisfiedBy, {
+    providerId: "custom-openai",
+    source: "auth_file",
+  });
+  const customAfterSave = savePayload.onboarding.required.providers.find((provider: any) => provider.id === "custom-openai");
+  assert.deepEqual(customAfterSave.configuration, {
+    baseUrl: "https://proxy.example.com/v1",
+    modelId: "gpt-4o-mini",
+  });
+  assert.equal(savePayload.onboarding.lastValidation.status, "succeeded");
+  assert.equal(harness.spawnCalls, 2);
+  assert.equal(authStorage.hasAuth("custom-openai"), true);
+  assert.equal(existsSync(modelsJsonPath), true);
+
+  const modelsConfig = JSON.parse(readFileSync(modelsJsonPath, "utf-8")) as any;
+  assert.equal(modelsConfig.providers["custom-openai"].baseUrl, "https://proxy.example.com/v1");
+  assert.equal(modelsConfig.providers["custom-openai"].apiKey, "env:CUSTOM_OPENAI_API_KEY");
+  assert.equal(modelsConfig.providers["custom-openai"].api, "openai-completions");
+  assert.equal(modelsConfig.providers["custom-openai"].models[0].id, "gpt-4o-mini");
+
+  const bootAfter = await bootRoute.GET(projectRequest(fixture.projectCwd, "/api/boot"));
+  const bootAfterPayload = (await bootAfter.json()) as any;
+  assert.equal(bootAfterPayload.onboarding.locked, false);
+  assert.equal(bootAfterPayload.onboarding.required.satisfiedBy.providerId, "custom-openai");
+  const customAfterBoot = bootAfterPayload.onboarding.required.providers.find((provider: any) => provider.id === "custom-openai");
+  assert.deepEqual(customAfterBoot.configuration, {
+    baseUrl: "https://proxy.example.com/v1",
+    modelId: "gpt-4o-mini",
+  });
+});
+
+test("save_custom_provider rejects invalid input without persisting auth or models config", async (t) => {
+  const fixture = makeWorkspaceFixture();
+  clearOnboardingEnv();
+  const authStorage = AuthStorage.inMemory({});
+  const modelsDir = join(tmpdir(), `gsd-custom-openai-invalid-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const modelsJsonPath = join(modelsDir, "models.json");
+  configureBridgeFixture(fixture, "sess-custom-openai-invalid");
+  onboarding.configureOnboardingServiceForTests({
+    authStorage,
+    getEnvApiKey: noEnvApiKey,
+    modelsJsonPath,
+  });
+
+  t.after(async () => {
+    onboarding.resetOnboardingServiceForTests();
+    await bridge.resetBridgeServiceForTests();
+    restoreOnboardingEnv();
+    rmSync(modelsDir, { recursive: true, force: true });
+    fixture.cleanup();
+  });
+
+  const saveResponse = await onboardingRoute.POST(
+    projectRequest(fixture.projectCwd, "/api/onboarding", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "save_custom_provider",
+        providerId: "custom-openai",
+        baseUrl: "not-a-url",
+        apiKey: "sk-custom-live",
+        modelId: "",
+      }),
+    }),
+  );
+
+  assert.equal(saveResponse.status, 422);
+  const savePayload = (await saveResponse.json()) as any;
+  assert.equal(savePayload.onboarding.lastValidation.status, "failed");
+  assert.match(savePayload.onboarding.lastValidation.message, /Base URL must be a valid URL/i);
+  assert.equal(savePayload.onboarding.locked, true);
+  assert.equal(authStorage.hasAuth("custom-openai"), false);
+  assert.equal(existsSync(modelsJsonPath), false);
+});
+
 test("logout_provider removes saved auth, refreshes the bridge, and relocks onboarding when it was the only provider", async (t) => {
   const fixture = makeWorkspaceFixture();
   clearOnboardingEnv();
@@ -642,6 +763,70 @@ test("logout_provider removes saved auth, refreshes the bridge, and relocks onbo
   assert.equal(bootAfterPayload.onboarding.lockReason, "required_setup");
   assert.equal(bootAfterPayload.onboarding.bridgeAuthRefresh.phase, "succeeded");
   assert.equal(bootAfterPayload.onboarding.required.satisfied, false);
+});
+
+test("logout_provider removes custom-openai auth and provider config together", async (t) => {
+  const fixture = makeWorkspaceFixture();
+  clearOnboardingEnv();
+  const authStorage = AuthStorage.inMemory({
+    "custom-openai": { type: "api_key", key: "sk-custom-logout" },
+  } as any);
+  const modelsDir = join(tmpdir(), `gsd-custom-openai-logout-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const modelsJsonPath = join(modelsDir, "models.json");
+  mkdirSync(modelsDir, { recursive: true });
+  writeFileSync(modelsJsonPath, JSON.stringify({
+    providers: {
+      "custom-openai": {
+        baseUrl: "https://proxy.example.com/v1",
+        apiKey: "env:CUSTOM_OPENAI_API_KEY",
+        api: "openai-completions",
+        models: [{ id: "gpt-4o-mini" }],
+      },
+      openai: {
+        baseUrl: "https://api.openai.com/v1",
+      },
+    },
+  }, null, 2));
+  const harness = configureBridgeFixture(fixture, "sess-custom-openai-logout");
+  onboarding.configureOnboardingServiceForTests({
+    authStorage,
+    getEnvApiKey: noEnvApiKey,
+    modelsJsonPath,
+  });
+
+  t.after(async () => {
+    onboarding.resetOnboardingServiceForTests();
+    await bridge.resetBridgeServiceForTests();
+    restoreOnboardingEnv();
+    rmSync(modelsDir, { recursive: true, force: true });
+    fixture.cleanup();
+  });
+
+  const bootBefore = await bootRoute.GET(projectRequest(fixture.projectCwd, "/api/boot"));
+  const bootBeforePayload = (await bootBefore.json()) as any;
+  assert.equal(bootBeforePayload.onboarding.required.satisfiedBy.providerId, "custom-openai");
+  assert.equal(harness.spawnCalls, 1);
+
+  const logoutResponse = await onboardingRoute.POST(
+    projectRequest(fixture.projectCwd, "/api/onboarding", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "logout_provider",
+        providerId: "custom-openai",
+      }),
+    }),
+  );
+
+  assert.equal(logoutResponse.status, 200);
+  const logoutPayload = (await logoutResponse.json()) as any;
+  assert.equal(logoutPayload.onboarding.locked, true);
+  assert.equal(logoutPayload.onboarding.lockReason, "required_setup");
+  assert.equal(authStorage.hasAuth("custom-openai"), false);
+  assert.equal(harness.spawnCalls, 2);
+
+  const modelsConfig = JSON.parse(readFileSync(modelsJsonPath, "utf-8")) as any;
+  assert.equal("custom-openai" in modelsConfig.providers, false);
+  assert.equal("openai" in modelsConfig.providers, true);
 });
 
 test("logout_provider fails clearly for environment-backed auth that the browser cannot remove", async (t) => {

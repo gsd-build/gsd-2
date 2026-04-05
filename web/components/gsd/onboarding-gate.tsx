@@ -86,6 +86,7 @@ export function OnboardingGate() {
   const {
     refreshOnboarding,
     saveApiKey,
+    saveCustomProvider,
     startProviderFlow,
     submitProviderFlowInput,
     cancelProviderFlow,
@@ -232,6 +233,15 @@ export function OnboardingGate() {
                   requestProviderId={workspace.onboardingRequestProviderId}
                   onSaveApiKey={async (pid, key) => {
                     const next = await saveApiKey(pid, key)
+                    const settled = Boolean(
+                      next && !next.locked &&
+                      (next.bridgeAuthRefresh.phase === "succeeded" || next.bridgeAuthRefresh.phase === "idle"),
+                    )
+                    if (settled) { setDismissedAfterSuccess(true); void refreshBoot() }
+                    return next
+                  }}
+                  onSaveCustomProvider={async (pid, baseUrl, apiKey, modelId) => {
+                    const next = await saveCustomProvider(pid, baseUrl, apiKey, modelId)
                     const settled = Boolean(
                       next && !next.locked &&
                       (next.bridgeAuthRefresh.phase === "succeeded" || next.bridgeAuthRefresh.phase === "idle"),
