@@ -1,0 +1,142 @@
+#!/bin/bash
+readonly IMAGE="trusted/gsd:latest"
+
+# Basic shim options (preserved)
+DRY_RUN=false
+TRACE=false
+while [[ $# -gt 0 && $1 == --* ]]; do
+  case $1 in
+    --dry-run) DRY_RUN=true; shift ;;
+    --trace) TRACE=true; shift ;;
+    *) break ;;
+  esac
+done
+
+set -Eeuo pipefail
+[[ $TRACE == true ]] && set -x
+
+error_exit() {
+    echo "Error: $1" >&2
+    if echo "$1" | grep -q "Permission denied\|Pasta failed"; then
+        echo "Rootless storage issue. Fix: sudo chown -R $USER: /var/cache/\$UID/containers/storage && sudo chmod -R 755 /var/cache/\$UID/containers/storage"
+    fi
+    exit 1
+}
+
+if ! podman image exists "$IMAGE"; then
+    error_exit "GSD image not found. Re-run the installation script."
+fi
+
+# TTY for interactive TUI
+TTY_FLAG="-it"
+
+# ----------------------------------------------------------------------
+# Safe non-interactive detection (works even with ZERO arguments)
+# ----------------------------------------------------------------------
+if [[ $# -eq 0 ]]; then
+  : # no arguments → keep interactive TUI (default)
+elif [[ "$*" == *--print* ]] || \
+     [[ "$*" == *--mode* ]] || \
+     [[ "$*" == *--help* ]] || \
+     [[ "$*" == *-h* ]] || \
+     [[ -n "${GSD_NON_INTERACTIVE:-}" ]]; then
+  TTY_FLAG="-i"
+fi
+
+# Also catch common sub-commands explicitly (safer than relying on $1 alone)
+case "${1:-}" in
+  --print|--mode|rpc|mcp|text|help|-h|--version)
+    TTY_FLAG="-i"
+    ;;
+esac
+
+# Persistence mounts (GSD's exact requirements)
+MOUNTS="-v $PWD:/home/node/project:Z -v $HOME/.gsd:/home/node/.gsd:Z -v $PWD/.gsd:/home/node/project/.gsd:Z"
+
+# Optional caches
+[ -d "$PWD/.gsd/cache" ] || mkdir -p "$PWD/.gsd/cache"
+
+JSON_INPUT="${API_CONFIG:-$HOME/.llm-api.json}" 
+
+# Check jq is available (hard requirement)
+if ! command -v jq >/dev/null 2>&1; then
+  echo "- Error: 'jq' is required to parse API keys JSON" >&2
+  exit 1
+fi
+
+# Read and validate JSON (fails fast if malformed)
+if ! jq -e '.["api-key"]' "$JSON_INPUT" >/dev/null 2>&1; then
+  echo "- Error: Invalid JSON or missing 'api-key' array" >&2
+  exit 1
+fi
+
+echo "- Setting API keys from JSON..." >&2
+
+# Main parsing loop – one line per vendor=key pair
+jq -r '.["api-key"][]' "$JSON_INPUT" | while read -r entry; do
+  # Split on first '=' only (handles keys that might contain '=' in rare cases)
+  VENDOR="${entry%%=*}"
+  KEY="${entry#*=}"
+
+  # Guard: skip malformed lines
+  if [[ -z "$VENDOR" || -z "$KEY" ]]; then
+    echo "- Warning: skipping malformed entry '${entry}'" >&2
+    continue
+  fi
+
+  # Convert vendor to uppercase (xai → XAI) and append _API_KEY
+  UPPER_VENDOR=$(echo "$VENDOR" | tr '[:lower:]' '[:upper:]')
+  ENV_VAR_NAME="${UPPER_VENDOR}_API_KEY"
+
+  # Export it (visible to parent shell if script is sourced, or inside container)
+  export "${ENV_VAR_NAME}=${KEY}"
+
+  echo "- Exported ${ENV_VAR_NAME}" >&2
+done
+
+# Optional: print all set keys (for debugging – never shows the actual secrets)
+echo "- API keys loaded: $(env | grep -E '^[A-Z0-9_]+_API_KEY=' | cut -d= -f1 | tr '\n' ' ')" >&2
+
+# =============================================================================
+# Auto-create missing Podman secrets from environment variables
+# (gsd_XAI_API_KEY, gsd_ANTHROPIC_API_KEY, …)
+# =============================================================================
+SECRETS=""
+
+for key in XAI_API_KEY ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY OPENROUTER_API_KEY; do
+    secret_name="gsd_${key}"
+
+    # 1. If env var has a real value AND the secret does NOT exist yet → create it
+    if [[ -n "${!key:-}" ]] && ! podman secret exists "$secret_name" 2>/dev/null; then
+        echo "- Creating new Podman secret: $secret_name" >&2
+        # Secure creation: never expose the key on the command line
+        printf '%s' "${!key}" | podman secret create "$secret_name" -
+    fi
+
+    # 2. If the secret now exists (or already did), add the --secret flag
+    if podman secret exists "$secret_name" 2>/dev/null; then
+        SECRETS+=" --secret $secret_name,type=env,target=${key}"
+    fi
+done
+
+echo "- Secrets prepared: ${SECRETS:-<none>}" >&2
+
+# Simple run — always --rm, isolated TUI (or headless)
+if [[ $DRY_RUN == true ]]; then
+    echo "[DRY] would run: podman run --rm $TTY_FLAG --userns=keep-id --security-opt=label=disable $MOUNTS $SECRETS -e USER=$USER $IMAGE $@"
+else
+    # Run rootless, persistent caches + project mount.
+    podman run --rm $TTY_FLAG \
+            -v gsd-npm_cache:/home/node/.npm:Z \
+            -v gsd-pw-browsers_cache:/home/node/pw-browsers:Z \
+            -v gsd-cargo_cache:/home/node/.cargo:Z \
+            -v gsd-rustup_cache:/home/node/.rustup:Z \
+            -v gsd-uv_cache:/home/node/.cache/uv:Z \
+            -v gsd-gsd_cache:/home/node/.cache/gsd:Z \
+            --userns=keep-id \
+            --security-opt=label=disable \
+            $MOUNTS $SECRETS \
+            -e USER="$USER" \
+            -e GSD_HOME="/home/node/.gsd" \
+            "$IMAGE" "$@"
+fi
