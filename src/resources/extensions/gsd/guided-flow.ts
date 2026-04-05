@@ -8,7 +8,7 @@
 
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@gsd/pi-coding-agent";
 import { showNextAction } from "../shared/tui.js";
-import { loadFile } from "./files.js";
+import { loadFile, saveFile } from "./files.js";
 import { isDbAvailable, getMilestoneSlices } from "./gsd-db.js";
 import { parseRoadmapSlices } from "./roadmap-slices.js";
 import { loadPrompt, inlineTemplate } from "./prompt-loader.js";
@@ -585,6 +585,16 @@ export async function showDiscuss(
 
   const state = await deriveState(basePath);
 
+  // Rebuild STATE.md from derived state before any dispatch (#3475).
+  // Without this, guided prompts read a stale STATE.md cache and the
+  // agent bootstraps from the wrong milestone.
+  try {
+    const { buildStateMarkdown } = await import("./doctor.js");
+    await saveFile(resolveGsdRootFile(basePath, "STATE"), buildStateMarkdown(state));
+  } catch (err) {
+    logWarning("guided", `STATE.md rebuild failed: ${(err as Error).message}`);
+  }
+
   // No active milestone (or corrupted milestone with undefined id) —
   // check for pending milestones to discuss instead
   if (!state.activeMilestone?.id) {
@@ -1136,6 +1146,14 @@ export async function showSmartEntry(
   }
 
   const state = await deriveState(basePath);
+
+  // Rebuild STATE.md from derived state before any dispatch (#3475).
+  try {
+    const { buildStateMarkdown } = await import("./doctor.js");
+    await saveFile(resolveGsdRootFile(basePath, "STATE"), buildStateMarkdown(state));
+  } catch (err) {
+    logWarning("guided", `STATE.md rebuild failed: ${(err as Error).message}`);
+  }
 
   if (!state.activeMilestone?.id) {
     // Guard: if a discuss session is already in flight, don't re-inject the prompt.
