@@ -23,7 +23,7 @@ import type { SecretsManifestEntry } from "./gsd/types.js";
 
 interface CollectedSecret {
 	key: string;
-	value: string | null; // null = skipped
+	value: string | null | undefined; // null/undefined = skipped
 }
 
 interface ToolResultDetails {
@@ -62,6 +62,9 @@ async function writeEnvKey(filePath: string, key: string, value: string): Promis
 		content = await readFile(filePath, "utf8");
 	} catch {
 		content = "";
+	}
+	if (typeof value !== "string") {
+		throw new TypeError(`Secret ${key} must be a string before writing to ${filePath}`);
 	}
 	const escaped = value.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/\r/g, "");
 	const line = `${key}=${escaped}`;
@@ -115,10 +118,10 @@ async function collectOneSecret(
 	keyName: string,
 	hint: string | undefined,
 	guidance?: string[],
-): Promise<string | null> {
+) : Promise<string | null> {
 	if (!ctx.hasUI) return null;
 
-	return ctx.ui.custom((tui: any, theme: any, _kb: any, done: (r: string | null) => void) => {
+	const result = await ctx.ui.custom((tui: any, theme: any, _kb: any, done: (r: string | null) => void) => {
 		let value = "";
 		let cachedLines: string[] | undefined;
 
@@ -215,6 +218,7 @@ async function collectOneSecret(
 			handleInput,
 		};
 	});
+	return result ?? null;
 }
 
 /**
