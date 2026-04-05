@@ -479,15 +479,18 @@ export function executeTriageResolutions(
     }
   }
 
-  // Also process deferred captures that target milestone IDs — create
-  // milestone directories so deriveState() discovers them.
-  const deferred = loadAllCaptures(basePath).filter(
-    c => c.status === "resolved" && !c.executed && c.classification === "defer",
+  // Also process deferred and milestone-class captures (#3542).
+  // A defer/milestone capture's "action" is the triage decision itself —
+  // once classified and resolved, the capture is done. The target milestone
+  // picks up the work naturally from its planning context.
+  const deferrable = loadAllCaptures(basePath).filter(
+    c => c.status === "resolved" && !c.executed &&
+      (c.classification === "defer" || (c.classification as string) === "milestone"),
   );
-  if (deferred.length > 0) {
-    // Group deferred captures by target milestone
+  if (deferrable.length > 0) {
+    // Group captures that reference a specific milestone — create dirs as needed.
     const byMilestone = new Map<string, CaptureEntry[]>();
-    for (const cap of deferred) {
+    for (const cap of deferrable) {
       const target = cap.resolution?.match(/\b(M\d{3}(?:-[a-z0-9]{6})?)\b/)?.[1];
       if (target) {
         const list = byMilestone.get(target) ?? [];
@@ -502,10 +505,16 @@ export function executeTriageResolutions(
         if (created) {
           result.deferredMilestones++;
           result.actions.push(`Created milestone ${milestoneId} for ${captures.length} deferred capture(s)`);
-          for (const cap of captures) {
-            markCaptureExecuted(basePath, cap.id);
-          }
         }
+      }
+    }
+    // Stamp ALL defer/milestone captures as executed (#3542 gaps 1-3).
+    // Previously only captures that triggered dir creation were stamped.
+    // Captures without a milestone ID in resolution text, or targeting an
+    // existing directory, were silently dropped — never stamped.
+    for (const cap of deferrable) {
+      if (!cap.executed) {
+        markCaptureExecuted(basePath, cap.id);
       }
     }
   }
