@@ -113,9 +113,7 @@ export async function openProjectDbIfPresent(basePath: string): Promise<void> {
   try {
     openDatabase(gsdDbPath);
   } catch (err) {
-    process.stderr.write(
-      `gsd-db: failed to open existing database: ${(err as Error).message}\n`,
-    );
+    logWarning("engine", `gsd-db: failed to open existing database: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
