@@ -1015,7 +1015,9 @@ export async function runUnitPhase(
     try {
       const entries = deps.existsSync(s.basePath) ? readdirSync(s.basePath) : [];
       hasXcodeBundle = entries.some((e: string) => e.endsWith(".xcodeproj") || e.endsWith(".xcworkspace"));
-    } catch { /* best-effort */ }
+    } catch (err) {
+      debugLog("runUnitPhase", { phase: "xcode-bundle-scan-failed", basePath: s.basePath, error: String(err) });
+    }
     // Monorepo support (#2347): if no project files in the worktree directory,
     // walk parent directories up to the filesystem root. In monorepos,
     // package.json / Cargo.toml etc. live in a parent directory.
