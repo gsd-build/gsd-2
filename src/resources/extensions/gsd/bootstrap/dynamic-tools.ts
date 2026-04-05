@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, sep } from "node:path";
 
 import type { ExtensionAPI } from "@gsd/pi-coding-agent";
@@ -32,41 +33,36 @@ export function resolveProjectRootDbPath(basePath: string): string {
     return join(projectRoot, ".gsd", "gsd.db");
   }
 
-  // Symlink-resolved layout: /.gsd/projects/<hash>/worktrees/M001/...
-  // The project root is everything before /.gsd/projects/ (#2517)
-  const symlinkMarker = `${sep}.gsd${sep}projects${sep}`;
-  const symlinkIdx = basePath.indexOf(symlinkMarker);
-  if (symlinkIdx !== -1) {
-    const afterProjects = basePath.slice(symlinkIdx + symlinkMarker.length);
-    // Expect: <hash>/worktrees/...
-    const worktreeSeg = `${sep}worktrees${sep}`;
-    if (afterProjects.includes(worktreeSeg)) {
-      const projectRoot = basePath.slice(0, symlinkIdx);
-      return join(projectRoot, ".gsd", "gsd.db");
-    }
-  }
+  const normalizedPath = basePath.replaceAll("\\", "/");
+  const projectsWorktreeMatch = /^(.*?)(\/\.gsd\/projects\/[a-f0-9]+)\/worktrees(?:\/|$)/.exec(normalizedPath);
+  if (projectsWorktreeMatch) {
+    const projectRootCandidate = basePath.slice(0, projectsWorktreeMatch[1].length);
+    const projectStateRoot = basePath.slice(0, projectsWorktreeMatch[1].length + projectsWorktreeMatch[2].length);
+    const normalizedProjectRoot = projectRootCandidate.replaceAll("\\", "/").replace(/\/+$/, "");
+    const normalizedGsdHome = (process.env.GSD_HOME || join(homedir(), ".gsd"))
+      .replaceAll("\\", "/")
+      .replace(/\/+$/, "");
+    const candidateGsdPath = join(projectRootCandidate, ".gsd")
+      .replaceAll("\\", "/")
+      .replace(/\/+$/, "");
 
-  // Forward-slash variant for symlink-resolved layout
-  const fwdSymlinkMarker = "/.gsd/projects/";
-  const fwdSymlinkIdx = basePath.indexOf(fwdSymlinkMarker);
-  if (fwdSymlinkIdx !== -1) {
-    const afterProjects = basePath.slice(fwdSymlinkIdx + fwdSymlinkMarker.length);
-    if (afterProjects.includes("/worktrees/")) {
-      const projectRoot = basePath.slice(0, fwdSymlinkIdx);
-      return join(projectRoot, ".gsd", "gsd.db");
-    }
-  }
+    const looksLikeUserHome =
+      /^\/(?:Users|home)\/[^/]+$/.test(normalizedProjectRoot)
+      || /^[A-Za-z]:\/Users\/[^/]+$/.test(normalizedProjectRoot);
 
-  // External-state layout: ~/.gsd/projects/<hash>/worktrees/<MID>/...
-  // Resolve to ~/.gsd/projects/<hash>/gsd.db (the canonical project DB) (#2952).
-  const extRe = /[/\\]\.gsd[/\\]projects[/\\][a-f0-9]+[/\\]worktrees(?:[/\\]|$)/;
-  const extMatch = extRe.exec(basePath);
-  if (extMatch) {
-    const matchStr = extMatch[0];
-    // Find the "/worktrees" portion within the match and slice up to it
-    const wtIdx = matchStr.search(/[/\\]worktrees(?:[/\\]|$)/);
-    const projectStateRoot = basePath.slice(0, extMatch.index + wtIdx);
-    return join(projectStateRoot, "gsd.db");
+    // External-state layout: ~/.gsd/projects/<hash>/worktrees/<MID>/...
+    // Resolve to ~/.gsd/projects/<hash>/gsd.db (#2952).
+    if (
+      candidateGsdPath === normalizedGsdHome
+      || candidateGsdPath.startsWith(normalizedGsdHome + "/")
+      || looksLikeUserHome
+    ) {
+      return join(projectStateRoot, "gsd.db");
+    }
+
+    // Symlink-resolved project-local layout: <project>/.gsd/projects/<hash>/worktrees/<MID>/...
+    // Resolve to <project>/.gsd/gsd.db (#2517).
+    return join(projectRootCandidate, ".gsd", "gsd.db");
   }
 
   return join(basePath, ".gsd", "gsd.db");
@@ -191,4 +187,3 @@ export function registerDynamicTools(pi: ExtensionAPI): void {
     },
   } as any);
 }
-
