@@ -28,6 +28,7 @@ function captureTool(): CapturedTool {
 		registerTool(tool: any) {
 			captured = { name: tool.name, execute: tool.execute };
 		},
+		on() {},
 	};
 	AskUserQuestions(fakePi as any);
 	if (!captured) throw new Error("No tool registered");
