@@ -424,18 +424,21 @@ test("parsePreferencesMarkdown parses heading+list format without frontmatter (#
 
 test("invalid frontmatter stays quiet outside debug mode (#3327)", () => {
   const errors: string[] = [];
-  const origError = console.error;
+  const origWrite = process.stderr.write.bind(process.stderr);
   const prevDebug = process.env.GSD_DEBUG;
   delete process.env.GSD_DEBUG;
-  console.error = (...args: unknown[]) => errors.push(args.join(" "));
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    errors.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
   try {
     _resetParseWarningFlag();
     const invalid = "---\nmodels:\n  execution: \"unterminated\n---\n";
     const prefs = parsePreferencesMarkdown(invalid);
     assert.deepEqual(prefs, {}, "invalid frontmatter should still fall back to empty preferences");
-    assert.equal(errors.length, 0, "invalid frontmatter should not write stack traces to stderr by default");
+    assert.equal(errors.length, 0, "invalid frontmatter should stay quiet outside debug mode");
   } finally {
-    console.error = origError;
+    process.stderr.write = origWrite as typeof process.stderr.write;
     if (prevDebug === undefined) delete process.env.GSD_DEBUG;
     else process.env.GSD_DEBUG = prevDebug;
     _resetParseWarningFlag();
@@ -444,10 +447,13 @@ test("invalid frontmatter stays quiet outside debug mode (#3327)", () => {
 
 test("invalid frontmatter logs short debug error at most once (#3327)", () => {
   const errors: string[] = [];
-  const origError = console.error;
+  const origWrite = process.stderr.write.bind(process.stderr);
   const prevDebug = process.env.GSD_DEBUG;
   process.env.GSD_DEBUG = "1";
-  console.error = (...args: unknown[]) => errors.push(args.join(" "));
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    errors.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
   try {
     _resetParseWarningFlag();
     const invalid = "---\nmodels:\n  execution: \"unterminated\n---\n";
@@ -455,10 +461,10 @@ test("invalid frontmatter logs short debug error at most once (#3327)", () => {
     parsePreferencesMarkdown(invalid);
 
     assert.equal(errors.length, 1, `expected exactly one debug log, got ${errors.length}: ${JSON.stringify(errors)}`);
-    assert.match(errors[0], /YAML parse error:/);
+    assert.match(errors[0], /\[gsd:guided\] WARN: YAML parse error in frontmatter block:/);
     assert.ok(!errors[0].includes("YAMLParseError:"), "debug log should not dump the full error object");
   } finally {
-    console.error = origError;
+    process.stderr.write = origWrite as typeof process.stderr.write;
     if (prevDebug === undefined) delete process.env.GSD_DEBUG;
     else process.env.GSD_DEBUG = prevDebug;
     _resetParseWarningFlag();
