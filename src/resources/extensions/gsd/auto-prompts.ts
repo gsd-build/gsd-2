@@ -998,6 +998,10 @@ export async function buildResearchSlicePrompt(
   inlined.push(await inlineFile(roadmapPath, roadmapRel, "Milestone Roadmap"));
   const contextInline = await inlineFileOptional(contextPath, contextRel, "Milestone Context");
   if (contextInline) inlined.push(contextInline);
+  const sliceContextPath = resolveSliceFile(base, mid, sid, "CONTEXT");
+  const sliceContextRel = relSliceFile(base, mid, sid, "CONTEXT");
+  const sliceContextInline = await inlineFileOptional(sliceContextPath, sliceContextRel, "Slice Context (from discussion)");
+  if (sliceContextInline) inlined.push(sliceContextInline);
   const researchInline = await inlineFileOptional(milestoneResearchPath, milestoneResearchRel, "Milestone Research");
   if (researchInline) inlined.push(researchInline);
   const decisionsInline = await inlineDecisionsFromDb(base, mid);
@@ -1053,6 +1057,10 @@ export async function buildPlanSlicePrompt(
   if (researchSliceAnchor) inlined.push(formatAnchorForPrompt(researchSliceAnchor));
 
   inlined.push(await inlineFile(roadmapPath, roadmapRel, "Milestone Roadmap"));
+  const sliceContextPathPS = resolveSliceFile(base, mid, sid, "CONTEXT");
+  const sliceContextRelPS = relSliceFile(base, mid, sid, "CONTEXT");
+  const sliceContextInlinePS = await inlineFileOptional(sliceContextPathPS, sliceContextRelPS, "Slice Context (from discussion)");
+  if (sliceContextInlinePS) inlined.push(sliceContextInlinePS);
   const researchInline = await inlineFileOptional(researchPath, researchRel, "Slice Research");
   if (researchInline) inlined.push(researchInline);
   if (inlineLevel !== "minimal") {
@@ -1257,6 +1265,10 @@ export async function buildCompleteSlicePrompt(
   const inlined: string[] = [];
   inlined.push(await inlineFile(roadmapPath, roadmapRel, "Milestone Roadmap"));
   inlined.push(await inlineFile(slicePlanPath, slicePlanRel, "Slice Plan"));
+  const sliceContextPathCS = resolveSliceFile(base, mid, sid, "CONTEXT");
+  const sliceContextRelCS = relSliceFile(base, mid, sid, "CONTEXT");
+  const sliceContextInlineCS = await inlineFileOptional(sliceContextPathCS, sliceContextRelCS, "Slice Context (from discussion)");
+  if (sliceContextInlineCS) inlined.push(sliceContextInlineCS);
   if (inlineLevel !== "minimal") {
     const requirementsInline = await inlineRequirementsFromDb(base, sid, inlineLevel);
     if (requirementsInline) inlined.push(requirementsInline);
@@ -1514,6 +1526,10 @@ export async function buildReplanSlicePrompt(
   const inlined: string[] = [];
   inlined.push(await inlineFile(roadmapPath, roadmapRel, "Milestone Roadmap"));
   inlined.push(await inlineFile(slicePlanPath, slicePlanRel, "Current Slice Plan"));
+  const sliceContextPathRP = resolveSliceFile(base, mid, sid, "CONTEXT");
+  const sliceContextRelRP = relSliceFile(base, mid, sid, "CONTEXT");
+  const sliceContextInlineRP = await inlineFileOptional(sliceContextPathRP, sliceContextRelRP, "Slice Context (from discussion)");
+  if (sliceContextInlineRP) inlined.push(sliceContextInlineRP);
 
   // Find the blocker task summary — the completed task with blocker_discovered: true
   let blockerTaskId = "";
@@ -1631,6 +1647,10 @@ export async function buildReassessRoadmapPrompt(
   const inlined: string[] = [];
   inlined.push(await inlineFile(roadmapPath, roadmapRel, "Current Roadmap"));
   inlined.push(await inlineFile(summaryPath, summaryRel, `${completedSliceId} Summary`));
+  const sliceContextPathRA = resolveSliceFile(base, mid, completedSliceId, "CONTEXT");
+  const sliceContextRelRA = relSliceFile(base, mid, completedSliceId, "CONTEXT");
+  const sliceContextInlineRA = await inlineFileOptional(sliceContextPathRA, sliceContextRelRA, `${completedSliceId} Slice Context (from discussion)`);
+  if (sliceContextInlineRA) inlined.push(sliceContextInlineRA);
   if (inlineLevel !== "minimal") {
     const projectInline = await inlineProjectFromDb(base);
     if (projectInline) inlined.push(projectInline);
