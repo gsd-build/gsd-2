@@ -447,6 +447,12 @@ export async function deriveStateFromDb(basePath: string): Promise<GSDState> {
   let activeMilestoneFound = false;
   let activeMilestoneHasDraft = false;
 
+  // Pre-scan: if any non-complete, non-parked milestone is explicitly 'active' in the DB,
+  // queued shells (status=queued, no slices) should yield to it rather than claiming active.
+  const hasExplicitlyActiveMilestone = milestones.some(
+    m => m.status === 'active' && !completeMilestoneIds.has(m.id) && !parkedMilestoneIds.has(m.id)
+  );
+
   for (const m of milestones) {
     if (parkedMilestoneIds.has(m.id)) {
       registry.push({ id: m.id, title: stripMilestonePrefix(m.title) || m.id, status: 'parked' });
@@ -497,6 +503,11 @@ export async function deriveStateFromDb(basePath: string): Promise<GSDState> {
 
       if (depsUnmet) {
         registry.push({ id: m.id, title, status: 'pending', dependsOn: deps });
+        continue;
+      }
+
+      if (m.status === 'queued' && slices.length === 0 && hasExplicitlyActiveMilestone) {
+        registry.push({ id: m.id, title, status: 'pending' });
         continue;
       }
 
