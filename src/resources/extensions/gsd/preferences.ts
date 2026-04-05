@@ -248,7 +248,7 @@ function parseFrontmatterBlock(frontmatter: string): GSDPreferences {
     if (process.env.GSD_DEBUG && !_warnedFrontmatterParseError) {
       _warnedFrontmatterParseError = true;
       const message = e instanceof Error ? e.message : String(e);
-      console.error(`[parseFrontmatterBlock] YAML parse error: ${message}`);
+      logWarning("guided", `YAML parse error in frontmatter block: ${message}`);
     }
     return {} as GSDPreferences;
   }
