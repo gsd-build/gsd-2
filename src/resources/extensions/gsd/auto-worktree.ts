@@ -1049,12 +1049,20 @@ export function createAutoWorktree(
       reuseExistingBranch: true,
     });
   } else {
-    // Fresh start — create branch from integration branch
+    // Fresh start — create branch from integration branch.
+    // Use the same 3-tier fallback as mergeMilestoneToMain (#3461):
+    //   1. META.json integration branch (explicit per-milestone override)
+    //   2. git.main_branch preference (user's configured working branch)
+    //   3. nativeDetectMainBranch (origin/HEAD auto-detection)
+    // Without tier 2, projects with main_branch=dev but origin/HEAD→master
+    // would fork worktrees from the wrong (stale) branch.
     const integrationBranch =
       readIntegrationBranch(basePath, milestoneId) ?? undefined;
+    const gitPrefs = loadEffectiveGSDPreferences()?.preferences?.git;
+    const startPoint = integrationBranch ?? gitPrefs?.main_branch ?? undefined;
     info = createWorktree(basePath, milestoneId, {
       branch,
-      startPoint: integrationBranch,
+      startPoint,
     });
   }
 
