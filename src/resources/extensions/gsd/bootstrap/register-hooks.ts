@@ -28,6 +28,24 @@ async function syncServiceTierStatus(ctx: ExtensionContext): Promise<void> {
   ctx.ui.setStatus("gsd-fast", formatServiceTierFooterStatus(getEffectiveServiceTier(), ctx.model?.id));
 }
 
+/**
+ * Returns the session_before_compact cancel check as a testable pure function.
+ * Accepts predicate overrides so tests can inject mock state without side effects.
+ *
+ * Only isAutoActive() blocks compaction. isAutoPaused() must NOT (#3165).
+ */
+export function buildBeforeCompactHandler(
+  isActiveOverride: () => boolean = isAutoActive,
+  _isPausedOverride?: () => boolean,
+): () => Promise<{ cancel: true } | undefined> {
+  return async () => {
+    if (isActiveOverride()) {
+      return { cancel: true };
+    }
+    return undefined;
+  };
+}
+
 export function registerHooks(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     resetWriteGateState();
@@ -97,7 +115,7 @@ export function registerHooks(pi: ExtensionAPI): void {
   });
 
   pi.on("session_before_compact", async () => {
-    if (isAutoActive() || isAutoPaused()) {
+    if (isAutoActive()) {
       return { cancel: true };
     }
     const basePath = process.cwd();
