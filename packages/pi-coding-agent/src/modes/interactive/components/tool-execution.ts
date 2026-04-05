@@ -3,6 +3,7 @@ import {
 	Container,
 	getCapabilities,
 	Image,
+	type ImageDimensions,
 	imageFallback,
 	Spacer,
 	Text,
@@ -88,6 +89,9 @@ export class ToolExecutionComponent extends Container {
 	private editDiffArgsKey?: string; // Track which args the preview is for
 	// Cached converted images for Kitty protocol (which requires PNG), keyed by index
 	private convertedImages: Map<number, { data: string; mimeType: string }> = new Map();
+	// Cached resolved image dimensions to avoid re-triggering async parsing
+	// when updateDisplay() recreates Image components (#3455).
+	private resolvedImageDimensions: Map<number, ImageDimensions> = new Map();
 	// Incremental syntax highlighting cache for write tool call args
 	private writeHighlightCache?: WriteHighlightCache;
 	// When true, this component intentionally renders no lines
@@ -472,16 +476,28 @@ export class ToolExecutionComponent extends Container {
 					const spacer = new Spacer(1);
 					this.addChild(spacer);
 					this.imageSpacers.push(spacer);
+					// Pass cached dimensions to avoid re-triggering async parsing
+					// when updateDisplay() recreates Image components (#3455).
+					const cachedDims = this.resolvedImageDimensions.get(i);
 					const imageComponent = new Image(
 						imageData,
 						imageMimeType,
 						{ fallbackColor: (s: string) => theme.fg("toolOutput", s) },
 						{ maxWidthCells: 60 },
+						cachedDims,
 					);
-					imageComponent.setOnDimensionsResolved(() => {
-						this.updateDisplay();
-						this.ui.requestRender();
-					});
+					if (!cachedDims) {
+						const imgIdx = i;
+						imageComponent.setOnDimensionsResolved(() => {
+							// Cache resolved dimensions so future updateDisplay() calls
+							// don't re-trigger async parsing → infinite loop (#3455).
+							const dims = imageComponent.getDimensions?.();
+							if (dims) this.resolvedImageDimensions.set(imgIdx, dims);
+							// Just re-render — don't call updateDisplay() which would
+							// destroy and recreate all Image components.
+							this.ui.requestRender();
+						});
+					}
 					this.imageComponents.push(imageComponent);
 					this.addChild(imageComponent);
 				}
