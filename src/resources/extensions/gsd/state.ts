@@ -446,6 +446,10 @@ export async function deriveStateFromDb(basePath: string): Promise<GSDState> {
   let activeMilestoneSlices: SliceRow[] = [];
   let activeMilestoneFound = false;
   let activeMilestoneHasDraft = false;
+  // Queued shells (DB row, no slices, no content files) are deferred during
+  // the main loop so they don't eclipse real active milestones (#3470).
+  // If no real active milestone is found, the first deferred shell is promoted.
+  let firstDeferredQueuedShell: { id: string; title: string; deps: string[] } | null = null;
 
   for (const m of milestones) {
     if (parkedMilestoneIds.has(m.id)) {
@@ -500,6 +504,23 @@ export async function deriveStateFromDb(basePath: string): Promise<GSDState> {
         continue;
       }
 
+      // Defer queued shell milestones with no substantive content (#3470).
+      // A queued milestone with no slices and no context/draft file is a
+      // placeholder that should not block later real active milestones.
+      // If no real active milestone is found after the loop, the first
+      // deferred shell is promoted to active (#2921).
+      if (m.status === 'queued' && slices.length === 0) {
+        const contextFile = resolveMilestoneFile(basePath, m.id, "CONTEXT");
+        const draftFile = resolveMilestoneFile(basePath, m.id, "CONTEXT-DRAFT");
+        if (!contextFile && !draftFile) {
+          if (!firstDeferredQueuedShell) {
+            firstDeferredQueuedShell = { id: m.id, title, deps };
+          }
+          registry.push({ id: m.id, title, status: 'pending', ...(deps.length > 0 ? { dependsOn: deps } : {}) });
+          continue;
+        }
+      }
+
       // Handle all-slices-done case (validating/completing)
       if (allSlicesDone) {
         const validationFile = resolveMilestoneFile(basePath, m.id, "VALIDATION");
@@ -530,6 +551,16 @@ export async function deriveStateFromDb(basePath: string): Promise<GSDState> {
       const deps = m.depends_on;
       registry.push({ id: m.id, title, status: 'pending', ...(deps.length > 0 ? { dependsOn: deps } : {}) });
     }
+  }
+
+  // Promote deferred queued shell if no real active milestone was found (#3470/#2921).
+  if (!activeMilestoneFound && firstDeferredQueuedShell) {
+    const shell = firstDeferredQueuedShell;
+    activeMilestone = { id: shell.id, title: shell.title };
+    activeMilestoneSlices = [];
+    activeMilestoneFound = true;
+    const entry = registry.find(e => e.id === shell.id);
+    if (entry) entry.status = 'active';
   }
 
   const milestoneProgress = {
