@@ -80,6 +80,7 @@ import { join } from "node:path";
 import { sep as pathSep } from "node:path";
 
 import { resolveProjectRootDbPath } from "./bootstrap/dynamic-tools.js";
+import { resolveDefaultSessionModel } from "./preferences-models.js";
 import type { WorktreeResolver } from "./worktree-resolver.js";
 
 export interface BootstrapDeps {
@@ -155,12 +156,16 @@ export async function bootstrapAutoSession(
 
   // Capture the user's session model before guided-flow dispatch can apply a
   // phase-specific planning model for a discuss turn (#2829).
-  const startModelSnapshot = ctx.model
-    ? {
-        provider: ctx.model.provider,
-        id: ctx.model.id,
-      }
-    : null;
+  //
+  // GSD PREFERENCES.md takes priority over the session model from settings.json
+  // (#3517).  The session model (ctx.model) comes from findInitialModel() which
+  // reads defaultProvider/defaultModel from ~/.gsd/agent/settings.json.  When
+  // the user has explicit model preferences in PREFERENCES.md, those should win.
+  const preferredModel = resolveDefaultSessionModel(ctx.model?.provider);
+  const startModelSnapshot = preferredModel
+    ?? (ctx.model
+      ? { provider: ctx.model.provider, id: ctx.model.id }
+      : null);
 
   try {
     // Validate GSD_PROJECT_ID early so the user gets immediate feedback
