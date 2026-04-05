@@ -2,7 +2,7 @@ import { DefaultResourceLoader, sortExtensionPaths } from '@gsd/pi-coding-agent'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, openSync, closeSync, readFileSync, readlinkSync, readdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { compareSemver } from './update-check.js'
 import { discoverExtensionEntryPaths } from './extension-discovery.js'
@@ -290,7 +290,19 @@ function copyDirRecursive(src: string, dest: string): void {
  */
 function ensureNodeModulesSymlink(agentDir: string): void {
   const agentNodeModules = join(agentDir, 'node_modules')
-  const gsdNodeModules = join(packageRoot, 'node_modules')
+  // When installed globally (npm/bun), packageRoot is .../node_modules/gsd-pi.
+  // Its internal node_modules only has @gsd/* workspace packages, not hoisted
+  // runtime deps like yaml, @sinclair/typebox, etc. (#3529).
+  // Use dirname(packageRoot) to reach the hoisted node_modules that contains
+  // all deps. Fall back to packageRoot/node_modules for source/monorepo installs
+  // where the internal node_modules IS the right target.
+  const internalNodeModules = join(packageRoot, 'node_modules')
+  const hoistedNodeModules = dirname(packageRoot)
+  // If packageRoot is inside a node_modules directory (global install),
+  // use the parent (hoisted) node_modules. Otherwise use internal.
+  const gsdNodeModules = basename(hoistedNodeModules) === 'node_modules'
+    ? hoistedNodeModules
+    : internalNodeModules
 
   try {
     const stat = lstatSync(agentNodeModules)
