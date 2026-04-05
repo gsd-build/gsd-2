@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 // Import loadExtensions from the compiled dist (it IS re-exported from the
 // core/extensions barrel but not from the top-level index).
 const loaderPath = join(
-  fileURLToPath(import.meta.url), "..", "..", "..", "..",
+  fileURLToPath(import.meta.url), "..", "..", "..",
   "packages", "pi-coding-agent", "dist", "core", "extensions", "loader.js",
 );
 
