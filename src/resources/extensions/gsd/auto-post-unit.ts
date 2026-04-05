@@ -34,6 +34,7 @@ import {
   verifyExpectedArtifact,
   resolveExpectedArtifactPath,
   writeBlockerPlaceholder,
+  diagnoseExpectedArtifact,
 } from "./auto-recovery.js";
 import { regenerateIfMissing } from "./workflow-projections.js";
 import { syncStateToProjectRoot } from "./auto-worktree.js";
