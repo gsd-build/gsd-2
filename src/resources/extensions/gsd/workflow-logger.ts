@@ -48,7 +48,8 @@ export type LogComponent =
   | "bootstrap"     // Extension bootstrap (system-context, agent-end)
   | "guided"        // Guided flow (discuss, plan wizards)
   | "registry"      // Rule registry hook state
-  | "renderer";     // Markdown renderer and projections
+  | "renderer"      // Markdown renderer and projections
+  | "postUnit";     // Post-unit processing (abandon detection, overrides)
 
 export interface LogEntry {
   ts: string;
