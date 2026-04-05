@@ -430,10 +430,10 @@ export function writeBlockerPlaceholder(
   if (isDbAvailable()) {
     const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
     if (unitType === "execute-task" && mid && sid && tid) {
-      try { updateTaskStatus(mid, sid, tid, "complete", new Date().toISOString()); } catch { /* non-fatal */ }
+      try { updateTaskStatus(mid, sid, tid, "complete", new Date().toISOString()); } catch (e) { logWarning("recovery", `updateTaskStatus failed during context exhaustion: ${e instanceof Error ? e.message : String(e)}`); }
     }
     if (unitType === "complete-slice" && mid && sid) {
-      try { updateSliceStatus(mid, sid, "complete", new Date().toISOString()); } catch { /* non-fatal */ }
+      try { updateSliceStatus(mid, sid, "complete", new Date().toISOString()); } catch (e) { logWarning("recovery", `updateSliceStatus failed during context exhaustion: ${e instanceof Error ? e.message : String(e)}`); }
     }
   }
 
