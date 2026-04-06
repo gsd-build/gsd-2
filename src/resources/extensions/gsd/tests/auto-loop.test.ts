@@ -1219,7 +1219,7 @@ test("auto-loop.ts barrel re-exports autoLoop, runUnit, and resolveAgentEnd", ()
   );
 });
 
-test("auto.ts startAuto calls autoLoop (not dispatchNextUnit as first dispatch)", () => {
+test("auto.ts startAuto delegates to pluggable orchestrator factory (minimal edit per ADR-008)", () => {
   const src = readFileSync(
     resolve(import.meta.dirname, "..", "auto.ts"),
     "utf-8",
@@ -1231,8 +1231,8 @@ test("auto.ts startAuto calls autoLoop (not dispatchNextUnit as first dispatch)"
   const fnBlock =
     fnEnd > -1 ? src.slice(fnIdx, fnEnd) : src.slice(fnIdx, fnIdx + 5000);
   assert.ok(
-    fnBlock.includes("autoLoop("),
-    "startAuto must call autoLoop() instead of dispatchNextUnit()",
+    fnBlock.includes("orchestrator-factory.js") || fnBlock.includes("createOrchestrator"),
+    "startAuto must delegate to pluggable orchestrator factory instead of direct autoLoop() or dispatchNextUnit()",
   );
 });
 
