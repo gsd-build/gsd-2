@@ -12,6 +12,13 @@ import { registerQueryTools } from "./query-tools.js";
 import { registerHooks } from "./register-hooks.js";
 import { registerShortcuts } from "./register-shortcuts.js";
 
+export function handleUncaughtExtensionError(err: Error): void {
+  if (handleRecoverableExtensionProcessError(err)) {
+    return;
+  }
+  process.stderr.write(`[gsd] uncaught: ${err?.stack ?? err?.message ?? String(err)}\n`);
+}
+
 export function handleRecoverableExtensionProcessError(err: Error): boolean {
   if ((err as NodeJS.ErrnoException).code === "EPIPE") {
     process.exit(0);
@@ -33,10 +40,7 @@ export function handleRecoverableExtensionProcessError(err: Error): boolean {
 function installEpipeGuard(): void {
   if (!process.listeners("uncaughtException").some((listener) => listener.name === "_gsdEpipeGuard")) {
     const _gsdEpipeGuard = (err: Error): void => {
-      if (handleRecoverableExtensionProcessError(err)) {
-        return;
-      }
-      throw err;
+      handleUncaughtExtensionError(err);
     };
     process.on("uncaughtException", _gsdEpipeGuard);
   }
