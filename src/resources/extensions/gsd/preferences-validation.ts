@@ -935,5 +935,33 @@ export function validatePreferences(preferences: GSDPreferences): {
     }
   }
 
+  // ─── Discuss Preparation ────────────────────────────────────────────
+  if (preferences.discuss_preparation !== undefined) {
+    if (typeof preferences.discuss_preparation === "boolean") {
+      validated.discuss_preparation = preferences.discuss_preparation;
+    } else {
+      errors.push("discuss_preparation must be a boolean");
+    }
+  }
+
+  // ─── Discuss Web Research ───────────────────────────────────────────
+  if (preferences.discuss_web_research !== undefined) {
+    if (typeof preferences.discuss_web_research === "boolean") {
+      validated.discuss_web_research = preferences.discuss_web_research;
+    } else {
+      errors.push("discuss_web_research must be a boolean");
+    }
+  }
+
+  // ─── Discuss Depth ──────────────────────────────────────────────────
+  if (preferences.discuss_depth !== undefined) {
+    const validDepths = new Set(["quick", "standard", "thorough"]);
+    if (typeof preferences.discuss_depth === "string" && validDepths.has(preferences.discuss_depth)) {
+      validated.discuss_depth = preferences.discuss_depth as GSDPreferences["discuss_depth"];
+    } else {
+      errors.push(`discuss_depth must be one of: quick, standard, thorough`);
+    }
+  }
+
   return { preferences: validated, errors, warnings };
 }

@@ -1114,7 +1114,7 @@ function resolveVersionCatalogAccessors(
   return accessors;
 }
 
-function scanProjectFiles(basePath: string): string[] {
+export function scanProjectFiles(basePath: string): string[] {
   const files: string[] = [];
   const queue: Array<{ path: string; depth: number }> = [{ path: basePath, depth: 0 }];
 

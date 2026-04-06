@@ -110,6 +110,9 @@ export const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "enhanced_verification_pre",
   "enhanced_verification_post",
   "enhanced_verification_strict",
+  "discuss_preparation",
+  "discuss_web_research",
+  "discuss_depth",
 ]);
 
 /** Canonical list of all dispatch unit types. */
@@ -309,6 +312,7 @@ export interface GSDPreferences {
     timeout_scale_cap?: number;
   };
 
+
   // ─── Enhanced Verification ──────────────────────────────────────────────────
   /**
    * Enable enhanced verification (both pre-execution and post-execution checks).
@@ -332,6 +336,27 @@ export interface GSDPreferences {
    * Default: false (warnings only for non-critical failures).
    */
   enhanced_verification_strict?: boolean;
+  /**
+   * Enable the preparation phase before discussion sessions.
+   * Preparation analyzes the codebase, reviews prior context, and optionally researches the ecosystem.
+   * Default: true.
+   */
+  discuss_preparation?: boolean;
+  /**
+   * Enable web research during preparation phase.
+   * When enabled, searches for best practices and known issues for the detected tech stack.
+   * Requires a search API key (TAVILY_API_KEY or BRAVE_API_KEY).
+   * Default: true.
+   */
+  discuss_web_research?: boolean;
+  /**
+   * Depth of preparation analysis.
+   * - "quick": Minimal analysis, fastest (~10s)
+   * - "standard": Balanced analysis (~30s)
+   * - "thorough": Deep analysis with more file sampling (~60s)
+   * Default: "standard".
+   */
+  discuss_depth?: "quick" | "standard" | "thorough";
 }
 
 export interface LoadedGSDPreferences {
