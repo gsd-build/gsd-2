@@ -9,7 +9,7 @@ import { handleAgentEnd } from "./agent-end-recovery.js";
 import { clearDiscussionFlowState, isDepthVerified, isQueuePhaseActive, markDepthVerified, resetWriteGateState, shouldBlockContextWrite, shouldBlockQueueExecution } from "./write-gate.js";
 import { isBlockedStateFile, isBashWriteToStateFile, BLOCKED_WRITE_ERROR } from "../write-intercept.js";
 import { cleanupQuickBranch } from "../quick.js";
-import { getDiscussionMilestoneId } from "../guided-flow.js";
+import { getDiscussionMilestoneId, restoreToolsAfterDiscuss } from "../guided-flow.js";
 import { loadToolApiKeys } from "../commands-config.js";
 import { loadFile, saveFile, formatContinue } from "../files.js";
 import { deriveState } from "../state.js";
@@ -93,6 +93,10 @@ export function registerHooks(pi: ExtensionAPI): void {
   pi.on("agent_end", async (event, ctx: ExtensionContext) => {
     resetToolCallLoopGuard();
     resetAskUserQuestionsCache();
+    // Restore the full tool set if a discuss-flow dispatch scoped it down.
+    // Must run before handleAgentEnd so that any follow-up dispatches
+    // (e.g. auto-start after discuss) have access to the complete tool set.
+    restoreToolsAfterDiscuss(pi);
     await handleAgentEnd(pi, event, ctx);
   });
 

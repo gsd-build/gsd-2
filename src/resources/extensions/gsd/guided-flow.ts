@@ -89,6 +89,25 @@ interface PendingAutoStartEntry {
 
 const pendingAutoStartMap = new Map<string, PendingAutoStartEntry>();
 
+// ── Discuss-flow tool scoping state ──────────────────────────────────────────
+// dispatchWorkflow strips non-allowlisted GSD tools for discuss flows (#2949).
+// We save the original tool set so it can be restored once the discuss turn
+// completes (agent_end hook). Without this, subsequent guided-flow dispatches
+// run with the reduced tool set — breaking plan/execute phases.
+let _savedToolsBeforeDiscuss: string[] | null = null;
+
+/**
+ * Restore the full tool set after a discuss-flow dispatch.
+ * Called from the agent_end hook. No-op when no discuss scoping is active.
+ */
+export function restoreToolsAfterDiscuss(pi: ExtensionAPI): void {
+  if (_savedToolsBeforeDiscuss) {
+    pi.setActiveTools(_savedToolsBeforeDiscuss);
+    debugLog("discuss-tool-restore", { restored: _savedToolsBeforeDiscuss.length });
+    _savedToolsBeforeDiscuss = null;
+  }
+}
+
 /**
  * Backward-compat bridge: returns a mutable reference to the entry matching
  * basePath, or the sole entry when only one session exists.
@@ -297,6 +316,10 @@ async function dispatchWorkflow(
   // planning/execution/completion tools to keep the grammar within limits.
   if (unitType?.startsWith("discuss-")) {
     const currentTools = pi.getActiveTools();
+    // Save the full tool set so agent_end can restore it after the discuss
+    // turn completes. Without this, subsequent dispatches (plan/execute)
+    // would run with the reduced discuss-only tool set.
+    _savedToolsBeforeDiscuss = currentTools;
     // Keep all non-GSD tools (builtins, other extensions) and only the
     // GSD tools on the discuss allowlist.
     const scopedTools = currentTools.filter(
