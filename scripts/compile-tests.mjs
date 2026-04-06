@@ -199,6 +199,42 @@ async function main() {
     console.log(`Removed ${staleCleaned} stale compiled test files from dist-test/`);
   }
 
+  // Remove stale .ts/.js sibling pairs in resource directories.
+  // esbuild compiles .ts → .js, then copyAssets overlays the original .ts files.
+  // When these pairs land inside dist-test/dist/resources/extensions/ (the path
+  // resource-loader uses as bundled source), hasStaleCompiledExtensionSiblings()
+  // detects them and forces a full re-sync on every initResources() call,
+  // defeating the version-match skip optimization and breaking tests that rely
+  // on the skip (e.g. the marker-file-survives test).
+  // Clean both dist-test/dist/ and dist-test/src/ resource extension roots.
+  // dist/resources/extensions/ is what resource-loader uses as bundled source —
+  // stale pairs there break hasStaleCompiledExtensionSiblings().
+  // src/resources/extensions/ root-level .ts files are never imported directly
+  // (tests import the compiled .js via dist-test-resolve.mjs), so clean those too.
+  const resourceDirsToClean = [
+    join(ROOT, 'dist-test', 'dist', 'resources', 'extensions'),
+    join(ROOT, 'dist-test', 'src', 'resources', 'extensions'),
+  ];
+  let resourceStaleCleaned = 0;
+  for (const dir of resourceDirsToClean) {
+    let entries;
+    try { entries = await readdir(dir, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      // A .ts file is stale if a .js sibling exists (it was compiled by esbuild)
+      if (entry.name.endsWith('.ts')) {
+        const jsName = entry.name.replace(/\.ts$/, '.js');
+        if (existsSync(join(dir, jsName))) {
+          await rm(join(dir, entry.name));
+          resourceStaleCleaned++;
+        }
+      }
+    }
+  }
+  if (resourceStaleCleaned > 0) {
+    console.log(`Removed ${resourceStaleCleaned} stale .ts/.js resource pairs from dist-test/`);
+  }
+
   // Ensure dist-test/node_modules exists so resource-loader.ts (which computes
   // packageRoot from import.meta.url) resolves gsdNodeModules to a real path.
   // Without this, initResources creates dangling symlinks in test environments.
