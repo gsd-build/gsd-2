@@ -371,16 +371,16 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				await new Promise(resolve => setTimeout(resolve, baseDelayMs * attempt));
 			}
 
-			// All retries exhausted — throw descriptive error
-			// Check if credentials exist but are temporarily backed off
-			// (e.g., after a 429 quota exhaustion). Provide a specific error
-			// so the retry handler knows this is transient, not a permanent
-			// auth failure.
+			// All retries exhausted — throw descriptive error.
+			// Check if credentials exist but are temporarily in a backoff window
+			// (e.g., after a 429). This message intentionally avoids phrases like
+			// "rate limit" / "429" to prevent isRetryableError() from re-entering
+			// the retry handler and creating cascading error entries (#3429).
 			const hasAuth = modelRegistry.authStorage.hasAuth(resolvedProvider);
 			if (hasAuth) {
 				throw new Error(
-					`All credentials for "${resolvedProvider}" are temporarily backed off due to rate limiting. ` +
-						`The request will be retried automatically when backoff expires.`,
+					`All credentials for "${resolvedProvider}" are in a cooldown window. ` +
+						`Please wait a moment and try again, or switch to a different provider.`,
 				);
 			}
 			const model = agent.state.model;
@@ -390,8 +390,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				// surface a specific message instead of the misleading "Authentication failed".
 				if (modelRegistry.authStorage.areAllCredentialsBackedOff(resolvedProvider)) {
 					throw new Error(
-						`Rate limit in effect for "${resolvedProvider}". ` +
-							`Please wait before retrying or switch to a different model.`,
+						`All credentials for "${resolvedProvider}" are in a cooldown window. ` +
+							`Please wait a moment and try again, or switch to a different provider.`,
 					);
 				}
 				throw new Error(

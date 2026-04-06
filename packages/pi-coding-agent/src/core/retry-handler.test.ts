@@ -278,5 +278,85 @@ describe("RetryHandler — long-context entitlement 429 (#2803)", () => {
 			const msg = errorMessage("Extra usage is required for long context requests.");
 			assert.equal(handler.isRetryableError(msg), true);
 		});
+
+		it("does NOT consider credential cooldown error as retryable (#3429)", () => {
+			// The credential cooldown message from getApiKey() must not re-enter
+			// the retry handler. Re-entry creates cascading empty error entries
+			// in the session file that break resume.
+			const { deps } = createMockDeps();
+			const handler = new RetryHandler(deps);
+			const msg = errorMessage(
+				'All credentials for "anthropic" are in a cooldown window. ' +
+				'Please wait a moment and try again, or switch to a different provider.',
+			);
+			assert.equal(handler.isRetryableError(msg), false);
+		});
+	});
+
+	describe("quota_exhausted credential backoff (#3430)", () => {
+		it("does NOT call markUsageLimitReached for quota_exhausted errors", async () => {
+			// "Extra usage is required" is an account-level billing gate.
+			// Backing off the credential for 30 minutes blocks all provider
+			// requests and has no effect on the billing condition.
+			const { deps, markUsageLimitReached } = createMockDeps({
+				model: createMockModel("anthropic", "claude-opus-4-6[1m]"),
+				markUsageLimitReachedResult: false,
+				fallbackResult: null,
+				findModelResult: () => undefined,
+			});
+
+			const handler = new RetryHandler(deps);
+			const msg = errorMessage(
+				'429 {"type":"error","error":{"type":"rate_limit_error","message":"Extra usage is required for long context requests."}}',
+			);
+
+			await handler.handleRetryableError(msg);
+
+			assert.equal(
+				markUsageLimitReached.mock.calls.length,
+				0,
+				"markUsageLimitReached must NOT be called for quota_exhausted errors",
+			);
+		});
+
+		it("still calls markUsageLimitReached for regular rate_limit errors", async () => {
+			const { deps, markUsageLimitReached } = createMockDeps({
+				model: createMockModel("anthropic", "claude-opus-4-6"),
+				markUsageLimitReachedResult: false,
+				fallbackResult: null,
+			});
+
+			const handler = new RetryHandler(deps);
+			const msg = errorMessage("429 Too Many Requests");
+
+			await handler.handleRetryableError(msg);
+
+			assert.equal(
+				markUsageLimitReached.mock.calls.length,
+				1,
+				"markUsageLimitReached should be called for rate_limit errors",
+			);
+		});
+
+		it("still tries cross-provider fallback for quota_exhausted without credential backoff", async () => {
+			const fallbackModel = createMockModel("openai", "gpt-4o");
+			const { deps, markUsageLimitReached, continueFn } = createMockDeps({
+				model: createMockModel("anthropic", "claude-opus-4-6[1m]"),
+				markUsageLimitReachedResult: false,
+				fallbackResult: { model: fallbackModel, reason: "cross-provider fallback" },
+			});
+
+			const handler = new RetryHandler(deps);
+			const msg = errorMessage("Extra usage is required for long context requests.");
+
+			const result = await handler.handleRetryableError(msg);
+
+			assert.equal(result, true, "should retry with fallback provider");
+			assert.equal(
+				markUsageLimitReached.mock.calls.length,
+				0,
+				"should NOT back off credentials before trying fallback",
+			);
+		});
 	});
 });

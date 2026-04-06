@@ -109,7 +109,11 @@ export class RetryHandler {
 		if (isContextOverflow(message, contextWindow)) return false;
 
 		const err = message.errorMessage;
-		return /overloaded|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|connection.?error|connection.?refused|other side closed|fetch failed|upstream.?connect|reset before headers|terminated|retry delay|network.?(?:is\s+)?unavailable|credentials.*expired|temporarily backed off|extra usage is required/i.test(
+		// "temporarily backed off" is intentionally excluded: it is an internally-
+		// generated error from getApiKey() when credentials are in a backoff window.
+		// Re-entering the retry handler for that message creates a cascade of empty
+		// error entries in the session file, breaking resume (#3429).
+		return /overloaded|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|connection.?error|connection.?refused|other side closed|fetch failed|upstream.?connect|reset before headers|terminated|retry delay|network.?(?:is\s+)?unavailable|credentials.*expired|extra usage is required/i.test(
 			err,
 		);
 	}
@@ -139,34 +143,42 @@ export class RetryHandler {
 		const retryGeneration = this._retryGeneration;
 		if (this._deps.getModel() && message.errorMessage) {
 			const errorType = this._classifyErrorType(message.errorMessage);
-			const isCredentialError = errorType === "rate_limit" || errorType === "quota_exhausted";
-			const hasAlternate =
-				isCredentialError &&
-				this._deps.modelRegistry.authStorage.markUsageLimitReached(
-					this._deps.getModel()!.provider,
-					this._deps.getSessionId(),
-					{ errorType },
-				);
+			const isRateLimit = errorType === "rate_limit";
+			const isQuotaError = errorType === "quota_exhausted";
 
-			if (hasAlternate) {
-				this._removeLastAssistantError();
+			// Credential rotation — only for transient rate limits (#3430).
+			// Quota errors ("Extra usage is required") are account-level billing
+			// gates; rotating to another credential on the same account won't help
+			// and the 30-minute backoff blocks all provider requests needlessly.
+			if (isRateLimit) {
+				const hasAlternate =
+					this._deps.modelRegistry.authStorage.markUsageLimitReached(
+						this._deps.getModel()!.provider,
+						this._deps.getSessionId(),
+						{ errorType },
+					);
 
-				this._deps.emit({
-					type: "auto_retry_start",
-					attempt: this._retryAttempt + 1,
-					maxAttempts: settings.maxRetries,
-					delayMs: 0,
-					errorMessage: `${message.errorMessage} (switching credential)`,
-				});
+				if (hasAlternate) {
+					this._removeLastAssistantError();
 
-				// Retry immediately with the next credential - don't increment _retryAttempt
-				this._scheduleContinue(retryGeneration);
+					this._deps.emit({
+						type: "auto_retry_start",
+						attempt: this._retryAttempt + 1,
+						maxAttempts: settings.maxRetries,
+						delayMs: 0,
+						errorMessage: `${message.errorMessage} (switching credential)`,
+					});
 
-				return true;
+					// Retry immediately with the next credential - don't increment _retryAttempt
+					this._scheduleContinue(retryGeneration);
+
+					return true;
+				}
 			}
 
-			// All credentials are backed off. Try cross-provider fallback before giving up.
-			if (isCredentialError) {
+			// Cross-provider fallback — for rate limits with all creds backed off,
+			// or quota errors (which skip credential backoff entirely).
+			if (isRateLimit || isQuotaError) {
 				const fallbackResult = await this._deps.fallbackResolver.findFallback(
 					this._deps.getModel()!,
 					errorType,
@@ -200,7 +212,7 @@ export class RetryHandler {
 				}
 
 				// No fallback available either
-				if (errorType === "quota_exhausted") {
+				if (isQuotaError) {
 					// Try long-context model downgrade ([1m] → base) before giving up
 					const downgraded = this._tryLongContextDowngrade(message, retryGeneration);
 					if (downgraded) return true;

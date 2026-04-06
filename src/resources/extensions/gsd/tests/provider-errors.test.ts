@@ -464,7 +464,8 @@ test("agent-session retryable error regex matches server_error (underscore)", ()
   // This regex is extracted from _isRetryableError in agent-session.ts.
   // It must match both "server error" (space) and "server_error" (underscore)
   // to properly classify Codex streaming errors as retryable.
-  const retryableRegex = /overloaded|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|connection.?error|connection.?refused|other side closed|fetch failed|upstream.?connect|reset before headers|terminated|retry delay|network.?(?:is\s+)?unavailable|credentials.*expired|temporarily backed off/i;
+  // "temporarily backed off" intentionally excluded — see #3429
+  const retryableRegex = /overloaded|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|connection.?error|connection.?refused|other side closed|fetch failed|upstream.?connect|reset before headers|terminated|retry delay|network.?(?:is\s+)?unavailable|credentials.*expired|extra usage is required/i;
 
   // server_error (with underscore — Codex streaming error format)
   assert.ok(retryableRegex.test("Codex server_error: An error occurred"));
