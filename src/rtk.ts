@@ -86,7 +86,7 @@ function getPathValue(env: NodeJS.ProcessEnv): string | undefined {
 }
 
 export function buildRtkEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return applyRtkProcessEnv({ ...env });
+  return applyRtkProcessEnv({ ...process.env, ...env });
 }
 
 export function resolveRtkAssetName(
