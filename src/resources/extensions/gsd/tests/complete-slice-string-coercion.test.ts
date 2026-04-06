@@ -124,6 +124,42 @@ describe("verificationEvidence sentinel coercion (#3565)", () => {
   });
 });
 
+// ─── wrapArray coercion unit tests (#3585) ──────────────────────────────
+
+describe("wrapArray coercion for simple string-array fields (#3585)", () => {
+  /**
+   * The wrapArray coercion logic extracted from db-tools.ts sliceCompleteExecute.
+   * Duplicated here so we can unit-test it directly.
+   */
+  function wrapArray(v: any): any[] {
+    return v == null ? [] : Array.isArray(v) ? v : [v];
+  }
+
+  test("null returns empty array", () => {
+    assert.deepEqual(wrapArray(null), []);
+  });
+
+  test("undefined returns empty array", () => {
+    assert.deepEqual(wrapArray(undefined), []);
+  });
+
+  test("plain string wraps into single-element array", () => {
+    assert.deepEqual(
+      wrapArray("Validated Tech UI flows and Portal self-service flows"),
+      ["Validated Tech UI flows and Portal self-service flows"],
+    );
+  });
+
+  test("array passes through unchanged", () => {
+    const arr = ["item1", "item2"];
+    assert.deepEqual(wrapArray(arr), arr);
+  });
+
+  test("empty array passes through unchanged", () => {
+    assert.deepEqual(wrapArray([]), []);
+  });
+});
+
 // ─── Handler integration with coerced params ─────────────────────────────
 
 describe("handleCompleteSlice with coerced string arrays (#3565)", () => {

@@ -804,27 +804,39 @@ export function registerDbTools(pi: ExtensionAPI): void {
         return m ? [m[1].trim(), m[2].trim()] : [s.trim(), ""];
       };
       const coerced = { ...params };
-      coerced.filesModified = (params.filesModified ?? []).map((f: any) => {
+      // Coerce simple string-array fields: LLMs sometimes pass a plain string
+      // instead of a single-element array (#3585).
+      const wrapArray = (v: any): any[] =>
+        v == null ? [] : Array.isArray(v) ? v : [v];
+      coerced.provides = wrapArray(params.provides);
+      coerced.keyFiles = wrapArray(params.keyFiles);
+      coerced.keyDecisions = wrapArray(params.keyDecisions);
+      coerced.patternsEstablished = wrapArray(params.patternsEstablished);
+      coerced.observabilitySurfaces = wrapArray(params.observabilitySurfaces);
+      coerced.requirementsSurfaced = wrapArray(params.requirementsSurfaced);
+      coerced.drillDownPaths = wrapArray(params.drillDownPaths);
+      coerced.affects = wrapArray(params.affects);
+      coerced.filesModified = wrapArray(params.filesModified).map((f: any) => {
         if (typeof f !== "string") return f;
         const [path, description] = splitPair(f);
         return { path, description };
       });
-      coerced.requires = (params.requires ?? []).map((r: any) => {
+      coerced.requires = wrapArray(params.requires).map((r: any) => {
         if (typeof r !== "string") return r;
         const [slice, provides] = splitPair(r);
         return { slice, provides };
       });
-      coerced.requirementsAdvanced = (params.requirementsAdvanced ?? []).map((r: any) => {
+      coerced.requirementsAdvanced = wrapArray(params.requirementsAdvanced).map((r: any) => {
         if (typeof r !== "string") return r;
         const [id, how] = splitPair(r);
         return { id, how };
       });
-      coerced.requirementsValidated = (params.requirementsValidated ?? []).map((r: any) => {
+      coerced.requirementsValidated = wrapArray(params.requirementsValidated).map((r: any) => {
         if (typeof r !== "string") return r;
         const [id, proof] = splitPair(r);
         return { id, proof };
       });
-      coerced.requirementsInvalidated = (params.requirementsInvalidated ?? []).map((r: any) => {
+      coerced.requirementsInvalidated = wrapArray(params.requirementsInvalidated).map((r: any) => {
         if (typeof r !== "string") return r;
         const [id, what] = splitPair(r);
         return { id, what };
@@ -884,14 +896,14 @@ export function registerDbTools(pi: ExtensionAPI): void {
       deviations: Type.Optional(Type.String({ description: "Deviations from the slice plan, or 'None.'" })),
       knownLimitations: Type.Optional(Type.String({ description: "Known limitations or gaps, or 'None.'" })),
       followUps: Type.Optional(Type.String({ description: "Follow-up work discovered during execution, or 'None.'" })),
-      keyFiles: Type.Optional(Type.Array(Type.String(), { description: "Key files created or modified" })),
-      keyDecisions: Type.Optional(Type.Array(Type.String(), { description: "Key decisions made during this slice" })),
-      patternsEstablished: Type.Optional(Type.Array(Type.String(), { description: "Patterns established by this slice" })),
-      observabilitySurfaces: Type.Optional(Type.Array(Type.String(), { description: "Observability surfaces added" })),
-      provides: Type.Optional(Type.Array(Type.String(), { description: "What this slice provides to downstream slices" })),
-      requirementsSurfaced: Type.Optional(Type.Array(Type.String(), { description: "New requirements surfaced" })),
-      drillDownPaths: Type.Optional(Type.Array(Type.String(), { description: "Paths to task summaries for drill-down" })),
-      affects: Type.Optional(Type.Array(Type.String(), { description: "Downstream slices affected" })),
+      keyFiles: Type.Optional(Type.Union([Type.Array(Type.String()), Type.String()], { description: "Key files created or modified" })),
+      keyDecisions: Type.Optional(Type.Union([Type.Array(Type.String()), Type.String()], { description: "Key decisions made during this slice" })),
+      patternsEstablished: Type.Optional(Type.Union([Type.Array(Type.String()), Type.String()], { description: "Patterns established by this slice" })),
+      observabilitySurfaces: Type.Optional(Type.Union([Type.Array(Type.String()), Type.String()], { description: "Observability surfaces added" })),
+      provides: Type.Optional(Type.Union([Type.Array(Type.String()), Type.String()], { description: "What this slice provides to downstream slices" })),
+      requirementsSurfaced: Type.Optional(Type.Union([Type.Array(Type.String()), Type.String()], { description: "New requirements surfaced" })),
+      drillDownPaths: Type.Optional(Type.Union([Type.Array(Type.String()), Type.String()], { description: "Paths to task summaries for drill-down" })),
+      affects: Type.Optional(Type.Union([Type.Array(Type.String()), Type.String()], { description: "Downstream slices affected" })),
       requirementsAdvanced: Type.Optional(Type.Array(
         Type.Union([
           Type.Object({
