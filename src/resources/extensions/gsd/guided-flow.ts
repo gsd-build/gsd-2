@@ -40,6 +40,28 @@ import { findMilestoneIds, nextMilestoneId, reserveMilestoneId, getReservedMiles
 import { parkMilestone, discardMilestone } from "./milestone-actions.js";
 import { selectAndApplyModel } from "./auto-model-selection.js";
 import { DISCUSS_TOOLS_ALLOWLIST } from "./constants.js";
+import {
+  runPreparation,
+  formatCodebaseBrief,
+  formatPriorContextBrief,
+  formatEcosystemBrief,
+  type PreparationResult,
+} from "./preparation.js";
+
+// ─── Preparation result storage ─────────────────────────────────────────────
+// Stores the most recent preparation result for injection into discuss prompts.
+// S02 will consume this when building the prepared discussion prompt.
+let lastPreparationResult: PreparationResult | null = null;
+
+/** Get the most recent preparation result (for S02 prompt building). */
+export function getLastPreparationResult(): PreparationResult | null {
+  return lastPreparationResult;
+}
+
+/** Clear the preparation result (called after discussion completes). */
+export function clearPreparationResult(): void {
+  lastPreparationResult = null;
+}
 
 // ─── Re-exports (preserve public API for existing importers) ────────────────
 export {
@@ -412,6 +434,93 @@ function buildHeadlessDiscussPrompt(nextId: string, seedContext: string, _basePa
 }
 
 /**
+ * Build the prepared discuss prompt with brief injection.
+ * Uses the discuss-prepared template which encodes the 4-layer discussion protocol.
+ *
+ * @param nextId - The milestone ID being discussed
+ * @param preamble - Preamble text for the discuss prompt
+ * @param _basePath - Root directory of the project (unused, kept for signature consistency)
+ * @param prepResult - Preparation result containing briefs to inject
+ * @returns The prepared discuss prompt string
+ */
+function buildPreparedPrompt(
+  nextId: string,
+  preamble: string,
+  _basePath: string,
+  prepResult: PreparationResult,
+): string {
+  const milestoneRel = `.gsd/milestones/${nextId}`;
+
+  // Use context-enhanced instead of context for prepared discussions
+  const inlinedTemplates = [
+    inlineTemplate("project", "Project"),
+    inlineTemplate("requirements", "Requirements"),
+    inlineTemplate("context-enhanced", "Context Enhanced"),
+    inlineTemplate("roadmap", "Roadmap"),
+    inlineTemplate("decisions", "Decisions"),
+  ].join("\n\n---\n\n");
+
+  // Format the briefs from the preparation result
+  const codebaseBrief = prepResult.codebaseBrief || formatCodebaseBrief(prepResult.codebase);
+  const priorContextBrief = prepResult.priorContextBrief || formatPriorContextBrief(prepResult.priorContext);
+  const ecosystemBrief = prepResult.ecosystemBrief || formatEcosystemBrief(prepResult.ecosystem);
+
+  return loadPrompt("discuss-prepared", {
+    milestoneId: nextId,
+    preamble,
+    codebaseBrief,
+    priorContextBrief,
+    ecosystemBrief,
+    contextPath: `${milestoneRel}/${nextId}-CONTEXT.md`,
+    roadmapPath: `${milestoneRel}/${nextId}-ROADMAP.md`,
+    inlinedTemplates,
+    commitInstruction: buildDocsCommitInstruction(`docs(${nextId}): context, requirements, and roadmap`),
+    multiMilestoneCommitInstruction: buildDocsCommitInstruction("docs: project plan — N milestones"),
+  });
+}
+
+/**
+ * Run preparation phase if enabled, then build the discuss prompt.
+ * This is the main entry point for new milestone discussions with preparation.
+ * Stores the preparation result for S02 to inject into the discuss prompt.
+ *
+ * When preparation succeeds, uses the discuss-prepared template with brief injection.
+ * Falls back to the standard discuss template when preparation is disabled or fails.
+ *
+ * @param ctx - Extension command context with UI for progress notifications
+ * @param nextId - The milestone ID being discussed
+ * @param preamble - Preamble text for the discuss prompt
+ * @param basePath - Root directory of the project
+ * @returns The discuss prompt string
+ */
+async function prepareAndBuildDiscussPrompt(
+  ctx: ExtensionCommandContext,
+  nextId: string,
+  preamble: string,
+  basePath: string,
+): Promise<string> {
+  const prefs = loadEffectiveGSDPreferences()?.preferences ?? {};
+
+  // Run preparation if enabled (default: true)
+  if (prefs.discuss_preparation !== false) {
+    const prepResult = await runPreparation(basePath, ctx.ui, {
+      discuss_preparation: prefs.discuss_preparation,
+      discuss_web_research: prefs.discuss_web_research,
+      discuss_depth: prefs.discuss_depth,
+    });
+    lastPreparationResult = prepResult;
+
+    // Use prepared prompt if preparation was enabled and produced results
+    if (prepResult.enabled) {
+      return buildPreparedPrompt(nextId, preamble, basePath, prepResult);
+    }
+  }
+
+  // Fall back to standard discuss prompt for backward compatibility
+  return buildDiscussPrompt(nextId, preamble, basePath);
+}
+
+/**
  * Bootstrap a .gsd/ project from scratch for headless use.
  * Ensures git repo, .gsd/ structure, gitignore, and preferences all exist.
  */
@@ -655,7 +764,7 @@ export async function showDiscuss(
       const uniqueMilestoneIds = !!loadEffectiveGSDPreferences()?.preferences?.unique_milestone_ids;
       const nextId = nextMilestoneIdReserved(milestoneIds, uniqueMilestoneIds);
       pendingAutoStartMap.set(basePath, { ctx, pi, basePath, milestoneId: nextId, step: false });
-      await dispatchWorkflow(pi, buildDiscussPrompt(nextId, `New milestone ${nextId}.`, basePath), "gsd-run", ctx, "discuss-milestone");
+      await dispatchWorkflow(pi, await prepareAndBuildDiscussPrompt(ctx, nextId, `New milestone ${nextId}.`, basePath), "gsd-run", ctx, "discuss-milestone");
     }
     return;
   }
@@ -1017,7 +1126,7 @@ async function handleMilestoneActions(
     const uniqueMilestoneIds = !!loadEffectiveGSDPreferences()?.preferences?.unique_milestone_ids;
     const nextId = nextMilestoneIdReserved(milestoneIds, uniqueMilestoneIds);
     pendingAutoStartMap.set(basePath, { ctx, pi, basePath, milestoneId: nextId, step: stepMode });
-    await dispatchWorkflow(pi, buildDiscussPrompt(nextId,
+    await dispatchWorkflow(pi, await prepareAndBuildDiscussPrompt(ctx, nextId,
       `New milestone ${nextId}.`,
       basePath
     ), "gsd-run", ctx, "discuss-milestone");
@@ -1176,7 +1285,7 @@ export async function showSmartEntry(
     if (isFirst) {
       // First ever — skip wizard, just ask directly
       pendingAutoStartMap.set(basePath, { ctx, pi, basePath, milestoneId: nextId, step: stepMode });
-      await dispatchWorkflow(pi, buildDiscussPrompt(nextId,
+      await dispatchWorkflow(pi, await prepareAndBuildDiscussPrompt(ctx, nextId,
         `New project, milestone ${nextId}. Do NOT read or explore .gsd/ — it's empty scaffolding.`,
         basePath
       ), "gsd-run", ctx, "discuss-milestone");
@@ -1197,7 +1306,7 @@ export async function showSmartEntry(
 
       if (choice === "new_milestone") {
         pendingAutoStartMap.set(basePath, { ctx, pi, basePath, milestoneId: nextId, step: stepMode });
-        await dispatchWorkflow(pi, buildDiscussPrompt(nextId,
+        await dispatchWorkflow(pi, await prepareAndBuildDiscussPrompt(ctx, nextId,
           `New milestone ${nextId}.`,
           basePath
         ), "gsd-run", ctx, "discuss-milestone");
@@ -1236,7 +1345,7 @@ export async function showSmartEntry(
       const nextId = nextMilestoneIdReserved(milestoneIds, uniqueMilestoneIds);
 
       pendingAutoStartMap.set(basePath, { ctx, pi, basePath, milestoneId: nextId, step: stepMode });
-      await dispatchWorkflow(pi, buildDiscussPrompt(nextId,
+      await dispatchWorkflow(pi, await prepareAndBuildDiscussPrompt(ctx, nextId,
         `New milestone ${nextId}.`,
         basePath
       ), "gsd-run", ctx, "discuss-milestone");
@@ -1301,7 +1410,7 @@ export async function showSmartEntry(
       const uniqueMilestoneIds = !!loadEffectiveGSDPreferences()?.preferences?.unique_milestone_ids;
       const nextId = nextMilestoneIdReserved(milestoneIds, uniqueMilestoneIds);
       pendingAutoStartMap.set(basePath, { ctx, pi, basePath, milestoneId: nextId, step: stepMode });
-      await dispatchWorkflow(pi, buildDiscussPrompt(nextId,
+      await dispatchWorkflow(pi, await prepareAndBuildDiscussPrompt(ctx, nextId,
         `New milestone ${nextId}.`,
         basePath
       ), "gsd-run", ctx, "discuss-milestone");
@@ -1385,7 +1494,7 @@ export async function showSmartEntry(
         const uniqueMilestoneIds = !!loadEffectiveGSDPreferences()?.preferences?.unique_milestone_ids;
         const nextId = nextMilestoneIdReserved(milestoneIds, uniqueMilestoneIds);
         pendingAutoStartMap.set(basePath, { ctx, pi, basePath, milestoneId: nextId, step: stepMode });
-        await dispatchWorkflow(pi, buildDiscussPrompt(nextId,
+        await dispatchWorkflow(pi, await prepareAndBuildDiscussPrompt(ctx, nextId,
           `New milestone ${nextId}.`,
           basePath
         ), "gsd-run", ctx, "discuss-milestone");
