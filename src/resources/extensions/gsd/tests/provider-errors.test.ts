@@ -101,6 +101,13 @@ test("classifyError detects quota exceeded as permanent", () => {
   assert.ok(!isTransient(result));
 });
 
+test("classifyError treats plain 'Connection error.' as transient connection failure (#3594)", () => {
+  const result = classifyError("Connection error.");
+  assert.ok(isTransient(result));
+  assert.equal(result.kind, "connection");
+  assert.ok("retryAfterMs" in result && result.retryAfterMs === 15_000);
+});
+
 test("classifyError treats unknown error as not transient", () => {
   const result = classifyError("something went wrong");
   assert.ok(!isTransient(result));
