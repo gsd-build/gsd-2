@@ -55,6 +55,7 @@ import {
   getSlice,
   insertMilestone,
   insertSlice,
+  insertTask,
   updateTaskStatus,
   getPendingSliceGateCount,
   type MilestoneRow,
@@ -737,6 +738,44 @@ export async function deriveStateFromDb(basePath: string): Promise<GSDState> {
 
   // ── Get tasks from DB ────────────────────────────────────────────────
   let tasks = getSliceTasks(activeMilestone.id, activeSlice.id);
+
+  // ── Reconcile missing tasks: plan file has tasks but DB is empty (#3600) ──
+  // When the planning agent writes S##-PLAN.md with task entries but never
+  // calls the gsd_plan_slice persistence tool, the DB has zero task rows
+  // even though the plan file contains valid tasks. Without this reconciliation,
+  // deriveState returns phase='planning' forever — the dispatcher re-dispatches
+  // plan-slice in an infinite loop.
+  if (tasks.length === 0 && planFile) {
+    try {
+      const planContent = await loadFile(planFile);
+      if (planContent) {
+        const diskPlan = parsePlan(planContent);
+        if (diskPlan.tasks.length > 0) {
+          for (let i = 0; i < diskPlan.tasks.length; i++) {
+            const t = diskPlan.tasks[i];
+            try {
+              insertTask({
+                id: t.id,
+                sliceId: activeSlice.id,
+                milestoneId: activeMilestone.id,
+                title: t.title,
+                status: t.done ? 'complete' : 'pending',
+                sequence: i + 1,
+              });
+            } catch (insertErr) {
+              // Task may already exist from a partial previous import — skip
+              logWarning("reconcile", `failed to insert task ${t.id} from plan file: ${insertErr instanceof Error ? insertErr.message : String(insertErr)}`);
+            }
+          }
+          tasks = getSliceTasks(activeMilestone.id, activeSlice.id);
+          logWarning("reconcile", `imported ${tasks.length} tasks from plan file for ${activeMilestone.id}/${activeSlice.id} — DB was empty (#3600)`, { mid: activeMilestone.id, sid: activeSlice.id });
+        }
+      }
+    } catch (err) {
+      // Non-fatal — fall through to the existing "empty plan" logic
+      logError("reconcile", `plan-file task import failed for ${activeMilestone.id}/${activeSlice.id}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   // ── Reconcile stale task status (#2514) ──────────────────────────────
   // When a session disconnects after the agent writes SUMMARY + VERIFY
