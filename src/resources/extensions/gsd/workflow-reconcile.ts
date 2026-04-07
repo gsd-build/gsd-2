@@ -11,6 +11,7 @@ import {
   getSliceTasks,
   insertMilestone,
   _getAdapter,
+  getMilestoneSlices,
   insertVerificationEvidence,
   upsertDecision,
   openDatabase,
@@ -82,6 +83,7 @@ function replayEvents(events: WorkflowEvent[]): void {
     const p = event.params;
     // Normalize cmd format: completion tools write hyphens ("complete-task"),
     // legacy logs use underscores ("complete_task"). Accept both formats.
+    // Type guard: malformed event lines with non-string cmd are skipped.
     if (typeof event.cmd !== "string") {
       logWarning("reconcile", `Event with non-string cmd skipped: ${JSON.stringify(event.cmd)}`);
       continue;
@@ -134,17 +136,24 @@ function replayEvents(events: WorkflowEvent[]): void {
       }
       case "complete_milestone": {
         const milestoneId = p["milestoneId"] as string;
-        // Milestone completion via worktree replay — update status to complete
-        if (milestoneId) {
+        if (!milestoneId) break;
+        // Invariant check: only mark complete if all slices are closed.
+        // Without this guard, a reordered/partial event stream could close
+        // a milestone while work is still incomplete.
+        const mSlices = getMilestoneSlices(milestoneId);
+        const allClosed = mSlices.length === 0 || mSlices.every(s => isClosedStatus(s.status));
+        if (allClosed) {
           updateMilestoneStatus(milestoneId, "complete", event.ts);
+        } else {
+          logWarning("reconcile", `Skipping complete_milestone replay for ${milestoneId}: not all slices are closed`);
         }
         break;
       }
       case "plan_milestone": {
         // Replay milestone creation — uses INSERT OR IGNORE (gsd-db's insertMilestone is safe)
-        const milestoneId = p["milestoneId"] as string;
-        if (milestoneId) {
-          insertMilestone({ id: milestoneId, title: (p["title"] as string) ?? milestoneId });
+        const mId = p["milestoneId"] as string;
+        if (mId) {
+          insertMilestone({ id: mId, title: (p["title"] as string) ?? mId });
         }
         break;
       }
@@ -238,6 +247,11 @@ export function extractEntityKey(
     case "replan_slice":
       return typeof p["sliceId"] === "string"
         ? { type: "slice", id: p["sliceId"] }
+        : null;
+
+    case "complete_milestone":
+      return typeof p["milestoneId"] === "string"
+        ? { type: "milestone", id: p["milestoneId"] }
         : null;
 
     case "plan_slice":
