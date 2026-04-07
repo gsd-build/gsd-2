@@ -1540,9 +1540,6 @@ export async function dispatchHookUnit(
   return true;
 }
 
-// Direct phase dispatch → auto-direct-dispatch.ts
-export { dispatchDirectPhase } from "./auto-direct-dispatch.js";
-
 // Re-export recovery functions for external consumers
 export {
   buildLoopRemediationSteps,
