@@ -147,7 +147,7 @@ export async function runUnit(
  *   "validate-milestone M001"
  *   "hook/post-unit"
  */
-function buildSessionName(
+export function buildSessionName(
   unitType: string,
   unitId: string,
   milestoneId: string | null,
