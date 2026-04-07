@@ -120,7 +120,7 @@ export function getShellConfig(): { shell: string; args: string[]; needsShell: b
 
 	const bashOnPath = findBashOnPath();
 	if (bashOnPath) {
-		cachedShellConfig = { shell: bashOnPath, args: ["-c"] };
+		cachedShellConfig = { shell: bashOnPath, args: ["-c"], needsShell: false };
 		return cachedShellConfig;
 	}
 
