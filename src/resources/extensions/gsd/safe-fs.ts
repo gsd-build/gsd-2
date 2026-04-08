@@ -1,6 +1,33 @@
-import { existsSync, mkdirSync, cpSync, type CopySyncOptions } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, cpSync, type CopySyncOptions } from "node:fs"
 import { dirname } from "node:path"
 import { logWarning } from "./workflow-logger.js"
+
+/**
+ * Safely reads a file, returning null if it doesn't exist or on error.
+ * Replaces the repeated `if (!existsSync(f)) return null; readFileSync(f, "utf-8")` pattern.
+ */
+export function safeReadFile(filePath: string): string | null {
+  try {
+    if (!existsSync(filePath)) return null
+    return readFileSync(filePath, "utf-8")
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Ensures the parent directory of a file path exists.
+ * Replaces the repeated `mkdirSync(dirname(path), { recursive: true })` pattern.
+ */
+export function ensureParentDir(filePath: string): boolean {
+  try {
+    mkdirSync(dirname(filePath), { recursive: true })
+    return true
+  } catch (err) {
+    logWarning("fs", `ensureParentDir failed: ${filePath}: ${(err as Error).message}`)
+    return false
+  }
+}
 
 /**
  * Safely creates a directory. Returns true if successful, false on error.

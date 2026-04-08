@@ -16,6 +16,14 @@ export function milestoneIdSort(a: string, b: string): number {
   return extractMilestoneSeq(a) - extractMilestoneSeq(b);
 }
 
+/**
+ * Extract the milestone ID from a `milestone/<id>` git branch name.
+ * Returns the raw branch name if it doesn't match the milestone prefix.
+ */
+export function milestoneIdFromBranch(branch: string): string {
+  return branch.replace(/^milestone\//, "");
+}
+
 export function findMilestoneIds(basePath: string): string[] {
   const dir = milestonesDir(basePath);
   try {
