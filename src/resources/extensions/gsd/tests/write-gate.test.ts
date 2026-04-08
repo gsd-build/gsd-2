@@ -195,6 +195,162 @@ test('write-gate: markDepthVerified unblocks queue-mode writes when milestoneId 
   clearDiscussionFlowState();
 });
 
+// ═══════════════════════════════════════════════════════════════════════
+// Discussion gate enforcement tests (pending gate mechanism)
+// ═══════════════════════════════════════════════════════════════════════
+
+import {
+  isGateQuestionId,
+  shouldBlockPendingGate,
+  shouldBlockPendingGateBash,
+  setPendingGate,
+  clearPendingGate,
+  getPendingGate,
+} from '../bootstrap/write-gate.ts';
+
+// ─── Scenario 19: isGateQuestionId recognizes all gate patterns ──
+
+test('write-gate: isGateQuestionId recognizes all gate patterns', () => {
+  assert.strictEqual(isGateQuestionId('layer1_scope_gate'), true);
+  assert.strictEqual(isGateQuestionId('layer2_architecture_gate'), true);
+  assert.strictEqual(isGateQuestionId('layer3_error_gate'), true);
+  assert.strictEqual(isGateQuestionId('layer4_quality_gate'), true);
+  assert.strictEqual(isGateQuestionId('depth_verification'), true);
+  assert.strictEqual(isGateQuestionId('depth_verification_M002'), true);
+  assert.strictEqual(isGateQuestionId('my_layer1_scope_gate_question'), true);
+  // Non-gate question IDs
+  assert.strictEqual(isGateQuestionId('project_intent'), false);
+  assert.strictEqual(isGateQuestionId('feature_priority'), false);
+  assert.strictEqual(isGateQuestionId(''), false);
+});
+
+// ─── Scenario 20: setPendingGate / getPendingGate / clearPendingGate lifecycle ──
+
+test('write-gate: pending gate lifecycle (set, get, clear)', () => {
+  clearDiscussionFlowState();
+  assert.strictEqual(getPendingGate(), null, 'starts null');
+
+  setPendingGate('layer1_scope_gate');
+  assert.strictEqual(getPendingGate(), 'layer1_scope_gate', 'set correctly');
+
+  clearPendingGate();
+  assert.strictEqual(getPendingGate(), null, 'cleared correctly');
+
+  // clearDiscussionFlowState also clears pending gate
+  setPendingGate('layer2_architecture_gate');
+  clearDiscussionFlowState();
+  assert.strictEqual(getPendingGate(), null, 'clearDiscussionFlowState clears pending gate');
+});
+
+// ─── Scenario 21: shouldBlockPendingGate blocks non-safe tools when gate is pending ──
+
+test('write-gate: shouldBlockPendingGate blocks write/edit during pending gate', () => {
+  clearDiscussionFlowState();
+  setPendingGate('layer1_scope_gate');
+
+  // write should be blocked during discussion
+  const writeResult = shouldBlockPendingGate('write', 'M001', false);
+  assert.strictEqual(writeResult.block, true, 'write should be blocked');
+  assert.ok(writeResult.reason!.includes('layer1_scope_gate'), 'reason mentions the gate');
+
+  // edit should be blocked
+  const editResult = shouldBlockPendingGate('edit', 'M001', false);
+  assert.strictEqual(editResult.block, true, 'edit should be blocked');
+
+  // gsd tools should be blocked
+  const gsdResult = shouldBlockPendingGate('gsd_plan_milestone', 'M001', false);
+  assert.strictEqual(gsdResult.block, true, 'gsd tools should be blocked');
+
+  clearDiscussionFlowState();
+});
+
+// ─── Scenario 22: shouldBlockPendingGate allows safe tools when gate is pending ──
+
+test('write-gate: shouldBlockPendingGate allows read-only and ask_user_questions during pending gate', () => {
+  clearDiscussionFlowState();
+  setPendingGate('layer1_scope_gate');
+
+  // ask_user_questions is always safe (model needs to re-ask)
+  assert.strictEqual(shouldBlockPendingGate('ask_user_questions', 'M001').block, false);
+  // read-only tools are safe
+  assert.strictEqual(shouldBlockPendingGate('read', 'M001').block, false);
+  assert.strictEqual(shouldBlockPendingGate('grep', 'M001').block, false);
+  assert.strictEqual(shouldBlockPendingGate('glob', 'M001').block, false);
+  assert.strictEqual(shouldBlockPendingGate('ls', 'M001').block, false);
+
+  clearDiscussionFlowState();
+});
+
+// ─── Scenario 23: shouldBlockPendingGate does not block outside discussion ──
+
+test('write-gate: shouldBlockPendingGate does not block outside discussion', () => {
+  clearDiscussionFlowState();
+  setPendingGate('layer1_scope_gate');
+
+  // No milestoneId and no queue phase — not in discussion
+  const result = shouldBlockPendingGate('write', null, false);
+  assert.strictEqual(result.block, false, 'should not block outside discussion');
+
+  clearDiscussionFlowState();
+});
+
+// ─── Scenario 24: shouldBlockPendingGate blocks in queue mode ──
+
+test('write-gate: shouldBlockPendingGate blocks in queue mode when gate is pending', () => {
+  clearDiscussionFlowState();
+  setQueuePhaseActive(true);
+  setPendingGate('depth_verification');
+
+  const result = shouldBlockPendingGate('write', null, true);
+  assert.strictEqual(result.block, true, 'should block in queue mode');
+
+  clearDiscussionFlowState();
+});
+
+// ─── Scenario 25: shouldBlockPendingGateBash allows read-only commands ──
+
+test('write-gate: shouldBlockPendingGateBash allows read-only commands during pending gate', () => {
+  clearDiscussionFlowState();
+  setPendingGate('layer2_architecture_gate');
+
+  assert.strictEqual(shouldBlockPendingGateBash('cat file.txt', 'M001').block, false);
+  assert.strictEqual(shouldBlockPendingGateBash('git log --oneline', 'M001').block, false);
+  assert.strictEqual(shouldBlockPendingGateBash('grep -r pattern .', 'M001').block, false);
+  assert.strictEqual(shouldBlockPendingGateBash('ls -la', 'M001').block, false);
+
+  clearDiscussionFlowState();
+});
+
+// ─── Scenario 26: shouldBlockPendingGateBash blocks mutating commands ──
+
+test('write-gate: shouldBlockPendingGateBash blocks mutating commands during pending gate', () => {
+  clearDiscussionFlowState();
+  setPendingGate('layer2_architecture_gate');
+
+  const result = shouldBlockPendingGateBash('npm run build', 'M001');
+  assert.strictEqual(result.block, true, 'mutating bash should be blocked');
+  assert.ok(result.reason!.includes('layer2_architecture_gate'));
+
+  clearDiscussionFlowState();
+});
+
+// ─── Scenario 27: no pending gate means no blocking ──
+
+test('write-gate: no pending gate means no blocking', () => {
+  clearDiscussionFlowState();
+
+  assert.strictEqual(shouldBlockPendingGate('write', 'M001').block, false);
+  assert.strictEqual(shouldBlockPendingGateBash('npm run build', 'M001').block, false);
+});
+
+// ─── Scenario 28: resetWriteGateState clears pending gate ──
+
+test('write-gate: resetWriteGateState clears pending gate', () => {
+  setPendingGate('layer3_error_gate');
+  resetWriteGateState();
+  assert.strictEqual(getPendingGate(), null);
+});
+
 // ─── Standard options fixture used across depth confirmation tests ──
 
 const STANDARD_OPTIONS = [

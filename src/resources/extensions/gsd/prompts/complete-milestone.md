@@ -63,6 +63,6 @@ Then:
 13. Do not commit manually — the system auto-commits your changes after this unit completes.
 - Say: "Milestone {{milestoneId}} complete."
 
-**Important:** Do NOT skip the code change verification, success criteria, or definition of done verification (steps 3-5). The milestone summary must reflect actual verified outcomes, not assumed success. Verification failures BLOCK completion — there is no override. The milestone stays in its current state until issues are resolved and verification is re-run.
+**Important:** Do NOT skip the code change verification, success criteria, or definition of done verification (steps 3-5). The milestone summary must reflect actual verified outcomes, not assumed success. Verification failures BLOCK completion — there is no override. The milestone stays in its current state until issues are resolved and verification is re-run. **If a verification tool itself fails, errors, or returns unexpected output, treat it as a verification failure** — never rationalize past a tool error ("tool didn't respond, assuming success" is forbidden). A tool that cannot verify is a tool that did not verify.
 
 **File system safety:** When scanning milestone directories for evidence, use `ls` or `find` to list directory contents first — never pass a directory path (e.g. `tasks/`, `slices/`) directly to the `read` tool. The `read` tool only accepts file paths, not directories.

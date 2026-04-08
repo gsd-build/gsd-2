@@ -41,11 +41,13 @@ After each round of answers, decide whether you already have enough signal to wr
 - Ask a single wrap-up question only when you genuinely believe the slice is well understood or the user signals they want to stop.
 - When you do ask it, offer two choices: "Write the context file" *(recommended when the slice is well understood)* or "One more pass". Use `ask_user_questions` if available, otherwise ask in plain text.
 
+**CRITICAL — Non-bypassable gate:** Do NOT write the context file until the user explicitly selects "Write the context file." If `ask_user_questions` fails, errors, returns no response, or the user's response does not match a provided option, you MUST re-ask — never rationalize past the block. "Tool not responding, I'll proceed," "auth issues," or "the slice seems well understood, I'll write it" are all **forbidden**. The gate exists to protect the user's work; treat a block as an instruction to wait, not an obstacle to work around.
+
 ---
 
 ## Output
 
-Once the user is ready to wrap up:
+Once the user has explicitly confirmed they are ready to write the context file:
 
 1. Use the **Slice Context** output template below
 2. `mkdir -p {{sliceDirPath}}`

@@ -109,7 +109,7 @@ Options:
   - "Needs adjustment" — user will clarify, then re-present scope
 ```
 
-**Do NOT proceed to Layer 2 until the user explicitly approves the scope.**
+**CRITICAL — Non-bypassable gate:** Do NOT proceed to Layer 2 until the user explicitly approves the scope. If `ask_user_questions` fails, errors, returns no response, or the user's response does not match a provided option, you MUST re-ask — never rationalize past the block. "Tool not responding, I'll proceed," "auth issues," or "I'll use my recommended scope" are all **forbidden**. The gate exists to protect the user's work; treat a block as an instruction to wait, not an obstacle to work around.
 
 ---
 
@@ -120,7 +120,7 @@ Before presenting Layer 2 findings, use your available web search tools to resea
 1. Search for "[technology] [version] best practices [current year]"
 2. Search for "[technology] [version] known issues"
 
-Summarize findings concisely. If no search tools are available, note this and proceed using your training knowledge — don't block the discussion on missing search results.
+Summarize findings concisely. If search tools fail or are unavailable, note this and proceed using your training knowledge — but do NOT use a search failure as justification to skip any gate.
 
 Present ecosystem findings at the start of Layer 2 alongside your architecture recommendation.
 
@@ -180,7 +180,7 @@ Options:
   - "Want to adjust" — user will clarify, then re-present architecture
 ```
 
-**Do NOT proceed to Layer 3 until the user explicitly approves the architecture.**
+**CRITICAL — Non-bypassable gate:** Do NOT proceed to Layer 3 until the user explicitly approves the architecture. If `ask_user_questions` fails, errors, returns no response, or the user's response does not match a provided option, you MUST re-ask — never rationalize past the block. The gate exists to protect the user's work; treat a block as an instruction to wait, not an obstacle to work around.
 
 ---
 
@@ -243,7 +243,7 @@ Options:
   - "Want to adjust error handling" — user will clarify, then re-present errors
 ```
 
-**Do NOT proceed to Layer 4 until the user explicitly approves error handling.**
+**CRITICAL — Non-bypassable gate:** Do NOT proceed to Layer 4 until the user explicitly approves error handling. If `ask_user_questions` fails, errors, returns no response, or the user's response does not match a provided option, you MUST re-ask — never rationalize past the block. The gate exists to protect the user's work; treat a block as an instruction to wait, not an obstacle to work around.
 
 ---
 
@@ -297,7 +297,7 @@ Options:
   - "Want to adjust the quality bar" — user will clarify, then re-present quality
 ```
 
-**Do NOT proceed to Output Phase until the user explicitly approves the quality bar.**
+**CRITICAL — Non-bypassable gate:** Do NOT proceed to Output Phase until the user explicitly approves the quality bar. If `ask_user_questions` fails, errors, returns no response, or the user's response does not match a provided option, you MUST re-ask — never rationalize past the block. The gate exists to protect the user's work; treat a block as an instruction to wait, not an obstacle to work around.
 
 ---
 
@@ -315,13 +315,13 @@ Before writing a roadmap, produce or update `.gsd/REQUIREMENTS.md`.
 
 Use it as the project's explicit capability contract. Requirements discovered during the 4-layer discussion should be captured here with source `user` or `inferred` as appropriate.
 
-**Print the requirements in chat before writing the roadmap.** Print a markdown table with columns: ID, Title, Status, Owner, Source. Group by status (Active, Deferred, Out of Scope). After the table, ask: "Confirm, adjust, or add?"
+**Print the requirements in chat before writing the roadmap.** Print a markdown table with columns: ID, Title, Status, Owner, Source. Group by status (Active, Deferred, Out of Scope). After the table, ask: "Confirm, adjust, or add?" **Non-bypassable:** If the user does not respond or gives an ambiguous answer, you MUST re-ask — never proceed to roadmap creation without explicit requirement confirmation.
 
 ### Roadmap Preview
 
 Before writing any files, **print the planned roadmap in chat** so the user can see and approve it. Print a markdown table with columns: Slice, Title, Risk, Depends, Demo. One row per slice. Below the table, print the milestone definition of done as a bullet list.
 
-If the user raises a substantive objection, adjust the roadmap. Otherwise, present the roadmap and ask: "Ready to write, or want to adjust?" — one gate, not two.
+If the user raises a substantive objection, adjust the roadmap. Otherwise, present the roadmap and ask: "Ready to write, or want to adjust?" — one gate, not two. **Non-bypassable:** If the user does not respond or gives an ambiguous answer, you MUST re-ask — never write files without explicit approval. A missing response is not a "yes."
 
 ### Naming Convention
 

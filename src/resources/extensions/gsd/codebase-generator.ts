@@ -38,6 +38,10 @@ interface DirectoryGroup {
 const DEFAULT_EXCLUDES = [
   ".gsd/",
   ".planning/",
+  ".plans/",
+  ".claude/",
+  ".cursor/",
+  ".vscode/",
   ".git/",
   "node_modules/",
   "dist/",

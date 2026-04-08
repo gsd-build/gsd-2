@@ -94,13 +94,13 @@ Before moving to the wrap-up gate, verify you have covered:
 - options: "Yes, you got it (Recommended)", "Not quite — let me clarify"
 - **The question ID must contain `depth_verification`** (e.g. `depth_verification_confirm`) — this enables the write-gate downstream.
 
-**If `{{structuredQuestionsAvailable}}` is `false`:** ask in plain text: "Did I capture that correctly? If not, tell me what I missed." Wait for confirmation before proceeding.
+**If `{{structuredQuestionsAvailable}}` is `false`:** ask in plain text: "Did I capture that correctly? If not, tell me what I missed." Wait for explicit confirmation before proceeding. **The same non-bypassable gate applies to the plain-text path** — if the user does not respond, gives an ambiguous answer, or does not explicitly confirm, you MUST re-ask. Never rationalize past a missing confirmation.
 
 If they clarify, absorb the correction and re-verify.
 
 The depth verification is the only required confirmation gate. Do not add a second "ready to proceed?" gate after it.
 
-**CRITICAL — Non-bypassable gate:** The system mechanically blocks CONTEXT.md writes until the user selects the "(Recommended)" option. If the user declines, cancels, or the tool fails, you MUST re-ask — never rationalize past the block ("tool not responding, I'll proceed" is forbidden). The gate exists to protect the user's work; treat a block as an instruction, not an obstacle to work around.
+**CRITICAL — Non-bypassable gate:** The system mechanically blocks CONTEXT.md writes until the user selects the "(Recommended)" option (structured path) or explicitly confirms (plain-text path). If the user declines, cancels, does not respond, or the tool fails, you MUST re-ask — never rationalize past the block ("tool not responding, I'll proceed" is forbidden). The gate exists to protect the user's work; treat a block as an instruction, not an obstacle to work around.
 
 ---
 

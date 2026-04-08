@@ -6,7 +6,7 @@ import { isToolCallEventType } from "@gsd/pi-coding-agent";
 import { buildMilestoneFileName, resolveMilestonePath, resolveSliceFile, resolveSlicePath } from "../paths.js";
 import { buildBeforeAgentStartResult } from "./system-context.js";
 import { handleAgentEnd } from "./agent-end-recovery.js";
-import { clearDiscussionFlowState, isDepthVerified, isDepthConfirmationAnswer, isQueuePhaseActive, markDepthVerified, resetWriteGateState, shouldBlockContextWrite, shouldBlockQueueExecution } from "./write-gate.js";
+import { clearDiscussionFlowState, isDepthVerified, isDepthConfirmationAnswer, isQueuePhaseActive, markDepthVerified, resetWriteGateState, shouldBlockContextWrite, shouldBlockQueueExecution, isGateQuestionId, setPendingGate, clearPendingGate, getPendingGate, shouldBlockPendingGate, shouldBlockPendingGateBash } from "./write-gate.js";
 import { isBlockedStateFile, isBashWriteToStateFile, BLOCKED_WRITE_ERROR } from "../write-intercept.js";
 import { cleanupQuickBranch } from "../quick.js";
 import { getDiscussionMilestoneId } from "../guided-flow.js";
@@ -168,6 +168,43 @@ export function registerHooks(pi: ExtensionAPI): void {
       return { block: true, reason: loopCheck.reason };
     }
 
+    // ── Discussion gate enforcement: track pending questions ─────────
+    // During a discussion flow, EVERY ask_user_questions call matters.
+    // When ask_user_questions is called, mark it as pending. It stays
+    // pending until the user responds. This prevents the model from
+    // continuing if ask_user_questions fails, errors, or is cancelled.
+    if (event.toolName === "ask_user_questions") {
+      const milestoneId = getDiscussionMilestoneId();
+      const inDiscussion = milestoneId !== null || isQueuePhaseActive();
+      if (inDiscussion) {
+        const questions: any[] = (event.input as any)?.questions ?? [];
+        const questionId = questions[0]?.id ?? "ask_user_questions";
+        setPendingGate(typeof questionId === "string" ? questionId : "ask_user_questions");
+      }
+    }
+
+    // ── Discussion gate enforcement: block tool calls while gate is pending ──
+    // If ask_user_questions was called with a gate ID but hasn't been confirmed,
+    // block all non-read-only tool calls to prevent the model from skipping gates.
+    if (getPendingGate()) {
+      const milestoneId = getDiscussionMilestoneId();
+      if (isToolCallEventType("bash", event)) {
+        const bashGuard = shouldBlockPendingGateBash(
+          event.input.command,
+          milestoneId,
+          isQueuePhaseActive(),
+        );
+        if (bashGuard.block) return bashGuard;
+      } else {
+        const gateGuard = shouldBlockPendingGate(
+          event.toolName,
+          milestoneId,
+          isQueuePhaseActive(),
+        );
+        if (gateGuard.block) return gateGuard;
+      }
+    }
+
     // ── Queue-mode execution guard (#2545): block source-code mutations ──
     // When /gsd queue is active, the agent should only create milestones,
     // not execute work. Block write/edit to non-.gsd/ paths and bash commands
@@ -244,9 +281,27 @@ export function registerHooks(pi: ExtensionAPI): void {
     if (!milestoneId && !queueActive) return;
 
     const details = event.details as any;
+
+    // ── Discussion gate enforcement: handle gate question responses ──
+    // If the result is cancelled or has no response, the pending gate stays active
+    // so the model is blocked from non-read-only tools until it re-asks.
+    // If the user responded at all (even "needs adjustment"), clear the pending gate
+    // because the user engaged — the prompt handles the re-ask-after-adjustment flow.
+    const questions: any[] = (event.input as any)?.questions ?? [];
+    const currentPendingGate = getPendingGate();
+    if (currentPendingGate) {
+      if (details?.cancelled || !details?.response) {
+        // Gate stays pending — model will be blocked from non-read-only tools
+        // until it re-asks and gets a valid response
+      } else {
+        // User responded (confirmed or requested adjustment) — clear the pending gate.
+        // The prompt-level instructions handle the "needs adjustment" re-ask flow.
+        clearPendingGate();
+      }
+    }
+
     if (details?.cancelled || !details?.response) return;
 
-    const questions: any[] = (event.input as any)?.questions ?? [];
     for (const question of questions) {
       if (typeof question.id === "string" && question.id.includes("depth_verification")) {
         // Only unlock the gate if the user selected the first option (confirmation).

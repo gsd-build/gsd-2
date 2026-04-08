@@ -51,7 +51,7 @@ For each capture, classify it as one of:
    
    For captures classified as **note** or **defer**, auto-confirm without asking — these are low-impact.
    For captures classified as **stop** or **backtrack**, auto-confirm without asking — these are urgent user directives that must be honored immediately.
-   For captures classified as **quick-task**, **inject**, or **replan**, ask the user to confirm or choose a different classification.
+   For captures classified as **quick-task**, **inject**, or **replan**, ask the user to confirm or choose a different classification. **Non-bypassable:** If `ask_user_questions` fails, errors, or the user does not respond, you MUST re-ask — never auto-confirm these classifications without explicit user approval.
 
 3. **Update** `.gsd/CAPTURES.md` — for each capture, update its section with the confirmed classification:
    - Change `**Status:** pending` to `**Status:** resolved`

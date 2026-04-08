@@ -138,6 +138,28 @@ test("generateCodebaseMap: excludes .gsd/ files", () => {
   }
 });
 
+test("generateCodebaseMap: excludes .claude/ and other tool directories", () => {
+  const base = makeTmpRepo();
+  try {
+    addFile(base, "src/main.ts");
+    addFile(base, ".claude/CLAUDE.md");
+    addFile(base, ".claude/memory/user.md");
+    addFile(base, ".plans/plan.md");
+    addFile(base, ".cursor/settings.json");
+    addFile(base, ".vscode/settings.json");
+
+    const result = generateCodebaseMap(base);
+    assert.ok(result.content.includes("`src/main.ts`"), "should include src/main.ts");
+    assert.ok(!result.content.includes("CLAUDE.md"), "should exclude .claude/ files");
+    assert.ok(!result.content.includes("user.md"), "should exclude .claude/memory/ files");
+    assert.ok(!result.content.includes(".plans"), "should exclude .plans/ files");
+    assert.ok(!result.content.includes(".cursor"), "should exclude .cursor/ files");
+    assert.ok(!result.content.includes(".vscode"), "should exclude .vscode/ files");
+  } finally {
+    cleanup(base);
+  }
+});
+
 test("generateCodebaseMap: excludes binary and lock files", () => {
   const base = makeTmpRepo();
   try {

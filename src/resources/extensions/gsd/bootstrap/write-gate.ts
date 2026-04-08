@@ -29,6 +29,40 @@ const BASH_READ_ONLY_RE = /^\s*(cat|head|tail|less|more|wc|file|stat|du|df|which
 let depthVerificationDone = false;
 let activeQueuePhase = false;
 
+/**
+ * Discussion gate enforcement state.
+ *
+ * When ask_user_questions is called with a recognized gate question ID,
+ * we track the pending gate. Until the gate is confirmed (user selects the
+ * first/recommended option), all non-read-only tool calls are blocked.
+ * This mechanically prevents the model from rationalizing past failed or
+ * cancelled gate questions.
+ */
+let pendingGateId: string | null = null;
+
+/**
+ * Recognized gate question ID patterns.
+ * These appear in both discuss-prepared.md (4-layer) and discuss.md (depth/requirements/roadmap).
+ */
+const GATE_QUESTION_PATTERNS = [
+  "layer1_scope_gate",
+  "layer2_architecture_gate",
+  "layer3_error_gate",
+  "layer4_quality_gate",
+  "depth_verification",
+] as const;
+
+/**
+ * Tools that are safe to call while a gate is pending.
+ * Includes read-only tools and ask_user_questions itself (so the model can re-ask).
+ */
+const GATE_SAFE_TOOLS = new Set([
+  "ask_user_questions",
+  "read", "grep", "find", "ls", "glob",
+  "search-the-web", "resolve_library", "get_library_docs", "fetch_page",
+  "search_and_read",
+]);
+
 export function isDepthVerified(): boolean {
   return depthVerificationDone;
 }
@@ -43,15 +77,109 @@ export function setQueuePhaseActive(active: boolean): void {
 
 export function resetWriteGateState(): void {
   depthVerificationDone = false;
+  pendingGateId = null;
 }
 
 export function clearDiscussionFlowState(): void {
   depthVerificationDone = false;
   activeQueuePhase = false;
+  pendingGateId = null;
 }
 
 export function markDepthVerified(): void {
   depthVerificationDone = true;
+}
+
+/**
+ * Check whether a question ID matches a recognized gate pattern.
+ */
+export function isGateQuestionId(questionId: string): boolean {
+  return GATE_QUESTION_PATTERNS.some(pattern => questionId.includes(pattern));
+}
+
+/**
+ * Mark a gate as pending (called when ask_user_questions is invoked with a gate ID).
+ */
+export function setPendingGate(gateId: string): void {
+  pendingGateId = gateId;
+}
+
+/**
+ * Clear the pending gate (called when the user confirms).
+ */
+export function clearPendingGate(): void {
+  pendingGateId = null;
+}
+
+/**
+ * Get the currently pending gate, if any.
+ */
+export function getPendingGate(): string | null {
+  return pendingGateId;
+}
+
+/**
+ * Check whether a tool call should be blocked because a discussion gate
+ * is pending (ask_user_questions was called but not confirmed).
+ *
+ * Returns { block: true, reason } if the tool should be blocked.
+ * Read-only tools and ask_user_questions itself are always allowed.
+ */
+export function shouldBlockPendingGate(
+  toolName: string,
+  milestoneId: string | null,
+  queuePhaseActive?: boolean,
+): { block: boolean; reason?: string } {
+  if (!pendingGateId) return { block: false };
+
+  const inDiscussion = milestoneId !== null;
+  const inQueue = queuePhaseActive ?? false;
+  if (!inDiscussion && !inQueue) return { block: false };
+
+  if (GATE_SAFE_TOOLS.has(toolName)) return { block: false };
+
+  // Bash read-only commands are also safe
+  if (toolName === "bash") return { block: false }; // bash is checked separately below
+
+  return {
+    block: true,
+    reason: [
+      `HARD BLOCK: Discussion gate "${pendingGateId}" has not been confirmed by the user.`,
+      `You MUST re-call ask_user_questions with the gate question before making any other tool calls.`,
+      `If the previous ask_user_questions call failed, errored, was cancelled, or the user's response`,
+      `did not match a provided option, you MUST re-ask — never rationalize past the block.`,
+      `Do NOT proceed, do NOT use alternative approaches, do NOT skip the gate.`,
+    ].join(" "),
+  };
+}
+
+/**
+ * Check whether a bash command should be blocked because a discussion gate is pending.
+ * Read-only bash commands are allowed; mutating commands are blocked.
+ */
+export function shouldBlockPendingGateBash(
+  command: string,
+  milestoneId: string | null,
+  queuePhaseActive?: boolean,
+): { block: boolean; reason?: string } {
+  if (!pendingGateId) return { block: false };
+
+  const inDiscussion = milestoneId !== null;
+  const inQueue = queuePhaseActive ?? false;
+  if (!inDiscussion && !inQueue) return { block: false };
+
+  // Allow read-only bash commands
+  if (BASH_READ_ONLY_RE.test(command)) return { block: false };
+
+  return {
+    block: true,
+    reason: [
+      `HARD BLOCK: Discussion gate "${pendingGateId}" has not been confirmed by the user.`,
+      `You MUST re-call ask_user_questions with the gate question before running mutating commands.`,
+      `If the previous ask_user_questions call failed, errored, was cancelled, or the user's response`,
+      `did not match a provided option, you MUST re-ask — never rationalize past the block.`,
+    ].join(" "),
+  };
 }
 
 /**
