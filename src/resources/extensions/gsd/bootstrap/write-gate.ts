@@ -1,4 +1,6 @@
 const MILESTONE_CONTEXT_RE = /M\d+(?:-[a-z0-9]{6})?-CONTEXT\.md$/;
+const CONTEXT_MILESTONE_RE = /(?:^|[/\\])(M\d+(?:-[a-z0-9]{6})?)-CONTEXT\.md$/i;
+const DEPTH_VERIFICATION_MILESTONE_RE = /depth_verification[_-](M\d+(?:-[a-z0-9]{6})?)/i;
 
 /**
  * Path segment that identifies .gsd/ planning artifacts.
@@ -26,7 +28,7 @@ const QUEUE_SAFE_TOOLS = new Set([
  */
 const BASH_READ_ONLY_RE = /^\s*(cat|head|tail|less|more|wc|file|stat|du|df|which|type|echo|printf|ls|find|grep|rg|awk|sed\b(?!.*-i)|sort|uniq|diff|comm|tr|cut|tee\s+-a\s+\/dev\/null|git\s+(log|show|diff|status|branch|tag|remote|rev-parse|ls-files|blame|shortlog|describe|stash\s+list|config\s+--get|cat-file)|gh\s+(issue|pr|api|repo|release)\s+(view|list|diff|status|checks)|mkdir\s+-p\s+\.gsd|rtk\s)/;
 
-let depthVerificationDone = false;
+const verifiedDepthMilestones = new Set<string>();
 let activeQueuePhase = false;
 
 /**
@@ -64,7 +66,15 @@ const GATE_SAFE_TOOLS = new Set([
 ]);
 
 export function isDepthVerified(): boolean {
-  return depthVerificationDone;
+  return verifiedDepthMilestones.size > 0;
+}
+
+/**
+ * Check whether a specific milestone has passed depth verification.
+ */
+export function isMilestoneDepthVerified(milestoneId: string | null | undefined): boolean {
+  if (!milestoneId) return false;
+  return verifiedDepthMilestones.has(milestoneId);
 }
 
 export function isQueuePhaseActive(): boolean {
@@ -76,18 +86,19 @@ export function setQueuePhaseActive(active: boolean): void {
 }
 
 export function resetWriteGateState(): void {
-  depthVerificationDone = false;
+  verifiedDepthMilestones.clear();
   pendingGateId = null;
 }
 
 export function clearDiscussionFlowState(): void {
-  depthVerificationDone = false;
+  verifiedDepthMilestones.clear();
   activeQueuePhase = false;
   pendingGateId = null;
 }
 
-export function markDepthVerified(): void {
-  depthVerificationDone = true;
+export function markDepthVerified(milestoneId?: string | null): void {
+  if (!milestoneId) return;
+  verifiedDepthMilestones.add(milestoneId);
 }
 
 /**
@@ -95,6 +106,23 @@ export function markDepthVerified(): void {
  */
 export function isGateQuestionId(questionId: string): boolean {
   return GATE_QUESTION_PATTERNS.some(pattern => questionId.includes(pattern));
+}
+
+/**
+ * Extract the milestone ID embedded in a depth-verification question id.
+ * Prompts are expected to use ids like `depth_verification_M001_confirm`.
+ */
+export function extractDepthVerificationMilestoneId(questionId: string): string | null {
+  const match = questionId.match(DEPTH_VERIFICATION_MILESTONE_RE);
+  return match?.[1] ?? null;
+}
+
+/**
+ * Extract the milestone ID from a milestone CONTEXT file path.
+ */
+function extractContextMilestoneId(inputPath: string): string | null {
+  const match = inputPath.match(CONTEXT_MILESTONE_RE);
+  return match?.[1] ?? null;
 }
 
 /**
@@ -127,14 +155,10 @@ export function getPendingGate(): string | null {
  */
 export function shouldBlockPendingGate(
   toolName: string,
-  milestoneId: string | null,
-  queuePhaseActive?: boolean,
+  _milestoneId: string | null,
+  _queuePhaseActive?: boolean,
 ): { block: boolean; reason?: string } {
   if (!pendingGateId) return { block: false };
-
-  const inDiscussion = milestoneId !== null;
-  const inQueue = queuePhaseActive ?? false;
-  if (!inDiscussion && !inQueue) return { block: false };
 
   if (GATE_SAFE_TOOLS.has(toolName)) return { block: false };
 
@@ -159,14 +183,10 @@ export function shouldBlockPendingGate(
  */
 export function shouldBlockPendingGateBash(
   command: string,
-  milestoneId: string | null,
-  queuePhaseActive?: boolean,
+  _milestoneId: string | null,
+  _queuePhaseActive?: boolean,
 ): { block: boolean; reason?: string } {
   if (!pendingGateId) return { block: false };
-
-  const inDiscussion = milestoneId !== null;
-  const inQueue = queuePhaseActive ?? false;
-  if (!inDiscussion && !inQueue) return { block: false };
 
   // Allow read-only bash commands
   if (BASH_READ_ONLY_RE.test(command)) return { block: false };
@@ -215,16 +235,24 @@ export function shouldBlockContextWrite(
   toolName: string,
   inputPath: string,
   milestoneId: string | null,
-  depthVerified: boolean,
-  queuePhaseActive?: boolean,
+  _queuePhaseActive?: boolean,
 ): { block: boolean; reason?: string } {
   if (toolName !== "write") return { block: false };
-
-  const inDiscussion = milestoneId !== null;
-  const inQueue = queuePhaseActive ?? false;
-  if (!inDiscussion && !inQueue) return { block: false };
   if (!MILESTONE_CONTEXT_RE.test(inputPath)) return { block: false };
-  if (depthVerified) return { block: false };
+
+  const targetMilestoneId = extractContextMilestoneId(inputPath) ?? milestoneId;
+  if (!targetMilestoneId) {
+    return {
+      block: true,
+      reason: [
+        `HARD BLOCK: Cannot write milestone CONTEXT.md without knowing which milestone it belongs to.`,
+        `This is a mechanical gate — you MUST NOT proceed, retry, or rationalize past this block.`,
+        `Required action: call ask_user_questions with question id containing "depth_verification" and the milestone id.`,
+      ].join(" "),
+    };
+  }
+
+  if (isMilestoneDepthVerified(targetMilestoneId)) return { block: false };
 
   return {
     block: true,
@@ -234,6 +262,40 @@ export function shouldBlockContextWrite(
       `Required action: call ask_user_questions with question id containing "depth_verification".`,
       `The user MUST select the "(Recommended)" confirmation option to unlock this gate.`,
       `If the user declines, cancels, or the tool fails, you must re-ask — not bypass.`,
+    ].join(" "),
+  };
+}
+
+/**
+ * Check whether a gsd_summary_save CONTEXT artifact should be blocked.
+ * Slice-level CONTEXT artifacts are allowed; milestone-level CONTEXT writes
+ * require the milestone to be depth-verified first.
+ */
+export function shouldBlockContextArtifactSave(
+  artifactType: string,
+  milestoneId: string | null,
+  sliceId?: string | null,
+): { block: boolean; reason?: string } {
+  if (artifactType !== "CONTEXT") return { block: false };
+  if (sliceId) return { block: false };
+  if (!milestoneId) {
+    return {
+      block: true,
+      reason: [
+        `HARD BLOCK: Cannot save milestone CONTEXT without a milestone_id.`,
+        `This is a mechanical gate — you MUST NOT proceed, retry, or rationalize past this block.`,
+      ].join(" "),
+    };
+  }
+  if (isMilestoneDepthVerified(milestoneId)) return { block: false };
+
+  return {
+    block: true,
+    reason: [
+      `HARD BLOCK: Cannot save milestone CONTEXT without depth verification for ${milestoneId}.`,
+      `This is a mechanical gate — you MUST NOT proceed, retry, or rationalize past this block.`,
+      `Required action: call ask_user_questions with question id containing "depth_verification_${milestoneId}".`,
+      `The user MUST select the "(Recommended)" confirmation option to unlock this gate.`,
     ].join(" "),
   };
 }
@@ -283,7 +345,10 @@ export function shouldBlockQueueExecution(
     };
   }
 
-  // Unknown tools — allow by default (custom extension tools, etc.)
-  return { block: false };
+  // Unknown tools — block by default in queue mode so custom tools cannot
+  // bypass execution restrictions.
+  return {
+    block: true,
+    reason: `Blocked: /gsd queue is a planning tool — it creates milestones, not executes work. Unknown tools are not permitted during queue mode.`,
+  };
 }
-

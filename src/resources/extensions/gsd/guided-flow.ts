@@ -186,12 +186,13 @@ export function checkAutoStartAfterDiscuss(): boolean {
   // Parse PROJECT.md for milestone sequence, warn if any are missing context.
   // Don't block — milestones can be intentionally queued without context.
   const projectFile = resolveGsdRootFile(basePath, "PROJECT");
+  let projectIds: string[] = [];
   if (projectFile) {
     try {
       const projectContent = readFileSync(projectFile, "utf-8");
-      const milestoneIds = parseMilestoneSequenceFromProject(projectContent);
-      if (milestoneIds.length > 1) {
-        const missing = milestoneIds.filter(id => {
+      projectIds = parseMilestoneSequenceFromProject(projectContent);
+      if (projectIds.length > 1) {
+        const missing = projectIds.filter(id => {
           const hasContext = !!resolveMilestoneFile(basePath, id, "CONTEXT");
           const hasDraft = !!resolveMilestoneFile(basePath, id, "CONTEXT-DRAFT");
           const hasDir = existsSync(join(gsdRoot(basePath), "milestones", id));
@@ -210,9 +211,17 @@ export function checkAutoStartAfterDiscuss(): boolean {
 
   // Gate 4: Discussion manifest process verification (multi-milestone only)
   // The LLM writes DISCUSSION-MANIFEST.json after each Phase 3 gate decision.
-  // If the manifest exists but gates_completed < total, the LLM hasn't finished
-  // presenting all readiness gates to the user — block auto-start.
+  // If the project is multi-milestone, the manifest is required. When it is
+  // missing, fail closed instead of assuming the discussion finished.
   const manifestPath = join(gsdRoot(basePath), "DISCUSSION-MANIFEST.json");
+  const requiresManifest = projectIds.length > 1 || findMilestoneIds(basePath).length > 1;
+  if (requiresManifest && !existsSync(manifestPath)) {
+    ctx.ui.notify(
+      "Multi-milestone discussion manifest is missing. Auto-start will remain paused until the manifest is written.",
+      "warning",
+    );
+    return false;
+  }
   if (existsSync(manifestPath)) {
     try {
       const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
@@ -225,9 +234,7 @@ export function checkAutoStartAfterDiscuss(): boolean {
       }
 
       // Cross-check manifest milestones against PROJECT.md if available
-      if (projectFile) {
-        const projectContent = readFileSync(projectFile, "utf-8");
-        const projectIds = parseMilestoneSequenceFromProject(projectContent);
+      if (projectIds.length > 0) {
         const manifestIds = Object.keys(manifest.milestones ?? {});
         const untracked = projectIds.filter(id => !manifestIds.includes(id));
         if (untracked.length > 0) {

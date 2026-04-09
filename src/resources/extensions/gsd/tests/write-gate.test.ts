@@ -3,9 +3,9 @@
  *
  * Exercises shouldBlockContextWrite() — a pure function that implements:
  *   (a) toolName !== "write" → pass
- *   (b) milestoneId null → pass (not in discussion)
+ *   (b) milestone context must resolve to a verified milestone
  *   (c) path doesn't match /M\d+-CONTEXT\.md$/ → pass
- *   (d) depthVerified → pass
+ *   (d) non-context files → pass
  *   (e) else → block with actionable reason
  */
 
@@ -14,12 +14,12 @@ import assert from 'node:assert/strict';
 import {
   isDepthConfirmationAnswer,
   shouldBlockContextWrite,
-  isDepthVerified,
-  isQueuePhaseActive,
   setQueuePhaseActive,
 } from '../index.ts';
 import {
   markDepthVerified,
+  isMilestoneDepthVerified,
+  shouldBlockContextArtifactSave,
   clearDiscussionFlowState,
   resetWriteGateState,
 } from '../bootstrap/write-gate.ts';
@@ -53,26 +53,27 @@ test('write-gate: blocks CONTEXT.md write during discussion without depth verifi
 // ─── Scenario 3: Allows CONTEXT.md write after depth verification ──
 
 test('write-gate: allows CONTEXT.md write after depth verification', () => {
+  clearDiscussionFlowState();
+  markDepthVerified('M001');
   const result = shouldBlockContextWrite(
     'write',
     '/Users/dev/project/.gsd/milestones/M001/M001-CONTEXT.md',
     'M001',
-    true,
   );
   assert.strictEqual(result.block, false, 'should not block after depth verification');
   assert.strictEqual(result.reason, undefined, 'should have no reason');
+  clearDiscussionFlowState();
 });
 
-// ─── Scenario 4: Allows CONTEXT.md write outside discussion phase (milestoneId null) ──
+// ─── Scenario 4: Ambiguous session context no longer bypasses the gate ──
 
-test('write-gate: allows CONTEXT.md write outside discussion phase', () => {
+test('write-gate: blocks CONTEXT.md write when milestoneId is ambiguous', () => {
   const result = shouldBlockContextWrite(
     'write',
     '.gsd/milestones/M001/M001-CONTEXT.md',
     null,
-    false,
   );
-  assert.strictEqual(result.block, false, 'should not block outside discussion phase');
+  assert.strictEqual(result.block, true, 'should block when milestone context is ambiguous');
 });
 
 // ─── Scenario 5: Allows non-CONTEXT.md writes during discussion ──
@@ -83,7 +84,6 @@ test('write-gate: allows non-CONTEXT.md writes during discussion', () => {
     'write',
     '.gsd/milestones/M001/M001-DISCUSSION.md',
     'M001',
-    false,
   );
   assert.strictEqual(r1.block, false, 'DISCUSSION.md should pass');
 
@@ -92,7 +92,6 @@ test('write-gate: allows non-CONTEXT.md writes during discussion', () => {
     'write',
     '.gsd/milestones/M001/slices/S01/S01-PLAN.md',
     'M001',
-    false,
   );
   assert.strictEqual(r2.block, false, 'slice plan should pass');
 
@@ -101,7 +100,6 @@ test('write-gate: allows non-CONTEXT.md writes during discussion', () => {
     'write',
     'src/index.ts',
     'M001',
-    false,
   );
   assert.strictEqual(r3.block, false, 'regular code file should pass');
 });
@@ -113,7 +111,6 @@ test('write-gate: regex does not match slice context files (S01-CONTEXT.md)', ()
     'write',
     '.gsd/milestones/M001/slices/S01/S01-CONTEXT.md',
     'M001',
-    false,
   );
   assert.strictEqual(result.block, false, 'S01-CONTEXT.md should not be blocked');
 });
@@ -125,7 +122,6 @@ test('write-gate: blocked reason contains depth_verification keyword and anti-by
     'write',
     '.gsd/milestones/M999/M999-CONTEXT.md',
     'M999',
-    false,
   );
   assert.strictEqual(result.block, true);
   assert.ok(result.reason!.includes('depth_verification'), 'reason should mention depth_verification question id');
@@ -141,7 +137,6 @@ test('write-gate: blocks CONTEXT.md write in queue mode without depth verificati
     'write',
     '.gsd/milestones/M001/M001-CONTEXT.md',
     null,   // no milestoneId in queue mode
-    false,  // not depth-verified
     true,   // queue phase active
   );
   assert.strictEqual(result.block, true, 'should block in queue mode without depth verification');
@@ -151,46 +146,70 @@ test('write-gate: blocks CONTEXT.md write in queue mode without depth verificati
 // ─── Scenario 9: Queue mode allows CONTEXT.md write after depth verification ──
 
 test('write-gate: allows CONTEXT.md write in queue mode after depth verification', () => {
+  clearDiscussionFlowState();
+  markDepthVerified('M001');
   const result = shouldBlockContextWrite(
     'write',
     '.gsd/milestones/M001/M001-CONTEXT.md',
     null,   // no milestoneId in queue mode
-    true,   // depth-verified
     true,   // queue phase active
   );
   assert.strictEqual(result.block, false, 'should not block in queue mode after depth verification');
+  clearDiscussionFlowState();
 });
 
-// ─── Scenario 10: markDepthVerified works in queue-only mode (no milestoneId) ──
-// This is the core regression for #1812: in queue mode, the tool_result handler
-// must call markDepthVerified() even when getDiscussionMilestoneId() is null.
+// ─── Scenario 10: depth verification is scoped per milestone, not global ──
 
-test('write-gate: markDepthVerified unblocks queue-mode writes when milestoneId is null', () => {
+test('write-gate: markDepthVerified unlocks only the matching milestone', () => {
   clearDiscussionFlowState();
-  setQueuePhaseActive(true);
+  markDepthVerified('M001');
 
-  // Before marking: should block
-  const blocked = shouldBlockContextWrite(
-    'write',
-    '.gsd/milestones/M001/M001-CONTEXT.md',
-    null,
-    isDepthVerified(),
-    isQueuePhaseActive(),
-  );
-  assert.strictEqual(blocked.block, true, 'should block before markDepthVerified');
-
-  // Simulate what the fixed tool_result handler does
-  markDepthVerified();
-
-  // After marking: should pass
   const allowed = shouldBlockContextWrite(
     'write',
     '.gsd/milestones/M001/M001-CONTEXT.md',
     null,
-    isDepthVerified(),
-    isQueuePhaseActive(),
   );
-  assert.strictEqual(allowed.block, false, 'should allow after markDepthVerified in queue mode');
+  assert.strictEqual(allowed.block, false, 'should allow the verified milestone');
+
+  const blockedOther = shouldBlockContextWrite(
+    'write',
+    '.gsd/milestones/M002/M002-CONTEXT.md',
+    null,
+  );
+  assert.strictEqual(blockedOther.block, true, 'other milestones should remain blocked');
+  assert.strictEqual(isMilestoneDepthVerified('M001'), true);
+  assert.strictEqual(isMilestoneDepthVerified('M002'), false);
+
+  clearDiscussionFlowState();
+});
+
+// ─── Scenario 11: gsd_summary_save CONTEXT contract is milestone-scoped ──
+
+test('write-gate: gsd_summary_save only blocks final milestone CONTEXT writes', () => {
+  clearDiscussionFlowState();
+
+  assert.strictEqual(
+    shouldBlockContextArtifactSave('CONTEXT-DRAFT', 'M001').block,
+    false,
+    'draft CONTEXT should be allowed',
+  );
+  assert.strictEqual(
+    shouldBlockContextArtifactSave('CONTEXT', 'M001', 'S01').block,
+    false,
+    'slice CONTEXT should be allowed',
+  );
+  assert.strictEqual(
+    shouldBlockContextArtifactSave('CONTEXT', 'M001').block,
+    true,
+    'final milestone CONTEXT should block before verification',
+  );
+
+  markDepthVerified('M001');
+  assert.strictEqual(
+    shouldBlockContextArtifactSave('CONTEXT', 'M001').block,
+    false,
+    'final milestone CONTEXT should pass after verification',
+  );
 
   clearDiscussionFlowState();
 });
@@ -281,15 +300,15 @@ test('write-gate: shouldBlockPendingGate allows read-only and ask_user_questions
   clearDiscussionFlowState();
 });
 
-// ─── Scenario 23: shouldBlockPendingGate does not block outside discussion ──
+// ─── Scenario 23: shouldBlockPendingGate still blocks when the session is ambiguous ──
 
-test('write-gate: shouldBlockPendingGate does not block outside discussion', () => {
+test('write-gate: shouldBlockPendingGate blocks outside discussion when a gate is pending', () => {
   clearDiscussionFlowState();
   setPendingGate('layer1_scope_gate');
 
-  // No milestoneId and no queue phase — not in discussion
+  // No milestoneId and no queue phase — still block because the gate is pending
   const result = shouldBlockPendingGate('write', null, false);
-  assert.strictEqual(result.block, false, 'should not block outside discussion');
+  assert.strictEqual(result.block, true, 'should block even when milestoneId is null');
 
   clearDiscussionFlowState();
 });

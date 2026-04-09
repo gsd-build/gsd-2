@@ -10,11 +10,15 @@
 
 import { describe, test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import {
   getDiscussionMilestoneId,
   setPendingAutoStart,
   clearPendingAutoStart,
+  checkAutoStartAfterDiscuss,
 } from "../guided-flow.ts";
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
@@ -94,4 +98,34 @@ describe("#2985 Bug 4 — getDiscussionMilestoneId must be keyed by basePath", (
     const result = getDiscussionMilestoneId();
     assert.equal(result, "M001", "should return the only active milestone for backward compat");
   });
+});
+
+test("checkAutoStartAfterDiscuss fails closed when a multi-milestone manifest is missing", () => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-auto-start-manifest-"));
+  try {
+    const gsdDir = join(base, ".gsd");
+    const milestoneDir = join(gsdDir, "milestones", "M001");
+    mkdirSync(milestoneDir, { recursive: true });
+    mkdirSync(join(gsdDir, "milestones", "M002"), { recursive: true });
+    writeFileSync(
+      join(gsdDir, "PROJECT.md"),
+      `# Project\n\n| M001 | First milestone | active |\n| M002 | Second milestone | queued |\n`,
+    );
+    writeFileSync(join(gsdDir, "STATE.md"), "# State\n");
+    writeFileSync(join(milestoneDir, "M001-CONTEXT.md"), "# M001 Context\n");
+
+    clearPendingAutoStart();
+    setPendingAutoStart(base, {
+      basePath: base,
+      milestoneId: "M001",
+      ctx: { ui: { notify: () => undefined } } as any,
+      pi: { setActiveTools: () => undefined, getActiveTools: () => [] } as any,
+    });
+
+    const started = checkAutoStartAfterDiscuss();
+    assert.equal(started, false, "auto-start should fail closed without the manifest");
+  } finally {
+    clearPendingAutoStart();
+    rmSync(base, { recursive: true, force: true });
+  }
 });

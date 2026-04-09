@@ -7,6 +7,16 @@ import { loadEffectiveGSDPreferences } from "../preferences.js";
 import { ensureDbOpen } from "./dynamic-tools.js";
 import { StringEnum } from "@gsd/pi-ai";
 import { logError } from "../workflow-logger.js";
+import { getErrorMessage } from "../error-utils.js";
+import { shouldBlockContextArtifactSave } from "./write-gate.js";
+
+const SUPPORTED_SUMMARY_ARTIFACT_TYPES = ["SUMMARY", "RESEARCH", "CONTEXT", "ASSESSMENT", "CONTEXT-DRAFT"] as const;
+
+export function isSupportedSummaryArtifactType(
+  artifactType: string,
+): artifactType is (typeof SUPPORTED_SUMMARY_ARTIFACT_TYPES)[number] {
+  return (SUPPORTED_SUMMARY_ARTIFACT_TYPES as readonly string[]).includes(artifactType);
+}
 
 /**
  * Register an alias tool that shares the same execute function as its canonical counterpart.
@@ -283,11 +293,21 @@ export function registerDbTools(pi: ExtensionAPI): void {
         details: { operation: "save_summary", error: "db_unavailable" } as any,
       };
     }
-    const validTypes = ["SUMMARY", "RESEARCH", "CONTEXT", "ASSESSMENT"];
-    if (!validTypes.includes(params.artifact_type)) {
+    if (!isSupportedSummaryArtifactType(params.artifact_type)) {
       return {
-        content: [{ type: "text" as const, text: `Error: Invalid artifact_type "${params.artifact_type}". Must be one of: ${validTypes.join(", ")}` }],
+        content: [{ type: "text" as const, text: `Error: Invalid artifact_type "${params.artifact_type}". Must be one of: ${SUPPORTED_SUMMARY_ARTIFACT_TYPES.join(", ")}` }],
         details: { operation: "save_summary", error: "invalid_artifact_type" } as any,
+      };
+    }
+    const contextGuard = shouldBlockContextArtifactSave(
+      params.artifact_type,
+      params.milestone_id ?? null,
+      params.slice_id ?? null,
+    );
+    if (contextGuard.block) {
+      return {
+        content: [{ type: "text" as const, text: `Error saving artifact: ${contextGuard.reason ?? "context write blocked"}` }],
+        details: { operation: "save_summary", error: "context_write_blocked" } as any,
       };
     }
     try {
@@ -333,16 +353,17 @@ export function registerDbTools(pi: ExtensionAPI): void {
       "Computes the file path from milestone/slice/task IDs automatically.",
     promptSnippet: "Save a GSD artifact (summary/research/context/assessment) to DB and disk",
     promptGuidelines: [
-      "Use gsd_summary_save to persist structured artifacts (SUMMARY, RESEARCH, CONTEXT, ASSESSMENT).",
+      "Use gsd_summary_save to persist structured artifacts (SUMMARY, RESEARCH, CONTEXT, ASSESSMENT, CONTEXT-DRAFT).",
       "milestone_id is required. slice_id and task_id are optional — they determine the file path.",
       "The tool computes the relative path automatically: milestones/M001/M001-SUMMARY.md, milestones/M001/slices/S01/S01-SUMMARY.md, etc.",
-      "artifact_type must be one of: SUMMARY, RESEARCH, CONTEXT, ASSESSMENT.",
+      "artifact_type must be one of: SUMMARY, RESEARCH, CONTEXT, ASSESSMENT, CONTEXT-DRAFT.",
+      "Use CONTEXT-DRAFT for incremental draft persistence; use CONTEXT for the final milestone context after depth verification.",
     ],
     parameters: Type.Object({
       milestone_id: Type.String({ description: "Milestone ID (e.g. M001)" }),
       slice_id: Type.Optional(Type.String({ description: "Slice ID (e.g. S01)" })),
       task_id: Type.Optional(Type.String({ description: "Task ID (e.g. T01)" })),
-      artifact_type: Type.String({ description: "One of: SUMMARY, RESEARCH, CONTEXT, ASSESSMENT" }),
+      artifact_type: Type.String({ description: "One of: SUMMARY, RESEARCH, CONTEXT, ASSESSMENT, CONTEXT-DRAFT" }),
       content: Type.String({ description: "The full markdown content of the artifact" }),
     }),
     execute: summarySaveExecute,

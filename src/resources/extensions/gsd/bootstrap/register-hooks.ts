@@ -6,7 +6,7 @@ import { isToolCallEventType } from "@gsd/pi-coding-agent";
 import { buildMilestoneFileName, resolveMilestonePath, resolveSliceFile, resolveSlicePath } from "../paths.js";
 import { buildBeforeAgentStartResult } from "./system-context.js";
 import { handleAgentEnd } from "./agent-end-recovery.js";
-import { clearDiscussionFlowState, isDepthVerified, isDepthConfirmationAnswer, isQueuePhaseActive, markDepthVerified, resetWriteGateState, shouldBlockContextWrite, shouldBlockQueueExecution, isGateQuestionId, setPendingGate, clearPendingGate, getPendingGate, shouldBlockPendingGate, shouldBlockPendingGateBash } from "./write-gate.js";
+import { clearDiscussionFlowState, isDepthConfirmationAnswer, isQueuePhaseActive, markDepthVerified, resetWriteGateState, shouldBlockContextWrite, shouldBlockQueueExecution, isGateQuestionId, setPendingGate, clearPendingGate, getPendingGate, shouldBlockPendingGate, shouldBlockPendingGateBash, extractDepthVerificationMilestoneId } from "./write-gate.js";
 import { isBlockedStateFile, isBashWriteToStateFile, BLOCKED_WRITE_ERROR } from "../write-intercept.js";
 import { cleanupQuickBranch } from "../quick.js";
 import { getDiscussionMilestoneId } from "../guided-flow.js";
@@ -24,6 +24,7 @@ import { logWarning as safetyLogWarning } from "../workflow-logger.js";
 import { installNotifyInterceptor } from "./notify-interceptor.js";
 import { initNotificationStore } from "../notification-store.js";
 import { initNotificationWidget } from "../notification-widget.js";
+import { initHealthWidget } from "../health-widget.js";
 
 // Skip the welcome screen on the very first session_start — cli.ts already
 // printed it before the TUI launched. Only re-print on /clear (subsequent sessions).
@@ -39,6 +40,7 @@ export function registerHooks(pi: ExtensionAPI): void {
     initNotificationStore(process.cwd());
     installNotifyInterceptor(ctx);
     initNotificationWidget(ctx);
+    initHealthWidget(ctx);
     resetWriteGateState();
     resetToolCallLoopGuard();
     resetAskUserQuestionsCache();
@@ -162,24 +164,25 @@ export function registerHooks(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_call", async (event) => {
+    const discussionBasePath = process.cwd();
     // ── Loop guard: block repeated identical tool calls ──
     const loopCheck = checkToolCallLoop(event.toolName, event.input as Record<string, unknown>);
     if (loopCheck.block) {
       return { block: true, reason: loopCheck.reason };
     }
 
-    // ── Discussion gate enforcement: track pending questions ─────────
-    // During a discussion flow, EVERY ask_user_questions call matters.
-    // When ask_user_questions is called, mark it as pending. It stays
-    // pending until the user responds. This prevents the model from
-    // continuing if ask_user_questions fails, errors, or is cancelled.
+    // ── Discussion gate enforcement: track pending gate questions ─────────
+    // Only gate-shaped ask_user_questions calls should block execution.
+    // The gate stays pending until the user selects the approval option.
     if (event.toolName === "ask_user_questions") {
-      const milestoneId = getDiscussionMilestoneId();
+      const milestoneId = getDiscussionMilestoneId(discussionBasePath);
       const inDiscussion = milestoneId !== null || isQueuePhaseActive();
       if (inDiscussion) {
         const questions: any[] = (event.input as any)?.questions ?? [];
-        const questionId = questions[0]?.id ?? "ask_user_questions";
-        setPendingGate(typeof questionId === "string" ? questionId : "ask_user_questions");
+        const questionId = questions.find((question) => typeof question?.id === "string" && isGateQuestionId(question.id))?.id;
+        if (typeof questionId === "string") {
+          setPendingGate(questionId);
+        }
       }
     }
 
@@ -187,7 +190,7 @@ export function registerHooks(pi: ExtensionAPI): void {
     // If ask_user_questions was called with a gate ID but hasn't been confirmed,
     // block all non-read-only tool calls to prevent the model from skipping gates.
     if (getPendingGate()) {
-      const milestoneId = getDiscussionMilestoneId();
+      const milestoneId = getDiscussionMilestoneId(discussionBasePath);
       if (isToolCallEventType("bash", event)) {
         const bashGuard = shouldBlockPendingGateBash(
           event.input.command,
@@ -247,8 +250,7 @@ export function registerHooks(pi: ExtensionAPI): void {
     const result = shouldBlockContextWrite(
       event.toolName,
       event.input.path,
-      getDiscussionMilestoneId(),
-      isDepthVerified(),
+      getDiscussionMilestoneId(discussionBasePath),
       isQueuePhaseActive(),
     );
     if (result.block) return result;
@@ -276,7 +278,7 @@ export function registerHooks(pi: ExtensionAPI): void {
 
   pi.on("tool_result", async (event) => {
     if (event.toolName !== "ask_user_questions") return;
-    const milestoneId = getDiscussionMilestoneId();
+    const milestoneId = getDiscussionMilestoneId(process.cwd());
     const queueActive = isQueuePhaseActive();
     if (!milestoneId && !queueActive) return;
 
@@ -294,9 +296,13 @@ export function registerHooks(pi: ExtensionAPI): void {
         // Gate stays pending — model will be blocked from non-read-only tools
         // until it re-asks and gets a valid response
       } else {
-        // User responded (confirmed or requested adjustment) — clear the pending gate.
-        // The prompt-level instructions handle the "needs adjustment" re-ask flow.
-        clearPendingGate();
+        const pendingQuestion = questions.find((question) => question?.id === currentPendingGate);
+        if (pendingQuestion) {
+          const answer = details.response?.answers?.[currentPendingGate];
+          if (isDepthConfirmationAnswer(answer?.selected, pendingQuestion.options)) {
+            clearPendingGate();
+          }
+        }
       }
     }
 
@@ -308,7 +314,7 @@ export function registerHooks(pi: ExtensionAPI): void {
         // Cross-references against the question's defined options to reject free-form "Other" text.
         const answer = details.response?.answers?.[question.id];
         if (isDepthConfirmationAnswer(answer?.selected, question.options)) {
-          markDepthVerified();
+          markDepthVerified(extractDepthVerificationMilestoneId(question.id) ?? milestoneId);
         }
         break;
       }
