@@ -20,6 +20,7 @@ import { execFileSync } from "node:child_process";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { GSDError, GSD_PARSE_ERROR, GSD_STALE_STATE, GSD_LOCK_HELD, GSD_GIT_ERROR, GSD_MERGE_CONFLICT } from "./errors.js";
 import { logWarning } from "./workflow-logger.js";
+import { getErrorMessage } from "./error-utils.js";
 import {
   nativeBranchDelete,
   nativeBranchExists,
