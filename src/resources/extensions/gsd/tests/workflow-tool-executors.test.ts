@@ -268,7 +268,7 @@ test("executeSliceComplete coerces string enrichment entries and writes summary/
       "INSERT OR REPLACE INTO tasks (milestone_id, slice_id, id, title, status) VALUES (?, ?, ?, ?, ?)",
     ).run("M001", "S01", "T01", "Task T01", "complete");
 
-    const result = await inProjectDir(base, () => executeSliceComplete({
+    const rawParams = {
       milestoneId: "M001",
       sliceId: "S01",
       sliceTitle: "Slice S01",
@@ -280,7 +280,9 @@ test("executeSliceComplete coerces string enrichment entries and writes summary/
       requirementsAdvanced: ["R001 - added slice completion support"],
       filesModified: ["src/file.ts - updated logic"],
       requires: ["S00 - upstream context"],
-    }, base));
+    } as unknown as Parameters<typeof executeSliceComplete>[0];
+
+    const result = await inProjectDir(base, () => executeSliceComplete(rawParams, base));
 
     assert.equal(result.details.operation, "complete_slice");
     const summaryPath = String(result.details.summaryPath);
@@ -341,7 +343,7 @@ test("executeCompleteMilestone sanitizes raw params and writes milestone summary
       "INSERT OR REPLACE INTO tasks (milestone_id, slice_id, id, title, status) VALUES (?, ?, ?, ?, ?)",
     ).run("M003", "S03", "T03", "Task T03", "complete");
 
-    const result = await inProjectDir(base, () => executeCompleteMilestone({
+    const rawParams = {
       milestoneId: "M003",
       title: "Milestone Three",
       oneLiner: "Completed milestone",
@@ -349,7 +351,9 @@ test("executeCompleteMilestone sanitizes raw params and writes milestone summary
       verificationPassed: "true",
       keyDecisions: ["shared executor path"],
       lessonsLearned: ["MCP transport stays generic"],
-    }, base));
+    } as unknown as Parameters<typeof executeCompleteMilestone>[0];
+
+    const result = await inProjectDir(base, () => executeCompleteMilestone(rawParams, base));
 
     assert.equal(result.details.operation, "complete_milestone");
     const summaryPath = String(result.details.summaryPath);
