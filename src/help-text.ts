@@ -3,12 +3,15 @@ const SUBCOMMAND_HELP: Record<string, string> = {
     'Usage: gsd config',
     '',
     'Re-run the interactive setup wizard to configure:',
-    '  - LLM provider (Anthropic, OpenAI, Google, etc.)',
+    '  - LLM provider (Anthropic, OpenAI, Google, OpenRouter, Ollama, LM Studio, etc.)',
     '  - Web search provider (Brave, Tavily, built-in)',
     '  - Remote questions (Discord, Slack, Telegram)',
     '  - Tool API keys (Context7, Jina, Groq)',
     '',
     'All steps are skippable and can be changed later with /login or /search-provider.',
+    '',
+    'For detailed provider setup instructions (OpenRouter, Ollama, LM Studio, vLLM,',
+    'and other OpenAI-compatible endpoints), see docs/providers.md.',
   ].join('\n'),
 
   update: [
@@ -169,6 +172,7 @@ export function printHelp(version: string): void {
   process.stdout.write('  update                   Update GSD to the latest version\n')
   process.stdout.write('  sessions                 List and resume a past session\n')
   process.stdout.write('  worktree <cmd>           Manage worktrees (list, merge, clean, remove)\n')
+  process.stdout.write('  auto [args]              Run auto-mode without TUI (pipeable)\n')
   process.stdout.write('  headless [cmd] [args]    Run /gsd commands without TUI (default: auto)\n')
   process.stdout.write('\nRun gsd <subcommand> --help for subcommand-specific help.\n')
 }

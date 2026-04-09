@@ -8,6 +8,7 @@ import { runEnvironmentChecks } from "../../doctor-environment.js";
 import { deriveState } from "../../state.js";
 import { handleCmux } from "../../commands-cmux.js";
 import { projectRoot } from "../context.js";
+import { formatShortcut } from "../../files.js";
 
 export function showHelp(ctx: ExtensionCommandContext): void {
   const lines = [
@@ -24,11 +25,12 @@ export function showHelp(ctx: ExtensionCommandContext): void {
     "  /gsd new-milestone  Create milestone from headless context (used by gsd headless)",
     "",
     "VISIBILITY",
-    "  /gsd status         Show progress dashboard  (Ctrl+Alt+G)",
+    `  /gsd status         Show progress dashboard  (${formatShortcut("Ctrl+Alt+G")})`,
     "  /gsd visualize      Interactive 10-tab TUI (progress, timeline, deps, metrics, health, agent, changes, knowledge, captures, export)",
     "  /gsd queue          Show queued/dispatched units and execution order",
     "  /gsd history        View execution history  [--cost] [--phase] [--model] [N]",
     "  /gsd changelog      Show categorized release notes  [version]",
+    `  /gsd notifications  View persistent notification history  [clear|tail|filter]  (${formatShortcut("Ctrl+Alt+N")})`,
     "",
     "COURSE CORRECTION",
     "  /gsd steer <desc>   Apply user override to active work",
@@ -51,6 +53,7 @@ export function showHelp(ctx: ExtensionCommandContext): void {
     "  /gsd cmux           Manage cmux integration  [status|on|off|notifications|sidebar|splits|browser]",
     "  /gsd config         Set API keys for external tools",
     "  /gsd keys           API key manager  [list|add|remove|test|rotate|doctor]",
+    "  /gsd show-config    Show effective configuration (models, routing, toggles)",
     "  /gsd hooks          Show post-unit hook configuration",
     "  /gsd extensions     Manage extensions  [list|enable|disable|info]",
     "  /gsd fast           Toggle OpenAI service tier  [on|off|flex|status]",
@@ -70,6 +73,9 @@ export function showHelp(ctx: ExtensionCommandContext): void {
 
 export async function handleStatus(ctx: ExtensionCommandContext): Promise<void> {
   const basePath = projectRoot();
+  // Open DB in cold sessions so status uses DB-backed state, not filesystem fallback (#3385)
+  const { ensureDbOpen } = await import("../../bootstrap/dynamic-tools.js");
+  await ensureDbOpen();
   const state = await deriveState(basePath);
 
   if (state.registry.length === 0) {
@@ -78,8 +84,8 @@ export async function handleStatus(ctx: ExtensionCommandContext): Promise<void> 
   }
 
   const { GSDDashboardOverlay } = await import("../../dashboard-overlay.js");
-  const result = await ctx.ui.custom<void>(
-    (tui, theme, _kb, done) => new GSDDashboardOverlay(tui, theme, () => done()),
+  const result = await ctx.ui.custom<boolean>(
+    (tui, theme, _kb, done) => new GSDDashboardOverlay(tui, theme, () => done(true)),
     {
       overlay: true,
       overlayOptions: {
@@ -107,8 +113,8 @@ export async function handleVisualize(ctx: ExtensionCommandContext): Promise<voi
   }
 
   const { GSDVisualizerOverlay } = await import("../../visualizer-overlay.js");
-  const result = await ctx.ui.custom<void>(
-    (tui, theme, _kb, done) => new GSDVisualizerOverlay(tui, theme, () => done()),
+  const result = await ctx.ui.custom<boolean>(
+    (tui, theme, _kb, done) => new GSDVisualizerOverlay(tui, theme, () => done(true)),
     {
       overlay: true,
       overlayOptions: {
@@ -211,6 +217,25 @@ export async function handleCoreCommand(trimmed: string, ctx: ExtensionCommandCo
   }
   if (trimmed === "cmux" || trimmed.startsWith("cmux ")) {
     await handleCmux(trimmed.replace(/^cmux\s*/, "").trim(), ctx);
+    return true;
+  }
+  if (trimmed === "show-config") {
+    const { GSDConfigOverlay, formatConfigText } = await import("../../config-overlay.js");
+    const result = await ctx.ui.custom<boolean>(
+      (tui, theme, _kb, done) => new GSDConfigOverlay(tui, theme, () => done(true)),
+      {
+        overlay: true,
+        overlayOptions: {
+          width: "65%",
+          minWidth: 55,
+          maxHeight: "85%",
+          anchor: "center",
+        },
+      },
+    );
+    if (result === undefined) {
+      ctx.ui.notify(formatConfigText(), "info");
+    }
     return true;
   }
   if (trimmed === "setup" || trimmed.startsWith("setup ")) {

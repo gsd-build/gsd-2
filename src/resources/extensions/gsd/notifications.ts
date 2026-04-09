@@ -23,7 +23,13 @@ export function sendDesktopNotification(
   message: string,
   level: NotifyLevel = "info",
   kind: NotificationKind = "complete",
+  projectName?: string,
 ): void {
+  // When a projectName is provided and the title is the default "GSD",
+  // replace it with a project-qualified title for multi-project clarity.
+  if (projectName && title === "GSD") {
+    title = formatNotificationTitle(projectName);
+  }
   const loaded = loadEffectiveGSDPreferences()?.preferences;
   if (!shouldSendDesktopNotification(kind, loaded?.notifications)) return;
 
@@ -62,6 +68,16 @@ export function shouldSendDesktopNotification(
     default:
       return preferences?.on_complete ?? true;
   }
+}
+
+/**
+ * Format a notification title that includes the project name for context.
+ * Returns "GSD — projectName" when a project name is available, otherwise "GSD".
+ */
+export function formatNotificationTitle(projectName?: string): string {
+  const trimmed = projectName?.trim();
+  if (trimmed) return `GSD — ${trimmed}`;
+  return "GSD";
 }
 
 export function buildDesktopNotificationCommand(

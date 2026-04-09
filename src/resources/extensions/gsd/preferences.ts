@@ -19,6 +19,7 @@ import { parse as parseYaml } from "yaml";
 import type { PostUnitHookConfig, PreDispatchHookConfig, TokenProfile } from "./types.js";
 import type { DynamicRoutingConfig } from "./model-router.js";
 import { normalizeStringArray } from "../shared/format-utils.js";
+import { logWarning } from "./workflow-logger.js";
 import { resolveProfileDefaults as _resolveProfileDefaults } from "./preferences-models.js";
 
 import {
@@ -48,6 +49,7 @@ export type {
   AutoSupervisorConfig,
   RemoteQuestionsConfig,
   CmuxPreferences,
+  CodebaseMapPreferences,
   GSDPreferences,
   LoadedGSDPreferences,
   SkillResolution,
@@ -69,6 +71,7 @@ export {
   resolveModelForUnit,
   resolveModelWithFallbacksForUnit,
   getNextFallbackModel,
+  isTransientNetworkError,
   validateModelId,
   updatePreferencesModels,
   resolveDynamicRoutingConfig,
@@ -87,7 +90,7 @@ function gsdHome(): string {
 }
 
 function globalPreferencesPath(): string {
-  return join(gsdHome(), "PREFERENCES.md");
+  return join(gsdHome(), "preferences.md");
 }
 
 function legacyGlobalPreferencesPath(): string {
@@ -95,15 +98,15 @@ function legacyGlobalPreferencesPath(): string {
 }
 
 function projectPreferencesPath(): string {
-  return join(gsdRoot(process.cwd()), "PREFERENCES.md");
-}
-// Legacy: older versions used lowercase preferences.md.
-// Check lowercase as a fallback so those files aren't silently ignored.
-function globalPreferencesPathLegacy(): string {
-  return join(gsdHome(), "preferences.md");
-}
-function projectPreferencesPathLegacy(): string {
   return join(gsdRoot(process.cwd()), "preferences.md");
+}
+// Bootstrap in gitignore.ts historically created PREFERENCES.md (uppercase) by mistake.
+// Check uppercase as a fallback so those files aren't silently ignored.
+function globalPreferencesPathUppercase(): string {
+  return join(gsdHome(), "PREFERENCES.md");
+}
+function projectPreferencesPathUppercase(): string {
+  return join(gsdRoot(process.cwd()), "PREFERENCES.md");
 }
 
 export function getGlobalGSDPreferencesPath(): string {
@@ -122,13 +125,13 @@ export function getProjectGSDPreferencesPath(): string {
 
 export function loadGlobalGSDPreferences(): LoadedGSDPreferences | null {
   return loadPreferencesFile(globalPreferencesPath(), "global")
-    ?? loadPreferencesFile(globalPreferencesPathLegacy(), "global")
+    ?? loadPreferencesFile(globalPreferencesPathUppercase(), "global")
     ?? loadPreferencesFile(legacyGlobalPreferencesPath(), "global");
 }
 
 export function loadProjectGSDPreferences(): LoadedGSDPreferences | null {
   return loadPreferencesFile(projectPreferencesPath(), "project")
-    ?? loadPreferencesFile(projectPreferencesPathLegacy(), "project");
+    ?? loadPreferencesFile(projectPreferencesPathUppercase(), "project");
 }
 
 export function loadEffectiveGSDPreferences(): LoadedGSDPreferences | null {
@@ -197,10 +200,13 @@ function loadPreferencesFile(path: string, scope: "global" | "project"): LoadedG
 }
 
 let _warnedUnrecognizedFormat = false;
+let _warnedSectionParse = false;
 
-/** @internal Reset the warn-once flag — exported for testing only. */
+/** @internal Reset the warn-once flags — exported for testing only. */
 export function _resetParseWarningFlag(): void {
   _warnedUnrecognizedFormat = false;
+  _warnedFrontmatterParse = false;
+  _warnedSectionParse = false;
 }
 
 /** @internal Exported for testing only */
@@ -221,13 +227,18 @@ export function parsePreferencesMarkdown(content: string): GSDPreferences | null
     return parseHeadingListFormat(content);
   }
 
-  if (!_warnedUnrecognizedFormat) {
+  // Warn when a non-empty file exists but lacks frontmatter delimiters (#2036).
+  if (content.trim().length > 0 && !_warnedUnrecognizedFormat) {
     _warnedUnrecognizedFormat = true;
-    console.warn("[parsePreferencesMarkdown] PREFERENCES.md exists but uses an unrecognized format — skipping.");
+    console.warn(
+      "[GSD] Warning: preferences file has unrecognized format — content does not use YAML frontmatter delimiters (---). " +
+      "Wrap your preferences in --- fences. See https://github.com/gsd-build/gsd-2/issues/2036",
+    );
   }
   return null;
 }
 
+let _warnedFrontmatterParse = false;
 function parseFrontmatterBlock(frontmatter: string): GSDPreferences {
   try {
     const parsed = parseYaml(frontmatter);
@@ -236,7 +247,11 @@ function parseFrontmatterBlock(frontmatter: string): GSDPreferences {
     }
     return parsed as GSDPreferences;
   } catch (e) {
-    console.error("[parseFrontmatterBlock] YAML parse error:", e);
+    // Warn at most once per session to avoid flooding TUI (#3376)
+    if (!_warnedFrontmatterParse) {
+      _warnedFrontmatterParse = true;
+      logWarning("guided", `YAML parse error in preferences frontmatter (suppressing further): ${(e as Error).message}`);
+    }
     return {} as GSDPreferences;
   }
 }
@@ -295,8 +310,11 @@ function parseHeadingListFormat(content: string): GSDPreferences {
       }
 
       typed[targetSection] = value;
-    } catch {
-      /* malformed section — skip */
+    } catch (e) {
+      if (!_warnedSectionParse) {
+        _warnedSectionParse = true;
+        logWarning("guided", `preferences section parse failed: ${(e as Error).message}`);
+      }
     }
   }
 
@@ -360,6 +378,10 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
     verification_commands: mergeStringLists(base.verification_commands, override.verification_commands),
     verification_auto_fix: override.verification_auto_fix ?? base.verification_auto_fix,
     verification_max_retries: override.verification_max_retries ?? base.verification_max_retries,
+    enhanced_verification: override.enhanced_verification ?? base.enhanced_verification,
+    enhanced_verification_pre: override.enhanced_verification_pre ?? base.enhanced_verification_pre,
+    enhanced_verification_post: override.enhanced_verification_post ?? base.enhanced_verification_post,
+    enhanced_verification_strict: override.enhanced_verification_strict ?? base.enhanced_verification_strict,
     search_provider: override.search_provider ?? base.search_provider,
     context_selection: override.context_selection ?? base.context_selection,
     auto_visualize: override.auto_visualize ?? base.auto_visualize,
@@ -370,8 +392,19 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
     service_tier: override.service_tier ?? base.service_tier,
     forensics_dedup: override.forensics_dedup ?? base.forensics_dedup,
     show_token_cost: override.show_token_cost ?? base.show_token_cost,
-    experimental: (base.experimental || override.experimental)
-      ? { ...(base.experimental ?? {}), ...(override.experimental ?? {}) }
+    codebase: (base.codebase || override.codebase)
+      ? {
+          ...(base.codebase ?? {}),
+          ...(override.codebase ?? {}),
+          // Merge exclude_patterns arrays rather than overriding
+          exclude_patterns: [
+            ...((base.codebase?.exclude_patterns) ?? []),
+            ...((override.codebase?.exclude_patterns) ?? []),
+          ].filter(Boolean),
+        }
+      : undefined,
+    slice_parallel: (base.slice_parallel || override.slice_parallel)
+      ? { ...(base.slice_parallel ?? {}), ...(override.slice_parallel ?? {}) }
       : undefined,
   };
 }
@@ -519,7 +552,7 @@ export function resolvePreDispatchHooks(): PreDispatchHookConfig[] {
  * Resolve the effective git isolation mode from preferences.
  * Returns "none" (default), "worktree", or "branch".
  *
- * Default is "none" so GSD works out of the box without PREFERENCES.md.
+ * Default is "none" so GSD works out of the box without preferences.md.
  * Worktree isolation requires explicit opt-in because it depends on git
  * branch infrastructure that must be set up before use.
  */
@@ -537,5 +570,6 @@ export function resolveParallelConfig(prefs: GSDPreferences | undefined): import
     budget_ceiling: prefs?.parallel?.budget_ceiling,
     merge_strategy: prefs?.parallel?.merge_strategy ?? "per-milestone",
     auto_merge: prefs?.parallel?.auto_merge ?? "confirm",
+    worker_model: prefs?.parallel?.worker_model,
   };
 }

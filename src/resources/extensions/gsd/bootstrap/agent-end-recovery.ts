@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 
+import { logWarning } from "../workflow-logger.js";
 import { checkAutoStartAfterDiscuss } from "../guided-flow.js";
 import { getAutoDashboardData, getAutoModeStartModel, isAutoActive, pauseAuto } from "../auto.js";
 import { getNextFallbackModel, resolveModelWithFallbacksForUnit } from "../preferences.js";
@@ -18,7 +19,17 @@ import {
 
 const retryState = createRetryState();
 const MAX_NETWORK_RETRIES = 2;
-const MAX_TRANSIENT_AUTO_RESUMES = 3;
+const MAX_TRANSIENT_AUTO_RESUMES = 8;
+
+/**
+ * Reset the module-level retry state so a resumed auto-session starts fresh.
+ * Called by provider-error-resume.ts before startAuto() — without this, the
+ * consecutiveTransientCount accumulates across pause/resume cycles and locks
+ * out auto-resume after MAX_TRANSIENT_AUTO_RESUMES total (not consecutive) errors.
+ */
+export function resetTransientRetryState(): void {
+  resetRetryState(retryState);
+}
 
 async function pauseTransientWithBackoff(
   cls: ErrorClass,
@@ -68,16 +79,82 @@ export async function handleAgentEnd(
 
   const lastMsg = event.messages[event.messages.length - 1];
   if (lastMsg && "stopReason" in lastMsg && lastMsg.stopReason === "aborted") {
+    // Empty content with aborted stopReason is a non-fatal agent stop (the LLM
+    // chose to end without producing output). Only pause on genuine fatal aborts
+    // that carry error context — e.g. errorMessage field or non-empty content
+    // indicating a mid-stream failure. (#2695)
+    const content = "content" in lastMsg ? lastMsg.content : undefined;
+    const hasEmptyContent = Array.isArray(content) && content.length === 0;
+    const hasErrorMessage = "errorMessage" in lastMsg && !!lastMsg.errorMessage;
+
+    if (hasEmptyContent && !hasErrorMessage) {
+      // Non-fatal: treat as a normal agent end so the loop can continue
+      // instead of entering a stuck re-dispatch cycle.
+      try {
+        resetRetryState(retryState);
+        resolveAgentEnd(event);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        ctx.ui.notify(`Auto-mode error after empty-content abort: ${message}. Stopping auto-mode.`, "error");
+        try { await pauseAuto(ctx, pi); } catch (e) { logWarning("bootstrap", `pauseAuto failed after empty-content abort: ${(e as Error).message}`); }
+      }
+      return;
+    }
+
     await pauseAuto(ctx, pi);
     return;
   }
   if (lastMsg && "stopReason" in lastMsg && lastMsg.stopReason === "error") {
-    const errorDetail = "errorMessage" in lastMsg && lastMsg.errorMessage ? `: ${lastMsg.errorMessage}` : "";
-    const errorMsg = ("errorMessage" in lastMsg && lastMsg.errorMessage) ? String(lastMsg.errorMessage) : "";
+    // #3588: errorMessage can be useless (e.g. "success") while the real error
+    // is in the assistant message text content. Fall back to content when
+    // errorMessage looks uninformative.
+    const rawErrorMsg = ("errorMessage" in lastMsg && lastMsg.errorMessage) ? String(lastMsg.errorMessage) : "";
+    const isUseless = !rawErrorMsg || /^(success|ok|true|error|unknown)$/i.test(rawErrorMsg.trim());
+    // #3588: When errorMessage is uninformative, extract the real error from
+    // the assistant message text content for display purposes only.
+    // Classification still uses rawErrorMsg to avoid false positives from prose.
+    let displayMsg = rawErrorMsg;
+    if (isUseless && "content" in lastMsg && Array.isArray(lastMsg.content)) {
+      const textBlock = lastMsg.content.find((b: any) => b.type === "text" && b.text);
+      if (textBlock) displayMsg = (textBlock as any).text.slice(0, 300);
+    }
+    const errorDetail = displayMsg ? `: ${displayMsg}` : "";
     const explicitRetryAfterMs = ("retryAfterMs" in lastMsg && typeof lastMsg.retryAfterMs === "number") ? lastMsg.retryAfterMs : undefined;
 
-    // ── 1. Classify ──────────────────────────────────────────────────────
-    const cls = classifyError(errorMsg, explicitRetryAfterMs);
+    // ── 1. Classify using rawErrorMsg to avoid prose false-positives ────
+    const cls = classifyError(rawErrorMsg, explicitRetryAfterMs);
+
+    // ── 1b. Defer to Core RetryHandler for transient errors ─────────────
+    // The Core RetryHandler (agent-session.ts) processes retryable errors
+    // AFTER this extension handler, in the same _processAgentEvent() call.
+    // For transient errors (overloaded, rate limit, server), the Core will
+    // retry in-context — same session, same conversation — which is strictly
+    // better than our Layer 2 pause+resume (which creates a new session).
+    //
+    // If we react here AND the Core also retries, we race: pauseAuto tears
+    // down the session while agent.continue() starts a new turn.
+    //
+    // Solution: Do nothing for transient errors. The Core RetryHandler
+    // runs next in _processAgentEvent and will either:
+    //   a) Retry successfully → new agent_end (success) → we see it next time
+    //   b) Exhaust retries → the agent stays idle, autoLoop's unit timeout
+    //      or stuck detection handles it
+    //
+    // We do NOT call resolveAgentEnd here — that would unblock autoLoop
+    // prematurely while the Core is still retrying in the same session.
+    // We do NOT call pauseAuto — that would tear down the session.
+    if (isTransient(cls)) {
+      return;
+    }
+
+    // Cap rate-limit backoff for CLI-style providers (openai-codex, google-gemini-cli)
+    // which use per-user quotas with shorter windows (#2922).
+    if (cls.kind === "rate-limit") {
+      const currentProvider = ctx.model?.provider;
+      if (currentProvider === "openai-codex" || currentProvider === "google-gemini-cli") {
+        cls.retryAfterMs = Math.min(cls.retryAfterMs, 30_000);
+      }
+    }
 
     // ── 2. Decide & Act ──────────────────────────────────────────────────
 
@@ -181,8 +258,8 @@ export async function handleAgentEnd(
     ctx.ui.notify(`Auto-mode error in agent_end handler: ${message}. Stopping auto-mode.`, "error");
     try {
       await pauseAuto(ctx, pi);
-    } catch {
-      // best-effort
+    } catch (e) {
+      logWarning("bootstrap", `pauseAuto failed in agent_end handler: ${(e as Error).message}`);
     }
   }
 }

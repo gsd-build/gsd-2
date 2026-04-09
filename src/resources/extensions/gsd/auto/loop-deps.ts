@@ -20,6 +20,7 @@ import type { DispatchAction } from "../auto-dispatch.js";
 import type { WorktreeResolver } from "../worktree-resolver.js";
 import type { CmuxLogLevel } from "../../cmux/index.js";
 import type { JournalEntry } from "../journal.js";
+import type { MergeReconcileResult } from "../auto-recovery.js";
 
 /**
  * Dependencies injected by the caller (auto.ts startAuto) so autoLoop
@@ -93,6 +94,7 @@ export interface LoopDeps {
     body: string,
     kind: string,
     category: string,
+    projectName?: string,
   ) => void;
   setActiveMilestoneId: (basePath: string, mid: string) => void;
   pruneQueueOrder: (basePath: string, pendingIds: string[]) => void;
@@ -117,7 +119,7 @@ export interface LoopDeps {
     milestoneId: string,
     fileType: string,
   ) => string | null;
-  reconcileMergeState: (basePath: string, ctx: ExtensionContext) => boolean;
+  reconcileMergeState: (basePath: string, ctx: ExtensionContext) => MergeReconcileResult;
 
   // Budget/context/secrets
   getLedger: () => unknown;

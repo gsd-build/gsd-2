@@ -30,9 +30,10 @@ import { checkOwnership, taskUnitKey } from "../unit-ownership.js";
 import { saveFile, clearParseCache } from "../files.js";
 import { invalidateStateCache } from "../state.js";
 import { renderPlanCheckboxes } from "../markdown-renderer.js";
-import { renderAllProjections } from "../workflow-projections.js";
+import { renderAllProjections, renderSummaryContent } from "../workflow-projections.js";
 import { writeManifest } from "../workflow-manifest.js";
 import { appendEvent } from "../workflow-events.js";
+import { logWarning, logError } from "../workflow-logger.js";
 
 export interface CompleteTaskResult {
   taskId: string;
@@ -41,79 +42,52 @@ export interface CompleteTaskResult {
   summaryPath: string;
 }
 
+import type { TaskRow } from "../gsd-db.js";
+
 /**
- * Render task summary markdown matching the template format.
- * YAML frontmatter uses snake_case keys for parseSummary() compatibility.
+ * Normalize a list parameter that may arrive as a string (newline-delimited
+ * bullet list from the LLM) into a string array (#3361).
  */
-function renderSummaryMarkdown(params: CompleteTaskParams): string {
-  const now = new Date().toISOString();
-  const keyFilesYaml = params.keyFiles.length > 0
-    ? params.keyFiles.map(f => `  - ${f}`).join("\n")
-    : "  - (none)";
-  const keyDecisionsYaml = params.keyDecisions.length > 0
-    ? params.keyDecisions.map(d => `  - ${d}`).join("\n")
-    : "  - (none)";
-
-  // Build verification evidence table rows
-  let evidenceTable = "| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n";
-  if (params.verificationEvidence.length > 0) {
-    params.verificationEvidence.forEach((e, i) => {
-      evidenceTable += `| ${i + 1} | \`${e.command}\` | ${e.exitCode} | ${e.verdict} | ${e.durationMs}ms |\n`;
-    });
-  } else {
-    evidenceTable += "| — | No verification commands discovered | — | — | — |\n";
+function normalizeListParam(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value === "string" && value.trim()) {
+    return value.split(/\n/).map(s => s.replace(/^[\s\-*•]+/, "").trim()).filter(Boolean);
   }
+  return [];
+}
 
-  // Determine verification_result from evidence
-  const allPassed = params.verificationEvidence.length > 0 &&
-    params.verificationEvidence.every(e => e.exitCode === 0 || e.verdict.includes("✅") || e.verdict.toLowerCase().includes("pass"));
-  const verificationResult = allPassed ? "passed" : (params.verificationEvidence.length === 0 ? "untested" : "mixed");
-
-  // Extract a title from the oneLiner or taskId
-  const title = params.oneLiner || params.taskId;
-
-  return `---
-id: ${params.taskId}
-parent: ${params.sliceId}
-milestone: ${params.milestoneId}
-key_files:
-${keyFilesYaml}
-key_decisions:
-${keyDecisionsYaml}
-duration: ""
-verification_result: ${verificationResult}
-completed_at: ${now}
-blocker_discovered: ${params.blockerDiscovered}
----
-
-# ${params.taskId}: ${title}
-
-**${params.oneLiner}**
-
-## What Happened
-
-${params.narrative}
-
-## Verification
-
-${params.verification}
-
-## Verification Evidence
-
-${evidenceTable}
-
-## Deviations
-
-${params.deviations || "None."}
-
-## Known Issues
-
-${params.knownIssues || "None."}
-
-## Files Created/Modified
-
-${params.keyFiles.map(f => `- \`${f}\``).join("\n") || "None."}
-`;
+/**
+ * Build a TaskRow-shaped object from CompleteTaskParams so the unified
+ * renderSummaryContent() can be used at completion time (#2720).
+ */
+function paramsToTaskRow(params: CompleteTaskParams, completedAt: string): TaskRow {
+  return {
+    milestone_id: params.milestoneId,
+    slice_id: params.sliceId,
+    id: params.taskId,
+    title: params.oneLiner || params.taskId,
+    status: "complete",
+    one_liner: params.oneLiner,
+    narrative: params.narrative,
+    verification_result: params.verification,
+    duration: "",
+    completed_at: completedAt,
+    blocker_discovered: params.blockerDiscovered ?? false,
+    deviations: params.deviations ?? "",
+    known_issues: params.knownIssues ?? "",
+    key_files: normalizeListParam(params.keyFiles),
+    key_decisions: normalizeListParam(params.keyDecisions),
+    full_summary_md: "",
+    description: "",
+    estimate: "",
+    files: [],
+    verify: "",
+    inputs: [],
+    expected_output: [],
+    observability_impact: "",
+    full_plan_md: "",
+    sequence: 0,
+  };
 }
 
 /**
@@ -178,8 +152,8 @@ export async function handleCompleteTask(
     }
 
     // All guards passed — perform writes
-    insertMilestone({ id: params.milestoneId });
-    insertSlice({ id: params.sliceId, milestoneId: params.milestoneId });
+    insertMilestone({ id: params.milestoneId, title: params.milestoneId });
+    insertSlice({ id: params.sliceId, milestoneId: params.milestoneId, title: params.sliceId });
     insertTask({
       id: params.taskId,
       sliceId: params.sliceId,
@@ -190,14 +164,14 @@ export async function handleCompleteTask(
       narrative: params.narrative,
       verificationResult: params.verification,
       duration: "",
-      blockerDiscovered: params.blockerDiscovered,
-      deviations: params.deviations,
-      knownIssues: params.knownIssues,
-      keyFiles: params.keyFiles,
-      keyDecisions: params.keyDecisions,
+      blockerDiscovered: params.blockerDiscovered ?? false,
+      deviations: params.deviations ?? "None.",
+      knownIssues: params.knownIssues ?? "None.",
+      keyFiles: params.keyFiles ?? [],
+      keyDecisions: params.keyDecisions ?? [],
     });
 
-    for (const evidence of params.verificationEvidence) {
+    for (const evidence of (params.verificationEvidence ?? [])) {
       insertVerificationEvidence({
         taskId: params.taskId,
         sliceId: params.sliceId,
@@ -218,8 +192,9 @@ export async function handleCompleteTask(
   // If disk render fails, roll back the DB status so deriveState() and
   // verifyExpectedArtifact() stay consistent (both say "not done").
 
-  // Render summary markdown
-  const summaryMd = renderSummaryMarkdown(params);
+  // Render summary markdown via the single source of truth (#2720)
+  const taskRow = paramsToTaskRow(params, completedAt);
+  const summaryMd = renderSummaryContent(taskRow, params.sliceId, params.milestoneId, params.verificationEvidence ?? []);
 
   // Resolve and write summary to disk
   let summaryPath: string;
@@ -248,9 +223,7 @@ export async function handleCompleteTask(
     }
   } catch (renderErr) {
     // Disk render failed — roll back DB status so state stays consistent
-    process.stderr.write(
-      `gsd-db: complete_task — disk render failed, rolling back DB status: ${(renderErr as Error).message}\n`,
-    );
+    logWarning("tool", `complete_task — disk render failed, rolling back DB status: ${(renderErr as Error).message}`);
     // Delete orphaned verification_evidence rows first (FK constraint
     // references tasks, so evidence must go before status change).
     // Without this, retries accumulate duplicate evidence rows (#2724).
@@ -269,9 +242,19 @@ export async function handleCompleteTask(
   clearParseCache();
 
   // ── Post-mutation hook: projections, manifest, event log ───────────────
+  // Separate try/catch per step so a projection failure doesn't prevent
+  // the event log entry (critical for worktree reconciliation).
   try {
     await renderAllProjections(basePath, params.milestoneId);
+  } catch (projErr) {
+    logWarning("tool", `complete-task projection warning: ${(projErr as Error).message}`);
+  }
+  try {
     writeManifest(basePath);
+  } catch (mfErr) {
+    logWarning("tool", `complete-task manifest warning: ${(mfErr as Error).message}`);
+  }
+  try {
     appendEvent(basePath, {
       cmd: "complete-task",
       params: { milestoneId: params.milestoneId, sliceId: params.sliceId, taskId: params.taskId },
@@ -280,10 +263,8 @@ export async function handleCompleteTask(
       actor_name: params.actorName,
       trigger_reason: params.triggerReason,
     });
-  } catch (hookErr) {
-    process.stderr.write(
-      `gsd: complete-task post-mutation hook warning: ${(hookErr as Error).message}\n`,
-    );
+  } catch (eventErr) {
+    logError("tool", `complete-task event log FAILED — completion invisible to reconciliation`, { error: (eventErr as Error).message });
   }
 
   return {

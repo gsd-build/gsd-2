@@ -24,14 +24,18 @@ Then:
 3. Run all slice-level verification checks defined in the slice plan. All must pass before marking the slice done. If any fail, fix them first.
 4. If the slice plan includes observability/diagnostic surfaces, confirm they work. Skip this for simple slices that don't have observability sections.
 5. If the slice involved runtime behavior, fill the **Operational Readiness** section (Q8) in the slice summary: health signal, failure signal, recovery procedure, and monitoring gaps. Omit entirely for simple slices with no runtime concerns.
-6. If this slice produced evidence that a requirement changed status (Active → Validated, Active → Deferred, etc.), call `gsd_save_decision` with scope="requirement", decision="{requirement-id}", choice="{new-status}", rationale="{evidence}". Do NOT write `.gsd/REQUIREMENTS.md` directly — the engine renders it from the database.
+6. If this slice produced evidence that a requirement changed status (Active → Validated, Active → Deferred, etc.), call `gsd_requirement_update` with the requirement ID, updated `status`, and `validation` evidence. Do NOT write `.gsd/REQUIREMENTS.md` directly — the engine renders it from the database.
 7. Write `{{sliceSummaryPath}}` (compress all task summaries).
 8. Write `{{sliceUatPath}}` — a concrete UAT script with real test cases derived from the slice plan and task summaries. Include preconditions, numbered steps with expected outcomes, and edge cases. This must NOT be a placeholder or generic template — tailor every test case to what this slice actually built.
 9. Review task summaries for `key_decisions`. Append any significant decisions to `.gsd/DECISIONS.md` if missing.
 10. Review task summaries for patterns, gotchas, or non-obvious lessons learned. If any would save future agents from repeating investigation or hitting the same issues, append them to `.gsd/KNOWLEDGE.md`. Only add entries that are genuinely useful — don't pad with obvious observations.
-11. Call `gsd_complete_slice` with milestone_id, slice_id, the slice summary, and the UAT result. Do NOT manually mark the roadmap checkbox — the tool writes to the DB and renders the ROADMAP.md projection automatically.
+11. Call `gsd_complete_slice` with milestoneId, sliceId, the slice summary, and the UAT result. Do NOT manually mark the roadmap checkbox — the tool writes to the DB and renders the ROADMAP.md projection automatically.
 12. Do not run git commands — the system commits your changes and handles any merge after this unit succeeds.
-13. Update `.gsd/PROJECT.md` if it exists — refresh current state if needed.
+13. Update `.gsd/PROJECT.md` if it exists — refresh current state if needed: use the `write` tool with `path: ".gsd/PROJECT.md"` and `content` containing the full updated document reflecting current project state. Do NOT use the `edit` tool for this — PROJECT.md is a full-document refresh.
+
+**Autonomous execution:** Do not call `ask_user_questions` or `secure_env_collect`. You are running in auto-mode — there is no human available to answer questions. Make reasonable assumptions and document them in the slice summary. If a decision genuinely requires human input, note it in the summary and proceed with the best available option.
+
+**File system safety:** Task summaries are preloaded in the inlined context above. If you need to re-read any of them, use `find .gsd/milestones/{{milestoneId}}/slices/{{sliceId}}/tasks -name "*-SUMMARY.md"` to list file paths first — never pass `{{slicePath}}` or any other directory path directly to the `read` tool. The `read` tool only accepts file paths, not directories.
 
 **You MUST call `gsd_complete_slice` with the slice summary and UAT content before finishing. The tool persists to both DB and disk and renders `{{sliceSummaryPath}}` and `{{sliceUatPath}}` automatically.**
 

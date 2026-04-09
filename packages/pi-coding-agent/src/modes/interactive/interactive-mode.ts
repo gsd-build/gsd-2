@@ -7,6 +7,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { listDescendants } from "@gsd/native";
 import type { AgentMessage } from "@gsd/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, Model, OAuthProviderId } from "@gsd/pi-ai";
 import type {
@@ -78,7 +79,7 @@ import { ExtensionSelectorComponent } from "./components/extension-selector.js";
 import { FooterComponent } from "./components/footer.js";
 import { appKey, appKeyHint, editorKey, formatKeyForDisplay, keyHint, rawKeyHint } from "./components/keybinding-hints.js";
 import { LoginDialogComponent } from "./components/login-dialog.js";
-import { ModelSelectorComponent } from "./components/model-selector.js";
+import { ModelSelectorComponent, providerDisplayName } from "./components/model-selector.js";
 import { OAuthSelectorComponent } from "./components/oauth-selector.js";
 import { ProviderManagerComponent } from "./components/provider-manager.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
@@ -107,6 +108,7 @@ import {
 	getThemeByName,
 	initTheme,
 	onThemeChange,
+	stopThemeWatcher,
 	setRegisteredThemes,
 	setTheme,
 	setThemeInstance,
@@ -156,6 +158,10 @@ export interface InteractiveModeOptions {
 }
 
 export class InteractiveMode {
+	// Cap rendered chat components to prevent unbounded memory/CPU growth.
+	// Only render-components are removed — session transcript stays on disk.
+	private static readonly MAX_CHAT_COMPONENTS = 100;
+
 	private session: AgentSession;
 	private ui: TUI;
 	private chatContainer: Container;
@@ -201,6 +207,9 @@ export class InteractiveMode {
 
 	// Agent subscription unsubscribe function
 	private unsubscribe?: () => void;
+
+	// Branch change listener unsubscribe function
+	private _branchChangeUnsub?: () => void;
 
 	// Track if editor is in bash mode (text starts with !)
 	private isBashMode = false;
@@ -329,7 +338,7 @@ export class InteractiveMode {
 				return filtered.map((item) => ({
 					value: item.label,
 					label: item.id,
-					description: item.provider,
+					description: providerDisplayName(item.provider),
 				}));
 			};
 		}
@@ -511,7 +520,7 @@ export class InteractiveMode {
 		});
 
 		// Set up git branch watcher (uses provider instead of footer)
-		this.footerDataProvider.onBranchChange(() => {
+		this._branchChangeUnsub = this.footerDataProvider.onBranchChange(() => {
 			this.ui.requestRender();
 		});
 
@@ -1998,8 +2007,9 @@ export class InteractiveMode {
 	}
 
 	private subscribeToAgent(): void {
-		this.unsubscribe = this.session.subscribe(async (event) => {
-			await this.handleEvent(event);
+		let eventQueue: Promise<void> = Promise.resolve();
+		this.unsubscribe = this.session.subscribe((event) => {
+			eventQueue = eventQueue.then(() => this.handleEvent(event)).catch(() => {});
 		});
 	}
 
@@ -2133,6 +2143,18 @@ export class InteractiveMode {
 				const _exhaustive: never = message;
 			}
 		}
+		this.trimChatHistory();
+	}
+
+	/**
+	 * Remove oldest components when chat exceeds MAX_CHAT_COMPONENTS.
+	 * Only render-components are removed — session data stays in SessionManager.
+	 */
+	private trimChatHistory(): void {
+		while (this.chatContainer.children.length > InteractiveMode.MAX_CHAT_COMPONENTS) {
+			const oldest = this.chatContainer.children[0];
+			this.chatContainer.removeChild(oldest);
+		}
 	}
 
 	/**
@@ -2227,6 +2249,7 @@ export class InteractiveMode {
 		}
 
 		this.pendingTools.clear();
+		this.trimChatHistory();
 		this.ui.requestRender();
 	}
 
@@ -2320,6 +2343,21 @@ export class InteractiveMode {
 		if (shutdownBehavior === "stop_ui") {
 			return;
 		}
+
+		// Kill ALL descendant processes to prevent orphans (next-server, pnpm dev, etc.)
+		try {
+			const descendants = listDescendants(process.pid);
+			for (const childPid of descendants) {
+				try { process.kill(childPid, "SIGTERM"); } catch {}
+			}
+			if (descendants.length > 0) {
+				await new Promise(resolve => setTimeout(resolve, 500));
+				for (const childPid of descendants) {
+					try { process.kill(childPid, "SIGKILL"); } catch {}
+				}
+			}
+		} catch {}
+
 		process.exit(0);
 	}
 
@@ -2365,6 +2403,12 @@ export class InteractiveMode {
 	private async handleFollowUp(): Promise<void> {
 		const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
 		if (!text) return;
+
+		if (text.startsWith("/") && !this.isKnownSlashCommand(text)) {
+			const command = text.split(/\s/)[0];
+			this.showError(`Unknown command: ${command}. Use slash autocomplete to see available commands.`);
+			return;
+		}
 
 		// Queue input during compaction (extension commands execute immediately)
 		if (this.session.isCompacting) {
@@ -2648,6 +2692,12 @@ export class InteractiveMode {
 	}
 
 	private queueCompactionMessage(text: string, mode: "steer" | "followUp"): void {
+		if (text.startsWith("/") && !this.isKnownSlashCommand(text)) {
+			const command = text.split(/\s/)[0];
+			this.showError(`Unknown command: ${command}. Use slash autocomplete to see available commands.`);
+			return;
+		}
+
 		this.compactionQueuedMessages.push({ text, mode });
 		this.editor.addToHistory?.(text);
 		this.editor.setText("");
@@ -2664,6 +2714,32 @@ export class InteractiveMode {
 		const spaceIndex = text.indexOf(" ");
 		const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
 		return !!extensionRunner.getCommand(commandName);
+	}
+
+	private isKnownSlashCommand(text: string): boolean {
+		if (!text.startsWith("/")) return false;
+
+		const spaceIndex = text.indexOf(" ");
+		const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+
+		if (BUILTIN_SLASH_COMMANDS.some((command) => command.name === commandName)) {
+			return true;
+		}
+
+		if (this.isExtensionCommand(text)) {
+			return true;
+		}
+
+		if (this.session.promptTemplates.some((template) => template.name === commandName)) {
+			return true;
+		}
+
+		if (commandName.startsWith("skill:") && this.settingsManager.getEnableSkillCommands()) {
+			const skillName = commandName.slice("skill:".length);
+			return this.session.resourceLoader.getSkills().skills.some((skill) => skill.name === skillName);
+		}
+
+		return false;
 	}
 
 	private async flushCompactionQueue(options?: { willRetry?: boolean }): Promise<void> {
@@ -3335,6 +3411,11 @@ export class InteractiveMode {
 					done();
 					this.ui.requestRender();
 				},
+				async (provider: string) => {
+					// Enter key → auth setup for selected provider (#3579)
+					done();
+					await this.showLoginDialog(provider);
+				},
 			);
 			return { component, focus: component };
 		});
@@ -3805,6 +3886,33 @@ export class InteractiveMode {
 			this.loadingAnimation = undefined;
 		}
 		this.clearExtensionTerminalInputListeners();
+
+		// Clean up branch change listener (Fix 1)
+		this._branchChangeUnsub?.();
+		this._branchChangeUnsub = undefined;
+
+		// Clean up theme change listener and watcher (Fix 2)
+		onThemeChange(() => {});
+		stopThemeWatcher();
+
+		// Resolve any pending getUserInput promise so the run() loop can exit (Fix 3)
+		if (this.onInputCallback) {
+			this.onInputCallback("");
+			this.onInputCallback = undefined;
+		}
+
+		// Dispose extension widgets, custom footer, and custom header (Fix 4)
+		this.clearExtensionWidgets();
+		if (this.customFooter?.dispose) {
+			this.customFooter.dispose();
+		}
+		this.customFooter = undefined;
+		if (this.customHeader?.dispose) {
+			this.customHeader.dispose();
+		}
+		this.customHeader = undefined;
+		this.autocompleteProvider = undefined;
+
 		this.footer.dispose();
 		this.footerDataProvider.dispose();
 		if (this.unsubscribe) {

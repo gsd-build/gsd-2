@@ -72,6 +72,7 @@ import type { ModelRegistry } from "./model-registry.js";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.js";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.js";
 import { RetryHandler } from "./retry-handler.js";
+import { isImageDimensionError, downsizeConversationImages } from "./image-overflow-recovery.js";
 import type { BranchSummaryEntry, SessionManager } from "./session-manager.js";
 import { getLatestCompactionEntry } from "./session-manager.js";
 import type { SettingsManager } from "./settings-manager.js";
@@ -136,7 +137,8 @@ export type AgentSessionEvent =
 	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
 	| { type: "fallback_provider_switch"; from: string; to: string; reason: string }
 	| { type: "fallback_provider_restored"; provider: string; reason: string }
-	| { type: "fallback_chain_exhausted"; reason: string };
+	| { type: "fallback_chain_exhausted"; reason: string }
+	| { type: "image_overflow_recovery"; strippedCount: number; imageCount: number };
 
 /** Listener function for agent session events */
 export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
@@ -164,6 +166,9 @@ export interface AgentSessionConfig {
 	baseToolsOverride?: Record<string, AgentTool>;
 	/** Mutable ref used by Agent to access the current ExtensionRunner */
 	extensionRunnerRef?: { current?: ExtensionRunner };
+	/** Optional: check if the claude-code CLI provider is ready (installed + authed).
+	 * Passed through to RetryHandler for third-party block recovery (#3772). */
+	isClaudeCodeReady?: () => boolean;
 }
 
 export interface ExtensionBindings {
@@ -322,6 +327,7 @@ export class AgentSession {
 			getSessionId: () => this.sessionId,
 			emit: (event) => this._emit(event),
 			onModelChange: (model) => this.sessionManager.appendModelChange(model.provider, model.id),
+			isClaudeCodeReady: config.isClaudeCodeReady,
 		});
 
 		this._compactionOrchestrator = new CompactionOrchestrator({
@@ -485,6 +491,36 @@ export class AgentSession {
 			if (this._retryHandler.isRetryableError(msg)) {
 				const didRetry = await this._retryHandler.handleRetryableError(msg);
 				if (didRetry) return; // Retry was initiated, don't proceed to compaction
+			}
+
+			// Check for image dimension overflow (many-image 400 error).
+			// When a session accumulates many images, the API rejects requests
+			// whose images exceed the many-image dimension limit. Strip older
+			// images from the conversation and auto-retry. (#2874)
+			if (
+				msg.stopReason === "error" &&
+				isImageDimensionError(msg.errorMessage)
+			) {
+				const messages = this.agent.state.messages;
+				const result = downsizeConversationImages(messages as Message[]);
+				if (result.processed) {
+					// Remove the trailing error assistant message, then replace
+					if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
+						this.agent.replaceMessages(messages.slice(0, -1));
+					}
+
+					this._emit({
+						type: "image_overflow_recovery",
+						strippedCount: result.strippedCount,
+						imageCount: result.imageCount,
+					});
+
+					// Auto-retry after downsizing
+					setTimeout(() => {
+						this.agent.continue().catch(() => {});
+					}, 0);
+					return;
+				}
 			}
 
 			await this._compactionOrchestrator.checkCompaction(msg);
@@ -1545,6 +1581,16 @@ export class AgentSession {
 				activeToolNames: this.getActiveToolNames(),
 				includeAllExtensionTools: true,
 			});
+		} else {
+			// Even when cwd hasn't changed, restore the full tool set (#3616).
+			// Extensions (e.g., discuss flows) may narrow the active tool list
+			// via setActiveTools() during a session. Without this refresh, the
+			// narrowed set persists into the next session — causing tools like
+			// gsd_plan_slice to be missing from auto-mode subagent sessions.
+			this._refreshToolRegistry({
+				activeToolNames: this.getActiveToolNames(),
+				includeAllExtensionTools: true,
+			});
 		}
 
 		// Run setup callback if provided (e.g., to append initial messages)
@@ -1601,6 +1647,10 @@ export class AgentSession {
 		options?: { persist?: boolean },
 	): Promise<void> {
 		const previousModel = this.model;
+		// Explicit model switches must cancel any in-flight retry loop from the
+		// previous provider/model. Otherwise stale provider backoff errors can
+		// continue to land after the user or runtime has already switched models.
+		this._retryHandler.abortRetry();
 		this.agent.setModel(model);
 		this.sessionManager.appendModelChange(model.provider, model.id);
 		if (options?.persist !== false) {
@@ -1986,6 +2036,11 @@ export class AgentSession {
 					const messages = this.agent.state.messages;
 					const last = messages[messages.length - 1];
 					if (last?.role === "assistant" && (last as AssistantMessage).stopReason === "error") {
+						// If the error was an image dimension overflow, downsize images
+						// before retrying so the retry doesn't hit the same error (#2874)
+						if (isImageDimensionError((last as AssistantMessage).errorMessage)) {
+							downsizeConversationImages(messages as Message[]);
+						}
 						this.agent.replaceMessages(messages.slice(0, -1));
 						this.agent.continue().catch((err) => {
 							runner.emitError({

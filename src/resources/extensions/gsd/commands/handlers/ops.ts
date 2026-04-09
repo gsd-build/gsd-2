@@ -178,6 +178,11 @@ Examples:
     await dispatchDirectPhase(ctx, pi, phase, projectRoot());
     return true;
   }
+  if (trimmed === "notifications" || trimmed.startsWith("notifications ")) {
+    const { handleNotificationsCommand } = await import("./notifications-handler.js");
+    await handleNotificationsCommand(trimmed.replace(/^notifications\s*/, "").trim(), ctx, pi);
+    return true;
+  }
   if (trimmed === "inspect") {
     await handleInspect(ctx);
     return true;
@@ -204,6 +209,11 @@ Examples:
   if (trimmed === "rethink") {
     const { handleRethink } = await import("../../rethink.js");
     await handleRethink(trimmed, ctx, pi);
+    return true;
+  }
+  if (trimmed === "codebase" || trimmed.startsWith("codebase ")) {
+    const { handleCodebase } = await import("../../commands-codebase.js");
+    await handleCodebase(trimmed.replace(/^codebase\s*/, "").trim(), ctx, pi);
     return true;
   }
   return false;

@@ -102,4 +102,49 @@ describe("PartialMessageBuilder — malformed tool arguments (#2574)", () => {
 			"non-JSON content should set malformedArguments: true",
 		);
 	});
+
+	test("YAML bullet lists repaired to JSON arrays (#2660)", () => {
+		const builder = new PartialMessageBuilder("claude-sonnet-4-20250514");
+		const malformedJson =
+			'{"milestoneId": "M005", "keyDecisions": - Used Web Notification API, "keyFiles": - src/lib.rs, "title": "done"}';
+		const event = feedToolCall(builder, [malformedJson]);
+
+		assert.ok(event, "event should not be null");
+		assert.equal(event!.type, "toolcall_end");
+		// Repaired YAML bullets should NOT set malformedArguments
+		assert.equal(
+			(event as any).malformedArguments,
+			undefined,
+			"repaired YAML bullets should not set malformedArguments",
+		);
+		if (event!.type === "toolcall_end") {
+			assert.equal(event!.toolCall.arguments.milestoneId, "M005");
+			assert.ok(
+				Array.isArray(event!.toolCall.arguments.keyDecisions),
+				"keyDecisions should be repaired to an array",
+			);
+			assert.ok(
+				Array.isArray(event!.toolCall.arguments.keyFiles),
+				"keyFiles should be repaired to an array",
+			);
+			assert.equal(event!.toolCall.arguments.title, "done");
+		}
+	});
+
+	test("XML parameter tags trapped inside valid JSON strings are promoted (#3751)", () => {
+		const builder = new PartialMessageBuilder("claude-sonnet-4-20250514");
+		const malformedJson =
+			'{"narrative":"text.</narrative>\\n<parameter name=\\"verification\\">all tests pass</parameter>\\n<parameter name=\\"verificationEvidence\\">[\\"npm test\\"]</parameter>","oneLiner":"done"}';
+		const event = feedToolCall(builder, [malformedJson]);
+
+		assert.ok(event, "event should not be null");
+		assert.equal(event!.type, "toolcall_end");
+		assert.equal((event as any).malformedArguments, undefined);
+		if (event!.type === "toolcall_end") {
+			assert.equal(event.toolCall.arguments.narrative, "text.");
+			assert.equal(event.toolCall.arguments.verification, "all tests pass");
+			assert.deepEqual(event.toolCall.arguments.verificationEvidence, ["npm test"]);
+			assert.equal(event.toolCall.arguments.oneLiner, "done");
+		}
+	});
 });

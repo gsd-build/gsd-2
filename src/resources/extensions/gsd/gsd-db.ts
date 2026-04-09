@@ -10,6 +10,7 @@ import { existsSync, copyFileSync, mkdirSync, realpathSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Decision, Requirement, GateRow, GateId, GateScope, GateStatus, GateVerdict } from "./types.js";
 import { GSDError, GSD_STALE_STATE } from "./errors.js";
+import { logError, logWarning } from "./workflow-logger.js";
 
 const _require = createRequire(import.meta.url);
 
@@ -408,6 +409,7 @@ function initSchema(db: DbAdapter, fileBacked: boolean): void {
     db.exec("CREATE INDEX IF NOT EXISTS idx_milestones_status ON milestones(status)");
     db.exec("CREATE INDEX IF NOT EXISTS idx_quality_gates_pending ON quality_gates(milestone_id, slice_id, status)");
     db.exec("CREATE INDEX IF NOT EXISTS idx_verification_evidence_task ON verification_evidence(milestone_id, slice_id, task_id)");
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_verification_evidence_dedup ON verification_evidence(task_id, slice_id, milestone_id, command, verdict)");
 
     // v14 index — slice dependency lookups
     db.exec("CREATE INDEX IF NOT EXISTS idx_slice_deps_target ON slice_dependencies(milestone_id, depends_on_slice_id)");
@@ -448,6 +450,25 @@ function migrateSchema(db: DbAdapter): void {
   const row = db.prepare("SELECT MAX(version) as v FROM schema_version").get();
   const currentVersion = row ? (row["v"] as number) : 0;
   if (currentVersion >= SCHEMA_VERSION) return;
+
+  // Backup database before migration so a mid-migration crash doesn't
+  // leave a partially-migrated DB with no recovery path.
+  // WAL-safe: checkpoint first to flush WAL into the main DB file, then copy.
+  if (currentPath && currentPath !== ":memory:" && existsSync(currentPath)) {
+    try {
+      const backupPath = `${currentPath}.backup-v${currentVersion}`;
+      if (!existsSync(backupPath)) {
+        // Flush WAL to main DB file before copying — without this, the backup
+        // may be missing committed data that only exists in the -wal file.
+        try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* checkpoint is best-effort */ }
+        copyFileSync(currentPath, backupPath);
+      }
+    } catch (backupErr) {
+      // Log but proceed — blocking migration leaves the DB stuck at an old
+      // schema version permanently on read-only or full filesystems.
+      logWarning("db", `Pre-migration backup failed: ${backupErr instanceof Error ? backupErr.message : String(backupErr)}`);
+    }
+  }
 
   db.exec("BEGIN");
   try {
@@ -721,6 +742,7 @@ function migrateSchema(db: DbAdapter): void {
       db.exec("CREATE INDEX IF NOT EXISTS idx_milestones_status ON milestones(status)");
       db.exec("CREATE INDEX IF NOT EXISTS idx_quality_gates_pending ON quality_gates(milestone_id, slice_id, status)");
       db.exec("CREATE INDEX IF NOT EXISTS idx_verification_evidence_task ON verification_evidence(milestone_id, slice_id, task_id)");
+      db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_verification_evidence_dedup ON verification_evidence(task_id, slice_id, milestone_id, command, verdict)");
       db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
         ":version": 13,
         ":applied_at": new Date().toISOString(),
@@ -778,8 +800,21 @@ export function openDatabase(path: string): boolean {
   try {
     initSchema(adapter, fileBacked);
   } catch (err) {
-    try { adapter.close(); } catch { /* swallow */ }
-    throw err;
+    // Corrupt freelist: DDL fails with "malformed" but VACUUM can rebuild.
+    // Attempt VACUUM recovery before giving up (see #2519).
+    if (fileBacked && err instanceof Error && err.message?.includes("malformed")) {
+      try {
+        adapter.exec("VACUUM");
+        initSchema(adapter, fileBacked);
+        process.stderr.write("gsd-db: recovered corrupt database via VACUUM\n");
+      } catch (retryErr) {
+        try { adapter.close(); } catch (e) { logWarning("db", `close after VACUUM failed: ${(e as Error).message}`); }
+        throw retryErr;
+      }
+    } else {
+      try { adapter.close(); } catch (e) { logWarning("db", `close after VACUUM failed: ${(e as Error).message}`); }
+      throw err;
+    }
   }
 
   currentDb = adapter;
@@ -788,7 +823,7 @@ export function openDatabase(path: string): boolean {
 
   if (!_exitHandlerRegistered) {
     _exitHandlerRegistered = true;
-    process.on("exit", () => { try { closeDatabase(); } catch {} });
+    process.on("exit", () => { try { closeDatabase(); } catch (e) { logWarning("db", `exit handler close failed: ${(e as Error).message}`); } });
   }
 
   return true;
@@ -798,16 +833,14 @@ export function closeDatabase(): void {
   if (currentDb) {
     try {
       currentDb.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-    } catch { /* non-fatal — best effort before close */ }
+    } catch (e) { logWarning("db", `WAL checkpoint failed: ${(e as Error).message}`); }
     try {
       // Incremental vacuum to reclaim space without blocking
       currentDb.exec('PRAGMA incremental_vacuum(64)');
-    } catch { /* non-fatal */ }
+    } catch (e) { logWarning("db", `incremental vacuum failed: ${(e as Error).message}`); }
     try {
       currentDb.close();
-    } catch {
-      // swallow close errors
-    }
+    } catch (e) { logWarning("db", `database close failed: ${(e as Error).message}`); }
     currentDb = null;
     currentPath = null;
     currentPid = 0;
@@ -819,7 +852,7 @@ export function vacuumDatabase(): void {
   if (!currentDb) return;
   try {
     currentDb.exec('VACUUM');
-  } catch { /* non-fatal */ }
+  } catch (e) { logWarning("db", `VACUUM failed: ${(e as Error).message}`); }
 }
 
 let _txDepth = 0;
@@ -985,9 +1018,21 @@ export function _resetProvider(): void {
 
 export function upsertDecision(d: Omit<Decision, "seq">): void {
   if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  // Use ON CONFLICT DO UPDATE instead of INSERT OR REPLACE to preserve the
+  // seq column. INSERT OR REPLACE deletes then reinserts, resetting seq and
+  // corrupting decision ordering in DECISIONS.md after reconcile replay.
   currentDb.prepare(
-    `INSERT OR REPLACE INTO decisions (id, when_context, scope, decision, choice, rationale, revisable, made_by, superseded_by)
-     VALUES (:id, :when_context, :scope, :decision, :choice, :rationale, :revisable, :made_by, :superseded_by)`,
+    `INSERT INTO decisions (id, when_context, scope, decision, choice, rationale, revisable, made_by, superseded_by)
+     VALUES (:id, :when_context, :scope, :decision, :choice, :rationale, :revisable, :made_by, :superseded_by)
+     ON CONFLICT(id) DO UPDATE SET
+       when_context = excluded.when_context,
+       scope = excluded.scope,
+       decision = excluded.decision,
+       choice = excluded.choice,
+       rationale = excluded.rationale,
+       revisable = excluded.revisable,
+       made_by = excluded.made_by,
+       superseded_by = excluded.superseded_by`,
   ).run({
     ":id": d.id,
     ":when_context": d.when_context,
@@ -1024,7 +1069,7 @@ export function upsertRequirement(r: Requirement): void {
 
 export function clearArtifacts(): void {
   if (!currentDb) return;
-  try { currentDb.exec("DELETE FROM artifacts"); } catch { /* cache clear is best effort */ }
+  try { currentDb.exec("DELETE FROM artifacts"); } catch (e) { logWarning("db", `clearArtifacts failed: ${(e as Error).message}`); }
 }
 
 export function insertArtifact(a: {
@@ -1107,7 +1152,9 @@ export function insertMilestone(m: {
   ).run({
     ":id": m.id,
     ":title": m.title ?? "",
-    ":status": m.status ?? "active",
+    // Default to "queued" — never auto-create milestones as "active" (#3380).
+    // Callers that need "active" must pass it explicitly.
+    ":status": m.status ?? "queued",
     ":depends_on": JSON.stringify(m.depends_on ?? []),
     ":created_at": new Date().toISOString(),
     ":vision": m.planning?.vision ?? "",
@@ -1124,10 +1171,12 @@ export function insertMilestone(m: {
   });
 }
 
-export function upsertMilestonePlanning(milestoneId: string, planning: Partial<MilestonePlanningRecord>): void {
+export function upsertMilestonePlanning(milestoneId: string, planning: Partial<MilestonePlanningRecord> & { title?: string; status?: string }): void {
   if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
   currentDb.prepare(
     `UPDATE milestones SET
+      title = COALESCE(NULLIF(:title, ''), title),
+      status = COALESCE(NULLIF(:status, ''), status),
       vision = COALESCE(:vision, vision),
       success_criteria = COALESCE(:success_criteria, success_criteria),
       key_risks = COALESCE(:key_risks, key_risks),
@@ -1142,6 +1191,8 @@ export function upsertMilestonePlanning(milestoneId: string, planning: Partial<M
      WHERE id = :id`,
   ).run({
     ":id": milestoneId,
+    ":title": planning.title ?? "",
+    ":status": planning.status ?? "",
     ":vision": planning.vision ?? null,
     ":success_criteria": planning.successCriteria ? JSON.stringify(planning.successCriteria) : null,
     ":key_risks": planning.keyRisks ? JSON.stringify(planning.keyRisks) : null,
@@ -1169,13 +1220,25 @@ export function insertSlice(s: {
 }): void {
   if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
   currentDb.prepare(
-    `INSERT OR IGNORE INTO slices (
+    `INSERT INTO slices (
       milestone_id, id, title, status, risk, depends, demo, created_at,
       goal, success_criteria, proof_level, integration_closure, observability_impact, sequence
     ) VALUES (
       :milestone_id, :id, :title, :status, :risk, :depends, :demo, :created_at,
       :goal, :success_criteria, :proof_level, :integration_closure, :observability_impact, :sequence
-    )`,
+    )
+    ON CONFLICT (milestone_id, id) DO UPDATE SET
+      title = CASE WHEN :raw_title IS NOT NULL THEN excluded.title ELSE slices.title END,
+      status = CASE WHEN slices.status IN ('complete', 'done') THEN slices.status ELSE excluded.status END,
+      risk = CASE WHEN :raw_risk IS NOT NULL THEN excluded.risk ELSE slices.risk END,
+      depends = excluded.depends,
+      demo = CASE WHEN :raw_demo IS NOT NULL THEN excluded.demo ELSE slices.demo END,
+      goal = CASE WHEN :raw_goal IS NOT NULL THEN excluded.goal ELSE slices.goal END,
+      success_criteria = CASE WHEN :raw_success_criteria IS NOT NULL THEN excluded.success_criteria ELSE slices.success_criteria END,
+      proof_level = CASE WHEN :raw_proof_level IS NOT NULL THEN excluded.proof_level ELSE slices.proof_level END,
+      integration_closure = CASE WHEN :raw_integration_closure IS NOT NULL THEN excluded.integration_closure ELSE slices.integration_closure END,
+      observability_impact = CASE WHEN :raw_observability_impact IS NOT NULL THEN excluded.observability_impact ELSE slices.observability_impact END,
+      sequence = CASE WHEN :raw_sequence IS NOT NULL THEN excluded.sequence ELSE slices.sequence END`,
   ).run({
     ":milestone_id": s.milestoneId,
     ":id": s.id,
@@ -1191,6 +1254,16 @@ export function insertSlice(s: {
     ":integration_closure": s.planning?.integrationClosure ?? "",
     ":observability_impact": s.planning?.observabilityImpact ?? "",
     ":sequence": s.sequence ?? 0,
+    // Raw sentinel params: NULL when caller omitted the field, used in ON CONFLICT guards
+    ":raw_title": s.title ?? null,
+    ":raw_risk": s.risk ?? null,
+    ":raw_demo": s.demo ?? null,
+    ":raw_goal": s.planning?.goal ?? null,
+    ":raw_success_criteria": s.planning?.successCriteria ?? null,
+    ":raw_proof_level": s.planning?.proofLevel ?? null,
+    ":raw_integration_closure": s.planning?.integrationClosure ?? null,
+    ":raw_observability_impact": s.planning?.observabilityImpact ?? null,
+    ":raw_sequence": s.sequence ?? null,
   });
 }
 
@@ -1309,6 +1382,13 @@ export function updateTaskStatus(milestoneId: string, sliceId: string, taskId: s
     ":slice_id": sliceId,
     ":id": taskId,
   });
+}
+
+export function setTaskBlockerDiscovered(milestoneId: string, sliceId: string, taskId: string, discovered: boolean): void {
+  if (!currentDb) return;
+  currentDb.prepare(
+    `UPDATE tasks SET blocker_discovered = :discovered WHERE milestone_id = :mid AND slice_id = :sid AND id = :tid`,
+  ).run({ ":discovered": discovered ? 1 : 0, ":mid": milestoneId, ":sid": sliceId, ":tid": taskId });
 }
 
 export function upsertTaskPlanning(milestoneId: string, sliceId: string, taskId: string, planning: Partial<TaskPlanningRecord>): void {
@@ -1505,7 +1585,7 @@ export function insertVerificationEvidence(e: {
 }): void {
   if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
   currentDb.prepare(
-    `INSERT INTO verification_evidence (task_id, slice_id, milestone_id, command, exit_code, verdict, duration_ms, created_at)
+    `INSERT OR IGNORE INTO verification_evidence (task_id, slice_id, milestone_id, command, exit_code, verdict, duration_ms, created_at)
      VALUES (:task_id, :slice_id, :milestone_id, :command, :exit_code, :verdict, :duration_ms, :created_at)`,
   ).run({
     ":task_id": e.taskId,
@@ -1517,6 +1597,26 @@ export function insertVerificationEvidence(e: {
     ":duration_ms": e.durationMs,
     ":created_at": new Date().toISOString(),
   });
+}
+
+export interface VerificationEvidenceRow {
+  id: number;
+  task_id: string;
+  slice_id: string;
+  milestone_id: string;
+  command: string;
+  exit_code: number;
+  verdict: string;
+  duration_ms: number;
+  created_at: string;
+}
+
+export function getVerificationEvidence(milestoneId: string, sliceId: string, taskId: string): VerificationEvidenceRow[] {
+  if (!currentDb) return [];
+  const rows = currentDb.prepare(
+    "SELECT * FROM verification_evidence WHERE milestone_id = :mid AND slice_id = :sid AND task_id = :tid ORDER BY id",
+  ).all({ ":mid": milestoneId, ":sid": sliceId, ":tid": taskId });
+  return rows as unknown as VerificationEvidenceRow[];
 }
 
 export interface MilestoneRow {
@@ -1625,11 +1725,11 @@ export function getActiveSliceFromDb(milestoneId: string): SliceRow | null {
   const row = currentDb.prepare(
     `SELECT s.* FROM slices s
      WHERE s.milestone_id = :mid
-       AND s.status NOT IN ('complete', 'done')
+       AND s.status NOT IN ('complete', 'done', 'skipped')
        AND NOT EXISTS (
          SELECT 1 FROM json_each(s.depends) AS dep
          WHERE dep.value NOT IN (
-           SELECT id FROM slices WHERE milestone_id = :mid AND status IN ('complete', 'done')
+           SELECT id FROM slices WHERE milestone_id = :mid AND status IN ('complete', 'done', 'skipped')
          )
        )
      ORDER BY s.sequence, s.id
@@ -1738,7 +1838,7 @@ export function copyWorktreeDb(srcDbPath: string, destDbPath: string): boolean {
     copyFileSync(srcDbPath, destDbPath);
     return true;
   } catch (err) {
-    process.stderr.write(`gsd-db: failed to copy DB to worktree: ${(err as Error).message}\n`);
+    logError("db", "failed to copy DB to worktree", { error: (err as Error).message });
     return false;
   }
 }
@@ -1765,18 +1865,18 @@ export function reconcileWorktreeDb(
   // ATTACHing a WAL-mode DB to itself corrupts the WAL (#2823).
   try {
     if (realpathSync(mainDbPath) === realpathSync(worktreeDbPath)) return zero;
-  } catch { /* path resolution failed — fall through to existing checks */ }
+  } catch (e) { logWarning("db", `realpathSync failed: ${(e as Error).message}`); }
   // Sanitize path: reject any characters that could break ATTACH syntax.
   // ATTACH DATABASE doesn't support parameterized paths in all providers,
   // so we use strict allowlist validation instead.
   if (/['";\x00]/.test(worktreeDbPath)) {
-    process.stderr.write("gsd-db: worktree DB reconciliation failed: path contains unsafe characters\n");
+    logError("db", "worktree DB reconciliation failed: path contains unsafe characters");
     return zero;
   }
   if (!currentDb) {
     const opened = openDatabase(mainDbPath);
     if (!opened) {
-      process.stderr.write("gsd-db: worktree DB reconciliation failed: cannot open main DB\n");
+      logError("db", "worktree DB reconciliation failed: cannot open main DB");
       return zero;
     }
   }
@@ -1850,20 +1950,32 @@ export function reconcileWorktreeDb(
           FROM wt.milestones
         `).run());
 
-        // Merge slices — preserve worktree progress (status, summaries, planning)
+        // Merge slices — preserve worktree progress but never downgrade completed status (#2558).
+        // Uses INSERT OR REPLACE with a subquery that picks the best status — if the main DB
+        // already has a completed slice, keep that status even if the worktree copy is stale.
         merged.slices = countChanges(adapter.prepare(`
           INSERT OR REPLACE INTO slices (
             milestone_id, id, title, status, risk, depends, demo, created_at, completed_at,
             full_summary_md, full_uat_md, goal, success_criteria, proof_level,
             integration_closure, observability_impact, sequence, replan_triggered_at
           )
-          SELECT milestone_id, id, title, status, risk, depends, demo, created_at, completed_at,
-                 full_summary_md, full_uat_md, goal, success_criteria, proof_level,
-                 integration_closure, observability_impact, sequence, replan_triggered_at
-          FROM wt.slices
+          SELECT w.milestone_id, w.id, w.title,
+                 CASE
+                   WHEN m.status IN ('complete', 'done') AND w.status NOT IN ('complete', 'done')
+                   THEN m.status ELSE w.status
+                 END,
+                 w.risk, w.depends, w.demo, w.created_at,
+                 CASE
+                   WHEN m.status IN ('complete', 'done') AND w.status NOT IN ('complete', 'done')
+                   THEN m.completed_at ELSE w.completed_at
+                 END,
+                 w.full_summary_md, w.full_uat_md, w.goal, w.success_criteria, w.proof_level,
+                 w.integration_closure, w.observability_impact, w.sequence, w.replan_triggered_at
+          FROM wt.slices w
+          LEFT JOIN slices m ON m.milestone_id = w.milestone_id AND m.id = w.id
         `).run());
 
-        // Merge tasks — preserve execution results, status, summaries
+        // Merge tasks — preserve execution results, never downgrade completed status (#2558)
         merged.tasks = countChanges(adapter.prepare(`
           INSERT OR REPLACE INTO tasks (
             milestone_id, slice_id, id, title, status, one_liner, narrative,
@@ -1872,12 +1984,23 @@ export function reconcileWorktreeDb(
             description, estimate, files, verify, inputs, expected_output,
             observability_impact, full_plan_md, sequence
           )
-          SELECT milestone_id, slice_id, id, title, status, one_liner, narrative,
-                 verification_result, duration, completed_at, blocker_discovered,
-                 deviations, known_issues, key_files, key_decisions, full_summary_md,
-                 description, estimate, files, verify, inputs, expected_output,
-                 observability_impact, full_plan_md, sequence
-          FROM wt.tasks
+          SELECT w.milestone_id, w.slice_id, w.id, w.title,
+                 CASE
+                   WHEN m.status IN ('complete', 'done') AND w.status NOT IN ('complete', 'done')
+                   THEN m.status ELSE w.status
+                 END,
+                 w.one_liner, w.narrative,
+                 w.verification_result, w.duration,
+                 CASE
+                   WHEN m.status IN ('complete', 'done') AND w.status NOT IN ('complete', 'done')
+                   THEN m.completed_at ELSE w.completed_at
+                 END,
+                 w.blocker_discovered,
+                 w.deviations, w.known_issues, w.key_files, w.key_decisions, w.full_summary_md,
+                 w.description, w.estimate, w.files, w.verify, w.inputs, w.expected_output,
+                 w.observability_impact, w.full_plan_md, w.sequence
+          FROM wt.tasks w
+          LEFT JOIN tasks m ON m.milestone_id = w.milestone_id AND m.slice_id = w.slice_id AND m.id = w.id
         `).run());
 
         // Merge memories — keep worktree-learned insights
@@ -1902,15 +2025,15 @@ export function reconcileWorktreeDb(
 
         adapter.exec("COMMIT");
       } catch (txErr) {
-        try { adapter.exec("ROLLBACK"); } catch { /* best effort */ }
+        try { adapter.exec("ROLLBACK"); } catch (e) { logWarning("db", `rollback failed: ${(e as Error).message}`); }
         throw txErr;
       }
       return { ...merged, conflicts };
     } finally {
-      try { adapter.exec("DETACH DATABASE wt"); } catch { /* best effort */ }
+      try { adapter.exec("DETACH DATABASE wt"); } catch (e) { logWarning("db", `detach worktree DB failed: ${(e as Error).message}`); }
     }
   } catch (err) {
-    process.stderr.write(`gsd-db: worktree DB reconciliation failed: ${(err as Error).message}\n`);
+    logError("db", "worktree DB reconciliation failed", { error: (err as Error).message });
     return { ...zero, conflicts };
   }
 }

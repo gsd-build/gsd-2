@@ -9,6 +9,7 @@ import { deriveState, isValidationTerminal } from "../state.ts";
 import { resolveExpectedArtifactPath, diagnoseExpectedArtifact } from "../auto-artifact-paths.ts";
 import { verifyExpectedArtifact, buildLoopRemediationSteps } from "../auto-recovery.ts";
 import { resolveDispatch, type DispatchContext } from "../auto-dispatch.ts";
+import { buildValidateMilestonePrompt } from "../auto-prompts.ts";
 import type { GSDState } from "../types.ts";
 import { clearPathCache } from "../paths.ts";
 import { clearParseCache } from "../files.ts";
@@ -55,6 +56,12 @@ function writeSliceSummary(base: string, mid: string, sid: string, content: stri
   const dir = join(base, ".gsd", "milestones", mid, "slices", sid);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, `${sid}-SUMMARY.md`), content);
+}
+
+function writeSliceAssessment(base: string, mid: string, sid: string, content: string): void {
+  const dir = join(base, ".gsd", "milestones", mid, "slices", sid);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${sid}-ASSESSMENT.md`), content);
 }
 
 const ALL_DONE_ROADMAP = `# M001: Test Milestone
@@ -163,16 +170,15 @@ test("deriveState returns completing-milestone when VALIDATION exists with termi
   }
 });
 
-test("deriveState treats needs-remediation as terminal — does not re-enter validating-milestone (#832)", async () => {
+test("deriveState treats needs-remediation as non-terminal — re-enters validating-milestone (#832)", async () => {
   const base = makeTmpBase();
   try {
     writeRoadmap(base, "M001", ALL_DONE_ROADMAP);
     writeValidation(base, "M001", "---\nverdict: needs-remediation\nremediation_round: 0\n---\n\n# Validation\nNeeds fixes.");
 
     const state = await deriveState(base);
-    // needs-remediation is now terminal — milestone needs a SUMMARY to be fully complete
-    // Without SUMMARY, it enters completing-milestone (not validating-milestone)
-    assert.notEqual(state.phase, "validating-milestone");
+    // needs-remediation routes back to validating-milestone for re-validation
+    assert.equal(state.phase, "validating-milestone");
     assert.equal(state.activeMilestone?.id, "M001");
   } finally {
     cleanup(base);
@@ -188,6 +194,25 @@ test("deriveState returns complete when both VALIDATION and SUMMARY exist", asyn
 
     const state = await deriveState(base);
     assert.equal(state.phase, "complete");
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("buildValidateMilestonePrompt inlines ASSESSMENT evidence instead of UAT spec", async () => {
+  const base = makeTmpBase();
+  try {
+    writeRoadmap(base, "M001", ALL_DONE_ROADMAP);
+    const dir = join(base, ".gsd", "milestones", "M001");
+    writeFileSync(join(dir, "M001-CONTEXT.md"), CONTEXT_FILE);
+    writeSliceSummary(base, "M001", "S01", "# S01 Summary\nDelivered.");
+    writeFileSync(join(dir, "slices", "S01", "S01-UAT.md"), "# UAT Spec\nDo the thing.\n");
+    writeSliceAssessment(base, "M001", "S01", "---\nverdict: PASS\n---\n# Assessment\nEvidence captured.");
+
+    const prompt = await buildValidateMilestonePrompt("M001", "Test Milestone", base);
+    assert.match(prompt, /S01 Assessment/i, "prompt should inline assessment evidence");
+    assert.match(prompt, /verdict: PASS/i, "prompt should include the assessment verdict");
+    assert.doesNotMatch(prompt, /UAT Spec/i, "prompt should not inline the raw UAT spec as evidence");
   } finally {
     cleanup(base);
   }

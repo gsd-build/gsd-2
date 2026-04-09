@@ -136,7 +136,7 @@ export async function dispatchSlashCommand(
 		await ctx.handleModelCommand(searchTerm);
 		return true;
 	}
-	if (text.startsWith("/export")) {
+	if (text === "/export" || text.startsWith("/export ")) {
 		await handleExportCommand(text, ctx);
 		return true;
 	}

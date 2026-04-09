@@ -38,7 +38,7 @@ Do a mandatory investigation pass before making any decisions. This is not optio
 3. **Web search** — `search-the-web` if the domain is unfamiliar, if you need current best practices, or if the spec references external services/APIs you need facts about. Use `fetch_page` for full content when snippets aren't enough.
 
 **Web search budget:** Budget carefully across investigation + focused research:
-- Prefer `resolve_library` / `get_library_docs` over `web_search` for library documentation.
+- Prefer `resolve_library` / `get_library_docs` over `search-the-web` for library documentation.
 - Prefer `search_and_read` for one-shot topic research.
 - Target 2-3 web searches in this investigation pass. Save remaining budget for focused research.
 - Do NOT repeat the same or similar queries.

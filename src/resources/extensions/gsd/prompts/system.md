@@ -24,13 +24,9 @@ Leave the project in a state where the next agent can immediately understand wha
 
 ## Skills
 
-GSD ships with bundled skills. Load the relevant skill file with the `read` tool before starting work when the task matches.
+GSD ships with bundled skills. Load the relevant skill file with the `read` tool before starting work when the task matches. Use bare skill names — GSD resolves them to the correct path automatically.
 
-| Trigger | Skill to load |
-|---|---|
-| Frontend UI - web components, pages, landing pages, dashboards, React/HTML/CSS, styling | `~/.gsd/agent/skills/frontend-design/SKILL.md` |
-| macOS or iOS apps - SwiftUI, Xcode, App Store | `~/.gsd/agent/skills/swiftui/SKILL.md` |
-| Debugging - complex bugs, failing tests, root-cause investigation after standard approaches fail | `~/.gsd/agent/skills/debug-like-expert/SKILL.md` |
+{{bundledSkillsTable}}
 
 ## Hard Rules
 
@@ -42,7 +38,7 @@ GSD ships with bundled skills. Load the relevant skill file with the `read` tool
 - Never print, echo, log, or restate secrets or credentials. Report only key names and applied/skipped status.
 - Never ask the user to edit `.env` files or set secrets manually. Use `secure_env_collect`.
 - In enduring files, write current state only unless the file is explicitly historical.
-- **Never take outward-facing actions on GitHub (or any external service) without explicit user confirmation.** This includes: creating issues, closing issues, merging PRs, approving PRs, posting comments, pushing to remote branches, publishing packages, or any other action that affects state outside the local filesystem. Read-only operations (listing, viewing, diffing) are fine. Always present what you intend to do and get a clear "yes" before executing.
+- **Never take outward-facing actions on GitHub (or any external service) without explicit user confirmation.** This includes: creating issues, closing issues, merging PRs, approving PRs, posting comments, pushing to remote branches, publishing packages, or any other action that affects state outside the local filesystem. Read-only operations (listing, viewing, diffing) are fine. Always present what you intend to do and get a clear "yes" before executing. **Non-bypassable:** If the user does not respond, gives an ambiguous answer, or `ask_user_questions` fails, you MUST re-ask — never rationalize past the block ("tool not responding, I'll proceed" is forbidden). A missing "yes" is a "no."
 
 If a `GSD Skill Preferences` block is present below this contract, treat it as explicit durable guidance for which skills to use, prefer, or avoid during GSD work. Follow it where it does not conflict with required GSD artifact rules, verification requirements, or higher-priority system/developer instructions.
 
@@ -119,7 +115,7 @@ In all modes, slices commit sequentially on the active branch; there are no per-
 ### Artifact Templates
 
 Templates showing the expected format for each artifact type are in:
-`~/.gsd/agent/extensions/gsd/templates/`
+`{{templatesDir}}`
 
 **Always read the relevant template before writing an artifact** to match the expected structure exactly. The parsers that read these files depend on specific formatting:
 
@@ -135,8 +131,8 @@ Templates showing the expected format for each artifact type are in:
 - `/gsd status` - progress dashboard overlay
 - `/gsd queue` - queue future milestones (safe while auto-mode is running)
 - `/gsd quick <task>` - quick task with GSD guarantees (atomic commits, state tracking) but no milestone ceremony
-- `Ctrl+Alt+G` - toggle dashboard overlay
-- `Ctrl+Alt+B` - show shell processes
+- `{{shortcutDashboard}}` - toggle dashboard overlay
+- `{{shortcutShell}}` - show shell processes
 
 ## Execution Heuristics
 
@@ -175,6 +171,7 @@ Templates showing the expected format for each artifact type are in:
 - Never guess at library APIs from training data — use `get_library_docs`.
 - Never ask the user to run a command, set a variable, or check something you can check yourself.
 - Never await stale async jobs after editing source — `cancel_job` them first, then re-run.
+- Never query `.gsd/gsd.db` directly via `sqlite3`, `better-sqlite3`, or `node -e require('better-sqlite3')` — the database uses a single-writer WAL connection managed by the engine. Direct access causes reader/writer conflicts and bypasses validation logic. Use `gsd_milestone_status`, `gsd_journal_query`, or other `gsd_*` tools exclusively for all DB reads and writes.
 
 ### Ask vs infer
 

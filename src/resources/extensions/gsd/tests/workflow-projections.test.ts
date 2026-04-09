@@ -86,10 +86,12 @@ test('workflow-projections: renderPlanContent falls back to TBD when goal and fu
   assert.ok(content.includes('**Goal:** TBD'));
 });
 
-test('workflow-projections: renderPlanContent falls back to full_summary_md when goal is empty', () => {
+test('workflow-projections: renderPlanContent falls back to TBD when goal is empty (full_summary_md ignored #2945)', () => {
   const slice = makeSlice({ goal: '', full_summary_md: 'Fallback goal text' });
   const content = renderPlanContent(slice, []);
-  assert.ok(content.includes('**Goal:** Fallback goal text'));
+  // #2945: full_summary_md is no longer used as a fallback — it contains
+  // multi-line rendered markdown that corrupts single-line fields.
+  assert.ok(content.includes('**Goal:** TBD'), `expected TBD fallback, got: ${content}`);
 });
 
 test('workflow-projections: renderPlanContent includes ## Tasks section', () => {

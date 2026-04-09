@@ -67,7 +67,7 @@ export interface SidecarItem {
 export const MAX_UNIT_DISPATCHES = 3;
 export const STUB_RECOVERY_THRESHOLD = 2;
 export const MAX_LIFETIME_DISPATCHES = 6;
-export const NEW_SESSION_TIMEOUT_MS = 30_000;
+export const NEW_SESSION_TIMEOUT_MS = 120_000;
 
 // ─── AutoSession ─────────────────────────────────────────────────────────────
 
@@ -105,6 +105,8 @@ export class AutoSession {
   // ── Model state ──────────────────────────────────────────────────────────
   autoModeStartModel: StartModel | null = null;
   currentUnitModel: Model<Api> | null = null;
+  /** Fully-qualified model ID (provider/id) set after selectAndApplyModel + hook overrides (#2899). */
+  currentDispatchedModelId: string | null = null;
   originalModelId: string | null = null;
   originalModelProvider: string | null = null;
   lastBudgetAlertLevel: BudgetAlertLevel = 0;
@@ -120,6 +122,11 @@ export class AutoSession {
   // ── Sidecar queue ─────────────────────────────────────────────────────
   sidecarQueue: SidecarItem[] = [];
 
+  // ── Tool invocation errors (#2883) ──────────────────────────────────
+  /** Set when a GSD tool execution ends with isError due to malformed/truncated
+   *  JSON arguments. Checked by postUnitPreVerification to break retry loops. */
+  lastToolInvocationError: string | null = null;
+
   // ── Isolation degradation ────────────────────────────────────────────
   /** Set to true when worktree creation fails; prevents merge of nonexistent branch. */
   isolationDegraded = false;
@@ -131,12 +138,19 @@ export class AutoSession {
 
   // ── Dispatch circuit breakers ──────────────────────────────────────
   rewriteAttemptCount = 0;
+  /** Tracks consecutive bootstrap attempts that found phase === "complete".
+   *  Moved from module-level to per-session so s.reset() clears it (#1348). */
+  consecutiveCompleteBootstraps = 0;
 
   // ── Metrics ──────────────────────────────────────────────────────────────
   autoStartTime = 0;
   lastPromptCharCount: number | undefined;
   lastBaselineCharCount: number | undefined;
   pendingQuickTasks: CaptureEntry[] = [];
+
+  // ── Safety harness ───────────────────────────────────────────────────────
+  /** SHA of the pre-unit git checkpoint ref. Cleared on success or rollback. */
+  checkpointSha: string | null = null;
 
   // ── Signal handler ───────────────────────────────────────────────────────
   sigtermHandler: (() => void) | null = null;
@@ -193,6 +207,7 @@ export class AutoSession {
     // Model
     this.autoModeStartModel = null;
     this.currentUnitModel = null;
+    this.currentDispatchedModelId = null;
     this.originalModelId = null;
     this.originalModelProvider = null;
     this.lastBudgetAlertLevel = 0;
@@ -212,8 +227,11 @@ export class AutoSession {
     this.pendingQuickTasks = [];
     this.sidecarQueue = [];
     this.rewriteAttemptCount = 0;
+    this.consecutiveCompleteBootstraps = 0;
+    this.lastToolInvocationError = null;
     this.isolationDegraded = false;
     this.milestoneMergedInPhases = false;
+    this.checkpointSha = null;
 
     // Signal handler
     this.sigtermHandler = null;

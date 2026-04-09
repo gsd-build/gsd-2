@@ -69,6 +69,7 @@ export function resolveModelWithFallbacksForUnit(unitType: string): ResolvedMode
       break;
     case "complete-slice":
     case "complete-milestone":
+    case "worktree-merge":
     case "run-uat":
       phaseConfig = m.completion;
       break;
@@ -107,6 +108,84 @@ export function resolveModelWithFallbacksForUnit(unitType: string): ResolvedMode
 }
 
 /**
+ * Resolve the default session model from GSD preferences.
+ *
+ * Used at auto-mode bootstrap to override the session model that was
+ * determined by settings.json (defaultProvider/defaultModel).  When
+ * PREFERENCES.md (or project preferences) configures an `execution` model
+ * we treat that as the session default.  Falls back through execution →
+ * planning → first configured model.
+ *
+ * Accepts an optional `sessionProvider` for bare model IDs that don't
+ * include an explicit provider prefix (e.g. `gpt-5.4` instead of
+ * `openai-codex/gpt-5.4`).  When a bare ID is found and sessionProvider
+ * is available, the session provider is used.  Without sessionProvider,
+ * bare IDs are still returned with provider set to the bare ID itself
+ * so downstream resolution (resolveModelId) can match it.
+ *
+ * Returns `{ provider, id }` or `undefined` if no model preference is
+ * configured.
+ */
+export function resolveDefaultSessionModel(
+  sessionProvider?: string,
+): { provider: string; id: string } | undefined {
+  const prefs = loadEffectiveGSDPreferences();
+  if (!prefs?.preferences.models) return undefined;
+
+  const m = prefs.preferences.models as GSDModelConfigV2;
+
+  // Priority: execution → planning → first configured value
+  const candidates: Array<string | GSDPhaseModelConfig | undefined> = [
+    m.execution,
+    m.planning,
+    m.research,
+    m.discuss,
+    m.completion,
+    m.validation,
+    m.subagent,
+  ];
+
+  for (const cfg of candidates) {
+    if (!cfg) continue;
+
+    // Normalize to provider + id from the various config shapes
+    let provider: string | undefined;
+    let id: string;
+
+    if (typeof cfg === "string") {
+      const slashIdx = cfg.indexOf("/");
+      if (slashIdx !== -1) {
+        provider = cfg.slice(0, slashIdx);
+        id = cfg.slice(slashIdx + 1);
+      } else {
+        // Bare model ID (e.g. "gpt-5.4") — use session provider as context
+        provider = sessionProvider;
+        id = cfg;
+      }
+    } else {
+      // Object config: { model, provider?, fallbacks? }
+      if (cfg.provider) {
+        provider = cfg.provider;
+      } else if (cfg.model.includes("/")) {
+        const slashIdx = cfg.model.indexOf("/");
+        provider = cfg.model.slice(0, slashIdx);
+        id = cfg.model.slice(slashIdx + 1);
+        return { provider, id };
+      } else {
+        provider = sessionProvider;
+      }
+      id = cfg.model;
+    }
+
+    if (provider && id) {
+      return { provider, id };
+    }
+  }
+
+  return undefined;
+}
+
+/**
  * Determines the next fallback model to try when the current model fails.
  * If the current model is not in the configured list, returns the primary model.
  * If the current model is the last in the list, returns undefined (exhausted).
@@ -135,6 +214,18 @@ export function getNextFallbackModel(
   if (!foundCurrent) {
     return modelsToTry[0];
   }
+}
+
+/**
+ * Detect whether an error message indicates a transient network error
+ * (worth retrying the same model) vs a permanent provider error
+ * (auth failure, quota exceeded, etc. -- should fall back immediately).
+ */
+export function isTransientNetworkError(errorMsg: string): boolean {
+  if (!errorMsg) return false;
+  const hasNetworkSignal = /network|ECONNRESET|ETIMEDOUT|ECONNREFUSED|socket hang up|fetch failed|connection.*reset|dns/i.test(errorMsg);
+  const hasPermanentSignal = /auth|unauthorized|forbidden|invalid.*key|quota|billing/i.test(errorMsg);
+  return hasNetworkSignal && !hasPermanentSignal;
 }
 
 /**
@@ -308,7 +399,7 @@ export function resolveContextSelection(): import("./types.js").ContextSelection
 }
 
 /**
- * Resolve the search provider preference from PREFERENCES.md.
+ * Resolve the search provider preference from preferences.md.
  * Returns undefined if not configured (caller falls back to existing behavior).
  */
 export function resolveSearchProviderFromPreferences(): GSDPreferences["search_provider"] | undefined {

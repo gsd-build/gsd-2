@@ -51,6 +51,12 @@ test("guided discussion prompts avoid wrap-up prompts after every round", () => 
   assert.doesNotMatch(slicePrompt, /I think I have a solid picture of this slice\. Ready to wrap up/i);
 });
 
+test("guided milestone discussion scopes depth verification to the milestone id", () => {
+  const prompt = readPrompt("guided-discuss-milestone");
+  assert.match(prompt, /depth_verification_\{\{milestoneId\}\}/, "depth verification id should include the milestone id");
+  assert.doesNotMatch(prompt, /depth_verification_confirm" — this enables the write-gate downstream/i, "legacy global depth gate wording should be gone");
+});
+
 test("guided-resume-task prompt preserves recovery state until work is superseded", () => {
   const prompt = readPrompt("guided-resume-task");
   assert.match(prompt, /Do \*\*not\*\* delete the continue file immediately/i);
@@ -181,11 +187,15 @@ test("reassess-roadmap prompt references gsd_reassess_roadmap tool", () => {
   assert.match(prompt, /gsd_reassess_roadmap/);
 });
 
-test("validate-milestone prompt persists verification classes through gsd_validate_milestone", () => {
+test("validate-milestone prompt dispatches parallel reviewers", () => {
   const prompt = readPrompt("validate-milestone");
-  assert.match(prompt, /verification classes section/i);
-  assert.match(prompt, /verificationClasses/);
-  assert.match(prompt, /gsd_validate_milestone/);
+  assert.match(prompt, /Reviewer A/);
+  assert.match(prompt, /Reviewer B/);
+  assert.match(prompt, /Reviewer C/);
+  assert.match(prompt, /Requirements Coverage/);
+  assert.match(prompt, /Cross-Slice Integration/);
+  assert.match(prompt, /Assessment & Acceptance Criteria/);
+  assert.match(prompt, /assessment evidence/i);
 });
 
 // ─── Prompt migration: replan-slice → gsd_replan_slice ────────────────
@@ -200,6 +210,60 @@ test("replan-slice prompt names gsd_replan_slice as the tool to use", () => {
 test("reassess-roadmap prompt names gsd_reassess_roadmap as the tool to use", () => {
   const prompt = readPrompt("reassess-roadmap");
   assert.match(prompt, /gsd_reassess_roadmap/);
+});
+
+// ─── Bug #2933: prompt parameter names must match camelCase TypeBox schema ───
+
+test("execute-task prompt uses camelCase parameter names matching TypeBox schema", () => {
+  const prompt = readPrompt("execute-task");
+  // The gsd_complete_task tool schema uses camelCase: milestoneId, sliceId, taskId
+  // Prompts must NOT tell the LLM to use snake_case (milestone_id, slice_id, task_id)
+  const toolCallLine = prompt.split("\n").find((l) => /gsd_complete_task/.test(l) || /gsd_task_complete/.test(l));
+  assert.ok(toolCallLine, "prompt must contain a gsd_complete_task or gsd_task_complete tool call line");
+  assert.doesNotMatch(toolCallLine!, /milestone_id/, "must use milestoneId, not milestone_id");
+  assert.doesNotMatch(toolCallLine!, /slice_id/, "must use sliceId, not slice_id");
+  assert.doesNotMatch(toolCallLine!, /task_id/, "must use taskId, not task_id");
+  // Positive: must mention the camelCase names
+  assert.match(toolCallLine!, /milestoneId/);
+  assert.match(toolCallLine!, /sliceId/);
+  assert.match(toolCallLine!, /taskId/);
+});
+
+test("complete-slice prompt uses camelCase parameter names matching TypeBox schema", () => {
+  const prompt = readPrompt("complete-slice");
+  // The gsd_complete_slice tool schema uses camelCase: milestoneId, sliceId
+  const toolCallLine = prompt.split("\n").find((l) => /gsd_complete_slice/.test(l) || /gsd_slice_complete/.test(l));
+  assert.ok(toolCallLine, "prompt must contain a gsd_complete_slice or gsd_slice_complete tool call line");
+  assert.doesNotMatch(toolCallLine!, /milestone_id/, "must use milestoneId, not milestone_id");
+  assert.doesNotMatch(toolCallLine!, /slice_id/, "must use sliceId, not slice_id");
+  // Positive: must mention the camelCase names
+  assert.match(toolCallLine!, /milestoneId/);
+  assert.match(toolCallLine!, /sliceId/);
+});
+
+// ─── File system safety: complete-slice parity with complete-milestone (#2935) ──
+
+test("complete-slice prompt includes filesystem safety guard against EISDIR", () => {
+  const prompt = readPrompt("complete-slice");
+  assert.match(
+    prompt,
+    /File system safety/i,
+    "complete-slice.md must include a 'File system safety' instruction to prevent EISDIR errors when the LLM passes a directory path to the read tool"
+  );
+  assert.match(
+    prompt,
+    /never pass.*directory path.*directly to the.*read.*tool/i,
+    "complete-slice.md must warn against passing directory paths to the read tool"
+  );
+});
+
+test("complete-milestone prompt still has its filesystem safety guard (regression)", () => {
+  const prompt = readPrompt("complete-milestone");
+  assert.match(
+    prompt,
+    /File system safety/i,
+    "complete-milestone.md must keep its filesystem safety guard"
+  );
 });
 
 test("reactive-execute prompt references tool calls instead of checkbox updates", () => {
