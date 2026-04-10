@@ -14,8 +14,9 @@ import type {
 	Context,
 	Model,
 	SimpleStreamOptions,
+	ThinkingLevel,
 } from "@gsd/pi-ai";
-import { EventStream } from "@gsd/pi-ai";
+import { EventStream, mapThinkingLevelToEffort, supportsAdaptiveThinking } from "@gsd/pi-ai";
 import { execSync } from "node:child_process";
 import { PartialMessageBuilder, ZERO_USAGE, mapUsage } from "./partial-builder.js";
 import { buildWorkflowMcpServers } from "../gsd/workflow-mcp.js";
@@ -246,8 +247,15 @@ export function buildFinalClaudeCodeContent(
  * Extracted for testability — callers can verify session persistence,
  * beta flags, and other configuration without mocking the full SDK.
  */
-export function buildSdkOptions(modelId: string, prompt: string): Record<string, unknown> {
+export function buildSdkOptions(
+	modelId: string,
+	prompt: string,
+	reasoning?: ThinkingLevel,
+): Record<string, unknown> {
 	const mcpServers = buildWorkflowMcpServers();
+	const effort = reasoning && supportsAdaptiveThinking(modelId)
+		? mapThinkingLevelToEffort(reasoning, modelId)
+		: undefined;
 	return {
 		pathToClaudeCodeExecutable: getClaudePath(),
 		model: modelId,
@@ -259,6 +267,7 @@ export function buildSdkOptions(modelId: string, prompt: string): Record<string,
 		settingSources: ["project"],
 		systemPrompt: { type: "preset", preset: "claude_code" },
 		...(mcpServers ? { mcpServers } : {}),
+		...(effort ? { effort } : {}),
 		betas: modelId.includes("sonnet") ? ["context-1m-2025-08-07"] : [],
 	};
 }
@@ -315,7 +324,7 @@ async function pumpSdkMessages(
 		}
 
 		const prompt = buildPromptFromContext(context);
-		const sdkOpts = buildSdkOptions(modelId, prompt);
+		const sdkOpts = buildSdkOptions(modelId, prompt, options?.reasoning);
 
 		const queryResult = sdk.query({
 			prompt,

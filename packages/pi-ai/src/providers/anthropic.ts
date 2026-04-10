@@ -21,9 +21,9 @@ import {
 	supportsAdaptiveThinking,
 } from "./anthropic-shared.js";
 
-// Re-export types used by other modules
+// Re-export types and helpers used by other modules
 export type { AnthropicEffort, AnthropicOptions };
-export { extractRetryAfterMs };
+export { extractRetryAfterMs, mapThinkingLevelToEffort, supportsAdaptiveThinking };
 
 let _AnthropicClass: typeof Anthropic | undefined;
 async function getAnthropicClass(): Promise<typeof Anthropic> {

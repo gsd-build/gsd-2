@@ -252,6 +252,52 @@ describe("stream-adapter — session persistence (#2859)", () => {
 	});
 });
 
+// ---------------------------------------------------------------------------
+// Thinking level → effort pass-through (#3917)
+// ---------------------------------------------------------------------------
+
+describe("stream-adapter — effort pass-through (#3917)", () => {
+	test("buildSdkOptions maps minimal reasoning to low effort", () => {
+		const options = buildSdkOptions("claude-sonnet-4-20250514", "test", "minimal");
+		assert.equal(options.effort, "low");
+	});
+
+	test("buildSdkOptions maps low reasoning to low effort", () => {
+		const options = buildSdkOptions("claude-sonnet-4-20250514", "test", "low");
+		assert.equal(options.effort, "low");
+	});
+
+	test("buildSdkOptions maps medium reasoning to medium effort", () => {
+		const options = buildSdkOptions("claude-sonnet-4-20250514", "test", "medium");
+		assert.equal(options.effort, "medium");
+	});
+
+	test("buildSdkOptions maps high reasoning to high effort", () => {
+		const options = buildSdkOptions("claude-sonnet-4-20250514", "test", "high");
+		assert.equal(options.effort, "high");
+	});
+
+	test("buildSdkOptions maps xhigh to max for opus models", () => {
+		const options = buildSdkOptions("claude-opus-4-6-20250514", "test", "xhigh");
+		assert.equal(options.effort, "max");
+	});
+
+	test("buildSdkOptions maps xhigh to high for non-opus models", () => {
+		const options = buildSdkOptions("claude-sonnet-4-20250514", "test", "xhigh");
+		assert.equal(options.effort, "high");
+	});
+
+	test("buildSdkOptions omits effort when reasoning is undefined (thinking off)", () => {
+		const options = buildSdkOptions("claude-sonnet-4-20250514", "test", undefined);
+		assert.equal(options.effort, undefined);
+	});
+
+	test("buildSdkOptions omits effort for models that do not support adaptive thinking", () => {
+		const options = buildSdkOptions("claude-haiku-4-5-20251001", "test", "high");
+		assert.equal(options.effort, undefined);
+	});
+});
+
 describe("stream-adapter — final content filtering (#3861)", () => {
 	test("buildFinalClaudeCodeContent strips intermediate tool calls from the final assistant message", () => {
 		const finalContent = buildFinalClaudeCodeContent(
