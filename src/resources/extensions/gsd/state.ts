@@ -47,6 +47,7 @@ import { extractVerdict } from './verdict-parser.js';
 
 import {
   isDbAvailable,
+  wasDbOpenAttempted,
   getAllMilestones,
   getMilestone,
   getMilestoneSlices,
@@ -271,7 +272,12 @@ export async function deriveState(basePath: string): Promise<GSDState> {
       _telemetry.markdownDeriveCount++;
     }
   } else {
-    logWarning("state", "DB unavailable — using filesystem state derivation (degraded mode)");
+    // Only warn when DB initialization was attempted and failed — not when
+    // the DB simply hasn't been opened yet (e.g. during before_agent_start
+    // context injection which runs before any tool invocation opens the DB).
+    if (wasDbOpenAttempted()) {
+      logWarning("state", "DB unavailable — using filesystem state derivation (degraded mode)");
+    }
     result = await _deriveStateImpl(basePath);
     _telemetry.markdownDeriveCount++;
   }

@@ -778,6 +778,7 @@ let currentDb: DbAdapter | null = null;
 let currentPath: string | null = null;
 let currentPid: number = 0;
 let _exitHandlerRegistered = false;
+let _dbOpenAttempted = false;
 
 export function getDbProvider(): ProviderName | null {
   loadProvider();
@@ -788,7 +789,18 @@ export function isDbAvailable(): boolean {
   return currentDb !== null;
 }
 
+/**
+ * Returns true if openDatabase() has been called at least once this session.
+ * Used to distinguish "DB not yet initialized" from "DB genuinely unavailable"
+ * so that early callers (e.g. before_agent_start context injection) don't
+ * trigger a false degraded-mode warning.
+ */
+export function wasDbOpenAttempted(): boolean {
+  return _dbOpenAttempted;
+}
+
 export function openDatabase(path: string): boolean {
+  _dbOpenAttempted = true;
   if (currentDb && currentPath !== path) closeDatabase();
   if (currentDb && currentPath === path) return true;
 
