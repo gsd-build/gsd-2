@@ -549,11 +549,13 @@ function buildSnapshotOpts(
   _unitType: string,
   _unitId: string,
 ): {
+  autoSessionKey?: string;
   continueHereFired?: boolean;
   promptCharCount?: number;
   baselineCharCount?: number;
 } & Record<string, unknown> {
   return {
+    ...(s.autoStartTime > 0 ? { autoSessionKey: String(s.autoStartTime) } : {}),
     promptCharCount: s.lastPromptCharCount,
     baselineCharCount: s.lastBaselineCharCount,
     ...(s.currentUnitRouting ?? {}),
