@@ -194,4 +194,27 @@ export const CUSTOM_MODELS = {
 			compat: { thinkingFormat: "zai", supportsDeveloperRole: false },
 		} satisfies Model<"openai-completions">,
 	},
+
+	// ─── OpenRouter (GLM-5.1) ─────────────────────────────────────────
+	// GLM-5.1 via OpenRouter, not yet in the auto-generated catalog.
+	// Ref: https://openrouter.ai/z-ai/glm-5.1
+	"openrouter": {
+		"z-ai/glm-5.1": {
+			id: "z-ai/glm-5.1",
+			name: "Z.ai: GLM 5.1",
+			api: "openai-completions",
+			provider: "openrouter",
+			baseUrl: "https://openrouter.ai/api/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: {
+				input: 0.95,
+				output: 3.15,
+				cacheRead: 0,
+				cacheWrite: 0,
+			},
+			contextWindow: 202752,
+			maxTokens: 131072,
+		} satisfies Model<"openai-completions">,
+	},
 } as const;
