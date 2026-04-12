@@ -15,10 +15,14 @@ import {
   getRequirementById,
   getActiveDecisions,
   getActiveRequirements,
-  getTask,
   transaction,
   _getAdapter,
   _resetProvider,
+  insertMilestone,
+  insertSlice,
+  insertTask,
+  getTask,
+  getSliceTasks,
 } from '../gsd-db.ts';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -458,6 +462,60 @@ describe('gsd-db', () => {
     closeDatabase();
     assert.ok(!isDbAvailable(), 'DB should not be available after close');
     assert.ok(!wasDbOpenAttempted(), 'wasDbOpenAttempted should reset after closeDatabase');
+  });
+
+  test('gsd-db: rowToTask tolerates corrupt comma-separated task arrays', () => {
+    openDatabase(':memory:');
+    insertMilestone({ id: 'M001', status: 'active' });
+    insertSlice({ milestoneId: 'M001', id: 'S01', status: 'active' });
+    insertTask({
+      milestoneId: 'M001',
+      sliceId: 'S01',
+      id: 'T01',
+      title: 'Recover corrupt arrays',
+      planning: {
+        description: 'desc',
+        estimate: 'small',
+        files: ['src/original.ts'],
+        verify: 'npm test',
+        inputs: ['docs/original.md'],
+        expectedOutput: ['dist/original.md'],
+        observabilityImpact: '',
+      },
+    });
+
+    const adapter = _getAdapter()!;
+    adapter.prepare(
+      `UPDATE tasks
+         SET files = ?, inputs = ?, expected_output = ?, key_files = ?, key_decisions = ?
+       WHERE milestone_id = ? AND slice_id = ? AND id = ?`,
+    ).run(
+      'src-erf/Models/foo.cs, src-erf/Models/bar.cs',
+      'docs/input-a.md, docs/input-b.md',
+      'dist/out-a.md, dist/out-b.md',
+      'src/resources/extensions/gsd/gsd-db.ts, src/resources/extensions/gsd/state.ts',
+      '"decision-1"',
+      'M001',
+      'S01',
+      'T01',
+    );
+
+    const task = getTask('M001', 'S01', 'T01');
+    assert.ok(task, 'getTask should still return the corrupt row');
+    assert.deepStrictEqual(task!.files, ['src-erf/Models/foo.cs', 'src-erf/Models/bar.cs']);
+    assert.deepStrictEqual(task!.inputs, ['docs/input-a.md', 'docs/input-b.md']);
+    assert.deepStrictEqual(task!.expected_output, ['dist/out-a.md', 'dist/out-b.md']);
+    assert.deepStrictEqual(
+      task!.key_files,
+      ['src/resources/extensions/gsd/gsd-db.ts', 'src/resources/extensions/gsd/state.ts'],
+    );
+    assert.deepStrictEqual(task!.key_decisions, ['decision-1']);
+
+    const sliceTasks = getSliceTasks('M001', 'S01');
+    assert.equal(sliceTasks.length, 1, 'getSliceTasks should also survive corrupt rows');
+    assert.deepStrictEqual(sliceTasks[0]!.files, task!.files);
+
+    closeDatabase();
   });
 
   // ─── Final Report ──────────────────────────────────────────────────────────

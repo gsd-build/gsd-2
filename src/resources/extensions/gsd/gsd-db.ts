@@ -1564,6 +1564,23 @@ export interface TaskRow {
   sequence: number;
 }
 
+function parseTaskArrayColumn(raw: unknown): string[] {
+  if (typeof raw !== "string" || raw.trim() === "") return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.map((value) => String(value));
+    if (parsed === null || parsed === undefined || parsed === "") return [];
+    return [String(parsed)];
+  } catch {
+    // Older/corrupt rows may contain comma-separated strings instead of JSON.
+    return raw
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+  }
+}
+
 function rowToTask(row: Record<string, unknown>): TaskRow {
   const parseTaskArray = (value: unknown): string[] => {
     if (Array.isArray(value)) {
@@ -1603,8 +1620,8 @@ function rowToTask(row: Record<string, unknown>): TaskRow {
     blocker_discovered: (row["blocker_discovered"] as number) === 1,
     deviations: row["deviations"] as string,
     known_issues: row["known_issues"] as string,
-    key_files: JSON.parse((row["key_files"] as string) || "[]"),
-    key_decisions: JSON.parse((row["key_decisions"] as string) || "[]"),
+    key_files: parseTaskArrayColumn(row["key_files"]),
+    key_decisions: parseTaskArrayColumn(row["key_decisions"]),
     full_summary_md: row["full_summary_md"] as string,
     description: (row["description"] as string) ?? "",
     estimate: (row["estimate"] as string) ?? "",
