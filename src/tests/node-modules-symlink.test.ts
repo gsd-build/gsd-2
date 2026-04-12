@@ -147,9 +147,9 @@ test("pnpm layout: merged node_modules contains entries from both hoisted and in
     symlinkSync(join(hoisted, entry.name), join(agentNodeModules, entry.name));
   }
 
-  // Overlay internal entries (workspace scopes take precedence)
+  // Overlay @gsd* workspace scopes from internal (these take precedence)
   for (const entry of readdirSync(internal, { withFileTypes: true })) {
-    if (entry.name.startsWith(".")) continue;
+    if (!entry.name.startsWith("@gsd")) continue;
     const link = join(agentNodeModules, entry.name);
     try { lstatSync(link); unlinkSync(link); } catch { /* didn't exist */ }
     symlinkSync(join(internal, entry.name), link);
@@ -203,18 +203,37 @@ test("hasMissingWorkspaceScopes detects pnpm layout", (t) => {
   assert.equal(hasMissing(hoisted, internal), true, "pnpm-style: @gsd-build missing from hoisted");
 });
 
-test("merged node_modules marker prevents unnecessary rebuild", (t) => {
+test("merged node_modules marker uses fingerprint including directory entries", (t) => {
   const tmp = mkdtempSync(join(tmpdir(), "gsd-pnpm-marker-"));
   t.after(() => rmSync(tmp, { recursive: true, force: true }));
 
+  // Simulate two directories with known entries
+  const hoisted = join(tmp, "hoisted");
+  const internal = join(tmp, "internal");
+  mkdirSync(join(hoisted, "yaml"), { recursive: true });
+  mkdirSync(join(hoisted, "@sinclair"), { recursive: true });
+  mkdirSync(join(internal, "@gsd"), { recursive: true });
+
+  // Build fingerprint the same way the production code does
+  const h = readdirSync(hoisted).sort().join(",");
+  const i = readdirSync(internal).sort().join(",");
+  const fakePackageRoot = "/usr/lib/node_modules/gsd-pi";
+  const fingerprint = `${fakePackageRoot}\n${h}\n${i}`;
+
   const agentNodeModules = join(tmp, "agent", "node_modules");
   mkdirSync(agentNodeModules, { recursive: true });
-
-  // Write a marker file
   const marker = join(agentNodeModules, ".gsd-merged");
-  const fakePackageRoot = "/usr/lib/node_modules/gsd-pi";
-  writeFileSync(marker, fakePackageRoot);
+  writeFileSync(marker, fingerprint);
 
-  // Verify the marker can be read back and matched
-  assert.equal(readFileSync(marker, "utf-8").trim(), fakePackageRoot);
+  // Verify fingerprint contains all three components
+  const stored = readFileSync(marker, "utf-8").trim();
+  assert.ok(stored.includes(fakePackageRoot), "fingerprint includes packageRoot");
+  assert.ok(stored.includes("@sinclair"), "fingerprint includes hoisted entries");
+  assert.ok(stored.includes("@gsd"), "fingerprint includes internal entries");
+
+  // Verify fingerprint changes when a new package is added
+  mkdirSync(join(hoisted, "new-package"), { recursive: true });
+  const h2 = readdirSync(hoisted).sort().join(",");
+  const fingerprint2 = `${fakePackageRoot}\n${h2}\n${i}`;
+  assert.notEqual(fingerprint, fingerprint2, "fingerprint should change when deps change");
 });

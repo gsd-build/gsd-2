@@ -357,7 +357,7 @@ function reconcileSymlink(link: string, target: string): void {
 
 /**
  * Create a real node_modules directory containing symlinks from both the
- * hoisted root (external deps) and internal root (workspace packages).
+ * hoisted root (external deps) and internal root (@gsd/* workspace packages).
  * Used for pnpm global installs where @gsd/* isn't hoisted.
  */
 function reconcileMergedNodeModules(
@@ -365,10 +365,12 @@ function reconcileMergedNodeModules(
   hoisted: string,
   internal: string,
 ): void {
-  // Fast path: if already merged for this packageRoot, skip rebuild
+  // Fast path: if already merged for this packageRoot + same directory contents, skip.
+  // The fingerprint includes entry names from both roots so `pnpm add/remove` triggers rebuild.
   const marker = join(agentNodeModules, '.gsd-merged')
+  const fingerprint = mergedFingerprint(hoisted, internal)
   try {
-    if (existsSync(marker) && readFileSync(marker, 'utf-8').trim() === packageRoot) return
+    if (existsSync(marker) && readFileSync(marker, 'utf-8').trim() === fingerprint) return
   } catch { /* rebuild */ }
 
   // Remove any existing symlink or stale merged directory
@@ -383,28 +385,47 @@ function reconcileMergedNodeModules(
 
   mkdirSync(agentNodeModules, { recursive: true })
 
+  let linkedCount = 0
+
   // Symlink entries from the hoisted node_modules (external deps)
   try {
     for (const entry of readdirSync(hoisted, { withFileTypes: true })) {
       // Skip the gsd-pi package itself and dotfiles
       if (entry.name === basename(packageRoot)) continue
       if (entry.name.startsWith('.')) continue
-      try { symlinkSync(join(hoisted, entry.name), join(agentNodeModules, entry.name)) } catch { /* skip */ }
+      try { symlinkSync(join(hoisted, entry.name), join(agentNodeModules, entry.name)); linkedCount++ } catch { /* skip individual */ }
     }
-  } catch { /* non-fatal */ }
+  } catch (err) {
+    console.error(`[gsd] WARN: Failed to read hoisted node_modules at ${hoisted}: ${err instanceof Error ? err.message : err}`)
+  }
 
-  // Overlay workspace scopes from internal node_modules — these take precedence
+  // Overlay @gsd* workspace scopes from internal node_modules
   try {
     for (const entry of readdirSync(internal, { withFileTypes: true })) {
-      if (entry.name.startsWith('.')) continue
+      if (!entry.name.startsWith('@gsd')) continue
       const link = join(agentNodeModules, entry.name)
       try { lstatSync(link); unlinkSync(link) } catch { /* didn't exist */ }
-      try { symlinkSync(join(internal, entry.name), link) } catch { /* skip */ }
+      try { symlinkSync(join(internal, entry.name), link); linkedCount++ } catch { /* skip individual */ }
     }
-  } catch { /* non-fatal */ }
+  } catch (err) {
+    console.error(`[gsd] WARN: Failed to read internal node_modules at ${internal}: ${err instanceof Error ? err.message : err}`)
+  }
 
-  // Stamp marker so next startup can skip rebuild
-  try { writeFileSync(marker, packageRoot) } catch { /* non-fatal */ }
+  // Only stamp marker if we actually linked something — avoids caching a broken state
+  if (linkedCount > 0) {
+    try { writeFileSync(marker, fingerprint) } catch { /* non-fatal */ }
+  }
+}
+
+/** Build a cache fingerprint from packageRoot + sorted entry names of both directories */
+function mergedFingerprint(hoisted: string, internal: string): string {
+  try {
+    const h = readdirSync(hoisted).sort().join(',')
+    const i = readdirSync(internal).sort().join(',')
+    return `${packageRoot}\n${h}\n${i}`
+  } catch {
+    return packageRoot  // fallback: at least invalidate on version change
+  }
 }
 
 /**
