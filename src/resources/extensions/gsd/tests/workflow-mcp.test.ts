@@ -441,13 +441,14 @@ test("usesWorkflowMcpTransport matches local externalCli providers", () => {
   assert.equal(usesWorkflowMcpTransport("oauth", "local://custom"), false);
 });
 
-test("supportsStructuredQuestions disables structured ask flow on workflow MCP transports", () => {
+test("supportsStructuredQuestions allows MCP transports now that ElicitRequest is supported", () => {
+  // MCP transport (Claude Code CLI) supports form elicitation — no longer blocked
   assert.equal(
     supportsStructuredQuestions(["ask_user_questions"], {
       authMode: "externalCli",
       baseUrl: "local://claude-code",
     }),
-    false,
+    true,
   );
   assert.equal(
     supportsStructuredQuestions(["ask_user_questions"], {
@@ -456,6 +457,7 @@ test("supportsStructuredQuestions disables structured ask flow on workflow MCP t
     }),
     true,
   );
+  // Still false when ask_user_questions is not in the tool set
   assert.equal(
     supportsStructuredQuestions([], {
       authMode: "oauth",

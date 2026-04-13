@@ -350,16 +350,14 @@ export function usesWorkflowMcpTransport(
 
 export function supportsStructuredQuestions(
   activeTools: string[],
-  options: Pick<WorkflowCapabilityOptions, "authMode" | "baseUrl"> = {},
+  _options: Pick<WorkflowCapabilityOptions, "authMode" | "baseUrl"> = {},
 ): boolean {
   if (!activeTools.includes("ask_user_questions")) return false;
 
-  // Workflow MCP currently exposes ask_user_questions via MCP form elicitation.
-  // Local external CLI transports such as Claude Code can invoke the tool, but
-  // do not reliably complete that elicitation round-trip yet, so guided discuss
-  // prompts must fall back to plain-text questioning.
-  if (usesWorkflowMcpTransport(options.authMode, options.baseUrl)) return false;
-
+  // MCP transport (Claude Code CLI) now supports form elicitation via
+  // ElicitRequest in the MCP server. The discuss prompt templates include a
+  // "Tool fallback" instruction so the LLM gracefully degrades to plain-text
+  // questioning if the elicitation round-trip fails at runtime.
   return true;
 }
 
