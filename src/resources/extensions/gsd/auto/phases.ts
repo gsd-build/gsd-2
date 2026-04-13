@@ -27,6 +27,7 @@ import { runUnit } from "./run-unit.js";
 import { debugLog } from "../debug-logger.js";
 import { PROJECT_FILES } from "../detection.js";
 import { MergeConflictError } from "../git-service.js";
+import { setCurrentPhase, clearCurrentPhase } from "../../shared/gsd-phase-state.js";
 import { join, basename, dirname, parse as parsePath } from "node:path";
 import { existsSync, cpSync, readdirSync } from "node:fs";
 import { logWarning, logError } from "../workflow-logger.js";
@@ -1068,6 +1069,7 @@ export async function runUnitPhase(
   const previousTier = s.currentUnitRouting?.tier;
 
   s.currentUnit = { type: unitType, id: unitId, startedAt: Date.now() };
+  setCurrentPhase(unitType);
   s.lastToolInvocationError = null; // #2883: clear stale error from previous unit
   const unitStartSeq = ic.nextSeq();
   deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: unitStartSeq, eventType: "unit-start", data: { unitType, unitId } });
@@ -1529,6 +1531,7 @@ export async function runFinalize(
     // Detach session from the timed-out unit so late async completions
     // cannot mutate state for the next unit (#3757).
     s.currentUnit = null;
+    clearCurrentPhase();
     loopState.consecutiveFinalizeTimeouts++;
     debugLog("autoLoop", {
       phase: "pre-verification-timeout",
@@ -1626,6 +1629,7 @@ export async function runFinalize(
     // Detach session from the timed-out unit so late async completions
     // cannot mutate state for the next unit (#3757).
     s.currentUnit = null;
+    clearCurrentPhase();
     loopState.consecutiveFinalizeTimeouts++;
     debugLog("autoLoop", {
       phase: "post-verification-timeout",
