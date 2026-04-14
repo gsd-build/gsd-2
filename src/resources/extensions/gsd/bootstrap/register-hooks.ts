@@ -19,7 +19,8 @@ import { checkToolCallLoop, resetToolCallLoopGuard } from "./tool-call-loop-guar
 import { saveActivityLog } from "../activity-log.js";
 import { resetAskUserQuestionsCache } from "../../ask-user-questions.js";
 import { recordToolCall as safetyRecordToolCall, recordToolResult as safetyRecordToolResult } from "../safety/evidence-collector.js";
-import { classifyCommand } from "../safety/destructive-guard.js";
+import { classifyCatastrophic, classifyCommand } from "../safety/destructive-guard.js";
+import { classifyBashPath, classifyFilePath } from "../safety/path-guard.js";
 import { logWarning as safetyLogWarning } from "../workflow-logger.js";
 import { installNotifyInterceptor } from "./notify-interceptor.js";
 import { initNotificationStore } from "../notification-store.js";
@@ -227,6 +228,18 @@ export function registerHooks(pi: ExtensionAPI): void {
       if (queueGuard.block) return queueGuard;
     }
 
+    // ── Catastrophic command hard-block ─────────────────────────────────
+    // Tight denylist of irreversible host-damaging commands (rm -rf /, dd to
+    // /dev/sd*, fork bombs, force-push to main, etc.). Runs unconditionally
+    // — not gated on auto-mode — because the consequences are catastrophic
+    // regardless of who is driving.
+    if (isToolCallEventType("bash", event)) {
+      const catastrophic = classifyCatastrophic(event.input.command);
+      if (catastrophic.block) {
+        return { block: true, reason: catastrophic.reason };
+      }
+    }
+
     // ── Single-writer engine: block direct writes to STATE.md ──────────
     // Covers write, edit, and bash tools to prevent bypass vectors.
     if (isToolCallEventType("write", event)) {
@@ -244,6 +257,29 @@ export function registerHooks(pi: ExtensionAPI): void {
     if (isToolCallEventType("bash", event)) {
       if (isBashWriteToStateFile(event.input.command)) {
         return { block: true, reason: BLOCKED_WRITE_ERROR };
+      }
+    }
+
+    // ── Filesystem perimeter guard ──────────────────────────────────────
+    // Block Write/Edit to absolute paths outside the session base directory
+    // (with allowlist for tmp dirs). For bash, only flag clearly out-of-tree
+    // absolute redirect/cp/mv/rm targets — relative paths stay allowed.
+    if (isToolCallEventType("write", event)) {
+      const perimeter = classifyFilePath(event.input.path, discussionBasePath);
+      if (perimeter.block) {
+        return { block: true, reason: perimeter.reason };
+      }
+    }
+    if (isToolCallEventType("edit", event)) {
+      const perimeter = classifyFilePath(event.input.path, discussionBasePath);
+      if (perimeter.block) {
+        return { block: true, reason: perimeter.reason };
+      }
+    }
+    if (isToolCallEventType("bash", event)) {
+      const perimeter = classifyBashPath(event.input.command, discussionBasePath);
+      if (perimeter.block) {
+        return { block: true, reason: perimeter.reason };
       }
     }
 
