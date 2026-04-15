@@ -219,6 +219,10 @@ export async function dispatchSlashCommand(
 		ctx.showSessionSelector();
 		return true;
 	}
+	if (text === "/gsd" || text.startsWith("/gsd ")) {
+		await handleGsdCommand(text, ctx);
+		return true;
+	}
 	if (text === "/quit") {
 		await ctx.shutdown();
 		return true;
@@ -289,7 +293,7 @@ async function handleShareCommand(ctx: SlashCommandContext): Promise<void> {
 		ctx.editorContainer.clear();
 		ctx.editorContainer.addChild(ctx.editor);
 		ctx.ui.setFocus(ctx.editor);
-		try {
+	try {
 			fs.unlinkSync(tmpFile);
 		} catch {
 			// Ignore cleanup errors
@@ -665,8 +669,150 @@ function handleEditModeCommand(arg: string | undefined, ctx: SlashCommandContext
 	ctx.showStatus(`Edit mode: ${next}${next === "hashline" ? " (LINE#ID anchored edits)" : " (text-match edits)"}`);
 }
 
+async function handleGsdCommand(text: string, ctx: SlashCommandContext): Promise<void> {
+	const parts = text.split(/\s+/);
+	const subCommand = parts[1];
+
+	if (subCommand === "extract-learnings") {
+		const milestoneId = parts[2];
+		if (!milestoneId) {
+			ctx.showWarning("Usage: /gsd extract-learnings <milestone-id>");
+			return;
+		}
+		await handleExtractLearnings(milestoneId, ctx);
+	} else {
+		ctx.showWarning("Usage: /gsd extract-learnings <milestone-id>");
+	}
+}
+
+async function handleExtractLearnings(milestoneId: string, ctx: SlashCommandContext): Promise<void> {
+	const milestoneDir = path.join(process.cwd(), ".gsd", "milestones", milestoneId);
+	const planPath = path.join(milestoneDir, `${milestoneId}-PLAN.md`);
+	const summaryPath = path.join(milestoneDir, `${milestoneId}-SUMMARY.md`);
+
+	if (!fs.existsSync(planPath) || !fs.existsSync(summaryPath)) {
+		ctx.showError(`Missing required artifacts for ${milestoneId}. Ensure ${milestoneId}-PLAN.md and ${milestoneId}-SUMMARY.md exist in .gsd/milestones/${milestoneId}/`);
+		return;
+	}
+
+	ctx.showStatus(`Extracting learnings for milestone ${milestoneId}...`);
+
+	try {
+		const artifacts = resolvePhaseArtifacts(milestoneId, milestoneDir);
+		const artifactContents = artifacts.map(a => `--- ARTIFACT: ${a.filename} ---\n${fs.readFileSync(a.path, "utf-8")}`).join("\n\n");
+		const prompt = buildExtractLearningsPrompt(milestoneId, artifactContents);
+
+		const response = await (ctx.session as any).chat(prompt);
+		const text = typeof response === "string" ? response : response?.content || "";
+
+		const jsonMatch = text.match(/\{[\s\S]*\}/);
+		if (!jsonMatch) {
+			throw new Error("Failed to extract structured data from LLM response.");
+		}
+		const data = JSON.parse(jsonMatch[0]);
+
+		const learnings = data.learnings || [];
+		const counts = {
+			decisions: 0,
+			lessons: 0,
+			patterns: 0,
+			surprises: 0
+		};
+
+		for (const item of learnings) {
+			const cat = (item.category || "").toLowerCase();
+			if (cat.startsWith("decision")) counts.decisions++;
+			else if (cat.startsWith("lesson")) counts.lessons++;
+			else if (cat.startsWith("pattern")) counts.patterns++;
+			else if (cat.startsWith("surprise")) counts.surprises++;
+		}
+
+		const missingArtifacts = ["VERIFICATION", "UAT"]
+			.map(s => `${milestoneId}-${s}.md`)
+			.filter(name => !fs.existsSync(path.join(milestoneDir, name)));
+
+		const frontmatter = buildFrontmatter(milestoneId, data.phase_name || milestoneId, data.project || "Unknown", counts, missingArtifacts);
+
+		let markdown = `${frontmatter}\n\n# ${milestoneId} Learnings: ${data.phase_name || ""}\n\n`;
+
+		const categories = ["Decisions", "Lessons", "Patterns", "Surprises"] as const;
+		for (const category of categories) {
+			const catItems = learnings.filter((l: any) => (l.category || "").toLowerCase().includes(category.toLowerCase().slice(0, -1)));
+			if (catItems.length > 0) {
+				markdown += `## ${category}\n\n`;
+				for (const item of catItems) {
+					markdown += `### ${item.title || "Observation"}\n`;
+					markdown += `${item.content}\n\n`;
+					if (item.rationale) markdown += `**Rationale**: ${item.rationale}\n`;
+					if (item.context) markdown += `**Context**: ${item.context}\n`;
+					if (item.applicability) markdown += `**Applicability**: ${item.applicability}\n`;
+					if (item.impact) markdown += `**Impact**: ${item.impact}\n`;
+					markdown += `**Source**: ${item.source}\n\n`;
+				}
+			}
+		}
+
+		const outputPath = path.join(milestoneDir, `${milestoneId}-LEARNINGS.md`);
+		fs.writeFileSync(outputPath, markdown);
+
+		const runner = (ctx.session as any).extensionRunner;
+		if (runner) {
+			for (const item of learnings) {
+				try {
+					await (ctx.session as any).executeTool?.("capture_thought", {
+						thought: item.content,
+						category: item.category,
+						phase: milestoneId,
+						project: data.project,
+						source: item.source
+					});
+				} catch {
+					// REQ-LEARN-04: complete successfully if capture_thought unavailable
+				}
+			}
+		}
+
+		ctx.showStatus(`Successfully wrote learnings to .gsd/milestones/${milestoneId}/${milestoneId}-LEARNINGS.md`);
+
+	} catch (error: any) {
+		ctx.showError(`Learning extraction failed: ${error.message}`);
+	}
+}
+
+function resolvePhaseArtifacts(milestoneId: string, milestoneDir: string) {
+	const suffixes = ["PLAN", "SUMMARY", "VERIFICATION", "UAT"];
+	return suffixes
+		.map(s => ({ filename: `${milestoneId}-${s}.md`, path: path.join(milestoneDir, `${milestoneId}-${s}.md`) }))
+		.filter(a => fs.existsSync(a.path));
+}
+
+function buildExtractLearningsPrompt(milestoneId: string, content: string): string {
+	return `Analyze the following artifacts for milestone ${milestoneId} and extract institutional knowledge.\n\n${content}\n\nIdentify:\n1. Decisions: technical choices, rationale, and source\n2. Lessons: what was learned, context, and source\n3. Patterns: reusable approaches, applicability, and source\n4. Surprises: unexpected findings, impact, and source\n\nFormat as JSON:\n{\n  "project": "...",\n  "phase_name": "...",\n  "learnings": [\n    {\n      "category": "Decisions|Lessons|Patterns|Surprises",\n      "title": "...",\n      "content": "...",\n      "source": "artifact name and section",\n      "rationale": "...",\n      "context": "...",\n      "applicability": "...",\n      "impact": "..."\n    }\n  ]\n}\nReturn only the JSON.`;
+}
+
+function buildFrontmatter(phase: string, phaseName: string, project: string, counts: any, missing: string[]): string {
+	return [
+		'---',
+		`phase: ${JSON.stringify(phase)}`,
+		`phase_name: ${JSON.stringify(phaseName)}`,
+		`project: ${JSON.stringify(project)}`,
+		`generated: ${JSON.stringify(new Date().toISOString())}`,
+		'counts:',
+		`  decisions: ${counts.decisions}`,
+		`  lessons: ${counts.lessons}`,
+		`  patterns: ${counts.patterns}`,
+		`  surprises: ${counts.surprises}`,
+		`missing_artifacts: ${JSON.stringify(missing)}`,
+		'---'
+	].join('\n');
+}
+
 function handleArminSaysHi(ctx: SlashCommandContext): void {
 	ctx.chatContainer.addChild(new Spacer(1));
 	ctx.chatContainer.addChild(new ArminComponent(ctx.ui));
 	ctx.requestRender();
+}
+",
+  "explanation": "Implemented the `/gsd extract-learnings <milestone-id>` slash command by adding a new case to the `dispatchSlashCommand` router and implementing the corresponding handler and helper functions. The handler validates the existence of required milestone artifacts (PLAN.md and SUMMARY.md), resolves optional ones (VERIFICATION.md and UAT.md), and dispatches an LLM turn to extract institutional knowledge into four categories: Decisions, Lessons, Patterns, and Surprises. The results are written to a LEARNINGS.md file with specific YAML frontmatter. It also integrates with the `capture_thought` tool if available to log individual learnings structured with metadata. All requirements from the issue description, including source attribution, overwrite behavior, and error handling, are met.",
+  "testCase": "1. Create a milestone directory `.gsd/milestones/M001/`.\n2. Create `M001-PLAN.md` and `M001-SUMMARY.md` inside that directory with some content about technical decisions and outcomes.\n3. Run the slash command `/gsd extract-learnings M001` in the agent terminal.\n4. Verify that `.gsd/milestones/M001/M001-LEARNINGS.md` is generated with the correct YAML frontmatter and categories.\n5. Verify that running the command again overwrites the file.\n6. Delete `M001-PLAN.md` and verify that the command now returns a clear error message."
 }
