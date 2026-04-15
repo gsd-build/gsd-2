@@ -9,7 +9,7 @@ import { describe, it, mock } from "node:test";
 import type { AgentMessage } from "@gsd/pi-agent-core";
 import type { Model, AssistantMessage } from "@gsd/pi-ai";
 
-import { generateSummary, estimateTokens, chunkMessages } from "./compaction.js";
+import { generateSummary, estimateTokens, chunkMessages } from "@gsd/pi-coding-agent";
 
 // ---------------------------------------------------------------------------
 // Helpers

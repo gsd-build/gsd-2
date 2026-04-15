@@ -13,11 +13,11 @@ import type { Agent } from "@gsd/pi-agent-core";
 import type { AssistantMessage, Model } from "@gsd/pi-ai";
 import { isContextOverflow } from "@gsd/pi-ai";
 import type { UsageLimitErrorType } from "./auth-storage.js";
-import type { FallbackResolver } from "./fallback-resolver.js";
+import type { FallbackResolver } from "@gsd/agent-core";
 import type { ModelRegistry } from "./model-registry.js";
 import type { SettingsManager } from "./settings-manager.js";
 import { sleep } from "../utils/sleep.js";
-import type { AgentSessionEvent } from "./agent-session.js";
+import type { AgentSessionEvent } from "@gsd/agent-core";
 
 /** Dependencies injected from AgentSession into RetryHandler */
 export interface RetryHandlerDeps {

@@ -84,7 +84,7 @@ test("Text.setText returns early when text is unchanged", () => {
 // ── Chat component cap ──────────────────────────────────────────────
 
 test("InteractiveMode caps rendered chat components", () => {
-  const src = readSource("packages/pi-coding-agent/src/modes/interactive/interactive-mode.ts");
+  const src = readSource("packages/gsd-agent-modes/src/modes/interactive/interactive-mode.ts");
   assert.ok(
     src.includes("MAX_CHAT_COMPONENTS"),
     "InteractiveMode must define MAX_CHAT_COMPONENTS to prevent unbounded growth",
@@ -98,7 +98,7 @@ test("InteractiveMode caps rendered chat components", () => {
 // ── ToolExecution dispose ───────────────────────────────────────────
 
 test("ToolExecutionComponent has dispose() to clear heavy references", () => {
-  const src = readSource("packages/pi-coding-agent/src/modes/interactive/components/tool-execution.ts");
+  const src = readSource("packages/gsd-agent-modes/src/modes/interactive/components/tool-execution.ts");
   assert.ok(
     src.includes("dispose()"),
     "ToolExecutionComponent must have dispose() for GC of image maps, diff previews, etc.",
@@ -108,7 +108,7 @@ test("ToolExecutionComponent has dispose() to clear heavy references", () => {
 // ── Orphan process prevention ───────────────────────────────────────
 
 test("InteractiveMode kills descendant processes on shutdown", () => {
-  const src = readSource("packages/pi-coding-agent/src/modes/interactive/interactive-mode.ts");
+  const src = readSource("packages/gsd-agent-modes/src/modes/interactive/interactive-mode.ts");
   assert.ok(
     src.includes("listDescendants"),
     "Shutdown must use listDescendants to find orphan child processes",

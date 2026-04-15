@@ -3,7 +3,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { CredentialCooldownError } from "./sdk.js";
+import { CredentialCooldownError } from "@gsd/agent-core";
 
 // ─── CredentialCooldownError ──────────────────────────────────────────────────
 

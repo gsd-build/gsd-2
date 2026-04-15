@@ -25,7 +25,7 @@ import {
 	createCompactionSummaryMessage,
 	createCustomMessage,
 } from "./messages.js";
-import { BlobStore, externalizeImageData, isBlobRef, resolveImageData } from "./blob-store.js";
+import { BlobStore, externalizeImageData, isBlobRef, resolveImageData } from "@gsd/agent-core";
 
 /** Inline concurrency limiter to cap parallel async operations. */
 function pLimit(concurrency: number) {

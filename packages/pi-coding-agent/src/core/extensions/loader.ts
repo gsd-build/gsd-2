@@ -18,6 +18,8 @@ import * as _bundledPiTui from "@gsd/pi-tui";
 // Static imports of packages that extensions may use.
 // These MUST be static so Bun bundles them into the compiled binary.
 // The virtualModules option then makes them available to extensions.
+import * as _bundledGsdAgentCore from "@gsd/agent-core";
+import * as _bundledGsdAgentModes from "@gsd/agent-modes";
 import * as _bundledTypebox from "@sinclair/typebox";
 import * as _bundledYaml from "yaml";
 import * as _bundledMcpClient from "@modelcontextprotocol/sdk/client";
@@ -57,6 +59,8 @@ import type {
  * Maps specifier -> module object for subpaths that must be available in compiled binaries.
  */
 const STATIC_BUNDLED_MODULES: Record<string, unknown> = {
+	"@gsd/agent-core": _bundledGsdAgentCore,
+	"@gsd/agent-modes": _bundledGsdAgentModes,
 	"@sinclair/typebox": _bundledTypebox,
 	"@gsd/pi-agent-core": _bundledPiAgentCore,
 	"@gsd/pi-tui": _bundledPiTui,
@@ -324,6 +328,8 @@ function getAliases(): Record<string, string> {
 		// Auto-discovered subpath exports (lowest priority — overridden by manual entries below)
 		...autoDiscovered,
 		// Manual entries for workspace packages and packages needing special resolution
+		"@gsd/agent-core": resolveWorkspaceOrImport("gsd-agent-core/dist/index.js", "@gsd/agent-core"),
+		"@gsd/agent-modes": resolveWorkspaceOrImport("gsd-agent-modes/dist/index.js", "@gsd/agent-modes"),
 		"@gsd/pi-coding-agent": packageIndex,
 		"@gsd/pi-agent-core": resolveWorkspaceOrImport("agent/dist/index.js", "@gsd/pi-agent-core"),
 		"@gsd/pi-tui": resolveWorkspaceOrImport("tui/dist/index.js", "@gsd/pi-tui"),

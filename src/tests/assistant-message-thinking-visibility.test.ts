@@ -9,7 +9,7 @@ import { join } from "node:path";
 const assistantMessagePath = join(
   process.cwd(),
   "packages",
-  "pi-coding-agent",
+  "gsd-agent-modes",
   "src",
   "modes",
   "interactive",

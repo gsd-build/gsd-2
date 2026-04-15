@@ -9,7 +9,7 @@ import { spawn } from "child_process";
 import { getShellConfig, getShellEnv, killProcessTree, sanitizeCommand } from "../../utils/shell.js";
 import { type BashInterceptorRule, compileInterceptor, DEFAULT_BASH_INTERCEPTOR_RULES } from "./bash-interceptor.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult, truncateTail } from "./truncate.js";
-import type { ArtifactManager } from "../artifact-manager.js";
+import type { ArtifactManager } from "@gsd/agent-core";
 
 // Cached Win32 FFI handles for restoring VT input after child processes
 let _vtHandles: { GetConsoleMode: any; SetConsoleMode: any; handle: any } | null = null;

@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import { DefaultPackageManager } from "./package-manager.js";
-import { prepareLifecycleHooks, runLifecycleHooks } from "./lifecycle-hooks.js";
+import { prepareLifecycleHooks, runLifecycleHooks } from "@gsd/agent-core";
 import { SettingsManager } from "./settings-manager.js";
 
 export type PackageCommand = "install" | "remove" | "update" | "list";

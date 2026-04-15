@@ -19,7 +19,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const source = readFileSync(
-  join(__dirname, '..', '..', 'packages', 'pi-coding-agent', 'src', 'modes', 'interactive', 'components', 'provider-manager.ts'),
+  join(__dirname, '..', '..', 'packages', 'gsd-agent-modes', 'src', 'modes', 'interactive', 'components', 'provider-manager.ts'),
   'utf-8',
 );
 

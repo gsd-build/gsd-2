@@ -20,6 +20,7 @@
     "copy-assets": "node scripts/copy-assets.cjs"
   },
   "dependencies": {
+    "@gsd/agent-core": "*",
     "@mariozechner/jiti": "^2.6.2",
     "@silvia-odwyer/photon-node": "^0.3.4",
     "chalk": "^5.5.0",

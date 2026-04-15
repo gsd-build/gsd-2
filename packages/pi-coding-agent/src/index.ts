@@ -2,6 +2,34 @@
 
 // Config paths
 export { getAgentDir, VERSION } from "./config.js";
+// Config constants needed by @gsd/agent-modes
+export { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR } from "./config.js";
+// Config utilities needed by @gsd/agent-modes
+export { getAuthPath, getDebugLogPath, getUpdateInstruction, getShareViewerUrl, getCustomThemesDir } from "./config.js";
+// Additional config utilities needed by @gsd/agent-modes entry point
+export { getModelsPath } from "./config.js";
+// Config utilities needed by @gsd/agent-core
+export { getDocsPath, getExamplesPath, getReadmePath, getExportTemplateDir } from "./config.js";
+// Thinking level utilities needed by @gsd/agent-modes
+export { isValidThinkingLevel, VALID_THINKING_LEVELS } from "./core/thinking-level.js";
+// Tool registry needed by @gsd/agent-modes
+export { allTools } from "./core/tools/index.js";
+export type { Tool, ToolName } from "./core/tools/index.js";
+// Path utilities needed by @gsd/agent-modes
+export { resolveReadPath } from "./core/tools/path-utils.js";
+// KeybindingsManager class (value export) needed by @gsd/agent-modes
+export { KeybindingsManager } from "@gsd/agent-core";
+// Image utilities needed by @gsd/agent-modes
+export { detectSupportedImageMimeTypeFromFile } from "./utils/mime.js";
+export { formatDimensionNote, resizeImage, type ImageResizeOptions, type ResizedImage } from "./utils/image-resize.js";
+export { convertToPng } from "./utils/image-convert.js";
+export { extensionForImageMimeType, readClipboardImage } from "./utils/clipboard-image.js";
+// Changelog utilities needed by @gsd/agent-modes
+export { getChangelogPath, getNewEntries, parseChangelog } from "./utils/changelog.js";
+// Shell utilities needed by @gsd/agent-modes
+export { sanitizeBinaryOutput } from "./utils/shell.js";
+// Tool utilities needed by @gsd/agent-modes
+export { ensureTool } from "./utils/tools-manager.js";
 export {
 	AgentSession,
 	type AgentSessionConfig,
@@ -12,7 +40,8 @@ export {
 	type PromptOptions,
 	parseSkillBlock,
 	type SessionStats,
-} from "./core/agent-session.js";
+	type SessionStateChangeReason,
+} from "@gsd/agent-core";
 // Auth and model registry
 export {
 	type ApiKeyCredential,
@@ -22,6 +51,7 @@ export {
 	FileAuthStorageBackend,
 	InMemoryAuthStorageBackend,
 	type OAuthCredential,
+	type UsageLimitErrorType,
 } from "./core/auth-storage.js";
 // Compaction
 export {
@@ -31,6 +61,7 @@ export {
 	type CompactionResult,
 	type CutPointResult,
 	calculateContextTokens,
+	chunkMessages,
 	collectEntriesForBranchSummary,
 	compact,
 	DEFAULT_COMPACTION_SETTINGS,
@@ -45,7 +76,7 @@ export {
 	prepareBranchEntries,
 	serializeConversation,
 	shouldCompact,
-} from "./core/compaction/index.js";
+} from "@gsd/agent-core";
 export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.js";
 // Extension system
 export type {
@@ -90,7 +121,6 @@ export type {
 	InputEvent,
 	InputEventResult,
 	InputSource,
-	KeybindingsManager,
 	LoadExtensionsResult,
 	LsToolCallEvent,
 	MessageRenderer,
@@ -105,16 +135,25 @@ export type {
 	ReadToolCallEvent,
 	RegisteredCommand,
 	RegisteredTool,
+	ExtensionErrorListener,
+	MessageEndEvent,
+	MessageStartEvent,
+	MessageUpdateEvent,
 	SessionBeforeCompactEvent,
+	SessionBeforeCompactResult,
 	SessionBeforeForkEvent,
+	SessionBeforeForkResult,
 	SessionBeforeSwitchEvent,
+	SessionBeforeSwitchResult,
 	SessionBeforeTreeEvent,
+	SessionBeforeTreeResult,
 	SessionCompactEvent,
 	SessionForkEvent,
 	SessionShutdownEvent,
 	SessionStartEvent,
 	SessionSwitchEvent,
 	SessionTreeEvent,
+	ShutdownHandler,
 	SlashCommandInfo,
 	SlashCommandLocation,
 	SlashCommandSource,
@@ -122,11 +161,15 @@ export type {
 	ToolCallEvent,
 	ToolCompatibility,
 	ToolDefinition,
+	ToolExecutionEndEvent,
+	ToolExecutionStartEvent,
+	ToolExecutionUpdateEvent,
 	ToolInfo,
 	SortResult,
 	SortWarning,
 	ToolRenderResultOptions,
 	ToolResultEvent,
+	TreePreparation,
 	TurnEndEvent,
 	TurnStartEvent,
 	UserBashEvent,
@@ -143,6 +186,7 @@ export {
 	importExtensionModule,
 	isToolCallEventType,
 	isToolResultEventType,
+	loadExtensions,
 	readManifest,
 	readManifestFromEntryPath,
 	sortExtensionPaths,
@@ -153,7 +197,43 @@ export {
 } from "./core/extensions/index.js";
 // Footer data provider (git branch + extension statuses - data not otherwise available to extensions)
 export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.js";
+// FooterDataProvider class needed by @gsd/agent-modes
+export { FooterDataProvider } from "./core/footer-data-provider.js";
+export type { BashResult } from "@gsd/agent-core";
 export { convertToLlm } from "./core/messages.js";
+// Message types and factories needed by @gsd/agent-modes
+export { createCompactionSummaryMessage } from "./core/messages.js";
+export type { BranchSummaryMessage, CompactionSummaryMessage, CustomMessage } from "./core/messages.js";
+// Additional symbols needed by @gsd/agent-core compaction files
+export { createBranchSummaryMessage, createCustomMessage } from "./core/messages.js";
+export { TOOL_RESULT_MAX_CHARS, COMPACTION_KEEP_RECENT_TOKENS, COMPACTION_RESERVE_TOKENS } from "./core/constants.js";
+export { getErrorMessage } from "./utils/error.js";
+// Symbols needed by @gsd/agent-core agent-session.ts
+export { DEFAULT_THINKING_LEVEL } from "./core/defaults.js";
+export type { BashExecutionMessage } from "./core/messages.js";
+export { expandPromptTemplate } from "./core/prompt-templates.js";
+export { RetryHandler } from "./core/retry-handler.js";
+export type { ResourceExtensionPaths } from "./core/resource-loader.js";
+export { createAllTools } from "./core/tools/index.js";
+export { findInitialModel } from "./core/model-resolver.js";
+// Contextual tips system needed by @gsd/agent-modes
+export { ContextualTips } from "@gsd/agent-core";
+// Model scope resolution needed by @gsd/agent-modes
+export { resolveModelScope } from "./core/model-resolver.js";
+// CLI model resolution needed by @gsd/agent-modes entry point
+export { resolveCliModel } from "./core/model-resolver.js";
+export type { ScopedModel, ResolveCliModelResult } from "./core/model-resolver.js";
+// Startup timing instrumentation needed by @gsd/agent-modes entry point
+export { printTimings, time } from "./core/timings.js";
+// HTML export utility needed by @gsd/agent-modes entry point
+export { exportFromFile } from "@gsd/agent-core";
+// Migrations needed by @gsd/agent-modes entry point
+export { runMigrations, showDeprecationWarnings } from "./migrations.js";
+// Slash commands needed by @gsd/agent-modes
+export { BUILTIN_SLASH_COMMANDS } from "./core/slash-commands.js";
+// Edit diff utility needed by @gsd/agent-modes
+export { computeEditDiff } from "./core/tools/edit-diff.js";
+export type { EditDiffError, EditDiffResult } from "./core/tools/edit-diff.js";
 export { ModelDiscoveryCache } from "./core/discovery-cache.js";
 export type { DiscoveredModel, DiscoveryResult, ProviderDiscoveryAdapter } from "./core/model-discovery.js";
 export { getDiscoverableProviders, getDiscoveryAdapter } from "./core/model-discovery.js";
@@ -192,7 +272,7 @@ export {
 	type PromptTemplate,
 	// Pre-built tools (use process.cwd())
 	readOnlyTools,
-} from "./core/sdk.js";
+} from "@gsd/agent-core";
 export {
 	type BranchSummaryEntry,
 	buildSessionContext,
@@ -206,22 +286,26 @@ export {
 	migrateSessionEntries,
 	type NewSessionOptions,
 	parseSessionEntries,
+	type ReadonlySessionManager,
 	type SessionContext,
 	type SessionEntry,
 	type SessionEntryBase,
 	type SessionHeader,
 	type SessionInfo,
 	type SessionInfoEntry,
+	type SessionListProgress,
 	SessionManager,
 	type SessionMessageEntry,
+	type SessionTreeNode,
 	type ThinkingLevelChangeEntry,
 } from "./core/session-manager.js";
 // Blob and artifact storage
-export { BlobStore, isBlobRef, parseBlobRef, externalizeImageData, resolveImageData } from "./core/blob-store.js";
-export { ArtifactManager } from "./core/artifact-manager.js";
+export { BlobStore, isBlobRef, parseBlobRef, externalizeImageData, resolveImageData } from "@gsd/agent-core";
+export { ArtifactManager } from "@gsd/agent-core";
 export {
 	type AsyncSettings,
 	type CompactionSettings,
+	type FallbackChainEntry,
 	type ImageSettings,
 	type MemorySettings,
 	type PackageSource,
@@ -321,28 +405,8 @@ export {
 	registerMcpToolCompatibility,
 	resetToolCompatibilityRegistry,
 } from "./core/tools/index.js";
-// Main entry point
-export { main } from "./main.js";
-// Run modes for programmatic SDK usage
-export {
-	InteractiveMode,
-	type InteractiveModeOptions,
-	type PrintModeOptions,
-	runPrintMode,
-	runRpcMode,
-	type ModelInfo,
-	RpcClient,
-	type RpcClientOptions,
-	type RpcEventListener,
-	type RpcCommand,
-	type RpcInitResult,
-	type RpcProtocolVersion,
-	type RpcResponse,
-	type RpcSessionState,
-	type RpcV2Event,
-} from "./modes/index.js";
-// RPC JSONL utilities
-export { attachJsonlLineReader, serializeJsonLine } from "./modes/rpc/jsonl.js";
+// RPC JSONL utilities (now in core/)
+export { attachJsonlLineReader, serializeJsonLine } from "./core/jsonl.js";
 // UI components for extensions
 export {
 	ArminComponent,
@@ -384,22 +448,39 @@ export {
 	UserMessageComponent,
 	UserMessageSelectorComponent,
 	type VisualTruncateResult,
-} from "./modes/interactive/components/index.js";
-// Theme utilities for custom tools and extensions
+} from "./components/index.js";
+// Theme utilities for custom tools, extensions, and @gsd/agent-modes
 export {
+	getAvailableThemes,
+	getAvailableThemesWithPaths,
+	getEditorTheme,
 	getLanguageFromPath,
 	getMarkdownTheme,
+	getResolvedThemeColors,
 	getSelectListTheme,
 	getSettingsListTheme,
+	getThemeByName,
+	getThemeExportColors,
 	highlightCode,
 	initTheme,
+	onThemeChange,
+	setRegisteredThemes,
+	setTheme,
+	setThemeInstance,
+	stopThemeWatcher,
+	theme,
 	Theme,
 	type ThemeColor,
-} from "./modes/interactive/theme/theme.js";
+	type ThemeInfo,
+} from "./core/theme/theme.js";
 // Clipboard utilities
 export { copyToClipboard } from "./utils/clipboard.js";
 export { parseFrontmatter, stripFrontmatter } from "./utils/frontmatter.js";
 // Shell utilities
-export { getShellConfig, sanitizeCommand } from "./utils/shell.js";
+export { getShellConfig, getShellEnv, killProcessTree, sanitizeCommand } from "./utils/shell.js";
+// FallbackResolver re-exported from @gsd/agent-core (moved in CORE-01)
+export { FallbackResolver, type FallbackResult } from "@gsd/agent-core";
 // Cross-platform path display
 export { toPosixPath } from "./utils/path-display.js";
+// Git utilities needed by @gsd/agent-core
+export { parseGitUrl } from "./utils/git.js";

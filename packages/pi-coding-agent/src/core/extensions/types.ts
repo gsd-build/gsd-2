@@ -38,13 +38,11 @@ import type {
 	TUI,
 } from "@gsd/pi-tui";
 import type { Static, TSchema } from "@sinclair/typebox";
-import type { Theme } from "../../modes/interactive/theme/theme.js";
-import type { BashResult } from "../bash-executor.js";
-import type { CompactionPreparation, CompactionResult } from "../compaction/index.js";
+import type { Theme } from "../theme/theme.js";
 import type { EventBus } from "../event-bus.js";
 import type { ExecOptions, ExecResult } from "../exec.js";
 import type { ReadonlyFooterDataProvider } from "../footer-data-provider.js";
-import type { KeybindingsManager } from "../keybindings.js";
+import type { KeybindingsManager } from "../keybindings-types.js";
 import type { CustomMessage } from "../messages.js";
 import type { ModelRegistry } from "../model-registry.js";
 import type {
@@ -74,7 +72,62 @@ import type {
 
 export type { ExecOptions, ExecResult } from "../exec.js";
 export type { AgentToolResult, AgentToolUpdateCallback };
-export type { AppAction, KeybindingsManager } from "../keybindings.js";
+export type { AppAction, KeybindingsManager } from "../keybindings-types.js";
+
+// --- Inlined from BashResult (PF-03: break import dep on files moving to @gsd/agent-core) ---
+
+interface BashResult {
+	/** Combined stdout + stderr output (sanitized, possibly truncated) */
+	output: string;
+	/** Process exit code (undefined if killed/cancelled) */
+	exitCode: number | undefined;
+	/** Whether the command was cancelled via signal */
+	cancelled: boolean;
+	/** Whether the output was truncated */
+	truncated: boolean;
+	/** Path to temp file containing full output (if output exceeded truncation threshold) */
+	fullOutputPath?: string;
+}
+
+// --- Inlined from compaction/ (PF-03: break import dep on files moving to @gsd/agent-core) ---
+
+interface CompactionResult<T = unknown> {
+	summary: string;
+	firstKeptEntryId: string;
+	tokensBefore: number;
+	/** Extension-specific data (e.g., ArtifactIndex, version markers for structured compaction) */
+	details?: T;
+}
+
+interface FileOperations {
+	read: Set<string>;
+	written: Set<string>;
+	edited: Set<string>;
+}
+
+interface CompactionSettings {
+	enabled: boolean;
+	reserveTokens: number;
+	keepRecentTokens: number;
+}
+
+interface CompactionPreparation {
+	/** UUID of first entry to keep */
+	firstKeptEntryId: string;
+	/** Messages that will be summarized and discarded */
+	messagesToSummarize: AgentMessage[];
+	/** Messages that will be turned into turn prefix summary (if splitting) */
+	turnPrefixMessages: AgentMessage[];
+	/** Whether this is a split turn (cut point in middle of turn) */
+	isSplitTurn: boolean;
+	tokensBefore: number;
+	/** Summary from previous compaction, for iterative update */
+	previousSummary?: string;
+	/** File operations extracted from messagesToSummarize */
+	fileOps: FileOperations;
+	/** Compaction settings from settings.jsonl */
+	settings: CompactionSettings;
+}
 
 // ============================================================================
 // UI Context

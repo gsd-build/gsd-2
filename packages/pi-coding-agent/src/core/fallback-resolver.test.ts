@@ -3,7 +3,7 @@
 
 import { describe, it, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";
-import { FallbackResolver } from "./fallback-resolver.js";
+import { FallbackResolver } from "@gsd/agent-core";
 import type { Api, Model } from "@gsd/pi-ai";
 import type { AuthStorage } from "./auth-storage.js";
 import type { ModelRegistry } from "./model-registry.js";

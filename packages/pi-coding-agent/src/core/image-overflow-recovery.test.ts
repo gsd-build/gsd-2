@@ -4,7 +4,7 @@ import {
 	isImageDimensionError,
 	MANY_IMAGE_MAX_DIMENSION,
 	downsizeConversationImages,
-} from "./image-overflow-recovery.js";
+} from "@gsd/agent-core";
 import type { Message } from "@gsd/pi-ai";
 
 // ─── isImageDimensionError ────────────────────────────────────────────────────

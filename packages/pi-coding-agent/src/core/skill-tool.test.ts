@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { Agent } from "@gsd/pi-agent-core";
 import { AuthStorage } from "./auth-storage.js";
-import { AgentSession } from "./agent-session.js";
+import { AgentSession } from "@gsd/agent-core";
 import { ModelRegistry } from "./model-registry.js";
 import { DefaultResourceLoader } from "./resource-loader.js";
 import { SessionManager } from "./session-manager.js";

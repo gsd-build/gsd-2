@@ -5,11 +5,13 @@ import {
   runPackageCommand,
   SettingsManager,
   SessionManager,
-  createAgentSession,
-  InteractiveMode,
+} from '@gsd/pi-coding-agent'
+import {
+  runInteractiveMode as InteractiveMode,
   runPrintMode,
   runRpcMode,
-} from '@gsd/pi-coding-agent'
+} from '@gsd/agent-modes'
+import { createAgentSession } from '@gsd/agent-core'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { agentDir, sessionsDir, authFilePath } from './app-paths.js'

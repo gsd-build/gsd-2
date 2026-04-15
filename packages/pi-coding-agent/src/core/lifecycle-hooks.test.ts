@@ -8,7 +8,7 @@ import {
 	collectRuntimeDependencies,
 	verifyRuntimeDependencies,
 	resolveLocalSourcePath,
-} from "./lifecycle-hooks.js";
+} from "@gsd/agent-core";
 
 function tmpDir(prefix: string, t: { after: (fn: () => void) => void }): string {
 	const dir = mkdtempSync(join(tmpdir(), `pi-lh-${prefix}-`));
