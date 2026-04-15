@@ -125,7 +125,10 @@ export function registerHooks(pi: ExtensionAPI): void {
     await ensureDbOpen();
     const state = await deriveState(basePath);
     if (!state.activeMilestone || !state.activeSlice || !state.activeTask) return;
-    if (state.phase !== "executing") return;
+    // Write checkpoint for ALL phases, not just "executing" — discuss, research,
+    // and planning also carry in-memory state (user answers, gate verification)
+    // that would be lost on compaction (#4258).
+    // if (state.phase !== "executing") return;
 
     const sliceDir = resolveSlicePath(basePath, state.activeMilestone.id, state.activeSlice.id);
     if (!sliceDir) return;
