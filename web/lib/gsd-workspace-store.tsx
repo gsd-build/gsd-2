@@ -195,12 +195,13 @@ export interface WorkspaceOnboardingProviderState {
   required: true
   recommended: boolean
   configured: boolean
-  configuredVia: "auth_file" | "environment" | "runtime" | null
+  configuredVia: "auth_file" | "environment" | "runtime" | "external_cli" | null
   supports: {
     apiKey: boolean
     oauth: boolean
     oauthAvailable: boolean
     usesCallbackServer: boolean
+    externalCli: boolean
   }
 }
 
@@ -258,7 +259,7 @@ export interface WorkspaceOnboardingState {
     blocking: true
     skippable: false
     satisfied: boolean
-    satisfiedBy: { providerId: string; source: "auth_file" | "environment" | "runtime" } | null
+    satisfiedBy: { providerId: string; source: "auth_file" | "environment" | "runtime" | "external_cli" } | null
     providers: WorkspaceOnboardingProviderState[]
   }
   optional: {
