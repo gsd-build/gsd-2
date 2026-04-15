@@ -7,7 +7,7 @@ export type DebugSessionStatus = "active" | "paused" | "resolved" | "failed";
 
 export interface DebugSessionArtifact {
   version: 1;
-  mode: "debug";
+  mode: "debug" | "diagnose";
   slug: string;
   issue: string;
   status: DebugSessionStatus;
@@ -35,6 +35,7 @@ export interface DebugSessionListResult {
 
 export interface CreateDebugSessionInput {
   issue: string;
+  mode?: "debug" | "diagnose";
   status?: DebugSessionStatus;
   phase?: string;
   createdAt?: number;
@@ -117,7 +118,7 @@ function isDebugSessionArtifact(value: unknown): value is DebugSessionArtifact {
   const o = value as Record<string, unknown>;
   return (
     o.version === 1
-    && o.mode === "debug"
+    && (o.mode === "debug" || o.mode === "diagnose")
     && typeof o.slug === "string"
     && typeof o.issue === "string"
     && isDebugSessionStatus(o.status)
@@ -189,7 +190,7 @@ export function createDebugSession(
   const now = input.createdAt ?? d.now();
   const session: DebugSessionArtifact = {
     version: 1,
-    mode: "debug",
+    mode: input.mode ?? "debug",
     slug,
     issue,
     status: input.status ?? DEFAULT_STATUS,

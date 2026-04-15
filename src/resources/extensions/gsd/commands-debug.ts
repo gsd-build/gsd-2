@@ -15,6 +15,7 @@ export type DebugCommandIntent
   | { type: "status"; slug: string }
   | { type: "continue"; slug: string }
   | { type: "diagnose"; slug?: string }
+  | { type: "diagnose-issue"; issue: string }
   | { type: "error"; message: string };
 
 const SUBCOMMANDS = new Set(["list", "status", "continue", "--diagnose"]);
@@ -30,12 +31,13 @@ function isValidSlugCandidate(input: string): boolean {
 
 function formatSessionLine(prefix: string, session: {
   slug: string;
+  mode: string;
   status: string;
   phase: string;
   issue: string;
   updatedAt: number;
 }): string {
-  return `${prefix} ${session.slug} [mode=debug status=${session.status} phase=${session.phase}] — ${session.issue} (updated ${new Date(session.updatedAt).toISOString()})`;
+  return `${prefix} ${session.slug} [mode=${session.mode} status=${session.status} phase=${session.phase}] — ${session.issue} (updated ${new Date(session.updatedAt).toISOString()})`;
 }
 
 function usageText(): string {
@@ -44,7 +46,7 @@ function usageText(): string {
     "       /gsd debug list",
     "       /gsd debug status <slug>",
     "       /gsd debug continue <slug>",
-    "       /gsd debug --diagnose [slug]",
+    "       /gsd debug --diagnose [<slug> | <issue text>]",
   ].join("\n");
 }
 
@@ -76,7 +78,8 @@ export function parseDebugCommand(args: string): DebugCommandIntent {
   if (head === "--diagnose") {
     if (parts.length === 1) return { type: "diagnose" };
     if (parts.length === 2 && isValidSlugCandidate(parts[1])) return { type: "diagnose", slug: parts[1] };
-    return { type: "error", message: "Invalid diagnose target. Usage: /gsd debug --diagnose [slug]" };
+    if (parts.length >= 3) return { type: "diagnose-issue", issue: parts.slice(1).join(" ") };
+    return { type: "error", message: "Invalid diagnose target. Usage: /gsd debug --diagnose [<slug> | <issue text>]" };
   }
 
   if (head.startsWith("-") && !SUBCOMMANDS.has(head)) {
@@ -244,6 +247,37 @@ export async function handleDebug(args: string, ctx: ExtensionCommandContext): P
       ctx.ui.notify(
         `Unable to continue debug session '${parsed.slug}': ${message}\nTry /gsd debug --diagnose ${parsed.slug}`,
         "warning",
+      );
+    }
+    return;
+  }
+
+  if (parsed.type === "diagnose-issue") {
+    const issue = parsed.issue.trim();
+    if (!issue) {
+      ctx.ui.notify(`Issue text is required.\n${usageText()}`, "warning");
+      return;
+    }
+
+    try {
+      const created = createDebugSession(basePath, { issue, mode: "diagnose" });
+      const s = created.session;
+      ctx.ui.notify(
+        [
+          `Diagnose session started: ${s.slug}`,
+          formatSessionLine("Session:", s),
+          `Artifact: ${created.artifactPath}`,
+          `Log: ${s.logPath}`,
+          `dispatchMode=find_root_cause_only`,
+          `Next: /gsd debug status ${s.slug} or /gsd debug --diagnose ${s.slug}`,
+        ].join("\n"),
+        "info",
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(
+        `Unable to create diagnose session: ${message}\nTry /gsd debug --diagnose for artifact health details.`,
+        "error",
       );
     }
     return;

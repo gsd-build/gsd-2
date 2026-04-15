@@ -54,6 +54,57 @@ describe("parseDebugCommand", () => {
     assert.equal(parseDebugCommand("--diagnose not/a-slug").type, "error");
     assert.equal(parseDebugCommand("--wat").type, "error");
   });
+
+  test("routes multi-token --diagnose to diagnose-issue with root-cause-only intent", () => {
+    assert.deepEqual(parseDebugCommand("--diagnose login fails on safari"), {
+      type: "diagnose-issue",
+      issue: "login fails on safari",
+    });
+    assert.deepEqual(parseDebugCommand("--diagnose flaky checkout flow"), {
+      type: "diagnose-issue",
+      issue: "flaky checkout flow",
+    });
+    assert.deepEqual(parseDebugCommand("--diagnose status is returning 500"), {
+      type: "diagnose-issue",
+      issue: "status is returning 500",
+    });
+  });
+
+  test("--diagnose with valid slug remains slug-targeted diagnose", () => {
+    assert.deepEqual(parseDebugCommand("--diagnose auth-flake"), {
+      type: "diagnose",
+      slug: "auth-flake",
+    });
+    assert.deepEqual(parseDebugCommand("--diagnose ci-flake-2"), {
+      type: "diagnose",
+      slug: "ci-flake-2",
+    });
+  });
+
+  test("--diagnose with no args returns store-health diagnose", () => {
+    assert.deepEqual(parseDebugCommand("--diagnose"), { type: "diagnose" });
+  });
+
+  test("single invalid slug token after --diagnose is an error not issue-start", () => {
+    assert.equal(parseDebugCommand("--diagnose not/a-slug").type, "error");
+    assert.equal(parseDebugCommand("--diagnose UPPERCASE").type, "error");
+    assert.equal(parseDebugCommand("--diagnose has space").type, "diagnose-issue");
+  });
+
+  test("issue text starting with reserved words falls through to issue-start", () => {
+    assert.deepEqual(parseDebugCommand("list broken retry behavior"), {
+      type: "issue-start",
+      issue: "list broken retry behavior",
+    });
+    assert.deepEqual(parseDebugCommand("status login is flaky"), {
+      type: "issue-start",
+      issue: "status login is flaky",
+    });
+    assert.deepEqual(parseDebugCommand("continue flaky checkout flow"), {
+      type: "issue-start",
+      issue: "continue flaky checkout flow",
+    });
+  });
 });
 
 describe("handleDebug lifecycle", () => {
@@ -196,6 +247,125 @@ describe("handleDebug lifecycle", () => {
       await handleDebug(`status ${slug}`, statusCtx as any);
       assert.equal(statusCtx.notifications[0].level, "info");
       assert.match(statusCtx.notifications[0].message, /mode=debug/);
+    } finally {
+      process.chdir(saved);
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("--diagnose <issue text> creates diagnose session with mode=diagnose and find_root_cause_only dispatch", async () => {
+    const base = makeBase();
+    const ctx = createMockCtx();
+    const saved = process.cwd();
+    process.chdir(base);
+
+    try {
+      await handleDebug("--diagnose login fails on safari", ctx as any);
+      assert.equal(ctx.notifications.length, 1);
+      const note = ctx.notifications[0];
+      assert.equal(note.level, "info");
+      assert.match(note.message, /Diagnose session started: login-fails-on-safari/);
+      assert.match(note.message, /mode=diagnose/);
+      assert.match(note.message, /dispatchMode=find_root_cause_only/);
+      assert.match(note.message, /phase=queued/);
+      assert.match(note.message, /status=active/);
+
+      const statusCtx = createMockCtx();
+      await handleDebug("status login-fails-on-safari", statusCtx as any);
+      assert.match(statusCtx.notifications[0].message, /mode=diagnose/);
+      assert.match(statusCtx.notifications[0].message, /status=active/);
+    } finally {
+      process.chdir(saved);
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("--diagnose <slug> targets existing session for targeted diagnose", async () => {
+    const base = makeBase();
+    const saved = process.cwd();
+    process.chdir(base);
+
+    try {
+      createDebugSession(base, { issue: "CI flake on main", createdAt: 1 });
+
+      const ctx = createMockCtx();
+      await handleDebug("--diagnose ci-flake-on-main", ctx as any);
+      assert.equal(ctx.notifications.length, 1);
+      assert.equal(ctx.notifications[0].level, "info");
+      assert.match(ctx.notifications[0].message, /Diagnose session: ci-flake-on-main/);
+      assert.match(ctx.notifications[0].message, /status=active/);
+      assert.match(ctx.notifications[0].message, /malformedArtifactsInStore=0/);
+    } finally {
+      process.chdir(saved);
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("--diagnose with unknown slug emits actionable warning", async () => {
+    const base = makeBase();
+    const saved = process.cwd();
+    process.chdir(base);
+
+    try {
+      const ctx = createMockCtx();
+      await handleDebug("--diagnose no-such-session", ctx as any);
+      assert.equal(ctx.notifications[0].level, "warning");
+      assert.match(ctx.notifications[0].message, /not found/);
+      assert.match(ctx.notifications[0].message, /\/gsd debug list/);
+    } finally {
+      process.chdir(saved);
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("diagnose-issue tolerates malformed artifact in store and still creates session", async () => {
+    const base = makeBase();
+    const saved = process.cwd();
+    process.chdir(base);
+
+    try {
+      createDebugSession(base, { issue: "Healthy issue", createdAt: 1 });
+      writeFileSync(join(base, ".gsd", "debug", "sessions", "broken.json"), "{ nope", "utf-8");
+
+      const ctx = createMockCtx();
+      await handleDebug("--diagnose billing webhook is dropping events", ctx as any);
+      assert.equal(ctx.notifications[0].level, "info");
+      assert.match(ctx.notifications[0].message, /Diagnose session started:/);
+      assert.match(ctx.notifications[0].message, /mode=diagnose/);
+    } finally {
+      process.chdir(saved);
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("continue blocks on resolved session with actionable warning", async () => {
+    const base = makeBase();
+    const saved = process.cwd();
+    process.chdir(base);
+
+    try {
+      createDebugSession(base, { issue: "Done issue", createdAt: 1, status: "resolved", phase: "complete" });
+
+      const ctx = createMockCtx();
+      await handleDebug("continue done-issue", ctx as any);
+      assert.equal(ctx.notifications[0].level, "warning");
+      assert.match(ctx.notifications[0].message, /resolved/);
+    } finally {
+      process.chdir(saved);
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("unknown flag returns error without silently routing to wrong path", async () => {
+    const base = makeBase();
+    const saved = process.cwd();
+    process.chdir(base);
+
+    try {
+      const ctx = createMockCtx();
+      await handleDebug("--unknown-flag some text", ctx as any);
+      assert.equal(ctx.notifications[0].level, "warning");
+      assert.match(ctx.notifications[0].message, /Unknown debug flag/);
     } finally {
       process.chdir(saved);
       rmSync(base, { recursive: true, force: true });
