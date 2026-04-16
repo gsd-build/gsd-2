@@ -790,11 +790,11 @@ async function runRemoteQuestionsStep(
   pc: PicoModule,
   authStorage: AuthStorage,
 ): Promise<string | null> {
-  // Check existing config — use getCredentialsForProvider to skip empty-key entries
-  const hasValidKey = (provider: string) =>
-    authStorage
-      .getCredentialsForProvider(provider)
-      .some((c: ApiKeyCredential) => c.type === 'api_key' && typeof c.key === 'string' && c.key.length > 0)
+  // Check existing config — use authStorage.get() and validate the key
+  const hasValidKey = (provider: string) => {
+    const c = authStorage.get(provider) as ApiKeyCredential | undefined
+    return c?.type === 'api_key' && typeof c.key === 'string' && c.key.length > 0
+  }
   const hasDiscord = hasValidKey('discord_bot')
   const hasSlack = hasValidKey('slack_bot')
   const hasTelegram = hasValidKey('telegram_bot')
