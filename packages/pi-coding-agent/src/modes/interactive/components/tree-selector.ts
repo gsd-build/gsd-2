@@ -9,7 +9,7 @@ import {
 	Text,
 	TruncatedText,
 	truncateToWidth,
-} from "@gsd/pi-tui";
+} from "@mariozechner/pi-tui";
 import type { SessionTreeNode } from "../../../core/session-manager.js";
 import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";

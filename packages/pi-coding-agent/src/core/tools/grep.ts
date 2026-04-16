@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline";
-import type { AgentTool } from "@gsd/pi-agent-core";
-import { Text } from "@gsd/pi-tui";
+import type { AgentTool } from "@mariozechner/pi-agent-core";
+import { Text } from "@mariozechner/pi-tui";
 import { type Static, Type } from "@sinclair/typebox";
 import { spawn } from "child_process";
 import { readFileSync, statSync } from "fs";

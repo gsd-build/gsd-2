@@ -1,5 +1,5 @@
-import type { AssistantMessage } from "@gsd/pi-ai";
-import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@gsd/pi-tui";
+import type { AssistantMessage } from "@mariozechner/pi-ai";
+import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@mariozechner/pi-tui";
 import { getMarkdownTheme, theme } from "../theme/theme.js";
 
 /**

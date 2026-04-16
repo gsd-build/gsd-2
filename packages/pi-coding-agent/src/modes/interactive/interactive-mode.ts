@@ -7,8 +7,8 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentMessage } from "@gsd/pi-agent-core";
-import type { AssistantMessage, ImageContent, Message, Model, OAuthProviderId } from "@gsd/pi-ai";
+import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AssistantMessage, ImageContent, Message, Model, OAuthProviderId } from "@mariozechner/pi-ai";
 import type {
 	AutocompleteItem,
 	EditorComponent,
@@ -19,7 +19,7 @@ import type {
 	OverlayHandle,
 	OverlayOptions,
 	SlashCommand,
-} from "@gsd/pi-tui";
+} from "@mariozechner/pi-tui";
 import {
 	CombinedAutocompleteProvider,
 	type Component,
@@ -35,7 +35,7 @@ import {
 	TruncatedText,
 	TUI,
 	visibleWidth,
-} from "@gsd/pi-tui";
+} from "@mariozechner/pi-tui";
 import { spawn, spawnSync } from "child_process";
 import {
 	APP_NAME,

@@ -21,6 +21,9 @@
   },
   "dependencies": {
     "@gsd/agent-core": "*",
+    "@mariozechner/pi-ai": "file:../pi-ai",
+    "@mariozechner/pi-agent-core": "file:../pi-agent-core",
+    "@mariozechner/pi-tui": "file:../pi-tui",
     "@mariozechner/jiti": "^2.6.2",
     "@silvia-odwyer/photon-node": "^0.3.4",
     "chalk": "^5.5.0",
