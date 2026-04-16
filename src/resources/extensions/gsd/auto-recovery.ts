@@ -462,7 +462,22 @@ export function writeBlockerPlaceholder(
     const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
     const ts = new Date().toISOString();
     if (unitType === "execute-task" && mid && sid && tid) {
-      try { updateTaskStatus(mid, sid, tid, "complete", ts); } catch (e) { logWarning("recovery", `updateTaskStatus failed during context exhaustion: ${e instanceof Error ? e.message : String(e)}`); }
+      try {
+        updateTaskStatus(mid, sid, tid, "complete", ts);
+        const planPath = resolveSliceFile(base, mid, sid, "PLAN");
+        if (planPath && existsSync(planPath)) {
+          const planContent = readFileSync(planPath, "utf-8");
+          const updatedPlan = planContent.replace(
+            new RegExp(`^(\\s*-\\s+)\\[ \\]\\s+\\*\\*${tid}:`, "m"),
+            `$1[x] **${tid}:`,
+          );
+          if (updatedPlan !== planContent) {
+            atomicWriteSync(planPath, updatedPlan);
+          }
+        }
+      } catch (e) {
+        logWarning("recovery", `updateTaskStatus failed during context exhaustion: ${e instanceof Error ? e.message : String(e)}`);
+      }
       // Append event so worktree reconciliation can replay this recovery completion
       try { appendEvent(base, { cmd: "complete-task", params: { milestoneId: mid, sliceId: sid, taskId: tid }, ts, actor: "system", trigger_reason: "blocker-placeholder-recovery" }); } catch (e) { logWarning("recovery", `appendEvent failed for task recovery: ${e instanceof Error ? e.message : String(e)}`); }
     }
