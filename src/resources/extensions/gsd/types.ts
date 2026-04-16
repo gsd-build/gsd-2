@@ -2,11 +2,9 @@
 // Types consumed by state derivation, file parsing, and status display.
 // Pure interfaces — no logic, no runtime dependencies.
 
-import type { RiskLevel } from "../../../shared/workspace-types.js";
-
 // ─── Enums & Literal Unions ────────────────────────────────────────────────
 
-export type { RiskLevel };
+export type RiskLevel = "low" | "medium" | "high";
 export type Phase =
   | "pre-planning"
   | "needs-discussion"

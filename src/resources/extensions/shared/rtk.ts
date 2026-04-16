@@ -10,7 +10,7 @@ import {
   getRtkBinaryName,
   isRtkEnabled,
   resolveSystemRtkPath,
-} from "../../../rtk-shared.js";
+} from "./rtk-shared.js";
 
 const GSD_RTK_REWRITE_TIMEOUT_MS_ENV = "GSD_RTK_REWRITE_TIMEOUT_MS";
 const RTK_REWRITE_TIMEOUT_MS = 5_000;
