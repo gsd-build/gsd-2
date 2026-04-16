@@ -25,7 +25,7 @@ Preferences use YAML frontmatter in a markdown file:
 version: 1
 models:
   research: claude-sonnet-4-6
-  planning: claude-opus-4-6
+  planning: claude-opus-4-7
   execution: claude-sonnet-4-6
   completion: claude-sonnet-4-6
 skill_discovery: suggest
@@ -173,7 +173,7 @@ Per-phase model selection. Each key accepts a model string or an object with fal
 models:
   research: claude-sonnet-4-6
   planning:
-    model: claude-opus-4-6
+    model: claude-opus-4-7
     fallbacks:
       - openrouter/z-ai/glm-5
   execution: claude-sonnet-4-6
@@ -225,7 +225,7 @@ For full documentation including provider configuration, model overrides, OpenAI
 ```yaml
 models:
   planning:
-    model: claude-opus-4-6
+    model: claude-opus-4-7
     fallbacks:
       - openrouter/z-ai/glm-5
       - openrouter/moonshotai/kimi-k2.5
@@ -563,7 +563,7 @@ post_unit_hooks:
   - name: code-review
     after: [execute-task]
     prompt: "Review the code changes for quality and security issues."
-    model: claude-opus-4-6          # optional: model override
+    model: claude-opus-4-7          # optional: model override
     max_cycles: 1                   # max fires per trigger (1-10, default: 1)
     artifact: REVIEW.md             # optional: skip if this file exists
     retry_on: NEEDS-REWORK.md       # optional: re-run trigger unit if this file appears
@@ -609,7 +609,7 @@ pre_dispatch_hooks:
     action: replace
     prompt: "Execute the task using TDD methodology."
     unit_type: execute-task-tdd     # optional: override unit type label
-    model: claude-opus-4-6          # optional: model override
+    model: claude-opus-4-7          # optional: model override
 ```
 
 All pre-dispatch hooks support `enabled: true/false` to toggle without removing.
@@ -691,7 +691,7 @@ dynamic_routing:
   tier_models:
     light: claude-haiku-4-5
     standard: claude-sonnet-4-6
-    heavy: claude-opus-4-6
+    heavy: claude-opus-4-7
   escalate_on_failure: true
   budget_pressure: true
   cross_provider: true
@@ -774,7 +774,7 @@ version: 1
 models:
   research: openrouter/deepseek/deepseek-r1
   planning:
-    model: claude-opus-4-6
+    model: claude-opus-4-7
     fallbacks:
       - openrouter/z-ai/glm-5
   execution: claude-sonnet-4-6

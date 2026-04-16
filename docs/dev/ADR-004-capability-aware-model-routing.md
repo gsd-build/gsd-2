@@ -197,6 +197,7 @@ Built-in capability profiles ship as a data table alongside `MODEL_CAPABILITY_TI
 
 ```ts
 const MODEL_CAPABILITY_PROFILES: Record<string, ModelCapabilities> = {
+  "claude-opus-4-7":     { coding: 95, debugging: 90, research: 85, reasoning: 95, speed: 30, longContext: 80, instruction: 90 },
   "claude-opus-4-6":     { coding: 95, debugging: 90, research: 85, reasoning: 95, speed: 30, longContext: 80, instruction: 90 },
   "claude-sonnet-4-6":   { coding: 85, debugging: 80, research: 75, reasoning: 80, speed: 60, longContext: 75, instruction: 85 },
   "claude-haiku-4-5":    { coding: 60, debugging: 50, research: 45, reasoning: 50, speed: 95, longContext: 50, instruction: 75 },

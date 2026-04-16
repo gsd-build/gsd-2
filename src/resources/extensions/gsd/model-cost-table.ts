@@ -22,7 +22,8 @@ export interface ModelCostEntry {
  */
 export const BUNDLED_COST_TABLE: ModelCostEntry[] = [
   // Anthropic
-  { id: "claude-opus-4-6", inputPer1k: 0.015, outputPer1k: 0.075, updatedAt: "2025-03-15" },
+  { id: "claude-opus-4-7", inputPer1k: 0.005, outputPer1k: 0.025, updatedAt: "2026-04-16" },
+  { id: "claude-opus-4-6", inputPer1k: 0.005, outputPer1k: 0.025, updatedAt: "2026-04-16" },
   { id: "claude-sonnet-4-6", inputPer1k: 0.003, outputPer1k: 0.015, updatedAt: "2025-03-15" },
   { id: "claude-haiku-4-5", inputPer1k: 0.0008, outputPer1k: 0.004, updatedAt: "2025-03-15" },
   { id: "claude-sonnet-4-5-20250514", inputPer1k: 0.003, outputPer1k: 0.015, updatedAt: "2025-03-15" },

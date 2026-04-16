@@ -42,7 +42,7 @@ dynamic_routing:
   tier_models:                    # explicit model per tier (optional)
     light: claude-haiku-4-5
     standard: claude-sonnet-4-6
-    heavy: claude-opus-4-6
+    heavy: claude-opus-4-7
   escalate_on_failure: true       # bump tier on task failure (default: true)
   budget_pressure: true           # auto-downgrade when approaching budget ceiling (default: true)
   cross_provider: true            # consider models from other providers (default: true)
@@ -56,7 +56,7 @@ Override which model is used for each tier. When omitted, the router uses a buil
 
 - **Light:** `claude-haiku-4-5`, `gpt-4o-mini`, `gemini-2.0-flash`
 - **Standard:** `claude-sonnet-4-6`, `gpt-4o`, `gemini-2.5-pro`
-- **Heavy:** `claude-opus-4-6`, `gpt-4.5-preview`, `gemini-2.5-pro`
+- **Heavy:** `claude-opus-4-7`, `gpt-4.5-preview`, `gemini-2.5-pro`
 
 ### `escalate_on_failure`
 
@@ -101,7 +101,7 @@ Each model has a built-in **capability profile** — a 7-dimension score (0–10
 | `longContext` | Handling large codebases and long documents |
 | `instruction` | Following structured instructions precisely |
 
-**Built-in profiles** exist for 9 models: `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5`, `gpt-4o`, `gpt-4o-mini`, `gemini-2.5-pro`, `gemini-2.0-flash`, `deepseek-chat`, `o3`.
+**Built-in profiles** exist for 9 models: `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5`, `gpt-4o`, `gpt-4o-mini`, `gemini-2.5-pro`, `gemini-2.0-flash`, `deepseek-chat`, `o3`.
 
 Models without a built-in profile receive **uniform scores of 50** across all dimensions. This is a cold-start policy — unknown models compete but don't have an advantage. From the user's perspective, routing behaves the same as before capability scoring was introduced for those models.
 
@@ -277,7 +277,7 @@ The router includes a built-in cost table for common models, used for cross-prov
 |-------|-------|--------|
 | claude-haiku-4-5 | $0.80 | $4.00 |
 | claude-sonnet-4-6 | $3.00 | $15.00 |
-| claude-opus-4-6 | $15.00 | $75.00 |
+| claude-opus-4-7 | $15.00 | $75.00 |
 | gpt-4o-mini | $0.15 | $0.60 |
 | gpt-4o | $2.50 | $10.00 |
 | gemini-2.0-flash | $0.10 | $0.40 |

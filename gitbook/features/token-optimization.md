@@ -81,7 +81,7 @@ token_profile: budget
 phases:
   skip_research: false        # override: keep research
 models:
-  planning: claude-opus-4-6   # override: use Opus for planning
+  planning: claude-opus-4-7   # override: use Opus for planning
 ```
 
 ## Adaptive Learning

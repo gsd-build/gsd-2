@@ -89,6 +89,7 @@ export const MODEL_CAPABILITY_TIER: Record<string, ComplexityTier> = {
   "deepseek-chat": "standard",
 
   // Heavy-tier models (most capable)
+  "claude-opus-4-7": "heavy",
   "claude-opus-4-6": "heavy",
   "claude-3-opus-latest": "heavy",
   "gpt-4-turbo": "heavy",
@@ -114,7 +115,8 @@ const MODEL_COST_PER_1K_INPUT: Record<string, number> = {
   "claude-3-5-haiku-latest": 0.0008,
   "claude-sonnet-4-6": 0.003,
   "claude-sonnet-4-5-20250514": 0.003,
-  "claude-opus-4-6": 0.015,
+  "claude-opus-4-7": 0.005,
+  "claude-opus-4-6": 0.005,
   "gpt-4o-mini": 0.00015,
   "gpt-4o": 0.0025,
   "gpt-4.1": 0.002,
@@ -145,6 +147,7 @@ const MODEL_COST_PER_1K_INPUT: Record<string, number> = {
 
 export const MODEL_CAPABILITY_PROFILES: Record<string, ModelCapabilities> = {
   // ── Anthropic ──────────────────────────────────────────────────────────────
+  "claude-opus-4-7":              { coding: 95, debugging: 90, research: 85, reasoning: 95, speed: 30, longContext: 80, instruction: 90 },
   "claude-opus-4-6":              { coding: 95, debugging: 90, research: 85, reasoning: 95, speed: 30, longContext: 80, instruction: 90 },
   "claude-sonnet-4-6":            { coding: 85, debugging: 80, research: 75, reasoning: 80, speed: 60, longContext: 75, instruction: 85 },
   "claude-sonnet-4-5-20250514":   { coding: 85, debugging: 80, research: 75, reasoning: 80, speed: 60, longContext: 75, instruction: 85 },

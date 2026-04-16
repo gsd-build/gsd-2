@@ -532,7 +532,7 @@ version: 1
 models:
   research: claude-sonnet-4-6
   planning:
-    model: claude-opus-4-6
+    model: claude-opus-4-7
     fallbacks:
       - openrouter/z-ai/glm-5
       - openrouter/minimax/minimax-m2.5
@@ -791,7 +791,7 @@ In your preferences (`/gsd prefs`), assign different models to different phases:
 models:
   research: openrouter/deepseek/deepseek-r1
   planning:
-    model: claude-opus-4-6
+    model: claude-opus-4-7
     fallbacks:
       - openrouter/z-ai/glm-5
   execution: claude-sonnet-4-6

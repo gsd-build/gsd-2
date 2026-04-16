@@ -25,7 +25,7 @@ GSD 偏好设置保存在 `~/.gsd/PREFERENCES.md`（全局）或 `.gsd/PREFERENC
 version: 1
 models:
   research: claude-sonnet-4-6
-  planning: claude-opus-4-6
+  planning: claude-opus-4-7
   execution: claude-sonnet-4-6
   completion: claude-sonnet-4-6
 skill_discovery: suggest
@@ -175,7 +175,7 @@ mcp_call(server="my-server", tool="<tool_name>", args={...})
 models:
   research: claude-sonnet-4-6
   planning:
-    model: claude-opus-4-6
+    model: claude-opus-4-7
     fallbacks:
       - openrouter/z-ai/glm-5
   execution: claude-sonnet-4-6
@@ -228,7 +228,7 @@ GSD 读取 `models.json` 的顺序如下：
 ```yaml
 models:
   planning:
-    model: claude-opus-4-6
+    model: claude-opus-4-7
     fallbacks:
       - openrouter/z-ai/glm-5
       - openrouter/moonshotai/kimi-k2.5
@@ -573,7 +573,7 @@ post_unit_hooks:
   - name: code-review
     after: [execute-task]
     prompt: "Review the code changes for quality and security issues."
-    model: claude-opus-4-6          # 可选：覆盖 model
+    model: claude-opus-4-7          # 可选：覆盖 model
     max_cycles: 1                   # 每次触发最多执行几轮（1-10，默认 1）
     artifact: REVIEW.md             # 可选：若该文件已存在则跳过
     retry_on: NEEDS-REWORK.md       # 可选：若生成该文件，则回退并重跑触发单元
@@ -619,7 +619,7 @@ pre_dispatch_hooks:
     action: replace
     prompt: "Execute the task using TDD methodology."
     unit_type: execute-task-tdd     # 可选：覆盖 unit type 标签
-    model: claude-opus-4-6          # 可选：覆盖 model
+    model: claude-opus-4-7          # 可选：覆盖 model
 ```
 
 所有 pre-dispatch hooks 都支持 `enabled: true/false`，用于开关而不删除配置。
@@ -701,7 +701,7 @@ dynamic_routing:
   tier_models:
     light: claude-haiku-4-5
     standard: claude-sonnet-4-6
-    heavy: claude-opus-4-6
+    heavy: claude-opus-4-7
   escalate_on_failure: true
   budget_pressure: true
   cross_provider: true
@@ -784,7 +784,7 @@ version: 1
 models:
   research: openrouter/deepseek/deepseek-r1
   planning:
-    model: claude-opus-4-6
+    model: claude-opus-4-7
     fallbacks:
       - openrouter/z-ai/glm-5
   execution: claude-sonnet-4-6

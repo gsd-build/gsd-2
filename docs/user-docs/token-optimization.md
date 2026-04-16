@@ -220,7 +220,7 @@ version: 1
 token_profile: balanced
 models:
   planning:
-    model: claude-opus-4-6
+    model: claude-opus-4-7
     fallbacks:
       - openrouter/z-ai/glm-5
   execution: claude-sonnet-4-6
@@ -234,8 +234,8 @@ models:
 version: 1
 token_profile: quality
 models:
-  planning: claude-opus-4-6
-  execution: claude-opus-4-6
+  planning: claude-opus-4-7
+  execution: claude-opus-4-7
 ---
 ```
 
@@ -250,7 +250,7 @@ token_profile: budget
 phases:
   skip_research: false     # override: keep milestone research
 models:
-  planning: claude-opus-4-6  # override: use Opus for planning despite budget profile
+  planning: claude-opus-4-7  # override: use Opus for planning despite budget profile
 ---
 ```
 

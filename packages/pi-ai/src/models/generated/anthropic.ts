@@ -293,6 +293,23 @@ export const ANTHROPIC_MODELS = {
 			contextWindow: 1000000,
 			maxTokens: 128000,
 		} satisfies Model<"anthropic-messages">,
+		"claude-opus-4-7": {
+			id: "claude-opus-4-7",
+			name: "Claude Opus 4.7",
+			api: "anthropic-messages",
+			provider: "anthropic",
+			baseUrl: "https://api.anthropic.com",
+			reasoning: true,
+			input: ["text", "image"],
+			cost: {
+				input: 5,
+				output: 25,
+				cacheRead: 0.5,
+				cacheWrite: 6.25,
+			},
+			contextWindow: 1000000,
+			maxTokens: 128000,
+		} satisfies Model<"anthropic-messages">,
 		"claude-sonnet-4-0": {
 			id: "claude-sonnet-4-0",
 			name: "Claude Sonnet 4 (latest)",

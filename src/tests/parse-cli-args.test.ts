@@ -72,6 +72,7 @@ describe('parseCliArgs — short flags and basic options', () => {
 
   test('--model captures model id', () => {
     assert.equal(parse('--model', 'claude-opus-4-6').model, 'claude-opus-4-6')
+    assert.equal(parse('--model', 'claude-opus-4-7').model, 'claude-opus-4-7')
   })
 })
 

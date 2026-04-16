@@ -23,7 +23,7 @@ Preferences use YAML frontmatter in a markdown file:
 version: 1
 models:
   research: claude-sonnet-4-6
-  planning: claude-opus-4-6
+  planning: claude-opus-4-7
   execution: claude-sonnet-4-6
   completion: claude-sonnet-4-6
 skill_discovery: suggest
@@ -107,7 +107,7 @@ Per-phase model selection:
 models:
   research: claude-sonnet-4-6
   planning:
-    model: claude-opus-4-6
+    model: claude-opus-4-7
     fallbacks:
       - openrouter/z-ai/glm-5
   execution: claude-sonnet-4-6
@@ -189,7 +189,7 @@ post_unit_hooks:
   - name: code-review
     after: [execute-task]
     prompt: "Review the code changes for quality and security."
-    model: claude-opus-4-6
+    model: claude-opus-4-7
     max_cycles: 1
     artifact: REVIEW.md
 ```
@@ -251,7 +251,7 @@ version: 1
 models:
   research: openrouter/deepseek/deepseek-r1
   planning:
-    model: claude-opus-4-6
+    model: claude-opus-4-7
     fallbacks:
       - openrouter/z-ai/glm-5
   execution: claude-sonnet-4-6

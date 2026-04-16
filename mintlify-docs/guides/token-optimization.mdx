@@ -141,7 +141,7 @@ GSD tracks success/failure per tier and adjusts classifications over time. User 
     token_profile: balanced
     models:
       planning:
-        model: claude-opus-4-6
+        model: claude-opus-4-7
         fallbacks:
           - openrouter/z-ai/glm-5
       execution: claude-sonnet-4-6
@@ -154,8 +154,8 @@ GSD tracks success/failure per tier and adjusts classifications over time. User 
     version: 1
     token_profile: quality
     models:
-      planning: claude-opus-4-6
-      execution: claude-opus-4-6
+      planning: claude-opus-4-7
+      execution: claude-opus-4-7
     ---
     ```
   </Tab>
@@ -170,6 +170,6 @@ token_profile: budget
 phases:
   skip_research: false       # keep research despite budget profile
 models:
-  planning: claude-opus-4-6  # use Opus for planning despite budget
+  planning: claude-opus-4-7  # use Opus for planning despite budget
 ---
 ```

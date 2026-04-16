@@ -13,6 +13,15 @@ const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
 export const CLAUDE_CODE_MODELS = [
 	{
+		id: "claude-opus-4-7",
+		name: "Claude Opus 4.7 (via Claude Code)",
+		reasoning: true,
+		input: ["text", "image"] as ("text" | "image")[],
+		cost: ZERO_COST,
+		contextWindow: 1_000_000,
+		maxTokens: 128_000,
+	},
+	{
 		id: "claude-opus-4-6",
 		name: "Claude Opus 4.6 (via Claude Code)",
 		reasoning: true,
