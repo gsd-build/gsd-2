@@ -72,3 +72,6 @@ export {
 	type TurnStartEvent,
 } from "./extensions/index.js";
 export { createSyntheticSourceInfo } from "./source-info.js";
+// GSD additions — re-export @gsd/agent-core symbols for consumers
+export { FallbackResolver, type FallbackResult } from "@gsd/agent-core";
+export { ContextualTips, type TipContext } from "@gsd/agent-core";

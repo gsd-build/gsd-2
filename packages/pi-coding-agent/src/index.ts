@@ -355,3 +355,66 @@ export { copyToClipboard } from "./utils/clipboard.js";
 export { parseFrontmatter, stripFrontmatter } from "./utils/frontmatter.js";
 // Shell utilities
 export { getShellConfig } from "./utils/shell.js";
+// GSD additions — symbols needed by @gsd/agent-core and @gsd/agent-modes
+// Config utilities needed by @gsd/agent-core
+export { getDocsPath, getExamplesPath, getReadmePath, getExportTemplateDir } from "./config.js";
+// Config utilities needed by @gsd/agent-modes
+export { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR, getAuthPath, getDebugLogPath, getUpdateInstruction, getShareViewerUrl, getCustomThemesDir, getModelsPath } from "./config.js";
+// Bash executor (now in local source in 0.67.2)
+export { type BashExecutorOptions, type BashResult, executeBash, executeBashWithOperations } from "./core/bash-executor.js";
+// Shell utilities needed by @gsd/agent-modes
+export { getShellEnv, killProcessTree, sanitizeBinaryOutput } from "./utils/shell.js";
+// Changelog utilities needed by @gsd/agent-modes
+export { getChangelogPath, getNewEntries, parseChangelog } from "./utils/changelog.js";
+// Git utilities needed by @gsd/agent-core
+export { parseGitUrl } from "./utils/git.js";
+// App keybindings type (needed by @gsd/agent-modes)
+export type { AppAction } from "./core/keybindings-types.js";
+// HTML export utility
+export { exportFromFile } from "./core/export-html/index.js";
+// Footer data provider class needed by @gsd/agent-modes
+export { FooterDataProvider } from "./core/footer-data-provider.js";
+// Additional symbols needed by @gsd/agent-modes
+export { createCompactionSummaryMessage } from "./core/messages.js";
+export type { BranchSummaryMessage, CompactionSummaryMessage, CustomMessage } from "./core/messages.js";
+export { createBranchSummaryMessage, createCustomMessage } from "./core/messages.js";
+export { DEFAULT_THINKING_LEVEL } from "./core/defaults.js";
+export type { BashExecutionMessage } from "./core/messages.js";
+export { expandPromptTemplate } from "./core/prompt-templates.js";
+export type { ResourceExtensionPaths } from "./core/resource-loader.js";
+export { createAllTools, allTools } from "./core/tools/index.js";
+export type { Tool, ToolName } from "./core/tools/index.js";
+export { findInitialModel } from "./core/model-resolver.js";
+export { resolveModelScope, resolveCliModel } from "./core/model-resolver.js";
+export type { ScopedModel, ResolveCliModelResult } from "./core/model-resolver.js";
+export { printTimings, time } from "./core/timings.js";
+export { runMigrations, showDeprecationWarnings } from "./migrations.js";
+export { BUILTIN_SLASH_COMMANDS } from "./core/slash-commands.js";
+export { computeEditDiff } from "./core/tools/edit-diff.js";
+export type { EditDiffError, EditDiffResult } from "./core/tools/edit-diff.js";
+export { resolveReadPath } from "./core/tools/path-utils.js";
+export { detectSupportedImageMimeTypeFromFile } from "./utils/mime.js";
+export { formatDimensionNote, resizeImage, type ImageResizeOptions, type ResizedImage } from "./utils/image-resize.js";
+export { convertToPng } from "./utils/image-convert.js";
+export { extensionForImageMimeType, readClipboardImage } from "./utils/clipboard-image.js";
+export { ensureTool } from "./utils/tools-manager.js";
+// GSD-only symbols still in @gsd/agent-core (GSD business logic, not upstream)
+export { ContextualTips } from "@gsd/agent-core";
+export { BlobStore, isBlobRef, parseBlobRef, externalizeImageData, resolveImageData } from "@gsd/agent-core";
+export { ArtifactManager } from "@gsd/agent-core";
+export { FallbackResolver, type FallbackResult } from "@gsd/agent-core";
+// Theme utilities needed by @gsd/agent-modes
+export {
+	getAvailableThemes,
+	getAvailableThemesWithPaths,
+	getEditorTheme,
+	getResolvedThemeColors,
+	getThemeByName,
+	getThemeExportColors,
+	onThemeChange,
+	setRegisteredThemes,
+	setTheme,
+	setThemeInstance,
+	stopThemeWatcher,
+	type ThemeInfo,
+} from "./core/theme/theme.js";

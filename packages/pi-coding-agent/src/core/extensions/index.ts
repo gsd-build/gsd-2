@@ -2,13 +2,20 @@
  * Extension system for lifecycle events and custom tools.
  */
 
-export type { SlashCommandInfo, SlashCommandSource } from "../slash-commands.js";
-export type { SourceInfo } from "../source-info.js";
+export type { ExtensionManifest } from "./extension-manifest.js";
+export { readManifest, readManifestFromEntryPath } from "./extension-manifest.js";
+export type { SortResult, SortWarning } from "./extension-sort.js";
+export { sortExtensionPaths } from "./extension-sort.js";
+export type { SlashCommandInfo, SlashCommandLocation, SlashCommandSource } from "../slash-commands.js";
 export {
 	createExtensionRuntime,
 	discoverAndLoadExtensions,
+	getUntrustedExtensionPaths,
+	importExtensionModule,
+	isProjectTrusted,
 	loadExtensionFromFactory,
 	loadExtensions,
+	trustProject,
 } from "./loader.js";
 export type {
 	ExtensionErrorListener,
@@ -25,9 +32,8 @@ export type {
 	// Re-exports
 	AgentToolResult,
 	AgentToolUpdateCallback,
-	AppendEntryHandler,
 	// App keybindings (for custom editors)
-	AppKeybinding,
+	AppAction,
 	// Events - Tool (ToolCallEvent types)
 	BashToolCallEvent,
 	BashToolResultEvent,
@@ -37,6 +43,9 @@ export type {
 	BeforeProviderRequestEventResult,
 	// Context
 	CompactOptions,
+	// Events - Adjust Tool Set (ADR-005)
+	AdjustToolSetEvent,
+	AdjustToolSetResult,
 	// Events - Agent
 	ContextEvent,
 	// Event Results
@@ -70,10 +79,6 @@ export type {
 	ExtensionWidgetOptions,
 	FindToolCallEvent,
 	FindToolResultEvent,
-	GetActiveToolsHandler,
-	GetAllToolsHandler,
-	GetCommandsHandler,
-	GetThinkingLevelHandler,
 	GrepToolCallEvent,
 	GrepToolResultEvent,
 	// Events - Input
@@ -96,17 +101,19 @@ export type {
 	// Provider Registration
 	ProviderConfig,
 	ProviderModelConfig,
+	LifecycleHookContext,
+	LifecycleHookHandler,
+	LifecycleHookMap,
+	LifecycleHookPhase,
+	LifecycleHookScope,
 	ReadToolCallEvent,
 	ReadToolResultEvent,
 	// Commands
 	RegisteredCommand,
 	RegisteredTool,
-	ResolvedCommand,
 	// Events - Resources
 	ResourcesDiscoverEvent,
 	ResourcesDiscoverResult,
-	SendMessageHandler,
-	SendUserMessageHandler,
 	SessionBeforeCompactEvent,
 	SessionBeforeCompactResult,
 	SessionBeforeForkEvent,
@@ -116,20 +123,22 @@ export type {
 	SessionBeforeTreeEvent,
 	SessionBeforeTreeResult,
 	SessionCompactEvent,
+	SessionDirectoryEvent,
+	SessionDirectoryHandler,
+	SessionDirectoryResult,
 	SessionEvent,
+	SessionForkEvent,
 	SessionShutdownEvent,
 	// Events - Session
 	SessionStartEvent,
+	SessionSwitchEvent,
 	SessionTreeEvent,
-	SetActiveToolsHandler,
-	SetLabelHandler,
-	SetModelHandler,
-	SetThinkingLevelHandler,
 	TerminalInputHandler,
 	// Events - Tool
 	ToolCallEvent,
 	ToolCallEventResult,
 	// Tools
+	ToolCompatibility,
 	ToolDefinition,
 	// Events - Tool Execution
 	ToolExecutionEndEvent,
@@ -145,20 +154,17 @@ export type {
 	// Events - User Bash
 	UserBashEvent,
 	UserBashEventResult,
+	BashTransformEvent,
+	BashTransformEventResult,
 	WidgetPlacement,
 	WriteToolCallEvent,
 	WriteToolResultEvent,
 } from "./types.js";
 // Type guards
+export { isToolCallEventType, isToolResultEventType } from "./types.js";
 export {
-	defineTool,
-	isBashToolResult,
-	isEditToolResult,
-	isFindToolResult,
-	isGrepToolResult,
-	isLsToolResult,
-	isReadToolResult,
-	isToolCallEventType,
-	isWriteToolResult,
-} from "./types.js";
-export { wrapRegisteredTool, wrapRegisteredTools } from "./wrapper.js";
+	wrapRegisteredTool,
+	wrapRegisteredTools,
+	wrapToolsWithExtensions,
+	wrapToolWithExtensions,
+} from "./wrapper.js";
