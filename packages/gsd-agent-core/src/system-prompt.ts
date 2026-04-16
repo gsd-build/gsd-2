@@ -3,7 +3,8 @@
  */
 
 import { getDocsPath, getExamplesPath, getReadmePath } from "@gsd/pi-coding-agent";
-import { formatSkillsForPrompt, type Skill } from "@gsd/pi-coding-agent";
+import { formatSkillsForPrompt } from "@gsd/pi-coding-agent";
+import type { Skill } from "@gsd/agent-types";
 
 // toPosixPath removed from @gsd/pi-coding-agent 0.67.2 public API.
 // Phase 09: move to @gsd/agent-types.

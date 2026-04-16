@@ -20,11 +20,11 @@ import {
 	prepareCompaction,
 	shouldCompact,
 } from "./compaction/index.js";
-import type { ExtensionRunner } from "@gsd/pi-coding-agent";
-import type { ModelRegistry } from "@gsd/pi-coding-agent";
+import type { ExtensionRunner } from "@gsd/agent-types";
+import type { ModelRegistry } from "@gsd/agent-types";
 import { getLatestCompactionEntry } from "@gsd/pi-coding-agent";
-import type { CompactionEntry, SessionManager } from "@gsd/pi-coding-agent";
-import type { SettingsManager } from "@gsd/pi-coding-agent";
+import type { CompactionEntry, SessionManager } from "@gsd/agent-types";
+import type { SettingsManager } from "@gsd/agent-types";
 import type { AgentSessionEvent } from "./agent-session.js";
 
 // Local shims for types/functions absent from @gsd/pi-coding-agent 0.67.2 public API.

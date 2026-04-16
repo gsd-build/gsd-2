@@ -10,9 +10,9 @@
  */
 
 import type { Api, Model } from "@gsd/pi-ai";
-import type { AuthStorage } from "@gsd/pi-coding-agent";
-import type { ModelRegistry } from "@gsd/pi-coding-agent";
-import type { SettingsManager } from "@gsd/pi-coding-agent";
+import type { AuthStorage } from "@gsd/agent-types";
+import type { ModelRegistry } from "@gsd/agent-types";
+import type { SettingsManager } from "@gsd/agent-types";
 
 // Local shims for GSD fallback types removed from @gsd/pi-coding-agent 0.67.2.
 // Phase 09 moves these to @gsd/agent-types.

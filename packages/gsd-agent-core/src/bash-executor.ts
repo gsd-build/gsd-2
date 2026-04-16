@@ -39,7 +39,7 @@ function sanitizeCommand(cmd: string): string {
 	// Remove null bytes and ASCII control characters (except newline/tab which are valid in scripts)
 	return cmd.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
 }
-import type { BashOperations } from "@gsd/pi-coding-agent";
+import type { BashOperations } from "@gsd/agent-types";
 
 // ============================================================================
 // Types

@@ -9,7 +9,7 @@ import type { AgentMessage } from "@gsd/pi-agent-core";
 import type { Model } from "@gsd/pi-ai";
 import { completeSimple } from "@gsd/pi-ai";
 import { convertToLlm } from "@gsd/pi-coding-agent";
-import type { SessionEntry } from "@gsd/pi-coding-agent";
+import type { SessionEntry } from "@gsd/agent-types";
 
 // COMPACTION_RESERVE_TOKENS removed from @gsd/pi-coding-agent 0.67.2 public API.
 // Phase 09 moves to @gsd/agent-types.

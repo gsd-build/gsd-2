@@ -6,8 +6,8 @@
  */
 
 import type { ImageContent, TextContent } from "@gsd/pi-ai";
-import type { Theme } from "@gsd/pi-coding-agent";
-import type { ToolDefinition } from "@gsd/pi-coding-agent";
+import type { Theme } from "@gsd/agent-types";
+import type { ToolDefinition } from "@gsd/agent-types";
 import { ansiLinesToHtml } from "./ansi-to-html.js";
 
 export interface ToolHtmlRendererDeps {

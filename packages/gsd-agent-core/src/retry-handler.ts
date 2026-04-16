@@ -15,8 +15,8 @@ import type { Agent } from "@gsd/pi-agent-core";
 import type { AssistantMessage, Model } from "@gsd/pi-ai";
 import { isContextOverflow } from "@gsd/pi-ai";
 import type { FallbackResolver } from "./fallback-resolver.js";
-import type { ModelRegistry } from "@gsd/pi-coding-agent";
-import type { SettingsManager } from "@gsd/pi-coding-agent";
+import type { ModelRegistry } from "@gsd/agent-types";
+import type { SettingsManager } from "@gsd/agent-types";
 import type { AgentSessionEvent } from "./agent-session.js";
 
 // Local error classification type for retry decisions. Distinct from FallbackResolver's

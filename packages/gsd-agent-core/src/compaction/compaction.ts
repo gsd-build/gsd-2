@@ -13,7 +13,7 @@ import { completeSimple } from "@gsd/pi-ai";
 const COMPACTION_KEEP_RECENT_TOKENS = 20_000;
 const COMPACTION_RESERVE_TOKENS = 16_384;
 import { convertToLlm } from "@gsd/pi-coding-agent";
-import type { CompactionEntry, SessionEntry } from "@gsd/pi-coding-agent";
+import type { CompactionEntry, SessionEntry } from "@gsd/agent-types";
 import {
 	collectMessages,
 	computeFileLists,

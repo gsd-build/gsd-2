@@ -13,7 +13,7 @@ import {
 	createCompactionSummaryMessage,
 	createCustomMessage,
 } from "@gsd/pi-coding-agent";
-import type { SessionEntry } from "@gsd/pi-coding-agent";
+import type { SessionEntry } from "@gsd/agent-types";
 
 // ============================================================================
 // File Operation Tracking

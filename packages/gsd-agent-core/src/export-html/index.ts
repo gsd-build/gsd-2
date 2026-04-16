@@ -3,8 +3,8 @@ import { existsSync, readFileSync, writeFileSync } from "fs";
 import { basename, join } from "path";
 import { APP_NAME, getExportTemplateDir } from "@gsd/pi-coding-agent";
 import { getResolvedThemeColors, getThemeExportColors } from "@gsd/pi-coding-agent";
-import type { ToolInfo } from "@gsd/pi-coding-agent";
-import type { SessionEntry } from "@gsd/pi-coding-agent";
+import type { ToolInfo } from "@gsd/agent-types";
+import type { SessionEntry } from "@gsd/agent-types";
 import { SessionManager } from "@gsd/pi-coding-agent";
 
 /**
