@@ -27,7 +27,7 @@ function startMockServer(statusCode: number, body = "{}", onRequest?: (req: http
       const addr = server.address() as { port: number };
       resolve({
         url: `http://127.0.0.1:${addr.port}`,
-        close: () => new Promise((r) => server.close(r)),
+        close: () => new Promise<void>((r) => server.close(() => r())),
       });
     });
   });
