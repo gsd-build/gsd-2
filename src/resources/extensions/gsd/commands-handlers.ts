@@ -349,7 +349,7 @@ export async function handleKnowledge(args: string, ctx: ExtensionCommandContext
     : "global";
 
   await appendKnowledge(basePath, type, entryText, scope);
-  ctx.ui.notify(`Added ${type} to KNOWLEDGE.md: "${entryText}"`, "success");
+  ctx.ui.notify(`Added ${type} to KNOWLEDGE.md: "${entryText}"`, "info");
 }
 
 export async function handleRunHook(args: string, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<void> {

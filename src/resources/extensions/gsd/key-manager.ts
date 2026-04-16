@@ -323,7 +323,7 @@ export async function handleAddKey(
     process.env[provider.envVar] = key;
   }
 
-  ctx.ui.notify(`Key saved for ${provider.label}: ${maskKey(key)}`, "success");
+  ctx.ui.notify(`Key saved for ${provider.label}: ${maskKey(key)}`, "info");
   return true;
 }
 
@@ -383,7 +383,7 @@ export async function handleRemoveKey(
     delete process.env[provider.envVar];
   }
 
-  ctx.ui.notify(`Key removed for ${provider.label}.`, "success");
+  ctx.ui.notify(`Key removed for ${provider.label}.`, "info");
   return true;
 }
 
@@ -650,7 +650,7 @@ export async function handleRotateKey(
     }
 
     if (result.status === "valid") {
-      ctx.ui.notify(`Key validated successfully (${result.latencyMs}ms).`, "success");
+      ctx.ui.notify(`Key validated successfully (${result.latencyMs}ms).`, "info");
     } else {
       ctx.ui.notify(`Key test result: ${result.message}. Proceeding anyway.`, "warning");
     }
@@ -664,7 +664,7 @@ export async function handleRotateKey(
     process.env[provider.envVar] = newKey;
   }
 
-  ctx.ui.notify(`Key rotated for ${provider.label}: ${maskKey(newKey)}`, "success");
+  ctx.ui.notify(`Key rotated for ${provider.label}: ${maskKey(newKey)}`, "info");
   return true;
 }
 
