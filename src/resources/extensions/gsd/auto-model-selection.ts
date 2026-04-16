@@ -309,7 +309,7 @@ export async function selectAndApplyModel(
         }
       }
 
-      const ok = await pi.setModel(model, { persist: false });
+      const ok = await pi.setModel(model);
       if (ok) {
         appliedModel = model;
 
@@ -362,11 +362,11 @@ export async function selectAndApplyModel(
       m => m.provider === autoModeStartModel.provider && m.id === autoModeStartModel.id,
     );
     if (startModel) {
-      const ok = await pi.setModel(startModel, { persist: false });
+      const ok = await pi.setModel(startModel);
       if (!ok) {
         const byId = availableModels.find(m => m.id === autoModeStartModel.id);
         if (byId) {
-          const fallbackOk = await pi.setModel(byId, { persist: false });
+          const fallbackOk = await pi.setModel(byId);
           if (fallbackOk) appliedModel = byId;
         }
       } else {
@@ -490,28 +490,30 @@ export function isFlatRateProvider(provider: string, opts?: FlatRateContext): bo
  * Build a FlatRateContext for a given provider from live runtime state.
  * Safe to call when ctx or prefs are undefined — missing pieces are
  * treated as "no signal".
+ *
+ * pi 0.67.2 removed ModelRegistry.getProviderAuthMode. authMode is now
+ * inferred from the model's baseUrl: a local:// URL means externalCli.
+ * We look up any model for the given provider to read its baseUrl.
  */
 export function buildFlatRateContext(
   provider: string,
-  ctx?: { modelRegistry?: { getProviderAuthMode?: (p: string) => string } },
+  ctx?: { modelRegistry?: { getAll?: () => Array<{ provider: string; baseUrl?: string }> } },
   prefs?: { flat_rate_providers?: readonly string[] },
 ): FlatRateContext {
   let authMode: FlatRateContext["authMode"];
-  const registry = ctx?.modelRegistry;
-  if (registry && typeof registry.getProviderAuthMode === "function") {
-    try {
-      const mode = registry.getProviderAuthMode(provider);
-      if (mode === "apiKey" || mode === "oauth" || mode === "externalCli" || mode === "none") {
-        authMode = mode;
-      }
-    } catch (err) {
-      // Registry lookup failure must never break flat-rate detection —
-      // fall through with authMode undefined and surface the cause.
-      logWarning(
-        "dispatch",
-        `flat-rate auth-mode lookup failed for ${provider}: ${err instanceof Error ? err.message : String(err)}`,
-      );
+  try {
+    const models = ctx?.modelRegistry?.getAll?.() ?? [];
+    const providerModel = models.find(m => m.provider.toLowerCase() === provider.toLowerCase());
+    if (providerModel?.baseUrl?.startsWith("local://")) {
+      authMode = "externalCli";
     }
+  } catch (err) {
+    // Registry lookup failure must never break flat-rate detection —
+    // fall through with authMode undefined.
+    logWarning(
+      "dispatch",
+      `flat-rate auth-mode lookup failed for ${provider}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
   return {
     authMode,

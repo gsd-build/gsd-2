@@ -60,6 +60,7 @@ import { resolveSafetyHarnessConfig } from "../safety/safety-harness.js";
 import {
   getWorkflowTransportSupportError,
   getRequiredWorkflowToolsForAutoUnit,
+  inferAuthModeFromBaseUrl,
 } from "../workflow-mcp.js";
 
 // ─── Session timeout auto-resume state ────────────────────────────────────────
@@ -1375,7 +1376,7 @@ export async function runUnitPhase(
     const availableModels = ctx.modelRegistry.getAvailable();
     const match = deps.resolveModelId(hookModelOverride, availableModels, ctx.model?.provider);
     if (match) {
-      const ok = await pi.setModel(match, { persist: false });
+      const ok = await pi.setModel(match);
       if (ok) {
         s.currentUnitModel = match as AutoSession["currentUnitModel"];
         ctx.ui.notify(`Hook model override: ${match.provider}/${match.id}`, "info");
@@ -1407,11 +1408,7 @@ export async function runUnitPhase(
       projectRoot: s.basePath,
       surface: "auto-mode",
       unitType,
-      authMode: s.currentUnitModel?.provider
-        ? ctx.modelRegistry.getProviderAuthMode(s.currentUnitModel.provider)
-        : ctx.model?.provider
-          ? ctx.modelRegistry.getProviderAuthMode(ctx.model.provider)
-          : undefined,
+      authMode: inferAuthModeFromBaseUrl((s.currentUnitModel as any)?.baseUrl ?? ctx.model?.baseUrl),
       baseUrl: (s.currentUnitModel as any)?.baseUrl ?? ctx.model?.baseUrl,
     },
   );
