@@ -5,7 +5,7 @@
  */
 
 import type { Api, Model } from "@gsd/pi-ai";
-import { getProviderCapabilities } from "@gsd/pi-ai";
+import { getProviderCapabilities } from "./model-router.js";
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 import type { GSDPreferences } from "./preferences.js";
 import { resolveModelWithFallbacksForUnit, resolveDynamicRoutingConfig } from "./preferences.js";

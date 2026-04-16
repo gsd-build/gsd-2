@@ -16,7 +16,8 @@
  * Respects OLLAMA_HOST env var for non-default endpoints.
  */
 
-import { importExtensionModule, type ExtensionAPI } from "@gsd/pi-coding-agent";
+import { type ExtensionAPI } from "@gsd/pi-coding-agent";
+import { importExtensionModule } from "@gsd/agent-core";
 import * as client from "./ollama-client.js";
 import { discoverModels } from "./ollama-discovery.js";
 import { registerOllamaCommands } from "./ollama-commands.js";
