@@ -11,7 +11,6 @@ import { createInterface } from "readline";
 import {
 	APP_NAME,
 	AuthStorage,
-	type CreateAgentSessionOptions,
 	DefaultPackageManager,
 	DefaultResourceLoader,
 	type LoadExtensionsResult,
@@ -31,10 +30,9 @@ import {
 	stopThemeWatcher,
 	time,
 	VERSION,
-	createAgentSession,
 	allTools,
 } from "@gsd/pi-coding-agent";
-import { KeybindingsManager } from "@gsd/agent-core";
+import { KeybindingsManager, createAgentSession, type CreateAgentSessionOptions } from "@gsd/agent-core";
 import { type Args, parseArgs, printHelp } from "./cli/args.js";
 import { selectConfig } from "./cli/config-selector.js";
 import { processFileArguments } from "./cli/file-processor.js";
@@ -575,7 +573,7 @@ export async function main(args: string[]) {
 	}
 
 	if (mode === "rpc") {
-		await runRpcMode(session as any);
+		await runRpcMode(session);
 	} else if (isInteractive) {
 		if (scopedModels.length > 0 && (parsed.verbose || !settingsManager.getQuietStartup())) {
 			const modelList = scopedModels
@@ -588,7 +586,7 @@ export async function main(args: string[]) {
 		}
 
 		printTimings();
-		const mode = new InteractiveMode(session as any, {
+		const mode = new InteractiveMode(session, {
 			migratedProviders,
 			modelFallbackMessage,
 			initialMessage,
@@ -598,7 +596,7 @@ export async function main(args: string[]) {
 		});
 		await mode.run();
 	} else {
-		await runPrintMode(session as any, {
+		await runPrintMode(session, {
 			mode,
 			messages: parsed.messages,
 			initialMessage,
