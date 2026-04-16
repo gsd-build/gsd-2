@@ -668,6 +668,25 @@ export class SettingsManager {
 		this.save();
 	}
 
+	getMemorySettings(): {
+		enabled: boolean;
+		maxRolloutsPerStartup: number;
+		maxRolloutAgeDays: number;
+		minRolloutIdleHours: number;
+		stage1Concurrency: number;
+		summaryInjectionTokenLimit: number;
+	} {
+		const mem = (this.settings as any).memory ?? {};
+		return {
+			enabled: mem.enabled ?? false,
+			maxRolloutsPerStartup: mem.maxRolloutsPerStartup ?? 64,
+			maxRolloutAgeDays: mem.maxRolloutAgeDays ?? 30,
+			minRolloutIdleHours: mem.minRolloutIdleHours ?? 12,
+			stage1Concurrency: mem.stage1Concurrency ?? 8,
+			summaryInjectionTokenLimit: mem.summaryInjectionTokenLimit ?? 5000,
+		};
+	}
+
 	getRetrySettings(): { enabled: boolean; maxRetries: number; baseDelayMs: number; maxDelayMs: number } {
 		return {
 			enabled: this.getRetryEnabled(),

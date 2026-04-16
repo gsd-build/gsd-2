@@ -29,7 +29,7 @@ export type {
 	AgentToolResult,
 	AgentToolUpdateCallback,
 	// App keybindings (for custom editors)
-	AppAction,
+	AppKeybinding,
 	// Events - Tool (ToolCallEvent types)
 	BashToolCallEvent,
 	BashToolResultEvent,
@@ -39,9 +39,6 @@ export type {
 	BeforeProviderRequestEventResult,
 	// Context
 	CompactOptions,
-	// Events - Adjust Tool Set (ADR-005)
-	AdjustToolSetEvent,
-	AdjustToolSetResult,
 	// Events - Agent
 	ContextEvent,
 	// Event Results
@@ -97,11 +94,6 @@ export type {
 	// Provider Registration
 	ProviderConfig,
 	ProviderModelConfig,
-	LifecycleHookContext,
-	LifecycleHookHandler,
-	LifecycleHookMap,
-	LifecycleHookPhase,
-	LifecycleHookScope,
 	ReadToolCallEvent,
 	ReadToolResultEvent,
 	// Commands
@@ -119,23 +111,18 @@ export type {
 	SessionBeforeTreeEvent,
 	SessionBeforeTreeResult,
 	SessionCompactEvent,
-	SessionDirectoryEvent,
-	SessionDirectoryHandler,
-	SessionDirectoryResult,
 	SessionEvent,
-	SessionForkEvent,
 	SessionShutdownEvent,
 	// Events - Session
 	SessionStartEvent,
-	SessionSwitchEvent,
 	SessionTreeEvent,
 	TerminalInputHandler,
 	// Events - Tool
 	ToolCallEvent,
 	ToolCallEventResult,
 	// Tools
-	ToolCompatibility,
 	ToolDefinition,
+	ToolRenderContext,
 	// Events - Tool Execution
 	ToolExecutionEndEvent,
 	ToolExecutionStartEvent,
@@ -150,14 +137,12 @@ export type {
 	// Events - User Bash
 	UserBashEvent,
 	UserBashEventResult,
-	BashTransformEvent,
-	BashTransformEventResult,
 	WidgetPlacement,
 	WriteToolCallEvent,
 	WriteToolResultEvent,
 } from "./types.js";
 // Type guards
-export { isToolCallEventType, isToolResultEventType } from "./types.js";
+export { isToolCallEventType } from "./types.js";
 export {
 	wrapRegisteredTool,
 	wrapRegisteredTools,

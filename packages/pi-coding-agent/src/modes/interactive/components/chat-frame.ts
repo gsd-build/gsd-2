@@ -2,7 +2,7 @@ import { truncateToWidth, visibleWidth } from "@gsd/pi-tui";
 import { theme } from "../../../core/theme/theme.js";
 import { formatTimestamp, type TimestampFormat } from "./timestamp.js";
 
-type FrameTone = "assistant" | "user";
+type FrameTone = "assistant" | "user" | "compaction";
 
 function trimOuterBlankLines(lines: string[]): string[] {
 	let start = 0;

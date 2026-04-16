@@ -30,4 +30,4 @@ export type AppAction =
 	| "resume";
 
 // KeybindingsManager is a class — re-export as type to avoid duplicating the implementation.
-export type { KeybindingsManager } from "@gsd/agent-core";
+export type { KeybindingsManager } from "./keybindings.js";

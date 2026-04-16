@@ -56,7 +56,7 @@ export class CompactionSummaryMessageComponent extends Container {
 						"customMessageText",
 						`Compacted from ${tokenStr} tokens (`,
 					) +
-						theme.fg("dim", editorKey("expandTools")) +
+						theme.fg("dim", editorKey("app.tools.expand")) +
 						theme.fg("customMessageText", " to expand)"),
 					0,
 					0,

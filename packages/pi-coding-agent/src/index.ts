@@ -124,6 +124,7 @@ export {
 	createExtensionRuntime,
 	discoverAndLoadExtensions,
 	ExtensionRunner,
+	sortExtensionPaths,
 	wrapRegisteredTool,
 	wrapRegisteredTools,
 } from "./core/extensions/index.js";
@@ -401,11 +402,7 @@ export { formatDimensionNote, resizeImage, type ImageResizeOptions, type Resized
 export { convertToPng } from "./utils/image-convert.js";
 export { extensionForImageMimeType, readClipboardImage } from "./utils/clipboard-image.js";
 export { ensureTool } from "./utils/tools-manager.js";
-// GSD-only symbols still in @gsd/agent-core (GSD business logic, not upstream)
-export { ContextualTips } from "@gsd/agent-core";
-export { BlobStore, isBlobRef, parseBlobRef, externalizeImageData, resolveImageData } from "@gsd/agent-core";
-export { ArtifactManager } from "@gsd/agent-core";
-export { FallbackResolver, type FallbackResult } from "@gsd/agent-core";
+export { handlePackageCommand } from "./package-manager-cli.js";
 // Theme utilities needed by @gsd/agent-modes
 export {
 	getAvailableThemes,

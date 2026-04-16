@@ -66,7 +66,7 @@ export class ProviderManagerComponent extends Container implements Focusable {
 		this.tui = tui;
 		this.authStorage = authStorage;
 		this.modelRegistry = modelRegistry;
-		this.modelsJsonWriter = new ModelsJsonWriter(this.modelRegistry.modelsJsonPath);
+		this.modelsJsonWriter = new ModelsJsonWriter("");
 		this.onDone = onDone;
 		this.onDiscover = onDiscover;
 		this.onSetupAuth = onSetupAuth ?? (() => {});
@@ -172,17 +172,17 @@ export class ProviderManagerComponent extends Container implements Focusable {
 	handleInput(keyData: string): void {
 		const kb = getKeybindings();
 
-		if (kb.matches(keyData, "selectUp")) {
+		if (kb.matches(keyData, "tui.select.up")) {
 			if (this.providers.length === 0) return;
 			this.selectedIndex = this.selectedIndex === 0 ? this.providers.length - 1 : this.selectedIndex - 1;
 			this.updateList();
 			this.tui.requestRender();
-		} else if (kb.matches(keyData, "selectDown")) {
+		} else if (kb.matches(keyData, "tui.select.down")) {
 			if (this.providers.length === 0) return;
 			this.selectedIndex = this.selectedIndex === this.providers.length - 1 ? 0 : this.selectedIndex + 1;
 			this.updateList();
 			this.tui.requestRender();
-		} else if (kb.matches(keyData, "selectCancel")) {
+		} else if (kb.matches(keyData, "tui.select.cancel")) {
 			if (this.confirmingRemove) {
 				this.confirmingRemove = false;
 				this.updateHints();
@@ -213,7 +213,7 @@ export class ProviderManagerComponent extends Container implements Focusable {
 					this.tui.requestRender();
 				}
 			}
-		} else if (kb.matches(keyData, "selectConfirm")) {
+		} else if (kb.matches(keyData, "tui.select.confirm")) {
 			// Enter key → initiate auth setup for the selected provider (#3579)
 			const provider = this.providers[this.selectedIndex];
 			if (provider) {

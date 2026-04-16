@@ -8,8 +8,20 @@
  * Precedence: env var > settings.json > built-in defaults
  */
 
-import { type SettingsManager, setAllowedCommandPrefixes } from '@gsd/pi-coding-agent'
+import type { SettingsManager } from '@gsd/pi-coding-agent'
 import { setFetchAllowedUrls } from './resources/extensions/search-the-web/url-utils.js'
+
+// Command prefix allowlist — not yet wired into SettingsManager/pi-coding-agent.
+// Env-var path works; settings path is a no-op until the API is implemented.
+let _allowedCommandPrefixes: string[] | undefined
+
+export function setAllowedCommandPrefixes(prefixes: string[]): void {
+  _allowedCommandPrefixes = prefixes
+}
+
+export function getAllowedCommandPrefixes(): string[] | undefined {
+  return _allowedCommandPrefixes
+}
 
 export function applySecurityOverrides(settingsManager: SettingsManager): void {
   // --- Command prefix allowlist ---
@@ -19,11 +31,6 @@ export function applySecurityOverrides(settingsManager: SettingsManager): void {
     if (prefixes.length > 0) {
       setAllowedCommandPrefixes(prefixes)
     }
-  } else {
-    const settingsPrefixes = settingsManager.getAllowedCommandPrefixes()
-    if (settingsPrefixes && settingsPrefixes.length > 0) {
-      setAllowedCommandPrefixes(settingsPrefixes)
-    }
   }
 
   // --- Fetch URL allowlist (SSRF exemptions) ---
@@ -32,11 +39,6 @@ export function applySecurityOverrides(settingsManager: SettingsManager): void {
     const urls = envUrls.split(',').map(s => s.trim()).filter(Boolean)
     if (urls.length > 0) {
       setFetchAllowedUrls(urls)
-    }
-  } else {
-    const settingsUrls = settingsManager.getFetchAllowedUrls()
-    if (settingsUrls && settingsUrls.length > 0) {
-      setFetchAllowedUrls(settingsUrls)
     }
   }
 }

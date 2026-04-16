@@ -9,8 +9,9 @@ import {
 	type HighlightColors,
 } from "@gsd/native";
 import { getCustomThemesDir } from "../../../config.js";
+import type { SourceInfo } from "../../../core/source-info.js";
 import { ThemeJsonSchema, type ColorValue, type ThemeJson } from "./theme-schema.js";
-import { builtinThemes } from "./themes.js";
+import { builtinThemes } from "../../../core/theme/themes.js";
 
 // Issue #453: native preview highlighting can wedge the entire interactive
 // session after a successful file tool. Keep the safer plain-text path as the
@@ -269,6 +270,7 @@ function resolveThemeColors<T extends Record<string, ColorValue>>(
 export class Theme {
 	readonly name?: string;
 	readonly sourcePath?: string;
+	sourceInfo?: SourceInfo;
 	private fgColors: Map<ThemeColor, string>;
 	private bgColors: Map<ThemeBg, string>;
 	private mode: ColorMode;

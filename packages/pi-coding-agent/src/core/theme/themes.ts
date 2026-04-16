@@ -9,7 +9,7 @@
  */
 
 // Re-use the ThemeJson type from the schema module to avoid runtime cycles.
-import type { ThemeJson } from "./theme-schema.js";
+import type { ThemeJson } from "../../modes/interactive/theme/theme-schema.js";
 
 // ---------------------------------------------------------------------------
 // Dark theme

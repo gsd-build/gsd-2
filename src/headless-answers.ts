@@ -7,7 +7,7 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { serializeJsonLine } from '@gsd/pi-coding-agent'
+import { serializeJsonLine } from '@gsd-build/rpc-client'
 
 // ---------------------------------------------------------------------------
 // Types

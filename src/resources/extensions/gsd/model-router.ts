@@ -5,9 +5,26 @@
 import type { ComplexityTier, ClassificationResult, TaskMetadata } from "./complexity-classifier.js";
 import { tierOrdinal } from "./complexity-classifier.js";
 import type { ResolvedModelConfig } from "./preferences.js";
-import { getProviderCapabilities, type ProviderCapabilities } from "@gsd/pi-ai";
-import { getToolCompatibility, getAllToolCompatibility } from "@gsd/pi-coding-agent";
-import type { ToolCompatibility } from "@gsd/pi-coding-agent";
+// Stubs: these APIs were removed in pi-mono 0.67.2 vendor swap.
+// Tool compatibility and provider capabilities will be re-implemented as part of ADR-005 Phase 3.
+interface ProviderCapabilities {
+  toolCalling: boolean;
+  imageToolResults: boolean;
+  unsupportedSchemaFeatures: string[];
+}
+interface ToolCompatibility {
+  producesImages?: boolean;
+  schemaFeatures?: string[];
+}
+function getProviderCapabilities(_providerApi: string): ProviderCapabilities {
+  return { toolCalling: true, imageToolResults: true, unsupportedSchemaFeatures: [] };
+}
+function getToolCompatibility(_toolName: string): ToolCompatibility | undefined {
+  return undefined;
+}
+function getAllToolCompatibility(): Record<string, ToolCompatibility> {
+  return {};
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

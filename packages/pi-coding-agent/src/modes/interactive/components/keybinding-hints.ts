@@ -22,3 +22,7 @@ export function keyHint(keybinding: Keybinding, description: string): string {
 export function rawKeyHint(key: string, description: string): string {
 	return theme.fg("dim", key) + theme.fg("muted", ` ${description}`);
 }
+
+export function editorKey(action: Keybinding): string {
+	return formatKeys(getKeybindings().getKeys(action));
+}

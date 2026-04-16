@@ -59,7 +59,7 @@ export type { ExtensionUIContext } from "@gsd/pi-coding-agent";
 export type { ExtensionUIDialogOptions } from "@gsd/pi-coding-agent";
 export type { ExtensionWidgetOptions } from "@gsd/pi-coding-agent";
 export type { ToolName } from "@gsd/pi-coding-agent";
-export type { ContextualTips } from "@gsd/pi-coding-agent";
+// ContextualTips: import directly from @gsd/agent-core
 export type { PromptTemplate } from "@gsd/pi-coding-agent";
 export type { Skill } from "@gsd/pi-coding-agent";
 export type { Tool } from "@gsd/pi-coding-agent";

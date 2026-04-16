@@ -288,6 +288,14 @@ export class AuthStorage {
 	}
 
 	/**
+	 * Get all credentials for a provider as an array.
+	 */
+	getCredentialsForProvider(provider: string): AuthCredential[] {
+		const cred = this.data[provider];
+		return cred ? [cred] : [];
+	}
+
+	/**
 	 * Set credential for a provider.
 	 */
 	set(provider: string, credential: AuthCredential): void {

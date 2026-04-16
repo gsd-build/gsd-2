@@ -94,7 +94,7 @@ import { ToolExecutionComponent } from "./components/tool-execution.js";
 import { TreeSelectorComponent } from "./components/tree-selector.js";
 import { UserMessageComponent } from "./components/user-message.js";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.js";
-import { ContextualTips } from "@gsd/pi-coding-agent";
+import { ContextualTips } from "@gsd/agent-core";
 import { type SlashCommandContext, dispatchSlashCommand, getAppKeyDisplay } from "./slash-command-handlers.js";
 import { handleAgentEvent } from "./controllers/chat-controller.js";
 import { createExtensionUIContext as buildExtensionUIContext } from "./controllers/extension-ui-controller.js";
