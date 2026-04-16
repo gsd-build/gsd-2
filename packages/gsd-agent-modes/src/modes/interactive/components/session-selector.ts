@@ -440,6 +440,7 @@ class SessionList implements Component, Focusable {
 			// Session display text (name or first message)
 			const hasName = !!session.name;
 			const displayText = session.name ?? session.firstMessage;
+			// eslint-disable-next-line no-control-regex -- intentional: sanitizing session display text
 			const normalizedMessage = displayText.replace(/[\x00-\x1f\x7f]/g, " ").trim();
 
 			// Right side: message count and age
@@ -769,7 +770,7 @@ export class SessionSelectorComponent extends Container implements Focusable {
 		};
 
 		// Ensure header status timeouts are cleared when leaving the selector
-		const clearStatusMessage = () => this.header.setStatusMessage(null);
+		const clearStatusMessage = (): void => this.header.setStatusMessage(null);
 		this.sessionList.onSelect = (sessionPath) => {
 			clearStatusMessage();
 			onSelect(sessionPath);
@@ -909,7 +910,7 @@ export class SessionSelectorComponent extends Container implements Focusable {
 		this.header.setLoading(true);
 		this.requestRender();
 
-		const onProgress = (loaded: number, total: number) => {
+		const onProgress = (loaded: number, total: number): void => {
 			if (scope !== this.scope) return;
 			if (seq !== undefined && seq !== this.allLoadSeq) return;
 			this.header.setProgress(loaded, total);

@@ -158,6 +158,11 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 					host.updateEditorBorderColor();
 					host.ui.requestRender();
 					return;
+				case "set_steering_mode":
+				case "set_follow_up_mode":
+				case "set_auto_compaction":
+				case "set_auto_retry":
+				case "abort_retry":
 				default:
 					host.ui.requestRender();
 					return;
@@ -364,7 +369,7 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 				let runStart = -1;
 				let runEnd = -1;
 				let runType: "text" | "thinking" | undefined;
-				const closeRun = () => {
+				const closeRun = (): void => {
 					if (runStart !== -1 && runType) {
 						desired.push({ kind: "text-run", startIndex: runStart, endIndex: runEnd, contentType: runType });
 						runStart = -1;
@@ -613,7 +618,7 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 						let runStart = -1;
 						let runEnd = -1;
 						let runType: "text" | "thinking" | undefined;
-						const closeRun = () => {
+						const closeRun = (): void => {
 							if (runStart !== -1 && runType) {
 								desired.push({ kind: "text-run", startIndex: runStart, endIndex: runEnd, contentType: runType });
 								runStart = -1;
@@ -935,6 +940,11 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 				`Removed ${event.strippedCount} older image(s) to comply with API limits. Retrying...`,
 			);
 			host.ui.requestRender();
+			break;
+
+		case "turn_start":
+		case "turn_end":
+			// No UI action needed for turn lifecycle events
 			break;
 	}
 }

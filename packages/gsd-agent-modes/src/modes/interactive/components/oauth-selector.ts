@@ -73,7 +73,7 @@ export class OAuthSelectorComponent extends Container {
 			const isLoggedIn = credentials?.type === "oauth";
 			const statusIndicator = isLoggedIn ? theme.fg("success", " ✓ logged in") : "";
 
-			let line = "";
+			let line: string;
 			if (isSelected) {
 				const prefix = theme.fg("accent", "→ ");
 				const text = theme.fg("accent", provider.name);

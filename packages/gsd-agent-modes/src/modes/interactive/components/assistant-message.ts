@@ -3,7 +3,7 @@ import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@gsd/pi-t
 import { getMarkdownTheme } from "@gsd/pi-coding-agent";
 import { isServerToolUseBlock } from "@gsd/agent-types";
 import { theme } from "../../../theme.js";
-import { formatTimestamp, type TimestampFormat } from "./timestamp.js";
+import { type TimestampFormat } from "./timestamp.js";
 import { renderChatFrame } from "./chat-frame.js";
 
 export interface ContentRange {
@@ -95,7 +95,7 @@ export class AssistantMessageComponent extends Container {
 		// Claude Code often emits long reasoning blocks ahead of user-visible text/tool
 		// output in the same lifecycle. Keep chat output visible without requiring a
 		// manual thinking toggle every turn.
-		const shouldCapThinking = hasTextContent || hasToolContent || message.provider === "claude-code";
+		const _shouldCapThinking = hasTextContent || hasToolContent || message.provider === "claude-code";
 
 		// Render content in order; non-text/thinking blocks are silently skipped
 		for (let i = 0; i < slice.length; i++) {

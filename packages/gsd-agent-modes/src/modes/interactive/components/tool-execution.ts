@@ -764,7 +764,7 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	private formatToolExecution(): string {
-		let text = "";
+		let text: string;
 		const invalidArg = theme.fg("error", "[invalid arg]");
 		const normalizedToolName = this.normalizedToolName;
 

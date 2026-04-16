@@ -12,7 +12,7 @@ export class BorderedLoader extends Container {
 	constructor(tui: TUI, theme: Theme, message: string, options?: { cancellable?: boolean }) {
 		super();
 		this.cancellable = options?.cancellable ?? true;
-		const borderColor = (s: string) => theme.fg("border", s);
+		const borderColor = (s: string): string => theme.fg("border", s);
 		this.addChild(new DynamicBorder(borderColor));
 		if (this.cancellable) {
 			this.loader = new CancellableLoader(

@@ -39,7 +39,7 @@ export class BashExecutionComponent extends Container {
 		// Use dim border for excluded-from-context commands (!! prefix)
 		const colorKey = excludeFromContext ? "dim" : "bashMode";
 		this._borderColorKey = colorKey;
-		const borderColor = (str: string) => theme.fg(colorKey, str);
+		const borderColor = (str: string): string => theme.fg(colorKey, str);
 
 		// Add spacer
 		this.addChild(new Spacer(1));

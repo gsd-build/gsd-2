@@ -1,7 +1,6 @@
-import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@gsd/pi-tui";
+import { Container, Markdown, type MarkdownTheme } from "@gsd/pi-tui";
 import { getMarkdownTheme } from "@gsd/pi-coding-agent";
-import { theme } from "../../../theme.js";
-import { formatTimestamp, type TimestampFormat } from "./timestamp.js";
+import { type TimestampFormat } from "./timestamp.js";
 import { renderChatFrame } from "./chat-frame.js";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";

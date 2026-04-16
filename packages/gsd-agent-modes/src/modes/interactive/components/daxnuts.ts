@@ -100,7 +100,7 @@ export class DaxnutsComponent implements Component {
 		const t = theme;
 		const lines: string[] = [];
 
-		const center = (s: string) => {
+		const center = (s: string): string => {
 			const visible = visibleWidth(s);
 			const left = Math.max(0, Math.floor((width - visible) / 2));
 			return " ".repeat(left) + s;

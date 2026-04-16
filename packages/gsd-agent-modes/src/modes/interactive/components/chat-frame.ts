@@ -27,7 +27,7 @@ export function renderChatFrame(
 	const contentWidth = Math.max(1, outerWidth - 2); // "│ " + content
 	const borderColor = opts.tone === "user" ? "borderAccent" : "border";
 	const borderMuted = opts.tone === "user" ? "borderMuted" : "borderMuted";
-	const border = (s: string) => theme.fg(borderColor, s);
+	const border = (s: string): string => theme.fg(borderColor, s);
 	const leftRaw = `• ${opts.label}`;
 	const rightRaw =
 		opts.showTimestamp === false || !opts.timestamp

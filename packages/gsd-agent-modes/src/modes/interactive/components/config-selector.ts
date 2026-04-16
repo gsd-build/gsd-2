@@ -69,7 +69,7 @@ function getGroupLabel(metadata: PathMetadata): string {
 function buildGroups(resolved: ResolvedPaths): ResourceGroup[] {
 	const groupMap = new Map<string, ResourceGroup>();
 
-	const addToGroup = (resources: ResolvedResource[], resourceType: ResourceType) => {
+	const addToGroup = (resources: ResolvedResource[], resourceType: ResourceType): void => {
 		for (const res of resources) {
 			const { path, enabled, metadata } = res;
 			const groupKey = `${metadata.origin}:${metadata.scope}:${metadata.source}`;

@@ -9,7 +9,7 @@ import { type ImageContent, modelsAreEqual, supportsXhigh } from "@gsd/pi-ai";
 import chalk from "chalk";
 import { createInterface } from "readline";
 import {
-	APP_NAME,
+	APP_NAME as _APP_NAME,
 	AuthStorage,
 	DefaultPackageManager,
 	DefaultResourceLoader,
@@ -325,7 +325,7 @@ async function handleConfigCommand(args: string[]): Promise<boolean> {
 	process.exit(0);
 }
 
-export async function main(args: string[]) {
+export async function main(args: string[]): Promise<void> {
 	// Catch unhandled promise rejections so the process doesn't silently disappear
 	process.on("unhandledRejection", (reason) => {
 		const message = reason instanceof Error ? reason.stack ?? reason.message : String(reason);
@@ -361,7 +361,7 @@ export async function main(args: string[]) {
 
 	// isAllLocalChain / isLocalModel removed in pi-coding-agent 0.67.2 —
 	// check baseUrl: models with no baseUrl use cloud APIs, those with one may be local.
-	const isLocalModel = (m: { baseUrl?: string | null }) => !!m.baseUrl;
+	const isLocalModel = (m: { baseUrl?: string | null }): boolean => !!m.baseUrl;
 	const allModelsLocal = modelRegistry.getAll().length > 0 && modelRegistry.getAll().every(isLocalModel);
 
 	// Offline mode validation / auto-detection

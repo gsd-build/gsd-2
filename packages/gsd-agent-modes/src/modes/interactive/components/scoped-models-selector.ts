@@ -1,4 +1,4 @@
-import type { Model } from "@gsd/pi-ai";
+import type { Api, Model } from "@gsd/pi-ai";
 import { providerDisplayName } from "./model-selector.js";
 import {
 	Container,
@@ -65,12 +65,12 @@ function getSortedIds(enabledIds: EnabledIds, allIds: string[]): string[] {
 
 interface ModelItem {
 	fullId: string;
-	model: Model<any>;
+	model: Model<Api>;
 	enabled: boolean;
 }
 
 export interface ModelsConfig {
-	allModels: Model<any>[];
+	allModels: Model<Api>[];
 	enabledModelIds: Set<string>;
 	/** true if enabledModels setting is defined (empty = all enabled) */
 	hasEnabledModelsFilter: boolean;
@@ -95,7 +95,7 @@ export interface ModelsCallbacks {
  * Changes are session-only until explicitly persisted with Ctrl+S.
  */
 export class ScopedModelsSelectorComponent extends Container implements Focusable {
-	private modelsById: Map<string, Model<any>> = new Map();
+	private modelsById: Map<string, Model<Api>> = new Map();
 	private allIds: string[] = [];
 	private enabledIds: EnabledIds = null;
 	private filteredItems: ModelItem[] = [];

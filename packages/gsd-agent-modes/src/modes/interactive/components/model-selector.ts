@@ -1,4 +1,4 @@
-import { type Model, modelsAreEqual } from "@gsd/pi-ai";
+import { type Api, type Model, modelsAreEqual } from "@gsd/pi-ai";
 import {
 	Container,
 	type Focusable,
@@ -39,11 +39,11 @@ function formatTokenCount(count: number): string {
 interface ModelItem {
 	provider: string;
 	id: string;
-	model: Model<any>;
+	model: Model<Api>;
 }
 
 interface ScopedModelItem {
-	model: Model<any>;
+	model: Model<Api>;
 	thinkingLevel?: string;
 }
 
@@ -91,10 +91,10 @@ export class ModelSelectorComponent extends Container implements Focusable {
 	private selectedFlatIndex: number = 0;
 
 	private isSearching: boolean = false;
-	private currentModel?: Model<any>;
+	private currentModel?: Model<Api>;
 	private settingsManager: SettingsManager;
 	private modelRegistry: ModelRegistry;
-	private onSelectCallback: (model: Model<any>) => void;
+	private onSelectCallback: (model: Model<Api>) => void;
 	private onCancelCallback: () => void;
 	private errorMessage?: string;
 	private tui: TUI;
@@ -105,11 +105,11 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
 	constructor(
 		tui: TUI,
-		currentModel: Model<any> | undefined,
+		currentModel: Model<Api> | undefined,
 		settingsManager: SettingsManager,
 		modelRegistry: ModelRegistry,
 		scopedModels: ReadonlyArray<ScopedModelItem>,
-		onSelect: (model: Model<any>) => void,
+		onSelect: (model: Model<Api>) => void,
 		onCancel: () => void,
 		initialSearchInput?: string,
 	) {
@@ -203,7 +203,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		// Load available models (built-in models still work even if models.json failed)
 		try {
 			const availableModels = this.modelRegistry.getAvailable();
-			models = availableModels.map((model: Model<any>) => ({
+			models = availableModels.map((model: Model<Api>) => ({
 				provider: model.provider,
 				id: model.id,
 				model,
@@ -319,7 +319,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 	/**
 	 * Get the currently selected model from grouped or flat state.
 	 */
-	private getSelectedModel(): Model<any> | undefined {
+	private getSelectedModel(): Model<Api> | undefined {
 		if (this.isSearching) {
 			return this.filteredModels[this.selectedFlatIndex]?.model;
 		}
@@ -511,7 +511,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		}
 	}
 
-	private modelDetailLine(m: Model<any>): string {
+	private modelDetailLine(m: Model<Api>): string {
 		return [
 			m.name,
 			`ctx: ${formatTokenCount(m.contextWindow)}`,
@@ -644,7 +644,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		this.updateList();
 	}
 
-	private handleSelect(model: Model<any>): void {
+	private handleSelect(model: Model<Api>): void {
 		// Save as new default
 		this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
 		this.onSelectCallback(model);
