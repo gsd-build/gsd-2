@@ -10,6 +10,9 @@ const cjsRequire = createRequire(import.meta.url);
  * Minimal terminal interface for TUI
  */
 export interface Terminal {
+	// Whether stdout is a real TTY (false for pipes, e.g. RPC bridge processes)
+	readonly isTTY: boolean;
+
 	// Start the terminal with input and resize handlers
 	start(onInput: (data: string) => void, onResize: () => void): void;
 
@@ -75,6 +78,10 @@ export class ProcessTerminal implements Terminal {
 		}
 		return env;
 	})();
+
+	get isTTY(): boolean {
+		return !!process.stdout.isTTY;
+	}
 
 	get kittyProtocolActive(): boolean {
 		return this._kittyProtocolActive;
