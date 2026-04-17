@@ -667,7 +667,8 @@ async function prepareToolCall(
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 ): Promise<PreparedToolCall | ImmediateToolCallOutcome> {
-	const tool = currentContext.tools?.find((t) => t.name === toolCall.name);
+	const lowerName = toolCall.name.toLowerCase();
+	const tool = currentContext.tools?.find((t) => t.name.toLowerCase() === lowerName);
 	if (!tool) {
 		return {
 			kind: "immediate",
@@ -675,6 +676,9 @@ async function prepareToolCall(
 			isError: true,
 		};
 	}
+	// Normalize to the registered tool name so the UI shows the canonical
+	// casing (e.g. "Skill") instead of whatever the model emitted ("skill").
+	toolCall.name = tool.name;
 
 	try {
 		const validatedArgs = validateToolArguments(tool, toolCall);
