@@ -2,7 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import stripAnsi from "strip-ansi";
 import { ToolExecutionComponent } from "../tool-execution.js";
-import { initTheme } from "../../../../core/theme/theme.js";
+import { initTheme } from "@gsd/pi-coding-agent";
 
 initTheme("dark", false);
 
@@ -122,5 +122,50 @@ describe("ToolExecutionComponent", () => {
 		// Multi-line JSON dump for the complex payload
 		assert.match(rendered, /"payload"/);
 		assert.match(rendered, /"nested"/);
+	});
+
+	// TOOL-01: edits[] array format (pi 0.67.2 edit tool API)
+	test("edit tool renders path label when called with edits[] array format (TOOL-01)", () => {
+		const rendered = renderTool(
+			"Edit",
+			{ path: "/tmp/test.ts", edits: [{ oldText: "old content", newText: "new content" }] },
+		);
+
+		assert.match(rendered, /test\.ts/);
+		assert.doesNotMatch(rendered, /"oldText"/);
+	});
+
+	test("edit tool renders path label when called with single oldText/newText format (TOOL-01)", () => {
+		const rendered = renderTool(
+			"Edit",
+			{ path: "/tmp/test.ts", oldText: "old content", newText: "new content" },
+		);
+
+		assert.match(rendered, /test\.ts/);
+	});
+
+	test("edit tool handles edits[] with no valid elements without crashing (TOOL-01 type guard)", () => {
+		assert.doesNotThrow(() => {
+			renderTool(
+				"Edit",
+				{ path: "/tmp/test.ts", edits: [{ bad: "data" }, null, { also: "bad" }] },
+			);
+		});
+	});
+
+	test("edit tool handles empty edits[] without crashing (TOOL-01 edge case)", () => {
+		assert.doesNotThrow(() => {
+			renderTool("Edit", { path: "/tmp/test.ts", edits: [] });
+		});
+	});
+
+	// TOOL-02: computeEditDiff invocation via lowercase "edit" tool name
+	test("edit tool (lowercase) triggers diff path for edits[] format without crashing (TOOL-02)", () => {
+		assert.doesNotThrow(() => {
+			renderTool(
+				"edit",
+				{ path: "/tmp/nonexistent-for-test.ts", edits: [{ oldText: "a", newText: "b" }] },
+			);
+		});
 	});
 });
