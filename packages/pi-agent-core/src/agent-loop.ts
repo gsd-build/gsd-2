@@ -534,6 +534,8 @@ async function executeToolCallsSequential(
 
 	for (let index = 0; index < toolCalls.length; index++) {
 		const toolCall = toolCalls[index];
+
+		const preparation = await prepareToolCall(currentContext, assistantMessage, toolCall, config, signal);
 		stream.push({
 			type: "tool_execution_start",
 			toolCallId: toolCall.id,
@@ -541,7 +543,6 @@ async function executeToolCallsSequential(
 			args: toolCall.arguments,
 		});
 
-		const preparation = await prepareToolCall(currentContext, assistantMessage, toolCall, config, signal);
 		if (preparation.kind === "immediate") {
 			if (preparation.isError) {
 				preparationErrorCount++;
@@ -593,6 +594,8 @@ async function executeToolCallsParallel(
 
 	for (let index = 0; index < toolCalls.length; index++) {
 		const toolCall = toolCalls[index];
+
+		const preparation = await prepareToolCall(currentContext, assistantMessage, toolCall, config, signal);
 		stream.push({
 			type: "tool_execution_start",
 			toolCallId: toolCall.id,
@@ -600,7 +603,6 @@ async function executeToolCallsParallel(
 			args: toolCall.arguments,
 		});
 
-		const preparation = await prepareToolCall(currentContext, assistantMessage, toolCall, config, signal);
 		if (preparation.kind === "immediate") {
 			if (preparation.isError) {
 				preparationErrorCount++;
