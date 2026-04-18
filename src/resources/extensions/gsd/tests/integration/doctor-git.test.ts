@@ -696,6 +696,45 @@ describe('doctor-git', async () => {
       assert.deepStrictEqual(staleIssues.length, 0, "recent commit with dirty tree NOT flagged as stale");
     });
 
+    // ─── Test: stale_uncommitted_changes suppressed by git.snapshots:false (#4420) ──
+    test('stale_uncommitted_changes (suppressed by git.snapshots:false)', async () => {
+      const dir = createRepoWithActiveMilestone();
+      cleanups.push(dir);
+
+      const pastDate = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+      run(`git commit --amend --no-edit --date="${pastDate}"`, dir);
+      execSync(`git commit --amend --no-edit`, {
+        cwd: dir,
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf-8",
+        env: { ...process.env, GIT_COMMITTER_DATE: pastDate },
+      });
+
+      writeFileSync(join(dir, "README.md"), "# test\nmodified content\n");
+      writeFileSync(join(dir, ".gsd", "PREFERENCES.md"), `---\ngit:\n  snapshots: false\n---\n`);
+
+      const commitsBefore = run("git rev-list --count HEAD", dir);
+
+      const previousCwd = process.cwd();
+      process.chdir(dir);
+      try {
+        const detect = await runGSDDoctor(dir);
+        const staleIssues = detect.issues.filter(i => i.code === "stale_uncommitted_changes");
+        assert.deepStrictEqual(staleIssues.length, 0, "git.snapshots:false suppresses stale detection");
+
+        const fixed = await runGSDDoctor(dir, { fix: true });
+        assert.ok(
+          !fixed.fixesApplied.some(f => f.includes("gsd snapshot")),
+          `git.snapshots:false suppresses snapshot fix (got: ${JSON.stringify(fixed.fixesApplied)})`,
+        );
+      } finally {
+        process.chdir(previousCwd);
+      }
+
+      const commitsAfter = run("git rev-list --count HEAD", dir);
+      assert.strictEqual(commitsAfter, commitsBefore, "no snapshot commit was created when git.snapshots:false");
+    });
+
     // ─── Test: stale_uncommitted_changes NOT flagged when tree is clean ──
     test('stale_uncommitted_changes (no false positive on clean tree)', async () => {
       const dir = createRepoWithActiveMilestone();

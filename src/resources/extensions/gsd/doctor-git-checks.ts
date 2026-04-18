@@ -369,9 +369,13 @@ export async function checkGitHealth(
   // auto-commit a safety snapshot so work isn't lost.
   try {
     const prefs = loadEffectiveGSDPreferences()?.preferences ?? {};
+    // `git.snapshots: false` is the canonical toggle that disables WIP
+    // snapshot commits — honour it here as well so both the proactive gate
+    // and the doctor-run path stay consistent (#4420).
+    const snapshotsEnabled = prefs.git?.snapshots !== false;
     const thresholdMinutes = prefs.stale_commit_threshold_minutes ?? 30;
 
-    if (thresholdMinutes > 0) {
+    if (snapshotsEnabled && thresholdMinutes > 0) {
       const dirty = nativeHasChanges(basePath);
       if (dirty) {
         const branch = nativeGetCurrentBranch(basePath);
