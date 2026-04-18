@@ -170,6 +170,7 @@ import {
 } from "./auto-recovery.js";
 import { resolveDispatch, DISPATCH_RULES } from "./auto-dispatch.js";
 import { getErrorMessage } from "./error-utils.js";
+import { recoverFailedMigration } from "./migrate-external.js";
 import { initRegistry, convertDispatchRules } from "./rule-registry.js";
 import { emitJournalEvent as _emitJournalEvent, type JournalEntry } from "./journal.js";
 import {
@@ -1323,6 +1324,13 @@ export async function startAuto(
 
   // Escape stale worktree cwd from a previous milestone (#608).
   base = escapeStaleWorktree(base);
+
+  // Heal .gsd.migrating before any branching — covers both fresh-start and
+  // resume paths (#4416). The matching call in auto-start.ts covers the
+  // bootstrap-only path; this call ensures the resume path is also protected.
+  if (recoverFailedMigration(base)) {
+    ctx.ui.notify("Recovered unfinished migration (.gsd.migrating → .gsd).", "info");
+  }
 
   const freshStartAssessment = interruptedAssessment
     ?? await assessInterruptedSession(base);
