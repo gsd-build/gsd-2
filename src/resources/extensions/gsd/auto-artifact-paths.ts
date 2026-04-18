@@ -43,6 +43,16 @@ export function resolveExpectedArtifactPath(
       return dir ? join(dir, buildMilestoneFileName(mid, "ROADMAP")) : null;
     }
     case "research-slice": {
+      // #4414: Sentinel unitId "{mid}/parallel-research" fans out across
+      // multiple slices. Resolve to a milestone-level placeholder path so
+      // blocker escalation has somewhere to write. Verification for this
+      // sentinel is handled directly in verifyExpectedArtifact.
+      if (sid === "parallel-research") {
+        const mdir = resolveMilestonePath(base, mid);
+        return mdir
+          ? join(mdir, buildMilestoneFileName(mid, "PARALLEL-BLOCKER"))
+          : null;
+      }
       const dir = resolveSlicePath(base, mid, sid!);
       return dir ? join(dir, buildSliceFileName(sid!, "RESEARCH")) : null;
     }
@@ -114,6 +124,9 @@ export function diagnoseExpectedArtifact(
     case "plan-milestone":
       return `${relMilestoneFile(base, mid, "ROADMAP")} (milestone roadmap)`;
     case "research-slice":
+      if (sid === "parallel-research") {
+        return `${relMilestoneFile(base, mid, "PARALLEL-BLOCKER")} (parallel slice research sentinel)`;
+      }
       return `${relSliceFile(base, mid, sid!, "RESEARCH")} (slice research)`;
     case "plan-slice":
       return `${relSliceFile(base, mid, sid!, "PLAN")} (slice plan)`;

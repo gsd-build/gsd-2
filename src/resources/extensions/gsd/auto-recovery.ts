@@ -261,6 +261,45 @@ export function verifyExpectedArtifact(
     return true;
   }
 
+  // #4414: research-slice parallel-research sentinel. The unitId
+  // `{mid}/parallel-research` is not a real slice — it triggers a single agent
+  // that fans out research across multiple slices. Verify success by checking
+  // that every slice which was "research-ready" in the roadmap now has a
+  // RESEARCH file. Without this, resolveExpectedArtifactPath returns null and
+  // the retry/escalation machinery silently re-dispatches forever.
+  //
+  // NOTE: this predicate mirrors the dispatch rule at
+  // auto-dispatch.ts parallel-research-slices — keep the two in sync.
+  if (unitType === "research-slice" && unitId.endsWith("/parallel-research")) {
+    const { milestone: mid } = parseUnitId(unitId);
+    if (!mid) return false;
+    const roadmapFile = resolveMilestoneFile(base, mid, "ROADMAP");
+    if (!roadmapFile || !existsSync(roadmapFile)) {
+      logWarning("recovery", `verify-fail ${unitType} ${unitId}: roadmap missing`);
+      return false;
+    }
+    try {
+      const roadmap = parseLegacyRoadmap(readFileSync(roadmapFile, "utf-8"));
+      const milestoneResearchFile = resolveMilestoneFile(base, mid, "RESEARCH");
+      for (const slice of roadmap.slices) {
+        if (slice.done) continue;
+        if (milestoneResearchFile && slice.id === "S01") continue;
+        const depsComplete = (slice.depends ?? []).every((depId) =>
+          !!resolveSliceFile(base, mid, depId, "SUMMARY"),
+        );
+        if (!depsComplete) continue;
+        if (!resolveSliceFile(base, mid, slice.id, "RESEARCH")) {
+          logWarning("recovery", `verify-fail ${unitType} ${unitId}: slice ${slice.id} missing RESEARCH`);
+          return false;
+        }
+      }
+      return true;
+    } catch (err) {
+      logWarning("recovery", `parallel-research verification failed: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }
+
   const absPath = resolveExpectedArtifactPath(unitType, unitId, base);
   // For unit types with no verifiable artifact (null path), the parent directory
   // is missing on disk — treat as stale completion state so the key gets evicted (#313).
@@ -454,6 +493,14 @@ export function writeBlockerPlaceholder(
     `Review and replace this file before relying on downstream artifacts.`,
   ].join("\n");
   writeFileSync(absPath, content, "utf-8");
+
+  // #4414: Clear caches so subsequent dispatch guards (e.g.
+  // resolveMilestoneFile) see the placeholder file. Without this, the
+  // cached directory listing is stale and the dispatch rule re-fires,
+  // producing an infinite loop despite the placeholder being on disk.
+  // Matches the pattern used in verifyExpectedArtifact above.
+  clearPathCache();
+  clearParseCache();
 
   // Mark the task/slice as complete in the DB so verifyExpectedArtifact passes.
   // Without this, the DB status stays "pending" and the dispatch loop

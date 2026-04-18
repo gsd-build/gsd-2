@@ -452,6 +452,12 @@ export const DISPATCH_RULES: DispatchRule[] = [
       // Only dispatch parallel if 2+ slices are ready
       if (researchReadySlices.length < 2) return null;
 
+      // #4414: If a previous parallel-research attempt escalated to a blocker
+      // placeholder, skip this rule and fall through to per-slice research
+      // (or other rules) rather than re-dispatching the same failing unit.
+      const parallelBlocker = resolveMilestoneFile(basePath, mid, "PARALLEL-BLOCKER");
+      if (parallelBlocker) return null;
+
       return {
         action: "dispatch",
         unitType: "research-slice",
