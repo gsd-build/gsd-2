@@ -61,7 +61,18 @@ async function sendSlackNotification(config: ResolvedConfig, title: string, mess
     }),
     signal: AbortSignal.timeout(PER_REQUEST_TIMEOUT_MS),
   });
-  if (!response.ok) throw new Error(`Slack HTTP ${response.status}`);
+
+  let payload: any;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    throw new Error(`Slack HTTP ${response.status} ${response.statusText} (invalid JSON: ${error instanceof Error ? error.message : String(error)})`);
+  }
+
+  if (!response.ok || payload?.ok !== true) {
+    const detail = payload?.error ? String(payload.error) : JSON.stringify(payload);
+    throw new Error(`Slack HTTP ${response.status} ${response.statusText}: ${detail}`);
+  }
 }
 
 async function sendDiscordNotification(config: ResolvedConfig, title: string, message: string): Promise<void> {
