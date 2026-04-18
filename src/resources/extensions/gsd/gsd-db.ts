@@ -1964,7 +1964,7 @@ export function getSliceTasks(milestoneId: string, sliceId: string): TaskRow[] {
 
 // ─── ADR-011 Phase 2 escalation helpers ──────────────────────────────────
 
-/** Set pause-on-escalation state on a completed task. */
+/** Set pause-on-escalation state on a completed task. Mutually exclusive with awaiting_review. */
 export function setTaskEscalationPending(
   milestoneId: string, sliceId: string, taskId: string,
   artifactPath: string,
@@ -1973,12 +1973,13 @@ export function setTaskEscalationPending(
   currentDb.prepare(
     `UPDATE tasks
        SET escalation_pending = 1,
+           escalation_awaiting_review = 0,
            escalation_artifact_path = :path
      WHERE milestone_id = :mid AND slice_id = :sid AND id = :tid`,
   ).run({ ":path": artifactPath, ":mid": milestoneId, ":sid": sliceId, ":tid": taskId });
 }
 
-/** Set awaiting-review state (artifact exists but continueWithDefault=true, no pause). */
+/** Set awaiting-review state (artifact exists but continueWithDefault=true, no pause). Mutually exclusive with pending. */
 export function setTaskEscalationAwaitingReview(
   milestoneId: string, sliceId: string, taskId: string,
   artifactPath: string,
@@ -1987,6 +1988,7 @@ export function setTaskEscalationAwaitingReview(
   currentDb.prepare(
     `UPDATE tasks
        SET escalation_awaiting_review = 1,
+           escalation_pending = 0,
            escalation_artifact_path = :path
      WHERE milestone_id = :mid AND slice_id = :sid AND id = :tid`,
   ).run({ ":path": artifactPath, ":mid": milestoneId, ":sid": sliceId, ":tid": taskId });
@@ -2392,8 +2394,13 @@ export function reconcileWorktreeDb(
     try {
       const wtInfo = adapter.prepare("PRAGMA wt.table_info('decisions')").all();
       const hasMadeBy = wtInfo.some((col) => col["name"] === "made_by");
-      // ADR-011 P2: worktree may predate schema v16/v17; fall back to defaults when columns are missing.
+      // ADR-011: worktree may predate schema v16/v17. For missing columns we
+      // fall through to the main DB's existing value (not a literal default)
+      // so reconcile never silently clears state the main tree has recorded.
       const hasDecisionSource = wtInfo.some((col) => col["name"] === "source");
+      const wtSliceInfo = adapter.prepare("PRAGMA wt.table_info('slices')").all();
+      const hasIsSketch = wtSliceInfo.some((col) => col["name"] === "is_sketch");
+      const hasSketchScope = wtSliceInfo.some((col) => col["name"] === "sketch_scope");
       const wtTaskInfo = adapter.prepare("PRAGMA wt.table_info('tasks')").all();
       const hasBlockerSource = wtTaskInfo.some((col) => col["name"] === "blocker_source");
       const hasEscalationPending = wtTaskInfo.some((col) => col["name"] === "escalation_pending");
@@ -2421,15 +2428,20 @@ export function reconcileWorktreeDb(
 
       adapter.exec("BEGIN");
       try {
+        // Join the target decisions so we can prefer an existing main.source
+        // when the worktree predates v16 — otherwise a write-through reconcile
+        // would clobber 'escalation'-sourced decisions with the literal default.
         merged.decisions = countChanges(adapter.prepare(`
           INSERT OR REPLACE INTO decisions (
             id, when_context, scope, decision, choice, rationale, revisable, made_by, source, superseded_by
           )
-          SELECT id, when_context, scope, decision, choice, rationale, revisable, ${
-            hasMadeBy ? "made_by" : "'agent'"
+          SELECT w.id, w.when_context, w.scope, w.decision, w.choice, w.rationale, w.revisable, ${
+            hasMadeBy ? "w.made_by" : "COALESCE(m.made_by, 'agent')"
           }, ${
-            hasDecisionSource ? "source" : "'discussion'"
-          }, superseded_by FROM wt.decisions
+            hasDecisionSource ? "w.source" : "COALESCE(m.source, 'discussion')"
+          }, w.superseded_by
+          FROM wt.decisions w
+          LEFT JOIN decisions m ON m.id = w.id
         `).run());
 
         merged.requirements = countChanges(adapter.prepare(`
@@ -2466,13 +2478,15 @@ export function reconcileWorktreeDb(
         `).run());
 
         // Merge slices — preserve worktree progress but never downgrade completed status (#2558).
-        // Uses INSERT OR REPLACE with a subquery that picks the best status — if the main DB
-        // already has a completed slice, keep that status even if the worktree copy is stale.
+        // ADR-011 Phase 1: carry is_sketch + sketch_scope so reconcile doesn't
+        // silently clear sketch metadata. When the worktree predates v16,
+        // fall back to the main DB's existing value rather than a literal 0/''.
         merged.slices = countChanges(adapter.prepare(`
           INSERT OR REPLACE INTO slices (
             milestone_id, id, title, status, risk, depends, demo, created_at, completed_at,
             full_summary_md, full_uat_md, goal, success_criteria, proof_level,
-            integration_closure, observability_impact, sequence, replan_triggered_at
+            integration_closure, observability_impact, sequence, replan_triggered_at,
+            is_sketch, sketch_scope
           )
           SELECT w.milestone_id, w.id, w.title,
                  CASE
@@ -2485,7 +2499,9 @@ export function reconcileWorktreeDb(
                    THEN m.completed_at ELSE w.completed_at
                  END,
                  w.full_summary_md, w.full_uat_md, w.goal, w.success_criteria, w.proof_level,
-                 w.integration_closure, w.observability_impact, w.sequence, w.replan_triggered_at
+                 w.integration_closure, w.observability_impact, w.sequence, w.replan_triggered_at,
+                 ${hasIsSketch ? "w.is_sketch" : "COALESCE(m.is_sketch, 0)"},
+                 ${hasSketchScope ? "w.sketch_scope" : "COALESCE(m.sketch_scope, '')"}
           FROM wt.slices w
           LEFT JOIN slices m ON m.milestone_id = w.milestone_id AND m.id = w.id
         `).run());
@@ -2518,11 +2534,11 @@ export function reconcileWorktreeDb(
                  w.deviations, w.known_issues, w.key_files, w.key_decisions, w.full_summary_md,
                  w.description, w.estimate, w.files, w.verify, w.inputs, w.expected_output,
                  w.observability_impact, w.full_plan_md, w.sequence,
-                 ${hasBlockerSource ? "w.blocker_source" : "''"},
-                 ${hasEscalationPending ? "w.escalation_pending" : "0"},
-                 ${hasEscalationAwaiting ? "w.escalation_awaiting_review" : "0"},
-                 ${hasEscalationArtifact ? "w.escalation_artifact_path" : "NULL"},
-                 ${hasEscalationOverride ? "w.escalation_override_applied_at" : "NULL"}
+                 ${hasBlockerSource ? "w.blocker_source" : "COALESCE(m.blocker_source, '')"},
+                 ${hasEscalationPending ? "w.escalation_pending" : "COALESCE(m.escalation_pending, 0)"},
+                 ${hasEscalationAwaiting ? "w.escalation_awaiting_review" : "COALESCE(m.escalation_awaiting_review, 0)"},
+                 ${hasEscalationArtifact ? "w.escalation_artifact_path" : "m.escalation_artifact_path"},
+                 ${hasEscalationOverride ? "w.escalation_override_applied_at" : "m.escalation_override_applied_at"}
           FROM wt.tasks w
           LEFT JOIN tasks m ON m.milestone_id = w.milestone_id AND m.slice_id = w.slice_id AND m.id = w.id
         `).run());
@@ -3244,13 +3260,13 @@ export function restoreManifest(manifest: StateManifest): void {
       );
     }
 
-    // Restore slices
+    // Restore slices (ADR-011 Phase 1: includes is_sketch + sketch_scope)
     const slStmt = db.prepare(
       `INSERT INTO slices (milestone_id, id, title, status, risk, depends, demo,
         created_at, completed_at, full_summary_md, full_uat_md,
         goal, success_criteria, proof_level, integration_closure, observability_impact,
-        sequence, replan_triggered_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        sequence, replan_triggered_at, is_sketch, sketch_scope)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const s of manifest.slices) {
       slStmt.run(
@@ -3259,6 +3275,8 @@ export function restoreManifest(manifest: StateManifest): void {
         s.created_at, s.completed_at, s.full_summary_md, s.full_uat_md,
         s.goal, s.success_criteria, s.proof_level, s.integration_closure, s.observability_impact,
         s.sequence, s.replan_triggered_at,
+        s.is_sketch ?? 0,
+        s.sketch_scope ?? "",
       );
     }
 

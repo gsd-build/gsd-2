@@ -993,20 +993,24 @@ export async function deriveStateFromDb(basePath: string): Promise<GSDState> {
   // ADR-011 Phase 2: pause-on-escalation takes precedence over dispatching the
   // next task. `awaiting_review` tasks (continueWithDefault=true) are NOT
   // surfaced here — they let the loop continue.
-  const escalationEnabled = loadEffectiveGSDPreferences()?.preferences?.phases?.mid_execution_escalation === true;
-  if (escalationEnabled) {
-    const escalatingTaskId = detectPendingEscalation(tasks, basePath);
-    if (escalatingTaskId) {
-      return {
-        activeMilestone, activeSlice, activeTask,
-        phase: 'escalating-task', recentDecisions: [],
-        blockers: [`Task ${escalatingTaskId} requires a user decision before the loop can proceed`],
-        nextAction: `Run /gsd escalate show ${escalatingTaskId} to review, then /gsd escalate resolve ${escalatingTaskId} <choice> to proceed.`,
-        activeWorkspace: undefined,
-        registry, requirements,
-        progress: { milestones: milestoneProgress, slices: sliceProgress, tasks: taskProgress },
-      };
-    }
+  //
+  // We do NOT gate this on `phases.mid_execution_escalation` — creation of
+  // new escalations is gated at the write site (tools/complete-task.ts:315),
+  // but any escalation_pending row already persisted in the DB must be
+  // honored even if the user later toggles the flag off. Otherwise those
+  // rows would silently orphan, the loop would advance past the paused task,
+  // and the user's prior resolution never lands.
+  const escalatingTaskId = detectPendingEscalation(tasks, basePath);
+  if (escalatingTaskId) {
+    return {
+      activeMilestone, activeSlice, activeTask,
+      phase: 'escalating-task', recentDecisions: [],
+      blockers: [`Task ${escalatingTaskId} requires a user decision before the loop can proceed`],
+      nextAction: `Run /gsd escalate show ${escalatingTaskId} to review, then /gsd escalate resolve ${escalatingTaskId} <choice> to proceed.`,
+      activeWorkspace: undefined,
+      registry, requirements,
+      progress: { milestones: milestoneProgress, slices: sliceProgress, tasks: taskProgress },
+    };
   }
 
   if (!blockerTaskId) {

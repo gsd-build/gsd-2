@@ -130,13 +130,18 @@ export function readEscalationArtifact(path: string): EscalationArtifact | null 
     if (typeof art.sliceId !== "string" || art.sliceId.length === 0) return null;
     if (typeof art.milestoneId !== "string" || art.milestoneId.length === 0) return null;
     if (typeof art.question !== "string" || art.question.length === 0) return null;
-    if (!Array.isArray(art.options) || art.options.length === 0) return null;
+    // Option array constraints — kept in sync with buildEscalationArtifact so
+    // a hand-edited artifact cannot be weaker than what the writer would emit.
+    if (!Array.isArray(art.options) || art.options.length < 2 || art.options.length > 4) return null;
+    const optionIds = new Set<string>();
     for (const opt of art.options) {
       if (!opt || typeof opt !== "object") return null;
       const o = opt as Partial<EscalationOption>;
       if (typeof o.id !== "string" || o.id.length === 0) return null;
       if (typeof o.label !== "string") return null;
       if (typeof o.tradeoffs !== "string") return null;
+      if (optionIds.has(o.id)) return null;
+      optionIds.add(o.id);
     }
     if (typeof art.recommendation !== "string") return null;
     // Recommendation must reference a real option id.
@@ -296,13 +301,19 @@ export function claimOverrideForInjection(
 
 function formatOverrideBlock(art: EscalationArtifact): string {
   const isReject = art.userChoice === "reject-blocker";
+  const isAccept = art.userChoice === "accept";
+  const isOptionChoice = !!art.userChoice && !isReject && !isAccept;
+  // Include the stable option id in the block so downstream prompts and
+  // parsers have a machine-readable token, not just the display label.
   const choiceLabel = isReject
     ? "rejected — blocker path"
-    : art.userChoice === "accept"
+    : isAccept
       ? `accepted recommendation (${art.recommendation})`
-      : (art.options.find((o) => o.id === art.userChoice)?.label ?? art.userChoice ?? "unknown");
+      : isOptionChoice
+        ? `${art.options.find((o) => o.id === art.userChoice)?.label ?? art.userChoice} (id: ${art.userChoice})`
+        : (art.userChoice ?? "unknown");
 
-  const tradeoffs = art.userChoice && art.userChoice !== "accept" && art.userChoice !== "reject-blocker"
+  const tradeoffs = isOptionChoice
     ? art.options.find((o) => o.id === art.userChoice)?.tradeoffs ?? ""
     : "";
 

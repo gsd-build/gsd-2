@@ -82,7 +82,7 @@ Apply these when decomposing and ordering slices:
 
 If the preference `phases.progressive_planning` is enabled and the roadmap has **2 or more slices**, you SHOULD plan S01 in full detail and S02+ as sketches. Plan S02+ full only when the slice is trivially determined (pure boilerplate that cannot meaningfully change based on what S01 ships).
 
-A **sketch slice** has the same roadmap entry as today (title, risk, depends, demo line) plus a `sketchScope` of 2–3 sentences describing the scope boundary. Do NOT attempt to decompose it into tasks during this unit — leave `goal`, `successCriteria`, `proofLevel`, `integrationClosure`, `observabilityImpact` blank (or provide them if genuinely known). When the prior slice completes, a separate `refine-slice` unit will expand the sketch into a full plan using the real codebase state and the prior slice SUMMARY.
+A **sketch slice** has the same roadmap entry as today (title, risk, depends, demo line) plus a `sketchScope` of 2–3 sentences describing the scope boundary. Do NOT attempt to decompose it into tasks during this unit — provide a one-sentence `goal` (the tool schema requires it; keep it at the same level of detail as the roadmap demo line) and leave `successCriteria`, `proofLevel`, `integrationClosure`, `observabilityImpact` blank (or provide them if genuinely known). When the prior slice completes, a separate `refine-slice` unit will expand the sketch into a full plan using the real codebase state and the prior slice SUMMARY.
 
 **To mark a slice as a sketch in the `gsd_plan_milestone` tool call:** set `isSketch: true` and `sketchScope: "<2-3 sentence scope>"` on that slice entry.
 

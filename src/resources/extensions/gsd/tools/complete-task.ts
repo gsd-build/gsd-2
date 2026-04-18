@@ -160,6 +160,39 @@ export async function handleCompleteTask(
   const completedAt = new Date().toISOString();
   let guardError: string | null = null;
 
+  // ── ADR-011 Phase 2: validate escalation payload BEFORE any side effects ─
+  // Building the artifact runs the full shape validation (2-4 options, unique
+  // ids, recommendation references a real id). If the payload is malformed
+  // we must reject the call before marking the task complete, writing
+  // SUMMARY.md, flipping the plan checkbox, or closing execute-task gates —
+  // otherwise a rejected payload would leave the task marked complete with
+  // no escalation recorded, and the loop would silently advance past it.
+  // The filesystem write happens later (after side effects) because that's
+  // the cheapest ordering and validation is where 99% of failures live.
+  let validatedEscalationArtifact: ReturnType<typeof buildEscalationArtifact> | null = null;
+  let escalationWriteEnabled = false;
+  if (params.escalation) {
+    escalationWriteEnabled = loadEffectiveGSDPreferences()?.preferences?.phases?.mid_execution_escalation === true;
+    if (escalationWriteEnabled) {
+      try {
+        validatedEscalationArtifact = buildEscalationArtifact({
+          taskId: params.taskId,
+          sliceId: params.sliceId,
+          milestoneId: params.milestoneId,
+          question: params.escalation.question,
+          options: params.escalation.options,
+          recommendation: params.escalation.recommendation,
+          recommendationRationale: params.escalation.recommendationRationale,
+          continueWithDefault: params.escalation.continueWithDefault,
+        });
+      } catch (validationErr) {
+        return {
+          error: `complete-task escalation payload invalid for ${params.milestoneId}/${params.sliceId}/${params.taskId}: ${(validationErr as Error).message}`,
+        };
+      }
+    }
+  }
+
   transaction(() => {
     // State machine preconditions (inside txn for atomicity).
     // Milestone/slice not existing is OK — insertMilestone/insertSlice below will auto-create.
@@ -307,43 +340,27 @@ export async function handleCompleteTask(
   }
 
   // ── ADR-011 Phase 2: write escalation artifact (opt-in) ────────────────
-  // The executor may include an `escalation` payload when they need the user
-  // to resolve an ambiguity. We write the artifact + flip the DB flag only
-  // when `phases.mid_execution_escalation` is enabled — otherwise the
-  // payload is ignored so agents can safely populate it before users opt in.
-  if (params.escalation) {
-    const escalationEnabled = loadEffectiveGSDPreferences()?.preferences?.phases?.mid_execution_escalation === true;
-    if (escalationEnabled) {
-      try {
-        const artifact = buildEscalationArtifact({
-          taskId: params.taskId,
-          sliceId: params.sliceId,
-          milestoneId: params.milestoneId,
-          question: params.escalation.question,
-          options: params.escalation.options,
-          recommendation: params.escalation.recommendation,
-          recommendationRationale: params.escalation.recommendationRationale,
-          continueWithDefault: params.escalation.continueWithDefault,
-        });
-        writeEscalationArtifact(basePath, artifact);
-      } catch (escalationErr) {
-        const msg = `complete-task escalation write failed for ${params.milestoneId}/${params.sliceId}/${params.taskId}: ${(escalationErr as Error).message}`;
-        logWarning("tool", msg);
-        // For pause-required escalations (continueWithDefault=false), the
-        // loop MUST pause — so if we can't write the artifact we must surface
-        // the failure instead of silently allowing the task to "complete" and
-        // the loop to advance. For fire-and-correct (continueWithDefault=true)
-        // the task proceeds and the warning is enough.
-        if (params.escalation.continueWithDefault === false) {
-          return { error: msg };
-        }
+  // Validation already happened BEFORE side effects — this block only
+  // performs the disk write for a pre-validated artifact. Only transient
+  // filesystem errors can fail here. For continueWithDefault=false we still
+  // surface the error; the side effects already landed (task complete +
+  // SUMMARY.md + gates closed), so the caller sees inconsistent state and
+  // must run /gsd recover or manually re-escalate.
+  if (validatedEscalationArtifact) {
+    try {
+      writeEscalationArtifact(basePath, validatedEscalationArtifact);
+    } catch (escalationErr) {
+      const msg = `complete-task escalation write failed for ${params.milestoneId}/${params.sliceId}/${params.taskId}: ${(escalationErr as Error).message}`;
+      logWarning("tool", msg);
+      if (validatedEscalationArtifact.continueWithDefault === false) {
+        return { error: msg };
       }
-    } else {
-      logWarning(
-        "tool",
-        `complete-task received escalation payload but phases.mid_execution_escalation is not enabled; ignoring (${params.milestoneId}/${params.sliceId}/${params.taskId})`,
-      );
     }
+  } else if (params.escalation && !escalationWriteEnabled) {
+    logWarning(
+      "tool",
+      `complete-task received escalation payload but phases.mid_execution_escalation is not enabled; ignoring (${params.milestoneId}/${params.sliceId}/${params.taskId})`,
+    );
   }
 
   // Invalidate all caches

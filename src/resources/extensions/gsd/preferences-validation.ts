@@ -313,14 +313,34 @@ export function validatePreferences(preferences: GSDPreferences): {
     if (typeof preferences.phases === "object" && preferences.phases !== null) {
       const validatedPhases: PhaseSkipPreferences = {};
       const p = preferences.phases as Record<string, unknown>;
-      if (p.skip_research !== undefined) validatedPhases.skip_research = !!p.skip_research;
-      if (p.skip_reassess !== undefined) validatedPhases.skip_reassess = !!p.skip_reassess;
-      if (p.skip_slice_research !== undefined) validatedPhases.skip_slice_research = !!p.skip_slice_research;
-      if (p.skip_milestone_validation !== undefined) validatedPhases.skip_milestone_validation = !!p.skip_milestone_validation;
-      if (p.reassess_after_slice !== undefined) validatedPhases.reassess_after_slice = !!p.reassess_after_slice;
-      if ((p as any).require_slice_discussion !== undefined) (validatedPhases as any).require_slice_discussion = !!(p as any).require_slice_discussion;
-      if (p.mid_execution_escalation !== undefined) validatedPhases.mid_execution_escalation = !!p.mid_execution_escalation;
-      if (p.progressive_planning !== undefined) validatedPhases.progressive_planning = !!p.progressive_planning;
+      // Strict boolean parsing — YAML usually delivers real booleans, but
+      // hand-edits like `progressive_planning: "false"` otherwise coerce to
+      // truthy via `!!`. Accept only real booleans or the literal strings
+      // "true"/"false"; anything else becomes a warning + ignored.
+      const parseStrictBoolean = (key: string, raw: unknown): boolean | undefined => {
+        if (typeof raw === "boolean") return raw;
+        if (typeof raw === "string") {
+          if (raw === "true") return true;
+          if (raw === "false") return false;
+        }
+        warnings.push(`phases.${key} must be a boolean (got ${typeof raw}: ${JSON.stringify(raw)}) — ignored`);
+        return undefined;
+      };
+      const assignBool = (key: keyof PhaseSkipPreferences, raw: unknown): void => {
+        const v = parseStrictBoolean(String(key), raw);
+        if (v !== undefined) (validatedPhases as Record<string, boolean>)[key as string] = v;
+      };
+      if (p.skip_research !== undefined) assignBool("skip_research", p.skip_research);
+      if (p.skip_reassess !== undefined) assignBool("skip_reassess", p.skip_reassess);
+      if (p.skip_slice_research !== undefined) assignBool("skip_slice_research", p.skip_slice_research);
+      if (p.skip_milestone_validation !== undefined) assignBool("skip_milestone_validation", p.skip_milestone_validation);
+      if (p.reassess_after_slice !== undefined) assignBool("reassess_after_slice", p.reassess_after_slice);
+      if ((p as any).require_slice_discussion !== undefined) {
+        const v = parseStrictBoolean("require_slice_discussion", (p as any).require_slice_discussion);
+        if (v !== undefined) (validatedPhases as any).require_slice_discussion = v;
+      }
+      if (p.mid_execution_escalation !== undefined) assignBool("mid_execution_escalation", p.mid_execution_escalation);
+      if (p.progressive_planning !== undefined) assignBool("progressive_planning", p.progressive_planning);
       // Warn on unknown phase keys
       const knownPhaseKeys = new Set(["skip_research", "skip_reassess", "skip_slice_research", "skip_milestone_validation", "reassess_after_slice", "require_slice_discussion", "mid_execution_escalation", "progressive_planning"]);
       for (const key of Object.keys(p)) {
