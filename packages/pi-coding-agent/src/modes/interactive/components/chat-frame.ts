@@ -27,10 +27,10 @@ export function renderChatFrame(
 	const contentWidth = Math.max(1, outerWidth - 2); // "│ " + content
 	const borderColor =
 		opts.tone === "user"
-			? "borderAccent"
+			? "border"
 			: opts.tone === "compaction"
 				? "customMessageLabel"
-				: "border";
+				: "borderAccent";
 	const borderMuted =
 		opts.tone === "compaction" ? "customMessageLabel" : "borderMuted";
 	const border = (s: string) => theme.fg(borderColor, s);
@@ -44,12 +44,18 @@ export function renderChatFrame(
 		? Math.max(1, outerWidth - visibleWidth(rightRaw) - 1)
 		: outerWidth;
 	const left = truncateToWidth(leftRaw, leftBudget, "");
-	const leftStyled =
+	const labelColor =
 		opts.tone === "user"
-			? theme.fg("accent", theme.bold(left))
+			? "border"
 			: opts.tone === "compaction"
-				? theme.fg("customMessageLabel", theme.bold(left))
-				: theme.fg("muted", theme.bold(left));
+				? "customMessageLabel"
+				: "borderAccent";
+	const dashIdx = left.indexOf(" - ");
+	const leftStyled =
+		dashIdx >= 0
+			? theme.fg(labelColor, theme.bold(left.slice(0, dashIdx))) +
+				theme.fg("dim", left.slice(dashIdx))
+			: theme.fg(labelColor, theme.bold(left));
 	const rightStyled = rightRaw ? theme.fg("dim", rightRaw) : "";
 	const gap =
 		rightRaw.length > 0
@@ -62,9 +68,16 @@ export function renderChatFrame(
 	const headerPad = Math.max(0, outerWidth - visibleWidth(headerRow));
 
 	const sourceLines = trimOuterBlankLines(contentLines);
+	const bodyColor =
+		opts.tone === "user"
+			? "userMessageText"
+			: opts.tone === "compaction"
+				? "customMessageText"
+				: "assistantMessageText";
 	const bodyLines = (sourceLines.length > 0 ? sourceLines : [""]).map((line) => {
 		const clipped = truncateToWidth(line, contentWidth, "");
-		return border("│ ") + clipped;
+		const tinted = bodyColor ? theme.fg(bodyColor, clipped) : clipped;
+		return border("│ ") + tinted;
 	});
 
 	return [

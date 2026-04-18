@@ -27,6 +27,7 @@ export const ThemeJsonSchema = Type.Object({
     selectedBg: ColorValueSchema,
     userMessageBg: ColorValueSchema,
     userMessageText: ColorValueSchema,
+    assistantMessageText: ColorValueSchema,
     customMessageBg: ColorValueSchema,
     customMessageText: ColorValueSchema,
     customMessageLabel: ColorValueSchema,

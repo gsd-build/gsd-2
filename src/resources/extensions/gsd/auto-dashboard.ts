@@ -904,10 +904,24 @@ export function updateProgressWidget(
           }
           if (cumulativeCost) sp.push(theme.fg("warning", `$${cumulativeCost.toFixed(2)}`));
 
-          const cxDisplay = `${cxPct}%/${formatWidgetTokens(cxWindow)}`;
-          if (cxPctVal > 90) sp.push(theme.fg("error", cxDisplay));
-          else if (cxPctVal > 70) sp.push(theme.fg("warning", cxDisplay));
-          else sp.push(cxDisplay);
+          const CX_BAR_WIDTH = 8;
+          const cxBarFilled = Math.min(
+            CX_BAR_WIDTH,
+            Math.max(0, Math.round((cxPctVal / 100) * CX_BAR_WIDTH)),
+          );
+          const cxBarColor: "error" | "warning" | "success" =
+            cxPctVal > 90 ? "error" : cxPctVal > 70 ? "warning" : "success";
+          const cxBar =
+            theme.fg(cxBarColor, "━".repeat(cxBarFilled)) +
+            theme.fg("dim", "─".repeat(CX_BAR_WIDTH - cxBarFilled));
+          const cxPctText = `${cxPct}%/${formatWidgetTokens(cxWindow)}`;
+          const cxColorized =
+            cxPctVal > 90
+              ? theme.fg("error", cxPctText)
+              : cxPctVal > 70
+                ? theme.fg("warning", cxPctText)
+                : cxPctText;
+          sp.push(`${cxBar} ${cxColorized}`);
 
           const statsLine = sp.map(p => p.includes("\x1b[") ? p : theme.fg("dim", p))
             .join(theme.fg("dim", "  "));

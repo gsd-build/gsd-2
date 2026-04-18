@@ -36,6 +36,7 @@ export type ThemeColor =
 	| "text"
 	| "thinkingText"
 	| "userMessageText"
+	| "assistantMessageText"
 	| "customMessageText"
 	| "customMessageLabel"
 	| "toolTitle"
