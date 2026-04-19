@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
+import { symlinkSync, realpathSync } from "node:fs";
+
 import { _getAdapter, closeDatabase } from "../../../src/resources/extensions/gsd/gsd-db.ts";
-import { registerWorkflowTools, WORKFLOW_TOOL_NAMES } from "./workflow-tools.ts";
+import { registerWorkflowTools, WORKFLOW_TOOL_NAMES, validateProjectDir } from "./workflow-tools.ts";
 
 function makeTmpBase(): string {
   const base = join(tmpdir(), `gsd-mcp-workflow-${randomUUID()}`);
@@ -1089,5 +1091,93 @@ describe("URL scheme regex — Windows drive letter safety", () => {
     assert.ok(!urlSchemeRegex.test("/usr/local/lib/module.js"), "unix absolute path should not match");
     assert.ok(!urlSchemeRegex.test("./relative/path.js"), "relative path should not match");
     assert.ok(!urlSchemeRegex.test("../parent/path.js"), "parent relative path should not match");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateProjectDir — symlink containment hardening (#4476)
+// ---------------------------------------------------------------------------
+//
+// The regression: a symlink inside the allowed root could point outside it,
+// and a lexical-only containment check would happily admit the path. The fix
+// realpath()s the candidate (and the allowed root) before checking
+// containment, falling back to the lexical path only when the candidate
+// itself does not exist (a legitimate brand-new-worktree case).
+
+describe("validateProjectDir", () => {
+  it("rejects a symlink inside the allowed root that points outside it", () => {
+    const allowedRoot = makeTmpBase();
+    const outside = makeTmpBase();
+    const linkInside = join(allowedRoot, "escape-link");
+    symlinkSync(outside, linkInside, "dir");
+
+    const prevRoot = process.env.GSD_WORKFLOW_PROJECT_ROOT;
+    try {
+      process.env.GSD_WORKFLOW_PROJECT_ROOT = allowedRoot;
+      assert.throws(
+        () => validateProjectDir(linkInside),
+        /configured workflow project root/,
+        "symlink-to-outside must not bypass the containment check",
+      );
+    } finally {
+      if (prevRoot === undefined) {
+        delete process.env.GSD_WORKFLOW_PROJECT_ROOT;
+      } else {
+        process.env.GSD_WORKFLOW_PROJECT_ROOT = prevRoot;
+      }
+      cleanup(allowedRoot);
+      cleanup(outside);
+    }
+  });
+
+  it("accepts a non-existent path inside the allowed root (new worktree case)", () => {
+    const allowedRoot = makeTmpBase();
+    // Use the realpath form so that on platforms where /tmp resolves through a
+    // symlink (macOS /var → /private/var) the lexical fallback for ENOENT
+    // candidates still lines up with the allowed root.
+    const canonicalRoot = realpathSync(allowedRoot);
+    const futureWorktree = join(canonicalRoot, "worktrees", "M999-not-yet-created");
+
+    const prevRoot = process.env.GSD_WORKFLOW_PROJECT_ROOT;
+    try {
+      process.env.GSD_WORKFLOW_PROJECT_ROOT = canonicalRoot;
+      const result = validateProjectDir(futureWorktree);
+      assert.equal(result, futureWorktree, "ENOENT should fall back to the lexical path, not throw");
+    } finally {
+      if (prevRoot === undefined) {
+        delete process.env.GSD_WORKFLOW_PROJECT_ROOT;
+      } else {
+        process.env.GSD_WORKFLOW_PROJECT_ROOT = prevRoot;
+      }
+      cleanup(allowedRoot);
+    }
+  });
+
+  it("accepts a real directory inside the allowed root", () => {
+    const allowedRoot = makeTmpBase();
+    const child = join(allowedRoot, "child");
+    mkdirSync(child, { recursive: true });
+
+    const prevRoot = process.env.GSD_WORKFLOW_PROJECT_ROOT;
+    try {
+      process.env.GSD_WORKFLOW_PROJECT_ROOT = allowedRoot;
+      const result = validateProjectDir(child);
+      // realpath may canonicalize macOS /var → /private/var; assert it ends with our child segment.
+      assert.ok(result.endsWith("child"), `expected resolved path to end with 'child', got ${result}`);
+    } finally {
+      if (prevRoot === undefined) {
+        delete process.env.GSD_WORKFLOW_PROJECT_ROOT;
+      } else {
+        process.env.GSD_WORKFLOW_PROJECT_ROOT = prevRoot;
+      }
+      cleanup(allowedRoot);
+    }
+  });
+
+  it("rejects relative paths", () => {
+    assert.throws(
+      () => validateProjectDir("relative/path"),
+      /must be an absolute path/,
+    );
   });
 });

@@ -22,10 +22,12 @@ type WorkflowToolExecutors = {
         depends: string[];
         demo: string;
         goal: string;
-        successCriteria: string;
-        proofLevel: string;
-        integrationClosure: string;
-        observabilityImpact: string;
+        successCriteria?: string;
+        proofLevel?: string;
+        integrationClosure?: string;
+        observabilityImpact?: string;
+        isSketch?: boolean;
+        sketchScope?: string;
       }>;
       status?: string;
       dependsOn?: string[];
@@ -209,6 +211,13 @@ type WorkflowToolExecutors = {
       keyFiles?: string[];
       keyDecisions?: string[];
       blockerDiscovered?: boolean;
+      escalation?: {
+        question: string;
+        options: Array<{ id: string; label: string; tradeoffs: string }>;
+        recommendation: string;
+        recommendationRationale: string;
+        continueWithDefault: boolean;
+      };
       verificationEvidence?: Array<
         { command: string; exitCode: number; verdict: string; durationMs: number } | string
       >;
@@ -279,30 +288,51 @@ function resolveExternalStateRoot(allowedRoot: string): string | null {
   }
 }
 
-function validateProjectDir(projectDir: string, env: NodeJS.ProcessEnv = process.env): string {
+export function validateProjectDir(projectDir: string, env: NodeJS.ProcessEnv = process.env): string {
   if (!isAbsolute(projectDir)) {
     throw new Error(`projectDir must be an absolute path. Received: ${projectDir}`);
   }
 
-  const resolvedProjectDir = resolve(projectDir);
+  const lexicallyResolved = resolve(projectDir);
+  // Resolve symlinks on the candidate before the containment check so that a
+  // symlink inside the allowed root pointing outside of it cannot bypass the
+  // guard. Falls back to the lexical path if the candidate does not exist yet
+  // (legitimate for a brand-new worktree dir about to be created).
+  const resolvedProjectDir = safeRealpath(lexicallyResolved);
+
   const allowedRoot = getAllowedProjectRoot(env);
   if (!allowedRoot) return resolvedProjectDir;
 
-  if (isWithinRoot(resolvedProjectDir, allowedRoot)) return resolvedProjectDir;
+  const resolvedAllowedRoot = safeRealpath(allowedRoot);
+  if (isWithinRoot(resolvedProjectDir, resolvedAllowedRoot)) return resolvedProjectDir;
 
   // External state layout: `<allowedRoot>/.gsd` may be a symlink into
   // `~/.gsd/projects/<hash>/`, and auto-worktrees live under
   // `~/.gsd/projects/<hash>/worktrees/<MID>/`. Accept candidates that are
   // under the realpath of `<allowedRoot>/.gsd` — they belong to this project
   // even though their absolute path is outside allowedRoot (#issue-a44).
-  const externalRoot = resolveExternalStateRoot(allowedRoot);
+  const externalRoot = resolveExternalStateRoot(resolvedAllowedRoot);
   if (externalRoot && isWithinRoot(resolvedProjectDir, externalRoot)) {
     return resolvedProjectDir;
   }
 
   throw new Error(
-    `projectDir must stay within the configured workflow project root. Received: ${resolvedProjectDir}; allowed root: ${allowedRoot}`,
+    `projectDir must stay within the configured workflow project root. Received: ${resolvedProjectDir}; allowed root: ${resolvedAllowedRoot}`,
   );
+}
+
+function safeRealpath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch (err) {
+    // Only fall back for non-existent paths — a legitimate case when a worktree
+    // directory hasn't been created yet. Permission errors (EACCES), not-a-
+    // directory (ENOTDIR), etc. must propagate so we do not silently degrade
+    // to a lexical-only containment check that a restricted symlink could
+    // bypass.
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return path;
+    throw err;
+  }
 }
 
 function parseToolArgs<T>(schema: z.ZodType<T>, args: Record<string, unknown>): T {
@@ -571,9 +601,31 @@ export const WORKFLOW_TOOL_NAMES = [
   "gsd_journal_query",
 ] as const;
 
+const DEFAULT_WORKFLOW_OP_TIMEOUT_MS = 5 * 60 * 1000;
+
+function getWorkflowOpTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.GSD_MCP_WORKFLOW_TIMEOUT_MS?.trim();
+  if (!raw) return DEFAULT_WORKFLOW_OP_TIMEOUT_MS;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_WORKFLOW_OP_TIMEOUT_MS;
+  return parsed; // 0 disables the timeout
+}
+
 async function runSerializedWorkflowOperation<T>(fn: () => Promise<T>): Promise<T> {
   // The shared DB adapter and workflow log base path are process-global, so
   // workflow MCP mutations must not overlap within a single server process.
+  // A per-operation deadline prevents a single stuck call from wedging every
+  // subsequent write for the lifetime of the process.
+  //
+  // Known limitation: on timeout we surface an error and release the queue,
+  // but Promise.race cannot cancel the underlying `fn()` — it may continue
+  // running in the background and overlap with the next admitted operation.
+  // Proper cancellation requires threading an AbortSignal through every
+  // workflow executor (`workflow-tool-executors.ts` and friends), which is
+  // a larger change. The current trade-off: risk a theoretical overlap after
+  // a 5-minute wall-clock timeout vs permanently wedging the server. The
+  // overlap window is bounded by how long the zombie `fn()` keeps running;
+  // in practice DB writes complete quickly even when the caller gave up.
   const prior = workflowExecutionQueue;
   let release!: () => void;
   workflowExecutionQueue = new Promise<void>((resolve) => {
@@ -581,8 +633,22 @@ async function runSerializedWorkflowOperation<T>(fn: () => Promise<T>): Promise<
   });
 
   await prior;
+  const timeoutMs = getWorkflowOpTimeoutMs();
   try {
-    return await fn();
+    if (timeoutMs === 0) {
+      return await fn();
+    }
+    let timer: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`Workflow operation exceeded ${timeoutMs}ms deadline (GSD_MCP_WORKFLOW_TIMEOUT_MS)`));
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([fn(), timeoutPromise]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   } finally {
     release();
   }
@@ -763,10 +829,14 @@ const planMilestoneParams = {
     depends: z.array(z.string()),
     demo: z.string(),
     goal: z.string(),
-    successCriteria: z.string(),
-    proofLevel: z.string(),
-    integrationClosure: z.string(),
-    observabilityImpact: z.string(),
+    // ADR-011: heavy planning fields are optional for sketch slices; required for full slices.
+    successCriteria: z.string().optional(),
+    proofLevel: z.string().optional(),
+    integrationClosure: z.string().optional(),
+    observabilityImpact: z.string().optional(),
+    // ADR-011 sketch-then-refine fields.
+    isSketch: z.boolean().optional().describe("ADR-011: true marks this slice as a sketch awaiting refine-slice expansion"),
+    sketchScope: z.string().optional().describe("ADR-011: 2-3 sentence scope boundary, required when isSketch=true"),
   })).describe("Planned slices for the milestone"),
   status: z.string().optional().describe("Milestone status"),
   dependsOn: z.array(z.string()).optional().describe("Milestone dependencies"),
@@ -872,7 +942,7 @@ const saveGateResultParams = {
   projectDir: projectDirParam,
   milestoneId: z.string().describe("Milestone ID (e.g. M001)"),
   sliceId: z.string().describe("Slice ID (e.g. S01)"),
-  gateId: z.enum(["Q3", "Q4", "Q5", "Q6", "Q7", "Q8", "MV01", "MV02", "MV03", "MV04"]).describe("Gate ID"),
+  gateId: z.string().describe("Gate ID (e.g. Q3, Q4, Q5, Q6, Q7, Q8, MV01, MV02, MV03, MV04). Accepts any string for forward-compatibility with new gates."),
   taskId: z.string().optional().describe("Task ID for task-scoped gates"),
   verdict: z.enum(["pass", "flag", "omitted"]).describe("Gate verdict"),
   rationale: z.string().describe("One-sentence justification"),
@@ -1035,6 +1105,20 @@ const taskCompleteParams = {
   keyFiles: z.array(z.string()).optional().describe("List of key files created or modified"),
   keyDecisions: z.array(z.string()).optional().describe("List of key decisions made during this task"),
   blockerDiscovered: z.boolean().optional().describe("Whether a plan-invalidating blocker was discovered"),
+  // ADR-011 Phase 2: mid-execution escalation — agent asks the user to resolve an ambiguity.
+  escalation: z.object({
+    question: z.string().describe("The question the user needs to answer — one clear sentence."),
+    options: z.array(z.object({
+      id: z.string().describe("Short id (e.g. 'A', 'B') used by /gsd escalate resolve."),
+      label: z.string().describe("One-line label."),
+      tradeoffs: z.string().describe("1-2 sentences on the tradeoffs of this option."),
+    })).min(2).max(4).describe("2-4 options the user can choose between."),
+    recommendation: z.string().describe("Option id the executor recommends."),
+    recommendationRationale: z.string().describe("Why the recommendation — 1-2 sentences."),
+    continueWithDefault: z.boolean().describe(
+      "When true, loop continues (artifact logged for later review). When false, auto-mode pauses until the user resolves via /gsd escalate resolve.",
+    ),
+  }).optional().describe("ADR-011 Phase 2: optional escalation payload. Only honored when phases.mid_execution_escalation is true."),
   verificationEvidence: z.array(z.union([
     z.object({
       command: z.string(),
@@ -1182,7 +1266,19 @@ export function registerWorkflowTools(server: McpToolServer): void {
           return reserved;
         }
         const allIds = [...new Set([...findMilestoneIds(projectDir), ...getReservedMilestoneIds()])];
-        const nextId = nextMilestoneId(allIds);
+        const prefsMod = await importLocalModule<any>(
+          "../../../src/resources/extensions/gsd/preferences.js",
+        ).catch(() => null);
+        // Graceful degradation: a corrupt preferences file should not crash
+        // milestone-id generation. Fall back to non-unique IDs if anything
+        // throws here — matches the pre-fix behavior for missing prefs.
+        let uniqueEnabled = false;
+        try {
+          uniqueEnabled = !!prefsMod?.loadEffectiveGSDPreferences?.()?.preferences?.unique_milestone_ids;
+        } catch {
+          uniqueEnabled = false;
+        }
+        const nextId = nextMilestoneId(allIds, uniqueEnabled);
         await ensureMilestoneDbRow(nextId);
         return nextId;
       });
@@ -1210,7 +1306,19 @@ export function registerWorkflowTools(server: McpToolServer): void {
           return reserved;
         }
         const allIds = [...new Set([...findMilestoneIds(projectDir), ...getReservedMilestoneIds()])];
-        const nextId = nextMilestoneId(allIds);
+        const prefsMod = await importLocalModule<any>(
+          "../../../src/resources/extensions/gsd/preferences.js",
+        ).catch(() => null);
+        // Graceful degradation: a corrupt preferences file should not crash
+        // milestone-id generation. Fall back to non-unique IDs if anything
+        // throws here — matches the pre-fix behavior for missing prefs.
+        let uniqueEnabled = false;
+        try {
+          uniqueEnabled = !!prefsMod?.loadEffectiveGSDPreferences?.()?.preferences?.unique_milestone_ids;
+        } catch {
+          uniqueEnabled = false;
+        }
+        const nextId = nextMilestoneId(allIds, uniqueEnabled);
         await ensureMilestoneDbRow(nextId);
         return nextId;
       });
@@ -1474,8 +1582,10 @@ export function registerWorkflowTools(server: McpToolServer): void {
     "Read the current status of a milestone and all its slices from the GSD database.",
     milestoneStatusParams,
     async (args: Record<string, unknown>) => {
+      // gsd_milestone_status is a read-only query. In-process (query-tools.ts)
+      // does not apply the write-gate; MCP must match to avoid blocking reads
+      // during pending-gate or queue-mode states.
       const { projectDir, milestoneId } = parseWorkflowArgs(milestoneStatusSchema, args);
-      await enforceWorkflowWriteGate("gsd_milestone_status", projectDir, milestoneId);
       const { executeMilestoneStatus } = await getWorkflowToolExecutors();
       return runSerializedWorkflowOperation(() => executeMilestoneStatus({ milestoneId }, projectDir));
     },

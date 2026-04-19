@@ -23,7 +23,7 @@ import { readKnowledge } from './readers/knowledge.js';
 import { buildGraph, writeGraph, writeSnapshot, graphStatus, graphQuery, graphDiff } from './readers/graph.js';
 import { resolveGsdRoot } from './readers/paths.js';
 import { runDoctorLite } from './readers/doctor-lite.js';
-import { registerWorkflowTools } from './workflow-tools.js';
+import { registerWorkflowTools, validateProjectDir } from './workflow-tools.js';
 import { applySecrets, checkExistingEnvKeys, detectDestination } from './env-writer.js';
 
 // ---------------------------------------------------------------------------
@@ -497,7 +497,8 @@ export async function createMcpServer(sessionManager: SessionManager): Promise<{
     async (args: Record<string, unknown>) => {
       const { projectDir, query } = args as { projectDir: string; query?: string };
       try {
-        const state = await readProjectState(projectDir, query);
+        const validated = validateProjectDir(projectDir);
+        const state = await readProjectState(validated, query);
         return jsonContent(state);
       } catch (err) {
         return errorContent(err instanceof Error ? err.message : String(err));
@@ -589,7 +590,7 @@ export async function createMcpServer(sessionManager: SessionManager): Promise<{
       };
 
       try {
-        const resolvedProjectDir = resolve(projectDir);
+        const resolvedProjectDir = validateProjectDir(projectDir);
         const resolvedEnvPath = resolve(resolvedProjectDir, envFilePath ?? '.env');
 
         // (1) Check which keys already exist
@@ -696,7 +697,7 @@ export async function createMcpServer(sessionManager: SessionManager): Promise<{
     async (args: Record<string, unknown>) => {
       const { projectDir } = args as { projectDir: string };
       try {
-        return jsonContent(readProgress(projectDir));
+        return jsonContent(readProgress(validateProjectDir(projectDir)));
       } catch (err) {
         return errorContent(err instanceof Error ? err.message : String(err));
       }
@@ -716,7 +717,7 @@ export async function createMcpServer(sessionManager: SessionManager): Promise<{
     async (args: Record<string, unknown>) => {
       const { projectDir, milestoneId } = args as { projectDir: string; milestoneId?: string };
       try {
-        return jsonContent(readRoadmap(projectDir, milestoneId));
+        return jsonContent(readRoadmap(validateProjectDir(projectDir), milestoneId));
       } catch (err) {
         return errorContent(err instanceof Error ? err.message : String(err));
       }
@@ -736,7 +737,7 @@ export async function createMcpServer(sessionManager: SessionManager): Promise<{
     async (args: Record<string, unknown>) => {
       const { projectDir, limit } = args as { projectDir: string; limit?: number };
       try {
-        return jsonContent(readHistory(projectDir, limit));
+        return jsonContent(readHistory(validateProjectDir(projectDir), limit));
       } catch (err) {
         return errorContent(err instanceof Error ? err.message : String(err));
       }
@@ -756,7 +757,7 @@ export async function createMcpServer(sessionManager: SessionManager): Promise<{
     async (args: Record<string, unknown>) => {
       const { projectDir, scope } = args as { projectDir: string; scope?: string };
       try {
-        return jsonContent(runDoctorLite(projectDir, scope));
+        return jsonContent(runDoctorLite(validateProjectDir(projectDir), scope));
       } catch (err) {
         return errorContent(err instanceof Error ? err.message : String(err));
       }
@@ -776,7 +777,7 @@ export async function createMcpServer(sessionManager: SessionManager): Promise<{
     async (args: Record<string, unknown>) => {
       const { projectDir, filter } = args as { projectDir: string; filter?: 'all' | 'pending' | 'actionable' };
       try {
-        return jsonContent(readCaptures(projectDir, filter ?? 'all'));
+        return jsonContent(readCaptures(validateProjectDir(projectDir), filter ?? 'all'));
       } catch (err) {
         return errorContent(err instanceof Error ? err.message : String(err));
       }
@@ -795,7 +796,7 @@ export async function createMcpServer(sessionManager: SessionManager): Promise<{
     async (args: Record<string, unknown>) => {
       const { projectDir } = args as { projectDir: string };
       try {
-        return jsonContent(readKnowledge(projectDir));
+        return jsonContent(readKnowledge(validateProjectDir(projectDir)));
       } catch (err) {
         return errorContent(err instanceof Error ? err.message : String(err));
       }
@@ -836,7 +837,7 @@ export async function createMcpServer(sessionManager: SessionManager): Promise<{
       snapshot: z.boolean().optional().describe('Write snapshot before build (for future diff)'),
     },
     async (args: Record<string, unknown>) => {
-      const { projectDir, mode, term, budget, snapshot } = args as {
+      const { projectDir: rawProjectDir, mode, term, budget, snapshot } = args as {
         projectDir: string;
         mode: 'build' | 'query' | 'status' | 'diff';
         term?: string;
@@ -845,6 +846,7 @@ export async function createMcpServer(sessionManager: SessionManager): Promise<{
       };
 
       try {
+        const projectDir = validateProjectDir(rawProjectDir);
         const gsdRoot = resolveGsdRoot(projectDir);
 
         switch (mode) {
