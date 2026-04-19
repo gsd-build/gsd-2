@@ -238,6 +238,14 @@ function clearProjectRootStateFiles(basePath: string, milestoneId: string): void
   }
 }
 
+function isProjectGsdSymlink(basePath: string): boolean {
+  try {
+    return lstatSyncFn(join(basePath, ".gsd")).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 // ─── Build Artifact Auto-Resolve ─────────────────────────────────────────────
 
 /** Patterns for machine-generated build artifacts that can be safely
@@ -1675,12 +1683,19 @@ export function mergeMilestoneToMain(
       // CONTEXT files into the stash. If stash pop later fails, those files
       // are permanently trapped in the stash entry and lost on the next
       // stash push or drop.
+      //
+      // When `.gsd` itself is a symlink, Git rejects pathspecs below it
+      // ("beyond a symbolic link"). In that layout, exclude the whole symlink
+      // and keep stashing real project files that could block the merge.
+      const stashPathspecs = isProjectGsdSymlink(originalBasePath_)
+        ? [".", ":(exclude).gsd"]
+        : [":(exclude).gsd/milestones"];
       execFileSync(
         "git",
         [
           "stash", "push", "--include-untracked",
           "-m", `gsd: pre-merge stash for ${milestoneId}`,
-          "--", ":(exclude).gsd/milestones",
+          "--", ...stashPathspecs,
         ],
         { cwd: originalBasePath_, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" },
       );
