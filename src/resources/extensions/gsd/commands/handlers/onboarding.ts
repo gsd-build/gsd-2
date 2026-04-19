@@ -1,17 +1,19 @@
-// GSD — /gsd onboarding command handler (re-entry, --resume, --reset, --step)
+// GSD — /gsd onboarding command handler (re-entry hub)
 //
-// Provides the discoverable re-entry point for the onboarding wizard. The
-// first-run wizard in src/onboarding.ts is hidden behind shouldRunOnboarding;
-// this handler lets users re-launch it on demand.
+// The first-run wizard in src/onboarding.ts uses @clack/prompts and takes over
+// raw stdin. Running it from inside the pi-coding-agent TUI wedges the TUI
+// (clack leaves stdin paused + cooked, pi-tui's data handler then receives no
+// keypresses). So re-entry cannot replay the clack wizard — instead it routes
+// to a setup hub built from ctx.ui.select, which the TUI owns.
+//
+// Clack-only steps (llm/search/remote/tool-keys via the first-run wizard) are
+// surfaced as notifications pointing the user at the canonical per-step
+// commands (/login, /gsd keys, /gsd remote) that are already ctx.ui-safe.
 
 import type { ExtensionCommandContext } from "@gsd/pi-coding-agent"
-import { AuthStorage } from "@gsd/pi-coding-agent"
-import { homedir } from "node:os"
-import { join } from "node:path"
 import {
   ONBOARDING_STEPS,
   isValidStepId,
-  nearestResumeStep,
   type OnboardingStepId,
 } from "../../setup-catalog.js"
 import {
@@ -20,37 +22,7 @@ import {
   resetOnboarding,
 } from "../../onboarding-state.js"
 
-// Inline auth path (mirrors src/app-paths.ts) — keep this module rootDir-clean
-// for the resources tsconfig. Importing from src/ pulls files outside
-// src/resources and breaks the build.
-const AUTH_FILE_PATH = join(
-  process.env.GSD_CODING_AGENT_DIR ||
-    join(process.env.GSD_HOME || join(homedir(), ".gsd"), "agent"),
-  "auth.json",
-)
-
-/**
- * Dynamic import shim for the first-run wizard.
- *
- * src/onboarding.ts lives outside the resources rootDir, so a static import
- * pulls it into this tsconfig project and triggers TS6059. We resolve the
- * specifier through a variable + opaque type so TS can't pull the file at
- * compile time; the path resolves correctly at runtime via dist/onboarding.js.
- */
-type FirstRunWizardModule = {
-  runOnboarding: (storage: AuthStorage) => Promise<void>
-  runLlmStep: (...args: unknown[]) => Promise<unknown>
-  runWebSearchStep: (...args: unknown[]) => Promise<unknown>
-  runRemoteQuestionsStep: (...args: unknown[]) => Promise<unknown>
-  runToolKeysStep: (...args: unknown[]) => Promise<unknown>
-}
-async function loadFirstRunWizard(): Promise<FirstRunWizardModule> {
-  const specifier = "../../../../../onboarding.js"
-  return (await import(/* @vite-ignore */ specifier)) as FirstRunWizardModule
-}
-
 interface ParsedArgs {
-  resume: boolean
   reset: boolean
   step: string | null
   stepValid: boolean | null
@@ -58,11 +30,13 @@ interface ParsedArgs {
 
 function parseArgs(raw: string): ParsedArgs {
   const tokens = raw.split(/\s+/).filter(Boolean)
-  const out: ParsedArgs = { resume: false, reset: false, step: null, stepValid: null }
+  const out: ParsedArgs = { reset: false, step: null, stepValid: null }
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]
-    if (t === "--resume" || t === "resume") out.resume = true
-    else if (t === "--reset" || t === "reset") out.reset = true
+    if (t === "--reset" || t === "reset") out.reset = true
+    else if (t === "--resume" || t === "resume") {
+      // Re-entry no longer replays the wizard; --resume collapses into the hub.
+    }
     else if (t === "--step" || t === "step") {
       const next = tokens[i + 1]
       if (next) {
@@ -79,52 +53,39 @@ function parseArgs(raw: string): ParsedArgs {
   return out
 }
 
-async function getAuthStorage(): Promise<AuthStorage> {
-  return AuthStorage.create(AUTH_FILE_PATH)
-}
+// ─── Per-step routing ────────────────────────────────────────────────────────
+//
+// Clack-based steps are surfaced as notifications — running them inline from
+// the TUI would wedge stdin (see header comment). Everything else routes to an
+// existing ctx.ui-safe handler.
 
-async function runWholeWizard(ctx: ExtensionCommandContext, fromStep?: OnboardingStepId): Promise<void> {
-  const authStorage = await getAuthStorage()
-  // The first-run wizard ignores the resume hint today — it always walks the
-  // full sequence with skip prompts. We still mark completion at the end and
-  // record the resume hint for next time. This keeps the wizard linear and
-  // simple; per-step jump support comes via --step.
-  if (fromStep) {
-    ctx.ui.notify(
-      `Resuming from step: ${fromStep}. The wizard runs all remaining steps; press skip on any you've already configured.`,
-      "info",
-    )
-  }
-  const { runOnboarding } = await loadFirstRunWizard()
-  await runOnboarding(authStorage)
-}
-
-async function runSingleStep(ctx: ExtensionCommandContext, stepId: OnboardingStepId): Promise<void> {
-  const authStorage = await getAuthStorage()
-  const ob = await loadFirstRunWizard()
-  // Lazy-load clack + chalk via the same path the wizard uses
-  const p = await import("@clack/prompts")
-  const { default: chalk } = await import("chalk")
-  const pc = {
-    cyan: chalk.cyan, green: chalk.green, yellow: chalk.yellow,
-    dim: chalk.dim, bold: chalk.bold, red: chalk.red, reset: chalk.reset,
-  }
-
+async function runStep(ctx: ExtensionCommandContext, stepId: OnboardingStepId): Promise<void> {
   switch (stepId) {
     case "llm":
-      await ob.runLlmStep(p as any, pc as any, authStorage)
+      ctx.ui.notify(
+        "LLM provider setup: run /login to sign in via OAuth, or /gsd keys add to paste an API key.",
+        "info",
+      )
       return
     case "search":
-      await ob.runWebSearchStep(p as any, pc as any, authStorage, false)
+      ctx.ui.notify(
+        "Web search setup: run /gsd keys add and pick a search provider (brave, tavily, etc.).",
+        "info",
+      )
       return
     case "remote":
-      await ob.runRemoteQuestionsStep(p as any, pc as any, authStorage)
+      ctx.ui.notify(
+        "Remote questions setup: run /gsd remote to configure Discord / Slack / Telegram notifications.",
+        "info",
+      )
       return
     case "tool-keys":
-      await ob.runToolKeysStep(p as any, pc as any, authStorage)
+      ctx.ui.notify(
+        "Tool keys setup: run /gsd keys add to save API keys for Context7, Jina, Groq voice, etc.",
+        "info",
+      )
       return
     case "model": {
-      // Delegate to /gsd model picker
       const { handleCoreCommand } = await import("./core.js")
       await handleCoreCommand("model", ctx)
       return
@@ -137,7 +98,6 @@ async function runSingleStep(ctx: ExtensionCommandContext, stepId: OnboardingSte
       return
     }
     case "doctor": {
-      // Best-effort: surface provider doctor results inline
       try {
         const { runProviderDoctor } = await import("../../doctor-providers.js") as any
         if (typeof runProviderDoctor === "function") {
@@ -148,16 +108,36 @@ async function runSingleStep(ctx: ExtensionCommandContext, stepId: OnboardingSte
       ctx.ui.notify("Run /gsd doctor to validate your setup.", "info")
       return
     }
-    case "skills": {
-      ctx.ui.notify("Skill install runs automatically during /gsd init. Use /gsd init or /skill manage.", "info")
+    case "skills":
+      ctx.ui.notify("Skill install runs during /gsd init. Use /gsd init or /skill manage.", "info")
       return
-    }
     case "project": {
       const { handleCoreCommand } = await import("./core.js")
       await handleCoreCommand("init", ctx)
       return
     }
   }
+}
+
+// ─── Setup hub ───────────────────────────────────────────────────────────────
+
+async function renderSetupHub(ctx: ExtensionCommandContext): Promise<void> {
+  const record = readOnboardingRecord()
+  const completed = new Set(record.completedSteps)
+  const skipped = new Set(record.skippedSteps)
+
+  const labels = ONBOARDING_STEPS.map(step => {
+    const mark = completed.has(step.id) ? "✓" : skipped.has(step.id) ? "↷" : "○"
+    const req = step.required ? " (required)" : ""
+    return `${mark} ${step.label}${req} — ${step.hint}`
+  })
+  const labelToStep = new Map(labels.map((label, i) => [label, ONBOARDING_STEPS[i].id]))
+
+  const choice = await ctx.ui.select("GSD Setup — pick a step to configure", labels)
+  if (typeof choice !== "string") return
+  const stepId = labelToStep.get(choice)
+  if (!stepId) return
+  await runStep(ctx, stepId)
 }
 
 function renderStatus(): string {
@@ -192,38 +172,25 @@ export async function handleOnboarding(rawArgs: string, ctx: ExtensionCommandCon
       ctx.ui.notify(`Unknown step "${args.step}". Valid: ${validIds}`, "warning")
       return
     }
-    await runSingleStep(ctx, args.step as OnboardingStepId)
+    await runStep(ctx, args.step as OnboardingStepId)
     return
   }
 
   if (args.reset) {
     resetOnboarding()
     ctx.ui.notify(
-      "Onboarding reset. Existing API keys/credentials are unchanged — manage them with /gsd keys.",
+      "Onboarding state cleared. API keys/credentials are unchanged — manage them with /gsd keys. Restart GSD to re-run the first-run wizard, or pick a step below.",
       "info",
     )
-    await runWholeWizard(ctx)
+    await renderSetupHub(ctx)
     return
   }
 
-  if (args.resume) {
-    const r = readOnboardingRecord()
-    const next = nearestResumeStep(r.lastResumePoint, r.completedSteps)
-    await runWholeWizard(ctx, next)
-    return
-  }
-
-  // No flags. If already complete, show status + offer choice.
+  // No flags (or --resume). Show status if complete, then open the hub.
   if (isOnboardingComplete()) {
     ctx.ui.notify(renderStatus(), "info")
-    ctx.ui.notify(
-      "Onboarding already complete. Use /gsd onboarding --reset to start over, or --step <name> to redo one section.",
-      "info",
-    )
-    return
   }
-
-  await runWholeWizard(ctx)
+  await renderSetupHub(ctx)
 }
 
 export { renderStatus as renderOnboardingStatus }
