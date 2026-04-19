@@ -386,6 +386,111 @@ describe("workflow MCP tools", () => {
     }
   });
 
+  it("gsd_plan_milestone rejects empty slice fields up front with all violations", async () => {
+    const base = makeTmpBase();
+    try {
+      const server = makeMockServer();
+      registerWorkflowTools(server as any);
+      const milestoneTool = server.tools.find((t) => t.name === "gsd_plan_milestone");
+      assert.ok(milestoneTool, "milestone planning tool should be registered");
+
+      let caught: unknown;
+      try {
+        await milestoneTool!.handler({
+          projectDir: base,
+          milestoneId: "M001",
+          title: "Workflow MCP planning",
+          vision: "Plan milestone over MCP.",
+          slices: [
+            {
+              sliceId: "S01",
+              title: "Bridge planning",
+              risk: "medium",
+              depends: [],
+              demo: "Milestone plan persists through MCP.",
+              goal: "Persist roadmap state.",
+              successCriteria: "",
+              proofLevel: "",
+              integrationClosure: "   ",
+              observabilityImpact: "",
+            },
+          ],
+        });
+      } catch (err) {
+        caught = err;
+      }
+      assert.ok(caught, "empty slice fields should be rejected");
+      const message = caught instanceof Error ? caught.message : String(caught);
+      for (const field of ["successCriteria", "proofLevel", "integrationClosure", "observabilityImpact"]) {
+        assert.ok(
+          message.includes(field),
+          `parse error should mention ${field}, got: ${message}`,
+        );
+      }
+    } finally {
+      cleanup(base);
+    }
+  });
+
+  it("gsd_plan_milestone requires sketchScope when isSketch=true and skips heavy fields", async () => {
+    const base = makeTmpBase();
+    try {
+      const server = makeMockServer();
+      registerWorkflowTools(server as any);
+      const milestoneTool = server.tools.find((t) => t.name === "gsd_plan_milestone");
+      assert.ok(milestoneTool, "milestone planning tool should be registered");
+
+      let caught: unknown;
+      try {
+        await milestoneTool!.handler({
+          projectDir: base,
+          milestoneId: "M001",
+          title: "Sketch milestone",
+          vision: "Sketch first, refine later.",
+          slices: [
+            {
+              sliceId: "S01",
+              title: "Sketch slice",
+              risk: "low",
+              depends: [],
+              demo: "Stub demo.",
+              goal: "Stub goal.",
+              isSketch: true,
+              sketchScope: "",
+            },
+          ],
+        });
+      } catch (err) {
+        caught = err;
+      }
+      assert.ok(caught, "empty sketchScope should be rejected when isSketch=true");
+      const message = caught instanceof Error ? caught.message : String(caught);
+      assert.ok(message.includes("sketchScope"), `expected sketchScope error, got: ${message}`);
+
+      const sketchResult = await milestoneTool!.handler({
+        projectDir: base,
+        milestoneId: "M001",
+        title: "Sketch milestone",
+        vision: "Sketch first, refine later.",
+        slices: [
+          {
+            sliceId: "S01",
+            title: "Sketch slice",
+            risk: "low",
+            depends: [],
+            demo: "Stub demo.",
+            goal: "Stub goal.",
+            isSketch: true,
+            sketchScope: "Defer heavy planning fields until refine-slice.",
+          },
+        ],
+      });
+      assert.match((sketchResult as any).content[0].text as string, /Planned milestone M001/);
+    } finally {
+      cleanup(base);
+    }
+  });
+
   it("gsd_requirement_save opens the DB before inline requirement writes", async () => {
     const base = makeTmpBase();
     try {
