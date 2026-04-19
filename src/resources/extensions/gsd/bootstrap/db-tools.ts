@@ -1073,10 +1073,19 @@ export function registerDbTools(pi: ExtensionAPI): void {
     renderResult(result: any, _options: any, theme: any) {
       const d = result.details;
       if (result.isError || d?.error) {
-        return new Text(theme.fg("error", `Error: ${d?.error ?? "unknown"}`), 0, 0);
+        const msg = d?.error ?? result.content?.[0]?.text ?? "unknown";
+        return new Text(theme.fg("error", `Error: ${msg}`), 0, 0);
       }
-      const color = d?.verdict === "flag" ? "warning" : "success";
-      return new Text(theme.fg(color, `${d?.gateId}: ${d?.verdict}`), 0, 0);
+      // Under MCP external tool execution, `details` is stripped to `{}`
+      // because MCP doesn't serialize non-standard return fields. Fall back
+      // to the human-readable summary from `content` instead of printing
+      // `undefined: undefined`.
+      if (!d?.gateId || !d?.verdict) {
+        const text = result.content?.[0]?.text ?? "Gate result saved";
+        return new Text(theme.fg("success", text), 0, 0);
+      }
+      const color = d.verdict === "flag" ? "warning" : "success";
+      return new Text(theme.fg(color, `${d.gateId}: ${d.verdict}`), 0, 0);
     },
   };
 
