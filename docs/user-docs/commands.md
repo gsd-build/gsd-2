@@ -31,6 +31,7 @@
 | `/gsd export --html --all` | Generate retrospective reports for all milestones at once |
 | `/gsd update` | Update GSD to the latest version in-session |
 | `/gsd knowledge` | Add persistent project knowledge (rule, pattern, or lesson) |
+| `/gsd extract-learnings <MID>` | Extract structured Decisions, Lessons, Patterns, and Surprises from a completed milestone — writes `<MID>-LEARNINGS.md` audit trail, appends Patterns and Lessons to `.gsd/KNOWLEDGE.md`, and persists Decisions via the DECISIONS database. Runs automatically at milestone completion. |
 | `/gsd fast` | Toggle service tier for supported models (prioritized API routing) |
 | `/gsd rate` | Rate last unit's model tier (over/ok/under) — improves adaptive routing |
 | `/gsd changelog` | Show categorized release notes |

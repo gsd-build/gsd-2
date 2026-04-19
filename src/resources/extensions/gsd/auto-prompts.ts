@@ -35,6 +35,7 @@ import { formatDecisionsCompact, formatRequirementsCompact } from "./structured-
 import { readPhaseAnchor, formatAnchorForPrompt } from "./phase-anchor.js";
 import { logWarning } from "./workflow-logger.js";
 import { inlineGraphSubgraph } from "./graph-context.js";
+import { buildExtractionStepsBlock } from "./commands-extract-learnings.js";
 
 // ─── Preamble Cap ─────────────────────────────────────────────────────────────
 
@@ -1744,6 +1745,14 @@ export async function buildCompleteMilestonePrompt(
 
   const milestoneSummaryPath = join(base, `${relMilestonePath(base, mid)}/${mid}-SUMMARY.md`);
 
+  const learningsRelPath = join(relMilestonePath(base, mid), `${mid}-LEARNINGS.md`);
+  const learningsAbsPath = join(base, learningsRelPath);
+  const extractLearningsSteps = buildExtractionStepsBlock({
+    milestoneId: mid,
+    outputPath: learningsAbsPath,
+    relativeOutputPath: learningsRelPath,
+  });
+
   return loadPrompt("complete-milestone", {
     workingDirectory: base,
     milestoneId: mid,
@@ -1751,6 +1760,7 @@ export async function buildCompleteMilestonePrompt(
     roadmapPath: roadmapRel,
     inlinedContext,
     milestoneSummaryPath,
+    extractLearningsSteps,
     skillActivation: buildSkillActivationBlock({
       base,
       milestoneId: mid,
