@@ -1,13 +1,23 @@
-// Regression: save_gate_result renderResult must not print "undefined: undefined"
-// when `details` is stripped to `{}`. This happens under MCP external tool
-// execution — the MCP protocol doesn't carry non-standard return fields, so
-// Claude Code's adapter drops `details`. renderResult must fall back to the
-// human-readable summary from `content[0].text` instead.
+/**
+ * Regression test suite for save_gate_result renderResult under MCP execution.
+ *
+ * Verifies that renderResult does not print "undefined: undefined" when
+ * `details` is stripped to `{}`. This happens under MCP external tool
+ * execution because the MCP protocol doesn't carry non-standard return
+ * fields, so Claude Code's adapter drops `details`. renderResult must fall
+ * back to the human-readable summary from `content[0].text` instead.
+ *
+ * Cases covered:
+ *   - empty `details` falls back to content summary
+ *   - structured details render with proper field values
+ *   - error text surfaces when `details.error` is missing
+ */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerDbTools } from '../bootstrap/db-tools.ts';
 
+/** Construct a minimal Pi-like object with a tool registry, for use in tests. */
 function makeMockPi() {
   const tools: any[] = [];
   return {
@@ -21,6 +31,7 @@ const fakeTheme = {
   bold: (text: string) => text,
 };
 
+/** Register db-tools against a mock Pi and return the gsd_save_gate_result tool. */
 function getSaveGateResultTool() {
   const pi = makeMockPi();
   registerDbTools(pi);

@@ -1070,6 +1070,19 @@ export function registerDbTools(pi: ExtensionAPI): void {
       text += theme.fg("dim", ` → ${args.verdict ?? ""}`);
       return new Text(text, 0, 0);
     },
+    /**
+     * Render the save_gate_result tool output for the TUI.
+     *
+     * Falls back to `content[0].text` when `details` is empty — which happens
+     * under MCP external tool execution because the MCP protocol doesn't carry
+     * non-standard return fields (Claude Code's stream adapter drops `details`).
+     * Without the fallback, the renderer prints "undefined: undefined" instead
+     * of the gate verdict. The same fallback applies to error rendering when
+     * `details.error` is missing.
+     *
+     * Tracked broader fix: plumb `details` through MCP via `structuredContent`
+     * (issue #4472).
+     */
     renderResult(result: any, _options: any, theme: any) {
       const d = result.details;
       if (result.isError || d?.error) {
