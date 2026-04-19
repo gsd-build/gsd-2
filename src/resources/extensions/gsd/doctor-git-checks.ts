@@ -36,6 +36,22 @@ function isDoctorArtifactOnly(dirPath: string): boolean {
   }
 }
 
+function normalizePathForComparison(path: string): string {
+  const resolved = existsSync(path) ? realpathSync(path) : path;
+  const normalized = resolved
+    .replaceAll("\\", "/")
+    .replace(/^\/\/\?\//, "")
+    .replace(/\/+$/, "");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function isSameOrNestedPath(candidate: string, container: string): boolean {
+  const normalizedCandidate = normalizePathForComparison(candidate);
+  const normalizedContainer = normalizePathForComparison(container);
+  return normalizedCandidate === normalizedContainer ||
+    normalizedCandidate.startsWith(`${normalizedContainer}/`);
+}
+
 export async function checkGitHealth(
   basePath: string,
   issues: DoctorIssue[],
@@ -98,8 +114,13 @@ export async function checkGitHealth(
           // pattern in removeWorktree() (#1946). Without this, git cannot
           // remove the worktree and the doctor enters a deadlock where it
           // detects the orphan every run but never cleans it up.
-          const cwd = process.cwd();
-          if (wt.path === cwd || cwd.startsWith(wt.path + sep)) {
+          let cwd = basePath;
+          try {
+            cwd = process.cwd();
+          } catch {
+            cwd = basePath;
+          }
+          if (isSameOrNestedPath(cwd, wt.path)) {
             try {
               process.chdir(basePath);
             } catch {
