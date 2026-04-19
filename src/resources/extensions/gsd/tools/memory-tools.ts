@@ -17,6 +17,7 @@ import {
   reinforceMemory,
 } from "../memory-store.js";
 import type { Memory, RankedMemory } from "../memory-store.js";
+import { traverseGraph } from "../memory-relations.js";
 
 // ─── Shared result shape (matches tools/workflow-tool-executors.ts) ─────────
 
@@ -274,34 +275,38 @@ export interface GsdGraphParams {
   mode: "build" | "query";
   memoryId?: string;
   depth?: number;
+  rel?: string;
 }
 
 export interface GraphNode {
   id: string;
   category: string;
   content: string;
+  confidence: number;
 }
 
 export interface GraphEdge {
   from: string;
   to: string;
   rel: string;
+  confidence: number;
 }
 
 export function executeGsdGraph(params: GsdGraphParams): ToolExecutionResult {
   if (!isDbAvailable()) return dbUnavailable("gsd_graph");
 
   if (params.mode === "build") {
-    // Phase 1 stub: the extractor populates relations as it goes (Phase 4
-    // extends it with explicit LINK actions). For now, we acknowledge the
-    // request without performing a batch rebuild.
+    // The extractor emits LINK actions incrementally (Phase 4). There is no
+    // batch rebuild step to run today — ingest artifacts via `/gsd memory
+    // extract <SRC-...>` and the next extraction turn will add edges.
     return {
       content: [
         {
           type: "text",
           text:
-            "gsd_graph build acknowledged. Graph is populated incrementally by memory extraction; " +
-            "dedicated rebuild will be implemented in a later phase.",
+            "gsd_graph build acknowledged. Graph edges are populated incrementally by memory " +
+            "extraction (including LINK actions). Use `/gsd memory extract <SRC-...>` to trigger " +
+            "extraction against a specific ingested source.",
         },
       ],
       details: { operation: "gsd_graph", mode: "build", built: 0 },
@@ -325,24 +330,38 @@ export function executeGsdGraph(params: GsdGraphParams): ToolExecutionResult {
     };
   }
 
-  const adapter = _getAdapter();
-  if (!adapter) return dbUnavailable("gsd_graph");
-
   try {
-    const { nodes, edges } = traverseSupersedes(memoryId, clampDepth(params.depth));
+    const graph = traverseGraph(memoryId, clampDepth(params.depth));
+    const rel = params.rel?.trim().toLowerCase() || null;
+    const edges = rel ? graph.edges.filter((e) => e.rel === rel) : graph.edges;
+    const relevantIds = new Set<string>([memoryId]);
+    for (const e of edges) {
+      relevantIds.add(e.from);
+      relevantIds.add(e.to);
+    }
+    const nodes = graph.nodes.filter((n) => relevantIds.has(n.id));
+
     if (nodes.length === 0) {
       return {
         content: [{ type: "text", text: `No memory found with id ${memoryId}.` }],
         details: { operation: "gsd_graph", mode: "query", memoryId, nodes: [], edges: [] },
       };
     }
+
     const summary = [
       `Memory ${memoryId} — ${nodes.length} node(s), ${edges.length} edge(s).`,
       ...nodes.map((n) => `  [${n.id}] (${n.category}) ${n.content}`),
+      ...edges.map((e) => `  ${e.from} --${e.rel}-> ${e.to}`),
     ].join("\n");
     return {
       content: [{ type: "text", text: summary }],
-      details: { operation: "gsd_graph", mode: "query", memoryId, nodes, edges },
+      details: {
+        operation: "gsd_graph",
+        mode: "query",
+        memoryId,
+        nodes: nodes.map((n) => ({ id: n.id, category: n.category, content: n.content })),
+        edges: edges.map((e) => ({ from: e.from, to: e.to, rel: e.rel })),
+      },
     };
   } catch (err) {
     return {
@@ -358,60 +377,4 @@ function clampDepth(value: unknown): number {
   if (value < 0) return 0;
   if (value > 5) return 5;
   return Math.floor(value);
-}
-
-/**
- * Walk the `memories.superseded_by` edges up to `depth` hops in both
- * directions. Phase 4 will replace this with a proper memory_relations
- * traversal, at which point `rel` will carry real semantics.
- */
-function traverseSupersedes(
-  startId: string,
-  depth: number,
-): { nodes: GraphNode[]; edges: GraphEdge[] } {
-  const adapter = _getAdapter();
-  if (!adapter) return { nodes: [], edges: [] };
-
-  const visited = new Set<string>();
-  const queue: Array<{ id: string; hop: number }> = [{ id: startId, hop: 0 }];
-  const nodes: GraphNode[] = [];
-  const edges: GraphEdge[] = [];
-
-  while (queue.length > 0) {
-    const { id, hop } = queue.shift()!;
-    if (visited.has(id)) continue;
-    visited.add(id);
-
-    const row = adapter
-      .prepare("SELECT id, category, content, superseded_by FROM memories WHERE id = :id")
-      .get({ ":id": id });
-    if (!row) continue;
-
-    nodes.push({
-      id: row["id"] as string,
-      category: row["category"] as string,
-      content: row["content"] as string,
-    });
-
-    if (hop >= depth) continue;
-
-    // Forward edge: this memory supersedes something? (i.e. others point to it)
-    const predecessors = adapter
-      .prepare("SELECT id FROM memories WHERE superseded_by = :id")
-      .all({ ":id": id });
-    for (const pred of predecessors) {
-      const predId = pred["id"] as string;
-      edges.push({ from: predId, to: id, rel: "supersedes" });
-      if (!visited.has(predId)) queue.push({ id: predId, hop: hop + 1 });
-    }
-
-    // Backward edge: this memory was superseded by another
-    const successor = row["superseded_by"] as string | null;
-    if (successor && successor !== "CAP_EXCEEDED") {
-      edges.push({ from: id, to: successor, rel: "supersedes" });
-      if (!visited.has(successor)) queue.push({ id: successor, hop: hop + 1 });
-    }
-  }
-
-  return { nodes, edges };
 }

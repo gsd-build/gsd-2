@@ -16,6 +16,7 @@ import {
   decayMemoriesBefore,
   supersedeLowestRankedMemories,
 } from './gsd-db.js';
+import { createMemoryRelation, isValidRelation } from './memory-relations.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -62,11 +63,20 @@ export type MemoryActionSupersede = {
   superseded_by: string;
 };
 
+export type MemoryActionLink = {
+  action: 'LINK';
+  from: string;
+  to: string;
+  rel: string;
+  confidence?: number;
+};
+
 export type MemoryAction =
   | MemoryActionCreate
   | MemoryActionUpdate
   | MemoryActionReinforce
-  | MemoryActionSupersede;
+  | MemoryActionSupersede
+  | MemoryActionLink;
 
 // ─── Category Display Order ─────────────────────────────────────────────────
 
@@ -661,12 +671,26 @@ export function applyMemoryActions(
           case 'SUPERSEDE':
             supersedeMemory(action.id, action.superseded_by);
             break;
+          case 'LINK':
+            applyLinkAction(action);
+            break;
         }
       }
       enforceMemoryCap();
     });
   } catch {
     // non-fatal — transaction will have rolled back
+  }
+}
+
+// ─── LINK action ────────────────────────────────────────────────────────────
+
+function applyLinkAction(action: MemoryActionLink): void {
+  try {
+    if (!isValidRelation(action.rel)) return;
+    createMemoryRelation(action.from, action.to, action.rel, action.confidence);
+  } catch {
+    // Link failures should never break memory extraction.
   }
 }
 

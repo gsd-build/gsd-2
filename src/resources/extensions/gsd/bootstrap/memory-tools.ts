@@ -135,6 +135,13 @@ export function registerMemoryTools(pi: ExtensionAPI): void {
       }),
       memoryId: Type.Optional(Type.String({ description: "Memory ID (required when mode=query)" })),
       depth: Type.Optional(Type.Number({ description: "Hops to traverse (0–5, default 1)", minimum: 0, maximum: 5 })),
+      rel: Type.Optional(Type.Union([
+        Type.Literal("related_to"),
+        Type.Literal("depends_on"),
+        Type.Literal("contradicts"),
+        Type.Literal("elaborates"),
+        Type.Literal("supersedes"),
+      ], { description: "Only include edges with this relation type" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       const ok = await ensureDbOpen();

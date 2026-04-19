@@ -180,7 +180,7 @@ function openRawDb(path: string): unknown {
   return new Database(path);
 }
 
-const SCHEMA_VERSION = 19;
+const SCHEMA_VERSION = 20;
 
 function indexExists(db: DbAdapter, name: string): boolean {
   return !!db.prepare(
@@ -316,6 +316,17 @@ function initSchema(db: DbAdapter, fileBacked: boolean): void {
         dim INTEGER NOT NULL,
         vector BLOB NOT NULL,
         updated_at TEXT NOT NULL
+      )
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS memory_relations (
+        from_id TEXT NOT NULL,
+        to_id TEXT NOT NULL,
+        rel TEXT NOT NULL,
+        confidence REAL NOT NULL DEFAULT 0.8,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (from_id, to_id, rel)
       )
     `);
 
@@ -549,6 +560,8 @@ function initSchema(db: DbAdapter, fileBacked: boolean): void {
     db.exec("CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope)");
     db.exec("CREATE INDEX IF NOT EXISTS idx_memory_sources_kind ON memory_sources(kind)");
     db.exec("CREATE INDEX IF NOT EXISTS idx_memory_sources_scope ON memory_sources(scope)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memory_relations_from ON memory_relations(from_id)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memory_relations_to ON memory_relations(to_id)");
     db.exec("CREATE INDEX IF NOT EXISTS idx_replan_history_milestone ON replan_history(milestone_id, created_at)");
 
     // v13 indexes — hot-path dispatch queries
@@ -1120,6 +1133,26 @@ function migrateSchema(db: DbAdapter): void {
       }
       db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
         ":version": 19,
+        ":applied_at": new Date().toISOString(),
+      });
+    }
+
+    if (currentVersion < 20) {
+      // Memory system Phase 4: knowledge-graph relations between memories.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS memory_relations (
+          from_id TEXT NOT NULL,
+          to_id TEXT NOT NULL,
+          rel TEXT NOT NULL,
+          confidence REAL NOT NULL DEFAULT 0.8,
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (from_id, to_id, rel)
+        )
+      `);
+      db.exec("CREATE INDEX IF NOT EXISTS idx_memory_relations_from ON memory_relations(from_id)");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_memory_relations_to ON memory_relations(to_id)");
+      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
+        ":version": 20,
         ":applied_at": new Date().toISOString(),
       });
     }
@@ -3639,6 +3672,33 @@ export function deleteMemoryEmbedding(memoryId: string): boolean {
     .prepare("DELETE FROM memory_embeddings WHERE memory_id = :id")
     .run({ ":id": memoryId }) as { changes?: number };
   return (res?.changes ?? 0) > 0;
+}
+
+export function insertMemoryRelationRow(args: {
+  fromId: string;
+  toId: string;
+  rel: string;
+  confidence: number;
+  createdAt: string;
+}): void {
+  if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  currentDb.prepare(
+    `INSERT OR REPLACE INTO memory_relations (from_id, to_id, rel, confidence, created_at)
+     VALUES (:from_id, :to_id, :rel, :confidence, :created_at)`,
+  ).run({
+    ":from_id": args.fromId,
+    ":to_id": args.toId,
+    ":rel": args.rel,
+    ":confidence": args.confidence,
+    ":created_at": args.createdAt,
+  });
+}
+
+export function deleteMemoryRelationsFor(memoryId: string): void {
+  if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  currentDb
+    .prepare("DELETE FROM memory_relations WHERE from_id = :id OR to_id = :id")
+    .run({ ":id": memoryId });
 }
 
 export function rewriteMemoryId(placeholderId: string, realId: string): void {

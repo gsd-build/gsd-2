@@ -325,7 +325,7 @@ test('memory-store: schema includes memories table', () => {
 
   // Verify schema version is 17 (ADR-011 P2 escalation columns included)
   const version = adapter.prepare('SELECT MAX(version) as v FROM schema_version').get();
-  assert.deepStrictEqual(version?.['v'], 19, 'schema version should be 19');
+  assert.deepStrictEqual(version?.['v'], 20, 'schema version should be 20');
 
   closeDatabase();
 });

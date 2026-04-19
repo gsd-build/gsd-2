@@ -128,6 +128,14 @@ Actions (return JSON array):
 - UPDATE: {"action": "UPDATE", "id": "<MEM###>", "content": "<revised text>"}
 - REINFORCE: {"action": "REINFORCE", "id": "<MEM###>"}
 - SUPERSEDE: {"action": "SUPERSEDE", "id": "<MEM###>", "superseded_by": "<MEM###>"}
+- LINK: {"action": "LINK", "from": "<MEM###>", "to": "<MEM###>", "rel": "<rel>", "confidence": <0.6-0.95>}
+
+Link relation types:
+- related_to   — two memories cover the same area
+- depends_on   — "to" is a prerequisite for "from"
+- contradicts  — "from" conflicts with "to"
+- elaborates   — "from" expands on "to"
+- supersedes   — "from" replaces "to" (rarely needed; prefer SUPERSEDE)
 
 Rules:
 - Don't create memories for one-off bug fixes or temporary state
@@ -135,6 +143,7 @@ Rules:
 - Keep content to 1-3 sentences
 - Confidence: 0.6 tentative, 0.8 solid, 0.95 well-confirmed
 - Prefer fewer high-quality memories over many low-quality ones
+- Only LINK memories that genuinely relate — don't fabricate edges
 - Return empty array [] if nothing worth remembering
 - NEVER include secrets, API keys, or passwords
 
@@ -259,6 +268,21 @@ export function parseMemoryResponse(raw: string): MemoryAction[] {
               action: 'SUPERSEDE',
               id: item.id,
               superseded_by: item.superseded_by,
+            });
+          }
+          break;
+        case 'LINK':
+          if (
+            typeof item.from === 'string' &&
+            typeof item.to === 'string' &&
+            typeof item.rel === 'string'
+          ) {
+            actions.push({
+              action: 'LINK',
+              from: item.from,
+              to: item.to,
+              rel: item.rel,
+              confidence: typeof item.confidence === 'number' ? item.confidence : undefined,
             });
           }
           break;
