@@ -35,6 +35,19 @@ function registerAlias(pi: ExtensionAPI, toolDef: any, aliasName: string, canoni
   });
 }
 
+/**
+ * Read a tool result's structured payload, accommodating MCP's `details` →
+ * `structuredContent` rename (#4472, #4477). In-process executions still
+ * deliver the payload on `result.details`; MCP-routed executions deliver it
+ * on `result.structuredContent` (post `adaptExecutorResult` transform). All
+ * `renderResult` callbacks in this file route through this helper so a future
+ * field rename only needs to be applied in one place.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- result shape varies by tool
+function readDetails(result: any): any {
+  return result?.details ?? result?.structuredContent;
+}
+
 export function registerDbTools(pi: ExtensionAPI): void {
   // ─── gsd_decision_save (formerly gsd_save_decision) ─────────────────────
 
@@ -110,7 +123,7 @@ export function registerDbTools(pi: ExtensionAPI): void {
       return new Text(text, 0, 0);
     },
     renderResult(result: any, _options: any, theme: any) {
-      const d = result.details;
+      const d = readDetails(result);
       if (result.isError || d?.error) {
         return new Text(theme.fg("error", `Error: ${d?.error ?? "unknown"}`), 0, 0);
       }
@@ -188,7 +201,7 @@ export function registerDbTools(pi: ExtensionAPI): void {
       return new Text(text, 0, 0);
     },
     renderResult(result: any, _options: any, theme: any) {
-      const d = result.details;
+      const d = readDetails(result);
       if (result.isError || d?.error) {
         return new Text(theme.fg("error", `Error: ${d?.error ?? "unknown"}`), 0, 0);
       }
@@ -273,7 +286,7 @@ export function registerDbTools(pi: ExtensionAPI): void {
       return new Text(text, 0, 0);
     },
     renderResult(result: any, _options: any, theme: any) {
-      const d = result.details;
+      const d = readDetails(result);
       if (result.isError || d?.error) {
         return new Text(theme.fg("error", `Error: ${d?.error ?? "unknown"}`), 0, 0);
       }
@@ -322,7 +335,7 @@ export function registerDbTools(pi: ExtensionAPI): void {
       return new Text(text, 0, 0);
     },
     renderResult(result: any, _options: any, theme: any) {
-      const d = result.details;
+      const d = readDetails(result);
       if (result.isError || d?.error) {
         return new Text(theme.fg("error", `Error: ${d?.error ?? "unknown"}`), 0, 0);
       }
@@ -406,7 +419,7 @@ export function registerDbTools(pi: ExtensionAPI): void {
       return new Text(theme.fg("toolTitle", theme.bold("milestone_generate_id")), 0, 0);
     },
     renderResult(result: any, _options: any, theme: any) {
-      const d = result.details;
+      const d = readDetails(result);
       if (result.isError || d?.error) {
         return new Text(theme.fg("error", `Error: ${d?.error ?? "unknown"}`), 0, 0);
       }
@@ -1087,7 +1100,7 @@ export function registerDbTools(pi: ExtensionAPI): void {
      * `Error: Error: ...`.
      */
     renderResult(result: any, _options: any, theme: any) {
-      const d = result.details;
+      const d = readDetails(result);
       if (result.isError || d?.error) {
         const rawMsg = d?.error ?? result.content?.[0]?.text ?? "unknown";
         const msg = rawMsg.replace(/^\s*Error:\s*/i, "");

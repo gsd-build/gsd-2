@@ -879,7 +879,7 @@ function normalizeToolResultContent(content: unknown): ExternalToolResultContent
  * rewrites casing. All other shapes fall back to an empty object so callers
  * can rely on `details` being present.
  */
-function extractStructuredDetailsFromBlock(block: Record<string, unknown>): Record<string, unknown> {
+function extractStructuredDetailsFromBlock(block: Record<string, unknown>): Record<string, unknown> | undefined {
 	const sibling = block.structuredContent ?? (block as Record<string, unknown>).structured_content;
 	if (sibling && typeof sibling === "object" && !Array.isArray(sibling)) {
 		return sibling as Record<string, unknown>;
@@ -897,7 +897,12 @@ function extractStructuredDetailsFromBlock(block: Record<string, unknown>): Reco
 		}
 	}
 
-	return {};
+	// Return undefined (not {}) when no structured payload is present, matching
+	// the pre-#4477 contract where `details` was nullable. An empty-object
+	// sentinel is truthy and breaks downstream consumers that gate on
+	// `if (details)`. `undefined` matches the type of the field these results
+	// flow into (`Record<string, unknown> | undefined`).
+	return undefined;
 }
 
 /** Extract tool result payloads from an SDK synthetic user message, keyed by tool-use ID. */

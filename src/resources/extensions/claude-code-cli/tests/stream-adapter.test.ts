@@ -372,7 +372,10 @@ describe("stream-adapter — Claude Code external tool results", () => {
 				toolUseId: "tool-bash-1",
 				result: {
 					content: [{ type: "text", text: "line 1\nline 2" }],
-					details: {},
+					// extractStructuredDetailsFromBlock returns undefined when no
+					// structured payload exists, restoring the pre-#4477 nullable
+					// contract (#4477 review feedback).
+					details: undefined,
 					isError: false,
 				},
 			},
@@ -468,7 +471,9 @@ describe("stream-adapter — Claude Code external tool results", () => {
 				toolUseId: "tool-read-1",
 				result: {
 					content: [{ type: "text", text: "file contents" }],
-					details: {},
+					// undefined (not {}) per the restored nullable contract — see
+					// the analogous assertion in the tool_result test above.
+					details: undefined,
 					isError: true,
 				},
 			},

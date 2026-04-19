@@ -627,6 +627,15 @@ function getWorkflowOpTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
  * channel for structured tool payloads — preserves the data for clients that
  * render from it (e.g. the save_gate_result renderer that reads gateId /
  * verdict). See #4472.
+ *
+ * Discard policy for non-plain-object `details`: the `isPlainObject` guard
+ * accepts the canonical case (a record literal) and intentionally drops bare
+ * primitives (string, number, boolean), bare arrays, and class instances /
+ * Date objects. This is deliberate — MCP `structuredContent` is specified as
+ * a JSON object; non-object payloads can't round-trip cleanly. No current
+ * executor returns a non-object `details`, so this never fires in practice.
+ * Future executors needing to return a primitive should wrap it
+ * (`details: { value: 42 }`) rather than relying on the discard.
  */
 function adaptExecutorResult(result: unknown): unknown {
   if (!result || typeof result !== "object") return result;
@@ -730,41 +739,15 @@ async function handleTaskComplete(
   args: Omit<z.infer<typeof taskCompleteSchema>, "projectDir">,
 ): Promise<unknown> {
   await enforceWorkflowWriteGate("gsd_task_complete", projectDir, args.milestoneId);
-  const {
-    taskId,
-    sliceId,
-    milestoneId,
-    oneLiner,
-    narrative,
-    verification,
-    deviations,
-    knownIssues,
-    keyFiles,
-    keyDecisions,
-    blockerDiscovered,
-    verificationEvidence,
-  } = args;
   const { executeTaskComplete } = await getWorkflowToolExecutors();
+  // Pass `args` through directly rather than destructure-then-rebuild. The
+  // previous implementation re-listed each field, which silently dropped
+  // schema fields that weren't in the rebuild list (e.g., ADR-011's
+  // `escalation` payload). The destructure-then-rebuild pattern is the bug
+  // class; matching the spread shape used by sibling handlers (handleSliceComplete,
+  // handleReplanSlice) eliminates the recurrence risk by construction.
   return adaptExecutorResult(
-    await runSerializedWorkflowOperation(() =>
-      executeTaskComplete(
-        {
-          taskId,
-          sliceId,
-          milestoneId,
-          oneLiner,
-          narrative,
-          verification,
-          deviations,
-          knownIssues,
-          keyFiles,
-          keyDecisions,
-          blockerDiscovered,
-          verificationEvidence,
-        },
-        projectDir,
-      ),
-    ),
+    await runSerializedWorkflowOperation(() => executeTaskComplete(args, projectDir)),
   );
 }
 
