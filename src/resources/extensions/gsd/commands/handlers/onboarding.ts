@@ -39,7 +39,10 @@ const AUTH_FILE_PATH = join(
  * compile time; the path resolves correctly at runtime via dist/onboarding.js.
  */
 type FirstRunWizardModule = {
-  runOnboarding: (storage: AuthStorage) => Promise<void>
+  runOnboarding: (
+    storage: AuthStorage,
+    opts?: { showIntro?: boolean },
+  ) => Promise<void>
   runLlmStep: (...args: unknown[]) => Promise<unknown>
   runWebSearchStep: (...args: unknown[]) => Promise<unknown>
   runRemoteQuestionsStep: (...args: unknown[]) => Promise<unknown>
@@ -126,7 +129,7 @@ async function runWholeWizard(ctx: ExtensionCommandContext, fromStep?: Onboardin
     )
   }
   const { runOnboarding } = await loadFirstRunWizard()
-  await runOnboarding(authStorage)
+  await runOnboarding(authStorage, { showIntro: false })
 }
 
 async function runSingleStep(ctx: ExtensionCommandContext, stepId: OnboardingStepId): Promise<void> {

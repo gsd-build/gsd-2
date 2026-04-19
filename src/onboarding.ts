@@ -57,6 +57,11 @@ type PicoModule = {
   reset: (s: string) => string
 }
 
+interface RunOnboardingOptions {
+  /** Show logo + intro banner. Disable when onboarding is launched inside an active TUI session. */
+  showIntro?: boolean
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TOOL_KEYS: ToolKeyConfig[] = [
@@ -246,7 +251,10 @@ export function shouldRunOnboarding(authStorage: AuthStorage, settingsDefaultPro
  * All steps are skippable. All errors are recoverable.
  * Writes status to stderr during execution.
  */
-export async function runOnboarding(authStorage: AuthStorage): Promise<void> {
+export async function runOnboarding(
+  authStorage: AuthStorage,
+  opts: RunOnboardingOptions = {},
+): Promise<void> {
   let p: ClackModule
   let pc: PicoModule
   try {
@@ -258,8 +266,10 @@ export async function runOnboarding(authStorage: AuthStorage): Promise<void> {
   }
 
   // ── Intro ─────────────────────────────────────────────────────────────────
-  process.stderr.write(renderLogo(pc.cyan))
-  p.intro(pc.bold('Welcome to GSD — let\'s get you set up'))
+  if (opts.showIntro !== false) {
+    process.stderr.write(renderLogo(pc.cyan))
+    p.intro(pc.bold('Welcome to GSD — let\'s get you set up'))
+  }
 
   const completedSteps: string[] = []
 
