@@ -38,7 +38,7 @@ import { ensurePreferencesFile, serializePreferencesToFrontmatter } from "./comm
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface ForensicAnomaly {
+export interface ForensicAnomaly {
   type: "stuck-loop" | "cost-spike" | "timeout" | "missing-artifact" | "crash" | "doctor-issue" | "error-trace" | "journal-stuck" | "journal-guard-block" | "journal-rapid-iterations" | "journal-worktree-failure";
   severity: "info" | "warning" | "error";
   unitType?: string;
@@ -588,7 +588,31 @@ function gatherActivityLogMeta(basePath: string, activeMilestone?: string | null
   }
 }
 
-// ─── Completed Keys Loader ────────────────────────────────────────────────────
+// ─── Completed Keys Helpers ───────────────────────────────────────────────────
+
+/**
+ * Parse a completed-unit key into { unitType, unitId }.
+ *
+ * Most unit types are a single segment ("execute-task", "complete-slice", …)
+ * so the key format is simply "unitType/unitId". Hook units are the exception:
+ * their type is compound ("hook/<hookName>"), making the key look like
+ * "hook/telegram-progress/M007/S01". Splitting naïvely on the first slash
+ * yields unitType="hook" which bypasses verifyExpectedArtifact()'s
+ * startsWith("hook/") guard and produces false-positive missing-artifact
+ * errors (#2826).
+ *
+ * Returns null for malformed keys (no slash, or hook/ with no second slash).
+ */
+export function splitCompletedKey(key: string): { unitType: string; unitId: string } | null {
+  if (key.startsWith("hook/")) {
+    const secondSlash = key.indexOf("/", 5); // skip past "hook/"
+    if (secondSlash === -1) return null;      // malformed — "hook/" with no hook name
+    return { unitType: key.slice(0, secondSlash), unitId: key.slice(secondSlash + 1) };
+  }
+  const slashIdx = key.indexOf("/");
+  if (slashIdx === -1) return null;
+  return { unitType: key.slice(0, slashIdx), unitId: key.slice(slashIdx + 1) };
+}
 
 function loadCompletedKeys(basePath: string): string[] {
   const file = join(gsdRoot(basePath), "completed-units.json");
@@ -640,13 +664,43 @@ function getDbCompletionCounts(): DbCompletionCounts | null {
 
 // ─── Anomaly Detectors ───────────────────────────────────────────────────────
 
-function detectStuckLoops(units: UnitMetrics[], anomalies: ForensicAnomaly[]): void {
-  const counts = new Map<string, number>();
+/**
+ * Detect units that were dispatched multiple times (stuck in a loop).
+ *
+ * Counts distinct dispatches by grouping on (type, id, startedAt) first to
+ * collapse idle-watchdog duplicate snapshots (#1943), then counts unique
+ * startedAt values per type/id to determine actual dispatch count.
+ *
+ * Exported for testability.
+ */
+export function detectStuckLoops(units: UnitMetrics[], anomalies: ForensicAnomaly[]): void {
+  // First, collect unique startedAt values per type/id key, bucketed by
+  // autoSessionKey when available so cross-session recovery does not look
+  // like a within-session stuck loop.
+  const dispatchMap = new Map<string, Map<string, Set<number>>>();
   for (const u of units) {
     const key = `${u.type}/${u.id}`;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+    let sessionBuckets = dispatchMap.get(key);
+    if (!sessionBuckets) {
+      sessionBuckets = new Map();
+      dispatchMap.set(key, sessionBuckets);
+    }
+
+    const sessionKey = u.autoSessionKey ?? "__legacy__";
+    let starts = sessionBuckets.get(sessionKey);
+    if (!starts) {
+      starts = new Set();
+      sessionBuckets.set(sessionKey, starts);
+    }
+    starts.add(u.startedAt);
   }
-  for (const [key, count] of counts) {
+
+  for (const [key, sessionBuckets] of dispatchMap) {
+    const hasSessionAwareData = Array.from(sessionBuckets.keys()).some((sessionKey) => sessionKey !== "__legacy__");
+    const count = hasSessionAwareData
+      ? Math.max(...Array.from(sessionBuckets.values(), (starts) => starts.size))
+      : (sessionBuckets.get("__legacy__")?.size ?? 0);
+
     if (count > 1) {
       const [unitType, ...idParts] = key.split("/");
       anomalies.push({
@@ -655,7 +709,9 @@ function detectStuckLoops(units: UnitMetrics[], anomalies: ForensicAnomaly[]): v
         unitType,
         unitId: idParts.join("/"),
         summary: `Unit ${key} was dispatched ${count} times`,
-        details: `Repeated dispatch suggests the unit completed but its artifacts weren't verified, or the state machine kept returning it.`,
+        details: hasSessionAwareData
+          ? `Repeated dispatch within the same auto session suggests the unit completed but its artifacts were not verified, or the state machine kept returning it. Cross-session recovery runs are ignored.`
+          : `Repeated dispatch suggests the unit completed but its artifacts weren't verified, or the state machine kept returning it.`,
       });
     }
   }
@@ -700,34 +756,6 @@ function detectTimeouts(traces: UnitTrace[], anomalies: ForensicAnomaly[]): void
       });
     }
   }
-}
-
-/**
- * Parse a completed-unit key into its unitType and unitId.
- *
- * Hook units use a compound slash-delimited type ("hook/<hookName>"), so a
- * naive `key.indexOf("/")` would split "hook/telegram-progress/M007/S01" into
- * unitType="hook" (wrong) instead of "hook/telegram-progress".
- *
- * Returns `null` for malformed keys that cannot be split.
- */
-export function splitCompletedKey(key: string): { unitType: string; unitId: string } | null {
-  if (key.startsWith("hook/")) {
-    // Hook unit types are two segments: "hook/<hookName>/<unitId...>"
-    const secondSlash = key.indexOf("/", 5); // skip past "hook/"
-    if (secondSlash === -1) return null;     // malformed — no unitId after hook name
-    return {
-      unitType: key.slice(0, secondSlash),
-      unitId: key.slice(secondSlash + 1),
-    };
-  }
-
-  const slashIdx = key.indexOf("/");
-  if (slashIdx === -1) return null;
-  return {
-    unitType: key.slice(0, slashIdx),
-    unitId: key.slice(slashIdx + 1),
-  };
 }
 
 function detectMissingArtifacts(completedKeys: string[], basePath: string, activeMilestone: string | null, anomalies: ForensicAnomaly[]): void {

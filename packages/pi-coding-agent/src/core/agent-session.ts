@@ -166,6 +166,9 @@ export interface AgentSessionConfig {
 	baseToolsOverride?: Record<string, AgentTool>;
 	/** Mutable ref used by Agent to access the current ExtensionRunner */
 	extensionRunnerRef?: { current?: ExtensionRunner };
+	/** Optional: check if the claude-code CLI provider is ready (installed + authed).
+	 * Passed through to RetryHandler for third-party block recovery (#3772). */
+	isClaudeCodeReady?: () => boolean;
 }
 
 export interface ExtensionBindings {
@@ -324,6 +327,7 @@ export class AgentSession {
 			getSessionId: () => this.sessionId,
 			emit: (event) => this._emit(event),
 			onModelChange: (model) => this.sessionManager.appendModelChange(model.provider, model.id),
+			isClaudeCodeReady: config.isClaudeCodeReady,
 		});
 
 		this._compactionOrchestrator = new CompactionOrchestrator({
@@ -617,6 +621,19 @@ export class AgentSession {
 			await this._extensionRunner.emit({ type: "agent_start" });
 		} else if (event.type === "agent_end") {
 			await this._extensionRunner.emit({ type: "agent_end", messages: event.messages });
+			// `stop` fires on true quiescence: the agent cleanly completed and is now
+			// waiting for the user. Use the last assistant message's stopReason to
+			// distinguish clean completion from error/cancellation.
+			const last = event.messages[event.messages.length - 1];
+			const stopReason: "completed" | "cancelled" | "error" | "blocked" =
+				last?.role === "assistant"
+					? last.stopReason === "aborted"
+						? "cancelled"
+						: last.stopReason === "error"
+							? "error"
+							: "completed"
+					: "completed";
+			await this._extensionRunner.emitStop({ reason: stopReason, lastMessage: last });
 		} else if (event.type === "turn_start") {
 			const extensionEvent: TurnStartEvent = {
 				type: "turn_start",
@@ -1271,8 +1288,9 @@ export class AgentSession {
 	}
 
 	getRenderableToolDefinition(toolName: string): ToolDefinition | undefined {
+		const normalizedToolName = toolName.toLowerCase();
 		return [...this._getBuiltinToolDefinitions(), ...this._getRegisteredToolDefinitions()].find(
-			(tool) => tool.name === toolName,
+			(tool) => tool.name.toLowerCase() === normalizedToolName,
 		);
 	}
 
@@ -1518,12 +1536,24 @@ export class AgentSession {
 		await this.agent.waitForIdle();
 		// Ensure agent_end is emitted even when abort interrupts a tool call (#1414).
 		// The agent may go idle without emitting agent_end if the abort happens
-		// between tool execution and response processing.
+		// between tool execution and response processing. Also fire Stop so
+		// Layer 0 hooks see a consistent view of session quiescence.
 		if (!this.isStreaming && this._extensionRunner) {
+			const messages = this.agent.state.messages;
 			await this._extensionRunner.emit({
 				type: "agent_end",
-				messages: this.agent.state.messages,
+				messages,
 			});
+			const last = messages[messages.length - 1];
+			const stopReason: "completed" | "cancelled" | "error" | "blocked" =
+				last?.role === "assistant"
+					? last.stopReason === "aborted"
+						? "cancelled"
+						: last.stopReason === "error"
+							? "error"
+							: "completed"
+					: "cancelled";
+			await this._extensionRunner.emitStop({ reason: stopReason, lastMessage: last });
 		}
 	}
 
@@ -1553,9 +1583,12 @@ export class AgentSession {
 			}
 		}
 
-		this._disconnectFromAgent();
-		await this.abort();
-		this.agent.reset();
+	// #4243: Must call abort() BEFORE _disconnectFromAgent() so that
+	// message_end/agent_end events fire and the #4216 finalization code
+	// can run before we unsubscribe from the event bus.
+	await this.abort();
+	this._disconnectFromAgent();
+	this.agent.reset();
 		// Update cwd to current process directory — auto-mode may have chdir'd
 		// into a worktree since the original session was created.
 		const previousCwd = this._cwd;
@@ -1574,6 +1607,16 @@ export class AgentSession {
 		// the original project root instead of the worktree (#633).
 		if (this._cwd !== previousCwd) {
 			this._buildRuntime({
+				activeToolNames: this.getActiveToolNames(),
+				includeAllExtensionTools: true,
+			});
+		} else {
+			// Even when cwd hasn't changed, restore the full tool set (#3616).
+			// Extensions (e.g., discuss flows) may narrow the active tool list
+			// via setActiveTools() during a session. Without this refresh, the
+			// narrowed set persists into the next session — causing tools like
+			// gsd_plan_slice to be missing from auto-mode subagent sessions.
+			this._refreshToolRegistry({
 				activeToolNames: this.getActiveToolNames(),
 				includeAllExtensionTools: true,
 			});
@@ -1633,6 +1676,10 @@ export class AgentSession {
 		options?: { persist?: boolean },
 	): Promise<void> {
 		const previousModel = this.model;
+		// Explicit model switches must cancel any in-flight retry loop from the
+		// previous provider/model. Otherwise stale provider backoff errors can
+		// continue to land after the user or runtime has already switched models.
+		this._retryHandler.abortRetry();
 		this.agent.setModel(model);
 		this.sessionManager.appendModelChange(model.provider, model.id);
 		if (options?.persist !== false) {
@@ -2392,9 +2439,12 @@ export class AgentSession {
 			}
 		}
 
-		this._disconnectFromAgent();
-		await this.abort();
-		this._steeringMessages = [];
+	// #4243: Must call abort() BEFORE _disconnectFromAgent() so that
+	// message_end/agent_end events fire and the #4216 finalization code
+	// can run before we unsubscribe from the event bus.
+	await this.abort();
+	this._disconnectFromAgent();
+	this._steeringMessages = [];
 		this._followUpMessages = [];
 		this._pendingNextTurnMessages = [];
 

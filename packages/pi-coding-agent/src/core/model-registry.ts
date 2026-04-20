@@ -8,6 +8,7 @@ import {
 	type AssistantMessageEventStream,
 	type Context,
 	getApiProvider,
+	getEnvApiKey,
 	getModels,
 	getProviders,
 	type KnownProvider,
@@ -28,7 +29,7 @@ import { getAgentDir } from "../config.js";
 import type { AuthStorage } from "./auth-storage.js";
 import { ModelDiscoveryCache } from "./discovery-cache.js";
 import type { DiscoveredModel, DiscoveryResult } from "./model-discovery.js";
-import { getDefaultTTL, getDiscoverableProviders, getDiscoveryAdapter } from "./model-discovery.js";
+import { getDefaultTTL, getDiscoverableProviders, getDiscoveryAdapter, supportsDiscoveryForApi } from "./model-discovery.js";
 import { clearConfigValueCache, resolveConfigValue, resolveHeaders } from "./resolve-config-value.js";
 import { isLocalModel } from "./local-model-check.js";
 
@@ -245,7 +246,7 @@ export class ModelRegistry {
 			if (keyConfig) {
 				return resolveConfigValue(keyConfig);
 			}
-			return undefined;
+			return getEnvApiKey(provider);
 		});
 
 		// Refresh models when credentials change (e.g., OAuth token refresh with new model limits)
@@ -465,6 +466,18 @@ export class ModelRegistry {
 			// Store API key config for fallback resolver
 			if (providerConfig.apiKey) {
 				this.customProviderApiKeys.set(providerName, providerConfig.apiKey);
+			}
+
+			// Register custom providers so isProviderRequestReady() can find
+			// them (#3531). Without this, models.json providers with apiKey
+			// fail the auth check and are invisible to the fallback resolver.
+			if (!this.registeredProviders.has(providerName)) {
+				this.registeredProviders.set(providerName, {
+					authMode: providerConfig.apiKey ? "apiKey" : "none",
+					apiKey: providerConfig.apiKey,
+					baseUrl: providerConfig.baseUrl,
+					isReady: providerConfig.apiKey ? () => true : undefined,
+				} as any);
 			}
 
 			for (const modelDef of modelDefs) {
@@ -742,6 +755,7 @@ export class ModelRegistry {
 					maxTokens: modelDef.maxTokens,
 					headers,
 					compat: modelDef.compat,
+					providerOptions: modelDef.providerOptions,
 				} as Model<Api>);
 			}
 
@@ -774,11 +788,12 @@ export class ModelRegistry {
 	 * Results are cached and merged into the registry (never overrides existing models).
 	 */
 	async discoverModels(providers?: string[]): Promise<DiscoveryResult[]> {
-		const targetProviders = providers ?? getDiscoverableProviders();
+		const targetProviders = providers ?? this.getAutoDiscoverableProviders();
 		const results: DiscoveryResult[] = [];
 
 		for (const providerName of targetProviders) {
-			const adapter = getDiscoveryAdapter(providerName);
+			const providerApis = this.getProviderApis(providerName);
+			const adapter = getDiscoveryAdapter(providerName, providerApis);
 			if (!adapter.supportsDiscovery) continue;
 
 			// Skip if cache is still fresh
@@ -798,8 +813,10 @@ export class ModelRegistry {
 				const apiKey = await this.authStorage.getApiKey(providerName);
 				if (!apiKey && !this.isProviderRequestReady(providerName)) continue;
 
-				const models = await adapter.fetchModels(apiKey ?? "", undefined);
-				this.discoveryCache.set(providerName, models);
+				const baseUrl = this.getProviderBaseUrl(providerName);
+				const models = await adapter.fetchModels(apiKey ?? "", baseUrl);
+				const ttlMs = this.getDiscoveryTtl(providerName, providerApis);
+				this.discoveryCache.set(providerName, models, ttlMs);
 				results.push({
 					provider: providerName,
 					models,
@@ -851,22 +868,95 @@ export class ModelRegistry {
 		const converted: Model<Api>[] = [];
 		for (const result of results) {
 			if (result.error) continue;
+			const providerDefaults = this.getDiscoveryProviderDefaults(result.provider);
 			for (const dm of result.models) {
 				converted.push({
 					id: dm.id,
 					name: dm.name ?? dm.id,
-					api: "openai" as Api,
+					api: providerDefaults.api,
 					provider: result.provider,
-					baseUrl: "",
+					baseUrl: providerDefaults.baseUrl,
 					reasoning: dm.reasoning ?? false,
-					input: dm.input ?? ["text"],
+					input: dm.input ?? providerDefaults.input,
 					cost: dm.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-					contextWindow: dm.contextWindow ?? 128000,
-					maxTokens: dm.maxTokens ?? 16384,
+					contextWindow: dm.contextWindow ?? providerDefaults.contextWindow,
+					maxTokens: dm.maxTokens ?? providerDefaults.maxTokens,
 				} as Model<Api>);
 			}
 		}
 		return converted;
+	}
+
+	private getProviderApis(provider: string): Set<string> {
+		const apis = new Set<string>();
+		for (const model of this.models) {
+			if (model.provider === provider && typeof model.api === "string" && model.api.length > 0) {
+				apis.add(model.api);
+			}
+		}
+
+		const providerConfig = this.registeredProviders.get(provider);
+		if (providerConfig?.api) apis.add(providerConfig.api);
+		for (const modelDef of providerConfig?.models ?? []) {
+			if (modelDef.api) apis.add(modelDef.api);
+		}
+		return apis;
+	}
+
+	private getAutoDiscoverableProviders(): string[] {
+		const discoverable = new Set<string>(getDiscoverableProviders());
+		for (const provider of new Set(this.models.map((m) => m.provider))) {
+			const apis = this.getProviderApis(provider);
+			for (const api of apis) {
+				if (supportsDiscoveryForApi(api)) {
+					discoverable.add(provider);
+					break;
+				}
+			}
+		}
+		return [...discoverable];
+	}
+
+	private getProviderBaseUrl(provider: string): string | undefined {
+		const fromModels = this.models.find((m) => m.provider === provider && typeof m.baseUrl === "string" && m.baseUrl.length > 0);
+		if (fromModels?.baseUrl) return fromModels.baseUrl;
+		return this.registeredProviders.get(provider)?.baseUrl;
+	}
+
+	private getDiscoveryProviderDefaults(provider: string): {
+		api: Api;
+		baseUrl: string;
+		input: ("text" | "image")[];
+		contextWindow: number;
+		maxTokens: number;
+	} {
+		const first = this.models.find((m) => m.provider === provider);
+		if (first) {
+			return {
+				api: first.api,
+				baseUrl: first.baseUrl,
+				input: first.input,
+				contextWindow: first.contextWindow,
+				maxTokens: first.maxTokens,
+			};
+		}
+
+		return {
+			api: "openai-completions",
+			baseUrl: this.registeredProviders.get(provider)?.baseUrl ?? "",
+			input: ["text"],
+			contextWindow: 128000,
+			maxTokens: 16384,
+		};
+	}
+
+	private getDiscoveryTtl(provider: string, providerApis: Set<string>): number {
+		for (const api of providerApis) {
+			if (supportsDiscoveryForApi(api)) {
+				return getDefaultTTL("openai");
+			}
+		}
+		return getDefaultTTL(provider);
 	}
 
 	/**
@@ -917,5 +1007,6 @@ export interface ProviderConfigInput {
 		maxTokens: number;
 		headers?: Record<string, string>;
 		compat?: Model<Api>["compat"];
+		providerOptions?: Record<string, unknown>;
 	}>;
 }

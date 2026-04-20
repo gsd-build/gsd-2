@@ -72,7 +72,9 @@ const autoStartSrc = readFileSync(
 const symlinkIdx = autoStartSrc.indexOf("ensureGsdSymlink(base)");
 assertTrue(symlinkIdx >= 0, "auto-start.ts calls ensureGsdSymlink(base)");
 
-const afterSymlink = symlinkIdx >= 0 ? autoStartSrc.slice(symlinkIdx, symlinkIdx + 800) : "";
+const afterSymlink = symlinkIdx >= 0
+  ? autoStartSrc.slice(symlinkIdx, autoStartSrc.indexOf("Initialize GitServiceImpl", symlinkIdx))
+  : "";
 
 // The milestones bootstrap must check milestones path, not gsdDir
 // Old (dead) code: if (!existsSync(gsdDir)) { mkdirSync(join(gsdDir, "milestones"), ...) }

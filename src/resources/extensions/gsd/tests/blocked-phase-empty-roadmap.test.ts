@@ -119,7 +119,12 @@ test("milestone transition with empty-slice roadmap → pre-planning, not blocke
   assert.equal(state.activeMilestone?.id, "M002");
 });
 
-test("genuinely blocked milestone (circular deps, real slices) stays blocked", async (t) => {
+test("real roadmap with circular deps does not regress to pre-planning", async (t) => {
+  // Non-regression guard: the pre-planning fallback must not fire when the
+  // roadmap on disk has real parsed slices. Upstream's partial-dep fallback
+  // (resolveSliceDependencies) picks a best candidate for circular deps and
+  // proceeds to planning — the invariant we protect here is that
+  // pre-planning is reserved for genuinely empty roadmaps.
   const base = makeBase();
   t.after(() => { closeDatabase(); rmSync(base, { recursive: true, force: true }); });
 
@@ -134,8 +139,8 @@ test("genuinely blocked milestone (circular deps, real slices) stays blocked", a
   invalidateStateCache();
   const state = await deriveStateFromDb(base);
 
-  assert.equal(state.phase, "blocked", "circular deps with real roadmap slices must stay blocked");
-  assert.ok(state.blockers.length > 0, "blockers must be non-empty for a genuinely blocked milestone");
+  assert.notEqual(state.phase, "pre-planning", "real roadmap slices must never surface as pre-planning");
+  assert.ok(state.activeSlice !== null, "fallback must surface an active slice for planning");
 });
 
 test("reconciliation removes pending DB slices absent from the roadmap", async (t) => {
