@@ -1198,7 +1198,14 @@ export async function pauseAuto(
         s.originalModelId,
       );
       if (original) {
-        await pi.setModel(original, { persist: false });
+        const ok = await pi.setModel(original, { persist: false });
+        if (!ok) {
+          logWarning(
+            "engine",
+            `paused-model restore skipped: setModel returned false for ${s.originalModelProvider}/${s.originalModelId}`,
+            { file: "auto.ts" },
+          );
+        }
       }
     }
   } catch (err) {

@@ -32,6 +32,10 @@ test("pauseAuto restores the user's original model while paused", () => {
     /await pi\.setModel\(original, \{ persist: false \}\)/.test(source),
     "pauseAuto must restore the original model with persist:false so paused interaction returns to the user's model",
   );
+  assert.ok(
+    /const ok = await pi\.setModel\(original, \{ persist: false \}\);[\s\S]{0,120}if \(!ok\)/.test(source),
+    "pauseAuto should handle setModel returning false instead of silently ignoring restore failures",
+  );
 });
 
 test("resume path stages metadata snapshots and applies them only on accepted resume", () => {

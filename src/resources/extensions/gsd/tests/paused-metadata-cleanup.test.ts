@@ -63,6 +63,34 @@ test("cleanupPausedMetadataAfterResumeLock deletes derived paused metadata path 
   );
 });
 
+test("cleanupPausedMetadataAfterResumeLock derives paused metadata path from originalBasePath when available", (t) => {
+  const base = makeTmpBase();
+  const originalBase = makeTmpBase();
+  const basePausedPath = join(base, ".gsd", "runtime", "paused-session.json");
+  const originalPausedPath = join(originalBase, ".gsd", "runtime", "paused-session.json");
+  mkdirSync(join(base, ".gsd", "runtime"), { recursive: true });
+  mkdirSync(join(originalBase, ".gsd", "runtime"), { recursive: true });
+  writeFileSync(basePausedPath, "{}", "utf-8");
+  writeFileSync(originalPausedPath, "{}", "utf-8");
+  t.after(() => {
+    cleanup(base);
+    cleanup(originalBase);
+  });
+
+  cleanupPausedMetadataAfterResumeLock(true, base, originalBase, null);
+
+  assert.equal(
+    existsSync(originalPausedPath),
+    false,
+    "when originalBasePath is available, cleanup should target project-root paused metadata",
+  );
+  assert.equal(
+    existsSync(basePausedPath),
+    true,
+    "cleanup should not target worktree-local paused metadata when originalBasePath is provided",
+  );
+});
+
 test("cleanupPausedMetadataAfterResumeLock logs warning when unlink fails", () => {
   const warnings: string[] = [];
 
