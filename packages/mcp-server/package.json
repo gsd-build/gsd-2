@@ -25,7 +25,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "node --test dist/mcp-server.test.js"
+    "build:test": "tsc -p tsconfig.test.json",
+    "test": "npm run build:test && node --test dist/mcp-server.test.js dist/remote-questions.test.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

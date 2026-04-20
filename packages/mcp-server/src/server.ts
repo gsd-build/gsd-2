@@ -15,6 +15,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import type { SessionManager } from './session-manager.js';
+import { isRemoteConfigured, tryRemoteQuestions } from './remote-questions.js';
 import { readProgress } from './readers/state.js';
 import { readRoadmap } from './readers/roadmap.js';
 import { readHistory } from './readers/metrics.js';
@@ -545,11 +546,28 @@ export async function createMcpServer(sessionManager: SessionManager): Promise<{
         allowMultiple: z.boolean().optional().describe('If true, the user can select multiple options. No "None of the above" option is added.'),
       })).describe('Questions to show the user. Prefer 1 and do not exceed 3.'),
     },
-    async (args: Record<string, unknown>) => {
+    async (args: Record<string, unknown>, extra?: McpToolExtra) => {
       const { questions } = args as unknown as AskUserQuestionsParams;
       try {
         const validationError = validateAskUserQuestionsPayload(questions);
         if (validationError) return errorContent(validationError);
+
+        // Delegate to remote-questions manager when a remote channel is configured
+        // (Discord, Slack, Telegram). This path is the only one reachable for
+        // Claude Code-under-gsd sessions, which have no local TUI.
+        if (isRemoteConfigured()) {
+          const remoteResult = await tryRemoteQuestions(questions, extra?.signal);
+          if (remoteResult) {
+            const details = remoteResult.details as Record<string, unknown> | undefined;
+            if (details?.['timed_out'] || details?.['error']) {
+              // Surface timeout/error as plain text so the LLM knows to retry
+              return textContent(remoteResult.content[0]?.text ?? 'Remote questions timed out or failed');
+            }
+            return textContent(remoteResult.content[0]?.text ?? '');
+          }
+          // resolveRemoteConfig() returned null between isRemoteConfigured() and
+          // tryRemoteQuestions() (e.g. env var was cleared) — fall through to local.
+        }
 
         const elicitation = await server.server.elicitInput(buildAskUserQuestionsElicitRequest(questions));
         if (elicitation.action !== 'accept' || !elicitation.content) {
