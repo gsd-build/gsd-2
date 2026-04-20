@@ -18,6 +18,7 @@ import {
   type AgentEndEvent,
   type LoopDeps,
 } from "../auto-loop.js";
+import { resolveIterationEndReason } from "../auto/loop.js";
 import type { SessionLockStatus } from "../session-lock.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -1107,6 +1108,26 @@ test("autoLoop emits iteration-end when cancelled unit execution breaks the loop
   assert.ok(
     deps.callLog.includes("pauseAuto"),
     "timeout cancellation path should pause auto-mode",
+  );
+});
+
+test("resolveIterationEndReason falls back when extra.reason is missing or not a string", () => {
+  assert.equal(resolveIterationEndReason("guards-break"), "guards-break");
+  assert.equal(
+    resolveIterationEndReason("guards-break", { reason: undefined }),
+    "guards-break",
+  );
+  assert.equal(
+    resolveIterationEndReason("guards-break", { reason: null }),
+    "guards-break",
+  );
+  assert.equal(
+    resolveIterationEndReason("guards-break", { reason: 123 }),
+    "guards-break",
+  );
+  assert.equal(
+    resolveIterationEndReason("guards-break", { reason: "dispatch-break" }),
+    "dispatch-break",
   );
 });
 

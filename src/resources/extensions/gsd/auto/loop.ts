@@ -170,6 +170,13 @@ function checkMemoryPressure(): { pressured: boolean; heapMB: number; limitMB: n
   return { pressured: pct > MEMORY_PRESSURE_THRESHOLD, heapMB, limitMB, pct };
 }
 
+export function resolveIterationEndReason(
+  fallbackReason: string,
+  extra: Record<string, unknown> = {},
+): string {
+  return typeof extra.reason === "string" ? extra.reason : fallbackReason;
+}
+
 function resolveDispatchNodeKind(
   unitType: string,
   sidecarItem?: SidecarItem,
@@ -399,9 +406,7 @@ export async function autoLoop(
       const ic: IterationContext = { ctx, pi, s, deps, prefs, iteration, flowId, nextSeq };
       deps.emitJournalEvent({ ts: new Date().toISOString(), flowId, seq: nextSeq(), eventType: "iteration-start", data: { iteration } });
       const emitIterationEnd = (reason: string, extra: Record<string, unknown> = {}) => {
-        const resolvedReason = typeof extra.reason === "string"
-          ? extra.reason
-          : reason;
+        const resolvedReason = resolveIterationEndReason(reason, extra);
         deps.emitJournalEvent({
           ts: new Date().toISOString(),
           flowId,
