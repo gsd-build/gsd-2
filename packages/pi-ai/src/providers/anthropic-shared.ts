@@ -654,9 +654,16 @@ export function processAnthropicStream(
 						// leaving content_block.name as "" here. Fall back to the tool list
 						// if available to avoid storing an empty name in history (#4538).
 						const rawName = event.content_block.name;
-						const resolvedName = rawName
-							? (isOAuthToken ? fromClaudeCodeName(rawName, context.tools) : rawName)
-							: (context.tools?.find(() => true)?.name ?? rawName);
+						let resolvedName: string;
+						if (rawName) {
+							resolvedName = isOAuthToken ? fromClaudeCodeName(rawName, context.tools) : rawName;
+						} else {
+							const fallbackName = context.tools?.[0]?.name ?? rawName;
+							if (fallbackName && fallbackName !== rawName) {
+								console.warn(`[anthropic-shared] Empty tool name in content_block_start (id=${event.content_block.id}); falling back to first tool: ${fallbackName}`);
+							}
+							resolvedName = fallbackName;
+						}
 						const block: Block = {
 							type: "toolCall",
 							id: event.content_block.id,
