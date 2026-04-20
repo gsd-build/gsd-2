@@ -330,8 +330,8 @@ export function startAutoDetached(
 }
 
 /** Returns true if the project is configured for `isolation:worktree` mode. */
-export function shouldUseWorktreeIsolation(): boolean {
-  const prefs = loadEffectiveGSDPreferences()?.preferences?.git;
+export function shouldUseWorktreeIsolation(basePath?: string): boolean {
+  const prefs = loadEffectiveGSDPreferences(basePath)?.preferences?.git;
   if (prefs?.isolation === "worktree") return true;
   // Default is false — worktree isolation requires explicit opt-in
   return false;
@@ -424,7 +424,7 @@ export function getAutoDashboardData(): AutoDashboardData {
   const rtkSavings = sessionId && s.basePath
     ? getRtkSessionSavings(s.basePath, sessionId)
     : null;
-  const rtkEnabled = loadEffectiveGSDPreferences()?.preferences.experimental?.rtk === true;
+  const rtkEnabled = loadEffectiveGSDPreferences(s.basePath || undefined)?.preferences.experimental?.rtk === true;
   // Pending capture count — lazy check, non-fatal
   let pendingCaptureCount = 0;
   try {
@@ -648,7 +648,7 @@ function buildSnapshotOpts(
   gitStatus?: "ok" | "failed";
   gitError?: string;
 } & Record<string, unknown> {
-  const prefs = loadEffectiveGSDPreferences()?.preferences;
+  const prefs = loadEffectiveGSDPreferences(s.basePath || undefined)?.preferences;
   const uokFlags = resolveUokFlags(prefs);
   return {
     ...(s.autoStartTime > 0 ? { autoSessionKey: String(s.autoStartTime) } : {}),
@@ -686,7 +686,7 @@ function handleLostSessionLock(
   restoreProjectRootEnv();
   restoreMilestoneLockEnv();
   deregisterSigtermHandler();
-  clearCmuxSidebar(loadEffectiveGSDPreferences()?.preferences);
+  clearCmuxSidebar(loadEffectiveGSDPreferences(s.basePath || undefined)?.preferences);
   const base = lockBase();
   const lockFilePath = base ? join(gsdRoot(base), "auto.lock") : "unknown";
   const recoverySuggestion = "\nTo recover, run: gsd doctor --fix";
@@ -764,7 +764,7 @@ export async function stopAuto(
   reason?: string,
 ): Promise<void> {
   if (!s.active && !s.paused) return;
-  const loadedPreferences = loadEffectiveGSDPreferences()?.preferences;
+  const loadedPreferences = loadEffectiveGSDPreferences(s.basePath || undefined)?.preferences;
   const reasonSuffix = reason ? ` — ${reason}` : "";
 
   try {
@@ -1495,7 +1495,7 @@ export async function startAuto(
     // ── Auto-worktree / branch-mode: re-enter on resume ──
     if (
       s.currentMilestoneId &&
-      getIsolationMode() !== "none" &&
+      getIsolationMode(s.originalBasePath || s.basePath) !== "none" &&
       s.originalBasePath &&
       !isInAutoWorktree(s.basePath) &&
       !detectWorktreeName(s.basePath) &&
@@ -1534,7 +1534,7 @@ export async function startAuto(
     await openProjectDbIfPresent(s.basePath);
     try {
       await rebuildState(s.basePath);
-      syncCmuxSidebar(loadEffectiveGSDPreferences()?.preferences, await deriveState(s.basePath));
+      syncCmuxSidebar(loadEffectiveGSDPreferences(s.basePath || undefined)?.preferences, await deriveState(s.basePath));
     } catch (e) {
       debugLog("resume-rebuild-state-failed", {
         error: e instanceof Error ? e.message : String(e),
@@ -1584,7 +1584,7 @@ export async function startAuto(
       "resuming",
       s.currentMilestoneId ?? "unknown",
     );
-    logCmuxEvent(loadEffectiveGSDPreferences()?.preferences, s.stepMode ? "Step-mode resumed." : "Auto-mode resumed.", "progress");
+    logCmuxEvent(loadEffectiveGSDPreferences(s.basePath || undefined)?.preferences, s.stepMode ? "Step-mode resumed." : "Auto-mode resumed.", "progress");
 
     captureProjectRootEnv(s.originalBasePath || s.basePath);
     startAutoCommandPolling(s.basePath);
@@ -1622,12 +1622,12 @@ export async function startAuto(
 
   captureProjectRootEnv(s.originalBasePath || s.basePath);
   try {
-    syncCmuxSidebar(loadEffectiveGSDPreferences()?.preferences, await deriveState(s.basePath));
+    syncCmuxSidebar(loadEffectiveGSDPreferences(s.basePath || undefined)?.preferences, await deriveState(s.basePath));
   } catch (err) {
     // Best-effort only — sidebar sync must never block auto-mode startup
     logWarning("engine", `cmux sync failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
   }
-  logCmuxEvent(loadEffectiveGSDPreferences()?.preferences, requestedStepMode ? "Step-mode started." : "Auto-mode started.", "progress");
+  logCmuxEvent(loadEffectiveGSDPreferences(s.basePath || undefined)?.preferences, requestedStepMode ? "Step-mode started." : "Auto-mode started.", "progress");
 
   startAutoCommandPolling(s.basePath);
 

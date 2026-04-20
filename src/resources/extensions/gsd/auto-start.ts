@@ -92,7 +92,7 @@ import type { WorktreeResolver } from "./worktree-resolver.js";
 import { getSessionModelOverride } from "./session-model-override.js";
 
 export interface BootstrapDeps {
-  shouldUseWorktreeIsolation: () => boolean;
+  shouldUseWorktreeIsolation: (basePath?: string) => boolean;
   registerSigtermHandler: (basePath: string) => void;
   lockBase: () => string;
   buildResolver: () => WorktreeResolver;
@@ -343,7 +343,7 @@ export async function bootstrapAutoSession(
     const hasLocalGit = existsSync(join(base, ".git"));
     if (!hasLocalGit || isInheritedRepo(base)) {
       const mainBranch =
-        loadEffectiveGSDPreferences()?.preferences?.git?.main_branch || "main";
+        loadEffectiveGSDPreferences(base)?.preferences?.git?.main_branch || "main";
       nativeInit(base, mainBranch);
     }
 
@@ -361,7 +361,7 @@ export async function bootstrapAutoSession(
     // Ensure .gitignore has baseline patterns.
     // ensureGitignore checks for git-tracked .gsd/ files and skips the
     // ".gsd" pattern if the project intentionally tracks .gsd/ in git.
-    const gitPrefs = loadEffectiveGSDPreferences()?.preferences?.git;
+    const gitPrefs = loadEffectiveGSDPreferences(base)?.preferences?.git;
     const manageGitignore = gitPrefs?.manage_gitignore;
     ensureGitignore(base, { manageGitignore });
     if (manageGitignore !== false) untrackRuntimeFiles(base);
@@ -390,7 +390,7 @@ export async function bootstrapAutoSession(
     // Initialize GitServiceImpl
     s.gitService = new GitServiceImpl(
       s.basePath,
-      loadEffectiveGSDPreferences()?.preferences?.git ?? {},
+      loadEffectiveGSDPreferences(base)?.preferences?.git ?? {},
     );
 
     // ── Debug mode ──
@@ -434,7 +434,7 @@ export async function bootstrapAutoSession(
     // was lost due to session ending between completion and teardown.
     // Must run after DB open and before worktree entry.
     try {
-      const auditResult = auditOrphanedMilestoneBranches(base, getIsolationMode());
+      const auditResult = auditOrphanedMilestoneBranches(base, getIsolationMode(base));
       for (const msg of auditResult.recovered) {
         ctx.ui.notify(`Orphan audit: ${msg}`, "info");
       }
@@ -454,7 +454,7 @@ export async function bootstrapAutoSession(
     // Stale worktree state recovery (#654)
     if (
       state.activeMilestone &&
-      shouldUseWorktreeIsolation() &&
+      shouldUseWorktreeIsolation(base) &&
       !detectWorktreeName(base)
     ) {
       const wtPath = getAutoWorktreePath(base, state.activeMilestone.id);
@@ -472,7 +472,7 @@ export async function bootstrapAutoSession(
     if (
       state.activeMilestone &&
       (state.phase === "pre-planning" || state.phase === "complete") &&
-      getIsolationMode() !== "none" &&
+      getIsolationMode(base) !== "none" &&
       !detectWorktreeName(base) &&
       !base.includes(`${pathSep}.gsd${pathSep}worktrees${pathSep}`)
     ) {
@@ -676,7 +676,7 @@ export async function bootstrapAutoSession(
 
     // Capture integration branch
     if (s.currentMilestoneId) {
-      if (getIsolationMode() !== "none") {
+      if (getIsolationMode(base) !== "none") {
         captureIntegrationBranch(base, s.currentMilestoneId);
       }
       setActiveMilestoneId(base, s.currentMilestoneId);
@@ -685,7 +685,7 @@ export async function bootstrapAutoSession(
     // Guard against stale milestone branch when isolation:none (#3613).
     // A prior session with isolation:branch/worktree may have left HEAD on
     // milestone/<MID>. Auto-checkout back to the integration branch.
-    if (getIsolationMode() === "none" && nativeIsRepo(base)) {
+    if (getIsolationMode(base) === "none" && nativeIsRepo(base)) {
       try {
         const currentBranch = nativeGetCurrentBranch(base);
         if (currentBranch.startsWith("milestone/")) {
@@ -716,7 +716,7 @@ export async function bootstrapAutoSession(
 
     if (
       s.currentMilestoneId &&
-      getIsolationMode() !== "none" &&
+      getIsolationMode(base) !== "none" &&
       !detectWorktreeName(base) &&
       !isUnderGsdWorktrees(base)
     ) {
@@ -819,7 +819,7 @@ export async function bootstrapAutoSession(
     }
 
     // Snapshot installed skills
-    if (resolveSkillDiscoveryMode() !== "off") {
+    if (resolveSkillDiscoveryMode(base) !== "off") {
       snapshotSkills();
     }
 
@@ -853,7 +853,7 @@ export async function bootstrapAutoSession(
     // FlatRateContext used by selectAndApplyModel so user-declared
     // flat-rate providers and externalCli auto-detection are respected.
     const { isFlatRateProvider, buildFlatRateContext } = await import("./auto-model-selection.js");
-    const bannerPrefs = loadEffectiveGSDPreferences()?.preferences;
+    const bannerPrefs = loadEffectiveGSDPreferences(base)?.preferences;
     const effectiveProvider = s.autoModeStartModel?.provider ?? ctx.model?.provider;
     const effectivelyEnabled = routingConfig.enabled
       && (routingConfig.allow_flat_rate_providers

@@ -632,6 +632,39 @@ test("preferences paths use canonical uppercase filenames", () => {
   }
 });
 
+test("explicit base path preference loading survives a deleted cwd (#4498)", (t) => {
+  const originalCwd = process.cwd();
+  const originalGsdHome = process.env.GSD_HOME;
+  const tempProject = mkdtempSync(join(tmpdir(), "gsd-prefs-base-project-"));
+  const tempGsdHome = mkdtempSync(join(tmpdir(), "gsd-prefs-base-home-"));
+  const deletedCwd = mkdtempSync(join(tmpdir(), "gsd-prefs-deleted-cwd-"));
+
+  t.after(() => {
+    process.chdir(originalCwd);
+    if (originalGsdHome === undefined) delete process.env.GSD_HOME;
+    else process.env.GSD_HOME = originalGsdHome;
+    rmSync(tempProject, { recursive: true, force: true });
+    rmSync(tempGsdHome, { recursive: true, force: true });
+    rmSync(deletedCwd, { recursive: true, force: true });
+  });
+
+  mkdirSync(join(tempProject, ".gsd"), { recursive: true });
+  writeFileSync(
+    join(tempProject, ".gsd", "PREFERENCES.md"),
+    "---\nversion: 1\nlanguage: Swedish\ngit:\n  isolation: worktree\n---\n",
+    "utf-8",
+  );
+
+  process.env.GSD_HOME = tempGsdHome;
+  process.chdir(deletedCwd);
+  rmSync(deletedCwd, { recursive: true, force: true });
+
+  const loaded = loadEffectiveGSDPreferences(tempProject);
+  assert.notEqual(loaded, null);
+  assert.equal(loaded!.preferences.language, "Swedish");
+  assert.equal(getIsolationMode(tempProject), "worktree");
+});
+
 test("uppercase PREFERENCES.md wins over legacy lowercase preferences.md", () => {
   const originalCwd = process.cwd();
   const originalGsdHome = process.env.GSD_HOME;
