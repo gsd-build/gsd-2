@@ -48,6 +48,14 @@ const VercelGatewayRoutingSchema = Type.Object({
 	order: Type.Optional(Type.Array(Type.String())),
 });
 
+// Schema for model capability declarations (mirrors ModelCapabilities in pi-ai types)
+const ModelCapabilitiesSchema = Type.Object({
+	supportsXhigh: Type.Optional(Type.Boolean()),
+	requiresToolCallId: Type.Optional(Type.Boolean()),
+	supportsServiceTier: Type.Optional(Type.Boolean()),
+	charsPerToken: Type.Optional(Type.Number()),
+});
+
 // Schema for OpenAI compatibility settings
 const OpenAICompletionsCompatSchema = Type.Object({
 	supportsStore: Type.Optional(Type.Boolean()),
@@ -91,6 +99,7 @@ const ModelDefinitionSchema = Type.Object({
 	maxTokens: Type.Optional(Type.Number()),
 	headers: Type.Optional(Type.Record(Type.String(), Type.String())),
 	compat: Type.Optional(OpenAICompatSchema),
+	capabilities: Type.Optional(ModelCapabilitiesSchema),
 });
 
 // Schema for per-model overrides (all fields optional, merged with built-in model)
@@ -110,6 +119,7 @@ const ModelOverrideSchema = Type.Object({
 	maxTokens: Type.Optional(Type.Number()),
 	headers: Type.Optional(Type.Record(Type.String(), Type.String())),
 	compat: Type.Optional(OpenAICompatSchema),
+	capabilities: Type.Optional(ModelCapabilitiesSchema),
 });
 
 type ModelOverride = Static<typeof ModelOverrideSchema>;
@@ -218,6 +228,11 @@ function applyModelOverride(model: Model<Api>, override: ModelOverride): Model<A
 
 	// Deep merge compat
 	result.compat = mergeCompat(model.compat, override.compat);
+
+	// Merge capabilities (override wins per-field)
+	if (override.capabilities) {
+		result.capabilities = { ...model.capabilities, ...override.capabilities };
+	}
 
 	return result;
 }
@@ -514,6 +529,7 @@ export class ModelRegistry {
 					maxTokens: modelDef.maxTokens ?? 16384,
 					headers,
 					compat: modelDef.compat,
+					capabilities: modelDef.capabilities,
 				} as Model<Api>);
 			}
 		}

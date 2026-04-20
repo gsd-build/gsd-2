@@ -505,7 +505,9 @@ export function buildParams(
 		if (supportsAdaptiveThinking(model.id)) {
 			params.thinking = { type: "adaptive" };
 			if (options.effort) {
-				params.output_config = { effort: options.effort };
+				// The SDK's OutputConfig.effort type doesn't include "xhigh" yet.
+				// Cast so our superset AnthropicEffort type compiles cleanly.
+				params.output_config = { effort: options.effort as "low" | "medium" | "high" | "max" };
 			}
 		} else {
 			params.thinking = {
