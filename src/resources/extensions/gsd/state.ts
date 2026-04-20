@@ -898,13 +898,19 @@ export async function deriveStateFromDb(basePath: string): Promise<GSDState> {
   // may be stale — e.g. from a previous roadmap draft — even when the roadmap on
   // disk has been replaced by a placeholder. Upstream's partial-dep fallback in
   // resolveSliceDependencies would otherwise surface one of the stale rows as
-  // planning work. Re-reading disk here returns pre-planning for a genuinely
-  // empty roadmap without mutating DB rows, so pruning stays conservative.
+  // planning work. Re-reading disk here returns pre-planning for a *genuinely*
+  // empty roadmap without mutating DB rows. A parser/section mismatch (roadmap
+  // authored under a non-standard heading) also yields zero parsed slices, so
+  // we cross-check the raw text for a slice-checkbox pattern; if that pattern
+  // exists we defer to the DB-backed fallback instead of false-flagging
+  // pre-planning and overriding legitimate state.
   const activeRoadmapPath = resolveMilestoneFile(basePath, activeMilestone.id, "ROADMAP");
   if (activeRoadmapPath) {
     try {
-      const diskSlices = parseRoadmap(readFileSync(activeRoadmapPath, "utf-8")).slices;
-      if (diskSlices.length === 0) {
+      const roadmapText = readFileSync(activeRoadmapPath, "utf-8");
+      const diskSlices = parseRoadmap(roadmapText).slices;
+      const hasSliceCheckbox = /^[ \t]*-[ \t]*\[[^\]]*\][ \t]*\*\*S\d+/m.test(roadmapText);
+      if (diskSlices.length === 0 && !hasSliceCheckbox) {
         return {
           activeMilestone, activeSlice: null, activeTask: null,
           phase: 'pre-planning',
