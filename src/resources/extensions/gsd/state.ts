@@ -911,13 +911,15 @@ export async function deriveStateFromDb(basePath: string): Promise<GSDState> {
       const diskSlices = parseRoadmap(roadmapText).slices;
       const hasSliceCheckbox = /^[ \t]*-[ \t]*\[[^\]]*\][ \t]*\*\*S\d+/m.test(roadmapText);
       if (diskSlices.length === 0 && !hasSliceCheckbox) {
+        // Roadmap is the source of truth here; stale DB rows would otherwise
+        // surface phantom slice counts while we're flagging pre-planning.
         return {
           activeMilestone, activeSlice: null, activeTask: null,
           phase: 'pre-planning',
           recentDecisions: [], blockers: [],
           nextAction: `Milestone ${activeMilestone.id} roadmap has no slices defined. Plan the roadmap.`,
           registry, requirements,
-          progress: { milestones: milestoneProgress, slices: sliceProgress },
+          progress: { milestones: milestoneProgress, slices: { done: 0, total: 0 } },
         };
       }
     } catch {
