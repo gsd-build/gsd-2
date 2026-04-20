@@ -325,7 +325,12 @@ function extractPathFromAnnotation(raw: string): string {
 
   const annotatedMatch = trimmed.match(/^(.+?)\s+[—–-]\s+.+$/);
   if (annotatedMatch) {
-    return annotatedMatch[1].trim();
+    const prefix = annotatedMatch[1].trim();
+    const prefixBacktickMatch = prefix.match(/`([^`]+)`/);
+    if (prefixBacktickMatch && looksLikePathOrUrl(prefixBacktickMatch[1].trim())) {
+      return prefixBacktickMatch[1].trim();
+    }
+    return prefix.replace(/`/g, "").trim();
   }
 
   // Fallback: scan all backticked tokens and return the first one that looks
