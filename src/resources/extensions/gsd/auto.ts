@@ -219,6 +219,7 @@ import { initHealthWidget } from "./health-widget.js";
 import { runLegacyAutoLoop, runUokKernelLoop, resolveAgentEnd, resolveAgentEndCancelled, _resetPendingResolve, isSessionSwitchInFlight, type LoopDeps, type ErrorContext } from "./auto-loop.js";
 import { runAutoLoopWithUok } from "./uok/kernel.js";
 import { resolveUokFlags } from "./uok/flags.js";
+import { cleanupPausedMetadataAfterResumeLock } from "./auto/paused-metadata-cleanup.js";
 // Slice-level parallelism (#2340)
 import { getEligibleSlices } from "./slice-parallel-eligibility.js";
 import { startSliceParallel } from "./slice-parallel-orchestrator.js";
@@ -1604,13 +1605,12 @@ export async function startAuto(
     }
 
     // Lock acquired — now safe to delete paused-session metadata.
-    const pausedPath = pausedMetadataCleanupPath
-      ?? join(gsdRoot(s.originalBasePath || base), "runtime", "paused-session.json");
-    if (existsSync(pausedPath)) {
-      try { unlinkSync(pausedPath); } catch (err) {
-        logWarning("session", `pause file cleanup failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
-      }
-    }
+    cleanupPausedMetadataAfterResumeLock(
+      true,
+      base,
+      s.originalBasePath,
+      pausedMetadataCleanupPath,
+    );
     pausedMetadataCleanupPath = null;
 
     // Lock acquired — now safe to delete the captured session transcript path.

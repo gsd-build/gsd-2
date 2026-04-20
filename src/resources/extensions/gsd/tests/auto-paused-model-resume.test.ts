@@ -64,10 +64,10 @@ test("resume path defers paused-session metadata deletion until lock acquisition
   );
 
   const lockIdx = source.indexOf("const resumeLock = acquireSessionLock(base);");
-  const deferredCleanupIdx = source.indexOf("const pausedPath = pausedMetadataCleanupPath", lockIdx);
+  const deferredCleanupIdx = source.indexOf("cleanupPausedMetadataAfterResumeLock(", lockIdx);
   assert.ok(
     lockIdx > -1 && deferredCleanupIdx > lockIdx,
-    "paused-session metadata should only be unlinked after acquireSessionLock succeeds",
+    "paused-session metadata should only be cleaned up after acquireSessionLock succeeds",
   );
 });
 
