@@ -64,6 +64,15 @@ export interface SidecarItem {
   captureId?: string;
 }
 
+export interface PreExecFailure {
+  /** Milestone/slice that failed (e.g. "M001/S02"). */
+  unitId: string;
+  /** Verbatim blocking check strings from the failed gate run. */
+  blockingFindings: string[];
+  /** Condensed gate verdict excerpt for context (status + rationale). */
+  verdictExcerpt: string;
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 export const MAX_UNIT_DISPATCHES = 3;
@@ -149,14 +158,7 @@ export class AutoSession {
    * Cleared after it has been consumed (injected into the prompt) to avoid
    * stale context bleeding into unrelated slices.
    */
-  lastPreExecFailure: {
-    /** Milestone/slice that failed (e.g. "M001/S02"). */
-    unitId: string;
-    /** Verbatim blocking check strings from the failed gate run. */
-    blockingFindings: string[];
-    /** Condensed gate verdict excerpt for context (status + rationale). */
-    verdictExcerpt: string;
-  } | null = null;
+  lastPreExecFailure: PreExecFailure | null = null;
 
   // ── Tool invocation errors (#2883) ──────────────────────────────────
   /** Set when a GSD tool execution ends with isError due to malformed/truncated
