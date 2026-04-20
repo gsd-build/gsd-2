@@ -680,6 +680,47 @@ test("MAX_TRANSIENT_AUTO_RESUMES is at least 8 for sustained overload resilience
   );
 });
 
+// ── Stream idle timeout / partial response (#4558) ──────────────────────────
+
+test("classifyError: 'Stream idle timeout - partial response received' is transient network", () => {
+  const result = classifyError("API Error: Stream idle timeout - partial response received");
+  assert.ok(isTransient(result), "stream idle timeout must be transient");
+  assert.equal(result.kind, "network");
+  assert.ok("retryAfterMs" in result && result.retryAfterMs > 0);
+});
+
+test("classifyError: 'stream idle timeout' (lowercase) is transient network", () => {
+  const result = classifyError("stream idle timeout");
+  assert.ok(isTransient(result), "lowercase stream idle timeout must be transient");
+  assert.equal(result.kind, "network");
+});
+
+test("classifyError: 'partial response received' alone is transient network", () => {
+  const result = classifyError("partial response received");
+  assert.ok(isTransient(result), "partial response received must be transient");
+  assert.equal(result.kind, "network");
+});
+
+// ── Context overflow / context window exceeded (#4528) ───────────────────────
+
+test("classifyError: MiniMax context window error is transient server", () => {
+  const result = classifyError("400 invalid params, context window exceeds limit (2013)");
+  assert.ok(isTransient(result), "context window exceeded must be transient");
+  assert.equal(result.kind, "server");
+});
+
+test("classifyError: 'context length exceeded' is transient server", () => {
+  const result = classifyError("context length exceeded: max 128000 tokens");
+  assert.ok(isTransient(result), "context length exceeded must be transient");
+  assert.equal(result.kind, "server");
+});
+
+test("classifyError: 'context window' with 'exceed' is transient server", () => {
+  const result = classifyError("context window exceeded for this model");
+  assert.ok(isTransient(result), "context window exceeded must be transient");
+  assert.equal(result.kind, "server");
+});
+
 // ── agent-session retryable regex handles server_error (#1166) ──────────────
 
 test("agent-session retryable error regex matches server_error (underscore)", () => {
