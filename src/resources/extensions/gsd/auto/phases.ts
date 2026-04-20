@@ -419,7 +419,7 @@ export async function runPreDispatch(
         findings: reason,
         milestoneId: state.activeMilestone?.id ?? undefined,
       });
-      ctx.ui.notify(`Plan gate failed-closed: ${reason}`, "error");
+      ctx.ui.notify(`Plan gate failed-closed: ${reason}\n\nIf this keeps happening, try: /gsd doctor heal`, "error");
       await deps.pauseAuto(ctx, pi);
       return { action: "break", reason: "plan-v2-gate-failed" };
     }

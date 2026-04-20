@@ -105,7 +105,7 @@ function runPlanV2Gate(
   if (!compiled.ok) {
     const reason = compiled.reason ?? "plan-v2 compilation failed";
     ctx.ui.notify(
-      `Plan gate failed-closed: ${reason}. Complete plan/discuss artifacts before execution.`,
+      `Plan gate failed-closed: ${reason}. Complete plan/discuss artifacts before execution.\n\nIf this keeps happening, try: /gsd doctor heal`,
       "error",
     );
     return false;
