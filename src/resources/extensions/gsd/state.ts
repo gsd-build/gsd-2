@@ -373,15 +373,25 @@ function reconcileDiskToDb(basePath: string): MilestoneRow[] {
       });
     }
 
-    // Prune pending DB rows absent from the roadmap. Completed rows stay put
-    // so SUMMARY-backed history is never collateral damage. The parse
-    // succeeded by the time we're here (errors `continue` above), so an empty
-    // `roadmapSliceIds` reflects a placeholder roadmap — exactly the case
-    // where stale DB rows must be cleared so derivation reaches pre-planning.
-    for (const dbSlice of dbSlices) {
-      if (!isStatusDone(dbSlice.status) && !roadmapSliceIds.has(dbSlice.id)) {
-        deleteSlice(mid, dbSlice.id);
+    // Prune pending DB rows absent from the roadmap, but only when the parse
+    // yielded at least one slice id. An empty parse can also stem from a
+    // parser/section mismatch, so we refuse to delete pending rows we cannot
+    // positively cross-reference. Completed rows stay put either way so
+    // SUMMARY-backed history is never collateral damage. Placeholder-roadmap
+    // recovery is handled further down in deriveStateFromDb via a disk-level
+    // pre-planning check that does not touch DB rows.
+    if (roadmapSliceIds.size > 0) {
+      for (const dbSlice of dbSlices) {
+        if (!isStatusDone(dbSlice.status) && !roadmapSliceIds.has(dbSlice.id)) {
+          deleteSlice(mid, dbSlice.id);
+        }
       }
+    } else {
+      logWarning(
+        "state",
+        "reconcileDiskToDb: skip stale-slice pruning because parsed roadmap has zero slices",
+        { mid },
+      );
     }
 
     // Reconcile stale *existing* slice rows (#3599): a slice row may exist in
@@ -884,6 +894,31 @@ export async function deriveStateFromDb(basePath: string): Promise<GSDState> {
     return handleAllSlicesDone(basePath, activeMilestone, registry, requirements, milestoneProgress, sliceProgress);
   }
 
+  // Placeholder-roadmap recovery (#3439, #3441): DB rows for the active milestone
+  // may be stale — e.g. from a previous roadmap draft — even when the roadmap on
+  // disk has been replaced by a placeholder. Upstream's partial-dep fallback in
+  // resolveSliceDependencies would otherwise surface one of the stale rows as
+  // planning work. Re-reading disk here returns pre-planning for a genuinely
+  // empty roadmap without mutating DB rows, so pruning stays conservative.
+  const activeRoadmapPath = resolveMilestoneFile(basePath, activeMilestone.id, "ROADMAP");
+  if (activeRoadmapPath) {
+    try {
+      const diskSlices = parseRoadmap(readFileSync(activeRoadmapPath, "utf-8")).slices;
+      if (diskSlices.length === 0) {
+        return {
+          activeMilestone, activeSlice: null, activeTask: null,
+          phase: 'pre-planning',
+          recentDecisions: [], blockers: [],
+          nextAction: `Milestone ${activeMilestone.id} roadmap has no slices defined. Plan the roadmap.`,
+          registry, requirements,
+          progress: { milestones: milestoneProgress, slices: sliceProgress },
+        };
+      }
+    } catch {
+      // Unreadable roadmap — fall through so the user eventually sees the error.
+    }
+  }
+
   // ADR-011 auto-heal: if a slice has a PLAN on disk but is still flagged is_sketch=1
   // (e.g. a crash between plan-slice write and the sketch flip), reconcile before
   // running phase derivation so the flag doesn't misroute state.
@@ -903,26 +938,6 @@ export async function deriveStateFromDb(basePath: string): Promise<GSDState> {
         registry, requirements,
         progress: { milestones: milestoneProgress, slices: sliceProgress },
       };
-    }
-
-    // DB rows may be stale if the roadmap was replaced with a placeholder — re-check disk.
-    const roadmapPath = resolveMilestoneFile(basePath, activeMilestone.id, "ROADMAP");
-    if (roadmapPath) {
-      try {
-        const diskSlices = parseRoadmap(readFileSync(roadmapPath, "utf-8")).slices;
-        if (diskSlices.length === 0) {
-          return {
-            activeMilestone, activeSlice: null, activeTask: null,
-            phase: 'pre-planning',
-            recentDecisions: [], blockers: [],
-            nextAction: `Milestone ${activeMilestone.id} roadmap has no slices defined. Plan the roadmap.`,
-            registry, requirements,
-            progress: { milestones: milestoneProgress, slices: sliceProgress },
-          };
-        }
-      } catch {
-        // Unreadable roadmap — fall through to blocked so the user sees the error
-      }
     }
 
     return {
