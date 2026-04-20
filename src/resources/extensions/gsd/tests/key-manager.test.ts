@@ -143,6 +143,13 @@ test("PROVIDER_REGISTRY includes all major LLM providers", () => {
   assert.ok(ids.includes("groq"));
 });
 
+test("PROVIDER_REGISTRY includes claude-code as a first-class LLM provider (#4541)", () => {
+  const entry = PROVIDER_REGISTRY.find((p) => p.id === "claude-code");
+  assert.ok(entry, "claude-code must be in PROVIDER_REGISTRY");
+  assert.equal(entry!.category, "llm");
+  assert.ok(entry!.hasOAuth, "claude-code uses OAuth (CLI auth)");
+});
+
 test("PROVIDER_REGISTRY includes all tool/search providers", () => {
   const ids = PROVIDER_REGISTRY.map((p) => p.id);
   assert.ok(ids.includes("tavily"));
