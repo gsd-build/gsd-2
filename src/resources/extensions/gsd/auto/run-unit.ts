@@ -124,12 +124,12 @@ export async function runUnit(
   // not wasted on a guaranteed 401.
   {
     const provider = s.currentUnitModel?.provider ?? ctx.model?.provider;
-    const readyCheck = (ctx as any).modelRegistry?.isProviderRequestReady;
+    const registry = (ctx as any).modelRegistry;
 
-    if (provider && typeof readyCheck === "function") {
+    if (provider && registry != null && typeof registry.isProviderRequestReady === "function") {
       let ready = false;
       try {
-        ready = readyCheck(provider);
+        ready = registry.isProviderRequestReady(provider);
       } catch {
         ready = false;
       }

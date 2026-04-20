@@ -376,7 +376,10 @@ test("runUnit cancels before dispatch using currentUnitModel provider when set (
   _resetPendingResolve();
 
   const ctx = makeMockCtx();
-  ctx.model = { provider: "anthropic", id: "claude-opus-4-6" };
+  // ctx.model uses "openai" which IS ready — if the code ignores currentUnitModel
+  // and falls back to ctx.model.provider, the unit would NOT be cancelled. The
+  // test therefore differentiates: only a bug (wrong provider lookup) would pass.
+  ctx.model = { provider: "openai", id: "gpt-4o" };
   // modelRegistry says anthropic is not ready but openai is
   ctx.modelRegistry = {
     isProviderRequestReady: (provider: string) => provider === "openai",
@@ -395,10 +398,10 @@ test("runUnit cancels before dispatch using currentUnitModel provider when set (
     result.errorContext?.message ?? "",
     /Provider anthropic is not request-ready/,
   );
-  assert.equal(pi.calls.length, 0);
+  assert.equal(pi.calls.length, 0, "sendMessage must not be called — anthropic (currentUnitModel) is not ready");
 });
 
-test("runUnit proceeds when provider is request-ready (#4555)", async () => {
+test("runUnit does not cancel before dispatch when provider is request-ready (#4555)", async () => {
   _resetPendingResolve();
 
   const ctx = makeMockCtx();
