@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, readFileSync, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, readFileSync, existsSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -11,7 +11,7 @@ import {
   _getAdapter,
   insertGateRow,
 } from "../gsd-db.ts";
-import { markDepthVerified, clearDiscussionFlowState } from "../bootstrap/write-gate.ts";
+import { markDepthVerified, clearDiscussionFlowState, loadWriteGateSnapshot } from "../bootstrap/write-gate.ts";
 import {
   executeCompleteMilestone,
   executePlanMilestone,
@@ -738,6 +738,69 @@ test("executeSummarySave leaves sibling CONTEXT-DRAFT intact for non-CONTEXT art
       "CONTEXT-DRAFT.md must survive RESEARCH/SUMMARY/ASSESSMENT writes",
     );
   } finally {
+    closeDatabase();
+    cleanup(base);
+  }
+});
+
+test("executeSummarySave CONTEXT HARD BLOCK clears after write-gate state file is deleted (#4343)", async () => {
+  const base = makeTmpBase();
+  const originalEnv = process.env.GSD_PERSIST_WRITE_GATE_STATE;
+  process.env.GSD_PERSIST_WRITE_GATE_STATE = "1";
+  try {
+    openTestDb(base);
+    clearDiscussionFlowState();
+
+    // First call: CONTEXT artifact without depth verification → HARD BLOCK
+    const blocked = await inProjectDir(base, () => executeSummarySave({
+      milestone_id: "M001",
+      artifact_type: "CONTEXT",
+      content: "# Context\n\ncontent",
+    }, base));
+    assert.equal(blocked.isError, true, "should be blocked without depth verification");
+    assert.match(
+      blocked.content[0].text,
+      /HARD BLOCK/,
+      "blocked result should mention HARD BLOCK",
+    );
+
+    // Verify the state file was written (persist mode is active)
+    const stateFilePath = join(base, ".gsd", "runtime", "write-gate-state.json");
+    // The state file may or may not exist at this point (block doesn't write state).
+    // Write a fake state file simulating stale persisted block state.
+    mkdirSync(join(base, ".gsd", "runtime"), { recursive: true });
+    writeFileSync(stateFilePath, JSON.stringify({
+      verifiedDepthMilestones: [],
+      activeQueuePhase: false,
+      pendingGateId: "depth_verification_M001",
+    }));
+
+    // User deletes the state file to reset the block
+    unlinkSync(stateFilePath);
+    assert.ok(!existsSync(stateFilePath), "state file deleted");
+
+    // The snapshot loaded after deletion should be clean (no pending gate, no block)
+    const snapshot = loadWriteGateSnapshot(base);
+    assert.equal(snapshot.pendingGateId, null, "pendingGateId should be null after file deletion");
+    assert.deepEqual(snapshot.verifiedDepthMilestones, [], "verifiedDepthMilestones should be empty after file deletion");
+
+    // Depth-verify and re-attempt: should succeed after deletion clears stale state
+    markDepthVerified("M001", base);
+
+    const unblocked = await inProjectDir(base, () => executeSummarySave({
+      milestone_id: "M001",
+      artifact_type: "CONTEXT",
+      content: "# Context\n\nfinal content",
+    }, base));
+    assert.equal(unblocked.isError, undefined, "should not be blocked after depth verification");
+    assert.equal(unblocked.details.operation, "save_summary");
+  } finally {
+    if (originalEnv === undefined) {
+      delete process.env.GSD_PERSIST_WRITE_GATE_STATE;
+    } else {
+      process.env.GSD_PERSIST_WRITE_GATE_STATE = originalEnv;
+    }
+    clearDiscussionFlowState();
     closeDatabase();
     cleanup(base);
   }

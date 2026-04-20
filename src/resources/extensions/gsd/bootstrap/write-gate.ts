@@ -117,9 +117,21 @@ function normalizeWriteGateSnapshot(value: unknown): WriteGateSnapshot {
   };
 }
 
+const EMPTY_SNAPSHOT: WriteGateSnapshot = {
+  verifiedDepthMilestones: [],
+  activeQueuePhase: false,
+  pendingGateId: null,
+};
+
 export function loadWriteGateSnapshot(basePath: string = process.cwd()): WriteGateSnapshot {
   const path = writeGateSnapshotPath(basePath);
-  if (!existsSync(path)) return currentWriteGateSnapshot();
+  if (!existsSync(path)) {
+    // When persist mode is active and the file has been deleted, treat it as a
+    // full state reset so deleting the file clears the HARD BLOCK gate.
+    // In non-persist mode the file is never written, so fall back to in-memory.
+    if (shouldPersistWriteGateSnapshot()) return EMPTY_SNAPSHOT;
+    return currentWriteGateSnapshot();
+  }
   try {
     return normalizeWriteGateSnapshot(JSON.parse(readFileSync(path, "utf-8")));
   } catch {
