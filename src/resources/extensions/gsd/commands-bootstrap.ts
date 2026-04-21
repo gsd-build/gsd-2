@@ -65,7 +65,11 @@ function filterStartsWith(
 }
 
 function getGsdArgumentCompletions(prefix: string) {
+  const hasTrailingSpace = prefix.endsWith(" ");
   const parts = prefix.trim().split(/\s+/);
+  if (hasTrailingSpace && parts.length >= 1) {
+    parts.push("");
+  }
 
   if (parts.length <= 1) {
     return filterStartsWith(parts[0] ?? "", TOP_LEVEL_SUBCOMMANDS);
