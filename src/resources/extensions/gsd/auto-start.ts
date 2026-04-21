@@ -553,37 +553,15 @@ export async function bootstrapAutoSession(
         const { showSmartEntry } = await import("./guided-flow.js");
         await showSmartEntry(ctx, pi, base, { step: requestedStepMode });
 
-        invalidateAllCaches();
-        const postState = await deriveState(base);
-        if (
-          postState.activeMilestone &&
-          postState.phase !== "complete" &&
-          postState.phase !== "pre-planning"
-        ) {
-          s.consecutiveCompleteBootstraps = 0; // Successfully advanced past "complete"
-          state = postState;
-        } else if (
-          postState.activeMilestone &&
-          postState.phase === "pre-planning"
-        ) {
-          const contextFile = resolveMilestoneFile(
-            base,
-            postState.activeMilestone.id,
-            "CONTEXT",
-          );
-          const hasContext = !!(contextFile && (await loadFile(contextFile)));
-          if (hasContext) {
-            state = postState;
-          } else {
-            ctx.ui.notify(
-              "Discussion completed but no milestone context was written. Run /gsd to try the discussion again, or /gsd auto after creating the milestone manually.",
-              "warning",
-            );
-            return releaseLockAndReturn();
-          }
-        } else {
-          return releaseLockAndReturn();
-        }
+        // showSmartEntry dispatches via pi.sendMessage() which is fire-and-forget:
+        // it queues the message and returns immediately, before the LLM turn runs.
+        // Checking postState here would always see the pre-dispatch state, causing
+        // the premature "Discussion completed but..." warning (#3420).
+        //
+        // checkAutoStartAfterDiscuss (in guided-flow.ts) already handles re-entering
+        // auto-mode by calling startAutoDetached after the discussion completes.
+        // Release the lock and let the async dispatch proceed.
+        return releaseLockAndReturn();
       }
 
       // Active milestone exists but has no roadmap
@@ -595,17 +573,16 @@ export async function bootstrapAutoSession(
           const { showSmartEntry } = await import("./guided-flow.js");
           await showSmartEntry(ctx, pi, base, { step: requestedStepMode });
 
-          invalidateAllCaches();
-          const postState = await deriveState(base);
-          if (postState.activeMilestone && postState.phase !== "pre-planning") {
-            state = postState;
-          } else {
-            ctx.ui.notify(
-              "Discussion completed but milestone context is still missing. Run /gsd to try again.",
-              "warning",
-            );
-            return releaseLockAndReturn();
-          }
+          // showSmartEntry dispatches via pi.sendMessage() which is fire-and-forget:
+          // it queues the message and returns immediately, before the LLM turn runs.
+          // Checking postState here fires before the LLM has had a turn, so the
+          // pre-planning phase would still appear unchanged and a premature warning
+          // would be emitted (#3420).
+          //
+          // checkAutoStartAfterDiscuss (in guided-flow.ts) already handles re-entering
+          // auto-mode by calling startAutoDetached after the discussion completes.
+          // Release the lock and let the async dispatch proceed.
+          return releaseLockAndReturn();
         }
       }
 
