@@ -7,7 +7,8 @@
  */
 
 import { execSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { readFileSync, existsSync } from 'node:fs';
+import { resolve, join } from 'node:path';
 import { RpcClient } from '@gsd-build/rpc-client';
 import type { SdkAgentEvent, RpcInitResult, RpcCostUpdateEvent, RpcExtensionUIRequest } from '@gsd-build/rpc-client';
 import type {
@@ -201,8 +202,29 @@ export class SessionManager {
    */
   async cancelSessionByDir(projectDir: string): Promise<void> {
     const session = this.getSessionByDir(projectDir);
-    if (!session) throw new Error(`Session not found for projectDir: ${projectDir}`);
-    await this._cancelSessionObject(session);
+    if (session) {
+      await this._cancelSessionObject(session);
+      return;
+    }
+    const stopped = await this.stopDetachedAutoProcess(projectDir);
+    if (!stopped) {
+      throw new Error(`Session not found for projectDir: ${projectDir}`);
+    }
+  }
+
+  private async stopDetachedAutoProcess(projectDir: string): Promise<boolean> {
+    const lockPath = join(projectDir, '.gsd', 'auto.lock');
+    if (!existsSync(lockPath)) return false;
+    try {
+      const lockData = JSON.parse(readFileSync(lockPath, 'utf-8')) as { pid?: number };
+      const pid = lockData.pid;
+      if (typeof pid !== 'number') return false;
+      try { process.kill(pid, 0); } catch { return false; }
+      process.kill(pid, 'SIGTERM');
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**

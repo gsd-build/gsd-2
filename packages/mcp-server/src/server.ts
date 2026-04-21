@@ -478,12 +478,20 @@ export async function createMcpServer(sessionManager: SessionManager): Promise<{
     async (args: Record<string, unknown>) => {
       const { sessionId, projectDir } = args as { sessionId?: string; projectDir?: string };
       try {
+        if (!sessionId && !projectDir) {
+          return errorContent('Either sessionId or projectDir must be provided');
+        }
         if (sessionId) {
-          await sessionManager.cancelSession(sessionId);
+          try {
+            await sessionManager.cancelSession(sessionId);
+          } catch (err) {
+            if (!projectDir || !(err instanceof Error) || !err.message.includes('Session not found')) {
+              throw err;
+            }
+            await sessionManager.cancelSessionByDir(projectDir);
+          }
         } else if (projectDir) {
           await sessionManager.cancelSessionByDir(projectDir);
-        } else {
-          return errorContent('Either sessionId or projectDir must be provided');
         }
         return jsonContent({ cancelled: true });
       } catch (err) {
