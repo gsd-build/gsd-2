@@ -14,7 +14,8 @@ import type { GSDPreferences } from "./preferences.js";
 import type { UatType } from "./files.js";
 import type { MinimalModelRegistry } from "./context-budget.js";
 import { loadFile, extractUatType, loadActiveOverrides } from "./files.js";
-import { isDbAvailable, getMilestoneSlices, getPendingGates, markAllGatesOmitted, getMilestone, updateMilestoneStatus } from "./gsd-db.js";
+import { isDbAvailable, getMilestoneSlices, getPendingGates, markAllGatesOmitted, getMilestone, updateMilestoneStatus, getExternalWait, incrementProbeFailureCount, updateExternalWaitStatus, resetProbeFailureCount, getAllWaitingExternalWaits, updateTaskStatus } from "./gsd-db.js";
+import { exec } from "node:child_process";
 import { isClosedStatus } from "./status-guards.js";
 import { extractVerdict, isAcceptableUatVerdict } from "./verdict-parser.js";
 
@@ -30,8 +31,9 @@ import {
   buildSliceFileName,
 } from "./paths.js";
 import { parseRoadmap } from "./parsers-legacy.js";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { logWarning, logError } from "./workflow-logger.js";
+import { invalidateStateCache } from "./state.js";
 import { join } from "node:path";
 import { hasImplementationArtifacts } from "./auto-recovery.js";
 import { classifyMilestoneSummaryContent } from "./milestone-summary-classifier.js";
@@ -74,7 +76,8 @@ export type DispatchAction =
       matchedRule?: string;
     }
   | { action: "stop"; reason: string; level: "info" | "warning" | "error"; matchedRule?: string }
-  | { action: "skip"; matchedRule?: string };
+  | { action: "skip"; matchedRule?: string }
+  | { action: "sleep"; durationMs: number; matchedRule?: string };
 
 export interface DispatchContext {
   basePath: string;
@@ -708,6 +711,166 @@ export const DISPATCH_RULES: DispatchRule[] = [
           basePath,
         ),
       };
+    },
+  },
+  {
+    name: "awaiting-external → probe",
+    match: async (ctx) => {
+      const { state, mid, basePath } = ctx;
+      if (state.phase !== "awaiting-external") return null;
+      if (!state.activeTask || !state.activeSlice) return null;
+
+      const sid = state.activeSlice.id;
+      const tid = state.activeTask.id;
+      const waitRow = getExternalWait(mid, sid, tid);
+
+      if (!waitRow) {
+        return {
+          action: "stop" as const,
+          reason: `Task ${tid} has status "awaiting-external" but no external_waits record. Run /gsd doctor to diagnose.`,
+          level: "warning" as const,
+        };
+      }
+
+      // ── Probe exit code semantics (D029) ──────────────────────────
+      // INVERTED from shell convention:
+      //   exit 0  = "still running" (not done)  → sleep for pollInterval
+      //   exit !0 = "done"                      → skip (transition handled here)
+      // Rationale: SLURM's `squeue -j ID | grep -c ID` returns 0 when job
+      // is in queue (running), non-zero when it's gone (done).
+
+      const checkCommand = waitRow.check_command as string;
+      const pollIntervalMs = (waitRow.poll_interval_ms as number) || 60000;
+      const tasksDir = join(resolveSlicePath(basePath, mid, sid), "tasks");
+      const logPath = join(tasksDir, `${tid}-EXTERNAL-WAIT.log`);
+
+      // ── Timeout check (before probe execution) ────────────────────
+      const registeredAt = waitRow.registered_at as string;
+      const timeoutMs = (waitRow.timeout_ms as number) || 86400000;
+      if (Date.now() > Date.parse(registeredAt) + timeoutMs) {
+        const onTimeout = (waitRow.on_timeout as string) || "manual-attention";
+        updateTaskStatus(mid, sid, tid, "manual-attention");
+        updateExternalWaitStatus(mid, sid, tid, "timed-out");
+        invalidateStateCache();
+        try { appendFileSync(logPath, JSON.stringify({ ts: new Date().toISOString(), event: "timeout", registeredAt, timeoutMs }) + "\n"); } catch {}
+        if (onTimeout === "manual-attention") {
+          return { action: "stop" as const, reason: `External wait for ${tid} timed out (registered ${registeredAt}, timeout ${timeoutMs}ms). Escalating to manual attention.`, level: "warning" as const };
+        }
+        return { action: "stop" as const, reason: `External wait for ${tid} timed out.`, level: "warning" as const };
+      }
+
+      // ── JSON probe spec existence check (R228) ────────────────────
+      const probeSpecPath = join(tasksDir, `${tid}-EXTERNAL-WAIT.json`);
+      if (!existsSync(probeSpecPath)) {
+        updateTaskStatus(mid, sid, tid, "manual-attention");
+        updateExternalWaitStatus(mid, sid, tid, "timed-out");
+        invalidateStateCache();
+        return { action: "stop" as const, reason: `Task ${tid} has external_waits DB row but no ${tid}-EXTERNAL-WAIT.json probe spec. Escalating to manual attention.`, level: "warning" as const };
+      }
+
+      // ── Helper: compute min pollInterval across all waiting waits ──
+      const computeMinPoll = (): number => {
+        const allWaiting = getAllWaitingExternalWaits(mid);
+        return allWaiting.length > 0
+          ? Math.min(...allWaiting.map(w => (w.poll_interval_ms as number) || 60000))
+          : pollIntervalMs;
+      };
+
+      try {
+        const { exitCode, killed, stdout } = await new Promise<{ exitCode: number | null; killed: boolean; stdout: string }>((resolve) => {
+          exec(checkCommand, { timeout: 30000, shell: "/bin/sh" }, (err, stdout, _stderr) => {
+            if (err) {
+              resolve({ exitCode: (err as any).code ?? null, killed: !!(err as any).killed, stdout: stdout || "" });
+            } else {
+              resolve({ exitCode: 0, killed: false, stdout: stdout || "" });
+            }
+          });
+        });
+
+        // ── Probe execution log ───────────────────────────────────
+        try { appendFileSync(logPath, JSON.stringify({ ts: new Date().toISOString(), event: "probe", exitCode, stdout: stdout.slice(0, 500), killed }) + "\n"); } catch {}
+
+        if (killed) {
+          incrementProbeFailureCount(mid, sid, tid);
+          const updated = getExternalWait(mid, sid, tid);
+          if (updated && (updated.probe_failure_count as number) >= 3) {
+            updateTaskStatus(mid, sid, tid, "manual-attention");
+            updateExternalWaitStatus(mid, sid, tid, "timed-out");
+            invalidateStateCache();
+            return {
+              action: "stop" as const,
+              reason: `Probe for ${tid} timed out 3 times. Escalating to manual attention.`,
+              level: "warning" as const,
+            };
+          }
+          return { action: "sleep" as const, durationMs: computeMinPoll(), matchedRule: "awaiting-external → probe" };
+        }
+
+        if (exitCode === 0) {
+          // Still running — reset failure count (R227) and sleep
+          resetProbeFailureCount(mid, sid, tid);
+          return { action: "sleep" as const, durationMs: computeMinPoll(), matchedRule: "awaiting-external → probe" };
+        }
+
+        // ── Non-zero exit = done — execute successCheck if present ──
+        const successCheck = waitRow.success_check as string | null;
+        const contextHint = (waitRow.context_hint as string) || "";
+        let jobSucceeded = true;
+        let failureContext = "";
+
+        if (successCheck) {
+          try {
+            const scResult = await new Promise<{ exitCode: number | null; stdout: string; stderr: string }>((resolve) => {
+              exec(successCheck, { timeout: 30000, shell: "/bin/sh" }, (err, scStdout, scStderr) => {
+                if (err) resolve({ exitCode: (err as any).code ?? 1, stdout: scStdout || "", stderr: scStderr || "" });
+                else resolve({ exitCode: 0, stdout: scStdout || "", stderr: scStderr || "" });
+              });
+            });
+            try { appendFileSync(logPath, JSON.stringify({ ts: new Date().toISOString(), event: "successCheck", exitCode: scResult.exitCode, stdout: scResult.stdout.slice(0, 500) }) + "\n"); } catch {}
+            if (scResult.exitCode !== 0) {
+              jobSucceeded = false;
+              failureContext = `Exit code: ${scResult.exitCode}\nStderr: ${scResult.stderr.slice(0, 1000)}`;
+            }
+          } catch (scErr) {
+            jobSucceeded = false;
+            failureContext = `successCheck exec error: ${scErr instanceof Error ? scErr.message : String(scErr)}`;
+          }
+        }
+
+        // ── State transition: awaiting-external → executing ────────
+        updateTaskStatus(mid, sid, tid, "executing");
+        updateExternalWaitStatus(mid, sid, tid, "resolved");
+        resetProbeFailureCount(mid, sid, tid);
+        invalidateStateCache();
+
+        // ── Carry-forward context ─────────────────────────────────
+        if (ctx.session) {
+          if (jobSucceeded) {
+            ctx.session.pendingExternalResume = `**EXTERNAL WAIT RESOLVED — TASK RESUMING**\n\nThe external process you submitted has completed successfully.${contextHint ? `\n\nContext from registration: ${contextHint}` : ""}\n\nContinue with the task.`;
+          } else {
+            ctx.session.pendingExternalResume = `**EXTERNAL WAIT RESOLVED — JOB FAILED**\n\nThe external process completed but the success check failed.${contextHint ? `\n\nContext from registration: ${contextHint}` : ""}\n\nFailure details:\n${failureContext}\n\nInvestigate the failure, adjust parameters if needed, and either fix the issue or escalate.`;
+          }
+        }
+
+        return { action: "skip" as const };
+      } catch (execErr) {
+        // ── Probe execution failure log ──────────────────────────
+        try { appendFileSync(logPath, JSON.stringify({ ts: new Date().toISOString(), event: "probe-error", error: execErr instanceof Error ? execErr.message : String(execErr) }) + "\n"); } catch {}
+
+        incrementProbeFailureCount(mid, sid, tid);
+        const updated = getExternalWait(mid, sid, tid);
+        if (updated && (updated.probe_failure_count as number) >= 3) {
+          updateTaskStatus(mid, sid, tid, "manual-attention");
+          updateExternalWaitStatus(mid, sid, tid, "timed-out");
+          invalidateStateCache();
+          return {
+            action: "stop" as const,
+            reason: `Probe for ${tid} failed 3 times: ${execErr instanceof Error ? execErr.message : String(execErr)}`,
+            level: "warning" as const,
+          };
+        }
+        return { action: "sleep" as const, durationMs: computeMinPoll(), matchedRule: "awaiting-external → probe" };
+      }
     },
   },
   {

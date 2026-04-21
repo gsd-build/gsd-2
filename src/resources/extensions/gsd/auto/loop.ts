@@ -432,6 +432,10 @@ export async function autoLoop(
         if (dispatch.action === "skip") {
           continue;
         }
+        if (dispatch.action === "sleep") {
+          await new Promise(r => setTimeout(r, dispatch.durationMs));
+          continue;
+        }
 
         // dispatch.action === "dispatch"
         const step = dispatch.step!;
