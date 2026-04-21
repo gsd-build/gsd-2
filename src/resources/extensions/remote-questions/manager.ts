@@ -9,6 +9,7 @@ import { resolveRemoteConfig, type ResolvedConfig } from "./config.js";
 import { DiscordAdapter } from "./discord-adapter.js";
 import { SlackAdapter } from "./slack-adapter.js";
 import { TelegramAdapter } from "./telegram-adapter.js";
+import { clearProxyAgentCache } from "./http-client.js";
 import { createPromptRecord, writePromptRecord, markPromptAnswered, markPromptDispatched, markPromptStatus, updatePromptRecord } from "./store.js";
 import { sanitizeError } from "../shared/sanitize.js";
 
@@ -41,7 +42,10 @@ export function startCommandPolling(
     });
   }, intervalMs);
 
-  return () => clearInterval(timer);
+  return () => {
+    clearInterval(timer);
+    clearProxyAgentCache();
+  };
 }
 
 interface ToolResult {

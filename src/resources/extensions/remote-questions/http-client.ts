@@ -23,6 +23,14 @@ function redactProxyUrl(url: string): string {
   }
 }
 
+/** Close and clear all cached ProxyAgent instances. */
+export function clearProxyAgentCache(): void {
+  for (const agent of proxyAgentCache.values()) {
+    agent.close();
+  }
+  proxyAgentCache.clear();
+}
+
 export interface ApiRequestOptions {
   /** Authorization header scheme. Omit to skip the Authorization header entirely. */
   authScheme?: "Bearer" | "Bot";
@@ -76,11 +84,12 @@ export async function apiRequest(
 
   // Configure proxy if proxyUrl is provided
   if (proxyUrl) {
-    let agent = proxyAgentCache.get(proxyUrl);
+    const cacheKey = redactProxyUrl(proxyUrl);
+    let agent = proxyAgentCache.get(cacheKey);
     if (!agent) {
       try {
         agent = new ProxyAgent(proxyUrl);
-        proxyAgentCache.set(proxyUrl, agent);
+        proxyAgentCache.set(cacheKey, agent);
       } catch (err) {
         const redactedUrl = redactProxyUrl(proxyUrl);
         const errorMessage = err instanceof Error ? err.message : String(err);
