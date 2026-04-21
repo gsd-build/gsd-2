@@ -2733,7 +2733,10 @@ export function reconcileWorktreeDb(
           FROM wt.artifacts
         `).run());
 
-        // Merge milestones — worktree may have updated status/planning fields
+        // Merge milestones — worktree may have updated status/planning fields.
+        // Never downgrade status: complete > active > pre-planning (#4372).
+        // A stale worktree may carry an older 'active' status for a milestone
+        // that the main DB has already marked 'complete'; preserve the higher status.
         merged.milestones = countChanges(adapter.prepare(`
           INSERT OR REPLACE INTO milestones (
             id, title, status, depends_on, created_at, completed_at,
@@ -2741,11 +2744,25 @@ export function reconcileWorktreeDb(
             verification_contract, verification_integration, verification_operational, verification_uat,
             definition_of_done, requirement_coverage, boundary_map_markdown
           )
-          SELECT id, title, status, depends_on, created_at, completed_at,
-                 vision, success_criteria, key_risks, proof_strategy,
-                 verification_contract, verification_integration, verification_operational, verification_uat,
-                 definition_of_done, requirement_coverage, boundary_map_markdown
-          FROM wt.milestones
+          SELECT w.id, w.title,
+                 CASE
+                   WHEN m.status IN ('complete', 'done') AND w.status NOT IN ('complete', 'done')
+                   THEN m.status ELSE w.status
+                 END,
+                 w.depends_on,
+                 CASE
+                   WHEN m.status IN ('complete', 'done') AND w.status NOT IN ('complete', 'done')
+                   THEN m.created_at ELSE w.created_at
+                 END,
+                 CASE
+                   WHEN m.status IN ('complete', 'done') AND w.status NOT IN ('complete', 'done')
+                   THEN m.completed_at ELSE w.completed_at
+                 END,
+                 w.vision, w.success_criteria, w.key_risks, w.proof_strategy,
+                 w.verification_contract, w.verification_integration, w.verification_operational, w.verification_uat,
+                 w.definition_of_done, w.requirement_coverage, w.boundary_map_markdown
+          FROM wt.milestones w
+          LEFT JOIN milestones m ON m.id = w.id
         `).run());
 
         // Merge slices — preserve worktree progress but never downgrade completed status (#2558).

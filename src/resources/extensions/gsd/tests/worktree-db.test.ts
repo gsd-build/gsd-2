@@ -10,6 +10,8 @@ import {
   insertDecision,
   insertRequirement,
   insertArtifact,
+  insertMilestone,
+  getMilestone,
   getDecisionById,
   getRequirementById,
   _getAdapter,
@@ -438,6 +440,39 @@ console.log('\n=== worktree-db: reconcileWorktreeDb ===');
   // Should still report counts for the existing rows (INSERT OR REPLACE touches them)
   assert.ok(result.conflicts.length === 0, 'no conflicts when DBs are identical');
   assert.ok(isDbAvailable(), 'DB usable after no-change reconciliation');
+
+  cleanup(mainDir, wtDir);
+}
+
+// Test: reconcileWorktreeDb must NOT downgrade milestone status complete→active (#4372)
+{
+  const mainDir = tempDir();
+  const wtDir = tempDir();
+  const mainDb = path.join(mainDir, 'gsd.db');
+  const wtDb = path.join(wtDir, 'gsd.db');
+
+  // Seed main with a milestone already marked complete
+  seedMainDb(mainDb);
+  const mainAdapter = _getAdapter()!;
+  insertMilestone({ id: 'M-COMP', title: 'Completed Milestone', status: 'complete' });
+  // Manually mark completed_at so it's a realistic complete record
+  mainAdapter.prepare(`UPDATE milestones SET completed_at = '2025-06-01T00:00:00.000Z' WHERE id = 'M-COMP'`).run();
+  closeDatabase();
+
+  // Copy to worktree — the worktree has the milestone as 'active' (stale / older snapshot)
+  copyWorktreeDb(mainDb, wtDb);
+  openDatabase(wtDb);
+  const wtAdapter = _getAdapter()!;
+  wtAdapter.prepare(`UPDATE milestones SET status = 'active', completed_at = NULL WHERE id = 'M-COMP'`).run();
+  closeDatabase();
+
+  // Reconcile: main should win and keep 'complete'
+  openDatabase(mainDb);
+  reconcileWorktreeDb(mainDb, wtDb);
+
+  const m = getMilestone('M-COMP');
+  assert.ok(m !== null, 'milestone M-COMP still exists after reconcile');
+  assert.strictEqual(m!.status, 'complete', 'complete milestone must not be downgraded to active by stale worktree');
 
   cleanup(mainDir, wtDir);
 }
