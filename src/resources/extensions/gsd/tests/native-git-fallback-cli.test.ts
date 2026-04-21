@@ -28,8 +28,8 @@ describe("native git fallback uses argv-based execution (#4180)", () => {
     assert.doesNotMatch(block, /execSync\(/, "nativeIsRepo should not shell out with execSync");
     assert.match(
       block,
-      /gitFileExec\(basePath,\s*\["rev-parse",\s*"--git-dir"\],\s*true\)/,
-      "nativeIsRepo should use argv-based git execution",
+      /gitFileExec\(basePath,\s*\["rev-parse",\s*"--git-dir"\]\)/,
+      "nativeIsRepo should use argv-based git execution without swallowing non-repo failures",
     );
   });
 

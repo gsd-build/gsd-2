@@ -323,7 +323,7 @@ export function nativeIsRepo(basePath: string): boolean {
     return native.gitIsRepo(basePath);
   }
   try {
-    gitFileExec(basePath, ["rev-parse", "--git-dir"], true);
+    gitFileExec(basePath, ["rev-parse", "--git-dir"]);
     return true;
   } catch {
     return false;
