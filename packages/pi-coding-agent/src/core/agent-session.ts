@@ -1568,6 +1568,8 @@ export class AgentSession {
 	async newSession(options?: {
 		parentSession?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;
+		/** See ExtensionCommandContext.newSession for docs (#3731). */
+		abortSignal?: AbortSignal;
 	}): Promise<boolean> {
 		const previousSessionFile = this.sessionFile;
 
@@ -1587,6 +1589,15 @@ export class AgentSession {
 	// message_end/agent_end events fire and the #4216 finalization code
 	// can run before we unsubscribe from the event bus.
 	await this.abort();
+
+		// #3731: If the caller aborted (e.g. runUnit() timed out and restored cwd to
+		// project root), discard this session before capturing process.cwd() and
+		// rebuilding the tool runtime. Without this check, the late newSession()
+		// would rebuild tools with root cwd, breaking worktree isolation.
+		if (options?.abortSignal?.aborted) {
+			return false;
+		}
+
 	this._disconnectFromAgent();
 	this.agent.reset();
 		// Update cwd to current process directory — auto-mode may have chdir'd

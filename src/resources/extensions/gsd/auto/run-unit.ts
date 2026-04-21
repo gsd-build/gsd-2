@@ -42,16 +42,25 @@ export async function runUnit(
   let sessionResult: { cancelled: boolean };
   let sessionTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
   const mySessionSwitchGeneration = ++sessionSwitchGeneration;
+  // #3731: Cancellation controller for newSession(). When the session-creation
+  // timeout fires, we abort this controller so that the still-in-flight
+  // newSession() discards itself after await this.abort() completes, preventing
+  // it from capturing the (now-root) process.cwd() and rebuilding the tool
+  // runtime with the wrong cwd.
+  const sessionAbortController = new AbortController();
   _setSessionSwitchInFlight(true);
   try {
-    const sessionPromise = s.cmdCtx!.newSession().finally(() => {
+    const sessionPromise = s.cmdCtx!.newSession({ abortSignal: sessionAbortController.signal }).finally(() => {
       if (sessionSwitchGeneration === mySessionSwitchGeneration) {
         _setSessionSwitchInFlight(false);
       }
     });
     const timeoutPromise = new Promise<{ cancelled: true }>((resolve) => {
       sessionTimeoutHandle = setTimeout(
-        () => resolve({ cancelled: true }),
+        () => {
+          sessionAbortController.abort();
+          resolve({ cancelled: true });
+        },
         NEW_SESSION_TIMEOUT_MS,
       );
     });

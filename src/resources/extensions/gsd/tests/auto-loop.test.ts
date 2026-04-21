@@ -35,12 +35,15 @@ function makeMockSession(opts?: {
   newSessionDelayMs?: number;
   onNewSessionStart?: (session: any) => void;
   onNewSessionSettle?: (session: any) => void;
+  /** Called after the delay with the aborted state of any passed abortSignal.
+   *  Used to verify that runUnit passes an aborted signal on late resolution (#3731). */
+  onSignalCheck?: (aborted: boolean) => void;
 }) {
   const session = {
     active: true,
     verbose: false,
     cmdCtx: {
-      newSession: () => {
+      newSession: (options?: { abortSignal?: AbortSignal }) => {
         opts?.onNewSessionStart?.(session);
         if (opts?.newSessionThrows) {
           return Promise.reject(new Error(opts.newSessionThrows));
@@ -50,11 +53,17 @@ function makeMockSession(opts?: {
         if (delay > 0) {
           return new Promise<{ cancelled: boolean }>((res) =>
             setTimeout(() => {
+              // Simulate AgentSession.newSession() checking abortSignal after
+              // its internal async work (abort()) completes — this is where the
+              // real code captures process.cwd() and rebuilds the tool runtime.
+              // If the signal is aborted, the real code discards the session.
+              opts?.onSignalCheck?.(options?.abortSignal?.aborted ?? false);
               opts?.onNewSessionSettle?.(session);
               res(result);
             }, delay),
           );
         }
+        opts?.onSignalCheck?.(options?.abortSignal?.aborted ?? false);
         opts?.onNewSessionSettle?.(session);
         return Promise.resolve(result);
       },
@@ -463,6 +472,65 @@ test("runUnit proceeds when isProviderRequestReady throws (defensive) (#4555)", 
   assert.equal(result.status, "cancelled");
   assert.equal(result.errorContext?.category, "provider");
   assert.equal(pi.calls.length, 0);
+});
+
+test("late-resolving newSession() after timeout receives aborted signal so tool runtime is not configured with root cwd (#3731)", async () => {
+  // When newSession() times out in runUnit(), auto-mode restores cwd to project
+  // root. If newSession() later resolves, it must NOT use process.cwd() to
+  // configure the tool runtime (which would give it root cwd, not worktree cwd).
+  //
+  // The fix: runUnit creates an AbortController, aborts it on timeout, and passes
+  // the signal to newSession(). AgentSession.newSession() checks the signal after
+  // its internal await this.abort() completes and returns early (discards) if aborted.
+  //
+  // This test uses mock.timers to control timing precisely.
+  _resetPendingResolve();
+  mock.timers.enable();
+
+  try {
+    let abortedWhenLateSessionSettled: boolean | null = null;
+
+    // newSession mock simulates AgentSession.newSession() behavior:
+    // after an internal delay (representing await this.abort()), it checks the
+    // abortSignal — that's where the real code would capture process.cwd() and
+    // call _buildRuntime. If aborted, the real code must discard the session.
+    const s = makeMockSession({
+      newSessionDelayMs: 200_000, // longer than NEW_SESSION_TIMEOUT_MS (120s)
+      onSignalCheck: (aborted) => {
+        abortedWhenLateSessionSettled = aborted;
+      },
+    });
+
+    const ctx = makeMockCtx();
+    const pi = makeMockPi();
+
+    const resultPromise = runUnit(ctx, pi, s, "task", "T01", "prompt");
+
+    // Tick past the 120s NEW_SESSION_TIMEOUT_MS — runUnit returns cancelled
+    mock.timers.tick(121_000);
+    await Promise.resolve();
+
+    const result = await resultPromise;
+    assert.equal(result.status, "cancelled", "runUnit must return cancelled on session timeout");
+
+    // Tick past the delayed newSession (200s total) — the late newSession resolves
+    mock.timers.tick(80_000);
+    // Drain microtask queue so the .finally() and setTimeout callbacks run
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The key assertion: when the late newSession() resolves, runUnit must have
+    // passed an aborted AbortSignal. Without the fix, no signal is passed and
+    // abortedWhenLateSessionSettled would be false (or null, if signal not passed at all).
+    assert.equal(
+      abortedWhenLateSessionSettled,
+      true,
+      "runUnit must pass an aborted AbortSignal to newSession() when it resolves after the session-creation timeout (#3731). " +
+      "Without this, AgentSession.newSession() captures root process.cwd() and rebuilds the tool runtime with wrong cwd.",
+    );
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 // ─── Structural assertions ───────────────────────────────────────────────────

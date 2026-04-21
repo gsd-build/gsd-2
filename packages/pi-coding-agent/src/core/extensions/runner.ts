@@ -164,6 +164,8 @@ export type ExtensionErrorListener = (error: ExtensionError) => void;
 export type NewSessionHandler = (options?: {
 	parentSession?: string;
 	setup?: (sessionManager: SessionManager) => Promise<void>;
+	/** See ExtensionCommandContext.newSession for docs (#3731). */
+	abortSignal?: AbortSignal;
 }) => Promise<{ cancelled: boolean }>;
 
 export type ForkHandler = (entryId: string) => Promise<{ cancelled: boolean }>;
