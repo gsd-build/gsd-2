@@ -569,11 +569,13 @@ export class WorktreeResolver {
         }
       }
 
-      // Re-throw MergeConflictError so the auto loop can detect real code
-      // conflicts and stop instead of retrying forever (#2330).
-      if (err instanceof MergeConflictError) {
-        throw err;
-      }
+      // Restore state before re-throwing so callers always get a consistent
+      // session (#4380).
+      this.restoreToProjectRoot();
+      // Re-throw: MergeConflictError stops the auto loop (#2330); non-conflict
+      // errors (permission denied, filesystem failures) must also propagate so
+      // broken states are diagnosable (#4380).
+      throw err;
     }
 
     // Always restore basePath and rebuild — whether merge succeeded or failed
@@ -659,6 +661,8 @@ export class WorktreeResolver {
         error: msg,
       });
       ctx.notify(`Milestone merge failed (branch mode): ${msg}`, "warning");
+      // Re-throw all errors so callers can apply their own recovery logic (#4380).
+      throw err;
     }
   }
 
@@ -681,7 +685,13 @@ export class WorktreeResolver {
       currentMilestoneId,
       nextMilestoneId,
     });
-    this.mergeAndExit(currentMilestoneId, ctx);
+    try {
+      this.mergeAndExit(currentMilestoneId, ctx);
+    } catch {
+      // mergeAndExit already emitted a warning notification and restored state.
+      // Still enter the next milestone so the session can continue working
+      // rather than leaving the loop stuck with no active worktree.
+    }
     this.enterMilestone(nextMilestoneId, ctx);
   }
 }

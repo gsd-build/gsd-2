@@ -577,9 +577,11 @@ test("mergeAndExit in worktree mode restores to project root on merge failure", 
   const ctx = makeNotifyCtx();
   const resolver = new WorktreeResolver(s, deps);
 
-  resolver.mergeAndExit("M001", ctx);
+  // Error propagates (#4380) — callers handle recovery. restoreToProjectRoot()
+  // still runs before re-throw so state is consistent for the caller.
+  assert.throws(() => resolver.mergeAndExit("M001", ctx), /conflict in main/);
 
-  assert.equal(s.basePath, "/project"); // error recovery — restored
+  assert.equal(s.basePath, "/project"); // error recovery — restored before re-throw
   assert.ok(
     ctx.messages.some(
       (m) => m.level === "warning" && m.msg.includes("conflict in main"),
@@ -607,7 +609,8 @@ test("mergeAndExit failure message tells user worktree and branch are preserved 
   const ctx = makeNotifyCtx();
   const resolver = new WorktreeResolver(s, deps);
 
-  resolver.mergeAndExit("M001", ctx);
+  // Error propagates (#4380) — notification is still emitted before re-throw
+  assert.throws(() => resolver.mergeAndExit("M001", ctx), /pathspec 'main' did not match/);
 
   const warning = ctx.messages.find((m) => m.level === "warning");
   assert.ok(warning, "a warning message is emitted");
@@ -643,7 +646,8 @@ test("mergeAndExit failure message references /gsd dispatch complete-milestone, 
   const ctx = makeNotifyCtx();
   const resolver = new WorktreeResolver(s, deps);
 
-  resolver.mergeAndExit("M001", ctx);
+  // Error propagates (#4380) — notification is still emitted before re-throw
+  assert.throws(() => resolver.mergeAndExit("M001", ctx), /dirty working tree/);
 
   const warning = ctx.messages.find((m) => m.level === "warning");
   assert.ok(warning, "a warning message is emitted");
@@ -709,7 +713,8 @@ test("mergeAndExit in branch mode handles merge failure gracefully", () => {
   const ctx = makeNotifyCtx();
   const resolver = new WorktreeResolver(s, deps);
 
-  resolver.mergeAndExit("M001", ctx);
+  // Error propagates (#4380) — notification is still emitted before re-throw
+  assert.throws(() => resolver.mergeAndExit("M001", ctx), /branch merge conflict/);
 
   assert.ok(
     ctx.messages.some(
@@ -1068,4 +1073,35 @@ test("mergeAndExit in none mode remains a no-op when NOT in a worktree (#2625)",
 
   assert.equal(findCalls(deps.calls, "mergeMilestoneToMain").length, 0,
     "must NOT merge when not in a worktree and mode is none");
+});
+
+// ─── #4380 — Non-MergeConflictError must not be swallowed ────────────────────
+
+test("mergeAndExit propagates non-MergeConflictError to caller (#4380)", () => {
+  // Regression test: previously the catch block in _mergeWorktreeMode only
+  // re-threw MergeConflictError. Permission errors, filesystem errors, and other
+  // non-conflict failures were swallowed silently, making broken states impossible
+  // to diagnose and preventing callers (phases.ts) from applying their own
+  // error-recovery logic.
+  const permissionError = new Error("EACCES: permission denied, open '/project/.git/SQUASH_MSG'");
+  const s = makeSession({
+    basePath: "/project/.gsd/worktrees/M001",
+    originalBasePath: "/project",
+  });
+  const deps = makeDeps({
+    isInAutoWorktree: () => true,
+    getIsolationMode: () => "worktree",
+    mergeMilestoneToMain: () => {
+      throw permissionError;
+    },
+  });
+  const ctx = makeNotifyCtx();
+  const resolver = new WorktreeResolver(s, deps);
+
+  // The error must propagate — callers need it to apply their own recovery logic
+  assert.throws(
+    () => resolver.mergeAndExit("M001", ctx),
+    (err: unknown) => err === permissionError,
+    "non-MergeConflictError must propagate to the caller, not be swallowed",
+  );
 });
