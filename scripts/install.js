@@ -24,12 +24,11 @@ import { createInterface } from 'readline'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-// When running as postinstall, npm sets INIT_CWD to the package root.
-// When running via npx, __dirname is inside a transient cache — use process.cwd() instead.
+// packageRoot is always relative to this script — it's the gsd-pi package directory.
+// This is correct whether running as postinstall (inside node_modules/gsd-pi) or
+// via npx (inside a transient cache), since __dirname resolves to the script's location.
 const IS_POSTINSTALL = !!process.env.npm_lifecycle_event
-const packageRoot = IS_POSTINSTALL
-  ? (process.env.INIT_CWD || resolve(__dirname, '..'))
-  : resolve(__dirname, '..')
+const packageRoot = resolve(__dirname, '..')
 
 // ── Feature flags ──────────────────────────────────────────────────────────
 
