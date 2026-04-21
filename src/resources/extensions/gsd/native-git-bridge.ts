@@ -1067,7 +1067,7 @@ export function nativeResetHard(basePath: string): void {
     native.gitResetHard(basePath);
     return;
   }
-  gitFileExec(basePath, ["reset", "--hard", "HEAD"], true);
+  gitFileExec(basePath, ["reset", "--hard", "HEAD"]);
 }
 
 /**

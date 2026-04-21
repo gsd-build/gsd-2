@@ -16,6 +16,9 @@ const source = readFileSync(join(__dirname, "..", "native-git-bridge.ts"), "utf-
 function section(startMarker: string, endMarker: string): string {
   const start = source.indexOf(startMarker);
   const end = source.indexOf(endMarker, start);
+  assert.notEqual(start, -1, `Missing start marker: ${startMarker}`);
+  assert.notEqual(end, -1, `Missing end marker: ${endMarker}`);
+  assert.ok(end > start, `Invalid section bounds: ${startMarker} -> ${endMarker}`);
   return source.slice(start, end);
 }
 
@@ -54,8 +57,8 @@ describe("native git fallback uses argv-based execution (#4180)", () => {
     assert.doesNotMatch(block, /execSync\(/, "nativeResetHard should not shell out with execSync");
     assert.match(
       block,
-      /gitFileExec\(basePath,\s*\["reset",\s*"--hard",\s*"HEAD"\],\s*true\)/,
-      "nativeResetHard should use argv-based git execution",
+      /gitFileExec\(basePath,\s*\["reset",\s*"--hard",\s*"HEAD"\]\)/,
+      "nativeResetHard should use argv-based git execution without swallowing reset failures",
     );
   });
 });
