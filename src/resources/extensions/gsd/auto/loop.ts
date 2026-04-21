@@ -590,6 +590,7 @@ export async function autoLoop(
       consecutiveCooldowns = 0;
       recentErrorMessages.length = 0;
       deps.emitJournalEvent({ ts: new Date().toISOString(), flowId, seq: nextSeq(), eventType: "iteration-end", data: { iteration } });
+      saveStuckState(s.basePath, loopState); // persist across session restarts (#4382)
       debugLog("autoLoop", { phase: "iteration-complete", iteration });
       finishTurn("completed");
     } catch (loopErr) {

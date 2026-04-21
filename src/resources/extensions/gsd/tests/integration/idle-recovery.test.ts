@@ -442,3 +442,33 @@ test('writeBlockerPlaceholder: updates DB slice status for complete-slice (#2653
     cleanup(base);
   }
 });
+
+test('writeBlockerPlaceholder: inserts placeholder slice for plan-milestone so deriveState exits pre-planning (#4378)', async () => {
+  const base = createFixtureBase();
+  try {
+    const { openDatabase, closeDatabase, insertMilestone, getMilestoneSlices, isDbAvailable } =
+      await import("../../gsd-db.ts");
+
+    const dbPath = join(base, ".gsd", "gsd.db");
+    mkdirSync(join(base, ".gsd", "milestones", "M001"), { recursive: true });
+
+    openDatabase(dbPath);
+    try {
+      insertMilestone({ id: "M001", title: "Test", status: "active" });
+
+      // Before fix: writeBlockerPlaceholder wrote the placeholder ROADMAP.md but
+      // never updated the DB, so activeMilestoneSlices.length === 0 on next deriveState
+      // call → state.phase stays 'pre-planning' → plan-milestone dispatches again → infinite loop
+      writeBlockerPlaceholder("plan-milestone", "M001", base, "idle recovery exhausted");
+
+      const slices = getMilestoneSlices("M001");
+      assert.ok(slices.length > 0,
+        "writeBlockerPlaceholder must insert a placeholder slice for plan-milestone so " +
+        "deriveState sees activeMilestoneSlices.length > 0 and exits pre-planning phase (#4378)");
+    } finally {
+      if (isDbAvailable()) closeDatabase();
+    }
+  } finally {
+    cleanup(base);
+  }
+});
