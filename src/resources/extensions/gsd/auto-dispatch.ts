@@ -741,7 +741,15 @@ export const DISPATCH_RULES: DispatchRule[] = [
 
       const checkCommand = waitRow.check_command as string;
       const pollIntervalMs = (waitRow.poll_interval_ms as number) || 60000;
-      const tasksDir = join(resolveSlicePath(basePath, mid, sid), "tasks");
+      const slicePath = resolveSlicePath(basePath, mid, sid);
+      if (!slicePath) {
+        logWarning("dispatch", `Cannot resolve slice path for ${mid}/${sid} — escalating ${tid} to manual attention.`);
+        updateTaskStatus(mid, sid, tid, "manual-attention");
+        updateExternalWaitStatus(mid, sid, tid, "timed-out");
+        invalidateStateCache();
+        return { action: "stop" as const, reason: `Cannot resolve slice path for ${mid}/${sid}/${tid}. Escalating to manual attention.`, level: "warning" as const };
+      }
+      const tasksDir = join(slicePath, "tasks");
       const logPath = join(tasksDir, `${tid}-EXTERNAL-WAIT.log`);
 
       // ── Timeout check (before probe execution) ────────────────────
@@ -752,7 +760,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
         updateTaskStatus(mid, sid, tid, "manual-attention");
         updateExternalWaitStatus(mid, sid, tid, "timed-out");
         invalidateStateCache();
-        try { appendFileSync(logPath, JSON.stringify({ ts: new Date().toISOString(), event: "timeout", registeredAt, timeoutMs }) + "\n"); } catch {}
+        try { appendFileSync(logPath, JSON.stringify({ ts: new Date().toISOString(), event: "timeout", registeredAt, timeoutMs }) + "\n"); } catch (logErr) { logWarning("dispatch", `Failed to write external wait log: ${logErr instanceof Error ? logErr.message : String(logErr)}`); }
         if (onTimeout === "manual-attention") {
           return { action: "stop" as const, reason: `External wait for ${tid} timed out (registered ${registeredAt}, timeout ${timeoutMs}ms). Escalating to manual attention.`, level: "warning" as const };
         }
@@ -776,9 +784,11 @@ export const DISPATCH_RULES: DispatchRule[] = [
           : pollIntervalMs;
       };
 
+      // Probe timeout: use pollInterval (capped between 30s-120s) so slow external systems have time to respond
+      const probeTimeoutMs = Math.max(30000, Math.min(pollIntervalMs, 120000));
       try {
         const { exitCode, killed, stdout } = await new Promise<{ exitCode: number | null; killed: boolean; stdout: string }>((resolve) => {
-          exec(checkCommand, { timeout: 30000, shell: "/bin/sh" }, (err, stdout, _stderr) => {
+          exec(checkCommand, { timeout: probeTimeoutMs, shell: "/bin/sh" }, (err, stdout, _stderr) => {
             if (err) {
               resolve({ exitCode: (err as any).code ?? null, killed: !!(err as any).killed, stdout: stdout || "" });
             } else {
@@ -788,7 +798,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
         });
 
         // ── Probe execution log ───────────────────────────────────
-        try { appendFileSync(logPath, JSON.stringify({ ts: new Date().toISOString(), event: "probe", exitCode, stdout: stdout.slice(0, 500), killed }) + "\n"); } catch {}
+        try { appendFileSync(logPath, JSON.stringify({ ts: new Date().toISOString(), event: "probe", exitCode, stdout: stdout.slice(0, 500), killed }) + "\n"); } catch (logErr) { logWarning("dispatch", `Failed to write external wait log: ${logErr instanceof Error ? logErr.message : String(logErr)}`); }
 
         if (killed) {
           incrementProbeFailureCount(mid, sid, tid);
@@ -826,7 +836,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
                 else resolve({ exitCode: 0, stdout: scStdout || "", stderr: scStderr || "" });
               });
             });
-            try { appendFileSync(logPath, JSON.stringify({ ts: new Date().toISOString(), event: "successCheck", exitCode: scResult.exitCode, stdout: scResult.stdout.slice(0, 500) }) + "\n"); } catch {}
+            try { appendFileSync(logPath, JSON.stringify({ ts: new Date().toISOString(), event: "successCheck", exitCode: scResult.exitCode, stdout: scResult.stdout.slice(0, 500) }) + "\n"); } catch (logErr) { logWarning("dispatch", `Failed to write external wait log: ${logErr instanceof Error ? logErr.message : String(logErr)}`); }
             if (scResult.exitCode !== 0) {
               jobSucceeded = false;
               failureContext = `Exit code: ${scResult.exitCode}\nStderr: ${scResult.stderr.slice(0, 1000)}`;
@@ -855,7 +865,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
         return { action: "skip" as const };
       } catch (execErr) {
         // ── Probe execution failure log ──────────────────────────
-        try { appendFileSync(logPath, JSON.stringify({ ts: new Date().toISOString(), event: "probe-error", error: execErr instanceof Error ? execErr.message : String(execErr) }) + "\n"); } catch {}
+        try { appendFileSync(logPath, JSON.stringify({ ts: new Date().toISOString(), event: "probe-error", error: execErr instanceof Error ? execErr.message : String(execErr) }) + "\n"); } catch (logErr) { logWarning("dispatch", `Failed to write external wait log: ${logErr instanceof Error ? logErr.message : String(logErr)}`); }
 
         incrementProbeFailureCount(mid, sid, tid);
         const updated = getExternalWait(mid, sid, tid);

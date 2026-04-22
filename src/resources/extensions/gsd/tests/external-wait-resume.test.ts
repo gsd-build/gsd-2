@@ -171,7 +171,8 @@ function buildDispatchCtx(
       progress: { milestones: { done: 0, total: 1 } },
     },
     prefs: undefined,
-    session: session as any,
+    // Test partial: only pendingExternalResume is needed for external-wait dispatch
+    session: session as unknown as import("../auto/session.js").AutoSession,
   };
 }
 
@@ -542,6 +543,7 @@ describe("Minimum pollInterval sleep (R219)", () => {
         progress: { milestones: { done: 0, total: 1 } },
       },
       prefs: undefined,
+      session: { pendingExternalResume: null } as unknown as import("../auto/session.js").AutoSession,
     };
 
     const result = await resolveDispatch(ctx);

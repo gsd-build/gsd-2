@@ -1500,6 +1500,7 @@ export async function runUnitPhase(
   }
 
   const hadCrashRecovery = !!s.pendingCrashRecovery;
+  const hadExternalResume = !!s.pendingExternalResume;
   if (s.pendingCrashRecovery) {
     const capped =
       s.pendingCrashRecovery.length > MAX_RECOVERY_CHARS
@@ -1520,7 +1521,7 @@ export async function runUnitPhase(
     s.pendingExternalResume = null;
   }
 
-  if (!hadCrashRecovery && (s.unitDispatchCount.get(dispatchKey) ?? 0) > 1) {
+  if (!hadCrashRecovery && !hadExternalResume && (s.unitDispatchCount.get(dispatchKey) ?? 0) > 1) {
     const diagnostic = deps.getDeepDiagnostic(s.basePath);
     if (diagnostic) {
       const cappedDiag =

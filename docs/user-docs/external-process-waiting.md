@@ -62,7 +62,7 @@ The `test != "completed"` pattern matches the exit code convention: exit 0 while
 
 ## Lifecycle
 
-```
+```text
 Registration
     │
     ▼
@@ -95,7 +95,7 @@ Auto-loop polls at pollInterval
 
 Register an external wait using the `gsd_register_external_wait` tool during task execution:
 
-```
+```javascript
 gsd_register_external_wait({
   milestoneId: "M006",
   sliceId: "S02",

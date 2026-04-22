@@ -78,7 +78,7 @@ afterEach(() => {
 
 describe("gsd_register_external_wait — successful registration", () => {
   test("insertExternalWait() creates DB row with correct values", () => {
-    const { basePath } = createFixture("executing");
+    createFixture("executing");
 
     insertExternalWait("M001", "S01", "T01", "echo hello");
 
@@ -99,7 +99,7 @@ describe("gsd_register_external_wait — successful registration", () => {
   });
 
   test("task status transitions to awaiting-external after registration", () => {
-    const { basePath } = createFixture("executing");
+    createFixture("executing");
 
     insertExternalWait("M001", "S01", "T01", "echo hello");
     updateTaskStatus("M001", "S01", "T01", "awaiting-external");
@@ -145,7 +145,7 @@ describe("gsd_register_external_wait — successful registration", () => {
   });
 
   test("idempotent — re-registration replaces existing row", () => {
-    const { basePath } = createFixture("executing");
+    createFixture("executing");
 
     insertExternalWait("M001", "S01", "T01", "echo first");
     const row1 = getExternalWait("M001", "S01", "T01");
@@ -165,7 +165,7 @@ describe("gsd_register_external_wait — successful registration", () => {
 
 describe("gsd_register_external_wait — status guard", () => {
   test("task with status 'pending' — guard rejects registration", () => {
-    const { basePath } = createFixture("pending");
+    createFixture("pending");
 
     // Verify task has pending status
     const task = getTask("M001", "S01", "T01");
@@ -182,7 +182,7 @@ describe("gsd_register_external_wait — status guard", () => {
   });
 
   test("task with status 'complete' — guard rejects registration", () => {
-    const { basePath } = createFixture("complete");
+    createFixture("complete");
 
     const task = getTask("M001", "S01", "T01");
     assert.ok(task);
@@ -197,7 +197,7 @@ describe("gsd_register_external_wait — status guard", () => {
 
 describe("gsd_register_external_wait — nonexistent task", () => {
   test("getTask returns null for nonexistent task", () => {
-    const { basePath } = createFixture("executing");
+    createFixture("executing");
 
     const task = getTask("M001", "S01", "T99");
     assert.equal(task, null, "nonexistent task should return null");
@@ -208,14 +208,14 @@ describe("gsd_register_external_wait — nonexistent task", () => {
   });
 
   test("getTask returns null for nonexistent milestone", () => {
-    const { basePath } = createFixture("executing");
+    createFixture("executing");
 
     const task = getTask("M999", "S01", "T01");
     assert.equal(task, null, "nonexistent milestone should return null");
   });
 
   test("getTask returns null for nonexistent slice", () => {
-    const { basePath } = createFixture("executing");
+    createFixture("executing");
 
     const task = getTask("M001", "S99", "T01");
     assert.equal(task, null, "nonexistent slice should return null");
@@ -226,7 +226,7 @@ describe("gsd_register_external_wait — nonexistent task", () => {
 
 describe("gsd_register_external_wait — optional fields", () => {
   test("all optional fields stored in DB via insertExternalWait()", () => {
-    const { basePath } = createFixture("executing");
+    createFixture("executing");
 
     insertExternalWait("M001", "S01", "T01", "squeue --job 12345", {
       successCheck: "test -f /tmp/result.json",
@@ -281,7 +281,7 @@ describe("gsd_register_external_wait — optional fields", () => {
   });
 
   test("defaults applied when optional fields omitted", () => {
-    const { basePath } = createFixture("executing");
+    createFixture("executing");
 
     // Call with only required fields
     insertExternalWait("M001", "S01", "T01", "echo check");

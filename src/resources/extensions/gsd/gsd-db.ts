@@ -572,10 +572,11 @@ function initSchema(db: DbAdapter, fileBacked: boolean): void {
         probe_failure_count INTEGER NOT NULL DEFAULT 0,
         registered_at TEXT NOT NULL,
         resolved_at TEXT,
-        PRIMARY KEY (milestone_id, slice_id, task_id)
+        PRIMARY KEY (milestone_id, slice_id, task_id),
+        FOREIGN KEY (milestone_id, slice_id, task_id) REFERENCES tasks(milestone_id, slice_id, id) ON DELETE CASCADE
       )
     `);
-    db.exec("CREATE INDEX IF NOT EXISTS idx_external_waits_status ON external_waits(status)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_external_waits_milestone_status ON external_waits(milestone_id, status)");
 
     db.exec("CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(superseded_by)");
 
@@ -1270,10 +1271,11 @@ function migrateSchema(db: DbAdapter): void {
           probe_failure_count INTEGER NOT NULL DEFAULT 0,
           registered_at TEXT NOT NULL,
           resolved_at TEXT,
-          PRIMARY KEY (milestone_id, slice_id, task_id)
+          PRIMARY KEY (milestone_id, slice_id, task_id),
+          FOREIGN KEY (milestone_id, slice_id, task_id) REFERENCES tasks(milestone_id, slice_id, id) ON DELETE CASCADE
         )
       `);
-      db.exec("CREATE INDEX IF NOT EXISTS idx_external_waits_status ON external_waits(status)");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_external_waits_milestone_status ON external_waits(milestone_id, status)");
       db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
         ":version": 23,
         ":applied_at": new Date().toISOString(),

@@ -433,7 +433,12 @@ export async function autoLoop(
           continue;
         }
         if (dispatch.action === "sleep") {
-          await new Promise(r => setTimeout(r, dispatch.durationMs));
+          // Chunked sleep: poll s.active every 1s so pause/stop is responsive
+          const sleepMs = dispatch.durationMs;
+          const start = Date.now();
+          while (Date.now() - start < sleepMs && s.active) {
+            await new Promise(r => setTimeout(r, Math.min(1000, sleepMs - (Date.now() - start))));
+          }
           continue;
         }
 

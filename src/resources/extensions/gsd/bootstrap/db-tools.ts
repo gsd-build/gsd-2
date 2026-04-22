@@ -1126,9 +1126,9 @@ export function registerDbTools(pi: ExtensionAPI): void {
   // ─── gsd_register_external_wait ──────────────────────────────────────────
 
   const registerExternalWaitExecute = async (_toolCallId: string, params: any, _signal: AbortSignal | undefined, _onUpdate: unknown, _ctx: unknown) => {
-    const dbOk = ensureDbOpen();
+    const dbOk = await ensureDbOpen();
     if (!dbOk) {
-      return { content: [{ type: "text" as const, text: "Error: GSD database is not available" }], isError: true, details: { error: "GSD database is not available" } };
+      return { content: [{ type: "text" as const, text: "Error: GSD database is not available" }], isError: true, details: { error: "GSD database is not available" } as any };
     }
 
     const { milestoneId, sliceId, taskId, checkCommand, successCheck, pollIntervalMs, timeoutMs, contextHint, onTimeout } = params;
@@ -1136,12 +1136,12 @@ export function registerDbTools(pi: ExtensionAPI): void {
     // Validate task exists
     const task = getTask(milestoneId, sliceId, taskId);
     if (!task) {
-      return { content: [{ type: "text" as const, text: `Error: task not found — ${milestoneId}/${sliceId}/${taskId}` }], isError: true, details: { error: "task not found" } };
+      return { content: [{ type: "text" as const, text: `Error: task not found — ${milestoneId}/${sliceId}/${taskId}` }], isError: true, details: { error: "task not found" } as any };
     }
 
     // Validate task status is 'executing' (R229)
     if (task.status !== "executing") {
-      return { content: [{ type: "text" as const, text: `Error: task not in executing status (current: ${task.status})` }], isError: true, details: { error: `task not in executing status (current: ${task.status})` } };
+      return { content: [{ type: "text" as const, text: `Error: task not in executing status (current: ${task.status})` }], isError: true, details: { error: `task not in executing status (current: ${task.status})` } as any };
     }
 
     // Insert external_waits DB row (R213, R214, R223)
@@ -1190,7 +1190,7 @@ export function registerDbTools(pi: ExtensionAPI): void {
     return {
       content: [{ type: "text" as const, text: `External wait registered for ${milestoneId}/${sliceId}/${taskId}. Probe spec: ${relPath}` }],
       isError: false,
-      details: { milestoneId, sliceId, taskId, jsonPath: relPath },
+      details: { milestoneId, sliceId, taskId, jsonPath: relPath } as any,
     };
   };
 
@@ -1229,7 +1229,7 @@ export function registerDbTools(pi: ExtensionAPI): void {
       return new Text(text, 0, 0);
     },
     renderResult(result: any, _options: any, theme: any) {
-      const d = result.details;
+      const d = readDetails(result);
       if (result.isError || d?.error) {
         return new Text(theme.fg("error", `Error: ${d?.error ?? "unknown"}`), 0, 0);
       }

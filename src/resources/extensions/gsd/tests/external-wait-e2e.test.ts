@@ -39,6 +39,7 @@ import {
   getExternalWait,
   insertExternalWait,
   getTask,
+  incrementProbeFailureCount,
 } from "../gsd-db.ts";
 
 // ── State derivation ──────────────────────────────────────────────────────
@@ -408,14 +409,9 @@ describe("Scenario 4: 3-strike probe failure", () => {
       checkCommand: "sleep 35", // will hit 30s exec timeout
     });
 
-    // Pre-set probe_failure_count to 2 via raw node:sqlite
-    const dbPath = join(basePath, ".gsd", "gsd.db");
-    const { DatabaseSync } = await import("node:sqlite");
-    const rawDb = new DatabaseSync(dbPath);
-    rawDb.prepare(
-      "UPDATE external_waits SET probe_failure_count = 2 WHERE milestone_id = 'M001' AND slice_id = 'S01' AND task_id = 'T01'",
-    ).run();
-    rawDb.close();
+    // Pre-set probe_failure_count to 2 via DB wrapper API
+    incrementProbeFailureCount("M001", "S01", "T01");
+    incrementProbeFailureCount("M001", "S01", "T01");
 
     // Verify pre-condition
     const beforeWait = getExternalWait("M001", "S01", "T01");

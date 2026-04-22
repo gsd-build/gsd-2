@@ -391,7 +391,10 @@ describe("dispatch rule probe execution", () => {
     assert.equal(result.action, "skip");
   });
 
-  test("probe timeout increments failure count", { timeout: 40000 }, async () => {
+  // Slow test: uses `sleep 35` to trigger the 30s probe timeout. ~35s runtime.
+  // Skip in fast CI with FAST_CI=1 env var.
+  const skipSlow = process.env.FAST_CI === "1";
+  test("probe timeout increments failure count", { timeout: 40000, skip: skipSlow }, async () => {
     const { basePath } = createFixture();
     updateTaskStatus("M001", "S01", "T01", "awaiting-external");
     insertExternalWaitRow(basePath, {
@@ -421,7 +424,8 @@ describe("dispatch rule probe execution", () => {
     assert.equal(row.probe_failure_count, 1);
   });
 
-  test("3-strike escalation → stop action", { timeout: 40000 }, async () => {
+  // Slow test: uses `sleep 35` to trigger the 30s probe timeout. ~35s runtime.
+  test("3-strike escalation → stop action", { timeout: 40000, skip: skipSlow }, async () => {
     const { basePath } = createFixture();
     updateTaskStatus("M001", "S01", "T01", "awaiting-external");
     insertExternalWaitRow(basePath, {
