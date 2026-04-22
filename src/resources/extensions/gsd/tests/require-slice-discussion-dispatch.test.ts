@@ -19,12 +19,17 @@ import { DISPATCH_RULES, type DispatchContext } from "../auto-dispatch.ts";
 import type { GSDState } from "../types.ts";
 import type { GSDPreferences } from "../preferences.ts";
 
-const RULE_NAME = "planning (require_slice_discussion) → pause for discussion (#3454)";
+// Use a stable token (the preference name) for rule lookup instead of the
+// full human-readable title — copy edits to the rule name will not break
+// these tests as long as the rule still references the preference it gates.
+const RULE_NAME_TOKEN = "require_slice_discussion";
 
 function findRule() {
-  const rule = DISPATCH_RULES.find(r => r.name === RULE_NAME);
-  if (!rule) throw new Error(`dispatch rule not found: ${RULE_NAME}`);
-  return rule;
+  const matches = DISPATCH_RULES.filter(r => r.name.includes(RULE_NAME_TOKEN));
+  if (matches.length !== 1) {
+    throw new Error(`expected exactly one dispatch rule containing "${RULE_NAME_TOKEN}", found ${matches.length}`);
+  }
+  return matches[0];
 }
 
 function buildState(overrides: Partial<GSDState> = {}): GSDState {
@@ -153,7 +158,7 @@ describe("require_slice_discussion dispatch rule (#3454)", () => {
   // ─── Rule ordering: must run before the plan-slice rule ──────────────
 
   test("rule is ordered before the 'planning → plan-slice' rule", () => {
-    const discussIdx = DISPATCH_RULES.findIndex(r => r.name === RULE_NAME);
+    const discussIdx = DISPATCH_RULES.findIndex(r => r.name.includes(RULE_NAME_TOKEN));
     const planIdx = DISPATCH_RULES.findIndex(r => r.name.startsWith("planning → plan-slice"));
     assert.ok(discussIdx >= 0, "require_slice_discussion rule must be registered");
     assert.ok(planIdx >= 0, "plan-slice rule must be registered");
