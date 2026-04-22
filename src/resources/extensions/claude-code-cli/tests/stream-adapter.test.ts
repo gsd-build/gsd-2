@@ -1261,6 +1261,27 @@ describe("stream-adapter — permission mode (F10)", () => {
 			`expected bypass or acceptEdits, got ${mode}`,
 		);
 	});
+
+	test("resolveClaudePermissionMode flips to bypassPermissions when GSD_HEADLESS=1 (#4657)", async () => {
+		const originalWarn = console.warn;
+		console.warn = () => {};
+		try {
+			const env = { GSD_HEADLESS: "1" } as NodeJS.ProcessEnv;
+			const mode = await resolveClaudePermissionMode(env);
+			assert.equal(mode, "bypassPermissions");
+		} finally {
+			console.warn = originalWarn;
+		}
+	});
+
+	test("resolveClaudePermissionMode: explicit override wins over GSD_HEADLESS=1", async () => {
+		const env = {
+			GSD_HEADLESS: "1",
+			GSD_CLAUDE_CODE_PERMISSION_MODE: "acceptEdits",
+		} as NodeJS.ProcessEnv;
+		const mode = await resolveClaudePermissionMode(env);
+		assert.equal(mode, "acceptEdits");
+	});
 });
 
 describe("stream-adapter — Windows Claude path lookup (#3770)", () => {

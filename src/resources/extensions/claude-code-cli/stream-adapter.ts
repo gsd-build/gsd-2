@@ -703,6 +703,12 @@ export function makeAbortedMessage(model: string, lastTextContent: string): Assi
  * Set `GSD_CLAUDE_CODE_PERMISSION_MODE` to `bypassPermissions` to restore
  * the old always-approve behaviour, or to `default` / `plan` for stricter
  * modes.
+ *
+ * When `GSD_HEADLESS=1` is set (auto-mode / non-interactive runs), the
+ * default flips to `bypassPermissions` because there is no UI to approve
+ * permission dialogs — `acceptEdits` would hang verification commands like
+ * `npx tsc --noEmit` or `npx vitest run` indefinitely (#4657). Explicit
+ * overrides still win, so users can opt back into `acceptEdits` in headless.
  */
 export async function resolveClaudePermissionMode(
 	env: NodeJS.ProcessEnv = process.env,
@@ -710,6 +716,12 @@ export async function resolveClaudePermissionMode(
 	const override = env.GSD_CLAUDE_CODE_PERMISSION_MODE?.trim();
 	if (override === "bypassPermissions" || override === "acceptEdits" || override === "default" || override === "plan") {
 		return override;
+	}
+	if (env.GSD_HEADLESS === "1") {
+		console.warn(
+			"[claude-code-cli] Headless mode detected (GSD_HEADLESS=1): defaulting permissionMode to 'bypassPermissions' so verification Bash commands can run. Set GSD_CLAUDE_CODE_PERMISSION_MODE=acceptEdits to opt out.",
+		);
+		return "bypassPermissions";
 	}
 	return "acceptEdits";
 }
