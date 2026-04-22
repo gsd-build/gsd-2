@@ -584,11 +584,19 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
             if (parked) {
               ctx.ui.notify(`Milestone ${s.currentMilestoneId} parked: "${decision.reason}"`, "info");
             } else {
-              logWarning("postUnit", `abandon detected for ${s.currentMilestoneId} but parkMilestone returned false (already parked, completed, or not found)`);
+              // Park refused: milestone directory missing, milestone already
+              // completed (SUMMARY present), or PARKED.md already exists.
+              // resolveAllOverrides below will still consume the override —
+              // surface this loudly so the user notices state drift rather
+              // than silently losing the abandon directive.
+              const msg = `Abandon detected for ${s.currentMilestoneId} but park refused (milestone is completed, already parked, or missing). Override will be resolved anyway — verify state is correct.`;
+              logError("engine", msg);
+              ctx.ui.notify(msg, "warning");
             }
           }
         } catch (err) {
-          logWarning("postUnit", `abandon-detect failed: ${(err as Error).message}`);
+          logError("engine", `abandon-detect failed: ${(err as Error).message}`);
+          ctx.ui.notify(`Abandon detection failed — check logs. Overrides will still be resolved.`, "warning");
         }
 
         await resolveAllOverrides(s.basePath);

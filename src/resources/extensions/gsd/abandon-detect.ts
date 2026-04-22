@@ -22,7 +22,8 @@ import type { Override } from "./files.js";
 // Verb variants cover both US and UK inflections:
 //   cancel / canceled / canceling / cancelled / cancelling / cancels
 //   travel-style "l"-doubling also applies to shelve/drop/scrap.
-const ABANDON_VERB_RE = /\b(abandon(?:ed|ing|s)?|descope(?:d|s)?|cancel(?:led|ling|ed|ing|s)?|shelve(?:d|s)?|shelving|drop(?:ped|ping|s)?|scrap(?:ped|ping|s)?)\b/i;
+// "descope" also accepts "de-scope" and "de scope" (hyphen / space forms).
+const ABANDON_VERB_RE = /\b(abandon(?:ed|ing|s)?|de[-\s]?scope(?:d|s|ing)?|cancel(?:led|ling|ed|ing|s)?|shelve(?:d|s)?|shelving|drop(?:ped|ping|s)?|scrap(?:ped|ping|s)?)\b/i;
 
 export interface AbandonDecision {
   shouldPark: boolean;

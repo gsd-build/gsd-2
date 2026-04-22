@@ -68,6 +68,30 @@ describe("detectAbandonMilestone (#3490)", () => {
     assert.strictEqual(d.shouldPark, true);
   });
 
+  test("parks on hyphenated 'de-scope' variant", () => {
+    const d = detectAbandonMilestone(
+      [mkOverride("de-scope this milestone — moved to v2")],
+      "M001",
+    );
+    assert.strictEqual(d.shouldPark, true);
+  });
+
+  test("parks on space-separated 'de scope' variant", () => {
+    const d = detectAbandonMilestone(
+      [mkOverride("de scope the milestone entirely")],
+      "M001",
+    );
+    assert.strictEqual(d.shouldPark, true);
+  });
+
+  test("parks on 'de-scoped' past-tense hyphen variant", () => {
+    const d = detectAbandonMilestone(
+      [mkOverride("M003 was de-scoped last week")],
+      "M003",
+    );
+    assert.strictEqual(d.shouldPark, true);
+  });
+
   // ─── False-positive guards ────────────────────────────────────────────
 
   test("does NOT park on 'cancel the standup reminder' (no milestone ref)", () => {
