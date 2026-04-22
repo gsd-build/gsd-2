@@ -328,8 +328,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	const extensionRunnerRef: { current?: ExtensionRunner } = {};
 
-	let agent!: Agent;
-	agent = new Agent({
+	const agent = new Agent({
 		initialState: {
 			systemPrompt: "",
 			model,
