@@ -239,6 +239,51 @@ describe("Timeout detection (R221)", () => {
     assert.equal(logEntry.event, "timeout");
     assert.ok(logEntry.ts, "log entry should have timestamp");
   });
+
+  test("times out → resume-with-failure + skip when onTimeout is resume-with-failure", async () => {
+    const { basePath, tasksDir, session } = createFixture({
+      checkCommand: "exit 0",
+      timeoutMs: 1, // 1ms — already expired
+      onTimeout: "resume-with-failure",
+      contextHint: "SLURM job 99999",
+    });
+    invalidateAllCaches();
+
+    const ctx = buildDispatchCtx(basePath, session);
+
+    // Small delay to ensure the 1ms timeout has passed
+    await new Promise(r => setTimeout(r, 10));
+
+    const result = await resolveDispatch(ctx);
+
+    // resume-with-failure returns skip (not stop) to resume execution
+    assert.equal(result.action, "skip");
+
+    // Verify DB: task status → executing (resumed, not manual-attention)
+    const task = getTask("M001", "S01", "T01");
+    assert.ok(task);
+    assert.equal(task.status, "executing", "task should resume to executing on resume-with-failure timeout");
+
+    // Verify DB: external_waits status → timed-out, resolved_at set
+    const wait = getExternalWait("M001", "S01", "T01");
+    assert.ok(wait);
+    assert.equal(wait.status, "timed-out");
+    assert.ok(wait.resolved_at, "resolved_at should be set after timeout");
+
+    // Verify session carry-forward has failure context
+    assert.ok(session.pendingExternalResume, "pendingExternalResume should be set");
+    assert.match(session.pendingExternalResume!, /TIMED OUT/);
+    assert.match(session.pendingExternalResume!, /resume-with-failure/);
+    assert.match(session.pendingExternalResume!, /SLURM job 99999/);
+
+    // Verify log file exists with timeout entry including onTimeout mode
+    const logPath = join(tasksDir, "T01-EXTERNAL-WAIT.log");
+    assert.ok(existsSync(logPath), "log file should exist after timeout");
+    const logContent = readFileSync(logPath, "utf-8").trim();
+    const logEntry = JSON.parse(logContent.split("\n")[0]);
+    assert.equal(logEntry.event, "timeout");
+    assert.ok(logEntry.ts, "log entry should have timestamp");
+  });
 });
 
 // ── 2. Probe success → resume (R222, R224) ──────────────────────────────

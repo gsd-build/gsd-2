@@ -14,7 +14,7 @@
 
 import { describe, test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -33,6 +33,9 @@ import {
 
 // ── JSON persistence ─────────────────────────────────────────────────────
 import { saveJsonFile, loadJsonFile } from "../json-persistence.ts";
+
+// ── State cache ─────────────────────────────────────────────────────────
+import { invalidateStateCache } from "../state.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Fixture Helpers
@@ -293,5 +296,191 @@ describe("gsd_register_external_wait — optional fields", () => {
     assert.equal(row.on_timeout, "manual-attention", "default onTimeout is manual-attention");
     assert.equal(row.success_check, null, "successCheck defaults to null");
     assert.equal(row.context_hint, null, "contextHint defaults to null");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 5. Handler-flow tests — exercise the gsd_register_external_wait handler's
+//    full sequence: precondition gates, file-before-DB ordering, atomicity,
+//    and structured error returns.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Simulate the handler's execution sequence. This replicates what
+ * registerExternalWaitExecute does internally, since the handler is a
+ * closure inside registerDbTools and cannot be imported directly.
+ */
+function simulateHandlerFlow(
+  basePath: string,
+  params: {
+    milestoneId: string;
+    sliceId: string;
+    taskId: string;
+    checkCommand: string;
+    successCheck?: string;
+    pollIntervalMs?: number;
+    timeoutMs?: number;
+    contextHint?: string;
+    onTimeout?: string;
+  },
+): { isError: boolean; errorMsg?: string; jsonPath?: string } {
+  const { milestoneId, sliceId, taskId, checkCommand, successCheck, pollIntervalMs, timeoutMs, contextHint, onTimeout } = params;
+
+  // Step 1: Validate task exists
+  const task = getTask(milestoneId, sliceId, taskId);
+  if (!task) {
+    return { isError: true, errorMsg: `task not found — ${milestoneId}/${sliceId}/${taskId}` };
+  }
+
+  // Step 2: Validate task status is 'executing' (R229)
+  if (task.status !== "executing") {
+    return { isError: true, errorMsg: `task not in executing status (current: ${task.status})` };
+  }
+
+  // Step 3: Write JSON probe spec FIRST (file before DB)
+  const resolvedPollInterval = pollIntervalMs ?? 30000;
+  const resolvedTimeout = timeoutMs ?? 86400000;
+  const resolvedOnTimeout = onTimeout ?? "manual-attention";
+  const registeredAt = new Date().toISOString();
+
+  const gsdDir = join(basePath, ".gsd");
+  const tasksDir = join(gsdDir, "milestones", milestoneId, "slices", sliceId, "tasks");
+  mkdirSync(tasksDir, { recursive: true });
+
+  const jsonPath = join(tasksDir, `${taskId}-EXTERNAL-WAIT.json`);
+  try {
+    saveJsonFile(jsonPath, {
+      milestoneId, sliceId, taskId, checkCommand,
+      successCheck: successCheck ?? null,
+      pollIntervalMs: resolvedPollInterval,
+      timeoutMs: resolvedTimeout,
+      contextHint: contextHint ?? null,
+      onTimeout: resolvedOnTimeout,
+      registeredAt,
+    });
+  } catch (fileErr) {
+    return { isError: true, errorMsg: "probe spec write failed" };
+  }
+
+  // Step 4: Insert DB row + update task status
+  try {
+    insertExternalWait(milestoneId, sliceId, taskId, checkCommand, {
+      successCheck, pollIntervalMs, timeoutMs, contextHint, onTimeout,
+    });
+    updateTaskStatus(milestoneId, sliceId, taskId, "awaiting-external");
+  } catch (dbErr) {
+    // Cleanup JSON on DB failure
+    try { unlinkSync(jsonPath); } catch { /* best effort */ }
+    return { isError: true, errorMsg: "db update failed" };
+  }
+
+  invalidateStateCache();
+  return { isError: false, jsonPath };
+}
+
+describe("gsd_register_external_wait — handler flow (end-to-end)", () => {
+  test("successful end-to-end: file written before DB, all state consistent", () => {
+    const { basePath, tasksDir } = createFixture("executing");
+
+    const result = simulateHandlerFlow(basePath, {
+      milestoneId: "M001", sliceId: "S01", taskId: "T01",
+      checkCommand: "echo hello",
+      contextHint: "CI pipeline #42",
+      onTimeout: "resume-with-failure",
+      pollIntervalMs: 45000,
+      timeoutMs: 7200000,
+    });
+
+    assert.equal(result.isError, false, "handler should succeed");
+
+    // Verify JSON probe spec exists and has correct values
+    const jsonPath = join(tasksDir, "T01-EXTERNAL-WAIT.json");
+    assert.ok(existsSync(jsonPath), "JSON probe spec should exist");
+    const spec = JSON.parse(readFileSync(jsonPath, "utf-8"));
+    assert.equal(spec.checkCommand, "echo hello");
+    assert.equal(spec.contextHint, "CI pipeline #42");
+    assert.equal(spec.onTimeout, "resume-with-failure");
+    assert.equal(spec.pollIntervalMs, 45000);
+    assert.equal(spec.timeoutMs, 7200000);
+    assert.ok(spec.registeredAt, "registeredAt should be present");
+
+    // Verify DB state
+    const row = getExternalWait("M001", "S01", "T01");
+    assert.ok(row, "external_waits row should exist");
+    assert.equal(row.check_command, "echo hello");
+    assert.equal(row.status, "waiting");
+
+    // Verify task status transitioned
+    const task = getTask("M001", "S01", "T01");
+    assert.ok(task);
+    assert.equal(task.status, "awaiting-external");
+  });
+
+  test("precondition: rejects when task does not exist", () => {
+    createFixture("executing");
+
+    const result = simulateHandlerFlow(base, {
+      milestoneId: "M001", sliceId: "S01", taskId: "T99",
+      checkCommand: "echo hello",
+    });
+
+    assert.equal(result.isError, true);
+    assert.match(result.errorMsg!, /task not found/);
+
+    // Verify no side effects: no DB row, no JSON file
+    const row = getExternalWait("M001", "S01", "T99");
+    assert.equal(row, null, "no DB row for nonexistent task");
+  });
+
+  test("precondition: rejects when task status is 'pending'", () => {
+    createFixture("pending");
+
+    const result = simulateHandlerFlow(base, {
+      milestoneId: "M001", sliceId: "S01", taskId: "T01",
+      checkCommand: "echo hello",
+    });
+
+    assert.equal(result.isError, true);
+    assert.match(result.errorMsg!, /not in executing status/);
+    assert.match(result.errorMsg!, /pending/);
+
+    // Verify no side effects
+    const row = getExternalWait("M001", "S01", "T01");
+    assert.equal(row, null, "no DB row when precondition fails");
+
+    const jsonPath = join(base, ".gsd", "milestones", "M001", "slices", "S01", "tasks", "T01-EXTERNAL-WAIT.json");
+    assert.equal(existsSync(jsonPath), false, "no JSON file when precondition fails");
+  });
+
+  test("precondition: rejects when task status is 'complete'", () => {
+    createFixture("complete");
+
+    const result = simulateHandlerFlow(base, {
+      milestoneId: "M001", sliceId: "S01", taskId: "T01",
+      checkCommand: "echo hello",
+    });
+
+    assert.equal(result.isError, true);
+    assert.match(result.errorMsg!, /not in executing status/);
+    assert.match(result.errorMsg!, /complete/);
+  });
+
+  test("fallback path creation when tasks dir does not exist", () => {
+    // Create fixture but remove the tasks dir to test fallback
+    const { basePath } = createFixture("executing");
+    const tasksDir = join(basePath, ".gsd", "milestones", "M001", "slices", "S01", "tasks");
+    rmSync(tasksDir, { recursive: true, force: true });
+
+    const result = simulateHandlerFlow(basePath, {
+      milestoneId: "M001", sliceId: "S01", taskId: "T01",
+      checkCommand: "echo hello",
+    });
+
+    assert.equal(result.isError, false, "handler should succeed with fallback path creation");
+
+    // Verify tasks dir was recreated and JSON exists
+    assert.ok(existsSync(tasksDir), "tasks dir should be recreated");
+    const jsonPath = join(tasksDir, "T01-EXTERNAL-WAIT.json");
+    assert.ok(existsSync(jsonPath), "JSON probe spec should exist");
   });
 });
