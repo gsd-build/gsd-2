@@ -2,16 +2,29 @@
 import { describe, test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-// When compiled, this test lives at dist-test/src/tests/workspace-manifest.test.js — three
-// levels deep from the repo root where scripts/lib/workspace-manifest.cjs actually lives.
-const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+
+// Walk up from this file's directory to the real repo root. Can't stop at the first package.json
+// with a "workspaces" field because compile-tests.mjs mirrors package.json + packages/ into
+// dist-test/, which would masquerade as a repo root. .git/ is the only reliable discriminator.
+function findRepoRoot(start: string): string {
+	let dir = start;
+	for (let i = 0; i < 10; i++) {
+		if (existsSync(join(dir, ".git"))) return dir;
+		const parent = resolve(dir, "..");
+		if (parent === dir) break;
+		dir = parent;
+	}
+	throw new Error(`Could not locate repo root (no .git found) from ${start}`);
+}
+
+const projectRoot = findRepoRoot(dirname(fileURLToPath(import.meta.url)));
 const manifestModulePath = join(projectRoot, "scripts", "lib", "workspace-manifest.cjs");
 const verifyScriptPath = join(projectRoot, "scripts", "verify-workspace-coverage.cjs");
 
