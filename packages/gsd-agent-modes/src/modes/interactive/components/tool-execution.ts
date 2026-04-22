@@ -128,7 +128,7 @@ export class ToolExecutionComponent extends Container {
 	private imageComponents: Image[] = [];
 	private imageSpacers: Spacer[] = [];
 	private toolName: string;
-	private args: Record<string, unknown>;
+	private args: Record<string, any>;
 	private expanded = false;
 	private showImages: boolean;
 	private isPartial = true;
@@ -138,7 +138,7 @@ export class ToolExecutionComponent extends Container {
 	private result?: {
 		content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
 		isError: boolean;
-		details?: Record<string, unknown>;
+		details?: Record<string, any>;
 	};
 	// Cached edit diff preview (computed when args arrive, before tool executes)
 	private editDiffPreview?: EditDiffResult | EditDiffError;
@@ -159,7 +159,7 @@ export class ToolExecutionComponent extends Container {
 
 	constructor(
 		toolName: string,
-		args: Record<string, unknown>,
+		args: Record<string, any>,
 		options: ToolExecutionOptions = {},
 		toolDefinition: ToolDefinition | undefined,
 		ui: TUI,
@@ -211,7 +211,7 @@ export class ToolExecutionComponent extends Container {
 		this.result = undefined;
 	}
 
-	updateArgs(args: Record<string, unknown>): void {
+	updateArgs(args: Record<string, any>): void {
 		this.args = args;
 		if (this.normalizedToolName === "write" && this.isPartial) {
 			this.updateWriteHighlightCacheIncremental();
@@ -382,12 +382,12 @@ export class ToolExecutionComponent extends Container {
 		}
 	}
 
-	updateResult(
-		result: {
-			content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
-			details?: Record<string, unknown>;
-			isError: boolean;
-		},
+		updateResult(
+			result: {
+				content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+				details?: Record<string, any>;
+				isError: boolean;
+			},
 		isPartial = false,
 	): void {
 		this.result = result;
@@ -751,12 +751,12 @@ export class ToolExecutionComponent extends Container {
 			.join("\n");
 
 		const caps = getCapabilities();
-		if (imageBlocks.length > 0 && (!caps.images || !this.showImages)) {
-			const imageIndicators = imageBlocks
-				.map((img) => {
-					return imageFallback(img.mimeType);
-				})
-				.join("\n");
+			if (imageBlocks.length > 0 && (!caps.images || !this.showImages)) {
+				const imageIndicators = imageBlocks
+					.map((img) => {
+						return imageFallback(typeof img.mimeType === "string" ? img.mimeType : "image/unknown");
+					})
+					.join("\n");
 			output = output ? `${output}\n${imageIndicators}` : imageIndicators;
 		}
 

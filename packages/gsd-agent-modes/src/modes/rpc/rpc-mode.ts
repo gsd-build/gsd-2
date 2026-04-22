@@ -407,14 +407,10 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 			return false;
 		},
 
-		setToolsExpanded(_expanded: boolean) {
-			// Tool expansion not supported in RPC mode - no TUI
-		},
-
-		setHiddenThinkingLabel(_label: string | undefined): void {
-			// Thinking label not supported in RPC mode
-		},
-	});
+			setToolsExpanded(_expanded: boolean) {
+				// Tool expansion not supported in RPC mode - no TUI
+			},
+		});
 
 	// Set up extensions with RPC-based UI context.
 	// Do not block the initial RPC handshake on extension session_start hooks:
@@ -735,36 +731,38 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 				const commands: RpcSlashCommand[] = [];
 
 				// Extension commands
-				for (const cmd of session.extensionRunner?.getRegisteredCommands() ?? []) {
-					commands.push({
-						name: cmd.name,
-						description: cmd.description,
-						source: "extension",
-						path: cmd.sourceInfo.path,
-					});
-				}
+					for (const cmd of session.extensionRunner?.getRegisteredCommands() ?? []) {
+						const commandPath = (cmd as { path?: string; sourceInfo?: { path?: string } }).path
+							?? (cmd as { sourceInfo?: { path?: string } }).sourceInfo?.path;
+						commands.push({
+							name: cmd.name,
+							description: cmd.description,
+							source: "extension",
+							path: commandPath,
+						});
+					}
 
-				// Prompt templates (source is always "user" | "project" | "path" in coding-agent)
-				for (const template of session.promptTemplates) {
-					commands.push({
-						name: template.name,
-						description: template.description,
-						source: "prompt",
-						location: template.sourceInfo.scope as RpcSlashCommand["location"],
-						path: template.filePath,
-					});
-				}
+					// Prompt templates (source is always "user" | "project" | "path" in coding-agent)
+					for (const template of session.promptTemplates) {
+						commands.push({
+							name: template.name,
+							description: template.description,
+							source: "prompt",
+							location: template.source as RpcSlashCommand["location"],
+							path: template.filePath,
+						});
+					}
 
-				// Skills (source is always "user" | "project" | "path" in coding-agent)
-				for (const skill of session.resourceLoader.getSkills().skills) {
-					commands.push({
-						name: `skill:${skill.name}`,
-						description: skill.description,
-						source: "skill",
-						location: skill.sourceInfo.scope as RpcSlashCommand["location"],
-						path: skill.filePath,
-					});
-				}
+					// Skills (source is always "user" | "project" | "path" in coding-agent)
+					for (const skill of session.resourceLoader.getSkills().skills) {
+						commands.push({
+							name: `skill:${skill.name}`,
+							description: skill.description,
+							source: "skill",
+							location: skill.source as RpcSlashCommand["location"],
+							path: skill.filePath,
+						});
+					}
 
 				return success(id, "get_commands", { commands });
 			}

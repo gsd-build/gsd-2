@@ -58,9 +58,5 @@ export function createExtensionUIContext(host: InteractiveModeStateHost): Extens
 		},
 		getToolsExpanded: () => host.toolOutputExpanded,
 		setToolsExpanded: (expanded) => host.setToolsExpanded(expanded),
-		setHiddenThinkingLabel: (_label: string | undefined) => {
-			// Thinking label not supported in this context
-		},
 	};
 }
-

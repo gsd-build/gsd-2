@@ -357,7 +357,7 @@ export async function main(args: string[]): Promise<void> {
 	const settingsManager = SettingsManager.create(cwd, agentDir);
 	reportSettingsErrors(settingsManager, "startup");
 	const authStorage = AuthStorage.create();
-	const modelRegistry = ModelRegistry.create(authStorage, getModelsPath());
+	const modelRegistry = new ModelRegistry(authStorage, getModelsPath());
 
 	// isAllLocalChain / isLocalModel removed in pi-coding-agent 0.67.2 —
 	// check baseUrl: models with no baseUrl use cloud APIs, those with one may be local.
@@ -367,7 +367,7 @@ export async function main(args: string[]): Promise<void> {
 	// Offline mode validation / auto-detection
 	if (offlineMode) {
 		// --offline flag: validate all models are local
-		const remoteModel = modelRegistry.getAll().find((m) => !isLocalModel(m));
+		const remoteModel = modelRegistry.getAll().find((m: { baseUrl?: string | null }) => !isLocalModel(m));
 		if (remoteModel) {
 			console.error(
 				`Error: --offline requires all configured models to be local. Found remote model: ${remoteModel.name} (${(remoteModel as { baseUrl?: string | null }).baseUrl || "cloud API"})`,
@@ -394,7 +394,7 @@ export async function main(args: string[]): Promise<void> {
 		noPromptTemplates: firstPass.noPromptTemplates || firstPass.bare,
 		noThemes: firstPass.noThemes || firstPass.bare,
 		systemPrompt: firstPass.systemPrompt,
-		appendSystemPrompt: firstPass.appendSystemPrompt ? [firstPass.appendSystemPrompt] : undefined,
+		appendSystemPrompt: firstPass.appendSystemPrompt,
 		// --bare: suppress CLAUDE.md/AGENTS.md ancestor walk
 		...(firstPass.bare ? { agentsFilesOverride: () => ({ agentsFiles: [] }) } : {}),
 	});

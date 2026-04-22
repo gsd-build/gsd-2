@@ -1,15 +1,10 @@
 import { type Component, truncateToWidth, visibleWidth } from "@gsd/pi-tui";
-import type { AgentSession, SessionManager } from "@gsd/agent-types";
+import type { AgentSession } from "@gsd/agent-types";
 import type { ReadonlyFooterDataProvider } from "@gsd/agent-types";
 import { theme } from "../../../theme.js";
 import { providerDisplayName } from "./model-selector.js";
 
-interface GSDSessionManager extends SessionManager {
-	getUsageTotals?(): { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number };
-}
-
 interface GSDSessionState {
-	model: string;
 	activeInferenceModel?: string;
 }
 
@@ -87,7 +82,7 @@ export class FooterComponent implements Component {
 	render(width: number): string[] {
 		const state = this.session.state;
 
-		const usageTotals = (this.session.sessionManager as unknown as GSDSessionManager).getUsageTotals?.() ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+		const usageTotals = this.session.sessionManager.getUsageTotals();
 		const totalInput = usageTotals.input;
 		const totalOutput = usageTotals.output;
 		const totalCacheRead = usageTotals.cacheRead;
@@ -96,7 +91,10 @@ export class FooterComponent implements Component {
 
 		// Use activeInferenceModel during streaming to show the model actually
 		// being used, not the configured model which may have been switched mid-turn.
-		const displayModel = (state as unknown as GSDSessionState).activeInferenceModel ?? state.model;
+		const activeInferenceModelId = (state as unknown as GSDSessionState).activeInferenceModel;
+		const displayModel = activeInferenceModelId
+			? this.session.modelRegistry.getAll().find((model) => model.id === activeInferenceModelId) ?? this.session.model
+			: this.session.model;
 
 		// Calculate context usage from session (handles compaction correctly).
 		// After compaction, tokens are unknown until the next LLM response.

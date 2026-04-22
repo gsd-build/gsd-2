@@ -184,7 +184,7 @@ export {
 	wrapToolWithExtensions,
 } from "./core/extensions/index.js";
 // Footer data provider (git branch + extension statuses - data not otherwise available to extensions)
-export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.js";
+export { FooterDataProvider, type ReadonlyFooterDataProvider } from "./core/footer-data-provider.js";
 export {
 	type BashExecutionMessage,
 	type BranchSummaryMessage,

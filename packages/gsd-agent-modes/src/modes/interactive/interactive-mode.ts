@@ -93,10 +93,12 @@ import { SessionSelectorComponent } from "./components/session-selector.js";
 import { SettingsSelectorComponent } from "./components/settings-selector.js";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.js";
 import { ToolExecutionComponent } from "./components/tool-execution.js";
+import type { TimestampFormat } from "./components/timestamp.js";
 import { TreeSelectorComponent } from "./components/tree-selector.js";
 import { UserMessageComponent } from "./components/user-message.js";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.js";
 import { ContextualTips } from "@gsd/pi-coding-agent";
+import type { InteractiveModeStateHost } from "./interactive-mode-state.js";
 import { type SlashCommandContext, getAppKeyDisplay } from "./slash-command-handlers.js";
 import { handleAgentEvent } from "./controllers/chat-controller.js";
 import { createExtensionUIContext as buildExtensionUIContext } from "./controllers/extension-ui-controller.js";
@@ -136,8 +138,8 @@ function isExpandable(obj: unknown): obj is Expandable {
  * interface (added by GSD without modifying pi-coding-agent).
  */
 interface GSDSettingsManager {
-	getTimestampFormat?(): string | undefined;
-	setTimestampFormat?(format: string): void;
+	getTimestampFormat?(): TimestampFormat | undefined;
+	setTimestampFormat?(format: TimestampFormat): void;
 	getRespectGitignoreInPicker?(): boolean;
 	setRespectGitignoreInPicker?(enabled: boolean): void;
 }
@@ -189,7 +191,7 @@ interface GSDContainer {
  * but are not in the ModelRegistry interface type.
  */
 interface GSDModelRegistry {
-	discoverModels?(providers: string[]): Promise<Array<{ error?: string }>>;
+	discoverModels?(providers: string[]): Promise<Array<{ error?: string; models?: Array<unknown> }>>;
 	getApiKeyForProvider?(provider: string): Promise<string | undefined>;
 }
 
@@ -550,7 +552,7 @@ export class InteractiveMode {
 				rawKeyHint(`${appKey(kb, "clear")} twice`, "to exit"),
 				hint("exit", "to exit (empty)"),
 				hint("suspend", "to suspend"),
-				keyHint("tui.editor.deleteToLineEnd", "to delete to end"),
+				keyHint("deleteToLineEnd", "to delete to end"),
 				hint("cycleThinkingLevel", "to cycle thinking level"),
 				rawKeyHint(`${appKey(kb, "cycleModelForward")}/${appKey(kb, "cycleModelBackward")}`, "to cycle models"),
 				hint("selectModel", "to select model"),
@@ -1088,7 +1090,10 @@ export class InteractiveMode {
 			return;
 		}
 
-		const metadata = (this.session.resourceLoader as unknown as GSDResourceLoader).getPathMetadata?.();
+		const metadata = (
+			(this.session.resourceLoader as unknown as GSDResourceLoader).getPathMetadata?.()
+			?? new Map<string, { source: string; scope: string; origin: string }>()
+		) as Map<string, { source: string; scope: string; origin: string }>;
 		const sectionHeader = (name: string, color: ThemeColor = "mdHeading"): string => theme.fg(color, `[${name}]`);
 
 		const skillsResult = this.session.resourceLoader.getSkills();
@@ -1398,10 +1403,9 @@ export class InteractiveMode {
 						options?.onError?.(err);
 					}
 				})();
-			},
-			getSystemPrompt: () => this.session.systemPrompt,
-			signal: undefined,
-		});
+				},
+				getSystemPrompt: () => this.session.systemPrompt,
+			});
 
 		// Set up the extension shortcut handler on the default editor
 		this.defaultEditor.onExtensionShortcut = (data: string) => {
@@ -1658,7 +1662,7 @@ export class InteractiveMode {
 	 * Create the ExtensionUIContext for extensions.
 	 */
 	private createExtensionUIContext(): ExtensionUIContext {
-		return buildExtensionUIContext(this);
+		return buildExtensionUIContext(this as unknown as InteractiveModeStateHost);
 	}
 
 	getExtensionUIContext(): ExtensionUIContext {
@@ -2201,8 +2205,12 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	private getTimestampFormat(): TimestampFormat {
+		return (this.settingsManager as unknown as GSDSettingsManager).getTimestampFormat?.() ?? "date-time-iso";
+	}
+
 	private addMessageToChat(message: AgentMessage, options?: { populateHistory?: boolean }): void {
-		const timestampFormat = (this.settingsManager as unknown as GSDSettingsManager).getTimestampFormat?.();
+		const timestampFormat = this.getTimestampFormat();
 		switch (message.role) {
 			case "bashExecution": {
 				const component = new BashExecutionComponent(message.command, this.ui, message.excludeFromContext);
@@ -2317,7 +2325,7 @@ export class InteractiveMode {
 		options: { updateFooter?: boolean; populateHistory?: boolean } = {},
 	): void {
 		this.pendingTools.clear();
-		const timestampFormat = (this.settingsManager as unknown as GSDSettingsManager).getTimestampFormat?.();
+		const timestampFormat = this.getTimestampFormat();
 
 		if (options.updateFooter) {
 			this.footer.invalidate();
@@ -3131,11 +3139,11 @@ export class InteractiveMode {
 					showHardwareCursor: this.settingsManager.getShowHardwareCursor(),
 					editorPaddingX: this.settingsManager.getEditorPaddingX(),
 					autocompleteMaxVisible: this.settingsManager.getAutocompleteMaxVisible(),
-					respectGitignoreInPicker: (this.settingsManager as unknown as GSDSettingsManager).getRespectGitignoreInPicker?.() ?? true,
-					quietStartup: this.settingsManager.getQuietStartup(),
-					clearOnShrink: this.settingsManager.getClearOnShrink(),
-					timestampFormat: (this.settingsManager as unknown as GSDSettingsManager).getTimestampFormat?.(),
-				},
+						respectGitignoreInPicker: (this.settingsManager as unknown as GSDSettingsManager).getRespectGitignoreInPicker?.() ?? true,
+						quietStartup: this.settingsManager.getQuietStartup(),
+						clearOnShrink: this.settingsManager.getClearOnShrink(),
+						timestampFormat: this.getTimestampFormat(),
+					},
 				{
 					onAutoCompactChange: (enabled) => {
 						this.session.setAutoCompactionEnabled(enabled);
@@ -3165,10 +3173,10 @@ export class InteractiveMode {
 					onFollowUpModeChange: (mode) => {
 						this.session.setFollowUpMode(mode);
 					},
-					onTransportChange: (transport) => {
-						this.settingsManager.setTransport(transport);
-						this.session.agent.transport = transport;
-					},
+						onTransportChange: (transport) => {
+							this.settingsManager.setTransport(transport);
+							this.session.agent.setTransport(transport);
+						},
 					onThinkingLevelChange: (level) => {
 						this.session.setThinkingLevel(level);
 						this.footer.invalidate();
@@ -3252,20 +3260,20 @@ export class InteractiveMode {
 	}
 
 	private async handleModelCommand(searchTerm?: string): Promise<void> {
-		await handleModelCommandController(this, searchTerm);
+		await handleModelCommandController(this as unknown as InteractiveModeStateHost, searchTerm);
 	}
 
 	private async findExactModelMatch(searchTerm: string): Promise<Model<Api> | undefined> {
-		return findExactModelMatchController(this, searchTerm);
+		return findExactModelMatchController(this as unknown as InteractiveModeStateHost, searchTerm);
 	}
 
 	private async getModelCandidates(): Promise<Model<Api>[]> {
-		return getModelCandidatesController(this);
+		return getModelCandidatesController(this as unknown as InteractiveModeStateHost);
 	}
 
 	/** Update the footer's available provider count from current model candidates */
 	private async updateAvailableProviderCount(): Promise<void> {
-		await updateAvailableProviderCountController(this);
+		await updateAvailableProviderCountController(this as unknown as InteractiveModeStateHost);
 	}
 
 	private showModelSelector(initialSearchInput?: string): void {
@@ -3462,11 +3470,11 @@ export class InteractiveMode {
 			return;
 		}
 
-		this.showSelector((done) => {
-			const selector = new TreeSelectorComponent(
-				tree,
-				realLeafId,
-				this.ui.terminal.rows,
+			this.showSelector((done) => {
+				const selector = new TreeSelectorComponent(
+					tree as unknown as ConstructorParameters<typeof TreeSelectorComponent>[0],
+					realLeafId,
+					this.ui.terminal.rows,
 				async (entryId) => {
 					// Selecting the current leaf is a no-op (already there)
 					if (entryId === realLeafId) {
@@ -3659,11 +3667,11 @@ export class InteractiveMode {
 					try {
 						const results = await (this.session.modelRegistry as unknown as GSDModelRegistry).discoverModels?.([provider]) ?? [];
 						const result = results[0];
-						if (result?.error) {
-							this.showError(`Discovery failed: ${result.error}`);
-						} else {
-							this.showStatus(`Discovered ${result?.models.length ?? 0} models from ${provider}`);
-						}
+							if (result?.error) {
+								this.showError(`Discovery failed: ${result.error}`);
+							} else {
+								this.showStatus(`Discovered ${result?.models?.length ?? 0} models from ${provider}`);
+							}
 					} catch (error) {
 						this.showError(error instanceof Error ? error.message : String(error));
 					}

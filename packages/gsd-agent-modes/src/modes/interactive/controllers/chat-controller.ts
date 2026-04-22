@@ -43,33 +43,40 @@ let orphanedSegments: RenderedSegment[] = [];
 // blocks at runtime. Using a structural supertype avoids dual-module-path as-any casts.
 type RuntimeContentBlock = { type: string; [key: string]: unknown };
 
-function hasVisibleAssistantContent(message: { content: RuntimeContentBlock[] }): boolean {
+function hasVisibleAssistantContent(message: { content: Array<unknown> }): boolean {
 	return message.content.some(
-		(c) =>
-			(c.type === "text" && typeof c["text"] === "string" && (c["text"] as string).trim().length > 0)
-			|| (c.type === "thinking" && typeof c["thinking"] === "string" && (c["thinking"] as string).trim().length > 0),
+		(c) => {
+			const block = c as RuntimeContentBlock;
+			return (
+			(block.type === "text" && typeof block["text"] === "string" && (block["text"] as string).trim().length > 0)
+			|| (block.type === "thinking" && typeof block["thinking"] === "string" && (block["thinking"] as string).trim().length > 0)
+			);
+		},
 	);
 }
 
-function hasAssistantToolBlocks(message: { content: RuntimeContentBlock[] }): boolean {
-	return message.content.some((c) => c.type === "toolCall" || c.type === "serverToolUse");
+function hasAssistantToolBlocks(message: { content: Array<unknown> }): boolean {
+	return message.content.some((c) => {
+		const block = c as RuntimeContentBlock;
+		return block.type === "toolCall" || block.type === "serverToolUse";
+	});
 }
 
 // Pick the latest non-empty text block that appears strictly before the most
 // recent tool call. Text blocks that come after the last tool call are still
 // streaming live into the chat container, so mirroring them into the pinned
 // "Latest Output" zone would render the same tokens twice.
-export function findLatestPinnableText(contentBlocks: RuntimeContentBlock[]): string {
+export function findLatestPinnableText(contentBlocks: Array<unknown>): string {
 	let lastToolIdx = -1;
 	for (let i = contentBlocks.length - 1; i >= 0; i--) {
-		const c = contentBlocks[i];
+		const c = contentBlocks[i] as RuntimeContentBlock;
 		if (c?.type === "toolCall" || c?.type === "serverToolUse") {
 			lastToolIdx = i;
 			break;
 		}
 	}
 	for (let i = lastToolIdx - 1; i >= 0; i--) {
-		const c = contentBlocks[i];
+		const c = contentBlocks[i] as RuntimeContentBlock;
 		if (c?.type === "text" && typeof c["text"] === "string" && (c["text"] as string).trim()) {
 			return (c["text"] as string).trim();
 		}
@@ -89,7 +96,7 @@ let pinnedTextComponent: Markdown | undefined;
 export async function handleAgentEvent(host: InteractiveModeStateHost & {
 	init: () => Promise<void>;
 	getMarkdownThemeWithSettings: () => MarkdownTheme;
-	addMessageToChat: (message: Record<string, unknown>, options?: { populateHistory?: boolean }) => void;
+	addMessageToChat: (message: unknown, options?: { populateHistory?: boolean }) => void;
 	formatWebSearchResult: (content: unknown) => string;
 	getRegisteredToolDefinition: (toolName: string) => ToolDefinition | undefined;
 	checkShutdownRequested: () => Promise<void>;

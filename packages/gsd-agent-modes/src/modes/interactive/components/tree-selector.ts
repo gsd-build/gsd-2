@@ -12,7 +12,20 @@ import {
 } from "@gsd/pi-tui";
 // SessionTreeNode is not exported from pi-coding-agent index in 0.67.2 — define locally.
 interface SessionTreeNode {
-	entry: { id: string; parentId: string | null; timestamp: string; [key: string]: unknown };
+	entry: {
+		id: string;
+		parentId: string | null;
+		timestamp: string;
+		type?: string;
+		message?: any;
+		summary?: string;
+		modelId?: string;
+		thinkingLevel?: string;
+		customType?: string;
+		content?: unknown;
+		tokensBefore?: number;
+		label?: string;
+	};
 	children: SessionTreeNode[];
 	label?: string;
 	labelTimestamp?: string;
@@ -532,8 +545,8 @@ class TreeList implements Component {
 				}
 				break;
 			}
-			case "custom_message": {
-				parts.push(entry.customType);
+				case "custom_message": {
+					parts.push(entry.customType ?? "");
 				if (typeof entry.content === "string") {
 					parts.push(entry.content);
 				} else {
@@ -544,18 +557,18 @@ class TreeList implements Component {
 			case "compaction":
 				parts.push("compaction");
 				break;
-			case "branch_summary":
-				parts.push("branch summary", entry.summary);
-				break;
-			case "model_change":
-				parts.push("model", entry.modelId);
-				break;
-			case "thinking_level_change":
-				parts.push("thinking", entry.thinkingLevel);
-				break;
-			case "custom":
-				parts.push("custom", entry.customType);
-				break;
+				case "branch_summary":
+					parts.push("branch summary", entry.summary ?? "");
+					break;
+				case "model_change":
+					parts.push("model", entry.modelId ?? "");
+					break;
+				case "thinking_level_change":
+					parts.push("thinking", entry.thinkingLevel ?? "");
+					break;
+				case "custom":
+					parts.push("custom", entry.customType ?? "");
+					break;
 			case "label":
 				parts.push("label", entry.label ?? "");
 				break;
@@ -736,13 +749,13 @@ class TreeList implements Component {
 				result = theme.fg("customMessageLabel", `[${entry.customType}]: `) + normalize(content);
 				break;
 			}
-			case "compaction": {
-				const tokens = Math.round(entry.tokensBefore / 1000);
-				result = theme.fg("borderAccent", `[compaction: ${tokens}k tokens]`);
-				break;
-			}
-			case "branch_summary":
-				result = theme.fg("warning", `[branch summary]: `) + normalize(entry.summary);
+				case "compaction": {
+					const tokens = Math.round((entry.tokensBefore ?? 0) / 1000);
+					result = theme.fg("borderAccent", `[compaction: ${tokens}k tokens]`);
+					break;
+				}
+				case "branch_summary":
+					result = theme.fg("warning", `[branch summary]: `) + normalize(entry.summary ?? "");
 				break;
 			case "model_change":
 				result = theme.fg("dim", `[model: ${entry.modelId}]`);
@@ -852,11 +865,11 @@ class TreeList implements Component {
 
 	handleInput(keyData: string): void {
 		const kb = getKeybindings();
-		if (kb.matches(keyData, "tui.select.up")) {
+		if (kb.matches(keyData, "selectUp")) {
 			this.selectedIndex = this.selectedIndex === 0 ? this.filteredNodes.length - 1 : this.selectedIndex - 1;
-		} else if (kb.matches(keyData, "tui.select.down")) {
+		} else if (kb.matches(keyData, "selectDown")) {
 			this.selectedIndex = this.selectedIndex === this.filteredNodes.length - 1 ? 0 : this.selectedIndex + 1;
-		} else if (kb.matches(keyData, "app.tree.foldOrUp")) {
+		} else if (kb.matches(keyData, "treeFoldOrUp")) {
 			const currentId = this.filteredNodes[this.selectedIndex]?.node.entry.id;
 			if (currentId && this.isFoldable(currentId) && !this.foldedNodes.has(currentId)) {
 				this.foldedNodes.add(currentId);
@@ -864,7 +877,7 @@ class TreeList implements Component {
 			} else {
 				this.selectedIndex = this.findBranchSegmentStart("up");
 			}
-		} else if (kb.matches(keyData, "app.tree.unfoldOrDown")) {
+		} else if (kb.matches(keyData, "treeUnfoldOrDown")) {
 			const currentId = this.filteredNodes[this.selectedIndex]?.node.entry.id;
 			if (currentId && this.foldedNodes.has(currentId)) {
 				this.foldedNodes.delete(currentId);
@@ -872,18 +885,18 @@ class TreeList implements Component {
 			} else {
 				this.selectedIndex = this.findBranchSegmentStart("down");
 			}
-		} else if (kb.matches(keyData, "tui.editor.cursorLeft") || kb.matches(keyData, "tui.select.pageUp")) {
+		} else if (kb.matches(keyData, "cursorLeft") || kb.matches(keyData, "selectPageUp")) {
 			// Page up
 			this.selectedIndex = Math.max(0, this.selectedIndex - this.maxVisibleLines);
-		} else if (kb.matches(keyData, "tui.editor.cursorRight") || kb.matches(keyData, "tui.select.pageDown")) {
+		} else if (kb.matches(keyData, "cursorRight") || kb.matches(keyData, "selectPageDown")) {
 			// Page down
 			this.selectedIndex = Math.min(this.filteredNodes.length - 1, this.selectedIndex + this.maxVisibleLines);
-		} else if (kb.matches(keyData, "tui.select.confirm")) {
+		} else if (kb.matches(keyData, "selectConfirm")) {
 			const selected = this.filteredNodes[this.selectedIndex];
 			if (selected && this.onSelect) {
 				this.onSelect(selected.node.entry.id);
 			}
-		} else if (kb.matches(keyData, "tui.select.cancel")) {
+		} else if (kb.matches(keyData, "selectCancel")) {
 			if (this.searchQuery) {
 				this.searchQuery = "";
 				this.foldedNodes.clear();
@@ -930,7 +943,7 @@ class TreeList implements Component {
 			this.filterMode = modes[(currentIndex + 1) % modes.length];
 			this.foldedNodes.clear();
 			this.applyFilter();
-		} else if (kb.matches(keyData, "tui.editor.deleteCharBackward")) {
+		} else if (kb.matches(keyData, "deleteCharBackward")) {
 			if (this.searchQuery.length > 0) {
 				this.searchQuery = this.searchQuery.slice(0, -1);
 				this.foldedNodes.clear();
@@ -1057,17 +1070,17 @@ class LabelInput implements Component, Focusable {
 		lines.push(truncateToWidth(`${indent}${theme.fg("muted", "Label (empty to remove):")}`, width));
 		lines.push(...this.input.render(availableWidth).map((line) => truncateToWidth(`${indent}${line}`, width)));
 		lines.push(
-			truncateToWidth(`${indent}${keyHint("tui.select.confirm", "save")}  ${keyHint("tui.select.cancel", "cancel")}`, width),
+			truncateToWidth(`${indent}${keyHint("selectConfirm", "save")}  ${keyHint("selectCancel", "cancel")}`, width),
 		);
 		return lines;
 	}
 
 	handleInput(keyData: string): void {
 		const kb = getKeybindings();
-		if (kb.matches(keyData, "tui.select.confirm")) {
+		if (kb.matches(keyData, "selectConfirm")) {
 			const value = this.input.getValue().trim();
 			this.onSubmit?.(this.entryId, value || undefined);
-		} else if (kb.matches(keyData, "tui.select.cancel")) {
+		} else if (kb.matches(keyData, "selectCancel")) {
 			this.onCancel?.();
 		} else {
 			this.input.handleInput(keyData);
