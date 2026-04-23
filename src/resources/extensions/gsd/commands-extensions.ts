@@ -179,11 +179,14 @@ export function validateExtensionPackage(packageDir: string): ValidationResult {
     }
   }
 
-  // (c) @gsd/* packages must be in peerDependencies, not dependencies (D-12c)
-  const deps = (pkg.dependencies as Record<string, unknown> | undefined) ?? {};
-  for (const dep of Object.keys(deps)) {
-    if (dep.startsWith("@gsd/")) {
-      errors.push(`"${dep}" must be in peerDependencies, not dependencies`);
+  // (c) @gsd/* packages must be in peerDependencies, not dependencies/devDependencies (D-12c)
+  // Mirrors validateExtensionManifest below and extension-validator.ts:checkDependencyPlacement.
+  for (const field of ["dependencies", "devDependencies"] as const) {
+    const deps = (pkg[field] as Record<string, unknown> | undefined) ?? {};
+    for (const dep of Object.keys(deps)) {
+      if (dep.startsWith("@gsd/")) {
+        errors.push(`"${dep}" must be in peerDependencies, not ${field}`);
+      }
     }
   }
 

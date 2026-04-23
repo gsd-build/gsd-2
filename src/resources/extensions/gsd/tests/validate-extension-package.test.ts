@@ -114,6 +114,28 @@ test("validateExtensionPackage: @gsd/* in dependencies (not peerDependencies) re
   assert.ok(result.errors.some(e => e.includes("@gsd/pi-coding-agent")), `Expected error about @gsd/ dep, got: ${JSON.stringify(result.errors)}`);
 });
 
+test("validateExtensionPackage: @gsd/* in devDependencies returns error", (t) => {
+  const dir = makeTempDir();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  writeIndexTs(dir);
+  writePackageJson(dir, {
+    name: "@gsd-extensions/test",
+    version: "1.0.0",
+    gsd: { extension: true },
+    pi: { extensions: ["./index.ts"] },
+    peerDependencies: { "@gsd/pi-coding-agent": "*" },
+    devDependencies: { "@gsd/pi-tui": "^2.0.0" },
+  });
+
+  const result = validateExtensionPackage(dir);
+  assert.equal(result.valid, false);
+  assert.ok(
+    result.errors.some(e => e.includes("@gsd/pi-tui") && e.includes("devDependencies")),
+    `Expected error about @gsd/ in devDependencies, got: ${JSON.stringify(result.errors)}`,
+  );
+});
+
 test("validateExtensionPackage: missing package.json returns error", (t) => {
   const dir = makeTempDir();
   t.after(() => rmSync(dir, { recursive: true, force: true }));
