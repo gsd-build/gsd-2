@@ -290,6 +290,44 @@ describe("resolveImportPath", () => {
     assert.ok(result.resolvedPath?.endsWith("types.ts"));
   });
 
+  test("resolves .mjs and .cjs imports to TS module siblings", (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "post-exec-test-ts-module-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "esm.mts"), "export {};");
+    writeFileSync(join(dir, "src", "common.cts"), "export = {};");
+    writeFileSync(join(dir, "src", "main.ts"), "");
+
+    const esmResult = resolveImportPath("./esm.mjs", "src/main.ts", dir);
+    assert.ok(esmResult.exists);
+    assert.ok(esmResult.resolvedPath?.endsWith("esm.mts"));
+
+    const cjsResult = resolveImportPath("./common.cjs", "src/main.ts", dir);
+    assert.ok(cjsResult.exists);
+    assert.ok(cjsResult.resolvedPath?.endsWith("common.cts"));
+  });
+
+  test("resolves dotted-stem TypeScript import without extension", (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "post-exec-test-dotted-stem-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, "src", "lib"), { recursive: true });
+    writeFileSync(join(dir, "src", "lib", "test-helpers.test-utils.ts"), "export {};");
+    writeFileSync(join(dir, "src", "Button.stories.tsx"), "export {};");
+    writeFileSync(join(dir, "src", "main.ts"), "");
+
+    const helperResult = resolveImportPath(
+      "./lib/test-helpers.test-utils",
+      "src/main.ts",
+      dir
+    );
+    assert.ok(helperResult.exists, "dotted helper stem should resolve");
+    assert.ok(helperResult.resolvedPath?.endsWith("test-helpers.test-utils.ts"));
+
+    const storiesResult = resolveImportPath("./Button.stories", "src/main.ts", dir);
+    assert.ok(storiesResult.exists, "dotted stories stem should resolve");
+    assert.ok(storiesResult.resolvedPath?.endsWith("Button.stories.tsx"));
+  });
+
   // Non-code explicit extensions must not fall through to code-extension
   // shadows: a missing ./missing.css must stay unresolved even if a stray
   // ./missing.css.ts happens to exist.
@@ -654,6 +692,28 @@ describe("checkCrossTaskSignatures", () => {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  test("checks signatures in .mts and .cts key files", (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "post-exec-test-signature-mts-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(
+      join(dir, "src", "utils.mts"),
+      "export function parse(value: string): string { return value; }"
+    );
+    writeFileSync(
+      join(dir, "src", "api.cts"),
+      "export function parse(value: number): string { return String(value); }"
+    );
+
+    const priorTask = createTask({ id: "T01", key_files: ["src/utils.mts"] });
+    const currentTask = createTask({ id: "T02", key_files: ["src/api.cts"] });
+
+    const results = checkCrossTaskSignatures(currentTask, [priorTask], dir);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].target, "parse");
+    assert.ok(results[0].message.includes("parameters"));
+  });
 });
 
 // ─── Pattern Consistency Tests ───────────────────────────────────────────────
@@ -724,6 +784,23 @@ describe("checkPatternConsistency", () => {
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  test("checks patterns in .mts key files", (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "post-exec-test-pattern-mts-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    writeFileSync(
+      join(dir, "api.mts"),
+      `async function getData(): Promise<string> {
+        const result = await fetch('/api');
+        return result.text().then(t => t.toUpperCase());
+      }`
+    );
+
+    const task = createTask({ id: "T01", key_files: ["api.mts"] });
+    const results = checkPatternConsistency(task, [], dir);
+
+    assert.equal(results.filter((r) => r.message.includes("async")).length, 1);
   });
 
   test("passes when naming is consistent (camelCase only)", () => {

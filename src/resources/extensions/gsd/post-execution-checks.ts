@@ -17,6 +17,61 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve, dirname, join, extname } from "node:path";
 import type { TaskRow } from "./gsd-db.ts";
 
+const CODE_EXTENSION_ORDER = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
+const CODE_EXTENSIONS = new Set(CODE_EXTENSION_ORDER);
+const TS_ESM_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".cjs"]);
+const TS_ESM_EXTENSION_FALLBACKS = new Map<string, string[]>([
+  [".js", [".ts", ".tsx", ".js", ".jsx"]],
+  [".jsx", [".tsx", ".jsx"]],
+  [".mjs", [".mts", ".mjs"]],
+  [".cjs", [".cts", ".cjs"]],
+]);
+const DOTTED_STEM_FALLBACK_EXTENSIONS = new Set([
+  ".client",
+  ".server",
+  ".spec",
+  ".stories",
+  ".test",
+  ".test-utils",
+  ".webhook",
+]);
+const SEALED_NON_CODE_EXTENSIONS = new Set([
+  ".css",
+  ".scss",
+  ".sass",
+  ".less",
+  ".styl",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".svg",
+  ".webp",
+  ".avif",
+  ".ico",
+  ".bmp",
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".otf",
+  ".eot",
+  ".json",
+  ".jsonc",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".md",
+  ".mdx",
+  ".txt",
+  ".html",
+  ".xml",
+  ".wasm",
+]);
+
+function isCodeFile(file: string): boolean {
+  return CODE_EXTENSIONS.has(extname(file));
+}
+
 // ─── Result Types ────────────────────────────────────────────────────────────
 
 export interface PostExecutionCheckJSON {
@@ -131,13 +186,11 @@ export function resolveImportPath(
   basePath: string
 ): { exists: boolean; resolvedPath: string | null } {
   const sourceDir = dirname(resolve(basePath, sourceFile));
-  const extensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
+  let extensions = CODE_EXTENSION_ORDER;
 
   // If the import already has an explicit extension, check it as-is first.
-  // This correctly resolves asset imports like .css, .scss, images, fonts
-  // without requiring each extension to be enumerated (issue #4411). We only
-  // do this when the import carries an extension so that extensionless module
-  // imports still flow through the TS ESM convention and index-file resolvers.
+  // For known sealed extensions, a miss stays missing. Unknown dotted suffixes
+  // such as `.test-utils` are treated as part of the TypeScript stem (#4659).
   const explicitExt = extname(importPath);
   if (explicitExt !== "") {
     const directPath = resolve(sourceDir, importPath);
@@ -145,29 +198,15 @@ export function resolveImportPath(
       return { exists: true, resolvedPath: directPath };
     }
 
-    // Known concrete extensions that should NOT fall through to code-shadow
-    // probing when missing. This preserves the "missing.css must stay missing"
-    // guarantee while still allowing dotted module stems like ./route.server
-    // to resolve as ./route.server.ts.
-    const nonFallbackExtensions = new Set([
-      ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
-      ".json", ".css", ".scss", ".sass", ".less", ".styl",
-      ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".ico", ".bmp",
-      ".woff", ".woff2", ".ttf", ".otf", ".eot",
-    ]);
-    const runtimeFallbackExtensions = new Set([".js", ".jsx", ".mjs", ".cjs"]);
-    const dottedStemFallbackExtensions = new Set([".server", ".client", ".webhook"]);
-
+    // Known code extensions and known asset/data extensions are explicit file
+    // requests. Do not let `./missing.css` accidentally resolve to
+    // `./missing.css.ts`. Unknown dotted suffixes are sealed by default, with a
+    // narrow allowlist for common TS module stems such as `route.server`.
     if (
-      explicitExt !== "" &&
-      !runtimeFallbackExtensions.has(explicitExt) &&
-      !nonFallbackExtensions.has(explicitExt) &&
-      !dottedStemFallbackExtensions.has(explicitExt)
+      (CODE_EXTENSIONS.has(explicitExt) && !TS_ESM_EXTENSIONS.has(explicitExt))
+      || SEALED_NON_CODE_EXTENSIONS.has(explicitExt)
+      || (!TS_ESM_EXTENSIONS.has(explicitExt) && !DOTTED_STEM_FALLBACK_EXTENSIONS.has(explicitExt))
     ) {
-      return { exists: false, resolvedPath: null };
-    }
-
-    if (nonFallbackExtensions.has(explicitExt) && !runtimeFallbackExtensions.has(explicitExt)) {
       return { exists: false, resolvedPath: null };
     }
   }
@@ -177,12 +216,16 @@ export function resolveImportPath(
   let normalizedPath = importPath;
   if (importPath.endsWith(".js")) {
     normalizedPath = importPath.slice(0, -3);
+    extensions = TS_ESM_EXTENSION_FALLBACKS.get(".js") ?? extensions;
   } else if (importPath.endsWith(".jsx")) {
     normalizedPath = importPath.slice(0, -4);
+    extensions = TS_ESM_EXTENSION_FALLBACKS.get(".jsx") ?? extensions;
   } else if (importPath.endsWith(".mjs")) {
     normalizedPath = importPath.slice(0, -4);
+    extensions = TS_ESM_EXTENSION_FALLBACKS.get(".mjs") ?? extensions;
   } else if (importPath.endsWith(".cjs")) {
     normalizedPath = importPath.slice(0, -4);
+    extensions = TS_ESM_EXTENSION_FALLBACKS.get(".cjs") ?? extensions;
   }
 
   // Try the normalized path with common extensions
@@ -359,8 +402,7 @@ export function checkCrossTaskSignatures(
 
   for (const task of priorTasks) {
     for (const file of task.key_files) {
-      const ext = extname(file);
-      if (![".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"].includes(ext)) continue;
+      if (!isCodeFile(file)) continue;
 
       const absolutePath = resolve(basePath, file);
       if (!existsSync(absolutePath)) continue;
@@ -382,8 +424,7 @@ export function checkCrossTaskSignatures(
   // Extract function calls/references from current task's key_files
   // and check they match prior definitions
   for (const file of taskRow.key_files) {
-    const ext = extname(file);
-    if (![".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"].includes(ext)) continue;
+    if (!isCodeFile(file)) continue;
 
     const absolutePath = resolve(basePath, file);
     if (!existsSync(absolutePath)) continue;
@@ -446,8 +487,7 @@ export function checkPatternConsistency(
   const results: PostExecutionCheckJSON[] = [];
 
   for (const file of taskRow.key_files) {
-    const ext = extname(file);
-    if (![".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"].includes(ext)) continue;
+    if (!isCodeFile(file)) continue;
 
     const absolutePath = resolve(basePath, file);
     if (!existsSync(absolutePath)) continue;
