@@ -21,6 +21,12 @@ function createWindowsStyleBase(): { root: string; base: string } {
   return { root, base };
 }
 
+function getRenderedWorkingDirectory(prompt: string): string {
+  const match = prompt.match(/working directory is `([^`]+)`/);
+  assert.ok(match, "prompt should render a workingDirectory value");
+  return match[1];
+}
+
 test("prompt builders normalize workingDirectory to POSIX paths at runtime", async () => {
   const { root, base } = createWindowsStyleBase();
   const normalizedBase = base.replaceAll("\\", "/");
@@ -34,14 +40,13 @@ test("prompt builders normalize workingDirectory to POSIX paths at runtime", asy
     ]);
 
     for (const prompt of prompts) {
-      assert.ok(
-        prompt.includes(`Your working directory is \`${normalizedBase}\`.`),
+      const workingDirectory = getRenderedWorkingDirectory(prompt);
+      assert.equal(
+        workingDirectory,
+        normalizedBase,
         "workingDirectory should be normalized to POSIX separators in rendered prompts",
       );
-      assert.ok(
-        !prompt.includes(`Your working directory is \`${base}\`.`),
-        "rendered prompts should not expose raw backslash paths",
-      );
+      assert.equal(workingDirectory.includes("\\"), false);
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
