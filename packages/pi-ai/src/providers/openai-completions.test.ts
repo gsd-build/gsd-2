@@ -16,6 +16,7 @@ import type { Model, Context, OpenAICompletionsCompat, AssistantMessage } from "
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/** Build a minimal openai-completions model fixture with optional compat overrides. */
 function makeModel(compatOverrides: Partial<OpenAICompletionsCompat> = {}): Model<"openai-completions"> {
 	return {
 		id: "test-model",
@@ -32,6 +33,7 @@ function makeModel(compatOverrides: Partial<OpenAICompletionsCompat> = {}): Mode
 	} as Model<"openai-completions">;
 }
 
+/** Build a fully-resolved compat object with safe defaults, optionally overriding specific fields. */
 function makeCompat(overrides: Partial<OpenAICompletionsCompat> = {}): Required<OpenAICompletionsCompat> {
 	return {
 		supportsStore: false,
@@ -52,10 +54,12 @@ function makeCompat(overrides: Partial<OpenAICompletionsCompat> = {}): Required<
 	};
 }
 
+/** Build a minimal user message fixture. */
 function makeUserMsg(text: string) {
 	return { role: "user" as const, content: [{ type: "text" as const, text }], timestamp: Date.now() };
 }
 
+/** Build a minimal assistant message fixture with usage zeroed out. */
 function makeAssistantMsg(overrides: Partial<AssistantMessage> = {}): AssistantMessage {
 	return {
 		role: "assistant",
