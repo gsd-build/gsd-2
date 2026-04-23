@@ -1609,9 +1609,16 @@ test("auto-timeout-recovery.ts calls resolveAgentEnd instead of dispatchNextUnit
     !src.includes("await dispatchNextUnit"),
     "auto-timeout-recovery.ts must not call dispatchNextUnit",
   );
+  // After PR #4716, advance branches go through bumpAndResolveSynthetic()
+  // (which bumps the turn epoch and calls resolveAgentEnd atomically).
+  // Either direct resolveAgentEnd() or the helper satisfies the invariant:
+  // the loop must be re-iterated on timeout recovery.
+  const reIteratesLoop =
+    src.includes("resolveAgentEnd(") ||
+    src.includes("bumpAndResolveSynthetic(");
   assert.ok(
-    src.includes("resolveAgentEnd("),
-    "auto-timeout-recovery.ts must call resolveAgentEnd to re-iterate the loop on timeout recovery",
+    reIteratesLoop,
+    "auto-timeout-recovery.ts must call resolveAgentEnd (directly or via bumpAndResolveSynthetic) to re-iterate the loop on timeout recovery",
   );
 });
 

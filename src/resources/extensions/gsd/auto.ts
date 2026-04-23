@@ -485,6 +485,11 @@ export function isAutoActive(): boolean {
   return s.active;
 }
 
+/** Test-only seam for validating auto-mode guards (#4704). Do not use in production code. */
+export function _setAutoActiveForTest(active: boolean): void {
+  s.active = active;
+}
+
 export function isAutoPaused(): boolean {
   return s.paused;
 }

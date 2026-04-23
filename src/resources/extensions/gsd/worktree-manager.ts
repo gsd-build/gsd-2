@@ -559,6 +559,7 @@ const SKIP_PATHS = [
   ".gsd/worktrees/",
   ".gsd/runtime/",
   ".gsd/activity/",
+  ".gsd/audit/",
   ".gsd/forensics/",
   ".gsd/parallel/",
   ".gsd/journal/",
