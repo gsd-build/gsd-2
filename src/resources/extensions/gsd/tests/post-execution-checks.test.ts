@@ -290,6 +290,27 @@ describe("resolveImportPath", () => {
     assert.ok(result.resolvedPath?.endsWith("types.ts"));
   });
 
+  test("resolves dotted-stem TypeScript import without extension", (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "post-exec-test-dotted-stem-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, "src", "lib"), { recursive: true });
+    writeFileSync(join(dir, "src", "lib", "test-helpers.test-utils.ts"), "export {};");
+    writeFileSync(join(dir, "src", "Button.stories.tsx"), "export {};");
+    writeFileSync(join(dir, "src", "main.ts"), "");
+
+    const helperResult = resolveImportPath(
+      "./lib/test-helpers.test-utils",
+      "src/main.ts",
+      dir
+    );
+    assert.ok(helperResult.exists, "dotted helper stem should resolve");
+    assert.ok(helperResult.resolvedPath?.endsWith("test-helpers.test-utils.ts"));
+
+    const storiesResult = resolveImportPath("./Button.stories", "src/main.ts", dir);
+    assert.ok(storiesResult.exists, "dotted stories stem should resolve");
+    assert.ok(storiesResult.resolvedPath?.endsWith("Button.stories.tsx"));
+  });
+
   // Non-code explicit extensions must not fall through to code-extension
   // shadows: a missing ./missing.css must stay unresolved even if a stray
   // ./missing.css.ts happens to exist.

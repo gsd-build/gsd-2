@@ -17,6 +17,41 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve, dirname, join, extname } from "node:path";
 import type { TaskRow } from "./gsd-db.ts";
 
+const CODE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
+const TS_ESM_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".cjs"]);
+const SEALED_NON_CODE_EXTENSIONS = new Set([
+  ".css",
+  ".scss",
+  ".sass",
+  ".less",
+  ".styl",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".svg",
+  ".webp",
+  ".avif",
+  ".ico",
+  ".bmp",
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".otf",
+  ".eot",
+  ".json",
+  ".jsonc",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".md",
+  ".mdx",
+  ".txt",
+  ".html",
+  ".xml",
+  ".wasm",
+]);
+
 // ─── Result Types ────────────────────────────────────────────────────────────
 
 export interface PostExecutionCheckJSON {
@@ -134,22 +169,21 @@ export function resolveImportPath(
   const extensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
 
   // If the import already has an explicit extension, check it as-is first.
-  // This correctly resolves asset imports like .css, .scss, images, fonts
-  // without requiring each extension to be enumerated (issue #4411). We only
-  // do this when the import carries an extension so that extensionless module
-  // imports still flow through the TS ESM convention and index-file resolvers.
+  // For known sealed extensions, a miss stays missing. Unknown dotted suffixes
+  // such as `.test-utils` are treated as part of the TypeScript stem (#4659).
   const explicitExt = extname(importPath);
   if (explicitExt !== "") {
     const directPath = resolve(sourceDir, importPath);
     if (existsSync(directPath)) {
       return { exists: true, resolvedPath: directPath };
     }
-    // Only .js/.jsx/.mjs/.cjs imports legitimately fall through for the TS
-    // ESM convention (.js → .ts). Any other explicit extension (.css, .json,
-    // .svg, images, fonts, .ts, .tsx, …) must stay unresolved when the direct
-    // path is missing — otherwise a stray `./missing.css.ts` could shadow a
-    // genuinely missing `./missing.css` import.
-    if (![".js", ".jsx", ".mjs", ".cjs"].includes(explicitExt)) {
+    // Known code extensions and known asset/data extensions are explicit file
+    // requests. Do not let `./missing.css` accidentally resolve to
+    // `./missing.css.ts`. JS-family extensions fall through for TS ESM below.
+    if (
+      (CODE_EXTENSIONS.has(explicitExt) && !TS_ESM_EXTENSIONS.has(explicitExt))
+      || SEALED_NON_CODE_EXTENSIONS.has(explicitExt)
+    ) {
       return { exists: false, resolvedPath: null };
     }
   }
