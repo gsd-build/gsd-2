@@ -515,6 +515,48 @@ export async function inlineKnowledgeScoped(
 }
 
 /**
+ * Budget-capped knowledge inline for milestone-level prompt assembly.
+ *
+ * Addresses issue #4719: the six milestone-phase prompts (research-milestone,
+ * plan-milestone, complete-slice, complete-milestone, validate-milestone,
+ * reassess-roadmap) previously injected the full KNOWLEDGE.md (~226KB for a
+ * real project) on every invocation. This helper scopes by caller-supplied
+ * keywords and caps the payload at `maxChars` (default 30,000 chars).
+ *
+ * Returns null when no KNOWLEDGE.md exists or no entries match any keyword.
+ */
+export async function inlineKnowledgeBudgeted(
+  base: string,
+  keywords: string[],
+  options?: { maxChars?: number },
+): Promise<string | null> {
+  const DEFAULT_MAX_CHARS = 30_000;
+  const HARD_MAX_CHARS = 100_000;
+  const raw = Number(options?.maxChars ?? DEFAULT_MAX_CHARS);
+  const maxChars = Number.isFinite(raw)
+    ? Math.max(0, Math.min(Math.floor(raw), HARD_MAX_CHARS))
+    : DEFAULT_MAX_CHARS;
+
+  const knowledgePath = resolveGsdRootFile(base, "KNOWLEDGE");
+  if (!existsSync(knowledgePath)) return null;
+
+  const content = await loadFile(knowledgePath);
+  if (!content) return null;
+
+  const { queryKnowledge } = await import("./context-store.js");
+  const scoped = await queryKnowledge(content, keywords);
+  if (!scoped) return null;
+
+  const trimmed = scoped.trim();
+  const truncated =
+    trimmed.length > maxChars
+      ? `${trimmed.slice(0, maxChars)}\n\n[...truncated ${trimmed.length - maxChars} chars; rerun with narrower scope if needed]`
+      : trimmed;
+
+  return `### Project Knowledge (scoped)\nSource: \`${relGsdRootFile("KNOWLEDGE")}\`\n\n${truncated}`;
+}
+
+/**
  * Inline a roadmap excerpt for a specific slice.
  * Reads full roadmap, extracts minimal excerpt with header + predecessor + target row.
  * Returns null if roadmap doesn't exist or slice not found.
@@ -1095,7 +1137,8 @@ export async function buildResearchMilestonePrompt(mid: string, midTitle: string
   if (requirementsInline) inlined.push(requirementsInline);
   const decisionsInline = await inlineDecisionsFromDb(base, mid);
   if (decisionsInline) inlined.push(decisionsInline);
-  const knowledgeInlineRM = await inlineGsdRootFile(base, "knowledge.md", "Project Knowledge");
+  // Scoped + budgeted — see issue #4719
+  const knowledgeInlineRM = await inlineKnowledgeBudgeted(base, extractKeywords(midTitle));
   if (knowledgeInlineRM) inlined.push(knowledgeInlineRM);
   inlined.push(inlineTemplate("research", "Research"));
 
@@ -1156,7 +1199,8 @@ export async function buildPlanMilestonePrompt(mid: string, midTitle: string, ba
     );
     inlined.push(queueInline);
   }
-  const knowledgeInlinePM = await inlineGsdRootFile(base, "knowledge.md", "Project Knowledge");
+  // Scoped + budgeted — see issue #4719
+  const knowledgeInlinePM = await inlineKnowledgeBudgeted(base, extractKeywords(midTitle));
   if (knowledgeInlinePM) inlined.push(knowledgeInlinePM);
   inlined.push(inlineTemplate("roadmap", "Roadmap"));
   if (inlineLevel === "full") {
@@ -1655,7 +1699,7 @@ export async function buildExecuteTaskPrompt(
 }
 
 export async function buildCompleteSlicePrompt(
-  mid: string, _midTitle: string, sid: string, sTitle: string, base: string, level?: InlineLevel,
+  mid: string, midTitle: string, sid: string, sTitle: string, base: string, level?: InlineLevel,
 ): Promise<string> {
   const inlineLevel = level ?? resolveInlineLevel();
 
@@ -1675,7 +1719,12 @@ export async function buildCompleteSlicePrompt(
     const requirementsInline = await inlineRequirementsFromDb(base, mid, sid, inlineLevel);
     if (requirementsInline) inlined.push(requirementsInline);
   }
-  const knowledgeInlineCS = await inlineGsdRootFile(base, "knowledge.md", "Project Knowledge");
+  // Scoped + budgeted — see issue #4719. Slice context is richer than
+  // milestone context at complete-slice time, so combine both title sources.
+  const knowledgeInlineCS = await inlineKnowledgeBudgeted(
+    base,
+    [...extractKeywords(midTitle), ...extractKeywords(sTitle)],
+  );
   if (knowledgeInlineCS) inlined.push(knowledgeInlineCS);
 
   // Inline all task summaries for this slice
@@ -1778,7 +1827,8 @@ export async function buildCompleteMilestonePrompt(
     const projectInline = await inlineProjectFromDb(base);
     if (projectInline) inlined.push(projectInline);
   }
-  const knowledgeInlineCM = await inlineGsdRootFile(base, "knowledge.md", "Project Knowledge");
+  // Scoped + budgeted — see issue #4719
+  const knowledgeInlineCM = await inlineKnowledgeBudgeted(base, extractKeywords(midTitle));
   if (knowledgeInlineCM) inlined.push(knowledgeInlineCM);
   // Inline milestone context file (milestone-level, not GSD root)
   const contextPath = resolveMilestoneFile(base, mid, "CONTEXT");
@@ -1914,7 +1964,8 @@ export async function buildValidateMilestonePrompt(
     const projectInline = await inlineProjectFromDb(base);
     if (projectInline) inlined.push(projectInline);
   }
-  const knowledgeInline = await inlineGsdRootFile(base, "knowledge.md", "Project Knowledge");
+  // Scoped + budgeted — see issue #4719
+  const knowledgeInline = await inlineKnowledgeBudgeted(base, extractKeywords(midTitle));
   if (knowledgeInline) inlined.push(knowledgeInline);
   // Inline milestone context file
   const contextPath = resolveMilestoneFile(base, mid, "CONTEXT");
@@ -2099,7 +2150,8 @@ export async function buildReassessRoadmapPrompt(
     const decisionsInline = await inlineDecisionsFromDb(base, mid, undefined, inlineLevel);
     if (decisionsInline) inlined.push(decisionsInline);
   }
-  const knowledgeInlineRA = await inlineGsdRootFile(base, "knowledge.md", "Project Knowledge");
+  // Scoped + budgeted — see issue #4719
+  const knowledgeInlineRA = await inlineKnowledgeBudgeted(base, extractKeywords(midTitle));
   if (knowledgeInlineRA) inlined.push(knowledgeInlineRA);
 
   const inlinedContext = capPreamble(`## Inlined Context (preloaded — do not re-read these files)\n\n${inlined.join("\n\n---\n\n")}`);
