@@ -74,7 +74,7 @@
     "test:fixtures:record": "node scripts/with-env.mjs GSD_FIXTURE_MODE=record -- node --experimental-strip-types tests/fixtures/record.ts",
     "test:live": "node scripts/with-env.mjs GSD_LIVE_TESTS=1 -- node --experimental-strip-types tests/live/run.ts",
     "test:browser-tools": "node --test src/resources/extensions/browser-tools/tests/browser-tools-unit.test.cjs src/resources/extensions/browser-tools/tests/browser-tools-integration.test.mjs",
-    "test:native": "node --test packages/native/src/__tests__/grep.test.mjs",
+    "test:native": "npm run test -w @gsd/native",
     "test:secret-scan": "node --import ./src/resources/extensions/gsd/tests/resolve-ts.mjs --experimental-strip-types --test src/tests/secret-scan.test.ts",
     "secret-scan": "node scripts/secret-scan.mjs",
     "secret-scan:install-hook": "node scripts/install-hooks.mjs",
