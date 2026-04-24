@@ -58,8 +58,9 @@ export class TelegramAdapter implements ChannelAdapter {
   }
 
   /** Close the underlying proxy agent to free connections. */
-  close(): void {
-    this.proxyAgent?.close();
+  async close(): Promise<void> {
+    await this.proxyAgent?.close();
+    this.proxyAgent = undefined;
   }
 
   async validate(): Promise<void> {

@@ -150,4 +150,27 @@ describe("apiRequest proxy integration", () => {
       },
     );
   });
+
+  it("throws when both agent and proxyUrl are passed", async () => {
+    const { ProxyAgent } = await import("undici");
+    const { apiRequest } = await import("../http-client.js");
+
+    const agent = new ProxyAgent("http://proxy.example.com:8080");
+
+    await assert.rejects(
+      async () => {
+        await apiRequest("https://api.example.com/test", "GET", undefined, {
+          agent,
+          proxyUrl: "http://proxy.example.com:8080",
+          errorLabel: "Test API",
+        });
+      },
+      (err: Error) => {
+        assert.ok(err.message.includes("Test API: agent and proxyUrl are mutually exclusive"));
+        return true;
+      },
+    );
+
+    agent.close();
+  });
 });
