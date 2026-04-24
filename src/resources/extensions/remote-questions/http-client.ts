@@ -8,9 +8,7 @@
 import { ProxyAgent } from "undici";
 import { PER_REQUEST_TIMEOUT_MS } from "./types.js";
 
-const proxyAgentCache = new Map<string, ProxyAgent>();
-
-function redactProxyUrl(url: string): string {
+export function redactProxyUrl(url: string): string {
   try {
     const parsed = new URL(url);
     if (parsed.username || parsed.password) {
@@ -19,16 +17,51 @@ function redactProxyUrl(url: string): string {
     }
     return parsed.toString();
   } catch {
-    return "[invalid-proxy-url]";
+    return "<REDACTED>";
   }
 }
 
-/** Close and clear all cached ProxyAgent instances. */
-export function clearProxyAgentCache(): void {
-  for (const agent of proxyAgentCache.values()) {
-    agent.close();
+/**
+ * Check whether a target URL should bypass the proxy based on the
+ * NO_PROXY / no_proxy environment variable.
+ *
+ * Supports comma-separated host patterns with optional leading-dot
+ * suffix matching (e.g. `.example.com` matches `sub.example.com`).
+ */
+export function shouldBypassProxy(targetUrl: string, noProxy?: string): boolean {
+  if (!noProxy) return false;
+
+  let hostname: string;
+  try {
+    hostname = new URL(targetUrl).hostname;
+  } catch {
+    return false;
   }
-  proxyAgentCache.clear();
+
+  const patterns = noProxy.split(",").map((p) => p.trim()).filter(Boolean);
+  for (const pattern of patterns) {
+    if (pattern === "*") return true;
+    if (pattern === hostname) return true;
+    if (pattern.startsWith(".")) {
+      const suffix = pattern.slice(1);
+      if (hostname === suffix || hostname.endsWith(pattern)) return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Create a ProxyAgent for the given proxy URL with optional TLS settings.
+ */
+export function createProxyAgent(
+  proxyUrl: string,
+  tlsOptions?: { rejectUnauthorized?: boolean },
+): ProxyAgent {
+  if (tlsOptions?.rejectUnauthorized === false) {
+    return new ProxyAgent({ uri: proxyUrl, proxyTls: { rejectUnauthorized: false } });
+  }
+  return new ProxyAgent(proxyUrl);
 }
 
 export interface ApiRequestOptions {
@@ -44,6 +77,10 @@ export interface ApiRequestOptions {
   contentType?: string;
   /** HTTP/HTTPS proxy URL (e.g., "http://proxy.example.com:8080"). */
   proxyUrl?: string;
+  /** Pre-configured ProxyAgent instance (preferred over proxyUrl for reuse). */
+  agent?: ProxyAgent;
+  /** When true and proxyUrl is used, disable TLS certificate verification for the proxy tunnel. */
+  proxyTlsRejectUnauthorized?: boolean;
 }
 
 /**
@@ -54,7 +91,9 @@ export interface ApiRequestOptions {
  * - Serializes `body` as JSON and sets Content-Type when provided.
  * - Returns `{}` for 204 No Content responses.
  * - Truncates error response bodies to `safeErrorLength` chars (default 200).
- * - Supports HTTP/HTTPS proxy via `proxyUrl` option using undici's ProxyAgent.
+ * - Supports HTTP/HTTPS proxy via `proxyUrl` option using undici's ProxyAgent,
+ *   or a pre-created `agent` for connection reuse.
+ * - Respects NO_PROXY / no_proxy environment variable when `proxyUrl` is provided.
  */
 export async function apiRequest(
   url: string,
@@ -69,6 +108,8 @@ export async function apiRequest(
     errorLabel = "HTTP",
     contentType,
     proxyUrl,
+    agent,
+    proxyTlsRejectUnauthorized,
   } = options;
 
   const headers: Record<string, string> = {};
@@ -82,21 +123,25 @@ export async function apiRequest(
     signal: AbortSignal.timeout(PER_REQUEST_TIMEOUT_MS),
   };
 
-  // Configure proxy if proxyUrl is provided
-  if (proxyUrl) {
-    const cacheKey = redactProxyUrl(proxyUrl);
-    let agent = proxyAgentCache.get(cacheKey);
-    if (!agent) {
+  // Use pre-configured agent if provided
+  if (agent) {
+    init.dispatcher = agent;
+  } else if (proxyUrl) {
+    // Respect NO_PROXY environment variable
+    const noProxy = process.env.NO_PROXY || process.env.no_proxy;
+    if (!shouldBypassProxy(url, noProxy)) {
       try {
-        agent = new ProxyAgent(proxyUrl);
-        proxyAgentCache.set(cacheKey, agent);
+        // Validate proxy URL before creating agent
+        const _validated = new URL(proxyUrl);
+        const agent = proxyTlsRejectUnauthorized === false
+          ? new ProxyAgent({ uri: proxyUrl, proxyTls: { rejectUnauthorized: false } })
+          : new ProxyAgent(proxyUrl);
+        init.dispatcher = agent;
       } catch (err) {
-        const redactedUrl = redactProxyUrl(proxyUrl);
         const errorMessage = err instanceof Error ? err.message : String(err);
-        throw new Error(`${errorLabel}: Failed to configure proxy (${redactedUrl}): ${errorMessage}`);
+        throw new Error(`${errorLabel}: Failed to configure proxy: ${errorMessage}`);
       }
     }
-    init.dispatcher = agent;
   }
 
   if (body !== undefined) {
@@ -112,7 +157,7 @@ export async function apiRequest(
     const text = await response.text().catch(() => "");
     const safeText =
       text.length > safeErrorLength
-        ? text.slice(0, safeErrorLength) + "\u2026"
+        ? text.slice(0, safeErrorLength) + "…"
         : text;
     throw new Error(`${errorLabel} HTTP ${response.status}: ${safeText}`);
   }

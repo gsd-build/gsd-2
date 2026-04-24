@@ -1,8 +1,8 @@
 /**
  * Unit tests for remote-questions HTTP client proxy wiring.
  *
- * These tests verify that apiRequest correctly handles the proxyUrl option
- * by checking the dispatcher property passed to fetch.
+ * These tests verify that apiRequest correctly handles the proxyUrl option,
+ * NO_PROXY bypass, redaction, and agent reuse.
  */
 
 import { describe, it, beforeEach, afterEach } from "node:test";
@@ -32,27 +32,40 @@ function mockFetch(
 
 describe("apiRequest proxy integration", () => {
   const originalFetch = globalThis.fetch;
+  const originalNoProxy = process.env.NO_PROXY;
+  const originalNoProxyLower = process.env.no_proxy;
 
   beforeEach(() => {
     fetchCalls = [];
     globalThis.fetch = mockFetch as typeof globalThis.fetch;
+    delete process.env.NO_PROXY;
+    delete process.env.no_proxy;
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    if (originalNoProxy === undefined) {
+      delete process.env.NO_PROXY;
+    } else {
+      process.env.NO_PROXY = originalNoProxy;
+    }
+    if (originalNoProxyLower === undefined) {
+      delete process.env.no_proxy;
+    } else {
+      process.env.no_proxy = originalNoProxyLower;
+    }
   });
 
-  it("does not include dispatcher when proxyUrl is omitted", async () => {
-    // Import the module fresh to pick up the mocked fetch
+  it("does not include agent when proxyUrl is omitted", async () => {
     const { apiRequest } = await import("../http-client.js");
     await apiRequest("https://api.example.com/test", "GET", undefined, {});
 
     assert.equal(fetchCalls.length, 1, "expected exactly one fetch call");
     const call = fetchCalls[0];
-    assert.ok(!call.init.dispatcher, "expected no dispatcher when proxyUrl is omitted");
+    assert.ok(!call.init.dispatcher, "expected no agent when proxyUrl is omitted");
   });
 
-  it("includes a dispatcher when proxyUrl is provided", async () => {
+  it("includes an agent when proxyUrl is provided", async () => {
     const { apiRequest } = await import("../http-client.js");
     await apiRequest("https://api.example.com/test", "GET", undefined, {
       proxyUrl: "http://proxy.example.com:8080",
@@ -60,7 +73,64 @@ describe("apiRequest proxy integration", () => {
 
     assert.equal(fetchCalls.length, 1, "expected exactly one fetch call");
     const call = fetchCalls[0];
-    assert.ok(call.init.dispatcher, "expected dispatcher to be set when proxyUrl is provided");
+    assert.ok(call.init.dispatcher, "expected agent to be set when proxyUrl is provided");
+  });
+
+  it("skips proxy when target is in NO_PROXY", async () => {
+    process.env.NO_PROXY = "api.example.com,other.host";
+
+    const { apiRequest } = await import("../http-client.js");
+    await apiRequest("https://api.example.com/test", "GET", undefined, {
+      proxyUrl: "http://proxy.example.com:8080",
+    });
+
+    assert.equal(fetchCalls.length, 1, "expected exactly one fetch call");
+    const call = fetchCalls[0];
+    assert.ok(!call.init.dispatcher, "expected no agent when target is in NO_PROXY");
+  });
+
+  it("skips proxy when target matches suffix in NO_PROXY", async () => {
+    process.env.NO_PROXY = ".example.com";
+
+    const { apiRequest } = await import("../http-client.js");
+    await apiRequest("https://api.example.com/test", "GET", undefined, {
+      proxyUrl: "http://proxy.example.com:8080",
+    });
+
+    assert.equal(fetchCalls.length, 1, "expected exactly one fetch call");
+    const call = fetchCalls[0];
+    assert.ok(!call.init.dispatcher, "expected no agent when target matches NO_PROXY suffix");
+  });
+
+  it("uses proxy when target is not in NO_PROXY", async () => {
+    process.env.NO_PROXY = "other.host";
+
+    const { apiRequest } = await import("../http-client.js");
+    await apiRequest("https://api.example.com/test", "GET", undefined, {
+      proxyUrl: "http://proxy.example.com:8080",
+    });
+
+    assert.equal(fetchCalls.length, 1, "expected exactly one fetch call");
+    const call = fetchCalls[0];
+    assert.ok(call.init.dispatcher, "expected agent when target is not in NO_PROXY");
+  });
+
+  it("uses provided agent directly without NO_PROXY check", async () => {
+    const { ProxyAgent } = await import("undici");
+    const { apiRequest } = await import("../http-client.js");
+
+    process.env.NO_PROXY = "api.example.com";
+    const agent = new ProxyAgent("http://proxy.example.com:8080");
+
+    await apiRequest("https://api.example.com/test", "GET", undefined, {
+      agent,
+    });
+
+    assert.equal(fetchCalls.length, 1, "expected exactly one fetch call");
+    const call = fetchCalls[0];
+    assert.equal(call.init.dispatcher, agent, "expected provided agent to be used directly");
+
+    agent.close();
   });
 
   it("throws a clear error when ProxyAgent cannot be created", async () => {

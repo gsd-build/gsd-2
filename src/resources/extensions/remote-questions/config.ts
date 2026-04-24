@@ -13,6 +13,7 @@ export interface ResolvedConfig {
   pollIntervalMs: number;
   token: string;
   proxyUrl?: string;
+  proxyTlsRejectUnauthorized?: boolean;
 }
 
 const ENV_KEYS: Record<RemoteChannel, string> = {
@@ -91,8 +92,9 @@ export function resolveRemoteConfig(): ResolvedConfig | null {
   const timeoutMinutes = clampNumber(rq.timeout_minutes, DEFAULT_TIMEOUT_MINUTES, MIN_TIMEOUT_MINUTES, MAX_TIMEOUT_MINUTES);
   const pollIntervalSeconds = clampNumber(rq.poll_interval_seconds, DEFAULT_POLL_INTERVAL_SECONDS, MIN_POLL_INTERVAL_SECONDS, MAX_POLL_INTERVAL_SECONDS);
 
-  // Resolve proxy URL: env var takes precedence over config file
+  // Resolve proxy URL: explicit config takes precedence over env vars
   const proxyUrl = resolveProxyUrl(rq.proxy_url);
+  const proxyTlsRejectUnauthorized = resolveProxyTlsRejectUnauthorized();
 
   return {
     channel: rq.channel,
@@ -101,6 +103,7 @@ export function resolveRemoteConfig(): ResolvedConfig | null {
     pollIntervalMs: pollIntervalSeconds * 1000,
     token,
     proxyUrl,
+    proxyTlsRejectUnauthorized,
   };
 }
 
@@ -132,25 +135,40 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
 
 /**
  * Resolve proxy URL for Telegram connections.
- * Environment variable TELEGRAM_PROXY_URL takes precedence over config file.
- * Falls back to standard proxy environment variables if no explicit proxy is set.
+ *
+ * Precedence (highest to lowest):
+ *   1. Explicit config file proxy_url
+ *   2. TELEGRAM_PROXY_URL environment variable
+ *   3. Standard proxy environment variables (https_proxy, http_proxy, ALL_PROXY)
  */
 export function resolveProxyUrl(configProxyUrl?: string): string | undefined {
-  // TELEGRAM_PROXY_URL env var takes highest precedence
+  // Config file proxy_url takes highest precedence
+  if (configProxyUrl) {
+    return configProxyUrl;
+  }
+
+  // TELEGRAM_PROXY_URL env var is next
   const envProxy = process.env.TELEGRAM_PROXY_URL;
   if (envProxy) {
     return envProxy;
   }
 
-  // Config file proxy_url is next
-  if (configProxyUrl) {
-    return configProxyUrl;
-  }
-
   // Fall back to standard proxy env vars (https_proxy, http_proxy, ALL_PROXY)
-  // These are commonly used by many tools and libraries
   return process.env.https_proxy || process.env.HTTPS_PROXY ||
          process.env.http_proxy || process.env.HTTP_PROXY ||
          process.env.all_proxy || process.env.ALL_PROXY ||
          undefined;
+}
+
+/**
+ * Resolve whether TLS certificate verification should be disabled for the
+ * proxy tunnel. This is useful for corporate proxies that use self-signed certs.
+ *
+ * TELEGRAM_PROXY_TLS_REJECT_UNAUTHORIZED=false disables verification.
+ * Defaults to true (secure).
+ */
+export function resolveProxyTlsRejectUnauthorized(): boolean {
+  const envValue = process.env.TELEGRAM_PROXY_TLS_REJECT_UNAUTHORIZED;
+  if (envValue === undefined) return true;
+  return envValue.toLowerCase() !== "false";
 }
