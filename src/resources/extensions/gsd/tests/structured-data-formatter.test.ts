@@ -271,96 +271,12 @@ describe("structured-data-formatter: measureSavings", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Realistic token savings measurement
+// Removed: "decisions/requirements/task-plan saves 30%+ vs markdown" tests.
+//
+// These tests compared the compact formatters against hand-crafted markdown
+// fixtures chosen by the test author. Any baseline picked to demonstrate
+// savings is circular — it proves nothing about real-world token overhead
+// relative to what the app actually emits. See #4836. A proper savings-drift
+// harness (measured against captured real inputs, tracked as a regression
+// metric over time) is tracked as a follow-up.
 // ---------------------------------------------------------------------------
-
-describe("structured-data-formatter: realistic savings", () => {
-  it("decisions compact format saves 30%+ vs markdown table", () => {
-    const decisions = [sampleDecision, sampleDecision2];
-
-    // Simulate a typical markdown table
-    const markdownTable = [
-      "| ID   | When       | Scope        | Decision                | Choice                 | Rationale                | Revisable |",
-      "|------|------------|--------------|-------------------------|------------------------|--------------------------|-----------|",
-      "| D001 | M001/S01   | architecture | Use SQLite for storage  | WAL mode, single-writer | Built-in, no external deps | yes       |",
-      "| D002 | M001/S02   | testing      | Unit test all parsers   | node:test framework    | Fast, zero-dependency    | no        |",
-    ].join("\n");
-
-    const compactOutput = formatDecisionsCompact(decisions);
-    const savings = measureSavings(compactOutput, markdownTable);
-    assert.ok(
-      savings >= 30,
-      `expected >=30% savings, got ${savings.toFixed(1)}%`,
-    );
-  });
-
-  it("requirements compact format saves 30%+ vs markdown sections", () => {
-    const requirements = [sampleRequirement, sampleRequirement2];
-
-    // Simulate verbose markdown format with all fields
-    const markdownSections = [
-      "## R001",
-      "",
-      "- **Class:** functional",
-      "- **Status:** active",
-      "- **Description:** Response latency < 200ms for API endpoints",
-      "- **Why:** Critical for user experience",
-      "- **Source:** architecture review",
-      "- **Primary Owner:** S01",
-      "- **Supporting Slices:** S02, S03",
-      "- **Validation:** Load test confirms P99 < 200ms",
-      "- **Notes:** Monitor in production",
-      "",
-      "## R002",
-      "",
-      "- **Class:** non-functional",
-      "- **Status:** active",
-      "- **Description:** Data consistency across writes",
-      "- **Why:** Prevents data loss",
-      "- **Source:** data team review",
-      "- **Primary Owner:** S02",
-      "- **Supporting Slices:** S01",
-      "- **Validation:** Integration test suite",
-      "- **Notes:** Requires WAL mode",
-    ].join("\n");
-
-    const compactOutput = formatRequirementsCompact(requirements);
-    const savings = measureSavings(compactOutput, markdownSections);
-    assert.ok(
-      savings >= 30,
-      `expected >=30% savings, got ${savings.toFixed(1)}%`,
-    );
-  });
-
-  it("task plan compact format saves 30%+ vs markdown sections", () => {
-    const tasks = [sampleTaskDone, sampleTaskPending];
-
-    // Simulate verbose markdown task format
-    const markdownTasks = [
-      "## T01 - Database schema",
-      "",
-      "- **Status:** Done",
-      "- **Estimate:** 30m",
-      "- **Description:** Create tables for decisions and requirements",
-      "- **Files:**",
-      "  - src/db.ts",
-      "  - src/schema.ts",
-      "",
-      "## T02 - API endpoints",
-      "",
-      "- **Status:** Pending",
-      "- **Estimate:** 1h",
-      "- **Description:** REST endpoints for CRUD operations",
-      "- **Files:**",
-      "  - src/api.ts",
-      "- **Verify:** npm test",
-    ].join("\n");
-
-    const compactOutput = formatTaskPlanCompact(tasks);
-    const savings = measureSavings(compactOutput, markdownTasks);
-    assert.ok(
-      savings >= 30,
-      `expected >=30% savings, got ${savings.toFixed(1)}%`,
-    );
-  });
-});
