@@ -16,6 +16,7 @@ const EXPOSED_OUTSIDE_WIZARD = new Set<string>([
   "version",          // auto-managed by writePreferencesFile
   "modelOverrides",   // advanced routing — edit PREFERENCES.md directly (not in KNOWN_PREFERENCE_KEYS)
   "context_mode",     // advanced sandbox config (gsd_exec + compaction) — enabled by default; edit PREFERENCES.md directly to tune timeouts/caps. Wizard coverage tracked separately.
+  "skip_clean_reassess", // opt-in power-user performance tuning (#4778) — skips reassess-roadmap dispatch when slice SUMMARY signals clean completion. Deliberately kept out of the wizard so novice users stay on safe defaults; power users edit PREFERENCES.md directly. Overlaps with ADR-003 §4's `phases.reassess_after_slice` — to be reconciled in a follow-up.
 ]);
 
 test("every KNOWN_PREFERENCE_KEYS entry is reachable from the wizard source", () => {
