@@ -54,7 +54,7 @@ function cleanupMergeArtifacts(projectRoot: string): void {
       if (existsSync(p)) unlinkSync(p);
     }
   } catch (err) {
-    logWarning("slice-cadence", `merge artifact cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
+    logWarning("worktree", `merge artifact cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
