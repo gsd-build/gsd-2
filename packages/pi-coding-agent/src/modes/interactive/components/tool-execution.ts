@@ -589,12 +589,30 @@ export class ToolExecutionComponent extends Container {
 					}
 				} catch {
 					// Fall back to default on error
-					this.contentBox.addChild(new Text(theme.fg("toolTitle", theme.bold(this.toolName)), 0, 0));
+					this.contentBox.addChild(
+						new Text(
+							theme.fg(
+								"toolTitle",
+								theme.bold(prettifyToolName(this.toolName, this.toolDefinition?.label)),
+							),
+							0,
+							0,
+						),
+					);
 					customRendererHasContent = true;
 				}
 			} else {
-				// No custom renderCall, show tool name
-				this.contentBox.addChild(new Text(theme.fg("toolTitle", theme.bold(this.toolName)), 0, 0));
+				// No custom renderCall, show prettified tool name
+				this.contentBox.addChild(
+					new Text(
+						theme.fg(
+							"toolTitle",
+							theme.bold(prettifyToolName(this.toolName, this.toolDefinition?.label)),
+						),
+						0,
+						0,
+					),
+				);
 				customRendererHasContent = true;
 			}
 
