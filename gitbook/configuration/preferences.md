@@ -52,6 +52,8 @@ git:
   auto_push: true
   merge_strategy: squash
   isolation: worktree
+  collapse_cadence: milestone   # or "slice" — see Git & Worktrees docs
+  milestone_resquash: true       # collapse slice commits into one at milestone end
 
 # Verification
 verification_commands:
