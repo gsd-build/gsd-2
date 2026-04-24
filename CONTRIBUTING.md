@@ -319,6 +319,53 @@ assert.match(generated, /export const ROUTES =/);
 
 The reason becomes part of the diff and is visible at review. If you're not sure whether your case qualifies, it doesn't.
 
+### Three recurring defect classes (CodeRabbit themes)
+
+CI enforces three specific patterns that have caused real bugs in merged PRs (see issue #4931). All three are checked by `scripts/check-coderabbit-themes.mjs`.
+
+**1. `Statement#get()` returns `undefined`, not `null`.** better-sqlite3's `Statement#get(…)` returns `undefined` when no row matches. A `!== null` guard passes for `undefined` too (`undefined !== null` is `true`), so the guard is always truthy and downstream property access crashes.
+
+```typescript
+// ❌ WRONG
+const row = stmt.get(id);
+if (row !== null) {
+  use(row.v);  // row is undefined → crash
+}
+
+// ✅ CORRECT
+const row = stmt.get(id);
+if (row != null) { use(row.v); }        // catches both null and undefined
+// or
+if (row === undefined) return null;
+// or
+return row ?? defaultValue;
+```
+
+**2. Attach `once()` listeners BEFORE the triggering syscall.** If the event fires synchronously (fast exit, already-emitted event), a listener attached after the trigger misses it.
+
+```typescript
+// ❌ WRONG — listener can miss sync exit
+proc.kill("SIGINT");
+await new Promise(resolve => proc.once("exit", resolve));
+
+// ✅ CORRECT — listener first, trigger after
+const done = new Promise(resolve => proc.once("exit", resolve));
+proc.kill("SIGINT");
+await done;
+```
+
+**3. `.mjs` importing `.ts` requires `--experimental-strip-types`.** Without the flag (or `--import tsx`, `--loader ts-node`, etc.), Node throws `ERR_UNKNOWN_FILE_EXTENSION`. If your `.mjs` harness imports any `.ts` module, every script that runs it must pass the flag.
+
+```json
+// ❌ WRONG
+"test:tokens": "node --test studio/test/tokens.test.mjs"
+
+// ✅ CORRECT
+"test:tokens": "node --experimental-strip-types --test studio/test/tokens.test.mjs"
+```
+
+**Opt-out marker**: `// allow-coderabbit-theme: <reason>` on the same or preceding line, same convention as `allow-source-grep:`. The reason appears in the diff.
+
 ## Local development
 
 ```bash
