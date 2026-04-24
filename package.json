@@ -70,8 +70,6 @@
     "pretest": "npm run typecheck:extensions",
     "test": "npm run test:unit && npm run test:integration && npm run test:packages",
     "test:smoke": "node --experimental-strip-types tests/smoke/run.ts",
-    "test:fixtures": "node --experimental-strip-types tests/fixtures/run.ts",
-    "test:fixtures:record": "node scripts/with-env.mjs GSD_FIXTURE_MODE=record -- node --experimental-strip-types tests/fixtures/record.ts",
     "test:live": "node scripts/with-env.mjs GSD_LIVE_TESTS=1 -- node --experimental-strip-types tests/live/run.ts",
     "test:browser-tools": "node --test src/resources/extensions/browser-tools/tests/browser-tools-unit.test.cjs src/resources/extensions/browser-tools/tests/browser-tools-integration.test.mjs",
     "test:native": "npm run test -w @gsd/native",
