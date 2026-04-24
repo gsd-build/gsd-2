@@ -26,7 +26,15 @@ import { blockModel, isModelBlocked } from "../blocked-models.js";
 
 const retryState = createRetryState();
 const MAX_NETWORK_RETRIES = 2;
-const MAX_TRANSIENT_AUTO_RESUMES = 8;
+/**
+ * Cap on auto-resume attempts for sustained transient-provider errors.
+ *
+ * Exported so tests assert against the shared constant instead of
+ * regex-scraping the source literal (see #4837). Raising this value to
+ * handle longer provider overloads should update the single constant; the
+ * test in provider-errors.test.ts consumes it directly.
+ */
+export const MAX_TRANSIENT_AUTO_RESUMES = 8;
 
 /**
  * Reset the module-level retry state so a resumed auto-session starts fresh.
