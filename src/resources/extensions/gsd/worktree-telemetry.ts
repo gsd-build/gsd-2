@@ -150,6 +150,38 @@ export function emitCanonicalRootRedirect(
   }));
 }
 
+// #4765 — slice-cadence collapse events
+
+export function emitSliceMerged(
+  projectRoot: string,
+  milestoneId: string,
+  sliceId: string,
+  meta: { durationMs?: number; conflict?: boolean; commitSha?: string } = {},
+): void {
+  emitJournalEvent(projectRoot, baseEntry("slice-merged", {
+    milestoneId,
+    sliceId,
+    mergedAt: now(),
+    durationMs: meta.durationMs,
+    conflict: meta.conflict ?? false,
+    commitSha: meta.commitSha,
+  }));
+}
+
+export function emitMilestoneResquash(
+  projectRoot: string,
+  milestoneId: string,
+  meta: { sliceCount: number; startSha?: string; endSha?: string } = { sliceCount: 0 },
+): void {
+  emitJournalEvent(projectRoot, baseEntry("milestone-resquash", {
+    milestoneId,
+    sliceCount: meta.sliceCount,
+    startSha: meta.startSha,
+    endSha: meta.endSha,
+    resquashedAt: now(),
+  }));
+}
+
 // ─── Aggregator ──────────────────────────────────────────────────────────
 
 export interface WorktreeTelemetrySummary {
@@ -171,6 +203,12 @@ export interface WorktreeTelemetrySummary {
   exitsWithUnmergedWork: number;
   /** Count of canonical-root-redirects (how often #4761 validation would have read stale state) */
   canonicalRedirects: number;
+  /** #4765 — count of successful slice-level merges (slice-cadence feature) */
+  slicesMerged: number;
+  /** #4765 — count of slice-level merge conflicts */
+  sliceMergeConflicts: number;
+  /** #4765 — count of milestone-level re-squash operations */
+  milestoneResquashes: number;
 }
 
 /**
@@ -193,6 +231,9 @@ export function summarizeWorktreeTelemetry(
     exitsByReason: {},
     exitsWithUnmergedWork: 0,
     canonicalRedirects: 0,
+    slicesMerged: 0,
+    sliceMergeConflicts: 0,
+    milestoneResquashes: 0,
   };
 
   for (const e of entries) {
@@ -220,6 +261,13 @@ export function summarizeWorktreeTelemetry(
       }
       case "canonical-root-redirect":
         summary.canonicalRedirects++;
+        break;
+      case "slice-merged":
+        summary.slicesMerged++;
+        if (d.conflict === true) summary.sliceMergeConflicts++;
+        break;
+      case "milestone-resquash":
+        summary.milestoneResquashes++;
         break;
       default:
         break;

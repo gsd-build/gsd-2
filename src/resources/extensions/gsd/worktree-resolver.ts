@@ -21,6 +21,8 @@ import { debugLog } from "./debug-logger.js";
 import { MergeConflictError } from "./git-service.js";
 import { emitJournalEvent } from "./journal.js";
 import { emitWorktreeCreated, emitWorktreeMerged } from "./worktree-telemetry.js";
+import { getCollapseCadence, getMilestoneResquash, resquashMilestoneOnMain } from "./slice-cadence.js";
+import { loadEffectiveGSDPreferences } from "./preferences.js";
 
 // ─── Dependency Interface ──────────────────────────────────────────────────
 
@@ -462,6 +464,38 @@ export class WorktreeResolver {
       this._mergeWorktreeMode(milestoneId, ctx);
     } else if (mode === "branch") {
       this._mergeBranchMode(milestoneId, ctx);
+    }
+
+    // #4765 — when collapse_cadence=slice AND milestone_resquash=true, the
+    // N per-slice commits on main should be collapsed into one milestone
+    // commit. Done AFTER the primary merge-and-teardown so the branch and
+    // worktree are already cleaned up; we operate on main directly.
+    try {
+      const startSha = this.s.milestoneStartShas.get(milestoneId);
+      if (startSha) {
+        const prefs = loadEffectiveGSDPreferences(this.s.originalBasePath || this.s.basePath)?.preferences;
+        if (getCollapseCadence(prefs) === "slice" && getMilestoneResquash(prefs)) {
+          const result = resquashMilestoneOnMain(
+            this.s.originalBasePath || this.s.basePath,
+            milestoneId,
+            startSha,
+          );
+          if (result.resquashed) {
+            ctx.notify(
+              `slice-cadence: re-squashed slice commits for ${milestoneId} into a single milestone commit.`,
+              "info",
+            );
+          }
+        }
+        this.s.milestoneStartShas.delete(milestoneId);
+      }
+    } catch (err) {
+      debugLog("WorktreeResolver", {
+        action: "mergeAndExit",
+        milestoneId,
+        phase: "resquash",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     // #4764 — record merge completion (success path reaches here). Failure

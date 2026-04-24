@@ -618,6 +618,69 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
           clearReactiveState(s.basePath, mid, sid);
         }
       });
+
+      // #4765 — slice-cadence collapse. When `git.collapse_cadence: "slice"`
+      // is set, squash-merge the slice's commits from the milestone branch
+      // onto main right here, so orphan risk shrinks from milestone-size to
+      // slice-size. Only runs in worktree isolation mode — the feature needs
+      // a milestone branch to squash from.
+      await runSafely("postUnit", "slice-cadence-merge", async () => {
+        const prefsResult = loadEffectiveGSDPreferences(s.basePath);
+        const prefs = prefsResult?.preferences;
+        const { getCollapseCadence, mergeSliceToMain } = await import("./slice-cadence.js");
+        if (getCollapseCadence(prefs) !== "slice") return;
+        if (prefs?.git?.isolation !== "worktree") return;
+        if (s.isolationDegraded) return;
+
+        const projectRoot = s.originalBasePath || s.basePath;
+        const { milestone: mid, slice: sid } = parseUnitId(unit.id);
+        if (!mid || !sid) return;
+
+        // Record the milestone start SHA before the first slice merge, so
+        // resquashMilestoneOnMain has a target at milestone completion.
+        if (!s.milestoneStartShas.has(mid)) {
+          try {
+            const { nativeCommitCountBetween: _c } = await import("./native-git-bridge.js");
+            // Use plumbing directly rather than adding another native helper.
+            const { execFileSync } = await import("node:child_process");
+            const sha = execFileSync("git", ["rev-parse", "main"], {
+              cwd: projectRoot, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8",
+            }).trim();
+            if (sha) s.milestoneStartShas.set(mid, sha);
+          } catch (err) {
+            logWarning("engine", `slice-cadence: failed to record milestone start SHA: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+
+        try {
+          const result = mergeSliceToMain(projectRoot, mid, sid);
+          if (result.skipped) {
+            logWarning("engine", `slice-cadence: merge skipped for ${sid} — ${result.skippedReason}`);
+            return;
+          }
+          ctx.ui.notify(
+            `slice-cadence: ${sid} merged to main (${result.durationMs}ms).`,
+            "info",
+          );
+        } catch (err) {
+          const { MergeConflictError } = await import("./git-service.js");
+          if (err instanceof MergeConflictError) {
+            ctx.ui.notify(
+              `slice-cadence merge conflict in ${sid}: ${err.conflictedFiles.join(", ")}. ` +
+              `Resolve manually on main and run \`/gsd auto\` to resume.`,
+              "error",
+            );
+            // Surface as a blocker so the auto loop stops rather than
+            // dispatching the next slice on top of a conflicted main.
+            const { stopAuto } = await import("./auto.js");
+            await stopAuto(ctx, undefined, `slice-merge-conflict on ${sid}`);
+            return;
+          }
+          logError("engine", `slice-cadence merge failed for ${sid}`, {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      });
     }
 
     // Post-triage: execute actionable resolutions

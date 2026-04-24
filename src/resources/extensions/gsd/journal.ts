@@ -57,7 +57,10 @@ export type JournalEventType =
   | "worktree-orphaned"
   | "auto-exit"
   | "worktree-sync"
-  | "canonical-root-redirect";
+  | "canonical-root-redirect"
+  // #4765 — slice-cadence collapse
+  | "slice-merged"
+  | "milestone-resquash";
 
 /** A single structured event in the journal. */
 export interface JournalEntry {
