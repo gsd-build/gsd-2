@@ -26,14 +26,14 @@ const COMMAND_POLLING_INTERVAL_MS = 5000;
 export function startCommandPolling(
   basePath: string,
   intervalMs = COMMAND_POLLING_INTERVAL_MS,
-): () => void {
+): () => void | Promise<void> {
   const config = resolveRemoteConfig();
   if (!config || config.channel !== "telegram") {
     // Non-Telegram channels have no command polling support — return a no-op cleanup.
     return () => {};
   }
 
-  const adapter = new TelegramAdapter(config.token, config.channelId, basePath);
+  const adapter = new TelegramAdapter(config.token, config.channelId, basePath, config.proxyUrl, config.proxyTlsRejectUnauthorized);
 
   const timer = setInterval(() => {
     void adapter.pollAndHandleCommands(basePath).catch(() => {
@@ -41,7 +41,10 @@ export function startCommandPolling(
     });
   }, intervalMs);
 
-  return () => clearInterval(timer);
+  return async () => {
+    clearInterval(timer);
+    await Promise.resolve(adapter.close()).catch(() => {});
+  };
 }
 
 interface ToolResult {
@@ -81,6 +84,7 @@ export async function tryRemoteQuestions(
   try {
     await adapter.validate();
   } catch (err) {
+    await Promise.resolve(adapter.close?.()).catch(() => {});
     markPromptStatus(prompt.id, "failed", sanitizeError(String((err as Error).message)));
     return errorResult(`Remote auth failed (${config.channel}): ${(err as Error).message}`, config.channel);
   }
@@ -90,12 +94,15 @@ export async function tryRemoteQuestions(
     dispatch = await adapter.sendPrompt(prompt);
     markPromptDispatched(prompt.id, dispatch.ref);
   } catch (err) {
+    await Promise.resolve(adapter.close?.()).catch(() => {});
     markPromptStatus(prompt.id, "failed", sanitizeError(String((err as Error).message)));
     return errorResult(`Failed to send questions via ${config.channel}: ${(err as Error).message}`, config.channel);
   }
 
   const answer = await pollUntilDone(adapter, prompt, dispatch.ref, signal);
+
   if (!answer) {
+    await Promise.resolve(adapter.close?.()).catch(() => {});
     markPromptStatus(prompt.id, signal?.aborted ? "cancelled" : "timed_out");
     return {
       content: [{
@@ -126,6 +133,8 @@ export async function tryRemoteQuestions(
   try {
     await adapter.acknowledgeAnswer?.(dispatch.ref);
   } catch { /* best-effort */ }
+
+  await Promise.resolve(adapter.close?.()).catch(() => {});
 
   return {
     content: [{ type: "text", text: JSON.stringify({ answers: formatForTool(answer) }) }],
@@ -174,7 +183,7 @@ function createPrompt(questions: QuestionInput[], config: ResolvedConfig): Remot
 
 function createAdapter(config: ResolvedConfig, basePath: string): ChannelAdapter {
   if (config.channel === "slack") return new SlackAdapter(config.token, config.channelId);
-  if (config.channel === "telegram") return new TelegramAdapter(config.token, config.channelId, basePath);
+  if (config.channel === "telegram") return new TelegramAdapter(config.token, config.channelId, basePath, config.proxyUrl, config.proxyTlsRejectUnauthorized);
   return new DiscordAdapter(config.token, config.channelId);
 }
 

@@ -93,8 +93,8 @@ function makeStartCommandPolling(
   adapterPollFn: (basePath: string) => Promise<number>,
   isConfigured: boolean,
   intervalMs = 5000,
-): (basePath: string) => () => void {
-  return function startCommandPolling(basePath: string): () => void {
+): (basePath: string) => () => void | Promise<void> {
+  return function startCommandPolling(basePath: string): () => void | Promise<void> {
     if (!isConfigured) {
       return () => {};
     }

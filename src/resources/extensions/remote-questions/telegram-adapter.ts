@@ -2,9 +2,10 @@
  * Remote Questions — Telegram adapter
  */
 
+import { ProxyAgent } from "undici";
 import { type ChannelAdapter, type RemotePrompt, type RemoteDispatchResult, type RemoteAnswer, type RemotePromptRef } from "./types.js";
 import { formatForTelegram, parseTelegramResponse } from "./format.js";
-import { apiRequest } from "./http-client.js";
+import { apiRequest, shouldBypassProxy, redactProxyUrl } from "./http-client.js";
 import { isCommand, handleCommand, type CommandSender } from "./commands.js";
 
 const TELEGRAM_API = "https://api.telegram.org";
@@ -17,11 +18,49 @@ export class TelegramAdapter implements ChannelAdapter {
   private readonly token: string;
   private readonly chatId: string;
   private readonly basePath: string;
+  private readonly proxyUrl?: string;
+  private readonly proxyTlsRejectUnauthorized?: boolean;
+  private proxyAgent?: ProxyAgent;
 
-  constructor(token: string, chatId: string, basePath: string) {
+  constructor(
+    token: string,
+    chatId: string,
+    basePath: string,
+    proxyUrl?: string,
+    proxyTlsRejectUnauthorized?: boolean,
+  ) {
     this.token = token;
     this.chatId = chatId;
     this.basePath = basePath;
+    this.proxyUrl = proxyUrl;
+    this.proxyTlsRejectUnauthorized = proxyTlsRejectUnauthorized;
+  }
+
+  private getProxyAgent(): ProxyAgent | undefined {
+    if (this.proxyAgent) return this.proxyAgent;
+    if (!this.proxyUrl) return undefined;
+
+    const noProxy = process.env.NO_PROXY || process.env.no_proxy;
+    if (shouldBypassProxy(TELEGRAM_API, noProxy)) return undefined;
+
+    try {
+      if (this.proxyTlsRejectUnauthorized === false) {
+        this.proxyAgent = new ProxyAgent({ uri: this.proxyUrl, proxyTls: { rejectUnauthorized: false } });
+      } else {
+        this.proxyAgent = new ProxyAgent(this.proxyUrl);
+      }
+    } catch (err) {
+      const redacted = redactProxyUrl(this.proxyUrl);
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`TelegramAdapter: Failed to configure proxy (${redacted}): ${message}`);
+    }
+    return this.proxyAgent;
+  }
+
+  /** Close the underlying proxy agent to free connections. */
+  async close(): Promise<void> {
+    await this.proxyAgent?.close();
+    this.proxyAgent = undefined;
   }
 
   async validate(): Promise<void> {
@@ -225,7 +264,7 @@ export class TelegramAdapter implements ChannelAdapter {
       `${TELEGRAM_API}/bot${this.token}/${method}`,
       "POST",
       params,
-      { errorLabel: "Telegram API" },
+      { errorLabel: "Telegram API", agent: this.getProxyAgent() },
     );
   }
 }

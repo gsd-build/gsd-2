@@ -99,4 +99,6 @@ export interface ChannelAdapter {
   sendPrompt(prompt: RemotePrompt): Promise<RemoteDispatchResult>;
   pollAnswer(prompt: RemotePrompt, ref: RemotePromptRef): Promise<RemoteAnswer | null>;
   acknowledgeAnswer?(ref: RemotePromptRef): Promise<void>;
+  /** Release any persistent connections or resources held by the adapter. */
+  close?(): void | Promise<void>;
 }
