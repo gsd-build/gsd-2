@@ -34,6 +34,10 @@ import {
   ModelPolicyDispatchBlockedError,
   clearToolBaseline,
 } from "../auto-model-selection.js";
+import {
+  registerToolCompatibility,
+  resetToolCompatibilityRegistry,
+} from "@gsd/pi-coding-agent";
 
 function makeTempProject(): { dir: string; cleanup: () => void; restoreEnv: () => void } {
   const originalCwd = process.cwd();
@@ -113,11 +117,54 @@ function makeCtx(availableModels: Array<{ id: string; provider: string; api: str
 }
 
 // ─── 1. Vacuous-truth guard ──────────────────────────────────────────────────
-test("vacuous-truth: empty workflow tool requirement + permitted model → dispatch succeeds", async () => {
+//
+// Two scenarios pin the empty-requiredTools branch and a permitted-tool branch.
+// Without the empty-list scenario, a regression that mishandles `requiredTools = []`
+// (e.g. by treating an empty array as "deny all" or by null-derefing the helper
+// return) would still pass.
+
+test("vacuous-truth (a): unit type with empty workflow-required tools → dispatch succeeds", async () => {
   const env = makeTempProject();
   try {
-    // gate-evaluate has tool requirement ["gsd_save_gate_result"], but if every
-    // available model's API can carry it, policy must allow dispatch.
+    // `refine-slice` is not in the getRequiredWorkflowToolsForAutoUnit switch
+    // → returns []. Exercises the empty-requiredTools branch in
+    // applyModelPolicyFilter (CodeRabbit Minor: existing test used
+    // gate-evaluate which has non-empty required tools and never hit this path).
+    const availableModels = [
+      { id: "claude-sonnet-4-6", provider: "anthropic", api: "anthropic-messages" },
+    ];
+    const pi = makeRecordingPi([]);
+    clearToolBaseline(pi as unknown as object);
+
+    const result = await selectAndApplyModel(
+      makeCtx(availableModels),
+      pi as any,
+      "refine-slice",
+      "x1",
+      env.dir,
+      undefined,
+      false,
+      { provider: "anthropic", id: "claude-sonnet-4-6" },
+      undefined,
+      true,
+    );
+
+    assert.equal(result.appliedModel?.id, "claude-sonnet-4-6", "empty requiredTools must not deny dispatch");
+    const setModelCalls = pi.__calls.filter(c => c.kind === "setModel");
+    assert.equal(setModelCalls.length, 1, "setModel should have been called exactly once");
+  } finally {
+    env.restoreEnv();
+    env.cleanup();
+  }
+});
+
+test("vacuous-truth (b): non-empty workflow tool requirement that the model carries → dispatch succeeds", async () => {
+  const env = makeTempProject();
+  try {
+    // gate-evaluate has tool requirement ["gsd_save_gate_result"]; if the
+    // model's API can carry it, policy must still allow dispatch. Counter-test
+    // to (a): proves the path with a non-empty requirement isn't denying
+    // legitimate dispatches.
     const availableModels = [
       { id: "claude-sonnet-4-6", provider: "anthropic", api: "anthropic-messages" },
     ];
@@ -137,7 +184,7 @@ test("vacuous-truth: empty workflow tool requirement + permitted model → dispa
       true,
     );
 
-    assert.equal(result.appliedModel?.id, "claude-sonnet-4-6", "should apply the permitted model");
+    assert.equal(result.appliedModel?.id, "claude-sonnet-4-6", "compat-required dispatch must succeed");
     const setModelCalls = pi.__calls.filter(c => c.kind === "setModel");
     assert.equal(setModelCalls.length, 1, "setModel should have been called exactly once");
   } finally {
@@ -210,8 +257,66 @@ test("cross-unit poisoning: prior unit narrowing must not deny next unit's eligi
   }
 });
 
-// ─── 3. Genuinely-impossible negative ────────────────────────────────────────
-test("genuinely-impossible: workflow requires a tool no candidate carries → throws typed error", async () => {
+// ─── 3a. Genuinely-impossible: tool-compatibility denial path ────────────────
+//
+// Exercises the real `getRequiredWorkflowToolsForAutoUnit` →
+// `filterToolsForProvider` path that #4959 was about (CodeRabbit Minor:
+// existing 3b test used cross-provider denial which never hit this path).
+// Registers `gsd_plan_slice` as `producesImages: true`, then offers only an
+// `ollama-chat` candidate (which has `imageToolResults: false`) — the
+// workflow-required tool is incompatible with the candidate's API, so the
+// policy filter denies the model with a `tool policy denied (...)` reason.
+test("genuinely-impossible (a): workflow tool incompatible with candidate API → typed error names tool + api", async () => {
+  const env = makeTempProject();
+  try {
+    // Register the workflow tool as image-producing for the duration of this
+    // test. afterEach() resets the registry below.
+    registerToolCompatibility("gsd_plan_slice", { producesImages: true });
+
+    const availableModels = [
+      { id: "ollama-llama-3", provider: "ollama", api: "ollama-chat" },
+    ];
+    const pi = makeRecordingPi(["gsd_plan_slice"]);
+    clearToolBaseline(pi as unknown as object);
+
+    const ctx = makeCtx(availableModels);
+    // Same provider as candidate so the cross-provider gate doesn't fire —
+    // we want this denial to come from tool-compatibility, not provider mismatch.
+    ctx.model = { provider: "ollama", id: "ollama-llama-3", api: "ollama-chat" };
+
+    let thrown: unknown;
+    try {
+      await selectAndApplyModel(
+        ctx,
+        pi as any,
+        "plan-slice",
+        "s1",
+        env.dir,
+        undefined,
+        false,
+        { provider: "ollama", id: "ollama-llama-3" },
+        undefined,
+        true,
+      );
+    } catch (e) {
+      thrown = e;
+    }
+
+    assert.ok(thrown instanceof ModelPolicyDispatchBlockedError, "should throw ModelPolicyDispatchBlockedError");
+    const err = thrown as ModelPolicyDispatchBlockedError;
+    assert.equal(err.unitType, "plan-slice");
+    assert.match(err.message, /tool policy denied/, "throw must surface the tool-compatibility deny reason");
+    assert.match(err.message, /gsd_plan_slice/, "throw must name the incompatible tool");
+    assert.match(err.message, /ollama-chat/, "throw must name the api for which the tool was filtered");
+  } finally {
+    resetToolCompatibilityRegistry();
+    env.restoreEnv();
+    env.cleanup();
+  }
+});
+
+// ─── 3b. Genuinely-impossible: cross-provider denial path ────────────────────
+test("genuinely-impossible (b): cross-provider routing disabled + provider mismatch → typed error", async () => {
   const env = makeTempProject();
   try {
     // Use plan-slice (workflow-required: ["gsd_plan_slice"]) but pretend no

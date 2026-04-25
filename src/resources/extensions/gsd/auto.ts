@@ -1394,11 +1394,14 @@ export async function startAuto(
     return;
   }
 
-  // Drop any stale active-tool baseline left over from a prior auto session
-  // on this `pi` (e.g. a session that ended without stopAuto running cleanly).
-  // The first selectAndApplyModel call for this run will recapture from the
-  // live tool set (#4959 / CodeRabbit).
-  clearToolBaseline(pi);
+  // On a *fresh* start, drop any stale active-tool baseline left by a prior
+  // auto session that didn't run stopAuto cleanly.  Skip on resume: pauseAuto
+  // leaves the last provider-trimmed active tools in place, so clearing here
+  // would let the next selectAndApplyModel recapture that already-narrowed
+  // set as the new baseline — exactly the cross-unit poisoning this PR is
+  // fixing (#4959 / CodeRabbit Major).  The pre-pause baseline survives in
+  // the WeakMap keyed by `pi`.
+  if (!s.paused) clearToolBaseline(pi);
 
   const requestedStepMode = options?.step ?? false;
   const interruptedAssessment = options?.interrupted ?? null;
