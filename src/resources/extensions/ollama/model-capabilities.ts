@@ -28,9 +28,22 @@ export interface ModelCapability {
 // window is authoritative. For unknown/estimated models, num_ctx is NOT sent
 // to avoid OOM risk — Ollama uses its own safe default instead.
 const KNOWN_MODELS: Array<[pattern: string, caps: ModelCapability]> = [
-	// ─── Reasoning models ───────────────────────────────────────────────
-	["deepseek-r1", { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
-	["qwq", { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
+	// ─── Reasoning models (fallback when /api/show capabilities is absent) ──
+	// IMPORTANT: matching is `baseName === pattern || baseName.startsWith(pattern)`,
+	// so more specific patterns must appear before more general ones.
+	["deepseek-r1",       { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
+	["deepseek-v3.1",     { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
+	["deepseek-v4-flash", { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
+	["deepseek-v4",       { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
+	["qwq",               { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
+	["gpt-oss",           { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
+	["glm-4",             { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
+	["glm-5",             { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
+	["kimi-k2",           { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
+	["minimax-m2",        { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
+	["nemotron-3",        { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
+	["gemma4",            { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
+	["gemini-3-flash",    { contextWindow: 1048576, reasoning: true, ollamaOptions: { num_ctx: 1048576 } }],
 
 	// ─── Vision models ──────────────────────────────────────────────────
 	["llava", { contextWindow: 4096, input: ["text", "image"], ollamaOptions: { num_ctx: 4096 } }],
@@ -59,14 +72,16 @@ const KNOWN_MODELS: Array<[pattern: string, caps: ModelCapability]> = [
 	// Long-variant entries MUST appear before the bare `qwen3` base —
 	// `baseName.startsWith(pattern)` returns true for `qwen3.5`/`qwen3-coder`/
 	// `qwen3-next` against `qwen3`, and the first match wins (#4991).
+	// All qwen3 variants support hybrid thinking; /api/show capabilities is
+	// authoritative — these entries are only consulted when ollama omits it.
 	// ref: qwen3-next 1M ctx — https://qwen.ai/blog?id=qwen3-next
-	["qwen3-next", { contextWindow: 1048576, maxTokens: 32768, ollamaOptions: { num_ctx: 1048576 } }],
+	["qwen3-next", { contextWindow: 1048576, maxTokens: 32768, reasoning: true, ollamaOptions: { num_ctx: 1048576 } }],
 	// ref: qwen3-coder 256K ctx — https://qwenlm.github.io/blog/qwen3-coder/
-	["qwen3-coder", { contextWindow: 262144, maxTokens: 32768, ollamaOptions: { num_ctx: 262144 } }],
+	["qwen3-coder", { contextWindow: 262144, maxTokens: 32768, reasoning: true, ollamaOptions: { num_ctx: 262144 } }],
 	// ref: qwen3.5 / qwen3.6 1M ctx — Ollama Cloud release notes
-	["qwen3.6", { contextWindow: 1048576, maxTokens: 32768, ollamaOptions: { num_ctx: 1048576 } }],
-	["qwen3.5", { contextWindow: 1048576, maxTokens: 32768, ollamaOptions: { num_ctx: 1048576 } }],
-	["qwen3", { contextWindow: 131072, maxTokens: 32768, ollamaOptions: { num_ctx: 131072 } }],
+	["qwen3.6", { contextWindow: 1048576, maxTokens: 32768, reasoning: true, ollamaOptions: { num_ctx: 1048576 } }],
+	["qwen3.5", { contextWindow: 1048576, maxTokens: 32768, reasoning: true, ollamaOptions: { num_ctx: 1048576 } }],
+	["qwen3", { contextWindow: 131072, maxTokens: 32768, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
 	["qwen2.5", { contextWindow: 131072, maxTokens: 32768, ollamaOptions: { num_ctx: 131072 } }],
 	["qwen2", { contextWindow: 131072, maxTokens: 32768, ollamaOptions: { num_ctx: 131072 } }],
 
