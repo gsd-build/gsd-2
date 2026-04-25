@@ -71,6 +71,15 @@ export const IDLE_TIMEOUT_MS = 15_000
 // longer idle timeout to avoid killing the session prematurely (#808).
 export const NEW_MILESTONE_IDLE_TIMEOUT_MS = 120_000
 const INTERACTIVE_HEADLESS_TOOLS = new Set(['ask_user_questions', 'secure_env_collect'])
+const MULTI_TURN_HEADLESS_COMMANDS = new Set(['auto', 'next', 'discuss', 'plan'])
+
+export interface HeadlessRuntimeState {
+  command: string
+  idleTimeoutMs: number
+  isAutoMode: boolean
+  isNewMilestone: boolean
+  isMultiTurnCommand: boolean
+}
 
 export function getHeadlessIdleTimeout(command: string): number {
   if (command === 'new-milestone') return NEW_MILESTONE_IDLE_TIMEOUT_MS
@@ -81,8 +90,22 @@ export function getHeadlessIdleTimeout(command: string): number {
   return IDLE_TIMEOUT_MS
 }
 
-export function shouldArmIdleTimeout(toolCallCount: number, idleTimeoutMs: number): boolean {
-  return toolCallCount > 0 && idleTimeoutMs > 0
+export function getHeadlessRuntimeState(command: string): HeadlessRuntimeState {
+  return {
+    command,
+    idleTimeoutMs: getHeadlessIdleTimeout(command),
+    isAutoMode: command === 'auto',
+    isNewMilestone: command === 'new-milestone',
+    isMultiTurnCommand: MULTI_TURN_HEADLESS_COMMANDS.has(command),
+  }
+}
+
+export function shouldArmHeadlessIdleTimer(
+  toolCallCount: number,
+  interactiveToolCount: number,
+  idleTimeoutMs: number,
+): boolean {
+  return toolCallCount > 0 && interactiveToolCount === 0 && idleTimeoutMs > 0
 }
 
 export function isTerminalNotification(event: Record<string, unknown>): boolean {
@@ -105,10 +128,6 @@ export function isMilestoneReadyNotification(event: Record<string, unknown>): bo
 
 export function isInteractiveHeadlessTool(toolName: string | undefined): boolean {
   return INTERACTIVE_HEADLESS_TOOLS.has(String(toolName ?? ''))
-}
-
-export function shouldArmHeadlessIdleTimeout(toolCallCount: number, interactiveToolCount: number): boolean {
-  return toolCallCount > 0 && interactiveToolCount === 0
 }
 
 // ---------------------------------------------------------------------------

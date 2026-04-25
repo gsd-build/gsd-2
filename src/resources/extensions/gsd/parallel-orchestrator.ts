@@ -999,6 +999,9 @@ export function refreshWorkerStatuses(
         worker.process = null;
         continue;
       }
+      // If disk state disappears before we observed a terminal state, a dead
+      // PID means the worker can no longer make progress. Classify that as an
+      // error instead of preserving a forever-running zombie.
       if (!isPidAlive(worker.pid)) {
         worker.cleanup?.();
         worker.cleanup = undefined;

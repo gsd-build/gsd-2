@@ -29,9 +29,8 @@ import {
   isQuickCommand,
   FIRE_AND_FORGET_METHODS,
   isInteractiveHeadlessTool,
-  shouldArmHeadlessIdleTimeout,
-  getHeadlessIdleTimeout,
-  shouldArmIdleTimeout,
+  getHeadlessRuntimeState,
+  shouldArmHeadlessIdleTimer,
   EXIT_SUCCESS,
   EXIT_ERROR,
   EXIT_BLOCKED,
@@ -268,8 +267,9 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
 async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): Promise<{ exitCode: number; interrupted: boolean }> {
   let interrupted = false
   const startTime = Date.now()
-  let currentCommand = options.command
-  const isNewMilestone = currentCommand === 'new-milestone'
+  let runtimeState = getHeadlessRuntimeState(options.command)
+  let currentCommand = runtimeState.command
+  const isNewMilestone = runtimeState.isNewMilestone
 
   // new-milestone involves codebase investigation + artifact writing — needs more time
   if (isNewMilestone && options.timeout === 300_000) {
@@ -279,10 +279,10 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
   // auto-mode sessions are long-running (minutes to hours) with their own internal
   // per-unit timeout via auto-supervisor. Disable the overall timeout unless the
   // user explicitly set --timeout.
-  const isAutoMode = currentCommand === 'auto'
+  const isAutoMode = runtimeState.isAutoMode
   // discuss and plan are multi-turn: they involve multiple question rounds,
   // codebase scanning, and artifact writing before the workflow completes (#3547).
-  let isMultiTurnCommand = isMultiTurnHeadlessCommand(options.command)
+  let isMultiTurnCommand = runtimeState.isMultiTurnCommand
   if (isAutoMode && options.timeout === 300_000) {
     options.timeout = 0
   }
@@ -502,14 +502,14 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
 
   // Idle timeout — fallback completion detection
   let idleTimer: ReturnType<typeof setTimeout> | null = null
-  let effectiveIdleTimeout = getHeadlessIdleTimeout(currentCommand)
+  let effectiveIdleTimeout = runtimeState.idleTimeoutMs
 
   function resetIdleTimer(): void {
-    if (idleTimer) clearTimeout(idleTimer)
-    if (
-      shouldArmIdleTimeout(toolCallCount, effectiveIdleTimeout) &&
-      shouldArmHeadlessIdleTimeout(toolCallCount, interactiveToolCallIds.size)
-    ) {
+    if (idleTimer) {
+      clearTimeout(idleTimer)
+      idleTimer = null
+    }
+    if (shouldArmHeadlessIdleTimer(toolCallCount, interactiveToolCallIds.size, effectiveIdleTimeout)) {
       idleTimer = setTimeout(() => {
         completed = true
         resolveCompletion()
@@ -926,9 +926,10 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
       clearTimeout(idleTimer)
       idleTimer = null
     }
-    currentCommand = 'auto'
-    isMultiTurnCommand = true
-    effectiveIdleTimeout = getHeadlessIdleTimeout(currentCommand)
+    runtimeState = getHeadlessRuntimeState('auto')
+    currentCommand = runtimeState.command
+    isMultiTurnCommand = runtimeState.isMultiTurnCommand
+    effectiveIdleTimeout = runtimeState.idleTimeoutMs
     completed = false
     milestoneReady = false
     blocked = false
