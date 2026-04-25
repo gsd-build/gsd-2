@@ -18,8 +18,9 @@ import { resolve, dirname, join, extname } from "node:path";
 import type { TaskRow } from "./gsd-db.ts";
 
 const CODE_EXTENSION_ORDER = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
+const TYPESCRIPT_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
+const JAVASCRIPT_RUNTIME_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".cjs"]);
 const CODE_EXTENSIONS = new Set(CODE_EXTENSION_ORDER);
-const TS_ESM_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".cjs"]);
 const TS_ESM_EXTENSION_FALLBACKS = new Map<string, string[]>([
   [".js", [".ts", ".tsx", ".js", ".jsx"]],
   [".jsx", [".tsx", ".jsx"]],
@@ -69,7 +70,7 @@ const SEALED_NON_CODE_EXTENSIONS = new Set([
 ]);
 
 function isCodeFile(file: string): boolean {
-  return CODE_EXTENSIONS.has(extname(file));
+  return CODE_EXTENSIONS.has(extname(file).toLowerCase());
 }
 
 // ─── Result Types ────────────────────────────────────────────────────────────
@@ -191,7 +192,7 @@ export function resolveImportPath(
   // If the import already has an explicit extension, check it as-is first.
   // For known sealed extensions, a miss stays missing. Unknown dotted suffixes
   // such as `.test-utils` are treated as part of the TypeScript stem (#4659).
-  const explicitExt = extname(importPath);
+  const explicitExt = extname(importPath).toLowerCase();
   if (explicitExt !== "") {
     const directPath = resolve(sourceDir, importPath);
     if (existsSync(directPath)) {
@@ -203,9 +204,9 @@ export function resolveImportPath(
     // `./missing.css.ts`. Unknown dotted suffixes are sealed by default, with a
     // narrow allowlist for common TS module stems such as `route.server`.
     if (
-      (CODE_EXTENSIONS.has(explicitExt) && !TS_ESM_EXTENSIONS.has(explicitExt))
+      TYPESCRIPT_EXTENSIONS.has(explicitExt)
       || SEALED_NON_CODE_EXTENSIONS.has(explicitExt)
-      || (!TS_ESM_EXTENSIONS.has(explicitExt) && !DOTTED_STEM_FALLBACK_EXTENSIONS.has(explicitExt))
+      || (!JAVASCRIPT_RUNTIME_EXTENSIONS.has(explicitExt) && !DOTTED_STEM_FALLBACK_EXTENSIONS.has(explicitExt))
     ) {
       return { exists: false, resolvedPath: null };
     }
@@ -214,18 +215,9 @@ export function resolveImportPath(
   // Handle TypeScript ESM convention: .js imports resolve to .ts files
   // e.g., import './types.js' -> ./types.ts
   let normalizedPath = importPath;
-  if (importPath.endsWith(".js")) {
-    normalizedPath = importPath.slice(0, -3);
-    extensions = TS_ESM_EXTENSION_FALLBACKS.get(".js") ?? extensions;
-  } else if (importPath.endsWith(".jsx")) {
-    normalizedPath = importPath.slice(0, -4);
-    extensions = TS_ESM_EXTENSION_FALLBACKS.get(".jsx") ?? extensions;
-  } else if (importPath.endsWith(".mjs")) {
-    normalizedPath = importPath.slice(0, -4);
-    extensions = TS_ESM_EXTENSION_FALLBACKS.get(".mjs") ?? extensions;
-  } else if (importPath.endsWith(".cjs")) {
-    normalizedPath = importPath.slice(0, -4);
-    extensions = TS_ESM_EXTENSION_FALLBACKS.get(".cjs") ?? extensions;
+  if (JAVASCRIPT_RUNTIME_EXTENSIONS.has(explicitExt)) {
+    normalizedPath = importPath.slice(0, -explicitExt.length);
+    extensions = TS_ESM_EXTENSION_FALLBACKS.get(explicitExt) ?? extensions;
   }
 
   // Try the normalized path with common extensions
@@ -260,10 +252,7 @@ export function checkImportResolution(
   const results: PostExecutionCheckJSON[] = [];
 
   // Get files from key_files
-  const filesToCheck = taskRow.key_files.filter((f) => {
-    const ext = extname(f);
-    return [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"].includes(ext);
-  });
+  const filesToCheck = taskRow.key_files.filter(isCodeFile);
 
   for (const file of filesToCheck) {
     const absolutePath = resolve(basePath, file);

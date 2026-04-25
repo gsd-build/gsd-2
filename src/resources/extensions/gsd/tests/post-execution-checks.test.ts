@@ -328,6 +328,79 @@ describe("resolveImportPath", () => {
     assert.ok(storiesResult.resolvedPath?.endsWith("Button.stories.tsx"));
   });
 
+  test("resolves test and spec dotted stems without treating the suffix as sealed", (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "post-exec-test-dotted-spec-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "Widget.test.ts"), "export {};");
+    writeFileSync(join(dir, "src", "Widget.spec.ts"), "export {};");
+    writeFileSync(join(dir, "src", "main.ts"), "");
+
+    const testResult = resolveImportPath("./Widget.test", "src/main.ts", dir);
+    assert.ok(testResult.exists, "dotted .test stem should resolve");
+    assert.ok(testResult.resolvedPath?.endsWith("Widget.test.ts"));
+
+    const specResult = resolveImportPath("./Widget.spec", "src/main.ts", dir);
+    assert.ok(specResult.exists, "dotted .spec stem should resolve");
+    assert.ok(specResult.resolvedPath?.endsWith("Widget.spec.ts"));
+  });
+
+  test("resolves explicit TypeScript declaration and module extensions", (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "post-exec-test-ts-exts-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "types.d.ts"), "export interface Types {}");
+    writeFileSync(join(dir, "src", "runtime.mts"), "export {};");
+    writeFileSync(join(dir, "src", "runtime.cts"), "export {};");
+    writeFileSync(join(dir, "src", "main.ts"), "");
+
+    const declarationResult = resolveImportPath("./types.d.ts", "src/main.ts", dir);
+    assert.ok(declarationResult.exists, "explicit .d.ts import should resolve directly");
+    assert.ok(declarationResult.resolvedPath?.endsWith("types.d.ts"));
+
+    const mtsResult = resolveImportPath("./runtime.mts", "src/main.ts", dir);
+    assert.ok(mtsResult.exists, "explicit .mts import should resolve directly");
+    assert.ok(mtsResult.resolvedPath?.endsWith("runtime.mts"));
+
+    const ctsResult = resolveImportPath("./runtime.cts", "src/main.ts", dir);
+    assert.ok(ctsResult.exists, "explicit .cts import should resolve directly");
+    assert.ok(ctsResult.resolvedPath?.endsWith("runtime.cts"));
+  });
+
+  test("resolves JavaScript module imports to TypeScript module siblings", (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "post-exec-test-ts-module-exts-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "esm.mts"), "export {};");
+    writeFileSync(join(dir, "src", "common.cts"), "export {};");
+    writeFileSync(join(dir, "src", "main.ts"), "");
+
+    const esmResult = resolveImportPath("./esm.mjs", "src/main.ts", dir);
+    assert.ok(esmResult.exists, ".mjs import should resolve to .mts sibling");
+    assert.ok(esmResult.resolvedPath?.endsWith("esm.mts"));
+
+    const commonResult = resolveImportPath("./common.cjs", "src/main.ts", dir);
+    assert.ok(commonResult.exists, ".cjs import should resolve to .cts sibling");
+    assert.ok(commonResult.resolvedPath?.endsWith("common.cts"));
+  });
+
+  test("missing explicit TypeScript and asset extensions do not match code shadows", (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "post-exec-test-sealed-exts-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "missing.mts.ts"), "export {};");
+    writeFileSync(join(dir, "src", "missing.CSS.ts"), "export {};");
+    writeFileSync(join(dir, "src", "main.ts"), "");
+
+    const mtsResult = resolveImportPath("./missing.mts", "src/main.ts", dir);
+    assert.ok(!mtsResult.exists, "missing explicit .mts import should stay missing");
+    assert.equal(mtsResult.resolvedPath, null);
+
+    const cssResult = resolveImportPath("./missing.CSS", "src/main.ts", dir);
+    assert.ok(!cssResult.exists, "missing asset import should be case-insensitively sealed");
+    assert.equal(cssResult.resolvedPath, null);
+  });
+
   // Non-code explicit extensions must not fall through to code-extension
   // shadows: a missing ./missing.css must stay unresolved even if a stray
   // ./missing.css.ts happens to exist.
