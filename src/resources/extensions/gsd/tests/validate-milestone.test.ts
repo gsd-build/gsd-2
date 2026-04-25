@@ -271,6 +271,7 @@ Test
     assert.match(prompt, /S01 Summary/i, "prompt should inline non-skipped slice summaries");
     assert.doesNotMatch(prompt, /### S02 Summary/i, "prompt should not inline skipped slice summaries");
     assert.doesNotMatch(prompt, /not found — file does not exist yet/i, "prompt should not emit skipped-slice missing-file placeholders");
+    assert.doesNotMatch(prompt, /S02-SUMMARY\.md/, "skipped slice must not appear in on-demand path list (#4780)");
   } finally {
     cleanup(base);
   }
