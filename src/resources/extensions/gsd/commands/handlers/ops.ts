@@ -6,6 +6,7 @@ import { handleConfig } from "../../commands-config.js";
 import { handleDoctor, handleCapture, handleKnowledge, handleRunHook, handleSkillHealth, handleSteer, handleTriage, handleUpdate } from "../../commands-handlers.js";
 import { handleInspect } from "../../commands-inspect.js";
 import { handleLogs } from "../../commands-logs.js";
+import { handleDebug } from "../../commands-debug.js";
 import { handleCleanupBranches, handleCleanupSnapshots, handleSkip, handleCleanupProjects, handleCleanupWorktrees, handleRecover } from "../../commands-maintenance.js";
 import { handleExport } from "../../export.js";
 import { handleHistory } from "../../history.js";
@@ -40,6 +41,10 @@ export async function handleOpsCommand(trimmed: string, ctx: ExtensionCommandCon
   }
   if (trimmed === "logs" || trimmed.startsWith("logs ")) {
     await handleLogs(trimmed.replace(/^logs\s*/, "").trim(), ctx);
+    return true;
+  }
+  if (trimmed === "debug" || trimmed.startsWith("debug ")) {
+    await handleDebug(trimmed.replace(/^debug\s*/, "").trim(), ctx, pi);
     return true;
   }
   if (trimmed === "forensics" || trimmed.startsWith("forensics ")) {
@@ -186,6 +191,11 @@ Examples:
     await handleNotificationsCommand(trimmed.replace(/^notifications\s*/, "").trim(), ctx, pi);
     return true;
   }
+  if (trimmed === "escalate" || trimmed.startsWith("escalate ")) {
+    const { handleEscalateCommand } = await import("./escalate.js");
+    await handleEscalateCommand(trimmed.replace(/^escalate\s*/, "").trim(), ctx, pi);
+    return true;
+  }
   if (trimmed === "inspect") {
     await handleInspect(ctx);
     return true;
@@ -239,6 +249,17 @@ Examples:
   if (trimmed === "extract-learnings" || trimmed.startsWith("extract-learnings ")) {
     const { handleExtractLearnings } = await import("../../commands-extract-learnings.js");
     await handleExtractLearnings(trimmed.replace(/^extract-learnings\s*/, "").trim(), ctx, pi);
+    return true;
+  }
+  if (trimmed === "memory" || trimmed.startsWith("memory ") || trimmed === "memory help") {
+    const { handleMemory } = await import("../../commands-memory.js");
+    await handleMemory(trimmed.replace(/^memory\s*/, "").trim(), ctx, pi);
+    return true;
+  }
+  if (trimmed === "scan" || trimmed.startsWith("scan ")) {
+    const { handleScan } = await import("../../commands-scan.js");
+    // \s* (not \s+) is intentional: handles both /gsd scan (no args) and /gsd scan --focus X
+    await handleScan(trimmed.replace(/^scan\s*/, "").trim(), ctx, pi);
     return true;
   }
   return false;

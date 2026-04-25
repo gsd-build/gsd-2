@@ -1,7 +1,8 @@
 import type { AssistantMessage } from "@gsd/pi-ai";
 import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@gsd/pi-tui";
 import { getMarkdownTheme, theme } from "../theme/theme.js";
-import { formatTimestamp, type TimestampFormat } from "./timestamp.js";
+import { type TimestampFormat } from "./timestamp.js";
+import { renderChatFrame } from "./chat-frame.js";
 
 export interface ContentRange {
 	startIndex: number;
@@ -94,10 +95,6 @@ export class AssistantMessageComponent extends Container {
 		// manual thinking toggle every turn.
 		const shouldCapThinking = hasTextContent || hasToolContent || message.provider === "claude-code";
 
-		if (hasVisibleContent) {
-			this.contentContainer.addChild(new Spacer(1));
-		}
-
 		// Render content in order; non-text/thinking blocks are silently skipped
 		for (let i = 0; i < slice.length; i++) {
 			const content = slice[i];
@@ -160,10 +157,24 @@ export class AssistantMessageComponent extends Container {
 				}
 			}
 
-			if (message.stopReason && message.timestamp) {
-				const timeStr = formatTimestamp(message.timestamp, this.timestampFormat);
-				this.contentContainer.addChild(new Text(theme.fg("dim", timeStr), 1, 0));
-			}
 		}
+	}
+
+	override render(width: number): string[] {
+		const frameWidth = Math.max(20, width);
+		const contentWidth = Math.max(1, frameWidth - 4);
+		const lines = super.render(contentWidth);
+		const headerLabel = this.lastMessage?.model ? `GSD - ${this.lastMessage.model}` : "GSD";
+		const framed = renderChatFrame(lines, frameWidth, {
+			label: headerLabel,
+			tone: "assistant",
+			timestamp: this.lastMessage?.timestamp,
+			timestampFormat: this.timestampFormat,
+			showTimestamp: this.showMetadata,
+		});
+		if (framed.length === 0) {
+			return framed;
+		}
+		return ["", ...framed];
 	}
 }

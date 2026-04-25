@@ -102,6 +102,8 @@ Setting `prefer_skills: []` does **not** disable skill discovery — it just mea
 
 - `custom_instructions`: extra durable instructions related to skill use. For operational project knowledge (recurring rules, gotchas, patterns), use `.gsd/KNOWLEDGE.md` instead — it's injected into every agent prompt automatically and agents can append to it during execution.
 
+- `language`: preferred response language for all GSD interactions. Accepts any language name or code — `"Chinese"`, `"zh"`, `"German"`, `"de"`, `"日本語"`, etc. When set, GSD injects "Always respond in \<language\>" into every agent's system prompt, including after `/clear`. Quickest way to set it: `/gsd language <name>`. To clear: `/gsd language off`.
+
 - `models`: per-stage model selection (applies to both auto-mode and guided-flow dispatches). Keys: `research`, `planning`, `discuss`, `execution`, `execution_simple`, `completion`, `validation`, `subagent`. Values can be:
   - Simple string: `"claude-sonnet-4-6"` — single model, no fallbacks
   - Provider-qualified string: `"bedrock/claude-sonnet-4-6"` — targets a specific provider when the same model ID exists across multiple providers
@@ -128,7 +130,7 @@ Setting `prefer_skills: []` does **not** disable skill discovery — it just mea
   - `auto_push`: boolean — automatically push commits to the remote after committing. Default: `false`.
   - `push_branches`: boolean — push the milestone branch to the remote after commits. Default: `false`.
   - `remote`: string — git remote name to push to. Default: `"origin"`.
-  - `snapshots`: boolean — create snapshot commits (WIP saves) during long-running tasks. Default: `true`.
+  - `snapshots`: boolean — create WIP snapshot commits (e.g. pre-dispatch and stale-uncommitted-changes safety commits emitted by the doctor). Set to `false` to suppress all doctor-initiated `gsd snapshot:` commits. Default: `true`.
   - `pre_merge_check`: boolean or `"auto"` — run pre-merge checks before merging a worktree back to the integration branch. `true` always runs, `false` never runs, `"auto"` runs when CI is detected. Default: `"auto"`.
   - `commit_type`: string — override the conventional commit type prefix. Must be one of: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`, `build`, `style`. Default: inferred from diff content.
   - `main_branch`: string — the primary branch name for new git repos (e.g., `"main"`, `"master"`, `"trunk"`). Also used by `getMainBranch()` as the preferred branch when auto-detection is ambiguous. Default: `"main"`.
@@ -157,7 +159,7 @@ Setting `prefer_skills: []` does **not** disable skill discovery — it just mea
 
 - `phases`: fine-grained control over which phases run. Usually set by `token_profile`, but can be overridden. Keys:
   - `skip_research`: boolean — skip milestone-level research. Default: `false`.
-  - `reassess_after_slice`: boolean — run roadmap reassessment after each completed slice. Default: `true`.
+  - `reassess_after_slice`: boolean — run a dedicated roadmap-reassessment unit after each completed slice. Default: `false` (per ADR-003 §4). The plan-slice agent for the next slice performs JIT reassessment via a prompt preamble at zero additional token cost; a dedicated reassess session is opt-in. Set to `true` (e.g. via the `burn-max` profile) if you want the explicit session.
   - `skip_reassess`: boolean — force-disable roadmap reassessment even if `reassess_after_slice` is enabled. Default: `false`.
   - `skip_slice_research`: boolean — skip per-slice research. Default: `false`.
 
@@ -195,14 +197,14 @@ Setting `prefer_skills: []` does **not** disable skill discovery — it just mea
   - `enabled`: boolean — enable kernel wrappers and contract observers. Default: `true`.
   - `legacy_fallback.enabled`: boolean — emergency release fallback that forces legacy orchestration behavior even when `uok.enabled` is `true`. Default: `false`.
     - Runtime override: set `GSD_UOK_FORCE_LEGACY=1` (or `GSD_UOK_LEGACY_FALLBACK=1`) to force legacy behavior for the current process.
-  - `gates.enabled`: boolean — route checks through the unified gate runner and persist `gate_runs`.
-  - `model_policy.enabled`: boolean — enforce policy filtering before model capability scoring.
-  - `execution_graph.enabled`: boolean — enable DAG scheduler facade/adapters for execution.
-  - `gitops.enabled`: boolean — persist turn-level git transaction records.
-  - `gitops.turn_action`: `"commit"` | `"snapshot"` | `"status-only"` — turn transaction mode.
-  - `gitops.turn_push`: boolean — whether turn transactions should include push intent metadata.
-  - `audit_unified.enabled`: boolean — dual-write unified audit envelope events.
-  - `plan_v2.enabled`: boolean — enable bounded clarify/research/draft/compile planning flow.
+  - `gates.enabled`: boolean — route checks through the unified gate runner and persist `gate_runs`. Default: `true`.
+  - `model_policy.enabled`: boolean — enforce policy filtering before model capability scoring. Default: `true`.
+  - `execution_graph.enabled`: boolean — enable DAG scheduler facade/adapters for execution. Default: `true`.
+  - `gitops.enabled`: boolean — persist turn-level git transaction records. Default: `true`.
+  - `gitops.turn_action`: `"commit"` | `"snapshot"` | `"status-only"` — turn transaction mode. Default: `"commit"` (per-task atomic commits).
+  - `gitops.turn_push`: boolean — whether turn transactions should include push intent metadata. Default: `false`.
+  - `audit_unified.enabled`: boolean — dual-write unified audit envelope events. Default: `true`.
+  - `plan_v2.enabled`: boolean — enable bounded clarify/research/draft/compile planning flow. Default: `true`.
 
 - `context_management`: configures context hygiene for auto-mode sessions. Keys:
   - `observation_masking`: boolean — mask old tool results to reduce context bloat. Default: `true`.

@@ -1,14 +1,14 @@
 /**
- * Post-unit processing for handleAgentEnd — auto-commit, doctor run,
+ * Post-unit processing for auto-loop — auto-commit, doctor run,
  * state rebuild, worktree sync, DB dual-write, hooks, triage, and
  * quick-task dispatch.
  *
- * Split into two functions called sequentially by handleAgentEnd with
+ * Split into two functions called sequentially by auto-loop with
  * the verification gate between them:
  *   1. postUnitPreVerification() — commit, doctor, state rebuild, worktree sync, artifact verification
  *   2. postUnitPostVerification() — DB dual-write, hooks, triage, quick-tasks
  *
- * Extracted from handleAgentEnd() in auto.ts.
+ * Extracted from the pre-loop agent_end handler in auto.ts.
  */
 
 import type { ExtensionContext, ExtensionAPI } from "@gsd/pi-coding-agent";
@@ -55,7 +55,7 @@ import { hasPendingCaptures, loadPendingCaptures, revertExecutorResolvedCaptures
 import { debugLog } from "./debug-logger.js";
 import { runSafely } from "./auto-utils.js";
 import type { AutoSession, SidecarItem } from "./auto/session.js";
-import { getEvidence } from "./safety/evidence-collector.js";
+import { getEvidence, clearEvidenceFromDisk } from "./safety/evidence-collector.js";
 import { validateFileChanges } from "./safety/file-change-validator.js";
 // crossReferenceEvidence available for future use when verification_evidence is stored in DB
 // import { crossReferenceEvidence, type ClaimedEvidence } from "./safety/evidence-cross-ref.js";
@@ -70,9 +70,24 @@ import { ensureCodebaseMapFresh } from "./codebase-generator.js";
 import { resolveUokFlags } from "./uok/flags.js";
 import { UokGateRunner } from "./uok/gate-runner.js";
 import { writeTurnGitTransaction } from "./uok/gitops.js";
+import { isClosedStatus } from "./status-guards.js";
+import { detectAbandonMilestone } from "./abandon-detect.js";
 
 /** Maximum verification retry attempts before escalating to blocker placeholder (#2653). */
 const MAX_VERIFICATION_RETRIES = 3;
+const COMPLETE_MILESTONE_DB_SETTLE_MS = 1500;
+const COMPLETE_MILESTONE_DB_SETTLE_POLL_MS = 100;
+
+async function waitForMilestoneDbClose(mid: string): Promise<boolean> {
+  const deadline = Date.now() + COMPLETE_MILESTONE_DB_SETTLE_MS;
+  while (Date.now() < deadline) {
+    if (!isDbAvailable()) return false;
+    const milestone = getMilestone(mid);
+    if (milestone && isClosedStatus(milestone.status)) return true;
+    await new Promise((resolve) => setTimeout(resolve, COMPLETE_MILESTONE_DB_SETTLE_POLL_MS));
+  }
+  return false;
+}
 
 
 /** Enqueue a sidecar item (hook, triage, or quick-task) for the main loop to
@@ -99,7 +114,7 @@ function enqueueSidecar(
  *  next actual task commit via `smartStage()`. */
 const LIFECYCLE_ONLY_UNITS = new Set([
   "research-milestone", "discuss-milestone", "discuss-slice", "plan-milestone",
-  "validate-milestone", "research-slice", "plan-slice",
+  "validate-milestone", "research-slice", "plan-slice", "refine-slice",
   "replan-slice", "complete-slice", "run-uat",
   "reassess-roadmap", "rewrite-docs",
 ]);
@@ -107,7 +122,6 @@ import {
   updateProgressWidget as _updateProgressWidget,
   updateSliceProgressCache,
   unitVerb,
-  hideFooter,
   describeNextUnit,
 } from "./auto-dashboard.js";
 import { existsSync, unlinkSync } from "node:fs";
@@ -190,7 +204,7 @@ export function detectRogueFileWrites(
     if (!hasPlanningState) {
       rogues.push({ path: roadmapPath, unitType, unitId });
     }
-  } else if (unitType === "plan-slice" || unitType === "replan-slice") {
+  } else if (unitType === "plan-slice" || unitType === "refine-slice" || unitType === "replan-slice") {
     if (!mid || !sid) return [];
 
     const planPath = resolveSliceFile(basePath, mid, sid, "PLAN");
@@ -556,6 +570,35 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
     // Rewrite-docs completion
     if (s.currentUnit.type === "rewrite-docs") {
       await runSafely("postUnit", "rewrite-docs-resolve", async () => {
+        // Detect abandon/descope overrides BEFORE resolving them (#3490).
+        // If an override is about abandoning the milestone, park it so the
+        // state engine skips it. Without this, rewrite-docs only edits
+        // markdown but the DB still has the milestone as active.
+        try {
+          const { loadActiveOverrides } = await import("./files.js");
+          const overrides = await loadActiveOverrides(s.basePath);
+          const decision = detectAbandonMilestone(overrides, s.currentMilestoneId);
+          if (decision.shouldPark && s.currentMilestoneId) {
+            const { parkMilestone } = await import("./milestone-actions.js");
+            const parked = parkMilestone(s.basePath, s.currentMilestoneId, decision.reason);
+            if (parked) {
+              ctx.ui.notify(`Milestone ${s.currentMilestoneId} parked: "${decision.reason}"`, "info");
+            } else {
+              // Park refused: milestone directory missing, milestone already
+              // completed (SUMMARY present), or PARKED.md already exists.
+              // resolveAllOverrides below will still consume the override —
+              // surface this loudly so the user notices state drift rather
+              // than silently losing the abandon directive.
+              const msg = `Abandon detected for ${s.currentMilestoneId} but park refused (milestone is completed, already parked, or missing). Override will be resolved anyway — verify state is correct.`;
+              logError("engine", msg);
+              ctx.ui.notify(msg, "warning");
+            }
+          }
+        } catch (err) {
+          logError("engine", `abandon-detect failed: ${(err as Error).message}`);
+          ctx.ui.notify(`Abandon detection failed — check logs. Overrides will still be resolved.`, "warning");
+        }
+
         await resolveAllOverrides(s.basePath);
         // Reset both disk and in-memory counters. Disk counter is authoritative
         // (survives restarts); in-memory is kept in sync for the current session.
@@ -575,6 +618,87 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
           clearReactiveState(s.basePath, mid, sid);
         }
       });
+
+      // #4765 — slice-cadence collapse. When `git.collapse_cadence: "slice"`
+      // is set, squash-merge the slice's commits from the milestone branch
+      // onto main right here, so orphan risk shrinks from milestone-size to
+      // slice-size. Only runs in worktree isolation mode — the feature needs
+      // a milestone branch to squash from.
+      let sliceMergeStopped = false;
+      await runSafely("postUnit", "slice-cadence-merge", async () => {
+        const prefsResult = loadEffectiveGSDPreferences(s.basePath);
+        const prefs = prefsResult?.preferences;
+        const { getCollapseCadence, mergeSliceToMain } = await import("./slice-cadence.js");
+        if (getCollapseCadence(prefs) !== "slice") return;
+        if (prefs?.git?.isolation !== "worktree") return;
+        if (s.isolationDegraded) return;
+
+        const projectRoot = s.originalBasePath || s.basePath;
+        const { milestone: mid, slice: sid } = parseUnitId(unit.id);
+        if (!mid || !sid) return;
+
+        // Record the milestone start SHA before the first slice merge, so
+        // resquashMilestoneOnMain has a target at milestone completion.
+        // Resolve main branch dynamically — hard-coding "main" breaks repos
+        // that use "master" or a custom default branch.
+        if (!s.milestoneStartShas.has(mid)) {
+          try {
+            const { nativeDetectMainBranch } = await import("./native-git-bridge.js");
+            const mainBranch = nativeDetectMainBranch(projectRoot);
+            const { execFileSync } = await import("node:child_process");
+            const sha = execFileSync("git", ["rev-parse", mainBranch], {
+              cwd: projectRoot, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8",
+            }).trim();
+            if (sha) s.milestoneStartShas.set(mid, sha);
+          } catch (err) {
+            logWarning("engine", `slice-cadence: failed to record milestone start SHA: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+
+        try {
+          const result = mergeSliceToMain(projectRoot, mid, sid);
+          if (result.skipped) {
+            logWarning("engine", `slice-cadence: merge skipped for ${sid} — ${result.skippedReason}`);
+            return;
+          }
+          ctx.ui.notify(
+            `slice-cadence: ${sid} merged to main (${result.durationMs}ms).`,
+            "info",
+          );
+        } catch (err) {
+          const { MergeConflictError } = await import("./git-service.js");
+          if (err instanceof MergeConflictError) {
+            ctx.ui.notify(
+              `slice-cadence merge conflict in ${sid}: ${err.conflictedFiles.join(", ")}. ` +
+              `Resolve manually on main and run \`/gsd auto\` to resume.`,
+              "error",
+            );
+            // Stop auto AND signal the outer postUnit flow to exit early.
+            // Without the flag, subsequent hooks (triage, rogue detection,
+            // DB writes) would keep running against a conflicted main
+            // checkout after the loop was already told to stop.
+            const { stopAuto } = await import("./auto.js");
+            await stopAuto(ctx, undefined, `slice-merge-conflict on ${sid}`);
+            sliceMergeStopped = true;
+            return;
+          }
+          logError("engine", `slice-cadence merge failed for ${sid}`, {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          // Non-conflict failures (dirty main, rev-walk error, etc.) can
+          // leave the checkout in an unexpected state. Stop auto-mode so
+          // the next slice doesn't dispatch on top of it.
+          const { stopAuto } = await import("./auto.js");
+          await stopAuto(ctx, undefined, `slice-merge-error on ${sid}`);
+          sliceMergeStopped = true;
+        }
+      });
+      // Exit early after stopAuto so the rest of post-unit processing
+      // (triage, rogue detection, hook dispatch, DB writes) doesn't run
+      // against a conflicted main checkout. Return "dispatched" to match
+      // the convention used by other stop/pauseAuto paths in this function
+      // (see signal handling earlier: stop/pause also return "dispatched").
+      if (sliceMergeStopped) return "dispatched";
     }
 
     // Post-triage: execute actionable resolutions
@@ -654,7 +778,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
             if (taskRow) {
               const expectedOutput = taskRow.expected_output ?? [];
               const plannedFiles = taskRow.files ?? [];
-              const audit = validateFileChanges(s.basePath, expectedOutput, plannedFiles);
+              const audit = validateFileChanges(s.basePath, expectedOutput, plannedFiles, safetyConfig.file_change_allowlist);
               if (audit && audit.violations.length > 0) {
                 const warnings = audit.violations.filter(v => v.severity === "warning");
                 for (const v of warnings) {
@@ -712,6 +836,16 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
             debugLog("postUnit", { phase: "safety-content-validation", error: String(e) });
           }
         }
+
+        // Clear persisted evidence file now that post-unit processing is complete
+        // (Bug #4385 — prevents stale evidence from affecting retries of same unit ID).
+        if (safetyConfig.evidence_collection && s.currentUnit.type === "execute-task" && sMid && sSid && sTid) {
+          try {
+            clearEvidenceFromDisk(s.basePath, sMid, sSid, sTid);
+          } catch (e) {
+            debugLog("postUnit", { phase: "safety-evidence-clear", error: String(e) });
+          }
+        }
       }
     } catch (e) {
       debugLog("postUnit", { phase: "safety-harness", error: String(e) });
@@ -732,10 +866,29 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
       // If verification failed, attempt to regenerate missing projection files
       // from DB data before giving up (e.g. research-slice produces PLAN from engine).
       if (!triggerArtifactVerified) {
+        if (s.currentUnit.type === "complete-milestone") {
+          try {
+            const { milestone: mid } = parseUnitId(s.currentUnit.id);
+            if (mid) {
+              const settled = await waitForMilestoneDbClose(mid);
+              if (settled) {
+                triggerArtifactVerified = verifyExpectedArtifact(s.currentUnit.type, s.currentUnit.id, s.basePath);
+                if (triggerArtifactVerified) {
+                  invalidateAllCaches();
+                }
+              }
+            }
+          } catch (e) {
+            debugLog("postUnit", { phase: "artifact-verify-settle-db", error: String(e) });
+          }
+        }
+      }
+
+      if (!triggerArtifactVerified) {
         try {
           const { milestone: mid, slice: sid } = parseUnitId(s.currentUnit.id);
           if (mid && sid) {
-            const regenerated = regenerateIfMissing(s.basePath, mid, sid, "PLAN");
+            const regenerated = await regenerateIfMissing(s.basePath, mid, sid, "PLAN");
             if (regenerated) {
               // Re-check after regeneration
               triggerArtifactVerified = verifyExpectedArtifact(s.currentUnit.type, s.currentUnit.id, s.basePath);
@@ -1020,10 +1173,12 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
     }
   }
 
-  // ── Pre-execution checks (after plan-slice completes) ──
+  // ── Pre-execution checks (after plan-slice or ADR-011 refine-slice completes) ──
+  // Both emit the same PLAN.md + task artifacts via gsd_plan_slice, so the
+  // same structural validation applies to both.
   if (
     s.currentUnit &&
-    s.currentUnit.type === "plan-slice"
+    (s.currentUnit.type === "plan-slice" || s.currentUnit.type === "refine-slice")
   ) {
     const currentUnit = s.currentUnit;
     let preExecPauseNeeded = false;
@@ -1121,13 +1276,26 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
           });
         }
 
-        // Notify UI
+        // Notify UI — surface actionable details (#4259)
         if (result.status === "fail") {
-          const blockingCount = result.checks.filter(c => !c.passed && c.blocking).length;
+          const blockingChecks = result.checks.filter(c => !c.passed && c.blocking);
+          const blockingCount = blockingChecks.length;
+          const details = blockingChecks.slice(0, 3).map(c => `  \u2022 ${c.message}`).join("\n");
+          const suffix = blockingChecks.length > 3 ? `\n  \u2022 ...and ${blockingChecks.length - 3} more` : "";
+          const evidenceNote = `\nSee ${sid}-PRE-EXEC-VERIFY.json for full details.`;
           ctx.ui.notify(
-            `Pre-execution checks failed: ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"} found`,
+            `Pre-execution checks failed: ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"} found\n${details}${suffix}${evidenceNote}`,
             "error",
           );
+          // Persist failure context so the next plan-slice re-dispatch can inject
+          // it into the prompt and break the infinite loop (#4551).
+          s.lastPreExecFailure = {
+            unitId: currentUnit.id,
+            blockingFindings: blockingChecks.map(
+              c => `[${c.category}] ${c.target}: ${c.message}`,
+            ),
+            verdictExcerpt: `status=${result.status}; ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"} detected`,
+          };
           preExecPauseNeeded = true;
         } else if (result.status === "warn") {
           ctx.ui.notify(
@@ -1136,6 +1304,14 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
           );
           // Strict mode: treat warnings as blocking
           if (prefs?.enhanced_verification_strict === true) {
+            const warnChecks = result.checks.filter(c => !c.passed);
+            s.lastPreExecFailure = {
+              unitId: currentUnit.id,
+              blockingFindings: warnChecks.map(
+                c => `[${c.category}] ${c.target}: ${c.message}`,
+              ),
+              verdictExcerpt: `status=${result.status} (strict mode); ${warnChecks.length} warning${warnChecks.length === 1 ? "" : "s"} treated as blocking`,
+            };
             preExecPauseNeeded = true;
           }
         }

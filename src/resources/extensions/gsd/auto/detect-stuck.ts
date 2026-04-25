@@ -20,6 +20,7 @@ const ENOENT_PATH_RE = /ENOENT[^']*'([^']+)'/;
  *
  * Rule 1: Same error string twice in a row → stuck immediately.
  * Rule 2: Same unit key 3+ consecutive times → stuck (preserves prior behavior).
+ * Rule 2b: Same unit key appears 3+ times anywhere in the active window → stuck.
  * Rule 3: Oscillation A→B→A→B in last 4 entries → stuck.
  * Rule 4: Same ENOENT path in any 2 entries within the window → stuck (#3575).
  *         Missing files don't self-heal between retries — retrying wastes budget.
@@ -56,6 +57,15 @@ export function detectStuck(
         reason: `${last.key} derived 3 consecutive times without progress${suffix}`,
       };
     }
+  }
+
+  // Rule 2b: Same unit key 3+ times anywhere in the active window
+  const countInWindow = window.filter((entry) => entry.key === last.key).length;
+  if (countInWindow >= 3) {
+    return {
+      stuck: true,
+      reason: `${last.key} derived ${countInWindow} times in last ${window.length} attempts without progress${suffix}`,
+    };
   }
 
   // Rule 3: Oscillation (A→B→A→B in last 4)

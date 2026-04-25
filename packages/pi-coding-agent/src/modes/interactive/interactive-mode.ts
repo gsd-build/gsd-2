@@ -1827,6 +1827,8 @@ export class InteractiveMode {
 			this.showError(message);
 		} else if (type === "warning") {
 			this.showWarning(message);
+		} else if (type === "success") {
+			this.showSuccess(message);
 		} else {
 			this.showStatus(message, { append: true });
 		}
@@ -2117,6 +2119,7 @@ export class InteractiveMode {
 	}
 
 	private addMessageToChat(message: AgentMessage, options?: { populateHistory?: boolean }): void {
+		const timestampFormat = this.settingsManager.getTimestampFormat();
 		switch (message.role) {
 			case "bashExecution": {
 				const component = new BashExecutionComponent(message.command, this.ui, message.excludeFromContext);
@@ -2174,12 +2177,12 @@ export class InteractiveMode {
 								skillBlock.userMessage,
 								this.getMarkdownThemeWithSettings(),
 								message.timestamp,
-								this.settingsManager.getTimestampFormat(),
+								timestampFormat,
 							);
 							this.chatContainer.addChild(userComponent);
 						}
 					} else {
-						const userComponent = new UserMessageComponent(textContent, this.getMarkdownThemeWithSettings(), message.timestamp, this.settingsManager.getTimestampFormat());
+						const userComponent = new UserMessageComponent(textContent, this.getMarkdownThemeWithSettings(), message.timestamp, timestampFormat);
 						this.chatContainer.addChild(userComponent);
 					}
 					if (options?.populateHistory) {
@@ -2193,7 +2196,7 @@ export class InteractiveMode {
 					message,
 					this.hideThinkingBlock,
 					this.getMarkdownThemeWithSettings(),
-					this.settingsManager.getTimestampFormat(),
+					timestampFormat,
 				);
 				this.chatContainer.addChild(assistantComponent);
 				break;
@@ -2231,6 +2234,7 @@ export class InteractiveMode {
 		options: { updateFooter?: boolean; populateHistory?: boolean } = {},
 	): void {
 		this.pendingTools.clear();
+		const timestampFormat = this.settingsManager.getTimestampFormat();
 
 		if (options.updateFooter) {
 			this.footer.invalidate();
@@ -2255,7 +2259,7 @@ export class InteractiveMode {
 							message,
 							this.hideThinkingBlock,
 							this.getMarkdownThemeWithSettings(),
-							this.settingsManager.getTimestampFormat(),
+							timestampFormat,
 							{ startIndex: segment.startIndex, endIndex: segment.endIndex },
 						);
 						this.chatContainer.addChild(assistantComponent);
@@ -2337,6 +2341,12 @@ export class InteractiveMode {
 			}
 		}
 
+		// Any pendingTools entries left over after replay are historical tool
+		// calls whose results were squashed out of session context (commonly by
+		// compaction). Mark them finished so the frame stops showing "Running".
+		for (const component of this.pendingTools.values()) {
+			component.markHistoricalNoResult();
+		}
 		this.pendingTools.clear();
 		this.trimChatHistory();
 		this.ui.requestRender();
@@ -2732,6 +2742,17 @@ export class InteractiveMode {
 	showWarning(warningMessage: string): void {
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(theme.fg("warning", `Warning: ${warningMessage}`), 1, 0));
+		this.ui.requestRender();
+	}
+
+	showSuccess(successMessage: string): void {
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("success", text)));
+		this.chatContainer.addChild(
+			new Text(theme.fg("success", successMessage), 1, 0),
+		);
+		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("success", text)));
+		this.chatContainer.addChild(new Spacer(1));
 		this.ui.requestRender();
 	}
 
@@ -3564,7 +3585,19 @@ export class InteractiveMode {
 					this.ui.requestRender();
 				},
 				async (provider: string) => {
-					// Enter key → auth setup for selected provider (#3579)
+					// Enter key → auth setup for selected provider (#3579).
+					// Only OAuth providers support the login dialog flow.
+					// externalCli providers (e.g. claude-code) authenticate through
+					// their own CLI — sending them to the OAuth dialog produces
+					// "Unknown OAuth provider: claude-code" (#4548).
+					const isOAuthProvider = this.session.modelRegistry.authStorage
+						.getOAuthProviders()
+						.some((p) => p.id === provider);
+					if (!isOAuthProvider) {
+						done();
+						this.showStatus(`${provider} uses external CLI auth — use /model to select a model or run the provider's own auth command.`);
+						return;
+					}
 					done();
 					await this.showLoginDialog(provider);
 				},

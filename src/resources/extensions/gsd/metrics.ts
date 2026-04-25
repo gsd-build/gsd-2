@@ -90,6 +90,7 @@ export function classifyUnitPhase(unitType: string): MetricsPhase {
       return "discussion";
     case "plan-milestone":
     case "plan-slice":
+    case "refine-slice":
       return "planning";
     case "execute-task":
       return "execution";

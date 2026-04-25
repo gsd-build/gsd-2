@@ -14,6 +14,7 @@ import type { AutoSession, SidecarItem } from "./session.js";
 import type { LoopDeps } from "./loop-deps.js";
 import {
   MAX_LOOP_ITERATIONS,
+  type PhaseResult,
   type LoopState,
   type IterationContext,
   type IterationData,
@@ -28,12 +29,16 @@ import {
 } from "./phases.js";
 import { debugLog } from "../debug-logger.js";
 import { isInfrastructureError, isTransientCooldownError, getCooldownRetryAfterMs, COOLDOWN_FALLBACK_WAIT_MS, MAX_COOLDOWN_RETRIES } from "./infra-errors.js";
+import { ModelPolicyDispatchBlockedError } from "../auto-model-selection.js";
 import { resolveEngine } from "../engine-resolver.js";
 import { logWarning } from "../workflow-logger.js";
 import { gsdRoot } from "../paths.js";
+import { atomicWriteSync } from "../atomic-write.js";
 import { resolveUokFlags } from "../uok/flags.js";
 import { scheduleSidecarQueue } from "../uok/execution-graph.js";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { ExecutionGraphScheduler } from "../uok/execution-graph.js";
+import type { UokGraphNode } from "../uok/contracts.js";
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
 // ── Stuck detection persistence (#3704) ──────────────────────────────────
@@ -47,6 +52,13 @@ function stuckStatePath(basePath: string): string {
 function loadStuckState(basePath: string): { recentUnits: Array<{ key: string }>; stuckRecoveryAttempts: number } {
   try {
     const data = JSON.parse(readFileSync(stuckStatePath(basePath), "utf-8"));
+    // Only load state written by a DIFFERENT process (real session restart).
+    // If the PID matches the current process, this state was written by an earlier
+    // autoLoop call in the same process (e.g., a test that completed before this
+    // one), not by a crashed session — skip it to prevent test state pollution.
+    if (data.pid === process.pid) {
+      return { recentUnits: [], stuckRecoveryAttempts: 0 };
+    }
     return {
       recentUnits: Array.isArray(data.recentUnits) ? data.recentUnits : [],
       stuckRecoveryAttempts: typeof data.stuckRecoveryAttempts === "number" ? data.stuckRecoveryAttempts : 0,
@@ -62,6 +74,7 @@ function saveStuckState(basePath: string, state: LoopState): void {
     const filePath = stuckStatePath(basePath);
     mkdirSync(join(gsdRoot(basePath), "runtime"), { recursive: true });
     writeFileSync(filePath, JSON.stringify({
+      pid: process.pid,
       recentUnits: state.recentUnits.slice(-20), // keep last 20 entries
       stuckRecoveryAttempts: state.stuckRecoveryAttempts,
       updatedAt: new Date().toISOString(),
@@ -71,12 +84,75 @@ function saveStuckState(basePath: string, state: LoopState): void {
   }
 }
 
+// ── Custom workflow verification retry persistence ───────────────────────
+// Custom workflows can request verification retries after a step runs. The
+// retry budget must survive an auto-mode restart or a failing verifier can
+// consume a fresh retry budget every session.
+function customVerifyRetryStateDir(s: Pick<AutoSession, "activeRunDir" | "basePath">): string {
+  return s.activeRunDir ? join(s.activeRunDir, "runtime") : join(gsdRoot(s.basePath), "runtime");
+}
+
+function customVerifyRetryStatePath(s: Pick<AutoSession, "activeRunDir" | "basePath">): string {
+  return join(customVerifyRetryStateDir(s), "custom-verify-retries.json");
+}
+
+function hydrateCustomVerifyRetryCounts(s: AutoSession): Map<string, number> {
+  if (s.verificationRetryCount.size > 0) {
+    return s.verificationRetryCount;
+  }
+
+  try {
+    const raw = JSON.parse(readFileSync(customVerifyRetryStatePath(s), "utf-8"));
+    const counts = raw && typeof raw === "object" && raw.counts && typeof raw.counts === "object"
+      ? raw.counts as Record<string, unknown>
+      : {};
+    for (const [key, value] of Object.entries(counts)) {
+      if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+        s.verificationRetryCount.set(key, Math.floor(value));
+      }
+    }
+  } catch (err) {
+    debugLog("autoLoop", { phase: "load-custom-verify-retries-failed", error: err instanceof Error ? err.message : String(err) });
+  }
+
+  return s.verificationRetryCount;
+}
+
+function saveCustomVerifyRetryCounts(s: AutoSession): void {
+  const retryCounts = s.verificationRetryCount;
+  const filePath = customVerifyRetryStatePath(s);
+
+  try {
+    if (!retryCounts || retryCounts.size === 0) {
+      unlinkSync(filePath);
+      return;
+    }
+    mkdirSync(customVerifyRetryStateDir(s), { recursive: true });
+    atomicWriteSync(filePath, JSON.stringify({
+      counts: Object.fromEntries(retryCounts),
+      updatedAt: new Date().toISOString(),
+    }) + "\n");
+  } catch (err) {
+    const code = err && typeof err === "object" && "code" in err ? (err as { code?: string }).code : undefined;
+    if (code !== "ENOENT") {
+      debugLog("autoLoop", { phase: "save-custom-verify-retries-failed", error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+}
+
 // ── Memory pressure monitoring (#3331) ──────────────────────────────────
 // Check heap usage every N iterations and trigger graceful shutdown before
 // the OS OOM killer sends SIGKILL. The threshold is 90% of the V8 heap
 // limit (--max-old-space-size or default ~1.5-4GB depending on platform).
 const MEMORY_CHECK_INTERVAL = 5; // check every 5 iterations
 const MEMORY_PRESSURE_THRESHOLD = 0.85; // 85% of heap limit
+const MAX_CUSTOM_ENGINE_VERIFY_RETRIES = 3;
+
+type DispatchContract = "legacy-direct" | "uok-scheduler";
+
+interface AutoLoopOptions {
+  dispatchContract?: DispatchContract;
+}
 
 function checkMemoryPressure(): { pressured: boolean; heapMB: number; limitMB: number; pct: number } {
   const mem = process.memoryUsage();
@@ -95,22 +171,90 @@ function checkMemoryPressure(): { pressured: boolean; heapMB: number; limitMB: n
   return { pressured: pct > MEMORY_PRESSURE_THRESHOLD, heapMB, limitMB, pct };
 }
 
+function resolveDispatchNodeKind(
+  unitType: string,
+  sidecarItem?: SidecarItem,
+): UokGraphNode["kind"] {
+  if (sidecarItem?.kind === "hook") return "hook";
+  if (sidecarItem?.kind === "triage") return "verification";
+  if (sidecarItem?.kind === "quick-task") return "team-worker";
+
+  if (unitType.startsWith("hook/")) return "hook";
+  if (unitType === "reactive-execute") return "subagent";
+  if (
+    unitType === "gate-evaluate"
+    || unitType === "validate-milestone"
+    || unitType === "run-uat"
+    || unitType === "complete-slice"
+  ) {
+    return "verification";
+  }
+  if (unitType === "replan-slice" || unitType === "reassess-roadmap") {
+    return "reprocess";
+  }
+  return "unit";
+}
+
+async function runUnitPhaseViaContract(
+  dispatchContract: DispatchContract,
+  ic: IterationContext,
+  iterData: IterationData,
+  loopState: LoopState,
+  sidecarItem?: SidecarItem,
+): Promise<PhaseResult<{ unitStartedAt: number }>> {
+  if (dispatchContract === "legacy-direct") {
+    return runUnitPhase(ic, iterData, loopState, sidecarItem);
+  }
+
+  const scheduler = new ExecutionGraphScheduler();
+  let outcome: PhaseResult<{ unitStartedAt: number }> | null = null;
+  const executeNode = async (): Promise<void> => {
+    outcome = await runUnitPhase(ic, iterData, loopState, sidecarItem);
+  };
+  const kinds: UokGraphNode["kind"][] = [
+    "unit",
+    "hook",
+    "subagent",
+    "team-worker",
+    "verification",
+    "reprocess",
+  ];
+  for (const kind of kinds) scheduler.registerHandler(kind, executeNode);
+
+  const nodeId = `dispatch:${ic.iteration}:${iterData.unitType}:${iterData.unitId}`;
+  await scheduler.run([
+    {
+      id: nodeId,
+      kind: resolveDispatchNodeKind(iterData.unitType, sidecarItem),
+      dependsOn: [],
+      metadata: {
+        unitType: iterData.unitType,
+        unitId: iterData.unitId,
+      },
+    },
+  ], { parallel: false, maxWorkers: 1 });
+
+  return outcome ?? { action: "break", reason: "scheduler-dispatch-missing-result" };
+}
+
 /**
  * Main auto-mode execution loop. Iterates: derive → dispatch → guards →
  * runUnit → finalize → repeat. Exits when s.active becomes false or a
  * terminal condition is reached.
  *
  * This is the linear replacement for the recursive
- * dispatchNextUnit → handleAgentEnd → dispatchNextUnit chain.
+ * dispatchNextUnit → resolveAgentEnd → dispatchNextUnit chain.
  */
 export async function autoLoop(
   ctx: ExtensionContext,
   pi: ExtensionAPI,
   s: AutoSession,
   deps: LoopDeps,
+  options?: AutoLoopOptions,
 ): Promise<void> {
   debugLog("autoLoop", { phase: "enter" });
   let iteration = 0;
+  const dispatchContract = options?.dispatchContract ?? "legacy-direct";
   // Load persisted stuck state so counters survive session restarts (#3704)
   const persisted = loadStuckState(s.basePath);
   const loopState: LoopState = {
@@ -324,7 +468,12 @@ export async function autoLoop(
         }
 
         // ── Unit execution (shared with dev path) ──
-        const unitPhaseResult = await runUnitPhase(ic, iterData, loopState);
+        const unitPhaseResult = await runUnitPhaseViaContract(
+          dispatchContract,
+          ic,
+          iterData,
+          loopState,
+        );
         deps.uokObserver?.onPhaseResult("unit", unitPhaseResult.action, {
           unitType: iterData.unitType,
           unitId: iterData.unitId,
@@ -347,16 +496,51 @@ export async function autoLoop(
           break;
         }
         if (verifyResult === "retry") {
-          debugLog("autoLoop", { phase: "custom-engine-verify-retry", iteration, unitId: iterData.unitId });
+          const recoveryKey = `${iterData.unitType}/${iterData.unitId}`;
+          const retryCounts = hydrateCustomVerifyRetryCounts(s);
+          const attempts = (retryCounts.get(recoveryKey) ?? 0) + 1;
+          retryCounts.set(recoveryKey, attempts);
+          saveCustomVerifyRetryCounts(s);
+          debugLog("autoLoop", { phase: "custom-engine-verify-retry", iteration, unitId: iterData.unitId, attempts });
           deps.uokObserver?.onPhaseResult("custom-engine", "retry", {
             unitType: iterData.unitType,
             unitId: iterData.unitId,
+            attempts,
           });
+          if (attempts > MAX_CUSTOM_ENGINE_VERIFY_RETRIES) {
+            const recovery = await policy.recover(iterData.unitType, iterData.unitId, { basePath: s.basePath });
+            if (recovery.outcome === "pause") {
+              await deps.pauseAuto(ctx, pi);
+              finishTurn("paused", "manual-attention", recovery.reason ?? "custom-engine-verify-retry-exhausted");
+              break;
+            }
+            if (recovery.outcome === "skip") {
+              await deps.stopAuto(
+                ctx,
+                pi,
+                recovery.reason ??
+                  `Custom workflow verification for ${iterData.unitId} requested skip after retry exhaustion, but the custom engine cannot reconcile skipped steps.`,
+              );
+              finishTurn("stopped", "manual-attention", "custom-engine-verify-retry-exhausted");
+              break;
+            }
+            const exhaustedReason =
+              `Custom workflow verification for ${iterData.unitId} requested retry ${attempts} times without passing.`;
+            await deps.stopAuto(
+              ctx,
+              pi,
+              recovery.outcome === "stop" && recovery.reason ? recovery.reason : exhaustedReason,
+            );
+            finishTurn("stopped", "manual-attention", "custom-engine-verify-retry-exhausted");
+            break;
+          }
           finishTurn("retry");
           continue;
         }
 
         // Verification passed — mark step complete
+        s.verificationRetryCount?.delete(`${iterData.unitType}/${iterData.unitId}`);
+        saveCustomVerifyRetryCounts(s);
         debugLog("autoLoop", { phase: "custom-engine-reconcile", iteration, unitId: iterData.unitId });
         const reconcileResult = await engine.reconcile(engineState, {
           unitType: iterData.unitType,
@@ -469,7 +653,13 @@ export async function autoLoop(
         });
       }
 
-      const unitPhaseResult = await runUnitPhase(ic, iterData, loopState, sidecarItem);
+      const unitPhaseResult = await runUnitPhaseViaContract(
+        dispatchContract,
+        ic,
+        iterData,
+        loopState,
+        sidecarItem,
+      );
       deps.uokObserver?.onPhaseResult("unit", unitPhaseResult.action, {
         unitType: iterData.unitType,
         unitId: iterData.unitId,
@@ -502,6 +692,7 @@ export async function autoLoop(
       consecutiveCooldowns = 0;
       recentErrorMessages.length = 0;
       deps.emitJournalEvent({ ts: new Date().toISOString(), flowId, seq: nextSeq(), eventType: "iteration-end", data: { iteration } });
+      saveStuckState(s.basePath, loopState); // persist across session restarts (#4382)
       debugLog("autoLoop", { phase: "iteration-complete", iteration });
       finishTurn("completed");
     } catch (loopErr) {
@@ -512,6 +703,52 @@ export async function autoLoop(
       // completion even on failure (#2344). Without this, errors in
       // runFinalize leave the journal incomplete, making diagnosis harder.
       deps.emitJournalEvent({ ts: new Date().toISOString(), flowId, seq: nextSeq(), eventType: "iteration-end", data: { iteration, error: msg } });
+
+      // ── Pre-send model-policy block: not a retryable error (#4959 / #4850) ──
+      // The model-policy gate runs before the prompt is sent.  When every
+      // candidate model is denied (cross-provider disabled + flat-rate
+      // baseline + tool-policy denial), retrying the same unit produces the
+      // same denial — burning the consecutive-error budget toward a 3-strike
+      // hard stop and corrupting auto-mode state.  Pause for user attention
+      // instead, with the per-model deny reasons surfaced from the typed
+      // error.
+      if (loopErr instanceof ModelPolicyDispatchBlockedError) {
+        debugLog("autoLoop", {
+          phase: "model-policy-blocked",
+          iteration,
+          unitType: loopErr.unitType,
+          unitId: loopErr.unitId,
+          reasons: loopErr.reasons,
+        });
+        ctx.ui.notify(
+          `Auto-mode paused: model-policy denied dispatch for ${loopErr.unitType}/${loopErr.unitId}. ${msg}`,
+          "error",
+        );
+        deps.emitJournalEvent({
+          ts: new Date().toISOString(),
+          flowId,
+          seq: nextSeq(),
+          eventType: "unit-end",
+          data: {
+            unitType: loopErr.unitType,
+            unitId: loopErr.unitId,
+            status: "blocked",
+            reason: "model-policy-dispatch-blocked",
+            reasons: loopErr.reasons,
+          },
+        });
+        // Carry the blocked unit identity into the turn-result observer:
+        // the throw originated inside dispatch, so observedUnitType/Id were
+        // not assigned by the success path at lines 453/631/647 — but the
+        // typed error already names the unit (#4959 / CodeRabbit).
+        observedUnitType = loopErr.unitType;
+        observedUnitId = loopErr.unitId;
+        await deps.pauseAuto(ctx, pi);
+        finishTurn("paused", "manual-attention", msg);
+        // Do NOT increment consecutiveErrors — the failure is configuration,
+        // not a transient runtime fault.
+        break;
+      }
 
       // ── Infrastructure errors: immediate stop, no retry ──
       // These are unrecoverable (disk full, OOM, etc.). Retrying just burns
@@ -621,4 +858,22 @@ export async function autoLoop(
 
   _clearCurrentResolve();
   debugLog("autoLoop", { phase: "exit", totalIterations: iteration });
+}
+
+export async function runUokKernelLoop(
+  ctx: ExtensionContext,
+  pi: ExtensionAPI,
+  s: AutoSession,
+  deps: LoopDeps,
+): Promise<void> {
+  return autoLoop(ctx, pi, s, deps, { dispatchContract: "uok-scheduler" });
+}
+
+export async function runLegacyAutoLoop(
+  ctx: ExtensionContext,
+  pi: ExtensionAPI,
+  s: AutoSession,
+  deps: LoopDeps,
+): Promise<void> {
+  return autoLoop(ctx, pi, s, deps, { dispatchContract: "legacy-direct" });
 }

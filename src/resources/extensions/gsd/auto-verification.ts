@@ -5,9 +5,9 @@
  * dependency audits, handles auto-fix retry logic, and writes
  * verification evidence JSON.
  *
- * Extracted from handleAgentEnd() in auto.ts. Returns a sentinel
- * value instead of calling return/pauseAuto directly — the caller
- * checks the result and handles control flow.
+ * Extracted from the pre-loop agent_end handler in auto.ts. Returns a
+ * sentinel value instead of calling return/pauseAuto directly — the
+ * caller checks the result and handles control flow.
  */
 
 import type { ExtensionContext, ExtensionAPI } from "@gsd/pi-coding-agent";
@@ -524,6 +524,39 @@ export async function runPostUnitVerification(
     // Update result.passed based on post-execution checks
     if (postExecBlockingFailure) {
       result.passed = false;
+    }
+
+    // Emit Layer 2 verify_result event with the final, post-exec verdict so hooks
+    // see the authoritative pass/fail and the complete set of failures.
+    try {
+      const { emitVerifyResult } = await import("./hook-emitter.js");
+      const checkFailures = result.checks
+        .filter((c) => c.exitCode !== 0)
+        .map((c) => ({
+          kind: "gate" as const,
+          message: `${c.command} exited ${c.exitCode}${c.stderr ? `: ${c.stderr.slice(0, 200)}` : ""}`,
+        }));
+      const runtimeFailures = (result.runtimeErrors ?? [])
+        .filter((e) => e.blocking)
+        .map((e) => ({
+          kind: "other" as const,
+          message: `[${e.source}] ${e.message.slice(0, 200)}`,
+        }));
+      const postExecFailures = (postExecChecks ?? [])
+        .filter((c) => !c.passed)
+        .map((c) => ({
+          kind: "other" as const,
+          message: `[${c.category}] ${c.target}: ${c.message}`,
+        }));
+      await emitVerifyResult({
+        passed: result.passed,
+        failures: [...checkFailures, ...runtimeFailures, ...postExecFailures],
+        unitType: s.currentUnit.type,
+        unitId: s.currentUnit.id,
+        cwd: s.basePath,
+      });
+    } catch (hookErr) {
+      logWarning("engine", `verify_result hook emission failed: ${(hookErr as Error).message}`);
     }
 
     // ── Auto-fix retry logic ──

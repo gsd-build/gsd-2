@@ -9,5 +9,9 @@
     "sourceMap": false
   },
   "include": ["src/resources/extensions/**/*.ts"],
-  "exclude": ["src/resources/extensions/**/tests/**", "src/resources/extensions/**/*.test.ts", "src/resources/extensions/**/*.test.mts"]
+  "exclude": [
+    "src/resources/extensions/**/tests/**",
+    "src/resources/extensions/**/*.test.ts",
+    "src/resources/extensions/**/*.test.mts"
+  ]
 }

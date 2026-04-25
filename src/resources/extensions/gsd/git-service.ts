@@ -85,6 +85,22 @@ export interface GitPreferences {
    *  for forensic inspection.
    */
   absorb_snapshot_commits?: boolean;
+  /** #4765 — when to collapse worktree commits back to main.
+   *  - "milestone" (default): existing behavior — squash-merge happens once
+   *    at milestone completion or transition.
+   *  - "slice": squash-merge each slice's commits to main as soon as the
+   *    slice passes validation. Shrinks the orphan window from
+   *    milestone-size to slice-size and surfaces merge conflicts per slice
+   *    rather than all at once at milestone end.
+   */
+  collapse_cadence?: "milestone" | "slice";
+  /** #4765 — when `collapse_cadence: "slice"`, optionally re-squash the per-
+   *  slice commits on main into one milestone commit at milestone completion.
+   *  Preserves the "one commit per milestone in main" history shape that
+   *  `collapse_cadence: "milestone"` produces today.
+   *  Default: true when collapse_cadence is "slice", ignored otherwise.
+   */
+  milestone_resquash?: boolean;
 }
 
 export const VALID_BRANCH_NAME = /^[a-zA-Z0-9_\-\/.]+$/;
@@ -210,6 +226,7 @@ export interface PreMergeCheckResult {
  */
 export const RUNTIME_EXCLUSION_PATHS: readonly string[] = [
   ".gsd/activity/",
+  ".gsd/audit/",
   ".gsd/forensics/",
   ".gsd/runtime/",
   ".gsd/worktrees/",
@@ -760,7 +777,6 @@ export class GitServiceImpl {
    * Run pre-merge verification check. Auto-detects test runner from project
    * files, or uses custom command from prefs.pre_merge_check.
    * Gated on prefs.pre_merge_check (false = skip, string = custom command).
-   * Stub: to be implemented in T03.
    */
   runPreMergeCheck(): PreMergeCheckResult {
     if (this.prefs.pre_merge_check === false) {

@@ -3,14 +3,14 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev, test, 'hotfix/**']
     paths-ignore:
       - '.github/workflows/ai-triage.yml'
       - '.github/workflows/build-native.yml'
       - '.github/workflows/cleanup-dev-versions.yml'
       - 'LICENSE'
   pull_request:
-    branches: [main]
+    branches: [main, dev, test]
     paths-ignore:
       - '.github/workflows/ai-triage.yml'
       - '.github/workflows/build-native.yml'
@@ -116,6 +116,21 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: bash scripts/require-tests.sh
 
+      - name: Reject source-grep tests
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bash scripts/check-source-grep-tests.sh
+
+      - name: CodeRabbit-theme self-tests
+        run: node --test scripts/__tests__/check-coderabbit-themes.test.mjs
+
+      - name: Reject recurring CodeRabbit themes
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/check-coderabbit-themes.mjs
+
   build:
     timeout-minutes: 15
     needs: detect-changes
@@ -158,6 +173,9 @@ jobs:
 
       - name: Validate package is installable
         run: npm run validate-pack
+
+      - name: Verify workspace coverage (every linkable package has tests)
+        run: npm run verify:workspace-coverage
 
       - name: Run unit tests
         run: npm run test:unit

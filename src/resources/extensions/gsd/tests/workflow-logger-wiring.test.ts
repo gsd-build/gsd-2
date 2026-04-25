@@ -88,15 +88,24 @@ test("runFinalize drains and surfaces logger buffer via ctx.ui.notify", () => {
 });
 
 test("runFinalize timeout branches drain the buffer to prevent bleed", () => {
-  // Both timeout branches null out s.currentUnit — they should also drain
-  // so accumulated logs for the timed-out unit don't leak into the next.
+  // Both timeout branches route through failClosedOnFinalizeTimeout; that
+  // helper must drain the buffer so timed-out unit logs do not bleed into
+  // the next unit.
   const runFinalizeIdx = phasesSrc.indexOf("export async function runFinalize");
   const finalizeBody = phasesSrc.slice(runFinalizeIdx);
-  const drainCallCount =
-    (finalizeBody.match(/drainLogs\(\)/g) ?? []).length;
+  const timeoutHelperCalls =
+    (finalizeBody.match(/failClosedOnFinalizeTimeout\(/g) ?? []).length;
   assert.ok(
-    drainCallCount >= 2,
-    `runFinalize timeout branches should each call drainLogs() (found ${drainCallCount}, expected >= 2)`,
+    timeoutHelperCalls >= 2,
+    `runFinalize timeout branches should each route through failClosedOnFinalizeTimeout() (found ${timeoutHelperCalls}, expected >= 2)`,
+  );
+
+  const helperMatch = phasesSrc.match(
+    /async function failClosedOnFinalizeTimeout[\s\S]*?drainLogs\(\)/,
+  );
+  assert.ok(
+    helperMatch,
+    "failClosedOnFinalizeTimeout should drain the logger buffer before returning",
   );
 });
 

@@ -55,6 +55,7 @@ export function resolveModelWithFallbacksForUnit(unitType: string): ResolvedMode
       break;
     case "plan-milestone":
     case "plan-slice":
+    case "refine-slice":
     case "replan-slice":
       phaseConfig = m.planning;
       break;

@@ -117,6 +117,8 @@ export function snapshotState(): StateManifest {
     observability_impact: (r["observability_impact"] as string) ?? "",
     sequence: toNumeric(r["sequence"], 0) as number,
     replan_triggered_at: (r["replan_triggered_at"] as string) ?? null,
+    is_sketch: toNumeric(r["is_sketch"], 0) as number,
+    sketch_scope: (r["sketch_scope"] as string) ?? "",
   }));
 
   const rawTasks = db.prepare("SELECT * FROM tasks ORDER BY milestone_id, slice_id, sequence, id").all() as Record<string, unknown>[];
@@ -146,6 +148,11 @@ export function snapshotState(): StateManifest {
     observability_impact: (r["observability_impact"] as string) ?? "",
     full_plan_md: (r["full_plan_md"] as string) ?? "",
     sequence: toNumeric(r["sequence"], 0) as number,
+    blocker_source: (r["blocker_source"] as string) ?? "",
+    escalation_pending: toNumeric(r["escalation_pending"], 0) as number,
+    escalation_awaiting_review: toNumeric(r["escalation_awaiting_review"], 0) as number,
+    escalation_artifact_path: (r["escalation_artifact_path"] as string) ?? null,
+    escalation_override_applied_at: (r["escalation_override_applied_at"] as string) ?? null,
   }));
 
   const rawDecisions = db.prepare("SELECT * FROM decisions ORDER BY seq").all() as Record<string, unknown>[];
@@ -159,6 +166,7 @@ export function snapshotState(): StateManifest {
     rationale: (r["rationale"] as string) ?? "",
     revisable: (r["revisable"] as string) ?? "",
     made_by: (r["made_by"] as string as Decision["made_by"]) ?? "agent",
+    source: (r["source"] as string) ?? "discussion",
     superseded_by: (r["superseded_by"] as string) ?? null,
   }));
 
