@@ -130,6 +130,15 @@ test("vacuous-truth (a): unit type with empty workflow-required tools → dispat
     // → returns []. Exercises the empty-requiredTools branch in
     // applyModelPolicyFilter (CodeRabbit Minor: existing test used
     // gate-evaluate which has non-empty required tools and never hit this path).
+    //
+    // PREFERENCES with tier_models is required so resolvePreferredModelConfig
+    // returns a non-undefined modelConfig — only then does selectAndApplyModel
+    // run the policy filter we want to exercise.
+    writeFileSync(
+      join(env.dir, ".gsd", "PREFERENCES.md"),
+      ["---", "dynamic_routing:", "  enabled: true", "  tier_models:", "    heavy: anthropic/claude-sonnet-4-6", "---"].join("\n"),
+      "utf-8",
+    );
     const availableModels = [
       { id: "claude-sonnet-4-6", provider: "anthropic", api: "anthropic-messages" },
     ];
@@ -272,6 +281,15 @@ test("genuinely-impossible (a): workflow tool incompatible with candidate API �
     // Register the workflow tool as image-producing for the duration of this
     // test. afterEach() resets the registry below.
     registerToolCompatibility("gsd_plan_slice", { producesImages: true });
+
+    // PREFERENCES needs tier_models so resolvePreferredModelConfig returns a
+    // non-undefined modelConfig — without that, selectAndApplyModel skips the
+    // entire policy block and we never reach the tool-compat denial path.
+    writeFileSync(
+      join(env.dir, ".gsd", "PREFERENCES.md"),
+      ["---", "dynamic_routing:", "  enabled: true", "  tier_models:", "    heavy: ollama/ollama-llama-3", "---"].join("\n"),
+      "utf-8",
+    );
 
     const availableModels = [
       { id: "ollama-llama-3", provider: "ollama", api: "ollama-chat" },
