@@ -17,8 +17,18 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve, dirname, join, extname } from "node:path";
 import type { TaskRow } from "./gsd-db.ts";
 
-const CODE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
-const TS_ESM_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".cjs"]);
+const TYPESCRIPT_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
+const JAVASCRIPT_RUNTIME_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".cjs"]);
+const CODE_EXTENSIONS = [
+  ".ts",
+  ".tsx",
+  ".mts",
+  ".cts",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+];
 const SEALED_NON_CODE_EXTENSIONS = new Set([
   ".css",
   ".scss",
@@ -166,12 +176,11 @@ export function resolveImportPath(
   basePath: string
 ): { exists: boolean; resolvedPath: string | null } {
   const sourceDir = dirname(resolve(basePath, sourceFile));
-  const extensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
 
   // If the import already has an explicit extension, check it as-is first.
   // For known sealed extensions, a miss stays missing. Unknown dotted suffixes
   // such as `.test-utils` are treated as part of the TypeScript stem (#4659).
-  const explicitExt = extname(importPath);
+  const explicitExt = extname(importPath).toLowerCase();
   if (explicitExt !== "") {
     const directPath = resolve(sourceDir, importPath);
     if (existsSync(directPath)) {
@@ -181,7 +190,7 @@ export function resolveImportPath(
     // requests. Do not let `./missing.css` accidentally resolve to
     // `./missing.css.ts`. JS-family extensions fall through for TS ESM below.
     if (
-      (CODE_EXTENSIONS.has(explicitExt) && !TS_ESM_EXTENSIONS.has(explicitExt))
+      TYPESCRIPT_EXTENSIONS.has(explicitExt)
       || SEALED_NON_CODE_EXTENSIONS.has(explicitExt)
     ) {
       return { exists: false, resolvedPath: null };
@@ -191,18 +200,12 @@ export function resolveImportPath(
   // Handle TypeScript ESM convention: .js imports resolve to .ts files
   // e.g., import './types.js' -> ./types.ts
   let normalizedPath = importPath;
-  if (importPath.endsWith(".js")) {
-    normalizedPath = importPath.slice(0, -3);
-  } else if (importPath.endsWith(".jsx")) {
-    normalizedPath = importPath.slice(0, -4);
-  } else if (importPath.endsWith(".mjs")) {
-    normalizedPath = importPath.slice(0, -4);
-  } else if (importPath.endsWith(".cjs")) {
-    normalizedPath = importPath.slice(0, -4);
+  if (JAVASCRIPT_RUNTIME_EXTENSIONS.has(explicitExt)) {
+    normalizedPath = importPath.slice(0, -explicitExt.length);
   }
 
   // Try the normalized path with common extensions
-  for (const ext of extensions) {
+  for (const ext of CODE_EXTENSIONS) {
     const fullPath = resolve(sourceDir, normalizedPath + ext);
     if (existsSync(fullPath)) {
       return { exists: true, resolvedPath: fullPath };
@@ -210,7 +213,7 @@ export function resolveImportPath(
   }
 
   // Try as a directory with index file
-  for (const ext of extensions) {
+  for (const ext of CODE_EXTENSIONS) {
     const indexPath = resolve(sourceDir, normalizedPath, `index${ext}`);
     if (existsSync(indexPath)) {
       return { exists: true, resolvedPath: indexPath };
@@ -234,8 +237,8 @@ export function checkImportResolution(
 
   // Get files from key_files
   const filesToCheck = taskRow.key_files.filter((f) => {
-    const ext = extname(f);
-    return [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"].includes(ext);
+    const ext = extname(f).toLowerCase();
+    return CODE_EXTENSIONS.includes(ext);
   });
 
   for (const file of filesToCheck) {
