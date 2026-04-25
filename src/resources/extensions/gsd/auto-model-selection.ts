@@ -96,23 +96,17 @@ function restoreToolBaseline(pi: ExtensionAPI): void {
   if (baseline === undefined) {
     // First call: capture the canonical pre-dispatch tool set.  At auto-mode
     // start the active set has not yet been narrowed for any provider.
-    try {
-      const initial = pi.getActiveTools();
-      TOOL_BASELINE.set(key, [...initial]);
-    } catch {
-      // Some test fakes don't implement getActiveTools yet — record an empty
-      // baseline so subsequent calls don't keep retrying.
-      TOOL_BASELINE.set(key, []);
-    }
+    // Guarded against test fakes that omit getActiveTools — record an empty
+    // baseline so subsequent calls don't keep re-probing.
+    const initial = typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [];
+    TOOL_BASELINE.set(key, [...initial]);
     return;
   }
   // Restore baseline before the next unit reads getActiveTools / applies
-  // post-selection adjustToolSet.
-  try {
+  // post-selection adjustToolSet.  Older fakes that omit setActiveTools are
+  // tolerated — the test asserts call order on real fakes.
+  if (typeof pi.setActiveTools === "function") {
     pi.setActiveTools([...baseline]);
-  } catch {
-    // setActiveTools may not exist on older fakes; ignore — the test asserts
-    // call order only, not throw-safety.
   }
 }
 
