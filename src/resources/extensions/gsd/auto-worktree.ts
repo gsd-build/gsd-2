@@ -1528,8 +1528,13 @@ export function ensureCleanWorkingTree(basePath: string): { stashed: boolean; cl
       stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf-8",
     }).trim();
-  } catch {
-    return { stashed: false, cleaned };
+  } catch (err) {
+    throw new GSDError(
+      GSD_GIT_ERROR,
+      `Failed to inspect working tree before merge: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
   }
 
   if (!status) {
@@ -1541,7 +1546,7 @@ export function ensureCleanWorkingTree(basePath: string): { stashed: boolean; cl
   try {
     execFileSync(
       "git",
-      ["stash", "push", "--include-untracked", "-m", `gsd: pre-merge clean state`],
+      ["stash", "push", "-m", `gsd: pre-merge clean state`],
       { cwd: basePath, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" },
     );
     stashed = true;
@@ -1563,8 +1568,13 @@ export function ensureCleanWorkingTree(basePath: string): { stashed: boolean; cl
         stdio: ["ignore", "pipe", "pipe"],
         encoding: "utf-8",
       }).trim();
-    } catch {
-      status = "";
+    } catch (err) {
+      throw new GSDError(
+        GSD_GIT_ERROR,
+        `Failed to verify working tree after abort+reset: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     }
 
     if (status) {

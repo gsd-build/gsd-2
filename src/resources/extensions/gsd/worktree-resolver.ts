@@ -683,10 +683,12 @@ export class WorktreeResolver {
         });
       }
 
-      // Error recovery: always restore to project root
+      // Error recovery: always attempt to restore to project root
+      let restoredCwd = false;
       if (originalBase) {
         try {
           process.chdir(originalBase);
+          restoredCwd = true;
         } catch (chdirErr) {
           debugLog("WorktreeResolver", {
             action: "mergeAndExit",
@@ -701,8 +703,10 @@ export class WorktreeResolver {
       // conflicts and stop instead of retrying forever (#2330).
       // Restore basePath BEFORE re-throwing so s.basePath stays in sync
       // with process.cwd() — prevents downstream path desync (#3141).
+      // Only call restoreToProjectRoot() when chdir actually succeeded;
+      // otherwise s.basePath would diverge from process.cwd().
       if (err instanceof MergeConflictError) {
-        this.restoreToProjectRoot();
+        if (restoredCwd) this.restoreToProjectRoot();
         throw err;
       }
     }
