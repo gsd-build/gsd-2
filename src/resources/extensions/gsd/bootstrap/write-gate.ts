@@ -1,5 +1,17 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
+
+import { minimatch } from "minimatch";
+
+/**
+ * Declarative tools-policy for a unit. Inlined here because the worktree
+ * branch predates the full unit-context-manifest export (#4934).
+ */
+export type ToolsPolicy =
+  | { mode: "all" }
+  | { mode: "read-only" }
+  | { mode: "planning" }
+  | { mode: "docs"; allowedPathGlobs: readonly string[] };
 
 /**
  * Regex matching milestone CONTEXT.md file names in both legacy M001
@@ -97,8 +109,15 @@ export interface WriteGateSnapshot {
   pendingGateId: string | null;
 }
 
+/**
+ * Persistence is ON by default (opt-out).
+ * Set GSD_PERSIST_WRITE_GATE_STATE="0" or GSD_PERSIST_WRITE_GATE_STATE="false"
+ * to disable. All other values — including unset — persist the snapshot.
+ * (Inverted from the original opt-in guard; see #4950.)
+ */
 function shouldPersistWriteGateSnapshot(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.GSD_PERSIST_WRITE_GATE_STATE === "1";
+  const v = env.GSD_PERSIST_WRITE_GATE_STATE;
+  return v !== "0" && v !== "false";
 }
 
 function writeGateSnapshotPath(basePath: string = process.cwd()): string {
@@ -117,9 +136,20 @@ function persistWriteGateSnapshot(basePath: string = process.cwd()): void {
   if (!shouldPersistWriteGateSnapshot()) return;
   const path = writeGateSnapshotPath(basePath);
   mkdirSync(join(basePath, ".gsd", "runtime"), { recursive: true });
-  const tempPath = `${path}.tmp`;
+  const tempPath = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
   writeFileSync(tempPath, JSON.stringify(currentWriteGateSnapshot(), null, 2), "utf-8");
-  renameSync(tempPath, path);
+  try {
+    renameSync(tempPath, path);
+  } catch (err: unknown) {
+    // EXDEV: cross-device rename (temp and dest on different mounts). Fall back
+    // to copy-then-delete so the snapshot is still written atomically enough.
+    if (err instanceof Error && (err as NodeJS.ErrnoException).code === "EXDEV") {
+      copyFileSync(tempPath, path);
+      unlinkSync(tempPath);
+    } else {
+      throw err;
+    }
+  }
 }
 
 function clearPersistedWriteGateSnapshot(basePath: string = process.cwd()): void {
@@ -359,9 +389,9 @@ export function isDepthConfirmationAnswer(
     return typeof confirmLabel === "string" && value === confirmLabel;
   }
 
-  // Fallback when options aren't available (e.g., older call sites):
-  // accept only if it contains "(Recommended)" — the prompt convention suffix.
-  return value.includes("(Recommended)");
+  // Fail-closed: no options means we cannot structurally validate the answer.
+  // Returning false prevents any free-form string from unlocking the gate.
+  return false;
 }
 
 export function shouldBlockContextWrite(
@@ -502,4 +532,117 @@ export function shouldBlockQueueExecutionInSnapshot(
     block: true,
     reason: `Blocked: /gsd queue is a planning tool — it creates milestones, not executes work. Unknown tools are not permitted during queue mode.`,
   };
+}
+
+// ─── Planning-unit tools-policy enforcement (#4934) ───────────────────────
+
+const PLANNING_WRITE_TOOLS = new Set(["write", "edit", "multi_edit", "notebook_edit"]);
+const PLANNING_SUBAGENT_TOOLS = new Set(["subagent", "task"]);
+
+const PLANNING_SAFE_TOOLS = new Set([
+  "read", "grep", "find", "ls", "glob",
+  "ask_user_questions",
+  "search-the-web", "resolve_library", "get_library_docs", "fetch_page",
+  "search_and_read",
+]);
+
+function isPathUnderGsd(absPath: string, basePath: string): boolean {
+  const gsdRoot = resolve(basePath, ".gsd");
+  const rel = relative(gsdRoot, absPath);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function matchesAllowedGlob(absPath: string, basePath: string, globs: readonly string[]): boolean {
+  const rel = relative(basePath, absPath);
+  if (rel.startsWith("..") || isAbsolute(rel)) return false;
+  const posix = rel.split(sep).join("/");
+  return globs.some(g => minimatch(posix, g, { dot: false, nocase: false }));
+}
+
+function blockReason(unitType: string, mode: string, what: string): string {
+  return [
+    `HARD BLOCK: unit "${unitType}" runs under tools-policy "${mode}" — ${what}.`,
+    `This is a mechanical gate enforced by manifest.tools (#4934). You MUST NOT proceed,`,
+    `retry the same call, or rationalize past this block. If you need to write user source,`,
+    `the work belongs in execute-task, not in a planning unit.`,
+  ].join(" ");
+}
+
+/**
+ * Planning-unit tool-policy enforcement. Returns { block } per the policy
+ * resolved from the active unit's manifest:
+ *
+ *   - "all"        → never blocks.
+ *   - "read-only"  → blocks all writes, bash, and subagent dispatch.
+ *   - "planning"   → blocks writes to paths outside <basePath>/.gsd/,
+ *                    bash that isn't read-only, and subagent dispatch.
+ *   - "docs"       → like "planning" but also allows writes to paths
+ *                    matching `allowedPathGlobs` relative to basePath.
+ *
+ * `policy` of null means "no manifest resolved" — pass-through.
+ */
+export function shouldBlockPlanningUnit(
+  toolName: string,
+  pathOrCommand: string,
+  basePath: string,
+  unitType: string,
+  policy: ToolsPolicy | null | undefined,
+): { block: boolean; reason?: string } {
+  if (!policy) return { block: false };
+  if (policy.mode === "all") return { block: false };
+
+  const tool = toolName;
+
+  if (policy.mode === "read-only") {
+    if (PLANNING_SAFE_TOOLS.has(tool)) return { block: false };
+    if (tool.startsWith("gsd_")) return { block: false };
+    if (PLANNING_WRITE_TOOLS.has(tool) || tool === "bash" || PLANNING_SUBAGENT_TOOLS.has(tool)) {
+      return { block: true, reason: blockReason(unitType, policy.mode, `${tool} is not permitted (read-only)`) };
+    }
+    return { block: true, reason: blockReason(unitType, policy.mode, `tool "${tool}" is not on the read-only allowlist`) };
+  }
+
+  // planning / docs modes
+  if (PLANNING_SAFE_TOOLS.has(tool)) return { block: false };
+  if (tool.startsWith("gsd_")) return { block: false };
+
+  if (PLANNING_SUBAGENT_TOOLS.has(tool)) {
+    return { block: true, reason: blockReason(unitType, policy.mode, `subagent dispatch is not permitted in planning units`) };
+  }
+
+  if (tool === "bash") {
+    if (BASH_READ_ONLY_RE.test(pathOrCommand)) return { block: false };
+    return {
+      block: true,
+      reason: blockReason(
+        unitType,
+        policy.mode,
+        `bash is restricted to read-only commands (cat/grep/git log/etc); cannot run "${pathOrCommand.slice(0, 80)}${pathOrCommand.length > 80 ? "…" : ""}"`,
+      ),
+    };
+  }
+
+  if (PLANNING_WRITE_TOOLS.has(tool)) {
+    if (!pathOrCommand) {
+      return { block: true, reason: blockReason(unitType, policy.mode, `${tool} called with empty path`) };
+    }
+    const absPath = isAbsolute(pathOrCommand) ? pathOrCommand : resolve(basePath, pathOrCommand);
+
+    if (isPathUnderGsd(absPath, basePath)) return { block: false };
+
+    if (policy.mode === "docs" && matchesAllowedGlob(absPath, basePath, policy.allowedPathGlobs)) {
+      return { block: false };
+    }
+
+    return {
+      block: true,
+      reason: blockReason(
+        unitType,
+        policy.mode,
+        `cannot ${tool} "${pathOrCommand}" — writes are restricted to .gsd/${policy.mode === "docs" ? " and " + policy.allowedPathGlobs.join(", ") : ""}`,
+      ),
+    };
+  }
+
+  return { block: false };
 }

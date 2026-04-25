@@ -347,7 +347,11 @@ export async function selectAndApplyModel(
         );
         const availableModelIds = routingEligibleModels.map(m => `${m.provider}/${m.id}`);
 
-        // Escalate tier on retry when escalate_on_failure is enabled (default: true)
+        // Escalate tier on retry when escalate_on_failure is enabled (default: true).
+        // #4973: Deterministic policy errors are short-circuited at the postUnit
+        // level (auto-post-unit.ts writes a placeholder and returns "continue"),
+        // so this code path only runs for legitimate model-quality retries where
+        // tier escalation is the right response.
         if (
           retryContext?.isRetry &&
           retryContext.previousTier &&
@@ -361,6 +365,17 @@ export async function selectAndApplyModel(
               `Tier escalation: ${retryContext.previousTier} → ${escalated} (retry after failure)`,
               "info",
             );
+          } else {
+            // #4973: Already at max tier — keep previousTier rather than letting
+            // fresh classification silently downgrade the model back to a lower tier.
+            // Without this, a light-start unit on retry 3 would revert to the light
+            // model after escalating to heavy on retries 1 and 2.
+            const tierOrder: Record<string, number> = { light: 0, standard: 1, heavy: 2 };
+            const prevOrder = tierOrder[retryContext.previousTier] ?? 0;
+            const freshOrder = tierOrder[classification.tier] ?? 0;
+            if (prevOrder > freshOrder) {
+              classification = { ...classification, tier: retryContext.previousTier as ComplexityTier, reason: "retained escalated tier from retry" };
+            }
           }
         }
 

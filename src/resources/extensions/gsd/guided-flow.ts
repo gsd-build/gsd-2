@@ -315,12 +315,29 @@ function extractAssistantText(msg: any): string {
 
 /**
  * Return true if the assistant message contains any tool-use block.
+ *
+ * The canonical pi-ai `AssistantMessage.content` (see packages/pi-ai/src/types.ts)
+ * uses `type: "toolCall"` and `type: "serverToolUse"` for tool invocations —
+ * every provider (anthropic-direct, claude-code-cli, openai, etc.) normalizes
+ * incoming tool blocks into these two shapes before they reach guided-flow.
+ *
+ * The Anthropic API wire shape `"tool_use"` / `"server_tool_use"` does NOT appear
+ * in the internal AssistantMessage — those literals are only used when sending
+ * messages back out to the Anthropic API. Matching them here was a latent bug:
+ * `hasToolUse` returned `false` for every real tool call, which let the
+ * empty-turn nudge fire and pre-empt MCP tools that block on the user
+ * (e.g. `ask_user_questions`). See investigation in PR for #4658.
  */
 function hasToolUse(msg: any): boolean {
   if (!msg) return false;
   const content = msg.content;
   if (!Array.isArray(content)) return false;
-  return content.some((b: any) => b && typeof b === "object" && (b.type === "tool_use" || b.type === "tool-use"));
+  return content.some(
+    (b: any) =>
+      b &&
+      typeof b === "object" &&
+      (b.type === "toolCall" || b.type === "serverToolUse"),
+  );
 }
 
 /**
