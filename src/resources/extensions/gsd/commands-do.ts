@@ -7,13 +7,13 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent";
 
-interface Route {
+export interface DoRoute {
   keywords: string[];
   command: string;
   acceptsArgs?: boolean;
 }
 
-const ROUTES: Route[] = [
+export const ROUTES: DoRoute[] = [
   { keywords: ["progress", "status", "dashboard", "how far", "where are we", "show me progress"], command: "status" },
   { keywords: ["auto", "autonomous", "run all", "keep going", "start auto", "run autonomously"], command: "auto", acceptsArgs: true },
   { keywords: ["stop", "halt", "abort"], command: "stop" },
@@ -44,17 +44,21 @@ const ROUTES: Route[] = [
   { keywords: ["debug", "debug session", "investigate", "troubleshoot", "diagnose issue"], command: "debug", acceptsArgs: true },
 ];
 
-interface MatchResult {
+export interface MatchResult {
   command: string;
   remainingArgs: string;
   score: number;
 }
 
-function escapeRegExp(value: string): string {
+interface CompiledRoute extends DoRoute {
+  patterns: Array<{ keyword: string; regex: RegExp }>;
+}
+
+export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function keywordPattern(keyword: string, acceptsArgs: boolean): RegExp {
+export function keywordPattern(keyword: string, acceptsArgs: boolean): RegExp {
   const escaped = keyword
     .trim()
     .split(/\s+/)
@@ -65,13 +69,21 @@ function keywordPattern(keyword: string, acceptsArgs: boolean): RegExp {
     : new RegExp(`^${escaped}$`, "i");
 }
 
-function matchRoute(input: string): MatchResult | null {
+const COMPILED_ROUTES: CompiledRoute[] = ROUTES.map((route) => ({
+  ...route,
+  patterns: route.keywords.map((keyword) => ({
+    keyword,
+    regex: keywordPattern(keyword, route.acceptsArgs === true),
+  })),
+}));
+
+export function matchRoute(input: string): MatchResult | null {
   const trimmed = input.trim();
   let bestMatch: MatchResult | null = null;
 
-  for (const route of ROUTES) {
-    for (const keyword of route.keywords) {
-      const match = trimmed.match(keywordPattern(keyword, route.acceptsArgs === true));
+  for (const route of COMPILED_ROUTES) {
+    for (const { keyword, regex } of route.patterns) {
+      const match = trimmed.match(regex);
       if (match) {
         const score = keyword.length; // Longer match = higher confidence
         if (!bestMatch || score > bestMatch.score) {

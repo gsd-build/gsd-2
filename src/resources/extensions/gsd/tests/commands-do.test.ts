@@ -1,92 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-// ─── Mock dispatcher to capture routed commands ─────────────────────────
-
-let lastRouted: string | null = null;
-let lastQuick: string | null = null;
-
-const mockCtx = {
-  ui: {
-    notify: (_msg: string, _level: string) => {},
-  },
-} as any;
-
-// We test the keyword matching logic directly since the handler imports
-// the dispatcher dynamically (which requires the full extension runtime).
-
-// Inline the route-matching logic from commands-do.ts for unit testing.
-interface Route {
-  keywords: string[];
-  command: string;
-  acceptsArgs?: boolean;
-}
-
-const ROUTES: Route[] = [
-  { keywords: ["progress", "status", "dashboard", "how far", "where are we", "show me progress"], command: "status" },
-  { keywords: ["auto", "autonomous", "run all", "keep going", "start auto", "run autonomously"], command: "auto", acceptsArgs: true },
-  { keywords: ["stop", "halt", "abort"], command: "stop" },
-  { keywords: ["pause", "break", "take a break"], command: "pause" },
-  { keywords: ["history", "past", "what happened", "previous"], command: "history", acceptsArgs: true },
-  { keywords: ["doctor", "health", "diagnose", "check health"], command: "doctor", acceptsArgs: true },
-  { keywords: ["clean up", "cleanup", "remove old", "prune", "tidy"], command: "cleanup" },
-  { keywords: ["ship", "pull request", "create pr", "open pr", "merge"], command: "ship", acceptsArgs: true },
-  { keywords: ["discuss", "talk about", "architecture", "design"], command: "discuss" },
-  { keywords: ["undo", "revert", "rollback", "take back"], command: "undo" },
-  { keywords: ["skip", "skip task", "skip this"], command: "skip", acceptsArgs: true },
-  { keywords: ["visualize", "viz", "graph", "chart", "show graph"], command: "visualize" },
-  { keywords: ["capture", "note", "idea", "thought", "remember"], command: "capture", acceptsArgs: true },
-  { keywords: ["inspect", "database", "sqlite", "db state"], command: "inspect" },
-  { keywords: ["session report", "session summary", "cost summary", "how much"], command: "session-report", acceptsArgs: true },
-  { keywords: ["backlog", "parking lot", "later", "someday"], command: "backlog" },
-  { keywords: ["add tests", "write tests", "generate tests", "test coverage"], command: "add-tests", acceptsArgs: true },
-  { keywords: ["next", "step", "next step", "what's next"], command: "next", acceptsArgs: true },
-  { keywords: ["logs", "debug logs", "log files"], command: "logs", acceptsArgs: true },
-  { keywords: ["debug", "debug session", "investigate", "troubleshoot", "diagnose issue"], command: "debug", acceptsArgs: true },
-];
-
-interface MatchResult {
-  command: string;
-  remainingArgs: string;
-  score: number;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function keywordPattern(keyword: string, acceptsArgs: boolean): RegExp {
-  const escaped = keyword
-    .trim()
-    .split(/\s+/)
-    .map(escapeRegExp)
-    .join("\\s+");
-  return acceptsArgs
-    ? new RegExp(`^${escaped}(?:\\s+(.+))?$`, "i")
-    : new RegExp(`^${escaped}$`, "i");
-}
-
-function matchRoute(input: string): MatchResult | null {
-  const trimmed = input.trim();
-  let bestMatch: MatchResult | null = null;
-
-  for (const route of ROUTES) {
-    for (const keyword of route.keywords) {
-      const match = trimmed.match(keywordPattern(keyword, route.acceptsArgs === true));
-      if (match) {
-        const score = keyword.length;
-        if (!bestMatch || score > bestMatch.score) {
-          const remaining = route.acceptsArgs === true ? (match[1] ?? "").trim() : "";
-          bestMatch = { command: route.command, remainingArgs: remaining, score };
-        }
-      }
-    }
-  }
-
-  return bestMatch;
-}
+import { matchRoute, ROUTES } from "../commands-do.ts";
 
 // ─── Tests ──────────────────────────────────────────────────────────────
+
+test("/gsd do: tests use the canonical route table", () => {
+  const commands = new Set(ROUTES.map((route) => route.command));
+  for (const command of [
+    "export",
+    "queue",
+    "knowledge",
+    "pr-branch",
+    "migrate",
+    "steer",
+    "park",
+    "widget",
+  ]) {
+    assert.ok(commands.has(command), `expected canonical route table to include ${command}`);
+  }
+});
 
 test("/gsd do: routes exact progress intent to status", () => {
   const match = matchRoute("show me progress");
@@ -107,7 +40,7 @@ test("/gsd do: routes bare cleanup intent to cleanup", () => {
   assert.equal(match.remainingArgs, "");
 });
 
-test("/gsd do: does not route no-arg cleanup when sentence has extra words", () => {
+test("/gsd do: cleanup sentence stays a quick-task phrase instead of a partial cleanup command", () => {
   const match = matchRoute("clean up old branches");
   assert.equal(match, null);
 });
@@ -132,6 +65,11 @@ test("/gsd do: routes 'what is next' to next", () => {
 
 test("/gsd do: returns null for unrecognized input", () => {
   const match = matchRoute("florbinate the gizmo");
+  assert.equal(match, null);
+});
+
+test("/gsd do: full progress sentence stays a quick-task phrase", () => {
+  const match = matchRoute("How Far Along Are We on the mobile app");
   assert.equal(match, null);
 });
 
