@@ -89,6 +89,7 @@ export class AutoSession {
   activeEngineId: string | null = null;
   activeRunDir: string | null = null;
   cmdCtx: ExtensionCommandContext | null = null;
+  eventBus: ExtensionAPI["events"] | null = null;
 
   // ── Paths ────────────────────────────────────────────────────────────────
   basePath = "";
@@ -106,6 +107,10 @@ export class AutoSession {
   readonly unitDispatchCount = new Map<string, number>();
   readonly unitLifetimeDispatches = new Map<string, number>();
   readonly unitRecoveryCount = new Map<string, number>();
+  /** Async job ids started during each unit execution (keyed by type:id:startedAt). */
+  readonly unitAsyncJobIds = new Map<string, Set<string>>();
+  /** Bounded set of async job ids whose late completion messages should be dropped. */
+  readonly ignoredAsyncJobIds = new Set<string>();
 
   // ── Timers ───────────────────────────────────────────────────────────────
   unitTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
@@ -243,6 +248,7 @@ export class AutoSession {
     this.activeEngineId = null;
     this.activeRunDir = null;
     this.cmdCtx = null;
+    this.eventBus = null;
 
     // Paths
     this.basePath = "";
@@ -260,6 +266,8 @@ export class AutoSession {
     this.unitDispatchCount.clear();
     this.unitLifetimeDispatches.clear();
     this.unitRecoveryCount.clear();
+    this.unitAsyncJobIds.clear();
+    this.ignoredAsyncJobIds.clear();
 
     // Unit
     this.currentUnit = null;
