@@ -71,7 +71,7 @@ test("register-hooks writes CONTINUE checkpoint during planning phase without ac
     },
   } as any;
 
-  registerHooks(pi);
+  registerHooks(pi, []);
 
   const compactHandlers = handlers.get("session_before_compact");
   assert.ok(compactHandlers && compactHandlers.length > 0, "session_before_compact handler should be registered");
