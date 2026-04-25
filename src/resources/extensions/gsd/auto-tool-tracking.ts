@@ -87,20 +87,32 @@ export function clearInFlightTools(): void {
 // ─── Tool invocation error classification (#2883) ────────────────────────
 
 /**
- * Patterns that indicate a tool invocation failed due to malformed or truncated
- * JSON arguments — as opposed to a normal business-logic error from the tool
- * handler. When these errors occur, retrying the same unit will produce the same
- * failure, so the retry loop must be broken.
+ * Patterns that indicate a tool invocation failed deterministically before
+ * useful work could be completed — as opposed to a normal business-logic error
+ * from the tool handler. When these errors occur, retrying the same unit will
+ * produce the same failure, so the retry loop must be broken.
  */
 const TOOL_INVOCATION_ERROR_RE = /Validation failed for tool|Expected ',' or '\}'(?: after property value)?(?: in JSON)?|Unexpected end of JSON|Unexpected token.*in JSON/i;
+const DETERMINISTIC_POLICY_ERROR_RE = /(?:^|\b)(?:HARD BLOCK:|Blocked: \/gsd queue is a planning tool|Direct writes to \.gsd\/STATE\.md and \.gsd\/gsd\.db are blocked|This is a mechanical gate)/i;
 
 /**
- * Returns true if the error message indicates a tool invocation failure due to
- * malformed/truncated arguments (as opposed to a normal tool execution error).
+ * Returns true if the error message indicates a deterministic invocation or
+ * policy failure (as opposed to a normal tool execution error).
  */
 export function isToolInvocationError(errorMsg: string): boolean {
   if (!errorMsg) return false;
-  return TOOL_INVOCATION_ERROR_RE.test(errorMsg);
+  return TOOL_INVOCATION_ERROR_RE.test(errorMsg) || isDeterministicPolicyError(errorMsg);
+}
+
+/**
+ * Returns true if the error message indicates a deterministic policy gate
+ * blocked the tool call before execution. Retrying the same unit without
+ * changing behavior will hit the same gate, so auto-mode should pause instead
+ * of re-dispatching.
+ */
+export function isDeterministicPolicyError(errorMsg: string): boolean {
+  if (!errorMsg) return false;
+  return DETERMINISTIC_POLICY_ERROR_RE.test(errorMsg);
 }
 
 /**

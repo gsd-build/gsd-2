@@ -110,6 +110,38 @@ export interface DispatchRule {
   match: (ctx: DispatchContext) => Promise<DispatchAction | null>;
 }
 
+async function readUatGateVerdict(
+  basePath: string,
+  mid: string,
+  sliceId: string,
+): Promise<{ verdict: string; uatType: UatType | undefined } | null> {
+  const uatFile = resolveSliceFile(basePath, mid, sliceId, "UAT");
+  const assessmentFile = resolveSliceFile(basePath, mid, sliceId, "ASSESSMENT");
+
+  const uatContent = uatFile ? await loadFile(uatFile) : null;
+  const uatType = uatContent ? extractUatType(uatContent) : undefined;
+
+  const assessmentContent = assessmentFile ? await loadFile(assessmentFile) : null;
+  if (assessmentContent) {
+    const assessmentVerdict = extractVerdict(assessmentContent);
+    if (assessmentVerdict) {
+      return {
+        verdict: assessmentVerdict,
+        uatType: uatType ?? extractUatType(assessmentContent),
+      };
+    }
+  }
+
+  if (uatContent) {
+    const legacyUatVerdict = extractVerdict(uatContent);
+    if (legacyUatVerdict) {
+      return { verdict: legacyUatVerdict, uatType };
+    }
+  }
+
+  return null;
+}
+
 function missingSliceStop(mid: string, phase: string): DispatchAction {
   return {
     action: "stop",
@@ -349,27 +381,28 @@ export const DISPATCH_RULES: DispatchRule[] = [
       // Only applies when UAT dispatch is enabled
       if (!prefs?.uat_dispatch) return null;
 
-      const roadmapFile = resolveMilestoneFile(basePath, mid, "ROADMAP");
-
-      // DB-first: get completed slices from DB
-      let completedSliceIds: string[];
+      // DB-first: prefer closed slices from DB; fall back to ROADMAP on disk.
+      let closedSliceIds: string[];
       if (isDbAvailable()) {
-        completedSliceIds = getMilestoneSlices(mid)
-          .filter(s => s.status === "complete")
+        closedSliceIds = getMilestoneSlices(mid)
+          .filter(s => isClosedStatus(s.status))
           .map(s => s.id);
       } else {
-        return null;
+        // Filesystem fallback for degraded / unmigrated projects.
+        // `slice.done` in the parsed ROADMAP is the disk-level closed signal.
+        const roadmapFile = resolveMilestoneFile(basePath, mid, "ROADMAP");
+        const roadmapContent = roadmapFile ? await loadFile(roadmapFile) : null;
+        if (!roadmapContent) return null;
+        const roadmap = parseRoadmap(roadmapContent);
+        closedSliceIds = roadmap.slices.filter(s => s.done).map(s => s.id);
       }
 
-      for (const sliceId of completedSliceIds) {
-        const resultFile = resolveSliceFile(basePath, mid, sliceId, "UAT");
-        if (!resultFile) continue;
-        const content = await loadFile(resultFile);
-        if (!content) continue;
-        const verdict = extractVerdict(content);
-        const uatType = extractUatType(content);
+      for (const sliceId of closedSliceIds) {
+        const result = await readUatGateVerdict(basePath, mid, sliceId);
+        if (!result) continue;
+        const { verdict, uatType } = result;
 
-        if (verdict && !isAcceptableUatVerdict(verdict, uatType)) {
+        if (!isAcceptableUatVerdict(verdict, uatType)) {
           return {
             action: "stop" as const,
             reason: `UAT verdict for ${sliceId} is "${verdict}" — blocking progression until resolved.\nReview the UAT result and update the verdict to PASS, or re-run /gsd auto after fixing.`,

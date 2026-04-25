@@ -393,7 +393,7 @@ export function registerHooks(
     if (isAutoActive() && typeof event.toolCallId === "string") {
       markToolEnd(event.toolCallId);
     }
-    if (isAutoActive() && event.isError && event.toolName.startsWith("gsd_")) {
+    if (isAutoActive() && event.isError) {
       const resultPayload = ("result" in event ? event.result : undefined) as any;
       const errorText = typeof resultPayload === "string"
         ? resultPayload
@@ -489,9 +489,9 @@ export function registerHooks(
 
   pi.on("tool_execution_end", async (event) => {
     markToolEnd(event.toolCallId);
-    // #2883: Capture tool invocation errors (malformed/truncated JSON arguments)
+    // #2883/#4974: Capture deterministic invocation/policy errors
     // so postUnitPreVerification can break the retry loop instead of re-dispatching.
-    if (event.isError && event.toolName.startsWith("gsd_")) {
+    if (event.isError) {
       const errorText = typeof event.result === "string"
         ? event.result
         : (typeof event.result?.content?.[0]?.text === "string" ? event.result.content[0].text : String(event.result));

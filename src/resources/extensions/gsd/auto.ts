@@ -333,6 +333,25 @@ function normalizeSessionFilePath(raw: unknown): string | null {
   return candidate;
 }
 
+function synthesizePausedSessionRecovery(
+  basePath: string,
+  unitType: string,
+  unitId: string,
+  sessionFile: string,
+): ReturnType<typeof synthesizeCrashRecovery> {
+  const activityDir = join(gsdRoot(basePath), "activity");
+  return synthesizeCrashRecovery(basePath, unitType, unitId, sessionFile, activityDir);
+}
+
+export function _synthesizePausedSessionRecoveryForTest(
+  basePath: string,
+  unitType: string,
+  unitId: string,
+  sessionFile: string,
+): ReturnType<typeof synthesizeCrashRecovery> {
+  return synthesizePausedSessionRecovery(basePath, unitType, unitId, sessionFile);
+}
+
 export function startAutoDetached(
   ctx: ExtensionCommandContext,
   pi: ExtensionAPI,
@@ -1567,16 +1586,6 @@ export async function startAuto(
       return;
     }
 
-    // Lock acquired — now safe to delete the pause file
-    if (s.pausedSessionFile) {
-      try { unlinkSync(s.pausedSessionFile); } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-          logWarning("session", `pause file cleanup failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
-        }
-      }
-      s.pausedSessionFile = null;
-    }
-
     s.paused = false;
     s.active = true;
     s.verbose = verboseMode;
@@ -1674,13 +1683,11 @@ export async function startAuto(
     invalidateAllCaches();
 
     if (s.pausedSessionFile) {
-      const activityDir = join(gsdRoot(s.basePath), "activity");
-      const recovery = synthesizeCrashRecovery(
+      const recovery = synthesizePausedSessionRecovery(
         s.basePath,
         s.currentUnit?.type ?? s.pausedUnitType ?? "unknown",
         s.currentUnit?.id ?? s.pausedUnitId ?? "unknown",
-        s.pausedSessionFile ?? undefined,
-        activityDir,
+        s.pausedSessionFile,
       );
       if (recovery && recovery.trace.toolCallCount > 0) {
         s.pendingCrashRecovery = recovery.prompt;

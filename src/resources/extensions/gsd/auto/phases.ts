@@ -201,6 +201,7 @@ async function closeoutAndStop(
       s.currentUnit.startedAt,
       deps.buildSnapshotOpts(s.currentUnit.type, s.currentUnit.id),
     );
+    s.currentUnit = null;
   }
   await deps.stopAuto(ctx, pi, reason);
 }
@@ -2105,6 +2106,8 @@ export async function runFinalize(
 
   // Both pre and post verification completed without timeout — reset counter
   loopState.consecutiveFinalizeTimeouts = 0;
+  s.currentUnit = null;
+  clearCurrentPhase();
 
   // Surface accumulated workflow-logger issues for this unit to the user.
   // Warnings/errors logged during the unit are buffered in the logger and
