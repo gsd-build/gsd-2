@@ -110,8 +110,9 @@ export class UokGateRunner {
     let attempt = 0;
     let final: GateResult | null = null;
     const maxAttemptsByFailureClass = RETRY_MATRIX;
+    const maxAttemptsCeiling = Math.max(...Object.values(RETRY_MATRIX)) + 1;
 
-    while (attempt < 3) {
+    while (attempt < maxAttemptsCeiling) {
       attempt += 1;
       const now = new Date().toISOString();
       const result = await gate.execute(ctx, attempt);
