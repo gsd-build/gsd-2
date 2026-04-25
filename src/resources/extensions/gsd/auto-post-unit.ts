@@ -72,6 +72,7 @@ import { UokGateRunner } from "./uok/gate-runner.js";
 import { writeTurnGitTransaction } from "./uok/gitops.js";
 import { isClosedStatus } from "./status-guards.js";
 import { detectAbandonMilestone } from "./abandon-detect.js";
+import { isDeterministicPolicyError } from "./auto-tool-tracking.js";
 
 const COMPLETE_MILESTONE_DB_SETTLE_MS = 1500;
 const COMPLETE_MILESTONE_DB_SETTLE_POLL_MS = 100;
@@ -915,11 +916,31 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
       // unbounded loops (#2007).
       //
       // Pre-checks short-circuit retry for known-unrecoverable failures:
+      // - Deterministic policy rejection (#4973): structural write-gate failure
+      //   that will recur on every retry, so write a blocker placeholder.
       // - DB infra failure (#2517): completion tool returned db_unavailable, so
       //   the artifact was never written. Retrying can never succeed.
       // - Tool invocation error (#2883/#3595): malformed JSON args or queued
       //   user message — retry will produce the same failure.
-      if (!triggerArtifactVerified && !isDbAvailable()) {
+      //
+      // #4973: Deterministic policy rejections (e.g. context_write_blocked from the
+      // write-gate) are checked FIRST — before the DB-availability check — because
+      // they are structural gates that will fire on every retry regardless of DB or
+      // model tier. Short-circuit immediately by writing a blocker placeholder.
+      if (!triggerArtifactVerified && s.lastToolInvocationError && isDeterministicPolicyError(s.lastToolInvocationError)) {
+        const retryKey = `${s.currentUnit.type}:${s.currentUnit.id}`;
+        debugLog("postUnit", { phase: "deterministic-policy-error-placeholder", unitType: s.currentUnit.type, unitId: s.currentUnit.id, error: s.lastToolInvocationError });
+        const reason = `Deterministic policy rejection for ${s.currentUnit.type} "${s.currentUnit.id}": ${s.lastToolInvocationError}. Retrying cannot resolve this gate — writing blocker placeholder to advance pipeline.`;
+        s.lastToolInvocationError = null;
+        s.pendingVerificationRetry = null;
+        s.verificationRetryCount.delete(retryKey);
+        writeBlockerPlaceholder(s.currentUnit.type, s.currentUnit.id, s.basePath, reason);
+        ctx.ui.notify(
+          `${s.currentUnit.type} ${s.currentUnit.id} — deterministic policy rejection, wrote blocker placeholder (no retries) (#4973)`,
+          "warning",
+        );
+        // Fall through to "continue" — do NOT enter the retry or db-unavailable paths.
+      } else if (!triggerArtifactVerified && !isDbAvailable()) {
         debugLog("postUnit", { phase: "artifact-verify-skip-db-unavailable", unitType: s.currentUnit.type, unitId: s.currentUnit.id });
         const dbSkipDiag = diagnoseExpectedArtifact(s.currentUnit.type, s.currentUnit.id, s.basePath);
         ctx.ui.notify(
@@ -938,7 +959,6 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
           await pauseAuto(ctx, pi);
           return "dispatched";
         }
-
 
         const hasExpectedArtifact = resolveExpectedArtifactPath(s.currentUnit.type, s.currentUnit.id, s.basePath) !== null;
         if (hasExpectedArtifact) {

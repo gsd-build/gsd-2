@@ -61,6 +61,8 @@ import { resolveUokFlags } from "./uok/flags.js";
 import { selectReactiveDispatchBatch } from "./uok/execution-graph.js";
 import { getMilestonePipelineVariant } from "./milestone-scope-classifier.js";
 import { EXECUTION_ENTRY_PHASES, hasFinalizedMilestoneContext } from "./uok/plan-v2.js";
+import { isAutoActive } from "./auto.js";
+import { markDepthVerified } from "./bootstrap/write-gate.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -308,6 +310,16 @@ export const DISPATCH_RULES: DispatchRule[] = [
       // Align with the plan-v2 gate's lookup semantics: whitespace-only counts
       // as missing, and an auto worktree may fall back to GSD_PROJECT_ROOT.
       if (hasFinalizedMilestoneContext(basePath, mid)) return null;
+      // H6 fix (#4973): In auto-mode there is no human to answer the
+      // depth-verification ask_user_questions, so the write-gate deadlocks.
+      // Pre-mark the milestone as depth-verified so gsd_summary_save({artifact_type:"CONTEXT"})
+      // is not blocked. Safe ordering: session_switch fires clearDiscussionFlowState()
+      // (register-hooks.ts:106) before before_agent_start, which fires before resolveDispatch
+      // reaches this match fn — so this call always happens after any session-switch reset.
+      // Interactive sessions (isAutoActive()===false) are unaffected.
+      if (isAutoActive()) {
+        markDepthVerified(mid, basePath);
+      }
       return {
         action: "dispatch",
         unitType: "discuss-milestone",
@@ -444,6 +456,12 @@ export const DISPATCH_RULES: DispatchRule[] = [
     name: "needs-discussion → discuss-milestone",
     match: async ({ state, mid, midTitle, basePath, structuredQuestionsAvailable }) => {
       if (state.phase !== "needs-discussion") return null;
+      // H6 fix (#4973): auto-mark depth-verified so the write-gate does not
+      // deadlock in non-interactive (auto-mode) runs. See ordering note at
+      // "execution-entry phase (no context) → discuss-milestone" above.
+      if (isAutoActive()) {
+        markDepthVerified(mid, basePath);
+      }
       return {
         action: "dispatch",
         unitType: "discuss-milestone",
@@ -464,6 +482,12 @@ export const DISPATCH_RULES: DispatchRule[] = [
       const contextFile = resolveMilestoneFile(basePath, mid, "CONTEXT");
       const hasContext = !!(contextFile && (await loadFile(contextFile)));
       if (hasContext) return null; // fall through to next rule
+      // H6 fix (#4973): auto-mark depth-verified so the write-gate does not
+      // deadlock in non-interactive (auto-mode) runs. See ordering note at
+      // "execution-entry phase (no context) → discuss-milestone" above.
+      if (isAutoActive()) {
+        markDepthVerified(mid, basePath);
+      }
       return {
         action: "dispatch",
         unitType: "discuss-milestone",

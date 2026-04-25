@@ -124,3 +124,35 @@ export function isQueuedUserMessageSkip(errorMsg: string): boolean {
   if (!errorMsg) return false;
   return /^Skipped due to queued user message\.?$/i.test(errorMsg.trim());
 }
+
+// ─── Deterministic policy error classification (#4973) ─────────────────────
+
+/**
+ * Known deterministic policy error substrings. Each entry is a stable string
+ * that will appear in the tool error text content when the corresponding
+ * policy gate fires. Retrying these errors will always produce the same outcome.
+ *
+ * Add new entries here as new deterministic gates are introduced. Do NOT use
+ * regex — explicit substrings keep the list auditable.
+ */
+export const DETERMINISTIC_POLICY_ERROR_STRINGS = [
+  // gsd_summary_save write-gate: CONTEXT artifact blocked pending depth verification (#4973).
+  // Matches the fallback text in workflow-tool-executors.ts and the verbose reason
+  // from shouldBlockContextArtifactSaveInSnapshot at write-gate.ts:432-442.
+  "context write blocked",
+  "CONTEXT without depth verification",
+  // Raw write tool gate (#4973): shouldBlockContextWrite at write-gate.ts:390-399 emits
+  // "Cannot write to milestone CONTEXT.md without depth verification." for direct
+  // write tool calls to *-CONTEXT.md paths (different code path than gsd_summary_save).
+  "CONTEXT.md without depth verification",
+] as const;
+
+/**
+ * Returns true if the error message indicates a deterministic policy rejection
+ * (a structural gate that will fire on every retry regardless of model quality).
+ * Used by postUnitPreVerification to short-circuit the retry loop (#4973).
+ */
+export function isDeterministicPolicyError(errorMsg: string): boolean {
+  if (!errorMsg) return false;
+  return DETERMINISTIC_POLICY_ERROR_STRINGS.some(s => errorMsg.includes(s));
+}

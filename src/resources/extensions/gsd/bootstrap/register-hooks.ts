@@ -402,6 +402,8 @@ export function registerHooks(
             : (typeof (event as any).content === "string"
                 ? (event as any).content
                 : String(resultPayload ?? "")));
+      // Let recordToolInvocationError classify the failure so non-gsd_ harness
+      // errors and deterministic policy rejections are handled consistently.
       recordToolInvocationError(event.toolName, errorText);
     }
     if (event.toolName !== "ask_user_questions") return;
@@ -495,6 +497,8 @@ export function registerHooks(
       const errorText = typeof event.result === "string"
         ? event.result
         : (typeof event.result?.content?.[0]?.text === "string" ? event.result.content[0].text : String(event.result));
+      // Let recordToolInvocationError classify the failure so non-gsd_ harness
+      // errors and deterministic policy rejections are handled consistently.
       recordToolInvocationError(event.toolName, errorText);
     }
     // Safety harness: record tool execution results for evidence cross-referencing
