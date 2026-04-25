@@ -104,16 +104,9 @@ export function isToolInvocationError(errorMsg: string): boolean {
   return TOOL_INVOCATION_ERROR_RE.test(errorMsg) || isDeterministicPolicyError(errorMsg);
 }
 
-/**
- * Returns true if the error message indicates a deterministic policy gate
- * blocked the tool call before execution. Retrying the same unit without
- * changing behavior will hit the same gate, so auto-mode should pause instead
- * of re-dispatching.
- */
-export function isDeterministicPolicyError(errorMsg: string): boolean {
-  if (!errorMsg) return false;
-  return DETERMINISTIC_POLICY_ERROR_RE.test(errorMsg);
-}
+// (isDeterministicPolicyError merged below — see "Deterministic policy error
+// classification" section. The merged definition checks BOTH the regex and the
+// substring list to preserve behaviour from the two original definitions.)
 
 /**
  * Returns true if the error message indicates the tool was skipped because
@@ -149,10 +142,12 @@ export const DETERMINISTIC_POLICY_ERROR_STRINGS = [
 
 /**
  * Returns true if the error message indicates a deterministic policy rejection
- * (a structural gate that will fire on every retry regardless of model quality).
- * Used by postUnitPreVerification to short-circuit the retry loop (#4973).
+ * — either a regex-matched policy gate (HARD BLOCK, queue, etc.) or one of the
+ * known substring markers from #4973. Retrying these errors will always
+ * produce the same outcome, so auto-mode should pause rather than re-dispatch.
  */
 export function isDeterministicPolicyError(errorMsg: string): boolean {
   if (!errorMsg) return false;
+  if (DETERMINISTIC_POLICY_ERROR_RE.test(errorMsg)) return true;
   return DETERMINISTIC_POLICY_ERROR_STRINGS.some(s => errorMsg.includes(s));
 }
