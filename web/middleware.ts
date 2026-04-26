@@ -11,16 +11,48 @@ import { NextResponse, type NextRequest } from "next/server"
  * Additionally, if an `Origin` header is present, it must match the expected
  * localhost origin to prevent cross-site request forgery.
  */
+
+// Routes that must pass through even while shutdown is pending.
+// /api/boot cancels a pending shutdown; /api/shutdown initiates one.
+const SHUTDOWN_EXEMPT_PREFIXES = ["/api/boot", "/api/shutdown"]
+
+/**
+ * Read shutdown-pending state from the HMR-safe globalThis singleton that
+ * shutdown-gate.ts writes. Accessing globalThis directly (rather than
+ * importing shutdown-gate) avoids pulling Node.js-only APIs (process.on,
+ * process.exit) into the middleware Edge Runtime context.
+ */
+function isShutdownPending(): boolean {
+  const gate = (
+    globalThis as { __gsdShutdownGate?: { shutdownTimer: unknown } | null }
+  ).__gsdShutdownGate
+  return gate != null && gate.shutdownTimer != null
+}
+
 export function middleware(request: NextRequest): NextResponse | undefined {
   const { pathname } = request.nextUrl
 
   // Only gate API routes
   if (!pathname.startsWith("/api/")) return NextResponse.next()
 
+  // ── Shutdown guard ─────────────────────────────────────────────────
+  // While a graceful shutdown is pending, reject new work so in-flight
+  // requests can drain before process.exit(). Boot and shutdown routes
+  // are exempt — boot must be able to cancel the pending shutdown.
+  if (
+    isShutdownPending() &&
+    !SHUTDOWN_EXEMPT_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  ) {
+    return NextResponse.json(
+      { error: "Server is shutting down" },
+      { status: 503 },
+    )
+  }
+
   const expectedToken = process.env.GSD_WEB_AUTH_TOKEN
   if (!expectedToken) {
     // If no token was configured (e.g. dev mode without launch harness),
-    // allow everything — the server didn't opt into auth.
+
     return NextResponse.next()
   }
 
