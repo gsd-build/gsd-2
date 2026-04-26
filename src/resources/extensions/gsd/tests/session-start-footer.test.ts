@@ -74,13 +74,19 @@ test("session_switch toggles gsd-health from runtime auto state without touching
     `gsd-session-switch-widget-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   );
   mkdirSync(join(dir, ".gsd"), { recursive: true });
+  const tempGsdHome = join(dir, "home");
+  mkdirSync(tempGsdHome, { recursive: true });
 
   const originalCwd = process.cwd();
+  const originalGsdHome = process.env.GSD_HOME;
+  process.env.GSD_HOME = tempGsdHome;
   process.chdir(dir);
   autoSession.reset();
   t.after(() => {
     autoSession.reset();
     process.chdir(originalCwd);
+    if (originalGsdHome === undefined) delete process.env.GSD_HOME;
+    else process.env.GSD_HOME = originalGsdHome;
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
   });
 

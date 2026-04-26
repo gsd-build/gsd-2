@@ -461,6 +461,33 @@ if (cliFlags.messages[0] === 'auto') {
   await runHeadlessFromAuto(buildHeadlessAutoArgs(cliFlags))
 }
 
+// ---------------------------------------------------------------------------
+// Worktree subcommand — `gsd worktree <list|merge|clean|remove>`
+// ---------------------------------------------------------------------------
+if (
+  !isPrintMode &&
+  cliFlags.listModels === undefined &&
+  (cliFlags.messages[0] === 'worktree' || cliFlags.messages[0] === 'wt')
+) {
+  const { handleList, handleMerge, handleClean, handleRemove } = await import('./worktree-cli.js')
+  const sub = cliFlags.messages[1]
+  const subArgs = cliFlags.messages.slice(2)
+
+  if (!sub || sub === 'list') {
+    await handleList(process.cwd())
+  } else if (sub === 'merge') {
+    await handleMerge(process.cwd(), subArgs)
+  } else if (sub === 'clean') {
+    await handleClean(process.cwd())
+  } else if (sub === 'remove' || sub === 'rm') {
+    await handleRemove(process.cwd(), subArgs)
+  } else {
+    process.stderr.write(`Unknown worktree command: ${sub}\n`)
+    process.stderr.write('Commands: list, merge [name], clean, remove <name>\n')
+  }
+  process.exit(0)
+}
+
 const {
   AuthStorage,
   DefaultResourceLoader,
@@ -694,29 +721,6 @@ if (isPrintMode) {
 }
 
 // ---------------------------------------------------------------------------
-// Worktree subcommand — `gsd worktree <list|merge|clean|remove>`
-// ---------------------------------------------------------------------------
-if (cliFlags.messages[0] === 'worktree' || cliFlags.messages[0] === 'wt') {
-  const { handleList, handleMerge, handleClean, handleRemove } = await import('./worktree-cli.js')
-  const sub = cliFlags.messages[1]
-  const subArgs = cliFlags.messages.slice(2)
-
-  if (!sub || sub === 'list') {
-    await handleList(process.cwd())
-  } else if (sub === 'merge') {
-    await handleMerge(process.cwd(), subArgs)
-  } else if (sub === 'clean') {
-    await handleClean(process.cwd())
-  } else if (sub === 'remove' || sub === 'rm') {
-    await handleRemove(process.cwd(), subArgs)
-  } else {
-    process.stderr.write(`Unknown worktree command: ${sub}\n`)
-    process.stderr.write('Commands: list, merge [name], clean, remove <name>\n')
-  }
-  process.exit(0)
-}
-
-// ---------------------------------------------------------------------------
 // Worktree flag (-w) — create/resume a worktree for the interactive session
 // ---------------------------------------------------------------------------
 if (cliFlags.worktree) {
@@ -775,7 +779,9 @@ markStartup('initResources')
 // Overlap resource loading with session manager setup — both are independent.
 // resourceLoader.reload() is the most expensive step (jiti compilation), so
 // starting it early shaves ~50-200ms off interactive startup.
-const resourceLoader = await buildResourceLoader(agentDir)
+const resourceLoader = await buildResourceLoader(agentDir, {
+  additionalExtensionPaths: cliFlags.extensions.length > 0 ? cliFlags.extensions : undefined,
+})
 const resourceLoadPromise = resourceLoader.reload()
 
 // While resources load, let session manager finish any async I/O it needs.

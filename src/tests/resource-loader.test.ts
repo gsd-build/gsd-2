@@ -104,6 +104,32 @@ test("buildResourceLoader excludes duplicate top-level pi extensions when bundle
   );
 });
 
+test("buildResourceLoader includes caller-provided additional extension paths", async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), "gsd-resource-loader-cli-"));
+  const fakeAgentDir = join(tmp, ".gsd", "agent");
+  const cliExtensionPath = join(tmp, "cli-extension.ts");
+  const restoreHomeEnv = overrideHomeEnv(tmp);
+
+  t.after(() => {
+    restoreHomeEnv();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  writeFileSync(cliExtensionPath, "export {};\n");
+
+  const { buildResourceLoader } = await import("../resource-loader.ts");
+  const loader = await buildResourceLoader(fakeAgentDir, {
+    additionalExtensionPaths: [cliExtensionPath],
+  }) as { additionalExtensionPaths?: string[] };
+  const additionalExtensionPaths = loader.additionalExtensionPaths ?? [];
+
+  assert.equal(
+    additionalExtensionPaths.includes(cliExtensionPath),
+    true,
+    "caller-provided extension paths should be threaded into the resource loader",
+  );
+});
+
 test("initResources manifest tracks all bundled extension subdirectories including remote-questions (#2367)", async () => {
   const { initResources } = await import("../resource-loader.ts");
   const tmp = mkdtempSync(join(tmpdir(), "gsd-resource-loader-manifest-"));

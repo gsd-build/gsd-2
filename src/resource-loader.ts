@@ -764,7 +764,14 @@ function getBundledExtensionKeys(): Set<string> {
   return _bundledExtensionKeys
 }
 
-export async function buildResourceLoader(agentDir: string): Promise<DefaultResourceLoaderType> {
+interface BuildResourceLoaderOptions {
+  additionalExtensionPaths?: string[]
+}
+
+export async function buildResourceLoader(
+  agentDir: string,
+  options: BuildResourceLoaderOptions = {},
+): Promise<DefaultResourceLoaderType> {
   const { DefaultResourceLoader, sortExtensionPaths } = await loadPiCodingAgentModule()
   const registry = loadRegistry()
   const piAgentDir = join(homedir(), '.pi', 'agent')
@@ -777,10 +784,14 @@ export async function buildResourceLoader(agentDir: string): Promise<DefaultReso
       if (!manifest) return true
       return isExtensionEnabled(registry, manifest.id)
     })
+  const additionalExtensionPaths = [
+    ...piExtensionPaths,
+    ...(options.additionalExtensionPaths ?? []),
+  ]
 
   return new DefaultResourceLoader({
     agentDir,
-    additionalExtensionPaths: piExtensionPaths,
+    additionalExtensionPaths,
     bundledExtensionKeys: bundledKeys,
     extensionPathsTransform: (paths: string[]) => {
       // 1. Filter community extensions through the GSD registry
