@@ -128,7 +128,6 @@ import {
 } from "./metrics.js";
 import { setLogBasePath, logWarning, logError } from "./workflow-logger.js";
 import { preflightCleanRoot, postflightPopStash } from "./clean-root-preflight.js";
-import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readFileSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
@@ -250,6 +249,7 @@ export type {
   StartModel,
 } from "./auto/session.js";
 import { autoSession as s } from "./auto-runtime-state.js";
+import { gsdHome } from "./gsd-home.js";
 
 // ── ENCAPSULATION INVARIANT ─────────────────────────────────────────────────
 // ALL mutable auto-mode state lives in the AutoSession class (auto/session.ts).
@@ -1651,7 +1651,7 @@ export async function startAuto(
     // tree; deployed extensions live at ~/.gsd/agent/extensions/gsd/ where the
     // relative path resolves to ~/.gsd/agent/resource-loader.js which doesn't exist.
     // Using GSD_PKG_ROOT constructs a correct absolute path in both contexts (#3949).
-    const agentDir = process.env.GSD_CODING_AGENT_DIR || join(process.env.GSD_HOME || homedir(), ".gsd", "agent");
+    const agentDir = process.env.GSD_CODING_AGENT_DIR || join(gsdHome(), "agent");
     const pkgRoot = process.env.GSD_PKG_ROOT;
     const resourceLoaderPath = pkgRoot
       ? pathToFileURL(join(pkgRoot, "dist", "resource-loader.js")).href

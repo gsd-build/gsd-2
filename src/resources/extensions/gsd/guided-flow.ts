@@ -25,7 +25,7 @@ import {
 } from "./interrupted-session.js";
 import { listUnitRuntimeRecords, clearUnitRuntimeRecord } from "./unit-runtime.js";
 import { resolveExpectedArtifactPath } from "./auto.js";
-import { getHomeDir } from "./home-dir.js";
+import { gsdHome } from "./gsd-home.js";
 import {
   gsdRoot, milestonesDir, resolveMilestoneFile, resolveMilestonePath,
   resolveSliceFile, resolveSlicePath, resolveGsdRootFile, relGsdRootFile,
@@ -608,7 +608,7 @@ async function dispatchWorkflow(
     });
   }
 
-  const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(getHomeDir(), ".gsd", "agent", "GSD-WORKFLOW.md");
+  const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(gsdHome(), "agent", "GSD-WORKFLOW.md");
   const workflow = readFileSync(workflowPath, "utf-8");
 
   pi.sendMessage(

@@ -19,7 +19,6 @@ import {
   lstatSync as lstatSyncFn,
 } from "node:fs";
 import { isAbsolute, join, sep as pathSep } from "node:path";
-import { homedir } from "node:os";
 import { GSDError, GSD_IO_ERROR, GSD_GIT_ERROR } from "./errors.js";
 import {
   reconcileWorktreeDb,
@@ -75,8 +74,8 @@ import {
   nativeIsAncestor,
   nativeMergeAbort,
 } from "./native-git-bridge.js";
+import { gsdHome } from "./gsd-home.js";
 
-const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
 const PROJECT_PREFERENCES_FILE = "PREFERENCES.md";
 const LEGACY_PROJECT_PREFERENCES_FILE = "preferences.md";
 
@@ -478,7 +477,7 @@ export function syncStateToProjectRoot(
  */
 export function readResourceVersion(): string | null {
   const agentDir =
-    process.env.GSD_CODING_AGENT_DIR || join(gsdHome, "agent");
+    process.env.GSD_CODING_AGENT_DIR || join(gsdHome(), "agent");
   const manifestPath = join(agentDir, "managed-resources.json");
   try {
     const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
@@ -541,9 +540,9 @@ export function escapeStaleWorktree(base: string): string {
   // the string-slice heuristic matched the wrong /.gsd/ boundary. This happens
   // when .gsd is a symlink into ~/.gsd/projects/<hash> and process.cwd()
   // resolved through the symlink. Returning ~ would be catastrophic (#1676).
-  const candidateGsd = join(projectRoot, ".gsd").replaceAll("\\", "/");
-  const gsdHomePath = gsdHome.replaceAll("\\", "/");
-  if (candidateGsd === gsdHomePath || candidateGsd.startsWith(gsdHomePath + "/")) {
+  const candidateGsd = normalizeWorktreePathForCompare(join(projectRoot, ".gsd"));
+  const gsdHomeNorm = normalizeWorktreePathForCompare(gsdHome());
+  if (candidateGsd === gsdHomeNorm || candidateGsd.startsWith(gsdHomeNorm + "/")) {
     // Don't chdir to home — return base unchanged.
     // resolveProjectRoot() in worktree.ts has the full git-file-based recovery
     // and will be called by the caller (startAuto → projectRoot()).
