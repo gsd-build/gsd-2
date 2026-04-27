@@ -19,8 +19,45 @@ import type {
 import { parseNDJsonStream } from "./ndjson-stream.js";
 
 const DEFAULT_HOST = "http://localhost:11434";
-const PROBE_TIMEOUT_MS = 1500;
-const REQUEST_TIMEOUT_MS = 10000;
+const DEFAULT_PROBE_TIMEOUT_MS = 1500;
+const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
+export const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+/**
+ * Parse a positive integer from an environment variable, falling back to
+ * `fallback` when the var is unset, empty, non-numeric, zero, or negative.
+ *
+ * Defensive parsing: a typo like `OLLAMA_PROBE_TIMEOUT_MS=abc` or
+ * `OLLAMA_PROBE_TIMEOUT_MS=0` should not silently disable the timeout —
+ * fall back to the documented default instead.
+ */
+export function envPositiveInt(name: string, fallback: number): number {
+	const raw = process.env[name];
+	if (!raw) return fallback;
+	const parsed = Number.parseInt(raw, 10);
+	if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+	return Math.min(parsed, MAX_TIMER_DELAY_MS);
+}
+
+/**
+ * Effective probe timeout for the startup `isRunning()` health check.
+ * Override with `OLLAMA_PROBE_TIMEOUT_MS=<ms>` for slower networks (LAN
+ * Ollama hosts, cloud endpoints, contended cold starts).
+ *
+ * Resolved at call time — tests and downstream callers can mutate
+ * `process.env` between invocations and pick up the new value.
+ */
+export function getProbeTimeoutMs(): number {
+	return envPositiveInt("OLLAMA_PROBE_TIMEOUT_MS", DEFAULT_PROBE_TIMEOUT_MS);
+}
+
+/**
+ * Effective per-request timeout for REST calls. Override with
+ * `OLLAMA_REQUEST_TIMEOUT_MS=<ms>`.
+ */
+export function getRequestTimeoutMs(): number {
+	return envPositiveInt("OLLAMA_REQUEST_TIMEOUT_MS", DEFAULT_REQUEST_TIMEOUT_MS);
+}
 
 /**
  * Get the Ollama host URL from OLLAMA_HOST or default.
@@ -57,7 +94,7 @@ function withAuth(options: RequestInit = {}): RequestInit {
 	};
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = getRequestTimeoutMs()): Promise<Response> {
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), timeoutMs);
 	try {
@@ -77,7 +114,7 @@ export async function isRunning(): Promise<boolean> {
 		const host = getOllamaHost();
 		const isCloud = host.includes("ollama.com") || host.includes("cloud");
 		const probeUrl = isCloud ? `${host}/api/tags` : `${host}/`;
-		const timeout = isCloud ? REQUEST_TIMEOUT_MS : PROBE_TIMEOUT_MS;
+		const timeout = isCloud ? getRequestTimeoutMs() : getProbeTimeoutMs();
 		const response = await fetchWithTimeout(probeUrl, isCloud ? { method: "GET" } : {}, timeout);
 		return response.ok;
 	} catch {

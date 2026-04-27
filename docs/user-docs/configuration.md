@@ -194,6 +194,15 @@ Each line is one JSON object with this shape:
 
 Telemetry is emitted per assistant API attempt, not per user turn. If a provider call records an error and auto-retry runs, the failed attempt can produce a line with `stopReason: "error"`, and each retry attempt that reaches an assistant message produces its own line. Keep all lines for billed-attempt accounting; group with session logs or timestamps downstream if you need a deduplicated final-response view.
 
+### Ollama
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL. A bare `host:port` value is treated as `http://host:port`. |
+| `OLLAMA_API_KEY` | (none) | Bearer token for remote or cloud Ollama endpoints. Local Ollama ignores this header. |
+| `OLLAMA_PROBE_TIMEOUT_MS` | `1500` | Startup health-check timeout in milliseconds. Unset, empty, non-numeric, zero, or negative values fall back to the default. Values above `2147483647` ms are capped to Node.js's maximum timer delay. |
+| `OLLAMA_REQUEST_TIMEOUT_MS` | `10000` | Per-request REST timeout in milliseconds. Unset, empty, non-numeric, zero, or negative values fall back to the default. Values above `2147483647` ms are capped to Node.js's maximum timer delay. |
+
 ## All Settings
 
 ### `models`
