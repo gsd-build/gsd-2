@@ -17,6 +17,22 @@
 import { execFileSync } from "node:child_process";
 
 /**
+ * Spawn the Claude CLI without triggering Node's DEP0190.
+ *
+ * Passing `args` together with `shell: true` is deprecated in Node 22+
+ * because the args are concatenated into the command string without
+ * escaping. On Windows we still need a shell to resolve `.cmd` shims, so
+ * we invoke `cmd /c <command> <args...>` explicitly. On POSIX we don't
+ * need a shell at all.
+ */
+function spawnClaude(command: string, args: string[], opts: { timeout: number; stdio: "pipe" }): Buffer {
+	if (process.platform === "win32") {
+		return execFileSync("cmd", ["/c", command, ...args], opts);
+	}
+	return execFileSync(command, args, opts);
+}
+
+/**
  * Candidate executable names for the Claude Code CLI.
  *
  * Keep the explicit win32 ternary selector for regression coverage (Issue #4424):
@@ -49,7 +65,7 @@ function debugLog(...parts: unknown[]): void {
  * Find the first candidate that responds to `--version`. Returns the
  * candidate name on success, null if none worked.
  *
- * On Windows with `shell: true`, a missing candidate surfaces as a
+ * On Windows with `cmd /c`, a missing candidate surfaces as a
  * non-zero exit from cmd.exe rather than ENOENT — so we cannot rely on
  * the error code to decide "try next". Treat any failure as "try next"
  * for the version probe; the only thing that matters for binary
@@ -59,10 +75,9 @@ function debugLog(...parts: unknown[]): void {
 function findWorkingCommand(): string | null {
 	for (const command of CLAUDE_COMMAND_CANDIDATES) {
 		try {
-			execFileSync(command, ["--version"], {
+			spawnClaude(command, ["--version"], {
 				timeout: VERSION_TIMEOUT_MS,
 				stdio: "pipe",
-				shell: process.platform === "win32",
 			});
 			debugLog("version probe ok via", command);
 			return command;
@@ -110,10 +125,9 @@ function parseAuthStatus(output: string): boolean | null {
 function probeAuth(command: string): boolean | null {
 	// Try --json first (newer CLIs).
 	try {
-		const out = execFileSync(command, ["auth", "status", "--json"], {
+		const out = spawnClaude(command, ["auth", "status", "--json"], {
 			timeout: AUTH_TIMEOUT_MS,
 			stdio: "pipe",
-			shell: process.platform === "win32",
 		}).toString();
 		debugLog("auth status --json output:", out.slice(0, 200));
 		const parsed = parseAuthStatus(out);
@@ -124,10 +138,9 @@ function probeAuth(command: string): boolean | null {
 
 	// Fallback: plain `auth status` (older CLIs that don't accept --json).
 	try {
-		const out = execFileSync(command, ["auth", "status"], {
+		const out = spawnClaude(command, ["auth", "status"], {
 			timeout: AUTH_TIMEOUT_MS,
 			stdio: "pipe",
-			shell: process.platform === "win32",
 		}).toString();
 		debugLog("auth status output:", out.slice(0, 200));
 		return parseAuthStatus(out);
