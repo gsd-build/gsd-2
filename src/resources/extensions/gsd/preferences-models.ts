@@ -9,6 +9,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { gsdHome } from "./gsd-home.js";
 import type { DynamicRoutingConfig } from "./model-router.js";
 import { canonicalModelForTier, defaultRoutingConfig, resolveModelForTier } from "./model-router.js";
 import type { ComplexityTier } from "./complexity-classifier.js";
@@ -210,7 +211,7 @@ export function resolveDefaultSessionModel(
 export function isCustomProvider(provider: string | undefined): boolean {
   if (!provider) return false;
   const candidates = [
-    join(homedir(), ".gsd", "agent", "models.json"),
+    join(gsdHome(), "agent", "models.json"),
     join(homedir(), ".pi", "agent", "models.json"),
   ];
   for (const path of candidates) {

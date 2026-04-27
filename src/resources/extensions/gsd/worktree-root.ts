@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { gsdHome } from "./gsd-home.js";
 
 export interface WorktreeSegment {
   gsdIdx: number;
@@ -78,10 +78,10 @@ function resolveProjectRootFromPath(path: string): string {
     ? path.slice(0, markerIdx)
     : path.slice(0, segment.gsdIdx);
 
-  const gsdHome = normalizeWorktreePathForCompare(process.env.GSD_HOME || join(homedir(), ".gsd"));
+  const gsdHomeNorm = normalizeWorktreePathForCompare(gsdHome());
   const candidateGsdPath = normalizeWorktreePathForCompare(join(candidate, ".gsd"));
 
-  if (candidateGsdPath === gsdHome || candidateGsdPath.startsWith(`${gsdHome}/`)) {
+  if (candidateGsdPath === gsdHomeNorm || candidateGsdPath.startsWith(`${gsdHomeNorm}/`)) {
     const realRoot = resolveProjectRootFromGitFile(path);
     return realRoot ?? path;
   }

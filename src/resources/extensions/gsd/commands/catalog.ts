@@ -1,10 +1,9 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { loadRegistry } from "../workflow-templates.js";
+import { gsdHome } from "../gsd-home.js";
 
-const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
 
 export interface GsdCommandDefinition {
   cmd: string;
@@ -325,7 +324,7 @@ function filterOptions(
 
 function getExtensionCompletions(prefix: string, action: string) {
   try {
-    const extDir = join(gsdHome, "agent", "extensions");
+    const extDir = join(gsdHome(), "agent", "extensions");
     const ids: Array<{ id: string; name: string }> = [];
     for (const entry of readdirSync(extDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
@@ -414,7 +413,7 @@ function resolveProjectRootForCompletion(basePath: string): string {
   const gsdIdx = basePath.indexOf(gsdMarker);
   const candidate = gsdIdx !== -1 ? basePath.slice(0, gsdIdx) : basePath.slice(0, segment.gsdIdx);
 
-  const normalizedGsdHome = normalizePathForCompare(gsdHome);
+  const normalizedGsdHome = normalizePathForCompare(gsdHome());
   const candidateGsdPath = normalizePathForCompare(join(candidate, ".gsd"));
   if (candidateGsdPath === normalizedGsdHome || candidateGsdPath.startsWith(`${normalizedGsdHome}/`)) {
     return resolveProjectRootFromGitFile(basePath) ?? basePath;
@@ -523,7 +522,7 @@ export function getGsdArgumentCompletions(prefix: string) {
       const base = resolveProjectRootForCompletion(process.cwd());
       scanDir(join(base, ".gsd", "workflows"), "project");
       scanDir(join(base, ".gsd", "workflow-defs"), "project-legacy");
-      scanDir(join(gsdHome, "workflows"), "global");
+      scanDir(join(gsdHome(), "workflows"), "global");
     } catch { /* ignore */ }
     // Also include bundled template names.
     try {

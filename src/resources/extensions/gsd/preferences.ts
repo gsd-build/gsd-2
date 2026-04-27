@@ -33,6 +33,7 @@ import {
   formatSkillRef,
 } from "./preferences-types.js";
 import { validatePreferences } from "./preferences-validation.js";
+import { gsdHome } from "./gsd-home.js";
 
 // ─── Re-exports: types ──────────────────────────────────────────────────────
 // Every type/interface that was previously exported from this file is
@@ -98,10 +99,6 @@ export {
 } from "./preferences-models.js";
 
 // ─── Path Constants & Getters ───────────────────────────────────────────────
-
-function gsdHome(): string {
-  return process.env.GSD_HOME || join(homedir(), ".gsd");
-}
 
 function globalPreferencesPath(): string {
   return join(gsdHome(), "PREFERENCES.md");

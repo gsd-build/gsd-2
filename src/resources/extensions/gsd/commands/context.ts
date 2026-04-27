@@ -5,6 +5,7 @@ import { validateDirectory } from "../validate-directory.js";
 import { resolveProjectRoot } from "../worktree.js";
 import { showNextAction } from "../../shared/tui.js";
 import { handleStatus } from "./handlers/core.js";
+import { homedir } from "node:os";
 
 export interface GsdDispatchContext {
   ctx: ExtensionCommandContext;
@@ -28,8 +29,8 @@ export function projectRoot(): string {
   try {
     cwd = process.cwd();
   } catch {
-    // cwd directory was deleted (e.g. worktree teardown) — fall back to HOME (#3598)
-    cwd = process.env.HOME ?? "/";
+    // cwd directory was deleted (e.g. worktree teardown) — fall back to home (#3598)
+    cwd = homedir();
   }
   const root = resolveProjectRoot(cwd);
   const pathToCheck = root !== cwd ? cwd : root;
