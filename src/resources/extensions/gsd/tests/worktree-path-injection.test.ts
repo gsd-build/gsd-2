@@ -1,6 +1,6 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -23,7 +23,7 @@ const {
   buildRewriteDocsPrompt,
 } = await import("../auto-prompts.ts");
 const { invalidateStateCache } = await import("../state.ts");
-const { resolveAgentEnd, runUnit, _resetPendingResolve } = await import("../auto-loop.js");
+const { resolveAgentEnd, runUnit, _resetPendingResolve } = await import("../auto-loop.ts");
 
 function writeMilestone(base: string, mid = "M001", title = "Worktree Path Injection"): void {
   const milestoneDir = join(base, ".gsd", "milestones", mid);
@@ -71,8 +71,8 @@ test("runUnit changes cwd to basePath before creating a new session", async (t) 
   _resetPendingResolve();
 
   const originalCwd = process.cwd();
-  const base = mkdtempSync(join(tmpdir(), "gsd-rununit-base-"));
-  const drifted = mkdtempSync(join(tmpdir(), "gsd-rununit-drift-"));
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "gsd-rununit-base-")));
+  const drifted = realpathSync(mkdtempSync(join(tmpdir(), "gsd-rununit-drift-")));
   t.after(() => {
     process.chdir(originalCwd);
     rmSync(base, { recursive: true, force: true });
@@ -110,12 +110,57 @@ test("runUnit changes cwd to basePath before creating a new session", async (t) 
   assert.equal(cwdAtNewSession, base);
 });
 
+test("runUnit cancels before creating a session when basePath chdir fails", async (t) => {
+  _resetPendingResolve();
+
+  const originalCwd = process.cwd();
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "gsd-rununit-missing-base-")));
+  const drifted = realpathSync(mkdtempSync(join(tmpdir(), "gsd-rununit-missing-drift-")));
+  rmSync(base, { recursive: true, force: true });
+  t.after(() => {
+    process.chdir(originalCwd);
+    rmSync(drifted, { recursive: true, force: true });
+  });
+
+  process.chdir(drifted);
+
+  let newSessionCalled = false;
+  const session = {
+    active: true,
+    basePath: base,
+    verbose: false,
+    cmdCtx: {
+      newSession: () => {
+        newSessionCalled = true;
+        return Promise.resolve({ cancelled: false });
+      },
+    },
+  } as any;
+  const pi = {
+    calls: [] as unknown[],
+    sendMessage(...args: unknown[]) {
+      this.calls.push(args);
+    },
+  } as any;
+  const ctx = { ui: { notify: () => {} }, model: { id: "test-model" } } as any;
+
+  const result = await runUnit(ctx, pi, session, "task", "T01", "prompt");
+
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.errorContext?.category, "session-failed");
+  assert.equal(result.errorContext?.isTransient, true);
+  assert.match(result.errorContext?.message ?? "", /Failed to chdir to basePath before newSession/);
+  assert.ok(result.errorContext?.message.includes(base), "error should include the failed basePath");
+  assert.equal(newSessionCalled, false, "newSession must not run after chdir failure");
+  assert.equal(pi.calls.length, 0, "unit must not dispatch after chdir failure");
+});
+
 test("direct dispatch redirects to the canonical milestone worktree before newSession", async (t) => {
   invalidateStateCache();
 
   const originalCwd = process.cwd();
-  const base = mkdtempSync(join(tmpdir(), "gsd-direct-base-"));
-  const drifted = mkdtempSync(join(tmpdir(), "gsd-direct-drift-"));
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "gsd-direct-base-")));
+  const drifted = realpathSync(mkdtempSync(join(tmpdir(), "gsd-direct-drift-")));
   writeMilestone(base);
   const worktreeRoot = makeLiveMilestoneWorktree(base);
 
@@ -150,7 +195,7 @@ test("direct dispatch redirects to the canonical milestone worktree before newSe
 });
 
 test("worktree-aware prompt builders include the explicit working directory", async (t) => {
-  const base = mkdtempSync(join(tmpdir(), "gsd-prompt-base-"));
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "gsd-prompt-base-")));
   writeMilestone(base);
   t.after(() => rmSync(base, { recursive: true, force: true }));
 

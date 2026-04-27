@@ -51,7 +51,16 @@ export async function runUnit(
       process.chdir(s.basePath);
     }
   } catch (e) {
-    logWarning("engine", "Failed to chdir to basePath before newSession", { basePath: s.basePath, error: String(e) });
+    const msg = `Failed to chdir to basePath before newSession (basePath: ${s.basePath}): ${String(e)}`;
+    logWarning("engine", msg, { basePath: s.basePath, error: String(e) });
+    return {
+      status: "cancelled",
+      errorContext: {
+        message: msg,
+        category: "session-failed",
+        isTransient: true,
+      },
+    };
   }
 
   // ── Session creation with timeout ──

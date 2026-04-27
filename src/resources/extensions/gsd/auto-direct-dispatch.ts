@@ -52,6 +52,8 @@ export async function dispatchDirectPhase(
     return;
   }
 
+  const projectRoot = base;
+
   // Switch the dispatch base to the canonical milestone worktree if one
   // exists. Without this, /gsd dispatch invoked from the project root would
   // build prompts and create a session anchored to the project root even
@@ -272,7 +274,7 @@ export async function dispatchDirectPhase(
     ctx.model?.provider,
     getRequiredWorkflowToolsForAutoUnit(unitType),
     {
-      projectRoot: base,
+      projectRoot,
       surface: "direct phase dispatch",
       unitType,
       authMode: ctx.model?.provider ? ctx.modelRegistry.getProviderAuthMode(ctx.model.provider) : undefined,
@@ -293,7 +295,10 @@ export async function dispatchDirectPhase(
       process.chdir(base);
     }
   } catch (err) {
-    logWarning("engine", `chdir failed before direct-dispatch newSession: ${err instanceof Error ? err.message : String(err)}`, { file: "auto-direct-dispatch.ts" });
+    const msg = `Failed to chdir before direct-dispatch newSession (basePath: ${base}): ${err instanceof Error ? err.message : String(err)}`;
+    logWarning("engine", msg, { file: "auto-direct-dispatch.ts", basePath: base, error: err instanceof Error ? err.message : String(err) });
+    ctx.ui.notify(`${msg}. Cancelling dispatch to avoid running in the wrong directory.`, "error");
+    return;
   }
 
   const result = await ctx.newSession();

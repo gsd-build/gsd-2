@@ -2632,7 +2632,7 @@ export async function buildGateEvaluatePrompt(
     const subPrompt = [
       `You are evaluating quality gate **${def.id}** for slice ${sid} (${sTitle}).`,
       "",
-      `**Working directory:** \`${base}\``,
+      `**Working directory:** \`${base}\`. All file reads, writes, and shell commands MUST operate relative to this directory. Do NOT \`cd\` to any other directory.`,
       "",
       `## Question: ${def.question}`,
       "",
