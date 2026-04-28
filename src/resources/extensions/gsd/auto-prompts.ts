@@ -1287,6 +1287,95 @@ export async function buildDiscussMilestonePrompt(
   return basePrompt;
 }
 
+/**
+ * Build a prompt for the workflow-preferences unit type (deep mode).
+ * Fixed-question wizard: captures 5 high-impact workflow toggles via structured
+ * questions and writes them to .gsd/config.json. Runs ONCE per project, early
+ * in deep-mode bootstrap before discuss-project.
+ */
+export async function buildWorkflowPreferencesPrompt(
+  base: string,
+  structuredQuestionsAvailable = "false",
+): Promise<string> {
+  return loadPrompt("guided-workflow-preferences", {
+    workingDirectory: base,
+    structuredQuestionsAvailable,
+  });
+}
+
+/**
+ * Build a prompt for the research-project (parallel) unit type (deep mode).
+ * Orchestrator that spawns 4 parallel Task() calls covering stack, features,
+ * architecture, and pitfalls. Each subagent writes its findings to .gsd/research/.
+ * Fires after research-decision marker says "research" and project research files
+ * are missing. Skipped entirely if user picked "skip".
+ */
+export async function buildResearchProjectPrompt(
+  base: string,
+  structuredQuestionsAvailable = "false",
+): Promise<string> {
+  return loadPrompt("guided-research-project", {
+    workingDirectory: base,
+    structuredQuestionsAvailable,
+  });
+}
+
+/**
+ * Build a prompt for the research-decision unit type (deep mode).
+ * Fixed-question stage: asks "research first or skip?" via ask_user_questions
+ * and writes .gsd/runtime/research-decision.json. Fires after discuss-requirements
+ * and before research-project-parallel.
+ */
+export async function buildResearchDecisionPrompt(
+  base: string,
+  structuredQuestionsAvailable = "false",
+): Promise<string> {
+  return loadPrompt("guided-research-decision", {
+    workingDirectory: base,
+    structuredQuestionsAvailable,
+  });
+}
+
+/**
+ * Build a prompt for the discuss-project unit type (deep mode).
+ * Project-level interview: produces .gsd/PROJECT.md.
+ * Fires before any milestone-level work when planning_depth === "deep" and
+ * PROJECT.md is missing.
+ */
+export async function buildDiscussProjectPrompt(
+  base: string,
+  structuredQuestionsAvailable = "false",
+): Promise<string> {
+  const inlinedTemplates = inlineTemplate("project", "Project");
+
+  return loadPrompt("guided-discuss-project", {
+    workingDirectory: base,
+    inlinedTemplates,
+    structuredQuestionsAvailable,
+    commitInstruction: "Do not commit planning artifacts — .gsd/ is managed externally.",
+  });
+}
+
+/**
+ * Build a prompt for the discuss-requirements unit type (deep mode).
+ * Requirements-level interview: produces .gsd/REQUIREMENTS.md using the
+ * structured R### format. Reads PROJECT.md as authoritative context.
+ * Fires when planning_depth === "deep", PROJECT.md exists, and REQUIREMENTS.md is missing.
+ */
+export async function buildDiscussRequirementsPrompt(
+  base: string,
+  structuredQuestionsAvailable = "false",
+): Promise<string> {
+  const inlinedTemplates = inlineTemplate("requirements", "Requirements");
+
+  return loadPrompt("guided-discuss-requirements", {
+    workingDirectory: base,
+    inlinedTemplates,
+    structuredQuestionsAvailable,
+    commitInstruction: "Do not commit planning artifacts — .gsd/ is managed externally.",
+  });
+}
+
 export async function buildResearchMilestonePrompt(mid: string, midTitle: string, base: string): Promise<string> {
   // #4782 phase 3: research-milestone migrated through the composer.
   // Declared inline order: milestone-context, project, requirements,

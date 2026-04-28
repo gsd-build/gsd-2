@@ -450,6 +450,7 @@ On first run, GSD launches a branded setup wizard that walks you through LLM pro
 | `/gsd`                  | Step mode — executes one unit at a time, pauses between each                  |
 | `/gsd next`             | Explicit step mode (same as bare `/gsd`)                                      |
 | `/gsd auto`             | Autonomous mode — researches, plans, executes, commits, repeats               |
+| `/gsd new-project --deep` | Bootstrap a project with staged project-level discovery                    |
 | `/gsd quick`            | Execute a quick task with GSD guarantees, skip planning overhead              |
 | `/gsd stop`             | Stop auto mode gracefully                                                     |
 | `/gsd steer`            | Hard-steer plan documents during execution                                    |
@@ -499,9 +500,12 @@ Every dispatch is carefully constructed. The LLM never wastes tool calls on orie
 | Artifact           | Purpose                                                         |
 | ------------------ | --------------------------------------------------------------- |
 | `PROJECT.md`       | Living doc — what the project is right now                      |
+| `REQUIREMENTS.md`  | Project-level capability contract and out-of-scope list         |
 | `DECISIONS.md`     | Append-only register of architectural decisions                 |
 | `KNOWLEDGE.md`     | Cross-session rules, patterns, and lessons learned              |
 | `RUNTIME.md`       | Runtime context — API endpoints, env vars, services (v2.39)     |
+| `runtime/research-decision.json` | Deep-mode marker for project research vs skip       |
+| `research/*.md`    | Optional deep-mode project research: stack, features, architecture, pitfalls |
 | `STATE.md`         | Quick-glance dashboard — always read first                      |
 | `M001-ROADMAP.md`  | Milestone plan with slice checkboxes, risk levels, dependencies |
 | `M001-CONTEXT.md`  | User decisions from the discuss phase                           |
@@ -598,6 +602,7 @@ auto_report: true
 | Setting                           | What it controls                                                                                      |
 | --------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | `models.*`                        | Per-phase model selection — string for a single model, or `{model, fallbacks}` for automatic failover |
+| `planning_depth`                  | `light` / `deep` — opt into staged project discovery before milestone planning                         |
 | `skill_discovery`                 | `auto` / `suggest` / `off` — how GSD finds and applies skills                                         |
 | `auto_supervisor.*`               | Timeout thresholds for auto mode supervision                                                          |
 | `budget_ceiling`                  | USD ceiling — auto mode pauses when reached                                                           |

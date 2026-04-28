@@ -429,8 +429,13 @@ const MAX_EMPTY_TURN_RETRIES = 2;
 
 // Phrases that indicate the LLM is about to do something but has not yet.
 // Kept tight to avoid flagging legitimate narration like "I'll wait for your answer."
+//
+// "make" was previously in the verb list but matches conversational meta phrases
+// like "Let me make sure I understand…" which are NOT action announcements —
+// removed to prevent the empty-turn nudge from auto-replying to user questions
+// in discuss flows.
 const COMMIT_INTENT_RE =
-  /\b(?:I['’]ll|I will|Next,? I['’]ll|Now I['’]ll|Let me|I['’]m going to|I am going to)\s+(?:now\s+)?(?:write|create|call|invoke|update|add|make|run|execute|generate|produce|emit|compose|implement|save|apply|commit)\b/i;
+  /\b(?:I['’]ll|I will|Next,? I['’]ll|Now I['’]ll|Let me|I['’]m going to|I am going to)\s+(?:now\s+)?(?:write|create|call|invoke|update|add|run|execute|generate|produce|emit|compose|implement|save|apply|commit)\b/i;
 
 /**
  * Reset the empty-turn counter for a basePath after a successful tool-use turn.
@@ -460,12 +465,14 @@ export function maybeHandleEmptyIntentTurn(
   // path, handled by maybeHandleReadyPhraseWithoutFiles.
   if (READY_PHRASE_RE.test(text)) return false;
 
-  // Skip if the LLM is clearly handing back to the user. Keep the heuristic
-  // tight: a trailing question mark on the last non-empty line is the common
-  // signal for "I asked the user a question and stopped."
+  // Skip if the LLM is clearly handing back to the user. Last-line `?` is
+  // the strongest signal, but discuss flows often end with a freeform
+  // question followed by a closing remark ("…what should we build? I'll
+  // pick one if you don't care."). Treat ANY non-empty line ending in `?`
+  // as a question-asked signal — false negatives here auto-reply to the
+  // user, which is a much worse failure mode than a missed nudge.
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const lastLine = lines[lines.length - 1] ?? "";
-  if (lastLine.endsWith("?")) return false;
+  if (lines.some((l) => l.endsWith("?"))) return false;
 
   // Must contain a commit-intent phrase — this is the stall we care about.
   if (!COMMIT_INTENT_RE.test(text)) return false;
