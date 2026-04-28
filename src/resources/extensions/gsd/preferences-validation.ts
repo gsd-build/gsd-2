@@ -1275,7 +1275,11 @@ export function validatePreferences(preferences: GSDPreferences): {
   // Per-unit-type and per-prefix thinking-level policy. Resolved at dispatch
   // time; a user `/thinking` override always beats the policy.
   if (preferences.thinking_policy !== undefined) {
-    if (typeof preferences.thinking_policy === "object" && preferences.thinking_policy !== null) {
+    if (
+      typeof preferences.thinking_policy === "object" &&
+      preferences.thinking_policy !== null &&
+      !Array.isArray(preferences.thinking_policy)
+    ) {
       const tp = preferences.thinking_policy as Record<string, unknown>;
       const validTp: ThinkingPolicyConfig = {};
       const validLevels = new Set<string>(KNOWN_THINKING_LEVELS);
@@ -1360,7 +1364,7 @@ export function validatePreferences(preferences: GSDPreferences): {
         validated.thinking_policy = validTp;
       }
     } else {
-      errors.push("thinking_policy must be an object");
+      errors.push("thinking_policy must be a mapping (not an array or scalar)");
     }
   }
 

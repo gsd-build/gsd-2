@@ -134,6 +134,17 @@ test("validatePreferences: rejects invalid level value", async () => {
   );
 });
 
+test("validatePreferences: rejects array as thinking_policy", async () => {
+  const { validatePreferences } = await import("../preferences-validation.ts");
+  const { errors } = validatePreferences({
+    thinking_policy: [{ default: "high" }] as unknown as Record<string, unknown>,
+  });
+  assert.ok(
+    errors.some((e) => e.toLowerCase().includes("mapping")),
+    `expected mapping error for array input, got: ${JSON.stringify(errors)}`,
+  );
+});
+
 // ─── Auto-mode wiring (source-level checks) ───────────────────────────
 // These assert the policy is actually invoked from the dispatch path
 // without requiring the full dependency graph at test runtime.
