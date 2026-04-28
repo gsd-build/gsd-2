@@ -127,7 +127,7 @@ export function formatCleanKeepReason(status: WorktreeStatus): string {
 // ─── Subcommand: list ───────────────────────────────────────────────────────
 
 async function handleList(ctx: ExtensionCommandContext): Promise<void> {
-  const basePath = projectRoot();
+  const basePath = projectRoot(ctx);
   const worktrees = listWorktrees(basePath);
   const statuses = worktrees.map((wt) => getStatus(basePath, wt.name, wt.path));
   ctx.ui.notify(formatWorktreeList(statuses), "info");
@@ -136,7 +136,7 @@ async function handleList(ctx: ExtensionCommandContext): Promise<void> {
 // ─── Subcommand: merge ──────────────────────────────────────────────────────
 
 async function handleMerge(args: string, ctx: ExtensionCommandContext): Promise<void> {
-  const basePath = projectRoot();
+  const basePath = projectRoot(ctx);
   const worktrees = listWorktrees(basePath);
   const trimmed = args.trim();
 
@@ -241,7 +241,7 @@ async function handleMerge(args: string, ctx: ExtensionCommandContext): Promise<
 // ─── Subcommand: clean ──────────────────────────────────────────────────────
 
 async function handleClean(ctx: ExtensionCommandContext): Promise<void> {
-  const basePath = projectRoot();
+  const basePath = projectRoot(ctx);
   const worktrees = listWorktrees(basePath);
   if (worktrees.length === 0) {
     ctx.ui.notify("No worktrees to clean.", "info");
@@ -281,7 +281,7 @@ async function handleClean(ctx: ExtensionCommandContext): Promise<void> {
 // ─── Subcommand: remove ─────────────────────────────────────────────────────
 
 async function handleRemove(args: string, ctx: ExtensionCommandContext): Promise<void> {
-  const basePath = projectRoot();
+  const basePath = projectRoot(ctx);
   const tokens = args.trim().split(/\s+/).filter(Boolean);
   const force = tokens.includes("--force");
   const name = tokens.find((t) => t !== "--force");

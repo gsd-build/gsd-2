@@ -19,7 +19,7 @@ function emitParallelMessage(pi: ExtensionAPI, content: string): void {
   pi.sendMessage({ customType: "gsd-parallel", content, display: true });
 }
 
-export async function handleParallelCommand(trimmed: string, _ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<boolean> {
+export async function handleParallelCommand(trimmed: string, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<boolean> {
   if (!trimmed.startsWith("parallel")) return false;
 
   const parallelArgs = trimmed.slice("parallel".length).trim();
@@ -27,7 +27,7 @@ export async function handleParallelCommand(trimmed: string, _ctx: ExtensionComm
   const rest = restParts.join(" ");
 
   if (subcommand === "start" || subcommand === "") {
-    const root = projectRoot();
+    const root = projectRoot(ctx);
     const loaded = loadEffectiveGSDPreferences();
     const config = resolveParallelConfig(loaded?.preferences);
     if (!config.enabled) {
@@ -54,7 +54,7 @@ export async function handleParallelCommand(trimmed: string, _ctx: ExtensionComm
   }
 
   if (subcommand === "status") {
-    const root = projectRoot();
+    const root = projectRoot(ctx);
     refreshWorkerStatuses(root, { restoreIfNeeded: true });
     const workers = getWorkerStatuses(root);
     if (workers.length === 0 || !isParallelActive()) {
@@ -75,21 +75,21 @@ export async function handleParallelCommand(trimmed: string, _ctx: ExtensionComm
 
   if (subcommand === "stop") {
     const milestoneId = rest.trim() || undefined;
-    await stopParallel(projectRoot(), milestoneId);
+    await stopParallel(projectRoot(ctx), milestoneId);
     emitParallelMessage(pi, milestoneId ? `Stopped worker for ${milestoneId}.` : "All parallel workers stopped.");
     return true;
   }
 
   if (subcommand === "pause") {
     const milestoneId = rest.trim() || undefined;
-    pauseWorker(projectRoot(), milestoneId);
+    pauseWorker(projectRoot(ctx), milestoneId);
     emitParallelMessage(pi, milestoneId ? `Paused worker for ${milestoneId}.` : "All parallel workers paused.");
     return true;
   }
 
   if (subcommand === "resume") {
     const milestoneId = rest.trim() || undefined;
-    resumeWorker(projectRoot(), milestoneId);
+    resumeWorker(projectRoot(ctx), milestoneId);
     emitParallelMessage(pi, milestoneId ? `Resumed worker for ${milestoneId}.` : "All parallel workers resumed.");
     return true;
   }
@@ -97,24 +97,24 @@ export async function handleParallelCommand(trimmed: string, _ctx: ExtensionComm
   if (subcommand === "merge") {
     const milestoneId = rest.trim() || undefined;
     if (milestoneId) {
-      const result = await mergeCompletedMilestone(projectRoot(), milestoneId);
+      const result = await mergeCompletedMilestone(projectRoot(ctx), milestoneId);
       emitParallelMessage(pi, formatMergeResults([result]));
       return true;
     }
-    const workers = getWorkerStatuses(projectRoot());
+    const workers = getWorkerStatuses(projectRoot(ctx));
     if (workers.length === 0) {
       emitParallelMessage(pi, "No parallel workers to merge.");
       return true;
     }
-    const results = await mergeAllCompleted(projectRoot(), workers);
+    const results = await mergeAllCompleted(projectRoot(ctx), workers);
     emitParallelMessage(pi, formatMergeResults(results));
     return true;
   }
 
   if (subcommand === "watch") {
-    const root = projectRoot();
+    const root = projectRoot(ctx);
     const { ParallelMonitorOverlay } = await import("../../parallel-monitor-overlay.js");
-    await _ctx.ui.custom<void>(
+    await ctx.ui.custom<void>(
       (tui, theme, _kb, done) => new ParallelMonitorOverlay(tui, theme, () => done(), root),
       {
         overlay: true,

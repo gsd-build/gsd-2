@@ -61,7 +61,7 @@ export async function handleEscalateCommand(
     return;
   }
 
-  const basePath = projectRoot();
+  const basePath = projectRoot(ctx);
   const prefs = loadEffectiveGSDPreferences()?.preferences;
   if (prefs?.phases?.mid_execution_escalation !== true) {
     ctx.ui.notify(

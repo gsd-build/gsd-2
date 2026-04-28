@@ -21,7 +21,7 @@ export async function handleOpsCommand(trimmed: string, ctx: ExtensionCommandCon
   if (trimmed === "init") {
     const { detectProjectState } = await import("../../detection.js");
     const { handleReinit, showProjectInit } = await import("../../init-wizard.js");
-    const basePath = projectRoot();
+    const basePath = projectRoot(ctx);
     const detection = detectProjectState(basePath);
     if (detection.state === "v2-gsd" || detection.state === "v2-gsd-empty") {
       await handleReinit(ctx, detection);
@@ -58,21 +58,21 @@ export async function handleOpsCommand(trimmed: string, ctx: ExtensionCommandCon
     return true;
   }
   if (trimmed === "history" || trimmed.startsWith("history ")) {
-    await handleHistory(trimmed.replace(/^history\s*/, "").trim(), ctx, projectRoot());
+    await handleHistory(trimmed.replace(/^history\s*/, "").trim(), ctx, projectRoot(ctx));
     return true;
   }
   if (trimmed === "undo-task" || trimmed.startsWith("undo-task ")) {
     const { handleUndoTask } = await import("../../undo.js");
-    await handleUndoTask(trimmed.replace(/^undo-task\s*/, "").trim(), ctx, pi, projectRoot());
+    await handleUndoTask(trimmed.replace(/^undo-task\s*/, "").trim(), ctx, pi, projectRoot(ctx));
     return true;
   }
   if (trimmed === "reset-slice" || trimmed.startsWith("reset-slice ")) {
     const { handleResetSlice } = await import("../../undo.js");
-    await handleResetSlice(trimmed.replace(/^reset-slice\s*/, "").trim(), ctx, pi, projectRoot());
+    await handleResetSlice(trimmed.replace(/^reset-slice\s*/, "").trim(), ctx, pi, projectRoot(ctx));
     return true;
   }
   if (trimmed === "undo" || trimmed.startsWith("undo ")) {
-    await handleUndo(trimmed.replace(/^undo\s*/, "").trim(), ctx, pi, projectRoot());
+    await handleUndo(trimmed.replace(/^undo\s*/, "").trim(), ctx, pi, projectRoot(ctx));
     return true;
   }
   if (trimmed === "skip") {
@@ -80,15 +80,15 @@ export async function handleOpsCommand(trimmed: string, ctx: ExtensionCommandCon
     return true;
   }
   if (trimmed.startsWith("skip ")) {
-    await handleSkip(trimmed.replace(/^skip\s*/, "").trim(), ctx, projectRoot());
+    await handleSkip(trimmed.replace(/^skip\s*/, "").trim(), ctx, projectRoot(ctx));
     return true;
   }
   if (trimmed === "recover") {
-    await handleRecover(ctx, projectRoot());
+    await handleRecover(ctx, projectRoot(ctx));
     return true;
   }
   if (trimmed === "export" || trimmed.startsWith("export ")) {
-    await handleExport(trimmed.replace(/^export\s*/, "").trim(), ctx, projectRoot());
+    await handleExport(trimmed.replace(/^export\s*/, "").trim(), ctx, projectRoot(ctx));
     return true;
   }
   if (trimmed === "cleanup projects" || trimmed.startsWith("cleanup projects ")) {
@@ -96,20 +96,20 @@ export async function handleOpsCommand(trimmed: string, ctx: ExtensionCommandCon
     return true;
   }
   if (trimmed === "cleanup worktrees") {
-    await handleCleanupWorktrees(ctx, projectRoot());
+    await handleCleanupWorktrees(ctx, projectRoot(ctx));
     return true;
   }
   if (trimmed === "cleanup") {
-    await handleCleanupBranches(ctx, projectRoot());
-    await handleCleanupSnapshots(ctx, projectRoot());
+    await handleCleanupBranches(ctx, projectRoot(ctx));
+    await handleCleanupSnapshots(ctx, projectRoot(ctx));
     return true;
   }
   if (trimmed === "cleanup branches") {
-    await handleCleanupBranches(ctx, projectRoot());
+    await handleCleanupBranches(ctx, projectRoot(ctx));
     return true;
   }
   if (trimmed === "cleanup snapshots") {
-    await handleCleanupSnapshots(ctx, projectRoot());
+    await handleCleanupSnapshots(ctx, projectRoot(ctx));
     return true;
   }
   if (trimmed.startsWith("capture ") || trimmed === "capture") {
@@ -117,7 +117,7 @@ export async function handleOpsCommand(trimmed: string, ctx: ExtensionCommandCon
     return true;
   }
   if (trimmed === "triage") {
-    await handleTriage(ctx, pi, process.cwd());
+    await handleTriage(ctx, pi, projectRoot(ctx));
     return true;
   }
   if (trimmed === "config") {
@@ -183,7 +183,7 @@ Examples:
       ctx.ui.notify("Usage: /gsd dispatch <phase>  (research|plan|execute|complete|reassess|uat|replan)", "warning");
       return true;
     }
-    await dispatchDirectPhase(ctx, pi, phase, projectRoot());
+    await dispatchDirectPhase(ctx, pi, phase, projectRoot(ctx));
     return true;
   }
   if (trimmed === "notifications" || trimmed.startsWith("notifications ")) {

@@ -7,9 +7,9 @@ import { Key } from "@gsd/pi-tui";
 import { GSD_SHORTCUTS } from "../shortcut-defs.js";
 import { shortcutDesc } from "../../shared/mod.js";
 
-async function getProjectRoot(): Promise<string> {
+async function getProjectRoot(ctx: ExtensionContext): Promise<string> {
   const { projectRoot } = await import("../commands/context.js");
-  return projectRoot();
+  return projectRoot(ctx);
 }
 
 export function registerShortcuts(pi: ExtensionAPI): void {
@@ -23,7 +23,7 @@ export function registerShortcuts(pi: ExtensionAPI): void {
   const openDashboardOverlay = async (ctx: ExtensionContext) => {
     const [{ GSDDashboardOverlay }, basePath] = await Promise.all([
       import("../dashboard-overlay.js"),
-      getProjectRoot(),
+      getProjectRoot(ctx),
     ]);
     if (!existsSync(join(basePath, ".gsd"))) {
       ctx.ui.notify("No .gsd/ directory found. Run /gsd to start.", "info");
@@ -56,7 +56,7 @@ export function registerShortcuts(pi: ExtensionAPI): void {
   };
 
   const openParallelOverlay = async (ctx: ExtensionContext) => {
-    const basePath = await getProjectRoot();
+    const basePath = await getProjectRoot(ctx);
     const parallelDir = join(basePath, ".gsd", "parallel");
     if (!existsSync(parallelDir)) {
       ctx.ui.notify("No parallel workers found. Run /gsd parallel start first.", "info");

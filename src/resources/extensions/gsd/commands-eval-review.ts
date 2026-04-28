@@ -268,6 +268,7 @@ export async function buildEvalReviewContext(
   state: Extract<EvalReviewState, { kind: "ready" }>,
   milestoneId: string,
   now: () => Date = () => new Date(),
+  ctx?: ExtensionCommandContext,
 ): Promise<EvalReviewContext> {
   const summaryReadBudget = state.specPath
     ? MAX_CONTEXT_BYTES - SPEC_MARKER_RESERVE_BYTES
@@ -305,7 +306,7 @@ export async function buildEvalReviewContext(
 
   const truncated = summaryRead.truncated || specTruncated;
   const outputPath = evalReviewWritePath(state.sliceDir, state.sliceId);
-  const basePath = projectRoot();
+  const basePath = projectRoot(ctx);
   const relativeOutputPath = relative(basePath, outputPath);
 
   return {
@@ -625,7 +626,7 @@ export async function handleEvalReview(
     throw err;
   }
 
-  const basePath = projectRoot();
+  const basePath = projectRoot(ctx);
   const state = await deriveState(basePath);
   if (!state.activeMilestone) {
     ctx.ui.notify(
@@ -688,7 +689,7 @@ export async function handleEvalReview(
 
   let context: EvalReviewContext;
   try {
-    context = await buildEvalReviewContext(detected, milestoneId);
+    context = await buildEvalReviewContext(detected, milestoneId, () => new Date(), ctx);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     ctx.ui.notify(`Failed to build eval-review context: ${msg}`, "error");

@@ -269,6 +269,14 @@ export interface ExtensionContext {
 	hasUI: boolean;
 	/** Current working directory */
 	cwd: string;
+	/**
+	 * Canonical "current project" root. Resolves to the git toplevel of `cwd`
+	 * when `cwd` is inside a git repository, otherwise to `cwd`. Extensions
+	 * that operate on per-project state (e.g. milestones, worktrees, project
+	 * metadata) should prefer `projectRoot` over `cwd`, since `cwd` may be a
+	 * subdirectory of the project.
+	 */
+	projectRoot: string;
 	/** Session manager (read-only) */
 	sessionManager: ReadonlySessionManager;
 	/** Model registry for API key resolution */

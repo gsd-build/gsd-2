@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@gsd/pi-coding-agent";
 
 import { checkRemoteAutoSession, isAutoActive, isAutoPaused, stopAutoRemote } from "../auto.js";
 import { validateDirectory } from "../validate-directory.js";
@@ -24,16 +24,38 @@ export class GSDNoProjectError extends Error {
   }
 }
 
-export function projectRoot(): string {
-  let cwd: string;
-  try {
-    cwd = process.cwd();
-  } catch {
-    // cwd directory was deleted (e.g. worktree teardown) — fall back to home (#3598)
-    cwd = homedir();
+/**
+ * Resolve and validate the current project root.
+ *
+ * When `ctx` is provided, sources the root from `ctx.projectRoot` (the
+ * canonical "current project" maintained by the runner). When `ctx` is
+ * omitted, falls back to `process.cwd()` resolved via `resolveProjectRoot`.
+ *
+ * In both cases the result is passed through `validateDirectory`; if the
+ * directory is rejected (e.g. inside a node_modules tree, deleted, etc.),
+ * a `GSDNoProjectError` is thrown.
+ *
+ * Prefer the ctx-aware overload from any handler that has an
+ * `ExtensionContext` in scope so the resolved root tracks the runner's
+ * notion of the current project rather than the process cwd.
+ */
+export function projectRoot(ctx?: ExtensionContext): string {
+  let root: string;
+  let pathToCheck: string;
+  if (ctx && typeof ctx.projectRoot === "string" && ctx.projectRoot.length > 0) {
+    root = ctx.projectRoot;
+    pathToCheck = ctx.cwd && ctx.cwd !== root ? ctx.cwd : root;
+  } else {
+    let cwd: string;
+    try {
+      cwd = ctx?.cwd ?? process.cwd();
+    } catch {
+      // cwd directory was deleted (e.g. worktree teardown) — fall back to home (#3598)
+      cwd = homedir();
+    }
+    root = resolveProjectRoot(cwd);
+    pathToCheck = root !== cwd ? cwd : root;
   }
-  const root = resolveProjectRoot(cwd);
-  const pathToCheck = root !== cwd ? cwd : root;
   const result = validateDirectory(pathToCheck);
   if (result.severity === "blocked") {
     throw new GSDNoProjectError(result.reason ?? "GSD must be run inside a project directory.");
@@ -61,7 +83,7 @@ export async function guardRemoteSession(
 ): Promise<boolean> {
   if (isAutoActive() || isAutoPaused()) return true;
 
-  const remote = checkRemoteAutoSession(projectRoot());
+  const remote = checkRemoteAutoSession(projectRoot(ctx));
   if (!remote.running || !remote.pid) return true;
 
   const unitLabel = remote.unitType && remote.unitId
@@ -124,7 +146,7 @@ export async function guardRemoteSession(
     return false;
   }
   if (choice === "stop") {
-    const result = stopAutoRemote(projectRoot());
+    const result = stopAutoRemote(projectRoot(ctx));
     if (result.found) {
       ctx.ui.notify(`Sent stop signal to auto-mode session (PID ${result.pid}). It will shut down gracefully.`, "info");
     } else if (result.error) {

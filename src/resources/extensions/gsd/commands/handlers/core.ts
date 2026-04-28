@@ -144,7 +144,7 @@ export function showHelp(ctx: ExtensionCommandContext, args = ""): void {
 }
 
 export async function handleStatus(ctx: ExtensionCommandContext): Promise<void> {
-  const basePath = projectRoot();
+  const basePath = projectRoot(ctx);
   // Open DB in cold sessions so status uses DB-backed state, not filesystem fallback (#3385)
   const { ensureDbOpen } = await import("../../bootstrap/dynamic-tools.js");
   await ensureDbOpen();
@@ -170,7 +170,7 @@ export async function handleStatus(ctx: ExtensionCommandContext): Promise<void> 
   );
 
   if (result === undefined) {
-    ctx.ui.notify(formatTextStatus(state), "info");
+    ctx.ui.notify(formatTextStatus(state, ctx), "info");
   }
 }
 
@@ -248,7 +248,7 @@ export async function handleSetup(args: string, ctx: ExtensionCommandContext, pi
 
   // Bare /gsd setup — render the hub: status + actions
   const globalConfigured = hasGlobalSetup();
-  const detection = detectProjectState(projectRoot());
+  const detection = detectProjectState(projectRoot(ctx));
   const onboardingDone = isOnboardingComplete();
   const record = readOnboardingRecord();
 
@@ -495,7 +495,7 @@ export async function handleCoreCommand(
   return false;
 }
 
-export function formatTextStatus(state: GSDState): string {
+export function formatTextStatus(state: GSDState, ctx?: ExtensionContext): string {
   const lines: string[] = ["GSD Status\n"];
   lines.push(formatProgressLine(computeProgressScore()));
   lines.push("");
@@ -538,7 +538,7 @@ export function formatTextStatus(state: GSDState): string {
     }
   }
 
-  const envResults = runEnvironmentChecks(projectRoot());
+  const envResults = runEnvironmentChecks(projectRoot(ctx));
   const envIssues = envResults.filter((result) => result.status !== "ok");
   if (envIssues.length > 0) {
     lines.push("");

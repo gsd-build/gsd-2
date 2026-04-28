@@ -168,7 +168,7 @@ export async function showProjectInit(
   if (gitChoice === "not_yet") return { completed: false, bootstrapped: false };
 
   if (gitChoice === "customize") {
-    await customizeGitPrefs(ctx, prefs, signals);
+    await customizeGitPrefs(ctx, prefs, signals, basePath);
   }
 
   // ── Step 6: Custom instructions ────────────────────────────────────────────
@@ -433,9 +433,10 @@ async function customizeGitPrefs(
   ctx: ExtensionCommandContext,
   prefs: ProjectPreferences,
   signals: ProjectSignals,
+  basePath: string,
 ): Promise<void> {
   // Isolation strategy
-  const hasSubmodules = existsSync(join(process.cwd(), ".gitmodules"));
+  const hasSubmodules = existsSync(join(basePath, ".gitmodules"));
   const isolationActions = [
     { id: "worktree", label: "Worktree", description: "Isolated git worktree per milestone (recommended)", recommended: !hasSubmodules },
     { id: "branch", label: "Branch", description: "Work on branches in project root (better for submodules)", recommended: hasSubmodules },

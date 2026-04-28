@@ -182,7 +182,7 @@ function dispatchPluginByMode(
     case "yaml-step": {
       const overrides = parseWorkflowOverridesOnly(args);
       try {
-        const base = projectRoot();
+        const base = projectRoot(ctx);
         const runDir = createRun(base, plugin.name, Object.keys(overrides).length > 0 ? overrides : undefined);
         setActiveEngineId("custom");
         setActiveRunDir(runDir);
@@ -229,7 +229,7 @@ async function handleCustomWorkflow(
 ): Promise<boolean> {
   // Bare `/gsd workflow` — list plugins
   if (!sub) {
-    const base = projectRoot();
+    const base = projectRoot(ctx);
     const listing = listPluginsFormatted(base);
     ctx.ui.notify(listing, "info");
     return true;
@@ -254,7 +254,7 @@ async function handleCustomWorkflow(
     }
     const { defName, overrides } = parseWorkflowRunArgs(rest);
     try {
-      const base = projectRoot();
+      const base = projectRoot(ctx);
       const runDir = createRun(base, defName, Object.keys(overrides).length > 0 ? overrides : undefined);
       setActiveEngineId("custom");
       setActiveRunDir(runDir);
@@ -271,7 +271,7 @@ async function handleCustomWorkflow(
 
   // ── list [name] — list YAML runs ──
   if (head === "list") {
-    const base = projectRoot();
+    const base = projectRoot(ctx);
     const runs = listRuns(base, rest || undefined);
     if (runs.length === 0) {
       ctx.ui.notify("No workflow runs found.", "info");
@@ -291,7 +291,7 @@ async function handleCustomWorkflow(
       ctx.ui.notify("Usage: /gsd workflow info <name>", "warning");
       return true;
     }
-    const base = projectRoot();
+    const base = projectRoot(ctx);
     const plugin = resolvePlugin(base, rest);
     if (!plugin) {
       ctx.ui.notify(`Plugin not found: ${rest}\nRun /gsd workflow to list plugins.`, "warning");
@@ -326,7 +326,7 @@ async function handleCustomWorkflow(
       else if (t && !source) source = t;
     }
 
-    const base = projectRoot();
+    const base = projectRoot(ctx);
     try {
       const url = resolveSourceUrl(source);
       ctx.ui.notify(`Fetching ${url}…`, "info");
@@ -373,7 +373,7 @@ async function handleCustomWorkflow(
       ctx.ui.notify("Usage: /gsd workflow uninstall <name>", "warning");
       return true;
     }
-    const base = projectRoot();
+    const base = projectRoot(ctx);
     const result = uninstallPlugin(base, rest.trim());
     if (!result.removed) {
       ctx.ui.notify(
@@ -395,7 +395,7 @@ async function handleCustomWorkflow(
       ctx.ui.notify("Usage: /gsd workflow validate <name>", "warning");
       return true;
     }
-    const base = projectRoot();
+    const base = projectRoot(ctx);
     const plugin = resolvePlugin(base, rest);
 
     let raw: string;
@@ -469,7 +469,7 @@ async function handleCustomWorkflow(
       ctx.ui.notify("No custom workflow to resume. Use /gsd auto for dev workflow.", "warning");
       return true;
     }
-    startAutoDetached(ctx, pi, projectRoot(), false);
+    startAutoDetached(ctx, pi, projectRoot(ctx), false);
     ctx.ui.notify("Custom workflow resumed.", "info");
     return true;
   }
@@ -477,7 +477,7 @@ async function handleCustomWorkflow(
   // ── Direct dispatch: /gsd workflow <name> [args] ──
   // If the first token isn't a reserved subcommand, resolve it as a plugin.
   if (!RESERVED_SUBCOMMANDS.has(head)) {
-    const base = projectRoot();
+    const base = projectRoot(ctx);
     const plugin = resolvePlugin(base, head);
     if (plugin) {
       dispatchPluginByMode(plugin, rest, ctx, pi);
@@ -513,12 +513,12 @@ export async function handleWorkflowCommand(trimmed: string, ctx: ExtensionComma
 
   if (trimmed === "queue") {
     if (requireNotAutoActive("/gsd queue", ctx)) return true;
-    await showQueue(ctx, pi, projectRoot());
+    await showQueue(ctx, pi, projectRoot(ctx));
     return true;
   }
   if (trimmed === "discuss") {
     if (requireNotAutoActive("/gsd discuss", ctx)) return true;
-    await showDiscuss(ctx, pi, projectRoot());
+    await showDiscuss(ctx, pi, projectRoot(ctx));
     return true;
   }
   if (trimmed === "quick" || trimmed.startsWith("quick ")) {
@@ -528,7 +528,7 @@ export async function handleWorkflowCommand(trimmed: string, ctx: ExtensionComma
   }
   if (trimmed === "new-milestone" || trimmed.startsWith("new-milestone ")) {
     if (requireNotAutoActive("/gsd new-milestone", ctx)) return true;
-    const basePath = projectRoot();
+    const basePath = projectRoot(ctx);
     const args = trimmed.replace(/^new-milestone\s*/, "").trim();
     if (/(^|\s)--deep(\s|$)/.test(args)) {
       setPlanningDepth(basePath, "deep");
@@ -570,7 +570,7 @@ export async function handleWorkflowCommand(trimmed: string, ctx: ExtensionComma
   }
   if (trimmed === "park" || trimmed.startsWith("park ")) {
     if (requireNotAutoActive("/gsd park", ctx)) return true;
-    const basePath = projectRoot();
+    const basePath = projectRoot(ctx);
     const arg = trimmed.replace(/^park\s*/, "").trim();
     let targetId = arg;
     if (!targetId) {
@@ -596,7 +596,7 @@ export async function handleWorkflowCommand(trimmed: string, ctx: ExtensionComma
   }
   if (trimmed === "unpark" || trimmed.startsWith("unpark ")) {
     if (requireNotAutoActive("/gsd unpark", ctx)) return true;
-    const basePath = projectRoot();
+    const basePath = projectRoot(ctx);
     const arg = trimmed.replace(/^unpark\s*/, "").trim();
     let targetId = arg;
     if (!targetId) {

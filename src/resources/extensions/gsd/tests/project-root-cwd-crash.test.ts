@@ -35,7 +35,7 @@ describe('projectRoot cwd crash guard (#3598)', () => {
   });
 
   test('projectRoot function is exported', () => {
-    assert.match(contextSource, /export function projectRoot\(\)/,
+    assert.match(contextSource, /export function projectRoot\(/,
       'projectRoot should be an exported function');
   });
 });

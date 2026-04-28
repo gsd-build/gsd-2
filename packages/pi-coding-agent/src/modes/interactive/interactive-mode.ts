@@ -52,6 +52,7 @@ import type {
 	ExtensionUIDialogOptions,
 	ExtensionWidgetOptions,
 } from "../../core/extensions/index.js";
+import { resolveProjectRoot } from "../../core/extensions/project-root.js";
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.js";
 import { type AppAction, KeybindingsManager } from "../../core/keybindings.js";
 import { createCompactionSummaryMessage } from "../../core/messages.js";
@@ -1300,6 +1301,7 @@ export class InteractiveMode {
 			ui: this.createExtensionUIContext(),
 			hasUI: true,
 			cwd: process.cwd(),
+			projectRoot: resolveProjectRoot(process.cwd()),
 			sessionManager: this.sessionManager,
 			modelRegistry: this.session.modelRegistry,
 			model: this.session.model,

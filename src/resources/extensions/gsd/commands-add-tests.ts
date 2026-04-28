@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { deriveState } from "./state.js";
 import { gsdRoot, resolveSliceFile } from "./paths.js";
 import { loadPrompt } from "./prompt-loader.js";
+import { projectRoot } from "./commands/context.js";
 
 function findLastCompletedSlice(basePath: string, milestoneId: string): string | null {
   // Scan disk for slices that have a SUMMARY.md (indicating completion)
@@ -91,7 +92,7 @@ export async function handleAddTests(
   ctx: ExtensionCommandContext,
   pi: ExtensionAPI,
 ): Promise<void> {
-  const basePath = process.cwd();
+  const basePath = projectRoot(ctx);
   const state = await deriveState(basePath);
 
   if (!state.activeMilestone) {
