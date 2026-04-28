@@ -6,7 +6,7 @@
 // frontmatter keys.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { getProjectGSDPreferencesPath } from "./preferences.js";
 import { logWarning } from "./workflow-logger.js";
@@ -24,10 +24,36 @@ export function setPlanningDepth(
   depth: "light" | "deep",
 ): void {
   const path = getProjectGSDPreferencesPath(basePath);
+  const { frontmatter, body } = readProjectPreferencesParts(path);
 
+  frontmatter.planning_depth = depth;
+  if (depth === "deep") {
+    applyDeepWorkflowPreferenceDefaults(frontmatter);
+  }
+
+  writeProjectPreferencesParts(path, frontmatter, body);
+  if (depth === "deep") {
+    ensureResearchDecisionDefault(basePath);
+  }
+}
+
+export function ensureWorkflowPreferencesCaptured(basePath: string): void {
+  const path = getProjectGSDPreferencesPath(basePath);
+  const { frontmatter, body } = readProjectPreferencesParts(path);
+
+  frontmatter.planning_depth = "deep";
+  applyDeepWorkflowPreferenceDefaults(frontmatter);
+
+  writeProjectPreferencesParts(path, frontmatter, body);
+  ensureResearchDecisionDefault(basePath);
+}
+
+function readProjectPreferencesParts(path: string): {
+  frontmatter: Record<string, unknown>;
+  body: string;
+} {
   let frontmatter: Record<string, unknown> = {};
   let body = "";
-
   if (existsSync(path)) {
     const content = readFileSync(path, "utf-8");
     const match = content.match(FRONTMATTER_RE);
@@ -50,9 +76,14 @@ export function setPlanningDepth(
       body = content;
     }
   }
+  return { frontmatter, body };
+}
 
-  frontmatter.planning_depth = depth;
-
+function writeProjectPreferencesParts(
+  path: string,
+  frontmatter: Record<string, unknown>,
+  body: string,
+): void {
   // yaml.stringify emits a trailing newline. Strip if present so we control framing.
   const yamlBlock = stringifyYaml(frontmatter).replace(/\n$/, "");
   const newContent = body
@@ -61,4 +92,54 @@ export function setPlanningDepth(
 
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, newContent, "utf-8");
+}
+
+function applyDeepWorkflowPreferenceDefaults(frontmatter: Record<string, unknown>): void {
+  if (frontmatter.commit_policy === undefined) {
+    frontmatter.commit_policy = "per-task";
+  }
+  if (frontmatter.branch_model === undefined) {
+    frontmatter.branch_model = "single";
+  }
+  if (frontmatter.uat_dispatch === undefined) {
+    frontmatter.uat_dispatch = true;
+  }
+
+  const existingModels = frontmatter.models;
+  const models = existingModels && typeof existingModels === "object" && !Array.isArray(existingModels)
+    ? existingModels as Record<string, unknown>
+    : {};
+  if (models.executor_class === undefined) {
+    models.executor_class = "balanced";
+  }
+  frontmatter.models = models;
+  frontmatter.workflow_prefs_captured = true;
+}
+
+function ensureResearchDecisionDefault(basePath: string): void {
+  const runtimeDir = join(dirname(getProjectGSDPreferencesPath(basePath)), "runtime");
+  const decisionPath = join(runtimeDir, "research-decision.json");
+  let decision = "research";
+
+  if (existsSync(decisionPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(decisionPath, "utf-8")) as Record<string, unknown>;
+      if (parsed.decision === "skip") {
+        decision = "skip";
+      }
+    } catch {
+      // Invalid runtime marker is replaced with the default decision.
+    }
+  }
+
+  mkdirSync(runtimeDir, { recursive: true });
+  writeFileSync(
+    decisionPath,
+    `${JSON.stringify({
+      decision,
+      decided_at: new Date().toISOString(),
+      source: "workflow-preferences",
+    }, null, 2)}\n`,
+    "utf-8",
+  );
 }

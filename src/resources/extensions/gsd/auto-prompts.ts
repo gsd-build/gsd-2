@@ -1289,8 +1289,8 @@ export async function buildDiscussMilestonePrompt(
 
 /**
  * Build a prompt for the workflow-preferences unit type (deep mode).
- * Fixed-question wizard: captures 5 high-impact workflow toggles via structured
- * questions and writes them to .gsd/config.json. Runs ONCE per project, early
+ * Default-writing stage: records high-impact workflow defaults in
+ * .gsd/PREFERENCES.md. Runs ONCE per project, early
  * in deep-mode bootstrap before discuss-project.
  */
 export async function buildWorkflowPreferencesPrompt(

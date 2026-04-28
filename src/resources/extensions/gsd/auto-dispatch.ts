@@ -42,7 +42,6 @@ import {
   buildDiscussRequirementsPrompt,
   buildResearchDecisionPrompt,
   buildResearchProjectPrompt,
-  buildWorkflowPreferencesPrompt,
   buildResearchMilestonePrompt,
   buildPlanMilestonePrompt,
   buildResearchSlicePrompt,
@@ -69,6 +68,7 @@ import { getMilestonePipelineVariant } from "./milestone-scope-classifier.js";
 import { EXECUTION_ENTRY_PHASES, hasFinalizedMilestoneContext } from "./uok/plan-v2.js";
 import { isAutoActive } from "./auto.js";
 import { markDepthVerified } from "./bootstrap/write-gate.js";
+import { ensureWorkflowPreferencesCaptured } from "./planning-depth.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -177,9 +177,9 @@ async function readUatGateVerdict(
 
 /**
  * Read the YAML frontmatter from .gsd/PREFERENCES.md and check whether the
- * deep-mode workflow-preferences wizard has run. Uses an explicit
+ * deep-mode workflow-preferences defaults have been captured. Uses an explicit
  * `workflow_prefs_captured: true` marker so a partial frontmatter (e.g.
- * just `commit_policy: merge`) does not falsely suppress the wizard.
+ * just `commit_policy: merge`) does not falsely suppress the defaults write.
  */
 function isWorkflowPrefsCaptured(basePath: string): boolean {
   const prefsPath = join(gsdRoot(basePath), "PREFERENCES.md");
@@ -582,20 +582,16 @@ export const DISPATCH_RULES: DispatchRule[] = [
   },
   {
     // Deep mode stage gate: workflow preferences not yet captured.
-    // Fires once per project, before discuss-project, when planning_depth === "deep"
-    // and the .gsd/PREFERENCES.md frontmatter does NOT carry the
-    // `workflow_prefs_captured: true` marker. Light mode skips entirely.
+    // This used to dispatch an agent unit, but the step is deterministic
+    // defaults-writing. Keep it in-process so missing preferences cannot loop
+    // on the same no-input unit until stuck detection fires.
     name: "deep: pre-planning (no workflow prefs) → workflow-preferences",
-    match: async ({ state, basePath, prefs, structuredQuestionsAvailable }) => {
+    match: async ({ state, basePath, prefs }) => {
       if (prefs?.planning_depth !== "deep") return null;
       if (state.phase !== "pre-planning" && state.phase !== "needs-discussion") return null;
       if (isWorkflowPrefsCaptured(basePath)) return null; // already captured — fall through
-      return {
-        action: "dispatch",
-        unitType: "workflow-preferences",
-        unitId: "WORKFLOW-PREFS",
-        prompt: await buildWorkflowPreferencesPrompt(basePath, structuredQuestionsAvailable),
-      };
+      ensureWorkflowPreferencesCaptured(basePath);
+      return null;
     },
   },
   {

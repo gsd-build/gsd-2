@@ -61,6 +61,8 @@ import {
   formatCodebaseBrief,
   formatPriorContextBrief,
 } from "./preparation.js";
+import { verifyExpectedArtifact } from "./auto-recovery.js";
+import { isAwaitingUserInput } from "./auto-post-unit.js";
 
 // ─── Re-exports (preserve public API for existing importers) ────────────────
 export {
@@ -129,6 +131,17 @@ interface PendingAutoStartEntry {
   readyRejectCount?: number;
 }
 
+interface PendingDeepProjectSetupEntry {
+  ctx: ExtensionCommandContext;
+  pi: ExtensionAPI;
+  basePath: string;
+  step?: boolean;
+  createdAt: number;
+  sessionId?: string;
+  currentUnitType?: string;
+  currentUnitId?: string;
+}
+
 // #4573: cap for how many times we nudge the LLM after a premature ready
 // phrase before giving up and asking the user to re-run /gsd.
 const MAX_READY_REJECTS = 2;
@@ -139,6 +152,24 @@ const MAX_READY_REJECTS = 2;
 const READY_PHRASE_RE = /\bMilestone\s+M\d{3}[A-Z0-9-]*\s+ready\.?/i;
 
 const pendingAutoStartMap = new Map<string, PendingAutoStartEntry>();
+const pendingDeepProjectSetupMap = new Map<string, PendingDeepProjectSetupEntry>();
+const USER_DRIVEN_DEEP_SETUP_UNITS = new Set([
+  "discuss-project",
+  "discuss-requirements",
+  "research-decision",
+]);
+const FOREGROUND_DEEP_SETUP_RULE_NAMES = new Set([
+  "deep: pre-planning (no workflow prefs) → workflow-preferences",
+  "deep: pre-planning (no PROJECT) → discuss-project",
+  "deep: pre-planning (no REQUIREMENTS) → discuss-requirements",
+  "deep: pre-planning (no research decision) → research-decision",
+]);
+const FOREGROUND_DEEP_SETUP_QUESTION_POLICY = `## Foreground Deep Setup Question Policy
+
+This stage is running inside the foreground \`/gsd new-project --deep\` interview. Ask user questions in plain chat only.
+
+- Do NOT call \`ask_user_questions\`, \`AskUserQuestion\`, or ToolSearch to discover user-input tools.
+- Ask one focused round, then stop and wait for the user's normal chat response.`;
 
 /**
  * Backward-compat bridge: returns a mutable reference to the entry matching
@@ -172,6 +203,14 @@ export function clearPendingAutoStart(basePath?: string): void {
   }
 }
 
+export function clearPendingDeepProjectSetup(basePath?: string): void {
+  if (basePath) {
+    pendingDeepProjectSetupMap.delete(basePath);
+  } else {
+    pendingDeepProjectSetupMap.clear();
+  }
+}
+
 /**
  * Returns the milestoneId being discussed for the given project.
  * When basePath is omitted and only one session is active, returns that
@@ -187,6 +226,137 @@ export function getDiscussionMilestoneId(basePath?: string): string | null {
     return pendingAutoStartMap.values().next().value!.milestoneId;
   }
   return null;
+}
+
+function _getPendingDeepProjectSetup(basePath?: string): PendingDeepProjectSetupEntry | null {
+  if (basePath) return pendingDeepProjectSetupMap.get(basePath) ?? null;
+  if (pendingDeepProjectSetupMap.size === 1) return pendingDeepProjectSetupMap.values().next().value!;
+  return null;
+}
+
+function getDeepSetupSessionId(ctx: ExtensionContext | undefined): string | undefined {
+  return ctx?.sessionManager?.getSessionId?.();
+}
+
+function _getPendingDeepProjectSetupForContext(
+  ctx: ExtensionContext | undefined,
+  basePath?: string,
+): PendingDeepProjectSetupEntry | null {
+  if (basePath) {
+    return pendingDeepProjectSetupMap.get(basePath) ?? null;
+  }
+  if (!ctx) return _getPendingDeepProjectSetup();
+
+  const sessionId = getDeepSetupSessionId(ctx);
+  if (sessionId) {
+    const matches = [...pendingDeepProjectSetupMap.values()].filter(entry => entry.sessionId === sessionId);
+    if (matches.length === 1) return matches[0]!;
+  }
+
+  const matches = [...pendingDeepProjectSetupMap.values()].filter(entry => entry.ctx === ctx);
+  return matches.length === 1 ? matches[0]! : null;
+}
+
+export async function startDeepProjectSetupForeground(
+  ctx: ExtensionCommandContext,
+  pi: ExtensionAPI,
+  basePath: string,
+  step?: boolean,
+): Promise<void> {
+  const entry: PendingDeepProjectSetupEntry = {
+    ctx,
+    pi,
+    basePath,
+    step,
+    createdAt: Date.now(),
+    sessionId: getDeepSetupSessionId(ctx),
+  };
+  pendingDeepProjectSetupMap.set(basePath, entry);
+  await dispatchNextDeepProjectSetupStage(entry);
+}
+
+export async function checkDeepProjectSetupAfterTurn(
+  event: { messages: any[] },
+  ctx?: ExtensionContext,
+  basePath?: string,
+): Promise<boolean> {
+  const entry = _getPendingDeepProjectSetupForContext(ctx, basePath);
+  if (!entry) return false;
+
+  if (entry.currentUnitType && entry.currentUnitId) {
+    const artifactReady = verifyExpectedArtifact(entry.currentUnitType, entry.currentUnitId, entry.basePath);
+    if (!artifactReady) {
+      if (isAwaitingUserInput(event.messages)) return false;
+      return false;
+    }
+  }
+
+  return dispatchNextDeepProjectSetupStage(entry);
+}
+
+async function dispatchNextDeepProjectSetupStage(entry: PendingDeepProjectSetupEntry): Promise<boolean> {
+  invalidateAllCaches();
+  const prefs = loadEffectiveGSDPreferences(entry.basePath)?.preferences;
+  const { DISPATCH_RULES, hasPendingDeepStage } = await import("./auto-dispatch.js");
+
+  if (!hasPendingDeepStage(prefs, entry.basePath)) {
+    pendingDeepProjectSetupMap.delete(entry.basePath);
+    startAutoDetached(entry.ctx, entry.pi, entry.basePath, false, { step: entry.step });
+    return true;
+  }
+
+  const state = await deriveState(entry.basePath);
+  const dispatchCtx = {
+    basePath: entry.basePath,
+    mid: "PROJECT",
+    midTitle: "Project setup",
+    state,
+    prefs,
+    // Claude Code currently surfaces workflow-MCP question calls as tool-request
+    // UI that can be cancelled outside the normal chat flow. During the
+    // foreground deep project setup interview, keep user input in plain chat so
+    // `/gsd new-project --deep` cannot bounce through cancelled tool requests.
+    structuredQuestionsAvailable: "false" as const,
+  };
+  let result: Awaited<ReturnType<(typeof DISPATCH_RULES)[number]["match"]>> = null;
+  for (const rule of DISPATCH_RULES) {
+    // Only evaluate foreground setup gates here. Later deep rules such as
+    // research-project have dispatch-time side effects (e.g. claiming an
+    // inflight marker) and must be left to auto-mode once the interview is
+    // complete.
+    if (!FOREGROUND_DEEP_SETUP_RULE_NAMES.has(rule.name)) continue;
+    result = await rule.match(dispatchCtx);
+    if (result) break;
+  }
+
+  if (!result || result.action !== "dispatch") {
+    if (result?.action === "stop") {
+      entry.ctx.ui.notify(result.reason, result.level);
+    } else if (hasPendingDeepStage(prefs, entry.basePath)) {
+      pendingDeepProjectSetupMap.delete(entry.basePath);
+      startAutoDetached(entry.ctx, entry.pi, entry.basePath, false, { step: entry.step });
+      return true;
+    }
+    return false;
+  }
+
+  if (!USER_DRIVEN_DEEP_SETUP_UNITS.has(result.unitType)) {
+    pendingDeepProjectSetupMap.delete(entry.basePath);
+    startAutoDetached(entry.ctx, entry.pi, entry.basePath, false, { step: entry.step });
+    return true;
+  }
+
+  entry.currentUnitType = result.unitType;
+  entry.currentUnitId = result.unitId;
+  entry.createdAt = Date.now();
+  await dispatchWorkflow(
+    entry.pi,
+    `${result.prompt}\n\n${FOREGROUND_DEEP_SETUP_QUESTION_POLICY}`,
+    "gsd-run",
+    entry.ctx,
+    result.unitType,
+  );
+  return true;
 }
 
 /** Called from agent_end to check if auto-mode should start after discuss */
@@ -1611,17 +1781,17 @@ export async function showSmartEntry(
 
   // ── Deep planning mode kickoff ────────────────────────────────────────
   // When `planning_depth: deep` is set (e.g. via `/gsd new-project --deep`)
-  // and any of the 5 project-level stage gates (workflow-prefs, discuss-
-  // project, discuss-requirements, research-decision, research-project) is
-  // still pending, hand off to the auto-loop so the deep-mode dispatch
-  // rules in auto-dispatch.ts drive the staged interview turn-by-turn.
+  // and any project-level stage gate is still pending, keep the user-question
+  // stages in the foreground conversation. Auto-mode is resumed only after
+  // the project interview artifacts exist, so questions do not look like
+  // cancelled auto-mode runs.
   // Light mode and fully-completed deep projects fall through to the
   // standard wizard below.
   {
     const prefs = loadEffectiveGSDPreferences(basePath)?.preferences;
     const { hasPendingDeepStage } = await import("./auto-dispatch.js");
     if (hasPendingDeepStage(prefs, basePath)) {
-      startAutoDetached(ctx, pi, basePath, false);
+      await startDeepProjectSetupForeground(ctx, pi, basePath, stepMode);
       return;
     }
   }

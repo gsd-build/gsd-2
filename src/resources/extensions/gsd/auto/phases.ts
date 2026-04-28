@@ -11,7 +11,12 @@ import { importExtensionModule, type ExtensionAPI, type ExtensionContext } from 
 
 import type { AutoSession, SidecarItem } from "./session.js";
 import type { LoopDeps } from "./loop-deps.js";
-import type { PostUnitContext, PreVerificationOpts } from "../auto-post-unit.js";
+import {
+  USER_DRIVEN_DEEP_UNITS,
+  isAwaitingUserInput,
+  type PostUnitContext,
+  type PreVerificationOpts,
+} from "../auto-post-unit.js";
 import type { Phase } from "../types.js";
 import {
   MAX_RECOVERY_CHARS,
@@ -647,6 +652,18 @@ export async function runPreDispatch(
     } catch (e) {
       logWarning("engine", "STATE.md rebuild failed after milestone transition", { error: String(e) });
     }
+  }
+
+  const { hasPendingDeepStage } = await import("../auto-dispatch.js");
+  if (hasPendingDeepStage(prefs, s.basePath)) {
+    return {
+      action: "next",
+      data: {
+        state,
+        mid: "PROJECT",
+        midTitle: "Project setup",
+      },
+    };
   }
 
   if (mid) {
@@ -1405,6 +1422,7 @@ export async function runUnitPhase(
   s.currentUnit = { type: unitType, id: unitId, startedAt: Date.now() };
   s.lastGitActionFailure = null;
   s.lastGitActionStatus = null;
+  s.lastUnitAgentEndMessages = null;
   setCurrentPhase(unitType);
   s.lastToolInvocationError = null; // #2883: clear stale error from previous unit
   const unitStartSeq = ic.nextSeq();
@@ -1639,6 +1657,7 @@ export async function runUnitPhase(
     unitId,
     finalPrompt,
   );
+  s.lastUnitAgentEndMessages = unitResult.event?.messages ?? null;
   debugLog("autoLoop", {
     phase: "runUnit-end",
     iteration: ic.iteration,
@@ -1840,19 +1859,27 @@ export async function runUnitPhase(
         (u: { type: string; id: string; startedAt: number; toolCalls: number }) => u.type === unitType && u.id === unitId && u.startedAt === s.currentUnit?.startedAt,
       );
       if (lastUnit && lastUnit.toolCalls === 0) {
-        debugLog("runUnitPhase", {
-          phase: "zero-tool-calls",
-          unitType,
-          unitId,
-          warning: "Unit completed with 0 tool calls — likely context exhaustion, marking as failed",
-        });
-        ctx.ui.notify(
-          `${unitType} ${unitId} completed with 0 tool calls — context exhaustion, will retry`,
-          "warning",
-        );
-        // Fall through to next iteration where dispatch will re-derive
-        // and re-dispatch this unit.
-        return { action: "next", data: { unitStartedAt: s.currentUnit?.startedAt, requestDispatchedAt: unitResult.requestDispatchedAt } };
+        if (USER_DRIVEN_DEEP_UNITS.has(unitType) && isAwaitingUserInput(s.lastUnitAgentEndMessages ?? undefined)) {
+          debugLog("runUnitPhase", {
+            phase: "zero-tool-calls-awaiting-user-input",
+            unitType,
+            unitId,
+          });
+        } else {
+          debugLog("runUnitPhase", {
+            phase: "zero-tool-calls",
+            unitType,
+            unitId,
+            warning: "Unit completed with 0 tool calls — likely context exhaustion, marking as failed",
+          });
+          ctx.ui.notify(
+            `${unitType} ${unitId} completed with 0 tool calls — context exhaustion, will retry`,
+            "warning",
+          );
+          // Fall through to next iteration where dispatch will re-derive
+          // and re-dispatch this unit.
+          return { action: "next", data: { unitStartedAt: s.currentUnit?.startedAt, requestDispatchedAt: unitResult.requestDispatchedAt } };
+        }
       }
     }
   }
@@ -1960,11 +1987,11 @@ export async function runFinalize(
   // mutations are harmless — postUnitPreVerification guards all side effects
   // behind `if (s.currentUnit)`. The next iteration sets a fresh currentUnit.
   // Sidecar items use lightweight pre-verification opts
-  const preVerificationOpts: PreVerificationOpts | undefined = sidecarItem
+  const preVerificationOpts: PreVerificationOpts = sidecarItem
     ? sidecarItem.kind === "hook"
-      ? { skipSettleDelay: true, skipWorktreeSync: true }
-      : { skipSettleDelay: true }
-    : undefined;
+      ? { skipSettleDelay: true, skipWorktreeSync: true, agentEndMessages: s.lastUnitAgentEndMessages ?? undefined }
+      : { skipSettleDelay: true, agentEndMessages: s.lastUnitAgentEndMessages ?? undefined }
+    : { agentEndMessages: s.lastUnitAgentEndMessages ?? undefined };
   const preUnitSnapshot = s.currentUnit
     ? { type: s.currentUnit.type, id: s.currentUnit.id, startedAt: s.currentUnit.startedAt }
     : null;

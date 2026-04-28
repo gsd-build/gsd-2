@@ -9,7 +9,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -142,7 +142,7 @@ function writeValidRequirements(base: string): void {
 
 // ─── Regression test for B1: rule ordering bug ────────────────────────────
 
-test("integration: deep mode + needs-discussion + nothing captured → workflow-preferences (NOT discuss-milestone)", async (t) => {
+test("integration: deep mode + needs-discussion + nothing captured → capture prefs then discuss-project", async (t) => {
   const base = makeIsolatedBase();
   t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
 
@@ -152,13 +152,16 @@ test("integration: deep mode + needs-discussion + nothing captured → workflow-
   if (result.action === "dispatch") {
     assert.strictEqual(
       result.unitType,
-      "workflow-preferences",
-      "deep mode in needs-discussion with no captured prefs must dispatch workflow-preferences first, not discuss-milestone",
+      "discuss-project",
+      "deep mode in needs-discussion must self-heal preferences before project discovery, not discuss milestone",
     );
   }
+  const prefsContent = readFileSync(join(base, ".gsd", "PREFERENCES.md"), "utf-8");
+  assert.match(prefsContent, /^workflow_prefs_captured:\s*true\s*$/m);
+  assert.ok(existsSync(join(base, ".gsd", "runtime", "research-decision.json")));
 });
 
-test("integration: deep mode + pre-planning + nothing captured → workflow-preferences", async (t) => {
+test("integration: deep mode + pre-planning + nothing captured → capture prefs then discuss-project", async (t) => {
   const base = makeIsolatedBase();
   t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
 
@@ -166,8 +169,10 @@ test("integration: deep mode + pre-planning + nothing captured → workflow-pref
   const result = await resolveDispatch(makeCtx(base, prefs, "pre-planning"));
   assert.strictEqual(result.action, "dispatch");
   if (result.action === "dispatch") {
-    assert.strictEqual(result.unitType, "workflow-preferences");
+    assert.strictEqual(result.unitType, "discuss-project");
   }
+  const prefsContent = readFileSync(join(base, ".gsd", "PREFERENCES.md"), "utf-8");
+  assert.match(prefsContent, /^workflow_prefs_captured:\s*true\s*$/m);
 });
 
 test("integration: deep mode + prefs captured + no PROJECT.md → discuss-project", async (t) => {

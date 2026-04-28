@@ -682,6 +682,62 @@ test("executeSummarySave removes sibling CONTEXT-DRAFT when writing milestone CO
   }
 });
 
+test("executeSummarySave supports root-level deep planning artifacts", async () => {
+  const base = makeTmpBase();
+  try {
+    openTestDb(base);
+
+    const project = await inProjectDir(base, () => executeSummarySave({
+      artifact_type: "PROJECT",
+      content: "# Project\n\n## What This Is\n\nA root project artifact.",
+    }, base));
+    assert.equal(project.isError, undefined);
+    assert.equal(project.details.path, "PROJECT.md");
+    assert.ok(existsSync(join(base, ".gsd", "PROJECT.md")));
+
+    const requirements = await inProjectDir(base, () => executeSummarySave({
+      artifact_type: "REQUIREMENTS",
+      content: "# Requirements\n\n## Active\n\n## Validated\n\n## Deferred\n\n## Out of Scope\n\n## Traceability\n\n## Coverage Summary\n",
+    }, base));
+    assert.equal(requirements.isError, undefined);
+    assert.equal(requirements.details.path, "REQUIREMENTS.md");
+    assert.ok(existsSync(join(base, ".gsd", "REQUIREMENTS.md")));
+
+    const db = _getAdapter();
+    const rows = db!.prepare(
+      "SELECT path, artifact_type, milestone_id FROM artifacts WHERE path IN ('PROJECT.md', 'REQUIREMENTS.md') ORDER BY path",
+    ).all() as Array<Record<string, unknown>>;
+    assert.deepEqual(
+      rows.map((row) => [row.path, row.artifact_type, row.milestone_id]),
+      [
+        ["PROJECT.md", "PROJECT", null],
+        ["REQUIREMENTS.md", "REQUIREMENTS", null],
+      ],
+    );
+  } finally {
+    closeDatabase();
+    cleanup(base);
+  }
+});
+
+test("executeSummarySave rejects milestone-scoped artifacts without milestone_id", async () => {
+  const base = makeTmpBase();
+  try {
+    openTestDb(base);
+
+    const result = await inProjectDir(base, () => executeSummarySave({
+      artifact_type: "CONTEXT",
+      content: "# Context\n",
+    }, base));
+    assert.equal(result.isError, true);
+    assert.equal(result.details.error, "missing_milestone_id");
+    assert.match(result.content[0].text, /milestone_id is required/);
+  } finally {
+    closeDatabase();
+    cleanup(base);
+  }
+});
+
 test("executeSummarySave removes sibling CONTEXT-DRAFT when writing slice CONTEXT (#4442)", async () => {
   const base = makeTmpBase();
   try {

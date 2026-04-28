@@ -1,4 +1,4 @@
-**Working directory:** `{{workingDirectory}}`. All file reads, writes, and shell commands MUST operate relative to this directory. Do NOT `cd` to any other directory.
+**Working directory:** `{{workingDirectory}}`. All file reads, writes, and shell commands MUST operate relative to this directory. Do NOT `cd` to any other directory. For `.gsd` files in this prompt, use absolute paths rooted at `{{workingDirectory}}` instead of discovering them with `Glob`.
 
 Discuss the **project** as a whole. Identify gray areas at the project level — vision, users, anti-goals, key constraints — ask the user about them, and write `.gsd/PROJECT.md` with the decisions. Use the **Project** output template below. If a `GSD Skill Preferences` block is present in system context, use it to decide which skills to load and follow; do not override required artifact rules.
 
@@ -22,7 +22,7 @@ Before your first action, print this banner verbatim in chat:
 
 ### Open the conversation
 
-Ask the user a single freeform question (NOT structured): **"What do you want to build?"**
+Ask the user a single freeform question in plain text, not structured: **"What do you want to build?"**
 
 Wait for their response. This grounds every follow-up in their own terminology.
 
@@ -50,7 +50,9 @@ Ask **1–3 questions per round**. Each round targets one of:
 
 **Never fabricate or simulate user input.** Never generate fake transcript markers like `[User]`, `[Human]`, or `User:`. Ask one question round, then wait for the user's actual response before continuing.
 
-**If `{{structuredQuestionsAvailable}}` is `true`:** use `ask_user_questions` for each round. 1–3 questions per call. Keep option labels short (3–5 words). Always include a freeform "Other / let me explain" option. **IMPORTANT: Call `ask_user_questions` exactly once per turn.** Wait for user response before asking the next round.
+**Plain-text default:** Project discovery is open-ended. Ask question rounds in plain text unless you are presenting 2–3 concrete alternatives with clear tradeoffs.
+
+**If `{{structuredQuestionsAvailable}}` is `true` and you use `ask_user_questions`:** ask 1–3 questions per call. Every question object MUST include a stable lowercase `id`. Keep option labels short (3–5 words). Always include a freeform "Other / let me explain" option. Wait for each tool result before asking the next round.
 
 **If `{{structuredQuestionsAvailable}}` is `false`:** ask questions in plain text. Keep each round to 1–3 focused questions.
 
@@ -60,7 +62,7 @@ After each round, investigate further if any answer opens a new unknown, then as
 
 After each round, decide whether you have enough depth to write a strong PROJECT.md.
 
-- **Incremental persistence:** After every 2 question rounds, silently save a `PROJECT-DRAFT.md` to `.gsd/` using `gsd_summary_save` with `artifact_type: "PROJECT-DRAFT"`. Crash protection. Do NOT mention this save to the user.
+- **Incremental persistence:** After every 2 question rounds, silently save `.gsd/PROJECT-DRAFT.md` using `gsd_summary_save` with `artifact_type: "PROJECT-DRAFT"` and no `milestone_id`. Crash protection. Do NOT mention this save to the user.
 - If not ready, continue to the next round.
 - Use a wrap-up prompt only when you believe the depth checklist below is satisfied or the user signals they want to stop.
 
@@ -103,6 +105,7 @@ Before moving to the wrap-up gate, verify you have covered:
 
 **If `{{structuredQuestionsAvailable}}` is `true`:** use `ask_user_questions` with:
 - header: "Depth Check"
+- id: "depth_verification_project_confirm"
 - question: "Did I capture the depth right?"
 - options: "Yes, you got it (Recommended)", "Not quite — let me clarify"
 - **The question ID must contain `depth_verification_project`** — this enables the write-gate downstream.
@@ -122,8 +125,9 @@ The depth verification is the only required confirmation gate. Do not add a seco
 Once the user confirms depth:
 
 1. Use the **Project** output template (inlined above).
-2. Call `gsd_summary_save` with `artifact_type: "PROJECT"` and the full project markdown as `content` — the tool writes `.gsd/PROJECT.md` to disk and persists to DB. Preserve the user's exact terminology, emphasis, and framing.
+2. Call `gsd_summary_save` with `artifact_type: "PROJECT"` and the full project markdown as `content`; omit `milestone_id`. The tool writes `.gsd/PROJECT.md` to disk and persists to DB. Preserve the user's exact terminology, emphasis, and framing.
 3. The `## Capability Contract` section MUST reference `.gsd/REQUIREMENTS.md` — that file does not yet exist; the next stage (`discuss-requirements`) will produce it.
 4. The `## Milestone Sequence` MUST list at least M001 with title and one-liner. Subsequent milestones may be listed as known intents; they will be elaborated in their own discuss-milestone stages.
-5. {{commitInstruction}}
-6. Say exactly: `"Project context written."` — nothing else.
+5. Do NOT use `artifact_type: "CONTEXT"` and do NOT pass `milestone_id: "PROJECT"`; that creates a fake milestone named PROJECT.
+6. {{commitInstruction}}
+7. Say exactly: `"Project context written."` — nothing else.

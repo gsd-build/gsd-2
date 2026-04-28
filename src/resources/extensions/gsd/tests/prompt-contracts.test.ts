@@ -99,10 +99,34 @@ test("guided requirements prompt saves requirement records before final summary 
 
 test("guided requirements prompt uses supported summary artifact types", () => {
   const prompt = readPrompt("guided-discuss-requirements");
-  assert.match(prompt, /artifact_type:\s*"CONTEXT-DRAFT"/);
-  assert.match(prompt, /artifact_type:\s*"CONTEXT"(?!-)/);
-  assert.doesNotMatch(prompt, /artifact_type:\s*"REQUIREMENTS-DRAFT"/);
-  assert.doesNotMatch(prompt, /artifact_type:\s*"REQUIREMENTS"/);
+  assert.match(prompt, /artifact_type:\s*"REQUIREMENTS-DRAFT"/);
+  assert.match(prompt, /artifact_type:\s*"REQUIREMENTS"(?!-)/);
+  assert.match(prompt, /omit `milestone_id`/);
+  assert.match(prompt, /Do NOT use `artifact_type: "CONTEXT"` and do NOT pass `milestone_id: "REQUIREMENTS"`/);
+  assert.match(prompt, /depth_verification_requirements_confirm/);
+  assert.doesNotMatch(prompt, /call `gsd_summary_save` with `artifact_type: "CONTEXT"`/);
+});
+
+test("workflow preferences prompt writes defaults without interactive questions", () => {
+  const prompt = readPrompt("guided-workflow-preferences");
+  assert.match(prompt, /default-writing/i);
+  assert.match(prompt, /Do NOT call `ask_user_questions`/);
+  assert.match(prompt, /commit_policy:\s*per-task/);
+  assert.match(prompt, /branch_model:\s*single/);
+  assert.match(prompt, /research:\s*research/);
+  assert.doesNotMatch(prompt, /Ask all three questions/i);
+  assert.doesNotMatch(prompt, /Ask all four questions/i);
+  assert.doesNotMatch(prompt, /Ask all five questions/i);
+});
+
+test("guided project prompt writes root PROJECT artifact, not PROJECT milestone", () => {
+  const prompt = readPrompt("guided-discuss-project");
+  assert.match(prompt, /artifact_type:\s*"PROJECT"/);
+  assert.match(prompt, /omit `milestone_id`/);
+  assert.match(prompt, /Do NOT use `artifact_type: "CONTEXT"` and do NOT pass `milestone_id: "PROJECT"`/);
+  assert.match(prompt, /single freeform question in plain text, not structured/i);
+  assert.doesNotMatch(prompt, /project_initial_shape/);
+  assert.match(prompt, /depth_verification_project_confirm/);
 });
 
 test("guided research decision prompt keeps exact chat confirmation strings", () => {

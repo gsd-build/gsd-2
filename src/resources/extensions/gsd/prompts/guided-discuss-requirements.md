@@ -1,4 +1,4 @@
-**Working directory:** `{{workingDirectory}}`. All file reads, writes, and shell commands MUST operate relative to this directory. Do NOT `cd` to any other directory.
+**Working directory:** `{{workingDirectory}}`. All file reads, writes, and shell commands MUST operate relative to this directory. Do NOT `cd` to any other directory. For `.gsd` files in this prompt, use absolute paths rooted at `{{workingDirectory}}` instead of discovering them with `Glob`.
 
 Discuss **project-level requirements**. Read `.gsd/PROJECT.md` first — it is the authoritative source for vision, core value, anti-goals, and milestone sequence. All requirements must trace back to it. Identify gray areas about what capabilities the project must deliver, ask the user, and write `.gsd/REQUIREMENTS.md` using the v2 structured `R###` format. Use the **Requirements** output template below.
 
@@ -51,13 +51,13 @@ Ask **1–3 questions per round**. Each round targets one dimension:
 
 **Never fabricate or simulate user input.** Wait for actual responses.
 
-**If `{{structuredQuestionsAvailable}}` is `true`:** use `ask_user_questions`. For class assignments, present the allowed classes as multi-select options. For status, present the four statuses as exclusive options. **One `ask_user_questions` call per turn.**
+**If `{{structuredQuestionsAvailable}}` is `true`:** use `ask_user_questions`. Every question object MUST include a stable lowercase `id`. For class assignments, present the allowed classes as multi-select options. For status, present the four statuses as exclusive options. Ask 1–3 questions per call. Wait for each tool result before asking the next round.
 
 **If `{{structuredQuestionsAvailable}}` is `false`:** ask in plain text. Keep each round to 1–3 questions.
 
 ### Round cadence
 
-- **Incremental persistence:** After every 2 question rounds, silently save the current requirements draft using `gsd_summary_save` with `artifact_type: "CONTEXT-DRAFT"`. Crash protection. Do NOT mention this save.
+- **Incremental persistence:** After every 2 question rounds, silently save the current requirements draft using `gsd_summary_save` with `artifact_type: "REQUIREMENTS-DRAFT"` and no `milestone_id`. Crash protection. Do NOT mention this save.
 - Continue rounds until the depth checklist is satisfied or the user signals stop.
 
 ---
@@ -95,6 +95,7 @@ Before the wrap-up gate, verify:
 
 **If `{{structuredQuestionsAvailable}}` is `true`:** use `ask_user_questions` with:
 - header: "Depth Check"
+- id: "depth_verification_requirements_confirm"
 - question: "Are these the right requirements at the right scope?"
 - options: "Yes, ship it (Recommended)", "Not quite — let me adjust"
 - **The question ID must contain `depth_verification_requirements`** — enables the write-gate.
@@ -113,8 +114,9 @@ Once the user confirms:
 
 1. Use the **Requirements** output template (inlined above) to render the final markdown in working memory.
 2. Every entry must conform to the `R###` format with all listed fields. Use `gsd_requirement_save` (NOT plain file edit) for each requirement so DB state is saved first.
-3. After all `gsd_requirement_save` calls complete, call `gsd_summary_save` with `artifact_type: "CONTEXT"` and the full rendered markdown as `content` — this persists the final requirements discussion artifact.
+3. After all `gsd_requirement_save` calls complete, call `gsd_summary_save` with `artifact_type: "REQUIREMENTS"` and the full rendered markdown as `content`; omit `milestone_id`. This writes `.gsd/REQUIREMENTS.md` and persists the final requirements artifact.
 4. The file MUST contain all required sections: `## Active`, `## Validated`, `## Deferred`, `## Out of Scope`, `## Traceability`, `## Coverage Summary`. Empty sections are OK; missing sections are not.
 5. Print the final coverage summary in chat: `Active: N | Validated: N | Deferred: N | Out of Scope: N | Mapped to slices: N | Unmapped active: N`.
-6. {{commitInstruction}}
-7. End your response with exactly: `Requirements written.`
+6. Do NOT use `artifact_type: "CONTEXT"` and do NOT pass `milestone_id: "REQUIREMENTS"`; that creates a fake milestone instead of `.gsd/REQUIREMENTS.md`.
+7. {{commitInstruction}}
+8. End your response with exactly: `Requirements written.`

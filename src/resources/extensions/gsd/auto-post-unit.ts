@@ -288,6 +288,7 @@ export function buildStepCompleteMessage(nextState: import("./types.js").GSDStat
 export interface PreVerificationOpts {
   skipSettleDelay?: boolean;
   skipWorktreeSync?: boolean;
+  agentEndMessages?: unknown[];
 }
 
 export interface PostUnitContext {
@@ -299,6 +300,45 @@ export interface PostUnitContext {
   stopAuto: (ctx?: ExtensionContext, pi?: ExtensionAPI, reason?: string) => Promise<void>;
   pauseAuto: (ctx?: ExtensionContext, pi?: ExtensionAPI) => Promise<void>;
   updateProgressWidget: (ctx: ExtensionContext, unitType: string, unitId: string, state: import("./types.js").GSDState) => void;
+}
+
+export const USER_DRIVEN_DEEP_UNITS = new Set([
+  "discuss-project",
+  "discuss-requirements",
+  "research-decision",
+]);
+
+function extractTextFromMessage(msg: unknown): string {
+  if (!msg || typeof msg !== "object") return "";
+  const content = (msg as { content?: unknown }).content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const typed = block as { type?: unknown; text?: unknown };
+    if (typed.type === "text" && typeof typed.text === "string") {
+      parts.push(typed.text);
+    }
+  }
+  return parts.join("\n");
+}
+
+function lastAssistantText(messages: unknown[] | undefined): string {
+  if (!Array.isArray(messages)) return "";
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const text = extractTextFromMessage(messages[i]).trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+export function isAwaitingUserInput(messages: unknown[] | undefined): boolean {
+  const text = lastAssistantText(messages);
+  if (!text) return false;
+  if (/ask_user_questions was cancelled before receiving a response/i.test(text)) return true;
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return lines.some((line) => line.endsWith("?"));
 }
 
 export async function autoCommitUnit(
@@ -953,6 +993,18 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
           "warning",
         );
         // Fall through to "continue" — do NOT enter the retry or db-unavailable paths.
+      } else if (!triggerArtifactVerified && USER_DRIVEN_DEEP_UNITS.has(s.currentUnit.type) && isAwaitingUserInput(opts?.agentEndMessages)) {
+        debugLog("postUnit", {
+          phase: "artifact-verify-awaiting-user",
+          unitType: s.currentUnit.type,
+          unitId: s.currentUnit.id,
+        });
+        ctx.ui.notify(
+          `${s.currentUnit.type} ${s.currentUnit.id} is waiting for your input — pausing auto-mode instead of retrying the missing artifact.`,
+          "info",
+        );
+        await pauseAuto(ctx, pi);
+        return "dispatched";
       } else if (!triggerArtifactVerified && !isDbAvailable()) {
         debugLog("postUnit", { phase: "artifact-verify-skip-db-unavailable", unitType: s.currentUnit.type, unitId: s.currentUnit.id });
         const dbSkipDiag = diagnoseExpectedArtifact(s.currentUnit.type, s.currentUnit.id, s.basePath);

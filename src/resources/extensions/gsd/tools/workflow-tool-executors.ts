@@ -30,12 +30,29 @@ import { handleValidateMilestone } from "./validate-milestone.js";
 import { logError, logWarning } from "../workflow-logger.js";
 import { invalidateStateCache } from "../state.js";
 
-export const SUPPORTED_SUMMARY_ARTIFACT_TYPES = ["SUMMARY", "RESEARCH", "CONTEXT", "ASSESSMENT", "CONTEXT-DRAFT"] as const;
+export const SUPPORTED_SUMMARY_ARTIFACT_TYPES = [
+  "SUMMARY",
+  "RESEARCH",
+  "CONTEXT",
+  "ASSESSMENT",
+  "CONTEXT-DRAFT",
+  "PROJECT",
+  "PROJECT-DRAFT",
+  "REQUIREMENTS",
+  "REQUIREMENTS-DRAFT",
+] as const;
 
 export function isSupportedSummaryArtifactType(
   artifactType: string,
 ): artifactType is (typeof SUPPORTED_SUMMARY_ARTIFACT_TYPES)[number] {
   return (SUPPORTED_SUMMARY_ARTIFACT_TYPES as readonly string[]).includes(artifactType);
+}
+
+function isRootSummaryArtifactType(artifactType: string): boolean {
+  return artifactType === "PROJECT" ||
+    artifactType === "PROJECT-DRAFT" ||
+    artifactType === "REQUIREMENTS" ||
+    artifactType === "REQUIREMENTS-DRAFT";
 }
 
 export interface ToolExecutionResult {
@@ -45,7 +62,7 @@ export interface ToolExecutionResult {
 }
 
 export interface SummarySaveParams {
-  milestone_id: string;
+  milestone_id?: string;
   slice_id?: string;
   task_id?: string;
   artifact_type: string;
@@ -71,6 +88,13 @@ export async function executeSummarySave(
     isError: true,
       };
   }
+  if (!isRootSummaryArtifactType(params.artifact_type) && !params.milestone_id) {
+    return {
+      content: [{ type: "text", text: `Error: milestone_id is required for artifact_type "${params.artifact_type}". Root-level artifacts must use PROJECT, PROJECT-DRAFT, REQUIREMENTS, or REQUIREMENTS-DRAFT.` }],
+      details: { operation: "save_summary", error: "missing_milestone_id" },
+      isError: true,
+    };
+  }
   const contextGuard = shouldBlockContextArtifactSaveInSnapshot(
     loadWriteGateSnapshot(basePath),
     params.artifact_type,
@@ -86,7 +110,15 @@ export async function executeSummarySave(
   }
   try {
     let relativePath: string;
-    if (params.task_id && params.slice_id) {
+    if (params.artifact_type === "PROJECT") {
+      relativePath = "PROJECT.md";
+    } else if (params.artifact_type === "PROJECT-DRAFT") {
+      relativePath = "PROJECT-DRAFT.md";
+    } else if (params.artifact_type === "REQUIREMENTS") {
+      relativePath = "REQUIREMENTS.md";
+    } else if (params.artifact_type === "REQUIREMENTS-DRAFT") {
+      relativePath = "REQUIREMENTS-DRAFT.md";
+    } else if (params.task_id && params.slice_id) {
       relativePath = `milestones/${params.milestone_id}/slices/${params.slice_id}/tasks/${params.task_id}-${params.artifact_type}.md`;
     } else if (params.slice_id) {
       relativePath = `milestones/${params.milestone_id}/slices/${params.slice_id}/${params.slice_id}-${params.artifact_type}.md`;
@@ -109,8 +141,8 @@ export async function executeSummarySave(
     if (params.artifact_type === "CONTEXT" && !params.task_id) {
       try {
         const draftFile = params.slice_id
-          ? resolveSliceFile(basePath, params.milestone_id, params.slice_id, "CONTEXT-DRAFT")
-          : resolveMilestoneFile(basePath, params.milestone_id, "CONTEXT-DRAFT");
+          ? resolveSliceFile(basePath, params.milestone_id!, params.slice_id, "CONTEXT-DRAFT")
+          : resolveMilestoneFile(basePath, params.milestone_id!, "CONTEXT-DRAFT");
         if (draftFile) unlinkSync(draftFile);
       } catch (e) {
         logWarning("tool", `CONTEXT-DRAFT.md unlink failed: ${(e as Error).message}`);

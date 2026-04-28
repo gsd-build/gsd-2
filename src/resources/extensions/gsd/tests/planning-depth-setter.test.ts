@@ -37,6 +37,12 @@ test("Deep mode: setPlanningDepth creates PREFERENCES.md when missing", (t) => {
   assert.ok(existsSync(path), "PREFERENCES.md must be created");
   const { frontmatter } = readFrontmatter(path);
   assert.strictEqual(frontmatter.planning_depth, "deep");
+  assert.strictEqual(frontmatter.workflow_prefs_captured, true);
+  assert.strictEqual(frontmatter.commit_policy, "per-task");
+  assert.strictEqual(frontmatter.branch_model, "single");
+  assert.strictEqual(frontmatter.uat_dispatch, true);
+  assert.deepStrictEqual(frontmatter.models, { executor_class: "balanced" });
+  assert.ok(existsSync(join(base, ".gsd", "runtime", "research-decision.json")));
 });
 
 test("Deep mode: setPlanningDepth updates existing planning_depth", (t) => {
@@ -67,6 +73,35 @@ test("Deep mode: setPlanningDepth preserves other frontmatter keys", (t) => {
   assert.strictEqual(frontmatter.version, 1);
   assert.strictEqual(frontmatter.mode, "solo");
   assert.strictEqual(frontmatter.uat_dispatch, true);
+});
+
+test("Deep mode: setPlanningDepth preserves explicit workflow preference values", (t) => {
+  const base = makeBase();
+  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+
+  mkdirSync(join(base, ".gsd"), { recursive: true });
+  writeFileSync(
+    join(base, ".gsd", "PREFERENCES.md"),
+    [
+      "---",
+      "planning_depth: deep",
+      "commit_policy: manual",
+      "branch_model: per-milestone-worktree",
+      "uat_dispatch: false",
+      "models:",
+      "  executor_class: heavy",
+      "---",
+      "",
+    ].join("\n"),
+  );
+  setPlanningDepth(base, "deep");
+
+  const { frontmatter } = readFrontmatter(join(base, ".gsd", "PREFERENCES.md"));
+  assert.strictEqual(frontmatter.workflow_prefs_captured, true);
+  assert.strictEqual(frontmatter.commit_policy, "manual");
+  assert.strictEqual(frontmatter.branch_model, "per-milestone-worktree");
+  assert.strictEqual(frontmatter.uat_dispatch, false);
+  assert.deepStrictEqual(frontmatter.models, { executor_class: "heavy" });
 });
 
 test("Deep mode: setPlanningDepth preserves body content", (t) => {

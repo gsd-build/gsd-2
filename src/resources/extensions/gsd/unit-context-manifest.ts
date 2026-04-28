@@ -598,10 +598,9 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
   },
 
   // ─── Deep planning mode (project-level) units ────────────────────────
-  // workflow-preferences: minimal 5-question wizard that captures
-  // commit_policy / branch_model / executor_class / uat_dispatch /
-  // skip_research into PREFERENCES.md. No project artifacts needed; the
-  // structured-questions UI carries the full prompt body.
+  // workflow-preferences: default-writing stage that records
+  // commit_policy / branch_model in PREFERENCES.md, defaults
+  // uat_dispatch/executor_class, and records the research decision. No project artifacts needed.
   "workflow-preferences": {
     skills: { mode: "none" },
     knowledge: "none",

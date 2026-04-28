@@ -342,6 +342,16 @@ function refreshLastCommit(basePath: string): void {
       cachedLastCommit = null;
       return;
     }
+    try {
+      execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
+        cwd: basePath,
+        stdio: ["pipe", "pipe", "pipe"],
+        timeout: 3000,
+      });
+    } catch {
+      cachedLastCommit = null;
+      return;
+    }
     const raw = execFileSync("git", ["log", "-1", "--format=%cr|%s"], {
       cwd: basePath,
       encoding: "utf-8",

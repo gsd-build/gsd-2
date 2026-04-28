@@ -5,7 +5,7 @@
 import test from "node:test";
 import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -151,36 +151,42 @@ test("Deep mode: workflow-preferences does NOT dispatch in light mode", async (t
   assert.strictEqual(result, null);
 });
 
-test("Deep mode: workflow-preferences DOES dispatch in deep mode when PREFERENCES.md missing", async (t) => {
+test("Deep mode: workflow-preferences captures defaults in-process when PREFERENCES.md missing", async (t) => {
   const base = makeIsolatedBaseWithCleanup(t);
 
   const prefs = { planning_depth: "deep" } as GSDPreferences;
   const result = await rule(WORKFLOW_PREFS_RULE_NAME).match(makeCtx(base, prefs));
-  assert.ok(result && result.action === "dispatch");
-  if (result.action === "dispatch") {
-    assert.strictEqual(result.unitType, "workflow-preferences");
-    assert.strictEqual(result.unitId, "WORKFLOW-PREFS");
-  }
+  assert.strictEqual(result, null, "workflow prefs are written deterministically, not dispatched to an agent");
+  const content = readFileSync(join(base, ".gsd", "PREFERENCES.md"), "utf-8");
+  assert.match(content, /^workflow_prefs_captured:\s*true\s*$/m);
+  assert.match(content, /^commit_policy:\s*per-task\s*$/m);
+  assert.ok(existsSync(join(base, ".gsd", "runtime", "research-decision.json")));
 });
 
-test("Deep mode: workflow-preferences DOES dispatch when PREFERENCES.md exists but lacks workflow_prefs_captured marker", async (t) => {
+test("Deep mode: workflow-preferences self-heals PREFERENCES.md when capture marker is missing", async (t) => {
   const base = makeIsolatedBaseWithCleanup(t);
 
   // Partial PREFERENCES.md (e.g. only planning_depth set) must not falsely
-  // suppress the wizard — the explicit captured marker is required.
+  // suppress the defaults write — the explicit captured marker is required.
   writeFileSync(join(base, ".gsd", "PREFERENCES.md"), "---\nplanning_depth: deep\n---\n");
   const prefs = { planning_depth: "deep" } as GSDPreferences;
   const result = await rule(WORKFLOW_PREFS_RULE_NAME).match(makeCtx(base, prefs));
-  assert.ok(result && result.action === "dispatch", "missing capture marker must re-fire wizard");
+  assert.strictEqual(result, null);
+  const content = readFileSync(join(base, ".gsd", "PREFERENCES.md"), "utf-8");
+  assert.match(content, /^workflow_prefs_captured:\s*true\s*$/m);
+  assert.match(content, /^branch_model:\s*single\s*$/m);
 });
 
-test("Deep mode: workflow-preferences DOES dispatch when frontmatter is malformed", async (t) => {
+test("Deep mode: workflow-preferences self-heals malformed frontmatter", async (t) => {
   const base = makeIsolatedBaseWithCleanup(t);
 
   writeFileSync(join(base, ".gsd", "PREFERENCES.md"), "---\nthis is not valid yaml: [\n---\n");
   const prefs = { planning_depth: "deep" } as GSDPreferences;
   const result = await rule(WORKFLOW_PREFS_RULE_NAME).match(makeCtx(base, prefs));
-  assert.ok(result && result.action === "dispatch", "malformed frontmatter treated as not captured");
+  assert.strictEqual(result, null);
+  const content = readFileSync(join(base, ".gsd", "PREFERENCES.md"), "utf-8");
+  assert.match(content, /^workflow_prefs_captured:\s*true\s*$/m);
+  assert.ok(content.includes("this is not valid yaml"), "malformed original content is preserved as body");
 });
 
 test("Deep mode: workflow-preferences does NOT dispatch when PREFERENCES.md has workflow_prefs_captured: true", async (t) => {
