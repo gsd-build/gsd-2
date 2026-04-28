@@ -32,7 +32,7 @@ import { MergeConflictError } from "../git-service.js";
 import { setCurrentPhase, clearCurrentPhase } from "../../shared/gsd-phase-state.js";
 import { pauseAutoForProviderError } from "../provider-error-pause.js";
 import { resumeAutoAfterProviderDelay } from "../bootstrap/provider-error-resume.js";
-import { resolveThinkingLevel } from "../thinking-policy.js";
+import { getEffectiveThinkingLevel } from "../thinking-policy.js";
 import { join, basename } from "node:path";
 import { existsSync, cpSync, readdirSync } from "node:fs";
 import {
@@ -1551,12 +1551,11 @@ export async function runUnitPhase(
         // any thinking_policy override resolved in selectAndApplyModel — so a
         // hook-driven model swap doesn't silently revert to the bootstrap
         // snapshot. Falls back to autoModeStartThinkingLevel when no policy.
-        const hookEffectiveLevel = (() => {
-          const policy = prefs?.thinking_policy;
-          if (!policy) return s.autoModeStartThinkingLevel;
-          const fb = (s.autoModeStartThinkingLevel ?? "medium") as Parameters<typeof resolveThinkingLevel>[2];
-          return resolveThinkingLevel(unitType, policy, fb);
-        })();
+        const hookEffectiveLevel = getEffectiveThinkingLevel(
+          unitType,
+          prefs?.thinking_policy,
+          s.autoModeStartThinkingLevel,
+        );
         if (hookEffectiveLevel) {
           pi.setThinkingLevel(hookEffectiveLevel);
         }

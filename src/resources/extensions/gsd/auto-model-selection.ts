@@ -20,7 +20,7 @@ import { resolveUokFlags } from "./uok/flags.js";
 import { applyModelPolicyFilter } from "./uok/model-policy.js";
 import { isModelBlocked } from "./blocked-models.js";
 import { getRequiredWorkflowToolsForAutoUnit } from "./workflow-mcp.js";
-import { resolveThinkingLevel } from "./thinking-policy.js";
+import { getEffectiveThinkingLevel } from "./thinking-policy.js";
 import type { ThinkingLevel } from "./thinking-policy.js";
 
 /**
@@ -210,13 +210,9 @@ export async function selectAndApplyModel(
   // but unmatched rules fall back to that snapshot — so a user level always
   // wins when no policy rule applies. Only auto-mode applies the policy
   // (interactive/guided dispatches use the session level as-is).
-  const effectiveThinkingLevel: ThinkingLevel | null | undefined = (() => {
-    if (!isAutoMode) return autoModeStartThinkingLevel ?? null;
-    const policy = prefs?.thinking_policy;
-    if (!policy) return autoModeStartThinkingLevel ?? null;
-    const fallback = (autoModeStartThinkingLevel ?? "medium") as ThinkingLevel;
-    return resolveThinkingLevel(unitType, policy, fallback);
-  })();
+  const effectiveThinkingLevel: ThinkingLevel | null | undefined = isAutoMode
+    ? getEffectiveThinkingLevel(unitType, prefs?.thinking_policy, autoModeStartThinkingLevel)
+    : autoModeStartThinkingLevel ?? null;
 
   const modelConfig = effectiveSessionModelOverride
     ? undefined

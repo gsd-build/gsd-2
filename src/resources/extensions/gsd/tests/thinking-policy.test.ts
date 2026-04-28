@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { resolveThinkingLevel } from "../thinking-policy.ts";
+import { getEffectiveThinkingLevel, resolveThinkingLevel } from "../thinking-policy.ts";
 import type { ThinkingPolicyConfig } from "../preferences-types.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -79,6 +79,32 @@ test("resolveThinkingLevel: prefix non-match falls through to default", () => {
     prefixes: { "research-": "high" },
   };
   assert.equal(resolveThinkingLevel("execute-task", policy, "off"), "minimal");
+});
+
+// ─── getEffectiveThinkingLevel — dispatch-site convenience wrapper ────
+
+test("getEffectiveThinkingLevel: returns startLevel unchanged when no policy", () => {
+  assert.equal(getEffectiveThinkingLevel("execute-task", undefined, "high"), "high");
+});
+
+test("getEffectiveThinkingLevel: returns null/undefined startLevel unchanged when no policy", () => {
+  assert.equal(getEffectiveThinkingLevel("execute-task", undefined, null), null);
+  assert.equal(getEffectiveThinkingLevel("execute-task", undefined, undefined), undefined);
+});
+
+test("getEffectiveThinkingLevel: applies policy with startLevel as fallback", () => {
+  const policy: ThinkingPolicyConfig = {
+    default: "medium",
+    unitTypes: { "execute-task": "off" },
+  };
+  assert.equal(getEffectiveThinkingLevel("execute-task", policy, "high"), "off");
+  // No exact / prefix match → falls through to default
+  assert.equal(getEffectiveThinkingLevel("complete-slice", policy, "high"), "medium");
+});
+
+test("getEffectiveThinkingLevel: defaults fallback to \"medium\" when startLevel is null", () => {
+  const policy: ThinkingPolicyConfig = {}; // no rules → fallback wins
+  assert.equal(getEffectiveThinkingLevel("complete-slice", policy, null), "medium");
 });
 
 // ─── Validation surface ────────────────────────────────────────────────
@@ -156,12 +182,12 @@ test("auto-model-selection resolves thinking_policy and prefers user start-level
     "auto-model-selection.ts should import the policy resolver",
   );
   assert.ok(
-    src.includes("resolveThinkingLevel(unitType, policy"),
-    "auto-model-selection.ts should call resolveThinkingLevel(unitType, policy, fallback)",
+    src.includes("getEffectiveThinkingLevel(unitType, prefs?.thinking_policy"),
+    "auto-model-selection.ts should call getEffectiveThinkingLevel(unitType, policy, startLevel)",
   );
   assert.ok(
-    src.includes("autoModeStartThinkingLevel ?? \"medium\""),
-    "fallback for resolveThinkingLevel should be the user's start snapshot",
+    src.includes("autoModeStartThinkingLevel"),
+    "the call should pass autoModeStartThinkingLevel as the start-level snapshot",
   );
   assert.ok(
     !src.includes("reapplyThinkingLevel(pi, autoModeStartThinkingLevel)"),
@@ -179,8 +205,10 @@ test("auto-model-selection skips policy resolution in interactive (non-auto) mod
   // dynamic routing is already gated this way (#3962); thinking_policy follows
   // the same convention.
   assert.ok(
-    src.includes("if (!isAutoMode) return autoModeStartThinkingLevel"),
-    "thinking_policy should be a no-op in interactive mode",
+    src.includes("isAutoMode") &&
+      src.includes("getEffectiveThinkingLevel(unitType, prefs?.thinking_policy") &&
+      src.includes(": autoModeStartThinkingLevel ?? null"),
+    "thinking_policy should be gated on isAutoMode and bypass to the start snapshot in interactive mode",
   );
 });
 

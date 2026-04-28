@@ -46,3 +46,21 @@ export function resolveThinkingLevel(
 
   return policy.default ?? fallback;
 }
+
+/**
+ * Compute the thinking level for a dispatch, given the snapshot captured at
+ * auto-mode start. Returns the snapshot unchanged when no policy is configured
+ * (so callers don't need to special-case the no-policy path).
+ *
+ * Pass `null`/`undefined` for `startLevel` if no snapshot exists; the caller
+ * decides what to do with a missing level (typically: skip `setThinkingLevel`).
+ */
+export function getEffectiveThinkingLevel(
+  unitType: string,
+  policy: ThinkingPolicyConfig | undefined,
+  startLevel: ThinkingLevel | null | undefined,
+): ThinkingLevel | null | undefined {
+  if (!policy) return startLevel;
+  const fallback = (startLevel ?? "medium") as ThinkingLevel;
+  return resolveThinkingLevel(unitType, policy, fallback);
+}

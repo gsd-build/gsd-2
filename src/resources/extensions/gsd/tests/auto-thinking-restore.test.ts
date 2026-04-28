@@ -45,7 +45,7 @@ test("hook model override preserves captured thinking level", () => {
     "hook model override should reference the captured start-level snapshot (as fallback)",
   );
   assert.ok(
-    hookBlock.includes("resolveThinkingLevel"),
-    "hook model override should consult thinking_policy via resolveThinkingLevel",
+    hookBlock.includes("getEffectiveThinkingLevel"),
+    "hook model override should consult thinking_policy via getEffectiveThinkingLevel",
   );
 });
