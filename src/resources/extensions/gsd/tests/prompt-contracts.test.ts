@@ -100,15 +100,15 @@ test("guided requirements prompt saves requirement records before final summary 
 test("guided requirements prompt uses supported summary artifact types", () => {
   const prompt = readPrompt("guided-discuss-requirements");
   assert.match(prompt, /artifact_type:\s*"CONTEXT-DRAFT"/);
-  assert.match(prompt, /artifact_type:\s*"CONTEXT"/);
+  assert.match(prompt, /artifact_type:\s*"CONTEXT"(?!-)/);
   assert.doesNotMatch(prompt, /artifact_type:\s*"REQUIREMENTS-DRAFT"/);
   assert.doesNotMatch(prompt, /artifact_type:\s*"REQUIREMENTS"/);
 });
 
 test("guided research decision prompt keeps exact chat confirmation strings", () => {
   const prompt = readPrompt("guided-research-decision");
-  assert.match(prompt, /Research decision: research/);
-  assert.match(prompt, /Research decision recorded\./);
+  assert.match(prompt, /^Research decision: research$/m);
+  assert.match(prompt, /^Research decision recorded\.$/m);
   assert.match(prompt, /Do not change the required confirmation strings/i);
   assert.doesNotMatch(prompt, /note the inference in the chat confirmation line/i);
 });

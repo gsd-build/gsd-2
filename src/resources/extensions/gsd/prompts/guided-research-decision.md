@@ -51,8 +51,16 @@ Once the answer is captured:
    - Use `"research"` if the user picked "Yes" or answered yes/y in plain text
    - Use `"skip"` if the user picked "Skip" or answered no/n
    - Optional for ambiguous or "Other / let me explain" answers: add an `inference_note` field to the JSON. Do not put inference text in chat.
-3. Print a one-line confirmation in chat: `Research decision: research` or `Research decision: skip`
-4. Say exactly: `"Research decision recorded."` — nothing else.
+3. Print exactly one of these one-line confirmations in chat:
+```text
+Research decision: research
+Research decision: skip
+```
+4. Say exactly:
+```text
+Research decision recorded.
+```
+Nothing else.
 
 ---
 

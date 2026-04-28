@@ -3,6 +3,7 @@
 // and on artifact presence, and that light mode behavior is unaffected.
 
 import test from "node:test";
+import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -92,6 +93,16 @@ function makeIsolatedBase(): string {
   return base;
 }
 
+function makeIsolatedBaseWithCleanup(t: TestContext): string {
+  const base = makeIsolatedBase();
+  t.after(() => {
+    try {
+      rmSync(base, { recursive: true, force: true });
+    } catch {}
+  });
+  return base;
+}
+
 function writeValidProject(base: string): void {
   writeFileSync(join(base, ".gsd", "PROJECT.md"), VALID_PROJECT_MD);
 }
@@ -134,16 +145,14 @@ function rule(name: string) {
 // ─── workflow-preferences rule ────────────────────────────────────────────
 
 test("Deep mode: workflow-preferences does NOT dispatch in light mode", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   const result = await rule(WORKFLOW_PREFS_RULE_NAME).match(makeCtx(base, undefined));
   assert.strictEqual(result, null);
 });
 
 test("Deep mode: workflow-preferences DOES dispatch in deep mode when PREFERENCES.md missing", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   const prefs = { planning_depth: "deep" } as GSDPreferences;
   const result = await rule(WORKFLOW_PREFS_RULE_NAME).match(makeCtx(base, prefs));
@@ -155,8 +164,7 @@ test("Deep mode: workflow-preferences DOES dispatch in deep mode when PREFERENCE
 });
 
 test("Deep mode: workflow-preferences DOES dispatch when PREFERENCES.md exists but lacks workflow_prefs_captured marker", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   // Partial PREFERENCES.md (e.g. only planning_depth set) must not falsely
   // suppress the wizard — the explicit captured marker is required.
@@ -167,8 +175,7 @@ test("Deep mode: workflow-preferences DOES dispatch when PREFERENCES.md exists b
 });
 
 test("Deep mode: workflow-preferences DOES dispatch when frontmatter is malformed", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   writeFileSync(join(base, ".gsd", "PREFERENCES.md"), "---\nthis is not valid yaml: [\n---\n");
   const prefs = { planning_depth: "deep" } as GSDPreferences;
@@ -177,8 +184,7 @@ test("Deep mode: workflow-preferences DOES dispatch when frontmatter is malforme
 });
 
 test("Deep mode: workflow-preferences does NOT dispatch when PREFERENCES.md has workflow_prefs_captured: true", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   writeFileSync(
     join(base, ".gsd", "PREFERENCES.md"),
@@ -192,16 +198,14 @@ test("Deep mode: workflow-preferences does NOT dispatch when PREFERENCES.md has 
 // ─── discuss-project rule ─────────────────────────────────────────────────
 
 test("Deep mode: discuss-project does NOT dispatch when planning_depth is undefined (default light)", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   const result = await rule(PROJECT_RULE_NAME).match(makeCtx(base, undefined));
   assert.strictEqual(result, null, "light mode (default) must not fire deep-mode rule");
 });
 
 test("Deep mode: discuss-project does NOT dispatch when planning_depth is 'light'", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   const prefs = { planning_depth: "light" } as GSDPreferences;
   const result = await rule(PROJECT_RULE_NAME).match(makeCtx(base, prefs));
@@ -209,8 +213,7 @@ test("Deep mode: discuss-project does NOT dispatch when planning_depth is 'light
 });
 
 test("Deep mode: discuss-project DOES dispatch when planning_depth is 'deep' and PROJECT.md missing", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   const prefs = { planning_depth: "deep" } as GSDPreferences;
   const result = await rule(PROJECT_RULE_NAME).match(makeCtx(base, prefs));
@@ -223,8 +226,7 @@ test("Deep mode: discuss-project DOES dispatch when planning_depth is 'deep' and
 });
 
 test("Deep mode: discuss-project does NOT dispatch when PROJECT.md already exists and is valid", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   writeValidProject(base);
   const prefs = { planning_depth: "deep" } as GSDPreferences;
@@ -233,8 +235,7 @@ test("Deep mode: discuss-project does NOT dispatch when PROJECT.md already exist
 });
 
 test("Deep mode: discuss-project DOES dispatch when PROJECT.md exists but is invalid", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   writeFileSync(join(base, ".gsd", "PROJECT.md"), "# Project\n");
   const prefs = { planning_depth: "deep" } as GSDPreferences;
@@ -247,8 +248,7 @@ test("Deep mode: discuss-project DOES dispatch when PROJECT.md exists but is inv
 });
 
 test("Deep mode: discuss-project does NOT dispatch in non-pre-planning phases", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   const prefs = { planning_depth: "deep" } as GSDPreferences;
   const result = await rule(PROJECT_RULE_NAME).match(makeCtx(base, prefs, "executing"));
@@ -256,8 +256,7 @@ test("Deep mode: discuss-project does NOT dispatch in non-pre-planning phases", 
 });
 
 test("Deep mode: discuss-project DOES dispatch in needs-discussion phase", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   const prefs = { planning_depth: "deep" } as GSDPreferences;
   const result = await rule(PROJECT_RULE_NAME).match(makeCtx(base, prefs, "needs-discussion"));
@@ -267,16 +266,14 @@ test("Deep mode: discuss-project DOES dispatch in needs-discussion phase", async
 // ─── discuss-requirements rule ────────────────────────────────────────────
 
 test("Deep mode: discuss-requirements does NOT dispatch in light mode", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   const result = await rule(REQUIREMENTS_RULE_NAME).match(makeCtx(base, undefined));
   assert.strictEqual(result, null, "light mode must not fire deep-mode requirements rule");
 });
 
 test("Deep mode: discuss-requirements does NOT dispatch when PROJECT.md missing (project rule must run first)", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   const prefs = { planning_depth: "deep" } as GSDPreferences;
   const result = await rule(REQUIREMENTS_RULE_NAME).match(makeCtx(base, prefs));
@@ -284,8 +281,7 @@ test("Deep mode: discuss-requirements does NOT dispatch when PROJECT.md missing 
 });
 
 test("Deep mode: discuss-requirements DOES dispatch when PROJECT.md exists and REQUIREMENTS.md missing", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   writeValidProject(base);
   const prefs = { planning_depth: "deep" } as GSDPreferences;
@@ -298,8 +294,7 @@ test("Deep mode: discuss-requirements DOES dispatch when PROJECT.md exists and R
 });
 
 test("Deep mode: discuss-requirements does NOT dispatch when REQUIREMENTS.md already exists and is valid", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   writeValidProject(base);
   writeValidRequirements(base);
@@ -309,8 +304,7 @@ test("Deep mode: discuss-requirements does NOT dispatch when REQUIREMENTS.md alr
 });
 
 test("Deep mode: discuss-requirements DOES dispatch when REQUIREMENTS.md exists but is invalid", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   writeValidProject(base);
   writeFileSync(join(base, ".gsd", "REQUIREMENTS.md"), "# Requirements\n");
@@ -326,8 +320,7 @@ test("Deep mode: discuss-requirements DOES dispatch when REQUIREMENTS.md exists 
 // ─── research-decision rule ───────────────────────────────────────────────
 
 test("Deep mode: research-decision does NOT dispatch in light mode", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   writeValidProject(base);
   writeValidRequirements(base);
@@ -336,8 +329,7 @@ test("Deep mode: research-decision does NOT dispatch in light mode", async (t) =
 });
 
 test("Deep mode: research-decision does NOT dispatch when REQUIREMENTS.md missing", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   writeValidProject(base);
   // No REQUIREMENTS.md
@@ -347,8 +339,7 @@ test("Deep mode: research-decision does NOT dispatch when REQUIREMENTS.md missin
 });
 
 test("Deep mode: research-decision DOES dispatch when REQUIREMENTS.md exists and no decision marker", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   writeValidProject(base);
   writeValidRequirements(base);
@@ -362,8 +353,7 @@ test("Deep mode: research-decision DOES dispatch when REQUIREMENTS.md exists and
 });
 
 test("Deep mode: research-decision does NOT dispatch when decision marker exists", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   writeValidProject(base);
   writeValidRequirements(base);
@@ -387,8 +377,7 @@ function setupReadyForResearchProject(base: string): void {
 }
 
 test("Deep mode: research-project does NOT dispatch in light mode", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   setupReadyForResearchProject(base);
   const result = await rule(RESEARCH_PROJECT_RULE_NAME).match(makeCtx(base, undefined));
@@ -396,8 +385,7 @@ test("Deep mode: research-project does NOT dispatch in light mode", async (t) =>
 });
 
 test("Deep mode: research-project does NOT dispatch when decision marker missing", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   writeValidProject(base);
   writeValidRequirements(base);
@@ -408,8 +396,7 @@ test("Deep mode: research-project does NOT dispatch when decision marker missing
 });
 
 test("Deep mode: research-project does NOT dispatch when user chose 'skip'", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   writeValidProject(base);
   writeValidRequirements(base);
@@ -421,8 +408,7 @@ test("Deep mode: research-project does NOT dispatch when user chose 'skip'", asy
 });
 
 test("Deep mode: research-project DOES dispatch when decision is 'research' and research files missing", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   setupReadyForResearchProject(base);
   const prefs = { planning_depth: "deep" } as GSDPreferences;
@@ -439,8 +425,7 @@ test("Deep mode: research-project DOES dispatch when decision is 'research' and 
 });
 
 test("Deep mode: research-project clears in-flight marker when prompt assembly fails", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   const restorePromptBuilder = setResearchProjectPromptBuilderForTest(async () => {
     throw new Error("prompt assembly failed");
@@ -459,8 +444,7 @@ test("Deep mode: research-project clears in-flight marker when prompt assembly f
 });
 
 test("Deep mode: research-project does NOT dispatch while in-flight marker exists", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   setupReadyForResearchProject(base);
   writeFileSync(join(base, ".gsd", "runtime", "research-project-inflight"), "{}\n");
@@ -470,8 +454,7 @@ test("Deep mode: research-project does NOT dispatch while in-flight marker exist
 });
 
 test("Deep mode: research-project does NOT dispatch when all 4 research files exist", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   setupReadyForResearchProject(base);
   mkdirSync(join(base, ".gsd", "research"), { recursive: true });
@@ -484,8 +467,7 @@ test("Deep mode: research-project does NOT dispatch when all 4 research files ex
 });
 
 test("Deep mode: research-project treats a dimension BLOCKER as terminal", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   setupReadyForResearchProject(base);
   mkdirSync(join(base, ".gsd", "research"), { recursive: true });
@@ -500,8 +482,7 @@ test("Deep mode: research-project treats a dimension BLOCKER as terminal", async
 });
 
 test("Deep mode: research-project DOES dispatch when only 3 of 4 research files exist", async (t) => {
-  const base = makeIsolatedBase();
-  t.after(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  const base = makeIsolatedBaseWithCleanup(t);
 
   setupReadyForResearchProject(base);
   mkdirSync(join(base, ".gsd", "research"), { recursive: true });
