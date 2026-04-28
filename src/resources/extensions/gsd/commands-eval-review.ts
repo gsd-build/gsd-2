@@ -60,10 +60,17 @@ export const SLICE_ID_PATTERN = /^S\d+$/;
 
 /**
  * Hard cap on the combined byte length of `SUMMARY.md` + `AI-SPEC.md` content
- * inlined into the auditor prompt. Exceeding this triggers truncation with an
- * inline marker; the handler also surfaces a warning via `ctx.ui.notify`.
+ * (including any truncation markers) inlined into the auditor prompt. The
+ * total prompt input is guaranteed to stay within this bound.
  */
 export const MAX_CONTEXT_BYTES = 200 * 1024;
+
+/** Bytes reserved by `readCapped` for its own truncation marker. */
+const READ_MARKER_RESERVE_BYTES = 128;
+/** Bytes reserved up front for the optional spec elision/failure marker. */
+const SPEC_MARKER_RESERVE_BYTES = 128;
+/** Below this many bytes left for spec we skip reading and emit only a marker. */
+const MIN_USEFUL_SPEC_BYTES = 256;
 
 const USAGE = "Usage: /gsd eval-review <sliceId> [--force] [--show]  (e.g. S07)";
 
@@ -262,15 +269,19 @@ export async function buildEvalReviewContext(
   milestoneId: string,
   now: () => Date = () => new Date(),
 ): Promise<EvalReviewContext> {
-  const summaryRead = await readCapped(state.summaryPath, MAX_CONTEXT_BYTES);
+  // Reserve room for the optional spec marker so the spec path always has
+  // budget for at least its truncation message.
+  const summaryReadBudget = MAX_CONTEXT_BYTES - SPEC_MARKER_RESERVE_BYTES;
+  const summaryRead = await readCapped(state.summaryPath, summaryReadBudget);
   const summaryBytes = summaryRead.bytesUsed;
   const remaining = MAX_CONTEXT_BYTES - summaryBytes;
 
   let spec: string | null = null;
   let specTruncated = false;
   if (state.specPath) {
-    if (remaining <= 0) {
-      spec = "[truncated: AI-SPEC.md omitted because SUMMARY.md consumed the context cap]";
+    if (remaining < MIN_USEFUL_SPEC_BYTES) {
+      const elision = "[truncated: AI-SPEC.md omitted because SUMMARY.md consumed the context cap]";
+      if (Buffer.byteLength(elision, "utf-8") <= remaining) spec = elision;
       specTruncated = true;
     } else {
       try {
@@ -278,9 +289,9 @@ export async function buildEvalReviewContext(
         spec = specRead.content;
         specTruncated = specRead.truncated;
       } catch (err) {
-        // spec is optional — degrade rather than throw
         const msg = err instanceof Error ? err.message : String(err);
-        spec = `[truncated: failed to read AI-SPEC.md (${msg})]`;
+        const failure = `[truncated: failed to read AI-SPEC.md (${msg})]`;
+        if (Buffer.byteLength(failure, "utf-8") <= remaining) spec = failure;
         specTruncated = true;
       }
     }
@@ -320,12 +331,16 @@ async function readCapped(filePath: string, maxBytes: number): Promise<CappedRea
       truncated: false,
     };
   }
+  // Reserve marker bytes up front so the marker plus head fit within maxBytes.
   // stream: true drops any trailing partial UTF-8 sequence instead of emitting U+FFFD.
-  const head = new TextDecoder("utf-8").decode(buf.subarray(0, maxBytes), { stream: true });
-  const elided = buf.byteLength - maxBytes;
+  const sliceBytes = Math.max(0, maxBytes - READ_MARKER_RESERVE_BYTES);
+  const head = new TextDecoder("utf-8").decode(buf.subarray(0, sliceBytes), { stream: true });
+  const elided = buf.byteLength - sliceBytes;
+  const marker = `\n\n[truncated: ${elided} bytes elided to fit eval-review context cap of ${maxBytes} bytes]\n`;
+  const content = `${head}${marker}`;
   return {
-    content: `${head}\n\n[truncated: ${elided} bytes elided to fit eval-review context cap of ${maxBytes} bytes]\n`,
-    bytesUsed: maxBytes,
+    content,
+    bytesUsed: Buffer.byteLength(content, "utf-8"),
     truncated: true,
   };
 }
@@ -507,6 +522,38 @@ ${ctx.summary}
 `;
 }
 
+// ─── Control-flow planner ─────────────────────────────────────────────────────
+
+/**
+ * Pure decision function for {@link handleEvalReview}'s control flow.
+ *
+ * Encodes the order in which the handler resolves its branches given parsed
+ * args, detected slice state, and any existing EVAL-REVIEW.md. Extracted so
+ * the order itself is unit-testable without stubbing the full handler.
+ *
+ * Order: invalid slice dir → show (no-summary tolerant) → missing summary
+ * → file exists without --force → dispatch.
+ */
+export type EvalReviewAction =
+  | { readonly kind: "no-slice-dir" }
+  | { readonly kind: "show"; readonly path: string | null }
+  | { readonly kind: "no-summary" }
+  | { readonly kind: "exists-no-force"; readonly path: string }
+  | { readonly kind: "dispatch" };
+
+export function planEvalReviewAction(
+  args: EvalReviewArgs,
+  detected: EvalReviewState,
+  existingPath: string | null,
+): EvalReviewAction {
+  if (detected.kind === "no-slice-dir") return { kind: "no-slice-dir" };
+  // --show is read-only and tolerates missing SUMMARY.md.
+  if (args.show) return { kind: "show", path: existingPath };
+  if (detected.kind === "no-summary") return { kind: "no-summary" };
+  if (existingPath && !args.force) return { kind: "exists-no-force", path: existingPath };
+  return { kind: "dispatch" };
+}
+
 // ─── Handler entry ────────────────────────────────────────────────────────────
 
 /**
@@ -559,47 +606,52 @@ export async function handleEvalReview(
   const milestoneId = state.activeMilestone.id;
 
   const detected = detectEvalReviewState(parsed, basePath, milestoneId);
+  const existing = detected.kind === "no-slice-dir"
+    ? null
+    : findEvalReviewFile(basePath, milestoneId, detected.sliceId);
+  const action = planEvalReviewAction(parsed, detected, existing);
 
-  if (detected.kind === "no-slice-dir") {
+  if (action.kind === "no-slice-dir" && detected.kind === "no-slice-dir") {
     ctx.ui.notify(
       `Slice not found: ${detected.sliceId}. Expected at ${detected.expectedDir} — check the slice ID for typos.`,
       "error",
     );
     return;
   }
-  if (detected.kind === "no-summary") {
-    ctx.ui.notify(
-      `Slice ${detected.sliceId} exists but has no SUMMARY.md — run /gsd execute-phase first to generate one.`,
-      "warning",
-    );
-    return;
-  }
-
-  const existing = findEvalReviewFile(basePath, milestoneId, detected.sliceId);
-
-  if (parsed.show) {
-    if (!existing) {
+  if (action.kind === "show") {
+    if (!action.path) {
       ctx.ui.notify(
-        `No EVAL-REVIEW.md present for ${detected.sliceId}. Run /gsd eval-review ${detected.sliceId} to generate one.`,
+        `No EVAL-REVIEW.md present for ${parsed.sliceId}. Run /gsd eval-review ${parsed.sliceId} to generate one.`,
         "warning",
       );
       return;
     }
     try {
-      const content = await readFile(existing, "utf-8");
-      ctx.ui.notify(`--- ${detected.sliceId}-EVAL-REVIEW.md ---\n\n${content}`, "info");
+      const content = await readFile(action.path, "utf-8");
+      ctx.ui.notify(`--- ${parsed.sliceId}-EVAL-REVIEW.md ---\n\n${content}`, "info");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      ctx.ui.notify(`Failed to read ${existing}: ${msg}`, "error");
+      ctx.ui.notify(`Failed to read ${action.path}: ${msg}`, "error");
     }
     return;
   }
-
-  if (existing && !parsed.force) {
+  if (action.kind === "no-summary") {
     ctx.ui.notify(
-      `EVAL-REVIEW.md already exists at ${existing}. Re-run with --force to overwrite.`,
+      `Slice ${parsed.sliceId} exists but has no SUMMARY.md — run /gsd execute-phase first to generate one.`,
       "warning",
     );
+    return;
+  }
+  if (action.kind === "exists-no-force") {
+    ctx.ui.notify(
+      `EVAL-REVIEW.md already exists at ${action.path}. Re-run with --force to overwrite.`,
+      "warning",
+    );
+    return;
+  }
+  // action.kind === "dispatch" — fall through.
+  if (detected.kind !== "ready") {
+    // Type guard — planner only returns "dispatch" when detected is ready.
     return;
   }
 

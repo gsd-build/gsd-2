@@ -24,6 +24,8 @@ import {
   evalReviewWritePath,
   findEvalReviewFile,
   parseEvalReviewArgs,
+  planEvalReviewAction,
+  type EvalReviewArgs,
   type EvalReviewState,
 } from "../commands-eval-review.js";
 import { GSD_COMMAND_DESCRIPTION, TOP_LEVEL_SUBCOMMANDS } from "../commands/catalog.js";
@@ -326,7 +328,46 @@ describe("buildEvalReviewContext", () => {
     };
     const ctx = await buildEvalReviewContext(state, "M001");
     assert.equal(ctx.truncated, true);
-    assert.ok(!ctx.summary.includes("�"), "must not contain replacement char at the truncation boundary");
+    assert.ok(!ctx.summary.includes("\u{FFFD}"), "must not contain replacement char at the truncation boundary");
+  });
+
+  it("keeps total summary+spec byte length within MAX_CONTEXT_BYTES under truncation", async () => {
+    const summaryPath = join(sliceDir, "S07-SUMMARY.md");
+    const specPath = join(sliceDir, "S07-AI-SPEC.md");
+    writeFileSync(summaryPath, "S".repeat(MAX_CONTEXT_BYTES * 2), "utf-8");
+    writeFileSync(specPath, "P".repeat(MAX_CONTEXT_BYTES * 2), "utf-8");
+    const state: Extract<EvalReviewState, { kind: "ready" }> = {
+      kind: "ready",
+      sliceId: "S07",
+      sliceDir,
+      summaryPath,
+      specPath,
+    };
+    const ctx = await buildEvalReviewContext(state, "M001");
+    const summaryBytes = Buffer.byteLength(ctx.summary, "utf-8");
+    const specBytes = ctx.spec ? Buffer.byteLength(ctx.spec, "utf-8") : 0;
+    assert.ok(
+      summaryBytes + specBytes <= MAX_CONTEXT_BYTES,
+      `total ${summaryBytes + specBytes} must not exceed cap ${MAX_CONTEXT_BYTES}`,
+    );
+    assert.ok(ctx.summary.includes("[truncated:"));
+  });
+
+  it("keeps single-file truncation within maxBytes (regression: marker bytes count toward cap)", async () => {
+    const summaryPath = join(sliceDir, "S07-SUMMARY.md");
+    writeFileSync(summaryPath, "S".repeat(MAX_CONTEXT_BYTES * 2), "utf-8");
+    const state: Extract<EvalReviewState, { kind: "ready" }> = {
+      kind: "ready",
+      sliceId: "S07",
+      sliceDir,
+      summaryPath,
+      specPath: null,
+    };
+    const ctx = await buildEvalReviewContext(state, "M001");
+    assert.equal(ctx.truncated, true);
+    const totalBytes = Buffer.byteLength(ctx.summary, "utf-8");
+    assert.ok(totalBytes <= MAX_CONTEXT_BYTES, `${totalBytes} > ${MAX_CONTEXT_BYTES}`);
+    assert.ok(ctx.summary.includes("[truncated:"));
   });
 
   it("populates outputPath using the canonical slice file naming", async () => {
@@ -340,13 +381,14 @@ describe("buildEvalReviewContext", () => {
 
 describe("evalReviewWritePath", () => {
   it("computes the canonical write path purely from inputs", () => {
-    const result = evalReviewWritePath("/repo/.gsd/milestones/M001/slices/S07", "S07");
-    assert.equal(result, "/repo/.gsd/milestones/M001/slices/S07/S07-EVAL-REVIEW.md");
+    const sliceDir = join("/repo", ".gsd", "milestones", "M001", "slices", "S07");
+    const expected = join(sliceDir, "S07-EVAL-REVIEW.md");
+    assert.equal(evalReviewWritePath(sliceDir, "S07"), expected);
   });
 
   it("does not touch the filesystem", () => {
-    // Calling with a nonexistent dir is fine — it's pure path math.
-    const result = evalReviewWritePath("/nonexistent/path/abc", "S99");
+    const sliceDir = join("/nonexistent", "path", "abc");
+    const result = evalReviewWritePath(sliceDir, "S99");
     assert.ok(result.endsWith("S99-EVAL-REVIEW.md"));
   });
 });
@@ -375,6 +417,53 @@ describe("findEvalReviewFile", () => {
     writeFileSync(target, "---\nschema: eval-review/v1\n---\n", "utf-8");
     const found = findEvalReviewFile(basePath, "M001", "S07");
     assert.equal(found, target);
+  });
+});
+
+// ─── planEvalReviewAction ─────────────────────────────────────────────────────
+
+describe("planEvalReviewAction", () => {
+  function args(overrides: Partial<EvalReviewArgs> = {}): EvalReviewArgs {
+    return { sliceId: "S07", force: false, show: false, ...overrides };
+  }
+  const noSliceDir: EvalReviewState = { kind: "no-slice-dir", sliceId: "S07", expectedDir: "/tmp/x" };
+  const noSummary: EvalReviewState = { kind: "no-summary", sliceId: "S07", sliceDir: "/tmp/x", specPath: null };
+  const ready: EvalReviewState = { kind: "ready", sliceId: "S07", sliceDir: "/tmp/x", summaryPath: "/tmp/x/SUMMARY.md", specPath: null };
+
+  it("returns no-slice-dir before checking show or anything else", () => {
+    assert.equal(planEvalReviewAction(args({ show: true }), noSliceDir, "/tmp/r.md").kind, "no-slice-dir");
+    assert.equal(planEvalReviewAction(args({ force: true }), noSliceDir, null).kind, "no-slice-dir");
+  });
+
+  it("returns show with the existing path when --show is set, even if SUMMARY is missing (regression: --show must bypass no-summary)", () => {
+    const action = planEvalReviewAction(args({ show: true }), noSummary, "/tmp/r.md");
+    assert.equal(action.kind, "show");
+    if (action.kind === "show") assert.equal(action.path, "/tmp/r.md");
+  });
+
+  it("returns show with null path when --show is set and no EVAL-REVIEW.md exists", () => {
+    const action = planEvalReviewAction(args({ show: true }), noSummary, null);
+    assert.equal(action.kind, "show");
+    if (action.kind === "show") assert.equal(action.path, null);
+  });
+
+  it("returns no-summary when SUMMARY missing and --show is NOT set", () => {
+    assert.equal(planEvalReviewAction(args(), noSummary, null).kind, "no-summary");
+    assert.equal(planEvalReviewAction(args({ force: true }), noSummary, "/tmp/r.md").kind, "no-summary");
+  });
+
+  it("returns exists-no-force when EVAL-REVIEW.md is present and --force is NOT set", () => {
+    const action = planEvalReviewAction(args(), ready, "/tmp/r.md");
+    assert.equal(action.kind, "exists-no-force");
+    if (action.kind === "exists-no-force") assert.equal(action.path, "/tmp/r.md");
+  });
+
+  it("returns dispatch when ready, no existing file", () => {
+    assert.equal(planEvalReviewAction(args(), ready, null).kind, "dispatch");
+  });
+
+  it("returns dispatch when ready and --force overrides existing file", () => {
+    assert.equal(planEvalReviewAction(args({ force: true }), ready, "/tmp/r.md").kind, "dispatch");
   });
 });
 
