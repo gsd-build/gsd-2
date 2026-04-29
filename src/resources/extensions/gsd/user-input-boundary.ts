@@ -11,8 +11,17 @@ const REMOTE_QUESTION_FAILURE_RE =
 const APPROVAL_WAIT_RE =
   /\bwait(?:ing)?\s+for\s+(?:your\s+)?(?:confirmation|approval|input|response|answer)\b/i;
 
-const APPROVAL_QUESTION_KEYWORD_RE =
-  /\b(?:confirm|confirmation|approve|approval|approved|captured|correct|correctly|right|adjust|write|save|proceed|reclassify|research|skip)\b/i;
+const APPROVAL_QUESTION_RE =
+  /\b(?:confirm|confirmation|approve|approval|approved|captured|correct|correctly|happy\s+with|ready\s+to\s+(?:write|save|proceed|ship)|(?:want|need)\s+to\s+adjust|should\s+I\s+(?:write|save|proceed)|do\s+you\s+want\s+me\s+to\s+(?:write|save|proceed)|ship\s+it)\b/i;
+
+const APPROVAL_RIGHT_QUESTION_RE =
+  /\b(?:does|do|is|are|was|were|did)\b[^\n?]{0,120}\bright\b/i;
+
+const APPROVAL_CHANGE_QUESTION_RE =
+  /\b(?:anything\s+else|anything|something)\s+to\s+(?:adjust|add|remove|reclassify)\b/i;
+
+const RESEARCH_DECISION_QUESTION_RE =
+  /\b(?:research|skip)\b/i;
 
 function extractTextFromMessage(msg: unknown): string {
   if (!msg || typeof msg !== "object") return "";
@@ -49,7 +58,24 @@ function hasApprovalQuestion(text: string): boolean {
       text.lastIndexOf("?", i - 1),
     );
     const fragment = text.slice(previousBreak + 1, i + 1);
-    if (APPROVAL_QUESTION_KEYWORD_RE.test(fragment)) return true;
+    if (APPROVAL_QUESTION_RE.test(fragment)) return true;
+    if (APPROVAL_RIGHT_QUESTION_RE.test(fragment)) return true;
+    if (APPROVAL_CHANGE_QUESTION_RE.test(fragment)) return true;
+  }
+  return false;
+}
+
+function hasResearchDecisionQuestion(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "?") continue;
+    const previousBreak = Math.max(
+      text.lastIndexOf("\n", i),
+      text.lastIndexOf(".", i),
+      text.lastIndexOf("!", i),
+      text.lastIndexOf("?", i - 1),
+    );
+    const fragment = text.slice(previousBreak + 1, i + 1);
+    if (RESEARCH_DECISION_QUESTION_RE.test(fragment)) return true;
   }
   return false;
 }
@@ -117,5 +143,12 @@ export function shouldPauseForUserApprovalQuestion(
   unitType: string | undefined,
   messages: unknown[] | undefined,
 ): boolean {
-  return !!unitType && USER_APPROVAL_UNIT_TYPES.has(unitType) && isAwaitingApprovalBoundary(messages);
+  if (!unitType || !USER_APPROVAL_UNIT_TYPES.has(unitType)) return false;
+  const text = lastAssistantText(messages);
+  if (!text) return false;
+  if (/ask_user_questions was cancelled before receiving a response/i.test(text)) return true;
+  if (REMOTE_QUESTION_FAILURE_RE.test(text)) return true;
+  if (APPROVAL_WAIT_RE.test(text)) return true;
+  if (unitType === "research-decision") return hasResearchDecisionQuestion(text);
+  return hasApprovalQuestion(text);
 }

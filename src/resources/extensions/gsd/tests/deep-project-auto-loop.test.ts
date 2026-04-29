@@ -1039,6 +1039,68 @@ test("deep project setup: grounding interview question with requirements context
   assert.equal(shouldPauseForUserApprovalQuestion("discuss-project", messages), false);
 });
 
+test("deep project setup: persistence and anti-goals interview prompt does not trigger approval abort", () => {
+  const messages = [
+    {
+      role: "assistant",
+      content: [
+        "Greenfield, personal, plain HTML/CSS/JS, core value is create and check off tasks.",
+        "",
+        "A couple more:",
+        "",
+        "1. Persistence? Should tasks survive a page refresh (localStorage), or is it fine if they reset on reload?",
+        "2. Anti-goals - what would you explicitly not want? (e.g., no user accounts, no backend, no categories/tags, no due dates - or something else)",
+      ].join("\n"),
+    },
+  ];
+
+  assert.equal(isAwaitingUserInput(messages), true);
+  assert.equal(shouldPauseForUserApprovalQuestion("discuss-project", messages), false);
+});
+
+test("deep project setup: discovery questions before writing PROJECT do not trigger approval abort", () => {
+  const messages = [
+    {
+      role: "assistant",
+      content: [
+        "Good. Greenfield HTML/CSS/JS to-do app, personal use, core feature is create and check off tasks.",
+        "",
+        "Two more questions before I write PROJECT.md:",
+        "",
+        "1. Any persistence? Should tasks survive a page refresh - localStorage, or is in-memory fine for now?",
+        "2. Rough milestone shape? Is M001 \"basic create/complete list that works in a browser,\" or do you have a v2 in mind (e.g., edit/delete, due dates, categories)?",
+      ].join("\n"),
+    },
+  ];
+
+  assert.equal(isAwaitingUserInput(messages), true);
+  assert.equal(shouldPauseForUserApprovalQuestion("discuss-project", messages), false);
+});
+
+test("deep project setup: discovery question mentioning write intent does not trigger approval abort", () => {
+  const messages = [
+    {
+      role: "assistant",
+      content: "Before I write PROJECT, any persistence?",
+    },
+  ];
+
+  assert.equal(isAwaitingUserInput(messages), true);
+  assert.equal(shouldPauseForUserApprovalQuestion("discuss-project", messages), false);
+});
+
+test("deep project setup: scope discovery question mentioning add does not trigger approval abort", () => {
+  const messages = [
+    {
+      role: "assistant",
+      content: "Should the basic milestone add delete support, or keep delete for a later v2?",
+    },
+  ];
+
+  assert.equal(isAwaitingUserInput(messages), true);
+  assert.equal(shouldPauseForUserApprovalQuestion("discuss-project", messages), false);
+});
+
 test("deep project setup: requirements preview question from screenshot is treated as waiting", () => {
   const messages = [
     {
