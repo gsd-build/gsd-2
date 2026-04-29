@@ -47,7 +47,7 @@ The amount of context inlined is controlled by your [token profile](/guides/toke
 GSD isolates milestone work using one of three modes (configured via `git.isolation` in preferences):
 
 - **`none`** (default) — work happens on your current branch. No isolation overhead.
-- **`worktree`** — each milestone runs in its own git worktree. Squash-merged to main on completion.
+- **`worktree`** — each milestone runs in its own git worktree. Requires at least one commit; zero-commit repos temporarily run as `none` until `HEAD` exists. Squash-merged to main on completion.
 - **`branch`** — work happens on a `milestone/<MID>` branch in the project root. Useful for submodule-heavy repos.
 
 See [git strategy](/guides/git-strategy) for details.
