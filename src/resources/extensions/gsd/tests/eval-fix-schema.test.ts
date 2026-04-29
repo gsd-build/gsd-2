@@ -127,9 +127,39 @@ describe("parseEvalFixFrontmatter (happy path)", () => {
 
   it("accepts fractional-seconds in the generated/review_generated timestamps", () => {
     const withMs = HAPPY_PATH_FRONTMATTER
-      .replace("generated: 2026-04-29T10:15:00Z", "generated: 2026-04-29T10:15:00.123Z");
+      .replace("generated: 2026-04-29T10:15:00Z", "generated: 2026-04-29T10:15:00.123Z")
+      .replace("review_generated: 2026-04-28T14:00:00Z", "review_generated: 2026-04-28T14:00:00.456Z");
     const result = parseEvalFixFrontmatter(withMs);
     assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.data.generated, "2026-04-29T10:15:00.123Z");
+      assert.equal(result.data.review_generated, "2026-04-28T14:00:00.456Z");
+    }
+  });
+
+  it("rejects forged counts that disagree with fixes[] (anti-Goodhart)", () => {
+    const wrong = HAPPY_PATH_FRONTMATTER
+      .replace("  fixed: 1", "  fixed: 2")
+      .replace("  total: 1", "  total: 2");
+    const result = parseEvalFixFrontmatter(wrong);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.pointer, "/counts");
+      assert.match(result.error, /counts must match fixes/);
+    }
+  });
+
+  it("rejects a forged status that hides declined entries as COMPLETE", () => {
+    const wrong = HAPPY_PATH_FRONTMATTER
+      .replace("    action: code_change", "    action: declined")
+      .replace("  fixed: 1", "  fixed: 0")
+      .replace("  declined: 0", "  declined: 1");
+    const result = parseEvalFixFrontmatter(wrong);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.pointer, "/status");
+      assert.match(result.error, /status must be PARTIAL/);
+    }
   });
 });
 
@@ -419,11 +449,24 @@ describe("validateFixesAgainstReview", () => {
       counts: { fixed: fixes.length, partial: 0, declined: 0, total: fixes.length },
     };
   }
+  function expected(
+    ids: readonly string[],
+    over: Record<string, { dimension?: EvalFixEntryT["dimension"]; severity?: EvalFixEntryT["severity"] }> = {},
+  ): Map<string, { dimension: EvalFixEntryT["dimension"]; severity: EvalFixEntryT["severity"] }> {
+    const m = new Map<string, { dimension: EvalFixEntryT["dimension"]; severity: EvalFixEntryT["severity"] }>();
+    for (const id of ids) {
+      m.set(id, {
+        dimension: over[id]?.dimension ?? "observability",
+        severity: over[id]?.severity ?? "major",
+      });
+    }
+    return m;
+  }
 
-  it("returns ok when fixes is a permutation of expectedGapIds", () => {
+  it("returns ok when fixes is a permutation of expectedGaps", () => {
     const result = validateFixesAgainstReview(
       fixDoc([entry({ gap_id: "G01" }), entry({ gap_id: "G02" })]),
-      new Set(["G02", "G01"]),
+      expected(["G02", "G01"]),
     );
     assert.equal(result.ok, true);
   });
@@ -431,7 +474,7 @@ describe("validateFixesAgainstReview", () => {
   it("rejects when an audit gap is missing from fixes (Goodhart-by-omission, BLOCKER-3)", () => {
     const result = validateFixesAgainstReview(
       fixDoc([entry({ gap_id: "G01" })]),
-      new Set(["G01", "G02"]),
+      expected(["G01", "G02"]),
     );
     assert.equal(result.ok, false);
     if (!result.ok) {
@@ -443,7 +486,7 @@ describe("validateFixesAgainstReview", () => {
   it("rejects a phantom gap_id not in the audit", () => {
     const result = validateFixesAgainstReview(
       fixDoc([entry({ gap_id: "G01" }), entry({ gap_id: "G99" })]),
-      new Set(["G01"]),
+      expected(["G01"]),
     );
     assert.equal(result.ok, false);
     if (!result.ok) {
@@ -455,16 +498,40 @@ describe("validateFixesAgainstReview", () => {
   it("rejects duplicate gap_id entries", () => {
     const result = validateFixesAgainstReview(
       fixDoc([entry({ gap_id: "G01" }), entry({ gap_id: "G01" })]),
-      new Set(["G01"]),
+      expected(["G01"]),
     );
     assert.equal(result.ok, false);
     if (!result.ok) assert.match(result.error, /duplicate/);
   });
 
+  it("rejects a fix that downgrades the audit's severity (mirrored-metadata contract)", () => {
+    const result = validateFixesAgainstReview(
+      fixDoc([entry({ gap_id: "G01", severity: "minor" })]),
+      expected(["G01"], { G01: { severity: "major" } }),
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.match(result.pointer, /\/fixes\/0\/severity/);
+      assert.match(result.error, /severity=major/);
+    }
+  });
+
+  it("rejects a fix that rewrites the audit's dimension", () => {
+    const result = validateFixesAgainstReview(
+      fixDoc([entry({ gap_id: "G01", dimension: "guardrails" })]),
+      expected(["G01"], { G01: { dimension: "observability" } }),
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.match(result.pointer, /\/fixes\/0\/dimension/);
+      assert.match(result.error, /dimension=observability/);
+    }
+  });
+
   it("rejects a non-declined entry whose evidence is not a citation (MAJOR-2)", () => {
     const result = validateFixesAgainstReview(
       fixDoc([entry({ gap_id: "G01", evidence: "see PR" })]),
-      new Set(["G01"]),
+      expected(["G01"]),
     );
     assert.equal(result.ok, false);
     if (!result.ok) {
@@ -481,7 +548,7 @@ describe("validateFixesAgainstReview", () => {
         files_touched: [],
         evidence: "Sink wiring blocked on infra ticket; declining rather than emitting tokenistic call.",
       })]),
-      new Set(["G01"]),
+      expected(["G01"]),
     );
     assert.equal(result.ok, true);
   });

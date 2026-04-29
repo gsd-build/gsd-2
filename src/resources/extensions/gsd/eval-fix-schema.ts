@@ -134,7 +134,34 @@ export function parseEvalFixFrontmatter(raw: string): ParseResult {
     };
   }
 
-  return { ok: true, data: parsed as EvalFixFrontmatterT };
+  // Re-derive counts/status from fixes[] — schema-shape alone is forgeable.
+  const data = parsed as EvalFixFrontmatterT;
+  const derivedCounts = deriveCounts(data.fixes);
+  if (
+    data.counts.fixed !== derivedCounts.fixed ||
+    data.counts.partial !== derivedCounts.partial ||
+    data.counts.declined !== derivedCounts.declined ||
+    data.counts.total !== derivedCounts.total
+  ) {
+    return {
+      ok: false,
+      error:
+        `Schema validation failed: counts must match fixes[] ` +
+        `(expected fixed=${derivedCounts.fixed} partial=${derivedCounts.partial} ` +
+        `declined=${derivedCounts.declined} total=${derivedCounts.total})`,
+      pointer: "/counts",
+    };
+  }
+  const derivedStatus = deriveStatus(derivedCounts);
+  if (data.status !== derivedStatus) {
+    return {
+      ok: false,
+      error: `Schema validation failed: status must be ${derivedStatus} for the supplied fixes[]`,
+      pointer: "/status",
+    };
+  }
+
+  return { ok: true, data };
 }
 
 // ─── Derived fields ───────────────────────────────────────────────────────────
@@ -177,13 +204,18 @@ export function isCitationEvidence(evidence: string): boolean {
   return false;
 }
 
+export type ExpectedGapMeta = {
+  dimension: EvalFixEntryT["dimension"];
+  severity: EvalFixEntryT["severity"];
+};
+
 export function validateFixesAgainstReview(
   fix: EvalFixFrontmatterT,
-  expectedGapIds: ReadonlySet<string>,
+  expectedGaps: ReadonlyMap<string, ExpectedGapMeta>,
 ): { ok: true } | { ok: false; pointer: string; error: string } {
   const fixIds = new Set(fix.fixes.map((f) => f.gap_id));
 
-  for (const expected of expectedGapIds) {
+  for (const expected of expectedGaps.keys()) {
     if (!fixIds.has(expected)) {
       return {
         ok: false,
@@ -193,12 +225,27 @@ export function validateFixesAgainstReview(
     }
   }
   for (let i = 0; i < fix.fixes.length; i++) {
-    const id = fix.fixes[i].gap_id;
-    if (!expectedGapIds.has(id)) {
+    const entry = fix.fixes[i];
+    const expected = expectedGaps.get(entry.gap_id);
+    if (!expected) {
       return {
         ok: false,
         pointer: `/fixes/${i}/gap_id`,
-        error: `Fix references gap_id ${id} which was not in the audit's gaps[]`,
+        error: `Fix references gap_id ${entry.gap_id} which was not in the audit's gaps[]`,
+      };
+    }
+    if (entry.dimension !== expected.dimension) {
+      return {
+        ok: false,
+        pointer: `/fixes/${i}/dimension`,
+        error: `Fix ${entry.gap_id} must keep dimension=${expected.dimension} (got ${entry.dimension})`,
+      };
+    }
+    if (entry.severity !== expected.severity) {
+      return {
+        ok: false,
+        pointer: `/fixes/${i}/severity`,
+        error: `Fix ${entry.gap_id} must keep severity=${expected.severity} (got ${entry.severity})`,
       };
     }
   }
