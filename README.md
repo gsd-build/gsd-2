@@ -338,18 +338,23 @@ Auto mode is a state machine driven by files on disk. It reads `.gsd/STATE.md`, 
 
 12. **Escape hatch** — Press Escape to pause. The conversation is preserved. Interact with the agent, inspect what happened, or just `/gsd auto` to resume from disk state.
 
-### `/gsd` and `/gsd next` — Step Mode
+### `/gsd` — Smart Launcher
 
-By default, `/gsd` runs in **step mode**: the same state machine as auto mode, but it pauses between units with a wizard showing what completed and what's next. You advance one step at a time, review the output, and continue when ready.
+Bare `/gsd` opens the smart launcher wizard. It reads the current `.gsd/` state, detects active or interrupted sessions, then shows a short action list with the recommended action highlighted and preselected. Use it when you want GSD to choose the safest next entry point instead of remembering the exact subcommand.
 
-- **No `.gsd/` directory** → Start a new project. Discussion flow captures your vision, constraints, and preferences.
-- **Milestone exists, no roadmap** → Discuss or research the milestone.
-- **Roadmap exists, slices pending** → Plan the next slice, execute one task, or switch to auto.
-- **Mid-task** → Resume from where you left off.
+The launcher appears whenever you type `/gsd` with no subcommand in an interactive session. Explicit subcommands still bypass it: `/gsd next` runs one step, `/gsd auto` runs continuously, and `/gsd status` opens the dashboard.
 
-`/gsd next` is an explicit alias for step mode. You can switch from step → auto mid-session via the wizard.
+| Current state | Recommended action |
+|---------------|--------------------|
+| No `.gsd/` directory | Initialize project |
+| Initialized, no milestones | Quick task when available; otherwise create the first milestone |
+| Recoverable interrupted session | Resume |
+| Auto-mode already active | View status, with stop available |
+| Milestone needs context or a roadmap | Discuss first |
+| Roadmap-ready work | Step next, with auto available |
+| Current milestones complete | Start a new milestone |
 
-Step mode is the on-ramp. Auto mode is the highway.
+`/gsd next` is the explicit step-mode command. It executes one guided unit and pauses, using the same state machine as auto mode.
 
 ---
 
@@ -386,9 +391,11 @@ Open a terminal in your project and run:
 gsd
 ```
 
-GSD opens an interactive agent session. From there, you have two ways to work:
+GSD opens an interactive agent session. From there, you have three common ways to work:
 
-**`/gsd` — step mode.** Type `/gsd` and GSD executes one unit of work at a time, pausing between each with a wizard showing what completed and what's next. Same state machine as auto mode, but you stay in the loop. No project yet? It starts the discussion flow. Roadmap exists? It plans or executes the next step.
+**`/gsd` — smart launcher.** Type `/gsd` and GSD shows a state-aware wizard with a recommended action: initialize, resume, discuss, step next, go auto, quick task, status, or start a new milestone.
+
+**`/gsd next` — step mode.** Type `/gsd next` to execute one guided unit and pause. Same state machine as auto mode, but you stay in the loop.
 
 **`/gsd auto` — autonomous mode.** Type `/gsd auto` and walk away. GSD researches, plans, executes, verifies, commits, and advances through every slice until the milestone is complete. Fresh context window per task. No babysitting.
 
@@ -447,8 +454,8 @@ On first run, GSD launches a branded setup wizard that walks you through LLM pro
 
 | Command                 | What it does                                                                  |
 | ----------------------- | ----------------------------------------------------------------------------- |
-| `/gsd`                  | Step mode — executes one unit at a time, pauses between each                  |
-| `/gsd next`             | Explicit step mode (same as bare `/gsd`)                                      |
+| `/gsd`                  | Smart launcher wizard — recommends the safest next action for current state   |
+| `/gsd next`             | Explicit step mode — executes one unit, then pauses                           |
 | `/gsd auto`             | Autonomous mode — researches, plans, executes, commits, repeats               |
 | `/gsd new-project --deep` | Bootstrap a project with staged project-level discovery                    |
 | `/gsd quick`            | Execute a quick task with GSD guarantees, skip planning overhead              |

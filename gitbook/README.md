@@ -53,10 +53,11 @@ See [Installation](getting-started/installation.md) for detailed setup instructi
 
 | Mode | Command | Best For |
 |------|---------|----------|
-| **Step** | `/gsd` | Staying in the loop, reviewing each step |
+| **Launcher** | `/gsd` | Picking the recommended next action for the current project state |
+| **Step** | `/gsd next` | Staying in the loop, reviewing each step |
 | **Auto** | `/gsd auto` | Walking away, overnight builds, batch work |
 
-The recommended workflow: run auto mode in one terminal, steer from another. See [Step Mode](core-concepts/step-mode.md) and [Auto Mode](core-concepts/auto-mode.md).
+The recommended workflow: use `/gsd` when you want state-aware guidance, run auto mode in one terminal, and steer from another. See [Step Mode](core-concepts/step-mode.md) and [Auto Mode](core-concepts/auto-mode.md).
 
 ## Requirements
 

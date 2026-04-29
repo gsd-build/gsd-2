@@ -44,16 +44,18 @@ Plan → Execute (per task) → Complete → Reassess Roadmap → Next Slice
 
 Every phase gets a fresh context window with pre-loaded context — no accumulated garbage, no degraded quality.
 
-## Two ways to work
+## Common ways to work
 
 <Tabs>
-  <Tab title="Step mode">
-    Type `/gsd` inside a session. GSD executes one unit at a time, pausing between each so you can review.
+  <Tab title="Smart launcher">
+    Type `/gsd` inside a session. GSD opens a state-aware launcher, recommends the next safe action, and lets you choose step mode, auto mode, setup, resume, quick task, or status depending on the project state.
 
     ```bash
     gsd
     /gsd
     ```
+
+    Use `/gsd next` when you want to run one guided unit directly.
   </Tab>
   <Tab title="Auto mode">
     Type `/gsd auto` and walk away. GSD autonomously researches, plans, executes, verifies, and commits until the milestone is complete.

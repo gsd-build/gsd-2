@@ -269,7 +269,7 @@ rm -rf "$(dirname .gsd)/.gsd.lock"
 
 ### Session lock stolen by `/gsd` in another terminal
 
-**Symptoms:** Running `/gsd` (step mode) in a second terminal causes a running auto-mode session to lose its lock.
+**Symptoms:** Running `/gsd` in a second terminal causes a running auto-mode session to lose its lock.
 
 **Fix:** Fixed in v2.36.0. Bare `/gsd` no longer steals the session lock from a running auto-mode session. Upgrade to the latest version.
 

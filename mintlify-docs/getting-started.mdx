@@ -56,16 +56,19 @@ GSD auto-selects a default model after login. Switch anytime:
 
 Or configure per-phase models in [preferences](/guides/configuration).
 
-## Two ways to work
+## Common ways to work
 
 <Tabs>
-  <Tab title="Step mode">
-    Type `/gsd` inside a session. GSD executes one unit at a time, pausing between each with a wizard showing what completed and what's next.
+  <Tab title="Smart launcher">
+    Type `/gsd` inside a session to open the smart launcher. GSD reads the project state and highlights a recommended action before you commit to a path.
 
-    - **No `.gsd/` directory** → starts a discussion to capture your project vision
-    - **Milestone exists, no roadmap** → discuss or research the milestone
-    - **Roadmap exists, slices pending** → plan the next slice or execute a task
-    - **Mid-task** → resume where you left off
+    - **No `.gsd/` directory** → initialize the project, optionally with deep discovery
+    - **Initialized, no milestones** → run a quick task when available or create the first milestone
+    - **Recoverable interrupted session** → resume where it left off
+    - **Milestone exists, no roadmap** → discuss first or create the roadmap
+    - **Roadmap exists, slices pending** → step next or switch to auto mode
+
+    Use `/gsd next` to skip the launcher and execute one guided unit directly.
   </Tab>
   <Tab title="Auto mode">
     Type `/gsd auto` and walk away. GSD autonomously researches, plans, executes, verifies, commits, and advances through every slice until the milestone is complete.

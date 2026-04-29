@@ -315,18 +315,19 @@ Or configure per-phase models in preferences — see [Configuration](./configura
 
 ---
 
-## Two Ways to Work
+## Common Ways to Work
 
-### Step Mode — `/gsd`
+### Smart Launcher — `/gsd`
 
-Type `/gsd` inside a session. GSD executes one unit of work at a time, pausing between each with a wizard showing what completed and what's next.
+Type `/gsd` inside a session to open the smart launcher. GSD reads the project state and highlights a recommended action before you commit to a path.
 
-- **No `.gsd/` directory** — starts a discussion flow to capture your project vision
-- **Milestone exists, no roadmap** — discuss or research the milestone
-- **Roadmap exists, slices pending** — plan the next slice or execute a task
-- **Mid-task** — resume where you left off
+- **No `.gsd/` directory** — initialize the project, optionally with deep discovery
+- **Initialized, no milestones** — run a quick task when available or create the first milestone
+- **Recoverable interrupted session** — resume where it left off
+- **Milestone exists, no roadmap** — discuss first or create the roadmap
+- **Roadmap exists, slices pending** — step next or switch to auto mode
 
-Step mode keeps you in the loop, reviewing output between each step.
+Use `/gsd next` to skip the launcher and execute one guided unit directly. Step mode keeps you in the loop, reviewing output between each step.
 
 ### Auto Mode — `/gsd auto`
 

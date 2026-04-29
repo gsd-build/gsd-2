@@ -5,10 +5,10 @@ Step mode is GSD's interactive, one-step-at-a-time workflow. You stay in the loo
 ## Starting Step Mode
 
 ```
-/gsd
+/gsd next
 ```
 
-GSD reads the state of your `.gsd/` directory and presents a wizard showing what's completed and what's next. It then executes one unit of work and pauses.
+GSD reads the state of your `.gsd/` directory, executes one guided unit of work, and pauses. Bare `/gsd` opens the smart launcher first; choose **Step next** there when you want the wizard to pick the safest step-mode entry point.
 
 ## How It Works
 
@@ -16,8 +16,8 @@ Step mode adapts to your project's current state:
 
 | State | What Happens |
 |-------|-------------|
-| No `.gsd/` directory | Starts a discussion flow to capture your project vision |
-| Milestone exists, no roadmap | Opens a discussion or research phase for the milestone |
+| No `.gsd/` directory | Use bare `/gsd` to initialize the project first |
+| Milestone exists, no roadmap | Opens a discussion or roadmap phase for the milestone |
 | Roadmap exists, slices pending | Plans the next slice or executes the next task |
 | Mid-task | Resumes where you left off |
 

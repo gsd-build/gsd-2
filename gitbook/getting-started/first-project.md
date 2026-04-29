@@ -10,14 +10,15 @@ gsd
 
 GSD shows a welcome screen with your version, active model, and available tool keys.
 
-## Start a Discussion
+## Start from the Smart Launcher
 
-Type `/gsd` to enter step mode. GSD reads the state of your project directory and determines the next logical action:
+Type `/gsd` to open the smart launcher. GSD reads the state of your project directory and highlights the recommended next action:
 
-- **No `.gsd/` directory** — starts a discussion flow to capture your project vision
-- **Milestone exists, no roadmap** — discuss or research the milestone
-- **Roadmap exists, slices pending** — plan the next slice or execute a task
-- **Mid-task** — resume where you left off
+- **No `.gsd/` directory** — initialize the project
+- **Initialized, no milestones** — run a quick task when available or create the first milestone
+- **Recoverable interrupted session** — resume where it left off
+- **Milestone exists, no roadmap** — discuss first or create the roadmap
+- **Roadmap exists, slices pending** — step next or switch to auto mode
 
 For a new project, GSD will ask you to describe what you want to build. Talk through your vision — GSD captures requirements, architectural decisions, and scope.
 

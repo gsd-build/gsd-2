@@ -4,8 +4,8 @@
 
 | Command | Description |
 |---------|-------------|
-| `/gsd` | Step mode — execute one unit at a time, pause between each |
-| `/gsd next` | Explicit step mode (same as `/gsd`) |
+| `/gsd` | Smart launcher wizard — recommends the safest next action for the current project state |
+| `/gsd next` | Explicit step mode — execute one guided unit, then pause |
 | `/gsd auto` | Autonomous mode — research, plan, execute, commit, repeat |
 | `/gsd quick` | Execute a quick task with GSD guarantees (atomic commits, state tracking) without full planning overhead |
 | `/gsd stop` | Stop auto mode gracefully |
@@ -39,6 +39,22 @@
 | `/gsd logs` | Browse activity logs, debug logs, and metrics |
 | `/gsd remote` | Control remote auto-mode |
 | `/gsd help` | Categorized command reference with descriptions for all GSD subcommands |
+
+### Bare `/gsd` Smart Launcher
+
+Bare `/gsd` opens a state-aware launcher wizard in interactive sessions. It checks whether the project is initialized, whether auto-mode is active, whether an interrupted session can resume, and where the current milestone is in the workflow, then highlights a recommended action.
+
+| Project state | Recommended action |
+|---------------|--------------------|
+| No `.gsd/` directory | Initialize project |
+| Initialized with no milestones | Quick task when available; otherwise create the first milestone |
+| Recoverable interrupted session | Resume |
+| Auto-mode already active | View status, with stop available |
+| Milestone needs context or a roadmap | Discuss first |
+| Roadmap-ready work | Step next, with auto available |
+| Current milestones complete | Start a new milestone |
+
+Use `/gsd next` when you want to skip the launcher and directly run one step. Use `/gsd auto` when you want continuous execution.
 
 ## Configuration & Diagnostics
 
