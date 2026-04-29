@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { deriveState, isSliceComplete, isMilestoneComplete, isGhostMilestone } from '../state.ts';
+import { closeDatabase, insertDecision, openDatabase } from '../gsd-db.ts';
 
 // This suite exercises the explicit legacy markdown derivation path.
 process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK = '1';
@@ -60,6 +61,10 @@ function writeRequirements(base: string, content: string): void {
   writeFileSync(join(base, '.gsd', 'REQUIREMENTS.md'), content);
 }
 
+function writeDecisions(base: string, content: string): void {
+  writeFileSync(join(base, '.gsd', 'DECISIONS.md'), content);
+}
+
 function cleanup(base: string): void {
   rmSync(base, { recursive: true, force: true });
 }
@@ -84,6 +89,95 @@ describe('derive-state', async () => {
       assert.deepStrictEqual(state.progress?.milestones?.done, 0, 'milestones done = 0');
       assert.deepStrictEqual(state.progress?.milestones?.total, 0, 'milestones total = 0');
     } finally {
+      cleanup(base);
+    }
+  });
+
+  test('loads recent decisions from DECISIONS.md into derived state', async () => {
+    const base = createFixtureBase();
+    try {
+      writeDecisions(base, `# Decisions
+
+| # | When | Scope | Decision | Choice | Rationale | Revisable? | Made By |
+|---|---|---|---|---|---|---|---|
+| D001 | M001/S01 | architecture | Keep state projection canonical | Use deriveState output | Shared source of truth | yes | agent |
+| D002 | M001/S02 | workflow | Keep PRs standalone | Avoid dependency chains | Reviewer clarity | yes | collaborative |
+`);
+
+      const state = await deriveState(base);
+
+      assert.deepStrictEqual(state.recentDecisions, [
+        "D002: Keep PRs standalone - Avoid dependency chains",
+        "D001: Keep state projection canonical - Use deriveState output",
+      ]);
+    } finally {
+      cleanup(base);
+    }
+  });
+
+  test('uses empty DB decisions as authoritative over DECISIONS.md fallback', async () => {
+    const base = createFixtureBase();
+    try {
+      closeDatabase();
+      assert.equal(openDatabase(join(base, '.gsd', 'gsd.db')), true);
+      writeDecisions(base, `# Decisions
+
+| # | When | Scope | Decision | Choice | Rationale | Revisable? | Made By |
+|---|---|---|---|---|---|---|---|
+| D999 | M999/S99 | workflow | Stale markdown decision | Do not show | DB is authoritative | yes | agent |
+`);
+
+      const state = await deriveState(base);
+
+      assert.deepStrictEqual(state.recentDecisions, []);
+    } finally {
+      closeDatabase();
+      cleanup(base);
+    }
+  });
+
+  test('loads recent decisions from DB before DECISIONS.md fallback', async () => {
+    const base = createFixtureBase();
+    try {
+      closeDatabase();
+      assert.equal(openDatabase(join(base, '.gsd', 'gsd.db')), true);
+      insertDecision({
+        id: 'D010',
+        when_context: 'M001/S01',
+        scope: 'workflow',
+        decision: 'Keep runtime state DB-first',
+        choice: 'Use database decisions',
+        rationale: 'State projection should match authoritative storage',
+        revisable: 'yes',
+        made_by: 'agent',
+        superseded_by: null,
+      });
+      insertDecision({
+        id: 'D011',
+        when_context: 'M001/S02',
+        scope: 'workflow',
+        decision: 'Keep markdown fallback explicit',
+        choice: 'Use DECISIONS.md only when DB is unavailable',
+        rationale: 'Avoid stale file data overriding live DB state',
+        revisable: 'yes',
+        made_by: 'agent',
+        superseded_by: null,
+      });
+      writeDecisions(base, `# Decisions
+
+| # | When | Scope | Decision | Choice | Rationale | Revisable? | Made By |
+|---|---|---|---|---|---|---|---|
+| D999 | M999/S99 | workflow | Stale markdown decision | Do not show | DB is authoritative | yes | agent |
+`);
+
+      const state = await deriveState(base);
+
+      assert.deepStrictEqual(state.recentDecisions, [
+        'D011: Keep markdown fallback explicit - Use DECISIONS.md only when DB is unavailable',
+        'D010: Keep runtime state DB-first - Use database decisions',
+      ]);
+    } finally {
+      closeDatabase();
       cleanup(base);
     }
   });

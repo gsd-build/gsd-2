@@ -6,7 +6,9 @@
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import type { Decision, Requirement } from './types.js';
+import type { Requirement } from './types.js';
+import { parseDecisionsTable } from './decisions-table.js';
+export { parseDecisionsTable } from './decisions-table.js';
 import {
   upsertDecision,
   upsertRequirement,
@@ -33,84 +35,6 @@ import { findMilestoneIds } from './guided-flow.js';
 import { parseRoadmap, parsePlan } from './parsers-legacy.js';
 import { parseContextDependsOn } from './files.js';
 import { logWarning } from './workflow-logger.js';
-
-// ─── DECISIONS.md Parser ───────────────────────────────────────────────────
-
-const VALID_MADE_BY = new Set(['human', 'agent', 'collaborative']);
-
-/**
- * Parse a DECISIONS.md markdown table into Decision objects (without seq).
- * Detects `(amends DXXX)` in the Decision column to build supersession info.
- * Returns parsed rows with superseded_by set to null; callers handle chaining.
- */
-export function parseDecisionsTable(content: string): Omit<Decision, 'seq'>[] {
-  const lines = content.split('\n');
-  const results: Omit<Decision, 'seq'>[] = [];
-
-  // Map from amended ID → amending ID for supersession
-  const amendsMap = new Map<string, string>();
-
-  for (const line of lines) {
-    // Skip non-table lines, header, and separator
-    if (!line.trim().startsWith('|')) continue;
-    const trimmed = line.trim();
-    // Skip separator rows like |---|---|...|
-    if (/^\|[\s-|]+\|$/.test(trimmed)) continue;
-
-    // Split on | and strip leading/trailing empty cells
-    const cells = trimmed.split('|').map(c => c.trim());
-    // Remove first and last empty strings from leading/trailing |
-    if (cells.length > 0 && cells[0] === '') cells.shift();
-    if (cells.length > 0 && cells[cells.length - 1] === '') cells.pop();
-
-    if (cells.length < 7) continue;
-
-    const id = cells[0].trim();
-    // Skip header row
-    if (id === '#' || id.toLowerCase() === 'id') continue;
-    // Must look like a decision ID (D followed by digits)
-    if (!/^D\d+/.test(id)) continue;
-
-    const when_context = cells[1].trim();
-    const scope = cells[2].trim();
-    const decisionText = cells[3].trim();
-    const choice = cells[4].trim();
-    const rationale = cells[5].trim();
-    const revisable = cells[6].trim();
-    // Made By column is optional for backward compatibility — defaults to 'agent'
-    const rawMadeBy = cells.length >= 8 ? cells[7].trim().toLowerCase() : 'agent';
-    const made_by = (VALID_MADE_BY.has(rawMadeBy) ? rawMadeBy : 'agent') as import('./types.js').DecisionMadeBy;
-
-    // Detect (amends DXXX) in the Decision column
-    const amendsMatch = decisionText.match(/\(amends\s+(D\d+)\)/i);
-    if (amendsMatch) {
-      amendsMap.set(amendsMatch[1], id);
-    }
-
-    results.push({
-      id,
-      when_context,
-      scope,
-      decision: decisionText,
-      choice,
-      rationale,
-      revisable,
-      made_by,
-      superseded_by: null,
-    });
-  }
-
-  // Apply supersession: if D010 amends D001, set D001.superseded_by = D010
-  // Handle chains: if D020 amends D010 and D010 amends D001,
-  // D001.superseded_by = D010, D010.superseded_by = D020
-  for (const row of results) {
-    if (amendsMap.has(row.id)) {
-      row.superseded_by = amendsMap.get(row.id)!;
-    }
-  }
-
-  return results;
-}
 
 // ─── REQUIREMENTS.md Parser ────────────────────────────────────────────────
 

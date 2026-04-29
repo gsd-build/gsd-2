@@ -40,12 +40,13 @@ import { isClosedStatus, isDeferredStatus } from './status-guards.js';
 import { nativeBatchParseGsdFiles, type BatchParsedFile } from './native-parser-bridge.js';
 
 import { join, resolve } from 'path';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { debugCount, debugTime } from './debug-logger.js';
 import { logWarning } from './workflow-logger.js';
 import { extractVerdict } from './verdict-parser.js';
 import { detectPendingEscalation } from './escalation.js';
 import { isTerminalMilestoneSummaryContent } from './milestone-summary-classifier.js';
+import { parseDecisionsTable } from './decisions-table.js';
 
 import {
   isDbAvailable,
@@ -59,6 +60,7 @@ import {
   getRequirementCounts,
   getLatestAssessmentByScope,
   getPendingGateCountForTurn,
+  _getAdapter,
   type MilestoneRow,
   type SliceRow,
   type TaskRow,
@@ -206,6 +208,58 @@ let _telemetry = { dbDeriveCount: 0, markdownDeriveCount: 0 };
 export function getDeriveTelemetry() { return { ..._telemetry }; }
 export function resetDeriveTelemetry() { _telemetry = { dbDeriveCount: 0, markdownDeriveCount: 0 }; }
 
+const RECENT_DECISION_LIMIT = 5;
+
+type RecentDecisionRow = {
+  id: string;
+  decision: string;
+  choice: string;
+};
+
+function formatRecentDecision(row: RecentDecisionRow): string {
+  const choice = row.choice.trim();
+  return choice ? `${row.id}: ${row.decision.trim()} - ${choice}` : `${row.id}: ${row.decision.trim()}`;
+}
+
+function parseRecentDecisionRows(content: string): RecentDecisionRow[] {
+  return parseDecisionsTable(content)
+    .filter((row) => row.superseded_by == null)
+    .map((row) => ({
+      id: row.id,
+      decision: row.decision,
+      choice: row.choice,
+    }));
+}
+
+function loadRecentDecisionsFromDb(): string[] | null {
+  if (!isDbAvailable()) return null;
+  const adapter = _getAdapter();
+  if (!adapter) return null;
+
+  try {
+    const rows = adapter
+      .prepare("SELECT id, decision, choice FROM decisions WHERE superseded_by IS NULL ORDER BY seq DESC LIMIT ?")
+      .all(RECENT_DECISION_LIMIT) as RecentDecisionRow[];
+    return rows.map(formatRecentDecision);
+  } catch {
+    return null;
+  }
+}
+
+function loadRecentDecisions(basePath: string): string[] {
+  const dbDecisions = loadRecentDecisionsFromDb();
+  if (dbDecisions != null) return dbDecisions;
+
+  try {
+    const decisionsPath = resolveGsdRootFile(basePath, "DECISIONS");
+    if (!existsSync(decisionsPath)) return [];
+    const rows = parseRecentDecisionRows(readFileSync(decisionsPath, "utf8"));
+    return rows.slice(-RECENT_DECISION_LIMIT).reverse().map(formatRecentDecision);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Invalidate the deriveState() cache. Call this whenever planning files on disk
  * may have changed (unit completion, merges, file writes).
@@ -350,6 +404,7 @@ export async function deriveState(
   }
 
   stopTimer({ phase: result.phase, milestone: result.activeMilestone?.id });
+  result.recentDecisions = loadRecentDecisions(basePath);
   debugCount("deriveStateCalls");
   _stateCache = { basePath: cacheKey, result, timestamp: Date.now() };
   return result;
