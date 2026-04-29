@@ -182,7 +182,7 @@ class OpenRouterDiscoveryAdapter implements ProviderDiscoveryAdapter {
 	supportsDiscovery = true;
 
 	async fetchModels(apiKey: string, baseUrl?: string): Promise<DiscoveredModel[]> {
-		const url = `${baseUrl ?? "https://openrouter.ai"}/api/v1/models`;
+		const url = `${baseUrl ?? "https://openrouter.ai"}/models`;
 		const response = await fetchWithTimeout(url, {
 			headers: { Authorization: `Bearer ${apiKey}` },
 		});
