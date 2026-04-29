@@ -14,7 +14,7 @@ export interface GsdCommandDefinition {
 type CompletionMap = Record<string, readonly GsdCommandDefinition[]>;
 
 export const GSD_COMMAND_DESCRIPTION =
-  "GSD — Get Shit Done: /gsd help|start|templates|next|auto|stop|pause|status|widget|visualize|queue|quick|discuss|capture|triage|dispatch|history|undo|undo-task|reset-slice|rate|skip|export|cleanup|model|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|debug|logs|forensics|changelog|migrate|remote|steer|knowledge|new-milestone|parallel|cmux|park|unpark|init|setup|onboarding|inspect|extensions|update|fast|mcp|rethink|workflow|codebase|notifications|ship|do|session-report|backlog|pr-branch|add-tests|scan|language|worktree|eval-review";
+  "GSD — Get Shit Done: /gsd help|start|templates|next|auto|stop|pause|status|widget|visualize|queue|quick|discuss|capture|triage|dispatch|history|undo|undo-task|reset-slice|rate|skip|export|cleanup|model|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|debug|logs|forensics|changelog|migrate|remote|steer|knowledge|new-milestone|parallel|cmux|park|unpark|init|setup|onboarding|inspect|extensions|update|fast|mcp|rethink|workflow|codebase|notifications|ship|do|session-report|backlog|pr-branch|add-tests|scan|language|worktree|eval-review|eval-fix";
 
 export const TOP_LEVEL_SUBCOMMANDS: readonly GsdCommandDefinition[] = [
   { cmd: "help", desc: "Categorized command reference with descriptions" },
@@ -85,6 +85,7 @@ export const TOP_LEVEL_SUBCOMMANDS: readonly GsdCommandDefinition[] = [
   { cmd: "language", desc: "Set or clear the global response language (e.g. /gsd language Chinese)" },
   { cmd: "worktree", desc: "Manage worktrees from the TUI (list, merge, clean, remove)" },
   { cmd: "eval-review", desc: "Audit a slice's AI evaluation strategy and write a scored EVAL-REVIEW.md (--force, --show)" },
+  { cmd: "eval-fix", desc: "Address gaps from a slice's EVAL-REVIEW.md and write an EVAL-FIX.md audit trail (--force, --show)" },
 ];
 
 const NESTED_COMPLETIONS: CompletionMap = {
