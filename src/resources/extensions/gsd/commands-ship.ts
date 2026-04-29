@@ -9,12 +9,14 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 
 import { deriveState } from "./state.js";
 import { resolveMilestoneFile, resolveSlicePath, resolveSliceFile } from "./paths.js";
 import { getLedger, getProjectTotals, aggregateByModel, formatCost, formatTokenCount, loadLedgerFromDisk } from "./metrics.js";
 import { nativeGetCurrentBranch, nativeDetectMainBranch } from "./native-git-bridge.js";
 import { formatDuration } from "../shared/format-utils.js";
+import { parseEvalReviewFrontmatter, type Verdict } from "./eval-review-schema.js";
 
 function git(basePath: string, args: readonly string[]): string {
   return execFileSync("git", args, { cwd: basePath, encoding: "utf-8" }).trim();
@@ -74,6 +76,75 @@ function collectSliceSummaries(basePath: string, milestoneId: string): string[] 
     }
   }
   return summaries;
+}
+
+/**
+ * Discriminated result of inspecting a slice's `<sliceId>-EVAL-REVIEW.md`
+ * for the pre-ship soft warning. Pure data — the caller decides how to
+ * surface each variant to the user.
+ */
+export type SliceEvalCheck =
+  | { readonly sliceId: string; readonly kind: "absent" }
+  | {
+      readonly sliceId: string;
+      readonly kind: "malformed";
+      readonly error: string;
+      readonly pointer: string;
+    }
+  | {
+      readonly sliceId: string;
+      readonly kind: "ok";
+      readonly verdict: Verdict;
+      readonly overall_score: number;
+    };
+
+/**
+ * Inspect a single slice's EVAL-REVIEW.md without throwing.
+ *
+ * One async file read attempt — no `existsSync` precheck (defense against the
+ * TOCTOU race that bit prior implementations). ENOENT is treated as `absent`.
+ * Other read errors
+ * propagate so callers can decide how to handle them; the {@link handleShip}
+ * caller wraps them in a non-blocking warning rather than aborting the
+ * ship.
+ *
+ * @param basePath - project root.
+ * @param milestoneId - active milestone ID.
+ * @param sliceId - slice ID to check.
+ * @returns A {@link SliceEvalCheck} discriminating on the four valid states.
+ * @throws Forwarded `readFile` errors other than `ENOENT`.
+ */
+export async function checkSliceEvalReview(
+  basePath: string,
+  milestoneId: string,
+  sliceId: string,
+): Promise<SliceEvalCheck> {
+  const path = resolveSliceFile(basePath, milestoneId, sliceId, "EVAL-REVIEW");
+  if (!path) {
+    return { sliceId, kind: "absent" };
+  }
+
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf-8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { sliceId, kind: "absent" };
+    }
+    throw err;
+  }
+
+  const parsed = parseEvalReviewFrontmatter(raw);
+  if (!parsed.ok) {
+    return { sliceId, kind: "malformed", error: parsed.error, pointer: parsed.pointer };
+  }
+
+  return {
+    sliceId,
+    kind: "ok",
+    verdict: parsed.data.verdict,
+    overall_score: parsed.data.overall_score,
+  };
 }
 
 function generatePRContent(basePath: string, milestoneId: string, milestoneTitle: string): PRContent {
@@ -180,6 +251,34 @@ export async function handleShip(
       "warning",
     );
     return;
+  }
+
+  // 2b. Pre-ship soft warning on EVAL-REVIEW.md status (non-blocking).
+  for (const sliceId of listSliceIds(basePath, milestoneId)) {
+    let result: SliceEvalCheck;
+    try {
+      result = await checkSliceEvalReview(basePath, milestoneId, sliceId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      ctx.ui.notify(`Could not read EVAL-REVIEW.md for ${sliceId}: ${msg}`, "warning");
+      continue;
+    }
+    if (result.kind === "absent") {
+      ctx.ui.notify(
+        `Slice ${sliceId} has no EVAL-REVIEW.md — consider /gsd eval-review ${sliceId} (non-blocking).`,
+        "warning",
+      );
+    } else if (result.kind === "malformed") {
+      ctx.ui.notify(
+        `Slice ${sliceId} EVAL-REVIEW.md frontmatter invalid at ${result.pointer}: ${result.error} (non-blocking).`,
+        "warning",
+      );
+    } else if (result.verdict === "NOT_IMPLEMENTED") {
+      ctx.ui.notify(
+        `Slice ${sliceId} eval verdict NOT_IMPLEMENTED (overall ${result.overall_score}/100) — shipping anyway, but the eval gap is unresolved.`,
+        "warning",
+      );
+    }
   }
 
   // 3. Generate PR content

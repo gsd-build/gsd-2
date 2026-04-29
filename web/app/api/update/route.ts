@@ -9,7 +9,7 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 export async function GET(request: Request): Promise<Response> {
-  // Defense-in-depth: verify auth token even though middleware should catch it.
+  // Defense-in-depth: verify auth token even though the proxy should catch it.
   const authError = verifyAuthToken(request);
   if (authError) return authError;
   try {
@@ -42,7 +42,7 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  // Defense-in-depth: verify auth token even though middleware should catch it.
+  // Defense-in-depth: verify auth token even though the proxy should catch it.
   const authError = verifyAuthToken(request);
   if (authError) return authError;
   try {

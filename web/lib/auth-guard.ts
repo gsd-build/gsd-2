@@ -4,8 +4,8 @@
 /**
  * Defense-in-depth auth check for critical API routes (shutdown, update, etc.).
  *
- * The primary auth gate is Next.js middleware (web/middleware.ts). This helper
- * provides a second layer so that even if middleware is misconfigured or
+ * The primary auth gate is the Next.js proxy (web/proxy.ts). This helper
+ * provides a second layer so that even if the proxy is misconfigured or
  * bypassed, sensitive endpoints still reject unauthenticated requests.
  *
  * Returns a 401 Response if the token is missing or invalid, or null if auth

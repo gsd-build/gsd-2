@@ -91,11 +91,11 @@ GSD isolates milestone work using one of three modes:
 
 | Mode | How It Works | Best For |
 |------|-------------|----------|
-| `worktree` (default) | Each milestone gets its own directory and branch | Most projects |
+| `none` (default) | Work happens directly on your current branch | Most projects |
+| `worktree` | Each milestone gets its own directory and branch | Projects that need file isolation |
 | `branch` | Work happens in the project root on a milestone branch | Submodule-heavy repos |
-| `none` | Work happens directly on your current branch | Hot-reload workflows |
 
-In worktree mode, all commits are squash-merged to main as one clean commit when the milestone completes. See [Git & Worktrees](../configuration/git-settings.md).
+In worktree mode, all commits are squash-merged to main as one clean commit when the milestone completes. Worktree mode requires at least one commit; zero-commit repos temporarily run as `none` until `HEAD` exists. See [Git & Worktrees](../configuration/git-settings.md).
 
 ## Crash Recovery
 

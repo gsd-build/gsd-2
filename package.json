@@ -143,7 +143,7 @@
     "typescript": "^5.4.0"
   },
   "optionalDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.83",
+    "@anthropic-ai/claude-agent-sdk": "0.2.83",
     "@gsd-build/engine-darwin-arm64": ">=2.10.2",
     "@gsd-build/engine-darwin-x64": ">=2.10.2",
     "@gsd-build/engine-linux-arm64-gnu": ">=2.10.2",

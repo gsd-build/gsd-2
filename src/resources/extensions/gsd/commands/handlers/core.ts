@@ -105,6 +105,7 @@ export function showHelp(ctx: ExtensionCommandContext, args = ""): void {
     "  /gsd backlog        Manage backlog items  [add|promote|remove|list]",
     "  /gsd pr-branch      Create a clean PR branch filtering .gsd/ commits  [--dry-run|--name]",
     "  /gsd add-tests      Generate tests for completed slices",
+    "  /gsd eval-review <sliceId>  Audit a slice's AI evaluation strategy  [--force|--show]",
     "  /gsd scan           Rapid codebase assessment  [--focus tech|arch|quality|concerns|tech+arch]",
     "",
     "SETUP & CONFIGURATION",

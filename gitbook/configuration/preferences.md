@@ -51,7 +51,7 @@ auto_supervisor:
 git:
   auto_push: true
   merge_strategy: squash
-  isolation: worktree
+  isolation: none
   collapse_cadence: milestone   # or "slice" — see Git & Worktrees docs
   # milestone_resquash applies only when collapse_cadence: "slice"
   # milestone_resquash: true    # collapse slice commits into one at milestone end
@@ -193,10 +193,12 @@ Git behavior. See [Git & Worktrees](git-settings.md).
 git:
   auto_push: false
   merge_strategy: squash
-  isolation: worktree
+  isolation: none
   commit_docs: true
   auto_pr: false
 ```
+
+Set `isolation: worktree` when you need milestone file isolation. Worktree mode requires a committed `HEAD`; in a zero-commit repo, GSD temporarily behaves as `none` until the first commit exists.
 
 ### `notifications`
 
