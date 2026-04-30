@@ -97,7 +97,7 @@ const REFRESH_INTERVAL_MS = 60_000;
 export function initHealthWidget(ctx: ExtensionContext): void {
   if (!ctx.hasUI) return;
 
-  const basePath = projectRoot();
+  const basePath = projectRoot(ctx);
 
   // String-array fallback — used in RPC mode (factory is a no-op there)
   const initialData = loadHealthWidgetData(basePath);

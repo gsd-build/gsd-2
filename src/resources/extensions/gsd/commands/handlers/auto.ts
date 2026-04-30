@@ -46,25 +46,25 @@ export async function handleAutoCommand(trimmed: string, ctx: ExtensionCommandCo
   if (trimmed === "next" || trimmed.startsWith("next ")) {
     if (trimmed.includes("--dry-run")) {
       const { handleDryRun } = await import("../../commands-maintenance.js");
-      await handleDryRun(ctx, projectRoot());
+      await handleDryRun(ctx, projectRoot(ctx));
       return true;
     }
     const { milestoneId, rest: afterMilestone } = parseMilestoneTarget(trimmed);
     const verboseMode = afterMilestone.includes("--verbose");
     const debugMode = afterMilestone.includes("--debug");
-    if (debugMode) enableDebug(projectRoot());
+    if (debugMode) enableDebug(projectRoot(ctx));
     if (!(await guardRemoteSession(ctx, pi))) return true;
 
     // Validate the milestone target exists and is not already complete.
     if (milestoneId) {
-      const allIds = findMilestoneIds(projectRoot());
+      const allIds = findMilestoneIds(projectRoot(ctx));
       if (!allIds.includes(milestoneId)) {
         ctx.ui.notify(`Milestone ${milestoneId} does not exist. Available: ${allIds.join(", ") || "(none)"}`, "error");
         return true;
       }
     }
 
-    startAutoDetached(ctx, pi, projectRoot(), verboseMode, {
+    startAutoDetached(ctx, pi, projectRoot(ctx), verboseMode, {
       step: true,
       milestoneLock: milestoneId,
     });
@@ -76,12 +76,12 @@ export async function handleAutoCommand(trimmed: string, ctx: ExtensionCommandCo
     const { milestoneId, rest: afterMilestone } = parseMilestoneTarget(afterYolo);
     const verboseMode = afterMilestone.includes("--verbose");
     const debugMode = afterMilestone.includes("--debug");
-    if (debugMode) enableDebug(projectRoot());
+    if (debugMode) enableDebug(projectRoot(ctx));
     if (!(await guardRemoteSession(ctx, pi))) return true;
 
     // Validate the milestone target exists and is not already complete.
     if (milestoneId) {
-      const allIds = findMilestoneIds(projectRoot());
+      const allIds = findMilestoneIds(projectRoot(ctx));
       if (!allIds.includes(milestoneId)) {
         ctx.ui.notify(`Milestone ${milestoneId} does not exist. Available: ${allIds.join(", ") || "(none)"}`, "error");
         return true;
@@ -89,7 +89,7 @@ export async function handleAutoCommand(trimmed: string, ctx: ExtensionCommandCo
     }
 
     if (yoloSeedFile) {
-      const resolved = resolve(projectRoot(), yoloSeedFile);
+      const resolved = resolve(projectRoot(ctx), yoloSeedFile);
       if (!existsSync(resolved)) {
         ctx.ui.notify(`Yolo seed file not found: ${resolved}`, "error");
         return true;
@@ -103,20 +103,20 @@ export async function handleAutoCommand(trimmed: string, ctx: ExtensionCommandCo
       // then auto-mode starts automatically via checkAutoStartAfterDiscuss
       // when the LLM says "Milestone X ready."
       const { showHeadlessMilestoneCreation } = await import("../../guided-flow.js");
-      await showHeadlessMilestoneCreation(ctx, pi, projectRoot(), seedContent);
+      await showHeadlessMilestoneCreation(ctx, pi, projectRoot(ctx), seedContent);
     } else if (milestoneId) {
-      startAutoDetached(ctx, pi, projectRoot(), verboseMode, {
+      startAutoDetached(ctx, pi, projectRoot(ctx), verboseMode, {
         milestoneLock: milestoneId,
       });
     } else {
-      startAutoDetached(ctx, pi, projectRoot(), verboseMode);
+      startAutoDetached(ctx, pi, projectRoot(ctx), verboseMode);
     }
     return true;
   }
 
   if (trimmed === "stop") {
     if (!isAutoActive() && !isAutoPaused()) {
-      const result = stopAutoRemote(projectRoot());
+      const result = stopAutoRemote(projectRoot(ctx));
       if (result.found) {
         ctx.ui.notify(`Sent stop signal to auto-mode session (PID ${result.pid}). It will shut down gracefully.`, "info");
       } else if (result.error) {
@@ -144,13 +144,13 @@ export async function handleAutoCommand(trimmed: string, ctx: ExtensionCommandCo
   }
 
   if (trimmed === "rate" || trimmed.startsWith("rate ")) {
-    await handleRate(trimmed.replace(/^rate\s*/, "").trim(), ctx, projectRoot());
+    await handleRate(trimmed.replace(/^rate\s*/, "").trim(), ctx, projectRoot(ctx));
     return true;
   }
 
   if (trimmed === "") {
     if (!(await guardRemoteSession(ctx, pi))) return true;
-    startAutoDetached(ctx, pi, projectRoot(), false, { step: true });
+    startAutoDetached(ctx, pi, projectRoot(ctx), false, { step: true });
     return true;
   }
 

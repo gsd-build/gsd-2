@@ -10,6 +10,7 @@ import {
   type DebugSpecialistReview,
 } from "./debug-session-store.js";
 import { loadPrompt } from "./prompt-loader.js";
+import { projectRoot } from "./commands/context.js";
 
 export type DebugCommandIntent
   = { type: "usage" }
@@ -94,7 +95,7 @@ export function parseDebugCommand(args: string): DebugCommandIntent {
 
 export async function handleDebug(args: string, ctx: ExtensionCommandContext, pi?: ExtensionAPI): Promise<void> {
   const parsed = parseDebugCommand(args);
-  const basePath = process.cwd();
+  const basePath = projectRoot(ctx);
 
   if (parsed.type === "usage") {
     ctx.ui.notify(usageText(), "info");

@@ -107,9 +107,9 @@ export function isDoctorHealActionable(issue: { fixable: boolean; severity: stri
 
 export async function handleDoctor(args: string, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<void> {
   const { jsonMode, dryRun, fixFlag, includeBuild, includeTests, mode, requestedScope } = parseDoctorArgs(args);
-  const scope = await selectDoctorScope(projectRoot(), requestedScope);
+  const scope = await selectDoctorScope(projectRoot(ctx), requestedScope);
   const effectiveScope = mode === "audit" ? requestedScope : scope;
-  const report = await runGSDDoctor(projectRoot(), {
+  const report = await runGSDDoctor(projectRoot(ctx), {
     fix: mode === "fix" || mode === "heal" || dryRun || fixFlag,
     dryRun,
     scope: effectiveScope,
@@ -155,7 +155,7 @@ export async function handleSkillHealth(args: string, ctx: ExtensionCommandConte
     formatSkillDetail,
   } = await import("./skill-health.js");
 
-  const basePath = projectRoot();
+  const basePath = projectRoot(ctx);
 
   // /gsd skill-health <skill-name> — detail view
   if (args && !args.startsWith("--")) {
@@ -203,7 +203,7 @@ export async function handleCapture(args: string, ctx: ExtensionCommandContext):
     return;
   }
 
-  const basePath = process.cwd();
+  const basePath = projectRoot(ctx);
 
   // Ensure .gsd/ exists — capture should work even without a milestone
   const gsdDir = gsdRoot(basePath);
@@ -270,7 +270,7 @@ export async function handleTriage(ctx: ExtensionCommandContext, pi: ExtensionAP
 }
 
 export async function handleSteer(change: string, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<void> {
-  const basePath = process.cwd();
+  const basePath = projectRoot(ctx);
   const state = await deriveState(basePath);
   const mid = state.activeMilestone?.id ?? "none";
   const sid = state.activeSlice?.id ?? "none";
@@ -343,7 +343,7 @@ export async function handleKnowledge(args: string, ctx: ExtensionCommandContext
   }
 
   const type = typeArg as "rule" | "pattern" | "lesson";
-  const basePath = process.cwd();
+  const basePath = projectRoot(ctx);
   const state = await deriveState(basePath);
   const scope = state.activeMilestone?.id
     ? `${state.activeMilestone.id}${state.activeSlice ? `/${state.activeSlice.id}` : ""}`
@@ -372,7 +372,7 @@ Examples:
   }
 
   const [hookName, unitType, unitId] = parts;
-  const basePath = projectRoot();
+  const basePath = projectRoot(ctx);
 
   // Import the hook trigger function
   const { triggerHookManually, formatHookStatus, getHookStatus } = await import("./post-unit-hooks.js");

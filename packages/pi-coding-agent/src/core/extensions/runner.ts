@@ -75,6 +75,7 @@ import type {
 	VerifyFailure,
 	VerifyResultEvent,
 } from "./types.js";
+import { resolveProjectRoot } from "./project-root.js";
 
 // Keybindings for these actions cannot be overridden by extensions
 const RESERVED_ACTIONS_FOR_EXTENSION_CONFLICTS: ReadonlyArray<KeyAction> = [
@@ -215,6 +216,7 @@ export class ExtensionRunner {
 	private runtime: ExtensionRuntime;
 	private uiContext: ExtensionUIContext;
 	private cwd: string;
+	private projectRoot: string;
 	private sessionManager: SessionManager;
 	private modelRegistry: ModelRegistry;
 	private errorListeners: Set<ExtensionErrorListener> = new Set();
@@ -256,6 +258,7 @@ export class ExtensionRunner {
 		this.runtime = runtime;
 		this.uiContext = noOpUIContext;
 		this.cwd = cwd;
+		this.projectRoot = resolveProjectRoot(cwd);
 		this.sessionManager = sessionManager;
 		this.modelRegistry = modelRegistry;
 		// Bind emit methods into the shared runtime so createExtensionAPI can delegate to them.
@@ -658,6 +661,7 @@ export class ExtensionRunner {
 			ui: this.uiContext,
 			hasUI: this.hasUI(),
 			cwd: this.cwd,
+			projectRoot: this.projectRoot,
 			sessionManager: this.sessionManager,
 			modelRegistry: this.modelRegistry,
 			get model() {

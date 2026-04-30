@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { gsdRoot } from "./paths.js";
 import { logWarning } from "./workflow-logger.js";
 import { getErrorMessage } from "./error-utils.js";
+import { projectRoot } from "./commands/context.js";
 
 export interface InspectData {
   schemaVersion: number | null;
@@ -51,7 +52,7 @@ export async function handleInspect(ctx: ExtensionCommandContext): Promise<void>
     const { isDbAvailable, _getAdapter, openDatabase } = await import("./gsd-db.js");
 
     if (!isDbAvailable()) {
-      const gsdDir = gsdRoot(process.cwd());
+      const gsdDir = gsdRoot(projectRoot(ctx));
       const dbPath = join(gsdDir, "gsd.db");
       if (!existsSync(gsdDir) || !existsSync(dbPath) || !openDatabase(dbPath)) {
         ctx.ui.notify("No GSD database available. Run /gsd auto to create one.", "info");

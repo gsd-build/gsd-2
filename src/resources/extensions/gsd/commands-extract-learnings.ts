@@ -427,7 +427,7 @@ export async function handleExtractLearnings(
   }
 
   // projectRoot() throws GSDNoProjectError if no project found — intentional, handled by dispatcher
-  const basePath = projectRoot();
+  const basePath = projectRoot(ctx);
   const milestoneDir = resolveMilestonePath(basePath, milestoneId);
 
   if (!milestoneDir) {
