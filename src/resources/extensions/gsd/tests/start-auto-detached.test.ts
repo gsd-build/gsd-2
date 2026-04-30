@@ -41,6 +41,59 @@ test("command entrypoints use startAutoDetached instead of awaiting startAuto (#
   );
 });
 
+test("bare /gsd stays in the foreground smart-entry flow (#5125 regression)", () => {
+  const autoHandlerSrc = readGsdFile("commands/handlers/auto.ts");
+  const bareCommandBranch = autoHandlerSrc.slice(
+    autoHandlerSrc.indexOf('if (trimmed === "")'),
+  );
+
+  assert.ok(
+    bareCommandBranch.includes('await import("../../guided-flow.js")'),
+    "bare /gsd should load the guided smart-entry flow",
+  );
+  assert.ok(
+    bareCommandBranch.includes("await showSmartEntry(ctx, pi, projectRoot(), { step: true })"),
+    "bare /gsd should await the foreground wizard instead of detaching auto-mode",
+  );
+  assert.ok(
+    !bareCommandBranch.includes("startAutoDetached("),
+    "bare /gsd must not enter detached auto bootstrap directly",
+  );
+});
+
+test("auto bootstrap validates blocked directories before touching .gsd migration state", () => {
+  const autoSrc = readGsdFile("auto.ts");
+  const autoStartSrc = readGsdFile("auto-start.ts");
+
+  const startAutoIdx = autoSrc.indexOf("export async function startAuto(");
+  const startAutoBody = autoSrc.slice(startAutoIdx);
+  const startAutoValidationIdx = startAutoBody.indexOf("validateDirectory(base)");
+  const startAutoRecoveryIdx = startAutoBody.indexOf("recoverFailedMigration(base)");
+
+  assert.ok(startAutoIdx > -1, "startAuto should exist");
+  assert.ok(startAutoValidationIdx > -1, "startAuto should validate the base directory");
+  assert.ok(startAutoRecoveryIdx > -1, "startAuto should still recover failed migrations for safe projects");
+  assert.ok(
+    startAutoValidationIdx < startAutoRecoveryIdx,
+    "startAuto must reject blocked directories before recovering or migrating .gsd state",
+  );
+
+  const bootstrapIdx = autoStartSrc.indexOf("export async function bootstrapAutoSession(");
+  const bootstrapBody = autoStartSrc.slice(bootstrapIdx);
+  const bootstrapValidationIdx = bootstrapBody.indexOf("validateDirectory(base)");
+  const lockIdx = bootstrapBody.indexOf("acquireSessionLock(base)");
+  const bootstrapMigrationIdx = bootstrapBody.indexOf("migrateToExternalState(base)");
+
+  assert.ok(bootstrapIdx > -1, "bootstrapAutoSession should exist");
+  assert.ok(bootstrapValidationIdx > -1, "bootstrapAutoSession should validate the base directory");
+  assert.ok(lockIdx > -1, "bootstrapAutoSession should acquire a session lock for safe projects");
+  assert.ok(bootstrapMigrationIdx > -1, "bootstrapAutoSession should still migrate safe projects");
+  assert.ok(
+    bootstrapValidationIdx < lockIdx && bootstrapValidationIdx < bootstrapMigrationIdx,
+    "fresh bootstrap must reject blocked directories before locking or migrating .gsd state",
+  );
+});
+
 test("startAutoDetached reports failures asynchronously (#3733)", () => {
   const autoSrc = readGsdFile("auto.ts");
 

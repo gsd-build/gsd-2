@@ -88,6 +88,7 @@ import { join } from "node:path";
 import { sep as pathSep } from "node:path";
 
 import { resolveProjectRootDbPath } from "./bootstrap/dynamic-tools.js";
+import { validateDirectory } from "./validate-directory.js";
 import {
   isCustomProvider,
   resolveDefaultSessionModel,
@@ -349,6 +350,12 @@ export async function bootstrapAutoSession(
     lockBase,
     buildResolver,
   } = deps;
+
+  const dirCheck = validateDirectory(base);
+  if (dirCheck.severity === "blocked") {
+    ctx.ui.notify(dirCheck.reason!, "error");
+    return false;
+  }
 
   const lockResult = acquireSessionLock(base);
   if (!lockResult.acquired) {

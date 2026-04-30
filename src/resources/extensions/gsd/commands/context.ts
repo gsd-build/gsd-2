@@ -24,13 +24,29 @@ export class GSDNoProjectError extends Error {
   }
 }
 
+let commandCwdOverride: string | null = null;
+
+export async function withCommandCwd<T>(cwd: string | undefined, fn: () => Promise<T>): Promise<T> {
+  const previous = commandCwdOverride;
+  commandCwdOverride = cwd || null;
+  try {
+    return await fn();
+  } finally {
+    commandCwdOverride = previous;
+  }
+}
+
 export function projectRoot(): string {
   let cwd: string;
-  try {
-    cwd = process.cwd();
-  } catch {
-    // cwd directory was deleted (e.g. worktree teardown) — fall back to home (#3598)
-    cwd = homedir();
+  if (commandCwdOverride) {
+    cwd = commandCwdOverride;
+  } else {
+    try {
+      cwd = process.cwd();
+    } catch {
+      // cwd directory was deleted (e.g. worktree teardown) — fall back to home (#3598)
+      cwd = homedir();
+    }
   }
   const root = resolveProjectRoot(cwd);
   const pathToCheck = root !== cwd ? cwd : root;
@@ -43,10 +59,14 @@ export function projectRoot(): string {
 
 export function currentDirectoryRoot(): string {
   let cwd: string;
-  try {
-    cwd = process.cwd();
-  } catch {
-    cwd = process.env.HOME ?? "/";
+  if (commandCwdOverride) {
+    cwd = commandCwdOverride;
+  } else {
+    try {
+      cwd = process.cwd();
+    } catch {
+      cwd = process.env.HOME ?? "/";
+    }
   }
   const result = validateDirectory(cwd);
   if (result.severity === "blocked") {

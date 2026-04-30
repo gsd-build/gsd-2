@@ -264,6 +264,14 @@ export class ExtensionRunner {
 		this.runtime.emitExtensionEvent = (event) => this.emitExtensionEventDynamic(event);
 	}
 
+	private currentCwd(): string {
+		try {
+			return process.cwd();
+		} catch {
+			return this.cwd;
+		}
+	}
+
 	/**
 	 * Dispatch an ExtensionEvent by type. Used by extensions to emit the
 	 * post-plan Layer 2 events (git lifecycle, verify, budget, milestone,
@@ -657,7 +665,7 @@ export class ExtensionRunner {
 		return {
 			ui: this.uiContext,
 			hasUI: this.hasUI(),
-			cwd: this.cwd,
+			cwd: this.currentCwd(),
 			sessionManager: this.sessionManager,
 			modelRegistry: this.modelRegistry,
 			get model() {

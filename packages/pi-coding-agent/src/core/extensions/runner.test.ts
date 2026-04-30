@@ -4,7 +4,7 @@ import { ExtensionRunner } from "./runner.js";
 import type { Extension, ExtensionRuntime, ToolCallEvent } from "./index.js";
 import { SessionManager } from "../session-manager.js";
 import { ModelRegistry } from "../model-registry.js";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { AuthStorage } from "../auth-storage.js";
@@ -80,5 +80,30 @@ describe("ExtensionRunner.emitToolCall", () => {
 		assert.equal(errors[0].error, "handler crashed");
 		assert.equal(errors[0].event, "tool_call");
 		assert.equal(errors[0].extensionPath, "/test/throwing-ext");
+	});
+});
+
+describe("ExtensionRunner.createContext", () => {
+	it("uses the live process cwd instead of the constructor cwd", (t) => {
+		const originalCwd = process.cwd();
+		const dir = mkdtempSync(join(tmpdir(), "runner-test-"));
+		const projectDir = join(dir, "project");
+		t.after(() => {
+			process.chdir(originalCwd);
+			rmSync(dir, { recursive: true, force: true });
+		});
+
+		const sessionManager = SessionManager.create(dir, dir);
+		const authStorage = AuthStorage.create();
+		const modelRegistry = new ModelRegistry(authStorage, join(dir, "models.json"));
+		const runtime = makeMinimalRuntime();
+		const runner = new ExtensionRunner([], runtime, originalCwd, sessionManager, modelRegistry);
+
+		mkdirSync(projectDir);
+		const realProjectDir = realpathSync(projectDir);
+		process.chdir(realProjectDir);
+
+		assert.equal(runner.createContext().cwd, realProjectDir);
+		assert.equal(runner.createCommandContext().cwd, realProjectDir);
 	});
 });
