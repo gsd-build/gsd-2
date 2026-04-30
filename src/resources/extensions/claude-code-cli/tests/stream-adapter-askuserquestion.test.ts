@@ -135,6 +135,33 @@ describe("convertAskUserQuestionInputToQuestions invalid inputs", () => {
 		if (r.ok) return;
 		assert.match(r.reason, /duplicate question text: Same\?/);
 	});
+	test("rejects whitespace-only question text", () => {
+		const r = convertAskUserQuestionInputToQuestions({
+			questions: [{ question: "   ", header: "H", multiSelect: false,
+				options: [{ label: "A", description: "" }] }],
+		});
+		assert.equal(r.ok, false);
+		if (r.ok) return;
+		assert.match(r.reason, /question 0 missing question text/);
+	});
+	test("rejects whitespace-only header", () => {
+		const r = convertAskUserQuestionInputToQuestions({
+			questions: [{ question: "Q", header: "  ", multiSelect: false,
+				options: [{ label: "A", description: "" }] }],
+		});
+		assert.equal(r.ok, false);
+		if (r.ok) return;
+		assert.match(r.reason, /question 0 missing header/);
+	});
+	test("rejects whitespace-only option label", () => {
+		const r = convertAskUserQuestionInputToQuestions({
+			questions: [{ question: "Q", header: "H", multiSelect: false,
+				options: [{ label: "  ", description: "" }] }],
+		});
+		assert.equal(r.ok, false);
+		if (r.ok) return;
+		assert.match(r.reason, /option 0 missing label/);
+	});
 	test("rejects duplicate option labels within a question", () => {
 		const r = convertAskUserQuestionInputToQuestions({
 			questions: [
@@ -195,7 +222,7 @@ describe("roundResultToAskUserQuestionAnswers", () => {
 			endInterview: false,
 			answers: {},
 		});
-		assert.deepEqual(r, {});
+		assert.deepEqual({ ...r }, {});
 	});
 
 	test("omits questions with empty-string selected", () => {
@@ -203,7 +230,7 @@ describe("roundResultToAskUserQuestionAnswers", () => {
 			endInterview: false,
 			answers: { q_0: { selected: "", notes: "" } },
 		});
-		assert.deepEqual(r, {});
+		assert.deepEqual({ ...r }, {});
 	});
 
 	test("omits questions with empty-array selected", () => {
@@ -211,7 +238,39 @@ describe("roundResultToAskUserQuestionAnswers", () => {
 			endInterview: false,
 			answers: { q_1: { selected: [], notes: "" } },
 		});
-		assert.deepEqual(r, {});
+		assert.deepEqual({ ...r }, {});
+	});
+
+	test("ignores selections that are not in the original options", () => {
+		const r = roundResultToAskUserQuestionAnswers(input as any, {
+			endInterview: false,
+			answers: { q_0: { selected: "Z", notes: "" } },
+		});
+		assert.equal(r["Pick one"], undefined);
+	});
+
+	test("ignores multi-select arrays containing off-menu labels", () => {
+		const r = roundResultToAskUserQuestionAnswers(input as any, {
+			endInterview: false,
+			answers: { q_1: { selected: ["X", "BAD"], notes: "" } },
+		});
+		assert.equal(r["Pick many"], undefined);
+	});
+
+	test("dedupes multi-select selections", () => {
+		const r = roundResultToAskUserQuestionAnswers(input as any, {
+			endInterview: false,
+			answers: { q_1: { selected: ["X", "X", "Y"], notes: "" } },
+		});
+		assert.equal(r["Pick many"], "X, Y");
+	});
+
+	test("returns a null-prototype map (no inherited keys)", () => {
+		const r = roundResultToAskUserQuestionAnswers(input as any, {
+			endInterview: false,
+			answers: { q_0: { selected: "A", notes: "" } },
+		});
+		assert.equal(Object.getPrototypeOf(r), null);
 	});
 });
 

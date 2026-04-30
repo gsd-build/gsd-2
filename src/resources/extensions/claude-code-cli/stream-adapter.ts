@@ -1024,7 +1024,7 @@ export function convertAskUserQuestionInputToQuestions(
 		}
 		const obj = item as Record<string, unknown>;
 
-		if (typeof obj.question !== "string" || obj.question.length === 0) {
+		if (typeof obj.question !== "string" || obj.question.trim().length === 0) {
 			return { ok: false, reason: `question ${index} missing question text` };
 		}
 		// Reject duplicate question texts: roundResultToAskUserQuestionAnswers
@@ -1034,7 +1034,7 @@ export function convertAskUserQuestionInputToQuestions(
 			return { ok: false, reason: `duplicate question text: ${obj.question}` };
 		}
 		seenQuestionTexts.add(obj.question);
-		if (typeof obj.header !== "string" || obj.header.length === 0) {
+		if (typeof obj.header !== "string" || obj.header.trim().length === 0) {
 			return { ok: false, reason: `question ${index} missing header` };
 		}
 		if (typeof obj.multiSelect !== "boolean") {
@@ -1052,7 +1052,7 @@ export function convertAskUserQuestionInputToQuestions(
 				return { ok: false, reason: `question ${index} option ${optionIndex} is not an object` };
 			}
 			const optionObj = rawOption as Record<string, unknown>;
-			if (typeof optionObj.label !== "string" || optionObj.label.length === 0) {
+			if (typeof optionObj.label !== "string" || optionObj.label.trim().length === 0) {
 				return { ok: false, reason: `question ${index} option ${optionIndex} missing label` };
 			}
 			// Reject duplicate option labels within the same question:
@@ -1100,19 +1100,31 @@ export function roundResultToAskUserQuestionAnswers(
 	input: AskUserQuestionInputShape,
 	result: RoundResult,
 ): Record<string, string> {
-	const answers: Record<string, string> = {};
+	// Null prototype: the answers map is keyed by model-controlled question
+	// text, so `__proto__` and friends could otherwise alias prototype
+	// fields. The intercept's caller does Object.keys(answers) so this
+	// stays compatible.
+	const answers = Object.create(null) as Record<string, string>;
 	for (let index = 0; index < input.questions.length; index += 1) {
 		const question = input.questions[index];
 		if (!question) continue;
 		const answer = result.answers[`q_${index}`];
 		if (!answer) continue;
+		// Only persist labels that exist in the original options. A buggy or
+		// custom askInterview implementation can't inject off-menu answers
+		// the LLM didn't see — those drop and the partial-answers guard in
+		// the intercept treats the question as unanswered.
+		const allowedLabels = new Set(question.options.map((option) => option.label));
 		const selected = answer.selected;
 		if (typeof selected === "string") {
-			if (selected.length === 0) continue;
+			if (selected.length === 0 || !allowedLabels.has(selected)) continue;
 			answers[question.question] = selected;
 		} else if (Array.isArray(selected)) {
 			if (selected.length === 0) continue;
-			answers[question.question] = selected.join(", ");
+			if (selected.some((label) => typeof label !== "string" || !allowedLabels.has(label))) continue;
+			// Dedupe multi-select choices before joining — a buggy UI could
+			// emit duplicates that misrepresent the user's intent.
+			answers[question.question] = [...new Set(selected)].join(", ");
 		}
 	}
 	return answers;
@@ -1288,7 +1300,10 @@ export function createClaudeCodeCanUseToolHandler(
 
 			return {
 				behavior: "allow",
-				updatedInput: { ..._input, answers },
+				// Spread answers into a plain object so the SDK gets a
+				// normally-prototyped value (the helper returns a null-proto
+				// map internally for safety).
+				updatedInput: { ..._input, answers: { ...answers } },
 				toolUseID: options.toolUseID,
 			};
 		}
