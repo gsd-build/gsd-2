@@ -886,6 +886,22 @@ export function syncWorktreeStateBack(
   return { synced };
 }
 
+function syncCurrentMilestoneStateAfterMerge(
+  mainBasePath: string,
+  worktreePath: string,
+  milestoneId: string,
+): { synced: string[] } {
+  const mainGsd = gsdRoot(mainBasePath);
+  const wtGsd = gsdRoot(worktreePath);
+  const synced: string[] = [];
+
+  if (isSamePath(mainGsd, wtGsd)) return { synced };
+  if (!existsSync(wtGsd) || !existsSync(mainGsd)) return { synced };
+
+  syncMilestoneDir(wtGsd, mainGsd, milestoneId, synced);
+  return { synced };
+}
+
 /**
  * Sync a single milestone directory from worktree to main.
  * Copies milestone-level .md files, slice-level files, and task summaries.
@@ -2224,6 +2240,27 @@ export function mergeMilestoneToMain(
 
   // 9a-iii. Restore sheltered queued milestone directories (#2505).
   restoreShelter();
+
+  // 9a-iv. Preserve current milestone artifacts that may be untracked in git.
+  // syncWorktreeStateBack intentionally skips the current milestone before the
+  // squash merge to avoid conflicting with the merge content. Once the squash
+  // commit is complete, copy those files back so summaries, validation, and
+  // task outputs survive worktree teardown in external/.gitignored .gsd setups.
+  try {
+    const { synced } = syncCurrentMilestoneStateAfterMerge(
+      originalBasePath_,
+      worktreeCwd,
+      milestoneId,
+    );
+    if (synced.length > 0) {
+      debugLog("mergeMilestoneToMain", {
+        phase: "current-milestone-sync-after-merge",
+        synced: synced.length,
+      });
+    }
+  } catch (err) {
+    logWarning("worktree", `current milestone sync after merge failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   // 9b. Safety check (#1792): if nothing was committed, verify the milestone
   // work is already on the integration branch before allowing teardown.
