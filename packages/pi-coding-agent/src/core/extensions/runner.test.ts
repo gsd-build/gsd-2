@@ -47,6 +47,27 @@ function makeThrowingExtension(eventType: string, error: Error): Extension {
 	} as unknown as Extension;
 }
 
+function makeCommandExtension(path: string, commandName: string, marker: string): Extension {
+	return {
+		path,
+		commands: new Map([
+			[
+				commandName,
+				{
+					name: commandName,
+					description: marker,
+					handler: async () => {},
+				},
+			],
+		]),
+		handlers: new Map(),
+		shortcuts: new Map(),
+		tools: new Map(),
+		flags: new Map(),
+		diagnostics: [],
+	} as unknown as Extension;
+}
+
 describe("ExtensionRunner.emitToolCall", () => {
 	it("catches throwing extension handler and routes to emitError", async (t) => {
 		const dir = mkdtempSync(join(tmpdir(), "runner-test-"));
@@ -105,5 +126,47 @@ describe("ExtensionRunner.createContext", () => {
 
 		assert.equal(runner.createContext().cwd, realProjectDir);
 		assert.equal(runner.createCommandContext().cwd, realProjectDir);
+	});
+});
+
+describe("ExtensionRunner protected commands", () => {
+	it("resolves /gsd to the bundled GSD extension even when another extension loads first", () => {
+		const dir = mkdtempSync(join(tmpdir(), "runner-test-"));
+		try {
+			const sessionManager = SessionManager.create(dir, dir);
+			const authStorage = AuthStorage.create();
+			const modelRegistry = new ModelRegistry(authStorage, join(dir, "models.json"));
+			const runtime = makeMinimalRuntime();
+			const userExt = makeCommandExtension("/tmp/extensions/user-spoof/index.ts", "gsd", "spoof");
+			const gsdExt = makeCommandExtension(`${dir}/extensions/gsd/index.ts`, "gsd", "bundled");
+			const runner = new ExtensionRunner([userExt, gsdExt], runtime, dir, sessionManager, modelRegistry);
+
+			const command = runner.getCommand("gsd");
+			assert.equal(command?.description, "bundled");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("omits spoofed /gsd from registered extension commands", () => {
+		const dir = mkdtempSync(join(tmpdir(), "runner-test-"));
+		try {
+			const sessionManager = SessionManager.create(dir, dir);
+			const authStorage = AuthStorage.create();
+			const modelRegistry = new ModelRegistry(authStorage, join(dir, "models.json"));
+			const runtime = makeMinimalRuntime();
+			const userExt = makeCommandExtension("/tmp/extensions/user-spoof/index.ts", "gsd", "spoof");
+			const gsdExt = makeCommandExtension(`${dir}/extensions/gsd/index.ts`, "gsd", "bundled");
+			const runner = new ExtensionRunner([userExt, gsdExt], runtime, dir, sessionManager, modelRegistry);
+
+			const commands = runner.getRegisteredCommands();
+			assert.deepEqual(commands.map((command) => command.description), ["bundled"]);
+			assert.ok(
+				runner.getCommandDiagnostics().some((diagnostic) => diagnostic.message.includes("protected command owner")),
+				"spoofed /gsd conflict should be reported",
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
