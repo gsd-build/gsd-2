@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, dirname, join, relative, sep } from "node:path";
 import { homedir, platform } from "node:os";
+import { createRootShortcuts, type BrowseEntry } from "../../../lib/directory-browser";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,7 +60,7 @@ function isSameOrDescendant(candidate: string, root: string): boolean {
  * Get additional root-level directories to show as shortcuts
  * (for accessing external drives and mounted filesystems)
  */
-function getAdditionalRoots(): string[] {
+function getPlatformLocations(): string[] {
   const os = platform();
   if (os === "linux") {
     return getLinuxMountPoints();
@@ -68,6 +69,10 @@ function getAdditionalRoots(): string[] {
     return getMacMountPoints();
   }
   return [];
+}
+
+function getBrowseRoots(): string[] {
+  return ["/", ...getPlatformLocations()];
 }
 
 /**
@@ -88,17 +93,15 @@ export async function GET(request: Request): Promise<Response> {
     const devRoot = getDevRoot();
     const targetPath = rawPath ? resolve(rawPath) : devRoot;
 
-    // Restrict browsing to devRoot and its subtree, or the home directory
-    // if no devRoot is configured. Navigating to the parent of devRoot is
-    // allowed (one level up) so the UI can show the devRoot in context,
-    // but nothing further.
-    // Also allow navigation to platform mount roots (for example, /Volumes on macOS).
+    // Restrict browsing to the configured devRoot by default, but provide an
+    // explicit filesystem-root escape hatch for users who need to select
+    // projects from absolute locations such as /Volumes on macOS.
     const devRootParent = dirname(devRoot);
-    const additionalRoots = getAdditionalRoots();
+    const browseRoots = getBrowseRoots();
     const isAllowedBrowsePath = (candidate: string): boolean =>
       isSameOrDescendant(candidate, devRoot) ||
       candidate === devRootParent ||
-      additionalRoots.some((root) => isSameOrDescendant(candidate, root));
+      browseRoots.some((root) => isSameOrDescendant(candidate, root));
     const isAllowedPath = isAllowedBrowsePath(targetPath);
 
     if (!isAllowedPath) {
@@ -126,10 +129,11 @@ export async function GET(request: Request): Promise<Response> {
     const parentPath = dirname(targetPath);
     // Only offer the parent navigation if it's within the allowed scope.
     const parentAllowed = parentPath !== targetPath && isAllowedBrowsePath(parentPath);
-    const entries: Array<{ name: string; path: string }> = [];
+    const entries: BrowseEntry[] = [];
+    const shortcuts: BrowseEntry[] = [];
 
-    // Show mount points as quick-access when browsing from the home/dev root.
-    const showMountPoints = additionalRoots.length > 0 && (targetPath === homedir() || targetPath === devRoot);
+    // Show root-level locations as shortcuts when browsing from the home/dev root.
+    const showLocationShortcuts = browseRoots.length > 0 && (targetPath === homedir() || targetPath === devRoot);
 
     try {
       const items = readdirSync(targetPath, { withFileTypes: true });
@@ -145,28 +149,21 @@ export async function GET(request: Request): Promise<Response> {
         });
       }
 
-      // Add mount points as quick-access entries.
-      if (showMountPoints) {
-        for (const mp of additionalRoots) {
-          if (existsSync(mp)) {
-            const mpName = mp.split("/").pop() || mp;
-            entries.push({
-              name: mpName,
-              path: mp,
-            });
-          }
-        }
+      if (showLocationShortcuts) {
+        shortcuts.push(...createRootShortcuts(browseRoots));
       }
     } catch {
       // Permission denied or other read error — return empty entries
     }
 
     entries.sort((a, b) => a.name.localeCompare(b.name));
+    shortcuts.sort((a, b) => a.name.localeCompare(b.name));
 
     return Response.json({
       current: targetPath,
       parent: parentAllowed ? parentPath : null,
       entries,
+      shortcuts,
     });
   } catch (err) {
     return Response.json(
