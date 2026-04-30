@@ -1915,6 +1915,11 @@ export async function dispatchHookUnit(
     return false;
   }
 
+  const cmdCtxAny = s.cmdCtx as Record<string, unknown> | null;
+  if (typeof cmdCtxAny?.clearQueue === "function") {
+    (cmdCtxAny.clearQueue as () => unknown)();
+  }
+
   const result = await s.cmdCtx!.newSession();
   if (result.cancelled) {
     await stopAuto(ctx, pi);
