@@ -7,7 +7,7 @@ import assert from "node:assert";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 import { resolveProjectRoot } from "./project-root.js";
 
@@ -37,6 +37,34 @@ describe("resolveProjectRoot", () => {
 			const sub = join(repo, "nested", "deep");
 			mkdirSync(sub, { recursive: true });
 			assert.strictEqual(resolveProjectRoot(sub), repo);
+		} finally {
+			cleanup();
+		}
+	});
+
+	test("returned path uses native separators", () => {
+		// `git rev-parse --show-toplevel` always emits forward slashes (even on
+		// Windows). `resolveProjectRoot` must normalize so equality and prefix
+		// comparisons against values from `fs.realpathSync` / `path.join` work.
+		const { repo, cleanup } = makeRepo();
+		try {
+			const sub = join(repo, "nested", "deep");
+			mkdirSync(sub, { recursive: true });
+			const root = resolveProjectRoot(sub);
+			// On Windows: must not contain forward slashes (raw git output would).
+			// On POSIX: separator is "/" and path is unchanged.
+			if (sep === "\\") {
+				assert.ok(
+					!root.includes("/"),
+					`expected native separators on Windows, got: ${root}`,
+				);
+			}
+			// Cross-platform invariant: the returned root, when joined with a
+			// native-separator subpath, must remain a prefix-match of that path.
+			assert.ok(
+				sub.startsWith(root),
+				`expected ${sub} to start with ${root}`,
+			);
 		} finally {
 			cleanup();
 		}

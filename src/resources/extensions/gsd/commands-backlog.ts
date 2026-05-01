@@ -12,6 +12,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 
 import { gsdRoot } from "./paths.js";
+import { projectRoot } from "./commands/context.js";
 
 interface BacklogItem {
   id: string;
@@ -161,7 +162,7 @@ export async function handleBacklog(
   ctx: ExtensionCommandContext,
   pi: ExtensionAPI,
 ): Promise<void> {
-  const basePath = process.cwd();
+  const basePath = projectRoot(ctx);
   const parts = args.trim().split(/\s+/);
   const sub = parts[0] ?? "";
   const rest = parts.slice(1).join(" ");

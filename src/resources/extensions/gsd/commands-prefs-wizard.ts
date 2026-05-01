@@ -21,6 +21,7 @@ import {
 } from "./preferences.js";
 import { loadFile, saveFile, splitFrontmatter, parseFrontmatterMap } from "./files.js";
 import { runClaudeImportFlow } from "./claude-import.js";
+import { projectRoot } from "./commands/context.js";
 
 /** Extract body content after frontmatter closing delimiter, or null if none. */
 function extractBodyAfterFrontmatter(content: string): string | null {
@@ -253,7 +254,7 @@ export async function handlePrefs(args: string, ctx: ExtensionCommandContext): P
     const effective = loadEffectiveGSDPreferences();
     let hasUnresolved = false;
     if (effective) {
-      const report = resolveAllSkillReferences(effective.preferences, process.cwd());
+      const report = resolveAllSkillReferences(effective.preferences, projectRoot(ctx));
       const resolved = [...report.resolutions.values()].filter(r => r.method !== "unresolved");
       hasUnresolved = report.warnings.length > 0;
       if (resolved.length > 0 || hasUnresolved) {

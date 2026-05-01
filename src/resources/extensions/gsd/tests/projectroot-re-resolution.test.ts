@@ -65,13 +65,32 @@ describe("projectRoot(ctx) re-resolves from ctx every invocation", () => {
   });
 });
 
-describe("commands/handlers/ never reaches for process.cwd() directly", () => {
-  // Every handler resolves its base path through `projectRoot(ctx)`,
-  // never via `process.cwd()`. A stray `process.cwd()` in handlers/
-  // would silently target the wrong directory whenever cwd diverges
-  // from the invocation project root, and would slip past the
-  // module-scope test below.
-  test("no .ts file under commands/handlers/ contains process.cwd()", () => {
+describe("command surface never reaches for process.cwd() directly", () => {
+  // Every handler resolves its base path through `projectRoot(ctx)` (or
+  // explicitly through `ctx.cwd` when the actual invocation cwd is what's
+  // wanted, e.g. resolving a user-supplied relative path). A stray
+  // `process.cwd()` would silently target the wrong directory whenever
+  // cwd diverges from the invocation project root.
+  //
+  // Comments referencing the literal "process.cwd()" are allowed; this
+  // matcher only flags actual call expressions of the form `process.cwd(`.
+  // To enforce the rule, we strip line and block comments before scanning.
+  function findOffenders(src: string): number[] {
+    const stripped = src
+      // Block comments: /* ... */
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
+      // Line comments: // ...
+      .replace(/\/\/[^\n]*/g, (m) => m.replace(/[^\n]/g, " "));
+    const offenders: number[] = [];
+    const re = /\bprocess\.cwd\s*\(/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(stripped)) !== null) {
+      offenders.push(stripped.slice(0, m.index).split("\n").length);
+    }
+    return offenders;
+  }
+
+  test("no .ts file under commands/handlers/ calls process.cwd()", () => {
     const offenders: string[] = [];
     function walk(dir: string): void {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -80,10 +99,7 @@ describe("commands/handlers/ never reaches for process.cwd() directly", () => {
           walk(full);
         } else if (entry.isFile() && entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")) {
           const src = readFileSync(full, "utf-8");
-          const re = /\bprocess\.cwd\s*\(/g;
-          let m: RegExpExecArray | null;
-          while ((m = re.exec(src)) !== null) {
-            const lineNo = src.slice(0, m.index).split("\n").length;
+          for (const lineNo of findOffenders(src)) {
             offenders.push(`${full}:${lineNo}`);
           }
         }
@@ -93,7 +109,26 @@ describe("commands/handlers/ never reaches for process.cwd() directly", () => {
     assert.deepEqual(
       offenders,
       [],
-      "handlers/ must resolve project root via projectRoot(ctx); found process.cwd() callsites",
+      "handlers/ must resolve project root via projectRoot(ctx) or ctx.cwd; found process.cwd() callsites",
+    );
+  });
+
+  test("no commands-*.ts (top-level) file calls process.cwd()", () => {
+    const offenders: string[] = [];
+    for (const entry of readdirSync(EXT_ROOT, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      if (!/^commands-.*\.ts$/.test(entry.name)) continue;
+      if (entry.name.endsWith(".test.ts")) continue;
+      const file = join(EXT_ROOT, entry.name);
+      const src = readFileSync(file, "utf-8");
+      for (const lineNo of findOffenders(src)) {
+        offenders.push(`${file}:${lineNo}`);
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "commands-*.ts must resolve project root via projectRoot(ctx) or ctx.cwd; found process.cwd() callsites",
     );
   });
 });

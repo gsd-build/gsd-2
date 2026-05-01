@@ -41,12 +41,11 @@ export class GSDNoProjectError extends Error {
  */
 export function projectRoot(ctx?: ExtensionContext): string {
   let root: string;
-  let pathToCheck: string;
+  let cwd: string;
   if (ctx && typeof ctx.projectRoot === "string" && ctx.projectRoot.length > 0) {
     root = ctx.projectRoot;
-    pathToCheck = ctx.cwd && ctx.cwd !== root ? ctx.cwd : root;
+    cwd = ctx.cwd && ctx.cwd.length > 0 ? ctx.cwd : root;
   } else {
-    let cwd: string;
     try {
       cwd = ctx?.cwd ?? process.cwd();
     } catch {
@@ -54,11 +53,18 @@ export function projectRoot(ctx?: ExtensionContext): string {
       cwd = homedir();
     }
     root = resolveProjectRoot(cwd);
-    pathToCheck = root !== cwd ? cwd : root;
   }
-  const result = validateDirectory(pathToCheck);
-  if (result.severity === "blocked") {
-    throw new GSDNoProjectError(result.reason ?? "GSD must be run inside a project directory.");
+
+  // Validate the root itself first — a bad root (e.g. project deleted) should
+  // never be returned as if it were valid. Then, if cwd diverges from root,
+  // also validate cwd so commands like /gsd cleanup that operate on the
+  // current directory get a chance to fail with a meaningful reason rather
+  // than silently misfiring against an unrelated project root.
+  for (const candidate of root === cwd ? [root] : [root, cwd]) {
+    const result = validateDirectory(candidate);
+    if (result.severity === "blocked") {
+      throw new GSDNoProjectError(result.reason ?? "GSD must be run inside a project directory.");
+    }
   }
   return root;
 }

@@ -17,6 +17,7 @@ import { join, resolve } from "node:path";
 
 import { ensureProjectWorkflowMcpConfig } from "./mcp-project-config.js";
 import { gsdHome } from "./gsd-home.js";
+import { projectRoot } from "./commands/context.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -64,12 +65,12 @@ interface McpServerRawConfig {
   url?: string;
 }
 
-function readMcpConfigs(): McpServerRawConfig[] {
+function readMcpConfigs(basePath: string): McpServerRawConfig[] {
   const servers: McpServerRawConfig[] = [];
   const seen = new Set<string>();
   const configPaths = [
-    join(process.cwd(), ".mcp.json"),
-    join(process.cwd(), ".gsd", "mcp.json"),
+    join(basePath, ".mcp.json"),
+    join(basePath, ".gsd", "mcp.json"),
     join(gsdHome(), "mcp.json"),
   ];
 
@@ -183,7 +184,7 @@ export async function handleMcpStatus(
 ): Promise<void> {
   const trimmed = args.trim();
   const lowered = trimmed.toLowerCase();
-  const configs = readMcpConfigs();
+  const configs = readMcpConfigs(projectRoot(ctx));
 
   // /gsd mcp init [dir]
   if (!lowered || lowered === "status") {

@@ -190,7 +190,9 @@ export async function handleCleanupWorktrees(ctx: ExtensionCommandContext, baseP
 
   if (safeToRemove.length > 0) {
     lines.push(`Safe to remove (${safeToRemove.length}) — merged into main, clean:`);
-    const cwd = process.cwd();
+    // Use the invocation-time cwd, not process.cwd(): we are guarding against
+    // removing the user's current working directory out from under them.
+    const cwd = ctx.cwd;
     let removed = 0;
     for (const s of safeToRemove) {
       const wt = s.worktree;

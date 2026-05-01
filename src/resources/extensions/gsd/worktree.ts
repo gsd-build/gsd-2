@@ -112,6 +112,16 @@ export function detectWorktreeName(basePath: string): string | null {
  *
  * Use this in commands that call `process.cwd()` to ensure they always
  * operate against the real project root, not a worktree subdirectory.
+ *
+ * NOTE: The pi-coding-agent runner ships a separate, simpler
+ * `resolveProjectRoot` at `packages/pi-coding-agent/src/core/extensions/
+ * project-root.ts` that runs `git rev-parse --show-toplevel` and is unaware
+ * of GSD worktrees. The runner's job is only to derive a "current project"
+ * for the generic `ExtensionContext.projectRoot` field — it does not know
+ * about GSD's worktree layout. The function in this module is GSD-specific
+ * and additionally peels worktree paths back to the parent project root.
+ * Both are intentional: the runner's flavor populates ctx; the GSD flavor
+ * is what gsd command handlers fall back to when no ctx is available.
  */
 export function resolveProjectRoot(basePath: string): string {
   return resolveWorktreeProjectRoot(basePath);

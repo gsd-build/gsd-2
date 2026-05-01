@@ -349,7 +349,10 @@ function handleExport(ctx: ExtensionCommandContext, target: string | undefined):
       })),
       sources,
     };
-    const abs = resolvePath(process.cwd(), target);
+    // User-supplied path: resolve relative to the invocation cwd, not the
+    // project root, so `/gsd memory export ./foo.json` writes where the user
+    // currently is.
+    const abs = resolvePath(ctx.cwd, target);
     writeFileSync(abs, JSON.stringify(payload, null, 2), "utf-8");
     ctx.ui.notify(
       `Exported ${payload.memories.length} memories, ${payload.relations.length} relations, ${payload.sources.length} sources → ${abs}`,
@@ -382,7 +385,9 @@ function handleImport(ctx: ExtensionCommandContext, target: string | undefined):
     return;
   }
   try {
-    const abs = resolvePath(process.cwd(), target);
+    // User-supplied path: resolve relative to the invocation cwd, not the
+    // project root.
+    const abs = resolvePath(ctx.cwd, target);
     const raw = readFileSync(abs, "utf-8");
     const parsed = JSON.parse(raw) as { memories?: ExportedMemory[]; relations?: ExportedRelation[] };
 

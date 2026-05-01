@@ -6,8 +6,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **pi-coding-agent**: new `projectRoot: string` field on `ExtensionContext` and
+  `ExtensionCommandContext`. Populated by the runner from `cwd` at construction
+  time via `git rev-parse --show-toplevel` (or `cwd` itself outside a repo) and
+  exposed to every extension. **Breaking interface change for extension
+  authors:** any extension that constructs an `ExtensionContext` literal in
+  tests or implements the type directly must now provide `projectRoot`. Set
+  `GSD_DEBUG=1` to surface diagnostic output when git resolution silently
+  falls back to `cwd`. Lays the foundation for opt-in workspace mode tracked
+  in #5110.
+
 ### Changed
-- **gsd**: thread `ctx.projectRoot` through every `/gsd …` handler instead of resolving `process.cwd()` at each call site. New `ExtensionContext.projectRoot` field is populated once per command invocation by the runner and resolves to the git toplevel of `cwd` (or `cwd` itself outside a repo). Behaviour-preserving refactor; no flag, no user-visible change. Lays the foundation for opt-in workspace mode tracked in #5110.
+- **gsd**: thread `ctx.projectRoot` through every `/gsd …` handler and
+  top-level `commands-*.ts` entry instead of resolving `process.cwd()` at each
+  call site. Path-resolution semantics are unchanged for users running gsd
+  from inside a single git repository on POSIX hosts; on Windows, the runner
+  now normalizes git's POSIX-separator output through `path.resolve` so
+  callers comparing `projectRoot` to native-separator paths get correct
+  equality and prefix matches.
 
 ### Deprecated
 - **mcp-server**: 11 `gsd_*` alias tools (`gsd_save_decision`, `gsd_update_requirement`, `gsd_save_requirement`, `gsd_generate_milestone_id`, `gsd_task_plan`, `gsd_slice_replan`, `gsd_complete_slice`, `gsd_milestone_complete`, `gsd_milestone_validate`, `gsd_roadmap_reassess`, `gsd_complete_task`) are entering a deprecation window. Each invocation now emits a `deprecation.mcp_alias_used` JSONL record to stderr. Use the canonical names (`gsd_decision_save`, etc.). The aliases will be removed in a future release after telemetry confirms zero usage. (#5031)

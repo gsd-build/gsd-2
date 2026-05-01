@@ -15,6 +15,7 @@ import {
   nativeDetectMainBranch,
   nativeBranchExists,
 } from "./native-git-bridge.js";
+import { projectRoot } from "./commands/context.js";
 
 const EXCLUDED_PATHS = [".gsd", ".planning", "PLAN.md"] as const;
 
@@ -126,7 +127,7 @@ export async function handlePrBranch(
   args: string,
   ctx: ExtensionCommandContext,
 ): Promise<void> {
-  const basePath = process.cwd();
+  const basePath = projectRoot(ctx);
   const dryRun = args.includes("--dry-run");
   const nameMatch = args.match(/--name\s+(\S+)/);
 

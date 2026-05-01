@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { getLedger, getProjectTotals, aggregateByModel, formatCost, formatTokenCount, loadLedgerFromDisk } from "./metrics.js";
 import type { UnitMetrics } from "./metrics.js";
 import { gsdRoot } from "./paths.js";
+import { projectRoot } from "./commands/context.js";
 import { formatDuration } from "../shared/format-utils.js";
 
 function formatSessionReport(units: UnitMetrics[]): string {
@@ -59,7 +60,7 @@ export async function handleSessionReport(
   args: string,
   ctx: ExtensionCommandContext,
 ): Promise<void> {
-  const basePath = process.cwd();
+  const basePath = projectRoot(ctx);
 
   // Get units from in-memory ledger or disk
   const ledger = getLedger();

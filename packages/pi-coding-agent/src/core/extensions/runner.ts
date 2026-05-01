@@ -258,6 +258,11 @@ export class ExtensionRunner {
 		this.runtime = runtime;
 		this.uiContext = noOpUIContext;
 		this.cwd = cwd;
+		// Resolved once here. The runner exposes no setter, so this value is
+		// fixed for the runner's lifetime and equally fixed in every context
+		// returned by createContext(). When workspace mode introduces a
+		// runtime "active repo" switch (project_changed event), this needs
+		// to become a setter that re-runs resolveProjectRoot.
 		this.projectRoot = resolveProjectRoot(cwd);
 		this.sessionManager = sessionManager;
 		this.modelRegistry = modelRegistry;
@@ -653,7 +658,16 @@ export class ExtensionRunner {
 
 	/**
 	 * Create an ExtensionContext for use in event handlers and tool execution.
-	 * Context values are resolved at call time, so changes via bindCore/bindUI are reflected.
+	 *
+	 * Context values bound via `bindCore` / `bindUI` (ui, model, idle/abort, etc.)
+	 * are resolved at call time, so updates surface in subsequent contexts. By
+	 * contrast, `cwd` and `projectRoot` are fixed at constructor time — the
+	 * runner has no mutation channel for them today, so every context returned
+	 * by this method shares the same path values for the runner's lifetime.
+	 *
+	 * Once a per-runner mutation channel exists (planned alongside the
+	 * `project_changed` event for workspace mode), `cwd`/`projectRoot` will
+	 * become call-time-resolved as well.
 	 */
 	createContext(): ExtensionContext {
 		const getModel = this.getModel;
