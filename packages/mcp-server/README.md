@@ -80,34 +80,25 @@ Add to `.cursor/mcp.json`:
 The workflow MCP surface includes:
 
 - `gsd_decision_save`
-- `gsd_save_decision`
 - `gsd_requirement_update`
-- `gsd_update_requirement`
 - `gsd_requirement_save`
-- `gsd_save_requirement`
 - `gsd_milestone_generate_id`
-- `gsd_generate_milestone_id`
 - `gsd_plan_milestone`
 - `gsd_plan_slice`
 - `gsd_plan_task`
-- `gsd_task_plan`
 - `gsd_replan_slice`
-- `gsd_slice_replan`
 - `gsd_task_complete`
-- `gsd_complete_task`
 - `gsd_slice_complete`
-- `gsd_complete_slice`
 - `gsd_skip_slice`
 - `gsd_validate_milestone`
-- `gsd_milestone_validate`
 - `gsd_complete_milestone`
-- `gsd_milestone_complete`
 - `gsd_reassess_roadmap`
-- `gsd_roadmap_reassess`
 - `gsd_save_gate_result`
 - `gsd_summary_save`
 - `gsd_milestone_status`
 - `gsd_journal_query`
+
+**Aliases (kept for backwards compatibility — prefer the canonical name above):** `gsd_save_decision`, `gsd_update_requirement`, `gsd_save_requirement`, `gsd_generate_milestone_id`, `gsd_task_plan`, `gsd_slice_replan`, `gsd_complete_task`, `gsd_complete_slice`, `gsd_milestone_validate`, `gsd_milestone_complete`, `gsd_roadmap_reassess`.
 
 These tools use the same GSD workflow handlers as the native in-process tool path wherever a shared handler exists.
 

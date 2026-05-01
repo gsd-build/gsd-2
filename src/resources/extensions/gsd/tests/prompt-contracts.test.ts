@@ -174,15 +174,15 @@ test("guided-resume-task prompt preserves recovery state until work is supersede
 
 // ─── Prompt migration: execute-task → gsd_complete_task ───────────────
 
-test("execute-task prompt references gsd_complete_task tool", () => {
+test("execute-task prompt references gsd_task_complete tool", () => {
   const prompt = readPrompt("execute-task");
-  assert.match(prompt, /gsd_complete_task/);
+  assert.match(prompt, /gsd_task_complete/);
 });
 
-test("execute-task prompt uses gsd_complete_task as canonical summary write path", () => {
+test("execute-task prompt uses gsd_task_complete as canonical summary write path", () => {
   const prompt = readPrompt("execute-task");
   assert.match(prompt, /\{\{taskSummaryPath\}\}/);
-  assert.match(prompt, /gsd_complete_task/);
+  assert.match(prompt, /gsd_task_complete/);
   assert.match(prompt, /DB-backed tool is the canonical write path/i);
   assert.match(prompt, /Do \*\*not\*\* manually write `?\{\{taskSummaryPath\}\}`?/i);
   assert.doesNotMatch(prompt, /^\d+\.\s+Write `?\{\{taskSummaryPath\}\}`?\s*$/m);
@@ -202,9 +202,9 @@ test("execute-task prompt still contains template variables for context", () => 
 
 // ─── Prompt migration: complete-slice → gsd_complete_slice ────────────
 
-test("complete-slice prompt references gsd_complete_slice tool", () => {
+test("complete-slice prompt references gsd_slice_complete tool", () => {
   const prompt = readPrompt("complete-slice");
-  assert.match(prompt, /gsd_complete_slice/);
+  assert.match(prompt, /gsd_slice_complete/);
 });
 
 test("complete-slice prompt does not instruct LLM to toggle checkboxes manually", () => {
@@ -216,7 +216,7 @@ test("complete-slice prompt instructs writing summary and UAT files before tool 
   const prompt = readPrompt("complete-slice");
   assert.match(prompt, /\{\{sliceSummaryPath\}\}/);
   assert.match(prompt, /\{\{sliceUatPath\}\}/);
-  assert.match(prompt, /gsd_complete_slice/);
+  assert.match(prompt, /gsd_slice_complete/);
   assert.match(prompt, /DB-backed tool is the canonical write path/i);
   assert.match(prompt, /Do \*\*not\*\* manually write `?\{\{sliceSummaryPath\}\}`?/i);
   assert.match(prompt, /Do \*\*not\*\* manually write `?\{\{sliceUatPath\}\}`?/i);

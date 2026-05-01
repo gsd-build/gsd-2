@@ -349,9 +349,9 @@ export function getRequiredWorkflowToolsForAutoUnit(unitType: string): string[] 
     case "execute-task":
     case "execute-task-simple":
     case "reactive-execute":
-      return ["gsd_complete_task"];
+      return ["gsd_task_complete"];
     case "complete-slice":
-      return ["gsd_complete_slice"];
+      return ["gsd_slice_complete"];
     case "replan-slice":
       return ["gsd_replan_slice"];
     case "reassess-roadmap":
