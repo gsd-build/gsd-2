@@ -158,10 +158,17 @@ describe("ModelRegistry discovery — OpenAI-compatible custom providers", () =>
 			"utf-8",
 		);
 
+		const minimaxDiscoveryUrl = "https://api.minimax.example/v1/models";
 		const prevFetch = globalThis.fetch;
 		let requestedUrl = "";
 		globalThis.fetch = (async (input: string | URL | Request) => {
 			requestedUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+			if (!requestedUrl.startsWith("https://api.minimax.example")) {
+				return new Response(JSON.stringify({ data: [], models: [] }), {
+					status: 200,
+					headers: { "content-type": "application/json" },
+				});
+			}
 			return new Response(
 				JSON.stringify({
 					data: [
@@ -191,7 +198,7 @@ describe("ModelRegistry discovery — OpenAI-compatible custom providers", () =>
 			const discovery = results.find((r) => r.provider === providerName);
 			assert.ok(discovery, "discovery result should include custom provider");
 			assert.equal(discovery?.error, undefined, "custom provider discovery should succeed");
-			assert.equal(requestedUrl, "https://api.minimax.example/v1/models");
+			assert.equal(requestedUrl, minimaxDiscoveryUrl);
 
 			const discovered = registry
 				.getAllWithDiscovered()
@@ -203,6 +210,21 @@ describe("ModelRegistry discovery — OpenAI-compatible custom providers", () =>
 			assert.equal(discovered?.maxTokens, 32768);
 			assert.equal(discovered?.reasoning, true);
 			assert.deepEqual(discovered?.input, ["text", "image"]);
+
+			const modelKeys = (models: { provider: string; id: string }[]) =>
+				[...new Set(models.map((m) => `${m.provider}/${m.id}`))].sort();
+
+			const availMerged = await registry.getAvailableWithDiscovered();
+			assert.ok(
+				availMerged.some((m) => m.provider === providerName && m.id === "MiniMax-M2.7-highspeed"),
+				"getAvailableWithDiscovered should expose discovered IDs for prefs-style pickers",
+			);
+
+			await registry.discoverModels();
+			const baseline = registry.getAllWithDiscovered().filter((m) => registry.isProviderRequestReady(m.provider));
+			const availAgain = await registry.getAvailableWithDiscovered();
+
+			assert.deepEqual(modelKeys(availAgain), modelKeys(baseline));
 		} finally {
 			globalThis.fetch = prevFetch;
 		}

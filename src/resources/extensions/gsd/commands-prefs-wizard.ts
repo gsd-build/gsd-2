@@ -586,7 +586,7 @@ async function configureModels(ctx: ExtensionCommandContext, prefs: Record<strin
   ] as const;
   const models: Record<string, unknown> = (prefs.models as Record<string, unknown>) ?? {};
 
-  const availableModels = ctx.modelRegistry.getAvailable();
+  const availableModels = await ctx.modelRegistry.getAvailableWithDiscovered();
   if (availableModels.length > 0) {
     // Group models by provider, sorted alphabetically
     const byProvider = new Map<string, typeof availableModels>();

@@ -555,6 +555,18 @@ export class ModelRegistry {
 	}
 
 	/**
+	 * Like {@link getAvailable} but runs {@link discoverModels} first so cached/live
+	 * discovery is merged in. Cache-fresh providers skip network; otherwise may await
+	 * key resolution or HTTP fetch. Drops models whose provider is not
+	 * {@link isProviderRequestReady} (same gate as {@link getAvailable}) and honours
+	 * {@link setDisabledModelProviders}.
+	 */
+	async getAvailableWithDiscovered(): Promise<Model<Api>[]> {
+		await this.discoverModels();
+		return this.getAllWithDiscovered().filter((m) => this.isProviderRequestReady(m.provider));
+	}
+
+	/**
 	 * Set provider IDs that should be excluded from model selection/routing.
 	 * This does not affect direct tool auth flows that resolve provider keys.
 	 */
