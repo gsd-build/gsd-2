@@ -295,7 +295,13 @@ function commitMatchesMilestone(
     if (files.some((file) => isMilestoneArtifactPath(file, milestoneId))) return true;
     if (commitMessageMentionsMilestone(message, milestoneId)) return true;
     if (activeMilestone === milestoneId) return true;
-    if (activeMilestone === null && isDbAvailable() && getSlice(milestoneId, shortTrailer[1]!) != null) return true;
+
+    if (isDbAvailable()) {
+      const sliceId = shortTrailer[1]!;
+      if (getSlice(milestoneId, sliceId) == null) return false;
+      if (activeMilestone === null) return true;
+      return getSlice(activeMilestone, sliceId) == null;
+    }
   }
 
   return false;
