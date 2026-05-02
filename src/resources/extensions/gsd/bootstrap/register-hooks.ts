@@ -571,10 +571,12 @@ export function registerHooks(
     const currentPendingGate = getPendingGate();
     if (currentPendingGate) {
       if (details?.cancelled || !details?.response) {
-        // Gate stays pending. The only path that mechanically clears it is
-        // another ask_user_questions call whose response exactly matches the
-        // first option label — plain-chat confirmation does NOT clear the
-        // gate, so the instruction must not send the agent down that dead end.
+        // Gate stays pending. Direct the agent to the most reliable recovery
+        // path — re-calling ask_user_questions with the same gate id — without
+        // misrepresenting the plain-text path. The plain-text path also works
+        // (isExplicitApprovalResponse on the next before_agent_start clears
+        // the gate when the user replies with an approval keyword), but the
+        // structured re-ask is more deterministic and gives the user a clear UI.
         return {
           content: [{
             type: "text" as const,
@@ -584,7 +586,6 @@ export function registerHooks(
               "Do not infer approval from earlier or prior messages.",
               "Do not proceed, write files, save artifacts, or call other tools.",
               `Re-call ask_user_questions with the same gate question id ("${currentPendingGate}") and wait for the user's response.`,
-              "Plain-text confirmation in chat will NOT clear this gate — only an ask_user_questions response that exactly matches the first (Recommended) option label clears it.",
             ].join(" "),
           }],
         };

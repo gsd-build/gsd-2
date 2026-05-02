@@ -232,22 +232,20 @@ test("register-hooks returns hard blocker when depth question is cancelled", asy
     /Do not infer approval from earlier or prior messages/,
   );
   // Regression for milestone-hang: the cancelled-gate instruction must direct
-  // the agent back to ask_user_questions (the only path that clears the gate),
-  // not to plain-chat confirmation (which mechanically cannot clear it).
+  // the agent toward the most reliable recovery path — re-calling
+  // ask_user_questions with the same gate id. The plain-text path also clears
+  // the gate via isExplicitApprovalResponse on the next before_agent_start,
+  // but the structured re-ask is more deterministic, so the message points
+  // there and avoids the prior dead-end "ask in plain chat, then stop" wording.
   assert.match(
     patch?.content?.[0]?.text ?? "",
     /Re-call ask_user_questions with the same gate question id/,
     "must instruct the agent to re-ask via ask_user_questions",
   );
-  assert.match(
-    patch?.content?.[0]?.text ?? "",
-    /Plain-text confirmation in chat will NOT clear this gate/,
-    "must warn that plain-text confirmation cannot clear the gate",
-  );
   assert.doesNotMatch(
     patch?.content?.[0]?.text ?? "",
-    /confirm in plain chat/,
-    "must not direct the agent to ask in plain chat — that path cannot clear the gate",
+    /confirm in plain chat, then stop/,
+    "must not direct the agent down the prior dead-end plain-chat-and-stop path",
   );
 });
 
