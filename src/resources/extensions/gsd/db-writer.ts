@@ -18,7 +18,7 @@ import { logWarning, logError } from './workflow-logger.js';
 import { invalidateStateCache } from './state.js';
 import { clearPathCache } from './paths.js';
 import { clearParseCache } from './files.js';
-import type { MilestoneScope } from './workspace.js';
+import type { MilestoneScope, GsdWorkspace } from './workspace.js';
 import { createWorkspace, scopeMilestone } from './workspace.js';
 
 // ─── Freeform Detection ───────────────────────────────────────────────────
@@ -717,6 +717,69 @@ export interface SaveArtifactOpts {
 }
 
 /**
+ * Save a root-level artifact (no milestone) to DB and write to disk,
+ * routing path construction through workspace.contract.projectGsd directly.
+ * Use this instead of saveArtifactToDbByScope when milestone_id is absent.
+ */
+export async function saveArtifactToDbForWorkspace(
+  workspace: GsdWorkspace,
+  opts: SaveArtifactOpts,
+): Promise<void> {
+  try {
+    const db = await import('./gsd-db.js');
+
+    const gsdDir = workspace.contract.projectGsd;
+    const fullPath = resolve(gsdDir, opts.path);
+
+    if (!fullPath.startsWith(gsdDir)) {
+      throw new GSDError(GSD_IO_ERROR, `saveArtifactToDbForWorkspace: path escapes .gsd/ directory: ${opts.path}`);
+    }
+
+    let contentToPersist = opts.content;
+    if (opts.artifact_type === 'REQUIREMENTS' && opts.path === 'REQUIREMENTS.md') {
+      const activeRequirements = db.getActiveRequirements();
+      if (activeRequirements.length === 0) {
+        throw new GSDError(GSD_STALE_STATE, 'saveArtifactToDbForWorkspace: REQUIREMENTS final save requires active DB-backed requirements');
+      }
+      contentToPersist = generateRequirementsMd(activeRequirements);
+    }
+
+    let skipDiskWrite = false;
+    if (!isRootCanonicalArtifact(opts) && existsSync(fullPath)) {
+      const existingSize = statSync(fullPath).size;
+      const newSize = Buffer.byteLength(contentToPersist, 'utf-8');
+      if (existingSize > 0 && newSize < existingSize * 0.5) {
+        logWarning('projection', `new content (${newSize}B) is <50% of existing projection (${existingSize}B), preserving disk file while DB remains authoritative`, { fn: 'saveArtifactToDbForWorkspace', path: opts.path });
+        skipDiskWrite = true;
+      }
+    }
+
+    db.insertArtifact({
+      path: opts.path,
+      artifact_type: opts.artifact_type,
+      milestone_id: null,
+      slice_id: null,
+      task_id: null,
+      full_content: contentToPersist,
+    });
+
+    if (!skipDiskWrite) {
+      try {
+        await saveFile(fullPath, contentToPersist);
+      } catch (diskErr) {
+        logWarning('projection', 'artifact projection write failed; DB artifact remains committed', { fn: 'saveArtifactToDbForWorkspace', path: opts.path, error: String((diskErr as Error).message) });
+      }
+    }
+    invalidateStateCache();
+    clearPathCache();
+    clearParseCache();
+  } catch (err) {
+    logError('manifest', 'saveArtifactToDbForWorkspace failed', { fn: 'saveArtifactToDbForWorkspace', error: String((err as Error).message) });
+    throw err;
+  }
+}
+
+/**
  * Save an artifact to DB and write the corresponding markdown file to disk,
  * routing all path construction through the workspace contract.
  *
@@ -727,6 +790,12 @@ export async function saveArtifactToDbByScope(
   scope: MilestoneScope,
   opts: SaveArtifactOpts,
 ): Promise<void> {
+  // Guard: an empty milestoneId produces malformed paths (milestoneDir = join(gsd, "milestones", "")).
+  // Callers that have no milestone should use saveArtifactToDbForWorkspace instead.
+  if (!scope.milestoneId) {
+    throw new GSDError(GSD_IO_ERROR, `saveArtifactToDbByScope: milestoneId is empty — use saveArtifactToDbForWorkspace for root artifacts`);
+  }
+
   try {
     const db = await import('./gsd-db.js');
 
@@ -805,8 +874,8 @@ export async function saveArtifactToDb(
 ): Promise<void> {
   const workspace = createWorkspace(basePath);
   const milestoneId = opts.milestone_id;
-  const scope = milestoneId
-    ? scopeMilestone(workspace, milestoneId)
-    : scopeMilestone(workspace, '');
-  return saveArtifactToDbByScope(scope, opts);
+  if (milestoneId) {
+    return saveArtifactToDbByScope(scopeMilestone(workspace, milestoneId), opts);
+  }
+  return saveArtifactToDbForWorkspace(workspace, opts);
 }
