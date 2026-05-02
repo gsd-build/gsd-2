@@ -9,7 +9,7 @@
 
 import type { ExtensionContext } from "@gsd/pi-coding-agent";
 import { parseUnitId } from "./unit-id.js";
-import { MILESTONE_ID_RE } from "./milestone-ids.js";
+import { MILESTONE_ID_RE, MILESTONE_ID_BODY } from "./milestone-ids.js";
 import { appendEvent } from "./workflow-events.js";
 import { atomicWriteSync } from "./atomic-write.js";
 import { clearParseCache } from "./files.js";
@@ -310,7 +310,6 @@ function commitMatchesMilestone(
   return false;
 }
 
-const MILESTONE_ID_BODY = MILESTONE_ID_RE.source.replace(/^\^|\$$/g, "");
 const LONG_TRAILER_RE = new RegExp(
   `^GSD-(?:Task|Unit):\\s*(${MILESTONE_ID_BODY})(?:$|[\\s/])`,
   "m",
