@@ -231,6 +231,121 @@ test("register-hooks returns hard blocker when depth question is cancelled", asy
     patch?.content?.[0]?.text ?? "",
     /Do not infer approval from earlier or prior messages/,
   );
+  // Regression for milestone-hang: the cancelled-gate instruction must direct
+  // the agent back to ask_user_questions (the only path that clears the gate),
+  // not to plain-chat confirmation (which mechanically cannot clear it).
+  assert.match(
+    patch?.content?.[0]?.text ?? "",
+    /Re-call ask_user_questions with the same gate question id/,
+    "must instruct the agent to re-ask via ask_user_questions",
+  );
+  assert.match(
+    patch?.content?.[0]?.text ?? "",
+    /Plain-text confirmation in chat will NOT clear this gate/,
+    "must warn that plain-text confirmation cannot clear the gate",
+  );
+  assert.doesNotMatch(
+    patch?.content?.[0]?.text ?? "",
+    /confirm in plain chat/,
+    "must not direct the agent to ask in plain chat — that path cannot clear the gate",
+  );
+});
+
+test("register-hooks recovers from a cancelled depth question via re-asked ask_user_questions (milestone-hang regression)", async (t) => {
+  const dir = makeTempDir("recovery");
+  const originalCwd = process.cwd();
+  process.chdir(dir);
+  resetWriteGateState(dir);
+
+  t.after(() => {
+    try {
+      resetWriteGateState(dir);
+    } finally {
+      process.chdir(originalCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  const handlers = new Map<string, Array<(event: any, ctx?: any) => Promise<any> | any>>();
+  const pi = {
+    on(event: string, handler: (event: any, ctx?: any) => Promise<any> | any) {
+      const existing = handlers.get(event) ?? [];
+      existing.push(handler);
+      handlers.set(event, existing);
+    },
+  } as any;
+
+  registerHooks(pi, []);
+
+  const questionId = "depth_verification_M001_confirm";
+  const questions = [
+    {
+      id: questionId,
+      question: "Did I capture the project correctly?",
+      options: [
+        { label: "Yes, you got it (Recommended)" },
+        { label: "Not quite — let me clarify" },
+      ],
+    },
+  ];
+
+  // 1. Initial ask sets the gate.
+  for (const handler of handlers.get("tool_call") ?? []) {
+    await handler({ toolName: "ask_user_questions", input: { questions } });
+  }
+  assert.equal(getPendingGate(), questionId, "initial ask must set the gate");
+
+  // 2. User cancels (simulates the trap from the screenshot: question never
+  //    answered through the structured channel). Gate must stay pending.
+  for (const handler of handlers.get("tool_result") ?? []) {
+    await handler({
+      toolName: "ask_user_questions",
+      input: { questions },
+      details: { cancelled: true, response: null },
+    });
+  }
+  assert.equal(getPendingGate(), questionId, "cancelled response must leave gate pending");
+
+  // 3. A non-safe tool call (the same path that hung in the screenshot) must
+  //    be blocked while the gate is pending. This is what the agent would hit
+  //    if it followed the old "ask in plain chat" instruction and then tried
+  //    to proceed with planning.
+  let planBlock: any;
+  for (const handler of handlers.get("tool_call") ?? []) {
+    const result = await handler({
+      toolName: "mcp__gsd-workflow__gsd_plan_milestone",
+      input: { milestoneId: "M001" },
+    });
+    if (result?.block) planBlock = result;
+  }
+  assert.equal(planBlock?.block, true, "gsd_plan_milestone must remain blocked while gate is pending");
+
+  // 4. Recovery path: re-call ask_user_questions with the same gate id and a
+  //    confirming response. This is the path the new instruction directs the
+  //    agent toward, and it must clear the gate.
+  for (const handler of handlers.get("tool_call") ?? []) {
+    await handler({ toolName: "ask_user_questions", input: { questions } });
+  }
+  for (const handler of handlers.get("tool_result") ?? []) {
+    await handler({
+      toolName: "ask_user_questions",
+      input: { questions },
+      details: {
+        response: {
+          answers: {
+            [questionId]: { selected: "Yes, you got it (Recommended)" },
+          },
+        },
+      },
+    });
+  }
+
+  assert.equal(getPendingGate(), null, "confirming re-ask must clear the gate");
+  assert.equal(
+    shouldBlockContextArtifactSave("CONTEXT", "M001").block,
+    false,
+    "context save must unlock after recovery",
+  );
 });
 
 test("register-hooks gates MCP ask_user_questions cancellation before requirement saves", async (t) => {

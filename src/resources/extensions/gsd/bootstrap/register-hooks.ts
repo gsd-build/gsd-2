@@ -571,8 +571,10 @@ export function registerHooks(
     const currentPendingGate = getPendingGate();
     if (currentPendingGate) {
       if (details?.cancelled || !details?.response) {
-        // Gate stays pending. Return a hard instruction as the tool result so
-        // the model cannot reinterpret a cancelled prompt as prior approval.
+        // Gate stays pending. The only path that mechanically clears it is
+        // another ask_user_questions call whose response exactly matches the
+        // first option label — plain-chat confirmation does NOT clear the
+        // gate, so the instruction must not send the agent down that dead end.
         return {
           content: [{
             type: "text" as const,
@@ -580,8 +582,9 @@ export function registerHooks(
               `HARD BLOCK: approval gate "${currentPendingGate}" is still pending.`,
               "No user response was received for the confirmation question.",
               "Do not infer approval from earlier or prior messages.",
-              "Do not proceed, write files, save artifacts, or call more tools.",
-              "Ask the user to confirm in plain chat, then stop and wait for their next message.",
+              "Do not proceed, write files, save artifacts, or call other tools.",
+              `Re-call ask_user_questions with the same gate question id ("${currentPendingGate}") and wait for the user's response.`,
+              "Plain-text confirmation in chat will NOT clear this gate — only an ask_user_questions response that exactly matches the first (Recommended) option label clears it.",
             ].join(" "),
           }],
         };
