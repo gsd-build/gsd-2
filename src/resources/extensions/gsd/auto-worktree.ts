@@ -1420,82 +1420,87 @@ export function teardownAutoWorktree(
   const { preserveBranch = false } = opts;
   const previousCwd = process.cwd();
 
+  // Wrap the entire teardown body in a single try/finally so activeWorkspace
+  // is ALWAYS cleared — even if process.chdir throws (e.g. originalBasePath
+  // was deleted before teardown ran). Previously the finally only covered
+  // removeWorktree, leaving the registry stale on a chdir failure (H3 fix).
   try {
-    process.chdir(originalBasePath);
-  } catch (err) {
-    throw new GSDError(
-      GSD_IO_ERROR,
-      `Failed to chdir back to ${originalBasePath} during teardown: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
-  // Mirror cleanup steps from mergeMilestoneToMain abort path:
-
-  // 1. Remove transient state files (STATE.md, auto.lock, {MID}-META.json).
-  //    Non-fatal — must not block teardown.
-  try {
-    clearProjectRootStateFiles(originalBasePath, milestoneId);
-  } catch (err) {
-    logWarning("worktree", `clearProjectRootStateFiles failed during teardown: ${err instanceof Error ? err.message : String(err)}`);
-  }
-
-  // 2. Reconcile worktree-local gsd.db into project root DB if both exist.
-  //    Non-fatal — handles legacy worktrees that have a local copy.
-  if (isDbAvailable()) {
     try {
-      const contract = resolveGsdPathContract(previousCwd, originalBasePath);
-      const worktreeDbPath = join(contract.worktreeGsd ?? join(previousCwd, ".gsd"), "gsd.db");
-      const mainDbPath = contract.projectDb;
-      if (existsSync(worktreeDbPath) && !isSamePath(worktreeDbPath, mainDbPath)) {
-        reconcileWorktreeDb(mainDbPath, worktreeDbPath);
-      }
+      process.chdir(originalBasePath);
     } catch (err) {
-      /* non-fatal */
-      logError("worktree", `DB reconciliation failed during teardown: ${err instanceof Error ? err.message : String(err)}`);
+      throw new GSDError(
+        GSD_IO_ERROR,
+        `Failed to chdir back to ${originalBasePath} during teardown: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
-  }
 
-  nudgeGitBranchCache(previousCwd);
+    // Mirror cleanup steps from mergeMilestoneToMain abort path:
 
-  // 3. Clear module state in a finally block so activeWorkspace is ALWAYS
-  //    reset to null — even if removeWorktree throws (e.g. Windows git
-  //    failure). A stale activeWorkspace causes getActiveAutoWorktreeContext()
-  //    to return wrong data for subsequent operations.
-  try {
+    // 1. Remove transient state files (STATE.md, auto.lock, {MID}-META.json).
+    //    Non-fatal — must not block teardown.
+    try {
+      clearProjectRootStateFiles(originalBasePath, milestoneId);
+    } catch (err) {
+      logWarning("worktree", `clearProjectRootStateFiles failed during teardown: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // 2. Reconcile worktree-local gsd.db into project root DB if both exist.
+    //    Non-fatal — handles legacy worktrees that have a local copy.
+    if (isDbAvailable()) {
+      try {
+        const contract = resolveGsdPathContract(previousCwd, originalBasePath);
+        const worktreeDbPath = join(contract.worktreeGsd ?? join(previousCwd, ".gsd"), "gsd.db");
+        const mainDbPath = contract.projectDb;
+        if (existsSync(worktreeDbPath) && !isSamePath(worktreeDbPath, mainDbPath)) {
+          reconcileWorktreeDb(mainDbPath, worktreeDbPath);
+        }
+      } catch (err) {
+        /* non-fatal */
+        logError("worktree", `DB reconciliation failed during teardown: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    nudgeGitBranchCache(previousCwd);
+
+    // 3. Remove the worktree. Errors propagate naturally — the outer finally
+    //    ensures activeWorkspace is cleared regardless.
     removeWorktree(originalBasePath, milestoneId, {
       branch,
       deleteBranch: !preserveBranch,
     });
-  } finally {
-    setActiveWorkspace(null);
-  }
 
-  // Verify cleanup succeeded — warn if the worktree directory is still on disk.
-  // On Windows, bash-based cleanup can silently fail when paths contain
-  // backslashes (#1436), leaving ~1 GB+ orphaned directories.
-  const wtDir = worktreePath(originalBasePath, milestoneId);
-  if (existsSync(wtDir)) {
-    logWarning(
-      "reconcile",
-      `Worktree directory still exists after teardown: ${wtDir}. ` +
-        `This is likely an orphaned directory consuming disk space. ` +
-        `Remove it manually with: rm -rf "${wtDir.replaceAll("\\", "/")}"`,
-      { worktree: milestoneId },
-    );
-    // Attempt a direct filesystem removal as a fallback — but ONLY if the
-    // path is safely inside .gsd/worktrees/ to prevent #2365 data loss.
-    if (isInsideWorktreesDir(originalBasePath, wtDir)) {
-      try {
-        rmSync(wtDir, { recursive: true, force: true });
-      } catch (err) {
-        // Non-fatal — the warning above tells the user how to clean up
-        logWarning("worktree", `worktree directory removal failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    } else {
-      console.error(
-        `[GSD] REFUSING fallback rmSync — path is outside .gsd/worktrees/: ${wtDir}`,
+    // Verify cleanup succeeded — warn if the worktree directory is still on disk.
+    // On Windows, bash-based cleanup can silently fail when paths contain
+    // backslashes (#1436), leaving ~1 GB+ orphaned directories.
+    const wtDir = worktreePath(originalBasePath, milestoneId);
+    if (existsSync(wtDir)) {
+      logWarning(
+        "reconcile",
+        `Worktree directory still exists after teardown: ${wtDir}. ` +
+          `This is likely an orphaned directory consuming disk space. ` +
+          `Remove it manually with: rm -rf "${wtDir.replaceAll("\\", "/")}"`,
+        { worktree: milestoneId },
       );
+      // Attempt a direct filesystem removal as a fallback — but ONLY if the
+      // path is safely inside .gsd/worktrees/ to prevent #2365 data loss.
+      if (isInsideWorktreesDir(originalBasePath, wtDir)) {
+        try {
+          rmSync(wtDir, { recursive: true, force: true });
+        } catch (err) {
+          // Non-fatal — the warning above tells the user how to clean up
+          logWarning("worktree", `worktree directory removal failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      } else {
+        console.error(
+          `[GSD] REFUSING fallback rmSync — path is outside .gsd/worktrees/: ${wtDir}`,
+        );
+      }
     }
+  } finally {
+    // Clear module state unconditionally — regardless of which step above
+    // failed. A stale activeWorkspace causes getActiveAutoWorktreeContext()
+    // to return wrong data for subsequent operations.
+    setActiveWorkspace(null);
   }
 }
 
