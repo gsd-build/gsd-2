@@ -9,12 +9,12 @@
 
 import type { ExtensionContext } from "@gsd/pi-coding-agent";
 import { parseUnitId } from "./unit-id.js";
-import { MILESTONE_ID_RE } from "./milestone-ids.js";
+import { MILESTONE_ID_RE, MILESTONE_ID_BODY } from "./milestone-ids.js";
 import { appendEvent } from "./workflow-events.js";
 import { atomicWriteSync } from "./atomic-write.js";
 import { clearParseCache } from "./files.js";
 import { parseRoadmap as parseLegacyRoadmap, parsePlan as parseLegacyPlan } from "./parsers-legacy.js";
-import { isDbAvailable, getTask, getSlice, getSliceTasks, getPendingGates, updateTaskStatus, updateSliceStatus, insertSlice, getMilestone } from "./gsd-db.js";
+import { isDbAvailable, getTask, getSlice, getSliceTasks, getPendingGates, updateTaskStatus, updateSliceStatus, insertSlice, getMilestone, listMilestonesOwningSlice } from "./gsd-db.js";
 import { isValidationTerminal } from "./state.js";
 import { getErrorMessage } from "./error-utils.js";
 import { logWarning, logError } from "./workflow-logger.js";
@@ -257,23 +257,6 @@ function getChangedFilesFromMilestoneTaggedCommits(
   basePath: string,
   milestoneId: string,
 ): { ok: boolean; matched: boolean; files: string[] } {
-  // Primary: path-scoped log against .gsd/milestones/<id>. Fast and unbounded
-  // by depth when .gsd/ is tracked in git.
-  const scoped = scanGsdTaggedCommits(basePath, milestoneId, [
-    "log", "--format=%H%x1f%B%x1e", "HEAD", "--", `.gsd/milestones/${milestoneId}`,
-  ]);
-  if (!scoped.ok) return scoped;
-  if (scoped.matched) return scoped;
-
-  // Fallback (#5033): when .gsd/ is gitignored / external / untracked, the
-  // path-scoped scan matches no commits even though GSD-tagged commits
-  // referencing the milestone exist on the integration branch. Re-scan all
-  // of HEAD's history and rely on commitMatchesMilestone to bind by
-  // explicit milestone mention in the message body.
-  //
-  // Intentionally unbounded — symmetric with the primary scan, and avoids
-  // reintroducing the rolling-depth failure class removed in #4699 where
-  // milestone evidence aged out behind unrelated activity.
   return scanGsdTaggedCommits(basePath, milestoneId, [
     "log", "--format=%H%x1f%B%x1e", "HEAD",
   ]);
@@ -300,15 +283,20 @@ function scanGsdTaggedCommits(
         const hash = record.slice(0, sep).trim();
         const message = record.slice(sep + 1);
         return [{ hash, message }];
-      });
+      })
+      .reverse();
 
     const files = new Set<string>();
     let matched = false;
+    let activeMilestone: string | null = null;
     for (const { hash, message } of records) {
       if (!commitMessageHasGsdTrailer(message)) continue;
 
+      const longTrailerMid = extractLongTrailerMilestone(message);
+      if (longTrailerMid) activeMilestone = longTrailerMid;
+
       const commitFiles = getChangedFilesForCommit(basePath, hash);
-      if (!commitMatchesMilestone(message, milestoneId, commitFiles)) continue;
+      if (!commitMatchesMilestone(message, milestoneId, commitFiles, activeMilestone)) continue;
 
       matched = true;
       for (const file of commitFiles) {
@@ -336,20 +324,42 @@ function commitMessageHasGsdTrailer(message: string): boolean {
   return /^GSD-(?:Task|Unit):\s*\S+/m.test(message);
 }
 
-function commitMatchesMilestone(message: string, milestoneId: string, files: readonly string[]): boolean {
+function commitMatchesMilestone(
+  message: string,
+  milestoneId: string,
+  files: readonly string[],
+  activeMilestone: string | null,
+): boolean {
   if (commitTrailerStartsWithMilestone(message, milestoneId)) return true;
 
-  // Meaningful execute-task commits currently store task scope as Sxx/Tyy
-  // rather than Mxx/Sxx/Tyy. Bind those commits back to the milestone when
-  // either the commit touched this milestone's artifacts, or — for projects
-  // where .gsd/ is gitignored/external (#5033) — the message explicitly
-  // names the milestone.
-  if (/^GSD-Task:\s*S[^/\s]+\/T\S+/m.test(message)) {
+  const shortTrailer = message.match(/^GSD-Task:\s*(S[^/\s]+)\/T\S+/m);
+  if (shortTrailer) {
     if (files.some((file) => isMilestoneArtifactPath(file, milestoneId))) return true;
     if (commitMessageMentionsMilestone(message, milestoneId)) return true;
+    if (activeMilestone === milestoneId) return true;
+
+    if (isDbAvailable()) {
+      const sliceId = shortTrailer[1]!;
+      if (getSlice(milestoneId, sliceId) == null) return false;
+      if (activeMilestone === null) {
+        const owners = listMilestonesOwningSlice(sliceId);
+        return owners.length === 1 && owners[0] === milestoneId;
+      }
+      return getSlice(activeMilestone, sliceId) == null;
+    }
   }
 
   return false;
+}
+
+const LONG_TRAILER_RE = new RegExp(
+  `^GSD-(?:Task|Unit):\\s*(${MILESTONE_ID_BODY})(?:$|[\\s/])`,
+  "m",
+);
+
+function extractLongTrailerMilestone(message: string): string | null {
+  const match = message.match(LONG_TRAILER_RE);
+  return match ? match[1]! : null;
 }
 
 function commitMessageMentionsMilestone(message: string, milestoneId: string): boolean {

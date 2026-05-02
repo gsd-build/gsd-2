@@ -14,8 +14,11 @@ import { getErrorMessage } from "./error-utils.js";
 
 // ─── Regex ──────────────────────────────────────────────────────────────────
 
+/** Body of a milestone ID — `M001` or `M001-abc123`, without anchors. */
+export const MILESTONE_ID_BODY = "M\\d{3}(?:-[a-z0-9]{6})?";
+
 /** Matches both classic `M001` and unique `M001-abc123` formats (anchored). */
-export const MILESTONE_ID_RE = /^M\d{3}(?:-[a-z0-9]{6})?$/;
+export const MILESTONE_ID_RE = new RegExp(`^${MILESTONE_ID_BODY}$`);
 
 // ─── Parsing & Extraction ───────────────────────────────────────────────────
 
