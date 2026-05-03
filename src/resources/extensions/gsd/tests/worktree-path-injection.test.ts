@@ -28,7 +28,8 @@ const {
   buildRewriteDocsPrompt,
 } = await import("../auto-prompts.ts");
 const { invalidateStateCache } = await import("../state.ts");
-const { resolveAgentEnd, runUnit, _resetPendingResolve } = await import("../auto-loop.ts");
+const { resolveAgentEnd, _resetPendingResolve } = await import("../auto/resolve.ts");
+const { runUnit } = await import("../auto/run-unit.ts");
 
 function writeMilestone(base: string, mid = "M001", title = "Worktree Path Injection"): void {
   const milestoneDir = join(base, ".gsd", "milestones", mid);
@@ -227,6 +228,9 @@ test("worktree-aware prompt builders include the explicit working directory", as
       [{ change: "Refresh docs", timestamp: "2026-04-27T00:00:00.000Z", appliedAt: "test" }] as any,
     ),
   ]);
+
+  assert.ok(prompts[0].includes("## Context Mode"), "discuss-milestone should include standalone Context Mode guidance");
+  assert.ok(prompts[0].includes("interview lane"), "discuss-milestone should render the interview lane");
 
   for (const prompt of prompts) {
     assert.match(prompt, /working directory/i);

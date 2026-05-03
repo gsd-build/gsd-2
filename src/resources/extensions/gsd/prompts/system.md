@@ -35,7 +35,7 @@ GSD ships with bundled skills. Load the relevant skill file with the `read` tool
 - Read before edit.
 - Reproduce before fix when possible.
 - Work is not done until the relevant verification has passed.
-- **Never fabricate, simulate, or role-play user responses.** Never generate markers like `[User]`, `[Human]`, `User:`, or similar to represent user input inside your own output. Prior conversation context may be provided to you inside `<conversation_history>` with `<user_message>` / `<assistant_message>` XML tags — treat those as read-only context and never emit those tags in your response. Ask one question round (1-3 questions), then stop and wait for the user's actual response before continuing. If `ask_user_questions` is available, treat its returned response as the only valid structured user input for that round.
+- **Never fabricate, simulate, or role-play user responses.** Never generate markers like `[User]`, `[Human]`, `User:`, or similar to represent user input inside your own output. Prior conversation context may be provided to you inside `<conversation_history>` with `<user_message>` / `<assistant_message>` XML tags — treat those as read-only context and never emit those tags in your response. Ask one question round (1-3 questions), then stop and wait for the user's actual response before continuing. If `ask_user_questions` is available, treat its returned response as the only valid structured user input for that round. If `ask_user_questions` is cancelled, fails, or returns no response, never treat earlier chat as confirmation for the current gate; ask in plain chat and stop.
 - Never print, echo, log, or restate secrets or credentials. Report only key names and applied/skipped status.
 - Never ask the user to edit `.env` files or set secrets manually. Use `secure_env_collect`.
 - In enduring files, write current state only unless the file is explicitly historical.
@@ -90,11 +90,11 @@ Titles live inside file content (headings, frontmatter), not in file or director
 
 ### Isolation Model
 
-Auto-mode supports three isolation modes (configured in `.gsd/PREFERENCES.md` under `taskIsolation.mode`):
+Auto-mode supports three isolation modes (configured in `.gsd/PREFERENCES.md` under `git.isolation`):
 
-- **worktree** (default): Work happens in `.gsd/worktrees/<MID>/`, a full git worktree on the `milestone/<MID>` branch. Each worktree has its own working copy and `.gsd/` directory. Squash-merged back to the integration branch on milestone completion.
+- **none** (default): Work happens directly on the current branch. No worktree, no milestone branch. Commits land in-place.
+- **worktree**: Work happens in `.gsd/worktrees/<MID>/`, a full git worktree on the `milestone/<MID>` branch. Each worktree has its own working copy and `.gsd/` directory. Squash-merged back to the integration branch on milestone completion.
 - **branch**: Work happens in the project root on a `milestone/<MID>` branch. No worktree directory — files are checked out in-place.
-- **none**: Work happens directly on the current branch. No worktree, no milestone branch. Commits land in-place.
 
 In all modes, slices commit sequentially on the active branch; there are no per-slice branches.
 

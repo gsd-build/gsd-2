@@ -8,6 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { parseSummary } from '../files.ts';
 import { deriveState } from '../state.ts';
 
+// This suite exercises the explicit legacy markdown derivation path.
+process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK = '1';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const worktreePromptsDir = join(__dirname, '..', 'prompts');
 

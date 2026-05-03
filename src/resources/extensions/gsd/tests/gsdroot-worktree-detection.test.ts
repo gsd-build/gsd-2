@@ -1,9 +1,10 @@
 /**
  * gsdroot-worktree-detection.test.ts — Regression test for #2594.
  *
- * gsdRoot() must return the worktree's own .gsd directory when the basePath
- * is inside a .gsd/worktrees/<name>/ structure, not walk up to the project
- * root's .gsd via the git-root probe.
+ * gsdRoot() must return the canonical project .gsd directory when basePath
+ * is inside a .gsd/worktrees/<name>/ structure. Worktree-local .gsd folders
+ * are legacy projection roots only; runtime state is DB-authoritative at the
+ * project .gsd.
  *
  * The bug: when a git worktree lives at /project/.gsd/worktrees/M008/,
  * probeGsdRoot() runs `git rev-parse --show-toplevel` which can return the
@@ -20,7 +21,7 @@ import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 
-import { gsdRoot, _clearGsdRootCache } from "../paths.ts";
+import { gsdRoot, resolveGsdPathContract, _clearGsdRootCache } from "../paths.ts";
 
 describe("gsdRoot() worktree detection (#2594)", () => {
   let projectRoot: string;
@@ -61,7 +62,7 @@ describe("gsdRoot() worktree detection (#2594)", () => {
     rmSync(projectRoot, { recursive: true, force: true });
   });
 
-  test("returns worktree .gsd when basePath is a worktree with its own .gsd (fast path)", () => {
+  test("returns project .gsd when basePath is a worktree with its own .gsd", () => {
     // Simulates a worktree that already had copyPlanningArtifacts() run,
     // so it has its own .gsd/ directory.
     const worktreeBase = join(projectGsd, "worktrees", "M008");
@@ -71,41 +72,26 @@ describe("gsdRoot() worktree detection (#2594)", () => {
     const result = gsdRoot(worktreeBase);
     assert.equal(
       result,
-      worktreeGsd,
-      `Expected worktree .gsd (${worktreeGsd}), got ${result}. ` +
-        "gsdRoot() should use the fast path for an existing worktree .gsd.",
+      projectGsd,
+      `Expected canonical project .gsd (${projectGsd}), got ${result}.`,
     );
+    assert.equal(resolveGsdPathContract(worktreeBase).worktreeGsd, worktreeGsd);
   });
 
-  test("returns worktree .gsd path (not project root .gsd) when worktree .gsd does not exist yet", () => {
-    // This is the core #2594 bug: the worktree directory exists but its .gsd
-    // subdirectory hasn't been created yet. Without the fix, probeGsdRoot()
-    // walks up from the worktree path, finds /project/.gsd, and returns it.
-    // With the fix, it detects the .gsd/worktrees/<name>/ pattern and returns
-    // the worktree-local .gsd path as the creation fallback.
+  test("returns project .gsd when worktree .gsd does not exist yet", () => {
     const worktreeBase = join(projectGsd, "worktrees", "M008");
     mkdirSync(worktreeBase, { recursive: true });
     // NOTE: no .gsd/ inside worktreeBase
 
     const result = gsdRoot(worktreeBase);
-    const expected = join(worktreeBase, ".gsd");
-
-    // Without the fix, this returns projectGsd (/project/.gsd) because the
-    // walk-up from worktreeBase finds it. With the fix, it returns the
-    // worktree-local path.
-    assert.notEqual(
-      result,
-      projectGsd,
-      "gsdRoot() must NOT return the project root .gsd when basePath is inside .gsd/worktrees/",
-    );
     assert.equal(
       result,
-      expected,
-      `Expected worktree-local .gsd (${expected}), got ${result}.`,
+      projectGsd,
+      `Expected canonical project .gsd (${projectGsd}), got ${result}.`,
     );
   });
 
-  test("returns worktree .gsd when basePath is a real git worktree inside .gsd/worktrees/", () => {
+  test("returns project .gsd when basePath is a real git worktree inside .gsd/worktrees/", () => {
     // Create a real git worktree at .gsd/worktrees/M010
     const worktreeName = "M010";
     const worktreeBase = join(projectGsd, "worktrees", worktreeName);
@@ -125,17 +111,10 @@ describe("gsdRoot() worktree detection (#2594)", () => {
 
     // The real git worktree exists at worktreeBase but has NO .gsd/ subdir yet
     const gsdResult = gsdRoot(worktreeBase);
-    const expected = join(worktreeBase, ".gsd");
-
-    assert.notEqual(
-      gsdResult,
-      projectGsd,
-      "gsdRoot() must NOT escape to project root .gsd from inside a git worktree",
-    );
     assert.equal(
       gsdResult,
-      expected,
-      `Expected worktree-local .gsd (${expected}), got ${gsdResult}`,
+      projectGsd,
+      `Expected canonical project .gsd (${projectGsd}), got ${gsdResult}`,
     );
 
     // Cleanup worktree

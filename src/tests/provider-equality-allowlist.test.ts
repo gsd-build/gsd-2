@@ -86,14 +86,15 @@ const ALLOWED_FILES: Record<string, string> = {
     "canonical-provider tiebreakers (ADR-012)",
   "src/provider-migrations.ts":
     "transport-specific default-provider migration target (ADR-012)",
-
 };
 
 function shouldScan(path: string): boolean {
   if (!path.endsWith(".ts")) return false;
   if (path.endsWith(".test.ts")) return false;
   if (path.endsWith(".d.ts")) return false;
-  const parts = path.split(sep);
+  const rel = relative(REPO_ROOT, path);
+  if (rel.startsWith("..")) return false;
+  const parts = rel.split(sep);
   if (parts.includes("node_modules")) return false;
   if (parts.includes(".worktrees")) return false;
   if (parts.includes("dist")) return false;

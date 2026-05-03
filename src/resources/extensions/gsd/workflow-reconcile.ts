@@ -20,7 +20,7 @@ import {
 } from "./gsd-db.js";
 import { isClosedStatus } from "./status-guards.js";
 import { invalidateStateCache } from "./state.js";
-import { clearPathCache } from "./paths.js";
+import { clearPathCache, resolveGsdPathContract } from "./paths.js";
 import { clearParseCache } from "./files.js";
 import { writeManifest } from "./workflow-manifest.js";
 import { atomicWriteSync } from "./atomic-write.js";
@@ -492,7 +492,7 @@ function _reconcileWorktreeLogsInner(
   atomicWriteSync(join(mainBasePath, ".gsd", "event-log.jsonl"), logContent);
 
   // Step 8: Replay into DB (wrapped in a transaction by replayEvents)
-  openDatabase(join(mainBasePath, ".gsd", "gsd.db"));
+  openDatabase(resolveGsdPathContract(mainBasePath).projectDb);
   replayEvents(merged);
 
   // Step 9: Write manifest
@@ -647,7 +647,7 @@ export function resolveConflict(
   writeEventLog(targetBasePath, targetBaseEvents.concat(rewrittenTargetEvents));
 
   // Replay resolved events through the DB (updates DB state)
-  openDatabase(join(basePath, ".gsd", "gsd.db"));
+  openDatabase(resolveGsdPathContract(basePath).projectDb);
   replayEvents(eventsToReplay);
   invalidateStateCache();
   clearPathCache();

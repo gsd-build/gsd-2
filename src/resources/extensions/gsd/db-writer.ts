@@ -8,7 +8,7 @@
 // Critical invariant: generated markdown must round-trip through
 // parseDecisionsTable() and parseRequirementsSections() with field fidelity.
 
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import type { Decision, Requirement } from './types.js';
 import { resolveGsdRootFile } from './paths.js';
@@ -18,6 +18,8 @@ import { logWarning, logError } from './workflow-logger.js';
 import { invalidateStateCache } from './state.js';
 import { clearPathCache } from './paths.js';
 import { clearParseCache } from './files.js';
+import type { MilestoneScope, GsdWorkspace } from './workspace.js';
+import { createWorkspace, scopeMilestone } from './workspace.js';
 
 // ─── Freeform Detection ───────────────────────────────────────────────────
 
@@ -124,9 +126,9 @@ const STATUS_SECTION_MAP: Array<{ status: string; heading: string }> = [
 /**
  * Generate full REQUIREMENTS.md content from an array of Requirement objects.
  * Groups requirements by status into sections (## Active, ## Validated, etc.),
- * each containing ### RXXX — Description headings with bullet fields.
- * Only emits sections that have content. Appends Traceability table and
- * Coverage Summary at the bottom.
+ * each containing ### RXXX — Description headings with bullet fields. Empty
+ * status sections are emitted too because the deep-mode validator treats their
+ * presence as part of the canonical contract.
  */
 export function generateRequirementsMd(requirements: Requirement[]): string {
   const lines: string[] = [];
@@ -147,12 +149,10 @@ export function generateRequirementsMd(requirements: Requirement[]): string {
   // Emit sections in canonical order
   for (const { status, heading } of STATUS_SECTION_MAP) {
     const reqs = byStatus.get(status);
-    if (!reqs || reqs.length === 0) continue;
-
     lines.push(`## ${heading}`);
     lines.push('');
 
-    for (const r of reqs) {
+    for (const r of reqs ?? []) {
       lines.push(`### ${r.id} — ${r.description || 'Untitled'}`);
 
       // Emit bullet fields — only those with content
@@ -197,6 +197,14 @@ export function generateRequirementsMd(requirements: Requirement[]): string {
   lines.push(`- Unmapped active requirements: 0`);
 
   return lines.join('\n') + '\n';
+}
+
+function isRootCanonicalArtifact(opts: SaveArtifactOpts): boolean {
+  if (opts.milestone_id || opts.slice_id || opts.task_id) return false;
+  return (
+    opts.artifact_type === 'PROJECT' ||
+    opts.artifact_type === 'REQUIREMENTS'
+  );
 }
 
 // ─── Next Decision ID ─────────────────────────────────────────────────────
@@ -298,36 +306,49 @@ export async function saveRequirementToDb(
     const db = await import('./gsd-db.js');
 
     // Atomic ID assignment + insert inside a transaction.
-    const id = db.transaction(() => {
+    const txResult = db.transaction(() => {
       const adapter = db._getAdapter();
       if (!adapter) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
 
+      const existingRow = adapter
+        .prepare(
+          `SELECT * FROM requirements
+           WHERE LOWER(TRIM(description)) = LOWER(TRIM(:description))
+             AND LOWER(COALESCE(status, 'active')) = 'active'
+             AND superseded_by IS NULL
+           ORDER BY id
+           LIMIT 1`,
+        )
+        .get({ ':description': fields.description });
       const row = adapter
         .prepare('SELECT MAX(CAST(SUBSTR(id, 2) AS INTEGER)) as max_num FROM requirements')
         .get();
       const maxNum = row ? (row['max_num'] as number | null) : null;
-      const nextId = (maxNum == null || isNaN(maxNum))
+      const nextId = existingRow
+        ? String(existingRow['id'])
+        : (maxNum == null || isNaN(maxNum))
         ? 'R001'
         : `R${String(maxNum + 1).padStart(3, '0')}`;
 
       const requirement: Requirement = {
         id: nextId,
-        class: fields.class,
-        status: fields.status ?? 'active',
+        class: fields.class || (existingRow?.['class'] as string | undefined) || '',
+        status: fields.status ?? (existingRow?.['status'] as string | undefined) ?? 'active',
         description: fields.description,
         why: fields.why,
         source: fields.source,
-        primary_owner: fields.primary_owner ?? '',
-        supporting_slices: fields.supporting_slices ?? '',
-        validation: fields.validation ?? '',
-        notes: fields.notes ?? '',
-        full_content: '',
-        superseded_by: null,
+        primary_owner: fields.primary_owner ?? (existingRow?.['primary_owner'] as string | undefined) ?? '',
+        supporting_slices: fields.supporting_slices ?? (existingRow?.['supporting_slices'] as string | undefined) ?? '',
+        validation: fields.validation ?? (existingRow?.['validation'] as string | undefined) ?? '',
+        notes: fields.notes ?? (existingRow?.['notes'] as string | undefined) ?? '',
+        full_content: (existingRow?.['full_content'] as string | undefined) ?? '',
+        superseded_by: (existingRow?.['superseded_by'] as string | null | undefined) ?? null,
       };
 
       db.upsertRequirement(requirement);
-      return nextId;
+      return { id: nextId };
     });
+    const { id } = txResult;
 
     // Fetch all requirements for full file regeneration
     const adapter = db._getAdapter();
@@ -356,13 +377,7 @@ export async function saveRequirementToDb(
     try {
       await saveFile(filePath, md);
     } catch (diskErr) {
-      logError('manifest', 'disk write failed, rolling back DB row', { fn: 'saveRequirementToDb', error: String((diskErr as Error).message) });
-      try {
-        db.deleteRequirementById(id);
-      } catch (rollbackErr) {
-        logError('manifest', 'SPLIT BRAIN: disk write failed AND DB rollback failed — DB has orphaned row', { fn: 'saveRequirementToDb', id, error: String((rollbackErr as Error).message) });
-      }
-      throw diskErr;
+      logWarning('projection', 'REQUIREMENTS.md projection write failed; DB requirement remains committed', { fn: 'saveRequirementToDb', id, error: String((diskErr as Error).message) });
     }
     invalidateStateCache();
     clearPathCache();
@@ -498,13 +513,7 @@ export async function saveDecisionToDb(
     try {
       await saveFile(filePath, md);
     } catch (diskErr) {
-      logError('manifest', 'disk write failed, rolling back DB row', { fn: 'saveDecisionToDb', error: String((diskErr as Error).message) });
-      try {
-        db.deleteDecisionById(id);
-      } catch (rollbackErr) {
-        logError('manifest', 'SPLIT BRAIN: disk write failed AND DB rollback failed — DB has orphaned row', { fn: 'saveDecisionToDb', id, error: String((rollbackErr as Error).message) });
-      }
-      throw diskErr;
+      logWarning('projection', 'DECISIONS.md projection write failed; DB decision remains committed', { fn: 'saveDecisionToDb', id, error: String((diskErr as Error).message) });
     }
     // #2661: When a decision defers a slice, update the slice status in the DB
     // so the dispatcher skips it. Without this, STATE.md and DECISIONS.md are
@@ -532,8 +541,8 @@ export async function saveDecisionToDb(
     // ADR-013 dual-write: keep the memory store in sync with every decision
     // persisted via the legacy gsd_save_decision path. Without this, prompts
     // that still call gsd_save_decision (discuss.md, plan-milestone.md,
-    // guided-plan-slice.md, et al. during the deprecation window) would
-    // create decisions rows invisible to memory_query and loadMemoryBlock.
+    // plan-slice.md, et al.) would create decisions rows invisible to
+    // memory_query and loadMemoryBlock.
     // Best-effort — never throw, never roll back the decision on failure.
     try {
       const { createMemory } = await import('./memory-store.js');
@@ -627,34 +636,7 @@ export async function updateRequirementInDb(
   try {
     const db = await import('./gsd-db.js');
 
-    let existing = db.getRequirementById(id);
-
-    // If requirement doesn't exist in DB, seed the entire requirements table
-    // from REQUIREMENTS.md first (#3346). This handles the standard workflow
-    // where requirements are authored in markdown during discussion but never
-    // imported into the database — making gsd_requirement_update always fail
-    // with "not_found" at milestone completion.
-    if (!existing) {
-      const reqFilePath = resolveGsdRootFile(basePath, 'REQUIREMENTS');
-      try {
-        const content = readFileSync(reqFilePath, 'utf-8');
-        const { parseRequirementsSections } = await import('./md-importer.js');
-        const parsed = parseRequirementsSections(content);
-        if (parsed.length > 0) {
-          logWarning('manifest', `Seeding ${parsed.length} requirements from REQUIREMENTS.md into DB (first update triggers import)`, { fn: 'updateRequirementInDb' });
-          for (const req of parsed) {
-            // Only seed if not already in DB (avoid overwriting concurrent inserts)
-            if (!db.getRequirementById(req.id)) {
-              db.upsertRequirement(req);
-            }
-          }
-          // Re-check after seeding
-          existing = db.getRequirementById(id);
-        }
-      } catch {
-        // REQUIREMENTS.md missing or unparseable — fall through to skeleton
-      }
-    }
+    const existing = db.getRequirementById(id);
 
     const base: Requirement = existing ?? {
       id,
@@ -710,11 +692,7 @@ export async function updateRequirementInDb(
     try {
       await saveFile(filePath, md);
     } catch (diskErr) {
-      logError('manifest', 'disk write failed, reverting DB row', { fn: 'updateRequirementInDb', error: String((diskErr as Error).message) });
-      if (existing) {
-        db.upsertRequirement(existing);
-      }
-      throw diskErr;
+      logWarning('projection', 'REQUIREMENTS.md projection write failed; DB requirement update remains committed', { fn: 'updateRequirementInDb', id, error: String((diskErr as Error).message) });
     }
     // Invalidate file-read caches so deriveState() sees the updated markdown.
     // Do NOT clear the artifacts table — we just wrote to it intentionally.
@@ -739,35 +717,118 @@ export interface SaveArtifactOpts {
 }
 
 /**
- * Save an artifact to DB and write the corresponding markdown file to disk.
- * The path is relative to .gsd/ (e.g. "milestones/M001/slices/S06/tasks/T01-SUMMARY.md").
- * The full file path is computed as basePath + '.gsd/' + path.
+ * Save a root-level artifact (no milestone) to DB and write to disk,
+ * routing path construction through workspace.contract.projectGsd directly.
+ * Use this instead of saveArtifactToDbByScope when milestone_id is absent.
  */
-export async function saveArtifactToDb(
+export async function saveArtifactToDbForWorkspace(
+  workspace: GsdWorkspace,
   opts: SaveArtifactOpts,
-  basePath: string,
 ): Promise<void> {
   try {
     const db = await import('./gsd-db.js');
 
-    // Guard against path traversal before any reads/writes
-    const gsdDir = resolve(basePath, '.gsd');
-    const fullPath = resolve(basePath, '.gsd', opts.path);
-    if (!fullPath.startsWith(gsdDir)) {
-      throw new GSDError(GSD_IO_ERROR, `saveArtifactToDb: path escapes .gsd/ directory: ${opts.path}`);
+    const gsdDir = workspace.contract.projectGsd;
+    const fullPath = resolve(gsdDir, opts.path);
+
+    const rel0 = relative(gsdDir, fullPath);
+    if (rel0.startsWith('..') || isAbsolute(rel0)) {
+      throw new GSDError(GSD_IO_ERROR, `saveArtifactToDbForWorkspace: path escapes .gsd/ directory: ${opts.path}`);
     }
 
-    // Shrinkage guard: if the file already exists and the new content is
-    // significantly smaller (<50%), preserve the richer file on disk and
-    // store its content in the DB instead of the abbreviated version.
-    let dbContent = opts.content;
+    let contentToPersist = opts.content;
+    if (opts.artifact_type === 'REQUIREMENTS' && opts.path === 'REQUIREMENTS.md') {
+      const activeRequirements = db.getActiveRequirements();
+      if (activeRequirements.length === 0) {
+        throw new GSDError(GSD_STALE_STATE, 'saveArtifactToDbForWorkspace: REQUIREMENTS final save requires active DB-backed requirements');
+      }
+      contentToPersist = generateRequirementsMd(activeRequirements);
+    }
+
     let skipDiskWrite = false;
-    if (existsSync(fullPath)) {
+    if (!isRootCanonicalArtifact(opts) && existsSync(fullPath)) {
       const existingSize = statSync(fullPath).size;
-      const newSize = Buffer.byteLength(opts.content, 'utf-8');
+      const newSize = Buffer.byteLength(contentToPersist, 'utf-8');
       if (existingSize > 0 && newSize < existingSize * 0.5) {
-        logWarning('manifest', `new content (${newSize}B) is <50% of existing file (${existingSize}B), preserving disk file`, { fn: 'saveArtifactToDb', path: opts.path });
-        dbContent = readFileSync(fullPath, 'utf-8');
+        logWarning('projection', `new content (${newSize}B) is <50% of existing projection (${existingSize}B), preserving disk file while DB remains authoritative`, { fn: 'saveArtifactToDbForWorkspace', path: opts.path });
+        skipDiskWrite = true;
+      }
+    }
+
+    db.insertArtifact({
+      path: opts.path,
+      artifact_type: opts.artifact_type,
+      milestone_id: null,
+      slice_id: null,
+      task_id: null,
+      full_content: contentToPersist,
+    });
+
+    if (!skipDiskWrite) {
+      try {
+        await saveFile(fullPath, contentToPersist);
+      } catch (diskErr) {
+        logWarning('projection', 'artifact projection write failed; DB artifact remains committed', { fn: 'saveArtifactToDbForWorkspace', path: opts.path, error: String((diskErr as Error).message) });
+      }
+    }
+    invalidateStateCache();
+    clearPathCache();
+    clearParseCache();
+  } catch (err) {
+    logError('manifest', 'saveArtifactToDbForWorkspace failed', { fn: 'saveArtifactToDbForWorkspace', error: String((err as Error).message) });
+    throw err;
+  }
+}
+
+/**
+ * Save an artifact to DB and write the corresponding markdown file to disk,
+ * routing all path construction through the workspace contract.
+ *
+ * The path is relative to .gsd/ (e.g. "milestones/M001/slices/S06/tasks/T01-SUMMARY.md").
+ * The full file path is computed as scope.workspace.contract.projectGsd + '/' + path.
+ */
+export async function saveArtifactToDbByScope(
+  scope: MilestoneScope,
+  opts: SaveArtifactOpts,
+): Promise<void> {
+  // Guard: an empty milestoneId produces malformed paths (milestoneDir = join(gsd, "milestones", "")).
+  // Callers that have no milestone should use saveArtifactToDbForWorkspace instead.
+  if (!scope.milestoneId) {
+    throw new GSDError(GSD_IO_ERROR, `saveArtifactToDbByScope: milestoneId is empty — use saveArtifactToDbForWorkspace for root artifacts`);
+  }
+
+  try {
+    const db = await import('./gsd-db.js');
+
+    // Use contract.projectGsd as the canonical .gsd directory — never a hand-rolled basePath join.
+    const gsdDir = scope.workspace.contract.projectGsd;
+    const fullPath = resolve(gsdDir, opts.path);
+
+    // Guard against path traversal before any reads/writes
+    const rel1 = relative(gsdDir, fullPath);
+    if (rel1.startsWith('..') || isAbsolute(rel1)) {
+      throw new GSDError(GSD_IO_ERROR, `saveArtifactToDbByScope: path escapes .gsd/ directory: ${opts.path}`);
+    }
+
+    let contentToPersist = opts.content;
+    if (opts.artifact_type === 'REQUIREMENTS' && opts.path === 'REQUIREMENTS.md') {
+      const activeRequirements = db.getActiveRequirements();
+      if (activeRequirements.length === 0) {
+        throw new GSDError(GSD_STALE_STATE, 'saveArtifactToDbByScope: REQUIREMENTS final save requires active DB-backed requirements');
+      }
+      contentToPersist = generateRequirementsMd(activeRequirements);
+    }
+
+    // Shrinkage guard: if the projection file already exists and the new
+    // content is significantly smaller (<50%), preserve the richer file on
+    // disk, but keep the DB row authoritative with the caller-provided content.
+    // Root canonical artifacts are exempt (rendered from canonical DB state).
+    let skipDiskWrite = false;
+    if (!isRootCanonicalArtifact(opts) && existsSync(fullPath)) {
+      const existingSize = statSync(fullPath).size;
+      const newSize = Buffer.byteLength(contentToPersist, 'utf-8');
+      if (existingSize > 0 && newSize < existingSize * 0.5) {
+        logWarning('projection', `new content (${newSize}B) is <50% of existing projection (${existingSize}B), preserving disk file while DB remains authoritative`, { fn: 'saveArtifactToDbByScope', path: opts.path });
         skipDiskWrite = true;
       }
     }
@@ -778,17 +839,15 @@ export async function saveArtifactToDb(
       milestone_id: opts.milestone_id ?? null,
       slice_id: opts.slice_id ?? null,
       task_id: opts.task_id ?? null,
-      full_content: dbContent,
+      full_content: contentToPersist,
     });
 
     // Write the file to disk (only if we're not preserving a richer existing file)
     if (!skipDiskWrite) {
       try {
-        await saveFile(fullPath, opts.content);
+        await saveFile(fullPath, contentToPersist);
       } catch (diskErr) {
-        logError('manifest', 'disk write failed, rolling back DB row', { fn: 'saveArtifactToDb', error: String((diskErr as Error).message) });
-        db.deleteArtifactByPath(opts.path);
-        throw diskErr;
+        logWarning('projection', 'artifact projection write failed; DB artifact remains committed', { fn: 'saveArtifactToDbByScope', path: opts.path, error: String((diskErr as Error).message) });
       }
     }
     // Invalidate file-read caches so deriveState() sees the updated markdown.
@@ -797,7 +856,28 @@ export async function saveArtifactToDb(
     clearPathCache();
     clearParseCache();
   } catch (err) {
-    logError('manifest', 'saveArtifactToDb failed', { fn: 'saveArtifactToDb', error: String((err as Error).message) });
+    logError('manifest', 'saveArtifactToDbByScope failed', { fn: 'saveArtifactToDbByScope', error: String((err as Error).message) });
     throw err;
   }
+}
+
+/**
+ * Save an artifact to DB and write the corresponding markdown file to disk.
+ * The path is relative to .gsd/ (e.g. "milestones/M001/slices/S06/tasks/T01-SUMMARY.md").
+ * The full file path is computed as basePath + '.gsd/' + path.
+ *
+ * @deprecated Use saveArtifactToDbByScope instead, which routes through the
+ * workspace contract for canonical path resolution.
+ * TODO(C-future): remove this legacy wrapper once all callers are migrated.
+ */
+export async function saveArtifactToDb(
+  opts: SaveArtifactOpts,
+  basePath: string,
+): Promise<void> {
+  const workspace = createWorkspace(basePath);
+  const milestoneId = opts.milestone_id;
+  if (milestoneId) {
+    return saveArtifactToDbByScope(scopeMilestone(workspace, milestoneId), opts);
+  }
+  return saveArtifactToDbForWorkspace(workspace, opts);
 }

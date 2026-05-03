@@ -12,11 +12,14 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolve } from 'node:path';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, join, resolve } from 'node:path';
 import { EventEmitter } from 'node:events';
 
 import { SessionManager } from './session-manager.js';
 import {
+  askUserQuestionsHandler,
   buildAskUserQuestionsElicitRequest,
   createMcpServer,
   formatAskUserQuestionsElicitResult,
@@ -563,6 +566,7 @@ describe('SessionManager', () => {
 describe('SessionManager.resolveCLIPath', () => {
   const originalGsdPath = process.env['GSD_CLI_PATH'];
   const originalPath = process.env['PATH'];
+  const originalPathTitle = process.env['Path'];
 
   afterEach(() => {
     if (originalGsdPath !== undefined) {
@@ -572,6 +576,13 @@ describe('SessionManager.resolveCLIPath', () => {
     }
     if (originalPath !== undefined) {
       process.env['PATH'] = originalPath;
+    } else {
+      delete process.env['PATH'];
+    }
+    if (originalPathTitle !== undefined) {
+      process.env['Path'] = originalPathTitle;
+    } else {
+      delete process.env['Path'];
     }
   });
 
@@ -581,8 +592,50 @@ describe('SessionManager.resolveCLIPath', () => {
     assert.equal(result, resolve('/custom/path/to/gsd'));
   });
 
-  it('throws when GSD_CLI_PATH not set and which fails', () => {
+  it('finds gsd on PATH without shelling out to which', () => {
     delete process.env['GSD_CLI_PATH'];
+    const tmp = mkdtempSync(join(tmpdir(), 'gsd-cli-path-'));
+    try {
+      const shimName = process.platform === 'win32' ? 'gsd.cmd' : 'gsd';
+      const shimPath = join(tmp, shimName);
+      writeFileSync(shimPath, '', 'utf8');
+      process.env['PATH'] = [tmp, originalPath].filter(Boolean).join(delimiter);
+
+      const resolvedPath = SessionManager.resolveCLIPath();
+      if (process.platform === 'win32') {
+        assert.equal(resolvedPath.toLowerCase(), resolve(shimPath).toLowerCase());
+      } else {
+        assert.equal(resolvedPath, resolve(shimPath));
+      }
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('finds gsd when Windows exposes Path instead of PATH', () => {
+    delete process.env['GSD_CLI_PATH'];
+    delete process.env['PATH'];
+    const tmp = mkdtempSync(join(tmpdir(), 'gsd-cli-path-title-'));
+    try {
+      const shimName = process.platform === 'win32' ? 'gsd.cmd' : 'gsd';
+      const shimPath = join(tmp, shimName);
+      writeFileSync(shimPath, '', 'utf8');
+      process.env['Path'] = tmp;
+
+      const resolvedPath = SessionManager.resolveCLIPath();
+      if (process.platform === 'win32') {
+        assert.equal(resolvedPath.toLowerCase(), resolve(shimPath).toLowerCase());
+      } else {
+        assert.equal(resolvedPath, resolve(shimPath));
+      }
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('throws when GSD_CLI_PATH not set and PATH lookup fails', () => {
+    delete process.env['GSD_CLI_PATH'];
+    delete process.env['Path'];
     process.env['PATH'] = '/nonexistent';
     assert.throws(
       () => SessionManager.resolveCLIPath(),
@@ -782,6 +835,373 @@ describe('createMcpServer tool registration', () => {
         },
       }),
     );
+  });
+
+  it('ask_user_questions returns local elicitation answers before trying remote', async () => {
+    const questions = [
+      {
+        id: 'depth_verification_M001',
+        header: 'Depth Check',
+        question: 'Did I capture the depth right?',
+        options: [
+          { label: 'Yes, you got it (Recommended)', description: 'Continue with the current summary.' },
+          { label: 'Not quite', description: 'I need to clarify the depth further.' },
+        ],
+      },
+    ];
+    let remoteCalls = 0;
+
+    const result = await askUserQuestionsHandler(questions, undefined, {
+      async elicitInput() {
+        return {
+          action: 'accept',
+          content: {
+            depth_verification_M001: 'Yes, you got it (Recommended)',
+          },
+        };
+      },
+      isRemoteConfigured() {
+        return true;
+      },
+      async tryRemoteQuestions() {
+        remoteCalls++;
+        return { content: [{ type: 'text', text: 'remote response' }] };
+      },
+    });
+
+    assert.equal(remoteCalls, 0);
+    assert.equal(
+      result.content[0]?.text,
+      JSON.stringify({
+        answers: {
+          depth_verification_M001: {
+            answers: ['Yes, you got it (Recommended)'],
+          },
+        },
+      }),
+    );
+  });
+
+  it('ask_user_questions falls back to remote when local elicitation is cancelled', async () => {
+    const questions = [
+      {
+        id: 'depth_verification_M001',
+        header: 'Depth Check',
+        question: 'Did I capture the depth right?',
+        options: [
+          { label: 'Yes, you got it (Recommended)', description: 'Continue with the current summary.' },
+          { label: 'Not quite', description: 'I need to clarify the depth further.' },
+        ],
+      },
+    ];
+    let remoteCalls = 0;
+    const signal = AbortSignal.abort();
+
+    const result = await askUserQuestionsHandler(questions, { signal }, {
+      async elicitInput() {
+        return { action: 'cancel' };
+      },
+      isRemoteConfigured() {
+        return true;
+      },
+      async tryRemoteQuestions(remoteQuestions, receivedSignal) {
+        remoteCalls++;
+        assert.equal(remoteQuestions, questions);
+        assert.equal(receivedSignal, signal);
+        return { content: [{ type: 'text', text: 'remote response' }] };
+      },
+    });
+
+    assert.equal(remoteCalls, 1);
+    assert.equal(result.content[0]?.text, 'remote response');
+  });
+
+  it('ask_user_questions falls back to remote when local elicitation is unavailable', async () => {
+    const questions = [
+      {
+        id: 'depth_verification_M001',
+        header: 'Depth Check',
+        question: 'Did I capture the depth right?',
+        options: [
+          { label: 'Yes, you got it (Recommended)', description: 'Continue with the current summary.' },
+          { label: 'Not quite', description: 'I need to clarify the depth further.' },
+        ],
+      },
+    ];
+    let remoteCalls = 0;
+
+    const result = await askUserQuestionsHandler(questions, undefined, {
+      async elicitInput() {
+        throw new Error('MCP host does not support elicitation');
+      },
+      isRemoteConfigured() {
+        return true;
+      },
+      async tryRemoteQuestions(remoteQuestions) {
+        remoteCalls++;
+        assert.equal(remoteQuestions, questions);
+        return { content: [{ type: 'text', text: 'remote response' }] };
+      },
+    });
+
+    assert.equal(remoteCalls, 1);
+    assert.equal(result.content[0]?.text, 'remote response');
+  });
+
+  it('ask_user_questions surfaces remote success answers as structuredContent (regression #5267)', async () => {
+    const questions = [
+      {
+        id: 'depth_verification_M001',
+        header: 'Depth Check',
+        question: 'Did I capture the depth right?',
+        options: [
+          { label: 'Yes, you got it (Recommended)', description: 'Continue.' },
+          { label: 'Not quite', description: 'Clarify.' },
+        ],
+      },
+    ];
+
+    const result = await askUserQuestionsHandler(questions, undefined, {
+      async elicitInput() {
+        throw new Error('MCP host does not support elicitation');
+      },
+      isRemoteConfigured() {
+        return true;
+      },
+      async tryRemoteQuestions() {
+        return {
+          content: [{ type: 'text', text: '{"answers":{"depth_verification_M001":{"answers":["Yes, you got it (Recommended)"]}}}' }],
+          details: {
+            remote: true,
+            channel: 'discord',
+            timed_out: false,
+            promptId: 'p1',
+            threadUrl: null,
+            questions,
+            response: {
+              endInterview: false,
+              answers: {
+                depth_verification_M001: { selected: 'Yes, you got it (Recommended)', notes: '' },
+              },
+            },
+            status: 'answered',
+          },
+        };
+      },
+    });
+
+    assert.deepEqual(
+      (result as { structuredContent?: unknown }).structuredContent,
+      {
+        questions,
+        response: {
+          // endInterview mirrors the local RoundResult shape so register-hooks
+          // sees identical payloads on both code paths.
+          endInterview: false,
+          answers: {
+            depth_verification_M001: { selected: 'Yes, you got it (Recommended)', notes: '' },
+          },
+        },
+        cancelled: false,
+      },
+    );
+  });
+
+  it('ask_user_questions surfaces remote timeout as cancelled structuredContent (regression #5267)', async () => {
+    const questions = [
+      {
+        id: 'depth_verification_M001',
+        header: 'Depth Check',
+        question: 'Did I capture the depth right?',
+        options: [
+          { label: 'Yes, you got it (Recommended)', description: 'Continue.' },
+          { label: 'Not quite', description: 'Clarify.' },
+        ],
+      },
+    ];
+
+    const result = await askUserQuestionsHandler(questions, undefined, {
+      async elicitInput() {
+        throw new Error('MCP host does not support elicitation');
+      },
+      isRemoteConfigured() {
+        return true;
+      },
+      async tryRemoteQuestions() {
+        return {
+          content: [{ type: 'text', text: '{"timed_out":true,"channel":"discord","message":"User did not respond within 5 minutes."}' }],
+          details: { remote: true, channel: 'discord', timed_out: true, status: 'timed_out' },
+        };
+      },
+    });
+
+    assert.deepEqual(
+      (result as { structuredContent?: unknown }).structuredContent,
+      { questions, response: null, cancelled: true },
+    );
+  });
+
+  it('ask_user_questions reports a malformed remote response as cancelled, not silent success (regression #5267)', async () => {
+    const questions = [
+      {
+        id: 'depth_verification_M001',
+        header: 'Depth Check',
+        question: 'Did I capture the depth right?',
+        options: [
+          { label: 'Yes, you got it (Recommended)', description: 'Continue.' },
+          { label: 'Not quite', description: 'Clarify.' },
+        ],
+      },
+    ];
+
+    const result = await askUserQuestionsHandler(questions, undefined, {
+      async elicitInput() {
+        throw new Error('MCP host does not support elicitation');
+      },
+      isRemoteConfigured() {
+        return true;
+      },
+      async tryRemoteQuestions() {
+        // Simulates a remote module returning a non-conforming `details.response`
+        // (e.g. a stale build, a wire mismatch). The handler must not surface
+        // this as `cancelled: false, response: null` — that would lie to any
+        // consumer reading `structuredContent.cancelled`.
+        return {
+          content: [{ type: 'text', text: '{}' }],
+          details: { remote: true, channel: 'discord', timed_out: false, response: 'not-an-object' },
+        };
+      },
+    });
+
+    assert.deepEqual(
+      (result as { structuredContent?: unknown }).structuredContent,
+      { questions, response: null, cancelled: true },
+    );
+  });
+
+  it('ask_user_questions returns cancelled structuredContent when remote is unconfigured and local declines (regression #5267)', async () => {
+    const questions = [
+      {
+        id: 'depth_verification_M001',
+        header: 'Depth Check',
+        question: 'Did I capture the depth right?',
+        options: [
+          { label: 'Yes, you got it (Recommended)', description: 'Continue.' },
+          { label: 'Not quite', description: 'Clarify.' },
+        ],
+      },
+    ];
+
+    const result = await askUserQuestionsHandler(questions, undefined, {
+      async elicitInput() {
+        return { action: 'decline' };
+      },
+      isRemoteConfigured() {
+        return false;
+      },
+      async tryRemoteQuestions() {
+        throw new Error('should not be called when remote is unconfigured');
+      },
+    });
+
+    assert.deepEqual(
+      (result as { structuredContent?: unknown }).structuredContent,
+      { questions, response: null, cancelled: true },
+    );
+    assert.equal(result.content[0]?.text, 'ask_user_questions was cancelled before receiving a response');
+  });
+
+  it('ask_user_questions returns cancelled structuredContent when configured remote returns null (regression #5267)', async () => {
+    const questions = [
+      {
+        id: 'depth_verification_M001',
+        header: 'Depth Check',
+        question: 'Did I capture the depth right?',
+        options: [
+          { label: 'Yes, you got it (Recommended)', description: 'Continue.' },
+          { label: 'Not quite', description: 'Clarify.' },
+        ],
+      },
+    ];
+
+    const result = await askUserQuestionsHandler(questions, undefined, {
+      async elicitInput() {
+        return { action: 'cancel' };
+      },
+      isRemoteConfigured() {
+        return true;
+      },
+      async tryRemoteQuestions() {
+        return null;
+      },
+    });
+
+    assert.deepEqual(
+      (result as { structuredContent?: unknown }).structuredContent,
+      { questions, response: null, cancelled: true },
+    );
+  });
+
+  it('ask_user_questions re-throws non-fallback local errors (regression #5267)', async () => {
+    const questions = [
+      {
+        id: 'depth_verification_M001',
+        header: 'Depth Check',
+        question: 'Did I capture the depth right?',
+        options: [
+          { label: 'Yes, you got it (Recommended)', description: 'Continue.' },
+          { label: 'Not quite', description: 'Clarify.' },
+        ],
+      },
+    ];
+
+    const result = await askUserQuestionsHandler(questions, undefined, {
+      async elicitInput() {
+        throw new TypeError('schema validation blew up');
+      },
+      isRemoteConfigured() {
+        return false;
+      },
+      async tryRemoteQuestions() {
+        throw new Error('should not be called');
+      },
+    });
+
+    // Non-fallback errors propagate to the outer try/catch and surface as an
+    // MCP `isError` result — no `structuredContent` is attached because the
+    // error path predates the structured success/cancel branches.
+    assert.equal('isError' in result && result.isError, true);
+    assert.match(result.content[0]?.text ?? '', /schema validation blew up/);
+  });
+
+  it('ask_user_questions reports both local and remote errors when both paths fail', async () => {
+    const questions = [
+      {
+        id: 'depth_verification_M001',
+        header: 'Depth Check',
+        question: 'Did I capture the depth right?',
+        options: [
+          { label: 'Yes, you got it (Recommended)', description: 'Continue with the current summary.' },
+          { label: 'Not quite', description: 'I need to clarify the depth further.' },
+        ],
+      },
+    ];
+
+    const result = await askUserQuestionsHandler(questions, undefined, {
+      async elicitInput() {
+        throw new Error('ask_user_questions timed out after 10 minutes');
+      },
+      isRemoteConfigured() {
+        return true;
+      },
+      async tryRemoteQuestions() {
+        throw new Error('remote transport failed');
+      },
+    });
+
+    assert.equal('isError' in result && result.isError, true);
+    assert.match(result.content[0]?.text ?? '', /Local elicitation failed/);
+    assert.match(result.content[0]?.text ?? '', /remote transport failed/);
   });
 });
 

@@ -35,10 +35,10 @@ let _ext: ExtensionModules | null = null
 interface ExtensionModules {
   createWorktree: (basePath: string, name: string) => { path: string; branch: string }
   listWorktrees: (basePath: string) => Array<{ name: string; path: string; branch: string }>
-  removeWorktree: (basePath: string, name: string, opts?: { deleteBranch?: boolean }) => void
-  mergeWorktreeToMain: (basePath: string, name: string, commitMessage: string) => void
-  diffWorktreeAll: (basePath: string, name: string) => WorktreeDiff
-  diffWorktreeNumstat: (basePath: string, name: string) => Array<{ added: number; removed: number }>
+  removeWorktree: (basePath: string, name: string, opts?: { deleteBranch?: boolean; branch?: string }) => void
+  mergeWorktreeToMain: (basePath: string, name: string, commitMessage: string, branch?: string) => void
+  diffWorktreeAll: (basePath: string, name: string, branch?: string) => WorktreeDiff
+  diffWorktreeNumstat: (basePath: string, name: string, branch?: string) => Array<{ added: number; removed: number }>
   worktreeBranchName: (name: string) => string
   worktreePath: (basePath: string, name: string) => string
   runWorktreePostCreateHook: (basePath: string, wtPath: string) => string | null
@@ -141,9 +141,9 @@ interface WorktreeStatus {
 
 // ─── Status Helpers ─────────────────────────────────────────────────────────
 
-function getWorktreeStatus(ext: ExtensionModules, basePath: string, name: string, wtPath: string): WorktreeStatus {
-  const diff = ext.diffWorktreeAll(basePath, name)
-  const numstat = ext.diffWorktreeNumstat(basePath, name)
+function getWorktreeStatus(ext: ExtensionModules, basePath: string, name: string, wtPath: string, branch: string): WorktreeStatus {
+  const diff = ext.diffWorktreeAll(basePath, name, branch)
+  const numstat = ext.diffWorktreeNumstat(basePath, name, branch)
   const filesChanged = diff.added.length + diff.modified.length + diff.removed.length
   let linesAdded = 0
   let linesRemoved = 0
@@ -159,7 +159,7 @@ function getWorktreeStatus(ext: ExtensionModules, basePath: string, name: string
   let commits = 0
   try {
     const mainBranch = ext.nativeDetectMainBranch(basePath)
-    commits = ext.nativeCommitCountBetween(basePath, mainBranch, ext.worktreeBranchName(name))
+    commits = ext.nativeCommitCountBetween(basePath, mainBranch, branch)
   } catch (error) {
     logDebugFailure('native commit count', error)
   }
@@ -167,7 +167,7 @@ function getWorktreeStatus(ext: ExtensionModules, basePath: string, name: string
   return {
     name,
     path: wtPath,
-    branch: ext.worktreeBranchName(name),
+    branch,
     exists: existsSync(wtPath),
     filesChanged,
     linesAdded,
@@ -212,7 +212,7 @@ async function handleList(basePath: string): Promise<void> {
 
   process.stderr.write(chalk.bold('\nWorktrees\n\n'))
   for (const wt of worktrees) {
-    const status = getWorktreeStatus(ext, basePath, wt.name, wt.path)
+    const status = getWorktreeStatus(ext, basePath, wt.name, wt.path, wt.branch)
     process.stderr.write(formatStatus(status) + '\n\n')
   }
 }
@@ -245,11 +245,11 @@ async function doMerge(ext: ExtensionModules, basePath: string, name: string): P
     process.exit(1)
   }
 
-  const status = getWorktreeStatus(ext, basePath, name, wt.path)
+  const status = getWorktreeStatus(ext, basePath, name, wt.path, wt.branch)
   if (status.filesChanged === 0 && !status.uncommitted) {
     process.stderr.write(chalk.dim(`Worktree "${name}" has no changes to merge.\n`))
     // Clean up empty worktree
-    ext.removeWorktree(basePath, name, { deleteBranch: true })
+    ext.removeWorktree(basePath, name, { deleteBranch: true, branch: wt.branch })
     process.stderr.write(chalk.green(`Removed empty worktree ${chalk.bold(name)}.\n`))
     return
   }
@@ -271,8 +271,8 @@ async function doMerge(ext: ExtensionModules, basePath: string, name: string): P
   process.stderr.write(chalk.dim(`  ${status.filesChanged} files, ${chalk.green(`+${status.linesAdded}`)} ${chalk.red(`-${status.linesRemoved}`)}\n\n`))
 
   try {
-    ext.mergeWorktreeToMain(basePath, name, commitMessage)
-    ext.removeWorktree(basePath, name, { deleteBranch: true })
+    ext.mergeWorktreeToMain(basePath, name, commitMessage, wt.branch)
+    ext.removeWorktree(basePath, name, { deleteBranch: true, branch: wt.branch })
     process.stderr.write(chalk.green(`✓ Merged and cleaned up ${chalk.bold(name)}\n`))
     process.stderr.write(chalk.dim(`  commit: ${commitMessage}\n`))
   } catch (err) {
@@ -296,10 +296,10 @@ async function handleClean(basePath: string): Promise<void> {
 
   let cleaned = 0
   for (const wt of worktrees) {
-    const status = getWorktreeStatus(ext, basePath, wt.name, wt.path)
+    const status = getWorktreeStatus(ext, basePath, wt.name, wt.path, wt.branch)
     if (status.filesChanged === 0 && !status.uncommitted) {
       try {
-        ext.removeWorktree(basePath, wt.name, { deleteBranch: true })
+        ext.removeWorktree(basePath, wt.name, { deleteBranch: true, branch: wt.branch })
         process.stderr.write(chalk.green(`  ✓ Removed ${chalk.bold(wt.name)} (clean)\n`))
         cleaned++
       } catch (error) {
@@ -331,7 +331,7 @@ async function handleRemove(basePath: string, args: string[]): Promise<void> {
     process.exit(1)
   }
 
-  const status = getWorktreeStatus(ext, basePath, name, wt.path)
+  const status = getWorktreeStatus(ext, basePath, name, wt.path, wt.branch)
   if (status.filesChanged > 0 || status.uncommitted) {
     process.stderr.write(chalk.yellow(`⚠ Worktree "${name}" has unmerged changes (${status.filesChanged} files).\n`))
     process.stderr.write(chalk.yellow('  Use --force to remove anyway, or merge first: gsd worktree merge ' + name + '\n'))
@@ -340,7 +340,7 @@ async function handleRemove(basePath: string, args: string[]): Promise<void> {
     }
   }
 
-  ext.removeWorktree(basePath, name, { deleteBranch: true })
+  ext.removeWorktree(basePath, name, { deleteBranch: true, branch: wt.branch })
   process.stderr.write(chalk.green(`✓ Removed worktree ${chalk.bold(name)}\n`))
 }
 
@@ -354,7 +354,7 @@ async function handleStatusBanner(basePath: string): Promise<void> {
 
   const withChanges = worktrees.filter(wt => {
     try {
-      const diff = ext.diffWorktreeAll(basePath, wt.name)
+      const diff = ext.diffWorktreeAll(basePath, wt.name, wt.branch)
       return diff.added.length + diff.modified.length + diff.removed.length > 0
     } catch (error) {
       logDebugFailure(`status scan for ${wt.name}`, error)
@@ -385,7 +385,7 @@ async function handleWorktreeFlag(worktreeFlag: boolean | string): Promise<void>
     const existing = ext.listWorktrees(basePath)
     const withChanges = existing.filter(wt => {
       try {
-        const diff = ext.diffWorktreeAll(basePath, wt.name)
+        const diff = ext.diffWorktreeAll(basePath, wt.name, wt.branch)
         return diff.added.length + diff.modified.length + diff.removed.length > 0
       } catch (error) {
         logDebugFailure(`worktree -w scan for ${wt.name}`, error)
@@ -409,7 +409,7 @@ async function handleWorktreeFlag(worktreeFlag: boolean | string): Promise<void>
       // Multiple active worktrees — show them and ask user to pick
       process.stderr.write(chalk.yellow(`${withChanges.length} worktrees have unmerged changes:\n\n`))
       for (const wt of withChanges) {
-        const status = getWorktreeStatus(ext, basePath, wt.name, wt.path)
+        const status = getWorktreeStatus(ext, basePath, wt.name, wt.path, wt.branch)
         process.stderr.write(formatStatus(status) + '\n\n')
       }
       process.stderr.write(chalk.dim('Specify which one: gsd -w <name>\n'))

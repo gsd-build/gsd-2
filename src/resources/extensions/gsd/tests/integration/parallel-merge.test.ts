@@ -473,26 +473,26 @@ test("mergeAllCompleted — by-completion order respects startedAt", async () =>
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Bug #2812 — determineMergeOrder should use worktree DB as source of truth
+// Bug #2812 — determineMergeOrder should use DB state as source of truth
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/** Set up a worktree DB with a milestone marked complete */
-function setupWorktreeDb(basePath: string, mid: string): void {
-  const wtGsdDir = join(basePath, ".gsd", "worktrees", mid, ".gsd");
-  mkdirSync(wtGsdDir, { recursive: true });
-  const dbPath = join(wtGsdDir, "gsd.db");
+/** Set up canonical DB with a milestone marked complete and a worktree marker dir */
+function setupCanonicalDbWithWorktree(basePath: string, mid: string): void {
+  mkdirSync(join(basePath, ".gsd", "worktrees", mid), { recursive: true });
+  mkdirSync(join(basePath, ".gsd"), { recursive: true });
+  const dbPath = join(basePath, ".gsd", "gsd.db");
   openDatabase(dbPath);
   insertMilestone({ id: mid, title: `Milestone ${mid}`, status: "complete" });
   updateMilestoneStatus(mid, "complete", new Date().toISOString());
   closeDatabase();
 }
 
-test("determineMergeOrder — finds milestones completed in worktree DB even when worker state is 'error' (#2812)", () => {
+test("determineMergeOrder — finds milestones completed in canonical DB even when worker state is 'error' (#2812)", () => {
   const base = realpathSync(mkdtempSync(join(tmpdir(), "merge-db-bug-")));
   try {
     // Simulate the bug scenario: orchestrator has stale "error" state
-    // but the worktree DB shows milestone is actually complete.
-    setupWorktreeDb(base, "M011");
+    // but the canonical DB shows milestone is actually complete.
+    setupCanonicalDbWithWorktree(base, "M011");
 
     const workers = [
       makeWorker({ milestoneId: "M010", state: "error" }),
@@ -502,12 +502,12 @@ test("determineMergeOrder — finds milestones completed in worktree DB even whe
 
     const order = determineMergeOrder(workers, "sequential", base);
 
-    // M011 should be included because its worktree DB says status='complete'
+    // M011 should be included because the canonical DB says status='complete'
     assert.ok(
       order.includes("M011"),
-      `Expected M011 in merge order (worktree DB says complete), got: [${order}]`,
+      `Expected M011 in merge order (canonical DB says complete), got: [${order}]`,
     );
-    // M010 and M012 should NOT be included (no worktree DB with complete status)
+    // M010 and M012 should NOT be included (no canonical complete status)
     assert.ok(!order.includes("M010"), "M010 should not be in merge order (error, no DB)");
     assert.ok(!order.includes("M012"), "M012 should not be in merge order (running, no DB)");
   } finally {
@@ -529,7 +529,7 @@ test("determineMergeOrder — combines stopped workers and DB-complete milestone
   const base = realpathSync(mkdtempSync(join(tmpdir(), "merge-dedup-")));
   try {
     // M001 is stopped in orchestrator AND complete in worktree DB
-    setupWorktreeDb(base, "M001");
+    setupCanonicalDbWithWorktree(base, "M001");
 
     const workers = [
       makeWorker({ milestoneId: "M001", state: "stopped" }),
@@ -555,8 +555,8 @@ test("mergeAllCompleted — discovers DB-complete milestones when workers show e
     ]);
     setupRoadmap(repo, "M011", "Feature System", ["S01: Feature module"]);
 
-    // Set up worktree DB showing M011 is complete
-    setupWorktreeDb(repo, "M011");
+    // Set up canonical DB showing M011 is complete
+    setupCanonicalDbWithWorktree(repo, "M011");
 
     // Orchestrator thinks M011 is in error (stale state)
     const workers = [

@@ -81,9 +81,6 @@ test("domain-work prompts use skillActivation placeholder", () => {
     "plan-slice",
     "execute-task",
     "guided-research-slice",
-    "guided-plan-milestone",
-    "guided-plan-slice",
-    "guided-execute-task",
     "guided-resume-task",
   ];
 
@@ -140,20 +137,6 @@ test("custom skillActivation is substituted into execute-task", () => {
   });
 
   assert.ok(result.includes("Load React and accessibility skills first."));
-  assert.ok(!result.includes("{{skillActivation}}"));
-});
-
-test("guided execute prompt substitutes skillActivation", () => {
-  const result = loadPrompt("guided-execute-task", {
-    milestoneId: "M001",
-    sliceId: "S01",
-    taskId: "T01",
-    taskTitle: "Implement feature",
-    inlinedTemplates: "Template",
-    skillActivation: "Load React skill first.",
-  });
-
-  assert.ok(result.includes("Load React skill first."));
   assert.ok(!result.includes("{{skillActivation}}"));
 });
 
@@ -255,32 +238,6 @@ test("plan-milestone prompt substitutes skillActivation", () => {
   });
 
   assert.ok(result.includes("Load milestone planning skills first."));
-  assert.ok(!result.includes("{{skillActivation}}"));
-});
-
-test("guided plan milestone prompt substitutes skillActivation", () => {
-  const result = loadPrompt("guided-plan-milestone", {
-    milestoneId: "M001",
-    milestoneTitle: "Test Milestone",
-    secretsOutputPath: ".gsd/milestones/M001/M001-SECRETS.md",
-    inlinedTemplates: "Templates",
-    skillActivation: "Load guided planning skills first.",
-  });
-
-  assert.ok(result.includes("Load guided planning skills first."));
-  assert.ok(!result.includes("{{skillActivation}}"));
-});
-
-test("guided plan slice prompt substitutes skillActivation", () => {
-  const result = loadPrompt("guided-plan-slice", {
-    milestoneId: "M001",
-    sliceId: "S01",
-    sliceTitle: "Test Slice",
-    inlinedTemplates: "Templates",
-    skillActivation: "Load guided slice planning skills first.",
-  });
-
-  assert.ok(result.includes("Load guided slice planning skills first."));
   assert.ok(!result.includes("{{skillActivation}}"));
 });
 

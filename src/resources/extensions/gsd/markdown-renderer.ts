@@ -1,9 +1,8 @@
 // GSD Markdown Renderer — DB → Markdown file generation
 //
 // Transforms DB state into correct markdown files on disk.
-// Each render function reads from DB (with disk fallback),
-// patches content to match DB status, writes atomically to disk,
-// stores updated content in the artifacts table, and invalidates caches.
+// Each render function reads from DB, writes a markdown projection to disk,
+// stores generated content in the artifacts table, and invalidates caches.
 //
 // Critical invariant: rendered markdown must round-trip through
 // parseRoadmap(), parsePlan(), parseSummary() in files.ts.
@@ -61,59 +60,43 @@ function invalidateCaches(): void {
   clearParseCache();
 }
 
+function meaningfulSection(value: string | null | undefined): string {
+  const trimmed = (value ?? "").trim();
+  if (!trimmed) return "";
+  if (/^(not provided\.?|none\.?|n\/a)$/i.test(trimmed)) return "";
+  if (/^\{\{[^}]+\}\}$/.test(trimmed)) return "";
+  return trimmed;
+}
+
+function pushIndented(lines: string[], value: string, indent = "  "): void {
+  for (const line of value.split("\n")) {
+    lines.push(`${indent}${line}`);
+  }
+}
+
+function taskSummaryForSlicePlan(description: string): string {
+  const meaningful = meaningfulSection(description);
+  if (!meaningful) return "";
+
+  const beforeHeading = meaningful.split(/\n#{1,6}\s+/)[0]?.trim() ?? "";
+  const firstBlock = beforeHeading.split(/\n\s*\n/)[0]?.trim() ?? "";
+  return firstBlock || beforeHeading;
+}
+
 /**
- * Load artifact content from DB first, falling back to reading from disk.
- * On disk fallback, stores the content in the artifacts table for future use.
- * Returns null if content is unavailable from both sources.
+ * Load artifact content from the DB. Markdown projections are not authoritative
+ * during runtime; when the artifact row is missing, callers regenerate from DB
+ * rows instead of patching disk fallback content and storing it back.
  */
 function loadArtifactContent(
   artifactPath: string,
-  absPath: string | null,
-  opts: {
-    artifact_type: string;
-    milestone_id: string;
-    slice_id?: string;
-    task_id?: string;
-  },
 ): string | null {
-  // Try DB first
   const artifact = getArtifact(artifactPath);
   if (artifact && artifact.full_content) {
     return artifact.full_content;
   }
 
-  // Fall back to disk
-  if (!absPath) {
-    process.stderr.write(
-      `markdown-renderer: artifact not found in DB or on disk: ${artifactPath}\n`,
-    );
-    return null;
-  }
-
-  let content: string;
-  try {
-    content = readFileSync(absPath, "utf-8");
-  } catch {
-    logWarning("renderer", `cannot read file from disk: ${absPath}`);
-    return null;
-  }
-
-  // Store in DB for future use (graceful degradation path)
-  try {
-    insertArtifact({
-      path: artifactPath,
-      artifact_type: opts.artifact_type,
-      milestone_id: opts.milestone_id,
-      slice_id: opts.slice_id ?? null,
-      task_id: opts.task_id ?? null,
-      full_content: content,
-    });
-  } catch {
-    // Non-fatal: we have the content, DB storage is best-effort
-    logWarning("renderer", `failed to store disk fallback in DB: ${artifactPath}`);
-  }
-
-  return content;
+  return null;
 }
 
 /**
@@ -187,7 +170,9 @@ function renderRoadmapMarkdown(milestone: MilestoneRow, slices: SliceRow[]): str
 }
 
 function renderTaskPlanMarkdown(task: TaskRow, taskGates: GateRow[] = []): string {
-  const estimatedSteps = Math.max(1, task.description.trim().split(/\n+/).filter(Boolean).length || 1);
+  const description = meaningfulSection(task.description);
+  const observabilityImpact = meaningfulSection(task.observability_impact);
+  const estimatedSteps = Math.max(1, description.split(/\n+/).filter(Boolean).length || 1);
   const estimatedFiles = task.files.length > 0
     ? task.files.length
     : task.expected_output.length > 0
@@ -206,8 +191,8 @@ function renderTaskPlanMarkdown(task: TaskRow, taskGates: GateRow[] = []): strin
   lines.push(`# ${task.id}: ${task.title || task.id}`);
   lines.push("");
 
-  if (task.description.trim()) {
-    lines.push(task.description.trim());
+  if (description) {
+    lines.push(description);
     lines.push("");
   }
 
@@ -242,10 +227,10 @@ function renderTaskPlanMarkdown(task: TaskRow, taskGates: GateRow[] = []): strin
   lines.push(task.verify.trim() || "- Verify the task outcome with the slice-level checks.");
   lines.push("");
 
-  if (task.observability_impact.trim()) {
+  if (observabilityImpact) {
     lines.push("## Observability Impact");
     lines.push("");
-    lines.push(task.observability_impact.trim());
+    lines.push(observabilityImpact);
     lines.push("");
   }
 
@@ -275,8 +260,9 @@ function renderSlicePlanMarkdown(slice: SliceRow, tasks: TaskRow[], gates: GateR
 
   lines.push("## Must-Haves");
   lines.push("");
-  if (slice.success_criteria.trim()) {
-    for (const line of slice.success_criteria.split(/\n+/).map((entry) => entry.trim()).filter(Boolean)) {
+  const successCriteria = meaningfulSection(slice.success_criteria);
+  if (successCriteria) {
+    for (const line of successCriteria.split(/\n+/).map((entry) => entry.trim()).filter(Boolean)) {
       lines.push(line.startsWith("-") ? line : `- ${line}`);
     }
   } else {
@@ -301,24 +287,27 @@ function renderSlicePlanMarkdown(slice: SliceRow, tasks: TaskRow[], gates: GateR
     lines.push("");
   }
 
-  if (slice.proof_level.trim()) {
+  const proofLevel = meaningfulSection(slice.proof_level);
+  if (proofLevel) {
     lines.push("## Proof Level");
     lines.push("");
-    lines.push(`- This slice proves: ${slice.proof_level.trim()}`);
+    lines.push(`- This slice proves: ${proofLevel}`);
     lines.push("");
   }
 
-  if (slice.integration_closure.trim()) {
+  const integrationClosure = meaningfulSection(slice.integration_closure);
+  if (integrationClosure) {
     lines.push("## Integration Closure");
     lines.push("");
-    lines.push(slice.integration_closure.trim());
+    lines.push(integrationClosure);
     lines.push("");
   }
 
   lines.push("## Verification");
   lines.push("");
-  if (slice.observability_impact.trim()) {
-    const verificationLines = slice.observability_impact
+  const verification = meaningfulSection(slice.observability_impact);
+  if (verification) {
+    const verificationLines = verification
       .split(/\n+/)
       .map((entry) => entry.trim())
       .filter(Boolean);
@@ -336,8 +325,9 @@ function renderSlicePlanMarkdown(slice: SliceRow, tasks: TaskRow[], gates: GateR
     const done = isClosedStatus(task.status) ? "x" : " ";
     const estimate = task.estimate.trim() ? ` \`est:${task.estimate.trim()}\`` : "";
     lines.push(`- [${done}] **${task.id}: ${task.title || task.id}**${estimate}`);
-    if (task.description.trim()) {
-      lines.push(`  ${task.description.trim()}`);
+    const summary = taskSummaryForSlicePlan(task.description);
+    if (summary) {
+      pushIndented(lines, summary);
     }
     if (task.files.length > 0) {
       lines.push(`  - Files: ${task.files.map((file) => `\`${file}\``).join(", ")}`);
@@ -477,20 +467,15 @@ export async function renderRoadmapCheckboxes(
   const absPath = resolveMilestoneFile(basePath, milestoneId, "ROADMAP");
   const artifactPath = absPath ? toArtifactPath(absPath, basePath) : null;
 
-  // Load content from DB (with disk fallback)
+  // Load content from DB; regenerate from DB rows when the artifact is absent.
   let content: string | null = null;
   if (artifactPath) {
-    content = loadArtifactContent(artifactPath, absPath, {
-      artifact_type: "ROADMAP",
-      milestone_id: milestoneId,
-    });
+    content = loadArtifactContent(artifactPath);
   }
 
   if (!content) {
-    process.stderr.write(
-      `markdown-renderer: no roadmap content available for ${milestoneId}\n`,
-    );
-    return false;
+    await renderRoadmapFromDb(basePath, milestoneId);
+    return true;
   }
 
   // Apply checkbox patches for each slice
@@ -552,18 +537,12 @@ export async function renderPlanCheckboxes(
 
   let content: string | null = null;
   if (artifactPath) {
-    content = loadArtifactContent(artifactPath, absPath, {
-      artifact_type: "PLAN",
-      milestone_id: milestoneId,
-      slice_id: sliceId,
-    });
+    content = loadArtifactContent(artifactPath);
   }
 
   if (!content) {
-    process.stderr.write(
-      `markdown-renderer: no plan content available for ${milestoneId}/${sliceId}\n`,
-    );
-    return false;
+    await renderPlanFromDb(basePath, milestoneId, sliceId);
+    return true;
   }
 
   // Apply checkbox patches for each task

@@ -8,7 +8,7 @@ Auto mode is GSD's autonomous execution engine. Run `/gsd auto`, walk away, come
 /gsd auto
 ```
 
-GSD reads `.gsd/STATE.md`, determines the next unit of work, creates a fresh AI session with all relevant context, and lets the AI execute. When it finishes, GSD reads disk state again and dispatches the next unit. This continues until the milestone is complete.
+GSD derives the next unit of work from the authoritative SQLite database at the project root, creates a fresh AI session with all relevant context, and lets the AI execute. When it finishes, GSD persists the result to the database, refreshes markdown projections such as `STATE.md`, and dispatches the next unit. This continues until the milestone is complete.
 
 ## The Execution Loop
 
@@ -26,6 +26,36 @@ Plan → Execute (per task) → Complete → Reassess Roadmap → Next Slice
 - **Reassess** — checks if the roadmap still makes sense after what was learned
 - **Validate** — after all slices, verifies success criteria were actually met
 
+## State Authority
+
+The GSD database is the runtime source of truth for milestones, slices, tasks, requirements, decisions, summaries, and completion status. Markdown files in `.gsd/` are rendered projections for review, prompts, and git-friendly history; editing a projection does not override the database unless a GSD command imports or saves the change.
+
+In worktree mode, the project-root database and project-root `.gsd/` state remain authoritative. Worktree markdown projections are diagnostics, not state to sync back. Runtime state derivation does not silently rebuild from markdown when the database is unavailable. The legacy markdown fallback is only enabled with `GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK=1` for tests and explicit recovery work.
+
+## Deep Planning Mode
+
+Enable project-level deep planning with `/gsd new-project --deep`, `/gsd new-milestone --deep`, or this project preference:
+
+```yaml
+planning_depth: deep
+```
+
+Deep mode runs one-time discovery gates before normal milestone planning:
+
+```text
+Workflow Preferences -> Project Context -> Requirements -> Research Decision -> Optional Project Research -> Milestone Context/Roadmap
+```
+
+| Artifact | Stage | Purpose |
+|----------|-------|---------|
+| `.gsd/PREFERENCES.md` | `--deep` / `workflow-preferences` | Holds `planning_depth: deep` and captured workflow settings |
+| `.gsd/PROJECT.md` | `discuss-project` | Project vision, users, anti-goals, constraints, milestone sequence |
+| `.gsd/REQUIREMENTS.md` | `discuss-requirements` | Capability contract with Active, Validated, Deferred, and Out of Scope requirements |
+| `.gsd/runtime/research-decision.json` | `research-decision` | Records whether to run project research or skip it |
+| `.gsd/research/STACK.md`, `FEATURES.md`, `ARCHITECTURE.md`, `PITFALLS.md` | `research-project` | Optional four-way project research when the decision is `research` |
+
+The research-decision unit only records the choice. If the decision is `research`, the next gate fans out four project research passes. Those outputs inform planning and requirement review; they do not silently create binding requirements.
+
 ## Controlling Auto Mode
 
 ### Pause
@@ -38,7 +68,7 @@ Press **Escape**. The conversation is preserved. You can interact with the agent
 /gsd auto
 ```
 
-Auto mode reads disk state and picks up where it left off.
+Auto mode derives the latest database state and picks up where it left off.
 
 ### Stop
 
@@ -68,6 +98,19 @@ Fire-and-forget thought capture. Captures are triaged automatically between task
 
 Every task gets a clean AI context window. No accumulated garbage, no quality degradation from context bloat. The dispatch prompt includes everything needed — task plans, prior summaries, decisions, dependency context — so the AI starts oriented.
 
+## Context Mode
+
+Context Mode is enabled by default for auto-mode runs. Each unit receives manifest-driven guidance to preserve the conversation window: use `gsd_exec` for noisy codebase scans, builds, tests, and diagnostics; use `gsd_exec_search` before repeating a prior sandboxed run; and use `gsd_resume` after compaction or session resume to read `.gsd/last-snapshot.md`.
+
+`gsd_exec` writes full stdout/stderr and metadata under `.gsd/exec/`, then returns only a short digest to the agent. This keeps large command output out of the LLM context while preserving exact evidence on disk. Opt out with:
+
+```yaml
+context_mode:
+  enabled: false
+```
+
+You can also tune sandbox behavior with `context_mode.exec_timeout_ms`, `context_mode.exec_stdout_cap_bytes`, and `context_mode.exec_digest_chars`.
+
 ## Runtime Tool Policy
 
 Every auto-mode unit declares a `ToolsPolicy` in its `UnitContextManifest`, and GSD enforces it before tool calls run. Execution units use `all` mode and can edit project files, run shell commands, and dispatch subagents. Most planning and discussion units use `planning` mode: read tools are allowed, writes are limited to `.gsd/`, bash must be read-only, and subagent dispatch is blocked. Selected planning and closeout units use `planning-dispatch` mode, which keeps the same source-write and bash restrictions but allows `subagent` dispatch for isolated recon, planning, or review work. Documentation units use `docs` mode, which also allows writes to the manifest's documentation globs such as `docs/**`, top-level `README*.md`, `CHANGELOG.md`, and top-level `*.md`.
@@ -91,11 +134,11 @@ GSD isolates milestone work using one of three modes:
 
 | Mode | How It Works | Best For |
 |------|-------------|----------|
-| `worktree` (default) | Each milestone gets its own directory and branch | Most projects |
+| `none` (default) | Work happens directly on your current branch | Most projects |
+| `worktree` | Each milestone gets its own directory and branch | Projects that need file isolation |
 | `branch` | Work happens in the project root on a milestone branch | Submodule-heavy repos |
-| `none` | Work happens directly on your current branch | Hot-reload workflows |
 
-In worktree mode, all commits are squash-merged to main as one clean commit when the milestone completes. See [Git & Worktrees](../configuration/git-settings.md).
+In worktree mode, all commits are squash-merged to main as one clean commit when the milestone completes. Worktree mode requires at least one commit; zero-commit repos temporarily run as `none` until `HEAD` exists. See [Git & Worktrees](../configuration/git-settings.md).
 
 ## Crash Recovery
 

@@ -14,7 +14,7 @@ import type { GSDPreferences } from "./preferences.js";
 import type { UatType } from "./files.js";
 import type { MinimalModelRegistry } from "./context-budget.js";
 import { loadFile, extractUatType, loadActiveOverrides } from "./files.js";
-import { isDbAvailable, getMilestoneSlices, getPendingGates, markAllGatesOmitted, getMilestone, updateMilestoneStatus } from "./gsd-db.js";
+import { isDbAvailable, getMilestoneSlices, getPendingGates, markAllGatesOmitted, getMilestone, insertAssessment, transaction } from "./gsd-db.js";
 import { isClosedStatus } from "./status-guards.js";
 import { extractVerdict, isAcceptableUatVerdict } from "./verdict-parser.js";
 
@@ -30,13 +30,17 @@ import {
   buildSliceFileName,
 } from "./paths.js";
 import { parseRoadmap } from "./parsers-legacy.js";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { validateArtifact } from "./schemas/validate.js";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { logWarning, logError } from "./workflow-logger.js";
 import { join } from "node:path";
 import { hasImplementationArtifacts } from "./auto-recovery.js";
-import { classifyMilestoneSummaryContent } from "./milestone-summary-classifier.js";
 import {
   buildDiscussMilestonePrompt,
+  buildDiscussProjectPrompt,
+  buildDiscussRequirementsPrompt,
+  buildResearchDecisionPrompt,
+  buildResearchProjectPrompt,
   buildResearchMilestonePrompt,
   buildPlanMilestonePrompt,
   buildResearchSlicePrompt,
@@ -63,6 +67,19 @@ import { getMilestonePipelineVariant } from "./milestone-scope-classifier.js";
 import { EXECUTION_ENTRY_PHASES, hasFinalizedMilestoneContext } from "./uok/plan-v2.js";
 import { isAutoActive } from "./auto.js";
 import { markDepthVerified } from "./bootstrap/write-gate.js";
+import { ensureWorkflowPreferencesCaptured } from "./planning-depth.js";
+import { MILESTONE_ID_RE } from "./milestone-ids.js";
+import {
+  PROJECT_RESEARCH_INFLIGHT_MARKER,
+} from "./project-research-policy.js";
+import {
+  isWorkflowPrefsCaptured,
+  resolveDeepProjectSetupState,
+  type DeepProjectSetupStage,
+} from "./deep-project-setup-policy.js";
+import { annotateBackgroundable } from "./delegation-policy.js";
+import { invalidateAllCaches } from "./cache.js";
+import { insertMilestoneValidationGates } from "./milestone-validation-gates.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -75,6 +92,12 @@ export type DispatchAction =
       pauseAfterDispatch?: boolean;
       /** Name of the matched dispatch rule from the unified registry (journal provenance). */
       matchedRule?: string;
+      /**
+       * True when the matched unit type has a `good` verdict in delegation-policy.ts.
+       * Annotated in `resolveDispatch`. Consumers may use this to fork the prompt
+       * to a background sub-agent; default behavior is unchanged (synchronous).
+       */
+      backgroundable?: boolean;
     }
   | { action: "stop"; reason: string; level: "info" | "warning" | "error"; matchedRule?: string }
   | { action: "skip"; matchedRule?: string };
@@ -91,11 +114,19 @@ export interface DispatchContext {
   sessionContextWindow?: number;
   /** Model registry forwarded to the budget engine so it can look up the configured executor model. */
   modelRegistry?: MinimalModelRegistry;
+  /** Session model provider, used for provider-specific effective context windows. */
+  sessionProvider?: string;
 }
 
 type ReassessmentChecker = typeof checkNeedsReassessment;
+type ResearchProjectPromptBuilder = typeof buildResearchProjectPrompt;
 
 let reassessmentChecker: ReassessmentChecker = checkNeedsReassessment;
+let researchProjectPromptBuilder: ResearchProjectPromptBuilder = buildResearchProjectPrompt;
+
+function shouldBypassMilestoneDepthGateInAuto(prefs: GSDPreferences | undefined): boolean {
+  return isAutoActive() && prefs?.planning_depth !== "deep";
+}
 
 export function setReassessmentCheckerForTest(checker: ReassessmentChecker): () => void {
   const previous = reassessmentChecker;
@@ -105,12 +136,29 @@ export function setReassessmentCheckerForTest(checker: ReassessmentChecker): () 
   };
 }
 
+export function setResearchProjectPromptBuilderForTest(builder: ResearchProjectPromptBuilder): () => void {
+  const previous = researchProjectPromptBuilder;
+  researchProjectPromptBuilder = builder;
+  return () => {
+    researchProjectPromptBuilder = previous;
+  };
+}
+
 export interface DispatchRule {
   /** Human-readable name for debugging and test identification */
   name: string;
   /** Return a DispatchAction if this rule matches, null to fall through */
   match: (ctx: DispatchContext) => Promise<DispatchAction | null>;
 }
+
+export type DeepProjectStage =
+  DeepProjectSetupStage;
+
+export type DeepStageGate =
+  | { status: "not-applicable"; stage: null; reason: string }
+  | { status: "complete"; stage: null; reason: string }
+  | { status: "pending"; stage: DeepProjectStage; reason: string }
+  | { status: "blocked"; stage: DeepProjectStage; reason: string };
 
 async function readUatGateVerdict(
   basePath: string,
@@ -142,6 +190,25 @@ async function readUatGateVerdict(
   }
 
   return null;
+}
+
+/**
+ * Deep planning mode: check whether any project-level stage gate
+ * (workflow-preferences, discuss-project, discuss-requirements,
+ * research-decision, research-project) still has work pending.
+ *
+ * Used by the milestone-level discuss rules to yield to project-level
+ * deep-mode rules when the project hasn't finished its setup interview.
+ * Returns false in light mode (or when prefs absent) so the milestone
+ * rules behave exactly as before.
+ */
+export function getDeepStageGate(prefs: GSDPreferences | undefined, basePath: string): DeepStageGate {
+  return resolveDeepProjectSetupState(prefs, basePath);
+}
+
+export function hasPendingDeepStage(prefs: GSDPreferences | undefined, basePath: string): boolean {
+  const gate = getDeepStageGate(prefs, basePath);
+  return gate.status === "pending" || gate.status === "blocked";
 }
 
 function missingSliceStop(mid: string, phase: string): DispatchAction {
@@ -305,19 +372,17 @@ export const DISPATCH_RULES: DispatchRule[] = [
     // Fire BEFORE the execution-entry phase rules so we redispatch to
     // `discuss-milestone` instead of hitting the plan-v2 gate.
     name: "execution-entry phase (no context) → discuss-milestone",
-    match: async ({ state, mid, midTitle, basePath, structuredQuestionsAvailable }) => {
+    match: async ({ state, mid, midTitle, basePath, prefs, structuredQuestionsAvailable }) => {
       if (!EXECUTION_ENTRY_PHASES.has(state.phase)) return null;
+      if (!MILESTONE_ID_RE.test(mid)) return null;
       // Align with the plan-v2 gate's lookup semantics: whitespace-only counts
       // as missing, and an auto worktree may fall back to GSD_PROJECT_ROOT.
       if (hasFinalizedMilestoneContext(basePath, mid)) return null;
-      // H6 fix (#4973): In auto-mode there is no human to answer the
-      // depth-verification ask_user_questions, so the write-gate deadlocks.
-      // Pre-mark the milestone as depth-verified so gsd_summary_save({artifact_type:"CONTEXT"})
-      // is not blocked. Safe ordering: session_switch fires clearDiscussionFlowState()
-      // (register-hooks.ts:106) before before_agent_start, which fires before resolveDispatch
-      // reaches this match fn — so this call always happens after any session-switch reset.
-      // Interactive sessions (isAutoActive()===false) are unaffected.
-      if (isAutoActive()) {
+      // H6 fix (#4973): non-deep auto-mode has no human to answer the
+      // depth-verification question, so pre-marking avoids a write-gate
+      // deadlock. Deep planning is still user-driven even inside auto-mode,
+      // so it must wait for explicit approval instead of taking this bypass.
+      if (shouldBypassMilestoneDepthGateInAuto(prefs)) {
         markDepthVerified(mid, basePath);
       }
       return {
@@ -454,12 +519,17 @@ export const DISPATCH_RULES: DispatchRule[] = [
   },
   {
     name: "needs-discussion → discuss-milestone",
-    match: async ({ state, mid, midTitle, basePath, structuredQuestionsAvailable }) => {
+    match: async ({ state, mid, midTitle, basePath, prefs, structuredQuestionsAvailable }) => {
       if (state.phase !== "needs-discussion") return null;
-      // H6 fix (#4973): auto-mark depth-verified so the write-gate does not
-      // deadlock in non-interactive (auto-mode) runs. See ordering note at
-      // "execution-entry phase (no context) → discuss-milestone" above.
-      if (isAutoActive()) {
+      // Deep mode bypass: yield to the project-level deep stage gates
+      // (workflow-prefs, discuss-project, discuss-requirements,
+      // research-decision, research-project) when any of them still have
+      // work pending. Without this guard, the milestone discuss rule wins
+      // before the deep rules ever get a chance to fire.
+      if (hasPendingDeepStage(prefs, basePath)) return null;
+      // H6 fix (#4973): keep the non-deep auto-mode bypass, but do not
+      // pre-verify deep planning's user-facing milestone approval gate.
+      if (shouldBypassMilestoneDepthGateInAuto(prefs)) {
         markDepthVerified(mid, basePath);
       }
       return {
@@ -476,16 +546,156 @@ export const DISPATCH_RULES: DispatchRule[] = [
     },
   },
   {
+    // Deep mode stage gate: workflow preferences not yet captured.
+    // This used to dispatch an agent unit, but the step is deterministic
+    // defaults-writing. Keep it in-process so missing preferences cannot loop
+    // on the same no-input unit until stuck detection fires.
+    name: "deep: pre-planning (no workflow prefs) → workflow-preferences",
+    match: async ({ state, basePath, prefs }) => {
+      if (prefs?.planning_depth !== "deep") return null;
+      if (state.phase !== "pre-planning" && state.phase !== "needs-discussion") return null;
+      if (isWorkflowPrefsCaptured(basePath)) return null; // already captured — fall through
+      ensureWorkflowPreferencesCaptured(basePath);
+      return null;
+    },
+  },
+  {
+    // Deep mode stage gate: PROJECT.md missing or invalid.
+    // Fires only when planning_depth === "deep" and PROJECT.md is missing/invalid.
+    // Project-level interview must complete before any milestone-level discussion.
+    // Light mode (default) skips this rule entirely — falls through to milestone rules.
+    name: "deep: pre-planning (no PROJECT) → discuss-project",
+    match: async ({ state, basePath, prefs, structuredQuestionsAvailable }) => {
+      if (prefs?.planning_depth !== "deep") return null;
+      if (state.phase !== "pre-planning" && state.phase !== "needs-discussion") return null;
+      const projectPath = join(gsdRoot(basePath), "PROJECT.md");
+      if (existsSync(projectPath) && validateArtifact(projectPath, "project").ok) return null; // PROJECT.md valid — fall through
+      return {
+        action: "dispatch",
+        unitType: "discuss-project",
+        unitId: "PROJECT",
+        prompt: await buildDiscussProjectPrompt(basePath, structuredQuestionsAvailable),
+      };
+    },
+  },
+  {
+    // Deep mode stage gate: REQUIREMENTS.md missing or invalid.
+    // Fires only when planning_depth === "deep", PROJECT.md is valid, and
+    // REQUIREMENTS.md is missing/invalid.
+    // Falls through in light mode or when REQUIREMENTS.md already exists and is valid.
+    name: "deep: pre-planning (no REQUIREMENTS) → discuss-requirements",
+    match: async ({ state, basePath, prefs, structuredQuestionsAvailable }) => {
+      if (prefs?.planning_depth !== "deep") return null;
+      if (state.phase !== "pre-planning" && state.phase !== "needs-discussion") return null;
+      const projectPath = join(gsdRoot(basePath), "PROJECT.md");
+      if (!existsSync(projectPath) || !validateArtifact(projectPath, "project").ok) return null; // PROJECT.md missing/invalid — earlier rule handles
+      const requirementsPath = join(gsdRoot(basePath), "REQUIREMENTS.md");
+      if (existsSync(requirementsPath) && validateArtifact(requirementsPath, "requirements").ok) return null; // REQUIREMENTS.md valid — fall through
+      return {
+        action: "dispatch",
+        unitType: "discuss-requirements",
+        unitId: "REQUIREMENTS",
+        prompt: await buildDiscussRequirementsPrompt(basePath, structuredQuestionsAvailable),
+      };
+    },
+  },
+  {
+    // Deep mode research gate: capture user's research decision.
+    // Fires after discuss-requirements (REQUIREMENTS.md exists) when no decision
+    // marker has been written yet. Asks one yes/no question via ask_user_questions
+    // and writes .gsd/runtime/research-decision.json. Downstream research-project
+    // rule reads the marker to decide whether to fan out 4 parallel research subagents.
+    // Light mode skips entirely.
+    name: "deep: pre-planning (no research decision) → research-decision",
+    match: async ({ state, basePath, prefs, structuredQuestionsAvailable }) => {
+      if (prefs?.planning_depth !== "deep") return null;
+      if (state.phase !== "pre-planning" && state.phase !== "needs-discussion") return null;
+      const gate = resolveDeepProjectSetupState(prefs, basePath);
+      if (gate.status !== "pending" || gate.stage !== "research-decision") return null;
+      return {
+        action: "dispatch",
+        unitType: "research-decision",
+        unitId: "RESEARCH-DECISION",
+        prompt: await buildResearchDecisionPrompt(basePath, structuredQuestionsAvailable),
+      };
+    },
+  },
+  {
+    // Deep mode parallel research.
+    // Fires when planning_depth === "deep", REQUIREMENTS.md exists,
+    // research-decision marker says "research", and any of the 4 project
+    // research files is missing. Spawns one orchestrator session that fans
+    // out 4 parallel subagents (stack, features, architecture, pitfalls).
+    // Skipped entirely when user chose "skip" at the research-decision gate.
+    name: "deep: pre-planning (research approved, files missing) → research-project",
+    match: async ({ state, basePath, prefs, structuredQuestionsAvailable }) => {
+      if (prefs?.planning_depth !== "deep") return null;
+      if (state.phase !== "pre-planning" && state.phase !== "needs-discussion") return null;
+      const gate = resolveDeepProjectSetupState(prefs, basePath);
+      if (gate.status === "blocked" && gate.stage === "project-research") {
+        return {
+          action: "stop" as const,
+          reason: gate.reason,
+          level: "warning" as const,
+        };
+      }
+      if (gate.status !== "pending" || gate.stage !== "project-research") return null;
+      // Idempotency guard: one orchestrator owns the project research fan-out
+      // until guided-research-project.md deletes this marker during closeout.
+      const runtimeDir = join(gsdRoot(basePath), "runtime");
+      const inflightMarkerPath = join(runtimeDir, PROJECT_RESEARCH_INFLIGHT_MARKER);
+      const researchInFlightStop = {
+        action: "stop" as const,
+        reason:
+          "Project research is already in progress. Wait for it to finish, or clear `.gsd/runtime/research-project-inflight` if the prior run crashed.",
+        level: "info" as const,
+      };
+      if (existsSync(inflightMarkerPath)) return researchInFlightStop;
+      mkdirSync(runtimeDir, { recursive: true });
+      try {
+        writeFileSync(
+          inflightMarkerPath,
+          JSON.stringify({ started: new Date().toISOString() }) + "\n",
+          { encoding: "utf-8", flag: "wx" },
+        );
+      } catch (err) {
+        if (err && typeof err === "object" && "code" in err && err.code === "EEXIST") {
+          return researchInFlightStop;
+        }
+        throw err;
+      }
+      try {
+        const prompt = await researchProjectPromptBuilder(basePath, structuredQuestionsAvailable);
+        return {
+          action: "dispatch",
+          unitType: "research-project",
+          unitId: "RESEARCH-PROJECT",
+          prompt,
+        };
+      } catch (err) {
+        try {
+          if (existsSync(inflightMarkerPath)) unlinkSync(inflightMarkerPath);
+        } catch (cleanupErr) {
+          logWarning(
+            "dispatch",
+            `failed to remove research-project in-flight marker after prompt assembly error: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`,
+          );
+        }
+        throw err;
+      }
+    },
+  },
+  {
     name: "pre-planning (no context) → discuss-milestone",
-    match: async ({ state, mid, midTitle, basePath, structuredQuestionsAvailable }) => {
+    match: async ({ state, mid, midTitle, basePath, prefs, structuredQuestionsAvailable }) => {
       if (state.phase !== "pre-planning") return null;
       const contextFile = resolveMilestoneFile(basePath, mid, "CONTEXT");
       const hasContext = !!(contextFile && (await loadFile(contextFile)));
       if (hasContext) return null; // fall through to next rule
-      // H6 fix (#4973): auto-mark depth-verified so the write-gate does not
-      // deadlock in non-interactive (auto-mode) runs. See ordering note at
-      // "execution-entry phase (no context) → discuss-milestone" above.
-      if (isAutoActive()) {
+      if (prefs?.planning_depth === "deep") return null;
+      // H6 fix (#4973): keep the non-deep auto-mode bypass, but do not
+      // pre-verify deep planning's user-facing milestone approval gate.
+      if (shouldBypassMilestoneDepthGateInAuto(prefs)) {
         markDepthVerified(mid, basePath);
       }
       return {
@@ -653,15 +863,11 @@ export const DISPATCH_RULES: DispatchRule[] = [
     // while a slice is still `is_sketch=1`, fall through to a standard
     // plan-slice so the loop doesn't dead-end.
     //
-    // Note on the flag-OFF downgrade: plan-slice does not explicitly clear
-    // `is_sketch`. After it writes PLAN.md, the auto-heal in state.ts's
-    // `deriveStateFromDb` (via `autoHealSketchFlags`) flips the flag on the
-    // next iteration. That implicit coupling is the sole mechanism that
-    // reconciles `is_sketch=1` on the plan-slice path — do not remove the
-    // auto-heal without either adding an explicit `setSliceSketchFlag(..., false)`
-    // call here or doing so inside the plan-slice tool handler.
+    // Note on the flag-OFF downgrade: DB slice metadata is authoritative.
+    // PLAN.md is only a projection, so plan-slice/refine-slice handlers must
+    // explicitly clear `is_sketch` when a sketch becomes a full plan.
     name: "refining → refine-slice",
-    match: async ({ state, mid, midTitle, basePath, prefs, sessionContextWindow, modelRegistry }) => {
+    match: async ({ state, mid, midTitle, basePath, prefs, sessionContextWindow, modelRegistry, sessionProvider }) => {
       if (state.phase !== "refining") return null;
       if (!state.activeSlice) return missingSliceStop(mid, state.phase);
       const sid = state.activeSlice.id;
@@ -686,7 +892,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
           unitId: `${mid}/${sid}`,
           prompt: await buildPlanSlicePrompt(
             mid, midTitle, sid, sTitle, basePath, undefined,
-            { ...(softScopeHint ? { softScopeHint } : {}), sessionContextWindow, modelRegistry },
+            { ...(softScopeHint ? { softScopeHint } : {}), sessionContextWindow, modelRegistry, sessionProvider },
           ),
         };
       }
@@ -696,14 +902,14 @@ export const DISPATCH_RULES: DispatchRule[] = [
         unitId: `${mid}/${sid}`,
         prompt: await buildRefineSlicePrompt(
           mid, midTitle, sid, sTitle, basePath, undefined,
-          { sessionContextWindow, modelRegistry },
+          { sessionContextWindow, modelRegistry, sessionProvider },
         ),
       };
     },
   },
   {
     name: "planning → plan-slice",
-    match: async ({ state, mid, midTitle, basePath, sessionContextWindow, modelRegistry, session }) => {
+    match: async ({ state, mid, midTitle, basePath, sessionContextWindow, modelRegistry, sessionProvider, session }) => {
       if (state.phase !== "planning") return null;
       if (!state.activeSlice) return missingSliceStop(mid, state.phase);
       const sid = state.activeSlice!.id;
@@ -732,7 +938,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
           sTitle,
           basePath,
           undefined,
-          { sessionContextWindow, modelRegistry, priorPreExecFailure },
+          { sessionContextWindow, modelRegistry, sessionProvider, priorPreExecFailure },
         ),
       };
     },
@@ -793,7 +999,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
   },
   {
     name: "executing → reactive-execute (parallel dispatch)",
-    match: async ({ state, mid, midTitle, basePath, prefs, sessionContextWindow, modelRegistry }) => {
+    match: async ({ state, mid, midTitle, basePath, prefs, sessionContextWindow, modelRegistry, sessionProvider }) => {
       if (state.phase !== "executing" || !state.activeTask) return null;
       if (!state.activeSlice) return null; // fall through
 
@@ -896,7 +1102,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
             selected,
             basePath,
             subagentModel,
-            { sessionContextWindow, modelRegistry },
+            { sessionContextWindow, modelRegistry, sessionProvider },
           ),
         };
       } catch (err) {
@@ -908,7 +1114,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
   },
   {
     name: "executing → execute-task (recover missing task plan → plan-slice)",
-    match: async ({ state, mid, midTitle, basePath, sessionContextWindow, modelRegistry }) => {
+    match: async ({ state, mid, midTitle, basePath, sessionContextWindow, modelRegistry, sessionProvider }) => {
       if (state.phase !== "executing" || !state.activeTask) return null;
       if (!state.activeSlice) return missingSliceStop(mid, state.phase);
       const sid = state.activeSlice!.id;
@@ -933,7 +1139,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
             sTitle,
             basePath,
             undefined,
-            { sessionContextWindow, modelRegistry },
+            { sessionContextWindow, modelRegistry, sessionProvider },
           ),
         };
       }
@@ -943,7 +1149,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
   },
   {
     name: "executing → execute-task",
-    match: async ({ state, mid, basePath, sessionContextWindow, modelRegistry }) => {
+    match: async ({ state, mid, basePath, sessionContextWindow, modelRegistry, sessionProvider }) => {
       if (state.phase !== "executing" || !state.activeTask) return null;
       if (!state.activeSlice) return missingSliceStop(mid, state.phase);
       const sid = state.activeSlice!.id;
@@ -962,7 +1168,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
           tid,
           tTitle,
           basePath,
-          { sessionContextWindow, modelRegistry },
+          { sessionContextWindow, modelRegistry, sessionProvider },
         ),
       };
     },
@@ -1000,9 +1206,12 @@ export const DISPATCH_RULES: DispatchRule[] = [
           const skipSource = trivialVariant
             ? "trivial-scope pipeline variant (#4781)"
             : "`skip_milestone_validation` preference";
+          const skipValidationReason = trivialVariant ? "trivial-scope" : "preference";
           const content = [
             "---",
             "verdict: pass",
+            "skip_validation: true",
+            `skip_validation_reason: ${skipValidationReason}`,
             "remediation_round: 0",
             "---",
             "",
@@ -1011,6 +1220,45 @@ export const DISPATCH_RULES: DispatchRule[] = [
             `Milestone validation was skipped via ${skipSource}.`,
           ].join("\n");
           writeFileSync(validationPath, content, "utf-8");
+          try {
+            // DB-backed state derivation keys off assessments, not only the file
+            // projection. Persist the skipped validation there too so the next
+            // loop iteration advances to completing-milestone instead of
+            // re-entering validating-milestone.
+            if (isDbAvailable()) {
+              transaction(() => {
+                insertAssessment({
+                  path: validationPath,
+                  milestoneId: mid,
+                  sliceId: null,
+                  taskId: null,
+                  status: "pass",
+                  scope: "milestone-validation",
+                  fullContent: content,
+                });
+                const gateSliceId = getMilestoneSlices(mid)[0]?.id;
+                if (gateSliceId) {
+                  insertMilestoneValidationGates(
+                    mid,
+                    gateSliceId,
+                    "pass",
+                    new Date().toISOString(),
+                  );
+                }
+              });
+            }
+          } catch (err) {
+            try {
+              unlinkSync(validationPath);
+            } catch (unlinkErr) {
+              logWarning(
+                "dispatch",
+                `failed to remove skipped validation file after DB write failure for ${mid}: ${unlinkErr instanceof Error ? unlinkErr.message : String(unlinkErr)}`,
+              );
+            }
+            throw err;
+          }
+          invalidateAllCaches();
         }
         return { action: "skip" };
       }
@@ -1035,15 +1283,6 @@ export const DISPATCH_RULES: DispatchRule[] = [
         const milestone = getMilestone(mid);
         if (milestone && isClosedStatus(milestone.status)) {
           return { action: "skip" };
-        }
-      }
-
-      const existingSummary = resolveMilestoneFile(basePath, mid, "SUMMARY");
-      let summaryOutcome: "success" | "failure" | "unknown" = "unknown";
-      if (existingSummary) {
-        const summaryContent = await loadFile(existingSummary);
-        if (summaryContent) {
-          summaryOutcome = classifyMilestoneSummaryContent(summaryContent);
         }
       }
 
@@ -1104,7 +1343,9 @@ export const DISPATCH_RULES: DispatchRule[] = [
               if (validationContent) {
                 // Allow completion when validation was intentionally skipped by
                 // preference/budget profile (#3399, #3344).
+                const skippedByMarker = /^skip_validation:\s*true$/im.test(validationContent);
                 const skippedByPreference = /skip(?:ped)?[\s\-]+(?:by|per|due to)\s+(?:preference|budget|profile)/i.test(validationContent);
+                const skippedByTrivialVariant = /trivial-scope pipeline variant/i.test(validationContent);
 
                 // Accept either the structured template format (table with MET/N/A/SATISFIED)
                 // or prose evidence patterns the validation agent may emit.
@@ -1113,7 +1354,12 @@ export const DISPATCH_RULES: DispatchRule[] = [
                   (validationContent.includes("MET") || validationContent.includes("N/A") || validationContent.includes("SATISFIED"));
                 const proseMatch =
                   /[Oo]perational[\s\S]{0,500}?(?:✅|pass|verified|confirmed|met|complete|true|yes|addressed|covered|satisfied|partially|n\/a|not[\s-]+applicable)/i.test(validationContent);
-                const hasOperationalCheck = skippedByPreference || structuredMatch || proseMatch;
+                const hasOperationalCheck =
+                  skippedByMarker ||
+                  skippedByPreference ||
+                  skippedByTrivialVariant ||
+                  structuredMatch ||
+                  proseMatch;
                 if (!hasOperationalCheck) {
                   return {
                     action: "stop" as const,
@@ -1127,48 +1373,6 @@ export const DISPATCH_RULES: DispatchRule[] = [
         }
       } catch (err) { /* fall through — don't block on DB errors */
         logWarning("dispatch", `verification class check failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-
-      // Disk/DB mismatch handling (#4658): SUMMARY presence alone is not enough.
-      // Apply post-gate policy:
-      // - success summary: reconcile DB and skip re-dispatch
-      // - failure summary: pause/fail-closed
-      // - unknown summary: pause/fail-closed
-      if (existingSummary) {
-        const milestone = isDbAvailable() ? getMilestone(mid) : null;
-        const status = milestone?.status ?? (isDbAvailable() ? "missing" : "unavailable");
-
-        if (summaryOutcome === "success") {
-          if (!isDbAvailable()) {
-            logWarning("dispatch", `Milestone ${mid} SUMMARY indicates completion while DB is unavailable — skipping duplicate complete-milestone dispatch`);
-            return { action: "skip" };
-          }
-          try {
-            updateMilestoneStatus(mid, "complete", new Date().toISOString());
-            logWarning("dispatch", `Milestone ${mid} SUMMARY indicates completion while DB status was "${status}" — reconciled DB to complete (#4658)`);
-            return { action: "skip" };
-          } catch (err) {
-            return {
-              action: "stop",
-              level: "warning",
-              reason: `Milestone ${mid} SUMMARY indicates completion but DB reconciliation failed (${err instanceof Error ? err.message : String(err)}). Auto-mode paused for manual review.`,
-            };
-          }
-        }
-
-        if (summaryOutcome === "failure") {
-          return {
-            action: "stop",
-            level: "warning",
-            reason: `Milestone ${mid} has a failure-path SUMMARY while DB status is "${status}". Auto-mode will not promote completion from failure artifacts. Re-run complete-milestone only after blockers are resolved and verification passes.`,
-          };
-        }
-
-        return {
-          action: "stop",
-          level: "warning",
-          reason: `Milestone ${mid} has an ambiguous SUMMARY while DB status is "${status}". Auto-mode paused instead of promoting completion from file presence alone.`,
-        };
       }
 
       return {
@@ -1207,10 +1411,21 @@ import { getRegistry } from "./rule-registry.js";
 export async function resolveDispatch(
   ctx: DispatchContext,
 ): Promise<DispatchAction> {
+  const activeMid = ctx.state.activeMilestone?.id;
+  if (activeMid && ctx.mid !== activeMid) {
+    return {
+      action: "stop",
+      reason:
+        `Dispatch milestone mismatch: context mid "${ctx.mid}" does not match active milestone "${activeMid}". ` +
+        "This usually means a project-level deep setup pseudo-id leaked into milestone dispatch; rerun /gsd auto after setup state is reconciled.",
+      level: "warning",
+    };
+  }
+
   // Delegate to registry when available
   try {
     const registry = getRegistry();
-    return await registry.evaluateDispatch(ctx);
+    return annotateBackgroundable(await registry.evaluateDispatch(ctx));
   } catch (err) {
     // Registry not initialized — fall back to inline loop
     logWarning("dispatch", `registry dispatch failed, falling back to inline rules: ${err instanceof Error ? err.message : String(err)}`);
@@ -1220,7 +1435,7 @@ export async function resolveDispatch(
     const result = await rule.match(ctx);
     if (result) {
       if (result.action !== "skip") result.matchedRule = rule.name;
-      return result;
+      return annotateBackgroundable(result);
     }
   }
 
@@ -1235,6 +1450,7 @@ export async function resolveDispatch(
     matchedRule: "<no-match>",
   };
 }
+
 
 /** Exposed for testing — returns the rule names in evaluation order. */
 export function getDispatchRuleNames(): string[] {

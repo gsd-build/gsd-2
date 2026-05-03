@@ -8,6 +8,13 @@ Your goal is **not** to center the discussion on tech stack trivia, naming conve
 
 ## Interview Protocol
 
+### Read project shape
+
+Before your first question round, read `.gsd/PROJECT.md` and look for `## Project Shape` → `**Complexity:**`. The verdict is either **`simple`** or **`complex`** (default to `complex` if the section is missing or unclear).
+
+- **`simple`** — favor 1–2 plain-text rounds, write the slice context fast. Skip parallel-research investigation.
+- **`complex`** — full investigation with structured 3–4-option questions.
+
 ### Before your first question round
 
 Do a lightweight targeted investigation so your questions are grounded in reality:
@@ -24,7 +31,7 @@ Do **not** go deep — just enough that your questions reflect what's actually t
 
 **Never fabricate or simulate user input.** Never generate fake transcript markers like `[User]`, `[Human]`, or `User:`. Ask one question round, then wait for the user's actual response before continuing.
 
-**If `{{structuredQuestionsAvailable}}` is `true`:** Ask **1–3 questions per round** using `ask_user_questions`. **Call `ask_user_questions` exactly once per turn — never make multiple calls with the same or overlapping questions. Wait for the user's response before asking the next round.**
+**If `{{structuredQuestionsAvailable}}` is `true`:** Ask **1–3 questions per round** using `ask_user_questions`. In **`complex`** mode, each multi-choice question MUST present **3 or 4 concrete, researched options** plus a final **"Other — let me discuss"** option; options must be grounded in the investigation above (codebase signals, library docs, prior `.gsd/` artifacts), not generic placeholders. In **`simple`** mode, 2 options is fine. Binary wrap-up gates are exempt from the 3-or-4 rule. **Call `ask_user_questions` exactly once per turn — never make multiple calls with the same or overlapping questions. Wait for the user's response before asking the next round.**
 **If `{{structuredQuestionsAvailable}}` is `false`:** Ask **1–3 questions per round** in plain text. Number them and wait for the user's response before asking the next round.
 Keep each question focused on one of:
 - **UX and user-facing behaviour** — what does the user see, click, trigger, or experience?

@@ -1,3 +1,4 @@
+// GSD-2 — ID-based path resolution for GSD project files and directories
 /**
  * GSD Paths — ID-based path resolution
  *
@@ -10,10 +11,13 @@
  */
 
 import { readdirSync, existsSync, realpathSync, Dirent } from "node:fs";
-import { join, dirname, normalize } from "node:path";
+import { join, dirname, normalize, resolve } from "node:path";
+import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { nativeScanGsdTree, type GsdTreeEntry } from "./native-parser-bridge.js";
 import { DIR_CACHE_MAX } from "./constants.js";
+import { gsdHome } from "./gsd-home.js";
+import { isGsdWorktreePath, resolveWorktreeProjectRoot } from "./worktree-root.js";
 
 // ─── Directory Listing Cache ──────────────────────────────────────────────────
 
@@ -125,9 +129,15 @@ function cachedReaddir(dirPath: string): string[] {
 }
 
 /**
- * Clear the directory listing cache.
+ * Clear the volatile directory listing caches.
  * Call after milestone transitions, file creation in planning directories,
  * or at the start/end of a dispatch cycle.
+ *
+ * NOTE: This does NOT clear gsdRootCache. The project root is stable for
+ * the lifetime of a process; clearing it on every agent turn-end caused a
+ * 250–2500 ms regression per session (git rev-parse + dir walk per turn).
+ * Use _clearGsdRootCache() at session-reset boundaries (workspace switch,
+ * process exit) when the project root may genuinely change.
  */
 export function clearPathCache(): void {
   dirEntryCache.clear();
@@ -178,9 +188,14 @@ export function resolveDir(parentDir: string, idPrefix: string): string | null {
     // Exact match first (current convention: bare ID)
     const exact = entries.find(e => e.isDirectory() && e.name === idPrefix);
     if (exact) return exact.name;
+    const idLower = idPrefix.toLowerCase();
+    const exactCaseInsensitive = entries.find(
+      e => e.isDirectory() && e.name.toLowerCase() === idLower
+    );
+    if (exactCaseInsensitive) return exactCaseInsensitive.name;
     // Prefix match for legacy descriptor dirs: M001-SOMETHING
     const prefixed = entries.find(
-      e => e.isDirectory() && e.name.startsWith(idPrefix + "-")
+      e => e.isDirectory() && e.name.toLowerCase().startsWith(idLower + "-")
     );
     return prefixed ? prefixed.name : null;
   } catch {
@@ -282,11 +297,95 @@ const LEGACY_GSD_ROOT_FILES: Record<GSDRootFileKey, string> = {
 
 // ─── GSD Root Discovery ───────────────────────────────────────────────────────
 
+// Process-lifetime cache for gsdRoot() results.
+// Keys are realpath-normalized (via normCacheKey) so /foo and /foo/ share the
+// same entry and so do case-variant paths on case-insensitive volumes. This
+// normalization is the safety net that prevents cache poisoning from the
+// ~/.gsd walk-up bug (fixed in c46cf4786 + b35e070eb), making it safe to
+// hold this cache for the entire process lifetime.
+// Use _clearGsdRootCache() only at session-reset boundaries (workspace switch,
+// process exit) — NOT inside clearPathCache(), which runs on every agent turn.
 const gsdRootCache = new Map<string, string>();
 
-/** Exported for tests only — do not call in production code. */
+export interface GsdPathContract {
+  /** Canonical repo/project root where authoritative state lives. */
+  projectRoot: string;
+  /** Current execution root, which may be an auto-worktree. */
+  workRoot: string;
+  /** Canonical authoritative .gsd directory. */
+  projectGsd: string;
+  /** Legacy worktree-local .gsd projection directory, when applicable. */
+  worktreeGsd: string | null;
+  /** Canonical authoritative SQLite DB path. */
+  projectDb: string;
+  /** True when workRoot is inside a GSD worktree layout. */
+  isWorktree: boolean;
+}
+
+export function resolveGsdPathContract(
+  workRoot: string,
+  originalProjectRoot?: string | null,
+): GsdPathContract {
+  const resolvedWorkRoot = resolve(workRoot || process.cwd());
+  const isWorktree = isGsdWorktreePath(resolvedWorkRoot);
+  if (isWorktree && !originalProjectRoot?.trim()) {
+    const externalMatch = /[/\\]\.gsd[/\\]projects[/\\][^/\\]+[/\\]worktrees(?:[/\\]|$)/.exec(resolvedWorkRoot);
+    if (externalMatch) {
+      const worktreesIdx = externalMatch[0].search(/[/\\]worktrees(?:[/\\]|$)/);
+      const projectGsd = resolvedWorkRoot.slice(0, externalMatch.index + worktreesIdx);
+      return {
+        projectRoot: dirname(dirname(projectGsd)),
+        workRoot: resolvedWorkRoot,
+        projectGsd,
+        worktreeGsd: join(resolvedWorkRoot, ".gsd"),
+        projectDb: join(projectGsd, "gsd.db"),
+        isWorktree,
+      };
+    }
+  }
+  const projectRoot = resolve(resolveWorktreeProjectRoot(resolvedWorkRoot, originalProjectRoot));
+  const projectGsd = join(projectRoot, ".gsd");
+  const worktreeGsd = isWorktree ? join(resolvedWorkRoot, ".gsd") : null;
+
+  return {
+    projectRoot,
+    workRoot: resolvedWorkRoot,
+    projectGsd,
+    worktreeGsd,
+    projectDb: join(projectGsd, "gsd.db"),
+    isWorktree,
+  };
+}
+
+/**
+ * Invalidate the gsdRoot cache.
+ * Use ONLY at session-reset boundaries: workspace switch, process exit, or
+ * any context where the project root itself may genuinely change.
+ * Do NOT call this on every agent turn — use clearPathCache() for volatile
+ * directory listing invalidation instead.
+ */
 export function _clearGsdRootCache(): void {
   gsdRootCache.clear();
+}
+
+/**
+ * Resolve a path to its canonical real path using the native resolver.
+ * On macOS case-insensitive (HFS+/APFS) volumes, realpathSync.native normalizes
+ * case — ensuring that /foo/Bar and /foo/bar resolve to the same string.
+ * Falls back to resolve(p) for non-existent paths.
+ *
+ * Use this helper everywhere a path is used as an identity/cache key so that
+ * all callers agree on the canonical form.
+ */
+export function normalizeRealPath(p: string): string {
+  try { return realpathSync.native(p); } catch { return resolve(p); }
+}
+
+/** Normalize a path for use as a gsdRootCache key (realpath + trailing-slash strip). */
+function normCacheKey(p: string): string {
+  const r = normalizeRealPath(p);
+  const s = r.replaceAll("\\", "/").replace(/\/+$/, "");
+  return process.platform === "win32" ? s.toLowerCase() : s;
 }
 
 /**
@@ -298,15 +397,55 @@ export function _clearGsdRootCache(): void {
  *   3. Walk up from basePath — handles moved .gsd in an ancestor (bounded by git root)
  *   4. basePath/.gsd         — creation fallback (init scenario)
  *
- * Result is cached per basePath for the process lifetime.
+ * Result is cached per normalized basePath for the process lifetime.
+ * Keys are realpath-normalized so /foo and /foo/ share the same cache entry.
  */
 export function gsdRoot(basePath: string): string {
-  const cached = gsdRootCache.get(basePath);
+  const cacheKey = normCacheKey(basePath);
+  const cached = gsdRootCache.get(cacheKey);
   if (cached) return cached;
 
-  const result = probeGsdRoot(basePath);
-  gsdRootCache.set(basePath, result);
+  // Canonicalize result via realpath before asserting and caching so that
+  // callers always receive a canonical path regardless of whether probeGsdRoot
+  // returned a path through a symlink. Without this, the cached value can
+  // diverge from other realpath-normalized paths (e.g. workspace.identityKey).
+  const result = normalizeRealPath(probeGsdRoot(basePath));
+
+  // Defense-in-depth: if basePath resolves to the user's home directory and
+  // the result equals gsdHome(), refuse — project-scoped writes must never
+  // land in the global ~/.gsd. Paths under ~/.gsd/projects/<hash>/ are still
+  // valid (their basePath does not equal homedir).
+  assertNotGlobalGsdHome(basePath, result);
+
+  gsdRootCache.set(cacheKey, result);
   return result;
+}
+
+function assertNotGlobalGsdHome(basePath: string, result: string): void {
+  const norm = (p: string): string => {
+    let r: string;
+    try { r = realpathSync.native(p); } catch { r = p; }
+    const s = r.replaceAll("\\", "/").replace(/\/+$/, "");
+    return process.platform === "win32" ? s.toLowerCase() : s;
+  };
+  let baseNorm: string;
+  let homeNorm: string;
+  let resultNorm: string;
+  let gsdHomeNorm: string;
+  try {
+    baseNorm = norm(basePath);
+    homeNorm = norm(homedir());
+    resultNorm = norm(result);
+    gsdHomeNorm = norm(gsdHome());
+  } catch {
+    return;
+  }
+  if (baseNorm === homeNorm && resultNorm === gsdHomeNorm) {
+    throw new Error(
+      `Refusing to use ${result} as a project .gsd directory — that is the global GSD home. ` +
+      `Run GSD from inside a project directory.`,
+    );
+  }
 }
 
 /**
@@ -342,6 +481,9 @@ function isInsideGsdWorktree(p: string): boolean {
 }
 
 function probeGsdRoot(rawBasePath: string): string {
+  const contract = resolveGsdPathContract(rawBasePath);
+  if (contract.isWorktree) return contract.projectGsd;
+
   // 1. Fast path — check the input path directly
   const local = join(rawBasePath, ".gsd");
   if (existsSync(local)) return local;
@@ -376,9 +518,21 @@ function probeGsdRoot(rawBasePath: string): string {
     }
   } catch { /* git not available */ }
 
+  // Compute gsdHome once for the skip-check used in steps 2 and 3.
+  const normPath = (p: string): string => {
+    let r: string;
+    try { r = realpathSync.native(p); } catch { r = p; }
+    const s = r.replaceAll("\\", "/").replace(/\/+$/, "");
+    return process.platform === "win32" ? s.toLowerCase() : s;
+  };
+  let gsdHomeNorm: string;
+  try { gsdHomeNorm = normPath(gsdHome()); } catch { gsdHomeNorm = ""; }
+
   if (gitRoot) {
     const candidate = join(gitRoot, ".gsd");
-    if (existsSync(candidate)) return candidate;
+    // Skip if the candidate resolves to the global GSD home — a subdir basePath
+    // must not be anchored to ~/.gsd just because $HOME is a git repo.
+    if (existsSync(candidate) && normPath(candidate) !== gsdHomeNorm) return candidate;
   }
 
   // 3. Walk up from basePath to the git root (only if we are in a subdirectory)
@@ -386,7 +540,7 @@ function probeGsdRoot(rawBasePath: string): string {
     let cur = dirname(basePath);
     while (cur !== basePath) {
       const candidate = join(cur, ".gsd");
-      if (existsSync(candidate)) return candidate;
+      if (existsSync(candidate) && normPath(candidate) !== gsdHomeNorm) return candidate;
       if (cur === gitRoot) break;
       basePath = cur;
       cur = dirname(cur);

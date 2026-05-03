@@ -10,7 +10,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { gsdRoot } from "./paths.js";
 import { GIT_NO_PROMPT_ENV } from "./git-constants.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
@@ -147,7 +147,7 @@ export interface TaskCommitContext {
  * what was actually built), falling back to the task title (what was planned).
  */
 export function buildTaskCommitMessage(ctx: TaskCommitContext): string {
-  const description = ctx.oneLiner || ctx.taskTitle;
+  const description = sanitizeCommitSubjectDescription(ctx.oneLiner || ctx.taskTitle);
   const type = inferCommitType(ctx.taskTitle, ctx.oneLiner);
 
   // Truncate description to ~72 chars for subject line (full budget without scope)
@@ -177,6 +177,61 @@ export function buildTaskCommitMessage(ctx: TaskCommitContext): string {
   }
 
   return `${subject}\n\n${bodyParts.join("\n\n")}`;
+}
+
+function sanitizeCommitSubjectDescription(value: string): string {
+  const cleaned = value
+    .replace(/[\x00-\x1F\x7F]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || "update task";
+}
+
+function normalizeRepoRelativePath(basePath: string, filePath: string): string | null {
+  const trimmed = filePath.trim();
+  if (!trimmed || trimmed.includes("\0")) return null;
+
+  const relPath = isAbsolute(trimmed)
+    ? relative(basePath, trimmed)
+    : normalize(trimmed);
+  if (!relPath || relPath === "." || isAbsolute(relPath) || relPath.startsWith(`..${sep}`) || relPath === "..") {
+    return null;
+  }
+
+  const resolved = resolve(basePath, relPath);
+  const relFromBase = relative(basePath, resolved);
+  if (!relFromBase || relFromBase === "." || relFromBase.startsWith("..") || isAbsolute(relFromBase)) {
+    return null;
+  }
+
+  return relFromBase;
+}
+
+function pathspecToRegex(pattern: string): RegExp {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*");
+  return new RegExp(`^${escaped}$`);
+}
+
+function isExcludedScopedPath(path: string, exclusions: readonly string[]): boolean {
+  const normalizedPath = path.replace(/\\/g, "/");
+  for (const exclusion of exclusions) {
+    const normalizedExclusion = exclusion.replace(/^:!/, "").replace(/\\/g, "/");
+    if (!normalizedExclusion) continue;
+    if (normalizedExclusion.endsWith("/")) {
+      if (normalizedPath === normalizedExclusion.slice(0, -1) || normalizedPath.startsWith(normalizedExclusion)) {
+        return true;
+      }
+      continue;
+    }
+    if (normalizedExclusion.includes("*")) {
+      if (pathspecToRegex(normalizedExclusion).test(normalizedPath)) return true;
+      continue;
+    }
+    if (normalizedPath === normalizedExclusion) return true;
+  }
+  return false;
 }
 
 /**
@@ -659,6 +714,26 @@ export class GitServiceImpl {
     nativeAddAllWithExclusions(this.basePath, allExclusions);
   }
 
+  private scopedStageTaskFiles(
+    taskContext: TaskCommitContext,
+    extraExclusions: readonly string[] = [],
+  ): boolean {
+    const keyFiles = taskContext.keyFiles ?? [];
+    if (keyFiles.length === 0) return false;
+
+    const allExclusions = [...RUNTIME_EXCLUSION_PATHS, ...extraExclusions];
+    const paths = Array.from(new Set(
+      keyFiles
+        .map(file => normalizeRepoRelativePath(this.basePath, file))
+        .filter((file): file is string => file !== null)
+        .filter(file => !isExcludedScopedPath(file, allExclusions)),
+    ));
+    if (paths.length === 0) return false;
+
+    nativeAddPaths(this.basePath, paths);
+    return true;
+  }
+
   /** Tracks whether runtime file cleanup has run this session. */
   private _runtimeFilesCleanedUp = false;
 
@@ -698,7 +773,10 @@ export class GitServiceImpl {
     // Native path uses libgit2 (single syscall), fallback spawns git.
     if (!nativeHasChanges(this.basePath)) return null;
 
-    this.smartStage(extraExclusions);
+    const scoped = taskContext
+      ? this.scopedStageTaskFiles(taskContext, extraExclusions)
+      : false;
+    if (!scoped) this.smartStage(extraExclusions);
 
     // After smart staging, check if anything was actually staged
     // (all changes might have been runtime files that got excluded)

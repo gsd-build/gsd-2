@@ -12,11 +12,11 @@
 
 import { describe, test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { nativeIsRepo, nativeCommit, nativeResetHard } from "../native-git-bridge.js";
+import { nativeIsRepo, nativeCommit, nativeResetHard, nativeBranchDelete } from "../native-git-bridge.js";
 
 // Note: prior static-analysis tests that scanned native-git-bridge.ts for
 // the raw shell-spawn pattern were removed under #4827 — the integration
@@ -71,6 +71,19 @@ describe("native-git-bridge #4180: fallback runtime behaviour", () => {
     assert.equal(subject, "test: regression commit #4180");
   });
 
+  test("nativeCommit runs commit hooks", () => {
+    const hookPath = join(repo, ".git", "hooks", "commit-msg");
+    const marker = join(repo, "hook-ran.txt");
+    writeFileSync(hookPath, `#!/bin/sh\nprintf ran > "${marker}"\n`, "utf-8");
+    chmodSync(hookPath, 0o755);
+
+    writeFileSync(join(repo, "file.txt"), "hooked\n");
+    git(["add", "."], repo);
+    nativeCommit(repo, "test: hook execution");
+
+    assert.equal(readFileSync(marker, "utf-8"), "ran");
+  });
+
   test("nativeCommit returns null when nothing is staged", () => {
     const result = nativeCommit(repo, "test: nothing staged");
     assert.equal(result, null);
@@ -94,5 +107,12 @@ describe("native-git-bridge #4180: fallback runtime behaviour", () => {
 
     const content = readFileSync(join(repo, "file.txt"), "utf-8");
     assert.equal(content, "initial\n", "file should be restored to HEAD content after hard reset");
+  });
+
+  test("nativeBranchDelete throws when git cannot delete the branch", () => {
+    assert.throws(
+      () => nativeBranchDelete(repo, "does-not-exist"),
+      /GSD_GIT_ERROR|git branch -D does-not-exist failed/,
+    );
   });
 });

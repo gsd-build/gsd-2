@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { gsdHome } from "./gsd-home.js";
 
 export interface WorktreeSegment {
   gsdIdx: number;
@@ -58,18 +58,23 @@ export function resolveWorktreeProjectRoot(
   basePath: string,
   originalBasePath?: string | null,
 ): string {
-  const preferred =
-    originalBasePath?.trim() ||
-    process.env.GSD_PROJECT_ROOT?.trim() ||
-    basePath;
+  const explicitOriginal = originalBasePath?.trim();
+  if (explicitOriginal) return resolveProjectRootFromPath(explicitOriginal);
 
-  return resolveProjectRootFromPath(preferred);
+  const envProjectRoot = process.env.GSD_PROJECT_ROOT?.trim();
+  if (envProjectRoot && isGsdWorktreePath(basePath)) {
+    return resolveProjectRootFromPath(envProjectRoot);
+  }
+
+  return resolveProjectRootFromPath(basePath || envProjectRoot || process.cwd());
 }
 
 function resolveProjectRootFromPath(path: string): string {
   const normalizedPath = path.replaceAll("\\", "/");
   const segment = findWorktreeSegment(normalizedPath);
-  if (!segment) return resolveGitWorkingTreeRoot(path) ?? path;
+  if (!segment) {
+    return resolveNearestBootstrappedGsdRoot(path) ?? resolveGitWorkingTreeRoot(path) ?? path;
+  }
 
   const sepChar = path.includes("\\") ? "\\" : "/";
   const gsdMarker = `${sepChar}.gsd${sepChar}`;
@@ -78,10 +83,10 @@ function resolveProjectRootFromPath(path: string): string {
     ? path.slice(0, markerIdx)
     : path.slice(0, segment.gsdIdx);
 
-  const gsdHome = normalizeWorktreePathForCompare(process.env.GSD_HOME || join(homedir(), ".gsd"));
+  const gsdHomeNorm = normalizeWorktreePathForCompare(gsdHome());
   const candidateGsdPath = normalizeWorktreePathForCompare(join(candidate, ".gsd"));
 
-  if (candidateGsdPath === gsdHome || candidateGsdPath.startsWith(`${gsdHome}/`)) {
+  if (candidateGsdPath === gsdHomeNorm || candidateGsdPath.startsWith(`${gsdHomeNorm}/`)) {
     const realRoot = resolveProjectRootFromGitFile(path);
     return realRoot ?? path;
   }
@@ -89,13 +94,46 @@ function resolveProjectRootFromPath(path: string): string {
   return candidate;
 }
 
+function resolveNearestBootstrappedGsdRoot(path: string): string | null {
+  try {
+    let dir = existsSync(path) && !statSync(path).isDirectory()
+      ? resolve(path, "..")
+      : path;
+    const externalStateParent = normalizeWorktreePathForCompare(resolve(gsdHome(), ".."));
+
+    for (let i = 0; i < 30; i++) {
+      if (normalizeWorktreePathForCompare(dir) === externalStateParent) return null;
+      if (hasGsdBootstrapArtifacts(join(dir, ".gsd"))) return dir;
+
+      const gitPath = join(dir, ".git");
+      if (existsSync(gitPath)) return null;
+
+      const parent = resolve(dir, "..");
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch {
+    // Non-fatal: callers fall back to git root resolution.
+  }
+  return null;
+}
+
+function hasGsdBootstrapArtifacts(gsdPath: string): boolean {
+  return existsSync(gsdPath) &&
+    (existsSync(join(gsdPath, "PREFERENCES.md")) ||
+      existsSync(join(gsdPath, "preferences.md")) ||
+      existsSync(join(gsdPath, "milestones")));
+}
+
 function resolveGitWorkingTreeRoot(path: string): string | null {
   try {
     let dir = existsSync(path) && !statSync(path).isDirectory()
       ? resolve(path, "..")
       : path;
+    const externalStateParent = normalizeWorktreePathForCompare(resolve(gsdHome(), ".."));
 
     for (let i = 0; i < 30; i++) {
+      if (normalizeWorktreePathForCompare(dir) === externalStateParent) return null;
       const gitPath = join(dir, ".git");
       if (existsSync(gitPath)) return dir;
 

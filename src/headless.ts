@@ -352,6 +352,16 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
     return { exitCode: result.exitCode, interrupted: false }
   }
 
+  // Recover: rebuild DB hierarchy from on-disk markdown projections, no RPC
+  // child needed. This is the one mutating headless subcommand — required for
+  // CI / automation that needs to reconcile DB state from markdown without
+  // launching an interactive TTY-bound runtime.
+  if (options.command === 'recover') {
+    const { handleRecover } = await import('./headless-recover.js')
+    const result = await handleRecover(process.cwd())
+    process.exit(result.exitCode)
+  }
+
   // Doctor: read-only health check, no RPC child needed (#4904 live-regression).
   // The interactive `/gsd doctor` command lives in the GSD extension; this CLI
   // path lets non-interactive callers (CI, recovery scripts, the live-regression

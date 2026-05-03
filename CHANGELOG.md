@@ -6,6 +6,285 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.79.0] - 2026-05-03
+
+### Added
+- **gsd**: DB-backed auto-mode coordination tables (workers, leases, dispatches, command queue)
+- **workspace**: introduce GsdWorkspace and MilestoneScope handle types
+- **dispatch**: annotate dispatch actions with delegation-policy verdict
+- **delegation**: codify per-tool background-safety policy
+- **discuss**: scale questioning depth via project shape classifier
+- **headless**: add `gsd headless recover` for non-TTY DB recovery
+- **gsd**: doctor flags exhausted run-uat retry counters
+- **gsd**: emit pre-ship soft warning on EVAL-REVIEW status
+- **gsd**: register /gsd eval-review in catalog and ops dispatcher
+- **gsd**: add /gsd eval-review command handler
+- **gsd**: add EVAL-REVIEW frontmatter schema module
+- **gsd**: add artifact validators for Phase 11 deep mode
+- **gsd**: add /gsd new-project and --deep flag for Phase 11
+- **gsd**: add research-decision and research-project dispatch units (Phase 11)
+- **gsd**: add deep planning mode dispatch units (Phase 11)
+- **gsd**: add worktree {list,merge,clean,remove} commands to TUI dispatcher
+- **unit-manifest**: introduce planning-dispatch mode for slice plan/complete
+- **auto-prompts**: surface manifest skills via recommendations + auto-match
+- **auto-dispatch**: default reactive-execute on at >=3 ready tasks
+- **subagent**: add dispatch telemetry and stronger prompt guidelines
+- **ollama**: configurable probe/request timeouts via env vars
+- **pi-coding-agent**: opt-in per-call token telemetry (#5023)
+- **auto**: proactive rate limiting via min_request_interval_ms (#2996)
+- **gsd**: add doctor check for orphan milestone directories (#4996)
+- **mcp-client**: read global MCP config from ~/.gsd/mcp.json
+- **gsd**: runtime tools-policy enforcement for planning units (#4934)
+- **gsd**: add disabled model provider routing denylist
+- **model-routing**: cross-provider tier resolution and provider-agnostic profile defaults
+
+### Fixed
+- **gsd**: preserve policy-block pause through dispatch errors
+- **gsd**: surface DB-backed stale lock in doctor
+- **gsd**: canonicalize deriveState read root and cache key for symlinked worktrees
+- **gsd**: persist skip-validation state and clear gate rows on recover
+- **gsd**: drop false plain-text claim from cancelled-gate hard block
+- **gsd**: redirect cancelled-gate hard block to ask_user_questions
+- **tests**: finalize write-gate basePath threading and workspace mock typing
+- **metrics**: correct logWarning component in saveLedger fallback
+- **paths**: canonicalize gsdRoot result before caching
+- **auto-worktree**: validate milestoneId match in ByScope wrappers
+- **workspace**: canonicalize base before resolving contract
+- **metrics**: invalidate scoped ledger cache after prune
+- **metrics**: abort saveLedger when lock not acquired
+- **gsd-db**: restore previous connection on openDatabase failure
+- **db-writer**: replace startsWith path containment with path.relative
+- **tests**: thread basePath through write-gate calls in pre-existing tests
+- **auto-worktree**: broaden teardown try/finally to cover chdir
+- **guided-flow**: correct Gate 1b escalation message and counter increment ordering
+- **worktree-resolver**: use isSamePath instead of string ==/!= for originalBase
+- **auto**: warn on resume when persisted worktree is missing
+- **metrics**: stale-lock detection + PID stamp + async yield
+- **db-writer**: guard saveArtifactToDb root-artifact path
+- **auto-worktree**: guarantee activeWorkspace cleared on teardown failure
+- **workspace**: unify path normalization on realpathSync.native
+- **guided-flow**: bound Gate 1b recovery with retry counter
+- **auto-worktree**: mirror cleanup steps in teardownAutoWorktree abort path
+- **guided-flow**: discriminate plan-blocked from discuss-incomplete in Gate 1b
+- **write-gate**: require basePath; remove process.cwd() defaults
+- **paths**: normalize gsdRootCache keys and invalidate via clearPathCache
+- **metrics**: atomic merge for parallel-mode metrics.json writes
+- **paths**: guard git-root anchor against ~/.gsd resolution
+- **mcp**: preserve multi-select array shape and explicit cancellation
+- **mcp**: normalize remote ask_user_questions answers into structuredContent
+- **mcp**: attach structuredContent to ask_user_questions results
+- **guided-flow**: bust path cache before ready-signal validation
+- **tests**: live-regression — recover from markdown before headless query
+- **gsd**: address db-authoritative review findings
+- **gsd**: disable implicit markdown runtime fallback
+- **gsd**: complete db-authoritative state contract
+- **gsd**: preserve worktree isolation in /gsd handlers + harden MCP cwd
+- **gsd**: defer empty-turn nudge on mid-line approval prompts
+- **gsd**: refuse project writes when run from $HOME
+- **gsd**: allow user gsd integration branches
+- **gsd**: honor skip git during init
+- **gsd**: sanitize generated commit subjects
+- **github-sync**: defer slice prs until completion
+- **vscode**: scope agent diff to tracked files
+- **vscode**: register checkpoint tree view
+- **vscode**: restore checkpoint file existence
+- **vscode**: track rpc file mutation events
+- **core**: protect bundled gsd slash command
+- **gsd**: scope task commits to reported files
+- **gsd**: block startup on git index lock
+- **gsd**: avoid pushing pr base before draft pr
+- **github-sync**: avoid closing issues before delivery
+- **github-sync**: keep failed task closure retryable
+- **github-sync**: keep slice pr sync retryable
+- **github-sync**: use safe git environment
+- **github-sync**: scope config cache by project
+- **gsd**: use actual branch in worktree cli
+- **gsd**: run hooks for automated commits
+- **gsd**: block on post-unit git failures
+- **gsd**: detect auto worktree by supplied path
+- **gsd**: surface branch deletion failures
+- **gsd**: validate worktree start branch preference
+- **gsd**: detect default branch during init
+- **gsd**: preserve current milestone artifacts after merge
+- **gsd**: advance checked-out slice worktrees safely
+- **gsd**: use integration branch for slice cadence
+- **gsd**: preserve dirty worktree state on merge
+- **gsd**: per-record advisory lock for unit runtime writes
+- **gsd**: self-heal missing workflow_prefs_captured flag
+- **gsd**: stop deep setup gate from hijacking executing phases
+- **gsd**: atomicize runtime artifact writes
+- **gsd**: short-circuit bare /gsd next-action prompt when no UI
+- **gsd**: make summary save schema OpenAI-compatible
+- **resources**: resync nested compiled extension drift
+- **gsd**: reduce duplicate planning noise
+- **gsd**: keep planning depth project-local
+- **gsd**: align milestone artifact path resolution
+- **native**: fall back when stream processor is missing
+- **gsd**: keep bare command in smart entry
+- **ci**: mirror package dist for Windows tests
+- **mcp-server**: resolve Windows Path env lookup
+- **mcp-server**: use Windows-safe env CLI shims
+- **mcp-server**: address secure env and cache review
+- **mcp-server**: unblock test build, sync server version, surface auth failures, propagate cancellation
+- **mcp-server**: harden security across workflow handlers, env writer, and session lookup
+- **mcp-server**: use compiled imports in dist-test
+- **gsd**: cap claude-code context budgeting
+- **mcp-server**: try host elicitation before remote channel for ask_user_questions
+- prefer source workflow modules in mcp tools
+- keep requirements db as source of truth
+- harden deep requirements workflow
+- **gsd**: rederive zero-slice plan v2 graphs
+- **gsd**: prefer nearest bootstrapped project root
+- **gsd**: keep deep new-project rooted in cwd
+- **gsd**: gate workflow mcp questions safely
+- **gsd**: require verified deep approval gates
+- **gsd**: keep deep approval gates in chat
+- **gsd**: pause milestone approval questions
+- **gsd**: bootstrap deep setup git head
+- **gsd**: close deep planning audit gaps
+- **gsd**: harden deep planning plan gates
+- **gsd**: avoid aborting discovery questions
+- **gsd**: avoid approval abort on grounding questions
+- **gsd**: avoid aborting opening deep interview question
+- **gsd**: keep approval question text visible on external CLI
+- **gsd**: rederive state on empty plan graph
+- resolve slice isolation from project root
+- route slice merge isolation through resolver
+- **gsd**: skip worktree isolation before first commit
+- **gsd**: avoid worktree setup before initial commit
+- **gsd**: keep sqlite fallback optional
+- **gsd**: make deep project research opt-in
+- **gsd**: auto-skip stale tiny app research blockers
+- **gsd**: gate plain-text setup approvals
+- **gsd**: cap project research for tiny apps
+- **gsd**: pause deep setup on approval questions
+- **gsd**: guard deep project dispatch state
+- **gsd**: three CodeRabbit findings on eval-review prompt and budgeting
+- **gsd**: bound eval-review reads to cap and surface AI-SPEC errors
+- **gsd**: clean legacy deep setup milestone dirs
+- **gsd**: allow root summary saves over workflow mcp
+- **gsd**: preserve dev CLI entrypoint for subagents
+- **gsd**: three CodeRabbit findings — control flow, marker budget, Windows test
+- **gsd**: handle UTF-8 multi-byte chars at the truncation boundary
+- **gsd**: clamp computeOverallScore to MIN_SCORE..MAX_SCORE
+- **gsd**: align deep research dispatch policy
+- **gsd**: degrade AI-SPEC.md read failure to a marker instead of throwing
+- **gsd**: stabilize deep new-project workflow
+- **gsd**: include eval-review in /gsd help full output
+- **tool-bootstrap**: skip provisioning on Windows when tools are on PATH
+- **gsd**: wire planning_depth through the prefs load pipeline
+- **cross-platform**: consolidate .gsd path resolution into gsdHome()
+- **gsd**: wire deep-mode kickoff into showSmartEntry
+- **gsd**: block deep research while marker is in flight
+- **gsd**: tighten deep planning review contracts
+- **gsd**: resolve deep planning review issues
+- **gsd**: allow review-tier subagent dispatch from validate-milestone
+- **gsd**: address deep planning review feedback
+- **claude-code-cli**: persist Always Allow for non-Bash tools
+- **gsd**: empty-turn nudge no longer auto-replies to user questions
+- **gsd**: address audit findings on deep planning mode (B1, B2, I1-I8)
+- **agent-session**: skip idle wait after agent_end
+- **agent-session**: guard synthetic agent_end transitions
+- **gsd**: preserve auto session handoff in terminals
+- **gsd**: anchor cwd without cwd guard
+- **gsd**: anchor cwd at project root in mergeAndExit (closes #5079)
+- **gsd**: dispatch new debug sessions
+- **gsd**: harden worktree dispatch cwd handling
+- **gsd**: stop dispatch on cwd anchor failures
+- use ?? consistently for modelOverride, add filePath to test helper
+- **gsd**: anchor subagent dispatch to canonical worktree path
+- **gsd**: harden worktree dirty handling
+- **safety**: persist bash evidence at tool_call to close mid-unit re-dispatch race (#5056)
+- clarify worktree clean retention reasons
+- clarify worktree merge cleanup failures
+- **gsd**: preserve inspected empty subagent inputs
+- **gsd**: normalize auto worktree loop roots
+- gate planning subagent dispatch
+- **gsd**: normalize worktree project roots
+- **gsd**: restore prompt contract CI
+- **ollama**: clamp timeout env timer values
+- **ollama**: correct context window for cloud / long-variant models
+- **extensions**: drop semver dep, replace with inline isVersionGreater
+- **windows**: avoid DEP0190 in Claude CLI binary probes
+- **gsd**: normalize self-merge ref guard
+- **gsd**: guard milestone message scan
+- **gsd**: refuse self-merge when integration branch == milestone branch (#5024)
+- **gsd**: bind milestone-tagged commits when .gsd/ is gitignored (#5033)
+- **gsd**: run slice workers through headless auto
+- **gsd**: resolve home directory correctly on Windows (#5015)
+- **startup**: address PR review feedback
+- **pi-coding-agent,gsd**: preserve Anthropic prompt cache (#5019)
+- **gsd**: classify stream internal errors as transient
+- **gsd**: preserve infrastructure git add failures
+- **auto**: stamp request interval at dispatch
+- **web**: guard shutdown gate process handlers
+- **web**: keep shutdown gate out of middleware runtime
+- **web**: prevent boot/shutdown phantom race (#4950)
+- **web**: block new work in middleware during pending shutdown (#4950)
+- **web**: drain SSE streams on shutdown (#4950)
+- **tui**: preserve pasted images on regular submit
+- report orphan milestone dirs without db
+- **gsd**: surface real SQL errors from capture_thought instead of swallowing
+- harden milestone id reservation
+- include db rows in milestone id reservation
+- **model-routing**: normalize resolved tier model IDs
+- **gsd**: defer milestone dir creation until first artifact write (#4996)
+- **gsd**: reuse ghost milestone IDs in nextMilestoneId to close gap (#4996)
+- **gsd**: guard ensurePreconditions against phantom milestone IDs (#4996)
+- **pi-ai**: repair dangling xml tool parameters
+- **gsd**: enforce manifest tool policy docs
+- **gsd**: point orphan branch hint to doctor fix
+- **gsd**: preserve disabled model providers in effective prefs
+- **model-routing**: document provider-agnostic profile tiers
+- **gsd**: cover full help command list
+- **model-routing**: address PR #3115 review — implement findModelForTier, behavioral tests, threading
+- **extension-sdk**: repair broken pi-ui-tui doc paths and restore dropped hint branches
+- **subagent**: seed result model from effective override, not agent default
+- **subagent**: thread model override through subagent spawning
+- remove ADR/PRD docs from PR #4935 (unrelated to test fix)
+- **web**: report terminal creation failures
+- **gsd**: checkpoint planning slices without active tasks
+- **gsd**: checkpoint all session phases during compaction, not just executing (#4258)
+- **extension-sdk**: correct broken link, wrong import, and invalid method in rules
+- **ci**: resolve docs-check and lint failures
+- **gsd**: guard worktree creation against repos with no commits
+- **gsd**: add 12 missing commands to /gsd help menu
+
+### Changed
+- **gsd**: migrate auto.lock + paused-session.json to DB-backed coordination (Phase C pt 2)
+- **gsd**: canonicalize auto-mode writers + delete copyPlanningArtifacts/reconcile + migrate stuck-state to DB
+- **metrics**: sleep between lock acquire retries
+- **paths**: decouple gsdRootCache from per-turn clearPathCache
+- **auto-worktree**: replace originalBase singleton with workspace registry
+- **gsd-db**: scope DB connection by workspace identity
+- **metrics**: replace module singleton with explicit workspace
+- **db-writer**: route saveArtifactToDb through workspace contract
+- **auto-worktree**: sync layer takes explicit workspace pair
+- **guided-flow**: validators take MilestoneScope
+- **auto**: thread MilestoneScope through session state
+- **guided-flow**: pin MilestoneScope at discuss reservation time
+- prefer canonical tool names over aliases in prompts and prose
+- **gsd**: make db state authoritative
+- remove auto-loop.ts barrel, import from ./auto/* directly
+- **prompts**: delete superseded guided-*.md files
+- route guided-flow.ts callers to auto-prompts builders
+- **prompts**: backport guided doctrine into auto-*.md
+- **mcp-server**: remove copyright headers
+- **mcp-server**: cache .gsd path resolution and milestone/slice walks
+- **web**: pin postcss dependency
+- **web**: migrate proxy convention and refresh audits
+- **gsd**: strip PR/issue references from eval-review code comments
+- **gsd**: drop "Phase 11" from deep-planning-mode code
+- **gsd**: expose 11 previously-invisible bundled skills to system prompt
+- **welcome-screen**: surface MCP server count in banner, suppress google_search deprecation
+- **gsd**: migrate remaining files to getHomeDir() + harden forensics redaction
+- **mcp-server**: instrument 11 gsd_* alias tools with usage telemetry (#5031)
+- **pi-ai**: cache breakpoint after compaction summary boundary (#5027)
+- remove copyright headers from startup changes
+- **startup**: reduce GSD launch overhead
+- **ci**: retry transient macOS RTK check
+- **mcp-client**: surface $GSD_HOME in user copy + add collision test
+
 ### Deprecated
 - **mcp-server**: 11 `gsd_*` alias tools (`gsd_save_decision`, `gsd_update_requirement`, `gsd_save_requirement`, `gsd_generate_milestone_id`, `gsd_task_plan`, `gsd_slice_replan`, `gsd_complete_slice`, `gsd_milestone_complete`, `gsd_milestone_validate`, `gsd_roadmap_reassess`, `gsd_complete_task`) are entering a deprecation window. Each invocation now emits a `deprecation.mcp_alias_used` JSONL record to stderr. Use the canonical names (`gsd_decision_save`, etc.). The aliases will be removed in a future release after telemetry confirms zero usage. (#5031)
 
@@ -3717,7 +3996,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - License updated to MIT
 
-[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.78.1...HEAD
+[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.79.0...HEAD
+[2.79.0]: https://github.com/gsd-build/gsd-2/compare/v2.78.1...v2.79.0
 [2.78.1]: https://github.com/gsd-build/gsd-2/compare/v2.78.0...v2.78.1
 [2.78.0]: https://github.com/gsd-build/gsd-2/compare/v2.77.0...v2.78.0
 [2.77.0]: https://github.com/gsd-build/gsd-2/compare/v2.76.0...v2.77.0

@@ -85,7 +85,7 @@ describe("handleValidateMilestone write ordering (#2725)", () => {
     assert.doesNotMatch(validationMd, /## Verification Class Compliance/);
   });
 
-  it("rolls back DB row when disk write fails", async () => {
+  it("keeps DB row and reports stale projection when disk write fails", async () => {
     base = makeTmpBase();
     const dbPath = join(base, ".gsd", "gsd.db");
     openDatabase(dbPath);
@@ -101,16 +101,15 @@ describe("handleValidateMilestone write ordering (#2725)", () => {
 
     const result = await handleValidateMilestone(VALID_PARAMS, base);
 
-    // Should return error
-    assert.ok("error" in result, "should return error when disk write fails");
-    assert.ok(result.error.includes("disk render failed"));
+    assert.ok(!("error" in result), `unexpected error: ${"error" in result ? result.error : ""}`);
+    assert.equal(result.stale, true, "result should report stale projection");
 
-    // DB row should have been rolled back (deleted)
     const adapter = _getAdapter()!;
     const row = adapter.prepare(
-      `SELECT * FROM assessments WHERE milestone_id = 'M001' AND scope = 'milestone-validation'`,
-    ).get();
-    assert.equal(row, undefined, "assessment row should be deleted after disk-write rollback");
+      `SELECT status FROM assessments WHERE milestone_id = 'M001' AND scope = 'milestone-validation'`,
+    ).get() as { status: string } | undefined;
+    assert.ok(row, "assessment row should remain committed");
+    assert.equal(row!.status, "pass");
   });
 
   it("persists milestone validation gate_runs rows when UOK gates are enabled", async () => {

@@ -1,6 +1,5 @@
 import type { ExtensionAPI } from "@gsd/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
-import { StringEnum } from "@gsd/pi-ai";
+import { type TUnsafe, Type } from "@sinclair/typebox";
 import { diffCompactStates } from "../core.js";
 import type { ToolDeps, CompactPageState } from "../state.js";
 import {
@@ -24,6 +23,18 @@ const INTENTS = [
 ] as const;
 
 type Intent = (typeof INTENTS)[number];
+
+function StringEnum<T extends readonly string[]>(
+	values: T,
+	options?: { description?: string; default?: T[number] },
+): TUnsafe<T[number]> {
+	return Type.Unsafe<T[number]>({
+		type: "string",
+		enum: values as any,
+		...(options?.description && { description: options.description }),
+		...(options?.default && { default: options.default }),
+	});
+}
 
 // ---------------------------------------------------------------------------
 // Scoring evaluate script — runs entirely in-browser via page.evaluate()

@@ -151,16 +151,38 @@ export const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "language",
   "context_window_override",
   "context_mode",
+  "planning_depth",
 ]);
 
-/** Canonical list of all dispatch unit types. */
-export const KNOWN_UNIT_TYPES = [
+/**
+ * Broad union of every recognized unit-type *label* used across the codebase.
+ *
+ * This intentionally covers more than the manifest-tracked dispatch units in
+ * `unit-context-manifest.ts:KNOWN_UNIT_TYPES`. Examples that live here but not
+ * in the manifest:
+ * - `discuss-slice` — dispatched by `guided-flow.ts` rather than auto-mode;
+ *   composer falls through to default behavior via `resolveManifest()` null path.
+ * - `worktree-merge` — used as a model-routing case, prompt-template name, and
+ *   commit-message label, not as an LLM-dispatched unit.
+ *
+ * Used by `preferences-validation.ts` to validate user-provided unit-type
+ * references in preferences (model overrides, skill rules, etc.) — preferences
+ * may legitimately reference any label, including non-dispatched ones.
+ *
+ * The manifest-strict subset lives in `unit-context-manifest.ts:KNOWN_UNIT_TYPES`
+ * and is enforced 1:1 against `UNIT_MANIFESTS` by the parity test in
+ * `tests/unit-context-manifest.test.ts`.
+ */
+export const KNOWN_UNIT_LABELS = [
   "research-milestone", "plan-milestone", "research-slice", "plan-slice", "refine-slice",
   "execute-task", "reactive-execute", "gate-evaluate", "complete-slice", "replan-slice", "reassess-roadmap",
   "run-uat", "complete-milestone", "validate-milestone", "rewrite-docs",
   "discuss-milestone", "discuss-slice", "worktree-merge",
+  // Deep planning mode (project-level) units
+  "workflow-preferences", "discuss-project", "discuss-requirements",
+  "research-decision", "research-project",
 ] as const;
-export type UnitType = (typeof KNOWN_UNIT_TYPES)[number];
+export type UnitLabel = (typeof KNOWN_UNIT_LABELS)[number];
 
 
 export const SKILL_ACTIONS = new Set(["use", "prefer", "avoid"]);
@@ -339,11 +361,19 @@ export interface GSDPreferences {
   /**
    * Tool-output sandboxing via gsd_exec. Keeps sub-session context windows
    * clean by running scripts in a subprocess and only surfacing a short
-   * digest. See `ContextModeConfig`. Default: disabled.
+   * digest. See `ContextModeConfig`. Default: enabled unless explicitly
+   * disabled with `context_mode.enabled: false`.
    */
   context_mode?: ContextModeConfig;
   token_profile?: TokenProfile;
   phases?: PhaseSkipPreferences;
+  /**
+   * Planning depth for new-project / new-milestone interactive flows.
+   * - "light" (default): single discuss-milestone session writes CONTEXT.md.
+   * - "deep": staged flow writes PROJECT.md → REQUIREMENTS.md → CONTEXT.md → ROADMAP.md
+   *   with user gates between each.
+   */
+  planning_depth?: "light" | "deep";
   auto_visualize?: boolean;
   /** Generate HTML report snapshot after each milestone completion. Default: true. Set false to disable. */
   auto_report?: boolean;

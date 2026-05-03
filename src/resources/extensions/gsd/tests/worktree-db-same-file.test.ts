@@ -15,6 +15,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -155,6 +156,18 @@ describe("#2823: reconcileWorktreeDb same-file guard", () => {
       "should reconcile decisions from a genuinely different DB",
     );
   });
+});
+
+test("merge-time DB reconciliation only runs when legacy worktree DB exists", () => {
+  const src = readFileSync(join(import.meta.dirname, "..", "auto-worktree.ts"), "utf-8");
+  const reconcileIdx = src.indexOf("reconcileWorktreeDb(mainDbPath, worktreeDbPath)");
+  assert.ok(reconcileIdx !== -1, "merge-time reconcile call exists");
+  const guardWindow = src.slice(Math.max(0, reconcileIdx - 240), reconcileIdx);
+
+  assert.ok(
+    guardWindow.includes("existsSync(worktreeDbPath)") && guardWindow.includes("!isSamePath(worktreeDbPath, mainDbPath)"),
+    "merge-time reconcile requires a real legacy worktree DB and distinct DB paths",
+  );
 });
 
 // ─── Fix 3: infrastructure error classification ─────────────────────

@@ -14,7 +14,6 @@ import { join } from "node:path";
 import {
   transaction,
   insertAssessment,
-  deleteAssessmentByScope,
   getMilestoneSlices,
 } from "../gsd-db.js";
 import { resolveMilestonePath, clearPathCache } from "../paths.js";
@@ -45,6 +44,7 @@ export interface ValidateMilestoneResult {
   milestoneId: string;
   verdict: string;
   validationPath: string;
+  stale?: boolean;
 }
 
 export interface ValidateMilestoneOptions {
@@ -150,13 +150,14 @@ export async function handleValidateMilestone(
   });
 
   // ── Filesystem render (outside transaction) ────────────────────────────
-  // If disk render fails, roll back the DB row so state stays consistent.
+  let projectionStale = false;
   try {
     await saveFile(validationPath, validationMd);
   } catch (renderErr) {
-    logWarning("tool", `validate_milestone — disk render failed, rolling back DB row: ${(renderErr as Error).message}`);
-    deleteAssessmentByScope(params.milestoneId, 'milestone-validation');
-    return { error: `disk render failed: ${(renderErr as Error).message}` };
+    projectionStale = true;
+    logWarning("projection", `validate_milestone projection write failed for ${params.milestoneId}; DB validation remains committed`, {
+      error: (renderErr as Error).message,
+    });
   }
 
   invalidateStateCache();
@@ -202,5 +203,6 @@ export async function handleValidateMilestone(
     milestoneId: params.milestoneId,
     verdict: params.verdict,
     validationPath,
+    ...(projectionStale ? { stale: true } : {}),
   };
 }

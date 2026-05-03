@@ -58,13 +58,26 @@ test("#2313: syncStateToProjectRoot should sync metrics.json", () => {
   );
 });
 
-test("#2313: syncWorktreeStateBack should include metrics.json in ROOT_STATE_FILES", () => {
+test("syncStateToProjectRoot should back-sync completed-units.json", () => {
+  const syncSrcPath = join(import.meta.dirname, "..", "auto-worktree.ts");
+  const syncSrc = readFileSync(syncSrcPath, "utf-8");
+  const fnIdx = syncSrc.indexOf("export function syncStateToProjectRoot(");
+  assert.ok(fnIdx !== -1, "syncStateToProjectRoot exists");
+  const fnBlock = syncSrc.slice(fnIdx, syncSrc.indexOf("// ─── Resource Staleness", fnIdx));
+
+  assert.ok(
+    fnBlock.includes('"completed-units.json"'),
+    "syncStateToProjectRoot should copy completed-units.json back to the project root",
+  );
+});
+
+test("#2313: syncWorktreeStateBack should include metrics.json in ROOT_DIAGNOSTIC_FILES", () => {
   const autoWorktreeSrcPath = join(import.meta.dirname, "..", "auto-worktree.ts");
   const autoWorktreeSrc = readFileSync(autoWorktreeSrcPath, "utf-8");
 
-  // Find the ROOT_STATE_FILES constant (single source of truth for both sync directions)
-  const constIdx = autoWorktreeSrc.indexOf("ROOT_STATE_FILES");
-  assert.ok(constIdx !== -1, "ROOT_STATE_FILES constant exists");
+  // Find the ROOT_DIAGNOSTIC_FILES constant used for worktree copy-back.
+  const constIdx = autoWorktreeSrc.indexOf("ROOT_DIAGNOSTIC_FILES");
+  assert.ok(constIdx !== -1, "ROOT_DIAGNOSTIC_FILES constant exists");
 
   // Get the array content
   const arrayStart = autoWorktreeSrc.indexOf("[", constIdx);
@@ -73,7 +86,7 @@ test("#2313: syncWorktreeStateBack should include metrics.json in ROOT_STATE_FIL
 
   assert.ok(
     rootFilesBlock.includes("metrics.json"),
-    "metrics.json should be in ROOT_STATE_FILES list",
+    "metrics.json should be in ROOT_DIAGNOSTIC_FILES list",
   );
 });
 

@@ -755,10 +755,10 @@ export function diffWorktreeGSD(basePath: string, name: string): WorktreeDiffSum
  * on main when the merge is applied. If both branches have identical
  * content, this correctly returns an empty diff.
  */
-export function diffWorktreeAll(basePath: string, name: string): WorktreeDiffSummary {
+export function diffWorktreeAll(basePath: string, name: string, branchOverride?: string): WorktreeDiffSummary {
   basePath = normalizeBasePathForWorktreeOps(basePath);
 
-  const branch = worktreeBranchName(name);
+  const branch = branchOverride ?? worktreeBranchName(name);
   const mainBranch = nativeDetectMainBranch(basePath);
 
   const entries = nativeDiffNameStatus(basePath, mainBranch, branch);
@@ -770,10 +770,10 @@ export function diffWorktreeAll(basePath: string, name: string): WorktreeDiffSum
  * Get per-file line addition/deletion stats for what will change on main.
  * Uses direct diff (not merge-base) so the preview matches the actual merge outcome.
  */
-export function diffWorktreeNumstat(basePath: string, name: string): FileLineStat[] {
+export function diffWorktreeNumstat(basePath: string, name: string, branchOverride?: string): FileLineStat[] {
   basePath = normalizeBasePathForWorktreeOps(basePath);
 
-  const branch = worktreeBranchName(name);
+  const branch = branchOverride ?? worktreeBranchName(name);
   const mainBranch = nativeDetectMainBranch(basePath);
 
   const rawStats = nativeDiffNumstat(basePath, mainBranch, branch);
@@ -831,10 +831,10 @@ export function getWorktreeLog(basePath: string, name: string): string {
  * Must be called from the main working tree (not the worktree itself).
  * Returns the merge commit message.
  */
-export function mergeWorktreeToMain(basePath: string, name: string, commitMessage: string): string {
+export function mergeWorktreeToMain(basePath: string, name: string, commitMessage: string, branchOverride?: string): string {
   basePath = normalizeBasePathForWorktreeOps(basePath);
 
-  const branch = worktreeBranchName(name);
+  const branch = branchOverride ?? worktreeBranchName(name);
   const mainBranch = nativeDetectMainBranch(basePath);
   const current = nativeGetCurrentBranch(basePath);
 

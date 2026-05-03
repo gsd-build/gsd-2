@@ -290,6 +290,10 @@
         {
           "id": "gsd-plan",
           "name": "Plan"
+        },
+        {
+          "id": "gsd-checkpoints",
+          "name": "Checkpoints"
         }
       ]
     },

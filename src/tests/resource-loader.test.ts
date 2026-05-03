@@ -49,7 +49,7 @@ test("getExtensionKey normalizes top-level .ts and .js entry names to the same k
   );
 });
 
-test("hasStaleCompiledExtensionSiblings only flags top-level .ts/.js sibling pairs", async (t) => {
+test("hasStaleCompiledExtensionSiblings detects installed format drift against the bundled root", async (t) => {
   const { hasStaleCompiledExtensionSiblings } = await import("../resource-loader.ts");
   const tmp = mkdtempSync(join(tmpdir(), "gsd-resource-loader-"));
   const extensionsDir = join(tmp, "extensions");
@@ -71,6 +71,29 @@ test("hasStaleCompiledExtensionSiblings only flags top-level .ts/.js sibling pai
 
   writeFileSync(join(bundledDir, "ask-user-questions.ts"), "export {};\n");
   assert.equal(hasStaleCompiledExtensionSiblings(extensionsDir, bundledDir), false);
+});
+
+test("hasStaleCompiledExtensionSiblings detects nested bundled extension format drift", async (t) => {
+  const { hasStaleCompiledExtensionSiblings } = await import("../resource-loader.ts");
+  const tmp = mkdtempSync(join(tmpdir(), "gsd-resource-loader-nested-"));
+  const extensionsDir = join(tmp, "extensions");
+  const bundledDir = join(tmp, "bundled");
+
+  t.after(() => { rmSync(tmp, { recursive: true, force: true }); });
+
+  mkdirSync(join(extensionsDir, "gsd", "auto"), { recursive: true });
+  mkdirSync(join(bundledDir, "gsd", "auto"), { recursive: true });
+
+  writeFileSync(join(extensionsDir, "gsd", "index.ts"), "export {};\n");
+  writeFileSync(join(extensionsDir, "gsd", "auto", "phases.ts"), "export {};\n");
+  writeFileSync(join(bundledDir, "gsd", "index.js"), "export {};\n");
+  writeFileSync(join(bundledDir, "gsd", "auto", "phases.js"), "export {};\n");
+
+  assert.equal(
+    hasStaleCompiledExtensionSiblings(extensionsDir, bundledDir),
+    true,
+    "source .ts files under bundled subdirectories must trigger a resync when the bundle has .js",
+  );
 });
 
 test("buildResourceLoader excludes duplicate top-level pi extensions when bundled resources use .js", async (t) => {

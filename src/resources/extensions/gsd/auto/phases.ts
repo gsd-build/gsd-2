@@ -11,7 +11,12 @@ import { importExtensionModule, type ExtensionAPI, type ExtensionContext } from 
 
 import type { AutoSession, SidecarItem } from "./session.js";
 import type { LoopDeps } from "./loop-deps.js";
-import type { PostUnitContext, PreVerificationOpts } from "../auto-post-unit.js";
+import {
+  USER_DRIVEN_DEEP_UNITS,
+  isAwaitingUserInput,
+  type PostUnitContext,
+  type PreVerificationOpts,
+} from "../auto-post-unit.js";
 import type { Phase } from "../types.js";
 import {
   MAX_RECOVERY_CHARS,
@@ -26,7 +31,7 @@ import {
 import { detectStuck } from "./detect-stuck.js";
 import { runUnit } from "./run-unit.js";
 import { debugLog } from "../debug-logger.js";
-import { resolveWorktreeProjectRoot } from "../worktree-root.js";
+import { resolveWorktreeProjectRoot, normalizeWorktreePathForCompare } from "../worktree-root.js";
 import { PROJECT_FILES, hasProjectFileInAncestor } from "../detection.js";
 import { MergeConflictError } from "../git-service.js";
 import { setCurrentPhase, clearCurrentPhase } from "../../shared/gsd-phase-state.js";
@@ -52,7 +57,7 @@ import { getEligibleSlices } from "../slice-parallel-eligibility.js";
 import { startSliceParallel } from "../slice-parallel-orchestrator.js";
 import { isDbAvailable, getMilestoneSlices } from "../gsd-db.js";
 import type { MinimalModelRegistry } from "../context-budget.js";
-import { ensurePlanV2Graph, isMissingFinalizedContextResult } from "../uok/plan-v2.js";
+import { ensurePlanV2Graph, isEmptyPlanV2GraphResult, isMissingFinalizedContextResult } from "../uok/plan-v2.js";
 import { resolveUokFlags } from "../uok/flags.js";
 import { UokGateRunner } from "../uok/gate-runner.js";
 import { resetEvidence, loadEvidenceFromDisk } from "../safety/evidence-collector.js";
@@ -64,6 +69,12 @@ import {
   getRequiredWorkflowToolsForAutoUnit,
   supportsStructuredQuestions,
 } from "../workflow-mcp.js";
+
+// ─── Path Comparison Helper ───────────────────────────────────────────────
+/** Compare two paths for physical identity, tolerating trailing slashes and symlinks. */
+function isSamePathLocal(a: string, b: string): boolean {
+  return normalizeWorktreePathForCompare(a) === normalizeWorktreePathForCompare(b);
+}
 
 // ─── Session timeout auto-resume state ────────────────────────────────────────
 
@@ -397,7 +408,7 @@ export async function runPreDispatch(
   // Sync project root artifacts into worktree
   if (
     s.originalBasePath &&
-    s.basePath !== s.originalBasePath &&
+    !isSamePathLocal(s.basePath, s.originalBasePath) &&
     s.currentMilestoneId
   ) {
     deps.syncProjectRootToWorktree(
@@ -407,10 +418,56 @@ export async function runPreDispatch(
     );
   }
 
-  // Derive state
-  let state = await deps.deriveState(s.basePath);
-  if (prefs?.uok?.plan_v2?.enabled && shouldRunPlanV2Gate(state.phase)) {
-    const compiled = ensurePlanV2Graph(s.basePath, state);
+  // Derive state — use canonical project root so the cache key is stable
+  // across worktree↔project-root path-form alternation. See PR #5236
+  // (workspace handle infrastructure) and the Phase A pt 2 plan.
+  let state = await deps.deriveState(s.canonicalProjectRoot);
+  const { getDeepStageGate } = await import("../auto-dispatch.js");
+  const deepStageGate = getDeepStageGate(prefs, s.basePath);
+  const canRunDeepSetupGate =
+    state.phase === "pre-planning" ||
+    state.phase === "needs-discussion" ||
+    state.phase === "planning";
+  if (
+    canRunDeepSetupGate &&
+    (deepStageGate.status === "pending" || deepStageGate.status === "blocked")
+  ) {
+    debugLog("autoLoop", {
+      phase: "deep-project-stage-gate",
+      stage: deepStageGate.stage,
+      status: deepStageGate.status,
+      reason: deepStageGate.reason,
+    });
+    return {
+      action: "next",
+      data: {
+        state: {
+          ...state,
+          phase: "pre-planning",
+          activeMilestone: null,
+          activeSlice: null,
+          activeTask: null,
+          nextAction: deepStageGate.reason,
+        },
+        mid: "PROJECT",
+        midTitle: "Project setup",
+      },
+    };
+  }
+
+  if (uokFlags.planV2 && shouldRunPlanV2Gate(state.phase)) {
+    let compiled = ensurePlanV2Graph(s.basePath, state);
+    if (isEmptyPlanV2GraphResult(compiled)) {
+      deps.invalidateAllCaches();
+      state = await deps.deriveState(s.canonicalProjectRoot);
+      compiled = shouldRunPlanV2Gate(state.phase)
+        ? ensurePlanV2Graph(s.basePath, state)
+        : {
+            ok: true,
+            reason: "empty plan-v2 graph recovered by state rederive",
+            nodeCount: 0,
+          };
+    }
     if (!compiled.ok) {
       const reason = compiled.reason ?? "Plan v2 compilation failed";
       if (isMissingFinalizedContextResult(compiled)) {
@@ -602,12 +659,12 @@ export async function runPreDispatch(
 
     deps.invalidateAllCaches();
 
-    state = await deps.deriveState(s.basePath);
+    state = await deps.deriveState(s.canonicalProjectRoot);
     mid = state.activeMilestone?.id;
     midTitle = state.activeMilestone?.title;
 
     if (mid) {
-      if (deps.getIsolationMode() !== "none") {
+      if (deps.getIsolationMode(s.basePath) !== "none") {
         deps.captureIntegrationBranch(s.basePath, mid);
       }
       deps.resolver.enterMilestone(mid, ctx.ui);
@@ -782,7 +839,7 @@ export async function runPreDispatch(
   }
   if (mergeReconcileResult === "reconciled") {
     deps.invalidateAllCaches();
-    state = await deps.deriveState(s.basePath);
+    state = await deps.deriveState(s.canonicalProjectRoot);
     mid = state.activeMilestone?.id;
     midTitle = state.activeMilestone?.title;
   }
@@ -903,10 +960,16 @@ export async function runDispatch(
     ? ctx.modelRegistry.getProviderAuthMode(provider)
     : undefined;
   const activeTools = typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [];
-  const structuredQuestionsAvailable = supportsStructuredQuestions(activeTools, {
-    authMode,
-    baseUrl: ctx.model?.baseUrl,
-  }) ? "true" : "false";
+  // Deep planning intentionally keeps human checkpoints in plain chat. In
+  // Claude Code/local MCP transports, structured question requests can be
+  // cancelled outside the normal chat flow, which made approval gates easy to
+  // skip or bury under tool output.
+  const structuredQuestionsAvailable = prefs?.planning_depth === "deep"
+    ? "false"
+    : supportsStructuredQuestions(activeTools, {
+        authMode,
+        baseUrl: ctx.model?.baseUrl,
+      }) ? "true" : "false";
 
   debugLog("autoLoop", { phase: "dispatch-resolve", iteration: ic.iteration });
   const dispatchResult = await deps.resolveDispatch({
@@ -918,6 +981,7 @@ export async function runDispatch(
     session: s,
     structuredQuestionsAvailable,
     sessionContextWindow: ctx.model?.contextWindow,
+    sessionProvider: ctx.model?.provider,
     modelRegistry: ctx.modelRegistry as MinimalModelRegistry | undefined,
   });
 
@@ -1405,7 +1469,13 @@ export async function runUnitPhase(
   s.currentUnit = { type: unitType, id: unitId, startedAt: Date.now() };
   s.lastGitActionFailure = null;
   s.lastGitActionStatus = null;
-  setCurrentPhase(unitType);
+  s.lastUnitAgentEndMessages = null;
+  setCurrentPhase(unitType, {
+    basePath: s.basePath,
+    traceId: ic.flowId,
+    turnId: `iter-${ic.iteration}`,
+    causedBy: "unit-start",
+  });
   s.lastToolInvocationError = null; // #2883: clear stale error from previous unit
   const unitStartSeq = ic.nextSeq();
   deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: unitStartSeq, eventType: "unit-start", data: { unitType, unitId } });
@@ -1639,6 +1709,7 @@ export async function runUnitPhase(
     unitId,
     finalPrompt,
   );
+  s.lastUnitAgentEndMessages = unitResult.event?.messages ?? null;
   debugLog("autoLoop", {
     phase: "runUnit-end",
     iteration: ic.iteration,
@@ -1840,19 +1911,27 @@ export async function runUnitPhase(
         (u: { type: string; id: string; startedAt: number; toolCalls: number }) => u.type === unitType && u.id === unitId && u.startedAt === s.currentUnit?.startedAt,
       );
       if (lastUnit && lastUnit.toolCalls === 0) {
-        debugLog("runUnitPhase", {
-          phase: "zero-tool-calls",
-          unitType,
-          unitId,
-          warning: "Unit completed with 0 tool calls — likely context exhaustion, marking as failed",
-        });
-        ctx.ui.notify(
-          `${unitType} ${unitId} completed with 0 tool calls — context exhaustion, will retry`,
-          "warning",
-        );
-        // Fall through to next iteration where dispatch will re-derive
-        // and re-dispatch this unit.
-        return { action: "next", data: { unitStartedAt: s.currentUnit?.startedAt, requestDispatchedAt: unitResult.requestDispatchedAt } };
+        if (USER_DRIVEN_DEEP_UNITS.has(unitType) && isAwaitingUserInput(s.lastUnitAgentEndMessages ?? undefined)) {
+          debugLog("runUnitPhase", {
+            phase: "zero-tool-calls-awaiting-user-input",
+            unitType,
+            unitId,
+          });
+        } else {
+          debugLog("runUnitPhase", {
+            phase: "zero-tool-calls",
+            unitType,
+            unitId,
+            warning: "Unit completed with 0 tool calls — likely context exhaustion, marking as failed",
+          });
+          ctx.ui.notify(
+            `${unitType} ${unitId} completed with 0 tool calls — context exhaustion, will retry`,
+            "warning",
+          );
+          // Fall through to next iteration where dispatch will re-derive
+          // and re-dispatch this unit.
+          return { action: "next", data: { unitStartedAt: s.currentUnit?.startedAt, requestDispatchedAt: unitResult.requestDispatchedAt } };
+        }
       }
     }
   }
@@ -1960,11 +2039,11 @@ export async function runFinalize(
   // mutations are harmless — postUnitPreVerification guards all side effects
   // behind `if (s.currentUnit)`. The next iteration sets a fresh currentUnit.
   // Sidecar items use lightweight pre-verification opts
-  const preVerificationOpts: PreVerificationOpts | undefined = sidecarItem
+  const preVerificationOpts: PreVerificationOpts = sidecarItem
     ? sidecarItem.kind === "hook"
-      ? { skipSettleDelay: true, skipWorktreeSync: true }
-      : { skipSettleDelay: true }
-    : undefined;
+      ? { skipSettleDelay: true, skipWorktreeSync: true, agentEndMessages: s.lastUnitAgentEndMessages ?? undefined }
+      : { skipSettleDelay: true, agentEndMessages: s.lastUnitAgentEndMessages ?? undefined }
+    : { agentEndMessages: s.lastUnitAgentEndMessages ?? undefined };
   const preUnitSnapshot = s.currentUnit
     ? { type: s.currentUnit.type, id: s.currentUnit.id, startedAt: s.currentUnit.startedAt }
     : null;

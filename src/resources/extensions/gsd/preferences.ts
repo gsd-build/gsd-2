@@ -21,6 +21,7 @@ import type { DynamicRoutingConfig } from "./model-router.js";
 import { normalizeStringArray } from "../shared/format-utils.js";
 import { logWarning } from "./workflow-logger.js";
 import { resolveProfileDefaults as _resolveProfileDefaults } from "./preferences-models.js";
+import { nativeHasCommittedHead, nativeIsRepo } from "./native-git-bridge.js";
 
 import {
   KNOWN_PREFERENCE_KEYS,
@@ -33,6 +34,7 @@ import {
   formatSkillRef,
 } from "./preferences-types.js";
 import { validatePreferences } from "./preferences-validation.js";
+import { gsdHome } from "./gsd-home.js";
 
 // ─── Re-exports: types ──────────────────────────────────────────────────────
 // Every type/interface that was previously exported from this file is
@@ -99,10 +101,6 @@ export {
 
 // ─── Path Constants & Getters ───────────────────────────────────────────────
 
-function gsdHome(): string {
-  return process.env.GSD_HOME || join(homedir(), ".gsd");
-}
-
 function globalPreferencesPath(): string {
   return join(gsdHome(), "PREFERENCES.md");
 }
@@ -154,6 +152,7 @@ export function loadEffectiveGSDPreferences(
 ): LoadedGSDPreferences | null {
   const globalPreferences = loadGlobalGSDPreferences();
   const projectPreferences = loadProjectGSDPreferences(basePath);
+  const projectHasPlanningDepth = projectPreferences?.preferences.planning_depth !== undefined;
 
   if (!globalPreferences && !projectPreferences) return null;
 
@@ -199,7 +198,25 @@ export function loadEffectiveGSDPreferences(
     };
   }
 
+  result = stripInheritedPlanningDepth(result, projectHasPlanningDepth);
+
   return result;
+}
+
+function stripInheritedPlanningDepth(
+  loaded: LoadedGSDPreferences,
+  projectHasPlanningDepth: boolean,
+): LoadedGSDPreferences {
+  if (projectHasPlanningDepth || loaded.preferences.planning_depth === undefined) {
+    return loaded;
+  }
+
+  // planning_depth is a project bootstrap routing flag, not a user-global
+  // preference. A global ~/.gsd/PREFERENCES.md value should not make every
+  // fresh repo behave like `/gsd new-project --deep`.
+  const preferences: GSDPreferences = { ...loaded.preferences };
+  delete preferences.planning_depth;
+  return { ...loaded, preferences };
 }
 
 function loadPreferencesFile(path: string, scope: "global" | "project"): LoadedGSDPreferences | null {
@@ -462,6 +479,7 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
       ? { ...(base.slice_parallel ?? {}), ...(override.slice_parallel ?? {}) }
       : undefined,
     language: override.language ?? base.language,
+    planning_depth: override.planning_depth ?? base.planning_depth,
   };
 }
 
@@ -619,7 +637,10 @@ export function resolvePreDispatchHooks(): PreDispatchHookConfig[] {
  */
 export function getIsolationMode(basePath?: string): "none" | "worktree" | "branch" {
   const prefs = loadEffectiveGSDPreferences(basePath)?.preferences?.git;
-  if (prefs?.isolation === "worktree") return "worktree";
+  if (prefs?.isolation === "worktree") {
+    if (basePath && nativeIsRepo(basePath) && !nativeHasCommittedHead(basePath)) return "none";
+    return "worktree";
+  }
   if (prefs?.isolation === "branch") return "branch";
   return "none"; // default — no isolation, work on current branch
 }

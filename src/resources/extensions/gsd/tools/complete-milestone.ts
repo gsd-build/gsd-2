@@ -56,6 +56,7 @@ export interface CompleteMilestoneParams {
 export interface CompleteMilestoneResult {
   milestoneId: string;
   summaryPath: string;
+  stale?: boolean;
 }
 
 function renderMilestoneSummaryMarkdown(params: CompleteMilestoneParams): string {
@@ -206,15 +207,15 @@ export async function handleCompleteMilestone(
   // This handles re-dispatch scenarios (DB/disk state divergence) where a prior
   // completion already wrote the file. Overwriting would silently destroy the
   // richer content the agent produced during the original completion run.
+  let projectionStale = false;
   if (!existsSync(summaryPath)) {
     try {
       await saveFile(summaryPath, summaryMd);
     } catch (renderErr) {
-      // Disk render failed — roll back DB status so state stays consistent
-      logWarning("tool", `complete_milestone — disk render failed, rolling back DB status: ${(renderErr as Error).message}`);
-      updateMilestoneStatus(params.milestoneId, 'active', null);
-      invalidateStateCache();
-      return { error: `disk render failed: ${(renderErr as Error).message}` };
+      projectionStale = true;
+      logWarning("projection", `complete_milestone projection write failed for ${params.milestoneId}; DB completion remains committed`, {
+        error: (renderErr as Error).message,
+      });
     }
   }
 
@@ -252,5 +253,6 @@ export async function handleCompleteMilestone(
   return {
     milestoneId: params.milestoneId,
     summaryPath,
+    ...(projectionStale ? { stale: true } : {}),
   };
 }

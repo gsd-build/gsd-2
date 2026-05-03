@@ -1,6 +1,6 @@
 /**
  * Post-unit processing for auto-loop — auto-commit, doctor run,
- * state rebuild, worktree sync, DB dual-write, hooks, triage, and
+ * state rebuild, projection checks, DB tool closeout, hooks, triage, and
  * quick-task dispatch.
  *
  * Split into two functions called sequentially by auto-loop with
@@ -16,6 +16,7 @@ import { deriveState } from "./state.js";
 import { logWarning, logError } from "./workflow-logger.js";
 import { loadFile, parseSummary, resolveAllOverrides } from "./files.js";
 import { loadPrompt } from "./prompt-loader.js";
+import { isAwaitingUserInput } from "./user-input-boundary.js";
 import {
   resolveSliceFile,
   resolveSlicePath,
@@ -41,7 +42,8 @@ import {
 } from "./auto-recovery.js";
 import { regenerateIfMissing } from "./workflow-projections.js";
 import { syncStateToProjectRoot } from "./auto-worktree.js";
-import { isDbAvailable, getTask, getSlice, getMilestone, updateTaskStatus, updateSliceStatus, _getAdapter } from "./gsd-db.js";
+import { normalizeWorktreePathForCompare } from "./worktree-root.js";
+import { isDbAvailable, getTask, getSlice, getMilestone, updateTaskStatus, _getAdapter } from "./gsd-db.js";
 import { renderPlanCheckboxes } from "./markdown-renderer.js";
 import { consumeSignal } from "./session-status-io.js";
 import {
@@ -62,7 +64,7 @@ import { validateFileChanges } from "./safety/file-change-validator.js";
 import { validateContent } from "./safety/content-validator.js";
 import { resolveSafetyHarnessConfig } from "./safety/safety-harness.js";
 import { resolveExpectedArtifactPath as resolveArtifactForContent } from "./auto-artifact-paths.js";
-import { loadEffectiveGSDPreferences } from "./preferences.js";
+import { getIsolationMode, loadEffectiveGSDPreferences } from "./preferences.js";
 import { getSliceTasks } from "./gsd-db.js";
 import { runPreExecutionChecks, type PreExecutionResult } from "./pre-execution-checks.js";
 import { writePreExecutionEvidence, type PreExecutionCheckJSON } from "./verification-evidence.js";
@@ -73,6 +75,17 @@ import { writeTurnGitTransaction } from "./uok/gitops.js";
 import { isClosedStatus } from "./status-guards.js";
 import { detectAbandonMilestone } from "./abandon-detect.js";
 import { isDeterministicPolicyError } from "./auto-tool-tracking.js";
+import {
+  clearProjectResearchInflightMarker,
+  finalizeProjectResearchTimeout,
+} from "./project-research-policy.js";
+import { validateArtifact } from "./schemas/validate.js";
+
+// ─── Path Comparison Helper ───────────────────────────────────────────────
+/** Compare two paths for physical identity, tolerating trailing slashes and symlinks. */
+function isSamePathLocal(a: string, b: string): boolean {
+  return normalizeWorktreePathForCompare(a) === normalizeWorktreePathForCompare(b);
+}
 
 /** Maximum verification retry attempts before escalating to blocker placeholder (#2653). */
 const MAX_VERIFICATION_RETRIES = 3;
@@ -154,9 +167,8 @@ export interface RogueFileWrite {
  * the completion tool. A "rogue" file is one that exists on disk but has
  * no corresponding DB row with status "complete".
  *
- * This is a safety-net diagnostic (D003). The existing migrateFromMarkdown()
- * in postUnitPostVerification() eventually ingests rogue files, but explicit
- * detection provides immediate diagnostics so operators know the prompt failed.
+ * This is a safety-net diagnostic (D003). Runtime detection never imports
+ * markdown into the DB; explicit migration/import/recovery commands own that.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function hasNonEmptyFields(row: Record<string, any> | null, fields: string[]): boolean {
@@ -195,14 +207,7 @@ export function detectRogueFileWrites(
 
     const dbRow = getSlice(mid, sid);
     if (!dbRow || dbRow.status !== "complete") {
-      // Auto-remediate: SUMMARY exists on disk but DB is stale — sync DB to
-      // match filesystem instead of reporting as rogue (#3633).
-      try {
-        updateSliceStatus(mid, sid, "complete", new Date().toISOString());
-      } catch {
-        // If DB update fails, fall back to rogue detection so the issue is visible
-        rogues.push({ path: summaryPath, unitType, unitId });
-      }
+      rogues.push({ path: summaryPath, unitType, unitId });
     }
   } else if (unitType === "plan-milestone") {
     if (!mid) return [];
@@ -288,6 +293,7 @@ export function buildStepCompleteMessage(nextState: import("./types.js").GSDStat
 export interface PreVerificationOpts {
   skipSettleDelay?: boolean;
   skipWorktreeSync?: boolean;
+  agentEndMessages?: unknown[];
 }
 
 export interface PostUnitContext {
@@ -299,6 +305,46 @@ export interface PostUnitContext {
   stopAuto: (ctx?: ExtensionContext, pi?: ExtensionAPI, reason?: string) => Promise<void>;
   pauseAuto: (ctx?: ExtensionContext, pi?: ExtensionAPI) => Promise<void>;
   updateProgressWidget: (ctx: ExtensionContext, unitType: string, unitId: string, state: import("./types.js").GSDState) => void;
+}
+
+export const USER_DRIVEN_DEEP_UNITS = new Set([
+  "discuss-project",
+  "discuss-requirements",
+  "discuss-milestone",
+  "research-decision",
+]);
+export { isAwaitingUserInput } from "./user-input-boundary.js";
+
+function artifactValidationKind(unitType: string): "project" | "requirements" | null {
+  if (unitType === "discuss-project") return "project";
+  if (unitType === "discuss-requirements") return "requirements";
+  return null;
+}
+
+function describeArtifactVerificationFailure(unitType: string, unitId: string, basePath: string): string {
+  const artifactPath = resolveExpectedArtifactPath(unitType, unitId, basePath);
+  if (!artifactPath) {
+    return `Artifact verification failed: ${unitType} "${unitId}" has no resolvable artifact path.`;
+  }
+  const relPath = relative(basePath, artifactPath);
+  if (!existsSync(artifactPath)) {
+    return `Artifact verification failed: ${relPath} was not found on disk after unit execution.`;
+  }
+
+  const validationKind = artifactValidationKind(unitType);
+  if (validationKind) {
+    const result = validateArtifact(artifactPath, validationKind);
+    if (!result.ok) {
+      const errors = result.errors
+        .slice(0, MAX_NOTIFICATION_DETAILS)
+        .map((error) => `${error.code}: ${error.message}`)
+        .join("; ");
+      return `Artifact verification failed: ${relPath} exists but is invalid${errors ? ` (${errors})` : ""}.`;
+    }
+  }
+
+  const expected = diagnoseExpectedArtifact(unitType, unitId, basePath);
+  return `Artifact verification failed: ${relPath} exists but did not satisfy the ${unitType} completion contract${expected ? ` (${expected})` : ""}.`;
 }
 
 export async function autoCommitUnit(
@@ -519,17 +565,14 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
           }
 
           const failureMsg = `Git ${turnAction} failed: ${(gitResult.error ?? "unknown error").split("\n")[0]}`;
-          if (uokFlags.gitops) {
-            ctx.ui.notify(failureMsg, "error");
-            await pauseAuto(ctx, pi);
-            return "dispatched";
-          }
-          ctx.ui.notify(failureMsg, "warning");
+          ctx.ui.notify(failureMsg, "error");
           debugLog("postUnit", {
-            phase: "git-action-failed-nonblocking",
+            phase: "git-action-failed-blocking",
             action: turnAction,
             error: gitResult.error ?? "unknown error",
           });
+          await pauseAuto(ctx, pi);
+          return "dispatched";
         }
 
         s.lastGitActionStatus = "ok";
@@ -581,7 +624,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
     });
 
     // Sync worktree state back to project root (skipped for lightweight sidecars)
-    if (!opts?.skipWorktreeSync && s.originalBasePath && s.originalBasePath !== s.basePath) {
+    if (!opts?.skipWorktreeSync && s.originalBasePath && !isSamePathLocal(s.originalBasePath, s.basePath)) {
       await runSafely("postUnit", "worktree-sync", () => {
         syncStateToProjectRoot(s.basePath, s.originalBasePath!, s.currentMilestoneId);
       });
@@ -650,7 +693,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
         const prefs = prefsResult?.preferences;
         const { getCollapseCadence, mergeSliceToMain } = await import("./slice-cadence.js");
         if (getCollapseCadence(prefs) !== "slice") return;
-        if (prefs?.git?.isolation !== "worktree") return;
+        if (getIsolationMode(s.originalBasePath || s.basePath) !== "worktree") return;
         if (s.isolationDegraded) return;
 
         const projectRoot = s.originalBasePath || s.basePath;
@@ -694,7 +737,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
               "error",
             );
             // Stop auto AND signal the outer postUnit flow to exit early.
-            // Without the flag, subsequent hooks (triage, rogue detection,
+            // Without the flag, subsequent hooks (triage,
             // DB writes) would keep running against a conflicted main
             // checkout after the loop was already told to stop.
             const { stopAuto } = await import("./auto.js");
@@ -714,7 +757,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
         }
       });
       // Exit early after stopAuto so the rest of post-unit processing
-      // (triage, rogue detection, hook dispatch, DB writes) doesn't run
+      // (triage, hook dispatch, DB writes) doesn't run
       // against a conflicted main checkout. Return "dispatched" to match
       // the convention used by other stop/pauseAuto paths in this function
       // (see signal handling earlier: stop/pause also return "dispatched").
@@ -725,14 +768,16 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
     if (s.currentUnit.type === "triage-captures") {
       try {
         const { executeTriageResolutions } = await import("./triage-resolution.js");
-        const state = await deriveState(s.basePath);
+        const state = await deriveState(s.canonicalProjectRoot);
         const mid = state.activeMilestone?.id ?? "";
         const sid = state.activeSlice?.id ?? "";
 
         // executeTriageResolutions handles defer milestone creation even
         // without an active milestone/slice (the "all milestones complete"
         // scenario from #1562). inject/replan/quick-task still require mid+sid.
-        const triageResult = executeTriageResolutions(s.basePath, mid, sid);
+        // Phase C: write to canonical project root. copyPlanningArtifacts
+        // has been deleted, so triage writes land where readers consult.
+        const triageResult = executeTriageResolutions(s.canonicalProjectRoot, mid, sid);
 
         if (triageResult.injected > 0) {
           ctx.ui.notify(
@@ -767,17 +812,6 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
       } catch (err) {
         logError("engine", "triage resolution failed", { error: (err as Error).message });
       }
-    }
-
-    // Rogue file detection — safety net for LLM bypassing completion tools (D003)
-    try {
-      const rogueFiles = detectRogueFileWrites(s.currentUnit.type, s.currentUnit.id, s.basePath);
-      for (const rogue of rogueFiles) {
-        logWarning("engine", "rogue file write detected", { path: rogue.path, unitId: rogue.unitId });
-        ctx.ui.notify(`Rogue file write detected: ${rogue.path}`, "warning");
-      }
-    } catch (e) {
-      debugLog("postUnit", { phase: "rogue-detection", error: String(e) });
     }
 
     // ── Safety harness: post-unit validation ──
@@ -908,10 +942,14 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
         try {
           const { milestone: mid, slice: sid } = parseUnitId(s.currentUnit.id);
           if (mid && sid) {
-            const regenerated = await regenerateIfMissing(s.basePath, mid, sid, "PLAN");
+            // Phase C: write to the canonical project root (#5236 scope)
+            // so non-symlinked worktrees no longer maintain a separate
+            // local .gsd/ projection. copyPlanningArtifacts has been
+            // deleted; reads + writes converge at projectRoot.
+            const regenerated = await regenerateIfMissing(s.canonicalProjectRoot, mid, sid, "PLAN");
             if (regenerated) {
               // Re-check after regeneration
-              triggerArtifactVerified = verifyExpectedArtifact(s.currentUnit.type, s.currentUnit.id, s.basePath);
+              triggerArtifactVerified = verifyExpectedArtifact(s.currentUnit.type, s.currentUnit.id, s.canonicalProjectRoot);
               if (triggerArtifactVerified) {
                 invalidateAllCaches();
               }
@@ -922,13 +960,49 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
         }
       }
 
+      if (s.currentUnit.type === "research-project") {
+        try {
+          clearProjectResearchInflightMarker(s.basePath);
+        } catch (e) {
+          debugLog("postUnit", { phase: "research-project-inflight-cleanup", error: String(e) });
+        }
+      }
+
+      if (!triggerArtifactVerified && s.currentUnit.type === "research-project") {
+        const retryKey = `${s.currentUnit.type}:${s.currentUnit.id}`;
+        const outcome = finalizeProjectResearchTimeout(
+          s.basePath,
+          "Project research unit ended before all required dimensions produced durable files.",
+        );
+        s.pendingVerificationRetry = null;
+        s.verificationRetryCount.delete(retryKey);
+        triggerArtifactVerified = verifyExpectedArtifact(s.currentUnit.type, s.currentUnit.id, s.basePath);
+        if (triggerArtifactVerified) {
+          invalidateAllCaches();
+          ctx.ui.notify(
+            outcome.kind === "partial-blockers"
+              ? "Project research finished partially; wrote blockers for missing dimensions and advancing without rerunning all scouts."
+              : "Project research artifacts are now terminal.",
+            "warning",
+          );
+        } else {
+          ctx.ui.notify(
+            "Project research produced no usable research files; wrote PROJECT-RESEARCH-BLOCKER.md and continuing fail-closed.",
+            "error",
+          );
+          return "continue";
+        }
+      }
+
       // When artifact verification fails for a unit type that has a known expected
-      // artifact, return "retry" so the caller re-dispatches with failure context
+      // artifact, ask the caller to retry so it re-dispatches with failure context
       // instead of blindly re-dispatching the same unit (#1571).
       // Retries are capped at MAX_ARTIFACT_VERIFICATION_RETRIES to prevent
       // unbounded loops (#2007).
       //
       // Pre-checks short-circuit retry for known-unrecoverable failures:
+      // - User-input waits in deep setup: pause instead of retrying or writing
+      //   placeholders while the agent is waiting for approval.
       // - Deterministic policy rejection (#4973): structural write-gate failure
       //   that will recur on every retry, so write a blocker placeholder.
       // - DB infra failure (#2517): completion tool returned db_unavailable, so
@@ -936,11 +1010,24 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
       // - Tool invocation error (#2883/#3595): malformed JSON args or queued
       //   user message — retry will produce the same failure.
       //
-      // #4973: Deterministic policy rejections (e.g. context_write_blocked from the
-      // write-gate) are checked FIRST — before the DB-availability check — because
-      // they are structural gates that will fire on every retry regardless of DB or
-      // model tier. Short-circuit immediately by writing a blocker placeholder.
-      if (!triggerArtifactVerified && s.lastToolInvocationError && isDeterministicPolicyError(s.lastToolInvocationError)) {
+      // User-driven deep setup prompts may ask for approval before the final
+      // root artifact write. If a premature write hits the write gate in the
+      // same turn, the user wait is the meaningful state; pause instead of
+      // writing a placeholder over PROJECT/REQUIREMENTS.
+      if (!triggerArtifactVerified && USER_DRIVEN_DEEP_UNITS.has(s.currentUnit.type) && isAwaitingUserInput(opts?.agentEndMessages)) {
+        debugLog("postUnit", {
+          phase: "artifact-verify-awaiting-user",
+          unitType: s.currentUnit.type,
+          unitId: s.currentUnit.id,
+        });
+        ctx.ui.notify(
+          `${s.currentUnit.type} ${s.currentUnit.id} is waiting for your input — pausing auto-mode instead of retrying the missing artifact.`,
+          "info",
+        );
+        s.lastToolInvocationError = null;
+        await pauseAuto(ctx, pi);
+        return "dispatched";
+      } else if (!triggerArtifactVerified && s.lastToolInvocationError && isDeterministicPolicyError(s.lastToolInvocationError)) {
         const retryKey = `${s.currentUnit.type}:${s.currentUnit.id}`;
         debugLog("postUnit", { phase: "deterministic-policy-error-placeholder", unitType: s.currentUnit.type, unitId: s.currentUnit.id, error: s.lastToolInvocationError });
         const reason = `Deterministic policy rejection for ${s.currentUnit.type} "${s.currentUnit.id}": ${s.lastToolInvocationError}. Retrying cannot resolve this gate — writing blocker placeholder to advance pipeline.`;
@@ -977,11 +1064,16 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
         if (hasExpectedArtifact) {
           const retryKey = `${s.currentUnit.type}:${s.currentUnit.id}`;
           const attempt = (s.verificationRetryCount.get(retryKey) ?? 0) + 1;
+          const failureDetails = describeArtifactVerificationFailure(
+            s.currentUnit.type,
+            s.currentUnit.id,
+            s.basePath,
+          );
           if (attempt > MAX_ARTIFACT_VERIFICATION_RETRIES) {
             s.verificationRetryCount.delete(retryKey);
             debugLog("postUnit", { phase: "artifact-verify-exhausted", unitType: s.currentUnit.type, unitId: s.currentUnit.id, attempt });
             ctx.ui.notify(
-              `Artifact still missing for ${s.currentUnit.type} ${s.currentUnit.id} after ${MAX_ARTIFACT_VERIFICATION_RETRIES} retries — pausing auto-mode`,
+              `${failureDetails} Pausing auto-mode after ${MAX_ARTIFACT_VERIFICATION_RETRIES} retries.`,
               "error",
             );
             await pauseAuto(ctx, pi);
@@ -990,12 +1082,12 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
           s.verificationRetryCount.set(retryKey, attempt);
           s.pendingVerificationRetry = {
             unitId: s.currentUnit.id,
-            failureContext: `Artifact verification failed: expected artifact for ${s.currentUnit.type} "${s.currentUnit.id}" was not found on disk after unit execution (attempt ${attempt}/${MAX_ARTIFACT_VERIFICATION_RETRIES}).`,
+            failureContext: `${failureDetails} (attempt ${attempt}/${MAX_ARTIFACT_VERIFICATION_RETRIES}).`,
             attempt,
           };
           debugLog("postUnit", { phase: "artifact-verify-retry", unitType: s.currentUnit.type, unitId: s.currentUnit.id, attempt });
           ctx.ui.notify(
-            `Artifact missing for ${s.currentUnit.type} ${s.currentUnit.id} — retrying (attempt ${attempt}/${MAX_ARTIFACT_VERIFICATION_RETRIES})`,
+            `${failureDetails} Retrying (attempt ${attempt}/${MAX_ARTIFACT_VERIFICATION_RETRIES}).`,
             "warning",
           );
           return "retry";
@@ -1092,7 +1184,7 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
           if (mid && sid && tid) {
             try {
               updateTaskStatus(mid, sid, tid, "pending");
-              await renderPlanCheckboxes(s.basePath, mid, sid);
+              await renderPlanCheckboxes(s.canonicalProjectRoot, mid, sid);
             } catch (dbErr) {
               // DB unavailable — fail explicitly rather than silently reverting to markdown mutation.
               // Use 'gsd recover' to rebuild DB state from disk if needed.
@@ -1102,7 +1194,8 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
 
           // 2. Delete SUMMARY.md for the task
           if (mid && sid && tid) {
-            const tasksDir = resolveTasksDir(s.basePath, mid, sid);
+            // Phase C: read+delete via canonical project root.
+            const tasksDir = resolveTasksDir(s.canonicalProjectRoot, mid, sid);
             if (tasksDir) {
               const summaryFile = join(tasksDir, buildTaskFileName(tid, "SUMMARY"));
               if (existsSync(summaryFile)) {
@@ -1113,7 +1206,7 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
 
           // 3. Delete the retry_on artifact (e.g. NEEDS-REWORK.md)
           if (trigger.retryArtifact) {
-            const retryArtifactPath = resolveHookArtifactPath(s.basePath, trigger.unitId, trigger.retryArtifact);
+            const retryArtifactPath = resolveHookArtifactPath(s.canonicalProjectRoot, trigger.unitId, trigger.retryArtifact);
             if (existsSync(retryArtifactPath)) {
               unlinkSync(retryArtifactPath);
             }
@@ -1391,16 +1484,17 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
       if (hasPendingCaptures(s.basePath)) {
         const pending = loadPendingCaptures(s.basePath);
         if (pending.length > 0) {
-          const state = await deriveState(s.basePath);
+          const readRoot = s.canonicalProjectRoot;
+          const state = await deriveState(readRoot);
           const mid = state.activeMilestone?.id;
           const sid = state.activeSlice?.id;
 
           if (mid && sid) {
             let currentPlan = "";
             let roadmapContext = "";
-            const planFile = resolveSliceFile(s.basePath, mid, sid, "PLAN");
+            const planFile = resolveSliceFile(readRoot, mid, sid, "PLAN");
             if (planFile) currentPlan = (await loadFile(planFile)) ?? "";
-            const roadmapFile = resolveMilestoneFile(s.basePath, mid, "ROADMAP");
+            const roadmapFile = resolveMilestoneFile(readRoot, mid, "ROADMAP");
             if (roadmapFile) roadmapContext = (await loadFile(roadmapFile)) ?? "";
 
             const capturesList = pending.map(c =>
@@ -1468,7 +1562,7 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
   // exits the loop, leaving the user with no hint to /clear and /gsd again.
   if (s.stepMode) {
     try {
-      const nextState = await deriveState(s.basePath);
+      const nextState = await deriveState(s.canonicalProjectRoot);
       ctx.ui.notify(buildStepCompleteMessage(nextState), "info");
     } catch (e) {
       debugLog("postUnit", { phase: "step-wizard-notify", error: String(e) });

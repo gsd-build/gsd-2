@@ -133,29 +133,9 @@ assert(
   "stale CONTEXT-DRAFT.md should be deleted in both-files case",
 );
 
-// ─── Static: guided-flow.ts has cleanup code ───────────────────────────
-
-console.log("=== Static: cleanup code in guided-flow.ts ===");
-
-const { readFileSync } = await import("node:fs");
-const guidedFlowSource = readFileSync(
-  join(import.meta.dirname, "..", "guided-flow.ts"),
-  "utf-8",
-);
-
-const checkFnIdx = guidedFlowSource.indexOf("checkAutoStartAfterDiscuss");
-const checkFnEnd = guidedFlowSource.indexOf("\nexport ", checkFnIdx + 1);
-const checkFnChunk = guidedFlowSource.slice(checkFnIdx, checkFnEnd > checkFnIdx ? checkFnEnd : checkFnIdx + 5000);
-
-assert(
-  checkFnChunk.includes("CONTEXT-DRAFT"),
-  "checkAutoStartAfterDiscuss should reference CONTEXT-DRAFT for cleanup",
-);
-
-assert(
-  checkFnChunk.includes("unlinkSync"),
-  "checkAutoStartAfterDiscuss should use unlinkSync to delete the draft",
-);
+// Note: source-grep assertions removed per CONTRIBUTING.md (no asserting against
+// readFileSync of source). The behavioral scenarios above already exercise the
+// CONTEXT-DRAFT cleanup path end-to-end via the actual filesystem state.
 
 // ─── Cleanup ──────────────────────────────────────────────────────────
 

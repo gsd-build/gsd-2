@@ -47,7 +47,7 @@ const symlinkResult = resolveProjectRootDbPath(symlinkPath);
 assertEq(
   symlinkResult,
   join("/home/user/myproject/.gsd/projects/abc123def", "gsd.db"),
-  "/.gsd/projects/<hash>/worktrees/ resolves to hash-level DB (#2517, updated for #2952)",
+  "/.gsd/projects/<hash>/worktrees/ resolves to external project state DB",
 );
 
 // Windows-style separators for symlink layout
@@ -57,7 +57,7 @@ if (sep === "\\") {
   assertEq(
     winResult,
     join("C:\\Users\\dev\\project\\.gsd\\projects\\abc123def", "gsd.db"),
-    "Windows /.gsd/projects/<hash>/worktrees/ resolves to hash-level DB",
+    "Windows /.gsd/projects/<hash>/worktrees/ resolves to external project state DB",
   );
 } else {
   // On non-Windows, test forward-slash variant explicitly
@@ -66,7 +66,7 @@ if (sep === "\\") {
   assertEq(
     fwdResult,
     join("/home/user/myproject/.gsd/projects/abc123def", "gsd.db"),
-    "Forward-slash /.gsd/projects/<hash>/worktrees/ resolves to hash-level DB on POSIX",
+    "Forward-slash /.gsd/projects/<hash>/worktrees/ resolves to external project state DB on POSIX",
   );
 }
 
@@ -76,7 +76,7 @@ const deepResult = resolveProjectRootDbPath(deepSymlinkPath);
 assertEq(
   deepResult,
   join("/home/user/myproject/.gsd/projects/deadbeef42", "gsd.db"),
-  "Deep /.gsd/projects/<hash>/worktrees/ path resolves to hash-level DB (#2952)",
+  "Deep /.gsd/projects/<hash>/worktrees/ path resolves to external project state DB",
 );
 
 // Non-worktree path should be unchanged

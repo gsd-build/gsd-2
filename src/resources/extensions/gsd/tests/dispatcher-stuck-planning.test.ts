@@ -1,10 +1,9 @@
 /**
- * dispatcher-stuck-planning.test.ts — #3656
+ * dispatcher-stuck-planning.test.ts
  *
- * Verify that state.ts contains the disk-to-DB task reconciliation logic
- * that prevents the dispatcher from getting stuck in an infinite planning
- * loop when the planner writes a PLAN.md but never calls the persistence
- * tool, leaving the DB with zero or partial task rows.
+ * Verify that state.ts no longer imports disk PLAN.md tasks into the runtime
+ * DB. PLAN.md is a projection; task rows must be created through DB-backed
+ * planning/import APIs.
  */
 
 import { describe, test } from "node:test";
@@ -16,23 +15,23 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const sourceFile = join(__dirname, "..", "state.ts");
 
-describe("dispatcher stuck-planning reconciliation (#3656)", () => {
+describe("dispatcher DB-authoritative planning boundary", () => {
   const source = readFileSync(sourceFile, "utf-8");
 
-  test("imports insertTask from gsd-db", () => {
-    assert.match(source, /import\s*\{[^}]*insertTask[^}]*\}\s*from/);
+  test("does not import insertTask into state derivation", () => {
+    assert.doesNotMatch(source, /import\s*\{[^}]*insertTask[^}]*\}\s*from/);
   });
 
-  test("contains plan-file task reconciliation block", () => {
-    assert.match(source, /if\s*\(\s*planFile\s*\)/);
-    assert.match(source, /dbTaskIds\.has\(t\.id\)/);
+  test("does not contain plan-file task reconciliation block", () => {
+    assert.doesNotMatch(source, /dbTaskIds\.has\(t\.id\)/);
+    assert.match(source, /Slice \$\{activeSlice\.id\} has no DB tasks/);
   });
 
-  test("calls insertTask for each disk plan task", () => {
-    assert.match(source, /insertTask\(\{/);
+  test("does not call insertTask from state derivation", () => {
+    assert.doesNotMatch(source, /insertTask\(\{/);
   });
 
-  test("references issue #3600 in reconciliation comment", () => {
-    assert.match(source, /#3600/);
+  test("documents markdown projections as non-authoritative", () => {
+    assert.match(source, /Markdown files are projections only/);
   });
 });

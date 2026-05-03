@@ -11,19 +11,21 @@
  * src/mcp-server.ts in the main package).
  */
 
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { z } from 'zod';
 import type { SessionManager } from './session-manager.js';
 import { isRemoteConfigured, tryRemoteQuestions } from './remote-questions.js';
+import type { RemoteToolResult } from './remote-questions.js';
 import { readProgress } from './readers/state.js';
 import { readRoadmap } from './readers/roadmap.js';
 import { readHistory } from './readers/metrics.js';
 import { readCaptures } from './readers/captures.js';
 import { readKnowledge } from './readers/knowledge.js';
 import { buildGraph, writeGraph, writeSnapshot, graphStatus, graphQuery, graphDiff } from './readers/graph.js';
-import { resolveGsdRoot } from './readers/paths.js';
+import { resolveGsdRoot, resolveMilestoneFile } from './readers/paths.js';
 import { runDoctorLite } from './readers/doctor-lite.js';
 import { registerWorkflowTools, validateProjectDir } from './workflow-tools.js';
 import { applySecrets, checkExistingEnvKeys, detectDestination, resolveProjectEnvFilePath } from './env-writer.js';
@@ -34,7 +36,21 @@ import { applySecrets, checkExistingEnvKeys, detectDestination, resolveProjectEn
 
 const MCP_PKG = '@modelcontextprotocol/sdk';
 const SERVER_NAME = 'gsd';
-const SERVER_VERSION = '2.53.0';
+
+/**
+ * Read the version from this package's package.json so the MCP handshake
+ * always advertises the deployed artifact's version. Falls back to '0.0.0'
+ * if package.json can't be located (e.g. unusual bundling); the fallback
+ * is loud-ish but won't crash the server.
+ */
+const SERVER_VERSION: string = (() => {
+  try {
+    const require = createRequire(import.meta.url);
+    const pkg = require('../package.json') as { version?: unknown };
+    if (typeof pkg.version === 'string' && pkg.version.length > 0) return pkg.version;
+  } catch { /* fall through */ }
+  return '0.0.0';
+})();
 
 /** User-interaction timeout — generous but bounded so elicitation can't hang indefinitely (#4586). */
 const ELICIT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
@@ -48,15 +64,28 @@ const ELICIT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 function defaultExecFn(
   cmd: string,
   args: string[],
+  opts?: { stdin?: string },
 ): Promise<{ code: number; stderr: string }> {
   return new Promise((res) => {
-    // stdin: ignore — avoids hanging if the child ever prompts interactively.
+    // stdin: pipe only when a caller explicitly supplies input; otherwise
+    // ignore it to avoid hanging if the child ever prompts interactively.
     // stdout: ignore — consumer only cares about stderr + exit code, and an
     //   un-drained pipe deadlocks once the kernel buffer (~64KB) fills.
     // stderr: pipe — captured below for error surfacing.
-    const child = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = spawn(resolveShellCommand(cmd), args, {
+      shell: process.platform === 'win32',
+      stdio: [opts?.stdin === undefined ? 'ignore' : 'pipe', 'ignore', 'pipe'],
+      windowsHide: true,
+    });
     let stderr = '';
-    child.stderr.on('data', (chunk) => {
+    child.stdin?.on('error', () => {
+      // Child exited before consuming stdin; close/error handling below will
+      // surface the real process result.
+    });
+    if (opts?.stdin !== undefined) {
+      child.stdin?.end(opts.stdin, 'utf8');
+    }
+    child.stderr?.on('data', (chunk) => {
       stderr += chunk.toString('utf8');
     });
     child.on('error', (err) => res({ code: 1, stderr: err.message }));
@@ -64,9 +93,19 @@ function defaultExecFn(
   });
 }
 
+function resolveShellCommand(cmd: string): string {
+  if (process.platform !== 'win32') return cmd;
+  if (cmd === 'vercel') return 'vercel.cmd';
+  if (cmd === 'npx') return 'npx.cmd';
+  return cmd;
+}
+
 /**
  * Race a promise against a timeout. Rejects with a typed error on timeout so
  * callers can return a specific MCP error response rather than hanging.
+ * If a parent AbortSignal is provided, an abort also rejects the race so
+ * client-side cancellation propagates instead of being absorbed by the
+ * 10-minute elicitation hold.
  *
  * @param timeoutMs - override for testing; defaults to ELICIT_TIMEOUT_MS
  */
@@ -74,18 +113,36 @@ export async function withElicitTimeout<T>(
   promise: Promise<T>,
   label: string,
   timeoutMs = ELICIT_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`${label} timed out after ${timeoutMs / 60000} minutes — no user response received`)),
-      timeoutMs,
+  const racers: Promise<T>[] = [promise];
+  racers.push(
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`${label} timed out after ${timeoutMs / 60000} minutes — no user response received`)),
+        timeoutMs,
+      );
+    }),
+  );
+  let abortListener: (() => void) | undefined;
+  if (signal) {
+    if (signal.aborted) {
+      clearTimeout(timer);
+      throw new Error(`${label} cancelled by client`);
+    }
+    racers.push(
+      new Promise<never>((_, reject) => {
+        abortListener = () => reject(new Error(`${label} cancelled by client`));
+        signal.addEventListener('abort', abortListener, { once: true });
+      }),
     );
-  });
+  }
   try {
-    return await Promise.race([promise, timeout]);
+    return await Promise.race(racers);
   } finally {
     clearTimeout(timer);
+    if (signal && abortListener) signal.removeEventListener('abort', abortListener);
   }
 }
 
@@ -177,9 +234,8 @@ async function readProjectState(projectDir: string, query: string | undefined): 
       const milestones: Array<{ id: string; hasRoadmap: boolean; hasSummary: boolean }> = [];
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
-        const mDir = join(milestonesDir, entry.name);
-        const hasRoadmap = await fileExists(join(mDir, `${entry.name}-ROADMAP.md`));
-        const hasSummary = await fileExists(join(mDir, `${entry.name}-SUMMARY.md`));
+        const hasRoadmap = !!resolveMilestoneFile(gsdDir, entry.name, 'ROADMAP');
+        const hasSummary = !!resolveMilestoneFile(gsdDir, entry.name, 'SUMMARY');
         milestones.push({ id: entry.name, hasRoadmap, hasSummary });
       }
       result.milestones = milestones;
@@ -189,15 +245,6 @@ async function readProjectState(projectDir: string, query: string | undefined): 
   }
 
   return result;
-}
-
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -280,6 +327,32 @@ interface AskUserQuestionsElicitRequest {
     properties: Record<string, Record<string, unknown>>;
     required?: string[];
   };
+}
+
+/**
+ * Structured payload mirrored to the MCP `structuredContent` field on
+ * `ask_user_questions` results. Mirrors the `LocalResultDetails` shape that
+ * src/resources/extensions/ask-user-questions.ts already produces, so the
+ * GSD discussion-gate hook in register-hooks.ts can treat the MCP path
+ * identically to the in-process extension path. Without this, the bridge
+ * surfaces `details = undefined` and the gate hook's
+ * `if (details?.cancelled || !details?.response)` branch HARD-BLOCKs every
+ * user answer, including successful confirmations. See #5267.
+ */
+interface AskUserQuestionsRoundResultAnswer {
+  selected: string | string[];
+  notes: string;
+}
+
+interface AskUserQuestionsRoundResult {
+  endInterview: false;
+  answers: Record<string, AskUserQuestionsRoundResultAnswer>;
+}
+
+interface AskUserQuestionsStructuredContent {
+  questions: AskUserQuestion[];
+  response: AskUserQuestionsRoundResult | null;
+  cancelled: boolean;
 }
 
 const OTHER_OPTION_LABEL = 'None of the above';
@@ -387,6 +460,186 @@ export function formatAskUserQuestionsElicitResult(
   return JSON.stringify({ answers });
 }
 
+/**
+ * Normalize an MCP elicitation form result into the `RoundResult` shape the
+ * GSD discussion-gate hook reads from `tool_result` `details.response`. The
+ * elicitation `content` map carries `{ [id]: label, [id]__note?: string }`;
+ * the hook expects `{ answers: { [id]: { selected, notes } } }`. Mirrored into
+ * `structuredContent` by `askUserQuestionsHandler`. See #5267.
+ */
+export function buildAskUserQuestionsRoundResult(
+  questions: AskUserQuestion[],
+  result: AskUserQuestionsElicitResult,
+): AskUserQuestionsRoundResult {
+  const answers: Record<string, AskUserQuestionsRoundResultAnswer> = {};
+  const content = result.content ?? {};
+
+  for (const question of questions) {
+    if (question.allowMultiple) {
+      const list = normalizeAskUserQuestionsAnswers(content[question.id], true);
+      answers[question.id] = { selected: list, notes: '' };
+      continue;
+    }
+
+    const list = normalizeAskUserQuestionsAnswers(content[question.id], false);
+    const selected = list[0] ?? '';
+    const notes = selected === OTHER_OPTION_LABEL
+      ? normalizeAskUserQuestionsNote(content[`${question.id}__note`])
+      : '';
+    answers[question.id] = { selected, notes };
+  }
+
+  // `endInterview: false` mirrors the local extension's `RoundResult` shape and
+  // matches the remote path's `toRoundResultResponse` so register-hooks reads
+  // identical payloads regardless of channel. See peer review #5267-Q2.
+  return { endInterview: false, answers };
+}
+
+interface AskUserQuestionsHandlerDeps {
+  elicitInput(params: AskUserQuestionsElicitRequest): Promise<AskUserQuestionsElicitResult>;
+  isRemoteConfigured(): boolean;
+  tryRemoteQuestions(questions: AskUserQuestion[], signal?: AbortSignal): Promise<RemoteToolResult | null>;
+}
+
+function isLocalElicitFallbackError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const message = err.message.toLowerCase();
+  return (
+    message.includes('timed out after') ||
+    message.includes('elicit') ||
+    message.includes('elicitation') ||
+    message.includes('host') ||
+    message.includes('not supported') ||
+    message.includes('method not found') ||
+    message.includes('-32601')
+  );
+}
+
+function formatErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Defensive guard for the `details.response` payload from `tryRemoteQuestions`.
+ * Accepts only an object with a plain `answers` map; anything else (null,
+ * stringified JSON, missing) falls back to `null` so the gate hook routes
+ * the cancel branch instead of crashing on `details.response.answers[id]`.
+ */
+function isRoundResultLike(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const answers = (value as Record<string, unknown>)['answers'];
+  return !!answers && typeof answers === 'object' && !Array.isArray(answers);
+}
+
+export async function askUserQuestionsHandler(
+  questions: AskUserQuestion[],
+  extra: McpToolExtra | undefined,
+  deps: AskUserQuestionsHandlerDeps,
+): Promise<ToolContent> {
+  try {
+    const validationError = validateAskUserQuestionsPayload(questions);
+    if (validationError) return errorContent(validationError);
+
+    // Local-first: try the MCP host's elicitation channel (Claude Code,
+    // Cursor, etc.) before any configured remote channel. A misconfigured
+    // remote (e.g. expired Discord token returning 401) must not block the
+    // depth-verification gate when the user is sitting in front of the host.
+    let localElicitError: unknown;
+    try {
+      const elicitation = await withElicitTimeout(
+        deps.elicitInput(buildAskUserQuestionsElicitRequest(questions)),
+        'ask_user_questions',
+      );
+      if (elicitation.action === 'accept' && elicitation.content) {
+        const structured: AskUserQuestionsStructuredContent = {
+          questions,
+          response: buildAskUserQuestionsRoundResult(questions, elicitation),
+          cancelled: false,
+        };
+        return {
+          content: [{ type: 'text' as const, text: formatAskUserQuestionsElicitResult(questions, elicitation) }],
+          structuredContent: structured as unknown as Record<string, unknown>,
+        };
+      }
+    } catch (err) {
+      if (!isLocalElicitFallbackError(err)) throw err;
+      localElicitError = err;
+      console.warn(`[gsd:mcp] ask_user_questions local elicitation unavailable; trying remote fallback: ${formatErrorMessage(err)}`);
+    }
+
+    // Local cancelled / unavailable — fall back to the configured remote
+    // channel (Discord, Slack, Telegram) if one is set.
+    if (deps.isRemoteConfigured()) {
+      let remoteResult: RemoteToolResult | null;
+      try {
+        remoteResult = await deps.tryRemoteQuestions(questions, extra?.signal);
+      } catch (err) {
+        if (localElicitError) {
+          throw new Error(
+            `Local elicitation failed (${formatErrorMessage(localElicitError)}); remote fallback failed (${formatErrorMessage(err)})`,
+          );
+        }
+        throw err;
+      }
+      if (remoteResult) {
+        const details = remoteResult.details as Record<string, unknown> | undefined;
+        if (details?.['timed_out'] || details?.['error']) {
+          // Mirror the timeout/error into structuredContent so the gate hook's
+          // `details?.cancelled || !details?.response` branch fires correctly
+          // (gate stays pending, model re-asks) instead of silently dropping
+          // because no `details` made it across the MCP wire. See #5267.
+          const failedStructured: AskUserQuestionsStructuredContent = {
+            questions,
+            response: null,
+            cancelled: true,
+          };
+          return {
+            content: [{ type: 'text' as const, text: remoteResult.content[0]?.text ?? 'Remote questions timed out or failed' }],
+            structuredContent: failedStructured as unknown as Record<string, unknown>,
+          };
+        }
+        // Successful remote answer — surface the normalized RoundResult that
+        // remote-questions.ts attached to `details.response` so the gate hook
+        // sees `details.response.answers[id].selected` on this path too.
+        // A malformed `response` (failing isRoundResultLike) is reported as
+        // an explicit cancellation rather than a silent `cancelled: false`
+        // with `response: null` — the latter would lie to any consumer that
+        // reads `structuredContent.cancelled` independently of `.response`.
+        const hasValidResponse = isRoundResultLike(details?.['response']);
+        const acceptedStructured: AskUserQuestionsStructuredContent = hasValidResponse
+          ? {
+              questions,
+              response: details!['response'] as AskUserQuestionsRoundResult,
+              cancelled: false,
+            }
+          : {
+              questions,
+              response: null,
+              cancelled: true,
+            };
+        return {
+          content: [{ type: 'text' as const, text: remoteResult.content[0]?.text ?? '' }],
+          structuredContent: acceptedStructured as unknown as Record<string, unknown>,
+        };
+      }
+    }
+
+    if (localElicitError) throw localElicitError;
+
+    const cancelledStructured: AskUserQuestionsStructuredContent = {
+      questions,
+      response: null,
+      cancelled: true,
+    };
+    return {
+      content: [{ type: 'text' as const, text: 'ask_user_questions was cancelled before receiving a response' }],
+      structuredContent: cancelledStructured as unknown as Record<string, unknown>,
+    };
+  } catch (err) {
+    return errorContent(err instanceof Error ? err.message : String(err));
+  }
+}
+
 // ---------------------------------------------------------------------------
 // secure_env_collect handler (extracted so tests can drive it directly)
 // ---------------------------------------------------------------------------
@@ -397,8 +650,8 @@ export type ElicitInputFn = (params: {
 }) => Promise<{ action: 'accept' | 'cancel' | 'decline'; content?: Record<string, unknown> }>;
 
 type ToolContent =
-  | { content: Array<{ type: 'text'; text: string }> }
-  | { isError: true; content: Array<{ type: 'text'; text: string }> };
+  | { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown> }
+  | { isError: true; content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown> };
 
 export async function secureEnvCollectHandler(
   args: Record<string, unknown>,
@@ -750,39 +1003,11 @@ export async function createMcpServer(
     },
     async (args: Record<string, unknown>, extra?: McpToolExtra) => {
       const { questions } = args as unknown as AskUserQuestionsParams;
-      try {
-        const validationError = validateAskUserQuestionsPayload(questions);
-        if (validationError) return errorContent(validationError);
-
-        // Delegate to remote-questions manager when a remote channel is configured
-        // (Discord, Slack, Telegram). This path is the only one reachable for
-        // Claude Code-under-gsd sessions, which have no local TUI.
-        if (isRemoteConfigured()) {
-          const remoteResult = await tryRemoteQuestions(questions, extra?.signal);
-          if (remoteResult) {
-            const details = remoteResult.details as Record<string, unknown> | undefined;
-            if (details?.['timed_out'] || details?.['error']) {
-              // Surface timeout/error as plain text so the LLM knows to retry
-              return textContent(remoteResult.content[0]?.text ?? 'Remote questions timed out or failed');
-            }
-            return textContent(remoteResult.content[0]?.text ?? '');
-          }
-          // resolveRemoteConfig() returned null between isRemoteConfigured() and
-          // tryRemoteQuestions() (e.g. env var was cleared) — fall through to local.
-        }
-
-        const elicitation = await withElicitTimeout(
-          server.server.elicitInput(buildAskUserQuestionsElicitRequest(questions)),
-          'ask_user_questions',
-        );
-        if (elicitation.action !== 'accept' || !elicitation.content) {
-          return textContent('ask_user_questions was cancelled before receiving a response');
-        }
-
-        return textContent(formatAskUserQuestionsElicitResult(questions, elicitation));
-      } catch (err) {
-        return errorContent(err instanceof Error ? err.message : String(err));
-      }
+      return askUserQuestionsHandler(questions, extra, {
+        elicitInput: (params) => server.server.elicitInput(params),
+        isRemoteConfigured,
+        tryRemoteQuestions,
+      });
     },
   );
 

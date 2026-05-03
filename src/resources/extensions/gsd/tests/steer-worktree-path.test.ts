@@ -1,6 +1,6 @@
 // GSD Extension - Steer Worktree Path Resolution Test
-// Regression test for #3476: /gsd steer must write overrides to the worktree .gsd/,
-// not the project root .gsd/, when a worktree is active.
+// Worktrees share the canonical project .gsd state root. /gsd steer writes
+// overrides to that canonical root even when invoked with a worktree path.
 
 import { describe, test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
@@ -27,32 +27,31 @@ describe("steer worktree path resolution (#3476)", () => {
     rmSync(projectRoot, { recursive: true, force: true });
   });
 
-  test("appendOverride writes to worktree .gsd/ when worktree path is used", async () => {
+  test("appendOverride writes to canonical project .gsd/ when worktree path is used", async () => {
     await appendOverride(worktreePath, "Use Postgres instead of SQLite", "M001/S01/T01");
 
-    // Override should be in the worktree .gsd/
+    // Override should be in the canonical project .gsd/
     const wtOverrides = join(worktreePath, ".gsd", "OVERRIDES.md");
-    assert.ok(existsSync(wtOverrides), "override file exists in worktree .gsd/");
-
-    const content = readFileSync(wtOverrides, "utf-8");
-    assert.ok(content.includes("Use Postgres instead of SQLite"), "override content is correct");
-
-    // Override should NOT be in the project root .gsd/
     const rootOverrides = join(projectRoot, ".gsd", "OVERRIDES.md");
-    assert.ok(!existsSync(rootOverrides), "no override file in project root .gsd/");
+    assert.ok(!existsSync(wtOverrides), "no override file in worktree-local .gsd/");
+    assert.ok(existsSync(rootOverrides), "override file exists in project root .gsd/");
+
+    const content = readFileSync(rootOverrides, "utf-8");
+    assert.ok(content.includes("Use Postgres instead of SQLite"), "override content is correct");
   });
 
-  test("loadActiveOverrides reads from worktree .gsd/ when worktree path is used", async () => {
+  test("loadActiveOverrides reads canonical project .gsd/ when worktree path is used", async () => {
     await appendOverride(worktreePath, "Switch to JWT auth", "M001/S02/T01");
 
-    // Loading from worktree should find the override
+    // Loading from worktree resolves to the canonical project state root.
     const wtOverrides = await loadActiveOverrides(worktreePath);
     assert.equal(wtOverrides.length, 1, "one active override in worktree");
     assert.equal(wtOverrides[0].change, "Switch to JWT auth");
 
-    // Loading from project root should find nothing
+    // Loading from project root sees the same canonical override.
     const rootOverrides = await loadActiveOverrides(projectRoot);
-    assert.equal(rootOverrides.length, 0, "no overrides in project root");
+    assert.equal(rootOverrides.length, 1, "same override visible from project root");
+    assert.equal(rootOverrides[0].change, "Switch to JWT auth");
   });
 
   test("appendOverride falls back to project root when no worktree exists", async () => {

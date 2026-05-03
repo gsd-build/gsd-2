@@ -25,6 +25,7 @@ import { existsSync, copyFileSync, mkdirSync, realpathSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Decision, Requirement, GateRow, GateId, GateScope, GateStatus, GateVerdict } from "./types.js";
 import { GSDError, GSD_STALE_STATE } from "./errors.js";
+import type { GsdWorkspace, MilestoneScope } from "./workspace.js";
 import { getGateIdsForTurn, type OwnerTurn } from "./gate-registry.js";
 import { logError, logWarning } from "./workflow-logger.js";
 // Type-only import to avoid a circular runtime dep. The runtime side of
@@ -33,6 +34,7 @@ import { logError, logWarning } from "./workflow-logger.js";
 import type { StateManifest } from "./workflow-manifest.js";
 
 const _require = createRequire(import.meta.url);
+const BETTER_SQLITE3_PACKAGE = ["better", "sqlite3"].join("-");
 
 interface DbStatement {
   run(...params: unknown[]): unknown;
@@ -89,7 +91,7 @@ function loadProvider(): void {
   }
 
   try {
-    const mod = _require("better-sqlite3");
+    const mod = _require(BETTER_SQLITE3_PACKAGE);
     if (typeof mod === "function" || (mod && mod.default)) {
       providerModule = mod.default || mod;
       providerName = "better-sqlite3";
@@ -180,12 +182,143 @@ function openRawDb(path: string): unknown {
   return new Database(path);
 }
 
-export const SCHEMA_VERSION = 22;
+export const SCHEMA_VERSION = 25;
 
 function indexExists(db: DbAdapter, name: string): boolean {
   return !!db.prepare(
     "SELECT 1 as present FROM sqlite_master WHERE type = 'index' AND name = ?",
   ).get(name);
+}
+
+/**
+ * Create the v24 coordination tables (workers, milestone_leases,
+ * unit_dispatches, cancellation_requests, command_queue) and their indexes.
+ *
+ * Idempotent — uses IF NOT EXISTS throughout. Called from both the
+ * fresh-install path and the v24 migration block in migrateSchema().
+ *
+ * Single-host invariant: these tables coordinate concurrent auto-mode
+ * workers via shared SQLite WAL on local disk only. NFS / network
+ * filesystems break the coordination semantics — multi-host execution
+ * needs a real coordinator (etcd, Postgres) and is out of scope.
+ */
+function createCoordinationTablesV24(db: DbAdapter): void {
+  const ddl = [
+    `CREATE TABLE IF NOT EXISTS workers (
+      worker_id TEXT PRIMARY KEY,
+      host TEXT NOT NULL,
+      pid INTEGER NOT NULL,
+      started_at TEXT NOT NULL,
+      version TEXT NOT NULL,
+      last_heartbeat_at TEXT NOT NULL,
+      status TEXT NOT NULL,
+      project_root_realpath TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS milestone_leases (
+      milestone_id TEXT PRIMARY KEY,
+      worker_id TEXT NOT NULL,
+      fencing_token INTEGER NOT NULL,
+      acquired_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      status TEXT NOT NULL,
+      FOREIGN KEY (worker_id) REFERENCES workers(worker_id),
+      FOREIGN KEY (milestone_id) REFERENCES milestones(id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS unit_dispatches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trace_id TEXT NOT NULL,
+      turn_id TEXT,
+      worker_id TEXT NOT NULL,
+      milestone_lease_token INTEGER NOT NULL,
+      milestone_id TEXT NOT NULL,
+      slice_id TEXT,
+      task_id TEXT,
+      unit_type TEXT NOT NULL,
+      unit_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      attempt_n INTEGER NOT NULL DEFAULT 1,
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      exit_reason TEXT,
+      error_summary TEXT,
+      verification_evidence_id INTEGER,
+      next_run_at TEXT,
+      retry_after_ms INTEGER,
+      max_attempts INTEGER NOT NULL DEFAULT 3,
+      last_error_code TEXT,
+      last_error_at TEXT,
+      FOREIGN KEY (worker_id) REFERENCES workers(worker_id),
+      FOREIGN KEY (verification_evidence_id) REFERENCES verification_evidence(id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS cancellation_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      requested_at TEXT NOT NULL,
+      requested_by TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      dispatch_id INTEGER,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL,
+      acked_at TEXT,
+      acked_worker_id TEXT,
+      FOREIGN KEY (dispatch_id) REFERENCES unit_dispatches(id),
+      FOREIGN KEY (acked_worker_id) REFERENCES workers(worker_id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS command_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      target_worker TEXT,
+      command TEXT NOT NULL,
+      args_json TEXT NOT NULL DEFAULT '{}',
+      enqueued_at TEXT NOT NULL,
+      claimed_at TEXT,
+      claimed_by TEXT,
+      completed_at TEXT,
+      result_json TEXT
+    )`,
+  ];
+  for (const stmt of ddl) db.exec(stmt);
+
+  // Indexes — created here so both fresh-install and v24-migration paths
+  // produce identical structure.
+  db.exec("CREATE INDEX IF NOT EXISTS idx_unit_dispatches_active ON unit_dispatches(milestone_id, status)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_unit_dispatches_trace ON unit_dispatches(trace_id, turn_id)");
+  // Partial unique index — prevents two workers from claiming the same
+  // unit concurrently. Codex review MEDIUM B2: enforces double-claim guard
+  // at the DB level.
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_unit_dispatches_active_per_unit "
+    + "ON unit_dispatches(unit_id) WHERE status IN ('claimed','running')",
+  );
+  // command_queue index — SQLite indexes NULLs in B-trees, so this single
+  // index serves both targeted (target_worker = ?) and broadcast
+  // (target_worker IS NULL) queries. Codex review LOW B4 documented.
+  db.exec("CREATE INDEX IF NOT EXISTS idx_command_queue_pending ON command_queue(target_worker, claimed_at)");
+}
+
+/**
+ * Create the v25 runtime_kv table. Idempotent — uses IF NOT EXISTS.
+ *
+ * STRICT INVARIANT: runtime_kv is NON-CORRECTNESS-CRITICAL. UI cursors,
+ * dashboard caches, last-seen-version markers, resume cursors, and other
+ * "soft" state are OK. Anything that drives auto-mode control flow gets
+ * typed columns in unit_dispatches / workers / milestone_leases — never
+ * a bag of JSON in runtime_kv.
+ *
+ * Scope partitioning: ('global', '', key) for project-wide values;
+ * ('worker', worker_id, key) for per-worker state (resume cursors);
+ * ('milestone', milestone_id, key) for per-milestone soft state.
+ */
+function createRuntimeKvTableV25(db: DbAdapter): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS runtime_kv (
+      scope TEXT NOT NULL,
+      scope_id TEXT NOT NULL DEFAULT '',
+      key TEXT NOT NULL,
+      value_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (scope, scope_id, key)
+    )
+  `);
 }
 
 function dedupeVerificationEvidenceRows(db: DbAdapter): void {
@@ -353,7 +486,8 @@ function initSchema(db: DbAdapter, fileBacked: boolean): void {
         verification_uat TEXT NOT NULL DEFAULT '',
         definition_of_done TEXT NOT NULL DEFAULT '[]',
         requirement_coverage TEXT NOT NULL DEFAULT '',
-        boundary_map_markdown TEXT NOT NULL DEFAULT ''
+        boundary_map_markdown TEXT NOT NULL DEFAULT '',
+        sequence INTEGER DEFAULT 0
       )
     `);
 
@@ -583,6 +717,9 @@ function initSchema(db: DbAdapter, fileBacked: boolean): void {
 
     const existing = db.prepare("SELECT count(*) as cnt FROM schema_version").get();
     if (existing && (existing["cnt"] as number) === 0) {
+      createCoordinationTablesV24(db);
+      createRuntimeKvTableV25(db);
+
       // Fresh install — all tables are created above with the full current schema,
       // so it is safe to create all migration-specific indexes here.  For existing
       // databases these indexes are created inside the individual migration guards
@@ -1232,6 +1369,39 @@ function migrateSchema(db: DbAdapter): void {
       });
     }
 
+    if (currentVersion < 23) {
+      // v23: milestone queue ordering moves into the canonical DB. The
+      // historical QUEUE-ORDER.json file remains a projection, but runtime
+      // derivation must not read it as authoritative state.
+      ensureColumn(db, "milestones", "sequence", "ALTER TABLE milestones ADD COLUMN sequence INTEGER DEFAULT 0");
+      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
+        ":version": 23,
+        ":applied_at": new Date().toISOString(),
+      });
+    }
+
+    if (currentVersion < 24) {
+      // v24: auto-mode coordination tables. See createCoordinationTablesV24
+      // for full schema + invariants. No-op for fresh installs (the same
+      // helper runs in the fresh-install path); for upgraded DBs this is
+      // the only place these tables get created.
+      createCoordinationTablesV24(db);
+      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
+        ":version": 24,
+        ":applied_at": new Date().toISOString(),
+      });
+    }
+
+    if (currentVersion < 25) {
+      // v25: runtime_kv non-correctness-critical key-value storage. See
+      // createRuntimeKvTableV25 for the full schema + invariants.
+      createRuntimeKvTableV25(db);
+      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
+        ":version": 25,
+        ":applied_at": new Date().toISOString(),
+      });
+    }
+
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");
@@ -1246,6 +1416,182 @@ let _exitHandlerRegistered = false;
 let _dbOpenAttempted = false;
 let _lastDbError: Error | null = null;
 let _lastDbPhase: "open" | "initSchema" | "vacuum-recovery" | null = null;
+/**
+ * Identity key of the workspace whose connection is currently active
+ * (currentDb). Set by openDatabaseByWorkspace(); null when the active
+ * connection was opened via the legacy openDatabase(path) path.
+ */
+let _currentIdentityKey: string | null = null;
+
+/**
+ * Workspace-scoped connection cache.
+ * Key: GsdWorkspace.identityKey (realpath-normalized project root).
+ * Value: the DB path and open adapter for that workspace.
+ *
+ * Sibling worktrees of the same project share the same identityKey (set by
+ * createWorkspace) and therefore reuse the same cached connection, preserving
+ * shared-WAL semantics. Different projects get distinct cache entries.
+ *
+ * NOTE: Only one connection is "active" at a time (currentDb/currentPath).
+ * The cache allows fast re-activation of a previously opened connection when
+ * callers switch between known workspaces via openDatabaseByWorkspace().
+ */
+const _dbCache = new Map<string, { dbPath: string; db: DbAdapter }>();
+
+/** Test helper: expose the internal cache for inspection. Not for production use. */
+export function _getDbCache(): ReadonlyMap<string, { dbPath: string; db: DbAdapter }> {
+  return _dbCache;
+}
+
+/**
+ * Close and evict every entry in the workspace connection cache, then call
+ * closeDatabase() to close the active connection.
+ *
+ * Use this for test teardown or process-shutdown paths where every open
+ * connection must be flushed. Normal callers should use closeDatabase() or
+ * closeDatabaseByWorkspace() instead.
+ */
+export function closeAllDatabases(): void {
+  // Close all non-active cached connections first.
+  for (const [key, entry] of _dbCache) {
+    if (entry.db === currentDb) continue; // handled by closeDatabase() below
+    _dbCache.delete(key);
+    try { entry.db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* best-effort */ }
+    try { entry.db.exec("PRAGMA incremental_vacuum(64)"); } catch { /* best-effort */ }
+    try { entry.db.close(); } catch { /* best-effort */ }
+  }
+  closeDatabase();
+}
+
+/**
+ * Open (or reuse) the database connection scoped to the given workspace.
+ *
+ * Uses workspace.identityKey as the cache key, so sibling worktrees of the
+ * same project resolve to the same connection. On a cache hit the existing
+ * adapter is reactivated as the current connection without re-opening the
+ * file. On a cache miss, delegates to openDatabase() for the full
+ * open + schema-init + migration flow, then caches the result.
+ *
+ * When switching to a different workspace, the previously active connection
+ * is preserved in the cache (not closed), so callers can switch back to it
+ * cheaply via a subsequent openDatabaseByWorkspace() call.
+ *
+ * @param workspace A GsdWorkspace created by createWorkspace().
+ * @returns true if the connection is open and ready, false otherwise.
+ */
+export function openDatabaseByWorkspace(workspace: GsdWorkspace): boolean {
+  const key = workspace.identityKey;
+  const dbPath = workspace.contract.projectDb;
+
+  const cached = _dbCache.get(key);
+  if (cached) {
+    // Reactivate the cached connection as the current singleton.
+    currentDb = cached.db;
+    currentPath = cached.dbPath;
+    currentPid = process.pid;
+    _dbOpenAttempted = true;
+    _currentIdentityKey = key;
+    return true;
+  }
+
+  // Cache miss — need to open a new connection.
+  //
+  // If there is a currently active workspace connection, stash it in the
+  // cache under its identity key before calling openDatabase(), because
+  // openDatabase() will call closeDatabase() when the path changes (which
+  // would destroy the existing adapter). By nulling out currentDb first,
+  // we prevent openDatabase() from closing the live adapter.
+  let oldDb: typeof currentDb = null;
+  let oldPath: typeof currentPath = null;
+  let oldPid: typeof currentPid = 0;
+  let oldKey: typeof _currentIdentityKey = null;
+
+  if (currentDb !== null && _currentIdentityKey !== null) {
+    // Snapshot the old globals so we can restore them on failure.
+    oldDb = currentDb;
+    oldPath = currentPath;
+    oldPid = currentPid;
+    oldKey = _currentIdentityKey;
+    // Save the current connection so it stays alive in the cache.
+    _dbCache.set(_currentIdentityKey, {
+      dbPath: currentPath!,
+      db: currentDb,
+    });
+    // Detach from globals so openDatabase() opens fresh without closing it.
+    currentDb = null;
+    currentPath = null;
+    currentPid = 0;
+    _currentIdentityKey = null;
+  }
+
+  // Run the full open/schema/migration flow for the new workspace.
+  // openDatabase() can throw on corrupt DB or permission error — catch so we
+  // can restore the previous connection rather than leaving globals null.
+  let opened: boolean;
+  try {
+    opened = openDatabase(dbPath);
+  } catch (err) {
+    // Failed to open the new DB. Restore the previous workspace connection so
+    // the caller's workspace remains active (it is still safe in _dbCache).
+    if (oldDb !== null) {
+      currentDb = oldDb;
+      currentPath = oldPath;
+      currentPid = oldPid;
+      _currentIdentityKey = oldKey;
+    }
+    throw err;
+  }
+  if (opened && currentDb) {
+    _dbCache.set(key, { dbPath, db: currentDb });
+    _currentIdentityKey = key;
+  } else if (!opened && oldDb !== null) {
+    // Restore the previous connection so the caller's workspace remains active.
+    // The failed attempt left no live adapter, so the globals stayed null.
+    currentDb = oldDb;
+    currentPath = oldPath;
+    currentPid = oldPid;
+    _currentIdentityKey = oldKey;
+  }
+  return opened;
+}
+
+/**
+ * Open (or reuse) the database connection scoped to the workspace in a
+ * MilestoneScope. Thin delegation to openDatabaseByWorkspace().
+ */
+export function openDatabaseByScope(scope: MilestoneScope): boolean {
+  return openDatabaseByWorkspace(scope.workspace);
+}
+
+/**
+ * Close the database connection for the given workspace and remove it from
+ * the cache. If the workspace's connection is currently active (currentDb),
+ * performs a full closeDatabase() including WAL checkpoint. Otherwise only
+ * removes the cache entry (the adapter was already replaced by a later open).
+ */
+export function closeDatabaseByWorkspace(workspace: GsdWorkspace): void {
+  const key = workspace.identityKey;
+  const cached = _dbCache.get(key);
+  if (!cached) return;
+
+  _dbCache.delete(key);
+
+  if (currentDb === cached.db) {
+    // This workspace's connection is the active one — full close.
+    closeDatabase();
+  } else {
+    // Connection was displaced by a later open; close the adapter directly.
+    try {
+      cached.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    } catch (e) { logWarning("db", `WAL checkpoint (byWorkspace) failed: ${(e as Error).message}`); }
+    try {
+      cached.db.exec("PRAGMA incremental_vacuum(64)");
+    } catch (e) { logWarning("db", `incremental vacuum (byWorkspace) failed: ${(e as Error).message}`); }
+    try {
+      cached.db.close();
+    } catch (e) { logWarning("db", `database close (byWorkspace) failed: ${(e as Error).message}`); }
+  }
+}
 
 export function getDbProvider(): ProviderName | null {
   loadProvider();
@@ -1303,7 +1649,7 @@ export function openDatabase(path: string): boolean {
     // node:sqlite loaded but failed to open this file — try better-sqlite3 as fallback.
     if (providerName === "node:sqlite") {
       try {
-        const mod = _require("better-sqlite3");
+        const mod = _require(BETTER_SQLITE3_PACKAGE);
         const Db = (mod && mod.default) ? mod.default : mod;
         if (typeof Db === "function") {
           rawDb = new Db(path);
@@ -1376,6 +1722,13 @@ export function closeDatabase(): void {
     try {
       currentDb.close();
     } catch (e) { logWarning("db", `database close failed: ${(e as Error).message}`); }
+    // If this connection was workspace-tracked, evict it from the cache so
+    // subsequent openDatabaseByWorkspace() calls re-open rather than reactivate
+    // a closed adapter.
+    if (_currentIdentityKey !== null) {
+      _dbCache.delete(_currentIdentityKey);
+      _currentIdentityKey = null;
+    }
     currentDb = null;
     currentPath = null;
     currentPid = 0;
@@ -1599,6 +1952,34 @@ export function getActiveRequirements(): Requirement[] {
     full_content: row["full_content"] as string,
     superseded_by: null,
   }));
+}
+
+export function getRequirementCounts(): {
+  active: number;
+  validated: number;
+  deferred: number;
+  outOfScope: number;
+  blocked: number;
+  total: number;
+} {
+  if (!currentDb) {
+    return { active: 0, validated: 0, deferred: 0, outOfScope: 0, blocked: 0, total: 0 };
+  }
+  const rows = currentDb
+    .prepare("SELECT lower(status) as status, COUNT(*) as count FROM requirements GROUP BY lower(status)")
+    .all();
+  const counts = { active: 0, validated: 0, deferred: 0, outOfScope: 0, blocked: 0, total: 0 };
+  for (const row of rows) {
+    const status = String(row["status"] ?? "");
+    const count = Number(row["count"] ?? 0);
+    counts.total += count;
+    if (status === "active") counts.active += count;
+    else if (status === "validated") counts.validated += count;
+    else if (status === "deferred") counts.deferred += count;
+    else if (status === "out-of-scope" || status === "out_of_scope") counts.outOfScope += count;
+    else if (status === "blocked") counts.blocked += count;
+  }
+  return counts;
 }
 
 export function getDbOwnerPid(): number {
@@ -2468,6 +2849,7 @@ export interface MilestoneRow {
   definition_of_done: string[];
   requirement_coverage: string;
   boundary_map_markdown: string;
+  sequence: number;
 }
 
 function rowToMilestone(row: Record<string, unknown>): MilestoneRow {
@@ -2489,6 +2871,7 @@ function rowToMilestone(row: Record<string, unknown>): MilestoneRow {
     definition_of_done: JSON.parse((row["definition_of_done"] as string) || "[]"),
     requirement_coverage: (row["requirement_coverage"] as string) ?? "",
     boundary_map_markdown: (row["boundary_map_markdown"] as string) ?? "",
+    sequence: Number(row["sequence"] ?? 0),
   };
 }
 
@@ -2516,7 +2899,9 @@ function rowToArtifact(row: Record<string, unknown>): ArtifactRow {
 
 export function getAllMilestones(): MilestoneRow[] {
   if (!currentDb) return [];
-  const rows = currentDb.prepare("SELECT * FROM milestones ORDER BY id").all();
+  const rows = currentDb.prepare(
+    "SELECT * FROM milestones ORDER BY CASE WHEN sequence > 0 THEN 0 ELSE 1 END, sequence, id",
+  ).all();
   return rows.map(rowToMilestone);
 }
 
@@ -2525,6 +2910,22 @@ export function getMilestone(id: string): MilestoneRow | null {
   const row = currentDb.prepare("SELECT * FROM milestones WHERE id = :id").get({ ":id": id });
   if (!row) return null;
   return rowToMilestone(row);
+}
+
+export function setMilestoneQueueOrder(order: string[]): void {
+  if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  currentDb.exec("BEGIN IMMEDIATE");
+  try {
+    currentDb.prepare("UPDATE milestones SET sequence = 0").run();
+    const stmt = currentDb.prepare("UPDATE milestones SET sequence = :sequence WHERE id = :id");
+    order.forEach((id, index) => {
+      stmt.run({ ":id": id, ":sequence": index + 1 });
+    });
+    currentDb.exec("COMMIT");
+  } catch (err) {
+    currentDb.exec("ROLLBACK");
+    throw err;
+  }
 }
 
 /**
@@ -2722,6 +3123,8 @@ export function reconcileWorktreeDb(
       // fall through to the main DB's existing value (not a literal default)
       // so reconcile never silently clears state the main tree has recorded.
       const hasDecisionSource = wtInfo.some((col) => col["name"] === "source");
+      const wtMilestoneInfo = adapter.prepare("PRAGMA wt.table_info('milestones')").all();
+      const hasMilestoneSequence = wtMilestoneInfo.some((col) => col["name"] === "sequence");
       const wtSliceInfo = adapter.prepare("PRAGMA wt.table_info('slices')").all();
       const hasIsSketch = wtSliceInfo.some((col) => col["name"] === "is_sketch");
       const hasSketchScope = wtSliceInfo.some((col) => col["name"] === "sketch_scope");
@@ -2795,7 +3198,7 @@ export function reconcileWorktreeDb(
             id, title, status, depends_on, created_at, completed_at,
             vision, success_criteria, key_risks, proof_strategy,
             verification_contract, verification_integration, verification_operational, verification_uat,
-            definition_of_done, requirement_coverage, boundary_map_markdown
+            definition_of_done, requirement_coverage, boundary_map_markdown, sequence
           )
           SELECT w.id, w.title,
                  CASE
@@ -2813,7 +3216,8 @@ export function reconcileWorktreeDb(
                  END,
                  w.vision, w.success_criteria, w.key_risks, w.proof_strategy,
                  w.verification_contract, w.verification_integration, w.verification_operational, w.verification_uat,
-                 w.definition_of_done, w.requirement_coverage, w.boundary_map_markdown
+                 w.definition_of_done, w.requirement_coverage, w.boundary_map_markdown,
+                 ${hasMilestoneSequence ? "COALESCE(w.sequence, 0)" : "COALESCE(m.sequence, 0)"}
           FROM wt.milestones w
           LEFT JOIN milestones m ON m.id = w.id
         `).run());
@@ -3054,6 +3458,9 @@ export function deleteMilestone(milestoneId: string): void {
       `DELETE FROM artifacts WHERE milestone_id = :mid`,
     ).run({ ":mid": milestoneId });
     currentDb!.prepare(
+      `DELETE FROM milestone_leases WHERE milestone_id = :mid`,
+    ).run({ ":mid": milestoneId });
+    currentDb!.prepare(
       `DELETE FROM milestones WHERE id = :mid`,
     ).run({ ":mid": milestoneId });
   });
@@ -3100,6 +3507,20 @@ export function getAssessment(path: string): Record<string, unknown> | null {
   const row = currentDb.prepare(
     `SELECT * FROM assessments WHERE path = :path`,
   ).get({ ":path": path });
+  return row ?? null;
+}
+
+export function getLatestAssessmentByScope(
+  milestoneId: string,
+  scope: string,
+): Record<string, unknown> | null {
+  if (!currentDb) return null;
+  const row = currentDb.prepare(
+    `SELECT * FROM assessments
+      WHERE milestone_id = :mid AND scope = :scope
+      ORDER BY created_at DESC
+      LIMIT 1`,
+  ).get({ ":mid": milestoneId, ":scope": scope });
   return row ?? null;
 }
 
@@ -3461,14 +3882,20 @@ export function deleteArtifactByPath(path: string): void {
 }
 
 /**
- * Drop all rows from tasks/slices/milestones in dependency order inside a
- * transaction. Used by `gsd recover` to rebuild engine state from markdown.
+ * Drop hierarchy rows in dependency order inside a transaction. Used by
+ * `gsd recover` to rebuild engine state from markdown.
  */
 export function clearEngineHierarchy(): void {
   if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
   transaction(() => {
+    currentDb!.exec("DELETE FROM verification_evidence");
+    currentDb!.exec("DELETE FROM quality_gates");
+    currentDb!.exec("DELETE FROM slice_dependencies");
+    currentDb!.exec("DELETE FROM assessments");
+    currentDb!.exec("DELETE FROM replan_history");
     currentDb!.exec("DELETE FROM tasks");
     currentDb!.exec("DELETE FROM slices");
+    currentDb!.exec("DELETE FROM milestone_leases");
     currentDb!.exec("DELETE FROM milestones");
   });
 }
@@ -3582,6 +4009,7 @@ export function restoreManifest(manifest: StateManifest): void {
     db.exec("DELETE FROM verification_evidence");
     db.exec("DELETE FROM tasks");
     db.exec("DELETE FROM slices");
+    db.exec("DELETE FROM milestone_leases");
     db.exec("DELETE FROM milestones");
     db.exec("DELETE FROM decisions WHERE 1=1");
 
@@ -3590,8 +4018,8 @@ export function restoreManifest(manifest: StateManifest): void {
       `INSERT INTO milestones (id, title, status, depends_on, created_at, completed_at,
         vision, success_criteria, key_risks, proof_strategy,
         verification_contract, verification_integration, verification_operational, verification_uat,
-        definition_of_done, requirement_coverage, boundary_map_markdown)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        definition_of_done, requirement_coverage, boundary_map_markdown, sequence)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const m of manifest.milestones) {
       msStmt.run(
@@ -3600,7 +4028,7 @@ export function restoreManifest(manifest: StateManifest): void {
         m.vision, JSON.stringify(m.success_criteria), JSON.stringify(m.key_risks),
         JSON.stringify(m.proof_strategy),
         m.verification_contract, m.verification_integration, m.verification_operational, m.verification_uat,
-        JSON.stringify(m.definition_of_done), m.requirement_coverage, m.boundary_map_markdown,
+        JSON.stringify(m.definition_of_done), m.requirement_coverage, m.boundary_map_markdown, m.sequence ?? 0,
       );
     }
 
@@ -3720,6 +4148,7 @@ export function bulkInsertLegacyHierarchy(payload: {
   transaction(() => {
     db.prepare(`DELETE FROM tasks WHERE milestone_id IN (${placeholders})`).run(...clearMilestoneIds);
     db.prepare(`DELETE FROM slices WHERE milestone_id IN (${placeholders})`).run(...clearMilestoneIds);
+    db.prepare(`DELETE FROM milestone_leases WHERE milestone_id IN (${placeholders})`).run(...clearMilestoneIds);
     db.prepare(`DELETE FROM milestones WHERE id IN (${placeholders})`).run(...clearMilestoneIds);
 
     const insertMilestone = db.prepare(

@@ -19,6 +19,7 @@ export type DoctorIssueCode =
   | "stale_parallel_session"
   | "orphaned_completed_units"
   | "stale_hook_state"
+  | "uat_retry_exhausted"
   | "activity_log_bloat"
   | "state_file_stale"
   | "state_file_missing"

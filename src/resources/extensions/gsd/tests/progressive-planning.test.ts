@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { performance } from "node:perf_hooks";
 
 import {
   openDatabase,
@@ -99,21 +100,21 @@ test("ADR-011: sketch slice + progressive_planning ON → phase='refining'", asy
   assert.equal(state.phase, "refining", "sketch slice with flag ON must yield refining phase");
 });
 
-test("ADR-011: sketch slice + progressive_planning OFF → phase='planning' (backwards compat)", async (t) => {
+test("ADR-011: sketch slice + progressive_planning OFF → DB sketch metadata still yields refining", async (t) => {
   const originalCwd = process.cwd();
   const base = makeFixtureBase();
   t.after(() => cleanup(base, originalCwd));
 
   seedMilestoneWithSketchedS02(base);
   writeS01Artifacts(base);
-  // Write a PREFERENCES.md without the flag so loadEffectiveGSDPreferences finds
-  // a valid file but progressive_planning resolves to undefined.
+  // Write a PREFERENCES.md without the flag. DB slice metadata remains
+  // authoritative for whether this slice needs refinement.
   writePreferences(base, "phases:\n  skip_research: false");
   process.chdir(base);
 
   const state = await deriveStateFromDb(base);
   assert.equal(state.activeSlice?.id, "S02");
-  assert.equal(state.phase, "planning", "flag absent → must fall through to planning");
+  assert.equal(state.phase, "refining", "flag absent must not override DB sketch metadata");
 });
 
 test("ADR-011: dispatch rule maps refining → refine-slice unit", async (t) => {
@@ -516,24 +517,32 @@ test("ADR-011 P3 #26: refine-slice dispatch latency is bounded vs plan-slice bas
   await buildPlanSlicePrompt("M001", "Test", "S02", "Feature", base);
   await buildRefineSlicePrompt("M001", "Test", "S02", "Feature", base);
 
-  const planStart = Date.now();
-  await buildPlanSlicePrompt("M001", "Test", "S02", "Feature", base);
-  const planElapsed = Date.now() - planStart;
+  const measure = async (fn: () => Promise<string>): Promise<number> => {
+    const start = performance.now();
+    await fn();
+    return performance.now() - start;
+  };
 
-  const refineStart = Date.now();
-  await buildRefineSlicePrompt("M001", "Test", "S02", "Feature", base);
-  const refineElapsed = Date.now() - refineStart;
+  const planSamples: number[] = [];
+  const refineSamples: number[] = [];
+  for (let i = 0; i < 5; i++) {
+    planSamples.push(await measure(() => buildPlanSlicePrompt("M001", "Test", "S02", "Feature", base)));
+    refineSamples.push(await measure(() => buildRefineSlicePrompt("M001", "Test", "S02", "Feature", base)));
+  }
+  const bestPlan = Math.min(...planSamples);
+  const bestRefine = Math.min(...refineSamples);
 
   assert.ok(
-    refineElapsed < 500,
-    `refine-slice prompt build must complete under 500ms (took ${refineElapsed}ms)`,
+    bestRefine < 500,
+    `refine-slice prompt build must complete under 500ms (best=${bestRefine.toFixed(1)}ms, samples=${refineSamples.map(n => n.toFixed(1)).join(",")})`,
   );
   // Guard the ratio only when the baseline is large enough to be meaningful —
-  // if plan-slice measures 0-2ms the ratio is dominated by timer noise.
-  if (planElapsed >= 5) {
+  // if plan-slice measures in single-digit milliseconds, the ratio is dominated
+  // by scheduler and filesystem noise under the concurrent test runner.
+  if (bestPlan >= 20) {
     assert.ok(
-      refineElapsed < planElapsed * 3,
-      `refine-slice must not exceed 3x plan-slice baseline (refine=${refineElapsed}ms, plan=${planElapsed}ms)`,
+      bestRefine < bestPlan * 3,
+      `refine-slice must not exceed 3x plan-slice baseline (refine=${bestRefine.toFixed(1)}ms, plan=${bestPlan.toFixed(1)}ms)`,
     );
   }
 });

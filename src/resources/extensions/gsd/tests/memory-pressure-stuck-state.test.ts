@@ -40,23 +40,26 @@ describe("stuck detection persistence (#3704)", () => {
     assert.match(loopSource, /function saveStuckState/);
   });
 
+  // Phase C: API changed from (basePath) to (session) — recentUnits is
+  // now reconstructed from unit_dispatches and stuckRecoveryAttempts
+  // persists in runtime_kv (worker scope).
   test("loopState initialized from persisted state", () => {
-    assert.match(loopSource, /loadStuckState\(s\.basePath\)/);
+    assert.match(loopSource, /loadStuckState\(s\)/);
   });
 
   test("stuck state saved after each iteration", () => {
-    assert.match(loopSource, /saveStuckState\(s\.basePath,\s*loopState\)/);
+    assert.match(loopSource, /saveStuckState\(s,\s*loopState\)/);
   });
 
-  test("stuck state file path uses runtime directory", () => {
-    assert.match(loopSource, /stuck-state\.json/);
-  });
+  // Phase C: stuck-state.json file IO deleted; persistence moved to
+  // unit_dispatches (recentUnits) + runtime_kv (stuckRecoveryAttempts).
+  // The stuck-state-via-db.test.ts suite covers the round-trip.
 
   test("saveStuckState called in standard dev path as well as custom engine path (#4382)", () => {
     // Count all call-sites of saveStuckState (excluding the function definition itself).
     // After the fix, both the custom-engine path and the standard dev path must each
     // call saveStuckState so stuckRecoveryAttempts survives session restarts.
-    const callMatches = loopSource.match(/saveStuckState\(s\.basePath,\s*loopState\)/g) ?? [];
+    const callMatches = loopSource.match(/saveStuckState\(s,\s*loopState\)/g) ?? [];
     assert.ok(
       callMatches.length >= 2,
       `saveStuckState must be called in both the custom-engine path and the standard dev path ` +

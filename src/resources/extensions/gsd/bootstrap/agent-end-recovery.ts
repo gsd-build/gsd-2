@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 
 import { logWarning } from "../workflow-logger.js";
 import {
+  checkDeepProjectSetupAfterTurn,
   checkAutoStartAfterDiscuss,
   maybeHandleReadyPhraseWithoutFiles,
   maybeHandleEmptyIntentTurn,
@@ -11,8 +12,9 @@ import { clearPathCache } from "../paths.js";
 import { getAutoDashboardData, getAutoModeStartModel, isAutoActive, pauseAuto, setCurrentDispatchedModelId } from "../auto.js";
 import { getNextFallbackModel, resolveModelWithFallbacksForUnit } from "../preferences.js";
 import { pauseAutoForProviderError } from "../provider-error-pause.js";
-import { isSessionSwitchInFlight, resolveAgentEnd } from "../auto-loop.js";
+import { isSessionSwitchInFlight, resolveAgentEnd } from "../auto/resolve.js";
 import { resolveModelId } from "../auto-model-selection.js";
+import { resolveProjectRoot } from "../worktree.js";
 import { clearDiscussionFlowState } from "./write-gate.js";
 import { resumeAutoAfterProviderDelay } from "./provider-error-resume.js";
 import {
@@ -44,6 +46,14 @@ export const MAX_TRANSIENT_AUTO_RESUMES = 8;
  */
 export function resetTransientRetryState(): void {
   resetRetryState(retryState);
+}
+
+function resolveAgentEndBasePath(): string | undefined {
+  try {
+    return resolveProjectRoot(process.cwd());
+  } catch {
+    return undefined;
+  }
 }
 
 async function pauseTransientWithBackoff(
@@ -95,8 +105,17 @@ export async function handleAgentEnd(
   // rejected" loop even though the files are on disk.
   clearPathCache();
 
+  try {
+    if (await checkDeepProjectSetupAfterTurn(event, ctx, resolveAgentEndBasePath())) {
+      return;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logWarning("bootstrap", `checkDeepProjectSetupAfterTurn failed: ${message}`);
+  }
+
   if (checkAutoStartAfterDiscuss()) {
-    clearDiscussionFlowState();
+    clearDiscussionFlowState(resolveAgentEndBasePath() ?? process.cwd());
     return;
   }
 

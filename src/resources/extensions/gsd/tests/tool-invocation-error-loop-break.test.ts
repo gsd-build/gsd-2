@@ -102,7 +102,7 @@ describe("#2883: isToolInvocationError classification", () => {
   });
 
   test("detects raw write-gate CONTEXT failures for non-GSD write tools", () => {
-    resetWriteGateState();
+    resetWriteGateState(process.cwd());
     const result = shouldBlockContextWrite(
       "write",
       "/tmp/project/.gsd/milestones/M001/M001-CONTEXT.md",

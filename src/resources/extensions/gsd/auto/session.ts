@@ -22,6 +22,8 @@ import type { GitServiceImpl } from "../git-service.js";
 import type { CaptureEntry } from "../captures.js";
 import type { BudgetAlertLevel } from "../auto-budget.js";
 import { resolveWorktreeProjectRoot } from "../worktree-root.js";
+import { normalizeRealPath } from "../paths.js";
+import type { MilestoneScope } from "../workspace.js";
 
 // ─── Exported Types ──────────────────────────────────────────────────────────
 
@@ -95,6 +97,23 @@ export class AutoSession {
   // ── Paths ────────────────────────────────────────────────────────────────
   basePath = "";
   originalBasePath = "";
+  // TODO(C8): remove basePath/originalBasePath once all readers use s.scope
+  scope: MilestoneScope | null = null;
+
+  // ── Coordination identity (Phase B — DB-backed coordination) ────────────
+  /**
+   * Worker registry ID set by registerAutoWorker() at session start. Used by
+   * heartbeatAutoWorker() each loop iteration and by recordDispatchClaim()
+   * to fence dispatch ledger writes against stale workers.
+   */
+  workerId: string | null = null;
+  /**
+   * Active milestone lease fencing token, set by claimMilestoneLease() inside
+   * worktree-resolver.enterMilestone(). Threaded into recordDispatchClaim()
+   * as milestone_lease_token so out-of-band dispatches by a stale worker
+   * are detectable.
+   */
+  milestoneLeaseToken: number | null = null;
   previousProjectRootEnv: string | null = null;
   hadProjectRootEnv = false;
   projectRootEnvCaptured = false;
@@ -169,6 +188,8 @@ export class AutoSession {
   /** Set when a GSD tool execution ends with isError due to malformed/truncated
    *  JSON arguments. Checked by postUnitPreVerification to break retry loops. */
   lastToolInvocationError: string | null = null;
+  /** Agent-end messages from the just-finished unit, consumed during finalize. */
+  lastUnitAgentEndMessages: unknown[] | null = null;
   /** Set when turn-level git action fails during closeout. */
   lastGitActionFailure: string | null = null;
   /** Last turn-level git action status captured during finalize. */
@@ -236,6 +257,24 @@ export class AutoSession {
     return resolveWorktreeProjectRoot(this.basePath, this.originalBasePath);
   }
 
+  /**
+   * Canonical project root for state-derivation reads AND writer paths.
+   *
+   * Prefers the realpath-normalized projectRoot from the MilestoneScope
+   * (introduced by PR #5236), falling back to resolveWorktreeProjectRoot
+   * during early lifecycle / engine-bypass paths where scope may be null.
+   *
+   * Always realpath-normalized so cache keys (e.g. deriveState's _stateCache)
+   * cannot drift across worktree↔project-root path-string variants for the
+   * same filesystem location.
+   */
+  get canonicalProjectRoot(): string {
+    const root =
+      this.scope?.workspace.projectRoot
+        ?? resolveWorktreeProjectRoot(this.basePath, this.originalBasePath);
+    return normalizeRealPath(root);
+  }
+
   reset(): void {
     this.clearTimers();
 
@@ -252,6 +291,9 @@ export class AutoSession {
     // Paths
     this.basePath = "";
     this.originalBasePath = "";
+    this.scope = null;
+    this.workerId = null;
+    this.milestoneLeaseToken = null;
     this.previousProjectRootEnv = null;
     this.hadProjectRootEnv = false;
     this.projectRootEnvCaptured = false;
@@ -307,6 +349,7 @@ export class AutoSession {
     this.consecutiveCompleteBootstraps = 0;
     this.lastPreExecFailure = null;
     this.lastToolInvocationError = null;
+    this.lastUnitAgentEndMessages = null;
     this.lastGitActionFailure = null;
     this.lastGitActionStatus = null;
     this.isolationDegraded = false;

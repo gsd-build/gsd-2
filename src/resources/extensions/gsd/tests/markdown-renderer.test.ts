@@ -524,6 +524,76 @@ test('── markdown-renderer: renderPlanFromDb creates parse-compatible slice 
   }
 });
 
+test('── markdown-renderer: slice plan summarizes task descriptions without leaking nested headings ──', async () => {
+  const tmpDir = makeTmpDir();
+  const dbPath = path.join(tmpDir, '.gsd', 'gsd.db');
+  openDatabase(dbPath);
+  clearAllCaches();
+
+  try {
+    scaffoldDirs(tmpDir, 'M001', ['S01']);
+
+    insertMilestone({ id: 'M001', title: 'Milestone', status: 'active' });
+    insertSlice({
+      id: 'S01',
+      milestoneId: 'M001',
+      title: 'Working app',
+      status: 'pending',
+      demo: 'The app works.',
+      planning: {
+        goal: 'Build a small app.',
+        successCriteria: 'Not provided.',
+        proofLevel: 'Not provided.',
+        integrationClosure: 'N/A',
+        observabilityImpact: 'None',
+      },
+    });
+    insertTask({
+      id: 'T01',
+      sliceId: 'S01',
+      milestoneId: 'M001',
+      title: 'Build app',
+      status: 'pending',
+      planning: {
+        description: [
+          'Create the static app files.',
+          '',
+          '## Steps',
+          '',
+          '- Create the HTML shell.',
+          '- Wire browser storage.',
+          '',
+          '## Must-Haves',
+          '',
+          '- Adding an item updates the list.',
+        ].join('\n'),
+        estimate: '30m',
+        files: ['index.html', 'app.js', 'style.css'],
+        verify: 'open index.html',
+        inputs: ['.gitignore'],
+        expectedOutput: ['index.html', 'app.js', 'style.css'],
+      },
+    });
+
+    const rendered = await renderPlanFromDb(tmpDir, 'M001', 'S01');
+    const planContent = fs.readFileSync(rendered.planPath, 'utf-8');
+    clearAllCaches();
+    const parsedPlan = parsePlan(planContent);
+
+    assert.doesNotMatch(planContent, /Not provided/i, 'placeholder values should not render');
+    assert.doesNotMatch(planContent, /^## Steps$/m, 'task detail headings must not escape into the slice plan');
+    assert.strictEqual((planContent.match(/^## Must-Haves$/gm) ?? []).length, 1, 'slice plan has only its own Must-Haves heading');
+    assert.strictEqual(parsedPlan.tasks[0].description.trim(), 'Create the static app files.');
+
+    const taskPlanContent = fs.readFileSync(path.join(tmpDir, '.gsd', 'milestones', 'M001', 'slices', 'S01', 'tasks', 'T01-PLAN.md'), 'utf-8');
+    assert.match(taskPlanContent, /^## Steps$/m, 'task plan keeps detailed headings for executors');
+    assert.match(taskPlanContent, /^## Must-Haves$/m, 'task plan keeps detailed task must-haves');
+  } finally {
+    closeDatabase();
+    cleanupDir(tmpDir);
+  }
+});
+
 test('── markdown-renderer: renderTaskPlanFromDb throws for missing task ──', async () => {
   const tmpDir = makeTmpDir();
   const dbPath = path.join(tmpDir, '.gsd', 'gsd.db');
@@ -786,10 +856,10 @@ test('── markdown-renderer: renderAllFromDb produces all files ──', asyn
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Graceful Degradation (Disk Fallback)
+// DB-authoritative regeneration
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('── markdown-renderer: graceful fallback reads from disk when artifact not in DB ──', async () => {
+test('── markdown-renderer: missing artifact regenerates from DB without importing disk projection ──', async () => {
   const tmpDir = makeTmpDir();
   const dbPath = path.join(tmpDir, '.gsd', 'gsd.db');
   openDatabase(dbPath);
@@ -804,7 +874,7 @@ test('── markdown-renderer: graceful fallback reads from disk when artifact 
     // Write roadmap to disk but NOT in artifacts DB
     const roadmapContent = makeRoadmapContent([
       { id: 'S01', title: 'Core', done: false },
-    ]);
+    ]) + '\n\nDISK_ONLY_SENTINEL';
     const roadmapPath = path.join(tmpDir, '.gsd', 'milestones', 'M001', 'M001-ROADMAP.md');
     fs.writeFileSync(roadmapPath, roadmapContent);
     clearAllCaches();
@@ -813,14 +883,20 @@ test('── markdown-renderer: graceful fallback reads from disk when artifact 
     const before = getArtifact('milestones/M001/M001-ROADMAP.md');
     assert.deepStrictEqual(before, null, 'artifact not in DB before render');
 
-    // Render — should read from disk, store in DB
+    // Render — should regenerate from DB rows, not import/patch disk content.
     const ok = await renderRoadmapCheckboxes(tmpDir, 'M001');
-    assert.ok(ok, 'render succeeds with disk fallback');
+    assert.ok(ok, 'render succeeds by regenerating from DB');
 
-    // Verify artifact now in DB (stored after reading from disk)
+    // Verify artifact now exists in DB but does not contain disk-only content.
     const after = getArtifact('milestones/M001/M001-ROADMAP.md');
-    assert.ok(after !== null, 'artifact stored in DB after disk fallback render');
-    assert.ok(after!.full_content.includes('[x] **S01:'), 'DB artifact reflects rendered state');
+    assert.ok(after !== null, 'artifact regenerated in DB');
+    assert.ok(!after!.full_content.includes('DISK_ONLY_SENTINEL'), 'disk projection content was not imported');
+    assert.ok(after!.full_content.includes('S01'), 'DB artifact reflects DB slice state');
+
+    assert.ok(fs.existsSync(roadmapPath), 'roadmap projection regenerated on disk');
+    const diskAfter = fs.readFileSync(roadmapPath, 'utf-8');
+    assert.ok(!diskAfter.includes('DISK_ONLY_SENTINEL'), 'disk projection was rewritten from DB');
+    assert.ok(diskAfter.includes('S01'), 'disk projection reflects DB slice state');
   } finally {
     closeDatabase();
     cleanupDir(tmpDir);
@@ -1158,4 +1234,3 @@ test('── markdown-renderer: detectStaleRenders finds missing slice summary a
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-

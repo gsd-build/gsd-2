@@ -225,14 +225,14 @@ test("dispatch guard allows slice with all declared dependencies complete", (t) 
   );
 });
 
-test("dispatch guard skips completed milestone with SUMMARY even if it has unchecked remediation slices (#1716)", (t) => {
+test("dispatch guard does not skip prior milestone from SUMMARY projection when DB is not closed", (t) => {
   const repo = setupRepo();
   t.after(() => teardownRepo(repo));
 
   mkdirSync(join(repo, ".gsd", "milestones", "M001"), { recursive: true });
   mkdirSync(join(repo, ".gsd", "milestones", "M002"), { recursive: true });
 
-  // M001 is complete (has SUMMARY) but has unchecked remediation slices in DB
+  // M001 has a successful SUMMARY projection but is not closed in the DB.
   insertMilestone({ id: "M001", title: "Previous" });
   insertSlice({ id: "S01", milestoneId: "M001", title: "Core", status: "complete", depends: [], sequence: 1 });
   insertSlice({ id: "S02", milestoneId: "M001", title: "Tests", status: "complete", depends: ["S01"], sequence: 2 });
@@ -242,16 +242,15 @@ test("dispatch guard skips completed milestone with SUMMARY even if it has unche
   insertMilestone({ id: "M002", title: "Current" });
   insertSlice({ id: "S01", milestoneId: "M002", title: "Start", status: "pending", depends: [], sequence: 1 });
 
-  // M001 SUMMARY on disk triggers skip
+  // M001 SUMMARY on disk must not trigger skip while DB remains open/active.
   writeFileSync(join(repo, ".gsd", "milestones", "M001", "M001-ROADMAP.md"), "# M001\n");
   writeFileSync(join(repo, ".gsd", "milestones", "M001", "M001-SUMMARY.md"),
     "---\nstatus: complete\n---\n# M001 Summary\nDone.\n");
   writeFileSync(join(repo, ".gsd", "milestones", "M002", "M002-ROADMAP.md"), "# M002\n");
 
-  // M001 has SUMMARY — should be skipped, not block M002/S01
   assert.equal(
     getPriorSliceCompletionBlocker(repo, "main", "plan-slice", "M002/S01"),
-    null,
+    "Cannot dispatch plan-slice M002/S01: earlier slice M001/S03-R is not complete.",
   );
 });
 

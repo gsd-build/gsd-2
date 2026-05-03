@@ -11,6 +11,7 @@ import {
   wasDbOpenAttempted,
   getDbProvider,
   getDbStatus,
+  SCHEMA_VERSION,
   insertDecision,
   getDecisionById,
   insertRequirement,
@@ -101,7 +102,7 @@ describe('gsd-db', () => {
     // Check schema_version table
     const adapter = _getAdapter()!;
     const version = adapter.prepare('SELECT MAX(version) as version FROM schema_version').get();
-    assert.deepStrictEqual(version?.['version'], 22, 'schema version should be 22');
+    assert.deepStrictEqual(version?.['version'], SCHEMA_VERSION, `schema version should be ${SCHEMA_VERSION}`);
 
     // Check tables exist by querying them
     const dRows = adapter.prepare('SELECT count(*) as cnt FROM decisions').get();

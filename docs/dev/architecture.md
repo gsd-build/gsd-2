@@ -27,9 +27,9 @@ vscode-extension/         VS Code extension — chat participant (@gsd), sidebar
 
 ## Key Design Decisions
 
-### State Lives on Disk
+### DB-Authoritative Project State
 
-`.gsd/` is the sole source of truth. Auto mode reads it, writes it, and advances based on what it finds. No in-memory state survives across sessions. This enables crash recovery, multi-terminal steering, and session resumption.
+GSD stores runtime workflow state in the project-root SQLite database. Auto mode derives phases, completion status, requirements, decisions, summaries, and hierarchy from that database, then renders markdown projections in `.gsd/` for human review, prompt context, and git-friendly history. No in-memory state survives across sessions. This enables crash recovery, multi-terminal steering, and session resumption while avoiding silent markdown re-imports during normal runtime.
 
 ### Two-File Loader Pattern
 
@@ -111,7 +111,7 @@ Performance-critical operations use a Rust N-API engine:
 The auto mode dispatch pipeline:
 
 ```
-1.  Read disk state (STATE.md, roadmap, plans)
+1.  Derive project state from the database
 2.  Determine next unit type and ID
 3.  Classify complexity → select model tier
 4.  Apply budget pressure adjustments
@@ -155,7 +155,7 @@ Phase skipping (from token profile) gates steps 2-3: if a phase is skipped, the 
 | `visualizer-data.ts` | Data loading for visualizer tabs |
 | `visualizer-views.ts` | Tab renderers (progress, deps, metrics, timeline, discussion status) |
 | `metrics.ts` | Token and cost tracking ledger |
-| `state.ts` | State derivation from disk |
+| `state.ts` | DB-authoritative state derivation with explicit legacy markdown fallback for tests/recovery |
 | `session-lock.ts` | OS-level exclusive session locking (proper-lockfile) |
 | `crash-recovery.ts` | Lock file management for crash detection and recovery |
 | `preferences.ts` | Preference loading, merging, validation |

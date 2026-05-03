@@ -98,15 +98,16 @@ Shows each session's date, message count, and preview so you can choose which to
 
 ## What's on Disk
 
-All state lives in `.gsd/` inside your project:
+GSD keeps authoritative runtime state in the project-root SQLite database and renders markdown projections into `.gsd/` inside your project:
 
 ```
 .gsd/
+  gsd.db              — authoritative runtime database (local, gitignored)
   PROJECT.md          — what the project is
   REQUIREMENTS.md     — requirement contract
   DECISIONS.md        — architectural decisions
   KNOWLEDGE.md        — cross-session rules and patterns
-  STATE.md            — quick-glance status
+  STATE.md            — quick-glance status rendered from the database
   milestones/
     M001/
       M001-ROADMAP.md — slice plan with dependencies

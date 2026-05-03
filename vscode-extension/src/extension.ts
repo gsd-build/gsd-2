@@ -17,6 +17,7 @@ import { GsdLineDecorationManager } from "./line-decorations.js";
 import { GsdGitIntegration } from "./git-integration.js";
 import { GsdPermissionManager } from "./permissions.js";
 import { GsdPlanViewerProvider } from "./plan-viewer.js";
+import { GsdCheckpointProvider } from "./checkpoints.js";
 
 let client: GsdClient | undefined;
 let sidebarProvider: GsdSidebarProvider | undefined;
@@ -24,6 +25,7 @@ let fileDecorations: GsdFileDecorationProvider | undefined;
 let sessionTreeProvider: GsdSessionTreeProvider | undefined;
 let activityFeedProvider: GsdActivityFeedProvider | undefined;
 let planViewerProvider: GsdPlanViewerProvider | undefined;
+let checkpointProvider: GsdCheckpointProvider | undefined;
 let changeTracker: GsdChangeTracker | undefined;
 let scmProvider: GsdScmProvider | undefined;
 let diagnosticBridge: GsdDiagnosticBridge | undefined;
@@ -166,8 +168,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	// -- Change tracker & SCM provider -------------------------------------
 
-	changeTracker = new GsdChangeTracker(client);
+	changeTracker = new GsdChangeTracker(client, cwd);
 	context.subscriptions.push(changeTracker);
+
+	checkpointProvider = new GsdCheckpointProvider(changeTracker);
+	context.subscriptions.push(
+		checkpointProvider,
+		vscode.window.registerTreeDataProvider(GsdCheckpointProvider.viewId, checkpointProvider),
+	);
 
 	scmProvider = new GsdScmProvider(changeTracker, cwd);
 	context.subscriptions.push(scmProvider);
@@ -1001,6 +1009,7 @@ export function deactivate(): void {
 	fileDecorations?.dispose();
 	sessionTreeProvider?.dispose();
 	activityFeedProvider?.dispose();
+	checkpointProvider?.dispose();
 	changeTracker?.dispose();
 	scmProvider?.dispose();
 	diagnosticBridge?.dispose();
@@ -1012,6 +1021,7 @@ export function deactivate(): void {
 	fileDecorations = undefined;
 	sessionTreeProvider = undefined;
 	activityFeedProvider = undefined;
+	checkpointProvider = undefined;
 	changeTracker = undefined;
 	scmProvider = undefined;
 	diagnosticBridge = undefined;

@@ -1,10 +1,9 @@
 /**
- * stale-slice-rows.test.ts — #3658
+ * stale-slice-rows.test.ts
  *
- * Verify that state.ts contains slice-level status reconciliation that
- * updates stale DB rows (status "pending") when disk artifacts (SUMMARY)
- * prove the slice is complete. Without this, the dependency resolver builds
- * doneSliceIds from stale DB rows and downstream slices stay blocked.
+ * Verify that state.ts no longer treats slice SUMMARY.md projections as
+ * authority for DB slice status. Slice rows must be updated through DB-backed
+ * completion/import APIs.
  */
 
 import { describe, test } from "node:test";
@@ -16,26 +15,26 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const sourceFile = join(__dirname, "..", "state.ts");
 
-describe("stale slice row reconciliation (#3658)", () => {
+describe("stale slice row DB-authoritative boundary", () => {
   const source = readFileSync(sourceFile, "utf-8");
 
-  test("imports updateSliceStatus from gsd-db", () => {
-    assert.match(source, /import\s*\{[^}]*updateSliceStatus[^}]*\}\s*from/);
+  test("does not import updateSliceStatus into state derivation", () => {
+    assert.doesNotMatch(source, /import\s*\{[^}]*updateSliceStatus[^}]*\}\s*from/);
   });
 
-  test("checks isStatusDone before reconciling slice rows", () => {
-    assert.match(source, /isStatusDone\(dbSlice\.status\)/);
+  test("does not scan DB slice rows for disk SUMMARY reconciliation", () => {
+    assert.doesNotMatch(source, /dbSlice/);
   });
 
-  test("resolves SUMMARY file to detect completed slices on disk", () => {
-    assert.match(source, /resolveSliceFile\(basePath,\s*mid,\s*dbSlice\.id,\s*["']SUMMARY["']\)/);
+  test("does not resolve slice SUMMARY to mutate DB state", () => {
+    assert.doesNotMatch(source, /resolveSliceFile\(basePath,\s*mid,\s*dbSlice\.id,\s*["']SUMMARY["']\)/);
   });
 
-  test("calls updateSliceStatus to reconcile stale rows", () => {
-    assert.match(source, /updateSliceStatus\(mid,\s*dbSlice\.id,\s*["']complete["']\)/);
+  test("does not call updateSliceStatus from state derivation", () => {
+    assert.doesNotMatch(source, /updateSliceStatus\(/);
   });
 
-  test("references issue #3599 in reconciliation comment", () => {
-    assert.match(source, /#3599/);
+  test("documents markdown projections as non-authoritative", () => {
+    assert.match(source, /Markdown files are projections only/);
   });
 });

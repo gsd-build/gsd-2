@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os';
 
 import { deriveState } from '../state.js';
 
+// This suite exercises the explicit legacy markdown derivation path.
+process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK = '1';
+
 let passed = 0;
 let failed = 0;
 

@@ -18,39 +18,96 @@ import {
   hasResumableDerivedState,
   isBootstrapCrashLock,
   readPausedSessionMetadata,
+  PAUSED_SESSION_KV_KEY,
 } from "../interrupted-session.ts";
-import { gsdRoot } from "../paths.ts";
+import {
+  openDatabase,
+  closeDatabase,
+  insertMilestone,
+  _getAdapter,
+} from "../gsd-db.ts";
+import { registerAutoWorker } from "../db/auto-workers.ts";
+import { claimMilestoneLease } from "../db/milestone-leases.ts";
+import { recordDispatchClaim } from "../db/unit-dispatches.ts";
+import { insertSlice, insertTask } from "../gsd-db.ts";
+import { setRuntimeKv } from "../db/runtime-kv.ts";
+import { normalizeRealPath } from "../paths.ts";
 import type { GSDState } from "../types.ts";
 import { _synthesizePausedSessionRecoveryForTest } from "../auto.ts";
 
 function makeTmpBase(): string {
   const base = join(tmpdir(), `gsd-test-${randomUUID()}`);
   mkdirSync(join(base, ".gsd"), { recursive: true });
+  // Phase C pt 2: lock and paused-session live in the DB now. Open it
+  // for every test base so the helpers below can write through.
+  openDatabase(join(base, ".gsd", "gsd.db"));
   return base;
 }
 
 function cleanup(base: string): void {
+  try { closeDatabase(); } catch { /* */ }
   try { rmSync(base, { recursive: true, force: true }); } catch { /* */ }
 }
 
+/**
+ * Phase C pt 2 fixture: insert a stale worker row + dispatch + session_file
+ * directly via SQL so it appears as a crashed PEER process, not as the
+ * current test process. assessInterruptedSession filters out
+ * `rawLock.pid === process.pid` to avoid classifying its own process as
+ * a previous crash; using PID 999999999 (functionally guaranteed dead)
+ * bypasses that guard exactly the way the old file-based writeTestLock
+ * did with the same PID.
+ */
 function writeTestLock(
   base: string,
   unitType: string,
   unitId: string,
   sessionFile?: string,
 ): void {
-  writeFileSync(
-    join(gsdRoot(base), "auto.lock"),
-    JSON.stringify({
-      pid: 999999999,
-      startedAt: new Date().toISOString(),
-      unitType,
-      unitId,
-      unitStartedAt: new Date().toISOString(),
-      sessionFile,
-    }, null, 2),
-    "utf-8",
-  );
+  const projectRoot = normalizeRealPath(base);
+  const workerId = `test-fake-${randomUUID().slice(0, 8)}`;
+  const fakePid = 999999999;
+  const stalePast = "1970-01-01T00:00:00.000Z";
+  const db = _getAdapter()!;
+  db.prepare(
+    `INSERT INTO workers (
+      worker_id, host, pid, started_at, version,
+      last_heartbeat_at, status, project_root_realpath
+    ) VALUES (
+      :w, 'test-host', :pid, :started_at, 'test',
+      :stale, 'active', :project_root
+    )`,
+  ).run({
+    ":w": workerId,
+    ":pid": fakePid,
+    ":started_at": new Date().toISOString(),
+    ":stale": stalePast,
+    ":project_root": projectRoot,
+  });
+
+  // Ensure milestones referenced by the unitId exist so the dispatch
+  // FK is satisfied. Parse "M###/S##" or "M###" or "starting" / etc.
+  const midMatch = unitId.match(/^(M\d+)/);
+  if (midMatch && unitType !== "starting") {
+    const mid = midMatch[1];
+    try { insertMilestone({ id: mid, title: `Test ${mid}`, status: "active" }); }
+    catch { /* may already exist */ }
+    try {
+      const lease = claimMilestoneLease(workerId, mid);
+      recordDispatchClaim({
+        traceId: randomUUID(),
+        workerId,
+        milestoneLeaseToken: lease.ok ? lease.token : 0,
+        milestoneId: mid,
+        unitType,
+        unitId,
+      });
+    } catch { /* ignore — best-effort */ }
+  }
+
+  if (sessionFile) {
+    setRuntimeKv("worker", workerId, "session_file", sessionFile);
+  }
 }
 
 function writeRoadmap(base: string, checked = false): void {
@@ -82,6 +139,25 @@ function writeRoadmap(base: string, checked = false): void {
     ].join("\n"),
     "utf-8",
   );
+  // Phase C pt 2: makeTmpBase() opens the DB so writeTestLock can write
+  // the workers row. deriveState then goes DB-first; mirror the markdown
+  // fixture into the DB so the assessment sees the same milestone state.
+  // Use direct upsert SQL so calling writeRoadmap twice (e.g. once for
+  // base + once for a paused worktree) actually flips the status.
+  const status = checked ? "complete" : "active";
+  const adapter = _getAdapter();
+  if (adapter) {
+    adapter.prepare(
+      `INSERT INTO milestones (id, title, status, created_at)
+       VALUES (:id, :title, :status, :now)
+       ON CONFLICT(id) DO UPDATE SET status = excluded.status, title = excluded.title`,
+    ).run({ ":id": "M001", ":title": "Test Milestone", ":status": status, ":now": new Date().toISOString() });
+    adapter.prepare(
+      `INSERT INTO slices (milestone_id, id, title, status, created_at)
+       VALUES (:mid, :sid, :title, :status, :now)
+       ON CONFLICT(milestone_id, id) DO UPDATE SET status = excluded.status, title = excluded.title`,
+    ).run({ ":mid": "M001", ":sid": "S01", ":title": "Test slice", ":status": status, ":now": new Date().toISOString() });
+  }
 }
 
 function writeCompleteSliceArtifacts(base: string): void {
@@ -105,13 +181,16 @@ function writePausedSession(
   unitType?: string,
   unitId?: string,
 ): void {
-  const runtimeDir = join(base, ".gsd", "runtime");
-  mkdirSync(runtimeDir, { recursive: true });
-  writeFileSync(
-    join(runtimeDir, "paused-session.json"),
-    JSON.stringify({ milestoneId, originalBasePath: base, stepMode, worktreePath, unitType, unitId }, null, 2),
-    "utf-8",
-  );
+  // Phase C pt 2: paused-session.json migrated to runtime_kv
+  // (global scope, key PAUSED_SESSION_KV_KEY).
+  setRuntimeKv("global", "", PAUSED_SESSION_KV_KEY, {
+    milestoneId,
+    originalBasePath: base,
+    stepMode,
+    worktreePath,
+    unitType,
+    unitId,
+  });
 }
 
 function writeActivityLog(base: string, entries: Record<string, unknown>[]): void {
@@ -231,18 +310,63 @@ test("readPausedSessionMetadata preserves unitType and unitId through round-trip
 test("readPausedSessionMetadata handles legacy metadata without unitType/unitId", () => {
   const base = makeTmpBase();
   try {
-    // Write metadata without unitType/unitId (simulates older version)
-    const runtimeDir = join(base, ".gsd", "runtime");
-    mkdirSync(runtimeDir, { recursive: true });
-    writeFileSync(
-      join(runtimeDir, "paused-session.json"),
-      JSON.stringify({ milestoneId: "M001", originalBasePath: base }),
-      "utf-8",
-    );
+    // Phase C pt 2: write directly to runtime_kv (simulates older payload
+    // missing the now-canonical unitType/unitId fields).
+    setRuntimeKv("global", "", PAUSED_SESSION_KV_KEY, {
+      milestoneId: "M001",
+      originalBasePath: base,
+    });
     const meta = readPausedSessionMetadata(base);
     assert.equal(meta?.milestoneId, "M001");
     assert.equal(meta?.unitType, undefined);
     assert.equal(meta?.unitId, undefined);
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("readPausedSessionMetadata drops stale discuss-milestone pseudo PROJECT metadata", () => {
+  const base = makeTmpBase();
+  try {
+    // Phase C pt 2: write directly to runtime_kv (the file location is gone)
+    setRuntimeKv("global", "", PAUSED_SESSION_KV_KEY, {
+      milestoneId: null,
+      originalBasePath: base,
+      unitType: "discuss-milestone",
+      unitId: "PROJECT",
+    });
+
+    const meta = readPausedSessionMetadata(base);
+    assert.equal(meta, null);
+    // Confirm the row was deleted by readPausedSessionMetadata's
+    // isStalePseudoMilestonePause branch.
+    const adapter = _getAdapter()!;
+    const row = adapter.prepare(
+      `SELECT 1 FROM runtime_kv WHERE scope = 'global' AND scope_id = '' AND key = :k`,
+    ).get({ ":k": PAUSED_SESSION_KV_KEY });
+    assert.equal(row, undefined);
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("readPausedSessionMetadata drops stale deep setup pseudo-unit metadata", () => {
+  const base = makeTmpBase();
+  try {
+    setRuntimeKv("global", "", PAUSED_SESSION_KV_KEY, {
+      milestoneId: "WORKFLOW-PREFS",
+      originalBasePath: base,
+      unitType: "workflow-preferences",
+      unitId: "WORKFLOW-PREFS",
+    });
+
+    const meta = readPausedSessionMetadata(base);
+    assert.equal(meta, null);
+    const adapter = _getAdapter()!;
+    const row = adapter.prepare(
+      `SELECT 1 FROM runtime_kv WHERE scope = 'global' AND scope_id = '' AND key = :k`,
+    ).get({ ":k": PAUSED_SESSION_KV_KEY });
+    assert.equal(row, undefined);
   } finally {
     cleanup(base);
   }
@@ -454,10 +578,29 @@ test("assessInterruptedSession treats bootstrap crash as stale without paused me
 // ─── writeLock / readCrashLock ────────────────────────────────────────────
 
 test("writeLock creates lock file and readCrashLock reads it", (t) => {
+  // Phase C pt 2: lock state is reconstructed from workers + unit_dispatches
+  // + runtime_kv. The fresh worker is not stale yet — we register, dispatch,
+  // write the session_file, then expire the heartbeat to simulate a crash.
   const base = makeTmpBase();
   t.after(() => cleanup(base));
 
+  insertMilestone({ id: "M001", title: "Test", status: "active" });
+  const projectRoot = normalizeRealPath(base);
+  const workerId = registerAutoWorker({ projectRootRealpath: projectRoot });
+  const lease = claimMilestoneLease(workerId, "M001");
+  assert.equal(lease.ok, true);
+  if (!lease.ok) return;
+  recordDispatchClaim({
+    traceId: "t1", workerId, milestoneLeaseToken: lease.token,
+    milestoneId: "M001", unitType: "execute-task", unitId: "M001/S01/T01",
+  });
   writeLock(base, "execute-task", "M001/S01/T01", "/tmp/session.jsonl");
+
+  // Force stale so readCrashLock surfaces it.
+  _getAdapter()!.prepare(
+    `UPDATE workers SET last_heartbeat_at = '1970-01-01T00:00:00.000Z' WHERE worker_id = :w`,
+  ).run({ ":w": workerId });
+
   const lock = readCrashLock(base);
   assert.ok(lock, "lock should exist");
   assert.equal(lock!.unitType, "execute-task");
@@ -477,13 +620,30 @@ test("readCrashLock returns null when no lock exists", (t) => {
 // ─── clearLock ────────────────────────────────────────────────────────────
 
 test("clearLock removes existing lock file", (t) => {
+  // Phase C pt 2: clearLock now drops the session_file runtime_kv row
+  // for the LIVE worker (not the stale one). The "lock state" itself
+  // (pid, unitType, etc.) lives in workers + unit_dispatches; those are
+  // managed by markWorkerStopping (called from stopAuto, not here).
   const base = makeTmpBase();
   t.after(() => cleanup(base));
 
-  writeLock(base, "plan-slice", "M001/S01");
-  assert.ok(readCrashLock(base), "lock should exist before clear");
+  const projectRoot = normalizeRealPath(base);
+  const workerId = registerAutoWorker({ projectRootRealpath: projectRoot });
+
+  writeLock(base, "plan-slice", "M001/S01", "/tmp/session.jsonl");
+  // Confirm the session_file row landed for the live worker.
+  const adapter = _getAdapter()!;
+  const before = adapter.prepare(
+    `SELECT 1 FROM runtime_kv WHERE scope = 'worker' AND scope_id = :w AND key = 'session_file'`,
+  ).get({ ":w": workerId });
+  assert.ok(before, "session_file row exists before clear");
+
   clearLock(base);
-  assert.equal(readCrashLock(base), null, "lock should be gone after clear");
+
+  const after = adapter.prepare(
+    `SELECT 1 FROM runtime_kv WHERE scope = 'worker' AND scope_id = :w AND key = 'session_file'`,
+  ).get({ ":w": workerId });
+  assert.equal(after, undefined, "session_file row gone after clearLock");
 });
 
 test("clearLock is safe when no lock exists", (t) => {

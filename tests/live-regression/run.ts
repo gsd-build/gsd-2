@@ -20,7 +20,8 @@
  *   GSD_SMOKE_BINARY=dist/loader.js node --experimental-strip-types tests/live-regression/run.ts
  */
 
-import { execFileSync, spawn } from "child_process";
+import { execFileSync, spawn, spawnSync } from "child_process";
+import { DatabaseSync } from "node:sqlite";
 import {
   mkdtempSync,
   mkdirSync,
@@ -79,32 +80,97 @@ function gsd(
   cwd: string,
   env?: Record<string, string>,
 ): { stdout: string; stderr: string; code: number } {
-  try {
-    const stdout = execFileSync(
-      binary === "gsd" ? "gsd" : "node",
-      binary === "gsd" ? args : [binary, ...args],
-      {
-        cwd,
-        encoding: "utf-8",
-        timeout: 30_000,
-        stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, ...env, GSD_NON_INTERACTIVE: "1" },
-      },
-    );
-    return { stdout, stderr: "", code: 0 };
-  } catch (err: any) {
-    return {
-      stdout: err.stdout || "",
-      stderr: err.stderr || "",
-      code: err.status ?? 1,
-    };
-  }
+  const result = spawnSync(
+    binary === "gsd" ? "gsd" : "node",
+    binary === "gsd" ? args : [binary, ...args],
+    {
+      cwd,
+      encoding: "utf-8",
+      timeout: 30_000,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, ...env, GSD_NON_INTERACTIVE: "1" },
+    },
+  );
+  return {
+    stdout: result.stdout || "",
+    stderr: result.stderr || "",
+    code: result.status ?? 1,
+  };
 }
 
 function createTempProject(name: string): string {
   const dir = mkdtempSync(join(tmpdir(), `gsd-live-${name}-`));
   gitInitRepo(dir);
   return dir;
+}
+
+function seedStaleCrashLock(
+  projectDir: string,
+  pid: number,
+  unitType: string,
+  unitId: string,
+): void {
+  const gsdDir = join(projectDir, ".gsd");
+  mkdirSync(gsdDir, { recursive: true });
+  const db = new DatabaseSync(join(gsdDir, "gsd.db"));
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workers (
+      worker_id TEXT PRIMARY KEY,
+      host TEXT NOT NULL,
+      pid INTEGER NOT NULL,
+      started_at TEXT NOT NULL,
+      version TEXT NOT NULL,
+      last_heartbeat_at TEXT NOT NULL,
+      status TEXT NOT NULL,
+      project_root_realpath TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS unit_dispatches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trace_id TEXT NOT NULL,
+      turn_id TEXT,
+      worker_id TEXT NOT NULL,
+      milestone_lease_token INTEGER NOT NULL,
+      milestone_id TEXT NOT NULL,
+      slice_id TEXT,
+      task_id TEXT,
+      unit_type TEXT NOT NULL,
+      unit_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      attempt_n INTEGER NOT NULL DEFAULT 1,
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      exit_reason TEXT,
+      error_summary TEXT,
+      verification_evidence_id INTEGER,
+      next_run_at TEXT,
+      retry_after_ms INTEGER,
+      max_attempts INTEGER NOT NULL DEFAULT 3,
+      last_error_code TEXT,
+      last_error_at TEXT
+    );
+  `);
+  const workerId = `live-regression-worker-${Date.now()}`;
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO workers (
+      worker_id, host, pid, started_at, version, last_heartbeat_at, status, project_root_realpath
+    ) VALUES (?, 'test-host', ?, ?, '1', '1970-01-01T00:00:00.000Z', 'active', ?)
+  `).run(workerId, pid, now, projectDir);
+  db.prepare(`
+    INSERT INTO unit_dispatches (
+      trace_id, worker_id, milestone_lease_token, milestone_id, slice_id, task_id,
+      unit_type, unit_id, status, attempt_n, started_at, max_attempts
+    ) VALUES (?, ?, 1, 'M001', ?, ?, ?, ?, 'claimed', 1, ?, 3)
+  `).run(
+    `live-regression-${Date.now()}`,
+    workerId,
+    unitId.split("/")[1] ?? null,
+    unitId.split("/")[2] ?? null,
+    unitType,
+    unitId,
+    now,
+  );
+  db.close();
 }
 
 function buildMinimalRoadmap(
@@ -133,6 +199,23 @@ function buildMinimalPlan(
 
 function buildTaskSummary(id: string): string {
   return `---\nid: ${id}\nparent: S01\nmilestone: M001\nduration: 5m\nverification_result: passed\ncompleted_at: ${new Date().toISOString()}\n---\n\n# ${id}: Done\n\nCompleted.`;
+}
+
+// Recover DB hierarchy from on-disk markdown projections. DB is authoritative
+// at runtime, so live-regression fixtures that exist only as markdown must be
+// imported via `gsd headless recover` before `headless query` can derive
+// their state. The interactive `gsd recover` command requires a TTY; the
+// headless subcommand is the non-interactive parallel.
+function recover(dir: string): void {
+  const result = gsd(["headless", "recover"], dir);
+  assert(
+    result.code === 0,
+    `gsd headless recover should succeed for fixture, got ${result.code}: ${result.stderr}`,
+  );
+  assert(
+    result.stderr.includes("gsd-recover: recovered"),
+    `gsd headless recover should reach success path, got stderr: ${result.stderr}`,
+  );
 }
 
 // ─── Test: headless query returns valid JSON ──────────────────────────────
@@ -200,6 +283,7 @@ run("headless query: milestone with roadmap reports planning phase", () => {
       buildMinimalRoadmap([{ id: "S01", title: "First Slice", done: false }]),
     );
 
+    recover(dir);
     const result = gsd(["headless", "query"], dir);
     assert(result.code === 0, `expected exit 0, got ${result.code}`);
 
@@ -240,6 +324,7 @@ run("headless query: all tasks done reports summarizing phase", () => {
       buildTaskSummary("T01"),
     );
 
+    recover(dir);
     const result = gsd(["headless", "query"], dir);
     assert(result.code === 0, `expected exit 0, got ${result.code}`);
 
@@ -273,6 +358,7 @@ run("headless query: milestone with summary reports complete or idle", () => {
     );
     writeFileSync(join(mDir, "M001-SUMMARY.md"), "# M001 Summary\n\nComplete.");
 
+    recover(dir);
     const result = gsd(["headless", "query"], dir);
     assert(result.code === 0, `expected exit 0, got ${result.code}`);
 
@@ -299,19 +385,7 @@ runAsync("stale auto.lock with captured dead PID does not block --version", asyn
   const dir = createTempProject("stale-lock");
   try {
     const deadPid = await captureDeadPid();
-    const gsdDir = join(dir, ".gsd");
-    mkdirSync(gsdDir, { recursive: true });
-    writeFileSync(
-      join(gsdDir, "auto.lock"),
-      JSON.stringify({
-        pid: deadPid,
-        startedAt: new Date().toISOString(),
-        unitType: "starting",
-        unitId: "bootstrap",
-        unitStartedAt: new Date().toISOString(),
-        completedUnits: 0,
-      }),
-    );
+    seedStaleCrashLock(dir, deadPid, "starting", "bootstrap");
 
     const result = gsd(["--version"], dir);
     assert(
@@ -339,19 +413,7 @@ runAsync("gsd doctor surfaces actionable guidance about the stale lock", async (
   const dir = createTempProject("crash-guidance");
   try {
     const deadPid = await captureDeadPid();
-    const gsdDir = join(dir, ".gsd");
-    mkdirSync(join(gsdDir, "milestones"), { recursive: true });
-    writeFileSync(
-      join(gsdDir, "auto.lock"),
-      JSON.stringify({
-        pid: deadPid,
-        startedAt: new Date().toISOString(),
-        unitType: "execute-task",
-        unitId: "M001/S01/T02",
-        unitStartedAt: new Date().toISOString(),
-        completedUnits: 5,
-      }),
-    );
+    seedStaleCrashLock(dir, deadPid, "execute-task", "M001/S01/T02");
 
     const candidates: string[][] = [
       ["doctor"],

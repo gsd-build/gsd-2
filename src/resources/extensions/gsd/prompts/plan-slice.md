@@ -26,7 +26,7 @@ This unit runs under the `planning-dispatch` tools-policy: you may use the `suba
 
 - You'd otherwise read more than ~3 files to understand a subsystem → dispatch the **scout** agent for codebase recon and work from its compressed report.
 - The slice spans multiple subsystems and the decomposition isn't obvious → dispatch the **planner** agent or use the **decompose-into-slices** skill on a focused sub-area, then integrate.
-- You need current external information (library docs, API behavior, recent changes) → dispatch the **researcher** agent.
+- You need current external information (library docs, API behavior, recent changes) → dispatch the **scout** agent.
 
 **Do not** dispatch implementation-tier agents (`worker`, `refactorer`, `tester`) from this unit — they would write user source and bypass this unit's write isolation. Implementation belongs in `execute-task`.
 
@@ -66,7 +66,7 @@ Narrate your decomposition reasoning — why you're grouping work this way, what
 {{executorContextConstraints}}
 
 Then:
-0. If `REQUIREMENTS.md` was preloaded above, identify which Active requirements the roadmap says this slice owns or supports. These are the requirements this plan must deliver — every owned requirement needs at least one task that directly advances it, and verification must prove the requirement is met.
+0. If `REQUIREMENTS.md` was preloaded above, identify which Active requirements the roadmap says this slice owns or supports. Owned requirements are acceptance criteria for this slice — every owned requirement needs at least one task that directly advances it, and verification must prove the requirement is met. Supporting requirements are compatibility constraints only; do not pull a later slice's primary work into this slice unless the roadmap explicitly assigns that work here.
 0a. Call `memory_query` with keywords from the slice title and the source files listed below. Prior architectural decisions, conventions, and gotchas in this area should inform task decomposition — not be re-derived during execution.
 1. Read the templates:
    - `~/.gsd/agent/extensions/gsd/templates/plan.md`
@@ -80,7 +80,7 @@ Then:
    - Planned test files must only read from or import paths that are tracked in git. Do NOT plan tests whose inputs or fixtures are paths listed in `.gitignore` (e.g. `.gsd/`, `.planning/`, `.audits/`). If the scenario seems to require such a file, plan an inline fixture or a tracked sample instead.
 4. **For non-trivial slices only** — plan observability, proof level, and integration closure:
    - Include `Observability / Diagnostics` for backend, integration, async, stateful, or UI slices where failure diagnosis matters.
-   - Fill `Proof Level` and `Integration Closure` when the slice crosses runtime boundaries or has meaningful integration concerns.
+   - Fill `Proof Level` and `Integration Closure` truthfully when the slice crosses runtime boundaries or has meaningful integration concerns — say what class of proof this slice really delivers and what end-to-end wiring still remains. Do not phrase fixture/contract-only proof as if it were live integration proof.
    - **Omit these sections entirely for simple slices** where they would all be "none" or trivially obvious.
 5. **Quality gates** — for non-trivial slices, fill the Threat Surface (Q3) and Requirement Impact (Q4) sections in the slice plan:
    - **Threat Surface:** Identify abuse scenarios, data exposure risks, and input trust boundaries. Required when the slice handles user input, authentication, authorization, or sensitive data. Omit entirely for internal refactoring or simple changes.
@@ -92,16 +92,18 @@ Then:
    - a matching task plan file with description, steps, must-haves, verification, inputs, and expected output
    - **Inputs and Expected Output must list concrete backtick-wrapped file paths** (e.g. `` `src/types.ts` ``). These are machine-parsed to derive task dependencies — vague prose without paths breaks parallel execution. Every task must have at least one output file path.
    - Observability Impact section **only if the task touches runtime boundaries, async flows, or error paths** — omit it otherwise
-7. **Persist planning state through `gsd_plan_slice`.** Call it with the full slice planning payload (goal, demo, must-haves, verification, tasks, and metadata). The tool inserts all tasks in the same transaction, writes to the DB, and renders `{{outputPath}}` and `{{slicePath}}/tasks/T##-PLAN.md` files automatically. Do **not** call `gsd_plan_task` separately — `gsd_plan_slice` handles task persistence. Do **not** rely on direct `PLAN.md` writes as the source of truth; the DB-backed tool is the canonical write path for slice and task planning state.
+7. **Persist planning state through `gsd_plan_slice`.** Call it with the full slice planning payload: `goal`, `successCriteria`, optional `proofLevel`, optional `integrationClosure`, optional `observabilityImpact`, and `tasks`. Keep each task description's first paragraph concise; detailed steps and must-haves may follow, but the parent slice plan should read as a summary. The tool inserts all tasks in the same transaction, writes to the DB, and renders `{{outputPath}}` and `{{slicePath}}/tasks/T##-PLAN.md` files automatically. Do **not** call `gsd_plan_task` separately — `gsd_plan_slice` handles task persistence. Do **not** rely on direct `PLAN.md` writes as the source of truth; the DB-backed tool is the canonical write path for slice and task planning state.
 8. **Self-audit the plan.** Walk through each check — if any fail, fix the plan files before moving on:
     - **Completion semantics:** If every task were completed exactly as written, the slice goal/demo should actually be true.
-    - **Requirement coverage:** Every must-have in the slice maps to at least one task. No must-have is orphaned. If `REQUIREMENTS.md` exists, every Active requirement this slice owns maps to at least one task.
+    - **Requirement coverage:** Every must-have in the slice maps to at least one task. No must-have is orphaned. If `REQUIREMENTS.md` exists, every Active requirement this slice owns maps to at least one task with verification that proves the requirement is met.
+    - **Decisions honored:** The plan respects locked decisions from any inlined context, research, or `.gsd/DECISIONS.md` artifacts. Do not silently re-litigate prior decisions.
     - **Task completeness:** Every task has steps, must-haves, verification, inputs, and expected output — none are blank or vague. Inputs and Expected Output list backtick-wrapped file paths, not prose descriptions.
     - **Dependency correctness:** Task ordering is consistent. No task references work from a later task.
     - **Key links planned:** For every pair of artifacts that must connect, there is an explicit step that wires them.
     - **Scope sanity:** Target 2–5 steps and 3–8 files per task. 10+ steps or 12+ files — must split. Each task must be completable in a single fresh context window.
-    - **Feature completeness:** Every task produces real, user-facing progress — not just internal scaffolding.
-    - **Quality gate coverage:** For non-trivial slices, Threat Surface and Requirement Impact sections are present and specific (not placeholder text). For non-trivial tasks, Failure Modes, Load Profile, and Negative Tests are addressed in the task plan.
+    - **Proof-level truthfulness:** The proof-level wording does not overclaim live integration if only fixture/contract proof is planned.
+    - **Feature completeness:** Every task produces real, user-facing progress — not just internal scaffolding. If the slice has a UI surface, at least one task builds the real UI; if it has an API, at least one task connects it to a real data source. Showing the completed result to a non-technical stakeholder should demonstrate real product progress rather than developer artifacts.
+    - **Quality gate coverage:** For non-trivial slices, Threat Surface (Q3: abuse, data exposure, input trust) and Requirement Impact (Q4: requirements touched, re-verify, decisions revisited) sections are present and specific (not placeholder text). For non-trivial tasks, Failure Modes (Q5), Load Profile (Q6), and Negative Tests (Q7) are addressed in the task plan.
 10. If planning produced structural decisions, append them to `.gsd/DECISIONS.md`
 11. {{commitInstruction}}
 

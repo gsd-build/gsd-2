@@ -10,7 +10,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { showNextAction } from "../shared/tui.js";
-import { nativeIsRepo, nativeInit, nativeAddAll, nativeCommit } from "./native-git-bridge.js";
+import { nativeIsRepo, nativeInit, nativeAddAll, nativeCommit, nativeDetectMainBranch } from "./native-git-bridge.js";
 import { ensureGitignore, untrackRuntimeFiles } from "./gitignore.js";
 import { gsdRoot } from "./paths.js";
 import { assertSafeDirectory } from "./validate-directory.js";
@@ -26,6 +26,8 @@ interface InitWizardResult {
   completed: boolean;
   /** Whether .gsd/ was created */
   bootstrapped: boolean;
+  /** Whether git is available or was initialized during setup. */
+  gitEnabled?: boolean;
 }
 
 interface ProjectPreferences {
@@ -75,6 +77,7 @@ export async function showProjectInit(
 
   // ── Step 2: Git setup ──────────────────────────────────────────────────────
   let didInitGit = false;
+  let gitEnabled = signals.isGitRepo;
   if (!signals.isGitRepo) {
     const gitChoice = await showNextAction(ctx, {
       title: "GSD — Project Setup",
@@ -91,6 +94,7 @@ export async function showProjectInit(
     if (gitChoice === "init_git") {
       nativeInit(basePath, prefs.mainBranch);
       didInitGit = true;
+      gitEnabled = true;
     }
   } else {
     // Auto-detect main branch from existing repo
@@ -293,9 +297,12 @@ export async function showProjectInit(
     // Non-fatal — DB creation failure should not block project init
   }
 
-  // Ensure .gitignore
-  ensureGitignore(basePath);
-  untrackRuntimeFiles(basePath);
+  // Ensure .gitignore only when git is active. A user who selected "Skip"
+  // should not have git initialized or git-related files mutated later.
+  if (gitEnabled) {
+    ensureGitignore(basePath);
+    untrackRuntimeFiles(basePath);
+  }
 
   // Create initial commit so git log and git worktree work immediately (#4530).
   // Without this, the branch is "unborn" (zero commits) and downstream operations
@@ -341,7 +348,7 @@ export async function showProjectInit(
 
   ctx.ui.notify("GSD initialized. Starting your first milestone...", "info");
 
-  return { completed: true, bootstrapped: true };
+  return { completed: true, bootstrapped: true, gitEnabled };
 }
 
 // ─── V1 Migration Offer ─────────────────────────────────────────────────────────
@@ -662,22 +669,12 @@ function buildDetectionSummary(signals: ProjectSignals): string[] {
   return lines;
 }
 
-function detectMainBranch(basePath: string): string | null {
+export function detectMainBranch(basePath: string): string | null {
   try {
-    // Check HEAD reference for common branch names
-    const headPath = join(basePath, ".git", "HEAD");
-    if (existsSync(headPath)) {
-      const head = readFileSync(headPath, "utf-8").trim();
-      const match = head.match(/^ref: refs\/heads\/(.+)$/);
-      if (match) return match[1];
-    }
-
-    // Check for common remote branches
-    const refsPath = join(basePath, ".git", "refs", "remotes", "origin");
-    if (existsSync(refsPath)) {
-      if (existsSync(join(refsPath, "main"))) return "main";
-      if (existsSync(join(refsPath, "master"))) return "master";
-    }
+    // Match runtime branch resolution: origin/HEAD -> main -> master -> current.
+    // Reading .git/HEAD first records whichever feature branch happened to be
+    // checked out during init and can redirect future milestone merges.
+    return nativeDetectMainBranch(basePath);
   } catch {
     // Fall through to null
   }

@@ -1,10 +1,10 @@
 /**
  * complete-task handler — the core operation behind gsd_complete_task.
  *
- * Validates inputs, writes task row to DB in a transaction, then (outside
- * the transaction) renders SUMMARY.md to disk, toggles the plan checkbox,
- * stores the rendered markdown in the DB for D004 recovery, and invalidates
- * caches.
+ * Validates inputs, writes task row and rendered SUMMARY.md to DB in a
+ * transaction, then renders projections to disk and invalidates caches.
+ * Projection write failures are reported as stale projections and do not roll
+ * back committed DB state.
  */
 
 import { join } from "node:path";
@@ -22,13 +22,12 @@ import {
   getSlice,
   getTask,
   updateTaskStatus,
-  setTaskSummaryMd,
   deleteVerificationEvidence,
   saveGateResult,
   getPendingGatesForTurn,
 } from "../gsd-db.js";
 import { getGatesForTurn } from "../gate-registry.js";
-import { resolveSliceFile, resolveTasksDir, clearPathCache } from "../paths.js";
+import { resolveTasksDir, clearPathCache } from "../paths.js";
 import { checkOwnership, taskUnitKey } from "../unit-ownership.js";
 import { saveFile, clearParseCache } from "../files.js";
 import { invalidateStateCache } from "../state.js";
@@ -168,6 +167,7 @@ export async function handleCompleteTask(
   // ── Guards + DB writes inside a single transaction (prevents TOCTOU) ───
   const completedAt = new Date().toISOString();
   let guardError: string | null = null;
+  let summaryMd = "";
 
   // ── ADR-011 Phase 2: validate escalation payload BEFORE any side effects ─
   // Building the artifact runs the full shape validation (2-4 options, unique
@@ -237,6 +237,9 @@ export async function handleCompleteTask(
     }
 
     // All guards passed — perform writes
+    const taskRow = paramsToTaskRow(params, completedAt);
+    summaryMd = renderSummaryContent(taskRow, params.sliceId, params.milestoneId, params.verificationEvidence ?? []);
+
     insertMilestone({ id: params.milestoneId, title: params.milestoneId });
     insertSlice({ id: params.sliceId, milestoneId: params.milestoneId, title: params.sliceId });
     insertTask({
@@ -254,6 +257,7 @@ export async function handleCompleteTask(
       knownIssues: params.knownIssues ?? "None.",
       keyFiles: params.keyFiles ?? [],
       keyDecisions: params.keyDecisions ?? [],
+      fullSummaryMd: summaryMd,
     });
 
     for (const evidence of (params.verificationEvidence ?? [])) {
@@ -301,13 +305,7 @@ export async function handleCompleteTask(
     return { error: guardError };
   }
 
-  // ── Filesystem operations (outside transaction) ─────────────────────────
-  // If disk render fails, roll back the DB status so deriveState() and
-  // verifyExpectedArtifact() stay consistent (both say "not done").
-
-  // Render summary markdown via the single source of truth (#2720)
-  const taskRow = paramsToTaskRow(params, completedAt);
-  const summaryMd = renderSummaryContent(taskRow, params.sliceId, params.milestoneId, params.verificationEvidence ?? []);
+  let projectionStale = false;
 
   // Resolve and write summary to disk
   let summaryPath: string;
@@ -325,29 +323,15 @@ export async function handleCompleteTask(
   try {
     await saveFile(summaryPath, summaryMd);
 
-    // Toggle plan checkbox via renderer module
-    const planPath = resolveSliceFile(basePath, params.milestoneId, params.sliceId, "PLAN");
-    if (planPath) {
-      await renderPlanCheckboxes(basePath, params.milestoneId, params.sliceId);
-    } else {
-      process.stderr.write(
-        `gsd-db: complete_task — could not find plan file for ${params.sliceId}/${params.milestoneId}, skipping checkbox toggle\n`,
-      );
-    }
+    // Toggle or regenerate the plan projection from DB. Missing projection
+    // files are rebuilt by the renderer instead of being skipped.
+    await renderPlanCheckboxes(basePath, params.milestoneId, params.sliceId);
   } catch (renderErr) {
-    // Disk render failed — roll back DB status so state stays consistent
-    logWarning("tool", `complete_task — disk render failed, rolling back DB status: ${(renderErr as Error).message}`);
-    // Delete orphaned verification_evidence rows first (FK constraint
-    // references tasks, so evidence must go before status change).
-    // Without this, retries accumulate duplicate evidence rows (#2724).
-    deleteVerificationEvidence(params.milestoneId, params.sliceId, params.taskId);
-    updateTaskStatus(params.milestoneId, params.sliceId, params.taskId, 'pending');
-    invalidateStateCache();
-    return { error: `disk render failed: ${(renderErr as Error).message}` };
+    projectionStale = true;
+    logWarning("projection", `complete_task projection write failed for ${params.milestoneId}/${params.sliceId}/${params.taskId}; DB completion remains committed`, {
+      error: (renderErr as Error).message,
+    });
   }
-
-  // Store rendered markdown in DB for D004 recovery
-  setTaskSummaryMd(params.milestoneId, params.sliceId, params.taskId, summaryMd);
 
   // ── Close gates owned by execute-task (Q5/Q6/Q7) for this task ────────
   // Each gate id maps to a specific params field via taskGateFieldForId.
@@ -471,5 +455,6 @@ export async function handleCompleteTask(
     sliceId: params.sliceId,
     milestoneId: params.milestoneId,
     summaryPath,
+    ...(projectionStale ? { stale: true } : {}),
   };
 }

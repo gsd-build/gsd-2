@@ -9,12 +9,14 @@ import {
   type LockData,
 } from "./crash-recovery.js";
 import { gsdRoot } from "./paths.js";
+import { MILESTONE_ID_RE } from "./milestone-ids.js";
 import {
   synthesizeCrashRecovery,
   type RecoveryBriefing,
 } from "./session-forensics.js";
 import { deriveState } from "./state.js";
 import type { GSDState } from "./types.js";
+import { getRuntimeKv, deleteRuntimeKv } from "./db/runtime-kv.js";
 
 export type InterruptedSessionClassification =
   | "none"
@@ -50,17 +52,59 @@ export interface InterruptedSessionAssessment {
   isBootstrapCrash: boolean;
 }
 
+const LEGACY_DEEP_SETUP_UNITS = new Set([
+  "workflow-preferences:WORKFLOW-PREFS",
+  "discuss-project:PROJECT",
+  "discuss-requirements:REQUIREMENTS",
+  "research-decision:RESEARCH-DECISION",
+  "research-project:RESEARCH-PROJECT",
+]);
+
+function isStalePseudoMilestonePause(meta: PausedSessionMetadata): boolean {
+  if (meta.activeEngineId && meta.activeEngineId !== "dev") return false;
+  if (
+    meta.unitType === "discuss-milestone"
+    && typeof meta.unitId === "string"
+    && !MILESTONE_ID_RE.test(meta.unitId)
+  ) {
+    return true;
+  }
+  if (
+    typeof meta.unitType === "string"
+    && typeof meta.unitId === "string"
+    && LEGACY_DEEP_SETUP_UNITS.has(`${meta.unitType}:${meta.unitId}`)
+  ) {
+    return true;
+  }
+  return typeof meta.milestoneId === "string"
+    && !MILESTONE_ID_RE.test(meta.milestoneId)
+    && typeof meta.unitType === "string"
+    && typeof meta.unitId === "string"
+    && LEGACY_DEEP_SETUP_UNITS.has(`${meta.unitType}:${meta.unitId}`);
+}
+
+/**
+ * runtime_kv key (global scope) that stores the most recent paused-session
+ * metadata. Phase C pt 2: replaces runtime/paused-session.json. The key is
+ * project-wide (not worker-scoped) because the paused state represents the
+ * last time auto-mode paused on this project — there is at most one paused
+ * session per project at a time.
+ */
+export const PAUSED_SESSION_KV_KEY = "paused_session";
+
 export function readPausedSessionMetadata(
   basePath: string,
 ): PausedSessionMetadata | null {
-  const pausedPath = join(gsdRoot(basePath), "runtime", "paused-session.json");
-  if (!existsSync(pausedPath)) return null;
-
-  try {
-    return JSON.parse(readFileSync(pausedPath, "utf-8")) as PausedSessionMetadata;
-  } catch {
+  // basePath is unused now (the DB is workspace-scoped via the connection
+  // openDatabase opened on it) but kept in the signature for callers.
+  void basePath;
+  const meta = getRuntimeKv<PausedSessionMetadata>("global", "", PAUSED_SESSION_KV_KEY);
+  if (!meta) return null;
+  if (isStalePseudoMilestonePause(meta)) {
+    deleteRuntimeKv("global", "", PAUSED_SESSION_KV_KEY);
     return null;
   }
+  return meta;
 }
 
 export function isBootstrapCrashLock(lock: LockData | null): boolean {

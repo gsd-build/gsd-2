@@ -109,6 +109,42 @@ describe("mergeSliceToMain", () => {
     assert.equal(summary.sliceMergeConflicts, 0);
   });
 
+  test("merges slices to the recorded integration branch", () => {
+    git(["checkout", "-b", "develop"], dir);
+    mkdirSync(join(dir, ".gsd", "milestones", "M001"), { recursive: true });
+    writeFileSync(
+      join(dir, ".gsd", "milestones", "M001", "M001-META.json"),
+      JSON.stringify({ integrationBranch: "develop" }, null, 2) + "\n",
+    );
+
+    enterMilestoneBranch(dir, "M001");
+    commitFile(dir, "develop-only.txt", "slice 1 work\n", "feat: S01 work");
+
+    process.chdir(dir);
+    const result = mergeSliceToMain(dir, "M001", "S01");
+
+    assert.equal(result.mainBranch, "develop");
+    assert.equal(readFileSync(join(dir, "develop-only.txt"), "utf-8"), "slice 1 work\n");
+    assert.equal(git(["rev-parse", "develop"], dir), git(["rev-parse", "milestone/M001"], dir));
+    assert.notEqual(git(["rev-parse", "develop"], dir), git(["rev-parse", "main"], dir));
+  });
+
+  test("advances milestone branch when it is checked out in a worktree", () => {
+    commitFile(dir, ".gitignore", ".gsd/worktrees/\n", "chore: ignore worktrees");
+    const wtPath = join(dir, ".gsd", "worktrees", "M001");
+    mkdirSync(join(dir, ".gsd", "worktrees"), { recursive: true });
+    git(["worktree", "add", "-b", "milestone/M001", wtPath, "main"], dir);
+    commitFile(wtPath, "worktree-slice.txt", "slice work\n", "feat: S01 worktree");
+
+    process.chdir(wtPath);
+    const result = mergeSliceToMain(dir, "M001", "S01");
+
+    assert.equal(result.skipped, false);
+    assert.equal(git(["rev-parse", "main"], dir), git(["rev-parse", "milestone/M001"], dir));
+    assert.equal(git(["branch", "--show-current"], wtPath), "milestone/M001");
+    assert.equal(readFileSync(join(wtPath, "worktree-slice.txt"), "utf-8"), "slice work\n");
+  });
+
   test("handles sequential slice merges cleanly", () => {
     enterMilestoneBranch(dir, "M001");
     commitFile(dir, "a.txt", "slice 1\n", "feat: S01");

@@ -1,10 +1,9 @@
 /**
  * derive-state-db-disk-reconcile.test.ts — #2416
  *
- * After migration to DB-backed state, milestones that exist on disk
- * (in .gsd/milestones/) but were never imported into the DB become
- * invisible to deriveStateFromDb(). This test verifies that
- * deriveStateFromDb reconciles disk milestones with DB milestones.
+ * DB-authoritative state: milestones that exist only as markdown projections
+ * are not imported by deriveStateFromDb(). Explicit migration/import is the
+ * only markdown-to-DB path.
  */
 
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -17,7 +16,6 @@ import {
   closeDatabase,
   insertMilestone,
   insertSlice,
-  insertTask,
 } from "../gsd-db.ts";
 import { createTestContext } from "./test-helpers.ts";
 
@@ -58,7 +56,7 @@ const ROADMAP_CONTENT = `# M002: Disk-Only Milestone
 `;
 
 async function main(): Promise<void> {
-  console.log("\n=== #2416: deriveStateFromDb reconciles disk milestones ===");
+  console.log("\n=== deriveStateFromDb does not reconcile disk milestones ===");
 
   // Set up: M001 in DB, M002 on disk only
   const base = createFixtureBase();
@@ -81,12 +79,9 @@ async function main(): Promise<void> {
     invalidateStateCache();
     const state = await deriveStateFromDb(base);
 
-    // M002 should be visible in the registry
+    // M002 is disk-only and should not be visible in DB-backed state.
     const m002Entry = state.registry.find((m) => m.id === "M002");
-    assertTrue(
-      m002Entry !== undefined,
-      "M002 (disk-only milestone) should appear in state.registry (#2416)",
-    );
+    assertEq(m002Entry, undefined, "M002 disk-only milestone should not appear in DB-backed state");
 
     // M001 should still be in the registry
     const m001Entry = state.registry.find((m) => m.id === "M001");
@@ -95,24 +90,14 @@ async function main(): Promise<void> {
       "M001 (DB milestone) should still appear in state.registry",
     );
 
-    // The active milestone should be M002 (since M001 is complete)
-    assertTrue(
-      state.activeMilestone !== null,
-      "There should be an active milestone",
-    );
-    if (state.activeMilestone) {
-      assertEq(
-        state.activeMilestone.id,
-        "M002",
-        "Active milestone should be M002 (disk-only, not complete) (#2416)",
-      );
-    }
+    assertEq(state.activeMilestone, null, "No active milestone should be inferred from disk-only markdown");
+    assertEq(state.phase, "complete", "DB-only complete milestone drives complete state");
   } finally {
     closeDatabase();
     cleanup(base);
   }
 
-  console.log("\n=== #4974: summary-only disk milestones keep parsed title ===");
+    console.log("\n=== summary-only disk milestones are not imported ===");
 
   {
     const summaryOnlyBase = createFixtureBase();
@@ -132,20 +117,7 @@ async function main(): Promise<void> {
       const state = await deriveStateFromDb(summaryOnlyBase);
       const m002Entry = state.registry.find((m) => m.id === "M002");
 
-      assertTrue(
-        m002Entry !== undefined,
-        "M002 summary-only disk milestone should appear in state.registry (#4974)",
-      );
-      assertEq(
-        m002Entry?.title,
-        "Summary-Only Milestone",
-        "M002 summary-only disk milestone should use parsed SUMMARY title (#4974)",
-      );
-      assertEq(
-        m002Entry?.status,
-        "complete",
-        "M002 summary-only disk milestone should reconcile as complete (#4974)",
-      );
+      assertEq(m002Entry, undefined, "M002 summary-only disk milestone should not appear without explicit import");
     } finally {
       closeDatabase();
       cleanup(summaryOnlyBase);

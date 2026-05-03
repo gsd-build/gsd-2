@@ -12,7 +12,6 @@ import assert from "node:assert/strict";
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { extractSourceRegion } from "./test-helpers.ts";
 
 test("#2684: preferences files are NOT in ROOT_STATE_FILES (forward-only sync)", () => {
   const srcPath = join(import.meta.dirname, "..", "auto-worktree.ts");
@@ -41,22 +40,9 @@ test("#2684: preferences files are NOT in ROOT_STATE_FILES (forward-only sync)",
   );
 });
 
-test("copyPlanningArtifacts prefers canonical PREFERENCES.md with lowercase fallback", () => {
-  const srcPath = join(import.meta.dirname, "..", "auto-worktree.ts");
-  const src = readFileSync(srcPath, "utf-8");
-
-  // Find the copyPlanningArtifacts function body
-  const fnIdx = src.indexOf("function copyPlanningArtifacts");
-  assert.ok(fnIdx !== -1, "copyPlanningArtifacts function exists");
-
-  // Extract function body (up to the next top-level function)
-  const fnBody = extractSourceRegion(src, "function copyPlanningArtifacts");
-
-  assert.ok(
-    fnBody.includes("PROJECT_PREFERENCES_FILE") && fnBody.includes("LEGACY_PROJECT_PREFERENCES_FILE"),
-    "copyPlanningArtifacts should prefer canonical PREFERENCES.md and retain lowercase fallback via the shared constants",
-  );
-});
+// Phase C: copyPlanningArtifacts was deleted. Worktrees no longer
+// maintain a parallel .gsd/ projection; preference seeding is now
+// handled exclusively by syncGsdStateToWorktree() (covered below).
 
 test("syncGsdStateToWorktree copies canonical PREFERENCES.md", async () => {
   // Functional test: create a mock source and destination, call the sync

@@ -5,6 +5,10 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { deriveState, isSliceComplete, isMilestoneComplete, isGhostMilestone } from '../state.ts';
+
+// This suite exercises the explicit legacy markdown derivation path.
+process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK = '1';
+
 // ─── Fixture Helpers ───────────────────────────────────────────────────────
 
 function createFixtureBase(): string {

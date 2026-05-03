@@ -3,7 +3,7 @@ title: "Auto mode"
 description: "GSD's autonomous execution engine — run /gsd auto, walk away, come back to built software with clean git history."
 ---
 
-Auto mode is a **state machine driven by files on disk**. It reads `.gsd/STATE.md`, determines the next unit of work, creates a fresh agent session with pre-loaded context, and lets the LLM execute. When the LLM finishes, auto mode reads disk state again and dispatches the next unit.
+Auto mode is a **state machine driven by the GSD database at the project root**. It derives the next unit of work from authoritative SQLite state, creates a fresh agent session with pre-loaded context, and lets the LLM execute. When the LLM finishes, auto mode persists the result to the database, refreshes `.gsd/` projections such as `STATE.md`, and dispatches the next unit.
 
 ## The loop
 
@@ -19,11 +19,48 @@ Plan → Execute (per task) → Complete → Reassess Roadmap → Next Slice
 - **Reassess** — checks if the roadmap still makes sense
 - **Validate** — reconciliation gate after all slices; catches gaps before sealing the milestone
 
+## Deep planning mode
+
+Enable project-level deep planning with `/gsd new-project --deep`, `/gsd new-milestone --deep`, or this project preference:
+
+```yaml
+planning_depth: deep
+```
+
+Deep mode runs one-time discovery gates before normal milestone planning:
+
+```
+Workflow Preferences -> Project Context -> Requirements -> Research Decision -> Optional Project Research -> Milestone Context/Roadmap
+```
+
+| Artifact                                                                  | Stage                             | Purpose                                                                             |
+| ------------------------------------------------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------- |
+| `.gsd/PREFERENCES.md`                                                     | `--deep` / `workflow-preferences` | Holds `planning_depth: deep` and captured workflow settings                         |
+| `.gsd/PROJECT.md`                                                         | `discuss-project`                 | Project vision, users, anti-goals, constraints, milestone sequence                  |
+| `.gsd/REQUIREMENTS.md`                                                    | `discuss-requirements`            | Capability contract with Active, Validated, Deferred, and Out of Scope requirements |
+| `.gsd/runtime/research-decision.json`                                     | `research-decision`               | Records whether to run project research or skip it                                  |
+| `.gsd/research/STACK.md`, `FEATURES.md`, `ARCHITECTURE.md`, `PITFALLS.md` | `research-project`                | Optional four-way project research when the decision is `research`                  |
+
+The research-decision unit only records the choice. If the decision is `research`, the next gate fans out four project research passes. Those outputs inform planning and requirement review; they do not silently create binding requirements.
+
 ## Key properties
 
 ### Fresh session per unit
 
 Every task, research phase, and planning step gets a clean context window. The dispatch prompt includes everything needed — task plans, prior summaries, dependency context, decisions register — so the LLM starts oriented.
+
+### Context Mode
+
+Context Mode is enabled by default for auto-mode runs. Each unit receives manifest-driven guidance to preserve the conversation window: use `gsd_exec` for noisy codebase scans, builds, tests, and diagnostics; use `gsd_exec_search` before repeating a prior sandboxed run; and use `gsd_resume` after compaction or session resume to read `.gsd/last-snapshot.md`.
+
+`gsd_exec` writes full stdout/stderr and metadata under `.gsd/exec/`, then returns only a short digest to the agent. This keeps large command output out of the LLM context while preserving exact evidence on disk. Opt out with:
+
+```yaml
+context_mode:
+  enabled: false
+```
+
+You can also tune sandbox behavior with `context_mode.exec_timeout_ms`, `context_mode.exec_stdout_cap_bytes`, and `context_mode.exec_digest_chars`.
 
 ### Runtime tool policy
 
@@ -31,14 +68,14 @@ Each auto-mode unit has a `UnitContextManifest` with an enforced `ToolsPolicy`. 
 
 ### Context pre-loading
 
-| Inlined artifact | Purpose |
-|------------------|---------|
-| Task plan | What to build |
-| Slice plan | Where this task fits |
-| Prior task summaries | What's already done |
-| Dependency summaries | Cross-slice context |
-| Roadmap excerpt | Overall direction |
-| Decisions register | Architectural context |
+| Inlined artifact     | Purpose               |
+| -------------------- | --------------------- |
+| Task plan            | What to build         |
+| Slice plan           | Where this task fits  |
+| Prior task summaries | What's already done   |
+| Dependency summaries | Cross-slice context   |
+| Roadmap excerpt      | Overall direction     |
+| Decisions register   | Architectural context |
 
 The amount of context inlined is controlled by your [token profile](/guides/token-optimization). Budget mode inlines minimal context; quality mode inlines everything.
 
@@ -47,24 +84,24 @@ The amount of context inlined is controlled by your [token profile](/guides/toke
 GSD isolates milestone work using one of three modes (configured via `git.isolation` in preferences):
 
 - **`none`** (default) — work happens on your current branch. No isolation overhead.
-- **`worktree`** — each milestone runs in its own git worktree. Squash-merged to main on completion.
+- **`worktree`** — each milestone runs in its own git worktree. Requires at least one commit; zero-commit repos temporarily run as `none` until `HEAD` exists. Squash-merged to main on completion.
 - **`branch`** — work happens on a `milestone/<MID>` branch in the project root. Useful for submodule-heavy repos.
 
 See [git strategy](/guides/git-strategy) for details.
 
 ### Crash recovery
 
-A lock file tracks the current unit. If the session dies, the next `/gsd auto` synthesizes a recovery briefing from tool calls that made it to disk and resumes with full context.
+Auto mode persists worker state, unit-dispatch state, and paused-session metadata in the project-root SQLite database. If the session dies, the next `/gsd auto` reconstructs the interrupted unit from DB-backed runtime state, synthesizes a recovery briefing from the conversation history written to disk, and resumes with full context. If the project-root database is unavailable, crash recovery degrades gracefully to a clean start instead of reconstructing interrupted work from disk.
 
 **Headless auto-restart:** When running `gsd headless auto`, crashes trigger automatic restart with exponential backoff (5s → 10s → 30s cap, default 3 attempts). Combined with crash recovery, this enables overnight "run until done" execution.
 
 ### Provider error recovery
 
-| Error type | Examples | Action |
-|-----------|----------|--------|
-| Rate limit | 429, "too many requests" | Auto-resume after retry-after header or 60s |
-| Server error | 500, 502, 503, "overloaded" | Auto-resume after 30s |
-| Permanent | "unauthorized", "invalid key" | Pause indefinitely (requires manual resume) |
+| Error type   | Examples                      | Action                                      |
+| ------------ | ----------------------------- | ------------------------------------------- |
+| Rate limit   | 429, "too many requests"      | Auto-resume after retry-after header or 60s |
+| Server error | 500, 502, 503, "overloaded"   | Auto-resume after 30s                       |
+| Permanent    | "unauthorized", "invalid key" | Pause indefinitely (requires manual resume) |
 
 ### Stuck detection
 
@@ -72,11 +109,11 @@ A sliding-window analysis detects stuck loops — catching cycles like A→B→A
 
 ### Timeout supervision
 
-| Timeout | Default | Behavior |
-|---------|---------|----------|
-| Soft | 20 min | Warns the LLM to wrap up |
-| Idle | 10 min | Detects stalls, intervenes |
-| Hard | 30 min | Pauses auto mode |
+| Timeout | Default | Behavior                   |
+| ------- | ------- | -------------------------- |
+| Soft    | 20 min  | Warns the LLM to wrap up   |
+| Idle    | 10 min  | Detects stalls, intervenes |
+| Hard    | 30 min  | Pauses auto mode           |
 
 Configure in preferences:
 
@@ -108,7 +145,7 @@ Failures trigger auto-fix retries — the agent sees the output and attempts to 
 After milestone completion, GSD auto-generates a self-contained HTML report with progress tree, dependency graph, cost/token metrics, execution timeline, and changelog.
 
 ```yaml
-auto_report: true    # enabled by default
+auto_report: true # enabled by default
 ```
 
 Generate manually with `/gsd export --html`, or for all milestones with `/gsd export --html --all`.
@@ -119,7 +156,7 @@ Reactive task execution is enabled by default. GSD derives a dependency graph fr
 
 ```yaml
 reactive_execution:
-  enabled: false    # opt out
+  enabled: false # opt out
 ```
 
 Set `reactive_execution.enabled: true` explicitly to use the earlier two-ready-task threshold. Optional tuning includes `max_parallel` (default `2`, range `1`-`8`), `isolation_mode: same-tree`, and `subagent_model`.
@@ -127,25 +164,18 @@ Set `reactive_execution.enabled: true` explicitly to use the earlier two-ready-t
 ## Controlling auto mode
 
 <Steps>
-  <Step title="Start">
-    ```
-    /gsd auto
-    ```
-  </Step>
+  <Step title="Start">``` /gsd auto ```</Step>
   <Step title="Pause">
-    Press **Escape**. The conversation is preserved. You can interact with the agent, inspect state, or resume.
+    Press **Escape**. The conversation is preserved. You can interact with the
+    agent, inspect state, or resume.
   </Step>
   <Step title="Resume">
-    ```
-    /gsd auto
-    ```
-    Auto mode reads disk state and picks up where it left off.
+    ``` /gsd auto ``` Auto mode reads DB-backed runtime state and picks up where
+    it left off.
   </Step>
   <Step title="Stop">
-    ```
-    /gsd stop
-    ```
-    Stops auto mode gracefully. Can be run from a different terminal.
+    ``` /gsd stop ``` Stops auto mode gracefully. Can be run from a different
+    terminal.
   </Step>
 </Steps>
 
@@ -179,10 +209,10 @@ Fire-and-forget thought capture. Triaged automatically between tasks. See [captu
 
 Token profiles can skip phases to reduce cost:
 
-| Phase | `budget` | `balanced` | `quality` |
-|-------|----------|------------|-----------|
-| Milestone research | Skipped | Runs | Runs |
-| Slice research | Skipped | Skipped | Runs |
-| Reassess roadmap | Skipped | Runs | Runs |
+| Phase              | `budget` | `balanced` | `quality` |
+| ------------------ | -------- | ---------- | --------- |
+| Milestone research | Skipped  | Runs       | Runs      |
+| Slice research     | Skipped  | Skipped    | Runs      |
+| Reassess roadmap   | Skipped  | Runs       | Runs      |
 
 See [token optimization](/guides/token-optimization) for details.

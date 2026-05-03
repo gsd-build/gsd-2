@@ -22,8 +22,14 @@ import type { GSDState } from "./types.js";
 import {
   assessInterruptedSession,
   readPausedSessionMetadata,
+  PAUSED_SESSION_KV_KEY,
   type InterruptedSessionAssessment,
+  type PausedSessionMetadata,
 } from "./interrupted-session.js";
+import {
+  setRuntimeKv,
+  deleteRuntimeKv,
+} from "./db/runtime-kv.js";
 import { getManifestStatus } from "./files.js";
 export { inlinePriorMilestoneSummary } from "./files.js";
 import { collectSecretsFromManifest } from "../get-secrets-from-user.js";
@@ -129,7 +135,6 @@ import {
 } from "./metrics.js";
 import { setLogBasePath, logWarning, logError } from "./workflow-logger.js";
 import { preflightCleanRoot, postflightPopStash } from "./clean-root-preflight.js";
-import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readFileSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
@@ -177,6 +182,7 @@ import { getErrorMessage } from "./error-utils.js";
 import { recoverFailedMigration } from "./migrate-external.js";
 import { initRegistry, convertDispatchRules } from "./rule-registry.js";
 import { emitJournalEvent as _emitJournalEvent, type JournalEntry } from "./journal.js";
+import { isClosedStatus } from "./status-guards.js";
 import {
   type AutoDashboardData,
   updateProgressWidget as _updateProgressWidget,
@@ -196,6 +202,7 @@ import {
 import { isDbAvailable, getMilestone } from "./gsd-db.js";
 import { countPendingCaptures } from "./captures.js";
 import { CMUX_CHANNELS, type CmuxLogLevel } from "../shared/cmux-events.js";
+import { ensureDbOpen } from "./bootstrap/dynamic-tools.js";
 
 function makeCmuxEmitters(pi: ExtensionAPI) {
   return {
@@ -218,9 +225,13 @@ import {
 } from "./auto-post-unit.js";
 import { bootstrapAutoSession, openProjectDbIfPresent, type BootstrapDeps } from "./auto-start.js";
 import { initHealthWidget } from "./health-widget.js";
-import { runLegacyAutoLoop, runUokKernelLoop, resolveAgentEnd, resolveAgentEndCancelled, _resetPendingResolve, isSessionSwitchInFlight, type LoopDeps, type ErrorContext } from "./auto-loop.js";
+import { runLegacyAutoLoop, runUokKernelLoop } from "./auto/loop.js";
+import { resolveAgentEnd, resolveAgentEndCancelled, _resetPendingResolve, isSessionSwitchInFlight } from "./auto/resolve.js";
+import type { LoopDeps } from "./auto/loop-deps.js";
+import type { ErrorContext } from "./auto/types.js";
 import { runAutoLoopWithUok } from "./uok/kernel.js";
 import { resolveUokFlags } from "./uok/flags.js";
+import { validateDirectory } from "./validate-directory.js";
 // Slice-level parallelism (#2340)
 import { getEligibleSlices } from "./slice-parallel-eligibility.js";
 import { startSliceParallel } from "./slice-parallel-orchestrator.js";
@@ -240,6 +251,7 @@ import type {
   CurrentUnit,
   UnitRouting,
   StartModel,
+  AutoSession,
 } from "./auto/session.js";
 export {
   STUB_RECOVERY_THRESHOLD,
@@ -251,6 +263,11 @@ export type {
   StartModel,
 } from "./auto/session.js";
 import { autoSession as s } from "./auto-runtime-state.js";
+import { gsdHome } from "./gsd-home.js";
+import { createWorkspace, scopeMilestone } from "./workspace.js";
+import { registerAutoWorker, markWorkerStopping } from "./db/auto-workers.js";
+import { releaseMilestoneLease } from "./db/milestone-leases.js";
+import { normalizeRealPath } from "./paths.js";
 
 // ── ENCAPSULATION INVARIANT ─────────────────────────────────────────────────
 // ALL mutable auto-mode state lives in the AutoSession class (auto/session.ts).
@@ -267,6 +284,28 @@ import { autoSession as s } from "./auto-runtime-state.js";
 
 /** Throttle STATE.md rebuilds — at most once per 30 seconds */
 const STATE_REBUILD_MIN_INTERVAL_MS = 30_000;
+
+/**
+ * Phase B — register this auto-mode process in the workers table so other
+ * workers and janitors can detect liveness via heartbeat. Best-effort: if
+ * the DB is unavailable (e.g. fresh project before init) we skip registration
+ * silently rather than blocking session start.
+ */
+function registerAutoWorkerForSession(session: AutoSession): void {
+  if (session.workerId) return; // already registered (e.g. resume re-runs)
+  try {
+    const projectRootRealpath = normalizeRealPath(
+      session.scope?.workspace.projectRoot
+        ?? (session.originalBasePath || session.basePath),
+    );
+    session.workerId = registerAutoWorker({ projectRootRealpath });
+  } catch (err) {
+    debugLog("autoLoop", {
+      phase: "register-worker-failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
 
 function captureProjectRootEnv(projectRoot: string): void {
   if (!s.projectRootEnvCaptured) {
@@ -317,6 +356,32 @@ function restoreMilestoneLockEnv(): void {
   s.previousMilestoneLockEnv = null;
   s.hadMilestoneLockEnv = false;
   s.milestoneLockEnvCaptured = false;
+}
+
+/**
+ * Rebuild s.scope from the current s.basePath / s.originalBasePath / s.currentMilestoneId.
+ *
+ * Pass the worktree path as rawPath when entering a worktree so createWorkspace
+ * can detect the worktree layout and set mode="worktree". When no worktree is
+ * active, rawPath should equal the project root.
+ *
+ * Clears s.scope when milestoneId is absent — scope is only meaningful when a
+ * milestone is active.
+ *
+ * TODO(C8): remove basePath/originalBasePath once all readers use s.scope.
+ */
+function rebuildScope(rawPath: string, milestoneId: string | null): void {
+  if (!milestoneId) {
+    s.scope = null;
+    return;
+  }
+  try {
+    const workspace = createWorkspace(rawPath);
+    s.scope = scopeMilestone(workspace, milestoneId);
+  } catch {
+    // Non-fatal — scope is additive. Existing readers still use basePath.
+    s.scope = null;
+  }
 }
 
 function normalizeSessionFilePath(raw: unknown): string | null {
@@ -374,10 +439,7 @@ export function startAutoDetached(
 
 /** Returns true if the project is configured for `isolation:worktree` mode. */
 export function shouldUseWorktreeIsolation(basePath?: string): boolean {
-  const prefs = loadEffectiveGSDPreferences(basePath)?.preferences?.git;
-  if (prefs?.isolation === "worktree") return true;
-  // Default is false — worktree isolation requires explicit opt-in
-  return false;
+  return getIsolationMode(basePath) === "worktree";
 }
 
 /** Crash recovery prompt — set by startAuto, consumed by the main loop */
@@ -505,6 +567,26 @@ export function isAutoActive(): boolean {
 /** Test-only seam for validating auto-mode guards (#4704). Do not use in production code. */
 export function _setAutoActiveForTest(active: boolean): void {
   s.active = active;
+}
+
+/**
+ * Test-only seam: emit the missing-worktree warning exactly as the resume path
+ * does.  Allows unit tests to verify the warning is produced without
+ * bootstrapping the full auto-mode entry point.  Do not use in production code.
+ */
+export function _warnIfWorktreeMissingForTest(
+  worktreePath: string | null | undefined,
+  milestoneId: string,
+): boolean {
+  if (worktreePath && !existsSync(worktreePath)) {
+    logWarning(
+      "session",
+      `Worktree was expected at ${worktreePath} but is missing. Continuing in project-root mode. To restart with a fresh worktree, run /gsd-debug or recreate the milestone.`,
+      { file: "auto.ts", milestoneId },
+    );
+    return true;
+  }
+  return false;
 }
 
 export function isAutoPaused(): boolean {
@@ -933,6 +1015,21 @@ export async function stopAuto(
       debugLog("stop-cleanup-locks", { error: e instanceof Error ? e.message : String(e) });
     }
 
+    // ── Step 1b: Coordination cleanup (Phase B) ──
+    // Release any active milestone lease so other workers don't have to
+    // wait for TTL expiry, then mark this worker as stopping. Best-effort:
+    // DB unavailability or stale state must not block shutdown.
+    try {
+      if (s.workerId && s.currentMilestoneId && s.milestoneLeaseToken) {
+        releaseMilestoneLease(s.workerId, s.currentMilestoneId, s.milestoneLeaseToken);
+      }
+      if (s.workerId) {
+        markWorkerStopping(s.workerId);
+      }
+    } catch (e) {
+      debugLog("stop-cleanup-coordination", { error: e instanceof Error ? e.message : String(e) });
+    }
+
     // ── Step 1b: Flush queued follow-up messages (#3512) ──
     // Late async notifications (async_job_result, gsd-auto-wrapup) can trigger
     // extra LLM turns after stop. Flush them the same way run-unit.ts does.
@@ -1120,11 +1217,11 @@ export async function stopAuto(
     }
 
     // ── Step 12: Remove paused-session metadata (#1383) ──
+    // Phase C pt 2: deleteRuntimeKv replaces unlinkSync(paused-session.json).
     try {
-      const pausedPath = join(gsdRoot(s.originalBasePath || s.basePath), "runtime", "paused-session.json");
-      if (existsSync(pausedPath)) unlinkSync(pausedPath);
+      deleteRuntimeKv("global", "", PAUSED_SESSION_KV_KEY);
     } catch (err) { /* non-fatal */
-      logWarning("engine", `file unlink failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
+      logWarning("engine", `paused-session DB delete failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
     }
 
     // ── Step 13: Restore original model + thinking (before reset clears IDs) ──
@@ -1228,10 +1325,12 @@ export async function pauseAuto(
   s.pausedSessionFile = normalizeSessionFilePath(ctx?.sessionManager?.getSessionFile() ?? null);
 
   // Persist paused-session metadata so resume survives /exit (#1383).
-  // The fresh-start bootstrap checks for this file and restores worktree context.
+  // Phase C pt 2: persisted to runtime_kv (global scope, key
+  // PAUSED_SESSION_KV_KEY) instead of runtime/paused-session.json. The
+  // fresh-start bootstrap below reads from the same key.
   try {
-    const pausedMeta = {
-      milestoneId: s.currentMilestoneId,
+    const pausedMeta: PausedSessionMetadata = {
+      milestoneId: s.currentMilestoneId ?? undefined,
       worktreePath: isInAutoWorktree(s.basePath) ? s.basePath : null,
       originalBasePath: s.originalBasePath,
       stepMode: s.stepMode,
@@ -1239,21 +1338,15 @@ export async function pauseAuto(
       sessionFile: s.pausedSessionFile,
       unitType: s.currentUnit?.type ?? undefined,
       unitId: s.currentUnit?.id ?? undefined,
-      activeEngineId: s.activeEngineId,
+      activeEngineId: s.activeEngineId ?? undefined,
       activeRunDir: s.activeRunDir,
       autoStartTime: s.autoStartTime,
       milestoneLock: s.sessionMilestoneLock ?? undefined,
     };
-    const runtimeDir = join(gsdRoot(s.originalBasePath || s.basePath), "runtime");
-    mkdirSync(runtimeDir, { recursive: true });
-    writeFileSync(
-      join(runtimeDir, "paused-session.json"),
-      JSON.stringify(pausedMeta, null, 2),
-      "utf-8",
-    );
+    setRuntimeKv("global", "", PAUSED_SESSION_KV_KEY, pausedMeta);
   } catch (err) {
     // Non-fatal — resume will still work via full bootstrap, just without worktree context
-    logWarning("engine", `paused-session file write failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
+    logWarning("engine", `paused-session DB write failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
   }
 
   // Close out the current unit so its runtime record doesn't stay at "dispatched"
@@ -1265,6 +1358,19 @@ export async function pauseAuto(
       logWarning("engine", `unit closeout on pause failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
     }
     s.currentUnit = null;
+  }
+
+  // Keep STATE.md aligned with the DB-backed state before releasing pause state.
+  // Without this, an interrupted deep run can leave STATE.md saying "no active
+  // milestone" even after the DB/disk reconciliation has recovered the next unit.
+  if (s.basePath) {
+    try {
+      await rebuildState(s.basePath);
+    } catch (e) {
+      debugLog("pause-rebuild-state-failed", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
   }
 
   if (lockBase()) {
@@ -1514,6 +1620,12 @@ export async function startAuto(
   // Escape stale worktree cwd from a previous milestone (#608).
   base = escapeStaleWorktree(base);
 
+  const dirCheck = validateDirectory(base);
+  if (dirCheck.severity === "blocked") {
+    ctx.ui.notify(dirCheck.reason!, "error");
+    return;
+  }
+
   // Heal .gsd.migrating before any branching — covers both fresh-start and
   // resume paths (#4416). The matching call in auto-start.ts covers the
   // bootstrap-only path; this call ensures the resume path is also protected.
@@ -1521,8 +1633,10 @@ export async function startAuto(
     ctx.ui.notify("Recovered unfinished migration (.gsd.migrating → .gsd).", "info");
   }
 
-  const freshStartAssessment = interruptedAssessment
-    ?? await assessInterruptedSession(base);
+  const freshStartAssessment = await (interruptedAssessment
+    ?? (() => {
+      return ensureDbOpen(base).then(() => assessInterruptedSession(base));
+    })());
 
   if (freshStartAssessment.classification === "running") {
     const pid = freshStartAssessment.lock?.pid;
@@ -1537,10 +1651,20 @@ export async function startAuto(
 
   // If resuming from paused state, just re-activate and dispatch next unit.
   // Check persisted paused-session first (#1383) — survives /exit.
+  // Phase C pt 2: persisted in runtime_kv (global scope) instead of
+  // runtime/paused-session.json. The `clearPausedSession` helper
+  // replaces every prior unlinkSync(pausedPath) call.
+  const clearPausedSession = (logTag: string): void => {
+    try {
+      deleteRuntimeKv("global", "", PAUSED_SESSION_KV_KEY);
+    } catch (err) {
+      logWarning("session", `${logTag}: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
+    }
+  };
+
   if (!s.paused) {
     try {
       const meta = freshStartAssessment.pausedSession ?? readPausedSessionMetadata(base);
-      const pausedPath = join(gsdRoot(base), "runtime", "paused-session.json");
       if (meta?.activeEngineId && meta.activeEngineId !== "dev") {
         // Custom workflow resume — restore engine state
         s.activeEngineId = meta.activeEngineId;
@@ -1550,11 +1674,6 @@ export async function startAuto(
         s.autoStartTime = meta.autoStartTime || Date.now();
         s.sessionMilestoneLock = meta.milestoneLock ?? null;
         s.paused = true;
-        try { unlinkSync(pausedPath); } catch (e) {
-          if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
-            logWarning("session", `pause file cleanup failed: ${e instanceof Error ? e.message : String(e)}`, { file: "auto.ts" });
-          }
-        }
         ctx.ui.notify(
           `Resuming paused custom workflow${meta.activeRunDir ? ` (${meta.activeRunDir})` : ""}.`,
           "info",
@@ -1569,22 +1688,33 @@ export async function startAuto(
           );
         if (shouldResumePausedSession) {
           // Validate the milestone still exists and isn't already complete (#1664).
+          // DB status is authoritative when available; SUMMARY.md is a legacy
+          // fallback only for unmigrated/offline projects.
           const mDir = resolveMilestonePath(base, meta.milestoneId);
-          const summaryFile = resolveMilestoneFile(base, meta.milestoneId, "SUMMARY");
           let summaryIsTerminal = false;
-          if (summaryFile) {
-            try {
-              summaryIsTerminal = classifyMilestoneSummaryContent(readFileSync(summaryFile, "utf-8")) !== "failure";
-            } catch {
-              summaryIsTerminal = false;
+          let dbAvailable = isDbAvailable();
+          let milestoneRow = dbAvailable ? getMilestone(meta.milestoneId) : null;
+          if (!milestoneRow) {
+            const opened = await ensureDbOpen(base);
+            dbAvailable = opened || isDbAvailable();
+            if (dbAvailable) {
+              milestoneRow = getMilestone(meta.milestoneId);
+            }
+          }
+          if (dbAvailable) {
+            summaryIsTerminal = !!milestoneRow && isClosedStatus(milestoneRow.status);
+          } else {
+            const summaryFile = resolveMilestoneFile(base, meta.milestoneId, "SUMMARY");
+            if (summaryFile) {
+              try {
+                summaryIsTerminal = classifyMilestoneSummaryContent(readFileSync(summaryFile, "utf-8")) !== "failure";
+              } catch {
+                summaryIsTerminal = false;
+              }
             }
           }
           if (!mDir || summaryIsTerminal) {
-            try { unlinkSync(pausedPath); } catch (err) {
-              if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-                logWarning("session", `pause file cleanup failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
-              }
-            }
+            clearPausedSession("paused-session DB cleanup failed (milestone gone/complete)");
             ctx.ui.notify(
               `Paused milestone ${meta.milestoneId} is ${!mDir ? "missing" : "already complete"}. Starting fresh.`,
               "info",
@@ -1599,22 +1729,31 @@ export async function startAuto(
             s.autoStartTime = meta.autoStartTime || Date.now();
             s.sessionMilestoneLock = meta.milestoneLock ?? null;
             s.paused = true;
-            try { unlinkSync(pausedPath); } catch (e) {
-              if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
-                logWarning("session", `pause file cleanup failed: ${e instanceof Error ? e.message : String(e)}`, { file: "auto.ts" });
+            // Build scope from persisted state. Use worktreePath when present and
+            // still on disk so mode is detected correctly; fall back to project root.
+            {
+              const persistedWorktreePath = meta.worktreePath ?? null;
+              if (persistedWorktreePath && !existsSync(persistedWorktreePath)) {
+                logWarning(
+                  "session",
+                  `Worktree was expected at ${persistedWorktreePath} but is missing. Continuing in project-root mode. To restart with a fresh worktree, run /gsd-debug or recreate the milestone.`,
+                  { file: "auto.ts", milestoneId: meta.milestoneId ?? "" },
+                );
               }
+              const rawForScope = (persistedWorktreePath && existsSync(persistedWorktreePath))
+                ? persistedWorktreePath
+                : (s.originalBasePath || base);
+              rebuildScope(rawForScope, s.currentMilestoneId);
             }
             ctx.ui.notify(
               `Resuming paused session for ${meta.milestoneId}${meta.worktreePath && existsSync(meta.worktreePath) ? ` (worktree)` : ""}.`,
               "info",
             );
           }
-        } else if (existsSync(pausedPath)) {
-          try { unlinkSync(pausedPath); } catch (e) {
-            if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
-              logWarning("session", `stale pause file cleanup failed: ${e instanceof Error ? e.message : String(e)}`, { file: "auto.ts" });
-            }
-          }
+        } else if (meta) {
+          // Stale paused-session metadata that the assessment chose not to
+          // resume — clean it up so the next bootstrap starts fresh.
+          clearPausedSession("stale paused-session DB cleanup failed");
         }
       }
     } catch (err) {
@@ -1683,10 +1822,19 @@ export async function startAuto(
     // session (e.g. isolation mode changed, detectWorktreeName differs across
     // process restarts).  We guard with existsSync so a stale or deleted
     // worktree directory safely falls back to the project root.
-    const resumeWorktreePath = freshStartAssessment.pausedSession?.worktreePath;
+    const resumeWorktreePath = freshStartAssessment.pausedSession?.worktreePath ?? null;
+    if (resumeWorktreePath && !existsSync(resumeWorktreePath)) {
+      logWarning(
+        "session",
+        `Worktree was expected at ${resumeWorktreePath} but is missing. Continuing in project-root mode. To restart with a fresh worktree, run /gsd-debug or recreate the milestone.`,
+        { file: "auto.ts", milestoneId: s.currentMilestoneId ?? "" },
+      );
+    }
     if (resumeWorktreePath && existsSync(resumeWorktreePath)) {
       s.basePath = resumeWorktreePath;
     }
+    // Rebuild scope now that s.basePath reflects the actual worktree (or project root).
+    rebuildScope(s.basePath, s.currentMilestoneId);
     // Ensure the workflow-logger audit log is pinned to the project root
     // even when auto-mode is entered via a path that bypasses the
     // bootstrap/dynamic-tools ensureDbOpen() → setLogBasePath() chain
@@ -1715,6 +1863,8 @@ export async function startAuto(
       buildResolver().enterMilestone(s.currentMilestoneId, {
         notify: ctx.ui.notify.bind(ctx.ui),
       });
+      // s.basePath may have been updated to a worktree path by enterMilestone.
+      rebuildScope(s.basePath, s.currentMilestoneId);
     }
 
     registerSigtermHandler(lockBase());
@@ -1733,7 +1883,7 @@ export async function startAuto(
     // tree; deployed extensions live at ~/.gsd/agent/extensions/gsd/ where the
     // relative path resolves to ~/.gsd/agent/resource-loader.js which doesn't exist.
     // Using GSD_PKG_ROOT constructs a correct absolute path in both contexts (#3949).
-    const agentDir = process.env.GSD_CODING_AGENT_DIR || join(process.env.GSD_HOME || homedir(), ".gsd", "agent");
+    const agentDir = process.env.GSD_CODING_AGENT_DIR || join(gsdHome(), "agent");
     const pkgRoot = process.env.GSD_PKG_ROOT;
     const resourceLoaderPath = pkgRoot
       ? pathToFileURL(join(pkgRoot, "dist", "resource-loader.js")).href
@@ -1783,19 +1933,23 @@ export async function startAuto(
       s.pausedSessionFile = null;
     }
 
+    captureProjectRootEnv(s.originalBasePath || s.basePath);
+    registerAutoWorkerForSession(s);
     updateSessionLock(
       lockBase(),
       "resuming",
       s.currentMilestoneId ?? "unknown",
     );
-    writeLock(
-      lockBase(),
-      "resuming",
-      s.currentMilestoneId ?? "unknown",
-    );
+    if (s.workerId) {
+      writeLock(
+        lockBase(),
+        "resuming",
+        s.currentMilestoneId ?? "unknown",
+      );
+      clearPausedSession("paused-session DB cleanup failed (resume activation)");
+    }
     pi.events.emit(CMUX_CHANNELS.LOG, { preferences: loadEffectiveGSDPreferences(s.basePath || undefined)?.preferences, message: s.stepMode ? "Step-mode resumed." : "Auto-mode resumed.", level: "progress" });
 
-    captureProjectRootEnv(s.originalBasePath || s.basePath);
     startAutoCommandPolling(s.basePath);
     await runAutoLoopWithUok({
       ctx,
@@ -1829,7 +1983,12 @@ export async function startAuto(
   );
   if (!ready) return;
 
+  // Build scope after bootstrap has populated s.basePath / s.originalBasePath /
+  // s.currentMilestoneId (including worktree setup inside bootstrapAutoSession).
+  rebuildScope(s.basePath, s.currentMilestoneId);
+
   captureProjectRootEnv(s.originalBasePath || s.basePath);
+  registerAutoWorkerForSession(s);
   try {
     pi.events.emit(CMUX_CHANNELS.SIDEBAR, { action: "sync" as const, preferences: loadEffectiveGSDPreferences(s.basePath || undefined)?.preferences, state: await deriveState(s.basePath) });
   } catch (err) {

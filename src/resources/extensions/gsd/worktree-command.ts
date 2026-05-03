@@ -15,7 +15,7 @@ import { loadPrompt } from "./prompt-loader.js";
 import { autoCommitCurrentBranch, getMainBranch, resolveGitHeadPath, nudgeGitBranchCache } from "./worktree.js";
 import { runWorktreePostCreateHook } from "./auto-worktree.js";
 import { showConfirm } from "../shared/tui.js";
-import { gsdRoot, milestonesDir } from "./paths.js";
+import { gsdRoot, milestonesDir, resolveGsdPathContract } from "./paths.js";
 import {
   createWorktree,
   listWorktrees,
@@ -651,8 +651,9 @@ async function handleMerge(
     const commitMessage = `${commitType}: merge worktree ${name}\n\nGSD-Worktree: ${name}`;
 
     // Reconcile worktree DB into main DB before squash merge
-    const wtDbPath = join(worktreePath(basePath, name), ".gsd", "gsd.db");
-    const mainDbPath = join(basePath, ".gsd", "gsd.db");
+    const contract = resolveGsdPathContract(worktreePath(basePath, name), basePath);
+    const wtDbPath = join(contract.worktreeGsd ?? join(contract.workRoot, ".gsd"), "gsd.db");
+    const mainDbPath = contract.projectDb;
     if (existsSync(wtDbPath) && existsSync(mainDbPath)) {
       try {
         const { reconcileWorktreeDb } = await import("./gsd-db.js");

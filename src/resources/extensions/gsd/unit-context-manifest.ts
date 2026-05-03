@@ -90,6 +90,17 @@ export type MemoryPolicy = "none" | "critical-only" | "prompt-relevant";
 /** Preferences block policy. */
 export type PreferencesPolicy = "none" | "active-only" | "full";
 
+/** Context Mode lane guidance policy for each auto-mode unit. */
+export type ContextModePolicy =
+  | "none"
+  | "interview"
+  | "research"
+  | "planning"
+  | "execution"
+  | "verification"
+  | "orchestration"
+  | "docs";
+
 /**
  * Tool-access policy per unit type (#4934).
  *
@@ -220,6 +231,8 @@ export interface UnitContextManifest {
   readonly codebaseMap: boolean;
   /** Preferences block policy. */
   readonly preferences: PreferencesPolicy;
+  /** Context Mode guidance lane. */
+  readonly contextMode: ContextModePolicy;
   /**
    * Tool-access policy (#4934). Runtime enforcement covers path-scoped write
    * blocking, subagent denial, and bash allowlisting for active auto-mode
@@ -325,6 +338,12 @@ export const KNOWN_UNIT_TYPES = [
   "run-uat",
   "gate-evaluate",
   "rewrite-docs",
+  // Deep planning mode (project-level) units
+  "workflow-preferences",
+  "discuss-project",
+  "discuss-requirements",
+  "research-decision",
+  "research-project",
 ] as const;
 
 export type UnitType = typeof KNOWN_UNIT_TYPES[number];
@@ -337,6 +356,7 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     memory: "prompt-relevant",
     codebaseMap: true,
     preferences: "active-only",
+    contextMode: "research",
     tools: TOOLS_PLANNING,
     artifacts: {
       // Phase 3 migration (#4782): matches today's actual
@@ -353,6 +373,7 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     memory: "prompt-relevant",
     codebaseMap: true,
     preferences: "active-only",
+    contextMode: "planning",
     tools: TOOLS_PLANNING,
     artifacts: {
       inline: ["project", "requirements", "decisions", "milestone-research", "templates"],
@@ -367,6 +388,7 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     memory: "prompt-relevant",
     codebaseMap: true,
     preferences: "active-only",
+    contextMode: "interview",
     tools: TOOLS_PLANNING,
     artifacts: {
       inline: ["project", "requirements", "decisions", "milestone-context", "templates"],
@@ -381,7 +403,12 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     memory: "prompt-relevant",
     codebaseMap: false,
     preferences: "active-only",
-    tools: TOOLS_PLANNING,
+    contextMode: "verification",
+    // planning-dispatch: validation is a verification-fan-out unit. It reads
+    // the milestone surface and dispatches reviewer/security/tester subagents
+    // to report findings without touching user source. Mirrors
+    // complete-milestone's policy. Write isolation to .gsd/ is preserved.
+    tools: TOOLS_PLANNING_DISPATCH_REVIEW,
     artifacts: {
       inline: ["roadmap", "slice-summary", "slice-uat", "requirements", "decisions", "templates"],
       excerpt: [],
@@ -395,6 +422,7 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     memory: "prompt-relevant",
     codebaseMap: false,
     preferences: "active-only",
+    contextMode: "verification",
     // planning-dispatch: completion is a high-leverage place to fan out to
     // reviewer / security / tester subagents. They read the diff and report
     // findings; they do not write user source. Write isolation to .gsd/ is
@@ -418,6 +446,7 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     memory: "prompt-relevant",
     codebaseMap: true,
     preferences: "active-only",
+    contextMode: "research",
     tools: TOOLS_PLANNING,
     artifacts: {
       inline: ["roadmap", "milestone-research", "dependency-summaries", "templates"],
@@ -432,6 +461,7 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     memory: "prompt-relevant",
     codebaseMap: true,
     preferences: "active-only",
+    contextMode: "planning",
     // planning-dispatch: allows subagent dispatch so the planner can fan out
     // to scout for codebase recon and to planner/decompose-style specialists
     // for sub-decomposition. Write-isolation to .gsd/ is preserved.
@@ -449,6 +479,7 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     memory: "prompt-relevant",
     codebaseMap: true,
     preferences: "active-only",
+    contextMode: "planning",
     // See plan-slice — same rationale: dispatch to scout/planner-style
     // specialists during refinement is materially better than re-doing recon
     // inline.
@@ -466,6 +497,7 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     memory: "prompt-relevant",
     codebaseMap: true,
     preferences: "active-only",
+    contextMode: "planning",
     tools: TOOLS_PLANNING,
     artifacts: {
       inline: ["slice-plan", "slice-research", "dependency-summaries", "prior-task-summaries", "templates"],
@@ -480,6 +512,7 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     memory: "prompt-relevant",
     codebaseMap: false,
     preferences: "active-only",
+    contextMode: "verification",
     // See complete-milestone — same rationale: dispatch to reviewer / security /
     // tester subagents to fan out review work without bloating this unit's
     // context.
@@ -501,6 +534,7 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     memory: "critical-only",
     codebaseMap: false,
     preferences: "none",
+    contextMode: "planning",
     tools: TOOLS_PLANNING,
     artifacts: {
       // Phase 2 pilot (#4782): manifest now matches today's actual
@@ -520,6 +554,7 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     memory: "prompt-relevant",
     codebaseMap: true,
     preferences: "active-only",
+    contextMode: "execution",
     tools: TOOLS_ALL,
     artifacts: {
       inline: ["task-plan", "slice-plan", "prior-task-summaries", "templates"],
@@ -534,6 +569,7 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     memory: "prompt-relevant",
     codebaseMap: true,
     preferences: "active-only",
+    contextMode: "execution",
     tools: TOOLS_ALL,
     artifacts: {
       inline: ["slice-plan", "prior-task-summaries", "templates"],
@@ -550,6 +586,7 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     memory: "critical-only",
     codebaseMap: false,
     preferences: "active-only",
+    contextMode: "verification",
     tools: TOOLS_PLANNING,
     artifacts: {
       // Phase 3 migration (#4782): manifest matches today's actual
@@ -568,6 +605,7 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     memory: "critical-only",
     codebaseMap: false,
     preferences: "active-only",
+    contextMode: "verification",
     tools: TOOLS_PLANNING,
     artifacts: {
       inline: ["slice-plan", "prior-task-summaries"],
@@ -582,9 +620,101 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     memory: "prompt-relevant",
     codebaseMap: true,
     preferences: "active-only",
+    contextMode: "docs",
     tools: TOOLS_DOCS,
     artifacts: {
       inline: ["project", "requirements", "decisions", "templates"],
+      excerpt: [],
+      onDemand: [],
+    },
+    maxSystemPromptChars: COMMON_BUDGET_MEDIUM,
+  },
+
+  // ─── Deep planning mode (project-level) units ────────────────────────
+  // workflow-preferences: default-writing stage that records
+  // commit_policy / branch_model in PREFERENCES.md, defaults
+  // uat_dispatch/executor_class, and records the research decision. No project artifacts needed.
+  "workflow-preferences": {
+    skills: { mode: "none" },
+    knowledge: "none",
+    memory: "none",
+    codebaseMap: false,
+    preferences: "none",
+    contextMode: "none",
+    tools: TOOLS_PLANNING,
+    artifacts: {
+      inline: [],
+      excerpt: [],
+      onDemand: [],
+    },
+    maxSystemPromptChars: COMMON_BUDGET_SMALL,
+  },
+  // discuss-project: PROJECT.md interview (deep mode only). Project-scoped
+  // discussion runs before any milestone exists, so milestone artifacts are
+  // not loaded. Keeps templates available for PROJECT.md scaffolding.
+  "discuss-project": {
+    skills: { mode: "all" },
+    knowledge: "scoped",
+    memory: "prompt-relevant",
+    codebaseMap: true,
+    preferences: "active-only",
+    contextMode: "interview",
+    tools: TOOLS_PLANNING,
+    artifacts: {
+      inline: ["templates"],
+      excerpt: [],
+      onDemand: [],
+    },
+    maxSystemPromptChars: COMMON_BUDGET_MEDIUM,
+  },
+  // discuss-requirements: REQUIREMENTS.md interview. PROJECT.md is the
+  // primary context input; templates carry the requirements format.
+  "discuss-requirements": {
+    skills: { mode: "all" },
+    knowledge: "scoped",
+    memory: "prompt-relevant",
+    codebaseMap: true,
+    preferences: "active-only",
+    contextMode: "interview",
+    tools: TOOLS_PLANNING,
+    artifacts: {
+      inline: ["project", "templates"],
+      excerpt: [],
+      onDemand: [],
+    },
+    maxSystemPromptChars: COMMON_BUDGET_MEDIUM,
+  },
+  // research-decision: lightweight one-question yes/no unit. Writes a
+  // marker JSON; no project artifacts needed.
+  "research-decision": {
+    skills: { mode: "none" },
+    knowledge: "none",
+    memory: "none",
+    codebaseMap: false,
+    preferences: "none",
+    contextMode: "none",
+    tools: TOOLS_PLANNING,
+    artifacts: {
+      inline: [],
+      excerpt: [],
+      onDemand: [],
+    },
+    maxSystemPromptChars: COMMON_BUDGET_SMALL,
+  },
+  // research-project: orchestrator that fans out 4 parallel scout subagents
+  // for project research (stack, features, architecture, pitfalls). Needs the
+  // planning-dispatch policy to dispatch them. PROJECT.md + REQUIREMENTS.md
+  // give the orchestrator the framing context.
+  "research-project": {
+    skills: { mode: "all" },
+    knowledge: "scoped",
+    memory: "prompt-relevant",
+    codebaseMap: true,
+    preferences: "active-only",
+    contextMode: "research",
+    tools: { mode: "planning-dispatch", allowedSubagents: ["scout"] },
+    artifacts: {
+      inline: ["project", "requirements", "templates"],
       excerpt: [],
       onDemand: [],
     },

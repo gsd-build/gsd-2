@@ -19,6 +19,7 @@ import {
   claimEscalationOverride,
   findUnappliedEscalationOverride,
   listEscalationArtifacts,
+  SCHEMA_VERSION,
   _getAdapter,
 } from "../gsd-db.ts";
 import {
@@ -348,7 +349,7 @@ test("ADR-011 P2: schema v20 fresh DB has all escalation columns on tasks + sour
   assert.ok(decCols.includes("source"), "decisions table must have source column");
 
   const version = adapter.prepare("SELECT MAX(version) as v FROM schema_version").get();
-  assert.equal(version?.["v"], 22);
+  assert.equal(version?.["v"], SCHEMA_VERSION);
 });
 
 test("ADR-011 P2: findUnappliedEscalationOverride returns null when escalation_pending=1 (still pending)", (t) => {

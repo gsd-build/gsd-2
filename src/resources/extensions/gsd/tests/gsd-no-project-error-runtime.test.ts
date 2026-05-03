@@ -14,7 +14,7 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import { projectRoot, GSDNoProjectError } from '../commands/context.ts';
+import { projectRoot, GSDNoProjectError, withCommandCwd } from '../commands/context.ts';
 
 const ORIGINAL_CWD = process.cwd();
 
@@ -41,6 +41,20 @@ describe('projectRoot() throws GSDNoProjectError outside a project (#4902)', () 
       );
     } finally {
       process.chdir(ORIGINAL_CWD);
+    }
+  });
+
+  test('uses command ctx cwd even when process cwd is $HOME', async () => {
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-command-cwd-'));
+    fs.mkdirSync(path.join(projectDir, '.git'));
+
+    process.chdir(os.homedir());
+    try {
+      const resolved = await withCommandCwd(projectDir, async () => projectRoot());
+      assert.equal(resolved, projectDir);
+    } finally {
+      process.chdir(ORIGINAL_CWD);
+      fs.rmSync(projectDir, { recursive: true, force: true });
     }
   });
 

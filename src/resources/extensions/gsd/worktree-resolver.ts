@@ -1,3 +1,4 @@
+// GSD-2 — WorktreeResolver: encapsulates worktree path state and merge/exit lifecycle.
 /**
  * WorktreeResolver — encapsulates worktree path state and merge/exit lifecycle.
  *
@@ -23,14 +24,28 @@ import { emitJournalEvent } from "./journal.js";
 import { emitWorktreeCreated, emitWorktreeMerged } from "./worktree-telemetry.js";
 import { getCollapseCadence, getMilestoneResquash, resquashMilestoneOnMain } from "./slice-cadence.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
-import { resolveWorktreeProjectRoot } from "./worktree-root.js";
+import { resolveWorktreeProjectRoot, normalizeWorktreePathForCompare } from "./worktree-root.js";
+import { claimMilestoneLease, releaseMilestoneLease } from "./db/milestone-leases.js";
+
+// ─── Path Comparison Helper ────────────────────────────────────────────────
+/**
+ * Compare two paths for physical identity, tolerating trailing slashes,
+ * symlink differences, and case variations on case-insensitive volumes.
+ *
+ * Used in place of string `===` / `!==` wherever one operand may be
+ * realpath-normalised (e.g. from the workspace registry) and the other
+ * may not be (e.g. a raw caller-supplied basePath).
+ */
+function isSamePath(a: string, b: string): boolean {
+  return normalizeWorktreePathForCompare(a) === normalizeWorktreePathForCompare(b);
+}
 
 // ─── Dependency Interface ──────────────────────────────────────────────────
 
 export interface WorktreeResolverDeps {
   isInAutoWorktree: (basePath: string) => boolean;
   shouldUseWorktreeIsolation: () => boolean;
-  getIsolationMode: () => "worktree" | "branch" | "none";
+  getIsolationMode: (basePath?: string) => "worktree" | "branch" | "none";
   mergeMilestoneToMain: (
     basePath: string,
     milestoneId: string,
@@ -185,7 +200,72 @@ export class WorktreeResolver {
       return;
     }
 
-    const mode = this.deps.getIsolationMode();
+    // Phase B: claim a milestone lease before any worktree mutation. Two
+    // workers cannot enter the same milestone concurrently. Best-effort:
+    // skip if no worker registered (single-worker fallback) or DB
+    // unavailable; reuse existing lease if we already hold it on this
+    // milestone (re-entry within the same session).
+    if (this.s.workerId) {
+      if (this.s.currentMilestoneId === milestoneId && this.s.milestoneLeaseToken !== null) {
+        // Already held — no-op, the heartbeat in loop.ts refreshes TTL.
+      } else {
+        // If we held a different milestone, release it first so other
+        // workers don't have to wait for TTL.
+        if (this.s.currentMilestoneId && this.s.currentMilestoneId !== milestoneId && this.s.milestoneLeaseToken !== null) {
+          try {
+            releaseMilestoneLease(this.s.workerId, this.s.currentMilestoneId, this.s.milestoneLeaseToken);
+          } catch (err) {
+            debugLog("WorktreeResolver", {
+              action: "enterMilestone",
+              milestoneId,
+              releasePriorLeaseError: err instanceof Error ? err.message : String(err),
+            });
+          }
+          this.s.milestoneLeaseToken = null;
+        }
+
+        try {
+          const claim = claimMilestoneLease(this.s.workerId, milestoneId);
+          if (claim.ok) {
+            this.s.milestoneLeaseToken = claim.token;
+            debugLog("WorktreeResolver", {
+              action: "enterMilestone",
+              milestoneId,
+              leaseAcquired: true,
+              fencingToken: claim.token,
+              expiresAt: claim.expiresAt,
+            });
+          } else {
+            // Lease held by another worker — fail loud so the user can
+            // see the conflict instead of silently double-running.
+            const msg = `Milestone ${milestoneId} is held by worker ${claim.byWorker} until ${claim.expiresAt}.`;
+            debugLog("WorktreeResolver", {
+              action: "enterMilestone",
+              milestoneId,
+              leaseHeldByOther: claim.byWorker,
+              expiresAt: claim.expiresAt,
+            });
+            ctx.notify(`${msg} Another auto-mode worker is active. Stop it before entering ${milestoneId}.`, "error");
+            return;
+          }
+        } catch (err) {
+          // DB unavailable or other error — log and fall through to the
+          // pre-Phase-B single-worker behavior so a fresh project before
+          // DB init still works.
+          debugLog("WorktreeResolver", {
+            action: "enterMilestone",
+            milestoneId,
+            leaseError: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    }
+
+    // Resolve the project root for worktree operations via shared helper.
+    // Handles the case where originalBasePath is falsy and basePath is itself
+    // a worktree path — prevents double-nested worktree paths (#3729).
+    const basePath = resolveProjectRoot(this.s.originalBasePath, this.s.basePath);
+    const mode = this.deps.getIsolationMode(basePath);
 
     if (mode === "none") {
       debugLog("WorktreeResolver", {
@@ -204,10 +284,6 @@ export class WorktreeResolver {
       return;
     }
 
-    // Resolve the project root for worktree operations via shared helper.
-    // Handles the case where originalBasePath is falsy and basePath is itself
-    // a worktree path — prevents double-nested worktree paths (#3729).
-    const basePath = resolveProjectRoot(this.s.originalBasePath, this.s.basePath);
     debugLog("WorktreeResolver", {
       action: "enterMilestone",
       milestoneId,
@@ -447,7 +523,7 @@ export class WorktreeResolver {
       return;
     }
 
-    const mode = this.deps.getIsolationMode();
+    const mode = this.deps.getIsolationMode(this.s.originalBasePath || this.s.basePath);
     debugLog("WorktreeResolver", {
       action: "mergeAndExit",
       milestoneId,
@@ -589,7 +665,7 @@ export class WorktreeResolver {
         milestoneId,
         "ROADMAP",
       );
-      if (!roadmapPath && this.s.basePath !== originalBase) {
+      if (!roadmapPath && !isSamePath(this.s.basePath, originalBase)) {
         roadmapPath = this.deps.resolveMilestoneFile(
           this.s.basePath,
           milestoneId,

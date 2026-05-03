@@ -58,6 +58,10 @@ export function getExtensionKey(entryPath: string, extensionsDir: string): strin
   return relPath.split(/[\\/]/)[0].replace(/\.(?:ts|js)$/, '')
 }
 
+function stripSemverBuildMetadata(version: string): string {
+  return version.trim().replace(/^v/, '').split(/[+-]/, 1)[0] || '0.0.0'
+}
+
 function getManagedResourceManifestPath(agentDir: string): string {
   return join(agentDir, resourceVersionManifestName)
 }
@@ -196,7 +200,12 @@ export function getNewerManagedResourceVersion(agentDir: string, currentVersion:
   if (!managedVersion) {
     return null
   }
-  return compareSemver(managedVersion, currentVersion) > 0 ? managedVersion : null
+  // Managed resources stamped from the same release line should remain usable
+  // against local dev binaries like 2.78.1-dev.<sha>.
+  return compareSemver(
+    stripSemverBuildMetadata(managedVersion),
+    stripSemverBuildMetadata(currentVersion),
+  ) > 0 ? managedVersion : null
 }
 
 /**
@@ -717,28 +726,40 @@ function migrateSkillsToEcosystemDir(agentDir: string): void {
 
 export function hasStaleCompiledExtensionSiblings(extensionsDir: string, sourceDir: string = bundledExtensionsDir): boolean {
   if (!existsSync(extensionsDir)) return false
-  const sourceFiles = existsSync(sourceDir)
-    ? new Set(
-        readdirSync(sourceDir, { withFileTypes: true })
-          .filter((entry) => entry.isFile())
-          .map((entry) => entry.name),
-      )
-    : new Set<string>()
-  for (const entry of readdirSync(extensionsDir, { withFileTypes: true })) {
-    if (!entry.isFile()) continue
-    if (!entry.name.endsWith('.ts') && !entry.name.endsWith('.js')) continue
+  const sourceFiles = collectRelativeFiles(sourceDir)
+  const installedFiles = collectRelativeFiles(extensionsDir)
 
-    const siblingName = entry.name.endsWith('.ts')
-      ? entry.name.replace(/\.ts$/, '.js')
-      : entry.name.replace(/\.js$/, '.ts')
+  for (const relPath of installedFiles) {
+    if (!relPath.endsWith('.ts') && !relPath.endsWith('.js')) continue
+    if (sourceFiles.has(relPath)) continue
 
-    if (!existsSync(join(extensionsDir, siblingName))) continue
-    if (sourceFiles.has(entry.name) && sourceFiles.has(siblingName)) continue
-    if (sourceFiles.has(entry.name) || sourceFiles.has(siblingName)) {
-      return true
+    const bundledSibling = relPath.endsWith('.ts')
+      ? relPath.replace(/\.ts$/, '.js')
+      : relPath.replace(/\.js$/, '.ts')
+
+    if (sourceFiles.has(bundledSibling)) return true
+  }
+
+  return false
+}
+
+function collectRelativeFiles(rootDir: string): Set<string> {
+  const files = new Set<string>()
+  if (!existsSync(rootDir)) return files
+
+  const visit = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const entryPath = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        visit(entryPath)
+        continue
+      }
+      files.add(relative(rootDir, entryPath).replaceAll('\\', '/'))
     }
   }
-  return false
+
+  visit(rootDir)
+  return files
 }
 
 /**

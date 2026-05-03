@@ -118,6 +118,14 @@ export async function showNextAction(
 		}
 	});
 
+	// Headless guard: when no UI is bound (noOpUIContext), ctx.ui.custom() resolves
+	// to undefined immediately, and ctx.ui.select() does the same. Skip both and
+	// return the safe default so callers don't await two no-op promises before
+	// reaching a deterministic "not_yet". Lockup #5125 root protection.
+	if (!ctx.hasUI) {
+		return "not_yet";
+	}
+
 	const result = await ctx.ui.custom<string>((_tui: TUI, theme: Theme, _kb, done) => {
 		let cursorIdx = defaultIdx;
 		let cachedLines: string[] | undefined;

@@ -54,21 +54,16 @@ export function getPriorSliceCompletionBlocker(
     // completion, which is wrong when the SUMMARY is a failure-path report
     // (verification FAILED, blocker placeholder, etc.). Resolve as follows:
     //   1. When DB is available and status is closed → skip (authoritative).
-    //   2. When SUMMARY exists but looks like a failure/blocker report →
-    //      do not short-circuit; fall through to the slice-level check so
-    //      the guard can still block dependents of an active milestone.
-    //   3. Otherwise (SUMMARY without failure markers) → skip. Preserves
-    //      the #1716 contract where a completed milestone with unchecked
-    //      remediation slices is still treated as done.
-    const summaryPath = resolveMilestoneFile(base, mid, "SUMMARY");
+    //   2. When DB is unavailable, legacy SUMMARY.md fallback may skip.
+    //      DB-backed projects must not treat SUMMARY.md as authoritative.
     if (isDbAvailable()) {
       const milestoneRow = getMilestone(mid);
       if (milestoneRow && isClosedStatus(milestoneRow.status)) continue;
-    }
-    if (summaryPath) {
+    } else {
+      const summaryPath = resolveMilestoneFile(base, mid, "SUMMARY");
       let summaryContent: string | null = null;
-      try { summaryContent = readFileSync(summaryPath, "utf-8"); } catch { /* ignore */ }
-      if (!summaryContent || classifyMilestoneSummaryContent(summaryContent) !== "failure") {
+      try { summaryContent = summaryPath ? readFileSync(summaryPath, "utf-8") : null; } catch { /* ignore */ }
+      if (summaryContent && classifyMilestoneSummaryContent(summaryContent) !== "failure") {
         continue;
       }
     }

@@ -11,6 +11,8 @@ import {
   insertArtifact,
   isDbAvailable,
   insertMilestone,
+  insertRequirement,
+  insertAssessment,
   getAllMilestones,
   insertSlice,
   insertTask,
@@ -44,6 +46,23 @@ function insertArtifactRow(relativePath: string, content: string, opts?: {
     slice_id: opts?.slice_id ?? null,
     task_id: opts?.task_id ?? null,
     full_content: content,
+  });
+}
+
+function insertRequirementRow(id: string, status: string): void {
+  insertRequirement({
+    id,
+    class: 'functional',
+    status,
+    description: `${id} ${status}`,
+    why: 'test',
+    source: 'test',
+    primary_owner: '',
+    supporting_slices: '',
+    validation: '',
+    notes: '',
+    full_content: '',
+    superseded_by: null,
   });
 }
 
@@ -114,9 +133,9 @@ describe('derive-state-db', async () => {
       writeFile(base, 'milestones/M001/slices/S01/tasks/T01-PLAN.md', '# T01 Plan');
       writeFile(base, 'REQUIREMENTS.md', REQUIREMENTS_CONTENT);
 
-      // Derive state from files only (no DB)
+      // Derive state from the explicit legacy file-only path (no DB)
       invalidateStateCache();
-      const fileState = await deriveState(base);
+      const fileState = await _deriveStateImpl(base);
 
       // Now open DB, insert matching artifacts + milestone hierarchy
       openDatabase(':memory:');
@@ -128,6 +147,9 @@ describe('derive-state-db', async () => {
       insertSlice({ id: 'S02', milestoneId: 'M001', title: 'Second Slice', status: 'pending', risk: 'low', depends: ['S01'] });
       insertTask({ id: 'T01', sliceId: 'S01', milestoneId: 'M001', title: 'First Task', status: 'pending' });
       insertTask({ id: 'T02', sliceId: 'S01', milestoneId: 'M001', title: 'Done Task', status: 'complete' });
+      insertRequirementRow('R001', 'active');
+      insertRequirementRow('R002', 'active');
+      insertRequirementRow('R003', 'validated');
 
       insertArtifactRow('milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT, {
         artifact_type: 'roadmap',
@@ -174,10 +196,12 @@ describe('derive-state-db', async () => {
     }
   });
 
-  // ─── Test 2: Fallback when DB unavailable ─────────────────────────────
-  test('derive-state-db: fallback when DB unavailable', async () => {
+  // ─── Test 2: DB-unavailable runtime does not derive from markdown ──────
+  test('derive-state-db: DB-unavailable runtime does not derive from markdown by default', async () => {
     const base = createFixtureBase();
+    const prev = process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK;
     try {
+      process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK = '0';
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
       writeFile(base, 'milestones/M001/slices/S01/S01-PLAN.md', PLAN_CONTENT);
       writeFile(base, 'milestones/M001/slices/S01/tasks/.gitkeep', '');
@@ -188,17 +212,49 @@ describe('derive-state-db', async () => {
       invalidateStateCache();
       const state = await deriveState(base);
 
+      assert.deepStrictEqual(state.phase, 'pre-planning', 'runtime degrade: phase is pre-planning');
+      assert.deepStrictEqual(state.activeMilestone, null, 'runtime degrade: markdown milestone is not imported');
+      assert.deepStrictEqual(state.activeSlice, null, 'runtime degrade: markdown slice is not imported');
+      assert.deepStrictEqual(state.activeTask, null, 'runtime degrade: markdown task is not imported');
+      assert.ok(
+        state.blockers.some(b => b.includes('DB unavailable')),
+        'runtime degrade: blocker explains unavailable DB',
+      );
+    } finally {
+      if (prev === undefined) delete process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK;
+      else process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK = prev;
+      cleanup(base);
+    }
+  });
+
+  test('derive-state-db: explicit legacy markdown fallback remains opt-in', async () => {
+    const base = createFixtureBase();
+    const prev = process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK;
+    try {
+      writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
+      writeFile(base, 'milestones/M001/slices/S01/S01-PLAN.md', PLAN_CONTENT);
+      writeFile(base, 'milestones/M001/slices/S01/tasks/.gitkeep', '');
+      writeFile(base, 'milestones/M001/slices/S01/tasks/T01-PLAN.md', '# T01 Plan');
+
+      process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK = '1';
+
+      assert.ok(!isDbAvailable(), 'fallback: DB is not available');
+      invalidateStateCache();
+      const state = await deriveState(base);
+
       assert.deepStrictEqual(state.phase, 'executing', 'fallback: phase is executing');
       assert.deepStrictEqual(state.activeMilestone?.id, 'M001', 'fallback: activeMilestone is M001');
       assert.deepStrictEqual(state.activeSlice?.id, 'S01', 'fallback: activeSlice is S01');
       assert.deepStrictEqual(state.activeTask?.id, 'T01', 'fallback: activeTask is T01');
     } finally {
+      if (prev === undefined) delete process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK;
+      else process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK = prev;
       cleanup(base);
     }
   });
 
-  // ─── Test 3: Empty DB falls back to file reads ────────────────────────
-  test('derive-state-db: empty DB falls back to files', async () => {
+  // ─── Test 3: Empty DB remains authoritative ───────────────────────────
+  test('derive-state-db: empty DB does not import markdown milestones', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
@@ -206,21 +262,16 @@ describe('derive-state-db', async () => {
       writeFile(base, 'milestones/M001/slices/S01/tasks/.gitkeep', '');
       writeFile(base, 'milestones/M001/slices/S01/tasks/T01-PLAN.md', '# T01 Plan');
 
-      // Open DB but insert nothing — empty tables.
-      // With #2631 fix, deriveState will sync disk milestones into DB
-      // and then take the DB path. The result should still reflect the
-      // disk milestone correctly.
+      // Open DB but insert nothing — empty DB is authoritative at runtime.
       openDatabase(':memory:');
       assert.ok(isDbAvailable(), 'empty-db: DB is available');
 
       invalidateStateCache();
       const state = await deriveState(base);
 
-      // Milestone should be detected (synced from disk)
-      assert.deepStrictEqual(state.activeMilestone?.id, 'M001', 'empty-db: activeMilestone is M001');
-      // The DB path without explicit slice/task rows may derive a different
-      // phase than the filesystem path, but the milestone must be found.
-      assert.ok(state.activeMilestone !== null, 'empty-db: activeMilestone is not null');
+      assert.deepStrictEqual(getAllMilestones().length, 0, 'empty-db: markdown milestones are not imported');
+      assert.deepStrictEqual(state.activeMilestone, null, 'empty-db: no active milestone from disk');
+      assert.deepStrictEqual(state.registry, [], 'empty-db: registry remains empty');
 
       closeDatabase();
     } finally {
@@ -229,8 +280,8 @@ describe('derive-state-db', async () => {
     }
   });
 
-  // ─── Test 4: Partial DB content fills gaps from disk ──────────────────
-  test('derive-state-db: partial DB fills gaps from disk', async () => {
+  // ─── Test 4: Partial DB content does not fill gaps from disk ──────────
+  test('derive-state-db: partial DB does not fill requirements from disk', async () => {
     const base = createFixtureBase();
     try {
       // Write all files to disk
@@ -254,15 +305,14 @@ describe('derive-state-db', async () => {
       invalidateStateCache();
       const state = await deriveState(base);
 
-      // Should work: roadmap from DB, plan from disk fallback
+      // Should work from DB hierarchy, but requirements are DB-authoritative.
       assert.deepStrictEqual(state.phase, 'executing', 'partial-db: phase is executing');
       assert.deepStrictEqual(state.activeMilestone?.id, 'M001', 'partial-db: activeMilestone is M001');
       assert.deepStrictEqual(state.activeSlice?.id, 'S01', 'partial-db: activeSlice is S01');
       assert.deepStrictEqual(state.activeTask?.id, 'T01', 'partial-db: activeTask is T01');
-      // Requirements loaded from disk fallback
-      assert.deepStrictEqual(state.requirements?.active, 2, 'partial-db: requirements.active from disk');
-      assert.deepStrictEqual(state.requirements?.validated, 1, 'partial-db: requirements.validated from disk');
-      assert.deepStrictEqual(state.requirements?.total, 3, 'partial-db: requirements.total from disk');
+      assert.deepStrictEqual(state.requirements?.active, 0, 'partial-db: requirements.active not imported from disk');
+      assert.deepStrictEqual(state.requirements?.validated, 0, 'partial-db: requirements.validated not imported from disk');
+      assert.deepStrictEqual(state.requirements?.total, 0, 'partial-db: requirements.total not imported from disk');
 
       closeDatabase();
     } finally {
@@ -271,7 +321,7 @@ describe('derive-state-db', async () => {
     }
   });
 
-  test('derive-state-db: partial task rows reconcile missing plan tasks before summarizing', async (t) => {
+  test('derive-state-db: partial task rows do not import missing plan tasks', async (t) => {
     const base = createFixtureBase();
     t.after(() => {
       closeDatabase();
@@ -306,15 +356,39 @@ describe('derive-state-db', async () => {
     const state = await deriveState(base);
 
     const dbTasks = getSliceTasks('M001', 'S01');
-    assert.deepStrictEqual(dbTasks.length, 2, 'partial-task-db: missing T02 imported from plan');
+    assert.deepStrictEqual(dbTasks.length, 1, 'partial-task-db: missing T02 is not imported from plan');
     assert.deepStrictEqual(dbTasks.find(t => t.id === 'T01')?.status, 'complete', 'partial-task-db: existing complete T01 preserved');
-    assert.deepStrictEqual(dbTasks.find(t => t.id === 'T02')?.status, 'pending', 'partial-task-db: missing T02 inserted pending');
-    assert.deepStrictEqual(state.phase, 'executing', 'partial-task-db: phase remains executing, not summarizing');
-    assert.deepStrictEqual(state.activeTask?.id, 'T02', 'partial-task-db: activeTask is missing plan task T02');
-    assert.deepStrictEqual(state.progress?.tasks, { done: 1, total: 2 }, 'partial-task-db: task progress includes reconciled plan task');
+    assert.deepStrictEqual(dbTasks.find(t => t.id === 'T02'), undefined, 'partial-task-db: missing T02 absent from DB');
+    assert.deepStrictEqual(state.phase, 'summarizing', 'partial-task-db: phase follows DB tasks only');
+    assert.deepStrictEqual(state.activeTask, null, 'partial-task-db: no active task from disk-only plan row');
+    assert.deepStrictEqual(state.progress?.tasks, { done: 1, total: 1 }, 'partial-task-db: task progress is DB-only');
   });
 
-  test('derive-state-db: empty DB disk import preserves milestone completion and dependencies', async (t) => {
+  test('derive-state-db: disk SUMMARY does not complete a pending DB task', async (t) => {
+    const base = createFixtureBase();
+    t.after(() => {
+      closeDatabase();
+      cleanup(base);
+    });
+
+    writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
+    writeFile(base, 'milestones/M001/slices/S01/S01-PLAN.md', PLAN_CONTENT);
+    writeFile(base, 'milestones/M001/slices/S01/tasks/T01-SUMMARY.md', '# T01 Summary\n\nManual disk edit.');
+
+    openDatabase(':memory:');
+    insertMilestone({ id: 'M001', title: 'Test Milestone', status: 'active' });
+    insertSlice({ id: 'S01', milestoneId: 'M001', title: 'First Slice', status: 'active', risk: 'low', depends: [] });
+    insertTask({ id: 'T01', sliceId: 'S01', milestoneId: 'M001', title: 'First Task', status: 'pending' });
+
+    invalidateStateCache();
+    const state = await deriveStateFromDb(base);
+
+    assert.deepStrictEqual(getSliceTasks('M001', 'S01').find(t => t.id === 'T01')?.status, 'pending');
+    assert.deepStrictEqual(state.phase, 'executing');
+    assert.deepStrictEqual(state.activeTask?.id, 'T01');
+  });
+
+  test('derive-state-db: empty DB does not import milestone completion and dependencies', async (t) => {
     const base = createFixtureBase();
     t.after(() => {
       closeDatabase();
@@ -350,16 +424,13 @@ describe('derive-state-db', async () => {
     const state = await deriveState(base);
 
     const milestones = getAllMilestones();
-    assert.deepStrictEqual(milestones.find(m => m.id === 'M001')?.status, 'complete', 'disk-import: terminal summary imports M001 as complete');
-    assert.deepStrictEqual(milestones.find(m => m.id === 'M002')?.depends_on, ['M001'], 'disk-import: M002 depends_on imported from CONTEXT');
-    assert.deepStrictEqual(milestones.find(m => m.id === 'M003')?.depends_on, ['M002'], 'disk-import: M003 depends_on imported from CONTEXT');
-    assert.deepStrictEqual(state.activeMilestone?.id, 'M002', 'disk-import: M002 is active because M001 completion satisfies dependency');
-    assert.deepStrictEqual(state.registry.find(e => e.id === 'M001')?.status, 'complete', 'disk-import: M001 registry status is complete');
-    assert.deepStrictEqual(state.registry.find(e => e.id === 'M003')?.status, 'pending', 'disk-import: M003 stays pending on unmet M002 dependency');
+    assert.deepStrictEqual(milestones.length, 0, 'disk-import: markdown milestones are not imported');
+    assert.deepStrictEqual(state.activeMilestone, null, 'disk-import: no active milestone from markdown');
+    assert.deepStrictEqual(state.registry, [], 'disk-import: registry remains DB-only');
   });
 
-  // ─── Test 5: Requirements counting from disk (DB no longer used for content) ─
-  test('derive-state-db: requirements from disk content', async () => {
+  // ─── Test 5: Legacy requirements counting from disk ────────────────────
+  test('derive-state-db: explicit legacy derivation counts requirements from disk content', async () => {
     const base = createFixtureBase();
     try {
       // Write minimal milestone dir (needed for milestone discovery)
@@ -368,9 +439,9 @@ describe('derive-state-db', async () => {
       writeFile(base, 'REQUIREMENTS.md', REQUIREMENTS_CONTENT);
 
       invalidateStateCache();
-      const state = await deriveState(base);
+      const state = await _deriveStateImpl(base);
 
-      // Requirements should come from disk
+      // Explicit legacy derivation still reads requirements from disk.
       assert.deepStrictEqual(state.requirements?.active, 2, 'req-from-disk: requirements.active = 2');
       assert.deepStrictEqual(state.requirements?.validated, 1, 'req-from-disk: requirements.validated = 1');
       assert.deepStrictEqual(state.requirements?.total, 3, 'req-from-disk: requirements.total = 3');
@@ -805,6 +876,13 @@ describe('derive-state-db', async () => {
       openDatabase(':memory:');
       insertMilestone({ id: 'M001', title: 'Stuck Remediation', status: 'active' });
       insertSlice({ id: 'S01', milestoneId: 'M001', title: 'Done Slice', status: 'complete', risk: 'low', depends: [] });
+      insertAssessment({
+        path: 'milestones/M001/M001-VALIDATION.md',
+        milestoneId: 'M001',
+        status: 'needs-remediation',
+        scope: 'milestone-validation',
+        fullContent: 'verdict: needs-remediation',
+      });
 
       invalidateStateCache();
       const dbState = await deriveStateFromDb(base);
@@ -846,6 +924,13 @@ describe('derive-state-db', async () => {
       openDatabase(':memory:');
       insertMilestone({ id: 'M001', title: 'Complete Test', status: 'active' });
       insertSlice({ id: 'S01', milestoneId: 'M001', title: 'Done Slice', status: 'complete', risk: 'low', depends: [] });
+      insertAssessment({
+        path: 'milestones/M001/M001-VALIDATION.md',
+        milestoneId: 'M001',
+        status: 'pass',
+        scope: 'milestone-validation',
+        fullContent: 'verdict: pass',
+      });
 
       invalidateStateCache();
       const dbState = await deriveStateFromDb(base);
@@ -1098,8 +1183,8 @@ describe('derive-state-db', async () => {
     }
   });
 
-  // ─── Test 22: Needs-discussion — CONTEXT-DRAFT exists ─────────────────
-  test('derive-state-db: needs-discussion via DB', async () => {
+  // ─── Test 22: Needs-discussion — DB status, not CONTEXT-DRAFT ─────────
+  test('derive-state-db: needs-discussion via DB status', async () => {
     const base = createFixtureBase();
     try {
       writeFile(base, 'milestones/M001/M001-CONTEXT-DRAFT.md', '# M001: Draft\n\nDraft content.');
@@ -1108,7 +1193,7 @@ describe('derive-state-db', async () => {
       const fileState = await _deriveStateImpl(base);
 
       openDatabase(':memory:');
-      insertMilestone({ id: 'M001', title: 'Draft', status: 'active' });
+      insertMilestone({ id: 'M001', title: 'Draft', status: 'needs-discussion' });
 
       invalidateStateCache();
       const dbState = await deriveStateFromDb(base);
@@ -1127,7 +1212,7 @@ describe('derive-state-db', async () => {
   test('derive-state-db: disk-only milestone auto-synced into DB (#2416)', async () => {
     const base = createFixtureBase();
     try {
-      // M001 is complete and exists in DB. M002 was queued on disk only — no DB row.
+      // M001 is complete and exists in DB. M002 is disk-only — no DB row.
       writeFile(base, 'milestones/M001/M001-SUMMARY.md', '# M001 Summary\n\nDone.');
       writeFile(base, 'milestones/M002/M002-CONTEXT.md', '# M002: Queued\n\nQueued milestone.');
 
@@ -1138,16 +1223,12 @@ describe('derive-state-db', async () => {
       invalidateStateCache();
       const state = await deriveStateFromDb(base);
 
-      // Before the fix, M002 was invisible: getAllMilestones() returned only M001
-      // (complete) → phase='complete' → auto-mode stopped.
-      // After the fix, deriveStateFromDb reconciles disk dirs and inserts M002.
-      assert.deepStrictEqual(state.phase, 'pre-planning', 'disk-sync-2416: phase is pre-planning, not complete');
-      assert.deepStrictEqual(state.registry.length, 2, 'disk-sync-2416: both milestones visible in registry');
+      assert.deepStrictEqual(state.phase, 'complete', 'disk-sync-2416: disk-only milestone is not imported');
+      assert.deepStrictEqual(state.registry.length, 1, 'disk-sync-2416: only DB milestones visible in registry');
       assert.deepStrictEqual(state.registry[0]?.id, 'M001', 'disk-sync-2416: registry[0] is M001');
       assert.deepStrictEqual(state.registry[0]?.status, 'complete', 'disk-sync-2416: M001 is complete');
-      assert.deepStrictEqual(state.registry[1]?.id, 'M002', 'disk-sync-2416: registry[1] is M002');
-      assert.deepStrictEqual(state.registry[1]?.status, 'active', 'disk-sync-2416: M002 is active');
-      assert.deepStrictEqual(state.activeMilestone?.id, 'M002', 'disk-sync-2416: activeMilestone is M002');
+      assert.deepStrictEqual(state.registry[1], undefined, 'disk-sync-2416: M002 remains absent without explicit import');
+      assert.deepStrictEqual(state.activeMilestone, null, 'disk-sync-2416: no active milestone from disk-only row');
 
       closeDatabase();
     } finally {
@@ -1208,12 +1289,11 @@ describe('derive-state-db', async () => {
       invalidateStateCache();
       const dbState = await deriveStateFromDb(base);
 
-      // M002 should be reconciled from disk (not skipped as ghost) and become active
+      // M002 is legitimate legacy disk state but is not authoritative without a DB row.
       const m002Entry = dbState.registry.find(e => e.id === 'M002');
-      assert.ok(m002Entry !== undefined, 'ghost-wt: M002 should be in registry');
-      assert.deepStrictEqual(dbState.activeMilestone?.id, 'M002', 'ghost-wt: M002 should be active');
-      // Should NOT be phase: complete
-      assert.notEqual(dbState.phase, 'complete', 'ghost-wt: phase should not be complete');
+      assert.equal(m002Entry, undefined, 'ghost-wt: M002 should not be imported into registry');
+      assert.deepStrictEqual(dbState.activeMilestone, null, 'ghost-wt: no active milestone from disk-only worktree');
+      assert.equal(dbState.phase, 'complete', 'ghost-wt: DB-only M001 completion drives state');
 
       closeDatabase();
     } finally {

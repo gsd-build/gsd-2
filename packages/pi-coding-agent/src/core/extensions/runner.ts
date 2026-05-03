@@ -116,6 +116,15 @@ const buildBuiltinKeybindings = (effectiveKeybindings: Required<KeybindingsConfi
 	return builtinKeybindings;
 };
 
+const PROTECTED_EXTENSION_COMMANDS = new Set(["gsd"]);
+
+function isProtectedCommandOwner(commandName: string, extensionPath: string): boolean {
+	if (!PROTECTED_EXTENSION_COMMANDS.has(commandName)) return false;
+	const normalized = extensionPath.replace(/\\/g, "/");
+	return /\/extensions\/gsd\/(?:index\.[cm]?[jt]s|dist\/.*)$/.test(normalized)
+		|| /\/extensions\/gsd\/?$/.test(normalized);
+}
+
 /** Combined result from all before_agent_start handlers */
 interface BeforeAgentStartCombinedResult {
 	messages?: NonNullable<BeforeAgentStartEventResult["message"]>[];
@@ -262,6 +271,14 @@ export class ExtensionRunner {
 		this.runtime.emitBeforeModelSelect = (event) => this.emitBeforeModelSelect(event);
 		this.runtime.emitAdjustToolSet = (event) => this.emitAdjustToolSet(event);
 		this.runtime.emitExtensionEvent = (event) => this.emitExtensionEventDynamic(event);
+	}
+
+	private currentCwd(): string {
+		try {
+			return process.cwd();
+		} catch {
+			return this.cwd;
+		}
 	}
 
 	/**
@@ -588,10 +605,29 @@ export class ExtensionRunner {
 
 		const commands: RegisteredCommand[] = [];
 		const commandOwners = new Map<string, string>();
+		const protectedOwners = new Map<string, string>();
+		for (const ext of this.extensions) {
+			for (const command of ext.commands.values()) {
+				if (isProtectedCommandOwner(command.name, ext.path)) {
+					protectedOwners.set(command.name, ext.path);
+				}
+			}
+		}
+
 		for (const ext of this.extensions) {
 			for (const command of ext.commands.values()) {
 				if (reserved?.has(command.name)) {
 					const message = `Extension command '${command.name}' from ${ext.path} conflicts with built-in commands. Skipping.`;
+					this.commandDiagnostics.push({ type: "warning", message, path: ext.path });
+					if (!this.hasUI()) {
+						console.warn(message);
+					}
+					continue;
+				}
+
+				const protectedOwner = protectedOwners.get(command.name);
+				if (protectedOwner && protectedOwner !== ext.path) {
+					const message = `Extension command '${command.name}' from ${ext.path} conflicts with protected command owner ${protectedOwner}. Skipping.`;
 					this.commandDiagnostics.push({ type: "warning", message, path: ext.path });
 					if (!this.hasUI()) {
 						console.warn(message);
@@ -631,13 +667,21 @@ export class ExtensionRunner {
 	}
 
 	getCommand(name: string): RegisteredCommand | undefined {
+		let protectedCommand: RegisteredCommand | undefined;
 		for (const ext of this.extensions) {
 			const command = ext.commands.get(name);
 			if (command) {
+				if (isProtectedCommandOwner(name, ext.path)) {
+					protectedCommand = command;
+					break;
+				}
+				if (PROTECTED_EXTENSION_COMMANDS.has(name)) {
+					continue;
+				}
 				return command;
 			}
 		}
-		return undefined;
+		return protectedCommand;
 	}
 
 	/**
@@ -657,7 +701,7 @@ export class ExtensionRunner {
 		return {
 			ui: this.uiContext,
 			hasUI: this.hasUI(),
-			cwd: this.cwd,
+			cwd: this.currentCwd(),
 			sessionManager: this.sessionManager,
 			modelRegistry: this.modelRegistry,
 			get model() {

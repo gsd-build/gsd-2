@@ -28,7 +28,7 @@ This unit runs under the `planning-dispatch` tools-policy: you may use the `suba
 - **Touched auth, network, parsing, file IO, shell exec, or crypto** → dispatch the **security** agent for an OWASP-style audit.
 - **Added or modified tests** → dispatch the **tester** agent to assess coverage gaps relative to the slice plan.
 
-Subagents read the diff and report findings — they do **not** write user source. You remain responsible for acting on their feedback before calling `gsd_complete_slice` with `milestoneId` and `sliceId`.
+Subagents read the diff and report findings — they do **not** write user source. You remain responsible for acting on their feedback before calling `gsd_slice_complete` with `milestoneId` and `sliceId`.
 
 Then:
 1. Use the **Slice Summary** and **UAT** output templates from the inlined context above
@@ -37,11 +37,11 @@ Then:
 4. If the slice plan includes observability/diagnostic surfaces, confirm they work. Skip this for simple slices that don't have observability sections.
 5. Address every gate listed in the **Gates to Close** section above — each gate maps to a specific slice-summary section the handler inspects (for example, Q8 maps to **Operational Readiness**: health signal, failure signal, recovery procedure, and monitoring gaps). Leaving a section empty records the gate as `omitted`.
 6. If this slice produced evidence that a requirement changed status (Active → Validated, Active → Deferred, etc.), call `gsd_requirement_update` with the requirement ID, updated `status`, and `validation` evidence. Do NOT write `.gsd/REQUIREMENTS.md` directly — the engine renders it from the database.
-7. Prepare the slice completion content you will pass to `gsd_complete_slice` using the camelCase fields `milestoneId`, `sliceId`, `sliceTitle`, `oneLiner`, `narrative`, `verification`, and `uatContent`. Do **not** manually write `{{sliceSummaryPath}}`. Do **not** manually write `{{sliceUatPath}}` — the DB-backed tool is the canonical write path for both artifacts.
-8. Draft the UAT content you will pass as `uatContent` — a concrete UAT script with real test cases derived from the slice plan and task summaries. Include preconditions, numbered steps with expected outcomes, and edge cases. This must NOT be a placeholder or generic template — tailor every test case to what this slice actually built.
+7. Prepare the slice completion content you will pass to `gsd_slice_complete` using the camelCase fields `milestoneId`, `sliceId`, `sliceTitle`, `oneLiner`, `narrative`, `verification`, and `uatContent`. Do **not** manually write `{{sliceSummaryPath}}`. Do **not** manually write `{{sliceUatPath}}` — the DB-backed tool is the canonical write path for both artifacts.
+8. Draft the UAT content you will pass as `uatContent` — a concrete UAT script with real test cases derived from the slice plan and task summaries. Include preconditions, numbered steps with expected outcomes, and edge cases. This must NOT be a placeholder or generic template — tailor every test case to what this slice actually built. Fill the `UAT Type` and `Not Proven By This UAT` sections explicitly so the artifact states what class of acceptance it covers and what still remains unproven (e.g. live integration paths, performance under load, scenarios deferred to a later slice).
 9. Review task summaries for `key_decisions`. For each significant decision, call `capture_thought` with `category: "architecture"` (or `"pattern"`) and a `structuredFields` payload of `{ scope, decision, choice, rationale, made_by: "agent", revisable }`.
 10. Review task summaries for patterns, gotchas, or non-obvious lessons learned. For each one that would save future agents from repeating investigation, call `capture_thought` with the matching category (`gotcha`, `convention`, `pattern`, `environment`). The memory store is the single source of truth (ADR-013); do not append to `.gsd/DECISIONS.md` or `.gsd/KNOWLEDGE.md` directly.
-11. Call `gsd_complete_slice` with the camelCase fields `milestoneId`, `sliceId`, `sliceTitle`, `oneLiner`, `narrative`, `verification`, and `uatContent`, plus any optional enrichment fields you have. Do NOT manually mark the roadmap checkbox — the tool writes to the DB, renders `{{sliceSummaryPath}}` and `{{sliceUatPath}}`, and updates the ROADMAP.md projection automatically.
+11. Call `gsd_slice_complete` with the camelCase fields `milestoneId`, `sliceId`, `sliceTitle`, `oneLiner`, `narrative`, `verification`, and `uatContent`, plus any optional enrichment fields you have. Do NOT manually mark the roadmap checkbox — the tool writes to the DB, renders `{{sliceSummaryPath}}` and `{{sliceUatPath}}`, and updates the ROADMAP.md projection automatically.
 12. Do not run git commands — the system commits your changes and handles any merge after this unit succeeds.
 13. Update `.gsd/PROJECT.md` if it exists — refresh current state if needed: use the `write` tool with `path: ".gsd/PROJECT.md"` and `content` containing the full updated document reflecting current project state. Do NOT use the `edit` tool for this — PROJECT.md is a full-document refresh.
 
@@ -49,6 +49,6 @@ Then:
 
 **File system safety:** Task summaries are preloaded in the inlined context above. Task artifacts use a **flat file layout** — files such as `T01-SUMMARY.md` and `T02-SUMMARY.md` live directly inside the `tasks/` directory, not inside per-task subdirectories like `tasks/T01/SUMMARY.md`. If you need to re-read any of them, use `find .gsd/milestones/{{milestoneId}}/slices/{{sliceId}}/tasks -name "*-SUMMARY.md"` to list file paths first. Never use `tasks/*/SUMMARY.md`, and never pass `{{slicePath}}` or any other directory path directly to the `read` tool. The `read` tool only accepts file paths, not directories.
 
-**You MUST call `gsd_complete_slice` with the slice summary and UAT content before finishing. The tool persists to both DB and disk and renders `{{sliceSummaryPath}}` and `{{sliceUatPath}}` automatically.**
+**You MUST call `gsd_slice_complete` with the slice summary and UAT content before finishing. The tool persists to both DB and disk and renders `{{sliceSummaryPath}}` and `{{sliceUatPath}}` automatically.**
 
 When done, say: "Slice {{sliceId}} complete."

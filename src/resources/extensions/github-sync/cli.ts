@@ -6,6 +6,7 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { GIT_NO_PROMPT_ENV } from "../gsd/git-constants.js";
 
 // ─── Result Type ────────────────────────────────────────────────────────────
 
@@ -342,6 +343,7 @@ export function ghPushBranch(cwd: string, branch: string, setUpstream = true): G
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 30_000,
+      env: GIT_NO_PROMPT_ENV,
     });
     return ok(undefined);
   } catch (err) {
@@ -356,6 +358,7 @@ export function ghCreateBranch(cwd: string, branch: string, from: string): GhRes
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 10_000,
+      env: GIT_NO_PROMPT_ENV,
     });
     return ok(undefined);
   } catch (err) {

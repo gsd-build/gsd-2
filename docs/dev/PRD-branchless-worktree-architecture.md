@@ -7,6 +7,8 @@
 
 ---
 
+> **Current state model:** This PRD predates the DB-authoritative runtime model. Its worktree architecture remains historical context, but current GSD treats the project-root database as authoritative and renders markdown projections from it. Markdown import is an explicit recovery path, not a normal runtime fallback.
+
 ## Problem Statement
 
 GSD's auto-mode is unreliable. Users experience:
@@ -276,7 +278,7 @@ Validated by three independent models:
 | Attack | Severity | Mitigation |
 |--------|----------|------------|
 | Parallel milestone code conflict at squash-merge | Medium | `git rebase main` before squash. Rare in single-user. |
-| SQLite desync after `git reset --hard` | Low | DB rebuilt from tracked markdown on startup (M001/S02 importers). |
+| SQLite desync after `git reset --hard` | Low | Current runtime treats DB state as authoritative; use explicit recovery/import when markdown should repopulate the DB. |
 | Ghost lock after SIGKILL | Low | Existing heartbeat lock detection handles this. |
 | Squash merge loses bisect granularity | Low | Commit messages tag slices. Branch preservable if needed. |
 | Disk space with multiple worktrees | Low | Single active milestone at a time. Immediate cleanup. |
@@ -370,7 +372,7 @@ Resolution: Worktree is on `milestone/M001` branch, independent of `main`. Manua
 
 ## Dependencies
 
-- **M001 (Memory Database):** The SQLite database (`gsd.db`) must remain gitignored. The M001/S02 importer layer rebuilds it from tracked markdown. This PRD's `.gitignore` update explicitly ignores `gsd.db`.
+- **M001 (Memory Database):** The SQLite database (`gsd.db`) must remain gitignored. Current GSD treats it as authoritative runtime state; importing rendered markdown is an explicit recovery operation rather than a startup fallback. This PRD's `.gitignore` update explicitly ignores `gsd.db`.
 
 - **PR #487:** Must be closed. The `resolveMainWorktreeRoot` approach (sharing `.gsd/` across worktrees) contradicts tracked-artifact architecture.
 

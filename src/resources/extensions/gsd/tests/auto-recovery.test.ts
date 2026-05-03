@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 
 import { verifyExpectedArtifact, hasImplementationArtifacts, resolveExpectedArtifactPath, diagnoseExpectedArtifact, buildLoopRemediationSteps, writeBlockerPlaceholder } from "../auto-recovery.ts";
 import { resolveMilestoneFile } from "../paths.ts";
-import { openDatabase, closeDatabase, insertMilestone, insertSlice, insertGateRow } from "../gsd-db.ts";
+import { openDatabase, closeDatabase, insertMilestone, insertSlice, insertGateRow, insertTask } from "../gsd-db.ts";
 import { clearParseCache } from "../files.ts";
 import { parseRoadmap } from "../parsers-legacy.ts";
 import { invalidateAllCaches } from "../cache.ts";
@@ -85,6 +85,46 @@ test("resolveExpectedArtifactPath returns correct path for plan-slice", () => {
     const result = resolveExpectedArtifactPath("plan-slice", "M001/S01", base);
     assert.ok(result);
     assert.ok(result!.includes("PLAN"));
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("plan-slice artifact resolution handles lowercase unit IDs against uppercase paths", () => {
+  const base = makeTmpBase();
+  try {
+    const sliceDir = join(base, ".gsd", "milestones", "M001", "slices", "S01");
+    const tasksDir = join(sliceDir, "tasks");
+    writeFileSync(join(sliceDir, "S01-PLAN.md"), [
+      "# S01: Test Slice",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] **T01: Implement feature** `est:1h`",
+    ].join("\n"));
+    writeFileSync(join(tasksDir, "T01-PLAN.md"), "# T01 Plan");
+
+    const artifactPath = resolveExpectedArtifactPath("plan-slice", "m001/s01", base);
+    assert.ok(
+      artifactPath?.endsWith(".gsd/milestones/M001/slices/S01/S01-PLAN.md"),
+      "lowercase unit IDs should resolve to the existing uppercase artifact path",
+    );
+
+    const diagnostic = diagnoseExpectedArtifact("plan-slice", "m001/s01", base);
+    assert.ok(
+      diagnostic?.includes(".gsd/milestones/M001/slices/S01/S01-PLAN.md"),
+      "diagnostic should report the existing uppercase artifact path",
+    );
+    assert.ok(
+      diagnostic?.includes("task plans"),
+      "diagnostic should mention task plans because slice plan alone is insufficient",
+    );
+
+    assert.equal(
+      verifyExpectedArtifact("plan-slice", "m001/s01", base),
+      true,
+      "verification should pass when the uppercase slice plan and task plans exist",
+    );
   } finally {
     cleanup(base);
   }
@@ -758,6 +798,73 @@ test("hasImplementationArtifacts finds implementation commits when .gsd/ is giti
       result,
       "present",
       "milestone-tagged commit binding must work when .gsd/ is gitignored",
+    );
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("hasImplementationArtifacts binds GSD-Task trailer to milestone via DB state when .gsd/ is gitignored", () => {
+  const base = makeGitBase();
+  try {
+    writeFileSync(join(base, ".git", "info", "exclude"), ".gsd/\n");
+    mkdirSync(join(base, ".gsd"), { recursive: true });
+    openDatabase(join(base, ".gsd", "gsd.db"));
+    insertMilestone({ id: "M001", title: "Milestone One", status: "active" });
+    insertSlice({
+      id: "S01",
+      milestoneId: "M001",
+      title: "Slice One",
+      status: "complete",
+      risk: "low",
+      depends: [],
+    });
+    insertTask({
+      id: "T01",
+      sliceId: "S01",
+      milestoneId: "M001",
+      title: "Task One",
+      status: "complete",
+    });
+
+    mkdirSync(join(base, "src"), { recursive: true });
+    writeFileSync(join(base, "src", "feature.ts"), "export function feature() {}\n");
+    execFileSync("git", ["add", "."], { cwd: base, stdio: "ignore" });
+    execFileSync(
+      "git",
+      ["commit", "-m", "feat: add feature\n\nGSD-Task: S01/T01"],
+      { cwd: base, stdio: "ignore" },
+    );
+
+    const result = hasImplementationArtifacts(base, "M001");
+    assert.equal(
+      result,
+      "present",
+      "DB task ownership should bind S01/T01 implementation commits to M001 without explicit M001 text",
+    );
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("hasImplementationArtifacts does not bind GSD-Task trailer without milestone ownership evidence", () => {
+  const base = makeGitBase();
+  try {
+    writeFileSync(join(base, ".git", "info", "exclude"), ".gsd/\n");
+    mkdirSync(join(base, "src"), { recursive: true });
+    writeFileSync(join(base, "src", "feature.ts"), "export function feature() {}\n");
+    execFileSync("git", ["add", "."], { cwd: base, stdio: "ignore" });
+    execFileSync(
+      "git",
+      ["commit", "-m", "feat: add feature\n\nGSD-Task: S01/T01"],
+      { cwd: base, stdio: "ignore" },
+    );
+
+    const result = hasImplementationArtifacts(base, "M001");
+    assert.equal(
+      result,
+      "absent",
+      "S01/T01 shape alone must not bind an implementation commit to M001",
     );
   } finally {
     cleanup(base);

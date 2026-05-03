@@ -1,8 +1,10 @@
 # Parallel Milestone Orchestration
 
-Run multiple milestones simultaneously in isolated git worktrees. Each milestone gets its own worker process, its own branch, and its own context window — while a coordinator tracks progress, enforces budgets, and keeps everything in sync.
+Run multiple milestones simultaneously in isolated git worktrees. Each milestone gets its own worker process, its own branch, and its own context window, while the shared project-root SQLite runtime tracks worker liveness, milestone ownership, dispatch status, retry windows, and control commands.
 
 > **Status:** Behind `parallel.enabled: false` by default. Opt-in only — zero impact to existing users.
+>
+> **Single-host only:** Parallel workers must run on the same machine against a local project checkout. The coordination layer depends on SQLite WAL semantics on local disk and is not supported across machines or network-mounted filesystems.
 
 ## Quick Start
 
@@ -48,7 +50,7 @@ GSD scans your milestones, checks dependencies and file overlap, shows an eligib
 │  - Eligibility analysis (deps + file overlap)           │
 │  - Worker spawning and lifecycle                        │
 │  - Budget tracking across all workers                   │
-│  - Signal dispatch (pause/resume/stop)                  │
+│  - Command dispatch (pause/resume/stop)                 │
 │  - Session status monitoring                            │
 │  - Merge reconciliation                                 │
 │                                                         │
@@ -75,16 +77,21 @@ Each worker is a separate `gsd` process with complete isolation:
 | **Git branch** | `milestone/<MID>` — one branch per milestone |
 | **State derivation** | `GSD_MILESTONE_LOCK` env var — `deriveState()` only sees the assigned milestone |
 | **Context window** | Separate process — each worker has its own agent sessions |
-| **Metrics** | Each worktree has its own `.gsd/metrics.json` |
-| **Crash recovery** | Each worktree has its own `.gsd/auto.lock` |
+| **Metrics** | Project-root `.gsd/metrics.json` remains the durable ledger; worktree diagnostics may be mirrored back there |
+| **Crash recovery** | Coordination state stays anchored at the project root; per-worker locks and diagnostics are implementation details, not the source of truth |
 
 ### Coordination
 
-Workers and the coordinator communicate through file-based IPC:
+Workers and the coordinator communicate through DB-backed coordination tables in `.gsd/gsd.db`:
 
-- **Session status files** (`.gsd/parallel/<MID>.status.json`) — workers write heartbeats, the coordinator reads them
-- **Signal files** (`.gsd/parallel/<MID>.signal.json`) — coordinator writes signals, workers consume them
-- **Atomic writes** — write-to-temp + rename prevents partial reads
+- **`workers`** — registry of active auto-mode workers with heartbeat TTL and shutdown/crash status
+- **`milestone_leases`** — one-worker-at-a-time milestone ownership with fencing tokens for safe takeover after expiry or release
+- **`unit_dispatches`** — dispatch ledger that records claim, running, completed, failed, stuck, canceled, and retry timing state per unit
+- **`command_queue`** — targeted or broadcast control commands claimed atomically by workers
+
+If a worker stops heartbeating, its lease can expire and another worker can safely take over the milestone. Retry-aware stuck detection also consults the dispatch ledger so a unit waiting for `next_run_at` is not misclassified as stuck.
+
+This model assumes local-disk locking semantics. Do not place the project on NFS/SMB/FUSE-style mounts or try to share `.gsd/gsd.db*` across hosts.
 
 ## Eligibility Analysis
 
@@ -122,7 +129,7 @@ Before starting parallel execution, GSD checks which milestones can safely run c
   - `src/middleware.ts`
 ```
 
-File overlaps are warnings, not blockers. Both milestones work in separate worktrees, so they won't interfere at the filesystem level. Conflicts are detected and resolved during merge.
+File overlaps are warnings, not blockers. Both milestones work in separate worktrees, so they won't interfere at the filesystem level. Conflicts are still possible at merge time, and the coordination guarantees only apply when all workers share the same local SQLite/WAL runtime on one host.
 
 ## Configuration
 
@@ -131,23 +138,23 @@ Add to `~/.gsd/PREFERENCES.md` or `.gsd/PREFERENCES.md`:
 ```yaml
 ---
 parallel:
-  enabled: false            # Master toggle (default: false)
-  max_workers: 2            # Concurrent workers (1-4, default: 2)
-  budget_ceiling: 50.00     # Aggregate cost limit in dollars (optional)
-  merge_strategy: "per-milestone"  # When to merge: "per-slice" or "per-milestone"
-  auto_merge: "confirm"            # "auto", "confirm", or "manual"
+  enabled: false # Master toggle (default: false)
+  max_workers: 2 # Concurrent workers (1-4, default: 2)
+  budget_ceiling: 50.00 # Aggregate cost limit in dollars (optional)
+  merge_strategy: "per-milestone" # When to merge: "per-slice" or "per-milestone"
+  auto_merge: "confirm" # "auto", "confirm", or "manual"
 ---
 ```
 
 ### Configuration Reference
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `enabled` | boolean | `false` | Master toggle. Must be `true` for `/gsd parallel` commands to work. |
-| `max_workers` | number (1-4) | `2` | Maximum concurrent worker processes. Higher values use more memory and API budget. |
-| `budget_ceiling` | number | none | Aggregate cost ceiling in USD across all workers. When reached, no new units are dispatched. |
-| `merge_strategy` | `"per-slice"` or `"per-milestone"` | `"per-milestone"` | When worktree changes merge back to main. Per-milestone waits for the full milestone to complete. |
-| `auto_merge` | `"auto"`, `"confirm"`, `"manual"` | `"confirm"` | How merge-back is handled. `confirm` prompts before merging. `manual` requires explicit `/gsd parallel merge`. |
+| Key              | Type                               | Default           | Description                                                                                                    |
+| ---------------- | ---------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------- |
+| `enabled`        | boolean                            | `false`           | Master toggle. Must be `true` for `/gsd parallel` commands to work.                                            |
+| `max_workers`    | number (1-4)                       | `2`               | Maximum concurrent worker processes. Higher values use more memory and API budget.                             |
+| `budget_ceiling` | number                             | none              | Aggregate cost ceiling in USD across all workers. When reached, no new units are dispatched.                   |
+| `merge_strategy` | `"per-slice"` or `"per-milestone"` | `"per-milestone"` | When worktree changes merge back to main. Per-milestone waits for the full milestone to complete.              |
+| `auto_merge`     | `"auto"`, `"confirm"`, `"manual"`  | `"confirm"`       | How merge-back is handled. `confirm` prompts before merging. `manual` requires explicit `/gsd parallel merge`. |
 
 ## Commands
 
@@ -155,7 +162,7 @@ parallel:
 |---------|-------------|
 | `/gsd parallel start` | Analyze eligibility, confirm, and start workers |
 | `/gsd parallel status` | Show all workers with state, units completed, and cost |
-| `/gsd parallel stop` | Stop all workers (sends SIGTERM) |
+| `/gsd parallel stop` | Stop all workers (enqueues stop + sends SIGTERM) |
 | `/gsd parallel stop M002` | Stop a specific milestone's worker |
 | `/gsd parallel pause` | Pause all workers (finish current unit, then wait) |
 | `/gsd parallel pause M002` | Pause a specific worker |
@@ -164,30 +171,30 @@ parallel:
 | `/gsd parallel merge` | Merge all completed milestones back to main |
 | `/gsd parallel merge M002` | Merge a specific milestone back to main |
 
-## Signal Lifecycle
+## Command Lifecycle
 
-The coordinator communicates with workers through signals:
+The coordinator communicates with workers through persisted runtime commands:
 
-```
+```text
 Coordinator                    Worker
     │                            │
-    ├── sendSignal("pause") ──→  │
-    │                            ├── consumeSignal()
+    ├── enqueue("pause") ─────→  │
+    │                            ├── claimNextCommand()
     │                            ├── pauseAuto()
     │                            │   (finish current unit, wait)
     │                            │
-    ├── sendSignal("resume") ─→  │
-    │                            ├── consumeSignal()
+    ├── enqueue("resume") ────→  │
+    │                            ├── claimNextCommand()
     │                            ├── resume dispatch loop
     │                            │
-    ├── sendSignal("stop") ───→  │
+    ├── enqueue("stop") ──────→  │
     │   + SIGTERM ────────────→  │
-    │                            ├── consumeSignal() or SIGTERM handler
+    │                            ├── claimNextCommand() or SIGTERM handler
     │                            ├── stopAuto()
     │                            └── process exits
 ```
 
-Workers check for signals between units (in `handleAgentEnd`). The coordinator also sends `SIGTERM` for immediate response on stop.
+Workers poll the command queue between units and the coordinator also sends `SIGTERM` for immediate response on stop. Heartbeats and lease refreshes happen continuously during the loop, so `parallel status` reflects DB state rather than sidecar JSON files.
 
 ## Merge Reconciliation
 
@@ -200,12 +207,12 @@ When milestones complete, their worktree changes need to merge back to main.
 
 ### Conflict Handling
 
-1. `.gsd/` state files (STATE.md, metrics.json, etc.) — **auto-resolved** by accepting the milestone branch version
+1. Runtime coordination state (worker registry, leases, dispatches, cancellation requests, command queue) lives in the project-root SQLite runtime and is not merge-driven.
 2. Code conflicts — **stop and report**. The merge halts, showing which files conflict. Resolve manually and retry with `/gsd parallel merge <MID>`.
 
 ### Example
 
-```
+```text
 /gsd parallel merge
 
 # Merge Results
@@ -222,7 +229,7 @@ When milestones complete, their worktree changes need to merge back to main.
 When `budget_ceiling` is set, the coordinator tracks aggregate cost across all workers:
 
 - Cost is summed from each worker's session status
-- When the ceiling is reached, the coordinator signals workers to stop
+- When the ceiling is reached, the coordinator enqueues stop commands for workers
 - Each worker also respects the project-level `budget_ceiling` preference independently
 
 ## Health Monitoring
@@ -231,17 +238,18 @@ When `budget_ceiling` is set, the coordinator tracks aggregate cost across all w
 
 `/gsd doctor` detects parallel session issues:
 
-- **Stale parallel sessions** — Worker process died without cleanup. Doctor finds `.gsd/parallel/*.status.json` files with dead PIDs or expired heartbeats and removes them.
+- **Stale workers or leases** — Worker process died without cleanup. Doctor inspects worker heartbeats and expired milestone leases in the database, then clears the stale coordination state.
 
 Run `/gsd doctor --fix` to clean up automatically.
 
 ### Stale Detection
 
 Sessions are considered stale when:
-- The worker PID is no longer running (checked via `process.kill(pid, 0)`)
-- The last heartbeat is older than 30 seconds
+- The worker PID is no longer running
+- The last heartbeat is older than the worker TTL
+- A milestone lease is released or expires without a matching active heartbeat
 
-The coordinator runs stale detection during `refreshWorkerStatuses()` and automatically removes dead sessions.
+The coordinator runs stale detection during status refresh and either marks the worker crashed or allows the lease to be taken over on the next claim.
 
 ## Safety Model
 
@@ -253,32 +261,28 @@ The coordinator runs stale detection during `refreshWorkerStatuses()` and automa
 | **`GSD_MILESTONE_LOCK`** | Each worker only sees its milestone in state derivation |
 | **`GSD_PARALLEL_WORKER`** | Workers cannot spawn nested parallel sessions |
 | **Budget ceiling** | Aggregate cost enforcement across all workers |
-| **Signal-based shutdown** | Graceful stop via file signals + SIGTERM |
+| **Command queue + SIGTERM** | Graceful stop/pause/resume via DB-backed commands plus process signals |
 | **Doctor integration** | Detects and cleans up orphaned sessions |
-| **Conflict-aware merge** | Stops on code conflicts, auto-resolves `.gsd/` state conflicts |
+| **Conflict-aware merge** | Stops on code conflicts while runtime coordination state stays anchored in the shared DB |
 
 ## File Layout
 
-```
+```text
 .gsd/
-├── parallel/                    # Coordinator ↔ worker IPC
-│   ├── M002.status.json         # Worker heartbeat + progress
-│   ├── M002.signal.json         # Coordinator → worker signals
-│   ├── M003.status.json
-│   └── M003.signal.json
+├── gsd.db                       # Shared runtime database
+├── gsd.db-wal / gsd.db-shm      # SQLite WAL sidecars while workers are active
+├── parallel/                    # Per-milestone runtime lock / isolation dirs
+│   ├── M002/
+│   └── M003/
 ├── worktrees/                   # Git worktrees (one per milestone)
 │   ├── M002/                    # M002's isolated checkout
-│   │   ├── .gsd/                # M002's own state files
-│   │   │   ├── auto.lock
-│   │   │   ├── metrics.json
-│   │   │   └── milestones/
 │   │   └── src/                 # M002's working copy
 │   └── M003/
 │       └── ...
 └── ...
 ```
 
-Both `.gsd/parallel/` and `.gsd/worktrees/` are gitignored — they're runtime-only coordination files that never get committed.
+`.gsd/gsd.db*`, `.gsd/parallel/`, and `.gsd/worktrees/` are all local runtime artifacts and should remain gitignored.
 
 ## Troubleshooting
 
@@ -292,7 +296,7 @@ All milestones are either complete or blocked by dependencies. Check `/gsd queue
 
 ### Worker crashed — how to recover
 
-Workers now persist their state to disk automatically. If a worker process dies, the coordinator detects the dead PID via heartbeat expiry and marks the worker as crashed. On restart, the worker picks up from disk state — crash recovery, worktree re-entry, and completed-unit tracking carry over from the crashed session.
+Workers now persist coordination state in the shared runtime DB. If a worker process dies, the coordinator detects heartbeat expiry, marks the worker as crashed, and releases stale coordination state so a replacement worker can resume safely.
 
 1. Run `/gsd doctor --fix` to clean up stale sessions
 2. Run `/gsd parallel status` to see current state

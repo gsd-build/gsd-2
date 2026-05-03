@@ -10,6 +10,12 @@ All relevant context has been preloaded below — start working immediately with
 
 {{inlinedContext}}
 
+## Already Planned? Soft Brake
+
+If `{{outputPath}}` already exists on disk with at least one slice line (e.g. `- [ ] **S01:`) AND `gsd_query` reports slice rows for this milestone, a prior `gsd_plan_milestone` call already persisted the plan. Do **not** re-call `gsd_plan_milestone` — its UPSERT would overwrite the existing plan with whatever you reconstruct, which is unsafe when you don't have the original decomposition reasoning. Skip directly to the ready phrase at the end of this prompt.
+
+If only the file exists (no DB rows) or only DB rows exist (no file), the prior write was incomplete — proceed with planning as normal so the tool reconciles both.
+
 ## Your Role in the Pipeline
 
 You are the first deep look at this milestone. You have full tool access — explore the codebase, look up docs, investigate technology choices. Your job is to understand the landscape and then strategically decompose the work into demoable slices.
@@ -23,7 +29,7 @@ Before decomposing, build your understanding:
 1. **Codebase exploration.** For small/familiar codebases, use `rg`, `find`, and targeted reads. For large or unfamiliar codebases, use `scout` to build a broad map efficiently before diving in.
 2. **Library docs.** Use `resolve_library` / `get_library_docs` for unfamiliar libraries — skip this for libraries already used in the codebase.
 3. **Skill Discovery ({{skillDiscoveryMode}}):**{{skillDiscoveryInstructions}}
-4. **Requirements analysis.** If `.gsd/REQUIREMENTS.md` exists, research against it. Identify which Active requirements are table stakes, likely omissions, overbuilt risks, or domain-standard behaviors.
+4. **Requirements analysis.** If `.gsd/REQUIREMENTS.md` exists, research against it and treat Active requirements as the capability contract for this milestone. Identify which Active requirements are table stakes, likely omissions, overbuilt risks, or domain-standard behaviors. If `REQUIREMENTS.md` is missing, continue in legacy compatibility mode but explicitly note missing requirement coverage in the roadmap.
 
 ### Strategic Questions to Answer
 
@@ -47,7 +53,7 @@ Then:
 2. {{skillActivation}}
 3. Create the roadmap: decompose into demoable vertical slices — as many as the work genuinely needs, no more. A simple feature might be 1 slice. Don't decompose for decomposition's sake.
 4. Order by risk (high-risk first)
-5. Call `gsd_plan_milestone` to persist the milestone planning fields, slice rows, and **horizontal checklist** in the DB-backed planning path. Do **not** write `{{outputPath}}`, `ROADMAP.md`, or other planning artifacts manually — the planning tool owns roadmap rendering and persistence.
+5. Call `gsd_plan_milestone` to persist the milestone planning fields, slice rows, and **horizontal checklist** in the DB-backed planning path. Fill the Horizontal Checklist with cross-cutting concerns considered during planning (requirements re-read, decisions re-evaluated, graceful shutdown, revenue paths, auth boundary, shared resources, reconnection). Omit it for trivial milestones where none apply. Do **not** write `{{outputPath}}`, `ROADMAP.md`, or other planning artifacts manually — the planning tool owns roadmap rendering and persistence.
 6. If planning produced structural decisions (e.g. slice ordering rationale, technology choices, scope exclusions), call `gsd_decision_save` for each decision — the tool auto-assigns IDs and regenerates `.gsd/DECISIONS.md` automatically.
 
 ## Requirement Mapping Rules

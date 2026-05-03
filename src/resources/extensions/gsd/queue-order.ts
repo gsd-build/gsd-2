@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { gsdRoot } from "./paths.js";
 import { milestoneIdSort } from "./milestone-ids.js";
 import { loadJsonFileOrNull, saveJsonFile } from "./json-persistence.js";
+import { isDbAvailable, setMilestoneQueueOrder } from "./gsd-db.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -63,9 +64,13 @@ export function loadQueueOrder(basePath: string): string[] | null {
 }
 
 /**
- * Save a custom queue order to disk.
+ * Save a custom queue order. The DB sequence is canonical when a DB
+ * connection is open; QUEUE-ORDER.json remains a compatibility projection.
  */
 export function saveQueueOrder(basePath: string, order: string[]): void {
+  if (isDbAvailable()) {
+    setMilestoneQueueOrder(order);
+  }
   const data: QueueOrderFile = {
     order,
     updatedAt: new Date().toISOString(),

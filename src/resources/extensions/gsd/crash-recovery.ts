@@ -1,21 +1,43 @@
 /**
- * GSD Crash Recovery
+ * GSD Crash Recovery (Phase C pt 2 — DB-backed)
  *
- * Detects interrupted auto-mode sessions via a lock file.
- * Written on auto-start, updated on each unit dispatch, deleted on clean stop.
- * If the lock file exists on next startup, the previous session crashed.
+ * Detects interrupted auto-mode sessions via the DB-backed workers +
+ * unit_dispatches + runtime_kv tables. The auto.lock file is gone; the
+ * `LockData` shape is preserved for backward compatibility with callers
+ * (auto.ts, doctor checks, interrupted-session.ts), but the contents are
+ * now synthesized from:
  *
- * The lock records the pi session file path so crash recovery can read the
- * surviving JSONL (pi appends entries incrementally via appendFileSync,
- * so the file on disk reflects every tool call up to the crash point).
+ *   - workers.pid / .started_at / .last_heartbeat_at  → liveness + age
+ *   - unit_dispatches.unit_type / .unit_id / .started_at  → what was running
+ *   - runtime_kv("worker", workerId, "session_file")  → pi session JSONL path
+ *
+ * "Crashed" is detected via workers.status='active' + heartbeat past TTL,
+ * cross-checked with the OS PID via isLockProcessAlive(). When the DB is
+ * unavailable (fresh project before init), all readers return null and
+ * writers no-op — preserving the historical "no lock means no prior
+ * crash" semantics.
+ *
+ * The journal-based emitCrashRecoveredUnitEnd is unchanged from the file
+ * era — it queries the journal independently of the lock mechanism.
  */
 
+import {
+  emitJournalEvent,
+  queryJournal,
+} from "./journal.js";
 import { readFileSync, unlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { gsdRoot } from "./paths.js";
+import {
+  findStaleWorkerForProject,
+  getAllAutoWorkers,
+  type AutoWorkerRow,
+} from "./db/auto-workers.js";
+import { getLatestForUnit, type DispatchStatus } from "./db/unit-dispatches.js";
+import { getRuntimeKv, setRuntimeKv, deleteRuntimeKv } from "./db/runtime-kv.js";
+import { _getAdapter, isDbAvailable } from "./gsd-db.js";
+import { gsdRoot, normalizeRealPath } from "./paths.js";
 import { atomicWriteSync } from "./atomic-write.js";
 import { effectiveLockFile } from "./session-lock.js";
-import { emitJournalEvent, queryJournal } from "./journal.js";
 
 export interface LockData {
   pid: number;
@@ -27,11 +49,91 @@ export interface LockData {
   sessionFile?: string;
 }
 
+const SESSION_FILE_KV_KEY = "session_file";
+
 function lockPath(basePath: string): string {
   return join(gsdRoot(basePath), effectiveLockFile());
 }
 
-/** Write or update the lock file with current auto-mode state. */
+function readLegacyLock(basePath: string): LockData | null {
+  try {
+    const p = lockPath(basePath);
+    if (!existsSync(p)) return null;
+    return JSON.parse(readFileSync(p, "utf-8")) as LockData;
+  } catch {
+    return null;
+  }
+}
+
+function findActiveWorkerForCurrentProcess(
+  projectRootRealpath: string,
+): AutoWorkerRow | null {
+  if (!isDbAvailable()) return null;
+  const workers = getAllAutoWorkers();
+  for (const worker of workers) {
+    if (
+      worker.pid === process.pid
+      && worker.project_root_realpath === projectRootRealpath
+    ) {
+      return worker;
+    }
+  }
+  return null;
+}
+
+/**
+ * Look up the most recent dispatch row for a worker, regardless of status.
+ * Returns null if the worker has no dispatch history yet (e.g. crashed
+ * during bootstrap before claiming the first unit).
+ */
+function getLatestDispatchForWorker(workerId: string):
+  | { unit_type: string; unit_id: string; started_at: string; status: DispatchStatus }
+  | null {
+  if (!isDbAvailable()) return null;
+  const db = _getAdapter()!;
+  const row = db.prepare(
+    `SELECT unit_type, unit_id, started_at, status
+     FROM unit_dispatches
+     WHERE worker_id = :worker_id
+     ORDER BY id DESC
+     LIMIT 1`,
+  ).get({ ":worker_id": workerId }) as
+    | { unit_type: string; unit_id: string; started_at: string; status: DispatchStatus }
+    | undefined;
+  return row ?? null;
+}
+
+function workerToLockData(worker: AutoWorkerRow): LockData {
+  const dispatch = getLatestDispatchForWorker(worker.worker_id);
+  const sessionFile =
+    getRuntimeKv<string>("worker", worker.worker_id, SESSION_FILE_KV_KEY) ?? undefined;
+  return {
+    pid: worker.pid,
+    startedAt: worker.started_at,
+    // Pre-Phase-C-pt-2 default: when no dispatch row exists yet (bootstrap
+    // crash), report unitType="starting", unitId="bootstrap" — same shape
+    // the file-based writer used to produce.
+    unitType: dispatch?.unit_type ?? "starting",
+    unitId: dispatch?.unit_id ?? "bootstrap",
+    unitStartedAt: dispatch?.started_at ?? worker.started_at,
+    sessionFile,
+  };
+}
+
+/**
+ * Write or update the lock state for the current auto-mode session.
+ *
+ * Phase C pt 2: the only persistent state this function adds beyond what
+ * the workers + unit_dispatches tables already track is the pi session
+ * JSONL path, which lands in runtime_kv (worker scope, key
+ * "session_file"). The pid/startedAt/unitType/unitId/unitStartedAt are
+ * recorded by registerAutoWorker / heartbeatAutoWorker / recordDispatchClaim
+ * already.
+ *
+ * basePath is unused by the new implementation (kept as a parameter for
+ * back-compat with the 15+ call sites) — the worker is identified by
+ * pid + project_root_realpath in the workers table.
+ */
 export function writeLock(
   basePath: string,
   unitType: string,
@@ -47,51 +149,84 @@ export function writeLock(
       unitStartedAt: new Date().toISOString(),
       sessionFile,
     };
-    const lp = lockPath(basePath);
-    atomicWriteSync(lp, JSON.stringify(data, null, 2));
-  } catch (e) { /* non-fatal: lock write failure */ void e; }
+    atomicWriteSync(lockPath(basePath), JSON.stringify(data, null, 2));
+  } catch {
+    // Best-effort — never throw from the lock writer.
+  }
+
+  if (!isDbAvailable() || !sessionFile) return;
+  try {
+    const projectRoot = normalizeRealPath(basePath);
+    const worker = findActiveWorkerForCurrentProcess(projectRoot);
+    if (!worker) return;
+    setRuntimeKv("worker", worker.worker_id, SESSION_FILE_KV_KEY, sessionFile);
+  } catch {
+    // Best-effort — never throw from the lock writer.
+  }
 }
 
-/** Remove the lock file on clean stop. */
+/**
+ * Phase C pt 2: clearLock no longer deletes a file. The cleanup path
+ * (markWorkerStopping in stopAuto) flips the workers row to 'stopping'.
+ * This function additionally drops the session_file runtime_kv row for
+ * the current worker so a follow-up crash detection doesn't pick up a
+ * stale session-file pointer.
+ */
 export function clearLock(basePath: string): void {
   try {
     const p = lockPath(basePath);
     if (existsSync(p)) unlinkSync(p);
-  } catch (e) { /* non-fatal: lock clear failure */ void e; }
+  } catch {
+    // Best-effort.
+  }
+
+  if (!isDbAvailable()) return;
+  try {
+    const projectRoot = normalizeRealPath(basePath);
+    const worker = findActiveWorkerForCurrentProcess(projectRoot);
+    if (!worker) return;
+    deleteRuntimeKv("worker", worker.worker_id, SESSION_FILE_KV_KEY);
+  } catch {
+    // Best-effort.
+  }
 }
 
-/** Check if a crash lock exists and return its data. */
+/**
+ * Detect a previous crashed auto-mode session.
+ *
+ * Phase C pt 2: synthesized from workers (status='active' + lapsed
+ * heartbeat) + unit_dispatches (most recent for that worker) +
+ * runtime_kv (session_file). Returns null when no stale worker exists
+ * or the DB is unavailable.
+ */
 export function readCrashLock(basePath: string): LockData | null {
-  try {
-    const p = lockPath(basePath);
-    if (!existsSync(p)) return null;
-    const raw = readFileSync(p, "utf-8");
-    return JSON.parse(raw) as LockData;
-  } catch (e) {
-    /* non-fatal: corrupt or unreadable lock file */ void e;
-    return null;
+  if (isDbAvailable()) {
+    try {
+      const projectRoot = normalizeRealPath(basePath);
+      const stale = findStaleWorkerForProject(projectRoot);
+      if (stale) return workerToLockData(stale);
+    } catch {
+      // Fall through to the legacy lock-file compatibility path.
+    }
   }
+  return readLegacyLock(basePath);
 }
 
 /**
  * Check whether the process that wrote the lock is still running.
  * Uses `process.kill(pid, 0)` which sends no signal but checks liveness.
  * Returns true if the PID matches our own — we are the lock holder (#2470).
+ *
+ * Unchanged from the file-based era — pure stateless OS check.
  */
 export function isLockProcessAlive(lock: LockData): boolean {
   const pid = lock.pid;
   if (!Number.isInteger(pid) || pid <= 0) return false;
-  // Our own PID means WE hold this lock — we are alive. (#2470)
-  // Callers that need to distinguish "our lock" from "someone else's lock"
-  // (e.g. startAuto checking for a prior crashed session with a recycled PID)
-  // already guard with `crashLock.pid !== process.pid` before calling us.
   if (pid === process.pid) return true;
   try {
     process.kill(pid, 0);
     return true;
   } catch (err) {
-    // EPERM means the process exists but we lack permission — treat as alive.
-    // ESRCH means the process does not exist — treat as dead (stale lock).
     if ((err as NodeJS.ErrnoException).code === "EPERM") return true;
     return false;
   }
@@ -106,7 +241,6 @@ export function formatCrashInfo(lock: LockData): string {
     `  PID: ${lock.pid}`,
   ];
 
-  // Add recovery guidance based on what was happening when it crashed
   if (lock.unitType === "starting" && lock.unitId === "bootstrap") {
     lines.push(`No work was lost. Run /gsd auto to restart.`);
   } else if (lock.unitType.includes("research") || lock.unitType.includes("plan")) {
@@ -122,22 +256,14 @@ export function formatCrashInfo(lock: LockData): string {
 
 /**
  * Emit a synthetic unit-end event for a unit that crashed without emitting its own.
- *
- * Queries the journal to find the most recent unit-start for the crashed unit.
- * If a matching unit-end already exists (e.g. the hard timeout fired), this is a
- * no-op. Called during crash recovery, before clearing the stale lock.
- *
- * Addresses the gap reported in #3348 where `unit-start` was emitted but no
- * `unit-end` followed — side effects landed but the worker died before closeout.
+ * Unchanged from the file era — operates on the journal, not the lock.
  */
 export function emitCrashRecoveredUnitEnd(basePath: string, lock: LockData): void {
-  // Skip bootstrap / starting pseudo-units — they have no meaningful unit-start event.
   if (!lock.unitType || !lock.unitId || lock.unitType === "starting") return;
 
   try {
     const all = queryJournal(basePath);
 
-    // Find the most recent unit-start for this unitId
     const starts = all.filter(
       (e) => e.eventType === "unit-start" && e.data?.unitId === lock.unitId,
     );
@@ -145,7 +271,6 @@ export function emitCrashRecoveredUnitEnd(basePath: string, lock: LockData): voi
 
     const lastStart = starts[starts.length - 1];
 
-    // Check if a unit-end was already emitted (e.g. hard timeout fired after the crash)
     const alreadyClosed = all.some(
       (e) =>
         e.eventType === "unit-end" &&
@@ -155,7 +280,6 @@ export function emitCrashRecoveredUnitEnd(basePath: string, lock: LockData): voi
     );
     if (alreadyClosed) return;
 
-    // Find the highest seq in this flow for monotonic ordering
     const maxSeq = all
       .filter((e) => e.flowId === lastStart.flowId)
       .reduce((max, e) => Math.max(max, e.seq), lastStart.seq);
@@ -174,6 +298,16 @@ export function emitCrashRecoveredUnitEnd(basePath: string, lock: LockData): voi
       causedBy: { flowId: lastStart.flowId, seq: lastStart.seq },
     });
   } catch {
-    // Never throw from crash recovery path — journal failure must not block recovery
+    // Never throw from crash recovery path.
   }
+}
+
+/**
+ * Used by the doctor checks (doctor-runtime-checks.ts, doctor-proactive.ts)
+ * to enumerate stale workers across all projects this DB knows about.
+ * Phase C pt 2 export — surface for the same diagnostics that previously
+ * iterated `auto.lock` files.
+ */
+export function findStaleAutoWorker(basePath: string): LockData | null {
+  return readCrashLock(basePath);
 }

@@ -76,7 +76,9 @@ export function snapshotState(): StateManifest {
   // Wrap all reads in a deferred transaction so the snapshot is consistent
   // (all SELECTs see the same DB state even if a concurrent write lands between them).
   return readTransaction(() => {
-  const rawMilestones = db.prepare("SELECT * FROM milestones ORDER BY id").all() as Record<string, unknown>[];
+  const rawMilestones = db.prepare(
+    "SELECT * FROM milestones ORDER BY CASE WHEN sequence > 0 THEN 0 ELSE 1 END, sequence, id",
+  ).all() as Record<string, unknown>[];
   const milestones: MilestoneRow[] = rawMilestones.map((r) => ({
     id: r["id"] as string,
     title: r["title"] as string,
@@ -95,6 +97,7 @@ export function snapshotState(): StateManifest {
     definition_of_done: JSON.parse((r["definition_of_done"] as string) || "[]"),
     requirement_coverage: (r["requirement_coverage"] as string) ?? "",
     boundary_map_markdown: (r["boundary_map_markdown"] as string) ?? "",
+    sequence: Number(r["sequence"] ?? 0),
   }));
 
   const rawSlices = db.prepare("SELECT * FROM slices ORDER BY milestone_id, sequence, id").all() as Record<string, unknown>[];
