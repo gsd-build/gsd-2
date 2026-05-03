@@ -32,26 +32,17 @@ After reflection is confirmed, decide the approach based on the actual scope —
 
 ## Mandatory Investigation Before First Question Round
 
-Before asking your first question, do a mandatory investigation pass. This is not optional.
+Before the first question round, investigate enough that your questions reflect evidence instead of guesses:
 
-1. **Scout the codebase** — `ls`, `find`, `rg`, or `scout` for broad unfamiliar areas. Understand what already exists, what patterns are established, what constraints current code imposes.
-2. **Check library docs** — `resolve_library` / `get_library_docs` for any tech the user mentioned. Get current facts about capabilities, constraints, API shapes, version-specific behavior.
-3. **Web search** — `search-the-web` if the domain is unfamiliar, if you need current best practices, or if the user referenced external services/APIs you need facts about. Use `fetch_page` for full content when snippets aren't enough.
+1. Scout the codebase with `ls`, `find`, `rg`, or `scout` for relevant areas, existing patterns, and constraints.
+2. Check current library docs with `resolve_library` / `get_library_docs` for mentioned tech.
+3. Use `search-the-web`, `fetch_page`, or `search_and_read` only when the domain, service, API, or current practice needs external facts.
 
-**Web search budget:** You have a limited number of web searches per turn (typically 3-5). The discuss phase spans many turns (investigation, question rounds, focused research, requirements), so budget carefully:
-- Prefer `resolve_library` / `get_library_docs` over `search-the-web` for library documentation — they don't consume the web search budget.
-- Prefer `search_and_read` for one-shot topic research — it combines search + page fetch in a single call.
-- Target 2-3 web searches in the investigation pass. Save remaining budget for the focused research pass before roadmap creation.
-- Do NOT repeat the same or similar queries. If a search didn't find what you need, rephrase once or move on.
-- When a search returns many results, each result contains multiple text spans — this is normal formatting, not separate searches.
-
-This happens ONCE, before the first round. The goal: your first questions should reflect what's actually true, not what you assume.
-
-For subsequent rounds, continue investigating between rounds — check docs, search, or scout as needed to make each round's questions smarter. But the first-round investigation is mandatory and explicit. Distribute searches across turns rather than clustering them in one turn.
+Budget searches across the discussion. Prefer library docs and one-shot `search_and_read`; avoid repeated similar queries. Continue investigating between rounds when new answers expose gaps.
 
 ## Layered Question Rounds
 
-Questions are organized into four layers. Each layer targets a specific depth dimension. At each layer: ask 1-3 open questions per round, investigate between rounds as needed, and gate before advancing.
+Questions are organized into four layers. At each layer, ask 1-3 open questions per round, investigate between rounds as needed, and gate before advancing.
 
 **Default to open questions.** Use `ask_user_questions` only when there are 2-3 genuinely distinct paths with clear tradeoffs (e.g., "REST vs GraphQL" or "Postgres vs SQLite"). For nuanced design questions, ask in plain text and let the user explain.
 
@@ -71,11 +62,7 @@ Work types include: API/backend, UI/frontend, CLI/developer tool, data pipeline,
 
 ### Layer 1 — Scope
 
-Resolve what's in and what's out. Ask about:
-- Feature boundaries — what exactly ships in this milestone vs later
-- Ambiguities in the user's description — anything you're unsure about, ask
-- Dependencies — what does this work depend on, what depends on it
-- Priority — if scope needs trimming, what matters most
+Resolve what's in, out, and deferred. Ask about feature boundaries, ambiguities, dependencies, and priority.
 
 Adapt depth to work type:
 - **CLI work:** Focus on user mental model, command grammar, what existing commands do
@@ -97,11 +84,7 @@ If the user adjusts, reflect the updated understanding and ask again. Do not adv
 
 ### Layer 2 — Architecture
 
-Resolve how it's built. Ask about:
-- Per-slice technical decisions — what approach for each major piece
-- Inter-slice contracts — how do the pieces connect
-- Library/framework choices — with evidence from investigation, not assumptions
-- Integration with existing code — what patterns to follow, what to change
+Resolve how it is built: per-slice technical decisions, inter-slice contracts, library/framework choices backed by evidence, and integration with existing code patterns.
 
 Adapt depth to work type:
 - **API work:** Contracts, versioning, backwards compatibility, auth boundaries
@@ -131,8 +114,8 @@ Resolve what happens when things fail. Present this layer with an option:
 
 If the user chooses defaults, summarize what the defaults are and gate. If the user chooses to go deep, ask about:
 - Failure modes for each major component
-- Error propagation between layers (API → frontend, service → database)
-- Timeout, retry, and circuit-breaker strategies
+- Error propagation between layers
+- Timeout, retry, and circuit-breaker strategy
 - What the user sees when something fails
 
 Adapt depth to work type:
@@ -148,11 +131,7 @@ Summarize error handling strategy. Then ask: **"Does this capture how errors sho
 
 ### Layer 4 — Quality Bar
 
-Resolve what "done" means concretely. Ask about:
-- Per-slice acceptance criteria — specific enough for automated verification
-- Test strategy — what types of tests, what coverage expectations
-- Definition of done — what must be true before the milestone ships
-- Non-functional requirements — performance, accessibility, security if relevant
+Resolve what "done" means concretely: per-slice acceptance criteria, test strategy, definition of done, and relevant non-functional requirements.
 
 Adapt depth to work type:
 - **CLI work:** Shell compatibility, error message clarity, exit code semantics
