@@ -1915,6 +1915,7 @@ export function registerWorkflowTools(realServer: McpToolServer): void {
     execParams,
     async (args: Record<string, unknown>) => {
       const { projectDir, ...params } = parseWorkflowArgs(execSchema, args);
+      await enforceWorkflowWriteGate("gsd_exec", projectDir);
       const [{ executeGsdExec }, { loadEffectiveGSDPreferences }] = await Promise.all([
         importLocalModule<any>("../../../src/resources/extensions/gsd/tools/exec-tool.js"),
         importLocalModule<any>("../../../src/resources/extensions/gsd/preferences.js"),
@@ -1926,10 +1927,12 @@ export function registerWorkflowTools(realServer: McpToolServer): void {
         prefs = null;
       }
       return adaptExecutorResult(
-        await executeGsdExec(params, {
-          baseDir: projectDir,
-          preferences: (prefs?.preferences ?? null) as unknown,
-        }),
+        await runSerializedWorkflowOperation(() =>
+          executeGsdExec(params, {
+            baseDir: projectDir,
+            preferences: (prefs?.preferences ?? null) as unknown,
+          }),
+        ),
       );
     },
   );

@@ -216,7 +216,7 @@ describe("workflow MCP tools", () => {
       assert.match((result as any).content[0].text as string, /find-me-later/);
       assert.equal((result as any).structuredContent.operation, "gsd_exec_search");
       assert.equal((result as any).structuredContent.matches, 1);
-      assert.match((result as any).structuredContent.results[0].stdout_path, /\.gsd\/exec\/.*\.stdout$/);
+      assert.match((result as any).structuredContent.results[0].stdout_path, /\.gsd[\\/]exec[\\/].*\.stdout$/);
     } finally {
       cleanup(base);
     }
