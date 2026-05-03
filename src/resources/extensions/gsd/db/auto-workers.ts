@@ -210,14 +210,28 @@ export function autoWorkerHeartbeatTtlSeconds(): number {
   return HEARTBEAT_TTL_SECONDS;
 }
 
+function isWorkerProcessAlive(candidate: Pick<AutoWorkerRow, "host" | "pid">): boolean {
+  const pid = candidate.pid;
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  if (candidate.host !== hostname()) return false;
+  if (pid === process.pid) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EPERM") return true;
+    return false;
+  }
+}
+
 /**
  * Phase C pt 2 — find the most recently active worker for a project root
  * whose heartbeat has lapsed (the "previous crashed session" indicator).
  *
  * Used by crash-recovery.ts:readCrashLock to detect when a prior auto-mode
- * session ended without cleanup. Callers should additionally PID-check the
- * returned row via isLockProcessAlive() to distinguish "really dead" from
- * "still alive but heartbeat behind" (rare, but possible under load).
+ * session ended without cleanup. Workers are only treated as stale after
+ * their heartbeat has lapsed and the OS PID liveness check says the process
+ * is no longer alive.
  *
  * Returns null if no stale worker exists for this project root.
  */
@@ -238,7 +252,7 @@ export function findStaleWorkerForProject(
      ORDER BY started_at DESC
      LIMIT 1`,
   ).get({ ":project_root": projectRootRealpath, ":cutoff": cutoffIso }) as AutoWorkerRow | undefined;
-  if (row) return row;
+  if (row && !isWorkerProcessAlive(row)) return row;
 
   // Older rows and external fixtures may have captured a non-realpath spelling
   // of the same project root, e.g. /var/... vs /private/var/... on macOS.
@@ -251,5 +265,9 @@ export function findStaleWorkerForProject(
        AND last_heartbeat_at < :cutoff
      ORDER BY started_at DESC`,
   ).all({ ":cutoff": cutoffIso }) as unknown as AutoWorkerRow[];
-  return staleRows.find((candidate) => normalizeRealPath(candidate.project_root_realpath) === canonicalProjectRoot) ?? null;
+  return staleRows.find(
+    (candidate) =>
+      normalizeRealPath(candidate.project_root_realpath) === canonicalProjectRoot
+      && !isWorkerProcessAlive(candidate),
+  ) ?? null;
 }

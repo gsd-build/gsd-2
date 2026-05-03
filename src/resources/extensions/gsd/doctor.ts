@@ -339,11 +339,9 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
   // CLI doctor can run before any tool handler has opened the DB. Runtime
   // health checks need the existing project DB to surface DB-backed crash
   // locks, paused sessions, and coordination rows.
-  if (!isDbAvailable()) {
-    const dbPath = resolveGsdPathContract(basePath).projectDb;
-    if (existsSync(dbPath)) {
-      try { openDatabase(dbPath); } catch { /* surfaced later as db_unavailable */ }
-    }
+  const dbPath = resolveGsdPathContract(basePath).projectDb;
+  if (existsSync(dbPath)) {
+    try { openDatabase(dbPath); } catch { /* surfaced later as db_unavailable */ }
   }
 
   // Issue codes that represent completion state transitions — creating summary

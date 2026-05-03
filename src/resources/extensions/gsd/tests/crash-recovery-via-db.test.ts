@@ -50,6 +50,13 @@ function expireWorker(workerId: string): void {
   ).run({ ":w": workerId });
 }
 
+function setWorkerPid(workerId: string, pid: number): void {
+  const db = _getAdapter()!;
+  db.prepare(
+    `UPDATE workers SET pid = :pid WHERE worker_id = :w`,
+  ).run({ ":pid": pid, ":w": workerId });
+}
+
 test("readCrashLock returns null when no workers exist", (t) => {
   const base = makeBase();
   t.after(() => cleanup(base));
@@ -66,7 +73,7 @@ test("readCrashLock returns null when only fresh (un-expired) workers exist", (t
   assert.equal(readCrashLock(base), null);
 });
 
-test("readCrashLock synthesizes LockData from a stale worker (no dispatches yet)", (t) => {
+test("readCrashLock ignores a stale heartbeat when the worker PID is still alive", (t) => {
   const base = makeBase();
   t.after(() => cleanup(base));
   openDatabase(join(base, ".gsd", "gsd.db"));
@@ -74,9 +81,21 @@ test("readCrashLock synthesizes LockData from a stale worker (no dispatches yet)
   const workerId = registerAutoWorker({ projectRootRealpath: projectRoot });
   expireWorker(workerId);
 
+  assert.equal(readCrashLock(base), null);
+});
+
+test("readCrashLock synthesizes LockData from a stale dead worker (no dispatches yet)", (t) => {
+  const base = makeBase();
+  t.after(() => cleanup(base));
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  const projectRoot = normalizeRealPath(base);
+  const workerId = registerAutoWorker({ projectRootRealpath: projectRoot });
+  setWorkerPid(workerId, 99999);
+  expireWorker(workerId);
+
   const lock = readCrashLock(base);
   assert.ok(lock, "stale worker surfaced as a crash lock");
-  assert.equal(lock!.pid, process.pid);
+  assert.equal(lock!.pid, 99999);
   // Bootstrap default — no dispatches recorded
   assert.equal(lock!.unitType, "starting");
   assert.equal(lock!.unitId, "bootstrap");
@@ -97,6 +116,7 @@ test("readCrashLock includes the most recent dispatch as unitType/unitId", (t) =
     traceId: "t1", workerId, milestoneLeaseToken: lease.token,
     milestoneId: "M001", unitType: "plan-slice", unitId: "M001/S01",
   });
+  setWorkerPid(workerId, 99999);
   expireWorker(workerId);
 
   const lock = readCrashLock(base);
@@ -112,6 +132,7 @@ test("readCrashLock surfaces sessionFile from runtime_kv", (t) => {
   const projectRoot = normalizeRealPath(base);
   const workerId = registerAutoWorker({ projectRootRealpath: projectRoot });
   setRuntimeKv("worker", workerId, "session_file", "/tmp/pi-session-abc.jsonl");
+  setWorkerPid(workerId, 99999);
   expireWorker(workerId);
 
   const lock = readCrashLock(base);
@@ -156,6 +177,7 @@ test("writeLock stores the session_file in runtime_kv (worker scope)", (t) => {
   assert.equal(stored, "/tmp/session-xyz.jsonl");
 
   // Confirm a stale read picks it up via readCrashLock.
+  setWorkerPid(workerId, 99999);
   expireWorker(workerId);
   const lock = readCrashLock(base);
   assert.ok(lock);
