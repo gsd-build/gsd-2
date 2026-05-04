@@ -4,10 +4,10 @@ import { homedir } from 'node:os'
 import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, openSync, closeSync, readFileSync, readlinkSync, readdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { compareSemver } from '../update/update-check.js'
-import { discoverExtensionEntryPaths } from '../extension-runtime/extension-discovery.js'
-import { loadRegistry, readManifestFromEntryPath, isExtensionEnabled, ensureRegistryEntries } from '../extension-runtime/extension-registry.js'
-import { resolveBundledResourcesDirFromPackageRoot } from '../extension-runtime/bundled-resource-path.js'
+import { compareSemver } from './update-check.js'
+import { discoverExtensionEntryPaths } from './extension-discovery.js'
+import { loadRegistry, readManifestFromEntryPath, isExtensionEnabled, ensureRegistryEntries } from './extension-registry.js'
+import { resolveBundledResourcesDirFromPackageRoot } from './bundled-resource-path.js'
 
 type PiCodingAgentModule = typeof import('@gsd/pi-coding-agent')
 
@@ -25,7 +25,7 @@ function loadPiCodingAgentModule(): Promise<PiCodingAgentModule> {
 // that use gsd — causing stale/broken extensions to be synced to ~/.gsd/agent/.
 // dist/resources/ is populated by the build step (`npm run copy-resources`) and
 // reflects the built state, not the currently checked-out branch.
-const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const resourcesDir = resolveBundledResourcesDirFromPackageRoot(packageRoot)
 const bundledExtensionsDir = join(resourcesDir, 'extensions')
 const resourceVersionManifestName = 'managed-resources.json'
@@ -51,7 +51,7 @@ interface ManagedResourceManifest {
   installedExtensionDirs?: string[]
 }
 
-export { discoverExtensionEntryPaths } from '../extension-runtime/extension-discovery.js'
+export { discoverExtensionEntryPaths } from './extension-discovery.js'
 
 export function getExtensionKey(entryPath: string, extensionsDir: string): string {
   const relPath = relative(extensionsDir, entryPath)

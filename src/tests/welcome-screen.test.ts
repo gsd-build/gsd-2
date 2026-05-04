@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { printWelcomeScreen } from '../../dist/onboarding/welcome-screen.js'
+import { printWelcomeScreen } from '../../dist/welcome-screen.js'
 
 function capture(opts: Parameters<typeof printWelcomeScreen>[0]): string {
   const chunks: string[] = []

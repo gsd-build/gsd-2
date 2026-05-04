@@ -9,7 +9,7 @@
  */
 
 import { type SettingsManager, setAllowedCommandPrefixes } from '@gsd/pi-coding-agent'
-import { setFetchAllowedUrls } from '../resources/extensions/search-the-web/url-utils.js'
+import { setFetchAllowedUrls } from './resources/extensions/search-the-web/url-utils.js'
 
 export function applySecurityOverrides(settingsManager: SettingsManager): void {
   // --- Command prefix allowlist ---

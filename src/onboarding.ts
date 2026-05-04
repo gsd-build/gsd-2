@@ -14,16 +14,16 @@ import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { AuthStorage } from '@gsd/pi-coding-agent'
-import { renderLogo } from '../cli/logo.js'
-import { agentDir } from '../app/app-paths.js'
-import { isClaudeCliReady } from '../startup/claude-cli-check.js'
+import { renderLogo } from './logo.js'
+import { agentDir } from './app-paths.js'
+import { isClaudeCliReady } from './claude-cli-check.js'
 import {
   markOnboardingComplete,
   markStepCompleted,
   markStepSkipped,
   isOnboardingComplete,
-} from '../resources/extensions/gsd/onboarding-state.js'
-import { getLlmProviderIds } from '../resources/extensions/gsd/setup-catalog.js'
+} from './resources/extensions/gsd/onboarding-state.js'
+import { getLlmProviderIds } from './resources/extensions/gsd/setup-catalog.js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -969,7 +969,7 @@ export async function runRemoteQuestionsStep(
     })
     if (p.isCancel(channelId) || !channelId) return null
 
-    const { saveRemoteQuestionsConfig } = await import('../providers/remote-questions-config.js')
+    const { saveRemoteQuestionsConfig } = await import('./remote-questions-config.js')
     saveRemoteQuestionsConfig('slack', (channelId as string).trim())
     p.log.success(`Slack channel: ${pc.green((channelId as string).trim())}`)
     return 'Slack'
@@ -1038,7 +1038,7 @@ export async function runRemoteQuestionsStep(
       return null
     }
 
-    const { saveRemoteQuestionsConfig } = await import('../providers/remote-questions-config.js')
+    const { saveRemoteQuestionsConfig } = await import('./remote-questions-config.js')
     saveRemoteQuestionsConfig('telegram', trimmedChatId)
     p.log.success(`Telegram chat: ${pc.green(trimmedChatId)}`)
     return 'Telegram'
@@ -1151,7 +1151,7 @@ async function runDiscordChannelStep(p: ClackModule, pc: PicoModule, token: stri
   }
 
   // Save remote questions config
-  const { saveRemoteQuestionsConfig } = await import('../providers/remote-questions-config.js')
+  const { saveRemoteQuestionsConfig } = await import('./remote-questions-config.js')
   saveRemoteQuestionsConfig('discord', channelId)
   const channelName = channels.find(ch => ch.id === channelId)?.name
   p.log.success(`Discord channel: ${pc.green(channelName ? `#${channelName}` : channelId)}`)

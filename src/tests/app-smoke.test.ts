@@ -33,7 +33,7 @@ function assertExtensionIndexExists(agentDir: string, extensionName: string): vo
 // ═══════════════════════════════════════════════════════════════════════════
 
 test("app-paths resolve to ~/.gsd/", async () => {
-  const { appRoot, agentDir, sessionsDir, authFilePath } = await import("../app/app-paths.js");
+  const { appRoot, agentDir, sessionsDir, authFilePath } = await import("../app-paths.ts");
   // Use homedir() — process.env.HOME is undefined on Windows (uses USERPROFILE instead)
   const { homedir } = await import("node:os");
   const home = homedir();
@@ -53,7 +53,7 @@ test("loader sets all 4 GSD_ env vars and PI_PACKAGE_DIR", async (t) => {
   const script = `
     import { fileURLToPath } from 'url';
     import { dirname, resolve, join, delimiter } from 'path';
-    import { agentDir } from '../app/app-paths.js';
+    import { agentDir } from './app-paths.js';
 
     const pkgDir = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'pkg');
     process.env.PI_PACKAGE_DIR = pkgDir;
@@ -82,7 +82,7 @@ test("loader sets all 4 GSD_ env vars and PI_PACKAGE_DIR", async (t) => {
   const output = execSync(
     `node --experimental-strip-types -e "
       process.chdir('${projectRoot}');
-      await import('../app/app-paths.js');
+      await import('./src/app-paths.ts');
     " 2>&1`,
     { encoding: "utf-8", cwd: projectRoot },
   );
@@ -92,12 +92,12 @@ test("loader sets all 4 GSD_ env vars and PI_PACKAGE_DIR", async (t) => {
   }
 
   // Direct logic verification (no subprocess needed)
-  const { agentDir: ad } = await import("../app/app-paths.js");
+  const { agentDir: ad } = await import("../app-paths.ts");
   assert.ok(ad.endsWith(join(".gsd", "agent")), "agentDir ends with .gsd/agent");
 
   // Verify that the env var is populated at runtime by checking the actual
   // extensions directory has discoverable entry points
-  const { discoverExtensionEntryPaths } = await import("../extension-runtime/extension-discovery.ts");
+  const { discoverExtensionEntryPaths } = await import("../extension-discovery.ts");
   const bundledExtensionsDir = join(projectRoot, existsSync(join(projectRoot, "dist", "resources"))
   ? "dist" : "src", "resources", "extensions");
   const discovered = discoverExtensionEntryPaths(bundledExtensionsDir);
@@ -123,7 +123,7 @@ test("checkNodeVersion rejects below-minimum versions and accepts at-or-above", 
   // Calls the actual pure function the loader invokes. If loader.ts ever
   // weakens the minimum (e.g. drops the < check), this test fails because
   // an old Node version would be incorrectly accepted.
-  const { checkNodeVersion, MIN_NODE_MAJOR } = await import("../startup/runtime-checks.js");
+  const { checkNodeVersion, MIN_NODE_MAJOR } = await import("../runtime-checks.ts");
 
   // Below minimum → not ok, surfaces the actual major
   const tooOld = checkNodeVersion("18.19.0", MIN_NODE_MAJOR);
@@ -147,7 +147,7 @@ test("checkNodeVersion rejects below-minimum versions and accepts at-or-above", 
 test("requireGit returns false when exec throws and true when it succeeds", async () => {
   // Calls the actual pure function the loader uses. Stubs the exec function
   // so we test the loader's real behavior with no subprocess flakiness.
-  const { requireGit } = await import("../startup/runtime-checks.js");
+  const { requireGit } = await import("../runtime-checks.ts");
 
   // Failure path: exec throws → loader treats git as missing
   let calls: Array<{ cmd: string; args: ReadonlyArray<string> }> = [];
@@ -174,7 +174,7 @@ test("loader MIN_NODE_MAJOR matches package.json engines field exactly", async (
   // Imports the actual exported constant from runtime-checks.ts (the same
   // module loader.ts consumes) and asserts STRICT equality with the major
   // version parsed from package.json's engines.node range.
-  const { MIN_NODE_MAJOR } = await import("../startup/runtime-checks.js");
+  const { MIN_NODE_MAJOR } = await import("../runtime-checks.ts");
 
   const pkg = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf-8"));
   const engineRange: string = pkg.engines?.node ?? "";
@@ -196,8 +196,8 @@ test("gsd update bypasses the managed-resource-mismatch gate; non-update command
   // shouldBypassManagedResourceMismatchGate('update') must return true,
   // proving 'update' bypasses it. cli.ts wires the predicate before the gate
   // call, so update escapes the gate.
-  const { getNewerManagedResourceVersion } = await import("../resource-runtime/resource-loader.js");
-  const { shouldBypassManagedResourceMismatchGate } = await import("../cli/cli-policy.js");
+  const { getNewerManagedResourceVersion } = await import("../resource-loader.ts");
+  const { shouldBypassManagedResourceMismatchGate } = await import("../cli-policy.ts");
 
   const tmp = mkdtempSync(join(tmpdir(), "gsd-update-bypass-"));
   const fakeAgentDir = join(tmp, "agent");
@@ -235,7 +235,7 @@ test("gsd update bypasses the managed-resource-mismatch gate; non-update command
 });
 
 test("managed resource skew ignores dev/build suffixes on the same release line", async (t) => {
-  const { getNewerManagedResourceVersion } = await import("../resource-runtime/resource-loader.js");
+  const { getNewerManagedResourceVersion } = await import("../resource-loader.ts");
 
   const tmp = mkdtempSync(join(tmpdir(), "gsd-version-normalize-"));
   const fakeAgentDir = join(tmp, "agent");
@@ -270,7 +270,7 @@ test("managed resource skew ignores dev/build suffixes on the same release line"
 // ═══════════════════════════════════════════════════════════════════════════
 
 test("initResources syncs extensions, agents, and skills to target dir", async (t) => {
-  const { initResources, readManagedResourceVersion } = await import("../resource-runtime/resource-loader.js");
+  const { initResources, readManagedResourceVersion } = await import("../resource-loader.ts");
   const tmp = mkdtempSync(join(tmpdir(), "gsd-resources-test-"));
   const fakeAgentDir = join(tmp, "agent");
 
@@ -298,7 +298,7 @@ test("initResources syncs extensions, agents, and skills to target dir", async (
 });
 
 test("initResources skips copy when managed version matches current version", async (t) => {
-  const { initResources, readManagedResourceVersion } = await import("../resource-runtime/resource-loader.js");
+  const { initResources, readManagedResourceVersion } = await import("../resource-loader.ts");
   const tmp = mkdtempSync(join(tmpdir(), "gsd-resources-skip-"));
   const fakeAgentDir = join(tmp, "agent");
 
@@ -334,7 +334,7 @@ test("initResources skips copy when managed version matches current version", as
 // ═══════════════════════════════════════════════════════════════════════════
 
 test("loadStoredEnvKeys hydrates process.env from auth.json", async (t) => {
-  const { loadStoredEnvKeys } = await import("../onboarding/wizard.js");
+  const { loadStoredEnvKeys } = await import("../wizard.ts");
   const { AuthStorage } = await import("@gsd/pi-coding-agent");
 
   const tmp = mkdtempSync(join(tmpdir(), "gsd-wizard-test-"));
@@ -383,7 +383,7 @@ test("loadStoredEnvKeys hydrates process.env from auth.json", async (t) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 test("loadStoredEnvKeys does not overwrite existing env vars", async (t) => {
-  const { loadStoredEnvKeys } = await import("../onboarding/wizard.js");
+  const { loadStoredEnvKeys } = await import("../wizard.ts");
   const { AuthStorage } = await import("@gsd/pi-coding-agent");
 
   const tmp = mkdtempSync(join(tmpdir(), "gsd-wizard-nooverwrite-"));

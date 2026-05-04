@@ -17,7 +17,7 @@ import { join } from 'node:path'
 import {
   resolveGsdAgentExtensionsDir,
   shouldUseAgentExtensionsDir,
-} from '../headless/headless-query.ts'
+} from '../headless-query.ts'
 
 function makeTempDir(): string {
   const dir = join(

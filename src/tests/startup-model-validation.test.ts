@@ -7,7 +7,7 @@
 
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { validateConfiguredModel } from "../startup/startup-model-validation.js";
+import { validateConfiguredModel } from "../startup-model-validation.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

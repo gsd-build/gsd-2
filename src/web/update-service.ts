@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process"
-import { compareSemver } from "../update/update-check.js"
+import { compareSemver } from "../update-check.ts"
 
 const NPM_PACKAGE_NAME = "gsd-pi"
 const REGISTRY_URL = `https://registry.npmjs.org/${NPM_PACKAGE_NAME}/latest`

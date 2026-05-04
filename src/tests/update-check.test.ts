@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:http'
 
-import { compareSemver, readUpdateCache, writeUpdateCache, checkForUpdates, fetchLatestVersionFromRegistry } from '../update/update-check.js'
+import { compareSemver, readUpdateCache, writeUpdateCache, checkForUpdates, fetchLatestVersionFromRegistry } from '../update-check.js'
 
 // ---------------------------------------------------------------------------
 // compareSemver

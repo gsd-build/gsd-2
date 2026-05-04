@@ -5,7 +5,7 @@
  *
  * The defence-in-depth that closed #1709 moved from `loader.ts` (an ad-hoc
  * `isNonExtensionLibrary` predicate) into `resolveExtensionEntries` in
- * `src/extension-runtime/extension-discovery.ts`: when a directory's package.json carries a
+ * `src/extension-discovery.ts`: when a directory's package.json carries a
  * `pi` manifest with no extensions, the discovery step returns `[]` so the
  * loader never attempts a factory call. These tests exercise that real
  * function directly — a prior revision duplicated the algorithm into the
@@ -17,7 +17,7 @@ import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { resolveExtensionEntries } from '../extension-runtime/extension-discovery.ts'
+import { resolveExtensionEntries } from '../extension-discovery.ts'
 
 function makeTempDir(): string {
   const dir = join(tmpdir(), `nonext-lib-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)

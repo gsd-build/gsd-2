@@ -1,5 +1,5 @@
-import { collectCurrentProjectRecoveryDiagnostics } from "../../../../src/web-services/recovery-diagnostics-service.ts"
-import { requireProjectCwd } from "../../../../src/web-services/bridge-service.ts"
+import { collectCurrentProjectRecoveryDiagnostics } from "../../../../src/web/recovery-diagnostics-service.ts"
+import { requireProjectCwd } from "../../../../src/web/bridge-service.ts"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"

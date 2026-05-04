@@ -17,7 +17,7 @@ import assert from 'node:assert/strict'
 import {
   OTHER_PROVIDERS,
   detectNativeProviderFromBaseUrl,
-} from '../onboarding/onboarding.js'
+} from '../onboarding.ts'
 
 test('MiniMax is offered in the API-key provider list', () => {
   const values = OTHER_PROVIDERS.map((p) => p.value)

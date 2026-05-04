@@ -51,7 +51,7 @@ class DynamicLinesComponent implements Component {
 }
 
 describe("TUI autocomplete shrink clearing (#3721)", () => {
-  it("clears deleted autocomplete rows relative to the real IME cursor row", () => {
+  it("clears deleted autocomplete rows relative to the content bottom, not the IME cursor row", () => {
     const terminal = new MockTTYTerminal();
     const tui = new TUI(terminal, false);
     const component = new DynamicLinesComponent([
@@ -77,12 +77,12 @@ describe("TUI autocomplete shrink clearing (#3721)", () => {
     (tui as any).doRender();
 
     assert.ok(terminal.writtenData.length >= 1, "shrink render should write a differential buffer");
-    // Diff math must use the actual terminal cursor row after IME positioning
-    // (row 1). Shrink target row is 3, so first move is down 2.
+    // Diff math must use the previous content-bottom baseline (row 5), not
+    // the IME cursor row (row 1). Shrink target row is 3, so first move is up 2.
     const buffer = terminal.writtenData[0];
     assert.ok(
-      buffer.startsWith("\x1b[?2026h\x1b[2B\r"),
-      `expected shrink diff to move down from IME cursor baseline, got ${JSON.stringify(buffer)}`,
+      buffer.startsWith("\x1b[?2026h\x1b[2A\r"),
+      `expected shrink diff to move up from content-bottom baseline, got ${JSON.stringify(buffer)}`,
     );
   });
 });

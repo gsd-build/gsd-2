@@ -376,7 +376,7 @@ jobs:
       - name: Validate managed RTK install
         run: >-
           node --experimental-strip-types --input-type=module -e
-          "const mod = await import('./src/rtk/rtk.ts');
+          "const mod = await import('./src/rtk.ts');
           const result = await mod.ensureRtkAvailable();
           if (!result.available || !result.binaryPath || !mod.validateRtkBinary(result.binaryPath)) {
             console.error('Managed RTK validation failed:', result);

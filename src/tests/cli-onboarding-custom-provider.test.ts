@@ -32,6 +32,6 @@ test("SettingsManager reads defaultProvider/defaultModel from the explicit agent
 });
 
 test("cli.ts wires SettingsManager.create with both cwd and agentDir (#3860)", () => {
-  const cliSource = readFileSync(join(import.meta.dirname, "..", "cli", "cli.ts"), "utf-8");
+  const cliSource = readFileSync(join(import.meta.dirname, "..", "cli.ts"), "utf-8");
   assert.match(cliSource, /SettingsManager\.create\(process\.cwd\(\),\s*agentDir\)/);
 });

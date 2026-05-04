@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 
-import { requireProjectCwd } from "../../../../src/web-services/bridge-service.ts";
+import { requireProjectCwd } from "../../../../src/web/bridge-service.ts";
 import { resolveSecurePath } from "../../../lib/secure-path.ts";
 
 export const runtime = "nodejs";

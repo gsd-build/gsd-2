@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 
-const { resolveGsdCliEntry } = await import("../../web-services/cli-entry.ts");
+const { resolveGsdCliEntry } = await import("../../web/cli-entry.ts");
 
 function makeFixture(paths: string[]): string {
   const root = mkdtempSync(join(tmpdir(), "gsd-cli-entry-"));

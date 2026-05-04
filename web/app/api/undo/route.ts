@@ -1,5 +1,5 @@
-import { collectUndoInfo, executeUndo } from "../../../../src/web-services/undo-service.ts"
-import { requireProjectCwd } from "../../../../src/web-services/bridge-service.ts"
+import { collectUndoInfo, executeUndo } from "../../../../src/web/undo-service.ts"
+import { requireProjectCwd } from "../../../../src/web/bridge-service.ts"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"

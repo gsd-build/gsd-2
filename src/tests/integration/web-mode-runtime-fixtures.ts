@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
-import { getProjectSessionsDir } from "../../cli/cli-web-branch.js"
+import { getProjectSessionsDir } from "../../cli-web-branch.ts"
 
 export type RuntimeWorkspaceFixture = {
   projectCwd: string

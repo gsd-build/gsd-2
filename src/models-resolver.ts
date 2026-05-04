@@ -12,7 +12,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { agentDir } from '../app/app-paths.js'
+import { agentDir } from './app-paths.js'
 
 const GSD_MODELS_PATH = join(agentDir, 'models.json')
 const PI_MODELS_PATH = join(homedir(), '.pi', 'agent', 'models.json')

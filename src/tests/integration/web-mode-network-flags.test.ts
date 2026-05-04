@@ -4,8 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-const cliWeb = await import('../../cli/cli-web-branch.js')
-const webMode = await import('../../cli/web-mode.js')
+const cliWeb = await import('../../cli-web-branch.ts')
+const webMode = await import('../../web-mode.ts')
 
 // ─── CLI flag parsing ────────────────────────────────────────────────
 

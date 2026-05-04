@@ -59,7 +59,7 @@ test("Windows launch points use shell-safe shims", () => {
 		"utf8",
 	);
 	const updateService = readFileSync(
-		path.join(process.cwd(), "src", "web-services", "update-service.ts"),
+		path.join(process.cwd(), "src", "web", "update-service.ts"),
 		"utf8",
 	);
 	const preExecution = readFileSync(

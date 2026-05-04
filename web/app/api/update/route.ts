@@ -2,7 +2,7 @@ import {
   checkForUpdate,
   getUpdateStatus,
   triggerUpdate,
-} from "../../../../src/web-services/update-service.ts"
+} from "../../../../src/web/update-service.ts"
 import { verifyAuthToken } from "../../../lib/auth-guard";
 
 export const runtime = "nodejs"

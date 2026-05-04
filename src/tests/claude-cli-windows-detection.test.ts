@@ -10,7 +10,7 @@ import { join } from "node:path";
  * automatically on win32, so npm-global installs fail to be detected and
  * the "Use Claude Code CLI" onboarding option silently disappears.
  *
- * Both the lightweight onboarding check (`src/startup/claude-cli-check.ts`) and
+ * Both the lightweight onboarding check (`src/claude-cli-check.ts`) and
  * the cached readiness check
  * (`src/resources/extensions/claude-code-cli/readiness.ts`) must carry
  * the `process.platform === 'win32' ? 'claude.cmd' : 'claude'` guard —
@@ -46,7 +46,7 @@ const WINDOWS_CMD_SHELL_GUARD =
  */
 function verifyCliCheckSelector(): void {
 	const source = readFileSync(
-		join(import.meta.dirname, "..", "startup", "claude-cli-check.ts"),
+		join(import.meta.dirname, "..", "claude-cli-check.ts"),
 		"utf-8",
 	);
 

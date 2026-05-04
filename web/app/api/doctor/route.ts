@@ -1,5 +1,5 @@
-import { collectDoctorData, applyDoctorFixes } from "../../../../src/web-services/doctor-service.ts"
-import { requireProjectCwd } from "../../../../src/web-services/bridge-service.ts"
+import { collectDoctorData, applyDoctorFixes } from "../../../../src/web/doctor-service.ts"
+import { requireProjectCwd } from "../../../../src/web/bridge-service.ts"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"

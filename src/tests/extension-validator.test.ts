@@ -8,7 +8,7 @@ import {
   checkNamespaceReservation,
   checkDependencyPlacement,
   validateExtensionPackage,
-} from '../extension-runtime/extension-validator.ts'
+} from '../extension-validator.ts'
 
 describe('checkInstallDiscriminator', () => {
   test('returns null for valid gsd.extension === true', () => {

@@ -6,20 +6,20 @@ import type {
 } from '@gsd/pi-coding-agent'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { agentDir, sessionsDir, authFilePath } from '../app/app-paths.js'
-import { initResources, buildResourceLoader, getNewerManagedResourceVersion } from '../resource-runtime/resource-loader.js'
-import { ensureManagedTools } from '../app/tool-bootstrap.js'
-import { loadStoredEnvKeys } from '../onboarding/wizard.js'
-import { migratePiCredentials } from '../providers/pi-migration.js'
-import { shouldRunOnboarding, runOnboarding } from '../onboarding/onboarding.js'
+import { agentDir, sessionsDir, authFilePath } from './app-paths.js'
+import { initResources, buildResourceLoader, getNewerManagedResourceVersion } from './resource-loader.js'
+import { ensureManagedTools } from './tool-bootstrap.js'
+import { loadStoredEnvKeys } from './wizard.js'
+import { migratePiCredentials } from './pi-migration.js'
+import { shouldRunOnboarding, runOnboarding } from './onboarding.js'
 import chalk from 'chalk'
-import { checkForUpdates } from '../update/update-check.js'
+import { checkForUpdates } from './update-check.js'
 import { shouldBypassManagedResourceMismatchGate } from './cli-policy.js'
 import { shouldRedirectAutoToHeadless } from './cli-auto-routing.js'
 import { printHelp, printSubcommandHelp } from './help-text.js'
-import { applySecurityOverrides } from '../security/security-overrides.js'
-import { validateConfiguredModel } from '../startup/startup-model-validation.js'
-import { migrateAnthropicDefaultToClaudeCode } from '../providers/provider-migrations.js'
+import { applySecurityOverrides } from './security-overrides.js'
+import { validateConfiguredModel } from './startup-model-validation.js'
+import { migrateAnthropicDefaultToClaudeCode } from './provider-migrations.js'
 import {
   buildHeadlessAutoArgs,
   parseCliArgs,
@@ -27,10 +27,10 @@ import {
   migrateLegacyFlatSessions,
 } from './cli-web-branch.js'
 import { stopWebMode } from './web-mode.js'
-import { getProjectSessionsDir } from '../app/project-sessions.js'
-import { markStartup, printStartupTimings } from '../startup/startup-timings.js'
-import { applyRtkProcessEnv, GSD_RTK_DISABLED_ENV, isTruthy } from '../rtk/rtk-shared.js'
-import type { EnsureRtkResult } from '../rtk/rtk.js'
+import { getProjectSessionsDir } from './project-sessions.js'
+import { markStartup, printStartupTimings } from './startup-timings.js'
+import { applyRtkProcessEnv, GSD_RTK_DISABLED_ENV, isTruthy } from './rtk-shared.js'
+import type { EnsureRtkResult } from './rtk.js'
 
 type PiCodingAgentModule = typeof import('@gsd/pi-coding-agent')
 
@@ -169,7 +169,7 @@ async function doRtkBootstrap(): Promise<void> {
   // Honor GSD_RTK_DISABLED if already explicitly set in the environment
   // (env var takes precedence over preferences for manual override).
   if (!rtkDisabled) {
-    const { loadEffectiveGSDPreferences } = await import('../resources/extensions/gsd/preferences.js')
+    const { loadEffectiveGSDPreferences } = await import('./resources/extensions/gsd/preferences.js')
     const prefs = loadEffectiveGSDPreferences()
     const rtkEnabled = prefs?.preferences.experimental?.rtk === true
     if (!rtkEnabled) {
@@ -189,7 +189,7 @@ async function doRtkBootstrap(): Promise<void> {
       reason: `${GSD_RTK_DISABLED_ENV} is set`,
     }
   } else {
-    const { bootstrapRtk } = await import('../rtk/rtk.js')
+    const { bootstrapRtk } = await import('./rtk.js')
     rtkStatus = await bootstrapRtk()
   }
   markStartup('bootstrapRtk')
@@ -211,7 +211,7 @@ function ensureRtkBootstrap(): Promise<void> {
 // command is blocked — only `update` should bypass the gate so the user can
 // actually upgrade out of the broken state. See shouldBypassManagedResourceMismatchGate.
 if (shouldBypassManagedResourceMismatchGate(cliFlags.messages[0])) {
-  const { runUpdate } = await import('../update/update-cmd.js')
+  const { runUpdate } = await import('./update-cmd.js')
   await runUpdate()
   process.exit(0)
 }
@@ -429,7 +429,7 @@ if (cliFlags.messages[0] === 'headless') {
   // headless-query loads from src/resources/ while auto/interactive load
   // from ~/.gsd/agent/extensions/ — different extension copies diverge.
   initResources(agentDir)
-  const { runHeadless, parseHeadlessArgs } = await import('../headless/headless.js')
+  const { runHeadless, parseHeadlessArgs } = await import('./headless.js')
   await runHeadless(parseHeadlessArgs(process.argv))
   process.exit(0)
 }
@@ -441,7 +441,7 @@ if (cliFlags.messages[0] === 'headless') {
  */
 async function runHeadlessFromAuto(headlessArgs: string[]): Promise<never> {
   await ensureRtkBootstrap()
-  const { runHeadless, parseHeadlessArgs } = await import('../headless/headless.js')
+  const { runHeadless, parseHeadlessArgs } = await import('./headless.js')
   const argv = [process.argv[0], process.argv[1], 'headless', ...headlessArgs]
   await runHeadless(parseHeadlessArgs(argv))
   process.exit(0)
@@ -470,7 +470,7 @@ if (
   cliFlags.listModels === undefined &&
   (cliFlags.messages[0] === 'worktree' || cliFlags.messages[0] === 'wt')
 ) {
-  const { handleList, handleMerge, handleClean, handleRemove } = await import('../worktrees/worktree-cli.js')
+  const { handleList, handleMerge, handleClean, handleRemove } = await import('./worktree-cli.js')
   const sub = cliFlags.messages[1]
   const subArgs = cliFlags.messages.slice(2)
 
@@ -514,7 +514,7 @@ loadStoredEnvKeys(authStorage)
 migratePiCredentials(authStorage)
 
 // Resolve models.json path with fallback to ~/.pi/agent/models.json
-const { resolveModelsJsonPath } = await import('../providers/models-resolver.js')
+const { resolveModelsJsonPath } = await import('./models-resolver.js')
 const modelsJsonPath = resolveModelsJsonPath()
 
 const modelRegistry = new ModelRegistry(authStorage, modelsJsonPath)
@@ -693,7 +693,7 @@ if (isPrintMode) {
 
   if (mode === 'mcp') {
     printStartupTimings()
-    const { startMcpServer } = await import('../mcp/mcp-server.js')
+    const { startMcpServer } = await import('./mcp-server.js')
 
     // Activate every registered tool before starting the MCP transport.
     // `session.agent.state.tools` is the *active* subset, not the full
@@ -725,7 +725,7 @@ if (isPrintMode) {
 // Worktree flag (-w) — create/resume a worktree for the interactive session
 // ---------------------------------------------------------------------------
 if (cliFlags.worktree) {
-  const { handleWorktreeFlag } = await import('../worktrees/worktree-cli.js')
+  const { handleWorktreeFlag } = await import('./worktree-cli.js')
   await handleWorktreeFlag(cliFlags.worktree)
 }
 
@@ -734,7 +734,7 @@ if (cliFlags.worktree) {
 // ---------------------------------------------------------------------------
 if (!cliFlags.worktree && !isPrintMode) {
   try {
-    const { showWorktreeStatusBanner } = await import('../worktrees/worktree-status-banner.js')
+    const { showWorktreeStatusBanner } = await import('./worktree-status-banner.js')
     showWorktreeStatusBanner(process.cwd())
   } catch { /* non-fatal */ }
 }
@@ -860,10 +860,10 @@ if (!process.stdin.isTTY || !process.stdout.isTTY) {
 // Welcome screen — shown on every fresh interactive session before TUI takes over.
 // Skip when the first-run banner was already printed in loader.ts (prevents double banner).
 if (!process.env.GSD_FIRST_RUN_BANNER) {
-  const { printWelcomeScreen } = await import('../onboarding/welcome-screen.js')
+  const { printWelcomeScreen } = await import('./welcome-screen.js')
   let remoteChannel: string | undefined
   try {
-    const { resolveRemoteConfig } = await import('../resources/extensions/remote-questions/config.js')
+    const { resolveRemoteConfig } = await import('./resources/extensions/remote-questions/config.js')
     const rc = resolveRemoteConfig()
     if (rc) remoteChannel = rc.channel
   } catch { /* non-fatal */ }

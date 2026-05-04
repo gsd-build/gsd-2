@@ -9,7 +9,7 @@
  * Usage: node scripts/compile-tests.mjs
  */
 
-import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { existsSync, symlinkSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -243,8 +243,6 @@ async function main() {
     return;
   }
 
-  await rm(DIST_TEST_DIR, { recursive: true, force: true });
-
   console.log(`Compiling ${entryPoints.length} files to dist-test/...`);
 
   // bundle:false transforms TypeScript but keeps import specifiers verbatim.
@@ -345,6 +343,7 @@ async function main() {
   // Remove stale compiled test files: dist-test entries whose source no longer exists
   // in a non-integration source directory (e.g. test moved to integration/).
   // Only cleans *.test.js and *.test.ts files to avoid touching non-test outputs.
+  const { rm } = await import('node:fs/promises');
   const testDirsToClean = [
     [join(DIST_TEST_DIR, 'src', 'tests'), join(ROOT, 'src', 'tests')],
     [join(DIST_TEST_DIR, 'src', 'resources', 'extensions', 'gsd', 'tests'),

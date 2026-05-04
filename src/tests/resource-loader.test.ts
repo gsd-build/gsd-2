@@ -32,7 +32,7 @@ function overrideHomeEnv(homeDir: string): () => void {
 }
 
 test("getExtensionKey normalizes top-level .ts and .js entry names to the same key", async () => {
-  const { getExtensionKey } = await import("../resource-runtime/resource-loader.js");
+  const { getExtensionKey } = await import("../resource-loader.ts");
   const extensionsDir = "/tmp/extensions";
 
   assert.equal(
@@ -50,7 +50,7 @@ test("getExtensionKey normalizes top-level .ts and .js entry names to the same k
 });
 
 test("hasStaleCompiledExtensionSiblings detects installed format drift against the bundled root", async (t) => {
-  const { hasStaleCompiledExtensionSiblings } = await import("../resource-runtime/resource-loader.js");
+  const { hasStaleCompiledExtensionSiblings } = await import("../resource-loader.ts");
   const tmp = mkdtempSync(join(tmpdir(), "gsd-resource-loader-"));
   const extensionsDir = join(tmp, "extensions");
   const bundledDir = join(tmp, "bundled");
@@ -74,7 +74,7 @@ test("hasStaleCompiledExtensionSiblings detects installed format drift against t
 });
 
 test("hasStaleCompiledExtensionSiblings detects nested bundled extension format drift", async (t) => {
-  const { hasStaleCompiledExtensionSiblings } = await import("../resource-runtime/resource-loader.js");
+  const { hasStaleCompiledExtensionSiblings } = await import("../resource-loader.ts");
   const tmp = mkdtempSync(join(tmpdir(), "gsd-resource-loader-nested-"));
   const extensionsDir = join(tmp, "extensions");
   const bundledDir = join(tmp, "bundled");
@@ -111,7 +111,7 @@ test("buildResourceLoader excludes duplicate top-level pi extensions when bundle
   writeFileSync(join(piExtensionsDir, "ask-user-questions.ts"), "export {};\n");
   writeFileSync(join(piExtensionsDir, "custom-extension.ts"), "export {};\n");
 
-  const { buildResourceLoader } = await import("../resource-runtime/resource-loader.js");
+  const { buildResourceLoader } = await import("../resource-loader.ts");
   const loader = await buildResourceLoader(fakeAgentDir) as { additionalExtensionPaths?: string[] };
   const additionalExtensionPaths = loader.additionalExtensionPaths ?? [];
 
@@ -140,7 +140,7 @@ test("buildResourceLoader includes caller-provided additional extension paths", 
 
   writeFileSync(cliExtensionPath, "export {};\n");
 
-  const { buildResourceLoader } = await import("../resource-runtime/resource-loader.js");
+  const { buildResourceLoader } = await import("../resource-loader.ts");
   const loader = await buildResourceLoader(fakeAgentDir, {
     additionalExtensionPaths: [cliExtensionPath],
   }) as { additionalExtensionPaths?: string[] };
@@ -154,7 +154,7 @@ test("buildResourceLoader includes caller-provided additional extension paths", 
 });
 
 test("initResources manifest tracks all bundled extension subdirectories including remote-questions (#2367)", async () => {
-  const { initResources } = await import("../resource-runtime/resource-loader.js");
+  const { initResources } = await import("../resource-loader.ts");
   const tmp = mkdtempSync(join(tmpdir(), "gsd-resource-loader-manifest-"));
   const fakeAgentDir = join(tmp, "agent");
 
@@ -187,7 +187,7 @@ test("initResources manifest tracks all bundled extension subdirectories includi
 });
 
 test("initResources prunes stale top-level extension siblings next to bundled compiled extensions", async (t) => {
-  const { initResources } = await import("../resource-runtime/resource-loader.js");
+  const { initResources } = await import("../resource-loader.ts");
   const tmp = mkdtempSync(join(tmpdir(), "gsd-resource-loader-sync-"));
   const fakeAgentDir = join(tmp, "agent");
   const bundledTsPath = join(fakeAgentDir, "extensions", "ask-user-questions.ts");
@@ -231,7 +231,7 @@ test("initResources prunes stale top-level extension siblings next to bundled co
 });
 
 test("pruneRemovedBundledExtensions removes stale subdirectory extensions not in current bundle", async () => {
-  const { initResources } = await import("../resource-runtime/resource-loader.js");
+  const { initResources } = await import("../resource-loader.ts");
   const tmp = mkdtempSync(join(tmpdir(), "gsd-resource-loader-prune-dirs-"));
   const fakeAgentDir = join(tmp, "agent");
 

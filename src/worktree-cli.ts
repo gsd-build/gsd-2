@@ -23,12 +23,11 @@ import { createJiti } from '@mariozechner/jiti'
 import { fileURLToPath } from 'node:url'
 import { generateWorktreeName } from './worktree-name-gen.js'
 import { existsSync } from 'node:fs'
-import { resolveBundledGsdExtensionModule } from '../extension-runtime/bundled-resource-path.js'
+import { resolveBundledGsdExtensionModule } from './bundled-resource-path.js'
 
 const jiti = createJiti(fileURLToPath(import.meta.url), { interopDefault: true, debug: false })
-const bundledResourceImportUrl = new URL('../loader.js', import.meta.url).href
 const gsdExtensionPath = (...segments: string[]) =>
-  resolveBundledGsdExtensionModule(bundledResourceImportUrl, segments.join('/'))
+  resolveBundledGsdExtensionModule(import.meta.url, segments.join('/'))
 
 // Lazily-loaded extension modules (loaded once on first use via jiti)
 let _ext: ExtensionModules | null = null

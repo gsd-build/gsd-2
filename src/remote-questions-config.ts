@@ -10,7 +10,7 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { appRoot } from "../app/app-paths.js";
+import { appRoot } from "./app-paths.js";
 
 // Inlined from preferences.ts to avoid crossing the compiled/uncompiled
 // boundary — this file is compiled by tsc, but preferences.ts is loaded

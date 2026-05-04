@@ -3,7 +3,7 @@ import {
   collectCurrentProjectOnboardingState,
   getProjectBridgeServiceForCwd,
   requireProjectCwd,
-} from "../../../../../src/web-services/bridge-service.ts";
+} from "../../../../../src/web/bridge-service.ts";
 import { cancelShutdown, registerActiveStream } from "../../../../lib/shutdown-gate";
 
 export const runtime = "nodejs";

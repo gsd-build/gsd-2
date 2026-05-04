@@ -3,7 +3,7 @@
 
 import test, { describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildHeadlessAutoArgs, parseCliArgs } from '../cli/cli-web-branch.js'
+import { buildHeadlessAutoArgs, parseCliArgs } from '../cli-web-branch.ts'
 
 function parse(...args: string[]) {
   return parseCliArgs(['node', 'gsd', ...args])

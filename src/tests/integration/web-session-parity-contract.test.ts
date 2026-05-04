@@ -10,8 +10,8 @@ import { StringDecoder } from "node:string_decoder"
 import type { RpcSessionState } from "@gsd-build/contracts"
 
 const repoRoot = process.cwd()
-const bridge = await import("../../web-services/bridge-service.ts")
-const onboarding = await import("../../web-services/onboarding-service.ts")
+const bridge = await import("../../web/bridge-service.ts")
+const onboarding = await import("../../web/onboarding-service.ts")
 const browserRoute = await import("../../../web/app/api/session/browser/route.ts")
 const manageRoute = await import("../../../web/app/api/session/manage/route.ts")
 const gitRoute = await import("../../../web/app/api/git/route.ts")

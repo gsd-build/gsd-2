@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { hasDirectAnthropicApiKey, migrateAnthropicDefaultToClaudeCode, shouldMigrateAnthropicToClaudeCode } from "../providers/provider-migrations.js"
+import { hasDirectAnthropicApiKey, migrateAnthropicDefaultToClaudeCode, shouldMigrateAnthropicToClaudeCode } from "../provider-migrations.ts"
 
 function makeAuthStorage(credentials: unknown[]) {
   return {

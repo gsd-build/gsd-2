@@ -20,7 +20,6 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const gsdDir = join(__dirname, "..");
-const WORKFLOW_MCP_TEST_TIMEOUT_MS = 90_000;
 
 type ElicitPayload = {
   message: string;
@@ -296,9 +295,9 @@ test("workflow MCP launch config reaches mutation tools over stdio", async () =>
   });
 
   try {
-    await client.connect(transport, { timeout: WORKFLOW_MCP_TEST_TIMEOUT_MS });
+    await client.connect(transport, { timeout: 30_000 });
 
-    const tools = await client.listTools(undefined, { timeout: WORKFLOW_MCP_TEST_TIMEOUT_MS });
+    const tools = await client.listTools(undefined, { timeout: 30_000 });
     assert.ok(
       (tools.tools ?? []).some((tool) => tool.name === "gsd_plan_slice"),
       "expected workflow MCP surface to expose gsd_plan_slice",
@@ -326,7 +325,7 @@ test("workflow MCP launch config reaches mutation tools over stdio", async () =>
         },
       },
       undefined,
-      { timeout: WORKFLOW_MCP_TEST_TIMEOUT_MS },
+      { timeout: 30_000 },
     );
     assert.equal(askResult.isError, undefined);
     assert.equal(
@@ -365,7 +364,7 @@ test("workflow MCP launch config reaches mutation tools over stdio", async () =>
         },
       },
       undefined,
-      { timeout: WORKFLOW_MCP_TEST_TIMEOUT_MS },
+      { timeout: 30_000 },
     );
     assert.equal(milestoneResult.isError, undefined);
     assert.match(
@@ -396,7 +395,7 @@ test("workflow MCP launch config reaches mutation tools over stdio", async () =>
         },
       },
       undefined,
-      { timeout: WORKFLOW_MCP_TEST_TIMEOUT_MS },
+      { timeout: 30_000 },
     );
     assert.equal(sliceResult.isError, undefined);
     assert.match(
@@ -467,7 +466,7 @@ test("workflow MCP ask_user_questions uses stdio elicitation round-trip", async 
   });
 
   try {
-    await client.connect(transport, { timeout: WORKFLOW_MCP_TEST_TIMEOUT_MS });
+    await client.connect(transport, { timeout: 30_000 });
 
     const result = await client.callTool(
       {
@@ -487,7 +486,7 @@ test("workflow MCP ask_user_questions uses stdio elicitation round-trip", async 
         },
       },
       undefined,
-      { timeout: WORKFLOW_MCP_TEST_TIMEOUT_MS },
+      { timeout: 30_000 },
     );
 
     assert.ok(requestSeen, "expected stdio transport to forward an elicitation request");

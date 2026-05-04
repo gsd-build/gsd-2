@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const webMode = await import("../../cli/web-mode.js");
+const webMode = await import("../../web-mode.ts");
 
 // ---------------------------------------------------------------------------
 // #2628 — On Windows, child processes spawned by web-mode must set

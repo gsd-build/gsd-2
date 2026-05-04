@@ -1,8 +1,8 @@
 import {
   getOnboardingService,
   type OnboardingState,
-} from "../../../../src/web-services/onboarding-service.ts";
-import { requireProjectCwd } from "../../../../src/web-services/bridge-service.ts";
+} from "../../../../src/web/onboarding-service.ts";
+import { requireProjectCwd } from "../../../../src/web/bridge-service.ts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

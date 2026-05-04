@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
  */
 
 test("computeResourceFingerprint detects same-size content edits (#4787)", async (t) => {
-  const { computeResourceFingerprint } = await import("../resource-runtime/resource-loader.js");
+  const { computeResourceFingerprint } = await import("../resource-loader.ts");
 
   const tmp = mkdtempSync(join(tmpdir(), "gsd-fingerprint-content-"));
   t.after(() => { rmSync(tmp, { recursive: true, force: true }); });
@@ -51,7 +51,7 @@ test("computeResourceFingerprint detects same-size content edits (#4787)", async
 });
 
 test("syncResourceDir overwrites same-size stale content on refresh (#4787)", async (t) => {
-  const { syncResourceDir } = await import("../resource-runtime/resource-loader.js");
+  const { syncResourceDir } = await import("../resource-loader.ts");
 
   const tmp = mkdtempSync(join(tmpdir(), "gsd-sync-samesize-"));
   t.after(() => { rmSync(tmp, { recursive: true, force: true }); });

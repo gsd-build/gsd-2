@@ -4,7 +4,7 @@ import { delimiter } from "node:path";
 import {
   parseBundledExtensionPaths,
   serializeBundledExtensionPaths,
-} from "../extension-runtime/bundled-extension-paths.ts";
+} from "../bundled-extension-paths.ts";
 
 test("bundled extension paths use the platform delimiter by default", () => {
   const paths = ["/tmp/gsd/a.ts", "/tmp/gsd/b.ts"];

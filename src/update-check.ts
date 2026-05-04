@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, join, resolve as resolvePath, sep } from 'node:path'
 import { homedir } from 'node:os'
 import chalk from 'chalk'
-import { appRoot } from '../app/app-paths.js'
+import { appRoot } from './app-paths.js'
 import { execSync } from 'node:child_process'
 
 const CACHE_FILE = join(appRoot, '.update-check')

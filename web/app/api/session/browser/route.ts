@@ -1,7 +1,7 @@
 import {
   collectSessionBrowserPayload,
   requireProjectCwd,
-} from "../../../../../src/web-services/bridge-service.ts"
+} from "../../../../../src/web/bridge-service.ts"
 import {
   isSessionBrowserNameFilter,
   isSessionBrowserSortMode,

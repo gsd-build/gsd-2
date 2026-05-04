@@ -5,7 +5,7 @@ import { test } from "node:test";
 import {
   resolveBundledGsdExtensionModule,
   resolveBundledResourcesDirFromPackageRoot,
-} from "../extension-runtime/bundled-resource-path.ts";
+} from "../bundled-resource-path.ts";
 
 test("partial dist/resources falls back to src/resources", () => {
   const pkg = "/pkg";

@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import { shouldRedirectAutoToHeadless } from '../cli/cli-auto-routing.js'
+import { shouldRedirectAutoToHeadless } from '../cli-auto-routing.js'
 
 test('routes `gsd auto` with piped stdout to headless mode (#2732)', () => {
   assert.equal(shouldRedirectAutoToHeadless('auto', true, false), true)
@@ -23,7 +23,7 @@ test('routes `gsd auto` with piped stdin to headless mode', () => {
   assert.equal(shouldRedirectAutoToHeadless('auto', false, true), true)
 })
 
-test('src/cli/cli.ts routes `gsd auto` with piped stdout through the headless entrypoint', () => {
+test('src/cli.ts routes `gsd auto` with piped stdout through the headless entrypoint', () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'gsd-auto-cli-route-'))
   const loaderPath = join(tempDir, 'stub-loader.mjs')
   try {
@@ -93,7 +93,7 @@ export async function resolve(specifier, context, nextResolve) {
   if (specifier === '@gsd/pi-ai' || specifier === '@gsd/pi-ai/oauth') return { url: 'stub:pi-ai', shortCircuit: true }
   if (specifier === '@gsd/pi-tui') return { url: 'stub:pi-tui', shortCircuit: true }
   if (specifier === 'chalk') return { url: 'stub:chalk', shortCircuit: true }
-  if (specifier === '../headless/headless.js' && context.parentURL?.endsWith('/src/cli/cli.ts')) {
+  if (specifier === './headless.js' && context.parentURL?.endsWith('/src/cli.ts')) {
     return { url: 'stub:headless', shortCircuit: true }
   }
   if (
@@ -125,7 +125,7 @@ export async function load(url, context, nextLoad) {
       '--import',
       `data:text/javascript,${encodeURIComponent(registerLoader)}`,
       '--experimental-strip-types',
-      join(process.cwd(), 'src', 'cli', 'cli.ts'),
+      join(process.cwd(), 'src', 'cli.ts'),
       'auto',
       '--model',
       'test-model',

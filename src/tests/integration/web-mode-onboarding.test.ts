@@ -19,8 +19,8 @@ import {
 
 const repoRoot = process.cwd();
 
-const bridge = await import("../../web-services/bridge-service.ts");
-const onboarding = await import("../../web-services/onboarding-service.ts");
+const bridge = await import("../../web/bridge-service.ts");
+const onboarding = await import("../../web/onboarding-service.ts");
 const bootRoute = await import("../../../web/app/api/boot/route.ts");
 const onboardingRoute = await import("../../../web/app/api/onboarding/route.ts");
 const commandRoute = await import("../../../web/app/api/session/command/route.ts");

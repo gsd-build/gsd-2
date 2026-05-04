@@ -18,13 +18,13 @@ function distUrl(filename: string): string {
 test('mcp-server module imports without errors', async () => {
   // Import from the compiled dist output to avoid subpath resolution issues
   // that occur when the resolve-ts test hook rewrites .js -> .ts paths.
-  const mod = await import(distUrl('mcp/mcp-server.js'))
+  const mod = await import(distUrl('mcp-server.js'))
   assert.ok(mod, 'module should be importable')
   assert.strictEqual(typeof mod.startMcpServer, 'function', 'startMcpServer should be a function')
 })
 
 test('startMcpServer accepts the correct argument shape', async () => {
-  const { startMcpServer } = await import(distUrl('mcp/mcp-server.js'))
+  const { startMcpServer } = await import(distUrl('mcp-server.js'))
 
   assert.strictEqual(typeof startMcpServer, 'function')
   assert.strictEqual(startMcpServer.length, 1, 'startMcpServer should accept one argument')

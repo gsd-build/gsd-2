@@ -8,7 +8,7 @@ import { PassThrough } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 
 const repoRoot = process.cwd();
-const bridge = await import("../../web-services/bridge-service.ts");
+const bridge = await import("../../web/bridge-service.ts");
 
 // ---------------------------------------------------------------------------
 // Helpers (same shape as web-bridge-contract.test.ts)

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { webPreferencesPath } from "../../../../src/app/app-paths.js";
+import { webPreferencesPath } from "../../../../src/app-paths.ts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

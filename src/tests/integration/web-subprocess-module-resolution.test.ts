@@ -5,7 +5,7 @@ import { join } from "node:path"
 import {
   isUnderNodeModules,
   resolveSubprocessModule,
-} from "../../web-services/ts-subprocess-flags.ts"
+} from "../../web/ts-subprocess-flags.ts"
 
 // ---------------------------------------------------------------------------
 // isUnderNodeModules — exported utility
@@ -122,7 +122,7 @@ test("bridge-service workspace-index subprocess uses compiled JS when under node
   // Verify bridge-service.ts calls resolveSubprocessModule for workspace-index
   const { readFileSync } = await import("node:fs")
   const bridgeSource = readFileSync(
-    join(process.cwd(), "src", "web-services", "bridge-service.ts"),
+    join(process.cwd(), "src", "web", "bridge-service.ts"),
     "utf-8",
   )
 
@@ -137,11 +137,11 @@ test("bridge-service workspace-index subprocess uses compiled JS when under node
 test("all web service files use resolveSubprocessModule instead of hardcoded .ts paths (source audit)", async () => {
   const { readFileSync, readdirSync } = await import("node:fs")
 
-  const serviceFiles = readdirSync(join(process.cwd(), "src", "web-services"))
+  const serviceFiles = readdirSync(join(process.cwd(), "src", "web"))
     .filter((f: string) => f.endsWith("-service.ts"))
 
   for (const file of serviceFiles) {
-    const source = readFileSync(join(process.cwd(), "src", "web-services", file), "utf-8")
+    const source = readFileSync(join(process.cwd(), "src", "web", file), "utf-8")
 
     // If the service file imports resolveTypeStrippingFlag it spawns subprocesses
     // and must also use resolveSubprocessModule

@@ -297,6 +297,12 @@ describe("TUI cursor tracking regression (#3764)", () => {
       1,
       "hardwareCursorRow should be at IME position (row 1) after first render",
     );
+    assert.strictEqual(
+      (tui as any).contentCursorRow,
+      4,
+      "contentCursorRow should track rendered content-bottom row before IME reposition",
+    );
+
     // Shrink content
     terminal.writtenData = [];
     component.lines = [
@@ -307,16 +313,16 @@ describe("TUI cursor tracking regression (#3764)", () => {
 
     (tui as any).doRender();
 
-    assert.ok(
-      terminal.writtenData[0].startsWith("\x1b[?2026h\x1b[1B\r"),
-      `shrink diff should move from actual IME cursor row to new content bottom, got ${JSON.stringify(terminal.writtenData[0])}`,
-    );
-
     // After shrink, hardwareCursorRow should be at IME position again
     assert.strictEqual(
       (tui as any).hardwareCursorRow,
       1,
       "hardwareCursorRow should be at IME position after shrink render",
+    );
+    assert.strictEqual(
+      (tui as any).contentCursorRow,
+      2,
+      "contentCursorRow should update to new content-bottom row after shrink",
     );
   });
 });

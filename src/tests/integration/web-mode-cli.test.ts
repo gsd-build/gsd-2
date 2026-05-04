@@ -6,8 +6,8 @@ import { tmpdir } from 'node:os'
 
 const projectRoot = process.cwd()
 
-const cliWeb = await import('../../cli/cli-web-branch.js')
-const webMode = await import('../../cli/web-mode.js')
+const cliWeb = await import('../../cli-web-branch.ts')
+const webMode = await import('../../web-mode.ts')
 
 test('parseCliArgs recognizes --web explicitly', () => {
   const flags = cliWeb.parseCliArgs(['node', 'dist/loader.js', '--web'])
@@ -30,7 +30,7 @@ test('package hooks declare a concrete staged web host', () => {
 })
 
 test('web mode launcher defines or imports a browser opener', () => {
-  const source = readFileSync(join(projectRoot, 'src', 'cli', 'web-mode.ts'), 'utf-8')
+  const source = readFileSync(join(projectRoot, 'src', 'web-mode.ts'), 'utf-8')
   // openBrowser is now defined directly in web-mode.ts (was previously imported from onboarding.js)
   assert.match(source, /openBrowser/)
 })
@@ -44,7 +44,7 @@ test('cli.ts branches to web mode before interactive startup and preserves cwd-s
 
   t.after(() => { rmSync(tmp, { recursive: true, force: true }) });
 
-  const cliSource = readFileSync(join(projectRoot, 'src', 'cli', 'cli.ts'), 'utf-8')
+  const cliSource = readFileSync(join(projectRoot, 'src', 'cli.ts'), 'utf-8')
   const branchIndex = cliSource.indexOf('const webBranch = await runWebCliBranch')
   const modelRegistryIndex = cliSource.indexOf('const modelRegistry =')
   assert.ok(branchIndex !== -1, 'cli.ts contains an explicit web branch handoff')

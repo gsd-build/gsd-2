@@ -1,5 +1,5 @@
-import { collectCleanupData, executeCleanup } from "../../../../src/web-services/cleanup-service.ts"
-import { requireProjectCwd } from "../../../../src/web-services/bridge-service.ts"
+import { collectCleanupData, executeCleanup } from "../../../../src/web/cleanup-service.ts"
+import { requireProjectCwd } from "../../../../src/web/bridge-service.ts"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"

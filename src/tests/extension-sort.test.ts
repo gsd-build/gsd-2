@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join, basename, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
-import { sortExtensionPaths } from '../extension-runtime/extension-sort.ts'
+import { sortExtensionPaths } from '../extension-sort.ts'
 
 function makeTempDir(): string {
   const dir = join(tmpdir(), `ext-sort-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)

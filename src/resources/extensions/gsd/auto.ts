@@ -1949,15 +1949,15 @@ export async function startAuto(
     // Re-sync managed resources on resume so long-lived auto sessions pick up
     // bundled extension updates before resume-time verification/state logic runs.
     // GSD_PKG_ROOT is set by loader.ts and points to the gsd-pi package root.
-    // The relative import ("../../../resource-runtime/resource-loader.js") only works from the source
+    // The relative import ("../../../resource-loader.js") only works from the source
     // tree; deployed extensions live at ~/.gsd/agent/extensions/gsd/ where the
     // relative path resolves to ~/.gsd/agent/resource-loader.js which doesn't exist.
     // Using GSD_PKG_ROOT constructs a correct absolute path in both contexts (#3949).
     const agentDir = process.env.GSD_CODING_AGENT_DIR || join(gsdHome(), "agent");
     const pkgRoot = process.env.GSD_PKG_ROOT;
     const resourceLoaderPath = pkgRoot
-      ? pathToFileURL(join(pkgRoot, "dist", "resource-runtime", "resource-loader.js")).href
-      : new URL("../../../resource-runtime/resource-loader.js", import.meta.url).href;
+      ? pathToFileURL(join(pkgRoot, "dist", "resource-loader.js")).href
+      : new URL("../../../resource-loader.js", import.meta.url).href;
     const { initResources } = await import(resourceLoaderPath);
     initResources(agentDir);
     // Open the project DB before rebuild/derive so resume uses DB-backed

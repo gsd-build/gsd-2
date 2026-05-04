@@ -1,5 +1,5 @@
-import { collectHistoryData } from "../../../../src/web-services/history-service.ts"
-import { requireProjectCwd } from "../../../../src/web-services/bridge-service.ts"
+import { collectHistoryData } from "../../../../src/web/history-service.ts"
+import { requireProjectCwd } from "../../../../src/web/bridge-service.ts"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"

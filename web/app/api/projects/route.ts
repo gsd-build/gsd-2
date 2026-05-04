@@ -2,8 +2,8 @@ import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
-import { discoverProjects } from "../../../../src/web-services/project-discovery-service.ts";
-import { detectProjectKind } from "../../../../src/web-services/bridge-service.ts";
+import { discoverProjects } from "../../../../src/web/project-discovery-service.ts";
+import { detectProjectKind } from "../../../../src/web/bridge-service.ts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
