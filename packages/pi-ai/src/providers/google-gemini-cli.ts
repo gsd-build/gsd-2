@@ -103,6 +103,22 @@ const MAX_EMPTY_STREAM_RETRIES = 2;
 const EMPTY_STREAM_BASE_DELAY_MS = 500;
 const CLAUDE_THINKING_BETA_HEADER = "interleaved-thinking-2025-05-14";
 
+export function buildModelNotFoundErrorMessage(modelId: string, isAntigravity: boolean): string {
+	if (isAntigravity) {
+		return (
+			`Antigravity API error (404): Model "${modelId}" was not found. ` +
+			`This model may have been removed or renamed in the Antigravity backend. ` +
+			`Please switch to a supported Antigravity model (e.g., claude-opus-4-6-thinking or gemini-3.1-pro-high).`
+		);
+	}
+	return (
+		`Cloud Code Assist API error (404): Model "${modelId}" was not found. ` +
+		`This model may not be available via Cloud Code Assist. ` +
+		`Try using the "google" provider with a GOOGLE_API_KEY instead, ` +
+		`or switch to a supported model (e.g., gemini-2.5-pro).`
+	);
+}
+
 /**
  * Extract retry delay from Gemini error response (in milliseconds).
  * Checks headers first (Retry-After, x-ratelimit-reset, x-ratelimit-reset-after),
@@ -447,12 +463,7 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli", GoogleGe
 
 					// Not retryable or max retries exceeded
 					if (response.status === 404) {
-						throw new Error(
-							`Cloud Code Assist API error (404): Model "${model.id}" was not found. ` +
-							`This model may not be available via Cloud Code Assist. ` +
-							`Try using the "google" provider with a GOOGLE_API_KEY instead, ` +
-							`or switch to a supported model (e.g., gemini-2.5-pro).`,
-						);
+						throw new Error(buildModelNotFoundErrorMessage(model.id, isAntigravity));
 					}
 					throw new Error(`Cloud Code Assist API error (${response.status}): ${extractErrorMessage(errorText)}`);
 				} catch (error) {
