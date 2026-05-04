@@ -32,7 +32,6 @@ import { isInfrastructureError, isTransientCooldownError, getCooldownRetryAfterM
 import { ModelPolicyDispatchBlockedError } from "../auto-model-selection.js";
 import { resolveEngine } from "../engine-resolver.js";
 import { logWarning } from "../workflow-logger.js";
-import { gsdRoot } from "../paths.js";
 import { heartbeatAutoWorker } from "../db/auto-workers.js";
 import {
   recordDispatchClaim,
@@ -45,13 +44,10 @@ import {
 } from "../db/unit-dispatches.js";
 import { refreshMilestoneLease } from "../db/milestone-leases.js";
 import { getRuntimeKv, setRuntimeKv } from "../db/runtime-kv.js";
-import { atomicWriteSync } from "../atomic-write.js";
 import { resolveUokFlags } from "../uok/flags.js";
 import { scheduleSidecarQueue } from "../uok/execution-graph.js";
 import { ExecutionGraphScheduler } from "../uok/execution-graph.js";
 import type { UokGraphNode } from "../uok/contracts.js";
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
 import { normalizeRealPath } from "../paths.js";
 import {
   decideCooldownRecovery,
@@ -73,6 +69,10 @@ import {
   resolveUnitRequestTimestamp,
   shouldUseCustomEnginePath,
 } from "./workflow-kernel.js";
+import {
+  hydrateCustomVerifyRetryCounts,
+  saveCustomVerifyRetryCounts,
+} from "./custom-verify-retry-store.js";
 import {
   settleDispatchCompleted,
   settleDispatchFailed,
@@ -124,62 +124,6 @@ function saveStuckState(s: AutoSession, state: LoopState): void {
     setRuntimeKv("global", scopeId, STUCK_RECOVERY_ATTEMPTS_KEY, state.stuckRecoveryAttempts);
   } catch (err) {
     debugLog("autoLoop", { phase: "save-stuck-state-failed", error: err instanceof Error ? err.message : String(err) });
-  }
-}
-
-// ── Custom workflow verification retry persistence ───────────────────────
-// Custom workflows can request verification retries after a step runs. The
-// retry budget must survive an auto-mode restart or a failing verifier can
-// consume a fresh retry budget every session.
-function customVerifyRetryStateDir(s: Pick<AutoSession, "activeRunDir" | "basePath">): string {
-  return s.activeRunDir ? join(s.activeRunDir, "runtime") : join(gsdRoot(s.basePath), "runtime");
-}
-
-function customVerifyRetryStatePath(s: Pick<AutoSession, "activeRunDir" | "basePath">): string {
-  return join(customVerifyRetryStateDir(s), "custom-verify-retries.json");
-}
-
-function hydrateCustomVerifyRetryCounts(s: AutoSession): Map<string, number> {
-  if (s.verificationRetryCount.size > 0) {
-    return s.verificationRetryCount;
-  }
-
-  try {
-    const raw = JSON.parse(readFileSync(customVerifyRetryStatePath(s), "utf-8"));
-    const counts = raw && typeof raw === "object" && raw.counts && typeof raw.counts === "object"
-      ? raw.counts as Record<string, unknown>
-      : {};
-    for (const [key, value] of Object.entries(counts)) {
-      if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-        s.verificationRetryCount.set(key, Math.floor(value));
-      }
-    }
-  } catch (err) {
-    debugLog("autoLoop", { phase: "load-custom-verify-retries-failed", error: err instanceof Error ? err.message : String(err) });
-  }
-
-  return s.verificationRetryCount;
-}
-
-function saveCustomVerifyRetryCounts(s: AutoSession): void {
-  const retryCounts = s.verificationRetryCount;
-  const filePath = customVerifyRetryStatePath(s);
-
-  try {
-    if (!retryCounts || retryCounts.size === 0) {
-      unlinkSync(filePath);
-      return;
-    }
-    mkdirSync(customVerifyRetryStateDir(s), { recursive: true });
-    atomicWriteSync(filePath, JSON.stringify({
-      counts: Object.fromEntries(retryCounts),
-      updatedAt: new Date().toISOString(),
-    }) + "\n");
-  } catch (err) {
-    const code = err && typeof err === "object" && "code" in err ? (err as { code?: string }).code : undefined;
-    if (code !== "ENOENT") {
-      debugLog("autoLoop", { phase: "save-custom-verify-retries-failed", error: err instanceof Error ? err.message : String(err) });
-    }
   }
 }
 
@@ -258,6 +202,20 @@ function openDispatchClaim(
 function logDispatchLedgerWriteFailure(err: unknown): void {
   debugLog("autoLoop", {
     phase: "dispatch-ledger-write-failed",
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
+
+function logCustomVerifyRetryLoadFailure(err: unknown): void {
+  debugLog("autoLoop", {
+    phase: "load-custom-verify-retries-failed",
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
+
+function logCustomVerifyRetrySaveFailure(err: unknown): void {
+  debugLog("autoLoop", {
+    phase: "save-custom-verify-retries-failed",
     error: err instanceof Error ? err.message : String(err),
   });
 }
@@ -682,10 +640,14 @@ export async function autoLoop(
         }
         if (verifyResult === "retry") {
           const recoveryKey = `${iterData.unitType}/${iterData.unitId}`;
-          const retryCounts = hydrateCustomVerifyRetryCounts(s);
+          const retryCounts = hydrateCustomVerifyRetryCounts(s, {
+            logFailure: logCustomVerifyRetryLoadFailure,
+          });
           const attempts = (retryCounts.get(recoveryKey) ?? 0) + 1;
           retryCounts.set(recoveryKey, attempts);
-          saveCustomVerifyRetryCounts(s);
+          saveCustomVerifyRetryCounts(s, {
+            logFailure: logCustomVerifyRetrySaveFailure,
+          });
           debugLog("autoLoop", { phase: "custom-engine-verify-retry", iteration, unitId: iterData.unitId, attempts });
           phaseReporter.report("custom-engine", "retry", {
             unitType: iterData.unitType,
@@ -719,7 +681,9 @@ export async function autoLoop(
 
         // Verification passed — mark step complete
         s.verificationRetryCount?.delete(`${iterData.unitType}/${iterData.unitId}`);
-        saveCustomVerifyRetryCounts(s);
+        saveCustomVerifyRetryCounts(s, {
+          logFailure: logCustomVerifyRetrySaveFailure,
+        });
         debugLog("autoLoop", { phase: "custom-engine-reconcile", iteration, unitId: iterData.unitId });
         const reconcileResult = await engine.reconcile(engineState, {
           unitType: iterData.unitType,
