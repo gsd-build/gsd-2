@@ -16,16 +16,16 @@ Pay particular attention to **Forward Intelligence** sections: fragile areas, ch
 
 {{dependencySummaries}}
 
-## Your Role in the Pipeline
+## Mission
 
-You have full tool access. Before decomposing, explore relevant code so the plan reflects reality.
+Plan this slice against real code, then persist the plan through the DB-backed tool.
 
 ### Delegate Recon and Sub-Decomposition When Useful
 
 This unit runs under `planning-dispatch`: use `subagent` when isolated context improves planning.
 
 - More than ~3 files for a subsystem -> dispatch **scout** and use its compressed report.
-- Slice spans subsystems and decomposition is unclear -> dispatch **planner** or use **decompose-into-slices** on a focused area, then integrate.
+- Slice spans subsystems and decomposition is unclear -> dispatch **planner** or use **decompose-into-slices** on the focused area, then integrate.
 - Current external facts are needed -> dispatch the **scout** agent.
 
 **Do not** dispatch implementation-tier agents (`worker`, `refactorer`, `tester`); they would write source and bypass this unit. Implementation belongs in `execute-task`.
@@ -45,17 +45,13 @@ Completed slices are immutable: never modify or remove complete slices.
 
 Then plan this slice against the possibly updated roadmap. The roadmap description may be stale; verify it against current code.
 
-### Explore Slice Scope
-
-Read relevant code. Confirm what exists, what changes, and boundaries. Use `rg`, `find`, and targeted reads.
-
 ### Source Files
 
 {{sourceFilePaths}}
 
 If slice research exists inlined above, trust it and skip redundant exploration.
 
-Executors later receive only their task plan, slice plan excerpt, and prior task summaries. They do not see research docs, roadmap, or REQUIREMENTS.md. Put every needed file path, step, input, and output in the task plan.
+Explore enough relevant code to confirm what exists, what changes, and boundaries. Executors later receive only their task plan, slice plan excerpt, and prior task summaries; put every needed path, step, input, and output in the task plan.
 
 Narrate decomposition reasoning proportionally: grouping, ordering risks, and verification strategy.
 
@@ -71,19 +67,19 @@ Then:
    - `{{taskPlanTemplatePath}}`
 2. {{skillActivation}} Record expected executor skills in each task plan's `skills_used` frontmatter.
 3. Define slice-level verification:
-   - For non-trivial slices: plan actual test files with real assertions. Name the files.
-   - For simple slices: executable commands or script assertions are fine.
-   - If the project is non-trivial and has no test framework, the first task should set one up.
-   - If this slice establishes a boundary contract, verification must exercise that contract.
-   - Planned test files may only read/import git-tracked paths. Do NOT plan tests using ignored paths such as `.gsd/`, `.planning/`, or `.audits/`; use inline fixtures or tracked samples.
+   - Non-trivial slices need real test files with assertions; name them.
+   - Simple slices can use executable commands or script assertions.
+   - If no test framework exists in a non-trivial project, make setup the first task.
+   - Boundary contracts need contract-exercising verification.
+   - Planned tests may only read/import git-tracked paths. Do NOT plan tests using ignored paths such as `.gsd/`, `.planning/`, or `.audits/`; use inline fixtures or tracked samples.
 4. For non-trivial slices, plan observability, proof level, and integration closure. Use `Observability / Diagnostics` when failure diagnosis matters. State proof truthfully; do not present fixture/contract-only proof as live integration. Omit for simple slices.
 5. For non-trivial slices, fill quality gates:
    - **Threat Surface (Q3):** abuse, data exposure, and input trust boundaries. Required for user input, auth, authorization, or sensitive data; omit for simple/internal refactors.
    - **Requirement Impact (Q4):** requirements touched, what to re-verify, and decisions to reconsider. Omit if none.
    - For non-trivial tasks with dependencies, shared resources, or input handling, fill Failure Modes (Q5), Load Profile (Q6), and Negative Tests (Q7). Omit for simple tasks.
 6. Decompose into tasks, each fitting one context window. Each task needs:
-   - a concrete, action-oriented title
-   - the inline task entry fields defined in the plan.md template (Why / Files / Do / Verify / Done when)
+   - a concrete action title
+   - inline task entry fields from the plan.md template: Why / Files / Do / Verify / Done when
    - a matching task plan file with description, steps, must-haves, verification, inputs, and expected output
    - **Inputs and Expected Output must list concrete backtick-wrapped file paths** (e.g. `` `src/types.ts` ``). These are machine-parsed for dependencies; vague prose breaks parallel execution. Every task must have at least one output file path.
    - Observability Impact section **only if the task touches runtime boundaries, async flows, or error paths** — omit it otherwise
