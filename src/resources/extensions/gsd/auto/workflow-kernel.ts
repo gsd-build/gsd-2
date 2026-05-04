@@ -135,6 +135,18 @@ export type CustomEngineRecoveryDecision =
       turnError: "custom-engine-verify-retry-exhausted";
     };
 
+export interface InfrastructureErrorInput {
+  code: string;
+  errorMessage: string;
+}
+
+export interface InfrastructureErrorDecision {
+  notifyMessage: string;
+  stopMessage: string;
+  turnStatus: "failed";
+  failureClass: "execution";
+}
+
 export interface WorkflowLoopInput {
   active: boolean;
   iteration: number;
@@ -388,5 +400,14 @@ export function decideCustomEngineRecovery(
     action: "stop",
     stopMessage: input.outcome === "stop" && input.reason ? input.reason : exhaustedReason,
     turnError: exhaustedTurnError,
+  };
+}
+
+export function decideInfrastructureError(input: InfrastructureErrorInput): InfrastructureErrorDecision {
+  return {
+    notifyMessage: `Auto-mode stopped: infrastructure error ${input.code} — ${input.errorMessage}`,
+    stopMessage: `Infrastructure error (${input.code}): not recoverable by retry`,
+    turnStatus: "failed",
+    failureClass: "execution",
   };
 }

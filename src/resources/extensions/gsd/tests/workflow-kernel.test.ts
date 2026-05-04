@@ -12,6 +12,7 @@ import {
   decideEngineDispatch,
   decideEngineReconcile,
   decideFinalizeResult,
+  decideInfrastructureError,
   decideIterationErrorRecovery,
   decideMemoryPressure,
   decideMinRequestInterval,
@@ -449,6 +450,21 @@ test("decideCustomEngineRecovery maps stop and retry outcomes to exhausted stops
       action: "stop",
       stopMessage: "Custom workflow verification for step-1 requested retry 4 times without passing.",
       turnError: "custom-engine-verify-retry-exhausted",
+    },
+  );
+});
+
+test("decideInfrastructureError returns stable stop and notification messages", () => {
+  assert.deepEqual(
+    decideInfrastructureError({
+      code: "ENOSPC",
+      errorMessage: "disk full",
+    }),
+    {
+      notifyMessage: "Auto-mode stopped: infrastructure error ENOSPC — disk full",
+      stopMessage: "Infrastructure error (ENOSPC): not recoverable by retry",
+      turnStatus: "failed",
+      failureClass: "execution",
     },
   );
 });

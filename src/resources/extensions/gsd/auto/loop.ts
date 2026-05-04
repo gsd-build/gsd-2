@@ -61,6 +61,7 @@ import {
   decideEngineDispatch,
   decideEngineReconcile,
   decideFinalizeResult,
+  decideInfrastructureError,
   decideIterationErrorRecovery,
   decideMemoryPressure,
   decideMinRequestInterval,
@@ -1040,22 +1041,19 @@ export async function autoLoop(
       // LLM budget on guaranteed failures.
       const infraCode = isInfrastructureError(loopErr);
       if (infraCode) {
+        const infraDecision = decideInfrastructureError({
+          code: infraCode,
+          errorMessage: msg,
+        });
         debugLog("autoLoop", {
           phase: "infrastructure-error",
           iteration,
           code: infraCode,
           error: msg,
         });
-        ctx.ui.notify(
-          `Auto-mode stopped: infrastructure error ${infraCode} — ${msg}`,
-          "error",
-        );
-        await deps.stopAuto(
-          ctx,
-          pi,
-          `Infrastructure error (${infraCode}): not recoverable by retry`,
-        );
-        finishTurn("failed", "execution", msg);
+        ctx.ui.notify(infraDecision.notifyMessage, "error");
+        await deps.stopAuto(ctx, pi, infraDecision.stopMessage);
+        finishTurn(infraDecision.turnStatus, infraDecision.failureClass, msg);
         break;
       }
 
