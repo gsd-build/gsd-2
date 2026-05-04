@@ -38,7 +38,6 @@ import {
   markRunning as markDispatchRunning,
   markCompleted as markDispatchCompleted,
   markFailed as markDispatchFailed,
-  markStuck as markDispatchStuck,
   getRecentForUnit as getRecentDispatchesForUnit,
   getRecentUnitKeysForProjectRoot,
 } from "../db/unit-dispatches.js";
@@ -77,6 +76,7 @@ import {
   settleDispatchCompleted,
   settleDispatchFailed,
 } from "./workflow-dispatch-ledger.js";
+import { openDispatchClaim } from "./workflow-dispatch-claim.js";
 import { completeWorkflowIteration } from "./workflow-iteration-completion.js";
 import { createWorkflowJournalReporter } from "./workflow-journal-reporter.js";
 import { createWorkflowPhaseReporter } from "./workflow-phase-reporter.js";
@@ -127,81 +127,28 @@ function saveStuckState(s: AutoSession, state: LoopState): void {
   }
 }
 
-/**
- * Phase B helper: open a unit_dispatches row in 'claimed' state and
- * immediately transition it to 'running'. Returns a tri-state result so
- * callers can distinguish between a degraded ledger write and an explicit
- * already-active rejection from the partial unique index.
- *
- * Single-worker compatibility: this function is best-effort and never
- * throws. The auto-loop must continue to behave identically when the
- * ledger is degraded.
- */
-type DispatchClaimOutcome =
-  | { kind: "opened"; dispatchId: number }
-  | { kind: "skip"; reason: "already-active" | "stale-lease"; existingId?: number; existingWorker?: string }
-  | { kind: "degraded" };
-
-function openDispatchClaim(
-  s: AutoSession,
-  flowId: string,
-  turnId: string,
-  iterData: IterationData,
-): DispatchClaimOutcome {
-  if (!s.workerId || s.milestoneLeaseToken === null) return { kind: "degraded" };
-  const mid = iterData.mid;
-  if (!mid) return { kind: "degraded" };
-
-  const recent = getRecentDispatchesForUnit(iterData.unitId, 1);
-  const attemptN = (recent[0]?.attempt_n ?? 0) + 1;
-
-  let claim: ReturnType<typeof recordDispatchClaim>;
-  try {
-    claim = recordDispatchClaim({
-      traceId: flowId,
-      turnId,
-      workerId: s.workerId,
-      milestoneLeaseToken: s.milestoneLeaseToken,
-      milestoneId: mid,
-      sliceId: iterData.state.activeSlice?.id ?? null,
-      taskId: iterData.state.activeTask?.id ?? null,
-      unitType: iterData.unitType,
-      unitId: iterData.unitId,
-      attemptN,
-    });
-    if (!claim.ok) {
-      debugLog("autoLoop", {
-        phase: "dispatch-claim-rejected",
-        unitId: iterData.unitId,
-        reason: claim.error,
-        existingId: "existingId" in claim ? claim.existingId : undefined,
-        existingWorker: "existingWorker" in claim ? claim.existingWorker : undefined,
-      });
-      if (claim.error === "already_active") {
-        return {
-          kind: "skip",
-          reason: "already-active",
-          existingId: claim.existingId,
-          existingWorker: claim.existingWorker,
-        };
-      }
-      return { kind: "skip", reason: "stale-lease" };
-    }
-    markDispatchRunning(claim.dispatchId);
-    return { kind: "opened", dispatchId: claim.dispatchId };
-  } catch (err) {
-    debugLog("autoLoop", {
-      phase: "dispatch-claim-failed",
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return { kind: "degraded" };
-  }
-
-}
-
 function logDispatchLedgerWriteFailure(err: unknown): void {
   debugLog("autoLoop", {
     phase: "dispatch-ledger-write-failed",
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
+
+function logDispatchClaimRejected(details: {
+  unitId: string;
+  reason: string;
+  existingId?: number;
+  existingWorker?: string;
+}): void {
+  debugLog("autoLoop", {
+    phase: "dispatch-claim-rejected",
+    ...details,
+  });
+}
+
+function logDispatchClaimFailed(err: unknown): void {
+  debugLog("autoLoop", {
+    phase: "dispatch-claim-failed",
     error: err instanceof Error ? err.message : String(err),
   });
 }
@@ -812,7 +759,13 @@ export async function autoLoop(
       // null when DB unavailable, no worker registered, or no active lease
       // — those degraded paths fall through to the existing single-worker
       // semantics with no ledger entry, preserving back-compat.
-      const dispatchClaim = openDispatchClaim(s, flowId, turnId, iterData);
+      const dispatchClaim = openDispatchClaim(s, flowId, turnId, iterData, {
+        getRecentDispatchesForUnit,
+        recordDispatchClaim,
+        markDispatchRunning,
+        logClaimRejected: logDispatchClaimRejected,
+        logClaimFailed: logDispatchClaimFailed,
+      });
       const dispatchDecision = decideDispatchClaim(
         dispatchClaim.kind === "opened"
           ? { kind: "opened", dispatchId: dispatchClaim.dispatchId }
