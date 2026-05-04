@@ -53,6 +53,7 @@ import {
 } from "./db-decision-requirement-rows.js";
 import { rowToGate } from "./db-gate-rows.js";
 import { rowToArtifact, rowToMilestone, type ArtifactRow, type MilestoneRow } from "./db-milestone-artifact-rows.js";
+import { backupDatabaseBeforeMigration } from "./db-migration-backup.js";
 import { isMemoriesFtsAvailableSchema, tryCreateMemoriesFtsSchema } from "./db-memory-fts-schema.js";
 import { createDbOpenState, type DbOpenPhase } from "./db-open-state.js";
 import { createRuntimeKvTableV25 } from "./db-runtime-kv-schema.js";
@@ -147,24 +148,11 @@ function migrateSchema(db: DbAdapter): void {
   const currentVersion = getCurrentSchemaVersion(db);
   if (currentVersion >= SCHEMA_VERSION) return;
 
-  // Backup database before migration so a mid-migration crash doesn't
-  // leave a partially-migrated DB with no recovery path.
-  // WAL-safe: checkpoint first to flush WAL into the main DB file, then copy.
-  if (currentPath && currentPath !== ":memory:" && existsSync(currentPath)) {
-    try {
-      const backupPath = `${currentPath}.backup-v${currentVersion}`;
-      if (!existsSync(backupPath)) {
-        // Flush WAL to main DB file before copying — without this, the backup
-        // may be missing committed data that only exists in the -wal file.
-        try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* checkpoint is best-effort */ }
-        copyFileSync(currentPath, backupPath);
-      }
-    } catch (backupErr) {
-      // Log but proceed — blocking migration leaves the DB stuck at an old
-      // schema version permanently on read-only or full filesystems.
-      logWarning("db", `Pre-migration backup failed: ${backupErr instanceof Error ? backupErr.message : String(backupErr)}`);
-    }
-  }
+  backupDatabaseBeforeMigration(db, currentPath, currentVersion, {
+    existsSync,
+    copyFileSync,
+    logWarning,
+  });
 
   db.exec("BEGIN");
   try {
