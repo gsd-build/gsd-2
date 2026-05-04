@@ -1,4 +1,4 @@
-import { closeSync, fsyncSync, openSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, fsyncSync, openSync, renameSync, writeSync } from "node:fs";
 
 /**
  * Atomically write a file by writing to a temporary path then renaming.
@@ -7,15 +7,15 @@ import { closeSync, fsyncSync, openSync, renameSync, writeFileSync } from "node:
  */
 export function atomicWriteFileSync(filePath: string, content: string | Buffer, encoding?: BufferEncoding): void {
 	const tmpPath = filePath + ".tmp";
-	writeFileSync(tmpPath, content, encoding);
-
-	const fd = openSync(tmpPath, "r");
+	const buf = Buffer.isBuffer(content) ? content : Buffer.from(content, encoding ?? "utf8");
+	const fd = openSync(tmpPath, "w");
 	try {
+		writeSync(fd, buf);
 		fsyncSync(fd);
 	} finally {
 		closeSync(fd);
 	}
-
+	
 	renameSync(tmpPath, filePath);
 }
 
