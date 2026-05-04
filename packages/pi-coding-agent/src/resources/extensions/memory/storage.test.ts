@@ -96,8 +96,11 @@ describe("MemoryStorage debounced persistence", () => {
 	});
 
 	it("uses DB snapshot atomic helper for persistence (guard against torn-write regressions)", () => {
-		const src = readFileSync(new URL("./storage.ts", import.meta.url), "utf-8");
-		assert.match(src, /atomicWriteDbSnapshotSync\(this\.dbPath,\s*data\)/);
+		const src = readFileSync(
+			join(process.cwd(), "packages", "pi-coding-agent", "src", "resources", "extensions", "memory", "storage.ts"),
+			"utf-8",
+		);
+		assert.match(src, /atomicWriteDbSnapshotSync\s*\(\s*this\.dbPath\s*,\s*[A-Za-z_$][A-Za-z0-9_$]*\s*\)/);
 		assert.doesNotMatch(src, /writeFileSync\(this\.dbPath/);
 	});
 });
