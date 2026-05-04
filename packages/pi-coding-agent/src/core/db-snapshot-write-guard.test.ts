@@ -20,7 +20,7 @@ function collectTsFiles(dir: string, out: string[] = []): string[] {
 function stripComments(src: string): string {
 	return src
 		.replace(/\/\*[\s\S]*?\*\//g, "")
-		.replace(/^\s*\/\/.*$/gm, "");
+		.replace(/\/\/[^\n]*/g, "");
 }
 
 test("all sql.js db.export() persistence uses atomic snapshot helper", () => {
@@ -45,7 +45,7 @@ test("all sql.js db.export() persistence uses atomic snapshot helper", () => {
 			`${file} uses db.export() but does not call atomicWriteDbSnapshotSync()`,
 		);
 
-		const exportAssigned = /const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*db\.export\(\s*\)\s*;/m;
+		const exportAssigned = /(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*db\.export\(\s*\)\s*;/m;
 		const match = code.match(exportAssigned);
 		if (match) {
 			const varName = match[1];
