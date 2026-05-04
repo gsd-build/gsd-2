@@ -100,6 +100,17 @@ export type CooldownRecoveryDecision =
   | { action: "stop"; notifyMessage: string; stopMessage: string }
   | { action: "wait"; waitMs: number; notifyMessage: string };
 
+export interface IterationErrorRecoveryInput {
+  consecutiveErrors: number;
+  recentErrorMessages: string[];
+  currentErrorMessage: string;
+}
+
+export type IterationErrorRecoveryDecision =
+  | { action: "stop"; notifyMessage: string; stopMessage: string; turnStatus: "failed" }
+  | { action: "invalidate-and-retry"; notifyMessage: string; turnStatus: "retry" }
+  | { action: "retry"; notifyMessage: string; turnStatus: "retry" };
+
 export interface WorkflowLoopInput {
   active: boolean;
   iteration: number;
@@ -281,5 +292,38 @@ export function decideCooldownRecovery(input: CooldownRecoveryInput): CooldownRe
     notifyMessage:
       `Credentials in cooldown (${input.consecutiveCooldowns}/${input.maxCooldownRetries}) — ` +
       `waiting ${Math.round(waitMs / 1000)}s before retrying.`,
+  };
+}
+
+export function decideIterationErrorRecovery(
+  input: IterationErrorRecoveryInput,
+): IterationErrorRecoveryDecision {
+  if (input.consecutiveErrors >= 3) {
+    const errorHistory = input.recentErrorMessages
+      .map((message, index) => `  ${index + 1}. ${message}`)
+      .join("\n");
+    return {
+      action: "stop",
+      notifyMessage:
+        `Auto-mode stopped: ${input.consecutiveErrors} consecutive iteration failures:\n${errorHistory}`,
+      stopMessage: `${input.consecutiveErrors} consecutive iteration failures`,
+      turnStatus: "failed",
+    };
+  }
+
+  if (input.consecutiveErrors === 2) {
+    return {
+      action: "invalidate-and-retry",
+      notifyMessage:
+        `Iteration error (attempt ${input.consecutiveErrors}): ` +
+        `${input.currentErrorMessage}. Invalidating caches and retrying.`,
+      turnStatus: "retry",
+    };
+  }
+
+  return {
+    action: "retry",
+    notifyMessage: `Iteration error: ${input.currentErrorMessage}. Retrying.`,
+    turnStatus: "retry",
   };
 }

@@ -10,6 +10,7 @@ import {
   decideEngineDispatch,
   decideEngineReconcile,
   decideFinalizeResult,
+  decideIterationErrorRecovery,
   decideMemoryPressure,
   decideMinRequestInterval,
   decideWorkflowLoop,
@@ -314,6 +315,57 @@ test("decideCooldownRecovery stops after retry budget is exceeded", () => {
         "Auto-mode stopped: 6 consecutive credential cooldowns — " +
         "rate limit or quota may be persistently exhausted.",
       stopMessage: "6 consecutive credential cooldowns exceeded retry budget",
+    },
+  );
+});
+
+test("decideIterationErrorRecovery retries first iteration error", () => {
+  assert.deepEqual(
+    decideIterationErrorRecovery({
+      consecutiveErrors: 1,
+      recentErrorMessages: ["temporary failure"],
+      currentErrorMessage: "temporary failure",
+    }),
+    {
+      action: "retry",
+      notifyMessage: "Iteration error: temporary failure. Retrying.",
+      turnStatus: "retry",
+    },
+  );
+});
+
+test("decideIterationErrorRecovery invalidates caches on second consecutive error", () => {
+  assert.deepEqual(
+    decideIterationErrorRecovery({
+      consecutiveErrors: 2,
+      recentErrorMessages: ["temporary failure", "still failing"],
+      currentErrorMessage: "still failing",
+    }),
+    {
+      action: "invalidate-and-retry",
+      notifyMessage:
+        "Iteration error (attempt 2): still failing. Invalidating caches and retrying.",
+      turnStatus: "retry",
+    },
+  );
+});
+
+test("decideIterationErrorRecovery stops on third consecutive error with history", () => {
+  assert.deepEqual(
+    decideIterationErrorRecovery({
+      consecutiveErrors: 3,
+      recentErrorMessages: ["first", "second", "third"],
+      currentErrorMessage: "third",
+    }),
+    {
+      action: "stop",
+      notifyMessage:
+        "Auto-mode stopped: 3 consecutive iteration failures:\n" +
+        "  1. first\n" +
+        "  2. second\n" +
+        "  3. third",
+      stopMessage: "3 consecutive iteration failures",
+      turnStatus: "failed",
     },
   );
 });

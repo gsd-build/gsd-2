@@ -59,6 +59,7 @@ import {
   decideEngineDispatch,
   decideEngineReconcile,
   decideFinalizeResult,
+  decideIterationErrorRecovery,
   decideMemoryPressure,
   decideMinRequestInterval,
   decideWorkflowLoop,
@@ -1106,34 +1107,24 @@ export async function autoLoop(
         error: msg,
       });
 
-      if (consecutiveErrors >= 3) {
-        // 3+ consecutive: hard stop — something is fundamentally broken
-        const errorHistory = recentErrorMessages
-          .map((m, i) => `  ${i + 1}. ${m}`)
-          .join("\n");
-        ctx.ui.notify(
-          `Auto-mode stopped: ${consecutiveErrors} consecutive iteration failures:\n${errorHistory}`,
-          "error",
-        );
-        await deps.stopAuto(
-          ctx,
-          pi,
-          `${consecutiveErrors} consecutive iteration failures`,
-        );
-        finishTurn("failed", "execution", msg);
+      const errorDecision = decideIterationErrorRecovery({
+        consecutiveErrors,
+        recentErrorMessages,
+        currentErrorMessage: msg,
+      });
+      if (errorDecision.action === "stop") {
+        ctx.ui.notify(errorDecision.notifyMessage, "error");
+        await deps.stopAuto(ctx, pi, errorDecision.stopMessage);
+        finishTurn(errorDecision.turnStatus, "execution", msg);
         break;
-      } else if (consecutiveErrors === 2) {
-        // 2nd consecutive: try invalidating caches + re-deriving state
-        ctx.ui.notify(
-          `Iteration error (attempt ${consecutiveErrors}): ${msg}. Invalidating caches and retrying.`,
-          "warning",
-        );
+      }
+      if (errorDecision.action === "invalidate-and-retry") {
+        ctx.ui.notify(errorDecision.notifyMessage, "warning");
         deps.invalidateAllCaches();
       } else {
-        // 1st error: log and retry — transient failures happen
-        ctx.ui.notify(`Iteration error: ${msg}. Retrying.`, "warning");
+        ctx.ui.notify(errorDecision.notifyMessage, "warning");
       }
-      finishTurn("retry", "execution", msg);
+      finishTurn(errorDecision.turnStatus, "execution", msg);
     }
   }
 
