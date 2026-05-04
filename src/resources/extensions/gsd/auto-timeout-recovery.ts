@@ -72,7 +72,8 @@ export async function recoverTimedOutUnit(
     });
 
     const durableComplete = status.summaryExists && status.taskChecked && status.nextActionAdvanced;
-    if (durableComplete) {
+    const dbAuthoritativeComplete = status.dbComplete;
+    if (durableComplete || dbAuthoritativeComplete) {
       writeUnitRuntimeRecord(basePath, unitType, unitId, currentUnitStartedAt, {
         phase: "finalized",
         recovery: status,
