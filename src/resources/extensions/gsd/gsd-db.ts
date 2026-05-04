@@ -44,6 +44,7 @@ import { isMemoriesFtsAvailableSchema, tryCreateMemoriesFtsSchema } from "./db-m
 import { createDbOpenState, type DbOpenPhase } from "./db-open-state.js";
 import { createRuntimeKvTableV25 } from "./db-runtime-kv-schema.js";
 import { ensureColumn, getCurrentSchemaVersion, recordSchemaVersion } from "./db-schema-metadata.js";
+import { rowToSlice, rowToTask, type SliceRow, type TaskRow } from "./db-task-slice-rows.js";
 import { createDbTransactionRunner } from "./db-transaction.js";
 import { ensureVerificationEvidenceDedupIndex } from "./db-verification-evidence-schema.js";
 import { createSqliteProviderLoader, suppressSqliteWarning, type DbProviderName, type SqliteFallbackOpen } from "./db-provider.js";
@@ -54,6 +55,8 @@ import type { StateManifest } from "./workflow-manifest.js";
 
 const _require = createRequire(import.meta.url);
 type ProviderName = DbProviderName;
+
+export type { SliceRow, TaskRow } from "./db-task-slice-rows.js";
 
 const providerLoader = createSqliteProviderLoader({
   requireModule: (id: string) => _require(id),
@@ -1938,54 +1941,6 @@ export function upsertTaskPlanning(milestoneId: string, sliceId: string, taskId:
   });
 }
 
-export interface SliceRow {
-  milestone_id: string;
-  id: string;
-  title: string;
-  status: string;
-  risk: string;
-  depends: string[];
-  demo: string;
-  created_at: string;
-  completed_at: string | null;
-  full_summary_md: string;
-  full_uat_md: string;
-  goal: string;
-  success_criteria: string;
-  proof_level: string;
-  integration_closure: string;
-  observability_impact: string;
-  sequence: number;
-  replan_triggered_at: string | null;
-  is_sketch: number;
-  sketch_scope: string;
-}
-
-function rowToSlice(row: Record<string, unknown>): SliceRow {
-  return {
-    milestone_id: row["milestone_id"] as string,
-    id: row["id"] as string,
-    title: row["title"] as string,
-    status: row["status"] as string,
-    risk: row["risk"] as string,
-    depends: JSON.parse((row["depends"] as string) || "[]"),
-    demo: (row["demo"] as string) ?? "",
-    created_at: row["created_at"] as string,
-    completed_at: (row["completed_at"] as string) ?? null,
-    full_summary_md: (row["full_summary_md"] as string) ?? "",
-    full_uat_md: (row["full_uat_md"] as string) ?? "",
-    goal: (row["goal"] as string) ?? "",
-    success_criteria: (row["success_criteria"] as string) ?? "",
-    proof_level: (row["proof_level"] as string) ?? "",
-    integration_closure: (row["integration_closure"] as string) ?? "",
-    observability_impact: (row["observability_impact"] as string) ?? "",
-    sequence: (row["sequence"] as number) ?? 0,
-    replan_triggered_at: (row["replan_triggered_at"] as string) ?? null,
-    is_sketch: (row["is_sketch"] as number) ?? 0,
-    sketch_scope: (row["sketch_scope"] as string) ?? "",
-  };
-}
-
 export function getSlice(milestoneId: string, sliceId: string): SliceRow | null {
   if (!currentDb) return null;
   const row = currentDb.prepare("SELECT * FROM slices WHERE milestone_id = :mid AND id = :sid").get({ ":mid": milestoneId, ":sid": sliceId });
@@ -2018,116 +1973,6 @@ export function setSliceSummaryMd(milestoneId: string, sliceId: string, summaryM
   currentDb.prepare(
     `UPDATE slices SET full_summary_md = :summary_md, full_uat_md = :uat_md WHERE milestone_id = :mid AND id = :sid`,
   ).run({ ":mid": milestoneId, ":sid": sliceId, ":summary_md": summaryMd, ":uat_md": uatMd });
-}
-
-export interface TaskRow {
-  milestone_id: string;
-  slice_id: string;
-  id: string;
-  title: string;
-  status: string;
-  one_liner: string;
-  narrative: string;
-  verification_result: string;
-  duration: string;
-  completed_at: string | null;
-  blocker_discovered: boolean;
-  deviations: string;
-  known_issues: string;
-  key_files: string[];
-  key_decisions: string[];
-  full_summary_md: string;
-  description: string;
-  estimate: string;
-  files: string[];
-  verify: string;
-  inputs: string[];
-  expected_output: string[];
-  observability_impact: string;
-  full_plan_md: string;
-  sequence: number;
-  // ADR-011 Phase 2 escalation fields
-  blocker_source: string;
-  escalation_pending: number;
-  escalation_awaiting_review: number;
-  escalation_artifact_path: string | null;
-  escalation_override_applied_at: string | null;
-}
-
-function parseTaskArrayColumn(raw: unknown): string[] {
-  if (typeof raw !== "string" || raw.trim() === "") return [];
-
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed.map((value) => String(value));
-    if (parsed === null || parsed === undefined || parsed === "") return [];
-    return [String(parsed)];
-  } catch {
-    // Older/corrupt rows may contain comma-separated strings instead of JSON.
-    return raw
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean);
-  }
-}
-
-function rowToTask(row: Record<string, unknown>): TaskRow {
-  const parseTaskArray = (value: unknown): string[] => {
-    if (Array.isArray(value)) {
-      return value.filter((entry): entry is string => typeof entry === "string");
-    }
-    if (typeof value !== "string") return [];
-
-    const trimmed = value.trim();
-    if (!trimmed) return [];
-
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) {
-        return parsed.filter((entry): entry is string => typeof entry === "string");
-      }
-      if (typeof parsed === "string" && parsed.trim()) {
-        return [parsed.trim()];
-      }
-    } catch {
-      // Older/corrupt DB rows may contain raw comma-separated paths instead of JSON arrays.
-    }
-
-    return trimmed.split(",").map((entry) => entry.trim()).filter(Boolean);
-  };
-
-  return {
-    milestone_id: row["milestone_id"] as string,
-    slice_id: row["slice_id"] as string,
-    id: row["id"] as string,
-    title: row["title"] as string,
-    status: row["status"] as string,
-    one_liner: row["one_liner"] as string,
-    narrative: row["narrative"] as string,
-    verification_result: row["verification_result"] as string,
-    duration: row["duration"] as string,
-    completed_at: (row["completed_at"] as string) ?? null,
-    blocker_discovered: (row["blocker_discovered"] as number) === 1,
-    deviations: row["deviations"] as string,
-    known_issues: row["known_issues"] as string,
-    key_files: parseTaskArrayColumn(row["key_files"]),
-    key_decisions: parseTaskArrayColumn(row["key_decisions"]),
-    full_summary_md: row["full_summary_md"] as string,
-    description: (row["description"] as string) ?? "",
-    estimate: (row["estimate"] as string) ?? "",
-    files: parseTaskArray(row["files"]),
-    verify: (row["verify"] as string) ?? "",
-    inputs: parseTaskArray(row["inputs"]),
-    expected_output: parseTaskArray(row["expected_output"]),
-    observability_impact: (row["observability_impact"] as string) ?? "",
-    full_plan_md: (row["full_plan_md"] as string) ?? "",
-    sequence: (row["sequence"] as number) ?? 0,
-    blocker_source: (row["blocker_source"] as string) ?? "",
-    escalation_pending: (row["escalation_pending"] as number) ?? 0,
-    escalation_awaiting_review: (row["escalation_awaiting_review"] as number) ?? 0,
-    escalation_artifact_path: (row["escalation_artifact_path"] as string) ?? null,
-    escalation_override_applied_at: (row["escalation_override_applied_at"] as string) ?? null,
-  };
 }
 
 export function getTask(milestoneId: string, sliceId: string, taskId: string): TaskRow | null {
