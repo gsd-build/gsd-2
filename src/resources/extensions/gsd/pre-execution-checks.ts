@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Pre-execution validation checks for GSD task plans.
+
 /**
  * Pre-Execution Checks — Validate task plans before execution begins.
  *
@@ -18,7 +21,7 @@ import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import type { TaskRow } from "./gsd-db.ts";
+import type { TaskRow } from "./db-task-slice-rows.js";
 import type { PreExecutionCheckJSON } from "./verification-evidence.ts";
 
 const NPM_COMMAND = process.platform === "win32" ? "npm.cmd" : "npm";

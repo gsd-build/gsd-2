@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Post-execution validation checks for completed GSD task output.
+
 /**
  * Post-Execution Checks — Validate task output after execution completes.
  *
@@ -15,7 +18,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve, dirname, join, extname } from "node:path";
-import type { TaskRow } from "./gsd-db.ts";
+import type { TaskRow } from "./db-task-slice-rows.js";
 
 // ─── Result Types ────────────────────────────────────────────────────────────
 
