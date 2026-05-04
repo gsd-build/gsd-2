@@ -44,12 +44,19 @@ const DESKTOP = { width: 1440, height: 900 } // xl-band
 
 // ─── helpers ─────────────────────────────────────────────────────────────
 
-async function gotoPackagedHost(page: Page, launch: RuntimeLaunchResult): Promise<void> {
+async function gotoPackagedHost(
+  page: Page,
+  launch: RuntimeLaunchResult,
+  options?: { projectCwd?: string },
+): Promise<void> {
   // The launcher hands an auth token via the fragment so the client
   // bootstrap can read it. Without it the shell renders the
   // "Authentication Required" branch — which is itself responsive but
   // is not what these tests cover.
-  const target = launch.authToken ? `${launch.url}/#token=${launch.authToken}` : launch.url
+  const projectQuery = options?.projectCwd ? `?project=${encodeURIComponent(options.projectCwd)}` : ""
+  const target = launch.authToken
+    ? `${launch.url}/${projectQuery}#token=${launch.authToken}`
+    : `${launch.url}/${projectQuery}`
 
   // Capture browser console + page errors so a failed selector wait
   // can surface why the shell didn't mount instead of just timing out.
@@ -169,7 +176,7 @@ test("responsive contract: web host honours viewport-driven chrome", async (t) =
   context = await browser.newContext({ viewport: MOBILE })
   const page = await context.newPage()
 
-  await gotoPackagedHost(page, launch)
+  await gotoPackagedHost(page, launch, { projectCwd })
 
   // ───────────────────────────────────────────────────────────────────
   // 3. Mobile (≤767px): hamburger visible, bottom bar visible, drawer
