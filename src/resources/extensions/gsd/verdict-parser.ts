@@ -45,10 +45,11 @@ export function extractVerdict(content: string): string | undefined {
 }
 
 /**
- * Returns `true` when the content's frontmatter contains a `verdict` field.
+ * Returns `true` when the content contains any verdict format we can extract,
+ * while preserving the legacy bare `verdict: pass` body check.
  */
 export function hasVerdict(content: string): boolean {
-  return /verdict:\s*[\w-]+/i.test(content);
+  return extractVerdict(content) !== undefined || /verdict:\s*[\w-]+/i.test(content);
 }
 
 // ── UAT verdict schema ──────────────────────────────────────────────────

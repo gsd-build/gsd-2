@@ -106,6 +106,12 @@ describe("hasVerdict", () => {
     assert.equal(hasVerdict("verdict: pass"), true);
   });
 
+  it("returns true for markdown bold verdicts that extractVerdict parses (#5240)", () => {
+    assert.equal(hasVerdict("# Assessment\n\n**Verdict:** PASS"), true);
+    assert.equal(hasVerdict("# Assessment\n\n**Verdict:** ✅ PASS"), true);
+    assert.equal(hasVerdict("# Assessment\n\n**Verdict** needs-remediation"), true);
+  });
+
   it("returns false when no verdict field exists", () => {
     assert.equal(hasVerdict("# Just a heading"), false);
   });
