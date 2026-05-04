@@ -184,7 +184,7 @@ describe("removeWorktree preserves submodule uncommitted state (#2337)", () => {
     assert.ok(!existsSync(wt.path), "worktree directory should be removed");
 
     // The code path that fires on dirty submodules emits one of these
-    // two warnings. Either indicates the detection ran — the ONLY
+    // warnings. Any of these indicates the detection ran — the ONLY
     // observable that would fail if someone removed the
     // `if (hasSubmoduleChanges)` branch and went straight to force
     // removal. This is the assertion that #4823 demanded in place of
