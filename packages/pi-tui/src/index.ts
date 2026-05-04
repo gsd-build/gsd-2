@@ -5,7 +5,9 @@ export {
 	style,
 	TerminalStyle,
 	type TerminalBorderStyle,
+	type TerminalDensity,
 	type TerminalStyleSpec,
+	type TerminalTone,
 } from "./style.js";
 // Autocomplete support
 export {

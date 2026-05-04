@@ -64,6 +64,7 @@ import { getChangelogPath, getNewEntries, parseChangelog } from "../../utils/cha
 import { readClipboardImage } from "../../utils/clipboard-image.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import { AssistantMessageComponent } from "./components/assistant-message.js";
+import { AdaptiveLayoutComponent } from "./components/adaptive-layout.js";
 import { BashExecutionComponent } from "./components/bash-execution.js";
 import { BorderedLoader } from "./components/bordered-loader.js";
 import { BranchSummaryMessageComponent } from "./components/branch-summary-message.js";
@@ -246,6 +247,7 @@ export class InteractiveMode {
 	private ui: TUI;
 	private chatContainer: Container;
 	private pendingMessagesContainer: Container;
+	private adaptiveLayout: AdaptiveLayoutComponent;
 	private statusContainer: Container;
 	private pinnedMessageContainer: Container;
 	private defaultEditor: CustomEditor;
@@ -261,6 +263,7 @@ export class InteractiveMode {
 	private loadingAnimation: Loader | undefined = undefined;
 	private pendingWorkingMessage: string | undefined = undefined;
 	private readonly defaultWorkingMessage = "Working...";
+	private lastBlockingError: string | undefined = undefined;
 
 	private lastSigintTime = 0;
 	private lastEscapeTime = 0;
@@ -367,6 +370,14 @@ export class InteractiveMode {
 		this.headerContainer = new Container();
 		this.chatContainer = new Container();
 		this.pendingMessagesContainer = new Container();
+		this.adaptiveLayout = new AdaptiveLayoutComponent(() => ({
+			override: this.settingsManager.getAdaptiveMode(),
+			activeToolCount: this.pendingTools.size,
+			gsdPhase: this.pendingWorkingMessage,
+			lastError: this.lastBlockingError,
+			sessionName: this.sessionManager.getSessionName(),
+			cwd: process.cwd(),
+		}));
 		this.statusContainer = new Container();
 		this.pinnedMessageContainer = new Container();
 		this.widgetContainerAbove = new Container();
@@ -571,6 +582,7 @@ export class InteractiveMode {
 			}
 		}
 
+		this.ui.addChild(this.adaptiveLayout);
 		this.ui.addChild(this.chatContainer);
 		this.ui.addChild(this.pendingMessagesContainer);
 		this.ui.addChild(this.statusContainer);
@@ -2880,6 +2892,7 @@ export class InteractiveMode {
 	}
 
 	showError(errorMessage: string): void {
+		this.lastBlockingError = errorMessage;
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(theme.fg("error", `Error: ${errorMessage}`), 1, 0));
 		this.ui.requestRender();
@@ -3195,6 +3208,7 @@ export class InteractiveMode {
 					quietStartup: this.settingsManager.getQuietStartup(),
 					clearOnShrink: this.settingsManager.getClearOnShrink(),
 					timestampFormat: this.settingsManager.getTimestampFormat(),
+					adaptiveMode: this.settingsManager.getAdaptiveMode(),
 				},
 				{
 					onAutoCompactChange: (enabled) => {
@@ -3300,6 +3314,10 @@ export class InteractiveMode {
 					},
 					onTimestampFormatChange: (format) => {
 						this.settingsManager.setTimestampFormat(format);
+					},
+					onAdaptiveModeChange: (mode) => {
+						this.settingsManager.setAdaptiveMode(mode);
+						this.ui.requestRender();
 					},
 					onCancel: () => {
 						done();

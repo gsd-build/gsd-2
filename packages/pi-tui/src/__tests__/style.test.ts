@@ -42,4 +42,35 @@ describe("style", () => {
 		assert.equal(plain[1], "│ abcde");
 		assert.equal(visibleWidth(plain[1]), 7);
 	});
+
+	test("renders minimal left-rule surfaces", () => {
+		const plain = style().border("minimal").title("note").render(["No full card"], 20).map((line) => stripAnsi(line));
+
+		assert.equal(plain[0], "│ note              ");
+		assert.equal(plain[1], "│ No full card      ");
+	});
+
+	test("applies dashboard density and body gutters", () => {
+		const plain = style()
+			.border("single")
+			.density("dashboard")
+			.bodyGutter("· ")
+			.render(["body"], 14)
+			.map((line) => stripAnsi(line));
+
+		assert.equal(plain[0], "┌────────────┐");
+		assert.equal(plain[1], "│            │");
+		assert.equal(plain[2], "│·  body     │");
+		assert.equal(plain[3], "│            │");
+		assert.equal(plain[4], "└────────────┘");
+	});
+
+	test("passes tone to toneColor when no explicit border color is set", () => {
+		const lines = style()
+			.border("minimal")
+			.tone("success", (tone, text) => `[${tone}]${text}`)
+			.render(["ok"], 8);
+
+		assert.equal(lines[0], "[success]│ ok    ");
+	});
 });

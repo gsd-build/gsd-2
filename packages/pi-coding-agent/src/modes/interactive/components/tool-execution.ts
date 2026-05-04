@@ -104,10 +104,10 @@ function renderToolFrame(
 	const outerWidth = Math.max(20, width);
 	const contentWidth = Math.max(1, outerWidth - 2); // "│ " + content
 
-	const borderColor = opts.tone === "error" ? "error" : "toolTitle";
-	const topColor = opts.tone === "error" ? "error" : "toolTitle";
-	const labelColor = opts.tone === "error" ? "error" : "toolTitle";
-	const statusColor = opts.tone === "error" ? "error" : opts.tone === "pending" ? "warning" : "success";
+	const borderColor = opts.tone === "error" ? "toolError" : opts.tone === "pending" ? "toolRunning" : "toolSuccess";
+	const topColor = borderColor;
+	const labelColor = opts.tone === "error" ? "toolError" : "surfaceTitle";
+	const statusColor = opts.tone === "error" ? "toolError" : opts.tone === "pending" ? "toolRunning" : "toolSuccess";
 	const leftStyled = theme.fg(labelColor, theme.bold(`• ${opts.label}`));
 	const rightStyled = theme.fg(statusColor, opts.status);
 	const gap = Math.max(1, outerWidth - visibleWidth(leftStyled) - visibleWidth(rightStyled));
@@ -130,6 +130,11 @@ function renderToolFrame(
 const COMPACT_ARG_VALUE_LIMIT = 60;
 const GENERIC_OUTPUT_PREVIEW_LINES = 10;
 const GENERIC_ARGS_JSON_PREVIEW_LINES = 10;
+
+function formatElapsed(ms: number): string {
+	if (ms < 1000) return `${ms}ms`;
+	return `${Math.max(1, Math.round(ms / 1000))}s`;
+}
 
 /**
  * Format tool args for the generic-renderer fallback. Produces a one-line
@@ -199,6 +204,8 @@ export class ToolExecutionComponent extends Container {
 	private toolDefinition?: ToolDefinition;
 	private ui: TUI;
 	private cwd: string;
+	private readonly startedAt = Date.now();
+	private endedAt: number | undefined;
 	private result?: {
 		content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
 		isError: boolean;
@@ -433,6 +440,9 @@ export class ToolExecutionComponent extends Container {
 	): void {
 		this.result = result;
 		this.isPartial = isPartial;
+		if (!isPartial) {
+			this.endedAt = this.endedAt ?? Date.now();
+		}
 		if (this.normalizedToolName === "write" && !isPartial) {
 			const rawPath = str(this.args?.file_path ?? this.args?.path);
 			const fileContent = str(this.args?.content);
@@ -455,6 +465,7 @@ export class ToolExecutionComponent extends Container {
 	markHistoricalNoResult(): void {
 		if (this.result) return; // real result already set, nothing to do
 		this.isPartial = false;
+		this.endedAt = this.endedAt ?? Date.now();
 		this.result = {
 			content: [],
 			isError: false,
@@ -467,6 +478,7 @@ export class ToolExecutionComponent extends Container {
 	 */
 	completeWithError(message?: string): void {
 		this.isPartial = false;
+		this.endedAt = this.endedAt ?? Date.now();
 		if (this.result) {
 			let content = this.result.content;
 			if (message) {
@@ -537,20 +549,39 @@ export class ToolExecutionComponent extends Container {
 		}
 		const frameWidth = Math.max(20, width);
 		const contentWidth = Math.max(1, frameWidth - 4);
-		const lines = super.render(contentWidth);
 		const frameTone: ToolFrameTone =
 			this.result?.isError ? "error" : this.isPartial || !this.result ? "pending" : "success";
-		const frameStatus = this.isPartial || !this.result ? "Running" : this.result.isError ? "Error" : "Done";
+		const elapsed = formatElapsed((this.endedAt ?? Date.now()) - this.startedAt);
+		const frameStatus = `${this.isPartial || !this.result ? "Running" : this.result.isError ? "Error" : "Done"} · ${elapsed}`;
 		const parsed = parseMcpToolName(this.toolName);
 		const frameLabel = parsed
 			? `Tool ${parsed.server}·${parsed.tool}`
 			: `Tool ${prettifyToolName(this.toolName, this.toolDefinition?.label) || "unknown"}`;
+		if (this.shouldRenderCompactSuccess()) {
+			const availableWidth = Math.max(1, frameWidth - 2);
+			const summaryWidth = Math.max(1, availableWidth - visibleWidth(frameStatus) - 1);
+			const summary = truncateToWidth(this.getCompactSummary(frameLabel), summaryWidth, "");
+			const gap = Math.max(1, availableWidth - visibleWidth(summary) - visibleWidth(frameStatus));
+			const line = `${theme.fg("toolSuccess", summary)}${" ".repeat(gap)}${theme.fg("toolSuccess", frameStatus)}`;
+			return ["", ...style().border("minimal").borderColor((text) => theme.fg("toolSuccess", text)).render([line], frameWidth)];
+		}
+		const lines = super.render(contentWidth);
 		const framed = renderToolFrame(lines, frameWidth, {
 			label: frameLabel,
 			status: frameStatus,
 			tone: frameTone,
 		});
 		return framed.length > 0 ? ["", ...framed] : framed;
+	}
+
+	private shouldRenderCompactSuccess(): boolean {
+		if (this.expanded || this.isPartial || !this.result || this.result.isError) return false;
+		const hasImages = this.result.content?.some((block) => block.type === "image") ?? false;
+		return !hasImages && this.getTextOutput().trim().length === 0;
+	}
+
+	private getCompactSummary(frameLabel: string): string {
+		return `${frameLabel} Completed`;
 	}
 
 	private updateDisplay(): void {

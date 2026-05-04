@@ -55,6 +55,7 @@ describe("ToolExecutionComponent", () => {
 
 		assert.match(rendered, /Tool demo\u00b7do_thing/);
 		assert.match(rendered, /Running/);
+		assert.match(rendered, /Running · \d+(ms|s)/);
 	});
 
 	test("renders framed header with Error status for failed tool result", () => {
@@ -66,7 +67,20 @@ describe("ToolExecutionComponent", () => {
 
 		assert.match(rendered, /Tool demo\u00b7do_thing/);
 		assert.match(rendered, /Error/);
+		assert.match(rendered, /Error · \d+(ms|s)/);
 		assert.match(rendered, /boom/);
+	});
+
+	test("collapses successful low-signal tool cards by default", () => {
+		const rendered = renderToolCollapsed(
+			"mcp__demo__noop",
+			{ ok: true },
+			{ content: [], isError: false },
+		);
+
+		assert.match(rendered, /Done · \d+(ms|s)/);
+		assert.match(rendered, /Completed/);
+		assert.doesNotMatch(rendered, /ok=true/);
 	});
 
 	test("passes failed result status to custom result renderers", () => {

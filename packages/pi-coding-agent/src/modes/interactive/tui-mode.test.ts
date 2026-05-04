@@ -6,9 +6,16 @@ import { describe, test } from "node:test";
 import { resolveTuiMode } from "./tui-mode.js";
 
 describe("resolveTuiMode", () => {
+	test("explicit overrides beat auto selection", () => {
+		assert.equal(
+			resolveTuiMode({ terminalWidth: 60, override: "debug", gsdPhase: "validating-milestone" }),
+			"debug",
+		);
+	});
+
 	test("prioritizes compact layouts on narrow terminals", () => {
 		assert.equal(
-			resolveTuiMode({ terminalWidth: 60, hasBlockingError: true, gsdPhase: "validating-milestone" }),
+			resolveTuiMode({ terminalWidth: 60, override: "auto", hasBlockingError: true, gsdPhase: "validating-milestone" }),
 			"compact",
 		);
 	});

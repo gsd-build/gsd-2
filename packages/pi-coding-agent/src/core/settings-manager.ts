@@ -32,6 +32,7 @@ export interface RetrySettings {
 export interface TerminalSettings {
 	showImages?: boolean; // default: true (only relevant if terminal supports images)
 	clearOnShrink?: boolean; // default: false (clear empty rows when content shrinks)
+	adaptiveMode?: AdaptiveTuiMode; // default: "auto"
 }
 
 export interface ImageSettings {
@@ -149,6 +150,7 @@ export interface HooksSettings {
 }
 
 export type TransportSetting = Transport;
+export type AdaptiveTuiMode = "auto" | "chat" | "workflow" | "validation" | "debug" | "compact";
 
 /**
  * Package source for npm/git packages.
@@ -976,6 +978,16 @@ export class SettingsManager {
 
 	setClearOnShrink(enabled: boolean): void {
 		this.setNestedGlobalSetting("terminal", "clearOnShrink", enabled);
+	}
+
+	getAdaptiveMode(): AdaptiveTuiMode {
+		const mode = this.settings.terminal?.adaptiveMode;
+		const valid: AdaptiveTuiMode[] = ["auto", "chat", "workflow", "validation", "debug", "compact"];
+		return mode && valid.includes(mode) ? mode : "auto";
+	}
+
+	setAdaptiveMode(mode: AdaptiveTuiMode): void {
+		this.setNestedGlobalSetting("terminal", "adaptiveMode", mode);
 	}
 
 	getImageAutoResize(): boolean {
