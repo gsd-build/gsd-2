@@ -6,7 +6,7 @@
  * The only way an extension stops loading is an explicit `gsd extensions disable <id>`.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, writeSync } from "node:fs";
 import { getAgentDir } from "../../config.js";
 import { dirname, join } from "node:path";
 
@@ -95,7 +95,14 @@ export function saveRegistry(registry: ExtensionRegistry): void {
   try {
     mkdirSync(dirname(filePath), { recursive: true });
     const tmp = filePath + ".tmp";
-    writeFileSync(tmp, JSON.stringify(registry, null, 2), "utf-8");
+    const content = Buffer.from(JSON.stringify(registry, null, 2), "utf-8");
+    const fd = openSync(tmp, "w");
+    try {
+      writeSync(fd, content);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
     renameSync(tmp, filePath);
   } catch {
     // Non-fatal — don't let persistence failures break operation

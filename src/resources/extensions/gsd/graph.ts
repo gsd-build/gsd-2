@@ -16,7 +16,7 @@
  */
 
 import { parse, stringify } from "yaml";
-import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import type { WorkflowDefinition } from "./definition-loader.js";
 
@@ -145,8 +145,14 @@ export function writeGraph(runDir: string, graph: WorkflowGraph): void {
 
   const filePath = join(runDir, GRAPH_FILENAME);
   const tmpPath = filePath + ".tmp";
-  const content = stringify(yamlData);
-  writeFileSync(tmpPath, content, "utf-8");
+  const content = Buffer.from(stringify(yamlData), "utf-8");
+  const fd = openSync(tmpPath, "w");
+  try {
+    writeSync(fd, content);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
   // Atomic rename for crash safety
   renameSync(tmpPath, filePath);
 }

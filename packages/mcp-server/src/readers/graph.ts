@@ -12,7 +12,7 @@
  * writeGraph() is atomic: writes to graph.tmp.json then renames to graph.json.
  */
 
-import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync, writeSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import {
   resolveGsdRoot,
@@ -610,7 +610,14 @@ export async function writeGraph(gsdRoot: string, graph: KnowledgeGraph): Promis
   const tmp = graphTmpPath(gsdRoot);
   const final = graphJsonPath(gsdRoot);
 
-  writeFileSync(tmp, JSON.stringify(graph, null, 2), 'utf-8');
+  const content = Buffer.from(JSON.stringify(graph, null, 2), 'utf-8');
+  const fd = openSync(tmp, 'w');
+  try {
+    writeSync(fd, content);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
   renameSync(tmp, final);
 }
 
