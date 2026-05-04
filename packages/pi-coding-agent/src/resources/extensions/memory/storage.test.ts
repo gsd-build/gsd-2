@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it, afterEach } from "node:test";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -29,7 +29,6 @@ describe("MemoryStorage debounced persistence", () => {
 		const storage = await MemoryStorage.create(dbPath);
 
 		const initialStat = readFileSync(dbPath);
-		const initialMtime = initialStat.length;
 
 		storage.upsertThreads([
 			{ threadId: "t1", filePath: "/a.txt", fileSize: 100, fileMtime: 1000, cwd: "/proj" },
@@ -94,5 +93,11 @@ describe("MemoryStorage debounced persistence", () => {
 		const stats = reopened.getStats();
 		assert.equal(stats.totalThreads, 1, "Data should be persisted and readable after close");
 		reopened.close();
+	});
+
+	it("uses atomic write helper for db persistence (guard against torn-write regressions)", () => {
+		const src = readFileSync(new URL("./storage.ts", import.meta.url), "utf-8");
+		assert.match(src, /atomicWriteFileSync\(this\.dbPath,\s*Buffer\.from\(data\)\)/);
+		assert.doesNotMatch(src, /writeFileSync\(this\.dbPath/);
 	});
 });
