@@ -148,7 +148,7 @@ jobs:
           fi
 
   build:
-    timeout-minutes: 15
+    timeout-minutes: 25
     needs: [detect-changes, ci-circuit-breaker-fast]
     if: needs.detect-changes.outputs.docs-only != 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
