@@ -7,6 +7,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 
 import type { AutoSession } from "./session.js";
+import type { ErrorContext } from "./types.js";
 import type { GSDPreferences } from "../preferences.js";
 import type { GSDState } from "../types.js";
 import type { SessionLockStatus } from "../session-lock.js";
@@ -39,7 +40,11 @@ export interface LoopDeps {
     pi?: ExtensionAPI,
     reason?: string,
   ) => Promise<void>;
-  pauseAuto: (ctx?: ExtensionContext, pi?: ExtensionAPI) => Promise<void>;
+  pauseAuto: (
+    ctx?: ExtensionContext,
+    pi?: ExtensionAPI,
+    errorContext?: ErrorContext,
+  ) => Promise<void>;
   clearUnitTimeout: () => void;
   updateProgressWidget: (
     ctx: ExtensionContext,
@@ -245,7 +250,11 @@ export interface LoopDeps {
     prefs: GSDPreferences | undefined;
     buildSnapshotOpts: () => CloseoutOptions & Record<string, unknown>;
     buildRecoveryContext: () => unknown;
-    pauseAuto: (ctx?: ExtensionContext, pi?: ExtensionAPI) => Promise<void>;
+    pauseAuto: (
+      ctx?: ExtensionContext,
+      pi?: ExtensionAPI,
+      errorContext?: ErrorContext,
+    ) => Promise<void>;
   }) => void;
 
   // Prompt helpers
@@ -271,7 +280,11 @@ export interface LoopDeps {
   ) => Promise<"dispatched" | "continue" | "retry">;
   runPostUnitVerification: (
     vctx: VerificationContext,
-    pauseAuto: (ctx?: ExtensionContext, pi?: ExtensionAPI) => Promise<void>,
+    pauseAuto: (
+      ctx?: ExtensionContext,
+      pi?: ExtensionAPI,
+      errorContext?: ErrorContext,
+    ) => Promise<void>,
   ) => Promise<VerificationResult>;
   postUnitPostVerification: (
     pctx: PostUnitContext,
