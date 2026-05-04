@@ -54,6 +54,7 @@ import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { normalizeRealPath } from "../paths.js";
 import {
+  decideCooldownRecovery,
   decideDispatchClaim,
   decideEngineDispatch,
   decideEngineReconcile,
@@ -1070,6 +1071,12 @@ export async function autoLoop(
       if (isTransientCooldownError(loopErr)) {
         consecutiveCooldowns++;
         const retryAfterMs = getCooldownRetryAfterMs(loopErr);
+        const cooldownDecision = decideCooldownRecovery({
+          consecutiveCooldowns,
+          maxCooldownRetries: MAX_COOLDOWN_RETRIES,
+          retryAfterMs,
+          fallbackWaitMs: COOLDOWN_FALLBACK_WAIT_MS,
+        });
         debugLog("autoLoop", {
           phase: "cooldown-wait",
           iteration,
@@ -1078,27 +1085,14 @@ export async function autoLoop(
           error: msg,
         });
 
-        if (consecutiveCooldowns > MAX_COOLDOWN_RETRIES) {
-          ctx.ui.notify(
-            `Auto-mode stopped: ${consecutiveCooldowns} consecutive credential cooldowns — rate limit or quota may be persistently exhausted.`,
-            "error",
-          );
-          await deps.stopAuto(
-            ctx,
-            pi,
-            `${consecutiveCooldowns} consecutive credential cooldowns exceeded retry budget`,
-          );
+        if (cooldownDecision.action === "stop") {
+          ctx.ui.notify(cooldownDecision.notifyMessage, "error");
+          await deps.stopAuto(ctx, pi, cooldownDecision.stopMessage);
           break;
         }
 
-        const waitMs = (retryAfterMs !== undefined && retryAfterMs > 0 && retryAfterMs <= 60_000)
-          ? retryAfterMs + 500 // Use structured hint + small buffer
-          : COOLDOWN_FALLBACK_WAIT_MS;
-        ctx.ui.notify(
-          `Credentials in cooldown (${consecutiveCooldowns}/${MAX_COOLDOWN_RETRIES}) — waiting ${Math.round(waitMs / 1000)}s before retrying.`,
-          "warning",
-        );
-        await new Promise(resolve => setTimeout(resolve, waitMs));
+        ctx.ui.notify(cooldownDecision.notifyMessage, "warning");
+        await new Promise(resolve => setTimeout(resolve, cooldownDecision.waitMs));
         finishTurn("retry", "timeout", msg);
         continue; // Retry iteration without incrementing consecutiveErrors
       }

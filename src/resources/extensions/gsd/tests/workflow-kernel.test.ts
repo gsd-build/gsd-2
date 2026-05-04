@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  decideCooldownRecovery,
   decideDispatchClaim,
   decideEngineDispatch,
   decideEngineReconcile,
@@ -252,5 +253,67 @@ test("decideMinRequestInterval returns remaining wait budget", () => {
       nowMs: 15_000,
     }),
     { action: "continue" },
+  );
+});
+
+test("decideCooldownRecovery uses bounded retry-after hints with a small buffer", () => {
+  assert.deepEqual(
+    decideCooldownRecovery({
+      consecutiveCooldowns: 2,
+      maxCooldownRetries: 5,
+      retryAfterMs: 30_000,
+      fallbackWaitMs: 15_000,
+    }),
+    {
+      action: "wait",
+      waitMs: 30_500,
+      notifyMessage: "Credentials in cooldown (2/5) — waiting 31s before retrying.",
+    },
+  );
+});
+
+test("decideCooldownRecovery uses fallback wait when retry-after is missing or out of range", () => {
+  assert.deepEqual(
+    decideCooldownRecovery({
+      consecutiveCooldowns: 1,
+      maxCooldownRetries: 5,
+      fallbackWaitMs: 15_000,
+    }),
+    {
+      action: "wait",
+      waitMs: 15_000,
+      notifyMessage: "Credentials in cooldown (1/5) — waiting 15s before retrying.",
+    },
+  );
+  assert.deepEqual(
+    decideCooldownRecovery({
+      consecutiveCooldowns: 1,
+      maxCooldownRetries: 5,
+      retryAfterMs: 90_000,
+      fallbackWaitMs: 15_000,
+    }),
+    {
+      action: "wait",
+      waitMs: 15_000,
+      notifyMessage: "Credentials in cooldown (1/5) — waiting 15s before retrying.",
+    },
+  );
+});
+
+test("decideCooldownRecovery stops after retry budget is exceeded", () => {
+  assert.deepEqual(
+    decideCooldownRecovery({
+      consecutiveCooldowns: 6,
+      maxCooldownRetries: 5,
+      retryAfterMs: 30_000,
+      fallbackWaitMs: 15_000,
+    }),
+    {
+      action: "stop",
+      notifyMessage:
+        "Auto-mode stopped: 6 consecutive credential cooldowns — " +
+        "rate limit or quota may be persistently exhausted.",
+      stopMessage: "6 consecutive credential cooldowns exceeded retry budget",
+    },
   );
 });

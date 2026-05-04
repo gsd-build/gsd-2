@@ -89,6 +89,17 @@ export type MinRequestIntervalDecision =
   | { action: "continue" }
   | { action: "wait"; waitMs: number };
 
+export interface CooldownRecoveryInput {
+  consecutiveCooldowns: number;
+  maxCooldownRetries: number;
+  retryAfterMs?: number;
+  fallbackWaitMs: number;
+}
+
+export type CooldownRecoveryDecision =
+  | { action: "stop"; notifyMessage: string; stopMessage: string }
+  | { action: "wait"; waitMs: number; notifyMessage: string };
+
 export interface WorkflowLoopInput {
   active: boolean;
   iteration: number;
@@ -246,5 +257,29 @@ export function decideMinRequestInterval(input: MinRequestIntervalInput): MinReq
   return {
     action: "wait",
     waitMs: input.minIntervalMs - elapsedMs,
+  };
+}
+
+export function decideCooldownRecovery(input: CooldownRecoveryInput): CooldownRecoveryDecision {
+  if (input.consecutiveCooldowns > input.maxCooldownRetries) {
+    return {
+      action: "stop",
+      notifyMessage:
+        `Auto-mode stopped: ${input.consecutiveCooldowns} consecutive credential cooldowns — ` +
+        "rate limit or quota may be persistently exhausted.",
+      stopMessage:
+        `${input.consecutiveCooldowns} consecutive credential cooldowns exceeded retry budget`,
+    };
+  }
+
+  const waitMs = input.retryAfterMs !== undefined && input.retryAfterMs > 0 && input.retryAfterMs <= 60_000
+    ? input.retryAfterMs + 500
+    : input.fallbackWaitMs;
+  return {
+    action: "wait",
+    waitMs,
+    notifyMessage:
+      `Credentials in cooldown (${input.consecutiveCooldowns}/${input.maxCooldownRetries}) — ` +
+      `waiting ${Math.round(waitMs / 1000)}s before retrying.`,
   };
 }
