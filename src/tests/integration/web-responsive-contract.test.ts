@@ -300,7 +300,7 @@ test("responsive contract: web host honours viewport-driven chrome", async (t) =
   await page.waitForFunction(
     () => {
       const el = document.querySelector('[data-testid="mobile-milestone-drawer"]') as HTMLElement | null
-      return Boolean(el) && /-translate-x-full/.test(el!.className)
+      return Boolean(el) && el!.classList.contains("translate-x-full")
     },
     null,
     { timeout: 5_000 },
