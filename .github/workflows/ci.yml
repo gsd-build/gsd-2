@@ -315,7 +315,9 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
           GSD_SKIP_RTK_INSTALL: '1'
-        run: npm ci
+        run: |
+          npm install --package-lock-only --ignore-scripts
+          npm ci
 
       - name: Build core
         run: npm run build:core
@@ -367,7 +369,9 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
           GSD_SKIP_RTK_INSTALL: '1'
-        run: npm ci
+        run: |
+          npm install --package-lock-only --ignore-scripts
+          npm ci
 
       - name: Validate managed RTK install
         run: >-
