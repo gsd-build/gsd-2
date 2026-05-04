@@ -246,10 +246,11 @@ export function executeMemoryQuery(params: MemoryQueryParams): ToolExecutionResu
       ? "No matching memories."
       : hits.map((h) => `- [${h.id}] (${h.category}) ${h.content}`).join("\n");
 
-    const backend = ftsAvailable ? "fts5" : "like-fallback";
-    const text = ftsAvailable
-      ? summary
-      : `${summary}\n\n[degraded] FTS5 unavailable — memory query is using LIKE fallback (no stemming/BM25).`;
+    const usingLikeFallback = Boolean(query) && !ftsAvailable;
+    const backend = usingLikeFallback ? "like-fallback" : "ranked";
+    const text = usingLikeFallback
+      ? `${summary}\n\n[degraded] FTS5 unavailable — memory query is using LIKE fallback (no stemming/BM25).`
+      : summary;
 
     return {
       content: [{ type: "text", text }],
@@ -259,7 +260,7 @@ export function executeMemoryQuery(params: MemoryQueryParams): ToolExecutionResu
         k,
         returned: hits.length,
         keyword_backend: backend,
-        degraded_fts: !ftsAvailable,
+        degraded_fts: usingLikeFallback,
         hits,
       },
     };
