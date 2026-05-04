@@ -12,7 +12,7 @@
 import { describe, test, mock, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { postUnitPostVerification, type PostUnitContext } from "../auto-post-unit.ts";
@@ -277,7 +277,7 @@ describe("Pre-execution checks → pauseAuto wiring", () => {
     cleanupTestEnvironment();
   });
 
-  test("pauseAuto is called when pre-execution checks return status: fail with blocking: true", async () => {
+  test("first pre-execution fail triggers replan instead of pausing", async () => {
     // Set up tasks that will cause a blocking failure
     createFailingTasks();
 
@@ -291,33 +291,33 @@ describe("Pre-execution checks → pauseAuto wiring", () => {
     // Call postUnitPostVerification
     const result = await postUnitPostVerification(pctx);
 
-    // Verify pauseAuto was called
+    // Verify pauseAuto was NOT called on first failure
     assert.equal(
       pauseAutoMock.mock.callCount(),
-      1,
-      "pauseAuto should be called exactly once when pre-execution checks fail with blocking issues"
+      0,
+      "pauseAuto should not be called on the first blocking pre-execution failure"
     );
 
-    // Verify return value is "stopped"
+    // Verify return value continues the loop
     assert.equal(
       result,
-      "stopped",
-      "postUnitPostVerification should return 'stopped' when pre-execution checks fail"
+      "continue",
+      "postUnitPostVerification should continue after triggering a replan"
     );
 
-    // Verify UI was notified of the failure
+    // Verify UI was notified about triggering replan
     const notifyCalls = ctx.ui.notify.mock.calls;
-    const errorNotify = notifyCalls.find(
+    const warnNotify = notifyCalls.find(
       (call: { arguments: unknown[] }) =>
-        call.arguments[1] === "error" &&
-        String(call.arguments[0]).includes("Pre-execution checks failed")
+        call.arguments[1] === "warning" &&
+        String(call.arguments[0]).includes("triggering replan")
     );
-    assert.ok(errorNotify, "Should show error notification about pre-execution check failure");
-    const errorMessage = String(errorNotify.arguments[0]);
+    assert.ok(warnNotify, "Should show warning notification about pre-execution replan");
+    const errorMessage = String(warnNotify.arguments[0]);
     assert.match(
       errorMessage,
-      /Pre-execution checks failed: \d+ blocking issue/,
-      "failure notification should include the blocking issue count",
+      /Pre-execution checks failed/i,
+      "warning notification should include pre-exec failure context",
     );
     assert.ok(
       errorMessage.includes("[file] nonexistent-file-that-does-not-exist.ts: Task T01 references"),
@@ -337,8 +337,11 @@ describe("Pre-execution checks → pauseAuto wiring", () => {
     );
     assert.ok(
       errorMessage.includes(join(".gsd", "milestones", "M001", "slices", "S01", "S01-PRE-EXEC-VERIFY.json")),
-      "failure notification should point to the relative pre-exec evidence file path",
+      "warning notification should point to the relative pre-exec evidence file path",
     );
+
+    const triggerPath = join(tempDir, ".gsd", "milestones", "M001", "slices", "S01", "S01-REPLAN-TRIGGER.md");
+    assert.equal(existsSync(triggerPath), true, "replan trigger should be written on first failure");
   });
 
   test("pauseAuto is called when enhanced_verification_strict: true and pre-execution returns warn", async () => {
@@ -506,7 +509,8 @@ describe("Pre-execution checks → pauseAuto wiring", () => {
     const pctx = makePostUnitContext(s, ctx, pi, pauseAutoMock);
 
     const result = await postUnitPostVerification(pctx);
-    assert.equal(result, "stopped");
+    assert.equal(result, "continue");
+    assert.equal(pauseAutoMock.mock.callCount(), 0, "first fail should trigger replan, not pause");
 
     const adapter = _getAdapter();
     const row = adapter
