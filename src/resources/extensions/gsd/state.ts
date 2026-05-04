@@ -1,3 +1,5 @@
+// Project/App: GSD-2
+// File Purpose: Runtime state derivation from GSD workflow database and legacy files.
 // GSD Extension — State Derivation
 // DB-authoritative runtime derivation with explicit legacy filesystem fallback.
 // Pure TypeScript, zero Pi dependencies.
@@ -59,10 +61,9 @@ import {
   getRequirementCounts,
   getLatestAssessmentByScope,
   getPendingGateCountForTurn,
-  type MilestoneRow,
-  type SliceRow,
-  type TaskRow,
 } from './gsd-db.js';
+import type { MilestoneRow } from './db-milestone-artifact-rows.js';
+import type { SliceRow, TaskRow } from './db-task-slice-rows.js';
 
 /**
  * A "ghost" milestone directory contains only META.json (and no substantive
