@@ -6,14 +6,13 @@ import { createDismissibleOverlay } from "../ollama-commands.js";
 test("createDismissibleOverlay renders with text token and dismiss hint", () => {
 	const doneCalls: unknown[] = [];
 	const overlay = createDismissibleOverlay(
+		{ fg: (token: string, text: string) => `[${token}]${text}` },
 		["line one", "line two"],
 		(value) => doneCalls.push(value),
 		{ includeDismissHint: true },
 	);
 
-	const themed = overlay.render(80, {
-		fg: (token: string, text: string) => `[${token}]${text}`,
-	});
+	const themed = overlay.render(80);
 
 	assert.deepEqual(themed, [
 		"[text]line one",
@@ -26,7 +25,11 @@ test("createDismissibleOverlay renders with text token and dismiss hint", () => 
 
 test("createDismissibleOverlay dismisses on key input", () => {
 	const doneCalls: unknown[] = [];
-	const overlay = createDismissibleOverlay(["line"], (value) => doneCalls.push(value));
+	const overlay = createDismissibleOverlay(
+		{ fg: (_token: string, text: string) => text },
+		["line"],
+		(value) => doneCalls.push(value),
+	);
 
 	overlay.handleInput("x");
 
