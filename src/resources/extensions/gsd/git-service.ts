@@ -136,6 +136,12 @@ export interface TaskCommitContext {
   issueNumber?: number;
 }
 
+function sanitizeTaskKeyFiles(keyFiles: readonly string[] | undefined): string[] {
+  return (keyFiles ?? [])
+    .map(file => file.trim())
+    .filter(file => file !== "" && file !== "(none)" && !file.includes("{{"));
+}
+
 /**
  * Build a meaningful conventional commit message from task execution context.
  * Format: `{type}: {description}` (clean conventional commit — no GSD IDs in subject).
@@ -161,8 +167,9 @@ export function buildTaskCommitMessage(ctx: TaskCommitContext): string {
   // Build body with key files if available
   const bodyParts: string[] = [];
 
-  if (ctx.keyFiles && ctx.keyFiles.length > 0) {
-    const fileLines = ctx.keyFiles
+  const keyFiles = sanitizeTaskKeyFiles(ctx.keyFiles);
+  if (keyFiles.length > 0) {
+    const fileLines = keyFiles
       .slice(0, 8) // cap at 8 files to keep commit concise
       .map(f => `- ${f}`)
       .join("\n");
@@ -718,7 +725,7 @@ export class GitServiceImpl {
     taskContext: TaskCommitContext,
     extraExclusions: readonly string[] = [],
   ): boolean {
-    const keyFiles = taskContext.keyFiles ?? [];
+    const keyFiles = sanitizeTaskKeyFiles(taskContext.keyFiles);
     if (keyFiles.length === 0) return false;
 
     const allExclusions = [...RUNTIME_EXCLUSION_PATHS, ...extraExclusions];
