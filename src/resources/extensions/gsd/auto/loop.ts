@@ -84,6 +84,7 @@ import { createWorkflowTurnReporter } from "./workflow-turn-reporter.js";
 import { validateWorkflowSessionLock } from "./workflow-session-lock.js";
 import { dequeueSidecarItem } from "./workflow-sidecar-queue.js";
 import { maintainWorkerHeartbeat } from "./workflow-worker-heartbeat.js";
+import { measureMemoryPressure } from "./workflow-memory-pressure.js";
 
 // ── Stuck detection persistence (#3704) ──────────────────────────────────
 // Phase C migration: stuck-state.json deleted in favor of DB-backed
@@ -174,30 +175,12 @@ function logCustomVerifyRetrySaveFailure(err: unknown): void {
 // the OS OOM killer sends SIGKILL. The threshold is 90% of the V8 heap
 // limit (--max-old-space-size or default ~1.5-4GB depending on platform).
 const MEMORY_CHECK_INTERVAL = 5; // check every 5 iterations
-const MEMORY_PRESSURE_THRESHOLD = 0.85; // 85% of heap limit
 const MAX_CUSTOM_ENGINE_VERIFY_RETRIES = 3;
 
 type DispatchContract = "legacy-direct" | "uok-scheduler";
 
 interface AutoLoopOptions {
   dispatchContract?: DispatchContract;
-}
-
-function checkMemoryPressure(): { pressured: boolean; heapMB: number; limitMB: number; pct: number } {
-  const mem = process.memoryUsage();
-  // v8.getHeapStatistics() gives heap_size_limit but requires import
-  // Use a conservative estimate: RSS > 3GB is danger zone on most systems
-  const heapMB = Math.round(mem.heapUsed / 1024 / 1024);
-  const rssMB = Math.round(mem.rss / 1024 / 1024);
-  // Try to get the actual V8 heap limit
-  let limitMB = 4096; // conservative default
-  try {
-    const v8 = require("node:v8");
-    const stats = v8.getHeapStatistics();
-    limitMB = Math.round(stats.heap_size_limit / 1024 / 1024);
-  } catch { limitMB = 4096; /* v8 stats unavailable — use conservative default */ }
-  const pct = heapMB / limitMB;
-  return { pressured: pct > MEMORY_PRESSURE_THRESHOLD, heapMB, limitMB, pct };
 }
 
 async function enforceMinRequestInterval(s: AutoSession, prefs: IterationContext["prefs"]): Promise<void> {
@@ -367,7 +350,7 @@ export async function autoLoop(
     // ── Memory pressure check (#3331) ──
     // Graceful shutdown before OOM killer sends SIGKILL.
     if (iteration % MEMORY_CHECK_INTERVAL === 0) {
-      const mem = checkMemoryPressure();
+      const mem = measureMemoryPressure();
       debugLog("autoLoop", { phase: "memory-check", ...mem });
       const memoryDecision = decideMemoryPressure({ ...mem, iteration });
       if (memoryDecision.action === "stop") {
