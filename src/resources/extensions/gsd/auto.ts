@@ -231,6 +231,8 @@ import type { ErrorContext } from "./auto/types.js";
 import { runAutoLoopWithUok } from "./uok/kernel.js";
 import { resolveUokFlags } from "./uok/flags.js";
 import { validateDirectory } from "./validate-directory.js";
+import { createAutoOrchestrator } from "./auto/orchestrator.js";
+import type { AutoOrchestrationModule, AutoOrchestratorDeps } from "./auto/contracts.js";
 // Slice-level parallelism (#2340)
 import { getEligibleSlices } from "./slice-parallel-eligibility.js";
 import { startSliceParallel } from "./slice-parallel-orchestrator.js";
@@ -1208,6 +1210,12 @@ export async function stopAuto(
     // changes the user made between sessions (#4959 / CodeRabbit).
     if (pi) clearToolBaseline(pi);
 
+    try {
+      await s.orchestration?.stop(reason ?? "stop");
+    } catch (err) {
+      debugLog("stop-orchestration-stop", { error: err instanceof Error ? err.message : String(err) });
+    }
+
     // Reset all session state in one call
     s.reset();
   }
@@ -1306,6 +1314,12 @@ export async function pauseAuto(
   resolveAgentEnd({ messages: [] });
   _resetPendingResolve();
 
+  try {
+    await s.orchestration?.stop("pause");
+  } catch (err) {
+    debugLog("pause-orchestration-stop", { error: err instanceof Error ? err.message : String(err) });
+  }
+
   s.active = false;
   s.paused = true;
   deactivateGSD();
@@ -1361,6 +1375,140 @@ function buildResolverDeps(): WorktreeResolverDeps {
  */
 function buildResolver(): WorktreeResolver {
   return new WorktreeResolver(s, buildResolverDeps());
+}
+
+/**
+ * Thin entry glue for the new Auto Orchestration module.
+ *
+ * This intentionally wires only dispatch + error notification today, with
+ * no behavior changes to the existing auto loop. It provides a concrete seam
+ * the next refactor steps can adopt incrementally.
+ */
+export function createWiredAutoOrchestrationModule(
+  ctx: ExtensionContext,
+  _pi: ExtensionAPI,
+  basePath: string,
+): AutoOrchestrationModule {
+  const flowId = `auto-orchestrator-${Date.now()}`;
+  let seq = 0;
+
+  const deps: AutoOrchestratorDeps = {
+    dispatch: {
+      async decideNextUnit() {
+        const state = await deriveState(basePath);
+        const active = state.activeMilestone;
+        if (!active) return null;
+
+        const prefs = loadEffectiveGSDPreferences(basePath)?.preferences;
+        const action = await resolveDispatch({
+          basePath,
+          mid: active.id,
+          midTitle: active.title,
+          state,
+          prefs,
+        });
+
+        if (action.action !== "dispatch") return null;
+        return {
+          unitType: action.unitType,
+          unitId: action.unitId,
+          reason: action.matchedRule ?? "dispatch",
+          preconditions: [],
+        };
+      },
+    },
+    recovery: {
+      async classifyAndRecover(input) {
+        const reason = input.error instanceof Error ? input.error.message : String(input.error ?? "unknown auto error");
+        return { action: "escalate" as const, reason };
+      },
+    },
+    worktree: {
+      async prepareForUnit() {},
+      async syncAfterUnit() {},
+      async cleanupOnStop() {},
+    },
+    health: {
+      async preAdvanceGate() {
+        const gate = await preDispatchHealthGate(basePath);
+        return {
+          allow: gate.proceed,
+          reason: gate.reason,
+        };
+      },
+      async postAdvanceRecord(result) {
+        if (result.kind === "error") {
+          recordHealthSnapshot(1, 0, 0, [{
+            code: "orchestration-error",
+            message: result.reason ?? "orchestration error",
+            severity: "error",
+            unitId: "orchestration",
+          }], [], "orchestration");
+        } else if (result.kind === "blocked") {
+          recordHealthSnapshot(0, 1, 0, [{
+            code: "orchestration-blocked",
+            message: result.reason ?? "orchestration blocked",
+            severity: "warning",
+            unitId: "orchestration",
+          }], [], "orchestration");
+        }
+      },
+    },
+    runtime: {
+      async ensureLockOwnership() {
+        const status = getSessionLockStatus(basePath);
+        if (status === "in_use_by_other") {
+          throw new Error("session lock held by another process");
+        }
+      },
+      async journalTransition(event) {
+        const eventType = event.name === "start"
+          ? "iteration-start"
+          : event.name === "resume"
+            ? "iteration-start"
+            : event.name === "advance"
+              ? "dispatch-match"
+              : event.name === "advance-blocked"
+                ? "guard-block"
+                : event.name === "advance-stopped"
+                  ? "dispatch-stop"
+                  : event.name === "advance-error"
+                    ? "iteration-end"
+                    : event.name === "advance-retry"
+                      ? "guard-block"
+                      : event.name === "stop"
+                      ? "terminal"
+                      : "iteration-end";
+
+        _emitJournalEvent(basePath, {
+          ts: new Date().toISOString(),
+          flowId,
+          seq: ++seq,
+          eventType,
+          data: {
+            source: "auto-orchestrator",
+            name: event.name,
+            reason: event.reason,
+            unitType: event.unitType,
+            unitId: event.unitId,
+          },
+        });
+      },
+    },
+    notifications: {
+      async notifyLifecycle(event) {
+        if (event.name === "error") {
+          ctx.ui.notify(event.detail ?? "auto orchestration error", "error");
+        }
+      },
+    },
+  };
+
+  return createAutoOrchestrator(deps);
+}
+
+function ensureOrchestrationModule(ctx: ExtensionContext, pi: ExtensionAPI, basePath: string): void {
+  s.orchestration = createWiredAutoOrchestrationModule(ctx, pi, basePath);
 }
 
 /**
@@ -1753,6 +1901,7 @@ export async function startAuto(
     }
     // Rebuild scope now that s.basePath reflects the actual worktree (or project root).
     rebuildScope(s.basePath, s.currentMilestoneId);
+    ensureOrchestrationModule(ctx, pi, s.basePath || base);
     // Ensure the workflow-logger audit log is pinned to the project root
     // even when auto-mode is entered via a path that bypasses the
     // bootstrap/dynamic-tools ensureDbOpen() → setLogBasePath() chain
@@ -1868,6 +2017,11 @@ export async function startAuto(
     }
     pi.events.emit(CMUX_CHANNELS.LOG, { preferences: loadEffectiveGSDPreferences(s.basePath || undefined)?.preferences, message: s.stepMode ? "Step-mode resumed." : "Auto-mode resumed.", level: "progress" });
 
+    try {
+      await s.orchestration?.resume();
+    } catch (err) {
+      debugLog("resume-orchestration-resume", { error: err instanceof Error ? err.message : String(err) });
+    }
     startAutoCommandPolling(s.basePath);
     await runAutoLoopWithUok({
       ctx,
@@ -1904,7 +2058,7 @@ export async function startAuto(
   // Build scope after bootstrap has populated s.basePath / s.originalBasePath /
   // s.currentMilestoneId (including worktree setup inside bootstrapAutoSession).
   rebuildScope(s.basePath, s.currentMilestoneId);
-
+  ensureOrchestrationModule(ctx, pi, s.basePath || base);
   captureProjectRootEnv(s.originalBasePath || s.basePath);
   registerAutoWorkerForSession(s);
   try {
@@ -1914,6 +2068,12 @@ export async function startAuto(
     logWarning("engine", `cmux sync failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
   }
   pi.events.emit(CMUX_CHANNELS.LOG, { preferences: loadEffectiveGSDPreferences(s.basePath || undefined)?.preferences, message: requestedStepMode ? "Step-mode started." : "Auto-mode started.", level: "progress" });
+
+  try {
+    await s.orchestration?.start({ basePath: s.basePath, trigger: "auto-loop" });
+  } catch (err) {
+    debugLog("start-orchestration-start", { error: err instanceof Error ? err.message : String(err) });
+  }
 
   startAutoCommandPolling(s.basePath);
 
@@ -2037,6 +2197,7 @@ export async function dispatchHookUnit(
   }
 
   s.basePath = targetBasePath;
+  ensureOrchestrationModule(ctx, pi, s.basePath);
 
   const hookUnitType = `hook/${hookName}`;
   const hookStartedAt = Date.now();

@@ -21,6 +21,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent
 import type { GitServiceImpl } from "../git-service.js";
 import type { CaptureEntry } from "../captures.js";
 import type { BudgetAlertLevel } from "../auto-budget.js";
+import type { AutoOrchestrationModule } from "./contracts.js";
 import { resolveWorktreeProjectRoot } from "../worktree-root.js";
 import { normalizeRealPath } from "../paths.js";
 import type { MilestoneScope } from "../workspace.js";
@@ -229,6 +230,9 @@ export class AutoSession {
   /** Cleanup function returned by startCommandPolling(); null when not running. */
   commandPollingCleanup: (() => void) | null = null;
 
+  // ── Orchestration seam ───────────────────────────────────────────────────
+  orchestration: AutoOrchestrationModule | null = null;
+
   // ── Loop promise state ──────────────────────────────────────────────────
   // Per-unit resolve function and session-switch guard live at module level
   // in auto-loop.ts (_currentResolve, _sessionSwitchInFlight).
@@ -354,10 +358,14 @@ export class AutoSession {
     // Remote command polling — cleanup must be called before reset (auto.ts stopAuto)
     this.commandPollingCleanup = null;
 
+    // Orchestration seam
+    this.orchestration = null;
+
     // Loop promise state lives in auto-loop.ts module scope
   }
 
   toJSON(): Record<string, unknown> {
+    const orchestrationStatus = this.orchestration?.getStatus();
     return {
       active: this.active,
       paused: this.paused,
@@ -367,6 +375,9 @@ export class AutoSession {
       activeRunDir: this.activeRunDir,
       currentMilestoneId: this.currentMilestoneId,
       currentUnit: this.currentUnit,
+      orchestrationPhase: orchestrationStatus?.phase,
+      orchestrationTransitionCount: orchestrationStatus?.transitionCount,
+      orchestrationLastTransitionAt: orchestrationStatus?.lastTransitionAt,
       unitDispatchCount: Object.fromEntries(this.unitDispatchCount),
     };
   }
