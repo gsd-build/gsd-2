@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   decideDispatchClaim,
   decideEngineDispatch,
+  decideEngineReconcile,
   decideFinalizeResult,
   decideWorkflowLoop,
 } from "../auto/workflow-kernel.ts";
@@ -157,4 +158,24 @@ test("decideFinalizeResult maps continue and next results", () => {
     { action: "retry", ledgerErrorSummary: "finalize-retry" },
   );
   assert.deepEqual(decideFinalizeResult({ action: "next" }), { action: "complete" });
+});
+
+test("decideEngineReconcile maps terminal outcomes", () => {
+  assert.deepEqual(
+    decideEngineReconcile({ outcome: "milestone-complete" }),
+    { action: "complete-workflow", stopReason: "Workflow complete" },
+  );
+  assert.deepEqual(decideEngineReconcile({ outcome: "pause" }), { action: "pause" });
+  assert.deepEqual(
+    decideEngineReconcile({ outcome: "stop", reason: "blocked" }),
+    { action: "stop", reason: "blocked" },
+  );
+  assert.deepEqual(
+    decideEngineReconcile({ outcome: "stop" }),
+    { action: "stop", reason: "Engine stopped" },
+  );
+});
+
+test("decideEngineReconcile passes through continue outcomes", () => {
+  assert.deepEqual(decideEngineReconcile({ outcome: "continue" }), { action: "continue" });
 });

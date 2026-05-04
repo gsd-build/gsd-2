@@ -50,6 +50,18 @@ export type FinalizeDecision =
     }
   | { action: "complete" };
 
+export type EngineReconcileInput =
+  | { outcome: "milestone-complete" }
+  | { outcome: "pause" }
+  | { outcome: "stop"; reason?: string | null }
+  | { outcome: "continue" };
+
+export type EngineReconcileDecision =
+  | { action: "complete-workflow"; stopReason: "Workflow complete" }
+  | { action: "pause" }
+  | { action: "stop"; reason: string }
+  | { action: "continue" };
+
 export interface WorkflowLoopInput {
   active: boolean;
   iteration: number;
@@ -152,4 +164,26 @@ export function decideFinalizeResult(input: FinalizeInput): FinalizeDecision {
   }
 
   return { action: "complete" };
+}
+
+export function decideEngineReconcile(input: EngineReconcileInput): EngineReconcileDecision {
+  if (input.outcome === "milestone-complete") {
+    return {
+      action: "complete-workflow",
+      stopReason: "Workflow complete",
+    };
+  }
+
+  if (input.outcome === "pause") {
+    return { action: "pause" };
+  }
+
+  if (input.outcome === "stop") {
+    return {
+      action: "stop",
+      reason: input.reason ?? "Engine stopped",
+    };
+  }
+
+  return { action: "continue" };
 }

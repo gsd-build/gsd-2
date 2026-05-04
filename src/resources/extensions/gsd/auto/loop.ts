@@ -53,7 +53,13 @@ import type { UokGraphNode } from "../uok/contracts.js";
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { normalizeRealPath } from "../paths.js";
-import { decideDispatchClaim, decideEngineDispatch, decideFinalizeResult, decideWorkflowLoop } from "./workflow-kernel.js";
+import {
+  decideDispatchClaim,
+  decideEngineDispatch,
+  decideEngineReconcile,
+  decideFinalizeResult,
+  decideWorkflowLoop,
+} from "./workflow-kernel.js";
 
 // ── Stuck detection persistence (#3704) ──────────────────────────────────
 // Phase C migration: stuck-state.json deleted in favor of DB-backed
@@ -725,8 +731,13 @@ export async function autoLoop(
         saveStuckState(s, loopState); // persist across session restarts (#3704)
         debugLog("autoLoop", { phase: "iteration-complete", iteration });
 
-        if (reconcileResult.outcome === "milestone-complete") {
-          await deps.stopAuto(ctx, pi, "Workflow complete");
+        const reconcileDecision = decideEngineReconcile(
+          reconcileResult.outcome === "stop"
+            ? { outcome: "stop", reason: reconcileResult.reason }
+            : { outcome: reconcileResult.outcome },
+        );
+        if (reconcileDecision.action === "complete-workflow") {
+          await deps.stopAuto(ctx, pi, reconcileDecision.stopReason);
           deps.uokObserver?.onPhaseResult("custom-engine", "milestone-complete", {
             unitType: iterData.unitType,
             unitId: iterData.unitId,
@@ -734,7 +745,7 @@ export async function autoLoop(
           finishTurn("completed");
           break;
         }
-        if (reconcileResult.outcome === "pause") {
+        if (reconcileDecision.action === "pause") {
           await deps.pauseAuto(ctx, pi);
           deps.uokObserver?.onPhaseResult("custom-engine", "pause", {
             unitType: iterData.unitType,
@@ -743,8 +754,8 @@ export async function autoLoop(
           finishTurn("paused", "manual-attention");
           break;
         }
-        if (reconcileResult.outcome === "stop") {
-          await deps.stopAuto(ctx, pi, reconcileResult.reason ?? "Engine stopped");
+        if (reconcileDecision.action === "stop") {
+          await deps.stopAuto(ctx, pi, reconcileDecision.reason);
           deps.uokObserver?.onPhaseResult("custom-engine", "stop", {
             unitType: iterData.unitType,
             unitId: iterData.unitId,
