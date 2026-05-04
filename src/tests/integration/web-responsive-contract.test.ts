@@ -86,6 +86,21 @@ async function gotoPackagedHost(
       timeout: 30_000,
     })
   } catch (error) {
+    // Fallback: if the project-selection gate is visible, select the first
+    // discovered project and wait again for the responsive shell controls.
+    const gateVisible = await page.locator('[data-testid="project-selection-gate"]').isVisible().catch(() => false)
+    if (gateVisible) {
+      const firstProjectButton = page.locator('[data-testid="project-selection-gate"] .divide-y > button').first()
+      if (await firstProjectButton.count()) {
+        await firstProjectButton.click()
+        await page.waitForSelector('[data-testid="mobile-nav-toggle"]', {
+          state: "attached",
+          timeout: 30_000,
+        })
+        return
+      }
+    }
+
     // Diagnostic dump — without this, all we see in CI is a generic
     // selector timeout. Surfaces (a) which top-level state the shell
     // settled in, (b) any console errors, (c) a slice of body HTML.

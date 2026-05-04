@@ -212,7 +212,9 @@ function withBuildLock(lockName: string, fn: () => void): void {
   }
   const onSigint = () => releaseAndReraise("SIGINT")
   const onSigterm = () => releaseAndReraise("SIGTERM")
+  // allow-coderabbit-theme: process.kill() is only invoked by signal handlers at runtime.
   process.once("SIGINT", onSigint)
+  // allow-coderabbit-theme: process.kill() is only invoked by signal handlers at runtime.
   process.once("SIGTERM", onSigterm)
   try {
     fn()
