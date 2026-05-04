@@ -24,9 +24,9 @@ You have full tool access. Before decomposing, explore relevant code so the plan
 
 This unit runs under `planning-dispatch`: use `subagent` when isolated context improves planning.
 
-- More than ~3 files are needed for a subsystem → dispatch **scout** and use its compressed report.
+- More than ~3 files are needed for a subsystem → dispatch the **scout** agent and use its compressed report.
 - The slice spans subsystems and decomposition is unclear → dispatch **planner** or use **decompose-into-slices** on a focused area, then integrate.
-- Current external facts are needed → dispatch **scout**.
+- Current external facts are needed → dispatch the **scout** agent.
 
 **Do not** dispatch implementation-tier agents (`worker`, `refactorer`, `tester`) from this unit — they would write user source and bypass this unit's write isolation. Implementation belongs in `execute-task`.
 
@@ -89,7 +89,7 @@ Then:
    - a matching task plan file with description, steps, must-haves, verification, inputs, and expected output
    - **Inputs and Expected Output must list concrete backtick-wrapped file paths** (e.g. `` `src/types.ts` ``). These are machine-parsed to derive task dependencies — vague prose without paths breaks parallel execution. Every task must have at least one output file path.
    - Observability Impact section **only if the task touches runtime boundaries, async flows, or error paths** — omit it otherwise
-7. **Persist planning state through `gsd_plan_slice`.** Call it with `goal`, `successCriteria`, optional `proofLevel`, optional `integrationClosure`, optional `observabilityImpact`, and `tasks`. Keep task description first paragraphs concise. The tool inserts tasks transactionally, writes DB state, and renders `{{outputPath}}` plus `{{slicePath}}/tasks/T##-PLAN.md`. Do **not** call `gsd_plan_task` separately. Do **not** rely on direct `PLAN.md` writes as source of truth; the DB-backed tool is the canonical write path.
+7. **Persist planning state through `gsd_plan_slice`.** Call it with `goal`, `successCriteria`, optional `proofLevel`, optional `integrationClosure`, optional `observabilityImpact`, and `tasks`. Keep task description first paragraphs concise. `gsd_plan_slice` handles task persistence transactionally, writes DB state, and renders `{{outputPath}}` plus `{{slicePath}}/tasks/T##-PLAN.md`. Do **not** call `gsd_plan_task` separately. Do **not** rely on direct `PLAN.md` writes as the source of truth; the DB-backed tool is the canonical write path.
 8. **Self-audit before finishing.** Fix any failure:
     - Completion semantics: completed tasks make the slice goal/demo true.
     - Requirement coverage: every must-have and owned Active requirement maps to task verification.

@@ -131,7 +131,8 @@ If yes, create using the `bash` tool:
 
 ```bash
 # Step 1: Write issue body to a temp file; --body-file avoids shell quoting.
-cat > /tmp/gsd-forensic-issue.md << 'GSD_ISSUE_BODY'
+ISSUE_BODY_FILE="${TMPDIR:-${TEMP:-${TMP:-.}}}/gsd-forensic-issue.md"
+cat > "$ISSUE_BODY_FILE" << 'GSD_ISSUE_BODY'
 ## Problem
 [1-2 sentence summary]
 
@@ -159,8 +160,8 @@ GSD_ISSUE_BODY
 ISSUE_URL=$(gh issue create --repo gsd-build/gsd-2 \
   --title "..." \
   --label "auto-generated" \
-  --body-file /tmp/gsd-forensic-issue.md)
-rm -f /tmp/gsd-forensic-issue.md
+  --body-file "$ISSUE_BODY_FILE")
+rm -f "$ISSUE_BODY_FILE"
 
 # Step 2: Set issue type via GraphQL.
 ISSUE_NUM=$(echo "$ISSUE_URL" | grep -oE '[0-9]+$')

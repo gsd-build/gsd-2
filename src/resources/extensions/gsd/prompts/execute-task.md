@@ -86,7 +86,7 @@ Then:
 18. If you discover a non-obvious rule, recurring gotcha, or useful pattern, call `capture_thought` with `category: "gotcha"`, `"convention"`, `"pattern"`, or `"environment"`. Capture only what saves future agents investigation. The memory store is canonical; do not append to `.gsd/DECISIONS.md` or `.gsd/KNOWLEDGE.md`.
 19. Read the template at `{{templatesDir}}/task-summary.md`
 20. Use that template to prepare `gsd_task_complete` content with camelCase fields `milestoneId`, `sliceId`, `taskId`, `oneLiner`, `narrative`, `verification`, and `verificationEvidence`. Do **not** manually write `{{taskSummaryPath}}`.
-21. Call `gsd_task_complete` with milestoneId, sliceId, taskId, and completion fields. This final required step marks the task complete, updates DB state, renders `{{taskSummaryPath}}`, and updates PLAN.md. Do not manually edit PLAN.md checkboxes.
+21. Call `gsd_task_complete` with milestoneId, sliceId, taskId, and completion fields. This final required step marks the task complete, updates DB state, renders `{{taskSummaryPath}}`, and updates PLAN.md. The DB-backed tool is the canonical write path. Do not manually edit PLAN.md checkboxes.
 22. Do not run git commands. The system creates a commit from your task summary. Write a clear, specific one-liner; it becomes the commit message.
 
 All work stays in your working directory: `{{workingDirectory}}`.
