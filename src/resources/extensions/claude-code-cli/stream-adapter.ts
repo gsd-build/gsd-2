@@ -22,7 +22,7 @@ import type {
 import type { ExtensionUIContext } from "@gsd/pi-coding-agent";
 import { EventStream } from "@gsd/pi-ai";
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -1351,12 +1351,23 @@ export function buildSdkOptions(
 			: { thinking: { type: "disabled" } }
 		: undefined;
 
+	const additionalDirectories: string[] = [];
+	try {
+		const gsdPath = join(sdkCwd, ".gsd");
+		if (lstatSync(gsdPath).isSymbolicLink()) {
+			additionalDirectories.push(realpathSync(gsdPath));
+		}
+	} catch {
+		// .gsd may not exist yet; ignore.
+	}
+
 	return {
 		pathToClaudeCodeExecutable: getClaudePath(),
 		model: modelId,
 		includePartialMessages: true,
 		persistSession: true,
 		cwd: sdkCwd,
+		...(additionalDirectories.length > 0 ? { additionalDirectories } : {}),
 		permissionMode,
 		allowDangerouslySkipPermissions: permissionMode === "bypassPermissions",
 		settingSources: ["project"],
