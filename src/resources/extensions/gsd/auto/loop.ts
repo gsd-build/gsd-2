@@ -70,6 +70,7 @@ import {
   decideWorkflowLoop,
   formatDispatchExceptionSummary,
   formatUnhandledDispatchErrorSummary,
+  shouldUseCustomEnginePath,
 } from "./workflow-kernel.js";
 import { createWorkflowJournalReporter } from "./workflow-journal-reporter.js";
 import { createWorkflowPhaseReporter } from "./workflow-phase-reporter.js";
@@ -549,7 +550,11 @@ export async function autoLoop(
       //
       // GSD_ENGINE_BYPASS=1 skips the engine layer entirely — falls through
       // to the dev path below.
-      if (s.activeEngineId != null && s.activeEngineId !== "dev" && !sidecarItem && process.env.GSD_ENGINE_BYPASS !== "1") {
+      if (shouldUseCustomEnginePath({
+        activeEngineId: s.activeEngineId,
+        hasSidecarItem: Boolean(sidecarItem),
+        engineBypass: process.env.GSD_ENGINE_BYPASS === "1",
+      })) {
         debugLog("autoLoop", { phase: "custom-engine-derive", iteration, engineId: s.activeEngineId });
 
         const { engine, policy } = resolveEngine({

@@ -21,6 +21,7 @@ import {
   decideWorkflowLoop,
   formatDispatchExceptionSummary,
   formatUnhandledDispatchErrorSummary,
+  shouldUseCustomEnginePath,
 } from "../auto/workflow-kernel.ts";
 
 test("decideWorkflowLoop continues when dispatch preconditions are valid", () => {
@@ -385,6 +386,49 @@ test("decideCustomEngineVerifyRetry retries until the retry budget is exceeded",
   assert.deepEqual(
     decideCustomEngineVerifyRetry({ attempts: 4, maxRetries: 3 }),
     { action: "recover" },
+  );
+});
+
+test("shouldUseCustomEnginePath enables only non-dev engines without sidecar or bypass", () => {
+  assert.equal(
+    shouldUseCustomEnginePath({
+      activeEngineId: "custom",
+      hasSidecarItem: false,
+      engineBypass: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldUseCustomEnginePath({
+      activeEngineId: "dev",
+      hasSidecarItem: false,
+      engineBypass: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldUseCustomEnginePath({
+      activeEngineId: null,
+      hasSidecarItem: false,
+      engineBypass: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldUseCustomEnginePath({
+      activeEngineId: "custom",
+      hasSidecarItem: true,
+      engineBypass: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldUseCustomEnginePath({
+      activeEngineId: "custom",
+      hasSidecarItem: false,
+      engineBypass: true,
+    }),
+    false,
   );
 });
 

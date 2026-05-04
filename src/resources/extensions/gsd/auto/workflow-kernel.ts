@@ -120,6 +120,12 @@ export type CustomEngineVerifyRetryDecision =
   | { action: "retry" }
   | { action: "recover" };
 
+export interface CustomEnginePathInput {
+  activeEngineId: string | null | undefined;
+  hasSidecarItem: boolean;
+  engineBypass: boolean;
+}
+
 export interface CustomEngineRecoveryInput {
   outcome: "retry" | "skip" | "stop" | "pause";
   reason?: string;
@@ -404,6 +410,13 @@ export function decideCustomEngineVerifyRetry(
   return input.attempts > input.maxRetries
     ? { action: "recover" }
     : { action: "retry" };
+}
+
+export function shouldUseCustomEnginePath(input: CustomEnginePathInput): boolean {
+  return input.activeEngineId != null
+    && input.activeEngineId !== "dev"
+    && !input.hasSidecarItem
+    && !input.engineBypass;
 }
 
 export function decideCustomEngineRecovery(
