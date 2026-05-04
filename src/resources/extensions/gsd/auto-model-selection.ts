@@ -475,7 +475,7 @@ export async function selectAndApplyModel(
       const model = resolveModelId(modelId, resolutionPool, ctx.model?.provider);
 
       if (!model) {
-        if (verbose) ctx.ui.notify(`Model ${modelId} not found, trying fallback.`, "info");
+        ctx.ui.notify(`Model ${modelId} not found, trying fallback.`, "warning");
         continue;
       }
 
