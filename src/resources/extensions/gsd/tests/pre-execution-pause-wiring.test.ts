@@ -351,6 +351,50 @@ describe("Pre-execution checks → pauseAuto wiring", () => {
     assert.equal(existsSync(triggerPath), true, "replan trigger should be written on first failure");
   });
 
+  test("pre-execution fail after prior replan pauses with after-replan escalation", async () => {
+    createFailingTasks();
+
+    const adapter = _getAdapter();
+    adapter?.prepare(
+      `INSERT INTO replan_history (
+        milestone_id,
+        slice_id,
+        task_id,
+        summary,
+        previous_artifact_path,
+        replacement_artifact_path,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "M001",
+      "S01",
+      "",
+      "prior replan",
+      ".gsd/milestones/M001/slices/S01/S01-PLAN.md",
+      ".gsd/milestones/M001/slices/S01/S01-REPLAN.md",
+      new Date().toISOString(),
+    );
+
+    const ctx = makeMockCtx();
+    const pi = makeMockPi();
+    const pauseAutoMock = mock.fn(async () => {});
+    const s = makeMockSession(tempDir, { type: "plan-slice", id: "M001/S01" });
+    const pctx = makePostUnitContext(s, ctx, pi, pauseAutoMock);
+
+    const result = await postUnitPostVerification(pctx);
+
+    assert.equal(pauseAutoMock.mock.callCount(), 1, "pauseAuto should be called after replan when pre-exec still fails");
+    assert.equal(result, "stopped", "postUnitPostVerification should return 'stopped' on after-replan escalation");
+
+    const notifyCalls = ctx.ui.notify.mock.calls;
+    const errorNotify = notifyCalls.find(
+      (call: { arguments: unknown[] }) =>
+        call.arguments[1] === "error" &&
+        String(call.arguments[0]).includes("after replan"),
+    );
+    assert.ok(errorNotify, "Should show error notification mentioning after replan");
+  });
+
   test("pauseAuto is called when enhanced_verification_strict: true and pre-execution returns warn", async () => {
     // Write preferences with strict mode enabled
     writePreferences({
