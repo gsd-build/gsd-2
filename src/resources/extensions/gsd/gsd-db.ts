@@ -32,6 +32,7 @@ import { getGateIdsForTurn, type OwnerTurn } from "./gate-registry.js";
 import { logError, logWarning } from "./workflow-logger.js";
 import { createDbAdapter, type DbAdapter } from "./db-adapter.js";
 import { createDbConnectionCache, type DbConnectionCacheEntry } from "./db-connection-cache.js";
+import { createDbOpenState, type DbOpenPhase } from "./db-open-state.js";
 import { createSqliteProviderLoader, suppressSqliteWarning, type DbProviderName, type SqliteFallbackOpen } from "./db-provider.js";
 // Type-only import to avoid a circular runtime dep. The runtime side of
 // workflow-manifest.ts depends on this file, but the StateManifest type is
@@ -1279,9 +1280,7 @@ let currentDb: DbAdapter | null = null;
 let currentPath: string | null = null;
 let currentPid: number = 0;
 let _exitHandlerRegistered = false;
-let _dbOpenAttempted = false;
-let _lastDbError: Error | null = null;
-let _lastDbPhase: "open" | "initSchema" | "vacuum-recovery" | null = null;
+const _dbOpenState = createDbOpenState();
 /**
  * Identity key of the workspace whose connection is currently active
  * (currentDb). Set by openDatabaseByWorkspace(); null when the active
@@ -1367,7 +1366,7 @@ export function openDatabaseByWorkspace(workspace: GsdWorkspace): boolean {
     currentDb = cached.db;
     currentPath = cached.dbPath;
     currentPid = process.pid;
-    _dbOpenAttempted = true;
+    _dbOpenState.markAttempted();
     _currentIdentityKey = key;
     return true;
   }
@@ -1479,7 +1478,7 @@ export function isDbAvailable(): boolean {
  * trigger a false degraded-mode warning.
  */
 export function wasDbOpenAttempted(): boolean {
-  return _dbOpenAttempted;
+  return _dbOpenState.snapshot().attempted;
 }
 
 export function getDbStatus(): {
@@ -1487,40 +1486,38 @@ export function getDbStatus(): {
   provider: ProviderName | null;
   attempted: boolean;
   lastError: Error | null;
-  lastPhase: "open" | "initSchema" | "vacuum-recovery" | null;
+  lastPhase: DbOpenPhase | null;
 } {
   providerLoader.load();
+  const openState = _dbOpenState.snapshot();
   return {
     available: currentDb !== null,
     provider: providerLoader.getProviderName(),
-    attempted: _dbOpenAttempted,
-    lastError: _lastDbError,
-    lastPhase: _lastDbPhase,
+    attempted: openState.attempted,
+    lastError: openState.lastError,
+    lastPhase: openState.lastPhase,
   };
 }
 
 export function openDatabase(path: string): boolean {
-  _dbOpenAttempted = true;
+  _dbOpenState.markAttempted();
   if (currentDb && currentPath !== path) closeDatabase();
   if (currentDb && currentPath === path) return true;
 
   // Reset error state only when a new open attempt is actually going to run.
-  _lastDbError = null;
-  _lastDbPhase = null;
+  _dbOpenState.clearError();
 
   let rawDb: unknown;
   let fallbackOpen: SqliteFallbackOpen | null = null;
   try {
     rawDb = providerLoader.openRaw(path);
   } catch (primaryErr) {
-    _lastDbPhase = "open";
-    _lastDbError = primaryErr instanceof Error ? primaryErr : new Error(String(primaryErr));
+    _dbOpenState.recordError("open", primaryErr);
     // node:sqlite loaded but failed to open this file — try better-sqlite3 as fallback.
     fallbackOpen = providerLoader.tryOpenBetterSqliteFallback(path);
     if (fallbackOpen) {
       rawDb = fallbackOpen.rawDb;
-      _lastDbError = null;
-      _lastDbPhase = null;
+      _dbOpenState.clearError();
     }
     if (!rawDb) throw primaryErr;
   }
@@ -1539,14 +1536,12 @@ export function openDatabase(path: string): boolean {
         initSchema(adapter, fileBacked);
         process.stderr.write("gsd-db: recovered corrupt database via VACUUM\n");
       } catch (retryErr) {
-        _lastDbPhase = "vacuum-recovery";
-        _lastDbError = retryErr instanceof Error ? retryErr : new Error(String(retryErr));
+        _dbOpenState.recordError("vacuum-recovery", retryErr);
         try { adapter.close(); } catch (e) { logWarning("db", `close after VACUUM failed: ${(e as Error).message}`); }
         throw retryErr;
       }
     } else {
-      _lastDbPhase = "initSchema";
-      _lastDbError = err instanceof Error ? err : new Error(String(err));
+      _dbOpenState.recordError("initSchema", err);
       try { adapter.close(); } catch (e) { logWarning("db", `close after initSchema failed: ${(e as Error).message}`); }
       throw err;
     }
@@ -1592,9 +1587,7 @@ export function closeDatabase(): void {
   }
   // Reset session-scoped state unconditionally so stale error info from a
   // failed open doesn't persist into the next open attempt or status check.
-  _dbOpenAttempted = false;
-  _lastDbError = null;
-  _lastDbPhase = null;
+  _dbOpenState.reset();
 }
 
 /** Run a full VACUUM — call sparingly (e.g. after milestone completion). */
