@@ -6,6 +6,43 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.80.0] - 2026-05-04
+
+### Added
+- **gsd**: make uok contracts db authoritative
+- **context-mode**: fully wire auto-run context mode
+
+### Fixed
+- **post-exec**: tighten explicit extension fallback and +types guard
+- **post-exec**: handle dotted module stems and ignore React Router +types imports
+- **gsd**: recover planned slices after artifact writes
+- **auto**: emit stopped lifecycle event on recovery stop
+- **gsd-extension**: address remaining CodeRabbit auto seam feedback
+- **gsd-extension**: address auto orchestration review findings
+- **gsd-extension**: type pauseAuto error context in loop deps
+- **shared**: preserve submitted interview answers on abort
+- **gsd-extension**: type pauseAuto error context in loop deps
+- **gsd-extension**: preserve cancellation context for auto-mode pauses
+- **mcp-server**: update gsd_summary_save PROJECT test fixture for R3a contract
+- **gsd**: address PR5279 review — basePath threading + cache invalidation + Gate 1a test rigor
+- **gsd**: close depth-verification gate workflow regressions
+- **gsd**: resolve plan-slice artifacts case-insensitively
+- **gsd**: guard onTurnResult phaseResults access with Array.isArray
+- **gsd**: address PR5266 review — trace correlation, cleanup-on-throw, audit context reset
+- **gsd**: continue deep queued milestones
+- **gsd**: bind task commits to milestone completion guard
+- **gsd**: keep project save success if registration fails
+- **mcp-server**: Windows path-sep test regex + gate gsd_exec writes
+- **gsd**: register deep project milestones
+- **gsd**: use homedir() fallback in currentDirectoryRoot for cross-platform consistency
+
+### Changed
+- **auto**: dedupe pauseAuto callback signature
+- **gsd-extension**: introduce auto orchestration seams and contracts
+- **prefs**: rename KNOWN_UNIT_TYPES → KNOWN_UNIT_LABELS in preferences-types
+- sync package-lock.json (add @emnapi/runtime)
+- sync package-lock.json (add @emnapi/runtime)
+
 ## [2.79.0] - 2026-05-03
 
 ### Added
@@ -3996,7 +4033,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - License updated to MIT
 
-[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.79.0...HEAD
+[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.80.0...HEAD
+[2.80.0]: https://github.com/gsd-build/gsd-2/compare/v2.79.0...v2.80.0
 [2.79.0]: https://github.com/gsd-build/gsd-2/compare/v2.78.1...v2.79.0
 [2.78.1]: https://github.com/gsd-build/gsd-2/compare/v2.78.0...v2.78.1
 [2.78.0]: https://github.com/gsd-build/gsd-2/compare/v2.77.0...v2.78.0

@@ -1,6 +1,6 @@
 {
   "name": "@gsd/pi-tui",
-  "version": "2.79.0",
+  "version": "2.80.0",
   "description": "Terminal User Interface library (vendored from pi-mono)",
   "type": "module",
   "gsd": {
