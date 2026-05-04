@@ -12,10 +12,36 @@
  */
 
 import type { ExtensionAPI } from "@gsd/pi-coding-agent";
-import { Text } from "@gsd/pi-tui";
 import * as client from "./ollama-client.js";
 import { discoverModels, formatModelForDisplay } from "./ollama-discovery.js";
 import { formatModelSize } from "./model-capabilities.js";
+
+type OverlayTheme = { fg(token: string, text: string): string };
+
+type DismissibleOverlay = {
+	render(width: number): string[];
+	handleInput(data: string): void;
+	invalidate(): void;
+};
+
+export function createDismissibleOverlay(
+	theme: OverlayTheme,
+	lines: string[],
+	done: (r: undefined) => void,
+	options?: { includeDismissHint?: boolean },
+): DismissibleOverlay {
+	return {
+		render(_width: number): string[] {
+			const base = lines.map((l) => theme.fg("text", l));
+			if (!options?.includeDismissHint) return base;
+			return [...base, "", theme.fg("dim", " Press any key to dismiss")];
+		},
+		handleInput(_data: string): void {
+			done(undefined);
+		},
+		invalidate(): void {},
+	};
+}
 
 export function registerOllamaCommands(pi: ExtensionAPI): void {
 	pi.registerCommand("ollama", {
@@ -100,11 +126,8 @@ async function handleStatus(ctx: any): Promise<void> {
 	}
 
 	await ctx.ui.custom(
-		(tui: any, theme: any, _kb: any, done: (r: undefined) => void) => {
-			const text = new Text(lines.map((l) => theme.fg("fg", l)).join("\n"), 0, 0);
-			setTimeout(() => done(undefined), 0);
-			return text;
-		},
+		(_tui: any, theme: OverlayTheme, _kb: any, done: (r: undefined) => void) =>
+			createDismissibleOverlay(theme, lines, done, { includeDismissHint: true }),
 	);
 }
 
@@ -127,11 +150,8 @@ async function handleList(ctx: any): Promise<void> {
 	}
 
 	await ctx.ui.custom(
-		(tui: any, theme: any, _kb: any, done: (r: undefined) => void) => {
-			const text = new Text(lines.map((l) => theme.fg("fg", l)).join("\n"), 0, 0);
-			setTimeout(() => done(undefined), 0);
-			return text;
-		},
+		(_tui: any, theme: OverlayTheme, _kb: any, done: (r: undefined) => void) =>
+			createDismissibleOverlay(theme, lines, done, { includeDismissHint: true }),
 	);
 }
 
@@ -233,11 +253,8 @@ async function handlePs(ctx: any): Promise<void> {
 		}
 
 		await ctx.ui.custom(
-			(tui: any, theme: any, _kb: any, done: (r: undefined) => void) => {
-				const text = new Text(lines.map((l) => theme.fg("fg", l)).join("\n"), 0, 0);
-				setTimeout(() => done(undefined), 0);
-				return text;
-			},
+			(_tui: any, theme: OverlayTheme, _kb: any, done: (r: undefined) => void) =>
+				createDismissibleOverlay(theme, lines, done, { includeDismissHint: true }),
 		);
 	} catch (err) {
 		ctx.ui.notify(
