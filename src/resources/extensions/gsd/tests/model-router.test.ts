@@ -1,3 +1,5 @@
+// Project/App: GSD-2
+// File Purpose: Verifies model routing decisions and legacy provider-default telemetry.
 import test, { describe } from "node:test";
 import assert from "node:assert/strict";
 
@@ -14,6 +16,7 @@ import {
 } from "../model-router.js";
 import type { DynamicRoutingConfig, RoutingDecision, ModelCapabilities } from "../model-router.js";
 import type { ClassificationResult } from "../complexity-classifier.js";
+import { getLegacyTelemetry, resetLegacyTelemetry } from "../legacy-telemetry.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -297,16 +300,28 @@ test("cross-provider: configured primary available by bare ID wins over equivale
 // ─── resolveModelForTier (provider-agnostic tier resolution) ────────────────
 
 test("resolveModelForTier: returns canonical Anthropic model when no available models", () => {
-  assert.equal(resolveModelForTier("heavy", []), "claude-opus-4-6");
-  assert.equal(resolveModelForTier("standard", []), "claude-sonnet-4-6");
-  assert.equal(resolveModelForTier("light", []), "claude-haiku-4-5");
+  try {
+    resetLegacyTelemetry();
+    assert.equal(resolveModelForTier("heavy", []), "claude-opus-4-6");
+    assert.equal(resolveModelForTier("standard", []), "claude-sonnet-4-6");
+    assert.equal(resolveModelForTier("light", []), "claude-haiku-4-5");
+    assert.equal(getLegacyTelemetry()["legacy.providerDefaultUsed"], 3);
+  } finally {
+    resetLegacyTelemetry();
+  }
 });
 
 test("resolveModelForTier: returns canonical model when it is available", () => {
-  assert.equal(
-    resolveModelForTier("heavy", ["claude-opus-4-6", "claude-sonnet-4-6"]),
-    "claude-opus-4-6",
-  );
+  try {
+    resetLegacyTelemetry();
+    assert.equal(
+      resolveModelForTier("heavy", ["claude-opus-4-6", "claude-sonnet-4-6"]),
+      "claude-opus-4-6",
+    );
+    assert.equal(getLegacyTelemetry()["legacy.providerDefaultUsed"], 0);
+  } finally {
+    resetLegacyTelemetry();
+  }
 });
 
 test("resolveModelForTier: does not prefer canonical over cheaper same-tier model", () => {
@@ -341,11 +356,17 @@ test("resolveModelForTier: picks light-tier cross-provider model", () => {
 });
 
 test("resolveModelForTier: falls back to canonical when no tier match available", () => {
-  // Only unknown models available — getModelTier classifies unknowns as
-  // "standard", so a request for "heavy" finds no match and the canonical
-  // Anthropic ID is returned as a documented fallback.
-  const result = resolveModelForTier("heavy", ["some-custom-model"]);
-  assert.equal(result, "claude-opus-4-6");
+  try {
+    resetLegacyTelemetry();
+    // Only unknown models available — getModelTier classifies unknowns as
+    // "standard", so a request for "heavy" finds no match and the canonical
+    // Anthropic ID is returned as a documented fallback.
+    const result = resolveModelForTier("heavy", ["some-custom-model"]);
+    assert.equal(result, "claude-opus-4-6");
+    assert.equal(getLegacyTelemetry()["legacy.providerDefaultUsed"], 1);
+  } finally {
+    resetLegacyTelemetry();
+  }
 });
 
 test("resolveModelForTier: handles provider-prefixed available models", () => {
