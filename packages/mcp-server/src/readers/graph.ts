@@ -661,11 +661,18 @@ export async function writeSnapshot(gsdRoot: string): Promise<void> {
 
   renameSync(tmp, final);
 
-  const dirFd = openSync(dir, 'r');
+  // Best-effort directory fsync: some platforms/filesystems (notably Windows)
+  // may reject directory descriptors. Data durability is still protected by
+  // the temp-file fsync + atomic rename above.
   try {
-    fsyncSync(dirFd);
-  } finally {
-    closeSync(dirFd);
+    const dirFd = openSync(dir, 'r');
+    try {
+      fsyncSync(dirFd);
+    } finally {
+      closeSync(dirFd);
+    }
+  } catch {
+    // Ignore platform/filesystem limitations for directory fsync.
   }
 }
 
