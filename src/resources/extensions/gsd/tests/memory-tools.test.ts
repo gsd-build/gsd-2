@@ -253,6 +253,12 @@ test('memory-tools: memory_query surfaces degraded mode when FTS table is unavai
   assert.equal(result.details.degraded_fts, true);
   assert.match(result.content[0].text, /FTS5 unavailable/i);
 
+  const emptyQuery = executeMemoryQuery({ query: '' });
+  assert.ok(!emptyQuery.isError);
+  assert.equal(emptyQuery.details.keyword_backend, 'ranked');
+  assert.equal(emptyQuery.details.degraded_fts, false);
+  assert.doesNotMatch(emptyQuery.content[0].text, /FTS5 unavailable/i);
+
   closeDatabase();
 });
 
