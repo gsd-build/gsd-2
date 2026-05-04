@@ -69,6 +69,7 @@ import {
   decideWorkflowLoop,
 } from "./workflow-kernel.js";
 import { createWorkflowJournalReporter } from "./workflow-journal-reporter.js";
+import { createWorkflowPhaseReporter } from "./workflow-phase-reporter.js";
 import { createWorkflowTurnReporter } from "./workflow-turn-reporter.js";
 
 // ── Stuck detection persistence (#3704) ──────────────────────────────────
@@ -418,6 +419,9 @@ export async function autoLoop(
     const turnStartedAt = new Date().toISOString();
     let observedUnitType: string | undefined;
     let observedUnitId: string | undefined;
+    const phaseReporter = createWorkflowPhaseReporter({
+      observer: deps.uokObserver,
+    });
     const turnReporter = createWorkflowTurnReporter({
       observer: deps.uokObserver,
       traceId: flowId,
@@ -637,7 +641,7 @@ export async function autoLoop(
 
         // ── Guards (shared with dev path) ──
         const guardsResult = await runGuards(ic, s.currentMilestoneId ?? "workflow");
-        deps.uokObserver?.onPhaseResult("guard", guardsResult.action, {
+        phaseReporter.report("guard", guardsResult.action, {
           unitType: iterData.unitType,
           unitId: iterData.unitId,
         });
@@ -658,7 +662,7 @@ export async function autoLoop(
           const requestTimestamp = unitPhaseResult.data.requestDispatchedAt ?? unitPhaseResult.data.unitStartedAt;
           if (typeof requestTimestamp === "number") s.lastRequestTimestamp = requestTimestamp;
         }
-        deps.uokObserver?.onPhaseResult("unit", unitPhaseResult.action, {
+        phaseReporter.report("unit", unitPhaseResult.action, {
           unitType: iterData.unitType,
           unitId: iterData.unitId,
         });
@@ -672,7 +676,7 @@ export async function autoLoop(
         const verifyResult = await policy.verify(iterData.unitType, iterData.unitId, { basePath: s.basePath });
         if (verifyResult === "pause") {
           await deps.pauseAuto(ctx, pi);
-          deps.uokObserver?.onPhaseResult("custom-engine", "pause", {
+          phaseReporter.report("custom-engine", "pause", {
             unitType: iterData.unitType,
             unitId: iterData.unitId,
           });
@@ -686,7 +690,7 @@ export async function autoLoop(
           retryCounts.set(recoveryKey, attempts);
           saveCustomVerifyRetryCounts(s);
           debugLog("autoLoop", { phase: "custom-engine-verify-retry", iteration, unitId: iterData.unitId, attempts });
-          deps.uokObserver?.onPhaseResult("custom-engine", "retry", {
+          phaseReporter.report("custom-engine", "retry", {
             unitType: iterData.unitType,
             unitId: iterData.unitId,
             attempts,
@@ -742,7 +746,7 @@ export async function autoLoop(
         );
         if (reconcileDecision.action === "complete-workflow") {
           await deps.stopAuto(ctx, pi, reconcileDecision.stopReason);
-          deps.uokObserver?.onPhaseResult("custom-engine", "milestone-complete", {
+          phaseReporter.report("custom-engine", "milestone-complete", {
             unitType: iterData.unitType,
             unitId: iterData.unitId,
           });
@@ -751,7 +755,7 @@ export async function autoLoop(
         }
         if (reconcileDecision.action === "pause") {
           await deps.pauseAuto(ctx, pi);
-          deps.uokObserver?.onPhaseResult("custom-engine", "pause", {
+          phaseReporter.report("custom-engine", "pause", {
             unitType: iterData.unitType,
             unitId: iterData.unitId,
           });
@@ -760,7 +764,7 @@ export async function autoLoop(
         }
         if (reconcileDecision.action === "stop") {
           await deps.stopAuto(ctx, pi, reconcileDecision.reason);
-          deps.uokObserver?.onPhaseResult("custom-engine", "stop", {
+          phaseReporter.report("custom-engine", "stop", {
             unitType: iterData.unitType,
             unitId: iterData.unitId,
             reason: reconcileResult.reason,
@@ -768,7 +772,7 @@ export async function autoLoop(
           finishTurn("stopped", "manual-attention", reconcileResult.reason);
           break;
         }
-        deps.uokObserver?.onPhaseResult("custom-engine", "continue", {
+        phaseReporter.report("custom-engine", "continue", {
           unitType: iterData.unitType,
           unitId: iterData.unitId,
         });
@@ -779,7 +783,7 @@ export async function autoLoop(
       if (!sidecarItem) {
         // ── Phase 1: Pre-dispatch ─────────────────────────────────────────
         const preDispatchResult = await runPreDispatch(ic, loopState);
-        deps.uokObserver?.onPhaseResult("pre-dispatch", preDispatchResult.action);
+        phaseReporter.report("pre-dispatch", preDispatchResult.action);
         if (preDispatchResult.action === "break") {
           finishTurn("stopped", "manual-attention", "pre-dispatch-break");
           break;
@@ -793,7 +797,7 @@ export async function autoLoop(
 
         // ── Phase 2: Guards ───────────────────────────────────────────────
         const guardsResult = await runGuards(ic, preData.mid);
-        deps.uokObserver?.onPhaseResult("guard", guardsResult.action);
+        phaseReporter.report("guard", guardsResult.action);
         if (guardsResult.action === "break") {
           finishTurn("stopped", "manual-attention", "guard-break");
           break;
@@ -801,7 +805,7 @@ export async function autoLoop(
 
         // ── Phase 3: Dispatch ─────────────────────────────────────────────
         const dispatchResult = await runDispatch(ic, preData, loopState);
-        deps.uokObserver?.onPhaseResult("dispatch", dispatchResult.action);
+        phaseReporter.report("dispatch", dispatchResult.action);
         if (dispatchResult.action === "break") {
           finishTurn("stopped", "manual-attention", "dispatch-break");
           break;
@@ -837,7 +841,7 @@ export async function autoLoop(
         };
         observedUnitType = iterData.unitType;
         observedUnitId = iterData.unitId;
-        deps.uokObserver?.onPhaseResult("dispatch", "sidecar", {
+        phaseReporter.report("dispatch", "sidecar", {
           unitType: iterData.unitType,
           unitId: iterData.unitId,
           sidecarKind: sidecarItem.kind,
@@ -895,7 +899,7 @@ export async function autoLoop(
         const requestTimestamp = unitPhaseResult.data.requestDispatchedAt ?? unitPhaseResult.data.unitStartedAt;
         if (typeof requestTimestamp === "number") s.lastRequestTimestamp = requestTimestamp;
       }
-      deps.uokObserver?.onPhaseResult("unit", unitPhaseResult.action, {
+      phaseReporter.report("unit", unitPhaseResult.action, {
         unitType: iterData.unitType,
         unitId: iterData.unitId,
       });
@@ -930,7 +934,7 @@ export async function autoLoop(
         }
         throw err;
       }
-      deps.uokObserver?.onPhaseResult("finalize", finalizeResult.action, {
+      phaseReporter.report("finalize", finalizeResult.action, {
         unitType: iterData.unitType,
         unitId: iterData.unitId,
       });
