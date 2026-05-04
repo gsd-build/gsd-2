@@ -25,6 +25,12 @@ import type { MergeReconcileResult } from "../auto-recovery.js";
 import type { UokTurnObserver } from "../uok/contracts.js";
 import type { PreflightResult } from "../clean-root-preflight.js";
 
+type PauseAutoFn = (
+  ctx?: ExtensionContext,
+  pi?: ExtensionAPI,
+  errorContext?: ErrorContext,
+) => Promise<void>;
+
 /**
  * Dependencies injected by the caller (auto.ts startAuto) so autoLoop
  * can access private functions from auto.ts without exporting them.
@@ -40,11 +46,7 @@ export interface LoopDeps {
     pi?: ExtensionAPI,
     reason?: string,
   ) => Promise<void>;
-  pauseAuto: (
-    ctx?: ExtensionContext,
-    pi?: ExtensionAPI,
-    errorContext?: ErrorContext,
-  ) => Promise<void>;
+  pauseAuto: PauseAutoFn;
   clearUnitTimeout: () => void;
   updateProgressWidget: (
     ctx: ExtensionContext,
@@ -250,11 +252,7 @@ export interface LoopDeps {
     prefs: GSDPreferences | undefined;
     buildSnapshotOpts: () => CloseoutOptions & Record<string, unknown>;
     buildRecoveryContext: () => unknown;
-    pauseAuto: (
-      ctx?: ExtensionContext,
-      pi?: ExtensionAPI,
-      errorContext?: ErrorContext,
-    ) => Promise<void>;
+    pauseAuto: PauseAutoFn;
   }) => void;
 
   // Prompt helpers
@@ -280,11 +278,7 @@ export interface LoopDeps {
   ) => Promise<"dispatched" | "continue" | "retry">;
   runPostUnitVerification: (
     vctx: VerificationContext,
-    pauseAuto: (
-      ctx?: ExtensionContext,
-      pi?: ExtensionAPI,
-      errorContext?: ErrorContext,
-    ) => Promise<void>,
+    pauseAuto: PauseAutoFn,
   ) => Promise<VerificationResult>;
   postUnitPostVerification: (
     pctx: PostUnitContext,
