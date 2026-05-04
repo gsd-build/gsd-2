@@ -199,10 +199,7 @@ describe("Pre-execution fail-closed behavior", () => {
     );
   });
 
-  test("error notification includes error message when pre-execution throws", async () => {
-    // This test verifies the error handling path by checking the notify call structure
-    // The actual throw would require mocking runPreExecutionChecks, but we can verify
-    // the error handling code path exists by checking the notification pattern
+  test("blocking pre-execution failure triggers replan warning on first failure", async () => {
     writePreferences({
       enhanced_verification: true,
       enhanced_verification_pre: true,
@@ -247,25 +244,25 @@ describe("Pre-execution fail-closed behavior", () => {
 
     const result = await postUnitPostVerification(pctx);
 
-    // With a blocking failure, pauseAuto should be called
+    // First blocking failure should replan, not pause
     assert.equal(
       pauseAutoMock.mock.callCount(),
-      1,
-      "pauseAuto should be called when pre-execution checks fail"
+      0,
+      "pauseAuto should not be called on first blocking pre-execution failure"
     );
 
     assert.equal(
       result,
-      "stopped",
-      "postUnitPostVerification should return 'stopped' when checks fail"
+      "continue",
+      "postUnitPostVerification should return 'continue' after triggering replan"
     );
 
-    // Verify error notification was shown
     const notifyCalls = ctx.ui.notify.mock.calls;
-    const errorNotify = notifyCalls.find(
+    const warnNotify = notifyCalls.find(
       (call: { arguments: unknown[] }) =>
-        call.arguments[1] === "error"
+        call.arguments[1] === "warning" &&
+        String(call.arguments[0]).includes("triggering replan")
     );
-    assert.ok(errorNotify, "Should show error notification when pre-execution checks fail");
+    assert.ok(warnNotify, "Should show warning notification when pre-execution triggers replan");
   });
 });
