@@ -27,6 +27,20 @@ export interface ReorderResult {
   depsToRemove: Array<{ milestone: string; dep: string }>;
 }
 
+const MAX_VISIBLE_PENDING_ROWS = 12;
+
+export function computePendingViewport(cursor: number, total: number, maxVisible = MAX_VISIBLE_PENDING_ROWS): { start: number; end: number } {
+  if (total <= maxVisible) return { start: 0, end: total };
+  const half = Math.floor(maxVisible / 2);
+  let start = Math.max(0, cursor - half);
+  let end = start + maxVisible;
+  if (end > total) {
+    end = total;
+    start = end - maxVisible;
+  }
+  return { start, end };
+}
+
 /**
  * Show the queue reorder overlay.
  * Returns the new order + deps to remove, or null if cancelled.
@@ -181,7 +195,12 @@ export async function showQueueReorder(
         validation.redundant.map(r => `${r.milestone}:${r.dependsOn}`),
       );
 
-      for (let i = 0; i < items.length; i++) {
+      const viewport = computePendingViewport(cursor, items.length);
+      if (viewport.start > 0) {
+        lines.push(add(`    ${theme.fg("dim", `… ${viewport.start} above` )}`));
+      }
+
+      for (let i = viewport.start; i < viewport.end; i++) {
         const item = items[i];
         const isCursor = i === cursor;
         const num = i + 1;
@@ -213,6 +232,10 @@ export async function showQueueReorder(
         for (const v of validation.violations.filter(v => v.milestone === item.id && v.type === 'missing_dep')) {
           lines.push(add(`       ${theme.fg("error", `${GLYPH.statusWarning} depends_on: ${v.dependsOn} (does not exist)`)}`));
         }
+      }
+
+      if (viewport.end < items.length) {
+        lines.push(add(`    ${theme.fg("dim", `… ${items.length - viewport.end} below`)}`));
       }
 
       // Removed deps feedback
