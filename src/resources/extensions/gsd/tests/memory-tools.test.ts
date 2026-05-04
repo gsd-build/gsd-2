@@ -240,6 +240,22 @@ test('memory-tools: memory_query ignores superseded memories by default', () => 
   closeDatabase();
 });
 
+test('memory-tools: memory_query surfaces degraded mode when FTS table is unavailable', () => {
+  openDatabase(':memory:');
+  createMemory({ category: 'gotcha', content: 'credential rotation policy' });
+
+  const adapter = _getAdapter()!;
+  adapter.prepare('DROP TABLE IF EXISTS memories_fts').run();
+
+  const result = executeMemoryQuery({ query: 'credential' });
+  assert.ok(!result.isError);
+  assert.equal(result.details.keyword_backend, 'like-fallback');
+  assert.equal(result.details.degraded_fts, true);
+  assert.match(result.content[0].text, /FTS5 unavailable/i);
+
+  closeDatabase();
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // gsd_graph
 // ═══════════════════════════════════════════════════════════════════════════
