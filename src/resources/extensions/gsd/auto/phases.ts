@@ -238,6 +238,13 @@ async function emitCancelledUnitEnd(
   });
 }
 
+export function _isPauseOriginatedCancellation(
+  paused: boolean,
+  errorContext?: { message: string; category: string; stopReason?: string; isTransient?: boolean; retryAfterMs?: number },
+): boolean {
+  return paused && !errorContext;
+}
+
 export function _buildCancelledUnitStopReason(
   unitType: string,
   unitId: string,
@@ -1821,6 +1828,12 @@ export async function runUnitPhase(
   }
 
   if (unitResult.status === "cancelled") {
+    if (_isPauseOriginatedCancellation(s.paused, unitResult.errorContext)) {
+      await emitCancelledUnitEnd(ic, unitType, unitId, unitStartSeq);
+      debugLog("autoLoop", { phase: "exit", reason: "paused-cancelled" });
+      return { action: "break", reason: "paused" };
+    }
+
     const errorCategory = unitResult.errorContext?.category;
     // Provider-error pause: agent_end recovery normally pauses before this
     // branch. Provider readiness failures happen before dispatch, so pause here
