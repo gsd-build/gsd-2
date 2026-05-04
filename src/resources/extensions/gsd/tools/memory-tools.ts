@@ -9,7 +9,7 @@
 //   - memory_query    → keyword-filtered, score-ranked listing of active memories
 //   - gsd_graph       → returns a memory and its supersedes edges only (Phase 4 adds memory_relations)
 
-import { _getAdapter, isDbAvailable } from "../gsd-db.js";
+import { _getAdapter, isDbAvailable, isMemoriesFtsAvailable } from "../gsd-db.js";
 import {
   createMemory,
   getActiveMemoriesRanked,
@@ -189,8 +189,11 @@ export function executeMemoryQuery(params: MemoryQueryParams): ToolExecutionResu
   const category = params.category?.trim().toLowerCase() || undefined;
   const scopeFilter = params.scope?.trim() || undefined;
   const tagFilter = params.tag?.trim().toLowerCase() || undefined;
+  const adapter = _getAdapter();
+  if (!adapter) return dbUnavailable("memory_query");
 
   try {
+    const ftsAvailable = isMemoriesFtsAvailable(adapter);
     let ranked: RankedMemory[] = [];
     if (query) {
       ranked = queryMemoriesRanked({
@@ -243,13 +246,21 @@ export function executeMemoryQuery(params: MemoryQueryParams): ToolExecutionResu
       ? "No matching memories."
       : hits.map((h) => `- [${h.id}] (${h.category}) ${h.content}`).join("\n");
 
+    const usingLikeFallback = Boolean(query) && !ftsAvailable;
+    const backend = usingLikeFallback ? "like-fallback" : "ranked";
+    const text = usingLikeFallback
+      ? `${summary}\n\n[degraded] FTS5 unavailable — memory query is using LIKE fallback (no stemming/BM25).`
+      : summary;
+
     return {
-      content: [{ type: "text", text: summary }],
+      content: [{ type: "text", text }],
       details: {
         operation: "memory_query",
         query,
         k,
         returned: hits.length,
+        keyword_backend: backend,
+        degraded_fts: usingLikeFallback,
         hits,
       },
     };
