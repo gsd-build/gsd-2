@@ -22,7 +22,7 @@ Before asking, read `.gsd/PROJECT.md` and find `## Project Shape` -> `**Complexi
 ### Before your first question round
 
 Do a lightweight targeted investigation so your questions are grounded in reality:
-- Scout the codebase using direct tools (`rg`, `find`, `read`) to understand what already exists that this milestone touches or builds on
+- Inspect the codebase using direct tools (`rg`, `find`, `read`) to understand what already exists that this milestone touches or builds on
 - Do **not** spawn agents/subagents for this pass (`scout`, `researcher`, `worker`) — keep it local, transparent, and fast
 - Check the roadmap context above (if present) to understand what surrounds this milestone
 - Use `resolve_library` / `get_library_docs` for unfamiliar libraries — prefer this over `search-the-web` for library documentation
