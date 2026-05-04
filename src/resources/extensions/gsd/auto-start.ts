@@ -997,8 +997,17 @@ export async function bootstrapAutoSession(
         "info",
       );
     } else {
+      const suppressedByFlatRate = routingConfig.enabled
+        && !routingConfig.allow_flat_rate_providers
+        && !!effectiveProvider
+        && isFlatRateProvider(
+          effectiveProvider,
+          buildFlatRateContext(effectiveProvider, ctx, bannerPrefs),
+        );
       ctx.ui.notify(
-        `Dynamic routing: disabled — all tasks will use ${startModelLabel}`,
+        suppressedByFlatRate
+          ? `Dynamic routing: disabled (flat-rate provider: ${effectiveProvider}) — all tasks will use ${startModelLabel}`
+          : `Dynamic routing: disabled — all tasks will use ${startModelLabel}`,
         "info",
       );
     }

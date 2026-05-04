@@ -320,4 +320,15 @@ describe("auto-start banner respects allow_flat_rate_providers (#4386)", () => {
       "auto-start banner must read allow_flat_rate_providers so the banner reflects the opt-in",
     );
   });
+
+  test("banner explains when disable is due to flat-rate provider", () => {
+    const src = readFileSync(
+      join(__dirname_4386, "..", "auto-start.ts"),
+      "utf-8",
+    );
+    assert.ok(
+      src.includes("Dynamic routing: disabled (flat-rate provider:"),
+      "disabled banner should explicitly explain flat-rate suppression",
+    );
+  });
 });
