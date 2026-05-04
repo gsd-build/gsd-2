@@ -3,8 +3,8 @@
  * Stores results at {agentDir}/discovery-cache.json with per-provider TTLs.
  */
 
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from "fs";
-import { dirname, join } from "path";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { getAgentDir } from "../config.js";
 import { type DiscoveredModel, getDefaultTTL } from "./model-discovery.js";
 
