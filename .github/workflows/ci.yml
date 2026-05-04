@@ -147,10 +147,46 @@ jobs:
             exit 1
           fi
 
+  mergeability-gate:
+    timeout-minutes: 2
+    needs: [detect-changes, ci-circuit-breaker-fast]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      skip-heavy-jobs: ${{ steps.gate.outputs.skip-heavy-jobs }}
+    steps:
+      - name: Determine whether heavy CI should be skipped
+        id: gate
+        uses: actions/github-script@v8
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        with:
+          script: |
+            const eventName = process.env.EVENT_NAME;
+            let mergeableState = "unknown";
+
+            if (eventName === "pull_request") {
+              for (let i = 0; i < 6; i++) {
+                const { data } = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: context.payload.pull_request.number,
+                });
+
+                mergeableState = data.mergeable_state ?? "unknown";
+                if (mergeableState !== "unknown") break;
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+            }
+
+            const { shouldSkipHeavyJobs } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci/mergeability-gate.mjs`);
+            const skipHeavyJobs = shouldSkipHeavyJobs({ eventName, mergeableState });
+            core.info(`mergeable_state=${mergeableState}; skip-heavy-jobs=${skipHeavyJobs}`);
+            core.setOutput("skip-heavy-jobs", skipHeavyJobs ? "true" : "false");
+
   build:
     timeout-minutes: 25
-    needs: [detect-changes, ci-circuit-breaker-fast]
-    if: needs.detect-changes.outputs.docs-only != 'true'
+    needs: [detect-changes, ci-circuit-breaker-fast, mergeability-gate]
+    if: needs.detect-changes.outputs.docs-only != 'true' && needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
@@ -204,9 +240,9 @@ jobs:
 
   ci-circuit-breaker-build:
     timeout-minutes: 2
-    needs: [detect-changes, build]
+    needs: [detect-changes, build, mergeability-gate]
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    if: always() && needs.detect-changes.outputs.docs-only != 'true'
+    if: always() && needs.detect-changes.outputs.docs-only != 'true' && needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     steps:
       - name: Stop pipeline when build gate fails
         env:
@@ -219,8 +255,8 @@ jobs:
 
   integration-tests:
     timeout-minutes: 15
-    needs: [detect-changes, ci-circuit-breaker-build]
-    if: needs.detect-changes.outputs.docs-only != 'true'
+    needs: [detect-changes, ci-circuit-breaker-build, mergeability-gate]
+    if: needs.detect-changes.outputs.docs-only != 'true' && needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
@@ -266,8 +302,8 @@ jobs:
     # workflow. Mirrors the Dev Publish smoke step at dev-publish.yml:84-88.
     # No untrusted GitHub event input is consumed in run: blocks.
     timeout-minutes: 10
-    needs: [detect-changes, ci-circuit-breaker-build]
-    if: needs.detect-changes.outputs.docs-only != 'true'
+    needs: [detect-changes, ci-circuit-breaker-build, mergeability-gate]
+    if: needs.detect-changes.outputs.docs-only != 'true' && needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
@@ -299,8 +335,8 @@ jobs:
     # ABI, migration chain, etc.) - see tests/e2e/README.md.
     # No untrusted GitHub event input is consumed in run: blocks.
     timeout-minutes: 15
-    needs: detect-changes
-    if: needs.detect-changes.outputs.docs-only != 'true'
+    needs: [detect-changes, mergeability-gate]
+    if: needs.detect-changes.outputs.docs-only != 'true' && needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
@@ -336,10 +372,11 @@ jobs:
 
   windows-portability:
     timeout-minutes: 25
-    needs: [detect-changes, ci-circuit-breaker-build]
+    needs: [detect-changes, ci-circuit-breaker-build, mergeability-gate]
     if: >-
       needs.detect-changes.outputs.docs-only != 'true' &&
-      needs.detect-changes.outputs.portability-changed == 'true'
+      needs.detect-changes.outputs.portability-changed == 'true' &&
+      needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     runs-on: blacksmith-4vcpu-windows-2025
 
     steps:
@@ -380,10 +417,11 @@ jobs:
 
   rtk-portability:
     timeout-minutes: 20
-    needs: [detect-changes, ci-circuit-breaker-build]
+    needs: [detect-changes, ci-circuit-breaker-build, mergeability-gate]
     if: >-
       needs.detect-changes.outputs.docs-only != 'true' &&
-      needs.detect-changes.outputs.portability-changed == 'true'
+      needs.detect-changes.outputs.portability-changed == 'true' &&
+      needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     strategy:
       fail-fast: false
       matrix:
