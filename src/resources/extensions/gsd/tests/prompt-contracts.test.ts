@@ -75,6 +75,14 @@ test("guided discussion prompts avoid wrap-up prompts after every round", () => 
   assert.match(slicePrompt, /Never fabricate or simulate user input/i);
 });
 
+test("guided milestone investigation uses direct tools and forbids subagent scout", () => {
+  const prompt = readPrompt("guided-discuss-milestone");
+  assert.match(prompt, /using direct tools \(`rg`, `find`, `read`\)/i);
+  assert.match(prompt, /Do \*\*not\*\* spawn agents\/subagents/i);
+  assert.match(prompt, /Codebase investigation budget:\*\*\s*≤5 tool calls and ≤2 minutes/i);
+  assert.doesNotMatch(prompt, /\(`rg`, `find`, or `scout`\)/i);
+});
+
 test("guided milestone discussion scopes depth verification to the milestone id", () => {
   const prompt = readPrompt("guided-discuss-milestone");
   assert.match(prompt, /depth_verification_\{\{milestoneId\}\}/, "depth verification id should include the milestone id");
