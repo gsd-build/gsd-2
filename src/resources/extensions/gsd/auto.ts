@@ -729,7 +729,10 @@ export function checkRemoteAutoSession(projectRoot: string): {
   if (lock.pid === process.pid) return { running: false };
 
   if (!isLockProcessAlive(lock)) {
-    // Stale lock from a dead process — not a live remote session
+    // Stale lock from a dead process — not a live remote session.
+    // Best-effort reconcile so callers polling this API self-heal without
+    // requiring an explicit `gsd doctor --fix` invocation.
+    clearLock(projectRoot);
     return { running: false };
   }
 

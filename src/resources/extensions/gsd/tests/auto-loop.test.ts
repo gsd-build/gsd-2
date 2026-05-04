@@ -2644,6 +2644,33 @@ test("autoLoop skips rate-limit delay when min_request_interval_ms is 0 (default
 });
 
 // ─── #4850: pre-send model-policy block is non-retryable ────────────────────
+test("autoLoop emits iteration-end when iteration breaks early", async () => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  ctx.ui.setStatus = () => {};
+  const pi = makeMockPi();
+  const s = makeLoopSession();
+
+  const journalEvents: Array<{ eventType: string; data?: any }> = [];
+
+  const deps = makeMockDeps({
+    resolveDispatch: async () => ({
+      action: "stop" as const,
+      reason: "test-stop",
+      level: "warning" as const,
+    }),
+    emitJournalEvent: (entry: any) => { journalEvents.push(entry); },
+  });
+
+  await autoLoop(ctx, pi, s, deps);
+
+  const iterationStarts = journalEvents.filter((e) => e.eventType === "iteration-start");
+  const iterationEnds = journalEvents.filter((e) => e.eventType === "iteration-end");
+  assert.equal(iterationStarts.length, 1, "expected one iteration-start");
+  assert.equal(iterationEnds.length, 1, "expected one iteration-end on early break");
+});
+
 test("autoLoop classifies ModelPolicyDispatchBlockedError as blocked, not a retryable error", async () => {
   _resetPendingResolve();
 

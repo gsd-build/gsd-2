@@ -43,7 +43,7 @@ import {
 import { regenerateIfMissing } from "./workflow-projections.js";
 import { syncStateToProjectRoot } from "./auto-worktree.js";
 import { normalizeWorktreePathForCompare } from "./worktree-root.js";
-import { isDbAvailable, getTask, getSlice, getMilestone, updateTaskStatus, _getAdapter } from "./gsd-db.js";
+import { isDbAvailable, getTask, getSlice, getMilestone, updateTaskStatus, _getAdapter, getReplanHistory } from "./gsd-db.js";
 import { renderPlanCheckboxes } from "./markdown-renderer.js";
 import { consumeSignal } from "./session-status-io.js";
 import {
@@ -53,7 +53,7 @@ import {
   persistHookState,
   resolveHookArtifactPath,
 } from "./post-unit-hooks.js";
-import { hasPendingCaptures, loadPendingCaptures, revertExecutorResolvedCaptures } from "./captures.js";
+import { hasPendingCaptures, loadPendingCaptures, revertExecutorResolvedCaptures, type CaptureEntry } from "./captures.js";
 import { debugLog } from "./debug-logger.js";
 import { runSafely } from "./auto-utils.js";
 import type { AutoSession, SidecarItem } from "./auto/session.js";
@@ -80,6 +80,7 @@ import {
   finalizeProjectResearchTimeout,
 } from "./project-research-policy.js";
 import { validateArtifact } from "./schemas/validate.js";
+import { executeReplan } from "./triage-resolution.js";
 
 // ─── Path Comparison Helper ───────────────────────────────────────────────
 /** Compare two paths for physical identity, tolerating trailing slashes and symlinks. */
@@ -1270,12 +1271,12 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
     }
   }
 
-  // ── Pre-execution checks (after plan-slice or ADR-011 refine-slice completes) ──
-  // Both emit the same PLAN.md + task artifacts via gsd_plan_slice, so the
-  // same structural validation applies to both.
+  // ── Pre-execution checks (after plan/refine/replan slice completes) ──
+  // All three emit compatible PLAN.md + task artifacts, so the same
+  // structural validation must run after replans as well.
   if (
     s.currentUnit &&
-    (s.currentUnit.type === "plan-slice" || s.currentUnit.type === "refine-slice")
+    (s.currentUnit.type === "plan-slice" || s.currentUnit.type === "refine-slice" || s.currentUnit.type === "replan-slice")
   ) {
     const currentUnit = s.currentUnit;
     let preExecPauseNeeded = false;
@@ -1385,10 +1386,7 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
             ? `\n  ${NOTIFICATION_BULLET} ...and ${blockingChecks.length - MAX_NOTIFICATION_DETAILS} more`
             : "";
           const evidenceNote = `\nSee ${evidencePath} for full details.`;
-          ctx.ui.notify(
-            `Pre-execution checks failed: ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"} found\n${details}${suffix}${evidenceNote}`,
-            "error",
-          );
+
           // Persist failure context so the next plan-slice re-dispatch can inject
           // it into the prompt and break the infinite loop (#4551).
           s.lastPreExecFailure = {
@@ -1398,7 +1396,39 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
             ),
             verdictExcerpt: `status=${result.status}; ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"} detected`,
           };
-          preExecPauseNeeded = true;
+
+          // #4356: first pre-exec failure should trigger replan instead of
+          // unconditional hard pause. If a replan already happened, escalate.
+          const replanHistory = getReplanHistory(mid, sid);
+          if (replanHistory.length === 0) {
+            const capture: CaptureEntry = {
+              id: "pre-exec-failure",
+              text: `Pre-execution checks found ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"}`,
+              timestamp: new Date().toISOString(),
+              status: "triaged",
+              classification: "replan",
+              rationale: "Pre-execution check failures detected. Replan to fix task-level inconsistencies before execution.",
+            };
+            const triggered = executeReplan(s.canonicalProjectRoot, mid, sid, capture);
+            if (triggered) {
+              ctx.ui.notify(
+                `Pre-execution checks failed — triggering replan for ${sid}\n${details}${suffix}${evidenceNote}`,
+                "warning",
+              );
+            } else {
+              ctx.ui.notify(
+                `Pre-execution checks failed and replan trigger could not be written: ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"} found\n${details}${suffix}${evidenceNote}`,
+                "error",
+              );
+              preExecPauseNeeded = true;
+            }
+          } else {
+            ctx.ui.notify(
+              `Pre-execution checks failed after replan: ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"} found\n${details}${suffix}${evidenceNote}`,
+              "error",
+            );
+            preExecPauseNeeded = true;
+          }
         } else if (result.status === "warn") {
           ctx.ui.notify(
             `Pre-execution checks passed with warnings`,

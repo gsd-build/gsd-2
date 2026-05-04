@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { autoSession, getAutoRuntimeSnapshot } from "../auto-runtime-state.ts";
+import {
+  autoSession,
+  clearToolInvocationError,
+  getAutoRuntimeSnapshot,
+  recordToolInvocationError,
+} from "../auto-runtime-state.ts";
 
 test("getAutoRuntimeSnapshot includes orchestration phase when available", () => {
   autoSession.reset();
@@ -24,6 +29,19 @@ test("getAutoRuntimeSnapshot includes orchestration phase when available", () =>
   assert.equal(snap.orchestrationPhase, "running");
   assert.equal(snap.orchestrationTransitionCount, 3);
   assert.equal(snap.orchestrationLastTransitionAt, 123);
+
+  autoSession.reset();
+});
+
+test("recordToolInvocationError is cleared after a successful tool result", () => {
+  autoSession.reset();
+  autoSession.active = true;
+
+  autoSession.lastToolInvocationError = "gsd_task_complete: simulated tool invocation error";
+  assert.ok(autoSession.lastToolInvocationError, "precondition: error should be recorded");
+
+  clearToolInvocationError();
+  assert.equal(autoSession.lastToolInvocationError, null, "successful tool result should clear stale tool error state");
 
   autoSession.reset();
 });

@@ -340,6 +340,13 @@ export async function autoLoop(
 
     let dispatchId: number | null = null;
     let dispatchSettled = false;
+    let iterationStarted = false;
+    let iterationEndEmitted = false;
+    const emitIterationEnd = (data: Record<string, unknown>): void => {
+      if (!iterationStarted || iterationEndEmitted) return;
+      journalReporter.emit("iteration-end", data);
+      iterationEndEmitted = true;
+    };
     const completeIteration = (): void => {
       completeWorkflowIteration({
         get consecutiveErrors() { return consecutiveErrors; },
@@ -348,7 +355,7 @@ export async function autoLoop(
         set consecutiveCooldowns(value) { consecutiveCooldowns = value; },
         recentErrorMessages,
       }, {
-        emitIterationEnd: () => journalReporter.emit("iteration-end", { iteration }),
+        emitIterationEnd: () => emitIterationEnd({ iteration }),
         saveStuckState: () => saveStuckState(s, loopState),
         logIterationComplete: () => debugLog("autoLoop", { phase: "iteration-complete", iteration }),
       });
@@ -394,6 +401,7 @@ export async function autoLoop(
 
       const ic: IterationContext = { ctx, pi, s, deps, prefs, iteration, flowId, nextSeq };
       journalReporter.emit("iteration-start", { iteration });
+      iterationStarted = true;
       let iterData: IterationData;
 
       // ── Custom engine path ──────────────────────────────────────────────
@@ -790,7 +798,7 @@ export async function autoLoop(
       // Always emit iteration-end on error so the journal records iteration
       // completion even on failure (#2344). Without this, errors in
       // runFinalize leave the journal incomplete, making diagnosis harder.
-      journalReporter.emit("iteration-end", { iteration, error: msg });
+      emitIterationEnd({ iteration, error: msg });
 
       // ── Pre-send model-policy block: not a retryable error (#4959 / #4850) ──
       // The model-policy gate runs before the prompt is sent.  When every
@@ -913,6 +921,8 @@ export async function autoLoop(
         ctx.ui.notify(errorDecision.notifyMessage, "warning");
       }
       finishTurn(errorDecision.turnStatus, "execution", msg);
+    } finally {
+      emitIterationEnd({ iteration });
     }
   }
 

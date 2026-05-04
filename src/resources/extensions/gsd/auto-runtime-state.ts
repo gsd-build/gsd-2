@@ -56,3 +56,8 @@ export function recordToolInvocationError(toolName: string, errorMsg: string): v
     autoSession.lastToolInvocationError = `${toolName}: ${errorMsg}`;
   }
 }
+
+export function clearToolInvocationError(): void {
+  if (!autoSession.active) return;
+  autoSession.lastToolInvocationError = null;
+}
