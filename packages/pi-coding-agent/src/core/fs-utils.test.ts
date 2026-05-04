@@ -51,6 +51,11 @@ describe("atomicWriteFileSync", () => {
 		atomicWriteFileSync(filePath, "utf8 content", "utf-8");
 		assert.equal(readFileSync(filePath, "utf-8"), "utf8 content");
 	});
+
+	it("fsyncs temp file before rename (durability guard)", () => {
+		const src = readFileSync(new URL("./fs-utils.ts", import.meta.url), "utf-8");
+		assert.match(src, /fsyncSync\(fd\)/);
+	});
 });
 
 describe("atomicWriteDbSnapshotSync", () => {
