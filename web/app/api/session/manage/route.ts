@@ -1,7 +1,7 @@
 import {
   renameSessionInCurrentProject,
   requireProjectCwd,
-} from "../../../../../src/web/bridge-service.ts"
+} from "../../../../../src/web-services/bridge-service.ts"
 import {
   SESSION_BROWSER_SCOPE,
   isSessionManageAction,

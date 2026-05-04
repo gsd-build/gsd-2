@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
-import { agentDir as defaultAgentDir, sessionsDir as defaultSessionsDir, webPreferencesPath as defaultWebPreferencesPath } from './app-paths.js'
-import { getProjectSessionsDir } from './project-sessions.js'
+import { agentDir as defaultAgentDir, sessionsDir as defaultSessionsDir, webPreferencesPath as defaultWebPreferencesPath } from '../app/app-paths.js'
+import { getProjectSessionsDir } from '../app/project-sessions.js'
 import { launchWebMode, stopWebMode, type WebModeLaunchStatus, type WebModeStopOptions, type WebModeStopResult } from './web-mode.js'
 
 export interface CliFlags {
@@ -101,7 +101,7 @@ export function buildHeadlessAutoArgs(flags: Pick<CliFlags, 'messages' | 'model'
   return flags.model ? ['--model', flags.model, ...flags.messages] : [...flags.messages]
 }
 
-export { getProjectSessionsDir } from './project-sessions.js'
+export { getProjectSessionsDir } from '../app/project-sessions.js'
 
 export function migrateLegacyFlatSessions(baseSessionsDir: string, projectSessionsDir: string): void {
   if (!existsSync(baseSessionsDir)) return

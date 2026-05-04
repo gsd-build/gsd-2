@@ -5,10 +5,10 @@ import { request as httpRequest } from 'node:http'
 import { createServer } from 'node:net'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { appRoot, webPidFilePath as defaultWebPidFilePath } from './app-paths.js'
+import { appRoot, webPidFilePath as defaultWebPidFilePath } from '../app/app-paths.js'
 
 const DEFAULT_HOST = '127.0.0.1'
-const DEFAULT_PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const DEFAULT_PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 /** Open a URL in the user's default browser. */
 function openBrowser(url: string): void {
@@ -284,7 +284,7 @@ function stopLegacyPidFile(deps: Pick<WebModeDeps, 'pidFilePath' | 'readPidFile'
 }
 
 async function loadResourceBootstrap(): Promise<ResourceBootstrapLike> {
-  const mod = await import('./resource-loader.js')
+  const mod = await import('../resource-runtime/resource-loader.js')
   return {
     initResources: mod.initResources,
   }

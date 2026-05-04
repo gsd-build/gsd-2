@@ -1,5 +1,5 @@
-import { collectSkillHealthData } from "../../../../src/web/skill-health-service.ts"
-import { requireProjectCwd } from "../../../../src/web/bridge-service.ts"
+import { collectSkillHealthData } from "../../../../src/web-services/skill-health-service.ts"
+import { requireProjectCwd } from "../../../../src/web-services/bridge-service.ts"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"

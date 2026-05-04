@@ -2,7 +2,7 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { SettingsManager, getAllowedCommandPrefixes, SAFE_COMMAND_PREFIXES, setAllowedCommandPrefixes } from "@gsd/pi-coding-agent";
 import { getFetchAllowedUrls, setFetchAllowedUrls } from "../resources/extensions/search-the-web/url-utils.ts";
-import { applySecurityOverrides } from "../security-overrides.ts";
+import { applySecurityOverrides } from "../security/security-overrides.js";
 
 describe("applySecurityOverrides — env var and settings precedence", () => {
   const savedEnv: Record<string, string | undefined> = {};

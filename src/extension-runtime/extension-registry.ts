@@ -7,7 +7,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
-import { appRoot } from "./app-paths.js";
+import { appRoot } from "../app/app-paths.js";
 import { dirname, join } from "node:path";
 
 // ─── Types ──────────────────────────────────────────────────────────────────

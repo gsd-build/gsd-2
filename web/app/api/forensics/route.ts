@@ -1,5 +1,5 @@
-import { collectForensicsData } from "../../../../src/web/forensics-service.ts"
-import { requireProjectCwd } from "../../../../src/web/bridge-service.ts"
+import { collectForensicsData } from "../../../../src/web-services/forensics-service.ts"
+import { requireProjectCwd } from "../../../../src/web-services/bridge-service.ts"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"

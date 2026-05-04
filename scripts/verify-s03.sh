@@ -30,12 +30,12 @@ echo ""
 # Check 1 — Build: dist outputs exist
 # ----------------------------------------------------------------
 echo "--- Build ---"
-if [ -f "dist/wizard.js" ] && [ -f "dist/cli.js" ] && [ -f "dist/loader.js" ]; then
-  pass "1 — dist/wizard.js, dist/cli.js, dist/loader.js exist"
+if [ -f "dist/onboarding/wizard.js" ] && [ -f "dist/cli/cli.js" ] && [ -f "dist/loader.js" ]; then
+  pass "1 — dist/onboarding/wizard.js, dist/cli/cli.js, dist/loader.js exist"
 else
   echo "  (building...)"
   npm run build --silent 2>&1
-  if [ -f "dist/wizard.js" ] && [ -f "dist/cli.js" ] && [ -f "dist/loader.js" ]; then
+  if [ -f "dist/onboarding/wizard.js" ] && [ -f "dist/cli/cli.js" ] && [ -f "dist/loader.js" ]; then
     pass "1 — build succeeded"
   else
     fail "1 — build failed or dist files missing"
@@ -110,12 +110,12 @@ echo ""
 echo "--- loadStoredEnvKeys hydration ---"
 
 # ----------------------------------------------------------------
-# Check 5 — Structural: env var names compiled into dist/wizard.js
+# Check 5 — Structural: env var names compiled into dist/onboarding/wizard.js
 # ----------------------------------------------------------------
-if grep -q "BRAVE_API_KEY" dist/wizard.js && grep -q "BRAVE_ANSWERS_KEY" dist/wizard.js && grep -q "CONTEXT7_API_KEY" dist/wizard.js && grep -q "JINA_API_KEY" dist/wizard.js; then
-  pass "5 — dist/wizard.js contains all four optional key env var names"
+if grep -q "BRAVE_API_KEY" dist/onboarding/wizard.js && grep -q "BRAVE_ANSWERS_KEY" dist/onboarding/wizard.js && grep -q "CONTEXT7_API_KEY" dist/onboarding/wizard.js && grep -q "JINA_API_KEY" dist/onboarding/wizard.js; then
+  pass "5 — dist/onboarding/wizard.js contains all four optional key env var names"
 else
-  fail "5 — dist/wizard.js missing one or more optional key env var names"
+  fail "5 — dist/onboarding/wizard.js missing one or more optional key env var names"
 fi
 
 # ----------------------------------------------------------------
@@ -133,10 +133,10 @@ tmp6=$(mktemp)
     ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
     GSD_TEST_AUTH_PATH="$tmp_auth" \
     node -e "
-      import('./dist/app-paths.js').then(async (paths) => {
+      import('./dist/app/app-paths.js').then(async (paths) => {
         // Override authFilePath for test
         const { AuthStorage } = await import('@mariozechner/pi-coding-agent');
-        const { loadStoredEnvKeys } = await import('./dist/wizard.js');
+        const { loadStoredEnvKeys } = await import('./dist/onboarding/wizard.js');
         const auth = AuthStorage.create('$tmp_auth');
         loadStoredEnvKeys(auth);
         const val = process.env.BRAVE_API_KEY;

@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 
-import { resolveTypeStrippingFlag } from "../../web/ts-subprocess-flags.ts"
+import { resolveTypeStrippingFlag } from "../../web-services/ts-subprocess-flags.ts"
 
 // ---------------------------------------------------------------------------
 // Bug 1 — resolveTypeStrippingFlag selects the correct flag
@@ -163,7 +163,7 @@ test("bridge-service imports readdirSync from node:fs (#1936)", async () => {
   const { join } = await import("node:path")
 
   const bridgeSource = readFileSync(
-    join(process.cwd(), "src", "web", "bridge-service.ts"),
+    join(process.cwd(), "src", "web-services", "bridge-service.ts"),
     "utf-8",
   )
 

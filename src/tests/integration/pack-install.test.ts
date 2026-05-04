@@ -129,10 +129,10 @@ test("npm pack produces tarball with required files", async (t) => {
 
   // Critical files must be present
   assert.ok(files.some(f => f.includes("dist/loader.js")), "tarball contains dist/loader.js");
-  assert.ok(files.some(f => f.includes("dist/cli.js")), "tarball contains dist/cli.js");
-  assert.ok(files.some(f => f.includes("dist/app-paths.js")), "tarball contains dist/app-paths.js");
-  assert.ok(files.some(f => f.includes("dist/wizard.js")), "tarball contains dist/wizard.js");
-  assert.ok(files.some(f => f.includes("dist/resource-loader.js")), "tarball contains dist/resource-loader.js");
+  assert.ok(files.some(f => f.includes("dist/cli/cli.js")), "tarball contains dist/cli/cli.js");
+  assert.ok(files.some(f => f.includes("dist/app/app-paths.js")), "tarball contains dist/app/app-paths.js");
+  assert.ok(files.some(f => f.includes("dist/onboarding/wizard.js")), "tarball contains dist/onboarding/wizard.js");
+  assert.ok(files.some(f => f.includes("dist/resource-runtime/resource-loader.js")), "tarball contains dist/resource-runtime/resource-loader.js");
   assert.ok(files.some(f => f.includes("pkg/package.json")), "tarball contains pkg/package.json");
   assert.ok(files.some(f => f.includes("src/resources/extensions/gsd/index.ts")), "tarball contains bundled gsd extension");
   assert.ok(files.some(f => f.includes("scripts/postinstall.js")), "tarball contains postinstall script");

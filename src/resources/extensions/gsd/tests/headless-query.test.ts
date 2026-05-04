@@ -11,8 +11,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { handleQuery } from '../../../../headless-query.ts'
-import type { QuerySnapshot } from '../../../../headless-query.ts'
+import { handleQuery } from '../../../../headless/headless-query.ts'
+import type { QuerySnapshot } from '../../../../headless/headless-query.ts'
 import { invalidateStateCache } from '../state.ts'
 
 // ─── Fixture Helpers ────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { getEnvApiKey } from "../../packages/pi-ai/src/web-runtime-env-api-keys.ts";
 import type { OAuthAuthInfo, OAuthPrompt, OAuthProviderInterface } from "../../packages/pi-ai/dist/oauth.js";
-import { authFilePath } from "../app-paths.ts";
+import { authFilePath } from "../app/app-paths.js";
 import { createOnboardingAuthStorage, type OnboardingAuthStorage as AuthStorageInstance } from "./web-auth-storage.ts";
 
 type RequiredProviderCatalogEntry = {

@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 
 import {
   collectAuthoritativeAutoDashboardData,
-} from "../../web/auto-dashboard-service.ts";
+} from "../../web-services/auto-dashboard-service.ts";
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 

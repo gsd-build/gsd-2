@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { resolveBridgeRuntimeConfig, requireProjectCwd } from "../../../../src/web/bridge-service.ts"
+import { resolveBridgeRuntimeConfig, requireProjectCwd } from "../../../../src/web-services/bridge-service.ts"
 import type { SteerData } from "../../../lib/remaining-command-types.ts"
 
 export const runtime = "nodejs"

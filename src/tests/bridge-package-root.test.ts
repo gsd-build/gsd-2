@@ -15,7 +15,7 @@ import { join } from 'node:path'
  * falls through to the GSD_WEB_PACKAGE_ROOT env var.
  */
 
-import { safePackageRootFromImportUrl } from '../web/safe-import-meta-resolve.ts'
+import { safePackageRootFromImportUrl } from '../web-services/safe-import-meta-resolve.ts'
 
 test('safePackageRootFromImportUrl returns a path for a valid native file URL', () => {
   const result = safePackageRootFromImportUrl(import.meta.url)
@@ -50,7 +50,7 @@ test('safePackageRootFromImportUrl respects ancestorLevels', () => {
 })
 
 test('bridge-service.ts uses safePackageRootFromImportUrl for DEFAULT_PACKAGE_ROOT', () => {
-  const source = readFileSync(join(process.cwd(), 'src', 'web', 'bridge-service.ts'), 'utf-8')
+  const source = readFileSync(join(process.cwd(), 'src', 'web-services', 'bridge-service.ts'), 'utf-8')
   assert.ok(
     source.includes('safePackageRootFromImportUrl(import.meta.url)'),
     'bridge-service.ts must derive DEFAULT_PACKAGE_ROOT via the safe helper',
@@ -63,7 +63,7 @@ test('bridge-service.ts uses safePackageRootFromImportUrl for DEFAULT_PACKAGE_RO
 })
 
 test('bridge-service resolveBridgeRuntimeConfig falls back to lazy default', () => {
-  const source = readFileSync(join(process.cwd(), 'src', 'web', 'bridge-service.ts'), 'utf-8')
+  const source = readFileSync(join(process.cwd(), 'src', 'web-services', 'bridge-service.ts'), 'utf-8')
   assert.ok(
     source.includes('env.GSD_WEB_PACKAGE_ROOT || getDefaultPackageRoot()'),
     'resolveBridgeRuntimeConfig must fall back to lazy default package root',

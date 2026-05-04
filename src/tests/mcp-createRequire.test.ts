@@ -23,7 +23,7 @@ import { dirname, join } from 'node:path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const source = readFileSync(join(__dirname, '..', 'mcp-server.ts'), 'utf-8');
+const source = readFileSync(join(__dirname, '..', 'mcp', 'mcp-server.ts'), 'utf-8');
 
 describe('MCP server SDK subpath imports (#3603 / #3914)', () => {
   test('server/index.js subpath is imported with explicit .js suffix', () => {

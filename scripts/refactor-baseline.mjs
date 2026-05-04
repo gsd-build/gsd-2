@@ -40,7 +40,7 @@ const CONTRACT_SURFACES = [
   },
   {
     surface: "web",
-    path: "src/web/bridge-service.ts",
+    path: "src/web-services/bridge-service.ts",
   },
   {
     surface: "webStore",

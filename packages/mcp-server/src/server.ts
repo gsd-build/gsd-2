@@ -8,7 +8,7 @@
  *
  * Uses dynamic imports for @modelcontextprotocol/sdk because TS Node16
  * cannot resolve the SDK's subpath exports statically (same pattern as
- * src/mcp-server.ts in the main package).
+ * src/mcp/mcp-server.ts in the main package).
  */
 
 import { readFile, readdir } from 'node:fs/promises';
@@ -873,7 +873,7 @@ export async function createMcpServer(
 ): Promise<{
   server: McpServerInstance;
 }> {
-  // Dynamic import — same workaround as src/mcp-server.ts
+  // Dynamic import — same workaround as src/mcp/mcp-server.ts
   const mcpMod = await import(`${MCP_PKG}/server/mcp.js`);
   const McpServer = mcpMod.McpServer as new (
     info: { name: string; version: string },

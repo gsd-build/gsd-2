@@ -1,5 +1,5 @@
-import { collectCapturesData, resolveCaptureAction } from "../../../../src/web/captures-service.ts"
-import { requireProjectCwd } from "../../../../src/web/bridge-service.ts"
+import { collectCapturesData, resolveCaptureAction } from "../../../../src/web-services/captures-service.ts"
+import { requireProjectCwd } from "../../../../src/web-services/bridge-service.ts"
 import type { CaptureResolveRequest } from "../../../lib/knowledge-captures-types.ts"
 
 export const runtime = "nodejs"

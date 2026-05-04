@@ -17,10 +17,10 @@ import {
   EXIT_BLOCKED,
   EXIT_CANCELLED,
   mapStatusToExitCode,
-} from '../headless-events.js'
+} from '../headless/headless-events.js'
 
-import type { OutputFormat, HeadlessJsonResult } from '../headless-types.js'
-import { VALID_OUTPUT_FORMATS } from '../headless-types.js'
+import type { OutputFormat, HeadlessJsonResult } from '../headless/headless-types.js'
+import { VALID_OUTPUT_FORMATS } from '../headless/headless-types.js'
 
 // ─── Extracted parsing logic (mirrors headless.ts) ─────────────────────────
 

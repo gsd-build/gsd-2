@@ -13,7 +13,7 @@ import { join } from "node:path"
  */
 test("onboarding claude-cli path persists defaultProvider to settings.json", () => {
   const source = readFileSync(
-    join(import.meta.dirname, "..", "onboarding.ts"),
+    join(import.meta.dirname, "..", "onboarding", "onboarding.ts"),
     "utf-8",
   )
 

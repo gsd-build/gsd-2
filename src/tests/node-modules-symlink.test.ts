@@ -30,7 +30,7 @@ import {
   hasMissingWorkspaceScopes,
   mergedFingerprint,
   reconcileMergedNodeModules,
-} from "../resource-loader.ts";
+} from "../resource-runtime/resource-loader.js";
 
 // The real module captures packageRoot at load time — the merged-node-modules
 // logic skips entries named basename(packageRoot). We mirror that basename in
@@ -42,7 +42,7 @@ const realPackageRootBasename = basename(realPackageRoot);
 // --- Integration tests via initResources (source/monorepo path) ---
 
 test("initResources creates node_modules symlink in agent dir", async (t) => {
-  const { initResources } = await import("../resource-loader.ts");
+  const { initResources } = await import("../resource-runtime/resource-loader.js");
   const tmp = mkdtempSync(join(tmpdir(), "gsd-symlink-"));
   const fakeAgentDir = join(tmp, "agent");
 
@@ -62,7 +62,7 @@ test("initResources creates node_modules symlink in agent dir", async (t) => {
 });
 
 test("initResources replaces a real directory blocking node_modules with a symlink", async (t) => {
-  const { initResources } = await import("../resource-loader.ts");
+  const { initResources } = await import("../resource-runtime/resource-loader.js");
   const tmp = mkdtempSync(join(tmpdir(), "gsd-symlink-realdir-"));
   const fakeAgentDir = join(tmp, "agent");
 

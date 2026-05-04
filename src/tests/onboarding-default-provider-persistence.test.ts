@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 test("onboarding persists defaultProvider for API-key and OAuth flows", () => {
   const source = readFileSync(
-    join(import.meta.dirname, "..", "onboarding.ts"),
+    join(import.meta.dirname, "..", "onboarding", "onboarding.ts"),
     "utf-8",
   )
 
@@ -27,4 +27,3 @@ test("onboarding persists defaultProvider for API-key and OAuth flows", () => {
     "API-key onboarding must persist selected provider as defaultProvider",
   )
 })
-

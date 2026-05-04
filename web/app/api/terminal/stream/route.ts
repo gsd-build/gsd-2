@@ -11,7 +11,7 @@ import {
   addListener,
   isAllowedTerminalCommand,
 } from "../../../../lib/pty-manager";
-import { requireProjectCwd } from "../../../../../src/web/bridge-service.ts";
+import { requireProjectCwd } from "../../../../../src/web-services/bridge-service.ts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

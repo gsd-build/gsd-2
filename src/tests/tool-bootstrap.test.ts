@@ -4,7 +4,7 @@ import { chmodSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync,
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { ensureManagedTools, resolveToolFromPath } from "../tool-bootstrap.js";
+import { ensureManagedTools, resolveToolFromPath } from "../app/tool-bootstrap.js";
 
 const FD_TARGET = process.platform === "win32" ? "fd.exe" : "fd";
 const RG_TARGET = process.platform === "win32" ? "rg.exe" : "rg";

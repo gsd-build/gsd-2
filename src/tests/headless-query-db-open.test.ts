@@ -10,7 +10,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const src = readFileSync(join(__dirname, "..", "headless-query.ts"), "utf-8");
+const src = readFileSync(join(__dirname, "..", "headless", "headless-query.ts"), "utf-8");
 
 test("headless-query loads openProjectDbIfPresent from extension modules (#4123)", () => {
   assert.match(

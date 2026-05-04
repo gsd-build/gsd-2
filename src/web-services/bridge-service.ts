@@ -33,8 +33,8 @@ import {
   type SessionManageErrorResponse,
   type SessionManageResponse,
 } from "../../web/lib/session-browser-contract.ts";
-import { authFilePath } from "../app-paths.ts";
-import { getProjectSessionsDir } from "../project-sessions.ts";
+import { authFilePath } from "../app/app-paths.js";
+import { getProjectSessionsDir } from "../app/project-sessions.js";
 import {
   collectOnboardingState,
   registerOnboardingBridgeAuthRefresher,

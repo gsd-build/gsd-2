@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 
-const { runSubprocess, resolveModulePaths } = await import("../web/subprocess-runner.ts")
+const { runSubprocess, resolveModulePaths } = await import("../web-services/subprocess-runner.ts")
 
 // ---------------------------------------------------------------------------
 // resolveModulePaths — centralised TS loader + module path resolution

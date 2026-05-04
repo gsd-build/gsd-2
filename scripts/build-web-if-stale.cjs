@@ -25,7 +25,7 @@ if (process.platform === 'win32') {
 
 const root = resolve(__dirname, '..')
 const webRoot = join(root, 'web')
-// Also watch src/ because api routes import directly from src/web/* and src/resources/*
+// Also watch src/ because api routes import directly from src/web-services/* and src/resources/*
 const srcRoot = join(root, 'src')
 const stagedSentinel = join(root, 'dist', 'web', 'standalone', 'server.js')
 

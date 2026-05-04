@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import os from 'node:os'
 import chalk from 'chalk'
 import stripAnsi from 'strip-ansi'
-import { GSD_LOGO } from './logo.js'
+import { GSD_LOGO } from '../cli/logo.js'
 
 interface GsdState {
   milestone?: string

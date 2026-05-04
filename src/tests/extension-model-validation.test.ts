@@ -19,7 +19,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { validateConfiguredModel } = await import("../startup-model-validation.js");
+const { validateConfiguredModel } = await import("../startup/startup-model-validation.js");
 
 /**
  * Minimal stub of ModelRegistry with just getAll() / getAvailable().

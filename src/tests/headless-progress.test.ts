@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatProgress, formatThinkingLine, formatCostLine, summarizeToolArgs } from '../headless-ui.js'
-import type { ProgressContext } from '../headless-ui.js'
+import { formatProgress, formatThinkingLine, formatCostLine, summarizeToolArgs } from '../headless/headless-ui.js'
+import type { ProgressContext } from '../headless/headless-ui.js'
 
 // Tests run with NO_COLOR or non-TTY stderr, so ANSI codes are empty strings.
 // We test content, not escape sequences.

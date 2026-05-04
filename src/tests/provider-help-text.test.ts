@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 // Validate that help-text.ts includes updated provider references
-const { printSubcommandHelp } = await import("../../dist/help-text.js");
+const { printSubcommandHelp } = await import("../../dist/cli/help-text.js");
 
 describe("help-text provider references", () => {
   it("config help mentions OpenRouter and Ollama", () => {

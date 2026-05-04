@@ -29,7 +29,7 @@ const SKIP_EXTENSIONS = new Set([
 ]);
 
 test("all bundled extensions can be imported without throwing", async () => {
-  const { discoverExtensionEntryPaths } = await import("../resource-loader.ts");
+  const { discoverExtensionEntryPaths } = await import("../resource-runtime/resource-loader.js");
   const entryPaths = discoverExtensionEntryPaths(extensionsDir);
 
   assert.ok(entryPaths.length >= 10, `expected >=10 extensions, found ${entryPaths.length}`);

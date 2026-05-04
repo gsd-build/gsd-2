@@ -1,4 +1,4 @@
-// GSD2 — Regression test: auto-mode resume resolves resource-loader.js from deployed path (#3949)
+// GSD2 — Regression test: auto-mode resume resolves resource-runtime/resource-loader.js from deployed path (#3949)
 // Copyright (c) 2026 Jeremy McSpadden <jeremy@fluxlabs.net>
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -63,13 +63,13 @@ test("auto.ts resume uses GSD_PKG_ROOT for resource-loader import, not bare rela
 test("GSD_PKG_ROOT resolves resource-loader.js correctly from package root", () => {
   // Simulate what auto.ts does: given GSD_PKG_ROOT, construct the path
   const pkgRoot = resolve(__dirname, "..", "..");
-  const resourceLoaderPath = join(pkgRoot, "dist", "resource-loader.js");
+  const resourceLoaderPath = join(pkgRoot, "dist", "resource-runtime", "resource-loader.js");
 
-  // After build, dist/resource-loader.js should exist
+  // After build, dist/resource-runtime/resource-loader.js should exist
   // (this test runs post-build in CI; in dev it validates the path construction)
   const expectedDir = dirname(resourceLoaderPath);
   assert.ok(
-    expectedDir.endsWith(join("dist")),
+    expectedDir.endsWith(join("dist", "resource-runtime")),
     `resource-loader path should be under dist/, got: ${expectedDir}`,
   );
 });

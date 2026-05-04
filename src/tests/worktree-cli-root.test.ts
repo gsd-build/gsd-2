@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 
-import { handleWorktreeFlag } from "../worktree-cli.ts";
+import { handleWorktreeFlag } from "../worktrees/worktree-cli.js";
 import { createWorktree, worktreePath } from "../resources/extensions/gsd/worktree-manager.ts";
 
 let cleanupPaths: string[] = [];

@@ -24,7 +24,7 @@ if (firstArg === '--version' || firstArg === '-v') {
 }
 
 if (firstArg === '--help' || firstArg === '-h') {
-  const { printHelp } = await import('./help-text.js')
+  const { printHelp } = await import('./cli/help-text.js')
   printHelp(gsdVersion)
   process.exit(0)
 }
@@ -35,7 +35,7 @@ if (firstArg === '--help' || firstArg === '-h') {
 // package.json (already parsed above) and verifies git is available.
 // ---------------------------------------------------------------------------
 {
-  const { MIN_NODE_MAJOR, checkNodeVersion, requireGit } = await import('./runtime-checks.js')
+  const { MIN_NODE_MAJOR, checkNodeVersion, requireGit } = await import('./startup/runtime-checks.js')
   const red = '\x1b[31m'
   const bold = '\x1b[1m'
   const dim = '\x1b[2m'
@@ -68,13 +68,13 @@ if (firstArg === '--help' || firstArg === '-h') {
   }
 }
 
-import { agentDir, appRoot } from './app-paths.js'
-import { applyRtkProcessEnv } from './rtk-shared.js'
-import { serializeBundledExtensionPaths } from './bundled-extension-paths.js'
-import { resolveBundledResourcesDirFromPackageRoot } from './bundled-resource-path.js'
-import { discoverExtensionEntryPaths } from './extension-discovery.js'
-import { loadRegistry, readManifestFromEntryPath, isExtensionEnabled } from './extension-registry.js'
-import { renderLogo } from './logo.js'
+import { agentDir, appRoot } from './app/app-paths.js'
+import { applyRtkProcessEnv } from './rtk/rtk-shared.js'
+import { serializeBundledExtensionPaths } from './extension-runtime/bundled-extension-paths.js'
+import { resolveBundledResourcesDirFromPackageRoot } from './extension-runtime/bundled-resource-path.js'
+import { discoverExtensionEntryPaths } from './extension-runtime/extension-discovery.js'
+import { loadRegistry, readManifestFromEntryPath, isExtensionEnabled } from './extension-runtime/extension-registry.js'
+import { renderLogo } from './cli/logo.js'
 
 // pkg/ is a shim directory: contains gsd's piConfig (package.json) and pi's
 // theme assets (dist/modes/interactive/theme/) without a src/ directory.
@@ -255,4 +255,4 @@ if (missingPackages.length > 0) {
 }
 
 // Dynamic import defers ESM evaluation — config.js will see PI_PACKAGE_DIR above
-await import('./cli.js')
+await import('./cli/cli.js')

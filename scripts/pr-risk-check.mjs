@@ -7,7 +7,7 @@
  *   node scripts/pr-risk-check.mjs                      # auto-detect changed files vs main
  *   node scripts/pr-risk-check.mjs --base <branch>      # compare against a specific base
  *   node scripts/pr-risk-check.mjs --files a.ts,b.ts    # explicit file list
- *   echo "src/cli.ts" | node scripts/pr-risk-check.mjs  # pipe files via stdin
+ *   echo "src/cli/cli.ts" | node scripts/pr-risk-check.mjs  # pipe files via stdin
  *   node scripts/pr-risk-check.mjs --json               # JSON output
  *   node scripts/pr-risk-check.mjs --github             # GitHub Actions summary output
  */

@@ -1,5 +1,5 @@
-import { collectSettingsData } from "../../../../src/web/settings-service.ts"
-import { requireProjectCwd } from "../../../../src/web/bridge-service.ts"
+import { collectSettingsData } from "../../../../src/web-services/settings-service.ts"
+import { requireProjectCwd } from "../../../../src/web-services/bridge-service.ts"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"

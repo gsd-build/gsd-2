@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 test("update-cmd prints latest version before comparison (#3445)", () => {
-  const src = readFileSync(join(__dirname, "..", "update-cmd.ts"), "utf-8");
+  const src = readFileSync(join(__dirname, "..", "update", "update-cmd.ts"), "utf-8");
   const latestPrintIdx = src.indexOf("Latest version:");
   const comparisonIdx = src.indexOf("compareSemver(latest, current)");
   assert.ok(latestPrintIdx !== -1, "Must print latest version");
@@ -20,7 +20,7 @@ test("update-cmd prints latest version before comparison (#3445)", () => {
 });
 
 test("update commands use the registry fetch helper instead of npm view (#3806)", () => {
-  const src = readFileSync(join(__dirname, "..", "update-cmd.ts"), "utf-8");
+  const src = readFileSync(join(__dirname, "..", "update", "update-cmd.ts"), "utf-8");
   const handlerSrc = readFileSync(join(__dirname, "..", "resources", "extensions", "gsd", "commands-handlers.ts"), "utf-8");
   assert.ok(
     src.includes("fetchLatestVersionFromRegistry"),
@@ -35,12 +35,12 @@ test("update commands use the registry fetch helper instead of npm view (#3806)"
 });
 
 test("update-check exports resolveInstallCommand (#4145)", async () => {
-  const { resolveInstallCommand } = await import("../update-check.js");
+  const { resolveInstallCommand } = await import("../update/update-check.js");
   assert.equal(typeof resolveInstallCommand, "function", "resolveInstallCommand must be exported from update-check");
 });
 
 test("resolveInstallCommand returns bun command when running under Bun (#4145)", async () => {
-  const { resolveInstallCommand } = await import("../update-check.js");
+  const { resolveInstallCommand } = await import("../update/update-check.js");
   const orig = (process.versions as Record<string, string | undefined>).bun;
   try {
     (process.versions as Record<string, string | undefined>).bun = "1.0.0";
@@ -55,7 +55,7 @@ test("resolveInstallCommand returns bun command when running under Bun (#4145)",
 });
 
 test("resolveInstallCommand returns npm command when not running under Bun (#4145)", async () => {
-  const { resolveInstallCommand } = await import("../update-check.js");
+  const { resolveInstallCommand } = await import("../update/update-check.js");
   const orig = (process.versions as Record<string, string | undefined>).bun;
   try {
     delete (process.versions as Record<string, string | undefined>).bun;
@@ -68,7 +68,7 @@ test("resolveInstallCommand returns npm command when not running under Bun (#414
 });
 
 test("update-cmd uses resolveInstallCommand instead of hardcoded npm (#4145)", () => {
-  const src = readFileSync(join(__dirname, "..", "update-cmd.ts"), "utf-8");
+  const src = readFileSync(join(__dirname, "..", "update", "update-cmd.ts"), "utf-8");
   assert.ok(
     src.includes("resolveInstallCommand"),
     "update-cmd should use resolveInstallCommand for package manager detection",
@@ -84,7 +84,7 @@ test("commands-handlers uses resolveInstallCommand instead of hardcoded npm (#41
 });
 
 test("isBunInstall detects bun install via argv[1] even when process.versions.bun is undefined (#4145)", async () => {
-  const { isBunInstall } = await import("../update-check.js");
+  const { isBunInstall } = await import("../update/update-check.js");
   const orig = (process.versions as Record<string, string | undefined>).bun;
   const origArgv1 = process.argv[1];
   const origBunInstall = process.env.BUN_INSTALL;
@@ -127,7 +127,7 @@ test("isBunInstall detects bun install via argv[1] even when process.versions.bu
 });
 
 test("isBunInstall returns true when running under Bun runtime (#4145)", async () => {
-  const { isBunInstall } = await import("../update-check.js");
+  const { isBunInstall } = await import("../update/update-check.js");
   const orig = (process.versions as Record<string, string | undefined>).bun;
   const origArgv1 = process.argv[1];
   try {

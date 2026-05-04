@@ -12,7 +12,7 @@ import { gsdHome } from "../gsd-home.js";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 /**
- * GSD ASCII logo — inlined here because the canonical src/logo.ts is outside
+ * GSD ASCII logo — inlined here because the canonical src/cli/logo.ts is outside
  * the resources rootDir and cannot be imported directly.
  */
 const GSD_LOGO: readonly string[] = [

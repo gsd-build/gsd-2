@@ -56,7 +56,7 @@ function runUnderThrowDeprecation(modulePath: string, exportName: string): { sta
 
 describe("Issue #5017 — DEP0190 must not fire from Claude CLI probes", () => {
 	test("claude-cli-check.ts isClaudeBinaryInstalled() emits no DeprecationWarning", { skip: stripTypesSkipReason }, () => {
-		const modulePath = pathToFileURL(join(srcRoot, "claude-cli-check.ts")).href;
+		const modulePath = pathToFileURL(join(srcRoot, "startup", "claude-cli-check.ts")).href;
 		const { status, stderr } = runUnderThrowDeprecation(modulePath, "isClaudeBinaryInstalled");
 		assert.equal(
 			status,

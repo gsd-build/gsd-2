@@ -9,7 +9,7 @@
  * user's valid choice to be silently overwritten with a built-in fallback.
  */
 
-import { getPiDefaultModelAndProvider } from './pi-migration.js'
+import { getPiDefaultModelAndProvider } from '../providers/pi-migration.js'
 
 interface MinimalModel {
   provider: string

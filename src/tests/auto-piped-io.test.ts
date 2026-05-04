@@ -14,7 +14,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { shouldRedirectAutoToHeadless } from "../cli-auto-routing.js";
+import { shouldRedirectAutoToHeadless } from "../cli/cli-auto-routing.js";
 
 // ─── Extracted detection logic (mirrors cli.ts) ───────────────────────────
 

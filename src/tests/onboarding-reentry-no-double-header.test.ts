@@ -44,11 +44,11 @@ test("re-entry onboarding handler does not replay the clack wizard", () => {
 })
 
 test("first-run wizard still supports showIntro option for boot-time caller", () => {
-  // src/onboarding.ts is still used by the first-run boot path in src/cli.ts;
+  // src/onboarding/onboarding.ts is still used by the first-run boot path in src/cli/cli.ts;
   // its showIntro option stays so boot can suppress a duplicate intro when
   // another surface has already rendered the logo.
   const onboardingSource = readFileSync(
-    join(import.meta.dirname, "..", "onboarding.ts"),
+    join(import.meta.dirname, "..", "onboarding", "onboarding.ts"),
     "utf-8",
   )
 

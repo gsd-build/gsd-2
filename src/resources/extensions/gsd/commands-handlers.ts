@@ -31,7 +31,7 @@ const UPDATE_REGISTRY_URL = "https://registry.npmjs.org/gsd-pi/latest";
 const UPDATE_FETCH_TIMEOUT_MS = 5000;
 
 // Detects a bun-installed gsd via `process.argv[1]`. Mirrors isBunInstall in
-// src/update-check.ts — duplicated because tsconfig.resources.json rootDir
+// src/update/update-check.ts — duplicated because tsconfig.resources.json rootDir
 // prevents importing from src/. See #4145 for why the runtime-only check
 // (process.versions.bun) is insufficient: bun's global bin shims are plain
 // symlinks, so the target's #!/usr/bin/env node shebang runs the script under

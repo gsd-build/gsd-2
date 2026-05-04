@@ -14,7 +14,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 
-const bridge = await import("../../web/bridge-service.ts");
+const bridge = await import("../../web-services/bridge-service.ts");
 
 test("resolveBridgeRuntimeConfig uses GSD_WEB_PACKAGE_ROOT when set", () => {
   const env = {

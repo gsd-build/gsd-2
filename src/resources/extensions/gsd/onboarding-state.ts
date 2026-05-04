@@ -17,7 +17,7 @@ import { gsdHome } from "./gsd-home.js";
 export const FLOW_VERSION = 1
 
 const RECORD_VERSION = 1
-// Inline agentDir computation (mirrors src/app-paths.ts) — keep this module
+// Inline agentDir computation (mirrors src/app/app-paths.ts) — keep this module
 // rootDir-clean for the resources tsconfig; importing from src/ pulls files
 // outside src/resources and breaks the build.
 const AGENT_DIR =

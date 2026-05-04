@@ -16,7 +16,7 @@ import {
   resolveRtkBinaryPath,
   rewriteCommandWithRtk,
   validateRtkBinary,
-} from "../rtk.ts";
+} from "../rtk/rtk.js";
 import { createFakeRtk } from "./rtk-test-utils.ts";
 
 // Store original env values for restoration

@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { loadAndValidateAnswerFile, AnswerInjector } from '../../../../headless-answers.ts';
+import { loadAndValidateAnswerFile, AnswerInjector } from '../../../../headless/headless-answers.ts';
 
 function makeTempDir(prefix: string): string {
   const dir = join(tmpdir(), `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`);

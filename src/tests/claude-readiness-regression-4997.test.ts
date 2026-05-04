@@ -35,7 +35,7 @@ const readinessSource = readFileSync(
 );
 
 const cliCheckSource = readFileSync(
-  join(__dirname, "..", "claude-cli-check.ts"),
+  join(__dirname, "..", "startup", "claude-cli-check.ts"),
   "utf-8",
 );
 
