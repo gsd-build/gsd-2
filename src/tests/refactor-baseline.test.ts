@@ -16,12 +16,14 @@ const {
   collectContractsMetrics,
   collectDirectoryMetrics,
   collectPromptMetrics,
+  collectTestCompileMetrics,
   compareReports,
   formatDelta,
   formatDeltaPercent,
   countMatches,
   countLegacyContractImports,
   metricSafeLabel,
+  numberOrZero,
   parseArgs,
   parseCommandSpec,
   renderSummary,
@@ -92,6 +94,7 @@ test("collectBaseline returns the phase-zero report shape", async () => {
   await writeFile(join(root, "src/tests/fixtures/contracts-golden-fixtures.ts"), "export const fixtures = [];\n");
   await mkdir(join(root, "dist-test"), { recursive: true });
   await writeFile(join(root, "dist-test/example.js"), "console.log('ok')\n");
+  await writeTestCompileCache(root);
 
   const report = await collectBaseline(root);
 
@@ -100,7 +103,9 @@ test("collectBaseline returns the phase-zero report shape", async () => {
   assert.equal(report.prompt.fileCount, 1);
   assert.equal(report.context.fileCount, 2);
   assert.equal(report.distTest.exists, true);
-  assert.equal(report.distTest.fileCount, 1);
+  assert.equal(report.distTest.fileCount, 2);
+  assert.equal(report.testCompile.cacheFileExists, true);
+  assert.equal(report.metrics["testCompile.cacheHit"], 1);
   assert.equal(report.contracts.fixtures.total, 1);
   assert.equal(report.metrics["contracts.fixtures.sharedBySurface"], 6);
   assert.equal(report.commands.length, 0);
@@ -121,6 +126,14 @@ test("buildMetricIndex includes workspace and command metrics", () => {
       surfaceDriftFailures: 1,
       legacyTypeImportsRemaining: 2,
     },
+    testCompile: {
+      cacheFileExists: true,
+      cacheHit: true,
+      fileCount: 17,
+      bytesCopied: 18,
+      inputBytes: 19,
+      wallMs: 20,
+    },
     workspace: {
       areas: [
         { area: "src", exists: true, fileCount: 11, bytes: 12 },
@@ -128,6 +141,9 @@ test("buildMetricIndex includes workspace and command metrics", () => {
     },
     commands: [
       { label: "test compile", wallMs: 13, exitCode: 0, stdoutBytes: 14, stderrBytes: 15 },
+      { label: "changed-src", wallMs: 21, exitCode: 0, stdoutBytes: 22, stderrBytes: 23 },
+      { label: "verify-pr", wallMs: 24, exitCode: 0, stdoutBytes: 25, stderrBytes: 26 },
+      { label: "test-compile-cold", wallMs: 27, exitCode: 0, stdoutBytes: 28, stderrBytes: 29 },
     ],
   });
 
@@ -135,7 +151,44 @@ test("buildMetricIndex includes workspace and command metrics", () => {
   assert.equal(metrics["contracts.fixtures.total"], 16);
   assert.equal(metrics["contracts.surfaceDriftFailures"], 1);
   assert.equal(metrics["workspace.src.fileCount"], 11);
+  assert.equal(metrics["testCompile.cacheHit"], 1);
+  assert.equal(metrics["testCompile.fileCount"], 17);
   assert.equal(metrics["command.test-compile.wallMs"], 13);
+  assert.equal(metrics["verify.changedWallMs"], 21);
+  assert.equal(metrics["verify.fullWallMs"], 24);
+  assert.equal(metrics["testCompile.warmWallMs"], 13);
+  assert.equal(metrics["testCompile.coldWallMs"], 27);
+});
+
+test("collectTestCompileMetrics reads stale-aware test compile cache metrics", async () => {
+  const root = await makeFixtureRoot();
+  await writeTestCompileCache(root);
+
+  const metrics = await collectTestCompileMetrics(root);
+
+  assert.deepEqual(metrics, {
+    cacheFileExists: true,
+    cacheHit: true,
+    fileCount: 42,
+    bytesCopied: 0,
+    inputBytes: 1234,
+    wallMs: 150,
+  });
+});
+
+test("collectTestCompileMetrics returns defaults when cache file is absent", async () => {
+  const root = await makeFixtureRoot();
+
+  const metrics = await collectTestCompileMetrics(root);
+
+  assert.deepEqual(metrics, {
+    cacheFileExists: false,
+    cacheHit: null,
+    fileCount: 0,
+    bytesCopied: 0,
+    inputBytes: 0,
+    wallMs: 0,
+  });
 });
 
 test("collectContractsMetrics reports fixture coverage and surface drift", async () => {
@@ -196,6 +249,13 @@ test("formatDelta helpers render signed and unavailable values", () => {
   assert.equal(formatDeltaPercent(null), "n/a");
 });
 
+test("numberOrZero normalizes invalid metric values", () => {
+  assert.equal(numberOrZero(5), 5);
+  assert.equal(numberOrZero(Number.NaN), 0);
+  assert.equal(numberOrZero("5"), 0);
+  assert.equal(numberOrZero(undefined), 0);
+});
+
 test("metricSafeLabel normalizes arbitrary command labels", () => {
   assert.equal(metricSafeLabel(" test compile "), "test-compile");
   assert.equal(metricSafeLabel("build:core"), "build-core");
@@ -232,6 +292,7 @@ test("renderSummary includes key sections for human inspection", async () => {
   assert.match(summary, /Schema version: 1/);
   assert.match(summary, /Prompt metrics/);
   assert.match(summary, /dist-test metrics/);
+  assert.match(summary, /Test compile metrics/);
   assert.match(summary, /Contracts metrics/);
   assert.match(summary, /Largest prompt files/);
 });
@@ -280,4 +341,24 @@ async function writeContractsSurfaceFixtures(root: string): Promise<void> {
     await mkdir(dirname(join(root, file)), { recursive: true });
     await writeFile(join(root, file), 'import type { RpcCommand } from "@gsd-build/contracts";\n');
   }
+}
+
+async function writeTestCompileCache(root: string): Promise<void> {
+  await mkdir(join(root, "dist-test"), { recursive: true });
+  await writeFile(
+    join(root, "dist-test", ".compile-tests-cache.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      hash: "abc",
+      fileCount: 42,
+      bytes: 1234,
+      metrics: {
+        cacheHit: true,
+        fileCount: 42,
+        bytesCopied: 0,
+        inputBytes: 1234,
+        wallMs: 150,
+      },
+    }),
+  );
 }

@@ -140,12 +140,14 @@ export async function collectBaseline(root, commandSpecs = []) {
     distTestMetrics,
     workspaceMetrics,
     contractsMetrics,
+    testCompileMetrics,
   ] = await Promise.all([
     collectPromptMetrics(root),
     collectContextMetrics(root),
     collectDirectoryMetrics(join(root, "dist-test")),
     collectWorkspaceMetrics(root),
     collectContractsMetrics(root),
+    collectTestCompileMetrics(root),
   ]);
 
   const commandTimings = [];
@@ -165,6 +167,7 @@ export async function collectBaseline(root, commandSpecs = []) {
     distTest: distTestMetrics,
     workspace: workspaceMetrics,
     contracts: contractsMetrics,
+    testCompile: testCompileMetrics,
     commands: commandTimings,
     startup: {
       timingEnv: "GSD_STARTUP_TIMING=1",
@@ -176,6 +179,42 @@ export async function collectBaseline(root, commandSpecs = []) {
     ...report,
     metrics: buildMetricIndex(report),
   };
+}
+
+export async function collectTestCompileMetrics(root) {
+  const cachePath = join(root, "dist-test", ".compile-tests-cache.json");
+  if (!existsSync(cachePath)) {
+    return {
+      cacheFileExists: false,
+      cacheHit: null,
+      fileCount: 0,
+      bytesCopied: 0,
+      inputBytes: 0,
+      wallMs: 0,
+    };
+  }
+
+  try {
+    const cache = JSON.parse(await readFile(cachePath, "utf8"));
+    const metrics = cache.metrics ?? {};
+    return {
+      cacheFileExists: true,
+      cacheHit: typeof metrics.cacheHit === "boolean" ? metrics.cacheHit : null,
+      fileCount: numberOrZero(metrics.fileCount),
+      bytesCopied: numberOrZero(metrics.bytesCopied),
+      inputBytes: numberOrZero(metrics.inputBytes),
+      wallMs: numberOrZero(metrics.wallMs),
+    };
+  } catch {
+    return {
+      cacheFileExists: true,
+      cacheHit: null,
+      fileCount: 0,
+      bytesCopied: 0,
+      inputBytes: 0,
+      wallMs: 0,
+    };
+  }
 }
 
 export async function collectPromptMetrics(root) {
@@ -355,6 +394,12 @@ export function buildMetricIndex(report) {
     "contracts.fixtures.sharedBySurface": report.contracts?.fixtures?.sharedBySurface ?? 0,
     "contracts.surfaceDriftFailures": report.contracts?.surfaceDriftFailures ?? 0,
     "contracts.legacyTypeImportsRemaining": report.contracts?.legacyTypeImportsRemaining ?? 0,
+    "testCompile.cacheFileExists": report.testCompile?.cacheFileExists ? 1 : 0,
+    "testCompile.cacheHit": report.testCompile?.cacheHit === null ? -1 : (report.testCompile?.cacheHit ? 1 : 0),
+    "testCompile.fileCount": report.testCompile?.fileCount ?? 0,
+    "testCompile.bytesCopied": report.testCompile?.bytesCopied ?? 0,
+    "testCompile.inputBytes": report.testCompile?.inputBytes ?? 0,
+    "testCompile.wallMs": report.testCompile?.wallMs ?? 0,
   };
 
   for (const area of report.workspace.areas) {
@@ -370,9 +415,27 @@ export function buildMetricIndex(report) {
     metrics[`${prefix}.exitCode`] = command.exitCode;
     metrics[`${prefix}.stdoutBytes`] = command.stdoutBytes;
     metrics[`${prefix}.stderrBytes`] = command.stderrBytes;
+
+    const safeLabel = metricSafeLabel(command.label);
+    if (["changed-src", "test-changed-src", "verify-changed", "verify-changed-src"].includes(safeLabel)) {
+      metrics["verify.changedWallMs"] = command.wallMs;
+    }
+    if (["verify-pr", "verify-full", "full"].includes(safeLabel)) {
+      metrics["verify.fullWallMs"] = command.wallMs;
+    }
+    if (["test-compile-cold", "testcompile-cold"].includes(safeLabel)) {
+      metrics["testCompile.coldWallMs"] = command.wallMs;
+    }
+    if (["test-compile-warm", "testcompile-warm", "test-compile"].includes(safeLabel)) {
+      metrics["testCompile.warmWallMs"] = command.wallMs;
+    }
   }
 
   return metrics;
+}
+
+export function numberOrZero(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 export function compareReports(previous, current) {
@@ -510,6 +573,13 @@ export function renderSummary(report) {
     `- exists: ${report.distTest.exists}`,
     `- files: ${report.distTest.fileCount}`,
     `- bytes: ${report.distTest.bytes}`,
+    "",
+    "Test compile metrics",
+    `- cache file: ${report.testCompile?.cacheFileExists ?? false}`,
+    `- cache hit: ${report.testCompile?.cacheHit ?? "n/a"}`,
+    `- files: ${report.testCompile?.fileCount ?? 0}`,
+    `- bytes copied: ${report.testCompile?.bytesCopied ?? 0}`,
+    `- wall ms: ${report.testCompile?.wallMs ?? 0}`,
     "",
     "Contracts metrics",
     `- fixtures: ${report.contracts.fixtures.total}`,
