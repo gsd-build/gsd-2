@@ -12,8 +12,9 @@
  */
 
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { mkdirSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]/g;
 
@@ -47,9 +48,28 @@ export interface E2eEnv {
 }
 
 /**
+ * Allocate a fresh per-process HOME under the canonical tmpdir. Each
+ * spawned `gsd` writes to `~/.gsd/agent/extensions/...` for resource
+ * setup; sharing the host HOME causes ENOTEMPTY races when multiple
+ * spawns interleave on a CI runner. Re-using the same isolated HOME
+ * across spawns inside one test process is fine — gsd's own setup
+ * is idempotent within a single owner — but we must not share with
+ * the runner's actual home.
+ */
+let _isolatedHome: string | undefined;
+function isolatedHome(): string {
+	if (_isolatedHome) return _isolatedHome;
+	const dir = join(canonicalTmpdir(), `gsd-e2e-home-${process.pid}-${Date.now()}`);
+	mkdirSync(dir, { recursive: true });
+	_isolatedHome = dir;
+	return dir;
+}
+
+/**
  * Build the env for an e2e child process. Strips GSD_* vars from the host
- * (so a developer's local config does not leak into a test) but keeps PATH,
- * HOME, and the standard system vars.
+ * (so a developer's local config does not leak into a test), points HOME
+ * at an isolated tmp dir (so per-user gsd state can't race against the
+ * runner's real home), and forces deterministic flags.
  */
 export function buildE2eEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
 	const base: NodeJS.ProcessEnv = {};
@@ -61,6 +81,10 @@ export function buildE2eEnv(extra: Record<string, string> = {}): NodeJS.ProcessE
 	base.GSD_NON_INTERACTIVE = "1";
 	// Keep TMPDIR canonical for the child too.
 	base.TMPDIR = canonicalTmpdir();
+	// Per-process isolated HOME so gsd's resource-extension setup
+	// (~/.gsd/agent/extensions) cannot race against the runner's real
+	// home. Caller can override via `extra.HOME` if needed.
+	base.HOME = isolatedHome();
 	return { ...base, ...extra };
 }
 
