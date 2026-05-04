@@ -1440,12 +1440,12 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
     }
   }
 
-  // ── Pre-execution checks (after plan-slice or ADR-011 refine-slice completes) ──
-  // Both emit the same PLAN.md + task artifacts via gsd_plan_slice, so the
-  // same structural validation applies to both.
+  // ── Pre-execution checks (after plan/refine/replan slice completes) ──
+  // All three emit compatible PLAN.md + task artifacts, so the same
+  // structural validation must run after replans as well.
   if (
     s.currentUnit &&
-    (s.currentUnit.type === "plan-slice" || s.currentUnit.type === "refine-slice")
+    (s.currentUnit.type === "plan-slice" || s.currentUnit.type === "refine-slice" || s.currentUnit.type === "replan-slice")
   ) {
     const currentUnit = s.currentUnit;
     let preExecPauseNeeded = false;
@@ -1585,7 +1585,7 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
               classification: "replan",
               rationale: "Pre-execution check failures detected. Replan to fix task-level inconsistencies before execution.",
             };
-            const triggered = executeReplan(s.basePath, mid, sid, capture);
+            const triggered = executeReplan(s.canonicalProjectRoot, mid, sid, capture);
             if (triggered) {
               ctx.ui.notify(
                 `Pre-execution checks failed — triggering replan for ${sid}\n${details}${suffix}${evidenceNote}`,

@@ -49,7 +49,7 @@ test("recordToolInvocationError is cleared after a successful tool result", () =
   autoSession.reset();
   autoSession.active = true;
 
-  recordToolInvocationError("gsd_task_complete", "Validation failed for tool gsd_task_complete: missing required field");
+  autoSession.lastToolInvocationError = "gsd_task_complete: simulated tool invocation error";
   assert.ok(autoSession.lastToolInvocationError, "precondition: error should be recorded");
 
   clearToolInvocationError();

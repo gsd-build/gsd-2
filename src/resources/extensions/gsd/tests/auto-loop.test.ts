@@ -3840,7 +3840,7 @@ test("autoLoop emits iteration-end when iteration breaks early", async () => {
     resolveDispatch: async () => ({
       action: "stop" as const,
       reason: "test-stop",
-      severity: "warning" as const,
+      level: "warning" as const,
     }),
     emitJournalEvent: (entry: any) => { journalEvents.push(entry); },
   });
