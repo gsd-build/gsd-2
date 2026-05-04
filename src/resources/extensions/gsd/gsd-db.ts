@@ -1,3 +1,5 @@
+// Project/App: GSD-2
+// File Purpose: GSD database facade, schema, migrations, and single-writer write API.
 // GSD Database Abstraction Layer
 // Provides a SQLite database with provider fallback chain:
 //   node:sqlite (built-in) → better-sqlite3 (npm) → null (unavailable)
@@ -29,90 +31,21 @@ import type { GsdWorkspace, MilestoneScope } from "./workspace.js";
 import { getGateIdsForTurn, type OwnerTurn } from "./gate-registry.js";
 import { logError, logWarning } from "./workflow-logger.js";
 import { createDbAdapter, type DbAdapter } from "./db-adapter.js";
+import { createSqliteProviderLoader, suppressSqliteWarning, type DbProviderName, type SqliteFallbackOpen } from "./db-provider.js";
 // Type-only import to avoid a circular runtime dep. The runtime side of
 // workflow-manifest.ts depends on this file, but the StateManifest type is
 // pure structure with no runtime coupling.
 import type { StateManifest } from "./workflow-manifest.js";
 
 const _require = createRequire(import.meta.url);
-const BETTER_SQLITE3_PACKAGE = ["better", "sqlite3"].join("-");
+type ProviderName = DbProviderName;
 
-type ProviderName = "node:sqlite" | "better-sqlite3";
-
-let providerName: ProviderName | null = null;
-let providerModule: unknown = null;
-let loadAttempted = false;
-
-function suppressSqliteWarning(): void {
-  const origEmit = process.emit;
-  // Override via loose cast: Node's overloaded emit signature is not directly assignable.
-  (process as any).emit = function (event: string, ...args: unknown[]): boolean {
-    if (
-      event === "warning" &&
-      args[0] &&
-      typeof args[0] === "object" &&
-      "name" in args[0] &&
-      (args[0] as { name: string }).name === "ExperimentalWarning" &&
-      "message" in args[0] &&
-      typeof (args[0] as { message: string }).message === "string" &&
-      (args[0] as { message: string }).message.includes("SQLite")
-    ) {
-      return false;
-    }
-    return origEmit.apply(process, [event, ...args] as Parameters<typeof process.emit>) as unknown as boolean;
-  };
-}
-
-function loadProvider(): void {
-  if (loadAttempted) return;
-  loadAttempted = true;
-
-  try {
-    suppressSqliteWarning();
-    const mod = _require("node:sqlite");
-    if (mod.DatabaseSync) {
-      providerModule = mod;
-      providerName = "node:sqlite";
-      return;
-    }
-  } catch {
-    // unavailable
-  }
-
-  try {
-    const mod = _require(BETTER_SQLITE3_PACKAGE);
-    if (typeof mod === "function" || (mod && mod.default)) {
-      providerModule = mod.default || mod;
-      providerName = "better-sqlite3";
-      return;
-    }
-  } catch {
-    // unavailable
-  }
-
-  const nodeMajor = parseInt(process.versions.node.split(".")[0], 10);
-  const versionHint = nodeMajor < 22
-    ? ` GSD requires Node >= 22.0.0 (current: v${process.versions.node}). Upgrade Node to fix this.`
-    : "";
-  process.stderr.write(
-    `gsd-db: No SQLite provider available (tried node:sqlite, better-sqlite3).${versionHint}\n`,
-  );
-}
-
-function openRawDb(path: string): unknown {
-  loadProvider();
-  if (!providerModule || !providerName) return null;
-
-  if (providerName === "node:sqlite") {
-    const { DatabaseSync } = providerModule as {
-      DatabaseSync: new (path: string) => unknown;
-    };
-    return new DatabaseSync(path);
-  }
-
-  const Database = providerModule as new (path: string) => unknown;
-  return new Database(path);
-}
+const providerLoader = createSqliteProviderLoader({
+  requireModule: (id: string) => _require(id),
+  suppressSqliteWarning,
+  nodeVersion: process.versions.node,
+  writeStderr: (message: string) => process.stderr.write(message),
+});
 
 export const SCHEMA_VERSION = 25;
 
@@ -1526,8 +1459,8 @@ export function closeDatabaseByWorkspace(workspace: GsdWorkspace): void {
 }
 
 export function getDbProvider(): ProviderName | null {
-  loadProvider();
-  return providerName;
+  providerLoader.load();
+  return providerLoader.getProviderName();
 }
 
 export function isDbAvailable(): boolean {
@@ -1551,10 +1484,10 @@ export function getDbStatus(): {
   lastError: Error | null;
   lastPhase: "open" | "initSchema" | "vacuum-recovery" | null;
 } {
-  loadProvider();
+  providerLoader.load();
   return {
     available: currentDb !== null,
-    provider: providerName,
+    provider: providerLoader.getProviderName(),
     attempted: _dbOpenAttempted,
     lastError: _lastDbError,
     lastPhase: _lastDbPhase,
@@ -1571,28 +1504,18 @@ export function openDatabase(path: string): boolean {
   _lastDbPhase = null;
 
   let rawDb: unknown;
-  let fallbackProvider: ProviderName | null = null;
-  let fallbackModule: unknown = null;
+  let fallbackOpen: SqliteFallbackOpen | null = null;
   try {
-    rawDb = openRawDb(path);
+    rawDb = providerLoader.openRaw(path);
   } catch (primaryErr) {
     _lastDbPhase = "open";
     _lastDbError = primaryErr instanceof Error ? primaryErr : new Error(String(primaryErr));
     // node:sqlite loaded but failed to open this file — try better-sqlite3 as fallback.
-    if (providerName === "node:sqlite") {
-      try {
-        const mod = _require(BETTER_SQLITE3_PACKAGE);
-        const Db = (mod && mod.default) ? mod.default : mod;
-        if (typeof Db === "function") {
-          rawDb = new Db(path);
-          fallbackProvider = "better-sqlite3";
-          fallbackModule = Db;
-          _lastDbError = null;
-          _lastDbPhase = null;
-        }
-      } catch {
-        // fallback unavailable; surface original error
-      }
+    fallbackOpen = providerLoader.tryOpenBetterSqliteFallback(path);
+    if (fallbackOpen) {
+      rawDb = fallbackOpen.rawDb;
+      _lastDbError = null;
+      _lastDbPhase = null;
     }
     if (!rawDb) throw primaryErr;
   }
@@ -1625,10 +1548,7 @@ export function openDatabase(path: string): boolean {
   }
 
   // Commit fallback provider switch only after open + schema both succeeded.
-  if (fallbackProvider) {
-    providerName = fallbackProvider;
-    providerModule = fallbackModule;
-  }
+  if (fallbackOpen) providerLoader.commitFallback(fallbackOpen);
 
   currentDb = adapter;
   currentPath = path;
@@ -1927,9 +1847,7 @@ export function _getAdapter(): DbAdapter | null {
 }
 
 export function _resetProvider(): void {
-  loadAttempted = false;
-  providerModule = null;
-  providerName = null;
+  providerLoader.reset();
 }
 
 export function upsertDecision(d: Omit<Decision, "seq">): void {
