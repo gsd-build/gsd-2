@@ -53,7 +53,7 @@ describe("atomicWriteFileSync", () => {
 	});
 
 	it("fsyncs temp file before rename (durability guard)", () => {
-		const src = readFileSync(new URL("./fs-utils.ts", import.meta.url), "utf-8");
+		const src = readFileSync(join(process.cwd(), "packages", "pi-coding-agent", "src", "core", "fs-utils.ts"), "utf-8");
 		assert.match(src, /fsyncSync\(fd\)/);
 	});
 });
