@@ -37,8 +37,9 @@ test("initNotificationWidget replaces prior interval and store subscription", ()
     _resetNotificationStore();
     _resetNotificationWidgetForTests();
     initNotificationStore(tmp);
+    appendNotification("Need attention", "warning");
 
-    initNotificationWidget({
+    const firstCleanup = initNotificationWidget({
       hasUI: true,
       ui: { setStatus: (_key: string, value: string | undefined) => firstStatuses.push(value) },
     } as any);
@@ -48,14 +49,17 @@ test("initNotificationWidget replaces prior interval and store subscription", ()
     } as any);
 
     const firstCountAfterReplace = firstStatuses.length;
-    appendNotification("Need attention", "warning");
+    firstCleanup();
+    assert.equal(firstStatuses.length, firstCountAfterReplace, "stale cleanup must not clear the replaced status chip");
+
+    appendNotification("Need follow-up", "warning");
 
     assert.equal(
       firstStatuses.length,
       firstCountAfterReplace,
       "replaced widget must not receive store-change refreshes",
     );
-    assert.match(secondStatuses.at(-1) ?? "", /1 unread/);
+    assert.match(secondStatuses.at(-1) ?? "", /2 unread/);
   } finally {
     _resetNotificationWidgetForTests();
     _resetNotificationStore();

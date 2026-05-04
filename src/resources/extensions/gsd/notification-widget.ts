@@ -48,8 +48,8 @@ export function initNotificationWidget(ctx: ExtensionContext): () => void {
   const cleanup = () => {
     unsubscribe();
     clearInterval(interval);
-    ctx.ui.setStatus(STATUS_KEY, undefined);
     if (notificationWidgetCleanup === cleanup) {
+      ctx.ui.setStatus(STATUS_KEY, undefined);
       notificationWidgetCleanup = undefined;
     }
   };
