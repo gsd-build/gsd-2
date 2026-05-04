@@ -16,8 +16,8 @@ import { createHash } from "node:crypto";
 
 const MAX_CONSECUTIVE_IDENTICAL_CALLS = 4;
 
-/** Interactive/user-facing tools where even 1 duplicate is confusing. */
-const STRICT_LOOP_TOOLS = new Set(["ask_user_questions"]);
+/** Tools with stricter duplicate limits than the global threshold. */
+const STRICT_LOOP_TOOLS = new Set<string>();
 const MAX_CONSECUTIVE_STRICT = 1;
 
 let consecutiveCount = 0;

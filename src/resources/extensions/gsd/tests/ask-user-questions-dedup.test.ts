@@ -21,7 +21,7 @@ import {
 } from "../../ask-user-questions.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Strict loop guard: ask_user_questions blocks on 2nd identical call
+// Loop guard: ask_user_questions uses normal threshold (re-ask safe)
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("ask_user_questions dedup", () => {
@@ -30,15 +30,16 @@ describe("ask_user_questions dedup", () => {
     resetAskUserQuestionsCache();
   });
 
-  test("loop guard blocks 2nd identical ask_user_questions call", () => {
+  test("loop guard allows repeated ask_user_questions up to normal threshold", () => {
     const args = { questions: [{ id: "app_coverage", question: "Which apps?" }] };
 
-    const first = checkToolCallLoop("ask_user_questions", args);
-    assert.equal(first.block, false, "First call should be allowed");
+    for (let i = 1; i <= 4; i++) {
+      const result = checkToolCallLoop("ask_user_questions", args);
+      assert.equal(result.block, false, `ask_user_questions call ${i} should be allowed`);
+    }
 
-    const second = checkToolCallLoop("ask_user_questions", args);
-    assert.equal(second.block, true, "2nd identical call should be blocked");
-    assert.ok(second.reason!.includes("ask_user_questions"), "Reason should name the tool");
+    const fifth = checkToolCallLoop("ask_user_questions", args);
+    assert.equal(fifth.block, true, "5th identical ask_user_questions call should be blocked");
   });
 
   test("loop guard allows different ask_user_questions calls", () => {
