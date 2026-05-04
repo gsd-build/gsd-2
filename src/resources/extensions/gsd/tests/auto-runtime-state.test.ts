@@ -5,6 +5,7 @@ import {
   autoSession,
   clearToolInvocationError,
   getAutoRuntimeSnapshot,
+  recordToolInvocationError,
 } from "../auto-runtime-state.ts";
 
 test("getAutoRuntimeSnapshot includes orchestration phase when available", () => {
@@ -40,6 +41,20 @@ test("clearToolInvocationError clears stale tool error state for active auto ses
   clearToolInvocationError();
 
   assert.equal(autoSession.lastToolInvocationError, null);
+
+  autoSession.reset();
+});
+
+test("recordToolInvocationError is cleared after a successful tool result", () => {
+  autoSession.reset();
+  autoSession.active = true;
+
+  recordToolInvocationError("gsd_task_complete", "Validation failed for tool gsd_task_complete: missing required field");
+  assert.ok(autoSession.lastToolInvocationError, "precondition: error should be recorded");
+
+  clearToolInvocationError();
+  assert.equal(autoSession.lastToolInvocationError, null, "successful tool result should clear stale tool error state");
+
   autoSession.reset();
 });
 

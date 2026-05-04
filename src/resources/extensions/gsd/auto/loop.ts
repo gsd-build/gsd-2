@@ -402,9 +402,10 @@ export async function autoLoop(
 
     let dispatchId: number | null = null;
     let dispatchSettled = false;
+    let iterationStarted = false;
     let iterationEndEmitted = false;
     const emitIterationEnd = (details: Record<string, unknown> = {}): void => {
-      if (iterationEndEmitted) return;
+      if (!iterationStarted || iterationEndEmitted) return;
       iterationEndEmitted = true;
       journalReporter.emit("iteration-end", { iteration, ...details });
     };
@@ -470,6 +471,7 @@ export async function autoLoop(
 
       const ic: IterationContext = { ctx, pi, s, deps, prefs, iteration, flowId, nextSeq };
       journalReporter.emit("iteration-start", { iteration });
+      iterationStarted = true;
       let iterData: IterationData;
 
       // ── Custom engine path ──────────────────────────────────────────────
@@ -1142,6 +1144,8 @@ export async function autoLoop(
         ctx.ui.notify(errorDecision.notifyMessage, "warning");
       }
       finishTurn(errorDecision.turnStatus, "execution", msg);
+    } finally {
+      emitIterationEnd({ iteration });
     }
   }
 
