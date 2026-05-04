@@ -40,16 +40,19 @@ test("execute-task prompt renders compact execution and completion gates", async
     priorTaskLines: "- None",
     skillActivation: "Load relevant skills.",
     templatesDir: join(fixtureRoot, "templates"),
+    taskSummaryTemplatePath: "C:\\Users\\Test\\.gsd\\agent\\extensions\\gsd\\templates\\task-summary.md",
     verificationBudget: "~10K chars",
     taskSummaryPath: ".gsd/milestones/M001/slices/S01/tasks/T01-SUMMARY.md",
   });
 
   assert.match(prompt, /You execute\./);
   assert.match(prompt, /Call `memory_query`/);
-  assert.match(prompt, /Before any `Write` that creates an artifact or output file/);
-  assert.match(prompt, /Build the real thing/);
+  assert.match(prompt, /Before any `Write` creating an artifact\/output file/);
+  assert.match(prompt, /Build real behavior/);
   assert.match(prompt, /Background process rule/);
   assert.match(prompt, /blocker_discovered: true/);
+  assert.match(prompt, /C:\\Users\\Test\\.gsd\\agent\\extensions\\gsd\\templates\\task-summary\.md/);
+  assert.doesNotMatch(prompt, /\{\{templatesDir\}\}\/task-summary\.md/);
   assert.match(prompt, /Call `gsd_task_complete`/);
   assert.match(prompt, /Do not run git commands/);
   assert.doesNotMatch(prompt, /\{\{[a-zA-Z][a-zA-Z0-9_]*\}\}/);
