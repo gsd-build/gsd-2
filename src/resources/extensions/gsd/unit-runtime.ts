@@ -223,12 +223,6 @@ export async function inspectExecuteTaskDurability(
     dbComplete = !!task && isClosedStatus(task.status);
   }
 
-  let dbComplete = false;
-  if (isDbAvailable()) {
-    const dbTask = getTask(mid, sid, tid);
-    dbComplete = dbTask?.status === "complete" || dbTask?.status === "done";
-  }
-
   // Must-have coverage: load task plan and count mentions in summary
   let mustHaveCount = 0;
   let mustHavesMentionedInSummary = 0;
