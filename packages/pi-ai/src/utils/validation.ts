@@ -7,6 +7,15 @@ const addFormats = (addFormatsModule as any).default || addFormatsModule;
 
 import type { Tool, ToolCall } from "../types.js";
 
+const MAX_VALIDATION_ARGS_ECHO_CHARS = 1024;
+
+function summarizeArgumentsForError(args: unknown, maxChars = MAX_VALIDATION_ARGS_ECHO_CHARS): string {
+	const json = JSON.stringify(args, null, 2) ?? String(args);
+	if (json.length <= maxChars) return json;
+	const omitted = json.length - maxChars;
+	return `${json.slice(0, maxChars)}\n... [truncated, ${omitted} chars omitted]`;
+}
+
 // Detect if we're in a browser extension environment with strict CSP
 // Chrome extensions with Manifest V3 don't allow eval/Function constructor
 const isBrowserExtension = typeof globalThis !== "undefined" && (globalThis as any).chrome?.runtime?.id !== undefined;
@@ -63,7 +72,7 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): any {
 			})
 			.join("\n") || "Unknown validation error";
 
-	const errorMessage = `Validation failed for tool "${toolCall.name}":\n${errors}\n\nReceived arguments:\n${JSON.stringify(toolCall.arguments, null, 2)}`;
+	const errorMessage = `Validation failed for tool "${toolCall.name}":\n${errors}\n\nReceived arguments (summarized):\n${summarizeArgumentsForError(toolCall.arguments)}`;
 
 	throw new Error(errorMessage);
 }
