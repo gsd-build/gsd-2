@@ -11,7 +11,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { isMultiTurnHeadlessCommand } from '../headless.ts'
+import { isMultiTurnHeadlessCommand } from '../headless/headless.ts'
 
 test('discuss is classified as multi-turn (#3547)', () => {
   assert.equal(isMultiTurnHeadlessCommand('discuss'), true)

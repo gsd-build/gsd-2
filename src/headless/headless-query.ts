@@ -18,8 +18,8 @@ import { createJiti } from '@mariozechner/jiti'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import type { GSDState } from './resources/extensions/gsd/types.js'
-import { resolveBundledGsdExtensionModule } from './extension-runtime/bundled-resource-path.js'
+import type { GSDState } from '../resources/extensions/gsd/types.js'
+import { resolveBundledGsdExtensionModule } from '../extension-runtime/bundled-resource-path.js'
 
 const jiti = createJiti(fileURLToPath(import.meta.url), { interopDefault: true, debug: false })
 const { existsSync } = await import('node:fs')
@@ -58,10 +58,11 @@ export function shouldUseAgentExtensionsDir(opts: {
 
 const agentExtensionsDir = resolveGsdAgentExtensionsDir()
 const { useAgentDir } = shouldUseAgentExtensionsDir({ env: process.env })
+const bundledResourceImportUrl = new URL('../cli.js', import.meta.url).href
 const gsdExtensionPath = (...segments: string[]) =>
   useAgentDir
     ? resolveAgentExtensionModule(agentExtensionsDir, segments)
-    : resolveBundledGsdExtensionModule(import.meta.url, segments.join('/'))
+    : resolveBundledGsdExtensionModule(bundledResourceImportUrl, segments.join('/'))
 
 function resolveAgentExtensionModule(agentDir: string, segments: string[]): string {
   const requested = join(agentDir, ...segments)

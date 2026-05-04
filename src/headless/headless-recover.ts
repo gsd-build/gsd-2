@@ -22,7 +22,7 @@
 import { createJiti } from '@mariozechner/jiti'
 import { fileURLToPath } from 'node:url'
 import { resolveGsdAgentExtensionsDir, shouldUseAgentExtensionsDir } from './headless-query.js'
-import { resolveBundledGsdExtensionModule } from './extension-runtime/bundled-resource-path.js'
+import { resolveBundledGsdExtensionModule } from '../extension-runtime/bundled-resource-path.js'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 
@@ -30,10 +30,11 @@ const jiti = createJiti(fileURLToPath(import.meta.url), { interopDefault: true, 
 
 const agentExtensionsDir = resolveGsdAgentExtensionsDir()
 const { useAgentDir } = shouldUseAgentExtensionsDir({ env: process.env })
+const bundledResourceImportUrl = new URL('../cli.js', import.meta.url).href
 const gsdExtensionPath = (...segments: string[]) =>
   useAgentDir
     ? resolveAgentExtensionModule(agentExtensionsDir, segments)
-    : resolveBundledGsdExtensionModule(import.meta.url, segments.join('/'))
+    : resolveBundledGsdExtensionModule(bundledResourceImportUrl, segments.join('/'))
 
 function resolveAgentExtensionModule(agentDir: string, segments: string[]): string {
   const requested = join(agentDir, ...segments)

@@ -429,7 +429,7 @@ if (cliFlags.messages[0] === 'headless') {
   // headless-query loads from src/resources/ while auto/interactive load
   // from ~/.gsd/agent/extensions/ — different extension copies diverge.
   initResources(agentDir)
-  const { runHeadless, parseHeadlessArgs } = await import('./headless.js')
+  const { runHeadless, parseHeadlessArgs } = await import('./headless/headless.js')
   await runHeadless(parseHeadlessArgs(process.argv))
   process.exit(0)
 }
@@ -441,7 +441,7 @@ if (cliFlags.messages[0] === 'headless') {
  */
 async function runHeadlessFromAuto(headlessArgs: string[]): Promise<never> {
   await ensureRtkBootstrap()
-  const { runHeadless, parseHeadlessArgs } = await import('./headless.js')
+  const { runHeadless, parseHeadlessArgs } = await import('./headless/headless.js')
   const argv = [process.argv[0], process.argv[1], 'headless', ...headlessArgs]
   await runHeadless(parseHeadlessArgs(argv))
   process.exit(0)

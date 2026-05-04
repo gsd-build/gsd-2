@@ -158,7 +158,7 @@ import {
   EXIT_CANCELLED,
   isInteractiveHeadlessTool,
   shouldArmHeadlessIdleTimeout,
-} from '../headless-events.js'
+} from '../headless/headless-events.js'
 
 // ─── mapStatusToExitCode ─────────────────────────────────────────────────
 

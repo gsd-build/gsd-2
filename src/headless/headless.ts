@@ -19,7 +19,7 @@ import { ChildProcess } from 'node:child_process'
 
 import { RpcClient, SessionManager } from '@gsd/pi-coding-agent'
 import type { SessionInfo } from '@gsd/pi-coding-agent'
-import { getProjectSessionsDir } from './project-sessions.js'
+import { getProjectSessionsDir } from '../project-sessions.js'
 import { loadAndValidateAnswerFile, AnswerInjector } from './headless-answers.js'
 
 import {
@@ -368,8 +368,8 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
   // suite) get the same diagnostic without a TTY.
   if (options.command === 'doctor') {
     const wantsJson = options.json || options.commandArgs.includes('--json')
-    const { runGSDDoctor } = await import('./resources/extensions/gsd/doctor.js')
-    const { formatDoctorReport, formatDoctorReportJson } = await import('./resources/extensions/gsd/doctor-format.js')
+    const { runGSDDoctor } = await import('../resources/extensions/gsd/doctor.js')
+    const { formatDoctorReport, formatDoctorReportJson } = await import('../resources/extensions/gsd/doctor-format.js')
     let exitCode = 1
     try {
       const report = await runGSDDoctor(process.cwd())
