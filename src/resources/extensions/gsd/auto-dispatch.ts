@@ -1302,6 +1302,25 @@ export const DISPATCH_RULES: DispatchRule[] = [
               level: "warning",
             };
           }
+
+          // Safety guard (#4361): "needs-attention" can be terminal at the
+          // state layer, but completion must stop when success criteria are
+          // still unchecked to prevent retry loops until MAX_VERIFICATION_RETRIES.
+          if (verdict === "needs-attention") {
+            const checklistMatch = validationContent.match(
+              /##\s*Success Criteria(?:\s+Checklist)?[\s\S]*?(?=\n##\s|\n---|$)/i,
+            );
+            const unchecked = checklistMatch
+              ? (checklistMatch[0].match(/^-\s+\[\s\]/gm) ?? []).length
+              : 0;
+            if (unchecked > 0) {
+              return {
+                action: "stop",
+                reason: `Cannot complete milestone ${mid}: VALIDATION verdict is "needs-attention" but ${unchecked} Success Criteria item(s) are unchecked. Resolve blockers and re-run validation, or update the verdict to "needs-remediation" to trigger remediation.`,
+                level: "warning",
+              };
+            }
+          }
         }
       }
 
