@@ -102,7 +102,6 @@ async function gotoPackagedHost(
         state: "attached",
         timeout: 30_000,
       })
-      return
     }
 
     // Diagnostic dump — without this, all we see in CI is a generic
@@ -129,6 +128,47 @@ async function gotoPackagedHost(
         `original: ${(error as Error).message}`,
     )
   }
+
+  await unlockOnboardingIfBlocking(page, target)
+}
+
+async function unlockOnboardingIfBlocking(page: Page, target: string): Promise<void> {
+  const gateVisible = await page.locator('[data-testid="onboarding-gate"]').isVisible().catch(() => false)
+  if (!gateVisible) return
+
+  const onboardingState = await page.evaluate(async () => {
+    const res = await fetch("/api/onboarding", { method: "GET" })
+    const payload = await res.json()
+    return payload?.onboarding ?? null
+  })
+
+  const apiKeyProviderId = onboardingState?.required?.providers?.find(
+    (provider: { configured?: boolean; supports?: { apiKey?: boolean }; id?: string }) =>
+      !provider.configured && provider.supports?.apiKey && typeof provider.id === "string",
+  )?.id
+
+  if (!apiKeyProviderId) {
+    throw new Error("onboarding gate is visible but no API-key provider is available to unlock it")
+  }
+
+  const unlock = await page.evaluate(async ({ providerId }) => {
+    const res = await fetch("/api/onboarding", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "save_api_key", providerId, apiKey: "gsd-test-key" }),
+    })
+    const payload = await res.json()
+    return { ok: res.ok, status: res.status, onboarding: payload?.onboarding ?? null, error: payload?.error ?? null }
+  }, { providerId: apiKeyProviderId })
+
+  if (!unlock.ok || unlock.onboarding?.locked) {
+    throw new Error(
+      `failed to unlock onboarding (status=${unlock.status}, provider=${apiKeyProviderId}, locked=${String(unlock.onboarding?.locked)}, error=${unlock.error ?? "none"})`,
+    )
+  }
+
+  await page.goto(target, { waitUntil: "load", timeout: 30_000 })
+  await page.locator('[data-testid="onboarding-gate"]').waitFor({ state: "hidden", timeout: 10_000 })
 }
 
 async function setViewport(page: Page, vp: { width: number; height: number }): Promise<void> {
@@ -141,9 +181,8 @@ async function setViewport(page: Page, vp: { width: number; height: number }): P
 //
 // One subprocess host + one chromium instance shared across all the
 // breakpoint assertions. The harness sanitises the runtime env per
-// launch, and the locked-onboarding state is fine for these tests
-// because the AppShell renders alongside the OnboardingGate (the gate
-// is a sibling overlay, not a wrapping conditional).
+// launch; if onboarding is visible we unlock it through /api/onboarding
+// so overlay pointer interception cannot make this test flaky.
 
 test("responsive contract: web host honours viewport-driven chrome", async (t) => {
   const tempRoot = mkdtempSync(join(tmpdir(), "gsd-web-responsive-contract-"))
