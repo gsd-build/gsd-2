@@ -25,7 +25,7 @@ function findRepoRoot(start: string): string {
 
 const projectRoot = findRepoRoot(dirname(fileURLToPath(import.meta.url)));
 const rootPackage = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8"));
-const contractsPackage = JSON.parse(readFileSync(join(projectRoot, "packages/contracts/package.json"), "utf8"));
+const contractsPackage = JSON.parse(readFileSync(join(projectRoot, "packages/contracts/package.json"), "utf8")); // allow-source-grep: package manifest contract test validates build script metadata.
 const scripts = rootPackage.scripts as Record<string, string>;
 
 function assertContractsBefore(scriptName: string, laterCommand: string): void {
