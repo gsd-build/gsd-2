@@ -22,6 +22,8 @@ import {
   formatDecisionsForPrompt,
   formatRequirementsForPrompt,
 } from '../context-store.ts';
+import { inlineDecisionsFromDb } from '../auto-prompts.ts';
+import { createMemory } from '../memory-store.ts';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // prompt-db: DB-aware decisions helper returns scoped content
@@ -148,6 +150,38 @@ console.log('\n=== prompt-db: project content from DB ===');
   assert.match(wrapped, /^### Project/, 'wrapped project starts with ### Project');
   assert.match(wrapped, /Source:.*PROJECT\.md/, 'wrapped project has source path');
   assert.match(wrapped, /# Test Project/, 'wrapped project includes content');
+
+  closeDatabase();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// prompt-db: suppress decisions inline when architecture memories are present
+// ═══════════════════════════════════════════════════════════════════════════
+
+console.log('\n=== prompt-db: suppress decisions inline when architecture memories exist ===');
+{
+  openDatabase(':memory:');
+
+  insertDecision({
+    id: 'D001',
+    when_context: 'M001/S01',
+    scope: 'architecture',
+    decision: 'legacy decision row',
+    choice: 'A',
+    rationale: 'because',
+    revisable: 'yes',
+    made_by: 'agent',
+    superseded_by: null,
+  });
+
+  createMemory({
+    category: 'architecture',
+    content: 'memory-store architecture decision',
+    confidence: 0.9,
+  });
+
+  const inline = await inlineDecisionsFromDb(process.cwd(), 'M001');
+  assert.equal(inline, null, 'inline decisions should be suppressed when architecture memory coverage exists');
 
   closeDatabase();
 }

@@ -815,6 +815,14 @@ export async function inlineDecisionsFromDb(
       // legacy table — that switch lands separately to handle superseded
       // history cleanly.
       const { queryDecisionsFromMemories, formatDecisionsForPrompt } = await import("./context-store.js");
+      const { getActiveMemoriesRanked } = await import("./memory-store.js");
+
+      // ADR-013 deprecation-window mitigation: once architecture memories exist,
+      // suppress decisions-table prompt injection to avoid duplicate semantics
+      // across memory auto-injection + inline decisions block.
+      const hasArchitectureCoverage = getActiveMemoriesRanked(80)
+        .some((m) => m.category === "architecture");
+      if (hasArchitectureCoverage) return null;
 
       // First query: try with both milestoneId and scope (if scope provided)
       let decisions = queryDecisionsFromMemories({ milestoneId, scope });
