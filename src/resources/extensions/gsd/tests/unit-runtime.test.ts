@@ -11,6 +11,7 @@ import {
 import { clearPathCache } from '../paths.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { closeDatabase, openDatabase, insertMilestone, insertSlice, insertTask } from "../gsd-db.ts";
 
 const base = mkdtempSync(join(tmpdir(), "gsd-unit-runtime-test-"));
 const tasksDir = join(base, ".gsd", "milestones", "M100", "slices", "S02", "tasks");
@@ -40,6 +41,7 @@ console.log("\n=== execute-task durability inspection ===");
   assert.deepStrictEqual(status!.summaryExists, false, "summary initially missing");
   assert.deepStrictEqual(status!.taskChecked, false, "task initially unchecked");
   assert.deepStrictEqual(status!.nextActionAdvanced, false, "next action initially stale");
+  assert.deepStrictEqual(status!.dbComplete, false, "dbComplete false when DB unavailable or task incomplete");
   assert.ok(/summary missing/i.test(formatExecuteTaskRecoveryStatus(status!)), "diagnostic mentions summary");
 
   writeFileSync(join(tasksDir, "T09-SUMMARY.md"), "# done\n", "utf-8");
@@ -291,6 +293,40 @@ console.log("\n=== per-record lock: stale .lock is reclaimed, list ignores .lock
     assert.equal(records[0].unitId, "M002/S01/T01");
   } finally {
     rmSync(listBase, { recursive: true, force: true });
+  }
+}
+
+console.log("\n=== db-complete signal: execute-task durability reads DB status ===");
+{
+  const dbBase = mkdtempSync(join(tmpdir(), "gsd-unit-runtime-db-test-"));
+  try {
+    mkdirSync(join(dbBase, ".gsd", "milestones", "M300", "slices", "S01", "tasks"), { recursive: true });
+    writeFileSync(join(dbBase, ".gsd", "STATE.md"), "## Next Action\nExecute T02 for S01: next\n", "utf-8");
+    writeFileSync(
+      join(dbBase, ".gsd", "milestones", "M300", "slices", "S01", "S01-PLAN.md"),
+      "# S01\n\n## Tasks\n\n- [ ] **T01: Work** `est:10m`\n",
+      "utf-8",
+    );
+
+    openDatabase(join(dbBase, ".gsd", "gsd.db"));
+    insertMilestone({ id: "M300", title: "Test", status: "active", depends_on: [] });
+    insertSlice({ id: "S01", milestoneId: "M300", title: "Slice", status: "active", risk: "low", depends: [], demo: "", sequence: 1 });
+    insertTask({
+      id: "T01",
+      sliceId: "S01",
+      milestoneId: "M300",
+      title: "Work",
+      status: "complete",
+      planning: { description: "", estimate: "", files: [], verify: "", inputs: [], expectedOutput: [], observabilityImpact: "" },
+      sequence: 1,
+    });
+
+    const status = await inspectExecuteTaskDurability(dbBase, "M300/S01/T01");
+    assert.ok(status);
+    assert.equal(status!.dbComplete, true, "dbComplete should be true when DB task status is complete");
+  } finally {
+    try { closeDatabase(); } catch {}
+    rmSync(dbBase, { recursive: true, force: true });
   }
 }
 

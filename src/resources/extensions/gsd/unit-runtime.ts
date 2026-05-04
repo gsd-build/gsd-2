@@ -10,6 +10,7 @@ import {
 } from "./paths.js";
 import { loadFile, parseTaskPlanMustHaves, countMustHavesMentionedInSummary } from "./files.js";
 import { parseUnitId } from "./unit-id.js";
+import { getTask, isDbAvailable } from "./gsd-db.js";
 
 // Per-record advisory lock — prevents read-modify-write races between
 // concurrent writers updating disjoint fields of the same runtime record.
@@ -78,6 +79,7 @@ export interface ExecuteTaskRecoveryStatus {
   summaryExists: boolean;
   taskChecked: boolean;
   nextActionAdvanced: boolean;
+  dbComplete: boolean;
   mustHaveCount: number;
   mustHavesMentionedInSummary: number;
 }
@@ -200,6 +202,12 @@ export async function inspectExecuteTaskDurability(
   const taskChecked = !!planContent && new RegExp(`^- \\[[xX]\\] \\*\\*${escapedTid}:`, "m").test(planContent);
   const nextActionAdvanced = !new RegExp(`Execute ${tid}\\b`).test(stateContent);
 
+  let dbComplete = false;
+  if (isDbAvailable()) {
+    const dbTask = getTask(mid, sid, tid);
+    dbComplete = dbTask?.status === "complete" || dbTask?.status === "done";
+  }
+
   // Must-have coverage: load task plan and count mentions in summary
   let mustHaveCount = 0;
   let mustHavesMentionedInSummary = 0;
@@ -225,6 +233,7 @@ export async function inspectExecuteTaskDurability(
     summaryExists,
     taskChecked,
     nextActionAdvanced,
+    dbComplete,
     mustHaveCount,
     mustHavesMentionedInSummary,
   };
