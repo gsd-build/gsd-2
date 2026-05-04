@@ -33,6 +33,7 @@ import { logError, logWarning } from "./workflow-logger.js";
 import { createDbAdapter, type DbAdapter } from "./db-adapter.js";
 import { createDbConnectionCache, type DbConnectionCacheEntry } from "./db-connection-cache.js";
 import { createDbOpenState, type DbOpenPhase } from "./db-open-state.js";
+import { ensureColumn, indexExists } from "./db-schema-metadata.js";
 import { createDbTransactionRunner } from "./db-transaction.js";
 import { createSqliteProviderLoader, suppressSqliteWarning, type DbProviderName, type SqliteFallbackOpen } from "./db-provider.js";
 // Type-only import to avoid a circular runtime dep. The runtime side of
@@ -51,12 +52,6 @@ const providerLoader = createSqliteProviderLoader({
 });
 
 export const SCHEMA_VERSION = 25;
-
-function indexExists(db: DbAdapter, name: string): boolean {
-  return !!db.prepare(
-    "SELECT 1 as present FROM sqlite_master WHERE type = 'index' AND name = ?",
-  ).get(name);
-}
 
 /**
  * Create the v24 coordination tables (workers, milestone_leases,
@@ -616,11 +611,6 @@ function initSchema(db: DbAdapter, fileBacked: boolean): void {
   migrateSchema(db);
 }
 
-function columnExists(db: DbAdapter, table: string, column: string): boolean {
-  const rows = db.prepare(`PRAGMA table_info(${table})`).all();
-  return rows.some((row) => row["name"] === column);
-}
-
 /**
  * Create the FTS5 virtual table for memories plus the triggers that keep it
  * in sync with the base table. FTS5 may be unavailable on stripped-down
@@ -669,10 +659,6 @@ export function isMemoriesFtsAvailable(db: DbAdapter): boolean {
   } catch {
     return false;
   }
-}
-
-function ensureColumn(db: DbAdapter, table: string, column: string, ddl: string): void {
-  if (!columnExists(db, table, column)) db.exec(ddl);
 }
 
 function migrateSchema(db: DbAdapter): void {
