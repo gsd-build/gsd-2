@@ -11,7 +11,7 @@ import initSqlJs, { type Database as SqlJsDatabase } from "sql.js";
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { dirname } from "path";
-import { atomicWriteFileSync } from "../../../core/fs-utils.js";
+import { atomicWriteDbSnapshotSync } from "../../../core/fs-utils.js";
 
 export interface ThreadRow {
 	thread_id: string;
@@ -75,7 +75,7 @@ export class MemoryStorage {
 
 	private persist(): void {
 		const data = this.db.export();
-		atomicWriteFileSync(this.dbPath, Buffer.from(data));
+		atomicWriteDbSnapshotSync(this.dbPath, data);
 	}
 
 	private schedulePersist(): void {
