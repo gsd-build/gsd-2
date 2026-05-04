@@ -619,8 +619,13 @@ export class ToolExecutionComponent extends Container {
 			// Render result component if we have a result
 			if (this.result && this.toolDefinition.renderResult) {
 				try {
+					const rendererResult = {
+						content: this.result.content as any,
+						details: this.result.details,
+						isError: this.result.isError,
+					};
 					const resultComponent = this.toolDefinition.renderResult(
-						{ content: this.result.content as any, details: this.result.details },
+						rendererResult,
 						{ expanded: this.expanded, isPartial: this.isPartial },
 						theme,
 					);

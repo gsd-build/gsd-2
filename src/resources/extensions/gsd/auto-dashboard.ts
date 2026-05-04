@@ -583,6 +583,10 @@ export function updateProgressWidget(
     : state.activeSlice;
   const task = state.activeTask;
 
+  if (mid) {
+    updateSliceProgressCache(accessors.getBasePath(), mid.id, slice?.id);
+  }
+
   // Cache git branch at widget creation time (not per render)
   let cachedBranch: string | null = null;
   try { cachedBranch = getCurrentBranch(accessors.getBasePath()); } catch (err) { /* not in git repo */

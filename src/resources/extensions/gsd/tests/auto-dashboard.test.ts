@@ -13,6 +13,9 @@ import {
   formatWidgetTokens,
   estimateTimeRemaining,
   extractUatSliceId,
+  updateProgressWidget,
+  getRoadmapSlicesSync,
+  clearSliceProgressCache,
   getWidgetMode,
   cycleWidgetMode,
   _resetWidgetModeForTests,
@@ -21,6 +24,13 @@ import {
   _getLastCommitForTests,
   _getLastCommitFetchedAtForTests,
 } from "../auto-dashboard.ts";
+import {
+  openDatabase,
+  closeDatabase,
+  insertMilestone,
+  insertSlice,
+  insertTask,
+} from "../gsd-db.ts";
 
 const autoSource = readFileSync(join(process.cwd(), "src", "resources", "extensions", "gsd", "auto.ts"), "utf-8");
 const dashboardSource = readFileSync(join(process.cwd(), "src", "resources", "extensions", "gsd", "auto-dashboard.ts"), "utf-8");
@@ -218,6 +228,61 @@ test("auto progress widget renders RTK savings under the footer stats line", () 
   assert.match(dashboardSource, /formatRtkSavingsLabel/);
   assert.match(dashboardSource, /getRtkSessionSavings\(accessors\.getBasePath\(\), sessionId\)/);
   assert.match(dashboardSource, /lines\.push\(rightAlign\("", theme\.fg\("dim", cachedRtkLabel\), width\)\);/);
+});
+
+test("updateProgressWidget refreshes slice progress cache immediately", (t) => {
+  const dir = makeTempDir("progress-cache");
+  mkdirSync(join(dir, ".gsd"), { recursive: true });
+
+  t.after(() => {
+    closeDatabase();
+    clearSliceProgressCache();
+    cleanup(dir);
+  });
+
+  openDatabase(join(dir, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Milestone", status: "active" });
+  insertSlice({ milestoneId: "M001", id: "S01", title: "Done", status: "complete", sequence: 1 });
+  insertSlice({ milestoneId: "M001", id: "S02", title: "Active", status: "pending", sequence: 2 });
+  insertSlice({ milestoneId: "M001", id: "S03", title: "Pending", status: "pending", sequence: 3 });
+  insertTask({ milestoneId: "M001", sliceId: "S02", id: "T01", title: "Task", status: "complete" });
+
+  clearSliceProgressCache();
+  updateProgressWidget(
+    {
+      hasUI: true,
+      ui: { setWidget() {} },
+    } as any,
+    "complete-slice",
+    "M001/S02",
+    {
+      phase: "summarizing",
+      activeMilestone: { id: "M001", title: "Milestone" },
+      activeSlice: { id: "S02", title: "Active" },
+      activeTask: null,
+    } as any,
+    {
+      getAutoStartTime: () => 0,
+      isStepMode: () => false,
+      getCmdCtx: () => null,
+      getBasePath: () => dir,
+      isVerbose: () => false,
+      isSessionSwitching: () => false,
+      getCurrentDispatchedModelId: () => null,
+    },
+  );
+
+  const progress = getRoadmapSlicesSync();
+  assert.ok(progress, "progress cache should be populated immediately after updateProgressWidget");
+  assert.deepEqual({
+    done: progress.done,
+    total: progress.total,
+    activeSliceTasks: progress.activeSliceTasks,
+  }, {
+    done: 1,
+    total: 3,
+    activeSliceTasks: { done: 1, total: 1 },
+  });
 });
 
 test("last commit refresh backs off cleanly when base path is not a git repo", (t) => {

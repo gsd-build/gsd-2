@@ -14,7 +14,7 @@ function renderTool(
 		isError: boolean;
 		details?: Record<string, unknown>;
 	},
-	toolDefinition?: { label?: string },
+	toolDefinition?: { label?: string; renderCall?: (...args: any[]) => any; renderResult?: (...args: any[]) => any },
 ): string {
 	const component = new ToolExecutionComponent(
 		toolName,
@@ -36,7 +36,7 @@ function renderToolCollapsed(
 		isError: boolean;
 		details?: Record<string, unknown>;
 	},
-	toolDefinition?: { label?: string },
+	toolDefinition?: { label?: string; renderCall?: (...args: any[]) => any; renderResult?: (...args: any[]) => any },
 ): string {
 	const component = new ToolExecutionComponent(
 		toolName,
@@ -67,6 +67,27 @@ describe("ToolExecutionComponent", () => {
 		assert.match(rendered, /Tool demo\u00b7do_thing/);
 		assert.match(rendered, /Error/);
 		assert.match(rendered, /boom/);
+	});
+
+	test("passes failed result status to custom result renderers", () => {
+		const rendered = renderTool(
+			"gsd_requirement_save",
+			{ id: "R001" },
+			{ content: [{ type: "text", text: "saved" }], isError: true },
+			{
+				label: "Save Requirement",
+				renderResult(result: { isError?: boolean }) {
+					return {
+						render: () => [result.isError ? "custom saw error" : "custom saw success"],
+						invalidate() {},
+					};
+				},
+			},
+		);
+
+		assert.match(rendered, /Error/);
+		assert.match(rendered, /custom saw error/);
+		assert.doesNotMatch(rendered, /custom saw success/);
 	});
 
 	test("renders capitalized Claude Code Bash tool names with bash output instead of generic args JSON", () => {

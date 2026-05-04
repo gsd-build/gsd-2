@@ -15,6 +15,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import type { SessionManager } from './session-manager.js';
 import { isRemoteConfigured, tryRemoteQuestions } from './remote-questions.js';
@@ -355,6 +356,16 @@ interface AskUserQuestionsStructuredContent {
   cancelled: boolean;
 }
 
+interface AskUserQuestionsWriteGateModule {
+  isGateQuestionId(questionId: string): boolean;
+  isDepthConfirmationAnswer(selected: unknown, options?: Array<{ label?: string }>): boolean;
+  setPendingGate(gateId: string, basePath: string): void;
+  markApprovalGateVerified(gateId?: string | null, basePath?: string): void;
+  markDepthVerified(milestoneId?: string | null, basePath?: string): void;
+  clearPendingGate(basePath: string): void;
+  extractDepthVerificationMilestoneId(questionId: string): string | null;
+}
+
 const OTHER_OPTION_LABEL = 'None of the above';
 
 function normalizeAskUserQuestionsNote(value: AskUserQuestionsContentValue | undefined): string {
@@ -499,6 +510,90 @@ interface AskUserQuestionsHandlerDeps {
   elicitInput(params: AskUserQuestionsElicitRequest): Promise<AskUserQuestionsElicitResult>;
   isRemoteConfigured(): boolean;
   tryRemoteQuestions(questions: AskUserQuestion[], signal?: AbortSignal): Promise<RemoteToolResult | null>;
+  writeGate?: AskUserQuestionsWriteGateModule | null;
+  writeGateBasePath?: string;
+}
+
+let askUserQuestionsWriteGateModulePromise: Promise<AskUserQuestionsWriteGateModule | null> | null = null;
+
+function isAskUserQuestionsWriteGateModule(value: unknown): value is AskUserQuestionsWriteGateModule {
+  if (!value || typeof value !== 'object') return false;
+  const module = value as Record<string, unknown>;
+  return (
+    typeof module['isGateQuestionId'] === 'function' &&
+    typeof module['isDepthConfirmationAnswer'] === 'function' &&
+    typeof module['setPendingGate'] === 'function' &&
+    typeof module['markApprovalGateVerified'] === 'function' &&
+    typeof module['markDepthVerified'] === 'function' &&
+    typeof module['clearPendingGate'] === 'function' &&
+    typeof module['extractDepthVerificationMilestoneId'] === 'function'
+  );
+}
+
+async function loadAskUserQuestionsWriteGateModule(): Promise<AskUserQuestionsWriteGateModule | null> {
+  if (!askUserQuestionsWriteGateModulePromise) {
+    askUserQuestionsWriteGateModulePromise = (async () => {
+      const modulePath = process.env.GSD_WORKFLOW_WRITE_GATE_MODULE?.trim();
+      if (!modulePath) return null;
+      try {
+        if (/^[a-z]{2,}:/i.test(modulePath) && !modulePath.startsWith('file:')) {
+          throw new Error('GSD_WORKFLOW_WRITE_GATE_MODULE only supports file: URLs or filesystem paths.');
+        }
+        const baseRoot = process.env.GSD_WORKFLOW_PROJECT_ROOT?.trim() || process.cwd();
+        const specifier = modulePath.startsWith('file:') ? modulePath : pathToFileURL(resolve(baseRoot, modulePath)).href;
+        const loaded = await import(specifier);
+        return isAskUserQuestionsWriteGateModule(loaded) ? loaded : null;
+      } catch (err) {
+        console.warn(`[gsd:mcp] ask_user_questions write-gate integration unavailable: ${formatErrorMessage(err)}`);
+        return null;
+      }
+    })();
+  }
+  return askUserQuestionsWriteGateModulePromise;
+}
+
+function askUserQuestionsWriteGateBasePath(deps: AskUserQuestionsHandlerDeps): string {
+  return deps.writeGateBasePath ?? process.env.GSD_WORKFLOW_PROJECT_ROOT?.trim() ?? process.cwd();
+}
+
+async function resolveAskUserQuestionsWriteGate(deps: AskUserQuestionsHandlerDeps): Promise<AskUserQuestionsWriteGateModule | null> {
+  if (deps.writeGate !== undefined) return deps.writeGate;
+  return loadAskUserQuestionsWriteGateModule();
+}
+
+async function recordAskUserQuestionsPendingGate(
+  questions: AskUserQuestion[],
+  deps: AskUserQuestionsHandlerDeps,
+): Promise<void> {
+  const writeGate = await resolveAskUserQuestionsWriteGate(deps);
+  if (!writeGate) return;
+
+  const basePath = askUserQuestionsWriteGateBasePath(deps);
+  for (const question of questions) {
+    if (writeGate.isGateQuestionId(question.id)) {
+      writeGate.setPendingGate(question.id, basePath);
+    }
+  }
+}
+
+async function recordAskUserQuestionsGateResult(
+  structured: AskUserQuestionsStructuredContent,
+  deps: AskUserQuestionsHandlerDeps,
+): Promise<void> {
+  if (structured.cancelled || !structured.response) return;
+  const writeGate = await resolveAskUserQuestionsWriteGate(deps);
+  if (!writeGate) return;
+
+  const basePath = askUserQuestionsWriteGateBasePath(deps);
+  for (const question of structured.questions) {
+    if (!writeGate.isGateQuestionId(question.id)) continue;
+    const selected = structured.response.answers[question.id]?.selected;
+    if (!writeGate.isDepthConfirmationAnswer(selected, question.options)) continue;
+
+    writeGate.markApprovalGateVerified(question.id, basePath);
+    writeGate.markDepthVerified(writeGate.extractDepthVerificationMilestoneId(question.id), basePath);
+    writeGate.clearPendingGate(basePath);
+  }
 }
 
 function isLocalElicitFallbackError(err: unknown): boolean {
@@ -539,6 +634,7 @@ export async function askUserQuestionsHandler(
   try {
     const validationError = validateAskUserQuestionsPayload(questions);
     if (validationError) return errorContent(validationError);
+    await recordAskUserQuestionsPendingGate(questions, deps);
 
     // Local-first: try the MCP host's elicitation channel (Claude Code,
     // Cursor, etc.) before any configured remote channel. A misconfigured
@@ -556,6 +652,7 @@ export async function askUserQuestionsHandler(
           response: buildAskUserQuestionsRoundResult(questions, elicitation),
           cancelled: false,
         };
+        await recordAskUserQuestionsGateResult(structured, deps);
         return {
           content: [{ type: 'text' as const, text: formatAskUserQuestionsElicitResult(questions, elicitation) }],
           structuredContent: structured as unknown as Record<string, unknown>,
@@ -612,11 +709,12 @@ export async function askUserQuestionsHandler(
               response: details!['response'] as AskUserQuestionsRoundResult,
               cancelled: false,
             }
-          : {
+            : {
               questions,
               response: null,
               cancelled: true,
             };
+        await recordAskUserQuestionsGateResult(acceptedStructured, deps);
         return {
           content: [{ type: 'text' as const, text: remoteResult.content[0]?.text ?? '' }],
           structuredContent: acceptedStructured as unknown as Record<string, unknown>,

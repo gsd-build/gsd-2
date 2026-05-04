@@ -882,6 +882,144 @@ describe('createMcpServer tool registration', () => {
     );
   });
 
+  it('ask_user_questions persists confirmed depth gates for local answers', async () => {
+    const questions = [
+      {
+        id: 'depth_verification_M003_confirm',
+        header: 'Depth Check',
+        question: 'Did I capture the depth right?',
+        options: [
+          { label: 'Yes, you got it (Recommended)', description: 'Continue with the current summary.' },
+          { label: 'Not quite', description: 'I need to clarify the depth further.' },
+        ],
+      },
+    ];
+    const calls: string[] = [];
+    const writeGate = {
+      isGateQuestionId(questionId: string) {
+        return questionId.startsWith('depth_verification_');
+      },
+      isDepthConfirmationAnswer(selected: unknown, options?: Array<{ label?: string }>) {
+        return selected === options?.[0]?.label;
+      },
+      setPendingGate(gateId: string, basePath: string) {
+        calls.push(`pending:${gateId}:${basePath}`);
+      },
+      markApprovalGateVerified(gateId?: string | null, basePath?: string) {
+        calls.push(`approval:${gateId}:${basePath}`);
+      },
+      markDepthVerified(milestoneId?: string | null, basePath?: string) {
+        calls.push(`depth:${milestoneId}:${basePath}`);
+      },
+      clearPendingGate(basePath: string) {
+        calls.push(`clear:${basePath}`);
+      },
+      extractDepthVerificationMilestoneId(questionId: string) {
+        return questionId.match(/_(M\d+)_/)?.[1] ?? null;
+      },
+    };
+
+    const result = await askUserQuestionsHandler(questions, undefined, {
+      async elicitInput() {
+        return {
+          action: 'accept',
+          content: {
+            depth_verification_M003_confirm: 'Yes, you got it (Recommended)',
+          },
+        };
+      },
+      isRemoteConfigured() {
+        return false;
+      },
+      async tryRemoteQuestions() {
+        throw new Error('should not be called');
+      },
+      writeGate,
+      writeGateBasePath: '/tmp/gsd-project',
+    });
+
+    assert.equal('isError' in result && result.isError, false);
+    assert.deepEqual(calls, [
+      'pending:depth_verification_M003_confirm:/tmp/gsd-project',
+      'approval:depth_verification_M003_confirm:/tmp/gsd-project',
+      'depth:M003:/tmp/gsd-project',
+      'clear:/tmp/gsd-project',
+    ]);
+  });
+
+  it('ask_user_questions persists confirmed depth gates for remote answers', async () => {
+    const questions = [
+      {
+        id: 'depth_verification_M003_confirm',
+        header: 'Depth Check',
+        question: 'Did I capture the depth right?',
+        options: [
+          { label: 'Yes, you got it (Recommended)', description: 'Continue with the current summary.' },
+          { label: 'Not quite', description: 'I need to clarify the depth further.' },
+        ],
+      },
+    ];
+    const calls: string[] = [];
+    const writeGate = {
+      isGateQuestionId(questionId: string) {
+        return questionId.startsWith('depth_verification_');
+      },
+      isDepthConfirmationAnswer(selected: unknown, options?: Array<{ label?: string }>) {
+        return selected === options?.[0]?.label;
+      },
+      setPendingGate(gateId: string, basePath: string) {
+        calls.push(`pending:${gateId}:${basePath}`);
+      },
+      markApprovalGateVerified(gateId?: string | null, basePath?: string) {
+        calls.push(`approval:${gateId}:${basePath}`);
+      },
+      markDepthVerified(milestoneId?: string | null, basePath?: string) {
+        calls.push(`depth:${milestoneId}:${basePath}`);
+      },
+      clearPendingGate(basePath: string) {
+        calls.push(`clear:${basePath}`);
+      },
+      extractDepthVerificationMilestoneId(questionId: string) {
+        return questionId.match(/_(M\d+)_/)?.[1] ?? null;
+      },
+    };
+
+    const result = await askUserQuestionsHandler(questions, undefined, {
+      async elicitInput() {
+        return { action: 'cancel' };
+      },
+      isRemoteConfigured() {
+        return true;
+      },
+      async tryRemoteQuestions() {
+        return {
+          content: [{ type: 'text', text: 'remote response' }],
+          details: {
+            response: {
+              endInterview: false,
+              answers: {
+                depth_verification_M003_confirm: {
+                  selected: 'Yes, you got it (Recommended)',
+                  notes: '',
+                },
+              },
+            },
+          },
+        };
+      },
+      writeGate,
+      writeGateBasePath: '/tmp/gsd-project',
+    });
+
+    assert.equal('isError' in result && result.isError, false);
+    assert.deepEqual(calls, [
+      'pending:depth_verification_M003_confirm:/tmp/gsd-project',
+      'approval:depth_verification_M003_confirm:/tmp/gsd-project',
+      'depth:M003:/tmp/gsd-project',
+      'clear:/tmp/gsd-project',
+    ]);
+  });
+
   it('ask_user_questions falls back to remote when local elicitation is cancelled', async () => {
     const questions = [
       {
