@@ -53,7 +53,7 @@ import type { UokGraphNode } from "../uok/contracts.js";
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { normalizeRealPath } from "../paths.js";
-import { decideDispatchClaim, decideEngineDispatch, decideWorkflowLoop } from "./workflow-kernel.js";
+import { decideDispatchClaim, decideEngineDispatch, decideFinalizeResult, decideWorkflowLoop } from "./workflow-kernel.js";
 
 // ── Stuck detection persistence (#3704) ──────────────────────────────────
 // Phase C migration: stuck-state.json deleted in favor of DB-backed
@@ -919,25 +919,29 @@ export async function autoLoop(
         unitType: iterData.unitType,
         unitId: iterData.unitId,
       });
-      if (finalizeResult.action === "break") {
-        const finalizeFailureClass = finalizeResult.reason === "git-closeout-failure"
-          ? "git"
-          : "closeout";
+      const finalizeDecision = decideFinalizeResult(
+        finalizeResult.action === "break"
+          ? { action: "break", reason: finalizeResult.reason }
+          : finalizeResult.action === "continue"
+            ? { action: "continue" }
+            : { action: "next" },
+      );
+      if (finalizeDecision.action === "stop") {
         if (dispatchId !== null) {
           try {
-            markDispatchFailed(dispatchId, { errorSummary: `finalize-break:${finalizeResult.reason ?? "unknown"}` });
+            markDispatchFailed(dispatchId, { errorSummary: finalizeDecision.ledgerErrorSummary });
             dispatchSettled = true;
           } catch (err) {
             debugLog("autoLoop", { phase: "dispatch-ledger-write-failed", error: err instanceof Error ? err.message : String(err) });
           }
         }
-        finishTurn("stopped", finalizeFailureClass, "finalize-break");
+        finishTurn("stopped", finalizeDecision.failureClass, finalizeDecision.turnError);
         break;
       }
-      if (finalizeResult.action === "continue") {
+      if (finalizeDecision.action === "retry") {
         if (dispatchId !== null) {
           try {
-            markDispatchFailed(dispatchId, { errorSummary: "finalize-retry" });
+            markDispatchFailed(dispatchId, { errorSummary: finalizeDecision.ledgerErrorSummary });
             dispatchSettled = true;
           } catch (err) {
             debugLog("autoLoop", { phase: "dispatch-ledger-write-failed", error: err instanceof Error ? err.message : String(err) });

@@ -4,7 +4,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { decideDispatchClaim, decideEngineDispatch, decideWorkflowLoop } from "../auto/workflow-kernel.ts";
+import {
+  decideDispatchClaim,
+  decideEngineDispatch,
+  decideFinalizeResult,
+  decideWorkflowLoop,
+} from "../auto/workflow-kernel.ts";
 
 test("decideWorkflowLoop continues when dispatch preconditions are valid", () => {
   assert.deepEqual(
@@ -123,4 +128,33 @@ test("decideEngineDispatch preserves stop reasons and defaults missing ones", ()
 test("decideEngineDispatch passes through skip and dispatch actions", () => {
   assert.deepEqual(decideEngineDispatch({ action: "skip" }), { action: "skip" });
   assert.deepEqual(decideEngineDispatch({ action: "dispatch" }), { action: "dispatch" });
+});
+
+test("decideFinalizeResult maps break results to stop decisions", () => {
+  assert.deepEqual(
+    decideFinalizeResult({ action: "break", reason: "git-closeout-failure" }),
+    {
+      action: "stop",
+      failureClass: "git",
+      ledgerErrorSummary: "finalize-break:git-closeout-failure",
+      turnError: "finalize-break",
+    },
+  );
+  assert.deepEqual(
+    decideFinalizeResult({ action: "break" }),
+    {
+      action: "stop",
+      failureClass: "closeout",
+      ledgerErrorSummary: "finalize-break:unknown",
+      turnError: "finalize-break",
+    },
+  );
+});
+
+test("decideFinalizeResult maps continue and next results", () => {
+  assert.deepEqual(
+    decideFinalizeResult({ action: "continue" }),
+    { action: "retry", ledgerErrorSummary: "finalize-retry" },
+  );
+  assert.deepEqual(decideFinalizeResult({ action: "next" }), { action: "complete" });
 });

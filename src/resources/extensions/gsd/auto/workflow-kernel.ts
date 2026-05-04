@@ -32,6 +32,24 @@ export type EngineDispatchDecision =
   | { action: "skip" }
   | { action: "stop"; reason: string };
 
+export type FinalizeInput =
+  | { action: "break"; reason?: string }
+  | { action: "continue" }
+  | { action: "next" };
+
+export type FinalizeDecision =
+  | {
+      action: "stop";
+      failureClass: "git" | "closeout";
+      ledgerErrorSummary: string;
+      turnError: "finalize-break";
+    }
+  | {
+      action: "retry";
+      ledgerErrorSummary: "finalize-retry";
+    }
+  | { action: "complete" };
+
 export interface WorkflowLoopInput {
   active: boolean;
   iteration: number;
@@ -113,4 +131,25 @@ export function decideEngineDispatch(input: EngineDispatchInput): EngineDispatch
   }
 
   return { action: "dispatch" };
+}
+
+export function decideFinalizeResult(input: FinalizeInput): FinalizeDecision {
+  if (input.action === "break") {
+    const reason = input.reason ?? "unknown";
+    return {
+      action: "stop",
+      failureClass: reason === "git-closeout-failure" ? "git" : "closeout",
+      ledgerErrorSummary: `finalize-break:${reason}`,
+      turnError: "finalize-break",
+    };
+  }
+
+  if (input.action === "continue") {
+    return {
+      action: "retry",
+      ledgerErrorSummary: "finalize-retry",
+    };
+  }
+
+  return { action: "complete" };
 }
