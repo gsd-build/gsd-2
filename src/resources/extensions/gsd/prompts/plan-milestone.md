@@ -51,7 +51,7 @@ Then:
 2. {{skillActivation}}
 3. Create only as many demoable vertical slices as the work genuinely needs.
 4. Order by risk, high-risk first.
-5. Call `gsd_plan_milestone` to persist milestone fields, slice rows, and **horizontal checklist** through the DB-backed path. Fill the checklist with cross-cutting concerns considered during planning: requirements re-read, decisions re-evaluated, graceful shutdown, revenue paths, auth boundary, shared resources, reconnection. Omit for trivial milestones. Do **not** write `{{outputPath}}`, `ROADMAP.md`, or other planning artifacts manually; the tool owns rendering and persistence.
+5. Call `gsd_plan_milestone` to persist milestone fields, slice rows, and **Horizontal Checklist** through the DB-backed path. Fill the checklist with cross-cutting concerns considered during planning: requirements re-read, decisions re-evaluated, graceful shutdown, revenue paths, auth boundary, shared resources, reconnection. Omit for trivial milestones. Do **not** write `{{outputPath}}`, `ROADMAP.md`, or other planning artifacts manually; the tool owns rendering and persistence.
 6. If planning produced structural decisions (slice ordering, technology choices, scope exclusions), call `gsd_decision_save` for each; the tool assigns IDs and regenerates `.gsd/DECISIONS.md`.
 
 ## Requirement Mapping Rules
