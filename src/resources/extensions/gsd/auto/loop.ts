@@ -83,6 +83,7 @@ import {
   runUnitPhaseViaContract,
   type DispatchContract,
 } from "./workflow-unit-dispatch.js";
+import { handleCustomEngineDispatchOutcome } from "./workflow-custom-engine-dispatch-outcome.js";
 import { buildCustomEngineIterationData } from "./workflow-custom-engine-iteration.js";
 import { handleCustomEngineVerifyRetry } from "./workflow-custom-engine-retry.js";
 import {
@@ -436,12 +437,14 @@ export async function autoLoop(
           action: dispatch.action,
           reason: dispatch.reason,
         });
-
-        if (engineDispatchDecision.action === "stop") {
-          await deps.stopAuto(ctx, pi, engineDispatchDecision.reason);
-          break;
-        }
-        if (engineDispatchDecision.action === "skip") {
+        const dispatchFlow = await handleCustomEngineDispatchOutcome({
+          decision: engineDispatchDecision,
+          deps: {
+            stopAuto: reason => deps.stopAuto(ctx, pi, reason),
+          },
+        });
+        if (dispatchFlow.action === "break") break;
+        if (dispatchFlow.action === "continue") {
           continue;
         }
 
