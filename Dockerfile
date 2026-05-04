@@ -38,7 +38,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ARG TARBALL
 COPY ${TARBALL} /tmp/gsd-pi.tgz
-RUN npm install -g /tmp/gsd-pi.tgz && rm /tmp/gsd-pi.tgz
+# `npm install -g` of a local tarball is more brittle than installing
+# from the registry: postinstall hooks may exit non-zero when network
+# resources aren't reachable, and the bin shim can end up off PATH
+# depending on the npm prefix. Run with --ignore-scripts to skip
+# postinstall (we don't need any of its work for `--version`/`--help`
+# smoke), and verify the bin shim is present + exportable on PATH so
+# this fails loudly at build time rather than silently at run time.
+RUN npm install -g --ignore-scripts /tmp/gsd-pi.tgz \
+    && rm /tmp/gsd-pi.tgz \
+    && which gsd \
+    && gsd --version
 
 WORKDIR /workspace
 
