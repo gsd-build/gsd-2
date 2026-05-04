@@ -43,6 +43,51 @@ describe("my feature", () => {
 });
 ```
 
+### PTY-driven tests (interactive REPL, slash commands)
+
+Use `gsdPty` when the flow under test requires an interactive TTY — slash
+commands, the REPL prompt, anything that calls `process.stdin.isTTY` or
+needs ANSI rendering. Plain `gsdSync` / `gsdAsync` use pipes and the child
+will detect non-interactive mode.
+
+```ts
+import { describe, test } from "node:test";
+import assert from "node:assert/strict";
+import { createTmpProject, gsdPty } from "./_shared/index.ts";
+
+test("drives /hotkeys and exits cleanly", async (t) => {
+  const project = createTmpProject({ git: true, gsdSkeleton: true });
+  t.after(project.cleanup);
+
+  const pty = gsdPty([], { cwd: project.dir });
+  t.after(() => pty.dispose());
+
+  // Wait for first paint, then idle so keystrokes don't race startup.
+  await pty.waitForOutput((s) => s.length > 200);
+  await pty.waitForIdle(400);
+
+  pty.send("/hotkeys");
+  await pty.waitForOutput((s) => /ctrl\+/i.test(s));
+
+  pty.send("/exit");
+  const { exitCode } = await pty.waitForExit();
+  assert.equal(exitCode, 0);
+});
+```
+
+Notes:
+
+- `gsdPty` reuses the same env-stripping, isolated HOME, and canonical
+  TMPDIR conventions as `gsdAsync`. The only difference is the transport.
+- Predicates run against `cleanOutput()` — the full ANSI-stripped buffer.
+  Don't strip per-chunk; chunk boundaries can split escape sequences.
+- `.send(input)` auto-appends platform EOL. For chords like Ctrl-D (EOF)
+  use `.send(CTRL_D, { raw: true })`.
+- `node-pty@1.1.0` ships prebuilds for darwin and win32 (N-API → ABI-agnostic
+  on Node 22+). Linux falls back to `node-gyp rebuild` from source —
+  `ubuntu-latest` runners have python3 + build-essential pre-installed,
+  so this works without extra setup, just adds a few seconds to install.
+
 ## Harness contracts (`_shared/`)
 
 - **`spawn.ts`** — `gsdSync` / `gsdAsync` wrappers. Both:
@@ -60,6 +105,10 @@ describe("my feature", () => {
 - **`artifacts.ts`** — `artifactsFor(testSlug)` returns `{ dir, write }`.
   Use it to dump logs/screenshots/traces from a test that's about to fail
   so CI can upload them.
+- **`pty.ts`** — `gsdPty(args, env, opts)` for interactive REPL flows.
+  Returns `{ send, waitForOutput, waitForIdle, waitForExit, kill, dispose,
+  output, cleanOutput }`. Default 120×40, configurable via `opts.cols/rows`.
+  Inherits all env-isolation conventions from `spawn.ts`.
 
 ## Anti-patterns to avoid
 
@@ -81,5 +130,7 @@ describe("my feature", () => {
 - ⏳ Phase 2 (real-process MCP server e2e)
 - ⏳ Phase 6 (native TS↔Rust ABI smoke)
 - ⏳ Phase 7 (migration smoke)
+- ✅ Phase 9 (slash command via PTY)
+- ✅ Phase E (`/gsd undo --force` via PTY)
 
 See the e2e remediation plan in the parent PR description for the full sequence.

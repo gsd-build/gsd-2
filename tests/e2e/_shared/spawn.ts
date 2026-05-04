@@ -57,6 +57,14 @@ export interface E2eEnv {
  * the runner's actual home.
  */
 let _isolatedHome: string | undefined;
+/**
+ * Public accessor for the per-process isolated HOME used by every spawn.
+ * Tests that need to seed `~/.gsd/...` files (e.g. onboarding-complete
+ * sentinel for PTY-driven interactive flows) read this to know the path.
+ */
+export function getIsolatedHome(): string {
+	return isolatedHome();
+}
 function isolatedHome(): string {
 	if (_isolatedHome) return _isolatedHome;
 	const dir = join(canonicalTmpdir(), `gsd-e2e-home-${process.pid}-${Date.now()}`);
