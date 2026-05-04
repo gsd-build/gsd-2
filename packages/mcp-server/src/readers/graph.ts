@@ -644,8 +644,29 @@ export async function writeSnapshot(gsdRoot: string): Promise<void> {
     return;
   }
   const snapshot = { ...graph, snapshotAt: new Date().toISOString() };
+  const final = snapshotPath(gsdRoot);
+  const tmp = final + '.tmp';
+  const content = Buffer.from(JSON.stringify(snapshot, null, 2), 'utf-8');
 
-  writeFileSync(snapshotPath(gsdRoot), JSON.stringify(snapshot, null, 2), 'utf-8');
+  const fd = openSync(tmp, 'w');
+  try {
+    let offset = 0;
+    while (offset < content.length) {
+      offset += writeSync(fd, content, offset, content.length - offset);
+    }
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+
+  renameSync(tmp, final);
+
+  const dirFd = openSync(dir, 'r');
+  try {
+    fsyncSync(dirFd);
+  } finally {
+    closeSync(dirFd);
+  }
 }
 
 // ---------------------------------------------------------------------------
