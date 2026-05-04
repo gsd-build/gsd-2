@@ -273,11 +273,13 @@ function gitPathspecForWorktreePath(basePath: string, targetPath: string): strin
     base = realpathSync.native(basePath);
   } catch {
     /* keep original */
+    void base;
   }
   try {
     target = realpathSync.native(targetPath);
   } catch {
     /* keep original */
+    void target;
   }
 
   const rel = relative(base, target);
