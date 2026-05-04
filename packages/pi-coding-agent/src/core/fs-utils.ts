@@ -10,7 +10,10 @@ export function atomicWriteFileSync(filePath: string, content: string | Buffer, 
 	const buf = Buffer.isBuffer(content) ? content : Buffer.from(content, encoding ?? "utf8");
 	const fd = openSync(tmpPath, "w");
 	try {
-		writeSync(fd, buf);
+		let offset = 0;
+		while (offset < buf.length) {
+			offset += writeSync(fd, buf, offset, buf.length - offset);
+		}
 		fsyncSync(fd);
 	} finally {
 		closeSync(fd);

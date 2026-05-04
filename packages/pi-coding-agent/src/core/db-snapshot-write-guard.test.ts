@@ -17,23 +17,51 @@ function collectTsFiles(dir: string, out: string[] = []): string[] {
 	return out;
 }
 
+function stripComments(src: string): string {
+	return src
+		.replace(/\/\*[\s\S]*?\*\//g, "")
+		.replace(/^\s*\/\/.*$/gm, "");
+}
+
 test("all sql.js db.export() persistence uses atomic snapshot helper", () => {
 	const srcRoot = join(process.cwd(), "packages", "pi-coding-agent", "src");
 	const files = collectTsFiles(srcRoot);
 
 	for (const file of files) {
 		const src = readFileSync(file, "utf-8");
-		if (!src.includes("db.export(")) continue;
+		const code = stripComments(src);
+		if (!code.includes("db.export(")) continue;
+
+		const directExportWrite = /writeFileSync\([\s\S]{0,200}?db\.export\(/m;
+		assert.doesNotMatch(
+			code,
+			directExportWrite,
+			`${file} writes db.export() directly via writeFileSync(); use atomicWriteDbSnapshotSync()`,
+		);
 
 		assert.match(
-			src,
+			code,
 			/atomicWriteDbSnapshotSync\(/,
 			`${file} uses db.export() but does not call atomicWriteDbSnapshotSync()`,
 		);
-		assert.doesNotMatch(
-			src,
-			/writeFileSync\([^\n]*dbPath/,
-			`${file} appears to write DB path directly; use atomicWriteDbSnapshotSync()`,
-		);
+
+		const exportAssigned = /const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*db\.export\(\s*\)\s*;/m;
+		const match = code.match(exportAssigned);
+		if (match) {
+			const varName = match[1];
+			const escape = varName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+			const badWrite = new RegExp(`writeFileSync\\([\\s\\S]{0,240}?\\b${escape}\\b`, "m");
+			assert.doesNotMatch(
+				code,
+				badWrite,
+				`${file} writes db.export() variable ${varName} via writeFileSync(); use atomicWriteDbSnapshotSync()`,
+			);
+			const goodWrite = new RegExp(`atomicWriteDbSnapshotSync\\([\\s\\S]{0,120}?\\b${escape}\\b`, "m");
+			assert.match(
+				code,
+				goodWrite,
+				`${file} must pass db.export() variable ${varName} to atomicWriteDbSnapshotSync()`,
+			);
+		}
 	}
 });
