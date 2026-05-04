@@ -315,7 +315,7 @@ async function main() {
 
   // Copy root dist/ into dist-test/dist/ — some tests compute projectRoot as
   // 3 levels up from dist-test/src/tests/ which lands at dist-test/, then
-  // import from dist/mcp-server.js etc.
+  // import from dist/mcp/mcp-server.js etc.
   const rootDistDir = join(ROOT, 'dist');
   const distTestDistDir = join(DIST_TEST_DIR, 'dist');
   await copyAssets(rootDistDir, distTestDistDir);

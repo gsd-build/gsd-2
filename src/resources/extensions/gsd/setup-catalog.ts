@@ -35,7 +35,7 @@ export interface OnboardingStepDef {
  * To add a new step:
  *   1. Append here (or insert at the right position).
  *   2. Bump FLOW_VERSION in onboarding-state.ts so existing users get re-prompted.
- *   3. Wire its CLI runner in src/onboarding.ts (and handlers/onboarding.ts for --step).
+ *   3. Wire its CLI runner in src/onboarding/onboarding.ts (and handlers/onboarding.ts for --step).
  */
 export const ONBOARDING_STEPS: readonly OnboardingStepDef[] = [
   { id: "llm",       label: "LLM provider & auth",      required: true,  hint: "Sign in or paste an API key" },

@@ -2,7 +2,7 @@
  * Shared GSD block-letter ASCII logo.
  *
  * Single source of truth — imported by:
- *   - scripts/postinstall.js (via dist/logo.js)
+ *   - scripts/postinstall.js (via dist/cli/logo.js)
  *   - src/loader.ts (via ./logo.js)
  */
 

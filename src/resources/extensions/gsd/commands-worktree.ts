@@ -1,6 +1,6 @@
 // GSD-2 — In-TUI handler for /gsd worktree commands (list, merge, clean, remove).
 //
-// Mirrors the CLI subcommands in src/worktree-cli.ts but emits results via
+// Mirrors the CLI subcommands in src/worktrees/worktree-cli.ts but emits results via
 // ctx.ui.notify() instead of writing colored output to stderr. Reuses the
 // same extension modules (worktree-manager, native-git-bridge, etc.) so the
 // behavior is identical to the CLI surface.

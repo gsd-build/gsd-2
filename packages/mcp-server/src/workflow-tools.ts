@@ -709,7 +709,7 @@ function adaptExecutorResult(result: unknown): unknown {
  * or arrays. Used to gate `structuredContent` forwarding so the MCP transport
  * receives only true JSON objects (the protocol contract).
  *
- * Mirrored in `src/mcp-server.ts` for the agent-tool registry path's
+ * Mirrored in `src/mcp/mcp-server.ts` for the agent-tool registry path's
  * structured-content gate. Keep both copies in sync if the contract definition
  * needs to evolve. See #4477 review.
  */

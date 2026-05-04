@@ -430,7 +430,7 @@ async function writeContractsSurfaceFixtures(root: string): Promise<void> {
     "packages/pi-coding-agent/src/modes/rpc/rpc-types.ts",
     "packages/rpc-client/src/rpc-types.ts",
     "packages/mcp-server/src/types.ts",
-    "src/web/bridge-service.ts",
+    "src/web-services/bridge-service.ts",
     "web/lib/gsd-workspace-store.tsx",
     "vscode-extension/src/gsd-client.ts",
   ];

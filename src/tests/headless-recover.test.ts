@@ -4,7 +4,7 @@
 // `gsd headless recover` available to non-TTY callers (CI, automation, the
 // live-regression suite). The headless dispatcher previously had no
 // `recover` case — the only path was the interactive slash-command
-// (`/gsd recover`), which is gated behind a TTY check (src/cli.ts
+// (`/gsd recover`), which is gated behind a TTY check (src/cli/cli.ts
 // printNonTtyErrorAndExit) and rejected piped invocations.
 //
 // The headless wiring composes ensureDbOpen + clearEngineHierarchy +
