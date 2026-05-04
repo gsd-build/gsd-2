@@ -1449,6 +1449,22 @@ function stripStructuredContentPseudoBlocks(content: unknown): unknown {
 	return content.filter((item) => !isStructuredContentPseudoBlock(item));
 }
 
+const SENSITIVE_FILE_BLOCK_PATTERN = /requested permissions to (?:edit|write|create) .*sensitive file/i;
+
+function isSensitiveFilePermissionBlock(content: ExternalToolResultContentBlock[]): boolean {
+	const text = content
+		.filter((item) => item.type === "text" && typeof item.text === "string")
+		.map((item) => item.text)
+		.join("\n");
+	return SENSITIVE_FILE_BLOCK_PATTERN.test(text);
+}
+
+function normalizeExternalToolResult(result: ExternalToolResultPayload): ExternalToolResultPayload {
+	if (result.isError) return result;
+	if (!isSensitiveFilePermissionBlock(result.content)) return result;
+	return { ...result, isError: true };
+}
+
 /** Extract tool result payloads from an SDK synthetic user message, keyed by tool-use ID. */
 export function extractToolResultsFromSdkUserMessage(message: SDKUserMessage): Array<{
 	toolUseId: string;
@@ -1469,14 +1485,12 @@ export function extractToolResultsFromSdkUserMessage(message: SDKUserMessage): A
 		if (!toolUseId || seen.has(toolUseId)) continue;
 		seen.add(toolUseId);
 
-		extracted.push({
-			toolUseId,
-			result: {
-				content: normalizeToolResultContent(stripStructuredContentPseudoBlocks(block.content)),
-				details: extractStructuredDetailsFromBlock(block),
-				isError: block.is_error === true,
-			},
+		const result = normalizeExternalToolResult({
+			content: normalizeToolResultContent(stripStructuredContentPseudoBlocks(block.content)),
+			details: extractStructuredDetailsFromBlock(block),
+			isError: block.is_error === true,
 		});
+		extracted.push({ toolUseId, result });
 	}
 
 	if (extracted.length === 0) {
@@ -1485,14 +1499,12 @@ export function extractToolResultsFromSdkUserMessage(message: SDKUserMessage): A
 			const toolResult = fallback as Record<string, unknown>;
 			const toolUseId = typeof toolResult.tool_use_id === "string" ? toolResult.tool_use_id : "";
 			if (toolUseId) {
-				extracted.push({
-					toolUseId,
-					result: {
-						content: normalizeToolResultContent(stripStructuredContentPseudoBlocks(toolResult.content)),
-						details: extractStructuredDetailsFromBlock(toolResult),
-						isError: toolResult.is_error === true,
-					},
+				const result = normalizeExternalToolResult({
+					content: normalizeToolResultContent(stripStructuredContentPseudoBlocks(toolResult.content)),
+					details: extractStructuredDetailsFromBlock(toolResult),
+					isError: toolResult.is_error === true,
 				});
+				extracted.push({ toolUseId, result });
 			}
 		}
 	}

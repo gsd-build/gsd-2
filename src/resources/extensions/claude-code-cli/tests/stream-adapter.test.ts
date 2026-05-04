@@ -592,6 +592,29 @@ describe("stream-adapter — Claude Code external tool results", () => {
 		]);
 	});
 
+	test("extractToolResultsFromSdkUserMessage marks sensitive-file permission blocks as errors", () => {
+		const message: SDKUserMessage = {
+			type: "user",
+			session_id: "sess-1",
+			parent_tool_use_id: "tool-edit-1",
+			message: {
+				role: "user",
+				content: [
+					{
+						type: "tool_result",
+						tool_use_id: "tool-edit-1",
+						content: "Claude requested permissions to edit .claude/mcp-tools/.env which is a sensitive file.",
+						is_error: false,
+					},
+				],
+			},
+		};
+
+		const results = extractToolResultsFromSdkUserMessage(message);
+		assert.equal(results.length, 1);
+		assert.equal(results[0].result.isError, true, "sensitive-path blocks must be treated as errors");
+	});
+
 	test("buildFinalAssistantContent preserves intermediate tool calls with attached external results", () => {
 		const finalContent = buildFinalAssistantContent({
 			intermediateToolBlocks: [
