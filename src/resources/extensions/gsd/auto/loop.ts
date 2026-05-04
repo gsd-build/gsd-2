@@ -81,6 +81,7 @@ import { completeWorkflowIteration } from "./workflow-iteration-completion.js";
 import { createWorkflowJournalReporter } from "./workflow-journal-reporter.js";
 import { createWorkflowPhaseReporter } from "./workflow-phase-reporter.js";
 import { createWorkflowTurnReporter } from "./workflow-turn-reporter.js";
+import { dequeueSidecarItem } from "./workflow-sidecar-queue.js";
 
 // ── Stuck detection persistence (#3704) ──────────────────────────────────
 // Phase C migration: stuck-state.json deleted in favor of DB-backed
@@ -513,28 +514,14 @@ export async function autoLoop(
       const uokFlags = resolveUokFlags(prefs);
 
       // ── Check sidecar queue before deriveState ──
-      let sidecarItem: SidecarItem | undefined;
-      if (s.sidecarQueue.length > 0) {
-        if (uokFlags.executionGraph && s.sidecarQueue.length > 1) {
-          try {
-            s.sidecarQueue = await scheduleSidecarQueue(s.sidecarQueue);
-          } catch (err) {
-            logWarning("dispatch", `sidecar queue scheduling failed: ${err instanceof Error ? err.message : String(err)}`);
-          }
-        }
-        sidecarItem = s.sidecarQueue.shift()!;
-        debugLog("autoLoop", {
-          phase: "sidecar-dequeue",
-          kind: sidecarItem.kind,
-          unitType: sidecarItem.unitType,
-          unitId: sidecarItem.unitId,
-        });
-        journalReporter.emit("sidecar-dequeue", {
-          kind: sidecarItem.kind,
-          unitType: sidecarItem.unitType,
-          unitId: sidecarItem.unitId,
-        });
-      }
+      const sidecarItem = await dequeueSidecarItem({
+        queue: s.sidecarQueue,
+        executionGraphEnabled: uokFlags.executionGraph,
+        scheduleQueue: scheduleSidecarQueue,
+        warnSchedulingFailure: message => logWarning("dispatch", `sidecar queue scheduling failed: ${message}`),
+        logDequeue: payload => debugLog("autoLoop", { phase: "sidecar-dequeue", ...payload }),
+        emitDequeue: payload => journalReporter.emit("sidecar-dequeue", payload),
+      });
 
       const sessionLockBase = deps.lockBase();
       if (sessionLockBase) {
