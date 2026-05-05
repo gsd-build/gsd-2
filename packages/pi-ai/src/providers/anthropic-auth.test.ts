@@ -76,3 +76,19 @@ test("createClient uses resolveAnthropicBaseUrl for all auth paths (#4140)", () 
 		"all createClient branches should pass baseURL through resolveAnthropicBaseUrl",
 	);
 });
+
+test("createClient applies provider-specific header override for kimi-coding UA (#4640)", () => {
+	const source = readFileSync(join(__dirname, "..", "..", "src", "providers", "anthropic.ts"), "utf-8");
+	assert.ok(
+		source.includes('if (provider === "kimi-coding")'),
+		"anthropic provider adapter should special-case kimi-coding",
+	);
+	assert.ok(
+		source.includes('{ "User-Agent": "gsd-pi" }'),
+		"kimi-coding should default to a neutral User-Agent",
+	);
+	assert.ok(
+		source.includes("defaultProviderHeaders(model.provider)"),
+		"provider-specific headers should be merged into defaultHeaders",
+	);
+});

@@ -71,6 +71,15 @@ function hasBearerAuthorizationHeader(model: Model<"anthropic-messages">): boole
 	return typeof authHeader === "string" && authHeader.trim().toLowerCase().startsWith("bearer ");
 }
 
+function defaultProviderHeaders(provider: Model<"anthropic-messages">["provider"]): Record<string, string> | undefined {
+	// Kimi /coding rejects Anthropic SDK's stock User-Agent prefix with a
+	// misleading 429 "engine overloaded". Use a neutral UA by default.
+	if (provider === "kimi-coding") {
+		return { "User-Agent": "gsd-pi" };
+	}
+	return undefined;
+}
+
 async function createClient(
 	model: Model<"anthropic-messages">,
 	apiKey: string,
@@ -137,6 +146,7 @@ async function createClient(
 				"anthropic-dangerous-direct-browser-access": "true",
 				...(betaFeatures.length > 0 ? { "anthropic-beta": betaFeatures.join(",") } : {}),
 			},
+			defaultProviderHeaders(model.provider),
 			model.headers,
 			optionsHeaders,
 		),
