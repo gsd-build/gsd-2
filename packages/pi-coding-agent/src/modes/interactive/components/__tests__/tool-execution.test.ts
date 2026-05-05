@@ -100,7 +100,7 @@ describe("ToolExecutionComponent", () => {
 		assert.deepEqual(component.getRollupPhase()?.label, "Requirement writes");
 	});
 
-	test("does not expose phase metadata for output-bearing tools", () => {
+	test("exposes phase metadata for collapsed output-bearing generic tools", () => {
 		const component = new ToolExecutionComponent(
 			"mcp__demo__do_thing",
 			{ ok: true },
@@ -110,7 +110,7 @@ describe("ToolExecutionComponent", () => {
 		);
 		component.updateResult({ content: [{ type: "text", text: "important output" }], isError: false });
 
-		assert.equal(component.getRollupPhase(), null);
+		assert.deepEqual(component.getRollupPhase()?.label, "Other tool actions");
 	});
 
 	test("renders phase-based summaries for rolled-up tool executions", () => {
