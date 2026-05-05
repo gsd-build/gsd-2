@@ -11,12 +11,14 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
   };
   private readonly deps: AutoOrchestratorDeps;
   private lastAdvanceKey: string | null = null;
+  private sessionContext: AutoSessionContext | null = null;
 
   public constructor(deps: AutoOrchestratorDeps) {
     this.deps = deps;
   }
 
-  public async start(_sessionContext: AutoSessionContext): Promise<AutoAdvanceResult> {
+  public async start(sessionContext: AutoSessionContext): Promise<AutoAdvanceResult> {
+    this.sessionContext = sessionContext;
     this.lastAdvanceKey = null;
     this.status.phase = "running";
     this.bumpTransition();
@@ -26,6 +28,7 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
   }
 
   public async advance(): Promise<AutoAdvanceResult> {
+    let recoveryUnit: { unitType: string; unitId: string } | undefined;
     try {
       await this.deps.runtime.ensureLockOwnership();
       const gate = await this.deps.health.preAdvanceGate();
@@ -36,9 +39,25 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
         return blocked;
       }
 
-      const decision = await this.deps.dispatch.decideNextUnit();
+      const reconciliation = await this.deps.stateReconciliation.reconcileBeforeDispatch({
+        basePath: this.sessionContext?.basePath,
+      });
+      if (!reconciliation.allow) {
+        const blocked: AutoAdvanceResult = {
+          kind: "blocked",
+          reason: reconciliation.reason ?? "state reconciliation blocked",
+          stateSnapshot: reconciliation.stateSnapshot,
+        };
+        await this.deps.runtime.journalTransition({ name: "advance-blocked", reason: blocked.reason });
+        await this.deps.health.postAdvanceRecord(blocked);
+        return blocked;
+      }
+
+      const decision = await this.deps.dispatch.decideNextUnit({
+        stateSnapshot: reconciliation.stateSnapshot,
+      });
       if (!decision) {
-        const stopped: AutoAdvanceResult = { kind: "stopped", reason: "no remaining units" };
+        const stopped: AutoAdvanceResult = { kind: "stopped", reason: "no remaining units", stateSnapshot: reconciliation.stateSnapshot };
         this.status.phase = "stopped";
         this.status.activeUnit = undefined;
         this.lastAdvanceKey = null;
@@ -48,6 +67,7 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
         return stopped;
       }
 
+      recoveryUnit = { unitType: decision.unitType, unitId: decision.unitId };
       const nextKey = `${decision.unitType}:${decision.unitId}`;
       if (this.lastAdvanceKey === nextKey) {
         const blocked: AutoAdvanceResult = { kind: "blocked", reason: "idempotent advance: unit already active" };
@@ -61,6 +81,29 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
         return blocked;
       }
 
+      const toolContract = await this.deps.toolContract.compileUnitToolContract({
+        unitType: decision.unitType,
+        unitId: decision.unitId,
+        preconditions: decision.preconditions,
+      });
+      if (!toolContract.allow) {
+        const blocked: AutoAdvanceResult = {
+          kind: "blocked",
+          reason: toolContract.reason ?? "tool contract blocked",
+          stateSnapshot: reconciliation.stateSnapshot,
+        };
+        await this.deps.runtime.journalTransition({
+          name: "advance-blocked",
+          reason: blocked.reason,
+          unitType: decision.unitType,
+          unitId: decision.unitId,
+        });
+        await this.deps.health.postAdvanceRecord(blocked);
+        return blocked;
+      }
+
+      await this.deps.worktree.prepareForUnit(decision.unitType, decision.unitId);
+
       this.status.activeUnit = { unitType: decision.unitType, unitId: decision.unitId };
       this.status.phase = "running";
       this.lastAdvanceKey = nextKey;
@@ -72,17 +115,17 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
         unitType: decision.unitType,
         unitId: decision.unitId,
       });
-      await this.deps.worktree.prepareForUnit(decision.unitType, decision.unitId);
       await this.deps.worktree.syncAfterUnit(decision.unitType, decision.unitId);
 
-      const advanced: AutoAdvanceResult = { kind: "advanced" };
+      const advanced: AutoAdvanceResult = { kind: "advanced", stateSnapshot: reconciliation.stateSnapshot };
       await this.deps.health.postAdvanceRecord(advanced);
       return advanced;
     } catch (error) {
+      const unit = recoveryUnit ?? this.status.activeUnit;
       const recovery = await this.deps.recovery.classifyAndRecover({
         error,
-        unitType: this.status.activeUnit?.unitType,
-        unitId: this.status.activeUnit?.unitId,
+        unitType: unit?.unitType,
+        unitId: unit?.unitId,
       });
       const result: AutoAdvanceResult = recovery.action === "retry"
         ? { kind: "paused", reason: recovery.reason }

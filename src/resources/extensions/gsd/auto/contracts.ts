@@ -29,13 +29,36 @@ export interface AutoOrchestrationModule {
   getStatus(): AutoStatus;
 }
 
+export interface StateReconciliationAdapter {
+  reconcileBeforeDispatch(input: {
+    basePath?: string;
+  }): Promise<{
+    allow: boolean;
+    reason?: string;
+    stateSnapshot?: GSDState;
+  }>;
+}
+
 export interface DispatchAdapter {
-  decideNextUnit(): Promise<{
+  decideNextUnit(input: {
+    stateSnapshot?: GSDState;
+  }): Promise<{
     unitType: string;
     unitId: string;
     reason: string;
     preconditions: string[];
   } | null>;
+}
+
+export interface ToolContractAdapter {
+  compileUnitToolContract(input: {
+    unitType: string;
+    unitId: string;
+    preconditions: string[];
+  }): Promise<{
+    allow: boolean;
+    reason?: string;
+  }>;
 }
 
 export interface RecoveryAdapter {
@@ -78,7 +101,9 @@ export interface NotificationAdapter {
 }
 
 export interface AutoOrchestratorDeps {
+  stateReconciliation: StateReconciliationAdapter;
   dispatch: DispatchAdapter;
+  toolContract: ToolContractAdapter;
   recovery: RecoveryAdapter;
   worktree: WorktreeAdapter;
   health: HealthAdapter;

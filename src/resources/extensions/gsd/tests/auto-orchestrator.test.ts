@@ -3,15 +3,45 @@ import assert from "node:assert/strict";
 
 import { createAutoOrchestrator } from "../auto/orchestrator.js";
 import type { AutoOrchestratorDeps } from "../auto/contracts.js";
+import type { GSDState } from "../types.js";
+
+function makeState(): GSDState {
+  return {
+    activeMilestone: { id: "M01", title: "Milestone" },
+    activeSlice: null,
+    activeTask: null,
+    phase: "executing",
+    recentDecisions: [],
+    blockers: [],
+    nextAction: "execute-task",
+    registry: [],
+  };
+}
 
 function makeDeps(overrides: Partial<AutoOrchestratorDeps> = {}): { deps: AutoOrchestratorDeps; calls: string[] } {
   const calls: string[] = [];
 
   const deps: AutoOrchestratorDeps = {
+    stateReconciliation: {
+      async reconcileBeforeDispatch(input) {
+        calls.push(`state.reconcile:${input.basePath ?? "none"}`);
+        return { allow: true, stateSnapshot: makeState() };
+      },
+    },
     dispatch: {
-      async decideNextUnit() {
+      async decideNextUnit(input) {
         calls.push("dispatch.decide");
-        return { unitType: "execute-task", unitId: "T01", reason: "ready", preconditions: [] };
+        assert.equal(input.stateSnapshot?.activeMilestone?.id, "M01");
+        return { unitType: "execute-task", unitId: "T01", reason: "ready", preconditions: ["repo-clean"] };
+      },
+    },
+    toolContract: {
+      async compileUnitToolContract(input) {
+        calls.push("toolContract.compile");
+        assert.equal(input.unitType, "execute-task");
+        assert.equal(input.unitId, "T01");
+        assert.ok(Array.isArray(input.preconditions));
+        return { allow: true };
       },
     },
     recovery: {
@@ -43,6 +73,28 @@ function makeDeps(overrides: Partial<AutoOrchestratorDeps> = {}): { deps: AutoOr
 
   return { deps: { ...deps, ...overrides }, calls };
 }
+
+test("advance() runs the explicit invariant pipeline before journaling transition", async () => {
+  const { deps, calls } = makeDeps();
+  const orchestrator = createAutoOrchestrator(deps);
+
+  const result = await orchestrator.start({ basePath: "/tmp/project", trigger: "manual" });
+
+  assert.equal(result.kind, "advanced");
+  assert.deepEqual(calls, [
+    "journal:start",
+    "notify:start",
+    "runtime.lock",
+    "health.pre",
+    "state.reconcile:/tmp/project",
+    "dispatch.decide",
+    "toolContract.compile",
+    "worktree.prepare",
+    "journal:advance",
+    "worktree.sync",
+    "health.post",
+  ]);
+});
 
 test("start() advances and records active unit", async () => {
   const { deps, calls } = makeDeps();
@@ -87,6 +139,46 @@ test("advance() stops when dispatch has no next unit", async () => {
   assert.equal(orchestrator.getStatus().phase, "stopped");
 });
 
+test("advance() blocks before dispatch when state reconciliation denies progress", async () => {
+  const { deps, calls } = makeDeps({
+    stateReconciliation: {
+      async reconcileBeforeDispatch() {
+        calls.push("state.reconcile");
+        return { allow: false, reason: "db-disk-drift", stateSnapshot: makeState() };
+      },
+    },
+  });
+  const orchestrator = createAutoOrchestrator(deps);
+
+  const result = await orchestrator.advance();
+
+  assert.equal(result.kind, "blocked");
+  assert.equal(result.reason, "db-disk-drift");
+  assert.deepEqual(result.stateSnapshot, makeState());
+  assert.ok(!calls.includes("dispatch.decide"));
+  assert.ok(!calls.includes("toolContract.compile"));
+  assert.ok(!calls.includes("worktree.prepare"));
+});
+
+test("advance() blocks before worktree preparation when tool contract rejects unit", async () => {
+  const { deps, calls } = makeDeps({
+    toolContract: {
+      async compileUnitToolContract() {
+        calls.push("toolContract.compile");
+        return { allow: false, reason: "tool-policy-drift" };
+      },
+    },
+  });
+  const orchestrator = createAutoOrchestrator(deps);
+
+  const result = await orchestrator.advance();
+
+  assert.equal(result.kind, "blocked");
+  assert.equal(result.reason, "tool-policy-drift");
+  assert.equal(orchestrator.getStatus().activeUnit, undefined);
+  assert.ok(!calls.includes("worktree.prepare"));
+});
+
 test("advance() uses recovery on error", async () => {
   const { deps, calls } = makeDeps({
     runtime: {
@@ -105,6 +197,30 @@ test("advance() uses recovery on error", async () => {
   assert.equal(result.reason, "needs manual");
   assert.equal(orchestrator.getStatus().phase, "error");
   assert.ok(calls.includes("journal:advance-error"));
+});
+
+test("advance() passes selected unit to recovery when worktree safety fails", async () => {
+  let recoveryInput: { unitType?: string; unitId?: string } | null = null;
+  const { deps } = makeDeps({
+    worktree: {
+      async prepareForUnit() { throw new Error("missing .git"); },
+      async syncAfterUnit() {},
+      async cleanupOnStop() {},
+    },
+    recovery: {
+      async classifyAndRecover(input) {
+        recoveryInput = { unitType: input.unitType, unitId: input.unitId };
+        return { action: "escalate", reason: "worktree-invalid" };
+      },
+    },
+  });
+  const orchestrator = createAutoOrchestrator(deps);
+
+  const result = await orchestrator.advance();
+
+  assert.equal(result.kind, "error");
+  assert.deepEqual(recoveryInput, { unitType: "execute-task", unitId: "T01" });
+  assert.equal(orchestrator.getStatus().activeUnit, undefined);
 });
 
 test("advance() is idempotent for the same active unit", async () => {

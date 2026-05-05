@@ -1407,9 +1407,16 @@ export function createWiredAutoOrchestrationModule(
   let seq = 0;
 
   const deps: AutoOrchestratorDeps = {
+    stateReconciliation: {
+      async reconcileBeforeDispatch(input) {
+        const state = await deriveState(input.basePath ?? dispatchBasePath);
+        return { allow: true, stateSnapshot: state };
+      },
+    },
     dispatch: {
-      async decideNextUnit() {
-        const state = await deriveState(dispatchBasePath);
+      async decideNextUnit(input) {
+        const state = input.stateSnapshot;
+        if (!state) return null;
         const active = state.activeMilestone;
         if (!active) return null;
 
@@ -1429,6 +1436,11 @@ export function createWiredAutoOrchestrationModule(
           reason: action.matchedRule ?? "dispatch",
           preconditions: [],
         };
+      },
+    },
+    toolContract: {
+      async compileUnitToolContract() {
+        return { allow: true };
       },
     },
     recovery: {
