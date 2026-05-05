@@ -13,7 +13,7 @@ export interface GsdCommandDefinition {
 type CompletionMap = Record<string, readonly GsdCommandDefinition[]>;
 
 export const GSD_COMMAND_DESCRIPTION =
-  "GSD — Get Shit Done: /gsd help|start|templates|next|auto|stop|pause|status|widget|visualize|queue|quick|discuss|capture|triage|dispatch|history|undo|undo-task|reset-slice|rate|skip|export|cleanup|model|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|debug|logs|forensics|changelog|migrate|remote|steer|knowledge|new-milestone|new-project|parallel|cmux|park|unpark|init|setup|onboarding|inspect|extensions|update|fast|mcp|rethink|workflow|codebase|notifications|ship|do|session-report|backlog|pr-branch|add-tests|scan|language|worktree|eval-review";
+  "GSD — Get Shit Done: /gsd help|start|templates|next|auto|stop|pause|status|widget|visualize|queue|quick|discuss|capture|triage|dispatch|history|undo|undo-task|reset-slice|rate|skip|export|cleanup|model|mode|prefs|config|keys|hooks|run-hook|skill-health|doctor|debug|logs|forensics|changelog|migrate|remote|steer|knowledge|graph|new-milestone|new-project|parallel|cmux|park|unpark|init|setup|onboarding|inspect|extensions|update|fast|mcp|rethink|workflow|codebase|notifications|ship|do|session-report|backlog|pr-branch|add-tests|scan|language|worktree|eval-review";
 
 export const TOP_LEVEL_SUBCOMMANDS: readonly GsdCommandDefinition[] = [
   { cmd: "help", desc: "Categorized command reference with descriptions" },
@@ -60,6 +60,7 @@ export const TOP_LEVEL_SUBCOMMANDS: readonly GsdCommandDefinition[] = [
   { cmd: "steer", desc: "Hard-steer plan documents during execution" },
   { cmd: "inspect", desc: "Show SQLite DB diagnostics" },
   { cmd: "knowledge", desc: "Add persistent project knowledge (rule, pattern, or lesson)" },
+  { cmd: "graph", desc: "Build, inspect, query, or diff the knowledge graph (.gsd/graph.json)" },
   { cmd: "new-milestone", desc: "Create a milestone from a specification document (headless)" },
   { cmd: "new-project", desc: "Bootstrap a new project (use --deep for staged project-level discovery)" },
   { cmd: "parallel", desc: "Parallel milestone orchestration (start, status, stop, merge, watch)" },
@@ -193,6 +194,12 @@ const NESTED_COMPLETIONS: CompletionMap = {
     { cmd: "rule", desc: "Add a project rule (always/never do X)" },
     { cmd: "pattern", desc: "Add a code pattern to follow" },
     { cmd: "lesson", desc: "Record a lesson learned" },
+  ],
+  graph: [
+    { cmd: "build", desc: "Build the knowledge graph and write .gsd/graph.json" },
+    { cmd: "status", desc: "Show node/edge counts, age, and staleness for the cached graph" },
+    { cmd: "query", desc: "Query nodes/edges by term: /gsd graph query <term>" },
+    { cmd: "diff", desc: "Compare the on-disk graph with a freshly built one" },
   ],
   start: [
     { cmd: "bugfix", desc: "Triage, fix, test, and ship a bug fix" },
