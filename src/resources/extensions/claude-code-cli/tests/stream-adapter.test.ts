@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -667,6 +667,23 @@ describe("stream-adapter — session persistence (#2859)", () => {
 	test("buildSdkOptions sets model and prompt correctly", () => {
 		const options = buildSdkOptions("claude-sonnet-4-20250514", "hello world");
 		assert.equal(options.model, "claude-sonnet-4-20250514");
+	});
+
+	test("buildSdkOptions includes .gsd symlink target in additionalDirectories (#4645)", () => {
+		if (process.platform === "win32") return;
+		const originalCwd = process.cwd();
+		const projectDir = mkdtempSync(join(tmpdir(), "claude-gsd-symlink-"));
+		const externalGsd = mkdtempSync(join(tmpdir(), "claude-gsd-target-"));
+		try {
+			symlinkSync(externalGsd, join(projectDir, ".gsd"));
+			process.chdir(projectDir);
+			const options = buildSdkOptions("claude-sonnet-4-20250514", "test");
+			assert.deepEqual((options as any).additionalDirectories, [realpathSync(externalGsd)]);
+		} finally {
+			process.chdir(originalCwd);
+			rmSync(projectDir, { recursive: true, force: true });
+			rmSync(externalGsd, { recursive: true, force: true });
+		}
 	});
 
 	test("buildSdkOptions enables betas for sonnet models", () => {
