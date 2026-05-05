@@ -340,6 +340,12 @@ export async function autoLoop(
 
     let dispatchId: number | null = null;
     let dispatchSettled = false;
+    let iterationEndEmitted = false;
+    const emitIterationEnd = (details: Record<string, unknown> = {}): void => {
+      if (iterationEndEmitted) return;
+      iterationEndEmitted = true;
+      journalReporter.emit("iteration-end", { iteration, ...details });
+    };
     const completeIteration = (): void => {
       completeWorkflowIteration({
         get consecutiveErrors() { return consecutiveErrors; },
@@ -348,10 +354,14 @@ export async function autoLoop(
         set consecutiveCooldowns(value) { consecutiveCooldowns = value; },
         recentErrorMessages,
       }, {
-        emitIterationEnd: () => journalReporter.emit("iteration-end", { iteration }),
+        emitIterationEnd: () => emitIterationEnd(),
         saveStuckState: () => saveStuckState(s, loopState),
         logIterationComplete: () => debugLog("autoLoop", { phase: "iteration-complete", iteration }),
       });
+    };
+    const finishIncompleteIteration = (details: Record<string, unknown>): void => {
+      emitIterationEnd(details);
+      saveStuckState(s, loopState);
     };
 
     try {
@@ -730,12 +740,25 @@ export async function autoLoop(
       // ── Phase 5: Finalize ───────────────────────────────────────────────
 
       let finalizeResult: Awaited<ReturnType<typeof runFinalize>>;
+      journalReporter.emit("post-unit-finalize-start", {
+        iteration,
+        unitType: iterData.unitType,
+        unitId: iterData.unitId,
+      });
       try {
         finalizeResult = await runFinalize(ic, iterData, loopState, sidecarItem);
       } catch (err) {
+        const error = formatDispatchExceptionSummary({ error: err });
+        journalReporter.emit("post-unit-finalize-end", {
+          iteration,
+          unitType: iterData.unitType,
+          unitId: iterData.unitId,
+          status: "failed",
+          error,
+        });
         dispatchSettled = settleDispatchFailed(
           dispatchId,
-          formatDispatchExceptionSummary({ error: err }),
+          error,
           {
             markFailed: markDispatchFailed,
             logWriteFailure: logDispatchLedgerWriteFailure,
@@ -746,6 +769,15 @@ export async function autoLoop(
       phaseReporter.report("finalize", finalizeResult.action, {
         unitType: iterData.unitType,
         unitId: iterData.unitId,
+      });
+      const finalizeReason = finalizeResult.action === "break" ? finalizeResult.reason : undefined;
+      journalReporter.emit("post-unit-finalize-end", {
+        iteration,
+        unitType: iterData.unitType,
+        unitId: iterData.unitId,
+        status: finalizeResult.action === "next" ? "completed" : finalizeResult.action === "continue" ? "retry" : "stopped",
+        action: finalizeResult.action,
+        ...(finalizeReason ? { reason: finalizeReason } : {}),
       });
       const finalizeDecision = decideFinalizeResult(
         finalizeResult.action === "break"
@@ -759,6 +791,13 @@ export async function autoLoop(
           markFailed: markDispatchFailed,
           logWriteFailure: logDispatchLedgerWriteFailure,
         }) || dispatchSettled;
+        finishIncompleteIteration({
+          status: "stopped",
+          reason: finalizeReason ?? "finalize-break",
+          unitType: iterData.unitType,
+          unitId: iterData.unitId,
+          failureClass: finalizeDecision.failureClass,
+        });
         finishTurn("stopped", finalizeDecision.failureClass, finalizeDecision.turnError);
         break;
       }
@@ -767,6 +806,12 @@ export async function autoLoop(
           markFailed: markDispatchFailed,
           logWriteFailure: logDispatchLedgerWriteFailure,
         }) || dispatchSettled;
+        finishIncompleteIteration({
+          status: "retry",
+          reason: "finalize-retry",
+          unitType: iterData.unitType,
+          unitId: iterData.unitId,
+        });
         finishTurn("retry");
         continue;
       }
@@ -794,7 +839,7 @@ export async function autoLoop(
       // Always emit iteration-end on error so the journal records iteration
       // completion even on failure (#2344). Without this, errors in
       // runFinalize leave the journal incomplete, making diagnosis harder.
-      journalReporter.emit("iteration-end", { iteration, error: msg });
+      emitIterationEnd({ status: "failed", error: msg });
 
       // ── Pre-send model-policy block: not a retryable error (#4959 / #4850) ──
       // The model-policy gate runs before the prompt is sent.  When every
