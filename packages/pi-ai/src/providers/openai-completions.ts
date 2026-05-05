@@ -66,6 +66,67 @@ export interface OpenAICompletionsOptions extends StreamOptions {
 	reasoningEffort?: "minimal" | "low" | "medium" | "high" | "xhigh";
 }
 
+type OpenAICompatiblePayloadDefaults = {
+	chat_template_kwargs?: Record<string, unknown>;
+	temperature?: number;
+	top_p?: number;
+	top_k?: number;
+	min_p?: number;
+	presence_penalty?: number;
+	repetition_penalty?: number;
+};
+
+type OpenAICompatibleProviderOptions = {
+	actualModelId?: string;
+	payload?: OpenAICompatiblePayloadDefaults;
+};
+
+export function applyOpenAICompatibleProviderOptions(
+	model: Model<"openai-completions">,
+	params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+): OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming {
+	const providerOptions = (model.providerOptions ?? {}) as OpenAICompatibleProviderOptions;
+	const defaultPayload = providerOptions.payload ?? {};
+	const targetModelId = providerOptions.actualModelId ?? model.id;
+	const nextParams = {
+		...params,
+		model: targetModelId,
+	} as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
+
+	if (defaultPayload.temperature !== undefined && nextParams.temperature === undefined) {
+		nextParams.temperature = defaultPayload.temperature;
+	}
+
+	if (defaultPayload.top_p !== undefined) {
+		(nextParams as typeof nextParams & { top_p: number }).top_p = defaultPayload.top_p;
+	}
+
+	if (defaultPayload.top_k !== undefined) {
+		(nextParams as typeof nextParams & { top_k: number }).top_k = defaultPayload.top_k;
+	}
+
+	if (defaultPayload.min_p !== undefined) {
+		(nextParams as typeof nextParams & { min_p: number }).min_p = defaultPayload.min_p;
+	}
+
+	if (defaultPayload.presence_penalty !== undefined) {
+		(nextParams as typeof nextParams & { presence_penalty: number }).presence_penalty =
+			defaultPayload.presence_penalty;
+	}
+
+	if (defaultPayload.repetition_penalty !== undefined) {
+		(nextParams as typeof nextParams & { repetition_penalty: number }).repetition_penalty =
+			defaultPayload.repetition_penalty;
+	}
+
+	if (defaultPayload.chat_template_kwargs !== undefined) {
+		(nextParams as typeof nextParams & { chat_template_kwargs: Record<string, unknown> }).chat_template_kwargs =
+			defaultPayload.chat_template_kwargs;
+	}
+
+	return nextParams;
+}
+
 export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenAICompletionsOptions> = (
 	model: Model<"openai-completions">,
 	context: Context,
@@ -356,7 +417,7 @@ function buildParams(model: Model<"openai-completions">, context: Context, optio
 	const messages = convertMessages(model, context, compat);
 	maybeAddOpenRouterAnthropicCacheControl(model, messages);
 
-	const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+	let params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
 		model: model.id,
 		messages,
 		stream: true,
@@ -418,7 +479,7 @@ function buildParams(model: Model<"openai-completions">, context: Context, optio
 		}
 	}
 
-	return params;
+	return applyOpenAICompatibleProviderOptions(model, params);
 }
 
 function maybeAddOpenRouterAnthropicToolCacheControl(

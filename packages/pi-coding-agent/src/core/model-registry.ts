@@ -100,6 +100,7 @@ const ModelDefinitionSchema = Type.Object({
 	headers: Type.Optional(Type.Record(Type.String(), Type.String())),
 	compat: Type.Optional(OpenAICompatSchema),
 	capabilities: Type.Optional(ModelCapabilitiesSchema),
+	providerOptions: Type.Optional(Type.Record(Type.String(), Type.Any())),
 });
 
 // Schema for per-model overrides (all fields optional, merged with built-in model)
@@ -531,6 +532,7 @@ export class ModelRegistry {
 					headers,
 					compat: modelDef.compat,
 					capabilities: modelDef.capabilities,
+					providerOptions: modelDef.providerOptions,
 				} as Model<Api>);
 			}
 		}
