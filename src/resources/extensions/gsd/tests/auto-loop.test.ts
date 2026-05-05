@@ -1171,6 +1171,44 @@ test("autoLoop journals post-unit finalize stop after completed unit", async () 
   });
 });
 
+test("autoLoop journals iteration-end when unit phase breaks after cancelled unit", async () => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  ctx.ui.setStatus = () => {};
+  ctx.sessionManager = { getSessionFile: () => "/tmp/session.json" };
+  const pi = makeMockPi();
+  const s = makeLoopSession();
+  const journalEvents: Array<{ eventType: string; data?: any }> = [];
+
+  const deps = makeMockDeps({
+    emitJournalEvent: (entry: any) => {
+      journalEvents.push(entry);
+    },
+  });
+
+  const loopPromise = autoLoop(ctx, pi, s, deps);
+  await new Promise((r) => setTimeout(r, 50));
+  resolveAgentEndCancelled();
+  await loopPromise;
+
+  const unitEndIndex = journalEvents.findIndex(
+    (e) => e.eventType === "unit-end" && e.data?.status === "cancelled",
+  );
+  const iterationEndIndex = journalEvents.findIndex((e) => e.eventType === "iteration-end");
+
+  assert.ok(unitEndIndex >= 0, "cancelled unit should still emit unit-end");
+  assert.ok(iterationEndIndex > unitEndIndex, "unit-phase break must close the iteration after unit-end");
+  assert.deepEqual(journalEvents[iterationEndIndex]!.data, {
+    iteration: 1,
+    status: "stopped",
+    reason: "unit-aborted",
+    unitType: "execute-task",
+    unitId: "M001/S01/T01",
+    failureClass: "execution",
+  });
+});
+
 test("crash lock records session file from AFTER newSession, not before (#1710)", async (t) => {
   _resetPendingResolve();
 

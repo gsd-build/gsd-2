@@ -520,6 +520,13 @@ export async function autoLoop(
           unitId: iterData.unitId,
         });
         if (unitPhaseResult.action === "break") {
+          finishIncompleteIteration({
+            status: "stopped",
+            reason: unitPhaseResult.reason ?? "unit-break",
+            unitType: iterData.unitType,
+            unitId: iterData.unitId,
+            failureClass: "execution",
+          });
           finishTurn("stopped", "execution", "unit-break");
           break;
         }
@@ -538,7 +545,16 @@ export async function autoLoop(
               finishTurn,
             },
           });
-          if (verifyFlow.action === "break") break;
+          if (verifyFlow.action === "break") {
+            finishIncompleteIteration({
+              status: "paused",
+              reason: "custom-engine-verify-pause",
+              unitType: iterData.unitType,
+              unitId: iterData.unitId,
+              failureClass: "manual-attention",
+            });
+            break;
+          }
         }
         if (verifyResult === "retry") {
           const retryOutcome = await handleCustomEngineVerifyRetry({
@@ -572,7 +588,22 @@ export async function autoLoop(
               finishTurn,
             },
           });
-          if (retryFlow.action === "break") break;
+          if (retryFlow.action === "break") {
+            finishIncompleteIteration({
+              status: retryOutcome.action === "stop" ? "stopped" : "paused",
+              reason: retryOutcome.action === "retry" ? "custom-engine-verify-retry" : retryOutcome.turnError,
+              unitType: iterData.unitType,
+              unitId: iterData.unitId,
+              failureClass: "manual-attention",
+            });
+            break;
+          }
+          finishIncompleteIteration({
+            status: "retry",
+            reason: "custom-engine-verify-retry",
+            unitType: iterData.unitType,
+            unitId: iterData.unitId,
+          });
           continue;
         }
 
@@ -733,6 +764,13 @@ export async function autoLoop(
           markFailed: markDispatchFailed,
           logWriteFailure: logDispatchLedgerWriteFailure,
         }) || dispatchSettled;
+        finishIncompleteIteration({
+          status: "stopped",
+          reason: unitPhaseResult.reason ?? "unit-break",
+          unitType: iterData.unitType,
+          unitId: iterData.unitId,
+          failureClass: "execution",
+        });
         finishTurn("stopped", "execution", "unit-break");
         break;
       }
@@ -839,7 +877,7 @@ export async function autoLoop(
       // Always emit iteration-end on error so the journal records iteration
       // completion even on failure (#2344). Without this, errors in
       // runFinalize leave the journal incomplete, making diagnosis harder.
-      emitIterationEnd({ status: "failed", error: msg });
+      finishIncompleteIteration({ status: "failed", error: msg });
 
       // ── Pre-send model-policy block: not a retryable error (#4959 / #4850) ──
       // The model-policy gate runs before the prompt is sent.  When every
