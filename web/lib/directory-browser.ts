@@ -1,3 +1,5 @@
+import { dirname, relative, resolve, sep } from "node:path"
+
 export interface BrowseEntry {
   name: string
   path: string
@@ -26,4 +28,30 @@ export function createRootShortcuts(paths: string[]): BrowseEntry[] {
       path,
     }]
   })
+}
+
+function isSameOrDescendant(candidate: string, root: string): boolean {
+  const resolvedCandidate = resolve(candidate)
+  const resolvedRoot = resolve(root)
+  if (resolvedCandidate === resolvedRoot) return true
+  const pathToCandidate = relative(resolvedRoot, resolvedCandidate)
+  return (
+    Boolean(pathToCandidate) &&
+    !pathToCandidate.startsWith("..") &&
+    pathToCandidate !== ".." &&
+    !pathToCandidate.startsWith(sep)
+  )
+}
+
+export function isAllowedBrowsePath(candidate: string, devRoot: string, browseRoots: string[]): boolean {
+  const devRootParent = dirname(devRoot)
+  const filesystemRoot = resolve("/")
+  const resolvedCandidate = resolve(candidate)
+  const authRoots = browseRoots.filter((root) => resolve(root) !== filesystemRoot)
+  return (
+    resolvedCandidate === filesystemRoot ||
+    isSameOrDescendant(candidate, devRoot) ||
+    candidate === devRootParent ||
+    authRoots.some((root) => isSameOrDescendant(candidate, root))
+  )
 }

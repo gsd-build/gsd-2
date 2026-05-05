@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { resolve, dirname, join, relative, sep } from "node:path";
+import { resolve, dirname, join } from "node:path";
 import { homedir, platform } from "node:os";
-import { createRootShortcuts, type BrowseEntry } from "../../../lib/directory-browser";
+import { createRootShortcuts, isAllowedBrowsePath, type BrowseEntry } from "../../../lib/directory-browser";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,19 +41,6 @@ function getLinuxMountPoints(): string[] {
 
 function getMacMountPoints(): string[] {
   return existingDirectories(["/Volumes"]);
-}
-
-function isSameOrDescendant(candidate: string, root: string): boolean {
-  const resolvedCandidate = resolve(candidate);
-  const resolvedRoot = resolve(root);
-  if (resolvedCandidate === resolvedRoot) return true;
-  const pathToCandidate = relative(resolvedRoot, resolvedCandidate);
-  return (
-    Boolean(pathToCandidate) &&
-    !pathToCandidate.startsWith("..") &&
-    pathToCandidate !== ".." &&
-    !pathToCandidate.startsWith(sep)
-  );
 }
 
 /**
@@ -96,13 +83,9 @@ export async function GET(request: Request): Promise<Response> {
     // Restrict browsing to the configured devRoot by default, but provide an
     // explicit filesystem-root escape hatch for users who need to select
     // projects from absolute locations such as /Volumes on macOS.
-    const devRootParent = dirname(devRoot);
     const browseRoots = getBrowseRoots();
-    const isAllowedBrowsePath = (candidate: string): boolean =>
-      isSameOrDescendant(candidate, devRoot) ||
-      candidate === devRootParent ||
-      browseRoots.some((root) => isSameOrDescendant(candidate, root));
-    const isAllowedPath = isAllowedBrowsePath(targetPath);
+    const canBrowsePath = (candidate: string): boolean => isAllowedBrowsePath(candidate, devRoot, browseRoots);
+    const isAllowedPath = canBrowsePath(targetPath);
 
     if (!isAllowedPath) {
       return Response.json(
@@ -128,7 +111,7 @@ export async function GET(request: Request): Promise<Response> {
 
     const parentPath = dirname(targetPath);
     // Only offer the parent navigation if it's within the allowed scope.
-    const parentAllowed = parentPath !== targetPath && isAllowedBrowsePath(parentPath);
+    const parentAllowed = parentPath !== targetPath && canBrowsePath(parentPath);
     const entries: BrowseEntry[] = [];
     const shortcuts: BrowseEntry[] = [];
 

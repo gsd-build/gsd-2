@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { exec, execFile, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
+import { execFile, spawn, type SpawnOptions } from 'node:child_process'
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import { createServer } from 'node:net'
@@ -27,7 +27,18 @@ type ResourceBootstrapLike = {
   initResources: (agentDir: string) => void
 }
 
-type SpawnedChildLike = Pick<ChildProcess, 'once' | 'unref' | 'pid' | 'stdout' | 'stderr'>
+type ChildOutputStreamLike = {
+  on?: (event: string, listener: (chunk: unknown) => void) => unknown
+  unref?: () => void
+}
+
+type SpawnedChildLike = {
+  once?: (event: string, listener: (...args: unknown[]) => void) => unknown
+  unref?: () => void
+  pid?: number
+  stdout?: ChildOutputStreamLike | null
+  stderr?: ChildOutputStreamLike | null
+}
 
 export interface WebModeLaunchOptions {
   cwd: string
@@ -396,19 +407,29 @@ async function spawnDetachedProcess(
   command: string,
   args: string[],
   options: SpawnOptions,
-): Promise<{ ok: true; child: SpawnedChildLike } | { ok: false; error: unknown }> {
+): Promise<
+  | { ok: true; child: SpawnedChildLike; getStartupOutput: () => string; childExit: Promise<never> }
+  | { ok: false; error: unknown }
+> {
   return await new Promise((resolve) => {
     try {
       const child = spawnCommand(command, args, options)
+      const getStartupOutput = captureStartupOutput(child)
+      const childExit = waitForChildExit(child, getStartupOutput)
+      childExit.catch(() => undefined)
       let settled = false
-      const finish = (result: { ok: true; child: SpawnedChildLike } | { ok: false; error: unknown }) => {
+      const finish = (
+        result:
+          | { ok: true; child: SpawnedChildLike; getStartupOutput: () => string; childExit: Promise<never> }
+          | { ok: false; error: unknown },
+      ) => {
         if (settled) return
         settled = true
         resolve(result)
       }
 
       child.once?.('error', (error) => finish({ ok: false, error }))
-      setImmediate(() => finish({ ok: true, child }))
+      setImmediate(() => finish({ ok: true, child, getStartupOutput, childExit }))
     } catch (error) {
       resolve({ ok: false, error })
     }
@@ -524,21 +545,20 @@ const MAX_STARTUP_OUTPUT_CHARS = 4_000
 
 function captureStartupOutput(child: SpawnedChildLike): () => string {
   let output = ''
-  const append = (chunk: Buffer | string) => {
-    output += chunk.toString()
+  const append = (chunk: unknown) => {
+    output += String(chunk)
     if (output.length > MAX_STARTUP_OUTPUT_CHARS) {
       output = output.slice(output.length - MAX_STARTUP_OUTPUT_CHARS)
     }
   }
-  child.stdout?.on('data', append)
-  child.stderr?.on('data', append)
+  child.stdout?.on?.('data', append)
+  child.stderr?.on?.('data', append)
   return () => output.trim()
 }
 
 function unrefStartupOutput(child: SpawnedChildLike): void {
-  const unrefIfAvailable = (stream: NodeJS.ReadableStream | null | undefined) => {
-    const maybeUnref = stream as NodeJS.ReadableStream & { unref?: () => void }
-    maybeUnref?.unref?.()
+  const unrefIfAvailable = (stream: ChildOutputStreamLike | null | undefined) => {
+    stream?.unref?.()
   }
   unrefIfAvailable(child.stdout)
   unrefIfAvailable(child.stderr)
@@ -546,8 +566,10 @@ function unrefStartupOutput(child: SpawnedChildLike): void {
 
 function waitForChildExit(child: SpawnedChildLike, getStartupOutput: () => string): Promise<never> {
   return new Promise((_, reject) => {
-    child.once?.('exit', (code: number | null, signal: NodeJS.Signals | null) => {
-      const detail = signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`
+    child.once?.('exit', (code: unknown, signal: unknown) => {
+      const exitCode = typeof code === 'number' ? code : null
+      const exitSignal = typeof signal === 'string' ? signal : null
+      const detail = exitSignal ? `signal ${exitSignal}` : `code ${exitCode ?? 'unknown'}`
       const startupOutput = getStartupOutput()
       const outputDetail = startupOutput ? `; output: ${startupOutput}` : ''
       reject(new Error(`web host process exited before readiness (${detail})${outputDetail}`))
@@ -698,11 +720,9 @@ export async function launchWebMode(
     return failure
   }
 
-  const getStartupOutput = captureStartupOutput(spawnResult.child)
-
   try {
     const bootReadyFn = deps.waitForBootReady ?? ((u: string) => waitForBootReady(u, 180_000, stderr, authToken))
-    await Promise.race([bootReadyFn(url), waitForChildExit(spawnResult.child, getStartupOutput)])
+    await Promise.race([bootReadyFn(url), spawnResult.childExit])
     unrefStartupOutput(spawnResult.child)
   } catch (error) {
     const failure: WebModeLaunchFailure = {

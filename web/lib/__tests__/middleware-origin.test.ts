@@ -102,7 +102,7 @@ describe("middleware origin validation", () => {
     assert.equal(isAllowedOrigin(request, "http://[::1]:4567"), true);
   });
 
-  test("allows comma-separated forwarded host values", () => {
+  test("trusts only the first comma-separated forwarded host value", () => {
     process.env.GSD_WEB_HOST = "127.0.0.1";
     process.env.GSD_WEB_PORT = "4567";
 
@@ -112,7 +112,8 @@ describe("middleware origin validation", () => {
       "x-forwarded-proto": "https",
     });
 
-    assert.equal(isAllowedOrigin(request, "https://second.example.test"), true);
+    assert.equal(isAllowedOrigin(request, "https://first.example.test"), true);
+    assert.equal(isAllowedOrigin(request, "https://second.example.test"), false);
   });
 
   test("ignores invalid additional origins", () => {

@@ -48,10 +48,13 @@ function addIncomingRequestOrigins(allowed: Set<string>, request: OriginRequest,
     originProtocol,
   ].filter(Boolean))
 
-  for (const host of [
-    ...splitHostHeader(request.headers.get("x-forwarded-host")),
+  const forwardedHost = splitHostHeader(request.headers.get("x-forwarded-host"))[0]
+  const hosts = [
+    ...(forwardedHost ? [forwardedHost] : []),
     ...splitHostHeader(request.headers.get("host")),
-  ]) {
+  ]
+
+  for (const host of hosts) {
     for (const protocol of protocols) {
       const requestOrigin = normalizeOrigin(`${protocol}//${host}`)
       if (requestOrigin) allowed.add(requestOrigin)
