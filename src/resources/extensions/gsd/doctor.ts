@@ -460,9 +460,9 @@ export async function runGSDDoctor(basePath: string, options?: { fix?: boolean; 
       if (shouldFix("delimiter_in_title") && roadmapFile) {
         try {
           const raw = readFileSync(roadmapFile, "utf-8");
-          // Replace em/en dashes with " - " in the H1 title line only
+          // Replace delimiter characters in the H1 title line only.
           const sanitized = raw.replace(/^(# .*)$/m, (line) =>
-            line.replace(/[\u2014\u2013]/g, "-"),
+            line.replace(/[\u2014\u2013]/g, "-").replace(/\//g, "-"),
           );
           if (sanitized !== raw) {
             await saveFile(roadmapFile, sanitized);

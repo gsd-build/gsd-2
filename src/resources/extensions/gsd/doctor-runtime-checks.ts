@@ -8,7 +8,12 @@ import { deriveState, isGhostMilestone, isReusableGhostMilestone } from "./state
 import { saveFile } from "./files.js";
 import { nativeIsRepo, nativeForEachRef, nativeUpdateRef } from "./native-git-bridge.js";
 import { readCrashLock, isLockProcessAlive, clearLock } from "./crash-recovery.js";
-import { getActiveAutoWorkers } from "./db/auto-workers.js";
+import {
+  findStaleWorkerForProject,
+  getActiveAutoWorkers,
+  getAutoWorker,
+  markWorkerCrashed,
+} from "./db/auto-workers.js";
 import { normalizeRealPath } from "./paths.js";
 import { ensureGitignore, isGsdGitignored } from "./gitignore.js";
 import { readAllSessionStatuses, isSessionStale, removeSessionStatus } from "./session-status-io.js";
@@ -56,8 +61,16 @@ export async function checkRuntimeHealth(
         });
 
         if (shouldFix("stale_crash_lock")) {
-          clearLock(basePath);
-          fixesApplied.push("cleared stale auto-mode worker state");
+          const projectRoot = normalizeRealPath(basePath);
+          const staleWorker = findStaleWorkerForProject(projectRoot);
+          if (staleWorker) {
+            markWorkerCrashed(staleWorker.worker_id);
+            const updated = getAutoWorker(staleWorker.worker_id);
+            if (updated?.status && updated.status !== "active") {
+              clearLock(basePath);
+              fixesApplied.push("cleared stale auto-mode worker state");
+            }
+          }
         }
       }
     }

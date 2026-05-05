@@ -81,3 +81,41 @@ test("doctor fix=false still reports delimiter_in_title as warning", async (t) =
   const content = readFileSync(join(mDir, "M001-ROADMAP.md"), "utf-8");
   assert.ok(content.includes("\u2014"), "file should not be modified when fix=false");
 });
+
+test("doctor fix=true sanitizes slash delimiter in milestone title", async (t) => {
+  const tmpBase = mkdtempSync(join(tmpdir(), "gsd-doctor-delim-slash-"));
+  const gsd = join(tmpBase, ".gsd");
+  const mDir = join(gsd, "milestones", "M007");
+  const sDir = join(mDir, "slices", "S01");
+  const tDir = join(sDir, "tasks");
+  mkdirSync(tDir, { recursive: true });
+
+  writeFileSync(join(mDir, "M007-ROADMAP.md"), `# M007: Search by event/story
+
+## Slices
+- [ ] **S01: Setup** \`risk:low\` \`depends:[]\`
+  > After: done
+`);
+  writeFileSync(join(sDir, "S01-PLAN.md"), `# S01: Setup
+
+## Tasks
+- [ ] **T01: Init** \`est:10m\`
+`);
+  writeFileSync(join(tDir, "T01-PLAN.md"), "# T01: Init\n");
+
+  t.after(() => rmSync(tmpBase, { recursive: true, force: true }));
+
+  const report = await runGSDDoctor(tmpBase, { fix: true });
+  const fixed = readFileSync(join(mDir, "M007-ROADMAP.md"), "utf-8");
+  const h1 = fixed.split("\n").find(l => l.startsWith("# "))!;
+  assert.ok(h1, "H1 line should exist");
+  assert.ok(!h1.includes("/"), "forward slash should be replaced");
+
+  assert.ok(
+    report.fixesApplied.some(f => f.includes("sanitized delimiter characters in M007 title")),
+    `fixesApplied should mention slash sanitization, got: ${JSON.stringify(report.fixesApplied)}`,
+  );
+
+  const delimIssues = report.issues.filter(i => i.code === "delimiter_in_title" && i.unitId === "M007");
+  assert.equal(delimIssues.length, 0, "fixed slash delimiter issue should not remain in report");
+});
