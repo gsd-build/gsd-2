@@ -1,7 +1,8 @@
+// GSD-2 Interactive Tool Execution Rendering Tests
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import stripAnsi from "strip-ansi";
-import { ToolExecutionComponent } from "../tool-execution.js";
+import { ToolExecutionComponent, ToolPhaseSummaryComponent, type ToolExecutionPhase } from "../tool-execution.js";
 import { initTheme } from "../../theme/theme.js";
 
 initTheme("dark", false);
@@ -81,6 +82,49 @@ describe("ToolExecutionComponent", () => {
 		assert.match(rendered, /Done · \d+(ms|s)/);
 		assert.match(rendered, /Completed/);
 		assert.doesNotMatch(rendered, /ok=true/);
+	});
+
+	test("exposes phase metadata for successful low-signal tool rows", () => {
+		const component = new ToolExecutionComponent(
+			"gsd_requirement_update",
+			{ id: "R001" },
+			{},
+			{ label: "Update Requirement" } as any,
+			{ requestRender() {} } as any,
+		);
+		component.updateResult({ content: [], isError: false });
+
+		assert.deepEqual(component.getRollupPhase()?.label, "Requirement writes");
+	});
+
+	test("does not expose phase metadata for output-bearing tools", () => {
+		const component = new ToolExecutionComponent(
+			"mcp__demo__do_thing",
+			{ ok: true },
+			{},
+			undefined,
+			{ requestRender() {} } as any,
+		);
+		component.updateResult({ content: [{ type: "text", text: "important output" }], isError: false });
+
+		assert.equal(component.getRollupPhase(), null);
+	});
+
+	test("renders phase-based summaries for rolled-up tool executions", () => {
+		const phases: ToolExecutionPhase[] = [
+			{ label: "Setup / shell", count: 6, durationMs: 12 },
+			{ label: "Context reads", count: 4, durationMs: 6 },
+			{ label: "Requirement writes", count: 4, durationMs: 4 },
+			{ label: "Memory lookups", count: 4, durationMs: 4 },
+			{ label: "Finalization", count: 1, durationMs: 1 },
+		];
+		const rendered = stripAnsi(new ToolPhaseSummaryComponent(phases).render(120).join("\n"));
+
+		assert.match(rendered, /Setup \/ shell 6 actions\s+success · 12ms/);
+		assert.match(rendered, /Context reads 4 actions\s+success · 6ms/);
+		assert.match(rendered, /Requirement writes 4 actions\s+success · 4ms/);
+		assert.match(rendered, /Memory lookups 4 actions\s+success · 4ms/);
+		assert.match(rendered, /Finalization 1 action\s+success · 1ms/);
 	});
 
 	test("passes failed result status to custom result renderers", () => {

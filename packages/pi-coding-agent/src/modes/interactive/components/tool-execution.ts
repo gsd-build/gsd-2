@@ -1,3 +1,4 @@
+// GSD-2 Interactive Tool Execution Rendering
 import {
 	Box,
 	Container,
@@ -130,6 +131,12 @@ function renderToolFrame(
 const COMPACT_ARG_VALUE_LIMIT = 60;
 const GENERIC_OUTPUT_PREVIEW_LINES = 10;
 const GENERIC_ARGS_JSON_PREVIEW_LINES = 10;
+
+export type ToolExecutionPhase = {
+	label: string;
+	count: number;
+	durationMs: number;
+};
 
 function formatElapsed(ms: number): string {
 	if (ms < 1000) return `${ms}ms`;
@@ -578,6 +585,33 @@ export class ToolExecutionComponent extends Container {
 		if (this.expanded || this.isPartial || !this.result || this.result.isError) return false;
 		const hasImages = this.result.content?.some((block) => block.type === "image") ?? false;
 		return !hasImages && this.getTextOutput().trim().length === 0;
+	}
+
+	getRollupPhase(): ToolExecutionPhase | null {
+		if (!this.shouldRenderCompactSuccess()) return null;
+		const label = this.getPhaseLabel();
+		const endedAt = this.endedAt ?? Date.now();
+		return {
+			label,
+			count: 1,
+			durationMs: Math.max(0, endedAt - this.startedAt),
+		};
+	}
+
+	private getPhaseLabel(): string {
+		const name = this.normalizedToolName;
+		const displayName = prettifyToolName(this.toolName, this.toolDefinition?.label);
+
+		if (name === "bash") return "Setup / shell";
+		if (name === "read" || name === "ls" || name === "find" || name === "grep") return "Context reads";
+		if (name === "write" || name === "edit") return "File changes";
+		if (name === "web_search" || displayName === "ToolSearch") return "Discovery";
+		if (displayName === "Memory Query" || displayName === "Memory Capture" || displayName === "Gsd Graph") {
+			return "Memory lookups";
+		}
+		if (displayName === "Update Requirement" || displayName === "Save Requirement") return "Requirement writes";
+		if (displayName.startsWith("Complete ")) return "Finalization";
+		return "Other tool actions";
 	}
 
 	private getCompactSummary(frameLabel: string): string {
@@ -1229,5 +1263,26 @@ export class ToolExecutionComponent extends Container {
 		}
 
 		return text;
+	}
+}
+
+export class ToolPhaseSummaryComponent extends Container {
+	constructor(private readonly phases: ToolExecutionPhase[]) {
+		super();
+	}
+
+	override render(width: number): string[] {
+		const frameWidth = Math.max(20, width);
+		const rows = this.phases.map((phase) => {
+			const left = `${phase.label} ${phase.count} ${phase.count === 1 ? "action" : "actions"}`;
+			const right = `success · ${formatElapsed(phase.durationMs)}`;
+			const contentWidth = Math.max(1, frameWidth - 2);
+			const leftWidth = Math.max(1, contentWidth - visibleWidth(right) - 1);
+			const leftText = truncateToWidth(left, leftWidth, "");
+			const gap = Math.max(1, contentWidth - visibleWidth(leftText) - visibleWidth(right));
+			return `${theme.fg("toolSuccess", leftText)}${" ".repeat(gap)}${theme.fg("toolSuccess", right)}`;
+		});
+
+		return ["", ...style().border("minimal").borderColor((text) => theme.fg("toolSuccess", text)).render(rows, frameWidth)];
 	}
 }

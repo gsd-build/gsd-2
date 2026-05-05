@@ -1,9 +1,14 @@
+// GSD-2 Interactive Chat Controller
 import { Loader, Markdown, Spacer, Text } from "@gsd/pi-tui";
 
 import type { InteractiveModeEvent, InteractiveModeStateHost } from "../interactive-mode-state.js";
 import { theme } from "../theme/theme.js";
 import { AssistantMessageComponent } from "../components/assistant-message.js";
-import { ToolExecutionComponent } from "../components/tool-execution.js";
+import {
+	ToolExecutionComponent,
+	ToolPhaseSummaryComponent,
+	type ToolExecutionPhase,
+} from "../components/tool-execution.js";
 import { DynamicBorder } from "../components/dynamic-border.js";
 import { appKey } from "../components/keybinding-hints.js";
 
@@ -99,6 +104,71 @@ let hasToolsInTurn = false;
 let pinnedBorder: DynamicBorder | undefined;
 // Reference to the pinned markdown component below the border
 let pinnedTextComponent: Markdown | undefined;
+
+function mergeToolPhases(phases: ToolExecutionPhase[]): ToolExecutionPhase[] {
+	const merged: ToolExecutionPhase[] = [];
+	for (const phase of phases) {
+		const previous = merged[merged.length - 1];
+		if (previous?.label === phase.label) {
+			previous.count += phase.count;
+			previous.durationMs += phase.durationMs;
+		} else {
+			merged.push({ ...phase });
+		}
+	}
+	return merged;
+}
+
+function replaceCompactToolRowsWithPhaseSummary(
+	host: InteractiveModeStateHost & { ui: { requestRender: () => void } },
+): void {
+	let changed = false;
+	const nextRenderedSegments: RenderedSegment[] = [];
+	let rollupRun: Array<{ seg: Extract<RenderedSegment, { kind: "tool" }>; phase: ToolExecutionPhase }> = [];
+
+	const flushRollupRun = () => {
+		if (rollupRun.length < 2) {
+			nextRenderedSegments.push(...rollupRun.map((item) => item.seg));
+			rollupRun = [];
+			return;
+		}
+
+		const firstIndex = Math.max(0, host.chatContainer.children.indexOf(rollupRun[0].seg.component));
+		const summary = new ToolPhaseSummaryComponent(mergeToolPhases(rollupRun.map((item) => item.phase)));
+
+		for (const { seg } of rollupRun) {
+			host.chatContainer.removeChild(seg.component);
+		}
+
+		host.chatContainer.addChild(summary);
+		const summaryIndex = host.chatContainer.children.indexOf(summary);
+		if (summaryIndex !== -1 && summaryIndex !== firstIndex) {
+			host.chatContainer.children.splice(summaryIndex, 1);
+			host.chatContainer.children.splice(firstIndex, 0, summary);
+			(host.chatContainer as unknown as { _prevRender: string[] | null })._prevRender = null;
+		}
+
+		changed = true;
+		rollupRun = [];
+	};
+
+	for (const seg of renderedSegments) {
+		const phase = seg.kind === "tool" ? seg.component.getRollupPhase() : null;
+		if (seg.kind === "tool" && phase) {
+			rollupRun.push({ seg, phase });
+			continue;
+		}
+
+		flushRollupRun();
+		nextRenderedSegments.push(seg);
+	}
+	flushRollupRun();
+
+	if (changed) {
+		renderedSegments = nextRenderedSegments;
+		host.ui.requestRender();
+	}
+}
 
 export async function handleAgentEvent(host: InteractiveModeStateHost & {
 	init: () => Promise<void>;
@@ -773,6 +843,7 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 					host.streamingComponent.setShowMetadata(true);
 					host.streamingComponent.updateContent(host.streamingMessage);
 				}
+				replaceCompactToolRowsWithPhaseSummary(host);
 
 				if (host.streamingMessage.stopReason === "aborted" || host.streamingMessage.stopReason === "error") {
 					if (!errorMessage) {

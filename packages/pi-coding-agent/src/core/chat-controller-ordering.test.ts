@@ -1002,6 +1002,57 @@ test("chat-controller does not pin when there are no tool calls", async () => {
 	assert.equal(host.pinnedMessageContainer.children.length, 0, "pinned zone should stay empty without tool calls");
 });
 
+test("chat-controller rolls up only contiguous low-signal tool runs on message_end", async () => {
+	(globalThis as any)[Symbol.for("@gsd/pi-coding-agent:theme")] = {
+		fg: (_key: string, text: string) => text,
+		bg: (_key: string, text: string) => text,
+		bold: (text: string) => text,
+		italic: (text: string) => text,
+		truncate: (text: string) => text,
+	};
+
+	const host = createHost();
+	host.getMarkdownThemeWithSettings = () => ({});
+
+	const t1 = { type: "toolCall", id: "t1", name: "bash", arguments: { command: "true" } };
+	const t2 = { type: "toolCall", id: "t2", name: "bash", arguments: { command: "true" } };
+	const text = { type: "text", text: "middle output" };
+	const t3 = { type: "toolCall", id: "t3", name: "read", arguments: { path: "/tmp/a" } };
+	const t4 = { type: "toolCall", id: "t4", name: "read", arguments: { path: "/tmp/b" } };
+	const content = [t1, t2, text, t3, t4];
+
+	await handleAgentEvent(host, { type: "message_start", message: makeAssistant([]) } as any);
+	await handleAgentEvent(host, {
+		type: "message_update",
+		message: makeAssistant(content),
+		assistantMessageEvent: {
+			type: "text_delta",
+			contentIndex: 2,
+			delta: text.text,
+			partial: makeAssistant(content),
+		},
+	} as any);
+
+	for (const tool of [t1, t2, t3, t4]) {
+		await handleAgentEvent(host, {
+			type: "tool_execution_end",
+			toolCallId: tool.id,
+			isError: false,
+			result: { content: [], details: {} },
+		} as any);
+	}
+
+	await handleAgentEvent(host, { type: "message_end", message: makeAssistant(content) } as any);
+
+	assert.equal(host.chatContainer.children.length, 3, "two separated tool runs should become two summaries around text");
+	assert.equal(host.chatContainer.children[0]?.constructor?.name, "ToolPhaseSummaryComponent");
+	assert.equal(host.chatContainer.children[1]?.constructor?.name, "AssistantMessageComponent");
+	assert.equal(host.chatContainer.children[2]?.constructor?.name, "ToolPhaseSummaryComponent");
+	assert.match(host.chatContainer.children[0].render(120).join("\n"), /Setup \/ shell 2 actions/);
+	assert.match(host.chatContainer.children[2].render(120).join("\n"), /Context reads 2 actions/);
+	assert.equal(host.chatContainer._prevRender, null, "summary reposition must invalidate the chat container render cache");
+});
+
 // Regression test for issue #4144: interleaved text/tool content must render in content[] index order.
 // Stream: [text "A", toolCall T1, text "B", toolCall T2, text "C"]
 // Expected chatContainer order: textRun(A), toolExec(T1), textRun(B), toolExec(T2), textRun(C)
