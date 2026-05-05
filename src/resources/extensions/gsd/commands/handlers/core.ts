@@ -97,6 +97,7 @@ export function showHelp(ctx: ExtensionCommandContext, args = ""): void {
     "",
     "PROJECT KNOWLEDGE",
     "  /gsd knowledge <type> <text>   Add rule, pattern, or lesson to KNOWLEDGE.md",
+    "  /gsd graph [build|status|query <term>|diff]   Manage the .gsd/graph.json knowledge graph",
     "  /gsd codebase [generate|update|stats]   Manage the CODEBASE.md cache used in prompt context",
     "",
     "SHIPPING & BACKLOG",
