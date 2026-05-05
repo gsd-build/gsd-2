@@ -72,10 +72,11 @@ describe('doctor-runtime', async () => {
       const { randomUUID } = await import("node:crypto");
       openDatabase(join(dir, ".gsd", "gsd.db"));
       const db = _getAdapter()!;
+      const staleWorkerId = `test-fake-${randomUUID().slice(0, 8)}`;
       db.prepare(
         `INSERT INTO workers (worker_id, host, pid, started_at, version, last_heartbeat_at, status, project_root_realpath)
          VALUES (:w, 'test-host', 9999999, '2026-03-10T00:00:00Z', 'test', '1970-01-01T00:00:00.000Z', 'active', :root)`,
-      ).run({ ":w": `test-fake-${randomUUID().slice(0, 8)}`, ":root": dir });
+      ).run({ ":w": staleWorkerId, ":root": dir });
       // Leave DB open — runGSDDoctor's readCrashLock relies on the
       // currently-open DB connection (it does not open one of its own).
 
@@ -89,6 +90,14 @@ describe('doctor-runtime', async () => {
       assert.ok(
         fixed.fixesApplied.some(f => f.includes("cleared stale")),
         `fix clears stale lock (got: ${fixed.fixesApplied.join(", ")})`,
+      );
+      const row = db.prepare(`SELECT status FROM workers WHERE worker_id = :w`).get({ ":w": staleWorkerId }) as
+        | { status: string }
+        | undefined;
+      assert.notEqual(
+        row?.status,
+        "active",
+        "fix must persist stale worker away from active status",
       );
 
       // Close DB so subsequent tests in this file (which expect a clean
