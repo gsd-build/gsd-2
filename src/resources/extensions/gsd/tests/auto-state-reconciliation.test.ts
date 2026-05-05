@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 
+import { runPreDispatch } from "../auto/phases.js";
 import { createStateReconciliationAdapter } from "../auto/state-reconciliation.js";
 import type { StateReconciliationDeps } from "../auto/state-reconciliation.js";
+import type { IterationContext, LoopState } from "../auto/types.js";
 import type { GSDState } from "../types.js";
 
 function makeState(overrides: Partial<GSDState> = {}): GSDState {
@@ -187,20 +188,72 @@ test("reconcileBeforeDispatch keeps markdown->db promotion disabled in this slic
   const projectionRepair = result.repairs.find((repair) => repair.kind === "db-projection-repair");
   assert.equal(projectionRepair?.status, "skipped");
   assert.match(projectionRepair?.reason ?? "", /not configured/i);
-
-  const source = readFileSync(
-    new URL("../auto/state-reconciliation.ts", import.meta.url),
-    "utf8",
-  );
-  assert.doesNotMatch(source, /md-importer|importFromMarkdown|markdown.*import/i);
 });
 
-test("legacy pre-dispatch path routes through the reconciliation seam", () => {
-  const phasesSource = readFileSync(
-    new URL("../auto/phases.ts", import.meta.url),
-    "utf8",
-  );
-  assert.match(phasesSource, /deps\.reconcileBeforeDispatch/);
-  assert.match(phasesSource, /stateBasePath:\s*s\.canonicalProjectRoot/);
-  assert.match(phasesSource, /reason:\s*"legacy-pre-dispatch"/);
+test("legacy pre-dispatch path routes through the reconciliation seam", async () => {
+  const calls: string[] = [];
+  let reconciliationInput: unknown;
+  const ctx = {
+    ui: {
+      notify(message: string, level: string) {
+        calls.push(`notify:${level}:${message}`);
+      },
+    },
+  };
+  const deps = {
+    checkResourcesStale: () => null,
+    invalidateAllCaches: () => {
+      calls.push("invalidate");
+    },
+    preDispatchHealthGate: async () => ({ proceed: true, fixesApplied: [] }),
+    reconcileBeforeDispatch: async (input: unknown) => {
+      reconciliationInput = input;
+      return {
+        allow: false,
+        reason: "DB unavailable — runtime markdown state derivation is disabled",
+        repairs: [],
+        blockers: [{
+          kind: "db-unavailable",
+          reason: "DB unavailable — runtime markdown state derivation is disabled",
+          fatal: true,
+        }],
+      };
+    },
+    pauseAuto: async () => {
+      calls.push("pause");
+    },
+  };
+  const ic = {
+    ctx,
+    pi: {},
+    s: {
+      basePath: "/tmp/worktree",
+      canonicalProjectRoot: "/tmp/project",
+      originalBasePath: "/tmp/project",
+      resourceVersionOnStart: null,
+      currentMilestoneId: null,
+    },
+    deps,
+    prefs: undefined,
+    iteration: 1,
+    flowId: "flow-1",
+    nextSeq: () => 1,
+  } as unknown as IterationContext;
+  const loopState: LoopState = {
+    recentUnits: [],
+    stuckRecoveryAttempts: 0,
+    consecutiveFinalizeTimeouts: 0,
+  };
+
+  const result = await runPreDispatch(ic, loopState);
+
+  assert.deepEqual(reconciliationInput, {
+    basePath: "/tmp/worktree",
+    stateBasePath: "/tmp/project",
+    projectionBasePath: "/tmp/project",
+    reason: "legacy-pre-dispatch",
+  });
+  assert.deepEqual(result, { action: "break", reason: "state-reconciliation-blocked" });
+  assert.ok(calls.some((call) => call.startsWith("notify:error:DB unavailable")));
+  assert.ok(calls.includes("pause"));
 });
