@@ -591,6 +591,40 @@ export function _warnIfWorktreeMissingForTest(
   return false;
 }
 
+/** Test-only seam for behaviour tests that need a minimal active auto session. */
+export function _setAutoSessionStateForTest(state: {
+  active?: boolean;
+  paused?: boolean;
+  basePath?: string;
+  originalBasePath?: string;
+  originalThinkingLevel?: ReturnType<ExtensionAPI["getThinkingLevel"]> | null;
+  autoModeStartThinkingLevel?: ReturnType<ExtensionAPI["getThinkingLevel"]> | null;
+  currentMilestoneId?: string | null;
+}): void {
+  if (state.active !== undefined) s.active = state.active;
+  if (state.paused !== undefined) s.paused = state.paused;
+  if (state.basePath !== undefined) s.basePath = state.basePath;
+  if (state.originalBasePath !== undefined) s.originalBasePath = state.originalBasePath;
+  if (state.originalThinkingLevel !== undefined) s.originalThinkingLevel = state.originalThinkingLevel;
+  if (state.autoModeStartThinkingLevel !== undefined) s.autoModeStartThinkingLevel = state.autoModeStartThinkingLevel;
+  if (state.currentMilestoneId !== undefined) s.currentMilestoneId = state.currentMilestoneId;
+}
+
+/** Test-only seam for resetting auto-mode singleton state after behavioural tests. */
+export function _resetAutoSessionForTest(pi?: ExtensionAPI): void {
+  clearUnitTimeout();
+  stopAutoCommandPolling();
+  clearSliceProgressCache();
+  clearActivityLogState();
+  setLevelChangeCallback(null);
+  resetProactiveHealing();
+  restoreProjectRootEnv();
+  restoreMilestoneLockEnv();
+  _resetPendingResolve();
+  if (pi) clearToolBaseline(pi);
+  s.reset();
+}
+
 export function isAutoPaused(): boolean {
   return s.paused;
 }
