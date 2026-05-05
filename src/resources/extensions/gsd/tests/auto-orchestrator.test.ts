@@ -55,7 +55,6 @@ function makeDeps(overrides: Partial<AutoOrchestratorDeps> = {}): { deps: AutoOr
         calls.push("worktree.prepare");
         return { allow: true, warnings: [] };
       },
-      async syncAfterUnit() { calls.push("worktree.sync"); },
       async cleanupOnStop() { calls.push("worktree.cleanup"); },
     },
     health: {
@@ -94,7 +93,6 @@ test("advance() runs the explicit invariant pipeline before journaling transitio
     "toolContract.compile",
     "worktree.prepare",
     "journal:advance",
-    "worktree.sync",
     "health.post",
   ]);
 });
@@ -207,7 +205,6 @@ test("advance() blocks when worktree safety rejects the selected unit", async ()
   const { deps, calls } = makeDeps({
     worktree: {
       async prepareForUnit() { return { allow: false, reason: "missing .git", warnings: [] }; },
-      async syncAfterUnit() {},
       async cleanupOnStop() {},
     },
     recovery: {

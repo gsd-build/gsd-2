@@ -1468,7 +1468,6 @@ export function createWiredAutoOrchestrationModule(
         }
         return result;
       },
-      async syncAfterUnit() {},
       async cleanupOnStop() {},
     },
     health: {

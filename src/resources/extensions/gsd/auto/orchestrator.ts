@@ -130,7 +130,6 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
         unitType: decision.unitType,
         unitId: decision.unitId,
       });
-      await this.deps.worktree.syncAfterUnit(decision.unitType, decision.unitId);
 
       const advanced: AutoAdvanceResult = { kind: "advanced", stateSnapshot: reconciliation.stateSnapshot };
       await this.deps.health.postAdvanceRecord(advanced);

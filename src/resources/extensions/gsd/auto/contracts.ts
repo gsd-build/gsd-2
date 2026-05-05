@@ -103,7 +103,6 @@ export interface WorktreeAdapter {
     reason?: string;
     warnings?: readonly string[];
   }>;
-  syncAfterUnit(unitType: string, unitId: string): Promise<void>;
   cleanupOnStop(reason: string): Promise<void>;
 }
 
