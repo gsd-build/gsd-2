@@ -25,7 +25,7 @@ function makeDeps(overrides: Partial<AutoOrchestratorDeps> = {}): { deps: AutoOr
     stateReconciliation: {
       async reconcileBeforeDispatch(input) {
         calls.push(`state.reconcile:${input.basePath ?? "none"}`);
-        return { allow: true, stateSnapshot: makeState() };
+        return { allow: true, stateSnapshot: makeState(), repairs: [], blockers: [] };
       },
     },
     dispatch: {
@@ -145,7 +145,13 @@ test("advance() blocks before dispatch when state reconciliation denies progress
     stateReconciliation: {
       async reconcileBeforeDispatch() {
         calls.push("state.reconcile");
-        return { allow: false, reason: "db-disk-drift", stateSnapshot: makeState() };
+        return {
+          allow: false,
+          reason: "db-disk-drift",
+          stateSnapshot: makeState(),
+          repairs: [],
+          blockers: [{ kind: "state-derived-blocker", reason: "db-disk-drift", fatal: true }],
+        };
       },
     },
   });

@@ -233,9 +233,10 @@ import { runAutoLoopWithUok } from "./uok/kernel.js";
 import { resolveUokFlags } from "./uok/flags.js";
 import { validateDirectory } from "./validate-directory.js";
 import { createAutoOrchestrator } from "./auto/orchestrator.js";
-import type { AutoOrchestrationModule, AutoOrchestratorDeps } from "./auto/contracts.js";
+import type { AutoOrchestrationModule, AutoOrchestratorDeps, ReconcileBeforeDispatchInput } from "./auto/contracts.js";
 import { compileUnitToolContract as compileUnitToolContractFromManifest } from "./auto/tool-contract.js";
 import { prepareUnitRoot } from "./auto/worktree-safety.js";
+import { createDefaultStateReconciliationAdapter } from "./auto/state-reconciliation.js";
 // Slice-level parallelism (#2340)
 import { getEligibleSlices } from "./slice-parallel-eligibility.js";
 import { startSliceParallel } from "./slice-parallel-orchestrator.js";
@@ -1407,14 +1408,13 @@ export function createWiredAutoOrchestrationModule(
 ): AutoOrchestrationModule {
   const flowId = `auto-orchestrator-${Date.now()}`;
   let seq = 0;
+  const stateReconciliation = createDefaultStateReconciliationAdapter(
+    deriveState,
+    invalidateAllCaches,
+  );
 
   const deps: AutoOrchestratorDeps = {
-    stateReconciliation: {
-      async reconcileBeforeDispatch(input) {
-        const state = await deriveState(input.basePath ?? dispatchBasePath);
-        return { allow: true, stateSnapshot: state };
-      },
-    },
+    stateReconciliation,
     dispatch: {
       async decideNextUnit(input) {
         const state = input.stateSnapshot;
@@ -1564,6 +1564,10 @@ function buildLoopDeps(pi: ExtensionAPI): LoopDeps {
   initRegistry(convertDispatchRules(DISPATCH_RULES));
 
   const cmux = makeCmuxEmitters(pi);
+  const stateReconciliation = createDefaultStateReconciliationAdapter(
+    deriveState,
+    invalidateAllCaches,
+  );
 
   return {
     lockBase,
@@ -1581,6 +1585,8 @@ function buildLoopDeps(pi: ExtensionAPI): LoopDeps {
     // State and cache
     invalidateAllCaches,
     deriveState,
+    reconcileBeforeDispatch: (input: ReconcileBeforeDispatchInput) =>
+      stateReconciliation.reconcileBeforeDispatch(input),
     rebuildState,
     loadEffectiveGSDPreferences,
 

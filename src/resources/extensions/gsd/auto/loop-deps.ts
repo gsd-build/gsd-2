@@ -24,6 +24,7 @@ import type { JournalEntry } from "../journal.js";
 import type { MergeReconcileResult } from "../auto-recovery.js";
 import type { UokTurnObserver } from "../uok/contracts.js";
 import type { PreflightResult } from "../clean-root-preflight.js";
+import type { ReconcileBeforeDispatchInput, StateReconciliationResult } from "./contracts.js";
 
 type PauseAutoFn = (
   ctx?: ExtensionContext,
@@ -64,6 +65,9 @@ export interface LoopDeps {
   // State and cache functions
   invalidateAllCaches: () => void;
   deriveState: (basePath: string) => Promise<GSDState>;
+  reconcileBeforeDispatch?: (
+    input: ReconcileBeforeDispatchInput,
+  ) => Promise<StateReconciliationResult>;
   rebuildState: (basePath: string) => Promise<void>;
   loadEffectiveGSDPreferences: () =>
     | { preferences?: GSDPreferences }

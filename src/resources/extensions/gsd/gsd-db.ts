@@ -1138,16 +1138,19 @@ export function setSliceSketchFlag(milestoneId: string, sliceId: string, isSketc
  * is_sketch=1" is extremely unlikely to indicate anything other than the two
  * recovery scenarios above.
  */
-export function autoHealSketchFlags(milestoneId: string, hasPlanFile: (sliceId: string) => boolean): void {
-  if (!currentDb) return;
+export function autoHealSketchFlags(milestoneId: string, hasPlanFile: (sliceId: string) => boolean): number {
+  if (!currentDb) return 0;
   const rows = currentDb.prepare(
     `SELECT id FROM slices WHERE milestone_id = :mid AND is_sketch = 1`,
   ).all({ ":mid": milestoneId }) as Array<{ id: string }>;
+  let repaired = 0;
   for (const row of rows) {
     if (hasPlanFile(row.id)) {
       setSliceSketchFlag(milestoneId, row.id, false);
+      repaired++;
     }
   }
+  return repaired;
 }
 
 export function upsertSlicePlanning(milestoneId: string, sliceId: string, planning: Partial<SlicePlanningRecord>): void {

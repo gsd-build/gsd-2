@@ -53,14 +53,51 @@ export interface AutoOrchestrationModule {
   getStatus(): AutoStatus;
 }
 
+export type StateReconciliationRepairKind =
+  | "db-refresh"
+  | "stale-sketch-flag"
+  | "db-projection-repair";
+
+export type StateReconciliationRepairStatus =
+  | "applied"
+  | "skipped"
+  | "failed";
+
+export interface StateReconciliationRepair {
+  kind: StateReconciliationRepairKind;
+  status: StateReconciliationRepairStatus;
+  reason: string;
+  dbAffecting: boolean;
+}
+
+export type StateReconciliationBlockerKind =
+  | "db-unavailable"
+  | "state-derive-failed"
+  | "state-derived-blocker";
+
+export interface StateReconciliationBlocker {
+  kind: StateReconciliationBlockerKind;
+  reason: string;
+  fatal: boolean;
+}
+
+export interface StateReconciliationResult {
+  allow: boolean;
+  reason?: string;
+  stateSnapshot?: GSDState;
+  repairs: readonly StateReconciliationRepair[];
+  blockers: readonly StateReconciliationBlocker[];
+}
+
+export interface ReconcileBeforeDispatchInput {
+  basePath?: string;
+  stateBasePath?: string;
+  projectionBasePath?: string;
+  reason?: "orchestrator-advance" | "legacy-pre-dispatch" | "merge-reconcile";
+}
+
 export interface StateReconciliationAdapter {
-  reconcileBeforeDispatch(input: {
-    basePath?: string;
-  }): Promise<{
-    allow: boolean;
-    reason?: string;
-    stateSnapshot?: GSDState;
-  }>;
+  reconcileBeforeDispatch(input: ReconcileBeforeDispatchInput): Promise<StateReconciliationResult>;
 }
 
 export interface DispatchAdapter {

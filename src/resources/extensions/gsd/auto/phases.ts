@@ -452,10 +452,50 @@ export async function runPreDispatch(
     );
   }
 
-  // Derive state — use canonical project root so the cache key is stable
+  // Reconcile state — use canonical project root so the cache key is stable
   // across worktree↔project-root path-form alternation. See PR #5236
   // (workspace handle infrastructure) and the Phase A pt 2 plan.
-  let state = await deps.deriveState(s.canonicalProjectRoot);
+  const reconciliation = deps.reconcileBeforeDispatch
+    ? await deps.reconcileBeforeDispatch({
+        basePath: s.basePath,
+        stateBasePath: s.canonicalProjectRoot,
+        projectionBasePath: s.originalBasePath ?? s.canonicalProjectRoot,
+        reason: "legacy-pre-dispatch",
+      })
+    : {
+        allow: true,
+        stateSnapshot: await deps.deriveState(s.canonicalProjectRoot),
+        repairs: [],
+        blockers: [],
+      };
+  if (!reconciliation.allow || !reconciliation.stateSnapshot) {
+    const reason = reconciliation.reason ?? "State reconciliation blocked dispatch";
+    await runPreDispatchGate({
+      gateId: "state-reconciliation",
+      gateType: "execution",
+      outcome: "manual-attention",
+      failureClass: "manual-attention",
+      rationale: "state reconciliation blocked dispatch",
+      findings: reason,
+    });
+    ctx.ui.notify(reason, "error");
+    await deps.pauseAuto(ctx, pi);
+    debugLog("autoLoop", {
+      phase: "exit",
+      reason: "state-reconciliation-blocked",
+      blockers: reconciliation.blockers,
+      repairs: reconciliation.repairs,
+    });
+    return { action: "break", reason: "state-reconciliation-blocked" };
+  }
+  let state = reconciliation.stateSnapshot;
+  const appliedRepairs = reconciliation.repairs.filter((repair) => repair.status === "applied");
+  if (appliedRepairs.length > 0) {
+    debugLog("autoLoop", {
+      phase: "state-reconciled",
+      repairs: appliedRepairs.map((repair) => `${repair.kind}:${repair.reason}`),
+    });
+  }
   const { getDeepStageGate } = await import("../auto-dispatch.js");
   const deepStageGate = getDeepStageGate(prefs, s.basePath);
   const canRunDeepSetupGate =
