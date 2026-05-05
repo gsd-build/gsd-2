@@ -102,7 +102,22 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
         return blocked;
       }
 
-      await this.deps.worktree.prepareForUnit(decision.unitType, decision.unitId);
+      const worktree = await this.deps.worktree.prepareForUnit(decision.unitType, decision.unitId, toolContract.contract);
+      if (!worktree.allow) {
+        const blocked: AutoAdvanceResult = {
+          kind: "blocked",
+          reason: worktree.reason ?? "worktree safety blocked",
+          stateSnapshot: reconciliation.stateSnapshot,
+        };
+        await this.deps.runtime.journalTransition({
+          name: "advance-blocked",
+          reason: blocked.reason,
+          unitType: decision.unitType,
+          unitId: decision.unitId,
+        });
+        await this.deps.health.postAdvanceRecord(blocked);
+        return blocked;
+      }
 
       this.status.activeUnit = { unitType: decision.unitType, unitId: decision.unitId };
       this.status.phase = "running";

@@ -32,7 +32,6 @@ import { detectStuck } from "./detect-stuck.js";
 import { runUnit } from "./run-unit.js";
 import { debugLog } from "../debug-logger.js";
 import { resolveWorktreeProjectRoot, normalizeWorktreePathForCompare } from "../worktree-root.js";
-import { classifyProject } from "../detection.js";
 import { MergeConflictError } from "../git-service.js";
 import { setCurrentPhase, clearCurrentPhase } from "../../shared/gsd-phase-state.js";
 import { pauseAutoForProviderError } from "../provider-error-pause.js";
@@ -69,6 +68,8 @@ import {
   getRequiredWorkflowToolsForAutoUnit,
   supportsStructuredQuestions,
 } from "../workflow-mcp.js";
+import { compileUnitToolContract } from "./tool-contract.js";
+import { prepareUnitRoot } from "./worktree-safety.js";
 
 // ─── Path Comparison Helper ───────────────────────────────────────────────
 /** Compare two paths for physical identity, tolerating trailing slashes and symlinks. */
@@ -684,7 +685,6 @@ export async function runPreDispatch(
       deps.postflightPopStash(
         s.originalBasePath || s.basePath,
         s.currentMilestoneId!,
-        preflightTransition.stashMarker,
         ctx.ui.notify.bind(ctx.ui),
       );
     }
@@ -798,7 +798,6 @@ export async function runPreDispatch(
           deps.postflightPopStash(
             s.originalBasePath || s.basePath,
             s.currentMilestoneId,
-            preflightAllComplete.stashMarker,
             ctx.ui.notify.bind(ctx.ui),
           );
         }
@@ -927,7 +926,6 @@ export async function runPreDispatch(
         deps.postflightPopStash(
           s.originalBasePath || s.basePath,
           s.currentMilestoneId,
-          preflightComplete.stashMarker,
           ctx.ui.notify.bind(ctx.ui),
         );
       }
@@ -1483,47 +1481,32 @@ export async function runUnitPhase(
     unitId,
   });
 
-  // ── Worktree health check (#1833, #1843) ────────────────────────────
-  // Verify the working directory is a valid git checkout with project
-  // files before dispatching work. A broken worktree causes agents to
-  // hallucinate summaries since they cannot read or write any files.
-  // Uses project classification so project presence is not conflated with
-  // ecosystem marker detection. Static/minimal repos become untyped-existing.
-  let projectClassification: ReturnType<typeof classifyProject> | null = null;
-  if (s.basePath && unitType === "execute-task") {
-    const gitMarker = join(s.basePath, ".git");
-    const hasGit = deps.existsSync(gitMarker);
-    if (!hasGit) {
-      const msg = `Worktree health check failed: ${s.basePath} has no .git — refusing to dispatch ${unitType} ${unitId}`;
-      debugLog("runUnitPhase", { phase: "worktree-health-fail", basePath: s.basePath, hasGit });
-      ctx.ui.notify(msg, "error");
-      await deps.stopAuto(ctx, pi, msg);
-      return { action: "break", reason: "worktree-invalid" };
-    }
-    projectClassification = classifyProject(s.basePath);
-    if (projectClassification.kind === "invalid-repo") {
-      const msg = `Worktree health check failed: ${s.basePath} classified as invalid-repo (${projectClassification.reason}) — refusing to dispatch ${unitType} ${unitId}`;
-      debugLog("runUnitPhase", { phase: "worktree-health-invalid-repo", basePath: s.basePath, classification: projectClassification });
-      if (projectClassification.reason === "missing .git" && hasGit) {
-        ctx.ui.notify(
-          `Warning: ${s.basePath} project classification could not confirm .git; assuming it has no project content yet — proceeding as greenfield project because worktree health reported .git present`,
-          "warning",
-        );
-      } else {
-        ctx.ui.notify(msg, "error");
-        await deps.stopAuto(ctx, pi, msg);
-        return { action: "break", reason: "worktree-invalid" };
-      }
-    } else if (projectClassification.kind === "greenfield") {
-      debugLog("runUnitPhase", { phase: "worktree-health-greenfield", basePath: s.basePath, classification: projectClassification });
-      ctx.ui.notify(`Warning: ${s.basePath} has no project content yet — proceeding as greenfield project`, "warning");
-    } else if (projectClassification.kind === "untyped-existing") {
-      debugLog("runUnitPhase", { phase: "worktree-health-untyped-existing", basePath: s.basePath, classification: projectClassification });
-      ctx.ui.notify(
-        `Notice: ${s.basePath} has existing project content but no recognized tooling markers — using generic file-level workflow guidance`,
-        "info",
-      );
-    }
+  const toolContract = await compileUnitToolContract({ unitType, unitId, preconditions: [] });
+  if (!toolContract.allow) {
+    const msg = toolContract.reason ?? `Tool contract invalid for ${unitType} ${unitId}`;
+    debugLog("runUnitPhase", { phase: "tool-contract-invalid", unitType, unitId, reason: msg });
+    ctx.ui.notify(msg, "error");
+    await deps.stopAuto(ctx, pi, msg);
+    return { action: "break", reason: "tool-contract-invalid" };
+  }
+
+  const worktreeSafety = await prepareUnitRoot({
+    basePath: s.basePath,
+    unitType,
+    unitId,
+    contract: toolContract.contract,
+    existsSync: deps.existsSync,
+  });
+  if (!worktreeSafety.allow) {
+    const msg = worktreeSafety.reason ?? `Worktree health check failed for ${unitType} ${unitId}`;
+    debugLog("runUnitPhase", { phase: "worktree-health-fail", basePath: s.basePath, reason: msg });
+    ctx.ui.notify(msg, "error");
+    await deps.stopAuto(ctx, pi, msg);
+    return { action: "break", reason: "worktree-invalid" };
+  }
+  for (const warning of worktreeSafety.warnings) {
+    debugLog("runUnitPhase", { phase: "worktree-health-warn", basePath: s.basePath, warning });
+    ctx.ui.notify(`Warning: ${warning}`, "warning");
   }
 
   // Detect retry and capture previous tier for escalation
@@ -1600,17 +1583,6 @@ export async function runUnitPhase(
 
   // Prompt injection
   let finalPrompt = prompt;
-
-  if (unitType === "execute-task") {
-    projectClassification ??= classifyProject(s.basePath);
-    if (projectClassification.kind === "untyped-existing") {
-      const samples = projectClassification.contentFiles.slice(0, 8).join(", ") || "project files";
-      finalPrompt +=
-        "\n\n**Project classification:** Existing untyped project. No recognized build/tooling markers were detected, " +
-        "so use generic file-level workflow guidance. Task plans and completion summaries must list every concrete " +
-        `project file changed in \`files\` or \`expected_output\`. Detected content sample: ${samples}.`;
-    }
-  }
 
   if (s.pendingVerificationRetry) {
     const retryCtx = s.pendingVerificationRetry;

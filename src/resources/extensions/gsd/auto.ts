@@ -234,6 +234,8 @@ import { resolveUokFlags } from "./uok/flags.js";
 import { validateDirectory } from "./validate-directory.js";
 import { createAutoOrchestrator } from "./auto/orchestrator.js";
 import type { AutoOrchestrationModule, AutoOrchestratorDeps } from "./auto/contracts.js";
+import { compileUnitToolContract as compileUnitToolContractFromManifest } from "./auto/tool-contract.js";
+import { prepareUnitRoot } from "./auto/worktree-safety.js";
 // Slice-level parallelism (#2340)
 import { getEligibleSlices } from "./slice-parallel-eligibility.js";
 import { startSliceParallel } from "./slice-parallel-orchestrator.js";
@@ -1439,8 +1441,12 @@ export function createWiredAutoOrchestrationModule(
       },
     },
     toolContract: {
-      async compileUnitToolContract() {
-        return { allow: true };
+      async compileUnitToolContract(input) {
+        const compiled = await compileUnitToolContractFromManifest(input);
+        for (const warning of compiled.contract?.warnings ?? []) {
+          logWarning("engine", warning, { file: "auto/tool-contract.ts", unitType: input.unitType, unitId: input.unitId });
+        }
+        return compiled;
       },
     },
     recovery: {
@@ -1450,7 +1456,18 @@ export function createWiredAutoOrchestrationModule(
       },
     },
     worktree: {
-      async prepareForUnit() {},
+      async prepareForUnit(unitType, unitId, contract) {
+        const result = await prepareUnitRoot({
+          basePath: dispatchBasePath,
+          unitType,
+          unitId,
+          contract,
+        });
+        for (const warning of result.warnings) {
+          ctx.ui.notify(`Worktree safety: ${warning}`, "warning");
+        }
+        return result;
+      },
       async syncAfterUnit() {},
       async cleanupOnStop() {},
     },

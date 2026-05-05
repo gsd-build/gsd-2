@@ -51,7 +51,10 @@ function makeDeps(overrides: Partial<AutoOrchestratorDeps> = {}): { deps: AutoOr
       },
     },
     worktree: {
-      async prepareForUnit() { calls.push("worktree.prepare"); },
+      async prepareForUnit() {
+        calls.push("worktree.prepare");
+        return { allow: true, warnings: [] };
+      },
       async syncAfterUnit() { calls.push("worktree.sync"); },
       async cleanupOnStop() { calls.push("worktree.cleanup"); },
     },
@@ -199,17 +202,17 @@ test("advance() uses recovery on error", async () => {
   assert.ok(calls.includes("journal:advance-error"));
 });
 
-test("advance() passes selected unit to recovery when worktree safety fails", async () => {
-  let recoveryInput: { unitType?: string; unitId?: string } | null = null;
-  const { deps } = makeDeps({
+test("advance() blocks when worktree safety rejects the selected unit", async () => {
+  let recoveryCalled = false;
+  const { deps, calls } = makeDeps({
     worktree: {
-      async prepareForUnit() { throw new Error("missing .git"); },
+      async prepareForUnit() { return { allow: false, reason: "missing .git", warnings: [] }; },
       async syncAfterUnit() {},
       async cleanupOnStop() {},
     },
     recovery: {
-      async classifyAndRecover(input) {
-        recoveryInput = { unitType: input.unitType, unitId: input.unitId };
+      async classifyAndRecover() {
+        recoveryCalled = true;
         return { action: "escalate", reason: "worktree-invalid" };
       },
     },
@@ -218,9 +221,12 @@ test("advance() passes selected unit to recovery when worktree safety fails", as
 
   const result = await orchestrator.advance();
 
-  assert.equal(result.kind, "error");
-  assert.deepEqual(recoveryInput, { unitType: "execute-task", unitId: "T01" });
+  assert.equal(result.kind, "blocked");
+  assert.equal(result.reason, "missing .git");
+  assert.equal(recoveryCalled, false);
   assert.equal(orchestrator.getStatus().activeUnit, undefined);
+  assert.ok(calls.includes("journal:advance-blocked"));
+  assert.ok(!calls.includes("journal:advance"));
 });
 
 test("advance() is idempotent for the same active unit", async () => {

@@ -1,4 +1,5 @@
 import type { GSDState } from "../types.js";
+import type { ToolsPolicy } from "../unit-context-manifest.js";
 
 export interface AutoSessionContext {
   basePath: string;
@@ -19,6 +20,29 @@ export interface AutoAdvanceResult {
   kind: "advanced" | "blocked" | "paused" | "stopped" | "error";
   reason?: string;
   stateSnapshot?: GSDState;
+}
+
+export type RuntimeInvariantFailureKind =
+  | "state-reconciliation-blocked"
+  | "tool-contract-invalid"
+  | "worktree-root-invalid";
+
+export interface RuntimeInvariantFailure {
+  kind: RuntimeInvariantFailureKind;
+  reason: string;
+  unitType?: string;
+  unitId?: string;
+  remediation?: string;
+}
+
+export interface UnitToolContract {
+  unitType: string;
+  unitId: string;
+  requiredWorkflowTools: readonly string[];
+  toolsPolicy: ToolsPolicy | null;
+  sourceWrites: boolean;
+  preconditions: readonly string[];
+  warnings: readonly string[];
 }
 
 export interface AutoOrchestrationModule {
@@ -58,6 +82,7 @@ export interface ToolContractAdapter {
   }): Promise<{
     allow: boolean;
     reason?: string;
+    contract?: UnitToolContract;
   }>;
 }
 
@@ -73,7 +98,11 @@ export interface RecoveryAdapter {
 }
 
 export interface WorktreeAdapter {
-  prepareForUnit(unitType: string, unitId: string): Promise<void>;
+  prepareForUnit(unitType: string, unitId: string, contract?: UnitToolContract): Promise<{
+    allow: boolean;
+    reason?: string;
+    warnings?: readonly string[];
+  }>;
   syncAfterUnit(unitType: string, unitId: string): Promise<void>;
   cleanupOnStop(reason: string): Promise<void>;
 }

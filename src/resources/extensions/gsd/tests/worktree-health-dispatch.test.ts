@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
 
 import { PROJECT_FILES, classifyProject } from "../detection.js";
+import { prepareUnitRoot } from "../auto/worktree-safety.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -48,12 +49,23 @@ function createEmptyGitRepo(): string {
  * projects won't have them yet). Returns { pass, greenfield } to
  * distinguish "pass with project files" from "pass as greenfield".
  */
-function wouldPassHealthCheck(basePath: string, existsSyncFn: (p: string) => boolean): boolean {
-  const hasGit = existsSyncFn(join(basePath, ".git"));
-  if (!hasGit) return false;
-
-  // .git is sufficient — greenfield projects proceed with a warning
-  return true;
+async function wouldPassHealthCheck(basePath: string, existsSyncFn: (p: string) => boolean): Promise<boolean> {
+  const result = await prepareUnitRoot({
+    basePath,
+    unitType: "execute-task",
+    unitId: "M001/S01/T01",
+    existsSync: existsSyncFn,
+    contract: {
+      unitType: "execute-task",
+      unitId: "M001/S01/T01",
+      requiredWorkflowTools: ["gsd_task_complete"],
+      toolsPolicy: { mode: "all" },
+      sourceWrites: true,
+      preconditions: [],
+      warnings: [],
+    },
+  });
+  return result.allow;
 }
 
 /** Whether the directory has recognized project files (used for greenfield detection). */
@@ -86,19 +98,13 @@ test("PROJECT_FILES is exported and contains expected multi-ecosystem entries", 
   assert.ok(PROJECT_FILES.includes("Package.swift"), "includes Swift marker");
 });
 
-test("runUnitPhase fails closed when classification returns invalid-repo", () => {
+test("runUnitPhase delegates source-writing root validation to worktree safety", () => {
   const source = readFileSync(join(process.cwd(), "src/resources/extensions/gsd/auto/phases.ts"), "utf-8");
-  const invalidRepoBranch = source.slice(
-    source.indexOf('projectClassification.kind === "invalid-repo"'),
-    source.indexOf('projectClassification.kind === "greenfield"'),
-  );
 
-  assert.match(invalidRepoBranch, /projectClassification\.reason === "missing \.git" && hasGit/);
-  assert.match(invalidRepoBranch, /project classification could not confirm \.git/);
-  assert.match(invalidRepoBranch, /ctx\.ui\.notify\(msg,\s*"error"\)/);
-  assert.match(invalidRepoBranch, /await deps\.stopAuto\(ctx,\s*pi,\s*msg\)/);
-  assert.match(invalidRepoBranch, /return \{ action: "break", reason: "worktree-invalid" \}/);
-  assert.match(invalidRepoBranch, /classified as invalid-repo/);
+  assert.match(source, /compileUnitToolContract\(\{ unitType, unitId, preconditions: \[\] \}\)/);
+  assert.match(source, /prepareUnitRoot\(\{/);
+  assert.match(source, /await deps\.stopAuto\(ctx,\s*pi,\s*msg\)/);
+  assert.match(source, /return \{ action: "break", reason: "worktree-invalid" \}/);
 });
 
 describe("health check with git repo", () => {
@@ -106,64 +112,64 @@ describe("health check with git repo", () => {
   beforeEach(() => { dir = createGitRepo(); });
   afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
-  test("health check passes for Rust project (Cargo.toml, no package.json)", () => {
+  test("health check passes for Rust project (Cargo.toml, no package.json)", async () => {
     writeFileSync(join(dir, "Cargo.toml"), "[package]\nname = \"test\"\n");
     mkdirSync(join(dir, "crates"), { recursive: true });
-    assert.ok(wouldPassHealthCheck(dir, existsSync), "Rust project should pass health check");
+    assert.ok(await wouldPassHealthCheck(dir, existsSync), "Rust project should pass health check");
   });
 
-  test("health check passes for Go project (go.mod, no package.json)", () => {
+  test("health check passes for Go project (go.mod, no package.json)", async () => {
     writeFileSync(join(dir, "go.mod"), "module example.com/test\n\ngo 1.21\n");
-    assert.ok(wouldPassHealthCheck(dir, existsSync), "Go project should pass health check");
+    assert.ok(await wouldPassHealthCheck(dir, existsSync), "Go project should pass health check");
   });
 
-  test("health check passes for Python project (pyproject.toml, no package.json)", () => {
+  test("health check passes for Python project (pyproject.toml, no package.json)", async () => {
     writeFileSync(join(dir, "pyproject.toml"), "[project]\nname = \"test\"\n");
-    assert.ok(wouldPassHealthCheck(dir, existsSync), "Python project should pass health check");
+    assert.ok(await wouldPassHealthCheck(dir, existsSync), "Python project should pass health check");
   });
 
-  test("health check passes for Java project (pom.xml, no package.json)", () => {
+  test("health check passes for Java project (pom.xml, no package.json)", async () => {
     writeFileSync(join(dir, "pom.xml"), "<project></project>\n");
-    assert.ok(wouldPassHealthCheck(dir, existsSync), "Java project should pass health check");
+    assert.ok(await wouldPassHealthCheck(dir, existsSync), "Java project should pass health check");
   });
 
-  test("health check passes for Swift project (Package.swift, no package.json)", () => {
+  test("health check passes for Swift project (Package.swift, no package.json)", async () => {
     writeFileSync(join(dir, "Package.swift"), "// swift-tools-version:5.7\n");
-    assert.ok(wouldPassHealthCheck(dir, existsSync), "Swift project should pass health check");
+    assert.ok(await wouldPassHealthCheck(dir, existsSync), "Swift project should pass health check");
   });
 
-  test("health check passes for C/C++ project (CMakeLists.txt, no package.json)", () => {
+  test("health check passes for C/C++ project (CMakeLists.txt, no package.json)", async () => {
     writeFileSync(join(dir, "CMakeLists.txt"), "cmake_minimum_required(VERSION 3.20)\n");
-    assert.ok(wouldPassHealthCheck(dir, existsSync), "C/C++ project should pass health check");
+    assert.ok(await wouldPassHealthCheck(dir, existsSync), "C/C++ project should pass health check");
   });
 
-  test("health check passes for Elixir project (mix.exs, no package.json)", () => {
+  test("health check passes for Elixir project (mix.exs, no package.json)", async () => {
     writeFileSync(join(dir, "mix.exs"), "defmodule Test.MixProject do\nend\n");
-    assert.ok(wouldPassHealthCheck(dir, existsSync), "Elixir project should pass health check");
+    assert.ok(await wouldPassHealthCheck(dir, existsSync), "Elixir project should pass health check");
   });
 
-  test("health check passes for JS project (package.json, backward compat)", () => {
+  test("health check passes for JS project (package.json, backward compat)", async () => {
     writeFileSync(join(dir, "package.json"), '{"name":"test"}\n');
-    assert.ok(wouldPassHealthCheck(dir, existsSync), "JS project should pass health check");
+    assert.ok(await wouldPassHealthCheck(dir, existsSync), "JS project should pass health check");
   });
 
-  test("health check passes for src/-only project (backward compat)", () => {
+  test("health check passes for src/-only project (backward compat)", async () => {
     mkdirSync(join(dir, "src"), { recursive: true });
-    assert.ok(wouldPassHealthCheck(dir, existsSync), "src/-only project should pass health check");
+    assert.ok(await wouldPassHealthCheck(dir, existsSync), "src/-only project should pass health check");
   });
 
-  test("health check passes for empty git repo (greenfield project)", () => {
+  test("health check passes for empty git repo (greenfield project)", async () => {
     const empty = createEmptyGitRepo();
     try {
-      assert.ok(wouldPassHealthCheck(empty, existsSync), "empty git repo should pass health check (greenfield)");
+      assert.ok(await wouldPassHealthCheck(empty, existsSync), "empty git repo should pass health check (greenfield)");
       assert.equal(classifyProject(empty).kind, "greenfield");
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }
   });
 
-  test("health check classifies README-only repo as untyped existing, not greenfield", () => {
-    assert.ok(wouldPassHealthCheck(dir, existsSync), "README-only repo should pass health check");
+  test("health check classifies README-only repo as untyped existing, not greenfield", async () => {
+    assert.ok(await wouldPassHealthCheck(dir, existsSync), "README-only repo should pass health check");
     assert.equal(classifyProject(dir).kind, "untyped-existing");
   });
 });
@@ -173,9 +179,9 @@ describe("health check without git repo", () => {
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "wt-dispatch-test-nogit-")); });
   afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
-  test("health check fails for directory with no .git", () => {
+  test("health check fails for directory with no .git", async () => {
     writeFileSync(join(dir, "Cargo.toml"), "[package]\nname = \"test\"\n");
-    assert.ok(!wouldPassHealthCheck(dir, existsSync), "no-git directory should fail health check");
+    assert.ok(!await wouldPassHealthCheck(dir, existsSync), "no-git directory should fail health check");
   });
 });
 
@@ -184,15 +190,15 @@ describe("health check with xcodegen and Xcode bundles", () => {
   beforeEach(() => { dir = createGitRepo(); });
   afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
-  test("health check passes for xcodegen project (project.yml, no Package.swift)", () => {
+  test("health check passes for xcodegen project (project.yml, no Package.swift)", async () => {
     writeFileSync(join(dir, "project.yml"), "name: MyApp\ntargets:\n  MyApp:\n    type: application\n");
-    assert.ok(wouldPassHealthCheck(dir, existsSync), "xcodegen project should pass health check");
+    assert.ok(await wouldPassHealthCheck(dir, existsSync), "xcodegen project should pass health check");
   });
 
   // Regression for the real-world failure in #1882: an iOS project with a
   // project-specific Xcode bundle (Sudokuxyz.xcodeproj/) was blocked because
   // PROJECT_FILES only probes exact filenames, not suffix-based directory names.
-  test("Xcode bundle (*.xcodeproj) is not in PROJECT_FILES but detected by suffix scan", () => {
+  test("Xcode bundle (*.xcodeproj) is not in PROJECT_FILES but detected by suffix scan", async () => {
     mkdirSync(join(dir, "Sudokuxyz.xcodeproj"), { recursive: true });
     mkdirSync(join(dir, "Sources", "Sudokuxyz"), { recursive: true });
     writeFileSync(join(dir, "Sources", "Sudokuxyz", "ContentView.swift"), "import SwiftUI\n");
@@ -201,6 +207,6 @@ describe("health check with xcodegen and Xcode bundles", () => {
     // The readdirSync suffix scan used in phases.ts detects it
     assert.ok(hasXcodeBundle(dir), "readdirSync suffix scan detects .xcodeproj bundle");
     // Health check passes regardless (only requires .git)
-    assert.ok(wouldPassHealthCheck(dir, existsSync), "Xcode bundle project should pass health check");
+    assert.ok(await wouldPassHealthCheck(dir, existsSync), "Xcode bundle project should pass health check");
   });
 });
