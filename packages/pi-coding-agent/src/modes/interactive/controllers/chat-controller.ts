@@ -105,6 +105,19 @@ let hasToolsInTurn = false;
 let pinnedBorder: DynamicBorder | undefined;
 // Reference to the pinned markdown component below the border
 let pinnedTextComponent: Markdown | undefined;
+// True after assistant message_end when we still have pending tool executions.
+// Once the pending map drains, pinned output can be torn down safely.
+let deferPinnedCleanupUntilToolsComplete = false;
+
+function clearPinnedOutput(host: InteractiveModeStateHost): void {
+	if (pinnedBorder) pinnedBorder.stopSpinner();
+	host.pinnedMessageContainer.clear();
+	lastPinnedText = "";
+	hasToolsInTurn = false;
+	pinnedBorder = undefined;
+	pinnedTextComponent = undefined;
+	deferPinnedCleanupUntilToolsComplete = false;
+}
 
 function mergeToolPhases(phases: ToolExecutionPhase[]): ToolExecutionPhase[] {
 	const merged: ToolExecutionPhase[] = [];
@@ -229,12 +242,10 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 		lastContentLength = 0;
 		lastPinnedText = "";
 		hasToolsInTurn = false;
+		deferPinnedCleanupUntilToolsComplete = false;
 		renderedSegments = [];
 		orphanedSegments = [];
-		if (pinnedBorder) pinnedBorder.stopSpinner();
-		pinnedBorder = undefined;
-		pinnedTextComponent = undefined;
-		host.pinnedMessageContainer.clear();
+		clearPinnedOutput(host);
 	}
 
 	switch (event.type) {
@@ -247,15 +258,10 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 					host.streamingMessage = undefined;
 					host.pendingTools.clear();
 					host.pendingMessagesContainer.clear();
-					host.pinnedMessageContainer.clear();
-					lastPinnedText = "";
-					hasToolsInTurn = false;
+					clearPinnedOutput(host);
 					renderedSegments = [];
 					orphanedSegments = [];
 					lastContentLength = 0;
-					if (pinnedBorder) pinnedBorder.stopSpinner();
-					pinnedBorder = undefined;
-					pinnedTextComponent = undefined;
 					host.compactionQueuedMessages = [];
 					host.rebuildChatFromMessages();
 					host.updatePendingMessagesDisplay();
@@ -902,12 +908,11 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 				// Clear pinned output once the message is finalized in the chat
 				// container — prevents duplicate display when the agent continues
 				// (e.g. form elicitation) after the assistant message ends.
-				if (pinnedBorder) pinnedBorder.stopSpinner();
-				host.pinnedMessageContainer.clear();
-				lastPinnedText = "";
-				hasToolsInTurn = false;
-				pinnedBorder = undefined;
-				pinnedTextComponent = undefined;
+				if (host.pendingTools.size === 0) {
+					clearPinnedOutput(host);
+				} else {
+					deferPinnedCleanupUntilToolsComplete = true;
+				}
 				host.footer.invalidate();
 			}
 			host.ui.requestRender();
@@ -943,7 +948,11 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 			const component = host.pendingTools.get(event.toolCallId);
 			if (component) {
 				component.updateResult({ ...event.result, isError: event.isError });
+				host.pendingTools.delete(event.toolCallId);
 				replaceCompactToolRowsWithPhaseSummary(host);
+				if (deferPinnedCleanupUntilToolsComplete && host.pendingTools.size === 0) {
+					clearPinnedOutput(host);
+				}
 				host.ui.requestRender();
 			}
 			break;
@@ -968,14 +977,7 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 			host.pendingTools.clear();
 			// Pinned output is only useful while work is actively streaming.
 			// Keep chat history as the single source after completion.
-			if (pinnedBorder) {
-				pinnedBorder.stopSpinner();
-			}
-			host.pinnedMessageContainer.clear();
-			lastPinnedText = "";
-			hasToolsInTurn = false;
-			pinnedBorder = undefined;
-			pinnedTextComponent = undefined;
+			clearPinnedOutput(host);
 			await host.checkShutdownRequested();
 			host.ui.requestRender();
 			break;

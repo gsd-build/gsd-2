@@ -965,10 +965,87 @@ test("chat-controller clears pinned zone when assistant message ends", async () 
 
 	assert.ok(host.pinnedMessageContainer.children.length > 0, "pinned zone should be populated during streaming");
 
+	// Simulate the tool completing before message_end (e.g. form elicitation path).
+	await handleAgentEvent(
+		host,
+		{
+			type: "tool_execution_end",
+			toolCallId: toolCall.id,
+			result: { content: [{ type: "text", text: "ok" }], details: {} },
+			isError: false,
+		} as any,
+	);
+	assert.equal(host.pendingTools.size, 0, "no pending tools should remain before message_end");
+
 	// End the assistant message (e.g. before form elicitation) — pinned zone should clear
 	await handleAgentEvent(host, { type: "message_end", message: makeAssistant(msgContent) } as any);
 
 	assert.equal(host.pinnedMessageContainer.children.length, 0, "pinned zone should clear on message_end to prevent duplicate display");
+});
+
+test("chat-controller keeps pinned zone until trailing tool_execution_end after message_end (#4346)", async () => {
+	(globalThis as any)[Symbol.for("@gsd/pi-coding-agent:theme")] = {
+		fg: (_key: string, text: string) => text,
+		bg: (_key: string, text: string) => text,
+		bold: (text: string) => text,
+		italic: (text: string) => text,
+		truncate: (text: string) => text,
+	};
+
+	const host = createHost();
+	const toolCall = {
+		type: "toolCall",
+		id: "tool-msg-end-order-1",
+		name: "exec_command",
+		arguments: { cmd: "echo hi" },
+	};
+
+	await handleAgentEvent(host, { type: "message_start", message: makeAssistant([]) } as any);
+
+	host.getMarkdownThemeWithSettings = () => ({});
+	const msgContent = [{ type: "text", text: "Summary after tools." }, toolCall];
+	await handleAgentEvent(
+		host,
+		{
+			type: "message_update",
+			message: makeAssistant(msgContent),
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				contentIndex: 1,
+				toolCall: {
+					...toolCall,
+					externalResult: {
+						content: [{ type: "text", text: "ok" }],
+						details: {},
+						isError: false,
+					},
+				},
+				partial: makeAssistant(msgContent),
+			},
+		} as any,
+	);
+
+	assert.ok(host.pinnedMessageContainer.children.length > 0, "pinned zone should be populated during streaming");
+	assert.ok(host.pendingTools.size > 0, "tool should still be pending before message_end");
+
+	await handleAgentEvent(host, { type: "message_end", message: makeAssistant(msgContent) } as any);
+	assert.ok(
+		host.pinnedMessageContainer.children.length > 0,
+		"pinned zone should remain visible after message_end while tools are still pending",
+	);
+
+	await handleAgentEvent(
+		host,
+		{
+			type: "tool_execution_end",
+			toolCallId: toolCall.id,
+			result: { content: [{ type: "text", text: "ok" }], details: {} },
+			isError: false,
+		} as any,
+	);
+
+	assert.equal(host.pendingTools.size, 0, "tool should be removed from pending map when it completes");
+	assert.equal(host.pinnedMessageContainer.children.length, 0, "pinned zone should clear when last pending tool completes");
 });
 
 test("chat-controller does not pin when there are no tool calls", async () => {
