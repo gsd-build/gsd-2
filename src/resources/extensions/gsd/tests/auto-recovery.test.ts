@@ -12,6 +12,7 @@ import { clearParseCache } from "../files.ts";
 import { parseRoadmap } from "../parsers-legacy.ts";
 import { invalidateAllCaches } from "../cache.ts";
 import { deriveState, invalidateStateCache } from "../state.ts";
+import { writeIntegrationBranch } from "../git-service.ts";
 
 const tmpDirs: string[] = [];
 
@@ -730,6 +731,50 @@ test("hasImplementationArtifacts rejects milestone-scoped main history with only
 
     const result = hasImplementationArtifacts(base, "M001");
     assert.equal(result, "absent", "milestone-scoped fallback must not treat .gsd-only commits as implementation");
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("hasImplementationArtifacts finds integration implementation-only commits when milestone branch diff is .gsd-only", () => {
+  const base = makeGitBase();
+  try {
+    mkdirSync(join(base, "src"), { recursive: true });
+    writeFileSync(join(base, "src", "feature.ts"), "export function feature() {}\n");
+    execFileSync("git", ["add", "src/feature.ts"], { cwd: base, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "feat: add milestone feature\n\nGSD-Task: S01/T01"], { cwd: base, stdio: "ignore" });
+
+    mkdirSync(join(base, ".gsd"), { recursive: true });
+    openDatabase(join(base, ".gsd", "gsd.db"));
+    insertMilestone({ id: "M001", title: "Milestone One", status: "active" });
+    insertSlice({
+      id: "S01",
+      milestoneId: "M001",
+      title: "Slice One",
+      status: "complete",
+      risk: "low",
+      depends: [],
+    });
+    insertTask({
+      id: "T01",
+      sliceId: "S01",
+      milestoneId: "M001",
+      title: "Task One",
+      status: "complete",
+    });
+
+    execFileSync("git", ["checkout", "-b", "milestone/M001"], { cwd: base, stdio: "ignore" });
+    writeIntegrationBranch(base, "M001", "main");
+    writeFileSync(join(base, ".gsd", "milestones", "M001", "M001-SUMMARY.md"), "# Milestone Summary\nDone.");
+    execFileSync("git", ["add", "."], { cwd: base, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "chore: auto-commit after complete-milestone\n\nGSD-Unit: M001"], { cwd: base, stdio: "ignore" });
+
+    const result = hasImplementationArtifacts(base, "M001");
+    assert.equal(
+      result,
+      "present",
+      ".gsd-only milestone closeout diffs should still honor implementation commits already on the integration branch",
+    );
   } finally {
     cleanup(base);
   }

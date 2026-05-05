@@ -155,7 +155,21 @@ export function hasImplementationArtifacts(basePath: string, milestoneId?: strin
       return "unknown";
     }
 
-    return classifyImplementationFiles(changedFiles);
+    const branchClassification = classifyImplementationFiles(changedFiles);
+    if (branchClassification === "present") return "present";
+
+    // A completing milestone branch can have a non-empty diff containing only
+    // .gsd/ closeout files after implementation commits already landed on the
+    // recorded integration branch. In that topology, the branch diff alone is
+    // insufficient; use the same milestone-tagged evidence fallback as the
+    // self-diff retry path before declaring the milestone implementation-free.
+    if (milestoneId) {
+      const tagged = getChangedFilesFromMilestoneTaggedCommits(basePath, milestoneId);
+      if (!tagged.ok) return "unknown";
+      if (tagged.matched) return classifyImplementationFiles(tagged.files);
+    }
+
+    return "absent";
   } catch (e) {
     // Non-fatal — if git operations fail, return unknown so callers can decide
     logWarning("recovery", `implementation artifact check failed: ${(e as Error).message}`);
@@ -263,7 +277,7 @@ function getChangedFilesFromMilestoneTaggedCommits(
     "log", "--format=%H%x1f%B%x1e", "HEAD", "--", `.gsd/milestones/${milestoneId}`,
   ]);
   if (!scoped.ok) return scoped;
-  if (scoped.matched) return scoped;
+  if (scoped.matched && classifyImplementationFiles(scoped.files) === "present") return scoped;
 
   // Fallback (#5033): when .gsd/ is gitignored / external / untracked, the
   // path-scoped scan matches no commits even though GSD-tagged commits
@@ -274,9 +288,17 @@ function getChangedFilesFromMilestoneTaggedCommits(
   // Intentionally unbounded — symmetric with the primary scan, and avoids
   // reintroducing the rolling-depth failure class removed in #4699 where
   // milestone evidence aged out behind unrelated activity.
-  return scanGsdTaggedCommits(basePath, milestoneId, [
+  const unscoped = scanGsdTaggedCommits(basePath, milestoneId, [
     "log", "--format=%H%x1f%B%x1e", "HEAD",
   ]);
+  if (!unscoped.ok) return scoped.matched ? scoped : unscoped;
+  if (!unscoped.matched) return scoped;
+
+  return {
+    ok: true,
+    matched: true,
+    files: [...new Set([...scoped.files, ...unscoped.files])],
+  };
 }
 
 function scanGsdTaggedCommits(
