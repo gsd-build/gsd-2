@@ -1,3 +1,5 @@
+// GSD-2 + src/resources/extensions/gsd/auto-dashboard.ts - Auto-mode progress widget rendering and dashboard helpers.
+
 /**
  * Auto-mode Dashboard — progress widget rendering, elapsed time formatting,
  * unit description helpers, and slice progress caching.
@@ -46,6 +48,7 @@ import {
 import { logWarning } from "./workflow-logger.js";
 import { formattedShortcutPair } from "./shortcut-defs.js";
 import { homedir } from "node:os";
+import { readUnitRuntimeRecord, type AutoUnitRuntimeRecord } from "./unit-runtime.js";
 
 // ─── UAT Slice Extraction ─────────────────────────────────────────────────────
 
@@ -213,6 +216,36 @@ export function formatWidgetTokens(count: number): string {
   if (count < 1000000) return `${Math.round(count / 1000)}k`;
   if (count < 10000000) return `${(count / 1000000).toFixed(1)}M`;
   return `${Math.round(count / 1000000)}M`;
+}
+
+export function formatRuntimeHealthSignal(
+  record: AutoUnitRuntimeRecord | null,
+  now = Date.now(),
+): { level: "green" | "yellow"; summary: string; detail?: string } | null {
+  if (!record) return null;
+  const idleMs = Math.max(0, now - record.lastProgressAt);
+  const idleMinutes = Math.floor(idleMs / 60_000);
+  if ((record.recoveryAttempts ?? 0) > 0 || record.phase === "recovered" || record.lastProgressKind.includes("recovery")) {
+    return {
+      level: "yellow",
+      summary: "Recovering",
+      detail: `retry ${record.recoveryAttempts ?? 1} after ${record.lastRecoveryReason ?? "idle"} stall`,
+    };
+  }
+  if (record.progressCount === 0 && idleMs >= 60_000) {
+    return {
+      level: "yellow",
+      summary: "Waiting on provider",
+      detail: `no output for ${idleMinutes}m`,
+    };
+  }
+  return null;
+}
+
+export function shouldRenderRoadmapProgress(
+  progress: { total: number; activeSliceTasks?: { total: number } | null } | null,
+): progress is { total: number; activeSliceTasks?: { total: number } | null } {
+  return !!progress && progress.total > 0;
 }
 
 // ─── ETA Estimation ──────────────────────────────────────────────────────────
@@ -622,6 +655,7 @@ export function updateProgressWidget(
     let cachedLines: string[] | undefined;
     let cachedWidth: number | undefined;
     let cachedRtkLabel: string | null | undefined;
+    let cachedRuntimeRecord: AutoUnitRuntimeRecord | null = null;
 
     const refreshRtkLabel = (): void => {
       try {
@@ -634,7 +668,16 @@ export function updateProgressWidget(
       }
     };
 
+    const refreshRuntimeRecord = (): void => {
+      try {
+        cachedRuntimeRecord = readUnitRuntimeRecord(accessors.getBasePath(), unitType, unitId);
+      } catch {
+        cachedRuntimeRecord = null;
+      }
+    };
+
     refreshRtkLabel();
+    refreshRuntimeRecord();
 
     const pulseTimer = setInterval(() => {
       pulseBright = !pulseBright;
@@ -652,6 +695,7 @@ export function updateProgressWidget(
           updateSliceProgressCache(accessors.getBasePath(), mid.id, slice?.id);
         }
         refreshRtkLabel();
+        refreshRuntimeRecord();
         cachedLines = undefined;
       } catch (err) { /* non-fatal */
         logWarning("dashboard", `DB status update failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -685,13 +729,16 @@ export function updateProgressWidget(
 
         // Health indicator in header
         const score = computeProgressScore();
-        const healthColor = score.level === "green" ? "success"
-          : score.level === "yellow" ? "warning"
+        const runtimeSignal = formatRuntimeHealthSignal(cachedRuntimeRecord);
+        const healthLevel = runtimeSignal?.level ?? score.level;
+        const healthSummary = runtimeSignal?.summary ?? score.summary;
+        const healthColor = healthLevel === "green" ? "success"
+          : healthLevel === "yellow" ? "warning"
             : "error";
-        const healthIcon = score.level === "green" ? GLYPH.statusActive
-          : score.level === "yellow" ? "!"
+        const healthIcon = healthLevel === "green" ? GLYPH.statusActive
+          : healthLevel === "yellow" ? "!"
             : "x";
-        const healthStr = `  ${theme.fg(healthColor, healthIcon)} ${theme.fg(healthColor, score.summary)}`;
+        const healthStr = `  ${theme.fg(healthColor, healthIcon)} ${theme.fg(healthColor, healthSummary)}`;
 
         const headerLeft = `${pad}${dot} ${theme.fg("accent", theme.bold("GSD"))}  ${theme.fg("success", modeTag)}${healthStr}`;
 
@@ -706,7 +753,9 @@ export function updateProgressWidget(
         lines.push(rightAlign(headerLeft, headerRight, width));
 
         // Show health signal details when degraded (yellow/red)
-        if (score.level !== "green" && score.signals.length > 0 && widgetMode !== "min") {
+        if (runtimeSignal?.detail && widgetMode !== "min") {
+          lines.push(`${pad}  ${theme.fg("dim", runtimeSignal.detail)}`);
+        } else if (score.level !== "green" && score.signals.length > 0 && widgetMode !== "min") {
           // Show up to 3 most relevant signals in compact form
           const topSignals = score.signals
             .filter(s => s.kind === "negative")
@@ -785,7 +834,7 @@ export function updateProgressWidget(
 
           // Progress bar
           const roadmapSlices = mid ? getRoadmapSlicesSync() : null;
-          if (roadmapSlices) {
+          if (shouldRenderRoadmapProgress(roadmapSlices)) {
             const { done, total, activeSliceTasks } = roadmapSlices;
             const barWidth = Math.max(6, Math.min(18, Math.floor(width * 0.25)));
             const pct = total > 0 ? done / total : 0;
@@ -853,7 +902,7 @@ export function updateProgressWidget(
 
         const leftLines: string[] = [];
 
-        if (roadmapSlices) {
+        if (shouldRenderRoadmapProgress(roadmapSlices)) {
           const { done, total, activeSliceTasks } = roadmapSlices;
           const barWidth = Math.max(6, Math.min(18, Math.floor(leftColWidth * 0.4)));
           const pct = total > 0 ? done / total : 0;

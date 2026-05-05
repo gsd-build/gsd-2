@@ -1,3 +1,5 @@
+// GSD-2 + src/tests/tui-content-cursor-desync.test.ts - Regression coverage for TUI hardware cursor baselines.
+
 /**
  * Regression test for #3764: TUI input clears and jumps up after PR #3744.
  *
@@ -297,11 +299,6 @@ describe("TUI cursor tracking regression (#3764)", () => {
       1,
       "hardwareCursorRow should be at IME position (row 1) after first render",
     );
-    assert.strictEqual(
-      (tui as any).contentCursorRow,
-      4,
-      "contentCursorRow should track rendered content-bottom row before IME reposition",
-    );
 
     // Shrink content
     terminal.writtenData = [];
@@ -313,16 +310,17 @@ describe("TUI cursor tracking regression (#3764)", () => {
 
     (tui as any).doRender();
 
+    assert.ok(terminal.writtenData.length >= 1, "shrink render should produce a differential buffer");
+    assert.ok(
+      terminal.writtenData[0].startsWith("\x1b[?2026h\x1b[1B\r"),
+      `shrink diff should move down from the actual hardware cursor row, got ${JSON.stringify(terminal.writtenData[0])}`,
+    );
+
     // After shrink, hardwareCursorRow should be at IME position again
     assert.strictEqual(
       (tui as any).hardwareCursorRow,
       1,
       "hardwareCursorRow should be at IME position after shrink render",
-    );
-    assert.strictEqual(
-      (tui as any).contentCursorRow,
-      2,
-      "contentCursorRow should update to new content-bottom row after shrink",
     );
   });
 });

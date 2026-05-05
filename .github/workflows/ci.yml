@@ -174,6 +174,9 @@ jobs:
     outputs:
       skip-heavy-jobs: ${{ steps.gate.outputs.skip-heavy-jobs }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
       - name: Determine whether heavy CI should be skipped
         id: gate
         uses: actions/github-script@v8

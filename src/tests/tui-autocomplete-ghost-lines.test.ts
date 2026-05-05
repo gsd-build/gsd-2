@@ -1,3 +1,5 @@
+// GSD-2 + src/tests/tui-autocomplete-ghost-lines.test.ts - Regression coverage for TUI shrink clearing near autocomplete rows.
+
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { CURSOR_MARKER, TUI, type Component, type Terminal } from "@gsd/pi-tui";
@@ -51,7 +53,7 @@ class DynamicLinesComponent implements Component {
 }
 
 describe("TUI autocomplete shrink clearing (#3721)", () => {
-  it("clears deleted autocomplete rows relative to the content bottom, not the IME cursor row", () => {
+  it("clears deleted autocomplete rows relative to the actual hardware cursor row", () => {
     const terminal = new MockTTYTerminal();
     const tui = new TUI(terminal, false);
     const component = new DynamicLinesComponent([
@@ -77,12 +79,13 @@ describe("TUI autocomplete shrink clearing (#3721)", () => {
     (tui as any).doRender();
 
     assert.ok(terminal.writtenData.length >= 1, "shrink render should write a differential buffer");
-    // Diff math must use the previous content-bottom baseline (row 5), not
-    // the IME cursor row (row 1). Shrink target row is 3, so first move is up 2.
+    // The real terminal cursor was positioned at the editor cursor row (row 1)
+    // for IME. Deleted autocomplete rows start after the new content bottom
+    // (row 3), so the first move must go down 2 rows from the actual cursor.
     const buffer = terminal.writtenData[0];
     assert.ok(
-      buffer.startsWith("\x1b[?2026h\x1b[2A\r"),
-      `expected shrink diff to move up from content-bottom baseline, got ${JSON.stringify(buffer)}`,
+      buffer.startsWith("\x1b[?2026h\x1b[2B\r"),
+      `expected shrink diff to move down from the hardware cursor row, got ${JSON.stringify(buffer)}`,
     );
   });
 });

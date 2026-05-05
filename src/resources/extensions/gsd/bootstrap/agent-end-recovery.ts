@@ -1,3 +1,5 @@
+// GSD-2 + src/resources/extensions/gsd/bootstrap/agent-end-recovery.ts - Handles provider and agent-end recovery for GSD auto-mode.
+
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 
 import { logWarning } from "../workflow-logger.js";
@@ -12,7 +14,7 @@ import { clearPathCache } from "../paths.js";
 import { getAutoDashboardData, getAutoModeStartModel, isAutoActive, pauseAuto, setCurrentDispatchedModelId } from "../auto.js";
 import { getNextFallbackModel, resolveModelWithFallbacksForUnit } from "../preferences.js";
 import { pauseAutoForProviderError } from "../provider-error-pause.js";
-import { isSessionSwitchInFlight, resolveAgentEnd } from "../auto/resolve.js";
+import { isSessionSwitchInFlight, resolveAgentEnd, resolveAgentEndCancelled } from "../auto/resolve.js";
 import { resolveModelId } from "../auto-model-selection.js";
 import { resolveProjectRoot } from "../worktree.js";
 import { clearDiscussionFlowState } from "./write-gate.js";
@@ -67,6 +69,11 @@ export function _buildAbortedPauseContext(lastMsg: { errorMessage?: unknown }): 
     category: "aborted",
     isTransient: true,
   };
+}
+
+export function isUserInitiatedAbortMessage(message: string | undefined | null): boolean {
+  if (!message) return false;
+  return /\b(?:claude code process aborted by user|request aborted by user|process aborted by user)\b/i.test(message);
 }
 
 async function pauseTransientWithBackoff(
@@ -180,6 +187,14 @@ export async function handleAgentEnd(
     // is in the assistant message text content. Fall back to content when
     // errorMessage looks uninformative.
     const rawErrorMsg = ("errorMessage" in lastMsg && lastMsg.errorMessage) ? String(lastMsg.errorMessage) : "";
+    if (isUserInitiatedAbortMessage(rawErrorMsg)) {
+      resolveAgentEndCancelled({
+        message: rawErrorMsg,
+        category: "aborted",
+        isTransient: false,
+      });
+      return;
+    }
     const isUseless = !rawErrorMsg || /^(success|ok|true|error|unknown)$/i.test(rawErrorMsg.trim());
     // #3588: When errorMessage is uninformative, extract the real error from
     // the assistant message text content for display purposes only.

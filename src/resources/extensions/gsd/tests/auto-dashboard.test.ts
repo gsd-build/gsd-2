@@ -23,6 +23,8 @@ import {
   _refreshLastCommitForTests,
   _getLastCommitForTests,
   _getLastCommitFetchedAtForTests,
+  formatRuntimeHealthSignal,
+  shouldRenderRoadmapProgress,
 } from "../auto-dashboard.ts";
 import {
   openDatabase,
@@ -191,6 +193,37 @@ test("formatWidgetTokens formats millions with M", () => {
   assert.equal(formatWidgetTokens(1_000_000), "1.0M");
   assert.equal(formatWidgetTokens(10_000_000), "10M");
   assert.equal(formatWidgetTokens(25_000_000), "25M");
+});
+
+test("formatRuntimeHealthSignal surfaces idle recovery instead of generic progress", () => {
+  const signal = formatRuntimeHealthSignal({
+    version: 1,
+    unitType: "research-milestone",
+    unitId: "M001",
+    startedAt: 1_000,
+    updatedAt: 600_000,
+    phase: "recovered",
+    wrapupWarningSent: false,
+    continueHereFired: false,
+    timeoutAt: null,
+    lastProgressAt: 1_000,
+    progressCount: 1,
+    lastProgressKind: "idle-recovery-retry",
+    recoveryAttempts: 1,
+    lastRecoveryReason: "idle",
+  }, 600_000);
+
+  assert.deepEqual(signal, {
+    level: "yellow",
+    summary: "Recovering",
+    detail: "retry 1 after idle stall",
+  });
+});
+
+test("shouldRenderRoadmapProgress hides pre-roadmap zero-slice progress", () => {
+  assert.equal(shouldRenderRoadmapProgress(null), false);
+  assert.equal(shouldRenderRoadmapProgress({ done: 0, total: 0, activeSliceTasks: null } as any), false);
+  assert.equal(shouldRenderRoadmapProgress({ done: 0, total: 1, activeSliceTasks: null } as any), true);
 });
 
 // ─── estimateTimeRemaining ──────────────────────────────────────────────

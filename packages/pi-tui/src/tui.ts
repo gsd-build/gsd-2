@@ -1,3 +1,4 @@
+// GSD-2 + packages/pi-tui/src/tui.ts - Terminal UI renderer with differential rendering.
 /**
  * Minimal TUI implementation with differential rendering
  */
@@ -251,7 +252,6 @@ export class TUI extends Container {
 	private renderRequested = false;
 	private cursorRow = 0; // Logical cursor row (end of rendered content)
 	private hardwareCursorRow = 0; // Actual terminal cursor row (may differ due to IME positioning)
-	private contentCursorRow = 0; // Stable baseline row at end of rendered content (before IME cursor reposition)
 	private inputBuffer = ""; // Buffer for parsing terminal responses
 	private cellSizeQueryPending = false;
 	private showHardwareCursor = process.env.PI_HARDWARE_CURSOR === "1" || process.env.TERM_PROGRAM === "WarpTerminal";
@@ -512,7 +512,6 @@ export class TUI extends Container {
 			this.previousHeight = -1; // -1 triggers heightChanged, forcing a full clear
 			this.cursorRow = 0;
 			this.hardwareCursorRow = 0;
-			this.contentCursorRow = 0;
 			this.maxLinesRendered = 0;
 			this.previousViewportTop = 0;
 		}
@@ -639,7 +638,7 @@ export class TUI extends Container {
 		const height = this.terminal.rows;
 		let viewportTop = Math.max(0, this.maxLinesRendered - height);
 		let prevViewportTop = this.previousViewportTop;
-		let hardwareCursorRow = this.contentCursorRow;
+		let hardwareCursorRow = this.hardwareCursorRow;
 		const computeLineDiff = (targetRow: number): number => {
 			const currentScreenRow = hardwareCursorRow - prevViewportTop;
 			const targetScreenRow = targetRow - viewportTop;
@@ -695,7 +694,6 @@ export class TUI extends Container {
 			this.terminal.write(buffer);
 			this.cursorRow = Math.max(0, newLines.length - 1);
 			this.hardwareCursorRow = this.cursorRow;
-			this.contentCursorRow = this.cursorRow;
 			// Reset max lines when clearing, otherwise track growth
 			if (clear) {
 				this.maxLinesRendered = newLines.length;
@@ -819,7 +817,6 @@ export class TUI extends Container {
 				this.terminal.write(buffer);
 				this.cursorRow = targetRow;
 				this.hardwareCursorRow = targetRow;
-				this.contentCursorRow = targetRow;
 			}
 			this.positionHardwareCursor(cursorPos, newLines.length);
 			this.previousLines = newLines;
@@ -937,10 +934,8 @@ export class TUI extends Container {
 		// Track cursor position for next render
 		// cursorRow tracks end of content (for viewport calculation)
 		// hardwareCursorRow tracks actual terminal cursor position (for movement)
-		const contentBottomRow = Math.max(0, newLines.length - 1);
-		this.cursorRow = contentBottomRow;
+		this.cursorRow = Math.max(0, newLines.length - 1);
 		this.hardwareCursorRow = finalCursorRow;
-		this.contentCursorRow = contentBottomRow;
 		// Track terminal's working area (grows but doesn't shrink unless cleared)
 		this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
 		this.previousViewportTop = Math.max(0, this.maxLinesRendered - height);

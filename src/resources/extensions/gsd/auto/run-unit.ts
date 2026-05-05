@@ -1,3 +1,5 @@
+// GSD-2 + src/resources/extensions/gsd/auto/run-unit.ts - Runs one GSD auto-mode unit from session creation through agent completion.
+
 /**
  * auto/run-unit.ts — Single unit execution: session create → prompt → await agent_end.
  *
@@ -17,6 +19,7 @@ import {
 import { debugLog } from "../debug-logger.js";
 import { logWarning, logError } from "../workflow-logger.js";
 import { resolveAutoSupervisorConfig } from "../preferences.js";
+import { formatAutoUnitWorkingMessage } from "../working-output-messages.js";
 
 // Tracks the latest session-switch attempt so a late timeout settlement from an
 // older runUnit() call cannot clear the guard for a newer one.
@@ -184,30 +187,37 @@ export async function runUnit(
   debugLog("runUnit", { phase: "send-message", unitType, unitId });
 
   const requestDispatchedAt = Date.now();
-  pi.sendMessage(
-    { customType: "gsd-auto", content: prompt, display: s.verbose },
-    { triggerTurn: true },
-  );
+  ctx.ui.setWorkingMessage?.(formatAutoUnitWorkingMessage(unitType, unitId));
 
   // ── Await agent_end with absolute timeout (H4 fix) ──
   // If supervision fails to resolve unitPromise within 30s, treat as cancelled.
   // Without this, a crashed agent that never emits agent_end hangs the loop (#3161).
-  debugLog("runUnit", { phase: "awaiting-agent-end", unitType, unitId });
   const supervisor = resolveAutoSupervisorConfig();
   const UNIT_HARD_TIMEOUT_MS = Math.max(
     30_000,
     ((supervisor.hard_timeout_minutes ?? 30) * 60 * 1000) + 30_000,
   );
   let unitTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
-  const timeoutResult = new Promise<UnitResult>((resolve) => {
-    unitTimeoutHandle = setTimeout(() => {
-      resolve({ status: "cancelled", errorContext: { message: "Unit hard timeout — supervision may have failed", category: "timeout", isTransient: true } });
-    }, UNIT_HARD_TIMEOUT_MS);
-  });
-  const result = await runWithTurnGeneration(capturedTurnGen, () =>
-    Promise.race([unitPromise, timeoutResult]),
-  );
-  if (unitTimeoutHandle) clearTimeout(unitTimeoutHandle);
+  let result: UnitResult;
+  try {
+    pi.sendMessage(
+      { customType: "gsd-auto", content: prompt, display: s.verbose },
+      { triggerTurn: true },
+    );
+
+    debugLog("runUnit", { phase: "awaiting-agent-end", unitType, unitId });
+    const timeoutResult = new Promise<UnitResult>((resolve) => {
+      unitTimeoutHandle = setTimeout(() => {
+        resolve({ status: "cancelled", errorContext: { message: "Unit hard timeout — supervision may have failed", category: "timeout", isTransient: true } });
+      }, UNIT_HARD_TIMEOUT_MS);
+    });
+    result = await runWithTurnGeneration(capturedTurnGen, () =>
+      Promise.race([unitPromise, timeoutResult]),
+    );
+  } finally {
+    if (unitTimeoutHandle) clearTimeout(unitTimeoutHandle);
+    ctx.ui.setWorkingMessage?.(undefined);
+  }
   debugLog("runUnit", {
     phase: "agent-end-received",
     unitType,
