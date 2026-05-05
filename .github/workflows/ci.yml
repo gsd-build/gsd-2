@@ -37,6 +37,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       docs-only: ${{ steps.check.outputs.docs-only }}
+      heavy-code-changed: ${{ steps.check.outputs.heavy-code-changed }}
       portability-changed: ${{ steps.check.outputs.portability-changed }}
       windows-e2e-changed: ${{ steps.check.outputs.windows-e2e-changed }}
       docker-changed: ${{ steps.check.outputs.docker-changed }}
@@ -71,6 +72,15 @@ jobs:
             echo "docs-only=false" >> "$GITHUB_OUTPUT"
             echo "Non-docs files changed:"
             echo "$NON_DOCS"
+          fi
+          HEAVY_CODE=$(echo "$NON_DOCS" | grep -E '^(src/|packages/|native/|scripts/|web/|studio/|extensions/|tests/|Dockerfile$|docker/|package\.json$|package-lock\.json$|tsconfig[^/]*\.json$|packages/.*/tsconfig\.json$)' || true)
+          if [ -n "$HEAVY_CODE" ]; then
+            echo "heavy-code-changed=true" >> "$GITHUB_OUTPUT"
+            echo "Build/runtime-relevant files changed:"
+            echo "$HEAVY_CODE"
+          else
+            echo "heavy-code-changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No build/runtime-relevant changes detected — skipping heavy build/test jobs"
           fi
           PORTABILITY=$(echo "$NON_DOCS" | grep -E '^(src/|packages/|native/|scripts/|web/|package\.json$|package-lock\.json$|web/package-lock\.json$|tsconfig[^/]*\.json$|packages/.*/tsconfig\.json$)' || true)
           if [ -n "$PORTABILITY" ]; then
@@ -239,7 +249,7 @@ jobs:
   build:
     timeout-minutes: 25
     needs: [detect-changes, ci-circuit-breaker-fast, mergeability-gate]
-    if: needs.detect-changes.outputs.docs-only != 'true' && needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
+    if: needs.detect-changes.outputs.heavy-code-changed == 'true' && needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
@@ -297,7 +307,7 @@ jobs:
     timeout-minutes: 2
     needs: [detect-changes, build, mergeability-gate]
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    if: always() && needs.detect-changes.outputs.docs-only != 'true' && needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
+    if: always() && needs.detect-changes.outputs.heavy-code-changed == 'true' && needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     steps:
       - name: Stop pipeline when build gate fails
         env:
@@ -311,7 +321,7 @@ jobs:
   integration-tests:
     timeout-minutes: 15
     needs: [detect-changes, ci-circuit-breaker-build, mergeability-gate]
-    if: needs.detect-changes.outputs.docs-only != 'true' && needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
+    if: needs.detect-changes.outputs.heavy-code-changed == 'true' && needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
@@ -358,7 +368,7 @@ jobs:
     # No untrusted GitHub event input is consumed in run: blocks.
     timeout-minutes: 10
     needs: [detect-changes, ci-circuit-breaker-build, mergeability-gate]
-    if: needs.detect-changes.outputs.docs-only != 'true' && needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
+    if: needs.detect-changes.outputs.heavy-code-changed == 'true' && needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
@@ -391,7 +401,7 @@ jobs:
     # No untrusted GitHub event input is consumed in run: blocks.
     timeout-minutes: 15
     needs: [detect-changes, ci-circuit-breaker-build, mergeability-gate]
-    if: needs.detect-changes.outputs.docs-only != 'true' && needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
+    if: needs.detect-changes.outputs.heavy-code-changed == 'true' && needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
@@ -425,6 +435,32 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  ci-circuit-breaker-linux-runtime:
+    timeout-minutes: 2
+    needs: [detect-changes, mergeability-gate, integration-tests, live-regression, e2e]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    if: always() && needs.detect-changes.outputs.heavy-code-changed == 'true' && needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
+    steps:
+      - name: Stop expanded CI when Linux runtime fails
+        env:
+          INTEGRATION_TESTS: ${{ needs.integration-tests.result }}
+          LIVE_REGRESSION: ${{ needs.live-regression.result }}
+          E2E: ${{ needs.e2e.result }}
+        run: |
+          failed=0
+          for check in \
+            "integration-tests=$INTEGRATION_TESTS" \
+            "live-regression=$LIVE_REGRESSION" \
+            "e2e=$E2E"
+          do
+            result="${check#*=}"
+            if [ "$result" != "success" ]; then
+              echo "::error::Linux runtime gate failed ($check). Cancelling expanded CI jobs."
+              failed=1
+            fi
+          done
+          exit "$failed"
+
   docker-e2e:
     # Builds the runtime-local Dockerfile target from the current source
     # (npm pack + COPY into image) and runs `gsd --version` inside the
@@ -432,9 +468,9 @@ jobs:
     # tarball files. Gated by detect-changes so doc-only PRs skip it.
     # No untrusted GitHub event input is consumed in run: blocks.
     timeout-minutes: 20
-    needs: [detect-changes, ci-circuit-breaker-build, mergeability-gate]
+    needs: [detect-changes, ci-circuit-breaker-linux-runtime, mergeability-gate]
     if: >-
-      needs.detect-changes.outputs.docs-only != 'true' &&
+      needs.detect-changes.outputs.heavy-code-changed == 'true' &&
       needs.detect-changes.outputs.docker-changed == 'true' &&
       needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -467,11 +503,11 @@ jobs:
     # fake-LLM failures while child services remained alive, so keep it
     # manual until that suite is stable enough to promote.
     timeout-minutes: 25
-    needs: [detect-changes, ci-circuit-breaker-build, mergeability-gate]
+    needs: [detect-changes, ci-circuit-breaker-linux-runtime, mergeability-gate]
     if: >-
       github.event_name == 'workflow_dispatch' &&
       github.event.inputs.full_windows_e2e == 'true' &&
-      needs.detect-changes.outputs.docs-only != 'true' &&
+      needs.detect-changes.outputs.heavy-code-changed == 'true' &&
       needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     runs-on: blacksmith-4vcpu-windows-2025
     continue-on-error: true
@@ -520,9 +556,9 @@ jobs:
     #
     # No untrusted GitHub event input is consumed in run: blocks.
     timeout-minutes: 15
-    needs: [detect-changes, ci-circuit-breaker-build, mergeability-gate]
+    needs: [detect-changes, ci-circuit-breaker-linux-runtime, mergeability-gate]
     if: >-
-      needs.detect-changes.outputs.docs-only != 'true' &&
+      needs.detect-changes.outputs.heavy-code-changed == 'true' &&
       needs.detect-changes.outputs.studio-changed == 'true' &&
       needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -554,9 +590,9 @@ jobs:
     # non-blocking Windows e2e smoke suite. When both path filters match, this
     # avoids a second Windows runner, npm install, and build:core invocation.
     timeout-minutes: 25
-    needs: [detect-changes, ci-circuit-breaker-build, mergeability-gate]
+    needs: [detect-changes, ci-circuit-breaker-linux-runtime, mergeability-gate]
     if: >-
-      needs.detect-changes.outputs.docs-only != 'true' &&
+      needs.detect-changes.outputs.heavy-code-changed == 'true' &&
       (needs.detect-changes.outputs.portability-changed == 'true' ||
        needs.detect-changes.outputs.windows-e2e-changed == 'true') &&
       needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
@@ -627,7 +663,7 @@ jobs:
     needs: [detect-changes, mergeability-gate, windows-portability]
     if: >-
       always() &&
-      needs.detect-changes.outputs.docs-only != 'true' &&
+      needs.detect-changes.outputs.heavy-code-changed == 'true' &&
       needs.detect-changes.outputs.windows-e2e-changed == 'true' &&
       needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -638,9 +674,9 @@ jobs:
 
   rtk-portability:
     timeout-minutes: 20
-    needs: [detect-changes, ci-circuit-breaker-build, mergeability-gate]
+    needs: [detect-changes, ci-circuit-breaker-linux-runtime, mergeability-gate]
     if: >-
-      needs.detect-changes.outputs.docs-only != 'true' &&
+      needs.detect-changes.outputs.heavy-code-changed == 'true' &&
       needs.detect-changes.outputs.rtk-changed == 'true' &&
       needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     strategy:
