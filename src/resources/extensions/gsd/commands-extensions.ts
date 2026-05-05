@@ -7,7 +7,7 @@
  */
 
 import type { ExtensionCommandContext } from "@gsd/pi-coding-agent";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, cpSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -123,7 +123,17 @@ function saveRegistry(registry: ExtensionRegistry): void {
   try {
     mkdirSync(dirname(filePath), { recursive: true });
     const tmp = filePath + ".tmp";
-    writeFileSync(tmp, JSON.stringify(registry, null, 2), "utf-8");
+    const content = Buffer.from(JSON.stringify(registry, null, 2), "utf-8");
+    const fd = openSync(tmp, "w");
+    try {
+      let offset = 0;
+      while (offset < content.length) {
+        offset += writeSync(fd, content, offset, content.length - offset);
+      }
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
     renameSync(tmp, filePath);
   } catch { /* non-fatal */ }
 }

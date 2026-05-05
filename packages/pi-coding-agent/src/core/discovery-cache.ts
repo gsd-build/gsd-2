@@ -3,8 +3,8 @@
  * Stores results at {agentDir}/discovery-cache.json with per-provider TTLs.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
-import { dirname, join } from "path";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { getAgentDir } from "../config.js";
 import { type DiscoveredModel, getDefaultTTL } from "./model-discovery.js";
 
@@ -95,7 +95,14 @@ export class ModelDiscoveryCache {
 			}
 			// Atomic write: write to temp file then rename to avoid partial reads
 			const tmpPath = this.cachePath + ".tmp";
-			writeFileSync(tmpPath, JSON.stringify(this.data, null, 2), "utf-8");
+			const content = Buffer.from(JSON.stringify(this.data, null, 2), "utf-8");
+			const fd = openSync(tmpPath, "w");
+			try {
+				writeSync(fd, content);
+				fsyncSync(fd);
+			} finally {
+				closeSync(fd);
+			}
 			renameSync(tmpPath, this.cachePath);
 		} catch {
 			// Silently ignore write failures (read-only FS, permissions, etc.)

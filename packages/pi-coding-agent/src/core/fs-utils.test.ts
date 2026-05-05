@@ -3,7 +3,7 @@ import { describe, it, afterEach } from "node:test";
 import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { atomicWriteFileSync } from "./fs-utils.js";
+import { atomicWriteDbSnapshotSync, atomicWriteFileSync } from "./fs-utils.js";
 
 describe("atomicWriteFileSync", () => {
 	let dir: string;
@@ -50,5 +50,29 @@ describe("atomicWriteFileSync", () => {
 		const filePath = join(dir, "test.txt");
 		atomicWriteFileSync(filePath, "utf8 content", "utf-8");
 		assert.equal(readFileSync(filePath, "utf-8"), "utf8 content");
+	});
+
+	it("fsyncs temp file before rename (durability guard)", () => {
+		const src = readFileSync(join(process.cwd(), "packages", "pi-coding-agent", "src", "core", "fs-utils.ts"), "utf-8");
+		assert.match(src, /fsyncSync\(fd\)/);
+	});
+});
+
+describe("atomicWriteDbSnapshotSync", () => {
+	let dir: string;
+
+	afterEach(() => {
+		if (dir) {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("writes snapshot bytes via atomic file replacement", () => {
+		dir = mkdtempSync(join(tmpdir(), "fs-utils-db-snapshot-test-"));
+		const dbPath = join(dir, "agent.db");
+		const snapshot = new Uint8Array([0x53, 0x51, 0x4c, 0x69, 0x74, 0x65]);
+		atomicWriteDbSnapshotSync(dbPath, snapshot);
+		assert.deepEqual(readFileSync(dbPath), Buffer.from(snapshot));
+		assert.equal(existsSync(dbPath + ".tmp"), false);
 	});
 });

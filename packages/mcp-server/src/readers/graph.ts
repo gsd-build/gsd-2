@@ -12,7 +12,7 @@
  * writeGraph() is atomic: writes to graph.tmp.json then renames to graph.json.
  */
 
-import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync, writeSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import {
   resolveGsdRoot,
@@ -610,7 +610,14 @@ export async function writeGraph(gsdRoot: string, graph: KnowledgeGraph): Promis
   const tmp = graphTmpPath(gsdRoot);
   const final = graphJsonPath(gsdRoot);
 
-  writeFileSync(tmp, JSON.stringify(graph, null, 2), 'utf-8');
+  const content = Buffer.from(JSON.stringify(graph, null, 2), 'utf-8');
+  const fd = openSync(tmp, 'w');
+  try {
+    writeSync(fd, content);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
   renameSync(tmp, final);
 }
 
@@ -637,8 +644,36 @@ export async function writeSnapshot(gsdRoot: string): Promise<void> {
     return;
   }
   const snapshot = { ...graph, snapshotAt: new Date().toISOString() };
+  const final = snapshotPath(gsdRoot);
+  const tmp = final + '.tmp';
+  const content = Buffer.from(JSON.stringify(snapshot, null, 2), 'utf-8');
 
-  writeFileSync(snapshotPath(gsdRoot), JSON.stringify(snapshot, null, 2), 'utf-8');
+  const fd = openSync(tmp, 'w');
+  try {
+    let offset = 0;
+    while (offset < content.length) {
+      offset += writeSync(fd, content, offset, content.length - offset);
+    }
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+
+  renameSync(tmp, final);
+
+  // Best-effort directory fsync: some platforms/filesystems (notably Windows)
+  // may reject directory descriptors. Data durability is still protected by
+  // the temp-file fsync + atomic rename above.
+  try {
+    const dirFd = openSync(dir, 'r');
+    try {
+      fsyncSync(dirFd);
+    } finally {
+      closeSync(dirFd);
+    }
+  } catch {
+    // Ignore platform/filesystem limitations for directory fsync.
+  }
 }
 
 // ---------------------------------------------------------------------------
