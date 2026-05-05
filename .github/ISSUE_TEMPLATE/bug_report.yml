@@ -3,6 +3,7 @@ description: Report crashes, regressions, incorrect behavior, or broken workflow
 title: "[Bug]: "
 labels:
   - bug
+  - needs-triage
 body:
   - type: markdown
     attributes:

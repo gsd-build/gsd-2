@@ -3,6 +3,7 @@ description: Propose a new capability or improvement for GSD.
 title: "[Feature]: "
 labels:
   - enhancement
+  - needs-triage
 body:
   - type: markdown
     attributes:

@@ -37,7 +37,20 @@ jobs:
             const title = item.title;
             const body = item.body || '';
             const type = isIssue ? 'issue' : 'pull_request';
-            const existingLabels = (item.labels || []).map(l => l.name);
+            let existingLabels = (item.labels || []).map(l => l.name);
+
+            // Ensure all newly opened issues enter the canonical triage queue,
+            // even when they bypass issue templates (API/import/manual labeling).
+            if (isIssue && !existingLabels.includes('needs-triage')) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: number,
+                labels: ['needs-triage']
+              });
+              existingLabels.push('needs-triage');
+              core.info('Added default label: needs-triage');
+            }
 
             const prompt = `You are a GitHub issue/PR triage bot for the GSD-2 project. Your job is to:
             1. Classify the ${type} with appropriate labels
