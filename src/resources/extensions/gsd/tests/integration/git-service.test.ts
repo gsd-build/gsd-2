@@ -542,6 +542,30 @@ describe('git-service', async () => {
     rmSync(repo, { recursive: true, force: true });
   });
 
+  test('GitServiceImpl: ignores placeholder keyFiles from empty summaries', () => {
+    const repo = initTempRepo();
+    const svc = new GitServiceImpl(repo);
+
+    createFile(repo, "src/task.ts", "export const task = true;");
+
+    const msg = svc.autoCommit("execute-task", "M001/S01/T01", [], {
+      taskId: "S01/T01",
+      taskTitle: "implement task with empty key files",
+      oneLiner: "Added task implementation",
+      keyFiles: ["(none)"],
+    });
+    assert.ok(msg !== null, "placeholder keyFiles should fall back to normal staging");
+    assert.ok(!msg!.includes("(none)"), "placeholder keyFiles should not appear in commit message");
+
+    const committed = run("git show --name-only --format= HEAD", repo);
+    assert.ok(committed.includes("src/task.ts"), "dirty task file is committed");
+
+    const status = run("git status --porcelain", repo);
+    assert.equal(status, "", "working tree is clean after fallback staging");
+
+    rmSync(repo, { recursive: true, force: true });
+  });
+
   // ─── GitServiceImpl: empty-after-staging guard ─────────────────────────
 
   test('GitServiceImpl: empty-after-staging guard', () => {
