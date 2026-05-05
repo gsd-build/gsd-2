@@ -1,4 +1,5 @@
 import { clearParseCache } from "../files.js";
+import { clearPathCache } from "../paths.js";
 import { isClosedStatus, isDeferredStatus } from "../status-guards.js";
 import { isNonEmptyString, validateStringArray } from "../validation.js";
 import {
@@ -10,6 +11,7 @@ import {
   upsertTaskPlanning,
   insertGateRow,
   updateSliceStatus,
+  setSliceSketchFlag,
 } from "../gsd-db.js";
 import type { GateId } from "../types.js";
 import { invalidateStateCache } from "../state.js";
@@ -180,6 +182,13 @@ export async function handlePlanSlice(
         observabilityImpact: params.observabilityImpact,
       });
 
+      // ADR-011: clear the sketch flag atomically with the plan data so the
+      // auto-heal in `autoHealSketchFlags` is not the sole safety net.
+      // Without this, a stale `cachedReaddir` entry can cause `resolveSliceFile`
+      // to miss the newly-written PLAN.md, leaving is_sketch=1 and triggering
+      // the loop detector on the next iteration (issue #5291).
+      setSliceSketchFlag(params.milestoneId, params.sliceId, false);
+
       for (const task of params.tasks) {
         insertTask({
           id: task.taskId,
@@ -227,6 +236,10 @@ export async function handlePlanSlice(
     const renderResult = await renderPlanFromDb(basePath, params.milestoneId, params.sliceId);
     invalidateStateCache();
     clearParseCache();
+    // ADR-011: clear the directory listing cache so `autoHealSketchFlags` can
+    // see the newly-written PLAN.md on the next state derivation. Without this,
+    // `cachedReaddir` returns a stale listing and the heal predicate returns false.
+    clearPathCache();
 
     // ── Post-mutation hook: projections, manifest, event log ─────────────
     try {
