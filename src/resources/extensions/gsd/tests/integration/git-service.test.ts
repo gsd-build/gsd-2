@@ -218,6 +218,7 @@ describe('git-service', async () => {
     assert.ok(msg.startsWith("feat:"), "message starts with type: (no scope)");
     assert.ok(!msg.includes("(S01/T02)"), "no GSD ID in subject line");
     assert.ok(msg.includes("JWT-based auth"), "message includes one-liner content");
+    assert.ok(!msg.includes("Summary:"), "body omits summary when subject is not truncated");
     assert.ok(msg.includes("- src/auth.ts"), "message body includes key files");
     assert.ok(msg.includes("- src/middleware/jwt.ts"), "message body includes second key file");
     assert.ok(msg.includes("GSD-Task: S01/T02"), "GSD-Task trailer in body");
@@ -233,6 +234,27 @@ describe('git-service', async () => {
     assert.ok(subject.includes("Added auth BREAKING: injected trailer"), "control characters are flattened");
     assert.equal(subject.includes("\r"), false, "subject does not include carriage returns");
     assert.equal(subject.includes("\u0007"), false, "subject does not include control characters");
+  });
+
+  test('buildTaskCommitMessage preserves full summary in body when subject truncates', () => {
+    const oneLiner = "Recorded S09 plugin-settings runtime evidence and bounded remaining WPF/SDK debt in the Avalonia migration checklist.";
+    const msg = buildTaskCommitMessage({
+      taskId: "S09/T03",
+      taskTitle: "record plugin settings evidence",
+      oneLiner,
+      keyFiles: ["AVALONIA_MIGRATION_CHECKLIST.md"],
+      issueNumber: 42,
+    });
+
+    const subject = msg.split("\n")[0];
+    assert.ok(subject.endsWith("…"), "subject remains truncated with ellipsis");
+    assert.ok(msg.includes(`Summary: ${oneLiner}`), "body preserves full one-liner when subject truncates");
+
+    const summaryIdx = msg.indexOf(`Summary: ${oneLiner}`);
+    const taskIdx = msg.indexOf("GSD-Task: S09/T03");
+    const resolvesIdx = msg.indexOf("Resolves #42");
+    assert.ok(summaryIdx < taskIdx, "summary appears before GSD-Task trailer");
+    assert.ok(taskIdx < resolvesIdx, "trailer order remains GSD-Task then Resolves");
   });
 
   {

@@ -155,11 +155,16 @@ export function buildTaskCommitMessage(ctx: TaskCommitContext): string {
   const truncated = description.length > maxDescLen
     ? description.slice(0, maxDescLen - 1).trimEnd() + "…"
     : description;
+  const wasTruncated = truncated !== description;
 
   const subject = `${type}: ${truncated}`;
 
   // Build body with key files if available
   const bodyParts: string[] = [];
+
+  if (wasTruncated) {
+    bodyParts.push(`Summary: ${description}`);
+  }
 
   if (ctx.keyFiles && ctx.keyFiles.length > 0) {
     const fileLines = ctx.keyFiles
