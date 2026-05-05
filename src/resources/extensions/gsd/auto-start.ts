@@ -664,12 +664,13 @@ export async function bootstrapAutoSession(
     }
 
     const effectivePrefs = loadEffectiveGSDPreferences(base)?.preferences;
-    const deepProjectStagePending = !hasSurvivorBranch
-      ? (await import("./auto-dispatch.js")).hasPendingDeepStage(
-          effectivePrefs,
-          base,
-        )
-      : false;
+    const { shouldRunDeepProjectSetup } = await import("./auto-dispatch.js");
+    const deepProjectStagePending = shouldRunDeepProjectSetup(
+      state,
+      effectivePrefs,
+      base,
+      { hasSurvivorBranch },
+    );
 
     if (deepProjectStagePending) {
       // Deep project-level setup runs before the first milestone exists. Let

@@ -118,7 +118,7 @@ test("guided flow checks pending deep setup before plan-v2 gate", () => {
   const source = readFileSync(join(gsdDir, "guided-flow.ts"), "utf-8");
   const showSmartEntryIdx = source.indexOf("export async function showSmartEntry");
   assert.notEqual(showSmartEntryIdx, -1);
-  const deepIdx = source.indexOf("hasPendingDeepStage(prefs, basePath)", showSmartEntryIdx);
+  const deepIdx = source.indexOf("shouldRunDeepProjectSetup(state, prefs, basePath)", showSmartEntryIdx);
   const planIdx = source.indexOf("runPlanV2Gate(ctx, basePath, state)", showSmartEntryIdx);
   assert.ok(
     deepIdx > -1 && planIdx > -1 && deepIdx < planIdx,

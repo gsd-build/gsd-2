@@ -2064,8 +2064,8 @@ export async function showSmartEntry(
   // standard wizard below.
   {
     const prefs = loadEffectiveGSDPreferences(basePath)?.preferences;
-    const { hasPendingDeepStage } = await import("./auto-dispatch.js");
-    if (hasPendingDeepStage(prefs, basePath)) {
+    const { shouldRunDeepProjectSetup } = await import("./auto-dispatch.js");
+    if (shouldRunDeepProjectSetup(state, prefs, basePath)) {
       await startDeepProjectSetupForeground(ctx, pi, basePath, stepMode);
       return;
     }

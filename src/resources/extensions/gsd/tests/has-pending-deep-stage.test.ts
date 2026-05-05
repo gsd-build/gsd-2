@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { hasPendingDeepStage } from "../auto-dispatch.ts";
+import { hasPendingDeepStage, shouldRunDeepProjectSetup } from "../auto-dispatch.ts";
 import type { GSDPreferences } from "../preferences.ts";
 import { loadEffectiveGSDPreferences } from "../preferences.ts";
 
@@ -52,6 +52,38 @@ test("hasPendingDeepStage: returns true in deep mode when nothing has been captu
   const base = makeBase();
   try {
     assert.equal(hasPendingDeepStage(deepPrefs, base), true);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("shouldRunDeepProjectSetup: complete state wins over pending deep setup", async () => {
+  const base = makeBase();
+  try {
+    assert.equal(hasPendingDeepStage(deepPrefs, base), true);
+    assert.equal(
+      shouldRunDeepProjectSetup({ phase: "complete" }, deepPrefs, base),
+      false,
+      "completed projects must not restart deep setup and loop through auto-mode",
+    );
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("shouldRunDeepProjectSetup: only setup phases can trigger pending deep setup", () => {
+  const base = makeBase();
+  try {
+    assert.equal(hasPendingDeepStage(deepPrefs, base), true);
+    assert.equal(shouldRunDeepProjectSetup({ phase: "pre-planning" }, deepPrefs, base), true);
+    assert.equal(shouldRunDeepProjectSetup({ phase: "needs-discussion" }, deepPrefs, base), true);
+    assert.equal(shouldRunDeepProjectSetup({ phase: "planning" }, deepPrefs, base), true);
+    assert.equal(shouldRunDeepProjectSetup({ phase: "executing" }, deepPrefs, base), false);
+    assert.equal(shouldRunDeepProjectSetup({ phase: "blocked" }, deepPrefs, base), false);
+    assert.equal(
+      shouldRunDeepProjectSetup({ phase: "pre-planning" }, deepPrefs, base, { hasSurvivorBranch: true }),
+      false,
+    );
   } finally {
     rmSync(base, { recursive: true, force: true });
   }

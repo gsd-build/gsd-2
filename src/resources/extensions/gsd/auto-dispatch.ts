@@ -211,6 +211,23 @@ export function hasPendingDeepStage(prefs: GSDPreferences | undefined, basePath:
   return gate.status === "pending" || gate.status === "blocked";
 }
 
+export function shouldRunDeepProjectSetup(
+  state: Pick<GSDState, "phase">,
+  prefs: GSDPreferences | undefined,
+  basePath: string,
+  options: { hasSurvivorBranch?: boolean } = {},
+): boolean {
+  if (options.hasSurvivorBranch === true) return false;
+  if (
+    state.phase !== "pre-planning" &&
+    state.phase !== "needs-discussion" &&
+    state.phase !== "planning"
+  ) {
+    return false;
+  }
+  return hasPendingDeepStage(prefs, basePath);
+}
+
 function missingSliceStop(mid: string, phase: string): DispatchAction {
   return {
     action: "stop",
