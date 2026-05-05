@@ -166,6 +166,13 @@ export class RetryHandler {
 				if (adjusted) return true;
 			}
 
+			// Context overflow retry: when the model reports that input + output
+			// exceeds its context window, reduce maxTokens to fit.
+			{
+				const adjusted = this._tryContextOverflowRetry(message, retryGeneration);
+				if (adjusted) return true;
+			}
+
 			// Credential rotation — only for transient rate limits (#3430).
 			// Quota errors ("Extra usage is required") are account-level billing
 			// gates; rotating to another credential on the same account won't help
@@ -468,6 +475,59 @@ export class RetryHandler {
 			maxAttempts: this._deps.settingsManager.getRetrySettings().maxRetries,
 			delayMs: 0,
 			errorMessage: `${message.errorMessage} (reducing max tokens)`,
+		});
+
+		this._scheduleContinue(retryGeneration);
+		return true;
+	}
+
+	/**
+	 * Attempt a same-model retry by reducing maxTokens when provider reports
+	 * a context window overflow (e.g., Bedrock "maximum context length is N tokens.
+	 * However, you requested M output tokens").
+	 */
+	private _tryContextOverflowRetry(message: AssistantMessage, retryGeneration: number): boolean {
+		const currentModel = this._deps.getModel();
+		if (!currentModel || !message.errorMessage) return false;
+
+		const match = message.errorMessage.match(
+			/maximum context length is\s+([\d,]+)\s+tokens.*?requested\s+([\d,]+)\s+output tokens.*?(?:contains|at least)\s+([\d,]+)\s+input/i,
+		);
+		if (!match) return false;
+
+		const contextLimit = Number.parseInt(match[1].replace(/,/g, ""), 10);
+		const inputTokens = Number.parseInt(match[3].replace(/,/g, ""), 10);
+		if (!Number.isFinite(contextLimit) || !Number.isFinite(inputTokens)) return false;
+
+		const available = contextLimit - inputTokens;
+		if (available <= 64) return false;
+
+		const safetyBuffer = Math.min(64, Math.max(16, Math.floor(available * 0.1)));
+		const targetMaxTokens = Math.max(64, available - safetyBuffer);
+		if (targetMaxTokens >= currentModel.maxTokens) return false;
+
+		const downgradedModel = {
+			...currentModel,
+			maxTokens: targetMaxTokens,
+		};
+
+		this._deps.agent.setModel(downgradedModel);
+		this._deps.onModelChange(downgradedModel);
+		this._removeLastAssistantError();
+
+		this._deps.emit({
+			type: "fallback_provider_switch",
+			from: `${currentModel.provider}/${currentModel.id} (maxTokens=${currentModel.maxTokens})`,
+			to: `${downgradedModel.provider}/${downgradedModel.id} (maxTokens=${targetMaxTokens})`,
+			reason: `context overflow retry: input ${inputTokens} tokens, capping output to ${targetMaxTokens}`,
+		});
+
+		this._deps.emit({
+			type: "auto_retry_start",
+			attempt: this._retryAttempt + 1,
+			maxAttempts: this._deps.settingsManager.getRetrySettings().maxRetries,
+			delayMs: 0,
+			errorMessage: `${message.errorMessage} (reducing max tokens to fit context)`,
 		});
 
 		this._scheduleContinue(retryGeneration);
