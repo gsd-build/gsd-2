@@ -39,6 +39,8 @@ export type JournalEventType =
   | "unit-start"
   | "unit-end"
   | "post-unit-hook"
+  | "post-unit-finalize-start"
+  | "post-unit-finalize-end"
   | "terminal"
   | "guard-block"
   | "milestone-transition"
