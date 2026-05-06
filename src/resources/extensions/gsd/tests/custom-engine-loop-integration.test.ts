@@ -9,6 +9,7 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -26,6 +27,9 @@ const tmpDirs: string[] = [];
 
 function makeTmpDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "loop-integ-"));
+  execSync("git init", { cwd: dir, stdio: "ignore" });
+  execSync("git config user.email test@test.com", { cwd: dir, stdio: "ignore" });
+  execSync("git config user.name Test", { cwd: dir, stdio: "ignore" });
   tmpDirs.push(dir);
   return dir;
 }

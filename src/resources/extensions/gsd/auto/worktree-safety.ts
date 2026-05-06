@@ -53,7 +53,7 @@ export async function prepareUnitRoot(input: PrepareUnitRootInput): Promise<Prep
     return {
       allow: true,
       warnings: [
-        `${basePath} project classification could not confirm .git; proceeding as greenfield because worktree health reported .git present.`,
+        `${basePath} has no project content yet; project classification could not confirm .git; proceeding as greenfield because worktree health reported .git present.`,
       ],
     };
   }
