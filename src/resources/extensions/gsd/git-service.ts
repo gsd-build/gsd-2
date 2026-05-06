@@ -34,6 +34,7 @@ import {
   nativeAddPaths,
   nativeResetSoft,
   nativeCommitSubject,
+  nativeIsIgnored,
   _resetHasChangesCache,
 } from "./native-git-bridge.js";
 import { GSDError, GSD_MERGE_CONFLICT, GSD_GIT_ERROR } from "./errors.js";
@@ -726,6 +727,7 @@ export class GitServiceImpl {
       keyFiles
         .map(file => normalizeRepoRelativePath(this.basePath, file))
         .filter((file): file is string => file !== null)
+        .filter(file => !nativeIsIgnored(this.basePath, file))
         .filter(file => !isExcludedScopedPath(file, allExclusions)),
     ));
     if (paths.length === 0) return false;
