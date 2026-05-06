@@ -248,13 +248,14 @@ test("advance() is idempotent for the same active unit", async () => {
 });
 
 test("resume() re-enters running flow via advance", async () => {
-  const { deps } = makeDeps();
+  const { deps, calls } = makeDeps();
   const orchestrator = createAutoOrchestrator(deps);
 
-  const result = await orchestrator.resume();
+  const result = await orchestrator.resume({ basePath: "/tmp/resume-project", trigger: "resume" });
 
   assert.equal(result.kind, "advanced");
   assert.equal(orchestrator.getStatus().phase, "running");
+  assert.ok(calls.includes("state.reconcile:/tmp/resume-project"));
 });
 
 test("resume() clears idempotent lock and allows re-advance", async () => {

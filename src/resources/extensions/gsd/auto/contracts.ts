@@ -48,7 +48,7 @@ export interface UnitToolContract {
 export interface AutoOrchestrationModule {
   start(sessionContext: AutoSessionContext): Promise<AutoAdvanceResult>;
   advance(): Promise<AutoAdvanceResult>;
-  resume(): Promise<AutoAdvanceResult>;
+  resume(sessionContext?: AutoSessionContext): Promise<AutoAdvanceResult>;
   stop(reason: string): Promise<AutoAdvanceResult>;
   getStatus(): AutoStatus;
 }

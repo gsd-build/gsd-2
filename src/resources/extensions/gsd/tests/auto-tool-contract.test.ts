@@ -44,7 +44,7 @@ test("compileUnitToolContract soft-allows unknown units with warnings", async ()
   assert.equal(result.allow, true);
   assert.ok(result.contract);
   assert.equal(result.contract!.toolsPolicy, null);
-  assert.equal(result.contract!.sourceWrites, false);
+  assert.equal(result.contract!.sourceWrites, true);
   assert.deepEqual(result.contract!.requiredWorkflowTools, []);
   assert.equal(result.contract!.warnings.length, 1);
 });

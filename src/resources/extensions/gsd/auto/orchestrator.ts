@@ -180,7 +180,8 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
     }
   }
 
-  public async resume(): Promise<AutoAdvanceResult> {
+  public async resume(sessionContext?: AutoSessionContext): Promise<AutoAdvanceResult> {
+    if (sessionContext) this.sessionContext = sessionContext;
     this.lastAdvanceKey = null;
     this.status.phase = "running";
     this.bumpTransition();

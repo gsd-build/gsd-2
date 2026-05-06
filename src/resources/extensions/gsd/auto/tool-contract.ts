@@ -33,13 +33,16 @@ export async function compileUnitToolContract(input: {
 
   const requiredWorkflowTools = getRequiredWorkflowToolsForAutoUnit(unitType);
   const toolsPolicy = manifest?.tools ?? null;
+  // Unknown manifests are soft-allowed, but they may still write source files.
+  // Keep worktree-root validation on for fallback contracts.
+  const sourceWrites = manifest ? derivesSourceWrites(unitType, toolsPolicy?.mode ?? null) : true;
 
   const contract: UnitToolContract = {
     unitType,
     unitId,
     requiredWorkflowTools,
     toolsPolicy,
-    sourceWrites: derivesSourceWrites(unitType, toolsPolicy?.mode ?? null),
+    sourceWrites,
     preconditions: [...input.preconditions],
     warnings,
   };
