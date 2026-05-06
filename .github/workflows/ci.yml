@@ -502,12 +502,16 @@ jobs:
     # Full Windows e2e is still exploratory. It has previously hung after
     # fake-LLM failures while child services remained alive, so keep it
     # manual until that suite is stable enough to promote.
+    #
+    # ci-circuit-breaker-linux-runtime is intentionally excluded from needs:
+    # if it were included and got skipped (heavy-code-changed=false), this job
+    # would also be silently skipped even on explicit workflow_dispatch, breaking
+    # the "human override always runs" contract.
     timeout-minutes: 25
-    needs: [detect-changes, ci-circuit-breaker-linux-runtime, mergeability-gate]
+    needs: [detect-changes, mergeability-gate]
     if: >-
       github.event_name == 'workflow_dispatch' &&
       github.event.inputs.full_windows_e2e == 'true' &&
-      needs.detect-changes.outputs.heavy-code-changed == 'true' &&
       needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     runs-on: blacksmith-4vcpu-windows-2025
     continue-on-error: true
@@ -677,11 +681,19 @@ jobs:
     steps:
       - name: Report Windows smoke outcome
         env:
-          SMOKE_RESULT: ${{ needs.windows-portability.result == 'skipped' && 'skipped' || (needs.windows-portability.outputs.smoke_result || 'skipped') }}
+          PORTABILITY_RESULT: ${{ needs.windows-portability.result }}
+          SMOKE_RESULT: ${{ needs.windows-portability.outputs.smoke_result }}
         run: |
           echo "Windows e2e smoke runs in windows-portability."
-          echo "Smoke step outcome: $SMOKE_RESULT"
-          case "$SMOKE_RESULT" in
+          echo "windows-portability result: $PORTABILITY_RESULT"
+          echo "Smoke step outcome: ${SMOKE_RESULT:-<unset>}"
+          # If the upstream job failed/cancelled before the smoke step ran,
+          # surface that instead of mis-reporting it as "did not run".
+          if [ -z "$SMOKE_RESULT" ] && [ "$PORTABILITY_RESULT" != "success" ] && [ "$PORTABILITY_RESULT" != "skipped" ]; then
+            echo "::warning::windows-portability ended in $PORTABILITY_RESULT before Windows e2e smoke ran (non-blocking). See windows-portability logs."
+            exit 1
+          fi
+          case "${SMOKE_RESULT:-skipped}" in
             success)
               echo "::notice::Windows e2e smoke succeeded."
               ;;
@@ -689,7 +701,7 @@ jobs:
               echo "::warning::Windows e2e smoke failed (non-blocking). See windows-portability artifacts."
               exit 1
               ;;
-            skipped|"")
+            skipped)
               echo "::notice::Windows e2e smoke did not run (no relevant changes)."
               ;;
             *)
