@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
 
 import { preflightCleanRoot, postflightPopStash } from "../clean-root-preflight.ts";
+import { _resetHasChangesCache, nativeHasChanges } from "../native-git-bridge.ts";
 
 function run(cmd: string, cwd: string): string {
   return execSync(cmd, { cwd, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" }).trim();
@@ -381,6 +382,40 @@ test("postflightPopStash requires manual recovery when an untracked stash path i
     const stashList = run("git stash list", repo);
     assert.ok(preflight.stashMarker && stashList.includes(preflight.stashMarker), "stash must remain for manual recovery");
   } finally {
+    try { rmSync(repo, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* ignore */ }
+  }
+});
+
+test("preflightCleanRoot does not claim stashPushed when cached dirty state is stale (#5424)", () => {
+  const repo = createTempRepo();
+  try {
+    _resetHasChangesCache();
+
+    // Seed the 10s hasChanges cache with a dirty=true result.
+    writeFileSync(join(repo, "README.md"), "# dirty then clean\n");
+    assert.equal(nativeHasChanges(repo), true, "cache seed should observe dirty tree");
+
+    // Immediately clean the tree before preflight runs. The cache remains true.
+    run("git checkout -- README.md", repo);
+    assert.equal(run("git status --porcelain", repo), "", "working tree should be clean before preflight");
+
+    const notifications: Array<{ msg: string; level: string }> = [];
+    const result = preflightCleanRoot(repo, "M5424", (msg, level) => {
+      notifications.push({ msg, level });
+    });
+
+    assert.equal(result.stashPushed, false, "must not claim stashPushed when no stash entry was created");
+    assert.equal(result.stashMarker, undefined, "stash marker should be absent when stash was not created");
+    assert.match(result.summary, /No stashable changes found/i);
+    assert.ok(
+      notifications.some((n) => n.level === "warning" && n.msg.includes("M5424")),
+      "warning should still be emitted when cached dirty state triggers preflight path",
+    );
+
+    const stashList = run("git stash list", repo);
+    assert.equal(stashList, "", "stash list must remain empty when git stash reports nothing to save");
+  } finally {
+    _resetHasChangesCache();
     try { rmSync(repo, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* ignore */ }
   }
 });

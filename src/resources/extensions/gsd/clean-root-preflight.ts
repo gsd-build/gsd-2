@@ -178,9 +178,12 @@ function reconcileAlreadyPresentUntrackedStash(
   };
 }
 
-function findPreflightStashRef(basePath: string, milestoneId: string, stashMarker?: string): string | null {
-  const markerPrefix = `gsd-preflight-stash:${milestoneId}:`;
-  let fallbackRef: string | null = null;
+interface StashEntry {
+  ref: string;
+  subject: string;
+}
+
+function listStashEntries(basePath: string): StashEntry[] {
   try {
     const list = execFileSync("git", ["stash", "list", "--format=%gd%x00%s"], {
       cwd: basePath,
@@ -188,16 +191,34 @@ function findPreflightStashRef(basePath: string, milestoneId: string, stashMarke
       encoding: "utf-8",
       env: GIT_NO_PROMPT_ENV,
     });
+    const entries: StashEntry[] = [];
     for (const line of list.split("\n")) {
       const [ref, subject] = line.split("\x00");
       if (!ref || !subject) continue;
-      if (stashMarker && subject.includes(stashMarker)) return ref;
-      if (!fallbackRef && subject.includes(markerPrefix)) fallbackRef = ref;
+      entries.push({ ref, subject });
     }
+    return entries;
   } catch (err) {
-    logWarning("preflight", `stash list failed before restore: ${err instanceof Error ? err.message : String(err)}`);
+    logWarning("preflight", `stash list lookup failed: ${err instanceof Error ? err.message : String(err)}`);
+    return [];
   }
-  return fallbackRef;
+}
+
+function findStashRefByExactMarker(basePath: string, stashMarker: string): string | null {
+  const entry = listStashEntries(basePath).find((item) => item.subject.includes(stashMarker));
+  return entry?.ref ?? null;
+}
+
+function findPreflightStashRef(basePath: string, milestoneId: string, stashMarker?: string): string | null {
+  const markerPrefix = `gsd-preflight-stash:${milestoneId}:`;
+  const entries = listStashEntries(basePath);
+
+  if (stashMarker) {
+    const exactMatch = entries.find((entry) => entry.subject.includes(stashMarker));
+    if (exactMatch) return exactMatch.ref;
+  }
+
+  return entries.find((entry) => entry.subject.includes(markerPrefix))?.ref ?? null;
 }
 
 /**
@@ -244,6 +265,18 @@ export function preflightCleanRoot(
       encoding: "utf-8",
       env: GIT_NO_PROMPT_ENV,
     });
+
+    const createdStashRef = findStashRefByExactMarker(basePath, stashMarker);
+    if (!createdStashRef) {
+      const msg = `Auto-stash reported success but no stash entry was created before milestone ${milestoneId} merge. Continuing without postflight stash restore.`;
+      logWarning("preflight", msg);
+      notify(msg, "warning");
+      return {
+        stashPushed: false,
+        summary: `No stashable changes found before merge (milestone ${milestoneId}).`,
+      };
+    }
+
     return {
       stashPushed: true,
       stashMarker,
