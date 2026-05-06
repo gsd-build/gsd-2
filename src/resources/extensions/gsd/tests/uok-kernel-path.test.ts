@@ -120,6 +120,31 @@ test("runAutoLoopWithUok uses kernel path by default and records uok-kernel pari
   }
 });
 
+test("runAutoLoopWithUok keeps kernel path when uok.enabled=false and no fallback is set", async () => {
+  const basePath = makeBasePath();
+  try {
+    resetLegacyTelemetry();
+    const args = makeArgs(basePath, {
+      uok: {
+        enabled: false,
+      },
+    });
+    await runAutoLoopWithUok(args);
+
+    assert.equal(args.calls.kernel, 1);
+    assert.equal(args.calls.legacy, 0);
+
+    const events = readParityEvents(basePath);
+    assert.equal(events.length, 2);
+    assert.equal(events[0]?.path, "uok-kernel");
+    assert.equal(events[1]?.path, "uok-kernel");
+    assert.equal(getLegacyTelemetry()["legacy.uokFallbackUsed"], 0);
+  } finally {
+    resetLegacyTelemetry();
+    rmSync(basePath, { recursive: true, force: true });
+  }
+});
+
 test("runAutoLoopWithUok uses legacy path when explicit legacy fallback is enabled", async () => {
   const basePath = makeBasePath();
   try {
@@ -148,10 +173,10 @@ test("runAutoLoopWithUok uses legacy path when explicit legacy fallback is enabl
   }
 });
 
-test("runAutoLoopWithUok respects GSD_UOK_FORCE_LEGACY emergency switch", async () => {
+test("runAutoLoopWithUok respects GSD_UOK_FALLBACK emergency switch", async () => {
   const basePath = makeBasePath();
-  const previous = process.env.GSD_UOK_FORCE_LEGACY;
-  process.env.GSD_UOK_FORCE_LEGACY = "1";
+  const previous = process.env.GSD_UOK_FALLBACK;
+  process.env.GSD_UOK_FALLBACK = "1";
   try {
     resetLegacyTelemetry();
     const args = makeArgs(basePath, {
@@ -171,8 +196,8 @@ test("runAutoLoopWithUok respects GSD_UOK_FORCE_LEGACY emergency switch", async 
     assert.equal(getLegacyTelemetry()["legacy.uokFallbackUsed"], 1);
   } finally {
     resetLegacyTelemetry();
-    if (previous === undefined) delete process.env.GSD_UOK_FORCE_LEGACY;
-    else process.env.GSD_UOK_FORCE_LEGACY = previous;
+    if (previous === undefined) delete process.env.GSD_UOK_FALLBACK;
+    else process.env.GSD_UOK_FALLBACK = previous;
     rmSync(basePath, { recursive: true, force: true });
   }
 });

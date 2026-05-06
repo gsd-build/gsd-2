@@ -47,9 +47,9 @@ function writeParityEvent(basePath: string, event: Record<string, unknown>): voi
 
 function resolveKernelPathLabel(
   flags: ReturnType<typeof resolveUokFlags>,
-): "uok-kernel" | "legacy-wrapper" | "legacy-fallback" {
+): "uok-kernel" | "legacy-fallback" {
   if (flags.legacyFallback) return "legacy-fallback";
-  return flags.enabled ? "uok-kernel" : "legacy-wrapper";
+  return "uok-kernel";
 }
 
 export async function runAutoLoopWithUok(args: RunAutoLoopWithUokArgs): Promise<void> {
@@ -84,24 +84,22 @@ export async function runAutoLoopWithUok(args: RunAutoLoopWithUokArgs): Promise<
     );
   }
 
-  const decoratedDeps: LoopDeps = flags.enabled
-    ? {
-        ...deps,
-        uokObserver: createTurnObserver({
-          basePath: s.basePath,
-          gitAction: flags.gitopsTurnAction,
-          gitPush: flags.gitopsTurnPush,
-          enableAudit: flags.auditUnified,
-          enableGitops: flags.gitops,
-        }),
-      }
-    : deps;
+  const decoratedDeps: LoopDeps = {
+    ...deps,
+    uokObserver: createTurnObserver({
+      basePath: s.basePath,
+      gitAction: flags.gitopsTurnAction,
+      gitPush: flags.gitopsTurnPush,
+      enableAudit: flags.auditUnified,
+      enableGitops: flags.gitops,
+    }),
+  };
 
   try {
-    if (flags.enabled) {
-      await runKernelLoop(ctx, pi, s, decoratedDeps);
-    } else {
+    if (flags.legacyFallback) {
       await runLegacyLoop(ctx, pi, s, deps);
+    } else {
+      await runKernelLoop(ctx, pi, s, decoratedDeps);
     }
     writeParityEvent(s.basePath, {
       ts: new Date().toISOString(),

@@ -280,14 +280,17 @@ export async function autoLoop(
   const unitDispatchDeps = createExecutionGraphUnitDispatchDeps();
   // Load persisted stuck state so counters survive session restarts (#3704)
   const persisted = loadStuckState(s);
-  const loopState: LoopState = {
-    recentUnits: persisted.recentUnits,
-    stuckRecoveryAttempts: persisted.stuckRecoveryAttempts,
+  const loopState: LoopState = s.loopState ?? (s.loopState = {
+    recentUnits: [],
+    stuckRecoveryAttempts: 0,
     consecutiveFinalizeTimeouts: 0,
-  };
-  let consecutiveErrors = 0;
-  let consecutiveCooldowns = 0;
-  const recentErrorMessages: string[] = [];
+  });
+  s.loopState.recentUnits = persisted.recentUnits;
+  s.loopState.stuckRecoveryAttempts = persisted.stuckRecoveryAttempts;
+  s.loopState.consecutiveFinalizeTimeouts = 0;
+  s.loopConsecutiveErrors = 0;
+  s.loopConsecutiveCooldowns = 0;
+  s.loopRecentErrorMessages = [];
 
   while (s.active) {
     iteration++;
@@ -410,11 +413,11 @@ export async function autoLoop(
     };
     const completeIteration = (): void => {
       completeWorkflowIteration({
-        get consecutiveErrors() { return consecutiveErrors; },
-        set consecutiveErrors(value) { consecutiveErrors = value; },
-        get consecutiveCooldowns() { return consecutiveCooldowns; },
-        set consecutiveCooldowns(value) { consecutiveCooldowns = value; },
-        recentErrorMessages,
+        get consecutiveErrors() { return s.loopConsecutiveErrors; },
+        set consecutiveErrors(value) { s.loopConsecutiveErrors = value; },
+        get consecutiveCooldowns() { return s.loopConsecutiveCooldowns; },
+        set consecutiveCooldowns(value) { s.loopConsecutiveCooldowns = value; },
+        recentErrorMessages: s.loopRecentErrorMessages,
       }, {
         emitIterationEnd: () => emitIterationEnd(),
         saveStuckState: () => saveStuckState(s, loopState),
@@ -1086,10 +1089,10 @@ export async function autoLoop(
       // consecutive failure — but cap retries so we don't spin for hours
       // on persistent quota exhaustion.
       if (isTransientCooldownError(loopErr)) {
-        consecutiveCooldowns++;
+        s.loopConsecutiveCooldowns++;
         const retryAfterMs = getCooldownRetryAfterMs(loopErr);
         const cooldownDecision = decideCooldownRecovery({
-          consecutiveCooldowns,
+          consecutiveCooldowns: s.loopConsecutiveCooldowns,
           maxCooldownRetries: MAX_COOLDOWN_RETRIES,
           retryAfterMs,
           fallbackWaitMs: COOLDOWN_FALLBACK_WAIT_MS,
@@ -1097,7 +1100,7 @@ export async function autoLoop(
         debugLog("autoLoop", {
           phase: "cooldown-wait",
           iteration,
-          consecutiveCooldowns,
+          consecutiveCooldowns: s.loopConsecutiveCooldowns,
           retryAfterMs,
           error: msg,
         });
@@ -1115,18 +1118,18 @@ export async function autoLoop(
         continue; // Retry iteration without incrementing consecutiveErrors
       }
 
-      consecutiveErrors++;
-      recentErrorMessages.push(msg.length > 120 ? msg.slice(0, 120) + "..." : msg);
+      s.loopConsecutiveErrors++;
+      s.loopRecentErrorMessages.push(msg.length > 120 ? msg.slice(0, 120) + "..." : msg);
       debugLog("autoLoop", {
         phase: "iteration-error",
         iteration,
-        consecutiveErrors,
+        consecutiveErrors: s.loopConsecutiveErrors,
         error: msg,
       });
 
       const errorDecision = decideIterationErrorRecovery({
-        consecutiveErrors,
-        recentErrorMessages,
+        consecutiveErrors: s.loopConsecutiveErrors,
+        recentErrorMessages: s.loopRecentErrorMessages,
         currentErrorMessage: msg,
       });
       if (errorDecision.action === "stop") {

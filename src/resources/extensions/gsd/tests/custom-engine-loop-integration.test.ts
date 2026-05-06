@@ -186,9 +186,6 @@ function makeMockDeps(overrides?: Partial<LoopDeps>): LoopDeps & { callLog: stri
     createAutoWorktree: () => "/tmp/wt",
     captureIntegrationBranch: () => {},
     getIsolationMode: () => "none",
-    getCurrentBranch: () => "main",
-    autoWorktreeBranch: () => "auto/M001",
-    resolveMilestoneFile: () => null,
     reconcileMergeState: () => "clean",
     preflightCleanRoot: () => ({ stashPushed: false, summary: "" }),
     postflightPopStash: () => ({

@@ -17,6 +17,8 @@ function now(): number {
  */
 export const STUCK_WINDOW_SIZE = 6;
 
+const MAX_INLINE_RECOVERY_RETRIES = 2;
+
 export class AutoOrchestrator implements AutoOrchestrationModule {
   private status: AutoStatus = {
     phase: "idle",
@@ -41,6 +43,10 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
   }
 
   public async advance(): Promise<AutoAdvanceResult> {
+    return this.advanceInternal(0);
+  }
+
+  private async advanceInternal(recoveryAttempt: number): Promise<AutoAdvanceResult> {
     try {
       await this.deps.runtime.ensureLockOwnership();
 
@@ -226,6 +232,28 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
         return blocked;
       }
 
+      const dispatchClaim = await this.deps.runtime.claimAndJournalDispatch(decision);
+      if (dispatchClaim.kind === "already-active") {
+        const blocked: AutoAdvanceResult = {
+          kind: "blocked",
+          reason: dispatchClaim.reason ?? "dispatch claim blocked: unit already active",
+        };
+        await this.deps.health.postAdvanceRecord(blocked);
+        return blocked;
+      }
+      if (dispatchClaim.kind === "stale-lease") {
+        const paused: AutoAdvanceResult = {
+          kind: "paused",
+          reason: dispatchClaim.reason ?? "dispatch claim blocked: stale milestone lease",
+        };
+        this.status.phase = "paused";
+        this.bumpTransition();
+        await this.deps.runtime.journalTransition({ name: "advance-paused", reason: paused.reason });
+        await this.deps.notifications.notifyLifecycle({ name: "pause", detail: paused.reason });
+        await this.deps.health.postAdvanceRecord(paused);
+        return paused;
+      }
+
       this.status.activeUnit = { unitType: decision.unitType, unitId: decision.unitId };
       this.status.phase = "running";
       this.lastAdvanceKey = nextKey;
@@ -252,11 +280,23 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
         unitType: this.status.activeUnit?.unitType,
         unitId: this.status.activeUnit?.unitId,
       });
-      const result: AutoAdvanceResult = recovery.action === "retry"
-        ? { kind: "paused", reason: recovery.reason }
-        : recovery.action === "escalate"
-          ? { kind: "error", reason: recovery.reason }
-          : { kind: "stopped", reason: recovery.reason };
+
+      if (recovery.action === "retry" && recoveryAttempt < MAX_INLINE_RECOVERY_RETRIES) {
+        this.lastAdvanceKey = null;
+        this.status.activeUnit = undefined;
+        await this.deps.runtime.journalTransition({ name: "advance-retry", reason: recovery.reason });
+        if (recovery.retryAfterMs && recovery.retryAfterMs > 0) {
+          await new Promise<void>((resolve) => setTimeout(resolve, recovery.retryAfterMs));
+        }
+        return this.advanceInternal(recoveryAttempt + 1);
+      }
+
+      const result: AutoAdvanceResult =
+        recovery.action === "pause" || recovery.action === "retry"
+          ? { kind: "paused", reason: recovery.reason }
+          : recovery.action === "escalate"
+            ? { kind: "error", reason: recovery.reason }
+            : { kind: "stopped", reason: recovery.reason };
 
       if (result.kind === "paused") {
         this.status.phase = "paused";
@@ -300,6 +340,18 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
     await this.deps.runtime.journalTransition({ name: "resume" });
     await this.deps.notifications.notifyLifecycle({ name: "resume" });
     return this.advance();
+  }
+
+  public async pause(reason: string): Promise<AutoAdvanceResult> {
+    this.status.phase = "paused";
+    this.status.activeUnit = undefined;
+    this.lastAdvanceKey = null;
+    this.bumpTransition();
+    await this.deps.runtime.journalTransition({ name: "pause", reason });
+    await this.deps.notifications.notifyLifecycle({ name: "pause", detail: reason });
+    const paused: AutoAdvanceResult = { kind: "paused", reason };
+    await this.deps.health.postAdvanceRecord(paused);
+    return paused;
   }
 
   public async stop(reason: string): Promise<AutoAdvanceResult> {

@@ -123,13 +123,6 @@ export interface LoopDeps {
     mid: string,
   ) => void;
   getIsolationMode: (basePath?: string) => string;
-  getCurrentBranch: (basePath: string) => string;
-  autoWorktreeBranch: (milestoneId: string) => string;
-  resolveMilestoneFile: (
-    basePath: string,
-    milestoneId: string,
-    fileType: string,
-  ) => string | null;
   reconcileMergeState: (basePath: string, ctx: ExtensionContext) => MergeReconcileResult;
 
   // Clean-root preflight gate (#2909)
@@ -265,11 +258,6 @@ export interface LoopDeps {
 
   // Filesystem
   existsSync: (path: string) => boolean;
-  readFileSync: (path: string, encoding: string) => string;
-  atomicWriteSync: (path: string, content: string) => void;
-
-  // Git
-  GitServiceImpl: new (basePath: string, gitConfig: unknown) => unknown;
 
   // Worktree Lifecycle Module (ADR-016 — single Module Interface for the
   // milestone create/enter/exit/merge verbs)

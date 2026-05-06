@@ -249,6 +249,7 @@ import { resolveManifest } from "./unit-context-manifest.js";
 import { classifyFailure } from "./recovery-classification.js";
 import { supportsStructuredQuestions } from "./workflow-mcp.js";
 import type { MinimalModelRegistry } from "./context-budget.js";
+import { createRuntimePersistenceAdapter } from "./auto/adapters/runtime-persistence.js";
 // Slice-level parallelism (#2340)
 import { getEligibleSlices } from "./slice-parallel-eligibility.js";
 import { startSliceParallel } from "./slice-parallel-orchestrator.js";
@@ -635,6 +636,7 @@ function stopAutoCommandPolling(): void {
 export { type AutoDashboardData } from "./auto-dashboard.js";
 
 export function getAutoDashboardData(): AutoDashboardData {
+  const lifecycle = s.getLifecycleState();
   const ledger = getLedger();
   const totals = ledger ? getProjectTotals(ledger.units) : null;
   const sessionId = s.cmdCtx?.sessionManager?.getSessionId?.() ?? null;
@@ -653,11 +655,11 @@ export function getAutoDashboardData(): AutoDashboardData {
     logWarning("engine", `capture count failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
   }
   return {
-    active: s.active,
-    paused: s.paused,
+    active: lifecycle.active,
+    paused: lifecycle.paused,
     stepMode: s.stepMode,
     startTime: s.autoStartTime,
-    elapsed: s.active || s.paused
+    elapsed: lifecycle.active || lifecycle.paused
       ? (s.autoStartTime > 0 ? Date.now() - s.autoStartTime : 0)
       : 0,
     currentUnit: s.currentUnit ? { ...s.currentUnit } : null,
@@ -673,7 +675,7 @@ export function getAutoDashboardData(): AutoDashboardData {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export function isAutoActive(): boolean {
-  return s.active;
+  return s.getLifecycleState().active;
 }
 
 export function isAutoCompletionStopInProgress(): boolean {
@@ -682,7 +684,7 @@ export function isAutoCompletionStopInProgress(): boolean {
 
 /** Test-only seam for validating auto-mode guards (#4704). Do not use in production code. */
 export function _setAutoActiveForTest(active: boolean): void {
-  s.active = active;
+  s.setLifecycleState({ active });
 }
 
 /**
@@ -706,7 +708,7 @@ export function _warnIfWorktreeMissingForTest(
 }
 
 export function isAutoPaused(): boolean {
-  return s.paused;
+  return s.getLifecycleState().paused;
 }
 
 export interface ResumeResourceRefreshDeps {
@@ -772,7 +774,7 @@ export function setCurrentDispatchedModelId(model: { provider: string; id: strin
 
 // Tool tracking — delegates to auto-tool-tracking.ts
 export function markToolStart(toolCallId: string, toolName?: string): void {
-  _markToolStart(toolCallId, s.active, toolName);
+  _markToolStart(toolCallId, s.getLifecycleState().active, toolName);
 }
 
 export function markToolEnd(toolCallId: string): void {
@@ -788,7 +790,7 @@ export function markToolEnd(toolCallId: string): void {
  *   - deterministic policy rejection (#4973, e.g. context_write_blocked)
  */
 export function recordToolInvocationError(toolName: string, errorMsg: string): void {
-  if (!s.active) return;
+  if (!s.getLifecycleState().active) return;
   if (isToolInvocationError(errorMsg) || isQueuedUserMessageSkip(errorMsg) || isDeterministicPolicyError(errorMsg)) {
     s.lastToolInvocationError = `${toolName}: ${errorMsg}`;
   }
@@ -975,8 +977,7 @@ function handleLostSessionLock(
     existingPid: lockStatus?.existingPid,
     expectedPid: lockStatus?.expectedPid,
   });
-  s.active = false;
-  s.paused = false;
+  s.setLifecycleState({ active: false, paused: false });
   deactivateGSD();
   clearUnitTimeout();
   stopAutoCommandPolling();
@@ -1030,7 +1031,7 @@ export async function rerootCommandSession(
 
 export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void> {
   s.currentUnit = null;
-  s.active = false;
+  s.setLifecycleState({ active: false });
   deactivateGSD();
   clearUnitTimeout();
   stopAutoCommandPolling();
@@ -1050,7 +1051,7 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
 
   // A transient provider-error pause intentionally leaves the paused badge
   // visible so the user still has a resumable auto-mode signal on screen.
-  if (!s.paused) {
+  if (!s.getLifecycleState().paused) {
     ctx.ui.setStatus("gsd-auto", undefined);
     ctx.ui.setWidget("gsd-progress", undefined);
     if (s.completionStopInProgress) {
@@ -1163,7 +1164,8 @@ export async function stopAuto(
   reason?: string,
   options: StopAutoOptions = {},
 ): Promise<void> {
-  if (!s.active && !s.paused) return;
+  const lifecycleAtStop = s.getLifecycleState();
+  if (!lifecycleAtStop.active && !lifecycleAtStop.paused) return;
   const loadedPreferences = loadEffectiveGSDPreferences(s.basePath || undefined)?.preferences;
   const reasonSuffix = reason ? ` — ${reason}` : "";
   const preserveCompletionSurface = Boolean(options.completionWidget);
@@ -1633,7 +1635,7 @@ export async function pauseAuto(
   _pi?: ExtensionAPI,
   _errorContext?: ErrorContext,
 ): Promise<void> {
-  if (!s.active) return;
+  if (!s.getLifecycleState().active) return;
   clearUnitTimeout();
   stopAutoCommandPolling();
 
@@ -1720,13 +1722,16 @@ export async function pauseAuto(
   _resetPendingResolve();
 
   try {
-    await s.orchestration?.stop("pause");
+    if (s.orchestration?.pause) {
+      await s.orchestration.pause("pause");
+    } else {
+      await s.orchestration?.stop("pause");
+    }
   } catch (err) {
-    debugLog("pause-orchestration-stop", { error: err instanceof Error ? err.message : String(err) });
+    debugLog("pause-orchestration-transition", { error: err instanceof Error ? err.message : String(err) });
   }
 
-  s.active = false;
-  s.paused = true;
+  s.setLifecycleState({ active: false, paused: true });
   deactivateGSD();
   restoreProjectRootEnv();
   restoreMilestoneLockEnv();
@@ -1881,6 +1886,17 @@ export function createWiredAutoOrchestrationModule(
 ): AutoOrchestrationModule {
   const flowId = `auto-orchestrator-${Date.now()}`;
   let seq = 0;
+  const runtime = createRuntimePersistenceAdapter({
+    basePath: runtimeBasePath,
+    lockBasePath: runtimeBasePath,
+    flowId,
+    nextSeq: () => ++seq,
+    getWorkerContext: () => ({
+      workerId: s.workerId,
+      milestoneLeaseToken: s.milestoneLeaseToken,
+      milestoneId: s.currentMilestoneId,
+    }),
+  });
 
   const deps: AutoOrchestratorDeps = {
     stateReconciliation: {
@@ -1950,6 +1966,8 @@ export function createWiredAutoOrchestrationModule(
         return { ok: true, reason: result.kind };
       },
       async syncAfterUnit() {},
+      async finalizeMilestoneTransition() {},
+      async teardownMilestone() {},
       async cleanupOnStop() {},
     },
     health: {
@@ -1991,47 +2009,7 @@ export function createWiredAutoOrchestrationModule(
         }
       },
     },
-    runtime: {
-      async ensureLockOwnership() {
-        const status = getSessionLockStatus(runtimeBasePath);
-        if (!status.valid || status.failureReason === "pid-mismatch") {
-          throw new Error("session lock held by another process");
-        }
-      },
-      async journalTransition(event) {
-        const eventType = event.name === "start"
-          ? "iteration-start"
-          : event.name === "resume"
-            ? "iteration-start"
-            : event.name === "advance"
-              ? "dispatch-match"
-              : event.name === "advance-blocked"
-                ? "guard-block"
-                : event.name === "advance-stopped"
-                  ? "dispatch-stop"
-                  : event.name === "advance-error"
-                    ? "iteration-end"
-                    : event.name === "advance-paused" || event.name === "advance-retry"
-                      ? "guard-block"
-                      : event.name === "stop"
-                      ? "terminal"
-                      : "iteration-end";
-
-        _emitJournalEvent(runtimeBasePath, {
-          ts: new Date().toISOString(),
-          flowId,
-          seq: ++seq,
-          eventType,
-          data: {
-            source: "auto-orchestrator",
-            name: event.name,
-            reason: event.reason,
-            unitType: event.unitType,
-            unitId: event.unitId,
-          },
-        });
-      },
-    },
+    runtime,
     notifications: {
       async notifyLifecycle(event) {
         if (event.name === "error") {
@@ -2152,9 +2130,6 @@ function buildLoopDeps(pi: ExtensionAPI): LoopDeps {
     createAutoWorktree,
     captureIntegrationBranch,
     getIsolationMode,
-    getCurrentBranch,
-    autoWorktreeBranch,
-    resolveMilestoneFile,
     reconcileMergeState,
 
     // Budget/context/secrets
@@ -2197,12 +2172,6 @@ function buildLoopDeps(pi: ExtensionAPI): LoopDeps {
 
     // Filesystem
     existsSync,
-    readFileSync: (path: string, encoding: string) =>
-      readFileSync(path, encoding as BufferEncoding),
-    atomicWriteSync,
-
-    // Git
-    GitServiceImpl: GitServiceImpl as unknown as LoopDeps["GitServiceImpl"],
 
     // Worktree Lifecycle Module (ADR-016 — single Module Interface for the
     // milestone create/enter/exit/merge verbs)
@@ -2247,7 +2216,7 @@ export async function startAuto(
     milestoneLock?: string | null;
   },
 ): Promise<void> {
-  if (s.active) {
+  if (s.getLifecycleState().active) {
     debugLog("startAuto", { phase: "already-active", skipping: true });
     return;
   }
@@ -2259,7 +2228,7 @@ export async function startAuto(
   // set as the new baseline — exactly the cross-unit poisoning this PR is
   // fixing (#4959 / CodeRabbit Major).  The pre-pause baseline survives in
   // the WeakMap keyed by `pi`.
-  if (!s.paused) clearToolBaseline(pi);
+  if (!s.getLifecycleState().paused) clearToolBaseline(pi);
 
   const requestedStepMode = options?.step ?? false;
   const interruptedAssessment = options?.interrupted ?? null;
@@ -2315,7 +2284,7 @@ export async function startAuto(
     }
   };
 
-  if (!s.paused) {
+  if (!s.getLifecycleState().paused) {
     try {
       const meta = freshStartAssessment.pausedSession ?? readPausedSessionMetadata(base);
       if (meta?.activeEngineId && meta.activeEngineId !== "dev") {
@@ -2326,7 +2295,7 @@ export async function startAuto(
         s.stepMode = meta.stepMode ?? requestedStepMode;
         s.autoStartTime = meta.autoStartTime || Date.now();
         s.sessionMilestoneLock = meta.milestoneLock ?? null;
-        s.paused = true;
+        s.setLifecycleState({ paused: true });
         ctx.ui.notify(
           `Resuming paused custom workflow${meta.activeRunDir ? ` (${meta.activeRunDir})` : ""}.`,
           "info",
@@ -2381,7 +2350,7 @@ export async function startAuto(
             s.pausedUnitId = meta.unitId ?? null;
             s.autoStartTime = meta.autoStartTime || Date.now();
             s.sessionMilestoneLock = meta.milestoneLock ?? null;
-            s.paused = true;
+            s.setLifecycleState({ paused: true });
             // Build scope from persisted state. Use worktreePath when present and
             // still on disk so mode is detected correctly; fall back to project root.
             {
@@ -2421,7 +2390,7 @@ export async function startAuto(
     captureMilestoneLockEnv(s.sessionMilestoneLock);
   }
 
-  if (!s.paused) {
+  if (!s.getLifecycleState().paused) {
     s.stepMode = requestedStepMode;
   }
 
@@ -2433,7 +2402,7 @@ export async function startAuto(
     clearStaleWorkerLock(base);
   }
 
-  if (!s.paused) {
+  if (!s.getLifecycleState().paused) {
     s.pendingCrashRecovery =
       freshStartAssessment.classification === "recoverable"
         ? freshStartAssessment.recoveryPrompt
@@ -2452,18 +2421,17 @@ export async function startAuto(
     }
   }
 
-  if (s.paused) {
+  if (s.getLifecycleState().paused) {
     const resumeLock = acquireSessionLock(base);
     if (!resumeLock.acquired) {
       // Reset paused state so isAutoPaused() doesn't stick true after lock failure.
       // Pause file is preserved on disk for retry — not deleted.
-      s.paused = false;
+      s.setLifecycleState({ paused: false });
       ctx.ui.notify(`Cannot resume: ${resumeLock.reason}`, "error");
       return;
     }
 
-    s.paused = false;
-    s.active = true;
+    s.setLifecycleState({ active: true, paused: false });
     s.verbose = verboseMode;
     s.stepMode = requestedStepMode;
     s.cmdCtx = ctx;
@@ -2786,12 +2754,12 @@ export async function dispatchHookUnit(
   hookModel: string | undefined,
   targetBasePath: string,
 ): Promise<boolean> {
-  const wasActive = s.active;
+  const wasActive = s.getLifecycleState().active;
   const previousBasePath = s.basePath;
   const previousCurrentUnit = s.currentUnit ? { ...s.currentUnit } : null;
 
-  if (!s.active) {
-    s.active = true;
+  if (!s.getLifecycleState().active) {
+    s.setLifecycleState({ active: true });
     s.stepMode = true;
     s.cmdCtx = ctx as ExtensionCommandContext;
     s.autoStartTime = Date.now();
@@ -2862,7 +2830,7 @@ export async function dispatchHookUnit(
   const hookHardTimeoutMs = (supervisor.hard_timeout_minutes ?? 30) * 60 * 1000;
   s.unitTimeoutHandle = setTimeout(async () => {
     s.unitTimeoutHandle = null;
-    if (!s.active) return;
+    if (!s.getLifecycleState().active) return;
     ctx.ui.notify(
       `Hook ${hookName} exceeded ${supervisor.hard_timeout_minutes ?? 30}min timeout. Pausing auto-mode.`,
       "warning",

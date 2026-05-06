@@ -25,6 +25,7 @@ import type { AutoOrchestrationModule } from "./contracts.js";
 import { resolveWorktreeProjectRoot } from "../worktree-root.js";
 import { normalizeRealPath } from "../paths.js";
 import type { MilestoneScope } from "../workspace.js";
+import type { LoopState } from "./types.js";
 
 // ─── Exported Types ──────────────────────────────────────────────────────────
 
@@ -86,6 +87,12 @@ export const NEW_SESSION_TIMEOUT_MS = 120_000;
 
 export class AutoSession {
   // ── Lifecycle ────────────────────────────────────────────────────────────
+  /**
+   * Raw lifecycle flags used by hot-path loop cancellation/pause checks.
+   * Use these directly only where deterministic in-loop semantics depend on
+   * immediate writes (e.g. run-unit dispatch cancellation and provider-pause
+   * guards in phases/loop paths).
+   */
   active = false;
   paused = false;
   completionStopInProgress = false;
@@ -220,6 +227,20 @@ export class AutoSession {
    *  Moved from module-level to per-session so s.reset() clears it (#1348). */
   consecutiveCompleteBootstraps = 0;
 
+  // ── Loop runtime state (migrated from auto/loop.ts locals) ──────────────
+  /** Stuck-window and finalize-timeout state threaded through phase helpers. */
+  loopState: LoopState = {
+    recentUnits: [],
+    stuckRecoveryAttempts: 0,
+    consecutiveFinalizeTimeouts: 0,
+  };
+  /** Consecutive non-cooldown iteration failures used by error recovery policy. */
+  loopConsecutiveErrors = 0;
+  /** Consecutive transient credential cooldowns used by cooldown recovery policy. */
+  loopConsecutiveCooldowns = 0;
+  /** Recent capped error messages used for stop diagnostics after repeated failures. */
+  loopRecentErrorMessages: string[] = [];
+
   // ── Metrics ──────────────────────────────────────────────────────────────
   autoStartTime = 0;
   lastPromptCharCount: number | undefined;
@@ -253,6 +274,31 @@ export class AutoSession {
     if (this.wrapupWarningHandle) { clearTimeout(this.wrapupWarningHandle); this.wrapupWarningHandle = null; }
     if (this.idleWatchdogHandle) { clearInterval(this.idleWatchdogHandle); this.idleWatchdogHandle = null; }
     if (this.continueHereHandle) { clearInterval(this.continueHereHandle); this.continueHereHandle = null; }
+  }
+
+  setLifecycleState(next: { active?: boolean; paused?: boolean }): void {
+    if (typeof next.active === "boolean") this.active = next.active;
+    if (typeof next.paused === "boolean") this.paused = next.paused;
+  }
+
+  getLifecycleState(): { active: boolean; paused: boolean } {
+    // Compatibility mode during orchestrator migration:
+    // local session flags remain authoritative while set, and orchestrator
+    // status backfills lifecycle only when local flags are both false.
+    //
+    // Guidance:
+    // - Prefer getLifecycleState() for UI/entry-point/guard reads that only
+    //   need the effective session state.
+    // - Prefer raw active/paused in loop hot paths that rely on exact local
+    //   write ordering during a running iteration.
+    if (this.active || this.paused) {
+      return { active: this.active, paused: this.paused };
+    }
+    const phase = this.orchestration?.getStatus().phase;
+    return {
+      active: phase === "running",
+      paused: phase === "paused",
+    };
   }
 
   resetDispatchCounters(): void {
@@ -353,6 +399,14 @@ export class AutoSession {
     this.sidecarQueue = [];
     this.rewriteAttemptCount = 0;
     this.consecutiveCompleteBootstraps = 0;
+    this.loopState = {
+      recentUnits: [],
+      stuckRecoveryAttempts: 0,
+      consecutiveFinalizeTimeouts: 0,
+    };
+    this.loopConsecutiveErrors = 0;
+    this.loopConsecutiveCooldowns = 0;
+    this.loopRecentErrorMessages = [];
     this.lastPreExecFailure = null;
     this.preExecRetryCount.clear();
     this.lastToolInvocationError = null;
