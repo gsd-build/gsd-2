@@ -12,7 +12,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { VerificationResult } from "./types.ts";
-import { deriveVerificationOutcome } from "./verification-outcome.ts";
+import { deriveVerificationOutcome } from "./verification-outcome.js";
 
 // ─── JSON Evidence Artifact ──────────────────────────────────────────────────
 
