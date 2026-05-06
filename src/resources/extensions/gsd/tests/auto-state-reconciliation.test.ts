@@ -141,6 +141,25 @@ test("reconcileBeforeDispatch skips sketch re-derive when no flags changed", asy
   assert.equal(sketchRepair?.status, "skipped");
 });
 
+test("reconcileBeforeDispatch fails closed when sketch repair throws", async () => {
+  const deps = makeDeps({
+    isDbAvailable: () => true,
+    autoHealSketchFlags: () => {
+      throw new Error("heal exploded");
+    },
+  });
+  const adapter = createStateReconciliationAdapter(deps);
+
+  const result = await adapter.reconcileBeforeDispatch({ basePath: "/tmp/base" });
+
+  assert.equal(result.allow, false);
+  assert.match(result.reason ?? "", /sketch flag repair failed/);
+  assert.equal(result.blockers[0]?.fatal, true);
+  const sketchRepair = result.repairs.find((repair) => repair.kind === "stale-sketch-flag");
+  assert.equal(sketchRepair?.status, "failed");
+  assert.match(sketchRepair?.reason ?? "", /heal exploded/);
+});
+
 test("reconcileBeforeDispatch fails closed for db-unavailable derived blockers", async () => {
   const deps = makeDeps({
     deriveState: async () => makeState({

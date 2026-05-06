@@ -140,19 +140,36 @@ export function createStateReconciliationAdapter(
       let repairedSketch = false;
       if (deps.isDbAvailable() && stateSnapshot.activeMilestone?.id) {
         const milestoneId = stateSnapshot.activeMilestone.id;
-        const repairedCount = deps.autoHealSketchFlags(milestoneId, (sliceId) => {
-          const planPath = deps.resolveSlicePlanFile(stateBasePath, milestoneId, sliceId);
-          return Boolean(planPath && deps.existsSync(planPath));
-        });
-        repairs.push({
-          kind: "stale-sketch-flag",
-          status: repairedCount > 0 ? "applied" : "skipped",
-          reason: repairedCount > 0
-            ? `repaired ${repairedCount} stale sketch flag${repairedCount === 1 ? "" : "s"} for ${milestoneId}`
-            : `no stale sketch flags detected for ${milestoneId}`,
-          dbAffecting: repairedCount > 0,
-        });
-        repairedSketch = repairedCount > 0;
+        try {
+          const repairedCount = deps.autoHealSketchFlags(milestoneId, (sliceId) => {
+            const planPath = deps.resolveSlicePlanFile(stateBasePath, milestoneId, sliceId);
+            return Boolean(planPath && deps.existsSync(planPath));
+          });
+          repairs.push({
+            kind: "stale-sketch-flag",
+            status: repairedCount > 0 ? "applied" : "skipped",
+            reason: repairedCount > 0
+              ? `repaired ${repairedCount} stale sketch flag${repairedCount === 1 ? "" : "s"} for ${milestoneId}`
+              : `no stale sketch flags detected for ${milestoneId}`,
+            dbAffecting: repairedCount > 0,
+          });
+          repairedSketch = repairedCount > 0;
+        } catch (error) {
+          const reason = `sketch flag repair failed for ${milestoneId}: ${error instanceof Error ? error.message : String(error)}`;
+          repairs.push({
+            kind: "stale-sketch-flag",
+            status: "failed",
+            reason,
+            dbAffecting: false,
+          });
+          return {
+            allow: false,
+            reason,
+            stateSnapshot,
+            repairs,
+            blockers: [{ kind: "state-derived-blocker", reason, fatal: true }],
+          };
+        }
       } else {
         repairs.push({
           kind: "stale-sketch-flag",
