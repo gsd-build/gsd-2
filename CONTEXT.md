@@ -8,6 +8,7 @@
 - **Dispatch decision**: selection of the next Unit plus rationale and preconditions.
 - **Recovery decision**: retry/escalate/abort choice after runtime failure.
 - **Runtime persistence**: lock state, transition journal, and any persisted execution state required for safe resume.
+- **DB snapshot persistence**: crash-safe persistence of a full SQLite image exported from `sql.js`, written as a same-directory temporary file and atomically renamed over the live database path.
 
 ## Architecture terms adopted for this area
 
@@ -18,6 +19,7 @@
 - **Health adapter**: adapter behind the Health seam.
 - **Runtime persistence adapter**: adapter behind the Runtime persistence seam.
 - **Notification adapter**: adapter behind the Notification seam.
+- **DB snapshot persistence module**: the deep module that owns `sql.js` snapshot write semantics, including temp-file naming, fsync, cleanup, and rename ordering.
 - **State Reconciliation module**: module that reconciles DB-authoritative runtime state with durable disk projections before a Dispatch decision.
 - **Worktree Safety module**: module that validates project root, worktree registration, lease ownership, and git health before a source-writing Unit runs.
 - **Recovery Classification module**: module that maps provider, tool, policy, git, worktree, and runtime failures to a Recovery decision.
