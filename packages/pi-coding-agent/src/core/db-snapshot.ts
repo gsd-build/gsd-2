@@ -31,6 +31,11 @@ function fsyncDirectoryBestEffort(dirPath: string): void {
  * The snapshot is written to a unique temp file in the same directory, flushed,
  * then renamed over the target. A hard kill during the temp write leaves the
  * previous target intact; after rename, readers see the complete new snapshot.
+ *
+ * The rename replaces the target inode: existing file mode/ownership is not
+ * preserved, and a symlink at dbPath is replaced rather than written through.
+ * Agent DB snapshots are owned runtime files, so this trade-off favors a
+ * private 0600 replacement over retaining prior target metadata.
  */
 export function atomicWriteDbSnapshotSync(dbPath: string, snapshot: DbSnapshot): void {
 	const dirPath = dirname(dbPath);
