@@ -5,7 +5,7 @@
  * properties on a class instance. Benefits:
  *
  * - reset() clears everything in one call (was 25+ manual resets in stopAuto)
- * - toJSON() provides diagnostic snapshots
+ * - toJSON provides diagnostic snapshots
  * - grep `s.` shows every state access
  * - Constructable for testing
  *
@@ -310,6 +310,32 @@ export class AutoSession {
     return resolveWorktreeProjectRoot(this.basePath, this.originalBasePath);
   }
 
+  // Compatibility accessors for loop-state fields still referenced by
+  // diagnostics/tests during the loop-state migration.
+  get recentUnits(): LoopState["recentUnits"] {
+    return this.loopState.recentUnits;
+  }
+
+  set recentUnits(value: LoopState["recentUnits"]) {
+    this.loopState.recentUnits = value;
+  }
+
+  get stuckRecoveryAttempts(): number {
+    return this.loopState.stuckRecoveryAttempts;
+  }
+
+  set stuckRecoveryAttempts(value: number) {
+    this.loopState.stuckRecoveryAttempts = value;
+  }
+
+  get consecutiveFinalizeTimeouts(): number {
+    return this.loopState.consecutiveFinalizeTimeouts;
+  }
+
+  set consecutiveFinalizeTimeouts(value: number) {
+    this.loopState.consecutiveFinalizeTimeouts = value;
+  }
+
   /**
    * Canonical project root for state-derivation reads AND writer paths.
    *
@@ -404,6 +430,9 @@ export class AutoSession {
       stuckRecoveryAttempts: 0,
       consecutiveFinalizeTimeouts: 0,
     };
+    this.recentUnits = [];
+    this.stuckRecoveryAttempts = 0;
+    this.consecutiveFinalizeTimeouts = 0;
     this.loopConsecutiveErrors = 0;
     this.loopConsecutiveCooldowns = 0;
     this.loopRecentErrorMessages = [];
