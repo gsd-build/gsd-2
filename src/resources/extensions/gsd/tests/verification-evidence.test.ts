@@ -260,6 +260,69 @@ test("verification-evidence: writeVerificationJSON persists normalized outcome m
   }
 });
 
+test("verification-evidence: writeVerificationJSON maps blocking runtime errors to execution failure metadata", () => {
+  const tmp = makeTempDir("ve-outcome-runtime-error");
+  try {
+    const runtimeFailResult = makeResult({
+      passed: false,
+      checks: [
+        { command: "npm run test", exitCode: 0, stdout: "", stderr: "", durationMs: 100 },
+      ],
+      runtimeErrors: [
+        { source: "bg-shell", severity: "crash", message: "boom", blocking: true },
+      ],
+      outcome: {
+        kind: "passed",
+        passed: true,
+        totalChecks: 1,
+        failedChecks: 0,
+      },
+    });
+
+    writeVerificationJSON(runtimeFailResult, tmp, "T07");
+    const runtimeJson = JSON.parse(readFileSync(join(tmp, "T07-VERIFY.json"), "utf-8"));
+
+    assert.equal(runtimeJson.outcomeMetadata.outcome, "fail");
+    assert.equal(runtimeJson.outcomeMetadata.failureClass, "execution");
+    assert.equal(runtimeJson.outcomeMetadata.reason, "runtime-error");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("verification-evidence: writeVerificationJSON includes postExecutionChecks when provided", () => {
+  const tmp = makeTempDir("ve-post-exec-checks");
+  try {
+    const result = makeResult({
+      passed: false,
+      checks: [
+        { command: "npm run test", exitCode: 1, stdout: "", stderr: "fail", durationMs: 200 },
+      ],
+    });
+    const postExecutionChecks = [
+      {
+        category: "import",
+        target: "src/broken.ts:1",
+        passed: false,
+        message: "Unresolved import: ./does-not-exist.js",
+        blocking: true,
+      },
+    ] as const;
+
+    writeVerificationJSON(result, tmp, "T08", "M001/S01/T08", 1, 2, [...postExecutionChecks]);
+    const json = JSON.parse(readFileSync(join(tmp, "T08-VERIFY.json"), "utf-8"));
+
+    assert.ok(Array.isArray(json.postExecutionChecks), "postExecutionChecks should be an array");
+    assert.equal(json.postExecutionChecks.length, 1);
+    assert.equal(json.postExecutionChecks[0].category, "import");
+    assert.equal(json.postExecutionChecks[0].target, "src/broken.ts:1");
+    assert.equal(json.postExecutionChecks[0].passed, false);
+    assert.equal(json.postExecutionChecks[0].blocking, true);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ─── formatEvidenceTable Tests ───────────────────────────────────────────────
 
 test("verification-evidence: formatEvidenceTable returns markdown table with correct columns", () => {

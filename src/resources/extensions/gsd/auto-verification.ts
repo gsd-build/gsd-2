@@ -14,7 +14,6 @@
  */
 
 import type { ExtensionContext, ExtensionAPI } from "@gsd/pi-coding-agent";
-import { mkdirSync, writeFileSync } from "node:fs";
 import { resolveSliceFile, resolveSlicePath, resolveMilestoneFile } from "./paths.js";
 import { parseUnitId } from "./unit-id.js";
 import { isDbAvailable, getTask, getSliceTasks, getMilestoneSlices } from "./gsd-db.js";
@@ -31,11 +30,11 @@ import {
   captureRuntimeErrors,
   runDependencyAudit,
 } from "./verification-gate.js";
-import { writeVerificationJSON, type PostExecutionCheckJSON, type EvidenceJSON } from "./verification-evidence.js";
+import { writeVerificationJSON, type PostExecutionCheckJSON } from "./verification-evidence.js";
 import { logWarning } from "./workflow-logger.js";
 import { runPostExecutionChecks, type PostExecutionResult } from "./post-execution-checks.js";
 import type { AutoSession } from "./auto/session.js";
-import type { VerificationResult as VerificationGateResult } from "./types.js";
+import type { VerificationOutcomeKind } from "./verification-outcome.js";
 import { join } from "node:path";
 import { resolveUokFlags } from "./uok/flags.js";
 import { UokGateRunner } from "./uok/gate-runner.js";
@@ -54,7 +53,7 @@ interface VerificationSemanticsInput {
   passed: boolean;
   checks: Array<{ exitCode: number }>;
   discoverySource: string;
-  outcome?: string | null;
+  outcome?: VerificationOutcomeKind | null;
 }
 
 interface VerificationSemanticsDecision {
@@ -65,15 +64,7 @@ interface VerificationSemanticsDecision {
 export function evaluateVerificationOutcomeSemantics(
   result: VerificationSemanticsInput,
 ): VerificationSemanticsDecision {
-  const normalizedOutcome = typeof result.outcome === "string"
-    ? result.outcome.toLowerCase()
-    : null;
-
-  if (normalizedOutcome === "manual-attention") {
-    return { pause: true, reason: "manual-attention" };
-  }
-
-  if (normalizedOutcome === "no-command") {
+  if (result.outcome === "no-commands") {
     return { pause: true, reason: "no-command" };
   }
 
@@ -429,16 +420,13 @@ export async function runPostUnitVerification(
       passed: result.passed,
       checks: result.checks,
       discoverySource: result.discoverySource,
-      outcome: (result as VerificationGateResult & { outcome?: string }).outcome,
+      outcome: result.outcome?.kind ?? null,
     });
     if (outcomeSemantics.pause) {
       s.verificationRetryCount.delete(s.currentUnit.id);
       s.pendingVerificationRetry = null;
-      const reasonText = outcomeSemantics.reason === "manual-attention"
-        ? "manual-attention"
-        : "no-command";
       ctx.ui.notify(
-        `Verification requires ${reasonText} handling — pausing for human review`,
+        "Verification found no verifiable commands — pausing for human review",
         "error",
       );
       await pauseAuto(ctx, pi);
@@ -579,15 +567,14 @@ export async function runPostUnitVerification(
             // Mark as failed if there was a blocking post-exec failure
             passed: result.passed && !postExecBlockingFailure,
           };
-          // Manually write with postExecutionChecks field
-          writeVerificationJSONWithPostExec(
+          writeVerificationJSON(
             resultWithPostExec,
             tasksDir,
             tid,
             s.currentUnit.id,
-            postExecChecks,
             postExecBlockingFailure ? attempt + 1 : undefined,
-            postExecBlockingFailure ? maxRetries : undefined
+            postExecBlockingFailure ? maxRetries : undefined,
+            postExecChecks,
           );
         }
       } catch (evidenceErr) {
@@ -713,60 +700,4 @@ export async function runPostUnitVerification(
     await pauseAuto(ctx, pi);
     return "pause";
   }
-}
-
-/**
- * Write verification evidence JSON with post-execution checks included.
- * This is a variant of writeVerificationJSON that adds the postExecutionChecks field.
- */
-function writeVerificationJSONWithPostExec(
-  result: VerificationGateResult,
-  tasksDir: string,
-  taskId: string,
-  unitId: string,
-  postExecutionChecks: PostExecutionCheckJSON[],
-  retryAttempt?: number,
-  maxRetries?: number,
-): void {
-  mkdirSync(tasksDir, { recursive: true });
-
-  const evidence: EvidenceJSON = {
-    schemaVersion: 1,
-    taskId,
-    unitId: unitId ?? taskId,
-    timestamp: result.timestamp,
-    passed: result.passed,
-    discoverySource: result.discoverySource,
-    checks: result.checks.map((check) => ({
-      command: check.command,
-      exitCode: check.exitCode,
-      durationMs: check.durationMs,
-      verdict: check.exitCode === 0 ? "pass" : "fail",
-    })),
-    ...(retryAttempt !== undefined ? { retryAttempt } : {}),
-    ...(maxRetries !== undefined ? { maxRetries } : {}),
-    postExecutionChecks,
-  };
-
-  if (result.runtimeErrors && result.runtimeErrors.length > 0) {
-    evidence.runtimeErrors = result.runtimeErrors.map(e => ({
-      source: e.source,
-      severity: e.severity,
-      message: e.message,
-      blocking: e.blocking,
-    }));
-  }
-
-  if (result.auditWarnings && result.auditWarnings.length > 0) {
-    evidence.auditWarnings = result.auditWarnings.map(w => ({
-      name: w.name,
-      severity: w.severity,
-      title: w.title,
-      url: w.url,
-      fixAvailable: w.fixAvailable,
-    }));
-  }
-
-  const filePath = join(tasksDir, `${taskId}-VERIFY.json`);
-  writeFileSync(filePath, JSON.stringify(evidence, null, 2) + "\n", "utf-8");
 }

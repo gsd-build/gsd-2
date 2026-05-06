@@ -525,7 +525,7 @@ describe("Post-execution retry behavior", () => {
     const pi = makeMockPi();
     const pauseAutoMock = mock.fn(async () => {});
     const s = makeMockSession(tempDir, { type: "execute-task", id: "M001/S01/T01" });
-    (s as unknown as { basePath?: string }).basePath = undefined;
+    (s.currentUnit as unknown as { id?: string }).id = undefined;
 
     const vctx: VerificationContext = { s, ctx, pi };
     const result = await runPostUnitVerification(vctx, pauseAutoMock);

@@ -8,8 +8,8 @@
  *   4. First-non-empty-wins precedence
  *   5. All commands pass → gate passes
  *   6. One command fails → gate fails with exit code + stderr
- *   7. Missing package.json → 0 checks → pass
- *   8. Empty scripts → 0 checks → pass
+ *   7. Missing package.json → 0 checks → fail (passed=false, outcome.kind === "no-commands")
+ *   8. Empty scripts → 0 checks → fail (passed=false, outcome.kind === "no-commands")
  *   9. Preference validation for verification keys
  *  10. spawnSync error (command not found) → failure with exit code 127
  *  11. Dependency audit — git diff detection, npm audit parsing, graceful failures

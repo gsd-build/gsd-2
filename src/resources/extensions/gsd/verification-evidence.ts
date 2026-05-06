@@ -12,6 +12,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { VerificationResult } from "./types.ts";
+import { deriveVerificationOutcome } from "./verification-outcome.ts";
 
 // ─── JSON Evidence Artifact ──────────────────────────────────────────────────
 
@@ -109,14 +110,10 @@ export interface EvidenceJSON {
 
 function deriveOutcomeMetadata(result: VerificationResult): EvidenceOutcomeMetadataJSON {
   const runtimeBlocking = (result.runtimeErrors ?? []).some((err) => err.blocking);
-  const inferredKind = result.checks.length === 0
-    ? "no-commands"
-    : result.checks.some((check) => check.exitCode !== 0)
-      ? "failed"
-      : "passed";
-  const kind = result.outcome?.kind ?? inferredKind;
-  const totalChecks = result.outcome?.totalChecks ?? result.checks.length;
-  const failedChecks = result.outcome?.failedChecks ?? result.checks.filter((check) => check.exitCode !== 0).length;
+  const fallbackOutcome = deriveVerificationOutcome(result.checks);
+  const kind = result.outcome?.kind ?? fallbackOutcome.kind;
+  const totalChecks = result.outcome?.totalChecks ?? fallbackOutcome.totalChecks;
+  const failedChecks = result.outcome?.failedChecks ?? fallbackOutcome.failedChecks;
 
   if (kind === "no-commands") {
     return {
@@ -164,6 +161,7 @@ export function writeVerificationJSON(
   unitId?: string,
   retryAttempt?: number,
   maxRetries?: number,
+  postExecutionChecks?: PostExecutionCheckJSON[],
 ): void {
   mkdirSync(tasksDir, { recursive: true });
   const outcomeMetadata = deriveOutcomeMetadata(result);
@@ -184,6 +182,9 @@ export function writeVerificationJSON(
     })),
     ...(retryAttempt !== undefined ? { retryAttempt } : {}),
     ...(maxRetries !== undefined ? { maxRetries } : {}),
+    ...(postExecutionChecks && postExecutionChecks.length > 0
+      ? { postExecutionChecks }
+      : {}),
   };
 
   if (result.runtimeErrors && result.runtimeErrors.length > 0) {
