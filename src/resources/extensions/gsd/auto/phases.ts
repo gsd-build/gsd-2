@@ -1660,6 +1660,7 @@ export async function runUnitPhase(
   }
 
   // Select and apply model (with tier escalation on retry — normal units only)
+  const autoModeStartThinkingLevel = s.autoModeStartThinkingLevel ?? undefined;
   const modelResult = await deps.selectAndApplyModel(
     ctx,
     pi,
@@ -1672,7 +1673,7 @@ export async function runUnitPhase(
     sidecarItem ? undefined : { isRetry, previousTier },
     undefined,
     s.manualSessionModelOverride,
-    s.autoModeStartThinkingLevel,
+    autoModeStartThinkingLevel,
   );
   s.currentUnitRouting =
     modelResult.routing as AutoSession["currentUnitRouting"];
@@ -1687,8 +1688,8 @@ export async function runUnitPhase(
     if (match) {
       const ok = await pi.setModel(match, { persist: false });
       if (ok) {
-        if (s.autoModeStartThinkingLevel) {
-          pi.setThinkingLevel(s.autoModeStartThinkingLevel);
+        if (autoModeStartThinkingLevel) {
+          pi.setThinkingLevel(autoModeStartThinkingLevel);
         }
         s.currentUnitModel = match as AutoSession["currentUnitModel"];
         ctx.ui.notify(`Hook model override: ${match.provider}/${match.id}`, "info");
