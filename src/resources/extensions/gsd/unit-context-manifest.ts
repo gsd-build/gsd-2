@@ -513,10 +513,12 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     codebaseMap: false,
     preferences: "active-only",
     contextMode: "verification",
-    // See complete-milestone — same rationale: dispatch to reviewer / security /
-    // tester subagents to fan out review work without bloating this unit's
-    // context.
-    tools: TOOLS_PLANNING_DISPATCH_REVIEW,
+    // complete-slice must run verification commands (tests, linters, type checks)
+    // and fix failures before marking done. planning-dispatch blocks bash/write,
+    // contradicting the prompt contract ("Run all slice-level verification checks
+    // from the slice plan. Fix failures before marking done"). Subagent dispatch
+    // for review/security/tester is still available under TOOLS_ALL.
+    tools: TOOLS_ALL,
     artifacts: {
       // Phase 3 migration (#4782): matches today's actual
       // buildCompleteSlicePrompt inlining order. Overrides prepend +

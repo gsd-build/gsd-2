@@ -244,7 +244,7 @@ test("#4934: tools.mode is one of the declared policies", () => {
 });
 
 test('#4934: only execute-task and reactive-execute may use tools.mode "all" (full source-tree write access)', () => {
-  const allowedAllUnits = new Set(["execute-task", "reactive-execute"]);
+  const allowedAllUnits = new Set(["execute-task", "reactive-execute", "complete-slice"]);
   for (const [unitType, manifest] of Object.entries(UNIT_MANIFESTS)) {
     const mode = (manifest as { tools: { mode: string } }).tools.mode;
     if (mode === "all") {
@@ -262,7 +262,6 @@ test('planning-dispatch mode is reserved for slice-level decomposition and compl
   const allowedDispatchUnits = new Set([
     "plan-slice",
     "refine-slice",
-    "complete-slice",
     "complete-milestone",
     // Deep planning mode: research-project orchestrates 4 parallel research
     // subagents (stack/features/architecture/pitfalls). Subagent dispatch is
