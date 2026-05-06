@@ -465,4 +465,73 @@ describe("Post-execution retry behavior", () => {
     // Should NOT set up a retry
     assert.equal(s.pendingVerificationRetry, null);
   });
+
+  test("no-command verification state pauses immediately", async () => {
+    insertMilestone({ id: "M001" });
+    insertSlice({
+      id: "S01",
+      milestoneId: "M001",
+      title: "Test Slice",
+      risk: "low",
+    });
+    insertTask({
+      id: "T01",
+      sliceId: "S01",
+      milestoneId: "M001",
+      title: "Task with prose verify",
+      status: "pending",
+      planning: {
+        description: "Task with non-command verify text",
+        estimate: "1h",
+        files: [],
+        verify: "Verify the output matches expected format and all fields are present",
+        inputs: [],
+        expectedOutput: [],
+        observabilityImpact: "",
+      },
+      sequence: 0,
+    });
+
+    writePreferences({
+      enhanced_verification: true,
+      enhanced_verification_post: true,
+      verification_auto_fix: true,
+      verification_max_retries: 3,
+    });
+
+    const ctx = makeMockCtx();
+    const pi = makeMockPi();
+    const pauseAutoMock = mock.fn(async () => {});
+    const s = makeMockSession(tempDir, { type: "execute-task", id: "M001/S01/T01" });
+
+    const vctx: VerificationContext = { s, ctx, pi };
+    const result = await runPostUnitVerification(vctx, pauseAutoMock);
+
+    assert.equal(result, "pause");
+    assert.equal(pauseAutoMock.mock.callCount(), 1);
+    assert.equal(s.pendingVerificationRetry, null);
+  });
+
+  test("verification checker exception pauses instead of continuing", async () => {
+    createPostExecFailureTask();
+    writePreferences({
+      enhanced_verification: true,
+      enhanced_verification_post: true,
+      verification_auto_fix: true,
+      verification_max_retries: 3,
+    });
+
+    const ctx = makeMockCtx();
+    const pi = makeMockPi();
+    const pauseAutoMock = mock.fn(async () => {});
+    const s = makeMockSession(tempDir, { type: "execute-task", id: "M001/S01/T01" });
+    (s as unknown as { basePath?: string }).basePath = undefined;
+
+    const vctx: VerificationContext = { s, ctx, pi };
+    const result = await runPostUnitVerification(vctx, pauseAutoMock);
+
+    assert.equal(result, "pause");
+    assert.equal(pauseAutoMock.mock.callCount(), 1);
+    assert.equal(s.pendingVerificationRetry, null);
+  });
 });

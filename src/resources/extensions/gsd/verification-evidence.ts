@@ -78,12 +78,22 @@ export interface PostExecutionCheckJSON {
   blocking?: boolean;
 }
 
+export interface EvidenceOutcomeMetadataJSON {
+  outcome: "pass" | "fail" | "manual-attention";
+  failureClass: "none" | "verification" | "execution" | "manual-attention";
+  reason: "checks-passed" | "check-failed" | "runtime-error" | "no-command";
+  kind?: "passed" | "failed" | "no-commands";
+  totalChecks?: number;
+  failedChecks?: number;
+}
+
 export interface EvidenceJSON {
   schemaVersion: 1;
   taskId: string;
   unitId: string;
   timestamp: number;
   passed: boolean;
+  outcomeMetadata?: EvidenceOutcomeMetadataJSON;
   discoverySource: string;
   checks: EvidenceCheckJSON[];
   retryAttempt?: number;
@@ -95,6 +105,49 @@ export interface EvidenceJSON {
   preExecutionChecks?: PreExecutionCheckJSON[];
   /** Post-execution checks run after task completion (import resolution, signature drift, pattern consistency) */
   postExecutionChecks?: PostExecutionCheckJSON[];
+}
+
+function deriveOutcomeMetadata(result: VerificationResult): EvidenceOutcomeMetadataJSON {
+  const runtimeBlocking = (result.runtimeErrors ?? []).some((err) => err.blocking);
+  const inferredKind = result.checks.length === 0
+    ? "no-commands"
+    : result.checks.some((check) => check.exitCode !== 0)
+      ? "failed"
+      : "passed";
+  const kind = result.outcome?.kind ?? inferredKind;
+  const totalChecks = result.outcome?.totalChecks ?? result.checks.length;
+  const failedChecks = result.outcome?.failedChecks ?? result.checks.filter((check) => check.exitCode !== 0).length;
+
+  if (kind === "no-commands") {
+    return {
+      outcome: "manual-attention",
+      failureClass: "manual-attention",
+      reason: "no-command",
+      kind,
+      totalChecks,
+      failedChecks,
+    };
+  }
+
+  if (result.passed) {
+    return {
+      outcome: "pass",
+      failureClass: "none",
+      reason: "checks-passed",
+      kind,
+      totalChecks,
+      failedChecks,
+    };
+  }
+
+  return {
+    outcome: "fail",
+    failureClass: runtimeBlocking ? "execution" : "verification",
+    reason: runtimeBlocking ? "runtime-error" : "check-failed",
+    kind,
+    totalChecks,
+    failedChecks,
+  };
 }
 
 /**
@@ -113,6 +166,7 @@ export function writeVerificationJSON(
   maxRetries?: number,
 ): void {
   mkdirSync(tasksDir, { recursive: true });
+  const outcomeMetadata = deriveOutcomeMetadata(result);
 
   const evidence: EvidenceJSON = {
     schemaVersion: 1,
@@ -120,6 +174,7 @@ export function writeVerificationJSON(
     unitId: unitId ?? taskId,
     timestamp: result.timestamp,
     passed: result.passed,
+    outcomeMetadata,
     discoverySource: result.discoverySource,
     checks: result.checks.map((check) => ({
       command: check.command,

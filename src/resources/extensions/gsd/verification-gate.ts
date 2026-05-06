@@ -10,6 +10,7 @@ import type { AuditWarning, RuntimeError, VerificationCheck, VerificationResult 
 import { DEFAULT_COMMAND_TIMEOUT_MS } from "./constants.js";
 import { rewriteCommandWithRtk } from "../shared/rtk.js";
 import { normalizePythonCommand } from "./python-resolver.js";
+import { deriveVerificationOutcome } from "./verification-outcome.js";
 
 /** Maximum bytes of stdout/stderr to retain per command (10 KB). */
 const MAX_OUTPUT_BYTES = 10 * 1024;
@@ -306,7 +307,8 @@ export interface RunVerificationGateOptions {
  * and return a structured result.
  *
  * - All commands run sequentially regardless of individual pass/fail.
- * - `passed` is true when every command exits 0 (or no commands are discovered).
+ * - `passed` is true only when every discovered command exits 0.
+ * - No discovered commands yields `outcome.kind = "no-commands"` and `passed = false`.
  * - stdout/stderr per command are truncated to 10 KB.
  */
 export function runVerificationGate(options: RunVerificationGateOptions): VerificationResult {
@@ -319,11 +321,13 @@ export function runVerificationGate(options: RunVerificationGateOptions): Verifi
   });
 
   if (commands.length === 0) {
+    const outcome = deriveVerificationOutcome([]);
     return {
-      passed: true,
+      passed: outcome.passed,
       checks: [],
       discoverySource: source,
       timestamp,
+      outcome,
     };
   }
 
@@ -369,11 +373,13 @@ export function runVerificationGate(options: RunVerificationGateOptions): Verifi
     });
   }
 
+  const outcome = deriveVerificationOutcome(checks);
   return {
-    passed: checks.every(c => c.exitCode === 0),
+    passed: outcome.passed,
     checks,
     discoverySource: source,
     timestamp,
+    outcome,
   };
 }
 

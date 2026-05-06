@@ -176,6 +176,90 @@ test("verification-evidence: writeVerificationJSON uses optional unitId when pro
   }
 });
 
+test("verification-evidence: writeVerificationJSON persists normalized outcome metadata for no-command runs", () => {
+  const tmp = makeTempDir("ve-outcome-no-command");
+  try {
+    const result = makeResult({
+      passed: false,
+      checks: [],
+      discoverySource: "none",
+      outcome: {
+        kind: "no-commands",
+        passed: false,
+        totalChecks: 0,
+        failedChecks: 0,
+      },
+    });
+
+    writeVerificationJSON(result, tmp, "T04");
+
+    const json = JSON.parse(readFileSync(join(tmp, "T04-VERIFY.json"), "utf-8"));
+    assert.deepStrictEqual(json.outcomeMetadata, {
+      outcome: "manual-attention",
+      failureClass: "manual-attention",
+      reason: "no-command",
+      kind: "no-commands",
+      totalChecks: 0,
+      failedChecks: 0,
+    });
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("verification-evidence: writeVerificationJSON persists normalized outcome metadata for pass/fail runs", () => {
+  const tmp = makeTempDir("ve-outcome-pass-fail");
+  try {
+    const passResult = makeResult({
+      passed: true,
+      checks: [
+        { command: "npm run lint", exitCode: 0, stdout: "", stderr: "", durationMs: 100 },
+      ],
+      outcome: {
+        kind: "passed",
+        passed: true,
+        totalChecks: 1,
+        failedChecks: 0,
+      },
+    });
+    writeVerificationJSON(passResult, tmp, "T05");
+    const passJson = JSON.parse(readFileSync(join(tmp, "T05-VERIFY.json"), "utf-8"));
+    assert.deepStrictEqual(passJson.outcomeMetadata, {
+      outcome: "pass",
+      failureClass: "none",
+      reason: "checks-passed",
+      kind: "passed",
+      totalChecks: 1,
+      failedChecks: 0,
+    });
+
+    const failResult = makeResult({
+      passed: false,
+      checks: [
+        { command: "npm run test", exitCode: 1, stdout: "", stderr: "boom", durationMs: 250 },
+      ],
+      outcome: {
+        kind: "failed",
+        passed: false,
+        totalChecks: 1,
+        failedChecks: 1,
+      },
+    });
+    writeVerificationJSON(failResult, tmp, "T06");
+    const failJson = JSON.parse(readFileSync(join(tmp, "T06-VERIFY.json"), "utf-8"));
+    assert.deepStrictEqual(failJson.outcomeMetadata, {
+      outcome: "fail",
+      failureClass: "verification",
+      reason: "check-failed",
+      kind: "failed",
+      totalChecks: 1,
+      failedChecks: 1,
+    });
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ─── formatEvidenceTable Tests ───────────────────────────────────────────────
 
 test("verification-evidence: formatEvidenceTable returns markdown table with correct columns", () => {

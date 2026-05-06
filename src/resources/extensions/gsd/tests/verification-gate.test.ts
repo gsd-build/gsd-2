@@ -326,6 +326,7 @@ describe("verification-gate: execution", () => {
       preferenceCommands: ["echo hello", "echo world"],
     });
     assert.equal(result.passed, true);
+    assert.equal(result.outcome?.kind, "passed");
     assert.equal(result.checks.length, 2);
     assert.equal(result.discoverySource, "preference");
     assert.equal(result.checks[0].exitCode, 0);
@@ -341,17 +342,19 @@ describe("verification-gate: execution", () => {
       preferenceCommands: ["echo ok", "sh -c 'echo err >&2; exit 1'"],
     });
     assert.equal(result.passed, false);
+    assert.equal(result.outcome?.kind, "failed");
     assert.equal(result.checks.length, 2);
     assert.equal(result.checks[0].exitCode, 0);
     assert.equal(result.checks[1].exitCode, 1);
     assert.ok(result.checks[1].stderr.includes("err"));
   });
 
-  test("no commands discovered → gate passes with 0 checks", () => {
+  test("no commands discovered → gate is no-op and does not pass", () => {
     const result = runVerificationGate({
       cwd: tmp,
     });
-    assert.equal(result.passed, true);
+    assert.equal(result.passed, false);
+    assert.equal(result.outcome?.kind, "no-commands");
     assert.equal(result.checks.length, 0);
     assert.equal(result.discoverySource, "none");
   });

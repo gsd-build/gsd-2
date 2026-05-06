@@ -1,6 +1,7 @@
 // GSD Extension — Core Type Definitions
 // Types consumed by state derivation, file parsing, and status display.
 // Pure interfaces — no logic, no runtime dependencies.
+import type { VerificationOutcome } from "./verification-outcome.js";
 
 // ─── Enums & Literal Unions ────────────────────────────────────────────────
 
@@ -104,10 +105,11 @@ export interface AuditWarning {
 
 /** Aggregate result from the verification gate */
 export interface VerificationResult {
-  passed: boolean; // true if all checks passed (or no checks discovered)
+  passed: boolean; // true only when commands were discovered and all checks passed
   checks: VerificationCheck[]; // per-command results
   discoverySource: "preference" | "task-plan" | "package-json" | "python-project" | "none";
   timestamp: number; // Date.now() at gate start
+  outcome?: VerificationOutcome; // explicit outcome model (pass/fail/no-commands)
   runtimeErrors?: RuntimeError[]; // optional — populated by captureRuntimeErrors()
   auditWarnings?: AuditWarning[]; // optional — populated by runDependencyAudit()
 }
