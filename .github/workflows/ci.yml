@@ -597,6 +597,8 @@ jobs:
        needs.detect-changes.outputs.windows-e2e-changed == 'true') &&
       needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     runs-on: blacksmith-4vcpu-windows-2025
+    outputs:
+      smoke_result: ${{ steps.windows-smoke-e2e.outcome }}
 
     steps:
       - name: Checkout repository
@@ -658,7 +660,10 @@ jobs:
 
   e2e-windows:
     # Compatibility/status shim to preserve the historical e2e-windows check
-    # name while the smoke suite runs in windows-portability.
+    # name while the smoke suite runs in windows-portability. Reflects the
+    # smoke step outcome so the failure signal is not swallowed by the
+    # upstream job's continue-on-error step. The job itself remains
+    # non-blocking via continue-on-error.
     timeout-minutes: 5
     needs: [detect-changes, mergeability-gate, windows-portability]
     if: >-
@@ -667,10 +672,30 @@ jobs:
       needs.detect-changes.outputs.windows-e2e-changed == 'true' &&
       needs.mergeability-gate.outputs.skip-heavy-jobs != 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    continue-on-error: true
 
     steps:
-      - name: Windows smoke moved to windows-portability
-        run: echo "Windows e2e smoke now runs in windows-portability."
+      - name: Report Windows smoke outcome
+        env:
+          SMOKE_RESULT: ${{ needs.windows-portability.result == 'skipped' && 'skipped' || (needs.windows-portability.outputs.smoke_result || 'skipped') }}
+        run: |
+          echo "Windows e2e smoke runs in windows-portability."
+          echo "Smoke step outcome: $SMOKE_RESULT"
+          case "$SMOKE_RESULT" in
+            success)
+              echo "::notice::Windows e2e smoke succeeded."
+              ;;
+            failure)
+              echo "::warning::Windows e2e smoke failed (non-blocking). See windows-portability artifacts."
+              exit 1
+              ;;
+            skipped|"")
+              echo "::notice::Windows e2e smoke did not run (no relevant changes)."
+              ;;
+            *)
+              echo "::notice::Windows e2e smoke outcome: $SMOKE_RESULT"
+              ;;
+          esac
 
   rtk-portability:
     timeout-minutes: 20
