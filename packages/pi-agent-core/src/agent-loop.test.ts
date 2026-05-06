@@ -609,8 +609,8 @@ describe("agent-loop — schema overload retry cap (#2783)", () => {
  * execute-task when the model emits a lowercase tool name (e.g. "skill"
  * instead of "Skill").
  *
- * The fix makes the lookup case-insensitive and normalizes toolCall.name to
- * the registered (canonical) tool name so the UI displays the correct casing.
+ * The fix makes the lookup case-insensitive and emits the registered
+ * (canonical) tool name so the UI displays the correct casing.
  */
 describe("agent-loop — case-insensitive tool lookup (#4342)", () => {
 	it("matches a tool when the model emits a differently-cased name", async () => {
@@ -674,6 +674,7 @@ describe("agent-loop — case-insensitive tool lookup (#4342)", () => {
 		);
 		assert.ok(toolEnd, "expected tool_execution_end event");
 		assert.equal(toolEnd.isError, false, "tool execution should succeed despite case mismatch");
+		assert.equal(toolEnd.toolName, "Skill", "toolName in end event should be the canonical registered name");
 		assert.deepEqual(toolEnd.result.content, [{ type: "text", text: "skill executed" }]);
 	});
 
@@ -746,5 +747,277 @@ describe("agent-loop — case-insensitive tool lookup (#4342)", () => {
 		);
 		assert.ok(toolStart, "expected tool_execution_start event");
 		assert.equal(toolStart.toolName, "Skill", "toolName in start event should be the canonical registered name");
+	});
+
+	it("does not mutate the assistant message tool call when normalizing name casing", async () => {
+		const tool: AgentTool<any> = {
+			name: "Skill",
+			label: "Skill",
+			description: "Run a skill",
+			parameters: Type.Object({
+				skill: Type.String(),
+			}),
+			execute: async () => ({
+				content: [{ type: "text" as const, text: "ok" }],
+				details: {},
+			}),
+		};
+
+		const assistantToolCall = {
+			type: "toolCall" as const,
+			id: `tc_immut_${Date.now()}`,
+			name: "skill",
+			arguments: { skill: "test-skill" },
+		};
+		const assistantMessage = makeAssistantMessage({
+			content: [assistantToolCall],
+			stopReason: "toolUse",
+		});
+		const finalStop = makeAssistantMessage({
+			content: [{ type: "text", text: "Done." }],
+			stopReason: "stop",
+		});
+
+		const mockStream = createMockStreamFn([assistantMessage, finalStop]);
+
+		const context: AgentContext = {
+			systemPrompt: "You are a test agent.",
+			messages: [{ role: "user", content: [{ type: "text", text: "Run skill" }], timestamp: Date.now() }],
+			tools: [tool],
+		};
+
+		const config: AgentLoopConfig = {
+			model: TEST_MODEL,
+			convertToLlm: (msgs) => msgs.filter((m): m is any => m.role !== "custom"),
+			toolExecution: "sequential",
+		};
+
+		const stream = agentLoop(
+			[{ role: "user", content: [{ type: "text", text: "Run skill" }], timestamp: Date.now() }],
+			context,
+			config,
+			undefined,
+			mockStream as any,
+		);
+
+		const events = await collectEvents(stream);
+		const toolEnd = events.find(
+			(e): e is Extract<AgentEvent, { type: "tool_execution_end" }> => e.type === "tool_execution_end",
+		);
+
+		assert.ok(toolEnd, "expected tool_execution_end event");
+		assert.equal(toolEnd.toolName, "Skill", "emitted toolName should be canonical");
+		assert.equal(assistantToolCall.name, "skill", "original assistant message tool call should keep model-emitted casing");
+	});
+
+	it("emits tool_execution_start before validation and beforeToolCall results", async () => {
+		const tool: AgentTool<any> = {
+			name: "Skill",
+			label: "Skill",
+			description: "Run a skill",
+			parameters: Type.Object({
+				skill: Type.String(),
+			}),
+			execute: async () => ({
+				content: [{ type: "text" as const, text: "should not execute" }],
+				details: {},
+			}),
+		};
+
+		const toolTurn = makeAssistantMessage({
+			content: [
+				{
+					type: "toolCall",
+					id: `tc_order_${Date.now()}`,
+					name: "skill",
+					arguments: { skill: "test-skill" },
+				},
+			],
+			stopReason: "toolUse",
+		});
+		const finalStop = makeAssistantMessage({
+			content: [{ type: "text", text: "Done." }],
+			stopReason: "stop",
+		});
+
+		const mockStream = createMockStreamFn([toolTurn, finalStop]);
+
+		const context: AgentContext = {
+			systemPrompt: "You are a test agent.",
+			messages: [{ role: "user", content: [{ type: "text", text: "Run skill" }], timestamp: Date.now() }],
+			tools: [tool],
+		};
+
+		const config: AgentLoopConfig = {
+			model: TEST_MODEL,
+			convertToLlm: (msgs) => msgs.filter((m): m is any => m.role !== "custom"),
+			toolExecution: "sequential",
+			beforeToolCall: async ({ toolCall }) => ({
+				block: true,
+				reason: `blocked ${toolCall.name}`,
+			}),
+		};
+
+		const stream = agentLoop(
+			[{ role: "user", content: [{ type: "text", text: "Run skill" }], timestamp: Date.now() }],
+			context,
+			config,
+			undefined,
+			mockStream as any,
+		);
+
+		const events = await collectEvents(stream);
+		const toolStartIndex = events.findIndex((e) => e.type === "tool_execution_start");
+		const toolEndIndex = events.findIndex((e) => e.type === "tool_execution_end");
+		const toolStart = events[toolStartIndex] as Extract<AgentEvent, { type: "tool_execution_start" }> | undefined;
+		const toolEnd = events[toolEndIndex] as Extract<AgentEvent, { type: "tool_execution_end" }> | undefined;
+
+		assert.notEqual(toolStartIndex, -1, "expected tool_execution_start event");
+		assert.notEqual(toolEndIndex, -1, "expected tool_execution_end event");
+		assert.ok(toolStartIndex < toolEndIndex, "tool_execution_start should be emitted before blocked outcome");
+		assert.equal(toolStart?.toolName, "Skill", "start event should use the canonical registered name");
+		assert.equal(toolEnd?.toolName, "Skill", "end event should use the canonical registered name");
+		assert.equal(toolEnd?.isError, true, "blocked tool call should be emitted as an error");
+		assert.deepEqual(toolEnd?.result.content, [{ type: "text", text: "blocked Skill" }]);
+	});
+
+	it("prefers exact case matches when registered tools differ only by case", async () => {
+		const skillTool: AgentTool<any> = {
+			name: "Skill",
+			label: "Skill",
+			description: "Run uppercase skill",
+			parameters: Type.Object({}),
+			execute: async () => ({
+				content: [{ type: "text" as const, text: "Skill executed" }],
+				details: {},
+			}),
+		};
+		const lowercaseSkillTool: AgentTool<any> = {
+			name: "skill",
+			label: "skill",
+			description: "Run lowercase skill",
+			parameters: Type.Object({}),
+			execute: async () => ({
+				content: [{ type: "text" as const, text: "skill executed" }],
+				details: {},
+			}),
+		};
+
+		const exactLowercaseToolCall = makeAssistantMessage({
+			content: [
+				{
+					type: "toolCall",
+					id: `tc_collision_${Date.now()}`,
+					name: "skill",
+					arguments: {},
+				},
+			],
+			stopReason: "toolUse",
+		});
+		const finalStop = makeAssistantMessage({
+			content: [{ type: "text", text: "Done." }],
+			stopReason: "stop",
+		});
+
+		const mockStream = createMockStreamFn([exactLowercaseToolCall, finalStop]);
+
+		const context: AgentContext = {
+			systemPrompt: "You are a test agent.",
+			messages: [{ role: "user", content: [{ type: "text", text: "Run skill" }], timestamp: Date.now() }],
+			tools: [skillTool, lowercaseSkillTool],
+		};
+
+		const config: AgentLoopConfig = {
+			model: TEST_MODEL,
+			convertToLlm: (msgs) => msgs.filter((m): m is any => m.role !== "custom"),
+			toolExecution: "sequential",
+		};
+
+		const stream = agentLoop(
+			[{ role: "user", content: [{ type: "text", text: "Run skill" }], timestamp: Date.now() }],
+			context,
+			config,
+			undefined,
+			mockStream as any,
+		);
+
+		const events = await collectEvents(stream);
+		const toolEnd = events.find(
+			(e): e is Extract<AgentEvent, { type: "tool_execution_end" }> => e.type === "tool_execution_end",
+		);
+
+		assert.ok(toolEnd, "expected tool_execution_end event");
+		assert.equal(toolEnd.toolName, "skill", "exact case match should win over an earlier case-insensitive match");
+		assert.deepEqual(toolEnd.result.content, [{ type: "text", text: "skill executed" }]);
+	});
+
+	it("uses the first registered case-insensitive match when colliding tools have no exact match", async () => {
+		const skillTool: AgentTool<any> = {
+			name: "Skill",
+			label: "Skill",
+			description: "Run uppercase skill",
+			parameters: Type.Object({}),
+			execute: async () => ({
+				content: [{ type: "text" as const, text: "Skill executed" }],
+				details: {},
+			}),
+		};
+		const lowercaseSkillTool: AgentTool<any> = {
+			name: "skill",
+			label: "skill",
+			description: "Run lowercase skill",
+			parameters: Type.Object({}),
+			execute: async () => ({
+				content: [{ type: "text" as const, text: "skill executed" }],
+				details: {},
+			}),
+		};
+
+		const ambiguousToolCall = makeAssistantMessage({
+			content: [
+				{
+					type: "toolCall",
+					id: `tc_first_match_${Date.now()}`,
+					name: "SKILL",
+					arguments: {},
+				},
+			],
+			stopReason: "toolUse",
+		});
+		const finalStop = makeAssistantMessage({
+			content: [{ type: "text", text: "Done." }],
+			stopReason: "stop",
+		});
+
+		const mockStream = createMockStreamFn([ambiguousToolCall, finalStop]);
+
+		const context: AgentContext = {
+			systemPrompt: "You are a test agent.",
+			messages: [{ role: "user", content: [{ type: "text", text: "Run skill" }], timestamp: Date.now() }],
+			tools: [skillTool, lowercaseSkillTool],
+		};
+
+		const config: AgentLoopConfig = {
+			model: TEST_MODEL,
+			convertToLlm: (msgs) => msgs.filter((m): m is any => m.role !== "custom"),
+			toolExecution: "sequential",
+		};
+
+		const stream = agentLoop(
+			[{ role: "user", content: [{ type: "text", text: "Run skill" }], timestamp: Date.now() }],
+			context,
+			config,
+			undefined,
+			mockStream as any,
+		);
+
+		const events = await collectEvents(stream);
+		const toolEnd = events.find(
+			(e): e is Extract<AgentEvent, { type: "tool_execution_end" }> => e.type === "tool_execution_end",
+		);
+
+		assert.ok(toolEnd, "expected tool_execution_end event");
+		assert.equal(toolEnd.toolName, "Skill", "first registered case-insensitive match should be used");
+		assert.deepEqual(toolEnd.result.content, [{ type: "text", text: "Skill executed" }]);
 	});
 });
