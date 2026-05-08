@@ -12,16 +12,28 @@
  *   3. `default`.
  *   4. `fallback` argument (caller's existing/default level).
  *
- * NOTE: A user-driven `/thinking` override is captured separately at
- * auto-mode start and must beat the policy. That precedence is enforced at
- * the call site in `auto-model-selection.ts`, not here — this resolver only
- * computes the policy's recommended level.
+ * NOTE: The `fallback` argument carries the auto-mode start snapshot
+ * (`autoModeStartThinkingLevel`). The current runtime does not track a
+ * separate `/thinking` override flag, so the snapshot is treated as the
+ * recorded initial level and surfaces as fallback when no policy rule
+ * matches; explicit-override precedence is not enforced here.
  */
 
 import type { ThinkingLevel, ThinkingPolicyConfig } from "./preferences-types.js";
 
 export type { ThinkingLevel, ThinkingPolicyConfig };
 
+/**
+ * Resolve the thinking level for a single dispatch using the configured
+ * policy. Returns the first match in: exact `unitTypes[unitType]` → longest
+ * matching `prefixes[*]` → `default` → `fallback`. When `policy` is undefined
+ * the `fallback` is returned unchanged.
+ *
+ * @param unitType  The dispatch unit-type label (e.g. `plan-slice`, `execute-task`).
+ * @param policy    User-configured policy from preferences, or `undefined`.
+ * @param fallback  Thinking level to use when nothing in the policy matches.
+ * @returns         The resolved thinking level for this dispatch.
+ */
 export function resolveThinkingLevel(
   unitType: string,
   policy: ThinkingPolicyConfig | undefined,

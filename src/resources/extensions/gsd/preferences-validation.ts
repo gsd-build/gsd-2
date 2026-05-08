@@ -32,6 +32,24 @@ const VALID_UOK_TURN_ACTIONS = new Set<"commit" | "snapshot" | "status-only">([
   "status-only",
 ]);
 
+/**
+ * Validate and sanitize a raw `GSDPreferences` object.
+ *
+ * Walks every recognized key, type-checks values against the schema in
+ * `preferences-types.ts`, coerces YAML-only footguns (e.g. unquoted `off`
+ * parsed as boolean false → string `"off"`), and rejects unknown unit-type
+ * references with the full valid list in the error message. Unknown
+ * top-level keys are downgraded to warnings (with migration hints when the
+ * key is a common pi-level setting like `taskIsolation`).
+ *
+ * Pure: no filesystem access, no network, no merging of project + global
+ * preferences. The caller is responsible for layering and persistence.
+ *
+ * @param preferences  Raw preferences object (typically parsed from YAML).
+ * @returns            `preferences` is the sanitized copy with only valid
+ *                     fields; `errors` blocks the load when non-empty;
+ *                     `warnings` is informational and never blocks.
+ */
 export function validatePreferences(preferences: GSDPreferences): {
   preferences: GSDPreferences;
   errors: string[];
@@ -1282,7 +1300,9 @@ export function validatePreferences(preferences: GSDPreferences): {
 
   // ─── Thinking Policy ───────────────────────────────────────────────
   // Per-unit-type and per-prefix thinking-level policy. Resolved at dispatch
-  // time; a user `/thinking` override always beats the policy.
+  // time; policy rules win when they match (exact unitTypes → longest prefix
+  // → default), and the captured `autoModeStartThinkingLevel` snapshot is the
+  // fallback when no rule matches.
   if (preferences.thinking_policy !== undefined) {
     if (
       typeof preferences.thinking_policy === "object" &&

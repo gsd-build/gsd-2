@@ -335,8 +335,10 @@ export const KNOWN_THINKING_LEVELS = [
  *   3. `default`.
  *   4. Fallback supplied by caller (typically the live `pi.getThinkingLevel()`).
  *
- * A user-driven `/thinking` override (captured separately at auto-mode start)
- * always wins over the policy.
+ * The auto-mode start snapshot (`autoModeStartThinkingLevel`) is used as the
+ * fallback when no policy rule matches. The current runtime does not track
+ * `/thinking` override provenance separately, so the snapshot is treated as
+ * the recorded initial level rather than a guaranteed-higher-precedence flag.
  */
 export interface ThinkingPolicyConfig {
   /** Default thinking level when no prefix or unit-type rule matches. */
@@ -405,8 +407,9 @@ export interface GSDPreferences {
   /**
    * Per-unit-type and per-prefix thinking-level policy. Lets users dial
    * thinking off for cheap/low-stakes units (e.g. `execute-task-simple`) and
-   * up for high-leverage planning/discussion units. Resolved at dispatch time.
-   * A user `/thinking` override always beats the policy.
+   * up for high-leverage planning/discussion units. Resolved per dispatch via
+   * `resolveThinkingLevel` (exact unitTypes → longest prefix → default), with
+   * the captured auto-mode start snapshot used as fallback when no rule matches.
    */
   thinking_policy?: ThinkingPolicyConfig;
   /**
