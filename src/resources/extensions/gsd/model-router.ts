@@ -1,6 +1,5 @@
-// GSD Extension — Dynamic Model Router
-// Maps complexity tiers to models, enforcing downgrade-only semantics.
-// The user's configured model is always the ceiling.
+// Project/App: GSD-2
+// File Purpose: Routes work to appropriate models while preserving configured ceilings.
 
 import type { ComplexityTier, ClassificationResult, TaskMetadata } from "./complexity-classifier.js";
 import { tierOrdinal } from "./complexity-classifier.js";
@@ -8,6 +7,7 @@ import type { ResolvedModelConfig } from "./preferences.js";
 import { getProviderCapabilities, type ProviderCapabilities } from "@gsd/pi-ai";
 import { getToolCompatibility, getAllToolCompatibility } from "@gsd/pi-coding-agent";
 import type { ToolCompatibility } from "@gsd/pi-coding-agent";
+import { incrementLegacyTelemetry } from "./legacy-telemetry.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -641,14 +641,18 @@ export function resolveModelForTier(
 
   // No available models known — return canonical fallback
   if (availableModelIds.length === 0) {
+    incrementLegacyTelemetry("legacy.providerDefaultUsed");
     return canonicalModelForTier(tier);
   }
 
   // Cross-provider tier search
   const resolved = findModelForTier(tier, routingConfig, availableModelIds, allowCrossProvider);
-  return resolved
-    ? normalizeResolvedTierModelId(resolved, tier, routingConfig)
-    : canonicalModelForTier(tier);
+  if (resolved) {
+    return normalizeResolvedTierModelId(resolved, tier, routingConfig);
+  }
+
+  incrementLegacyTelemetry("legacy.providerDefaultUsed");
+  return canonicalModelForTier(tier);
 }
 
 // ─── Internal ────────────────────────────────────────────────────────────────

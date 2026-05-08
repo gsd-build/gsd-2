@@ -304,6 +304,30 @@ describe("resolveImportPath", () => {
     assert.ok(!result.exists);
     assert.equal(result.resolvedPath, null);
   });
+
+  test("resolves dotted TS module stem like .server via extension probing", (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "post-exec-test-server-dot-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "route.server.ts"), "export {};\n");
+    writeFileSync(join(dir, "src", "main.ts"), "");
+
+    const result = resolveImportPath("./route.server", "src/main.ts", dir);
+    assert.ok(result.exists);
+    assert.ok(result.resolvedPath?.endsWith("route.server.ts"));
+  });
+
+  test("missing unknown explicit extension does not match code-extension shadow", (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "post-exec-test-unknown-shadow-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "video.mp4.ts"), "export {};\n");
+    writeFileSync(join(dir, "src", "main.ts"), "");
+
+    const result = resolveImportPath("./video.mp4", "src/main.ts", dir);
+    assert.ok(!result.exists);
+    assert.equal(result.resolvedPath, null);
+  });
 });
 
 // ─── Import Resolution Check Tests ───────────────────────────────────────────
@@ -325,6 +349,28 @@ describe("checkImportResolution", () => {
       const task = createTask({
         id: "T01",
         key_files: ["src/main.ts"],
+      });
+
+      const results = checkImportResolution(task, [], tempDir);
+      assert.deepEqual(results, []);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("ignores generated React Router +types imports", () => {
+    tempDir = join(tmpdir(), `post-exec-test-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+    mkdirSync(join(tempDir, "app", "routes"), { recursive: true });
+    writeFileSync(
+      join(tempDir, "app", "routes", "root.tsx"),
+      "import type { Route } from './+types/root';\nexport default function Root() { return null; }"
+    );
+
+    try {
+      const task = createTask({
+        id: "T01",
+        key_files: ["app/routes/root.tsx"],
       });
 
       const results = checkImportResolution(task, [], tempDir);

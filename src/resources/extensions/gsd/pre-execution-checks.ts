@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Pre-execution validation checks for GSD task plans.
+
 /**
  * Pre-Execution Checks — Validate task plans before execution begins.
  *
@@ -18,7 +21,7 @@ import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import type { TaskRow } from "./gsd-db.ts";
+import type { TaskRow } from "./db-task-slice-rows.js";
 import type { PreExecutionCheckJSON } from "./verification-evidence.ts";
 
 const NPM_COMMAND = process.platform === "win32" ? "npm.cmd" : "npm";
@@ -377,6 +380,8 @@ function shouldValidateInputAsPath(raw: string): boolean {
   const trimmed = raw.trim();
   if (!trimmed) return false;
 
+  if (isRuntimeOnlyInput(trimmed)) return false;
+
   const candidate = extractPathFromAnnotation(trimmed);
   if (!candidate) return false;
 
@@ -400,6 +405,10 @@ function shouldValidateInputAsPath(raw: string): boolean {
     /[\\/]/.test(candidate) ||
     /[*?[\]{}]/.test(candidate)
   );
+}
+
+function isRuntimeOnlyInput(raw: string): boolean {
+  return /\(\s*runtime\s*\)/i.test(raw);
 }
 
 function containsGlobPattern(candidate: string): boolean {
@@ -445,6 +454,16 @@ export function checkFilePathConsistency(
 ): PreExecutionCheckJSON[] {
   const results: PreExecutionCheckJSON[] = [];
 
+  // Build a set of all files created by any task at any position (normalized).
+  // Used to suppress consistency errors for files that will be caught with a
+  // more precise message by checkTaskOrdering (sequence violation).
+  const allTaskOutputs = new Set<string>();
+  for (const t of tasks) {
+    for (const f of t.expected_output) {
+      allTaskOutputs.add(normalizeFilePath(f));
+    }
+  }
+
   for (let i = 0; i < tasks.length; i++) {
     const task = tasks[i];
     const priorOutputs = getExpectedOutputsUpTo(tasks, i);
@@ -478,6 +497,12 @@ export function checkFilePathConsistency(
       }
 
       if (!existsOnDisk && !inPriorOutputs && !inOwnOutputs && !directorySatisfied) {
+        // If a later task claims to create this file, the ordering check will
+        // fire a more precise "sequence violation" error for the same file.
+        // Suppress the consistency error here to avoid duplicate noise.
+        if (allTaskOutputs.has(normalizedFile) && !ownOutputs.has(normalizedFile)) {
+          continue;
+        }
         results.push({
           category: "file",
           target: file,
@@ -532,6 +557,7 @@ export function checkTaskOrdering(
     const filesToCheck = [...task.inputs];
 
     for (const file of filesToCheck) {
+      if (isRuntimeOnlyInput(file)) continue;
       if (!shouldValidateInputAsPath(file)) continue;
 
       const normalizedFile = normalizeFilePath(file);

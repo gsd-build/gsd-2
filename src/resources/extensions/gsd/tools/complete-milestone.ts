@@ -1,3 +1,4 @@
+// GSD2 complete-milestone tool handler
 /**
  * complete-milestone handler — the core operation behind gsd_complete_milestone.
  *
@@ -56,6 +57,8 @@ export interface CompleteMilestoneParams {
 export interface CompleteMilestoneResult {
   milestoneId: string;
   summaryPath: string;
+  stale?: boolean;
+  alreadyComplete?: boolean;
 }
 
 function renderMilestoneSummaryMarkdown(params: CompleteMilestoneParams): string {
@@ -142,6 +145,7 @@ export async function handleCompleteMilestone(
   // ── Guards + DB writes inside a single transaction (prevents TOCTOU) ───
   const completedAt = new Date().toISOString();
   let guardError: string | null = null;
+  let alreadyComplete = false;
 
   transaction(() => {
     // State machine preconditions (inside txn for atomicity)
@@ -151,7 +155,7 @@ export async function handleCompleteMilestone(
       return;
     }
     if (isClosedStatus(milestone.status)) {
-      guardError = `milestone ${params.milestoneId} is already complete`;
+      alreadyComplete = true;
       return;
     }
 
@@ -206,15 +210,15 @@ export async function handleCompleteMilestone(
   // This handles re-dispatch scenarios (DB/disk state divergence) where a prior
   // completion already wrote the file. Overwriting would silently destroy the
   // richer content the agent produced during the original completion run.
+  let projectionStale = false;
   if (!existsSync(summaryPath)) {
     try {
       await saveFile(summaryPath, summaryMd);
     } catch (renderErr) {
-      // Disk render failed — roll back DB status so state stays consistent
-      logWarning("tool", `complete_milestone — disk render failed, rolling back DB status: ${(renderErr as Error).message}`);
-      updateMilestoneStatus(params.milestoneId, 'active', null);
-      invalidateStateCache();
-      return { error: `disk render failed: ${(renderErr as Error).message}` };
+      projectionStale = true;
+      logWarning("projection", `complete_milestone projection write failed for ${params.milestoneId}; DB completion remains committed`, {
+        error: (renderErr as Error).message,
+      });
     }
   }
 
@@ -237,14 +241,16 @@ export async function handleCompleteMilestone(
     logWarning("tool", `complete-milestone manifest warning: ${(mfErr as Error).message}`);
   }
   try {
-    appendEvent(basePath, {
-      cmd: "complete-milestone",
-      params: { milestoneId: params.milestoneId },
-      ts: new Date().toISOString(),
-      actor: "agent",
-      actor_name: params.actorName,
-      trigger_reason: params.triggerReason,
-    });
+    if (!alreadyComplete) {
+      appendEvent(basePath, {
+        cmd: "complete-milestone",
+        params: { milestoneId: params.milestoneId },
+        ts: new Date().toISOString(),
+        actor: "agent",
+        actor_name: params.actorName,
+        trigger_reason: params.triggerReason,
+      });
+    }
   } catch (eventErr) {
     logError("tool", `complete-milestone event log FAILED — completion invisible to reconciliation`, { error: (eventErr as Error).message });
   }
@@ -252,5 +258,7 @@ export async function handleCompleteMilestone(
   return {
     milestoneId: params.milestoneId,
     summaryPath,
+    ...(projectionStale ? { stale: true } : {}),
+    ...(alreadyComplete ? { alreadyComplete: true } : {}),
   };
 }

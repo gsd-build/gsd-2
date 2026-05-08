@@ -113,8 +113,9 @@ test("#4782 phase 3: buildCompleteSlicePrompt composes roadmap → plan → task
     "task summaries precede slice-summary template",
   );
 
-  // Task body inlined
-  assert.match(prompt, /Task one did the thing/);
+  // Task summary excerpt is inlined; full narrative remains on-demand.
+  assert.match(prompt, /### Task Summary: T01 \(excerpt\)/);
+  assert.doesNotMatch(prompt, /Task one did the thing/);
 });
 
 test("#4782 phase 3: buildCompleteSlicePrompt handles missing task summaries gracefully", async (t) => {

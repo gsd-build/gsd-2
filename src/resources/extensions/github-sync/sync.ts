@@ -206,8 +206,8 @@ async function syncSlicePlan(
   mid: string,
   sid: string,
 ): Promise<void> {
-  // Skip if already synced
-  if (getSliceRecord(mapping, mid, sid)) return;
+  const existingSlice = getSliceRecord(mapping, mid, sid);
+  if (existingSlice) return;
 
   // Ensure milestone is synced first
   if (!getMilestoneRecord(mapping, mid)) {
@@ -223,7 +223,6 @@ async function syncSlicePlan(
 
   const plan = parsePlan(content);
   const sliceBranch = `milestone/${mid}/${sid}`;
-  const milestoneBranch = `milestone/${mid}`;
 
   // Create task sub-issues first (so we can link them in the PR body)
   const taskIssueNumbers: Array<{ id: string; title: string; issueNumber?: number }> = [];
@@ -271,58 +270,9 @@ async function syncSlicePlan(
     }
   }
 
-  if (config.slice_prs === false) {
-    // Slice PRs disabled — just record without PR
-    setSliceRecord(mapping, mid, sid, {
-      issueNumber: 0,
-      prNumber: 0,
-      branch: sliceBranch,
-      lastSyncedAt: new Date().toISOString(),
-      state: "open",
-    });
-    return;
-  }
-
-  // Create slice branch from milestone branch
-  const branchResult = ghCreateBranch(basePath, sliceBranch, milestoneBranch);
-  if (!branchResult.ok) {
-    debugLog("github-sync", { phase: "create-slice-branch", error: branchResult.error });
-    // Branch might already exist — continue anyway
-  }
-
-  // Push the slice branch
-  const pushResult = ghPushBranch(basePath, sliceBranch);
-  if (!pushResult.ok) {
-    debugLog("github-sync", { phase: "push-slice-branch", error: pushResult.error });
-  }
-
-  // Create draft PR
-  const prBody = formatSlicePRBody({
-    id: sid,
-    title: plan.title || sid,
-    goal: plan.goal,
-    mustHaves: plan.mustHaves,
-    demoCriterion: plan.demo,
-    tasks: taskIssueNumbers,
-  });
-
-  const prResult = ghCreatePR(basePath, {
-    repo: mapping.repo,
-    base: milestoneBranch,
-    head: sliceBranch,
-    title: `${sid}: ${plan.title || sid}`,
-    body: prBody,
-    draft: true,
-  });
-
-  const prNumber = prResult.ok ? prResult.data! : 0;
-  if (!prResult.ok) {
-    debugLog("github-sync", { phase: "create-slice-pr", error: prResult.error });
-  }
-
   setSliceRecord(mapping, mid, sid, {
-    issueNumber: 0, // Slice doesn't get its own issue — tracked via PR
-    prNumber,
+    issueNumber: 0,
+    prNumber: 0,
     branch: sliceBranch,
     lastSyncedAt: new Date().toISOString(),
     state: "open",
@@ -332,9 +282,72 @@ async function syncSlicePlan(
     phase: "slice-synced",
     mid,
     sid,
-    pr: prNumber,
+    pr: 0,
     taskIssues: taskIssueNumbers.filter(t => t.issueNumber).length,
   });
+}
+
+async function ensureSlicePullRequest(
+  basePath: string,
+  mapping: SyncMapping,
+  mid: string,
+  sid: string,
+): Promise<number | null> {
+  const sliceRecord = getSliceRecord(mapping, mid, sid);
+  if (!sliceRecord) return null;
+  if (sliceRecord.prNumber) return sliceRecord.prNumber;
+
+  const planPath = resolveSliceFile(basePath, mid, sid, "PLAN");
+  if (!planPath) return null;
+  const content = await loadFile(planPath);
+  if (!content) return null;
+  const plan = parsePlan(content);
+
+  const sliceBranch = sliceRecord.branch || `milestone/${mid}/${sid}`;
+  const milestoneBranch = `milestone/${mid}`;
+
+  const branchResult = ghCreateBranch(basePath, sliceBranch, milestoneBranch);
+  if (!branchResult.ok) {
+    debugLog("github-sync", { phase: "create-slice-branch", error: branchResult.error });
+  }
+
+  const pushResult = ghPushBranch(basePath, sliceBranch);
+  if (!pushResult.ok) {
+    debugLog("github-sync", { phase: "push-slice-branch", error: pushResult.error });
+    return null;
+  }
+
+  const tasks = (plan.tasks ?? []).map((task) => ({
+    id: task.id,
+    title: task.title,
+    issueNumber: getTaskRecord(mapping, mid, sid, task.id)?.issueNumber,
+  }));
+
+  const prResult = ghCreatePR(basePath, {
+    repo: mapping.repo,
+    base: milestoneBranch,
+    head: sliceBranch,
+    title: `${sid}: ${plan.title || sid}`,
+    body: formatSlicePRBody({
+      id: sid,
+      title: plan.title || sid,
+      goal: plan.goal,
+      mustHaves: plan.mustHaves,
+      demoCriterion: plan.demo,
+      tasks,
+    }),
+    draft: true,
+  });
+
+  if (!prResult.ok) {
+    debugLog("github-sync", { phase: "create-slice-pr", error: prResult.error });
+    return null;
+  }
+
+  sliceRecord.prNumber = prResult.data!;
+  sliceRecord.lastSyncedAt = new Date().toISOString();
+  setSliceRecord(mapping, mid, sid, sliceRecord);
+  return sliceRecord.prNumber;
 }
 
 async function syncTaskComplete(
@@ -349,6 +362,7 @@ async function syncTaskComplete(
   if (!taskRecord || taskRecord.state === "closed") return;
 
   // Load task summary
+  let commentOk = true;
   const summaryPath = resolveTaskFile(basePath, mid, sid, tid, "SUMMARY");
   if (summaryPath) {
     const content = await loadFile(summaryPath);
@@ -359,18 +373,24 @@ async function syncTaskComplete(
         body: summary.whatHappened,
         frontmatter: summary.frontmatter as unknown as Record<string, unknown>,
       });
-      ghAddComment(basePath, mapping.repo, taskRecord.issueNumber, comment);
+      const commentResult = ghAddComment(basePath, mapping.repo, taskRecord.issueNumber, comment);
+      commentOk = commentResult.ok;
+      if (!commentResult.ok) {
+        debugLog("github-sync", { phase: "task-comment-failed", mid, sid, tid, error: commentResult.error });
+      }
     }
   }
 
-  // Close the task issue
-  ghCloseIssue(basePath, mapping.repo, taskRecord.issueNumber);
+  if (!commentOk) return;
 
-  taskRecord.state = "closed";
+  // Do not close the GitHub issue here. The task commit may still be local-only;
+  // closing before the commit/PR reaches GitHub breaks the remote audit trail.
+  // Commit trailers / PR merge should close linked issues once code is delivered.
+  taskRecord.state = "open";
   taskRecord.lastSyncedAt = new Date().toISOString();
   setTaskRecord(mapping, mid, sid, tid, taskRecord);
 
-  debugLog("github-sync", { phase: "task-closed", mid, sid, tid, issue: taskRecord.issueNumber });
+  debugLog("github-sync", { phase: "task-complete-commented", mid, sid, tid, issue: taskRecord.issueNumber });
 }
 
 async function syncSliceComplete(
@@ -380,8 +400,17 @@ async function syncSliceComplete(
   mid: string,
   sid: string,
 ): Promise<void> {
-  const sliceRecord = getSliceRecord(mapping, mid, sid);
+  let sliceRecord = getSliceRecord(mapping, mid, sid);
+  if (!sliceRecord) {
+    await syncSlicePlan(basePath, mapping, config, mid, sid);
+    sliceRecord = getSliceRecord(mapping, mid, sid);
+  }
   if (!sliceRecord || sliceRecord.state === "closed") return;
+  if (!sliceRecord.prNumber && config.slice_prs !== false) {
+    await ensureSlicePullRequest(basePath, mapping, mid, sid);
+    sliceRecord = getSliceRecord(mapping, mid, sid);
+    if (!sliceRecord || !sliceRecord.prNumber) return;
+  }
 
   // Post slice summary as PR comment
   const summaryPath = resolveSliceFile(basePath, mid, sid, "SUMMARY");
@@ -500,28 +529,29 @@ export async function bootstrapSync(basePath: string): Promise<{
 
 // ─── Config Loading ─────────────────────────────────────────────────────────
 
-let _cachedConfig: GitHubSyncConfig | null | undefined;
+const _cachedConfigByBasePath = new Map<string, GitHubSyncConfig | null>();
 
-function loadGitHubSyncConfig(_basePath: string): GitHubSyncConfig | null {
-  if (_cachedConfig !== undefined) return _cachedConfig;
+function loadGitHubSyncConfig(basePath: string): GitHubSyncConfig | null {
+  if (_cachedConfigByBasePath.has(basePath)) return _cachedConfigByBasePath.get(basePath)!;
   try {
-    const prefs = loadEffectiveGSDPreferences();
+    const prefs = loadEffectiveGSDPreferences(basePath);
     const github = (prefs?.preferences as Record<string, unknown>)?.github;
     if (!github || typeof github !== "object") {
-      _cachedConfig = null;
+      _cachedConfigByBasePath.set(basePath, null);
       return null;
     }
-    _cachedConfig = github as GitHubSyncConfig;
-    return _cachedConfig;
+    const config = github as GitHubSyncConfig;
+    _cachedConfigByBasePath.set(basePath, config);
+    return config;
   } catch {
-    _cachedConfig = null;
+    _cachedConfigByBasePath.set(basePath, null);
     return null;
   }
 }
 
 /** Reset config cache (for testing). */
 export function _resetConfigCache(): void {
-  _cachedConfig = undefined;
+  _cachedConfigByBasePath.clear();
 }
 
 function resolveRepo(basePath: string): string | null {

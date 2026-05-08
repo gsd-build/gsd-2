@@ -1,3 +1,9 @@
+// GSD2 UOK Contract Types and Versioning
+
+export const CURRENT_UOK_CONTRACT_VERSION = "1" as const;
+
+export type UokContractVersion = "0" | typeof CURRENT_UOK_CONTRACT_VERSION;
+
 export type FailureClass =
   | "none"
   | "policy"
@@ -77,6 +83,7 @@ export interface TurnCloseoutRecord {
 }
 
 export interface TurnResult {
+  version?: UokContractVersion;
   traceId: string;
   turnId: string;
   iteration: number;
@@ -109,6 +116,7 @@ export interface DispatchExplanation {
 }
 
 export interface UokDispatchEnvelope {
+  version?: UokContractVersion;
   action: "dispatch" | "stop" | "skip";
   nodeKind?: UokNodeKind;
   unitType?: string;
@@ -130,6 +138,7 @@ export interface UokDispatchEnvelope {
 }
 
 export interface AuditEventEnvelope {
+  version?: UokContractVersion;
   eventId: string;
   traceId: string;
   turnId?: string;
@@ -198,4 +207,100 @@ export interface UokTurnObserver {
     data?: Record<string, unknown>,
   ): void;
   onTurnResult(result: TurnResult): void;
+}
+
+export interface ContractValidationIssue {
+  path: string;
+  message: string;
+}
+
+export interface ContractValidationResult<T> {
+  ok: boolean;
+  value: T;
+  issues: ContractValidationIssue[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeVersion(value: unknown): UokContractVersion {
+  return value === CURRENT_UOK_CONTRACT_VERSION ? CURRENT_UOK_CONTRACT_VERSION : "0";
+}
+
+function requireString(
+  value: Record<string, unknown>,
+  key: string,
+  issues: ContractValidationIssue[],
+): void {
+  if (typeof value[key] !== "string" || value[key] === "") {
+    issues.push({ path: key, message: `${key} must be a non-empty string` });
+  }
+}
+
+function requireRecord(
+  value: Record<string, unknown>,
+  key: string,
+  issues: ContractValidationIssue[],
+): void {
+  if (!isRecord(value[key])) {
+    issues.push({ path: key, message: `${key} must be an object` });
+  }
+}
+
+export function normalizeTurnResult(value: TurnResult): TurnResult {
+  return { ...value, version: normalizeVersion(value.version) };
+}
+
+export function normalizeDispatchEnvelope(value: UokDispatchEnvelope): UokDispatchEnvelope {
+  return { ...value, version: normalizeVersion(value.version) };
+}
+
+export function normalizeAuditEvent(value: AuditEventEnvelope): AuditEventEnvelope {
+  return { ...value, version: normalizeVersion(value.version) };
+}
+
+export function validateTurnResult(value: TurnResult): ContractValidationResult<TurnResult> {
+  const normalized = normalizeTurnResult(value);
+  const record = normalized as unknown as Record<string, unknown>;
+  const issues: ContractValidationIssue[] = [];
+  requireString(record, "traceId", issues);
+  requireString(record, "turnId", issues);
+  if (!Number.isInteger(record.iteration)) {
+    issues.push({ path: "iteration", message: "iteration must be an integer" });
+  }
+  requireString(record, "status", issues);
+  requireString(record, "failureClass", issues);
+  if (!Array.isArray(record.phaseResults)) {
+    issues.push({ path: "phaseResults", message: "phaseResults must be an array" });
+  }
+  requireString(record, "startedAt", issues);
+  requireString(record, "finishedAt", issues);
+  return { ok: issues.length === 0, value: normalized, issues };
+}
+
+export function validateDispatchEnvelope(value: UokDispatchEnvelope): ContractValidationResult<UokDispatchEnvelope> {
+  const normalized = normalizeDispatchEnvelope(value);
+  const record = normalized as unknown as Record<string, unknown>;
+  const issues: ContractValidationIssue[] = [];
+  requireString(record, "action", issues);
+  requireRecord(record, "reason", issues);
+  if (isRecord(record.reason)) {
+    requireString(record.reason, "reasonCode", issues);
+    requireString(record.reason, "summary", issues);
+  }
+  return { ok: issues.length === 0, value: normalized, issues };
+}
+
+export function validateAuditEvent(value: AuditEventEnvelope): ContractValidationResult<AuditEventEnvelope> {
+  const normalized = normalizeAuditEvent(value);
+  const record = normalized as unknown as Record<string, unknown>;
+  const issues: ContractValidationIssue[] = [];
+  requireString(record, "eventId", issues);
+  requireString(record, "traceId", issues);
+  requireString(record, "category", issues);
+  requireString(record, "type", issues);
+  requireString(record, "ts", issues);
+  requireRecord(record, "payload", issues);
+  return { ok: issues.length === 0, value: normalized, issues };
 }

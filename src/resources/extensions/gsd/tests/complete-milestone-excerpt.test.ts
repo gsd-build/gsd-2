@@ -261,3 +261,34 @@ test("#4780 closer prompt: uses excerpts + lists on-demand slice SUMMARY paths",
     `closer prompt length ${prompt.length} should be < raw summary size ${rawSize} + 20KB headroom`,
   );
 });
+
+test("complete-milestone prompt caps repeated inlined context around 20k chars", async (t) => {
+  const base = createBase();
+  t.after(() => cleanup(base));
+  invalidateAllCaches();
+
+  writeRoadmap(base, makeRoadmap());
+  writeSummary(base, "S01", makeFatSummary("S01"));
+  writeSummary(base, "S02", makeFatSummary("S02"));
+  writeFileSync(
+    join(base, ".gsd", "milestones", "M001", "M001-CONTEXT.md"),
+    "# M001 Context\n\n" + "Large milestone context body. ".repeat(1200),
+  );
+  writeFileSync(
+    join(base, ".gsd", "KNOWLEDGE.md"),
+    "# Project Knowledge\n\n## Patterns\n\n### Test Milestone shared\n" + "Large scoped knowledge body. ".repeat(1200),
+  );
+
+  const prompt = await buildCompleteMilestonePrompt("M001", "Test Milestone", base);
+  const contextStart = prompt.indexOf("## Inlined Context (preloaded");
+  const contextEnd = prompt.indexOf("## Steps", contextStart);
+  assert.ok(contextStart >= 0, "prompt should include inlined context");
+  assert.ok(contextEnd > contextStart, "prompt should include steps after inlined context");
+
+  const inlinedContext = prompt.slice(contextStart, contextEnd);
+  assert.ok(
+    inlinedContext.length <= 21_000,
+    `inlined context ${inlinedContext.length} chars should stay near the 20k cap`,
+  );
+  assert.match(inlinedContext, /\[\.\.\.truncated \d+ sections\]/);
+});

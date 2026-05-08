@@ -754,7 +754,13 @@ const all = pi.getAllTools();
 
 // Enable/disable tools at runtime
 pi.setActiveTools(["bash", "read", "my_tool"]);
+
+// Limit the skills advertised in <available_skills> without unloading them
+pi.setVisibleSkills(["my-skill", "debug-extension"]);
+pi.setVisibleSkills(undefined); // restore all loaded skills
 ```
+
+When a model/provider has request-time tool limits, Pi applies built-in provider compatibility filtering immediately before the provider call. Extensions can subscribe to `adjust_tool_set` to inspect the selected model and metadata-only request tail, then return `{ toolNames }` to narrow or reorder the final tool set for that single request.
 
 ---
 

@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Workflow template registry loading, matching, and display helpers.
+
 /**
  * GSD Workflow Templates — Registry & Resolution
  *
@@ -8,7 +11,8 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { homedir } from "node:os";
+import { gsdHome } from "./gsd-home.js";
+import { formatRecommendedProcessPaths } from "./process-task-path.js";
 
 const __extensionDir = resolveGsdExtensionDir();
 const registryPath = join(__extensionDir, "workflow-templates", "registry.json");
@@ -17,8 +21,7 @@ const registryPath = join(__extensionDir, "workflow-templates", "registry.json")
 function resolveGsdExtensionDir(): string {
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   if (existsSync(join(moduleDir, "workflow-templates"))) return moduleDir;
-  const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
-  const agentGsdDir = join(gsdHome, "agent", "extensions", "gsd");
+  const agentGsdDir = join(gsdHome(), "agent", "extensions", "gsd");
   if (existsSync(join(agentGsdDir, "workflow-templates"))) return agentGsdDir;
   return moduleDir;
 }
@@ -30,6 +33,10 @@ export type WorkflowMode =
   | "yaml-step"
   | "markdown-phase"
   | "auto-milestone";
+
+export function isLegacyWorkflowMode(mode: WorkflowMode | undefined): boolean {
+  return (mode ?? "markdown-phase") !== "auto-milestone";
+}
 
 export interface TemplateEntry {
   name: string;
@@ -214,6 +221,9 @@ export function listTemplates(): string {
 
   lines.push("Usage: /gsd start <template> [description]");
   lines.push("       /gsd templates info <name>");
+  lines.push("");
+  lines.push("Recommended Task Paths:");
+  lines.push(formatRecommendedProcessPaths());
 
   return lines.join("\n");
 }

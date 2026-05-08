@@ -810,6 +810,78 @@ test("loadEffectiveGSDPreferences merges min_request_interval_ms with project ov
   }
 });
 
+test("loadEffectiveGSDPreferences does not inherit global planning_depth into fresh projects", () => {
+  const originalCwd = process.cwd();
+  const originalGsdHome = process.env.GSD_HOME;
+  const tempProject = mkdtempSync(join(tmpdir(), "gsd-depth-global-project-"));
+  const tempGsdHome = mkdtempSync(join(tmpdir(), "gsd-depth-global-home-"));
+
+  try {
+    mkdirSync(join(tempProject, ".gsd"), { recursive: true });
+
+    writeFileSync(
+      join(tempGsdHome, "PREFERENCES.md"),
+      [
+        "---",
+        "version: 1",
+        "planning_depth: deep",
+        "language: German",
+        "---",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    process.env.GSD_HOME = tempGsdHome;
+    process.chdir(tempProject);
+
+    const loaded = loadEffectiveGSDPreferences();
+    assert.notEqual(loaded, null);
+    assert.equal(loaded!.preferences.planning_depth, undefined);
+    assert.equal(loaded!.preferences.language, "German", "other global preferences still carry over");
+  } finally {
+    process.chdir(originalCwd);
+    if (originalGsdHome === undefined) delete process.env.GSD_HOME;
+    else process.env.GSD_HOME = originalGsdHome;
+    rmSync(tempProject, { recursive: true, force: true });
+    rmSync(tempGsdHome, { recursive: true, force: true });
+  }
+});
+
+test("loadEffectiveGSDPreferences keeps project-local planning_depth explicit", () => {
+  const originalCwd = process.cwd();
+  const originalGsdHome = process.env.GSD_HOME;
+  const tempProject = mkdtempSync(join(tmpdir(), "gsd-depth-local-project-"));
+  const tempGsdHome = mkdtempSync(join(tmpdir(), "gsd-depth-local-home-"));
+
+  try {
+    mkdirSync(join(tempProject, ".gsd"), { recursive: true });
+
+    writeFileSync(
+      join(tempGsdHome, "PREFERENCES.md"),
+      ["---", "version: 1", "planning_depth: deep", "---"].join("\n"),
+      "utf-8",
+    );
+    writeFileSync(
+      join(tempProject, ".gsd", "PREFERENCES.md"),
+      ["---", "version: 1", "planning_depth: light", "---"].join("\n"),
+      "utf-8",
+    );
+
+    process.env.GSD_HOME = tempGsdHome;
+    process.chdir(tempProject);
+
+    const loaded = loadEffectiveGSDPreferences();
+    assert.notEqual(loaded, null);
+    assert.equal(loaded!.preferences.planning_depth, "light");
+  } finally {
+    process.chdir(originalCwd);
+    if (originalGsdHome === undefined) delete process.env.GSD_HOME;
+    else process.env.GSD_HOME = originalGsdHome;
+    rmSync(tempProject, { recursive: true, force: true });
+    rmSync(tempGsdHome, { recursive: true, force: true });
+  }
+});
+
 test("preferences paths use canonical uppercase filenames", () => {
   const originalCwd = process.cwd();
   const originalGsdHome = process.env.GSD_HOME;

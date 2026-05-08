@@ -14,7 +14,7 @@ import type {
   RpcExtensionUIResponse,
   RpcResponse,
   RpcSessionState,
-} from "../../packages/pi-coding-agent/src/modes/rpc/rpc-types.ts";
+} from "@gsd-build/contracts";
 import type {
   WorkspaceIndex as GSDWorkspaceIndex,
   WorkspaceMilestoneTarget as GSDWorkspaceMilestoneTarget,

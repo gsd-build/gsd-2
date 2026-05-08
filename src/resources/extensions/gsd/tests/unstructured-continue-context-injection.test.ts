@@ -1,4 +1,5 @@
-// GSD-2 — Regression test for #3615: unstructured "continue" must inject task context
+// Project/App: GSD-2
+// File Purpose: Regression test for unstructured continue task-context injection.
 // Copyright (c) 2026 Jeremy McSpadden <jeremy@fluxlabs.net>
 
 /**
@@ -55,12 +56,12 @@ describe("#3615 — structural: fallback exists with correct guards", () => {
     );
   });
 
-  test("fallback is intent-gated via RESUME_INTENT_PATTERNS", () => {
+  test("fallback is intent-gated via isLowEntropyResumePrompt", () => {
     const afterFallback = fnBody.indexOf("// Fallback:");
     const fallbackSection = fnBody.slice(afterFallback);
     assert.ok(
-      fallbackSection.includes("RESUME_INTENT_PATTERNS"),
-      "fallback must check RESUME_INTENT_PATTERNS before deriveState",
+      fallbackSection.includes("isLowEntropyResumePrompt(prompt)"),
+      "fallback must check isLowEntropyResumePrompt before deriveState",
     );
   });
 

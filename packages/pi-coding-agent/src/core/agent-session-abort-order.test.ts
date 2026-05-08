@@ -120,6 +120,7 @@ describe("#4243 — abort() must run before _disconnectFromAgent()", () => {
 
 	it("newSession() invokes abort() before _disconnectFromAgent()", async () => {
 		const session = await createSession();
+		(session as any).agent.state.isStreaming = true;
 		const order = recordCallOrder(session as any, ["abort", "_disconnectFromAgent"]);
 
 		const ok = await session.newSession();
@@ -136,6 +137,40 @@ describe("#4243 — abort() must run before _disconnectFromAgent()", () => {
 			abortIdx < disconnectIdx,
 			`abort() must run before _disconnectFromAgent(); order=${order.join(",")}`,
 		);
+	});
+
+	it("newSession() waits instead of aborting when the prior turn is idle but not settled", async () => {
+		const session = await createSession();
+		const order: string[] = [];
+		let releaseIdle!: () => void;
+		const idle = new Promise<void>((resolve) => {
+			releaseIdle = resolve;
+		});
+
+		(session as any).agent.state.isStreaming = false;
+		(session as any).agent.waitForIdle = () => {
+			order.push("waitForIdle");
+			return idle;
+		};
+		(session as any).abort = async () => {
+			order.push("abort");
+		};
+		const originalDisconnect = (session as any)._disconnectFromAgent.bind(session);
+		(session as any)._disconnectFromAgent = () => {
+			order.push("_disconnectFromAgent");
+			originalDisconnect();
+		};
+
+		const pendingNewSession = session.newSession();
+		await Promise.resolve();
+		assert.deepEqual(order, ["waitForIdle"]);
+		assert.equal(order.includes("abort"), false);
+
+		releaseIdle();
+		const ok = await pendingNewSession;
+		assert.equal(ok, true);
+		assert.deepEqual(order, ["waitForIdle", "_disconnectFromAgent"]);
+		assert.equal(order.includes("abort"), false);
 	});
 
 	it("newSession() waits instead of aborting while agent_end processing is still streaming", async () => {
@@ -432,6 +467,7 @@ describe("#4243 — abort() must run before _disconnectFromAgent()", () => {
 		const sessionFile = session.sessionFile;
 		assert.ok(typeof sessionFile === "string" && sessionFile.length > 0, "need a session file to switch to");
 
+		(session as any).agent.state.isStreaming = true;
 		const order = recordCallOrder(session as any, ["abort", "_disconnectFromAgent"]);
 
 		const ok = await session.switchSession(sessionFile);

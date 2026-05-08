@@ -15,7 +15,7 @@ test("shouldAutoPrepareWorkflowMcp enables prep for externalCli local transport"
   assert.equal(result, true);
 });
 
-test("shouldAutoPrepareWorkflowMcp enables prep when claude-code provider is ready", () => {
+test("shouldAutoPrepareWorkflowMcp stays disabled for non-Claude active provider even when claude-code is ready", () => {
   const result = shouldAutoPrepareWorkflowMcp({
     model: { provider: "openai", baseUrl: "https://api.openai.com" },
     modelRegistry: {
@@ -24,10 +24,10 @@ test("shouldAutoPrepareWorkflowMcp enables prep when claude-code provider is rea
     },
   });
 
-  assert.equal(result, true);
+  assert.equal(result, false);
 });
 
-test("shouldAutoPrepareWorkflowMcp enables prep when claude-code provider is registered", () => {
+test("shouldAutoPrepareWorkflowMcp stays disabled for non-Claude active provider even when claude-code is registered", () => {
   const result = shouldAutoPrepareWorkflowMcp({
     model: { provider: "openai", baseUrl: "https://api.openai.com" },
     modelRegistry: {
@@ -36,7 +36,7 @@ test("shouldAutoPrepareWorkflowMcp enables prep when claude-code provider is reg
     },
   });
 
-  assert.equal(result, true);
+  assert.equal(result, false);
 });
 
 test("shouldAutoPrepareWorkflowMcp stays disabled when neither transport nor provider readiness match", () => {

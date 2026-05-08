@@ -23,6 +23,7 @@ import { join } from 'node:path';
 // ask_user_questions handler integration test further below.
 import {
   isRemoteConfigured,
+  toRoundResultResponse,
   tryRemoteQuestions,
   type RemoteQuestion,
 } from './remote-questions.js';
@@ -46,6 +47,108 @@ const SAMPLE_QUESTIONS: RemoteQuestion[] = [
 function makePrefsFile(dir: string, content: string): void {
   writeFileSync(join(dir, 'PREFERENCES.md'), content, 'utf-8');
 }
+
+// ---------------------------------------------------------------------------
+// toRoundResultResponse — regression #5267
+// ---------------------------------------------------------------------------
+
+describe('toRoundResultResponse', () => {
+  const singleSelectQuestion: RemoteQuestion = {
+    id: 'approach',
+    header: 'Approach',
+    question: 'Pick one',
+    options: [
+      { label: 'Option A (Recommended)', description: '' },
+      { label: 'Option B', description: '' },
+    ],
+  };
+
+  const multiSelectQuestion: RemoteQuestion = {
+    id: 'focus',
+    header: 'Focus',
+    question: 'Pick all',
+    options: [
+      { label: 'Frontend', description: '' },
+      { label: 'Backend', description: '' },
+    ],
+    allowMultiple: true,
+  };
+
+  const noteQuestion: RemoteQuestion = {
+    id: 'confirm',
+    header: 'Confirm',
+    question: 'Proceed?',
+    options: [
+      { label: 'Yes', description: '' },
+      { label: 'No', description: '' },
+    ],
+  };
+
+  it('normalizes a single-answer RemoteAnswer into RoundResult shape', () => {
+    const result = toRoundResultResponse(
+      { answers: { approach: { answers: ['Option A (Recommended)'] } } },
+      [singleSelectQuestion],
+    );
+    assert.deepEqual(result, {
+      endInterview: false,
+      answers: {
+        approach: { selected: 'Option A (Recommended)', notes: '' },
+      },
+    });
+  });
+
+  it('keeps multi-answer arrays intact for multi-select questions', () => {
+    const result = toRoundResultResponse(
+      { answers: { focus: { answers: ['Frontend', 'Backend'] } } },
+      [multiSelectQuestion],
+    );
+    assert.deepEqual(result.answers.focus, { selected: ['Frontend', 'Backend'], notes: '' });
+  });
+
+  it('preserves the array shape for a multi-select question with a single selection (regression #5267)', () => {
+    // Without consulting `allowMultiple`, the previous length-based inference
+    // collapsed `['Frontend']` into the string `'Frontend'`, breaking any
+    // consumer that does `selected.includes(...)` on a multi-select answer.
+    const result = toRoundResultResponse(
+      { answers: { focus: { answers: ['Frontend'] } } },
+      [multiSelectQuestion],
+    );
+    assert.deepEqual(result.answers.focus, { selected: ['Frontend'], notes: '' });
+  });
+
+  it('lifts user_note into the notes field', () => {
+    const result = toRoundResultResponse(
+      { answers: { confirm: { answers: ['None of the above'], user_note: 'Need a hybrid path.' } } },
+      [noteQuestion],
+    );
+    assert.deepEqual(result.answers.confirm, { selected: 'None of the above', notes: 'Need a hybrid path.' });
+  });
+
+  it('returns an empty selected string when the channel produced no answer for a single-select', () => {
+    const result = toRoundResultResponse(
+      { answers: { approach: { answers: [] } } },
+      [singleSelectQuestion],
+    );
+    assert.deepEqual(result.answers.approach, { selected: '', notes: '' });
+  });
+
+  it('returns an empty array when the channel produced no answer for a multi-select', () => {
+    const result = toRoundResultResponse(
+      { answers: { focus: { answers: [] } } },
+      [multiSelectQuestion],
+    );
+    assert.deepEqual(result.answers.focus, { selected: [], notes: '' });
+  });
+
+  it('falls back to single-select shape when the answer id is not in the questions list', () => {
+    // Defensive: an unknown id (channel desync) should not wedge the helper.
+    const result = toRoundResultResponse(
+      { answers: { ghost: { answers: ['anything'] } } },
+      [singleSelectQuestion],
+    );
+    assert.deepEqual(result.answers.ghost, { selected: 'anything', notes: '' });
+  });
+});
 
 // ---------------------------------------------------------------------------
 // isRemoteConfigured — unit tests

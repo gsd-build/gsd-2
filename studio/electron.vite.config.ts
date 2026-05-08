@@ -20,6 +20,13 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/preload/index.ts')
+        },
+        // Electron's sandboxed preload context cannot load ES modules.
+        // Force CommonJS output so `contextBridge` etc. resolve at runtime.
+        // (Surfaced by tests/e2e in studio/test/e2e/electron-launch.e2e.test.mjs.)
+        output: {
+          format: 'cjs',
+          entryFileNames: '[name].cjs'
         }
       }
     }

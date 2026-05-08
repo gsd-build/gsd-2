@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "@gsd/pi-agent-core";
 import type { Transport } from "@gsd/pi-ai";
+import type { AdaptiveTuiMode } from "../../../core/settings-manager.js";
 import {
 	Container,
 	getCapabilities,
@@ -46,6 +47,7 @@ export interface SettingsConfig {
 	quietStartup: boolean;
 	clearOnShrink: boolean;
 	timestampFormat: "date-time-iso" | "date-time-us";
+	adaptiveMode: AdaptiveTuiMode;
 }
 
 export interface SettingsCallbacks {
@@ -71,6 +73,7 @@ export interface SettingsCallbacks {
 	onQuietStartupChange: (enabled: boolean) => void;
 	onClearOnShrinkChange: (enabled: boolean) => void;
 	onTimestampFormatChange: (format: "date-time-iso" | "date-time-us") => void;
+	onAdaptiveModeChange: (mode: AdaptiveTuiMode) => void;
 	onCancel: () => void;
 }
 
@@ -367,6 +370,15 @@ export class SettingsSelectorComponent extends Container {
 			values: ["date-time-iso", "date-time-us"],
 		});
 
+		const timestampIndex = items.findIndex((item) => item.id === "timestamp-format");
+		items.splice(timestampIndex + 1, 0, {
+			id: "adaptive-mode",
+			label: "TUI adaptive mode",
+			description: "Auto-select or force the terminal layout mode",
+			currentValue: config.adaptiveMode,
+			values: ["auto", "chat", "workflow", "validation", "debug", "compact"],
+		});
+
 		// Add borders
 		this.addChild(new DynamicBorder());
 
@@ -434,6 +446,9 @@ export class SettingsSelectorComponent extends Container {
 						break;
 					case "timestamp-format":
 						callbacks.onTimestampFormatChange(newValue as "date-time-iso" | "date-time-us");
+						break;
+					case "adaptive-mode":
+						callbacks.onAdaptiveModeChange(newValue as AdaptiveTuiMode);
 						break;
 				}
 			},

@@ -29,6 +29,7 @@ import {
   markStepActive,
   markStepComplete,
   expandIteration,
+  isTerminalStepStatus,
   type WorkflowGraph,
 } from "./graph.js";
 import { injectContext } from "./context-injector.js";
@@ -39,6 +40,24 @@ import { withFileLock } from "./file-lock.js";
 
 // Re-export for downstream consumers
 export { readFrozenDefinition } from "./definition-io.js";
+
+function formatBlockedWorkflowReason(graph: WorkflowGraph): string {
+  const statusById = new Map(graph.steps.map((step) => [step.id, step.status]));
+  const blockedSteps = graph.steps
+    .filter((step) => step.status === "pending")
+    .map((step) => {
+      const blockers = step.dependsOn
+        .filter((depId) => !isTerminalStepStatus(statusById.get(depId)))
+        .map((depId) => `${depId} (${statusById.get(depId) ?? "missing"})`);
+      return blockers.length > 0
+        ? `${step.id} waiting on ${blockers.join(", ")}`
+        : `${step.id} has no runnable dependency path`;
+    });
+
+  return blockedSteps.length > 0
+    ? `Workflow blocked: no pending steps are ready. Blocked steps: ${blockedSteps.join("; ")}`
+    : "Workflow blocked: no pending steps are ready.";
+}
 
 export class CustomWorkflowEngine implements WorkflowEngine {
   readonly engineId = "custom";
@@ -110,6 +129,16 @@ export class CustomWorkflowEngine implements WorkflowEngine {
       let next = getNextPendingStep(graph);
 
       if (!next) {
+        const allDone = graph.steps.every(
+          (step) => step.status === "complete" || step.status === "expanded",
+        );
+        if (!allDone) {
+          return {
+            action: "stop",
+            reason: formatBlockedWorkflowReason(graph),
+            level: "error",
+          };
+        }
         return {
           action: "stop",
           reason: "All steps complete",

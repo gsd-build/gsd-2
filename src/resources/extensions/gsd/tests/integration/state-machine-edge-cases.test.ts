@@ -46,6 +46,7 @@ import {
   updateTaskStatus,
   updateSliceStatus,
   updateMilestoneStatus,
+  insertAssessment,
   insertReplanHistory,
   getReplanHistory,
   insertGateRow,
@@ -363,13 +364,13 @@ describe("state derivation failures", () => {
     const state2 = await deriveState(base);
     assert.equal(state2.phase, "executing", "cached result should still show executing");
 
-    // After explicit invalidation, should reflect the DB mutation and reconcile
-    // missing plan tasks instead of prematurely summarizing a partial DB row set.
+    // After explicit invalidation, DB rows remain authoritative; PLAN.md is a
+    // projection and must not import missing task rows.
     invalidateStateCache();
     const state3 = await deriveState(base);
-    assert.equal(state3.phase, "executing", "after cache invalidation should continue with the missing plan task");
-    assert.equal(state3.activeTask?.id, "T02", "missing plan task T02 should be imported and selected");
-    assert.deepEqual(state3.progress?.tasks, { done: 1, total: 2 });
+    assert.equal(state3.phase, "summarizing", "after cache invalidation should follow DB tasks only");
+    assert.equal(state3.activeTask, null, "disk-only plan task T02 should not be imported");
+    assert.deepEqual(state3.progress?.tasks, { done: 1, total: 1 });
   });
 
   test("corrupt ROADMAP: binary content does not crash deriveState", async () => {
@@ -486,12 +487,14 @@ describe("transition boundary failures", () => {
     writeFileSync(join(mDir, "M001-CONTEXT-DRAFT.md"), "# Draft\nSome draft.\n");
 
     openDatabase(join(base, ".gsd", "gsd.db"));
+    insertMilestone({ id: "M001", title: "Draft", status: "needs-discussion" });
     invalidateAllCaches();
     const state1 = await deriveState(base);
     assert.equal(state1.phase, "needs-discussion");
 
     // Now write the full CONTEXT (simulates discussion completion)
     writeFileSync(join(mDir, "M001-CONTEXT.md"), "# M001: Resolved\n\n## Purpose\nDone.\n");
+    updateMilestoneStatus("M001", "active");
 
     invalidateAllCaches();
     const state2 = await deriveState(base);
@@ -1148,6 +1151,13 @@ describe("completion and verification failures", () => {
     insertTask({ id: "T01", sliceId: "S01", milestoneId: "M001", status: "complete" });
     insertTask({ id: "T02", sliceId: "S01", milestoneId: "M001", status: "complete" });
     insertTask({ id: "T01", sliceId: "S02", milestoneId: "M001", status: "complete" });
+    insertAssessment({
+      path: "milestones/M001/M001-VALIDATION.md",
+      milestoneId: "M001",
+      status: "pass",
+      scope: "milestone-validation",
+      fullContent: "verdict: pass",
+    });
 
     invalidateAllCaches();
     const state = await deriveStateFromDb(base);

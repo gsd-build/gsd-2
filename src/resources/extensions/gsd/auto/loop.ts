@@ -10,11 +10,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 
 import { randomUUID } from "node:crypto";
-import type { AutoSession, SidecarItem } from "./session.js";
+import type { AutoSession } from "./session.js";
 import type { LoopDeps } from "./loop-deps.js";
 import {
   MAX_LOOP_ITERATIONS,
-  type PhaseResult,
   type LoopState,
   type IterationContext,
   type IterationData,
@@ -24,7 +23,6 @@ import {
   runPreDispatch,
   runDispatch,
   runGuards,
-  runUnitPhase,
   runFinalize,
 } from "./phases.js";
 import { debugLog } from "../debug-logger.js";
@@ -32,112 +30,153 @@ import { isInfrastructureError, isTransientCooldownError, getCooldownRetryAfterM
 import { ModelPolicyDispatchBlockedError } from "../auto-model-selection.js";
 import { resolveEngine } from "../engine-resolver.js";
 import { logWarning } from "../workflow-logger.js";
-import { gsdRoot } from "../paths.js";
-import { atomicWriteSync } from "../atomic-write.js";
+import {
+  recordDispatchClaim,
+  markRunning as markDispatchRunning,
+  markCompleted as markDispatchCompleted,
+  markFailed as markDispatchFailed,
+  getRecentForUnit as getRecentDispatchesForUnit,
+  getRecentUnitKeysForProjectRoot,
+} from "../db/unit-dispatches.js";
+import { refreshMilestoneLease } from "../db/milestone-leases.js";
+import { heartbeatAutoWorker } from "../db/auto-workers.js";
+import { getRuntimeKv, setRuntimeKv } from "../db/runtime-kv.js";
 import { resolveUokFlags } from "../uok/flags.js";
 import { scheduleSidecarQueue } from "../uok/execution-graph.js";
-import { ExecutionGraphScheduler } from "../uok/execution-graph.js";
-import type { UokGraphNode } from "../uok/contracts.js";
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { normalizeRealPath } from "../paths.js";
+import {
+  decideCooldownRecovery,
+  decideDispatchClaim,
+  decideEngineDispatch,
+  decideFinalizeResult,
+  decideInfrastructureError,
+  decideIterationErrorRecovery,
+  decideMemoryPressure,
+  decideModelPolicyBlocked,
+  decideMinRequestInterval,
+  decideWorkflowLoop,
+  formatDispatchExceptionSummary,
+  formatUnhandledDispatchErrorSummary,
+  resolveUnitRequestTimestamp,
+  shouldUseCustomEnginePath,
+} from "./workflow-kernel.js";
+import {
+  hydrateCustomVerifyRetryCounts,
+  saveCustomVerifyRetryCounts,
+} from "./custom-verify-retry-store.js";
+import {
+  settleDispatchCompleted,
+  settleDispatchFailed,
+} from "./workflow-dispatch-ledger.js";
+import { emitOpenUnitEndForUnit } from "../crash-recovery.js";
+import { writeUnitRuntimeRecord } from "../unit-runtime.js";
+import { openDispatchClaim } from "./workflow-dispatch-claim.js";
+import { completeWorkflowIteration } from "./workflow-iteration-completion.js";
+import { createWorkflowJournalReporter } from "./workflow-journal-reporter.js";
+import { createWorkflowPhaseReporter } from "./workflow-phase-reporter.js";
+import { createWorkflowTurnReporter } from "./workflow-turn-reporter.js";
+import { validateWorkflowSessionLock } from "./workflow-session-lock.js";
+import { dequeueSidecarItem } from "./workflow-sidecar-queue.js";
+import { maintainWorkerHeartbeat } from "./workflow-worker-heartbeat.js";
+import { measureMemoryPressure } from "./workflow-memory-pressure.js";
+import { buildSidecarIterationData } from "./workflow-sidecar-iteration.js";
+import {
+  createExecutionGraphUnitDispatchDeps,
+  runUnitPhaseViaContract,
+  type DispatchContract,
+} from "./workflow-unit-dispatch.js";
+import { handleCustomEngineDispatchOutcome } from "./workflow-custom-engine-dispatch-outcome.js";
+import { buildCustomEngineIterationData } from "./workflow-custom-engine-iteration.js";
+import { handleCustomEngineVerifyRetry } from "./workflow-custom-engine-retry.js";
+import {
+  handleCustomEngineVerifyPause,
+  handleCustomEngineVerifyRetryOutcome,
+} from "./workflow-custom-engine-verify-outcome.js";
+import { handleCustomEngineReconcile } from "./workflow-custom-engine-reconcile.js";
+import { handleCustomEngineReconcileOutcome } from "./workflow-custom-engine-reconcile-outcome.js";
 
 // ── Stuck detection persistence (#3704) ──────────────────────────────────
-// Persist stuck detection state to disk so it survives session restarts.
-// Without this, restarting auto-mode resets all counters, allowing the
-// same blocked unit to burn a full retry budget each session.
-function stuckStatePath(basePath: string): string {
-  return join(gsdRoot(basePath), "runtime", "stuck-state.json");
+// Phase C migration: stuck-state.json deleted in favor of DB-backed
+// equivalents. recentUnits is rebuilt from unit_dispatches (Phase B
+// ledger) on session start; stuckRecoveryAttempts persists in runtime_kv
+// under a stable project scope (soft state per the runtime_kv invariant). Single-host
+// SQLite WAL only — multi-host would need a real coordinator.
+//
+// When no worker is registered (DB unavailable, fresh project), both
+// helpers degrade to the empty-state fallback that #3704 already
+// tolerates — same behavior as a fresh session.
+const STUCK_RECOVERY_ATTEMPTS_KEY = "stuck_recovery_attempts";
+const RECENT_UNIT_KEYS_LIMIT = 20;
+
+function stableStuckStateScopeId(s: AutoSession): string {
+  return normalizeRealPath(s.scope?.workspace.projectRoot ?? (s.originalBasePath || s.basePath));
 }
 
-function loadStuckState(basePath: string): { recentUnits: Array<{ key: string }>; stuckRecoveryAttempts: number } {
+function loadStuckState(s: AutoSession): { recentUnits: Array<{ key: string }>; stuckRecoveryAttempts: number } {
+  const scopeId = stableStuckStateScopeId(s);
+  if (!scopeId) return { recentUnits: [], stuckRecoveryAttempts: 0 };
   try {
-    const data = JSON.parse(readFileSync(stuckStatePath(basePath), "utf-8"));
-    // Only load state written by a DIFFERENT process (real session restart).
-    // If the PID matches the current process, this state was written by an earlier
-    // autoLoop call in the same process (e.g., a test that completed before this
-    // one), not by a crashed session — skip it to prevent test state pollution.
-    if (data.pid === process.pid) {
-      return { recentUnits: [], stuckRecoveryAttempts: 0 };
-    }
-    return {
-      recentUnits: Array.isArray(data.recentUnits) ? data.recentUnits : [],
-      stuckRecoveryAttempts: typeof data.stuckRecoveryAttempts === "number" ? data.stuckRecoveryAttempts : 0,
-    };
+    const recentUnits = getRecentUnitKeysForProjectRoot(scopeId, RECENT_UNIT_KEYS_LIMIT);
+    const stuckRecoveryAttempts =
+      getRuntimeKv<number>("global", scopeId, STUCK_RECOVERY_ATTEMPTS_KEY) ?? 0;
+    return { recentUnits, stuckRecoveryAttempts };
   } catch (err) {
     debugLog("autoLoop", { phase: "load-stuck-state-failed", error: err instanceof Error ? err.message : String(err) });
     return { recentUnits: [], stuckRecoveryAttempts: 0 };
   }
 }
 
-function saveStuckState(basePath: string, state: LoopState): void {
+function saveStuckState(s: AutoSession, state: LoopState): void {
+  const scopeId = stableStuckStateScopeId(s);
+  if (!scopeId) return;
+  // recentUnits is automatically derived from unit_dispatches by the
+  // dispatch ledger writes in openDispatchClaim — no separate persistence
+  // needed. Only the soft retry counter needs a runtime_kv row.
   try {
-    const filePath = stuckStatePath(basePath);
-    mkdirSync(join(gsdRoot(basePath), "runtime"), { recursive: true });
-    writeFileSync(filePath, JSON.stringify({
-      pid: process.pid,
-      recentUnits: state.recentUnits.slice(-20), // keep last 20 entries
-      stuckRecoveryAttempts: state.stuckRecoveryAttempts,
-      updatedAt: new Date().toISOString(),
-    }) + "\n");
+    setRuntimeKv("global", scopeId, STUCK_RECOVERY_ATTEMPTS_KEY, state.stuckRecoveryAttempts);
   } catch (err) {
     debugLog("autoLoop", { phase: "save-stuck-state-failed", error: err instanceof Error ? err.message : String(err) });
   }
 }
 
-// ── Custom workflow verification retry persistence ───────────────────────
-// Custom workflows can request verification retries after a step runs. The
-// retry budget must survive an auto-mode restart or a failing verifier can
-// consume a fresh retry budget every session.
-function customVerifyRetryStateDir(s: Pick<AutoSession, "activeRunDir" | "basePath">): string {
-  return s.activeRunDir ? join(s.activeRunDir, "runtime") : join(gsdRoot(s.basePath), "runtime");
+function logDispatchLedgerWriteFailure(err: unknown): void {
+  debugLog("autoLoop", {
+    phase: "dispatch-ledger-write-failed",
+    error: err instanceof Error ? err.message : String(err),
+  });
 }
 
-function customVerifyRetryStatePath(s: Pick<AutoSession, "activeRunDir" | "basePath">): string {
-  return join(customVerifyRetryStateDir(s), "custom-verify-retries.json");
+function logDispatchClaimRejected(details: {
+  unitId: string;
+  reason: string;
+  existingId?: number;
+  existingWorker?: string;
+}): void {
+  debugLog("autoLoop", {
+    phase: "dispatch-claim-rejected",
+    ...details,
+  });
 }
 
-function hydrateCustomVerifyRetryCounts(s: AutoSession): Map<string, number> {
-  if (s.verificationRetryCount.size > 0) {
-    return s.verificationRetryCount;
-  }
-
-  try {
-    const raw = JSON.parse(readFileSync(customVerifyRetryStatePath(s), "utf-8"));
-    const counts = raw && typeof raw === "object" && raw.counts && typeof raw.counts === "object"
-      ? raw.counts as Record<string, unknown>
-      : {};
-    for (const [key, value] of Object.entries(counts)) {
-      if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-        s.verificationRetryCount.set(key, Math.floor(value));
-      }
-    }
-  } catch (err) {
-    debugLog("autoLoop", { phase: "load-custom-verify-retries-failed", error: err instanceof Error ? err.message : String(err) });
-  }
-
-  return s.verificationRetryCount;
+function logDispatchClaimFailed(err: unknown): void {
+  debugLog("autoLoop", {
+    phase: "dispatch-claim-failed",
+    error: err instanceof Error ? err.message : String(err),
+  });
 }
 
-function saveCustomVerifyRetryCounts(s: AutoSession): void {
-  const retryCounts = s.verificationRetryCount;
-  const filePath = customVerifyRetryStatePath(s);
+function logCustomVerifyRetryLoadFailure(err: unknown): void {
+  debugLog("autoLoop", {
+    phase: "load-custom-verify-retries-failed",
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
 
-  try {
-    if (!retryCounts || retryCounts.size === 0) {
-      unlinkSync(filePath);
-      return;
-    }
-    mkdirSync(customVerifyRetryStateDir(s), { recursive: true });
-    atomicWriteSync(filePath, JSON.stringify({
-      counts: Object.fromEntries(retryCounts),
-      updatedAt: new Date().toISOString(),
-    }) + "\n");
-  } catch (err) {
-    const code = err && typeof err === "object" && "code" in err ? (err as { code?: string }).code : undefined;
-    if (code !== "ENOENT") {
-      debugLog("autoLoop", { phase: "save-custom-verify-retries-failed", error: err instanceof Error ? err.message : String(err) });
-    }
-  }
+function logCustomVerifyRetrySaveFailure(err: unknown): void {
+  debugLog("autoLoop", {
+    phase: "save-custom-verify-retries-failed",
+    error: err instanceof Error ? err.message : String(err),
+  });
 }
 
 // ── Memory pressure monitoring (#3331) ──────────────────────────────────
@@ -145,108 +184,53 @@ function saveCustomVerifyRetryCounts(s: AutoSession): void {
 // the OS OOM killer sends SIGKILL. The threshold is 90% of the V8 heap
 // limit (--max-old-space-size or default ~1.5-4GB depending on platform).
 const MEMORY_CHECK_INTERVAL = 5; // check every 5 iterations
-const MEMORY_PRESSURE_THRESHOLD = 0.85; // 85% of heap limit
 const MAX_CUSTOM_ENGINE_VERIFY_RETRIES = 3;
-
-type DispatchContract = "legacy-direct" | "uok-scheduler";
 
 interface AutoLoopOptions {
   dispatchContract?: DispatchContract;
 }
 
-function checkMemoryPressure(): { pressured: boolean; heapMB: number; limitMB: number; pct: number } {
-  const mem = process.memoryUsage();
-  // v8.getHeapStatistics() gives heap_size_limit but requires import
-  // Use a conservative estimate: RSS > 3GB is danger zone on most systems
-  const heapMB = Math.round(mem.heapUsed / 1024 / 1024);
-  const rssMB = Math.round(mem.rss / 1024 / 1024);
-  // Try to get the actual V8 heap limit
-  let limitMB = 4096; // conservative default
-  try {
-    const v8 = require("node:v8");
-    const stats = v8.getHeapStatistics();
-    limitMB = Math.round(stats.heap_size_limit / 1024 / 1024);
-  } catch { limitMB = 4096; /* v8 stats unavailable — use conservative default */ }
-  const pct = heapMB / limitMB;
-  return { pressured: pct > MEMORY_PRESSURE_THRESHOLD, heapMB, limitMB, pct };
-}
-
-function resolveDispatchNodeKind(
-  unitType: string,
-  sidecarItem?: SidecarItem,
-): UokGraphNode["kind"] {
-  if (sidecarItem?.kind === "hook") return "hook";
-  if (sidecarItem?.kind === "triage") return "verification";
-  if (sidecarItem?.kind === "quick-task") return "team-worker";
-
-  if (unitType.startsWith("hook/")) return "hook";
-  if (unitType === "reactive-execute") return "subagent";
-  if (
-    unitType === "gate-evaluate"
-    || unitType === "validate-milestone"
-    || unitType === "run-uat"
-    || unitType === "complete-slice"
-  ) {
-    return "verification";
-  }
-  if (unitType === "replan-slice" || unitType === "reassess-roadmap") {
-    return "reprocess";
-  }
-  return "unit";
-}
-
 async function enforceMinRequestInterval(s: AutoSession, prefs: IterationContext["prefs"]): Promise<void> {
   const minInterval = prefs?.min_request_interval_ms ?? 0;
-  if (minInterval > 0 && s.lastRequestTimestamp > 0) {
-    const elapsed = Date.now() - s.lastRequestTimestamp;
-    if (elapsed < minInterval) {
-      const waitMs = minInterval - elapsed;
-      debugLog("autoLoop", { phase: "rate-limit-wait", waitMs });
-      await new Promise<void>(r => setTimeout(r, waitMs));
-    }
+  const decision = decideMinRequestInterval({
+    minIntervalMs: minInterval,
+    lastRequestTimestamp: s.lastRequestTimestamp,
+    nowMs: Date.now(),
+  });
+  if (decision.action === "wait") {
+    debugLog("autoLoop", { phase: "rate-limit-wait", waitMs: decision.waitMs });
+    await new Promise<void>(r => setTimeout(r, decision.waitMs));
   }
 }
 
-async function runUnitPhaseViaContract(
-  dispatchContract: DispatchContract,
-  ic: IterationContext,
-  iterData: IterationData,
-  loopState: LoopState,
-  sidecarItem?: SidecarItem,
-): Promise<PhaseResult<{ unitStartedAt?: number; requestDispatchedAt?: number }>> {
-  if (dispatchContract === "legacy-direct") {
-    return runUnitPhase(ic, iterData, loopState, sidecarItem);
-  }
-
-  const scheduler = new ExecutionGraphScheduler();
-  let outcome: PhaseResult<{ unitStartedAt?: number; requestDispatchedAt?: number }> | null = null;
-  const executeNode = async (): Promise<void> => {
-    outcome = await runUnitPhase(ic, iterData, loopState, sidecarItem);
-  };
-  const kinds: UokGraphNode["kind"][] = [
-    "unit",
-    "hook",
-    "subagent",
-    "team-worker",
-    "verification",
-    "reprocess",
-  ];
-  for (const kind of kinds) scheduler.registerHandler(kind, executeNode);
-
-  const nodeId = `dispatch:${ic.iteration}:${iterData.unitType}:${iterData.unitId}`;
-  await scheduler.run([
-    {
-      id: nodeId,
-      kind: resolveDispatchNodeKind(iterData.unitType, sidecarItem),
-      dependsOn: [],
-      metadata: {
-        unitType: iterData.unitType,
-        unitId: iterData.unitId,
+function closeOutCrashedUnit(s: AutoSession, iterData: IterationData, err: unknown): void {
+  const summary = formatDispatchExceptionSummary({ error: err });
+  try {
+    emitOpenUnitEndForUnit(
+      s.basePath,
+      iterData.unitType,
+      iterData.unitId,
+      "cancelled",
+      {
+        message: summary,
+        category: "unit-exception",
+        isTransient: false,
       },
-    },
-  ], { parallel: false, maxWorkers: 1 });
-
-  return outcome ?? { action: "break", reason: "scheduler-dispatch-missing-result" };
+    );
+    writeUnitRuntimeRecord(
+      s.basePath,
+      iterData.unitType,
+      iterData.unitId,
+      s.currentUnit?.startedAt ?? Date.now(),
+      {
+        phase: "crashed",
+        lastProgressAt: Date.now(),
+        lastProgressKind: "unit-exception",
+      },
+    );
+  } catch (closeoutErr) {
+    logWarning("dispatch", `unit crash closeout failed: ${closeoutErr instanceof Error ? closeoutErr.message : String(closeoutErr)}`);
+  }
 }
 
 /**
@@ -267,8 +251,9 @@ export async function autoLoop(
   debugLog("autoLoop", { phase: "enter" });
   let iteration = 0;
   const dispatchContract = options?.dispatchContract ?? "legacy-direct";
+  const unitDispatchDeps = createExecutionGraphUnitDispatchDeps();
   // Load persisted stuck state so counters survive session restarts (#3704)
-  const persisted = loadStuckState(s.basePath);
+  const persisted = loadStuckState(s);
   const loopState: LoopState = {
     recentUnits: persisted.recentUnits,
     stuckRecoveryAttempts: persisted.stuckRecoveryAttempts,
@@ -282,52 +267,71 @@ export async function autoLoop(
     iteration++;
     debugLog("autoLoop", { phase: "loop-top", iteration });
 
+    maintainWorkerHeartbeat(s, {
+      heartbeatAutoWorker,
+      refreshMilestoneLease,
+      logHeartbeatFailure: err => debugLog("autoLoop", {
+        phase: "heartbeat-failed",
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    });
+
     // ── Journal: per-iteration flow grouping ──
     const flowId = randomUUID();
     let seqCounter = 0;
     const nextSeq = () => ++seqCounter;
+    const journalReporter = createWorkflowJournalReporter({
+      emitJournalEvent: deps.emitJournalEvent,
+      flowId,
+      nextSeq,
+    });
     const turnId = randomUUID();
     s.currentTraceId = flowId;
     s.currentTurnId = turnId;
     const turnStartedAt = new Date().toISOString();
     let observedUnitType: string | undefined;
     let observedUnitId: string | undefined;
-    let turnFinished = false;
-    const finishTurn = (
-      status: "completed" | "failed" | "paused" | "stopped" | "skipped" | "retry",
-      failureClass: "none" | "unknown" | "manual-attention" | "timeout" | "execution" | "closeout" | "git" = "none",
-      error?: string,
-    ): void => {
-      if (turnFinished) return;
-      turnFinished = true;
-      deps.uokObserver?.onTurnResult({
-        traceId: flowId,
-        turnId,
-        iteration,
-        unitType: observedUnitType,
-        unitId: observedUnitId,
-        status,
-        failureClass,
-        phaseResults: [],
-        error,
-        startedAt: turnStartedAt,
-        finishedAt: new Date().toISOString(),
-      });
-      s.currentTraceId = null;
-      s.currentTurnId = null;
-    };
-    deps.uokObserver?.onTurnStart({
+    const phaseReporter = createWorkflowPhaseReporter({
+      observer: deps.uokObserver,
+    });
+    const turnReporter = createWorkflowTurnReporter({
+      observer: deps.uokObserver,
       traceId: flowId,
       turnId,
       iteration,
       basePath: s.basePath,
       startedAt: turnStartedAt,
+      clearCurrentTurn: () => {
+        s.currentTraceId = null;
+        s.currentTurnId = null;
+      },
     });
+    const finishTurn = (
+      status: "completed" | "failed" | "paused" | "stopped" | "skipped" | "retry",
+      failureClass: "none" | "unknown" | "manual-attention" | "timeout" | "execution" | "closeout" | "git" = "none",
+      error?: string,
+    ): void => {
+      turnReporter.finish({
+        unitType: observedUnitType,
+        unitId: observedUnitId,
+        status,
+        failureClass,
+        error,
+      });
+    };
+    turnReporter.start();
 
-    if (iteration > MAX_LOOP_ITERATIONS) {
+    const iterationDecision = decideWorkflowLoop({
+      active: s.active,
+      iteration,
+      maxIterations: MAX_LOOP_ITERATIONS,
+      hasCommandContext: true,
+      sessionLockValid: true,
+    });
+    if (iterationDecision.action === "stop" && iterationDecision.reason === "max-iterations") {
       debugLog("autoLoop", {
         phase: "exit",
-        reason: "max-iterations",
+        reason: iterationDecision.reason,
         iteration,
       });
       await deps.stopAuto(
@@ -342,27 +346,45 @@ export async function autoLoop(
     // ── Memory pressure check (#3331) ──
     // Graceful shutdown before OOM killer sends SIGKILL.
     if (iteration % MEMORY_CHECK_INTERVAL === 0) {
-      const mem = checkMemoryPressure();
+      const mem = measureMemoryPressure();
       debugLog("autoLoop", { phase: "memory-check", ...mem });
-      if (mem.pressured) {
-        logWarning("dispatch", `Memory pressure: ${mem.heapMB}MB / ${mem.limitMB}MB (${Math.round(mem.pct * 100)}%) — stopping auto-mode to prevent OOM kill`);
-        await deps.stopAuto(
-          ctx,
-          pi,
-          `Memory pressure: heap at ${mem.heapMB}MB / ${mem.limitMB}MB (${Math.round(mem.pct * 100)}%). ` +
-          `Stopping gracefully to prevent OOM kill after ${iteration} iterations. ` +
-          `Resume with /gsd auto to continue from where you left off.`,
-        );
-        finishTurn("stopped", "timeout", "memory-pressure");
+      const memoryDecision = decideMemoryPressure({ ...mem, iteration });
+      if (memoryDecision.action === "stop") {
+        logWarning("dispatch", memoryDecision.warningMessage);
+        await deps.stopAuto(ctx, pi, memoryDecision.stopMessage);
+        finishTurn("stopped", "timeout", memoryDecision.turnError);
         break;
       }
     }
 
-    if (!s.cmdCtx) {
+    const commandContextDecision = decideWorkflowLoop({
+      active: s.active,
+      iteration,
+      maxIterations: MAX_LOOP_ITERATIONS,
+      hasCommandContext: Boolean(s.cmdCtx),
+      sessionLockValid: true,
+    });
+    if (commandContextDecision.action === "stop" && commandContextDecision.reason === "missing-command-context") {
       debugLog("autoLoop", { phase: "exit", reason: "no-cmdCtx" });
-      finishTurn("stopped", "manual-attention", "missing-command-context");
+      finishTurn("stopped", "manual-attention", commandContextDecision.reason);
       break;
     }
+
+    let dispatchId: number | null = null;
+    let dispatchSettled = false;
+    const completeIteration = (): void => {
+      completeWorkflowIteration({
+        get consecutiveErrors() { return consecutiveErrors; },
+        set consecutiveErrors(value) { consecutiveErrors = value; },
+        get consecutiveCooldowns() { return consecutiveCooldowns; },
+        set consecutiveCooldowns(value) { consecutiveCooldowns = value; },
+        recentErrorMessages,
+      }, {
+        emitIterationEnd: () => journalReporter.emit("iteration-end", { iteration }),
+        saveStuckState: () => saveStuckState(s, loopState),
+        logIterationComplete: () => debugLog("autoLoop", { phase: "iteration-complete", iteration }),
+      });
+    };
 
     try {
       // ── Blanket try/catch: one bad iteration must not kill the session
@@ -370,47 +392,44 @@ export async function autoLoop(
       const uokFlags = resolveUokFlags(prefs);
 
       // ── Check sidecar queue before deriveState ──
-      let sidecarItem: SidecarItem | undefined;
-      if (s.sidecarQueue.length > 0) {
-        if (uokFlags.executionGraph && s.sidecarQueue.length > 1) {
-          try {
-            s.sidecarQueue = await scheduleSidecarQueue(s.sidecarQueue);
-          } catch (err) {
-            logWarning("dispatch", `sidecar queue scheduling failed: ${err instanceof Error ? err.message : String(err)}`);
-          }
-        }
-        sidecarItem = s.sidecarQueue.shift()!;
-        debugLog("autoLoop", {
-          phase: "sidecar-dequeue",
-          kind: sidecarItem.kind,
-          unitType: sidecarItem.unitType,
-          unitId: sidecarItem.unitId,
-        });
-        deps.emitJournalEvent({ ts: new Date().toISOString(), flowId, seq: nextSeq(), eventType: "sidecar-dequeue", data: { kind: sidecarItem.kind, unitType: sidecarItem.unitType, unitId: sidecarItem.unitId } });
-      }
+      // NOTE: Sidecar dequeue MUST run before validateWorkflowSessionLock so a
+      // queued item is popped (and the `sidecar-dequeue` journal event emitted)
+      // even when the session lock invalidates this iteration. Inverting this
+      // order silently drops queued items on lock-loss. Refs #5308.
+      const sidecarItem = await dequeueSidecarItem({
+        queue: s.sidecarQueue,
+        executionGraphEnabled: uokFlags.executionGraph,
+        scheduleQueue: scheduleSidecarQueue,
+        warnSchedulingFailure: message => logWarning("dispatch", `sidecar queue scheduling failed: ${message}`),
+        logDequeue: payload => debugLog("autoLoop", { phase: "sidecar-dequeue", ...payload }),
+        emitDequeue: payload => journalReporter.emit("sidecar-dequeue", payload),
+      });
 
-      const sessionLockBase = deps.lockBase();
-      if (sessionLockBase) {
-        const lockStatus = deps.validateSessionLock(sessionLockBase);
-        if (!lockStatus.valid) {
-          debugLog("autoLoop", {
+      const sessionLockOutcome = validateWorkflowSessionLock({
+        active: s.active,
+        iteration,
+        maxIterations: MAX_LOOP_ITERATIONS,
+        deps: {
+          lockBase: deps.lockBase,
+          validateSessionLock: deps.validateSessionLock,
+          handleLostSessionLock: lockStatus => deps.handleLostSessionLock(ctx, lockStatus),
+          logInvalidSessionLock: details => debugLog("autoLoop", {
             phase: "session-lock-invalid",
-            reason: lockStatus.failureReason ?? "unknown",
-            existingPid: lockStatus.existingPid,
-            expectedPid: lockStatus.expectedPid,
-          });
-          deps.handleLostSessionLock(ctx, lockStatus);
-          debugLog("autoLoop", {
+            ...details,
+          }),
+          logSessionLockExit: details => debugLog("autoLoop", {
             phase: "exit",
-            reason: "session-lock-lost",
-            detail: lockStatus.failureReason ?? "unknown",
-          });
-          break;
-        }
+            ...details,
+          }),
+        },
+      });
+      if (sessionLockOutcome.action === "stop" && sessionLockOutcome.reason === "session-lock-lost") {
+        finishTurn("stopped", "manual-attention", sessionLockOutcome.reason);
+        break;
       }
 
       const ic: IterationContext = { ctx, pi, s, deps, prefs, iteration, flowId, nextSeq };
-      deps.emitJournalEvent({ ts: new Date().toISOString(), flowId, seq: nextSeq(), eventType: "iteration-start", data: { iteration } });
+      journalReporter.emit("iteration-start", { iteration });
       let iterData: IterationData;
 
       // ── Custom engine path ──────────────────────────────────────────────
@@ -421,7 +440,11 @@ export async function autoLoop(
       //
       // GSD_ENGINE_BYPASS=1 skips the engine layer entirely — falls through
       // to the dev path below.
-      if (s.activeEngineId != null && s.activeEngineId !== "dev" && !sidecarItem && process.env.GSD_ENGINE_BYPASS !== "1") {
+      if (shouldUseCustomEnginePath({
+        activeEngineId: s.activeEngineId,
+        hasSidecarItem: Boolean(sidecarItem),
+        engineBypass: process.env.GSD_ENGINE_BYPASS === "1",
+      })) {
         debugLog("autoLoop", { phase: "custom-engine-derive", iteration, engineId: s.activeEngineId });
 
         const { engine, policy } = resolveEngine({
@@ -429,39 +452,60 @@ export async function autoLoop(
           activeRunDir: s.activeRunDir,
         });
 
-        const engineState = await engine.deriveState(s.basePath);
+        const engineState = await engine.deriveState(s.canonicalProjectRoot);
+        debugLog("autoLoop", {
+          phase: "post-derive",
+          site: "custom-engine-derive",
+          basePath: s.basePath,
+          originalBasePath: s.originalBasePath,
+          scopeProjectRoot: s.scope?.workspace.projectRoot,
+          canonicalProjectRoot: s.canonicalProjectRoot,
+          derivedPhase: (engineState as { phase?: string }).phase,
+          isComplete: engineState.isComplete,
+        });
         if (engineState.isComplete) {
+          finishTurn("completed");
           await deps.stopAuto(ctx, pi, "Workflow complete");
           break;
         }
 
         debugLog("autoLoop", { phase: "custom-engine-dispatch", iteration });
         const dispatch = await engine.resolveDispatch(engineState, { basePath: s.basePath });
-
-        if (dispatch.action === "stop") {
-          await deps.stopAuto(ctx, pi, dispatch.reason ?? "Engine stopped");
+        const engineDispatchDecision = decideEngineDispatch(dispatch.action === "stop"
+          ? { action: "stop", reason: dispatch.reason }
+          : { action: dispatch.action });
+        const dispatchFlow = await handleCustomEngineDispatchOutcome({
+          decision: engineDispatchDecision,
+          deps: {
+            stopAuto: reason => deps.stopAuto(ctx, pi, reason),
+          },
+        });
+        if (dispatchFlow.action === "break") {
+          finishTurn("stopped", "manual-attention", "custom-engine-dispatch-stop");
           break;
         }
-        if (dispatch.action === "skip") {
+        if (dispatchFlow.action === "continue") {
+          finishTurn("skipped");
           continue;
         }
 
         // dispatch.action === "dispatch"
-        const step = dispatch.step!;
-        const gsdState = await deps.deriveState(s.basePath);
-
-        iterData = {
-          unitType: step.unitType,
-          unitId: step.unitId,
-          prompt: step.prompt,
-          finalPrompt: step.prompt,
-          pauseAfterUatDispatch: false,
-          state: gsdState,
-          mid: s.currentMilestoneId ?? "workflow",
-          midTitle: "Workflow",
-          isRetry: false,
-          previousTier: undefined,
-        };
+        if (dispatch.action !== "dispatch") {
+          finishTurn("skipped");
+          continue;
+        }
+        const step = dispatch.step;
+        iterData = await buildCustomEngineIterationData({
+          step,
+          basePath: s.basePath,
+          canonicalProjectRoot: s.canonicalProjectRoot,
+          currentMilestoneId: s.currentMilestoneId,
+          deriveState: deps.deriveState,
+          logPostDerive: details => debugLog("autoLoop", {
+            phase: "post-derive",
+            ...details,
+          }),
+        });
         observedUnitType = iterData.unitType;
         observedUnitId = iterData.unitId;
 
@@ -470,7 +514,7 @@ export async function autoLoop(
 
         // ── Guards (shared with dev path) ──
         const guardsResult = await runGuards(ic, s.currentMilestoneId ?? "workflow");
-        deps.uokObserver?.onPhaseResult("guard", guardsResult.action, {
+        phaseReporter.report("guard", guardsResult.action, {
           unitType: iterData.unitType,
           unitId: iterData.unitId,
         });
@@ -481,17 +525,28 @@ export async function autoLoop(
 
         // ── Unit execution (shared with dev path) ──
         await enforceMinRequestInterval(s, prefs);
-        const unitPhaseResult = await runUnitPhaseViaContract(
-          dispatchContract,
-          ic,
-          iterData,
-          loopState,
-        );
-        if (unitPhaseResult.action === "next") {
-          const requestTimestamp = unitPhaseResult.data.requestDispatchedAt ?? unitPhaseResult.data.unitStartedAt;
-          if (typeof requestTimestamp === "number") s.lastRequestTimestamp = requestTimestamp;
+        let unitPhaseResult: Awaited<ReturnType<typeof runUnitPhaseViaContract>>;
+        try {
+          unitPhaseResult = await runUnitPhaseViaContract(
+            dispatchContract,
+            ic,
+            iterData,
+            loopState,
+            undefined,
+            unitDispatchDeps,
+          );
+        } catch (err) {
+          if (err instanceof ModelPolicyDispatchBlockedError) {
+            throw err;
+          }
+          closeOutCrashedUnit(s, iterData, err);
+          throw err;
         }
-        deps.uokObserver?.onPhaseResult("unit", unitPhaseResult.action, {
+        if (unitPhaseResult.action === "next") {
+          const requestTimestamp = resolveUnitRequestTimestamp(unitPhaseResult.data);
+          if (requestTimestamp !== undefined) s.lastRequestTimestamp = requestTimestamp;
+        }
+        phaseReporter.report("unit", unitPhaseResult.action, {
           unitType: iterData.unitType,
           unitId: iterData.unitId,
         });
@@ -504,116 +559,93 @@ export async function autoLoop(
         debugLog("autoLoop", { phase: "custom-engine-verify", iteration, unitId: iterData.unitId });
         const verifyResult = await policy.verify(iterData.unitType, iterData.unitId, { basePath: s.basePath });
         if (verifyResult === "pause") {
-          await deps.pauseAuto(ctx, pi);
-          deps.uokObserver?.onPhaseResult("custom-engine", "pause", {
+          const verifyFlow = await handleCustomEngineVerifyPause({
             unitType: iterData.unitType,
             unitId: iterData.unitId,
+            deps: {
+              pauseAuto: () => deps.pauseAuto(ctx, pi),
+              stopAuto: reason => deps.stopAuto(ctx, pi, reason),
+              reportPause: details => phaseReporter.report("custom-engine", "pause", details),
+              finishTurn,
+            },
           });
-          finishTurn("paused", "manual-attention", "custom-engine-verify-pause");
-          break;
+          if (verifyFlow.action === "break") break;
         }
         if (verifyResult === "retry") {
-          const recoveryKey = `${iterData.unitType}/${iterData.unitId}`;
-          const retryCounts = hydrateCustomVerifyRetryCounts(s);
-          const attempts = (retryCounts.get(recoveryKey) ?? 0) + 1;
-          retryCounts.set(recoveryKey, attempts);
-          saveCustomVerifyRetryCounts(s);
-          debugLog("autoLoop", { phase: "custom-engine-verify-retry", iteration, unitId: iterData.unitId, attempts });
-          deps.uokObserver?.onPhaseResult("custom-engine", "retry", {
+          const retryOutcome = await handleCustomEngineVerifyRetry({
+            session: s,
             unitType: iterData.unitType,
             unitId: iterData.unitId,
-            attempts,
+            basePath: s.basePath,
+            iteration,
+            maxRetries: MAX_CUSTOM_ENGINE_VERIFY_RETRIES,
+            deps: {
+              hydrateRetryCounts: () => hydrateCustomVerifyRetryCounts(s, {
+                logFailure: logCustomVerifyRetryLoadFailure,
+              }),
+              saveRetryCounts: () => saveCustomVerifyRetryCounts(s, {
+                logFailure: logCustomVerifyRetrySaveFailure,
+              }),
+              recover: (unitType, unitId, options) => policy.recover(unitType, unitId, options),
+              logRetry: details => debugLog("autoLoop", {
+                phase: "custom-engine-verify-retry",
+                ...details,
+              }),
+              reportRetry: details => phaseReporter.report("custom-engine", "retry", details),
+            },
           });
-          if (attempts > MAX_CUSTOM_ENGINE_VERIFY_RETRIES) {
-            const recovery = await policy.recover(iterData.unitType, iterData.unitId, { basePath: s.basePath });
-            if (recovery.outcome === "pause") {
-              await deps.pauseAuto(ctx, pi);
-              finishTurn("paused", "manual-attention", recovery.reason ?? "custom-engine-verify-retry-exhausted");
-              break;
-            }
-            if (recovery.outcome === "skip") {
-              await deps.stopAuto(
-                ctx,
-                pi,
-                recovery.reason ??
-                  `Custom workflow verification for ${iterData.unitId} requested skip after retry exhaustion, but the custom engine cannot reconcile skipped steps.`,
-              );
-              finishTurn("stopped", "manual-attention", "custom-engine-verify-retry-exhausted");
-              break;
-            }
-            const exhaustedReason =
-              `Custom workflow verification for ${iterData.unitId} requested retry ${attempts} times without passing.`;
-            await deps.stopAuto(
-              ctx,
-              pi,
-              recovery.outcome === "stop" && recovery.reason ? recovery.reason : exhaustedReason,
-            );
-            finishTurn("stopped", "manual-attention", "custom-engine-verify-retry-exhausted");
-            break;
-          }
-          finishTurn("retry");
+          const retryFlow = await handleCustomEngineVerifyRetryOutcome({
+            outcome: retryOutcome,
+            deps: {
+              pauseAuto: () => deps.pauseAuto(ctx, pi),
+              stopAuto: reason => deps.stopAuto(ctx, pi, reason),
+              reportPause: details => phaseReporter.report("custom-engine", "pause", details),
+              finishTurn,
+            },
+          });
+          if (retryFlow.action === "break") break;
           continue;
         }
 
         // Verification passed — mark step complete
-        s.verificationRetryCount?.delete(`${iterData.unitType}/${iterData.unitId}`);
-        saveCustomVerifyRetryCounts(s);
-        debugLog("autoLoop", { phase: "custom-engine-reconcile", iteration, unitId: iterData.unitId });
-        const reconcileResult = await engine.reconcile(engineState, {
+        const reconcileOutcome = await handleCustomEngineReconcile({
+          session: s,
+          engineState,
+          iterData,
+          iteration,
+          deps: {
+            saveRetryCounts: () => saveCustomVerifyRetryCounts(s, {
+              logFailure: logCustomVerifyRetrySaveFailure,
+            }),
+            logReconcile: details => debugLog("autoLoop", {
+              phase: "custom-engine-reconcile",
+              ...details,
+            }),
+            reconcile: (state, completedStep) => engine.reconcile(state, completedStep),
+            now: () => Date.now(),
+            clearUnitTimeout: deps.clearUnitTimeout,
+            completeIteration,
+          },
+        });
+        const reconcileFlow = await handleCustomEngineReconcileOutcome({
+          outcome: reconcileOutcome,
           unitType: iterData.unitType,
           unitId: iterData.unitId,
-          startedAt: s.currentUnit?.startedAt ?? Date.now(),
-          finishedAt: Date.now(),
+          deps: {
+            stopAuto: reason => deps.stopAuto(ctx, pi, reason),
+            pauseAuto: () => deps.pauseAuto(ctx, pi),
+            report: (action, details) => phaseReporter.report("custom-engine", action, details),
+            finishTurn,
+          },
         });
-
-        deps.clearUnitTimeout();
-        consecutiveErrors = 0;
-        consecutiveCooldowns = 0;
-        recentErrorMessages.length = 0;
-        deps.emitJournalEvent({ ts: new Date().toISOString(), flowId, seq: nextSeq(), eventType: "iteration-end", data: { iteration } });
-        saveStuckState(s.basePath, loopState); // persist across session restarts (#3704)
-        debugLog("autoLoop", { phase: "iteration-complete", iteration });
-
-        if (reconcileResult.outcome === "milestone-complete") {
-          await deps.stopAuto(ctx, pi, "Workflow complete");
-          deps.uokObserver?.onPhaseResult("custom-engine", "milestone-complete", {
-            unitType: iterData.unitType,
-            unitId: iterData.unitId,
-          });
-          finishTurn("completed");
-          break;
-        }
-        if (reconcileResult.outcome === "pause") {
-          await deps.pauseAuto(ctx, pi);
-          deps.uokObserver?.onPhaseResult("custom-engine", "pause", {
-            unitType: iterData.unitType,
-            unitId: iterData.unitId,
-          });
-          finishTurn("paused", "manual-attention");
-          break;
-        }
-        if (reconcileResult.outcome === "stop") {
-          await deps.stopAuto(ctx, pi, reconcileResult.reason ?? "Engine stopped");
-          deps.uokObserver?.onPhaseResult("custom-engine", "stop", {
-            unitType: iterData.unitType,
-            unitId: iterData.unitId,
-            reason: reconcileResult.reason,
-          });
-          finishTurn("stopped", "manual-attention", reconcileResult.reason);
-          break;
-        }
-        deps.uokObserver?.onPhaseResult("custom-engine", "continue", {
-          unitType: iterData.unitType,
-          unitId: iterData.unitId,
-        });
-        finishTurn("completed");
+        if (reconcileFlow.action === "break") break;
         continue;
       }
 
       if (!sidecarItem) {
         // ── Phase 1: Pre-dispatch ─────────────────────────────────────────
         const preDispatchResult = await runPreDispatch(ic, loopState);
-        deps.uokObserver?.onPhaseResult("pre-dispatch", preDispatchResult.action);
+        phaseReporter.report("pre-dispatch", preDispatchResult.action);
         if (preDispatchResult.action === "break") {
           finishTurn("stopped", "manual-attention", "pre-dispatch-break");
           break;
@@ -627,7 +659,7 @@ export async function autoLoop(
 
         // ── Phase 2: Guards ───────────────────────────────────────────────
         const guardsResult = await runGuards(ic, preData.mid);
-        deps.uokObserver?.onPhaseResult("guard", guardsResult.action);
+        phaseReporter.report("guard", guardsResult.action);
         if (guardsResult.action === "break") {
           finishTurn("stopped", "manual-attention", "guard-break");
           break;
@@ -635,7 +667,7 @@ export async function autoLoop(
 
         // ── Phase 3: Dispatch ─────────────────────────────────────────────
         const dispatchResult = await runDispatch(ic, preData, loopState);
-        deps.uokObserver?.onPhaseResult("dispatch", dispatchResult.action);
+        phaseReporter.report("dispatch", dispatchResult.action);
         if (dispatchResult.action === "break") {
           finishTurn("stopped", "manual-attention", "dispatch-break");
           break;
@@ -648,22 +680,19 @@ export async function autoLoop(
         observedUnitType = iterData.unitType;
         observedUnitId = iterData.unitId;
       } else {
-        // ── Sidecar path: use values from the sidecar item directly ──
-        const sidecarState = await deps.deriveState(s.basePath);
-        iterData = {
-          unitType: sidecarItem.unitType,
-          unitId: sidecarItem.unitId,
-          prompt: sidecarItem.prompt,
-          finalPrompt: sidecarItem.prompt,
-          pauseAfterUatDispatch: false,
-          state: sidecarState,
-          mid: sidecarState.activeMilestone?.id,
-          midTitle: sidecarState.activeMilestone?.title,
-          isRetry: false, previousTier: undefined,
-        };
+        iterData = await buildSidecarIterationData({
+          sidecarItem,
+          basePath: s.basePath,
+          canonicalProjectRoot: s.canonicalProjectRoot,
+          deriveState: deps.deriveState,
+          logPostDerive: details => debugLog("autoLoop", {
+            phase: "post-derive",
+            ...details,
+          }),
+        });
         observedUnitType = iterData.unitType;
         observedUnitId = iterData.unitId;
-        deps.uokObserver?.onPhaseResult("dispatch", "sidecar", {
+        phaseReporter.report("dispatch", "sidecar", {
           unitType: iterData.unitType,
           unitId: iterData.unitId,
           sidecarKind: sidecarItem.kind,
@@ -671,60 +700,143 @@ export async function autoLoop(
       }
 
       await enforceMinRequestInterval(s, prefs);
-      const unitPhaseResult = await runUnitPhaseViaContract(
-        dispatchContract,
-        ic,
-        iterData,
-        loopState,
-        sidecarItem,
+
+      // Phase B: claim a unit_dispatches row before invoking the unit. The
+      // partial unique index idx_unit_dispatches_active_per_unit prevents
+      // a second worker from claiming the same unit concurrently. Returns
+      // null when DB unavailable, no worker registered, or no active lease
+      // — those degraded paths fall through to the existing single-worker
+      // semantics with no ledger entry, preserving back-compat.
+      const dispatchClaim = openDispatchClaim(s, flowId, turnId, iterData, {
+        getRecentDispatchesForUnit,
+        recordDispatchClaim,
+        markDispatchRunning,
+        logClaimRejected: logDispatchClaimRejected,
+        logClaimFailed: logDispatchClaimFailed,
+      });
+      const dispatchDecision = decideDispatchClaim(
+        dispatchClaim.kind === "opened"
+          ? { kind: "opened", dispatchId: dispatchClaim.dispatchId }
+          : dispatchClaim.kind === "skip"
+            ? { kind: "skip", reason: dispatchClaim.reason }
+            : { kind: "degraded" },
       );
-      if (unitPhaseResult.action === "next") {
-        const requestTimestamp = unitPhaseResult.data.requestDispatchedAt ?? unitPhaseResult.data.unitStartedAt;
-        if (typeof requestTimestamp === "number") s.lastRequestTimestamp = requestTimestamp;
+      if (dispatchDecision.action === "skip") {
+        finishTurn("skipped", "execution", dispatchDecision.reason);
+        continue;
       }
-      deps.uokObserver?.onPhaseResult("unit", unitPhaseResult.action, {
+      dispatchId = dispatchDecision.dispatchId;
+
+      let unitPhaseResult: Awaited<ReturnType<typeof runUnitPhaseViaContract>>;
+      try {
+        unitPhaseResult = await runUnitPhaseViaContract(
+          dispatchContract,
+          ic,
+          iterData,
+          loopState,
+          sidecarItem,
+          unitDispatchDeps,
+        );
+      } catch (err) {
+        if (err instanceof ModelPolicyDispatchBlockedError) {
+          throw err;
+        }
+        closeOutCrashedUnit(s, iterData, err);
+        dispatchSettled = settleDispatchFailed(
+          dispatchId,
+          formatDispatchExceptionSummary({ error: err }),
+          {
+            markFailed: markDispatchFailed,
+            logWriteFailure: logDispatchLedgerWriteFailure,
+          },
+        ) || dispatchSettled;
+        throw err;
+      }
+      if (unitPhaseResult.action === "next") {
+        const requestTimestamp = resolveUnitRequestTimestamp(unitPhaseResult.data);
+        if (requestTimestamp !== undefined) s.lastRequestTimestamp = requestTimestamp;
+      }
+      phaseReporter.report("unit", unitPhaseResult.action, {
         unitType: iterData.unitType,
         unitId: iterData.unitId,
       });
       if (unitPhaseResult.action === "break") {
+        dispatchSettled = settleDispatchFailed(dispatchId, "unit-break", {
+          markFailed: markDispatchFailed,
+          logWriteFailure: logDispatchLedgerWriteFailure,
+        }) || dispatchSettled;
         finishTurn("stopped", "execution", "unit-break");
         break;
       }
 
       // ── Phase 5: Finalize ───────────────────────────────────────────────
 
-      const finalizeResult = await runFinalize(ic, iterData, loopState, sidecarItem);
-      deps.uokObserver?.onPhaseResult("finalize", finalizeResult.action, {
+      let finalizeResult: Awaited<ReturnType<typeof runFinalize>>;
+      try {
+        finalizeResult = await runFinalize(ic, iterData, loopState, sidecarItem);
+      } catch (err) {
+        dispatchSettled = settleDispatchFailed(
+          dispatchId,
+          formatDispatchExceptionSummary({ error: err }),
+          {
+            markFailed: markDispatchFailed,
+            logWriteFailure: logDispatchLedgerWriteFailure,
+          },
+        ) || dispatchSettled;
+        throw err;
+      }
+      phaseReporter.report("finalize", finalizeResult.action, {
         unitType: iterData.unitType,
         unitId: iterData.unitId,
       });
-      if (finalizeResult.action === "break") {
-        const finalizeFailureClass = finalizeResult.reason === "git-closeout-failure"
-          ? "git"
-          : "closeout";
-        finishTurn("stopped", finalizeFailureClass, "finalize-break");
+      const finalizeDecision = decideFinalizeResult(
+        finalizeResult.action === "break"
+          ? { action: "break", reason: finalizeResult.reason }
+          : finalizeResult.action === "continue"
+            ? { action: "continue" }
+            : { action: "next" },
+      );
+      if (finalizeDecision.action === "stop") {
+        dispatchSettled = settleDispatchFailed(dispatchId, finalizeDecision.ledgerErrorSummary, {
+          markFailed: markDispatchFailed,
+          logWriteFailure: logDispatchLedgerWriteFailure,
+        }) || dispatchSettled;
+        finishTurn("stopped", finalizeDecision.failureClass, finalizeDecision.turnError);
         break;
       }
-      if (finalizeResult.action === "continue") {
+      if (finalizeDecision.action === "retry") {
+        dispatchSettled = settleDispatchFailed(dispatchId, finalizeDecision.ledgerErrorSummary, {
+          markFailed: markDispatchFailed,
+          logWriteFailure: logDispatchLedgerWriteFailure,
+        }) || dispatchSettled;
         finishTurn("retry");
         continue;
       }
 
-      consecutiveErrors = 0; // Iteration completed successfully
-      consecutiveCooldowns = 0;
-      recentErrorMessages.length = 0;
-      deps.emitJournalEvent({ ts: new Date().toISOString(), flowId, seq: nextSeq(), eventType: "iteration-end", data: { iteration } });
-      saveStuckState(s.basePath, loopState); // persist across session restarts (#4382)
-      debugLog("autoLoop", { phase: "iteration-complete", iteration });
+      dispatchSettled = settleDispatchCompleted(dispatchId, {
+        markCompleted: markDispatchCompleted,
+        logWriteFailure: logDispatchLedgerWriteFailure,
+      }) || dispatchSettled;
+      completeIteration();
       finishTurn("completed");
     } catch (loopErr) {
       // ── Blanket catch: absorb unexpected exceptions, apply graduated recovery ──
       const msg = loopErr instanceof Error ? loopErr.message : String(loopErr);
+      if (dispatchId !== null && !dispatchSettled && !(loopErr instanceof ModelPolicyDispatchBlockedError)) {
+        dispatchSettled = settleDispatchFailed(
+          dispatchId,
+          formatUnhandledDispatchErrorSummary({ error: loopErr }),
+          {
+            markFailed: markDispatchFailed,
+            logWriteFailure: logDispatchLedgerWriteFailure,
+          },
+        ) || dispatchSettled;
+      }
 
       // Always emit iteration-end on error so the journal records iteration
       // completion even on failure (#2344). Without this, errors in
       // runFinalize leave the journal incomplete, making diagnosis harder.
-      deps.emitJournalEvent({ ts: new Date().toISOString(), flowId, seq: nextSeq(), eventType: "iteration-end", data: { iteration, error: msg } });
+      journalReporter.emit("iteration-end", { iteration, error: msg });
 
       // ── Pre-send model-policy block: not a retryable error (#4959 / #4850) ──
       // The model-policy gate runs before the prompt is sent.  When every
@@ -735,6 +847,12 @@ export async function autoLoop(
       // instead, with the per-model deny reasons surfaced from the typed
       // error.
       if (loopErr instanceof ModelPolicyDispatchBlockedError) {
+        const policyDecision = decideModelPolicyBlocked({
+          unitType: loopErr.unitType,
+          unitId: loopErr.unitId,
+          errorMessage: msg,
+          reasons: loopErr.reasons,
+        });
         debugLog("autoLoop", {
           phase: "model-policy-blocked",
           iteration,
@@ -742,23 +860,8 @@ export async function autoLoop(
           unitId: loopErr.unitId,
           reasons: loopErr.reasons,
         });
-        ctx.ui.notify(
-          `Auto-mode paused: model-policy denied dispatch for ${loopErr.unitType}/${loopErr.unitId}. ${msg}`,
-          "error",
-        );
-        deps.emitJournalEvent({
-          ts: new Date().toISOString(),
-          flowId,
-          seq: nextSeq(),
-          eventType: "unit-end",
-          data: {
-            unitType: loopErr.unitType,
-            unitId: loopErr.unitId,
-            status: "blocked",
-            reason: "model-policy-dispatch-blocked",
-            reasons: loopErr.reasons,
-          },
-        });
+        ctx.ui.notify(policyDecision.notifyMessage, "error");
+        journalReporter.emit("unit-end", policyDecision.journalData);
         // Carry the blocked unit identity into the turn-result observer:
         // the throw originated inside dispatch, so observedUnitType/Id were
         // not assigned by the success path at lines 453/631/647 — but the
@@ -766,7 +869,7 @@ export async function autoLoop(
         observedUnitType = loopErr.unitType;
         observedUnitId = loopErr.unitId;
         await deps.pauseAuto(ctx, pi);
-        finishTurn("paused", "manual-attention", msg);
+        finishTurn(policyDecision.turnStatus, policyDecision.failureClass, msg);
         // Do NOT increment consecutiveErrors — the failure is configuration,
         // not a transient runtime fault.
         break;
@@ -777,22 +880,19 @@ export async function autoLoop(
       // LLM budget on guaranteed failures.
       const infraCode = isInfrastructureError(loopErr);
       if (infraCode) {
+        const infraDecision = decideInfrastructureError({
+          code: infraCode,
+          errorMessage: msg,
+        });
         debugLog("autoLoop", {
           phase: "infrastructure-error",
           iteration,
           code: infraCode,
           error: msg,
         });
-        ctx.ui.notify(
-          `Auto-mode stopped: infrastructure error ${infraCode} — ${msg}`,
-          "error",
-        );
-        await deps.stopAuto(
-          ctx,
-          pi,
-          `Infrastructure error (${infraCode}): not recoverable by retry`,
-        );
-        finishTurn("failed", "execution", msg);
+        ctx.ui.notify(infraDecision.notifyMessage, "error");
+        await deps.stopAuto(ctx, pi, infraDecision.stopMessage);
+        finishTurn(infraDecision.turnStatus, infraDecision.failureClass, msg);
         break;
       }
 
@@ -805,6 +905,12 @@ export async function autoLoop(
       if (isTransientCooldownError(loopErr)) {
         consecutiveCooldowns++;
         const retryAfterMs = getCooldownRetryAfterMs(loopErr);
+        const cooldownDecision = decideCooldownRecovery({
+          consecutiveCooldowns,
+          maxCooldownRetries: MAX_COOLDOWN_RETRIES,
+          retryAfterMs,
+          fallbackWaitMs: COOLDOWN_FALLBACK_WAIT_MS,
+        });
         debugLog("autoLoop", {
           phase: "cooldown-wait",
           iteration,
@@ -813,27 +919,15 @@ export async function autoLoop(
           error: msg,
         });
 
-        if (consecutiveCooldowns > MAX_COOLDOWN_RETRIES) {
-          ctx.ui.notify(
-            `Auto-mode stopped: ${consecutiveCooldowns} consecutive credential cooldowns — rate limit or quota may be persistently exhausted.`,
-            "error",
-          );
-          await deps.stopAuto(
-            ctx,
-            pi,
-            `${consecutiveCooldowns} consecutive credential cooldowns exceeded retry budget`,
-          );
+        if (cooldownDecision.action === "stop") {
+          ctx.ui.notify(cooldownDecision.notifyMessage, "error");
+          finishTurn("stopped", "timeout", msg);
+          await deps.stopAuto(ctx, pi, cooldownDecision.stopMessage);
           break;
         }
 
-        const waitMs = (retryAfterMs !== undefined && retryAfterMs > 0 && retryAfterMs <= 60_000)
-          ? retryAfterMs + 500 // Use structured hint + small buffer
-          : COOLDOWN_FALLBACK_WAIT_MS;
-        ctx.ui.notify(
-          `Credentials in cooldown (${consecutiveCooldowns}/${MAX_COOLDOWN_RETRIES}) — waiting ${Math.round(waitMs / 1000)}s before retrying.`,
-          "warning",
-        );
-        await new Promise(resolve => setTimeout(resolve, waitMs));
+        ctx.ui.notify(cooldownDecision.notifyMessage, "warning");
+        await new Promise(resolve => setTimeout(resolve, cooldownDecision.waitMs));
         finishTurn("retry", "timeout", msg);
         continue; // Retry iteration without incrementing consecutiveErrors
       }
@@ -847,34 +941,24 @@ export async function autoLoop(
         error: msg,
       });
 
-      if (consecutiveErrors >= 3) {
-        // 3+ consecutive: hard stop — something is fundamentally broken
-        const errorHistory = recentErrorMessages
-          .map((m, i) => `  ${i + 1}. ${m}`)
-          .join("\n");
-        ctx.ui.notify(
-          `Auto-mode stopped: ${consecutiveErrors} consecutive iteration failures:\n${errorHistory}`,
-          "error",
-        );
-        await deps.stopAuto(
-          ctx,
-          pi,
-          `${consecutiveErrors} consecutive iteration failures`,
-        );
-        finishTurn("failed", "execution", msg);
+      const errorDecision = decideIterationErrorRecovery({
+        consecutiveErrors,
+        recentErrorMessages,
+        currentErrorMessage: msg,
+      });
+      if (errorDecision.action === "stop") {
+        ctx.ui.notify(errorDecision.notifyMessage, "error");
+        await deps.stopAuto(ctx, pi, errorDecision.stopMessage);
+        finishTurn(errorDecision.turnStatus, "execution", msg);
         break;
-      } else if (consecutiveErrors === 2) {
-        // 2nd consecutive: try invalidating caches + re-deriving state
-        ctx.ui.notify(
-          `Iteration error (attempt ${consecutiveErrors}): ${msg}. Invalidating caches and retrying.`,
-          "warning",
-        );
+      }
+      if (errorDecision.action === "invalidate-and-retry") {
+        ctx.ui.notify(errorDecision.notifyMessage, "warning");
         deps.invalidateAllCaches();
       } else {
-        // 1st error: log and retry — transient failures happen
-        ctx.ui.notify(`Iteration error: ${msg}. Retrying.`, "warning");
+        ctx.ui.notify(errorDecision.notifyMessage, "warning");
       }
-      finishTurn("retry", "execution", msg);
+      finishTurn(errorDecision.turnStatus, "execution", msg);
     }
   }
 

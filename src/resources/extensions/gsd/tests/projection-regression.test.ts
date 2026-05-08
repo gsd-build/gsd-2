@@ -91,6 +91,7 @@ function makeMilestoneRow() {
     definition_of_done: [],
     requirement_coverage: '',
     boundary_map_markdown: '',
+    sequence: 0,
   };
 }
 

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { PassThrough } from "node:stream"
 import { StringDecoder } from "node:string_decoder"
+import type { RpcSessionState } from "@gsd-build/contracts"
 
 const repoRoot = process.cwd()
 const bridge = await import("../../web/bridge-service.ts")
@@ -635,16 +636,20 @@ test("/api/git exposes an explicit not-a-repo state instead of failing silently"
 })
 
 test("browser session, settings, and git surfaces keep inspectable browse/manage/state markers on the shared surface", () => {
-  const rpcTypesSource = readFileSync(resolve(import.meta.dirname, "../../../packages/pi-coding-agent/src/modes/rpc/rpc-types.ts"), "utf8")
   const contractSource = readFileSync(resolve(import.meta.dirname, "../../../web/lib/command-surface-contract.ts"), "utf8")
   const storeSource = readFileSync(resolve(import.meta.dirname, "../../../web/lib/gsd-workspace-store.tsx"), "utf8")
   const surfaceSource = readFileSync(resolve(import.meta.dirname, "../../../web/components/gsd/command-surface.tsx"), "utf8")
   const sidebarSource = readFileSync(resolve(import.meta.dirname, "../../../web/components/gsd/sidebar.tsx"), "utf8")
   const gitRouteSource = readFileSync(resolve(import.meta.dirname, "../../../web/app/api/git/route.ts"), "utf8")
 
-  assert.match(rpcTypesSource, /autoRetryEnabled: boolean/, "rpc-types.ts must expose retry-enabled state in get_state")
-  assert.match(rpcTypesSource, /retryInProgress: boolean/, "rpc-types.ts must expose retry-in-progress state in get_state")
-  assert.match(rpcTypesSource, /retryAttempt: number/, "rpc-types.ts must expose retry attempt visibility in get_state")
+  const retryState: Pick<RpcSessionState, "autoRetryEnabled" | "retryInProgress" | "retryAttempt"> = {
+    autoRetryEnabled: true,
+    retryInProgress: false,
+    retryAttempt: 0,
+  }
+  assert.equal(retryState.autoRetryEnabled, true)
+  assert.equal(retryState.retryInProgress, false)
+  assert.equal(retryState.retryAttempt, 0)
 
   assert.match(contractSource, /gitSummary:/, "command-surface-contract.ts must keep inspectable git-summary state on commandSurface")
   assert.match(contractSource, /load_git_summary/, "command-surface-contract.ts must model git-summary loading state")

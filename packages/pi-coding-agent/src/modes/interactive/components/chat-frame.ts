@@ -1,4 +1,5 @@
-import { truncateToWidth, visibleWidth } from "@gsd/pi-tui";
+// GSD2 TUI - Shared chat frame renderer for assistant, user, and system cards.
+import { style, truncateToWidth, visibleWidth } from "@gsd/pi-tui";
 import { theme } from "../theme/theme.js";
 import { formatTimestamp, type TimestampFormat } from "./timestamp.js";
 
@@ -34,7 +35,7 @@ export function renderChatFrame(
 				: "borderAccent";
 	const borderMuted = isPurple ? "customMessageLabel" : "borderMuted";
 	const border = (s: string) => theme.fg(borderColor, s);
-	const leftRaw = `• ${opts.label}`;
+	const leftRaw = opts.label;
 	const rightRaw =
 		opts.showTimestamp === false || !opts.timestamp
 			? ""
@@ -67,21 +68,21 @@ export function renderChatFrame(
 	const headerRow = `${leftStyled}${" ".repeat(gap)}${rightStyled}`;
 	const headerPad = Math.max(0, outerWidth - visibleWidth(headerRow));
 
-	const sourceLines = trimOuterBlankLines(contentLines);
 	const bodyColor =
 		opts.tone === "user"
 			? "userMessageText"
 			: isPurple
 				? "customMessageText"
 				: "assistantMessageText";
+	const sourceLines = trimOuterBlankLines(contentLines);
 	const bodyLines = (sourceLines.length > 0 ? sourceLines : [""]).map((line) => {
 		const clipped = truncateToWidth(line, contentWidth, "");
-		return border("│ ") + theme.fg(bodyColor, clipped);
+		return theme.fg(bodyColor, clipped);
 	});
 
-	return [
-		theme.fg(borderMuted, "─".repeat(outerWidth)),
-		headerRow + " ".repeat(headerPad),
-		...bodyLines,
-	];
+	return style()
+		.border("rule")
+		.borderColor((line) => (line.startsWith("─") ? theme.fg(borderMuted, line) : border(line)))
+		.title(headerRow + " ".repeat(headerPad))
+		.render(bodyLines, outerWidth);
 }

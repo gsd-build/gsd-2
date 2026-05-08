@@ -1,29 +1,12 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-// Import via the compiled package export (matches the convention in
-// xxhash.test.mjs). Importing the raw `.ts` source only worked when Node
-// was invoked with --experimental-strip-types; under the standard test
-// runner it fails with "does not provide an export named X". The npm
-// test script builds the package before running tests, so the compiled
-// export resolves correctly.
 import { processStreamChunk } from "@gsd/native/stream-process";
 
-// Runtime guard: the `processStreamChunk` native symbol shipped in the
-// source tree is not present in every published `@gsd-build/engine-*`
-// binary. Until the binary is refreshed (tracked in #4854), skip these
-// tests on environments whose native binding lacks the symbol rather
-// than fail CI with a TypeError. This makes the tests behaviour-ready
-// for local devs with a fresh `npm run build:native:dev` while keeping
-// CI green against the published engine.
 const require_ = createRequire(import.meta.url);
 const { native } = require_("../../dist/native.js");
-const skipReason =
-  typeof native?.processStreamChunk === "function"
-    ? null
-    : "native.processStreamChunk missing from @gsd/native binary — see #4854";
 
-describe("processStreamChunk", { skip: skipReason ?? undefined }, () => {
+describe("processStreamChunk", () => {
   test("processes a single chunk without state", () => {
     const result = processStreamChunk(Buffer.from("hello world\n"));
     assert.equal(result.text, "hello world\n");
@@ -51,5 +34,55 @@ describe("processStreamChunk", { skip: skipReason ?? undefined }, () => {
     assert.ok(Array.isArray(result.state.ansiPending), "ansiPending should be a plain array");
     assert.ok(!(result.state.utf8Pending instanceof Buffer), "utf8Pending should not be a Buffer");
     assert.ok(!(result.state.ansiPending instanceof Buffer), "ansiPending should not be a Buffer");
+  });
+
+  test("falls back when the native stream symbol is missing", () => {
+    const original = native.processStreamChunk;
+    native.processStreamChunk = undefined;
+    try {
+      const result = processStreamChunk(Buffer.from("\x1b[32mgreen\x1b[0m\n"));
+      assert.equal(result.text, "green\n");
+      assert.deepEqual(result.state, { utf8Pending: [], ansiPending: [] });
+    } finally {
+      native.processStreamChunk = original;
+    }
+  });
+
+  test("fallback carries split ANSI sequences across chunks", () => {
+    const original = native.processStreamChunk;
+    native.processStreamChunk = undefined;
+    try {
+      const first = processStreamChunk(Buffer.from("\x1b[31"));
+      assert.equal(first.text, "");
+      assert.ok(first.state.ansiPending.length > 0);
+
+      const second = processStreamChunk(
+        Buffer.from("mOK\x1b[0m\n"),
+        first.state,
+      );
+      assert.equal(second.text, "OK\n");
+      assert.deepEqual(second.state, { utf8Pending: [], ansiPending: [] });
+    } finally {
+      native.processStreamChunk = original;
+    }
+  });
+
+  test("fallback carries split UTF-8 sequences across chunks", () => {
+    const original = native.processStreamChunk;
+    native.processStreamChunk = undefined;
+    try {
+      const check = Buffer.from("✓");
+      const first = processStreamChunk(
+        Buffer.concat([Buffer.from("OK "), check.subarray(0, 1)]),
+      );
+      assert.equal(first.text, "OK ");
+      assert.ok(first.state.utf8Pending.length > 0);
+
+      const second = processStreamChunk(check.subarray(1), first.state);
+      assert.equal(second.text, "✓");
+      assert.deepEqual(second.state, { utf8Pending: [], ansiPending: [] });
+    } finally {
+      native.processStreamChunk = original;
+    }
   });
 });

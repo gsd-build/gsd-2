@@ -4,5 +4,7 @@ export * from "./agent.js";
 export * from "./agent-loop.js";
 // Proxy utilities
 export * from "./proxy.js";
+// Token audit utilities
+export * from "./token-audit.js";
 // Types
 export * from "./types.js";

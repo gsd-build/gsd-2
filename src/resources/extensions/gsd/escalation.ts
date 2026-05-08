@@ -1,3 +1,5 @@
+// Project/App: GSD-2
+// File Purpose: Mid-execution escalation artifact and state helpers for GSD tasks.
 // GSD Extension — ADR-011 Phase 2 Mid-Execution Escalation
 //
 // A single module that owns: escalation artifact I/O, detection, resolution,
@@ -19,8 +21,8 @@ import {
   findUnappliedEscalationOverride,
   setTaskBlockerSource,
   listEscalationArtifacts,
-  type TaskRow,
 } from "./gsd-db.js";
+import type { TaskRow } from "./db-task-slice-rows.js";
 import { emitUokAuditEvent, buildAuditEnvelope } from "./uok/audit.js";
 import { logWarning } from "./workflow-logger.js";
 

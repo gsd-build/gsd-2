@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Tests for GitHub sync markdown formatters.
+
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -57,6 +60,9 @@ describe("templates", () => {
       assert.ok(body.includes("Define all auth types"));
       assert.ok(body.includes("- User type"));
       assert.ok(body.includes("- Session type"));
+      assert.ok(body.includes("## Linked Issue"));
+      assert.ok(body.includes("## Tests Run"));
+      assert.ok(body.includes("## AI Assistance Disclosure"));
     });
 
     it("renders task checklist with issue links", () => {
@@ -71,6 +77,7 @@ describe("templates", () => {
       assert.ok(body.includes("- [ ] T01: Types (#43)"));
       assert.ok(body.includes("- [ ] T02: Schema"));
       assert.ok(!body.includes("T02: Schema (#"));
+      assert.ok(body.includes("Related issues: #43"));
     });
   });
 
@@ -163,9 +170,10 @@ describe("templates", () => {
       assert.ok(body.includes("`lane/writer`"));
       assert.ok(body.includes("Single-writer UOK metadata."));
       assert.ok(body.includes("- [ ] Writer token lifecycle regression"));
-      assert.ok(body.includes("- [ ] Disable writer sequence enrichment"));
-      assert.ok(body.includes("- [ ] npm run typecheck:extensions"));
+      assert.ok(body.includes("- Disable writer sequence enrichment"));
+      assert.ok(body.includes("- npm run typecheck:extensions"));
       assert.ok(body.includes("Closes #123"));
+      assert.ok(body.includes("## AI Assistance Disclosure"));
     });
 
     it("formats release checklist bodies from lane state", () => {

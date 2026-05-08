@@ -13,6 +13,7 @@ function readText(relativePath: string): string {
 function readPackage(): {
 	contributes: {
 		commands: Array<{ command: string }>;
+		views: Record<string, Array<{ id: string }>>;
 		configuration: {
 			properties: Record<string, unknown>;
 		};
@@ -52,4 +53,20 @@ test("approval mode contributes settings and executable commands", () => {
 	assert.match(extensionSource, /registerCommand\(\s*["']gsd\.selectApprovalMode["']/);
 	assert.match(permissionsSource, /getConfiguration\(["']gsd["']\)\.get<ApprovalMode>\(["']approvalMode["']/);
 	assert.match(permissionsSource, /update\(["']approvalMode["']/);
+});
+
+test("checkpoint view is contributed and registered", () => {
+	const pkg = readPackage();
+	const extensionSource = readText("src/extension.ts");
+
+	assert.ok(pkg.contributes.views.gsd.some((view) => view.id === "gsd-checkpoints"));
+	assert.match(extensionSource, /registerTreeDataProvider\(GsdCheckpointProvider\.viewId, checkpointProvider\)/);
+});
+
+test("agent diff command scopes git output to tracked agent files", () => {
+	const gitIntegrationSource = readText("src/git-integration.ts");
+
+	assert.match(gitIntegrationSource, /\["diff", "--", \.\.\.files\]/);
+	assert.match(gitIntegrationSource, /\["status", "--short", "--", \.\.\.files\]/);
+	assert.doesNotMatch(gitIntegrationSource, /\["diff"\]/);
 });

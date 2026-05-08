@@ -85,7 +85,11 @@ function makeMockDeps(
     resolveMilestoneFile: () => null,
     reconcileMergeState: () => "clean",
     preflightCleanRoot: () => ({ stashPushed: false, summary: "" }),
-    postflightPopStash: () => {},
+    postflightPopStash: () => ({
+      restored: true,
+      needsManualRecovery: false,
+      message: "restored",
+    }),
     getLedger: () => ({ units: [] }),
     getProjectTotals: () => ({ cost: 0 }),
     formatCost: (c: number) => `$${c.toFixed(2)}`,
@@ -399,6 +403,374 @@ test("runDispatch pauses when complete-milestone summary exists on disk but the 
   assert.equal(stopCalls, 0, "mismatch pause should not hard-stop the loop");
 });
 
+test("runDispatch pauses when execute-task artifacts exist but DB status is still open", async (t) => {
+  const capture = createEventCapture();
+  let pauseCalls = 0;
+  let stopCalls = 0;
+  let invalidateCalls = 0;
+  const base = join(tmpdir(), `gsd-stuck-execute-task-${randomUUID()}`);
+  t.after(() => {
+    closeDatabase();
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  const sliceDir = join(base, ".gsd", "milestones", "M001", "slices", "S01");
+  const tasksDir = join(sliceDir, "tasks");
+  mkdirSync(tasksDir, { recursive: true });
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test", status: "active" });
+  insertSlice({ id: "S01", milestoneId: "M001", title: "Slice", status: "in_progress" });
+  insertTask({ id: "T01", milestoneId: "M001", sliceId: "S01", title: "First task", status: "pending" });
+  writeFileSync(
+    join(sliceDir, "S01-PLAN.md"),
+    [
+      "# S01",
+      "",
+      "## Tasks",
+      "",
+      "- [x] **T01: First task** `est:1h`",
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(join(tasksDir, "T01-PLAN.md"), "# T01 Plan\n");
+  writeFileSync(join(tasksDir, "T01-SUMMARY.md"), "# T01 Summary\n\nDone on disk.\n");
+
+  const deps = makeMockDeps(capture, {
+    pauseAuto: async () => { pauseCalls++; },
+    stopAuto: async () => { stopCalls++; },
+    invalidateAllCaches: () => { invalidateCalls++; },
+    resolveDispatch: async () => ({
+      action: "dispatch" as const,
+      unitType: "execute-task",
+      unitId: "M001/S01/T01",
+      prompt: "execute the task",
+      matchedRule: "executing → execute-task",
+    }),
+  });
+  const ic = makeIC(deps, {
+    s: {
+      ...makeSession(),
+      basePath: base,
+      originalBasePath: base,
+    } as any,
+  });
+  const preData: PreDispatchData = {
+    state: {
+      phase: "executing",
+      activeMilestone: { id: "M001", title: "Test", status: "active" },
+      activeSlice: { id: "S01", title: "Slice" },
+      activeTask: { id: "T01", title: "First task" },
+      registry: [{ id: "M001", status: "active" }],
+      blockers: [],
+    } as any,
+    mid: "M001",
+    midTitle: "Test Milestone",
+  };
+  const loopState: LoopState = {
+    recentUnits: [
+      { key: "execute-task/M001/S01/T01" },
+      { key: "execute-task/M001/S01/T01" },
+    ],
+    stuckRecoveryAttempts: 0,
+    consecutiveFinalizeTimeouts: 0,
+  };
+
+  const result = await runDispatch(ic, preData, loopState);
+
+  assert.equal(result.action, "break");
+  assert.equal((result as any).reason, "execute-task-artifact-db-mismatch");
+  assert.equal(pauseCalls, 1, "execute-task disk/db mismatch should pause auto-mode");
+  assert.equal(stopCalls, 0, "execute-task disk/db mismatch should not hard-stop the loop");
+  assert.equal(invalidateCalls, 0, "mismatch should not clear caches and continue toward redispatch");
+  assert.equal(loopState.recentUnits.length, 3, "mismatch should keep the stuck window intact");
+  assert.equal(loopState.stuckRecoveryAttempts, 1, "mismatch should not reset the recovery counter");
+});
+
+test("runDispatch pauses at Level 2 when execute-task artifacts exist but DB status is still open", async (t) => {
+  const capture = createEventCapture();
+  let pauseCalls = 0;
+  let stopCalls = 0;
+  let invalidateCalls = 0;
+  const base = join(tmpdir(), `gsd-stuck-execute-task-l2-${randomUUID()}`);
+  t.after(() => {
+    closeDatabase();
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  const sliceDir = join(base, ".gsd", "milestones", "M001", "slices", "S01");
+  const tasksDir = join(sliceDir, "tasks");
+  mkdirSync(tasksDir, { recursive: true });
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test", status: "active" });
+  insertSlice({ id: "S01", milestoneId: "M001", title: "Slice", status: "in_progress" });
+  insertTask({ id: "T01", milestoneId: "M001", sliceId: "S01", title: "First task", status: "pending" });
+  writeFileSync(
+    join(sliceDir, "S01-PLAN.md"),
+    "# S01\n\n## Tasks\n\n- [x] **T01: First task** `est:1h`\n",
+  );
+  writeFileSync(join(tasksDir, "T01-PLAN.md"), "# T01 Plan\n");
+  writeFileSync(join(tasksDir, "T01-SUMMARY.md"), "# T01 Summary\n\nDone on disk.\n");
+
+  const deps = makeMockDeps(capture, {
+    pauseAuto: async () => { pauseCalls++; },
+    stopAuto: async () => { stopCalls++; },
+    invalidateAllCaches: () => { invalidateCalls++; },
+    resolveDispatch: async () => ({
+      action: "dispatch" as const,
+      unitType: "execute-task",
+      unitId: "M001/S01/T01",
+      prompt: "execute the task",
+      matchedRule: "executing execute-task",
+    }),
+  });
+  const ic = makeIC(deps, {
+    s: {
+      ...makeSession(),
+      basePath: base,
+      originalBasePath: base,
+    } as any,
+  });
+  const preData: PreDispatchData = {
+    state: {
+      phase: "executing",
+      activeMilestone: { id: "M001", title: "Test", status: "active" },
+      activeSlice: { id: "S01", title: "Slice" },
+      activeTask: { id: "T01", title: "First task" },
+      registry: [{ id: "M001", status: "active" }],
+      blockers: [],
+    } as any,
+    mid: "M001",
+    midTitle: "Test Milestone",
+  };
+  const loopState: LoopState = {
+    recentUnits: [
+      { key: "execute-task/M001/S01/T01" },
+      { key: "execute-task/M001/S01/T01" },
+    ],
+    stuckRecoveryAttempts: 1,
+    consecutiveFinalizeTimeouts: 0,
+  };
+
+  const result = await runDispatch(ic, preData, loopState);
+
+  assert.equal(result.action, "break");
+  assert.equal((result as any).reason, "execute-task-artifact-db-mismatch");
+  assert.equal(pauseCalls, 1, "Level 2 execute-task disk/db mismatch should pause auto-mode");
+  assert.equal(stopCalls, 0, "Level 2 execute-task disk/db mismatch should not hard-stop the loop");
+  assert.equal(invalidateCalls, 1, "Level 2 should invalidate caches before the final artifact recheck");
+  assert.equal(loopState.recentUnits.length, 3, "Level 2 mismatch should keep the stuck window intact");
+  assert.equal(loopState.stuckRecoveryAttempts, 1, "Level 2 mismatch should not reset the recovery counter");
+});
+
+test("runDispatch clears execute-task stuck state when artifacts and DB status are complete", async (t) => {
+  const capture = createEventCapture();
+  let pauseCalls = 0;
+  let stopCalls = 0;
+  let invalidateCalls = 0;
+  const base = join(tmpdir(), `gsd-stuck-execute-task-complete-${randomUUID()}`);
+  t.after(() => {
+    closeDatabase();
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  const sliceDir = join(base, ".gsd", "milestones", "M001", "slices", "S01");
+  const tasksDir = join(sliceDir, "tasks");
+  mkdirSync(tasksDir, { recursive: true });
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test", status: "active" });
+  insertSlice({ id: "S01", milestoneId: "M001", title: "Slice", status: "in_progress" });
+  insertTask({ id: "T01", milestoneId: "M001", sliceId: "S01", title: "First task", status: "complete" });
+  writeFileSync(
+    join(sliceDir, "S01-PLAN.md"),
+    "# S01\n\n## Tasks\n\n- [x] **T01: First task** `est:1h`\n",
+  );
+  writeFileSync(join(tasksDir, "T01-PLAN.md"), "# T01 Plan\n");
+  writeFileSync(join(tasksDir, "T01-SUMMARY.md"), "# T01 Summary\n\nDone on disk.\n");
+
+  const deps = makeMockDeps(capture, {
+    pauseAuto: async () => { pauseCalls++; },
+    stopAuto: async () => { stopCalls++; },
+    invalidateAllCaches: () => { invalidateCalls++; },
+    resolveDispatch: async () => ({
+      action: "dispatch" as const,
+      unitType: "execute-task",
+      unitId: "M001/S01/T01",
+      prompt: "execute the task",
+      matchedRule: "executing execute-task",
+    }),
+  });
+  const ic = makeIC(deps, {
+    s: {
+      ...makeSession(),
+      basePath: base,
+      originalBasePath: base,
+    } as any,
+  });
+  const preData: PreDispatchData = {
+    state: {
+      phase: "executing",
+      activeMilestone: { id: "M001", title: "Test", status: "active" },
+      activeSlice: { id: "S01", title: "Slice" },
+      activeTask: { id: "T01", title: "First task" },
+      registry: [{ id: "M001", status: "active" }],
+      blockers: [],
+    } as any,
+    mid: "M001",
+    midTitle: "Test Milestone",
+  };
+  const loopState: LoopState = {
+    recentUnits: [
+      { key: "execute-task/M001/S01/T01" },
+      { key: "execute-task/M001/S01/T01" },
+    ],
+    stuckRecoveryAttempts: 0,
+    consecutiveFinalizeTimeouts: 0,
+  };
+
+  const result = await runDispatch(ic, preData, loopState);
+
+  assert.equal(result.action, "continue");
+  assert.equal(pauseCalls, 0, "closed DB task should not pause auto-mode");
+  assert.equal(stopCalls, 0, "closed DB task should not hard-stop the loop");
+  assert.equal(invalidateCalls, 1, "closed DB task recovery should invalidate caches once");
+  assert.deepEqual(loopState.recentUnits, [], "closed DB task recovery should clear the stuck window");
+  assert.equal(loopState.stuckRecoveryAttempts, 0, "closed DB task recovery should reset the recovery counter");
+});
+
+test("runDispatch clears stuck state after Level 1 artifact recovery", async (t) => {
+  const capture = createEventCapture();
+  let invalidateCalls = 0;
+  let stopCalls = 0;
+  const base = join(tmpdir(), `gsd-stuck-plan-${randomUUID()}`);
+  t.after(() => {
+    closeDatabase();
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  const sliceDir = join(base, ".gsd", "milestones", "M001", "slices", "S01");
+  const tasksDir = join(sliceDir, "tasks");
+  mkdirSync(tasksDir, { recursive: true });
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test", status: "active" });
+  insertSlice({ id: "S01", milestoneId: "M001", title: "Slice", status: "pending" });
+  insertTask({ id: "T01", milestoneId: "M001", sliceId: "S01", title: "First task", status: "pending" });
+  writeFileSync(join(sliceDir, "S01-PLAN.md"), "# S01\n\n## Tasks\n\n- [ ] **T01: First task** `est:1h`\n");
+  writeFileSync(join(tasksDir, "T01-PLAN.md"), "# T01 Plan\n");
+
+  const deps = makeMockDeps(capture, {
+    invalidateAllCaches: () => { invalidateCalls++; },
+    stopAuto: async () => { stopCalls++; },
+    resolveDispatch: async () => ({
+      action: "dispatch" as const,
+      unitType: "plan-slice",
+      unitId: "M001/S01",
+      prompt: "plan the slice",
+      matchedRule: "planning → plan-slice",
+    }),
+  });
+  const ic = makeIC(deps, {
+    s: {
+      ...makeSession(),
+      basePath: base,
+      originalBasePath: base,
+    } as any,
+  });
+  const preData: PreDispatchData = {
+    state: {
+      phase: "planning",
+      activeMilestone: { id: "M001", title: "Test", status: "active" },
+      activeSlice: { id: "S01", title: "Slice" },
+      registry: [{ id: "M001", status: "active" }],
+      blockers: [],
+    } as any,
+    mid: "M001",
+    midTitle: "Test Milestone",
+  };
+  const loopState: LoopState = {
+    recentUnits: [
+      { key: "plan-slice/M001/S01" },
+      { key: "plan-slice/M001/S01" },
+    ],
+    stuckRecoveryAttempts: 0,
+    consecutiveFinalizeTimeouts: 0,
+  };
+
+  const result = await runDispatch(ic, preData, loopState);
+
+  assert.equal(result.action, "continue");
+  assert.equal(invalidateCalls, 1, "Level 1 artifact recovery should invalidate caches");
+  assert.equal(stopCalls, 0, "Level 1 artifact recovery should not hard-stop");
+  assert.deepEqual(loopState.recentUnits, [], "Level 1 artifact recovery should clear the stuck window");
+  assert.equal(loopState.stuckRecoveryAttempts, 0, "Level 1 artifact recovery should reset the recovery counter");
+});
+
+test("runDispatch escapes Level 2 stuck stop when artifact verifies after cache invalidation", async (t) => {
+  const capture = createEventCapture();
+  let invalidateCalls = 0;
+  let stopCalls = 0;
+  const base = join(tmpdir(), `gsd-stuck-plan-l2-${randomUUID()}`);
+  t.after(() => {
+    closeDatabase();
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  const sliceDir = join(base, ".gsd", "milestones", "M001", "slices", "S01");
+  const tasksDir = join(sliceDir, "tasks");
+  mkdirSync(tasksDir, { recursive: true });
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test", status: "active" });
+  insertSlice({ id: "S01", milestoneId: "M001", title: "Slice", status: "pending" });
+  insertTask({ id: "T01", milestoneId: "M001", sliceId: "S01", title: "First task", status: "pending" });
+  writeFileSync(join(sliceDir, "S01-PLAN.md"), "# S01\n\n## Tasks\n\n- [ ] **T01: First task** `est:1h`\n");
+  writeFileSync(join(tasksDir, "T01-PLAN.md"), "# T01 Plan\n");
+
+  const deps = makeMockDeps(capture, {
+    invalidateAllCaches: () => { invalidateCalls++; },
+    stopAuto: async () => { stopCalls++; },
+    resolveDispatch: async () => ({
+      action: "dispatch" as const,
+      unitType: "plan-slice",
+      unitId: "M001/S01",
+      prompt: "plan the slice",
+      matchedRule: "planning → plan-slice",
+    }),
+  });
+  const ic = makeIC(deps, {
+    s: {
+      ...makeSession(),
+      basePath: base,
+      originalBasePath: base,
+    } as any,
+  });
+  const preData: PreDispatchData = {
+    state: {
+      phase: "planning",
+      activeMilestone: { id: "M001", title: "Test", status: "active" },
+      activeSlice: { id: "S01", title: "Slice" },
+      registry: [{ id: "M001", status: "active" }],
+      blockers: [],
+    } as any,
+    mid: "M001",
+    midTitle: "Test Milestone",
+  };
+  const loopState: LoopState = {
+    recentUnits: [
+      { key: "plan-slice/M001/S01" },
+      { key: "plan-slice/M001/S01" },
+    ],
+    stuckRecoveryAttempts: 1,
+    consecutiveFinalizeTimeouts: 0,
+  };
+
+  const result = await runDispatch(ic, preData, loopState);
+
+  assert.equal(result.action, "continue");
+  assert.equal(invalidateCalls, 1, "Level 2 escape should invalidate caches before rechecking artifacts");
+  assert.equal(stopCalls, 0, "verified artifacts should escape Level 2 hard stop");
+  assert.deepEqual(loopState.recentUnits, [], "Level 2 artifact escape should clear the stuck window");
+  assert.equal(loopState.stuckRecoveryAttempts, 0, "Level 2 artifact escape should reset the recovery counter");
+});
+
 test("runUnitPhase emits unit-start and unit-end with causedBy reference", async () => {
   const capture = createEventCapture();
 
@@ -410,7 +782,7 @@ test("runUnitPhase emits unit-start and unit-end with causedBy reference", async
   // Instead, we test that unit-start is emitted at the right point by examining
   // the event immediately after calling runUnitPhase with a session where
   // newSession resolves quickly, and we resolve the agent_end externally.
-  const { resolveAgentEnd, _resetPendingResolve } = await import("../auto-loop.js");
+  const { resolveAgentEnd, _resetPendingResolve } = await import("../auto/resolve.js");
   _resetPendingResolve();
 
   const deps = makeMockDeps(capture);
@@ -464,7 +836,7 @@ test("runUnitPhase emits unit-start and unit-end with causedBy reference", async
 
 test("runUnitPhase increments unitDispatchCount for repeated artifact-missing retries", async () => {
   const capture = createEventCapture();
-  const { resolveAgentEnd, _resetPendingResolve } = await import("../auto-loop.js");
+  const { resolveAgentEnd, _resetPendingResolve } = await import("../auto/resolve.js");
   _resetPendingResolve();
 
   const deps = makeMockDeps(capture);
@@ -499,7 +871,7 @@ test("runUnitPhase increments unitDispatchCount for repeated artifact-missing re
 
 test("all events from a mock iteration have monotonically increasing seq and same flowId", async () => {
   const capture = createEventCapture();
-  const { resolveAgentEnd, _resetPendingResolve } = await import("../auto-loop.js");
+  const { resolveAgentEnd, _resetPendingResolve } = await import("../auto/resolve.js");
   _resetPendingResolve();
 
   const deps = makeMockDeps(capture, {
@@ -708,6 +1080,121 @@ test("#4671: plan-v2 missing CONTEXT.md reaches dispatch recovery instead of pau
   }
 });
 
+test("plan-v2 empty graph rederives state before pausing", async () => {
+  const basePath = mkdtempSync(join(tmpdir(), "gsd-plan-v2-empty-graph-"));
+  mkdirSync(join(basePath, ".gsd", "milestones", "M001"), { recursive: true });
+  writeFileSync(
+    join(basePath, ".gsd", "milestones", "M001", "M001-CONTEXT.md"),
+    "# M001: Test\n\nFinalized context.\n",
+  );
+  openDatabase(join(basePath, ".gsd", "gsd.db"));
+  try {
+    let deriveCalls = 0;
+    let invalidateCalls = 0;
+    let pauseCalls = 0;
+    const capture = createEventCapture();
+    const deps = makeMockDeps(capture, {
+      pauseAuto: async () => { pauseCalls++; },
+      invalidateAllCaches: () => { invalidateCalls++; },
+      deriveState: async () => {
+        deriveCalls++;
+        if (deriveCalls === 1) {
+          return {
+            phase: "validating-milestone",
+            activeMilestone: { id: "M001", title: "Test", status: "active" },
+            activeSlice: null,
+            activeTask: null,
+            registry: [{ id: "M001", status: "active" }],
+            blockers: [],
+            recentDecisions: [],
+            nextAction: "Validate milestone M001.",
+          } as any;
+        }
+        return {
+          phase: "pre-planning",
+          activeMilestone: { id: "M001", title: "Test", status: "active" },
+          activeSlice: null,
+          activeTask: null,
+          registry: [{ id: "M001", status: "active" }],
+          blockers: [],
+          recentDecisions: [],
+          nextAction: "Plan milestone M001.",
+        } as any;
+      },
+    });
+    const ic = makeIC(deps, {
+      prefs: { uok: { plan_v2: { enabled: true } } } as any,
+    });
+    ic.s.basePath = basePath;
+
+    const result = await runPreDispatch(ic, {
+      recentUnits: [],
+      stuckRecoveryAttempts: 0,
+      consecutiveFinalizeTimeouts: 0,
+    });
+
+    assert.equal(result.action, "next");
+    assert.equal(deriveCalls, 2, "empty plan graph should trigger one state rederive");
+    assert.ok(invalidateCalls >= 1, "empty plan graph recovery should clear caches before rederive");
+    assert.equal(pauseCalls, 0, "recoverable empty graph should not pause auto-mode");
+  } finally {
+    closeDatabase();
+    rmSync(basePath, { recursive: true, force: true });
+  }
+});
+
+test("plan-v2 empty graph pauses after one failed rederive", async () => {
+  const basePath = mkdtempSync(join(tmpdir(), "gsd-plan-v2-empty-graph-pause-"));
+  mkdirSync(join(basePath, ".gsd", "milestones", "M001"), { recursive: true });
+  writeFileSync(
+    join(basePath, ".gsd", "milestones", "M001", "M001-CONTEXT.md"),
+    "# M001: Test\n\nFinalized context.\n",
+  );
+  openDatabase(join(basePath, ".gsd", "gsd.db"));
+  try {
+    let deriveCalls = 0;
+    let invalidateCalls = 0;
+    let pauseCalls = 0;
+    const capture = createEventCapture();
+    const deps = makeMockDeps(capture, {
+      pauseAuto: async () => { pauseCalls++; },
+      invalidateAllCaches: () => { invalidateCalls++; },
+      deriveState: async () => {
+        deriveCalls++;
+        return {
+          phase: "validating-milestone",
+          activeMilestone: { id: "M001", title: "Test", status: "active" },
+          activeSlice: null,
+          activeTask: null,
+          registry: [{ id: "M001", status: "active" }],
+          blockers: [],
+          recentDecisions: [],
+          nextAction: "Validate milestone M001.",
+        } as any;
+      },
+    });
+    const ic = makeIC(deps, {
+      prefs: { uok: { plan_v2: { enabled: true } } } as any,
+    });
+    ic.s.basePath = basePath;
+
+    const result = await runPreDispatch(ic, {
+      recentUnits: [],
+      stuckRecoveryAttempts: 0,
+      consecutiveFinalizeTimeouts: 0,
+    });
+
+    assert.equal(result.action, "break");
+    assert.equal(result.reason, "plan-v2-gate-failed");
+    assert.equal(deriveCalls, 2, "empty plan graph should only rederive once");
+    assert.ok(invalidateCalls >= 1, "empty plan graph recovery should clear caches before rederive");
+    assert.equal(pauseCalls, 1, "persistent empty graph should pause auto-mode");
+  } finally {
+    closeDatabase();
+    rmSync(basePath, { recursive: true, force: true });
+  }
+});
+
 test("milestone-transition event is emitted when milestone changes", async () => {
   const capture = createEventCapture();
   const deps = makeMockDeps(capture, {
@@ -723,7 +1210,9 @@ test("milestone-transition event is emitted when milestone changes", async () =>
       blockers: [],
     }) as any,
   });
-  const ic = makeIC(deps);
+  const ic = makeIC(deps, {
+    prefs: { uok: { plan_v2: { enabled: false } } } as any,
+  });
   // Session says current milestone is M001, but state will return M002
   ic.s.currentMilestoneId = "M001";
   const loopState: LoopState = { recentUnits: [], stuckRecoveryAttempts: 0, consecutiveFinalizeTimeouts: 0 };
@@ -739,7 +1228,7 @@ test("milestone-transition event is emitted when milestone changes", async () =>
 
 test("unit-end event contains errorContext when unit is cancelled with structured error", async () => {
   const capture = createEventCapture();
-  const { resolveAgentEndCancelled, _resetPendingResolve } = await import("../auto-loop.js");
+  const { resolveAgentEndCancelled, _resetPendingResolve } = await import("../auto/resolve.js");
   _resetPendingResolve();
 
   let pauseCalls = 0;
@@ -794,7 +1283,7 @@ test("unit-end event contains errorContext when unit is cancelled with structure
 
 test("session-failed cancellations close out and emit unit-end before hard stop", async () => {
   const capture = createEventCapture();
-  const { resolveAgentEndCancelled, _resetPendingResolve } = await import("../auto-loop.js");
+  const { resolveAgentEndCancelled, _resetPendingResolve } = await import("../auto/resolve.js");
   _resetPendingResolve();
 
   let closeoutCalls = 0;
@@ -906,7 +1395,7 @@ test("runFinalize pauses and emits unit-end when pre-verification times out", as
 
 test("transient session-failed cancellations pause instead of hard-stopping", async () => {
   const capture = createEventCapture();
-  const { resolveAgentEndCancelled, _resetPendingResolve } = await import("../auto-loop.js");
+  const { resolveAgentEndCancelled, _resetPendingResolve } = await import("../auto/resolve.js");
   _resetPendingResolve();
 
   const deps = makeMockDeps(capture);

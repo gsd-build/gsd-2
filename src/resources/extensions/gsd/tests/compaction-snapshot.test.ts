@@ -29,7 +29,8 @@ test('buildSnapshot: renders memories, exec history, and active context', () => 
     memories: [
       { id: 'MEM001', category: 'gotcha', content: 'FTS5 needs Porter tokenizer', confidence: 0.9,
         source_unit_type: null, source_unit_id: null, created_at: '', updated_at: '',
-        superseded_by: null, hit_count: 0, scope: 'project', seq: 1, tags: [], structured_fields: null },
+        superseded_by: null, hit_count: 0, scope: 'project', seq: 1, tags: [], structured_fields: null,
+        last_hit_at: null },
     ],
     execHistory: [
       {
@@ -65,6 +66,7 @@ test('buildSnapshot: enforces the byte cap with a truncation marker', () => {
     seq: i,
     tags: [] as string[],
     structured_fields: null,
+    last_hit_at: null,
   }));
   const snap = buildSnapshot(
     { generatedAt: new Date(), memories: longMemories, execHistory: [] },
@@ -117,6 +119,17 @@ test('executeResume: reports friendly empty state when no snapshot exists', () =
     const result = executeResume({}, { baseDir: base });
     assert.equal(result.details.found, false);
     assert.match(result.content[0].text, /No snapshot found/);
+  } finally {
+    cleanup(base);
+  }
+});
+
+test('executeResume: returns disabled error when context_mode.enabled=false', () => {
+  const base = freshBase();
+  try {
+    const result = executeResume({}, { baseDir: base, preferences: { context_mode: { enabled: false } } });
+    assert.equal(result.isError, true);
+    assert.equal((result.details as { error?: string }).error, 'context_mode_disabled');
   } finally {
     cleanup(base);
   }

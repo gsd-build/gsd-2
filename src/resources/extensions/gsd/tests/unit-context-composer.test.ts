@@ -1,6 +1,5 @@
-// GSD-2 — #4782 phase 2 composer tests. Pure-function tests using mock
-// resolvers plus an integration check that reassess-roadmap's migrated
-// builder produces a prompt matching expectations.
+// Project/App: GSD-2
+// File Purpose: Tests unit context composer rendering, budgets, and reassess-roadmap prompt integration.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -9,6 +8,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import {
+  composeContextModeInstructions,
   composeInlinedContext,
   composeUnitContext,
   manifestBudgetChars,
@@ -21,12 +21,18 @@ import type {
   ComputedArtifactRegistry,
   UnitContextManifest,
 } from "../unit-context-manifest.ts";
-import { UNIT_MANIFESTS } from "../unit-context-manifest.ts";
-import { buildReassessRoadmapPrompt } from "../auto-prompts.ts";
+import { KNOWN_UNIT_TYPES, UNIT_MANIFESTS } from "../unit-context-manifest.ts";
+import {
+  buildExecuteTaskPrompt,
+  buildGateEvaluatePrompt,
+  buildReassessRoadmapPrompt,
+  buildWorkflowPreferencesPrompt,
+} from "../auto-prompts.ts";
 import { invalidateAllCaches } from "../cache.ts";
 import {
   openDatabase,
   closeDatabase,
+  insertGateRow,
   insertMilestone,
   upsertMilestonePlanning,
   insertSlice,
@@ -99,6 +105,82 @@ test("#4782 composer: manifestBudgetChars returns declared budget", () => {
   const small = manifestBudgetChars("reassess-roadmap");
   assert.ok(small !== null && small > 0);
   assert.strictEqual(manifestBudgetChars("never-dispatched"), null);
+});
+
+test("Context Mode composer: disabled, unknown, and none modes return empty string", () => {
+  assert.strictEqual(
+    composeContextModeInstructions("execute-task", { enabled: false, renderMode: "standalone" }),
+    "",
+  );
+  assert.strictEqual(
+    composeContextModeInstructions("never-dispatched", { enabled: true, renderMode: "standalone" }),
+    "",
+  );
+  assert.strictEqual(
+    composeContextModeInstructions("workflow-preferences", { enabled: true, renderMode: "standalone" }),
+    "",
+  );
+});
+
+test("Context Mode composer: standalone output starts with heading and includes required tools", () => {
+  const out = composeContextModeInstructions("execute-task", { enabled: true, renderMode: "standalone" });
+  assert.ok(out.startsWith("## Context Mode"));
+  assert.match(out, /execution lane/i);
+  assert.match(out, /`gsd_exec`/);
+  assert.match(out, /builds, tests, and diagnostics/);
+  assert.match(out, /`gsd_exec_search`/);
+  assert.match(out, /before reruns/);
+  assert.match(out, /`gsd_resume`/);
+  assert.match(out, /after compaction or resume/);
+});
+
+test("Context Mode composer: nested output is compact single sentence", () => {
+  const out = composeContextModeInstructions("gate-evaluate", { enabled: true, renderMode: "nested" });
+  assert.ok(!out.startsWith("## Context Mode"));
+  assert.match(out, /^Context Mode \(verification lane\): /);
+  assert.strictEqual(out.split(/\n/).length, 1);
+  assert.match(out, /`gsd_exec`/);
+  assert.match(out, /`gsd_exec_search`/);
+  assert.match(out, /`gsd_resume`/);
+  assert.ok(out.length < 240, `nested guidance should stay compact, got ${out.length} chars`);
+});
+
+const laneLabelByMode: Record<string, string> = {
+  interview: "interview",
+  research: "research",
+  planning: "planning",
+  execution: "execution",
+  verification: "verification",
+  orchestration: "orchestration",
+  docs: "documentation",
+};
+
+test("Context Mode composer: every known eligible unit renders its configured lane and required tools", () => {
+  for (const unitType of KNOWN_UNIT_TYPES) {
+    const manifest = UNIT_MANIFESTS[unitType];
+    assert.ok(manifest, `missing manifest for ${unitType}`);
+    const out = composeContextModeInstructions(unitType, { enabled: true, renderMode: "standalone" });
+    if (manifest.contextMode === "none") {
+      assert.strictEqual(out, "", `${unitType} should not render Context Mode`);
+      continue;
+    }
+    assert.ok(out.startsWith("## Context Mode"), `${unitType} should render standalone Context Mode heading`);
+    assert.match(out, new RegExp(`Lane: \\*\\*${laneLabelByMode[manifest.contextMode]} lane\\*\\*\\.`, "i"));
+    assert.match(out, /`gsd_exec`/, `${unitType} should mention gsd_exec`);
+    assert.match(out, /`gsd_exec_search`/, `${unitType} should mention gsd_exec_search`);
+    assert.match(out, /`gsd_resume`/, `${unitType} should mention gsd_resume`);
+  }
+});
+
+test("Context Mode composer: workflow-preferences and research-decision render no Context Mode block", () => {
+  assert.strictEqual(
+    composeContextModeInstructions("workflow-preferences", { enabled: true, renderMode: "standalone" }),
+    "",
+  );
+  assert.strictEqual(
+    composeContextModeInstructions("research-decision", { enabled: true, renderMode: "standalone" }),
+    "",
+  );
 });
 
 // ─── Integration: migrated buildReassessRoadmapPrompt ─────────────────────
@@ -182,11 +264,99 @@ test("#4782 phase 2: buildReassessRoadmapPrompt emits composer-shaped context wi
   assert.ok(!prompt.includes("Slice Context (from discussion)"));
 });
 
+test("Context Mode resume injection: eligible prompts include one bounded snapshot block above inlined context", async (t) => {
+  const base = makeFixtureBase();
+  t.after(() => cleanup(base));
+  invalidateAllCaches();
+
+  seed(base, "M001");
+  writeArtifacts(base);
+  writeFileSync(
+    join(base, ".gsd", "last-snapshot.md"),
+    "# GSD context snapshot\n\nResume evidence.\n",
+    "utf-8",
+  );
+
+  const prompt = await buildReassessRoadmapPrompt("M001", "Test", "S01", base);
+
+  assert.equal(prompt.match(/## Context Snapshot/g)?.length, 1);
+  assert.match(prompt, /Source: `\.gsd\/last-snapshot\.md`/);
+  assert.match(prompt, /Resume evidence/);
+  assert.ok(prompt.indexOf("## Context Mode") < prompt.indexOf("## Context Snapshot"));
+  assert.ok(prompt.indexOf("## Context Snapshot") < prompt.indexOf("## Inlined Context"));
+});
+
+test("Context Mode resume injection: missing snapshot does not add an empty block", async (t) => {
+  const base = makeFixtureBase();
+  t.after(() => cleanup(base));
+  invalidateAllCaches();
+
+  seed(base, "M001");
+  writeArtifacts(base);
+
+  const prompt = await buildReassessRoadmapPrompt("M001", "Test", "S01", base);
+
+  assert.match(prompt, /## Context Mode/);
+  assert.doesNotMatch(prompt, /## Context Snapshot/);
+});
+
+test("Context Mode resume injection: disabled mode suppresses guidance and snapshot reads", async (t) => {
+  const base = makeFixtureBase();
+  t.after(() => cleanup(base));
+  invalidateAllCaches();
+
+  seed(base, "M001");
+  writeArtifacts(base);
+  writeFileSync(join(base, ".gsd", "PREFERENCES.md"), "---\ncontext_mode:\n  enabled: false\n---\n", "utf-8");
+  writeFileSync(join(base, ".gsd", "last-snapshot.md"), "# GSD context snapshot\n\nDo not inject.\n", "utf-8");
+
+  const prompt = await buildReassessRoadmapPrompt("M001", "Test", "S01", base);
+
+  assert.doesNotMatch(prompt, /## Context Mode/);
+  assert.doesNotMatch(prompt, /## Context Snapshot/);
+  assert.doesNotMatch(prompt, /Do not inject/);
+});
+
+test("Context Mode resume injection: none-mode units do not inject snapshots", async () => {
+  const base = makeFixtureBase();
+  try {
+    writeFileSync(join(base, ".gsd", "last-snapshot.md"), "# GSD context snapshot\n\nNo lane.\n", "utf-8");
+    const prompt = await buildWorkflowPreferencesPrompt(base);
+    assert.doesNotMatch(prompt, /## Context Mode/);
+    assert.doesNotMatch(prompt, /## Context Snapshot/);
+    assert.doesNotMatch(prompt, /No lane/);
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("Context Mode prompt suppression: disabled inlined, phase-anchor, and nested prompts omit Context Mode", async (t) => {
+  const base = makeFixtureBase();
+  t.after(() => cleanup(base));
+  invalidateAllCaches();
+
+  seed(base, "M001");
+  writeArtifacts(base);
+  insertGateRow({ milestoneId: "M001", sliceId: "S01", gateId: "Q3", scope: "slice" });
+  writeFileSync(join(base, ".gsd", "PREFERENCES.md"), "---\ncontext_mode:\n  enabled: false\n---\n", "utf-8");
+  writeFileSync(join(base, ".gsd", "last-snapshot.md"), "# GSD context snapshot\n\nDo not inject.\n", "utf-8");
+
+  const inlinedPrompt = await buildReassessRoadmapPrompt("M001", "Test", "S01", base);
+  assert.doesNotMatch(inlinedPrompt, /## Context Mode|Context Mode \(|## Context Snapshot/);
+
+  const phaseAnchorPrompt = await buildExecuteTaskPrompt("M001", "S01", "First", "T01", "Task", base);
+  assert.doesNotMatch(phaseAnchorPrompt, /## Context Mode|Context Mode \(|## Context Snapshot/);
+
+  const nestedPrompt = await buildGateEvaluatePrompt("M001", "Test", "S01", "First", base);
+  assert.match(nestedPrompt, /Use this as the prompt for a `subagent` call/);
+  assert.doesNotMatch(nestedPrompt, /## Context Mode|Context Mode \(|## Context Snapshot/);
+});
+
 // ─── v2 surface (#4924) ───────────────────────────────────────────────────
 
 const fakeBase: BaseResolverContext = {
   unitType: "reassess-roadmap",
-  basePath: "/tmp/fake",
+  basePath: process.env.GSD_TEST_WORKSPACE_ROOT ?? process.cwd(),
   milestoneId: "M001",
   sliceId: "S01",
 };

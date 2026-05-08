@@ -64,6 +64,7 @@ import { getChangelogPath, getNewEntries, parseChangelog } from "../../utils/cha
 import { readClipboardImage } from "../../utils/clipboard-image.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import { AssistantMessageComponent } from "./components/assistant-message.js";
+import { AdaptiveLayoutComponent } from "./components/adaptive-layout.js";
 import { BashExecutionComponent } from "./components/bash-execution.js";
 import { BorderedLoader } from "./components/bordered-loader.js";
 import { BranchSummaryMessageComponent } from "./components/branch-summary-message.js";
@@ -170,6 +171,47 @@ type CompactionQueuedMessage = {
 	mode: "steer" | "followUp";
 };
 
+export type ExtensionNotifyType = "info" | "warning" | "error" | "success" | undefined;
+
+export function shouldRenderExtensionNotifyInChat(type: ExtensionNotifyType): boolean {
+	return type !== "warning";
+}
+
+export interface ExtensionNotifyRenderResult {
+	rendered: boolean;
+	statusSpacer?: Spacer;
+	statusText?: Text;
+}
+
+export function renderExtensionNotifyInChat(
+	chatContainer: Container,
+	message: string,
+	type?: ExtensionNotifyType,
+): ExtensionNotifyRenderResult {
+	if (!shouldRenderExtensionNotifyInChat(type)) {
+		return { rendered: false };
+	}
+
+	const spacer = new Spacer(1);
+	chatContainer.addChild(spacer);
+
+	if (type === "error") {
+		chatContainer.addChild(new Text(theme.fg("error", `Error: ${message}`), 1, 0));
+		return { rendered: true };
+	}
+	if (type === "success") {
+		chatContainer.addChild(new DynamicBorder((text) => theme.fg("success", text)));
+		chatContainer.addChild(new Text(theme.fg("success", message), 1, 0));
+		chatContainer.addChild(new DynamicBorder((text) => theme.fg("success", text)));
+		chatContainer.addChild(new Spacer(1));
+		return { rendered: true };
+	}
+
+	const statusText = new Text(theme.fg("dim", message), 1, 0);
+	chatContainer.addChild(statusText);
+	return { rendered: true, statusSpacer: spacer, statusText };
+}
+
 /**
  * Options for InteractiveMode initialization.
  */
@@ -205,6 +247,7 @@ export class InteractiveMode {
 	private ui: TUI;
 	private chatContainer: Container;
 	private pendingMessagesContainer: Container;
+	private adaptiveLayout: AdaptiveLayoutComponent;
 	private statusContainer: Container;
 	private pinnedMessageContainer: Container;
 	private defaultEditor: CustomEditor;
@@ -220,6 +263,7 @@ export class InteractiveMode {
 	private loadingAnimation: Loader | undefined = undefined;
 	private pendingWorkingMessage: string | undefined = undefined;
 	private readonly defaultWorkingMessage = "Working...";
+	private lastBlockingError: string | undefined = undefined;
 
 	private lastSigintTime = 0;
 	private lastEscapeTime = 0;
@@ -326,6 +370,14 @@ export class InteractiveMode {
 		this.headerContainer = new Container();
 		this.chatContainer = new Container();
 		this.pendingMessagesContainer = new Container();
+		this.adaptiveLayout = new AdaptiveLayoutComponent(() => ({
+			override: this.settingsManager.getAdaptiveMode(),
+			activeToolCount: this.pendingTools.size,
+			gsdPhase: this.pendingWorkingMessage,
+			lastError: this.lastBlockingError,
+			sessionName: this.sessionManager.getSessionName(),
+			cwd: process.cwd(),
+		}));
 		this.statusContainer = new Container();
 		this.pinnedMessageContainer = new Container();
 		this.widgetContainerAbove = new Container();
@@ -530,6 +582,7 @@ export class InteractiveMode {
 			}
 		}
 
+		this.ui.addChild(this.adaptiveLayout);
 		this.ui.addChild(this.chatContainer);
 		this.ui.addChild(this.pendingMessagesContainer);
 		this.ui.addChild(this.statusContainer);
@@ -1180,6 +1233,7 @@ export class InteractiveMode {
 						this.streamingComponent = undefined;
 						this.streamingMessage = undefined;
 						this.pendingTools.clear();
+						this.clearBlockingError();
 
 						// Render any messages added via setup, or show empty session
 						this.renderInitialMessages();
@@ -1324,6 +1378,9 @@ export class InteractiveMode {
 				})();
 			},
 			getSystemPrompt: () => this.session.systemPrompt,
+			setCompactionThresholdOverride: (percent) => {
+				this.session.settingsManager.setCompactionThresholdOverride(percent);
+			},
 		});
 
 		// Set up the extension shortcut handler on the default editor
@@ -1833,16 +1890,16 @@ export class InteractiveMode {
 	/**
 	 * Show a notification for extensions.
 	 */
-	private showExtensionNotify(message: string, type?: "info" | "warning" | "error" | "success"): void {
-		if (type === "error") {
-			this.showError(message);
-		} else if (type === "warning") {
-			this.showWarning(message);
-		} else if (type === "success") {
-			this.showSuccess(message);
-		} else {
-			this.showStatus(message, { append: true });
+	private showExtensionNotify(message: string, type?: ExtensionNotifyType): void {
+		const result = renderExtensionNotifyInChat(this.chatContainer, message, type);
+		if (!result.rendered) {
+			return;
 		}
+		if (result.statusSpacer && result.statusText) {
+			this.lastStatusSpacer = result.statusSpacer;
+			this.lastStatusText = result.statusText;
+		}
+		this.ui.requestRender();
 	}
 
 	/** Show a custom component with keyboard focus. Overlay mode renders on top of existing content. */
@@ -2839,9 +2896,14 @@ export class InteractiveMode {
 	}
 
 	showError(errorMessage: string): void {
+		this.lastBlockingError = errorMessage;
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(theme.fg("error", `Error: ${errorMessage}`), 1, 0));
 		this.ui.requestRender();
+	}
+
+	clearBlockingError(): void {
+		this.lastBlockingError = undefined;
 	}
 
 	showWarning(warningMessage: string): void {
@@ -3154,6 +3216,7 @@ export class InteractiveMode {
 					quietStartup: this.settingsManager.getQuietStartup(),
 					clearOnShrink: this.settingsManager.getClearOnShrink(),
 					timestampFormat: this.settingsManager.getTimestampFormat(),
+					adaptiveMode: this.settingsManager.getAdaptiveMode(),
 				},
 				{
 					onAutoCompactChange: (enabled) => {
@@ -3259,6 +3322,10 @@ export class InteractiveMode {
 					},
 					onTimestampFormatChange: (format) => {
 						this.settingsManager.setTimestampFormat(format);
+					},
+					onAdaptiveModeChange: (mode) => {
+						this.settingsManager.setAdaptiveMode(mode);
+						this.ui.requestRender();
 					},
 					onCancel: () => {
 						done();
@@ -3648,6 +3715,7 @@ export class InteractiveMode {
 		this.streamingComponent = undefined;
 		this.streamingMessage = undefined;
 		this.pendingTools.clear();
+		this.clearBlockingError();
 
 		// Switch session via AgentSession (emits extension session events)
 		await this.session.switchSession(sessionPath);
@@ -3969,6 +4037,7 @@ export class InteractiveMode {
 		this.streamingMessage = undefined;
 		this.pendingTools.clear();
 		this.pendingImages.length = 0;
+		this.clearBlockingError();
 
 		// Reset contextual tips for the new session
 		this.contextualTips.reset();

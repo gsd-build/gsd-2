@@ -305,6 +305,8 @@ export class AgentSession {
 
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
+	// Optional prompt-only skill catalog filter. Skills remain loaded and invocable by name.
+	private _visibleSkillNames: Set<string> | undefined = undefined;
 
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
@@ -867,6 +869,25 @@ export class AgentSession {
 		this.agent.setSystemPrompt(this._baseSystemPrompt);
 	}
 
+	/**
+	 * Set or clear a prompt-only filter for the <available_skills> catalog.
+	 *
+	 * This does not unload skills or disable the Skill tool. It only controls
+	 * which loaded skills are advertised in the system prompt on rebuild.
+	 */
+	setVisibleSkillsByName(skillNames: string[] | undefined): void {
+		this._visibleSkillNames = skillNames === undefined
+			? undefined
+			: new Set(skillNames.map((name) => name.trim().toLowerCase()).filter(Boolean));
+		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+		this.agent.setSystemPrompt(this._baseSystemPrompt);
+	}
+
+	/** Get the current prompt-only skill catalog filter, if one is active. */
+	getVisibleSkillNames(): string[] | undefined {
+		return this._visibleSkillNames ? [...this._visibleSkillNames] : undefined;
+	}
+
 	/** Whether compaction or branch summarization is currently running */
 	get isCompacting(): boolean {
 		return this._compactionOrchestrator.isCompacting;
@@ -1045,6 +1066,9 @@ export class AgentSession {
 		return buildSystemPrompt({
 			cwd: this._cwd,
 			skills: loadedSkills,
+			skillFilter: this._visibleSkillNames
+				? (skill) => this._visibleSkillNames!.has(skill.name.trim().toLowerCase())
+				: undefined,
 			contextFiles: loadedContextFiles,
 			customPrompt: loaderSystemPrompt,
 			appendSystemPrompt,
@@ -1626,6 +1650,11 @@ export class AgentSession {
 		// message_end/agent_end events fire while listeners are still connected.
 		// During agent_end handling the turn is already ending; aborting there can
 		// convert a successful auto-mode handoff into an aborted provider message.
+		if (!this.agent.state.isStreaming) {
+			this._retryHandler.abortRetry();
+			await this.agent.waitForIdle();
+			return;
+		}
 		await this.abort();
 	}
 
@@ -1640,6 +1669,8 @@ export class AgentSession {
 	async newSession(options?: {
 		parentSession?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;
+		/** Explicit workspace root for the new session/tool runtime. */
+		workspaceRoot?: string;
 		/** See ExtensionCommandContext.newSession for docs (#3731). */
 		abortSignal?: AbortSignal;
 	}): Promise<boolean> {
@@ -1661,10 +1692,10 @@ export class AgentSession {
 		try {
 			await this._settleCurrentTurnForSessionTransition();
 
-			// #3731: If the caller aborted (e.g. runUnit() timed out and restored cwd to
-			// project root), discard this session before capturing process.cwd() and
-			// rebuilding the tool runtime. Without this check, the late newSession()
-			// would rebuild tools with root cwd, breaking worktree isolation.
+			// #3731: If the caller aborted (e.g. runUnit() timed out while the
+			// worktree was being torn down), discard this session before rebuilding
+			// the tool runtime. Without this check, the late newSession() could
+			// rebuild tools with a stale workspace root.
 			if (options?.abortSignal?.aborted) {
 				return false;
 			}
@@ -1674,15 +1705,18 @@ export class AgentSession {
 		} finally {
 			this._sessionSwitchPending = false;
 		}
-		// Update cwd to current process directory — auto-mode may have chdir'd
-		// into a worktree since the original session was created.
+		// Update the workspace root for the new tool runtime. Auto-mode passes
+		// this explicitly so session routing does not depend on global
+		// process.cwd() after worktree merge/teardown. Other callers keep the
+		// historical default.
 		const previousCwd = this._cwd;
-		this._cwd = process.cwd();
+		this._cwd = options?.workspaceRoot ?? process.cwd();
 		this.sessionManager.newSession({ parentSession: options?.parentSession });
 		this.agent.sessionId = this.sessionManager.getSessionId();
 		this._steeringMessages = [];
 		this._followUpMessages = [];
 		this._pendingNextTurnMessages = [];
+		this._visibleSkillNames = undefined;
 
 		this.sessionManager.appendThinkingLevelChange(this.thinkingLevel);
 
@@ -2180,6 +2214,8 @@ export class AgentSession {
 				getActiveTools: () => this.getActiveToolNames(),
 				getAllTools: () => this.getAllTools(),
 				setActiveTools: (toolNames) => this.setActiveToolsByName(toolNames),
+				getVisibleSkills: () => this.getVisibleSkillNames(),
+				setVisibleSkills: (skillNames) => this.setVisibleSkillsByName(skillNames),
 				refreshTools: () => this._refreshToolRegistry(),
 				getCommands,
 				setModel: async (model, options) => {
@@ -2211,6 +2247,9 @@ export class AgentSession {
 					})();
 				},
 				getSystemPrompt: () => this.systemPrompt,
+				setCompactionThresholdOverride: (percent) => {
+					this.settingsManager.setCompactionThresholdOverride(percent);
+				},
 			},
 		);
 	}
@@ -2345,6 +2384,7 @@ export class AgentSession {
 		this.settingsManager.reload();
 		resetApiProviders();
 		await this._resourceLoader.reload();
+		this._visibleSkillNames = undefined;
 		this._buildRuntime({
 			activeToolNames: this.getActiveToolNames(),
 			flagValues: previousFlagValues,
@@ -2534,6 +2574,7 @@ export class AgentSession {
 		this._steeringMessages = [];
 		this._followUpMessages = [];
 		this._pendingNextTurnMessages = [];
+		this._visibleSkillNames = undefined;
 
 		// Set new session
 		this.sessionManager.setSessionFile(sessionPath);

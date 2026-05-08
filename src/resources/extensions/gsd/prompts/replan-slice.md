@@ -8,7 +8,7 @@ Your working directory is `{{workingDirectory}}`. All file reads, writes, and sh
 
 A completed task reported `blocker_discovered: true`, meaning the current slice plan cannot be executed as-is. Your job is to rewrite the remaining tasks in the slice plan to address the blocker while preserving all completed work.
 
-All relevant context has been preloaded below — the roadmap, current slice plan, the blocker task summary, and decisions are inlined. Start working immediately without re-reading these files.
+All relevant context has been preloaded below — the roadmap, current slice plan, blocker task summary excerpt, and decisions are inlined. Start working immediately without re-reading these files.
 
 {{inlinedContext}}
 
@@ -30,7 +30,7 @@ Consider these captures when rewriting the remaining tasks — they represent th
 
 ## Instructions
 
-1. Read the blocker task summary carefully. Understand exactly what was discovered and why it blocks the current plan.
+1. Use the inlined blocker summary excerpt first. Read the full blocker task summary only if the excerpt is absent, marked truncated, or lacks the specific blocker evidence needed to replan.
 2. Analyze the remaining `[ ]` tasks in the slice plan. Determine which are still valid, which need modification, and which should be replaced.
 3. **Persist replan state through `gsd_replan_slice`.** Call it with: `milestoneId`, `sliceId`, `blockerTaskId`, `blockerDescription`, `whatChanged`, `updatedTasks` (array of task objects with taskId, title, description, estimate, files, verify, inputs, expectedOutput), `removedTaskIds` (array of task ID strings). The tool structurally enforces preservation of completed tasks, writes replan history to the DB, re-renders `{{planPath}}`, and renders `{{replanPath}}`. Preserve or update the Threat Surface and Requirement Impact sections if the replan changes the slice's security posture or requirement coverage.
 4. If any incomplete task had a `T0x-PLAN.md`, remove or rewrite it to match the new task description.

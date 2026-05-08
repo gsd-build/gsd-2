@@ -53,31 +53,25 @@ console.log("\n=== Level 2: Prompts reference quality gates ===");
   assertTrue(planSlice.includes("Threat Surface"), "plan-slice.md mentions Threat Surface");
   assertTrue(planSlice.includes("Requirement Impact"), "plan-slice.md mentions Requirement Impact");
   assertTrue(planSlice.toLowerCase().includes("quality gate"), "plan-slice.md mentions quality gate");
-
-  const guidedPlanSlice = loadPrompt("guided-plan-slice");
   assertTrue(
-    guidedPlanSlice.includes("Threat Surface") || guidedPlanSlice.includes("Q3"),
-    "guided-plan-slice.md mentions Threat Surface or Q3"
+    planSlice.includes("Q3") || planSlice.includes("Threat Surface"),
+    "plan-slice.md mentions Threat Surface or Q3"
   );
 
   const executeTask = loadPrompt("execute-task");
   assertTrue(executeTask.includes("Failure Modes"), "execute-task.md mentions Failure Modes");
   assertTrue(executeTask.includes("Load Profile"), "execute-task.md mentions Load Profile");
   assertTrue(executeTask.includes("Negative Tests"), "execute-task.md mentions Negative Tests");
-
-  const guidedExecuteTask = loadPrompt("guided-execute-task");
   assertTrue(
-    guidedExecuteTask.includes("Failure Modes") || guidedExecuteTask.includes("Q5"),
-    "guided-execute-task.md mentions Failure Modes or Q5"
+    executeTask.includes("Q5") || executeTask.includes("Failure Modes"),
+    "execute-task.md mentions Failure Modes or Q5"
   );
 
   const completeSlice = loadPrompt("complete-slice");
   assertTrue(completeSlice.includes("Operational Readiness"), "complete-slice.md mentions Operational Readiness");
-
-  const guidedCompleteSlice = loadPrompt("guided-complete-slice");
   assertTrue(
-    guidedCompleteSlice.includes("Operational Readiness") || guidedCompleteSlice.includes("Q8"),
-    "guided-complete-slice.md mentions Operational Readiness or Q8"
+    completeSlice.includes("Operational Readiness") || completeSlice.includes("Q8"),
+    "complete-slice.md mentions Operational Readiness or Q8"
   );
 
   const completeMilestone = loadPrompt("complete-milestone");
@@ -85,10 +79,7 @@ console.log("\n=== Level 2: Prompts reference quality gates ===");
   assertTrue(completeMilestone.includes("Decision Re-evaluation"), "complete-milestone.md mentions Decision Re-evaluation");
 
   const planMilestone = loadPrompt("plan-milestone");
-  assertTrue(planMilestone.toLowerCase().includes("horizontal checklist"), "plan-milestone.md mentions horizontal checklist");
-
-  const guidedPlanMilestone = loadPrompt("guided-plan-milestone");
-  assertTrue(guidedPlanMilestone.includes("Horizontal Checklist"), "guided-plan-milestone.md mentions Horizontal Checklist");
+  assertTrue(planMilestone.includes("Horizontal Checklist"), "plan-milestone.md mentions Horizontal Checklist");
 
   const reassess = loadPrompt("reassess-roadmap");
   assertTrue(reassess.includes("Threat Surface"), "reassess-roadmap.md mentions Threat Surface");

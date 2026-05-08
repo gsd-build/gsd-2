@@ -27,9 +27,13 @@ export function buildNotificationWidgetLines(): string[] {
 }
 
 const REFRESH_INTERVAL_MS = 30_000;
+let notificationWidgetCleanup: (() => void) | undefined;
 
-export function initNotificationWidget(ctx: ExtensionContext): void {
-  if (!ctx.hasUI) return;
+export function initNotificationWidget(ctx: ExtensionContext): () => void {
+  notificationWidgetCleanup?.();
+  notificationWidgetCleanup = undefined;
+
+  if (!ctx.hasUI) return () => {};
 
   const push = () => {
     const chip = buildNotificationChip();
@@ -37,6 +41,23 @@ export function initNotificationWidget(ctx: ExtensionContext): void {
   };
   push();
 
-  onNotificationStoreChange(push);
-  setInterval(push, REFRESH_INTERVAL_MS).unref?.();
+  const unsubscribe = onNotificationStoreChange(push);
+  const interval = setInterval(push, REFRESH_INTERVAL_MS);
+  interval.unref?.();
+
+  const cleanup = () => {
+    unsubscribe();
+    clearInterval(interval);
+    if (notificationWidgetCleanup === cleanup) {
+      ctx.ui.setStatus(STATUS_KEY, undefined);
+      notificationWidgetCleanup = undefined;
+    }
+  };
+  notificationWidgetCleanup = cleanup;
+  return cleanup;
+}
+
+export function _resetNotificationWidgetForTests(): void {
+  notificationWidgetCleanup?.();
+  notificationWidgetCleanup = undefined;
 }

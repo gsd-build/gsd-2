@@ -17,8 +17,8 @@
  *
  * This rewrite builds a real git parent repo + local submodule, creates
  * a worktree, dirties a tracked file inside the submodule, then invokes
- * `removeWorktree` and asserts observable behaviour on stderr (where
- * `logWarning` writes) and on the filesystem (the worktree is gone).
+ * `removeWorktree` and asserts observable behaviour through the workflow log
+ * buffer and on the filesystem (the worktree is gone).
  */
 
 import { describe, test, beforeEach, afterEach } from "node:test";
@@ -35,6 +35,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { createWorktree, removeWorktree } from "../worktree-manager.ts";
+import { _resetLogs, peekLogs } from "../workflow-logger.ts";
 
 interface Harness {
   parent: string;
@@ -112,53 +113,38 @@ function makeHarness(): Harness {
   };
 }
 
-/** Capture stderr writes during `fn`. `logWarning` writes to stderr, so
- * this reveals warnings emitted by the worktree-manager. */
-function captureStderr(fn: () => void): string {
-  const streamAny = process.stderr as unknown as {
-    write: (chunk: string | Uint8Array, ...rest: unknown[]) => boolean;
-  };
-  const original = streamAny.write.bind(streamAny);
-  const chunks: string[] = [];
-  streamAny.write = (chunk: string | Uint8Array): boolean => {
-    chunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"));
-    return true;
-  };
-  try {
-    fn();
-  } finally {
-    streamAny.write = original;
-  }
-  return chunks.join("");
+function workflowLogMessages(): string {
+  return peekLogs().map((entry) => entry.message).join("\n");
 }
 
 describe("removeWorktree preserves submodule uncommitted state (#2337)", () => {
   let h: Harness;
 
   beforeEach(() => {
+    _resetLogs();
     h = makeHarness();
   });
 
   afterEach(() => {
     h.cleanup();
+    _resetLogs();
   });
 
   test("clean submodules: worktree removes without stashing or submodule warnings", () => {
     const wt = createWorktree(h.parent, "cleanwt");
     runGit(wt.path, ["submodule", "update", "--init", "--recursive"]);
 
-    const stderr = captureStderr(() => {
-      removeWorktree(h.parent, "cleanwt");
-    });
+    removeWorktree(h.parent, "cleanwt");
+    const logs = workflowLogMessages();
 
     assert.ok(!existsSync(wt.path), "worktree directory should be gone");
     assert.doesNotMatch(
-      stderr,
+      logs,
       /Saved uncommitted submodule changes to rescue branch/,
       "clean submodule must not trigger rescue-branch creation",
     );
     assert.doesNotMatch(
-      stderr,
+      logs,
       /Submodule rescue branch creation failed/,
       "clean submodule must not trigger rescue-branch failure warning",
     );
@@ -191,9 +177,8 @@ describe("removeWorktree preserves submodule uncommitted state (#2337)", () => {
       `precondition: submodule must be diverged, got: "${subStatus}"`,
     );
 
-    const stderr = captureStderr(() => {
-      removeWorktree(h.parent, "dirtywt");
-    });
+    removeWorktree(h.parent, "dirtywt");
+    const logs = workflowLogMessages();
 
     // Worktree is gone: force fallback succeeded.
     assert.ok(!existsSync(wt.path), "worktree directory should be removed");
@@ -205,7 +190,7 @@ describe("removeWorktree preserves submodule uncommitted state (#2337)", () => {
     // removal. This is the assertion that #4823 demanded in place of
     // the tautological `src.includes("submodule") && src.includes("force")`.
     assert.match(
-      stderr,
+      logs,
       /Saved uncommitted submodule changes to rescue branch|Submodule rescue branch creation failed|Submodule changes detected/,
       "dirty submodule must trigger detection-and-warning path",
     );
@@ -231,12 +216,11 @@ describe("removeWorktree preserves submodule uncommitted state (#2337)", () => {
       renameSync(modPath, hiddenPath);
     }
 
-    const stderr = captureStderr(() => {
-      removeWorktree(h.parent, "no-gitmodules");
-    });
+    removeWorktree(h.parent, "no-gitmodules");
+    const logs = workflowLogMessages();
 
     assert.doesNotMatch(
-      stderr,
+      logs,
       /Saved uncommitted submodule changes to rescue branch/,
       "missing .gitmodules should skip submodule detection entirely",
     );

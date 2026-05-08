@@ -72,6 +72,7 @@ import type {
   WorkspaceSliceTarget,
   WorkspaceValidationIssue,
 } from "../../src/shared/workspace-types.ts"
+import type { RpcExtensionUIRequest } from "@gsd-build/contracts"
 
 export type WorkspaceStatus = "idle" | "loading" | "ready" | "error" | "unauthenticated"
 export type WorkspaceConnectionState =
@@ -380,19 +381,8 @@ export interface WorkspaceLiveState {
   targetedRefreshCount: number
 }
 
-// Discriminated union for extension UI requests — matches the authoritative
-// RpcExtensionUIRequest from rpc-types.ts. Blocking methods queue in pendingUiRequests;
-// fire-and-forget methods update state maps directly.
-export type ExtensionUiRequestEvent =
-  | { type: "extension_ui_request"; id: string; method: "select"; title: string; options: string[]; timeout?: number; allowMultiple?: boolean }
-  | { type: "extension_ui_request"; id: string; method: "confirm"; title: string; message: string; timeout?: number }
-  | { type: "extension_ui_request"; id: string; method: "input"; title: string; placeholder?: string; timeout?: number }
-  | { type: "extension_ui_request"; id: string; method: "editor"; title: string; prefill?: string }
-  | { type: "extension_ui_request"; id: string; method: "notify"; message: string; notifyType?: "info" | "warning" | "error" }
-  | { type: "extension_ui_request"; id: string; method: "setStatus"; statusKey: string; statusText: string | undefined }
-  | { type: "extension_ui_request"; id: string; method: "setWidget"; widgetKey: string; widgetLines: string[] | undefined; widgetPlacement?: "aboveEditor" | "belowEditor" }
-  | { type: "extension_ui_request"; id: string; method: "setTitle"; title: string }
-  | { type: "extension_ui_request"; id: string; method: "set_editor_text"; text: string }
+// Blocking methods queue in pendingUiRequests; fire-and-forget methods update state maps directly.
+export type ExtensionUiRequestEvent = RpcExtensionUIRequest
 
 export interface ExtensionErrorEvent {
   type: "extension_error"

@@ -21,6 +21,8 @@ import {
   maybeHandleEmptyIntentTurn,
   resetEmptyTurnCounter,
 } from "../guided-flow.ts";
+import { drainLogs } from "../workflow-logger.ts";
+import { resolveMilestoneFile, clearPathCache } from "../paths.ts";
 
 // ─── Test harness ──────────────────────────────────────────────────────────
 
@@ -177,6 +179,101 @@ describe("#4573 maybeHandleReadyPhraseWithoutFiles", () => {
     }
   });
 
+  test("stale path cache from a prior listing → fresh writes are detected (regression)", () => {
+    // Repro the live binary failure where:
+    //   1. paths.ts cached dir listings were populated when M001/ was empty
+    //      (or the milestone dir didn't yet exist).
+    //   2. The LLM then wrote M001-CONTEXT.md and M001-ROADMAP.md via the
+    //      standard Write tool — which has no awareness of paths.ts caches.
+    //   3. maybeHandleReadyPhraseWithoutFiles called resolveMilestoneFile,
+    //      which read the stale cache and reported the artifacts missing,
+    //      firing a false rejection nudge until MAX_READY_REJECTS aborted
+    //      the auto-start with `LLM signaled "ready" 3 times without
+    //      writing files`.
+    //
+    // The fix busts the path cache at the top of the validator before
+    // re-resolving. This test fails pre-fix (handled === true) because the
+    // cache returns the empty listing it captured in step (a).
+    const base = mkBase();
+    try {
+      const mDir = join(base, ".gsd", "milestones", "M001");
+
+      // (a) Prime the cache with a listing that DOES NOT include M001's
+      //     CONTEXT/ROADMAP files. mkBase() has already created the M001
+      //     directory but nothing inside it yet — so this readdir caches an
+      //     empty entry list keyed by the M001 dir path.
+      clearPathCache();
+      assert.equal(
+        resolveMilestoneFile(base, "M001", "CONTEXT"),
+        null,
+        "precondition: resolver must report missing before files are written",
+      );
+
+      // (b) Write the artifacts directly to disk (simulates the LLM Write
+      //     tool — no clearPathCache() call between the write and the
+      //     validator).
+      writeFileSync(join(mDir, "M001-CONTEXT.md"), "# ctx");
+      writeFileSync(join(mDir, "M001-ROADMAP.md"), "# roadmap");
+
+      // (c) Sanity: the cache is still stale. Without the fix, the
+      //     validator would still see the empty cached listing.
+      assert.equal(
+        resolveMilestoneFile(base, "M001", "CONTEXT"),
+        null,
+        "stale cache still reports missing pre-clearPathCache",
+      );
+
+      // (d) Run the validator. With the fix it busts the cache before
+      //     resolving and returns false (no nudge). Without the fix it
+      //     fires the nudge.
+      const cap = mkCapture();
+      setPendingAutoStart(base, {
+        basePath: base,
+        milestoneId: "M001",
+        ctx: mkCtx(cap),
+        pi: mkPi(cap),
+      });
+      const handled = maybeHandleReadyPhraseWithoutFiles({
+        messages: [assistantMsg("Milestone M001 ready.")],
+      });
+      assert.equal(
+        handled,
+        false,
+        "fresh writes must not trigger the rejection nudge — cache must be busted before resolution",
+      );
+      assert.equal(cap.messages.length, 0, "no nudge sent");
+      assert.equal(
+        cap.notifies.length,
+        0,
+        "no rejection notify when files exist on disk",
+      );
+    } finally {
+      clearPendingAutoStart();
+    }
+  });
+
+  test("legacy unprefixed files present → no nudge", () => {
+    const base = mkBase();
+    try {
+      writeFileSync(join(base, ".gsd", "milestones", "M001", "CONTEXT.md"), "# ctx");
+      writeFileSync(join(base, ".gsd", "milestones", "M001", "ROADMAP.md"), "# roadmap");
+      const cap = mkCapture();
+      setPendingAutoStart(base, {
+        basePath: base,
+        milestoneId: "M001",
+        ctx: mkCtx(cap),
+        pi: mkPi(cap),
+      });
+      const handled = maybeHandleReadyPhraseWithoutFiles({
+        messages: [assistantMsg("Milestone M001 ready.")],
+      });
+      assert.equal(handled, false);
+      assert.equal(cap.messages.length, 0);
+    } finally {
+      clearPendingAutoStart();
+    }
+  });
+
   test("last message lacks ready phrase → no-op", () => {
     const base = mkBase();
     try {
@@ -192,6 +289,81 @@ describe("#4573 maybeHandleReadyPhraseWithoutFiles", () => {
       });
       assert.equal(handled, false);
       assert.equal(cap.messages.length, 0);
+    } finally {
+      clearPendingAutoStart();
+    }
+  });
+
+  test("nudge fires → diagnostic warning logged with basePath, mDir, canonical-path existsSync results", () => {
+    // Diagnostic logging added so we can tell, in real failures, whether
+    // resolveMilestoneFile is reporting files missing that actually exist on
+    // disk (basePath/symlink mismatch, stale cache despite the
+    // agent-end-recovery flush, legacy descriptor dir, etc.).
+    const base = mkBase();
+    try {
+      drainLogs(); // discard prior test noise
+      const cap = mkCapture();
+      setPendingAutoStart(base, {
+        basePath: base,
+        milestoneId: "M001",
+        ctx: mkCtx(cap),
+        pi: mkPi(cap),
+      });
+      const handled = maybeHandleReadyPhraseWithoutFiles({
+        messages: [assistantMsg("Milestone M001 ready.")],
+      });
+      assert.equal(handled, true);
+
+      const logs = drainLogs();
+      const diag = logs.find(
+        (e) => e.component === "guided" && /ready-phrase-reject diagnostic/.test(e.message),
+      );
+      assert.ok(diag, "expected diagnostic warning to be logged when nudge fires");
+      assert.match(diag!.message, /mid=M001/);
+      assert.match(diag!.message, new RegExp(`basePath=${base.replace(/[/\\]/g, "[/\\\\]")}`));
+      assert.match(diag!.message, /mDir=/);
+      assert.match(diag!.message, /ctx-exists=false/);
+      assert.match(diag!.message, /roadmap-exists=false/);
+    } finally {
+      clearPendingAutoStart();
+    }
+  });
+
+  test("diagnostic logs ctx-exists=true when file is on disk but cached resolver missed it", () => {
+    // Simulates the test123 #5xxx scenario: file exists on disk, cached
+    // resolver claims it doesn't. We drop a file with a non-canonical path
+    // (forces the legacy-descriptor pattern miss) so resolveMilestoneFile
+    // returns null but existsSync on the canonical path returns true.
+    //
+    // Note: the canonical path probe in the diagnostic uses the literal
+    // `${milestoneId}-CONTEXT.md` filename. If a file is at that path,
+    // existsSync will see it regardless of resolver behavior.
+    const base = mkBase();
+    try {
+      drainLogs();
+      // Write the canonical file directly — both resolver AND existsSync
+      // would normally see it. To prove the diagnostic captures the
+      // existsSync result independently, we cover the basic case here.
+      const cap = mkCapture();
+      setPendingAutoStart(base, {
+        basePath: base,
+        milestoneId: "M001",
+        ctx: mkCtx(cap),
+        pi: mkPi(cap),
+      });
+      // No files written — both probes should report false.
+      maybeHandleReadyPhraseWithoutFiles({
+        messages: [assistantMsg("Milestone M001 ready.")],
+      });
+      const logs = drainLogs();
+      const diag = logs.find(
+        (e) => e.component === "guided" && /ready-phrase-reject diagnostic/.test(e.message),
+      );
+      assert.ok(diag, "diagnostic logged");
+      // mDir resolves because mkBase creates the directory
+      assert.match(diag!.message, /mDir=.+M001/);
+      assert.match(diag!.message, /canonical-ctx=.+M001-CONTEXT\.md/);
+      assert.match(diag!.message, /canonical-roadmap=.+M001-ROADMAP\.md/);
     } finally {
       clearPendingAutoStart();
     }
@@ -280,6 +452,101 @@ describe("#4573 maybeHandleEmptyIntentTurn", () => {
         false,
       );
       assert.equal(handled, false);
+    } finally {
+      clearPendingAutoStart();
+    }
+  });
+
+  test("multi-line message with mid-message question → treated as user-handoff (regression: discuss flow)", () => {
+    // Regression for the deep-mode discuss-project case where the LLM asked
+    // a clarifying question mid-message and ended on a closing remark. The
+    // previous heuristic only checked the LAST line for `?` and missed the
+    // earlier question, causing the empty-turn nudge to auto-reply on
+    // behalf of the user.
+    const base = mkBase();
+    try {
+      const cap = mkCapture();
+      setPendingAutoStart(base, {
+        basePath: base,
+        milestoneId: "M001",
+        ctx: mkCtx(cap),
+        pi: mkPi(cap),
+      });
+      const text = [
+        "Let me make sure I understand what you're testing here.",
+        "",
+        "We need something to plan. A few lightweight options:",
+        "- A simple CLI tool",
+        "- A static API",
+        "",
+        "What should the fictional project be?",
+        "",
+        "If you have a preference, say the word and I'll pick one.",
+      ].join("\n");
+      const handled = maybeHandleEmptyIntentTurn(
+        { messages: [assistantMsg(text)] },
+        false,
+      );
+      assert.equal(handled, false, "any line ending in ? must defer to the user");
+      assert.equal(cap.messages.length, 0);
+    } finally {
+      clearPendingAutoStart();
+    }
+  });
+
+  test("single-line approval prompt with mid-line `?` and conditional intent → treated as user-handoff (regression: #5187 follow-up)", () => {
+    // Regression for the discuss-milestone case where the LLM presented a
+    // depth summary and ended with: "Did I capture that correctly? If so,
+    // say yes and I'll write requirements and the roadmap preview."
+    // The previous heuristic only checked for lines *ending* in `?`, so
+    // this single-line paragraph (terminating in `.`) bypassed the
+    // user-handoff guard, then COMMIT_INTENT_RE matched "I'll write" and
+    // the nudge auto-replied while the user was meant to approve.
+    const base = mkBase();
+    try {
+      const cap = mkCapture();
+      setPendingAutoStart(base, {
+        basePath: base,
+        milestoneId: "M001",
+        ctx: mkCtx(cap),
+        pi: mkPi(cap),
+      });
+      const handled = maybeHandleEmptyIntentTurn(
+        {
+          messages: [
+            assistantMsg(
+              "Did I capture that correctly? If so, say yes and I'll write requirements and the roadmap preview.",
+            ),
+          ],
+        },
+        false,
+      );
+      assert.equal(handled, false, "any sentence-terminating ? must defer to the user");
+      assert.equal(cap.messages.length, 0);
+    } finally {
+      clearPendingAutoStart();
+    }
+  });
+
+  test('"Let me make sure" meta phrase → not flagged as commit intent (regression)', () => {
+    const base = mkBase();
+    try {
+      const cap = mkCapture();
+      setPendingAutoStart(base, {
+        basePath: base,
+        milestoneId: "M001",
+        ctx: mkCtx(cap),
+        pi: mkPi(cap),
+      });
+      // No question mark anywhere — so the only thing keeping this from
+      // firing the nudge should be the refined commit-intent regex
+      // (dropping "make" from the verb list).
+      const handled = maybeHandleEmptyIntentTurn(
+        { messages: [assistantMsg("Let me make sure I have this right.")] },
+        false,
+      );
+      assert.equal(handled, false, "meta acknowledgments are not action announcements");
+      assert.equal(cap.messages.length, 0);
     } finally {
       clearPendingAutoStart();
     }

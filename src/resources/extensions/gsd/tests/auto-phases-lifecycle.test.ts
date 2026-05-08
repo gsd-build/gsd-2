@@ -1,17 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import { runFinalize } from "../auto/phases.ts";
 import { AutoSession } from "../auto/session.ts";
+import { readUnitRuntimeRecord, writeUnitRuntimeRecord } from "../unit-runtime.ts";
 
-test("runFinalize clears currentUnit after successful finalize", async () => {
-  const s = new AutoSession();
-  s.basePath = "/tmp/gsd-finalize-current-unit";
-  s.currentUnit = {
-    type: "execute-task",
-    id: "M001/S01/T01",
-    startedAt: Date.now(),
-  };
+async function runSuccessfulFinalize(s: AutoSession) {
+  const unit = s.currentUnit;
+  assert.ok(unit, "test setup must provide currentUnit");
+
+  writeUnitRuntimeRecord(s.basePath, unit.type, unit.id, unit.startedAt, {
+    phase: "dispatched",
+  });
 
   const deps = {
     clearUnitTimeout() {},
@@ -26,7 +29,7 @@ test("runFinalize clears currentUnit after successful finalize", async () => {
     postUnitPostVerification: async () => "continue",
   };
 
-  const result = await runFinalize(
+  return runFinalize(
     {
       ctx: { ui: { notify() {} } },
       pi: {},
@@ -38,8 +41,8 @@ test("runFinalize clears currentUnit after successful finalize", async () => {
       nextSeq: () => 1,
     } as any,
     {
-      unitType: "execute-task",
-      unitId: "M001/S01/T01",
+      unitType: unit.type,
+      unitId: unit.id,
       prompt: "",
       finalPrompt: "",
       pauseAfterUatDispatch: false,
@@ -55,7 +58,47 @@ test("runFinalize clears currentUnit after successful finalize", async () => {
       consecutiveFinalizeTimeouts: 0,
     },
   );
+}
 
-  assert.equal(result.action, "next");
-  assert.equal(s.currentUnit, null);
+test("runFinalize clears currentUnit after successful finalize", async () => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-finalize-current-unit-"));
+  const s = new AutoSession();
+  s.basePath = base;
+  s.currentUnit = {
+    type: "execute-task",
+    id: "M001/S01/T01",
+    startedAt: Date.now(),
+  };
+
+  try {
+    const result = await runSuccessfulFinalize(s);
+
+    assert.equal(result.action, "next");
+    assert.equal(s.currentUnit, null);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("runFinalize marks unit runtime finalized after successful finalize", async () => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-finalize-runtime-"));
+  const s = new AutoSession();
+  const startedAt = Date.now();
+  s.basePath = base;
+  s.currentUnit = {
+    type: "complete-milestone",
+    id: "M001",
+    startedAt,
+  };
+
+  try {
+    const result = await runSuccessfulFinalize(s);
+    const runtime = readUnitRuntimeRecord(base, "complete-milestone", "M001");
+
+    assert.equal(result.action, "next");
+    assert.equal(runtime?.phase, "finalized");
+    assert.equal(runtime?.lastProgressKind, "finalize-success");
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });

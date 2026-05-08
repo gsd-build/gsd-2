@@ -1,6 +1,6 @@
 {
   "name": "@gsd/pi-coding-agent",
-  "version": "2.78.1",
+  "version": "2.80.0",
   "description": "Coding agent CLI (vendored from pi-mono)",
   "type": "module",
   "gsd": {
@@ -25,6 +25,7 @@
     "copy-assets": "node scripts/copy-assets.cjs"
   },
   "dependencies": {
+    "@gsd-build/contracts": "^2.80.0",
     "@mariozechner/jiti": "^2.6.2",
     "@silvia-odwyer/photon-node": "^0.3.4",
     "chalk": "^5.5.0",

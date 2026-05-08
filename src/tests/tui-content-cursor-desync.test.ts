@@ -1,3 +1,5 @@
+// GSD-2 + src/tests/tui-content-cursor-desync.test.ts - Regression coverage for TUI hardware cursor baselines.
+
 /**
  * Regression test for #3764: TUI input clears and jumps up after PR #3744.
  *
@@ -307,6 +309,12 @@ describe("TUI cursor tracking regression (#3764)", () => {
     ];
 
     (tui as any).doRender();
+
+    assert.ok(terminal.writtenData.length >= 1, "shrink render should produce a differential buffer");
+    assert.ok(
+      terminal.writtenData[0].includes("\x1b[2J\x1b[22;1H"),
+      `short shrink should redraw at the bottom anchor, got ${JSON.stringify(terminal.writtenData[0])}`,
+    );
 
     // After shrink, hardwareCursorRow should be at IME position again
     assert.strictEqual(

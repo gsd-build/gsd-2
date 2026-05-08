@@ -44,7 +44,7 @@ describe("Dashboard custom-engine: updateProgressWidget in custom engine path", 
     const source = readFileSync(loopPath, "utf-8");
 
     // Find the custom engine block
-    const customEngineStart = source.indexOf('s.activeEngineId !== "dev"');
+    const customEngineStart = source.indexOf("shouldUseCustomEnginePath({");
     assert.ok(customEngineStart > -1, "Should find custom engine path in loop.ts");
 
     // The updateProgressWidget call should appear after the custom engine block start
@@ -66,11 +66,11 @@ describe("Dashboard custom-engine: updateProgressWidget in custom engine path", 
     const loopPath = resolve(__filename, "../../auto/loop.ts");
     const source = readFileSync(loopPath, "utf-8");
 
-    const customEngineStart = source.indexOf('s.activeEngineId !== "dev"');
+    const customEngineStart = source.indexOf("shouldUseCustomEnginePath({");
     const afterCustomEngine = source.slice(customEngineStart);
 
     // Verify custom engine path has iterData built before the widget call
-    const iterDataIndex = afterCustomEngine.indexOf("iterData = {");
+    const iterDataIndex = afterCustomEngine.indexOf("buildCustomEngineIterationData({");
     const widgetIndex = afterCustomEngine.indexOf("deps.updateProgressWidget");
     assert.ok(iterDataIndex > -1 && widgetIndex > -1, "Both iterData and widget call should exist");
     assert.ok(

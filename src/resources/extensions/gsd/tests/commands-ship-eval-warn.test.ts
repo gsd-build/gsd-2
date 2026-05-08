@@ -12,7 +12,7 @@
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, writeFileSync, unlinkSync } from "node:fs";
+import { mkdirSync, realpathSync, rmSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -129,7 +129,8 @@ describe("checkSliceEvalReview", () => {
     // points to a missing file — exactly the race a prior existsSync +
     // readFileSync sequence panicked on.
     const resolved = resolveSliceFile(basePath, "M001", "S07", "EVAL-REVIEW");
-    assert.equal(resolved, path);
+    assert.ok(resolved);
+    assert.equal(realpathSync(resolved), realpathSync(path));
     unlinkSync(path);
     const result = await checkSliceEvalReview(basePath, "M001", "S07");
     assert.equal(result.kind, "absent");

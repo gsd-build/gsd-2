@@ -16,14 +16,21 @@ export type AutoRuntimeSnapshot = {
   paused: boolean;
   currentUnit: CurrentUnit | null;
   basePath: string;
+  orchestrationPhase?: "idle" | "running" | "paused" | "stopped" | "error";
+  orchestrationTransitionCount?: number;
+  orchestrationLastTransitionAt?: number;
 };
 
 export function getAutoRuntimeSnapshot(): AutoRuntimeSnapshot {
+  const orchestrationStatus = autoSession.orchestration?.getStatus();
   return {
     active: autoSession.active,
     paused: autoSession.paused,
     currentUnit: autoSession.currentUnit ? { ...autoSession.currentUnit } : null,
     basePath: autoSession.basePath,
+    orchestrationPhase: orchestrationStatus?.phase,
+    orchestrationTransitionCount: orchestrationStatus?.transitionCount,
+    orchestrationLastTransitionAt: orchestrationStatus?.lastTransitionAt,
   };
 }
 

@@ -249,6 +249,28 @@ test('loadKnowledgeBlock: reports globalSizeKb above 4KB threshold', () => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
+test('loadKnowledgeBlock: caps repeated system prompt knowledge by default with source path', () => {
+  const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'gsd-kb-')));
+  const gsdHome = join(tmp, 'home');
+  const cwd = join(tmp, 'project');
+  mkdirSync(join(cwd, '.gsd'), { recursive: true });
+  mkdirSync(join(gsdHome, 'agent'), { recursive: true });
+  writeFileSync(join(cwd, '.gsd', 'KNOWLEDGE.md'), `K001: ${'large project knowledge '.repeat(1200)}`);
+
+  const original = process.env.PI_GSD_KNOWLEDGE_MAX_CHARS;
+  delete process.env.PI_GSD_KNOWLEDGE_MAX_CHARS;
+  try {
+    const result = loadKnowledgeBlock(gsdHome, cwd);
+    assert.ok(result.block.includes('Source: `'));
+    assert.ok(result.block.length <= 12_500, `knowledge block ${result.block.length} should stay near default cap`);
+    assert.ok(result.block.includes('[Knowledge Truncated]'));
+  } finally {
+    if (original === undefined) delete process.env.PI_GSD_KNOWLEDGE_MAX_CHARS;
+    else process.env.PI_GSD_KNOWLEDGE_MAX_CHARS = original;
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ─── inlineKnowledgeBudgeted — issue #4719 ─────────────────────────────────
 // Milestone-phase prompts must not inject the full KNOWLEDGE.md. The budgeted
 // helper scopes by milestone-level keywords and caps the injected size.
@@ -310,6 +332,31 @@ test('inlineKnowledgeBudgeted: caps payload below budget for large files', async
     result!,
     /\[\.\.\.truncated \d+ chars; rerun with narrower scope if needed\]/,
     'should include truncation note when budget is exceeded',
+  );
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('inlineKnowledgeBudgeted: default budget keeps auto prompt knowledge compact', async () => {
+  const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'gsd-knowledge-')));
+  const gsdDir = join(tmp, '.gsd');
+  mkdirSync(gsdDir, { recursive: true });
+
+  const entries = Array.from({ length: 300 }, (_, i) =>
+    `### Entry ${i}: shared topic\n${'default budget filler '.repeat(25)}\n`,
+  ).join('\n');
+  writeFileSync(join(gsdDir, 'KNOWLEDGE.md'), `# Project Knowledge\n\n## Patterns\n\n${entries}`);
+
+  const result = await inlineKnowledgeBudgeted(tmp, ['shared']);
+  assert.ok(result !== null, 'should return content');
+  assert.ok(
+    result!.length <= 12_500,
+    `default payload ${result!.length} chars should stay near the 12k budget`,
+  );
+  assert.match(
+    result!,
+    /\[\.\.\.truncated \d+ chars; rerun with narrower scope if needed\]/,
+    'should include truncation note when default budget is exceeded',
   );
 
   rmSync(tmp, { recursive: true, force: true });

@@ -223,6 +223,18 @@ describe('git-service', async () => {
     assert.ok(msg.includes("GSD-Task: S01/T02"), "GSD-Task trailer in body");
   });
 
+  test('buildTaskCommitMessage sanitizes subject text', () => {
+    const msg = buildTaskCommitMessage({
+      taskId: "S01/T03",
+      taskTitle: "implement subject cleanup",
+      oneLiner: "Added auth\n\nBREAKING: injected\r\u0007trailer",
+    });
+    const subject = msg.split("\n")[0];
+    assert.ok(subject.includes("Added auth BREAKING: injected trailer"), "control characters are flattened");
+    assert.equal(subject.includes("\r"), false, "subject does not include carriage returns");
+    assert.equal(subject.includes("\u0007"), false, "subject does not include control characters");
+  });
+
   {
     const msg = buildTaskCommitMessage({
       taskId: "S02/T01",
@@ -501,6 +513,85 @@ describe('git-service', async () => {
     assert.ok(msg2!.startsWith("feat:"), "meaningful commit uses feat type without scope");
     assert.ok(msg2!.includes("JWT-based auth"), "meaningful commit includes one-liner content");
     assert.ok(msg2!.includes("GSD-Task: S01/T02"), "meaningful commit has GSD-Task trailer");
+
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test('GitServiceImpl: task context keyFiles scope autoCommit staging', () => {
+    const repo = initTempRepo();
+    const svc = new GitServiceImpl(repo);
+
+    createFile(repo, "src/task.ts", "export const task = true;");
+    createFile(repo, "src/unrelated.ts", "export const unrelated = true;");
+
+    const msg = svc.autoCommit("execute-task", "M001/S01/T01", [], {
+      taskId: "S01/T01",
+      taskTitle: "implement scoped task",
+      oneLiner: "Added scoped task implementation",
+      keyFiles: ["src/task.ts"],
+    });
+    assert.ok(msg !== null, "autoCommit with keyFiles should commit scoped task files");
+
+    const committed = run("git show --name-only --format= HEAD", repo);
+    assert.ok(committed.includes("src/task.ts"), "key file is committed");
+    assert.ok(!committed.includes("src/unrelated.ts"), "unrelated dirty file is not committed");
+
+    const status = run("git status --porcelain", repo);
+    assert.ok(status.includes("src/unrelated.ts"), "unrelated dirty file remains in working tree");
+
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  // Regression: #5500. The LLM occasionally hallucinates files in
+  // task.keyFiles that were never written. Pre-existing scoped-stage code
+  // ran `git add -- <every keyFile>` and failed the entire commit on the
+  // first missing path. Verify that valid paths still commit and missing
+  // ones are dropped silently.
+  test('GitServiceImpl: scoped staging drops missing keyFiles and commits the rest', () => {
+    const repo = initTempRepo();
+    const svc = new GitServiceImpl(repo);
+
+    createFile(repo, "src/index.ts", "export const ok = true;");
+    // Note: src/commands/list.ts is intentionally NOT created — the LLM
+    // claimed it wrote this file but didn't.
+
+    const msg = svc.autoCommit("execute-task", "M001/S01/T02", [], {
+      taskId: "S01/T02",
+      taskTitle: "wire up command list",
+      oneLiner: "Added list command stub",
+      keyFiles: ["src/index.ts", "src/commands/list.ts"],
+    });
+    assert.ok(msg !== null, "autoCommit succeeds when at least one keyFile exists");
+
+    const committed = run("git show --name-only --format= HEAD", repo);
+    assert.ok(committed.includes("src/index.ts"), "existing key file is committed");
+    assert.ok(!committed.includes("src/commands/list.ts"), "missing key file is silently dropped");
+
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  // Regression: #5500. When ALL keyFiles are bogus, scopedStageTaskFiles
+  // must return false so autoCommit falls back to smartStage. The commit
+  // still goes out (using `git add -A` semantics) instead of failing.
+  test('GitServiceImpl: all missing keyFiles falls back to smartStage', () => {
+    const repo = initTempRepo();
+    const svc = new GitServiceImpl(repo);
+
+    createFile(repo, "src/actually-changed.ts", "export const real = true;");
+
+    const msg = svc.autoCommit("execute-task", "M001/S01/T03", [], {
+      taskId: "S01/T03",
+      taskTitle: "fix path handling",
+      oneLiner: "Hardened path resolution",
+      keyFiles: ["src/wrong/path-1.ts", "src/wrong/path-2.ts"],
+    });
+    assert.ok(msg !== null, "autoCommit falls back to smartStage when all keyFiles are missing");
+
+    const committed = run("git show --name-only --format= HEAD", repo);
+    assert.ok(
+      committed.includes("src/actually-changed.ts"),
+      "smartStage fallback stages real dirty files when scoped staging finds nothing",
+    );
 
     rmSync(repo, { recursive: true, force: true });
   });
@@ -949,6 +1040,11 @@ describe('git-service', async () => {
     // The main branch should be recorded
     writeIntegrationBranch(repo, "M002", "main");
     assert.deepStrictEqual(readIntegrationBranch(repo, "M002"), "main", "main branch is recorded");
+
+    // User-managed gsd/* integration branches should not be rejected unless
+    // they match a GSD-generated workflow template prefix.
+    writeIntegrationBranch(repo, "M003", "gsd/release/2026-q2");
+    assert.deepStrictEqual(readIntegrationBranch(repo, "M003"), "gsd/release/2026-q2", "user gsd/* branches are recorded");
 
     rmSync(repo, { recursive: true, force: true });
   });

@@ -290,6 +290,10 @@
         {
           "id": "gsd-plan",
           "name": "Plan"
+        },
+        {
+          "id": "gsd-checkpoints",
+          "name": "Checkpoints"
         }
       ]
     },
@@ -412,5 +416,8 @@
     "@types/vscode": "^1.95.0",
     "@vscode/vsce": "^3.7.1",
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "@gsd-build/contracts": "file:../packages/contracts"
   }
 }

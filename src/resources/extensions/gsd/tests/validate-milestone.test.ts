@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
-import { deriveState, isValidationTerminal } from "../state.ts";
+import { deriveState, invalidateStateCache, isValidationTerminal } from "../state.ts";
 import { resolveExpectedArtifactPath, diagnoseExpectedArtifact } from "../auto-artifact-paths.ts";
 import { verifyExpectedArtifact, buildLoopRemediationSteps } from "../auto-recovery.ts";
 import { resolveDispatch, type DispatchContext } from "../auto-dispatch.ts";
@@ -24,6 +24,7 @@ function makeTmpBase(): string {
 }
 
 function cleanup(base: string): void {
+  invalidateStateCache();
   clearPathCache();
   clearParseCache();
   closeDatabase();
@@ -394,7 +395,46 @@ test("dispatch rule skips when skip_milestone_validation preference is set", asy
   }
 });
 
-test("dispatch rule fails closed for failure-path SUMMARY when DB milestone is not complete (#4658)", async () => {
+test("skip write immediately advances deriveState out of validating-milestone", async () => {
+  const base = makeTmpBase();
+  try {
+    openTestDb(base);
+    insertMilestone({ id: "M001", title: "Test", status: "active" } as any);
+    insertSlice({ id: "S01", milestoneId: "M001", title: "Slice 1", status: "complete" } as any);
+
+    writeContext(base, "M001");
+    writeRoadmap(base, "M001", ALL_DONE_ROADMAP);
+    writeSliceSummary(base, "M001", "S01", "# S01 Summary\nDone.");
+
+    invalidateStateCache();
+    clearPathCache();
+    clearParseCache();
+
+    const before = await deriveState(base);
+    assert.equal(before.phase, "validating-milestone", "precondition: missing VALIDATION keeps phase in validation");
+
+    const ctx: DispatchContext = {
+      basePath: base,
+      mid: "M001",
+      midTitle: "Test",
+      state: before,
+      prefs: { phases: { skip_milestone_validation: true } },
+    };
+    const result = await resolveDispatch(ctx);
+    assert.equal(result.action, "skip");
+
+    const after = await deriveState(base);
+    assert.equal(
+      after.phase,
+      "completing-milestone",
+      "post-skip deriveState should see the new VALIDATION file without manual cache invalidation",
+    );
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("dispatch rule ignores failure-path SUMMARY projection when DB milestone is not complete (#4658 superseded)", async () => {
   const state: GSDState = {
     activeMilestone: { id: "M001", title: "Test" },
     activeSlice: null,
@@ -422,17 +462,14 @@ test("dispatch rule fails closed for failure-path SUMMARY when DB milestone is n
       prefs: undefined,
     };
     const result = await resolveDispatch(ctx);
-    assert.equal(result.action, "stop");
-    if (result.action === "stop") {
-      assert.equal(result.level, "warning");
-      assert.match(result.reason, /failure-path SUMMARY/i);
-    }
+    assert.equal(result.action, "dispatch");
+    assert.equal(getMilestone("M001")?.status, "active");
   } finally {
     cleanup(base);
   }
 });
 
-test("dispatch rule reconciles DB for successful stale SUMMARY (#4658)", async () => {
+test("dispatch rule does not reconcile DB from successful stale SUMMARY projection (#4658 superseded)", async () => {
   const state: GSDState = {
     activeMilestone: { id: "M001", title: "Test" },
     activeSlice: null,
@@ -473,15 +510,15 @@ test("dispatch rule reconciles DB for successful stale SUMMARY (#4658)", async (
       prefs: undefined,
     };
     const result = await resolveDispatch(ctx);
-    assert.equal(result.action, "skip");
+    assert.equal(result.action, "dispatch");
     const milestone = getMilestone("M001");
-    assert.equal(milestone?.status, "complete");
+    assert.equal(milestone?.status, "active");
   } finally {
     cleanup(base);
   }
 });
 
-test("dispatch rule fails closed for ambiguous stale SUMMARY (#4658)", async () => {
+test("dispatch rule ignores ambiguous stale SUMMARY projection (#4658 superseded)", async () => {
   const state: GSDState = {
     activeMilestone: { id: "M001", title: "Test" },
     activeSlice: null,
@@ -509,11 +546,8 @@ test("dispatch rule fails closed for ambiguous stale SUMMARY (#4658)", async () 
       prefs: undefined,
     };
     const result = await resolveDispatch(ctx);
-    assert.equal(result.action, "stop");
-    if (result.action === "stop") {
-      assert.equal(result.level, "warning");
-      assert.match(result.reason, /ambiguous SUMMARY/i);
-    }
+    assert.equal(result.action, "dispatch");
+    assert.equal(getMilestone("M001")?.status, "active");
   } finally {
     cleanup(base);
   }

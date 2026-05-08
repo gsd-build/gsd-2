@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Post-unit verification gate for GSD auto-mode units.
+
 /**
  * Post-unit verification gate for auto-mode.
  *
@@ -14,7 +17,8 @@ import type { ExtensionContext, ExtensionAPI } from "@gsd/pi-coding-agent";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolveSliceFile, resolveSlicePath, resolveMilestoneFile } from "./paths.js";
 import { parseUnitId } from "./unit-id.js";
-import { isDbAvailable, getTask, getSliceTasks, getMilestoneSlices, type TaskRow } from "./gsd-db.js";
+import { isDbAvailable, getTask, getSliceTasks, getMilestoneSlices } from "./gsd-db.js";
+import type { TaskRow } from "./db-task-slice-rows.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { extractVerdict } from "./verdict-parser.js";
 import { isClosedStatus } from "./status-guards.js";

@@ -39,6 +39,7 @@ function makeDeps(
     getAutoWorktreePath: () => null,
     autoCommitCurrentBranch: () => {},
     getCurrentBranch: () => "main",
+    checkoutBranch: () => {},
     autoWorktreeBranch: (milestoneId: string) => `milestone/${milestoneId}`,
     resolveMilestoneFile: (_basePath: string, milestoneId: string) =>
       `/project/.gsd/milestones/${milestoneId}/${milestoneId}-ROADMAP.md`,

@@ -4,7 +4,8 @@
  * Validates inputs, checks all tasks are complete, writes slice row to DB in
  * a transaction, then (outside the transaction) renders SUMMARY.md + UAT.md
  * to disk, toggles the roadmap checkbox, stores rendered markdown in DB for
- * D004 recovery, and invalidates caches.
+ * D004 recovery, and invalidates caches. Projection write failures are stale
+ * projection diagnostics and do not roll back committed DB state.
  */
 
 import { join } from "node:path";
@@ -277,7 +278,6 @@ export async function handleCompleteSlice(
 
   // ── Guards + DB writes inside a single transaction (prevents TOCTOU) ───
   const completedAt = new Date().toISOString();
-  const originalSliceStatus = getSlice(params.milestoneId, params.sliceId)?.status ?? "pending";
   let guardError: string | null = null;
 
   transaction(() => {
@@ -349,10 +349,6 @@ export async function handleCompleteSlice(
     return { error: guardError };
   }
 
-  // ── Filesystem operations (outside transaction) ─────────────────────────
-  // If disk render fails, roll back the DB status so deriveState() and
-  // verifyExpectedArtifact() stay consistent (both say "not done").
-
   // Render summary markdown
   const summaryMd = renderSliceSummaryMarkdown(params);
 
@@ -371,6 +367,8 @@ export async function handleCompleteSlice(
 
   const uatMd = renderUatMarkdown(params);
   const uatPath = summaryPath.replace(/-SUMMARY\.md$/, "-UAT.md");
+  setSliceSummaryMd(params.milestoneId, params.sliceId, summaryMd, uatMd);
+  let projectionStale = false;
 
   try {
     await saveFile(summaryPath, summaryMd);
@@ -382,15 +380,9 @@ export async function handleCompleteSlice(
       logWarning("tool", `complete_slice — could not find roadmap for ${params.milestoneId}, skipping checkbox toggle`);
     }
   } catch (renderErr) {
-    // Disk render failed — roll back DB status so state stays consistent
-    logWarning("tool", `complete_slice — disk render failed for ${params.milestoneId}/${params.sliceId}, rolling back DB status`, { error: (renderErr as Error).message });
-    updateSliceStatus(params.milestoneId, params.sliceId, originalSliceStatus);
-    invalidateStateCache();
-    return { error: `disk render failed: ${(renderErr as Error).message}` };
+    projectionStale = true;
+    logWarning("projection", `complete_slice projection write failed for ${params.milestoneId}/${params.sliceId}; DB completion remains committed`, { error: (renderErr as Error).message });
   }
-
-  // Store rendered markdown in DB for D004 recovery
-  setSliceSummaryMd(params.milestoneId, params.sliceId, summaryMd, uatMd);
 
   // ── Close gates owned by complete-slice (Q8) ───────────────────────────
   // Each owned gate maps to a specific summary section via the registry.
@@ -493,5 +485,6 @@ export async function handleCompleteSlice(
     milestoneId: params.milestoneId,
     summaryPath,
     uatPath,
+    ...(projectionStale ? { stale: true } : {}),
   };
 }

@@ -12,7 +12,7 @@
 
 import type { Client, Message, TextChannel, MessageComponentInteraction } from 'discord.js';
 import { EmbedBuilder, ComponentType } from 'discord.js';
-import type { SdkAgentEvent } from '@gsd-build/rpc-client';
+import type { SdkAgentEvent } from '@gsd-build/contracts';
 import type { Logger } from './logger.js';
 import type { DaemonConfig, PendingBlocker } from './types.js';
 import type { SessionManager } from './session-manager.js';

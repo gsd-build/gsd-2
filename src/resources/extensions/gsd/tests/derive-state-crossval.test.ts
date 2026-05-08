@@ -20,7 +20,7 @@ import {
   insertSlice,
   insertTask,
 } from '../gsd-db.ts';
-import { migrateHierarchyToDb } from '../md-importer.ts';
+import { migrateFromMarkdown, migrateHierarchyToDb } from '../md-importer.ts';
 import type { GSDState } from '../types.ts';
 
 // ─── Fixture Helpers ───────────────────────────────────────────────────────
@@ -479,12 +479,13 @@ skills_used: []
 
       // Step 2: Migrate markdown to DB
       openDatabase(':memory:');
-      const counts = migrateHierarchyToDb(base);
+      const counts = migrateFromMarkdown(base);
 
       // Verify migration populated correctly
-      assert.ok(counts.milestones >= 1, 'G-roundtrip: migrated milestones');
-      assert.ok(counts.slices >= 2, 'G-roundtrip: migrated slices');
-      assert.ok(counts.tasks >= 3, 'G-roundtrip: migrated tasks');
+      assert.ok(counts.hierarchy.milestones >= 1, 'G-roundtrip: migrated milestones');
+      assert.ok(counts.hierarchy.slices >= 2, 'G-roundtrip: migrated slices');
+      assert.ok(counts.hierarchy.tasks >= 3, 'G-roundtrip: migrated tasks');
+      assert.equal(counts.requirements, 3, 'G-roundtrip: migrated requirements');
 
       // Step 3: Get DB-backed state
       invalidateStateCache();

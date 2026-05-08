@@ -15,7 +15,7 @@ import { normalizeStringArray } from "../shared/format-utils.js";
 import {
   KNOWN_PREFERENCE_KEYS,
   KNOWN_THINKING_LEVELS,
-  KNOWN_UNIT_TYPES,
+  KNOWN_UNIT_LABELS,
 
   SKILL_ACTIONS,
   type ThinkingLevel,
@@ -278,6 +278,15 @@ export function validatePreferences(preferences: GSDPreferences): {
     }
   }
 
+  // ─── Planning Depth (deep planning mode) ─────────────────────────
+  if (preferences.planning_depth !== undefined) {
+    if (preferences.planning_depth === "light" || preferences.planning_depth === "deep") {
+      validated.planning_depth = preferences.planning_depth;
+    } else {
+      errors.push(`planning_depth must be "light" or "deep"`);
+    }
+  }
+
   // ─── Search Provider ─────────────────────────────────────────────
   if (preferences.search_provider !== undefined) {
     const validSearchProviders = new Set(["brave", "tavily", "ollama", "native", "auto"]);
@@ -435,7 +444,7 @@ export function validatePreferences(preferences: GSDPreferences): {
   if (preferences.post_unit_hooks && Array.isArray(preferences.post_unit_hooks)) {
     const validHooks: PostUnitHookConfig[] = [];
     const seenNames = new Set<string>();
-    const knownUnitTypes = new Set<string>(KNOWN_UNIT_TYPES);
+    const knownUnitTypes = new Set<string>(KNOWN_UNIT_LABELS);
     for (const hook of preferences.post_unit_hooks) {
       if (!hook || typeof hook !== "object") {
         errors.push("post_unit_hooks entry must be an object");
@@ -497,7 +506,7 @@ export function validatePreferences(preferences: GSDPreferences): {
   if (preferences.pre_dispatch_hooks && Array.isArray(preferences.pre_dispatch_hooks)) {
     const validPreHooks: PreDispatchHookConfig[] = [];
     const seenPreNames = new Set<string>();
-    const knownUnitTypes = new Set<string>(KNOWN_UNIT_TYPES);
+    const knownUnitTypes = new Set<string>(KNOWN_UNIT_LABELS);
     const validActions = new Set(["modify", "skip", "replace"]);
     for (const hook of preferences.pre_dispatch_hooks) {
       if (!hook || typeof hook !== "object") {
@@ -1283,7 +1292,7 @@ export function validatePreferences(preferences: GSDPreferences): {
       const tp = preferences.thinking_policy as Record<string, unknown>;
       const validTp: ThinkingPolicyConfig = {};
       const validLevels = new Set<string>(KNOWN_THINKING_LEVELS);
-      const knownUnitTypeSet = new Set<string>(KNOWN_UNIT_TYPES);
+      const knownUnitTypeSet = new Set<string>(KNOWN_UNIT_LABELS);
 
       // YAML parses unquoted `off` as boolean false. Coerce so that the user
       // can write `default: off` without quoting (better UX).
@@ -1334,7 +1343,7 @@ export function validatePreferences(preferences: GSDPreferences): {
           for (const [key, raw] of Object.entries(tp.unitTypes as Record<string, unknown>)) {
             if (!knownUnitTypeSet.has(key)) {
               errors.push(
-                `thinking_policy.unitTypes["${key}"] is not a known unit type. Valid: ${KNOWN_UNIT_TYPES.join(", ")}`,
+                `thinking_policy.unitTypes["${key}"] is not a known unit type. Valid: ${KNOWN_UNIT_LABELS.join(", ")}`,
               );
               continue;
             }

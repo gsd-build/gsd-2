@@ -150,7 +150,8 @@ export async function handleAutoCommand(trimmed: string, ctx: ExtensionCommandCo
 
   if (trimmed === "") {
     if (!(await guardRemoteSession(ctx, pi))) return true;
-    startAutoDetached(ctx, pi, projectRoot(), false, { step: true });
+    const { showSmartEntry } = await import("../../guided-flow.js");
+    await showSmartEntry(ctx, pi, projectRoot(), { step: true });
     return true;
   }
 

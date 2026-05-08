@@ -308,6 +308,7 @@ function includeSupersededMemories(rankedActive: Memory[]): Memory[] {
         scope: (row["scope"] as string) ?? "project",
         tags,
         structured_fields: structuredFields,
+        last_hit_at: (row["last_hit_at"] as string | null) ?? null,
       };
     });
   } catch {

@@ -205,17 +205,22 @@ test("readTransaction logs ROLLBACK failures as split-brain signal", () => {
   );
 });
 
-// ─── Runtime: state.ts and workflow-projections.ts log silent bailouts ─────
+// ─── Runtime: startup/projection diagnostics stay explicit ─────────────────
 
-test("state.ts logs roadmap read failures instead of silently continuing", () => {
-  const stateSrc = readFileSync(
-    join(import.meta.dirname, "..", "state.ts"),
+test("auto-start initializes the DB without implicit markdown migration", () => {
+  const autoStartSrc = readFileSync(
+    join(import.meta.dirname, "..", "auto-start.ts"),
     "utf-8",
   );
+  assert.doesNotMatch(
+    autoStartSrc,
+    /migrateFromMarkdown|md-importer/,
+    "auto-start must not import markdown into the runtime DB implicitly",
+  );
   assert.match(
-    stateSrc,
-    /logWarning\("state",\s*"reconcileDiskToDb: roadmap read failed/,
-    "state.ts reconcileDiskToDb should log roadmap read failures",
+    autoStartSrc,
+    /failed to initialize project database/,
+    "DB initialization failures should still be logged",
   );
 });
 

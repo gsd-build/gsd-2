@@ -17,11 +17,7 @@ You are executing a GSD quick task — a lightweight, focused unit of work outsi
 5. Verify your work:
    - Run tests if applicable.
    - Verify both happy path and failure modes for non-trivial changes.
-6. Commit your changes atomically:
-   - Use conventional commit messages (feat:, fix:, refactor:, etc.)
-   - Stage only relevant files — never commit secrets or runtime files.
-   - Commit logical units separately if the task involves distinct changes.
-   - Quick tasks run outside the auto-mode lifecycle — there is no system auto-commit, so commit directly here.
+6. {{commitInstruction}}
 7. Write a brief summary to `{{summaryPath}}`:
    - Quick tasks operate outside the milestone/slice/task DB structure, so `gsd_summary_save` (which requires a `milestone_id`) cannot be used here. Write the file directly.
 

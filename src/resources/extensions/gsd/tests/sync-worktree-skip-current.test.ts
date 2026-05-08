@@ -1,12 +1,9 @@
 /**
- * Regression test for #3641 — syncWorktreeStateBack skips current milestone
+ * Regression test for DB-authoritative syncWorktreeStateBack behavior.
  *
- * When syncing worktree state back to main, the current milestone being
- * merged should be skipped. Its files are already in the milestone branch
- * and copying them back would conflict with the squash merge.
- *
- * The fix adds a `mid === milestoneId` skip guard inside the milestone
- * iteration loop in syncWorktreeStateBack.
+ * Worktree milestone projections are not authoritative. syncWorktreeStateBack
+ * may reconcile a legacy worktree DB and copy diagnostics, but must not copy
+ * milestone markdown directories back into the project root.
  */
 
 import { describe, it } from 'node:test'
@@ -20,7 +17,7 @@ const src = readFileSync(
   'utf-8',
 )
 
-describe('syncWorktreeStateBack skips current milestone (#3641)', () => {
+describe('syncWorktreeStateBack does not copy worktree milestone projections', () => {
   it('syncWorktreeStateBack function exists', () => {
     assert.ok(
       src.includes('function syncWorktreeStateBack('),
@@ -28,7 +25,7 @@ describe('syncWorktreeStateBack skips current milestone (#3641)', () => {
     )
   })
 
-  it('mid === milestoneId skip guard exists in the milestone loop', () => {
+  it('does not iterate worktree milestones for copy-back', () => {
     // Find syncWorktreeStateBack
     const fnStart = src.indexOf('function syncWorktreeStateBack(')
     assert.ok(fnStart !== -1)
@@ -36,31 +33,11 @@ describe('syncWorktreeStateBack skips current milestone (#3641)', () => {
     // Get a reasonable portion of the function
     const fnBlock = extractSourceRegion(src, 'function syncWorktreeStateBack(', { fromIdx: fnStart })
 
-    // Find the for loop iterating milestones
-    const loopIdx = fnBlock.indexOf('for (const mid of wtMilestones)')
-    assert.ok(loopIdx !== -1, 'milestone iteration loop must exist')
-
-    // After the loop, there should be the skip guard
-    const loopBody = extractSourceRegion(fnBlock, 'for (const mid of wtMilestones)', { fromIdx: loopIdx })
-    assert.ok(
-      loopBody.includes('mid === milestoneId'),
-      'mid === milestoneId skip guard must exist inside the milestone loop',
-    )
-    assert.ok(
-      loopBody.includes('continue'),
-      'skip guard must use continue to skip the current milestone',
-    )
+    assert.ok(!fnBlock.includes('for (const mid of wtMilestones)'), 'must not iterate worktree milestones')
+    assert.ok(!fnBlock.includes('syncMilestoneDir('), 'must not copy milestone markdown projections')
   })
 
-  it('syncMilestoneDir is still called for non-current milestones', () => {
-    const fnStart = src.indexOf('function syncWorktreeStateBack(')
-    assert.ok(fnStart !== -1)
-
-    const fnBlock = extractSourceRegion(src, 'function syncWorktreeStateBack(', { fromIdx: fnStart })
-
-    assert.ok(
-      fnBlock.includes('syncMilestoneDir('),
-      'syncMilestoneDir must still be called for other milestones',
-    )
+  it('legacy milestone copy helper has been removed', () => {
+    assert.ok(!src.includes('function syncMilestoneDir('), 'syncMilestoneDir helper should not exist')
   })
 })

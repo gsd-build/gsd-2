@@ -1,3 +1,4 @@
+// GSD2 — Shared interview round UI widget
 /**
  * Shared interview round UI widget.
  *
@@ -224,12 +225,24 @@ export async function showInterviewRound(
 		let showingExitConfirm = false;
 		let exitCursor = 0; // 0 = keep going (default), 1 = end interview
 		let cachedLines: string[] | undefined;
+		let completed = false;
+		let removeAbortListener: (() => void) | undefined;
+
+		function finish(result: RoundResult) {
+			if (completed) return;
+			completed = true;
+			removeAbortListener?.();
+			done(result);
+		}
 
 		// External cancellation (e.g. remote channel won the race)
 		if (opts.signal) {
-			const onAbort = () => done({ endInterview: false, answers: {} });
+			const onAbort = () => finish({ endInterview: false, answers: {} });
 			if (opts.signal.aborted) { onAbort(); }
-			else { opts.signal.addEventListener("abort", onAbort, { once: true }); }
+			else {
+				opts.signal.addEventListener("abort", onAbort, { once: true });
+				removeAbortListener = () => opts.signal?.removeEventListener("abort", onAbort);
+			}
 		}
 
 		// Editor is created once; editorTheme comes from the design system
@@ -312,7 +325,7 @@ export async function showInterviewRound(
 
 		function submit() {
 			saveEditorToState();
-			done(buildResult());
+			finish(buildResult());
 		}
 
 		function goNextOrSubmit() {
@@ -355,10 +368,10 @@ export async function showInterviewRound(
 				if (matchesKey(data, Key.up) || matchesKey(data, Key.left)) { exitCursor = 0; refresh(); return; }
 				if (matchesKey(data, Key.down) || matchesKey(data, Key.right)) { exitCursor = 1; refresh(); return; }
 				if (data === "1") { showingExitConfirm = false; refresh(); return; }
-				if (data === "2") { done({ endInterview: false, answers: {} }); return; }
+				if (data === "2") { finish({ endInterview: false, answers: {} }); return; }
 				if (matchesKey(data, Key.enter) || matchesKey(data, Key.space)) {
 					if (exitCursor === 0) { showingExitConfirm = false; refresh(); }
-					else { done({ endInterview: false, answers: {} }); }
+					else { finish({ endInterview: false, answers: {} }); }
 					return;
 				}
 				if (matchesKey(data, Key.escape)) { showingExitConfirm = false; refresh(); return; }

@@ -44,6 +44,8 @@ export interface Memory {
    * decisions table (Step 5) with the original scope/decision/choice/etc.
    */
   structured_fields: Record<string, unknown> | null;
+  /** ISO timestamp of the most recent memory_query hit. NULL until first hit. */
+  last_hit_at: string | null;
 }
 
 export type MemoryActionCreate = {
@@ -100,6 +102,27 @@ const CATEGORY_PRIORITY: Record<string, number> = {
   preference: 5,
 };
 
+// ─── Scoring Helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Time-decay factor for memory relevance scoring.
+ * Returns 1.0 for never-hit or recently-hit memories, decaying linearly to
+ * 0.7 for memories not accessed in 90+ days. Floor at 0.7 keeps old-but-valid
+ * knowledge from being fully suppressed.
+ *
+ * Defensive parsing: invalid timestamp strings (NaN from Date.parse) are
+ * treated as "no decay" rather than propagating NaN into score arithmetic.
+ * Future timestamps (clock skew, manual DB edits) clamp to daysAgo=0 so the
+ * factor stays in the documented [0.7, 1.0] contract.
+ */
+export function memoryDecayFactor(lastHitAt: string | null): number {
+  if (!lastHitAt) return 1.0;
+  const ts = Date.parse(lastHitAt);
+  if (!Number.isFinite(ts)) return 1.0;
+  const daysAgo = Math.max(0, (Date.now() - ts) / 86_400_000);
+  return Math.max(0.7, 1.0 - 0.3 * Math.min(1.0, daysAgo / 90));
+}
+
 // ─── Row Mapping ────────────────────────────────────────────────────────────
 
 function rowToMemory(row: Record<string, unknown>): Memory {
@@ -118,6 +141,7 @@ function rowToMemory(row: Record<string, unknown>): Memory {
     scope: (row['scope'] as string) ?? 'project',
     tags: parseTags(row['tags']),
     structured_fields: parseStructuredFields(row['structured_fields']),
+    last_hit_at: (row['last_hit_at'] as string | null) ?? null,
   };
 }
 
@@ -233,15 +257,39 @@ export function queryMemoriesRanked(opts: QueryMemoriesOptions): RankedMemory[] 
     : [];
 
   if (keywordHits.length === 0 && semanticHits.length === 0 && !trimmedQuery) {
-    // No query at all — fall back to the existing ranked-by-score listing.
-    return getActiveMemoriesRanked(k).map((memory) => ({
-      memory,
-      score: memory.confidence * (1 + memory.hit_count * 0.1),
-      keywordRank: null,
-      semanticRank: null,
-      confidenceBoost: memory.confidence * (1 + memory.hit_count * 0.1),
-      reason: 'ranked' as const,
-    })).filter((hit) => passesFilters(hit.memory, opts));
+    // No query at all — return top-k by decay-aware ranked score.
+    //
+    // Build the candidate pool from a direct SQL query that honors the
+    // request's activeClause (i.e. include_superseded). Using
+    // getActiveMemoriesRanked here would silently drop superseded rows even
+    // when the caller explicitly opted in, and would slice by raw score
+    // before decay/filters had a chance to reorder.
+    const candidatePool = Math.min(Math.max(k * 5, 50), 500);
+    const rows = adapter
+      .prepare(
+        `SELECT * FROM memories ${activeClause}
+         ORDER BY (confidence * (1.0 + hit_count * 0.1)) DESC
+         LIMIT :limit`,
+      )
+      .all({ ':limit': candidatePool });
+
+    const ranked: RankedMemory[] = [];
+    for (const row of rows) {
+      const memory = rowToMemory(row);
+      if (!passesFilters(memory, opts)) continue;
+      const decay = memoryDecayFactor(memory.last_hit_at);
+      const score = memory.confidence * (1 + memory.hit_count * 0.1) * decay;
+      ranked.push({
+        memory,
+        score,
+        keywordRank: null,
+        semanticRank: null,
+        confidenceBoost: score,
+        reason: 'ranked' as const,
+      });
+    }
+    ranked.sort((a, b) => b.score - a.score);
+    return ranked.slice(0, k);
   }
 
   // 3) Reciprocal rank fusion — each hit contributes 1/(rrfK + rank).
@@ -275,7 +323,7 @@ export function queryMemoriesRanked(opts: QueryMemoriesOptions): RankedMemory[] 
   const ranked: RankedMemory[] = [];
   for (const entry of fused.values()) {
     if (!passesFilters(entry.memory, opts)) continue;
-    const boost = entry.memory.confidence * (1 + entry.memory.hit_count * 0.1);
+    const boost = entry.memory.confidence * (1 + entry.memory.hit_count * 0.1) * memoryDecayFactor(entry.memory.last_hit_at);
     const reason: RankedMemory['reason'] =
       entry.kwRank != null && entry.semRank != null
         ? 'both'
@@ -313,6 +361,8 @@ function passesFilters(memory: Memory, filters: QueryMemoriesFilters): boolean {
   return true;
 }
 
+let ftsWarningEmitted = false;
+
 function keywordSearch(
   adapter: NonNullable<ReturnType<typeof _getAdapter>>,
   rawQuery: string,
@@ -340,14 +390,29 @@ function keywordSearch(
     }
   }
 
-  // LIKE fallback — scans the candidate pool.
+  // LIKE fallback — scans a capped candidate pool.
+  if (!ftsWarningEmitted) {
+    ftsWarningEmitted = true;
+    logWarning('memory-store', 'FTS5 unavailable — using LIKE fallback scan (consider enabling FTS5)');
+  }
+
   const terms = rawQuery
     .toLowerCase()
     .split(/[^a-z0-9_]+/)
     .filter((t) => t.length >= 2);
   if (terms.length === 0) return [];
 
-  const rows = adapter.prepare(`SELECT * FROM memories ${activeClause}`).all();
+  const preScanCap = Math.min(limit * 20, 2000);
+  // ORDER BY confidence-weighted hit_count DESC so the cap keeps the most
+  // valuable candidates instead of the oldest-by-rowid (which would silently
+  // exclude recently-stored memories on tables larger than preScanCap).
+  const rows = adapter
+    .prepare(
+      `SELECT * FROM memories ${activeClause}
+       ORDER BY (confidence * (1.0 + hit_count * 0.1)) DESC
+       LIMIT :preScanCap`,
+    )
+    .all({ ':preScanCap': preScanCap });
   const scored: Array<{ memory: Memory; score: number }> = [];
   for (const row of rows) {
     const memory = rowToMemory(row);

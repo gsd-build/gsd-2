@@ -8,7 +8,7 @@ const __dirname = dirname(__filename)
 let mainWindow: BrowserWindow | null = null
 
 function createWindow(): BrowserWindow {
-  const preload = join(__dirname, '../preload/index.mjs')
+  const preload = join(__dirname, '../preload/index.cjs')
 
   const window = new BrowserWindow({
     width: 1400,

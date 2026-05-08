@@ -5,8 +5,8 @@
  * from the main repo's .gsd/ into the worktree's .gsd/ for the
  * specified milestone, and deletes gsd.db so it rebuilds from fresh state.
  *
- * Also verifies that syncWorktreeStateBack recurses into tasks/ subdirectories
- * so task-level summaries are not dropped on milestone teardown (#1678).
+ * Also verifies that syncWorktreeStateBack does not import worktree markdown
+ * projections back into the project root.
  *
  * Covers:
  *   - Milestone directory synced from main to worktree
@@ -15,12 +15,12 @@
  *   - No-op when paths are equal
  *   - No-op when milestoneId is null
  *   - Non-existent directories handled gracefully
- *   - syncWorktreeStateBack recurses into tasks/ subdirectory (#1678)
- *   - syncWorktreeStateBack syncs root-level .gsd/ files (REQUIREMENTS, PROJECT, etc.)
- *   - syncWorktreeStateBack syncs ALL milestone directories, not just the current one
- *   - syncWorktreeStateBack handles next-milestone artifacts created during completion
+ *   - syncWorktreeStateBack skips milestone markdown projections
+ *   - syncWorktreeStateBack does not import root-level .gsd/ state projections
+ *   - syncWorktreeStateBack does not copy worktree milestone projections back
+ *   - syncWorktreeStateBack leaves next-milestone projections DB/project-root authoritative
  *   - syncGsdStateToWorktree syncs non-standard milestone dir names (#1547)
- *   - syncWorktreeStateBack syncs non-standard milestone dir names (#1547)
+ *   - syncWorktreeStateBack skips non-standard milestone projection dir names
  */
 
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
@@ -213,8 +213,8 @@ describe('worktree-sync-milestones', async () => {
     }
   }
 
-  // ─── 8. syncWorktreeStateBack recurses into tasks/ (#1678) ───────────
-  console.log('\n=== 8. syncWorktreeStateBack copies tasks/ subdirectory (#1678) ===');
+  // ─── 8. syncWorktreeStateBack does not copy task projections ───────────
+  console.log('\n=== 8. syncWorktreeStateBack leaves task projections in worktree ===');
   {
     const mainBase = mkdtempSync(join(tmpdir(), 'gsd-wt-back-main-'));
     const wtBase = mkdtempSync(join(tmpdir(), 'gsd-wt-back-wt-'));
@@ -232,27 +232,26 @@ describe('worktree-sync-milestones', async () => {
       // Main project root starts with only the milestone directory (no slices yet)
       mkdirSync(join(mainBase, '.gsd', 'milestones', 'M002'), { recursive: true });
 
-      // Pass M001 as milestoneId (the one being merged/skipped), M002 should still sync
       const { synced } = syncWorktreeStateBack(mainBase, wtBase, 'M001');
 
       const mainSliceDir = join(mainBase, '.gsd', 'milestones', 'M002', 'slices', 'S01');
       const mainTasksDir = join(mainSliceDir, 'tasks');
 
       assert.ok(
-        existsSync(join(mainSliceDir, 'S01-SUMMARY.md')),
-        '#1678: slice SUMMARY synced to project root',
+        !existsSync(join(mainSliceDir, 'S01-SUMMARY.md')),
+        'slice SUMMARY projection is not copied to project root',
       );
       assert.ok(
-        existsSync(join(mainTasksDir, 'T01-SUMMARY.md')),
-        '#1678: task T01-SUMMARY synced to project root',
+        !existsSync(join(mainTasksDir, 'T01-SUMMARY.md')),
+        'task T01-SUMMARY projection is not copied to project root',
       );
       assert.ok(
-        existsSync(join(mainTasksDir, 'T02-SUMMARY.md')),
-        '#1678: task T02-SUMMARY synced to project root',
+        !existsSync(join(mainTasksDir, 'T02-SUMMARY.md')),
+        'task T02-SUMMARY projection is not copied to project root',
       );
       assert.ok(
-        synced.some((p) => p.includes('tasks/T01-SUMMARY.md')),
-        '#1678: task summary appears in synced list',
+        !synced.some((p) => p.includes('tasks/T01-SUMMARY.md')),
+        'task summary does not appear in synced list',
       );
     } finally {
       rmSync(mainBase, { recursive: true, force: true });
@@ -260,8 +259,8 @@ describe('worktree-sync-milestones', async () => {
     }
   }
 
-  // ─── 9. syncWorktreeStateBack syncs root-level .gsd/ files ──────────
-  console.log('\n=== 9. syncWorktreeStateBack syncs root-level files (REQUIREMENTS, PROJECT) ===');
+  // ─── 9. syncWorktreeStateBack does not import root-level state projections ──────────
+  console.log('\n=== 9. syncWorktreeStateBack leaves root-level state projections authoritative ===');
   {
     const mainBase = mkdtempSync(join(tmpdir(), 'gsd-wt-back-root-main-'));
     const wtBase = mkdtempSync(join(tmpdir(), 'gsd-wt-back-root-wt-'));
@@ -281,31 +280,31 @@ describe('worktree-sync-milestones', async () => {
 
       const { synced } = syncWorktreeStateBack(mainBase, wtBase, 'M001');
 
-      // Root-level files should be overwritten with worktree versions
+      // Root-level state projections must not be overwritten with worktree versions.
       const reqContent = readFileSync(join(mainBase, '.gsd', 'REQUIREMENTS.md'), 'utf-8');
       assert.ok(
-        reqContent.includes('R002'),
-        'REQUIREMENTS.md updated with worktree content',
+        !reqContent.includes('R002'),
+        'REQUIREMENTS.md ignores worktree projection content',
       );
 
       const projContent = readFileSync(join(mainBase, '.gsd', 'PROJECT.md'), 'utf-8');
       assert.ok(
-        projContent.includes('M002'),
-        'PROJECT.md updated with worktree content',
+        !projContent.includes('M002'),
+        'PROJECT.md ignores worktree projection content',
       );
 
       assert.ok(
-        existsSync(join(mainBase, '.gsd', 'KNOWLEDGE.md')),
-        'KNOWLEDGE.md synced from worktree',
+        !existsSync(join(mainBase, '.gsd', 'KNOWLEDGE.md')),
+        'KNOWLEDGE.md is not copied back from worktree',
       );
 
       assert.ok(
-        synced.includes('REQUIREMENTS.md'),
-        'REQUIREMENTS.md appears in synced list',
+        !synced.includes('REQUIREMENTS.md'),
+        'REQUIREMENTS.md does not appear in synced list',
       );
       assert.ok(
-        synced.includes('PROJECT.md'),
-        'PROJECT.md appears in synced list',
+        !synced.includes('PROJECT.md'),
+        'PROJECT.md does not appear in synced list',
       );
     } finally {
       rmSync(mainBase, { recursive: true, force: true });
@@ -313,8 +312,8 @@ describe('worktree-sync-milestones', async () => {
     }
   }
 
-  // ─── 10. syncWorktreeStateBack syncs ALL milestone directories ─────
-  console.log('\n=== 10. syncWorktreeStateBack syncs all milestone dirs, not just current ===');
+  // ─── 10. syncWorktreeStateBack does not copy milestone directories ─────
+  console.log('\n=== 10. syncWorktreeStateBack does not copy milestone dirs ===');
   {
     const mainBase = mkdtempSync(join(tmpdir(), 'gsd-wt-back-all-main-'));
     const wtBase = mkdtempSync(join(tmpdir(), 'gsd-wt-back-all-wt-'));
@@ -352,19 +351,19 @@ describe('worktree-sync-milestones', async () => {
         'M001 SUMMARY NOT synced (current milestone skipped to prevent merge conflicts)',
       );
 
-      // M002 should be synced (other milestone — not skipped)
+      // M002 should not be synced either; worktree projections are not authoritative.
       assert.ok(
-        existsSync(join(mainBase, '.gsd', 'milestones', 'M002-abc123', 'M002-abc123-CONTEXT.md')),
-        'M002 CONTEXT synced to main (next-milestone fix)',
+        !existsSync(join(mainBase, '.gsd', 'milestones', 'M002-abc123', 'M002-abc123-CONTEXT.md')),
+        'M002 CONTEXT projection is not copied to main',
       );
       assert.ok(
-        existsSync(join(mainBase, '.gsd', 'milestones', 'M002-abc123', 'M002-abc123-ROADMAP.md')),
-        'M002 ROADMAP synced to main (next-milestone fix)',
+        !existsSync(join(mainBase, '.gsd', 'milestones', 'M002-abc123', 'M002-abc123-ROADMAP.md')),
+        'M002 ROADMAP projection is not copied to main',
       );
 
       assert.ok(
-        synced.some((p) => p.includes('M002-abc123')),
-        'M002 appears in synced list',
+        !synced.some((p) => p.includes('M002-abc123')),
+        'M002 does not appear in synced list',
       );
     } finally {
       rmSync(mainBase, { recursive: true, force: true });
@@ -373,7 +372,7 @@ describe('worktree-sync-milestones', async () => {
   }
 
   // ─── 11. Full M006→M007 transition scenario ───────────────────────────
-  console.log('\n=== 11. complete-milestone creates next-milestone artifacts that survive sync ===');
+  console.log('\n=== 11. complete-milestone worktree projections do not overwrite project root ===');
   {
     const mainBase = mkdtempSync(join(tmpdir(), 'gsd-wt-transition-main-'));
     const wtBase = mkdtempSync(join(tmpdir(), 'gsd-wt-transition-wt-'));
@@ -419,27 +418,27 @@ describe('worktree-sync-milestones', async () => {
         'M006 SUMMARY NOT synced (current milestone skipped)',
       );
 
-      // Verify M007 artifacts synced (the critical fix — other milestones still sync)
+      // Verify M007 worktree projections are not copied back.
       assert.ok(
-        existsSync(join(mainBase, '.gsd', 'milestones', 'M007-wortc8', 'M007-wortc8-CONTEXT.md')),
-        'M007 CONTEXT synced to main (next-milestone)',
+        !existsSync(join(mainBase, '.gsd', 'milestones', 'M007-wortc8', 'M007-wortc8-CONTEXT.md')),
+        'M007 CONTEXT projection is not copied to main',
       );
       assert.ok(
-        existsSync(join(mainBase, '.gsd', 'milestones', 'M007-wortc8', 'M007-wortc8-ROADMAP.md')),
-        'M007 ROADMAP synced to main (next-milestone)',
+        !existsSync(join(mainBase, '.gsd', 'milestones', 'M007-wortc8', 'M007-wortc8-ROADMAP.md')),
+        'M007 ROADMAP projection is not copied to main',
       );
 
-      // Verify root-level files updated
+      // Verify root-level projections remain project-root authoritative.
       const reqContent = readFileSync(join(mainBase, '.gsd', 'REQUIREMENTS.md'), 'utf-8');
       assert.ok(
-        reqContent.includes('R090'),
-        'REQUIREMENTS.md has R090 from worktree',
+        !reqContent.includes('R090'),
+        'REQUIREMENTS.md ignores worktree projection updates',
       );
 
       const projContent = readFileSync(join(mainBase, '.gsd', 'PROJECT.md'), 'utf-8');
       assert.ok(
-        projContent.includes('M007'),
-        'PROJECT.md has M007 from worktree',
+        !projContent.includes('M007'),
+        'PROJECT.md ignores worktree projection updates',
       );
     } finally {
       rmSync(mainBase, { recursive: true, force: true });
@@ -478,8 +477,8 @@ describe('worktree-sync-milestones', async () => {
     }
   }
 
-  // ─── 13. syncWorktreeStateBack syncs QUEUE.md and completed-units.json (#1787) ──
-  console.log('\n=== 13. QUEUE.md and completed-units.json synced from worktree (#1787) ===');
+  // ─── 13. syncWorktreeStateBack skips QUEUE.md but preserves completed-units diagnostics ──
+  console.log('\n=== 13. QUEUE.md skipped; completed-units.json diagnostic synced ===');
   {
     const mainBase = mkdtempSync(join(tmpdir(), 'gsd-wt-back-queue-main-'));
     const wtBase = mkdtempSync(join(tmpdir(), 'gsd-wt-back-queue-wt-'));
@@ -488,7 +487,7 @@ describe('worktree-sync-milestones', async () => {
       mkdirSync(join(mainBase, '.gsd', 'milestones', 'M001'), { recursive: true });
       mkdirSync(join(wtBase, '.gsd', 'milestones', 'M001'), { recursive: true });
 
-      // Worktree has QUEUE.md and completed-units.json written during milestone closeout
+      // Worktree has QUEUE.md projection and completed-units.json diagnostic.
       writeFileSync(join(wtBase, '.gsd', 'QUEUE.md'), '# Queue\n- M002 next');
       writeFileSync(
         join(wtBase, '.gsd', 'completed-units.json'),
@@ -507,22 +506,17 @@ describe('worktree-sync-milestones', async () => {
 
       const { synced } = syncWorktreeStateBack(mainBase, wtBase, 'M001');
 
-      // QUEUE.md should be synced
+      // QUEUE.md is state/projection content and should not be copied back.
       assert.ok(
-        existsSync(join(mainBase, '.gsd', 'QUEUE.md')),
-        '#1787: QUEUE.md synced from worktree to main',
-      );
-      const queueContent = readFileSync(join(mainBase, '.gsd', 'QUEUE.md'), 'utf-8');
-      assert.ok(
-        queueContent.includes('M002 next'),
-        '#1787: QUEUE.md has correct content',
+        !existsSync(join(mainBase, '.gsd', 'QUEUE.md')),
+        'QUEUE.md is not synced from worktree to main',
       );
       assert.ok(
-        synced.includes('QUEUE.md'),
-        '#1787: QUEUE.md appears in synced list',
+        !synced.includes('QUEUE.md'),
+        'QUEUE.md does not appear in synced list',
       );
 
-      // completed-units.json should be synced
+      // completed-units.json is diagnostic and may be copied for operator visibility.
       assert.ok(
         existsSync(join(mainBase, '.gsd', 'completed-units.json')),
         '#1787: completed-units.json synced from worktree to main',
@@ -578,8 +572,8 @@ describe('worktree-sync-milestones', async () => {
     }
   }
 
-  // ─── 15. syncWorktreeStateBack syncs non-standard milestone dir names (#1547) ──
-  console.log('\n=== 15. syncWorktreeStateBack syncs non-standard milestone dir names (#1547) ===');
+  // ─── 15. syncWorktreeStateBack skips non-standard milestone dir names ──
+  console.log('\n=== 15. syncWorktreeStateBack skips non-standard milestone dir names ===');
   {
     const mainBase = mkdtempSync(join(tmpdir(), 'gsd-wt-back-custom-main-'));
     const wtBase = mkdtempSync(join(tmpdir(), 'gsd-wt-back-custom-wt-'));
@@ -601,12 +595,12 @@ describe('worktree-sync-milestones', async () => {
       const { synced } = syncWorktreeStateBack(mainBase, wtBase, 'M001');
 
       assert.ok(
-        existsSync(join(mainBase, '.gsd', 'milestones', 'sprint-beta', 'SUMMARY.md')),
-        '#1547: non-standard milestone dir "sprint-beta" synced back to main',
+        !existsSync(join(mainBase, '.gsd', 'milestones', 'sprint-beta', 'SUMMARY.md')),
+        'non-standard milestone projection is not copied back to main',
       );
       assert.ok(
-        synced.some((p) => p.includes('sprint-beta')),
-        '#1547: sprint-beta appears in synced list',
+        !synced.some((p) => p.includes('sprint-beta')),
+        'sprint-beta does not appear in synced list',
       );
     } finally {
       rmSync(mainBase, { recursive: true, force: true });

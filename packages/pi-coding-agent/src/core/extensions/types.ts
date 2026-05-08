@@ -289,6 +289,12 @@ export interface ExtensionContext {
 	compact(options?: CompactOptions): void;
 	/** Get the current effective system prompt. */
 	getSystemPrompt(): string;
+	/**
+	 * Set or clear an in-memory compaction threshold-percent override (0 < value < 1).
+	 * Pass `undefined` to clear. The override is not persisted; host integrations
+	 * are expected to re-apply on each session_start.
+	 */
+	setCompactionThresholdOverride(percent: number | undefined): void;
 }
 
 /**
@@ -303,10 +309,13 @@ export interface ExtensionCommandContext extends ExtensionContext {
 	newSession(options?: {
 		parentSession?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;
+		/** Explicit workspace root for the new session/tool runtime.
+		 *  When omitted, newSession() captures process.cwd() for backwards compatibility. */
+		workspaceRoot?: string;
 		/** When aborted before the session is fully configured, newSession() returns
 		 *  early without rebuilding the tool runtime. Used by runUnit() to discard
 		 *  a late-resolving newSession() after the session-creation timeout fires,
-		 *  preventing the tool runtime from being rebuilt with the wrong cwd (#3731). */
+		 *  preventing the tool runtime from being rebuilt with a stale workspace root (#3731). */
 		abortSignal?: AbortSignal;
 	}): Promise<{ cancelled: boolean }>;
 
@@ -842,6 +851,13 @@ export interface BeforeModelSelectResult {
 	modelId: string;
 }
 
+export interface AdjustToolSetRequestCustomMessage {
+	/** Index in the post-transform AgentMessage context. */
+	index: number;
+	/** Custom message type only; prompt/content text is intentionally omitted. */
+	customType: string;
+}
+
 /**
  * Fired after model selection to allow extensions to adjust the active tool set (ADR-005 Phase 4).
  * Extensions can add, remove, or reorder tools based on the selected model's provider capabilities.
@@ -858,6 +874,12 @@ export interface AdjustToolSetEvent {
 	activeToolNames: string[];
 	/** Tools already filtered by provider compatibility */
 	filteredTools: string[];
+	/**
+	 * Custom message metadata in the current request tail, measured from the
+	 * latest assistant message. This is metadata-only so extensions can scope
+	 * queued custom-message turns without seeing raw prompt content.
+	 */
+	requestCustomMessages?: AdjustToolSetRequestCustomMessage[];
 }
 
 /** Result from adjust_tool_set event handler. Return { toolNames } to override tool set. */
@@ -1480,6 +1502,20 @@ export interface ExtensionAPI {
 	/** Set the active tools by name. */
 	setActiveTools(toolNames: string[]): void;
 
+	/**
+	 * Get the prompt-only skill catalog filter, if one is active.
+	 * Undefined means all loaded skills remain visible in <available_skills>.
+	 */
+	getVisibleSkills(): string[] | undefined;
+
+	/**
+	 * Set or clear the prompt-only skill catalog filter.
+	 *
+	 * This changes which loaded skills are advertised in <available_skills>;
+	 * it does not unload skills or disable the Skill tool.
+	 */
+	setVisibleSkills(skillNames: string[] | undefined): void;
+
 	/** Get available slash commands in the current session. */
 	getCommands(): SlashCommandInfo[];
 
@@ -1721,6 +1757,8 @@ export interface ExtensionActions {
 	getActiveTools: () => string[];
 	getAllTools: () => ToolInfo[];
 	setActiveTools: (toolNames: string[]) => void;
+	getVisibleSkills: () => string[] | undefined;
+	setVisibleSkills: (skillNames: string[] | undefined) => void;
 	refreshTools: () => void;
 	getCommands: () => SlashCommandInfo[];
 	setModel: (model: Model<any>, options?: { persist?: boolean }) => Promise<boolean>;
@@ -1741,6 +1779,7 @@ export interface ExtensionContextActions {
 	getContextUsage: () => ContextUsage | undefined;
 	compact: (options?: CompactOptions) => void;
 	getSystemPrompt: () => string;
+	setCompactionThresholdOverride: (percent: number | undefined) => void;
 }
 
 /**
@@ -1752,6 +1791,8 @@ export interface ExtensionCommandContextActions {
 	newSession: (options?: {
 		parentSession?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;
+		/** See ExtensionCommandContext.newSession for docs. */
+		workspaceRoot?: string;
 		/** See ExtensionCommandContext.newSession for docs (#3731). */
 		abortSignal?: AbortSignal;
 	}) => Promise<{ cancelled: boolean }>;

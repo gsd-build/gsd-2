@@ -16,7 +16,7 @@ Dispatch ALL slices simultaneously using the `subagent` tool in **parallel mode*
 
 1. Call `subagent` with `tasks: [...]` containing one entry per slice below
 2. Wait for ALL subagents to complete
-3. Verify each slice's RESEARCH file was written (check the `.gsd/{{mid}}/` directory)
+3. Verify each slice's RESEARCH file was written (check `.gsd/milestones/{{mid}}/slices/<slice-id>/`)
 4. If a subagent failed to write its RESEARCH file, retry it **once** individually
 5. If it fails a second time, write a partial RESEARCH file for that slice with a `## BLOCKER` section explaining the failure — do NOT retry again
 6. Report which slices completed research and which (if any) needed a blocker note

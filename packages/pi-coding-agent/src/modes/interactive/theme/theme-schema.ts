@@ -70,6 +70,19 @@ export const ThemeJsonSchema = Type.Object({
     thinkingXhigh: ColorValueSchema,
     // Bash Mode (1 color)
     bashMode: ColorValueSchema,
+    // Adaptive TUI semantic tokens (optional; defaults are derived from core colors)
+    surfaceBorder: Type.Optional(ColorValueSchema),
+    surfaceMuted: Type.Optional(ColorValueSchema),
+    surfaceTitle: Type.Optional(ColorValueSchema),
+    surfaceAccent: Type.Optional(ColorValueSchema),
+    toolRunning: Type.Optional(ColorValueSchema),
+    toolSuccess: Type.Optional(ColorValueSchema),
+    toolError: Type.Optional(ColorValueSchema),
+    toolMuted: Type.Optional(ColorValueSchema),
+    modeWorkflow: Type.Optional(ColorValueSchema),
+    modeValidation: Type.Optional(ColorValueSchema),
+    modeDebug: Type.Optional(ColorValueSchema),
+    modeCompact: Type.Optional(ColorValueSchema),
   }),
   export: Type.Optional(
     Type.Object({

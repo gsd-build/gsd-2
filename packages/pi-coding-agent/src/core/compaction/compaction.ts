@@ -86,6 +86,13 @@ export interface CompactionSettings {
 	enabled: boolean;
 	reserveTokens: number;
 	keepRecentTokens: number;
+	/**
+	 * Optional percent-of-context-window threshold (0 < value < 1). When set,
+	 * `shouldCompact()` fires once `contextTokens > contextWindow * thresholdPercent`,
+	 * overriding the absolute `reserveTokens` calculation. Lets host integrations
+	 * (e.g. GSD) express compaction policy as a fraction independent of model size.
+	 */
+	thresholdPercent?: number;
 }
 
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
@@ -185,9 +192,20 @@ export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEst
 
 /**
  * Check if compaction should trigger based on context usage.
+ *
+ * When `thresholdPercent` is set (and within (0, 1)), it overrides the absolute
+ * `reserveTokens` calculation: compaction fires at `contextWindow * thresholdPercent`.
+ * Otherwise the legacy `contextWindow - reserveTokens` headroom is used.
  */
 export function shouldCompact(contextTokens: number, contextWindow: number, settings: CompactionSettings): boolean {
 	if (!settings.enabled) return false;
+	if (
+		settings.thresholdPercent !== undefined &&
+		settings.thresholdPercent > 0 &&
+		settings.thresholdPercent < 1
+	) {
+		return contextTokens > contextWindow * settings.thresholdPercent;
+	}
 	return contextTokens > contextWindow - settings.reserveTokens;
 }
 

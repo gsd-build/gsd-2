@@ -1,6 +1,6 @@
 {
   "name": "@gsd-build/rpc-client",
-  "version": "2.78.1",
+  "version": "2.80.0",
   "description": "Standalone RPC client SDK for GSD — zero internal dependencies",
   "license": "MIT",
   "gsd": {
@@ -32,6 +32,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node --test dist/rpc-client.test.js"
+  },
+  "dependencies": {
+    "@gsd-build/contracts": "^2.80.0"
   },
   "engines": {
     "node": ">=22.0.0"

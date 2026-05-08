@@ -38,5 +38,6 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "thinking", description: "Set thinking level (off/minimal/low/medium/high/xhigh)" },
 	{ name: "edit-mode", description: "Toggle edit mode (standard/hashline)" },
 	{ name: "terminal", description: "Run a shell command directly (e.g. /terminal ping -c3 1.1.1.1)" },
+	{ name: "tui", description: "Configure TUI layout mode (e.g. /tui mode workflow)" },
 	{ name: "quit", description: "Quit pi" },
 ];

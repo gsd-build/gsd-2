@@ -101,3 +101,30 @@ test("registerSigtermHandler deregisters previous handler from all signals", () 
   // Clean up
   deregisterSigtermHandler(handler2);
 });
+
+test("registered signal handler runs best-effort cleanup before exiting", () => {
+  let cleanupCalled = false;
+  let exitCode: number | string | null | undefined;
+  const originalExit = process.exit;
+  const handler = registerSigtermHandler(
+    "/tmp/test-signal-cleanup",
+    null,
+    () => {
+      cleanupCalled = true;
+    },
+  );
+
+  (process as any).exit = ((code?: number | string | null) => {
+    exitCode = code;
+    throw new Error("process.exit intercepted");
+  }) as never;
+
+  try {
+    assert.throws(() => handler(), /process\.exit intercepted/);
+    assert.equal(cleanupCalled, true);
+    assert.equal(exitCode, 0);
+  } finally {
+    (process as any).exit = originalExit;
+    deregisterSigtermHandler(handler);
+  }
+});

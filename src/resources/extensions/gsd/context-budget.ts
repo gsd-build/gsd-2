@@ -8,7 +8,12 @@
  * @see D001 (module location), D002 (200K fallback), D003 (section-boundary truncation)
  */
 
-import { type TokenProvider, getCharsPerToken } from "./token-counter.js";
+import {
+  type TokenProvider,
+  getCharsPerToken,
+  isAccurateCountingAvailable,
+  countTokensSync,
+} from "./token-counter.js";
 
 // ─── Budget ratio constants ──────────────────────────────────────────────────
 // Percentages of total context window allocated to each budget category.
@@ -28,6 +33,27 @@ const CHARS_PER_TOKEN = 4;
 
 /** Default context window when none can be resolved (D002) */
 const DEFAULT_CONTEXT_WINDOW = 200_000;
+
+/** Conservative effective context for Claude Code subscription routing (#4676) */
+const CLAUDE_CODE_EFFECTIVE_CONTEXT_WINDOW = 200_000;
+
+/**
+ * Cached empirical chars-per-token from a tiktoken probe, keyed by provider.
+ * countTokensSync's fallback path is provider-aware, so we cache per-provider
+ * to preserve that distinction once the encoder warms. The cl100k_base encoder
+ * itself gives a stable ratio for ASCII English so a single probe per provider
+ * key is sufficient. Empty map means "not yet probed" or "encoder unavailable".
+ */
+const _empiricalCharsPerTokenByProvider = new Map<string, number>();
+
+/**
+ * Test hook — clears the empirical chars-per-token cache so test cases that
+ * assert against the static char-ratio fallback aren't polluted by a prior
+ * tiktoken-warmed run in the same process. Production code must not call this.
+ */
+export function _resetEmpiricalCacheForTest(): void {
+  _empiricalCharsPerTokenByProvider.clear();
+}
 
 /** Percentage of context consumed before suggesting a continue-here checkpoint */
 const CONTINUE_THRESHOLD_PERCENT = 70;
@@ -98,7 +124,26 @@ export interface MinimalPreferences {
 export function computeBudgets(contextWindow: number, provider?: TokenProvider): BudgetAllocation {
   const effectiveWindow = contextWindow > 0 ? contextWindow : DEFAULT_CONTEXT_WINDOW;
   const charsPerToken = provider ? getCharsPerToken(provider) : CHARS_PER_TOKEN;
-  const totalChars = effectiveWindow * charsPerToken;
+
+  // Prefer the tiktoken encoder for total-char estimation when it has been
+  // warmed (initTokenCounter resolved). The cl100k_base ratio is stable for
+  // ASCII English, so probe once per provider and cache — computeBudgets is
+  // called multiple times per prompt build and the probe encode is otherwise
+  // wasted work.
+  let totalChars: number;
+  if (isAccurateCountingAvailable()) {
+    const providerKey = provider ?? "__default__";
+    let empirical = _empiricalCharsPerTokenByProvider.get(providerKey);
+    if (empirical === undefined) {
+      const probe = "the quick brown fox jumps over the lazy dog ".repeat(64);
+      const probeTokens = countTokensSync(probe, provider);
+      empirical = probeTokens > 0 ? probe.length / probeTokens : charsPerToken;
+      _empiricalCharsPerTokenByProvider.set(providerKey, empirical);
+    }
+    totalChars = effectiveWindow * empirical;
+  } else {
+    totalChars = effectiveWindow * charsPerToken;
+  }
 
   return {
     summaryBudgetChars: Math.floor(totalChars * SUMMARY_RATIO),
@@ -175,6 +220,7 @@ export function resolveExecutorContextWindow(
   registry: MinimalModelRegistry | undefined,
   preferences: MinimalPreferences | undefined,
   sessionContextWindow?: number,
+  sessionProvider?: string,
 ): number {
   // Step 1: Try configured executor model
   if (preferences?.models?.execution && registry) {
@@ -186,14 +232,14 @@ export function resolveExecutorContextWindow(
     if (modelId) {
       const model = findModelById(registry, modelId);
       if (model && model.contextWindow > 0) {
-        return model.contextWindow;
+        return resolveEffectiveContextWindow(model.contextWindow, model.provider);
       }
     }
   }
 
   // Step 2: Fall back to session context window
   if (sessionContextWindow && sessionContextWindow > 0) {
-    return sessionContextWindow;
+    return resolveEffectiveContextWindow(sessionContextWindow, sessionProvider);
   }
 
   // Step 3: Fall back to default (D002)
@@ -221,6 +267,13 @@ function resolveTaskCountMax(contextWindow: number): number {
     if (contextWindow >= threshold) return max;
   }
   return 3; // fallback — unreachable given tiers include 0
+}
+
+function resolveEffectiveContextWindow(contextWindow: number, provider?: string): number {
+  if (provider?.toLowerCase() === "claude-code" && contextWindow > CLAUDE_CODE_EFFECTIVE_CONTEXT_WINDOW) {
+    return CLAUDE_CODE_EFFECTIVE_CONTEXT_WINDOW;
+  }
+  return contextWindow;
 }
 
 /**

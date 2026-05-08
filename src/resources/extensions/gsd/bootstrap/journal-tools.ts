@@ -4,6 +4,13 @@ import type { ExtensionAPI } from "@gsd/pi-coding-agent";
 import { queryJournal } from "../journal.js";
 import { logWarning } from "../workflow-logger.js";
 
+function toolWorkspaceRoot(ctx: unknown): string {
+  if (ctx && typeof ctx === "object" && typeof (ctx as { cwd?: unknown }).cwd === "string") {
+    return (ctx as { cwd: string }).cwd;
+  }
+  return process.cwd();
+}
+
 export function registerJournalTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "gsd_journal_query",
@@ -36,7 +43,7 @@ export function registerJournalTools(pi: ExtensionAPI): void {
         if (params.after !== undefined) filters.after = params.after;
         if (params.before !== undefined) filters.before = params.before;
 
-        const entries = queryJournal(process.cwd(), filters);
+        const entries = queryJournal(toolWorkspaceRoot(_ctx), filters);
         const limited = entries.slice(0, params.limit ?? 100);
 
         if (limited.length === 0) {

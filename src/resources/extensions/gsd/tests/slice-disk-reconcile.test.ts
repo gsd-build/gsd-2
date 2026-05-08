@@ -1,10 +1,8 @@
 /**
  * slice-disk-reconcile.test.ts — #2533
  *
- * Slices that exist on disk (in ROADMAP.md) but are missing from the SQLite
- * database cause permanent "No slice eligible — check dependency ordering"
- * blocks. deriveStateFromDb must reconcile disk slices into the DB, just as
- * it already does for milestones (#2416).
+ * DB-authoritative state: slices that exist only in ROADMAP.md are projections
+ * and must not be imported into the SQLite database by deriveStateFromDb().
  *
  * Scenario: M001 has a ROADMAP with S01-S04. S01 and S02 have SUMMARY files
  * (complete on disk). S03 depends on S01. Only S04 is in the DB (depends on
@@ -70,7 +68,7 @@ const ROADMAP_CONTENT = `# M001: Test Milestone
 `;
 
 async function testMissingSlicesCauseBlock(): Promise<void> {
-  console.log("\n--- Test: missing DB slices cause permanent block (pre-fix) ---");
+  console.log("\n--- Test: missing DB slices are not imported from ROADMAP.md ---");
 
   const base = createFixtureBase();
   const dbPath = join(base, ".gsd", "gsd.db");
@@ -96,51 +94,11 @@ async function testMissingSlicesCauseBlock(): Promise<void> {
     invalidateStateCache();
     const state = await deriveStateFromDb(base);
 
-    // After the fix, slices S01-S03 should be reconciled into DB
     const dbSlices = getMilestoneSlices("M001");
-    assertTrue(
-      dbSlices.length === 4,
-      `All 4 roadmap slices should be in DB after reconciliation, got ${dbSlices.length}`,
-    );
-
-    // S01 and S02 should be marked complete (have SUMMARY files)
-    const s01 = dbSlices.find(s => s.id === "S01");
-    assertTrue(s01 !== undefined, "S01 should exist in DB after reconciliation");
-    if (s01) {
-      assertEq(s01.status, "complete", "S01 should be 'complete' (has SUMMARY on disk)");
-    }
-
-    const s02 = dbSlices.find(s => s.id === "S02");
-    assertTrue(s02 !== undefined, "S02 should exist in DB after reconciliation");
-    if (s02) {
-      assertEq(s02.status, "complete", "S02 should be 'complete' (has SUMMARY on disk)");
-    }
-
-    // S03 should be pending (no SUMMARY)
-    const s03 = dbSlices.find(s => s.id === "S03");
-    assertTrue(s03 !== undefined, "S03 should exist in DB after reconciliation");
-    if (s03) {
-      assertEq(s03.status, "pending", "S03 should be 'pending' (no SUMMARY on disk)");
-    }
-
-    // The state should NOT be blocked — S03 should be eligible (S01 dep satisfied)
-    assertTrue(
-      state.phase !== "blocked",
-      `Phase should not be 'blocked' after reconciliation, got '${state.phase}'`,
-    );
-
-    // Active slice should be S03 (S01 dep met, S03 is first incomplete with satisfied deps)
-    assertTrue(
-      state.activeSlice !== null,
-      "There should be an active slice after reconciliation",
-    );
-    if (state.activeSlice) {
-      assertEq(
-        state.activeSlice.id,
-        "S03",
-        "Active slice should be S03 (its dependency S01 is complete) (#2533)",
-      );
-    }
+    assertEq(dbSlices.length, 1, `Only DB slice S04 should remain, got ${dbSlices.length}`);
+    assertEq(dbSlices[0]?.id, "S04", "Disk-only slices are not inserted");
+    assertEq(state.phase, "blocked", "DB-only S04 remains blocked on missing DB dependency S03");
+    assertEq(state.activeSlice, null, "No active slice is inferred from roadmap-only rows");
   } finally {
     closeDatabase();
     cleanup(base);
@@ -148,7 +106,7 @@ async function testMissingSlicesCauseBlock(): Promise<void> {
 }
 
 async function testSliceReconciliationIdempotent(): Promise<void> {
-  console.log("\n--- Test: slice reconciliation is idempotent ---");
+  console.log("\n--- Test: disk-only slices remain absent on repeated derives ---");
 
   const base = createFixtureBase();
   const dbPath = join(base, ".gsd", "gsd.db");
@@ -178,11 +136,7 @@ async function testSliceReconciliationIdempotent(): Promise<void> {
       assertEq(s01.status, "complete", "S01 status should remain 'complete' (not overwritten)");
     }
 
-    // S02-S04 should have been added
-    assertTrue(
-      dbSlices.length === 4,
-      `Should have 4 slices after reconciliation (existing + new), got ${dbSlices.length}`,
-    );
+    assertEq(dbSlices.length, 1, `Only existing DB slice should remain, got ${dbSlices.length}`);
   } finally {
     closeDatabase();
     cleanup(base);
@@ -218,7 +172,7 @@ async function testNoRoadmapSkipsReconciliation(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  console.log("\n=== #2533: deriveStateFromDb reconciles disk slices ===");
+  console.log("\n=== deriveStateFromDb does not reconcile disk slices ===");
 
   await testMissingSlicesCauseBlock();
   await testSliceReconciliationIdempotent();

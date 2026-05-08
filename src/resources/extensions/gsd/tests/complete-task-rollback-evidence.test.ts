@@ -41,7 +41,7 @@ const VALID_PARAMS = {
   ],
 };
 
-describe("complete-task rollback cleans up verification_evidence (#2724)", () => {
+describe("complete-task projection failures keep DB completion committed", () => {
   let base: string;
 
   afterEach(() => {
@@ -75,7 +75,7 @@ describe("complete-task rollback cleans up verification_evidence (#2724)", () =>
     assert.equal(rows.length, 2, "should have 2 evidence rows after success");
   });
 
-  it("deletes verification_evidence rows on disk-render rollback", async () => {
+  it("keeps task completion and verification_evidence when disk projection write fails", async () => {
     base = makeTmpBase();
     openDatabase(join(base, ".gsd", "gsd.db"));
     insertMilestone({ id: "M001" });
@@ -87,20 +87,19 @@ describe("complete-task rollback cleans up verification_evidence (#2724)", () =>
     writeFileSync(tasksDir, "not-a-directory");
 
     const result = await handleCompleteTask(VALID_PARAMS, base);
-    assert.ok("error" in result, "should return error when disk write fails");
+    assert.ok(!("error" in result), `unexpected error: ${"error" in result ? result.error : ""}`);
+    assert.equal(result.stale, true, "result should report stale projection");
 
-    // Task should be rolled back to pending
     const adapter = _getAdapter()!;
     const task = adapter.prepare(
       `SELECT status FROM tasks WHERE milestone_id = 'M001' AND slice_id = 'S01' AND id = 'T01'`,
     ).get() as { status: string } | undefined;
     assert.ok(task, "task row should still exist");
-    assert.equal(task!.status, "pending", "task status should be rolled back to pending");
+    assert.equal(task!.status, "complete", "task status should remain complete");
 
-    // Verification evidence should be cleaned up — no orphaned rows
     const evidenceRows = adapter.prepare(
       `SELECT * FROM verification_evidence WHERE task_id = 'T01' AND slice_id = 'S01' AND milestone_id = 'M001'`,
     ).all();
-    assert.equal(evidenceRows.length, 0, "verification_evidence should be empty after rollback");
+    assert.equal(evidenceRows.length, 2, "verification_evidence should remain committed");
   });
 });

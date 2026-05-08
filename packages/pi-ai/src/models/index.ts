@@ -1,6 +1,7 @@
 import { MODELS } from "./generated/index.js";
 import { CUSTOM_MODELS } from "./custom.js";
 import { CAPABILITY_PATCHES, applyCapabilityPatches } from "./capability-patches.js";
+import { FAKE_MODEL, FAKE_MODEL_ID, FAKE_PROVIDER } from "./fake-model.js";
 import type { Api, KnownProvider, Model, Usage } from "../types.js";
 
 const modelRegistry: Map<string, Map<string, Model<Api>>> = new Map();
@@ -27,6 +28,14 @@ for (const [provider, models] of Object.entries(CUSTOM_MODELS)) {
 			providerModels.set(id, model as Model<Api>);
 		}
 	}
+}
+
+// E2E-test-only: register the fake model when GSD_FAKE_LLM_TRANSCRIPT is set.
+// Env var must be set BEFORE this module is imported. See providers/fake.ts.
+if (process.env.GSD_FAKE_LLM_TRANSCRIPT) {
+	const providerModels = new Map<string, Model<Api>>();
+	providerModels.set(FAKE_MODEL_ID, FAKE_MODEL as Model<Api>);
+	modelRegistry.set(FAKE_PROVIDER, providerModels);
 }
 
 // Apply patches to the static registry at module load

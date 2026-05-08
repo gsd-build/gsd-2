@@ -1,3 +1,5 @@
+// Project/App: GSD-2
+// File Purpose: Projection renderers for GSD workflow database rows.
 // GSD Extension — Projection Renderers (DB -> Markdown)
 // Renders PLAN.md, ROADMAP.md, SUMMARY.md, and STATE.md from database rows.
 // Projections are read-only views of engine state (Layer 3 of the architecture).
@@ -11,7 +13,9 @@ import {
   getSliceTasks,
   getVerificationEvidence,
 } from "./gsd-db.js";
-import type { MilestoneRow, SliceRow, TaskRow, VerificationEvidenceRow } from "./gsd-db.js";
+import type { MilestoneRow } from "./db-milestone-artifact-rows.js";
+import type { SliceRow, TaskRow } from "./db-task-slice-rows.js";
+import type { VerificationEvidenceRow } from "./db-verification-evidence-rows.js";
 import { atomicWriteSync } from "./atomic-write.js";
 import { join } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";

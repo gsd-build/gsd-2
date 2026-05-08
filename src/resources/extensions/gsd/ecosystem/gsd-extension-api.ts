@@ -204,6 +204,9 @@ export function createGSDExtensionAPI(
     getAllTools: () => pi.getAllTools(),
     setActiveTools: (...args: Parameters<ExtensionAPI["setActiveTools"]>) =>
       pi.setActiveTools(...args),
+    getVisibleSkills: () => pi.getVisibleSkills(),
+    setVisibleSkills: (...args: Parameters<ExtensionAPI["setVisibleSkills"]>) =>
+      pi.setVisibleSkills(...args),
     getCommands: () => pi.getCommands(),
 
     // ── Model & thinking ───────────────────────────────────────────────

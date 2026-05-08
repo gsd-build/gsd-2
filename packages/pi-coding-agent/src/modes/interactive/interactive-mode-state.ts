@@ -20,6 +20,7 @@ export interface InteractiveModeStateHost {
 	isInitialized: boolean;
 	loadingAnimation?: any;
 	pendingWorkingMessage?: string;
+	clearBlockingError(): void;
 	defaultWorkingMessage: string;
 	streamingComponent?: any;
 	streamingMessage?: any;
@@ -37,4 +38,3 @@ export interface InteractiveModeStateHost {
 }
 
 export type InteractiveModeEvent = AgentSessionEvent;
-

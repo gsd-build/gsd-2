@@ -3,22 +3,22 @@
 // re-deriving project memory state.
 
 import { readCompactionSnapshot } from "../compaction-snapshot.js";
+import { isContextModeEnabled, type ContextModeConfig } from "../preferences-types.js";
+import { contextModeDisabledResult, type ToolExecutionResult } from "./context-mode-tool-result.js";
 
 export interface ResumeToolParams {
   /** Ignored — reserved for future variant (e.g. dated snapshots). */
   _variant?: string;
 }
 
-export interface ToolExecutionResult {
-  content: Array<{ type: "text"; text: string }>;
-  details: Record<string, unknown>;
-  isError?: boolean;
-}
-
 export function executeResume(
   _params: ResumeToolParams,
-  opts: { baseDir: string },
+  opts: { baseDir: string; preferences?: { context_mode?: ContextModeConfig } | null },
 ): ToolExecutionResult {
+  if (!isContextModeEnabled(opts.preferences)) {
+    return contextModeDisabledResult("gsd_resume");
+  }
+
   const snapshot = readCompactionSnapshot(opts.baseDir);
   if (snapshot == null) {
     return {

@@ -1,28 +1,48 @@
 // GSD2 — Exec (context-mode) tool registration.
 //
-// Exposes the `gsd_exec` tool over MCP. Opt-in: disabled unless
-// `context_mode.enabled: true` is set in preferences.
+// Exposes the Context Mode runtime tools in-process. Default-on; opt out with
+// `context_mode.enabled: false` in preferences.
 
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "@gsd/pi-coding-agent";
+
+function toolWorkspaceRoot(ctx: unknown): string {
+  if (ctx && typeof ctx === "object" && typeof (ctx as { cwd?: unknown }).cwd === "string") {
+    return (ctx as { cwd: string }).cwd;
+  }
+  return process.cwd();
+}
+
+async function loadContextModePreferences(baseDir: string) {
+  const [{ loadEffectiveGSDPreferences }, { logWarning }] = await Promise.all([
+    import("../preferences.js"),
+    import("../workflow-logger.js"),
+  ]);
+  try {
+    return loadEffectiveGSDPreferences(baseDir)?.preferences ?? null;
+  } catch (err) {
+    logWarning("tool", `Context Mode tool could not load preferences: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
 
 export function registerExecTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "gsd_exec",
     label: "Exec (Sandboxed)",
     description:
-      "Run a short script (bash/node/python) in a subprocess. Full stdout/stderr persist to " +
+      "Run a short script (bash/node/python) in a subprocess. Capped stdout/stderr and metadata persist to " +
       ".gsd/exec/<id>.{stdout,stderr,meta.json}; only a short digest returns in context. Use " +
       "this instead of reading many files or emitting large tool outputs — e.g. have the script " +
       "count/grep/summarize and log the finding. Enabled by default; opt out via " +
       "preferences.context_mode.enabled=false.",
     promptSnippet:
-      "Run a bash/node/python script in a sandbox; full output is saved to disk and only a digest returns",
+      "Run a bash/node/python script in a sandbox; capped output is saved to disk and only a digest returns",
     promptGuidelines: [
       "Prefer gsd_exec for analyses that would otherwise read >3 files or produce large tool output.",
       "Write scripts that log the finding (counts, matches, summaries) rather than raw dumps.",
       "The digest is the last ~300 chars of stdout — size your log output accordingly.",
-      "Need the full output? Read the stdout_path returned in details (file on local disk).",
+      "Need persisted output? Read the stdout_path returned in details (file on local disk).",
     ],
     parameters: Type.Object({
       runtime: Type.Union(
@@ -40,20 +60,11 @@ export function registerExecTools(pi: ExtensionAPI): void {
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const [{ executeGsdExec }, { loadEffectiveGSDPreferences }, { logWarning }] = await Promise.all([
-        import("../tools/exec-tool.js"),
-        import("../preferences.js"),
-        import("../workflow-logger.js"),
-      ]);
-      let prefs: ReturnType<typeof loadEffectiveGSDPreferences> | null = null;
-      try {
-        prefs = loadEffectiveGSDPreferences();
-      } catch (err) {
-        logWarning("tool", `gsd_exec could not load preferences: ${err instanceof Error ? err.message : String(err)}`);
-      }
+      const { executeGsdExec } = await import("../tools/exec-tool.js");
+      const baseDir = toolWorkspaceRoot(_ctx);
       return executeGsdExec(params as Parameters<typeof executeGsdExec>[0], {
-        baseDir: process.cwd(),
-        preferences: prefs?.preferences ?? null,
+        baseDir,
+        preferences: await loadContextModePreferences(baseDir),
       });
     },
   });
@@ -67,7 +78,7 @@ export function registerExecTools(pi: ExtensionAPI): void {
     promptSnippet: "Search prior gsd_exec runs by substring, runtime, or failing-only filter",
     promptGuidelines: [
       "Use this before re-running an expensive analysis — the prior run's stdout file may still answer.",
-      "The preview shows the trailing ~300 chars of stdout; read stdout_path for the full transcript.",
+      "The preview shows the trailing ~300 chars of stdout; read stdout_path for persisted output.",
     ],
     parameters: Type.Object({
       query: Type.Optional(Type.String({ description: "Substring matched against id and purpose (case-insensitive)." })),
@@ -81,8 +92,10 @@ export function registerExecTools(pi: ExtensionAPI): void {
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       const { executeExecSearch } = await import("../tools/exec-search-tool.js");
+      const baseDir = toolWorkspaceRoot(_ctx);
       return executeExecSearch(params as Parameters<typeof executeExecSearch>[0], {
-        baseDir: process.cwd(),
+        baseDir,
+        preferences: await loadContextModePreferences(baseDir),
       });
     },
   });
@@ -102,8 +115,10 @@ export function registerExecTools(pi: ExtensionAPI): void {
     parameters: Type.Object({}),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       const { executeResume } = await import("../tools/resume-tool.js");
+      const baseDir = toolWorkspaceRoot(_ctx);
       return executeResume(params as Parameters<typeof executeResume>[0], {
-        baseDir: process.cwd(),
+        baseDir,
+        preferences: await loadContextModePreferences(baseDir),
       });
     },
   });

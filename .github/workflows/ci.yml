@@ -16,6 +16,7 @@ on:
       - '.github/workflows/build-native.yml'
       - '.github/workflows/cleanup-dev-versions.yml'
       - 'LICENSE'
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -26,14 +27,16 @@ jobs:
     timeout-minutes: 2
     runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
-      docs-only: ${{ steps.check.outputs.docs-only }}
+      heavy-code-changed: ${{ steps.check.outputs.heavy-code-changed }}
       portability-changed: ${{ steps.check.outputs.portability-changed }}
+      windows-e2e-changed: ${{ steps.check.outputs.windows-e2e-changed }}
+      docker-changed: ${{ steps.check.outputs.docker-changed }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Check if only documentation changed
+      - name: Classify changed files
         id: check
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -49,29 +52,94 @@ jobs:
           FILES=$(git diff --name-only "$BASE" "$HEAD_SHA" 2>/dev/null || git diff --name-only HEAD~1)
           echo "Changed files:"
           echo "$FILES"
-          NON_DOCS=$(echo "$FILES" | grep -vE '\.(md|markdown)$' | grep -vE '^docs/' | grep -vE '^LICENSE$' || true)
-          if [ -z "$NON_DOCS" ]; then
-            echo "docs-only=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Only documentation files changed — skipping build/test"
+
+          is_core_file() {
+            case "$1" in
+              src/*|packages/*|native/*|scripts/*|web/*|extensions/*|tests/*|docker/*|Dockerfile|package.json|package-lock.json|tsconfig*.json) return 0 ;;
+              packages/*/tsconfig.json) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          is_portability_file() {
+            case "$1" in
+              src/*|packages/*|native/*|scripts/*|web/*|package.json|package-lock.json|web/package-lock.json|tsconfig*.json) return 0 ;;
+              packages/*/tsconfig.json) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          is_windows_e2e_file() {
+            case "$1" in
+              tests/e2e/*|src/loader*|src/rtk*|src/native*|src/resources/extensions/gsd/gsd-db*|src/resources/extensions/gsd/extension-host*|src/resources/extensions/gsd/auto-worktree*|src/resources/extensions/gsd/workflow-mcp*|packages/pi-coding-agent/*|packages/pi-ai/*|packages/pi-agent-core/*|packages/native/*|packages/mcp-server/*|packages/rpc-client/*|native/*|package.json|package-lock.json|tsconfig*.json) return 0 ;;
+              packages/*/tsconfig.json) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          is_docker_file() {
+            case "$1" in
+              Dockerfile|docker/*|scripts/install.js|scripts/*.cjs|scripts/*.mjs|package.json|package-lock.json|src/*|packages/*|tests/e2e/docker/*) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          HEAVY_CODE=""
+          PORTABILITY=""
+          WINDOWS_E2E=""
+          DOCKER=""
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            if is_core_file "$file"; then
+              HEAVY_CODE="${HEAVY_CODE}${file}"$'\n'
+            fi
+            if is_portability_file "$file"; then
+              PORTABILITY="${PORTABILITY}${file}"$'\n'
+            fi
+            if is_windows_e2e_file "$file"; then
+              WINDOWS_E2E="${WINDOWS_E2E}${file}"$'\n'
+            fi
+            if is_docker_file "$file"; then
+              DOCKER="${DOCKER}${file}"$'\n'
+            fi
+          done <<< "$FILES"
+
+          if [ -n "$HEAVY_CODE" ]; then
+            echo "heavy-code-changed=true" >> "$GITHUB_OUTPUT"
+            echo "Build/runtime-relevant files changed:"
+            echo "$HEAVY_CODE"
           else
-            echo "docs-only=false" >> "$GITHUB_OUTPUT"
-            echo "Non-docs files changed:"
-            echo "$NON_DOCS"
+            echo "heavy-code-changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No build/runtime-relevant changes detected — skipping heavy build/test jobs"
           fi
-          PORTABILITY=$(echo "$NON_DOCS" | grep -E '^(src/|packages/|native/|scripts/|web/|package\.json$|package-lock\.json$|web/package-lock\.json$|tsconfig[^/]*\.json$|packages/.*/tsconfig\.json$)' || true)
           if [ -n "$PORTABILITY" ]; then
             echo "portability-changed=true" >> "$GITHUB_OUTPUT"
             echo "Portability-relevant files changed:"
             echo "$PORTABILITY"
           else
             echo "portability-changed=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::No portability-relevant changes detected — skipping portability matrix jobs"
+            echo "::notice::No portability-relevant changes detected — skipping Windows portability checks"
+          fi
+          if [ -n "$WINDOWS_E2E" ]; then
+            echo "windows-e2e-changed=true" >> "$GITHUB_OUTPUT"
+            echo "Windows e2e-relevant files changed:"
+            echo "$WINDOWS_E2E"
+          else
+            echo "windows-e2e-changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No Windows e2e-relevant changes detected — skipping Windows e2e"
+          fi
+          if [ -n "$DOCKER" ]; then
+            echo "docker-changed=true" >> "$GITHUB_OUTPUT"
+            echo "Docker-relevant files changed:"
+            echo "$DOCKER"
+          else
+            echo "docker-changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No Docker-relevant changes detected — skipping docker-e2e"
           fi
 
   docs-check:
     timeout-minutes: 5
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: detect-changes
     steps:
       - uses: actions/checkout@v6
         with:
@@ -82,7 +150,6 @@ jobs:
 
   lint:
     timeout-minutes: 5
-    needs: detect-changes
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v6
@@ -132,9 +199,9 @@ jobs:
         run: node scripts/check-coderabbit-themes.mjs
 
   build:
-    timeout-minutes: 15
-    needs: detect-changes
-    if: needs.detect-changes.outputs.docs-only != 'true'
+    timeout-minutes: 25
+    needs: [detect-changes, docs-check, lint]
+    if: needs.detect-changes.outputs.heavy-code-changed == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
@@ -178,18 +245,20 @@ jobs:
         run: npm run verify:workspace-coverage
 
       - name: Run unit tests
-        run: npm run test:unit
+        run: |
+          npm run test:compile
+          npm run test:unit:compiled
 
       - name: Run package tests
-        run: npm run test:packages
+        run: npm run test:packages:compiled
 
       - name: Check test coverage thresholds
         run: npm run test:coverage
 
   integration-tests:
     timeout-minutes: 15
-    needs: detect-changes
-    if: needs.detect-changes.outputs.docs-only != 'true'
+    needs: [detect-changes, build]
+    if: needs.detect-changes.outputs.heavy-code-changed == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
@@ -228,13 +297,16 @@ jobs:
       - name: Run integration tests
         run: npm run test:integration
 
-  windows-portability:
-    timeout-minutes: 25
-    needs: detect-changes
-    if: >-
-      needs.detect-changes.outputs.docs-only != 'true' &&
-      needs.detect-changes.outputs.portability-changed == 'true'
-    runs-on: blacksmith-4vcpu-windows-2025
+  e2e:
+    # Real-process e2e tests in tests/e2e/. Spawns the built dist/loader.js
+    # through the shared harness in tests/e2e/_shared/. This is where new
+    # cross-process flows land (fake-LLM agent loops, MCP server, native
+    # ABI, migration chain, etc.) - see tests/e2e/README.md.
+    # No untrusted GitHub event input is consumed in run: blocks.
+    timeout-minutes: 15
+    needs: [detect-changes, build]
+    if: needs.detect-changes.outputs.heavy-code-changed == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
       - name: Checkout repository
@@ -252,37 +324,67 @@ jobs:
       - name: Build core
         run: npm run build:core
 
-      - name: Typecheck extensions
-        run: npm run typecheck:extensions
+      - name: Run e2e suite (against built binary)
+        run: |
+          chmod +x dist/loader.js
+          export GSD_SMOKE_BINARY="$(pwd)/dist/loader.js"
+          npm run test:e2e
 
-      - name: Run package tests
-        run: npm run test:packages
+      - name: Upload e2e artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: test-results/e2e
+          if-no-files-found: ignore
+          retention-days: 7
 
-      - name: Run Windows portability tests
-        run: >-
-          node --import ./src/resources/extensions/gsd/tests/resolve-ts.mjs
-          --experimental-strip-types --test
-          src/tests/windows-portability.test.ts
-          src/resources/extensions/gsd/tests/validate-directory.test.ts
-          src/tests/integration/web-mode-windows-hide.test.ts
-
-  rtk-portability:
+  docker-e2e:
+    # Builds the runtime-local Dockerfile target from the current source
+    # (npm pack + COPY into image) and runs `gsd --version` inside the
+    # container. Catches missing system deps, broken postinstall, missing
+    # tarball files. Gated by detect-changes so doc-only PRs skip it.
+    # No untrusted GitHub event input is consumed in run: blocks.
     timeout-minutes: 20
-    needs: detect-changes
+    needs: [detect-changes, integration-tests, e2e]
     if: >-
-      needs.detect-changes.outputs.docs-only != 'true' &&
-      needs.detect-changes.outputs.portability-changed == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - label: linux
-            os: blacksmith-4vcpu-ubuntu-2404
-          - label: windows
-            os: blacksmith-4vcpu-windows-2025
-          - label: macos
-            os: macos-15
-    runs-on: ${{ matrix.os }}
+      needs.detect-changes.outputs.heavy-code-changed == 'true' &&
+      needs.detect-changes.outputs.docker-changed == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build core
+        # `npm pack` does not run prepublishOnly, so we must build dist/
+        # explicitly before packing — otherwise the tarball ships without
+        # the loader and the runtime-local Dockerfile target can't find
+        # the entry point.
+        run: npm run build:core
+
+      - name: Run docker e2e suite
+        run: npm run test:e2e:docker
+
+  windows-portability:
+    # Consolidates the blocking Windows portability checks with the
+    # non-blocking Windows e2e smoke suite.
+    timeout-minutes: 25
+    needs: [detect-changes, integration-tests, e2e]
+    if: >-
+      needs.detect-changes.outputs.heavy-code-changed == 'true' &&
+      (needs.detect-changes.outputs.portability-changed == 'true' ||
+       needs.detect-changes.outputs.windows-e2e-changed == 'true')
+    runs-on: blacksmith-4vcpu-windows-2025
 
     steps:
       - name: Checkout repository
@@ -298,37 +400,44 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+          GSD_SKIP_RTK_INSTALL: '1'
         run: npm ci
 
-      - name: Validate managed RTK install
-        run: >-
-          node --experimental-strip-types --input-type=module -e
-          "const mod = await import('./src/rtk.ts');
-          const path = mod.getManagedRtkPath(process.platform);
-          if (!mod.validateRtkBinary(path)) {
-            console.error('Managed RTK validation failed:', path);
-            process.exit(1);
-          }
-          console.log('Managed RTK validated at', path);"
+      - name: Build core
+        run: npm run build:core
 
-      - name: Run RTK-focused portability tests
+      - name: Typecheck extensions
+        if: needs.detect-changes.outputs.portability-changed == 'true'
+        run: npm run typecheck:extensions
+
+      - name: Run package tests
+        if: needs.detect-changes.outputs.portability-changed == 'true'
+        run: npm run test:packages
+
+      - name: Run Windows portability tests
+        if: needs.detect-changes.outputs.portability-changed == 'true'
         run: >-
           node --import ./src/resources/extensions/gsd/tests/resolve-ts.mjs
-          --experimental-strip-types --experimental-test-isolation=process --test
-          src/tests/rtk.test.ts
-          src/tests/rtk-execution-seams.test.ts
-          src/tests/postinstall.test.ts
-          src/tests/app-smoke.test.ts
-          src/resources/extensions/gsd/tests/custom-verification.test.ts
-          src/resources/extensions/gsd/tests/verification-gate.test.ts
+          --experimental-strip-types --test
+          src/tests/windows-portability.test.ts
+          src/resources/extensions/gsd/tests/validate-directory.test.ts
+          src/tests/integration/web-mode-windows-hide.test.ts
 
-      - name: Generate RTK benchmark evidence
-        if: matrix.label == 'linux'
-        run: node scripts/rtk-benchmark.mjs --output .artifacts/rtk-benchmark.md
+      - name: Run Windows e2e smoke suite (non-blocking)
+        id: windows-smoke-e2e
+        if: needs.detect-changes.outputs.windows-e2e-changed == 'true'
+        timeout-minutes: 10
+        shell: bash
+        continue-on-error: true
+        run: |
+          export GSD_SMOKE_BINARY="$(pwd)/dist/loader.js"
+          npm run test:e2e:windows-smoke
 
-      - name: Upload RTK benchmark artifact
-        if: matrix.label == 'linux'
+      - name: Upload Windows e2e artifacts on failure
+        if: steps.windows-smoke-e2e.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: rtk-benchmark-linux
-          path: .artifacts/rtk-benchmark.md
+          name: e2e-artifacts-windows
+          path: test-results/e2e
+          if-no-files-found: ignore
+          retention-days: 7

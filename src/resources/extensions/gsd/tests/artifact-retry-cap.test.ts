@@ -61,8 +61,8 @@ function extractStuckDetectionSection(source: string): string {
   const stuckSectionIdx = source.indexOf("Sliding-window stuck detection");
   assert.ok(stuckSectionIdx !== -1, "stuck-detection section must exist");
 
-  const preDispatchIdx = source.indexOf("// Pre-dispatch hooks", stuckSectionIdx);
-  assert.ok(preDispatchIdx !== -1, "pre-dispatch hooks section must follow stuck detection");
+  const preDispatchIdx = source.indexOf("return {\n    action: \"next\"", stuckSectionIdx);
+  assert.ok(preDispatchIdx !== -1, "dispatch-next return must follow stuck detection");
 
   return source.slice(stuckSectionIdx, preDispatchIdx);
 }

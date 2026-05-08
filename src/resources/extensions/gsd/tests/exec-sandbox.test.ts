@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { EXEC_DEFAULTS, runExecSandbox, type ExecSandboxOptions } from '../exec-sandbox.ts';
 import { buildExecOptions, executeGsdExec } from '../tools/exec-tool.ts';
 import { isContextModeEnabled } from '../preferences-types.ts';
+import { validatePreferences } from '../preferences-validation.ts';
 
 function freshBase(): string {
   return mkdtempSync(join(tmpdir(), 'gsd-exec-test-'));
@@ -174,6 +175,52 @@ test('executeGsdExec: runs when enabled explicitly set to true', async () => {
   }
 });
 
+test('executeGsdExec: forwards custom exec_env_allowlist from preferences', async () => {
+  const base = freshBase();
+  try {
+    const result = await executeGsdExec(
+      {
+        runtime: 'bash',
+        script: 'printf "allowed=%s blocked=%s\\n" "$GSD_ALLOWED" "$GSD_BLOCKED"',
+      },
+      {
+        baseDir: base,
+        preferences: {
+          context_mode: {
+            enabled: true,
+            exec_env_allowlist: ['GSD_ALLOWED'],
+          },
+        },
+        env: {
+          PATH: '/usr/bin:/bin',
+          HOME: '/tmp',
+          GSD_ALLOWED: 'yes',
+          GSD_BLOCKED: 'no',
+        },
+      },
+    );
+    assert.ok(!result.isError);
+    assert.match(result.content[0].text, /allowed=yes blocked=/);
+    assert.doesNotMatch(result.content[0].text, /blocked=no/);
+  } finally {
+    cleanup(base);
+  }
+});
+
+test('executeGsdExec: enforces per-call timeout override end-to-end', async () => {
+  const base = freshBase();
+  try {
+    const result = await executeGsdExec(
+      { runtime: 'bash', script: 'sleep 2', timeout_ms: 1 },
+      { baseDir: base, preferences: { context_mode: { enabled: true, exec_timeout_ms: 10_000 } } },
+    );
+    assert.equal(result.details.timed_out, true);
+    assert.equal(result.isError, true);
+  } finally {
+    cleanup(base);
+  }
+});
+
 test('executeGsdExec: rejects empty script', async () => {
   const base = freshBase();
   try {
@@ -186,6 +233,24 @@ test('executeGsdExec: rejects empty script', async () => {
   } finally {
     cleanup(base);
   }
+});
+
+test('validatePreferences: rejects invalid context_mode preference values', () => {
+  const result = validatePreferences({
+    context_mode: {
+      enabled: 'false',
+      exec_timeout_ms: 999,
+      exec_stdout_cap_bytes: 1,
+      exec_digest_chars: -1,
+      exec_env_allowlist: ['GOOD_NAME', 'bad-name'],
+    },
+  } as any);
+  assert.ok(result.errors.length > 0);
+  assert.ok(result.errors.includes('context_mode.enabled must be a boolean'));
+  assert.ok(result.errors.includes('context_mode.exec_timeout_ms must be a number between 1000 and 600000'));
+  assert.ok(result.errors.includes('context_mode.exec_stdout_cap_bytes must be a number between 4096 and 16777216'));
+  assert.ok(result.errors.includes('context_mode.exec_digest_chars must be a number between 0 and 4000'));
+  assert.ok(result.errors.includes('context_mode.exec_env_allowlist must be an array of valid env var names'));
 });
 
 test('isContextModeEnabled: defaults to true; only explicit false disables', () => {

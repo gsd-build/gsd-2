@@ -232,4 +232,59 @@ describe('emitCrashRecoveredUnitEnd (#3348)', () => {
       rmSync(base, { recursive: true, force: true });
     }
   });
+
+  test('emitOpenUnitEndForUnit closes the latest open start with error context', async () => {
+    const base = makeTmpBase();
+    try {
+      const { emitJournalEvent, queryJournal } = await import('../journal.ts');
+      const { emitOpenUnitEndForUnit } = await import('../crash-recovery.ts');
+
+      const firstFlowId = randomUUID();
+      const secondFlowId = randomUUID();
+      emitJournalEvent(base, {
+        ts: new Date().toISOString(),
+        flowId: firstFlowId,
+        seq: 1,
+        eventType: 'unit-start',
+        data: { unitType: 'execute-task', unitId: 'M008/S04/T02' },
+      });
+      emitJournalEvent(base, {
+        ts: new Date().toISOString(),
+        flowId: firstFlowId,
+        seq: 2,
+        eventType: 'unit-end',
+        data: { unitType: 'execute-task', unitId: 'M008/S04/T02', status: 'completed' },
+        causedBy: { flowId: firstFlowId, seq: 1 },
+      });
+      emitJournalEvent(base, {
+        ts: new Date().toISOString(),
+        flowId: secondFlowId,
+        seq: 3,
+        eventType: 'unit-start',
+        data: { unitType: 'execute-task', unitId: 'M008/S04/T02' },
+      });
+
+      const emitted = emitOpenUnitEndForUnit(
+        base,
+        'execute-task',
+        'M008/S04/T02',
+        'cancelled',
+        { message: 'runUnitPhase exploded', category: 'unit-exception', isTransient: false },
+      );
+
+      assert.equal(emitted, true, 'open unit should be closed');
+      const ends = queryJournal(base).filter((e) => e.eventType === 'unit-end');
+      assert.equal(ends.length, 2, 'should preserve existing end and add one new end');
+      const newEnd = ends.find((e) => e.causedBy?.flowId === secondFlowId);
+      assert.ok(newEnd, 'new end should close the latest open start');
+      assert.equal(newEnd!.data?.status, 'cancelled');
+      assert.deepEqual(newEnd!.data?.errorContext, {
+        message: 'runUnitPhase exploded',
+        category: 'unit-exception',
+        isTransient: false,
+      });
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
 });

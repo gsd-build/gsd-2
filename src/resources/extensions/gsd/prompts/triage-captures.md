@@ -2,7 +2,7 @@ You are triaging user-captured thoughts during a GSD session.
 
 ## UNIT: Triage Captures
 
-The user captured thoughts during execution using `/gsd capture`. Your job is to classify each capture, present your proposals, get user confirmation, and update CAPTURES.md with the final classifications.
+The user captured thoughts with `/gsd capture`. Classify each capture, present proposals, get needed confirmation, and update CAPTURES.md with final classifications.
 
 ## Pending Captures
 
@@ -18,24 +18,24 @@ The user captured thoughts during execution using `/gsd capture`. Your job is to
 
 ## Classification Criteria
 
-For each capture, classify it as one of:
+Classify each capture as one of:
 
-- **stop**: User directive to halt auto-mode immediately. Use when the user says "stop", "halt", "abort", "don't continue", "pause", or otherwise wants execution to cease. Auto-mode will pause after the current unit completes. Examples: "stop running", "halt execution", "don't continue".
-- **backtrack**: User directive to abandon the current milestone and return to a previous one. The user believes earlier milestones missed critical features or need rework. Include the target milestone ID (e.g., M003) in the Resolution field. Auto-mode will pause and write a regression marker. Examples: "restart from M003", "go back to milestone 3", "M004 and M005 failed, restart from M003".
-- **quick-task**: Small, self-contained, no downstream impact. Can be done in minutes without modifying the plan. Examples: fix a typo, add a missing import, tweak a config value.
-- **inject**: Belongs in the current slice but wasn't planned. Needs a new task added to the slice plan. Examples: add error handling to a module being built, add a missing test case for current work.
-- **defer**: Belongs in a future slice or milestone. Not urgent for current work. Examples: performance optimization, feature that depends on unbuilt infrastructure, nice-to-have enhancement.
-- **replan**: Changes the shape of remaining work in the current slice. Existing incomplete tasks may need rewriting. Examples: "the approach is wrong, we need to use X instead of Y", discovering a fundamental constraint.
-- **note**: Informational only. No action needed right now. Good context for future reference. Examples: "remember that the API has a rate limit", observations about code quality.
+- **stop**: Halt/pause auto-mode immediately after the current unit. Examples: "stop", "halt", "abort", "don't continue".
+- **backtrack**: Abandon current milestone and return to an earlier one. Include target milestone ID (e.g., M003) in Resolution. Auto-mode pauses and writes a regression marker.
+- **quick-task**: Small, self-contained, no downstream impact; minutes of work without plan changes.
+- **inject**: Belongs in current slice but was not planned; needs a new task.
+- **defer**: Belongs in a future slice/milestone; not urgent for current work.
+- **replan**: Changes remaining work shape in the current slice; incomplete tasks may need rewriting.
+- **note**: Informational only; useful future context with no immediate action.
 
 ## Decision Guidelines
 
-- **ALWAYS classify as stop** when the user explicitly says "stop", "halt", "abort", or "don't continue". Never shoe-horn a stop directive into "replan" or "note".
-- **ALWAYS classify as backtrack** when the user references returning to a previous milestone, restarting from an earlier point, or abandoning current milestone work. Include the target milestone ID in the Resolution field (e.g., "Backtrack to M003").
+- **ALWAYS classify as stop** when the user says "stop", "halt", "abort", or "don't continue". Never shoe-horn stop into "replan" or "note".
+- **ALWAYS classify as backtrack** when the user references returning to a previous milestone, restarting earlier, or abandoning current milestone work. Include target milestone ID in Resolution (e.g., "Backtrack to M003").
 - Prefer **quick-task** when the work is clearly small and self-contained.
 - Prefer **inject** over **replan** when only a new task is needed, not rewriting existing ones.
 - Prefer **defer** over **inject** when the work doesn't belong in the current slice's scope.
-- Use **replan** only when remaining incomplete tasks in the *current slice* need to change — not for cross-milestone issues.
+- Use **replan** only when remaining incomplete tasks in the *current slice* need to change, not for cross-milestone issues.
 - Use **note** for observations that don't require action.
 - When unsure between quick-task and inject, consider: will this take more than 10 minutes? If yes, inject.
 
@@ -49,8 +49,8 @@ For each capture, classify it as one of:
    - Your rationale
    - If applicable, which files would be affected
    
-   For captures classified as **note** or **defer**, auto-confirm without asking — these are low-impact.
-   For captures classified as **stop** or **backtrack**, auto-confirm without asking — these are urgent user directives that must be honored immediately.
+   Auto-confirm **note** and **defer** because they are low-impact.
+   Auto-confirm **stop** and **backtrack** because they are urgent user directives.
    For captures classified as **quick-task**, **inject**, or **replan**, ask the user to confirm or choose a different classification. **Non-bypassable:** If `ask_user_questions` fails, errors, or the user does not respond, you MUST re-ask — never auto-confirm these classifications without explicit user approval.
 
 3. **Update** `.gsd/CAPTURES.md` — for each capture, update its section with the confirmed classification:
@@ -61,7 +61,7 @@ For each capture, classify it as one of:
    - Add `**Resolved:** <current ISO timestamp>`
    - Add `**Milestone:** <current milestone ID>` (e.g., `**Milestone:** M003`)
 
-4. **Summarize** what was triaged: how many captures, what classifications were assigned, and what actions are pending (e.g., "2 quick-tasks ready for execution, 1 deferred to S03").
+4. **Summarize** count, assigned classifications, and pending actions (e.g., "2 quick-tasks ready, 1 deferred to S03").
 
 **Important:** Do NOT execute any resolutions. Only classify and update CAPTURES.md. Resolution execution happens separately (in auto-mode dispatch or manually by the user).
 

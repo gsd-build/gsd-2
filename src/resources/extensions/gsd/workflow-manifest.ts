@@ -1,29 +1,20 @@
+// Project/App: GSD-2
+// File Purpose: State manifest snapshot and restore orchestration for GSD workflow data.
+
 import {
   _getAdapter,
   readTransaction,
   restoreManifest,
-  type MilestoneRow,
-  type SliceRow,
-  type TaskRow,
 } from "./gsd-db.js";
+import type { MilestoneRow } from "./db-milestone-artifact-rows.js";
+import type { SliceRow, TaskRow } from "./db-task-slice-rows.js";
+import type { VerificationEvidenceRow } from "./db-verification-evidence-rows.js";
 import type { Decision } from "./types.js";
 import { atomicWriteSync } from "./atomic-write.js";
 import { readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 // ─── Manifest Types ──────────────────────────────────────────────────────
-
-export interface VerificationEvidenceRow {
-  id: number;
-  task_id: string;
-  slice_id: string;
-  milestone_id: string;
-  command: string;
-  exit_code: number | null;
-  verdict: string;
-  duration_ms: number | null;
-  created_at: string;
-}
 
 export interface StateManifest {
   version: 1;
@@ -76,7 +67,9 @@ export function snapshotState(): StateManifest {
   // Wrap all reads in a deferred transaction so the snapshot is consistent
   // (all SELECTs see the same DB state even if a concurrent write lands between them).
   return readTransaction(() => {
-  const rawMilestones = db.prepare("SELECT * FROM milestones ORDER BY id").all() as Record<string, unknown>[];
+  const rawMilestones = db.prepare(
+    "SELECT * FROM milestones ORDER BY CASE WHEN sequence > 0 THEN 0 ELSE 1 END, sequence, id",
+  ).all() as Record<string, unknown>[];
   const milestones: MilestoneRow[] = rawMilestones.map((r) => ({
     id: r["id"] as string,
     title: r["title"] as string,
@@ -95,6 +88,7 @@ export function snapshotState(): StateManifest {
     definition_of_done: JSON.parse((r["definition_of_done"] as string) || "[]"),
     requirement_coverage: (r["requirement_coverage"] as string) ?? "",
     boundary_map_markdown: (r["boundary_map_markdown"] as string) ?? "",
+    sequence: Number(r["sequence"] ?? 0),
   }));
 
   const rawSlices = db.prepare("SELECT * FROM slices ORDER BY milestone_id, sequence, id").all() as Record<string, unknown>[];

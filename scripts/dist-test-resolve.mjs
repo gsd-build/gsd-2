@@ -12,6 +12,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
+// Compiled legacy state tests exercise markdown derivation through deriveState().
+// Production/runtime keeps this fallback disabled unless explicitly requested.
+process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK ??= '1';
+
 // dist-test root — everything compiled lands here
 const DIST_TEST = new URL('../dist-test/', import.meta.url).href;
 

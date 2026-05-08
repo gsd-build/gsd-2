@@ -1,12 +1,5 @@
-/**
- * Component Loader — Unit Tests
- *
- * Tests for multi-format component loading:
- * - New format (component.yaml)
- * - Legacy skill format (SKILL.md with frontmatter)
- * - Legacy agent format (.md with frontmatter)
- * - Directory scanning
- */
+// Project/App: GSD-2
+// File Purpose: Verifies component loading across modern and legacy formats.
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';

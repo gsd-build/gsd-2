@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-// ensureDbOpen — Tests that the lazy DB opener creates + migrates the database
-// when .gsd/ exists with Markdown content but no gsd.db file.
+// ensureDbOpen — Tests that the lazy DB opener creates/opens the authoritative
+// database without implicitly importing markdown projections.
 //
 // This covers the bug where interactive (non-auto) sessions got
 // "GSD database is not available" because ensureDbOpen only opened
@@ -11,7 +11,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
-import { closeDatabase, isDbAvailable, getDecisionById, _getAdapter } from '../gsd-db.ts';
+import { closeDatabase, isDbAvailable, getDecisionById, SCHEMA_VERSION, _getAdapter } from '../gsd-db.ts';
 
 const _require = createRequire(import.meta.url);
 
@@ -284,11 +284,11 @@ function createLegacyV15Db(dbPath: string): void {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ensureDbOpen creates DB + migrates when .gsd/ has Markdown
+// ensureDbOpen creates DB without implicit Markdown migration
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('ensure-db-open', () => {
-  test('ensureDbOpen: creates DB from Markdown', async () => {
+  test('ensureDbOpen: creates empty DB without importing Markdown', async () => {
     const tmpDir = makeTmpDir();
     const gsdDir = path.join(tmpDir, '.gsd');
     fs.mkdirSync(gsdDir, { recursive: true });
@@ -319,17 +319,12 @@ describe('ensure-db-open', () => {
 
       const result = await ensureDbOpen();
 
-      assert.ok(result === true, 'ensureDbOpen should return true when .gsd/ has Markdown');
+      assert.ok(result === true, 'ensureDbOpen should return true when .gsd/ exists');
       assert.ok(fs.existsSync(dbPath), 'DB file should be created after ensureDbOpen');
       assert.ok(isDbAvailable(), 'DB should be available after ensureDbOpen');
 
-      // Verify that Markdown migration actually ran
       const decision = getDecisionById('D001');
-      assert.ok(decision !== null, 'D001 should be migrated from DECISIONS.md');
-      if (decision) {
-        assert.deepStrictEqual(decision.scope, 'architecture', 'Migrated decision scope should match');
-        assert.deepStrictEqual(decision.choice, 'SQLite', 'Migrated decision choice should match');
-      }
+      assert.equal(decision, null, 'D001 should not be imported from DECISIONS.md without explicit migration');
     } finally {
       process.cwd = origCwd;
       closeDatabase();
@@ -360,7 +355,7 @@ describe('ensure-db-open', () => {
       assert.ok(result === true, 'ensureDbOpen should honor explicit basePath');
       assert.equal(process.cwd(), originalCwd, 'ensureDbOpen should not mutate process.cwd');
       assert.ok(isDbAvailable(), 'DB should be available after explicit open');
-      assert.ok(getDecisionById('D777') !== null, 'explicit basePath DB should be opened');
+      assert.equal(getDecisionById('D777'), null, 'explicit basePath should not import DECISIONS.md');
     } finally {
       closeDatabase();
       cleanupDir(tmpDir);
@@ -389,7 +384,7 @@ describe('ensure-db-open', () => {
       assert.ok(db, 'adapter should be available after ensureDbOpen');
       assert.equal(
         db.prepare('SELECT MAX(version) as version FROM schema_version').get()?.version,
-        22,
+        SCHEMA_VERSION,
         'legacy DB should migrate to current schema version',
       );
 
@@ -519,9 +514,9 @@ describe('ensure-db-open', () => {
     try {
       const { ensureDbOpen } = await import('../bootstrap/dynamic-tools.ts');
       assert.equal(await ensureDbOpen(firstDir), true);
-      assert.ok(getDecisionById('D101') !== null, 'first DB should be active');
+      assert.equal(getDecisionById('D101'), null, 'first DB should not import DECISIONS.md');
       assert.equal(await ensureDbOpen(secondDir), true);
-      assert.ok(getDecisionById('D202') !== null, 'second DB should be active after switch');
+      assert.equal(getDecisionById('D202'), null, 'second DB should not import DECISIONS.md');
       assert.equal(getDecisionById('D101'), null, 'first DB should no longer be active after switch');
     } finally {
       closeDatabase();

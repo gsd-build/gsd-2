@@ -17,4 +17,9 @@ test("auto-worktree.ts includes main_branch preference in startPoint fallback (#
     src.includes("gitPrefs?.main_branch") || src.includes("prefs.main_branch"),
     "createAutoWorktree must check git.main_branch preference before falling back to nativeDetectMainBranch",
   );
+  assert.match(
+    src,
+    /nativeBranchExists\(basePath,\s*gitPrefs\.main_branch\)/,
+    "createAutoWorktree must validate git.main_branch exists before using it",
+  );
 });

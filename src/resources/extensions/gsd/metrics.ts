@@ -1,3 +1,4 @@
+// GSD-2 + metrics.ts: token & cost tracking for auto-mode units
 /**
  * GSD Metrics — Token & Cost Tracking
  *
@@ -14,6 +15,7 @@
  */
 
 import { join } from "node:path";
+import { openSync, closeSync, unlinkSync, statSync, writeFileSync } from "node:fs";
 import type { ExtensionContext } from "@gsd/pi-coding-agent";
 import { gsdRoot } from "./paths.js";
 import { getAndClearSkills } from "./skill-telemetry.js";
@@ -21,6 +23,8 @@ import { loadJsonFile, loadJsonFileOrNull, saveJsonFile } from "./json-persisten
 import { parseUnitId } from "./unit-id.js";
 import { buildAuditEnvelope, emitUokAuditEvent } from "./uok/audit.js";
 import { isUnifiedAuditEnabled } from "./uok/audit-toggle.js";
+import type { MilestoneScope } from "./workspace.js";
+import { logWarning } from "./workflow-logger.js";
 
 // Re-export from shared — import directly from format-utils to avoid pulling
 // in the full barrel (mod.js → ui.js → @gsd/pi-tui) which breaks when loaded
@@ -108,11 +112,17 @@ export function classifyUnitPhase(unitType: string): MetricsPhase {
 let ledger: MetricsLedger | null = null;
 let basePath: string = "";
 
+// Per-workspace ledger map, keyed by workspace.identityKey.
+// Populated by initMetricsByScope; independent of the module singleton.
+const scopedLedgers = new Map<string, MetricsLedger>();
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
  * Initialize the metrics system for a given project.
  * Loads existing ledger from disk if present.
+ *
+ * @deprecated TODO(C-future): remove module singleton. Use initMetricsByScope instead.
  */
 export function initMetrics(base: string): void {
   basePath = base;
@@ -121,6 +131,8 @@ export function initMetrics(base: string): void {
 
 /**
  * Reset in-memory state. Called when auto-mode stops.
+ *
+ * @deprecated TODO(C-future): remove module singleton. Use resetMetricsByScope instead.
  */
 export function resetMetrics(): void {
   ledger = null;
@@ -130,6 +142,8 @@ export function resetMetrics(): void {
 /**
  * Snapshot usage metrics from the current session before it's wiped.
  * Scans session entries for AssistantMessage usage data.
+ *
+ * @deprecated TODO(C-future): remove module singleton. Use snapshotUnitMetricsByScope instead.
  */
 export function snapshotUnitMetrics(
   ctx: ExtensionContext,
@@ -270,6 +284,182 @@ export function snapshotUnitMetrics(
  */
 export function getLedger(): MetricsLedger | null {
   return ledger;
+}
+
+// ─── Scope-aware API (canonical) ─────────────────────────────────────────────
+
+/**
+ * Initialize the metrics system for a given workspace scope.
+ * Loads existing ledger from disk into the per-scope ledger map.
+ * Does NOT touch the module-level singleton.
+ */
+export function initMetricsByScope(scope: MilestoneScope): void {
+  const base = scope.workspace.projectRoot;
+  const loaded = loadLedger(base);
+  scopedLedgers.set(scope.workspace.identityKey, loaded);
+}
+
+/**
+ * Get the in-memory ledger for the given scope, or null if not initialized.
+ */
+export function getLedgerByScope(scope: MilestoneScope): MetricsLedger | null {
+  return scopedLedgers.get(scope.workspace.identityKey) ?? null;
+}
+
+/**
+ * Reset scoped in-memory state for a workspace. Called when auto-mode stops.
+ */
+export function resetMetricsByScope(scope: MilestoneScope): void {
+  scopedLedgers.delete(scope.workspace.identityKey);
+}
+
+/**
+ * Snapshot usage metrics using an explicit workspace scope.
+ *
+ * This is the canonical variant. It derives the metrics path from
+ * scope.workspace.projectRoot rather than the module singleton, so it
+ * remains correct across session resume and in multi-workspace processes.
+ *
+ * Preserves the atomic write-merge logic from saveLedger so concurrent
+ * workers cannot silently discard each other's entries.
+ *
+ * If initMetricsByScope has not been called, the ledger is loaded from
+ * disk on first call (lazy init).
+ */
+export function snapshotUnitMetricsByScope(
+  scope: MilestoneScope,
+  ctx: ExtensionContext,
+  unitType: string,
+  unitId: string,
+  startedAt: number,
+  model: string,
+  opts?: {
+    tier?: string;
+    modelDowngraded?: boolean;
+    contextWindowTokens?: number;
+    truncationSections?: number;
+    continueHereFired?: boolean;
+    promptCharCount?: number;
+    baselineCharCount?: number;
+    autoSessionKey?: string;
+    traceId?: string;
+    turnId?: string;
+    causedBy?: string;
+  },
+): UnitMetrics | null {
+  const base = scope.workspace.projectRoot;
+  const key = scope.workspace.identityKey;
+
+  // Lazy init: load from disk if not yet in scoped map.
+  if (!scopedLedgers.has(key)) {
+    scopedLedgers.set(key, loadLedger(base));
+  }
+  const scopedLedger = scopedLedgers.get(key)!;
+
+  const entries = ctx.sessionManager.getEntries();
+  if (!entries || entries.length === 0) return null;
+
+  const tokens: TokenCounts = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+  let cost = 0;
+  let toolCalls = 0;
+  let assistantMessages = 0;
+  let userMessages = 0;
+
+  for (const entry of entries) {
+    if (entry.type !== "message") continue;
+    const msg = (entry as any).message;
+    if (!msg) continue;
+
+    if (msg.role === "assistant") {
+      assistantMessages++;
+      if (msg.usage) {
+        tokens.input += msg.usage.input ?? 0;
+        tokens.output += msg.usage.output ?? 0;
+        tokens.cacheRead += msg.usage.cacheRead ?? 0;
+        tokens.cacheWrite += msg.usage.cacheWrite ?? 0;
+        tokens.total += msg.usage.totalTokens ?? 0;
+        if (msg.usage.cost != null) {
+          const c = msg.usage.cost;
+          cost += typeof c === "number" ? c : (c.total ?? 0);
+        }
+      }
+      if (msg.content && Array.isArray(msg.content)) {
+        for (const block of msg.content) {
+          if (block.type === "toolCall") toolCalls++;
+        }
+      }
+    } else if (msg.role === "user") {
+      userMessages++;
+    }
+  }
+
+  const unit: UnitMetrics = {
+    type: unitType,
+    id: unitId,
+    model,
+    startedAt,
+    finishedAt: Date.now(),
+    ...(opts?.autoSessionKey ? { autoSessionKey: opts.autoSessionKey } : {}),
+    tokens,
+    cost,
+    toolCalls,
+    assistantMessages,
+    userMessages,
+    apiRequests: assistantMessages,
+    ...(opts?.tier ? { tier: opts.tier } : {}),
+    ...(opts?.modelDowngraded !== undefined ? { modelDowngraded: opts.modelDowngraded } : {}),
+    ...(opts?.contextWindowTokens !== undefined ? { contextWindowTokens: opts.contextWindowTokens } : {}),
+    ...(opts?.truncationSections !== undefined ? { truncationSections: opts.truncationSections } : {}),
+    ...(opts?.continueHereFired !== undefined ? { continueHereFired: opts.continueHereFired } : {}),
+    ...(opts?.promptCharCount != null ? { promptCharCount: opts.promptCharCount } : {}),
+    ...(opts?.baselineCharCount != null ? { baselineCharCount: opts.baselineCharCount } : {}),
+  };
+
+  // Auto-capture skill telemetry (#599)
+  const skills = getAndClearSkills();
+  if (skills.length > 0) {
+    unit.skills = skills;
+  }
+
+  // Compute cache hit rate
+  if (tokens.cacheRead > 0 || tokens.input > 0) {
+    const totalInput = tokens.cacheRead + tokens.input;
+    unit.cacheHitRate = totalInput > 0 ? Math.round((tokens.cacheRead / totalInput) * 100) : 0;
+  }
+
+  // Idempotency guard: update in-place on duplicate, append otherwise.
+  const dupeIdx = scopedLedger.units.findIndex(
+    (u) => u.type === unit.type && u.id === unit.id && u.startedAt === unit.startedAt,
+  );
+  if (dupeIdx >= 0) {
+    scopedLedger.units[dupeIdx] = unit;
+  } else {
+    scopedLedger.units.push(unit);
+  }
+  saveLedger(base, scopedLedger);
+
+  if (isUnifiedAuditEnabled()) {
+    emitUokAuditEvent(
+      base,
+      buildAuditEnvelope({
+        traceId: opts?.traceId ?? `metrics:${unitType}:${unitId}`,
+        turnId: opts?.turnId,
+        causedBy: opts?.causedBy,
+        category: "metrics",
+        type: "unit-metrics-snapshot",
+        payload: {
+          unitType,
+          unitId,
+          model,
+          tokens: unit.tokens,
+          cost: unit.cost,
+          toolCalls: unit.toolCalls,
+        },
+      }),
+    );
+  }
+
+  return unit;
 }
 
 // ─── Aggregation helpers ──────────────────────────────────────────────────────
@@ -593,6 +783,12 @@ export function pruneMetricsLedger(base: string, keepCount: number): number {
   if (ledger) {
     ledger.units = ledger.units.slice(-keepCount);
   }
+  // Invalidate all scoped ledger cache entries. Prune is rare; clearing the
+  // entire map is simpler than tracking which entry belongs to `base`. Without
+  // this, scopedLedgers entries for the pruned workspace hold a pre-prune
+  // MetricsLedger that snapshotUnitMetricsByScope would merge back in, causing
+  // pruned units to reappear in subsequent snapshots.
+  scopedLedgers.clear();
   return removed;
 }
 
@@ -635,6 +831,130 @@ function deduplicateUnits(units: UnitMetrics[]): UnitMetrics[] {
   return Array.from(map.values());
 }
 
+// How long a lock file must be untouched (in ms) before it is considered
+// orphaned from a crashed process. Set to 2× the acquire timeout.
+export const STALE_LOCK_THRESHOLD_MS = 4000;
+
+// Retry interval between lock acquire attempts (ms). Caps syscall rate at
+// ~200 attempts over a 2s timeout instead of ~20,000 without any sleep.
+// Exposed for tests.
+export const LOCK_RETRY_INTERVAL_MS = 5;
+
+// Sync sleep via Atomics.wait — true OS-level sleep, no CPU spin.
+// Int32Array must reference a SharedArrayBuffer; we wait on index 0 which
+// will never be woken by a Atomics.notify, so the wait always times out.
+const _lockSleepBuf = new Int32Array(new SharedArrayBuffer(4));
+function syncSleep(ms: number): void {
+  Atomics.wait(_lockSleepBuf, 0, 0, ms);
+}
+
+// Counts the number of sleepy retries (non-stale-evicting) made by acquireLock
+// across all calls since the last reset. Exported for test instrumentation only.
+let _lockSleepyRetries = 0;
+export function getLockSleepyRetries(): number { return _lockSleepyRetries; }
+export function resetLockSleepyRetries(): void { _lockSleepyRetries = 0; }
+
+/**
+ * Acquire an exclusive .lock sentinel file via O_EXCL.
+ *
+ * Improvements over the original:
+ *  - No busy spin: the inner `while (Date.now() < waitUntil) {}` spin that
+ *    burned CPU doing nothing useful is removed. Each retry attempt now makes
+ *    one `openSync` syscall and immediately re-checks the deadline, which is
+ *    orders of magnitude cheaper than a tight spin loop.
+ *  - Stale-lock detection: if the existing lock file's mtime is older than
+ *    STALE_LOCK_THRESHOLD_MS, the lock is considered orphaned (e.g. the
+ *    writing process crashed) and is forcibly removed before retrying.
+ *    A warning is logged so operators can detect crash patterns.
+ *  - PID stamp: on success, writes the acquiring process's PID and a
+ *    timestamp into the lock file so external monitors can identify orphans.
+ *  - Retry sleep: after each non-stale-evicting retry, sleeps
+ *    LOCK_RETRY_INTERVAL_MS (5ms) via Atomics.wait so the process yields to
+ *    the OS. This caps syscall rate at ~200–400/s under contention instead of
+ *    the ~20,000/s that would result from a tight openSync loop.
+ *    After a stale-lock eviction (lock already removed), no sleep is injected
+ *    — we retry immediately to close the short race window.
+ *
+ * Returns true on success, false on timeout.
+ */
+function acquireLock(lockPath: string, timeoutMs = 2000): boolean {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const fd = openSync(lockPath, "wx"); // O_WRONLY | O_CREAT | O_EXCL
+      closeSync(fd);
+      // Write PID stamp so external monitors can identify the lock owner.
+      try {
+        writeFileSync(lockPath, `${process.pid}\n${new Date().toISOString()}\n`, "utf-8");
+      } catch { /* non-fatal — stamp is diagnostic only */ }
+      return true;
+    } catch {
+      // Lock held by another process — check for staleness before retrying.
+      try {
+        const st = statSync(lockPath);
+        if (Date.now() - st.mtimeMs > STALE_LOCK_THRESHOLD_MS) {
+          logWarning(
+            "fs",
+            `stale metrics lock at ${lockPath} (age ${Date.now() - st.mtimeMs}ms); forcibly removing and retrying`,
+          );
+          try { unlinkSync(lockPath); } catch { /* already gone */ }
+          // Do NOT sleep after stale-lock eviction — retry the open
+          // immediately. The lock file was just removed; a short race window
+          // exists and sleeping here would unnecessarily delay recovery.
+          continue;
+        }
+      } catch { /* lock file disappeared between the failed open and stat — retry */ }
+      // Sleep between retries to yield to the OS and cap syscall rate.
+      // Uses Atomics.wait for a true blocking sleep (no CPU spin).
+      _lockSleepyRetries++;
+      syncSleep(LOCK_RETRY_INTERVAL_MS);
+    }
+  }
+  return false;
+}
+
+function releaseLock(lockPath: string): void {
+  try { unlinkSync(lockPath); } catch { /* ignore */ }
+}
+
+/**
+ * Save the ledger with cross-process merge semantics.
+ *
+ * Acquires a .lock sentinel file, reads the current on-disk ledger,
+ * merges worker units with existing peer units (worker's entry wins on
+ * type+id+startedAt conflict since it has the latest finishedAt),
+ * then writes atomically. This prevents parallel auto-mode workers from
+ * silently discarding each other's metrics entries.
+ *
+ * Falls back to a direct write (no merge) if the lock cannot be acquired
+ * within the timeout — better to potentially overwrite than to lose data
+ * entirely.
+ */
 function saveLedger(base: string, data: MetricsLedger): void {
-  saveJsonFile(metricsPath(base), data);
+  const path = metricsPath(base);
+  const lockPath = `${path}.lock`;
+  const acquired = acquireLock(lockPath);
+  if (acquired) {
+    try {
+      // Read current on-disk state and merge with worker's in-memory units.
+      // Worker units take precedence on conflict (by finishedAt in deduplicateUnits).
+      const onDisk = loadJsonFileOrNull(path, isMetricsLedger);
+      if (onDisk && onDisk.units.length > 0) {
+        const merged = deduplicateUnits([...onDisk.units, ...data.units]);
+        saveJsonFile(path, { ...data, units: merged });
+      } else {
+        saveJsonFile(path, data);
+      }
+    } finally {
+      releaseLock(lockPath);
+    }
+  } else {
+    // Lock could not be acquired within the timeout. Fall back to a direct
+    // write (no cross-process merge) to avoid losing this worker's data
+    // entirely. A concurrent writer may overwrite us, but that is preferable
+    // to a torn write caused by two writers simultaneously executing the
+    // read-merge-write sequence without mutual exclusion.
+    logWarning("fs", "saveLedger: lock not acquired — falling back to direct write (no merge)");
+    saveJsonFile(path, data);
+  }
 }

@@ -21,7 +21,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gsdRoot } from "./paths.js";
 import { createWorktree, worktreePath } from "./worktree-manager.js";
-import { autoWorktreeBranch, runWorktreePostCreateHook, syncGsdStateToWorktree } from "./auto-worktree.js";
+import { autoWorktreeBranch, fastForwardReusedMilestoneBranchIfSafe, runWorktreePostCreateHook, syncGsdStateToWorktree } from "./auto-worktree.js";
 import { nativeBranchExists } from "./native-git-bridge.js";
 import { readIntegrationBranch } from "./git-service.js";
 import { resolveParallelConfig } from "./preferences.js";
@@ -471,7 +471,7 @@ export async function startParallel(
       // Create the worktree (without chdir — coordinator stays in project root)
       let wtPath: string;
       try {
-        wtPath = createMilestoneWorktree(basePath, mid);
+        wtPath = _createMilestoneWorktree(basePath, mid);
       } catch (e) {
         logWarning("parallel", `createMilestoneWorktree fallback for ${mid}: ${(e as Error).message}`);
         wtPath = worktreePath(basePath, mid);
@@ -532,13 +532,23 @@ export async function startParallel(
 /**
  * Create a git worktree for a milestone without changing the coordinator's cwd.
  * Uses milestone/<MID> branch naming (same as auto-worktree.ts).
+ *
+ * Exported with the `_` prefix purely for tests — production callers stay on
+ * the closure-private name `createMilestoneWorktree` below.
  */
-function createMilestoneWorktree(basePath: string, milestoneId: string): string {
+export function _createMilestoneWorktree(basePath: string, milestoneId: string): string {
   const branch = autoWorktreeBranch(milestoneId);
   const branchExists = nativeBranchExists(basePath, branch);
 
   let info: { name: string; path: string; branch: string; exists: boolean };
   if (branchExists) {
+    // #5549 post-merge audit (R3): match the fast-forward behavior added to
+    // `createAutoWorktree` in commit 8996cb68e. When a worker reuses an
+    // existing milestone branch, fast-forward it onto the integration branch
+    // when safe so per-worker worktrees don't fork from a stale base after a
+    // sibling milestone has merged. Same `nativeIsAncestor` + worktree-list
+    // safety guards apply.
+    fastForwardReusedMilestoneBranchIfSafe(basePath, milestoneId, branch);
     info = createWorktree(basePath, milestoneId, { branch, reuseExistingBranch: true });
   } else {
     const integrationBranch = readIntegrationBranch(basePath, milestoneId) ?? undefined;

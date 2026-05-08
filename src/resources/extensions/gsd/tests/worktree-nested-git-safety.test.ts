@@ -56,11 +56,11 @@ test("#2616: findNestedGitDirs ignores .git files (worktree pointers)", (t) => {
   );
 });
 
-test("#2616: findNestedGitDirs skips excluded directories (node_modules, .gsd, target)", (t) => {
+test("#2616: findNestedGitDirs skips excluded directories (node_modules, .gsd, .bg-shell, target)", (t) => {
   const root = makeRoot(t);
 
   // All three of these contain a .git *directory*, but the scan must skip them.
-  for (const excluded of ["node_modules", ".gsd", "target"]) {
+  for (const excluded of ["node_modules", ".gsd", ".bg-shell", "target"]) {
     const inside = join(root, excluded, "vendored-pkg");
     mkdirSync(join(inside, ".git"), { recursive: true });
   }
@@ -71,6 +71,13 @@ test("#2616: findNestedGitDirs skips excluded directories (node_modules, .gsd, t
     0,
     `excluded directories must be skipped, got ${JSON.stringify(found)}`,
   );
+});
+
+test("#2616: findNestedGitDirs ignores normal missing child .git probes", (t) => {
+  const root = makeRoot(t);
+  mkdirSync(join(root, "plain-dir"), { recursive: true });
+
+  assert.deepEqual(findNestedGitDirs(root), []);
 });
 
 test("#2616: findNestedGitDirs finds deeply nested repos", (t) => {

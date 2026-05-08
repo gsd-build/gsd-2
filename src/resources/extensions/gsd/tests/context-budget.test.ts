@@ -4,7 +4,7 @@
  * No I/O, no extension context, no global state.
  */
 
-import { describe, it } from "node:test";
+import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 import {
@@ -16,7 +16,16 @@ import {
   computeBudgets,
   truncateAtSectionBoundary,
   resolveExecutorContextWindow,
+  _resetEmpiricalCacheForTest,
 } from "../context-budget.js";
+
+// Reset the per-provider empirical chars-per-token cache before each test.
+// The hardcoded char-ratio assertions below assume the static fallback path
+// (3.5 / 4.0 chars/token) is used. Without this guard, a prior test that
+// warms tiktoken would populate the cache and silently break these tests.
+beforeEach(() => {
+  _resetEmpiricalCacheForTest();
+});
 
 import type { TokenProvider } from "../token-counter.js";
 
@@ -199,6 +208,18 @@ describe("context-budget: resolveExecutorContextWindow", () => {
     assert.equal(result, 128_000);
   });
 
+  it("uses conservative effective context for configured claude-code models", () => {
+    const registry = makeRegistry([
+      makeModel("claude-sonnet-4-6", "claude-code", 1_000_000),
+    ]);
+    const prefs: MinimalPreferences = {
+      models: { execution: "claude-code/claude-sonnet-4-6" },
+    };
+
+    const result = resolveExecutorContextWindow(registry, prefs);
+    assert.equal(result, 200_000);
+  });
+
   it("supports provider/model format in preferences", () => {
     const registry = makeRegistry([
       makeModel("gpt-4o", "openai", 128_000),
@@ -244,6 +265,22 @@ describe("context-budget: resolveExecutorContextWindow", () => {
 
     const result = resolveExecutorContextWindow(registry, prefs, 128_000);
     assert.equal(result, 128_000);
+  });
+
+  it("uses conservative effective context for claude-code session window fallback", () => {
+    const registry = makeRegistry([]);
+    const prefs: MinimalPreferences = { models: {} };
+
+    const result = resolveExecutorContextWindow(registry, prefs, 1_000_000, "claude-code");
+    assert.equal(result, 200_000);
+  });
+
+  it("does not cap large non-claude-code session windows", () => {
+    const registry = makeRegistry([]);
+    const prefs: MinimalPreferences = { models: {} };
+
+    const result = resolveExecutorContextWindow(registry, prefs, 1_000_000, "openai");
+    assert.equal(result, 1_000_000);
   });
 
   it("falls back to 200K when no session and no executor model", () => {

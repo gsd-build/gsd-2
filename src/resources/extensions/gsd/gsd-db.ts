@@ -1,3 +1,5 @@
+// Project/App: GSD-2
+// File Purpose: GSD database facade, schema, migrations, and single-writer write API.
 // GSD Database Abstraction Layer
 // Provides a SQLite database with provider fallback chain:
 //   node:sqlite (built-in) → better-sqlite3 (npm) → null (unavailable)
@@ -21,189 +23,93 @@
 // excluded from this invariant.
 
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { existsSync, copyFileSync, mkdirSync, realpathSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Decision, Requirement, GateRow, GateId, GateScope, GateStatus, GateVerdict } from "./types.js";
 import { GSDError, GSD_STALE_STATE } from "./errors.js";
+import type { GsdWorkspace, MilestoneScope } from "./workspace.js";
 import { getGateIdsForTurn, type OwnerTurn } from "./gate-registry.js";
 import { logError, logWarning } from "./workflow-logger.js";
+import { createDbAdapter, type DbAdapter } from "./db-adapter.js";
+import { createBaseSchemaObjects } from "./db-base-schema.js";
+import { createCoordinationTablesV24 } from "./db-coordination-schema.js";
+import { createDbConnectionCache, type DbConnectionCacheEntry } from "./db-connection-cache.js";
+import {
+  emptyTaskStatusCounts,
+  rowToActiveTaskSummary,
+  rowToIdStatusSummary,
+  rowToTaskStatusCounts,
+  rowsToStringColumn,
+  type ActiveTaskSummary,
+  type IdStatusSummary,
+  type TaskStatusCounts,
+} from "./db-lightweight-query-rows.js";
+import {
+  rowToActiveDecision,
+  rowToActiveRequirement,
+  rowToDecision,
+  rowToRequirement,
+  rowsToRequirementCounts,
+} from "./db-decision-requirement-rows.js";
+import { rowToGate } from "./db-gate-rows.js";
+import { rowToArtifact, rowToMilestone, type ArtifactRow, type MilestoneRow } from "./db-milestone-artifact-rows.js";
+import { backupDatabaseBeforeMigration } from "./db-migration-backup.js";
+import {
+  applyMigrationV2Artifacts,
+  applyMigrationV3Memories,
+  applyMigrationV4DecisionMadeBy,
+  applyMigrationV5HierarchyTables,
+  applyMigrationV6SliceSummaries,
+  applyMigrationV7Dependencies,
+  applyMigrationV8PlanningFields,
+  applyMigrationV9Ordering,
+  applyMigrationV10ReplanTrigger,
+  applyMigrationV11TaskPlanning,
+  applyMigrationV12QualityGates,
+  applyMigrationV13HotPathIndexes,
+  applyMigrationV14SliceDependencies,
+  applyMigrationV15AuditTables,
+  applyMigrationV16EscalationSource,
+  applyMigrationV17TaskEscalation,
+  applyMigrationV18MemorySources,
+  applyMigrationV19MemoryFts,
+  applyMigrationV20MemoryRelations,
+  applyMigrationV21StructuredMemories,
+  applyMigrationV22QualityGateRepair,
+  applyMigrationV23MilestoneQueue,
+  applyMigrationV26MilestoneCommitAttributions,
+  applyMigrationV27ArtifactHash,
+  applyMigrationV28MemoryLastHitAt,
+} from "./db-migration-steps.js";
+import { isMemoriesFtsAvailableSchema, tryCreateMemoriesFtsSchema } from "./db-memory-fts-schema.js";
+import { createDbOpenState, type DbOpenPhase } from "./db-open-state.js";
+import { createRuntimeKvTableV25 } from "./db-runtime-kv-schema.js";
+import { ensureColumn, getCurrentSchemaVersion, recordSchemaVersion } from "./db-schema-metadata.js";
+import { rowToSlice, rowToTask, type SliceRow, type TaskRow } from "./db-task-slice-rows.js";
+import { createDbTransactionRunner } from "./db-transaction.js";
+import { ensureVerificationEvidenceDedupIndex } from "./db-verification-evidence-schema.js";
+import { createSqliteProviderLoader, suppressSqliteWarning, type DbProviderName, type SqliteFallbackOpen } from "./db-provider.js";
 // Type-only import to avoid a circular runtime dep. The runtime side of
 // workflow-manifest.ts depends on this file, but the StateManifest type is
 // pure structure with no runtime coupling.
 import type { StateManifest } from "./workflow-manifest.js";
 
 const _require = createRequire(import.meta.url);
+type ProviderName = DbProviderName;
 
-interface DbStatement {
-  run(...params: unknown[]): unknown;
-  get(...params: unknown[]): Record<string, unknown> | undefined;
-  all(...params: unknown[]): Record<string, unknown>[];
-}
+export type { ArtifactRow, MilestoneRow } from "./db-milestone-artifact-rows.js";
+export type { ActiveTaskSummary, IdStatusSummary, TaskStatusCounts } from "./db-lightweight-query-rows.js";
+export type { SliceRow, TaskRow } from "./db-task-slice-rows.js";
 
-interface DbAdapter {
-  exec(sql: string): void;
-  prepare(sql: string): DbStatement;
-  close(): void;
-}
+const providerLoader = createSqliteProviderLoader({
+  requireModule: (id: string) => _require(id),
+  suppressSqliteWarning,
+  nodeVersion: process.versions.node,
+  writeStderr: (message: string) => process.stderr.write(message),
+});
 
-type ProviderName = "node:sqlite" | "better-sqlite3";
-
-let providerName: ProviderName | null = null;
-let providerModule: unknown = null;
-let loadAttempted = false;
-
-function suppressSqliteWarning(): void {
-  const origEmit = process.emit;
-  // Override via loose cast: Node's overloaded emit signature is not directly assignable.
-  (process as any).emit = function (event: string, ...args: unknown[]): boolean {
-    if (
-      event === "warning" &&
-      args[0] &&
-      typeof args[0] === "object" &&
-      "name" in args[0] &&
-      (args[0] as { name: string }).name === "ExperimentalWarning" &&
-      "message" in args[0] &&
-      typeof (args[0] as { message: string }).message === "string" &&
-      (args[0] as { message: string }).message.includes("SQLite")
-    ) {
-      return false;
-    }
-    return origEmit.apply(process, [event, ...args] as Parameters<typeof process.emit>) as unknown as boolean;
-  };
-}
-
-function loadProvider(): void {
-  if (loadAttempted) return;
-  loadAttempted = true;
-
-  try {
-    suppressSqliteWarning();
-    const mod = _require("node:sqlite");
-    if (mod.DatabaseSync) {
-      providerModule = mod;
-      providerName = "node:sqlite";
-      return;
-    }
-  } catch {
-    // unavailable
-  }
-
-  try {
-    const mod = _require("better-sqlite3");
-    if (typeof mod === "function" || (mod && mod.default)) {
-      providerModule = mod.default || mod;
-      providerName = "better-sqlite3";
-      return;
-    }
-  } catch {
-    // unavailable
-  }
-
-  const nodeMajor = parseInt(process.versions.node.split(".")[0], 10);
-  const versionHint = nodeMajor < 22
-    ? ` GSD requires Node >= 22.0.0 (current: v${process.versions.node}). Upgrade Node to fix this.`
-    : "";
-  process.stderr.write(
-    `gsd-db: No SQLite provider available (tried node:sqlite, better-sqlite3).${versionHint}\n`,
-  );
-}
-
-function normalizeRow(row: unknown): Record<string, unknown> | undefined {
-  if (row == null) return undefined;
-  if (Object.getPrototypeOf(row) === null) {
-    return { ...(row as Record<string, unknown>) };
-  }
-  return row as Record<string, unknown>;
-}
-
-function normalizeRows(rows: unknown[]): Record<string, unknown>[] {
-  return rows.map((r) => normalizeRow(r)!);
-}
-
-function createAdapter(rawDb: unknown): DbAdapter {
-  const db = rawDb as {
-    exec(sql: string): void;
-    prepare(sql: string): {
-      run(...args: unknown[]): unknown;
-      get(...args: unknown[]): unknown;
-      all(...args: unknown[]): unknown[];
-    };
-    close(): void;
-  };
-
-  const stmtCache = new Map<string, DbStatement>();
-
-  function wrapStmt(raw: { run(...a: unknown[]): unknown; get(...a: unknown[]): unknown; all(...a: unknown[]): unknown[] }): DbStatement {
-    return {
-      run(...params: unknown[]): unknown {
-        return raw.run(...params);
-      },
-      get(...params: unknown[]): Record<string, unknown> | undefined {
-        return normalizeRow(raw.get(...params));
-      },
-      all(...params: unknown[]): Record<string, unknown>[] {
-        return normalizeRows(raw.all(...params));
-      },
-    };
-  }
-
-  return {
-    exec(sql: string): void {
-      db.exec(sql);
-    },
-    prepare(sql: string): DbStatement {
-      let cached = stmtCache.get(sql);
-      if (cached) return cached;
-      cached = wrapStmt(db.prepare(sql));
-      stmtCache.set(sql, cached);
-      return cached;
-    },
-    close(): void {
-      stmtCache.clear();
-      db.close();
-    },
-  };
-}
-
-function openRawDb(path: string): unknown {
-  loadProvider();
-  if (!providerModule || !providerName) return null;
-
-  if (providerName === "node:sqlite") {
-    const { DatabaseSync } = providerModule as {
-      DatabaseSync: new (path: string) => unknown;
-    };
-    return new DatabaseSync(path);
-  }
-
-  const Database = providerModule as new (path: string) => unknown;
-  return new Database(path);
-}
-
-export const SCHEMA_VERSION = 22;
-
-function indexExists(db: DbAdapter, name: string): boolean {
-  return !!db.prepare(
-    "SELECT 1 as present FROM sqlite_master WHERE type = 'index' AND name = ?",
-  ).get(name);
-}
-
-function dedupeVerificationEvidenceRows(db: DbAdapter): void {
-  db.exec(`
-    DELETE FROM verification_evidence
-    WHERE rowid NOT IN (
-      SELECT MIN(rowid)
-      FROM verification_evidence
-      GROUP BY task_id, slice_id, milestone_id, command, verdict
-    )
-  `);
-}
-
-function ensureVerificationEvidenceDedupIndex(db: DbAdapter): void {
-  if (indexExists(db, "idx_verification_evidence_dedup")) return;
-  dedupeVerificationEvidenceRows(db);
-  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_verification_evidence_dedup ON verification_evidence(task_id, slice_id, milestone_id, command, verdict)");
-}
+export const SCHEMA_VERSION = 28;
 
 function initSchema(db: DbAdapter, fileBacked: boolean): void {
   if (fileBacked) db.exec("PRAGMA journal_mode=WAL");
@@ -217,372 +123,16 @@ function initSchema(db: DbAdapter, fileBacked: boolean): void {
 
   db.exec("BEGIN");
   try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS schema_version (
-        version INTEGER NOT NULL,
-        applied_at TEXT NOT NULL
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS decisions (
-        seq INTEGER PRIMARY KEY AUTOINCREMENT,
-        id TEXT NOT NULL UNIQUE,
-        when_context TEXT NOT NULL DEFAULT '',
-        scope TEXT NOT NULL DEFAULT '',
-        decision TEXT NOT NULL DEFAULT '',
-        choice TEXT NOT NULL DEFAULT '',
-        rationale TEXT NOT NULL DEFAULT '',
-        revisable TEXT NOT NULL DEFAULT '',
-        made_by TEXT NOT NULL DEFAULT 'agent',
-        source TEXT NOT NULL DEFAULT 'discussion', -- ADR-011 P2: 'discussion' | 'planning' | 'escalation'
-        superseded_by TEXT DEFAULT NULL
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS requirements (
-        id TEXT PRIMARY KEY,
-        class TEXT NOT NULL DEFAULT '',
-        status TEXT NOT NULL DEFAULT '',
-        description TEXT NOT NULL DEFAULT '',
-        why TEXT NOT NULL DEFAULT '',
-        source TEXT NOT NULL DEFAULT '',
-        primary_owner TEXT NOT NULL DEFAULT '',
-        supporting_slices TEXT NOT NULL DEFAULT '',
-        validation TEXT NOT NULL DEFAULT '',
-        notes TEXT NOT NULL DEFAULT '',
-        full_content TEXT NOT NULL DEFAULT '',
-        superseded_by TEXT DEFAULT NULL
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS artifacts (
-        path TEXT PRIMARY KEY,
-        artifact_type TEXT NOT NULL DEFAULT '',
-        milestone_id TEXT DEFAULT NULL,
-        slice_id TEXT DEFAULT NULL,
-        task_id TEXT DEFAULT NULL,
-        full_content TEXT NOT NULL DEFAULT '',
-        imported_at TEXT NOT NULL DEFAULT ''
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS memories (
-        seq INTEGER PRIMARY KEY AUTOINCREMENT,
-        id TEXT NOT NULL UNIQUE,
-        category TEXT NOT NULL,
-        content TEXT NOT NULL,
-        confidence REAL NOT NULL DEFAULT 0.8,
-        source_unit_type TEXT,
-        source_unit_id TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        superseded_by TEXT DEFAULT NULL,
-        hit_count INTEGER NOT NULL DEFAULT 0,
-        scope TEXT NOT NULL DEFAULT 'project',
-        tags TEXT NOT NULL DEFAULT '[]',
-        structured_fields TEXT DEFAULT NULL
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS memory_processed_units (
-        unit_key TEXT PRIMARY KEY,
-        activity_file TEXT,
-        processed_at TEXT NOT NULL
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS memory_sources (
-        id TEXT PRIMARY KEY,
-        kind TEXT NOT NULL,
-        uri TEXT,
-        title TEXT,
-        content TEXT NOT NULL,
-        content_hash TEXT NOT NULL UNIQUE,
-        imported_at TEXT NOT NULL,
-        scope TEXT NOT NULL DEFAULT 'project',
-        tags TEXT NOT NULL DEFAULT '[]'
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS memory_embeddings (
-        memory_id TEXT PRIMARY KEY,
-        model TEXT NOT NULL,
-        dim INTEGER NOT NULL,
-        vector BLOB NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS memory_relations (
-        from_id TEXT NOT NULL,
-        to_id TEXT NOT NULL,
-        rel TEXT NOT NULL,
-        confidence REAL NOT NULL DEFAULT 0.8,
-        created_at TEXT NOT NULL,
-        PRIMARY KEY (from_id, to_id, rel)
-      )
-    `);
-
-    // FTS5 virtual table mirroring memories.content for fast keyword search.
-    // Optional — if the SQLite build lacks FTS5, we fall back to LIKE scans.
-    tryCreateMemoriesFts(db);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS milestones (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'active',
-        depends_on TEXT NOT NULL DEFAULT '[]',
-        created_at TEXT NOT NULL DEFAULT '',
-        completed_at TEXT DEFAULT NULL,
-        vision TEXT NOT NULL DEFAULT '',
-        success_criteria TEXT NOT NULL DEFAULT '[]',
-        key_risks TEXT NOT NULL DEFAULT '[]',
-        proof_strategy TEXT NOT NULL DEFAULT '[]',
-        verification_contract TEXT NOT NULL DEFAULT '',
-        verification_integration TEXT NOT NULL DEFAULT '',
-        verification_operational TEXT NOT NULL DEFAULT '',
-        verification_uat TEXT NOT NULL DEFAULT '',
-        definition_of_done TEXT NOT NULL DEFAULT '[]',
-        requirement_coverage TEXT NOT NULL DEFAULT '',
-        boundary_map_markdown TEXT NOT NULL DEFAULT ''
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS slices (
-        milestone_id TEXT NOT NULL,
-        id TEXT NOT NULL,
-        title TEXT NOT NULL DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'pending',
-        risk TEXT NOT NULL DEFAULT 'medium',
-        depends TEXT NOT NULL DEFAULT '[]',
-        demo TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL DEFAULT '',
-        completed_at TEXT DEFAULT NULL,
-        full_summary_md TEXT NOT NULL DEFAULT '',
-        full_uat_md TEXT NOT NULL DEFAULT '',
-        goal TEXT NOT NULL DEFAULT '',
-        success_criteria TEXT NOT NULL DEFAULT '',
-        proof_level TEXT NOT NULL DEFAULT '',
-        integration_closure TEXT NOT NULL DEFAULT '',
-        observability_impact TEXT NOT NULL DEFAULT '',
-        sequence INTEGER DEFAULT 0, -- Ordering hint: tools may set this to control execution order
-        replan_triggered_at TEXT DEFAULT NULL,
-        is_sketch INTEGER NOT NULL DEFAULT 0, -- ADR-011: 1 = slice is a sketch awaiting refinement
-        sketch_scope TEXT NOT NULL DEFAULT '', -- ADR-011: 2-3 sentence rough scope from plan-milestone
-        PRIMARY KEY (milestone_id, id),
-        FOREIGN KEY (milestone_id) REFERENCES milestones(id)
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS tasks (
-        milestone_id TEXT NOT NULL,
-        slice_id TEXT NOT NULL,
-        id TEXT NOT NULL,
-        title TEXT NOT NULL DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'pending',
-        one_liner TEXT NOT NULL DEFAULT '',
-        narrative TEXT NOT NULL DEFAULT '',
-        verification_result TEXT NOT NULL DEFAULT '',
-        duration TEXT NOT NULL DEFAULT '',
-        completed_at TEXT DEFAULT NULL,
-        blocker_discovered INTEGER DEFAULT 0,
-        blocker_source TEXT NOT NULL DEFAULT '', -- ADR-011 P2: provenance for blocker_discovered (e.g. 'reject-escalation')
-        escalation_pending INTEGER NOT NULL DEFAULT 0, -- ADR-011 P2: pause-on-escalation flag
-        escalation_awaiting_review INTEGER NOT NULL DEFAULT 0, -- ADR-011 P2: artifact exists but continueWithDefault=true (no pause)
-        escalation_artifact_path TEXT DEFAULT NULL, -- ADR-011 P2: path to T##-ESCALATION.json
-        escalation_override_applied_at TEXT DEFAULT NULL, -- ADR-011 P2: DB claim lock for idempotent override injection
-        deviations TEXT NOT NULL DEFAULT '',
-        known_issues TEXT NOT NULL DEFAULT '',
-        key_files TEXT NOT NULL DEFAULT '[]',
-        key_decisions TEXT NOT NULL DEFAULT '[]',
-        full_summary_md TEXT NOT NULL DEFAULT '',
-        description TEXT NOT NULL DEFAULT '',
-        estimate TEXT NOT NULL DEFAULT '',
-        files TEXT NOT NULL DEFAULT '[]',
-        verify TEXT NOT NULL DEFAULT '',
-        inputs TEXT NOT NULL DEFAULT '[]',
-        expected_output TEXT NOT NULL DEFAULT '[]',
-        observability_impact TEXT NOT NULL DEFAULT '',
-        full_plan_md TEXT NOT NULL DEFAULT '',
-        sequence INTEGER DEFAULT 0, -- Ordering hint: tools may set this to control execution order
-        PRIMARY KEY (milestone_id, slice_id, id),
-        FOREIGN KEY (milestone_id, slice_id) REFERENCES slices(milestone_id, id)
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS verification_evidence (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        task_id TEXT NOT NULL DEFAULT '',
-        slice_id TEXT NOT NULL DEFAULT '',
-        milestone_id TEXT NOT NULL DEFAULT '',
-        command TEXT NOT NULL DEFAULT '',
-        exit_code INTEGER DEFAULT 0,
-        verdict TEXT NOT NULL DEFAULT '',
-        duration_ms INTEGER DEFAULT 0,
-        created_at TEXT NOT NULL DEFAULT '',
-        FOREIGN KEY (milestone_id, slice_id, task_id) REFERENCES tasks(milestone_id, slice_id, id)
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS replan_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        milestone_id TEXT NOT NULL DEFAULT '',
-        slice_id TEXT DEFAULT NULL,
-        task_id TEXT DEFAULT NULL,
-        summary TEXT NOT NULL DEFAULT '',
-        previous_artifact_path TEXT DEFAULT NULL,
-        replacement_artifact_path TEXT DEFAULT NULL,
-        created_at TEXT NOT NULL DEFAULT '',
-        FOREIGN KEY (milestone_id) REFERENCES milestones(id)
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS assessments (
-        path TEXT PRIMARY KEY,
-        milestone_id TEXT NOT NULL DEFAULT '',
-        slice_id TEXT DEFAULT NULL,
-        task_id TEXT DEFAULT NULL,
-        status TEXT NOT NULL DEFAULT '',
-        scope TEXT NOT NULL DEFAULT '',
-        full_content TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL DEFAULT '',
-        FOREIGN KEY (milestone_id) REFERENCES milestones(id)
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS quality_gates (
-        milestone_id TEXT NOT NULL,
-        slice_id TEXT NOT NULL,
-        gate_id TEXT NOT NULL,
-        scope TEXT NOT NULL DEFAULT 'slice',
-        task_id TEXT NOT NULL DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'pending',
-        verdict TEXT NOT NULL DEFAULT '',
-        rationale TEXT NOT NULL DEFAULT '',
-        findings TEXT NOT NULL DEFAULT '',
-        evaluated_at TEXT DEFAULT NULL,
-        PRIMARY KEY (milestone_id, slice_id, gate_id, task_id),
-        FOREIGN KEY (milestone_id, slice_id) REFERENCES slices(milestone_id, id)
-      )
-    `);
-
-    // Slice dependency junction table (v14)
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS slice_dependencies (
-        milestone_id TEXT NOT NULL,
-        slice_id TEXT NOT NULL,
-        depends_on_slice_id TEXT NOT NULL,
-        PRIMARY KEY (milestone_id, slice_id, depends_on_slice_id),
-        FOREIGN KEY (milestone_id, slice_id) REFERENCES slices(milestone_id, id),
-        FOREIGN KEY (milestone_id, depends_on_slice_id) REFERENCES slices(milestone_id, id)
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS gate_runs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        trace_id TEXT NOT NULL,
-        turn_id TEXT NOT NULL,
-        gate_id TEXT NOT NULL,
-        gate_type TEXT NOT NULL DEFAULT '',
-        unit_type TEXT DEFAULT NULL,
-        unit_id TEXT DEFAULT NULL,
-        milestone_id TEXT DEFAULT NULL,
-        slice_id TEXT DEFAULT NULL,
-        task_id TEXT DEFAULT NULL,
-        outcome TEXT NOT NULL DEFAULT 'pass',
-        failure_class TEXT NOT NULL DEFAULT 'none',
-        rationale TEXT NOT NULL DEFAULT '',
-        findings TEXT NOT NULL DEFAULT '',
-        attempt INTEGER NOT NULL DEFAULT 1,
-        max_attempts INTEGER NOT NULL DEFAULT 1,
-        retryable INTEGER NOT NULL DEFAULT 0,
-        evaluated_at TEXT NOT NULL DEFAULT ''
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS turn_git_transactions (
-        trace_id TEXT NOT NULL,
-        turn_id TEXT NOT NULL,
-        unit_type TEXT DEFAULT NULL,
-        unit_id TEXT DEFAULT NULL,
-        stage TEXT NOT NULL DEFAULT 'turn-start',
-        action TEXT NOT NULL DEFAULT 'status-only',
-        push INTEGER NOT NULL DEFAULT 0,
-        status TEXT NOT NULL DEFAULT 'ok',
-        error TEXT DEFAULT NULL,
-        metadata_json TEXT NOT NULL DEFAULT '{}',
-        updated_at TEXT NOT NULL DEFAULT '',
-        PRIMARY KEY (trace_id, turn_id, stage)
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS audit_events (
-        event_id TEXT PRIMARY KEY,
-        trace_id TEXT NOT NULL,
-        turn_id TEXT DEFAULT NULL,
-        caused_by TEXT DEFAULT NULL,
-        category TEXT NOT NULL,
-        type TEXT NOT NULL,
-        ts TEXT NOT NULL,
-        payload_json TEXT NOT NULL DEFAULT '{}'
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS audit_turn_index (
-        trace_id TEXT NOT NULL,
-        turn_id TEXT NOT NULL,
-        first_ts TEXT NOT NULL,
-        last_ts TEXT NOT NULL,
-        event_count INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (trace_id, turn_id)
-      )
-    `);
-
-    db.exec("CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(superseded_by)");
-
-    db.exec("CREATE INDEX IF NOT EXISTS idx_replan_history_milestone ON replan_history(milestone_id, created_at)");
-
-    // v13 indexes — hot-path dispatch queries
-    db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_active ON tasks(milestone_id, slice_id, status)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_slices_active ON slices(milestone_id, status)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_milestones_status ON milestones(status)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_quality_gates_pending ON quality_gates(milestone_id, slice_id, status)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_verification_evidence_task ON verification_evidence(milestone_id, slice_id, task_id)");
-    ensureVerificationEvidenceDedupIndex(db);
-
-    // v14 index — slice dependency lookups
-    db.exec("CREATE INDEX IF NOT EXISTS idx_slice_deps_target ON slice_dependencies(milestone_id, depends_on_slice_id)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_gate_runs_turn ON gate_runs(trace_id, turn_id)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_gate_runs_lookup ON gate_runs(milestone_id, slice_id, task_id, gate_id)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_turn_git_tx_turn ON turn_git_transactions(trace_id, turn_id)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_audit_events_trace ON audit_events(trace_id, ts)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_audit_events_turn ON audit_events(trace_id, turn_id, ts)");
-
-    db.exec(`CREATE VIEW IF NOT EXISTS active_decisions AS SELECT * FROM decisions WHERE superseded_by IS NULL`);
-    db.exec(`CREATE VIEW IF NOT EXISTS active_requirements AS SELECT * FROM requirements WHERE superseded_by IS NULL`);
-    db.exec(`CREATE VIEW IF NOT EXISTS active_memories AS SELECT * FROM memories WHERE superseded_by IS NULL`);
+    createBaseSchemaObjects(db, {
+      tryCreateMemoriesFts,
+      ensureVerificationEvidenceDedupIndex,
+    });
 
     const existing = db.prepare("SELECT count(*) as cnt FROM schema_version").get();
     if (existing && (existing["cnt"] as number) === 0) {
+      createCoordinationTablesV24(db);
+      createRuntimeKvTableV25(db);
+
       // Fresh install — all tables are created above with the full current schema,
       // so it is safe to create all migration-specific indexes here.  For existing
       // databases these indexes are created inside the individual migration guards
@@ -594,12 +144,7 @@ function initSchema(db: DbAdapter, fileBacked: boolean): void {
       db.exec("CREATE INDEX IF NOT EXISTS idx_memory_relations_from ON memory_relations(from_id)");
       db.exec("CREATE INDEX IF NOT EXISTS idx_memory_relations_to ON memory_relations(to_id)");
 
-      db.prepare(
-        "INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)",
-      ).run({
-        ":version": SCHEMA_VERSION,
-        ":applied_at": new Date().toISOString(),
-      });
+      recordSchemaVersion(db, SCHEMA_VERSION);
     }
 
     db.exec("COMMIT");
@@ -611,11 +156,6 @@ function initSchema(db: DbAdapter, fileBacked: boolean): void {
   migrateSchema(db);
 }
 
-function columnExists(db: DbAdapter, table: string, column: string): boolean {
-  const rows = db.prepare(`PRAGMA table_info(${table})`).all();
-  return rows.some((row) => row["name"] === column);
-}
-
 /**
  * Create the FTS5 virtual table for memories plus the triggers that keep it
  * in sync with the base table. FTS5 may be unavailable on stripped-down
@@ -623,317 +163,88 @@ function columnExists(db: DbAdapter, table: string, column: string): boolean {
  * to LIKE-based scans in `memory-store.queryMemoriesRanked`.
  */
 export function tryCreateMemoriesFts(db: DbAdapter): boolean {
-  try {
-    db.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
-      USING fts5(content, content='memories', content_rowid='seq', tokenize='porter unicode61')
-    `);
-    // Triggers mirror inserts / updates / deletes on the base memories table.
-    db.exec(`
-      CREATE TRIGGER IF NOT EXISTS memories_ai
-      AFTER INSERT ON memories BEGIN
-        INSERT INTO memories_fts(rowid, content) VALUES (new.seq, new.content);
-      END
-    `);
-    db.exec(`
-      CREATE TRIGGER IF NOT EXISTS memories_ad
-      AFTER DELETE ON memories BEGIN
-        INSERT INTO memories_fts(memories_fts, rowid, content) VALUES ('delete', old.seq, old.content);
-      END
-    `);
-    db.exec(`
-      CREATE TRIGGER IF NOT EXISTS memories_au
-      AFTER UPDATE OF content ON memories BEGIN
-        INSERT INTO memories_fts(memories_fts, rowid, content) VALUES ('delete', old.seq, old.content);
-        INSERT INTO memories_fts(rowid, content) VALUES (new.seq, new.content);
-      END
-    `);
-    return true;
-  } catch (err) {
-    logWarning("db", `FTS5 unavailable — memory queries will use LIKE fallback: ${(err as Error).message}`);
-    return false;
-  }
+  return tryCreateMemoriesFtsSchema(db, {
+    onUnavailable: (message) => logWarning("db", message),
+  });
 }
 
 export function isMemoriesFtsAvailable(db: DbAdapter): boolean {
-  try {
-    const row = db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memories_fts'")
-      .get();
-    return !!row;
-  } catch {
-    return false;
-  }
+  return isMemoriesFtsAvailableSchema(db);
 }
 
-function ensureColumn(db: DbAdapter, table: string, column: string, ddl: string): void {
-  if (!columnExists(db, table, column)) db.exec(ddl);
+function backfillMemoriesFts(db: DbAdapter): void {
+  db.exec(`INSERT INTO memories_fts(rowid, content) SELECT seq, content FROM memories`);
+}
+
+function copyQualityGateRowsToRepairedTable(db: DbAdapter): void {
+  db.exec(`
+    INSERT OR IGNORE INTO quality_gates_new
+      (milestone_id, slice_id, gate_id, scope, task_id, status, verdict, rationale, findings, evaluated_at)
+    SELECT milestone_id, slice_id, gate_id, scope, COALESCE(task_id, ''), status, verdict, rationale, findings, evaluated_at
+    FROM quality_gates
+  `);
 }
 
 function migrateSchema(db: DbAdapter): void {
-  const row = db.prepare("SELECT MAX(version) as v FROM schema_version").get();
-  const currentVersion = row ? (row["v"] as number) : 0;
+  const currentVersion = getCurrentSchemaVersion(db);
   if (currentVersion >= SCHEMA_VERSION) return;
 
-  // Backup database before migration so a mid-migration crash doesn't
-  // leave a partially-migrated DB with no recovery path.
-  // WAL-safe: checkpoint first to flush WAL into the main DB file, then copy.
-  if (currentPath && currentPath !== ":memory:" && existsSync(currentPath)) {
-    try {
-      const backupPath = `${currentPath}.backup-v${currentVersion}`;
-      if (!existsSync(backupPath)) {
-        // Flush WAL to main DB file before copying — without this, the backup
-        // may be missing committed data that only exists in the -wal file.
-        try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* checkpoint is best-effort */ }
-        copyFileSync(currentPath, backupPath);
-      }
-    } catch (backupErr) {
-      // Log but proceed — blocking migration leaves the DB stuck at an old
-      // schema version permanently on read-only or full filesystems.
-      logWarning("db", `Pre-migration backup failed: ${backupErr instanceof Error ? backupErr.message : String(backupErr)}`);
-    }
-  }
+  backupDatabaseBeforeMigration(db, currentPath, currentVersion, {
+    existsSync,
+    copyFileSync,
+    logWarning,
+  });
 
   db.exec("BEGIN");
   try {
     if (currentVersion < 2) {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS artifacts (
-          path TEXT PRIMARY KEY,
-          artifact_type TEXT NOT NULL DEFAULT '',
-          milestone_id TEXT DEFAULT NULL,
-          slice_id TEXT DEFAULT NULL,
-          task_id TEXT DEFAULT NULL,
-          full_content TEXT NOT NULL DEFAULT '',
-          imported_at TEXT NOT NULL DEFAULT ''
-        )
-      `);
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 2,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV2Artifacts(db);
+      recordSchemaVersion(db, 2);
     }
 
     if (currentVersion < 3) {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS memories (
-          seq INTEGER PRIMARY KEY AUTOINCREMENT,
-          id TEXT NOT NULL UNIQUE,
-          category TEXT NOT NULL,
-          content TEXT NOT NULL,
-          confidence REAL NOT NULL DEFAULT 0.8,
-          source_unit_type TEXT,
-          source_unit_id TEXT,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          superseded_by TEXT DEFAULT NULL,
-          hit_count INTEGER NOT NULL DEFAULT 0
-        )
-      `);
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS memory_processed_units (
-          unit_key TEXT PRIMARY KEY,
-          activity_file TEXT,
-          processed_at TEXT NOT NULL
-        )
-      `);
-      db.exec("CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(superseded_by)");
-      db.exec("DROP VIEW IF EXISTS active_memories");
-      db.exec("CREATE VIEW active_memories AS SELECT * FROM memories WHERE superseded_by IS NULL");
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 3,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV3Memories(db);
+      recordSchemaVersion(db, 3);
     }
 
     if (currentVersion < 4) {
-      ensureColumn(db, "decisions", "made_by", `ALTER TABLE decisions ADD COLUMN made_by TEXT NOT NULL DEFAULT 'agent'`);
-      db.exec("DROP VIEW IF EXISTS active_decisions");
-      db.exec("CREATE VIEW active_decisions AS SELECT * FROM decisions WHERE superseded_by IS NULL");
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 4,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV4DecisionMadeBy(db);
+      recordSchemaVersion(db, 4);
     }
 
     if (currentVersion < 5) {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS milestones (
-          id TEXT PRIMARY KEY,
-          title TEXT NOT NULL DEFAULT '',
-          status TEXT NOT NULL DEFAULT 'active',
-          created_at TEXT NOT NULL,
-          completed_at TEXT DEFAULT NULL
-        )
-      `);
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS slices (
-          milestone_id TEXT NOT NULL,
-          id TEXT NOT NULL,
-          title TEXT NOT NULL DEFAULT '',
-          status TEXT NOT NULL DEFAULT 'pending',
-          risk TEXT NOT NULL DEFAULT 'medium',
-          created_at TEXT NOT NULL DEFAULT '',
-          completed_at TEXT DEFAULT NULL,
-          PRIMARY KEY (milestone_id, id),
-          FOREIGN KEY (milestone_id) REFERENCES milestones(id)
-        )
-      `);
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS tasks (
-          milestone_id TEXT NOT NULL,
-          slice_id TEXT NOT NULL,
-          id TEXT NOT NULL,
-          title TEXT NOT NULL DEFAULT '',
-          status TEXT NOT NULL DEFAULT 'pending',
-          one_liner TEXT NOT NULL DEFAULT '',
-          narrative TEXT NOT NULL DEFAULT '',
-          verification_result TEXT NOT NULL DEFAULT '',
-          duration TEXT NOT NULL DEFAULT '',
-          completed_at TEXT DEFAULT NULL,
-          blocker_discovered INTEGER DEFAULT 0,
-          deviations TEXT NOT NULL DEFAULT '',
-          known_issues TEXT NOT NULL DEFAULT '',
-          key_files TEXT NOT NULL DEFAULT '[]',
-          key_decisions TEXT NOT NULL DEFAULT '[]',
-          full_summary_md TEXT NOT NULL DEFAULT '',
-          PRIMARY KEY (milestone_id, slice_id, id),
-          FOREIGN KEY (milestone_id, slice_id) REFERENCES slices(milestone_id, id)
-        )
-      `);
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS verification_evidence (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          task_id TEXT NOT NULL DEFAULT '',
-          slice_id TEXT NOT NULL DEFAULT '',
-          milestone_id TEXT NOT NULL DEFAULT '',
-          command TEXT NOT NULL DEFAULT '',
-          exit_code INTEGER DEFAULT 0,
-          verdict TEXT NOT NULL DEFAULT '',
-          duration_ms INTEGER DEFAULT 0,
-          created_at TEXT NOT NULL DEFAULT '',
-          FOREIGN KEY (milestone_id, slice_id, task_id) REFERENCES tasks(milestone_id, slice_id, id)
-        )
-      `);
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 5,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV5HierarchyTables(db);
+      recordSchemaVersion(db, 5);
     }
 
     if (currentVersion < 6) {
-      ensureColumn(db, "slices", "full_summary_md", `ALTER TABLE slices ADD COLUMN full_summary_md TEXT NOT NULL DEFAULT ''`);
-      ensureColumn(db, "slices", "full_uat_md", `ALTER TABLE slices ADD COLUMN full_uat_md TEXT NOT NULL DEFAULT ''`);
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 6,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV6SliceSummaries(db);
+      recordSchemaVersion(db, 6);
     }
 
     if (currentVersion < 7) {
-      ensureColumn(db, "slices", "depends", `ALTER TABLE slices ADD COLUMN depends TEXT NOT NULL DEFAULT '[]'`);
-      ensureColumn(db, "slices", "demo", `ALTER TABLE slices ADD COLUMN demo TEXT NOT NULL DEFAULT ''`);
-      ensureColumn(db, "milestones", "depends_on", `ALTER TABLE milestones ADD COLUMN depends_on TEXT NOT NULL DEFAULT '[]'`);
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 7,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV7Dependencies(db);
+      recordSchemaVersion(db, 7);
     }
 
     if (currentVersion < 8) {
-      ensureColumn(db, "milestones", "vision", `ALTER TABLE milestones ADD COLUMN vision TEXT NOT NULL DEFAULT ''`);
-      ensureColumn(db, "milestones", "success_criteria", `ALTER TABLE milestones ADD COLUMN success_criteria TEXT NOT NULL DEFAULT '[]'`);
-      ensureColumn(db, "milestones", "key_risks", `ALTER TABLE milestones ADD COLUMN key_risks TEXT NOT NULL DEFAULT '[]'`);
-      ensureColumn(db, "milestones", "proof_strategy", `ALTER TABLE milestones ADD COLUMN proof_strategy TEXT NOT NULL DEFAULT '[]'`);
-      ensureColumn(db, "milestones", "verification_contract", `ALTER TABLE milestones ADD COLUMN verification_contract TEXT NOT NULL DEFAULT ''`);
-      ensureColumn(db, "milestones", "verification_integration", `ALTER TABLE milestones ADD COLUMN verification_integration TEXT NOT NULL DEFAULT ''`);
-      ensureColumn(db, "milestones", "verification_operational", `ALTER TABLE milestones ADD COLUMN verification_operational TEXT NOT NULL DEFAULT ''`);
-      ensureColumn(db, "milestones", "verification_uat", `ALTER TABLE milestones ADD COLUMN verification_uat TEXT NOT NULL DEFAULT ''`);
-      ensureColumn(db, "milestones", "definition_of_done", `ALTER TABLE milestones ADD COLUMN definition_of_done TEXT NOT NULL DEFAULT '[]'`);
-      ensureColumn(db, "milestones", "requirement_coverage", `ALTER TABLE milestones ADD COLUMN requirement_coverage TEXT NOT NULL DEFAULT ''`);
-      ensureColumn(db, "milestones", "boundary_map_markdown", `ALTER TABLE milestones ADD COLUMN boundary_map_markdown TEXT NOT NULL DEFAULT ''`);
-
-      ensureColumn(db, "slices", "goal", `ALTER TABLE slices ADD COLUMN goal TEXT NOT NULL DEFAULT ''`);
-      ensureColumn(db, "slices", "success_criteria", `ALTER TABLE slices ADD COLUMN success_criteria TEXT NOT NULL DEFAULT ''`);
-      ensureColumn(db, "slices", "proof_level", `ALTER TABLE slices ADD COLUMN proof_level TEXT NOT NULL DEFAULT ''`);
-      ensureColumn(db, "slices", "integration_closure", `ALTER TABLE slices ADD COLUMN integration_closure TEXT NOT NULL DEFAULT ''`);
-      ensureColumn(db, "slices", "observability_impact", `ALTER TABLE slices ADD COLUMN observability_impact TEXT NOT NULL DEFAULT ''`);
-
-      ensureColumn(db, "tasks", "description", `ALTER TABLE tasks ADD COLUMN description TEXT NOT NULL DEFAULT ''`);
-      ensureColumn(db, "tasks", "estimate", `ALTER TABLE tasks ADD COLUMN estimate TEXT NOT NULL DEFAULT ''`);
-      ensureColumn(db, "tasks", "files", `ALTER TABLE tasks ADD COLUMN files TEXT NOT NULL DEFAULT '[]'`);
-      ensureColumn(db, "tasks", "verify", `ALTER TABLE tasks ADD COLUMN verify TEXT NOT NULL DEFAULT ''`);
-      ensureColumn(db, "tasks", "inputs", `ALTER TABLE tasks ADD COLUMN inputs TEXT NOT NULL DEFAULT '[]'`);
-      ensureColumn(db, "tasks", "expected_output", `ALTER TABLE tasks ADD COLUMN expected_output TEXT NOT NULL DEFAULT '[]'`);
-      ensureColumn(db, "tasks", "observability_impact", `ALTER TABLE tasks ADD COLUMN observability_impact TEXT NOT NULL DEFAULT ''`);
-
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS replan_history (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          milestone_id TEXT NOT NULL DEFAULT '',
-          slice_id TEXT DEFAULT NULL,
-          task_id TEXT DEFAULT NULL,
-          summary TEXT NOT NULL DEFAULT '',
-          previous_artifact_path TEXT DEFAULT NULL,
-          replacement_artifact_path TEXT DEFAULT NULL,
-          created_at TEXT NOT NULL DEFAULT '',
-          FOREIGN KEY (milestone_id) REFERENCES milestones(id)
-        )
-      `);
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS assessments (
-          path TEXT PRIMARY KEY,
-          milestone_id TEXT NOT NULL DEFAULT '',
-          slice_id TEXT DEFAULT NULL,
-          task_id TEXT DEFAULT NULL,
-          status TEXT NOT NULL DEFAULT '',
-          scope TEXT NOT NULL DEFAULT '',
-          full_content TEXT NOT NULL DEFAULT '',
-          created_at TEXT NOT NULL DEFAULT '',
-          FOREIGN KEY (milestone_id) REFERENCES milestones(id)
-        )
-      `);
-      db.exec("CREATE INDEX IF NOT EXISTS idx_replan_history_milestone ON replan_history(milestone_id, created_at)");
-
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 8,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV8PlanningFields(db);
+      recordSchemaVersion(db, 8);
     }
 
     if (currentVersion < 9) {
-      ensureColumn(db, "slices", "sequence", `ALTER TABLE slices ADD COLUMN sequence INTEGER DEFAULT 0`);
-      ensureColumn(db, "tasks", "sequence", `ALTER TABLE tasks ADD COLUMN sequence INTEGER DEFAULT 0`);
-
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 9,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV9Ordering(db);
+      recordSchemaVersion(db, 9);
     }
 
     if (currentVersion < 10) {
-      ensureColumn(db, "slices", "replan_triggered_at", `ALTER TABLE slices ADD COLUMN replan_triggered_at TEXT DEFAULT NULL`);
-
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 10,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV10ReplanTrigger(db);
+      recordSchemaVersion(db, 10);
     }
 
     if (currentVersion < 11) {
-      ensureColumn(db, "tasks", "full_plan_md", `ALTER TABLE tasks ADD COLUMN full_plan_md TEXT NOT NULL DEFAULT ''`);
-      // Add unique constraint to replan_history for idempotency:
-      // one replan record per blocker task per slice per milestone.
-      db.exec(`
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_replan_history_unique
-        ON replan_history(milestone_id, slice_id, task_id)
-        WHERE slice_id IS NOT NULL AND task_id IS NOT NULL
-      `);
-
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 11,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV11TaskPlanning(db);
+      recordSchemaVersion(db, 11);
     }
 
     if (currentVersion < 12) {
@@ -942,294 +253,99 @@ function migrateSchema(db: DbAdapter): void {
       // DBs that migrate through v12. The corrected DDL uses
       // task_id TEXT NOT NULL DEFAULT '' with a plain column list PK. DBs that
       // were created with the broken DDL are repaired by the v22 migration below.
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS quality_gates (
-          milestone_id TEXT NOT NULL,
-          slice_id TEXT NOT NULL,
-          gate_id TEXT NOT NULL,
-          scope TEXT NOT NULL DEFAULT 'slice',
-          task_id TEXT NOT NULL DEFAULT '',
-          status TEXT NOT NULL DEFAULT 'pending',
-          verdict TEXT NOT NULL DEFAULT '',
-          rationale TEXT NOT NULL DEFAULT '',
-          findings TEXT NOT NULL DEFAULT '',
-          evaluated_at TEXT DEFAULT NULL,
-          PRIMARY KEY (milestone_id, slice_id, gate_id, task_id),
-          FOREIGN KEY (milestone_id, slice_id) REFERENCES slices(milestone_id, id)
-        )
-      `);
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 12,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV12QualityGates(db);
+      recordSchemaVersion(db, 12);
     }
 
     if (currentVersion < 13) {
-      // Hot-path indexes for auto-loop dispatch queries
-      db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_active ON tasks(milestone_id, slice_id, status)");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_slices_active ON slices(milestone_id, status)");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_milestones_status ON milestones(status)");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_quality_gates_pending ON quality_gates(milestone_id, slice_id, status)");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_verification_evidence_task ON verification_evidence(milestone_id, slice_id, task_id)");
-      ensureVerificationEvidenceDedupIndex(db);
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 13,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV13HotPathIndexes(db, ensureVerificationEvidenceDedupIndex);
+      recordSchemaVersion(db, 13);
     }
 
     if (currentVersion < 14) {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS slice_dependencies (
-          milestone_id TEXT NOT NULL,
-          slice_id TEXT NOT NULL,
-          depends_on_slice_id TEXT NOT NULL,
-          PRIMARY KEY (milestone_id, slice_id, depends_on_slice_id),
-          FOREIGN KEY (milestone_id, slice_id) REFERENCES slices(milestone_id, id),
-          FOREIGN KEY (milestone_id, depends_on_slice_id) REFERENCES slices(milestone_id, id)
-        )
-      `);
-      db.exec("CREATE INDEX IF NOT EXISTS idx_slice_deps_target ON slice_dependencies(milestone_id, depends_on_slice_id)");
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 14,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV14SliceDependencies(db);
+      recordSchemaVersion(db, 14);
     }
 
     if (currentVersion < 15) {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS gate_runs (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          trace_id TEXT NOT NULL,
-          turn_id TEXT NOT NULL,
-          gate_id TEXT NOT NULL,
-          gate_type TEXT NOT NULL DEFAULT '',
-          unit_type TEXT DEFAULT NULL,
-          unit_id TEXT DEFAULT NULL,
-          milestone_id TEXT DEFAULT NULL,
-          slice_id TEXT DEFAULT NULL,
-          task_id TEXT DEFAULT NULL,
-          outcome TEXT NOT NULL DEFAULT 'pass',
-          failure_class TEXT NOT NULL DEFAULT 'none',
-          rationale TEXT NOT NULL DEFAULT '',
-          findings TEXT NOT NULL DEFAULT '',
-          attempt INTEGER NOT NULL DEFAULT 1,
-          max_attempts INTEGER NOT NULL DEFAULT 1,
-          retryable INTEGER NOT NULL DEFAULT 0,
-          evaluated_at TEXT NOT NULL DEFAULT ''
-        )
-      `);
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS turn_git_transactions (
-          trace_id TEXT NOT NULL,
-          turn_id TEXT NOT NULL,
-          unit_type TEXT DEFAULT NULL,
-          unit_id TEXT DEFAULT NULL,
-          stage TEXT NOT NULL DEFAULT 'turn-start',
-          action TEXT NOT NULL DEFAULT 'status-only',
-          push INTEGER NOT NULL DEFAULT 0,
-          status TEXT NOT NULL DEFAULT 'ok',
-          error TEXT DEFAULT NULL,
-          metadata_json TEXT NOT NULL DEFAULT '{}',
-          updated_at TEXT NOT NULL DEFAULT '',
-          PRIMARY KEY (trace_id, turn_id, stage)
-        )
-      `);
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS audit_events (
-          event_id TEXT PRIMARY KEY,
-          trace_id TEXT NOT NULL,
-          turn_id TEXT DEFAULT NULL,
-          caused_by TEXT DEFAULT NULL,
-          category TEXT NOT NULL,
-          type TEXT NOT NULL,
-          ts TEXT NOT NULL,
-          payload_json TEXT NOT NULL DEFAULT '{}'
-        )
-      `);
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS audit_turn_index (
-          trace_id TEXT NOT NULL,
-          turn_id TEXT NOT NULL,
-          first_ts TEXT NOT NULL,
-          last_ts TEXT NOT NULL,
-          event_count INTEGER NOT NULL DEFAULT 0,
-          PRIMARY KEY (trace_id, turn_id)
-        )
-      `);
-      db.exec("CREATE INDEX IF NOT EXISTS idx_gate_runs_turn ON gate_runs(trace_id, turn_id)");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_gate_runs_lookup ON gate_runs(milestone_id, slice_id, task_id, gate_id)");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_turn_git_tx_turn ON turn_git_transactions(trace_id, turn_id)");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_audit_events_trace ON audit_events(trace_id, ts)");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_audit_events_turn ON audit_events(trace_id, turn_id, ts)");
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 15,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV15AuditTables(db);
+      recordSchemaVersion(db, 15);
     }
 
     if (currentVersion < 16) {
-      // ADR-011 Phase 1: sketch-then-refine progressive planning — sketch columns on slices.
-      ensureColumn(db, "slices", "is_sketch", `ALTER TABLE slices ADD COLUMN is_sketch INTEGER NOT NULL DEFAULT 0`);
-      ensureColumn(db, "slices", "sketch_scope", `ALTER TABLE slices ADD COLUMN sketch_scope TEXT NOT NULL DEFAULT ''`);
-      // ADR-011 Phase 2: decisions can now be sourced from escalation resolutions.
-      ensureColumn(db, "decisions", "source", `ALTER TABLE decisions ADD COLUMN source TEXT NOT NULL DEFAULT 'discussion'`);
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 16,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV16EscalationSource(db);
+      recordSchemaVersion(db, 16);
     }
 
     if (currentVersion < 17) {
-      // ADR-011 Phase 2: mid-execution escalation — columns on the tasks table.
-      ensureColumn(db, "tasks", "blocker_source", `ALTER TABLE tasks ADD COLUMN blocker_source TEXT NOT NULL DEFAULT ''`);
-      ensureColumn(db, "tasks", "escalation_pending", `ALTER TABLE tasks ADD COLUMN escalation_pending INTEGER NOT NULL DEFAULT 0`);
-      ensureColumn(db, "tasks", "escalation_awaiting_review", `ALTER TABLE tasks ADD COLUMN escalation_awaiting_review INTEGER NOT NULL DEFAULT 0`);
-      ensureColumn(db, "tasks", "escalation_artifact_path", `ALTER TABLE tasks ADD COLUMN escalation_artifact_path TEXT DEFAULT NULL`);
-      ensureColumn(db, "tasks", "escalation_override_applied_at", `ALTER TABLE tasks ADD COLUMN escalation_override_applied_at TEXT DEFAULT NULL`);
-      db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_escalation_pending ON tasks(milestone_id, slice_id, escalation_pending)");
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 17,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV17TaskEscalation(db);
+      recordSchemaVersion(db, 17);
     }
 
     if (currentVersion < 18) {
-      // Memory system Phase 2: scope + tags on memories, plus memory_sources
-      // table for raw ingested content (notes, files, URLs, artifacts).
-      ensureColumn(db, "memories", "scope", `ALTER TABLE memories ADD COLUMN scope TEXT NOT NULL DEFAULT 'project'`);
-      ensureColumn(db, "memories", "tags", `ALTER TABLE memories ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'`);
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS memory_sources (
-          id TEXT PRIMARY KEY,
-          kind TEXT NOT NULL,
-          uri TEXT,
-          title TEXT,
-          content TEXT NOT NULL,
-          content_hash TEXT NOT NULL UNIQUE,
-          imported_at TEXT NOT NULL,
-          scope TEXT NOT NULL DEFAULT 'project',
-          tags TEXT NOT NULL DEFAULT '[]'
-        )
-      `);
-      // If memory_sources already existed before v18 (created by an earlier
-      // version of initSchema that lacked scope/tags), add the missing columns.
-      ensureColumn(db, "memory_sources", "scope", `ALTER TABLE memory_sources ADD COLUMN scope TEXT NOT NULL DEFAULT 'project'`);
-      ensureColumn(db, "memory_sources", "tags", `ALTER TABLE memory_sources ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'`);
-      db.exec("CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope)");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_memory_sources_kind ON memory_sources(kind)");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_memory_sources_scope ON memory_sources(scope)");
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 18,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV18MemorySources(db);
+      recordSchemaVersion(db, 18);
     }
 
     if (currentVersion < 19) {
-      // Memory system Phase 3: embeddings + FTS5 for hybrid retrieval.
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS memory_embeddings (
-          memory_id TEXT PRIMARY KEY,
-          model TEXT NOT NULL,
-          dim INTEGER NOT NULL,
-          vector BLOB NOT NULL,
-          updated_at TEXT NOT NULL
-        )
-      `);
-      tryCreateMemoriesFts(db);
-      // Backfill FTS5 with any existing memories (triggers only cover future writes).
-      if (isMemoriesFtsAvailable(db)) {
-        try {
-          db.exec(`INSERT INTO memories_fts(rowid, content) SELECT seq, content FROM memories`);
-        } catch (err) {
-          logWarning("db", `FTS5 backfill failed: ${(err as Error).message}`);
-        }
-      }
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 19,
-        ":applied_at": new Date().toISOString(),
+      applyMigrationV19MemoryFts(db, {
+        tryCreateMemoriesFts,
+        isMemoriesFtsAvailable,
+        backfillMemoriesFts,
+        logWarning,
       });
+      recordSchemaVersion(db, 19);
     }
 
     if (currentVersion < 20) {
-      // Memory system Phase 4: knowledge-graph relations between memories.
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS memory_relations (
-          from_id TEXT NOT NULL,
-          to_id TEXT NOT NULL,
-          rel TEXT NOT NULL,
-          confidence REAL NOT NULL DEFAULT 0.8,
-          created_at TEXT NOT NULL,
-          PRIMARY KEY (from_id, to_id, rel)
-        )
-      `);
-      db.exec("CREATE INDEX IF NOT EXISTS idx_memory_relations_from ON memory_relations(from_id)");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_memory_relations_to ON memory_relations(to_id)");
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 20,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV20MemoryRelations(db);
+      recordSchemaVersion(db, 20);
     }
 
     if (currentVersion < 21) {
-      // ADR-013 Step 2: preserve structured fields (gsd_save_decision's
-      // scope/decision/choice/rationale/made_by/revisable) on memories rows so
-      // the eventual decisions->memories cutover does not lose schema fidelity.
-      // Nullable JSON column — existing rows stay NULL until backfilled in Step 5.
-      // Use ensureColumn for race-safety (matches v15-v18 pattern; bare ALTER
-      // throws "duplicate column" on the loser of a concurrent open race even
-      // though the transaction wrapper protects the schema_version row).
-      ensureColumn(db, "memories", "structured_fields", "ALTER TABLE memories ADD COLUMN structured_fields TEXT DEFAULT NULL");
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 21,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV21StructuredMemories(db);
+      recordSchemaVersion(db, 21);
     }
 
     if (currentVersion < 22) {
-      // v22: Repair quality_gates tables that were created by the broken v12
-      // migration (which used COALESCE(task_id, '') as a PK expression — invalid
-      // SQLite DDL). Those DBs have task_id nullable (dflt_value NULL, notnull 0).
-      // Rebuild the table with the correct schema, migrating existing rows via
-      // COALESCE so no data is lost.
-      const qgInfo = db.prepare("PRAGMA table_info(quality_gates)").all() as Array<Record<string, unknown>>;
-      const taskIdCol = qgInfo.find((r) => r["name"] === "task_id");
-      const needsRepair = taskIdCol && (taskIdCol["notnull"] === 0 || taskIdCol["notnull"] === "0");
-      if (needsRepair) {
-        db.exec(`
-          CREATE TABLE quality_gates_new (
-            milestone_id TEXT NOT NULL,
-            slice_id TEXT NOT NULL,
-            gate_id TEXT NOT NULL,
-            scope TEXT NOT NULL DEFAULT 'slice',
-            task_id TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT 'pending',
-            verdict TEXT NOT NULL DEFAULT '',
-            rationale TEXT NOT NULL DEFAULT '',
-            findings TEXT NOT NULL DEFAULT '',
-            evaluated_at TEXT DEFAULT NULL,
-            PRIMARY KEY (milestone_id, slice_id, gate_id, task_id),
-            FOREIGN KEY (milestone_id, slice_id) REFERENCES slices(milestone_id, id)
-          )
-        `);
-        db.exec(`
-          INSERT OR IGNORE INTO quality_gates_new
-            (milestone_id, slice_id, gate_id, scope, task_id, status, verdict, rationale, findings, evaluated_at)
-          SELECT milestone_id, slice_id, gate_id, scope, COALESCE(task_id, ''), status, verdict, rationale, findings, evaluated_at
-          FROM quality_gates
-        `);
-        db.exec("DROP TABLE quality_gates");
-        db.exec("ALTER TABLE quality_gates_new RENAME TO quality_gates");
-        db.exec("CREATE INDEX IF NOT EXISTS idx_quality_gates_pending ON quality_gates(milestone_id, slice_id, status)");
-      }
-      // Ensure scope column exists on quality_gates and assessments (guard
-      // against DBs that somehow lack it after a partial migration).
-      ensureColumn(db, "quality_gates", "scope", "ALTER TABLE quality_gates ADD COLUMN scope TEXT NOT NULL DEFAULT 'slice'");
-      ensureColumn(db, "assessments", "scope", "ALTER TABLE assessments ADD COLUMN scope TEXT NOT NULL DEFAULT ''");
-      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
-        ":version": 22,
-        ":applied_at": new Date().toISOString(),
-      });
+      applyMigrationV22QualityGateRepair(db, { copyQualityGateRowsToRepairedTable });
+      recordSchemaVersion(db, 22);
+    }
+
+    if (currentVersion < 23) {
+      applyMigrationV23MilestoneQueue(db);
+      recordSchemaVersion(db, 23);
+    }
+
+    if (currentVersion < 24) {
+      // v24: auto-mode coordination tables. See createCoordinationTablesV24
+      // for full schema + invariants. No-op for fresh installs (the same
+      // helper runs in the fresh-install path); for upgraded DBs this is
+      // the only place these tables get created.
+      createCoordinationTablesV24(db);
+      recordSchemaVersion(db, 24);
+    }
+
+    if (currentVersion < 25) {
+      // v25: runtime_kv non-correctness-critical key-value storage. See
+      // createRuntimeKvTableV25 for the full schema + invariants.
+      createRuntimeKvTableV25(db);
+      recordSchemaVersion(db, 25);
+    }
+
+    if (currentVersion < 26) {
+      applyMigrationV26MilestoneCommitAttributions(db);
+      recordSchemaVersion(db, 26);
+    }
+
+    if (currentVersion < 27) {
+      applyMigrationV27ArtifactHash(db);
+      recordSchemaVersion(db, 27);
+    }
+
+    if (currentVersion < 28) {
+      applyMigrationV28MemoryLastHitAt(db);
+      recordSchemaVersion(db, 28);
     }
 
     db.exec("COMMIT");
@@ -1243,13 +359,191 @@ let currentDb: DbAdapter | null = null;
 let currentPath: string | null = null;
 let currentPid: number = 0;
 let _exitHandlerRegistered = false;
-let _dbOpenAttempted = false;
-let _lastDbError: Error | null = null;
-let _lastDbPhase: "open" | "initSchema" | "vacuum-recovery" | null = null;
+const _dbOpenState = createDbOpenState();
+/**
+ * Identity key of the workspace whose connection is currently active
+ * (currentDb). Set by openDatabaseByWorkspace(); null when the active
+ * connection was opened via the legacy openDatabase(path) path.
+ */
+let _currentIdentityKey: string | null = null;
+
+/**
+ * Workspace-scoped connection cache.
+ * Key: GsdWorkspace.identityKey (realpath-normalized project root).
+ * Value: the DB path and open adapter for that workspace.
+ *
+ * Sibling worktrees of the same project share the same identityKey (set by
+ * createWorkspace) and therefore reuse the same cached connection, preserving
+ * shared-WAL semantics. Different projects get distinct cache entries.
+ *
+ * NOTE: Only one connection is "active" at a time (currentDb/currentPath).
+ * The cache allows fast re-activation of a previously opened connection when
+ * callers switch between known workspaces via openDatabaseByWorkspace().
+ */
+const _dbCache = createDbConnectionCache();
+
+/** Test helper: expose the internal cache for inspection. Not for production use. */
+export function _getDbCache(): ReadonlyMap<string, DbConnectionCacheEntry> {
+  return _dbCache.asReadonlyMap();
+}
+
+function closeCachedConnection(entry: DbConnectionCacheEntry, source: "all" | "workspace"): void {
+  try {
+    entry.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+  } catch (e) {
+    if (source === "workspace") logWarning("db", `WAL checkpoint (byWorkspace) failed: ${(e as Error).message}`);
+  }
+  try {
+    entry.db.exec("PRAGMA incremental_vacuum(64)");
+  } catch (e) {
+    if (source === "workspace") logWarning("db", `incremental vacuum (byWorkspace) failed: ${(e as Error).message}`);
+  }
+  try {
+    entry.db.close();
+  } catch (e) {
+    if (source === "workspace") logWarning("db", `database close (byWorkspace) failed: ${(e as Error).message}`);
+  }
+}
+
+/**
+ * Close and evict every entry in the workspace connection cache, then call
+ * closeDatabase() to close the active connection.
+ *
+ * Use this for test teardown or process-shutdown paths where every open
+ * connection must be flushed. Normal callers should use closeDatabase() or
+ * closeDatabaseByWorkspace() instead.
+ */
+export function closeAllDatabases(): void {
+  // Close all non-active cached connections first.
+  _dbCache.closeNonActive(currentDb, (entry) => closeCachedConnection(entry, "all"));
+  closeDatabase();
+}
+
+/**
+ * Open (or reuse) the database connection scoped to the given workspace.
+ *
+ * Uses workspace.identityKey as the cache key, so sibling worktrees of the
+ * same project resolve to the same connection. On a cache hit the existing
+ * adapter is reactivated as the current connection without re-opening the
+ * file. On a cache miss, delegates to openDatabase() for the full
+ * open + schema-init + migration flow, then caches the result.
+ *
+ * When switching to a different workspace, the previously active connection
+ * is preserved in the cache (not closed), so callers can switch back to it
+ * cheaply via a subsequent openDatabaseByWorkspace() call.
+ *
+ * @param workspace A GsdWorkspace created by createWorkspace().
+ * @returns true if the connection is open and ready, false otherwise.
+ */
+export function openDatabaseByWorkspace(workspace: GsdWorkspace): boolean {
+  const key = workspace.identityKey;
+  const dbPath = workspace.contract.projectDb;
+
+  const cached = _dbCache.get(key);
+  if (cached) {
+    // Reactivate the cached connection as the current singleton.
+    currentDb = cached.db;
+    currentPath = cached.dbPath;
+    currentPid = process.pid;
+    _dbOpenState.markAttempted();
+    _currentIdentityKey = key;
+    return true;
+  }
+
+  // Cache miss — need to open a new connection.
+  //
+  // If there is a currently active workspace connection, stash it in the
+  // cache under its identity key before calling openDatabase(), because
+  // openDatabase() will call closeDatabase() when the path changes (which
+  // would destroy the existing adapter). By nulling out currentDb first,
+  // we prevent openDatabase() from closing the live adapter.
+  let oldDb: typeof currentDb = null;
+  let oldPath: typeof currentPath = null;
+  let oldPid: typeof currentPid = 0;
+  let oldKey: typeof _currentIdentityKey = null;
+
+  if (currentDb !== null && _currentIdentityKey !== null) {
+    // Snapshot the old globals so we can restore them on failure.
+    oldDb = currentDb;
+    oldPath = currentPath;
+    oldPid = currentPid;
+    oldKey = _currentIdentityKey;
+    // Save the current connection so it stays alive in the cache.
+    _dbCache.set(_currentIdentityKey, {
+      dbPath: currentPath!,
+      db: currentDb,
+    });
+    // Detach from globals so openDatabase() opens fresh without closing it.
+    currentDb = null;
+    currentPath = null;
+    currentPid = 0;
+    _currentIdentityKey = null;
+  }
+
+  // Run the full open/schema/migration flow for the new workspace.
+  // openDatabase() can throw on corrupt DB or permission error — catch so we
+  // can restore the previous connection rather than leaving globals null.
+  let opened: boolean;
+  try {
+    opened = openDatabase(dbPath);
+  } catch (err) {
+    // Failed to open the new DB. Restore the previous workspace connection so
+    // the caller's workspace remains active (it is still safe in _dbCache).
+    if (oldDb !== null) {
+      currentDb = oldDb;
+      currentPath = oldPath;
+      currentPid = oldPid;
+      _currentIdentityKey = oldKey;
+    }
+    throw err;
+  }
+  if (opened && currentDb) {
+    _dbCache.set(key, { dbPath, db: currentDb });
+    _currentIdentityKey = key;
+  } else if (!opened && oldDb !== null) {
+    // Restore the previous connection so the caller's workspace remains active.
+    // The failed attempt left no live adapter, so the globals stayed null.
+    currentDb = oldDb;
+    currentPath = oldPath;
+    currentPid = oldPid;
+    _currentIdentityKey = oldKey;
+  }
+  return opened;
+}
+
+/**
+ * Open (or reuse) the database connection scoped to the workspace in a
+ * MilestoneScope. Thin delegation to openDatabaseByWorkspace().
+ */
+export function openDatabaseByScope(scope: MilestoneScope): boolean {
+  return openDatabaseByWorkspace(scope.workspace);
+}
+
+/**
+ * Close the database connection for the given workspace and remove it from
+ * the cache. If the workspace's connection is currently active (currentDb),
+ * performs a full closeDatabase() including WAL checkpoint. Otherwise only
+ * removes the cache entry (the adapter was already replaced by a later open).
+ */
+export function closeDatabaseByWorkspace(workspace: GsdWorkspace): void {
+  const key = workspace.identityKey;
+  const cached = _dbCache.get(key);
+  if (!cached) return;
+
+  _dbCache.delete(key);
+
+  if (currentDb === cached.db) {
+    // This workspace's connection is the active one — full close.
+    closeDatabase();
+  } else {
+    // Connection was displaced by a later open; close the adapter directly.
+    closeCachedConnection(cached, "workspace");
+  }
+}
 
 export function getDbProvider(): ProviderName | null {
-  loadProvider();
-  return providerName;
+  providerLoader.load();
+  return providerLoader.getProviderName();
 }
 
 export function isDbAvailable(): boolean {
@@ -1263,7 +557,7 @@ export function isDbAvailable(): boolean {
  * trigger a false degraded-mode warning.
  */
 export function wasDbOpenAttempted(): boolean {
-  return _dbOpenAttempted;
+  return _dbOpenState.snapshot().attempted;
 }
 
 export function getDbStatus(): {
@@ -1271,56 +565,44 @@ export function getDbStatus(): {
   provider: ProviderName | null;
   attempted: boolean;
   lastError: Error | null;
-  lastPhase: "open" | "initSchema" | "vacuum-recovery" | null;
+  lastPhase: DbOpenPhase | null;
 } {
-  loadProvider();
+  providerLoader.load();
+  const openState = _dbOpenState.snapshot();
   return {
     available: currentDb !== null,
-    provider: providerName,
-    attempted: _dbOpenAttempted,
-    lastError: _lastDbError,
-    lastPhase: _lastDbPhase,
+    provider: providerLoader.getProviderName(),
+    attempted: openState.attempted,
+    lastError: openState.lastError,
+    lastPhase: openState.lastPhase,
   };
 }
 
 export function openDatabase(path: string): boolean {
-  _dbOpenAttempted = true;
+  _dbOpenState.markAttempted();
   if (currentDb && currentPath !== path) closeDatabase();
   if (currentDb && currentPath === path) return true;
 
   // Reset error state only when a new open attempt is actually going to run.
-  _lastDbError = null;
-  _lastDbPhase = null;
+  _dbOpenState.clearError();
 
   let rawDb: unknown;
-  let fallbackProvider: ProviderName | null = null;
-  let fallbackModule: unknown = null;
+  let fallbackOpen: SqliteFallbackOpen | null = null;
   try {
-    rawDb = openRawDb(path);
+    rawDb = providerLoader.openRaw(path);
   } catch (primaryErr) {
-    _lastDbPhase = "open";
-    _lastDbError = primaryErr instanceof Error ? primaryErr : new Error(String(primaryErr));
+    _dbOpenState.recordError("open", primaryErr);
     // node:sqlite loaded but failed to open this file — try better-sqlite3 as fallback.
-    if (providerName === "node:sqlite") {
-      try {
-        const mod = _require("better-sqlite3");
-        const Db = (mod && mod.default) ? mod.default : mod;
-        if (typeof Db === "function") {
-          rawDb = new Db(path);
-          fallbackProvider = "better-sqlite3";
-          fallbackModule = Db;
-          _lastDbError = null;
-          _lastDbPhase = null;
-        }
-      } catch {
-        // fallback unavailable; surface original error
-      }
+    fallbackOpen = providerLoader.tryOpenBetterSqliteFallback(path);
+    if (fallbackOpen) {
+      rawDb = fallbackOpen.rawDb;
+      _dbOpenState.clearError();
     }
     if (!rawDb) throw primaryErr;
   }
   if (!rawDb) return false;
 
-  const adapter = createAdapter(rawDb);
+  const adapter = createDbAdapter(rawDb);
   const fileBacked = path !== ":memory:";
   try {
     initSchema(adapter, fileBacked);
@@ -1333,24 +615,19 @@ export function openDatabase(path: string): boolean {
         initSchema(adapter, fileBacked);
         process.stderr.write("gsd-db: recovered corrupt database via VACUUM\n");
       } catch (retryErr) {
-        _lastDbPhase = "vacuum-recovery";
-        _lastDbError = retryErr instanceof Error ? retryErr : new Error(String(retryErr));
+        _dbOpenState.recordError("vacuum-recovery", retryErr);
         try { adapter.close(); } catch (e) { logWarning("db", `close after VACUUM failed: ${(e as Error).message}`); }
         throw retryErr;
       }
     } else {
-      _lastDbPhase = "initSchema";
-      _lastDbError = err instanceof Error ? err : new Error(String(err));
+      _dbOpenState.recordError("initSchema", err);
       try { adapter.close(); } catch (e) { logWarning("db", `close after initSchema failed: ${(e as Error).message}`); }
       throw err;
     }
   }
 
   // Commit fallback provider switch only after open + schema both succeeded.
-  if (fallbackProvider) {
-    providerName = fallbackProvider;
-    providerModule = fallbackModule;
-  }
+  if (fallbackOpen) providerLoader.commitFallback(fallbackOpen);
 
   currentDb = adapter;
   currentPath = path;
@@ -1376,15 +653,49 @@ export function closeDatabase(): void {
     try {
       currentDb.close();
     } catch (e) { logWarning("db", `database close failed: ${(e as Error).message}`); }
+    // If this connection was workspace-tracked, evict it from the cache so
+    // subsequent openDatabaseByWorkspace() calls re-open rather than reactivate
+    // a closed adapter.
+    if (_currentIdentityKey !== null) {
+      _dbCache.delete(_currentIdentityKey);
+      _currentIdentityKey = null;
+    }
     currentDb = null;
     currentPath = null;
     currentPid = 0;
   }
   // Reset session-scoped state unconditionally so stale error info from a
   // failed open doesn't persist into the next open attempt or status check.
-  _dbOpenAttempted = false;
-  _lastDbError = null;
-  _lastDbPhase = null;
+  _dbOpenState.reset();
+}
+
+/**
+ * Re-open the active database connection from disk.
+ *
+ * Auto-mode can observe artifacts written by a workflow server running in a
+ * different process before its long-lived singleton has re-synchronized. The
+ * recovery path uses this to force the next state derivation to read from the
+ * current on-disk database instead of continuing with a possibly stale handle.
+ */
+export function refreshOpenDatabaseFromDisk(): boolean {
+  if (!currentDb || !currentPath) return false;
+  if (currentPath === ":memory:") return false;
+
+  const dbPath = currentPath;
+  const identityKey = _currentIdentityKey;
+
+  try {
+    closeDatabase();
+    const opened = openDatabase(dbPath);
+    if (opened && identityKey && currentDb) {
+      _dbCache.set(identityKey, { dbPath, db: currentDb });
+      _currentIdentityKey = identityKey;
+    }
+    return opened;
+  } catch (e) {
+    logWarning("db", `database refresh failed: ${(e as Error).message}`);
+    return false;
+  }
 }
 
 /** Run a full VACUUM — call sparingly (e.g. after milestone completion). */
@@ -1403,7 +714,16 @@ export function checkpointDatabase(): void {
   } catch (e) { logWarning("db", `WAL checkpoint failed: ${(e as Error).message}`); }
 }
 
-let _txDepth = 0;
+const _transactionRunner = createDbTransactionRunner();
+
+function createTransactionControls(db: DbAdapter) {
+  return {
+    begin: () => db.exec("BEGIN"),
+    beginRead: () => db.exec("BEGIN DEFERRED"),
+    commit: () => db.exec("COMMIT"),
+    rollback: () => db.exec("ROLLBACK"),
+  };
+}
 
 /**
  * Whether the current call is running inside an active SQLite transaction.
@@ -1412,35 +732,12 @@ let _txDepth = 0;
  * and would mask the original error with a secondary "cannot VACUUM" throw.
  */
 export function isInTransaction(): boolean {
-  return _txDepth > 0;
+  return _transactionRunner.isInTransaction();
 }
 
 export function transaction<T>(fn: () => T): T {
   if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
-
-  // Re-entrant: if already inside a transaction, just run fn() without
-  // starting a new one. SQLite does not support nested BEGIN/COMMIT.
-  if (_txDepth > 0) {
-    _txDepth++;
-    try {
-      return fn();
-    } finally {
-      _txDepth--;
-    }
-  }
-
-  currentDb.exec("BEGIN");
-  _txDepth++;
-  try {
-    const result = fn();
-    currentDb.exec("COMMIT");
-    return result;
-  } catch (err) {
-    currentDb.exec("ROLLBACK");
-    throw err;
-  } finally {
-    _txDepth--;
-  }
+  return _transactionRunner.transaction(createTransactionControls(currentDb), fn);
 }
 
 /**
@@ -1453,36 +750,14 @@ export function transaction<T>(fn: () => T): T {
 export function readTransaction<T>(fn: () => T): T {
   if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
 
-  if (_txDepth > 0) {
-    _txDepth++;
-    try {
-      return fn();
-    } finally {
-      _txDepth--;
-    }
-  }
-
-  currentDb.exec("BEGIN DEFERRED");
-  _txDepth++;
-  try {
-    const result = fn();
-    currentDb.exec("COMMIT");
-    return result;
-  } catch (err) {
-    try {
-      currentDb.exec("ROLLBACK");
-    } catch (rollbackErr) {
-      // A failed ROLLBACK after a failed read is a split-brain signal —
-      // the transaction is in an indeterminate state. Surface it via the
-      // logger instead of swallowing it.
-      logError("db", "snapshotState ROLLBACK failed", {
-        error: (rollbackErr as Error).message,
-      });
-    }
-    throw err;
-  } finally {
-    _txDepth--;
-  }
+  return _transactionRunner.readTransaction(createTransactionControls(currentDb), fn, (rollbackErr) => {
+    // A failed ROLLBACK after a failed read is a split-brain signal —
+    // the transaction is in an indeterminate state. Surface it via the
+    // logger instead of swallowing it.
+    logError("db", "snapshotState ROLLBACK failed", {
+      error: rollbackErr.message,
+    });
+  });
 }
 
 export function insertDecision(d: Omit<Decision, "seq">): void {
@@ -1508,37 +783,13 @@ export function getDecisionById(id: string): Decision | null {
   if (!currentDb) return null;
   const row = currentDb.prepare("SELECT * FROM decisions WHERE id = ?").get(id);
   if (!row) return null;
-  return {
-    seq: row["seq"] as number,
-    id: row["id"] as string,
-    when_context: row["when_context"] as string,
-    scope: row["scope"] as string,
-    decision: row["decision"] as string,
-    choice: row["choice"] as string,
-    rationale: row["rationale"] as string,
-    revisable: row["revisable"] as string,
-    made_by: (row["made_by"] as string as import("./types.js").DecisionMadeBy) ?? "agent",
-    source: (row["source"] as string) ?? "discussion",
-    superseded_by: (row["superseded_by"] as string) ?? null,
-  };
+  return rowToDecision(row);
 }
 
 export function getActiveDecisions(): Decision[] {
   if (!currentDb) return [];
   const rows = currentDb.prepare("SELECT * FROM active_decisions").all();
-  return rows.map((row) => ({
-    seq: row["seq"] as number,
-    id: row["id"] as string,
-    when_context: row["when_context"] as string,
-    scope: row["scope"] as string,
-    decision: row["decision"] as string,
-    choice: row["choice"] as string,
-    rationale: row["rationale"] as string,
-    revisable: row["revisable"] as string,
-    made_by: (row["made_by"] as string as import("./types.js").DecisionMadeBy) ?? "agent",
-    source: (row["source"] as string) ?? "discussion",
-    superseded_by: null,
-  }));
+  return rows.map(rowToActiveDecision);
 }
 
 export function insertRequirement(r: Requirement): void {
@@ -1566,39 +817,30 @@ export function getRequirementById(id: string): Requirement | null {
   if (!currentDb) return null;
   const row = currentDb.prepare("SELECT * FROM requirements WHERE id = ?").get(id);
   if (!row) return null;
-  return {
-    id: row["id"] as string,
-    class: row["class"] as string,
-    status: row["status"] as string,
-    description: row["description"] as string,
-    why: row["why"] as string,
-    source: row["source"] as string,
-    primary_owner: row["primary_owner"] as string,
-    supporting_slices: row["supporting_slices"] as string,
-    validation: row["validation"] as string,
-    notes: row["notes"] as string,
-    full_content: row["full_content"] as string,
-    superseded_by: (row["superseded_by"] as string) ?? null,
-  };
+  return rowToRequirement(row);
 }
 
 export function getActiveRequirements(): Requirement[] {
   if (!currentDb) return [];
   const rows = currentDb.prepare("SELECT * FROM active_requirements").all();
-  return rows.map((row) => ({
-    id: row["id"] as string,
-    class: row["class"] as string,
-    status: row["status"] as string,
-    description: row["description"] as string,
-    why: row["why"] as string,
-    source: row["source"] as string,
-    primary_owner: row["primary_owner"] as string,
-    supporting_slices: row["supporting_slices"] as string,
-    validation: row["validation"] as string,
-    notes: row["notes"] as string,
-    full_content: row["full_content"] as string,
-    superseded_by: null,
-  }));
+  return rows.map(rowToActiveRequirement);
+}
+
+export function getRequirementCounts(): {
+  active: number;
+  validated: number;
+  deferred: number;
+  outOfScope: number;
+  blocked: number;
+  total: number;
+} {
+  if (!currentDb) {
+    return { active: 0, validated: 0, deferred: 0, outOfScope: 0, blocked: 0, total: 0 };
+  }
+  const rows = currentDb
+    .prepare("SELECT lower(status) as status, COUNT(*) as count FROM requirements GROUP BY lower(status)")
+    .all();
+  return rowsToRequirementCounts(rows);
 }
 
 export function getDbOwnerPid(): number {
@@ -1614,9 +856,7 @@ export function _getAdapter(): DbAdapter | null {
 }
 
 export function _resetProvider(): void {
-  loadAttempted = false;
-  providerModule = null;
-  providerName = null;
+  providerLoader.reset();
 }
 
 export function upsertDecision(d: Omit<Decision, "seq">): void {
@@ -1686,9 +926,10 @@ export function insertArtifact(a: {
   full_content: string;
 }): void {
   if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  const contentHash = createHash("sha256").update(a.full_content).digest("hex");
   currentDb.prepare(
-    `INSERT OR REPLACE INTO artifacts (path, artifact_type, milestone_id, slice_id, task_id, full_content, imported_at)
-     VALUES (:path, :artifact_type, :milestone_id, :slice_id, :task_id, :full_content, :imported_at)`,
+    `INSERT OR REPLACE INTO artifacts (path, artifact_type, milestone_id, slice_id, task_id, full_content, imported_at, content_hash)
+     VALUES (:path, :artifact_type, :milestone_id, :slice_id, :task_id, :full_content, :imported_at, :content_hash)`,
   ).run({
     ":path": a.path,
     ":artifact_type": a.artifact_type,
@@ -1697,6 +938,7 @@ export function insertArtifact(a: {
     ":task_id": a.task_id,
     ":full_content": a.full_content,
     ":imported_at": new Date().toISOString(),
+    ":content_hash": contentHash,
   });
 }
 
@@ -2077,54 +1319,6 @@ export function upsertTaskPlanning(milestoneId: string, sliceId: string, taskId:
   });
 }
 
-export interface SliceRow {
-  milestone_id: string;
-  id: string;
-  title: string;
-  status: string;
-  risk: string;
-  depends: string[];
-  demo: string;
-  created_at: string;
-  completed_at: string | null;
-  full_summary_md: string;
-  full_uat_md: string;
-  goal: string;
-  success_criteria: string;
-  proof_level: string;
-  integration_closure: string;
-  observability_impact: string;
-  sequence: number;
-  replan_triggered_at: string | null;
-  is_sketch: number;
-  sketch_scope: string;
-}
-
-function rowToSlice(row: Record<string, unknown>): SliceRow {
-  return {
-    milestone_id: row["milestone_id"] as string,
-    id: row["id"] as string,
-    title: row["title"] as string,
-    status: row["status"] as string,
-    risk: row["risk"] as string,
-    depends: JSON.parse((row["depends"] as string) || "[]"),
-    demo: (row["demo"] as string) ?? "",
-    created_at: row["created_at"] as string,
-    completed_at: (row["completed_at"] as string) ?? null,
-    full_summary_md: (row["full_summary_md"] as string) ?? "",
-    full_uat_md: (row["full_uat_md"] as string) ?? "",
-    goal: (row["goal"] as string) ?? "",
-    success_criteria: (row["success_criteria"] as string) ?? "",
-    proof_level: (row["proof_level"] as string) ?? "",
-    integration_closure: (row["integration_closure"] as string) ?? "",
-    observability_impact: (row["observability_impact"] as string) ?? "",
-    sequence: (row["sequence"] as number) ?? 0,
-    replan_triggered_at: (row["replan_triggered_at"] as string) ?? null,
-    is_sketch: (row["is_sketch"] as number) ?? 0,
-    sketch_scope: (row["sketch_scope"] as string) ?? "",
-  };
-}
-
 export function getSlice(milestoneId: string, sliceId: string): SliceRow | null {
   if (!currentDb) return null;
   const row = currentDb.prepare("SELECT * FROM slices WHERE milestone_id = :mid AND id = :sid").get({ ":mid": milestoneId, ":sid": sliceId });
@@ -2159,116 +1353,6 @@ export function setSliceSummaryMd(milestoneId: string, sliceId: string, summaryM
   ).run({ ":mid": milestoneId, ":sid": sliceId, ":summary_md": summaryMd, ":uat_md": uatMd });
 }
 
-export interface TaskRow {
-  milestone_id: string;
-  slice_id: string;
-  id: string;
-  title: string;
-  status: string;
-  one_liner: string;
-  narrative: string;
-  verification_result: string;
-  duration: string;
-  completed_at: string | null;
-  blocker_discovered: boolean;
-  deviations: string;
-  known_issues: string;
-  key_files: string[];
-  key_decisions: string[];
-  full_summary_md: string;
-  description: string;
-  estimate: string;
-  files: string[];
-  verify: string;
-  inputs: string[];
-  expected_output: string[];
-  observability_impact: string;
-  full_plan_md: string;
-  sequence: number;
-  // ADR-011 Phase 2 escalation fields
-  blocker_source: string;
-  escalation_pending: number;
-  escalation_awaiting_review: number;
-  escalation_artifact_path: string | null;
-  escalation_override_applied_at: string | null;
-}
-
-function parseTaskArrayColumn(raw: unknown): string[] {
-  if (typeof raw !== "string" || raw.trim() === "") return [];
-
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed.map((value) => String(value));
-    if (parsed === null || parsed === undefined || parsed === "") return [];
-    return [String(parsed)];
-  } catch {
-    // Older/corrupt rows may contain comma-separated strings instead of JSON.
-    return raw
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean);
-  }
-}
-
-function rowToTask(row: Record<string, unknown>): TaskRow {
-  const parseTaskArray = (value: unknown): string[] => {
-    if (Array.isArray(value)) {
-      return value.filter((entry): entry is string => typeof entry === "string");
-    }
-    if (typeof value !== "string") return [];
-
-    const trimmed = value.trim();
-    if (!trimmed) return [];
-
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) {
-        return parsed.filter((entry): entry is string => typeof entry === "string");
-      }
-      if (typeof parsed === "string" && parsed.trim()) {
-        return [parsed.trim()];
-      }
-    } catch {
-      // Older/corrupt DB rows may contain raw comma-separated paths instead of JSON arrays.
-    }
-
-    return trimmed.split(",").map((entry) => entry.trim()).filter(Boolean);
-  };
-
-  return {
-    milestone_id: row["milestone_id"] as string,
-    slice_id: row["slice_id"] as string,
-    id: row["id"] as string,
-    title: row["title"] as string,
-    status: row["status"] as string,
-    one_liner: row["one_liner"] as string,
-    narrative: row["narrative"] as string,
-    verification_result: row["verification_result"] as string,
-    duration: row["duration"] as string,
-    completed_at: (row["completed_at"] as string) ?? null,
-    blocker_discovered: (row["blocker_discovered"] as number) === 1,
-    deviations: row["deviations"] as string,
-    known_issues: row["known_issues"] as string,
-    key_files: parseTaskArrayColumn(row["key_files"]),
-    key_decisions: parseTaskArrayColumn(row["key_decisions"]),
-    full_summary_md: row["full_summary_md"] as string,
-    description: (row["description"] as string) ?? "",
-    estimate: (row["estimate"] as string) ?? "",
-    files: parseTaskArray(row["files"]),
-    verify: (row["verify"] as string) ?? "",
-    inputs: parseTaskArray(row["inputs"]),
-    expected_output: parseTaskArray(row["expected_output"]),
-    observability_impact: (row["observability_impact"] as string) ?? "",
-    full_plan_md: (row["full_plan_md"] as string) ?? "",
-    sequence: (row["sequence"] as number) ?? 0,
-    blocker_source: (row["blocker_source"] as string) ?? "",
-    escalation_pending: (row["escalation_pending"] as number) ?? 0,
-    escalation_awaiting_review: (row["escalation_awaiting_review"] as number) ?? 0,
-    escalation_artifact_path: (row["escalation_artifact_path"] as string) ?? null,
-    escalation_override_applied_at: (row["escalation_override_applied_at"] as string) ?? null,
-  };
-}
-
 export function getTask(milestoneId: string, sliceId: string, taskId: string): TaskRow | null {
   if (!currentDb) return null;
   const row = currentDb.prepare(
@@ -2284,6 +1368,45 @@ export function getSliceTasks(milestoneId: string, sliceId: string): TaskRow[] {
     "SELECT * FROM tasks WHERE milestone_id = :mid AND slice_id = :sid ORDER BY sequence, id",
   ).all({ ":mid": milestoneId, ":sid": sliceId });
   return rows.map(rowToTask);
+}
+
+export function getCompletedMilestoneTaskFileHints(milestoneId: string): string[] {
+  if (!currentDb) return [];
+  const rows = currentDb.prepare(
+    `SELECT files, key_files
+     FROM tasks
+     WHERE milestone_id = :mid AND status IN ('complete', 'done')`,
+  ).all({ ":mid": milestoneId }) as Array<Record<string, unknown>>;
+
+  const hints = new Set<string>();
+  for (const row of rows) {
+    for (const raw of [row["files"], row["key_files"]]) {
+      for (const file of parseStringArrayColumn(raw)) {
+        const normalized = normalizeRepoPath(file);
+        if (normalized) hints.add(normalized);
+      }
+    }
+  }
+  return [...hints];
+}
+
+function parseStringArrayColumn(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.filter((entry): entry is string => typeof entry === "string");
+  if (typeof raw !== "string") return [];
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) return parsed.filter((entry): entry is string => typeof entry === "string");
+    if (typeof parsed === "string") return [parsed];
+  } catch {
+    return trimmed.split(",");
+  }
+  return [];
+}
+
+function normalizeRepoPath(file: string): string {
+  return file.trim().replace(/\\/g, "/").replace(/^\.\/+/, "");
 }
 
 // ─── ADR-011 Phase 2 escalation helpers ──────────────────────────────────
@@ -2450,73 +1573,11 @@ export function getVerificationEvidence(milestoneId: string, sliceId: string, ta
   return rows as unknown as VerificationEvidenceRow[];
 }
 
-export interface MilestoneRow {
-  id: string;
-  title: string;
-  status: string;
-  depends_on: string[];
-  created_at: string;
-  completed_at: string | null;
-  vision: string;
-  success_criteria: string[];
-  key_risks: Array<{ risk: string; whyItMatters: string }>;
-  proof_strategy: Array<{ riskOrUnknown: string; retireIn: string; whatWillBeProven: string }>;
-  verification_contract: string;
-  verification_integration: string;
-  verification_operational: string;
-  verification_uat: string;
-  definition_of_done: string[];
-  requirement_coverage: string;
-  boundary_map_markdown: string;
-}
-
-function rowToMilestone(row: Record<string, unknown>): MilestoneRow {
-  return {
-    id: row["id"] as string,
-    title: row["title"] as string,
-    status: row["status"] as string,
-    depends_on: JSON.parse((row["depends_on"] as string) || "[]"),
-    created_at: row["created_at"] as string,
-    completed_at: (row["completed_at"] as string) ?? null,
-    vision: (row["vision"] as string) ?? "",
-    success_criteria: JSON.parse((row["success_criteria"] as string) || "[]"),
-    key_risks: JSON.parse((row["key_risks"] as string) || "[]"),
-    proof_strategy: JSON.parse((row["proof_strategy"] as string) || "[]"),
-    verification_contract: (row["verification_contract"] as string) ?? "",
-    verification_integration: (row["verification_integration"] as string) ?? "",
-    verification_operational: (row["verification_operational"] as string) ?? "",
-    verification_uat: (row["verification_uat"] as string) ?? "",
-    definition_of_done: JSON.parse((row["definition_of_done"] as string) || "[]"),
-    requirement_coverage: (row["requirement_coverage"] as string) ?? "",
-    boundary_map_markdown: (row["boundary_map_markdown"] as string) ?? "",
-  };
-}
-
-export interface ArtifactRow {
-  path: string;
-  artifact_type: string;
-  milestone_id: string | null;
-  slice_id: string | null;
-  task_id: string | null;
-  full_content: string;
-  imported_at: string;
-}
-
-function rowToArtifact(row: Record<string, unknown>): ArtifactRow {
-  return {
-    path: row["path"] as string,
-    artifact_type: row["artifact_type"] as string,
-    milestone_id: (row["milestone_id"] as string) ?? null,
-    slice_id: (row["slice_id"] as string) ?? null,
-    task_id: (row["task_id"] as string) ?? null,
-    full_content: row["full_content"] as string,
-    imported_at: row["imported_at"] as string,
-  };
-}
-
 export function getAllMilestones(): MilestoneRow[] {
   if (!currentDb) return [];
-  const rows = currentDb.prepare("SELECT * FROM milestones ORDER BY id").all();
+  const rows = currentDb.prepare(
+    "SELECT * FROM milestones ORDER BY CASE WHEN sequence > 0 THEN 0 ELSE 1 END, sequence, id",
+  ).all();
   return rows.map(rowToMilestone);
 }
 
@@ -2525,6 +1586,22 @@ export function getMilestone(id: string): MilestoneRow | null {
   const row = currentDb.prepare("SELECT * FROM milestones WHERE id = :id").get({ ":id": id });
   if (!row) return null;
   return rowToMilestone(row);
+}
+
+export function setMilestoneQueueOrder(order: string[]): void {
+  if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  currentDb.exec("BEGIN IMMEDIATE");
+  try {
+    currentDb.prepare("UPDATE milestones SET sequence = 0").run();
+    const stmt = currentDb.prepare("UPDATE milestones SET sequence = :sequence WHERE id = :id");
+    order.forEach((id, index) => {
+      stmt.run({ ":id": id, ":sequence": index + 1 });
+    });
+    currentDb.exec("COMMIT");
+  } catch (err) {
+    currentDb.exec("ROLLBACK");
+    throw err;
+  }
 }
 
 /**
@@ -2595,36 +1672,36 @@ export function getArtifact(path: string): ArtifactRow | null {
 // ─── Lightweight Query Variants (hot-path optimized) ─────────────────────
 
 /** Fast milestone status check — avoids deserializing JSON planning fields. */
-export function getActiveMilestoneIdFromDb(): { id: string; status: string } | null {
+export function getActiveMilestoneIdFromDb(): IdStatusSummary | null {
   if (!currentDb) return null;
   const row = currentDb.prepare(
     "SELECT id, status FROM milestones WHERE status NOT IN ('complete', 'parked') ORDER BY id LIMIT 1",
   ).get();
   if (!row) return null;
-  return { id: row["id"] as string, status: row["status"] as string };
+  return rowToIdStatusSummary(row);
 }
 
 /** Fast slice status check — avoids deserializing JSON depends/planning fields. */
-export function getSliceStatusSummary(milestoneId: string): Array<{ id: string; status: string }> {
+export function getSliceStatusSummary(milestoneId: string): IdStatusSummary[] {
   if (!currentDb) return [];
   return currentDb.prepare(
     "SELECT id, status FROM slices WHERE milestone_id = :mid ORDER BY sequence, id",
-  ).all({ ":mid": milestoneId }).map((r) => ({ id: r["id"] as string, status: r["status"] as string }));
+  ).all({ ":mid": milestoneId }).map(rowToIdStatusSummary);
 }
 
 /** Fast task status check — avoids deserializing JSON arrays and large text fields. */
-export function getActiveTaskIdFromDb(milestoneId: string, sliceId: string): { id: string; status: string; title: string } | null {
+export function getActiveTaskIdFromDb(milestoneId: string, sliceId: string): ActiveTaskSummary | null {
   if (!currentDb) return null;
   const row = currentDb.prepare(
     "SELECT id, status, title FROM tasks WHERE milestone_id = :mid AND slice_id = :sid AND status NOT IN ('complete', 'done') ORDER BY sequence, id LIMIT 1",
   ).get({ ":mid": milestoneId, ":sid": sliceId });
   if (!row) return null;
-  return { id: row["id"] as string, status: row["status"] as string, title: row["title"] as string };
+  return rowToActiveTaskSummary(row);
 }
 
 /** Count tasks by status for a slice — useful for progress reporting without full row load. */
-export function getSliceTaskCounts(milestoneId: string, sliceId: string): { total: number; done: number; pending: number } {
-  if (!currentDb) return { total: 0, done: 0, pending: 0 };
+export function getSliceTaskCounts(milestoneId: string, sliceId: string): TaskStatusCounts {
+  if (!currentDb) return emptyTaskStatusCounts();
   const row = currentDb.prepare(
     `SELECT
        COUNT(*) as total,
@@ -2632,8 +1709,7 @@ export function getSliceTaskCounts(milestoneId: string, sliceId: string): { tota
        SUM(CASE WHEN status NOT IN ('complete', 'done') THEN 1 ELSE 0 END) as pending
      FROM tasks WHERE milestone_id = :mid AND slice_id = :sid`,
   ).get({ ":mid": milestoneId, ":sid": sliceId });
-  if (!row) return { total: 0, done: 0, pending: 0 };
-  return { total: (row["total"] as number) ?? 0, done: (row["done"] as number) ?? 0, pending: (row["pending"] as number) ?? 0 };
+  return rowToTaskStatusCounts(row);
 }
 
 // ─── Slice Dependencies (junction table) ─────────────────────────────────
@@ -2654,9 +1730,10 @@ export function syncSliceDependencies(milestoneId: string, sliceId: string, depe
 /** Get all slices that depend on a given slice. */
 export function getDependentSlices(milestoneId: string, sliceId: string): string[] {
   if (!currentDb) return [];
-  return currentDb.prepare(
+  const rows = currentDb.prepare(
     "SELECT slice_id FROM slice_dependencies WHERE milestone_id = :mid AND depends_on_slice_id = :sid",
-  ).all({ ":mid": milestoneId, ":sid": sliceId }).map((r) => r["slice_id"] as string);
+  ).all({ ":mid": milestoneId, ":sid": sliceId });
+  return rowsToStringColumn(rows, "slice_id");
 }
 
 // ─── Worktree DB Helpers ──────────────────────────────────────────────────
@@ -2722,6 +1799,8 @@ export function reconcileWorktreeDb(
       // fall through to the main DB's existing value (not a literal default)
       // so reconcile never silently clears state the main tree has recorded.
       const hasDecisionSource = wtInfo.some((col) => col["name"] === "source");
+      const wtMilestoneInfo = adapter.prepare("PRAGMA wt.table_info('milestones')").all();
+      const hasMilestoneSequence = wtMilestoneInfo.some((col) => col["name"] === "sequence");
       const wtSliceInfo = adapter.prepare("PRAGMA wt.table_info('slices')").all();
       const hasIsSketch = wtSliceInfo.some((col) => col["name"] === "is_sketch");
       const hasSketchScope = wtSliceInfo.some((col) => col["name"] === "sketch_scope");
@@ -2731,6 +1810,13 @@ export function reconcileWorktreeDb(
       const hasEscalationAwaiting = wtTaskInfo.some((col) => col["name"] === "escalation_awaiting_review");
       const hasEscalationArtifact = wtTaskInfo.some((col) => col["name"] === "escalation_artifact_path");
       const hasEscalationOverride = wtTaskInfo.some((col) => col["name"] === "escalation_override_applied_at");
+      const wtArtifactInfo = adapter.prepare("PRAGMA wt.table_info('artifacts')").all();
+      const hasArtifactContentHash = wtArtifactInfo.some((col) => col["name"] === "content_hash");
+      const wtMemoryInfo = adapter.prepare("PRAGMA wt.table_info('memories')").all();
+      const hasMemoryScope = wtMemoryInfo.some((col) => col["name"] === "scope");
+      const hasMemoryTags = wtMemoryInfo.some((col) => col["name"] === "tags");
+      const hasMemoryStructuredFields = wtMemoryInfo.some((col) => col["name"] === "structured_fields");
+      const hasMemoryLastHitAt = wtMemoryInfo.some((col) => col["name"] === "last_hit_at");
 
       const decConf = adapter.prepare(
         `SELECT m.id FROM decisions m INNER JOIN wt.decisions w ON m.id = w.id WHERE m.decision != w.decision OR m.choice != w.choice OR m.rationale != w.rationale OR ${
@@ -2778,12 +1864,17 @@ export function reconcileWorktreeDb(
           FROM wt.requirements
         `).run());
 
+        // V27: preserve content_hash. If the worktree predates V27 (no column),
+        // fall back to the main DB's existing hash so reconcile doesn't null
+        // out integrity fingerprints on artifacts that were unchanged in wt.
         merged.artifacts = countChanges(adapter.prepare(`
           INSERT OR REPLACE INTO artifacts (
-            path, artifact_type, milestone_id, slice_id, task_id, full_content, imported_at
+            path, artifact_type, milestone_id, slice_id, task_id, full_content, imported_at, content_hash
           )
-          SELECT path, artifact_type, milestone_id, slice_id, task_id, full_content, imported_at
-          FROM wt.artifacts
+          SELECT w.path, w.artifact_type, w.milestone_id, w.slice_id, w.task_id, w.full_content, w.imported_at,
+                 ${hasArtifactContentHash ? "w.content_hash" : "m.content_hash"}
+          FROM wt.artifacts w
+          LEFT JOIN artifacts m ON m.path = w.path
         `).run());
 
         // Merge milestones — worktree may have updated status/planning fields.
@@ -2795,7 +1886,7 @@ export function reconcileWorktreeDb(
             id, title, status, depends_on, created_at, completed_at,
             vision, success_criteria, key_risks, proof_strategy,
             verification_contract, verification_integration, verification_operational, verification_uat,
-            definition_of_done, requirement_coverage, boundary_map_markdown
+            definition_of_done, requirement_coverage, boundary_map_markdown, sequence
           )
           SELECT w.id, w.title,
                  CASE
@@ -2813,7 +1904,8 @@ export function reconcileWorktreeDb(
                  END,
                  w.vision, w.success_criteria, w.key_risks, w.proof_strategy,
                  w.verification_contract, w.verification_integration, w.verification_operational, w.verification_uat,
-                 w.definition_of_done, w.requirement_coverage, w.boundary_map_markdown
+                 w.definition_of_done, w.requirement_coverage, w.boundary_map_markdown,
+                 ${hasMilestoneSequence ? "COALESCE(w.sequence, 0)" : "COALESCE(m.sequence, 0)"}
           FROM wt.milestones w
           LEFT JOIN milestones m ON m.id = w.id
         `).run());
@@ -2884,15 +1976,25 @@ export function reconcileWorktreeDb(
           LEFT JOIN tasks m ON m.milestone_id = w.milestone_id AND m.slice_id = w.slice_id AND m.id = w.id
         `).run());
 
-        // Merge memories — keep worktree-learned insights
+        // Merge memories — keep worktree-learned insights.
+        // V18 (scope, tags), V21 (structured_fields), V28 (last_hit_at): for each
+        // column the wt may not yet have (older worktree DB), fall back to the
+        // main DB's existing value via LEFT JOIN so reconcile never silently
+        // resets these fields to defaults on rows that already had them.
         merged.memories = countChanges(adapter.prepare(`
           INSERT OR REPLACE INTO memories (
             seq, id, category, content, confidence, source_unit_type, source_unit_id,
-            created_at, updated_at, superseded_by, hit_count
+            created_at, updated_at, superseded_by, hit_count,
+            scope, tags, structured_fields, last_hit_at
           )
-          SELECT seq, id, category, content, confidence, source_unit_type, source_unit_id,
-                 created_at, updated_at, superseded_by, hit_count
-          FROM wt.memories
+          SELECT w.seq, w.id, w.category, w.content, w.confidence, w.source_unit_type, w.source_unit_id,
+                 w.created_at, w.updated_at, w.superseded_by, w.hit_count,
+                 ${hasMemoryScope ? "w.scope" : "COALESCE(m.scope, 'project')"},
+                 ${hasMemoryTags ? "w.tags" : "COALESCE(m.tags, '[]')"},
+                 ${hasMemoryStructuredFields ? "w.structured_fields" : "m.structured_fields"},
+                 ${hasMemoryLastHitAt ? "w.last_hit_at" : "m.last_hit_at"}
+          FROM wt.memories w
+          LEFT JOIN memories m ON m.id = w.id
         `).run());
 
         // Merge verification evidence — append-only, use INSERT OR IGNORE to avoid duplicates
@@ -3054,6 +2156,12 @@ export function deleteMilestone(milestoneId: string): void {
       `DELETE FROM artifacts WHERE milestone_id = :mid`,
     ).run({ ":mid": milestoneId });
     currentDb!.prepare(
+      `DELETE FROM milestone_commit_attributions WHERE milestone_id = :mid`,
+    ).run({ ":mid": milestoneId });
+    currentDb!.prepare(
+      `DELETE FROM milestone_leases WHERE milestone_id = :mid`,
+    ).run({ ":mid": milestoneId });
+    currentDb!.prepare(
       `DELETE FROM milestones WHERE id = :mid`,
     ).run({ ":mid": milestoneId });
   });
@@ -3103,22 +2211,21 @@ export function getAssessment(path: string): Record<string, unknown> | null {
   return row ?? null;
 }
 
-// ─── Quality Gates ───────────────────────────────────────────────────────
-
-function rowToGate(row: Record<string, unknown>): GateRow {
-  return {
-    milestone_id: row["milestone_id"] as string,
-    slice_id: row["slice_id"] as string,
-    gate_id: row["gate_id"] as GateId,
-    scope: row["scope"] as GateScope,
-    task_id: (row["task_id"] as string) ?? "",
-    status: row["status"] as GateStatus,
-    verdict: row["status"] === "pending" ? null : (row["verdict"] as GateVerdict),
-    rationale: (row["rationale"] as string) || "",
-    findings: (row["findings"] as string) || "",
-    evaluated_at: (row["evaluated_at"] as string) ?? null,
-  };
+export function getLatestAssessmentByScope(
+  milestoneId: string,
+  scope: string,
+): Record<string, unknown> | null {
+  if (!currentDb) return null;
+  const row = currentDb.prepare(
+    `SELECT * FROM assessments
+      WHERE milestone_id = :mid AND scope = :scope
+      ORDER BY created_at DESC
+      LIMIT 1`,
+  ).get({ ":mid": milestoneId, ":scope": scope });
+  return row ?? null;
 }
+
+// ─── Quality Gates ───────────────────────────────────────────────────────
 
 export function insertGateRow(g: {
   milestoneId: string;
@@ -3369,6 +2476,75 @@ export function upsertTurnGitTransaction(entry: {
   });
 }
 
+export function getMilestoneCommitAttributionShas(milestoneId: string): string[] {
+  if (!currentDb) return [];
+  const rows = currentDb.prepare(
+    `SELECT commit_sha
+     FROM milestone_commit_attributions
+     WHERE milestone_id = :mid
+     ORDER BY created_at, commit_sha`,
+  ).all({ ":mid": milestoneId }) as Array<Record<string, unknown>>;
+  return rows
+    .map((row) => typeof row["commit_sha"] === "string" ? row["commit_sha"] : "")
+    .filter(Boolean);
+}
+
+export function recordMilestoneCommitAttribution(entry: {
+  commitSha: string;
+  milestoneId: string;
+  sliceId?: string;
+  taskId?: string;
+  source: "recorded" | "backfill";
+  confidence: number;
+  files: string[];
+  createdAt: string;
+}): void {
+  if (!currentDb) return;
+  transaction(() => {
+    currentDb!.prepare(
+      `INSERT OR REPLACE INTO milestone_commit_attributions (
+        commit_sha, milestone_id, slice_id, task_id, source, confidence, files_json, created_at
+      ) VALUES (
+        :commit_sha, :milestone_id, :slice_id, :task_id, :source, :confidence, :files_json, :created_at
+      )`,
+    ).run({
+      ":commit_sha": entry.commitSha,
+      ":milestone_id": entry.milestoneId,
+      ":slice_id": entry.sliceId ?? null,
+      ":task_id": entry.taskId ?? null,
+      ":source": entry.source,
+      ":confidence": entry.confidence,
+      ":files_json": JSON.stringify(entry.files),
+      ":created_at": entry.createdAt,
+    });
+
+    currentDb!.prepare(
+      `INSERT OR IGNORE INTO audit_events (
+        event_id, trace_id, turn_id, caused_by, category, type, ts, payload_json
+      ) VALUES (
+        :event_id, :trace_id, :turn_id, :caused_by, :category, :type, :ts, :payload_json
+      )`,
+    ).run({
+      ":event_id": `milestone-commit-attribution:${entry.milestoneId}:${entry.commitSha}`,
+      ":trace_id": "milestone-commit-attribution",
+      ":turn_id": null,
+      ":caused_by": null,
+      ":category": "git",
+      ":type": "milestone-commit-attribution-recorded",
+      ":ts": entry.createdAt,
+      ":payload_json": JSON.stringify({
+        commitSha: entry.commitSha,
+        milestoneId: entry.milestoneId,
+        sliceId: entry.sliceId ?? null,
+        taskId: entry.taskId ?? null,
+        source: entry.source,
+        confidence: entry.confidence,
+        files: entry.files,
+      }),
+    });
+  });
+}
+
 export function insertAuditEvent(entry: {
   eventId: string;
   traceId: string;
@@ -3461,14 +2637,21 @@ export function deleteArtifactByPath(path: string): void {
 }
 
 /**
- * Drop all rows from tasks/slices/milestones in dependency order inside a
- * transaction. Used by `gsd recover` to rebuild engine state from markdown.
+ * Drop hierarchy rows in dependency order inside a transaction. Used by
+ * `gsd recover` to rebuild engine state from markdown.
  */
 export function clearEngineHierarchy(): void {
   if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
   transaction(() => {
+    currentDb!.exec("DELETE FROM verification_evidence");
+    currentDb!.exec("DELETE FROM quality_gates");
+    currentDb!.exec("DELETE FROM slice_dependencies");
+    currentDb!.exec("DELETE FROM assessments");
+    currentDb!.exec("DELETE FROM replan_history");
+    currentDb!.exec("DELETE FROM milestone_commit_attributions");
     currentDb!.exec("DELETE FROM tasks");
     currentDb!.exec("DELETE FROM slices");
+    currentDb!.exec("DELETE FROM milestone_leases");
     currentDb!.exec("DELETE FROM milestones");
   });
 }
@@ -3582,6 +2765,7 @@ export function restoreManifest(manifest: StateManifest): void {
     db.exec("DELETE FROM verification_evidence");
     db.exec("DELETE FROM tasks");
     db.exec("DELETE FROM slices");
+    db.exec("DELETE FROM milestone_leases");
     db.exec("DELETE FROM milestones");
     db.exec("DELETE FROM decisions WHERE 1=1");
 
@@ -3590,8 +2774,8 @@ export function restoreManifest(manifest: StateManifest): void {
       `INSERT INTO milestones (id, title, status, depends_on, created_at, completed_at,
         vision, success_criteria, key_risks, proof_strategy,
         verification_contract, verification_integration, verification_operational, verification_uat,
-        definition_of_done, requirement_coverage, boundary_map_markdown)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        definition_of_done, requirement_coverage, boundary_map_markdown, sequence)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const m of manifest.milestones) {
       msStmt.run(
@@ -3600,7 +2784,7 @@ export function restoreManifest(manifest: StateManifest): void {
         m.vision, JSON.stringify(m.success_criteria), JSON.stringify(m.key_risks),
         JSON.stringify(m.proof_strategy),
         m.verification_contract, m.verification_integration, m.verification_operational, m.verification_uat,
-        JSON.stringify(m.definition_of_done), m.requirement_coverage, m.boundary_map_markdown,
+        JSON.stringify(m.definition_of_done), m.requirement_coverage, m.boundary_map_markdown, m.sequence ?? 0,
       );
     }
 
@@ -3720,6 +2904,7 @@ export function bulkInsertLegacyHierarchy(payload: {
   transaction(() => {
     db.prepare(`DELETE FROM tasks WHERE milestone_id IN (${placeholders})`).run(...clearMilestoneIds);
     db.prepare(`DELETE FROM slices WHERE milestone_id IN (${placeholders})`).run(...clearMilestoneIds);
+    db.prepare(`DELETE FROM milestone_leases WHERE milestone_id IN (${placeholders})`).run(...clearMilestoneIds);
     db.prepare(`DELETE FROM milestones WHERE id IN (${placeholders})`).run(...clearMilestoneIds);
 
     const insertMilestone = db.prepare(
@@ -3914,8 +3099,8 @@ export function updateMemoryContentRow(
 export function incrementMemoryHitCount(id: string, updatedAt: string): void {
   if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
   currentDb.prepare(
-    "UPDATE memories SET hit_count = hit_count + 1, updated_at = :updated_at WHERE id = :id",
-  ).run({ ":updated_at": updatedAt, ":id": id });
+    "UPDATE memories SET hit_count = hit_count + 1, updated_at = :updated_at, last_hit_at = :last_hit_at WHERE id = :id",
+  ).run({ ":updated_at": updatedAt, ":last_hit_at": updatedAt, ":id": id });
 }
 
 export function supersedeMemoryRow(oldId: string, newId: string, updatedAt: string): void {

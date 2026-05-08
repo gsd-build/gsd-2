@@ -1,19 +1,11 @@
-/**
- * Component Loader
- *
- * Multi-format loader that handles:
- * 1. New format: component.yaml + SKILL.md/AGENT.md
- * 2. Legacy skill format: SKILL.md with YAML frontmatter
- * 3. Legacy agent format: .md with YAML frontmatter (name, description, tools, model)
- *
- * Auto-detects format by checking for component.yaml first, then falling back
- * to legacy formats based on file naming conventions.
- */
+// Project/App: GSD-2
+// File Purpose: Loads modern component.yaml definitions and legacy skill/agent formats.
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { parseFrontmatter } from '@gsd/pi-coding-agent';
+import { incrementLegacyTelemetry } from './legacy-telemetry.js';
 import type {
 	Component,
 	ComponentApiVersion,
@@ -270,6 +262,7 @@ function loadFromLegacySkill(
 		enabled: true,
 	};
 
+	incrementLegacyTelemetry('legacy.componentFormatUsed');
 	return { component, diagnostics };
 }
 
@@ -345,6 +338,7 @@ function loadFromLegacyAgent(
 		enabled: true,
 	};
 
+	incrementLegacyTelemetry('legacy.componentFormatUsed');
 	return { component, diagnostics };
 }
 

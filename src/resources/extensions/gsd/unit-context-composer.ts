@@ -42,6 +42,7 @@ import {
   type BaseResolverContext,
   type ComputedArtifactId,
   type ComputedArtifactRegistry,
+  type ContextModePolicy,
   type UnitContextManifest,
 } from "./unit-context-manifest.js";
 
@@ -90,6 +91,69 @@ export async function composeInlinedContext(
 export function manifestBudgetChars(unitType: string): number | null {
   const manifest = resolveManifest(unitType);
   return manifest ? manifest.maxSystemPromptChars : null;
+}
+
+// ─── Context Mode lane guidance ──────────────────────────────────────────
+
+export type ContextModeRenderMode = "standalone" | "nested";
+
+export interface ComposeContextModeInstructionOptions {
+  readonly enabled: boolean;
+  readonly renderMode: ContextModeRenderMode;
+}
+
+const CONTEXT_MODE_LANE_LABELS: Record<Exclude<ContextModePolicy, "none">, string> = {
+  interview: "interview",
+  research: "research",
+  planning: "planning",
+  execution: "execution",
+  verification: "verification",
+  orchestration: "orchestration",
+  docs: "documentation",
+};
+
+const CONTEXT_MODE_GUIDANCE_BY_LANE: Record<Exclude<ContextModePolicy, "none">, string> = {
+  interview:
+    "Use `gsd_resume` to restore prior discussion, `gsd_exec` for noisy discovery, and `gsd_exec_search` before repeating scans.",
+  research:
+    "Use `gsd_exec` for noisy research scans, `gsd_exec_search` before reruns, and `gsd_resume` to restore prior findings.",
+  planning:
+    "Use `gsd_resume` for planning continuity, `gsd_exec` for noisy checks, and `gsd_exec_search` before rerunning diagnostics.",
+  execution:
+    "Use `gsd_exec` for builds, tests, and diagnostics, `gsd_exec_search` before reruns, and `gsd_resume` after compaction or resume.",
+  verification:
+    "Use `gsd_exec` for verification commands, `gsd_exec_search` to reuse prior evidence, and `gsd_resume` after compaction or resume.",
+  orchestration:
+    "Use `gsd_resume` before resuming orchestration, `gsd_exec_search` to reuse prior runs, and `gsd_exec` for noisy coordination checks.",
+  docs:
+    "Use `gsd_resume` for prior context, `gsd_exec_search` for saved evidence, and `gsd_exec` for noisy doc validation commands.",
+};
+
+/**
+ * Render the Context Mode instruction lane for a unit type. Unknown unit
+ * types, disabled config, and explicit `contextMode: "none"` all omit the
+ * block so callers can prefix this safely without extra branching.
+ */
+export function composeContextModeInstructions(
+  unitType: string,
+  opts: ComposeContextModeInstructionOptions,
+): string {
+  if (!opts.enabled) return "";
+  const manifest = resolveManifest(unitType);
+  if (!manifest || manifest.contextMode === "none") return "";
+
+  const lane = CONTEXT_MODE_LANE_LABELS[manifest.contextMode];
+  const guidance = CONTEXT_MODE_GUIDANCE_BY_LANE[manifest.contextMode];
+  if (opts.renderMode === "nested") {
+    return `Context Mode (${lane} lane): ${guidance}`;
+  }
+
+  return [
+    "## Context Mode",
+    "",
+    `Lane: **${lane} lane**.`,
+    guidance,
+  ].join("\n");
 }
 
 // ─── v2 surface (#4924) ───────────────────────────────────────────────────

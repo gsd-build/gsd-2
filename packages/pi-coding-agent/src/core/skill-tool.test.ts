@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Tests skill invocation and prompt-only skill visibility behavior.
+
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -85,5 +88,30 @@ describe("Skill tool", () => {
 		const message = result.content[0]?.type === "text" ? result.content[0].text : "";
 		assert.match(message, /^Skill "nonexistent" not found\. Available skills: /);
 		assert.match(message, /swift-testing/);
+	});
+
+	it("filters skill catalog without unloading skills or disabling Skill tool", async () => {
+		writeSkill(testDir, "alpha", "Use alpha.");
+		writeSkill(testDir, "beta", "Use beta.");
+		const session = await createSession();
+
+		assert.match(session.systemPrompt, /<name>alpha<\/name>/);
+		assert.match(session.systemPrompt, /<name>beta<\/name>/);
+
+		session.setVisibleSkillsByName(["alpha"]);
+		assert.deepEqual(session.getVisibleSkillNames(), ["alpha"]);
+		assert.match(session.systemPrompt, /<name>alpha<\/name>/);
+		assert.doesNotMatch(session.systemPrompt, /<name>beta<\/name>/);
+
+		const tool = session.state.tools.find((entry) => entry.name === "Skill");
+		assert.ok(tool, "Skill tool should remain active");
+		const result = await tool.execute("call-3", { skill: "beta" });
+		const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+		assert.match(text, /<skill name="beta"/);
+
+		session.setVisibleSkillsByName(undefined);
+		assert.equal(session.getVisibleSkillNames(), undefined);
+		assert.match(session.systemPrompt, /<name>alpha<\/name>/);
+		assert.match(session.systemPrompt, /<name>beta<\/name>/);
 	});
 });

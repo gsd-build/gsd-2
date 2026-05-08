@@ -5,6 +5,7 @@ import { validateDirectory } from "../validate-directory.js";
 import { resolveProjectRoot } from "../worktree.js";
 import { showNextAction } from "../../shared/tui.js";
 import { handleStatus } from "./handlers/core.js";
+import { homedir } from "node:os";
 
 export interface GsdDispatchContext {
   ctx: ExtensionCommandContext;
@@ -23,13 +24,29 @@ export class GSDNoProjectError extends Error {
   }
 }
 
+let commandCwdOverride: string | null = null;
+
+export async function withCommandCwd<T>(cwd: string | undefined, fn: () => Promise<T>): Promise<T> {
+  const previous = commandCwdOverride;
+  commandCwdOverride = cwd || null;
+  try {
+    return await fn();
+  } finally {
+    commandCwdOverride = previous;
+  }
+}
+
 export function projectRoot(): string {
   let cwd: string;
-  try {
-    cwd = process.cwd();
-  } catch {
-    // cwd directory was deleted (e.g. worktree teardown) — fall back to HOME (#3598)
-    cwd = process.env.HOME ?? "/";
+  if (commandCwdOverride) {
+    cwd = commandCwdOverride;
+  } else {
+    try {
+      cwd = process.cwd();
+    } catch {
+      // cwd directory was deleted (e.g. worktree teardown) — fall back to home (#3598)
+      cwd = homedir();
+    }
   }
   const root = resolveProjectRoot(cwd);
   const pathToCheck = root !== cwd ? cwd : root;
@@ -38,6 +55,24 @@ export function projectRoot(): string {
     throw new GSDNoProjectError(result.reason ?? "GSD must be run inside a project directory.");
   }
   return root;
+}
+
+export function currentDirectoryRoot(): string {
+  let cwd: string;
+  if (commandCwdOverride) {
+    cwd = commandCwdOverride;
+  } else {
+    try {
+      cwd = process.cwd();
+    } catch {
+      cwd = homedir();
+    }
+  }
+  const result = validateDirectory(cwd);
+  if (result.severity === "blocked") {
+    throw new GSDNoProjectError(result.reason ?? "GSD must be run inside a project directory.");
+  }
+  return cwd;
 }
 
 export async function guardRemoteSession(
@@ -122,4 +157,3 @@ export async function guardRemoteSession(
 
   return choice === "force";
 }
-

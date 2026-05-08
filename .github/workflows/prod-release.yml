@@ -92,6 +92,12 @@ jobs:
       - name: Build release
         run: npm run build
 
+      - name: Run live regression tests (against release build)
+        run: |
+          chmod +x dist/loader.js
+          export GSD_SMOKE_BINARY="$(pwd)/dist/loader.js"
+          npm run test:live-regression
+
       - name: Publish release to npm @latest
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

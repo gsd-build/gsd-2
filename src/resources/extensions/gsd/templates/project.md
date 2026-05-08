@@ -11,6 +11,16 @@
 
 {{theOneThingThatMustWorkEvenIfEverythingElseIsCut}}
 
+## Project Shape
+
+<!-- Drives questioning depth in downstream stages. `simple` → short plain-text
+     rounds, fast PROJECT/CONTEXT/REQUIREMENTS writes. `complex` → researched
+     3–4-option questions with an "Other — let me discuss" hatch.
+     Default to `complex` when uncertain. -->
+
+- **Complexity:** {{simple | complex}}
+- **Why:** {{one-line rationale citing the signals that decided it}}
+
 ## Current State
 
 {{whatHasBeenBuiltSoFar — what works, what exists, what's deployed}}

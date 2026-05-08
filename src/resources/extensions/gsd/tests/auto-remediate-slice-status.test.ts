@@ -1,13 +1,12 @@
 /**
- * Regression test for #3673 — auto-remediate stale slice DB status
+ * Regression test for DB-authoritative rogue detection.
  *
- * When complete-slice fails after writing SUMMARY.md but before calling
- * updateSliceStatus(), the DB stays stale and the post-unit check
- * previously reported this as a "rogue" artifact, causing infinite
- * re-dispatch. The fix calls updateSliceStatus() to sync the DB.
+ * A SUMMARY.md on disk is a projection/diagnostic. Runtime post-unit checks
+ * must not use it to mark the DB slice complete; explicit import/recovery
+ * commands own markdown-to-DB behavior.
  *
- * This structural test verifies updateSliceStatus is imported and called
- * in the complete-slice branch of auto-post-unit.ts.
+ * This structural test verifies the complete-slice rogue branch reports the
+ * stale projection without calling updateSliceStatus().
  */
 
 import { describe, test } from 'node:test';
@@ -22,38 +21,26 @@ const __dirname = dirname(__filename);
 
 const source = readFileSync(join(__dirname, '..', 'auto-post-unit.ts'), 'utf-8');
 
-describe('auto-remediate stale slice status (#3673)', () => {
-  test('updateSliceStatus is imported from gsd-db', () => {
-    assert.match(source, /import\s*\{[^}]*updateSliceStatus[^}]*\}\s*from\s*["']\.\/gsd-db/,
-      'updateSliceStatus should be imported from gsd-db');
+describe('DB-authoritative slice rogue detection', () => {
+  test('updateSliceStatus is not imported for post-unit rogue reconciliation', () => {
+    assert.doesNotMatch(source, /import\s*\{[^}]*updateSliceStatus[^}]*\}\s*from\s*["']\.\/gsd-db/,
+      'auto-post-unit must not import updateSliceStatus for disk-to-DB reconciliation');
   });
 
-  test('updateSliceStatus is called with "complete" status', () => {
-    assert.match(source, /updateSliceStatus\(mid,\s*sid,\s*["']complete["']/,
-      'updateSliceStatus should be called with "complete" status');
+  test('complete-slice rogue branch does not mark DB complete from disk', () => {
+    assert.doesNotMatch(source, /updateSliceStatus\(mid,\s*sid,\s*["']complete["']/,
+      'SUMMARY.md on disk must not mark slice complete in DB');
   });
 
-  test('remediation is wrapped in try-catch for fallback to rogue detection', () => {
-    // The updateSliceStatus call should be in a try block with a catch
-    // that falls back to rogues.push
-    const updateIdx = source.indexOf('updateSliceStatus(mid, sid');
-    assert.ok(updateIdx > 0, 'updateSliceStatus call should exist');
-
-    // Find surrounding try-catch
-    const before = source.slice(Math.max(0, updateIdx - 200), updateIdx);
-    assert.match(before, /try\s*\{/,
-      'updateSliceStatus should be inside a try block');
-
-    // Bound the region to stop before the rogue fallback so /catch/ only
-    // matches this try block's catch, not an unrelated later one.
-    const after = extractSourceRegion(source, 'updateSliceStatus(mid, sid', 'rogues.push({');
-    assert.match(after, /catch/,
-      'try block should have a catch for fallback');
+  test('explicit rogue diagnostic reports stale slice summary projection', () => {
+    const branch = extractSourceRegion(source, 'unitType === "complete-slice"', 'unitType === "plan-milestone"');
+    assert.match(branch, /rogues\.push\(\{\s*path:\s*summaryPath,\s*unitType,\s*unitId\s*\}\)/,
+      'complete-slice branch should report stale SUMMARY.md as rogue');
   });
 
-  test('rogue detection still exists as fallback', () => {
-    // rogues.push should appear in the catch block
-    assert.match(source, /rogues\.push\(\{.*path:\s*summaryPath/,
-      'rogues.push fallback should still exist');
+  test('post-unit runtime does not call rogue diagnostics automatically', () => {
+    const postUnit = extractSourceRegion(source, 'export async function postUnitPostVerification');
+    assert.doesNotMatch(postUnit, /detectRogueFileWrites\(/,
+      'runtime post-unit path must not scan disk projections for rogue files');
   });
 });

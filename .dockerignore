@@ -51,3 +51,6 @@ bun.lock
 
 # ── Tarballs ──
 *.tgz
+# Allow the npm pack output for the runtime-local Dockerfile target,
+# which is exercised by tests/e2e/docker/runtime.e2e.test.ts.
+!gsd-pi-*.tgz

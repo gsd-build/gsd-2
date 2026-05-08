@@ -415,6 +415,8 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		getActiveTools: notInitialized,
 		getAllTools: notInitialized,
 		setActiveTools: notInitialized,
+		getVisibleSkills: notInitialized,
+		setVisibleSkills: notInitialized,
 		// registerTool() is valid during extension load; refresh is only needed post-bind.
 		refreshTools: () => {},
 		getCommands: notInitialized,
@@ -564,6 +566,14 @@ function createExtensionAPI(
 
 		setActiveTools(toolNames: string[]): void {
 			runtime.setActiveTools(toolNames);
+		},
+
+		getVisibleSkills(): string[] | undefined {
+			return runtime.getVisibleSkills();
+		},
+
+		setVisibleSkills(skillNames: string[] | undefined): void {
+			runtime.setVisibleSkills(skillNames);
 		},
 
 		getCommands() {

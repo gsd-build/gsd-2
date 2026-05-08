@@ -4,6 +4,8 @@
 // re-discover past runs without re-executing. Read-only; no DB writes.
 
 import { searchExecHistory, type ExecSearchOptions } from "../exec-history.js";
+import { isContextModeEnabled, type ContextModeConfig } from "../preferences-types.js";
+import { contextModeDisabledResult, type ToolExecutionResult } from "./context-mode-tool-result.js";
 
 export interface ExecSearchToolParams {
   query?: string;
@@ -12,16 +14,14 @@ export interface ExecSearchToolParams {
   limit?: number;
 }
 
-export interface ToolExecutionResult {
-  content: Array<{ type: "text"; text: string }>;
-  details: Record<string, unknown>;
-  isError?: boolean;
-}
-
 export function executeExecSearch(
   params: ExecSearchToolParams,
-  opts: { baseDir: string },
+  opts: { baseDir: string; preferences?: { context_mode?: ContextModeConfig } | null },
 ): ToolExecutionResult {
+  if (!isContextModeEnabled(opts.preferences)) {
+    return contextModeDisabledResult("gsd_exec_search");
+  }
+
   const searchOpts: ExecSearchOptions = {
     query: typeof params.query === "string" ? params.query : undefined,
     runtime: params.runtime,

@@ -31,7 +31,7 @@ import {
 import type { AgentSession } from "../../core/agent-session.js";
 import type { AppAction, KeybindingsManager } from "../../core/keybindings.js";
 import type { SessionManager } from "../../core/session-manager.js";
-import type { SettingsManager } from "../../core/settings-manager.js";
+import type { AdaptiveTuiMode, SettingsManager } from "../../core/settings-manager.js";
 import { copyToClipboard } from "../../utils/clipboard.js";
 import { getChangelogPath, parseChangelog } from "../../utils/changelog.js";
 import { ArminComponent } from "./components/armin.js";
@@ -233,6 +233,10 @@ export async function dispatchSlashCommand(
 		// and env vars from shell profiles (.zprofile/.profile) are available.
 		// Note: shell aliases are not loaded (requires -i which has side effects).
 		await ctx.handleBashCommand(command, { loginShell: true });
+		return true;
+	}
+	if (text === "/tui" || text.startsWith("/tui ")) {
+		handleTuiCommand(text, ctx);
 		return true;
 	}
 
@@ -663,6 +667,25 @@ function handleEditModeCommand(arg: string | undefined, ctx: SlashCommandContext
 	const next = current === "standard" ? "hashline" : "standard";
 	ctx.session.setEditMode(next);
 	ctx.showStatus(`Edit mode: ${next}${next === "hashline" ? " (LINE#ID anchored edits)" : " (text-match edits)"}`);
+}
+
+function handleTuiCommand(text: string, ctx: SlashCommandContext): void {
+	const parts = text.trim().split(/\s+/);
+	const mode = parts[1] === "mode" ? parts[2] : parts[1];
+	const valid: AdaptiveTuiMode[] = ["auto", "chat", "workflow", "validation", "debug", "compact"];
+
+	if (!mode) {
+		ctx.showStatus(`TUI mode: ${ctx.settingsManager.getAdaptiveMode()}`);
+		return;
+	}
+	if (!valid.includes(mode as AdaptiveTuiMode)) {
+		ctx.showWarning(`Usage: /tui mode ${valid.join("|")}`);
+		return;
+	}
+
+	ctx.settingsManager.setAdaptiveMode(mode as AdaptiveTuiMode);
+	ctx.showStatus(`TUI mode: ${mode}`);
+	ctx.requestRender();
 }
 
 function handleArminSaysHi(ctx: SlashCommandContext): void {

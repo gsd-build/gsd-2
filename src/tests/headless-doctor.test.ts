@@ -20,7 +20,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -29,30 +29,51 @@ import {
   formatDoctorReport,
   formatDoctorReportJson,
 } from "../resources/extensions/gsd/doctor-format.ts";
+import {
+  openDatabase,
+  closeDatabase,
+  insertMilestone,
+  _getAdapter,
+} from "../resources/extensions/gsd/gsd-db.ts";
+import { registerAutoWorker } from "../resources/extensions/gsd/db/auto-workers.ts";
+import { claimMilestoneLease } from "../resources/extensions/gsd/db/milestone-leases.ts";
+import { recordDispatchClaim } from "../resources/extensions/gsd/db/unit-dispatches.ts";
+import { normalizeRealPath } from "../resources/extensions/gsd/paths.ts";
 
 function makeStaleLockFixture(): string {
   const base = mkdtempSync(join(tmpdir(), "gsd-headless-doctor-"));
   mkdirSync(join(base, ".gsd", "milestones"), { recursive: true });
-  // PID 99999 is conventional in the live-regression suite for "dead PID
-  // we just verified is not running" — we don't need to verify the dead-PID
-  // capture here, just that the doctor surfaces the stale lock cleanly.
-  writeFileSync(
-    join(base, ".gsd", "auto.lock"),
-    JSON.stringify({
-      pid: 99999,
-      startedAt: new Date().toISOString(),
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test Milestone", status: "active" });
+  const workerId = registerAutoWorker({ projectRootRealpath: normalizeRealPath(base) });
+  const lease = claimMilestoneLease(workerId, "M001");
+  assert.equal(lease.ok, true);
+  if (lease.ok) {
+    const claimed = recordDispatchClaim({
+      traceId: "headless-doctor-test",
+      workerId,
+      milestoneLeaseToken: lease.token,
+      milestoneId: "M001",
+      sliceId: "S01",
+      taskId: "T02",
       unitType: "execute-task",
       unitId: "M001/S01/T02",
-      unitStartedAt: new Date().toISOString(),
-      completedUnits: 5,
-    }),
-  );
+    });
+    assert.equal(claimed.ok, true);
+  }
+  const db = _getAdapter()!;
+  db.prepare(
+    `UPDATE workers SET pid = 99999, last_heartbeat_at = '1970-01-01T00:00:00.000Z' WHERE worker_id = :worker_id`,
+  ).run({ ":worker_id": workerId });
   return base;
 }
 
 test("#4929: runGSDDoctor + formatDoctorReport surface 'lock' + stale PID for stale auto.lock", async (t) => {
   const base = makeStaleLockFixture();
-  t.after(() => rmSync(base, { recursive: true, force: true }));
+  t.after(() => {
+    closeDatabase();
+    rmSync(base, { recursive: true, force: true });
+  });
 
   const report = await runGSDDoctor(base);
   const out = formatDoctorReport(report);
@@ -77,7 +98,10 @@ test("#4929: runGSDDoctor + formatDoctorReport surface 'lock' + stale PID for st
 
 test("#4929: formatDoctorReportJson preserves the stale-lock issue + PID for --json callers", async (t) => {
   const base = makeStaleLockFixture();
-  t.after(() => rmSync(base, { recursive: true, force: true }));
+  t.after(() => {
+    closeDatabase();
+    rmSync(base, { recursive: true, force: true });
+  });
 
   const report = await runGSDDoctor(base);
   const json = formatDoctorReportJson(report);

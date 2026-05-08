@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Verifies GSD planning prompt placeholder rendering and DB-backed tool guidance.
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -6,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const worktreePromptsDir = join(__dirname, "..", "prompts");
+const fixtureRoot = process.env.GSD_TEST_WORKSPACE_ROOT ?? process.cwd();
 
 function loadPrompt(name: string, vars: Record<string, string> = {}): string {
   const path = join(worktreePromptsDir, `${name}.md`);
@@ -17,15 +21,18 @@ function loadPrompt(name: string, vars: Record<string, string> = {}): string {
 }
 
 const BASE_VARS = {
-  workingDirectory: "/tmp/test-project",
+  workingDirectory: fixtureRoot,
   milestoneId: "M001", sliceId: "S01", sliceTitle: "Test Slice",
   slicePath: ".gsd/milestones/M001/slices/S01",
   roadmapPath: ".gsd/milestones/M001/M001-ROADMAP.md",
   researchPath: ".gsd/milestones/M001/slices/S01/S01-RESEARCH.md",
-  outputPath: "/tmp/test-project/.gsd/milestones/M001/slices/S01/S01-PLAN.md",
+  outputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "slices", "S01", "S01-PLAN.md"),
   inlinedContext: "--- test inlined context ---",
   dependencySummaries: "", executorContextConstraints: "",
   sourceFilePaths: "- **Requirements**: `.gsd/REQUIREMENTS.md`",
+  templatesDir: join(fixtureRoot, "templates"),
+  planTemplatePath: "C:\\Users\\Test\\.gsd\\agent\\extensions\\gsd\\templates\\plan.md",
+  taskPlanTemplatePath: "C:\\Users\\Test\\.gsd\\agent\\extensions\\gsd\\templates\\task-plan.md",
   skillActivation: "Load the relevant skills.",
 };
 
@@ -61,6 +68,19 @@ test("plan-slice prompt: DB-backed tool names survive template substitution", ()
   assert.ok(result.includes("canonical write path"), "canonical write path language should survive substitution");
 });
 
+test("plan-slice prompt: compact planning gates survive template substitution", () => {
+  const result = loadPrompt("plan-slice", { ...BASE_VARS, commitInstruction: "Do not commit." });
+  assert.ok(result.includes("planning-dispatch"), "planning-dispatch policy should remain visible");
+  assert.ok(result.includes("Bias toward \"roadmap is fine.\""), "roadmap reassessment brake should remain visible");
+  assert.ok(result.includes("Self-audit before finishing"), "self-audit gate should remain visible");
+  assert.ok(result.includes("Quality gates: non-trivial slices/tasks include specific Q3-Q7 coverage where applicable."));
+  assert.ok(result.includes("C:\\Users\\Test\\.gsd\\agent\\extensions\\gsd\\templates\\plan.md"));
+  assert.ok(result.includes("C:\\Users\\Test\\.gsd\\agent\\extensions\\gsd\\templates\\task-plan.md"));
+  assert.ok(!result.includes("{{templatesDir}}/plan.md"));
+  assert.ok(!result.includes("{{templatesDir}}/task-plan.md"));
+  assert.ok(!result.includes("{{"));
+});
+
 test("plan-slice prompt: footer references gsd_plan_slice tool, not direct write", () => {
   const result = loadPrompt("plan-slice", { ...BASE_VARS, commitInstruction: "Do not commit." });
   assert.ok(
@@ -81,9 +101,6 @@ test("domain-work prompts use skillActivation placeholder", () => {
     "plan-slice",
     "execute-task",
     "guided-research-slice",
-    "guided-plan-milestone",
-    "guided-plan-slice",
-    "guided-execute-task",
     "guided-resume-task",
   ];
 
@@ -94,7 +111,7 @@ test("domain-work prompts use skillActivation placeholder", () => {
 
 test("skillActivation default leaves no unresolved placeholder", () => {
   const result = loadPromptWithDefaultSkillActivation("execute-task", {
-    workingDirectory: "/tmp/test-project",
+    workingDirectory: fixtureRoot,
     milestoneId: "M001",
     sliceId: "S01",
     sliceTitle: "Test Slice",
@@ -107,7 +124,8 @@ test("skillActivation default leaves no unresolved placeholder", () => {
     carryForwardSection: "Carry forward",
     resumeSection: "Resume",
     priorTaskLines: "- (no prior tasks)",
-    taskSummaryPath: "/tmp/test-project/.gsd/milestones/M001/slices/S01/tasks/T01-SUMMARY.md",
+    templatesDir: join(fixtureRoot, "templates"),
+    taskSummaryPath: join(fixtureRoot, ".gsd", "milestones", "M001", "slices", "S01", "tasks", "T01-SUMMARY.md"),
     inlinedTemplates: "Template",
     verificationBudget: "~10K chars",
     overridesSection: "",
@@ -119,7 +137,7 @@ test("skillActivation default leaves no unresolved placeholder", () => {
 
 test("custom skillActivation is substituted into execute-task", () => {
   const result = loadPrompt("execute-task", {
-    workingDirectory: "/tmp/test-project",
+    workingDirectory: fixtureRoot,
     milestoneId: "M001",
     sliceId: "S01",
     sliceTitle: "Test Slice",
@@ -132,7 +150,8 @@ test("custom skillActivation is substituted into execute-task", () => {
     carryForwardSection: "Carry forward",
     resumeSection: "Resume",
     priorTaskLines: "- (no prior tasks)",
-    taskSummaryPath: "/tmp/test-project/.gsd/milestones/M001/slices/S01/tasks/T01-SUMMARY.md",
+    templatesDir: join(fixtureRoot, "templates"),
+    taskSummaryPath: join(fixtureRoot, ".gsd", "milestones", "M001", "slices", "S01", "tasks", "T01-SUMMARY.md"),
     inlinedTemplates: "Template",
     verificationBudget: "~10K chars",
     overridesSection: "",
@@ -140,20 +159,6 @@ test("custom skillActivation is substituted into execute-task", () => {
   });
 
   assert.ok(result.includes("Load React and accessibility skills first."));
-  assert.ok(!result.includes("{{skillActivation}}"));
-});
-
-test("guided execute prompt substitutes skillActivation", () => {
-  const result = loadPrompt("guided-execute-task", {
-    milestoneId: "M001",
-    sliceId: "S01",
-    taskId: "T01",
-    taskTitle: "Implement feature",
-    inlinedTemplates: "Template",
-    skillActivation: "Load React skill first.",
-  });
-
-  assert.ok(result.includes("Load React skill first."));
   assert.ok(!result.includes("{{skillActivation}}"));
 });
 
@@ -170,12 +175,12 @@ test("guided resume prompt substitutes skillActivation", () => {
 
 test("research-milestone prompt substitutes skillActivation", () => {
   const result = loadPrompt("research-milestone", {
-    workingDirectory: "/tmp/test-project",
+    workingDirectory: fixtureRoot,
     milestoneId: "M001",
     milestoneTitle: "Test Milestone",
     milestonePath: ".gsd/milestones/M001",
     contextPath: ".gsd/milestones/M001/M001-CONTEXT.md",
-    outputPath: "/tmp/test-project/.gsd/milestones/M001/M001-RESEARCH.md",
+    outputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "M001-RESEARCH.md"),
     inlinedContext: "Context",
     skillDiscoveryMode: "manual",
     skillDiscoveryInstructions: " Discover skills manually.",
@@ -188,12 +193,12 @@ test("research-milestone prompt substitutes skillActivation", () => {
 
 test("research-milestone prompt references gsd_summary_save, not direct write", () => {
   const result = loadPrompt("research-milestone", {
-    workingDirectory: "/tmp/test-project",
+    workingDirectory: fixtureRoot,
     milestoneId: "M001",
     milestoneTitle: "Test Milestone",
     milestonePath: ".gsd/milestones/M001",
     contextPath: ".gsd/milestones/M001/M001-CONTEXT.md",
-    outputPath: "/tmp/test-project/.gsd/milestones/M001/M001-RESEARCH.md",
+    outputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "M001-RESEARCH.md"),
     inlinedContext: "Context",
     skillDiscoveryMode: "manual",
     skillDiscoveryInstructions: " Discover skills manually.",
@@ -216,7 +221,7 @@ test("research-milestone prompt references gsd_summary_save, not direct write", 
 
 test("research-slice prompt substitutes skillActivation", () => {
   const result = loadPrompt("research-slice", {
-    workingDirectory: "/tmp/test-project",
+    workingDirectory: fixtureRoot,
     milestoneId: "M001",
     sliceId: "S01",
     sliceTitle: "Test Slice",
@@ -224,7 +229,7 @@ test("research-slice prompt substitutes skillActivation", () => {
     roadmapPath: ".gsd/milestones/M001/M001-ROADMAP.md",
     contextPath: ".gsd/milestones/M001/M001-CONTEXT.md",
     milestoneResearchPath: ".gsd/milestones/M001/M001-RESEARCH.md",
-    outputPath: "/tmp/test-project/.gsd/milestones/M001/slices/S01/S01-RESEARCH.md",
+    outputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "slices", "S01", "S01-RESEARCH.md"),
     inlinedContext: "Context",
     dependencySummaries: "",
     skillDiscoveryMode: "manual",
@@ -238,15 +243,15 @@ test("research-slice prompt substitutes skillActivation", () => {
 
 test("plan-milestone prompt substitutes skillActivation", () => {
   const result = loadPrompt("plan-milestone", {
-    workingDirectory: "/tmp/test-project",
+    workingDirectory: fixtureRoot,
     milestoneId: "M001",
     milestoneTitle: "Test Milestone",
     milestonePath: ".gsd/milestones/M001",
     contextPath: ".gsd/milestones/M001/M001-CONTEXT.md",
     researchPath: ".gsd/milestones/M001/M001-RESEARCH.md",
-    researchOutputPath: "/tmp/test-project/.gsd/milestones/M001/M001-RESEARCH.md",
-    outputPath: "/tmp/test-project/.gsd/milestones/M001/M001-ROADMAP.md",
-    secretsOutputPath: "/tmp/test-project/.gsd/milestones/M001/M001-SECRETS.md",
+    researchOutputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "M001-RESEARCH.md"),
+    outputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "M001-ROADMAP.md"),
+    secretsOutputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "M001-SECRETS.md"),
     inlinedContext: "Context",
     sourceFilePaths: "- source",
     skillDiscoveryMode: "manual",
@@ -258,30 +263,31 @@ test("plan-milestone prompt substitutes skillActivation", () => {
   assert.ok(!result.includes("{{skillActivation}}"));
 });
 
-test("guided plan milestone prompt substitutes skillActivation", () => {
-  const result = loadPrompt("guided-plan-milestone", {
+test("plan-milestone prompt: compact planning gates survive template substitution", () => {
+  const result = loadPrompt("plan-milestone", {
+    workingDirectory: fixtureRoot,
     milestoneId: "M001",
     milestoneTitle: "Test Milestone",
-    secretsOutputPath: ".gsd/milestones/M001/M001-SECRETS.md",
-    inlinedTemplates: "Templates",
-    skillActivation: "Load guided planning skills first.",
+    milestonePath: ".gsd/milestones/M001",
+    contextPath: ".gsd/milestones/M001/M001-CONTEXT.md",
+    researchPath: ".gsd/milestones/M001/M001-RESEARCH.md",
+    researchOutputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "M001-RESEARCH.md"),
+    outputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "M001-ROADMAP.md"),
+    secretsOutputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "M001-SECRETS.md"),
+    inlinedContext: "Context",
+    sourceFilePaths: "- source",
+    skillDiscoveryMode: "manual",
+    skillDiscoveryInstructions: " Discover skills manually.",
+    skillActivation: "Load milestone planning skills first.",
   });
 
-  assert.ok(result.includes("Load guided planning skills first."));
-  assert.ok(!result.includes("{{skillActivation}}"));
-});
-
-test("guided plan slice prompt substitutes skillActivation", () => {
-  const result = loadPrompt("guided-plan-slice", {
-    milestoneId: "M001",
-    sliceId: "S01",
-    sliceTitle: "Test Slice",
-    inlinedTemplates: "Templates",
-    skillActivation: "Load guided slice planning skills first.",
-  });
-
-  assert.ok(result.includes("Load guided slice planning skills first."));
-  assert.ok(!result.includes("{{skillActivation}}"));
+  assert.ok(result.includes("Already Planned? Soft Brake"));
+  assert.ok(result.includes("gsd_plan_milestone"));
+  assert.ok(result.includes("Dependency format is comma-separated"));
+  assert.ok(result.includes("phases.progressive_planning"));
+  assert.ok(result.includes("Single-Slice Fast Path"));
+  assert.ok(result.includes("Secrets Manifest"));
+  assert.ok(!result.includes("{{"));
 });
 
 test("guided research slice prompt substitutes skillActivation", () => {

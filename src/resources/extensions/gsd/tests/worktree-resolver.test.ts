@@ -1,3 +1,5 @@
+// Project/App: GSD-2
+// File Purpose: WorktreeResolver unit and regression tests.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, realpathSync } from "node:fs";
@@ -9,6 +11,17 @@ import {
   type NotifyCtx,
 } from "../worktree-resolver.js";
 import { AutoSession } from "../auto/session.js";
+import {
+  closeDatabase,
+  insertMilestone,
+  openDatabase,
+} from "../gsd-db.js";
+import { registerAutoWorker } from "../db/auto-workers.js";
+import {
+  claimMilestoneLease,
+  getMilestoneLease,
+  releaseMilestoneLease,
+} from "../db/milestone-leases.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -19,11 +32,12 @@ interface CallLog {
 }
 
 function makeSession(
-  overrides?: Partial<{ basePath: string; originalBasePath: string }>,
+  overrides?: Partial<AutoSession>,
 ): AutoSession {
   const s = new AutoSession();
   s.basePath = overrides?.basePath ?? "/project";
   s.originalBasePath = overrides?.originalBasePath ?? "/project";
+  Object.assign(s, overrides);
   return s;
 }
 
@@ -104,6 +118,9 @@ function makeDeps(
       calls.push({ fn: "getCurrentBranch", args: [basePath] });
       return "main";
     },
+    checkoutBranch: (basePath: string, branch: string) => {
+      calls.push({ fn: "checkoutBranch", args: [basePath, branch] });
+    },
     autoWorktreeBranch: (milestoneId: string) => {
       calls.push({ fn: "autoWorktreeBranch", args: [milestoneId] });
       return `milestone/${milestoneId}`;
@@ -180,6 +197,17 @@ function makeNotifyCtx(): NotifyCtx & {
 
 function findCalls(calls: CallLog[], fn: string): CallLog[] {
   return calls.filter((c) => c.fn === fn);
+}
+
+function makeDbBase(): string {
+  const base = mkdtempSync(join(tmpdir(), "gsd-worktree-resolver-"));
+  mkdirSync(join(base, ".gsd"), { recursive: true });
+  return base;
+}
+
+function cleanupDbBase(base: string): void {
+  try { closeDatabase(); } catch { /* noop */ }
+  try { rmSync(base, { recursive: true, force: true }); } catch { /* noop */ }
 }
 
 // ─── Getter Tests ────────────────────────────────────────────────────────────
@@ -274,6 +302,24 @@ test("enterMilestone is no-op when isolation mode is none", () => {
   assert.equal(findCalls(deps.calls, "enterBranchModeForMilestone").length, 0);
 });
 
+test("enterMilestone passes project root to isolation mode guard", () => {
+  const s = makeSession({ basePath: "/project", originalBasePath: "/project" });
+  let checkedBasePath: string | undefined;
+  const deps = makeDeps({
+    getIsolationMode: (basePath?: string) => {
+      checkedBasePath = basePath;
+      return "none";
+    },
+  });
+  const ctx = makeNotifyCtx();
+  const resolver = new WorktreeResolver(s, deps);
+
+  resolver.enterMilestone("M001", ctx);
+
+  assert.equal(checkedBasePath, "/project");
+  assert.equal(findCalls(deps.calls, "createAutoWorktree").length, 0);
+});
+
 test("enterMilestone does NOT update basePath on creation failure", () => {
   const s = makeSession();
   const deps = makeDeps({
@@ -351,6 +397,43 @@ test("enterMilestone does not create double-nested worktree when originalBasePat
     !createdFromPath.includes("/.gsd/worktrees/"),
     `createAutoWorktree must be called with project root, got: "${createdFromPath}"`,
   );
+});
+
+test("enterMilestone reacquires a released same-milestone lease before worktree entry", (t) => {
+  const base = makeDbBase();
+  t.after(() => cleanupDbBase(base));
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test milestone", status: "active" });
+
+  const workerId = registerAutoWorker({ projectRootRealpath: base });
+  const originalClaim = claimMilestoneLease(workerId, "M001");
+  assert.equal(originalClaim.ok, true);
+  if (!originalClaim.ok) throw new Error("expected test lease claim");
+  assert.equal(releaseMilestoneLease(workerId, "M001", originalClaim.token), true);
+
+  const s = makeSession({
+    basePath: base,
+    originalBasePath: base,
+    workerId,
+    currentMilestoneId: "M001",
+    milestoneLeaseToken: originalClaim.token,
+  });
+  const deps = makeDeps({
+    createAutoWorktree: (basePath: string, milestoneId: string) => join(basePath, ".gsd", "worktrees", milestoneId),
+  });
+  const ctx = makeNotifyCtx();
+  const resolver = new WorktreeResolver(s, deps);
+
+  resolver.enterMilestone("M001", ctx);
+
+  const row = getMilestoneLease("M001");
+  assert.ok(row);
+  assert.equal(row.worker_id, workerId);
+  assert.equal(row.status, "held");
+  assert.equal(row.fencing_token, originalClaim.token + 1);
+  assert.equal(s.milestoneLeaseToken, originalClaim.token + 1);
+  assert.equal(s.basePath, join(base, ".gsd", "worktrees", "M001"));
+  assert.equal(ctx.messages.some((m) => m.level === "error"), false);
 });
 
 // ─── enterMilestone Tests (branch mode) ──────────────────────────────────────
@@ -722,21 +805,92 @@ test("mergeAndExit in branch mode merges when on milestone branch", () => {
   assert.ok(ctx.messages.some((m) => m.msg.includes("branch mode")));
 });
 
-test("mergeAndExit in branch mode skips when not on milestone branch", () => {
+test("mergeAndExit in branch mode checks out the milestone branch and merges (#5538-followup)", () => {
+  // Regression: previously this case silently returned without merging,
+  // stranding the milestone's commits on the branch (the test12345 repro).
+  // The fix forces a checkout first; merge proceeds when checkout succeeds.
   const s = makeSession({ basePath: "/project", originalBasePath: "/project" });
+  let currentBranch = "main";
+  const checkoutInvocations: Array<{ basePath: string; branch: string }> = [];
   const deps = makeDeps({
     isInAutoWorktree: () => false,
     getIsolationMode: () => "branch",
-    getCurrentBranch: () => "main",
+    getCurrentBranch: () => currentBranch,
     autoWorktreeBranch: () => "milestone/M001",
+    checkoutBranch: (basePath: string, branch: string) => {
+      checkoutInvocations.push({ basePath, branch });
+      currentBranch = branch;
+    },
   });
   const ctx = makeNotifyCtx();
   const resolver = new WorktreeResolver(s, deps);
 
   resolver.mergeAndExit("M001", ctx);
 
+  assert.equal(checkoutInvocations.length, 1, "must attempt checkout when on wrong branch");
+  assert.deepEqual(checkoutInvocations[0], { basePath: "/project", branch: "milestone/M001" });
+  assert.equal(findCalls(deps.calls, "mergeMilestoneToMain").length, 1);
+});
+
+test("mergeAndExit in branch mode throws when checkout fails", () => {
+  // Regression for the silent-skip bug: if the working tree is on the wrong
+  // branch and checkout fails, we must throw so the caller pauses auto-mode
+  // — never silently advance with the milestone unmerged.
+  const s = makeSession({ basePath: "/project", originalBasePath: "/project" });
+  const deps = makeDeps({
+    isInAutoWorktree: () => false,
+    getIsolationMode: () => "branch",
+    getCurrentBranch: () => "main",
+    autoWorktreeBranch: () => "milestone/M001",
+    checkoutBranch: () => {
+      throw new Error("dirty working tree blocks checkout");
+    },
+  });
+  const ctx = makeNotifyCtx();
+  const resolver = new WorktreeResolver(s, deps);
+
+  assert.throws(
+    () => resolver.mergeAndExit("M001", ctx),
+    /dirty working tree blocks checkout/,
+  );
+  assert.equal(
+    findCalls(deps.calls, "mergeMilestoneToMain").length,
+    0,
+    "merge must not run when checkout failed",
+  );
+  const errorNotify = ctx.messages.find((m) => m.level === "error");
+  assert.ok(errorNotify, "an error notification must be emitted");
+  assert.match(errorNotify!.msg, /milestone\/M001 failed/);
+  assert.match(errorNotify!.msg, /Resolve manually/);
+  assert.equal(
+    ctx.messages.some((m) => m.level === "warning" && m.msg.includes("Milestone merge failed")),
+    false,
+    "checkout failures with explicit recovery guidance must not emit a duplicate warning",
+  );
+});
+
+test("mergeAndExit in branch mode throws when checkout reports success but HEAD is still wrong", () => {
+  // Defense in depth: even if checkoutBranch returns without throwing, we
+  // re-verify and throw if HEAD didn't actually move. Prevents merging on
+  // top of the wrong branch on platforms where the checkout is a no-op.
+  const s = makeSession({ basePath: "/project", originalBasePath: "/project" });
+  const deps = makeDeps({
+    isInAutoWorktree: () => false,
+    getIsolationMode: () => "branch",
+    getCurrentBranch: () => "main", // never changes — simulates no-op checkout
+    autoWorktreeBranch: () => "milestone/M001",
+    checkoutBranch: () => {
+      // Pretend success — but getCurrentBranch will still return "main".
+    },
+  });
+  const ctx = makeNotifyCtx();
+  const resolver = new WorktreeResolver(s, deps);
+
+  assert.throws(
+    () => resolver.mergeAndExit("M001", ctx),
+    /reported success but current branch is main/,
+  );
   assert.equal(findCalls(deps.calls, "mergeMilestoneToMain").length, 0);
-  assert.equal(ctx.messages.length, 0);
 });
 
 test("mergeAndExit in branch mode handles merge failure gracefully", () => {
@@ -957,6 +1111,33 @@ test("mergeAndEnterNext enters next milestone even if merge fails", () => {
       (m) => m.level === "info" && m.msg.includes("Entered worktree"),
     ),
   );
+});
+
+test("mergeAndEnterNext halts after branch-mode user-notified checkout failure", () => {
+  const s = makeSession({ basePath: "/project", originalBasePath: "/project" });
+  const deps = makeDeps({
+    isInAutoWorktree: () => false,
+    getIsolationMode: () => "branch",
+    getCurrentBranch: () => "main",
+    autoWorktreeBranch: () => "milestone/M001",
+    checkoutBranch: () => {
+      throw new Error("dirty working tree blocks checkout");
+    },
+  });
+  const ctx = makeNotifyCtx();
+  const resolver = new WorktreeResolver(s, deps);
+
+  assert.throws(
+    () => resolver.mergeAndEnterNext("M001", "M002", ctx),
+    /dirty working tree blocks checkout/,
+  );
+  assert.equal(
+    findCalls(deps.calls, "enterBranchModeForMilestone").length,
+    0,
+    "must not enter the next milestone after a user-notified branch-mode failure",
+  );
+  assert.equal(findCalls(deps.calls, "mergeMilestoneToMain").length, 0);
+  assert.ok(ctx.messages.some((m) => m.level === "error" && m.msg.includes("Resolve manually")));
 });
 
 // ─── GitService Rebuild Atomicity ────────────────────────────────────────────

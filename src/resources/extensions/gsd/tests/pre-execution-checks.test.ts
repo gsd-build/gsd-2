@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Unit tests for pre-execution validation checks.
+
 /**
  * pre-execution-checks.test.ts — Unit tests for pre-execution validation checks.
  *
@@ -1542,6 +1545,27 @@ describe("checkFilePathConsistency directory inputs (#4446)", () => {
     assert.equal(results[0].blocking, true);
   });
 
+  test("runtime directory annotation is skipped as a pre-execution file dependency", (t) => {
+    const tempDir = join(tmpdir(), `pre-exec-dir-runtime-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+    t.after(() => rmSync(tempDir, { recursive: true, force: true }));
+
+    const tasks = [
+      createTask({
+        id: "T02",
+        inputs: ["entries/ directory (runtime)"],
+        expected_output: ["src/commands/delete.ts", "src/index.ts"],
+      }),
+    ];
+
+    const results = checkFilePathConsistency(tasks, tempDir);
+    assert.deepEqual(
+      results,
+      [],
+      "Runtime-only directory inputs are created during command execution, not required before the task starts",
+    );
+  });
+
   test("tilde-prefixed input is matched against $HOME, not the project basePath", (t) => {
     const fakeHome = join(tmpdir(), `pre-exec-tilde-home-${Date.now()}`);
     const projectDir = join(tmpdir(), `pre-exec-tilde-proj-${Date.now()}`);
@@ -1596,6 +1620,20 @@ describe("checkTaskOrdering directory inputs (#4446)", () => {
       [],
       "Directory reference should not be treated as reading a file created later",
     );
+  });
+
+  test("runtime directory annotation does not produce an ordering violation", () => {
+    const tasks = [
+      createTask({
+        id: "T02",
+        sequence: 0,
+        inputs: ["entries/ directory (runtime)"],
+        expected_output: [],
+      }),
+    ];
+
+    const results = checkTaskOrdering(tasks, "/tmp");
+    assert.deepEqual(results, []);
   });
 });
 
@@ -1781,7 +1819,7 @@ describe("checkFilePathConsistency completed-task output exemption (#4071)", () 
     );
   });
 
-  test("pending task at higher index still causes a missing-file error", (t) => {
+  test("pending task at higher index does NOT cause a duplicate consistency error (ordering check handles it)", (t) => {
     const tempDir = join(tmpdir(), `pre-exec-fc-pending-${Date.now()}`);
     mkdirSync(tempDir, { recursive: true });
     t.after(() => rmSync(tempDir, { recursive: true, force: true }));
@@ -1803,14 +1841,16 @@ describe("checkFilePathConsistency completed-task output exemption (#4071)", () 
       }),
     ];
 
+    // checkFilePathConsistency suppresses the error here because checkTaskOrdering
+    // will fire a more precise "sequence violation" error for the same file.
+    // The combined output of runPreExecutionChecks still flags the issue — just
+    // once, via the ordering check, instead of twice.
     const results = checkFilePathConsistency(tasks, tempDir);
     assert.equal(
       results.length,
-      1,
-      "pending task at higher index must still be flagged — the file is not available yet",
+      0,
+      "consistency check must not duplicate what the ordering check already reports",
     );
-    assert.equal(results[0].blocking, true);
-    assert.equal(results[0].target, "artifacts/output.json");
   });
 });
 

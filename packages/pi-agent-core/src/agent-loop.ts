@@ -21,6 +21,7 @@ import type {
 	AgentToolResult,
 	StreamFn,
 } from "./types.js";
+import { maybeLogTokenAudit } from "./token-audit.js";
 
 /**
  * Maximum number of consecutive turns where ALL tool calls in the turn fail
@@ -416,13 +417,15 @@ async function streamAssistantResponse(
 
 	// Convert to LLM-compatible messages (AgentMessage[] → Message[])
 	const llmMessages = await config.convertToLlm(messages);
+	const tools = config.filterTools ? await config.filterTools(context.tools ?? [], signal, messages) : context.tools;
 
 	// Build LLM context
 	const llmContext: Context = {
 		systemPrompt: context.systemPrompt,
 		messages: llmMessages,
-		tools: context.tools,
+		tools,
 	};
+	maybeLogTokenAudit(llmContext, messages);
 
 	const streamFunction = streamFn || streamSimple;
 

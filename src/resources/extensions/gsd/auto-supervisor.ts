@@ -32,6 +32,7 @@ let _currentSigtermHandler: (() => void) | null = null;
 export function registerSigtermHandler(
   currentBasePath: string,
   previousHandler: (() => void) | null,
+  onSignalCleanup?: () => void,
 ): () => void {
   // Remove the explicitly-passed previous handler
   if (previousHandler) {
@@ -43,6 +44,12 @@ export function registerSigtermHandler(
     for (const sig of CLEANUP_SIGNALS) process.off(sig, _currentSigtermHandler);
   }
   const handler = () => {
+    try {
+      onSignalCleanup?.();
+    } catch {
+      void 0;
+      // Signal cleanup is best-effort; lock cleanup and process exit still run.
+    }
     clearLock(currentBasePath);
     releaseSessionLock(currentBasePath);
     process.exit(0);

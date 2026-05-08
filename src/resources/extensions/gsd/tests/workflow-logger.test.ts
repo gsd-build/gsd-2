@@ -21,6 +21,11 @@ import {
   setStderrLoggingEnabled,
   _resetLogs,
 } from "../workflow-logger.ts";
+import {
+  initNotificationStore,
+  readNotifications,
+  _resetNotificationStore,
+} from "../notification-store.ts";
 
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
@@ -250,6 +255,7 @@ describe("workflow-logger", () => {
 
     afterEach(() => {
       setLogBasePath("");
+      _resetNotificationStore();
       cleanup(dir);
     });
 
@@ -343,16 +349,26 @@ describe("workflow-logger", () => {
   });
 
   describe("stderr output", () => {
-    test("writes WARN prefix to stderr for warnings", (t) => {
+    test("keeps warnings out of stderr but persists them to notifications", (t) => {
+      const dir = makeTempDir("wl-notify-");
       const written: string[] = [];
       const orig = process.stderr.write.bind(process.stderr);
       // @ts-ignore — patching for test
       process.stderr.write = (chunk: string) => { written.push(chunk); return true; };
-      t.after(() => { process.stderr.write = orig; });
+      t.after(() => {
+        process.stderr.write = orig;
+        _resetNotificationStore();
+        cleanup(dir);
+      });
 
+      initNotificationStore(dir);
       logWarning("engine", "test warn");
-      assert.equal(written.length, 1);
-      assert.ok(written[0].includes("[gsd:engine] WARN: test warn"));
+      assert.deepEqual(written, []);
+
+      const notifications = readNotifications(dir);
+      assert.equal(notifications.length, 1);
+      assert.equal(notifications[0].severity, "warning");
+      assert.equal(notifications[0].message, "[engine] test warn");
     });
 
     test("writes ERROR prefix to stderr for errors", (t) => {

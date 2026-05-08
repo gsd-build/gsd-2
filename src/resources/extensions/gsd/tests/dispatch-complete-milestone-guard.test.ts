@@ -47,26 +47,12 @@ describe("completing-milestone dispatch guard (#4324)", () => {
     assert.ok(dispatchIdx > -1, "complete-milestone dispatch should exist after the skip guard");
   });
 
-  test("classifies SUMMARY outcome and conditionally reconciles DB (#4658)", () => {
+  test("does not reconcile DB from SUMMARY.md projection (#4658 superseded)", () => {
     const phaseCheck = source.indexOf('phase !== "completing-milestone"');
-    // The SUMMARY-exists reconciliation guard must appear in this rule
-    const summaryGuard = source.indexOf('resolveMilestoneFile(basePath, mid, "SUMMARY")', phaseCheck);
-    assert.ok(summaryGuard > -1, "SUMMARY file check should exist in the completing-milestone rule");
-
-    const classifyCall = source.indexOf("classifyMilestoneSummaryContent", summaryGuard);
-    assert.ok(classifyCall > -1, "SUMMARY mismatch handling should classify summary content");
-    const dbGateBeforeClassify = source.indexOf("existingSummary && isDbAvailable()", summaryGuard);
-    assert.ok(
-      dbGateBeforeClassify === -1 || dbGateBeforeClassify > classifyCall,
-      "SUMMARY classification must not be gated on DB availability",
-    );
-
-    const reconcileCall = source.indexOf('updateMilestoneStatus(mid, "complete"', summaryGuard);
-    assert.ok(reconcileCall > -1, "successful SUMMARY should reconcile DB to complete");
-
-    const stopAction = source.indexOf('action: "stop"', summaryGuard);
-    assert.ok(stopAction > -1, "SUMMARY mismatch should return stop action");
-    const warningLevel = source.indexOf('level: "warning"', summaryGuard);
-    assert.ok(warningLevel > -1, "SUMMARY mismatch should be warning-level stop (pauses auto-mode)");
+    assert.ok(phaseCheck > -1, "completing-milestone phase check should exist");
+    const ruleTail = source.slice(phaseCheck, source.indexOf('name:', phaseCheck + 1));
+    assert.doesNotMatch(ruleTail, /resolveMilestoneFile\(basePath,\s*mid,\s*"SUMMARY"\)/);
+    assert.doesNotMatch(ruleTail, /classifyMilestoneSummaryContent/);
+    assert.doesNotMatch(ruleTail, /updateMilestoneStatus\(mid,\s*"complete"/);
   });
 });

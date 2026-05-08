@@ -9,16 +9,36 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { decideMemoryPressure } from "../auto/workflow-kernel.ts";
+import { measureMemoryPressure } from "../auto/workflow-memory-pressure.ts";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const loopSource = readFileSync(join(__dirname, "..", "auto", "loop.ts"), "utf-8");
 
 describe("memory pressure monitoring (#3331)", () => {
-  test("checkMemoryPressure function exists", () => {
-    assert.match(loopSource, /function checkMemoryPressure/);
+  test("measureMemoryPressure reports pressure above threshold", () => {
+    const snapshot = measureMemoryPressure({
+      threshold: 0.5,
+      deps: {
+        memoryUsage: () => ({ heapUsed: 768 * 1024 * 1024 }),
+        heapLimitBytes: () => 1024 * 1024 * 1024,
+      },
+    });
+
+    assert.equal(snapshot.pressured, true);
+    assert.equal(snapshot.heapMB, 768);
+    assert.equal(snapshot.limitMB, 1024);
   });
 
-  test("MEMORY_PRESSURE_THRESHOLD constant is defined", () => {
-    assert.match(loopSource, /MEMORY_PRESSURE_THRESHOLD\s*=\s*0\.\d+/);
+  test("measureMemoryPressure defaults to a sub-100-percent threshold", () => {
+    const snapshot = measureMemoryPressure({
+      deps: {
+        memoryUsage: () => ({ heapUsed: 3584 * 1024 * 1024 }),
+        heapLimitBytes: () => 4096 * 1024 * 1024,
+      },
+    });
+
+    assert.equal(snapshot.pressured, true);
   });
 
   test("memory check runs every MEMORY_CHECK_INTERVAL iterations", () => {
@@ -26,8 +46,16 @@ describe("memory pressure monitoring (#3331)", () => {
   });
 
   test("memory pressure triggers graceful stopAuto", () => {
-    assert.match(loopSource, /mem\.pressured/);
-    assert.match(loopSource, /Stopping gracefully to prevent OOM/);
+    const decision = decideMemoryPressure({
+      pressured: true,
+      heapMB: 3900,
+      limitMB: 4096,
+      pct: 0.95,
+      iteration: 10,
+    });
+
+    assert.equal(decision.action, "stop");
+    assert.match(decision.stopMessage, /Stopping gracefully to prevent OOM/);
   });
 });
 
@@ -40,27 +68,26 @@ describe("stuck detection persistence (#3704)", () => {
     assert.match(loopSource, /function saveStuckState/);
   });
 
+  // Phase C: API changed from (basePath) to (session) — recentUnits is
+  // now reconstructed from unit_dispatches and stuckRecoveryAttempts
+  // persists in runtime_kv (worker scope).
   test("loopState initialized from persisted state", () => {
-    assert.match(loopSource, /loadStuckState\(s\.basePath\)/);
+    assert.match(loopSource, /loadStuckState\(s\)/);
   });
 
   test("stuck state saved after each iteration", () => {
-    assert.match(loopSource, /saveStuckState\(s\.basePath,\s*loopState\)/);
+    assert.match(loopSource, /saveStuckState\(s,\s*loopState\)/);
   });
 
-  test("stuck state file path uses runtime directory", () => {
-    assert.match(loopSource, /stuck-state\.json/);
-  });
+  // Phase C: stuck-state.json file IO deleted; persistence moved to
+  // unit_dispatches (recentUnits) + runtime_kv (stuckRecoveryAttempts).
+  // The stuck-state-via-db.test.ts suite covers the round-trip.
 
-  test("saveStuckState called in standard dev path as well as custom engine path (#4382)", () => {
-    // Count all call-sites of saveStuckState (excluding the function definition itself).
-    // After the fix, both the custom-engine path and the standard dev path must each
-    // call saveStuckState so stuckRecoveryAttempts survives session restarts.
-    const callMatches = loopSource.match(/saveStuckState\(s\.basePath,\s*loopState\)/g) ?? [];
-    assert.ok(
-      callMatches.length >= 2,
-      `saveStuckState must be called in both the custom-engine path and the standard dev path ` +
-      `(found ${callMatches.length} call(s) — standard path is missing its call, #4382)`,
-    );
+  test("completeIteration centralizes stuck-state persistence for both loop paths (#4382)", () => {
+    assert.match(loopSource, /const completeIteration = \(\): void =>/);
+    assert.match(loopSource, /completeWorkflowIteration\(/);
+    assert.match(loopSource, /saveStuckState:\s*\(\)\s*=>\s*saveStuckState\(s,\s*loopState\)/);
+    assert.match(loopSource, /completeIteration,/);
+    assert.match(loopSource, /completeIteration\(\);/);
   });
 });

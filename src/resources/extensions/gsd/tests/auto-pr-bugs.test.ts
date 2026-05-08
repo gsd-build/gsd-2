@@ -34,6 +34,25 @@ test("#2302 bug 1: auto_pr condition should not require pushed flag", () => {
   );
 });
 
+test("auto_pr skips milestone branch push when configured remote is absent", () => {
+  const autoPrIdx = autoWorktreeSrc.indexOf("prefs.auto_pr === true");
+  assert.ok(autoPrIdx !== -1, "auto_pr block exists in auto-worktree.ts");
+
+  const autoPrBlock = autoWorktreeSrc.slice(
+    autoPrIdx,
+    autoWorktreeSrc.indexOf("// 11. Guard removed", autoPrIdx),
+  );
+  const remoteExistsIdx = autoPrBlock.indexOf("gitRemoteExists(originalBasePath_, remote)");
+  const pushIdx = autoPrBlock.indexOf('execFileSync("git", ["push", remote, milestoneBranch]');
+
+  assert.ok(remoteExistsIdx !== -1, "auto_pr must check that the configured remote exists");
+  assert.ok(pushIdx !== -1, "auto_pr still pushes the milestone branch before creating the PR");
+  assert.ok(
+    remoteExistsIdx < pushIdx,
+    "auto_pr must check remote existence before pushing the milestone branch",
+  );
+});
+
 // ─── Bug 2: phases.ts should not duplicate PR creation ──────────────────────
 
 const phasesSrcPath = join(import.meta.dirname, "..", "auto", "phases.ts");

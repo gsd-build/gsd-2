@@ -1,3 +1,4 @@
+// GSD2 commands-extract-learnings tests
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
@@ -482,6 +483,14 @@ describe("buildExtractionStepsBlock", () => {
     assert.ok(/deduplication/i.test(block) || /dedup/i.test(block));
     assert.ok(/semantically equivalent/i.test(block));
     assert.ok(/skip/i.test(block));
+  });
+
+  it("limits duplicate checks to one milestone-scoped memory query", () => {
+    const block = buildExtractionStepsBlock(ctx);
+    const memoryQueryMatches = block.match(/memory_query/g) ?? [];
+    assert.equal(memoryQueryMatches.length, 1);
+    assert.ok(block.includes("Do not re-read milestone artefacts or repeat memory queries category-by-category"));
+    assert.ok(!block.includes("Before each `capture_thought` call, optionally call `memory_query`"));
   });
 
   it("instructs capture_thought as the sole persistence path for Patterns, Lessons, and Decisions (ADR-013 step 6 cutover)", () => {

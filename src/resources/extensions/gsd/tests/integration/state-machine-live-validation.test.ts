@@ -575,7 +575,7 @@ describe("state-machine-live-validation", () => {
       assert.match((result as any).error, /verification did not pass/);
     });
 
-    test("double milestone completion returns error", async () => {
+    test("double milestone completion is idempotent", async () => {
       base = createFullFixture();
       openDatabase(join(base, ".gsd", "gsd.db"));
       insertMilestone({ id: "M001", title: "Done", status: "complete" });
@@ -583,8 +583,10 @@ describe("state-machine-live-validation", () => {
       insertTask({ id: "T01", sliceId: "S01", milestoneId: "M001", status: "complete" });
 
       const result = await handleCompleteMilestone(makeMilestoneParams("M001") as any, base);
-      assert.ok("error" in result);
-      assert.match((result as any).error, /already complete/);
+      assert.ok(!("error" in result), `already-complete milestone should be accepted: ${JSON.stringify(result)}`);
+      assert.equal(result.alreadyComplete, true);
+      assert.match(result.summaryPath, /M001-SUMMARY\.md$/);
+      assert.ok(isClosedStatus(getMilestone("M001")!.status), "milestone remains closed");
     });
   });
 

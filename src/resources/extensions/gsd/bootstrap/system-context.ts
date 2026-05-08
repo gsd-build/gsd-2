@@ -1,5 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: System prompt and hidden context bootstrap for GSD sessions.
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { ExtensionContext } from "@gsd/pi-coding-agent";
@@ -20,8 +21,13 @@ import { deriveState } from "../state.js";
 import { formatOverridesSection, formatShortcut, loadActiveOverrides, loadFile, parseContinue, parseSummary } from "../files.js";
 import { toPosixPath } from "../../shared/mod.js";
 import { autoEnableCmuxPreferences } from "../commands-cmux.js";
+import { gsdHome } from "../gsd-home.js";
 
-const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
+const DEFAULT_CONTEXT_MESSAGE_MAX_CHARS = 4_000;
+const DEFAULT_KNOWLEDGE_MAX_CHARS = 12_000;
+const DEFAULT_CODEBASE_MAX_CHARS = 8_000;
+const MIN_CONTEXT_MESSAGE_MAX_CHARS = 1_000;
+const MIN_KNOWLEDGE_MAX_CHARS = 1_000;
 
 /**
  * Bundled skill triggers — resolved dynamically at runtime instead of
@@ -81,7 +87,7 @@ function buildBundledSkillsTable(): string {
 
 function warnDeprecatedAgentInstructions(): void {
   const paths = [
-    join(gsdHome, "agent-instructions.md"),
+    join(gsdHome(), "agent-instructions.md"),
     join(process.cwd(), ".gsd", "agent-instructions.md"),
   ];
   for (const path of paths) {
@@ -138,7 +144,7 @@ export async function buildBeforeAgentStartResult(
     }
   }
 
-  const { block: knowledgeBlock, globalSizeKb } = loadKnowledgeBlock(gsdHome, process.cwd());
+  const { block: knowledgeBlock, globalSizeKb } = loadKnowledgeBlock(gsdHome(), process.cwd());
   if (globalSizeKb > 4) {
     ctx.ui.notify(
       `GSD: ~/.gsd/agent/KNOWLEDGE.md is ${globalSizeKb.toFixed(1)}KB — consider trimming to keep system prompt lean.`,
@@ -158,8 +164,6 @@ export async function buildBeforeAgentStartResult(
   } catch (e) {
     logWarning("bootstrap", `decisions backfill failed: ${(e as Error).message}`);
   }
-
-  const memoryBlock = await loadMemoryBlock(event.prompt ?? "");
 
   let newSkillsBlock = "";
   if (hasSkillSnapshot()) {
@@ -191,11 +195,10 @@ export async function buildBeforeAgentStartResult(
       if (rawContent) {
         // Cap injection size to ~2 000 tokens to avoid bloating every request.
         // Full map is always available at .gsd/CODEBASE.md.
-        const MAX_CODEBASE_CHARS = 8_000;
         const generatedMatch = rawContent.match(/Generated: (\S+)/);
         const generatedAt = generatedMatch?.[1] ?? "unknown";
-        const content = rawContent.length > MAX_CODEBASE_CHARS
-          ? rawContent.slice(0, MAX_CODEBASE_CHARS) + "\n\n*(truncated — see .gsd/CODEBASE.md for full map)*"
+        const content = rawContent.length > DEFAULT_CODEBASE_MAX_CHARS
+          ? rawContent.slice(0, DEFAULT_CODEBASE_MAX_CHARS) + "\n\n*(truncated — see .gsd/CODEBASE.md for full map)*"
           : rawContent;
         codebaseBlock = `\n\n[PROJECT CODEBASE — File structure and descriptions (generated ${generatedAt}, auto-refreshed when GSD detects tracked file changes; use /gsd codebase stats for status)]\n\n${content}`;
       }
@@ -207,6 +210,9 @@ export async function buildBeforeAgentStartResult(
   warnDeprecatedAgentInstructions();
 
   const injection = await buildGuidedExecuteContextInjection(event.prompt, process.cwd());
+  const memoryBlock = await loadMemoryBlock(event.prompt ?? "", {
+    includePromptRelevant: !(injection && isLowEntropyResumePrompt(event.prompt ?? "")),
+  });
 
   // Re-inject forensics context on follow-up turns (#2941)
   const forensicsInjection = !injection ? buildForensicsContextInjection(process.cwd(), event.prompt) : null;
@@ -219,12 +225,9 @@ export async function buildBeforeAgentStartResult(
     : "";
 
   // memoryBlock is FTS-queried against the user prompt and changes per call.
-  // Removing it from `fullSystem` keeps the system-prompt cache breakpoint
-  // stable across calls — the only scoped goal of this fix. The pi-ai
-  // Anthropic adapter additionally cache-marks the last user turn, so the
-  // memoryBlock injected via the context message may itself be cached up to
-  // that boundary; that's orthogonal and unchanged from prior behavior. The
-  // load-bearing win here is preserving the system+tools cache hit. (#5019)
+  // Keeping it out of `fullSystem` preserves provider prompt-cache stability
+  // for the static system/tool prefix. The dynamic memory block rides the
+  // volatile context message instead. (#5019)
   const fullSystem = `${event.systemPrompt}\n\n[SYSTEM CONTEXT — GSD]\n\n${systemContent}${preferenceBlock}${knowledgeBlock}${codebaseBlock}${newSkillsBlock}${worktreeBlock}${subagentModelBlock}`;
 
   stopContextTimer({
@@ -256,19 +259,53 @@ export function buildContextMessage(opts: {
   injection: string | null;
   forensicsInjection: string | null;
 }): { customType: string; content: string; display: false } | null {
-  const memoryContent = opts.memoryBlock.trim();
+  const contextCharLimit = getContextMessageCharLimit();
+  const memoryContent = markMemoryContextSupplied(opts.memoryBlock.trim());
   if (opts.injection) {
-    const content = memoryContent ? `${memoryContent}\n\n${opts.injection}` : opts.injection;
+    const content = limitContextMessageContent(
+      memoryContent ? `${memoryContent}\n\n${opts.injection}` : opts.injection,
+      contextCharLimit,
+    );
     return { customType: "gsd-guided-context", content, display: false as const };
   }
   if (opts.forensicsInjection) {
-    const content = memoryContent ? `${memoryContent}\n\n${opts.forensicsInjection}` : opts.forensicsInjection;
+    const content = limitContextMessageContent(
+      memoryContent ? `${memoryContent}\n\n${opts.forensicsInjection}` : opts.forensicsInjection,
+      contextCharLimit,
+    );
     return { customType: "gsd-forensics", content, display: false as const };
   }
   if (memoryContent) {
-    return { customType: "gsd-memory", content: memoryContent, display: false as const };
+    return {
+      customType: "gsd-memory",
+      content: limitContextMessageContent(memoryContent, contextCharLimit),
+      display: false as const,
+    };
   }
   return null;
+}
+
+function getContextMessageCharLimit(): number | null {
+  const raw = process.env.PI_GSD_CONTEXT_MAX_CHARS;
+  if (!raw) return DEFAULT_CONTEXT_MESSAGE_MAX_CHARS;
+  if (raw === "0") return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < MIN_CONTEXT_MESSAGE_MAX_CHARS) {
+    return DEFAULT_CONTEXT_MESSAGE_MAX_CHARS;
+  }
+  return Math.floor(parsed);
+}
+
+function limitContextMessageContent(content: string, limit: number | null): string {
+  if (!limit || content.length <= limit) return content;
+  const suffix = "\n\n[GSD Context Truncated]\nFull context is available from the referenced .gsd files and tools; read on demand only if this excerpt lacks required evidence.";
+  const headBudget = Math.max(0, limit - suffix.length);
+  return `${content.slice(0, headBudget).trimEnd()}${suffix}`;
+}
+
+function markMemoryContextSupplied(memoryContent: string): string {
+  if (!memoryContent) return "";
+  return `[GSD Context Metadata]\n- Memory supplied: yes\n\n${memoryContent}`;
 }
 
 /**
@@ -289,7 +326,10 @@ export function buildContextMessage(opts: {
  * with a token-budget cap. Failures degrade gracefully — the function never
  * throws and returns "" so the system prompt construction continues.
  */
-export async function loadMemoryBlock(userPrompt: string): Promise<string> {
+export async function loadMemoryBlock(
+  userPrompt: string,
+  opts: { includePromptRelevant?: boolean } = {},
+): Promise<string> {
   try {
     const { formatMemoriesForPrompt, getActiveMemoriesRanked, queryMemoriesRanked } = await import("../memory-store.js");
 
@@ -311,7 +351,7 @@ export async function loadMemoryBlock(userPrompt: string): Promise<string> {
 
     let relevant: typeof allRanked = [];
     const trimmed = userPrompt.trim();
-    if (trimmed) {
+    if (trimmed && opts.includePromptRelevant !== false) {
       const hits = queryMemoriesRanked({ query: trimmed, k: QUERY_K });
       relevant = hits.map((h) => h.memory).filter((m) => !criticalIds.has(m.id));
     }
@@ -363,12 +403,35 @@ export function loadKnowledgeBlock(gsdHomeDir: string, cwd: string): { block: st
   }
 
   const parts: string[] = [];
-  if (globalKnowledge) parts.push(`## Global Knowledge\n\n${globalKnowledge}`);
-  if (projectKnowledge) parts.push(`## Project Knowledge\n\n${projectKnowledge}`);
+  if (globalKnowledge) {
+    parts.push(`## Global Knowledge\nSource: \`${globalKnowledgePath}\`\n\n${globalKnowledge}`);
+  }
+  if (projectKnowledge) {
+    parts.push(`## Project Knowledge\nSource: \`${knowledgePath}\`\n\n${projectKnowledge}`);
+  }
+  const body = limitKnowledgeBlock(parts.join("\n\n"), getKnowledgeCharLimit());
   return {
-    block: `\n\n[KNOWLEDGE — Rules, patterns, and lessons learned]\n\n${parts.join("\n\n")}`,
+    block: `\n\n[KNOWLEDGE — Rules, patterns, and lessons learned]\n\n${body}`,
     globalSizeKb,
   };
+}
+
+function getKnowledgeCharLimit(): number | null {
+  const raw = process.env.PI_GSD_KNOWLEDGE_MAX_CHARS;
+  if (!raw) return DEFAULT_KNOWLEDGE_MAX_CHARS;
+  if (raw === "0") return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < MIN_KNOWLEDGE_MAX_CHARS) {
+    return DEFAULT_KNOWLEDGE_MAX_CHARS;
+  }
+  return Math.floor(parsed);
+}
+
+function limitKnowledgeBlock(content: string, limit: number | null): string {
+  if (!limit || content.length <= limit) return content;
+  const suffix = "\n\n[Knowledge Truncated]\nFull KNOWLEDGE.md content remains available at the source path(s) above; read on demand only if this excerpt lacks a required rule.";
+  const headBudget = Math.max(0, limit - suffix.length);
+  return `${content.slice(0, headBudget).trimEnd()}${suffix}`;
 }
 
 function buildWorktreeContextBlock(): string {
@@ -424,6 +487,11 @@ function buildWorktreeContextBlock(): string {
  */
 const RESUME_INTENT_PATTERNS = /^(continue|resume|ok|go|go ahead|proceed|keep going|carry on|next|yes|yeah|yep|sure|do it|let's go|pick up where you left off)$/;
 
+export function isLowEntropyResumePrompt(prompt: string): boolean {
+  const trimmed = prompt.trim().toLowerCase().replace(/[.!?,]+$/g, "");
+  return RESUME_INTENT_PATTERNS.test(trimmed);
+}
+
 async function buildGuidedExecuteContextInjection(prompt: string, basePath: string): Promise<string | null> {
   const ensureStateDbOpen = async () => {
     const { ensureDbOpen } = await import("./dynamic-tools.js");
@@ -453,8 +521,7 @@ async function buildGuidedExecuteContextInjection(prompt: string, basePath: stri
   // control/help/diagnostic prompts with unrelated execution context.
   // Phase-gated: only fire during "executing" to avoid misrouting during
   // replanning, gate evaluation, or other non-execution phases.
-  const trimmed = prompt.trim().toLowerCase().replace(/[.!?,]+$/g, "");
-  if (RESUME_INTENT_PATTERNS.test(trimmed)) {
+  if (isLowEntropyResumePrompt(prompt)) {
     await ensureStateDbOpen();
     const state = await deriveState(basePath);
     if (state.phase === "executing" && state.activeTask && state.activeMilestone && state.activeSlice) {

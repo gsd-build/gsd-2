@@ -1,11 +1,13 @@
+// GSD-2 + packages/pi-tui/src/__tests__/tui.test.ts - Regression coverage for the TUI renderer and container lifecycle.
+
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { Container, TUI } from "../tui.js";
+import { Container, CURSOR_MARKER, TUI } from "../tui.js";
 import type { Component } from "../tui.js";
 import type { Terminal } from "../terminal.js";
 
-function makeTerminal(): Terminal {
+function makeTerminal(writes?: string[]): Terminal {
 	return {
 		isTTY: true,
 		columns: 80,
@@ -14,7 +16,9 @@ function makeTerminal(): Terminal {
 		start() {},
 		stop() {},
 		drainInput: async () => {},
-		write() {},
+		write(data: string) {
+			writes?.push(data);
+		},
 		moveBy() {},
 		hideCursor() {},
 		showCursor() {},
@@ -45,6 +49,28 @@ function makeTerminal(): Terminal {
 // separate refactor PR rather than shipping a tautology. See #4794.
 
 describe("TUI", () => {
+	it("updates an editor line from the real hardware cursor row", () => {
+		const writes: string[] = [];
+		const terminal = makeTerminal(writes);
+		let value = "input";
+		const tui = new TUI(terminal);
+		tui.addChild({
+			render: () => ["top", `${value}${CURSOR_MARKER}`, "  GSD  No project loaded - run /gsd to start"],
+			invalidate() {},
+		});
+		const anyTui = tui as any;
+
+		anyTui.doRender();
+		const writeCountAfterFirstRender = writes.length;
+
+		value = "input x";
+		anyTui.doRender();
+
+		const renderWrite = writes[writeCountAfterFirstRender];
+		assert.ok(renderWrite.startsWith("\x1b[?2026h\r"), "editor diff should start at the current cursor row");
+		assert.ok(!renderWrite.startsWith("\x1b[?2026h\x1b[1A\r"), "editor diff must not move above the cursor row");
+	});
+
 	it("does not swallow a bare Escape keypress while waiting for the cell-size response", () => {
 		const tui = new TUI(makeTerminal());
 		const received: string[] = [];

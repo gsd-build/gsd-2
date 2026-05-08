@@ -69,7 +69,19 @@ export type ThemeColor =
 	| "thinkingMedium"
 	| "thinkingHigh"
 	| "thinkingXhigh"
-	| "bashMode";
+	| "bashMode"
+	| "surfaceBorder"
+	| "surfaceMuted"
+	| "surfaceTitle"
+	| "surfaceAccent"
+	| "toolRunning"
+	| "toolSuccess"
+	| "toolError"
+	| "toolMuted"
+	| "modeWorkflow"
+	| "modeValidation"
+	| "modeDebug"
+	| "modeCompact";
 
 export type ThemeBg =
 	| "selectedBg"
@@ -374,6 +386,24 @@ function getBuiltinThemes(): Record<string, ThemeJson> {
 	return builtinThemes;
 }
 
+function withSemanticColorDefaults(colors: ThemeJson["colors"]): ThemeJson["colors"] {
+	return {
+		...colors,
+		surfaceBorder: colors.surfaceBorder ?? colors.border,
+		surfaceMuted: colors.surfaceMuted ?? colors.borderMuted,
+		surfaceTitle: colors.surfaceTitle ?? colors.toolTitle,
+		surfaceAccent: colors.surfaceAccent ?? colors.borderAccent,
+		toolRunning: colors.toolRunning ?? colors.warning,
+		toolSuccess: colors.toolSuccess ?? colors.success,
+		toolError: colors.toolError ?? colors.error,
+		toolMuted: colors.toolMuted ?? colors.muted,
+		modeWorkflow: colors.modeWorkflow ?? colors.accent,
+		modeValidation: colors.modeValidation ?? colors.warning,
+		modeDebug: colors.modeDebug ?? colors.error,
+		modeCompact: colors.modeCompact ?? colors.muted,
+	};
+}
+
 export function getAvailableThemes(): string[] {
 	const themes = new Set<string>(Object.keys(getBuiltinThemes()));
 	const customThemesDir = getCustomThemesDir();
@@ -493,7 +523,7 @@ function loadThemeJson(name: string): ThemeJson {
 
 function createTheme(themeJson: ThemeJson, mode?: ColorMode, sourcePath?: string): Theme {
 	const colorMode = mode ?? detectColorMode();
-	const resolvedColors = resolveThemeColors(themeJson.colors, themeJson.vars);
+	const resolvedColors = resolveThemeColors(withSemanticColorDefaults(themeJson.colors), themeJson.vars);
 	const fgColors: Record<ThemeColor, string | number> = {} as Record<ThemeColor, string | number>;
 	const bgColors: Record<ThemeBg, string | number> = {} as Record<ThemeBg, string | number>;
 	const bgColorKeys: Set<string> = new Set([

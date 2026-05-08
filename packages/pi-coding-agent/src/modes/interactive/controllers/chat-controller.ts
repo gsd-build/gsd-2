@@ -1,9 +1,14 @@
+// GSD-2 Interactive Chat Controller
 import { Loader, Markdown, Spacer, Text } from "@gsd/pi-tui";
 
 import type { InteractiveModeEvent, InteractiveModeStateHost } from "../interactive-mode-state.js";
 import { theme } from "../theme/theme.js";
 import { AssistantMessageComponent } from "../components/assistant-message.js";
-import { ToolExecutionComponent } from "../components/tool-execution.js";
+import {
+	ToolExecutionComponent,
+	ToolPhaseSummaryComponent,
+	type ToolExecutionPhase,
+} from "../components/tool-execution.js";
 import { DynamicBorder } from "../components/dynamic-border.js";
 import { appKey } from "../components/keybinding-hints.js";
 
@@ -23,7 +28,8 @@ type RenderedSegment =
 		contentType: "text" | "thinking";
 		component: AssistantMessageComponent;
 	}
-	| { kind: "tool"; contentIndex: number; component: ToolExecutionComponent };
+	| { kind: "tool"; contentIndex: number; component: ToolExecutionComponent }
+	| { kind: "tool-summary"; component: ToolPhaseSummaryComponent; phases: ToolExecutionPhase[] };
 
 let renderedSegments: RenderedSegment[] = [];
 // When providers reuse one assistant lifecycle across internal sub-turns,
@@ -99,6 +105,84 @@ let hasToolsInTurn = false;
 let pinnedBorder: DynamicBorder | undefined;
 // Reference to the pinned markdown component below the border
 let pinnedTextComponent: Markdown | undefined;
+
+function mergeToolPhases(phases: ToolExecutionPhase[]): ToolExecutionPhase[] {
+	const merged: ToolExecutionPhase[] = [];
+	for (const phase of phases) {
+		const previous = merged[merged.length - 1];
+		if (previous?.label === phase.label) {
+			previous.count += phase.count;
+			previous.durationMs += phase.durationMs;
+		} else {
+			merged.push({ ...phase });
+		}
+	}
+	return merged;
+}
+
+function replaceCompactToolRowsWithPhaseSummary(
+	host: InteractiveModeStateHost & { ui: { requestRender: () => void } },
+): void {
+	let changed = false;
+	const nextRenderedSegments: RenderedSegment[] = [];
+	let rollupRun: Array<{
+		seg: Extract<RenderedSegment, { kind: "tool" | "tool-summary" }>;
+		phases: ToolExecutionPhase[];
+	}> = [];
+
+	const flushRollupRun = () => {
+		const actionCount = rollupRun.reduce(
+			(total, item) => total + item.phases.reduce((sum, phase) => sum + phase.count, 0),
+			0,
+		);
+		if (actionCount < 2) {
+			nextRenderedSegments.push(...rollupRun.map((item) => item.seg));
+			rollupRun = [];
+			return;
+		}
+
+		const firstIndex = Math.max(0, host.chatContainer.children.indexOf(rollupRun[0].seg.component));
+		const phases = mergeToolPhases(rollupRun.flatMap((item) => item.phases));
+		const summary = new ToolPhaseSummaryComponent(phases);
+
+		for (const { seg } of rollupRun) {
+			host.chatContainer.removeChild(seg.component);
+		}
+
+		host.chatContainer.addChild(summary);
+		const summaryIndex = host.chatContainer.children.indexOf(summary);
+		if (summaryIndex !== -1 && summaryIndex !== firstIndex) {
+			host.chatContainer.children.splice(summaryIndex, 1);
+			host.chatContainer.children.splice(firstIndex, 0, summary);
+			(host.chatContainer as unknown as { _prevRender: string[] | null })._prevRender = null;
+		}
+
+		changed = true;
+		nextRenderedSegments.push({ kind: "tool-summary", component: summary, phases });
+		rollupRun = [];
+	};
+
+	for (const seg of renderedSegments) {
+		const phase = seg.kind === "tool" ? seg.component.getRollupPhase() : null;
+		if (seg.kind === "tool" && phase) {
+			rollupRun.push({ seg, phases: [phase] });
+			continue;
+		}
+		if (seg.kind === "tool-summary") {
+			rollupRun.push({ seg, phases: seg.component.getPhases() });
+			continue;
+		}
+
+		flushRollupRun();
+		nextRenderedSegments.push(seg);
+	}
+	flushRollupRun();
+
+	if (changed) {
+		renderedSegments = nextRenderedSegments;
+		host.ui.requestRender();
+	}
+}
 
 export async function handleAgentEvent(host: InteractiveModeStateHost & {
 	init: () => Promise<void>;
@@ -177,6 +261,7 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 					return;
 			}
 		case "agent_start":
+			host.clearBlockingError();
 			if (host.retryEscapeHandler) {
 				host.defaultEditor.onEscape = host.retryEscapeHandler;
 				host.retryEscapeHandler = undefined;
@@ -338,6 +423,7 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 							details: externalToolResult.details,
 							isError: externalToolResult.isError,
 						});
+						replaceCompactToolRowsWithPhaseSummary(host);
 					}
 				}
 
@@ -790,6 +876,7 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 					for (const [, component] of host.pendingTools.entries()) {
 						component.setArgsComplete();
 					}
+					replaceCompactToolRowsWithPhaseSummary(host);
 				}
 				host.streamingComponent = undefined;
 				host.streamingMessage = undefined;
@@ -822,6 +909,7 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 				component.setExpanded(host.toolOutputExpanded);
 				host.chatContainer.addChild(component);
 				host.pendingTools.set(event.toolCallId, component);
+				renderedSegments.push({ kind: "tool", contentIndex: Number.MAX_SAFE_INTEGER, component });
 				host.ui.requestRender();
 			}
 			break;
@@ -839,7 +927,7 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 			const component = host.pendingTools.get(event.toolCallId);
 			if (component) {
 				component.updateResult({ ...event.result, isError: event.isError });
-				host.pendingTools.delete(event.toolCallId);
+				replaceCompactToolRowsWithPhaseSummary(host);
 				host.ui.requestRender();
 			}
 			break;
@@ -855,6 +943,7 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 				host.streamingComponent.setShowMetadata(true);
 				host.streamingComponent.updateContent(host.streamingMessage);
 			}
+			replaceCompactToolRowsWithPhaseSummary(host);
 			host.streamingComponent = undefined;
 			host.streamingMessage = undefined;
 			renderedSegments = [];

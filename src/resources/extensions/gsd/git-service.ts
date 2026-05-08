@@ -10,10 +10,11 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { gsdRoot } from "./paths.js";
 import { GIT_NO_PROMPT_ENV } from "./git-constants.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
+import { logWarning } from "./workflow-logger.js";
 
 
 import {
@@ -147,7 +148,7 @@ export interface TaskCommitContext {
  * what was actually built), falling back to the task title (what was planned).
  */
 export function buildTaskCommitMessage(ctx: TaskCommitContext): string {
-  const description = ctx.oneLiner || ctx.taskTitle;
+  const description = sanitizeCommitSubjectDescription(ctx.oneLiner || ctx.taskTitle);
   const type = inferCommitType(ctx.taskTitle, ctx.oneLiner);
 
   // Truncate description to ~72 chars for subject line (full budget without scope)
@@ -177,6 +178,61 @@ export function buildTaskCommitMessage(ctx: TaskCommitContext): string {
   }
 
   return `${subject}\n\n${bodyParts.join("\n\n")}`;
+}
+
+function sanitizeCommitSubjectDescription(value: string): string {
+  const cleaned = value
+    .replace(/[\x00-\x1F\x7F]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || "update task";
+}
+
+function normalizeRepoRelativePath(basePath: string, filePath: string): string | null {
+  const trimmed = filePath.trim();
+  if (!trimmed || trimmed.includes("\0")) return null;
+
+  const relPath = isAbsolute(trimmed)
+    ? relative(basePath, trimmed)
+    : normalize(trimmed);
+  if (!relPath || relPath === "." || isAbsolute(relPath) || relPath.startsWith(`..${sep}`) || relPath === "..") {
+    return null;
+  }
+
+  const resolved = resolve(basePath, relPath);
+  const relFromBase = relative(basePath, resolved);
+  if (!relFromBase || relFromBase === "." || relFromBase.startsWith("..") || isAbsolute(relFromBase)) {
+    return null;
+  }
+
+  return relFromBase;
+}
+
+function pathspecToRegex(pattern: string): RegExp {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*");
+  return new RegExp(`^${escaped}$`);
+}
+
+function isExcludedScopedPath(path: string, exclusions: readonly string[]): boolean {
+  const normalizedPath = path.replace(/\\/g, "/");
+  for (const exclusion of exclusions) {
+    const normalizedExclusion = exclusion.replace(/^:!/, "").replace(/\\/g, "/");
+    if (!normalizedExclusion) continue;
+    if (normalizedExclusion.endsWith("/")) {
+      if (normalizedPath === normalizedExclusion.slice(0, -1) || normalizedPath.startsWith(normalizedExclusion)) {
+        return true;
+      }
+      continue;
+    }
+    if (normalizedExclusion.includes("*")) {
+      if (pathspecToRegex(normalizedExclusion).test(normalizedPath)) return true;
+      continue;
+    }
+    if (normalizedPath === normalizedExclusion) return true;
+  }
+  return false;
 }
 
 /**
@@ -659,6 +715,63 @@ export class GitServiceImpl {
     nativeAddAllWithExclusions(this.basePath, allExclusions);
   }
 
+  private scopedStageTaskFiles(
+    taskContext: TaskCommitContext,
+    extraExclusions: readonly string[] = [],
+  ): boolean {
+    const keyFiles = taskContext.keyFiles ?? [];
+    if (keyFiles.length === 0) return false;
+
+    const allExclusions = [...RUNTIME_EXCLUSION_PATHS, ...extraExclusions];
+    const normalized = keyFiles
+      .map(file => normalizeRepoRelativePath(this.basePath, file))
+      .filter((file): file is string => file !== null)
+      .filter(file => !isExcludedScopedPath(file, allExclusions));
+
+    // Drop entries that don't exist on disk. The LLM occasionally lists files
+    // it intended to write but didn't (or names them with wrong casing/path).
+    // Pre-`b304f738b` `git add -A` swallowed these silently; the scoped
+    // pathspec form passes each path explicitly, so a single bad entry made
+    // the whole commit fail (see #5500). Filter so valid paths still commit.
+    const missing: string[] = [];
+    const existing: string[] = [];
+    for (const path of normalized) {
+      if (existsSync(join(this.basePath, path))) {
+        existing.push(path);
+      } else {
+        missing.push(path);
+      }
+    }
+    if (missing.length > 0) {
+      logWarning(
+        "engine",
+        `scoped stage: dropping ${missing.length} non-existent keyFile(s) from task commit: ${missing.join(", ")}`,
+        { file: "git-service.ts" },
+      );
+    }
+
+    const paths = Array.from(new Set(existing));
+    if (paths.length === 0) return false;
+
+    try {
+      nativeAddPaths(this.basePath, paths);
+      return true;
+    } catch (err) {
+      // Defense-in-depth: even after existence filtering, libgit2/git can
+      // still reject paths (gitignore matches, case-only differences on
+      // case-insensitive FS, submodule boundaries). Returning false lets
+      // autoCommit fall through to smartStage so the commit still goes out
+      // — restoring the resilience the unscoped path used to provide.
+      const msg = err instanceof Error ? err.message : String(err);
+      logWarning(
+        "engine",
+        `scoped stage failed (${msg}); falling back to smartStage`,
+        { file: "git-service.ts" },
+      );
+      return false;
+    }
+  }
+
   /** Tracks whether runtime file cleanup has run this session. */
   private _runtimeFilesCleanedUp = false;
 
@@ -698,7 +811,10 @@ export class GitServiceImpl {
     // Native path uses libgit2 (single syscall), fallback spawns git.
     if (!nativeHasChanges(this.basePath)) return null;
 
-    this.smartStage(extraExclusions);
+    const scoped = taskContext
+      ? this.scopedStageTaskFiles(taskContext, extraExclusions)
+      : false;
+    if (!scoped) this.smartStage(extraExclusions);
 
     // After smart staging, check if anything was actually staged
     // (all changes might have been runtime files that got excluded)

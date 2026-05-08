@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Ship command for creating pull requests from GSD milestone evidence.
+
 /**
  * GSD Command — /gsd ship
  *
@@ -17,6 +20,8 @@ import { getLedger, getProjectTotals, aggregateByModel, formatCost, formatTokenC
 import { nativeGetCurrentBranch, nativeDetectMainBranch } from "./native-git-bridge.js";
 import { formatDuration } from "../shared/format-utils.js";
 import { parseEvalReviewFrontmatter, type Verdict } from "./eval-review-schema.js";
+import { currentDirectoryRoot } from "./commands/context.js";
+import { buildPrEvidence } from "./pr-evidence.js";
 
 function git(basePath: string, args: readonly string[]): string {
   return execFileSync("git", args, { cwd: basePath, encoding: "utf-8" }).trim();
@@ -29,11 +34,6 @@ function isValidRefName(name: string): boolean {
   } catch {
     return false;
   }
-}
-
-interface PRContent {
-  title: string;
-  body: string;
 }
 
 function listSliceIds(basePath: string, milestoneId: string): string[] {
@@ -147,74 +147,48 @@ export async function checkSliceEvalReview(
   };
 }
 
-function generatePRContent(basePath: string, milestoneId: string, milestoneTitle: string): PRContent {
-  const title = `feat: ${milestoneTitle || milestoneId}`;
-
-  const sections: string[] = [];
-
-  // TL;DR
-  sections.push("## TL;DR\n");
-  sections.push(`**What:** Ship milestone ${milestoneId} — ${milestoneTitle || "(untitled)"}`);
-  sections.push(`**Why:** Milestone work complete, ready for review.`);
-  sections.push(`**How:** See slice summaries below.\n`);
-
-  // What — slice summaries
+function generatePRContent(basePath: string, milestoneId: string, milestoneTitle: string) {
   const summaries = collectSliceSummaries(basePath, milestoneId);
-  if (summaries.length > 0) {
-    sections.push("## What\n");
-    sections.push(summaries.join("\n\n"));
-    sections.push("");
-  }
-
-  // Roadmap status
+  const roadmapItems: string[] = [];
   const roadmapPath = resolveMilestoneFile(basePath, milestoneId, "ROADMAP");
   if (roadmapPath && existsSync(roadmapPath)) {
     try {
       const roadmap = readFileSync(roadmapPath, "utf-8");
       const checkboxLines = roadmap.split("\n").filter((l) => /^\s*-\s*\[[ x]\]/.test(l));
-      if (checkboxLines.length > 0) {
-        sections.push("## Roadmap\n");
-        sections.push(checkboxLines.join("\n"));
-        sections.push("");
-      }
+      roadmapItems.push(...checkboxLines);
     } catch {
       // non-fatal
     }
   }
 
-  // Metrics
+  const metrics: string[] = [];
   const ledger = getLedger();
   const units = ledger?.units ?? loadLedgerFromDisk(basePath)?.units ?? [];
   if (units.length > 0) {
     const totals = getProjectTotals(units);
     const byModel = aggregateByModel(units);
-    sections.push("## Metrics\n");
-    sections.push(`- **Units executed:** ${units.length}`);
-    sections.push(`- **Total cost:** ${formatCost(totals.cost)}`);
-    sections.push(`- **Tokens:** ${formatTokenCount(totals.tokens.input)} input / ${formatTokenCount(totals.tokens.output)} output`);
+    metrics.push(`**Units executed:** ${units.length}`);
+    metrics.push(`**Total cost:** ${formatCost(totals.cost)}`);
+    metrics.push(`**Tokens:** ${formatTokenCount(totals.tokens.input)} input / ${formatTokenCount(totals.tokens.output)} output`);
     if (totals.duration > 0) {
-      sections.push(`- **Duration:** ${formatDuration(totals.duration)}`);
+      metrics.push(`**Duration:** ${formatDuration(totals.duration)}`);
     }
     if (byModel.length > 0) {
-      sections.push(`- **Models:** ${byModel.map((m) => `${m.model} (${m.units} units)`).join(", ")}`);
+      metrics.push(`**Models:** ${byModel.map((m) => `${m.model} (${m.units} units)`).join(", ")}`);
     }
-    sections.push("");
   }
 
-  // Change type checklist
-  sections.push("## Change type\n");
-  sections.push("- [x] `feat` — New feature or capability");
-  sections.push("- [ ] `fix` — Bug fix");
-  sections.push("- [ ] `refactor` — Code restructuring");
-  sections.push("- [ ] `test` — Adding or updating tests");
-  sections.push("- [ ] `docs` — Documentation only");
-  sections.push("- [ ] `chore` — Build, CI, or tooling changes\n");
-
-  // AI disclosure
-  sections.push("---\n");
-  sections.push("*This PR was prepared with AI assistance (GSD auto-mode).*");
-
-  return { title, body: sections.join("\n") };
+  return buildPrEvidence({
+    milestoneId,
+    milestoneTitle,
+    changeType: "feat",
+    summaries,
+    roadmapItems,
+    metrics,
+    testsRun: ["Run `npm run verify:pr` before marking this PR ready."],
+    rollbackNotes: ["Revert the merge commit or close the PR before merge if review finds a regression."],
+    how: "Generated from GSD milestone slice summaries, roadmap status, and local metrics.",
+  });
 }
 
 export async function handleShip(
@@ -222,7 +196,7 @@ export async function handleShip(
   ctx: ExtensionCommandContext,
   _pi: ExtensionAPI,
 ): Promise<void> {
-  const basePath = process.cwd();
+  const basePath = currentDirectoryRoot();
   const dryRun = args.includes("--dry-run");
   const draft = args.includes("--draft");
   const force = args.includes("--force");

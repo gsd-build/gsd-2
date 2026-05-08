@@ -858,11 +858,11 @@ describe("state-machine-full-walkthrough", () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // RECONCILIATION
+  // DB-AUTHORITATIVE DERIVATION
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe("Reconciliation", () => {
-    test("DB: task with SUMMARY on disk but DB says pending → reconciliation fixes status (#2514)", async () => {
+  describe("DB-authoritative derivation", () => {
+    test("DB: task with SUMMARY on disk but DB says pending → DB remains authoritative", async () => {
       const base = createFixtureBase();
       const dbPath = join(base, ".gsd", "gsd.db");
       openDatabase(dbPath);
@@ -875,19 +875,19 @@ describe("state-machine-full-walkthrough", () => {
       writeRoadmap(base, "M001", standardRoadmap());
       writePlan(base, "M001", "S01", standardPlan());
 
-      // Write SUMMARY files on disk for both tasks (simulating session disconnect)
+      // Write SUMMARY files on disk for both tasks. These are projections and
+      // must not complete pending DB tasks during runtime derivation.
       writeTaskSummary(base, "M001", "S01", "T01");
       writeTaskSummary(base, "M001", "S01", "T02");
 
       invalidateStateCache();
       const state = await deriveStateFromDb(base);
 
-      // Reconciliation should detect SUMMARY→DB mismatch and update
-      // All tasks done → summarizing (not executing)
-      assert.equal(state.phase, "summarizing", "reconciliation should advance past pending tasks");
+      assert.equal(state.phase, "executing", "disk SUMMARY projections must not complete DB tasks");
+      assert.equal(state.activeTask?.id, "T01", "first pending DB task remains active");
     });
 
-    test("empty DB with disk milestones → disk-to-DB sync (#2631)", async () => {
+    test("empty DB with disk milestones → no runtime disk-to-DB sync", async () => {
       const base = createFixtureBase();
       writeContext(base, "M001", "# M001: Test\n\nContext.");
 
@@ -899,11 +899,10 @@ describe("state-machine-full-walkthrough", () => {
       invalidateStateCache();
       const state = await deriveState(base);
 
-      // After deriveState, DB should have the disk milestone
+      // Runtime derivation must not import disk milestones into the DB.
       const after = getAllMilestones();
-      assert.ok(after.length > 0, "DB should have milestones after reconciliation");
-      assert.equal(after[0]!.id, "M001");
-      assert.ok(state.activeMilestone !== null);
+      assert.equal(after.length, 0, "DB should remain empty without explicit migration");
+      assert.equal(state.activeMilestone, null, "disk milestone is ignored while DB is authoritative");
     });
 
     test("ghost milestone (empty dir) → NOT in registry", async () => {
@@ -1063,7 +1062,7 @@ describe("state-machine-full-walkthrough", () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe("Recovery: DB has slice but no task rows (partial migration)", () => {
-    test("DB tasks empty but PLAN on disk has tasks → reconciles to executing", async () => {
+    test("DB tasks empty but PLAN on disk has tasks → stays planning", async () => {
       const base = createFixtureBase();
       const dbPath = join(base, ".gsd", "gsd.db");
       openDatabase(dbPath);
@@ -1078,15 +1077,13 @@ describe("state-machine-full-walkthrough", () => {
       invalidateStateCache();
       const state = await deriveStateFromDb(base);
 
-      // FIX (#3600): plan-file tasks are now reconciled into the DB,
-      // so the phase correctly advances to executing instead of planning.
-      assert.equal(state.phase, "executing",
-        "reconciled plan-file tasks → executing (not stuck in planning)");
+      assert.equal(state.phase, "planning",
+        "PLAN.md projection must not import DB tasks during runtime derivation");
     });
   });
 
   describe("Failure: partial SUMMARY reconciliation", () => {
-    test("only one task has SUMMARY, other still pending → executing next task", async () => {
+    test("only one task has SUMMARY, other still pending → executing first DB-pending task", async () => {
       const base = createFixtureBase();
       const dbPath = join(base, ".gsd", "gsd.db");
       openDatabase(dbPath);
@@ -1104,9 +1101,8 @@ describe("state-machine-full-walkthrough", () => {
       invalidateStateCache();
       const state = await deriveStateFromDb(base);
 
-      // T01 reconciled to complete, T02 still pending → executing T02
       assert.equal(state.phase, "executing");
-      assert.equal(state.activeTask?.id, "T02", "should advance to next pending task");
+      assert.equal(state.activeTask?.id, "T01", "disk SUMMARY must not advance past pending DB task");
     });
   });
 
@@ -1255,7 +1251,7 @@ describe("state-machine-full-walkthrough", () => {
   });
 
   describe("Failure: missing task plan files in DB path", () => {
-    test("DB has tasks but no T##-PLAN.md files → planning phase", async () => {
+    test("DB has tasks but no T##-PLAN.md files → executing phase", async () => {
       const base = createFixtureBase();
       const dbPath = join(base, ".gsd", "gsd.db");
       openDatabase(dbPath);
@@ -1273,8 +1269,8 @@ describe("state-machine-full-walkthrough", () => {
       invalidateStateCache();
       const state = await deriveStateFromDb(base);
 
-      assert.equal(state.phase, "planning",
-        "missing T##-PLAN.md files should keep state in planning");
+      assert.equal(state.phase, "executing",
+        "DB tasks are authoritative even when task plan projections are missing");
     });
   });
 
@@ -1591,7 +1587,7 @@ describe("state-machine-full-walkthrough", () => {
   });
 
   describe("Failure: multiple reconciliation in single derivation", () => {
-    test("DB has 3 stale tasks, all with SUMMARY on disk → all reconciled in one pass", async () => {
+    test("DB has 3 stale tasks, all with SUMMARY on disk → first DB-pending task remains active", async () => {
       const base = createFixtureBase();
       const dbPath = join(base, ".gsd", "gsd.db");
       openDatabase(dbPath);
@@ -1641,9 +1637,9 @@ describe("state-machine-full-walkthrough", () => {
       invalidateStateCache();
       const state = await deriveStateFromDb(base);
 
-      // All 3 should be reconciled in one pass → summarizing
-      assert.equal(state.phase, "summarizing",
-        "all 3 stale tasks should be reconciled to complete in one derivation");
+      assert.equal(state.phase, "executing",
+        "disk SUMMARY projections must not reconcile DB task state");
+      assert.equal(state.activeTask?.id, "T01", "first non-closed DB task remains active");
     });
   });
 });

@@ -194,7 +194,7 @@ export async function showQueueAdd(
 
   // ── Dispatch the queue prompt ───────────────────────────────────────
   // Activate the queue phase so the write-gate applies to CONTEXT.md writes
-  setQueuePhaseActive(true);
+  setQueuePhaseActive(true, basePath);
 
   const queueInlinedTemplates = inlineTemplate("context", "Context");
   const prompt = loadPrompt("queue", {

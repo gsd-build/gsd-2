@@ -222,14 +222,19 @@ Using the \`write\` tool, persist the full structured report to
 LEARNINGS.md is the full, cited audit trail. Write it first — subsequent steps
 feed from its content.
 
-### Step 3 — Optionally pre-query the memory store for semantic duplicates
+### Step 3 — Run one bounded duplicate check
 
-Before persisting any extracted item in Steps 4–6, you may call
-\`memory_query\` with 2–3 keywords from the item to check whether the
-memory store already holds a semantically equivalent entry at high
-confidence. Skip those items in their respective steps. The memory store
-is the single source of truth for cross-session durable knowledge — no
-other persistence call is part of this flow.
+Before persisting extracted items in Steps 4–6, do at most one duplicate-check
+pass for the durable Decisions, Lessons, and Patterns from this milestone. Use
+the already-written LEARNINGS.md content and call \`memory_query\` once with a
+compact keyword summary for the whole batch. If that result clearly shows a
+semantically equivalent high-confidence memory for an item, mark only that item
+as already captured and skip it in its respective persistence step.
+
+Do not re-read milestone artefacts or repeat memory queries category-by-category
+after this point. The memory store is the single source of truth for
+cross-session durable knowledge — no other persistence call is part of this
+flow.
 
 ### Step 4 — Persist Patterns via \`capture_thought\`
 
@@ -268,11 +273,11 @@ later projection back to a human-visible decisions register stays lossless
 
 ### Step 7 — Deduplication rule (applies to Steps 4, 5, 6)
 
-Before each \`capture_thought\` call, optionally call \`memory_query\` with 2–3
-keywords from the entry. If a semantically equivalent memory is returned at
-high confidence, skip the capture entirely. Prefer skipping a near-duplicate
-over creating a second slightly-different row — redundancy degrades the
-signal.
+Use only the duplicate-check result from Step 3. If that bounded check returned
+a semantically equivalent memory at high confidence for an extracted item, skip
+the capture entirely. Otherwise, persist the item once via \`capture_thought\`.
+Prefer skipping a near-duplicate over creating a second slightly-different row
+— redundancy degrades the signal.
 
 ### Step 8 — Surprises stay only in LEARNINGS.md
 

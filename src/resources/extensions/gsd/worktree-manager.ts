@@ -70,6 +70,15 @@ export interface WorktreeDiffSummary {
   removed: string[];
 }
 
+function deleteBranchIfPresent(basePath: string, branch: string, warningPrefix: string): void {
+  try {
+    if (!nativeBranchExists(basePath, branch)) return;
+    nativeBranchDelete(basePath, branch, true);
+  } catch (e) {
+    logWarning("worktree", `${warningPrefix}: ${(e as Error).message}`);
+  }
+}
+
 // ─── Path Helpers ──────────────────────────────────────────────────────────
 
 function normalizePathForComparison(path: string): string {
@@ -408,7 +417,7 @@ export function listWorktrees(basePath: string): WorktreeInfo[] {
 
 /** Directories to skip when scanning for nested .git dirs. */
 const NESTED_GIT_SKIP_DIRS = new Set([
-  ".git", ".gsd", "node_modules", ".next", ".nuxt", "dist", "build",
+  ".git", ".gsd", ".bg-shell", "node_modules", ".next", ".nuxt", "dist", "build",
   "__pycache__", ".tox", ".venv", "venv", "target", "vendor",
 ]);
 
@@ -462,7 +471,9 @@ export function findNestedGitDirs(rootPath: string): string[] {
           continue;
         }
       } catch (e) {
-        logWarning("worktree", `existsSync/.git check failed for ${fullPath}: ${(e as Error).message}`);
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+          logWarning("worktree", `existsSync/.git check failed for ${fullPath}: ${(e as Error).message}`);
+        }
       }
 
       walk(fullPath, depth + 1);
@@ -535,7 +546,7 @@ export function removeWorktree(
   if (!existsSync(wtPath)) {
     nativeWorktreePrune(basePath);
     if (deleteBranch) {
-      try { nativeBranchDelete(basePath, branch, true); } catch (e) { logWarning("worktree", `nativeBranchDelete failed: ${(e as Error).message}`); }
+      deleteBranchIfPresent(basePath, branch, "nativeBranchDelete failed");
     }
     return;
   }
@@ -670,7 +681,7 @@ export function removeWorktree(
   nativeWorktreePrune(basePath);
 
   if (deleteBranch) {
-    try { nativeBranchDelete(basePath, branch, true); } catch (e) { logWarning("worktree", `final branch delete failed: ${(e as Error).message}`); }
+    deleteBranchIfPresent(basePath, branch, "final branch delete failed");
   }
 }
 
@@ -755,10 +766,10 @@ export function diffWorktreeGSD(basePath: string, name: string): WorktreeDiffSum
  * on main when the merge is applied. If both branches have identical
  * content, this correctly returns an empty diff.
  */
-export function diffWorktreeAll(basePath: string, name: string): WorktreeDiffSummary {
+export function diffWorktreeAll(basePath: string, name: string, branchOverride?: string): WorktreeDiffSummary {
   basePath = normalizeBasePathForWorktreeOps(basePath);
 
-  const branch = worktreeBranchName(name);
+  const branch = branchOverride ?? worktreeBranchName(name);
   const mainBranch = nativeDetectMainBranch(basePath);
 
   const entries = nativeDiffNameStatus(basePath, mainBranch, branch);
@@ -770,10 +781,10 @@ export function diffWorktreeAll(basePath: string, name: string): WorktreeDiffSum
  * Get per-file line addition/deletion stats for what will change on main.
  * Uses direct diff (not merge-base) so the preview matches the actual merge outcome.
  */
-export function diffWorktreeNumstat(basePath: string, name: string): FileLineStat[] {
+export function diffWorktreeNumstat(basePath: string, name: string, branchOverride?: string): FileLineStat[] {
   basePath = normalizeBasePathForWorktreeOps(basePath);
 
-  const branch = worktreeBranchName(name);
+  const branch = branchOverride ?? worktreeBranchName(name);
   const mainBranch = nativeDetectMainBranch(basePath);
 
   const rawStats = nativeDiffNumstat(basePath, mainBranch, branch);
@@ -831,10 +842,10 @@ export function getWorktreeLog(basePath: string, name: string): string {
  * Must be called from the main working tree (not the worktree itself).
  * Returns the merge commit message.
  */
-export function mergeWorktreeToMain(basePath: string, name: string, commitMessage: string): string {
+export function mergeWorktreeToMain(basePath: string, name: string, commitMessage: string, branchOverride?: string): string {
   basePath = normalizeBasePathForWorktreeOps(basePath);
 
-  const branch = worktreeBranchName(name);
+  const branch = branchOverride ?? worktreeBranchName(name);
   const mainBranch = nativeDetectMainBranch(basePath);
   const current = nativeGetCurrentBranch(basePath);
 

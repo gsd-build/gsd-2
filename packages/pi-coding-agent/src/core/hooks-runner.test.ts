@@ -38,6 +38,8 @@ function stubRuntime(): ExtensionRuntime {
     getActiveTools: () => [],
     getAllTools: () => [],
     setActiveTools: () => {},
+    getVisibleSkills: () => undefined,
+    setVisibleSkills: () => {},
     refreshTools: () => {},
     getCommands: () => [],
     setModel: async () => false,

@@ -6,12 +6,13 @@
  * flow to show when entering a project directory.
  */
 
+import { execFileSync } from "node:child_process";
 import { existsSync, openSync, readSync, closeSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, parse as parsePath } from "node:path";
 import { homedir } from "node:os";
 import { gsdRoot } from "./paths.js";
+import { gsdHome } from "./gsd-home.js";
 
-const gsdHome = process.env.GSD_HOME || join(homedir(), ".gsd");
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
@@ -70,6 +71,22 @@ export interface ProjectSignals {
   packageManager?: string;
   /** Auto-detected verification commands */
   verificationCommands: string[];
+}
+
+export type ProjectClassificationKind =
+  | "invalid-repo"
+  | "greenfield"
+  | "untyped-existing"
+  | "typed-existing";
+
+export interface ProjectClassification {
+  kind: ProjectClassificationKind;
+  signals: ProjectSignals;
+  trackedFiles: string[];
+  untrackedFiles: string[];
+  contentFiles: string[];
+  markers: string[];
+  reason: string;
 }
 
 // ─── Project File Markers ───────────────────────────────────────────────────────
@@ -243,6 +260,7 @@ const TEST_MARKERS = [
 const RECURSIVE_SCAN_IGNORED_DIRS = new Set([
   ".git",
   ".gsd",
+  ".bg-shell",
   ".planning",
   ".plans",
   ".claude",
@@ -266,6 +284,8 @@ const RECURSIVE_SCAN_IGNORED_DIRS = new Set([
   "DerivedData",
   "out",
 ]) as ReadonlySet<string>;
+
+const PROJECT_CONTENT_EXCLUDE_DIRS = RECURSIVE_SCAN_IGNORED_DIRS;
 
 /** Project file markers safe to detect recursively via suffix matching. */
 const ROOT_ONLY_PROJECT_FILES = new Set<string>([
@@ -536,6 +556,114 @@ export function detectProjectSignals(basePath: string): ProjectSignals {
   };
 }
 
+function normalizeGitPath(file: string): string {
+  return file.replaceAll("\\", "/").replace(/^\.\//, "");
+}
+
+function isProjectContentFile(file: string): boolean {
+  const normalized = normalizeGitPath(file);
+  if (!normalized || normalized.endsWith("/")) return false;
+  if (normalized === ".gitignore" || normalized === ".gitattributes") return false;
+  const parts = normalized.split("/");
+  if (parts.some((part) => PROJECT_CONTENT_EXCLUDE_DIRS.has(part))) return false;
+  if (normalized.endsWith(".DS_Store")) return false;
+  return true;
+}
+
+function runGitLines(basePath: string, args: string[]): string[] {
+  try {
+    const output = execFileSync("git", args, {
+      cwd: basePath,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf-8",
+    }).trim();
+    return output ? output.split("\n").map((line) => line.trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function listTrackedProjectFiles(basePath: string): string[] {
+  return runGitLines(basePath, ["ls-files"])
+    .map(normalizeGitPath)
+    .filter(isProjectContentFile);
+}
+
+function listUntrackedProjectFiles(basePath: string): string[] {
+  return runGitLines(basePath, ["ls-files", "--others", "--exclude-standard"])
+    .map(normalizeGitPath)
+    .filter(isProjectContentFile);
+}
+
+function hasKnownProjectMarkers(basePath: string, signals: ProjectSignals): boolean {
+  if (signals.detectedFiles.length > 0) return true;
+  if (signals.xcodePlatforms.length > 0) return true;
+  return false;
+}
+
+/**
+ * Classify repo presence separately from ecosystem/tooling markers.
+ *
+ * Known project files identify tooling. Git-tracked/non-ignored content
+ * identifies whether this is an existing project at all. This keeps small
+ * static or documentation repos from being mislabeled as greenfield.
+ */
+export function classifyProject(basePath: string): ProjectClassification {
+  const signals = detectProjectSignals(basePath);
+  const markers = [...signals.detectedFiles];
+
+  if (!signals.isGitRepo) {
+    return {
+      kind: "invalid-repo",
+      signals,
+      trackedFiles: [],
+      untrackedFiles: [],
+      contentFiles: [],
+      markers,
+      reason: "missing .git",
+    };
+  }
+
+  const trackedFiles = listTrackedProjectFiles(basePath);
+  const untrackedFiles = listUntrackedProjectFiles(basePath);
+  const contentFiles = [...new Set([...trackedFiles, ...untrackedFiles])];
+  const hasMarkers = hasKnownProjectMarkers(basePath, signals);
+
+  if (hasMarkers) {
+    return {
+      kind: "typed-existing",
+      signals,
+      trackedFiles,
+      untrackedFiles,
+      contentFiles,
+      markers,
+      reason: markers.length > 0 ? `detected markers: ${markers.join(", ")}` : "detected project structure",
+    };
+  }
+
+  if (contentFiles.length > 0) {
+    return {
+      kind: "untyped-existing",
+      signals,
+      trackedFiles,
+      untrackedFiles,
+      contentFiles,
+      markers,
+      reason: "project content exists but no recognized tooling markers were found",
+    };
+  }
+
+  return {
+    kind: "greenfield",
+    signals,
+    trackedFiles,
+    untrackedFiles,
+    contentFiles,
+    markers,
+    reason: "no tracked or non-ignored project content",
+  };
+}
+
 // ─── Xcode Platform Detection ───────────────────────────────────────────────────
 
 /** Known SDKROOT values → canonical platform names. */
@@ -720,8 +848,8 @@ function detectVerificationCommands(
  */
 export function hasGlobalSetup(): boolean {
   return (
-    existsSync(join(gsdHome, "PREFERENCES.md")) ||
-    existsSync(join(gsdHome, "preferences.md"))
+    existsSync(join(gsdHome(), "PREFERENCES.md")) ||
+    existsSync(join(gsdHome(), "preferences.md"))
   );
 }
 
@@ -730,18 +858,18 @@ export function hasGlobalSetup(): boolean {
  * Returns true if ~/.gsd/ doesn't exist or has no preferences or auth.
  */
 export function isFirstEverLaunch(): boolean {
-  if (!existsSync(gsdHome)) return true;
+  if (!existsSync(gsdHome())) return true;
 
   // If we have preferences, not first launch
   if (
-    existsSync(join(gsdHome, "PREFERENCES.md")) ||
-    existsSync(join(gsdHome, "preferences.md"))
+    existsSync(join(gsdHome(), "PREFERENCES.md")) ||
+    existsSync(join(gsdHome(), "preferences.md"))
   ) {
     return false;
   }
 
   // If we have auth.json, not first launch (onboarding.ts already ran)
-  if (existsSync(join(gsdHome, "agent", "auth.json"))) return false;
+  if (existsSync(join(gsdHome(), "agent", "auth.json"))) return false;
 
   // Check legacy path too
   const legacyPath = join(homedir(), ".pi", "agent", "gsd-preferences.md");

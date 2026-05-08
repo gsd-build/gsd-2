@@ -2,10 +2,12 @@
  * Workflow MCP tools — exposes the core GSD mutation/read handlers over MCP.
  */
 
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
+import { WORKFLOW_TOOL_NAMES as CONTRACT_WORKFLOW_TOOL_NAMES } from "@gsd-build/contracts";
 
 import { logAliasUsage } from "./alias-telemetry.js";
 
@@ -192,7 +194,7 @@ type WorkflowToolExecutors = {
   ) => Promise<unknown>;
   executeSummarySave: (
     params: {
-      milestone_id: string;
+      milestone_id?: string;
       slice_id?: string;
       task_id?: string;
       artifact_type: string;
@@ -229,7 +231,7 @@ type WorkflowToolExecutors = {
 };
 
 type WorkflowWriteGateModule = {
-  loadWriteGateSnapshot: (basePath?: string) => {
+  loadWriteGateSnapshot: (basePath: string) => {
     verifiedDepthMilestones: string[];
     activeQueuePhase: boolean;
     pendingGateId: string | null;
@@ -378,6 +380,50 @@ function resolveActiveWorktreeBasePath(
   return wtPath;
 }
 
+/**
+ * Fallback when the tool call has no milestoneId: if exactly one auto-worktree
+ * exists under `<projectRoot>/.gsd/worktrees/`, treat it as the active one.
+ * Multiple worktrees → ambiguous, return null and let writes go to project root.
+ */
+function resolveSoleActiveWorktree(projectRoot: string): string | null {
+  const worktreesDir = join(projectRoot, ".gsd", "worktrees");
+  if (!existsSync(worktreesDir)) return null;
+  let entries: string[];
+  try {
+    entries = readdirSync(worktreesDir);
+  } catch {
+    return null;
+  }
+  const live = entries
+    .map((name) => join(worktreesDir, name))
+    .filter((p) => existsSync(join(p, ".git")));
+  if (live.length !== 1) return null;
+  return live[0];
+}
+
+function isHomeDirectory(candidate: string): boolean {
+  let resolvedHome: string;
+  try {
+    resolvedHome = realpathSync(resolve(homedir()));
+  } catch {
+    resolvedHome = resolve(homedir());
+  }
+  let resolvedCandidate: string;
+  try {
+    resolvedCandidate = realpathSync(resolve(candidate));
+  } catch {
+    resolvedCandidate = resolve(candidate);
+  }
+  return resolvedCandidate === resolvedHome;
+}
+
+export function _parseWorkflowArgsForTest<T extends { projectDir?: string }>(
+  schema: z.ZodType<T>,
+  args: Record<string, unknown>,
+): T & { projectDir: string } {
+  return parseWorkflowArgs(schema, args);
+}
+
 function parseWorkflowArgs<T extends { projectDir?: string }>(
   schema: z.ZodType<T>,
   args: Record<string, unknown>,
@@ -387,14 +433,28 @@ function parseWorkflowArgs<T extends { projectDir?: string }>(
   // projectDir — default to process.cwd() which the MCP server inherited from
   // Claude Code (launched at the project root).
   const projectRootCandidate = parsed.projectDir ?? process.cwd();
+
+  // Defense-in-depth: refuse when the resolved candidate is the user's home
+  // directory. The MCP server's process.cwd() can be $HOME if launched from
+  // an unusual context; honoring it would write project artifacts into ~/.gsd.
+  if (isHomeDirectory(projectRootCandidate)) {
+    throw new Error(
+      `projectDir resolves to the user's home directory (${projectRootCandidate}). ` +
+      `Run the workflow tool from inside a project directory, or pass an explicit projectDir.`,
+    );
+  }
+
   const projectRoot = validateProjectDir(projectRootCandidate);
 
   // Step 2: if this tool call is scoped to a milestone that has an active
   // auto-worktree, re-route writes to the worktree's .gsd rather than the
   // project's shared .gsd. auto-mode's verifyExpectedArtifact runs against
   // the worktree, and a mismatch here causes every unit to retry once.
+  // When the agent omits milestoneId, fall back to the sole live worktree
+  // if exactly one exists — that's the active auto-mode session.
   const milestoneId = extractMilestoneId(parsed as Record<string, unknown>);
-  const worktreeBasePath = resolveActiveWorktreeBasePath(projectRoot, milestoneId);
+  const worktreeBasePath = resolveActiveWorktreeBasePath(projectRoot, milestoneId)
+    ?? (milestoneId ? null : resolveSoleActiveWorktree(projectRoot));
   const effectiveBasePath = worktreeBasePath ?? projectRoot;
 
   return {
@@ -428,6 +488,29 @@ function getSupportedSummaryArtifactTypes(executors: WorkflowToolExecutors): rea
   return executors.SUPPORTED_SUMMARY_ARTIFACT_TYPES;
 }
 
+function buildImportCandidates(relativePath: string): string[] {
+  const candidates: string[] = [];
+  const pushPreferredPair = (path: string | null) => {
+    if (!path) return;
+    if (path.endsWith(".js")) candidates.push(path.replace(/\.js$/, ".ts"));
+    candidates.push(path);
+  };
+
+  const sourcePath = relativePath.includes("/dist/")
+    ? relativePath.replace("/dist/", "/src/")
+    : relativePath;
+  const distPath = relativePath.includes("/src/")
+    ? relativePath.replace("/src/", "/dist/")
+    : relativePath.includes("/dist/")
+      ? relativePath
+      : null;
+
+  pushPreferredPair(sourcePath);
+  pushPreferredPair(distPath);
+
+  return [...new Set(candidates)];
+}
+
 function getWriteGateModuleCandidates(): string[] {
   const candidates: string[] = [];
   const explicitModule = process.env.GSD_WORKFLOW_WRITE_GATE_MODULE?.trim();
@@ -435,13 +518,13 @@ function getWriteGateModuleCandidates(): string[] {
     if (/^[a-z]{2,}:/i.test(explicitModule) && !explicitModule.startsWith("file:")) {
       throw new Error("GSD_WORKFLOW_WRITE_GATE_MODULE only supports file: URLs or filesystem paths.");
     }
+    warnCustomWorkflowModule("GSD_WORKFLOW_WRITE_GATE_MODULE", explicitModule);
     candidates.push(explicitModule.startsWith("file:") ? explicitModule : toFileUrl(explicitModule));
   }
 
   candidates.push(
-    new URL("../../../src/resources/extensions/gsd/bootstrap/write-gate.js", import.meta.url).href,
-    new URL("../../../dist/resources/extensions/gsd/bootstrap/write-gate.js", import.meta.url).href,
-    new URL("../../../src/resources/extensions/gsd/bootstrap/write-gate.ts", import.meta.url).href,
+    ...buildImportCandidates("../../../src/resources/extensions/gsd/bootstrap/write-gate.js")
+      .map((p) => new URL(p, import.meta.url).href),
   );
 
   return [...new Set(candidates)];
@@ -451,28 +534,37 @@ function toFileUrl(modulePath: string): string {
   return pathToFileURL(resolve(modulePath)).href;
 }
 
+const warnedCustomWorkflowModuleVars = new Set<string>();
+
+/**
+ * Emit a one-time stderr warning when GSD_WORKFLOW_EXECUTORS_MODULE or
+ * GSD_WORKFLOW_WRITE_GATE_MODULE is set. These overrides exist for dev/test
+ * use, but they let the env owner load arbitrary local modules. The warning
+ * makes accidental or hostile use loud rather than silent.
+ */
+function warnCustomWorkflowModule(varName: string, value: string): void {
+  if (warnedCustomWorkflowModuleVars.has(varName)) return;
+  warnedCustomWorkflowModuleVars.add(varName);
+  process.stderr.write(
+    `[gsd-mcp-server] WARNING: ${varName} is set (${value}). ` +
+    `Custom workflow modules will be loaded from this path. ` +
+    `Unset for production use.\n`,
+  );
+}
+
 /** @internal — exported for testing only */
 export function _buildImportCandidates(relativePath: string): string[] {
-  // Build candidate paths: try the given path first, then swap src/<->dist/
-  // and try .ts extension. This handles both dev (tsx from src/) and prod
-  // (compiled from dist/) execution contexts.
-  const candidates: string[] = [relativePath];
-  const swapped = relativePath.includes("/src/")
-    ? relativePath.replace("/src/", "/dist/")
-    : relativePath.includes("/dist/")
-      ? relativePath.replace("/dist/", "/src/")
-      : null;
-  if (swapped) candidates.push(swapped);
-  // Also try .ts variants for dev-mode tsx execution
-  if (relativePath.endsWith(".js")) {
-    candidates.push(relativePath.replace(/\.js$/, ".ts"));
-    if (swapped) candidates.push(swapped.replace(/\.js$/, ".ts"));
-  }
-  return candidates;
+  // Build candidate paths: prefer source first, including the .ts source
+  // variant, before falling back to compiled dist. In source/dev execution a
+  // stale dist/resources tree must not silently override edited source files.
+  return buildImportCandidates(relativePath);
 }
 
 async function importLocalModule<T>(relativePath: string): Promise<T> {
-  const candidates = _buildImportCandidates(relativePath)
+  const rawCandidates = _buildImportCandidates(relativePath);
+  const candidates = (import.meta.url.includes("/dist-test/") || import.meta.url.includes("\\dist-test\\")
+    ? [...rawCandidates].sort((a, b) => Number(a.endsWith(".ts")) - Number(b.endsWith(".ts")))
+    : rawCandidates)
     .map((p) => new URL(p, import.meta.url).href);
 
   let lastErr: unknown;
@@ -486,6 +578,17 @@ async function importLocalModule<T>(relativePath: string): Promise<T> {
   throw lastErr;
 }
 
+async function loadProjectPreferences(projectDir: string): Promise<unknown | null> {
+  const { loadEffectiveGSDPreferences } = await importLocalModule<any>(
+    "../../../src/resources/extensions/gsd/preferences.js",
+  );
+  try {
+    return loadEffectiveGSDPreferences(projectDir).preferences;
+  } catch {
+    return null;
+  }
+}
+
 function getWorkflowExecutorModuleCandidates(env: NodeJS.ProcessEnv = process.env): string[] {
   const candidates: string[] = [];
   const explicitModule = env.GSD_WORKFLOW_EXECUTORS_MODULE?.trim();
@@ -493,13 +596,13 @@ function getWorkflowExecutorModuleCandidates(env: NodeJS.ProcessEnv = process.en
     if (/^[a-z]{2,}:/i.test(explicitModule) && !explicitModule.startsWith("file:")) {
       throw new Error("GSD_WORKFLOW_EXECUTORS_MODULE only supports file: URLs or filesystem paths.");
     }
+    warnCustomWorkflowModule("GSD_WORKFLOW_EXECUTORS_MODULE", explicitModule);
     candidates.push(explicitModule.startsWith("file:") ? explicitModule : toFileUrl(explicitModule));
   }
 
   candidates.push(
-    new URL("../../../src/resources/extensions/gsd/tools/workflow-tool-executors.js", import.meta.url).href,
-    new URL("../../../dist/resources/extensions/gsd/tools/workflow-tool-executors.js", import.meta.url).href,
-    new URL("../../../src/resources/extensions/gsd/tools/workflow-tool-executors.ts", import.meta.url).href,
+    ...buildImportCandidates("../../../src/resources/extensions/gsd/tools/workflow-tool-executors.js")
+      .map((p) => new URL(p, import.meta.url).href),
   );
 
   return [...new Set(candidates)];
@@ -571,43 +674,7 @@ interface McpToolServer {
   ): unknown;
 }
 
-export const WORKFLOW_TOOL_NAMES = [
-  "gsd_decision_save",
-  "gsd_save_decision",
-  "gsd_requirement_update",
-  "gsd_update_requirement",
-  "gsd_requirement_save",
-  "gsd_save_requirement",
-  "gsd_milestone_generate_id",
-  "gsd_generate_milestone_id",
-  "gsd_plan_milestone",
-  "gsd_plan_slice",
-  "gsd_plan_task",
-  "gsd_task_plan",
-  "gsd_replan_slice",
-  "gsd_slice_replan",
-  "gsd_slice_complete",
-  "gsd_complete_slice",
-  "gsd_skip_slice",
-  "gsd_complete_milestone",
-  "gsd_milestone_complete",
-  "gsd_validate_milestone",
-  "gsd_milestone_validate",
-  "gsd_reassess_roadmap",
-  "gsd_roadmap_reassess",
-  "gsd_save_gate_result",
-  "gsd_summary_save",
-  "gsd_task_complete",
-  "gsd_complete_task",
-  "gsd_milestone_status",
-  "gsd_journal_query",
-  // ADR-013 step 3: memory-store tools exposed to external MCP clients.
-  // gsd_memory_graph is namespaced to avoid collision with the existing
-  // gsd_graph tool (project knowledge graph from .gsd/ artifacts).
-  "gsd_capture_thought",
-  "gsd_memory_query",
-  "gsd_memory_graph",
-] as const;
+export const WORKFLOW_TOOL_NAMES = CONTRACT_WORKFLOW_TOOL_NAMES;
 
 const DEFAULT_WORKFLOW_OP_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -1188,13 +1255,28 @@ const sliceCompleteSchema = z.object(sliceCompleteParams);
 
 const summarySaveParams = {
   projectDir: projectDirParam,
-  milestone_id: z.string().describe("Milestone ID (e.g. M001)"),
+  milestone_id: z.string().optional().describe("Milestone ID (e.g. M001). Omit only for root-level PROJECT/PROJECT-DRAFT/REQUIREMENTS/REQUIREMENTS-DRAFT artifacts."),
   slice_id: z.string().optional().describe("Slice ID (e.g. S01)"),
   task_id: z.string().optional().describe("Task ID (e.g. T01)"),
-  artifact_type: z.string().describe("Artifact type to save (SUMMARY, RESEARCH, CONTEXT, ASSESSMENT, CONTEXT-DRAFT)"),
+  artifact_type: z.string().describe("Artifact type to save (SUMMARY, RESEARCH, CONTEXT, ASSESSMENT, CONTEXT-DRAFT, PROJECT, PROJECT-DRAFT, REQUIREMENTS, REQUIREMENTS-DRAFT)"),
   content: z.string().describe("The full markdown content of the artifact"),
 };
-const summarySaveSchema = z.object(summarySaveParams);
+const ROOT_SUMMARY_ARTIFACT_TYPES = new Set([
+  "PROJECT",
+  "PROJECT-DRAFT",
+  "REQUIREMENTS",
+  "REQUIREMENTS-DRAFT",
+]);
+const summarySaveSchema = z.object(summarySaveParams).superRefine((value, ctx) => {
+  const isRootArtifact = ROOT_SUMMARY_ARTIFACT_TYPES.has(value.artifact_type);
+  if (!isRootArtifact && (!value.milestone_id || value.milestone_id.trim() === "")) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["milestone_id"],
+      message: "milestone_id is required for milestone-scoped artifact types",
+    });
+  }
+});
 
 const decisionSaveParams = {
   projectDir: projectDirParam,
@@ -1222,7 +1304,7 @@ const requirementUpdateSchema = z.object(requirementUpdateParams);
 
 const requirementSaveParams = {
   projectDir: projectDirParam,
-  class: z.string().describe("Requirement class"),
+  class: z.string().describe("Requirement class: core-capability, primary-user-loop, launchability, continuity, failure-visibility, integration, quality-attribute, operability, admin/support, compliance/security, differentiator, constraint, or anti-feature"),
   description: z.string().describe("Short description of the requirement"),
   why: z.string().describe("Why this requirement matters"),
   source: z.string().describe("Origin of the requirement"),
@@ -1320,7 +1402,63 @@ const journalQueryParams = {
 };
 const journalQuerySchema = z.object(journalQueryParams);
 
-export function registerWorkflowTools(server: McpToolServer): void {
+const execRuntimeSchema = z.enum(["bash", "node", "python"]);
+const execParams = {
+  projectDir: projectDirParam,
+  runtime: execRuntimeSchema.describe("Interpreter: bash (-c), node (-e), or python3 (-c)."),
+  script: nonEmptyString("script").describe("Script body. Keep output small; capped stdout/stderr are persisted under .gsd/exec."),
+  purpose: z.string().optional().describe("Short label recorded in meta.json for later review."),
+  timeout_ms: z.number().int().min(1_000).max(600_000).optional().describe("Per-invocation timeout in milliseconds."),
+};
+const execSchema = z.object(execParams);
+
+const execSearchParams = {
+  projectDir: projectDirParam,
+  query: z.string().optional().describe("Substring matched against id and purpose, case-insensitive."),
+  runtime: execRuntimeSchema.optional().describe("Restrict to one runtime."),
+  failing_only: z.boolean().optional().describe("Only non-zero exit codes and timeouts."),
+  limit: z.number().int().min(1).max(200).optional().describe("Max results (default 20, cap 200)."),
+};
+const execSearchSchema = z.object(execSearchParams);
+
+const resumeParams = {
+  projectDir: projectDirParam,
+};
+const resumeSchema = z.object(resumeParams);
+
+/**
+ * Wrap a real McpToolServer so every handler we register catches thrown
+ * errors and returns a structured `{isError: true, content: [...]}` MCP
+ * tool result instead of letting the SDK convert the throw into a
+ * JSON-RPC error frame. Some MCP hosts (notably Cursor) surface JSON-RPC
+ * errors as a generic "tool failed" with no message, which strips the
+ * agent of the context it needs to recover (write-gate blocks, schema
+ * mismatches, downstream RPC failures).
+ *
+ * Read-only tools in server.ts use the same pattern via per-handler
+ * try/catch + errorContent(). This shim applies it uniformly to every
+ * mutation handler in this module.
+ */
+function wrapServerWithErrorHandler(realServer: McpToolServer): McpToolServer {
+  return {
+    tool(name, description, params, handler) {
+      return realServer.tool(name, description, params, async (args) => {
+        try {
+          return await handler(args);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return {
+            isError: true as const,
+            content: [{ type: "text" as const, text: message }],
+          };
+        }
+      });
+    },
+  };
+}
+
+export function registerWorkflowTools(realServer: McpToolServer): void {
+  const server = wrapServerWithErrorHandler(realServer);
   server.tool(
     "gsd_decision_save",
     "Record a project decision to the GSD database and regenerate DECISIONS.md.",
@@ -1669,12 +1807,12 @@ export function registerWorkflowTools(server: McpToolServer): void {
 
   server.tool(
     "gsd_summary_save",
-    "Save a GSD summary/research/context/assessment artifact to the database and disk.",
+    "Save a GSD summary/research/context/assessment artifact to the database and disk. Omit milestone_id only for root-level PROJECT/PROJECT-DRAFT/REQUIREMENTS/REQUIREMENTS-DRAFT artifacts.",
     summarySaveParams,
     async (args: Record<string, unknown>) => {
       const parsed = parseWorkflowArgs(summarySaveSchema, args);
       const { projectDir, milestone_id, slice_id, task_id, artifact_type, content } = parsed;
-      await enforceWorkflowWriteGate("gsd_summary_save", projectDir, milestone_id);
+      await enforceWorkflowWriteGate("gsd_summary_save", projectDir, milestone_id ?? null);
       const executors = await getWorkflowToolExecutors();
       const supportedArtifactTypes = getSupportedSummaryArtifactTypes(executors);
       if (!supportedArtifactTypes.includes(artifact_type)) {
@@ -1741,6 +1879,63 @@ export function registerWorkflowTools(server: McpToolServer): void {
         return { content: [{ type: "text" as const, text: "No matching journal entries found." }] };
       }
       return { content: [{ type: "text" as const, text: JSON.stringify(entries, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "gsd_exec",
+    "Run a short bash/node/python script in the project directory. Capped stdout/stderr and metadata persist under .gsd/exec; only a digest returns to MCP.",
+    execParams,
+    async (args: Record<string, unknown>) => {
+      const { projectDir, ...params } = parseWorkflowArgs(execSchema, args);
+      await enforceWorkflowWriteGate("gsd_exec", projectDir);
+      const { executeGsdExec } = await importLocalModule<any>(
+        "../../../src/resources/extensions/gsd/tools/exec-tool.js",
+      );
+      return adaptExecutorResult(
+        await runSerializedWorkflowOperation(async () =>
+          executeGsdExec(params, {
+            baseDir: projectDir,
+            preferences: await loadProjectPreferences(projectDir),
+          }),
+        ),
+      );
+    },
+  );
+
+  server.tool(
+    "gsd_exec_search",
+    "Search prior gsd_exec runs from .gsd/exec/*.meta.json without re-running them.",
+    execSearchParams,
+    async (args: Record<string, unknown>) => {
+      const { projectDir, ...params } = parseWorkflowArgs(execSearchSchema, args);
+      const { executeExecSearch } = await importLocalModule<any>(
+        "../../../src/resources/extensions/gsd/tools/exec-search-tool.js",
+      );
+      return adaptExecutorResult(
+        executeExecSearch(params, {
+          baseDir: projectDir,
+          preferences: await loadProjectPreferences(projectDir),
+        }),
+      );
+    },
+  );
+
+  server.tool(
+    "gsd_resume",
+    "Read .gsd/last-snapshot.md so agents can re-orient after compaction or session resume.",
+    resumeParams,
+    async (args: Record<string, unknown>) => {
+      const { projectDir, ...params } = parseWorkflowArgs(resumeSchema, args);
+      const { executeResume } = await importLocalModule<any>(
+        "../../../src/resources/extensions/gsd/tools/resume-tool.js",
+      );
+      return adaptExecutorResult(
+        executeResume(params, {
+          baseDir: projectDir,
+          preferences: await loadProjectPreferences(projectDir),
+        }),
+      );
     },
   );
 

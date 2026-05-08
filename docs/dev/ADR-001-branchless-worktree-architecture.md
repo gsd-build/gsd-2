@@ -5,6 +5,8 @@
 **Deciders:** Lex Christopherson
 **Advisors:** Claude Opus 4.6, Gemini 2.5 Pro, GPT-5.4 (Codex)
 
+> **Current state model:** This ADR predates the DB-authoritative runtime model. Its git/worktree decision still applies, but current GSD treats the project-root database as authoritative and uses markdown files as rendered projections. The database is not silently rebuilt from markdown during normal runtime; use explicit recovery commands when importing markdown state is required.
+
 ## Context
 
 GSD uses git for isolation during autonomous coding sessions. The current architecture (shipped in M003, v2.13.0) creates a **worktree per milestone** with **slice branches inside each worktree**. Each slice (`S01`, `S02`, ...) gets its own branch (`gsd/M001/S01`) within the worktree, which merges back to the milestone branch (`milestone/M001`) via `--no-ff` when the slice completes. The milestone branch squash-merges to `main` when the milestone completes.
@@ -111,8 +113,8 @@ main ─────────────────────────
 .gsd/auto.lock           — crash detection sentinel
 .gsd/metrics.json        — token/cost accumulator
 .gsd/completed-units.json — dispatch idempotency tracker
-.gsd/STATE.md            — derived state cache (rebuilt by deriveState())
-.gsd/gsd.db              — SQLite cache (rebuilt from tracked markdown by importers)
+.gsd/STATE.md            — rendered state projection
+.gsd/gsd.db              — authoritative runtime database (local, gitignored)
 .gsd/DISCUSSION-MANIFEST.json — discussion phase tracking
 .gsd/milestones/**/*-CONTINUE.md — interrupted-work markers
 .gsd/milestones/**/continue.md   — legacy continue markers
@@ -209,7 +211,7 @@ Squash merge collapses all commits into one on `main`. Mitigations:
 
 **3. SQLite DB desync after `git reset`**
 
-If tracked markdown rolls back via `git reset --hard`, the gitignored `gsd.db` doesn't. Mitigation: the importer layer (M001/S02) rebuilds the DB from markdown on startup. The DB is a cache, markdown is truth.
+If tracked markdown rolls back via `git reset --hard`, the gitignored `gsd.db` does not. Current GSD treats the database as authoritative during runtime and does not silently import markdown projections. Operators should use explicit recovery/import commands when markdown is the intended source after database loss or corruption.
 
 **4. Disk space with multiple worktrees**
 

@@ -1,3 +1,5 @@
+// GSD2 UOK Dispatch Envelope Builder
+
 import type {
   DispatchExplanation,
   DispatchReasonCode,
@@ -5,6 +7,7 @@ import type {
   UokDispatchEnvelope,
   UokGraphNode,
 } from "./contracts.js";
+import { CURRENT_UOK_CONTRACT_VERSION } from "./contracts.js";
 
 export interface BuildDispatchEnvelopeInput {
   action: UokDispatchEnvelope["action"];
@@ -22,6 +25,7 @@ export interface BuildDispatchEnvelopeInput {
 
 export function buildDispatchEnvelope(input: BuildDispatchEnvelopeInput): UokDispatchEnvelope {
   return {
+    version: CURRENT_UOK_CONTRACT_VERSION,
     action: input.action,
     nodeKind: input.node?.kind,
     unitType: input.unitType,

@@ -10,6 +10,134 @@ import { AssistantMessageEventStream, EventStream } from "@gsd/pi-ai";
 import type { AssistantMessage, AssistantMessageEvent, Model } from "@gsd/pi-ai";
 
 describe("agent-loop — pauseTurn handling (#2869)", () => {
+	it("emits token audit after context transforms when opted in", async () => {
+		const finalStop = makeAssistantMessage({
+			content: [{ type: "text", text: "Done." }],
+			stopReason: "stop",
+		});
+		const original = process.env.PI_TOKEN_AUDIT;
+		const originalWrite = process.stderr.write;
+		let written = "";
+		process.env.PI_TOKEN_AUDIT = "1";
+		process.stderr.write = ((chunk: string | Uint8Array) => {
+			written += chunk.toString();
+			return true;
+		}) as typeof process.stderr.write;
+
+		try {
+			let filteredMessages: AgentMessage[] | undefined;
+			const streamFn = (_model: Model<any>, llmContext: any): AssistantMessageEventStream => {
+				assert.equal(llmContext.messages.length, 1, "audit boundary must use transformed context");
+				assert.equal(llmContext.messages[0].content[0].text, "transformed");
+				const stream = new AssistantMessageEventStream();
+				queueMicrotask(() => {
+					stream.push({ type: "start", partial: finalStop });
+					stream.push({ type: "done", message: finalStop });
+					stream.end(finalStop);
+				});
+				return stream;
+			};
+			const context: AgentContext = {
+				systemPrompt: "sensitive system",
+				messages: [{ role: "user", content: [{ type: "text", text: "original" }], timestamp: Date.now() }],
+				tools: [],
+			};
+			const config: AgentLoopConfig = {
+				model: TEST_MODEL,
+				transformContext: async () => [
+					{ role: "user", content: [{ type: "text", text: "transformed" }], timestamp: Date.now() },
+				],
+				convertToLlm: (msgs) => msgs.filter((m): m is any => m.role !== "custom"),
+				filterTools: (tools, _signal, messages) => {
+					filteredMessages = messages;
+					return tools;
+				},
+				toolExecution: "sequential",
+			};
+
+			const stream = agentLoop(
+				[{ role: "user", content: [{ type: "text", text: "new prompt" }], timestamp: Date.now() }],
+				context,
+				config,
+				undefined,
+				streamFn as any,
+			);
+			await collectEvents(stream);
+
+			assert.match(written, /"type":"token_audit"/);
+			assert.match(written, /"messageCount":1/);
+			assert.equal((filteredMessages?.[0] as any)?.content?.[0]?.text, "transformed");
+			assert.doesNotMatch(written, /transformed|original|new prompt|sensitive system/);
+		} finally {
+			process.stderr.write = originalWrite;
+			if (original === undefined) delete process.env.PI_TOKEN_AUDIT;
+			else process.env.PI_TOKEN_AUDIT = original;
+		}
+	});
+
+	it("applies final tool filtering before token audit and provider streaming", async () => {
+		const finalStop = makeAssistantMessage({
+			content: [{ type: "text", text: "Done." }],
+			stopReason: "stop",
+		});
+		const original = process.env.PI_TOKEN_AUDIT;
+		const originalWrite = process.stderr.write;
+		let written = "";
+		process.env.PI_TOKEN_AUDIT = "1";
+		process.stderr.write = ((chunk: string | Uint8Array) => {
+			written += chunk.toString();
+			return true;
+		}) as typeof process.stderr.write;
+
+		try {
+			const streamFn = (_model: Model<any>, llmContext: any): AssistantMessageEventStream => {
+				assert.deepEqual(llmContext.tools?.map((tool: AgentTool) => tool.name), ["write_file"]);
+				const stream = new AssistantMessageEventStream();
+				queueMicrotask(() => {
+					stream.push({ type: "start", partial: finalStop });
+					stream.push({ type: "done", message: finalStop });
+					stream.end(finalStop);
+				});
+				return stream;
+			};
+			const context: AgentContext = {
+				systemPrompt: "You are a test agent.",
+				messages: [{ role: "user", content: [{ type: "text", text: "Use a tool" }], timestamp: Date.now() }],
+				tools: [
+					makeToolWithSchema(),
+					{
+						...makeToolWithSchema(),
+						name: "drop_tool",
+						label: "Drop Tool",
+					},
+				],
+			};
+			const config: AgentLoopConfig = {
+				model: TEST_MODEL,
+				convertToLlm: (msgs) => msgs.filter((m): m is any => m.role !== "custom"),
+				filterTools: async (tools) => tools.filter((tool) => tool.name === "write_file"),
+				toolExecution: "sequential",
+			};
+
+			const stream = agentLoop(
+				[{ role: "user", content: [{ type: "text", text: "Use a tool" }], timestamp: Date.now() }],
+				context,
+				config,
+				undefined,
+				streamFn as any,
+			);
+			await collectEvents(stream);
+
+			assert.match(written, /"toolCount":1/);
+			assert.match(written, /"name":"write_file"/);
+			assert.doesNotMatch(written, /drop_tool/);
+		} finally {
+			process.stderr.write = originalWrite;
+			if (original === undefined) delete process.env.PI_TOKEN_AUDIT;
+			else process.env.PI_TOKEN_AUDIT = original;
+		}
+	});
+
 	it("continues to a second assistant turn when stopReason is pauseTurn", async () => {
 		const pauseTurn = makeAssistantMessage({
 			content: [{ type: "text", text: "Still working..." }],

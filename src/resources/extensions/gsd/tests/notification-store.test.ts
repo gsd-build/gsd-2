@@ -19,6 +19,7 @@ import {
   onNotificationStoreChange,
   _resetNotificationStore,
 } from "../notification-store.js";
+import { resolveNotificationStoreBasePath } from "../bootstrap/register-hooks.js";
 
 describe("notification-store", () => {
   let tmp: string;
@@ -241,6 +242,13 @@ describe("notification-store", () => {
     assert.equal(p1Entries[0].message, "project1");
 
     rmSync(tmp2, { recursive: true, force: true });
+  });
+
+  test("session notification base resolves auto-worktree paths to project root", () => {
+    const worktreePath = join(tmp, ".gsd", "worktrees", "M001");
+    mkdirSync(worktreePath, { recursive: true });
+
+    assert.equal(resolveNotificationStoreBasePath(worktreePath), tmp);
   });
 
   test("counters resync from disk after markAllRead", () => {

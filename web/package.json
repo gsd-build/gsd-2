@@ -12,6 +12,7 @@
     "test": "node --experimental-strip-types --test \"lib/__tests__/*.test.ts\""
   },
   "dependencies": {
+    "@gsd-build/contracts": "file:../packages/contracts",
     "@hookform/resolvers": "^3.9.1",
     "@lezer/highlight": "^1.2.3",
     "@mariozechner/jiti": "^2.6.2",

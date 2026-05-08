@@ -135,6 +135,20 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
 
 	/**
+	 * Optional final tool filter applied immediately before each provider call.
+	 *
+	 * Use this for runtime policy that depends on the fully active tool set.
+	 * The returned list is what token audit and the provider request both see.
+	 * Receives the post-transform AgentMessage context so policy can scope
+	 * request-local custom messages without inspecting provider payload text.
+	 */
+	filterTools?: (
+		tools: AgentTool<any>[],
+		signal?: AbortSignal,
+		messages?: AgentMessage[],
+	) => AgentTool<any>[] | Promise<AgentTool<any>[]>;
+
+	/**
 	 * Resolves an API key dynamically for each LLM call.
 	 *
 	 * Useful for short-lived OAuth tokens (e.g., GitHub Copilot) that may expire

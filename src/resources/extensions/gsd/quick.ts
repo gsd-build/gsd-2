@@ -10,8 +10,8 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, relative } from "node:path";
 import { loadPrompt } from "./prompt-loader.js";
 import { gsdRoot } from "./paths.js";
 import { GitServiceImpl, runGit } from "./git-service.js";
@@ -75,6 +75,40 @@ function ensureQuickDir(basePath: string, taskNum: number, slug: string): string
   const taskDir = join(quickDir, `${taskNum}-${slug}`);
   mkdirSync(taskDir, { recursive: true });
   return taskDir;
+}
+
+function isPathInside(parent: string, child: string): boolean {
+  const rel = relative(parent, child);
+  return rel === "" || (!!rel && !rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function isExternalGsdRoot(basePath: string, root: string): boolean {
+  try {
+    return !isPathInside(realpathSync(basePath), realpathSync(root));
+  } catch {
+    return !isPathInside(basePath, root);
+  }
+}
+
+export function buildQuickCommitInstruction(basePath: string, root: string): string {
+  const externalState = isExternalGsdRoot(basePath, root);
+  if (externalState) {
+    return [
+      "Commit repo changes atomically, but do not stage or commit `.gsd/quick/...`:",
+      "   - `.gsd/` resolves outside this git repository, so Git cannot stage quick-task summary files from the project repo.",
+      "   - Write the quick summary file directly at the requested path; that file is persisted by GSD external state.",
+      "   - Stage and commit only implementation/test/docs files that live inside the repository.",
+      "   - If the task only writes quick-task research/summary files and no repository files changed, do not run `git commit`; report that there was nothing in the project repo to commit.",
+    ].join("\n");
+  }
+
+  return [
+    "Commit your changes atomically:",
+    "   - Use conventional commit messages (feat:, fix:, refactor:, etc.)",
+    "   - Stage only relevant files — never commit secrets or runtime files.",
+    "   - Commit logical units separately if the task involves distinct changes.",
+    "   - Quick tasks run outside the auto-mode lifecycle — there is no system auto-commit, so commit directly here.",
+  ].join("\n");
 }
 
 function quickReturnStatePath(basePath: string): string {
@@ -246,6 +280,7 @@ export async function handleQuick(
     taskDir: taskDirRel,
     branch: actualBranch,
     summaryPath,
+    commitInstruction: buildQuickCommitInstruction(basePath, root),
     date,
     taskNum: String(taskNum),
     slug,

@@ -233,6 +233,16 @@ describe("getNextPendingStep", () => {
     const next = getNextPendingStep(graph);
     assert.equal(next?.id, "b");
   });
+
+  it("treats expanded dependencies as satisfied", (t) => {
+    const graph = makeGraph([
+      makeStep({ id: "iter", status: "expanded" }),
+      makeStep({ id: "after", dependsOn: ["iter"] }),
+    ]);
+
+    const next = getNextPendingStep(graph);
+    assert.equal(next?.id, "after");
+  });
 });
 
 // ─── markStepComplete ────────────────────────────────────────────────────

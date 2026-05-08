@@ -1,16 +1,16 @@
-You are merging changes from worktree **{{worktreeName}}** (branch `{{worktreeBranch}}`) into target branch `{{mainBranch}}`.
+You are merging worktree **{{worktreeName}}** (branch `{{worktreeBranch}}`) into target branch `{{mainBranch}}`.
 
 ## Working Directory
 
-Your current working directory has been set to the **main project tree** at `{{mainTreePath}}`. You are on the `{{mainBranch}}` branch. All git and file commands run from here.
+Your CWD is the **main project tree** at `{{mainTreePath}}` on `{{mainBranch}}`. Run all git and file commands here.
 
-- **Main tree (CWD):** `{{mainTreePath}}` — this is where you run `git merge`, read main-branch files, and commit
-- **Worktree directory:** `{{worktreePath}}` — the worktree's working copy; read files here to inspect worktree versions before merging
+- **Main tree (CWD):** `{{mainTreePath}}` — run `git merge`, read main files, commit.
+- **Worktree directory:** `{{worktreePath}}` — inspect worktree versions before merging.
 - **Worktree branch:** `{{worktreeBranch}}`
 
 ## Context
 
-The worktree was created as a parallel workspace. It may contain code changes, new milestones, updated roadmaps, new plans, research, decisions, or other artifacts that need to be merged into the target branch.
+The worktree may contain code, milestones, roadmaps, plans, research, decisions, requirements, or other artifacts to merge.
 
 ### Commit History (worktree)
 
@@ -43,50 +43,50 @@ The worktree was created as a parallel workspace. It may contain code changes, n
 
 ## Your Task
 
-Analyze the changes and guide the merge. Follow these steps exactly:
+Analyze and guide the merge exactly:
 
 ### Step 1: Categorize Changes
 
-Classify each changed file:
+Classify each changed file.
 
 **Code changes:**
-- **New source files** — new modules, components, utilities, tests
-- **Modified source files** — changes to existing code
+- **New source files** — modules, components, utilities, tests.
+- **Modified source files** — existing code changes.
 - **Config changes** — package.json, tsconfig, build config, etc.
-- **Deleted files** — removed source or config files
+- **Deleted files** — removed source/config.
 
 **GSD artifact changes:**
-- **New milestones** — entirely new M###/ directories with roadmaps
-- **New slices/tasks** — new planning artifacts within existing milestones
-- **Updated roadmaps** — modifications to existing M###-ROADMAP.md files
-- **Updated plans** — modifications to existing slice or task plans
-- **Research/context** — new or updated RESEARCH.md, CONTEXT.md files
+- **New milestones** — new M###/ directories with roadmaps.
+- **New slices/tasks** — planning artifacts inside existing milestones.
+- **Updated roadmaps** — changed M###-ROADMAP.md files.
+- **Updated plans** — changed slice/task plans.
+- **Research/context** — new or updated RESEARCH.md, CONTEXT.md.
 - **Decisions** — changes to DECISIONS.md
 - **Requirements** — changes to REQUIREMENTS.md
 - **Other** — anything else
 
 ### Step 2: Conflict Assessment
 
-For each **modified** file, check whether the main branch version has also changed since the worktree branched off. Flag any files where both branches have diverged — these need manual reconciliation.
+For each **modified** file, check whether main also changed since the worktree branched. Flag diverged files for manual reconciliation.
 
 To compare versions:
-- **Main-branch version:** read the file at its normal path (your CWD is the main tree)
-- **Worktree version:** read the file at `{{worktreePath}}/<relative-path>`
-- Use `git merge-base {{mainBranch}} {{worktreeBranch}}` to find the common ancestor if needed
+- **Main version:** read normal path from CWD.
+- **Worktree version:** read `{{worktreePath}}/<relative-path>`.
+- Use `git merge-base {{mainBranch}} {{worktreeBranch}}` if needed.
 
 Classify each modified file:
-- **Clean merges** — main hasn't changed, worktree changes can apply directly
-- **Conflicts** — both branches changed the same file; needs reconciliation
-- **Stale changes** — worktree modified a file that main has since replaced or removed
+- **Clean merges** — main unchanged; apply worktree changes directly.
+- **Conflicts** — both changed same file; reconcile.
+- **Stale changes** — main replaced/removed a file the worktree modified.
 
 ### Step 3: Merge Strategy
 
-Present a merge plan to the user:
+Present a merge plan:
 
-1. For **clean merges**: list files that will merge without conflict
-2. For **conflicts**: show both versions side-by-side and propose a reconciled version
-3. For **new files**: confirm they should be added to the main branch
-4. For **removed files**: confirm the removals are intentional
+1. **Clean merges:** files expected to merge without conflict.
+2. **Conflicts:** show both versions side-by-side and propose reconciliation.
+3. **New files:** confirm they should be added.
+4. **Removed files:** confirm removals are intentional.
 
 Ask the user to confirm the merge plan before proceeding.
 
@@ -97,17 +97,17 @@ Ask the user to confirm the merge plan before proceeding.
 Once the user has explicitly confirmed, run all commands from `{{mainTreePath}}` (your CWD):
 
 1. Ensure you are on the target branch: `git checkout {{mainBranch}}`
-2. If there are conflicts requiring manual reconciliation, apply the reconciled versions first
+2. If conflicts require manual reconciliation, apply reconciled versions first
 3. Run `git merge --squash {{worktreeBranch}}` to bring in all changes
-4. Review the staged changes — if any reconciled files need adjustment, apply them now
+4. Review staged changes; adjust reconciled files if needed
 5. Commit with message: `merge(worktree/{{worktreeName}}): <summary of what was merged>`
 6. Report what was merged
 
 ### Step 5: Cleanup Prompt
 
 After a successful merge, ask the user whether to:
-- **Remove the worktree** — delete the worktree directory and the `{{worktreeBranch}}` branch
-- **Keep the worktree** — leave it for continued parallel work
+- **Remove the worktree** — delete the worktree directory and `{{worktreeBranch}}`.
+- **Keep the worktree** — leave it for continued parallel work.
 
 If the user chooses to remove it, run these commands from `{{mainTreePath}}`:
 ```
@@ -119,7 +119,7 @@ git branch -D {{worktreeBranch}}
 
 ## Important
 
-- Never silently discard changes from either branch
-- When in doubt about a conflict, show both versions and ask the user
-- Preserve all GSD artifact formatting conventions (frontmatter, section structure, checkbox states)
-- If the worktree introduced new milestone IDs that conflict with main, flag this immediately
+- Never silently discard changes from either branch.
+- When in doubt, show both versions and ask.
+- Preserve GSD artifact formatting: frontmatter, sections, checkbox states.
+- If new milestone IDs conflict with main, flag immediately.

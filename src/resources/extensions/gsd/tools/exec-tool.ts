@@ -12,6 +12,7 @@ import {
   type ExecSandboxResult,
 } from "../exec-sandbox.js";
 import { isContextModeEnabled, type ContextModeConfig } from "../preferences-types.js";
+import { contextModeDisabledResult, type ToolExecutionResult } from "./context-mode-tool-result.js";
 
 export interface ExecToolParams {
   runtime: ExecSandboxRequest["runtime"];
@@ -20,17 +21,12 @@ export interface ExecToolParams {
   timeout_ms?: number;
 }
 
-export interface ToolExecutionResult {
-  content: Array<{ type: "text"; text: string }>;
-  details: Record<string, unknown>;
-  isError?: boolean;
-}
-
 export interface ExecToolDeps {
   baseDir: string;
   preferences: { context_mode?: ContextModeConfig } | null;
   /** Optional override for testing. */
   run?: (req: ExecSandboxRequest, opts: ExecSandboxOptions) => Promise<ExecSandboxResult>;
+  env?: NodeJS.ProcessEnv;
   now?: () => Date;
   generateId?: () => string;
 }
@@ -77,21 +73,6 @@ function isEnabled(prefs: ExecToolDeps["preferences"]): boolean {
   return isContextModeEnabled(prefs);
 }
 
-function disabledResult(): ToolExecutionResult {
-  return {
-    content: [
-      {
-        type: "text",
-        text:
-          "gsd_exec is disabled by `context_mode.enabled: false` in preferences. Remove that " +
-          "override (or set it to true) to re-enable sandboxed tool-output execution.",
-      },
-    ],
-    details: { operation: "gsd_exec", error: "context_mode_disabled" },
-    isError: true,
-  };
-}
-
 function paramError(message: string): ToolExecutionResult {
   return {
     content: [{ type: "text", text: `Error: ${message}` }],
@@ -104,7 +85,7 @@ export async function executeGsdExec(
   params: ExecToolParams,
   deps: ExecToolDeps,
 ): Promise<ToolExecutionResult> {
-  if (!isEnabled(deps.preferences)) return disabledResult();
+  if (!isEnabled(deps.preferences)) return contextModeDisabledResult("gsd_exec");
 
   const runtime = params.runtime;
   if (runtime !== "bash" && runtime !== "node" && runtime !== "python") {
@@ -121,7 +102,7 @@ export async function executeGsdExec(
   const opts = buildExecOptions(
     deps.baseDir,
     deps.preferences?.context_mode,
-    { now: deps.now, generateId: deps.generateId },
+    { env: deps.env, now: deps.now, generateId: deps.generateId },
   );
   const run = deps.run ?? runExecSandbox;
 

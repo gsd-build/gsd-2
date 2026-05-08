@@ -17,6 +17,7 @@ import { truncateToWidth, visibleWidth, matchesKey, Key } from "@gsd/pi-tui";
 
 import { formatDuration, STATUS_GLYPH, STATUS_COLOR } from "../shared/mod.js";
 import { formattedShortcutPair } from "./shortcut-defs.js";
+import { resolveGsdPathContract } from "./paths.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -126,7 +127,8 @@ function discoverWorkers(basePath: string): string[] {
 }
 
 function querySliceProgress(basePath: string, mid: string): SliceProgress[] {
-  const dbPath = join(basePath, ".gsd", "worktrees", mid, ".gsd", "gsd.db");
+  const workRoot = join(basePath, ".gsd", "worktrees", mid);
+  const dbPath = resolveGsdPathContract(workRoot, basePath).projectDb;
   if (!existsSync(dbPath)) return [];
 
   try {
@@ -166,7 +168,8 @@ function extractCostFromNdjson(basePath: string, mid: string): number {
 }
 
 function queryRecentCompletions(basePath: string, mid: string): string[] {
-  const dbPath = join(basePath, ".gsd", "worktrees", mid, ".gsd", "gsd.db");
+  const workRoot = join(basePath, ".gsd", "worktrees", mid);
+  const dbPath = resolveGsdPathContract(workRoot, basePath).projectDb;
   if (!existsSync(dbPath)) return [];
   try {
     const sql = `SELECT id, slice_id, one_liner FROM tasks WHERE milestone_id='${mid}' AND status='complete' AND completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT 5`;

@@ -144,6 +144,18 @@ test("safety-harness-bug2-race: bash evidence survives mid-unit reset between to
   assert.ok(bash[0].outputSnippet.includes("found"), "output snippet captured");
 });
 
+test("safety-harness: gsd_exec counts as execution evidence", () => {
+  resetEvidence();
+
+  recordToolCall("tc-exec-1", "gsd_exec", { command: "grep -n render index.html" });
+  recordToolResult("tc-exec-1", "gsd_exec", "Command exited with code 0\n1:render\n", false);
+
+  const bash = getEvidence().filter((e): e is BashEvidence => e.kind === "bash");
+  assert.equal(bash.length, 1, "gsd_exec must be tracked as execution evidence");
+  assert.equal(bash[0].command, "grep -n render index.html");
+  assert.equal(bash[0].exitCode, 0);
+});
+
 // ─── Bug 3: git diff HEAD~1 scope check ─────────────────────────────────────
 
 test("safety-harness-bug3: validateFileChanges works on initial commit (no HEAD~1)", (t) => {
@@ -236,4 +248,21 @@ test("safety-harness-bug3: validateFileChanges works on merge commit", (t) => {
 
   // Must produce a valid result without throwing
   assert.ok(audit !== null, "audit must be produced for merge commit repo");
+});
+
+test("safety-harness: planned changed file avoids unexpected-file warning", (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-planned-file-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+
+  execFileSync("git", ["init"], { cwd: base });
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: base });
+  execFileSync("git", ["config", "user.name", "Test User"], { cwd: base });
+  writeFileSync(join(base, "index.html"), "<main></main>\n");
+  execFileSync("git", ["add", "index.html"], { cwd: base });
+  execFileSync("git", ["commit", "-m", "add static app"], { cwd: base });
+
+  const audit = validateFileChanges(base, [], ["index.html"]);
+  assert.ok(audit !== null, "audit must be produced");
+  assert.deepEqual(audit!.unexpectedFiles, [], "planned index.html must not be unexpected");
+  assert.deepEqual(audit!.missingFiles, [], "planned index.html must not be missing");
 });

@@ -1,3 +1,5 @@
+// Project/App: GSD-2
+// File Purpose: Selects the UOK kernel path and records parity diagnostics.
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -9,6 +11,7 @@ import { buildAuditEnvelope, emitUokAuditEvent } from "./audit.js";
 import { setUnifiedAuditEnabled } from "./audit-toggle.js";
 import { resolveUokFlags } from "./flags.js";
 import { createTurnObserver } from "./loop-adapter.js";
+import { incrementLegacyTelemetry } from "../legacy-telemetry.js";
 
 interface RunAutoLoopWithUokArgs {
   ctx: ExtensionContext;
@@ -54,10 +57,14 @@ export async function runAutoLoopWithUok(args: RunAutoLoopWithUokArgs): Promise<
   const prefs = deps.loadEffectiveGSDPreferences()?.preferences;
   const flags = resolveUokFlags(prefs);
   setUnifiedAuditEnabled(flags.auditUnified);
+  const pathLabel = resolveKernelPathLabel(flags);
+  if (pathLabel !== "uok-kernel") {
+    incrementLegacyTelemetry("legacy.uokFallbackUsed");
+  }
 
   writeParityEvent(s.basePath, {
     ts: new Date().toISOString(),
-    path: resolveKernelPathLabel(flags),
+    path: pathLabel,
     flags,
     phase: "enter",
   });
@@ -98,7 +105,7 @@ export async function runAutoLoopWithUok(args: RunAutoLoopWithUokArgs): Promise<
     }
     writeParityEvent(s.basePath, {
       ts: new Date().toISOString(),
-      path: resolveKernelPathLabel(flags),
+      path: pathLabel,
       flags,
       phase: "exit",
       status: "ok",
@@ -106,7 +113,7 @@ export async function runAutoLoopWithUok(args: RunAutoLoopWithUokArgs): Promise<
   } catch (err) {
     writeParityEvent(s.basePath, {
       ts: new Date().toISOString(),
-      path: resolveKernelPathLabel(flags),
+      path: pathLabel,
       flags,
       phase: "exit",
       status: "error",

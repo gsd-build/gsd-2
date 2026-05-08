@@ -79,6 +79,27 @@ test('handlePlanTask rejects invalid payloads', async () => {
   }
 });
 
+test('handlePlanTask rejects absolute task IO paths outside the active worktree', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParent();
+    const outside = join(tmpdir(), 'outside-checkout', 'index.html');
+    const result = await handlePlanTask({
+      ...validParams(),
+      inputs: [outside],
+      expectedOutput: [outside],
+    }, base);
+
+    assert.ok('error' in result);
+    assert.match(result.error, /validation failed: inputs contains absolute path outside working directory/);
+    assert.equal(getTask('M001', 'S02', 'T02'), null, 'invalid planning IO must not persist the task');
+  } finally {
+    cleanup(base);
+  }
+});
+
 test('handlePlanTask rejects missing parent slice', async () => {
   const base = makeTmpBase();
   openDatabase(join(base, '.gsd', 'gsd.db'));

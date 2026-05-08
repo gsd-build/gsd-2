@@ -1,7 +1,8 @@
+// GSD-2 Interactive Tool Execution Rendering Tests
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import stripAnsi from "strip-ansi";
-import { ToolExecutionComponent } from "../tool-execution.js";
+import { ToolExecutionComponent, ToolPhaseSummaryComponent, type ToolExecutionPhase } from "../tool-execution.js";
 import { initTheme } from "../../theme/theme.js";
 
 initTheme("dark", false);
@@ -14,7 +15,7 @@ function renderTool(
 		isError: boolean;
 		details?: Record<string, unknown>;
 	},
-	toolDefinition?: { label?: string },
+	toolDefinition?: { label?: string; renderCall?: (...args: any[]) => any; renderResult?: (...args: any[]) => any },
 ): string {
 	const component = new ToolExecutionComponent(
 		toolName,
@@ -36,7 +37,7 @@ function renderToolCollapsed(
 		isError: boolean;
 		details?: Record<string, unknown>;
 	},
-	toolDefinition?: { label?: string },
+	toolDefinition?: { label?: string; renderCall?: (...args: any[]) => any; renderResult?: (...args: any[]) => any },
 ): string {
 	const component = new ToolExecutionComponent(
 		toolName,
@@ -50,23 +51,104 @@ function renderToolCollapsed(
 }
 
 describe("ToolExecutionComponent", () => {
-	test("renders framed header with Running status while tool is partial", () => {
+	test("renders framed header with running status while tool is partial", () => {
 		const rendered = renderToolCollapsed("mcp__demo__do_thing", { ok: true });
 
-		assert.match(rendered, /Tool demo\u00b7do_thing/);
-		assert.match(rendered, /Running/);
+		assert.match(rendered, /demo\u00b7do_thing/);
+		assert.doesNotMatch(rendered, /Tool demo\u00b7do_thing/);
+		assert.match(rendered, /running/);
+		assert.match(rendered, /running · \d+(ms|s)/);
 	});
 
-	test("renders framed header with Error status for failed tool result", () => {
+	test("renders framed header with failed status for failed tool result", () => {
 		const rendered = renderTool(
 			"mcp__demo__do_thing",
 			{ ok: true },
 			{ content: [{ type: "text", text: "boom" }], isError: true },
 		);
 
-		assert.match(rendered, /Tool demo\u00b7do_thing/);
-		assert.match(rendered, /Error/);
+		assert.match(rendered, /demo\u00b7do_thing/);
+		assert.doesNotMatch(rendered, /Tool demo\u00b7do_thing/);
+		assert.match(rendered, /failed/);
+		assert.match(rendered, /failed · \d+(ms|s)/);
 		assert.match(rendered, /boom/);
+	});
+
+	test("collapses successful low-signal tool cards by default", () => {
+		const rendered = renderToolCollapsed(
+			"mcp__demo__noop",
+			{ ok: true },
+			{ content: [], isError: false },
+		);
+
+		assert.match(rendered, /success · \d+(ms|s)/);
+		assert.match(rendered, /demo\u00b7noop/);
+		assert.doesNotMatch(rendered, /Completed/);
+		assert.doesNotMatch(rendered, /ok=true/);
+	});
+
+	test("exposes phase metadata for successful low-signal tool rows", () => {
+		const component = new ToolExecutionComponent(
+			"gsd_requirement_update",
+			{ id: "R001" },
+			{},
+			{ label: "Update Requirement" } as any,
+			{ requestRender() {} } as any,
+		);
+		component.updateResult({ content: [], isError: false });
+
+		assert.deepEqual(component.getRollupPhase()?.label, "Requirement writes");
+	});
+
+	test("exposes phase metadata for collapsed output-bearing generic tools", () => {
+		const component = new ToolExecutionComponent(
+			"mcp__demo__do_thing",
+			{ ok: true },
+			{},
+			undefined,
+			{ requestRender() {} } as any,
+		);
+		component.updateResult({ content: [{ type: "text", text: "important output" }], isError: false });
+
+		assert.deepEqual(component.getRollupPhase()?.label, "Other tool actions");
+	});
+
+	test("renders phase-based summaries for rolled-up tool executions", () => {
+		const phases: ToolExecutionPhase[] = [
+			{ label: "Setup / shell", count: 6, durationMs: 12 },
+			{ label: "Context reads", count: 4, durationMs: 6 },
+			{ label: "Requirement writes", count: 4, durationMs: 4 },
+			{ label: "Memory lookups", count: 4, durationMs: 4 },
+			{ label: "Finalization", count: 1, durationMs: 1 },
+		];
+		const rendered = stripAnsi(new ToolPhaseSummaryComponent(phases).render(120).join("\n"));
+
+		assert.match(rendered, /Setup \/ shell 6 actions\s+success · 12ms/);
+		assert.match(rendered, /Context reads 4 actions\s+success · 6ms/);
+		assert.match(rendered, /Requirement writes 4 actions\s+success · 4ms/);
+		assert.match(rendered, /Memory lookups 4 actions\s+success · 4ms/);
+		assert.match(rendered, /Finalization 1 action\s+success · 1ms/);
+	});
+
+	test("passes failed result status to custom result renderers", () => {
+		const rendered = renderTool(
+			"gsd_requirement_save",
+			{ id: "R001" },
+			{ content: [{ type: "text", text: "saved" }], isError: true },
+			{
+				label: "Save Requirement",
+				renderResult(result: { isError?: boolean }) {
+					return {
+						render: () => [result.isError ? "custom saw error" : "custom saw success"],
+						invalidate() {},
+					};
+				},
+			},
+		);
+
+		assert.match(rendered, /failed/);
+		assert.match(rendered, /custom saw error/);
+		assert.doesNotMatch(rendered, /custom saw success/);
 	});
 
 	test("renders capitalized Claude Code Bash tool names with bash output instead of generic args JSON", () => {
@@ -127,14 +209,16 @@ describe("ToolExecutionComponent", () => {
 			{ label: "Complete Slice" },
 		);
 
-		assert.match(rendered, /Tool Complete Slice/);
+		assert.match(rendered, /Complete Slice/);
+		assert.doesNotMatch(rendered, /Tool Complete Slice/);
 		assert.doesNotMatch(rendered, /gsd_slice_complete/);
 	});
 
 	test("frame header strips gsd_ prefix and title-cases when no label is registered", () => {
 		const rendered = renderToolCollapsed("gsd_requirement_update", { id: "R005" });
 
-		assert.match(rendered, /Tool Requirement Update/);
+		assert.match(rendered, /Requirement Update/);
+		assert.doesNotMatch(rendered, /Tool Requirement Update/);
 		assert.doesNotMatch(rendered, /gsd_requirement_update/);
 	});
 
@@ -163,7 +247,7 @@ describe("ToolExecutionComponent", () => {
 		assert.doesNotMatch(rendered, /…/);
 	});
 
-	test("generic fallback truncates long output when collapsed", () => {
+	test("generic fallback collapses successful output rows until expanded", () => {
 		const longOutput = Array.from({ length: 25 }, (_, i) => `line ${i + 1}`).join("\n");
 		const rendered = renderToolCollapsed(
 			"mcp__demo__do_thing",
@@ -171,10 +255,10 @@ describe("ToolExecutionComponent", () => {
 			{ content: [{ type: "text", text: longOutput }], isError: false },
 		);
 
-		assert.match(rendered, /line 1\b/);
-		assert.match(rendered, /line 10\b/);
-		assert.doesNotMatch(rendered, /line 20\b/);
-		assert.match(rendered, /\(15 more lines/);
+		assert.match(rendered, /demo\u00b7do_thing/);
+		assert.match(rendered, /success · \d+(ms|s)/);
+		assert.doesNotMatch(rendered, /line 1\b/);
+		assert.doesNotMatch(rendered, /\(15 more lines/);
 	});
 
 	test("generic fallback falls back to truncated JSON for complex args", () => {

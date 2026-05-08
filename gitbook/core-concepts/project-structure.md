@@ -37,12 +37,15 @@ Examples:
 - "Implement JWT middleware"
 - "Build the login form component"
 
-## The `.gsd/` Directory
+## Project State
 
-All project state lives on disk in a `.gsd/` directory at your project root:
+GSD keeps authoritative runtime state in the project-root SQLite database and renders markdown projections into `.gsd/` for review, prompts, and git history. The markdown files are useful to read and commit, but completion status and queue position come from the database unless you run an explicit import or recovery command.
+
+The `.gsd/` directory looks like this:
 
 ```
 .gsd/
+  gsd.db              — authoritative runtime database (local, gitignored)
   PROJECT.md          — living description of what the project is
   REQUIREMENTS.md     — requirement contract (active/validated/deferred)
   DECISIONS.md        — append-only architectural decisions log
@@ -73,7 +76,8 @@ All project state lives on disk in a `.gsd/` directory at your project root:
 | `DECISIONS.md` | Append-only log of architectural decisions with rationale |
 | `KNOWLEDGE.md` | Rules, patterns, and lessons learned across sessions — GSD reads this at the start of every task |
 | `RUNTIME.md` | Runtime context like API URLs, ports, and environment variables |
-| `STATE.md` | Current status at a glance — auto-generated, don't edit manually |
+| `gsd.db` | Authoritative runtime state for workflow hierarchy, completion, requirements, decisions, and summaries |
+| `STATE.md` | Current status at a glance — rendered from the database, don't edit manually |
 
 ## How Work Flows
 

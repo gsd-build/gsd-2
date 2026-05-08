@@ -31,7 +31,7 @@ export interface GraphStep {
   status: "pending" | "active" | "complete" | "expanded";
   /** The prompt to dispatch for this step. */
   prompt: string;
-  /** IDs of steps that must be "complete" before this step can run. */
+  /** IDs of steps that must be terminal before this step can run. */
   dependsOn: string[];
   /** For iteration instances: ID of the parent step that was expanded. */
   parentStepId?: string;
@@ -152,10 +152,17 @@ export function writeGraph(runDir: string, graph: WorkflowGraph): void {
 }
 
 /**
- * Get the next pending step whose dependencies are all complete.
+ * Return whether a graph step status satisfies dependency edges.
+ */
+export function isTerminalStepStatus(status: GraphStep["status"] | undefined): boolean {
+  return status === "complete" || status === "expanded";
+}
+
+/**
+ * Get the next pending step whose dependencies are all terminal.
  *
  * Returns the first step (in array order) with status "pending" where
- * every step in its `dependsOn` list has status "complete".
+ * every step in its `dependsOn` list has status "complete" or "expanded".
  *
  * @param graph — the workflow graph to query
  * @returns The next dispatchable step, or null if none available
@@ -165,8 +172,8 @@ export function getNextPendingStep(graph: WorkflowGraph): GraphStep | null {
 
   for (const step of graph.steps) {
     if (step.status !== "pending") continue;
-    const depsComplete = step.dependsOn.every(
-      (depId) => statusMap.get(depId) === "complete",
+    const depsComplete = step.dependsOn.every((depId) =>
+      isTerminalStepStatus(statusMap.get(depId)),
     );
     if (depsComplete) return step;
   }

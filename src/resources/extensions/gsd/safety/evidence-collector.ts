@@ -50,6 +50,15 @@ export interface FileEditEvidence {
 
 export type EvidenceEntry = BashEvidence | FileWriteEvidence | FileEditEvidence;
 
+const EXECUTION_TOOL_NAMES = new Set([
+  "bash",
+  "Bash",
+  "gsd_exec",
+  "gsd_exec_search",
+  "mcp__gsd-workflow__gsd_exec",
+  "mcp__gsd-workflow__gsd_exec_search",
+]);
+
 // ─── Module State ───────────────────────────────────────────────────────────
 
 let unitEvidence: EvidenceEntry[] = [];
@@ -188,11 +197,11 @@ export function clearEvidenceFromDisk(
  * Exit codes and output are filled in by recordToolResult after execution.
  */
 export function recordToolCall(toolCallId: string, toolName: string, input: Record<string, unknown>): void {
-  if (toolName === "bash" || toolName === "Bash") {
+  if (EXECUTION_TOOL_NAMES.has(toolName)) {
     unitEvidence.push({
       kind: "bash",
       toolCallId,
-      command: String(input.command ?? ""),
+      command: String(input.command ?? input.cmd ?? input.query ?? ""),
       exitCode: -1,
       outputSnippet: "",
       timestamp: Date.now(),

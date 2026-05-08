@@ -18,9 +18,12 @@ import type {
 	RpcResponse,
 	RpcSessionState,
 	RpcSlashCommand,
+	SdkAgentEvent,
 	ThinkingLevel,
 	SessionStats,
 } from "./rpc-types.js";
+
+export type { SdkAgentEvent };
 
 // ============================================================================
 // Types
@@ -31,12 +34,6 @@ type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : n
 
 /** RpcCommand without the id field (for internal send) */
 type RpcCommandBody = DistributiveOmit<RpcCommand, "id">;
-
-/** Agent event — a loosely-typed record from the server. The `type` field is always present. */
-export interface SdkAgentEvent {
-	type: string;
-	[key: string]: unknown;
-}
 
 export interface RpcClientOptions {
 	/** Path to the CLI entry point (default: searches for dist/cli.js) */

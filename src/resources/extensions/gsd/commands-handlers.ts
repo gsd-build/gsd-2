@@ -11,7 +11,7 @@ import { join, resolve as resolvePath, sep } from "node:path";
 import { homedir } from "node:os";
 import { deriveState } from "./state.js";
 import { gsdRoot } from "./paths.js";
-import { getHomeDir } from "./home-dir.js";
+import { gsdHome } from "./gsd-home.js";
 import { appendCapture, hasPendingCaptures, loadPendingCaptures } from "./captures.js";
 import { appendOverride, appendKnowledge } from "./files.js";
 import {
@@ -24,8 +24,17 @@ import {
 } from "./doctor.js";
 import { isAutoActive, checkRemoteAutoSession } from "./auto.js";
 import { getAutoWorktreePath } from "./auto-worktree.js";
-import { projectRoot } from "./commands/context.js";
+import { currentDirectoryRoot, projectRoot } from "./commands/context.js";
 import { loadPrompt } from "./prompt-loader.js";
+import {
+  buildDoctorHealIssuePayload,
+  buildDoctorHealSummary,
+  buildWorkflowDispatchContent,
+} from "./workflow-protocol.js";
+import {
+  restoreGsdWorkflowTools,
+  scopeGsdWorkflowToolsForDispatch,
+} from "./bootstrap/register-hooks.js";
 
 const UPDATE_REGISTRY_URL = "https://registry.npmjs.org/gsd-pi/latest";
 const UPDATE_FETCH_TIMEOUT_MS = 5000;
@@ -69,21 +78,26 @@ async function fetchLatestVersionForCommand(): Promise<string | null> {
 }
 
 export function dispatchDoctorHeal(pi: ExtensionAPI, scope: string | undefined, reportText: string, structuredIssues: string): void {
-  const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(getHomeDir(), ".gsd", "agent", "GSD-WORKFLOW.md");
+  const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(gsdHome(), "agent", "GSD-WORKFLOW.md");
   const workflow = readFileSync(workflowPath, "utf-8");
   const prompt = loadPrompt("doctor-heal", {
-    doctorSummary: reportText,
-    structuredIssues,
+    doctorSummary: buildDoctorHealSummary(reportText),
+    structuredIssues: buildDoctorHealIssuePayload(structuredIssues),
     scopeLabel: scope ?? "active milestone / blocking scope",
     doctorCommandSuffix: scope ? ` ${scope}` : "",
   });
 
-  const content = `Read the following GSD workflow protocol and execute exactly.\n\n${workflow}\n\n## Your Task\n\n${prompt}`;
+  const content = buildWorkflowDispatchContent({ workflow, workflowPath, task: prompt });
+  const savedTools = scopeGsdWorkflowToolsForDispatch(pi);
 
-  pi.sendMessage(
-    { customType: "gsd-doctor-heal", content, display: false },
-    { triggerTurn: true },
-  );
+  try {
+    pi.sendMessage(
+      { customType: "gsd-doctor-heal", content, display: false },
+      { triggerTurn: true },
+    );
+  } finally {
+    restoreGsdWorkflowTools(pi, savedTools);
+  }
 }
 
 /** Parse doctor command args into structured flags and positionals (pure, no I/O). */
@@ -203,7 +217,7 @@ export async function handleCapture(args: string, ctx: ExtensionCommandContext):
     return;
   }
 
-  const basePath = process.cwd();
+  const basePath = currentDirectoryRoot();
 
   // Ensure .gsd/ exists — capture should work even without a milestone
   const gsdDir = gsdRoot(basePath);
@@ -256,21 +270,26 @@ export async function handleTriage(ctx: ExtensionCommandContext, pi: ExtensionAP
     roadmapContext: roadmapContext || "(no active roadmap)",
   });
 
-  const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(getHomeDir(), ".gsd", "agent", "GSD-WORKFLOW.md");
+  const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(gsdHome(), "agent", "GSD-WORKFLOW.md");
   const workflow = readFileSync(workflowPath, "utf-8");
+  const savedTools = scopeGsdWorkflowToolsForDispatch(pi);
 
-  pi.sendMessage(
-    {
-      customType: "gsd-triage",
-      content: `Read the following GSD workflow protocol and execute exactly.\n\n${workflow}\n\n## Your Task\n\n${prompt}`,
-      display: false,
-    },
-    { triggerTurn: true },
-  );
+  try {
+    pi.sendMessage(
+      {
+        customType: "gsd-triage",
+        content: buildWorkflowDispatchContent({ workflow, workflowPath, task: prompt }),
+        display: false,
+      },
+      { triggerTurn: true },
+    );
+  } finally {
+    restoreGsdWorkflowTools(pi, savedTools);
+  }
 }
 
 export async function handleSteer(change: string, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<void> {
-  const basePath = process.cwd();
+  const basePath = currentDirectoryRoot();
   const state = await deriveState(basePath);
   const mid = state.activeMilestone?.id ?? "none";
   const sid = state.activeSlice?.id ?? "none";
@@ -343,7 +362,7 @@ export async function handleKnowledge(args: string, ctx: ExtensionCommandContext
   }
 
   const type = typeArg as "rule" | "pattern" | "lesson";
-  const basePath = process.cwd();
+  const basePath = currentDirectoryRoot();
   const state = await deriveState(basePath);
   const scope = state.activeMilestone?.id
     ? `${state.activeMilestone.id}${state.activeSlice ? `/${state.activeSlice.id}` : ""}`
@@ -372,7 +391,7 @@ Examples:
   }
 
   const [hookName, unitType, unitId] = parts;
-  const basePath = projectRoot();
+  const basePath = currentDirectoryRoot();
 
   // Import the hook trigger function
   const { triggerHookManually, formatHookStatus, getHookStatus } = await import("./post-unit-hooks.js");

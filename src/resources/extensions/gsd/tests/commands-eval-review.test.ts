@@ -9,7 +9,7 @@
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -462,7 +462,7 @@ describe("findEvalReviewFile", () => {
     const target = join(basePath, ".gsd", "milestones", "M001", "slices", "S07", "S07-EVAL-REVIEW.md");
     writeFileSync(target, "---\nschema: eval-review/v1\n---\n", "utf-8");
     const found = findEvalReviewFile(basePath, "M001", "S07");
-    assert.equal(found, target);
+    assert.equal(found, realpathSync(target));
   });
 });
 

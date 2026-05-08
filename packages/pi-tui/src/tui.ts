@@ -1,3 +1,4 @@
+// GSD-2 + packages/pi-tui/src/tui.ts - Terminal UI renderer with differential rendering.
 /**
  * Minimal TUI implementation with differential rendering
  */
@@ -250,7 +251,7 @@ export class TUI extends Container {
 	public onDebug?: () => void;
 	private renderRequested = false;
 	private cursorRow = 0; // Logical cursor row (end of rendered content)
-	private hardwareCursorRow = 0; // Actual terminal cursor row (may differ due to IME positioning)
+	private hardwareCursorRow = 0; // Logical content row of the terminal cursor; physical screen row = hardwareCursorRow - previousViewportTop
 	private inputBuffer = ""; // Buffer for parsing terminal responses
 	private cellSizeQueryPending = false;
 	private showHardwareCursor = process.env.PI_HARDWARE_CURSOR === "1" || process.env.TERM_PROGRAM === "WarpTerminal";
@@ -635,7 +636,8 @@ export class TUI extends Container {
 		if (this.stopped) return;
 		const width = this.terminal.columns;
 		const height = this.terminal.rows;
-		let viewportTop = Math.max(0, this.maxLinesRendered - height);
+		const getViewportTop = (lineCount: number): number => lineCount - height;
+		let viewportTop = getViewportTop(this.maxLinesRendered);
 		let prevViewportTop = this.previousViewportTop;
 		let hardwareCursorRow = this.hardwareCursorRow;
 		const computeLineDiff = (targetRow: number): number => {
@@ -672,14 +674,16 @@ export class TUI extends Container {
 		const fullRender = (clear: boolean): void => {
 			this.fullRedrawCount += 1;
 			let buffer = "\x1b[?2026h"; // Begin synchronized output
+			const startRow = Math.max(1, height - Math.max(1, newLines.length) + 1);
 			if (clear) {
 				// Clear viewport (scrollback preserved) and anchor the rendered
 				// block to the terminal bottom so the editor / belowEditor
 				// widgets do not jump to row 1 after a chat clear. When the
 				// block is taller than the viewport, Math.max(1, …) falls back
 				// to row 1 — same as the prior `\x1b[H` behavior.
-				const startRow = Math.max(1, height - Math.max(1, newLines.length) + 1);
 				buffer += `\x1b[2J\x1b[${startRow};1H`;
+			} else if (startRow > 1) {
+				buffer += `\x1b[${startRow};1H`;
 			}
 			for (let i = 0; i < newLines.length; i++) {
 				if (i > 0) buffer += "\r\n";
@@ -699,7 +703,7 @@ export class TUI extends Container {
 			} else {
 				this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
 			}
-			this.previousViewportTop = Math.max(0, this.maxLinesRendered - height);
+			this.previousViewportTop = getViewportTop(this.maxLinesRendered);
 			this.positionHardwareCursor(cursorPos, newLines.length);
 			this.previousLines = newLines;
 			this.previousWidth = width;
@@ -724,6 +728,15 @@ export class TUI extends Container {
 		// Width or height changed - full re-render
 		if (widthChanged || heightChanged) {
 			logRedraw(`terminal size changed (${this.previousWidth}x${this.previousHeight} -> ${width}x${height})`);
+			fullRender(true);
+			return;
+		}
+
+		if (
+			newLines.length !== this.previousLines.length &&
+			(newLines.length <= height || this.previousLines.length <= height)
+		) {
+			logRedraw(`bottom-anchored short block resized (${this.previousLines.length} -> ${newLines.length})`);
 			fullRender(true);
 			return;
 		}
@@ -780,7 +793,7 @@ export class TUI extends Container {
 		// No changes - but still need to update hardware cursor position if it moved
 		if (firstChanged === -1) {
 			this.positionHardwareCursor(cursorPos, newLines.length);
-			this.previousViewportTop = Math.max(0, this.maxLinesRendered - height);
+			this.previousViewportTop = getViewportTop(this.maxLinesRendered);
 			this.previousHeight = height;
 			return;
 		}
@@ -821,13 +834,13 @@ export class TUI extends Container {
 			this.previousLines = newLines;
 			this.previousWidth = width;
 			this.previousHeight = height;
-			this.previousViewportTop = Math.max(0, this.maxLinesRendered - height);
+			this.previousViewportTop = getViewportTop(this.maxLinesRendered);
 			return;
 		}
 
 		// Check if firstChanged is above what was previously visible
 		// Use previousLines.length (not maxLinesRendered) to avoid false positives after content shrinks
-		const previousContentViewportTop = Math.max(0, this.previousLines.length - height);
+		const previousContentViewportTop = getViewportTop(this.previousLines.length);
 		if (firstChanged < previousContentViewportTop) {
 			// First change is above previous viewport - need full re-render
 			logRedraw(`firstChanged < viewportTop (${firstChanged} < ${previousContentViewportTop})`);
@@ -937,7 +950,7 @@ export class TUI extends Container {
 		this.hardwareCursorRow = finalCursorRow;
 		// Track terminal's working area (grows but doesn't shrink unless cleared)
 		this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
-		this.previousViewportTop = Math.max(0, this.maxLinesRendered - height);
+		this.previousViewportTop = getViewportTop(this.maxLinesRendered);
 
 		// Position hardware cursor for IME
 		this.positionHardwareCursor(cursorPos, newLines.length);

@@ -8,6 +8,7 @@ import { renderAllProjections } from "../workflow-projections.js";
 import { writeManifest } from "../workflow-manifest.js";
 import { appendEvent } from "../workflow-events.js";
 import { logWarning } from "../workflow-logger.js";
+import { validatePlanningPathScope } from "../planning-path-scope.js";
 
 export interface PlanTaskParams {
   milestoneId: string;
@@ -64,6 +65,15 @@ export async function handlePlanTask(
     params = validateParams(rawParams);
   } catch (err) {
     return { error: `validation failed: ${(err as Error).message}` };
+  }
+
+  const pathScopeError = validatePlanningPathScope(basePath, [
+    { field: "files", values: params.files },
+    { field: "inputs", values: params.inputs },
+    { field: "expectedOutput", values: params.expectedOutput },
+  ]);
+  if (pathScopeError) {
+    return { error: `validation failed: ${pathScopeError}` };
   }
 
   // ── Guards + DB writes inside a single transaction (prevents TOCTOU) ───

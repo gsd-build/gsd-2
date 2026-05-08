@@ -44,4 +44,13 @@ describe('status opens DB before deriveState (#3691)', () => {
     assert.match(quickSrc, /getIsolationMode\(\)\s*!==\s*"none"/,
       'quick.ts should compare isolation mode against "none"');
   });
+
+  test('quick task prompt handles external .gsd without staging quick files', () => {
+    assert.match(quickSrc, /isExternalGsdRoot/,
+      'quick.ts should detect whether .gsd resolves outside the project repo');
+    assert.match(quickSrc, /do not stage or commit `\.gsd\/quick\/\.\.\.`/,
+      'external-state quick tasks must tell the agent not to stage .gsd/quick files');
+    assert.match(quickSrc, /nothing in the project repo to commit/,
+      'external-state quick tasks should allow summary-only work without a git commit');
+  });
 });

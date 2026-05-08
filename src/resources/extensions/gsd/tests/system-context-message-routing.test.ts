@@ -1,9 +1,5 @@
-// GSD bootstrap + system-context-message-routing.test — regression coverage
-// for #5019. `memoryBlock` is FTS-queried against the user prompt and changes
-// per call; embedding it in the cached system prefix invalidates Anthropic
-// prompt-cache hits on every request. The fix routes memory through the
-// existing context-message channel (volatile user-message suffix) and combines
-// it with any active guided-execute or forensics injection.
+// Project/App: GSD-2
+// File Purpose: Regression coverage for volatile system-context message routing.
 
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
@@ -11,6 +7,8 @@ import assert from "node:assert/strict";
 import { buildContextMessage } from "../bootstrap/system-context.ts";
 
 describe("buildContextMessage (#5019 — memory routing)", () => {
+  const markedMemory = "[GSD Context Metadata]\n- Memory supplied: yes\n\n[MEMORY]\nrule one";
+
   test("returns null when nothing to inject", () => {
     const result = buildContextMessage({
       memoryBlock: "",
@@ -37,7 +35,7 @@ describe("buildContextMessage (#5019 — memory routing)", () => {
     });
     assert.ok(result, "expected a context message");
     assert.equal(result.customType, "gsd-memory");
-    assert.equal(result.content, "[MEMORY]\nrule one\nrule two");
+    assert.equal(result.content, "[GSD Context Metadata]\n- Memory supplied: yes\n\n[MEMORY]\nrule one\nrule two");
     assert.equal(result.display, false);
   });
 
@@ -71,7 +69,7 @@ describe("buildContextMessage (#5019 — memory routing)", () => {
     });
     assert.ok(result);
     assert.equal(result.customType, "gsd-guided-context");
-    assert.equal(result.content, "[MEMORY]\nrule one\n\n[GUIDED]\nexecute T01");
+    assert.equal(result.content, `${markedMemory}\n\n[GUIDED]\nexecute T01`);
   });
 
   test("memory + forensics: memory prepended, customType is gsd-forensics", () => {
@@ -82,7 +80,7 @@ describe("buildContextMessage (#5019 — memory routing)", () => {
     });
     assert.ok(result);
     assert.equal(result.customType, "gsd-forensics");
-    assert.equal(result.content, "[MEMORY]\nrule one\n\n[FORENSICS]\ninvestigation context");
+    assert.equal(result.content, `${markedMemory}\n\n[FORENSICS]\ninvestigation context`);
   });
 
   test("guided takes precedence over forensics when both are somehow present", () => {

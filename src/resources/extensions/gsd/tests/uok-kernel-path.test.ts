@@ -1,3 +1,5 @@
+// Project/App: GSD-2
+// File Purpose: Verifies UOK kernel path selection and legacy fallback telemetry.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -11,6 +13,7 @@ import type { AutoSession } from "../auto/session.ts";
 import type { LoopDeps } from "../auto/loop-deps.ts";
 import { gsdRoot } from "../paths.ts";
 import type { GSDPreferences } from "../preferences.ts";
+import { getLegacyTelemetry, resetLegacyTelemetry } from "../legacy-telemetry.ts";
 
 function makeBasePath(): string {
   return mkdtempSync(join(tmpdir(), "gsd-uok-kernel-"));
@@ -86,6 +89,7 @@ function readParityEvents(basePath: string): Array<Record<string, unknown>> {
 test("runAutoLoopWithUok uses kernel path by default and records uok-kernel parity", async () => {
   const basePath = makeBasePath();
   try {
+    resetLegacyTelemetry();
     const args = makeArgs(basePath, {
       uok: {
         enabled: true,
@@ -109,7 +113,9 @@ test("runAutoLoopWithUok uses kernel path by default and records uok-kernel pari
     assert.equal(events[1]?.path, "uok-kernel");
     assert.equal(events[1]?.phase, "exit");
     assert.equal(events[1]?.status, "ok");
+    assert.equal(getLegacyTelemetry()["legacy.uokFallbackUsed"], 0);
   } finally {
+    resetLegacyTelemetry();
     rmSync(basePath, { recursive: true, force: true });
   }
 });
@@ -117,6 +123,7 @@ test("runAutoLoopWithUok uses kernel path by default and records uok-kernel pari
 test("runAutoLoopWithUok uses legacy path when explicit legacy fallback is enabled", async () => {
   const basePath = makeBasePath();
   try {
+    resetLegacyTelemetry();
     const args = makeArgs(basePath, {
       uok: {
         enabled: true,
@@ -134,7 +141,9 @@ test("runAutoLoopWithUok uses legacy path when explicit legacy fallback is enabl
     assert.equal(events[0]?.path, "legacy-fallback");
     assert.equal(events[1]?.path, "legacy-fallback");
     assert.equal(events[1]?.status, "ok");
+    assert.equal(getLegacyTelemetry()["legacy.uokFallbackUsed"], 1);
   } finally {
+    resetLegacyTelemetry();
     rmSync(basePath, { recursive: true, force: true });
   }
 });
@@ -144,6 +153,7 @@ test("runAutoLoopWithUok respects GSD_UOK_FORCE_LEGACY emergency switch", async 
   const previous = process.env.GSD_UOK_FORCE_LEGACY;
   process.env.GSD_UOK_FORCE_LEGACY = "1";
   try {
+    resetLegacyTelemetry();
     const args = makeArgs(basePath, {
       uok: {
         enabled: true,
@@ -158,7 +168,9 @@ test("runAutoLoopWithUok respects GSD_UOK_FORCE_LEGACY emergency switch", async 
     assert.equal(events.length, 2);
     assert.equal(events[0]?.path, "legacy-fallback");
     assert.equal(events[1]?.path, "legacy-fallback");
+    assert.equal(getLegacyTelemetry()["legacy.uokFallbackUsed"], 1);
   } finally {
+    resetLegacyTelemetry();
     if (previous === undefined) delete process.env.GSD_UOK_FORCE_LEGACY;
     else process.env.GSD_UOK_FORCE_LEGACY = previous;
     rmSync(basePath, { recursive: true, force: true });

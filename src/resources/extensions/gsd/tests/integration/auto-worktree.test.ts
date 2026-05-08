@@ -123,6 +123,7 @@ describe("auto-worktree lifecycle", () => {
 
     // Manually chdir out (simulates pause/crash)
     process.chdir(tempDir);
+    assert.ok(isInAutoWorktree(wtPath2), "isInAutoWorktree honors explicit worktree path when cwd is root");
 
     // enterAutoWorktree should re-enter
     const entered = enterAutoWorktree(tempDir, "M003");
@@ -159,7 +160,7 @@ describe("auto-worktree lifecycle", () => {
       assert.ok(realWtPath.startsWith(storage), "git registered the symlink-resolved worktree path");
 
       _resetAutoWorktreeOriginalBaseForTests();
-      process.chdir(join(realWtPath, ".gsd", "milestones", "M001"));
+      process.chdir(realWtPath);
 
       assert.ok(isInAutoWorktree(tempDir), "structural detection works without module originalBase");
       const resolved = getAutoWorktreePath(realWtPath, "M001");
@@ -168,7 +169,7 @@ describe("auto-worktree lifecycle", () => {
       assert.equal(existsSync(join(realWtPath, ".gsd", "worktrees", "M001")), false);
 
       enterAutoWorktree(tempDir, "M001");
-      process.chdir(join(realWtPath, ".gsd", "milestones", "M001"));
+      process.chdir(realWtPath);
       assert.deepStrictEqual(
         getActiveAutoWorktreeContext(),
         {
@@ -281,7 +282,7 @@ describe("auto-worktree lifecycle", () => {
     teardownAutoWorktree(tempDir, "M010");
   });
 
-  test("#778: reconcile plan checkboxes on re-attach", async () => {
+  test("#778: re-attach does not reconcile plan checkboxes into a worktree-local .gsd projection", async () => {
     tempDir = createTempRepo();
     const msDir = join(tempDir, ".gsd", "milestones", "M003");
     mkdirSync(msDir, { recursive: true });
@@ -321,23 +322,31 @@ describe("auto-worktree lifecycle", () => {
       "# S01 Plan\n- [x] **T01:** task one\n- [x] **T02:** task two\n- [ ] **T03:** task three\n",
     );
 
-    // Create worktree re-attached to existing milestone branch (T02 still [ ] in branch)
+    // Re-attaching the worktree should not reconcile the branch copy from the
+    // project-root plan. The project root stays canonical; the worktree keeps
+    // the milestone branch's tracked file contents until a git operation
+    // changes them.
     const wtPath = createAutoWorktree(tempDir, "M004");
 
     try {
       const wtPlanPath = join(wtPath, planRelPath);
-      assert.ok(existsSync(wtPlanPath), "plan file exists in worktree after re-attach");
+      assert.ok(existsSync(wtPlanPath), "tracked plan file remains present in the worktree branch");
 
       const wtPlan = read(wtPlanPath, "utf-8");
-      assert.ok(wtPlan.includes("- [x] **T02:"), "T02 should be [x] after reconciliation (was [ ] on branch)");
-      assert.ok(wtPlan.includes("- [x] **T01:"), "T01 stays [x]");
-      assert.ok(wtPlan.includes("- [ ] **T03:"), "T03 stays [ ] (not in root either)");
+      assert.ok(wtPlan.includes("- [ ] **T02:"), "worktree branch should retain its unreconciled T02 [ ] state");
+      assert.ok(wtPlan.includes("- [x] **T01:"), "worktree branch should retain T01 [x]");
+      assert.ok(wtPlan.includes("- [ ] **T03:"), "worktree branch should retain T03 [ ]");
+
+      const rootPlan = read(join(tempDir, planRelPath), "utf-8");
+      assert.ok(rootPlan.includes("- [x] **T02:"), "canonical root plan retains the newer T02 [x] state");
+      assert.ok(rootPlan.includes("- [x] **T01:"), "canonical root plan retains T01 [x]");
+      assert.ok(rootPlan.includes("- [ ] **T03:"), "canonical root plan retains T03 [ ]");
     } finally {
       teardownAutoWorktree(tempDir, "M004");
     }
   });
 
-  test("#2791: mcp.json copied into worktree via copyPlanningArtifacts", () => {
+  test("#2791: mcp.json is not copied into worktree on creation after copyPlanningArtifacts removal", () => {
     tempDir = createTempRepo();
     const msDir = join(tempDir, ".gsd", "milestones", "M003");
     mkdirSync(msDir, { recursive: true });
@@ -346,7 +355,8 @@ describe("auto-worktree lifecycle", () => {
     run("git commit -m \"add milestone\"", tempDir);
 
     // Create mcp.json in .gsd/ AFTER the commit (untracked, like real usage).
-    // copyPlanningArtifacts should copy it into the worktree's .gsd/.
+    // Phase C removed copyPlanningArtifacts, so creation should not seed a
+    // second worktree-local copy.
     writeFileSync(
       join(tempDir, ".gsd", "mcp.json"),
       JSON.stringify({ servers: { test: { command: "echo" } } }),
@@ -355,9 +365,10 @@ describe("auto-worktree lifecycle", () => {
     const wtPath = createAutoWorktree(tempDir, "M003");
 
     try {
-      assert.ok(
+      assert.equal(
         existsSync(join(wtPath, ".gsd", "mcp.json")),
-        "mcp.json should be copied into worktree .gsd/ on creation",
+        false,
+        "mcp.json should not be copied into worktree .gsd/ on creation",
       );
     } finally {
       teardownAutoWorktree(tempDir, "M003");

@@ -53,12 +53,14 @@
 | `/gsd skill-health` | Skill lifecycle dashboard |
 | `/gsd hooks` | Show configured hooks |
 | `/gsd migrate` | Migrate v1 `.planning` to `.gsd` format |
+| `/gsd recover` | Explicitly reconstruct database hierarchy state from rendered markdown after database loss or corruption |
 
 ## Milestone Management
 
 | Command | Description |
 |---------|-------------|
-| `/gsd new-milestone` | Create a new milestone |
+| `/gsd new-project [--deep]` | Bootstrap a new project; `--deep` enables staged project-level discovery |
+| `/gsd new-milestone [--deep]` | Create a new milestone; `--deep` opts the project into deep planning mode |
 | `/gsd skip` | Prevent a unit from auto-mode dispatch |
 | `/gsd undo` | Revert last completed unit |
 | `/gsd undo-task` | Reset a specific task's completion state |

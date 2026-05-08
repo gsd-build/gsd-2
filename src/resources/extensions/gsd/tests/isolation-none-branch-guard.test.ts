@@ -52,9 +52,12 @@ describe('isolation:none stale branch guard (#3675)', () => {
   });
 
   test('guard is wrapped in try-catch (non-fatal)', () => {
-    // Find the milestone/ check and verify it is inside a try block
-    const milestoneIdx = source.indexOf('startsWith("milestone/")');
-    assert.ok(milestoneIdx > 0, 'milestone/ check should exist');
+    // Pin to the specific guard usage (`currentBranch.startsWith(...)`) so
+    // unrelated occurrences of `startsWith("milestone/")` elsewhere in the
+    // file (e.g. branch-name iteration helpers added later) don't shift the
+    // index and break this structural assertion.
+    const milestoneIdx = source.indexOf('currentBranch.startsWith("milestone/")');
+    assert.ok(milestoneIdx > 0, 'isolation:none guard milestone/ check should exist');
     const before = source.slice(Math.max(0, milestoneIdx - 500), milestoneIdx);
     assert.match(before, /try\s*\{/,
       'milestone branch guard should be inside a try block');

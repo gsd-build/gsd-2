@@ -12,7 +12,8 @@ import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { autoLoop, resolveAgentEnd, _hasPendingResolveForTest, _resetPendingResolve } from "../auto-loop.js";
+import { autoLoop } from "../auto/loop.js";
+import { resolveAgentEnd, _hasPendingResolveForTest, _resetPendingResolve } from "../auto/resolve.js";
 import type { LoopDeps } from "../auto/loop-deps.js";
 import type { SessionLockStatus } from "../session-lock.js";
 import { writeGraph, readGraph, type WorkflowGraph, type GraphStep } from "../graph.ts";
@@ -191,7 +192,11 @@ function makeMockDeps(overrides?: Partial<LoopDeps>): LoopDeps & { callLog: stri
     resolveMilestoneFile: () => null,
     reconcileMergeState: () => "clean",
     preflightCleanRoot: () => ({ stashPushed: false, summary: "" }),
-    postflightPopStash: () => {},
+    postflightPopStash: () => ({
+      restored: true,
+      needsManualRecovery: false,
+      message: "restored",
+    }),
     getLedger: () => null,
     getProjectTotals: () => ({ cost: 0 }),
     formatCost: (c: number) => `$${c.toFixed(2)}`,
@@ -369,6 +374,150 @@ describe("Custom engine loop integration", () => {
     // Should stop with "Workflow complete" reason
     const stopEntry = deps.callLog.find((e: string) => e.startsWith("stopAuto:"));
     assert.ok(stopEntry?.includes("Workflow complete"), "Should stop with 'Workflow complete'");
+  });
+
+  it("finalizes custom-engine complete turns and clears current turn state", async () => {
+    _resetPendingResolve();
+
+    const runDir = makeTmpDir();
+    const graph = makeGraph([
+      makeStep({ id: "step-a", status: "complete" }),
+    ], "already-done");
+    writeGraph(runDir, graph);
+    writeDefinition(runDir, graph.steps, "already-done");
+
+    const ctx = makeMockCtx();
+    const pi = makeMockPi();
+    const s = makeLoopSession({
+      activeEngineId: "custom",
+      activeRunDir: runDir,
+      basePath: runDir,
+    });
+    const turnResults: Array<{ status: string; failureClass: string; error?: string }> = [];
+    const deps = makeMockDeps({
+      stopAuto: async (_ctx, _pi, reason) => {
+        deps.callLog.push(`stopAuto:${reason ?? "no-reason"}`);
+        s.active = false;
+      },
+      uokObserver: {
+        onTurnStart: () => {},
+        onTurnResult: (result) => {
+          deps.callLog.push(`turnResult:${result.status}`);
+          turnResults.push({
+            status: result.status,
+            failureClass: result.failureClass,
+            error: result.error,
+          });
+        },
+        onPhaseResult: () => {},
+      },
+    });
+
+    await autoLoop(ctx, pi, s, deps);
+
+    assert.deepEqual(turnResults, [{ status: "completed", failureClass: "none", error: undefined }]);
+    assert.ok(
+      deps.callLog.indexOf("turnResult:completed") < deps.callLog.indexOf("stopAuto:Workflow complete"),
+      `turn should finalize before stopAuto; log=${deps.callLog.join(",")}`,
+    );
+    assert.equal(s.currentTraceId, null);
+    assert.equal(s.currentTurnId, null);
+    assert.equal(pi.calls.length, 0, "complete workflow should not dispatch work");
+  });
+
+  it("stops blocked custom workflows and clears current turn state", async () => {
+    _resetPendingResolve();
+
+    const runDir = makeTmpDir();
+    const graph = makeGraph([
+      makeStep({ id: "step-a", dependsOn: ["step-b"] }),
+      makeStep({ id: "step-b", dependsOn: ["step-a"] }),
+    ], "blocked-workflow");
+    writeGraph(runDir, graph);
+    writeDefinition(runDir, graph.steps, "blocked-workflow");
+
+    const ctx = makeMockCtx();
+    const pi = makeMockPi();
+    const s = makeLoopSession({
+      activeEngineId: "custom",
+      activeRunDir: runDir,
+      basePath: runDir,
+    });
+    const turnResults: Array<{ status: string; failureClass: string; error?: string }> = [];
+    const deps = makeMockDeps({
+      stopAuto: async (_ctx, _pi, reason) => {
+        deps.callLog.push(`stopAuto:${reason ?? "no-reason"}`);
+        s.active = false;
+      },
+      uokObserver: {
+        onTurnStart: () => {},
+        onTurnResult: (result) => {
+          turnResults.push({
+            status: result.status,
+            failureClass: result.failureClass,
+            error: result.error,
+          });
+        },
+        onPhaseResult: () => {},
+      },
+    });
+
+    await autoLoop(ctx, pi, s, deps);
+
+    assert.equal(turnResults.length, 1);
+    assert.equal(turnResults[0].status, "stopped");
+    assert.equal(turnResults[0].failureClass, "manual-attention");
+    assert.match(turnResults[0].error ?? "", /custom-engine-dispatch-stop/);
+    assert.equal(s.currentTraceId, null);
+    assert.equal(s.currentTurnId, null);
+    assert.equal(pi.calls.length, 0, "blocked workflow should not dispatch a custom step");
+    assert.match(
+      deps.callLog.find((e: string) => e.startsWith("stopAuto:")) ?? "",
+      /Workflow blocked: no pending steps are ready/,
+    );
+  });
+
+  it("finalizes the active turn when the session lock is lost", async () => {
+    _resetPendingResolve();
+
+    const ctx = makeMockCtx();
+    const pi = makeMockPi();
+    const s = makeLoopSession();
+    const turnResults: Array<{ status: string; failureClass: string; error?: string }> = [];
+    const deps = makeMockDeps({
+      validateSessionLock: () => ({
+        valid: false,
+        failureReason: "pid-mismatch",
+        expectedPid: 111,
+        existingPid: 222,
+      } as SessionLockStatus),
+      handleLostSessionLock: () => {
+        deps.callLog.push("handleLostSessionLock");
+      },
+      uokObserver: {
+        onTurnStart: () => {},
+        onTurnResult: (result) => {
+          turnResults.push({
+            status: result.status,
+            failureClass: result.failureClass,
+            error: result.error,
+          });
+        },
+        onPhaseResult: () => {},
+      },
+    });
+
+    await autoLoop(ctx, pi, s, deps);
+
+    assert.deepEqual(turnResults, [{
+      status: "stopped",
+      failureClass: "manual-attention",
+      error: "session-lock-lost",
+    }]);
+    assert.equal(s.currentTraceId, null);
+    assert.equal(s.currentTurnId, null);
+    assert.equal(pi.calls.length, 0, "lost session lock must not dispatch work");
+    assert.ok(deps.callLog.includes("handleLostSessionLock"));
   });
 
   it("does not call runPreDispatch or runFinalize on the custom path", async () => {

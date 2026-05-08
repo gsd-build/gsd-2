@@ -28,8 +28,8 @@ describe('query-tools ensureDbOpen usage (#3672)', () => {
   });
 
   test('calls ensureDbOpen() before DB queries', () => {
-    assert.match(source, /await ensureDbOpen\(\)/,
-      'query-tools should call await ensureDbOpen()');
+    assert.match(source, /await ensureDbOpen\([^)]*\)/,
+      'query-tools should call await ensureDbOpen(...)');
   });
 
   test('no longer imports isDbAvailable in the execute path', () => {
@@ -41,7 +41,7 @@ describe('query-tools ensureDbOpen usage (#3672)', () => {
   });
 
   test('uses dbAvailable result from ensureDbOpen', () => {
-    assert.match(source, /dbAvailable\s*=\s*await ensureDbOpen\(\)/,
+    assert.match(source, /dbAvailable\s*=\s*await ensureDbOpen\([^)]*\)/,
       'should store ensureDbOpen result in dbAvailable');
   });
 });

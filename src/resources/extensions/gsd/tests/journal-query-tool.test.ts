@@ -52,6 +52,16 @@ async function executeToolInDir(tool: any, params: Record<string, unknown>, dir:
   }
 }
 
+async function executeToolWithContextRoot(tool: any, params: Record<string, unknown>, processDir: string, contextRoot: string) {
+  const originalCwd = process.cwd();
+  try {
+    process.chdir(processDir);
+    return await tool.execute("test-call-id", params, undefined, undefined, { cwd: contextRoot });
+  } finally {
+    process.chdir(originalCwd);
+  }
+}
+
 // ─── Registration ─────────────────────────────────────────────────────────────
 
 test("registerJournalTools registers gsd_journal_query tool", () => {
@@ -123,6 +133,28 @@ test("gsd_journal_query respects limit parameter", async () => {
     assert.equal(entries.length, 2, "Should return only 2 entries");
   } finally {
     cleanup(base);
+  }
+});
+
+test("gsd_journal_query uses context cwd instead of process cwd", async () => {
+  const processBase = makeTmpBase();
+  const contextBase = makeTmpBase();
+  try {
+    emitJournalEvent(processBase, makeEntry({ seq: 0, flowId: "process-flow" }));
+    emitJournalEvent(contextBase, makeEntry({ seq: 0, flowId: "context-flow" }));
+
+    const pi = makeMockPi();
+    registerJournalTools(pi);
+    const tool = pi.tools[0];
+
+    const result = await executeToolWithContextRoot(tool, { limit: 5 }, processBase, contextBase);
+    const entries = JSON.parse(result.content[0].text) as JournalEntry[];
+
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].flowId, "context-flow");
+  } finally {
+    cleanup(processBase);
+    cleanup(contextBase);
   }
 });
 

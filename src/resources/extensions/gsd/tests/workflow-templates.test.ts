@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Unit tests for workflow template registry loading, matching, and display.
+//
 // GSD Workflow Templates — Unit Tests
 //
 // Tests registry loading, template resolution, auto-detection, and listing.
@@ -8,6 +11,7 @@ import {
   loadRegistry,
   resolveByName,
   autoDetect,
+  isLegacyWorkflowMode,
   listTemplates,
   getTemplateInfo,
   loadWorkflowTemplate,
@@ -46,6 +50,20 @@ console.log('\n── Registry Loading ──');
     }
     assert.ok(Array.isArray(entry.triggers) && entry.triggers.length > 0, `${id}: triggers should be non-empty array`);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Workflow Mode Classification
+// ═══════════════════════════════════════════════════════════════════════════
+
+console.log('\n── Workflow Mode Classification ──');
+
+{
+  assert.equal(isLegacyWorkflowMode(undefined), true, 'missing mode defaults to markdown-phase legacy engine');
+  assert.equal(isLegacyWorkflowMode('markdown-phase'), true, 'markdown-phase is legacy engine telemetry');
+  assert.equal(isLegacyWorkflowMode('yaml-step'), true, 'yaml-step is legacy engine telemetry');
+  assert.equal(isLegacyWorkflowMode('oneshot'), true, 'oneshot is legacy engine telemetry');
+  assert.equal(isLegacyWorkflowMode('auto-milestone'), false, 'auto-milestone is the DB-backed milestone path');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -134,6 +152,9 @@ console.log('\n── List Templates ──');
   assert.ok(output.includes('spike'), 'Should list spike');
   assert.ok(output.includes('hotfix'), 'Should list hotfix');
   assert.ok(output.includes('/gsd start'), 'Should include usage hint');
+  assert.ok(output.includes('Recommended Task Paths'), 'Should include process path guidance');
+  assert.ok(output.includes('large-feature'), 'Should include large feature process path');
+  assert.ok(output.includes('/gsd discuss'), 'Should route large features to milestone flow');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

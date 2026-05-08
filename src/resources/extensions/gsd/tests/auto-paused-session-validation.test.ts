@@ -40,6 +40,12 @@ test("auto.ts validates milestone before restoring paused session (#1664)", () =
     "auto.ts must check for SUMMARY file to detect completed milestones",
   );
 
+  assert.ok(
+    source.includes("await ensureDbOpen(base)") &&
+      source.indexOf("await ensureDbOpen(base)") < source.indexOf('resolveMilestoneFile(base, meta.milestoneId, "SUMMARY")'),
+    "auto.ts must open the canonical DB before using SUMMARY as a paused-session fallback",
+  );
+
   // Resume path must sanitize paused session file metadata before unlink/recovery.
   assert.ok(
     source.includes("normalizeSessionFilePath(meta.sessionFile ?? null)"),

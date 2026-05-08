@@ -116,6 +116,15 @@ const buildBuiltinKeybindings = (effectiveKeybindings: Required<KeybindingsConfi
 	return builtinKeybindings;
 };
 
+const PROTECTED_EXTENSION_COMMANDS = new Set(["gsd"]);
+
+function isProtectedCommandOwner(commandName: string, extensionPath: string): boolean {
+	if (!PROTECTED_EXTENSION_COMMANDS.has(commandName)) return false;
+	const normalized = extensionPath.replace(/\\/g, "/");
+	return /\/extensions\/gsd\/(?:index\.[cm]?[jt]s|dist\/.*)$/.test(normalized)
+		|| /\/extensions\/gsd\/?$/.test(normalized);
+}
+
 /** Combined result from all before_agent_start handlers */
 interface BeforeAgentStartCombinedResult {
 	messages?: NonNullable<BeforeAgentStartEventResult["message"]>[];
@@ -164,6 +173,8 @@ export type ExtensionErrorListener = (error: ExtensionError) => void;
 export type NewSessionHandler = (options?: {
 	parentSession?: string;
 	setup?: (sessionManager: SessionManager) => Promise<void>;
+	/** Explicit workspace root for the new session/tool runtime. */
+	workspaceRoot?: string;
 	/** See ExtensionCommandContext.newSession for docs (#3731). */
 	abortSignal?: AbortSignal;
 }) => Promise<{ cancelled: boolean }>;
@@ -226,6 +237,7 @@ export class ExtensionRunner {
 	private getContextUsageFn: () => ContextUsage | undefined = () => undefined;
 	private compactFn: (options?: CompactOptions) => void = () => {};
 	private getSystemPromptFn: () => string = () => "";
+	private setCompactionThresholdOverrideFn: (percent: number | undefined) => void = () => {};
 	private newSessionHandler: NewSessionHandler = async () => {
 		throw new Error("Command context not yet bound: newSession is unavailable during early lifecycle");
 	};
@@ -262,6 +274,10 @@ export class ExtensionRunner {
 		this.runtime.emitBeforeModelSelect = (event) => this.emitBeforeModelSelect(event);
 		this.runtime.emitAdjustToolSet = (event) => this.emitAdjustToolSet(event);
 		this.runtime.emitExtensionEvent = (event) => this.emitExtensionEventDynamic(event);
+	}
+
+	private currentCwd(): string {
+		return this.cwd;
 	}
 
 	/**
@@ -396,6 +412,8 @@ export class ExtensionRunner {
 		this.runtime.getActiveTools = actions.getActiveTools;
 		this.runtime.getAllTools = actions.getAllTools;
 		this.runtime.setActiveTools = actions.setActiveTools;
+		this.runtime.getVisibleSkills = actions.getVisibleSkills;
+		this.runtime.setVisibleSkills = actions.setVisibleSkills;
 		this.runtime.refreshTools = actions.refreshTools;
 		this.runtime.getCommands = actions.getCommands;
 		this.runtime.setModel = actions.setModel;
@@ -411,6 +429,7 @@ export class ExtensionRunner {
 		this.getContextUsageFn = contextActions.getContextUsage;
 		this.compactFn = contextActions.compact;
 		this.getSystemPromptFn = contextActions.getSystemPrompt;
+		this.setCompactionThresholdOverrideFn = contextActions.setCompactionThresholdOverride;
 
 		// Flush provider registrations queued during extension loading
 		for (const { name, config } of this.runtime.pendingProviderRegistrations) {
@@ -588,10 +607,29 @@ export class ExtensionRunner {
 
 		const commands: RegisteredCommand[] = [];
 		const commandOwners = new Map<string, string>();
+		const protectedOwners = new Map<string, string>();
+		for (const ext of this.extensions) {
+			for (const command of ext.commands.values()) {
+				if (isProtectedCommandOwner(command.name, ext.path)) {
+					protectedOwners.set(command.name, ext.path);
+				}
+			}
+		}
+
 		for (const ext of this.extensions) {
 			for (const command of ext.commands.values()) {
 				if (reserved?.has(command.name)) {
 					const message = `Extension command '${command.name}' from ${ext.path} conflicts with built-in commands. Skipping.`;
+					this.commandDiagnostics.push({ type: "warning", message, path: ext.path });
+					if (!this.hasUI()) {
+						console.warn(message);
+					}
+					continue;
+				}
+
+				const protectedOwner = protectedOwners.get(command.name);
+				if (protectedOwner && protectedOwner !== ext.path) {
+					const message = `Extension command '${command.name}' from ${ext.path} conflicts with protected command owner ${protectedOwner}. Skipping.`;
 					this.commandDiagnostics.push({ type: "warning", message, path: ext.path });
 					if (!this.hasUI()) {
 						console.warn(message);
@@ -631,13 +669,21 @@ export class ExtensionRunner {
 	}
 
 	getCommand(name: string): RegisteredCommand | undefined {
+		let protectedCommand: RegisteredCommand | undefined;
 		for (const ext of this.extensions) {
 			const command = ext.commands.get(name);
 			if (command) {
+				if (isProtectedCommandOwner(name, ext.path)) {
+					protectedCommand = command;
+					break;
+				}
+				if (PROTECTED_EXTENSION_COMMANDS.has(name)) {
+					continue;
+				}
 				return command;
 			}
 		}
-		return undefined;
+		return protectedCommand;
 	}
 
 	/**
@@ -657,7 +703,7 @@ export class ExtensionRunner {
 		return {
 			ui: this.uiContext,
 			hasUI: this.hasUI(),
-			cwd: this.cwd,
+			cwd: this.currentCwd(),
 			sessionManager: this.sessionManager,
 			modelRegistry: this.modelRegistry,
 			get model() {
@@ -670,7 +716,21 @@ export class ExtensionRunner {
 			getContextUsage: () => this.getContextUsageFn(),
 			compact: (options) => this.compactFn(options),
 			getSystemPrompt: () => this.getSystemPromptFn(),
+			setCompactionThresholdOverride: (percent) => this.setCompactionThresholdOverrideFn(percent),
 		};
+	}
+
+	private createEventContext(eventType: string): ExtensionContext {
+		return {
+			...this.createContext(),
+			shutdown: () => {
+				throw new Error(`Extension event '${eventType}' cannot request TUI shutdown`);
+			},
+		};
+	}
+
+	private isShutdownGuardedEvent(eventType: string): boolean {
+		return eventType === "agent_end" || eventType === "stop" || eventType === "session_end";
 	}
 
 	createCommandContext(): ExtensionCommandContext {
@@ -713,7 +773,9 @@ export class ExtensionRunner {
 		getEvent: () => unknown,
 		processResult: (handlerResult: unknown, extensionPath: string) => { done: boolean },
 	): Promise<void> {
-		const ctx = this.createContext();
+		const ctx = this.isShutdownGuardedEvent(eventType)
+			? this.createEventContext(eventType)
+			: this.createContext();
 
 		for (const ext of this.extensions) {
 			const handlers = ext.handlers.get(eventType);

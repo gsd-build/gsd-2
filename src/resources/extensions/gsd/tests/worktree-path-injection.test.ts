@@ -28,7 +28,8 @@ const {
   buildRewriteDocsPrompt,
 } = await import("../auto-prompts.ts");
 const { invalidateStateCache } = await import("../state.ts");
-const { resolveAgentEnd, runUnit, _resetPendingResolve } = await import("../auto-loop.ts");
+const { resolveAgentEnd, _resetPendingResolve } = await import("../auto/resolve.ts");
+const { runUnit } = await import("../auto/run-unit.ts");
 
 function writeMilestone(base: string, mid = "M001", title = "Worktree Path Injection"): void {
   const milestoneDir = join(base, ".gsd", "milestones", mid);
@@ -78,7 +79,7 @@ async function waitFor(condition: () => boolean, label: string): Promise<void> {
   assert.fail(`Timed out waiting for ${label} after ${timeoutMs}ms`);
 }
 
-test("runUnit changes cwd to basePath before creating a new session", async (t) => {
+test("runUnit passes basePath as workspaceRoot without changing process cwd", async (t) => {
   _resetPendingResolve();
 
   const originalCwd = process.cwd();
@@ -92,13 +93,15 @@ test("runUnit changes cwd to basePath before creating a new session", async (t) 
 
   process.chdir(drifted);
 
+  let newSessionWorkspaceRoot: string | undefined;
   let cwdAtNewSession: string | undefined;
   const session = {
     active: true,
     basePath: base,
     verbose: false,
     cmdCtx: {
-      newSession: () => {
+      newSession: (options?: { workspaceRoot?: string }) => {
+        newSessionWorkspaceRoot = options?.workspaceRoot;
         cwdAtNewSession = process.cwd();
         return Promise.resolve({ cancelled: false });
       },
@@ -118,10 +121,12 @@ test("runUnit changes cwd to basePath before creating a new session", async (t) 
 
   const result = await resultPromise;
   assert.equal(result.status, "completed");
-  assert.equal(cwdAtNewSession, base);
+  assert.equal(newSessionWorkspaceRoot, base);
+  assert.equal(cwdAtNewSession, drifted);
+  assert.equal(process.cwd(), drifted);
 });
 
-test("runUnit cancels before creating a session when basePath chdir fails", async (t) => {
+test("runUnit does not chdir or cancel when basePath is not a live directory", async (t) => {
   _resetPendingResolve();
 
   const originalCwd = process.cwd();
@@ -135,14 +140,14 @@ test("runUnit cancels before creating a session when basePath chdir fails", asyn
 
   process.chdir(drifted);
 
-  let newSessionCalled = false;
+  let newSessionWorkspaceRoot: string | undefined;
   const session = {
     active: true,
     basePath: base,
     verbose: false,
     cmdCtx: {
-      newSession: () => {
-        newSessionCalled = true;
+      newSession: (options?: { workspaceRoot?: string }) => {
+        newSessionWorkspaceRoot = options?.workspaceRoot;
         return Promise.resolve({ cancelled: false });
       },
     },
@@ -155,15 +160,14 @@ test("runUnit cancels before creating a session when basePath chdir fails", asyn
   } as any;
   const ctx = { ui: { notify: () => {} }, model: { id: "test-model" } } as any;
 
-  const result = await runUnit(ctx, pi, session, "task", "T01", "prompt");
+  const resultPromise = runUnit(ctx, pi, session, "task", "T01", "prompt");
+  await waitFor(() => pi.calls.length === 1, "runUnit dispatch");
+  resolveAgentEnd({ messages: [{ role: "assistant" }] });
 
-  assert.equal(result.status, "cancelled");
-  assert.equal(result.errorContext?.category, "session-failed");
-  assert.equal(result.errorContext?.isTransient, true);
-  assert.match(result.errorContext?.message ?? "", /Failed to chdir to basePath before newSession/);
-  assert.ok(result.errorContext?.message.includes(base), "error should include the failed basePath");
-  assert.equal(newSessionCalled, false, "newSession must not run after chdir failure");
-  assert.equal(pi.calls.length, 0, "unit must not dispatch after chdir failure");
+  const result = await resultPromise;
+  assert.equal(result.status, "completed");
+  assert.equal(newSessionWorkspaceRoot, base);
+  assert.equal(process.cwd(), drifted);
 });
 
 test("direct dispatch redirects to the canonical milestone worktree before newSession", async (t) => {
@@ -184,12 +188,12 @@ test("direct dispatch redirects to the canonical milestone worktree before newSe
 
   process.chdir(drifted);
 
-  let cwdAtNewSession: string | undefined;
+  let newSessionWorkspaceRoot: string | undefined;
   let sentPrompt: string | undefined;
   const ctx = {
     ui: { notify: () => {} },
-    newSession: async () => {
-      cwdAtNewSession = process.cwd();
+    newSession: async (options?: { workspaceRoot?: string }) => {
+      newSessionWorkspaceRoot = options?.workspaceRoot;
       return { cancelled: false };
     },
   } as any;
@@ -201,7 +205,7 @@ test("direct dispatch redirects to the canonical milestone worktree before newSe
 
   await dispatchDirectPhase(ctx, pi, "research-milestone", base);
 
-  assert.equal(cwdAtNewSession, worktreeRoot);
+  assert.equal(newSessionWorkspaceRoot, worktreeRoot);
   assert.equal(process.cwd(), drifted);
   assert.ok(sentPrompt?.includes(worktreeRoot), "prompt should name the canonical worktree root");
 });
@@ -227,6 +231,9 @@ test("worktree-aware prompt builders include the explicit working directory", as
       [{ change: "Refresh docs", timestamp: "2026-04-27T00:00:00.000Z", appliedAt: "test" }] as any,
     ),
   ]);
+
+  assert.ok(prompts[0].includes("## Context Mode"), "discuss-milestone should include standalone Context Mode guidance");
+  assert.ok(prompts[0].includes("interview lane"), "discuss-milestone should render the interview lane");
 
   for (const prompt of prompts) {
     assert.match(prompt, /working directory/i);

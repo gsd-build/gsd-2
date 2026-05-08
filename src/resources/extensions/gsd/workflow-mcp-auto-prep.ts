@@ -29,29 +29,13 @@ function getAuthModeSafe(
   }
 }
 
-function hasClaudeCodeProvider(ctx: WorkflowMcpAutoPrepContext): boolean {
-  return getAuthModeSafe(ctx, "claude-code") === "externalCli";
-}
-
-function isClaudeCodeProviderReady(ctx: WorkflowMcpAutoPrepContext): boolean {
-  const readyCheck = ctx.modelRegistry?.isProviderRequestReady;
-  if (typeof readyCheck !== "function") return false;
-  try {
-    return readyCheck("claude-code");
-  } catch {
-    return false;
-  }
-}
-
 export function shouldAutoPrepareWorkflowMcp(ctx: WorkflowMcpAutoPrepContext): boolean {
   const provider = ctx.model?.provider;
   const baseUrl = ctx.model?.baseUrl;
   const authMode = getAuthModeSafe(ctx, provider);
 
-  if (usesWorkflowMcpTransport(authMode as any, baseUrl)) return true;
-  if (provider === "claude-code") return true;
-  if (hasClaudeCodeProvider(ctx)) return true;
-  return isClaudeCodeProviderReady(ctx);
+  if (provider !== "claude-code") return false;
+  return usesWorkflowMcpTransport(authMode as any, baseUrl) || authMode === "externalCli";
 }
 
 export function prepareWorkflowMcpForProject(

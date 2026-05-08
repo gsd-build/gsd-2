@@ -108,6 +108,21 @@ test('executeExecSearch: returns helpful empty-state message when no matches', (
   }
 });
 
+test('executeExecSearch: returns disabled error when context_mode.enabled=false', () => {
+  const base = freshBase();
+  try {
+    writeRun(base, 'should-not-surface', { stdout: 'hidden\n' });
+    const result = executeExecSearch(
+      { query: 'hidden' },
+      { baseDir: base, preferences: { context_mode: { enabled: false } } },
+    );
+    assert.equal(result.isError, true);
+    assert.equal((result.details as { error?: string }).error, 'context_mode_disabled');
+  } finally {
+    cleanup(base);
+  }
+});
+
 test('executeExecSearch: includes stdout_path and preview in details', () => {
   const base = freshBase();
   try {

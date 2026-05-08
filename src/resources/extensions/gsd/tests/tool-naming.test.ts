@@ -1,12 +1,10 @@
-// tool-naming — Verifies canonical + alias tool registration for GSD DB tools.
-//
-// Each DB tool must register under its canonical gsd_concept_action name
-// AND under a backward-compatible alias name.
-// The alias must share the exact same execute function reference as the canonical tool.
+// Project/App: GSD-2
+// File Purpose: Verifies canonical and alias DB tool registration plus legacy alias telemetry.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerDbTools } from '../bootstrap/db-tools.ts';
+import { getLegacyTelemetry, resetLegacyTelemetry } from '../legacy-telemetry.ts';
 
 
 // ─── Mock PI ──────────────────────────────────────────────────────────────────
@@ -66,9 +64,9 @@ for (const { canonical, alias } of RENAME_MAP) {
   assert.ok(aliasTool !== undefined, `Alias tool "${alias}" should be registered`);
 }
 
-// ─── Execute function identity ───────────────────────────────────────────────
+// ─── Execute function wrapping ───────────────────────────────────────────────
 
-console.log('\n── Tool naming: execute function identity (===) ──');
+console.log('\n── Tool naming: alias execute wrapper ──');
 
 for (const { canonical, alias } of RENAME_MAP) {
   const canonicalTool = pi.tools.find((t: any) => t.name === canonical);
@@ -76,11 +74,36 @@ for (const { canonical, alias } of RENAME_MAP) {
 
   if (canonicalTool && aliasTool) {
     assert.ok(
-      canonicalTool.execute === aliasTool.execute,
-      `"${canonical}" and "${alias}" should share the same execute function reference`,
+      canonicalTool.execute !== aliasTool.execute,
+      `"${alias}" should wrap "${canonical}" so alias usage can be counted`,
     );
   }
 }
+
+test("alias execute increments legacy MCP alias telemetry before delegating", async () => {
+  const canonicalTool = pi.tools.find((t: any) => t.name === "gsd_decision_save");
+  const aliasTool = pi.tools.find((t: any) => t.name === "gsd_save_decision");
+  assert.ok(canonicalTool);
+  assert.ok(aliasTool);
+
+  const originalCanonicalExecute = canonicalTool.execute;
+  try {
+    resetLegacyTelemetry();
+    let delegated = false;
+    canonicalTool.execute = async () => {
+      delegated = true;
+      return { content: [{ type: "text", text: "ok" }], details: { ok: true } };
+    };
+
+    await aliasTool.execute("call-1", {}, undefined, undefined, undefined);
+
+    assert.equal(delegated, true);
+    assert.equal(getLegacyTelemetry()["legacy.mcpAliasUsed"], 1);
+  } finally {
+    canonicalTool.execute = originalCanonicalExecute;
+    resetLegacyTelemetry();
+  }
+});
 
 // ─── Alias descriptions include "(alias for ...)" ───────────────────────────
 

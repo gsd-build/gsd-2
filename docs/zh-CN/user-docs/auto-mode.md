@@ -22,6 +22,10 @@ Plan (with integrated research) → Execute (per task) → Complete → Reassess
 - **Reassess**：检查 roadmap 是否仍然合理
 - **Validate Milestone**：在所有 slices 完成后做一致性校验，把 roadmap 的成功标准与实际结果对照，避免在封板前漏掉关键缺口
 
+### Milestone 完成的幂等行为
+
+Milestone completion 可以安全重试。如果 `complete-milestone` 单元在数据库已经把该 milestone 标记为关闭后再次派发，GSD 会把这次调用视为成功，而不是返回错误。已有的 summary projection 会保持不变，不会追加重复的 completion event，并且工具响应的 details 中会包含 `alreadyComplete: true`，方便 operator 和集成方区分重试与首次完成。
+
 ## 关键特性
 
 ### 每个单元都用全新会话

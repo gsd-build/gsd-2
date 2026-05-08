@@ -2,7 +2,12 @@
  * MCP Server types — session lifecycle and orchestration.
  */
 
-import type { RpcClient, SdkAgentEvent, RpcCostUpdateEvent, RpcExtensionUIRequest } from '@gsd-build/rpc-client';
+import type { RpcClient } from '@gsd-build/rpc-client';
+import type {
+  McpPendingBlocker as PendingBlocker,
+  RpcCostUpdateEvent,
+  SdkAgentEvent,
+} from '@gsd-build/contracts';
 
 // ---------------------------------------------------------------------------
 // Session Status
@@ -46,23 +51,7 @@ export interface ManagedSession {
   unsubscribe?: () => void;
 }
 
-// ---------------------------------------------------------------------------
-// Pending Blocker
-// ---------------------------------------------------------------------------
-
-export interface PendingBlocker {
-  /** The extension_ui_request id */
-  id: string;
-
-  /** The request method (e.g. 'select', 'confirm', 'input') */
-  method: string;
-
-  /** Human-readable message or title */
-  message: string;
-
-  /** Full event payload for inspection */
-  event: RpcExtensionUIRequest;
-}
+export type { PendingBlocker };
 
 // ---------------------------------------------------------------------------
 // Cost Accumulator (K004 — cumulative-max)

@@ -70,6 +70,7 @@ function makeDeps(
     getAutoWorktreePath: () => null,
     autoCommitCurrentBranch: () => undefined,
     getCurrentBranch: () => "worktree/M001",
+    checkoutBranch: () => undefined,
     autoWorktreeBranch: (mid: string) => `worktree/${mid}`,
     resolveMilestoneFile: () => null, // no roadmap → early return path
     readFileSync: () => "",

@@ -79,6 +79,10 @@ Handlers receive the event payload and an `ExtensionContext`. Return values vary
 | `pi.getActiveTools()` | `getActiveTools(): string[]` | Get currently active tool names |
 | `pi.getAllTools()` | `getAllTools(): ToolInfo[]` | Get all registered tools (name, description, parameters) |
 | `pi.setActiveTools(names)` | `setActiveTools(toolNames: string[])` | Enable/disable tools at runtime |
+| `pi.getVisibleSkills()` | `getVisibleSkills(): string[] \| undefined` | Get the prompt-only skill visibility filter |
+| `pi.setVisibleSkills(names)` | `setVisibleSkills(skillNames: string[] \| undefined)` | Limit which loaded skills are advertised in `<available_skills>` |
+
+`setVisibleSkills()` only changes the skill catalog rendered into the next system prompt. It does not unload skills or disable the Skill tool; pass `undefined` to restore the full loaded skill catalog.
 
 ### Model Management
 
@@ -375,7 +379,10 @@ pi.on("tool_call", (event, ctx) => {
 
 | Event | Type | Return Type | Description |
 |-------|------|-------------|-------------|
+| `adjust_tool_set` | `AdjustToolSetEvent` | `AdjustToolSetResult` | After built-in provider compatibility filtering and before the provider request. Can return `{ toolNames }` to narrow or reorder the final request tool set. |
 | `model_select` | `ModelSelectEvent` | — | Model changed. Includes `model`, `previousModel`, and `source` (`"set"`, `"cycle"`, `"restore"`). |
+
+`AdjustToolSetEvent` includes `selectedModelApi`, `selectedModelProvider`, `selectedModelId`, `activeToolNames`, `filteredTools`, and metadata-only `requestCustomMessages`. The final tool list is also the list seen by `PI_TOKEN_AUDIT` and the provider request.
 
 ---
 

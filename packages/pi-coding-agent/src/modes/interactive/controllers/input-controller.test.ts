@@ -49,6 +49,7 @@ function createMockHost() {
 		isInitialized: true,
 		loadingAnimation: undefined,
 		pendingWorkingMessage: undefined,
+		clearBlockingError: () => {},
 		defaultWorkingMessage: "Working...",
 		streamingComponent: undefined,
 		streamingMessage: undefined,

@@ -1,3 +1,4 @@
+// GSD2 TUI Tests - Chat frame card visual contract coverage.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import stripAnsi from "strip-ansi";
@@ -8,12 +9,12 @@ initTheme("dark", false);
 
 // Regression tests for the "compaction" tone added to renderChatFrame.
 // The compaction notice shares the same visual frame as user / assistant
-// messages (top rule, `• label` header, `│ ` body prefix) but uses the
+// messages (top rule, label header, `│ ` body prefix) but uses the
 // purple `customMessageLabel` color key so it is visually distinct from
 // conversation turns.
 
 describe("renderChatFrame — compaction tone", () => {
-	test("produces a top rule, `• compaction` header row, and a │ body margin", () => {
+	test("produces a top rule, compaction header row, and a │ body margin", () => {
 		const lines = renderChatFrame(
 			["Compacted from 1,224,262 tokens (ctrl+o to expand)"],
 			60,
@@ -33,11 +34,12 @@ describe("renderChatFrame — compaction tone", () => {
 		// Top rule is a solid horizontal bar
 		assert.match(plain[0], /^─+$/, "first line should be the solid top rule");
 
-		// Header row contains `• compaction`
+		// Header row contains `compaction`
 		assert.ok(
-			plain[1].includes("• compaction"),
-			`expected header to contain "• compaction", got ${JSON.stringify(plain[1])}`,
+			plain[1].includes("compaction"),
+			`expected header to contain "compaction", got ${JSON.stringify(plain[1])}`,
 		);
+		assert.ok(!plain[1].includes("•"), `header should not render a bullet prefix, got ${JSON.stringify(plain[1])}`);
 
 		// Body line(s) start with `│ `
 		assert.ok(

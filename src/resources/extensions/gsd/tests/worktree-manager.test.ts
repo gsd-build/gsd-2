@@ -235,4 +235,11 @@ describe("removeWorktree — missing worktree", () => {
       "should not throw when worktree does not exist",
     );
   });
+
+  test("deleteBranch is quiet when the branch is already gone", () => {
+    assert.doesNotThrow(
+      () => removeWorktree(base, "nonexistent", { deleteBranch: true }),
+      "missing branch should be treated as already cleaned up",
+    );
+  });
 });

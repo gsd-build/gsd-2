@@ -15,7 +15,6 @@ import { resolve, join, dirname } from "node:path";
 import { gsdRoot } from "../paths.js";
 import { fileURLToPath } from "node:url";
 import { showNextAction } from "../../shared/tui.js";
-import { getHomeDir } from "../home-dir.js";
 import {
   validatePlanningDirectory,
   parsePlanningDirectory,
@@ -25,6 +24,51 @@ import {
 } from "./index.js";
 
 import type { MigrationPreview } from "./writer.js";
+import { homedir } from "node:os";
+import { ensureDbOpen } from "../bootstrap/dynamic-tools.js";
+import { clearEngineHierarchy, transaction } from "../gsd-db.js";
+import { migrateFromMarkdown } from "../md-importer.js";
+import { invalidateStateCache } from "../state.js";
+
+export type MigrationImportCounts = ReturnType<typeof migrateFromMarkdown>;
+
+function assertMigrationImportMatchesPreview(imported: MigrationImportCounts, preview: MigrationPreview): void {
+  const mismatches: string[] = [];
+  if (imported.hierarchy.milestones !== preview.milestoneCount) {
+    mismatches.push(`milestones ${imported.hierarchy.milestones}/${preview.milestoneCount}`);
+  }
+  if (imported.hierarchy.slices !== preview.totalSlices) {
+    mismatches.push(`slices ${imported.hierarchy.slices}/${preview.totalSlices}`);
+  }
+  if (imported.hierarchy.tasks !== preview.totalTasks) {
+    mismatches.push(`tasks ${imported.hierarchy.tasks}/${preview.totalTasks}`);
+  }
+  if (imported.requirements !== preview.requirements.total) {
+    mismatches.push(`requirements ${imported.requirements}/${preview.requirements.total}`);
+  }
+  if (mismatches.length > 0) {
+    throw new Error(`migration DB import verification failed: ${mismatches.join(", ")}`);
+  }
+}
+
+export async function importWrittenMigrationToDb(
+  basePath: string,
+  preview?: MigrationPreview,
+): Promise<MigrationImportCounts> {
+  const opened = await ensureDbOpen(basePath);
+  if (!opened) {
+    throw new Error(`failed to open or create the GSD database at ${basePath}`);
+  }
+
+  const counts = transaction(() => {
+    clearEngineHierarchy();
+    const imported = migrateFromMarkdown(basePath);
+    if (preview) assertMigrationImportMatchesPreview(imported, preview);
+    return imported;
+  });
+  invalidateStateCache();
+  return counts;
+}
 
 /** Format preview stats for embedding in the review prompt. */
 function formatPreviewStats(preview: MigrationPreview): string {
@@ -86,9 +130,9 @@ export async function handleMigrate(
   // Default to cwd when no args given; expand ~ to HOME
   let rawPath = args.trim() || ".";
   if (rawPath.startsWith("~/")) {
-    rawPath = join(getHomeDir(), rawPath.slice(2));
+    rawPath = join(homedir(), rawPath.slice(2));
   } else if (rawPath === "~") {
-    rawPath = getHomeDir();
+    rawPath = homedir();
   }
 
   let sourcePath = resolve(process.cwd(), rawPath);
@@ -182,9 +226,10 @@ export async function handleMigrate(
 
   const result = await writeGSDDirectory(project, process.cwd());
   const gsdPath = gsdRoot(process.cwd());
+  const imported = await importWrittenMigrationToDb(process.cwd(), preview);
 
   ctx.ui.notify(
-    `✓ Migration complete — ${result.paths.length} file(s) written to .gsd/`,
+    `✓ Migration complete — ${result.paths.length} file(s) written to .gsd/ and ${imported.hierarchy.milestones}M/${imported.hierarchy.slices}S/${imported.hierarchy.tasks}T imported to the database`,
     "info",
   );
 
@@ -193,6 +238,7 @@ export async function handleMigrate(
     title: "Migration written",
     summary: [
       `${result.paths.length} files written to .gsd/`,
+      `${imported.hierarchy.milestones} milestone(s), ${imported.hierarchy.slices} slice(s), and ${imported.hierarchy.tasks} task(s) imported to gsd.db`,
       "",
       "The agent can now review the migrated output against GSD-2 standards —",
       "checking structure, content quality, deriveState() round-trip, and",

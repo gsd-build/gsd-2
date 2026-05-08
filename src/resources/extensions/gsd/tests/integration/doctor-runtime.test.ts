@@ -60,20 +60,24 @@ describe('doctor-runtime', async () => {
 
   try {
     // ─── Test 1: Stale crash lock detection & fix ─────────────────────
-    test('stale_crash_lock', async () => {
+    test('stale_crash_lock', async (t) => {
       const dir = createMinimalProject();
       cleanups.push(dir);
 
-      // Write a lock file with a PID that is definitely dead (use PID 1 million+)
-      const lockData = {
-        pid: 9999999,
-        startedAt: "2026-03-10T00:00:00Z",
-        unitType: "execute-task",
-        unitId: "M001/S01/T01",
-        unitStartedAt: "2026-03-10T00:01:00Z",
-        completedUnits: 3,
-      };
-      writeFileSync(join(dir, ".gsd", "auto.lock"), JSON.stringify(lockData, null, 2));
+      // Phase C pt 2: stale lock state lives in the workers table now.
+      // Insert a fake stale worker row directly (PID 9999999 is dead).
+      const { openDatabase, _getAdapter } = await import("../../gsd-db.ts");
+      const gsdDb = await import("../../gsd-db.ts");
+      t.after(() => { gsdDb.closeDatabase(); });
+      const { randomUUID } = await import("node:crypto");
+      openDatabase(join(dir, ".gsd", "gsd.db"));
+      const db = _getAdapter()!;
+      db.prepare(
+        `INSERT INTO workers (worker_id, host, pid, started_at, version, last_heartbeat_at, status, project_root_realpath)
+         VALUES (:w, 'test-host', 9999999, '2026-03-10T00:00:00Z', 'test', '1970-01-01T00:00:00.000Z', 'active', :root)`,
+      ).run({ ":w": `test-fake-${randomUUID().slice(0, 8)}`, ":root": dir });
+      // Leave DB open — runGSDDoctor's readCrashLock relies on the
+      // currently-open DB connection (it does not open one of its own).
 
       const detect = await runGSDDoctor(dir);
       const lockIssues = detect.issues.filter(i => i.code === "stale_crash_lock");
@@ -82,8 +86,15 @@ describe('doctor-runtime', async () => {
       assert.ok(lockIssues[0]?.fixable === true, "stale lock is fixable");
 
       const fixed = await runGSDDoctor(dir, { fix: true });
-      assert.ok(fixed.fixesApplied.some(f => f.includes("cleared stale auto.lock")), "fix clears stale lock");
-      assert.ok(!existsSync(join(dir, ".gsd", "auto.lock")), "auto.lock removed after fix");
+      assert.ok(
+        fixed.fixesApplied.some(f => f.includes("cleared stale")),
+        `fix clears stale lock (got: ${fixed.fixesApplied.join(", ")})`,
+      );
+
+      // Close DB so subsequent tests in this file (which expect a clean
+      // state) don't see this test's connection lingering.
+      const { closeDatabase } = await import("../../gsd-db.ts");
+      closeDatabase();
     });
 
     // ─── Test 2: No false positive for missing lock ───────────────────
@@ -122,6 +133,46 @@ describe('doctor-runtime', async () => {
       // Verify the file was cleaned
       const content = JSON.parse(readFileSync(join(dir, ".gsd", "hook-state.json"), "utf-8"));
       assert.deepStrictEqual(Object.keys(content.cycleCounts).length, 0, "hook state cycle counts cleared");
+    });
+
+    // ─── Test 3b: Exhausted run-uat retry counter detection & fix ──────
+    test('uat_retry_exhausted', async () => {
+      const dir = createMinimalProject();
+      cleanups.push(dir);
+
+      const runtimeDir = join(dir, ".gsd", "runtime");
+      mkdirSync(runtimeDir, { recursive: true });
+      const counterPath = join(runtimeDir, "uat-count-M001-S01.json");
+      writeFileSync(counterPath, JSON.stringify({ count: 7, updatedAt: "2026-04-30T00:00:00.000Z" }));
+
+      const detect = await runGSDDoctor(dir);
+      const uatIssues = detect.issues.filter(i => i.code === "uat_retry_exhausted");
+      assert.ok(uatIssues.length > 0, "detects exhausted UAT retry counter");
+      assert.equal(uatIssues[0]?.unitId, "M001/S01", "issue is scoped to the stuck slice");
+      assert.ok(uatIssues[0]?.fixable === true, "exhausted UAT counter is fixable");
+
+      const fixed = await runGSDDoctor(dir, { fix: true });
+      assert.ok(
+        fixed.fixesApplied.some(f => f.includes("reset exhausted run-uat retry counter for M001/S01")),
+        "fix resets the UAT retry counter",
+      );
+      assert.ok(!existsSync(counterPath), "UAT retry counter removed after fix");
+    });
+
+    test('uat_retry_exhausted — no issue when ASSESSMENT has verdict', async () => {
+      const dir = createMinimalProject();
+      cleanups.push(dir);
+
+      const runtimeDir = join(dir, ".gsd", "runtime");
+      mkdirSync(runtimeDir, { recursive: true });
+      writeFileSync(join(runtimeDir, "uat-count-M001-S01.json"), JSON.stringify({ count: 7 }));
+
+      const assessmentPath = join(dir, ".gsd", "milestones", "M001", "slices", "S01", "S01-ASSESSMENT.md");
+      writeFileSync(assessmentPath, "---\nverdict: PASS\n---\n# UAT Result\n");
+
+      const detect = await runGSDDoctor(dir);
+      const uatIssues = detect.issues.filter(i => i.code === "uat_retry_exhausted");
+      assert.deepStrictEqual(uatIssues.length, 0, "does not flag stale counter when ASSESSMENT already has a verdict");
     });
 
     // ─── Test 4: Activity log bloat detection ─────────────────────────
@@ -377,18 +428,19 @@ node_modules/
       const dir = createMinimalProject();
       cleanups.push(dir);
 
-      // Create lock dir + auto.lock with PID 1 (init/launchd — always alive, never our own PID)
+      // Create lock dir + insert a live worker row (PID 1 = init/launchd —
+      // always alive, never our own PID). Phase C pt 2: worker liveness
+      // lives in the workers table. last_heartbeat_at = now → not stale.
       const lockDir = join(dir, ".gsd.lock");
       mkdirSync(lockDir, { recursive: true });
-      const liveLockData = {
-        pid: 1,
-        startedAt: new Date().toISOString(),
-        unitType: "execute-task",
-        unitId: "M001/S01/T01",
-        unitStartedAt: new Date().toISOString(),
-        completedUnits: 1,
-      };
-      writeFileSync(join(dir, ".gsd", "auto.lock"), JSON.stringify(liveLockData, null, 2));
+      const { openDatabase, _getAdapter } = await import("../../gsd-db.ts");
+      const { randomUUID } = await import("node:crypto");
+      openDatabase(join(dir, ".gsd", "gsd.db"));
+      const db = _getAdapter()!;
+      db.prepare(
+        `INSERT INTO workers (worker_id, host, pid, started_at, version, last_heartbeat_at, status, project_root_realpath)
+         VALUES (:w, 'test-host', 1, :now, 'test', :now, 'active', :root)`,
+      ).run({ ":w": `test-fake-${randomUUID().slice(0, 8)}`, ":now": new Date().toISOString(), ":root": dir });
 
       const detect = await runGSDDoctor(dir);
       const strandedIssues = detect.issues.filter(i => i.code === "stranded_lock_directory");

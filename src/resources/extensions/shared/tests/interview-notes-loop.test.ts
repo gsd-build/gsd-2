@@ -139,4 +139,45 @@ describe("interview-ui notes loop regression (#3502)", () => {
 		assert.ok(answer, "answer for q1 should exist");
 		assert.equal(answer.selected, "Web App");
 	});
+
+	it("ignores abort signals after a submitted answer", async () => {
+		const controller = new AbortController();
+		const doneCalls: RoundResult[] = [];
+		let widget: { handleInput(input: string): void } | undefined;
+
+		const resultPromise = showInterviewRound(questions, { signal: controller.signal }, {
+			ui: {
+				custom: (factory: any) => new Promise<RoundResult>((resolve) => {
+					const mockTui = { requestRender: () => {} };
+					const mockTheme = {
+						fg: (_c: string, t: string) => t,
+						bold: (t: string) => t,
+						dim: (t: string) => t,
+						italic: (t: string) => t,
+						strikethrough: (t: string) => t,
+						accent: (t: string) => t,
+						success: (t: string) => t,
+						warning: (t: string) => t,
+						error: (t: string) => t,
+						info: (t: string) => t,
+						muted: (t: string) => t,
+						dimmed: (t: string) => t,
+					};
+					widget = factory(mockTui, mockTheme, {}, (result: RoundResult) => {
+						doneCalls.push(result);
+						resolve(result);
+					});
+				}),
+			},
+		} as any);
+
+		assert.ok(widget, "widget should be created synchronously");
+		widget.handleInput(ENTER);
+		widget.handleInput(ENTER);
+		controller.abort();
+
+		const result = await resultPromise;
+		assert.equal(doneCalls.length, 1, "abort after submit must not emit a second empty result");
+		assert.deepEqual(result.answers.q1, { selected: "Web App", notes: "" });
+	});
 });
