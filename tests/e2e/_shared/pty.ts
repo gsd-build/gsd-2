@@ -203,10 +203,14 @@ export function gsdPty(args: string[], env: E2eEnv, opts: PtyOptions = {}): PtyC
 	const dispose: PtyChild["dispose"] = async () => {
 		if (exited) return;
 		kill();
-		await Promise.race([
-			waitForExit(2000).catch(() => undefined),
-			sleep(2000),
-		]);
+		try {
+			await waitForExit(2000);
+			return;
+		} catch {
+			// escalate if graceful termination did not complete in time
+		}
+		if (!exited) kill("SIGKILL");
+		await waitForExit(2000).catch(() => undefined);
 	};
 
 	return { output, cleanOutput, send, waitForOutput, waitForIdle, waitForExit, kill, dispose };

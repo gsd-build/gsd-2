@@ -81,7 +81,7 @@ Notes:
   TMPDIR conventions as `gsdAsync`. The only difference is the transport.
 - Predicates run against `cleanOutput()` — the full ANSI-stripped buffer.
   Don't strip per-chunk; chunk boundaries can split escape sequences.
-- `.send(input)` auto-appends platform EOL. For chords like Ctrl-D (EOF)
+- `.send(input)` auto-appends `\r` (PTY Enter). For chords like Ctrl-D (EOF)
   use `.send(CTRL_D, { raw: true })`.
 - `node-pty@1.1.0` ships prebuilds for darwin and win32 (N-API → ABI-agnostic
   on Node 22+). Linux falls back to `node-gyp rebuild` from source —
@@ -116,7 +116,8 @@ Notes:
   tests" in [CONTRIBUTING.md](../../CONTRIBUTING.md). E2e is the wrong layer
   for that anyway.
 - ❌ Spawning `gsd` directly with `child_process.spawn` — bypasses the
-  env-stripping and TMPDIR fix. Always go through `gsdSync` / `gsdAsync`.
+  env-stripping and TMPDIR fix. Always go through `gsdSync` / `gsdAsync`
+  (or `gsdPty` for interactive TTY flows).
 - ❌ Asserting on raw ANSI-coded output. Use `result.stdoutClean`.
 - ❌ Calling real LLM/network APIs. Future phases land a fake-LLM provider
   that replays scripted transcripts; until then, e2e tests must avoid any
