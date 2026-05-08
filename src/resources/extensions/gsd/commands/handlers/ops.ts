@@ -168,6 +168,11 @@ Examples:
     ctx.ui.notify("Usage: /gsd knowledge <rule|pattern|lesson> <description>. Example: /gsd knowledge rule Use real DB for integration tests", "warning");
     return true;
   }
+  if (trimmed === "graph" || trimmed.startsWith("graph ") || trimmed.startsWith("graph\t")) {
+    const { handleGraph } = await import("../../commands-graph.js");
+    await handleGraph(trimmed.replace(/^graph\s*/, "").trim(), ctx, projectRoot());
+    return true;
+  }
   if (trimmed === "migrate" || trimmed.startsWith("migrate ")) {
     const { handleMigrate } = await import("../../migrate/command.js");
     await handleMigrate(trimmed.replace(/^migrate\s*/, "").trim(), ctx, pi);
