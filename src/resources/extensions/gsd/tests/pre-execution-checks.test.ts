@@ -17,11 +17,13 @@ import { join } from "node:path";
 import {
   extractPackageReferences,
   checkFilePathConsistency,
+  checkPackageExistence,
   checkTaskOrdering,
   checkInterfaceContracts,
   runPreExecutionChecks,
   normalizeFilePath,
   type PreExecutionResult,
+  type ResolutionContext,
 } from "../pre-execution-checks.ts";
 import type { TaskRow } from "../gsd-db.ts";
 
@@ -1999,5 +2001,284 @@ describe("checkFilePathConsistency quote-wrapped annotation (#3747)", () => {
       0,
       "Annotated file paths and prose inputs should produce zero blocking errors",
     );
+  });
+});
+
+// ─── isLocalPackage / checkPackageExistence workspace tests (#5237) ──────────
+
+describe("checkPackageExistence skips local workspace packages (#5237)", () => {
+  test("workspace package resolvable via require.resolve is not checked on npm", async () => {
+    // "node:fs" is always resolvable — use it as a proxy for a local package
+    const tasks = [
+      createTask({
+        id: "T01",
+        description: `
+\`\`\`typescript
+import { readFileSync } from 'fs';
+\`\`\`
+        `,
+      }),
+    ];
+
+    // basePath is the gsd-2 repo root (has node_modules)
+    const results = await checkPackageExistence(tasks, process.cwd());
+    // "fs" is a node builtin — extractPackageReferences skips node: prefix
+    // but bare 'fs' would be extracted. However it resolves via require.resolve
+    // so it should not produce a blocking failure.
+    const blocking = results.filter((r) => r.blocking && r.target === "fs");
+    assert.equal(blocking.length, 0, "Locally resolvable package should not produce blocking failure");
+  });
+
+  test("package existing in node_modules is not checked on npm", async () => {
+    // Create a fake workspace with a node_modules/@fake/pkg directory
+    const tempDir = join(tmpdir(), `pre-exec-pkg-local-${Date.now()}`);
+    mkdirSync(join(tempDir, "node_modules", "@fake", "pkg"), { recursive: true });
+    writeFileSync(join(tempDir, "package.json"), '{"name":"test"}');
+
+    try {
+      const tasks = [
+        createTask({
+          id: "T01",
+          description: `
+\`\`\`typescript
+import { thing } from '@fake/pkg';
+\`\`\`
+          `,
+        }),
+      ];
+
+      const results = await checkPackageExistence(tasks, tempDir);
+      const blocking = results.filter((r) => r.blocking && r.target === "@fake/pkg");
+      assert.equal(blocking.length, 0, "Package existing in node_modules should not produce blocking failure");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("non-existent package still produces blocking failure", async () => {
+    const tempDir = join(tmpdir(), `pre-exec-pkg-missing-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+    writeFileSync(join(tempDir, "package.json"), '{"name":"test"}');
+
+    try {
+      const tasks = [
+        createTask({
+          id: "T01",
+          description: `npm install @this-does-not-exist-anywhere-12345/fake-pkg`,
+        }),
+      ];
+
+      const results = await checkPackageExistence(tasks, tempDir);
+      const blocking = results.filter((r) => r.blocking);
+      assert.ok(blocking.length > 0 || results.some((r) => r.message?.includes("Timeout")),
+        "Non-existent package should produce blocking failure or timeout warning");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── ResolutionContext: multi-root file resolution (#5066, #5464, #5492) ─────
+
+describe("checkFilePathConsistency with ResolutionContext (#5464, #5492)", () => {
+  test("file found at additionalRoots passes even when missing from basePath", (t) => {
+    const worktree = join(tmpdir(), `pre-exec-ctx-wt-${Date.now()}`);
+    const projectRoot = join(tmpdir(), `pre-exec-ctx-root-${Date.now()}`);
+    mkdirSync(worktree, { recursive: true });
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    writeFileSync(join(projectRoot, "src/lib.ts"), "// exists at project root");
+    t.after(() => {
+      rmSync(worktree, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    });
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        inputs: ["src/lib.ts"],
+        expected_output: [],
+      }),
+    ];
+
+    const context: ResolutionContext = { additionalRoots: [projectRoot] };
+    const results = checkFilePathConsistency(tasks, worktree, context);
+    assert.equal(results.length, 0, "File at additionalRoots should satisfy the input check");
+  });
+
+  test(".gsd/ metadata path resolved via metadataRoot (#5492)", (t) => {
+    const worktree = join(tmpdir(), `pre-exec-ctx-meta-wt-${Date.now()}`);
+    const projectRoot = join(tmpdir(), `pre-exec-ctx-meta-root-${Date.now()}`);
+    mkdirSync(worktree, { recursive: true });
+    mkdirSync(join(projectRoot, ".gsd"), { recursive: true });
+    writeFileSync(join(projectRoot, ".gsd/DECISIONS.md"), "# Decisions");
+    t.after(() => {
+      rmSync(worktree, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    });
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        inputs: [".gsd/DECISIONS.md"],
+        expected_output: [],
+      }),
+    ];
+
+    const context: ResolutionContext = { metadataRoot: projectRoot };
+    const results = checkFilePathConsistency(tasks, worktree, context);
+    assert.equal(results.length, 0, ".gsd/ path should resolve via metadataRoot");
+  });
+
+  test(".gsd/ path still fails when not at metadataRoot either", (t) => {
+    const worktree = join(tmpdir(), `pre-exec-ctx-meta-fail-${Date.now()}`);
+    const projectRoot = join(tmpdir(), `pre-exec-ctx-meta-fail-root-${Date.now()}`);
+    mkdirSync(worktree, { recursive: true });
+    mkdirSync(projectRoot, { recursive: true });
+    t.after(() => {
+      rmSync(worktree, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    });
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        inputs: [".gsd/NONEXISTENT.md"],
+        expected_output: [],
+      }),
+    ];
+
+    const context: ResolutionContext = { metadataRoot: projectRoot };
+    const results = checkFilePathConsistency(tasks, worktree, context);
+    assert.equal(results.length, 1, "Missing .gsd/ file should still fail");
+    assert.equal(results[0].blocking, true);
+  });
+
+  test("without context, behavior is unchanged (single basePath)", (t) => {
+    const tempDir = join(tmpdir(), `pre-exec-ctx-none-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+    t.after(() => rmSync(tempDir, { recursive: true, force: true }));
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        inputs: ["missing-file.ts"],
+        expected_output: [],
+      }),
+    ];
+
+    const results = checkFilePathConsistency(tasks, tempDir);
+    assert.equal(results.length, 1, "Without context, missing file should still fail");
+    assert.equal(results[0].blocking, true);
+  });
+});
+
+describe("isUnderExpectedDirectory — directory materialization (#5066)", () => {
+  test("file under a prior task's directory output is satisfied", (t) => {
+    const tempDir = join(tmpdir(), `pre-exec-dir-mat-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+    t.after(() => rmSync(tempDir, { recursive: true, force: true }));
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        sequence: 0,
+        inputs: [],
+        expected_output: ["dita-back/"],
+      }),
+      createTask({
+        id: "T02",
+        sequence: 1,
+        inputs: ["dita-back/src/config.ts"],
+        expected_output: [],
+      }),
+    ];
+
+    const results = checkFilePathConsistency(tasks, tempDir);
+    assert.equal(results.length, 0,
+      "File under a prior task's directory expected_output should not be blocking");
+  });
+
+  test("file NOT under any directory output still fails", (t) => {
+    const tempDir = join(tmpdir(), `pre-exec-dir-mat-fail-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+    t.after(() => rmSync(tempDir, { recursive: true, force: true }));
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        sequence: 0,
+        inputs: [],
+        expected_output: ["other-dir/"],
+      }),
+      createTask({
+        id: "T02",
+        sequence: 1,
+        inputs: ["dita-back/src/config.ts"],
+        expected_output: [],
+      }),
+    ];
+
+    const results = checkFilePathConsistency(tasks, tempDir);
+    assert.equal(results.length, 1, "File not under any directory output should still fail");
+    assert.equal(results[0].blocking, true);
+  });
+
+  test("file output without trailing slash does not satisfy descendant", (t) => {
+    const tempDir = join(tmpdir(), `pre-exec-dir-mat-noslash-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+    t.after(() => rmSync(tempDir, { recursive: true, force: true }));
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        sequence: 0,
+        inputs: [],
+        expected_output: ["dita-back"],
+      }),
+      createTask({
+        id: "T02",
+        sequence: 1,
+        inputs: ["dita-back/src/config.ts"],
+        expected_output: [],
+      }),
+    ];
+
+    const results = checkFilePathConsistency(tasks, tempDir);
+    assert.equal(results.length, 1,
+      "Output without trailing slash should NOT satisfy descendant inputs (must be explicit directory)");
+  });
+});
+
+describe("runPreExecutionChecks with ResolutionContext integration", () => {
+  test("passes with context resolving files that would otherwise fail", async (t) => {
+    const worktree = join(tmpdir(), `pre-exec-int-wt-${Date.now()}`);
+    const projectRoot = join(tmpdir(), `pre-exec-int-root-${Date.now()}`);
+    mkdirSync(worktree, { recursive: true });
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    mkdirSync(join(projectRoot, ".gsd"), { recursive: true });
+    writeFileSync(join(projectRoot, "src/existing.ts"), "// content");
+    writeFileSync(join(projectRoot, ".gsd/REQUIREMENTS.md"), "# Reqs");
+    t.after(() => {
+      rmSync(worktree, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    });
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        inputs: ["src/existing.ts", ".gsd/REQUIREMENTS.md"],
+        expected_output: [],
+      }),
+    ];
+
+    const context: ResolutionContext = {
+      additionalRoots: [projectRoot],
+      metadataRoot: projectRoot,
+    };
+
+    const result = await runPreExecutionChecks(tasks, worktree, context);
+    assert.equal(result.status, "pass",
+      "Files resolvable via context should produce pass status");
+    assert.equal(result.checks.filter((c) => c.blocking).length, 0);
   });
 });

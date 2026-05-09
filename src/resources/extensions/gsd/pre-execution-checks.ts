@@ -19,8 +19,9 @@
 
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
 import type { TaskRow } from "./db-task-slice-rows.js";
 import type { PreExecutionCheckJSON } from "./verification-evidence.ts";
 
@@ -35,6 +36,18 @@ export interface PreExecutionResult {
   checks: PreExecutionCheckJSON[];
   /** Total duration in milliseconds */
   durationMs: number;
+}
+
+/**
+ * Resolution context for multi-root file lookups.
+ * Addresses false positives in worktree isolation (#5464, #5492, #5462) and
+ * directory-materialization tasks (#5066) by providing additional search paths.
+ */
+export interface ResolutionContext {
+  /** Additional paths to search when a file isn't found at basePath (e.g., project root) */
+  additionalRoots?: string[];
+  /** Path where .gsd/ metadata lives (project root, not worktree). Falls back to basePath. */
+  metadataRoot?: string;
 }
 
 // ─── Package Existence Check ─────────────────────────────────────────────────
@@ -128,6 +141,34 @@ function normalizePackageName(raw: string): string {
 }
 
 /**
+ * Returns true if the package is locally resolvable — skip npm registry check.
+ *
+ * Method 1: require.resolve from basePath — handles hoisted deps, exports
+ *   maps, and npm-linked packages that may not be directly in node_modules/.
+ * Method 2: existsSync on node_modules/<pkg> — handles unbuilt workspace
+ *   packages (no dist/ yet, so require.resolve throws) across all linker
+ *   modes: pnpm symlinks, npm workspace real dirs, yarn classic copies.
+ */
+function isLocalPackage(packageName: string, basePath: string): boolean {
+  // Method 1: require.resolve (handles hoisted deps and exports maps)
+  try {
+    const localRequire = createRequire(join(basePath, "package.json"));
+    localRequire.resolve(packageName);
+    return true;
+  } catch { /* not resolvable via require */ }
+
+  // Method 2: direct existence check (handles unbuilt workspace packages)
+  try {
+    const nmPath = packageName.startsWith("@")
+      ? join(basePath, "node_modules", ...packageName.split("/"))
+      : join(basePath, "node_modules", packageName);
+    if (existsSync(nmPath)) return true;
+  } catch { /* not in node_modules */ }
+
+  return false;
+}
+
+/**
  * Check if a package exists on npm registry.
  * Returns null on success, error message on failure.
  * Times out after timeoutMs (default 5000ms).
@@ -181,12 +222,13 @@ async function checkPackageOnNpm(
 
 /**
  * Check all package references in tasks for existence on npm.
- * Runs checks in parallel with a 5s timeout per package.
+ * Skips packages resolvable locally (workspace members, linked packages).
+ * Runs registry checks in parallel with a 5s timeout per package.
  * Network failures warn but don't fail (R012 conservative design).
  */
 export async function checkPackageExistence(
   tasks: TaskRow[],
-  _basePath: string
+  basePath: string
 ): Promise<PreExecutionCheckJSON[]> {
   const results: PreExecutionCheckJSON[] = [];
   const packagesToCheck = new Set<string>();
@@ -203,8 +245,18 @@ export async function checkPackageExistence(
     return results;
   }
 
-  // Check packages in parallel
-  const checkPromises = Array.from(packagesToCheck).map(async (pkg) => {
+  // Filter out packages that resolve locally (workspace packages, linked deps)
+  const resolveRoot = basePath || process.cwd();
+  const remotePackages = Array.from(packagesToCheck).filter(
+    (pkg) => !isLocalPackage(pkg, resolveRoot)
+  );
+
+  if (remotePackages.length === 0) {
+    return results;
+  }
+
+  // Check remaining (non-local) packages against npm in parallel
+  const checkPromises = remotePackages.map(async (pkg) => {
     const result = await checkPackageOnNpm(pkg);
     return { pkg, result };
   });
@@ -430,10 +482,78 @@ function getExpectedOutputsUpTo(tasks: TaskRow[], taskIndex: number): Set<string
 }
 
 /**
+ * Collect raw (unnormalized) expected_output entries from tasks up to taskIndex.
+ * Preserves trailing slashes for directory-intent detection (#5066).
+ */
+function getRawExpectedOutputsUpTo(tasks: TaskRow[], taskIndex: number): string[] {
+  const outputs: string[] = [];
+  for (let i = 0; i < tasks.length; i++) {
+    const task = tasks[i];
+    if (i < taskIndex || task.status === "completed") {
+      outputs.push(...task.expected_output);
+    }
+  }
+  return outputs;
+}
+
+/**
+ * Check if a file exists at any of the resolution roots.
+ * Tries basePath first, then additionalRoots in order.
+ * For .gsd/ paths, also tries metadataRoot (#5492).
+ */
+function fileExistsInContext(
+  normalizedFile: string,
+  basePath: string,
+  context?: ResolutionContext,
+): boolean {
+  // Primary: resolve against basePath
+  if (existsSync(resolve(basePath, normalizedFile))) return true;
+
+  // .gsd/ metadata paths resolve against the metadata root (#5492)
+  if (normalizedFile.startsWith(".gsd/") && context?.metadataRoot) {
+    if (existsSync(resolve(context.metadataRoot, normalizedFile))) return true;
+  }
+
+  // Additional roots (project root when in worktree, submodule roots, etc.)
+  if (context?.additionalRoots) {
+    for (const root of context.additionalRoots) {
+      if (existsSync(resolve(root, normalizedFile))) return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Check if a prior task's expected_output includes a directory that would
+ * contain normalizedFile when materialized (#5066).
+ * Handles setup tasks that create entire directory trees.
+ *
+ * Works with both raw paths (trailing /) and normalized paths (no trailing /).
+ * A normalized output "dita-back" satisfies "dita-back/src/config.ts" because
+ * getExpectedOutputsUpTo normalizes all outputs (stripping the trailing slash).
+ * We check the raw expected_output entries to detect directory intent.
+ */
+function isUnderExpectedDirectory(
+  normalizedFile: string,
+  expectedOutputs: Set<string>,
+  rawExpectedOutputs: string[],
+): boolean {
+  for (const rawOutput of rawExpectedOutputs) {
+    if (!rawOutput.endsWith("/")) continue;
+    const normalizedDir = normalizeFilePath(rawOutput);
+    const prefix = normalizedDir + "/";
+    if (normalizedFile.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+/**
  * Check that all files referenced in task.inputs either:
- *   1. Exist on disk, OR
+ *   1. Exist on disk (at basePath or additional roots), OR
  *   2. Are in a prior task's expected_output, OR
- *   3. Are in the current task's own expected_output — the task produces them,
+ *   3. Are under a prior task's directory expected_output (#5066), OR
+ *   4. Are in the current task's own expected_output — the task produces them,
  *      so they don't need to pre-exist (#4459, mirroring the exemption #3626
  *      introduced for task.files).
  *
@@ -444,7 +564,8 @@ function getExpectedOutputsUpTo(tasks: TaskRow[], taskIndex: number): Set<string
  */
 export function checkFilePathConsistency(
   tasks: TaskRow[],
-  basePath: string
+  basePath: string,
+  context?: ResolutionContext,
 ): PreExecutionCheckJSON[] {
   const results: PreExecutionCheckJSON[] = [];
 
@@ -453,6 +574,10 @@ export function checkFilePathConsistency(
     const priorOutputs = getExpectedOutputsUpTo(tasks, i);
     const ownOutputs = new Set<string>(task.expected_output.map(normalizeFilePath));
     const filesToCheck = [...task.inputs];
+
+    // Collect raw expected_output entries (with trailing slashes intact) for directory detection
+    const rawPriorOutputs = getRawExpectedOutputsUpTo(tasks, i);
+    const rawOwnOutputs = task.expected_output;
 
     for (const file of filesToCheck) {
       // Skip empty strings
@@ -463,24 +588,29 @@ export function checkFilePathConsistency(
       const normalizedFile = normalizeFilePath(file);
       if (containsGlobPattern(normalizedFile)) continue;
 
-      // Check if file exists on disk
-      const absolutePath = resolve(basePath, normalizedFile);
-      const existsOnDisk = existsSync(absolutePath);
+      // Check if file exists on disk (multi-root aware)
+      const existsOnDisk = fileExistsInContext(normalizedFile, basePath, context);
 
       // Check if file is in prior expected outputs (priorOutputs already normalized)
       const inPriorOutputs = priorOutputs.has(normalizedFile);
       const inOwnOutputs = ownOutputs.has(normalizedFile);
 
+      // File is under a directory that a prior task will materialize (#5066)
+      const underExpectedDir = !existsOnDisk && !inPriorOutputs && !inOwnOutputs
+        ? isUnderExpectedDirectory(normalizedFile, priorOutputs, rawPriorOutputs) ||
+          isUnderExpectedDirectory(normalizedFile, ownOutputs, rawOwnOutputs)
+        : false;
+
       // Directory inputs are satisfied when something produces a file beneath
       // them — either a prior task or the current task itself.
       let directorySatisfied = false;
-      if (!existsOnDisk && !inPriorOutputs && !inOwnOutputs && isDirectoryReference(file)) {
+      if (!existsOnDisk && !inPriorOutputs && !inOwnOutputs && !underExpectedDir && isDirectoryReference(file)) {
         directorySatisfied =
           anyOutputUnderDirectory(normalizedFile, priorOutputs) ||
           anyOutputUnderDirectory(normalizedFile, ownOutputs);
       }
 
-      if (!existsOnDisk && !inPriorOutputs && !inOwnOutputs && !directorySatisfied) {
+      if (!existsOnDisk && !inPriorOutputs && !inOwnOutputs && !underExpectedDir && !directorySatisfied) {
         results.push({
           category: "file",
           target: file,
@@ -500,12 +630,13 @@ export function checkFilePathConsistency(
 /**
  * Detect impossible task ordering: task N reads a file that task N+M creates.
  * This is a fatal error — the plan has an impossible dependency.
- * 
+ *
  * All paths are normalized before comparison to ensure ./src/a.ts matches src/a.ts.
  */
 export function checkTaskOrdering(
   tasks: TaskRow[],
-  basePath: string
+  basePath: string,
+  context?: ResolutionContext,
 ): PreExecutionCheckJSON[] {
   const results: PreExecutionCheckJSON[] = [];
 
@@ -544,8 +675,7 @@ export function checkTaskOrdering(
       // files, and a same-task output under the directory satisfies it.
       if (isDirectoryReference(file)) continue;
       const creator = fileCreators.get(normalizedFile);
-      const absolutePath = resolve(basePath, normalizedFile);
-      const existsOnDisk = existsSync(absolutePath);
+      const existsOnDisk = fileExistsInContext(normalizedFile, basePath, context);
       // Skip if the creating task has already completed — its output is available
       // regardless of disk state (e.g. file was a temp artifact cleaned up after
       // the task ran, or a replan introduced a new earlier-sequence task that
@@ -721,18 +851,20 @@ export function checkInterfaceContracts(
  *
  * @param tasks - Array of TaskRow from the slice
  * @param basePath - Base path for resolving file references
+ * @param context - Optional multi-root resolution context for worktree/submodule scenarios
  * @returns PreExecutionResult with status, checks, and duration
  */
 export async function runPreExecutionChecks(
   tasks: TaskRow[],
-  basePath: string
+  basePath: string,
+  context?: ResolutionContext,
 ): Promise<PreExecutionResult> {
   const startTime = Date.now();
   const allChecks: PreExecutionCheckJSON[] = [];
 
   // Run sync checks first
-  const fileChecks = checkFilePathConsistency(tasks, basePath);
-  const orderingChecks = checkTaskOrdering(tasks, basePath);
+  const fileChecks = checkFilePathConsistency(tasks, basePath, context);
+  const orderingChecks = checkTaskOrdering(tasks, basePath, context);
   const contractChecks = checkInterfaceContracts(tasks, basePath);
 
   allChecks.push(...fileChecks, ...orderingChecks, ...contractChecks);
