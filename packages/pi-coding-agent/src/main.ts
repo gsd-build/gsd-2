@@ -375,6 +375,21 @@ export async function main(args: string[]) {
 		process.exit(1);
 	});
 
+	// Catch SIGINT (Ctrl+C) so Kitty keyboard protocol is disabled before exit.
+	// Without this, a forced interruption leaves the terminal in raw+Kitty mode
+	// and every subsequent keypress leaks CSI-u garbage into the shell.
+	process.on("SIGINT", () => {
+		try {
+			process.stdout.write("\x1b[<u");
+			process.stdout.write("\x1b[>4;0m");
+			process.stdout.write("\x1b[?2004l");
+			process.stdout.write("\x1b[?25h");
+			process.stdout.write("\x1b[J");
+		} catch { /* terminal may already be closed */ }
+		console.error("\nInterrupted — terminal state restored.");
+		process.exit(130);
+	});
+
 	const offlineMode = args.includes("--offline") || isTruthyEnvFlag(process.env.PI_OFFLINE);
 	if (offlineMode) {
 		process.env.PI_OFFLINE = "1";
