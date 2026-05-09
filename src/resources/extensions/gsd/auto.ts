@@ -2195,8 +2195,13 @@ export async function startAuto(
         try {
           releaseSessionLock(base);
           clearLock(base);
-        } catch {
-          // Best-effort cleanup; the abort path must not continue resume.
+        } catch (cleanupErr) {
+          debugLog("auto-start-enter-milestone-cleanup-failed", {
+            error:
+              cleanupErr instanceof Error
+                ? cleanupErr.message
+                : String(cleanupErr),
+          });
         }
         return;
       }
