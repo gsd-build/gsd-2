@@ -298,16 +298,18 @@ test("enterMilestone returns ok:false reason:invalid-milestone-id on path traver
 
 // ─── exitMilestone — typed-result contract ────────────────────────────────────
 
-test("exitMilestone throws when no resolverFactory is provided", () => {
+test("exitMilestone returns teardown-failed when no resolverFactory is provided", () => {
   const s = makeSession();
   const deps = makeDeps();
   const ctx = makeCtx();
   const lifecycle = new WorktreeLifecycle(s, deps);
 
-  assert.throws(
-    () => lifecycle.exitMilestone("M001", { merge: true }, ctx),
-    /requires a resolverFactory/,
-  );
+  const result = lifecycle.exitMilestone("M001", { merge: true }, ctx);
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.reason, "teardown-failed");
+    assert.match(String(result.cause), /requires a resolverFactory/);
+  }
 });
 
 test("exitMilestone delegates merge:true to Resolver.mergeAndExit and returns ok:true", () => {

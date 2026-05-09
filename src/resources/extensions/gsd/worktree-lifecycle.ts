@@ -95,6 +95,7 @@ function isValidMilestoneId(milestoneId: string): boolean {
  * retires (slice #5587).
  *
  * Side effects (preserved from the original `WorktreeResolver.enterMilestone`):
+ *   - throws when `milestoneId` contains path separators or traversal
  *   - mutates `s.milestoneLeaseToken` on lease claim/release/refresh
  *   - mutates `s.basePath` on successful worktree entry
  *   - mutates `s.gitService` (rebuilt against the new base path)
@@ -468,9 +469,13 @@ export class WorktreeLifecycle {
     ctx: NotifyCtx,
   ): ExitResult {
     if (!this.resolverFactory) {
-      throw new Error(
-        "WorktreeLifecycle.exitMilestone requires a resolverFactory until #5587 retires WorktreeResolver",
-      );
+      return {
+        ok: false,
+        reason: "teardown-failed",
+        cause: new Error(
+          "WorktreeLifecycle.exitMilestone requires a resolverFactory until #5587 retires WorktreeResolver",
+        ),
+      };
     }
     const resolver = this.resolverFactory();
     if (opts.merge) {

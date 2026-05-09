@@ -1586,6 +1586,11 @@ function buildResolver(): WorktreeResolver {
   return new WorktreeResolver(s, buildResolverDeps());
 }
 
+function buildLifecycleDeps(): WorktreeLifecycleDeps {
+  const deps: WorktreeLifecycleDeps = buildResolverDeps();
+  return deps;
+}
+
 /**
  * Build a WorktreeLifecycle Module wrapping the current session.
  *
@@ -1611,7 +1616,11 @@ function buildLifecycleDeps(): WorktreeLifecycleDeps {
 function buildLifecycle(): WorktreeLifecycle {
   // Slice 2: pass resolverFactory so Lifecycle.exitMilestone can delegate
   // to WorktreeResolver.mergeAndExit while the merge body still lives there.
-  return new WorktreeLifecycle(s, buildLifecycleDeps(), () => buildResolver());
+  return new WorktreeLifecycle(
+    s,
+    buildLifecycleDeps(),
+    () => buildResolver(),
+  );
 }
 
 /**
@@ -2174,6 +2183,21 @@ export async function startAuto(
           "error",
         );
         await stopAuto(ctx, pi, "lease-conflict during resume");
+        return;
+      }
+      if (!enterResult.ok) {
+        ctx.ui.notify(
+          `Failed to enter milestone ${s.currentMilestoneId}.`,
+          "error",
+        );
+        s.active = false;
+        deactivateGSD();
+        try {
+          releaseSessionLock(base);
+          clearLock(base);
+        } catch {
+          // Best-effort cleanup; the abort path must not continue resume.
+        }
         return;
       }
       // s.basePath may have been updated to a worktree path by enterMilestone.

@@ -1137,6 +1137,11 @@ export async function bootstrapAutoSession(
             `Cannot enter milestone ${s.currentMilestoneId}: milestone id is invalid.`,
             "error",
           );
+        } else {
+          ctx.ui.notify(
+            `Failed to enter milestone ${s.currentMilestoneId}.`,
+            "error",
+          );
         }
         return releaseLockAndReturn();
       }
