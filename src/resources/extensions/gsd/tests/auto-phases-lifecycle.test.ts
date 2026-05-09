@@ -184,6 +184,12 @@ test("runFinalize merges a verified complete-milestone immediately and only once
         mergeCalls++;
       },
     },
+    lifecycle: {
+      exitMilestone(_mid: string, opts: { merge: boolean }) {
+        if (opts.merge) mergeCalls++;
+        return { ok: true, merged: opts.merge, codeFilesChanged: false };
+      },
+    },
   });
 
   assert.equal(result.action, "next");
@@ -201,6 +207,12 @@ test("runFinalize merges a verified complete-milestone immediately and only once
     resolver: {
       mergeAndExit() {
         mergeCalls++;
+      },
+    },
+    lifecycle: {
+      exitMilestone(_mid: string, opts: { merge: boolean }) {
+        if (opts.merge) mergeCalls++;
+        return { ok: true, merged: opts.merge, codeFilesChanged: false };
       },
     },
   });

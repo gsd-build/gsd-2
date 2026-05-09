@@ -29,6 +29,8 @@ import {
   refreshMilestoneLease,
   releaseMilestoneLease,
 } from "./db/milestone-leases.js";
+import { MergeConflictError } from "./git-service.js";
+import type { WorktreeResolver } from "./worktree-resolver.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -73,6 +75,10 @@ export type EnterResult =
         | "invalid-milestone-id";
       cause?: unknown;
     };
+
+export type ExitResult =
+  | { ok: true; merged: boolean; codeFilesChanged: boolean }
+  | { ok: false; reason: "merge-conflict" | "teardown-failed"; cause?: unknown };
 
 // ─── Validation ──────────────────────────────────────────────────────────
 
@@ -408,13 +414,16 @@ function rebuildGitService(
 export class WorktreeLifecycle {
   private readonly s: AutoSession;
   private readonly deps: WorktreeLifecycleDeps;
+  private readonly resolverFactory?: () => WorktreeResolver;
 
   constructor(
     s: AutoSession,
     deps: WorktreeLifecycleDeps,
+    resolverFactory?: () => WorktreeResolver,
   ) {
     this.s = s;
     this.deps = deps;
+    this.resolverFactory = resolverFactory;
   }
 
   /**
@@ -427,5 +436,61 @@ export class WorktreeLifecycle {
    */
   enterMilestone(milestoneId: string, ctx: NotifyCtx): EnterResult {
     return _enterMilestoneCore(this.s, this.deps, milestoneId, ctx);
+  }
+
+  /**
+   * Exit the current worktree. With `opts.merge === true`, runs the full
+   * merge-and-teardown path (worktree-mode or branch-mode auto-detected).
+   * With `opts.merge === false`, runs auto-commit and teardown without
+   * merging to main.
+   *
+   * Returns a typed `ExitResult`. `MergeConflictError` is surfaced as
+   * `{ ok: false, reason: "merge-conflict", cause }` instead of thrown,
+   * giving callers a typed branch for the expected failure path.
+   * Unexpected failures (filesystem, git permissions, etc.) are wrapped
+   * as `{ ok: false, reason: "teardown-failed", cause }` so callers always
+   * receive a discriminated union — no exceptions for any expected outcome.
+   *
+   * Issue #5586 ships this as a delegating wrapper around
+   * `WorktreeResolver.mergeAndExit`/`exitMilestone`. The full extraction
+   * (~500 lines of merge logic across `_mergeWorktreeMode` and
+   * `_mergeBranchMode`) happens in #5587 when `WorktreeResolver` retires.
+   * The delegating shape preserves caller migration without rewriting
+   * merge-conflict handling mid-flight.
+   *
+   * `codeFilesChanged` is best-effort `false` while delegation is in
+   * place; #5587 will thread the actual value through once the merge
+   * logic moves into the Module.
+   */
+  exitMilestone(
+    milestoneId: string,
+    opts: { merge: boolean; preserveBranch?: boolean },
+    ctx: NotifyCtx,
+  ): ExitResult {
+    if (!this.resolverFactory) {
+      throw new Error(
+        "WorktreeLifecycle.exitMilestone requires a resolverFactory until #5587 retires WorktreeResolver",
+      );
+    }
+    const resolver = this.resolverFactory();
+    if (opts.merge) {
+      try {
+        resolver.mergeAndExit(milestoneId, ctx);
+        return { ok: true, merged: true, codeFilesChanged: false };
+      } catch (err) {
+        if (err instanceof MergeConflictError) {
+          return { ok: false, reason: "merge-conflict", cause: err };
+        }
+        return { ok: false, reason: "teardown-failed", cause: err };
+      }
+    }
+    try {
+      resolver.exitMilestone(milestoneId, ctx, {
+        preserveBranch: opts.preserveBranch,
+      });
+      return { ok: true, merged: false, codeFilesChanged: false };
+    } catch (err) {
+      return { ok: false, reason: "teardown-failed", cause: err };
+    }
   }
 }
