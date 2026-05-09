@@ -25,6 +25,7 @@ import {
   runPreExecutionChecks,
   normalizeFilePath,
   type PreExecutionResult,
+  type ResolutionContext,
 } from "../pre-execution-checks.ts";
 import type { TaskRow } from "../gsd-db.ts";
 
@@ -2039,5 +2040,208 @@ describe("checkFilePathConsistency quote-wrapped annotation (#3747)", () => {
       0,
       "Annotated file paths and prose inputs should produce zero blocking errors",
     );
+  });
+});
+
+describe("checkFilePathConsistency with ResolutionContext (#5464, #5492)", () => {
+  test("file found at additionalRoots passes even when missing from basePath", (t) => {
+    const worktree = join(tmpdir(), `pre-exec-ctx-wt-${Date.now()}`);
+    const projectRoot = join(tmpdir(), `pre-exec-ctx-root-${Date.now()}`);
+    mkdirSync(worktree, { recursive: true });
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    writeFileSync(join(projectRoot, "src/lib.ts"), "// exists at project root");
+    t.after(() => {
+      rmSync(worktree, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    });
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        inputs: ["src/lib.ts"],
+        expected_output: [],
+      }),
+    ];
+
+    const context: ResolutionContext = { additionalRoots: [projectRoot] };
+    const results = checkFilePathConsistency(tasks, worktree, context);
+    assert.equal(results.length, 0, "File at additionalRoots should satisfy the input check");
+  });
+
+  test(".gsd/ metadata path resolved via metadataRoot (#5492)", (t) => {
+    const worktree = join(tmpdir(), `pre-exec-ctx-meta-wt-${Date.now()}`);
+    const projectRoot = join(tmpdir(), `pre-exec-ctx-meta-root-${Date.now()}`);
+    mkdirSync(worktree, { recursive: true });
+    mkdirSync(join(projectRoot, ".gsd"), { recursive: true });
+    writeFileSync(join(projectRoot, ".gsd/DECISIONS.md"), "# Decisions");
+    t.after(() => {
+      rmSync(worktree, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    });
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        inputs: [".gsd/DECISIONS.md"],
+        expected_output: [],
+      }),
+    ];
+
+    const context: ResolutionContext = { metadataRoot: projectRoot };
+    const results = checkFilePathConsistency(tasks, worktree, context);
+    assert.equal(results.length, 0, ".gsd/ path should resolve via metadataRoot");
+  });
+
+  test(".gsd/ path still fails when not at metadataRoot either", (t) => {
+    const worktree = join(tmpdir(), `pre-exec-ctx-meta-fail-${Date.now()}`);
+    const projectRoot = join(tmpdir(), `pre-exec-ctx-meta-fail-root-${Date.now()}`);
+    mkdirSync(worktree, { recursive: true });
+    mkdirSync(projectRoot, { recursive: true });
+    t.after(() => {
+      rmSync(worktree, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    });
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        inputs: [".gsd/NONEXISTENT.md"],
+        expected_output: [],
+      }),
+    ];
+
+    const context: ResolutionContext = { metadataRoot: projectRoot };
+    const results = checkFilePathConsistency(tasks, worktree, context);
+    assert.equal(results.length, 1, "Missing .gsd/ file should still fail");
+    assert.equal(results[0].blocking, true);
+  });
+
+  test("without context, behavior is unchanged (single basePath)", (t) => {
+    const tempDir = join(tmpdir(), `pre-exec-ctx-none-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+    t.after(() => rmSync(tempDir, { recursive: true, force: true }));
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        inputs: ["missing-file.ts"],
+        expected_output: [],
+      }),
+    ];
+
+    const results = checkFilePathConsistency(tasks, tempDir);
+    assert.equal(results.length, 1, "Without context, missing file should still fail");
+    assert.equal(results[0].blocking, true);
+  });
+});
+
+describe("isUnderExpectedDirectory — directory materialization (#5066)", () => {
+  test("file under a prior task's directory output is satisfied", (t) => {
+    const tempDir = join(tmpdir(), `pre-exec-dir-mat-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+    t.after(() => rmSync(tempDir, { recursive: true, force: true }));
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        sequence: 0,
+        inputs: [],
+        expected_output: ["dita-back/"],
+      }),
+      createTask({
+        id: "T02",
+        sequence: 1,
+        inputs: ["dita-back/src/config.ts"],
+        expected_output: [],
+      }),
+    ];
+
+    const results = checkFilePathConsistency(tasks, tempDir);
+    assert.equal(results.length, 0,
+      "File under a prior task's directory expected_output should not be blocking");
+  });
+
+  test("file NOT under any directory output still fails", (t) => {
+    const tempDir = join(tmpdir(), `pre-exec-dir-mat-fail-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+    t.after(() => rmSync(tempDir, { recursive: true, force: true }));
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        sequence: 0,
+        inputs: [],
+        expected_output: ["other-dir/"],
+      }),
+      createTask({
+        id: "T02",
+        sequence: 1,
+        inputs: ["dita-back/src/config.ts"],
+        expected_output: [],
+      }),
+    ];
+
+    const results = checkFilePathConsistency(tasks, tempDir);
+    assert.equal(results.length, 1, "File not under any directory output should still fail");
+    assert.equal(results[0].blocking, true);
+  });
+
+  test("file output without trailing slash does not satisfy descendant", (t) => {
+    const tempDir = join(tmpdir(), `pre-exec-dir-mat-noslash-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+    t.after(() => rmSync(tempDir, { recursive: true, force: true }));
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        sequence: 0,
+        inputs: [],
+        expected_output: ["dita-back"],
+      }),
+      createTask({
+        id: "T02",
+        sequence: 1,
+        inputs: ["dita-back/src/config.ts"],
+        expected_output: [],
+      }),
+    ];
+
+    const results = checkFilePathConsistency(tasks, tempDir);
+    assert.equal(results.length, 1,
+      "Output without trailing slash should NOT satisfy descendant inputs (must be explicit directory)");
+  });
+});
+
+describe("runPreExecutionChecks with ResolutionContext integration", () => {
+  test("passes with context resolving files that would otherwise fail", async (t) => {
+    const worktree = join(tmpdir(), `pre-exec-int-wt-${Date.now()}`);
+    const projectRoot = join(tmpdir(), `pre-exec-int-root-${Date.now()}`);
+    mkdirSync(worktree, { recursive: true });
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    mkdirSync(join(projectRoot, ".gsd"), { recursive: true });
+    writeFileSync(join(projectRoot, "src/existing.ts"), "// content");
+    writeFileSync(join(projectRoot, ".gsd/REQUIREMENTS.md"), "# Reqs");
+    t.after(() => {
+      rmSync(worktree, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    });
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        inputs: ["src/existing.ts", ".gsd/REQUIREMENTS.md"],
+        expected_output: [],
+      }),
+    ];
+
+    const context: ResolutionContext = {
+      additionalRoots: [projectRoot],
+      metadataRoot: projectRoot,
+    };
+
+    const result = await runPreExecutionChecks(tasks, worktree, context);
+    assert.equal(result.status, "pass",
+      "Files resolvable via context should produce pass status");
+    assert.equal(result.checks.filter((c) => c.blocking).length, 0);
   });
 });

@@ -37,6 +37,18 @@ export interface PreExecutionResult {
   durationMs: number;
 }
 
+/**
+ * Resolution context for multi-root file lookups.
+ * Addresses false positives in worktree isolation (#5464, #5492, #5462) and
+ * directory-materialization tasks (#5066) by providing additional search paths.
+ */
+export interface ResolutionContext {
+  /** Additional paths to search when a file isn't found at basePath (e.g., project root) */
+  additionalRoots?: string[];
+  /** Path where .gsd/ metadata lives (project root, not worktree). Falls back to basePath. */
+  metadataRoot?: string;
+}
+
 // ─── Package Existence Check ─────────────────────────────────────────────────
 
 /**
@@ -436,6 +448,59 @@ function getExpectedOutputsUpTo(tasks: TaskRow[], taskIndex: number): Set<string
 }
 
 /**
+ * Collect raw (unnormalized) expected_output entries from tasks up to taskIndex.
+ * Preserves trailing slashes for directory-intent detection (#5066).
+ */
+function getRawExpectedOutputsUpTo(tasks: TaskRow[], taskIndex: number): string[] {
+  const outputs: string[] = [];
+  for (let i = 0; i < tasks.length; i++) {
+    const task = tasks[i];
+    if (i < taskIndex || task.status === "completed") {
+      outputs.push(...task.expected_output);
+    }
+  }
+  return outputs;
+}
+
+/**
+ * Check if a file exists at any of the resolution roots.
+ */
+function fileExistsInContext(
+  normalizedFile: string,
+  basePath: string,
+  context?: ResolutionContext,
+): boolean {
+  if (existsSync(resolve(basePath, normalizedFile))) return true;
+  if (normalizedFile.startsWith(".gsd/") && context?.metadataRoot) {
+    if (existsSync(resolve(context.metadataRoot, normalizedFile))) return true;
+  }
+  if (context?.additionalRoots) {
+    for (const root of context.additionalRoots) {
+      if (existsSync(resolve(root, normalizedFile))) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Check if a prior task's expected_output includes a directory that would
+ * contain normalizedFile when materialized (#5066).
+ */
+function isUnderExpectedDirectory(
+  normalizedFile: string,
+  expectedOutputs: Set<string>,
+  rawExpectedOutputs: string[],
+): boolean {
+  for (const rawOutput of rawExpectedOutputs) {
+    if (!rawOutput.endsWith("/")) continue;
+    const normalizedDir = normalizeFilePath(rawOutput);
+    const prefix = normalizedDir + "/";
+    if (normalizedFile.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+/**
  * Check that all files referenced in task.inputs either:
  *   1. Exist on disk, OR
  *   2. Are in a prior task's expected_output, OR
@@ -450,7 +515,8 @@ function getExpectedOutputsUpTo(tasks: TaskRow[], taskIndex: number): Set<string
  */
 export function checkFilePathConsistency(
   tasks: TaskRow[],
-  basePath: string
+  basePath: string,
+  context?: ResolutionContext,
 ): PreExecutionCheckJSON[] {
   const results: PreExecutionCheckJSON[] = [];
 
@@ -470,6 +536,10 @@ export function checkFilePathConsistency(
     const ownOutputs = new Set<string>(task.expected_output.map(normalizeFilePath));
     const filesToCheck = [...task.inputs];
 
+    // Collect raw expected_output entries for directory-intent detection
+    const rawPriorOutputs = getRawExpectedOutputsUpTo(tasks, i);
+    const rawOwnOutputs = task.expected_output;
+
     for (const file of filesToCheck) {
       // Skip empty strings
       if (!file.trim()) continue;
@@ -479,24 +549,29 @@ export function checkFilePathConsistency(
       const normalizedFile = normalizeFilePath(file);
       if (containsGlobPattern(normalizedFile)) continue;
 
-      // Check if file exists on disk
-      const absolutePath = resolve(basePath, normalizedFile);
-      const existsOnDisk = existsSync(absolutePath);
+      // Check if file exists on disk (multi-root aware)
+      const existsOnDisk = fileExistsInContext(normalizedFile, basePath, context);
 
       // Check if file is in prior expected outputs (priorOutputs already normalized)
       const inPriorOutputs = priorOutputs.has(normalizedFile);
       const inOwnOutputs = ownOutputs.has(normalizedFile);
 
+      // File is under a directory that a prior task will materialize (#5066)
+      const underExpectedDir = !existsOnDisk && !inPriorOutputs && !inOwnOutputs
+        ? isUnderExpectedDirectory(normalizedFile, priorOutputs, rawPriorOutputs) ||
+          isUnderExpectedDirectory(normalizedFile, ownOutputs, rawOwnOutputs)
+        : false;
+
       // Directory inputs are satisfied when something produces a file beneath
       // them — either a prior task or the current task itself.
       let directorySatisfied = false;
-      if (!existsOnDisk && !inPriorOutputs && !inOwnOutputs && isDirectoryReference(file)) {
+      if (!existsOnDisk && !inPriorOutputs && !inOwnOutputs && !underExpectedDir && isDirectoryReference(file)) {
         directorySatisfied =
           anyOutputUnderDirectory(normalizedFile, priorOutputs) ||
           anyOutputUnderDirectory(normalizedFile, ownOutputs);
       }
 
-      if (!existsOnDisk && !inPriorOutputs && !inOwnOutputs && !directorySatisfied) {
+      if (!existsOnDisk && !inPriorOutputs && !inOwnOutputs && !underExpectedDir && !directorySatisfied) {
         // If a later task claims to create this file, the ordering check will
         // fire a more precise "sequence violation" error for the same file.
         // Suppress the consistency error here to avoid duplicate noise.
@@ -527,7 +602,8 @@ export function checkFilePathConsistency(
  */
 export function checkTaskOrdering(
   tasks: TaskRow[],
-  basePath: string
+  basePath: string,
+  context?: ResolutionContext,
 ): PreExecutionCheckJSON[] {
   const results: PreExecutionCheckJSON[] = [];
 
@@ -567,8 +643,7 @@ export function checkTaskOrdering(
       // files, and a same-task output under the directory satisfies it.
       if (isDirectoryReference(file)) continue;
       const creator = fileCreators.get(normalizedFile);
-      const absolutePath = resolve(basePath, normalizedFile);
-      const existsOnDisk = existsSync(absolutePath);
+      const existsOnDisk = fileExistsInContext(normalizedFile, basePath, context);
       // Skip if the creating task has already completed — its output is available
       // regardless of disk state (e.g. file was a temp artifact cleaned up after
       // the task ran, or a replan introduced a new earlier-sequence task that
@@ -748,14 +823,15 @@ export function checkInterfaceContracts(
  */
 export async function runPreExecutionChecks(
   tasks: TaskRow[],
-  basePath: string
+  basePath: string,
+  context?: ResolutionContext,
 ): Promise<PreExecutionResult> {
   const startTime = Date.now();
   const allChecks: PreExecutionCheckJSON[] = [];
 
   // Run sync checks first
-  const fileChecks = checkFilePathConsistency(tasks, basePath);
-  const orderingChecks = checkTaskOrdering(tasks, basePath);
+  const fileChecks = checkFilePathConsistency(tasks, basePath, context);
+  const orderingChecks = checkTaskOrdering(tasks, basePath, context);
   const contractChecks = checkInterfaceContracts(tasks, basePath);
 
   allChecks.push(...fileChecks, ...orderingChecks, ...contractChecks);
