@@ -345,6 +345,7 @@ export class WorktreeResolver {
 
     // If worktree creation failed earlier, skip merge — work is on current branch (#2483)
     if (this.s.isolationDegraded) {
+      this.s.milestoneStartShas.delete(milestoneId);
       debugLog("WorktreeResolver", {
         action: "mergeAndExit",
         milestoneId,
@@ -365,13 +366,6 @@ export class WorktreeResolver {
       mode,
       basePath: this.s.basePath,
     });
-    emitJournalEvent(this.s.originalBasePath || this.s.basePath, {
-      ts: new Date().toISOString(),
-      flowId: randomUUID(),
-      seq: 0,
-      eventType: "worktree-merge-start",
-      data: { milestoneId, mode },
-    });
 
     // #2625: If we are physically inside an auto-worktree, we MUST merge
     // regardless of the current isolation config. This prevents data loss when
@@ -380,6 +374,7 @@ export class WorktreeResolver {
     const inWorktree = this.deps.isInAutoWorktree(this.s.basePath) && this.s.originalBasePath;
 
     if (mode === "none" && !inWorktree) {
+      this.s.milestoneStartShas.delete(milestoneId);
       debugLog("WorktreeResolver", {
         action: "mergeAndExit",
         milestoneId,
@@ -388,6 +383,14 @@ export class WorktreeResolver {
       });
       return { merged: false, codeFilesChanged: false };
     }
+
+    emitJournalEvent(this.s.originalBasePath || this.s.basePath, {
+      ts: new Date().toISOString(),
+      flowId: randomUUID(),
+      seq: 0,
+      eventType: "worktree-merge-start",
+      data: { milestoneId, mode },
+    });
 
     let mergeOutcome: MergeAndExitResult = {
       merged: false,

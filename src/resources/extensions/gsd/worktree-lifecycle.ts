@@ -102,8 +102,9 @@ function releaseHeldMilestoneLease(
       phase,
       releaseLeaseError: err instanceof Error ? err.message : String(err),
     });
+  } finally {
+    s.milestoneLeaseToken = null;
   }
-  s.milestoneLeaseToken = null;
 }
 
 // ─── Implementation core ─────────────────────────────────────────────────

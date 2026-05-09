@@ -1264,6 +1264,7 @@ test("mergeAndExit is no-op when isolationDegraded is true (#2483)", () => {
     originalBasePath: "/project",
   });
   s.isolationDegraded = true;
+  s.milestoneStartShas.set("M001", "abc123");
   const deps = makeDeps({
     getIsolationMode: () => "worktree",
   });
@@ -1275,6 +1276,7 @@ test("mergeAndExit is no-op when isolationDegraded is true (#2483)", () => {
   assert.equal(findCalls(deps.calls, "mergeMilestoneToMain").length, 0);
   assert.equal(findCalls(deps.calls, "teardownAutoWorktree").length, 0);
   assert.equal(findCalls(deps.calls, "getIsolationMode").length, 0);
+  assert.equal(s.milestoneStartShas.has("M001"), false);
   assert.ok(
     ctx.messages.some(
       (m) => m.level === "info" && m.msg.includes("isolation was degraded"),
@@ -1324,6 +1326,7 @@ test("mergeAndExit in none mode remains a no-op when NOT in a worktree (#2625)",
     basePath: "/project",
     originalBasePath: "/project",
   });
+  s.milestoneStartShas.set("M001", "abc123");
   const deps = makeDeps({
     isInAutoWorktree: () => false,
     getIsolationMode: () => "none",
@@ -1335,6 +1338,7 @@ test("mergeAndExit in none mode remains a no-op when NOT in a worktree (#2625)",
 
   assert.equal(findCalls(deps.calls, "mergeMilestoneToMain").length, 0,
     "must NOT merge when not in a worktree and mode is none");
+  assert.equal(s.milestoneStartShas.has("M001"), false);
 });
 
 // ─── #4380 — Non-MergeConflictError must not be swallowed ────────────────────

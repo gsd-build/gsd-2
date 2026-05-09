@@ -180,6 +180,24 @@ describe("worktree journal events", () => {
     assert.equal(start!.data?.mode, "worktree");
   });
 
+  test("mergeAndExit does not emit worktree-merge-start on mode-none no-op", () => {
+    const s = makeSession({
+      basePath: tmp,
+      originalBasePath: tmp,
+    });
+    const deps = makeDeps({
+      isInAutoWorktree: () => false,
+      getIsolationMode: () => "none",
+    });
+    const resolver = new WorktreeResolver(s, deps);
+
+    resolver.mergeAndExit("M001", makeNotifyCtx());
+
+    const entries = readJournalEntries(tmp);
+    const start = entries.find(e => e.eventType === "worktree-merge-start");
+    assert.equal(start, undefined);
+  });
+
   test("mergeAndExit emits worktree-merge-failed on error", () => {
     const s = makeSession({
       basePath: join(tmp, "worktree"),
