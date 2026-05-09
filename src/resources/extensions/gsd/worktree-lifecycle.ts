@@ -493,4 +493,71 @@ export class WorktreeLifecycle {
       return { ok: false, reason: "teardown-failed", cause: err };
     }
   }
+
+  /**
+   * Fall back to branch-mode for `milestoneId` after a failed worktree
+   * creation, marking the session's isolation as degraded.
+   *
+   * Currently delegates to `enterBranchModeForMilestone` from auto-worktree.
+   * Idempotent: subsequent calls in a degraded session are no-ops.
+   *
+   * Issue #5587 ships this as a thin adapter; the body extraction joins the
+   * other merge-logic move-out in a follow-up cleanup slice.
+   */
+  degradeToBranchMode(milestoneId: string, ctx: NotifyCtx): void {
+    if (this.s.isolationDegraded) {
+      debugLog("WorktreeLifecycle", {
+        action: "degradeToBranchMode",
+        milestoneId,
+        skipped: true,
+        reason: "already-degraded",
+      });
+      return;
+    }
+    const basePath = resolveWorktreeProjectRoot(
+      this.s.basePath,
+      this.s.originalBasePath,
+    );
+    try {
+      this.deps.enterBranchModeForMilestone(basePath, milestoneId);
+      this.deps.invalidateAllCaches();
+      this.s.isolationDegraded = true;
+      ctx.notify(
+        `Switched to branch milestone/${milestoneId} (isolation degraded).`,
+        "info",
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      ctx.notify(
+        `Branch isolation setup for ${milestoneId} failed: ${msg}. Continuing on current branch.`,
+        "warning",
+      );
+      this.s.isolationDegraded = true;
+    }
+  }
+
+  /**
+   * Restore `s.basePath` to `s.originalBasePath` and rebuild `s.gitService`.
+   * No-op when `originalBasePath` is empty (fresh sessions).
+   *
+   * Used by error/cleanup paths that need the session to behave as if the
+   * worktree was never entered. Does NOT teardown the worktree directory —
+   * callers that need teardown go through `exitMilestone({ merge: false })`.
+   */
+  restoreToProjectRoot(): void {
+    if (!this.s.originalBasePath) return;
+    this.s.basePath = this.s.originalBasePath;
+    rebuildGitService(this.s, this.deps);
+    this.deps.invalidateAllCaches();
+  }
+
+  /** True if `milestoneId` is the session's currently-active milestone. */
+  isInMilestone(milestoneId: string): boolean {
+    return this.s.currentMilestoneId === milestoneId;
+  }
+
+  /** The active milestone id, or `null` if no milestone is active. */
+  getCurrentMilestoneIfAny(): string | null {
+    return this.s.currentMilestoneId;
+  }
 }

@@ -408,3 +408,115 @@ test("exitMilestone with merge:false delegates to Resolver.exitMilestone with pr
   }
   assert.deepEqual(receivedOpts, { preserveBranch: true });
 });
+
+// ─── Queries (issue #5587) ────────────────────────────────────────────────────
+
+test("isInMilestone returns true when session matches milestone id", () => {
+  const s = makeSession();
+  s.currentMilestoneId = "M001";
+  const lifecycle = new WorktreeLifecycle(s, makeDeps());
+
+  assert.equal(lifecycle.isInMilestone("M001"), true);
+  assert.equal(lifecycle.isInMilestone("M002"), false);
+});
+
+test("isInMilestone returns false when session has no active milestone", () => {
+  const s = makeSession();
+  s.currentMilestoneId = null;
+  const lifecycle = new WorktreeLifecycle(s, makeDeps());
+
+  assert.equal(lifecycle.isInMilestone("M001"), false);
+});
+
+test("getCurrentMilestoneIfAny returns the active milestone id or null", () => {
+  const s = makeSession();
+  s.currentMilestoneId = "M042";
+  const lifecycle = new WorktreeLifecycle(s, makeDeps());
+
+  assert.equal(lifecycle.getCurrentMilestoneIfAny(), "M042");
+
+  s.currentMilestoneId = null;
+  assert.equal(lifecycle.getCurrentMilestoneIfAny(), null);
+});
+
+// ─── degradeToBranchMode (issue #5587) ────────────────────────────────────────
+
+test("degradeToBranchMode sets isolationDegraded and invokes branch-mode helper", () => {
+  const s = makeSession();
+  const deps = makeDeps();
+  const ctx = makeCtx();
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  lifecycle.degradeToBranchMode("M001", ctx);
+
+  assert.equal(s.isolationDegraded, true);
+  assert.equal(
+    deps.calls.filter((c) => c.fn === "enterBranchModeForMilestone").length,
+    1,
+  );
+  assert.equal(deps.calls.filter((c) => c.fn === "invalidateAllCaches").length, 1);
+});
+
+test("degradeToBranchMode is no-op when isolationDegraded is already true", () => {
+  const s = makeSession();
+  s.isolationDegraded = true;
+  const deps = makeDeps();
+  const ctx = makeCtx();
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  lifecycle.degradeToBranchMode("M001", ctx);
+
+  assert.equal(
+    deps.calls.filter((c) => c.fn === "enterBranchModeForMilestone").length,
+    0,
+  );
+});
+
+test("degradeToBranchMode marks degraded and notifies on branch-mode failure", () => {
+  const s = makeSession();
+  const deps = makeDeps({
+    enterBranchModeForMilestone: () => {
+      throw new Error("checkout failed");
+    },
+  });
+  const ctx = makeCtx();
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  lifecycle.degradeToBranchMode("M001", ctx);
+
+  assert.equal(s.isolationDegraded, true);
+  assert.ok(
+    ctx.messages.some(
+      (m) => m.level === "warning" && m.msg.includes("Branch isolation setup"),
+    ),
+  );
+});
+
+// ─── restoreToProjectRoot (issue #5587) ───────────────────────────────────────
+
+test("restoreToProjectRoot restores basePath to originalBasePath and rebuilds git service", () => {
+  const s = makeSession();
+  s.originalBasePath = "/project";
+  s.basePath = "/project/.gsd/worktrees/M001";
+  const deps = makeDeps();
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  lifecycle.restoreToProjectRoot();
+
+  assert.equal(s.basePath, "/project");
+  assert.equal(deps.calls.filter((c) => c.fn === "GitServiceImpl").length, 1);
+  assert.equal(deps.calls.filter((c) => c.fn === "invalidateAllCaches").length, 1);
+});
+
+test("restoreToProjectRoot is no-op when originalBasePath is empty", () => {
+  const s = makeSession();
+  s.originalBasePath = "";
+  s.basePath = "/some/path";
+  const deps = makeDeps();
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  lifecycle.restoreToProjectRoot();
+
+  assert.equal(s.basePath, "/some/path"); // unchanged
+  assert.equal(deps.calls.filter((c) => c.fn === "GitServiceImpl").length, 0);
+});
