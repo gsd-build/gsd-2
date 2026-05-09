@@ -966,9 +966,10 @@ test("mergeAndExit in branch mode skips when no roadmap", () => {
   const ctx = makeNotifyCtx();
   const resolver = new WorktreeResolver(s, deps);
 
-  resolver.mergeAndExit("M001", ctx);
+  const result = resolver.mergeAndExit("M001", ctx);
 
   assert.equal(findCalls(deps.calls, "mergeMilestoneToMain").length, 0);
+  assert.deepEqual(result, { merged: false, codeFilesChanged: false });
 });
 
 test("mergeAndExit in branch mode rebuilds GitService after merge", () => {
@@ -997,11 +998,12 @@ test("mergeAndExit in none mode is a no-op", () => {
   const ctx = makeNotifyCtx();
   const resolver = new WorktreeResolver(s, deps);
 
-  resolver.mergeAndExit("M001", ctx);
+  const result = resolver.mergeAndExit("M001", ctx);
 
   assert.equal(findCalls(deps.calls, "mergeMilestoneToMain").length, 0);
   assert.equal(findCalls(deps.calls, "teardownAutoWorktree").length, 0);
   assert.equal(ctx.messages.length, 0);
+  assert.deepEqual(result, { merged: false, codeFilesChanged: false });
 });
 
 // ─── #1906 — metadata-only merge warning ────────────────────────────────────
@@ -1019,7 +1021,7 @@ test("mergeAndExit warns when merge contains no code changes (#1906)", () => {
   const ctx = makeNotifyCtx();
   const resolver = new WorktreeResolver(s, deps);
 
-  resolver.mergeAndExit("M001", ctx);
+  const result = resolver.mergeAndExit("M001", ctx);
 
   assert.ok(
     ctx.messages.some((m) => m.msg.includes("NO code changes") && m.level === "warning"),
@@ -1029,6 +1031,7 @@ test("mergeAndExit warns when merge contains no code changes (#1906)", () => {
     !ctx.messages.some((m) => m.msg.includes("merged to main") && m.level === "info"),
     "must NOT emit success-style info notification for metadata-only merge",
   );
+  assert.deepEqual(result, { merged: true, codeFilesChanged: false });
 });
 
 test("mergeAndExit emits info when merge contains code changes (#1906)", () => {
@@ -1044,7 +1047,7 @@ test("mergeAndExit emits info when merge contains code changes (#1906)", () => {
   const ctx = makeNotifyCtx();
   const resolver = new WorktreeResolver(s, deps);
 
-  resolver.mergeAndExit("M001", ctx);
+  const result = resolver.mergeAndExit("M001", ctx);
 
   assert.ok(
     ctx.messages.some((m) => m.msg.includes("merged to main") && m.level === "info"),
@@ -1054,6 +1057,7 @@ test("mergeAndExit emits info when merge contains code changes (#1906)", () => {
     !ctx.messages.some((m) => m.msg.includes("NO code changes")),
     "must NOT emit metadata-only warning when code files were merged",
   );
+  assert.deepEqual(result, { merged: true, codeFilesChanged: true });
 });
 
 test("mergeAndExit branch mode warns when merge contains no code changes (#1906)", () => {

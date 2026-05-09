@@ -86,6 +86,26 @@ function isValidMilestoneId(milestoneId: string): boolean {
   return !/[\/\\]|\.\./.test(milestoneId);
 }
 
+function releaseHeldMilestoneLease(
+  s: AutoSession,
+  milestoneId: string,
+  phase: string,
+): void {
+  if (!s.workerId || s.milestoneLeaseToken === null) return;
+  const token = s.milestoneLeaseToken;
+  try {
+    releaseMilestoneLease(s.workerId, milestoneId, token);
+  } catch (err) {
+    debugLog("WorktreeLifecycle", {
+      action: "enterMilestone",
+      milestoneId,
+      phase,
+      releaseLeaseError: err instanceof Error ? err.message : String(err),
+    });
+  }
+  s.milestoneLeaseToken = null;
+}
+
 // ─── Implementation core ─────────────────────────────────────────────────
 
 /**
@@ -313,6 +333,7 @@ export function _enterMilestoneCore(
         `Branch isolation setup for ${milestoneId} failed: ${msg}. Continuing on current branch.`,
         "warning",
       );
+      releaseHeldMilestoneLease(s, milestoneId, "branch-setup-failed");
       s.isolationDegraded = true;
       return { ok: false, reason: "creation-failed", cause: err };
     }
@@ -384,6 +405,7 @@ export function _enterMilestoneCore(
     );
     // Degrade isolation for the rest of this session so mergeAndExit
     // doesn't try to merge a nonexistent worktree branch (#2483)
+    releaseHeldMilestoneLease(s, milestoneId, "worktree-setup-failed");
     s.isolationDegraded = true;
     // Do NOT update s.basePath — stay in project root
     return { ok: false, reason: "creation-failed", cause: err };
@@ -458,9 +480,9 @@ export class WorktreeLifecycle {
    * The delegating shape preserves caller migration without rewriting
    * merge-conflict handling mid-flight.
    *
-   * `codeFilesChanged` is best-effort `false` while delegation is in
-   * place; #5587 will thread the actual value through once the merge
-   * logic moves into the Module.
+   * `merged` and `codeFilesChanged` are delegated from
+   * `WorktreeResolver.mergeAndExit` so no-op exits do not masquerade as
+   * completed merges.
    */
   exitMilestone(
     milestoneId: string,
@@ -475,8 +497,12 @@ export class WorktreeLifecycle {
     const resolver = this.resolverFactory();
     if (opts.merge) {
       try {
-        resolver.mergeAndExit(milestoneId, ctx);
-        return { ok: true, merged: true, codeFilesChanged: false };
+        const result = resolver.mergeAndExit(milestoneId, ctx);
+        return {
+          ok: true,
+          merged: result.merged,
+          codeFilesChanged: result.codeFilesChanged,
+        };
       } catch (err) {
         if (err instanceof MergeConflictError) {
           return { ok: false, reason: "merge-conflict", cause: err };

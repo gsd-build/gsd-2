@@ -11,9 +11,12 @@ import {
   type NotifyCtx,
 } from "../worktree-lifecycle.js";
 import { AutoSession } from "../auto/session.js";
-import { openDatabase, closeDatabase, insertMilestone } from "../gsd-db.js";
+import { closeDatabase, insertMilestone, openDatabase } from "../gsd-db.js";
 import { registerAutoWorker } from "../db/auto-workers.js";
-import { claimMilestoneLease } from "../db/milestone-leases.js";
+import {
+  claimMilestoneLease,
+  getMilestoneLease,
+} from "../db/milestone-leases.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -92,7 +95,7 @@ function makeCtx(): NotifyCtx & {
 }
 
 function makeDbBase(): string {
-  const base = mkdtempSync(join(tmpdir(), "gsd-lifecycle-"));
+  const base = mkdtempSync(join(tmpdir(), "gsd-worktree-lifecycle-"));
   mkdirSync(join(base, ".gsd"), { recursive: true });
   return base;
 }
@@ -192,6 +195,33 @@ test("enterMilestone returns ok:false reason:creation-failed and degrades sessio
   assert.equal(s.basePath, "/project");
 });
 
+test("enterMilestone releases claimed lease when worktree setup fails", (t) => {
+  const base = makeDbBase();
+  t.after(() => cleanupDbBase(base));
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test milestone", status: "active" });
+  const workerId = registerAutoWorker({ projectRootRealpath: base });
+
+  const s = makeSession({
+    basePath: base,
+    originalBasePath: base,
+    workerId,
+  });
+  const deps = makeDeps({
+    createAutoWorktree: () => {
+      throw new Error("boom");
+    },
+  });
+  const ctx = makeCtx();
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  const result = lifecycle.enterMilestone("M001", ctx);
+
+  assert.equal(result.ok, false);
+  assert.equal(s.milestoneLeaseToken, null);
+  assert.equal(getMilestoneLease("M001")?.status, "released");
+});
+
 test("enterMilestone returns ok:false reason:creation-failed when branch mode throws", () => {
   const s = makeSession();
   const deps = makeDeps({
@@ -210,6 +240,34 @@ test("enterMilestone returns ok:false reason:creation-failed when branch mode th
     assert.equal(result.reason, "creation-failed");
   }
   assert.equal(s.isolationDegraded, true);
+});
+
+test("enterMilestone releases claimed lease when branch setup fails", (t) => {
+  const base = makeDbBase();
+  t.after(() => cleanupDbBase(base));
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test milestone", status: "active" });
+  const workerId = registerAutoWorker({ projectRootRealpath: base });
+
+  const s = makeSession({
+    basePath: base,
+    originalBasePath: base,
+    workerId,
+  });
+  const deps = makeDeps({
+    getIsolationMode: () => "branch",
+    enterBranchModeForMilestone: () => {
+      throw new Error("branch checkout failed");
+    },
+  });
+  const ctx = makeCtx();
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  const result = lifecycle.enterMilestone("M001", ctx);
+
+  assert.equal(result.ok, false);
+  assert.equal(s.milestoneLeaseToken, null);
+  assert.equal(getMilestoneLease("M001")?.status, "released");
 });
 
 test("enterMilestone enters existing worktree when path resolves", () => {
@@ -318,6 +376,7 @@ test("exitMilestone delegates merge:true to Resolver.mergeAndExit and returns ok
   const fakeResolver = {
     mergeAndExit: (mid: string) => {
       calledMid = mid;
+      return { merged: true, codeFilesChanged: true };
     },
   };
   const lifecycle = new WorktreeLifecycle(s, deps, () => fakeResolver as any);
@@ -327,9 +386,27 @@ test("exitMilestone delegates merge:true to Resolver.mergeAndExit and returns ok
   assert.equal(result.ok, true);
   if (result.ok) {
     assert.equal(result.merged, true);
-    assert.equal(result.codeFilesChanged, false);
+    assert.equal(result.codeFilesChanged, true);
   }
   assert.equal(calledMid, "M001");
+});
+
+test("exitMilestone preserves Resolver.mergeAndExit no-op outcome", () => {
+  const s = makeSession();
+  const deps = makeDeps();
+  const ctx = makeCtx();
+  const fakeResolver = {
+    mergeAndExit: () => ({ merged: false, codeFilesChanged: false }),
+  };
+  const lifecycle = new WorktreeLifecycle(s, deps, () => fakeResolver as any);
+
+  const result = lifecycle.exitMilestone("M001", { merge: true }, ctx);
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.merged, false);
+    assert.equal(result.codeFilesChanged, false);
+  }
 });
 
 test("exitMilestone surfaces MergeConflictError as ok:false reason:merge-conflict", async () => {
