@@ -529,7 +529,7 @@ test("degradeToBranchMode still attempts fallback when isolationDegraded is alre
   assert.equal(deps.calls.filter((c) => c.fn === "GitServiceImpl").length, 1);
 });
 
-test("degradeToBranchMode notifies on branch-mode failure without marking degraded", () => {
+test("degradeToBranchMode notifies on branch-mode failure and marks degraded", () => {
   const s = makeSession();
   const deps = makeDeps({
     enterBranchModeForMilestone: () => {
@@ -541,7 +541,7 @@ test("degradeToBranchMode notifies on branch-mode failure without marking degrad
 
   lifecycle.degradeToBranchMode("M001", ctx);
 
-  assert.equal(s.isolationDegraded, false);
+  assert.equal(s.isolationDegraded, true);
   assert.ok(
     ctx.messages.some(
       (m) => m.level === "warning" && m.msg.includes("Branch isolation setup"),

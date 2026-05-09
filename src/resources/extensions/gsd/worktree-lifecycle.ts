@@ -542,10 +542,17 @@ export class WorktreeLifecycle {
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      debugLog("WorktreeLifecycle", {
+        action: "degradeToBranchMode",
+        milestoneId,
+        result: "error",
+        error: msg,
+      });
       ctx.notify(
         `Branch isolation setup for ${milestoneId} failed: ${msg}. Continuing on current branch.`,
         "warning",
       );
+      this.s.isolationDegraded = true;
     }
   }
 
