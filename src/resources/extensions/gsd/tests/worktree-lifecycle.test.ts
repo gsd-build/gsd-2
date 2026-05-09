@@ -312,6 +312,24 @@ test("exitMilestone returns teardown-failed when no resolverFactory is provided"
   }
 });
 
+test("exitMilestone wraps resolverFactory throws as ok:false reason:teardown-failed", () => {
+  const s = makeSession();
+  const deps = makeDeps();
+  const ctx = makeCtx();
+  const factoryErr = new Error("resolver construction failed");
+  const lifecycle = new WorktreeLifecycle(s, deps, () => {
+    throw factoryErr;
+  });
+
+  const result = lifecycle.exitMilestone("M001", { merge: true }, ctx);
+
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.reason, "teardown-failed");
+    assert.equal(result.cause, factoryErr);
+  }
+});
+
 test("exitMilestone delegates merge:true to Resolver.mergeAndExit and returns ok:true", () => {
   const s = makeSession();
   const deps = makeDeps();

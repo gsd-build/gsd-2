@@ -8,9 +8,11 @@
  *     `enterAutoWorktree`/`createAutoWorktree`, which chdir internally)
  *   - milestone lease coordination (claim/refresh/release fencing tokens)
  *
- * Phase 1 of the migration ships only `enterMilestone`. The remaining verbs
- * (`exitMilestone`, `degradeToBranchMode`, `restoreToProjectRoot`, queries) are
- * extracted from `WorktreeResolver` in subsequent slices.
+ * Phase 1 of the migration ships `enterMilestone` and `exitMilestone` as a
+ * delegating wrapper around `WorktreeResolver.exitMilestone`. The remaining
+ * verbs (`degradeToBranchMode`, `restoreToProjectRoot`, queries) and the full
+ * extraction of `exitMilestone`'s merge body are deferred to subsequent slices
+ * (#5587).
  *
  * The implementation lives in `_enterMilestoneCore` so `WorktreeResolver` can
  * call the same body during its internal `mergeAndEnterNext` recursion without
@@ -477,7 +479,14 @@ export class WorktreeLifecycle {
         ),
       };
     }
-    const resolver = this.resolverFactory();
+    let resolver: WorktreeResolver;
+    try {
+      resolver = this.resolverFactory();
+    } catch (err) {
+      return { ok: false, reason: "teardown-failed", cause: err };
+    }
+    // `preserveBranch` applies only to the non-merge exit path. `mergeAndExit`
+    // does not accept that option and always completes with branch cleanup.
     if (opts.merge) {
       try {
         resolver.mergeAndExit(milestoneId, ctx);
