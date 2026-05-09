@@ -1609,7 +1609,9 @@ function buildLifecycleDeps(): WorktreeLifecycleDeps {
 }
 
 function buildLifecycle(): WorktreeLifecycle {
-  return new WorktreeLifecycle(s, buildLifecycleDeps());
+  // Slice 2: pass resolverFactory so Lifecycle.exitMilestone can delegate
+  // to WorktreeResolver.mergeAndExit while the merge body still lives there.
+  return new WorktreeLifecycle(s, buildLifecycleDeps(), () => buildResolver());
 }
 
 /**

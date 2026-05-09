@@ -79,6 +79,10 @@ test("milestone transition archives completed units and rebuilds state", async (
             calls.push(`enter:${mid}`);
             return { ok: true, mode: "worktree", path: `/wt/${mid}` };
           },
+          exitMilestone: (mid: string, opts: { merge: boolean }) => {
+            calls.push(opts.merge ? `merge:${mid}` : `exit:${mid}`);
+            return { ok: true, merged: opts.merge, codeFilesChanged: false };
+          },
         },
         sendDesktopNotification: () => {},
         logCmuxEvent: () => {},
