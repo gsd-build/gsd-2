@@ -822,18 +822,15 @@ export async function runPreDispatch(
         deps.captureIntegrationBranch(s.basePath, mid);
       }
       const enterResult = deps.lifecycle.enterMilestone(mid, ctx.ui);
-<<<<<<< HEAD
-      if (!enterResult.ok && enterResult.reason === "lease-conflict") {
-        await deps.pauseAuto(ctx, pi);
-        return { action: "break", reason: "lease-conflict" };
-=======
       if (!enterResult.ok) {
         ctx.ui.notify(
           `Could not enter milestone ${mid}: ${enterResult.reason}. Auto-mode paused before dispatching work.`,
           enterResult.reason === "lease-conflict" ? "error" : "warning",
         );
+        if (enterResult.reason === "lease-conflict") {
+          await deps.pauseAuto(ctx, pi);
+        }
         return { action: "break", reason: `enter-milestone-${enterResult.reason}` };
->>>>>>> c737d75da (Apply babysitter fixes for PR #5600)
       }
     } else {
       // mid is undefined — no milestone to capture integration branch for
