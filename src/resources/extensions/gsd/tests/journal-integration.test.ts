@@ -134,6 +134,11 @@ function makeMockDeps(
     } as any,
     lifecycle: {
       enterMilestone: () => ({ ok: true, mode: "worktree", path: "/tmp/project" }),
+      exitMilestone: (_mid: string, opts: { merge: boolean }) => ({
+        ok: true,
+        merged: opts.merge,
+        codeFilesChanged: false,
+      }),
     } as any,
     postUnitPreVerification: async () => "continue" as const,
     runPostUnitVerification: async () => "continue" as const,

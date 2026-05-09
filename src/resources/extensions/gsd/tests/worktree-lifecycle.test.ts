@@ -295,3 +295,116 @@ test("enterMilestone returns ok:false reason:invalid-milestone-id on path traver
     assert.ok(separator.cause instanceof Error);
   }
 });
+
+// ─── exitMilestone — typed-result contract ────────────────────────────────────
+
+test("exitMilestone throws when no resolverFactory is provided", () => {
+  const s = makeSession();
+  const deps = makeDeps();
+  const ctx = makeCtx();
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  assert.throws(
+    () => lifecycle.exitMilestone("M001", { merge: true }, ctx),
+    /requires a resolverFactory/,
+  );
+});
+
+test("exitMilestone delegates merge:true to Resolver.mergeAndExit and returns ok:true", () => {
+  const s = makeSession();
+  const deps = makeDeps();
+  const ctx = makeCtx();
+  let calledMid: string | null = null;
+  const fakeResolver = {
+    mergeAndExit: (mid: string) => {
+      calledMid = mid;
+    },
+  };
+  const lifecycle = new WorktreeLifecycle(s, deps, () => fakeResolver as any);
+
+  const result = lifecycle.exitMilestone("M001", { merge: true }, ctx);
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.merged, true);
+    assert.equal(result.codeFilesChanged, false);
+  }
+  assert.equal(calledMid, "M001");
+});
+
+test("exitMilestone surfaces MergeConflictError as ok:false reason:merge-conflict", async () => {
+  const { MergeConflictError } = await import("../git-service.js");
+  const s = makeSession();
+  const deps = makeDeps();
+  const ctx = makeCtx();
+  const conflict = new MergeConflictError(
+    ["src/foo.ts"],
+    "merge",
+    "milestone/M001",
+    "main",
+  );
+  const fakeResolver = {
+    mergeAndExit: () => {
+      throw conflict;
+    },
+  };
+  const lifecycle = new WorktreeLifecycle(s, deps, () => fakeResolver as any);
+
+  const result = lifecycle.exitMilestone("M001", { merge: true }, ctx);
+
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.reason, "merge-conflict");
+    assert.equal(result.cause, conflict);
+  }
+});
+
+test("exitMilestone wraps non-conflict throws as ok:false reason:teardown-failed", () => {
+  const s = makeSession();
+  const deps = makeDeps();
+  const ctx = makeCtx();
+  const fsErr = new Error("EACCES: permission denied");
+  const fakeResolver = {
+    mergeAndExit: () => {
+      throw fsErr;
+    },
+  };
+  const lifecycle = new WorktreeLifecycle(s, deps, () => fakeResolver as any);
+
+  const result = lifecycle.exitMilestone("M001", { merge: true }, ctx);
+
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.reason, "teardown-failed");
+    assert.equal(result.cause, fsErr);
+  }
+});
+
+test("exitMilestone with merge:false delegates to Resolver.exitMilestone with preserveBranch", () => {
+  const s = makeSession();
+  const deps = makeDeps();
+  const ctx = makeCtx();
+  let receivedOpts: { preserveBranch?: boolean } | undefined;
+  const fakeResolver = {
+    exitMilestone: (
+      _mid: string,
+      _ctx: NotifyCtx,
+      opts?: { preserveBranch?: boolean },
+    ) => {
+      receivedOpts = opts;
+    },
+  };
+  const lifecycle = new WorktreeLifecycle(s, deps, () => fakeResolver as any);
+
+  const result = lifecycle.exitMilestone(
+    "M001",
+    { merge: false, preserveBranch: true },
+    ctx,
+  );
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.merged, false);
+  }
+  assert.deepEqual(receivedOpts, { preserveBranch: true });
+});

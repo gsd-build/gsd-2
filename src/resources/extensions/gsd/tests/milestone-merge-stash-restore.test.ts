@@ -71,6 +71,31 @@ function buildIc(opts: {
         }
       },
     },
+    lifecycle: {
+      exitMilestone: (_mid: string, exitOpts: { merge: boolean }) => {
+        log.mergeCalls += 1;
+        if (opts.mergeBehavior === "succeed") {
+          return { ok: true, merged: exitOpts.merge, codeFilesChanged: false };
+        }
+        try {
+          opts.mergeBehavior();
+          return { ok: true, merged: exitOpts.merge, codeFilesChanged: false };
+        } catch (err) {
+          // Mirror Lifecycle's typed-result wrapping of MergeConflictError
+          // and other thrown values per worktree-lifecycle.exitMilestone.
+          const isMergeConflict =
+            err !== null &&
+            typeof err === "object" &&
+            err !== undefined &&
+            (err as { name?: string }).name === "MergeConflictError";
+          return {
+            ok: false,
+            reason: isMergeConflict ? "merge-conflict" : "teardown-failed",
+            cause: err,
+          } as const;
+        }
+      },
+    },
     stopAuto: async (_c?: unknown, _p?: unknown, reason?: string) => {
       log.stopAutoCalls.push(reason);
     },

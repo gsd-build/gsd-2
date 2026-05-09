@@ -1613,7 +1613,11 @@ function buildLifecycleDeps(): WorktreeLifecycleDeps {
 }
 
 function buildLifecycle(): WorktreeLifecycle {
-  return new WorktreeLifecycle(s, buildLifecycleDeps());
+  return new WorktreeLifecycle(
+    s,
+    buildLifecycleDeps(),
+    () => buildResolver(),
+  );
 }
 
 /**

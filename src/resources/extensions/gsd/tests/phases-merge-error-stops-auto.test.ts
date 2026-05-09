@@ -85,6 +85,16 @@ const ic = {
         throw new Error("remote rejected push");
       },
     },
+    lifecycle: {
+      exitMilestone() {
+        calls.push("merge");
+        return {
+          ok: false,
+          reason: "teardown-failed",
+          cause: new Error("remote rejected push"),
+        };
+      },
+    },
     async stopAuto(_ctx: unknown, _pi: unknown, reason?: string) {
       calls.push(`stop:${reason}`);
     },
