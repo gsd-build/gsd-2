@@ -27,7 +27,6 @@ import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { resolveWorktreeProjectRoot, normalizeWorktreePathForCompare } from "./worktree-root.js";
 import {
   WorktreeLifecycle,
-  _enterMilestoneCore,
   type EnterResult,
 } from "./worktree-lifecycle.js";
 
