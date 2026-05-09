@@ -248,6 +248,14 @@ function makeMockDeps(overrides?: Partial<LoopDeps>): LoopDeps & { callLog: stri
     lifecycle: {
       enterMilestone: () => ({ ok: true, mode: "worktree", path: "/tmp/project" }),
     } as any,
+    lifecycle: {
+      enterMilestone: () => ({ ok: true, mode: "none", path: "/tmp/project" }),
+      exitMilestone: () => ({ ok: true, merged: false, codeFilesChanged: false }),
+      degradeToBranchMode: () => {},
+      restoreToProjectRoot: () => {},
+      isInMilestone: () => false,
+      getCurrentMilestoneIfAny: () => null,
+    } as any,
     postUnitPreVerification: async () => "continue" as const,
     runPostUnitVerification: async () => "continue" as const,
     postUnitPostVerification: async () => "continue" as const,

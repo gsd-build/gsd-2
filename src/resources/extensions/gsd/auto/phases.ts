@@ -824,7 +824,7 @@ export async function runPreDispatch(
       const enterResult = deps.lifecycle.enterMilestone(mid, ctx.ui);
       if (!enterResult.ok && enterResult.reason === "lease-conflict") {
         await deps.pauseAuto(ctx, pi);
-        return { action: "break", reason: "lease-conflict" };
+        return { action: "break", reason: "milestone-lease-conflict" };
       }
     } else {
       // mid is undefined — no milestone to capture integration branch for

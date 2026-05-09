@@ -123,6 +123,26 @@ export function _enterMilestoneCore(
       ),
     };
   }
+  let claimedLeaseThisCall = false;
+
+  const releaseClaimedLease = (): void => {
+    if (!claimedLeaseThisCall || !s.workerId || s.milestoneLeaseToken === null) {
+      return;
+    }
+    try {
+      releaseMilestoneLease(s.workerId, milestoneId, s.milestoneLeaseToken);
+    } catch (err) {
+      debugLog("WorktreeLifecycle", {
+        action: "enterMilestone",
+        milestoneId,
+        releaseFailedEntryLeaseError:
+          err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      s.milestoneLeaseToken = null;
+      claimedLeaseThisCall = false;
+    }
+  };
 
   if (s.isolationDegraded) {
     debugLog("WorktreeLifecycle", {
@@ -195,6 +215,7 @@ export function _enterMilestoneCore(
         const claim = claimMilestoneLease(s.workerId, milestoneId);
         if (claim.ok) {
           s.milestoneLeaseToken = claim.token;
+          claimedLeaseThisCall = true;
           debugLog("WorktreeLifecycle", {
             action: "enterMilestone",
             milestoneId,
@@ -313,6 +334,7 @@ export function _enterMilestoneCore(
         `Branch isolation setup for ${milestoneId} failed: ${msg}. Continuing on current branch.`,
         "warning",
       );
+      releaseClaimedLease();
       s.isolationDegraded = true;
       return { ok: false, reason: "creation-failed", cause: err };
     }
@@ -384,6 +406,7 @@ export function _enterMilestoneCore(
     );
     // Degrade isolation for the rest of this session so mergeAndExit
     // doesn't try to merge a nonexistent worktree branch (#2483)
+    releaseClaimedLease();
     s.isolationDegraded = true;
     // Do NOT update s.basePath — stay in project root
     return { ok: false, reason: "creation-failed", cause: err };
@@ -499,27 +522,18 @@ export class WorktreeLifecycle {
    * creation, marking the session's isolation as degraded.
    *
    * Currently delegates to `enterBranchModeForMilestone` from auto-worktree.
-   * Idempotent: subsequent calls in a degraded session are no-ops.
-   *
    * Issue #5587 ships this as a thin adapter; the body extraction joins the
    * other merge-logic move-out in a follow-up cleanup slice.
    */
   degradeToBranchMode(milestoneId: string, ctx: NotifyCtx): void {
-    if (this.s.isolationDegraded) {
-      debugLog("WorktreeLifecycle", {
-        action: "degradeToBranchMode",
-        milestoneId,
-        skipped: true,
-        reason: "already-degraded",
-      });
-      return;
-    }
     const basePath = resolveWorktreeProjectRoot(
       this.s.basePath,
       this.s.originalBasePath,
     );
     try {
       this.deps.enterBranchModeForMilestone(basePath, milestoneId);
+      this.s.basePath = basePath;
+      rebuildGitService(this.s, this.deps);
       this.deps.invalidateAllCaches();
       this.s.isolationDegraded = true;
       ctx.notify(
@@ -532,7 +546,6 @@ export class WorktreeLifecycle {
         `Branch isolation setup for ${milestoneId} failed: ${msg}. Continuing on current branch.`,
         "warning",
       );
-      this.s.isolationDegraded = true;
     }
   }
 

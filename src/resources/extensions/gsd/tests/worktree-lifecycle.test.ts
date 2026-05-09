@@ -11,9 +11,16 @@ import {
   type NotifyCtx,
 } from "../worktree-lifecycle.js";
 import { AutoSession } from "../auto/session.js";
-import { openDatabase, closeDatabase, insertMilestone } from "../gsd-db.js";
+import {
+  closeDatabase,
+  insertMilestone,
+  openDatabase,
+} from "../gsd-db.js";
 import { registerAutoWorker } from "../db/auto-workers.js";
-import { claimMilestoneLease } from "../db/milestone-leases.js";
+import {
+  claimMilestoneLease,
+  getMilestoneLease,
+} from "../db/milestone-leases.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -192,6 +199,29 @@ test("enterMilestone returns ok:false reason:creation-failed and degrades sessio
   assert.equal(s.basePath, "/project");
 });
 
+test("enterMilestone releases a newly claimed lease when worktree creation fails", (t) => {
+  const base = makeDbBase();
+  t.after(() => cleanupDbBase(base));
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test", status: "active" });
+  const workerId = registerAutoWorker({ projectRootRealpath: base });
+  const s = makeSession({ basePath: base, originalBasePath: base, workerId });
+  const deps = makeDeps({
+    createAutoWorktree: () => {
+      throw new Error("boom");
+    },
+  });
+  const ctx = makeCtx();
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  const result = lifecycle.enterMilestone("M001", ctx);
+
+  assert.equal(result.ok, false);
+  assert.equal(s.milestoneLeaseToken, null);
+  const row = getMilestoneLease("M001");
+  assert.equal(row?.status, "released");
+});
+
 test("enterMilestone returns ok:false reason:creation-failed when branch mode throws", () => {
   const s = makeSession();
   const deps = makeDeps({
@@ -210,6 +240,30 @@ test("enterMilestone returns ok:false reason:creation-failed when branch mode th
     assert.equal(result.reason, "creation-failed");
   }
   assert.equal(s.isolationDegraded, true);
+});
+
+test("enterMilestone releases a newly claimed lease when branch setup fails", (t) => {
+  const base = makeDbBase();
+  t.after(() => cleanupDbBase(base));
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test", status: "active" });
+  const workerId = registerAutoWorker({ projectRootRealpath: base });
+  const s = makeSession({ basePath: base, originalBasePath: base, workerId });
+  const deps = makeDeps({
+    getIsolationMode: () => "branch",
+    enterBranchModeForMilestone: () => {
+      throw new Error("branch checkout failed");
+    },
+  });
+  const ctx = makeCtx();
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  const result = lifecycle.enterMilestone("M001", ctx);
+
+  assert.equal(result.ok, false);
+  assert.equal(s.milestoneLeaseToken, null);
+  const row = getMilestoneLease("M001");
+  assert.equal(row?.status, "released");
 });
 
 test("enterMilestone enters existing worktree when path resolves", () => {
@@ -450,14 +504,16 @@ test("degradeToBranchMode sets isolationDegraded and invokes branch-mode helper"
   lifecycle.degradeToBranchMode("M001", ctx);
 
   assert.equal(s.isolationDegraded, true);
+  assert.equal(s.basePath, "/project");
   assert.equal(
     deps.calls.filter((c) => c.fn === "enterBranchModeForMilestone").length,
     1,
   );
+  assert.equal(deps.calls.filter((c) => c.fn === "GitServiceImpl").length, 1);
   assert.equal(deps.calls.filter((c) => c.fn === "invalidateAllCaches").length, 1);
 });
 
-test("degradeToBranchMode is no-op when isolationDegraded is already true", () => {
+test("degradeToBranchMode still attempts fallback when isolationDegraded is already true", () => {
   const s = makeSession();
   s.isolationDegraded = true;
   const deps = makeDeps();
@@ -468,11 +524,12 @@ test("degradeToBranchMode is no-op when isolationDegraded is already true", () =
 
   assert.equal(
     deps.calls.filter((c) => c.fn === "enterBranchModeForMilestone").length,
-    0,
+    1,
   );
+  assert.equal(deps.calls.filter((c) => c.fn === "GitServiceImpl").length, 1);
 });
 
-test("degradeToBranchMode marks degraded and notifies on branch-mode failure", () => {
+test("degradeToBranchMode notifies on branch-mode failure without marking degraded", () => {
   const s = makeSession();
   const deps = makeDeps({
     enterBranchModeForMilestone: () => {
@@ -484,7 +541,7 @@ test("degradeToBranchMode marks degraded and notifies on branch-mode failure", (
 
   lifecycle.degradeToBranchMode("M001", ctx);
 
-  assert.equal(s.isolationDegraded, true);
+  assert.equal(s.isolationDegraded, false);
   assert.ok(
     ctx.messages.some(
       (m) => m.level === "warning" && m.msg.includes("Branch isolation setup"),

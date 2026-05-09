@@ -1590,6 +1590,12 @@ function buildResolver(): WorktreeResolver {
   return new WorktreeResolver(s, buildResolverDeps());
 }
 
+function buildLifecycleDeps(): WorktreeLifecycleDeps {
+  return {
+    ...buildResolverDeps(),
+  } satisfies WorktreeLifecycleDeps;
+}
+
 /**
  * Build a WorktreeLifecycle Module wrapping the current session.
  *

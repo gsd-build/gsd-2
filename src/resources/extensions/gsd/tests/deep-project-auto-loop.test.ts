@@ -275,7 +275,7 @@ test("deep project setup: bootstrap can start auto-mode without an active milest
         lockBase: () => base,
         buildResolver: () => ({}) as any,
         buildLifecycle: () => ({
-          enterMilestone: () => ({ ok: true }),
+          enterMilestone: () => ({ ok: true, mode: "none", path: base }),
         }) as any,
       },
       {
@@ -383,7 +383,7 @@ test("deep project setup: bootstrap continues queued M002 without milestone cont
         lockBase: () => base,
         buildResolver: () => ({}) as any,
         buildLifecycle: () => ({
-          enterMilestone: () => ({ ok: true }),
+          enterMilestone: () => ({ ok: true, mode: "none", path: base }),
         }) as any,
       },
       {

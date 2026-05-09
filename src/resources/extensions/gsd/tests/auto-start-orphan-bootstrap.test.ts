@@ -106,7 +106,7 @@ test("bootstrap aborts before starting next milestone when completed orphan merg
           },
         }) as any,
         buildLifecycle: () => ({
-          enterMilestone: () => ({ ok: true }),
+          enterMilestone: () => ({ ok: true, mode: "none", path: base }),
         }) as any,
       },
       {
@@ -138,4 +138,3 @@ test("bootstrap aborts before starting next milestone when completed orphan merg
     rmSync(base, { recursive: true, force: true });
   }
 });
-
