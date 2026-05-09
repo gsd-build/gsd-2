@@ -540,7 +540,7 @@ function isUnderExpectedDirectory(
   rawExpectedOutputs: string[],
 ): boolean {
   for (const rawOutput of rawExpectedOutputs) {
-    if (!rawOutput.endsWith("/")) continue;
+    if (!isDirectoryReference(rawOutput)) continue;
     const normalizedDir = normalizeFilePath(rawOutput);
     const prefix = normalizedDir + "/";
     if (normalizedFile.startsWith(prefix)) return true;

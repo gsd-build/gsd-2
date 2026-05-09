@@ -2247,6 +2247,31 @@ describe("isUnderExpectedDirectory — directory materialization (#5066)", () =>
     assert.equal(results.length, 1,
       "Output without trailing slash should NOT satisfy descendant inputs (must be explicit directory)");
   });
+
+  test("annotated directory output satisfies descendant input", (t) => {
+    const tempDir = join(tmpdir(), `pre-exec-dir-mat-annotated-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+    t.after(() => rmSync(tempDir, { recursive: true, force: true }));
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        sequence: 0,
+        inputs: [],
+        expected_output: ["`dita-back/` — scaffold root"],
+      }),
+      createTask({
+        id: "T02",
+        sequence: 1,
+        inputs: ["dita-back/src/config.ts"],
+        expected_output: [],
+      }),
+    ];
+
+    const results = checkFilePathConsistency(tasks, tempDir);
+    assert.equal(results.length, 0,
+      "Annotated directory expected_output should satisfy descendant inputs");
+  });
 });
 
 describe("runPreExecutionChecks with ResolutionContext integration", () => {
