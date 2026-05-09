@@ -106,7 +106,9 @@ test("bootstrap aborts before starting next milestone when completed orphan merg
           },
         }) as any,
         buildLifecycle: () => ({
-          enterMilestone: () => ({ ok: true, mode: "none", path: base }),
+          enterMilestone: () => {
+            throw new Error("enterMilestone should not be called after orphan merge failure");
+          },
         }) as any,
       },
       {
