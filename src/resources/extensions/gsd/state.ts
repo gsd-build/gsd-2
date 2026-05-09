@@ -325,7 +325,7 @@ export async function deriveState(
   // from ROADMAP.md, PLAN.md, SUMMARY.md, REQUIREMENTS.md, or flag files.
   if (isDbAvailable()) {
     const stopDbTimer = debugTime("derive-state-db");
-    result = await deriveStateFromDb(basePath);
+    result = await deriveStateFromDb(basePath, opts?.projectRootForReads ?? basePath);
     stopDbTimer({ phase: result.phase, milestone: result.activeMilestone?.id });
     _telemetry.dbDeriveCount++;
   } else if (process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK === "1") {
@@ -652,7 +652,7 @@ function checkReplanTrigger(basePath: string, milestoneId: string, sliceId: stri
   return !!sliceRow?.replan_triggered_at;
 }
 
-export async function deriveStateFromDb(basePath: string): Promise<GSDState> {
+export async function deriveStateFromDb(basePath: string, readBasePath: string = basePath): Promise<GSDState> {
   const requirements = getRequirementCounts();
 
   const allMilestones = getAllMilestones();
@@ -742,7 +742,7 @@ export async function deriveStateFromDb(basePath: string): Promise<GSDState> {
   let effectiveSliceRow = activeSliceRow;
   if (activeSliceRow?.is_sketch === 1 && isDbAvailable()) {
     autoHealSketchFlags(activeMilestone.id, (sid) => {
-      const planPath = resolveSliceFile(basePath, activeMilestone.id, sid, 'PLAN');
+      const planPath = resolveSliceFile(readBasePath, activeMilestone.id, sid, 'PLAN');
       return planPath !== null && existsSync(planPath);
     });
     const healed = getSlice(activeMilestone.id, activeSlice.id);
