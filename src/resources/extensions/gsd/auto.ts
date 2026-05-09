@@ -1586,18 +1586,15 @@ function buildResolver(): WorktreeResolver {
   return new WorktreeResolver(s, buildResolverDeps());
 }
 
-function buildLifecycleDeps(): WorktreeLifecycleDeps {
-  const deps: WorktreeLifecycleDeps = buildResolverDeps();
-  return deps;
-}
-
 /**
- * Build a WorktreeLifecycle Module wrapping the current session.
+ * Build a focused `WorktreeLifecycleDeps` from the resolver's wider dep
+ * bag. Lifecycle's Interface is intentionally narrower than
+ * `WorktreeResolverDeps`; the explicit field copy enforces it.
  *
- * Per ADR-016, the Lifecycle Module is the typed-Interface owner of milestone
- * entry/exit verbs. Phase 1 (issue #5585) ships only `enterMilestone`; the
- * remaining verbs migrate from `WorktreeResolver` in subsequent slices.
- *
+ * Per ADR-016, the Lifecycle Module is the typed-Interface owner of
+ * milestone entry/exit verbs. Phase 1 (issue #5585) ships only
+ * `enterMilestone`; the remaining verbs migrate from `WorktreeResolver`
+ * in subsequent slices.
  */
 function buildLifecycleDeps(): WorktreeLifecycleDeps {
   const deps = buildResolverDeps();
