@@ -139,7 +139,10 @@ export class ProcessTerminal implements Terminal {
 		this.stdinBuffer = new StdinBuffer({ timeout: 50 });
 
 		// Kitty protocol response pattern: \x1b[?<flags>u
-		const kittyResponsePattern = /^\x1b\[\?(\d+)u$/;
+		// Some terminals (e.g. WezTerm, foot) respond with semicolon-delimited
+		// flags like \x1b[?1;4u which the old regex missed, causing the
+		// response to pass through as raw input.
+		const kittyResponsePattern = /^\x1b\[\?([\d;]+)u$/;
 
 		// Forward individual sequences to the input handler
 		this.stdinBuffer.on("data", (sequence) => {
@@ -281,9 +284,12 @@ export class ProcessTerminal implements Terminal {
 		// Disable bracketed paste mode
 		process.stdout.write("\x1b[?2004l");
 
-		// Disable Kitty keyboard protocol if not already done by drainInput()
+		// Disable Kitty keyboard protocol if not already done by drainInput().
+		// ALWAYS send the disable escape — the in-memory flag may be stale
+		// after a crash recovery, but the terminal's protocol state persists.
+		// Sending \x1b[<u when already disabled is a harmless no-op.
+		process.stdout.write("\x1b[<u");
 		if (this._kittyProtocolActive) {
-			process.stdout.write("\x1b[<u");
 			this._kittyProtocolActive = false;
 			setKittyProtocolActive(false);
 		}

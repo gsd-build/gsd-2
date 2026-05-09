@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Main entry point for the coding agent CLI.
  *
  * This file handles CLI argument parsing and translates them into
@@ -356,6 +356,23 @@ export async function main(args: string[]) {
 		const message = reason instanceof Error ? reason.stack ?? reason.message : String(reason);
 		console.error(`\nFatal: unhandled promise rejection\n${message}`);
 		process.exitCode = 1;
+	});
+
+	// Catch uncaught exceptions and restore terminal state before crashing.
+	// When the process dies without calling terminal.stop(), the Kitty keyboard
+	// protocol and raw mode remain active, causing garbled CSI-u escape
+	// sequences to leak into the parent shell for every subsequent keypress.
+	process.on("uncaughtException", (err) => {
+		try {
+			process.stdout.write("\x1b[<u");
+			process.stdout.write("\x1b[>4;0m");
+			process.stdout.write("\x1b[?2004l");
+			process.stdout.write("\x1b[?25h");
+			process.stdout.write("\x1b[J");
+		} catch { /* terminal may already be closed */ }
+		const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
+		console.error(`\nFatal: uncaught exception\n${message}`);
+		process.exit(1);
 	});
 
 	const offlineMode = args.includes("--offline") || isTruthyEnvFlag(process.env.PI_OFFLINE);
