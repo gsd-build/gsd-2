@@ -198,6 +198,35 @@ test("ADR-011: autoHealSketchFlags flips is_sketch=0 when PLAN file exists", asy
   assert.equal(getSlice("M001", "S02")?.is_sketch, 0, "post-heal: flag cleared");
 });
 
+test("ADR-011: deriveStateFromDb auto-heals stale sketch row — PLAN.md present + is_sketch=1 → phase≠'refining' + flag cleared", async (t) => {
+  // Regression: interrupted plan-slice left is_sketch=1 even though PLAN.md
+  // was written. deriveStateFromDb must call autoHealSketchFlags before
+  // deciding phase, so the run continues normally instead of looping back
+  // to 'refining'.
+  const originalCwd = process.cwd();
+  const base = makeFixtureBase();
+  t.after(() => cleanup(base, originalCwd));
+
+  seedMilestoneWithSketchedS02(base);
+  writeS01Artifacts(base);
+  // PLAN.md exists for S02 (plan-slice completed its write step), but
+  // is_sketch is still 1 (DB update was skipped due to crash/interruption).
+  writeFileSync(
+    join(base, ".gsd", "milestones", "M001", "slices", "S02", "S02-PLAN.md"),
+    "# S02 Plan\n",
+  );
+  writePreferences(base, "phases:\n  progressive_planning: true");
+  process.chdir(base);
+
+  const state = await deriveStateFromDb(base);
+
+  // Auto-heal must have cleared the flag in the DB.
+  assert.equal(getSlice("M001", "S02")?.is_sketch, 0, "DB flag must be cleared after auto-heal");
+  // Phase must not be 'refining' — the slice was already planned.
+  assert.notEqual(state.phase, "refining", "phase must advance past refining once PLAN.md exists");
+  assert.equal(state.activeSlice?.id, "S02", "S02 remains the active slice");
+});
+
 test("ADR-011: schema v16 is idempotent — re-opening DB preserves is_sketch and sketch_scope columns", async (t) => {
   const originalCwd = process.cwd();
   const base = mkdtempSync(join(tmpdir(), "gsd-adr011-schema-"));
