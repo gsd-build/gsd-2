@@ -20,6 +20,7 @@ import { join } from "node:path";
 import {
   extractPackageReferences,
   checkFilePathConsistency,
+  checkPackageExistence,
   checkTaskOrdering,
   checkInterfaceContracts,
   runPreExecutionChecks,
@@ -2039,5 +2040,79 @@ describe("checkFilePathConsistency quote-wrapped annotation (#3747)", () => {
       0,
       "Annotated file paths and prose inputs should produce zero blocking errors",
     );
+  });
+});
+
+// ─── isLocalPackage / checkPackageExistence workspace tests (#5237) ──────────
+
+describe("checkPackageExistence skips local workspace packages (#5237)", () => {
+  test("workspace package resolvable via require.resolve is not checked on npm", async () => {
+    // "node:fs" is always resolvable — use it as a proxy for a local package
+    const tasks = [
+      createTask({
+        id: "T01",
+        description: `
+\`\`\`typescript
+import { readFileSync } from 'fs';
+\`\`\`
+        `,
+      }),
+    ];
+
+    // basePath is the gsd-2 repo root (has node_modules)
+    const results = await checkPackageExistence(tasks, process.cwd());
+    // "fs" is a node builtin — extractPackageReferences skips node: prefix
+    // but bare 'fs' would be extracted. However it resolves via require.resolve
+    // so it should not produce a blocking failure.
+    const blocking = results.filter((r) => r.blocking && r.target === "fs");
+    assert.equal(blocking.length, 0, "Locally resolvable package should not produce blocking failure");
+  });
+
+  test("package existing in node_modules is not checked on npm", async () => {
+    // Create a fake workspace with a node_modules/@fake/pkg directory
+    const tempDir = join(tmpdir(), `pre-exec-pkg-local-${Date.now()}`);
+    mkdirSync(join(tempDir, "node_modules", "@fake", "pkg"), { recursive: true });
+    writeFileSync(join(tempDir, "package.json"), '{"name":"test"}');
+
+    try {
+      const tasks = [
+        createTask({
+          id: "T01",
+          description: `
+\`\`\`typescript
+import { thing } from '@fake/pkg';
+\`\`\`
+          `,
+        }),
+      ];
+
+      const results = await checkPackageExistence(tasks, tempDir);
+      const blocking = results.filter((r) => r.blocking && r.target === "@fake/pkg");
+      assert.equal(blocking.length, 0, "Package existing in node_modules should not produce blocking failure");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("non-existent package still produces blocking failure", async () => {
+    const tempDir = join(tmpdir(), `pre-exec-pkg-missing-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+    writeFileSync(join(tempDir, "package.json"), '{"name":"test"}');
+
+    try {
+      const tasks = [
+        createTask({
+          id: "T01",
+          description: `npm install @this-does-not-exist-anywhere-12345/fake-pkg`,
+        }),
+      ];
+
+      const results = await checkPackageExistence(tasks, tempDir);
+      const blocking = results.filter((r) => r.blocking);
+      assert.ok(blocking.length > 0 || results.some((r) => r.message?.includes("Timeout")),
+        "Non-existent package should produce blocking failure or timeout warning");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });

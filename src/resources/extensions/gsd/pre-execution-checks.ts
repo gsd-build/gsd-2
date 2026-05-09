@@ -19,8 +19,9 @@
 
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
 import type { TaskRow } from "./db-task-slice-rows.js";
 import type { PreExecutionCheckJSON } from "./verification-evidence.ts";
 
@@ -128,6 +129,38 @@ function normalizePackageName(raw: string): string {
 }
 
 /**
+ * Returns true if the package is locally resolvable — skip npm registry check.
+ *
+ * Method 1: require.resolve from basePath — handles hoisted deps, exports
+ *   maps, and npm-linked packages that may not be directly in node_modules/.
+ * Method 2: existsSync on node_modules/<pkg> — handles unbuilt workspace
+ *   packages (no dist/ yet, so require.resolve throws) across all linker
+ *   modes: pnpm symlinks, npm workspace real dirs, yarn classic copies.
+ *
+ * Note: existsSync is used (not lstatSync + isSymbolicLink) because npm
+ *   workspaces link packages as real directories, not symlinks. A symlink
+ *   check would silently miss them.
+ */
+function isLocalPackage(packageName: string, basePath: string): boolean {
+  // Method 1: require.resolve (handles hoisted deps and exports maps)
+  try {
+    const localRequire = createRequire(join(basePath, "package.json"));
+    localRequire.resolve(packageName);
+    return true;
+  } catch { /* not resolvable via require */ }
+
+  // Method 2: direct existence check (handles unbuilt workspace packages)
+  try {
+    const nmPath = packageName.startsWith("@")
+      ? join(basePath, "node_modules", ...packageName.split("/"))
+      : join(basePath, "node_modules", packageName);
+    if (existsSync(nmPath)) return true;
+  } catch { /* not in node_modules */ }
+
+  return false;
+}
+
+/**
  * Check if a package exists on npm registry.
  * Returns null on success, error message on failure.
  * Times out after timeoutMs (default 5000ms).
@@ -181,12 +214,13 @@ async function checkPackageOnNpm(
 
 /**
  * Check all package references in tasks for existence on npm.
- * Runs checks in parallel with a 5s timeout per package.
+ * Skips packages resolvable locally (workspace members, linked packages).
+ * Runs registry checks in parallel with a 5s timeout per package.
  * Network failures warn but don't fail (R012 conservative design).
  */
 export async function checkPackageExistence(
   tasks: TaskRow[],
-  _basePath: string
+  basePath: string
 ): Promise<PreExecutionCheckJSON[]> {
   const results: PreExecutionCheckJSON[] = [];
   const packagesToCheck = new Set<string>();
@@ -203,8 +237,18 @@ export async function checkPackageExistence(
     return results;
   }
 
-  // Check packages in parallel
-  const checkPromises = Array.from(packagesToCheck).map(async (pkg) => {
+  // Filter out packages that resolve locally (workspace packages, linked deps)
+  const resolveRoot = basePath || process.cwd();
+  const remotePackages = Array.from(packagesToCheck).filter(
+    (pkg) => !isLocalPackage(pkg, resolveRoot)
+  );
+
+  if (remotePackages.length === 0) {
+    return results;
+  }
+
+  // Check remaining (non-local) packages against npm in parallel
+  const checkPromises = remotePackages.map(async (pkg) => {
     const result = await checkPackageOnNpm(pkg);
     return { pkg, result };
   });
