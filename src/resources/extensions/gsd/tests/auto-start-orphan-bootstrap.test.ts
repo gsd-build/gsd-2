@@ -81,6 +81,7 @@ test("bootstrap aborts before starting next milestone when completed orphan merg
   const previousCwd = process.cwd();
   const s = new AutoSession();
   const mergeCalls: string[] = [];
+  let enterMilestoneCalls = 0;
   const notifications: Array<{ message: string; level?: string }> = [];
 
   try {
@@ -105,13 +106,13 @@ test("bootstrap aborts before starting next milestone when completed orphan merg
             throw new Error("synthetic merge failure");
           },
         }) as any,
-<<<<<<< HEAD
-        buildLifecycle: () => ({
-          enterMilestone: () => ({ ok: true }),
-        }) as any,
-=======
-        buildLifecycle: () => ({}) as any,
->>>>>>> 0fe53a695 (Apply CI healing fixes for PR #5600)
+        buildLifecycle: () =>
+          ({
+            enterMilestone: () => {
+              enterMilestoneCalls += 1;
+              return { ok: true };
+            },
+          }) as any,
       },
       {
         classification: "none",
@@ -129,6 +130,7 @@ test("bootstrap aborts before starting next milestone when completed orphan merg
 
     assert.equal(ready, false);
     assert.deepEqual(mergeCalls, ["M002"]);
+    assert.equal(enterMilestoneCalls, 0);
     assert.equal(s.active, false);
     assert.match(
       notifications.map((entry) => entry.message).join("\n"),
