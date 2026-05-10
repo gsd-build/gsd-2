@@ -628,7 +628,25 @@ function ensureGsdSymlinkCore(projectPath: string): string {
     }
 
     if (stat.isDirectory()) {
-      // Real directory in the main repo — migration will handle this later.
+      // Real directory — check if it's an empty shell that should be a symlink.
+      // This happens when a crash destroys the symlink and other code (e.g.
+      // notification-store mkdirSync) creates a bare directory before this
+      // function can heal it. If external state exists but the local dir is
+      // empty, restore the symlink. (#5696)
+      if (!inWorktree && hasProjectState(externalPath) && !hasProjectState(localGsd)) {
+        try {
+          const strayEntries = readdirSync(localGsd);
+          for (const entry of strayEntries) {
+            const src = join(localGsd, entry);
+            const dst = join(externalPath, entry);
+            if (!existsSync(dst)) {
+              try { renameSync(src, dst); } catch { /* skip conflicting */ }
+            }
+          }
+        } catch { /* non-fatal — dir may already be empty */ }
+        return replaceWithSymlink();
+      }
+      // Real directory with state — legacy migration will handle this later.
       // In worktrees, keep the directory in place and let syncGsdStateToWorktree
       // refresh its contents. Replacing a git-tracked .gsd directory with a
       // symlink makes git think tracked planning files were deleted.
