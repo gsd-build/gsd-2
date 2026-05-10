@@ -28,19 +28,18 @@ export interface ModelCapability {
 // window is authoritative. For unknown/estimated models, num_ctx is NOT sent
 // to avoid OOM risk — Ollama uses its own safe default instead.
 const KNOWN_MODELS: Array<[pattern: string, caps: ModelCapability]> = [
-	// ─── Reasoning models (fallback when /api/show capabilities is absent) ──
-	// IMPORTANT: matching is `baseName === pattern || baseName.startsWith(pattern)`,
-	// so more specific patterns must appear before more general ones.
+	// ─── Reasoning models without long-variant overrides ───────────────────
+	// /api/show capabilities is the authoritative reasoning signal; these
+	// fallback entries cover Ollama versions that omit it. Families that have
+	// long-variant entries elsewhere (glm-*, kimi-k2*, minimax-m2*, qwen3*)
+	// carry reasoning: true on those entries instead, to avoid prefix
+	// shadowing (#4991).
 	["deepseek-r1",       { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
 	["deepseek-v3.1",     { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
 	["deepseek-v4-flash", { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
 	["deepseek-v4",       { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
 	["qwq",               { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
 	["gpt-oss",           { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
-	["glm-4",             { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
-	["glm-5",             { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
-	["kimi-k2",           { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
-	["minimax-m2",        { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
 	["nemotron-3",        { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
 	["gemma4",            { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
 	["gemini-3-flash",    { contextWindow: 1048576, reasoning: true, ollamaOptions: { num_ctx: 1048576 } }],
@@ -89,25 +88,25 @@ const KNOWN_MODELS: Array<[pattern: string, caps: ModelCapability]> = [
 	// ref: glm 4.6 / 5.x 200K ctx — https://docs.z.ai/devpack/using5.1
 	// Long-variant entries before bare `glm-5` / `glm-4` would-be bases to
 	// avoid prefix shadowing (#4991).
-	["glm-5.1", { contextWindow: 204800, maxTokens: 16384, ollamaOptions: { num_ctx: 204800 } }],
-	["glm-5", { contextWindow: 204800, maxTokens: 16384, ollamaOptions: { num_ctx: 204800 } }],
-	["glm-4.6", { contextWindow: 204800, maxTokens: 16384, ollamaOptions: { num_ctx: 204800 } }],
-	["glm-4", { contextWindow: 131072, maxTokens: 16384, ollamaOptions: { num_ctx: 131072 } }],
+	["glm-5.1", { contextWindow: 204800, maxTokens: 16384, reasoning: true, ollamaOptions: { num_ctx: 204800 } }],
+	["glm-5", { contextWindow: 204800, maxTokens: 16384, reasoning: true, ollamaOptions: { num_ctx: 204800 } }],
+	["glm-4.6", { contextWindow: 204800, maxTokens: 16384, reasoning: true, ollamaOptions: { num_ctx: 204800 } }],
+	["glm-4", { contextWindow: 131072, maxTokens: 16384, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
 
 	// ─── Kimi K2 (Moonshot, Ollama Cloud) ──────────────────────────────
 	// ref: kimi-k2 256K ctx — https://platform.moonshot.ai/docs
 	// Same shadowing concern: kimi-k2-thinking and kimi-k2.{5,6} must
 	// match before any future bare `kimi-k2` entry (#4991).
-	["kimi-k2-thinking", { contextWindow: 262144, maxTokens: 16384, ollamaOptions: { num_ctx: 262144 } }],
-	["kimi-k2.6", { contextWindow: 262144, maxTokens: 16384, ollamaOptions: { num_ctx: 262144 } }],
-	["kimi-k2.5", { contextWindow: 262144, maxTokens: 16384, ollamaOptions: { num_ctx: 262144 } }],
-	["kimi-k2", { contextWindow: 262144, maxTokens: 16384, ollamaOptions: { num_ctx: 262144 } }],
+	["kimi-k2-thinking", { contextWindow: 262144, maxTokens: 16384, reasoning: true, ollamaOptions: { num_ctx: 262144 } }],
+	["kimi-k2.6", { contextWindow: 262144, maxTokens: 16384, reasoning: true, ollamaOptions: { num_ctx: 262144 } }],
+	["kimi-k2.5", { contextWindow: 262144, maxTokens: 16384, reasoning: true, ollamaOptions: { num_ctx: 262144 } }],
+	["kimi-k2", { contextWindow: 262144, maxTokens: 16384, reasoning: true, ollamaOptions: { num_ctx: 262144 } }],
 
 	// ─── MiniMax M2 (Ollama Cloud) ─────────────────────────────────────
 	// ref: minimax-m2 1M ctx — https://www.minimax.io/news/minimax-m2
-	["minimax-m2.7", { contextWindow: 1048576, maxTokens: 16384, ollamaOptions: { num_ctx: 1048576 } }],
-	["minimax-m2.5", { contextWindow: 1048576, maxTokens: 16384, ollamaOptions: { num_ctx: 1048576 } }],
-	["minimax-m2", { contextWindow: 1048576, maxTokens: 16384, ollamaOptions: { num_ctx: 1048576 } }],
+	["minimax-m2.7", { contextWindow: 1048576, maxTokens: 16384, reasoning: true, ollamaOptions: { num_ctx: 1048576 } }],
+	["minimax-m2.5", { contextWindow: 1048576, maxTokens: 16384, reasoning: true, ollamaOptions: { num_ctx: 1048576 } }],
+	["minimax-m2", { contextWindow: 1048576, maxTokens: 16384, reasoning: true, ollamaOptions: { num_ctx: 1048576 } }],
 
 	// ─── Gemma family ───────────────────────────────────────────────────
 	["gemma3", { contextWindow: 131072, maxTokens: 16384, ollamaOptions: { num_ctx: 131072 } }],
