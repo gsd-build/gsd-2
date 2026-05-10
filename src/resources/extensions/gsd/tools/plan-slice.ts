@@ -10,6 +10,7 @@ import {
   upsertTaskPlanning,
   insertGateRow,
   updateSliceStatus,
+  setSliceSketchFlag,
 } from "../gsd-db.js";
 import type { GateId } from "../types.js";
 import { invalidateStateCache } from "../state.js";
@@ -213,6 +214,10 @@ export async function handlePlanSlice(
           fullPlanMd: task.fullPlanMd,
         });
       }
+
+      // A full plan write means this slice is no longer a sketch — clear the
+      // flag so state derivation stops returning phase:'refining'.
+      setSliceSketchFlag(params.milestoneId, params.sliceId, false);
 
       // Seed quality gate rows inside the transaction — all-or-nothing with
       // the plan data so a crash can't leave orphaned gates without tasks.
