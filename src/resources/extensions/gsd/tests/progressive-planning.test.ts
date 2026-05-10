@@ -13,11 +13,12 @@ import {
   closeDatabase,
   insertMilestone,
   insertSlice,
+  insertTask,
   setSliceSketchFlag,
   autoHealSketchFlags,
   getSlice,
 } from "../gsd-db.ts";
-import { deriveStateFromDb } from "../state.ts";
+import { deriveStateFromDb, invalidateStateCache } from "../state.ts";
 import { resolveDispatch } from "../auto-dispatch.ts";
 import type { DispatchContext } from "../auto-dispatch.ts";
 
@@ -477,6 +478,84 @@ test("ADR-011 P3 #19: refine-slice prompt incorporates prior slice findings + sk
     /Prior Sketch Scope \(soft hint — non-binding\)/,
     "refine prompt must NOT use the soft-hint framing (that's the plan-slice flag-off downgrade)",
   );
+});
+
+test("ADR-011: stale is_sketch=1 auto-heals to 'executing' after session restart (DB close/reopen)", async (t) => {
+  // Simulates the crash-recovery scenario: plan-slice writes PLAN.md and tasks
+  // to DB, but the process crashed before clearing is_sketch=1. On the next
+  // session (DB close + reopen), deriveStateFromDb() must auto-heal the stale
+  // flag and return phase='executing', not 'refining'.
+  const originalCwd = process.cwd();
+  const base = makeFixtureBase();
+  t.after(() => cleanup(base, originalCwd));
+
+  // ── Session 1: seed stale state ───────────────────────────────────────
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test", status: "active" });
+  insertSlice({
+    id: "S01",
+    milestoneId: "M001",
+    title: "Foundation",
+    status: "complete",
+    risk: "high",
+    depends: [],
+    sequence: 1,
+    isSketch: false,
+  });
+  // S02: sketch flag left stale (simulates crash after plan write but before flag clear)
+  insertSlice({
+    id: "S02",
+    milestoneId: "M001",
+    title: "Feature",
+    status: "pending",
+    risk: "medium",
+    depends: ["S01"],
+    sequence: 2,
+    isSketch: true,
+  });
+  // Tasks exist in DB (plan-slice wrote them before the crash)
+  insertTask({
+    id: "T01",
+    sliceId: "S02",
+    milestoneId: "M001",
+    title: "Implement feature X",
+    status: "pending",
+  });
+  insertTask({
+    id: "T02",
+    sliceId: "S02",
+    milestoneId: "M001",
+    title: "Write tests for feature X",
+    status: "pending",
+  });
+
+  // Write PLAN.md on disk (plan-slice completed writing before crash)
+  writeFileSync(
+    join(base, ".gsd", "milestones", "M001", "slices", "S02", "S02-PLAN.md"),
+    "# S02 Plan\n\n- [ ] **T01: Implement feature X** `est:2h`\n- [ ] **T02: Write tests** `est:1h`\n",
+  );
+  writeS01Artifacts(base);
+
+  // Confirm the stale state: is_sketch=1 even though PLAN exists
+  assert.equal(getSlice("M001", "S02")?.is_sketch, 1, "pre-restart: stale is_sketch=1");
+
+  // ── Simulate session restart: close DB ────────────────────────────────
+  closeDatabase();
+
+  // ── Session 2: reopen DB and derive state ─────────────────────────────
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  invalidateStateCache();
+  writePreferences(base, "phases:\n  progressive_planning: true");
+  process.chdir(base);
+
+  const state = await deriveStateFromDb(base);
+
+  // Auto-heal must have cleared the flag
+  assert.equal(getSlice("M001", "S02")?.is_sketch, 0, "post-restart: auto-heal cleared is_sketch");
+  // Phase must be 'executing' (tasks exist, none complete, no gates)
+  assert.equal(state.phase, "executing", "post-restart phase must be 'executing', not 'refining'");
+  assert.equal(state.activeSlice?.id, "S02");
+  assert.equal(state.activeTask?.id, "T01");
 });
 
 test("ADR-011 P3 #26: refine-slice dispatch latency is bounded vs plan-slice baseline", async (t) => {
