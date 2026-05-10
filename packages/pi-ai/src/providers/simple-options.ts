@@ -8,12 +8,16 @@ import type { Api, Model, SimpleStreamOptions, StreamOptions, ThinkingBudgets, T
  * Anthropic-compatible models (e.g. OpenAI-completions, Vertex, etc.) use their
  * declared model.maxTokens directly so that providers with larger output windows
  * (131 072 tokens, etc.) are not silently capped.
+ *
+ * All models are additionally capped to 80% of contextWindow to leave headroom
+ * for the system prompt and user messages.
  */
 export function defaultMaxTokens(model: Model<Api>): number {
+	const contextCap = Math.floor(model.contextWindow * 0.8);
 	if (model.api === "anthropic-messages") {
-		return Math.min(model.maxTokens, 32000);
+		return Math.min(model.maxTokens, 32000, contextCap);
 	}
-	return model.maxTokens;
+	return Math.min(model.maxTokens, contextCap);
 }
 
 export function buildBaseOptions(model: Model<Api>, options?: SimpleStreamOptions, apiKey?: string): StreamOptions {
