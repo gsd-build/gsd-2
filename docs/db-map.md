@@ -324,6 +324,10 @@ FOREIGN KEY (milestone_id, slice_id) → slices
 FOREIGN KEY (milestone_id, depends_on_slice_id) → slices
 ```
 - Index: `idx_slice_deps_target`
+- Maintained from the milestone `ROADMAP.md` slice `depends` declarations. The
+  ADR-017 `roadmap-divergence` reconciliation repair re-imports the roadmap as
+  the source of truth, then refreshes this junction table so dependency checks
+  see the same edges as the markdown projection.
 
 ---
 

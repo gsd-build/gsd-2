@@ -24,8 +24,8 @@ import {
   renderPlanFromDb,
   renderTaskPlanFromDb,
   detectStaleRenders,
-  repairStaleRenders,
 } from '../markdown-renderer.ts';
+import { repairStaleRenders } from '../state-reconciliation/drift/stale-render.ts';
 import {
   parseRoadmap,
   parsePlan,

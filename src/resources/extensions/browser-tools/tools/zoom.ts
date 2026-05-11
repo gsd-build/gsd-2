@@ -14,6 +14,7 @@ export function registerZoomTools(pi: ExtensionAPI, deps: ToolDeps): void {
 			"Capture and optionally upscale a specific rectangular region of the page for detailed inspection. " +
 			"Useful for dense UIs where full-page screenshots have text too small to read. " +
 			"Returns the region as an inline image, same as browser_screenshot.",
+		compatibility: { producesImages: true },
 		parameters: Type.Object({
 			x: Type.Number({ description: "Left coordinate of the region in CSS pixels." }),
 			y: Type.Number({ description: "Top coordinate of the region in CSS pixels." }),

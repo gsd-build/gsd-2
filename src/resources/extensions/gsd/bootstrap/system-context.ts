@@ -165,6 +165,17 @@ export async function buildBeforeAgentStartResult(
     logWarning("bootstrap", `decisions backfill failed: ${(e as Error).message}`);
   }
 
+  // ADR-013 step 6 preflight: warn when decisions / KNOWLEDGE.md rows are not
+  // yet in the memories table. Read-only; never throws. The Phase 6 cutover
+  // is blocked on this signal reading clean, so users see the gap before
+  // any destructive step lands.
+  try {
+    const { reportConsolidationGaps } = await import("../memory-consolidation-scanner.js");
+    reportConsolidationGaps(process.cwd());
+  } catch (e) {
+    logWarning("bootstrap", `memory consolidation scan failed: ${(e as Error).message}`);
+  }
+
   let newSkillsBlock = "";
   if (hasSkillSnapshot()) {
     const newSkills = detectNewSkills();

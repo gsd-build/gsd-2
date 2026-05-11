@@ -420,6 +420,10 @@ describe("Custom engine loop integration", () => {
 
     assert.deepEqual(turnResults, [{ status: "completed", failureClass: "none", error: undefined }]);
     assert.ok(
+      deps.callLog.includes("journal:iteration-end"),
+      `complete workflow should emit iteration-end; log=${deps.callLog.join(",")}`,
+    );
+    assert.ok(
       deps.callLog.indexOf("turnResult:completed") < deps.callLog.indexOf("stopAuto:Workflow complete"),
       `turn should finalize before stopAuto; log=${deps.callLog.join(",")}`,
     );
@@ -471,6 +475,10 @@ describe("Custom engine loop integration", () => {
     assert.equal(turnResults[0].status, "stopped");
     assert.equal(turnResults[0].failureClass, "manual-attention");
     assert.match(turnResults[0].error ?? "", /custom-engine-dispatch-stop/);
+    assert.ok(
+      deps.callLog.includes("journal:iteration-end"),
+      `blocked workflow should emit iteration-end; log=${deps.callLog.join(",")}`,
+    );
     assert.equal(s.currentTraceId, null);
     assert.equal(s.currentTurnId, null);
     assert.equal(pi.calls.length, 0, "blocked workflow should not dispatch a custom step");
@@ -663,10 +671,15 @@ describe("Custom engine loop integration", () => {
       activeRunDir: runDir,
       basePath: runDir,
     });
+    const journalEvents: Array<{ eventType: string; data?: any }> = [];
     const deps = makeMockDeps({
       stopAuto: async (_ctx, _pi, reason) => {
         deps.callLog.push(`stopAuto:${reason ?? "no-reason"}`);
         s.active = false;
+      },
+      emitJournalEvent: (entry: any) => {
+        journalEvents.push(entry);
+        deps.callLog.push(`journal:${entry.eventType}`);
       },
     });
 
@@ -699,6 +712,21 @@ describe("Custom engine loop integration", () => {
     assert.match(stopEntry ?? "", /requested retry 4 times without passing/);
     const finalGraph = readGraph(runDir);
     assert.equal(finalGraph.steps[0]?.status, "active", "failed verification must not reconcile the step complete");
+
+    const unitEndIndexes = journalEvents
+      .map((entry, index) => entry.eventType === "unit-end" ? index : -1)
+      .filter((index) => index >= 0);
+    const iterationEndIndexes = journalEvents
+      .map((entry, index) => entry.eventType === "iteration-end" ? index : -1)
+      .filter((index) => index >= 0);
+    assert.equal(unitEndIndexes.length, 4, "each custom verification retry/stop attempt must emit unit-end");
+    assert.equal(iterationEndIndexes.length, 4, "each custom verification retry/stop iteration must close after unit-end");
+    for (const [i, unitEndIndex] of unitEndIndexes.entries()) {
+      assert.ok(
+        iterationEndIndexes[i]! > unitEndIndex,
+        `custom verification attempt ${i + 1} should emit iteration-end after unit-end`,
+      );
+    }
   });
 
   it("persists custom verification retry budget across a session restart", async () => {

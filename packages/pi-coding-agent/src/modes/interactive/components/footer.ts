@@ -1,8 +1,12 @@
+// Project/App: GSD-2
+// File Purpose: Interactive terminal footer renderer for workspace, model, usage, context, and extension status.
+
 import { type Component, truncateToWidth, visibleWidth } from "@gsd/pi-tui";
 import type { AgentSession } from "../../../core/agent-session.js";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.js";
 import { theme } from "../theme/theme.js";
 import { providerAuthBadge, providerDisplayName } from "./model-selector.js";
+import { renderFooterStrip } from "./transcript-design.js";
 
 /**
  * Sanitize text for display in a single-line status.
@@ -155,8 +159,8 @@ export class FooterComponent implements Component {
 			? Math.max(0, Math.min(BAR_WIDTH, Math.round((contextPercentValue / 100) * BAR_WIDTH)))
 			: 0;
 		const bar =
-			theme.fg(barColor, "━".repeat(filled)) +
-			theme.fg("dim", "─".repeat(Math.max(0, BAR_WIDTH - filled)));
+			theme.fg(barColor, "█".repeat(filled)) +
+			theme.fg("dim", "░".repeat(Math.max(0, BAR_WIDTH - filled)));
 		const pctText = contextPercent === "?" ? "?" : `${contextPercent}%`;
 		const suffix = `/${formatTokens(contextWindow)}${autoIndicator}`;
 		const colorizedPct =
@@ -218,34 +222,9 @@ export class FooterComponent implements Component {
 			}
 		}
 
-		const rightSideWidth = visibleWidth(rightSide);
-		const totalNeeded = statsLeftWidth + minPadding + rightSideWidth;
-
-		let statsLine: string;
-		if (totalNeeded <= width) {
-			// Both fit - add padding to right-align model
-			const padding = " ".repeat(width - statsLeftWidth - rightSideWidth);
-			statsLine = statsLeft + padding + rightSide;
-		} else {
-			// Need to truncate right side
-			const availableForRight = width - statsLeftWidth - minPadding;
-			if (availableForRight > 0) {
-				const truncatedRight = truncateToWidth(rightSide, availableForRight, "");
-				const truncatedRightWidth = visibleWidth(truncatedRight);
-				const padding = " ".repeat(Math.max(0, width - statsLeftWidth - truncatedRightWidth));
-				statsLine = statsLeft + padding + truncatedRight;
-			} else {
-				// Not enough space for right side at all
-				statsLine = statsLeft;
-			}
-		}
-
-		// Apply dim to each part separately. statsLeft may contain color codes (for context %)
-		// that end with a reset, which would clear an outer dim wrapper. So we dim the parts
-		// before and after the colored section independently.
+		// Apply dim to the stats group before handing it to the shared footer strip.
+		// statsLeft may contain color codes for context %, so keep coloring local to the group.
 		const dimStatsLeft = theme.fg("dim", statsLeft);
-		const remainder = statsLine.slice(statsLeft.length); // padding + rightSide
-		const dimRemainder = theme.fg("dim", remainder);
 
 		// Extension statuses right-aligned on the pwd line (sorted by key).
 		// Keeps the footer compact by avoiding a dedicated row when the content
@@ -260,18 +239,12 @@ export class FooterComponent implements Component {
 						.join(" ")
 				: "";
 
-		const pwdWidth = visibleWidth(pwd);
-		const extWidth = visibleWidth(extStatusText);
-		let pwdLine: string;
-		if (extStatusText && pwdWidth + 2 + extWidth <= width) {
-			const padding = " ".repeat(width - pwdWidth - extWidth);
-			pwdLine = theme.fg("dim", pwd + padding + extStatusText);
-		} else {
-			pwdLine = truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "..."));
-		}
-
-		const lines = [pwdLine, dimStatsLeft + dimRemainder];
-
-		return lines;
+		const leftSegments = [
+			theme.fg("accent", "● GSD"),
+			theme.fg("dim", pwd),
+			dimStatsLeft,
+		];
+		const footerRight = [rightSide, extStatusText].filter(Boolean).join(" ");
+		return renderFooterStrip(leftSegments, footerRight, width);
 	}
 }

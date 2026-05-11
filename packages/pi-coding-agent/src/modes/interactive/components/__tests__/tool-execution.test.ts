@@ -1,4 +1,5 @@
-// GSD-2 Interactive Tool Execution Rendering Tests
+// Project/App: GSD-2
+// File Purpose: Tests for interactive terminal tool execution rendering.
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import stripAnsi from "strip-ansi";
@@ -60,6 +61,23 @@ describe("ToolExecutionComponent", () => {
 		assert.match(rendered, /running · \d+(ms|s)/);
 	});
 
+	test("does not duplicate running generic tool labels before args", () => {
+		const rendered = renderToolCollapsed(
+			"Agent",
+			{
+				description: "Scout habit tracker codebase",
+				subagent_type: "Explore",
+				prompt: "Read these files and give me a concise summary of each.",
+			},
+		);
+
+		const labelMatches = rendered.match(/Agent/g) ?? [];
+		assert.equal(labelMatches.length, 1, `expected only the card title to contain Agent:\n${rendered}`);
+		assert.doesNotMatch(rendered, /description="Scout habit tracker codebase"/);
+		assert.doesNotMatch(rendered, /subagent_type="Explore"/);
+		assert.match(rendered, /running · \d+(ms|s)/);
+	});
+
 	test("renders framed header with failed status for failed tool result", () => {
 		const rendered = renderTool(
 			"mcp__demo__do_thing",
@@ -85,6 +103,19 @@ describe("ToolExecutionComponent", () => {
 		assert.match(rendered, /demo\u00b7noop/);
 		assert.doesNotMatch(rendered, /Completed/);
 		assert.doesNotMatch(rendered, /ok=true/);
+	});
+
+	test("does not duplicate generic tool labels in collapsed cards", () => {
+		const rendered = renderToolCollapsed(
+			"TodoWrite",
+			{ todos: [{ content: "Ship it", status: "pending" }] },
+			{ content: [{ type: "text", text: "TodoWrite" }], isError: false },
+		);
+
+		const labelMatches = rendered.match(/TodoWrite/g) ?? [];
+		assert.equal(labelMatches.length, 1, `expected only the card title to contain TodoWrite:\n${rendered}`);
+		assert.match(rendered, /output hidden/);
+		assert.match(rendered, /ctrl\+o expand/);
 	});
 
 	test("exposes phase metadata for successful low-signal tool rows", () => {
@@ -132,8 +163,41 @@ describe("ToolExecutionComponent", () => {
 			},
 		);
 
-		assert.match(rendered, /read .*src\/Inspector\.tsx:4-12/);
+		assert.match(rendered, /Read/);
+		assert.match(rendered, /src\/Inspector\.tsx:4-12/);
 		assert.doesNotMatch(rendered, /source/);
+		assert.doesNotMatch(rendered, /output hidden\n\s*│\s*ctrl\+o expand/);
+	});
+
+	test("renders compact capitalized read rows from file_path args", () => {
+		const rendered = renderToolCollapsed(
+			"Read",
+			{ file_path: "~/Github/gsd-2/src/resources/extensions/gsd/health-widget-core.ts" },
+			{ content: [{ type: "text", text: "hidden body output" }], isError: false },
+		);
+
+		assert.match(rendered, /Read/);
+		assert.match(rendered, /health-widget-core\.ts/);
+		assert.doesNotMatch(rendered, /hidden body output/);
+	});
+
+	test("renders compact read rows from direct result details path", () => {
+		const rendered = renderToolCollapsed(
+			"read",
+			{},
+			{
+				content: [{ type: "text", text: "hidden body output" }],
+				isError: false,
+				details: {
+					path: "/tmp/project/src/resources/extensions/gsd/health-widget-core.ts",
+					range: { start: 1, end: 12 },
+				},
+			},
+		);
+
+		assert.match(rendered, /Read/);
+		assert.match(rendered, /health-widget-core\.ts:1-12/);
+		assert.doesNotMatch(rendered, /hidden body output/);
 	});
 
 	test("renders compact edit rows with target metadata", () => {
@@ -155,8 +219,19 @@ describe("ToolExecutionComponent", () => {
 			},
 		);
 
-		assert.match(rendered, /edit .*src\/Inspector\.tsx:42/);
+		assert.match(rendered, /Edit/);
+		assert.match(rendered, /src\/Inspector\.tsx:42/);
 		assert.doesNotMatch(rendered, /Updated src\/Inspector\.tsx/);
+	});
+
+	test("renders running edit rows with title and target on the top line", () => {
+		const rendered = renderToolCollapsed("edit", { path: "src/Inspector.tsx" });
+
+		const labelMatches = rendered.match(/Edit/g) ?? [];
+		assert.equal(labelMatches.length, 1, `expected tool name only in the card title:\n${rendered}`);
+		assert.match(rendered, /src\/Inspector\.tsx/);
+		assert.match(rendered, /Edit src\/Inspector\.tsx/);
+		assert.match(rendered, /running · \d+(ms|s)/);
 	});
 
 	test("renders compact write rows with target metadata", () => {
@@ -177,8 +252,34 @@ describe("ToolExecutionComponent", () => {
 			},
 		);
 
-		assert.match(rendered, /write .*src\/output\.ts/);
+		assert.match(rendered, /Write/);
+		assert.match(rendered, /src\/output\.ts/);
 		assert.doesNotMatch(rendered, /Successfully wrote/);
+	});
+
+	test("omits default cwd placeholders for collapsed search tools", () => {
+		const rendered = renderToolCollapsed(
+			"Grep",
+			{},
+			{ content: [{ type: "text", text: "hidden body output" }], isError: false },
+		);
+
+		assert.match(rendered, /Grep/);
+		assert.doesNotMatch(rendered, /^│\.\s+│/m, `expected no placeholder cwd body:\n${rendered}`);
+		assert.match(rendered, /output hidden/);
+		assert.doesNotMatch(rendered, /hidden body output/);
+		assert.doesNotMatch(rendered, /^│\s+output hidden/m, `expected compact footer text on the top row:\n${rendered}`);
+	});
+
+	test("keeps meaningful collapsed search targets", () => {
+		const rendered = renderToolCollapsed(
+			"Grep",
+			{ pattern: "Project Initialized", path: "src/resources/extensions/gsd", glob: "*.ts" },
+			{ content: [{ type: "text", text: "hidden body output" }], isError: false },
+		);
+
+		assert.match(rendered, /Project Initialized in src\/resources\/extensions\/gsd \(\*\.ts\)/);
+		assert.doesNotMatch(rendered, /hidden body output/);
 	});
 
 	test("renders compact bash rows with command preview", () => {
@@ -188,7 +289,8 @@ describe("ToolExecutionComponent", () => {
 			{ content: [{ type: "text", text: "ok" }], isError: false, details: { cwd: "/tmp/project" } },
 		);
 
-		assert.match(rendered, /bash npm run typecheck -- --watch false/);
+		assert.match(rendered, /\$ npm run typecheck -- --watch false/);
+		assert.doesNotMatch(rendered, /├/, "collapsed command cards should not include internal divider lines");
 		assert.doesNotMatch(rendered, /\bok\b/);
 	});
 
@@ -339,7 +441,7 @@ describe("ToolExecutionComponent", () => {
 		assert.doesNotMatch(rendered, /gsd_requirement_update/);
 	});
 
-	test("formatCompactArgs truncates long string values inline instead of dumping JSON", () => {
+	test("collapsed generic running tools hide primitive args", () => {
 		const longPath = "/Users/alice/.gsd/projects/4dce7b775013/worktrees/slice-S03-some-long-path-that-exceeds-limit";
 		const rendered = renderToolCollapsed("gsd_slice_complete", {
 			sliceId: "S03",
@@ -347,9 +449,11 @@ describe("ToolExecutionComponent", () => {
 			worktree: longPath,
 		});
 
-		assert.match(rendered, /sliceId="S03"/);
-		assert.match(rendered, /milestoneId="M001"/);
-		assert.match(rendered, /worktree=".*…"/);
+		assert.match(rendered, /Slice Complete/);
+		assert.match(rendered, /running · \d+(ms|s)/);
+		assert.doesNotMatch(rendered, /sliceId="S03"/);
+		assert.doesNotMatch(rendered, /milestoneId="M001"/);
+		assert.doesNotMatch(rendered, /worktree=/);
 		assert.doesNotMatch(rendered, /"sliceId":\s*"S03"/);
 	});
 

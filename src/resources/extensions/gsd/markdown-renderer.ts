@@ -157,7 +157,12 @@ function renderRoadmapMarkdown(milestone: MilestoneRow, slices: SliceRow[]): str
   for (const slice of slices) {
     const done = isClosedStatus(slice.status) ? "x" : " ";
     const depends = `[${(slice.depends ?? []).join(",")}]`;
-    lines.push(`- [${done}] **${slice.id}: ${slice.title}** \`risk:${slice.risk}\` \`depends:${depends}\``);
+    // ADR-011: sketch slices get a `[sketch]` badge so the roadmap shows at a
+    // glance which slices are still pending refine-slice expansion. The badge
+    // sits in front of `risk:` so it's visible in narrow terminals that may
+    // truncate the line.
+    const sketchBadge = slice.is_sketch === 1 ? "`[sketch]` " : "";
+    lines.push(`- [${done}] **${slice.id}: ${slice.title}** ${sketchBadge}\`risk:${slice.risk}\` \`depends:${depends}\``);
     lines.push(`  > After this: ${slice.demo}`);
     lines.push("");
   }
@@ -920,101 +925,10 @@ export function detectStaleRenders(basePath: string): StaleEntry[] {
 }
 
 // ─── Stale Repair ─────────────────────────────────────────────────────────
-
-/**
- * Repair all stale renders detected by `detectStaleRenders()`.
- *
- * For each stale entry, calls the appropriate render function:
- * - Roadmap checkbox mismatches → renderRoadmapCheckboxes()
- * - Plan checkbox mismatches → renderPlanCheckboxes()
- * - Missing task summaries → renderTaskSummary()
- * - Missing slice summaries/UATs → renderSliceSummary()
- *
- * Idempotent: calling twice with no DB changes produces zero repairs on the second call.
- *
- * @returns the number of files repaired
- */
-export async function repairStaleRenders(basePath: string): Promise<number> {
-  const staleEntries = detectStaleRenders(basePath);
-  if (staleEntries.length === 0) return 0;
-
-  // Deduplicate: a single roadmap/plan file might appear multiple times
-  // (once per mismatched checkbox). We only need to re-render it once.
-  const repairedPaths = new Set<string>();
-  let repairCount = 0;
-
-  for (const entry of staleEntries) {
-    if (repairedPaths.has(entry.path)) continue;
-    // Normalize path separators for cross-platform regex matching
-    const normPath = entry.path.replace(/\\/g, "/");
-
-    try {
-      // Determine repair action from the reason
-      if (entry.reason.includes("in roadmap")) {
-        // Roadmap checkbox mismatch — extract milestone ID from path
-        const milestoneMatch = normPath.match(/milestones\/([^/]+)\//);
-        if (milestoneMatch) {
-          const ok = await renderRoadmapCheckboxes(basePath, milestoneMatch[1]);
-          if (ok) {
-            repairedPaths.add(entry.path);
-            repairCount++;
-          }
-        }
-      } else if (entry.reason.includes("in plan")) {
-        // Plan checkbox mismatch — extract milestone + slice IDs from path
-        const pathMatch = normPath.match(/milestones\/([^/]+)\/slices\/([^/]+)\//);
-        if (pathMatch) {
-          const ok = await renderPlanCheckboxes(basePath, pathMatch[1], pathMatch[2]);
-          if (ok) {
-            repairedPaths.add(entry.path);
-            repairCount++;
-          }
-        }
-      } else if (entry.reason.includes("SUMMARY.md missing") && entry.reason.match(/^T\d+/)) {
-        // Missing task summary — extract IDs from path
-        const pathMatch = normPath.match(/milestones\/([^/]+)\/slices\/([^/]+)\/tasks\//);
-        const taskMatch = entry.reason.match(/^(T\d+)/);
-        if (pathMatch && taskMatch) {
-          const ok = await renderTaskSummary(basePath, pathMatch[1], pathMatch[2], taskMatch[1]);
-          if (ok) {
-            repairedPaths.add(entry.path);
-            repairCount++;
-          }
-        }
-      } else if (entry.reason.includes("SUMMARY.md missing") && entry.reason.match(/^S\d+/)) {
-        // Missing slice summary — extract IDs from path
-        const pathMatch = normPath.match(/milestones\/([^/]+)\/slices\/([^/]+)\//);
-        if (pathMatch) {
-          const ok = await renderSliceSummary(basePath, pathMatch[1], pathMatch[2]);
-          if (ok) {
-            repairedPaths.add(entry.path);
-            repairCount++;
-          }
-        }
-      } else if (entry.reason.includes("UAT.md missing")) {
-        // Missing slice UAT — renderSliceSummary handles both SUMMARY + UAT
-        const pathMatch = normPath.match(/milestones\/([^/]+)\/slices\/([^/]+)\//);
-        if (pathMatch) {
-          const ok = await renderSliceSummary(basePath, pathMatch[1], pathMatch[2]);
-          if (ok) {
-            repairedPaths.add(entry.path);
-            repairCount++;
-          }
-        }
-      }
-    } catch (err) {
-      logWarning("renderer", `repair failed for ${entry.path}: ${(err as Error).message}`);
-    }
-  }
-
-  if (repairCount > 0) {
-    process.stderr.write(
-      `markdown-renderer: repaired ${repairCount} stale render(s)\n`,
-    );
-  }
-
-  return repairCount;
-}
+// Body relocated to state-reconciliation/drift/stale-render.ts (ADR-017 #5702).
+// detectStaleRenders above stays as a useful diagnostic primitive; the
+// drift handler composes it with the per-reason renderer dispatch and the
+// reconcileBeforeDispatch lifecycle.
 
 // ─── Replan & Assessment Renderers ────────────────────────────────────────
 

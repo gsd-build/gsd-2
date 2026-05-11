@@ -705,20 +705,21 @@ export function nativeAddTracked(basePath: string): void {
   gitFileExec(basePath, ["add", "-u"]);
 }
 
-function isDotGsdIgnored(basePath: string): boolean {
-  for (const path of [".gsd", ".gsd/"]) {
-    try {
-      execFileSync("git", ["check-ignore", "-q", path], {
-        cwd: basePath,
-        stdio: "pipe",
-        env: GIT_NO_PROMPT_ENV,
-      });
-      return true;
-    } catch {
-      // exit 1 means this form is not ignored; try the next variant
-    }
+export function nativeIsIgnored(basePath: string, path: string): boolean {
+  try {
+    execFileSync("git", ["check-ignore", "-q", "--", path], {
+      cwd: basePath,
+      stdio: "pipe",
+      env: GIT_NO_PROMPT_ENV,
+    });
+    return true;
+  } catch {
+    return false;
   }
-  return false;
+}
+
+function isDotGsdIgnored(basePath: string): boolean {
+  return [".gsd", ".gsd/"].some(path => nativeIsIgnored(basePath, path));
 }
 
 /**

@@ -6,6 +6,49 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.82.0] - 2026-05-10
+
+### Added
+- **tui**: refresh operations console design
+- **gsd**: show milestone completion rollup
+
+### Fixed
+- **gsd**: ignore completed-content aborts during session switch
+- **gsd-extension**: drop duplicate resolveGitDir import in merge-state.ts
+- run stuck detection during verification retries
+- complete auto timeout recovery journaling
+- skip ignored task key files during auto commit
+- defer run-unit failsafe during recovery
+- close all unit-end iteration exits
+- journal post-unit finalize stops
+- **gsd**: keep complete-slice closeout read-only
+- **gsd**: unblock CI tests on PR #5679
+- **gsd**: unblock CI typecheck on PR #5678
+- **auto**: guard ghost completions before milestone stop
+- **gsd**: gate unmerged exit telemetry on active worktrees
+- **gsd**: back off verification retries
+
+### Changed
+- **gsd-extension**: ADR-017 / strict caller closure for parallel spawns (#5707)
+- **gsd-extension**: ADR-017 / missing-completion-timestamp drift (#5706)
+- **gsd-extension**: ADR-017 / roadmap-divergence drift (#5705)
+- **gsd-extension**: ADR-017 / unregistered-milestone drift (#5704)
+- **gsd-extension**: ADR-017 / stale-worker drift detection and repair (#5703)
+- **gsd-extension**: ADR-017 / migrate stale-render drift (#5702)
+- **gsd-extension**: ADR-017 / migrate merge-state drift (#5701)
+- **gsd-extension**: ADR-017 phase 1 / sketch-flag drift pattern proof (#5700)
+- **gsd-extension**: ADR-016 phase 3 / R2 + R4 + ADR carve-outs (#5693)
+- **gsd-extension**: ADR-016 phase 2 / C4 — gitServiceFactory + final dep bag ≤6
+- **gsd-extension**: ADR-016 phase 2 / C3 — inline cache + preferences + paths
+- **gsd-extension**: ADR-016 phase 2 / C2 — inline worktree-manager helpers
+- **gsd-extension**: ADR-016 phase 2 / C1 — inline fs + git-CLI primitives
+- **gsd-extension**: ADR-016 phase 2 / B5 — route stop-path through restoreToProjectRoot
+- **gsd-extension**: ADR-016 phase 2 / B4 — adoptOrphanWorktree verb
+- **gsd-extension**: ADR-016 phase 2 / B3 — resumeFromPausedSession verb
+- **gsd-extension**: ADR-016 phase 2 / B2 — adoptSessionRoot verb
+- **gsd-extension**: ADR-016 phase 2 / A3 — privatize mergeMilestoneToMain
+- **gsd-extension**: ADR-016 phase 2 / A2 — extract mergeMilestoneStandalone
+
 ## [2.81.0] - 2026-05-09
 
 ### Added
@@ -4341,7 +4384,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - License updated to MIT
 
-[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.81.0...HEAD
+[Unreleased]: https://github.com/gsd-build/gsd-2/compare/v2.82.0...HEAD
+[2.82.0]: https://github.com/gsd-build/gsd-2/compare/v2.81.0...v2.82.0
 [2.81.0]: https://github.com/gsd-build/gsd-2/compare/v2.80.0...v2.81.0
 [2.80.0]: https://github.com/gsd-build/gsd-2/compare/v2.79.0...v2.80.0
 [2.79.0]: https://github.com/gsd-build/gsd-2/compare/v2.78.1...v2.79.0

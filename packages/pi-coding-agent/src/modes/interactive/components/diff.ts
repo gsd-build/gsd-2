@@ -1,5 +1,5 @@
 import * as Diff from "diff";
-import { theme } from "../theme/theme.js";
+import { getLanguageFromPath, highlightCode, theme } from "../theme/theme.js";
 
 /**
  * Parse diff line to extract prefix, line number, and content.
@@ -66,8 +66,13 @@ function renderIntraLineDiff(oldContent: string, newContent: string): { removedL
 }
 
 export interface RenderDiffOptions {
-	/** File path (unused, kept for API compatibility) */
+	/** File path used to choose syntax highlighting for changed content. */
 	filePath?: string;
+}
+
+function syntaxLine(content: string, lang: string | undefined): string {
+	if (!lang) return content;
+	return highlightCode(content, lang)[0] ?? content;
 }
 
 /**
@@ -76,9 +81,10 @@ export interface RenderDiffOptions {
  * - Removed lines: red, with inverse on changed tokens
  * - Added lines: green, with inverse on changed tokens
  */
-export function renderDiff(diffText: string, _options: RenderDiffOptions = {}): string {
+export function renderDiff(diffText: string, options: RenderDiffOptions = {}): string {
 	const lines = diffText.split("\n");
 	const result: string[] = [];
+	const lang = options.filePath ? getLanguageFromPath(options.filePath) : undefined;
 
 	let i = 0;
 	while (i < lines.length) {
@@ -126,19 +132,19 @@ export function renderDiff(diffText: string, _options: RenderDiffOptions = {}): 
 			} else {
 				// Show all removed lines first, then all added lines
 				for (const removed of removedLines) {
-					result.push(theme.fg("toolDiffRemoved", `-${removed.lineNum} ${replaceTabs(removed.content)}`));
+					result.push(`${theme.fg("toolDiffRemoved", `-${removed.lineNum} `)}${syntaxLine(replaceTabs(removed.content), lang)}`);
 				}
 				for (const added of addedLines) {
-					result.push(theme.fg("toolDiffAdded", `+${added.lineNum} ${replaceTabs(added.content)}`));
+					result.push(`${theme.fg("toolDiffAdded", `+${added.lineNum} `)}${syntaxLine(replaceTabs(added.content), lang)}`);
 				}
 			}
 		} else if (parsed.prefix === "+") {
 			// Standalone added line
-			result.push(theme.fg("toolDiffAdded", `+${parsed.lineNum} ${replaceTabs(parsed.content)}`));
+			result.push(`${theme.fg("toolDiffAdded", `+${parsed.lineNum} `)}${syntaxLine(replaceTabs(parsed.content), lang)}`);
 			i++;
 		} else {
 			// Context line
-			result.push(theme.fg("toolDiffContext", ` ${parsed.lineNum} ${replaceTabs(parsed.content)}`));
+			result.push(`${theme.fg("toolDiffContext", ` ${parsed.lineNum} `)}${syntaxLine(replaceTabs(parsed.content), lang)}`);
 			i++;
 		}
 	}

@@ -124,10 +124,29 @@ function applySgr(state: SgrState, paramString: string): void {
 
 function stripAnsi(line: string): string {
 	// Remove CSI sequences. Good enough for these tests.
-	return line.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+	return line
+		.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+		.replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, "");
 }
 
 describe("compositeOverlays — backdrop", () => {
+	it("positions overlays against the visible terminal when base content is short", () => {
+		const base = ["footer-like content"];
+		const overlay = makeEntry(["TOP"], {
+			width: 3,
+			anchor: "top-left",
+		});
+
+		const result = compositeOverlays(base, [overlay], 20, 10, 1);
+
+		assert.equal(result.length, 10);
+		assert.ok(stripAnsi(result[0]).startsWith("TOP"), "top overlay should render on terminal row 0");
+		assert.ok(
+			stripAnsi(result.at(-1) ?? "").includes("footer-like content"),
+			"short base content remains bottom-anchored",
+		);
+	});
+
 	it("dims base lines outside the overlay when backdrop is true", () => {
 		const base = ["hello world", "second line"];
 		const overlay = makeEntry(["OVERLAY"], {

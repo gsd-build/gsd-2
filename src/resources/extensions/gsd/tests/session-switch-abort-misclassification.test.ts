@@ -188,6 +188,30 @@ test("empty-content aborted during session-switch is silently ignored", () => {
   assert.equal(cancelledWith, null);
 });
 
+test("completed assistant content with aborted stopReason during session-switch is ignored", () => {
+  // newSession() can abort the just-finished provider stream while the last
+  // assistant message still carries the completed unit summary. That is a
+  // session-transition artifact, not a cancellation for the next unit.
+  let cancelledWith: unknown = null;
+  const resolveCancelled = (ctx: ErrorContext) => {
+    cancelledWith = ctx;
+    return true;
+  };
+
+  _handleSessionSwitchAgentEnd(
+    {
+      stopReason: "aborted",
+      content: [{
+        type: "text",
+        text: "Implemented T01 and verified the slice task is complete.",
+      }],
+    },
+    resolveCancelled,
+  );
+
+  assert.equal(cancelledWith, null);
+});
+
 test("non-abort errors during session-switch are not propagated through this helper", () => {
   // Real provider errors (rate-limit, network, unsupported-model) are handled
   // by the post-switch retry pipeline — not by the in-flight switch handler.

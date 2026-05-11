@@ -608,6 +608,32 @@ describe('git-service', async () => {
     rmSync(repo, { recursive: true, force: true });
   });
 
+  test('GitServiceImpl: task context keyFiles ignores gitignored build outputs', () => {
+    const repo = initTempRepo();
+    const svc = new GitServiceImpl(repo);
+
+    createFile(repo, ".gitignore", "dist/\n");
+    runGit(repo, ["add", ".gitignore"]);
+    runGit(repo, ["commit", "-F", "-"], { input: "ignore dist" });
+
+    createFile(repo, "src/task.ts", "export const task = true;");
+    createFile(repo, "dist/task.js", "export const task = true;");
+
+    const msg = svc.autoCommit("execute-task", "M001/S01/T01", [], {
+      taskId: "S01/T01",
+      taskTitle: "implement scoped task",
+      oneLiner: "Added scoped task implementation",
+      keyFiles: ["src/task.ts", "dist/task.js"],
+    });
+    assert.ok(msg !== null, "autoCommit should commit non-ignored key files");
+
+    const committed = run("git show --name-only --format= HEAD", repo);
+    assert.ok(committed.includes("src/task.ts"), "non-ignored key file is committed");
+    assert.ok(!committed.includes("dist/task.js"), "ignored build output is not committed");
+
+    rmSync(repo, { recursive: true, force: true });
+  });
+
   // ─── GitServiceImpl: empty-after-staging guard ─────────────────────────
 
   test('GitServiceImpl: empty-after-staging guard', () => {

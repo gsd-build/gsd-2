@@ -95,6 +95,16 @@ When approaching the budget ceiling, the router progressively downgrades:
 
 When enabled, the router may select models from providers other than your primary. This uses the built-in cost table to find the cheapest model at each tier. Requires the target provider to be configured.
 
+### Cross-provider telemetry
+
+When cross-provider routing replays an existing conversation into a model with a different provider API, GSD records any context transformations reported by `@gsd/pi-ai`'s `ProviderSwitchReport`. Non-empty reports are visible as:
+
+- A warning notification summarizing the provider switch and transformation counts.
+- A UOK audit event during auto-mode traces with `category: "model-policy"` and `type: "provider-switch"`.
+- Process-local provider switch stats exposed to internal dashboards, doctor checks, and tests through `getProviderSwitchStats()`.
+
+The report tracks the source and target APIs plus counts for dropped or downgraded thinking blocks, remapped tool call IDs, synthetic tool results, and dropped thought signatures. Set `GSD_VERBOSE=1` or `PI_VERBOSE=1` to also print provider-switch summaries to stderr.
+
 ### `capability_routing`
 
 When enabled (default: true), the router uses capability scoring to pick the best model in a tier rather than always defaulting to the cheapest. Set to `false` to revert to cheapest-in-tier behavior:

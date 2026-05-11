@@ -322,7 +322,7 @@ export function getRequiredWorkflowToolsForGuidedUnit(unitType: string): string[
     case "execute-task":
       return ["gsd_task_complete"];
     case "complete-slice":
-      return ["gsd_slice_complete"];
+      return ["gsd_slice_complete", "gsd_task_reopen", "gsd_replan_slice"];
     default:
       return [];
   }
@@ -351,7 +351,7 @@ export function getRequiredWorkflowToolsForAutoUnit(unitType: string): string[] 
     case "reactive-execute":
       return ["gsd_task_complete"];
     case "complete-slice":
-      return ["gsd_slice_complete"];
+      return ["gsd_slice_complete", "gsd_task_reopen", "gsd_replan_slice"];
     case "replan-slice":
       return ["gsd_replan_slice"];
     case "reassess-roadmap":

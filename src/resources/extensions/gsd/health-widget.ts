@@ -1,12 +1,5 @@
-/**
- * GSD Health Widget — always-on ambient health signal rendered belowEditor.
- *
- * Shows a compact 1-2 line summary: progress score, budget, provider key
- * status, and doctor/environment issue count. Refreshes every 60 seconds.
- * Quiet when everything is healthy; turns amber/red when issues arise.
- *
- * Widget key: "gsd-health", placement: "belowEditor"
- */
+// Project/App: GSD-2
+// File Purpose: Always-on ambient health signal rendered below the editor.
 
 import type { ExtensionContext } from "@gsd/pi-coding-agent";
 import type { GSDState } from "./types.js";
@@ -23,6 +16,9 @@ import {
   detectHealthWidgetProjectState,
   type HealthWidgetData,
 } from "./health-widget-core.js";
+
+export const HEALTH_WIDGET_ACTIVE_HINTS =
+  "  /gsd auto to run  ·  /gsd status for overview  ·  /gsd visualize to inspect  ·  /gsd notifications for history  ·  /gsd help";
 
 // ── Data loader ────────────────────────────────────────────────────────────────
 
@@ -136,7 +132,7 @@ export function initHealthWidget(ctx: ExtensionContext): void {
         if (!cachedLines || cachedWidth !== width) {
           cachedLines = buildHealthLines(data, width);
           if (data.projectState === "active") {
-            cachedLines = [...cachedLines, _theme.fg("dim", "  /gsd auto to run  ·  /gsd status for overview  ·  /gsd help")];
+            cachedLines = [...cachedLines, _theme.fg("dim", HEALTH_WIDGET_ACTIVE_HINTS)];
           }
           cachedWidth = width;
         }

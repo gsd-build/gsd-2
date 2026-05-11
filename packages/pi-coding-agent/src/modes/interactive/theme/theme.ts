@@ -878,13 +878,118 @@ function getHighlightColors(t: Theme): HighlightColors {
 	return cachedHighlightColors;
 }
 
+const LIGHTWEIGHT_KEYWORDS = new Set([
+	"as",
+	"async",
+	"await",
+	"break",
+	"case",
+	"catch",
+	"class",
+	"const",
+	"continue",
+	"default",
+	"def",
+	"else",
+	"enum",
+	"export",
+	"extends",
+	"false",
+	"fn",
+	"for",
+	"from",
+	"function",
+	"if",
+	"import",
+	"in",
+	"interface",
+	"let",
+	"match",
+	"new",
+	"null",
+	"return",
+	"struct",
+	"switch",
+	"throw",
+	"true",
+	"try",
+	"type",
+	"undefined",
+	"use",
+	"var",
+	"while",
+]);
+
+function lightweightHighlightLine(line: string): string {
+	let out = "";
+	let i = 0;
+	while (i < line.length) {
+		const ch = line[i];
+		const next = line[i + 1];
+		if (ch === "/" && next === "/") {
+			out += theme.fg("syntaxComment", line.slice(i));
+			break;
+		}
+		if (ch === "#") {
+			out += theme.fg("syntaxComment", line.slice(i));
+			break;
+		}
+		if (ch === '"' || ch === "'" || ch === "`") {
+			const quote = ch;
+			let j = i + 1;
+			while (j < line.length) {
+				if (line[j] === "\\") {
+					if (j + 1 >= line.length) {
+						j = line.length;
+						break;
+					}
+					j += 2;
+					continue;
+				}
+				if (line[j] === quote) {
+					j++;
+					break;
+				}
+				j++;
+			}
+			out += theme.fg("syntaxString", line.slice(i, j));
+			i = j;
+			continue;
+		}
+		if (/[A-Za-z_$]/.test(ch ?? "")) {
+			let j = i + 1;
+			while (j < line.length && /[A-Za-z0-9_$]/.test(line[j] ?? "")) j++;
+			const word = line.slice(i, j);
+			out += LIGHTWEIGHT_KEYWORDS.has(word)
+				? theme.fg("syntaxKeyword", word)
+				: word;
+			i = j;
+			continue;
+		}
+		if (/\d/.test(ch ?? "")) {
+			let j = i + 1;
+			while (j < line.length && /[\d._]/.test(line[j] ?? "")) j++;
+			out += theme.fg("syntaxNumber", line.slice(i, j));
+			i = j;
+			continue;
+		}
+		out += ch;
+		i++;
+	}
+	return out;
+}
+
+function lightweightHighlightCode(code: string): string[] {
+	return code.split("\n").map(lightweightHighlightLine);
+}
+
 /**
  * Highlight code with syntax coloring based on file extension or language.
  * Returns array of highlighted lines.
  */
 export function highlightCode(code: string, lang?: string): string[] {
 	if (!NATIVE_TUI_HIGHLIGHT_ENABLED) {
-		return code.split("\n");
+		return lang ? lightweightHighlightCode(code) : code.split("\n");
 	}
 
 	const validLang = lang && supportsLanguage(lang) ? lang : null;

@@ -1,3 +1,5 @@
+// GSD-2 doctor git health checks
+import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 
@@ -50,6 +52,26 @@ function isSameOrNestedPath(candidate: string, container: string): boolean {
   const normalizedContainer = normalizePathForComparison(container);
   return normalizedCandidate === normalizedContainer ||
     normalizedCandidate.startsWith(`${normalizedContainer}/`);
+}
+
+function getSnapshotDiffCheckFailure(basePath: string): string | null {
+  const failures: string[] = [];
+
+  for (const args of [["--cached"], []]) {
+    const result = spawnSync("git", ["diff", "--check", ...args], {
+      cwd: basePath,
+      encoding: "utf-8",
+    });
+    if (result.status === 0) continue;
+
+    const output = [result.stdout, result.stderr, result.error?.message]
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+    failures.push(output || `git diff --check ${args.join(" ")} failed`);
+  }
+
+  return failures.length > 0 ? failures.join("\n") : null;
 }
 
 async function isCompletedMilestoneTerminal(basePath: string, milestoneId: string): Promise<boolean> {
@@ -411,15 +433,31 @@ export async function checkGitHealth(
             fixable: true,
           });
 
+          const diffCheckFailure = getSnapshotDiffCheckFailure(basePath);
+          if (diffCheckFailure) {
+            issues.push({
+              severity: "error",
+              code: "conflict_markers_in_tracked_files",
+              scope: "project",
+              unitId: "project",
+              message: `Cannot create gsd snapshot: tracked changes contain conflict markers or whitespace errors. Resolve conflicts manually before auto-mode can proceed.\n${diffCheckFailure}`,
+              fixable: false,
+            });
+          }
+
           if (shouldFix("stale_uncommitted_changes")) {
             try {
-              nativeAddTracked(basePath);
-              const commitMsg = `gsd snapshot: uncommitted changes after ${mins}m inactivity`;
-              const result = nativeCommit(basePath, commitMsg);
-              if (result) {
-                fixesApplied.push(`created gsd snapshot after ${mins}m of uncommitted changes`);
+              if (diffCheckFailure) {
+                fixesApplied.push("gsd snapshot skipped - conflict markers detected in tracked files");
               } else {
-                fixesApplied.push("gsd snapshot skipped — nothing to commit after staging tracked files");
+                nativeAddTracked(basePath);
+                const commitMsg = `gsd snapshot: uncommitted changes after ${mins}m inactivity`;
+                const result = nativeCommit(basePath, commitMsg);
+                if (result) {
+                  fixesApplied.push(`created gsd snapshot after ${mins}m of uncommitted changes`);
+                } else {
+                  fixesApplied.push("gsd snapshot skipped — nothing to commit after staging tracked files");
+                }
               }
             } catch {
               fixesApplied.push("failed to create gsd snapshot commit");

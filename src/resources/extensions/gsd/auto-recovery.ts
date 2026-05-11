@@ -7,7 +7,6 @@
  * globals or AutoContext dependency.
  */
 
-import type { ExtensionContext } from "@gsd/pi-coding-agent";
 import { parseUnitId } from "./unit-id.js";
 import { MILESTONE_ID_RE } from "./milestone-ids.js";
 import { appendEvent } from "./workflow-events.js";
@@ -20,15 +19,6 @@ import { getErrorMessage } from "./error-utils.js";
 import { logWarning, logError } from "./workflow-logger.js";
 import { readIntegrationBranch } from "./git-service.js";
 import { isClosedStatus } from "./status-guards.js";
-import {
-  nativeConflictFiles,
-  nativeCommit,
-  nativeCheckoutTheirs,
-  nativeAddPaths,
-  nativeMergeAbort,
-  nativeRebaseAbort,
-  nativeResetHard,
-} from "./native-git-bridge.js";
 import {
   resolveSlicePath,
   resolveSliceFile,
@@ -46,7 +36,6 @@ import {
   mkdirSync,
   readFileSync,
   writeFileSync,
-  unlinkSync,
 } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
@@ -1001,205 +990,14 @@ export function writeBlockerPlaceholder(
 }
 
 // ─── Merge State Reconciliation ───────────────────────────────────────────────
+// Body relocated to state-reconciliation/drift/merge-state.ts (ADR-017 #5701).
+// Re-exported here for backward compatibility with existing call sites:
+// auto.ts, auto/loop-deps.ts, tests/integration/auto-recovery.test.ts.
 
-/**
- * Best-effort abort of a pending merge/squash and hard-reset to HEAD.
- * Handles both real merges (MERGE_HEAD) and squash merges (SQUASH_MSG).
- */
-function abortAndResetMerge(
-  basePath: string,
-  hasMergeHead: boolean,
-  squashMsgPath: string,
-): void {
-  if (hasMergeHead) {
-    try {
-      nativeMergeAbort(basePath);
-    } catch (err) {
-      /* best-effort */
-      logWarning("recovery", `git merge-abort failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  } else if (squashMsgPath) {
-    try {
-      unlinkSync(squashMsgPath);
-    } catch (err) {
-      /* best-effort */
-      logWarning("recovery", `file unlink failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-  try {
-    nativeResetHard(basePath);
-  } catch (err) {
-    /* best-effort */
-    logError("recovery", `git reset failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-export type MergeReconcileResult = "clean" | "reconciled" | "blocked";
-
-/**
- * Detect and abort other in-progress git operations left behind by a SIGKILL'd
- * worker (rebase, cherry-pick, revert). Without this, a killed worker mid-rebase
- * leaves `.git/rebase-merge/` or `.git/CHERRY_PICK_HEAD` and the worktree is
- * wedged until the user manually runs the matching `--abort`.
- *
- * Called before merge-state reconciliation because these states block any
- * subsequent merge/commit operation. (Issue #4980 HIGH-7)
- */
-function reconcileOtherInProgressGitOps(
-  basePath: string,
-  ctx: ExtensionContext,
-): "clean" | "reconciled" | "blocked" {
-  const gitDir = join(basePath, ".git");
-  const states: Array<{
-    label: string;
-    indicators: string[];
-    abort: () => void;
-  }> = [
-    {
-      label: "rebase",
-      indicators: [join(gitDir, "rebase-merge"), join(gitDir, "rebase-apply")],
-      abort: () => nativeRebaseAbort(basePath),
-    },
-    {
-      label: "cherry-pick",
-      indicators: [join(gitDir, "CHERRY_PICK_HEAD")],
-      abort: () => {
-        // No native helper; fall back to git CLI.
-        try {
-          execFileSync("git", ["cherry-pick", "--abort"], {
-            cwd: basePath, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8",
-          });
-        } catch (err) { logWarning("recovery", `cherry-pick --abort failed: ${getErrorMessage(err)}`); }
-      },
-    },
-    {
-      label: "revert",
-      indicators: [join(gitDir, "REVERT_HEAD")],
-      abort: () => {
-        try {
-          execFileSync("git", ["revert", "--abort"], {
-            cwd: basePath, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8",
-          });
-        } catch (err) { logWarning("recovery", `revert --abort failed: ${getErrorMessage(err)}`); }
-      },
-    },
-  ];
-
-  let reconciled = false;
-  for (const s of states) {
-    const present = s.indicators.some((p) => existsSync(p));
-    if (!present) continue;
-    try {
-      s.abort();
-      ctx.ui.notify(
-        `Detected leftover ${s.label} state from prior session — aborted.`,
-        "warning",
-      );
-      reconciled = true;
-    } catch (err) {
-      logError("recovery", `${s.label} abort failed: ${getErrorMessage(err)}`);
-      ctx.ui.notify(
-        `Detected leftover ${s.label} state but auto-abort failed. ` +
-        `Run \`git ${s.label} --abort\` manually before retrying.`,
-        "error",
-      );
-      return "blocked";
-    }
-  }
-  return reconciled ? "reconciled" : "clean";
-}
-
-/**
- * Detect leftover merge state from a prior session and reconcile it.
- * If MERGE_HEAD or SQUASH_MSG exists, check whether conflicts are resolved.
- * If resolved: finalize the commit. If only .gsd conflicts remain: auto-resolve.
- * If code conflicts remain: fail safe without modifying the worktree.
- */
-export function reconcileMergeState(
-  basePath: string,
-  ctx: ExtensionContext,
-): MergeReconcileResult {
-  // First, abort any rebase/cherry-pick/revert left over from a SIGKILL'd
-  // worker. Doing this before the merge-state check unblocks any merge that
-  // would otherwise refuse with "you have unfinished operation". (HIGH-7)
-  const otherOpsResult = reconcileOtherInProgressGitOps(basePath, ctx);
-  if (otherOpsResult === "blocked") return "blocked";
-
-  const mergeHeadPath = join(basePath, ".git", "MERGE_HEAD");
-  const squashMsgPath = join(basePath, ".git", "SQUASH_MSG");
-  const hasMergeHead = existsSync(mergeHeadPath);
-  const hasSquashMsg = existsSync(squashMsgPath);
-  if (!hasMergeHead && !hasSquashMsg) {
-    // If we cleaned up another op type, return "reconciled" so the caller
-    // re-derives state from a known-good baseline.
-    return otherOpsResult === "reconciled" ? "reconciled" : "clean";
-  }
-
-  const conflictedFiles = nativeConflictFiles(basePath);
-  if (conflictedFiles.length === 0) {
-    // All conflicts resolved — finalize the merge/squash commit
-    try {
-      const commitSha = nativeCommit(basePath, "chore(gsd): reconcile merge state");
-      if (commitSha) {
-        const mode = hasMergeHead ? "merge" : "squash commit";
-        ctx.ui.notify(`Finalized leftover ${mode} from prior session.`, "info");
-      } else {
-        ctx.ui.notify("No new commit needed for leftover merge/squash state — already committed.", "info");
-      }
-    } catch (err) {
-      const errorMessage = getErrorMessage(err);
-      ctx.ui.notify(`Failed to finalize leftover merge/squash commit: ${errorMessage}`, "error");
-      return "blocked";
-    }
-  } else {
-    // Still conflicted — try auto-resolving .gsd/ state file conflicts (#530)
-    const gsdConflicts = conflictedFiles.filter((f) => f.startsWith(".gsd/"));
-    const codeConflicts = conflictedFiles.filter((f) => !f.startsWith(".gsd/"));
-
-    if (gsdConflicts.length > 0 && codeConflicts.length === 0) {
-      // All conflicts are in .gsd/ state files — auto-resolve by accepting theirs
-      let resolved = true;
-      try {
-        nativeCheckoutTheirs(basePath, gsdConflicts);
-        nativeAddPaths(basePath, gsdConflicts);
-      } catch (e) {
-        logError("recovery", `auto-resolve .gsd/ conflicts failed: ${(e as Error).message}`);
-        resolved = false;
-      }
-      if (resolved) {
-        try {
-          nativeCommit(
-            basePath,
-            "chore: auto-resolve .gsd/ state file conflicts",
-          );
-          ctx.ui.notify(
-            `Auto-resolved ${gsdConflicts.length} .gsd/ state file conflict(s) from prior merge.`,
-            "info",
-          );
-        } catch (e) {
-          logError("recovery", `auto-commit .gsd/ conflict resolution failed: ${(e as Error).message}`);
-          resolved = false;
-        }
-      }
-      if (!resolved) {
-        abortAndResetMerge(basePath, hasMergeHead, squashMsgPath);
-        ctx.ui.notify(
-          "Detected leftover merge state — auto-resolve failed, cleaned up. Re-deriving state.",
-          "warning",
-        );
-      }
-    } else {
-      // Code conflicts present — fail safe and preserve any manual resolution
-      // work instead of discarding it with merge --abort/reset --hard.
-      ctx.ui.notify(
-        "Detected leftover merge state with unresolved code conflicts. Auto-mode will pause without modifying the worktree so manual conflict resolution is preserved.",
-        "error",
-      );
-      return "blocked";
-    }
-  }
-  return "reconciled";
-}
+export {
+  reconcileMergeState,
+  type MergeReconcileResult,
+} from "./state-reconciliation/drift/merge-state.js";
 
 // ─── Loop Remediation ─────────────────────────────────────────────────────────
 

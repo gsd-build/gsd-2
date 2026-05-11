@@ -34,7 +34,27 @@ Introduce a provider capability registry and tool compatibility layer that integ
 1. **Phase 1:** Provider Capabilities Registry (`packages/pi-ai/src/providers/provider-capabilities.ts`)
 2. **Phase 2:** Tool Compatibility Metadata (extend `ToolDefinition` with `compatibility` field)
 3. **Phase 3:** Tool-compatibility filter in routing pipeline + `ProviderSwitchReport` in `transform-messages.ts`
-4. **Phase 4:** `adjustToolSet` extension hook
+4. **Phase 3b:** Export `ProviderSwitchObserver` / `setProviderSwitchObserver` from `@gsd/pi-ai` and install a GSD observer that surfaces non-empty provider-switch reports as audit events, notifications, and in-memory stats.
+5. **Phase 4:** `adjustToolSet` extension hook
+
+### Provider Switch Visibility
+
+`packages/pi-ai/src/providers/transform-messages.ts` produces a `ProviderSwitchReport` whenever replaying conversation history into a different provider requires context transformations. The report includes:
+
+- `fromApi` / `toApi`
+- `thinkingBlocksDropped`
+- `thinkingBlocksDowngraded`
+- `toolCallIdsRemapped`
+- `syntheticToolResultsInserted`
+- `thoughtSignaturesDropped`
+
+`@gsd/pi-ai` exports `ProviderSwitchReport`, `ProviderSwitchObserver`, and `setProviderSwitchObserver(observer)`. The observer is single-subscriber by design; pass `undefined` to clear it. Observers receive only non-empty reports and are invoked synchronously after verbose stderr logging, with observer errors swallowed so telemetry cannot break model streaming.
+
+GSD installs its observer during bootstrap. Each non-empty report is surfaced in three places:
+
+- A UOK audit event when auto-mode trace context is active: `category: "model-policy"`, `type: "provider-switch"`, with the report fields in `payload`.
+- A warning notification via the notification store, so provider-switch context loss is visible without `GSD_VERBOSE=1`.
+- Process-local rollup stats from `getProviderSwitchStats()` in `src/resources/extensions/gsd/provider-switch-observer.ts`, including totals, per-trace buckets, the last report, and timestamps.
 
 ## Consequences
 

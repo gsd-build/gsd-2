@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Tests for /gsd notifications command handling and overlay launch behavior.
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
@@ -56,6 +59,47 @@ test("notifications command falls back to text output when overlay returns undef
 
   assert.equal(notices.length, 1, "text fallback should be emitted when overlay cannot render");
   assert.match(notices[0].message, /Recent notifications:/);
+});
+
+test("notifications command opens a compact bounded overlay", async (t) => {
+  const base = makeTempDir("overlay-options");
+  initNotificationStore(base);
+  appendNotification("Build complete", "success");
+
+  t.after(() => {
+    _resetNotificationStore();
+    cleanup(base);
+  });
+
+  const notices: Array<{ message: string; level?: string }> = [];
+  let capturedOptions: any;
+  await handleNotificationsCommand(
+    "",
+    {
+      hasUI: true,
+      ui: {
+        custom: async (_factory: any, options: any) => {
+          capturedOptions = options;
+          return true;
+        },
+        notify: (message: string, level?: string) => {
+          notices.push({ message, level });
+        },
+      },
+    } as any,
+    {} as any,
+  );
+
+  assert.deepEqual(capturedOptions?.overlayOptions, {
+    width: "58%",
+    minWidth: 68,
+    maxHeight: "52%",
+    anchor: "top-center",
+    row: "24%",
+    margin: { top: 2, right: 2, bottom: 6, left: 2 },
+    backdrop: true,
+  });
+  assert.equal(notices.length, 0, "successful overlay should not emit text fallback");
 });
 
 test("notifications tail caps inline output and hints to open overlay", async (t) => {

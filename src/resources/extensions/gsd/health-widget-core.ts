@@ -70,7 +70,7 @@ export function buildHealthLines(data: HealthWidgetData, width?: number): string
   }
 
   if (data.projectState === "initialized") {
-    return ["  GSD  Project initialized — run /gsd to continue setup"];
+    return ["  GSD  Project Initialized"];
   }
 
   const leftParts: string[] = [];

@@ -21,6 +21,23 @@ export interface ProviderSwitchReport {
 	thoughtSignaturesDropped: number;
 }
 
+/** Observer invoked once per non-empty cross-provider transform (ADR-005). */
+export type ProviderSwitchObserver = (report: ProviderSwitchReport) => void;
+
+let providerSwitchObserver: ProviderSwitchObserver | undefined;
+
+/**
+ * Register a single observer that receives every non-empty ProviderSwitchReport
+ * produced by `transformMessagesWithReport`. Pass `undefined` to clear.
+ *
+ * Single-subscriber by design — one host (GSD) owns telemetry. The observer
+ * runs synchronously after the verbose-stderr log; errors are swallowed so a
+ * misbehaving observer cannot break a stream.
+ */
+export function setProviderSwitchObserver(observer: ProviderSwitchObserver | undefined): void {
+	providerSwitchObserver = observer;
+}
+
 /**
  * Create an empty provider switch report.
  */
@@ -63,6 +80,13 @@ export function transformMessagesWithReport<TApi extends Api>(
 	const result = transformMessages(messages, model, normalizeToolCallId, report);
 	if (hasTransformations(report)) {
 		logProviderSwitchReport(report);
+		if (providerSwitchObserver) {
+			try {
+				providerSwitchObserver(report);
+			} catch {
+				// Observer must not break the stream.
+			}
+		}
 	}
 	return result;
 }

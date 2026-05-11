@@ -2,10 +2,31 @@
 
 # ADR-013: Memory Store Consolidation
 
-**Status:** Accepted
+**Status:** Accepted (mostly implemented — Phase 6 preflight/cutover outstanding)
 **Date:** 2026-04-19
+**Implemented:** 2026-04 to 2026-05 (Phases 0–5; Phase 6 preflight/cutover tracked on #5751 / #5755 / #5756)
 **Author:** Jeremy (@jeremymcs)
 **Related:** PR #4469 (memory tools Phase 1), commits f4bd65a8 / 59e1f830 / 03f77f36 / 9d9ccfe8 / fc6c93c2 (Phase 2-5), Issue #4495, PR #4496
+
+## Implementation status
+
+| Phase | Scope | Status | Evidence |
+|---|---|---|---|
+| 0 | ADR document | ✅ | This file |
+| 1 | `structuredFields` JSON column on `memories` table | ✅ | Schema present in `src/resources/extensions/gsd/gsd-db.ts` (memories table definition) |
+| 2 | Register `capture_thought`, `memory_query`, `gsd_graph` | ✅ | `src/resources/extensions/gsd/bootstrap/memory-tools.ts` |
+| 3 | Auto-injection of relevant memories at session start | ✅ | `src/resources/extensions/gsd/bootstrap/system-context.ts:213,329` — `loadMemoryBlock` (covered by `src/resources/extensions/gsd/tests/load-memory-block.test.ts`) |
+| 4a | Researcher agent frontmatter updated to include write-capable memory tools (`capture_thought`, `memory_query`, `gsd_graph`) | ✅ | `src/resources/agents/researcher.md:4` |
+| 4b | Scout agent frontmatter intentionally kept read-only — memory tools excluded per scope | ✅ | `src/resources/agents/scout.md:4` (no change; read-only contract preserved) |
+| 5 | Idempotent `decisions → memories` backfill on session start | ✅ | `src/resources/extensions/gsd/memory-backfill.ts` — `backfillDecisionsToMemories`; wired from `system-context.ts:159` |
+| 6 preflight | Cutover gap scanner (read-only, warns on unmigrated rows) | ⏳ | Outstanding — tracked on #5751 / PR #5765. No scanner module is present in this branch. |
+| 6 cutover | Stop dual-write, memories canonical, `decisions` table read-only | ⏳ | Outstanding — tracked on #5755. Destructive; blocked on scanner reading clean. |
+| 6 drop | Schema migration to drop `decisions` table | ⏳ | Outstanding — tracked on #5756. Blocked on #5755 baking for one minor version. |
+
+### Outstanding work
+
+- **#5755** (HITL, destructive) — stop dual-write of decisions / KNOWLEDGE.md, make `memories` the sole write surface, projections regenerate from `memories`
+- **#5756** (AFK, gated) — drop the `decisions` table; remove the read fallback. Blocked on #5755 baking
 
 ## Context
 
@@ -55,6 +76,7 @@ Step 6 may land only when **all** of the following are observable on `feat/memor
 
 - Step 4 auto-injection produces a memory block measurably similar in coverage to the current KNOWLEDGE.md inline injection on at least three real GSD projects (manual spot check).
 - Step 5 backfill is idempotent (rerunnable with no diff) on at least one real `.gsd/gsd.db` that contains historical decisions.
+- The ADR-013 Phase 6 preflight scanner reports zero consolidation gaps at startup and through `/gsd doctor`: active `decisions` rows must have matching `memories.structured_fields.sourceDecisionId` markers, and migrated `KNOWLEDGE.md` rows must have matching `sourceKnowledgeId` markers.
 - MCP `capture_thought` and `memory_query` calls succeed end-to-end from a non-CLI client (studio or vscode integration test).
 - No regression test in `src/resources/extensions/gsd/tests/` is silenced or removed without an explicit rationale comment in the diff.
 - A two-week dual-write bake period elapses with no in-flight project reporting lost decisions or knowledge entries.
@@ -82,6 +104,7 @@ If step 6 must be rolled back after the `decisions` table is dropped, a forward 
 ### Caveats
 
 - KNOWLEDGE.md and DECISIONS.md become projections. Manual edits are already overwritten today (DECISIONS.md is DB-projected) — the change extends that contract to KNOWLEDGE.md, which currently accepts manual appends. Anyone hand-editing KNOWLEDGE.md after step 6 will see their changes discarded on the next render. The migration commits include a one-time scan that warns if any KNOWLEDGE.md row in the working tree has no corresponding `memories` row at cutover time.
+- Before cutover, GSD runs a read-only consolidation scanner on startup. A warning such as `Memory consolidation: ... not yet in memories table` means the project still has legacy knowledge rows that have not been proven migrated; run `/gsd doctor` for counts and samples, then complete the decisions or KNOWLEDGE.md backfill before attempting cutover.
 - `category` enum is fixed at six values (`architecture | convention | gotcha | pattern | preference | environment`). Adding a seventh requires a schema change. The current set is adequate for the migration; future categories are out of scope for this ADR.
 - The `structuredFields` blob is intentionally schemaless inside the JSON. Schema for `architecture`-category memories is documented in step 2's commit; future categories may grow their own structured shapes.
 

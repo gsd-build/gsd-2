@@ -242,6 +242,24 @@ test('planning-dispatch: blocks recon agent under closeout policy', () => {
   assert.doesNotMatch(r.reason!, /read-only specialists/);
 });
 
+test('complete-slice closeout policy blocks edits to user source', () => {
+  const r = shouldBlockPlanningUnit('edit', join(BASE, 'src', 'main.ts'), BASE, 'complete-slice', PLANNING_DISPATCH_REVIEW);
+  assert.strictEqual(r.block, true);
+  assert.match(r.reason!, /complete-slice/);
+  assert.match(r.reason!, /writes are restricted to \.gsd/);
+});
+
+test('complete-slice closeout policy blocks non-allowlisted verification bash', () => {
+  const r = shouldBlockPlanningUnit('bash', 'go test ./...', BASE, 'complete-slice', PLANNING_DISPATCH_REVIEW);
+  assert.strictEqual(r.block, true);
+  assert.match(r.reason!, /bash is restricted/);
+});
+
+test('complete-slice closeout policy allows gsd_exec verification surface', () => {
+  const r = shouldBlockPlanningUnit('gsd_exec', '', BASE, 'complete-slice', PLANNING_DISPATCH_REVIEW);
+  assert.strictEqual(r.block, false);
+});
+
 test('planning-dispatch: still blocks writes to user source (write isolation preserved)', () => {
   const r = shouldBlockPlanningUnit('write', join(BASE, 'src', 'main.ts'), BASE, 'plan-slice', PLANNING_DISPATCH);
   assert.strictEqual(r.block, true);

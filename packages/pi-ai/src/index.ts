@@ -11,8 +11,13 @@ export {
 export * from "./providers/api-family.js";
 export * from "./providers/provider-capabilities.js";
 export * from "./providers/register-builtins.js";
-export type { ProviderSwitchReport } from "./providers/transform-messages.js";
-export { createEmptyReport, hasTransformations, transformMessagesWithReport } from "./providers/transform-messages.js";
+export type { ProviderSwitchObserver, ProviderSwitchReport } from "./providers/transform-messages.js";
+export {
+	createEmptyReport,
+	hasTransformations,
+	setProviderSwitchObserver,
+	transformMessagesWithReport,
+} from "./providers/transform-messages.js";
 export * from "./stream.js";
 export * from "./types.js";
 export * from "./utils/event-stream.js";

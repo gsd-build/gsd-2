@@ -145,42 +145,28 @@ export interface WorktreeLifecycleDeps {
   //               getIsolationMode, resolveMilestoneFile
   //   C4 (#5627): GitServiceImpl constructor → gitServiceFactory above
   //
-  // Final dep bag: 3 fields (gitServiceFactory, worktreeProjection,
-  // mergeMilestoneToMain). The ADR's envisioned shape was ≤6.
-
-  /**
-   * @deprecated Compatibility-only fields for legacy WorktreeResolver test
-   * fixtures. Lifecycle ignores these at runtime because the corresponding
-   * primitives are now direct imports.
-   */
-  isInAutoWorktree?: (basePath: string) => boolean;
-  getIsolationMode?: (basePath?: string) => string;
-  teardownAutoWorktree?: (
-    basePath: string,
-    milestoneId: string,
-    opts?: { preserveBranch?: boolean },
-  ) => void;
-  createAutoWorktree?: (basePath: string, milestoneId: string) => string;
-  enterAutoWorktree?: (basePath: string, milestoneId: string) => string;
-  enterBranchModeForMilestone?: (basePath: string, milestoneId: string) => void;
-  getAutoWorktreePath?: (basePath: string, milestoneId: string) => string | null;
-  autoCommitCurrentBranch?: (
-    basePath: string,
-    reason: string,
-    milestoneId: string,
-  ) => void;
-  getCurrentBranch?: (basePath: string) => string;
-  checkoutBranch?: (basePath: string, branch: string) => void;
-  autoWorktreeBranch?: (milestoneId: string) => string;
-  resolveMilestoneFile?: (
-    basePath: string,
-    milestoneId: string,
-    fileType: string,
-  ) => string | null;
-  readFileSync?: (path: string, encoding: BufferEncoding) => string;
-  loadEffectiveGSDPreferences?: (basePath?: string) => unknown;
-  invalidateAllCaches?: () => void;
+  // ADR-016 phase 3 (#5693) deleted the @deprecated optional fields that
+  // remained on this Interface for legacy test fixtures. Tests that need to
+  // substitute primitive implementations cast their deps to
+  // `WorktreeLifecycleTestOverrides` (exported below) — the test seam now
+  // lives outside the public Interface.
+  //
+  // Final dep bag: 3 fields. The ADR's envisioned shape was ≤6.
 }
+
+/**
+ * Test-only override shim. Production callers do not use this type — it
+ * exists so legacy test fixtures can substitute the primitive implementations
+ * that were inlined into Lifecycle in ADR-016 phase 2 (C1-C4). Pass an object
+ * typed `WorktreeLifecycleDeps & WorktreeLifecycleTestOverrides` to the
+ * `WorktreeLifecycle` constructor; Lifecycle reads the overrides through the
+ * structural-typing escape hatch in `primitiveOverrides()`.
+ *
+ * The fields here intentionally duplicate the C1-C4-inlined primitive
+ * signatures. Adding new fields is fine when a test needs to vary a primitive
+ * that has no other seam.
+ */
+export type WorktreeLifecycleTestOverrides = WorktreeLifecyclePrimitiveOverrides;
 
 /**
  * Internal sentinel — thrown by `_mergeBranchMode` when it has already

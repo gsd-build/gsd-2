@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { visibleWidth } from "@gsd/pi-tui";
 
 import { setCompletionProgressWidget, updateProgressWidget } from "../auto-dashboard.ts";
 import type { GSDState } from "../types.ts";
@@ -45,6 +46,15 @@ const baseAccessors = {
   isSessionSwitching: () => false,
   getCurrentDispatchedModelId: () => null,
 };
+
+function assertLinesFit(lines: string[], width: number): void {
+  for (const line of lines) {
+    assert.ok(
+      visibleWidth(line) <= width,
+      `line exceeds width ${width}: ${visibleWidth(line)} "${line}"`,
+    );
+  }
+}
 
 // ── Header lifecycle ────────────────────────────────────────────────────
 
@@ -205,6 +215,47 @@ test("auto-dashboard widget render output omits Ctrl+N guidance when isStepMode 
 
   const hasStepHint = lines.some((line: string) => line.includes("Ctrl+N to advance"));
   assert.equal(hasStepHint, false, "step-mode hint must NOT appear when isStepMode is false");
+
+  if (component.dispose) component.dispose();
+});
+
+test("auto-dashboard widget render output fits common terminal widths", (t) => {
+  const dir = makeTempDir("width-safe");
+  mkdirSync(join(dir, ".gsd"), { recursive: true });
+  t.after(() => cleanup(dir));
+
+  let widgetFactory: ((tui: unknown, theme: unknown) => any) | undefined;
+
+  updateProgressWidget(
+    {
+      hasUI: true,
+      ui: {
+        setWidget(_key: string, factory: any) { widgetFactory = factory; },
+        setHeader() {},
+        setStatus() {},
+      },
+    } as any,
+    "execute-task",
+    "M001/S01/T01",
+    baseState,
+    { ...baseAccessors, getBasePath: () => dir },
+  );
+
+  assert.ok(widgetFactory);
+
+  const component = widgetFactory!(
+    { requestRender() {} },
+    {
+      fg: (_color: string, text: string) => text,
+      bold: (text: string) => text,
+    },
+  );
+  t.after(() => component.dispose?.());
+
+  for (const width of [40, 80, 120]) {
+    assertLinesFit(component.render(width), width);
+    component.invalidate();
+  }
 
   if (component.dispose) component.dispose();
 });

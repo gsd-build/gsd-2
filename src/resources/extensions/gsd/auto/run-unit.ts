@@ -26,6 +26,31 @@ import { debugLog } from "../debug-logger.js";
 import { logWarning, logError } from "../workflow-logger.js";
 import { resolveAutoSupervisorConfig } from "../preferences.js";
 import { formatAutoUnitWorkingMessage } from "../working-output-messages.js";
+import { readUnitRuntimeRecord, type AutoUnitRuntimeRecord } from "../unit-runtime.js";
+
+const UNIT_FAILSAFE_BUFFER_MS = 30_000;
+const UNIT_FAILSAFE_RECHECK_MS = 30_000;
+
+export function shouldDeferUnitFailsafeTimeout(
+  runtime: AutoUnitRuntimeRecord | null,
+  opts: {
+    nowMs: number;
+    currentUnitStartedAt?: number;
+    freshProgressMs: number;
+  },
+): boolean {
+  if (!runtime) return false;
+  if (opts.currentUnitStartedAt === undefined) return false;
+  if (runtime.startedAt !== opts.currentUnitStartedAt) return false;
+  if (runtime.lastProgressAt <= 0) return false;
+  const progressAgeMs = opts.nowMs - runtime.lastProgressAt;
+  if (progressAgeMs < 0) return false;
+  if (progressAgeMs > opts.freshProgressMs) return false;
+  if (runtime.phase === "recovered") return true;
+  if (runtime.lastProgressKind.includes("recovery")) return true;
+  if (runtime.recoveryAttempts && runtime.recoveryAttempts > 0) return true;
+  return progressAgeMs >= 0 && progressAgeMs <= opts.freshProgressMs;
+}
 
 // Tracks the latest session-switch attempt so a late timeout settlement from an
 // older runUnit() call cannot clear the guard for a newer one.
@@ -192,8 +217,12 @@ export async function runUnit(
   // Without this, a crashed agent that never emits agent_end hangs the loop (#3161).
   const supervisor = resolveAutoSupervisorConfig();
   const UNIT_HARD_TIMEOUT_MS = Math.max(
-    30_000,
-    ((supervisor.hard_timeout_minutes ?? 30) * 60 * 1000) + 30_000,
+    UNIT_FAILSAFE_BUFFER_MS,
+    ((supervisor.hard_timeout_minutes ?? 30) * 60 * 1000) + UNIT_FAILSAFE_BUFFER_MS,
+  );
+  const freshProgressMs = Math.max(
+    UNIT_FAILSAFE_BUFFER_MS,
+    ((supervisor.idle_timeout_minutes ?? 10) * 60 * 1000) + UNIT_FAILSAFE_BUFFER_MS,
   );
   let unitTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
   let result: UnitResult;
@@ -205,9 +234,45 @@ export async function runUnit(
 
     debugLog("runUnit", { phase: "awaiting-agent-end", unitType, unitId });
     const timeoutResult = new Promise<UnitResult>((resolve) => {
-      unitTimeoutHandle = setTimeout(() => {
+      const settleOrDefer = () => {
+        let runtime: AutoUnitRuntimeRecord | null;
+        try {
+          runtime = readUnitRuntimeRecord(s.basePath, unitType, unitId);
+        } catch (error) {
+          debugLog("runUnit", {
+            phase: "unit-failsafe-runtime-read-failed",
+            unitType,
+            unitId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          resolve({
+            status: "cancelled",
+            errorContext: {
+              message: "Unit hard timeout — supervision may have failed; runtime progress could not be read",
+              category: "timeout",
+              isTransient: true,
+            },
+          });
+          return;
+        }
+        if (shouldDeferUnitFailsafeTimeout(runtime, {
+          nowMs: Date.now(),
+          currentUnitStartedAt: s.currentUnit?.startedAt,
+          freshProgressMs,
+        })) {
+          debugLog("runUnit", {
+            phase: "unit-failsafe-deferred",
+            unitType,
+            unitId,
+            runtimePhase: runtime?.phase,
+            lastProgressKind: runtime?.lastProgressKind,
+          });
+          unitTimeoutHandle = setTimeout(settleOrDefer, UNIT_FAILSAFE_RECHECK_MS);
+          return;
+        }
         resolve({ status: "cancelled", errorContext: { message: "Unit hard timeout — supervision may have failed", category: "timeout", isTransient: true } });
-      }, UNIT_HARD_TIMEOUT_MS);
+      };
+      unitTimeoutHandle = setTimeout(settleOrDefer, UNIT_HARD_TIMEOUT_MS);
     });
     result = await runWithTurnGeneration(capturedTurnGen, () =>
       Promise.race([unitPromise, timeoutResult]),

@@ -2,6 +2,7 @@
 // File Purpose: ADR-015 Recovery Classification module for runtime failure taxonomy.
 
 import { classifyError, isTransient, type ErrorClass } from "./error-classifier.js";
+import { ReconciliationFailedError } from "./state-reconciliation.js";
 
 export type RecoveryFailureKind =
   | "tool-schema"
@@ -9,6 +10,7 @@ export type RecoveryFailureKind =
   | "stale-worker"
   | "worktree-invalid"
   | "verification-drift"
+  | "reconciliation-drift"
   | "provider"
   | "runtime-unknown";
 
@@ -33,7 +35,13 @@ export interface RecoveryClassification {
 
 export function classifyFailure(input: RecoveryClassificationInput): RecoveryClassification {
   const message = errorMessage(input.error);
-  const failureKind = input.failureKind ?? inferFailureKind(message);
+  // ADR-017: ReconciliationFailedError is a typed throw from the State
+  // Reconciliation Module. Recognize it by class regardless of caller-supplied
+  // failureKind so the taxonomy stays consistent.
+  const failureKind =
+    input.error instanceof ReconciliationFailedError
+      ? "reconciliation-drift"
+      : input.failureKind ?? inferFailureKind(message);
 
   switch (failureKind) {
     case "tool-schema":
@@ -75,6 +83,15 @@ export function classifyFailure(input: RecoveryClassificationInput): RecoveryCla
         reason: `Verification drift${unitSuffix(input)}: ${message}`,
         exitReason: "verification-drift",
         remediation: "Inspect the verification artifact and reconcile the state snapshot before resuming.",
+      };
+    case "reconciliation-drift":
+      return {
+        failureKind,
+        action: "escalate",
+        reason: `Reconciliation drift${unitSuffix(input)}: ${message}`,
+        exitReason: "reconciliation-drift",
+        remediation:
+          "Inspect the persistent or repair-failed drift kinds reported by the State Reconciliation Module before resuming.",
       };
     case "provider": {
       const providerClass = classifyError(message, input.retryAfterMs);

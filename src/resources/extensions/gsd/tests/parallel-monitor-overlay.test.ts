@@ -1,11 +1,19 @@
-import { describe, it } from "node:test";
-import assert from "node:assert";
+// Project/App: GSD-2
+// File Purpose: Regression tests for parallel monitor overlay rendering and input handling.
 
-/**
- * Basic tests for the parallel monitor overlay data helpers.
- * The overlay is primarily a rendering component that reads existing
- * status files — these tests verify the helper logic in isolation.
- */
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+
+import { visibleWidth } from "@gsd/pi-tui";
+
+function assertLinesFit(lines: string[], width: number): void {
+  for (const line of lines) {
+    assert.ok(
+      visibleWidth(line) <= width,
+      `line exceeds width ${width}: ${visibleWidth(line)} "${line}"`,
+    );
+  }
+}
 
 describe("parallel-monitor-overlay", () => {
   it("progressBar generates correct width", async () => {
@@ -37,6 +45,7 @@ describe("parallel-monitor-overlay", () => {
     const lines = overlay.render(80);
     assert.ok(Array.isArray(lines), "render should return an array");
     assert.ok(lines.length > 0, "render should return at least one line");
+    assertLinesFit(lines, 80);
 
     // Should contain header text
     const joined = lines.join("\n");
@@ -77,6 +86,29 @@ describe("parallel-monitor-overlay", () => {
     (overlay as any).scrollOffset = 999;
     overlay.render(80);
     assert.equal((overlay as any).scrollOffset, 0, "empty overlays clamp scroll to zero");
+    overlay.dispose();
+  });
+
+  it("ParallelMonitorOverlay empty state fits narrow and wide widths", async () => {
+    const mod = await import("../parallel-monitor-overlay.js");
+
+    const mockTui = { requestRender: () => {} };
+    const mockTheme = {
+      fg: (_color: string, text: string) => text,
+      bold: (text: string) => text,
+    };
+    const overlay = new mod.ParallelMonitorOverlay(
+      mockTui,
+      mockTheme as any,
+      () => {},
+      "/nonexistent/path",
+    );
+
+    for (const width of [40, 80, 120]) {
+      assertLinesFit(overlay.render(width), width);
+      overlay.invalidate();
+    }
+
     overlay.dispose();
   });
 });

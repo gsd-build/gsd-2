@@ -1,4 +1,5 @@
-// GSD-2 Interactive Tool Execution Rendering
+// Project/App: GSD-2
+// File Purpose: Interactive terminal tool execution renderer for commands, tool calls, diffs, images, and summaries.
 import {
 	Box,
 	Container,
@@ -24,6 +25,7 @@ import { getLanguageFromPath, highlightCode, theme } from "../theme/theme.js";
 import { shortenPath } from "../utils/shorten-path.js";
 import { renderDiff } from "./diff.js";
 import { keyHint } from "./keybinding-hints.js";
+import { renderCommandCard, renderToolLineCard, renderTranscriptCard, type StatusTone } from "./transcript-design.js";
 import { truncateToVisualLines } from "./visual-truncate.js";
 
 // Preview line limit for bash when not expanded
@@ -81,73 +83,6 @@ function prettifyToolName(name: string, label?: string): string {
 		.split("_")
 		.map((word) => (word.length === 0 ? word : word[0].toUpperCase() + word.slice(1)))
 		.join(" ");
-}
-
-type ToolFrameTone = "pending" | "success" | "error";
-
-function trimOuterBlankLines(lines: string[]): string[] {
-	let start = 0;
-	let end = lines.length;
-	while (start < end && lines[start].trim().length === 0) start++;
-	while (end > start && lines[end - 1].trim().length === 0) end--;
-	return lines.slice(start, end);
-}
-
-function renderToolFrame(
-	contentLines: string[],
-	width: number,
-	opts: {
-		label: string;
-		status: string;
-		tone: ToolFrameTone;
-	},
-): string[] {
-	const outerWidth = Math.max(20, width);
-	const contentWidth = Math.max(1, outerWidth - 2); // "│ " + content
-
-	const borderColor = opts.tone === "error" ? "toolError" : opts.tone === "pending" ? "toolRunning" : "toolSuccess";
-	const topColor = borderColor;
-	const labelColor = opts.tone === "error" ? "toolError" : opts.tone === "pending" ? "toolRunning" : "toolSuccess";
-	const statusColor = opts.tone === "error" ? "toolError" : opts.tone === "pending" ? "toolRunning" : "toolSuccess";
-	const leftStyled = theme.fg(labelColor, theme.bold(opts.label));
-	const rightStyled = theme.fg(statusColor, opts.status);
-	const titleWidth = Math.max(1, outerWidth - 4);
-	const gap = Math.max(1, titleWidth - visibleWidth(leftStyled) - visibleWidth(rightStyled));
-	const headerRow = `${leftStyled}${" ".repeat(gap)}${rightStyled}`;
-	const headerPad = Math.max(0, titleWidth - visibleWidth(headerRow));
-
-	const sourceLines = trimOuterBlankLines(contentLines);
-	const bodyLines = (sourceLines.length > 0 ? sourceLines : [""]).map((line) => {
-		const clipped = truncateToWidth(line, contentWidth, "");
-		return clipped;
-	});
-
-	return style()
-		.border("rounded")
-		.borderColor((line) => theme.fg(line.startsWith("─") ? topColor : borderColor, line))
-		.title(headerRow + " ".repeat(headerPad))
-		.render(bodyLines, outerWidth);
-}
-
-function renderCollapsedToolRow(
-	label: string,
-	status: string,
-	width: number,
-	tone: Extract<ToolFrameTone, "success">,
-): string[] {
-	const outerWidth = Math.max(20, width);
-	const contentWidth = Math.max(1, outerWidth - 2);
-	const statusColor = tone === "success" ? "toolSuccess" : "toolMuted";
-	const labelStyled = theme.fg(statusColor, label);
-	const statusStyled = theme.fg(statusColor, status);
-	const labelWidth = Math.max(1, contentWidth - visibleWidth(statusStyled) - 1);
-	const clippedLabel = truncateToWidth(labelStyled, labelWidth, "");
-	const gap = Math.max(1, contentWidth - visibleWidth(clippedLabel) - visibleWidth(statusStyled));
-	const line = `${clippedLabel}${" ".repeat(gap)}${statusStyled}`;
-	return style()
-		.border("minimal")
-		.borderColor((text) => theme.fg(statusColor, text))
-		.render([line], outerWidth);
 }
 
 const COMPACT_ARG_VALUE_LIMIT = 60;
@@ -211,6 +146,40 @@ function formatToolTarget(target: ToolTargetMetadata): string | undefined {
 		return target.glob ? `${label} (${target.glob})` : label;
 	}
 	return appendLineOrRange(displayPath, target);
+}
+
+function directDetailsTarget(details: unknown, action: string): ToolTargetMetadata | undefined {
+	if (!details || typeof details !== "object") return undefined;
+	const record = details as Record<string, unknown>;
+	const rawPath = record.resolvedPath ?? record.inputPath ?? record.file_path ?? record.path;
+	if (typeof rawPath !== "string" || rawPath.trim().length === 0) return undefined;
+	const target: ToolTargetMetadata = {
+		kind: "file",
+		action,
+		resolvedPath: typeof record.resolvedPath === "string" ? record.resolvedPath : rawPath,
+		inputPath: typeof record.inputPath === "string" ? record.inputPath : rawPath,
+	};
+	if (typeof record.line === "number") {
+		target.line = record.line;
+	}
+	const range = record.range;
+	if (range && typeof range === "object") {
+		const rangeRecord = range as Record<string, unknown>;
+		target.range = {
+			start: typeof rangeRecord.start === "number" ? rangeRecord.start : undefined,
+			end: typeof rangeRecord.end === "number" ? rangeRecord.end : undefined,
+		};
+	}
+	return target;
+}
+
+function firstStringArg(args: Record<string, unknown>, keys: string[]): string | null {
+	for (const key of keys) {
+		const value = str(args[key]);
+		if (value === null) continue;
+		if (value) return value;
+	}
+	return "";
 }
 
 function formatArgsPathTarget(path: string | null, args: Record<string, unknown>): string | undefined {
@@ -692,22 +661,47 @@ export class ToolExecutionComponent extends Container {
 		}
 		const frameWidth = Math.max(20, width);
 		const contentWidth = Math.max(1, frameWidth - 4);
-		const frameTone: ToolFrameTone =
+		const frameTone: "pending" | "success" | "error" =
 			this.result?.isError ? "error" : this.isPartial || !this.result ? "pending" : "success";
 		const elapsed = formatElapsed((this.endedAt ?? Date.now()) - this.startedAt);
-		const frameStatus = `${this.isPartial || !this.result ? "running" : this.result.isError ? "failed" : "success"} · ${elapsed}`;
+		const statusWord = this.isPartial || !this.result ? "running" : this.result.isError ? "failed" : "success";
+		const frameStatus = `${statusWord} · ${elapsed}`;
 		const parsed = parseMcpToolName(this.toolName);
 		const frameLabel = parsed
 			? `${parsed.server}·${parsed.tool}`
 			: prettifyToolName(this.toolName, this.toolDefinition?.label) || "unknown";
-		if (this.shouldRenderCompactSuccess()) {
-			return ["", ...renderCollapsedToolRow(this.getCompactSummary(frameLabel), frameStatus, frameWidth, "success")];
+		const recommendedTone: StatusTone =
+			frameTone === "pending" ? "running" : frameTone === "error" ? "error" : "success";
+
+		if (this.normalizedToolName === "bash" && !this.expanded && !this.result?.isError) {
+			const command = str(this.args?.command);
+			return [
+				"",
+				...renderCommandCard(command && command.length > 0 ? formatCommandPreview(command) : frameLabel, frameWidth, {
+					status: frameStatus,
+					tone: recommendedTone,
+				}),
+			];
+		}
+		const hasImages = this.result?.content?.some((block) => block.type === "image") ?? false;
+		if (!this.expanded && !this.result?.isError && !hasImages) {
+			const compactTarget = this.getCompactTarget();
+			return [
+				"",
+				...renderToolLineCard(frameLabel, compactTarget, frameWidth, {
+					status: frameStatus,
+					tone: recommendedTone,
+					hidden: !this.isPartial && !!this.result,
+				}),
+			];
 		}
 		const lines = super.render(contentWidth);
-		const framed = renderToolFrame(lines, frameWidth, {
-			label: frameLabel,
-			status: frameStatus,
-			tone: frameTone,
+		const framed = renderTranscriptCard(lines, frameWidth, {
+			title: frameLabel,
+			right: frameStatus,
+			tone: recommendedTone,
+			footerLeft: this.expanded ? "output expanded" : undefined,
+			footerRight: this.expanded ? "ctrl+o collapse" : undefined,
 		});
 		return framed.length > 0 ? ["", ...framed] : framed;
 	}
@@ -748,15 +742,6 @@ export class ToolExecutionComponent extends Container {
 		return "Other tool actions";
 	}
 
-	private getCompactSummary(frameLabel: string): string {
-		if (this.normalizedToolName === "bash") {
-			const command = str(this.args?.command);
-			return command ? `bash ${formatCommandPreview(command)}` : frameLabel;
-		}
-		const target = this.getCompactTarget();
-		return target ? `${this.getCompactAction()} ${target}` : frameLabel;
-	}
-
 	private getCompactAction(): string {
 		const target = this.getTargetMetadata();
 		if (target?.action) return target.action === "list" ? "ls" : target.action;
@@ -765,7 +750,8 @@ export class ToolExecutionComponent extends Container {
 
 	private getTargetMetadata(): ToolTargetMetadata | undefined {
 		const target = this.result?.details?.target;
-		return target && typeof target === "object" ? target : undefined;
+		if (target && typeof target === "object") return target;
+		return directDetailsTarget(this.result?.details, this.normalizedToolName);
 	}
 
 	private getCompactTarget(): string | undefined {
@@ -773,7 +759,7 @@ export class ToolExecutionComponent extends Container {
 		const metadataTarget = metadata ? formatToolTarget(metadata) : undefined;
 		if (metadataTarget) return metadataTarget;
 
-		const path = str(this.args?.file_path ?? this.args?.path);
+		const path = firstStringArg(this.args ?? {}, ["file_path", "path", "notebook_path"]);
 		if (path === null) return undefined;
 		if (this.normalizedToolName === "read" || this.normalizedToolName === "hashline_read") {
 			return formatArgsPathTarget(path, this.args);
@@ -782,16 +768,18 @@ export class ToolExecutionComponent extends Container {
 			return path ? shortenPath(path) : undefined;
 		}
 		if (this.normalizedToolName === "ls") {
-			return shortenPath(path || ".");
+			return path ? shortenPath(path) : undefined;
 		}
 		if (this.normalizedToolName === "find") {
 			const pattern = str(this.args?.pattern);
-			return pattern ? `${pattern} in ${shortenPath(path || ".")}` : shortenPath(path || ".");
+			if (pattern) return path ? `${pattern} in ${shortenPath(path)}` : pattern;
+			return path ? shortenPath(path) : undefined;
 		}
 		if (this.normalizedToolName === "grep") {
 			const pattern = str(this.args?.pattern);
 			const glob = str(this.args?.glob);
-			const label = pattern ? `${pattern} in ${shortenPath(path || ".")}` : shortenPath(path || ".");
+			const label = pattern ? (path ? `${pattern} in ${shortenPath(path)}` : pattern) : path ? shortenPath(path) : undefined;
+			if (!label) return glob || undefined;
 			return glob ? `${label} (${glob})` : label;
 		}
 		return undefined;
@@ -1410,23 +1398,14 @@ export class ToolExecutionComponent extends Container {
 			}
 		} else {
 			// Generic tool / MCP tool without a registered renderer.
-			// MCP tool names from Claude Code arrive as `mcp__<server>__<tool>`;
-			// render the server prefix in muted style so the tool name reads
-			// cleanly. GSD-registered MCP tools have already had their prefix
-			// stripped upstream in partial-builder.ts and won't reach this branch.
-			const parsed = parseMcpToolName(this.toolName);
-			const displayName = parsed
-				? parsed.tool
-				: prettifyToolName(this.toolName, this.toolDefinition?.label);
-			const serverPrefix = parsed ? theme.fg("muted", `${parsed.server}\u00b7`) : "";
-			text = serverPrefix + theme.fg("toolTitle", theme.bold(displayName));
-
+			// The frame header already contains the tool identity, so the body
+			// should show only arguments and output.
 			const argsText = formatCompactArgs(this.args, this.expanded);
 			if (argsText) {
 				if (argsText.includes("\n")) {
-					text += `\n\n${theme.fg("toolOutput", argsText)}`;
+					text = theme.fg("toolOutput", argsText);
 				} else {
-					text += " " + theme.fg("toolOutput", argsText);
+					text = theme.fg("toolOutput", argsText);
 				}
 			}
 
@@ -1437,7 +1416,8 @@ export class ToolExecutionComponent extends Container {
 					const maxLines = this.expanded ? lines.length : GENERIC_OUTPUT_PREVIEW_LINES;
 					const displayLines = lines.slice(0, maxLines);
 					const remaining = lines.length - maxLines;
-					text += `\n\n${displayLines.map((line: string) => theme.fg("toolOutput", line)).join("\n")}`;
+					const outputText = displayLines.map((line: string) => theme.fg("toolOutput", line)).join("\n");
+					text += `${text ? "\n\n" : ""}${outputText}`;
 					if (remaining > 0) {
 						text += `${theme.fg("muted", `\n... (${remaining} more lines,`)} ${keyHint("expandTools", "to expand")})`;
 					}

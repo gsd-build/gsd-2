@@ -1,8 +1,11 @@
+// Project/App: GSD-2
+// File Purpose: Startup welcome screen rendering for the GSD terminal experience.
+
 /**
  * GSD Welcome Screen
  *
- * Two-panel bar layout: full-width accent bars at top/bottom (matching the
- * auto-mode progress widget style), logo left (fixed width), info right.
+ * Command-center layout: rounded terminal card with compact logo, project
+ * state, primary action, branch/workspace, and secondary hints.
  * Falls back to simple text on narrow terminals (<70 cols) or non-TTY.
  */
 
@@ -85,7 +88,27 @@ function visLen(s: string): number {
 
 /** Right-pad a string to the given visible width. */
 function rpad(s: string, w: number): string {
-  return s + ' '.repeat(Math.max(0, w - visLen(s)))
+  const clamped = clampVisible(s, w)
+  return clamped + ' '.repeat(Math.max(0, w - visLen(clamped)))
+}
+
+function rightAlign(left: string, right: string, width: number): string {
+  if (!right) return clampVisible(left, width)
+  const gap = Math.max(1, width - visLen(left) - visLen(right))
+  return clampVisible(left + ' '.repeat(gap) + right, width)
+}
+
+function frameLine(content: string, width: number): string {
+  const inner = Math.max(1, width - 2)
+  return chalk.hex('#a7ba78')('│') + rpad(content, inner) + chalk.hex('#a7ba78')('│')
+}
+
+/** Clamp rendered terminal output by visible columns. Falls back to plain text only when truncating. */
+function clampVisible(s: string, w: number): string {
+  if (w <= 0) return ''
+  if (visLen(s) <= w) return s
+  const plain = stripAnsi(s)
+  return plain.slice(0, Math.max(0, w - 1)) + '…'
 }
 
 export function buildWelcomeScreenLines(opts: WelcomeScreenOptions): string[] {
@@ -98,24 +121,6 @@ export function buildWelcomeScreenLines(opts: WelcomeScreenOptions): string[] {
     return ['', `  Get Shit Done v${version}`, `  ${shortCwd}`, '']
   }
 
-  // ── Panel widths ────────────────────────────────────────────────────────────
-  // Layout: 1 leading space + LEFT_INNER logo content + 1 inner divider + RIGHT_INNER info
-  // Total: 1 + LEFT_INNER + 1 + RIGHT_INNER = termWidth
-  const LEFT_INNER = 34
-  const RIGHT_INNER = termWidth - LEFT_INNER - 2  // 2 = leading space + inner divider
-
-  // ── Bar/divider chars (matching GLYPH.separator + widget ui.bar() style) ────
-  const H = '─', DV = '│', DS = '├'
-
-  // ── Left rows: blank + 6 logo lines + blank (8 total) ───────────────────────
-  const leftRows = ['', ...GSD_LOGO, '']
-
-  // ── Right rows (8 total, null = divider) ────────────────────────────────────
-  const titleLeft  = `  ${chalk.bold('Get Shit Done')}`
-  const titleRight = chalk.dim(`v${version}`)
-  const titleFill  = RIGHT_INNER - visLen(titleLeft) - visLen(titleRight)
-  const titleRow   = titleLeft + ' '.repeat(Math.max(1, titleFill)) + titleRight
-
   const toolParts: string[] = []
   if (process.env.BRAVE_API_KEY)      toolParts.push('Brave ✓')
   if (process.env.BRAVE_ANSWERS_KEY)  toolParts.push('Answers ✓')
@@ -124,77 +129,59 @@ export function buildWelcomeScreenLines(opts: WelcomeScreenOptions): string[] {
   if (process.env.CONTEXT7_API_KEY)   toolParts.push('Context7 ✓')
   if (remoteChannel)                  toolParts.push(`${remoteChannel.charAt(0).toUpperCase() + remoteChannel.slice(1)} ✓`)
 
-  // Tools left, hint right-aligned on the same row
-  const toolsLeft  = toolParts.length > 0 ? chalk.dim('  ' + toolParts.join('  ·  ')) : ''
-  const hintRight  = chalk.dim('/gsd to begin  ·  /gsd help')
-  const footerFill = RIGHT_INNER - visLen(toolsLeft) - visLen(hintRight)
-  const footerRow  = toolsLeft + ' '.repeat(Math.max(1, footerFill)) + hintRight
+  const innerWidth = Math.max(1, termWidth - 2)
+  const logoWidth = Math.max(...GSD_LOGO.map((line) => visLen(line)))
+  const divider = ` ${chalk.dim('│')} `
+  const panelWidth = innerWidth - logoWidth - visLen(divider)
+  if (panelWidth < 44) {
+    return ['', `  Get Shit Done v${version}`, `  ${shortCwd}`, '']
+  }
 
   // "Welcome back" context lines — GSD state if available, else hint.
   // Intentionally avoids data already shown in the footer (model, provider,
   // pwd, branch).
   const state = readGsdState()
-  let line1 = ''
-  let line2 = ''
+  let projectText = 'No active GSD project'
+  let commandText = '/gsd start'
+  let modeText = 'manual'
   if (state?.milestone) {
     const statusParts = [state.milestone, state.phase, state.slice].filter(Boolean)
-    const activePrefix = '  Active     '
-    const maxActiveLen = RIGHT_INNER - activePrefix.length - 1
-    let activeText = statusParts.join(' · ')
-    if (activeText.length > maxActiveLen) activeText = activeText.slice(0, maxActiveLen - 1) + '…'
-    line1 = `${activePrefix}${chalk.dim(activeText)}`
-    line2 = state.nextAction
-      ? `  Next       ${chalk.dim(state.nextAction)}`
-      : ''
-  } else {
-    line1 = `  Status     ${chalk.dim('No active GSD project')}`
-    line2 = `             ${chalk.dim('/gsd to begin')}`
+    projectText = statusParts.join(' · ')
+    const maxActionWidth = Math.max(10, panelWidth - 30)
+    commandText = state.nextAction ? clampVisible(state.nextAction, maxActionWidth) : '/gsd next'
+    modeText = state.phase ?? 'active'
   }
-  const sessionLine = line1
-  const projectLine = line2
 
   const mcpCount = countMcpServers()
-  const mcpLine = mcpCount > 0
-    ? `  MCP        ${chalk.dim(`${mcpCount} server${mcpCount === 1 ? '' : 's'} configured`)}`
-    : ''
+  const mcpText = toolParts.length > 0
+    ? toolParts.join('  ·  ')
+    : mcpCount > 0
+      ? `${mcpCount} server${mcpCount === 1 ? '' : 's'} configured`
+      : 'none configured'
 
-  const DIVIDER = null
-  const rightRows: (string | null)[] = [
-    titleRow,
-    DIVIDER,
-    sessionLine,
-    projectLine,
-    mcpLine,
-    '',
-    DIVIDER,
-    footerRow,
+  const label = (s: string) => chalk.dim(s)
+  const value = (s: string) => chalk.hex('#dce4f2')(s)
+  const accent = (s: string) => chalk.hex('#8db7ff')(s)
+  const panelRows = [
+    rightAlign(`${accent('GSD')} ${chalk.bold(value('Project Console'))}`, chalk.dim(`v${version}`), panelWidth),
+    rightAlign(`${label('Project')} ${value(projectText)}`, `${label('Command')} ${accent(commandText)}`, panelWidth),
+    rightAlign(`${label('Workspace')} ${value(shortCwd)}`, `${label('Mode')} ${value(modeText)}`, panelWidth),
+    rightAlign(`${label('MCP')} ${chalk.dim(mcpText)}`, `${label('Status')} ${value(state?.milestone ? 'active' : 'idle')}`, panelWidth),
+    rightAlign(`${label('Next')} ${accent('/gsd to begin')}`, `${label('Setup')} ${accent('/gsd start')}`, panelWidth),
+    rightAlign(chalk.dim('/gsd templates'), chalk.dim('/gsd help'), panelWidth),
   ]
 
   // ── Render ──────────────────────────────────────────────────────────────────
   const out: string[] = ['']
-
-  // Top bar — full-width accent separator, matches auto-mode widget ui.bar()
-  out.push(chalk.cyan(H.repeat(termWidth)))
-
-  for (let i = 0; i < 8; i++) {
-    const row      = leftRows[i] ?? ''
-    const lContent = rpad(row ? chalk.cyan(row) : '', LEFT_INNER)
-    const rRow     = rightRows[i]
-
-    if (rRow === null) {
-      // Section divider: left logo area + dim ├────... extending right
-      out.push(' ' + lContent + chalk.dim(DS + H.repeat(RIGHT_INNER)))
-    } else {
-      // Content row: 1 space + logo │ info (no outer vertical borders)
-      out.push(' ' + lContent + chalk.dim(DV) + rpad(rRow, RIGHT_INNER))
-    }
+  out.push(chalk.hex('#a7ba78')('╭' + '─'.repeat(termWidth - 2) + '╮'))
+  for (let i = 0; i < GSD_LOGO.length; i++) {
+    const logo = rpad(chalk.hex('#a7ba78')(GSD_LOGO[i]), logoWidth)
+    out.push(frameLine(`${logo}${divider}${panelRows[i] ?? ''}`, termWidth))
   }
-
-  // Bottom bar — full-width accent separator
-  out.push(chalk.cyan(H.repeat(termWidth)))
+  out.push(chalk.hex('#a7ba78')('╰' + '─'.repeat(termWidth - 2) + '╯'))
   out.push('')
 
-  return out
+  return out.map((line) => clampVisible(line, termWidth))
 }
 
 export function printWelcomeScreen(opts: WelcomeScreenOptions): void {

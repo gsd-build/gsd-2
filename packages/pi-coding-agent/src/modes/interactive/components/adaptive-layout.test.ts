@@ -1,4 +1,5 @@
-// GSD2 - Runtime tests for adaptive terminal layout rendering
+// Project/App: GSD-2
+// File Purpose: Runtime tests for adaptive command-center terminal layout rendering.
 
 import assert from "node:assert/strict";
 import { describe, it, before } from "node:test";
@@ -15,7 +16,7 @@ function render(component: AdaptiveLayoutComponent, width: number): string {
 }
 
 describe("AdaptiveLayoutComponent", () => {
-	it("renders workflow command center and inspector on wide terminals", () => {
+	it("renders a rounded workflow command center on wide terminals", () => {
 		const component = new AdaptiveLayoutComponent(() => ({
 			override: "workflow",
 			activeToolCount: 2,
@@ -26,8 +27,13 @@ describe("AdaptiveLayoutComponent", () => {
 
 		const output = render(component, 132);
 		assert.match(output, /GSD Command Center/);
-		assert.match(output, /signals/);
+		assert.match(output, /workflow · ready/);
 		assert.match(output, /2 running/);
+		assert.match(output, /watch tool output/);
+		assert.doesNotMatch(output, /signals/);
+		assert.doesNotMatch(output, /inspector/);
+		assert.doesNotMatch(output, /\bauto\b/i);
+		assert.match(output, /^╭─+╮/m);
 	});
 
 	it("falls back to a single compact row for narrow workflow terminals", () => {
@@ -41,6 +47,7 @@ describe("AdaptiveLayoutComponent", () => {
 		const output = render(component, 68);
 		assert.match(output, /GSD compact/);
 		assert.doesNotMatch(output, /signals/);
+		assert.doesNotMatch(output, /\bauto\b/i);
 	});
 
 	it("renders blocking failure context in debug mode", () => {

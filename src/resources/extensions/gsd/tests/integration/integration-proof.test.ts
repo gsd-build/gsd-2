@@ -62,8 +62,8 @@ import {
   renderRoadmapCheckboxes,
   renderAllFromDb,
   detectStaleRenders,
-  repairStaleRenders,
 } from "../../markdown-renderer.ts";
+import { repairStaleRenders } from "../../state-reconciliation/drift/stale-render.ts";
 
 // ── State derivation ──────────────────────────────────────────────────────
 import {

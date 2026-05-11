@@ -1,9 +1,11 @@
-// GSD2 - Adaptive terminal mode dashboard for the interactive TUI
+// Project/App: GSD-2
+// File Purpose: Adaptive command-center dashboard for the interactive TUI.
 
-import { style, truncateToWidth, visibleWidth, type Component } from "@gsd/pi-tui";
+import { style, truncateToWidth, type Component } from "@gsd/pi-tui";
 import type { TuiAdaptiveMode, TuiMode } from "../tui-mode.js";
 import { resolveTuiMode } from "../tui-mode.js";
 import { theme, type ThemeColor } from "../theme/theme.js";
+import { alignRight, breakpoint, keyValue, roundedPanel } from "./tui-style-kit.js";
 
 export interface AdaptiveLayoutState {
 	override: TuiAdaptiveMode;
@@ -41,34 +43,44 @@ export class AdaptiveLayoutComponent implements Component {
 	}
 
 	private renderWorkflow(width: number, state: AdaptiveLayoutState): string[] {
-		if (width < 112) return this.renderCompact(width, "workflow", state);
+		if (width < 72) return this.renderCompact(width, "workflow", state);
 
-		const leftWidth = Math.max(44, Math.floor(width * 0.56));
-		const rightWidth = Math.max(32, width - leftWidth - 2);
 		const phase = state.gsdPhase ?? "Ready";
-		const left = this.frame(
-			[
-				this.metric("Active", phase, "modeWorkflow"),
-				this.metric("Tools", state.activeToolCount > 0 ? `${state.activeToolCount} running` : "idle", "toolRunning"),
-				this.metric("Mode", state.override === "auto" ? "auto workflow" : state.override, "modeWorkflow"),
-			],
-			leftWidth,
-			"GSD Command Center",
-			"workflow",
-			"modeWorkflow",
-		);
-		const right = this.frame(
-			[
-				`Session ${state.sessionName ?? "current"}`,
-				`Path ${this.basename(state.cwd)}`,
-				`Next ${state.activeToolCount > 0 ? "watch tool output" : "continue from prompt"}`,
-			],
-			rightWidth,
-			"signals",
-			"inspector",
-			"surfaceAccent",
-		);
-		return this.columns(left, right, leftWidth);
+		const tools = state.activeToolCount > 0 ? `${state.activeToolCount} running` : "idle";
+		const next = state.activeToolCount > 0 ? "watch tool output" : "continue from prompt";
+		const modeLabel = state.override === "auto" ? "workflow" : state.override;
+		const bp = breakpoint(width);
+
+		const rows = bp === "regular"
+			? [
+					keyValue("Status", phase, "modeWorkflow"),
+					keyValue("Tools", tools, state.activeToolCount > 0 ? "toolRunning" : "toolMuted"),
+					keyValue("Session", state.sessionName ?? "current", "text"),
+					keyValue("Next", next, "surfaceAccent"),
+				]
+			: [
+					alignRight(
+						keyValue("Status", phase, "modeWorkflow"),
+						keyValue("Tools", tools, state.activeToolCount > 0 ? "toolRunning" : "toolMuted"),
+						Math.max(1, width - 2),
+					),
+					alignRight(
+						keyValue("Session", state.sessionName ?? "current", "text"),
+						keyValue("Path", this.basename(state.cwd), "text"),
+						Math.max(1, width - 2),
+					),
+					alignRight(
+						keyValue("Next", next, "surfaceAccent"),
+						keyValue("Mode", modeLabel, "modeWorkflow"),
+						Math.max(1, width - 2),
+					),
+				];
+
+		return roundedPanel(rows, width, {
+			title: "GSD Command Center",
+			rightTitle: `${modeLabel} · ${state.lastError ? "blocked" : "ready"}`,
+			tone: state.lastError ? "error" : "default",
+		});
 	}
 
 	private renderValidation(width: number, state: AdaptiveLayoutState): string[] {
@@ -140,21 +152,10 @@ export class AdaptiveLayoutComponent implements Component {
 		return `${theme.fg("surfaceMuted", `${label.padEnd(8)} `)}${theme.fg(color, value)}`;
 	}
 
-	private columns(left: string[], right: string[], leftWidth: number): string[] {
-		const rows = Math.max(left.length, right.length);
-		const output: string[] = [];
-		for (let i = 0; i < rows; i++) {
-			const leftLine = left[i] ?? "";
-			const rightLine = right[i] ?? "";
-			const gap = " ".repeat(Math.max(2, leftWidth - visibleWidth(leftLine) + 2));
-			output.push(`${leftLine}${gap}${rightLine}`);
-		}
-		return output;
-	}
-
 	private basename(cwd: string): string {
-		const trimmed = cwd.replace(/\/+$/, "");
-		const slash = trimmed.lastIndexOf("/");
+		const trimmed = cwd.replace(/[\\/]+$/, "");
+		if (!trimmed) return cwd.includes("\\") ? "\\" : "/";
+		const slash = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
 		return slash === -1 ? trimmed : trimmed.slice(slash + 1);
 	}
 }

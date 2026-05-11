@@ -55,6 +55,8 @@ Progressive downgrading as budget ceiling approaches:
 
 The router may select models from providers other than your primary, using a built-in cost table to find the cheapest model at each tier.
 
+When a cross-provider switch requires GSD to transform existing conversation history, `@gsd/pi-ai` emits a `ProviderSwitchReport`. Non-empty reports are surfaced as warning notifications, auto-mode UOK audit events with `category: "model-policy"` and `type: "provider-switch"`, and process-local stats readable by internal dashboards, doctor checks, and tests through `getProviderSwitchStats()`. The report records the source and target APIs plus counts for dropped/downgraded thinking blocks, remapped tool call IDs, synthetic tool results, and dropped thought signatures. Set `GSD_VERBOSE=1` or `PI_VERBOSE=1` to also log summaries to stderr.
+
 ## Task plan analysis
 
 For `execute-task` units, the classifier analyzes the task plan:

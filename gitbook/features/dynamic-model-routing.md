@@ -58,6 +58,8 @@ When approaching the budget ceiling, the router progressively downgrades:
 
 When enabled, the router may select models from providers other than your primary, using the built-in cost table to find the cheapest model at each tier.
 
+When a cross-provider switch requires GSD to transform existing conversation history, `@gsd/pi-ai` emits a `ProviderSwitchReport`. Non-empty reports are surfaced as warning notifications, auto-mode UOK audit events with `category: "model-policy"` and `type: "provider-switch"`, and process-local stats readable by internal dashboards, doctor checks, and tests through `getProviderSwitchStats()`. The report records the source and target APIs plus counts for dropped/downgraded thinking blocks, remapped tool call IDs, synthetic tool results, and dropped thought signatures. Set `GSD_VERBOSE=1` or `PI_VERBOSE=1` to also log summaries to stderr.
+
 ### Capability Routing
 
 Models are scored across 7 dimensions: coding, debugging, research, reasoning, speed, long context handling, and instruction following. Different task types weight these dimensions differently — a research task prioritizes research and reasoning, while an execution task prioritizes coding and instruction following.

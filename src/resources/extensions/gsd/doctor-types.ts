@@ -1,3 +1,4 @@
+// GSD-2 doctor report types
 export type DoctorSeverity = "info" | "warning" | "error";
 export type DoctorIssueCode =
   | "invalid_preferences"
@@ -65,6 +66,7 @@ export type DoctorIssueCode =
   | "worktree_unpushed"
   // Stale commit safety check
   | "stale_uncommitted_changes"
+  | "conflict_markers_in_tracked_files"
   // Snapshot ref bloat
   | "snapshot_ref_bloat"
   // Runtime data integrity

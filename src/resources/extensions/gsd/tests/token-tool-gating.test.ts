@@ -124,6 +124,8 @@ test("buildMinimalAutoGsdToolSet includes closeout tool for complete-slice", () 
     "gsd_milestone_status",
     "gsd_checkpoint_db",
     "gsd_task_complete",
+    "gsd_task_reopen",
+    "gsd_replan_slice",
     "gsd_slice_complete",
     "gsd_complete_slice",
     "memory_query",
@@ -131,6 +133,8 @@ test("buildMinimalAutoGsdToolSet includes closeout tool for complete-slice", () 
   ], "complete-slice");
 
   assert.ok(result.includes("gsd_slice_complete"));
+  assert.ok(result.includes("gsd_task_reopen"));
+  assert.ok(result.includes("gsd_replan_slice"));
   assert.ok(result.includes("subagent"));
   assert.ok(result.includes("capture_thought"));
   assert.ok(!result.includes("gsd_task_complete"));

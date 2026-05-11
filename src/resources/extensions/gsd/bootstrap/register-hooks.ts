@@ -16,7 +16,7 @@ import { canonicalToolName, clearDiscussionFlowState, isDepthConfirmationAnswer,
 import { resolveManifest } from "../unit-context-manifest.js";
 import { isBlockedStateFile, isBashWriteToStateFile, BLOCKED_WRITE_ERROR } from "../write-intercept.js";
 import { loadFile, saveFile, formatContinue } from "../files.js";
-import { getAutoRuntimeSnapshot, isAutoActive, isAutoPaused, markToolEnd, markToolStart, recordToolInvocationError } from "../auto-runtime-state.js";
+import { clearToolInvocationError, getAutoRuntimeSnapshot, isAutoActive, isAutoPaused, markToolEnd, markToolStart, recordToolInvocationError } from "../auto-runtime-state.js";
 
 import { checkToolCallLoop, resetToolCallLoopGuard } from "./tool-call-loop-guard.js";
 import { saveActivityLog } from "../activity-log.js";
@@ -143,7 +143,7 @@ const AUTO_UNIT_SCOPED_TOOLS: Record<string, readonly string[]> = {
   "plan-slice": ["gsd_plan_slice", "gsd_plan_task", "gsd_decision_save"],
   "refine-slice": ["gsd_plan_slice", "gsd_plan_task", "gsd_decision_save"],
   "replan-slice": ["gsd_replan_slice", "gsd_plan_task", "gsd_decision_save"],
-  "complete-slice": ["gsd_slice_complete", "gsd_decision_save", "gsd_requirement_update", "subagent"],
+  "complete-slice": ["gsd_slice_complete", "gsd_task_reopen", "gsd_replan_slice", "gsd_decision_save", "gsd_requirement_update", "subagent"],
   "reassess-roadmap": ["gsd_reassess_roadmap"],
   "execute-task": ["gsd_task_complete", "gsd_decision_save"],
   "execute-task-simple": ["gsd_task_complete", "gsd_decision_save"],
@@ -423,6 +423,10 @@ export function registerHooks(
   pi: ExtensionAPI,
   ecosystemHandlers: GSDEcosystemBeforeAgentStartHandler[],
 ): void {
+  // ADR-005 Phase 3b: surface pi-ai ProviderSwitchReport via audit, notification, and counter.
+  // Idempotent — only the first registerHooks call installs.
+  void import("../provider-switch-observer.js").then((m) => m.installProviderSwitchObserver());
+
   pi.on("session_start", async (_event, ctx) => {
     const basePath = contextBasePath(ctx);
     initSessionNotifications(ctx);
@@ -892,6 +896,8 @@ export function registerHooks(
       // Let recordToolInvocationError classify the failure so non-gsd_ harness
       // errors and deterministic policy rejections are handled consistently.
       recordToolInvocationError(event.toolName, errorText);
+    } else if (isAutoActive()) {
+      clearToolInvocationError();
     }
     const toolName = canonicalToolName(event.toolName);
     if (toolName !== "ask_user_questions") return;
@@ -1009,6 +1015,8 @@ export function registerHooks(
       // Let recordToolInvocationError classify the failure so non-gsd_ harness
       // errors and deterministic policy rejections are handled consistently.
       recordToolInvocationError(event.toolName, errorText);
+    } else if (isAutoActive()) {
+      clearToolInvocationError();
     }
     // Safety harness: record tool execution results for evidence cross-referencing
     if (isAutoActive()) {

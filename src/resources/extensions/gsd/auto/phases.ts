@@ -58,6 +58,7 @@ import { withTimeout, FINALIZE_PRE_TIMEOUT_MS, FINALIZE_POST_TIMEOUT_MS } from "
 import { getEligibleSlices } from "../slice-parallel-eligibility.js";
 import { startSliceParallel } from "../slice-parallel-orchestrator.js";
 import { isDbAvailable, getMilestoneSlices } from "../gsd-db.js";
+import { reconcileBeforeSpawn } from "../state-reconciliation.js";
 import type { MinimalModelRegistry } from "../context-budget.js";
 import type { PostflightResult, PreflightResult } from "../clean-root-preflight.js";
 import { ensurePlanV2Graph, isEmptyPlanV2GraphResult, isMissingFinalizedContextResult } from "../uok/plan-v2.js";
@@ -878,6 +879,16 @@ export async function runPreDispatch(
             `Slice-parallel: dispatching ${eligible.length} eligible slices for ${mid}.`,
             "info",
           );
+          // ADR-017 #5707: reconcile before spawning so each worker doesn't
+          // independently race on the same drift. Failure aborts the spawn.
+          const spawnGate = await reconcileBeforeSpawn(s.basePath);
+          if (!spawnGate.ok) {
+            ctx.ui.notify(
+              `Slice-parallel: aborting spawn — ${spawnGate.reason}`,
+              "error",
+            );
+            return { action: "break", reason: `slice-parallel-reconciliation-failed: ${spawnGate.reason}` };
+          }
           const result = await startSliceParallel(
             s.basePath,
             mid,
@@ -1340,16 +1351,14 @@ export async function runDispatch(
   // ── Sliding-window stuck detection with graduated recovery ──
   const derivedKey = `${unitType}/${unitId}`;
 
-  // Always record this dispatch in the sliding window so detectStuck() has
-  // accurate history. Skipping the push when pendingVerificationRetry is set
-  // caused infinite artifact-retry loops to be invisible to stuck detection
-  // (#2007). Only the *response* to a stuck signal is suppressed during retries.
+  // Always record this dispatch in the sliding window and run detection so
+  // Rules 1/3/4 can catch retry loops with repeated failure content (#5719).
+  // Rules 2/2b suppress legitimate retry backoff through the dispatch ledger.
   loopState.recentUnits.push({ key: derivedKey });
   if (loopState.recentUnits.length > STUCK_WINDOW_SIZE) loopState.recentUnits.shift();
 
-  if (!s.pendingVerificationRetry) {
-    const stuckSignal = detectStuck(loopState.recentUnits);
-    if (stuckSignal) {
+  const stuckSignal = detectStuck(loopState.recentUnits);
+  if (stuckSignal) {
       debugLog("autoLoop", {
         phase: "stuck-check",
         unitType,
@@ -1465,16 +1474,15 @@ export async function runDispatch(
         );
         return { action: "break", reason: "stuck-detected" };
       }
-    } else {
-      // Progress detected — reset recovery counter
-      if (loopState.stuckRecoveryAttempts > 0) {
-        debugLog("autoLoop", {
-          phase: "stuck-counter-reset",
-          from: loopState.recentUnits[loopState.recentUnits.length - 2]?.key ?? "",
-          to: derivedKey,
-        });
-        loopState.stuckRecoveryAttempts = 0;
-      }
+  } else {
+    // Progress detected — reset recovery counter
+    if (loopState.stuckRecoveryAttempts > 0) {
+      debugLog("autoLoop", {
+        phase: "stuck-counter-reset",
+        from: loopState.recentUnits[loopState.recentUnits.length - 2]?.key ?? "",
+        to: derivedKey,
+      });
+      loopState.stuckRecoveryAttempts = 0;
     }
   }
 
@@ -2224,6 +2232,20 @@ export async function runUnitPhase(
       await deps.autoCommitUnit?.(s.basePath, unitType, unitId, ctx);
       await emitCancelledUnitEnd(ic, unitType, unitId, unitStartSeq, unitResult.errorContext);
       return { action: "break", reason: "session-timeout" };
+    }
+    if (
+      unitResult.errorContext?.isTransient &&
+      errorCategory === "aborted"
+    ) {
+      ctx.ui.notify(
+        `Unit ${unitType} ${unitId} was aborted by the user. Pausing auto-mode (recoverable).`,
+        "warning",
+      );
+      debugLog("autoLoop", { phase: "unit-aborted-transient-pause", unitType, unitId, category: errorCategory });
+      await deps.pauseAuto(ctx, pi);
+      await deps.autoCommitUnit?.(s.basePath, unitType, unitId, ctx);
+      await emitCancelledUnitEnd(ic, unitType, unitId, unitStartSeq, unitResult.errorContext);
+      return { action: "break", reason: "unit-aborted-pause" };
     }
     // All other cancelled states (structural errors, non-transient failures): hard stop
     if (s.currentUnit) {

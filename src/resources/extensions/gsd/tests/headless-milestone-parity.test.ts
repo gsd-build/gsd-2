@@ -85,6 +85,11 @@ describe("headless milestone bootstrap — parity with interactive flow", () => 
       /Do not announce the ready phrase as something you are "about to" do/.test(section),
       "single-milestone pre-condition must include the 'do not announce intent' guard",
     );
+    assert.ok(/Next steps:/.test(section), "single-milestone handoff must include next steps");
+    assert.ok(/\/gsd auto/.test(section), "single-milestone handoff must mention /gsd auto");
+    assert.ok(/\/gsd status/.test(section), "single-milestone handoff must mention /gsd status");
+    assert.ok(/\/gsd visualize/.test(section), "single-milestone handoff must mention /gsd visualize");
+    assert.ok(/\/gsd notifications/.test(section), "single-milestone handoff must mention /gsd notifications");
   });
 
   test("discuss-headless multi-milestone pre-condition uses the non-bypassable checkbox format", () => {
@@ -113,5 +118,10 @@ describe("headless milestone bootstrap — parity with interactive flow", () => 
       /gates_completed === total/.test(multiSection),
       "multi-milestone pre-condition must still enforce gates_completed === total",
     );
+    assert.ok(/Next steps:/.test(multiSection), "multi-milestone handoff must include next steps");
+    assert.ok(/\/gsd auto/.test(multiSection), "multi-milestone handoff must mention /gsd auto");
+    assert.ok(/\/gsd status/.test(multiSection), "multi-milestone handoff must mention /gsd status");
+    assert.ok(/\/gsd visualize/.test(multiSection), "multi-milestone handoff must mention /gsd visualize");
+    assert.ok(/\/gsd notifications/.test(multiSection), "multi-milestone handoff must mention /gsd notifications");
   });
 });

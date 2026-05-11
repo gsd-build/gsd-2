@@ -40,7 +40,7 @@ test('renders GSD logo', () => {
 test('renders version', () => {
   const out = strip(capture({ version: '2.38.0' }))
   assert.ok(out.includes('v2.38.0'), 'version missing')
-  assert.ok(out.includes('Get Shit Done'), 'brand name missing')
+  assert.ok(out.includes('Project Console'), 'command-center title missing')
 })
 
 test('renders GSD project state or fallback hint', (t) => {
@@ -67,6 +67,7 @@ test('renders GSD project state or fallback hint', (t) => {
 test('renders cwd hint', () => {
   const out = strip(capture({ version: '1.0.0' }))
   assert.ok(out.includes('/gsd to begin'), 'hint line missing')
+  assert.ok(out.includes('/gsd start'), 'primary command missing')
 })
 
 test('skips when not a TTY', (t) => {
@@ -102,7 +103,7 @@ test('omits remote channel when not provided', () => {
   assert.ok(!out.includes('Telegram'), 'should not show Telegram when no remote')
 })
 
-test('Active row truncates with ellipsis when milestone text overflows panel width', (t) => {
+test('Project row truncates with ellipsis when milestone text overflows panel width', (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-welcome-test-'))
   mkdirSync(join(tmp, '.gsd'))
   writeFileSync(
@@ -126,13 +127,13 @@ test('Active row truncates with ellipsis when milestone text overflows panel wid
 
   const columns = (process.stderr as any).columns as number
   const out = strip(capture({ version: '1.0.0' }))
-  const activeLine = out.split('\n').find(l => /Active\s/.test(l))
-  assert.ok(activeLine, 'Active row should be present')
-  assert.ok(activeLine!.includes('…'), 'Active row should truncate long text with ellipsis')
-  assert.ok(activeLine!.length <= columns, `Active row length ${activeLine!.length} should not exceed terminal width ${columns}`)
+  const projectLine = out.split('\n').find(l => /Project\s+M001/.test(l))
+  assert.ok(projectLine, 'Project row should be present')
+  assert.ok(projectLine!.includes('…'), 'Project row should truncate long text with ellipsis')
+  assert.ok(projectLine!.length <= columns, `Project row length ${projectLine!.length} should not exceed terminal width ${columns}`)
 })
 
-test('Active row does not truncate short milestone text', (t) => {
+test('Project row does not truncate short milestone text', (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'gsd-welcome-test-'))
   mkdirSync(join(tmp, '.gsd'))
   writeFileSync(join(tmp, '.gsd', 'STATE.md'), '**Active Milestone:** M001: Short title\n')
@@ -148,23 +149,23 @@ test('Active row does not truncate short milestone text', (t) => {
   })
 
   const out = strip(capture({ version: '1.0.0' }))
-  const activeLine = out.split('\n').find(l => /Active\s/.test(l))
-  assert.ok(activeLine, 'Active row should be present')
-  assert.ok(activeLine!.includes('M001: Short title'), 'short title should appear in full')
-  assert.ok(!activeLine!.includes('…'), 'short title should not be truncated')
+  const projectLine = out.split('\n').find(l => /Project\s+M001/.test(l))
+  assert.ok(projectLine, 'Project row should be present')
+  assert.ok(projectLine!.includes('M001: Short title'), 'short title should appear in full')
+  assert.ok(!projectLine!.includes('…'), 'short title should not be truncated')
 })
 
-test('separator lines extend to full terminal width on wide terminals', (t) => {
+test('rounded command-center borders extend to full terminal width on wide terminals', (t) => {
   const origColumns = process.stderr.columns
   ;(process.stderr as any).columns = 250
   t.after(() => { ;(process.stderr as any).columns = origColumns })
 
   const out = strip(capture({ version: '1.0.0' }))
   const lines = out.split('\n')
-  // Top and bottom separator bars should be 249 chars (columns - 1)
-  const separatorLines = lines.filter(l => /^─+$/.test(l.trim()))
-  assert.ok(separatorLines.length >= 2, 'expected at least 2 full-width separator lines')
-  for (const sep of separatorLines) {
-    assert.equal(sep.trim().length, 249, `separator should be 249 chars wide, got ${sep.trim().length}`)
+  // Top and bottom rounded borders should be 249 chars (columns - 1)
+  const borderLines = lines.filter(l => /^[╭╰]─+[╮╯]$/.test(l.trim()))
+  assert.equal(borderLines.length, 2, 'expected top and bottom rounded border lines')
+  for (const border of borderLines) {
+    assert.equal(border.trim().length, 249, `border should be 249 chars wide, got ${border.trim().length}`)
   }
 })

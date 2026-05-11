@@ -1,3 +1,4 @@
+// GSD-2 doctor git integration tests
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 /**
@@ -759,6 +760,49 @@ describe('doctor-git', async () => {
       // Verify the snapshot commit was created with the gsd snapshot tag
       const log = run("git log -1 --oneline", dir);
       assert.ok(log.includes("gsd snapshot"), "commit is tagged with gsd snapshot");
+    });
+
+    test('stale_uncommitted_changes (skips snapshot when tracked changes contain conflict markers)', async () => {
+      const dir = createRepoWithActiveMilestone();
+      cleanups.push(dir);
+
+      const pastDate = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+      run(`git commit --amend --no-edit --date="${pastDate}"`, dir);
+      execSync(`git commit --amend --no-edit`, {
+        cwd: dir,
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf-8",
+        env: { ...process.env, GIT_COMMITTER_DATE: pastDate },
+      });
+
+      writeFileSync(join(dir, "README.md"), [
+        "# test",
+        "<<<<<<< Updated upstream",
+        "modified content",
+        "=======",
+        "stashed content",
+        ">>>>>>> Stashed changes",
+        "",
+      ].join("\n"));
+
+      const commitsBefore = run("git rev-list --count HEAD", dir);
+      const fixed = await runGSDDoctor(dir, { fix: true });
+      const conflictIssues = fixed.issues.filter(
+        i => i.code === ("conflict_markers_in_tracked_files" as typeof i.code),
+      );
+
+      assert.equal(conflictIssues.length, 1, "detects conflict markers before snapshotting");
+      assert.equal(conflictIssues[0]?.severity, "error", "conflict marker issue blocks automation");
+      assert.equal(conflictIssues[0]?.fixable, false, "conflict marker issue requires manual resolution");
+      assert.ok(
+        fixed.fixesApplied.some(f => f.includes("gsd snapshot skipped")),
+        "fix reports skipped snapshot",
+      );
+
+      const commitsAfter = run("git rev-list --count HEAD", dir);
+      assert.equal(commitsAfter, commitsBefore, "no snapshot commit is created");
+      assert.equal(run("git diff --cached --name-only", dir), "", "no files are staged");
+      assert.match(run("git status --short", dir), /M README\.md/m, "tracked file remains modified");
     });
 
     // ─── Test: stale_uncommitted_changes NOT flagged when recent commit ──

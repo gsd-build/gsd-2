@@ -33,28 +33,21 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { WorktreeLifecycle, type WorktreeLifecycleDeps } from "../worktree-lifecycle.ts";
+import {
+  WorktreeLifecycle,
+  type WorktreeLifecycleDeps,
+  type WorktreeLifecycleTestOverrides,
+} from "../worktree-lifecycle.ts";
 import { WorktreeStateProjection } from "../worktree-state-projection.ts";
 import { MergeConflictError } from "../git-service.ts";
-import { type TaskCommitContext } from "../worktree.ts";
 import type { AutoSession } from "../auto/session.ts";
 
-// Test-local: LegacyTestDeps had three fields Lifecycle does not need
-// (shouldUseWorktreeIsolation, syncWorktreeStateBack, captureIntegrationBranch).
-// Permit them in test fixtures so existing override patterns keep working —
-// Lifecycle ignores the extras via structural typing.
-type LegacyTestDeps = WorktreeLifecycleDeps & {
-  enterAutoWorktree: (basePath: string, milestoneId: string) => string;
-  createAutoWorktree: (basePath: string, milestoneId: string) => string;
-  enterBranchModeForMilestone: (basePath: string, milestoneId: string) => void;
-  getAutoWorktreePath: (basePath: string, milestoneId: string) => string | null;
-  isInAutoWorktree: (basePath: string) => boolean;
-  autoWorktreeBranch: (milestoneId: string) => string;
-  teardownAutoWorktree: (
-    basePath: string,
-    milestoneId: string,
-    opts?: { preserveBranch?: boolean },
-  ) => void;
+// Test-local: extras the WorktreeResolver-era fixture passed but Lifecycle
+// does not need (shouldUseWorktreeIsolation, syncWorktreeStateBack,
+// captureIntegrationBranch). Lifecycle ignores them via structural typing.
+// The C1-C4-inlined primitive overrides come from
+// `WorktreeLifecycleTestOverrides`, the test seam exported by the Module.
+type LegacyTestDeps = WorktreeLifecycleDeps & WorktreeLifecycleTestOverrides & {
   shouldUseWorktreeIsolation?: () => boolean;
   syncWorktreeStateBack?: (
     mainBasePath: string,
@@ -62,27 +55,7 @@ type LegacyTestDeps = WorktreeLifecycleDeps & {
     milestoneId: string,
   ) => { synced: string[] };
   captureIntegrationBranch?: (basePath: string, mid: string | undefined) => void;
-  autoCommitCurrentBranch?: (
-    basePath: string,
-    unitType: string,
-    unitId: string,
-    taskContext?: TaskCommitContext,
-  ) => string | null;
-  getCurrentBranch?: (basePath: string) => string;
-  checkoutBranch?: (basePath: string, branch: string) => void;
-  readFileSync?: (path: string, encoding: BufferEncoding) => string;
-  getIsolationMode?: (basePath?: string) => "worktree" | "branch" | "none";
-  resolveMilestoneFile?: (
-    basePath: string,
-    milestoneId: string,
-    fileType: string,
-  ) => string | null;
   GitServiceImpl?: new (basePath: string, gitConfig: unknown) => unknown;
-  loadEffectiveGSDPreferences?: () =>
-    | { preferences?: { git?: Record<string, unknown> } }
-    | null
-    | undefined;
-  invalidateAllCaches?: () => void;
 };
 
 /**
@@ -133,7 +106,7 @@ function makeDeps(
       _basePath: string,
       _unitType: string,
       _unitId: string,
-      _taskContext?: TaskCommitContext,
+      _taskContext?: unknown,
     ) => null,
     getCurrentBranch: () => "worktree/M001",
     checkoutBranch: () => undefined,

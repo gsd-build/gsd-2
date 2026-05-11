@@ -1,57 +1,25 @@
 // Project/App: GSD-2
-// File Purpose: ADR-015 State Reconciliation module for pre-dispatch runtime invariants.
+// File Purpose: ADR-017 State Reconciliation Module — public entry point.
+// Re-exports the drift-driven implementation from the state-reconciliation/
+// folder so existing import paths (./state-reconciliation.js) keep working.
 
-import { deriveState, invalidateStateCache, type DeriveStateOptions } from "./state.js";
-import type { GSDState } from "./types.js";
+export {
+  reconcileBeforeDispatch,
+  ReconciliationFailedError,
+  DRIFT_REGISTRY,
+} from "./state-reconciliation/index.js";
 
-export type StateReconciliationResult =
-  | {
-      ok: true;
-      stateSnapshot: GSDState;
-      repaired: readonly string[];
-      blockers: readonly string[];
-    }
-  | {
-      ok: false;
-      reason: string;
-      stateSnapshot?: GSDState;
-      repaired: readonly string[];
-      blockers: readonly string[];
-    };
+export type {
+  DriftContext,
+  DriftHandler,
+  DriftRecord,
+  ReconciliationDeps,
+  ReconciliationFailureDetail,
+  ReconciliationResult,
+} from "./state-reconciliation/index.js";
 
-export interface StateReconciliationDeps {
-  invalidateStateCache: () => void;
-  deriveState: (basePath: string, opts?: DeriveStateOptions) => Promise<GSDState>;
-}
-
-const defaultDeps: StateReconciliationDeps = {
-  invalidateStateCache,
-  deriveState,
-};
-
-export async function reconcileBeforeDispatch(
-  basePath: string,
-  deps: StateReconciliationDeps = defaultDeps,
-  opts?: DeriveStateOptions,
-): Promise<StateReconciliationResult> {
-  deps.invalidateStateCache();
-  const stateSnapshot = await deps.deriveState(basePath, opts);
-  const blockers = stateSnapshot.blockers ?? [];
-
-  if (blockers.length > 0 || stateSnapshot.phase === "blocked") {
-    return {
-      ok: false,
-      reason: blockers[0] ?? `State reconciliation blocked in phase ${stateSnapshot.phase}`,
-      stateSnapshot,
-      repaired: ["derive-state-cache-invalidated"],
-      blockers,
-    };
-  }
-
-  return {
-    ok: true,
-    stateSnapshot,
-    repaired: ["derive-state-cache-invalidated"],
-    blockers,
-  };
-}
+export { reconcileBeforeSpawn } from "./state-reconciliation/spawn-gate.js";
+export type {
+  SpawnGateDeps,
+  SpawnGateResult,
+} from "./state-reconciliation/spawn-gate.js";

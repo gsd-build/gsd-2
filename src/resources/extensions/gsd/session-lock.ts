@@ -598,6 +598,47 @@ export function isSessionLockProcessAlive(data: SessionLockData): boolean {
 }
 
 /**
+ * ADR-017 raw primitive: remove orphaned lock artifacts (lock dir + lock file)
+ * when the recorded PID is dead or no metadata is present. Mirrors the
+ * pre-flight cleanup logic in acquireSessionLock so the stale-worker drift
+ * handler can clear the orphan proactively without going through the full
+ * acquire path. No-op when the lock is held by an alive process.
+ *
+ * Returns true when artifacts were removed (drift was present).
+ */
+export function removeStaleSessionLock(basePath: string): boolean {
+  const lp = lockPath(basePath);
+  const gsdDir = gsdRoot(basePath);
+  const lockTarget = effectiveLockTarget(gsdDir);
+  const lockDir = lockTarget + ".lock";
+
+  const existingData = readExistingLockData(lp);
+  const isOrphan =
+    !existingData ||
+    (typeof existingData.pid === "number" && !isPidAlive(existingData.pid));
+  if (!isOrphan) return false;
+
+  let removed = false;
+  if (existsSync(lockDir)) {
+    try {
+      rmSync(lockDir, { recursive: true, force: true });
+      removed = true;
+    } catch {
+      /* best-effort */
+    }
+  }
+  if (existsSync(lp)) {
+    try {
+      unlinkSync(lp);
+      removed = true;
+    } catch {
+      /* best-effort */
+    }
+  }
+  return removed;
+}
+
+/**
  * Returns true if we currently hold a session lock for the given path.
  */
 export function isSessionLockHeld(basePath: string): boolean {

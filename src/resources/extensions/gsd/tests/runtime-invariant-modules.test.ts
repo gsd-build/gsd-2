@@ -42,16 +42,19 @@ test("State Reconciliation invalidates cache and returns reconciled state", asyn
   assert.equal(result.ok && result.stateSnapshot, state);
 });
 
-test("State Reconciliation blocks when derived state carries blockers", async () => {
+test("State Reconciliation surfaces terminal blockers in result (ADR-017)", async () => {
+  // Under ADR-017, blockers are terminal but do not throw — they ride along
+  // in the result so the orchestrator adapter can map them to ok=false.
   const result = await reconcileBeforeDispatch("/project", {
     invalidateStateCache() {},
     async deriveState() {
       return makeState({ phase: "blocked", blockers: ["slice lock missing"] });
     },
+    registry: [],
   });
 
-  assert.equal(result.ok, false);
-  assert.equal(!result.ok && result.reason, "slice lock missing");
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.blockers, ["slice lock missing"]);
 });
 
 test("Tool Contract compiles known Unit prompt and tool policy", () => {

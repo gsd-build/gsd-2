@@ -15,10 +15,10 @@ import {
   insertSlice,
   insertTask,
   setSliceSketchFlag,
-  autoHealSketchFlags,
   getSlice,
 } from "../gsd-db.ts";
 import { deriveStateFromDb, invalidateStateCache } from "../state.ts";
+import { autoHealSketchFlags } from "../state-reconciliation/drift/sketch-flag.ts";
 import { resolveDispatch } from "../auto-dispatch.ts";
 import type { DispatchContext } from "../auto-dispatch.ts";
 

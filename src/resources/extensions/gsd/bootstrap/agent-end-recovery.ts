@@ -12,7 +12,14 @@ import {
   resetEmptyTurnCounter,
 } from "../guided-flow.js";
 import { clearPathCache } from "../paths.js";
-import { getAutoDashboardData, getAutoModeStartModel, isAutoActive, pauseAuto, setCurrentDispatchedModelId } from "../auto.js";
+import {
+  getAutoDashboardData,
+  getAutoModeStartModel,
+  isAutoActive,
+  isAutoCompletionStopInProgress,
+  pauseAuto,
+  setCurrentDispatchedModelId,
+} from "../auto.js";
 import { getNextFallbackModel, resolveModelWithFallbacksForUnit } from "../preferences.js";
 import { pauseAutoForProviderError } from "../provider-error-pause.js";
 import {
@@ -146,8 +153,7 @@ export function isBareClaudeCodeStreamAbortPlaceholder(lastMsg: unknown): boolea
  * Claude Code abort markers are intentionally ignored when the abort fires
  * while the session-switch is in flight: the abort is the expected side-effect
  * of the transition, not a user signal. Other branches (genuine `stopReason
- * === "aborted"` with diagnostic content/errorMessage) preserve the prior
- * behavior.
+ * === "aborted"` with explicit errorMessage) preserve the prior behavior.
  */
 export function _handleSessionSwitchAgentEnd(
   lastMsg: unknown,
@@ -171,10 +177,8 @@ export function _handleSessionSwitchAgentEnd(
   }
 
   if (m.stopReason === "aborted") {
-    const content = m.content;
-    const hasEmptyContent = Array.isArray(content) && content.length === 0;
     const hasErrorMessage = !!m.errorMessage;
-    if (!hasEmptyContent || hasErrorMessage) {
+    if (hasErrorMessage) {
       resolveCancelled(_buildAbortedPauseContext(m as { errorMessage?: unknown }));
     }
   }
@@ -295,6 +299,12 @@ export async function handleAgentEnd(
   }
 
   if (isObjectRecord(lastMsg) && "stopReason" in lastMsg && lastMsg.stopReason === "aborted") {
+    if (isAutoCompletionStopInProgress()) {
+      resetRetryState(retryState);
+      resolveAgentEnd(event);
+      return;
+    }
+
     // Empty content with aborted stopReason is a non-fatal agent stop (the LLM
     // chose to end without producing output). Only pause on genuine fatal aborts
     // that carry error context — e.g. errorMessage field or non-empty content
@@ -326,6 +336,11 @@ export async function handleAgentEnd(
     // errorMessage looks uninformative.
     const rawErrorMsg = ("errorMessage" in lastMsg && lastMsg.errorMessage) ? String(lastMsg.errorMessage) : "";
     if (isUserInitiatedAbortMessage(rawErrorMsg)) {
+      if (isAutoCompletionStopInProgress()) {
+        resetRetryState(retryState);
+        resolveAgentEnd(event);
+        return;
+      }
       resolveAgentEndCancelled({
         message: rawErrorMsg,
         category: "aborted",

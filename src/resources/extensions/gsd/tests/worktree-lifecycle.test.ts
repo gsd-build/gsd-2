@@ -10,10 +10,10 @@ import {
   WorktreeLifecycle,
   resolvePausedResumeBasePath,
   type WorktreeLifecycleDeps,
+  type WorktreeLifecycleTestOverrides,
   type NotifyCtx,
 } from "../worktree-lifecycle.js";
 import { WorktreeStateProjection } from "../worktree-state-projection.js";
-import { type TaskCommitContext } from "../worktree.js";
 import { AutoSession } from "../auto/session.js";
 import { openDatabase, closeDatabase, insertMilestone } from "../gsd-db.js";
 import { registerAutoWorker } from "../db/auto-workers.js";
@@ -26,46 +26,11 @@ interface CallLog {
   args: unknown[];
 }
 
-// ADR-016 phase 2 / C2 retired the worktree-manager fields from
-// WorktreeLifecycleDeps. Tests still pass them via the structural-typing
-// escape hatch (Lifecycle ignores extras) and stub them out as no-ops in
-// makeDeps so existing fixtures keep type-checking.
-type LegacyTestDeps = WorktreeLifecycleDeps & {
-  getAutoWorktreePath?: (
-    basePath: string,
-    milestoneId: string,
-  ) => string | null;
-  isInAutoWorktree?: (basePath: string) => boolean;
-  autoWorktreeBranch?: (milestoneId: string) => string;
-  teardownAutoWorktree?: (
-    basePath: string,
-    milestoneId: string,
-    opts?: { preserveBranch?: boolean },
-  ) => void;
-  enterAutoWorktree?: (basePath: string, milestoneId: string) => string;
-  createAutoWorktree?: (basePath: string, milestoneId: string) => string;
-  enterBranchModeForMilestone?: (basePath: string, milestoneId: string) => void;
-  autoCommitCurrentBranch?: (
-    basePath: string,
-    reasonOrUnitType: string,
-    milestoneOrUnitId: string,
-    taskContext?: TaskCommitContext,
-  ) => string | null | void;
-  getCurrentBranch?: (basePath: string) => string;
-  checkoutBranch?: (basePath: string, branch: string) => void;
-  readFileSync?: (path: string, encoding: BufferEncoding) => string;
-  getIsolationMode?: (basePath?: string) => "worktree" | "branch" | "none";
-  invalidateAllCaches?: () => void;
-  loadEffectiveGSDPreferences?: () =>
-    | { preferences?: { git?: Record<string, unknown> } }
-    | null
-    | undefined;
-  resolveMilestoneFile?: (
-    basePath: string,
-    milestoneId: string,
-    fileType: string,
-  ) => string | null;
-};
+// The C1-C4-inlined primitive overrides come from
+// `WorktreeLifecycleTestOverrides`, the test seam exported by the Module.
+// Lifecycle reads these through `primitiveOverrides()` when present and
+// falls back to direct imports otherwise.
+type LegacyTestDeps = WorktreeLifecycleDeps & WorktreeLifecycleTestOverrides;
 
 function makeSession(overrides?: Partial<AutoSession>): AutoSession {
   const s = new AutoSession();
@@ -100,7 +65,7 @@ function makeDeps(
       basePath: string,
       unitType: string,
       unitId: string,
-      taskContext?: TaskCommitContext,
+      taskContext?: unknown,
     ) => {
       calls.push({ fn: "autoCommitCurrentBranch", args: [basePath, unitType, unitId, taskContext] });
       return null;

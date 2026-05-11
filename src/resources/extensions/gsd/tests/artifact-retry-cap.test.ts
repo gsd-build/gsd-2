@@ -62,7 +62,7 @@ test("#2007 bug 2: recentUnits.push is unconditional — not gated on pendingVer
   );
 });
 
-test("#2007 bug 2: detectStuck is still inside the pendingVerificationRetry guard", () => {
+test("#2007 bug 2: pendingVerificationRetry state is available for dispatch regression coverage", () => {
   const s = new AutoSession();
   s.pendingVerificationRetry = {
     unitId: "M001/S01/T01",

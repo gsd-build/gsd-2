@@ -35,6 +35,12 @@ test("auto execute-task requires canonical task completion tool", () => {
   assert.deepEqual(getRequiredWorkflowToolsForAutoUnit("execute-task"), ["gsd_task_complete"]);
 });
 
+test("complete-slice requires closeout and execution handoff tools", () => {
+  const expected = ["gsd_slice_complete", "gsd_task_reopen", "gsd_replan_slice"];
+  assert.deepEqual(getRequiredWorkflowToolsForGuidedUnit("complete-slice"), expected);
+  assert.deepEqual(getRequiredWorkflowToolsForAutoUnit("complete-slice"), expected);
+});
+
 test("deep project setup units declare required workflow MCP tools", () => {
   assert.deepEqual(getRequiredWorkflowToolsForGuidedUnit("discuss-project"), [
     "ask_user_questions",

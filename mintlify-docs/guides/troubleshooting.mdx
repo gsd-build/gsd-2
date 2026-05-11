@@ -73,6 +73,12 @@ It checks file structure, referential integrity, completion state consistency, g
     GSD auto-resolves conflicts on `.gsd/` runtime files. For code conflicts, the LLM attempts resolution. If that fails, resolve manually.
   </Accordion>
 
+  <Accordion title="Startup warns that memory consolidation is incomplete">
+    **Cause:** The ADR-013 preflight scanner found active `decisions` rows or `.gsd/KNOWLEDGE.md` rows that do not yet have matching entries in the canonical `memories` table.
+
+    **Fix:** Run `/gsd doctor` to inspect the counts and sample rows. Complete the decisions or KNOWLEDGE.md backfill before cutover; do not delete legacy knowledge files or database rows just to silence the warning.
+  </Accordion>
+
   <Accordion title="EBUSY / EPERM / EACCES on Windows">
     **Cause:** Antivirus, indexers, or editors briefly locking files during atomic rename.
 

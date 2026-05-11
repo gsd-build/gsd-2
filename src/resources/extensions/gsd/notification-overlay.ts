@@ -1,9 +1,8 @@
-// GSD Extension — Notification History Overlay
-// Scrollable panel showing all persisted notifications with severity filtering.
-// Toggled with Ctrl+Alt+N (⌃⌥N on macOS), Ctrl+Shift+N fallback, or /gsd notifications.
+// Project/App: GSD-2
+// File Purpose: Notification history overlay with severity filtering and width-safe TUI rendering.
 
 import type { Theme } from "@gsd/pi-coding-agent";
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi, matchesKey, Key } from "@gsd/pi-tui";
+import { truncateToWidth, visibleWidth, matchesKey, Key } from "@gsd/pi-tui";
 
 import {
   readNotifications,
@@ -14,10 +13,32 @@ import {
   type NotifySeverity,
 } from "./notification-store.js";
 import { formattedShortcutPair } from "./shortcut-defs.js";
-import { padRight, joinColumns } from "../shared/mod.js";
+import {
+  padRightVisible,
+  renderFrame,
+  renderKeyHints,
+  rightAlign,
+  wrapVisibleText,
+} from "./tui/render-kit.js";
 
-type FilterMode = "all" | "error" | "warning" | "info";
-const FILTER_CYCLE: FilterMode[] = ["all", "error", "warning", "info"];
+type FilterMode = "all" | "error" | "warning" | "success" | "info";
+const FILTER_CYCLE: FilterMode[] = ["all", "error", "warning", "success", "info"];
+const OVERLAY_WIDTH = "58%";
+const OVERLAY_MIN_WIDTH = 68;
+const OVERLAY_MAX_HEIGHT_PERCENT = 52;
+const OVERLAY_MARGIN = { top: 2, right: 2, bottom: 6, left: 2 } as const;
+
+export function notificationOverlayOptions() {
+  return {
+    width: OVERLAY_WIDTH,
+    minWidth: OVERLAY_MIN_WIDTH,
+    maxHeight: `${OVERLAY_MAX_HEIGHT_PERCENT}%`,
+    anchor: "top-center",
+    row: "24%",
+    margin: OVERLAY_MARGIN,
+    backdrop: true,
+  } as const;
+}
 
 function severityIcon(severity: NotifySeverity): string {
   switch (severity) {
@@ -27,17 +48,6 @@ function severityIcon(severity: NotifySeverity): string {
     case "info":
     default: return "●";
   }
-}
-
-/** Column-aware word wrap using pi-tui's native wrapper (handles unicode/ANSI). */
-function wrapText(text: string, maxWidth: number): string[] {
-  if (maxWidth <= 0) return [text];
-  const lines = wrapTextWithAnsi(text, maxWidth);
-  // Safety clamp: if any line still exceeds maxWidth (e.g. unbreakable long token),
-  // truncate it with an ellipsis so it cannot bleed past the box border.
-  return lines.map((l) =>
-    visibleWidth(l) > maxWidth ? truncateToWidth(l, maxWidth, "…") : l,
-  );
 }
 
 function formatTimestamp(ts: string): string {
@@ -184,13 +194,19 @@ export class GSDNotificationOverlay {
     }
 
     const content = this.buildContentLines(width);
-    const maxVisibleRows = Math.max(5, process.stdout.rows ? process.stdout.rows - 8 : 24) - 2;
+    const terminalRows = process.stdout.rows || 32;
+    const availableRows = Math.max(1, terminalRows - OVERLAY_MARGIN.top - OVERLAY_MARGIN.bottom);
+    const overlayRows = Math.min(
+      availableRows,
+      Math.max(1, Math.floor((terminalRows * OVERLAY_MAX_HEIGHT_PERCENT) / 100)),
+    );
+    const maxVisibleRows = Math.max(5, overlayRows - 2);
     const visibleContentRows = Math.min(content.length, maxVisibleRows);
     const maxScroll = Math.max(0, content.length - visibleContentRows);
     this.scrollOffset = Math.min(this.scrollOffset, maxScroll);
     const visibleContent = content.slice(this.scrollOffset, this.scrollOffset + visibleContentRows);
 
-    const lines = this.wrapInBox(visibleContent, width);
+    const lines = renderFrame(this.theme, visibleContent, width);
 
     this.cachedWidth = width;
     this.cachedLines = lines;
@@ -227,33 +243,15 @@ export class GSDNotificationOverlay {
     }
   }
 
-  private wrapInBox(inner: string[], width: number): string[] {
-    const th = this.theme;
-    const border = (s: string) => th.fg("borderAccent", s);
-    const innerWidth = width - 4;
-    const lines: string[] = [];
-
-    lines.push(border("╭" + "─".repeat(width - 2) + "╮"));
-    for (const line of inner) {
-      const truncated = truncateToWidth(line, innerWidth);
-      const padWidth = Math.max(0, innerWidth - visibleWidth(truncated));
-      lines.push(border("│") + " " + truncated + " ".repeat(padWidth) + " " + border("│"));
-    }
-    lines.push(border("╰" + "─".repeat(width - 2) + "╯"));
-    return lines;
-  }
-
   private buildContentLines(width: number): string[] {
     const th = this.theme;
-    const shellWidth = width - 4;
-    const contentWidth = Math.min(shellWidth, 128);
-    const sidePad = Math.max(0, Math.floor((shellWidth - contentWidth) / 2));
-    const leftMargin = " ".repeat(sidePad);
+    const shellWidth = Math.max(1, width - 4);
+    const contentWidth = shellWidth;
     const lines: string[] = [];
 
     const row = (content = ""): string => {
       const truncated = truncateToWidth(content, contentWidth);
-      return leftMargin + padRight(truncated, contentWidth);
+      return padRightVisible(truncated, contentWidth);
     };
     const blank = () => row("");
     const hr = () => row(th.fg("dim", "─".repeat(contentWidth)));
@@ -262,9 +260,15 @@ export class GSDNotificationOverlay {
     const title = th.fg("accent", th.bold("Notifications"));
     const filterLabel = this.filter === "all"
       ? th.fg("dim", "all")
-      : th.fg(this.filter === "error" ? "error" : this.filter === "warning" ? "warning" : "dim", this.filter);
+      : th.fg(
+        this.filter === "error" ? "error"
+          : this.filter === "warning" ? "warning"
+            : this.filter === "success" ? "success"
+              : "dim",
+        this.filter,
+      );
     const count = `${this.filteredEntries.length} entries`;
-    lines.push(row(joinColumns(
+    lines.push(row(rightAlign(
       `${title}  ${th.fg("dim", "filter:")} ${filterLabel}`,
       th.fg("dim", count),
       contentWidth,
@@ -273,7 +277,7 @@ export class GSDNotificationOverlay {
 
     // Controls
     const closeShortcut = formattedShortcutPair("notifications");
-    lines.push(row(th.fg("dim", `↑/↓ scroll  f filter  c clear  Esc close  (${closeShortcut})`)));
+    lines.push(row(renderKeyHints(th, ["↑/↓ scroll", "f filter", "c clear", `Esc/${closeShortcut} close`], contentWidth)));
     lines.push(blank());
 
     // Entries
@@ -302,7 +306,7 @@ export class GSDNotificationOverlay {
       const msgMaxWidth = Math.max(10, contentWidth - prefixWidth);
 
       // Wrap long messages onto continuation lines indented to align with message start
-      const msgLines = wrapText(entry.message, msgMaxWidth);
+      const msgLines = wrapVisibleText(entry.message, msgMaxWidth);
       const indent = " ".repeat(prefixWidth);
       for (let i = 0; i < msgLines.length; i++) {
         if (i === 0) {

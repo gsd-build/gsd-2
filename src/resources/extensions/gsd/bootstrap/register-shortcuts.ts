@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Registers GSD keyboard shortcuts for dashboard, notifications, and parallel overlays.
+
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -39,18 +42,12 @@ export function registerShortcuts(pi: ExtensionAPI): void {
   };
 
   const openNotificationsOverlay = async (ctx: ExtensionContext) => {
-    const { GSDNotificationOverlay } = await import("../notification-overlay.js");
+    const { GSDNotificationOverlay, notificationOverlayOptions } = await import("../notification-overlay.js");
     await ctx.ui.custom<boolean>(
       (tui, theme, _kb, done) => new GSDNotificationOverlay(tui, theme, () => done(true)),
       {
         overlay: true,
-        overlayOptions: {
-          width: "80%",
-          minWidth: 60,
-          maxHeight: "88%",
-          anchor: "center",
-          backdrop: true,
-        },
+        overlayOptions: notificationOverlayOptions(),
       },
     );
   };

@@ -1,13 +1,16 @@
+// Project/App: GSD-2
+// File Purpose: Left-edge user message rail renderer for interactive chat transcripts.
+
 import { Container, Markdown, type MarkdownTheme } from "@gsd/pi-tui";
 import { getMarkdownTheme } from "../theme/theme.js";
-import { type TimestampFormat } from "./timestamp.js";
-import { renderChatFrame } from "./chat-frame.js";
+import { formatTimestamp, type TimestampFormat } from "./timestamp.js";
+import { chatMessageWidth, renderUserRail } from "./transcript-design.js";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
 
 /**
- * Component that renders a user message with a right-aligned timestamp.
+ * Component that renders a user message against the left edge of the chat transcript.
  */
 export class UserMessageComponent extends Container {
 	private timestamp: number | undefined;
@@ -22,14 +25,16 @@ export class UserMessageComponent extends Container {
 
 	override render(width: number): string[] {
 		const frameWidth = Math.max(20, width);
-		const contentWidth = Math.max(1, frameWidth - 4);
+		const messageWidth = chatMessageWidth(frameWidth);
+		const contentWidth = Math.max(1, messageWidth - 2);
 		const lines = super.render(contentWidth);
-		const framed = renderChatFrame(lines, frameWidth, {
+		const meta =
+			this.timestamp !== undefined
+				? formatTimestamp(this.timestamp, this.timestampFormat)
+				: undefined;
+		const framed = renderUserRail(lines, frameWidth, {
 			label: "You",
-			tone: "user",
-			timestamp: this.timestamp,
-			timestampFormat: this.timestampFormat,
-			showTimestamp: true,
+			meta,
 		});
 		if (framed.length === 0) {
 			return framed;

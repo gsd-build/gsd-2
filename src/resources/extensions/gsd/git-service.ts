@@ -37,6 +37,7 @@ import {
   nativeAddPaths,
   nativeResetSoft,
   nativeCommitSubject,
+  nativeIsIgnored,
   _resetHasChangesCache,
 } from "./native-git-bridge.js";
 import { GSDError, GSD_MERGE_CONFLICT, GSD_GIT_ERROR } from "./errors.js";
@@ -760,6 +761,7 @@ export class GitServiceImpl {
     const normalized = keyFiles
       .map(file => normalizeRepoRelativePath(this.basePath, file))
       .filter((file): file is string => file !== null)
+      .filter(file => !nativeIsIgnored(this.basePath, file))
       .filter(file => !isExcludedScopedPath(file, allExclusions));
 
     // Drop entries that don't exist on disk. The LLM occasionally lists files

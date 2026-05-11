@@ -5,7 +5,7 @@
 // All functions degrade gracefully: return empty results when DB unavailable, never throw.
 
 import { isDbAvailable, _getAdapter } from './gsd-db.js';
-import type { Decision, Requirement } from './types.js';
+import type { Decision, DecisionMadeBy, Requirement } from './types.js';
 
 // ─── Query Functions ───────────────────────────────────────────────────────
 
@@ -61,6 +61,89 @@ export function queryDecisions(opts?: DecisionQueryOpts): Decision[] {
       made_by: (row['made_by'] as string as import('./types.js').DecisionMadeBy) ?? 'agent',
       superseded_by: null,
     }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * ADR-013 Phase 6 cutover (Stage 1): read active decisions from the `memories`
+ * table instead of the legacy `decisions` table. Returns the same `Decision[]`
+ * shape as `queryDecisions` so downstream formatters work unchanged.
+ *
+ * Filter semantics match `queryDecisions` exactly:
+ * - active only (memory's own `superseded_by IS NULL`)
+ * - `milestoneId`: matches when the JSON value of `structured_fields.when_context`
+ *   contains the milestone token, mirroring `when_context LIKE '%milestoneId%'`
+ *   on the legacy table
+ * - `scope`: exact match on `structured_fields.scope`, mirroring `scope = :scope`
+ *
+ * Both surfaces filter to active rows, so once the Phase 5 dual-write is
+ * caught up (PR #5765's scanner reading zero gaps), `queryDecisions` and
+ * `queryDecisionsFromMemories` return byte-equivalent results.
+ *
+ * `superseded_by` is always `null` here: the `decisions` table's
+ * supersedes-chain is not preserved by today's backfill (only active rows
+ * are migrated), so the field has no source in memories. Acceptable for
+ * prompt inlining, which never reads superseded entries.
+ */
+export function queryDecisionsFromMemories(opts?: DecisionQueryOpts): Decision[] {
+  if (!isDbAvailable()) return [];
+  const adapter = _getAdapter();
+  if (!adapter) return [];
+
+  try {
+    const clauses: string[] = [
+      "category = 'architecture'",
+      "structured_fields LIKE '%\"sourceDecisionId\":\"%'",
+      "superseded_by IS NULL",
+    ];
+    const params: Record<string, unknown> = {};
+
+    if (opts?.milestoneId) {
+      // when_context is a free-text JSON value; substring match preserves the
+      // semantics of `when_context LIKE '%milestoneId%'` on the legacy table.
+      clauses.push("json_extract(structured_fields, '$.when_context') LIKE :milestone_pattern");
+      params[':milestone_pattern'] = `%${opts.milestoneId}%`;
+    }
+
+    if (opts?.scope) {
+      clauses.push("json_extract(structured_fields, '$.scope') = :scope");
+      params[':scope'] = opts.scope;
+    }
+
+    const sql = `SELECT seq, structured_fields FROM memories WHERE ${clauses.join(' AND ')} ORDER BY seq`;
+    const rows = adapter.prepare(sql).all(params) as Array<Record<string, unknown>>;
+
+    const decisions: Decision[] = [];
+    for (const row of rows) {
+      const seq = row['seq'] as number;
+      const sfRaw = row['structured_fields'] as string | null;
+      if (!sfRaw) continue;
+      let sf: Record<string, unknown>;
+      try {
+        sf = JSON.parse(sfRaw) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      const sourceId = sf['sourceDecisionId'];
+      if (typeof sourceId !== 'string' || sourceId.length === 0) continue;
+
+      decisions.push({
+        seq,
+        id: sourceId,
+        when_context: typeof sf['when_context'] === 'string' ? (sf['when_context'] as string) : '',
+        scope: typeof sf['scope'] === 'string' ? (sf['scope'] as string) : '',
+        decision: typeof sf['decision'] === 'string' ? (sf['decision'] as string) : '',
+        choice: typeof sf['choice'] === 'string' ? (sf['choice'] as string) : '',
+        rationale: typeof sf['rationale'] === 'string' ? (sf['rationale'] as string) : '',
+        revisable: typeof sf['revisable'] === 'string' ? (sf['revisable'] as string) : '',
+        made_by: ((typeof sf['made_by'] === 'string' ? sf['made_by'] : 'agent') as DecisionMadeBy),
+        superseded_by: null,
+      });
+    }
+
+    return decisions;
   } catch {
     return [];
   }

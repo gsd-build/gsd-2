@@ -1,23 +1,23 @@
-/**
- * GSD Parallel Monitor Overlay
- *
- * Full-screen TUI overlay showing real-time parallel worker progress.
- * Opened via `/gsd parallel watch`, Ctrl+Alt+P (⌃⌥P on macOS),
- * or Ctrl+Shift+P fallback.
- * Reads the same data sources as `scripts/parallel-monitor.mjs` but
- * renders as a native pi-tui overlay with theme integration.
- */
+// Project/App: GSD-2
+// File Purpose: Parallel worker monitor overlay with width-safe operations-console rendering.
 
 import { existsSync, statSync, readFileSync, openSync, readSync, closeSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import type { Theme } from "@gsd/pi-coding-agent";
-import { truncateToWidth, visibleWidth, matchesKey, Key } from "@gsd/pi-tui";
+import { matchesKey, Key } from "@gsd/pi-tui";
 
-import { formatDuration, STATUS_GLYPH, STATUS_COLOR } from "../shared/mod.js";
+import { formatDuration } from "../shared/mod.js";
 import { formattedShortcutPair } from "./shortcut-defs.js";
 import { resolveGsdPathContract } from "./paths.js";
+import {
+  renderBar,
+  renderKeyHints,
+  renderProgressBar,
+  safeLine,
+  statusGlyph,
+} from "./tui/render-kit.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -277,17 +277,6 @@ function unitTypeLabel(unitType: string | null): string {
   return labels[unitType || ""] || (unitType || "---").toUpperCase().slice(0, 5);
 }
 
-function progressBar(done: number, total: number, width: number): string {
-  if (total === 0) return "░".repeat(width);
-  const filled = Math.round((done / total) * width);
-  return "█".repeat(filled) + "░".repeat(width - filled);
-}
-
-function healthGlyph(alive: boolean, heartbeatAge: number): string {
-  if (!alive) return "○";
-  return "●";
-}
-
 // ─── Overlay Class ────────────────────────────────────────────────────────
 
 export class ParallelMonitorOverlay {
@@ -299,6 +288,7 @@ export class ParallelMonitorOverlay {
   private workers: WorkerView[] = [];
   private events: string[] = [];
   private cachedLines?: string[];
+  private cachedWidth?: number;
   private scrollOffset = 0;
   private disposed = false;
   private resizeHandler: (() => void) | null = null;
@@ -339,6 +329,7 @@ export class ParallelMonitorOverlay {
     this.events = this.events.slice(-10);
 
     this.cachedLines = undefined;
+    this.cachedWidth = undefined;
     this.tui.requestRender();
   }
 
@@ -378,14 +369,15 @@ export class ParallelMonitorOverlay {
 
   invalidate(): void {
     this.cachedLines = undefined;
+    this.cachedWidth = undefined;
   }
 
   render(width: number): string[] {
-    if (this.cachedLines) return this.cachedLines;
+    if (this.cachedLines && this.cachedWidth === width) return this.cachedLines;
 
     const t = this.theme;
     const lines: string[] = [];
-    const w = Math.max(width, 60);
+    const w = Math.max(1, width);
 
     // Header
     const totalCost = this.workers.reduce((s, wk) => s + wk.cost, 0);
@@ -398,7 +390,7 @@ export class ParallelMonitorOverlay {
       t.bold(`$${totalCost.toFixed(2)}`) +
       t.fg("muted", "  │  5s refresh"),
     );
-    lines.push(t.fg("muted", "─".repeat(w)));
+    lines.push(renderBar(t, w));
 
     if (this.workers.length === 0) {
       lines.push("");
@@ -410,7 +402,7 @@ export class ParallelMonitorOverlay {
 
         // Health + ID + state
         const healthColor = wk.alive ? "success" : "error";
-        const glyph = healthGlyph(wk.alive, wk.heartbeatAge);
+        const glyph = statusGlyph(t, wk.alive ? "active" : "idle");
         const stateText = wk.alive
           ? t.fg("success", "RUNNING")
           : t.fg("error", t.bold("DEAD"));
@@ -452,25 +444,29 @@ export class ParallelMonitorOverlay {
           lines.push(`     ${t.fg("muted", "slices")}  ${chips.join("  ")}`);
 
           // Task progress bar
-          const bar = progressBar(wk.doneTasks, wk.totalTasks, 25);
+          const barWidth = Math.max(6, Math.min(25, w - 32));
+          const bar = renderProgressBar(t, wk.doneTasks, wk.totalTasks, barWidth, {
+            filledChar: "█",
+            emptyChar: "░",
+            emptyColor: "dim",
+          });
           const pct = wk.totalTasks > 0 ? Math.round((wk.doneTasks / wk.totalTasks) * 100) : 0;
           lines.push(
-            `     ${t.fg("muted", "tasks")}   ${t.fg("success", bar)}  ${wk.doneTasks}/${wk.totalTasks} ` +
+            `     ${t.fg("muted", "tasks")}   ${bar}  ${wk.doneTasks}/${wk.totalTasks} ` +
             t.fg("muted", `(${pct}%)  │  slices done ${wk.doneSlices}/${wk.totalSlices}`),
           );
         }
 
         // Errors
         for (const err of wk.errors.slice(-2)) {
-          const truncated = err.length > w - 10 ? err.slice(0, w - 11) + "…" : err;
-          lines.push(`     ${t.fg("error", "⚠ " + truncated)}`);
+          lines.push(`     ${t.fg("error", "! " + err)}`);
         }
       }
     }
 
     // Event feed
     lines.push("");
-    lines.push(t.fg("muted", "─".repeat(w)));
+    lines.push(renderBar(t, w));
     lines.push(`  ${t.bold("Recent Events")}`);
 
     if (this.events.length === 0) {
@@ -478,8 +474,7 @@ export class ParallelMonitorOverlay {
     } else {
       for (const evt of this.events.slice(-8)) {
         const mid = evt.match(/^✓ (M\d+)\//)?.[1] || "";
-        const truncated = evt.length > w - 10 ? evt.slice(0, w - 11) + "…" : evt;
-        lines.push(`  ${t.fg("muted", "│")} ${t.fg("accent", mid)} ${truncated.replace(/^✓ M\d+\//, "")}`);
+        lines.push(`  ${t.fg("muted", "│")} ${t.fg("accent", mid)} ${evt.replace(/^✓ M\d+\//, "")}`);
       }
     }
 
@@ -496,14 +491,17 @@ export class ParallelMonitorOverlay {
       }
       lines.push(`  ${t.bold("Total: $" + this.workers.reduce((s, wk) => s + wk.cost, 0).toFixed(2))}`);
     }
-    lines.push(t.fg("muted", `  ESC/q/${formattedShortcutPair("parallel")} close  │  ↑↓ scroll`));
+    lines.push(renderKeyHints(t, [`ESC/q/${formattedShortcutPair("parallel")} close`, "↑↓ scroll"], w));
 
     // Apply scroll — use terminal rows as height estimate
     const termHeight = process.stdout.rows || 40;
     const maxScroll = Math.max(0, lines.length - termHeight);
     this.scrollOffset = Math.min(Math.max(this.scrollOffset, 0), maxScroll);
-    const visible = lines.slice(this.scrollOffset, this.scrollOffset + termHeight);
+    const visible = lines
+      .slice(this.scrollOffset, this.scrollOffset + termHeight)
+      .map((line) => safeLine(line, w));
     this.cachedLines = visible;
+    this.cachedWidth = width;
     return visible;
   }
 }

@@ -399,6 +399,12 @@ export async function autoLoop(
 
     let dispatchId: number | null = null;
     let dispatchSettled = false;
+    let iterationEndEmitted = false;
+    const emitIterationEnd = (details: Record<string, unknown> = {}): void => {
+      if (iterationEndEmitted) return;
+      iterationEndEmitted = true;
+      journalReporter.emit("iteration-end", { iteration, ...details });
+    };
     const completeIteration = (): void => {
       completeWorkflowIteration({
         get consecutiveErrors() { return consecutiveErrors; },
@@ -407,10 +413,14 @@ export async function autoLoop(
         set consecutiveCooldowns(value) { consecutiveCooldowns = value; },
         recentErrorMessages,
       }, {
-        emitIterationEnd: () => journalReporter.emit("iteration-end", { iteration }),
+        emitIterationEnd: () => emitIterationEnd(),
         saveStuckState: () => saveStuckState(s, loopState),
         logIterationComplete: () => debugLog("autoLoop", { phase: "iteration-complete", iteration }),
       });
+    };
+    const finishIncompleteIteration = (details: Record<string, unknown>): void => {
+      emitIterationEnd(details);
+      saveStuckState(s, loopState);
     };
 
     try {
@@ -492,6 +502,7 @@ export async function autoLoop(
         });
         if (engineState.isComplete) {
           finishTurn("completed");
+          emitIterationEnd({ status: "completed", reason: "custom-engine-complete" });
           await deps.stopAuto(ctx, pi, "Workflow complete");
           break;
         }
@@ -509,16 +520,23 @@ export async function autoLoop(
         });
         if (dispatchFlow.action === "break") {
           finishTurn("stopped", "manual-attention", "custom-engine-dispatch-stop");
+          finishIncompleteIteration({
+            status: "stopped",
+            reason: "custom-engine-dispatch-stop",
+            failureClass: "manual-attention",
+          });
           break;
         }
         if (dispatchFlow.action === "continue") {
           finishTurn("skipped");
+          emitIterationEnd({ status: "skipped", reason: "custom-engine-dispatch-skip" });
           continue;
         }
 
         // dispatch.action === "dispatch"
         if (dispatch.action !== "dispatch") {
           finishTurn("skipped");
+          emitIterationEnd({ status: "skipped", reason: "custom-engine-dispatch-mismatch" });
           continue;
         }
         const step = dispatch.step;
@@ -547,6 +565,13 @@ export async function autoLoop(
         });
         if (guardsResult.action === "break") {
           finishTurn("stopped", "manual-attention", "guard-break");
+          finishIncompleteIteration({
+            status: "stopped",
+            reason: "guard-break",
+            unitType: iterData.unitType,
+            unitId: iterData.unitId,
+            failureClass: "manual-attention",
+          });
           break;
         }
 
@@ -578,6 +603,13 @@ export async function autoLoop(
           unitId: iterData.unitId,
         });
         if (unitPhaseResult.action === "break") {
+          finishIncompleteIteration({
+            status: "stopped",
+            reason: unitPhaseResult.reason ?? "unit-break",
+            unitType: iterData.unitType,
+            unitId: iterData.unitId,
+            failureClass: "execution",
+          });
           finishTurn("stopped", "execution", "unit-break");
           break;
         }
@@ -596,7 +628,16 @@ export async function autoLoop(
               finishTurn,
             },
           });
-          if (verifyFlow.action === "break") break;
+          if (verifyFlow.action === "break") {
+            finishIncompleteIteration({
+              status: "paused",
+              reason: "custom-engine-verify-pause",
+              unitType: iterData.unitType,
+              unitId: iterData.unitId,
+              failureClass: "manual-attention",
+            });
+            break;
+          }
         }
         if (verifyResult === "retry") {
           const retryOutcome = await handleCustomEngineVerifyRetry({
@@ -630,7 +671,22 @@ export async function autoLoop(
               finishTurn,
             },
           });
-          if (retryFlow.action === "break") break;
+          if (retryFlow.action === "break") {
+            finishIncompleteIteration({
+              status: retryOutcome.action === "stop" ? "stopped" : "paused",
+              reason: retryOutcome.action === "retry" ? "custom-engine-verify-retry" : retryOutcome.turnError,
+              unitType: iterData.unitType,
+              unitId: iterData.unitId,
+              failureClass: "manual-attention",
+            });
+            break;
+          }
+          finishIncompleteIteration({
+            status: "retry",
+            reason: "custom-engine-verify-retry",
+            unitType: iterData.unitType,
+            unitId: iterData.unitId,
+          });
           continue;
         }
 
@@ -841,6 +897,13 @@ export async function autoLoop(
           markFailed: markDispatchFailed,
           logWriteFailure: logDispatchLedgerWriteFailure,
         }) || dispatchSettled;
+        finishIncompleteIteration({
+          status: "stopped",
+          reason: unitPhaseResult.reason ?? "unit-break",
+          unitType: iterData.unitType,
+          unitId: iterData.unitId,
+          failureClass: "execution",
+        });
         finishTurn("stopped", "execution", "unit-break");
         break;
       }
@@ -848,12 +911,25 @@ export async function autoLoop(
       // ── Phase 5: Finalize ───────────────────────────────────────────────
 
       let finalizeResult: Awaited<ReturnType<typeof runFinalize>>;
+      journalReporter.emit("post-unit-finalize-start", {
+        iteration,
+        unitType: iterData.unitType,
+        unitId: iterData.unitId,
+      });
       try {
         finalizeResult = await runFinalize(ic, iterData, loopState, sidecarItem);
       } catch (err) {
+        const error = formatDispatchExceptionSummary({ error: err });
+        journalReporter.emit("post-unit-finalize-end", {
+          iteration,
+          unitType: iterData.unitType,
+          unitId: iterData.unitId,
+          status: "failed",
+          error,
+        });
         dispatchSettled = settleDispatchFailed(
           dispatchId,
-          formatDispatchExceptionSummary({ error: err }),
+          error,
           {
             markFailed: markDispatchFailed,
             logWriteFailure: logDispatchLedgerWriteFailure,
@@ -864,6 +940,15 @@ export async function autoLoop(
       phaseReporter.report("finalize", finalizeResult.action, {
         unitType: iterData.unitType,
         unitId: iterData.unitId,
+      });
+      const finalizeReason = finalizeResult.action === "break" ? finalizeResult.reason : undefined;
+      journalReporter.emit("post-unit-finalize-end", {
+        iteration,
+        unitType: iterData.unitType,
+        unitId: iterData.unitId,
+        status: finalizeResult.action === "next" ? "completed" : finalizeResult.action === "continue" ? "retry" : "stopped",
+        action: finalizeResult.action,
+        ...(finalizeReason ? { reason: finalizeReason } : {}),
       });
       const finalizeDecision = decideFinalizeResult(
         finalizeResult.action === "break"
@@ -877,6 +962,13 @@ export async function autoLoop(
           markFailed: markDispatchFailed,
           logWriteFailure: logDispatchLedgerWriteFailure,
         }) || dispatchSettled;
+        finishIncompleteIteration({
+          status: "stopped",
+          reason: finalizeReason ?? "finalize-break",
+          unitType: iterData.unitType,
+          unitId: iterData.unitId,
+          failureClass: finalizeDecision.failureClass,
+        });
         finishTurn("stopped", finalizeDecision.failureClass, finalizeDecision.turnError);
         break;
       }
@@ -885,6 +977,12 @@ export async function autoLoop(
           markFailed: markDispatchFailed,
           logWriteFailure: logDispatchLedgerWriteFailure,
         }) || dispatchSettled;
+        finishIncompleteIteration({
+          status: "retry",
+          reason: "finalize-retry",
+          unitType: iterData.unitType,
+          unitId: iterData.unitId,
+        });
         finishTurn("retry");
         continue;
       }
@@ -908,11 +1006,6 @@ export async function autoLoop(
           },
         ) || dispatchSettled;
       }
-
-      // Always emit iteration-end on error so the journal records iteration
-      // completion even on failure (#2344). Without this, errors in
-      // runFinalize leave the journal incomplete, making diagnosis harder.
-      journalReporter.emit("iteration-end", { iteration, error: msg });
 
       // ── Pre-send model-policy block: not a retryable error (#4959 / #4850) ──
       // The model-policy gate runs before the prompt is sent.  When every
@@ -938,6 +1031,12 @@ export async function autoLoop(
         });
         ctx.ui.notify(policyDecision.notifyMessage, "error");
         journalReporter.emit("unit-end", policyDecision.journalData);
+        finishIncompleteIteration({
+          status: "blocked",
+          reason: "model-policy-dispatch-blocked",
+          unitType: loopErr.unitType,
+          unitId: loopErr.unitId,
+        });
         // Carry the blocked unit identity into the turn-result observer:
         // the throw originated inside dispatch, so observedUnitType/Id were
         // not assigned by the success path at lines 453/631/647 — but the
@@ -950,6 +1049,11 @@ export async function autoLoop(
         // not a transient runtime fault.
         break;
       }
+
+      // Always emit iteration-end on error so the journal records iteration
+      // completion even on failure (#2344). Without this, errors in
+      // runFinalize leave the journal incomplete, making diagnosis harder.
+      finishIncompleteIteration({ status: "failed", error: msg });
 
       // ── Infrastructure errors: immediate stop, no retry ──
       // These are unrecoverable (disk full, OOM, etc.). Retrying just burns

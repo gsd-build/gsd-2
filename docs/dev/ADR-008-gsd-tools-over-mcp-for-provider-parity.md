@@ -1,9 +1,23 @@
 # ADR-008: Expose GSD Workflow Tools Over MCP for Provider Parity
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-04-09
+**Implemented:** 2026-05 (all six phases + validation parity test)
 **Deciders:** Jeremy McSpadden
 **Related:** ADR-004 (capability-aware model routing), ADR-007 (model catalog split and provider API encapsulation), `src/resources/extensions/gsd/bootstrap/db-tools.ts`, `src/resources/extensions/claude-code-cli/stream-adapter.ts`, `packages/mcp-server/src/server.ts`
+
+## Implementation status
+
+| Phase | Status | Evidence |
+|---|---|---|
+| 1. Extract shared handlers | ✅ | `src/resources/extensions/gsd/tools/workflow-tool-executors.ts` exports 11 transport-neutral executors used by both native (`bootstrap/db-tools.ts`) and MCP (`packages/mcp-server/src/workflow-tools.ts`) registrations |
+| 2. Workflow-tool MCP surface | ✅ | `packages/mcp-server/src/workflow-tools.ts` exposes the canonical set; aliases handled via `logAliasUsage` |
+| 3. Port safety enforcement | ✅ | `enforceWorkflowWriteGate(toolName, projectDir, milestoneId)` runs at the head of every MCP handler |
+| 4. Attach MCP to Claude Code | ✅ | `src/resources/extensions/claude-code-cli/stream-adapter.ts:1318` calls `buildWorkflowMcpServers(sdkCwd)` and passes `mcpServers` to the Anthropic Agent SDK session |
+| 5. Provider capability gating | ✅ | `getWorkflowTransportSupportError(...)` in `src/resources/extensions/gsd/workflow-mcp.ts` fires pre-dispatch from `auto/phases.ts`, `guided-flow.ts`, and `auto-direct-dispatch.ts`. Fails early with an actionable error when the active provider can access neither native tools nor an MCP workflow surface. 27 tests in `workflow-mcp.test.ts` |
+| 6. Prompts and docs transport-neutral | ✅ | Prompts under `src/resources/extensions/gsd/prompts/` reference the "DB-backed canonical write path" without prescribing transport; no manual-summary-fallback language remains anywhere |
+
+Validation criterion #3 ("MCP-invoked workflow tools produce the same DB updates, rendered artifacts, and state transitions as native tool calls") is locked in by `packages/mcp-server/src/workflow-tools-parity.test.ts` (added 2026-05-10 via PR #5760).
 
 ## Context
 

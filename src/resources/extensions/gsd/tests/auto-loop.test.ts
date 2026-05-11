@@ -20,7 +20,8 @@ import {
   isSessionSwitchInFlight,
   isSessionSwitchAbortGraceActive,
 } from "../auto/resolve.js";
-import { runUnit } from "../auto/run-unit.js";
+import { runUnit, shouldDeferUnitFailsafeTimeout } from "../auto/run-unit.js";
+import { writeUnitRuntimeRecord, readUnitRuntimeRecord } from "../unit-runtime.js";
 import { autoLoop } from "../auto/loop.js";
 import { runDispatch, runUnitPhase } from "../auto/phases.js";
 import { detectStuck } from "../auto/detect-stuck.js";
@@ -163,6 +164,109 @@ test("resolveAgentEnd resolves a pending runUnit promise", async () => {
   const result = await resultPromise;
   assert.equal(result.status, "completed");
   assert.deepEqual(result.event, event);
+});
+
+test("runUnit failsafe defers cancellation while timeout recovery is making fresh progress", async () => {
+  _resetPendingResolve();
+  mock.timers.enable();
+  const originalCwd = process.cwd();
+
+  try {
+    mock.timers.setTime(10_000);
+    const ctx = makeMockCtx();
+    const pi = makeMockPi();
+    const s = makeMockSession();
+    s.basePath = mkdtempSync(join(tmpdir(), "gsd-rununit-recovery-"));
+    s.currentUnit = { type: "task", id: "T01", startedAt: 1234 };
+
+    const resultPromise = runUnit(ctx, pi, s, "task", "T01", "prompt");
+    await waitForMicrotasks(() => pi.calls.length === 1, "unit dispatch");
+
+    writeUnitRuntimeRecord(s.basePath, "task", "T01", 1234, {
+      phase: "recovered",
+      recoveryAttempts: 1,
+      lastProgressKind: "hard-recovery-retry",
+      lastProgressAt: Date.now(),
+    });
+    assert.equal(
+      shouldDeferUnitFailsafeTimeout(readUnitRuntimeRecord(s.basePath, "task", "T01"), {
+        nowMs: Date.now(),
+        currentUnitStartedAt: s.currentUnit.startedAt,
+        freshProgressMs: 30_000,
+      }),
+      true,
+      "fresh recovery runtime should defer the failsafe",
+    );
+
+    setTimeout(() => {
+      writeUnitRuntimeRecord(s.basePath, "task", "T01", 1234, {
+        phase: "recovered",
+        recoveryAttempts: 1,
+        lastProgressKind: "hard-recovery-retry",
+        lastProgressAt: Date.now(),
+      });
+    }, (30 * 60 * 1000) + 29_000);
+
+    mock.timers.tick((30 * 60 * 1000) + 31_000);
+    await Promise.resolve();
+
+    resolveAgentEnd(makeEvent());
+    const result = await resultPromise;
+    assert.equal(result.status, "completed");
+  } finally {
+    mock.timers.reset();
+    process.chdir(originalCwd);
+  }
+});
+
+test("shouldDeferUnitFailsafeTimeout rejects stale runtime progress", () => {
+  assert.equal(
+    shouldDeferUnitFailsafeTimeout({
+      version: 1,
+      unitType: "task",
+      unitId: "T01",
+      startedAt: 1234,
+      updatedAt: 1,
+      phase: "recovered",
+      wrapupWarningSent: false,
+      continueHereFired: false,
+      timeoutAt: 1,
+      lastProgressAt: 1,
+      progressCount: 1,
+      lastProgressKind: "hard-recovery-retry",
+      recoveryAttempts: 1,
+    }, {
+      nowMs: 120_000,
+      currentUnitStartedAt: 1234,
+      freshProgressMs: 30_000,
+    }),
+    false,
+  );
+});
+
+test("shouldDeferUnitFailsafeTimeout rejects future runtime progress", () => {
+  assert.equal(
+    shouldDeferUnitFailsafeTimeout({
+      version: 1,
+      unitType: "task",
+      unitId: "T01",
+      startedAt: 1234,
+      updatedAt: 1,
+      phase: "recovered",
+      wrapupWarningSent: false,
+      continueHereFired: false,
+      timeoutAt: 1,
+      lastProgressAt: 150_000,
+      progressCount: 1,
+      lastProgressKind: "hard-recovery-retry",
+      recoveryAttempts: 1,
+    }, {
+      nowMs: 120_000,
+      currentUnitStartedAt: 1234,
+      freshProgressMs: 30_000,
+    }),
+    false,
+  );
 });
 
 test("resolveAgentEnd drops event when no promise is pending", () => {
@@ -1297,6 +1401,107 @@ test("autoLoop calls deriveState → resolveDispatch → runUnit in sequence", a
   );
 });
 
+test("autoLoop journals post-unit finalize stop after completed unit", async () => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  ctx.ui.setStatus = () => {};
+  ctx.sessionManager = { getSessionFile: () => "/tmp/session.json" };
+  const pi = makeMockPi();
+  const s = makeLoopSession();
+  const journalEvents: Array<{ eventType: string; data?: any }> = [];
+
+  const deps = makeMockDeps({
+    postUnitPreVerification: async () => {
+      deps.callLog.push("postUnitPreVerification");
+      s.lastGitActionFailure = "commit failed";
+      return "dispatched" as const;
+    },
+    emitJournalEvent: (entry: any) => {
+      journalEvents.push(entry);
+    },
+  });
+
+  const loopPromise = autoLoop(ctx, pi, s, deps);
+  await new Promise((r) => setTimeout(r, 50));
+  resolveAgentEnd(makeEvent());
+  await loopPromise;
+
+  assert.ok(
+    deps.callLog.includes("postUnitPreVerification"),
+    "completed units must enter post-unit pre-verification before stopping",
+  );
+  assert.ok(
+    !deps.callLog.includes("runPostUnitVerification"),
+    "git-closeout stop should not run later verification phases",
+  );
+
+  const unitEndIndex = journalEvents.findIndex((e) => e.eventType === "unit-end");
+  const finalizeStartIndex = journalEvents.findIndex((e) => e.eventType === "post-unit-finalize-start");
+  const finalizeEndIndex = journalEvents.findIndex((e) => e.eventType === "post-unit-finalize-end");
+  const iterationEndIndex = journalEvents.findIndex((e) => e.eventType === "iteration-end");
+
+  assert.ok(unitEndIndex >= 0, "unit-end should be journaled after agent completion");
+  assert.ok(finalizeStartIndex > unitEndIndex, "post-unit finalize must start after unit-end");
+  assert.ok(finalizeEndIndex > finalizeStartIndex, "post-unit finalize must journal its stop result");
+  assert.ok(iterationEndIndex > finalizeEndIndex, "iteration-end must be emitted even when finalize stops");
+
+  assert.deepEqual(journalEvents[finalizeEndIndex]!.data, {
+    iteration: 1,
+    unitType: "execute-task",
+    unitId: "M001/S01/T01",
+    status: "stopped",
+    action: "break",
+    reason: "git-closeout-failure",
+  });
+  assert.deepEqual(journalEvents[iterationEndIndex]!.data, {
+    iteration: 1,
+    status: "stopped",
+    reason: "git-closeout-failure",
+    unitType: "execute-task",
+    unitId: "M001/S01/T01",
+    failureClass: "git",
+  });
+});
+
+test("autoLoop journals iteration-end when unit phase breaks after cancelled unit", async () => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  ctx.ui.setStatus = () => {};
+  ctx.sessionManager = { getSessionFile: () => "/tmp/session.json" };
+  const pi = makeMockPi();
+  const s = makeLoopSession();
+  const journalEvents: Array<{ eventType: string; data?: any }> = [];
+
+  const deps = makeMockDeps({
+    emitJournalEvent: (entry: any) => {
+      journalEvents.push(entry);
+    },
+  });
+
+  const loopPromise = autoLoop(ctx, pi, s, deps);
+  await new Promise((r) => setTimeout(r, 50));
+  resolveAgentEndCancelled();
+  await loopPromise;
+
+  const unitEndIndex = journalEvents.findIndex(
+    (e) => e.eventType === "unit-end" && e.data?.status === "cancelled",
+  );
+  const iterationEndIndex = journalEvents.findIndex((e) => e.eventType === "iteration-end");
+
+  assert.ok(unitEndIndex >= 0, "cancelled unit should still emit unit-end");
+  assert.ok(iterationEndIndex > unitEndIndex, "unit-phase break must close the iteration after unit-end");
+  assert.deepEqual(journalEvents[iterationEndIndex]!.data, {
+    iteration: 1,
+    status: "stopped",
+    reason: "unit-aborted",
+    unitType: "execute-task",
+    unitId: "M001/S01/T01",
+    failureClass: "execution",
+  });
+});
+
 test("crash lock records session file from AFTER newSession, not before (#1710)", async (t) => {
   _resetPendingResolve();
 
@@ -1939,7 +2144,7 @@ test("stuck detection: window resets recovery when deriveState returns a differe
   );
 });
 
-test("stuck detection: does not push to window during verification retry", async () => {
+test("stuck detection: verification retries remain visible to the sliding window", async () => {
   _resetPendingResolve();
   mock.timers.enable({ apis: ["Date", "setTimeout"], now: 20_000 });
 
@@ -1994,8 +2199,9 @@ test("stuck detection: does not push to window during verification retry", async
 
     const loopPromise = autoLoop(ctx, pi, s, deps);
 
-    // Resolve agent_end for 4 iterations (1 initial + 3 retries)
-    for (let i = 1; i <= 4; i++) {
+    // Resolve agent_end for 3 attempts. The 4th iteration should stop before
+    // dispatch because retry dispatches stay visible to stuck detection.
+    for (let i = 1; i <= 3; i++) {
       await waitForMicrotasks(() => pi.calls.length === i, `dispatch ${i}`);
       resolveAgentEnd(makeEvent());
       await drainMicrotasks(100);
@@ -2004,16 +2210,14 @@ test("stuck detection: does not push to window during verification retry", async
 
     await loopPromise;
 
-    // Even though same unit was derived 4 times, verification retries should
-    // not push to the sliding window, so stuck detection should not have fired
     assert.ok(
-      !stopReason.includes("Stuck"),
-      `stuck detection should not fire during verification retries, got: ${stopReason}`,
+      stopReason.includes("Stuck"),
+      `stuck detection should fire during repeated verification retries, got: ${stopReason}`,
     );
     assert.equal(
       verifyCallCount,
-      4,
-      "verification should have been called 4 times (1 initial + 3 retries)",
+      3,
+      "verification should stop before a 4th repeated retry dispatch",
     );
   } finally {
     mock.timers.reset();
@@ -2099,7 +2303,8 @@ test("detectStuck: truncates long error strings", () => {
     { key: "A", error: longError },
   ]);
   assert.ok(result?.stuck);
-  assert.ok(result!.reason.length < 300, "reason should be truncated");
+  assert.ok(result!.reason.includes(longError.slice(0, 200)), "reason should include the truncated error prefix");
+  assert.equal(result!.reason.includes(longError), false, "reason should not include the full long error");
 });
 
 // NOTE: the "stuck-detected" / "stuck-counter-reset" debug-log grep was
@@ -2341,6 +2546,81 @@ test("resolveAgentEndCancelled with errorContext passes it through to resolved p
   assert.equal(resolved.errorContext!.category, "timeout");
   assert.equal(resolved.errorContext!.message, "test timeout");
   assert.equal(resolved.errorContext!.isTransient, true);
+});
+
+test("runUnitPhase pauses transient aborted cancellations instead of hard-stopping", async (t) => {
+  _resetPendingResolve();
+
+  const basePath = mkdtempSync(join(tmpdir(), "gsd-aborted-cancel-"));
+  t.after(() => {
+    rmSync(basePath, { recursive: true, force: true });
+  });
+
+  const ctx = {
+    ...makeMockCtx(),
+    ui: {
+      notify: () => {},
+      setStatus: () => {},
+      setWorkingMessage: () => {},
+    },
+    sessionManager: {
+      getEntries: () => [],
+    },
+    modelRegistry: {
+      getProviderAuthMode: () => undefined,
+      isProviderRequestReady: () => true,
+    },
+  } as any;
+  const pi = {
+    ...makeMockPi(),
+    sendMessage: () => {
+      queueMicrotask(() => resolveAgentEndCancelled({
+        message: "Claude Code process aborted by user",
+        category: "aborted",
+        isTransient: true,
+      }));
+    },
+  } as any;
+  const s = makeLoopSession({
+    basePath,
+    canonicalProjectRoot: basePath,
+    originalBasePath: basePath,
+  });
+  const deps = makeMockDeps();
+  let seq = 0;
+
+  const result = await runUnitPhase(
+    { ctx, pi, s, deps, prefs: undefined, iteration: 1, flowId: "flow-aborted", nextSeq: () => ++seq },
+    {
+      unitType: "execute-task",
+      unitId: "M001/S01/T01",
+      prompt: "do work",
+      finalPrompt: "do work",
+      pauseAfterUatDispatch: false,
+      state: {
+        phase: "executing",
+        activeMilestone: { id: "M001", title: "Milestone" },
+        activeSlice: { id: "S01", title: "Slice" },
+        activeTask: { id: "T01", title: "Task" },
+        registry: [{ id: "M001", title: "Milestone", status: "active" }],
+        recentDecisions: [],
+        blockers: [],
+        nextAction: "",
+        progress: { milestones: { done: 0, total: 1 } },
+        requirements: { active: 0, validated: 0, deferred: 0, outOfScope: 0, blocked: 0, total: 0 },
+      } as any,
+      mid: "M001",
+      midTitle: "Milestone",
+      isRetry: false,
+      previousTier: undefined,
+    },
+    { recentUnits: [{ key: "execute-task/M001/S01/T01" }], stuckRecoveryAttempts: 0, consecutiveFinalizeTimeouts: 0 },
+  );
+
+  assert.equal(result.action, "break");
+  assert.equal((result as any).reason, "unit-aborted-pause");
+  assert.equal(deps.callLog.includes("pauseAuto"), true);
+  assert.equal(deps.callLog.includes("stopAuto"), false);
 });
 
 test("runUnitPhase pauses ghost completions before closeout and finalize side effects", async (t) => {
@@ -3002,6 +3282,77 @@ test("dispatch Worktree Safety wins before stuck detection for execute-task with
   );
 });
 
+test("runDispatch runs stuck detection while artifact verification retry is pending (#5719)", async (t) => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  const pi = makeMockPi();
+  const notifications: string[] = [];
+  ctx.ui.notify = (msg: string) => { notifications.push(msg); };
+
+  const basePath = mkdtempSync(join(tmpdir(), "gsd-5719-retry-stuck-"));
+  t.after(() => rmSync(basePath, { recursive: true, force: true }));
+
+  const s = makeLoopSession({
+    basePath,
+    pendingVerificationRetry: {
+      unitId: "M001/S01/T01",
+      failureContext: "ENOENT: no such file or directory, access '/tmp/missing-plan.md'",
+      attempt: 1,
+    },
+  });
+  const deps = makeMockDeps();
+  const loopState = {
+    recentUnits: [
+      {
+        key: "execute-task/M001/S01/T01",
+        error: "ENOENT: no such file or directory, access '/tmp/missing-plan.md'",
+      },
+      { key: "plan-slice/M001/S02", error: "other failure" },
+      {
+        key: "complete-slice/M001/S01",
+        error: "ENOENT: no such file or directory, access '/tmp/missing-plan.md'",
+      },
+    ],
+    stuckRecoveryAttempts: 0,
+    consecutiveFinalizeTimeouts: 0,
+  };
+
+  const result = await runDispatch(
+    {
+      ctx,
+      pi,
+      s,
+      deps,
+      prefs: undefined,
+      iteration: 1,
+      flowId: "test-flow",
+      nextSeq: () => 1,
+    },
+    {
+      state: {
+        phase: "executing",
+        activeMilestone: { id: "M001", title: "Test", status: "active" },
+        activeSlice: { id: "S01", title: "Slice 1" },
+        activeTask: { id: "T01" },
+        registry: [{ id: "M001", status: "active" }],
+        blockers: [],
+      } as any,
+      mid: "M001",
+      midTitle: "Test",
+    },
+    loopState,
+  );
+
+  assert.equal(result.action, "next", "level-1 stuck recovery should still allow the recovery dispatch");
+  assert.equal(loopState.stuckRecoveryAttempts, 1, "stuck recovery should record the first recovery attempt");
+  assert.ok(deps.callLog.includes("invalidateAllCaches"), "stuck recovery should invalidate caches");
+  assert.ok(
+    notifications.some((n) => n.includes("Missing file referenced twice")),
+    "notification should surface the repeated ENOENT stuck reason",
+  );
+});
+
 test("dispatch Worktree Safety stops unknown unit types with missing Tool Contract", async (t) => {
   _resetPendingResolve();
 
@@ -3467,6 +3818,13 @@ test("autoLoop classifies ModelPolicyDispatchBlockedError as blocked, not a retr
   );
   assert.ok(unitEnd, "should emit unit-end with status=blocked");
   assert.equal(unitEnd!.data.reason, "model-policy-dispatch-blocked");
+  const unitEndIndex = journalEvents.findIndex(
+    e => e.eventType === "unit-end" && e.data?.status === "blocked",
+  );
+  const iterationEndIndex = journalEvents.findIndex(
+    e => e.eventType === "iteration-end" && e.data?.status === "blocked",
+  );
+  assert.ok(iterationEndIndex > unitEndIndex, "blocked policy iterations must close after unit-end");
 
   // Loop must pause for manual attention, NOT retry until 3-strike hard stop.
   assert.equal(pauseAutoCalls, 1, "should pause once on policy block");

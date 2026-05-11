@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Regression tests for the interactive terminal footer renderer.
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { stripVTControlCharacters } from "node:util";
@@ -6,7 +9,7 @@ import { initTheme } from "../../packages/pi-coding-agent/src/modes/interactive/
 
 initTheme("dark", false);
 
-test("FooterComponent dims the pwd row including right-aligned extension statuses", () => {
+test("FooterComponent renders a rounded operations-console footer with extension statuses", () => {
   const footer = new FooterComponent(
     {
       state: {
@@ -30,10 +33,15 @@ test("FooterComponent dims the pwd row including right-aligned extension statuse
     } as any,
   );
 
-  const lines = footer.render(100).map((line) => stripVTControlCharacters(line));
+  const lines = footer.render(160).map((line) => stripVTControlCharacters(line));
 
-  assert.equal(lines.length, 2);
-  assert.match(lines[0], /\(main\)/);
-  assert.match(lines[0], /ready synced$/);
-  assert.doesNotMatch(lines[1], /ready synced/);
+  assert.equal(lines.length, 3);
+  assert.match(lines[0], /^╭─+╮$/);
+  assert.match(lines[1], /^\│/);
+  assert.match(lines[1], /\(main\)/);
+  assert.match(lines[1], /ready synced\s*│$/);
+  assert.match(lines[1], /● GSD/);
+  assert.match(lines[1], /● GSD  │  .* \(main\)  │  /);
+  assert.match(lines[1], /12\.5%\/1\.0k/);
+  assert.match(lines[2], /^╰─+╯$/);
 });

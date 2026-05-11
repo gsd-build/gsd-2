@@ -313,13 +313,16 @@ export function compositeOverlays(
 		minLinesNeeded = Math.max(minLinesNeeded, row + overlayLines.length);
 	}
 
-	// Ensure result covers the terminal working area to keep overlay positioning stable across resizes.
-	// maxLinesRendered can exceed current content length after a shrink; pad to keep viewportStart consistent.
-	const workingHeight = Math.max(maxLinesRendered, minLinesNeeded);
+	// Ensure overlays are positioned against the visible terminal grid, not a
+	// short bottom-anchored render buffer. Without the terminal-height floor, a
+	// sparse app screen pushes "top" overlays down with the rest of the content.
+	const workingHeight = Math.max(termHeight, maxLinesRendered, minLinesNeeded);
 
-	// Extend result with empty lines if content is too short for overlay placement or working area
-	while (result.length < workingHeight) {
-		result.push("");
+	// Extend upward when content is shorter than the working area. This keeps
+	// the app's normal content bottom-anchored while giving overlays a full
+	// viewport-sized coordinate system.
+	if (result.length < workingHeight) {
+		result.unshift(...Array.from({ length: workingHeight - result.length }, () => ""));
 	}
 
 	const viewportStart = Math.max(0, workingHeight - termHeight);

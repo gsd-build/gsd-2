@@ -88,6 +88,7 @@ export class AutoSession {
   // ── Lifecycle ────────────────────────────────────────────────────────────
   active = false;
   paused = false;
+  completionStopInProgress = false;
   stepMode = false;
   verbose = false;
   activeEngineId: string | null = null;
@@ -287,6 +288,7 @@ export class AutoSession {
     // Lifecycle
     this.active = false;
     this.paused = false;
+    this.completionStopInProgress = false;
     this.stepMode = false;
     this.verbose = false;
     this.activeEngineId = null;
@@ -372,6 +374,12 @@ export class AutoSession {
     this.orchestration = null;
 
     // Loop promise state lives in auto-loop.ts module scope
+  }
+
+  resetAfterStop(options: { preserveCompletionSurface?: boolean } = {}): void {
+    const completionStopInProgress = options.preserveCompletionSurface ? this.completionStopInProgress : false;
+    this.reset();
+    this.completionStopInProgress = completionStopInProgress;
   }
 
   toJSON(): Record<string, unknown> {

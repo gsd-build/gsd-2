@@ -1,9 +1,10 @@
 # ADR-007: Model Catalog Split and Provider API Encapsulation
 
-**Status:** Proposed
+**Status:** Accepted (implemented)
 **Date:** 2026-04-03
+**Implemented:** 2026-04 (catalog split landed; `models.generated.ts` replaced by `packages/pi-ai/src/models/generated/` per-provider files; barrel exports cleaned)
 **Deciders:** Jeremy McSpadden
-**Related:** ADR-004 (capability-aware model routing), [ADR-005](https://github.com/gsd-build/gsd-2/issues/2790), [ADR-006](https://github.com/gsd-build/gsd-2/issues/2995), `packages/pi-ai/src/providers/`, `packages/pi-ai/src/models.ts`
+**Related:** ADR-004 (capability-aware model routing), [ADR-005](https://github.com/gsd-build/gsd-2/issues/2790), [ADR-006](./ADR-006-extension-modularization.md), `packages/pi-ai/src/providers/`, `packages/pi-ai/src/models.ts`
 
 ## Context
 

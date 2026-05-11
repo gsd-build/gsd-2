@@ -1,4 +1,5 @@
-// GSD2 TUI - Built-in terminal theme definitions.
+// Project/App: GSD-2
+// File Purpose: Built-in terminal theme definitions for interactive TUI rendering.
 /**
  * Built-in theme definitions.
  *
@@ -19,24 +20,24 @@ import type { ThemeJson } from "./theme-schema.js";
 const dark: ThemeJson = {
 	name: "dark",
 	vars: {
-		cyan: "#5cc8c8",
-		blue: "#79b8ff",
-		green: "#7ad38b",
-		red: "#f27b7b",
-		yellow: "#d6b85f",
-		gray: "#87949b",
-		dimGray: "#657178",
-		darkGray: "#303a40",
-		line: "#52616a",
-		lineSoft: "#303a40",
-		textSoft: "#cbd6dc",
-		accent: "#5cc8c8",
-		selectedBg: "#1d282a",
-		userMsgBg: "#202a2f",
-		toolPendingBg: "#252721",
-		toolSuccessBg: "#1c251f",
-		toolErrorBg: "#251e20",
-		customMsgBg: "#202a2f",
+		cyan: "#7fd4e8",
+		blue: "#8db7ff",
+		green: "#a8c978",
+		red: "#d98484",
+		yellow: "#e6c06a",
+		gray: "#7d889f",
+		dimGray: "#4d5870",
+		darkGray: "#4e596d",
+		line: "#a7ba78",
+		lineSoft: "#4e596d",
+		textSoft: "#dce4f2",
+		accent: "#8db7ff",
+		selectedBg: "#1d2430",
+		userMsgBg: "#232c3a",
+		toolPendingBg: "#171c26",
+		toolSuccessBg: "#171c26",
+		toolErrorBg: "#241b22",
+		customMsgBg: "#171c26",
 	},
 	colors: {
 		accent: "accent",
@@ -61,11 +62,11 @@ const dark: ThemeJson = {
 		toolPendingBg: "toolPendingBg",
 		toolSuccessBg: "toolSuccessBg",
 		toolErrorBg: "toolErrorBg",
-		toolTitle: "gray",
+		toolTitle: "accent",
 		toolOutput: "textSoft",
 		surfaceTitle: "accent",
 		surfaceAccent: "accent",
-		toolRunning: "yellow",
+		toolRunning: "accent",
 		toolSuccess: "green",
 		toolError: "red",
 
@@ -74,7 +75,7 @@ const dark: ThemeJson = {
 		mdLinkUrl: "dimGray",
 		mdCode: "accent",
 		mdCodeBlock: "green",
-		mdCodeBlockBorder: "gray",
+		mdCodeBlockBorder: "lineSoft",
 		mdQuote: "gray",
 		mdQuoteBorder: "gray",
 		mdHr: "gray",
@@ -101,12 +102,12 @@ const dark: ThemeJson = {
 		thinkingHigh: "#c084fc",
 		thinkingXhigh: "#f472b6",
 
-		bashMode: "green",
+		bashMode: "line",
 	},
 	export: {
-		pageBg: "#111416",
-		cardBg: "#1e2529",
-		infoBg: "#252721",
+		pageBg: "#10141d",
+		cardBg: "#171c26",
+		infoBg: "#1d2430",
 	},
 };
 

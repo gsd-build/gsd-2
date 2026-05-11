@@ -1,0 +1,1248 @@
+<!--
+Project/App: GSD-2
+File Purpose: Static HTML comparison mockups for proposed chat, assistant, and tool-output TUI redesigns.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GSD TUI Render Options</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #11141c;
+      --panel: #171b25;
+      --panel-soft: #1d2330;
+      --line: #a8bd78;
+      --line-muted: #566072;
+      --text: #d8dfef;
+      --muted: #75809a;
+      --dim: #4e5870;
+      --accent: #8db7ff;
+      --success: #a8c978;
+      --warning: #e6c06a;
+      --error: #d78282;
+      --purple: #b7a3ff;
+      --cyan: #75c9cc;
+      --add-bg: rgba(89, 138, 74, .28);
+      --del-bg: rgba(136, 62, 68, .36);
+      --warn-bg: rgba(158, 123, 49, .2);
+      --shadow: rgba(0, 0, 0, .34);
+      --font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      background:
+        linear-gradient(180deg, rgba(141, 183, 255, .06), transparent 360px),
+        var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+    }
+
+    main {
+      width: min(1480px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 32px 0 56px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      color: var(--text);
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+
+    .lede {
+      margin: 0;
+      color: var(--muted);
+      max-width: 780px;
+      line-height: 1.5;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(6, max-content);
+      gap: 10px;
+      align-items: center;
+      padding: 12px;
+      border: 1px solid var(--line-muted);
+      background: rgba(23, 27, 37, .7);
+      border-radius: 8px;
+      font-family: var(--font);
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .swatch {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+      background: currentColor;
+    }
+
+    .accent { color: var(--accent); }
+    .success { color: var(--success); }
+    .warning { color: var(--warning); }
+    .error { color: var(--error); }
+    .purple { color: var(--purple); }
+    .cyan { color: var(--cyan); }
+    .muted { color: var(--muted); }
+    .dim { color: var(--dim); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 22px;
+    }
+
+    .option {
+      min-width: 0;
+      border: 1px solid var(--line-muted);
+      background: linear-gradient(180deg, rgba(255, 255, 255, .025), transparent), var(--panel);
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 16px 42px var(--shadow);
+    }
+
+    .option.recommended {
+      border-color: var(--line);
+    }
+
+    .option-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 18px;
+      border-bottom: 1px solid rgba(86, 96, 114, .72);
+      background: rgba(17, 20, 28, .52);
+    }
+
+    .option-title {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    .option-title code {
+      color: var(--accent);
+      font-family: var(--font);
+      font-size: 13px;
+    }
+
+    .option-meta {
+      color: var(--muted);
+      font-family: var(--font);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .option-body {
+      padding: 18px;
+    }
+
+    .terminal {
+      padding: 18px 18px 16px;
+      border: 1px solid rgba(168, 189, 120, .78);
+      background: #151922;
+      border-radius: 6px;
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.45;
+      overflow: hidden;
+    }
+
+    .terminal + .terminal {
+      margin-top: 16px;
+    }
+
+    .caption {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-family: var(--font);
+      font-size: 12px;
+    }
+
+    .row {
+      display: flex;
+      gap: 12px;
+      min-width: 0;
+      white-space: pre;
+    }
+
+    .line-no {
+      width: 4ch;
+      flex: 0 0 4ch;
+      color: var(--dim);
+      text-align: right;
+      user-select: none;
+    }
+
+    .code {
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .add { color: var(--success); background: var(--add-bg); }
+    .del { color: var(--error); background: var(--del-bg); }
+    .warn { color: var(--warning); background: var(--warn-bg); }
+    .ctx { color: #8c96ad; }
+    .keyword { color: #9ebdff; font-weight: 700; }
+    .string { color: var(--success); }
+    .num { color: var(--purple); }
+
+    .rule {
+      color: var(--line-muted);
+      overflow: hidden;
+      white-space: nowrap;
+    }
+
+    .card-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-width: 0;
+      padding: 7px 0;
+      border-bottom: 1px solid rgba(86, 96, 114, .26);
+    }
+
+    .card-line:last-child {
+      border-bottom: 0;
+    }
+
+    .left, .right {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .right {
+      flex: 0 0 auto;
+      color: var(--muted);
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 1px 7px 2px;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    .progress {
+      display: inline-grid;
+      grid-template-columns: repeat(14, 8px);
+      gap: 2px;
+      vertical-align: -1px;
+    }
+
+    .seg {
+      height: 12px;
+      border-radius: 1px;
+      background: var(--dim);
+    }
+
+    .seg.fill { background: var(--success); }
+    .seg.mid { background: var(--warning); }
+    .seg.run { background: var(--accent); }
+
+    .pipeline {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: 8ch 11ch 1fr auto;
+      gap: 12px;
+      align-items: baseline;
+    }
+
+    .inspector {
+      display: grid;
+      grid-template-columns: 10ch 1fr;
+      gap: 8px 16px;
+    }
+
+    .rail {
+      border-left: 3px solid var(--line);
+      padding-left: 14px;
+      margin-bottom: 14px;
+    }
+
+    .ide-table {
+      display: grid;
+      grid-template-columns: 4ch 1fr;
+      gap: 0 12px;
+    }
+
+    .minimal {
+      display: grid;
+      gap: 8px;
+    }
+
+    .minimal-row {
+      display: grid;
+      grid-template-columns: 6ch minmax(0, 1fr) 11ch 4ch;
+      gap: 12px;
+      align-items: baseline;
+    }
+
+    .full {
+      grid-column: 1 / -1;
+    }
+
+    .section-title {
+      grid-column: 1 / -1;
+      margin: 18px 0 -4px;
+      padding-top: 22px;
+      border-top: 1px solid rgba(86, 96, 114, .72);
+    }
+
+    .section-title h2 {
+      margin: 0 0 6px;
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+
+    .section-title p {
+      margin: 0;
+      max-width: 820px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .assistant-frame {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px 12px;
+      background: rgba(17, 20, 28, .36);
+    }
+
+    .assistant-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--accent);
+      margin-bottom: 8px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .assistant-body {
+      color: var(--text);
+      display: grid;
+      gap: 6px;
+    }
+
+    .assistant-minimal {
+      display: grid;
+      gap: 8px;
+      padding-left: 2px;
+    }
+
+    .speaker {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .indented {
+      padding-left: 2ch;
+      color: var(--text);
+    }
+
+    .chat-bubble {
+      margin-left: 2ch;
+      padding: 10px 12px;
+      border-left: 2px solid var(--line);
+      background: rgba(29, 35, 48, .64);
+      border-radius: 0 6px 6px 0;
+    }
+
+    .footer-strip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-width: 0;
+      padding: 7px 10px;
+      border: 1px solid rgba(86, 96, 114, .72);
+      background: rgba(17, 20, 28, .66);
+      border-radius: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .footer-segments {
+      display: flex;
+      gap: 10px;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .segment {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--muted);
+    }
+
+    .auto-panel {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid rgba(168, 189, 120, .7);
+      border-radius: 6px;
+      background: rgba(17, 20, 28, .44);
+    }
+
+    .auto-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .metric {
+      min-width: 0;
+      padding: 8px;
+      border: 1px solid rgba(86, 96, 114, .58);
+      border-radius: 4px;
+      background: rgba(29, 35, 48, .58);
+    }
+
+    .metric-label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .metric-value {
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .stepper {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .step {
+      color: var(--muted);
+    }
+
+    .step.done { color: var(--success); }
+    .step.active { color: var(--accent); }
+    .step.warn { color: var(--warning); }
+
+    .auto-screen {
+      display: grid;
+      gap: 12px;
+    }
+
+    .auto-screen-header,
+    .auto-screen-footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      color: var(--muted);
+    }
+
+    .auto-screen-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .auto-screen-main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(320px, .9fr);
+      gap: 22px;
+      align-items: start;
+      padding: 10px 0;
+      border-top: 1px solid rgba(141, 183, 255, .48);
+      border-bottom: 1px solid rgba(141, 183, 255, .48);
+    }
+
+    .auto-screen-stack {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .auto-task-list {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .auto-task-row {
+      display: grid;
+      grid-template-columns: 4ch minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: baseline;
+      min-width: 0;
+    }
+
+    .auto-tile-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .auto-alert {
+      padding: 8px 10px;
+      border: 1px solid rgba(230, 192, 106, .72);
+      border-radius: 5px;
+      background: rgba(158, 123, 49, .16);
+      color: var(--warning);
+    }
+
+    .ownership-table {
+      display: grid;
+      gap: 1px;
+      border: 1px solid rgba(86, 96, 114, .72);
+      border-radius: 6px;
+      overflow: hidden;
+      background: rgba(86, 96, 114, .44);
+      font-family: var(--font);
+      font-size: 13px;
+    }
+
+    .ownership-row {
+      display: grid;
+      grid-template-columns: 13ch minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.25fr);
+      gap: 1px;
+      background: rgba(86, 96, 114, .44);
+    }
+
+    .ownership-cell {
+      min-width: 0;
+      padding: 9px 10px;
+      background: #151922;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .ownership-head .ownership-cell {
+      color: var(--text);
+      background: rgba(29, 35, 48, .9);
+      font-weight: 700;
+    }
+
+    .ownership-cell strong {
+      color: var(--text);
+    }
+
+    .auto-rail-layout {
+      display: grid;
+      grid-template-columns: 18ch minmax(0, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .auto-rail-menu {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+    }
+
+    @media (max-width: 980px) {
+      main { width: min(100vw - 24px, 760px); padding-top: 20px; }
+      header { grid-template-columns: 1fr; }
+      .legend { grid-template-columns: repeat(3, max-content); }
+      .grid { grid-template-columns: 1fr; }
+      .timeline { grid-template-columns: 1fr; gap: 4px; }
+      .minimal-row { grid-template-columns: 5ch 1fr; }
+      .minimal-row .right { grid-column: 2; }
+      .auto-screen-main,
+      .auto-rail-layout { grid-template-columns: 1fr; }
+      .auto-tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .ownership-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>GSD Chat / Assistant / Tool Output Render Options</h1>
+        <p class="lede">Five terminal-native design directions rendered as HTML previews. The palette mirrors theme-token intent: quiet borders, blue accent, green success, amber warning, red error, and dim metadata.</p>
+      </div>
+      <div class="legend" aria-label="Palette legend">
+        <span class="swatch accent"><span class="dot"></span>accent</span>
+        <span class="swatch success"><span class="dot"></span>success</span>
+        <span class="swatch warning"><span class="dot"></span>warning</span>
+        <span class="swatch error"><span class="dot"></span>error</span>
+        <span class="swatch purple"><span class="dot"></span>meta</span>
+        <span class="swatch muted"><span class="dot"></span>muted</span>
+      </div>
+    </header>
+
+    <section class="grid">
+      <article class="option recommended">
+        <div class="option-header">
+          <h2 class="option-title">1. Diff-First Cards <code>recommended for code work</code></h2>
+          <div class="option-meta">expanded tool-first</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="caption"><span class="accent">╭ edit tests/renderer-registration.test.ts</span><span><span class="success">+4</span> <span class="error">-1</span> · 1 hunk · <span class="success">done</span></span></div>
+            <div class="rule">├──────────────────────────────────────────────────────────────────────────────</div>
+            <div class="row ctx"><span class="line-no">189</span><span class="code">const state = {};</span></div>
+            <div class="row ctx"><span class="line-no">190</span><span class="code">const coloredTheme = {</span></div>
+            <div class="row ctx"><span class="line-no">191</span><span class="code">  ...testTheme(),</span></div>
+            <div class="row del"><span class="line-no">-193</span><span class="code">fg: (key: string, text: string) =&gt; `&lt;${key}&gt;${text}&lt;/${key}&gt;`,</span></div>
+            <div class="row add"><span class="line-no">+193</span><span class="code">fg: (key: string, text: string) =&gt;</span></div>
+            <div class="row add"><span class="line-no">+194</span><span class="code">  ["warning", "success", "error", "borderMuted"].includes(key)</span></div>
+            <div class="row add"><span class="line-no">+195</span><span class="code">    ? `&lt;${key}&gt;${text}&lt;/${key}&gt;`</span></div>
+            <div class="row add"><span class="line-no">+196</span><span class="code">    : text,</span></div>
+            <div class="rule">╰──────────────────────────────────────────────────────────────────── success ─╯</div>
+          </div>
+          <div class="terminal">
+            <div class="card-line"><span class="left"><span class="accent">$</span> npm run format</span><span class="right"><span class="success">✓</span> 2.1s · output hidden · ctrl+o expand</span></div>
+            <div class="card-line"><span class="left"><span class="accent">$</span> npm test</span><span class="right"><span class="progress"><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg run"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> 48% running</span></div>
+            <div class="card-line"><span class="left"><span class="accent">$</span> npm run check</span><span class="right"><span class="dim">○</span> queued</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option">
+        <div class="option-header">
+          <h2 class="option-title">2. Operations Log <code>dense timeline</code></h2>
+          <div class="option-meta">scan-first</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="timeline"><span class="muted">12:04:18</span><span class="accent">assistant</span><span>Planning renderer update</span><span class="muted">gpt-5.5</span></div>
+            <div class="timeline"><span class="muted">12:04:21</span><span class="success">edit</span><span>tests/renderer-registration.test.ts</span><span><span class="success">+4</span> <span class="error">-1</span> ok</span></div>
+            <div class="timeline"><span class="muted">12:04:24</span><span class="accent">command</span><span>npm run format</span><span class="success">ok 2s</span></div>
+            <div class="timeline"><span class="muted">12:04:37</span><span class="accent">command</span><span>npm test</span><span><span class="progress"><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg mid"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> 42%</span></div>
+            <div class="timeline"><span class="muted">12:05:02</span><span class="warning">check</span><span>typecheck:extensions</span><span class="warning">2 warnings</span></div>
+            <div class="timeline"><span class="muted">12:05:11</span><span class="error">command</span><span>npm run check</span><span class="error">failed</span></div>
+          </div>
+          <div class="terminal">
+            <div class="pipeline">
+              <div><span class="success">●</span> format <span class="success">2.1s</span>   <span class="success">●</span> unit <span class="success">8952 passed</span>   <span class="warning">●</span> typecheck <span class="warning">existing errors</span>   <span class="dim">○</span> push</div>
+              <div><span class="progress"><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg mid"></span><span class="seg mid"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> <span class="warning">64%</span> · waiting on check</div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option">
+        <div class="option-header">
+          <h2 class="option-title">3. Inspector Panels <code>structured details</code></h2>
+          <div class="option-meta">clean default</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="rail">
+              <div><span class="accent">assistant</span></div>
+              <div class="muted">I’ll update the renderer test, format it, then run the checks.</div>
+            </div>
+            <div class="caption"><span class="accent">╭─ edit</span><span class="success">✓ complete</span></div>
+            <div class="inspector">
+              <span class="muted">file</span><span>tests/renderer-registration.test.ts</span>
+              <span class="muted">summary</span><span>1 replacement, 3 insertions, 1 hunk</span>
+              <span class="muted">result</span><span><span class="success">+4</span> <span class="error">-1</span></span>
+              <span class="muted">view</span><span class="dim">ctrl+o expand diff</span>
+            </div>
+            <div class="rule">╰──────────────────────────────────────────────────────────────────────────────╯</div>
+          </div>
+          <div class="terminal">
+            <div class="caption"><span class="accent">╭─ command</span><span class="accent">● running</span></div>
+            <div class="inspector">
+              <span class="muted">command</span><span>npm test</span>
+              <span class="muted">progress</span><span><span class="progress"><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg run"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> 39%</span>
+              <span class="muted">output</span><span class="dim">hidden · ctrl+o expand</span>
+            </div>
+            <div class="rule">╰──────────────────────────────────────────────────────────────────────────────╯</div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option">
+        <div class="option-header">
+          <h2 class="option-title">4. Terminal IDE <code>gutter + status badges</code></h2>
+          <div class="option-meta">tooling-heavy</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="caption"><span><span class="pill accent">TOOL: EDIT</span> tests/renderer-registration.test.ts</span><span class="pill success">PASS</span></div>
+            <div class="rule">┌────┬─────────────────────────────────────────────────────────────────────────</div>
+            <div class="ide-table">
+              <span class="line-no muted">ln</span><span class="muted">change</span>
+              <span class="line-no">189</span><span class="ctx">const state = {};</span>
+              <span class="line-no">190</span><span class="ctx">const coloredTheme = {</span>
+              <span class="line-no del">193</span><span class="del">- fg: (...) =&gt; `&lt;${key}&gt;${text}&lt;/${key}&gt;`,</span>
+              <span class="line-no add">193</span><span class="add">+ fg: (...) =&gt;</span>
+              <span class="line-no add">194</span><span class="add">+   ["warning", "success", "error"].includes(key)</span>
+              <span class="line-no add">195</span><span class="add">+     ? `&lt;${key}&gt;${text}&lt;/${key}&gt;`</span>
+            </div>
+            <div class="rule">└────┴──────────────────────────────────────────────────────────── +4 -1 · 1 hunk</div>
+          </div>
+          <div class="terminal">
+            <div class="card-line"><span class="left"><span class="pill accent">RUN</span> npm test</span><span class="right"><span class="accent">●</span> 1m12s</span></div>
+            <div><span class="progress"><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg run"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> <span class="accent">61%</span> · output hidden · ctrl+o expand</div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option full">
+        <div class="option-header">
+          <h2 class="option-title">5. Minimal Transcript <code>quiet default, rich expand</code></h2>
+          <div class="option-meta">lowest clutter</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="minimal">
+              <div><span class="accent">GSD</span> <span class="muted">Updated the renderer registration test and started verification.</span></div>
+              <div class="minimal-row"><span class="success">edit</span><span>tests/renderer-registration.test.ts</span><span class="right"><span class="success">+4</span> <span class="error">-1</span></span><span class="success">✓</span></div>
+              <div class="minimal-row"><span class="accent">run</span><span>npm run format</span><span class="right">2.1s</span><span class="success">✓</span></div>
+              <div class="minimal-row"><span class="accent">run</span><span>npm test</span><span class="right"><span class="progress"><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg run"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> 39%</span><span class="accent">●</span></div>
+              <div class="minimal-row"><span class="dim">run</span><span>npm run check</span><span class="right">queued</span><span class="dim">○</span></div>
+            </div>
+          </div>
+          <div class="terminal">
+            <div class="caption"><span class="muted">expanded edit preview</span><span class="dim">ctrl+o collapse</span></div>
+            <div class="row del"><span class="line-no">-193</span><span class="code">fg: (key, text) =&gt; `&lt;${key}&gt;${text}&lt;/${key}&gt;`,</span></div>
+            <div class="row add"><span class="line-no">+193</span><span class="code">fg: (key, text) =&gt; ["warning", "success", "error"].includes(key) ? wrapped : text,</span></div>
+          </div>
+        </div>
+      </article>
+
+      <div class="section-title">
+        <h2>Assistant / Chat Dialog Treatments</h2>
+        <p>These focus on the assistant message itself. They can be paired with any tool-output option above; the strongest pairing is usually left-rail assistant text plus diff-first tool cards.</p>
+      </div>
+
+      <article class="option">
+        <div class="option-header">
+          <h2 class="option-title">A. Framed Assistant Cards <code>structured</code></h2>
+          <div class="option-meta">premium transcript</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="assistant-frame">
+              <div class="assistant-header"><span>GSD · gpt-5.5</span><span class="muted">12:04 PM</span></div>
+              <div class="assistant-body">
+                <div>I’ll update the renderer and run verification.</div>
+                <div class="muted">Plan:</div>
+                <div>1. Add a shared render helper</div>
+                <div>2. Refactor tool output</div>
+                <div>3. Run targeted tests and the PR gate</div>
+              </div>
+            </div>
+          </div>
+          <div class="terminal">
+            <div class="assistant-frame">
+              <div class="assistant-header"><span>GSD · status</span><span class="success">ready</span></div>
+              <div class="assistant-body">
+                <div>Targeted TUI tests passed. The full suite has two unrelated failures.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option">
+        <div class="option-header">
+          <h2 class="option-title">B. Minimal Speaker Labels <code>low visual weight</code></h2>
+          <div class="option-meta">content-first</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="assistant-minimal">
+              <div><span class="speaker">GSD</span> <span class="muted">· gpt-5.5 · 12:04 PM</span></div>
+              <div class="indented">I’ll update the renderer and run verification.</div>
+              <div class="indented muted">Plan:</div>
+              <div class="indented">1. Add a shared render helper</div>
+              <div class="indented">2. Refactor tool output</div>
+              <div class="indented">3. Run targeted tests and the PR gate</div>
+            </div>
+          </div>
+          <div class="terminal">
+            <div><span class="speaker">GSD</span> <span class="muted">· follow-up</span></div>
+            <div class="indented">I found the renderer layer: assistant message, chat frame, tool execution, bash execution, and diff rendering.</div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option recommended">
+        <div class="option-header">
+          <h2 class="option-title">C. Left Rail Conversation <code>recommended</code></h2>
+          <div class="option-meta">best long-session balance</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="rail">
+              <div><span class="speaker">GSD</span> <span class="muted">· gpt-5.5 · 12:04 PM</span></div>
+              <div>I’ll update the renderer and run verification.</div>
+              <div class="muted">Plan:</div>
+              <div>1. Add a shared render helper</div>
+              <div>2. Refactor tool output</div>
+              <div>3. Run targeted tests and the PR gate</div>
+            </div>
+            <div class="card-line"><span class="left"><span class="success">edit</span> tests/renderer-registration.test.ts</span><span class="right"><span class="success">+4</span> <span class="error">-1</span> ✓</span></div>
+          </div>
+          <div class="terminal">
+            <div class="rail">
+              <div><span class="speaker">GSD</span> <span class="muted">· verification</span></div>
+              <div>Targeted tests passed. Typecheck is blocked by unrelated existing errors.</div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option">
+        <div class="option-header">
+          <h2 class="option-title">D. Compact Transcript Mode <code>dense</code></h2>
+          <div class="option-meta">auto-mode friendly</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="timeline"><span class="muted">12:04</span><span class="accent">GSD</span><span>I’ll update the renderer and run verification.</span><span class="muted">gpt-5.5</span></div>
+            <div class="timeline"><span class="muted">12:05</span><span class="accent">GSD</span><span>Plan: helper, tool output refactor, tests.</span><span class="success">ready</span></div>
+            <div class="timeline"><span class="muted">12:06</span><span class="success">edit</span><span>tests/renderer-registration.test.ts</span><span><span class="success">+4</span> <span class="error">-1</span></span></div>
+          </div>
+          <div class="terminal">
+            <div class="caption"><span class="muted">expanded assistant message</span><span class="dim">ctrl+o collapse</span></div>
+            <div class="assistant-frame">
+              <div class="assistant-header"><span>GSD · expanded</span><span class="muted">12:04 PM</span></div>
+              <div class="assistant-body">
+                <div>I’ll update the renderer and run verification.</div>
+                <div>This expanded card shows full markdown when the compact transcript is too terse.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option full">
+        <div class="option-header">
+          <h2 class="option-title">E. Chat Bubble / Message Block <code>conversational</code></h2>
+          <div class="option-meta">softest visual tone</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div><span class="speaker">GSD</span> <span class="muted">· gpt-5.5</span></div>
+            <div class="chat-bubble">
+              <div>I’ll update the renderer and run checks.</div>
+              <div class="muted">The first pass keeps behavior unchanged and focuses on visual consistency.</div>
+            </div>
+          </div>
+          <div class="terminal">
+            <div><span class="speaker">GSD</span> <span class="muted">· after tests</span></div>
+            <div class="chat-bubble">
+              <div>Targeted tests passed. The full unit suite reports two unrelated failures.</div>
+              <div class="pipeline"><span class="progress"><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg mid"></span><span class="seg mid"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> <span class="warning">verification partial</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <div class="section-title">
+        <h2>Footer & Auto-Mode Dashboard Treatments</h2>
+        <p>These show options for persistent footer/status areas and the auto-mode progress widget. They can pair with any assistant/tool style above.</p>
+      </div>
+
+      <div class="section-title">
+        <h2>Auto Mode Output Designs</h2>
+        <p>Five full-screen treatments for the live auto-mode surface in the screenshot: current execution, roadmap position, progress, cost, ETA, health, and controls.</p>
+      </div>
+
+      <article class="option full">
+        <div class="option-header">
+          <h2 class="option-title">Footer vs Auto-Mode Content Ownership <code>duplication check</code></h2>
+          <div class="option-meta">design rule</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="ownership-table">
+              <div class="ownership-row ownership-head">
+                <div class="ownership-cell">Signal</div>
+                <div class="ownership-cell">Footer owns</div>
+                <div class="ownership-cell">Auto-mode owns</div>
+                <div class="ownership-cell">Duplication rule</div>
+              </div>
+              <div class="ownership-row">
+                <div class="ownership-cell"><strong>Identity</strong></div>
+                <div class="ownership-cell">GSD, cwd/worktree, branch</div>
+                <div class="ownership-cell">Milestone/slice/task identity</div>
+                <div class="ownership-cell">Footer says where you are; auto says what is running.</div>
+              </div>
+              <div class="ownership-row">
+                <div class="ownership-cell"><strong>Status</strong></div>
+                <div class="ownership-cell">Tiny mode chip: AUTO / manual</div>
+                <div class="ownership-cell">Health detail: progressing, waiting, recovering, paused</div>
+                <div class="ownership-cell">Do not show full health phrase in both places.</div>
+              </div>
+              <div class="ownership-row">
+                <div class="ownership-cell"><strong>Progress</strong></div>
+                <div class="ownership-cell">No task progress when auto panel is visible</div>
+                <div class="ownership-cell">Slices, tasks, current unit, roadmap list</div>
+                <div class="ownership-cell">Auto surface owns all roadmap progress.</div>
+              </div>
+              <div class="ownership-row">
+                <div class="ownership-cell"><strong>Cost</strong></div>
+                <div class="ownership-cell">Session total only when auto panel is hidden</div>
+                <div class="ownership-cell">Auto spend, budget ceiling, projection</div>
+                <div class="ownership-cell">When auto is visible, keep cost in auto only.</div>
+              </div>
+              <div class="ownership-row">
+                <div class="ownership-cell"><strong>Context</strong></div>
+                <div class="ownership-cell">Raw context meter and compaction mode</div>
+                <div class="ownership-cell">Only warnings that affect the active auto unit</div>
+                <div class="ownership-cell">Footer owns 0.2%/1.0M; auto owns “context risk” only.</div>
+              </div>
+              <div class="ownership-row">
+                <div class="ownership-cell"><strong>Model</strong></div>
+                <div class="ownership-cell">Provider/model/thinking state</div>
+                <div class="ownership-cell">Provider wait/retry details when relevant</div>
+                <div class="ownership-cell">Auto does not repeat model unless diagnosing latency.</div>
+              </div>
+              <div class="ownership-row">
+                <div class="ownership-cell"><strong>ETA</strong></div>
+                <div class="ownership-cell">None</div>
+                <div class="ownership-cell">Elapsed, remaining estimate, stall timers</div>
+                <div class="ownership-cell">ETA belongs with active work, not global footer.</div>
+              </div>
+              <div class="ownership-row">
+                <div class="ownership-cell"><strong>Controls</strong></div>
+                <div class="ownership-cell">Global shortcuts only</div>
+                <div class="ownership-cell">Auto-specific pause/dashboard/parallel controls</div>
+                <div class="ownership-cell">If both show controls, footer uses icons/short labels only.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option recommended full">
+        <div class="option-header">
+          <h2 class="option-title">AM1. Command Deck <code>recommended</code></h2>
+          <div class="option-meta">balanced operator view</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="auto-screen">
+              <div class="auto-screen-header">
+                <span class="auto-screen-title"><span class="accent">● GSD</span> <span class="success">AUTO</span> <span class="success">● Progressing well</span></span>
+                <span>18s · ~3h 22m left</span>
+              </div>
+              <div class="auto-screen-main">
+                <div class="auto-screen-stack">
+                  <div><span class="muted">Recurring Expenses</span> <span class="dim">claude-code/claude-sonnet-4-6</span></div>
+                  <div><span class="accent">S01:</span> <b>Schema migration + expense add --repeat</b></div>
+                  <div><span class="accent">▸ executing</span> <span>T01: Add repeat column via idempotent ALTER TABLE in init_schema</span></div>
+                  <div><span class="progress"><span class="seg fill"></span><span class="seg run"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> <span class="muted">0/3 slices · task 1/4</span></div>
+                  <div class="muted">worktrees/M004 (milestone/M004) · 15 hours ago: feat: Budget Tracking</div>
+                </div>
+                <div class="auto-task-list">
+                  <div class="auto-task-row"><span class="accent">› T01</span><span>Add repeat column via idempotent ALTER TABLE...</span><span class="accent">EXECUTE</span></div>
+                  <div class="auto-task-row"><span class="dim">· T02</span><span>Add --repeat option to `expense add` CLI com...</span><span class="dim">queued</span></div>
+                  <div class="auto-task-row"><span class="dim">· T03</span><span>Write tests/test_recurring_add.py covering --...</span><span class="dim">queued</span></div>
+                  <div class="auto-task-row"><span class="dim">· T04</span><span>Run full regression suite and confirm zero f...</span><span class="dim">queued</span></div>
+                </div>
+              </div>
+              <div class="auto-screen-footer">
+                <span><span class="warning">$21.29</span> ───── <span>0.2%/1.0M</span></span>
+                <span>esc pause │ ^G dashboard │ ^P parallel</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option full">
+        <div class="option-header">
+          <h2 class="option-title">AM2. Three-Zone Ops Console <code>health / work / controls</code></h2>
+          <div class="option-meta">fast scanning</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="auto-screen">
+              <div class="auto-tile-grid">
+                <div class="metric"><div class="metric-label">State</div><div class="metric-value success">AUTO · progressing</div></div>
+                <div class="metric"><div class="metric-label">Unit</div><div class="metric-value">M004/S01/T01</div></div>
+                <div class="metric"><div class="metric-label">Budget</div><div class="metric-value warning">$21.29</div></div>
+                <div class="metric"><div class="metric-label">Context</div><div class="metric-value">0.2% / 1.0M</div></div>
+              </div>
+              <div class="auto-screen-main">
+                <div class="auto-screen-stack">
+                  <div class="card-line"><span class="left"><span class="accent">Current task</span> Add repeat column via idempotent ALTER TABLE</span><span class="right">18s</span></div>
+                  <div class="card-line"><span class="left"><span class="accent">Provider</span> claude-code/claude-sonnet-4-6</span><span class="right">thinking off</span></div>
+                  <div class="card-line"><span class="left"><span class="accent">Worktree</span> ~/.gsd/projects/82fa6750e134/worktrees/M004</span><span class="right">main</span></div>
+                </div>
+                <div class="auto-screen-stack">
+                  <div><span class="progress"><span class="seg fill"></span><span class="seg run"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> <span class="accent">task 1/4</span></div>
+                  <div class="stepper"><span class="step active">● execute</span><span class="step">○ test</span><span class="step">○ validate</span><span class="step">○ closeout</span></div>
+                  <div class="muted">esc pause · ^G dashboard · ^P parallel · ^N next event</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option full">
+        <div class="option-header">
+          <h2 class="option-title">AM3. Roadmap-Centered <code>tasks first</code></h2>
+          <div class="option-meta">best for long milestones</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="auto-screen">
+              <div class="auto-screen-header">
+                <span><span class="accent">GSD AUTO</span> · M004 Budget Tracking</span>
+                <span><span class="success">healthy</span> · 0/3 slices · task 1/4</span>
+              </div>
+              <div class="auto-rail-layout">
+                <div class="auto-rail-menu">
+                  <span class="success">● S01 schema</span>
+                  <span class="dim">○ S02 workflow</span>
+                  <span class="dim">○ S03 validation</span>
+                  <span class="dim">○ milestone close</span>
+                </div>
+                <div class="auto-task-list">
+                  <div class="auto-task-row"><span class="accent">▸ T01</span><span>Add repeat column via idempotent ALTER TABLE in init_schema</span><span class="accent">now</span></div>
+                  <div class="auto-task-row"><span class="dim">  T02</span><span>Add --repeat option to `expense add` CLI command</span><span class="dim">next</span></div>
+                  <div class="auto-task-row"><span class="dim">  T03</span><span>Write tests/test_recurring_add.py covering repeat expense creation</span><span class="dim">queued</span></div>
+                  <div class="auto-task-row"><span class="dim">  T04</span><span>Run full regression suite and confirm zero failures</span><span class="dim">queued</span></div>
+                </div>
+              </div>
+              <div class="auto-screen-footer">
+                <span>provider response pending · 18s</span>
+                <span class="warning">$21.29</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option full">
+        <div class="option-header">
+          <h2 class="option-title">AM4. Event Feed + Current Focus <code>debuggable</code></h2>
+          <div class="option-meta">shows motion</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="auto-screen">
+              <div class="auto-screen-main">
+                <div class="auto-screen-stack">
+                  <div><span class="accent">Current focus</span></div>
+                  <div><b>M004/S01/T01</b> · Add repeat column via idempotent ALTER TABLE in init_schema</div>
+                  <div><span class="progress"><span class="seg fill"></span><span class="seg run"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> task 1/4 · 18s</div>
+                  <div class="muted">ETA ~3h 22m · 0.2% context · $21.29 spent</div>
+                </div>
+                <div class="auto-screen-stack">
+                  <div class="timeline"><span class="muted">07:34:12</span><span class="success">start</span><span>execute-task M004/S01/T01</span><span>ok</span></div>
+                  <div class="timeline"><span class="muted">07:34:18</span><span class="accent">model</span><span>waiting for provider response</span><span>18s</span></div>
+                  <div class="timeline"><span class="muted">07:34:19</span><span class="dim">tools</span><span>no active tool calls</span><span>idle</span></div>
+                  <div class="timeline"><span class="muted">07:34:20</span><span class="success">health</span><span>progressing well</span><span>green</span></div>
+                </div>
+              </div>
+              <div class="auto-screen-footer"><span>esc pause</span><span>^G dashboard │ ^P parallel │ ^L logs</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option full">
+        <div class="option-header">
+          <h2 class="option-title">AM5. Recovery-Aware Auto Surface <code>health first</code></h2>
+          <div class="option-meta">clear when things stall</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="auto-screen">
+              <div class="auto-screen-header">
+                <span><span class="warning">● GSD AUTO</span> · provider response slow</span>
+                <span>idle threshold 4m · retry budget 0/2</span>
+              </div>
+              <div class="auto-alert">If this unit stalls, GSD will retry with focused context, then pause with a recovery note instead of hiding the failure.</div>
+              <div class="auto-screen-main">
+                <div class="auto-screen-stack">
+                  <div><span class="accent">Active unit</span> M004/S01/T01</div>
+                  <div>Add repeat column via idempotent ALTER TABLE in init_schema</div>
+                  <div class="muted">last progress: provider request sent · current: waiting for response</div>
+                </div>
+                <div class="auto-tile-grid">
+                  <div class="metric"><div class="metric-label">Health</div><div class="metric-value warning">watching</div></div>
+                  <div class="metric"><div class="metric-label">Elapsed</div><div class="metric-value">18s</div></div>
+                  <div class="metric"><div class="metric-label">ETA</div><div class="metric-value">~3h 22m</div></div>
+                  <div class="metric"><div class="metric-label">Cost</div><div class="metric-value warning">$21.29</div></div>
+                </div>
+              </div>
+              <div class="auto-screen-footer"><span>esc pause · ^D diagnose</span><span class="dim">auto recovery enabled</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option recommended">
+        <div class="option-header">
+          <h2 class="option-title">F1. Powerline Footer + Compact Auto Widget <code>recommended</code></h2>
+          <div class="option-meta">persistent status</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="footer-strip">
+              <div class="footer-segments">
+                <span class="segment accent">● GSD AUTO</span>
+                <span class="segment"> feat/tui-refresh</span>
+                <span class="segment">gpt-5.5</span>
+                <span class="segment success">64%hit</span>
+                <span class="segment warning">$1.42</span>
+              </div>
+              <div class="right">ctx 38% · ctrl+d dashboard</div>
+            </div>
+          </div>
+          <div class="terminal">
+            <div class="auto-panel">
+              <div class="card-line"><span class="left"><span class="accent">●</span> GSD <span class="success">AUTO</span> · Executing T03 renderer polish</span><span class="right">14m · 6m left</span></div>
+              <div><span class="progress"><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg run"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> <span class="accent">8/14 tasks</span> · S02 · execute-task</div>
+              <div class="muted">~/gsd-2/.worktrees/tui-operations-console-refresh · ctrl+n next · ctrl+p parallel</div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option">
+        <div class="option-header">
+          <h2 class="option-title">F2. Minimal Footer + Full Auto Panel <code>quiet footer</code></h2>
+          <div class="option-meta">dashboard owns detail</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="footer-strip">
+              <div class="footer-segments"><span class="segment accent">GSD</span><span class="segment">feat/tui-refresh</span></div>
+              <div class="right">38% ctx</div>
+            </div>
+          </div>
+          <div class="terminal">
+            <div class="auto-panel">
+              <div class="card-line"><span class="left"><span class="accent">Auto-mode dashboard</span></span><span class="right"><span class="success">healthy</span> · 14m</span></div>
+              <div class="auto-grid">
+                <div class="metric"><div class="metric-label">Current unit</div><div class="metric-value">execute-task · M001/S02/T03</div></div>
+                <div class="metric"><div class="metric-label">Cost</div><div class="metric-value warning">$1.42 · projected $2.10</div></div>
+                <div class="metric"><div class="metric-label">Context</div><div class="metric-value">38% / 200k</div></div>
+              </div>
+              <div class="stepper"><span class="step done">● discuss</span><span class="step done">● plan</span><span class="step active">● execute</span><span class="step">○ verify</span><span class="step">○ complete</span></div>
+              <div><span class="progress"><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg run"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> <span class="accent">slice 2/4</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option">
+        <div class="option-header">
+          <h2 class="option-title">F3. Mission Control Auto View <code>operator mode</code></h2>
+          <div class="option-meta">parallel friendly</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="footer-strip">
+              <div class="footer-segments"><span class="segment accent">● auto</span><span class="segment success">3 workers alive</span><span class="segment warning">1 warning</span></div>
+              <div class="right">ctrl+p monitor · ctrl+s stop</div>
+            </div>
+          </div>
+          <div class="terminal">
+            <div class="auto-panel">
+              <div class="card-line"><span class="left"><span class="accent">Mission Control</span> · M001 parallel execution</span><span class="right">$4.28 total</span></div>
+              <div class="timeline"><span class="success">M001</span><span>execute</span><span>T03 renderer polish</span><span><span class="progress"><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg run"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> 31%</span></div>
+              <div class="timeline"><span class="success">M002</span><span>verify</span><span>targeted tests</span><span class="success">✓ passed</span></div>
+              <div class="timeline"><span class="warning">M003</span><span>recover</span><span>typecheck drift</span><span class="warning">retry 1</span></div>
+              <div class="timeline"><span class="dim">M004</span><span>queued</span><span>final PR notes</span><span class="dim">waiting</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option">
+        <div class="option-header">
+          <h2 class="option-title">F4. Stepper Footer + Slim Auto Strip <code>workflow first</code></h2>
+          <div class="option-meta">guided mode</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="footer-strip">
+              <div class="stepper"><span class="step done">● discuss</span><span class="step done">● plan</span><span class="step active">● execute</span><span class="step">○ uat</span><span class="step">○ merge</span></div>
+              <div class="right">next: ctrl+n</div>
+            </div>
+          </div>
+          <div class="terminal">
+            <div class="card-line"><span class="left"><span class="accent">AUTO</span> executing T03 · renderer polish</span><span class="right">8/14 tasks · 14m</span></div>
+            <div><span class="progress"><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg run"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> <span class="accent">57%</span> · <span class="muted">npm test running</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option full">
+        <div class="option-header">
+          <h2 class="option-title">F5. Health-First Footer + Alerting Auto Panel <code>recovery focused</code></h2>
+          <div class="option-meta">failures visible</div>
+        </div>
+        <div class="option-body">
+          <div class="terminal">
+            <div class="footer-strip">
+              <div class="footer-segments"><span class="segment warning">! recovering</span><span class="segment">M001/S02/T03</span><span class="segment">idle 4m</span><span class="segment">retry 1</span></div>
+              <div class="right">ctrl+d diagnose · esc pause</div>
+            </div>
+          </div>
+          <div class="terminal">
+            <div class="auto-panel">
+              <div class="card-line"><span class="left"><span class="warning">!</span> Recovery signal</span><span class="right">last progress 4m ago</span></div>
+              <div class="auto-grid">
+                <div class="metric"><div class="metric-label">Blocker</div><div class="metric-value warning">typecheck drift</div></div>
+                <div class="metric"><div class="metric-label">Action</div><div class="metric-value">retry with focused prompt</div></div>
+                <div class="metric"><div class="metric-label">Risk</div><div class="metric-value error">may pause after retry 2</div></div>
+              </div>
+              <div><span class="progress"><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg mid"></span><span class="seg mid"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> <span class="warning">recovery budget 36%</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

@@ -9,6 +9,7 @@ export function registerScreenshotTools(pi: ExtensionAPI, deps: ToolDeps): void 
 		label: "Browser Screenshot",
 		description:
 			"Take a screenshot of the current browser page and return it as an inline image. Uses JPEG for viewport/fullpage (smaller, configurable quality) and PNG for element crops (preserves transparency). Optionally crop to a specific element by CSS selector.",
+		compatibility: { producesImages: true },
 		parameters: Type.Object({
 			fullPage: Type.Optional(
 				Type.Boolean({ description: "Capture the full scrollable page (default: false)" })

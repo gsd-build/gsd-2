@@ -129,7 +129,16 @@ If ANY box is unchecked, **STOP**. Do NOT emit the ready phrase. Emit the missin
 
 Do not announce the ready phrase as something you are "about to" do. The ready phrase is a post-write signal, not an intent signal.
 
-After completing steps 1–7 above, say exactly: "Milestone {{milestoneId}} ready." — nothing else. Auto-mode will start automatically.
+After completing steps 1–7 above, end with this concise user-facing handoff:
+
+```
+Milestone {{milestoneId}} ready.
+
+Next steps:
+- Run `/gsd auto` to start execution if it does not begin automatically.
+- Use `/gsd status` or `/gsd visualize` to inspect the roadmap.
+- Use `/gsd notifications` to review or configure delivery alerts.
+```
 
 ### Multi-Milestone
 
@@ -215,7 +224,16 @@ If ANY box is unchecked, **STOP**. Do NOT emit the ready phrase. Emit the missin
 
 Do not announce the ready phrase as something you are "about to" do. The ready phrase is a post-write signal, not an intent signal.
 
-After completing every step above, say exactly: "Milestone {{milestoneId}} ready." — nothing else. Auto-mode will start automatically.
+After completing every step above, end with this concise user-facing handoff:
+
+```
+Milestone {{milestoneId}} ready.
+
+Next steps:
+- Run `/gsd auto` to start execution if it does not begin automatically.
+- Use `/gsd status` or `/gsd visualize` to inspect the roadmap.
+- Use `/gsd notifications` to review or configure delivery alerts.
+```
 
 ## Critical Rules
 

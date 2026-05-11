@@ -14,6 +14,7 @@ import {
 import { formatEligibilityReport } from "../../parallel-eligibility.js";
 import { formatMergeResults, mergeAllCompleted, mergeCompletedMilestone } from "../../parallel-merge.js";
 import { loadEffectiveGSDPreferences, resolveParallelConfig } from "../../preferences.js";
+import { reconcileBeforeSpawn } from "../../state-reconciliation.js";
 import { projectRoot } from "../context.js";
 function emitParallelMessage(pi: ExtensionAPI, content: string): void {
   pi.sendMessage({ customType: "gsd-parallel", content, display: true });
@@ -38,6 +39,17 @@ export async function handleParallelCommand(trimmed: string, _ctx: ExtensionComm
     const report = formatEligibilityReport(candidates);
     if (candidates.eligible.length === 0) {
       emitParallelMessage(pi, `${report}\n\nNo milestones are eligible for parallel execution.`);
+      return true;
+    }
+    // ADR-017 #5707: reconcile before spawning so workers don't independently
+    // race on the same drift. Failures abort the spawn with an actionable
+    // user-visible message.
+    const gate = await reconcileBeforeSpawn(root);
+    if (!gate.ok) {
+      emitParallelMessage(
+        pi,
+        `${report}\n\nParallel orchestration aborted before spawn — ${gate.reason}`,
+      );
       return true;
     }
     const result = await startParallel(

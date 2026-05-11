@@ -1,0 +1,806 @@
+<!--
+Project/App: GSD-2
+File Purpose: Focused recommended TUI redesign mockup for chat, assistant, tool output, footer, and auto-mode surfaces.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GSD Recommended TUI Design</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #10141d;
+      --panel: #171c26;
+      --panel-2: #1d2430;
+      --border: #a7ba78;
+      --border-muted: #4e596d;
+      --text: #dce4f2;
+      --muted: #7d889f;
+      --dim: #4d5870;
+      --accent: #8db7ff;
+      --success: #a8c978;
+      --warning: #e6c06a;
+      --error: #d98484;
+      --add-bg: rgba(89, 138, 74, .28);
+      --del-bg: rgba(136, 62, 68, .34);
+      --warn-bg: rgba(158, 123, 49, .2);
+      --shadow: rgba(0, 0, 0, .36);
+      --font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      background:
+        radial-gradient(circle at 18% -10%, rgba(141, 183, 255, .12), transparent 380px),
+        linear-gradient(180deg, rgba(168, 189, 120, .045), transparent 420px),
+        var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+    }
+
+    main {
+      width: min(1320px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 32px 0 56px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 22px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+
+    .lede {
+      margin: 0;
+      max-width: 820px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .decision {
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(23, 28, 38, .82);
+      color: var(--muted);
+      font-family: var(--font);
+      font-size: 12px;
+      box-shadow: 0 14px 40px var(--shadow);
+    }
+
+    .decision b { color: var(--success); font-weight: 700; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(360px, .65fr);
+      gap: 22px;
+      align-items: start;
+    }
+
+    .section {
+      min-width: 0;
+      border: 1px solid var(--border-muted);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, .025), transparent), var(--panel);
+      box-shadow: 0 16px 46px var(--shadow);
+      overflow: hidden;
+    }
+
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(78, 89, 109, .72);
+      background: rgba(16, 20, 29, .56);
+    }
+
+    .section-title h2 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    .section-title span {
+      color: var(--muted);
+      font-family: var(--font);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .terminal {
+      margin: 16px;
+      padding: 16px;
+      border: 1px solid rgba(167, 186, 120, .74);
+      border-radius: 6px;
+      background: #141923;
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.46;
+      overflow: hidden;
+    }
+
+    .muted { color: var(--muted); }
+    .dim { color: var(--dim); }
+    .accent { color: var(--accent); }
+    .success { color: var(--success); }
+    .warning { color: var(--warning); }
+    .error { color: var(--error); }
+
+    .rail {
+      border-left: 3px solid var(--border);
+      padding-left: 14px;
+      margin-bottom: 14px;
+      display: grid;
+      gap: 5px;
+    }
+
+    .speaker {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .tool-card {
+      margin: 14px 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      background: rgba(16, 20, 29, .38);
+    }
+
+    .tool-header,
+    .tool-footer,
+    .footer-strip,
+    .auto-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .tool-header {
+      padding: 9px 11px;
+      border-bottom: 1px solid rgba(78, 89, 109, .72);
+      color: var(--accent);
+    }
+
+    .tool-body {
+      padding: 8px 0;
+    }
+
+    .tool-footer {
+      padding: 8px 11px;
+      border-top: 1px solid rgba(78, 89, 109, .6);
+      color: var(--muted);
+    }
+
+    .left,
+    .right {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .right {
+      flex: 0 0 auto;
+      color: var(--muted);
+    }
+
+    .line {
+      display: flex;
+      gap: 12px;
+      min-width: 0;
+      white-space: pre;
+    }
+
+    .ln {
+      width: 5ch;
+      flex: 0 0 5ch;
+      color: var(--dim);
+      text-align: right;
+      user-select: none;
+    }
+
+    .code {
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .ctx { color: #8d98ae; }
+    .add { color: var(--success); background: var(--add-bg); }
+    .del { color: var(--error); background: var(--del-bg); }
+    .warn-bg { background: var(--warn-bg); }
+
+    .command-card {
+      margin: 10px 0;
+      padding: 9px 11px;
+      border: 1px solid rgba(167, 186, 120, .74);
+      border-radius: 5px;
+      background: rgba(16, 20, 29, .48);
+    }
+
+    .progress {
+      display: inline-grid;
+      grid-template-columns: repeat(14, 8px);
+      gap: 2px;
+      vertical-align: -1px;
+    }
+
+    .seg {
+      height: 12px;
+      border-radius: 1px;
+      background: var(--dim);
+    }
+
+    .seg.fill { background: var(--success); }
+    .seg.run { background: var(--accent); }
+    .seg.warn { background: var(--warning); }
+
+    .footer-strip {
+      align-items: center;
+      padding: 8px 10px;
+      border: 1px solid rgba(78, 89, 109, .72);
+      border-radius: 5px;
+      background: rgba(16, 20, 29, .7);
+      font-family: var(--font);
+      font-size: 13px;
+    }
+
+    .segments {
+      display: flex;
+      gap: 10px;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .segment {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--muted);
+    }
+
+    .auto-panel {
+      display: grid;
+      gap: 11px;
+      padding: 13px;
+      border: 1px solid rgba(167, 186, 120, .76);
+      border-radius: 6px;
+      background: rgba(16, 20, 29, .45);
+      font-family: var(--font);
+      font-size: 13px;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 9px;
+    }
+
+    .metric {
+      min-width: 0;
+      padding: 8px;
+      border: 1px solid rgba(78, 89, 109, .64);
+      border-radius: 4px;
+      background: rgba(29, 36, 48, .58);
+    }
+
+    .metric-label {
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .metric-value {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .notes {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .note {
+      padding: 10px 12px;
+      border: 1px solid rgba(78, 89, 109, .72);
+      border-radius: 5px;
+      background: rgba(16, 20, 29, .48);
+    }
+
+    .header-lab {
+      margin-top: 22px;
+    }
+
+    .header-grid {
+      display: grid;
+      gap: 16px;
+      padding: 16px;
+    }
+
+    .splash-option {
+      border: 1px solid rgba(78, 89, 109, .72);
+      border-radius: 6px;
+      background: rgba(16, 20, 29, .5);
+      overflow: hidden;
+    }
+
+    .option-label {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(78, 89, 109, .58);
+      color: var(--muted);
+      font-family: var(--font);
+      font-size: 12px;
+    }
+
+    .option-label b {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .splash-terminal {
+      padding: 14px;
+      background: #0f141c;
+      font-family: var(--font);
+      font-size: 13px;
+      line-height: 1.28;
+      color: var(--text);
+      overflow-x: auto;
+    }
+
+    .splash-frame {
+      min-width: 900px;
+      border-top: 1px solid rgba(167, 186, 120, .7);
+      border-bottom: 1px solid rgba(167, 186, 120, .7);
+      padding: 10px 0;
+    }
+
+    .splash-row {
+      display: grid;
+      grid-template-columns: 300px minmax(0, 1fr);
+      gap: 20px;
+      align-items: center;
+    }
+
+    .logo {
+      white-space: pre;
+      color: #9bb0a6;
+      text-shadow: 2px 2px 0 rgba(78, 89, 109, .68);
+      line-height: .86;
+      font-size: 21px;
+    }
+
+    .logo.small {
+      font-size: 14px;
+      line-height: .88;
+    }
+
+    .logo-word {
+      color: var(--border);
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .panel-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      min-width: 0;
+      border-bottom: 1px solid rgba(78, 89, 109, .72);
+      padding: 7px 0;
+    }
+
+    .panel-line:first-child {
+      border-top: 1px solid rgba(78, 89, 109, .72);
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1fr);
+      gap: 16px;
+      padding: 4px 0;
+    }
+
+    .key {
+      color: var(--muted);
+    }
+
+    .value {
+      color: var(--text);
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .hint-row {
+      display: flex;
+      justify-content: flex-end;
+      gap: 20px;
+      padding-top: 9px;
+      color: var(--muted);
+    }
+
+    .splash-compact {
+      display: grid;
+      grid-template-columns: 118px minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: center;
+      min-width: 900px;
+      padding: 12px 14px;
+      border: 1px solid rgba(167, 186, 120, .72);
+      border-radius: 5px;
+      background: rgba(16, 20, 29, .48);
+    }
+
+    .rail-panel {
+      border-left: 3px solid var(--border);
+      padding-left: 14px;
+      display: grid;
+      gap: 5px;
+    }
+
+    .dashboard-splash {
+      min-width: 900px;
+      display: grid;
+      grid-template-columns: 210px minmax(0, 1fr);
+      gap: 16px;
+      padding: 13px;
+      border: 1px solid rgba(167, 186, 120, .74);
+      border-radius: 6px;
+      background: rgba(20, 25, 35, .78);
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .status-cell {
+      border: 1px solid rgba(78, 89, 109, .64);
+      border-radius: 4px;
+      padding: 8px;
+      background: rgba(29, 36, 48, .55);
+    }
+
+    .mini-label {
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 4px;
+    }
+
+    .minimal-splash {
+      min-width: 900px;
+      display: grid;
+      gap: 8px;
+      padding: 10px 0;
+      border-top: 1px solid rgba(78, 89, 109, .76);
+      border-bottom: 1px solid rgba(78, 89, 109, .76);
+    }
+
+    .minimal-main {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: baseline;
+      padding: 0 2px;
+    }
+
+    .wide-panel {
+      min-width: 900px;
+      border: 1px solid rgba(167, 186, 120, .72);
+      border-radius: 6px;
+      background: rgba(16, 20, 29, .48);
+      overflow: hidden;
+    }
+
+    .wide-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(78, 89, 109, .72);
+    }
+
+    .wide-body {
+      display: grid;
+      grid-template-columns: 1.3fr .7fr .7fr;
+      gap: 0;
+    }
+
+    .wide-body > div {
+      padding: 12px;
+      border-right: 1px solid rgba(78, 89, 109, .58);
+    }
+
+    .wide-body > div:last-child {
+      border-right: 0;
+    }
+
+    @media (max-width: 1040px) {
+      main { width: min(100vw - 24px, 780px); padding-top: 20px; }
+      header, .layout { grid-template-columns: 1fr; }
+      .metrics { grid-template-columns: 1fr; }
+      .tool-header, .tool-footer, .footer-strip, .auto-row { white-space: normal; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Recommended GSD TUI Direction</h1>
+        <p class="lede">A single cohesive direction for the terminal experience: left-rail assistant messages, diff-first tool cards, compact command cards, a powerline-style footer, and a compact auto-mode widget with health escalation.</p>
+      </div>
+      <div class="decision"><b>Pick:</b> Left rail + diff-first tools + compact auto footer</div>
+    </header>
+
+    <div class="layout">
+      <section class="section">
+        <div class="section-title">
+          <h2>Transcript Recommendation</h2>
+          <span>assistant + tools</span>
+        </div>
+        <div class="terminal">
+          <div class="rail">
+            <div><span class="speaker">GSD</span> <span class="muted">· gpt-5.5 · 12:04 PM</span></div>
+            <div>I’ll update the renderer registration test and run verification.</div>
+            <div class="muted">Plan:</div>
+            <div>1. Adjust the themed renderer stub</div>
+            <div>2. Format and run targeted tests</div>
+            <div>3. Report full-suite failures separately if they are unrelated</div>
+          </div>
+
+          <div class="tool-card">
+            <div class="tool-header">
+              <div class="left">edit tests/renderer-registration.test.ts</div>
+              <div class="right"><span class="success">+4</span> <span class="error">-1</span> · 1 hunk · <span class="success">done</span></div>
+            </div>
+            <div class="tool-body">
+              <div class="line ctx"><span class="ln">189</span><span class="code">const state = {};</span></div>
+              <div class="line ctx"><span class="ln">190</span><span class="code">const coloredTheme = {</span></div>
+              <div class="line ctx"><span class="ln">191</span><span class="code">  ...testTheme(),</span></div>
+              <div class="line del"><span class="ln">-193</span><span class="code">fg: (key: string, text: string) =&gt; `&lt;${key}&gt;${text}&lt;/${key}&gt;`,</span></div>
+              <div class="line add"><span class="ln">+193</span><span class="code">fg: (key: string, text: string) =&gt;</span></div>
+              <div class="line add"><span class="ln">+194</span><span class="code">  ["warning", "success", "error", "borderMuted"].includes(key)</span></div>
+              <div class="line add"><span class="ln">+195</span><span class="code">    ? `&lt;${key}&gt;${text}&lt;/${key}&gt;`</span></div>
+              <div class="line add"><span class="ln">+196</span><span class="code">    : text,</span></div>
+            </div>
+            <div class="tool-footer">
+              <div class="left">output expanded</div>
+              <div class="right">ctrl+o collapse</div>
+            </div>
+          </div>
+
+          <div class="command-card">
+            <div class="auto-row"><span class="left"><span class="accent">$</span> npm run format</span><span class="right"><span class="success">✓</span> 2.1s · output hidden · ctrl+o expand</span></div>
+          </div>
+          <div class="command-card">
+            <div class="auto-row"><span class="left"><span class="accent">$</span> npm test</span><span class="right"><span class="progress"><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg run"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> 48% running</span></div>
+          </div>
+
+          <div class="rail">
+            <div><span class="speaker">GSD</span> <span class="muted">· verification</span></div>
+            <div>Targeted tests passed. The full unit suite reports two unrelated failures outside this change set.</div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="section">
+        <div class="section-title">
+          <h2>Persistent Surfaces</h2>
+          <span>footer + auto-mode</span>
+        </div>
+        <div class="terminal">
+          <div class="footer-strip">
+            <div class="segments">
+              <span class="segment accent">● GSD AUTO</span>
+              <span class="segment"> feat/tui-refresh</span>
+              <span class="segment">gpt-5.5</span>
+              <span class="segment success">64%hit</span>
+              <span class="segment warning">$1.42</span>
+            </div>
+            <div class="right">ctx 38% · ctrl+d</div>
+          </div>
+
+          <div style="height: 14px"></div>
+
+          <div class="auto-panel">
+            <div class="auto-row">
+              <span class="left"><span class="accent">●</span> GSD <span class="success">AUTO</span> · Executing T03 renderer polish</span>
+              <span class="right">14m · 6m left</span>
+            </div>
+            <div><span class="progress"><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg run"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> <span class="accent">8/14 tasks</span> · S02 · execute-task</div>
+            <div class="metrics">
+              <div class="metric"><div class="metric-label">Current</div><div class="metric-value">M001/S02/T03</div></div>
+              <div class="metric"><div class="metric-label">Cost</div><div class="metric-value warning">$1.42</div></div>
+              <div class="metric"><div class="metric-label">Context</div><div class="metric-value">38% / 200k</div></div>
+            </div>
+            <div class="muted">~/gsd-2/.worktrees/tui-operations-console-refresh</div>
+          </div>
+
+          <div style="height: 14px"></div>
+
+          <div class="auto-panel warn-bg">
+            <div class="auto-row">
+              <span class="left"><span class="warning">!</span> Recovery signal</span>
+              <span class="right">idle 4m · retry 1</span>
+            </div>
+            <div><span class="progress"><span class="seg fill"></span><span class="seg fill"></span><span class="seg fill"></span><span class="seg warn"></span><span class="seg warn"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span><span class="seg"></span></span> <span class="warning">recovery budget 36%</span></div>
+            <div class="muted">ctrl+d diagnose · esc pause</div>
+          </div>
+        </div>
+
+        <div class="notes">
+          <div class="note"><span class="success">Why this works:</span> assistant text stays readable without boxing every message, while tool output gets strong structure where it matters.</div>
+          <div class="note"><span class="accent">Default behavior:</span> command output stays collapsed, diffs expand inline, progress appears only for active work.</div>
+          <div class="note"><span class="warning">Escalation:</span> warnings use the same layout but switch tone, so recovery states are visible without a separate UI mode.</div>
+        </div>
+      </aside>
+    </div>
+
+    <section class="section header-lab">
+      <div class="section-title">
+        <h2>Header / Splash Options</h2>
+        <span>five directions for the first-run/status surface</span>
+      </div>
+      <div class="header-grid">
+        <div class="splash-option">
+          <div class="option-label">
+            <b>01 Refined Current</b>
+            <span>keeps the big mark, fixes hierarchy and spacing</span>
+          </div>
+          <div class="splash-terminal">
+            <div class="splash-frame">
+              <div class="splash-row">
+                <div class="logo"> ██████╗ ███████╗██████╗
+██╔════╝ ██╔════╝██╔══██╗
+██║  ███╗███████╗██║  ██║
+██║   ██║╚════██║██║  ██║
+╚██████╔╝███████║██████╔╝
+ ╚═════╝ ╚══════╝╚═════╝</div>
+                <div>
+                  <div class="panel-line"><span class="logo-word">Get Shit Done</span><span class="muted">v2.81.0</span></div>
+                  <div class="kv"><span class="key">Status</span><span class="value">No active GSD project</span></div>
+                  <div class="kv"><span class="key">Next</span><span class="value accent">/gsd to begin</span></div>
+                  <div class="kv"><span class="key">Workspace</span><span class="value">~/Github/gsd-2</span></div>
+                  <div class="panel-line"><span class="muted">No setup detected</span><span class="muted">/gsd help</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="splash-option">
+          <div class="option-label">
+            <b>02 Compact Rail</b>
+            <span>best when startup should stay quiet inside a chat transcript</span>
+          </div>
+          <div class="splash-terminal">
+            <div class="splash-compact">
+              <div class="logo small"> ███╗ ███╗ ███╗
+██╔╝ ██╔╝ ██╔██╗
+██║  ███╗ ██║██║
+╚██╗ ╚██║ █████╔╝</div>
+              <div class="rail-panel">
+                <div><span class="logo-word">GSD</span> <span class="muted">· Get Shit Done · v2.81.0</span></div>
+                <div>No active GSD project in <span class="muted">~/Github/gsd-2</span></div>
+                <div><span class="accent">/gsd to begin</span> <span class="muted">·</span> /gsd help <span class="muted">·</span> /gsd setup</div>
+              </div>
+              <div class="right">ready</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="splash-option">
+          <div class="option-label">
+            <b>03 Command Center</b>
+            <span>more operational, useful after a project exists</span>
+          </div>
+          <div class="splash-terminal">
+            <div class="dashboard-splash">
+              <div>
+                <div class="logo small"> ██████╗
+██╔════╝
+██║ ███╗
+╚██████╔╝
+ ╚═════╝</div>
+                <div class="hint-row" style="justify-content:flex-start"><span class="accent">GSD</span><span class="muted">v2.81.0</span></div>
+              </div>
+              <div>
+                <div class="panel-line"><span class="logo-word">Project Console</span><span class="muted">idle</span></div>
+                <div class="status-grid">
+                  <div class="status-cell"><div class="mini-label">Project</div><div>No active project</div></div>
+                  <div class="status-cell"><div class="mini-label">Command</div><div class="accent">/gsd start</div></div>
+                  <div class="status-cell"><div class="mini-label">Branch</div><div>main</div></div>
+                  <div class="status-cell"><div class="mini-label">Mode</div><div>manual</div></div>
+                </div>
+                <div class="hint-row"><span>/gsd to begin</span><span>/gsd templates</span><span>/gsd help</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="splash-option">
+          <div class="option-label">
+            <b>04 Minimal Status Bar</b>
+            <span>least visual noise, fastest to scan</span>
+          </div>
+          <div class="splash-terminal">
+            <div class="minimal-splash">
+              <div class="minimal-main">
+                <div><span class="logo-word">● GSD</span> <span class="muted">Get Shit Done</span></div>
+                <div class="muted">v2.81.0</div>
+              </div>
+              <div class="minimal-main">
+                <div>No active project <span class="muted">· ~/Github/gsd-2</span></div>
+                <div><span class="accent">/gsd to begin</span> <span class="muted">· /gsd help</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="splash-option">
+          <div class="option-label">
+            <b>05 Wide Dashboard</b>
+            <span>largest surface, strongest first-run guidance</span>
+          </div>
+          <div class="splash-terminal">
+            <div class="wide-panel">
+              <div class="wide-head">
+                <span><span class="logo-word">GSD</span> <span class="muted">Get Shit Done</span></span>
+                <span class="muted">v2.81.0</span>
+              </div>
+              <div class="wide-body">
+                <div>
+                  <div class="mini-label">Current State</div>
+                  <div>No active GSD project</div>
+                  <div class="muted">Initialize this workspace to enable milestones, slices, auto-mode, and progress tracking.</div>
+                </div>
+                <div>
+                  <div class="mini-label">Primary Action</div>
+                  <div class="accent">/gsd to begin</div>
+                  <div class="muted">guided setup</div>
+                </div>
+                <div>
+                  <div class="mini-label">Secondary</div>
+                  <div>/gsd help</div>
+                  <div class="muted">templates · prefs · status</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,6 +1,5 @@
-/**
- * Component for displaying bash command execution with streaming output.
- */
+// Project/App: GSD-2
+// File Purpose: Interactive terminal bash execution renderer with streaming output and recommended command cards.
 
 import { Container, Loader, Spacer, Text, type TUI } from "@gsd/pi-tui";
 import stripAnsi from "strip-ansi";
@@ -13,6 +12,7 @@ import {
 import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
 import { editorKey, keyHint } from "./keybinding-hints.js";
+import { renderCommandCard, renderTranscriptCard, type StatusTone } from "./transcript-design.js";
 import { truncateToVisualLines } from "./visual-truncate.js";
 
 // Preview line limit when not expanded (matches tool execution behavior)
@@ -118,6 +118,67 @@ export class BashExecutionComponent extends Container {
 		this.loader.stop();
 
 		this.updateDisplay();
+	}
+
+	override render(width: number): string[] {
+		const frameWidth = Math.max(20, width);
+		const elapsedStatus =
+			this.status === "running"
+				? "running"
+				: this.status === "complete"
+					? "success"
+					: this.status === "cancelled"
+						? "cancelled"
+						: `failed${this.exitCode !== undefined ? ` · exit ${this.exitCode}` : ""}`;
+		const tone: StatusTone =
+			this.status === "running"
+				? "running"
+				: this.status === "complete"
+					? "success"
+					: this.status === "cancelled"
+						? "warning"
+						: "error";
+
+		if (!this.expanded && this.status !== "error") {
+			return [
+				"",
+				...renderCommandCard(this.command.replace(/\s+/g, " ").trim(), frameWidth, {
+					status: elapsedStatus,
+					tone,
+				}),
+			];
+		}
+
+		const output = this.outputLines.join("\n");
+		const contextTruncation = truncateTail(output, {
+			maxLines: DEFAULT_MAX_LINES,
+			maxBytes: DEFAULT_MAX_BYTES,
+		});
+		const truncationResult = this.truncationResult ?? contextTruncation;
+		const fullOutputPath = this.fullOutputPath;
+		const availableLines = contextTruncation.content ? contextTruncation.content.split("\n") : [];
+		const preview = this.expanded ? availableLines : availableLines.slice(-PREVIEW_LINES);
+		const hidden = Math.max(0, availableLines.length - preview.length);
+		const truncationWarning =
+			(truncationResult.truncated || contextTruncation.truncated) && fullOutputPath
+				? [theme.fg("warning", `Output truncated. Full output: ${fullOutputPath}`)]
+				: [];
+		const body = [
+			theme.fg("toolTitle", `$ ${this.command}`),
+			...preview.map((line) => theme.fg("toolOutput", line)),
+			...(hidden > 0 ? [theme.fg("muted", `... ${hidden} earlier lines`)] : []),
+			...truncationWarning,
+		];
+		return [
+			"",
+			...renderTranscriptCard(body, frameWidth, {
+				title: "command",
+				right: elapsedStatus,
+				tone,
+				footerLeft: this.expanded ? "output expanded" : "output preview",
+				footerRight: this.expanded ? "ctrl+o collapse" : "ctrl+o expand",
+			}),
+		];
 	}
 
 	private updateDisplay(): void {

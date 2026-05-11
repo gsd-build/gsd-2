@@ -34,6 +34,17 @@ It checks:
 
 **Fix:** Check the task plan for clarity. If the plan is ambiguous, refine it manually, then `/gsd auto` to resume.
 
+### Auto mode pauses after a timeout or finalize failure
+
+**Symptoms:** Auto mode reports a unit hard timeout, a finalize timeout, or a post-unit closeout failure.
+
+**What to inspect:**
+- `.gsd/runtime/<unit-type>/<unit-id>.json` shows the latest runtime phase, timeout timestamp, recovery attempts, and progress marker. Timeout recovery uses progress kinds such as `idle-recovery-retry`, `hard-recovery-retry`, `finalize-pre-timeout`, `finalize-post-timeout`, and `finalize-success`.
+- `.gsd/journal/` shows the ordered loop events. Look for `unit-end`, then `post-unit-finalize-start`, `post-unit-finalize-end`, and `iteration-end`.
+- `post-unit-finalize-end.status` tells you whether closeout completed, retried, stopped, or failed. `iteration-end.status` and `iteration-end.reason` show the final loop outcome that caused auto mode to continue, retry, pause, or stop.
+
+**Fix:** If the runtime record shows fresh recovery progress, resume with `/gsd auto`; the failsafe defers cancellation while recovery is actively producing durable output. If the journal shows a stopped finalize reason such as a git closeout failure or repeated finalize timeout, resolve that underlying issue first, then resume.
+
 ### Wrong files in worktree
 
 **Symptoms:** Planning artifacts or code appear in the wrong directory.
@@ -149,6 +160,14 @@ If recovery still fails, repair runtime state instead of manually deleting indiv
 **What it means:** `.gsd/milestones/<MID>/` exists on disk, but GSD cannot find a DB milestone row, a matching `.gsd/worktrees/<MID>/` worktree, or any milestone content files. These disk-only stub directories can be left behind by interrupted or stale forward references and can skew the next milestone ID that GSD generates.
 
 **Fix:** Run `/gsd doctor fix` to remove the orphan milestone stub directory automatically. The auto-fix only targets disk-only stubs with no DB row, no worktree, and no content files; populated milestone directories and in-flight worktree-only milestones are not removed.
+
+### Startup warns that memory consolidation is incomplete
+
+**Symptoms:** On startup, GSD shows a warning like `Memory consolidation: ... not yet in memories table. Run /doctor for details.`
+
+**What it means:** The ADR-013 memory-store consolidation preflight scanner found legacy knowledge that is not yet represented in the canonical `memories` table. It checks active `decisions` rows for matching `structured_fields.sourceDecisionId` markers and `.gsd/KNOWLEDGE.md` table rows for matching `sourceKnowledgeId` markers. The scanner is read-only and is intended to block destructive cutover until migration coverage is visible.
+
+**Fix:** Run `/gsd doctor` to inspect the counts and sample rows. Before cutover, complete the decisions or KNOWLEDGE.md backfill so the affected rows exist in `memories`; do not delete legacy `DECISIONS.md`, `KNOWLEDGE.md`, or database rows just to silence the warning.
 
 ### Transient `EBUSY` / `EPERM` / `EACCES` while writing `.gsd/` files
 

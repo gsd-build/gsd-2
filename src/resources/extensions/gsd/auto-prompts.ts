@@ -806,14 +806,22 @@ export async function inlineDecisionsFromDb(
   try {
     const { isDbAvailable } = await import("./gsd-db.js");
     if (isDbAvailable()) {
-      const { queryDecisions, formatDecisionsForPrompt } = await import("./context-store.js");
+      // ADR-013 Phase 6 cutover (Stage 1): read decisions from the `memories`
+      // table. Both `queryDecisions` (legacy) and `queryDecisionsFromMemories`
+      // return identical Decision[] for active rows once Phase 5 dual-write is
+      // caught up. Switching the read here lets the destructive Phase 6 step
+      // (#5755) retire the legacy `decisions` table without changing prompt
+      // contents. Projection regen (`DECISIONS.md`) still sources from the
+      // legacy table — that switch lands separately to handle superseded
+      // history cleanly.
+      const { queryDecisionsFromMemories, formatDecisionsForPrompt } = await import("./context-store.js");
 
       // First query: try with both milestoneId and scope (if scope provided)
-      let decisions = queryDecisions({ milestoneId, scope });
+      let decisions = queryDecisionsFromMemories({ milestoneId, scope });
 
       // Cascade: if empty AND scope was provided, retry without scope
       if (decisions.length === 0 && scope) {
-        decisions = queryDecisions({ milestoneId });
+        decisions = queryDecisionsFromMemories({ milestoneId });
       }
 
       if (decisions.length > 0) {

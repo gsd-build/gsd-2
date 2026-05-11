@@ -92,11 +92,23 @@ Lifecycle entry/exit paths (`enterMilestone` and `exitMilestone`) construct the 
 ## Invariants
 
 - Single owner of `s.basePath` mutation across the codebase: the Worktree Lifecycle module. No caller writes `s.basePath` directly.
-- Single owner of `process.chdir()` for worktree transitions: the Lifecycle Module. The class must not double-chdir; this constraint moves from a comment in `worktree-resolver.ts` to an enforced internal invariant.
+- Single owner of `process.chdir()` for **auto-loop worktree transitions**: the Lifecycle Module. The class must not double-chdir; this constraint moves from a comment in `worktree-resolver.ts` to an enforced internal invariant. See **Scope and carve-outs** below for the auto-loop boundary.
 - Lifecycle calls Projection; Projection does not call Lifecycle. The dependency direction is one-way.
 - Projection rules per direction are fixed, not parameter-bag-driven. Callers do not pass options that change which files cross the boundary or in what direction.
 - `MilestoneScope` is the only input type for Projection verbs. Path-string overloads are not added.
 - Expected failures (worktree creation failed, lease conflict, merge conflict, teardown failed) flow through typed result unions; only unexpected failures throw.
+
+### Scope and carve-outs
+
+The single-owner invariants above are scoped to the **auto-loop worktree transitions** that ADR-016 was written to deepen — the path through `auto.ts` → `WorktreeLifecycle` → `enterMilestone` / `exitMilestone` / `restoreToProjectRoot` / `adopt*` / `resumeFromPausedSession`.
+
+The following sites are explicit carve-outs from the single-owner invariants. They are not bypasses; they predate the Lifecycle Module and are out of scope for the auto-loop deepening this ADR drives.
+
+- **`mergeMilestoneToMain` is exported from `auto-worktree.ts`** (the `export` keyword is preserved). Its body contains the squash-merge primitive. ADR-016 phase 2 / A3 (#5619) closed the *invocation* closure: the function is invoked only by `WorktreeLifecycle`, via a `WorktreeLifecycleDeps.mergeMilestoneToMain` field that `auto.ts:buildWorktreeLifecycleDeps()` populates. The export is the construction of that dep seam, not a caller bypass. Tests substitute the merge primitive through the same dep field.
+- **User-facing CLI verbs in `worktree-command.ts`** (`gsd worktree create / switch / return / merge`) chdir directly. These are user-driven mutations of the user's shell cwd, not auto-loop transitions. They never run inside an auto loop.
+- **Transient cwd-swap-and-restore inside git-merge primitives** (`slice-cadence.ts:mergeSliceToMain` / `resquashMilestoneOnMain`, and `auto-worktree.ts:mergeMilestoneToMain`) chdirs to the merge target's project root to run `git merge`, then restores the previous cwd before returning. This is a transient git-op cwd swap, not a session-level basePath transition. The `s.basePath` field is never mutated by these primitives.
+
+Future architecture reviews should not re-suggest folding these sites into Lifecycle without first revisiting this section. If a strict closure becomes preferable (e.g. because user-CLI verbs grow auto-loop reentry), that change should land alongside an amended invariants section, not as a quiet refactor.
 
 ## Consequences
 

@@ -1,5 +1,5 @@
-// GSD Extension — /gsd notifications Command Handler
-// View, filter, and clear the persistent notification history.
+// Project/App: GSD-2
+// File Purpose: Handles /gsd notifications commands and opens the notification history overlay.
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent";
 
@@ -11,7 +11,7 @@ import {
   unsuppressPersistence,
   type NotifySeverity,
 } from "../../notification-store.js";
-import { GSDNotificationOverlay } from "../../notification-overlay.js";
+import { GSDNotificationOverlay, notificationOverlayOptions } from "../../notification-overlay.js";
 
 const MAX_INLINE_ENTRIES = 40;
 
@@ -108,13 +108,7 @@ export async function handleNotificationsCommand(
           (tui, theme, _kb, done) => new GSDNotificationOverlay(tui, theme, () => done(true)),
           {
             overlay: true,
-            overlayOptions: {
-              width: "80%",
-              minWidth: 60,
-              maxHeight: "88%",
-              anchor: "center",
-              backdrop: true,
-            },
+            overlayOptions: notificationOverlayOptions(),
           },
         );
         if (result !== undefined) {
