@@ -108,6 +108,14 @@ export function mapContentBlock(
 	}
 }
 
+/**
+ * Map a Claude Code SDK `stop_reason` to GSD's `StopReason` union.
+ *
+ * Unknown / null reasons fall back to `"stop"` so callers don't have to
+ * special-case them — the SDK may surface new values on future model versions
+ * and a soft fallback keeps the assistant message renderable until we map
+ * them explicitly.
+ */
 export function mapStopReason(reason: string | null): StopReason {
 	switch (reason) {
 		case "end_turn":
@@ -192,6 +200,10 @@ export class PartialMessageBuilder {
 		};
 	}
 
+	/**
+	 * Current accumulated AssistantMessage. Mutated in place as stream events
+	 * arrive — callers that snapshot should clone before persisting.
+	 */
 	get message(): AssistantMessage {
 		return this.partial;
 	}
