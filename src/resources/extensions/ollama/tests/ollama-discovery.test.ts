@@ -19,12 +19,30 @@ function showStub(modelInfo: Record<string, unknown>, capabilities?: string[]): 
 }
 
 describe("discoverModels — context window resolution", () => {
-	it("prefers known table context window over /api/show value", async () => {
-		// /api/show is now always called (to read capabilities), but the static
-		// table still wins for context window when both sources have a value.
+	it("prefers /api/show context_length over known table value", async () => {
+		// /api/show is the authoritative source for context window (ollama
+		// metadata derived from the model file). The static table is a
+		// fallback for old ollama versions and network failures. Earlier
+		// versions of this code preferred the table, but the table fell
+		// behind reality on several model families (deepseek-v4-* underreported
+		// at 131072 vs real 1048576; minimax-m2.7 overreported at 1048576 vs
+		// real 196608). Trusting /api/show keeps gsd correct without
+		// chasing a perpetually-stale table.
 		const models = await discoverModels({
 			listModels: async () => tagsStub("llama3.2:latest", "3B"),
 			showModel: async () => showStub({ "llama.context_length": 4096 }),
+		});
+		assert.equal(models[0].contextWindow, 4096);
+	});
+
+	it("falls back to known table when /api/show omits context_length", async () => {
+		// Even though the model matches a known table entry (llama3.2 at
+		// 131072), if /api/show response carries no context_length key the
+		// table still serves as the fallback. This preserves correctness on
+		// older ollama versions that don't emit per-architecture context.
+		const models = await discoverModels({
+			listModels: async () => tagsStub("llama3.2:latest", "3B"),
+			showModel: async () => showStub({}),
 		});
 		assert.equal(models[0].contextWindow, 131072);
 	});

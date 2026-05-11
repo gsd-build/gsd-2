@@ -191,9 +191,12 @@ describe("getModelCapabilities — long-variant overrides aren't shadowed (#4991
 		assert.equal(caps.contextWindow, 262144);
 	});
 
-	it("minimax-m2.5:cloud and minimax-m2.7:cloud report 1M", () => {
+	it("minimax-m2.5:cloud at 1M (base default); minimax-m2.7:cloud at real 192K", () => {
+		// minimax-m2 family base was announced at 1M; m2.5 retained that.
+		// m2.7 ships at 196608 per ollama /api/show — confirmed empirically
+		// against gsd-build/gsd-2#4984 follow-up. Long-variant beats base.
 		assert.equal(getModelCapabilities("minimax-m2.5:cloud").contextWindow, 1048576);
-		assert.equal(getModelCapabilities("minimax-m2.7:cloud").contextWindow, 1048576);
+		assert.equal(getModelCapabilities("minimax-m2.7:cloud").contextWindow, 196608);
 	});
 
 	it("minimax-m2 base resolves to 1M", () => {

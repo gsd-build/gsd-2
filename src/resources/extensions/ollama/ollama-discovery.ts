@@ -73,10 +73,16 @@ async function enrichModel(info: OllamaModelInfo, deps: ClientDeps): Promise<Dis
 		if (process.env.GSD_DEBUG) console.warn(`[ollama] /api/show failed for ${info.name}:`, err instanceof Error ? err.message : String(err));
 	}
 
-	// Determine context window: known table > /api/show > estimate from param size > default
+	// Determine context window: /api/show (authoritative ollama metadata) >
+	// known table (fallback for old ollama versions / network failure) >
+	// estimate from parameter size > default. Earlier priority order put
+	// known table first, but the table fell behind reality on several
+	// model families (deepseek-v4-* 131072 vs real 1048576; minimax-m2.7
+	// 1048576 vs real 196608). /api/show is the source of truth when
+	// reachable; the table only fills the gap when it isn't.
 	const contextWindow =
-		caps.contextWindow ??
 		showContextWindow ??
+		caps.contextWindow ??
 		(parameterSize ? estimateContextFromParams(parameterSize) : 8192);
 
 	// Determine max tokens: known table > fraction of context > default

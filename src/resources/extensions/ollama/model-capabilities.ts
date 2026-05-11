@@ -36,12 +36,15 @@ const KNOWN_MODELS: Array<[pattern: string, caps: ModelCapability]> = [
 	// shadowing (#4991).
 	["deepseek-r1",       { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
 	["deepseek-v3.1",     { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
-	["deepseek-v4-flash", { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
-	["deepseek-v4",       { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
+	// DeepSeek V4 family ships at 1M context per ollama /api/show (deepseek4.context_length = 1048576).
+	// Long-variants listed before the bare `deepseek-v4` base to avoid prefix shadowing (#4991/#4984).
+	["deepseek-v4-pro",   { contextWindow: 1048576, reasoning: true, ollamaOptions: { num_ctx: 1048576 } }],
+	["deepseek-v4-flash", { contextWindow: 1048576, reasoning: true, ollamaOptions: { num_ctx: 1048576 } }],
+	["deepseek-v4",       { contextWindow: 1048576, reasoning: true, ollamaOptions: { num_ctx: 1048576 } }],
 	["qwq",               { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
 	["gpt-oss",           { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
 	["nemotron-3",        { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
-	["gemma4",            { contextWindow: 131072, reasoning: true, ollamaOptions: { num_ctx: 131072 } }],
+	["gemma4",            { contextWindow: 262144, reasoning: true, ollamaOptions: { num_ctx: 262144 } }],
 	["gemini-3-flash",    { contextWindow: 1048576, reasoning: true, ollamaOptions: { num_ctx: 1048576 } }],
 
 	// ─── Vision models ──────────────────────────────────────────────────
@@ -103,8 +106,11 @@ const KNOWN_MODELS: Array<[pattern: string, caps: ModelCapability]> = [
 	["kimi-k2", { contextWindow: 262144, maxTokens: 16384, reasoning: true, ollamaOptions: { num_ctx: 262144 } }],
 
 	// ─── MiniMax M2 (Ollama Cloud) ─────────────────────────────────────
-	// ref: minimax-m2 1M ctx — https://www.minimax.io/news/minimax-m2
-	["minimax-m2.7", { contextWindow: 1048576, maxTokens: 16384, reasoning: true, ollamaOptions: { num_ctx: 1048576 } }],
+	// ref: ollama /api/show authoritative — base m2 announced 1M but
+	// minimax-m2.7:cloud reports 196608 via /api/show. Per-variant entries
+	// retained for prefix-shadow safety (#4984); base kept at 1M pending
+	// confirmation from /api/show for older variants.
+	["minimax-m2.7", { contextWindow: 196608, maxTokens: 16384, reasoning: true, ollamaOptions: { num_ctx: 196608 } }],
 	["minimax-m2.5", { contextWindow: 1048576, maxTokens: 16384, reasoning: true, ollamaOptions: { num_ctx: 1048576 } }],
 	["minimax-m2", { contextWindow: 1048576, maxTokens: 16384, reasoning: true, ollamaOptions: { num_ctx: 1048576 } }],
 
