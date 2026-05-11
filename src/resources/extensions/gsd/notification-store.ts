@@ -3,7 +3,7 @@
 // .gsd/notifications.jsonl so they survive context resets and session restarts.
 // Rotates at MAX_ENTRIES to prevent unbounded growth.
 
-import { appendFileSync, existsSync, mkdirSync, openSync, closeSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, openSync, closeSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -298,7 +298,17 @@ function _withLock<T>(basePath: string, fn: () => T): T {
 
   for (let i = 0; i < maxAttempts; i++) {
     try {
-      mkdirSync(join(basePath, ".gsd"), { recursive: true });
+      // Guard: don't create a real directory if a symlink (even dangling) exists.
+      // ensureGsdSymlink will heal dangling symlinks on next startup. (#5696)
+      const gsdDir = join(basePath, ".gsd");
+      try {
+        const gsdStat = lstatSync(gsdDir);
+        if (!gsdStat.isSymbolicLink()) {
+          mkdirSync(gsdDir, { recursive: true });
+        }
+      } catch {
+        mkdirSync(gsdDir, { recursive: true });
+      }
       fd = openSync(lockPath, "wx");
       break;
     } catch (err: any) {
