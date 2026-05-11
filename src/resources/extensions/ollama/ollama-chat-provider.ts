@@ -221,7 +221,7 @@ export function buildThinkParam(
 	return level;
 }
 
-function buildRequest(
+export function buildRequest(
 	model: Model<Api>,
 	context: Context,
 	options?: SimpleStreamOptions,

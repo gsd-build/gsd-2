@@ -204,6 +204,20 @@ describe("getModelCapabilities — long-variant overrides aren't shadowed (#4991
 		assert.equal(caps.contextWindow, 1048576);
 	});
 
+	it("deepseek-v4-pro:cloud and deepseek-v4-flash:cloud resolve to 1M (long-variants beat deepseek-v4 base)", () => {
+		// Both long-variants must match before the bare `deepseek-v4` base
+		// entry, otherwise they'd inherit the family's old 131072 value.
+		// This pins the ordering invariant for the deepseek-v4 family that
+		// gsd-build/gsd-2#4984 covers for glm/kimi/minimax.
+		assert.equal(getModelCapabilities("deepseek-v4-pro:cloud").contextWindow, 1048576);
+		assert.equal(getModelCapabilities("deepseek-v4-flash:cloud").contextWindow, 1048576);
+	});
+
+	it("deepseek-v4 base also resolves to 1M (parity with long-variants)", () => {
+		const caps = getModelCapabilities("deepseek-v4:671b");
+		assert.equal(caps.contextWindow, 1048576);
+	});
+
 	it("ollamaOptions.num_ctx mirrors contextWindow for all new entries", () => {
 		// Inference time: num_ctx is what gets sent to Ollama on each chat.
 		// If contextWindow is right but num_ctx is stale, the model still

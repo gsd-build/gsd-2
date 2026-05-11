@@ -101,6 +101,16 @@ async function enrichModel(info: OllamaModelInfo, deps: ClientDeps): Promise<Dis
 		caps.reasoning ??
 		false;
 
+	// Sync num_ctx with the authoritative contextWindow. When /api/show
+	// wins, the table's static num_ctx would otherwise be stale and sent
+	// on every chat request — the very drift this commit's priority flip
+	// was designed to eliminate. Keep all other ollamaOptions (num_gpu,
+	// sampling params, keep_alive) from the table.
+	const ollamaOptions =
+		showContextWindow !== undefined
+			? { ...caps.ollamaOptions, num_ctx: showContextWindow }
+			: caps.ollamaOptions;
+
 	return {
 		id: info.name,
 		name: humanizeModelName(info.name),
@@ -111,7 +121,7 @@ async function enrichModel(info: OllamaModelInfo, deps: ClientDeps): Promise<Dis
 		maxTokens,
 		sizeBytes: info.size,
 		parameterSize,
-		ollamaOptions: caps.ollamaOptions,
+		ollamaOptions,
 	};
 }
 
@@ -122,6 +132,13 @@ export async function discoverModels(deps: ClientDeps = { listModels, showModel 
 	const tags = await deps.listModels();
 	if (!tags.models || tags.models.length === 0) return [];
 
+	// /api/show is now invoked for every model (capabilities + context_length
+	// both live there). Requests are dispatched concurrently here, but ollama's
+	// local server serializes model-metadata calls internally, so wall time
+	// scales linearly with model count — empirically ~50-100 ms/model on a warm
+	// ollama instance. A user with 30+ models pays ~3 s on app start. If this
+	// becomes a complaint, gate the call on `caps.contextWindow === undefined`
+	// and `caps.reasoning === undefined` (i.e., unknown-model fast path).
 	return Promise.all(tags.models.map((m) => enrichModel(m, deps)));
 }
 
