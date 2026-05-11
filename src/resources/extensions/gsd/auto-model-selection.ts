@@ -8,7 +8,7 @@ import type { Api, Model } from "@gsd/pi-ai";
 import { getProviderCapabilities } from "@gsd/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 import type { GSDPreferences } from "./preferences.js";
-import { resolveModelWithFallbacksForUnit, resolveDynamicRoutingConfig } from "./preferences.js";
+import { resolveModelWithFallbacksForUnit, resolveDynamicRoutingConfig, loadEffectiveGSDPreferences } from "./preferences.js";
 import type { ComplexityTier } from "./complexity-classifier.js";
 import { classifyUnitComplexity, extractTaskMetadata, tierLabel } from "./complexity-classifier.js";
 import { resolveModelForComplexity, escalateTier, getEligibleModels, loadCapabilityOverrides, adjustToolSet, filterToolsForProvider } from "./model-router.js";
@@ -131,9 +131,17 @@ export function resolvePreferredModelConfig(
     };
   }
 
-  // In interactive mode, don't synthesize a routing-based model config.
-  // The user's session model (/model) should be used as-is (#3962).
-  if (!isAutoMode) return undefined;
+  // In interactive mode, don't synthesize a routing-based model config
+  // UNLESS interactive_routing is explicitly enabled (ADR-018).
+  // The user's session model (/model) should be used as-is (#3962)
+  // when interactive_routing is off.
+  if (!isAutoMode) {
+    const interactiveRouting = loadEffectiveGSDPreferences(undefined, { availableModelIds: [] })?.preferences?.interactive_routing;
+    if (!interactiveRouting?.enabled) return undefined;
+    // Interactive routing enabled — fall through to synthesize config.
+    // The session model acts as the ceiling (downgrade-only semantics
+    // are already enforced by resolveModelForComplexity).
+  }
 
   const routingConfig = resolveDynamicRoutingConfig();
   if (!routingConfig.enabled || !routingConfig.tier_models) return undefined;
