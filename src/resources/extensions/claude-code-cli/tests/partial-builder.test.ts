@@ -3,23 +3,6 @@ import assert from "node:assert/strict";
 import { mapContentBlock, mapUsage, parseMcpToolName, PartialMessageBuilder } from "../partial-builder.ts";
 import type { BetaContentBlock, BetaRawMessageStreamEvent, NonNullableUsage } from "../sdk-types.ts";
 
-describe("mapUsage", () => {
-	test("excludes cumulative cache reads from context-sized totalTokens (#5243)", () => {
-		const usage: NonNullableUsage = {
-			input_tokens: 150_000,
-			output_tokens: 2_000,
-			cache_read_input_tokens: 900_000,
-			cache_creation_input_tokens: 3_000,
-		};
-
-		const mapped = mapUsage(usage, 1.23);
-
-		assert.equal(mapped.cacheRead, 900_000);
-		assert.equal(mapped.totalTokens, 155_000);
-		assert.equal(mapped.cost.total, 1.23);
-	});
-});
-
 describe("PartialMessageBuilder — malformed tool arguments (#2574)", () => {
 	/**
 	 * Helper: feed a tool_use block through the builder lifecycle and return
@@ -252,5 +235,84 @@ describe("PartialMessageBuilder — MCP tool name normalization", () => {
 		assert.equal(mapped.name, "gsd_task_complete");
 		assert.equal(mapped.mcpServer, "gsd-workflow");
 		assert.deepEqual(mapped.arguments, { taskId: "T001" });
+	});
+});
+
+describe("mapUsage — cache_read excluded from totalTokens (#5243)", () => {
+	function usage(overrides: Partial<NonNullableUsage> = {}): NonNullableUsage {
+		return {
+			input_tokens: 0,
+			output_tokens: 0,
+			cache_read_input_tokens: 0,
+			cache_creation_input_tokens: 0,
+			...overrides,
+		};
+	}
+
+	test("totalTokens excludes cache_read_input_tokens", () => {
+		const result = mapUsage(
+			usage({
+				input_tokens: 1000,
+				output_tokens: 500,
+				cache_read_input_tokens: 999_000,
+				cache_creation_input_tokens: 200,
+			}),
+			0.001,
+		);
+		assert.equal(result.cacheRead, 999_000, "cacheRead billing field preserved");
+		assert.equal(
+			result.totalTokens,
+			1700,
+			"totalTokens = input + output + cache_creation only",
+		);
+	});
+
+	test("does not blow past claude 1M compaction threshold with cumulative cache_read", () => {
+		// Repro from issue body: ~7 tool turns × 150k cached prefix = ~1.05M cumulative
+		// cache_read. Without the fix, totalTokens lands above the 983_616 threshold and
+		// triggers premature compaction. With the fix it tracks the real working set.
+		const result = mapUsage(
+			usage({
+				input_tokens: 2000,
+				output_tokens: 1500,
+				cache_read_input_tokens: 1_050_000,
+				cache_creation_input_tokens: 150_000,
+			}),
+			0,
+		);
+		assert.equal(result.totalTokens, 153_500);
+		assert.ok(
+			result.totalTokens < 983_616,
+			`totalTokens (${result.totalTokens}) must stay under the 983_616 compaction threshold`,
+		);
+	});
+
+	test("zero usage yields zero totalTokens", () => {
+		const result = mapUsage(usage(), 0);
+		assert.equal(result.totalTokens, 0);
+		assert.equal(result.cacheRead, 0);
+	});
+
+	test("cache_creation still counts toward totalTokens", () => {
+		// cache_creation is per-turn (charged once when a prefix is first cached),
+		// not cumulative across the agentic loop, so it stays in totalTokens.
+		const result = mapUsage(
+			usage({
+				input_tokens: 100,
+				output_tokens: 50,
+				cache_creation_input_tokens: 5000,
+			}),
+			0,
+		);
+		assert.equal(result.totalTokens, 5150);
+	});
+
+	test("cost is fully attributed to cost.total per SDK semantics", () => {
+		const result = mapUsage(usage({ input_tokens: 100 }), 0.42);
+		assert.equal(result.cost.total, 0.42);
+		assert.equal(result.cost.input, 0);
+		assert.equal(result.cost.output, 0);
+		assert.equal(result.cost.cacheRead, 0);
+		assert.equal(result.cost.cacheWrite, 0);
 	});
 });
