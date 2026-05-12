@@ -62,6 +62,7 @@ import {
   getRequirementCounts,
   getLatestAssessmentByScope,
   getPendingGateCountForTurn,
+  autoHealSketchFlags,
 } from './gsd-db.js';
 import type { MilestoneRow } from './db-milestone-artifact-rows.js';
 import type { SliceRow, TaskRow } from './db-task-slice-rows.js';
@@ -732,9 +733,19 @@ export async function deriveStateFromDb(basePath: string): Promise<GSDState> {
   const { activeSlice, activeSliceRow } = activeSliceContext;
 
   // ADR-011: DB slice metadata is authoritative for sketch refinement.
-  // PLAN.md and preference flags are projections/configuration and are
-  // deliberately not used to infer whether the slice itself is a sketch.
-  if (activeSliceRow?.is_sketch === 1) {
+  // Auto-heal stale is_sketch=1 flags when a real PLAN file already exists
+  // (crash recovery between plan write and flag flip, or progressive-planning
+  // downgrade path).
+  autoHealSketchFlags(activeMilestone.id, (sid) =>
+    !!resolveSliceFile(basePath, activeMilestone.id, sid, 'PLAN'),
+  );
+
+  // Re-read after auto-heal — the flag may have been cleared above.
+  const resolvedSketchFlag = activeSliceRow?.is_sketch === 1
+    ? getSlice(activeMilestone.id, activeSlice.id)?.is_sketch ?? 1
+    : 0;
+
+  if (resolvedSketchFlag === 1) {
     return {
       activeMilestone, activeSlice, activeTask: null,
       phase: 'refining', recentDecisions: [], blockers: [],
