@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { DISPATCH_RULES, getUatCount } from "../auto-dispatch.ts";
+import { DISPATCH_RULES, getUatCount, incrementUatCount } from "../auto-dispatch.ts";
 
 function makeUatProject(): string {
   const base = mkdtempSync(join(tmpdir(), "gsd-uat-cap-"));
@@ -61,6 +61,27 @@ test("run-uat dispatch stops after three attempts without a verdict", async () =
     assert.equal(capped?.action, "stop");
     assert.match(capped?.reason ?? "", /dispatched 3 times/);
     assert.equal(getUatCount(basePath, "M001", "S01"), 4);
+  } finally {
+    rmSync(basePath, { recursive: true, force: true });
+  }
+});
+
+test("run-uat counter persists across recycled milestone worktrees", () => {
+  const basePath = makeUatProject();
+  const firstWorktree = join(basePath, ".gsd", "worktrees", "M001");
+  const secondWorktree = join(basePath, ".gsd", "worktrees", "M001");
+
+  try {
+    mkdirSync(join(firstWorktree, ".gsd"), { recursive: true });
+    assert.equal(incrementUatCount(firstWorktree, "M001", "S01"), 1);
+    assert.equal(getUatCount(basePath, "M001", "S01"), 1);
+
+    rmSync(firstWorktree, { recursive: true, force: true });
+    mkdirSync(join(secondWorktree, ".gsd"), { recursive: true });
+
+    assert.equal(getUatCount(secondWorktree, "M001", "S01"), 1);
+    assert.equal(incrementUatCount(secondWorktree, "M001", "S01"), 2);
+    assert.equal(getUatCount(basePath, "M001", "S01"), 2);
   } finally {
     rmSync(basePath, { recursive: true, force: true });
   }
