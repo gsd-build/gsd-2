@@ -6,7 +6,8 @@
  * 2. Falling back to other providers via FallbackResolver
  * 3. Exponential backoff with configurable max retries
  *
- * Context overflow errors are NOT handled here (see compaction).
+ * Context overflow errors are generally handled by compaction, except when the
+ * overflow is caused by maxTokens being too high (retryable by reducing it).
  */
 
 import type { Agent } from "@gsd/pi-agent-core";
@@ -19,6 +20,27 @@ import type { SettingsManager } from "./settings-manager.js";
 import { sleep } from "../utils/sleep.js";
 import type { AgentSessionEvent } from "./agent-session.js";
 import { RETRYABLE_ERROR_RE } from "./retryable-error-regex.js";
+
+/**
+ * Detect context overflow errors caused specifically by maxTokens being too high.
+ * These mention "requested N output tokens" — distinguishing them from conversation-
+ * length overflows that compaction should handle.
+ */
+const MAX_TOKENS_OVERFLOW_RE =
+	/requested\s+([\d,]+)\s+output tokens.*(?:contains|at least)\s+([\d,]+)\s+input/i;
+
+function isMaxTokensOverflow(errorMessage: string): boolean {
+	return MAX_TOKENS_OVERFLOW_RE.test(errorMessage);
+}
+
+function parseMaxTokensOverflow(errorMessage: string): { inputTokens: number; requestedOutput: number } | null {
+	const match = errorMessage.match(MAX_TOKENS_OVERFLOW_RE);
+	if (!match) return null;
+	return {
+		requestedOutput: Number.parseInt(match[1].replace(/,/g, ""), 10),
+		inputTokens: Number.parseInt(match[2].replace(/,/g, ""), 10),
+	};
+}
 
 /** Dependencies injected from AgentSession into RetryHandler */
 export interface RetryHandlerDeps {
@@ -108,9 +130,13 @@ export class RetryHandler {
 	isRetryableError(message: AssistantMessage): boolean {
 		if (message.stopReason !== "error" || !message.errorMessage) return false;
 
-		// Context overflow is handled by compaction, not retry
+		// Context overflow is handled by compaction, not retry — UNLESS the error
+		// specifically mentions "requested N output tokens", which means maxTokens
+		// is too high and can be reduced without compaction.
 		const contextWindow = this._deps.getModel()?.contextWindow ?? 0;
-		if (isContextOverflow(message, contextWindow)) return false;
+		if (isContextOverflow(message, contextWindow)) {
+			return isMaxTokensOverflow(message.errorMessage);
+		}
 
 		return RETRYABLE_ERROR_RE.test(message.errorMessage);
 	}
@@ -157,6 +183,13 @@ export class RetryHandler {
 			// on the same model before rotating credentials/providers.
 			if (isQuotaError) {
 				const adjusted = this._tryAffordableMaxTokensRetry(message, retryGeneration);
+				if (adjusted) return true;
+			}
+
+			// MaxTokens overflow retry: when the provider reports that input + output
+			// exceeds context, reduce maxTokens to fit the available space.
+			if (message.errorMessage && isMaxTokensOverflow(message.errorMessage)) {
+				const adjusted = this._tryMaxTokensOverflowRetry(message, retryGeneration);
 				if (adjusted) return true;
 			}
 
@@ -462,6 +495,51 @@ export class RetryHandler {
 			maxAttempts: this._deps.settingsManager.getRetrySettings().maxRetries,
 			delayMs: 0,
 			errorMessage: `${message.errorMessage} (reducing max tokens)`,
+		});
+
+		this._scheduleContinue(retryGeneration);
+		return true;
+	}
+
+	/**
+	 * Attempt a same-model retry by reducing maxTokens when the provider reports
+	 * that input + requested output tokens exceed the context window.
+	 */
+	private _tryMaxTokensOverflowRetry(message: AssistantMessage, retryGeneration: number): boolean {
+		const currentModel = this._deps.getModel();
+		if (!currentModel || !message.errorMessage) return false;
+
+		const parsed = parseMaxTokensOverflow(message.errorMessage);
+		if (!parsed) return false;
+
+		const available = currentModel.contextWindow - parsed.inputTokens;
+		if (available <= 64) return false;
+
+		const targetMaxTokens = Math.max(64, Math.floor(available * 0.9));
+		if (targetMaxTokens >= currentModel.maxTokens) return false;
+
+		const downgradedModel = {
+			...currentModel,
+			maxTokens: targetMaxTokens,
+		};
+
+		this._deps.agent.setModel(downgradedModel);
+		this._deps.onModelChange(downgradedModel);
+		this._removeLastAssistantError();
+
+		this._deps.emit({
+			type: "fallback_provider_switch",
+			from: `${currentModel.provider}/${currentModel.id} (maxTokens=${currentModel.maxTokens})`,
+			to: `${downgradedModel.provider}/${downgradedModel.id} (maxTokens=${targetMaxTokens})`,
+			reason: `context overflow: input ${parsed.inputTokens} tokens, reducing output to ${targetMaxTokens}`,
+		});
+
+		this._deps.emit({
+			type: "auto_retry_start",
+			attempt: this._retryAttempt + 1,
+			maxAttempts: this._deps.settingsManager.getRetrySettings().maxRetries,
+			delayMs: 0,
+			errorMessage: `${message.errorMessage} (reducing max tokens to fit context)`,
 		});
 
 		this._scheduleContinue(retryGeneration);

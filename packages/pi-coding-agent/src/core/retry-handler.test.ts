@@ -516,3 +516,63 @@ describe("RetryHandler — long-context entitlement 429 (#2803)", () => {
 		});
 	});
 });
+
+// ─── maxTokens overflow retry (#5412) ───────────────────────────────────────
+
+describe("RetryHandler — maxTokens overflow retry (#5412)", () => {
+	it("classifies 'requested N output tokens' overflow as retryable", () => {
+		const model = createMockModel("amazon-bedrock", "qwen.qwen3-32b-v1:0");
+		(model as any).contextWindow = 32768;
+		(model as any).maxTokens = 16384;
+
+		const { deps } = createMockDeps({ model });
+		const handler = new RetryHandler(deps);
+
+		const msg = errorMessage(
+			"This model's maximum context length is 32768 tokens. However, you requested 16384 output tokens and your prompt contains at least 16385 input tokens, for a total of at least 32769 tokens.",
+		);
+
+		assert.equal(handler.isRetryableError(msg), true);
+	});
+
+	it("does NOT classify generic context overflow as retryable", () => {
+		const model = createMockModel("anthropic", "claude-sonnet-4-6");
+		(model as any).contextWindow = 200000;
+		(model as any).maxTokens = 32000;
+
+		const { deps } = createMockDeps({ model });
+		const handler = new RetryHandler(deps);
+
+		const msg = errorMessage("prompt is too long: 213462 tokens > 200000 maximum");
+
+		assert.equal(handler.isRetryableError(msg), false);
+	});
+
+	it("reduces maxTokens and retries on overflow", async () => {
+		const model = createMockModel("amazon-bedrock", "qwen.qwen3-32b-v1:0");
+		(model as any).contextWindow = 32768;
+		(model as any).maxTokens = 16384;
+		(model as any).api = "bedrock-converse-stream";
+
+		const { deps, emittedEvents, continueFn } = createMockDeps({ model });
+		const handler = new RetryHandler(deps);
+
+		const msg = errorMessage(
+			"This model's maximum context length is 32768 tokens. However, you requested 16384 output tokens and your prompt contains at least 16385 input tokens, for a total of at least 32769 tokens.",
+		);
+		deps.agent.state.messages.push(msg);
+
+		handler.createRetryPromiseForAgentEnd(deps.agent.state.messages);
+		const result = await handler.handleRetryableError(msg);
+
+		assert.equal(result, true, "should initiate retry");
+
+		// Verify maxTokens was reduced
+		const switchEvent = emittedEvents.find((e) => e.type === "fallback_provider_switch");
+		assert.ok(switchEvent, "should emit fallback_provider_switch");
+		assert.ok(switchEvent.reason.includes("context overflow"), "reason should mention context overflow");
+
+		// Available = 32768 - 16385 = 16383, target = floor(16383 * 0.9) = 14744
+		assert.ok(switchEvent.to.includes("14744"), `expected maxTokens=14744, got: ${switchEvent.to}`);
+	});
+});
