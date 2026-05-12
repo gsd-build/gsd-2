@@ -861,11 +861,11 @@ export function shouldBlockPlanningUnit(
       }
       return { block: false };
     }
-    return { block: true, reason: blockReason(unitType, policy.mode, `subagent dispatch is not permitted in planning units`) };
+    return { block: true, reason: blockReason(unitType, policy.mode, `subagent dispatch is not permitted`) };
   }
 
   if (tool === "bash") {
-    if (policy.mode === "verification") return { block: false };
+
     if (BASH_READ_ONLY_RE.test(pathOrCommand)) return { block: false };
     return {
       block: true,
