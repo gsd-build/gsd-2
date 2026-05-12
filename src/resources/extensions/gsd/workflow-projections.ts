@@ -374,7 +374,7 @@ export async function renderStateProjection(basePath: string): Promise<void> {
       try {
         const manifest = readManifest(basePath);
         const existingContent = (await readFile(statePath, "utf-8")).trim();
-        if ((manifest?.milestones?.length ?? 0) > 0 && existingContent.length > 0) {
+        if (Array.isArray(manifest?.milestones) && manifest.milestones.length > 0 && existingContent.length > 0) {
           logWarning("projection", "renderStateProjection: refusing to overwrite non-empty STATE.md with empty state while manifest has milestones");
           return;
         }

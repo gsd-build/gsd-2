@@ -284,6 +284,36 @@ test('workflow-projections: renderStateProjection rewrites non-empty STATE.md wh
   }
 });
 
+test('workflow-projections: renderStateProjection rewrites non-empty STATE.md when manifest milestones is not an array', async () => {
+  const base = mkdtempSync(join(tmpdir(), 'gsd-projection-non-array-milestones-'));
+  const gsdDir = join(base, '.gsd');
+  const statePath = join(gsdDir, 'STATE.md');
+  openDatabase(':memory:');
+  try {
+    mkdirSync(gsdDir, { recursive: true });
+    writeFileSync(statePath, '# GSD State\n\n**Active Milestone:** M001: Existing\n');
+    writeFileSync(join(gsdDir, 'state-manifest.json'), JSON.stringify({
+      version: 1,
+      exported_at: new Date().toISOString(),
+      milestones: 'M001',
+      slices: [],
+      tasks: [],
+      decisions: [],
+      verification_evidence: [],
+    }));
+
+    await renderStateProjection(base);
+
+    const content = readFileSync(statePath, 'utf-8');
+    assert.ok(content.includes('# GSD State'));
+    assert.ok(content.includes('**Active Milestone:** None'));
+    assert.ok(!content.includes('M001: Existing'));
+  } finally {
+    closeDatabase();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test('workflow-projections: renderStateProjection writes active milestone from DB when manifest matches', async () => {
   const base = mkdtempSync(join(tmpdir(), 'gsd-projection-db-milestone-'));
   const gsdDir = join(base, '.gsd');
