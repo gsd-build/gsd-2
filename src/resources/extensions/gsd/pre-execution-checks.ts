@@ -37,6 +37,21 @@ export interface PreExecutionResult {
   durationMs: number;
 }
 
+export interface TaskIoPlan {
+  id: string;
+  status?: string;
+  inputs: string[];
+  expected_output: string[];
+}
+
+export interface InvalidTaskInputPath {
+  taskId: string;
+  taskIndex: number;
+  inputIndex: number;
+  input: string;
+  message: string;
+}
+
 // ─── Package Existence Check ─────────────────────────────────────────────────
 
 /**
@@ -421,7 +436,7 @@ function containsGlobPattern(candidate: string): boolean {
  * run and its outputs are available regardless of sequence position or disk state (#4071).
  * All paths are normalized for consistent comparison.
  */
-function getExpectedOutputsUpTo(tasks: TaskRow[], taskIndex: number): Set<string> {
+function getExpectedOutputsUpTo(tasks: TaskIoPlan[], taskIndex: number): Set<string> {
   const outputs = new Set<string>();
   for (let i = 0; i < tasks.length; i++) {
     const task = tasks[i];
@@ -448,11 +463,11 @@ function getExpectedOutputsUpTo(tasks: TaskRow[], taskIndex: number): Set<string
  *
  * All paths are normalized before comparison to ensure ./src/a.ts matches src/a.ts.
  */
-export function checkFilePathConsistency(
-  tasks: TaskRow[],
-  basePath: string
-): PreExecutionCheckJSON[] {
-  const results: PreExecutionCheckJSON[] = [];
+export function findInvalidTaskInputPaths(
+  tasks: TaskIoPlan[],
+  basePath: string,
+): InvalidTaskInputPath[] {
+  const invalid: InvalidTaskInputPath[] = [];
 
   // Build a set of all files created by any task at any position (normalized).
   // Used to suppress consistency errors for files that will be caught with a
@@ -468,9 +483,9 @@ export function checkFilePathConsistency(
     const task = tasks[i];
     const priorOutputs = getExpectedOutputsUpTo(tasks, i);
     const ownOutputs = new Set<string>(task.expected_output.map(normalizeFilePath));
-    const filesToCheck = [...task.inputs];
 
-    for (const file of filesToCheck) {
+    for (let inputIndex = 0; inputIndex < task.inputs.length; inputIndex++) {
+      const file = task.inputs[inputIndex];
       // Skip empty strings
       if (!file.trim()) continue;
       if (!shouldValidateInputAsPath(file)) continue;
@@ -503,18 +518,31 @@ export function checkFilePathConsistency(
         if (allTaskOutputs.has(normalizedFile) && !ownOutputs.has(normalizedFile)) {
           continue;
         }
-        results.push({
-          category: "file",
-          target: file,
-          passed: false,
+        invalid.push({
+          taskId: task.id,
+          taskIndex: i,
+          inputIndex,
+          input: file,
           message: `Task ${task.id} references '${file}' which doesn't exist and isn't created by prior or same-task outputs`,
-          blocking: true,
         });
       }
     }
   }
 
-  return results;
+  return invalid;
+}
+
+export function checkFilePathConsistency(
+  tasks: TaskRow[],
+  basePath: string
+): PreExecutionCheckJSON[] {
+  return findInvalidTaskInputPaths(tasks, basePath).map((invalid) => ({
+    category: "file",
+    target: invalid.input,
+    passed: false,
+    message: invalid.message,
+    blocking: true,
+  }));
 }
 
 // ─── Task Ordering Check ─────────────────────────────────────────────────────

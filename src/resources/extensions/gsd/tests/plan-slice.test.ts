@@ -15,6 +15,9 @@ import { deriveState, invalidateStateCache } from '../state.ts';
 function makeTmpBase(): string {
   const base = mkdtempSync(join(tmpdir(), 'gsd-plan-slice-'));
   mkdirSync(join(base, '.gsd', 'milestones', 'M001', 'slices', 'S02', 'tasks'), { recursive: true });
+  mkdirSync(join(base, 'src', 'resources', 'extensions', 'gsd', 'tools'), { recursive: true });
+  writeFileSync(join(base, 'src', 'resources', 'extensions', 'gsd', 'tools', 'plan-milestone.ts'), '', 'utf-8');
+  writeFileSync(join(base, 'src', 'resources', 'extensions', 'gsd', 'tools', 'plan-task.ts'), '', 'utf-8');
   return base;
 }
 
@@ -237,6 +240,84 @@ test('handlePlanSlice accepts absolute task IO paths inside the active worktree'
           ...validParams().tasks[0],
           inputs: [inside],
           expectedOutput: [inside],
+        },
+      ],
+    }, base);
+
+    assert.ok(!('error' in result), `unexpected error: ${'error' in result ? result.error : ''}`);
+  } finally {
+    cleanup(base);
+  }
+});
+
+test('handlePlanSlice rejects nonexistent concrete task inputs before persisting tasks', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParentSlice();
+    const result = await handlePlanSlice({
+      ...validParams(),
+      tasks: [
+        {
+          ...validParams().tasks[0],
+          inputs: ['internal/domain/workitem/work_item.go'],
+          expectedOutput: ['internal/domain/workitem/workitem.go'],
+        },
+      ],
+    }, base);
+
+    assert.ok('error' in result);
+    assert.match(result.error, /validation failed: invalid task inputs: tasks\[0\]\.inputs\[0\] 'internal\/domain\/workitem\/work_item\.go'/);
+    assert.equal(getSliceTasks('M001', 'S02').length, 0, 'invalid planning IO must not persist tasks');
+  } finally {
+    cleanup(base);
+  }
+});
+
+test('handlePlanSlice accepts task inputs produced by same or prior tasks', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParentSlice();
+    const params = validParams();
+    const result = await handlePlanSlice({
+      ...params,
+      tasks: [
+        {
+          ...params.tasks[0],
+          inputs: ['generated/same-task.ts'],
+          expectedOutput: ['generated/same-task.ts', 'generated/prior-task.ts'],
+        },
+        {
+          ...params.tasks[1],
+          inputs: ['generated/prior-task.ts'],
+          expectedOutput: ['generated/second-task.ts'],
+        },
+      ],
+    }, base);
+
+    assert.ok(!('error' in result), `unexpected error: ${'error' in result ? result.error : ''}`);
+  } finally {
+    cleanup(base);
+  }
+});
+
+test('handlePlanSlice preserves pre-exec exemptions for glob, directory, and prose inputs', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParentSlice();
+    const params = validParams();
+    const result = await handlePlanSlice({
+      ...params,
+      tasks: [
+        {
+          ...params.tasks[0],
+          inputs: ['src/**/*.ts', 'generated/', 'Current domain shape'],
+          expectedOutput: ['generated/report.md'],
         },
       ],
     }, base);

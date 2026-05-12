@@ -20,6 +20,7 @@ import { writeManifest } from "../workflow-manifest.js";
 import { appendEvent } from "../workflow-events.js";
 import { logWarning } from "../workflow-logger.js";
 import { validatePlanningPathScope } from "../planning-path-scope.js";
+import { findInvalidTaskInputPaths } from "../pre-execution-checks.js";
 
 export interface PlanSliceTaskInput {
   taskId: string;
@@ -153,6 +154,23 @@ export async function handlePlanSlice(
   );
   if (pathScopeError) {
     return { error: `validation failed: ${pathScopeError}` };
+  }
+
+  const invalidInputs = findInvalidTaskInputPaths(
+    params.tasks.map((task) => ({
+      id: task.taskId,
+      status: "pending",
+      inputs: task.inputs,
+      expected_output: task.expectedOutput,
+    })),
+    basePath,
+  );
+  if (invalidInputs.length > 0) {
+    return {
+      error: `validation failed: invalid task inputs: ${invalidInputs
+        .map((input) => `tasks[${input.taskIndex}].inputs[${input.inputIndex}] '${input.input}'`)
+        .join(", ")}`,
+    };
   }
 
   // ── Guards + DB writes inside a single transaction (prevents TOCTOU) ───
