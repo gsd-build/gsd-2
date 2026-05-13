@@ -2,7 +2,7 @@ import { existsSync, rmSync } from "node:fs";
 import { join, relative } from "node:path";
 import { clearParseCache } from "../files.js";
 import { isClosedStatus, isDeferredStatus } from "../status-guards.js";
-import { isNonEmptyString } from "../validation.js";
+import { isNonEmptyString, validateStringArray } from "../validation.js";
 import {
   transaction,
   getMilestone,
