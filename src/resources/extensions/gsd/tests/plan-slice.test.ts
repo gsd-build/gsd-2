@@ -219,6 +219,28 @@ test('handlePlanSlice explains string task IO fields must be arrays', async () =
   }
 });
 
+test('handlePlanSlice validates task files with the shared string-array helper', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParentSlice();
+    const result = await handlePlanSlice({
+      ...validParams(),
+      tasks: [
+        {
+          ...validParams().tasks[0],
+          files: 'src/index.ts' as unknown as string[],
+        },
+      ],
+    }, base);
+    assert.ok('error' in result);
+    assert.match(result.error, /validation failed: tasks\[0\]\.files must be an array of strings, not string/);
+  } finally {
+    cleanup(base);
+  }
+});
+
 test('handlePlanSlice rejects absolute task IO paths outside the active worktree', async () => {
   const base = makeTmpBase();
   openDatabase(join(base, '.gsd', 'gsd.db'));
