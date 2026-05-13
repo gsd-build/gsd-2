@@ -208,12 +208,8 @@ export async function handlePlanSlice(
         .map((task) => task.id);
 
       for (const task of existingTasks) {
-        if (!newTaskIds.has(task.id) && isClosedStatus(task.status)) {
-          guardError = `cannot remove completed task ${task.id}`;
-          return;
-        }
         if (!newTaskIds.has(task.id) && task.status !== "pending") {
-          guardError = `cannot remove non-pending task ${task.id} (status: ${task.status})`;
+          guardError = `cannot remove task ${task.id} with status '${task.status}' — only pending tasks may be omitted during replan`;
           return;
         }
       }

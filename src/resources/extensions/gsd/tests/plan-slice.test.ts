@@ -342,7 +342,7 @@ test('handlePlanSlice refuses to omit non-pending tasks during replan', async ()
     }, base);
 
     assert.ok('error' in result);
-    assert.match(result.error, /cannot remove non-pending task T02 \(status: in_progress\)/);
+    assert.equal(result.error, "cannot remove task T02 with status 'in_progress' — only pending tasks may be omitted during replan");
     assert.equal(getTask('M001', 'S02', 'T02')?.status, 'in_progress', 'in-flight task must remain in the DB');
     assert.equal(getSliceTasks('M001', 'S02').length, 2, 'failed replan must not delete omitted in-flight tasks');
   } finally {
@@ -520,7 +520,7 @@ test('handlePlanSlice rejects omitted completed tasks without changing slice or 
       goal: 'Rejected replan should not persist.',
       tasks: fourTaskPlan.tasks.filter((task) => task.taskId !== 'T04'),
     }, base);
-    assert.deepEqual(second, { error: 'cannot remove completed task T04' });
+    assert.deepEqual(second, { error: "cannot remove task T04 with status 'complete' — only pending tasks may be omitted during replan" });
 
     assert.equal(getSlice('M001', 'S02')?.goal, 'Persist slice planning through the DB.');
     assert.deepEqual(getSliceTasks('M001', 'S02'), tasksBefore);
