@@ -56,7 +56,7 @@
     "build:core": "npm run build:contracts && npm run build:pi && npm run build:rpc-client && npm run build:mcp-server && tsc && npm run copy-resources && npm run copy-themes && npm run copy-export-html",
     "build": "npm run build:core && node scripts/build-web-if-stale.cjs",
     "stage:web-host": "node scripts/stage-web-standalone.cjs",
-    "build:web-host": "cross-env NODE_ENV=production npm --prefix web run build && npm run stage:web-host",
+    "build:web-host": "npm --prefix web run build && npm run stage:web-host",
     "copy-resources": "node scripts/copy-resources.cjs",
     "copy-themes": "node scripts/copy-themes.cjs",
     "copy-export-html": "node scripts/copy-export-html.cjs",

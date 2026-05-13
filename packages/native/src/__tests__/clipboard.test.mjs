@@ -39,8 +39,7 @@ function isClipboardUnavailableError(error) {
       message.includes("X11 server connection") ||
       message.includes("wl-clipboard") ||
       message.includes("No display") ||
-      message.includes("DISPLAY") ||
-      message.includes("selected clipboard is not supported")
+      message.includes("DISPLAY")
     )
   );
 }
