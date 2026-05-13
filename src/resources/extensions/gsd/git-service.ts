@@ -157,7 +157,7 @@ export interface TaskCommitContext {
  */
 export function buildTaskCommitMessage(ctx: TaskCommitContext): string {
   const description = sanitizeCommitSubjectDescription(ctx.oneLiner || ctx.taskTitle);
-  const type = inferCommitType(ctx.taskTitle, ctx.oneLiner);
+  const type = coerceCommitType(inferCommitType(ctx.taskTitle, ctx.oneLiner));
 
   // Truncate description to ~72 chars for subject line (full budget without scope)
   const maxDescLen = 70 - type.length;
@@ -1247,6 +1247,51 @@ export function runTurnGitAction(args: {
 }
 
 // ─── Commit Type Inference ─────────────────────────────────────────────────
+
+/**
+ * Conventional Commits types accepted by GSD's commit-message builders.
+ *
+ * Matches the set documented in GSD-WORKFLOW.md and aligns with the
+ * Conventional Commits standard. `inferCommitType` only ever produces a
+ * subset of these ("feat" plus the types listed in COMMIT_TYPE_RULES);
+ * `style` is included for compatibility with externally supplied types.
+ *
+ * Used by `coerceCommitType` to harden every code path that composes a
+ * `<type>: <subject>` line against malformed or unknown types — e.g. a
+ * future caller passing the type in directly, or a refactor of
+ * `inferCommitType` that accidentally widens its return set. Without this
+ * guard, an invalid type silently slips into `git commit` and a strict
+ * commit-msg hook rejects the commit with no actionable diagnostic.
+ */
+export const ALLOWED_COMMIT_TYPES = Object.freeze([
+  "feat",
+  "fix",
+  "docs",
+  "style",
+  "refactor",
+  "perf",
+  "test",
+  "chore",
+] as const);
+
+export type AllowedCommitType = typeof ALLOWED_COMMIT_TYPES[number];
+
+const ALLOWED_COMMIT_TYPE_SET: ReadonlySet<string> = new Set(ALLOWED_COMMIT_TYPES);
+
+/**
+ * Validate a commit type against ALLOWED_COMMIT_TYPES. Unknown types fall
+ * back to "chore" and a warning is logged to stderr so the substitution is
+ * visible in auto-mode logs. This keeps commit construction crash-free
+ * while preventing invalid types from reaching `git commit`.
+ */
+export function coerceCommitType(type: string): AllowedCommitType {
+  if (ALLOWED_COMMIT_TYPE_SET.has(type)) return type as AllowedCommitType;
+  console.warn(
+    `[gsd] Unknown commit type "${type}"; falling back to "chore". ` +
+    `Allowed types: ${ALLOWED_COMMIT_TYPES.join(", ")}`,
+  );
+  return "chore";
+}
 
 /**
  * Infer a conventional commit type from a title (and optional one-liner).
