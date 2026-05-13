@@ -842,7 +842,7 @@ export const executeTaskComplete = async (params, projectDir) => {
             estimate: "15m",
             files: ["src/resources/extensions/gsd/tools/workflow-tool-executors.ts"],
             verify: "node --test",
-            inputs: ["ROADMAP.md"],
+            inputs: [".gsd/milestones/M001/M001-ROADMAP.md"],
             expectedOutput: ["S01-PLAN.md", "T01-PLAN.md"],
           },
         ],
