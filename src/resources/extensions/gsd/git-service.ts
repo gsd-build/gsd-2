@@ -146,17 +146,57 @@ export interface TaskCommitContext {
  * The description is the task summary one-liner if available (it describes
  * what was actually built), falling back to the task title (what was planned).
  */
+/**
+ * Compose a commit subject of the form `<prefix> <descriptor>` and clamp it
+ * to a 72-character budget. Used by both the task-context path and the
+ * generic fallback path in `autoCommit` so a long descriptor (e.g. an
+ * unusually long unit type) can never produce an over-length subject that
+ * trips strict `commit-msg` hooks.
+ *
+ * The 72-byte budget matches the Conventional Commits / git convention and
+ * leaves headroom under stricter 50/72 hook enforcement. Bytes (not chars) is
+ * the correct unit: hooks running under `${#var}` in C-locale bash count bytes,
+ * and multi-byte UTF-8 chars (e.g. the `"…"` ellipsis at 3 bytes) silently
+ * overshoot a char-based clamp.
+ */
+export function buildAutoCommitSubject(prefix: string, descriptor: string): string {
+  const MAX_SUBJECT_BYTES = 72;
+  const ellipsis = "...";
+  const ellipsisBytes = Buffer.byteLength(ellipsis, "utf8");
+  const head = `${prefix} `;
+  const headBytes = Buffer.byteLength(head, "utf8");
+  if (headBytes >= MAX_SUBJECT_BYTES) {
+    // Pathological case: prefix already at/over budget — byte-truncate prefix only.
+    let out = "";
+    let used = 0;
+    for (const ch of head) {
+      const chBytes = Buffer.byteLength(ch, "utf8");
+      if (used + chBytes > MAX_SUBJECT_BYTES) break;
+      out += ch;
+      used += chBytes;
+    }
+    return out;
+  }
+  if (Buffer.byteLength(descriptor, "utf8") <= MAX_SUBJECT_BYTES - headBytes) {
+    return `${head}${descriptor}`;
+  }
+  const maxDescBytes = MAX_SUBJECT_BYTES - headBytes - ellipsisBytes;
+  let cut = "";
+  let used = 0;
+  for (const ch of descriptor) {
+    const chBytes = Buffer.byteLength(ch, "utf8");
+    if (used + chBytes > maxDescBytes) break;
+    cut += ch;
+    used += chBytes;
+  }
+  return `${head}${cut.trimEnd()}${ellipsis}`;
+}
+
 export function buildTaskCommitMessage(ctx: TaskCommitContext): string {
   const description = sanitizeCommitSubjectDescription(ctx.oneLiner || ctx.taskTitle);
   const type = inferCommitType(ctx.taskTitle, ctx.oneLiner);
 
-  // Truncate description to ~72 chars for subject line (full budget without scope)
-  const maxDescLen = 70 - type.length;
-  const truncated = description.length > maxDescLen
-    ? description.slice(0, maxDescLen - 1).trimEnd() + "…"
-    : description;
-
-  const subject = `${type}: ${truncated}`;
+  const subject = buildAutoCommitSubject(`${type}:`, description);
 
   // Build body with key files if available
   const bodyParts: string[] = [];
@@ -784,7 +824,7 @@ export class GitServiceImpl {
 
     const message = taskContext
       ? buildTaskCommitMessage(taskContext)
-      : `chore: auto-commit after ${unitType}\n\nGSD-Unit: ${unitId}`;
+      : `${buildAutoCommitSubject("chore:", `auto-commit after ${unitType}`)}\n\nGSD-Unit: ${unitId}`;
     nativeCommit(this.basePath, message, { allowEmpty: false });
 
     // Absorb any preceding gsd snapshot commits into this real commit.
