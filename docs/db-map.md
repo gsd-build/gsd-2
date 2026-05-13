@@ -245,6 +245,10 @@ FOREIGN KEY (milestone_id, slice_id) → slices(milestone_id, id)
 ```
 - Indexes: `idx_tasks_active` (milestone_id, slice_id, status), `idx_tasks_escalation_pending`
 - Status values: `pending`, `in_progress`, `complete`, `skipped`, `blocked`
+- `inputs` validation: when `gsd_plan_slice` receives concrete file paths in
+  task inputs, each path must already exist on disk or be produced by the
+  `expected_output` of the same task or an earlier task in the submitted plan.
+  Directory references, glob patterns, and prose references are exempt.
 
 ---
 
@@ -687,6 +691,11 @@ runtime_kv  (soft state KV)
 | `gsd_save_gate_result` | quality_gates | quality_gates, gate_runs | — |
 | `capture_thought` | memories | memories | KNOWLEDGE.md projection for Patterns/Lessons (both backfilled and newly captured) |
 | `memory_query` | memories, memories_fts, memory_embeddings | memories (hit_count++) | — |
+
+`gsd_plan_slice` rejects plans before persistence when a concrete task input
+path is neither present on disk nor produced by the same/prior task's
+`expected_output`. Glob patterns, directory references, and prose inputs are
+not treated as concrete file dependencies for this validation.
 
 ---
 
