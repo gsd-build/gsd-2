@@ -10,6 +10,7 @@ import { execFileSync, execSync } from "node:child_process";
 import {
   inferCommitType,
   buildTaskCommitMessage,
+  buildAutoCommitSubject,
   GitServiceImpl,
   MergeConflictError,
   RUNTIME_EXCLUSION_PATHS,
@@ -266,6 +267,37 @@ describe('git-service', async () => {
     assert.ok(msg.startsWith("test:"), "infers test type");
     assert.ok(msg.includes("GSD-Task: S01/T03"), "GSD-Task trailer present");
   }
+
+  // ─── buildAutoCommitSubject ────────────────────────────────────────────
+
+  test('buildAutoCommitSubject clamps long descriptors to 72 bytes', () => {
+    const longUnitType = "x".repeat(100);
+    const subject = buildAutoCommitSubject("chore:", `auto-commit after ${longUnitType}`);
+    assert.ok(
+      Buffer.byteLength(subject, "utf8") <= 72,
+      `subject byte length ${Buffer.byteLength(subject, "utf8")} exceeds 72`,
+    );
+    assert.ok(subject.startsWith("chore: "), "preserves chore: prefix");
+    assert.ok(subject.endsWith("..."), "uses ASCII ellipsis to mark truncation");
+  });
+
+  test('buildAutoCommitSubject leaves short descriptors untouched', () => {
+    const subject = buildAutoCommitSubject("chore:", "auto-commit after execute-task");
+    assert.equal(subject, "chore: auto-commit after execute-task");
+  });
+
+  test('buildAutoCommitSubject is byte-aware for multi-byte descriptors', () => {
+    // Multi-byte chars must not split mid-sequence, and the byte budget
+    // (not char budget) must be respected.
+    const descriptor = "café ".repeat(40); // each "café " = 6 bytes, 5 chars
+    const subject = buildAutoCommitSubject("chore:", descriptor);
+    assert.ok(
+      Buffer.byteLength(subject, "utf8") <= 72,
+      `subject byte length ${Buffer.byteLength(subject, "utf8")} exceeds 72`,
+    );
+    // Must round-trip through UTF-8 cleanly (no mid-char split).
+    assert.equal(Buffer.from(subject, "utf8").toString("utf8"), subject);
+  });
 
   // ─── RUNTIME_EXCLUSION_PATHS ───────────────────────────────────────────
 
@@ -627,6 +659,24 @@ describe('git-service', async () => {
     assert.ok(msg2!.startsWith("feat:"), "meaningful commit uses feat type without scope");
     assert.ok(msg2!.includes("JWT-based auth"), "meaningful commit includes one-liner content");
     assert.ok(msg2!.includes("GSD-Task: S01/T02"), "meaningful commit has GSD-Task trailer");
+
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test('GitServiceImpl: autoCommit fallback truncates long unit types', () => {
+    const repo = initTempRepo();
+    const svc = new GitServiceImpl(repo);
+
+    createFile(repo, "src/new-feature.ts", "export const x = 1;");
+
+    const longUnitType = "x".repeat(100);
+    const msg = svc.autoCommit(longUnitType, "T01");
+    assert.ok(msg !== null, "autoCommit produced a message");
+
+    const subject = msg!.split("\n")[0];
+    assert.ok(subject.length <= 72, `subject length ${subject.length} exceeds 72-char budget`);
+    assert.ok(subject.startsWith("chore: auto-commit after"), "preserves chore: prefix");
+    assert.ok(msg!.includes("GSD-Unit: T01"), "GSD-Unit trailer preserved");
 
     rmSync(repo, { recursive: true, force: true });
   });
