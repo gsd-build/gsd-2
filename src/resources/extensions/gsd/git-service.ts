@@ -146,6 +146,62 @@ export interface TaskCommitContext {
 }
 
 /**
+ * De-facto Git commit-subject byte budget. Conventional Commits / `commit-msg`
+ * hooks (e.g. commitlint with `header-max-length: 72`) enforce a 72-character
+ * limit, but most hooks count bytes (not Unicode code points), so the budget
+ * is most accurately treated as a *byte* limit.
+ */
+const GIT_SUBJECT_MAX_BYTES = 72;
+
+/**
+ * Compose `<prefix><descriptor>` and clamp the result to a 72-byte budget,
+ * truncating on a UTF-8 character boundary and appending an ASCII `...`
+ * marker when truncation occurs.
+ *
+ * Byte-aware (not char-aware): the ellipsis is the 3-byte ASCII `"..."`
+ * rather than U+2026 `"…"` (which is 1 char / 3 bytes in UTF-8), so the
+ * char→byte mismatch that produced over-length subjects (see #5907) is
+ * avoided. Multi-byte input is truncated on a code-point boundary, never
+ * mid-char.
+ *
+ * `prefix` is expected to be ASCII (e.g. `"feat: "`) and is included
+ * verbatim. The descriptor takes whatever byte budget remains.
+ */
+function truncateUtf8ForGitSubject(prefix: string, descriptor: string): string {
+  const prefixBytes = Buffer.byteLength(prefix, "utf8");
+  const descBudget = GIT_SUBJECT_MAX_BYTES - prefixBytes;
+  if (descBudget <= 0) {
+    // Pathological: prefix already at/over budget. Return prefix clamped by
+    // byte length on a char boundary.
+    return clampToByteBudget(prefix, GIT_SUBJECT_MAX_BYTES);
+  }
+  if (Buffer.byteLength(descriptor, "utf8") <= descBudget) {
+    return `${prefix}${descriptor}`;
+  }
+  const ellipsis = "...";
+  const ellipsisBytes = ellipsis.length; // ASCII → bytes == length
+  const cutBudget = descBudget - ellipsisBytes;
+  if (cutBudget <= 0) {
+    return `${prefix}${ellipsis}`.slice(0, prefix.length + ellipsisBytes);
+  }
+  const cut = clampToByteBudget(descriptor, cutBudget).trimEnd();
+  return `${prefix}${cut}${ellipsis}`;
+}
+
+/** Truncate `value` to at most `maxBytes` UTF-8 bytes on a code-point boundary. */
+function clampToByteBudget(value: string, maxBytes: number): string {
+  let bytes = 0;
+  let out = "";
+  for (const ch of value) {
+    const chBytes = Buffer.byteLength(ch, "utf8");
+    if (bytes + chBytes > maxBytes) break;
+    out += ch;
+    bytes += chBytes;
+  }
+  return out;
+}
+
+/**
  * Build a meaningful conventional commit message from task execution context.
  * Format: `{type}: {description}` (clean conventional commit — no GSD IDs in subject).
  *
@@ -159,13 +215,7 @@ export function buildTaskCommitMessage(ctx: TaskCommitContext): string {
   const description = sanitizeCommitSubjectDescription(ctx.oneLiner || ctx.taskTitle);
   const type = inferCommitType(ctx.taskTitle, ctx.oneLiner);
 
-  // Truncate description to ~72 chars for subject line (full budget without scope)
-  const maxDescLen = 70 - type.length;
-  const truncated = description.length > maxDescLen
-    ? description.slice(0, maxDescLen - 1).trimEnd() + "…"
-    : description;
-
-  const subject = `${type}: ${truncated}`;
+  const subject = truncateUtf8ForGitSubject(`${type}: `, description);
 
   // Build body with key files if available
   const bodyParts: string[] = [];

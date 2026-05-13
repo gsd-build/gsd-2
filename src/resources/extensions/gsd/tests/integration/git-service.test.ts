@@ -235,6 +235,69 @@ describe('git-service', async () => {
     assert.ok(!msg.includes("chore: auto-commit after execute-task"), "message does not use generic fallback");
   });
 
+  // Regression test for #5907: subjects produced by `buildTaskCommitMessage`
+  // were truncated on a *character* boundary, then had a 3-byte UTF-8 ellipsis
+  // appended, which overshot the 72-byte git-subject limit by 2-3 bytes for
+  // any description ≥66 chars and caused strict `commit-msg` hooks to fail.
+  test('buildTaskCommitMessage clamps subject to 72 bytes (ASCII, ≥66-char descriptor)', () => {
+    // Verbatim repro from issue #5907.
+    const oneLiner =
+      "Added the core lint contract, seven-rule metadata catalogue, and parse-derived mechanical lint mappings with structured suggested_fix objects.";
+    const msg = buildTaskCommitMessage({
+      taskId: "S01/T01",
+      taskTitle: "implement lint contract",
+      oneLiner,
+    });
+    const subject = msg.split("\n")[0];
+    assert.ok(
+      Buffer.byteLength(subject, "utf8") <= 72,
+      `subject is ${Buffer.byteLength(subject, "utf8")} bytes (limit 72): ${JSON.stringify(subject)}`,
+    );
+    assert.ok(subject.startsWith("feat:"), "preserves inferred type prefix");
+  });
+
+  test('buildTaskCommitMessage clamps subject to 72 bytes (multi-byte / emoji descriptor)', () => {
+    // Multi-byte chars must not be split mid-codepoint and the result must
+    // still fit in 72 bytes.
+    const oneLiner =
+      "Added 🚀 rocket-fast caching layer with 中文支持 and é-accented identifiers across the entire pipeline end-to-end";
+    const msg = buildTaskCommitMessage({
+      taskId: "S01/T02",
+      taskTitle: "add caching layer",
+      oneLiner,
+    });
+    const subject = msg.split("\n")[0];
+    assert.ok(
+      Buffer.byteLength(subject, "utf8") <= 72,
+      `subject is ${Buffer.byteLength(subject, "utf8")} bytes (limit 72): ${JSON.stringify(subject)}`,
+    );
+    // Round-trip through Buffer to confirm no replacement chars from a
+    // mid-codepoint truncation.
+    assert.equal(
+      Buffer.from(subject, "utf8").toString("utf8"),
+      subject,
+      "subject is valid UTF-8 (not truncated mid-codepoint)",
+    );
+  });
+
+  test('buildTaskCommitMessage clamps subject to 72 bytes across descriptor lengths 1..200', () => {
+    // Boundary fuzz: every length around the 66-char trigger should still
+    // produce a ≤72-byte subject.
+    for (let n = 1; n <= 200; n++) {
+      const msg = buildTaskCommitMessage({
+        taskId: "S01/T03",
+        taskTitle: "implement feature x",
+        oneLiner: "x".repeat(n),
+      });
+      const subject = msg.split("\n")[0];
+      const bytes = Buffer.byteLength(subject, "utf8");
+      assert.ok(
+        bytes <= 72,
+        `descriptor length ${n}: subject is ${bytes} bytes (limit 72): ${JSON.stringify(subject)}`,
+      );
+    }
+  });
+
   test('buildTaskCommitMessage sanitizes subject text', () => {
     const msg = buildTaskCommitMessage({
       taskId: "S01/T03",
