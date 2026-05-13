@@ -2082,6 +2082,9 @@ export function deleteTask(milestoneId: string, sliceId: string, taskId: string)
       `DELETE FROM verification_evidence WHERE milestone_id = :mid AND slice_id = :sid AND task_id = :tid`,
     ).run({ ":mid": milestoneId, ":sid": sliceId, ":tid": taskId });
     currentDb!.prepare(
+      `DELETE FROM quality_gates WHERE milestone_id = :mid AND slice_id = :sid AND task_id = :tid`,
+    ).run({ ":mid": milestoneId, ":sid": sliceId, ":tid": taskId });
+    currentDb!.prepare(
       `DELETE FROM tasks WHERE milestone_id = :mid AND slice_id = :sid AND id = :tid`,
     ).run({ ":mid": milestoneId, ":sid": sliceId, ":tid": taskId });
   });

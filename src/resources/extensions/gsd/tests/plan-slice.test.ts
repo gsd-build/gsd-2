@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, writeFileSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { openDatabase, closeDatabase, insertMilestone, insertSlice, getSlice, getSliceTasks, getTask, updateTaskStatus } from '../gsd-db.ts';
+import { openDatabase, closeDatabase, insertMilestone, insertSlice, getSlice, getSliceTasks, getTask, getGateResults, updateTaskStatus } from '../gsd-db.ts';
 import { handlePlanSlice } from '../tools/plan-slice.ts';
 import { parsePlan } from '../parsers-legacy.ts';
 import { parseTaskPlanFile } from '../files.ts';
@@ -195,6 +195,28 @@ test('handlePlanSlice rejects invalid payloads', async () => {
     const result = await handlePlanSlice({ ...validParams(), tasks: [] }, base);
     assert.ok('error' in result);
     assert.match(result.error, /validation failed: tasks must be a non-empty array/);
+  } finally {
+    cleanup(base);
+  }
+});
+
+test('handlePlanSlice explains string task IO fields must be arrays', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParentSlice();
+    const result = await handlePlanSlice({
+      ...validParams(),
+      tasks: [
+        {
+          ...validParams().tasks[0],
+          inputs: 'src/index.ts' as unknown as string[],
+        },
+      ],
+    }, base);
+    assert.ok('error' in result);
+    assert.match(result.error, /validation failed: tasks\[0\]\.inputs must be an array/);
   } finally {
     cleanup(base);
   }
@@ -430,6 +452,80 @@ test('handlePlanSlice reruns idempotently and refreshes parse-visible state', as
     assert.equal(parsedAfter.goal, 'Updated goal from rerun.');
     const task = getTask('M001', 'S02', 'T01');
     assert.equal(task?.description, 'Updated slice handler description.');
+  } finally {
+    cleanup(base);
+  }
+});
+
+test('handlePlanSlice removes omitted pending tasks when replanning a smaller task set', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParentSlice();
+    const fourTaskPlan = {
+      ...validParams(),
+      tasks: [
+        ...validParams().tasks,
+        { ...validParams().tasks[0], taskId: 'T03', title: 'Third task' },
+        { ...validParams().tasks[0], taskId: 'T04', title: 'Stale task', inputs: [] },
+      ],
+    };
+
+    const first = await handlePlanSlice(fourTaskPlan, base);
+    assert.ok(!('error' in first), `unexpected error: ${'error' in first ? first.error : ''}`);
+    const staleTaskPlanPath = join(base, '.gsd', 'milestones', 'M001', 'slices', 'S02', 'tasks', 'T04-PLAN.md');
+    assert.ok(existsSync(staleTaskPlanPath), 'initial plan should render T04');
+
+    const second = await handlePlanSlice({
+      ...validParams(),
+      tasks: fourTaskPlan.tasks.filter((task) => task.taskId !== 'T04'),
+    }, base);
+    assert.ok(!('error' in second), `unexpected error: ${'error' in second ? second.error : ''}`);
+
+    assert.deepEqual(getSliceTasks('M001', 'S02').map((task) => task.id), ['T01', 'T02', 'T03']);
+    assert.equal(getGateResults('M001', 'S02', 'task').some((gate) => gate.task_id === 'T04'), false);
+    assert.equal(existsSync(staleTaskPlanPath), false, 'omitted task plan artifact should be removed');
+  } finally {
+    cleanup(base);
+  }
+});
+
+test('handlePlanSlice rejects omitted completed tasks without changing slice or task state', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParentSlice();
+    const fourTaskPlan = {
+      ...validParams(),
+      tasks: [
+        ...validParams().tasks,
+        { ...validParams().tasks[0], taskId: 'T03', title: 'Third task' },
+        { ...validParams().tasks[0], taskId: 'T04', title: 'Stale task', inputs: [] },
+      ],
+    };
+
+    const first = await handlePlanSlice(fourTaskPlan, base);
+    assert.ok(!('error' in first), `unexpected error: ${'error' in first ? first.error : ''}`);
+    const staleTaskPlanPath = join(base, '.gsd', 'milestones', 'M001', 'slices', 'S02', 'tasks', 'T04-PLAN.md');
+    assert.ok(existsSync(staleTaskPlanPath), 'initial plan should render T04');
+
+    updateTaskStatus('M001', 'S02', 'T04', 'complete', '2026-05-12T00:00:00.000Z');
+    const tasksBefore = getSliceTasks('M001', 'S02');
+    const gatesBefore = getGateResults('M001', 'S02', 'task');
+
+    const second = await handlePlanSlice({
+      ...validParams(),
+      goal: 'Rejected replan should not persist.',
+      tasks: fourTaskPlan.tasks.filter((task) => task.taskId !== 'T04'),
+    }, base);
+    assert.deepEqual(second, { error: 'cannot remove completed task T04' });
+
+    assert.equal(getSlice('M001', 'S02')?.goal, 'Persist slice planning through the DB.');
+    assert.deepEqual(getSliceTasks('M001', 'S02'), tasksBefore);
+    assert.deepEqual(getGateResults('M001', 'S02', 'task'), gatesBefore);
+    assert.ok(existsSync(staleTaskPlanPath), 'completed task plan artifact should remain after rejected replan');
   } finally {
     cleanup(base);
   }
