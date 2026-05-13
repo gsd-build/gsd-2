@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, writeFileSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { openDatabase, closeDatabase, insertMilestone, insertSlice, getSlice, getSliceTasks, getTask } from '../gsd-db.ts';
+import { openDatabase, closeDatabase, insertMilestone, insertSlice, getSlice, getSliceTasks, getTask, updateTaskStatus } from '../gsd-db.ts';
 import { handlePlanSlice } from '../tools/plan-slice.ts';
 import { parsePlan } from '../parsers-legacy.ts';
 import { parseTaskPlanFile } from '../files.ts';
@@ -299,6 +299,30 @@ test('handlePlanSlice accepts task inputs produced by same or prior tasks', asyn
     }, base);
 
     assert.ok(!('error' in result), `unexpected error: ${'error' in result ? result.error : ''}`);
+  } finally {
+    cleanup(base);
+  }
+});
+
+test('handlePlanSlice refuses to omit non-pending tasks during replan', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParentSlice();
+    const first = await handlePlanSlice(validParams(), base);
+    assert.ok(!('error' in first), `unexpected error: ${'error' in first ? first.error : ''}`);
+    updateTaskStatus('M001', 'S02', 'T02', 'in_progress');
+
+    const result = await handlePlanSlice({
+      ...validParams(),
+      tasks: [validParams().tasks[0]],
+    }, base);
+
+    assert.ok('error' in result);
+    assert.match(result.error, /cannot remove non-pending task T02 \(status: in_progress\)/);
+    assert.equal(getTask('M001', 'S02', 'T02')?.status, 'in_progress', 'in-flight task must remain in the DB');
+    assert.equal(getSliceTasks('M001', 'S02').length, 2, 'failed replan must not delete omitted in-flight tasks');
   } finally {
     cleanup(base);
   }

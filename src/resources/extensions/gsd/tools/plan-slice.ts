@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { join, relative } from "node:path";
 import { clearParseCache } from "../files.js";
 import { findInvalidTaskInputPaths } from "../pre-execution-checks.js";
@@ -208,8 +208,8 @@ export async function handlePlanSlice(
         .map((task) => task.id);
 
       for (const task of existingTasks) {
-        if (!newTaskIds.has(task.id) && isClosedStatus(task.status)) {
-          guardError = `cannot remove completed task ${task.id}`;
+        if (!newTaskIds.has(task.id) && task.status !== "pending") {
+          guardError = `cannot remove non-pending task ${task.id} (status: ${task.status})`;
           return;
         }
       }
@@ -276,12 +276,13 @@ export async function handlePlanSlice(
 
   try {
     const tasksDir = resolveTasksDir(basePath, params.milestoneId, params.sliceId);
-    for (const taskId of omittedTaskIds) {
-      if (!tasksDir) continue;
-      const taskPlanPath = join(tasksDir, buildTaskFileName(taskId, "PLAN"));
-      if (existsSync(taskPlanPath)) rmSync(taskPlanPath, { force: true });
-      const artifactPath = relative(gsdRoot(basePath), taskPlanPath).replace(/\\/g, "/");
-      deleteArtifactByPath(artifactPath);
+    if (tasksDir) {
+      for (const taskId of omittedTaskIds) {
+        const taskPlanPath = join(tasksDir, buildTaskFileName(taskId, "PLAN"));
+        rmSync(taskPlanPath, { force: true });
+        const artifactPath = relative(gsdRoot(basePath), taskPlanPath).replace(/\\/g, "/");
+        deleteArtifactByPath(artifactPath);
+      }
     }
 
     const renderResult = await renderPlanFromDb(basePath, params.milestoneId, params.sliceId);
