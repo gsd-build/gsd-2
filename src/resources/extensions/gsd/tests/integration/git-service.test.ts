@@ -8,6 +8,8 @@ import { execSync } from "node:child_process";
 import {
   inferCommitType,
   buildTaskCommitMessage,
+  coerceCommitType,
+  ALLOWED_COMMIT_TYPES,
   GitServiceImpl,
   MergeConflictError,
   RUNTIME_EXCLUSION_PATHS,
@@ -254,6 +256,65 @@ describe('git-service', async () => {
     assert.ok(msg.startsWith("test:"), "infers test type");
     assert.ok(msg.includes("GSD-Task: S01/T03"), "GSD-Task trailer present");
   }
+
+  // ─── coerceCommitType ──────────────────────────────────────────────────
+
+  test('coerceCommitType: passes through allowed types unchanged', () => {
+    for (const type of ALLOWED_COMMIT_TYPES) {
+      assert.equal(coerceCommitType(type), type, `${type} is allowed`);
+    }
+  });
+
+  test('coerceCommitType: rewrites unknown types to chore with warning', () => {
+    const originalWarn = console.warn;
+    const warnings: string[] = [];
+    console.warn = (msg: string) => { warnings.push(msg); };
+    try {
+      assert.equal(coerceCommitType("wip"), "chore", "wip rewrites to chore");
+      assert.equal(coerceCommitType("cleanup"), "chore", "cleanup rewrites to chore");
+      assert.equal(coerceCommitType(""), "chore", "empty rewrites to chore");
+      assert.equal(coerceCommitType("FEAT"), "chore", "uppercase rewrites to chore (allowlist is lowercase)");
+      assert.equal(warnings.length, 4, "one warning per unknown type");
+      assert.ok(warnings[0]!.includes("wip"), "warning names the bad type");
+      assert.ok(warnings[0]!.includes("chore"), "warning names the fallback");
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  test('coerceCommitType: inferCommitType output is always allowed', () => {
+    // Every type COMMIT_TYPE_RULES can produce — plus the "feat" default —
+    // must be in ALLOWED_COMMIT_TYPES so coerceCommitType is a no-op on the
+    // normal path. Guards against future drift where a new rule adds a type
+    // that the allowlist doesn't know about.
+    const inferredTypes = [
+      inferCommitType("Implement user authentication"), // feat (default)
+      inferCommitType("Fix login redirect bug"),         // fix
+      inferCommitType("Refactor state management"),      // refactor
+      inferCommitType("Update API documentation"),       // docs
+      inferCommitType("Add tests for auth"),             // test
+      inferCommitType("Optimize cache performance"),     // perf
+      inferCommitType("Bump dependencies"),              // chore
+    ];
+    for (const t of inferredTypes) {
+      assert.ok((ALLOWED_COMMIT_TYPES as readonly string[]).includes(t), `inferCommitType produced "${t}" — must be in ALLOWED_COMMIT_TYPES`);
+    }
+  });
+
+  test('buildTaskCommitMessage: invalid synthesized type would fall back to chore', () => {
+    // Defense-in-depth: if a caller (or future refactor of inferCommitType)
+    // produced an invalid type, buildTaskCommitMessage must not emit it into
+    // the subject line — strict commit-msg hooks would reject the commit
+    // with no actionable diagnostic. Exercised here via coerceCommitType
+    // directly since inferCommitType always returns an allowed type today.
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try {
+      assert.equal(coerceCommitType("wip"), "chore", "wip → chore prevents `wip: ...` subject");
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
 
   // ─── RUNTIME_EXCLUSION_PATHS ───────────────────────────────────────────
 
