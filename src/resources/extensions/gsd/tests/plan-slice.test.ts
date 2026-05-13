@@ -447,3 +447,45 @@ test('handlePlanSlice rejects omitted completed tasks without changing slice or 
     cleanup(base);
   }
 });
+
+test('regression: validateTasks surfaces clean per-field errors for non-array IO inputs', async () => {
+  // Regression for the bug this PR fixes: an earlier refactor (0b0e1a901)
+  // re-added validateStringArray() calls inside validateTasks without
+  // re-adding its import. The catch around validateParams swallowed the
+  // ReferenceError into a generic "validation failed: validateStringArray
+  // is not defined" message, so silent runtime breakage was possible.
+  //
+  // Exercise every validateStringArray call site (files, inputs, expectedOutput)
+  // so a future missing-import would surface as a per-field assertion failure
+  // here, not a deep ReferenceError that's easy to mis-diagnose.
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParentSlice();
+
+    for (const field of ['files', 'inputs', 'expectedOutput'] as const) {
+      const result = await handlePlanSlice({
+        ...validParams(),
+        tasks: [{
+          ...validParams().tasks[0],
+          [field]: 'not-an-array' as unknown as string[],
+        }],
+      }, base);
+      assert.ok('error' in result, `${field}: expected validation error, got success`);
+      assert.match(
+        result.error,
+        new RegExp(`tasks\\[0\\]\\.${field} must be an array`),
+        `${field}: expected per-field validation message, got: ${result.error}`,
+      );
+      assert.doesNotMatch(
+        result.error,
+        /is not defined/,
+        `${field}: validation surfaced ReferenceError — likely a missing import in plan-slice.ts`,
+      );
+      assert.equal(getSliceTasks('M001', 'S02').length, 0, `${field}: invalid input must not persist`);
+    }
+  } finally {
+    cleanup(base);
+  }
+});
