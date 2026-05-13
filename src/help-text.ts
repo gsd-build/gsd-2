@@ -22,6 +22,24 @@ const SUBCOMMAND_HELP: Record<string, string> = {
     'Equivalent to: npm install -g gsd-pi@latest',
   ].join('\n'),
 
+  cache: [
+    'Usage: gsd cache <command>',
+    '',
+    'Manage the V8 compile cache GSD uses to speed up startup.',
+    '',
+    'Commands:',
+    '  path     Print the cache directory path',
+    '  clear    Delete the cache directory (safe; cache is rebuilt on next run)',
+    '',
+    'When to use `gsd cache clear`:',
+    '  - You patched a file under ~/.gsd/agent/ and `gsd` still appears to run',
+    '    the old code on the next launch.',
+    '  - You suspect bytecode corruption after a Node upgrade or interrupted run.',
+    '',
+    'The cache lives under ~/.gsd/agent/.compile-cache/ and is scoped by gsd-pi',
+    'version, so an `npm install -g gsd-pi@latest` already invalidates it.',
+  ].join('\n'),
+
   sessions: [
     'Usage: gsd sessions',
     '',
@@ -199,6 +217,7 @@ export function printHelp(version: string): void {
   process.stdout.write('  auto [args]              Run auto-mode without TUI (pipeable)\n')
   process.stdout.write('  headless [cmd] [args]    Run /gsd commands without TUI (default: auto)\n')
   process.stdout.write('  graph <subcommand>       Manage knowledge graph (build, query, status, diff)\n')
+  process.stdout.write('  cache <subcommand>       Manage compile cache (clear, path)\n')
   process.stdout.write('\nRun gsd <subcommand> --help for subcommand-specific help.\n')
 }
 

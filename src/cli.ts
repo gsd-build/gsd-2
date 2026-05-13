@@ -7,6 +7,7 @@ import type {
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { agentDir, sessionsDir, authFilePath } from './app-paths.js'
+import { computeCompileCacheDir, compileCacheRoot, clearCompileCache } from './compile-cache.js'
 import { initResources, buildResourceLoader, getNewerManagedResourceVersion } from './resource-loader.js'
 import { ensureManagedTools } from './tool-bootstrap.js'
 import { loadStoredEnvKeys } from './wizard.js'
@@ -44,9 +45,16 @@ function loadPiCodingAgentModule(): Promise<PiCodingAgentModule> {
 // V8 compile cache — Node 22+ can cache compiled bytecode across runs,
 // eliminating repeated parse/compile overhead for unchanged modules.
 // Must be set early so dynamic imports (extensions, lazy subcommands) benefit.
+//
+// The cache directory is scoped by gsd-pi version (see compile-cache.ts) so
+// that any version bump implicitly invalidates the cache. This is a defence
+// against a rare stale-bytecode trap observed when patching dist files in
+// place mid-debug. `gsd cache clear` is the manual recovery path for the
+// same-version case.
 // ---------------------------------------------------------------------------
 if (parseInt(process.versions.node) >= 22) {
-  process.env.NODE_COMPILE_CACHE ??= join(agentDir, '.compile-cache')
+  const gsdVersion = process.env.GSD_VERSION || '0.0.0'
+  process.env.NODE_COMPILE_CACHE ??= computeCompileCacheDir(agentDir, gsdVersion)
 }
 
 function exitIfManagedResourcesAreNewer(currentAgentDir: string): void {
@@ -211,6 +219,25 @@ function ensureRtkBootstrap(): Promise<void> {
 // command is blocked — only `update` should bypass the gate so the user can
 // actually upgrade out of the broken state. See shouldBypassManagedResourceMismatchGate.
 if (shouldBypassManagedResourceMismatchGate(cliFlags.messages[0])) {
+  if (cliFlags.messages[0] === 'cache') {
+    const sub = cliFlags.messages[1]
+    if (!sub || sub === 'path') {
+      process.stdout.write(`${compileCacheRoot(agentDir)}\n`)
+      process.exit(0)
+    }
+    if (sub === 'clear') {
+      const { existed, path } = clearCompileCache(agentDir)
+      if (existed) {
+        process.stdout.write(`[gsd] Cleared compile cache at ${path}\n`)
+      } else {
+        process.stdout.write(`[gsd] No compile cache to clear (${path} does not exist)\n`)
+      }
+      process.exit(0)
+    }
+    process.stderr.write(`Unknown cache command: ${sub}\n`)
+    process.stderr.write('Commands: clear, path\n')
+    process.exit(1)
+  }
   const { runUpdate } = await import('./update-cmd.js')
   await runUpdate()
   process.exit(0)

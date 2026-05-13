@@ -14,5 +14,8 @@
  * predicate before calling exitIfManagedResourcesAreNewer().
  */
 export function shouldBypassManagedResourceMismatchGate(firstMessage: string | undefined): boolean {
-  return firstMessage === 'update'
+  // `cache` must bypass because a stale compile cache is one plausible cause
+  // of the broken state itself — operators need an escape hatch that does not
+  // depend on the rest of cli.ts importing cleanly.
+  return firstMessage === 'update' || firstMessage === 'cache'
 }

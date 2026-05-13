@@ -53,6 +53,20 @@ It checks:
 
 **Fix:** This was fixed in v2.14+. If you're on an older version, update. The dispatch prompt now includes explicit working directory instructions.
 
+### Patched dist files don't seem to take effect
+
+**Symptoms:** You edited a file under `~/.gsd/agent/` (or otherwise patched gsd-pi's installed dist) to verify a fix, restarted `gsd`, and the old behavior persists as if your edit never happened.
+
+**Cause:** Node's V8 compile cache (`NODE_COMPILE_CACHE`, enabled by gsd on Node 22+) may serve stale bytecode for a patched module under rare conditions. The cache lives at `~/.gsd/agent/.compile-cache/` and is scoped by gsd-pi version, so a normal `npm install -g gsd-pi@latest` invalidates it automatically — but mid-debug edits on the same installed version can still trip the cache.
+
+**Fix:**
+
+```bash
+gsd cache clear
+```
+
+That removes the entire compile-cache directory; gsd rebuilds it on the next launch. Use `gsd cache path` to see where it lives without deleting anything.
+
 ### `command not found: gsd` after install
 
 **Symptoms:** `npm install -g gsd-pi` succeeds but `gsd` isn't found.
