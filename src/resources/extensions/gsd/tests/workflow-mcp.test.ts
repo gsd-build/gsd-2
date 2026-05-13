@@ -375,7 +375,7 @@ test("workflow MCP launch config reaches mutation tools over stdio", async () =>
               estimate: "10m",
               files: ["src/resources/extensions/gsd/workflow-mcp.ts"],
               verify: "node --test",
-              inputs: ["M001-ROADMAP.md"],
+              inputs: [".gsd/milestones/M001/M001-ROADMAP.md"],
               expectedOutput: ["S01-PLAN.md", "T01-PLAN.md"],
             },
           ],

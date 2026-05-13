@@ -285,6 +285,64 @@ test("executePlanSlice marks validation failures with isError", async () => {
   }
 });
 
+test("executePlanSlice rejects nonexistent concrete task inputs", async () => {
+  const base = makeTmpBase();
+  try {
+    openTestDb(base);
+    await inProjectDir(base, () => executePlanMilestone({
+      milestoneId: "M001",
+      title: "Workflow MCP planning",
+      vision: "Plan milestone over shared executors.",
+      slices: [
+        {
+          sliceId: "S01",
+          title: "Bridge planning",
+          risk: "medium",
+          depends: [],
+          demo: "Milestone plan persists through MCP.",
+          goal: "Persist roadmap state.",
+          successCriteria: "ROADMAP.md renders from DB.",
+          proofLevel: "integration",
+          integrationClosure: "Prompts and MCP call the same handler.",
+          observabilityImpact: "Executor tests cover output paths.",
+        },
+      ],
+    }, base));
+
+    const result = await inProjectDir(base, () => executePlanSlice({
+      milestoneId: "M001",
+      sliceId: "S01",
+      goal: "Reject nonexistent inputs before planning state persists.",
+      tasks: [
+        {
+          taskId: "T01",
+          title: "Invalid input task",
+          description: "Reference a concrete input that does not exist.",
+          estimate: "5m",
+          files: ["src/file.ts"],
+          verify: "node --test",
+          inputs: [".gsd/milestones/M001/NONEXISTENT.md"],
+          expectedOutput: ["S01-PLAN.md"],
+        },
+      ],
+    }, base));
+
+    assert.equal(result.isError, true);
+    assert.match(String(result.details.error), /validation failed: invalid task inputs/);
+    assert.match(result.content[0].text, /Error planning slice:/);
+
+    const db = _getAdapter();
+    assert.ok(db, "DB should be open");
+    const taskCount = db!.prepare(
+      "SELECT COUNT(*) AS count FROM tasks WHERE milestone_id = ? AND slice_id = ?",
+    ).get("M001", "S01") as Record<string, unknown>;
+    assert.equal(taskCount.count, 0, "invalid planning IO must not persist tasks");
+  } finally {
+    closeDatabase();
+    cleanup(base);
+  }
+});
+
 test("executeSliceComplete coerces string enrichment entries and writes summary/UAT artifacts", async () => {
   const base = makeTmpBase();
   try {
@@ -473,7 +531,7 @@ test("executeReassessRoadmap writes assessment and updates roadmap projection", 
           estimate: "5m",
           files: ["src/file.ts"],
           verify: "node --test",
-          inputs: ["M004-ROADMAP.md"],
+          inputs: [".gsd/milestones/M004/M004-ROADMAP.md"],
           expectedOutput: ["S04-SUMMARY.md", "S04-UAT.md"],
         },
       ],
@@ -607,7 +665,7 @@ test("executeReplanSlice rewrites pending tasks and renders replan artifacts", a
           estimate: "5m",
           files: ["src/blocker.ts"],
           verify: "node --test",
-          inputs: ["M006-ROADMAP.md"],
+          inputs: [".gsd/milestones/M006/M006-ROADMAP.md"],
           expectedOutput: ["T06-SUMMARY.md"],
         },
         {
@@ -617,7 +675,7 @@ test("executeReplanSlice rewrites pending tasks and renders replan artifacts", a
           estimate: "10m",
           files: ["src/pending.ts"],
           verify: "node --test",
-          inputs: ["S06-PLAN.md"],
+          inputs: [".gsd/milestones/M006/slices/S06/S06-PLAN.md"],
           expectedOutput: ["Updated plan"],
         },
       ],
@@ -645,7 +703,7 @@ test("executeReplanSlice rewrites pending tasks and renders replan artifacts", a
           estimate: "15m",
           files: ["src/pending.ts", "src/replanned.ts"],
           verify: "node --test",
-          inputs: ["S06-PLAN.md"],
+          inputs: [".gsd/milestones/M006/slices/S06/S06-PLAN.md"],
           expectedOutput: ["Updated plan"],
         },
         {
@@ -655,7 +713,7 @@ test("executeReplanSlice rewrites pending tasks and renders replan artifacts", a
           estimate: "20m",
           files: ["src/remediation.ts"],
           verify: "node --test",
-          inputs: ["S06-REPLAN.md"],
+          inputs: [".gsd/milestones/M006/slices/S06/S06-REPLAN.md"],
           expectedOutput: ["Remediation patch"],
         },
       ],
