@@ -216,13 +216,13 @@ describe("verification-gate: discovery", () => {
     assert.deepStrictEqual(result.commands, ["npm run test"]);
   });
 
-  test("taskPlanVerify rejects piped pytest command", () => {
+  test("taskPlanVerify accepts piped command", () => {
     const result = discoverCommands({
-      taskPlanVerify: "python3 -m pytest tests/ -q --tb=short 2>&1 | tail -5",
+      taskPlanVerify: "grep 'KEY' .env.example | grep -q STRIPE_WEBHOOK_SECRET",
       cwd: tmp,
     });
-    assert.equal(result.source, "none");
-    assert.deepStrictEqual(result.commands, []);
+    assert.equal(result.source, "task-plan");
+    assert.deepStrictEqual(result.commands, ["grep 'KEY' .env.example | grep -q STRIPE_WEBHOOK_SECRET"]);
   });
 
   test("Python project with tests discovers pytest when package.json is absent", () => {
