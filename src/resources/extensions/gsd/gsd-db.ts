@@ -111,7 +111,7 @@ const providerLoader = createSqliteProviderLoader({
 
 export const SCHEMA_VERSION = 28;
 
-function initSchema(db: DbAdapter, fileBacked: boolean, dbPath: string | null): void {
+function initSchema(db: DbAdapter, fileBacked: boolean, dbPath: string | null = null): void {
   const conservativeFilePragmas = fileBacked && _isLikelyWslDrvFsPathForTest(dbPath);
   if (fileBacked) db.exec(conservativeFilePragmas ? "PRAGMA journal_mode=DELETE" : "PRAGMA journal_mode=WAL");
   if (fileBacked) db.exec("PRAGMA busy_timeout = 5000");
@@ -628,7 +628,7 @@ export function openDatabase(path: string): boolean {
         process.stderr.write("gsd-db: recovered corrupt database via VACUUM\n");
       } catch (retryErr) {
         _dbOpenState.recordError("vacuum-recovery", retryErr);
-        try { adapter.close(); } catch (e) { logWarning("db", `close after VACUUM failed: ${(e as Error).message}`); }
+
         throw retryErr;
       }
     } else {
