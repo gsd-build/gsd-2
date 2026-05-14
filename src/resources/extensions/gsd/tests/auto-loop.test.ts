@@ -1502,6 +1502,40 @@ test("autoLoop journals iteration-end when unit phase breaks after cancelled uni
   });
 });
 
+test("autoLoop journals iteration-end when dispatch asks to re-derive state", async () => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  ctx.ui.setStatus = () => {};
+  ctx.sessionManager = { getSessionFile: () => "/tmp/session.json" };
+  const pi = makeMockPi();
+  const s = makeLoopSession();
+  const journalEvents: Array<{ eventType: string; data?: any }> = [];
+
+  const deps = makeMockDeps({
+    resolveDispatch: async () => {
+      s.active = false;
+      return { action: "skip" as const };
+    },
+    emitJournalEvent: (entry: any) => {
+      journalEvents.push(entry);
+    },
+  });
+
+  await autoLoop(ctx, pi, s, deps);
+
+  const iterationStartIndex = journalEvents.findIndex((e) => e.eventType === "iteration-start");
+  const iterationEndIndex = journalEvents.findIndex((e) => e.eventType === "iteration-end");
+
+  assert.ok(iterationStartIndex >= 0, "dispatch continue path should start an iteration");
+  assert.ok(iterationEndIndex > iterationStartIndex, "dispatch continue path must close the started iteration");
+  assert.deepEqual(journalEvents[iterationEndIndex]!.data, {
+    iteration: 1,
+    status: "skipped",
+    reason: "dispatch-continue",
+  });
+});
+
 test("crash lock records session file from AFTER newSession, not before (#1710)", async (t) => {
   _resetPendingResolve();
 
