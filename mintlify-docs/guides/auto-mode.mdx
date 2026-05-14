@@ -118,7 +118,7 @@ Auto mode also enforces a same-unit consecutive dispatch cap for `complete-miles
 
 ### Pre-execution blocking failures
 
-For planning units (`plan-slice` / `refine-slice`), pre-execution checks use a two-step recovery path:
+For planning units (`plan-slice` / `refine-slice`), pre-execution checks validate plan consistency (file references, task inputs, dependencies); when these checks fail, a two-step recovery path applies:
 
 1. The first blocking failure writes a replan trigger and auto mode continues into `replanning-slice` on the next dispatch.
 2. If blocking failures continue after a prior replan attempt, auto mode pauses and surfaces escalation details plus the evidence path.
