@@ -2130,6 +2130,7 @@ function buildLoopDeps(pi: ExtensionAPI): LoopDeps {
     createAutoWorktree,
     captureIntegrationBranch,
     getIsolationMode,
+    autoWorktreeBranch,
     reconcileMergeState,
 
     // Budget/context/secrets

@@ -123,6 +123,7 @@ export interface LoopDeps {
     mid: string,
   ) => void;
   getIsolationMode: (basePath?: string) => string;
+  autoWorktreeBranch: (milestoneId: string) => string;
   reconcileMergeState: (basePath: string, ctx: ExtensionContext) => MergeReconcileResult;
 
   // Clean-root preflight gate (#2909)
