@@ -887,7 +887,7 @@ test("hasImplementationArtifacts does not backfill untagged commits before miles
     });
 
     const result = hasImplementationArtifacts(base, "M001");
-    assert.equal(result, "absent", "pre-milestone commits must not be attributed to the milestone");
+    assert.equal(result, "unknown", "pre-milestone commits must fail open on integration self-diff retries");
     assert.deepEqual(getMilestoneCommitAttributionShas("M001"), []);
   } finally {
     cleanup(base);
@@ -924,7 +924,7 @@ test("hasImplementationArtifacts does not backfill unrelated untagged implementa
     execFileSync("git", ["commit", "-m", "feat: unrelated work"], { cwd: base, stdio: "ignore" });
 
     const result = hasImplementationArtifacts(base, "M001");
-    assert.equal(result, "absent", "backfill must require overlap with completed task file hints");
+    assert.equal(result, "unknown", "unmatched integration self-diff retries should fail open");
     assert.deepEqual(getMilestoneCommitAttributionShas("M001"), []);
   } finally {
     cleanup(base);
@@ -938,6 +938,20 @@ test("hasImplementationArtifacts treats empty non-integration branch diff as abs
 
     const result = hasImplementationArtifacts(base, "M001");
     assert.equal(result, "absent", "empty milestone branch diffs should not use main retry fallback");
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("hasImplementationArtifacts returns unknown for empty integration self-diff without milestone evidence (#5071)", () => {
+  const base = makeGitBase();
+  try {
+    const result = hasImplementationArtifacts(base, "M001");
+    assert.equal(
+      result,
+      "unknown",
+      "integration self-diff retries without milestone evidence must fail open instead of blocking closeout",
+    );
   } finally {
     cleanup(base);
   }
@@ -1057,11 +1071,7 @@ test("hasImplementationArtifacts does not bind GSD-Task trailer without mileston
     );
 
     const result = hasImplementationArtifacts(base, "M001");
-    assert.equal(
-      result,
-      "absent",
-      "S01/T01 shape alone must not bind an implementation commit to M001",
-    );
+    assert.equal(result, "unknown", "unbound GSD-Task trailers should fail open on integration self-diff retries");
   } finally {
     cleanup(base);
   }
@@ -1082,11 +1092,7 @@ test("hasImplementationArtifacts ignores malformed milestone IDs in commit-messa
     );
 
     const result = hasImplementationArtifacts(base, "M001(");
-    assert.equal(
-      result,
-      "absent",
-      "malformed milestone IDs must not bind implementation commits through message scanning",
-    );
+    assert.equal(result, "unknown", "malformed milestone IDs should fail open on integration self-diff retries");
   } finally {
     cleanup(base);
   }
