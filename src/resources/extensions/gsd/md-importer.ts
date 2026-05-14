@@ -16,7 +16,9 @@ import {
   insertTask,
   openDatabase,
   transaction,
+  updateMilestoneStatus,
   updateSliceStatus,
+  updateTaskStatus,
   _getAdapter,
 } from './gsd-db.js';
 import {
@@ -31,7 +33,7 @@ import {
 } from './paths.js';
 import { findMilestoneIds } from './guided-flow.js';
 import { parseRoadmap, parsePlan } from './parsers-legacy.js';
-import { parseContextDependsOn } from './files.js';
+import { parseContextDependsOn, parseSummary } from './files.js';
 import { logWarning } from './workflow-logger.js';
 
 // ─── DECISIONS.md Parser ───────────────────────────────────────────────────
@@ -493,6 +495,12 @@ function findFileByPrefixAndSuffix(dir: string, idPrefix: string, suffix: string
 
 // ─── Hierarchy Migration (milestones/slices/tasks from roadmaps+plans) ────
 
+function readCompletedAtFromSummary(summaryPath: string | null): string | undefined {
+  if (!summaryPath || !existsSync(summaryPath)) return undefined;
+  const completedAt = parseSummary(readFileSync(summaryPath, 'utf-8')).frontmatter.completed_at?.trim();
+  return completedAt || undefined;
+}
+
 /**
  * Walk .gsd/milestones/ dirs, parse roadmaps and plans, and populate
  * the milestones/slices/tasks DB tables.
@@ -562,6 +570,7 @@ export function migrateHierarchyToDb(basePath: string): {
       const contextContent = readFileSync(contextPath!, 'utf-8');
       dependsOn = parseContextDependsOn(contextContent);
     }
+    const milestoneCompletedAt = readCompletedAtFromSummary(summaryPath);
 
     // Extract raw "## Boundary Map" section from roadmap markdown for planning column
     let boundaryMapSection = '';
@@ -587,6 +596,9 @@ export function migrateHierarchyToDb(basePath: string): {
         boundaryMapMarkdown: boundaryMapSection,
       },
     });
+    if (milestoneCompletedAt) {
+      updateMilestoneStatus(milestoneId, milestoneStatus, milestoneCompletedAt);
+    }
     counts.milestones++;
 
     // Parse roadmap for slices
@@ -596,6 +608,8 @@ export function migrateHierarchyToDb(basePath: string): {
       const sliceEntry = roadmap.slices[si]!;
       // Per K002: use 'complete' not 'done'
       const sliceStatus = sliceEntry.done ? 'complete' : 'pending';
+      const sliceSummaryPath = resolveSliceFile(basePath, milestoneId, sliceEntry.id, 'SUMMARY');
+      const sliceCompletedAt = readCompletedAtFromSummary(sliceSummaryPath);
 
       // Parse slice plan early so goal is available for insertSlice planning column
       const planPath = resolveSliceFile(basePath, milestoneId, sliceEntry.id, 'PLAN');
@@ -618,6 +632,9 @@ export function migrateHierarchyToDb(basePath: string): {
           goal: plan?.goal ?? '',
         },
       });
+      if (sliceStatus === 'complete' && sliceCompletedAt) {
+        updateSliceStatus(milestoneId, sliceEntry.id, sliceStatus, sliceCompletedAt);
+      }
       counts.slices++;
 
       // Insert tasks from parsed plan
@@ -626,14 +643,14 @@ export function migrateHierarchyToDb(basePath: string): {
       for (const taskEntry of plan.tasks) {
         // Per K002: use 'complete' not 'done'
         let taskStatus: string = taskEntry.done ? 'complete' : 'pending';
+        const tasksDir = resolveTasksDir(basePath, milestoneId, sliceEntry.id);
 
         // Pre-migration consistency: if task is marked done in the plan but has
         // no summary file on disk, import as 'pending' so it gets re-executed
         // rather than silently importing bad state as the new DB authority.
         if (taskStatus === 'complete') {
-          const tDir = resolveTasksDir(basePath, milestoneId, sliceEntry.id);
-          if (tDir) {
-            const summaryFile = join(tDir, `${taskEntry.id}-SUMMARY.md`);
+          if (tasksDir) {
+            const summaryFile = join(tasksDir, `${taskEntry.id}-SUMMARY.md`);
             if (!existsSync(summaryFile)) {
               taskStatus = 'pending';
               process.stderr.write(
@@ -642,6 +659,9 @@ export function migrateHierarchyToDb(basePath: string): {
             }
           }
         }
+        const taskCompletedAt = readCompletedAtFromSummary(
+          tasksDir ? join(tasksDir, `${taskEntry.id}-SUMMARY.md`) : null,
+        );
 
         insertTask({
           id: taskEntry.id,
@@ -654,6 +674,9 @@ export function migrateHierarchyToDb(basePath: string): {
             verify: taskEntry.verify ?? '',
           },
         });
+        if (taskStatus === 'complete' && taskCompletedAt) {
+          updateTaskStatus(milestoneId, sliceEntry.id, taskEntry.id, taskStatus, taskCompletedAt);
+        }
         counts.tasks++;
       }
 
@@ -664,7 +687,6 @@ export function migrateHierarchyToDb(basePath: string): {
       // doctor would have auto-fixed. Without a slice summary, the slice
       // is in the "summarizing" phase, not complete.
       if (!sliceEntry.done) {
-        const sliceSummaryPath = resolveSliceFile(basePath, milestoneId, sliceEntry.id, 'SUMMARY');
         const hasSliceSummary = sliceSummaryPath !== null && existsSync(sliceSummaryPath);
         const allTasksDone = plan.tasks.length > 0 && plan.tasks.every(t => {
           const tDir = resolveTasksDir(basePath, milestoneId, sliceEntry.id);
@@ -674,7 +696,7 @@ export function migrateHierarchyToDb(basePath: string): {
         });
         if (allTasksDone && hasSliceSummary) {
           if (_getAdapter()) {
-            updateSliceStatus(milestoneId, sliceEntry.id, 'complete');
+            updateSliceStatus(milestoneId, sliceEntry.id, 'complete', sliceCompletedAt);
             process.stderr.write(
               `gsd-migrate: ${milestoneId}/${sliceEntry.id} all tasks + slice summary complete — upgrading slice to complete\n`,
             );

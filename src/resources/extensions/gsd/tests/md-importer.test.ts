@@ -299,6 +299,97 @@ test('md-importer: migrateFromMarkdown orchestrator', () => {
   }
 });
 
+test('md-importer: recover completed_at from summary frontmatter', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-completed-at-import-'));
+  const m001 = path.join(tmpDir, '.gsd', 'milestones', 'M001');
+  const s01 = path.join(m001, 'slices', 'S01');
+  const tasks = path.join(s01, 'tasks');
+  const milestoneCompletedAt = '2026-04-01T10:00:00.000Z';
+  const sliceCompletedAt = '2026-04-01T11:00:00.000Z';
+  const taskCompletedAt = '2026-04-01T11:30:00.000Z';
+
+  fs.mkdirSync(tasks, { recursive: true });
+  fs.writeFileSync(
+    path.join(m001, 'M001-ROADMAP.md'),
+    `# M001: Import Milestone
+
+## Slices
+
+- [x] **S01: Completed Slice** \`risk:low\` \`depends:[]\`
+`,
+  );
+  fs.writeFileSync(
+    path.join(m001, 'M001-SUMMARY.md'),
+    `---
+id: M001
+completed_at: ${milestoneCompletedAt}
+---
+
+# M001 Summary
+`,
+  );
+  fs.writeFileSync(
+    path.join(s01, 'S01-PLAN.md'),
+    `# S01: Completed Slice
+
+## Tasks
+
+- [x] **T01: Completed Task** \`est:5m\`
+  - Files: src/task.ts
+  - Verify: npm test
+`,
+  );
+  fs.writeFileSync(
+    path.join(s01, 'S01-SUMMARY.md'),
+    `---
+id: S01
+parent: M001
+milestone: M001
+completed_at: ${sliceCompletedAt}
+---
+
+# S01 Summary
+`,
+  );
+  fs.writeFileSync(
+    path.join(tasks, 'T01-SUMMARY.md'),
+    `---
+id: T01
+parent: S01
+milestone: M001
+completed_at: ${taskCompletedAt}
+---
+
+# T01 Summary
+`,
+  );
+
+  try {
+    openDatabase(':memory:');
+    migrateFromMarkdown(tmpDir);
+
+    const adapter = _getAdapter();
+    const milestone = adapter?.prepare('SELECT completed_at FROM milestones WHERE id = :id').get({ ':id': 'M001' });
+    const slice = adapter?.prepare('SELECT completed_at FROM slices WHERE milestone_id = :mid AND id = :sid').get({
+      ':mid': 'M001',
+      ':sid': 'S01',
+    });
+    const task = adapter?.prepare('SELECT completed_at FROM tasks WHERE milestone_id = :mid AND slice_id = :sid AND id = :tid').get({
+      ':mid': 'M001',
+      ':sid': 'S01',
+      ':tid': 'T01',
+    });
+
+    assert.equal(milestone?.completed_at, milestoneCompletedAt);
+    assert.equal(slice?.completed_at, sliceCompletedAt);
+    assert.equal(task?.completed_at, taskCompletedAt);
+
+    closeDatabase();
+  } finally {
+    cleanupDir(tmpDir);
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // md-importer: idempotent re-import
 // ═══════════════════════════════════════════════════════════════════════════
