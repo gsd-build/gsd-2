@@ -86,8 +86,9 @@ export function extractPackageReferences(description: string): string[] {
   ]);
 
   // npm install <pkg> patterns (handles npm i, npm add, yarn add, pnpm add)
-  // Use a global pattern to find all install commands, then parse following tokens
-  const installCmdPattern = /(?:npm\s+(?:install|i|add)|yarn\s+add|pnpm\s+add)\s+/g;
+  // Anchor to start-of-line command shape so prose mentions like
+  // "npm install hits worktree symlink breakage" are not parsed as packages.
+  const installCmdPattern = /(^|\n)\s*(?:[$>]\s*)?(?:npm\s+(?:install|i|add)|yarn\s+add|pnpm\s+add)\s+/g;
   let cmdMatch: RegExpExecArray | null;
   
   while ((cmdMatch = installCmdPattern.exec(description)) !== null) {

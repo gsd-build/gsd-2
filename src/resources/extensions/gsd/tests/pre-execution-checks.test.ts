@@ -75,7 +75,7 @@ function createTask(overrides: Partial<TaskRow> = {}): TaskRow {
 
 describe("extractPackageReferences", () => {
   test("extracts npm install patterns", () => {
-    const desc = "Run npm install lodash then npm i axios";
+    const desc = "npm install lodash\nnpm i axios";
     const packages = extractPackageReferences(desc);
     assert.deepEqual(packages.sort(), ["axios", "lodash"]);
   });
@@ -144,6 +144,12 @@ import type { Request } from 'express';
     const packages = extractPackageReferences(desc);
     assert.ok(packages.includes("typescript"));
     assert.ok(!packages.includes("-D"));
+  });
+
+  test("does not parse prose mention of npm install as packages (#5170)", () => {
+    const desc = "- npm install hits worktree symlink breakage → flag blocker; do not `rm node_modules` under the sandbox.";
+    const packages = extractPackageReferences(desc);
+    assert.deepEqual(packages, []);
   });
 
   // Regression tests for #4388: prose containing `from "..."` must not produce false-positive packages
