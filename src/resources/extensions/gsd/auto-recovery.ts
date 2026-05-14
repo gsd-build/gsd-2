@@ -217,6 +217,7 @@ export function hasImplementationArtifacts(basePath: string, milestoneId?: strin
         const milestoneEvidence = getChangedFilesFromMilestoneEvidence(basePath, milestoneId);
         if (!milestoneEvidence.ok) return "unknown";
         if (milestoneEvidence.matched) return classifyImplementationFiles(milestoneEvidence.files);
+        return "unknown";
       }
       if (currentBranch && currentBranch !== "HEAD") return "absent";
       return "unknown";
