@@ -1051,10 +1051,18 @@ export class AgentSession {
 	}
 
 	private _renderSkillInvocation(skill: { name: string; filePath: string; baseDir: string }, args?: string): string {
-		const content = readFileSync(skill.filePath, "utf-8");
-		const body = stripFrontmatter(content).trim();
-		const skillBlock = `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
-		return args && args.trim() ? `${skillBlock}\n\n${args.trim()}` : skillBlock;
+		try {
+			const content = readFileSync(skill.filePath, "utf-8");
+			const body = stripFrontmatter(content).trim();
+			const skillBlock = `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
+			return args && args.trim() ? `${skillBlock}\n\n${args.trim()}` : skillBlock;
+		} catch (err) {
+			const code = (err as { code?: unknown })?.code;
+			if (code === "ENFILE" || code === "EMFILE" || code === "ENOSPC") {
+				throw new Error(`Local resource exhaustion (${code}) while reading skill file: ${skill.filePath}`);
+			}
+			throw err;
+		}
 	}
 
 	private _expandSkillByName(skillName: string, args?: string): string {

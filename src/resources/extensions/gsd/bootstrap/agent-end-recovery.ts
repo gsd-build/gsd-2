@@ -210,6 +210,15 @@ export function isTerminalDeletedWorktreeProviderError(
   return /[/\\]\.gsd[/\\](?:projects[/\\][^/\\]+[/\\])?worktrees[/\\][^/\\\s"']+/i.test(message);
 }
 
+export function detectLocalResourceExhaustionCode(
+  message: string | undefined | null,
+): "ENFILE" | "EMFILE" | "ENOSPC" | null {
+  if (!message) return null;
+  const match = message.match(/\b(ENFILE|EMFILE|ENOSPC)\b/i);
+  if (!match) return null;
+  return match[1].toUpperCase() as "ENFILE" | "EMFILE" | "ENOSPC";
+}
+
 async function pauseTransientWithBackoff(
   cls: ErrorClass,
   pi: ExtensionAPI,
@@ -371,6 +380,16 @@ export async function handleAgentEnd(
       rawErrorMsg,
       "content" in lastMsg ? lastMsg.content : undefined,
     );
+    const localResourceCode = detectLocalResourceExhaustionCode(`${rawErrorMsg}\n${displayMsg}`);
+    if (localResourceCode) {
+      const detail = displayMsg || rawErrorMsg || localResourceCode;
+      await pauseAuto(ctx, pi, {
+        message: `Local resource exhaustion (${localResourceCode}): ${detail}`,
+        category: "session-failed",
+        isTransient: true,
+      });
+      return;
+    }
     if (
       isAutoCompletionStopInProgress() &&
       isTerminalDeletedWorktreeProviderError(`${rawErrorMsg}\n${displayMsg}`)

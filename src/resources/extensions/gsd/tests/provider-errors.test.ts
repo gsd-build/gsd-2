@@ -10,7 +10,12 @@ import assert from "node:assert/strict";
 import { classifyError, isTransient, isTransientNetworkError } from "../error-classifier.ts";
 import { pauseAutoForProviderError } from "../provider-error-pause.ts";
 import { resumeAutoAfterProviderDelay } from "../bootstrap/provider-error-resume.ts";
-import { MAX_TRANSIENT_AUTO_RESUMES, isTerminalDeletedWorktreeProviderError, resetTransientRetryState } from "../bootstrap/agent-end-recovery.ts";
+import {
+  MAX_TRANSIENT_AUTO_RESUMES,
+  detectLocalResourceExhaustionCode,
+  isTerminalDeletedWorktreeProviderError,
+  resetTransientRetryState,
+} from "../bootstrap/agent-end-recovery.ts";
 import { _buildCancelledUnitStopReason } from "../auto/phases.ts";
 import { getNextFallbackModel } from "../preferences.ts";
 // Zero-import module — imported by path rather than through the package
@@ -204,6 +209,13 @@ test("classifyError: rate limit on unsupported-model phrasing stays rate-limit",
     "429 rate limit — model not supported when using your account right now",
   );
   assert.equal(result.kind, "rate-limit");
+});
+
+test("detectLocalResourceExhaustionCode detects ENFILE/EMFILE/ENOSPC tokens", () => {
+  assert.equal(detectLocalResourceExhaustionCode("ENFILE: file table overflow"), "ENFILE");
+  assert.equal(detectLocalResourceExhaustionCode("boom emfile while opening"), "EMFILE");
+  assert.equal(detectLocalResourceExhaustionCode("write failed: enospc"), "ENOSPC");
+  assert.equal(detectLocalResourceExhaustionCode("network timeout"), null);
 });
 
 // ── STREAM_RE: V8 JSON parse error variants (#2916) ────────────────────────
