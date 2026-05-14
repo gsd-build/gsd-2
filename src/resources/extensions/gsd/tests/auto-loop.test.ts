@@ -1958,6 +1958,55 @@ test("autoLoop drains sidecar queue after postUnitPostVerification enqueues item
   );
 });
 
+test("autoLoop clears cmdCtx queue before sidecar iteration derivation (#5174)", async () => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  ctx.ui.setStatus = () => {};
+  const pi = makeMockPi();
+  let clearQueueCalled = false;
+  const s = makeLoopSession({
+    sidecarQueue: [{
+      kind: "hook" as const,
+      unitType: "hook/changelog",
+      unitId: "M001/S01/T01",
+      prompt: "generate changelog",
+    }],
+    cmdCtx: {
+      newSession: () => Promise.resolve({ cancelled: false }),
+      getContextUsage: () => ({ percent: 10, tokens: 1000, limit: 10000 }),
+      clearQueue: () => {
+        clearQueueCalled = true;
+      },
+    },
+  });
+
+  const deps = makeMockDeps({
+    deriveState: async () => {
+      assert.equal(
+        clearQueueCalled,
+        true,
+        "sidecar path must clear queued cmdCtx events before deriving sidecar state",
+      );
+      s.active = false;
+      return {
+        phase: "executing",
+        activeMilestone: { id: "M001", title: "Test", status: "active" },
+        activeSlice: { id: "S01", title: "Slice 1" },
+        activeTask: { id: "T01" },
+        registry: [{ id: "M001", status: "active" }],
+        blockers: [],
+      } as any;
+    },
+    resolveDispatch: async () => {
+      assert.fail("resolveDispatch should not run while processing an enqueued sidecar item");
+    },
+  });
+
+  await autoLoop(ctx, pi, s, deps);
+  assert.equal(clearQueueCalled, true, "sidecar path should call cmdCtx.clearQueue()");
+});
+
 test("autoLoop exits when no active milestone found", async (t) => {
   _resetPendingResolve();
 

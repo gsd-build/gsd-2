@@ -766,6 +766,17 @@ export async function autoLoop(
         observedUnitType = iterData.unitType;
         observedUnitId = iterData.unitId;
       } else {
+        try {
+          const cmdCtxAny = s.cmdCtx as { clearQueue?: () => unknown } | null | undefined;
+          if (typeof cmdCtxAny?.clearQueue === "function") {
+            cmdCtxAny.clearQueue();
+          }
+        } catch (error) {
+          debugLog("autoLoop", {
+            phase: "sidecar-clear-queue-failed",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
         iterData = await buildSidecarIterationData({
           sidecarItem,
           basePath: s.basePath,
