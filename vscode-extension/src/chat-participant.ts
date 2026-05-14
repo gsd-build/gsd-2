@@ -95,10 +95,9 @@ export function registerChatParticipant(
 							response.markdown(delta);
 						}
 					} else if (assistantEvent.type === "thinking_delta") {
-						// Thinking shown inline — prefix with italic so it's visually distinct
 						const delta = assistantEvent.delta as string | undefined;
 						if (delta) {
-							response.markdown(`*${delta}*`);
+							response.markdown(delta);
 						}
 					}
 					break;
