@@ -5,7 +5,6 @@ import {
   autoSession,
   clearToolInvocationError,
   getAutoRuntimeSnapshot,
-  recordToolInvocationError,
 } from "../auto-runtime-state.ts";
 
 test("getAutoRuntimeSnapshot includes orchestration phase when available", () => {
