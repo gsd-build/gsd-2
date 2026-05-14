@@ -15,6 +15,7 @@ import { readAllSessionStatuses, isSessionStale, removeSessionStatus } from "./s
 import { recoverFailedMigration } from "./migrate-external.js";
 import { splitCompletedKey } from "./forensics.js";
 import { findMilestoneIds } from "./milestone-ids.js";
+import { loadEffectiveGSDPreferences } from "./preferences.js";
 
 const MAX_UAT_ATTEMPTS = 3;
 
@@ -35,6 +36,8 @@ export async function checkRuntimeHealth(
   shouldFix: (code: DoctorIssueCode) => boolean,
 ): Promise<void> {
   const root = gsdRoot(basePath);
+  const gitPrefs = loadEffectiveGSDPreferences(basePath)?.preferences?.git;
+  const manageGitignore = gitPrefs?.manage_gitignore;
 
   // ── Stale crash lock ──────────────────────────────────────────────────
   // Phase C pt 2: the lock state lives in the workers + unit_dispatches
@@ -414,7 +417,7 @@ export async function checkRuntimeHealth(
           });
 
           if (shouldFix("gitignore_missing_patterns")) {
-            ensureGitignore(basePath);
+            ensureGitignore(basePath, { manageGitignore });
             fixesApplied.push("added missing GSD runtime patterns to .gitignore");
           }
         }
@@ -482,7 +485,7 @@ export async function checkRuntimeHealth(
           });
 
           if (shouldFix("symlinked_gsd_unignored")) {
-            const modified = ensureGitignore(basePath);
+            const modified = ensureGitignore(basePath, { manageGitignore });
             if (modified) fixesApplied.push("added .gsd to .gitignore (symlinked external state)");
           }
         }
