@@ -247,6 +247,18 @@ describe('git-service', async () => {
     assert.equal(subject.includes("\u0007"), false, "subject does not include control characters");
   });
 
+  test("buildTaskCommitMessage preserves long subject text without ellipsis truncation", () => {
+    const oneLiner = "Added retry-aware worker status logging with crash-safe checkpoint replay and dispatch lease recovery telemetry for long-running sessions";
+    const msg = buildTaskCommitMessage({
+      taskId: "S01/T09",
+      taskTitle: "implement auto-mode stability updates",
+      oneLiner,
+    });
+    const subject = msg.split("\n")[0];
+    assert.ok(subject.includes(oneLiner), "subject keeps full one-liner content");
+    assert.equal(subject.includes("…"), false, "subject is not truncated with ellipsis");
+  });
+
   {
     const msg = buildTaskCommitMessage({
       taskId: "S02/T01",
