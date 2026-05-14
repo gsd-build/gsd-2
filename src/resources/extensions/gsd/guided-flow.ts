@@ -1763,19 +1763,19 @@ async function showDiscussQueuedMilestone(
     return {
       id: m.id,
       label: `${m.id}: ${m.title}`,
-      description: `[queued] · ${contextStatus}`,
+      description: `[${m.status}] · ${contextStatus}`,
       recommended: i === 0,
     };
   });
 
   const choice = await showNextAction(ctx, {
-    title: "GSD — Discuss a queued milestone",
+    title: "GSD — Discuss a future/planned milestone",
     summary: [
-      "Select a queued milestone to discuss.",
+      "Select a milestone to discuss.",
       "Discussing will update its context file. It will not be activated.",
     ],
     actions,
-    notYetMessage: "Run /gsd discuss when ready.",
+
   });
 
   if (choice === "not_yet") return;
