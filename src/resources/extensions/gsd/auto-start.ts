@@ -69,6 +69,7 @@ import { isDbAvailable, getMilestone, getAllMilestones, openDatabase, getDbStatu
 import { isClosedStatus } from "./status-guards.js";
 import { classifyMilestoneSummaryContent } from "./milestone-summary-classifier.js";
 import { auditOrphanedPreflightStashes } from "./orphan-stash-audit.js";
+import { bootstrapFromManifest } from "./workflow-manifest.js";
 
 import {
   debugLog,
@@ -800,6 +801,13 @@ export async function bootstrapAutoSession(
     // consult DB status and avoid clearing runtime units for milestones that
     // only have a failure-path SUMMARY on disk (#4663).
     await openProjectDbIfPresent(base);
+    if (isDbAvailable() && getAllMilestones().length === 0) {
+      try {
+        bootstrapFromManifest(base);
+      } catch (err) {
+        logWarning("engine", `gsd-db: manifest bootstrap failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     registerAutoWorkerForSession(base);
 
     // Clean stale runtime unit files for completed milestones (#887).
