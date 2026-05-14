@@ -198,6 +198,7 @@ export function formatMcpStatusReport(servers: McpServerStatus[]): string {
 
   lines.push("");
   lines.push("Use /gsd mcp check <server> for details on a specific server.");
+  lines.push("Use /gsd mcp trust <server> to pre-trust a stdio server for automated sessions.");
   lines.push("Use mcp_discover to connect and list tools for a server.");
 
   return lines.join("\n");
