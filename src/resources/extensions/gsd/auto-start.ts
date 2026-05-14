@@ -1217,6 +1217,12 @@ export async function bootstrapAutoSession(
             `Cannot enter milestone ${s.currentMilestoneId}: worktree/branch creation failed. Isolation is degraded.`,
             "error",
           );
+        } else if (enterResult.reason === "isolation-degraded") {
+          ctx.ui.notify(
+            `Cannot enter milestone ${s.currentMilestoneId}: isolation degraded from a prior worktree failure. ` +
+            "Close tools locking the worktree directory, then retry.",
+            "error",
+          );
         } else if (enterResult.reason === "invalid-milestone-id") {
           ctx.ui.notify(
             `Cannot enter milestone ${s.currentMilestoneId}: milestone id is invalid.`,

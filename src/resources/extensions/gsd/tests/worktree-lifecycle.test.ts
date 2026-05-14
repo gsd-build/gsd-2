@@ -211,9 +211,34 @@ test("enterMilestone returns ok:true mode:none when isolation disabled", () => {
   assert.equal(s.basePath, "/project");
 });
 
-test("enterMilestone returns ok:false reason:isolation-degraded when session degraded", () => {
+test("enterMilestone falls back to branch mode when session is degraded in worktree isolation", () => {
   const s = makeSession({ isolationDegraded: true });
-  const deps = makeDeps();
+  const deps = makeDeps({
+    getIsolationMode: () => "worktree",
+    enterBranchModeForMilestone: () => {},
+  });
+  const ctx = makeCtx();
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  const result = lifecycle.enterMilestone("M001", ctx);
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.mode, "branch");
+    assert.equal(result.path, "/project");
+  }
+  assert.equal(s.basePath, "/project");
+  assert.equal(s.milestoneLeaseToken, null);
+});
+
+test("enterMilestone returns isolation-degraded when degraded fallback to branch mode also fails", () => {
+  const s = makeSession({ isolationDegraded: true });
+  const deps = makeDeps({
+    getIsolationMode: () => "worktree",
+    enterBranchModeForMilestone: () => {
+      throw new Error("branch fallback failed");
+    },
+  });
   const ctx = makeCtx();
   const lifecycle = new WorktreeLifecycle(s, deps);
 
@@ -223,9 +248,6 @@ test("enterMilestone returns ok:false reason:isolation-degraded when session deg
   if (!result.ok) {
     assert.equal(result.reason, "isolation-degraded");
   }
-  assert.equal(s.basePath, "/project");
-  assert.equal(s.milestoneLeaseToken, null);
-  assert.equal(deps.calls.filter((c) => c.fn === "getIsolationMode").length, 0);
 });
 
 test("enterMilestone returns ok:false reason:creation-failed and degrades session on worktree throw", (t) => {

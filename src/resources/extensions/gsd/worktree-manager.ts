@@ -241,7 +241,19 @@ export function createWorktree(basePath: string, name: string, opts: { branch?: 
     const gitFilePath = join(wtPath, ".git");
     if (!existsSync(gitFilePath)) {
       logWarning("reconcile", `Removing stale worktree directory (no .git file): ${wtPath}`, { worktree: name });
-      rmSync(wtPath, { recursive: true, force: true });
+      try {
+        rmSync(wtPath, { recursive: true, force: true });
+      } catch (err) {
+        if (err && typeof err === "object" && "code" in err && (err.code === "EPERM" || err.code === "EBUSY")) {
+          throw new GSDError(
+            GSD_GIT_ERROR,
+            `Cannot remove stale worktree directory at ${wtPath} (${err.code}: directory locked by another process). ` +
+            "Close editors or processes holding files in this directory, then retry.",
+            err,
+          );
+        }
+        throw err;
+      }
     } else {
       throw new GSDError(GSD_STALE_STATE, `Worktree "${name}" already exists at ${wtPath}`);
     }

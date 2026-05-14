@@ -522,6 +522,35 @@ export function _enterMilestoneCore(
   }
 
   if (s.isolationDegraded) {
+    const basePath = resolveWorktreeProjectRoot(s.basePath, s.originalBasePath);
+    const mode = lifecycleGetIsolationMode(deps, basePath);
+    if (mode === "worktree") {
+      try {
+        lifecycleEnterBranchMode(deps, basePath, milestoneId);
+        rebuildGitService(s, deps);
+        invalidateAllCaches();
+        ctx.notify(
+          `Worktree isolation degraded; switched to branch milestone/${milestoneId}.`,
+          "warning",
+        );
+        debugLog("WorktreeLifecycle", {
+          action: "enterMilestone",
+          milestoneId,
+          recovered: true,
+          mode: "branch",
+          from: "isolation-degraded",
+        });
+        return { ok: true, mode: "branch", path: basePath };
+      } catch (err) {
+        debugLog("WorktreeLifecycle", {
+          action: "enterMilestone",
+          milestoneId,
+          recoveryFailed: true,
+          reason: "isolation-degraded",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     debugLog("WorktreeLifecycle", {
       action: "enterMilestone",
       milestoneId,
