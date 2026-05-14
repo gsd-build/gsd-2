@@ -220,8 +220,13 @@ export function clearLock(basePath: string): void {
   try {
     const projectRoot = normalizeRealPath(basePath);
     const worker = findActiveWorkerForCurrentProcess(projectRoot);
-    if (!worker) return;
-    deleteRuntimeKv("worker", worker.worker_id, SESSION_FILE_KV_KEY);
+    if (worker) {
+      deleteRuntimeKv("worker", worker.worker_id, SESSION_FILE_KV_KEY);
+      return;
+    }
+    // Crash-recovery/doctor paths may call clearLock() while only a stale
+    // worker (dead PID) exists for this project.
+    clearStaleWorkerLock(basePath);
   } catch {
     // Best-effort.
   }
