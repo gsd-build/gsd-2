@@ -42,6 +42,8 @@
 | `/gsd remote` | Control remote auto-mode |
 | `/gsd help` | Categorized command reference with descriptions for all GSD subcommands |
 
+`/gsd discuss` supports optional direct targets: `/gsd discuss M014`, `/gsd discuss M014/S03`, `/gsd discuss --milestone M014`, and `/gsd discuss --slice M014/S03`.
+
 ## Visual Briefs
 
 `/gsd brief` asks the agent to gather evidence and write a single responsive HTML artifact for visual review, planning, recap, or presentation. Usage:

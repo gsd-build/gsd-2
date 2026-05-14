@@ -1446,6 +1446,7 @@ export async function showDiscuss(
   ctx: ExtensionCommandContext,
   pi: ExtensionAPI,
   basePath: string,
+  options?: { target?: string },
 ): Promise<void> {
   // Guard: no .gsd/ project
   if (!existsSync(gsdRoot(basePath))) {
@@ -1457,6 +1458,9 @@ export async function showDiscuss(
   invalidateAllCaches();
 
   const state = await deriveState(basePath);
+  const discussableFutureMilestones = state.registry.filter((m) =>
+    m.id !== state.activeMilestone?.id && m.status !== "complete" && m.status !== "parked",
+  );
 
   // Rebuild STATE.md from derived state before any dispatch (#3475).
   // Without this, guided prompts read a stale STATE.md cache and the
@@ -1468,15 +1472,56 @@ export async function showDiscuss(
     logWarning("guided", `STATE.md rebuild failed: ${(err as Error).message}`);
   }
 
+  const target = options?.target?.trim();
+  if (target) {
+    const slash = target.indexOf("/");
+    if (slash > 0) {
+      const mid = target.slice(0, slash);
+      const sid = target.slice(slash + 1);
+      const targetMilestone = state.registry.find((m) => m.id === mid);
+      if (!targetMilestone || targetMilestone.status === "complete" || targetMilestone.status === "parked") {
+        ctx.ui.notify(`Milestone ${mid} is not discussable.`, "warning");
+        return;
+      }
+      const slices = isDbAvailable()
+        ? getMilestoneSlices(mid).map(s => ({ id: s.id, done: s.status === "complete", title: s.title }))
+        : [];
+      const chosen = slices.find((s) => s.id === sid);
+      if (!chosen) {
+        ctx.ui.notify(`Slice ${target} was not found in discussable slices.`, "warning");
+        return;
+      }
+      if (chosen.done) {
+        ctx.ui.notify(`Slice ${target} is already complete; nothing to discuss.`, "info");
+        return;
+      }
+      const contextFile = resolveSliceFile(basePath, mid, sid, "CONTEXT");
+      const sqAvail = getStructuredQuestionsAvailability(pi, ctx);
+      const prompt = await buildDiscussSlicePrompt(mid, sid, chosen.title, basePath, {
+        rediscuss: !!contextFile,
+        structuredQuestionsAvailable: sqAvail,
+      });
+      await dispatchWorkflow(pi, prompt, "gsd-discuss", ctx, "discuss-slice", { basePath });
+      return;
+    }
+
+    const targetMilestone = state.registry.find((m) => m.id === target);
+    if (!targetMilestone || targetMilestone.status === "complete" || targetMilestone.status === "parked") {
+      ctx.ui.notify(`Milestone ${target} is not discussable.`, "warning");
+      return;
+    }
+    await dispatchDiscussForMilestone(ctx, pi, basePath, targetMilestone.id, targetMilestone.title, {});
+    return;
+  }
+
   // No active milestone (or corrupted milestone with undefined id) —
   // check for pending milestones to discuss instead
   if (!state.activeMilestone?.id) {
-    const pendingMilestones = state.registry.filter(m => m.status === "pending");
-    if (pendingMilestones.length === 0) {
+    if (discussableFutureMilestones.length === 0) {
       ctx.ui.notify("No active milestone. Run /gsd to create one first.", "warning");
       return;
     }
-    await showDiscussQueuedMilestone(ctx, pi, basePath, pendingMilestones);
+    await showDiscussQueuedMilestone(ctx, pi, basePath, discussableFutureMilestones);
     return;
   }
 
@@ -1583,9 +1628,8 @@ export async function showDiscuss(
 
   if (pendingSlices.length === 0) {
     // All slices complete — but queued milestones may still need discussion (#3150)
-    const pendingMilestones = state.registry.filter(m => m.status === "pending");
-    if (pendingMilestones.length > 0) {
-      await showDiscussQueuedMilestone(ctx, pi, basePath, pendingMilestones);
+    if (discussableFutureMilestones.length > 0) {
+      await showDiscussQueuedMilestone(ctx, pi, basePath, discussableFutureMilestones);
       return;
     }
     ctx.ui.notify("All slices are complete — nothing to discuss.", "info");
@@ -1607,9 +1651,8 @@ export async function showDiscuss(
     // If all pending slices are discussed, check for queued milestones before exiting (#3150)
     const allDiscussed = pendingSlices.every(s => discussedMap.get(s.id));
     if (allDiscussed) {
-      const pendingMilestones = state.registry.filter(m => m.status === "pending");
-      if (pendingMilestones.length > 0) {
-        await showDiscussQueuedMilestone(ctx, pi, basePath, pendingMilestones);
+      if (discussableFutureMilestones.length > 0) {
+        await showDiscussQueuedMilestone(ctx, pi, basePath, discussableFutureMilestones);
         return;
       }
       const lockData = readSessionLockData(basePath);
@@ -1643,12 +1686,11 @@ export async function showDiscuss(
     });
 
     // Offer access to queued milestones when any exist
-    const pendingMilestones = state.registry.filter(m => m.status === "pending");
-    if (pendingMilestones.length > 0) {
+    if (discussableFutureMilestones.length > 0) {
       actions.push({
         id: "discuss_queued_milestone",
-        label: "Discuss a queued milestone",
-        description: `Refine context for ${pendingMilestones.length} queued milestone(s). Does not affect current execution.`,
+        label: "Discuss a future/planned milestone",
+        description: `Refine context for ${discussableFutureMilestones.length} future milestone(s). Does not affect current execution.`,
         recommended: false,
       });
     }
@@ -1666,7 +1708,7 @@ export async function showDiscuss(
     if (choice === "not_yet") return;
 
     if (choice === "discuss_queued_milestone") {
-      await showDiscussQueuedMilestone(ctx, pi, basePath, pendingMilestones);
+      await showDiscussQueuedMilestone(ctx, pi, basePath, discussableFutureMilestones);
       return;
     }
 
