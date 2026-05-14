@@ -2146,14 +2146,23 @@ export async function runUnitPhase(
     if (errorCategory === "provider") {
       if (!s.paused) {
         const detail = unitResult.errorContext?.message ?? `Provider unavailable for ${unitType} ${unitId}`;
+        const isTransient = Boolean(unitResult.errorContext?.isTransient);
+        const retryAfterMs = unitResult.errorContext?.retryAfterMs ?? (isTransient ? 30_000 : undefined);
         await pauseAutoForProviderError(
           ctx.ui,
           detail,
           () => deps.pauseAuto(ctx, pi),
           {
             isRateLimit: false,
-            isTransient: Boolean(unitResult.errorContext?.isTransient),
-            retryAfterMs: unitResult.errorContext?.retryAfterMs,
+            isTransient,
+            retryAfterMs,
+            resume: isTransient
+              ? () => {
+                  void resumeAutoAfterProviderDelay(pi, ctx).catch((err) => {
+                    logWarning("engine", `Provider error auto-resume failed: ${err instanceof Error ? err.message : String(err)}`);
+                  });
+                }
+              : undefined,
           },
         );
       }
