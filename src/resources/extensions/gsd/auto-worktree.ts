@@ -179,6 +179,26 @@ function stashRefFromError(err: unknown): string | null {
   return typeof stashRef === "string" && stashRef.length > 0 ? stashRef : null;
 }
 
+function stashAlreadyExistsFilesFromError(err: unknown): string[] {
+  if (!err || typeof err !== "object") return [];
+  const stderr = (err as { stderr?: unknown }).stderr;
+  const stderrText = typeof stderr === "string"
+    ? stderr
+    : stderr instanceof Uint8Array
+      ? Buffer.from(stderr).toString("utf-8")
+      : "";
+  const message = err instanceof Error ? err.message : String(err);
+  const text = `${stderrText}\n${message}`;
+  const files = new Set<string>();
+  for (const line of text.split("\n")) {
+    const m = line.match(/^(.*?)\s+already exists, no checkout\s*$/i);
+    if (!m) continue;
+    const filePath = m[1]?.trim();
+    if (filePath) files.add(filePath);
+  }
+  return [...files];
+}
+
 /**
  * Check if two filesystem paths resolve to the same real location.
  * Returns false if either path cannot be resolved (e.g. doesn't exist).
@@ -2134,6 +2154,9 @@ export function mergeMilestoneToMain(
       const uu = nativeConflictFiles(originalBasePath_);
       const gsdUU = uu.filter((f) => f.startsWith(".gsd/"));
       const nonGsdUU = uu.filter((f) => !f.startsWith(".gsd/"));
+      const alreadyExists = stashAlreadyExistsFilesFromError(e);
+      const gsdAlreadyExists = alreadyExists.filter((f) => f.startsWith(".gsd/"));
+      const nonGsdAlreadyExists = alreadyExists.filter((f) => !f.startsWith(".gsd/"));
 
       if (gsdUU.length > 0) {
         for (const f of gsdUU) {
@@ -2168,10 +2191,35 @@ export function mergeMilestoneToMain(
         } else {
           logWarning("worktree", "recorded stash entry could not be resolved; skipping automatic drop");
         }
+      } else if (
+        gsdUU.length === 0 &&
+        nonGsdUU.length === 0 &&
+        gsdAlreadyExists.length > 0 &&
+        nonGsdAlreadyExists.length === 0
+      ) {
+        // Untracked-file restore failure from stash pop where all collided
+        // paths are .gsd/ artifacts that already exist after merge.
+        if (stashRefForDrop) {
+          try {
+            execFileSync("git", ["stash", "drop", stashRefForDrop], {
+              cwd: originalBasePath_,
+              stdio: ["ignore", "pipe", "pipe"],
+              encoding: "utf-8",
+            });
+          } catch (err) { /* stash may already be consumed */
+            logWarning("worktree", `git stash drop failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        } else {
+          logWarning("worktree", "recorded stash entry could not be resolved; skipping automatic drop");
+        }
       } else if (nonGsdUU.length > 0) {
         // Non-.gsd conflicts remain — leave stash for manual resolution
         logWarning("reconcile", "Stash pop conflict on non-.gsd files after merge", {
           files: nonGsdUU.join(", "),
+        });
+      } else if (nonGsdAlreadyExists.length > 0) {
+        logWarning("reconcile", "Stash pop restore collision on non-.gsd files after merge", {
+          files: nonGsdAlreadyExists.join(", "),
         });
       } else {
         logWarning(

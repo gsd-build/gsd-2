@@ -150,3 +150,50 @@ test("#2766: stash pop conflict on non-.gsd files preserves stash for manual res
     cleanupTempRepo(repo);
   }
 });
+
+test("#4766: stash pop untracked already-exists collisions on .gsd files drop stash", () => {
+  const repo = createTempRepo();
+  try {
+    const wtPath = createAutoWorktree(repo, "M302");
+
+    const normalizedPath = wtPath.replaceAll("\\", "/");
+    const worktreeName = normalizedPath.split("/").pop() || "M302";
+    const sliceBranch = `slice/${worktreeName}/S01`;
+    run(`git checkout -b "${sliceBranch}"`, wtPath);
+    writeFileSync(join(wtPath, "feature-302.ts"), "export const feature302 = true;\n");
+    run("git add feature-302.ts", wtPath);
+    run('git commit -m "add feature 302"', wtPath);
+    run("git checkout milestone/M302", wtPath);
+    run(`git merge --no-ff "${sliceBranch}" -m "merge S01: feature 302"`, wtPath);
+
+    // Create an untracked milestone artifact in root so pre-merge auto-stash
+    // captures it. The squash merge then writes the same path, and stash pop
+    // fails with "<path> already exists, no checkout".
+    const artifactDir = join(repo, ".gsd", "milestones", "M302");
+    mkdirSync(artifactDir, { recursive: true });
+    writeFileSync(join(artifactDir, "M302-SUMMARY.md"), "summary from working tree\n");
+
+    // Commit same artifact path on milestone branch so merge brings it in.
+    const wtArtifactDir = join(wtPath, ".gsd", "milestones", "M302");
+    mkdirSync(wtArtifactDir, { recursive: true });
+    writeFileSync(join(wtArtifactDir, "M302-SUMMARY.md"), "summary from milestone branch\n");
+    run("git add .gsd/milestones/M302/M302-SUMMARY.md", wtPath);
+    run('git commit -m "add milestone artifact"', wtPath);
+
+    const roadmap = makeRoadmap("M302", "Stash pop already-exists regression", [
+      { id: "S01", title: "Feature 302" },
+    ]);
+
+    const result = mergeMilestoneToMain(repo, "M302", roadmap);
+    assert.ok(
+      result.commitMessage.includes("GSD-Milestone: M302"),
+      "merge succeeds despite untracked .gsd stash-pop restore collision",
+    );
+
+    let stashList = "";
+    try { stashList = run("git stash list", repo); } catch { /* empty stash */ }
+    assert.strictEqual(stashList, "", "stash is empty after .gsd already-exists collision");
+  } finally {
+    cleanupTempRepo(repo);
+  }
+});
