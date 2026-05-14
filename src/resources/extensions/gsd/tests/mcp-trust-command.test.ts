@@ -79,6 +79,21 @@ test("warns on an unknown server name", () => {
   }
 });
 
+test("warns and does not write for a non-stdio (HTTP) server", () => {
+  const { dir, path } = makeTempConfig({
+    mcpServers: { remote: { url: "https://example.com/mcp" } },
+  });
+  try {
+    const before = readFileSync(path, "utf-8");
+    const result = trustMcpServer(path, "remote");
+    assert.equal(result.level, "warning");
+    assert.match(result.message, /non-stdio transport/);
+    assert.equal(readFileSync(path, "utf-8"), before, "file content must be unchanged");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("errors on a missing config file", () => {
   const result = trustMcpServer("/tmp/definitely-does-not-exist-mcp-trust.json", "foo");
   assert.equal(result.level, "error");

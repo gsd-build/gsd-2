@@ -145,6 +145,15 @@ export function trustMcpServer(
   if (!entry || typeof entry !== "object") {
     return { message: `Server "${serverName}" not found in ${configPath}.`, level: "warning" };
   }
+  // The trust flag is only consulted for stdio servers — HTTP servers are never
+  // gated — so refuse to write a meaningless flag onto a non-stdio entry. The
+  // raw config entry has no `transport` field; a stdio server has a `command`.
+  if (typeof entry.command !== "string") {
+    return {
+      message: `MCP server "${serverName}" uses non-stdio transport; trust can only be set for stdio servers.`,
+      level: "warning",
+    };
+  }
   if (entry.trust === true) {
     return {
       message: `MCP server "${serverName}" is already trusted in ${configPath}.`,
