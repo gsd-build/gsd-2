@@ -210,6 +210,7 @@ test("advance() follows the ADR-015 invariant sequence before journaling advance
     "dispatch.decide",
     "tool.compile",
     "worktree.prepare",
+    "runtime.claim",
     "journal:advance",
     "worktree.sync",
     "health.post",

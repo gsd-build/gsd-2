@@ -237,6 +237,7 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
         const blocked: AutoAdvanceResult = {
           kind: "blocked",
           reason: dispatchClaim.reason ?? "dispatch claim blocked: unit already active",
+          action: "stop",
         };
         await this.deps.health.postAdvanceRecord(blocked);
         return blocked;
