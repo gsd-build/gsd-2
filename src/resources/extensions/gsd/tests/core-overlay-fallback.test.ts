@@ -175,3 +175,44 @@ test("ambiguous typed model selection chooses provider first, then model", async
   assert.deepEqual(applied, selectedModel);
   assert.match(notices[0]!.message, /github-copilot\/gpt-5/);
 });
+
+test("onboarding model step wires extension API into model switching", async () => {
+  const selectedModel = { provider: "openai", id: "gpt-5.4" };
+  let applied: typeof selectedModel | null = null;
+  const notices: Array<{ message: string; type?: string }> = [];
+
+  const ctx = {
+    hasUI: true,
+    model: { provider: "anthropic", id: "claude-sonnet-4-6" },
+    modelRegistry: {
+      getAvailable: () => [
+        { provider: "anthropic", id: "claude-sonnet-4-6" },
+        selectedModel,
+      ],
+    },
+    ui: {
+      select: async (_title: string, options: string[]) => {
+        if (options.includes("openai (1 model)")) return "openai (1 model)";
+        return "gpt-5.4";
+      },
+      notify: (message: string, type?: string) => {
+        notices.push({ message, type });
+      },
+    },
+  } as any;
+
+  const pi = {
+    setModel: async (model: typeof selectedModel) => {
+      applied = model;
+      return true;
+    },
+  } as any;
+
+  const handled = await handleCoreCommand("onboarding --step model", ctx, pi);
+  assert.equal(handled, true);
+  assert.deepEqual(applied, selectedModel);
+  assert.equal(
+    notices.some(n => /Model switching is unavailable in this context/.test(n.message)),
+    false,
+  );
+});

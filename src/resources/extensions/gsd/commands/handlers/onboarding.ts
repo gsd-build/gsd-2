@@ -10,7 +10,7 @@
 // surfaced as notifications pointing the user at the canonical per-step
 // commands (/login, /gsd keys, /gsd remote) that are already ctx.ui-safe.
 
-import type { ExtensionCommandContext } from "@gsd/pi-coding-agent"
+import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent"
 import {
   ONBOARDING_STEPS,
   isValidStepId,
@@ -59,7 +59,11 @@ function parseArgs(raw: string): ParsedArgs {
 // the TUI would wedge stdin (see header comment). Everything else routes to an
 // existing ctx.ui-safe handler.
 
-async function runStep(ctx: ExtensionCommandContext, stepId: OnboardingStepId): Promise<void> {
+async function runStep(
+  ctx: ExtensionCommandContext,
+  stepId: OnboardingStepId,
+  pi?: ExtensionAPI,
+): Promise<void> {
   switch (stepId) {
     case "llm":
       ctx.ui.notify(
@@ -87,7 +91,7 @@ async function runStep(ctx: ExtensionCommandContext, stepId: OnboardingStepId): 
       return
     case "model": {
       const { handleCoreCommand } = await import("./core.js")
-      await handleCoreCommand("model", ctx)
+      await handleCoreCommand("model", ctx, pi)
       return
     }
     case "prefs": {
@@ -121,7 +125,7 @@ async function runStep(ctx: ExtensionCommandContext, stepId: OnboardingStepId): 
 
 // ─── Setup hub ───────────────────────────────────────────────────────────────
 
-async function renderSetupHub(ctx: ExtensionCommandContext): Promise<void> {
+async function renderSetupHub(ctx: ExtensionCommandContext, pi?: ExtensionAPI): Promise<void> {
   const record = readOnboardingRecord()
   const completed = new Set(record.completedSteps)
   const skipped = new Set(record.skippedSteps)
@@ -137,7 +141,7 @@ async function renderSetupHub(ctx: ExtensionCommandContext): Promise<void> {
   if (typeof choice !== "string") return
   const stepId = labelToStep.get(choice)
   if (!stepId) return
-  await runStep(ctx, stepId)
+  await runStep(ctx, stepId, pi)
 }
 
 function renderStatus(): string {
@@ -163,7 +167,11 @@ function renderStatus(): string {
   return lines.join("\n")
 }
 
-export async function handleOnboarding(rawArgs: string, ctx: ExtensionCommandContext): Promise<void> {
+export async function handleOnboarding(
+  rawArgs: string,
+  ctx: ExtensionCommandContext,
+  pi?: ExtensionAPI,
+): Promise<void> {
   const args = parseArgs(rawArgs.trim())
 
   if (args.step !== null) {
@@ -172,7 +180,7 @@ export async function handleOnboarding(rawArgs: string, ctx: ExtensionCommandCon
       ctx.ui.notify(`Unknown step "${args.step}". Valid: ${validIds}`, "warning")
       return
     }
-    await runStep(ctx, args.step as OnboardingStepId)
+    await runStep(ctx, args.step as OnboardingStepId, pi)
     return
   }
 
@@ -182,7 +190,7 @@ export async function handleOnboarding(rawArgs: string, ctx: ExtensionCommandCon
       "Onboarding state cleared. API keys/credentials are unchanged — manage them with /gsd keys. Restart GSD to re-run the first-run wizard, or pick a step below.",
       "info",
     )
-    await renderSetupHub(ctx)
+    await renderSetupHub(ctx, pi)
     return
   }
 
@@ -190,7 +198,7 @@ export async function handleOnboarding(rawArgs: string, ctx: ExtensionCommandCon
   if (isOnboardingComplete()) {
     ctx.ui.notify(renderStatus(), "info")
   }
-  await renderSetupHub(ctx)
+  await renderSetupHub(ctx, pi)
 }
 
 export { renderStatus as renderOnboardingStatus }

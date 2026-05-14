@@ -248,22 +248,22 @@ export async function handleSetup(args: string, ctx: ExtensionCommandContext, pi
   // for credentials).
   if (args === "onboarding" || args === "wizard") {
     const { handleOnboarding } = await import("./onboarding.js");
-    await handleOnboarding("", ctx);
+    await handleOnboarding("", ctx, pi);
     return;
   }
   if (args === "llm" || args === "auth") {
     const { handleOnboarding } = await import("./onboarding.js");
-    await handleOnboarding("--step llm", ctx);
+    await handleOnboarding("--step llm", ctx, pi);
     return;
   }
   if (args === "search") {
     const { handleOnboarding } = await import("./onboarding.js");
-    await handleOnboarding("--step search", ctx);
+    await handleOnboarding("--step search", ctx, pi);
     return;
   }
   if (args === "remote") {
     const { handleOnboarding } = await import("./onboarding.js");
-    await handleOnboarding("--step remote", ctx);
+    await handleOnboarding("--step remote", ctx, pi);
     return;
   }
   if (args === "model") {
@@ -529,7 +529,7 @@ export async function handleCoreCommand(
   }
   if (trimmed === "onboarding" || trimmed.startsWith("onboarding ")) {
     const { handleOnboarding } = await import("./onboarding.js");
-    await handleOnboarding(trimmed.replace(/^onboarding\s*/, "").trim(), ctx);
+    await handleOnboarding(trimmed.replace(/^onboarding\s*/, "").trim(), ctx, pi);
     return true;
   }
   return false;
