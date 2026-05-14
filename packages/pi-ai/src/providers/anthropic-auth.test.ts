@@ -91,18 +91,44 @@ test("createClient uses resolveAnthropicBaseUrl for all auth paths (#4140)", () 
 	}
 });
 
-test("createClient applies provider-specific header override for kimi-coding UA (#4640)", () => {
-	const source = readFileSync(join(__dirname, "..", "..", "src", "providers", "anthropic.ts"), "utf-8");
-	assert.ok(
-		source.includes('if (provider === "kimi-coding")'),
-		"anthropic provider adapter should special-case kimi-coding",
-	);
-	assert.ok(
-		source.includes('{ "User-Agent": "gsd-pi" }'),
+test("buildAnthropicClientOptions applies neutral User-Agent for kimi-coding (#4640)", () => {
+	const kimiModel = {
+		id: "kimi-k2-instruct",
+		provider: "kimi-coding",
+		type: "anthropic-messages",
+	} as unknown as Model<"anthropic-messages">;
+	const opts = buildAnthropicClientOptions(kimiModel, "test-key", false);
+	assert.equal(
+		(opts.defaultHeaders as Record<string, string>)["User-Agent"],
+		"gsd-pi",
 		"kimi-coding should default to a neutral User-Agent",
 	);
-	assert.ok(
-		source.includes("defaultProviderHeaders(model.provider)"),
-		"provider-specific headers should be merged into defaultHeaders",
+});
+
+test("buildAnthropicClientOptions does not set User-Agent for non-kimi-coding providers (#4640)", () => {
+	const anthropicModel = {
+		id: "claude-opus-4-7",
+		provider: "anthropic",
+		type: "anthropic-messages",
+	} as unknown as Model<"anthropic-messages">;
+	const opts = buildAnthropicClientOptions(anthropicModel, "test-key", false);
+	assert.equal(
+		(opts.defaultHeaders as Record<string, string>)["User-Agent"],
+		undefined,
+		"non-kimi providers should not get the override",
+	);
+});
+
+test("kimi-coding User-Agent can be overridden by caller-supplied optionsHeaders (#4640)", () => {
+	const kimiModel = {
+		id: "kimi-k2-instruct",
+		provider: "kimi-coding",
+		type: "anthropic-messages",
+	} as unknown as Model<"anthropic-messages">;
+	const opts = buildAnthropicClientOptions(kimiModel, "test-key", false, { "User-Agent": "custom-agent" });
+	assert.equal(
+		(opts.defaultHeaders as Record<string, string>)["User-Agent"],
+		"custom-agent",
+		"explicit optionsHeaders should win over the default override",
 	);
 });
