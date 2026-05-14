@@ -225,6 +225,41 @@ test("clearLock removes the session_file row for the active worker", (t) => {
     "session_file row deleted by clearLock");
 });
 
+test("clearLock falls back to stale-worker cleanup when no active current-process worker exists", (t) => {
+  const base = makeBase();
+  t.after(() => cleanup(base));
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "T", status: "active" });
+  const projectRoot = normalizeRealPath(base);
+  const workerId = registerAutoWorker({ projectRootRealpath: projectRoot });
+  const lease = claimMilestoneLease(workerId, "M001");
+  assert.equal(lease.ok, true);
+  if (!lease.ok) return;
+  const claim = recordDispatchClaim({
+    traceId: "t1",
+    workerId,
+    milestoneLeaseToken: lease.token,
+    milestoneId: "M001",
+    sliceId: "S01",
+    taskId: "T02",
+    unitType: "hook/codex-review",
+    unitId: "M001/S01/T02",
+  });
+  assert.equal(claim.ok, true);
+  if (!claim.ok) return;
+  markRunning(claim.dispatchId);
+  setRuntimeKv("worker", workerId, "session_file", "/tmp/pi-session-hook.jsonl");
+  setWorkerPid(workerId, 99999);
+  expireWorker(workerId);
+
+  assert.ok(readCrashLock(base), "stale worker is detected before clearLock");
+  clearLock(base);
+
+  assert.equal(getAutoWorker(workerId)?.status, "crashed");
+  assert.equal(getRuntimeKv("worker", workerId, "session_file"), null);
+  assert.equal(readCrashLock(base), null, "stale worker no longer blocks recovery");
+});
+
 test("clearStaleWorkerLock crashes stale worker and cancels latest active dispatch", (t) => {
   const base = makeBase();
   t.after(() => cleanup(base));
