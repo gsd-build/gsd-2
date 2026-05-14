@@ -134,6 +134,18 @@ export const MINIMAL_AUTO_BASE_TOOL_NAMES = [
   "write",
 ] as const;
 
+/**
+ * mcp-client extension tools. Not workflow-unit-scoped — they only enter the
+ * active set when the mcp-client extension is loaded, and when present the user
+ * explicitly wants them available (including in the auto runtime). Preserved
+ * unconditionally, like MINIMAL_AUTO_BASE_TOOL_NAMES.
+ */
+export const MCP_CLIENT_TOOL_NAMES = [
+  "mcp_servers",
+  "mcp_discover",
+  "mcp_call",
+] as const;
+
 const AUTO_UNIT_SCOPED_TOOLS: Record<string, readonly string[]> = {
   "research-milestone": ["gsd_summary_save", "gsd_decision_save"],
   "plan-milestone": ["gsd_plan_milestone", "gsd_decision_save", "gsd_requirement_update"],
@@ -170,6 +182,7 @@ function isGsdManagedTool(name: string): boolean {
 
 export function buildMinimalGsdToolSet(activeToolNames: readonly string[]): string[] {
   const active = new Set(activeToolNames);
+  // mcp_* tools are not GSD-managed, so they fall through this filter and are preserved.
   const preserved = activeToolNames.filter((name) => !isGsdManagedTool(name));
   const minimal = MINIMAL_GSD_TOOL_NAMES.filter((name) => active.has(name));
   return [...new Set([...preserved, ...minimal])];
@@ -181,16 +194,16 @@ export function buildMinimalAutoGsdToolSet(
 ): string[] {
   const active = new Set(activeToolNames);
   const unitTools = unitType ? AUTO_UNIT_SCOPED_TOOLS[unitType] ?? [] : [];
-  const autoBaseTools = new Set<string>(MINIMAL_AUTO_BASE_TOOL_NAMES);
-  const preserved = activeToolNames.filter((name) => autoBaseTools.has(name));
+  const preservedNames = new Set<string>([...MINIMAL_AUTO_BASE_TOOL_NAMES, ...MCP_CLIENT_TOOL_NAMES]);
+  const preserved = activeToolNames.filter((name) => preservedNames.has(name));
   const scoped = [...MINIMAL_GSD_TOOL_NAMES, ...unitTools].filter((name) => active.has(name));
   return [...new Set([...preserved, ...scoped])];
 }
 
 export function buildMinimalGsdWorkflowToolSet(activeToolNames: readonly string[]): string[] {
   const active = new Set(activeToolNames);
-  const autoBaseTools = new Set<string>(MINIMAL_AUTO_BASE_TOOL_NAMES);
-  const preserved = activeToolNames.filter((name) => autoBaseTools.has(name));
+  const preservedNames = new Set<string>([...MINIMAL_AUTO_BASE_TOOL_NAMES, ...MCP_CLIENT_TOOL_NAMES]);
+  const preserved = activeToolNames.filter((name) => preservedNames.has(name));
   const scoped = WORKFLOW_GSD_TOOL_NAMES.filter((name) => active.has(name));
   return [...new Set([...preserved, ...scoped])];
 }

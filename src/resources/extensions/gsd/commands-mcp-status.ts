@@ -8,11 +8,12 @@
  *   /gsd mcp status      — Same as bare /gsd mcp
  *   /gsd mcp check <srv> — Detailed status for a specific server
  *   /gsd mcp init [dir]  — Write project-local GSD workflow MCP config
+ *   /gsd mcp trust <srv> — Mark a stdio MCP server as trusted (writes "trust": true)
  */
 
 import type { ExtensionCommandContext } from "@gsd/pi-coding-agent";
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { ensureProjectWorkflowMcpConfig } from "./mcp-project-config.js";
@@ -111,6 +112,54 @@ function readMcpConfigs(): McpServerRawConfig[] {
   }
 
   return servers;
+}
+
+// ─── Trust writer (exported for testing) ────────────────────────────────────
+
+/**
+ * Write `"trust": true` into a server's entry in its config file. Read-mutate-write,
+ * preserving the file's existing top-level key (`mcpServers` vs `servers`) and all
+ * other content. Idempotent: an already-trusted server is a no-op.
+ */
+export function trustMcpServer(
+  configPath: string,
+  serverName: string,
+): { message: string; level: "info" | "warning" | "error" } {
+  if (!existsSync(configPath)) {
+    return { message: `Config file not found: ${configPath}`, level: "error" };
+  }
+  const raw = readFileSync(configPath, "utf-8");
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(raw) as Record<string, unknown>;
+  } catch (err) {
+    return {
+      message: `Failed to parse ${configPath}: ${err instanceof Error ? err.message : String(err)}`,
+      level: "error",
+    };
+  }
+  // Config files may use either `mcpServers` or `servers` — preserve the file's key.
+  const key = data.mcpServers ? "mcpServers" : data.servers ? "servers" : "mcpServers";
+  const servers = (data[key] ?? {}) as Record<string, Record<string, unknown>>;
+  const entry = servers[serverName];
+  if (!entry || typeof entry !== "object") {
+    return { message: `Server "${serverName}" not found in ${configPath}.`, level: "warning" };
+  }
+  if (entry.trust === true) {
+    return {
+      message: `MCP server "${serverName}" is already trusted in ${configPath}.`,
+      level: "info",
+    };
+  }
+  entry.trust = true;
+  data[key] = servers;
+  writeFileSync(configPath, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
+  return {
+    message:
+      `Trusted MCP server "${serverName}" — wrote "trust": true to ${configPath}.\n` +
+      `Takes effect on the next GSD session (or run mcp_servers with refresh).`,
+    level: "info",
+  };
 }
 
 // ─── Formatters (exported for testing) ──────────────────────────────────────
@@ -248,6 +297,43 @@ export async function handleMcpStatus(
     return;
   }
 
+  // /gsd mcp trust <server>
+  if (lowered.startsWith("trust ")) {
+    const serverName = trimmed.slice("trust ".length).trim();
+    if (!serverName) {
+      ctx.ui.notify("Usage: /gsd mcp trust <server>", "warning");
+      return;
+    }
+    try {
+      const mcpClient = await import("../mcp-client/index.js");
+      const mod = mcpClient as Record<string, unknown>;
+      const readConfigs = mod.readConfigs as
+        | (() => Array<{ name: string; sourcePath: string; transport: string; trust?: boolean }>)
+        | undefined;
+      if (typeof readConfigs !== "function") {
+        ctx.ui.notify("MCP client module is unavailable; cannot resolve server config.", "error");
+        return;
+      }
+      const all = readConfigs();
+      const server = all.find(
+        (s) => s.name === serverName || s.name.toLowerCase() === serverName.toLowerCase(),
+      );
+      if (!server) {
+        const available = all.map((s) => s.name).join(", ") || "(none)";
+        ctx.ui.notify(`Unknown MCP server: "${serverName}"\n\nAvailable: ${available}`, "warning");
+        return;
+      }
+      const result = trustMcpServer(server.sourcePath, server.name);
+      ctx.ui.notify(result.message, result.level);
+    } catch (err) {
+      ctx.ui.notify(
+        `Failed to trust MCP server "${serverName}": ${err instanceof Error ? err.message : String(err)}`,
+        "error",
+      );
+    }
+    return;
+  }
+
   // /gsd mcp or /gsd mcp status
   if (!lowered || lowered === "status") {
     // Build status for each server
@@ -286,10 +372,11 @@ export async function handleMcpStatus(
 
   // Unknown subcommand
   ctx.ui.notify(
-    "Usage: /gsd mcp [status|check <server>|init [dir]]\n\n" +
+    "Usage: /gsd mcp [status|check <server>|init [dir]|trust <server>]\n\n" +
     "  status           Show all MCP server statuses (default)\n" +
     "  check <server>   Detailed status for a specific server\n" +
-    "  init [dir]       Write .mcp.json for the local GSD workflow MCP server",
+    "  init [dir]       Write .mcp.json for the local GSD workflow MCP server\n" +
+    "  trust <server>   Mark a stdio MCP server as trusted (writes \"trust\": true)",
     "warning",
   );
 }

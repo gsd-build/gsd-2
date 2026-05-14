@@ -29,26 +29,32 @@ before(() => {
 	cwdDir = realpathSync(mkdtempSync(join(tmpdir(), "mcp-cwd-")));
 	gsdHomeDir = realpathSync(mkdtempSync(join(tmpdir(), "mcp-gsdhome-")));
 
-	// Project-local fixture (also defines `shared-server` for the precedence test)
+	// Project-local fixture (also defines `shared-server` for the precedence test).
+	// `trusted-project-server` carries the trust flag; `bad-trust-server` has a
+	// non-boolean trust value that must be ignored.
 	writeFileSync(
 		join(cwdDir, ".mcp.json"),
 		JSON.stringify({
 			mcpServers: {
 				"project-server": { command: "echo", args: ["proj"] },
 				"shared-server": { command: "echo", args: ["from-project"] },
+				"trusted-project-server": { command: "echo", args: ["trusted"], trust: true },
+				"bad-trust-server": { command: "echo", args: ["bad"], trust: "yes" },
 			},
 		}),
 		"utf-8",
 	);
 
 	// Global fixture rooted at $GSD_HOME (also defines `shared-server` to test
-	// that project-local takes precedence on name collision)
+	// that project-local takes precedence on name collision). Uses the `servers`
+	// top-level key to confirm trust is read from that variant too.
 	writeFileSync(
 		join(gsdHomeDir, "mcp.json"),
 		JSON.stringify({
-			mcpServers: {
+			servers: {
 				"global-server": { command: "echo", args: ["glob"] },
 				"shared-server": { command: "echo", args: ["from-global"] },
+				"trusted-global-server": { command: "echo", args: ["trusted"], trust: true },
 			},
 		}),
 		"utf-8",
@@ -88,4 +94,28 @@ test("#4757: project-local config wins on server-name collision", () => {
 		"project-local config must take precedence over $GSD_HOME on name collision",
 	);
 	assert.deepEqual(cfg?.args, ["from-project"]);
+});
+
+test("readConfigs surfaces trust:true from an mcpServers-keyed file", () => {
+	const cfg = getServerConfig("trusted-project-server");
+	assert.ok(cfg, "trusted project server must resolve");
+	assert.equal(cfg?.trust, true);
+});
+
+test("readConfigs surfaces trust:true from a servers-keyed file", () => {
+	const cfg = getServerConfig("trusted-global-server");
+	assert.ok(cfg, "trusted global server must resolve");
+	assert.equal(cfg?.trust, true);
+});
+
+test("readConfigs defaults trust to undefined when the flag is absent", () => {
+	const cfg = getServerConfig("project-server");
+	assert.ok(cfg);
+	assert.equal(cfg?.trust, undefined);
+});
+
+test("readConfigs ignores a non-boolean trust value", () => {
+	const cfg = getServerConfig("bad-trust-server");
+	assert.ok(cfg, "server with a bad trust value must still resolve");
+	assert.equal(cfg?.trust, undefined, "non-boolean trust must not be coerced to true");
 });

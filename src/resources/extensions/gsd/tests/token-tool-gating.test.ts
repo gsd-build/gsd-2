@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildMinimalAutoGsdToolSet, buildMinimalGsdToolSet, buildMinimalGsdWorkflowToolSet, buildRequestScopedGsdToolSet, MINIMAL_AUTO_BASE_TOOL_NAMES, MINIMAL_GSD_TOOL_NAMES, restoreGsdWorkflowTools, scopeGsdWorkflowToolsForDispatch } from "../bootstrap/register-hooks.ts";
+import { buildMinimalAutoGsdToolSet, buildMinimalGsdToolSet, buildMinimalGsdWorkflowToolSet, buildRequestScopedGsdToolSet, MCP_CLIENT_TOOL_NAMES, MINIMAL_AUTO_BASE_TOOL_NAMES, MINIMAL_GSD_TOOL_NAMES, restoreGsdWorkflowTools, scopeGsdWorkflowToolsForDispatch } from "../bootstrap/register-hooks.ts";
 
 test("buildMinimalGsdToolSet preserves non-GSD tools and replaces broad GSD surface", () => {
   const result = buildMinimalGsdToolSet([
@@ -229,6 +229,81 @@ test("buildRequestScopedGsdToolSet scopes queued workflow custom-message request
 
 test("buildRequestScopedGsdToolSet ignores stale workflow messages outside the current request tail", () => {
   assert.equal(buildRequestScopedGsdToolSet(["bash", "gsd_plan_milestone"], []), undefined);
+});
+
+test("buildMinimalAutoGsdToolSet preserves mcp_* tools when active", () => {
+  const result = buildMinimalAutoGsdToolSet([
+    "bash",
+    "read",
+    "lsp",
+    "browser_click",
+    "mcp_servers",
+    "mcp_discover",
+    "mcp_call",
+    "gsd_exec",
+    "gsd_task_complete",
+    "memory_query",
+  ], "execute-task");
+
+  for (const toolName of MCP_CLIENT_TOOL_NAMES) {
+    assert.ok(result.includes(toolName), `expected ${toolName} to be preserved`);
+  }
+  assert.ok(!result.includes("lsp"));
+  assert.ok(!result.includes("browser_click"));
+});
+
+test("buildMinimalAutoGsdToolSet does not inject mcp_* tools when absent", () => {
+  const result = buildMinimalAutoGsdToolSet([
+    "bash",
+    "read",
+    "gsd_exec",
+    "memory_query",
+  ], "execute-task");
+
+  for (const toolName of MCP_CLIENT_TOOL_NAMES) {
+    assert.ok(!result.includes(toolName), `${toolName} must not be injected when not active`);
+  }
+});
+
+test("buildMinimalGsdWorkflowToolSet preserves mcp_* tools when active", () => {
+  const result = buildMinimalGsdWorkflowToolSet([
+    "bash",
+    "read",
+    "lsp",
+    "mcp_servers",
+    "mcp_discover",
+    "mcp_call",
+    "gsd_plan_milestone",
+    "memory_query",
+  ]);
+
+  for (const toolName of MCP_CLIENT_TOOL_NAMES) {
+    assert.ok(result.includes(toolName), `expected ${toolName} to be preserved`);
+  }
+  assert.ok(!result.includes("lsp"));
+});
+
+test("buildMinimalGsdToolSet preserves mcp_* tools when active", () => {
+  const result = buildMinimalGsdToolSet([
+    "bash",
+    "mcp_call",
+    "memory_query",
+  ]);
+
+  assert.ok(result.includes("mcp_call"), "mcp_* tools are non-GSD-managed and must pass through");
+});
+
+test("buildRequestScopedGsdToolSet preserves mcp_* tools for gsd-run", () => {
+  const result = buildRequestScopedGsdToolSet([
+    "bash",
+    "read",
+    "mcp_call",
+    "gsd_plan_milestone",
+    "memory_query",
+  ], [{ customType: "gsd-run" }]);
+
+  assert.ok(result);
+  assert.ok(result.includes("mcp_call"));
 });
 
 test("scopeGsdWorkflowToolsForDispatch applies and restores per-unit skill visibility", () => {

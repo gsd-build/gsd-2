@@ -45,6 +45,8 @@ interface McpServerConfig {
 	headers?: Record<string, string>;
 	/** OAuth config for HTTP transport. */
 	oauth?: McpHttpAuthConfig["oauth"];
+	/** When true, stdio servers are pre-trusted (skip the interactive confirm). */
+	trust?: boolean;
 }
 
 interface McpToolSchema {
@@ -96,7 +98,7 @@ function stdioTrustKey(config: McpServerConfig): string {
 	});
 }
 
-function readConfigs(): McpServerConfig[] {
+export function readConfigs(): McpServerConfig[] {
 	if (configCache) return configCache;
 
 	const servers: McpServerConfig[] = [];
@@ -136,6 +138,7 @@ function readConfigs(): McpServerConfig[] {
 					name,
 					transport,
 					sourcePath: configPath,
+					trust: config.trust === true ? true : undefined,
 					...(hasCommand && {
 						command: config.command as string,
 						args: Array.isArray(config.args) ? (config.args as string[]) : undefined,
@@ -174,19 +177,30 @@ export function _buildMcpTrustConfirmOptionsForTest(signal?: AbortSignal): { tim
 	return signal ? { timeout: 120_000, signal } : { timeout: 120_000 };
 }
 
-async function assertTrustedStdioServer(
+export function _resetConfigCacheForTest(): void {
+	configCache = null;
+}
+
+export async function assertTrustedStdioServer(
 	config: McpServerConfig,
 	ctx?: ExtensionContext,
 	signal?: AbortSignal,
 ): Promise<string | undefined> {
 	if (config.transport !== "stdio") return undefined;
+
+	// Config flag — pre-trusted. Skip the confirm in both interactive and auto runtimes.
+	if (config.trust === true) return undefined;
+
 	const trustKey = stdioTrustKey(config);
+	// Approved interactively earlier this session.
 	if (trustedStdioServers.has(trustKey)) return undefined;
 
 	if (!ctx?.hasUI) {
 		throw new Error(
-			`MCP server "${config.name}" is a project-local stdio command from ${config.sourcePath}. ` +
-			"Run this from an interactive GSD session and approve the server before use.",
+			`MCP server "${config.name}" is an untrusted project-local stdio command ` +
+			`from ${config.sourcePath}. To use it in an automated session, run ` +
+			`/gsd mcp trust ${config.name} (or add "trust": true to that server's entry ` +
+			`in ${config.sourcePath}).`,
 		);
 	}
 
