@@ -36,6 +36,7 @@ import {
   type TaskCommitContext,
   type TurnGitActionMode,
 } from "./git-service.js";
+import { appendGitActionFailureLog } from "./git-action-failure-log.js";
 import {
   verifyExpectedArtifact,
   resolveExpectedArtifactPath,
@@ -604,12 +605,23 @@ async function runCloseoutGitAction(
           });
         }
 
-        const failureMsg = `Git ${turnAction} failed: ${(gitResult.error ?? "unknown error").split("\n")[0]}`;
+        const fullError = gitResult.error ?? "unknown error";
+        const logPath = appendGitActionFailureLog({
+          action: turnAction,
+          unitType: unit.type,
+          unitId: unit.id,
+          basePath: s.basePath,
+          error: fullError,
+        });
+        const firstLine = fullError.split("\n")[0];
+        const failureMsg = logPath
+          ? `Git ${turnAction} failed: ${firstLine} — see ${logPath}`
+          : `Git ${turnAction} failed: ${firstLine}`;
         ctx.ui.notify(failureMsg, opts?.softFailure ? "warning" : "error");
         debugLog("postUnit", {
           phase: opts?.softFailure ? "git-action-failed-soft" : "git-action-failed-blocking",
           action: turnAction,
-          error: gitResult.error ?? "unknown error",
+          error: fullError,
         });
         if (opts?.softFailure) {
           return "continue";
@@ -627,11 +639,29 @@ async function runCloseoutGitAction(
       }
     }
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    const errAny = e as { stderr?: unknown; stdout?: unknown };
+    const baseMessage = e instanceof Error ? e.message : String(e);
+    const stderrStr = typeof errAny.stderr === "string" ? errAny.stderr.trim() : "";
+    const stdoutStr = typeof errAny.stdout === "string" ? errAny.stdout.trim() : "";
+    const detailParts = [baseMessage];
+    if (stderrStr && !baseMessage.includes(stderrStr)) detailParts.push(stderrStr);
+    if (stdoutStr && !baseMessage.includes(stdoutStr) && !stderrStr.includes(stdoutStr)) detailParts.push(stdoutStr);
+    const message = detailParts.join("\n");
     s.lastGitActionFailure = message;
     s.lastGitActionStatus = "failed";
     debugLog("postUnit", { phase: "git-action", error: message, action: turnAction });
-    ctx.ui.notify(`Git ${turnAction} failed: ${message.split("\n")[0]}`, opts?.softFailure ? "warning" : "error");
+    const logPath = appendGitActionFailureLog({
+      action: turnAction,
+      unitType: unit.type,
+      unitId: unit.id,
+      basePath: s.basePath,
+      error: message,
+    });
+    const firstLine = message.split("\n")[0];
+    const notifyMsg = logPath
+      ? `Git ${turnAction} failed: ${firstLine} — see ${logPath}`
+      : `Git ${turnAction} failed: ${firstLine}`;
+    ctx.ui.notify(notifyMsg, opts?.softFailure ? "warning" : "error");
     if (opts?.softFailure) {
       return "continue";
     }

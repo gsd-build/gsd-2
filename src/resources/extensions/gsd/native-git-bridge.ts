@@ -986,12 +986,33 @@ export function nativeCommit(
     });
     return result;
   } catch (err: unknown) {
-    const errObj = err as { stdout?: string; stderr?: string; message?: string };
-    const combined = [errObj.stdout, errObj.stderr, errObj.message].filter(Boolean).join(" ");
+    const errObj = err as { stdout?: string | Buffer; stderr?: string | Buffer; message?: string };
+    const stdoutStr = typeof errObj.stdout === "string" ? errObj.stdout : errObj.stdout?.toString("utf-8") ?? "";
+    const stderrStr = typeof errObj.stderr === "string" ? errObj.stderr : errObj.stderr?.toString("utf-8") ?? "";
+    const combined = [stdoutStr, stderrStr, errObj.message].filter(Boolean).join(" ");
     if (combined.includes("nothing to commit") || combined.includes("nothing added to commit") || combined.includes("no changes added")) {
       return null;
     }
-    throw err;
+    // Surface stderr (and any meaningful stdout) on the thrown error so
+    // downstream consumers — `handleTurnGitActionError`, auto-mode UI — can
+    // explain *why* the commit failed (hook rejection, signer failure, etc.)
+    // instead of just echoing "Command failed: git commit -F -".
+    const origMessage = errObj.message ?? "git commit failed";
+    const stderrTrim = stderrStr.trim();
+    const stdoutTrim = stdoutStr.trim();
+    const detailParts: string[] = [];
+    if (stderrTrim) detailParts.push(stderrTrim);
+    if (stdoutTrim && !stderrTrim.includes(stdoutTrim)) detailParts.push(stdoutTrim);
+    const detail = detailParts.join("\n");
+    const wrapped = new Error(detail ? `${origMessage}\n${detail}` : origMessage) as Error & {
+      stdout?: string;
+      stderr?: string;
+      cause?: unknown;
+    };
+    wrapped.stdout = stdoutStr;
+    wrapped.stderr = stderrStr;
+    wrapped.cause = err;
+    throw wrapped;
   }
 }
 

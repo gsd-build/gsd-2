@@ -1200,8 +1200,31 @@ export function handleTurnGitActionError(action: TurnGitActionMode, err: unknown
   return {
     action,
     status: "failed",
-    error: getErrorMessage(err),
+    error: formatGitActionError(err),
   };
+}
+
+/**
+ * Build a multi-line error string that includes the underlying command's
+ * stderr (and any meaningful stdout) when available — git CLI failures from
+ * `execFileSync` populate `err.stderr` with the real reason (hook rejection,
+ * signer failure, etc.) while `err.message` is only "Command failed: …".
+ * Without this, auto-mode users see the bare command string with no clue why.
+ */
+function formatGitActionError(err: unknown): string {
+  const baseMessage = getErrorMessage(err);
+  if (!(err instanceof Error)) return baseMessage;
+  const extra = err as Error & { stdout?: unknown; stderr?: unknown };
+  const stderrStr = typeof extra.stderr === "string" ? extra.stderr : "";
+  const stdoutStr = typeof extra.stdout === "string" ? extra.stdout : "";
+  // If `nativeCommit` already folded stderr into `.message`, return as-is.
+  if (stderrStr && baseMessage.includes(stderrStr.trim())) return baseMessage;
+  const parts = [baseMessage];
+  const stderrTrim = stderrStr.trim();
+  const stdoutTrim = stdoutStr.trim();
+  if (stderrTrim) parts.push(stderrTrim);
+  if (stdoutTrim && !stderrTrim.includes(stdoutTrim)) parts.push(stdoutTrim);
+  return parts.join("\n");
 }
 
 export function runTurnGitAction(args: {
