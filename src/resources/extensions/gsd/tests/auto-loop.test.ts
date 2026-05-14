@@ -1502,6 +1502,39 @@ test("autoLoop journals iteration-end when unit phase breaks after cancelled uni
   });
 });
 
+test("autoLoop journals iteration-end when dispatch skips the current unit", async () => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  ctx.ui.setStatus = () => {};
+  const pi = makeMockPi();
+  const s = makeLoopSession();
+  const journalEvents: Array<{ eventType: string; data?: any }> = [];
+
+  const deps = makeMockDeps({
+    resolveDispatch: async () => {
+      s.active = false;
+      return { action: "skip" } as any;
+    },
+    emitJournalEvent: (entry: any) => {
+      journalEvents.push(entry);
+    },
+  });
+
+  await autoLoop(ctx, pi, s, deps);
+
+  const iterationStartIndex = journalEvents.findIndex((e) => e.eventType === "iteration-start");
+  const iterationEndIndex = journalEvents.findIndex((e) => e.eventType === "iteration-end");
+
+  assert.ok(iterationStartIndex >= 0, "skipped dispatch should still open an iteration");
+  assert.ok(iterationEndIndex > iterationStartIndex, "skipped dispatch must close the active iteration");
+  assert.deepEqual(journalEvents[iterationEndIndex]!.data, {
+    iteration: 1,
+    skipped: true,
+  });
+  assert.equal(pi.calls.length, 0, "dispatch skip must not send a unit prompt");
+});
+
 test("crash lock records session file from AFTER newSession, not before (#1710)", async (t) => {
   _resetPendingResolve();
 
@@ -2621,6 +2654,103 @@ test("runUnitPhase pauses transient aborted cancellations instead of hard-stoppi
   assert.equal((result as any).reason, "unit-aborted-pause");
   assert.equal(deps.callLog.includes("pauseAuto"), true);
   assert.equal(deps.callLog.includes("stopAuto"), false);
+});
+
+test("runUnitPhase schedules default auto-resume for transient provider cancellations", async (t) => {
+  _resetPendingResolve();
+
+  const basePath = mkdtempSync(join(tmpdir(), "gsd-provider-resume-"));
+  t.after(() => {
+    _resetPendingResolve();
+    rmSync(basePath, { recursive: true, force: true });
+  });
+
+  const originalSetTimeout = globalThis.setTimeout;
+  const timers: Array<{ fn: () => void; delay: number }> = [];
+  globalThis.setTimeout = ((fn: () => void, delay?: number) => {
+    timers.push({ fn, delay: delay ?? 0 });
+    return 0 as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout;
+
+  try {
+    const notifications: Array<{ message: string; level?: string }> = [];
+    const ctx = {
+      ...makeMockCtx(),
+      ui: {
+        notify: (message: string, level?: string) => {
+          notifications.push({ message, level });
+        },
+        setStatus: () => {},
+        setWorkingMessage: () => {},
+      },
+      sessionManager: {
+        getEntries: () => [],
+      },
+      modelRegistry: {
+        getProviderAuthMode: () => undefined,
+        isProviderRequestReady: () => true,
+      },
+    } as any;
+    const pi = {
+      ...makeMockPi(),
+      sendMessage: () => {
+        queueMicrotask(() => resolveAgentEndCancelled({
+          message: "provider temporarily overloaded",
+          category: "provider",
+          isTransient: true,
+        }));
+      },
+    } as any;
+    const s = makeLoopSession({
+      basePath,
+      canonicalProjectRoot: basePath,
+      originalBasePath: basePath,
+    });
+    const deps = makeMockDeps();
+    let seq = 0;
+
+    const result = await runUnitPhase(
+      { ctx, pi, s, deps, prefs: undefined, iteration: 1, flowId: "flow-provider-resume", nextSeq: () => ++seq },
+      {
+        unitType: "execute-task",
+        unitId: "M001/S01/T01",
+        prompt: "do work",
+        finalPrompt: "do work",
+        pauseAfterUatDispatch: false,
+        state: {
+          phase: "executing",
+          activeMilestone: { id: "M001", title: "Milestone" },
+          activeSlice: { id: "S01", title: "Slice" },
+          activeTask: { id: "T01", title: "Task" },
+          registry: [{ id: "M001", title: "Milestone", status: "active" }],
+          recentDecisions: [],
+          blockers: [],
+          nextAction: "",
+          progress: { milestones: { done: 0, total: 1 } },
+          requirements: { active: 0, validated: 0, deferred: 0, outOfScope: 0, blocked: 0, total: 0 },
+        } as any,
+        mid: "M001",
+        midTitle: "Milestone",
+        isRetry: false,
+        previousTier: undefined,
+      },
+      { recentUnits: [], stuckRecoveryAttempts: 0, consecutiveFinalizeTimeouts: 0 },
+    );
+
+    assert.equal(result.action, "break");
+    assert.equal((result as any).reason, "provider-pause");
+    assert.equal(deps.callLog.includes("pauseAuto"), true);
+    assert.ok(
+      timers.some((timer) => timer.delay === 30_000),
+      "transient provider pauses must schedule the default auto-resume delay",
+    );
+    assert.ok(
+      notifications.some((entry) => entry.message.includes("Auto-resuming in 30s")),
+      "default transient provider pause should announce the delayed resume",
+    );
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
 });
 
 test("runUnitPhase pauses ghost completions before closeout and finalize side effects", async (t) => {
