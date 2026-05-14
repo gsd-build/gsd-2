@@ -562,19 +562,11 @@ function commitMatchesMilestone(basePath: string, message: string, milestoneId: 
     if (files.some((file) => isMilestoneArtifactPath(file, milestoneId))) return true;
     if (commitMessageMentionsMilestone(message, milestoneId)) return true;
     if (commitTaskTrailerBelongsToMilestone(basePath, message, milestoneId)) return true;
-    if (MILESTONE_ID_RE.test(milestoneId) && classifyImplementationFiles(files) === "present") {
-      logWarning(
-        "recovery",
-        `unable to verify GSD-Task trailer ownership for ${milestoneId}; ignoring implementation-only commit evidence`,
-      );
+    if (!isDbAvailable() && MILESTONE_ID_RE.test(milestoneId) && classifyImplementationFiles(files) === "present") {
+      return true;
     }
   }
 
-  return false;
-}
-
-function commitTaskTrailerBelongsToMilestone(basePath: string, message: string, milestoneId: string): boolean {
-  const match = message.match(/^GSD-Task:\s*(S[^/\s]+)\/(T[^\s]+)/m);
   if (!match) return false;
   const [, sliceId, taskId] = match;
 
