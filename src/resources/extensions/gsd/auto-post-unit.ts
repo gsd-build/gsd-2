@@ -1673,7 +1673,7 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
             s.preExecRetryCount.set(retryKey, (s.preExecRetryCount.get(retryKey) ?? 0) + 1);
             preExecPauseNeeded = true;
           } else {
-            const triggerWritten = executeReplan(s.basePath, mid, sid, {
+            const triggerWritten = executeReplan(s.canonicalProjectRoot, mid, sid, {
               id: "pre-exec-failure",
               text: `Pre-execution checks found ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"} for ${mid}/${sid}`,
               timestamp: new Date().toISOString(),
@@ -1691,6 +1691,15 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
                 `Pre-execution checks failed: ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"} found\n${details}${suffix}${evidenceNote}`,
                 "error",
               );
+              s.lastPreExecFailure = {
+                unitId: currentUnit.id,
+                blockingFindings: blockingChecks.map(
+                  c => `[${c.category}] ${c.target}: ${c.message}`,
+                ),
+                verdictExcerpt: `status=${result.status}; ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"} detected (replan trigger write failed)`,
+              };
+              const retryKey = currentUnit.id;
+              s.preExecRetryCount.set(retryKey, (s.preExecRetryCount.get(retryKey) ?? 0) + 1);
               preExecPauseNeeded = true;
             }
           }

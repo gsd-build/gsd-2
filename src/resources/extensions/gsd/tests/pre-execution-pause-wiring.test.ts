@@ -327,6 +327,40 @@ describe("Pre-execution checks → pauseAuto wiring", () => {
     assert.ok(existsSync(triggerPath), "replan trigger file should be written on first pre-execution failure");
   });
 
+  test("first pre-execution blocking failure writes replan trigger to canonicalProjectRoot, not worktree basePath", async () => {
+    createFailingTasks();
+
+    const worktreeDir = join(tempDir, "worktree");
+    mkdirSync(worktreeDir, { recursive: true });
+
+    const ctx = makeMockCtx();
+    const pi = makeMockPi();
+    const pauseAutoMock = mock.fn(async () => {});
+    const s = makeMockSession(worktreeDir, { type: "plan-slice", id: "M001/S01" });
+    Object.defineProperty(s, "canonicalProjectRoot", { get: () => tempDir });
+    const pctx = makePostUnitContext(s, ctx, pi, pauseAutoMock);
+
+    const result = await postUnitPostVerification(pctx);
+    assert.equal(result, "continue");
+    assert.equal(pauseAutoMock.mock.callCount(), 0);
+
+    const canonicalTriggerPath = join(
+      tempDir, ".gsd", "milestones", "M001", "slices", "S01", "S01-REPLAN-TRIGGER.md",
+    );
+    const worktreeTriggerPath = join(
+      worktreeDir, ".gsd", "milestones", "M001", "slices", "S01", "S01-REPLAN-TRIGGER.md",
+    );
+    assert.ok(
+      existsSync(canonicalTriggerPath),
+      "replan trigger file should be written to canonicalProjectRoot",
+    );
+    assert.equal(
+      existsSync(worktreeTriggerPath),
+      false,
+      "replan trigger file should not be written to worktree basePath",
+    );
+  });
+
   test("pre-execution blocking failure after prior replan pauses auto", async () => {
     createFailingTasks();
     insertReplanHistory({
