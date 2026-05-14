@@ -1339,17 +1339,10 @@ export const DISPATCH_RULES: DispatchRule[] = [
         const validationContent = await loadFile(validationFile);
         if (validationContent) {
           const verdict = extractVerdict(validationContent);
-          if (verdict === "needs-remediation" || verdict === "needs-attention") {
-            return {
-              action: "stop",
-              reason: `Cannot complete milestone ${mid}: VALIDATION verdict is "${verdict}". Address the validation findings and re-run validation, or update the verdict manually.`,
-              level: "warning",
-            };
-          }
 
-          // Safety guard (#4361): "needs-attention" can be terminal at the
-          // state layer, but completion must stop when success criteria are
-          // still unchecked to prevent retry loops until MAX_VERIFICATION_RETRIES.
+          // Safety guard (#4361): when verdict is "needs-attention", surface
+          // the specific unchecked-criteria count first so the operator sees
+          // an actionable message instead of the generic verdict warning.
           if (verdict === "needs-attention") {
             const checklistMatch = validationContent.match(
               /##\s*Success Criteria(?:\s+Checklist)?[\s\S]*?(?=\n##\s|\n---|$)/i,
@@ -1364,6 +1357,14 @@ export const DISPATCH_RULES: DispatchRule[] = [
                 level: "warning",
               };
             }
+          }
+
+          if (verdict === "needs-remediation" || verdict === "needs-attention") {
+            return {
+              action: "stop",
+              reason: `Cannot complete milestone ${mid}: VALIDATION verdict is "${verdict}". Address the validation findings and re-run validation, or update the verdict manually.`,
+              level: "warning",
+            };
           }
         }
       }
