@@ -14,12 +14,12 @@
 import { describe, test, mock, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { postUnitPostVerification, type PostUnitContext } from "../auto-post-unit.ts";
 import { AutoSession } from "../auto/session.ts";
-import { openDatabase, closeDatabase, insertMilestone, insertSlice, insertTask, _getAdapter } from "../gsd-db.ts";
+import { openDatabase, closeDatabase, insertMilestone, insertSlice, insertTask, _getAdapter, insertReplanHistory } from "../gsd-db.ts";
 import { invalidateAllCaches } from "../cache.ts";
 import { _clearGsdRootCache } from "../paths.ts";
 
@@ -284,7 +284,7 @@ describe("Pre-execution checks → pauseAuto wiring", () => {
     cleanupTestEnvironment();
   });
 
-  test("pauseAuto is called when pre-execution checks return status: fail with blocking: true", async () => {
+  test("first pre-execution blocking failure triggers replan and does not pause", async () => {
     // Set up tasks that will cause a blocking failure
     createFailingTasks();
 
@@ -298,54 +298,61 @@ describe("Pre-execution checks → pauseAuto wiring", () => {
     // Call postUnitPostVerification
     const result = await postUnitPostVerification(pctx);
 
-    // Verify pauseAuto was called
+    // Verify pauseAuto was NOT called on first failure (should replan instead)
     assert.equal(
       pauseAutoMock.mock.callCount(),
-      1,
-      "pauseAuto should be called exactly once when pre-execution checks fail with blocking issues"
+      0,
+      "pauseAuto should not be called on first pre-execution failure"
     );
 
-    // Verify return value is "stopped"
+    // Verify return value is "continue" (dispatch loop should pick up replanning-slice)
     assert.equal(
       result,
-      "stopped",
-      "postUnitPostVerification should return 'stopped' when pre-execution checks fail"
+      "continue",
+      "postUnitPostVerification should return 'continue' on first pre-execution failure"
     );
 
-    // Verify UI was notified of the failure
+    // Verify UI was notified that replan was triggered
+    const notifyCalls = ctx.ui.notify.mock.calls;
+    const warnNotify = notifyCalls.find(
+      (call: { arguments: unknown[] }) =>
+        call.arguments[1] === "warning" &&
+        String(call.arguments[0]).includes("triggering replan")
+    );
+    assert.ok(warnNotify, "Should show warning notification that pre-exec failure triggered replan");
+
+    const triggerPath = join(
+      tempDir, ".gsd", "milestones", "M001", "slices", "S01", "S01-REPLAN-TRIGGER.md",
+    );
+    assert.ok(existsSync(triggerPath), "replan trigger file should be written on first pre-execution failure");
+  });
+
+  test("pre-execution blocking failure after prior replan pauses auto", async () => {
+    createFailingTasks();
+    insertReplanHistory({
+      milestoneId: "M001",
+      sliceId: "S01",
+      summary: "prior replan already attempted",
+    });
+
+    const ctx = makeMockCtx();
+    const pi = makeMockPi();
+    const pauseAutoMock = mock.fn(async () => {});
+    const s = makeMockSession(tempDir, { type: "plan-slice", id: "M001/S01" });
+    const pctx = makePostUnitContext(s, ctx, pi, pauseAutoMock);
+
+    const result = await postUnitPostVerification(pctx);
+
+    assert.equal(pauseAutoMock.mock.callCount(), 1, "pauseAuto should be called after a prior replan attempt");
+    assert.equal(result, "stopped", "postUnitPostVerification should stop when pre-exec fails after replan");
+
     const notifyCalls = ctx.ui.notify.mock.calls;
     const errorNotify = notifyCalls.find(
       (call: { arguments: unknown[] }) =>
         call.arguments[1] === "error" &&
-        String(call.arguments[0]).includes("Pre-execution checks failed")
+        String(call.arguments[0]).includes("failed after replan"),
     );
-    assert.ok(errorNotify, "Should show error notification about pre-execution check failure");
-    const errorMessage = String(errorNotify.arguments[0]);
-    assert.match(
-      errorMessage,
-      /Pre-execution checks failed: \d+ blocking issue/,
-      "failure notification should include the blocking issue count",
-    );
-    assert.ok(
-      errorMessage.includes("[file] nonexistent-file-that-does-not-exist.ts: Task T01 references"),
-      "failure notification should include category, target, and message details",
-    );
-    assert.ok(
-      errorMessage.includes("[file] missing-third-file.ts: Task T01 references"),
-      "failure notification should include up to three actionable check details",
-    );
-    assert.ok(
-      !errorMessage.includes("missing-fourth-file.ts"),
-      "failure notification should truncate details beyond the display limit",
-    );
-    assert.ok(
-      errorMessage.includes("...and 1 more"),
-      "failure notification should summarize truncated blocking checks",
-    );
-    assert.ok(
-      errorMessage.includes(join(".gsd", "milestones", "M001", "slices", "S01", "S01-PRE-EXEC-VERIFY.json")),
-      "failure notification should point to the relative pre-exec evidence file path",
-    );
+    assert.ok(errorNotify, "Should show escalation error notification when failure persists after replan");
   });
 
   test("pauseAuto is called when enhanced_verification_strict: true and pre-execution returns warn", async () => {
@@ -630,7 +637,7 @@ describe("Pre-execution checks → pauseAuto wiring", () => {
     const pctx = makePostUnitContext(s, ctx, pi, pauseAutoMock);
 
     const result = await postUnitPostVerification(pctx);
-    assert.equal(result, "stopped");
+    assert.equal(result, "continue");
 
     const adapter = _getAdapter();
     const row = adapter
