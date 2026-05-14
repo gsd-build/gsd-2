@@ -42,3 +42,19 @@ test("does not suppress when session has no execution tool calls", () => {
 
   assert.equal(_hasExecutionToolCallsInSessionForTest(entries), false);
 });
+
+test("detects top-level gsd_exec tool call with normalized name", () => {
+  const entries = [
+    { type: "toolCall", name: "  GSD_EXEC  ", arguments: { command: "npm test" } },
+  ];
+
+  assert.equal(_hasExecutionToolCallsInSessionForTest(entries), true);
+});
+
+test("detects top-level bash tool call via toolName field", () => {
+  const entries = [
+    { type: "toolCall", toolName: "bash", arguments: { command: "echo ok" } },
+  ];
+
+  assert.equal(_hasExecutionToolCallsInSessionForTest(entries), true);
+});

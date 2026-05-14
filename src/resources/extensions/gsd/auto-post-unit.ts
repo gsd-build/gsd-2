@@ -1017,7 +1017,9 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
                 }
 
                 if (claimedEvidence.length > 0 && bashCalls.length === 0) {
-                  const entries = ctx.sessionManager?.getEntries?.() ?? [];
+                  const entries = Array.isArray(opts?.agentEndMessages)
+                    ? opts.agentEndMessages
+                    : (ctx.sessionManager?.getEntries?.() ?? []);
                   const hasSessionExecutionCalls = _hasExecutionToolCallsInSessionForTest(entries);
                   if (hasSessionExecutionCalls) {
                     debugLog("postUnit", {
