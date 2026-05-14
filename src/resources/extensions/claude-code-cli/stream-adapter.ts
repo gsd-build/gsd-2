@@ -1477,7 +1477,8 @@ function stripStructuredContentPseudoBlocks(content: unknown): unknown {
 	return content.filter((item) => !isStructuredContentPseudoBlock(item));
 }
 
-const SENSITIVE_FILE_BLOCK_PATTERN = /requested permissions to (?:edit|write|create) .*sensitive file/i;
+const SENSITIVE_FILE_BLOCK_PATTERN =
+	/\bclaude requested permissions to (?:edit|write|create)\b[\s\S]*?\bwhich is a sensitive file\b/i;
 
 function isSensitiveFilePermissionBlock(content: ExternalToolResultContentBlock[]): boolean {
 	const text = content
