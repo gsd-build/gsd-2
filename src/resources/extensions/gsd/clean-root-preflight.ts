@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { GIT_NO_PROMPT_ENV } from "./git-constants.js";
 import { logWarning } from "./workflow-logger.js";
 import { nativeHasChanges } from "./native-git-bridge.js";
+import { closeDatabase, getDbPath, isDbAvailable, openDatabase } from "./gsd-db.js";
 
 export interface PreflightResult {
   /** true when a stash was pushed and postflightPopStash should be called */
@@ -236,6 +237,16 @@ export function preflightCleanRoot(
   notify(warnMsg, "warning");
 
   // Push the stash
+  const needsDbCycle = process.platform === "win32" && isDbAvailable();
+  const dbPathToReopen = needsDbCycle ? getDbPath() : null;
+  if (needsDbCycle) {
+    try {
+      closeDatabase();
+    } catch (err) {
+      logWarning("preflight", `pre-stash db close failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   try {
     const stashMarker = `gsd-preflight-stash:${milestoneId}:${process.pid}:${Date.now()}:${process.hrtime.bigint().toString(36)}`;
     execFileSync("git", ["stash", "push", "--include-untracked", "-m", `gsd-preflight-stash [${stashMarker}]`], {
@@ -255,6 +266,14 @@ export function preflightCleanRoot(
     logWarning("preflight", msg);
     notify(`Auto-stash failed before milestone ${milestoneId} merge — proceeding anyway. ${msg}`, "warning");
     return { stashPushed: false, summary: `stash-push-failed: ${msg}` };
+  } finally {
+    if (needsDbCycle && dbPathToReopen) {
+      try {
+        openDatabase(dbPathToReopen);
+      } catch (err) {
+        logWarning("preflight", `post-stash db reopen failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
   }
 }
 
