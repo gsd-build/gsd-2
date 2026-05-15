@@ -86,6 +86,16 @@ const PREF_SAMPLE_VALUES: Record<string, unknown> = {
   context_window_override: 128000,
   context_mode: { enabled: true },
   planning_depth: "deep",
+  workspace: {
+    mode: "parent",
+    repositories: {
+      frontend: {
+        path: "frontend",
+        role: "web UI",
+        verification: ["npm test"],
+      },
+    },
+  },
 };
 
 test("prefs wizard save path preserves every known preference key", async () => {

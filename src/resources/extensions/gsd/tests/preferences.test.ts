@@ -225,6 +225,81 @@ test("slice_parallel numeric max_workers is bounded to 1..8", () => {
   assert.ok(tooHigh.errors.some(e => e.includes("slice_parallel.max_workers")));
 });
 
+test("workspace.repositories validates and is preserved", () => {
+  const { preferences, errors, warnings } = validatePreferences({
+    workspace: {
+      mode: "parent",
+      repositories: {
+        frontend: {
+          path: "frontend",
+          role: "web UI",
+          verification: ["npm test"],
+          commit_policy: "skip",
+        },
+        backend: {
+          path: "backend",
+          role: "API",
+        },
+      },
+    },
+  });
+
+  assert.equal(errors.length, 0);
+  assert.equal(warnings.filter(w => w.includes("workspace")).length, 0);
+  assert.equal(preferences.workspace?.mode, "parent");
+  assert.deepEqual(preferences.workspace?.repositories?.frontend, {
+    path: "frontend",
+    role: "web UI",
+    verification: ["npm test"],
+    commit_policy: "skip",
+  });
+  assert.deepEqual(preferences.workspace?.repositories?.backend, {
+    path: "backend",
+    role: "API",
+  });
+});
+
+test("workspace.repositories.commit_policy rejects invalid values", () => {
+  const { errors } = validatePreferences({
+    workspace: {
+      repositories: {
+        frontend: {
+          path: "frontend",
+          commit_policy: "manual",
+        },
+      },
+    },
+  } as any);
+
+  assert.ok(errors.some((e) => e.includes("workspace.repositories.frontend.commit_policy")));
+});
+
+test("workspace.repositories rejects invalid shapes", () => {
+  const { errors } = validatePreferences({
+    workspace: {
+      mode: "invalid-mode",
+      repositories: {
+        "bad id": { path: "frontend" },
+        backend: { path: "" },
+      },
+    },
+  } as any);
+
+  assert.ok(errors.some(e => e.includes("workspace.mode")));
+  assert.ok(errors.some(e => e.includes('workspace.repositories key "bad id"')));
+  assert.ok(errors.some(e => e.includes("workspace.repositories.backend.path")));
+});
+
+test("workspace is a recognized preference key (no unknown warning)", () => {
+  const { warnings } = validatePreferences({
+    workspace: { mode: "project" },
+  });
+  assert.equal(
+    warnings.filter(w => w.includes("unknown preference key \"workspace\"")).length,
+    0,
+  );
+});
+
 test("valid values pass through correctly", () => {
   const { preferences: p1 } = validatePreferences({ budget_enforcement: "halt" });
   assert.equal(p1.budget_enforcement, "halt");
