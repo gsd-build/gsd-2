@@ -1868,6 +1868,7 @@ test("autoLoop handles dispatch skip action by continuing", async (t) => {
   ctx.ui.setStatus = () => {};
   const pi = makeMockPi();
   const s = makeLoopSession();
+  const journalEvents: Array<{ eventType: string; data?: any }> = [];
 
   let dispatchCallCount = 0;
   // Pre-queued dispatch responses: first call returns "skip", second returns "stop"
@@ -1881,6 +1882,10 @@ test("autoLoop handles dispatch skip action by continuing", async (t) => {
       dispatchCallCount++;
       deps.callLog.push("resolveDispatch");
       return response;
+    },
+    emitJournalEvent: (entry: any) => {
+      journalEvents.push(entry);
+      deps.callLog.push(`journal:${entry.eventType}`);
     },
   });
 
@@ -1897,6 +1902,16 @@ test("autoLoop handles dispatch skip action by continuing", async (t) => {
   assert.ok(
     deriveCalls.length >= 2,
     "deriveState should be called at least twice (one per iteration)",
+  );
+  const skippedIterationEnd = journalEvents.find((e) => e.eventType === "iteration-end");
+  assert.deepEqual(
+    skippedIterationEnd?.data,
+    { iteration: 1 },
+    "dispatch skip must close the skipped iteration before re-deriving state",
+  );
+  assert.ok(
+    deps.callLog.indexOf("journal:iteration-end") < deps.callLog.lastIndexOf("deriveState"),
+    "dispatch skip must journal iteration-end before the next deriveState",
   );
 });
 
