@@ -325,4 +325,61 @@ describe("discovery fetchModels — list URL resolution", () => {
 		await adapter.fetchModels("k", "https://api.custom.example");
 		assert.equal(requestedUrl, "https://api.custom.example/v1/models");
 	});
+
+	it("OpenAI adapter: rejects discovery base URL with query string", async () => {
+		globalThis.fetch = (async () => {
+			throw new Error("fetch should not run");
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("openai");
+		await assert.rejects(adapter.fetchModels("sk-test", "https://api.openai.com/v1?x=1"), /query string or hash fragment/i);
+	});
+
+	it("Google: rejects discovery base URL with hash fragment", async () => {
+		globalThis.fetch = (async () => {
+			throw new Error("fetch should not run");
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("google");
+		await assert.rejects(
+			adapter.fetchModels("google-key", "https://generativelanguage.googleapis.com/v1beta#bad"),
+			/query string or hash fragment/i,
+		);
+	});
+
+	it("OpenAI adapter: non-array payload.data yields empty DiscoveredModel list", async () => {
+		globalThis.fetch = (async () => {
+			return new Response(JSON.stringify({ data: { not: "an-array" } }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("openai");
+		const models = await adapter.fetchModels("sk-test");
+		assert.deepEqual(models, []);
+	});
+
+	it("OpenRouter: invalid pricing strings omit cost (no NaN)", async () => {
+		globalThis.fetch = (async () => {
+			return new Response(
+				JSON.stringify({
+					data: [
+						{
+							id: "m1",
+							name: "M1",
+							pricing: { prompt: "not-a-number", completion: "0.000001" },
+						},
+					],
+				}),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			);
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("openrouter");
+		const models = await adapter.fetchModels("sk-test");
+		assert.equal(models.length, 1);
+		assert.equal(models[0].id, "m1");
+		assert.equal(models[0].cost, undefined);
+	});
 });

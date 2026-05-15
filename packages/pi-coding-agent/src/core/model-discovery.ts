@@ -88,11 +88,21 @@ function joinUnderBase(base: string, resourcePath: string): string {
 }
 
 /**
- * When `trimmedBase` has no path (origin only), use `${origin}${hostOnlyPathPrefix}` as the API root.
+ * Normalize a discovery base URL to a stable API root for joining list paths.
+ *
+ * Requires an API-root style URL: no query string or hash (those would make joined list URLs ambiguous).
+ * When `trimmedBase` has no path (origin only), returns `${origin}${hostOnlyPathPrefix}`.
  * `hostOnlyPathPrefix` must start with `/` (e.g. `/v1`, `/api/v1`, `/v1beta`).
+ *
+ * @throws If the URL includes a query or fragment.
  */
 function resolveDiscoveryRoot(trimmedBase: string, hostOnlyPathPrefix: string): string {
 	const u = parseUrlOrThrow(trimmedBase);
+	if (u.search !== "" || u.hash !== "") {
+		throw new Error(
+			`Discovery base URL must not include a query string or hash fragment (use an API-root style base only): ${trimmedBase}`,
+		);
+	}
 	const pathNoSlash = u.pathname.replace(/\/+$/, "") || "/";
 	const isHostOnly = pathNoSlash === "/";
 	return isHostOnly ? `${u.origin}${hostOnlyPathPrefix}` : trimmedBase;
@@ -225,10 +235,15 @@ class OpenAIDiscoveryAdapter extends BearerJsonDiscoveryAdapter {
 		return "OpenAI models API";
 	}
 
+	/**
+	 * Parses an OpenAI-compatible `GET .../models` JSON body (`{ data: [...] }`).
+	 * If `data` is missing or not an array, returns an empty list instead of failing.
+	 */
 	parseBody(data: unknown): DiscoveredModel[] {
-		const payload = data as { data?: Array<Record<string, unknown>> };
-		return (payload.data ?? [])
-			.map((m) => parseOpenAICompatibleModel(m))
+		const payload = data as { data?: unknown };
+		const rows: unknown[] = Array.isArray(payload.data) ? payload.data : [];
+		return rows
+			.map((m) => parseOpenAICompatibleModel(m as Record<string, unknown>))
 			.filter((m): m is DiscoveredModel => !!m);
 	}
 }
@@ -285,6 +300,11 @@ class OpenRouterDiscoveryAdapter extends BearerJsonDiscoveryAdapter {
 		return "OpenRouter models API";
 	}
 
+	/**
+	 * Parses OpenRouter model list JSON. Builds per-model `cost` from `m.pricing` prompt/completion
+	 * strings (scaled by 1e6 into `input` / `output`; `cacheRead` / `cacheWrite` are 0).
+	 * Omits `cost` when parsing yields non-finite numbers (avoids NaN in `DiscoveredModel`).
+	 */
 	parseBody(data: unknown): DiscoveredModel[] {
 		const payload = data as {
 			data: Array<{
@@ -296,15 +316,19 @@ class OpenRouterDiscoveryAdapter extends BearerJsonDiscoveryAdapter {
 			}>;
 		};
 		return (payload.data ?? []).map((m) => {
-			const cost =
-				m.pricing?.prompt !== undefined && m.pricing?.completion !== undefined
-					? {
-							input: parseFloat(m.pricing.prompt) * 1_000_000,
-							output: parseFloat(m.pricing.completion) * 1_000_000,
-							cacheRead: 0,
-							cacheWrite: 0,
-						}
-					: undefined;
+			let cost: DiscoveredModel["cost"] | undefined;
+			if (m.pricing?.prompt !== undefined && m.pricing?.completion !== undefined) {
+				const promptCost = Number.parseFloat(m.pricing.prompt) * 1_000_000;
+				const completionCost = Number.parseFloat(m.pricing.completion) * 1_000_000;
+				if (Number.isFinite(promptCost) && Number.isFinite(completionCost)) {
+					cost = {
+						input: promptCost,
+						output: completionCost,
+						cacheRead: 0,
+						cacheWrite: 0,
+					};
+				}
+			}
 
 			return {
 				id: m.id,
