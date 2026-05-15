@@ -1537,6 +1537,28 @@ describe("normalizeFilePath tilde expansion (#4446)", () => {
 });
 
 describe("checkFilePathConsistency directory inputs (#4446)", () => {
+  test("monorepo root accepts unique immediate-subdirectory match for relative src path (#5894)", (t) => {
+    const workspaceDir = join(tmpdir(), `pre-exec-monorepo-${Date.now()}`);
+    mkdirSync(join(workspaceDir, "frontend", "src", "engine"), { recursive: true });
+    writeFileSync(join(workspaceDir, "frontend", "src", "engine", "bus.ts"), "// existing");
+    t.after(() => rmSync(workspaceDir, { recursive: true, force: true }));
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        inputs: ["src/engine/bus.ts"],
+        expected_output: [],
+      }),
+    ];
+
+    const results = checkFilePathConsistency(tasks, workspaceDir);
+    assert.deepEqual(
+      results,
+      [],
+      "When only one immediate sub-project contains src/engine/bus.ts, pre-exec should treat it as existing",
+    );
+  });
+
   test("directory input is satisfied by prior task's output under it", (t) => {
     const tempDir = join(tmpdir(), `pre-exec-dir-prior-${Date.now()}`);
     mkdirSync(tempDir, { recursive: true });

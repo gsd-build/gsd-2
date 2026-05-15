@@ -17,7 +17,7 @@
  *   - No AST parsers — interface parsing is heuristic (regex on code blocks)
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -445,6 +445,34 @@ function containsGlobPattern(candidate: string): boolean {
   return ["*", "?", "[", "]", "{", "}"].some((char) => candidate.includes(char));
 }
 
+function existsOnDiskFromBaseOrUniqueImmediateSubdir(basePath: string, normalizedFile: string): boolean {
+  const absolutePath = resolve(basePath, normalizedFile);
+  if (existsSync(absolutePath)) return true;
+
+  // Monorepo fallback: when plans emit paths relative to a sub-project
+  // root (e.g. src/...) while basePath points at the workspace root, accept
+  // a unique immediate-subdirectory match (e.g. frontend/src/...).
+  if (normalizedFile.startsWith("/") || normalizedFile.startsWith("../")) {
+    return false;
+  }
+
+  let matches = 0;
+  try {
+    for (const entry of readdirSync(basePath, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name === ".git" || entry.name === ".gsd" || entry.name === "node_modules") continue;
+      if (existsSync(resolve(basePath, entry.name, normalizedFile))) {
+        matches += 1;
+        if (matches > 1) return false;
+      }
+    }
+  } catch {
+    return false;
+  }
+
+  return matches === 1;
+}
+
 /**
  * Build a set of files that will be created by tasks up to (but not including) taskIndex.
  * Also includes outputs of completed tasks at any position — a completed task has already
@@ -510,8 +538,7 @@ export function checkFilePathConsistency(
       if (containsGlobPattern(normalizedFile)) continue;
 
       // Check if file exists on disk
-      const absolutePath = resolve(basePath, normalizedFile);
-      const existsOnDisk = existsSync(absolutePath);
+      const existsOnDisk = existsOnDiskFromBaseOrUniqueImmediateSubdir(basePath, normalizedFile);
 
       // Check if file is in prior expected outputs (priorOutputs already normalized)
       const inPriorOutputs = priorOutputs.has(normalizedFile);
@@ -597,8 +624,7 @@ export function checkTaskOrdering(
       // files, and a same-task output under the directory satisfies it.
       if (isDirectoryReference(file)) continue;
       const creator = fileCreators.get(normalizedFile);
-      const absolutePath = resolve(basePath, normalizedFile);
-      const existsOnDisk = existsSync(absolutePath);
+      const existsOnDisk = existsOnDiskFromBaseOrUniqueImmediateSubdir(basePath, normalizedFile);
       // Skip if the creating task has already completed — its output is available
       // regardless of disk state (e.g. file was a temp artifact cleaned up after
       // the task ran, or a replan introduced a new earlier-sequence task that
