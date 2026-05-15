@@ -1778,6 +1778,11 @@ export function mergeMilestoneToMain(
   if (currentBranchAtBase !== mainBranch) {
     nativeCheckoutBranch(originalBasePath_, mainBranch);
   }
+  const mainHeadBeforeMerge = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: originalBasePath_,
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf-8",
+  }).trim();
 
   // 6. Build rich commit message
   const dbMilestone = getMilestone(milestoneId);
@@ -2271,6 +2276,24 @@ export function mergeMilestoneToMain(
         `Squash merge produced nothing to commit but milestone branch "${milestoneBranch}" ` +
           `has ${codeChanges.length} code file(s) not on "${mainBranch}". ` +
           `Aborting worktree teardown to prevent data loss.`,
+      );
+    }
+  }
+
+  // #6124: teardown safety — verify that non-empty squash merges actually
+  // advanced the integration branch before deleting the milestone worktree.
+  if (!nothingToCommit) {
+    const mainHeadAfterMerge = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: originalBasePath_,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf-8",
+    }).trim();
+    if (mainHeadAfterMerge === mainHeadBeforeMerge) {
+      process.chdir(previousCwd);
+      throw new GSDError(
+        GSD_GIT_ERROR,
+        `Squash merge did not advance "${mainBranch}" after commit. ` +
+          `Aborting worktree teardown to preserve ${milestoneBranch} for manual recovery.`,
       );
     }
   }
