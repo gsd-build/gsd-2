@@ -137,8 +137,20 @@ test('workflow-manifest: bootstrapFromManifest restores DB from manifest (round-
   try {
     // Insert data and write manifest
     insertMilestone({ id: 'M001', title: 'Restored Milestone' });
-    insertSlice({ id: 'S01', milestoneId: 'M001', title: 'Restored Slice' });
-    insertTask({ id: 'T01', sliceId: 'S01', milestoneId: 'M001', title: 'Restored Task', status: 'complete' });
+    insertSlice({
+      id: 'S01',
+      milestoneId: 'M001',
+      title: 'Restored Slice',
+      planning: { targetRepositories: ['project'] },
+    });
+    insertTask({
+      id: 'T01',
+      sliceId: 'S01',
+      milestoneId: 'M001',
+      title: 'Restored Task',
+      status: 'complete',
+      planning: { targetRepositories: ['project'] },
+    });
     writeManifest(base);
     closeDatabase();
 
@@ -156,10 +168,12 @@ test('workflow-manifest: bootstrapFromManifest restores DB from manifest (round-
 
     const s = snap.slices.find((r) => r.id === 'S01');
     assert.ok(s !== undefined, 'S01 should be restored');
+    assert.deepEqual(s!.target_repositories, ['project']);
 
     const t = snap.tasks.find((r) => r.id === 'T01');
     assert.ok(t !== undefined, 'T01 should be restored');
     assert.strictEqual(t!.status, 'complete');
+    assert.deepEqual(t!.target_repositories, ['project']);
   } finally {
     closeDatabase();
     cleanupDir(base);

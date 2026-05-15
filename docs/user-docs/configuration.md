@@ -339,6 +339,31 @@ Enable deep mode for the current project with `/gsd new-project --deep` or `/gsd
 
 In deep mode, `research-decision` writes `.gsd/runtime/research-decision.json` with `research` or `skip`. A `research` decision dispatches `research-project`, which writes `.gsd/research/STACK.md`, `FEATURES.md`, `ARCHITECTURE.md`, and `PITFALLS.md`; a `skip` decision proceeds directly to milestone work.
 
+### `workspace`
+
+Declares repository targets for project or parent workspaces. `plan-slice` validates `targetRepositories` against these IDs and scopes task file/input/output paths to the selected repository roots.
+
+```yaml
+workspace:
+  mode: parent   # "project" or "parent"
+  repositories:
+    frontend:
+      path: frontend
+      role: ui
+      verification:
+        - npm run test
+      commit_policy: auto   # "auto" or "skip"
+    backend:
+      path: backend
+```
+
+- `workspace.mode`: `project` (single-repo default) or `parent` (multi-repo workspace rooted at the current project).
+- `workspace.repositories.<id>.path`: required repository path (relative or absolute).
+- `workspace.repositories.<id>.role`: optional label used for planning/reporting context.
+- `workspace.repositories.<id>.verification`: optional default verification commands for that repository.
+- `workspace.repositories.<id>.commit_policy`: optional per-repository auto-commit policy (`auto` or `skip`).
+- Omitted slice/task `targetRepositories` default to `["project"]`.
+
 ### `reactive_execution`
 
 Controls automatic parallel task dispatch inside a slice. This is enabled by default and only dispatches when task-plan IO annotations produce a non-ambiguous graph with enough ready, non-conflicting tasks.
