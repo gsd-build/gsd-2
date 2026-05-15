@@ -20,6 +20,7 @@ import { logWarning, logError } from "./workflow-logger.js";
 import { readIntegrationBranch } from "./git-service.js";
 import { isClosedStatus } from "./status-guards.js";
 import {
+  gsdProjectionRoot,
   resolveSlicePath,
   resolveSliceFile,
   resolveTasksDir,
@@ -880,9 +881,9 @@ export function verifyExpectedArtifact(
         }
 
         if (taskIds && taskIds.length > 0) {
-          const tasksDir = resolveTasksDir(base, mid, sid);
-          if (!tasksDir) {
-            logWarning("recovery", `verify-fail ${unitType} ${unitId}: resolveTasksDir returned null for ${mid}/${sid}`);
+          const tasksDir = join(gsdProjectionRoot(base), "milestones", mid, "slices", sid, "tasks");
+          if (!existsSync(tasksDir)) {
+            logWarning("recovery", `verify-fail ${unitType} ${unitId}: projected tasks dir missing ${tasksDir}`);
             return false;
           }
           for (const tid of taskIds) {

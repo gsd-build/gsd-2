@@ -22,6 +22,7 @@ import { isClosedStatus } from "./status-guards.js";
 import { extractVerdict, isAcceptableUatVerdict } from "./verdict-parser.js";
 
 import {
+  gsdProjectionRoot,
   gsdRoot,
   resolveMilestoneFile,
   resolveMilestonePath,
@@ -1168,8 +1169,16 @@ export const DISPATCH_RULES: DispatchRule[] = [
       // wrote the tasks/ directory files. Dispatch plan-slice to regenerate
       // them rather than hard-stopping — fixes the infinite-loop described in
       // issue #909.
-      const taskPlanPath = resolveTaskFile(basePath, mid, sid, tid, "PLAN");
-      if (!taskPlanPath || !existsSync(taskPlanPath)) {
+      const taskPlanPath = join(
+        gsdProjectionRoot(basePath),
+        "milestones",
+        mid,
+        "slices",
+        sid,
+        "tasks",
+        `${tid}-PLAN.md`,
+      );
+      if (!existsSync(taskPlanPath)) {
         return {
           action: "dispatch",
           unitType: "plan-slice",
