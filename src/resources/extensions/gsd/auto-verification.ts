@@ -44,7 +44,7 @@ import { resolveUokFlags } from "./uok/flags.js";
 import { UokGateRunner } from "./uok/gate-runner.js";
 import { verificationRetryKey } from "./auto/verification-retry-policy.js";
 import { decideVerificationVerdict } from "./verification-verdict.js";
-import { createRepositoryRegistryFromPreferences } from "./repository-registry.js";
+import { createRepositoryRegistryFromPreferences, defaultRepositoryTargets } from "./repository-registry.js";
 import type { SliceRow } from "./db-task-slice-rows.js";
 import { getSlice } from "./gsd-db.js";
 
@@ -63,12 +63,13 @@ function resolveVerificationTargets(
   slice: SliceRow | null,
 ): VerificationTarget[] {
   const registry = createRepositoryRegistryFromPreferences(basePath, prefs);
+  const defaultTargets = defaultRepositoryTargets(registry);
   const requestedIds =
     task?.target_repositories?.length
       ? task.target_repositories
       : slice?.target_repositories?.length
         ? slice.target_repositories
-        : ["project"];
+        : defaultTargets;
 
   const targets: VerificationTarget[] = [];
   const seen = new Set<string>();
@@ -76,7 +77,10 @@ function resolveVerificationTargets(
     if (seen.has(id)) continue;
     seen.add(id);
     const repo = registry.byId.get(id);
-    if (!repo) continue;
+    if (!repo) {
+      logWarning("engine", `verification: requested repository "${id}" not found; available: ${Array.from(registry.byId.keys()).join(", ")}`);
+      continue;
+    }
     targets.push({
       id: repo.id,
       cwd: repo.root,
@@ -450,7 +454,7 @@ export async function runPostUnitVerification(
 
       if (enhancedEnabled && postEnabled && isDbAvailable()) {
         try {
-          // Get the completed task from DB
+          // Use the previously fetched taskRow for post-execution checks.
           if (taskRow && taskRow.key_files && taskRow.key_files.length > 0) {
             // Get all tasks in the slice
             const allTasks = getSliceTasks(mid, sid);

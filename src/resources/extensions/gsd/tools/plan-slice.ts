@@ -29,7 +29,7 @@ import { checkFilePathConsistency, checkTaskOrdering } from "../pre-execution-ch
 import type { TaskRow } from "../db-task-slice-rows.js";
 import { buildTaskFileName, gsdProjectionRoot } from "../paths.js";
 import { loadEffectiveGSDPreferences } from "../preferences.js";
-import { createRepositoryRegistryFromPreferences, type RepositoryRegistry } from "../repository-registry.js";
+import { createRepositoryRegistryFromPreferences, defaultRepositoryTargets, type RepositoryRegistry } from "../repository-registry.js";
 
 export interface PlanSliceTaskInput {
   taskId: string;
@@ -169,15 +169,16 @@ function loadRepositoryRegistry(basePath: string): RepositoryRegistry {
 
 function validateReferencedRepositories(params: PlanSliceParams, registry: RepositoryRegistry): string | null {
   const known = new Set(registry.repositories.map((repo) => repo.id));
+  const defaults = defaultRepositoryTargets(registry);
 
   const missing: string[] = [];
   const noteMissing = (id: string) => {
     if (!known.has(id) && !missing.includes(id)) missing.push(id);
   };
 
-  for (const id of params.targetRepositories ?? []) noteMissing(id);
+  for (const id of params.targetRepositories ?? defaults) noteMissing(id);
   for (const task of params.tasks) {
-    for (const id of task.targetRepositories ?? []) noteMissing(id);
+    for (const id of task.targetRepositories ?? params.targetRepositories ?? defaults) noteMissing(id);
   }
 
   if (missing.length === 0) return null;
@@ -185,10 +186,11 @@ function validateReferencedRepositories(params: PlanSliceParams, registry: Repos
 }
 
 function resolveAllowedRootsForPathScope(params: PlanSliceParams, registry: RepositoryRegistry): string[] {
+  const defaults = defaultRepositoryTargets(registry);
   const requested = new Set<string>();
-  for (const id of params.targetRepositories ?? []) requested.add(id);
+  for (const id of params.targetRepositories ?? defaults) requested.add(id);
   for (const task of params.tasks) {
-    for (const id of task.targetRepositories ?? []) requested.add(id);
+    for (const id of task.targetRepositories ?? params.targetRepositories ?? defaults) requested.add(id);
   }
   if (requested.size === 0) return [registry.projectRoot];
   const roots = Array.from(requested)
@@ -197,7 +199,7 @@ function resolveAllowedRootsForPathScope(params: PlanSliceParams, registry: Repo
   return roots.length > 0 ? roots : [registry.projectRoot];
 }
 
-function toTaskRows(params: PlanSliceParams): TaskRow[] {
+function toTaskRows(params: PlanSliceParams, defaultTargets: string[]): TaskRow[] {
   return params.tasks.map((task, index) => ({
     milestone_id: params.milestoneId,
     slice_id: params.sliceId,
@@ -223,7 +225,7 @@ function toTaskRows(params: PlanSliceParams): TaskRow[] {
     expected_output: task.expectedOutput,
     observability_impact: task.observabilityImpact ?? "",
     full_plan_md: task.fullPlanMd ?? "",
-    target_repositories: task.targetRepositories ?? params.targetRepositories ?? ["project"],
+    target_repositories: task.targetRepositories ?? params.targetRepositories ?? defaultTargets,
     sequence: index + 1,
     blocker_source: "",
     escalation_pending: 0,
@@ -233,8 +235,8 @@ function toTaskRows(params: PlanSliceParams): TaskRow[] {
   }));
 }
 
-function validateTaskPathsBeforePersist(params: PlanSliceParams, basePath: string): string | null {
-  const taskRows = toTaskRows(params);
+function validateTaskPathsBeforePersist(params: PlanSliceParams, basePath: string, defaultTargets: string[]): string | null {
+  const taskRows = toTaskRows(params, defaultTargets);
   const checks = [
     ...checkFilePathConsistency(taskRows, basePath),
     ...checkTaskOrdering(taskRows, basePath),
@@ -260,6 +262,7 @@ export async function handlePlanSlice(
   }
 
   const repositoryRegistry = loadRepositoryRegistry(basePath);
+  const defaultTargets = defaultRepositoryTargets(repositoryRegistry);
   const repoValidationError = validateReferencedRepositories(params, repositoryRegistry);
   if (repoValidationError) {
     return { error: `validation failed: ${repoValidationError}` };
@@ -280,7 +283,7 @@ export async function handlePlanSlice(
     return { error: `validation failed: ${pathScopeError}` };
   }
 
-  const pathError = validateTaskPathsBeforePersist(params, basePath);
+  const pathError = validateTaskPathsBeforePersist(params, basePath, defaultTargets);
   if (pathError) {
     return { error: `pre-execution validation failed:\n${pathError}` };
   }
@@ -337,7 +340,7 @@ export async function handlePlanSlice(
         proofLevel: params.proofLevel,
         integrationClosure: params.integrationClosure,
         observabilityImpact: params.observabilityImpact,
-        targetRepositories: params.targetRepositories ?? ["project"],
+        targetRepositories: params.targetRepositories ?? defaultTargets,
       });
 
       for (const taskId of omittedTaskIds) {
@@ -362,7 +365,7 @@ export async function handlePlanSlice(
           expectedOutput: task.expectedOutput,
           observabilityImpact: task.observabilityImpact ?? "",
           fullPlanMd: task.fullPlanMd,
-          targetRepositories: task.targetRepositories ?? params.targetRepositories ?? ["project"],
+          targetRepositories: task.targetRepositories ?? params.targetRepositories ?? defaultTargets,
         });
       }
 

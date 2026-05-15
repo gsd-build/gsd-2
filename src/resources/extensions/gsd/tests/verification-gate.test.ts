@@ -331,6 +331,7 @@ describe("verification-gate: execution", () => {
     assert.equal(result.checks[1].exitCode, 0);
     assert.ok(result.checks[0].stdout.includes("hello"));
     assert.ok(result.checks[1].stdout.includes("world"));
+    assert.equal(result.passed, true);
     assert.equal(typeof result.timestamp, "number");
   });
 

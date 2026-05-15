@@ -1255,7 +1255,7 @@ export function validatePreferences(preferences: GSDPreferences): {
 
             if (typeof repo.path === "string" && repo.path.trim().length > 0) {
               validRepo.path = repo.path.trim();
-              const normalizedPathKey = validRepo.path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+              const normalizedPathKey = validRepo.path.replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/\/+$/, "").toLowerCase();
               if (normalizedPaths.has(normalizedPathKey)) {
                 errors.push(`workspace.repositories contains duplicate path: ${validRepo.path}`);
                 continue;

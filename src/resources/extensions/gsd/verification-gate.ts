@@ -313,6 +313,8 @@ function mergeDiscoverySource(
   if (sources.length === 0) return "none";
   const first = sources[0];
   if (sources.every((source) => source === first)) return first;
+  // Keep the first concrete source to preserve existing precedence semantics
+  // when aggregating multi-target verification results.
   return sources.find((source) => source !== "none") ?? "none";
 }
 
