@@ -2412,49 +2412,49 @@ export function mergeMilestoneToMain(
       }
     }
 
-  // 11. Guard removed — step 9b (#1792) now handles this with a smarter check:
-  //     throws only when the milestone has unanchored code changes, passes
-  //     through when the code is genuinely already on the integration branch.
+    // 11. Guard removed — step 9b (#1792) now handles this with a smarter check:
+    //     throws only when the milestone has unanchored code changes, passes
+    //     through when the code is genuinely already on the integration branch.
 
-  // 11a. Pre-teardown safety net (#1853): if the worktree still has uncommitted
-  // changes (e.g. nativeHasChanges cache returned stale false), abort teardown.
-  // Committing here would be too late: the squash merge to the integration
-  // branch already happened, so a new milestone-branch commit would not be
-  // included and branch deletion could drop the only ref to that work.
-  //
-  // Guard: only run when worktreeCwd is on the milestone branch (#2929).
-  // In parallel mode or branch-mode merges, worktreeCwd may be the project
-  // root on the integration branch. Committing dirty state there would
-  // capture unrelated files from other milestones.
-  if (existsSync(worktreeCwd)) {
-    let preTeardownBranch: string | null = null;
-    try {
-      preTeardownBranch = nativeGetCurrentBranch(worktreeCwd);
-    } catch (err) {
-      debugLog("mergeMilestoneToMain", { phase: "pre-teardown-branch-detect-failed", error: String(err) });
-    }
-    const isOnMilestoneBranch = preTeardownBranch === milestoneBranch;
-
-    if (isOnMilestoneBranch) {
+    // 11a. Pre-teardown safety net (#1853): if the worktree still has uncommitted
+    // changes (e.g. nativeHasChanges cache returned stale false), abort teardown.
+    // Committing here would be too late: the squash merge to the integration
+    // branch already happened, so a new milestone-branch commit would not be
+    // included and branch deletion could drop the only ref to that work.
+    //
+    // Guard: only run when worktreeCwd is on the milestone branch (#2929).
+    // In parallel mode or branch-mode merges, worktreeCwd may be the project
+    // root on the integration branch. Committing dirty state there would
+    // capture unrelated files from other milestones.
+    if (existsSync(worktreeCwd)) {
+      let preTeardownBranch: string | null = null;
       try {
-        const dirtyCheck = nativeWorkingTreeStatus(worktreeCwd);
-        if (dirtyCheck) {
-          process.chdir(previousCwd);
-          throw new GSDError(
-            GSD_GIT_ERROR,
-            `Milestone worktree still has uncommitted changes after squash merge. ` +
-              `Aborting teardown to preserve ${milestoneBranch}. Status:\n${dirtyCheck}`,
-          );
+        preTeardownBranch = nativeGetCurrentBranch(worktreeCwd);
+      } catch (err) {
+        debugLog("mergeMilestoneToMain", { phase: "pre-teardown-branch-detect-failed", error: String(err) });
+      }
+      const isOnMilestoneBranch = preTeardownBranch === milestoneBranch;
+
+      if (isOnMilestoneBranch) {
+        try {
+          const dirtyCheck = nativeWorkingTreeStatus(worktreeCwd);
+          if (dirtyCheck) {
+            process.chdir(previousCwd);
+            throw new GSDError(
+              GSD_GIT_ERROR,
+              `Milestone worktree still has uncommitted changes after squash merge. ` +
+                `Aborting teardown to preserve ${milestoneBranch}. Status:\n${dirtyCheck}`,
+            );
+          }
+        } catch (e) {
+          if (e instanceof GSDError) throw e;
+          debugLog("mergeMilestoneToMain", {
+            phase: "pre-teardown-dirty-check-error",
+            error: String(e),
+          });
         }
-      } catch (e) {
-        if (e instanceof GSDError) throw e;
-        debugLog("mergeMilestoneToMain", {
-          phase: "pre-teardown-dirty-check-error",
-          error: String(e),
-        });
       }
     }
-  }
 
     shouldCleanup = true;
     return { commitMessage, pushed, prCreated, codeFilesChanged };
