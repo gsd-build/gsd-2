@@ -78,6 +78,7 @@ import {
   nativeIsAncestor,
   nativeMergeAbort,
   nativeWorktreeList,
+  nativeLsFiles,
 } from "./native-git-bridge.js";
 import { gsdHome } from "./gsd-home.js";
 import { type MilestoneScope, type GsdWorkspace, createWorkspace } from "./workspace.js";
@@ -177,6 +178,15 @@ function stashRefFromError(err: unknown): string | null {
   if (!err || typeof err !== "object") return null;
   const stashRef = (err as { stashRef?: unknown }).stashRef;
   return typeof stashRef === "string" && stashRef.length > 0 ? stashRef : null;
+}
+
+function hasConflictMarkers(filePath: string): boolean {
+  try {
+    const content = readFileSync(filePath, "utf-8");
+    return content.includes("<<<<<<<") && content.includes("=======") && content.includes(">>>>>>>");
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -2199,9 +2209,23 @@ export function mergeMilestoneToMain(
       const uu = nativeConflictFiles(originalBasePath_);
       const gsdUU = uu.filter((f) => f.startsWith(".gsd/"));
       const nonGsdUU = uu.filter((f) => !f.startsWith(".gsd/"));
+      const stashPopMessage = e instanceof Error ? e.message : String(e);
+      const isUntrackedRestoreFailure = stashPopMessage.includes("could not restore untracked files from stash");
+      const gsdContentConflicts: string[] = [];
 
-      if (gsdUU.length > 0) {
-        for (const f of gsdUU) {
+      // Untracked-file restore failures can leave marker conflicts in tracked
+      // .gsd JSONL files without producing `U` status entries.
+      if (gsdUU.length === 0 && isUntrackedRestoreFailure) {
+        for (const f of nativeLsFiles(originalBasePath_, ".gsd/*.jsonl")) {
+          if (hasConflictMarkers(join(originalBasePath_, f))) {
+            gsdContentConflicts.push(f);
+          }
+        }
+      }
+      const gsdConflictFiles = [...gsdUU, ...gsdContentConflicts];
+
+      if (gsdConflictFiles.length > 0) {
+        for (const f of gsdConflictFiles) {
           try {
             // Accept the committed (HEAD) version of the state file
             execFileSync("git", ["checkout", "HEAD", "--", f], {
@@ -2218,7 +2242,7 @@ export function mergeMilestoneToMain(
         }
       }
 
-      if (gsdUU.length > 0 && nonGsdUU.length === 0) {
+      if (gsdConflictFiles.length > 0 && nonGsdUU.length === 0) {
         // All conflicts were .gsd/ files — safe to drop the stash
         if (stashRefForDrop) {
           try {
