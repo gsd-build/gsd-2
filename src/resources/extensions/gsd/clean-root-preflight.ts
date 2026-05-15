@@ -81,6 +81,10 @@ function readZeroDelimitedPaths(output: string): string[] {
   return output.split("\0").filter(Boolean);
 }
 
+function isGsdOwnedPath(path: string): boolean {
+  return path === ".gsd" || path.startsWith(".gsd/");
+}
+
 function listStashUntrackedPaths(basePath: string, stashRef: string): string[] | null {
   try {
     const output = gitText(basePath, ["ls-tree", "-r", "-z", "--name-only", `${stashRef}^3`]);
@@ -283,6 +287,26 @@ export function postflightPopStash(
         restored: false,
         needsManualRecovery: true,
         message: msg,
+      };
+    }
+    const trackedPaths = listStashTrackedPaths(basePath, stashRef);
+    const untrackedPaths = listStashUntrackedPaths(basePath, stashRef);
+    const stashPaths = [...(trackedPaths ?? []), ...(untrackedPaths ?? [])];
+    if (stashPaths.length > 0 && stashPaths.every((path) => isGsdOwnedPath(path))) {
+      execFileSync("git", ["stash", "drop", stashRef], {
+        cwd: basePath,
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf-8",
+        env: GIT_NO_PROMPT_ENV,
+      });
+      const msg = `Skipped restoring GSD metadata-only preflight stash after milestone ${milestoneId} merge.`;
+      notify(msg, "info");
+      return {
+        restored: true,
+        needsManualRecovery: false,
+        message: msg,
+        stashRef,
+        resolution: "already-present-dropped",
       };
     }
     execFileSync("git", ["stash", "apply", stashRef], {

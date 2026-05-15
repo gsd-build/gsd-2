@@ -384,3 +384,25 @@ test("postflightPopStash requires manual recovery when an untracked stash path i
     try { rmSync(repo, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* ignore */ }
   }
 });
+
+test("postflightPopStash skips apply and drops stash when payload is .gsd metadata only", () => {
+  const repo = createTempRepo();
+  try {
+    writeFileSync(join(repo, ".gsd", "notifications.jsonl"), '{"msg":"before"}\n');
+    const preflight = preflightCleanRoot(repo, "M013", () => {});
+    assert.equal(preflight.stashPushed, true, "preflight must stash .gsd metadata changes");
+
+    writeFileSync(join(repo, ".gsd", "notifications.jsonl"), '{"msg":"after"}\n');
+    run("git add .gsd/notifications.jsonl", repo);
+    run('git commit -m "chore: update metadata"', repo);
+
+    const postflight = postflightPopStash(repo, "M013", preflight.stashMarker, () => {});
+    assert.equal(postflight.needsManualRecovery, false, ".gsd-only stash must not stop auto-mode");
+    assert.equal(postflight.restored, true, ".gsd-only stash should be treated as successfully handled");
+
+    const stashList = run("git stash list", repo);
+    assert.ok(!stashList.includes(preflight.stashMarker ?? ""), ".gsd-only stash must be dropped");
+  } finally {
+    try { rmSync(repo, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* ignore */ }
+  }
+});
