@@ -43,6 +43,7 @@ describe("db-task-slice-rows", () => {
       proof_level: "",
       integration_closure: "",
       observability_impact: "",
+      target_repositories: [],
       sequence: 0,
       replan_triggered_at: null,
       is_sketch: 0,

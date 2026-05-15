@@ -110,7 +110,7 @@ test('handlePlanTask rejects absolute task IO paths outside the active worktree'
     }, base);
 
     assert.ok('error' in result);
-    assert.match(result.error, /validation failed: inputs contains absolute path outside working directory/);
+    assert.match(result.error, /validation failed: inputs contains absolute path outside allowed repository roots/);
     assert.equal(getTask('M001', 'S02', 'T02'), null, 'invalid planning IO must not persist the task');
   } finally {
     cleanup(base);
