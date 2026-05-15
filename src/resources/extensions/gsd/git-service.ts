@@ -17,6 +17,7 @@ import { gsdRoot } from "./paths.js";
 import { GIT_NO_PROMPT_ENV } from "./git-constants.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { logWarning } from "./workflow-logger.js";
+import { createRepositoryRegistryFromPreferences } from "./repository-registry.js";
 
 
 import {
@@ -123,6 +124,10 @@ export interface TurnGitActionResult {
   commitMessage?: string;
   snapshotLabel?: string;
   dirty?: boolean;
+  dirtyRepositories?: Record<string, boolean>;
+  commitMessages?: Record<string, string>;
+  commitErrors?: Record<string, string>;
+  skippedRepositories?: string[];
   error?: string;
 }
 
@@ -1207,21 +1212,89 @@ export function handleTurnGitActionError(action: TurnGitActionMode, err: unknown
   };
 }
 
+function collectRepositoryDirtyStatus(basePath: string): Record<string, boolean> {
+  const preferences = loadEffectiveGSDPreferences(basePath)?.preferences;
+  const registry = createRepositoryRegistryFromPreferences(basePath, preferences);
+  const dirtyByRepository: Record<string, boolean> = {};
+  for (const repo of registry.repositories) {
+    try {
+      dirtyByRepository[repo.id] = runGit(repo.root, ["status", "--porcelain"]).length > 0;
+    } catch {
+      // Fallback preserves legacy behavior if explicit status probing fails.
+      dirtyByRepository[repo.id] = nativeHasChanges(repo.root);
+    }
+  }
+  return dirtyByRepository;
+}
+
+function runPerRepositoryCommitAction(args: {
+  basePath: string;
+  unitType: string;
+  unitId: string;
+  taskContext?: TaskCommitContext;
+  targetRepositories?: string[];
+}): {
+  commitMessages: Record<string, string>;
+  commitErrors: Record<string, string>;
+  skippedRepositories: string[];
+} {
+  const preferences = loadEffectiveGSDPreferences(args.basePath)?.preferences;
+  const registry = createRepositoryRegistryFromPreferences(args.basePath, preferences);
+  const repoIds = args.targetRepositories?.length ? args.targetRepositories : ["project"];
+  const gitPrefs = preferences?.git ?? {};
+  const commitMessages: Record<string, string> = {};
+  const commitErrors: Record<string, string> = {};
+  const skippedRepositories: string[] = [];
+
+  for (const repoId of repoIds) {
+    const repo = registry.byId.get(repoId);
+    if (!repo) {
+      commitErrors[repoId] = `unknown repository target: ${repoId}`;
+      continue;
+    }
+    if (repo.commitPolicy === "skip") {
+      skippedRepositories.push(repo.id);
+      continue;
+    }
+
+    try {
+      const message =
+        new GitServiceImpl(repo.root, gitPrefs).autoCommit(
+          args.unitType,
+          args.unitId,
+          [],
+          args.taskContext,
+        ) ?? "";
+      if (message) {
+        commitMessages[repo.id] = message;
+      }
+    } catch (err) {
+      commitErrors[repo.id] = getErrorMessage(err);
+    }
+  }
+
+  return { commitMessages, commitErrors, skippedRepositories };
+}
+
 export function runTurnGitAction(args: {
   basePath: string;
   action: TurnGitActionMode;
   unitType: string;
   unitId: string;
   taskContext?: TaskCommitContext;
+  targetRepositories?: string[];
 }): TurnGitActionResult {
   try {
     // Force fresh working-tree status per turn; nativeHasChanges caches briefly.
     _resetHasChangesCache();
+    const dirtyRepositories = collectRepositoryDirtyStatus(args.basePath);
+    const dirty = Object.values(dirtyRepositories).some(Boolean);
     if (args.action === "status-only") {
       return {
         action: args.action,
         status: "ok",
-        dirty: nativeHasChanges(args.basePath),
+        dirty,
+        dirtyRepositories,
       };
     }
 
@@ -1233,16 +1306,38 @@ export function runTurnGitAction(args: {
         action: args.action,
         status: "ok",
         snapshotLabel: label,
-        dirty: nativeHasChanges(args.basePath),
+        dirty,
+        dirtyRepositories,
       };
     }
 
-    const commitMessage = git.autoCommit(args.unitType, args.unitId, [], args.taskContext) ?? undefined;
+    const repoCommitResult = runPerRepositoryCommitAction(args);
+    if (Object.keys(repoCommitResult.commitErrors).length > 0) {
+      return {
+        action: args.action,
+        status: "failed",
+        error: Object.entries(repoCommitResult.commitErrors)
+          .map(([repoId, msg]) => `${repoId}: ${msg}`)
+          .join("; "),
+        dirty,
+        dirtyRepositories,
+        commitMessages: repoCommitResult.commitMessages,
+        commitErrors: repoCommitResult.commitErrors,
+        skippedRepositories: repoCommitResult.skippedRepositories,
+      };
+    }
+
+    const primaryMessage =
+      repoCommitResult.commitMessages[args.targetRepositories?.[0] ?? "project"]
+      ?? Object.values(repoCommitResult.commitMessages)[0];
     return {
       action: args.action,
       status: "ok",
-      commitMessage,
-      dirty: nativeHasChanges(args.basePath),
+      commitMessage: primaryMessage,
+      dirty,
+      dirtyRepositories,
+      commitMessages: repoCommitResult.commitMessages,
+      skippedRepositories: repoCommitResult.skippedRepositories,
     };
   } catch (err) {
     return handleTurnGitActionError(args.action, err);
