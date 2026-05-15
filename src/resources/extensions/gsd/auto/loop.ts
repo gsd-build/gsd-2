@@ -739,6 +739,7 @@ export async function autoLoop(
           break;
         }
         if (preDispatchResult.action === "continue") {
+          journalReporter.emit("iteration-end", { iteration, skipped: true });
           finishTurn("skipped");
           continue;
         }
@@ -761,6 +762,7 @@ export async function autoLoop(
           break;
         }
         if (dispatchResult.action === "continue") {
+          journalReporter.emit("iteration-end", { iteration, skipped: true });
           finishTurn("skipped");
           continue;
         }
