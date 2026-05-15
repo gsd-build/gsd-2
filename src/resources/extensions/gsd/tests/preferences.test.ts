@@ -290,6 +290,23 @@ test("workspace.repositories rejects invalid shapes", () => {
   assert.ok(errors.some(e => e.includes("workspace.repositories.backend.path")));
 });
 
+test("workspace.repositories duplicate path error includes both repository ids", () => {
+  const { errors } = validatePreferences({
+    workspace: {
+      repositories: {
+        frontend: { path: "packages/app" },
+        backend: { path: "packages/app/" },
+      },
+    },
+  } as any);
+
+  assert.ok(
+    errors.some((e) =>
+      e.includes("workspace.repositories.backend.path duplicates workspace.repositories.frontend.path"),
+    ),
+  );
+});
+
 test("workspace is a recognized preference key (no unknown warning)", () => {
   const { warnings } = validatePreferences({
     workspace: { mode: "project" },
