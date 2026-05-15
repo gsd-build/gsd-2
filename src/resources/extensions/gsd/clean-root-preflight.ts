@@ -85,7 +85,25 @@ function isGsdOwnedPath(path: string): boolean {
   return path === ".gsd" || path.startsWith(".gsd/");
 }
 
+function hasStashUntrackedParent(basePath: string, stashRef: string): boolean | null {
+  try {
+    execFileSync("git", ["rev-parse", "--verify", "-q", `${stashRef}^3`], {
+      cwd: basePath,
+      stdio: ["ignore", "ignore", "ignore"],
+      env: GIT_NO_PROMPT_ENV,
+    });
+    return true;
+  } catch (err) {
+    const status = typeof err === "object" && err && "status" in err ? (err as { status?: unknown }).status : null;
+    if (typeof status === "number" && status === 1) return false;
+    return null;
+  }
+}
+
 function listStashUntrackedPaths(basePath: string, stashRef: string): string[] | null {
+  const hasUntrackedParent = hasStashUntrackedParent(basePath, stashRef);
+  if (hasUntrackedParent === false) return [];
+  if (hasUntrackedParent === null) return null;
   try {
     const output = gitText(basePath, ["ls-tree", "-r", "-z", "--name-only", `${stashRef}^3`]);
     return readZeroDelimitedPaths(output);
@@ -291,22 +309,33 @@ export function postflightPopStash(
     }
     const trackedPaths = listStashTrackedPaths(basePath, stashRef);
     const untrackedPaths = listStashUntrackedPaths(basePath, stashRef);
+    if (trackedPaths === null || untrackedPaths === null) {
+      throw new Error(`Could not inspect stash contents for ${stashRef}; preserving stash for manual recovery.`);
+    }
     const stashPaths = [...(trackedPaths ?? []), ...(untrackedPaths ?? [])];
     if (stashPaths.length > 0 && stashPaths.every((path) => isGsdOwnedPath(path))) {
-      execFileSync("git", ["stash", "drop", stashRef], {
-        cwd: basePath,
-        stdio: ["ignore", "pipe", "pipe"],
-        encoding: "utf-8",
-        env: GIT_NO_PROMPT_ENV,
-      });
-      const msg = `Skipped restoring GSD metadata-only preflight stash after milestone ${milestoneId} merge.`;
-      notify(msg, "info");
+      let dropped = true;
+      try {
+        execFileSync("git", ["stash", "drop", stashRef], {
+          cwd: basePath,
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf-8",
+          env: GIT_NO_PROMPT_ENV,
+        });
+      } catch (err) {
+        dropped = false;
+        logWarning("preflight", `git stash drop ${stashRef} failed after skipping GSD metadata-only restore: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      const msg = dropped
+        ? `Skipped restoring GSD metadata-only preflight stash after milestone ${milestoneId} merge.`
+        : `Skipped restoring GSD metadata-only preflight stash after milestone ${milestoneId} merge, but ${stashRef} could not be dropped and remains as a backup.`;
+      notify(msg, dropped ? "info" : "warning");
       return {
         restored: true,
         needsManualRecovery: false,
         message: msg,
         stashRef,
-        resolution: "already-present-dropped",
+        resolution: dropped ? "already-present-dropped" : "already-present-preserved",
       };
     }
     execFileSync("git", ["stash", "apply", stashRef], {

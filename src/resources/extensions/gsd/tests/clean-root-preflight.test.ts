@@ -399,6 +399,12 @@ test("postflightPopStash skips apply and drops stash when payload is .gsd metada
     const postflight = postflightPopStash(repo, "M013", preflight.stashMarker, () => {});
     assert.equal(postflight.needsManualRecovery, false, ".gsd-only stash must not stop auto-mode");
     assert.equal(postflight.restored, true, ".gsd-only stash should be treated as successfully handled");
+    assert.equal(postflight.resolution, "already-present-dropped");
+    assert.equal(
+      readFileSync(join(repo, ".gsd", "notifications.jsonl"), "utf-8"),
+      '{"msg":"after"}\n',
+      "post-merge metadata must remain untouched when the stash is skipped",
+    );
 
     const stashList = run("git stash list", repo);
     assert.ok(!stashList.includes(preflight.stashMarker ?? ""), ".gsd-only stash must be dropped");
