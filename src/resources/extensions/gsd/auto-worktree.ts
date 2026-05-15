@@ -2225,14 +2225,14 @@ export function mergeMilestoneToMain(
 
       // Untracked-file restore failures can leave marker conflicts in tracked
       // .gsd JSONL files without producing `U` status entries.
-      if (gsdUU.length === 0 && isUntrackedRestoreFailure) {
+      if (isUntrackedRestoreFailure) {
         for (const f of nativeLsFiles(originalBasePath_, ".gsd/*.jsonl")) {
           if (hasConflictMarkers(join(originalBasePath_, f))) {
             gsdContentConflicts.push(f);
           }
         }
       }
-      const gsdConflictFiles = [...gsdUU, ...gsdContentConflicts];
+      const gsdConflictFiles = [...new Set([...gsdUU, ...gsdContentConflicts])];
 
       if (gsdConflictFiles.length > 0) {
         for (const f of gsdConflictFiles) {
@@ -2253,8 +2253,27 @@ export function mergeMilestoneToMain(
       }
 
       if (gsdConflictFiles.length > 0 && nonGsdUU.length === 0) {
-        // All conflicts were .gsd/ files — safe to drop the stash
-        if (stashRefForDrop) {
+        // All detected conflicts were .gsd/ files. Before dropping, verify no
+        // unresolved non-.gsd conflict markers or unmerged entries remain.
+        const remainingUnmerged = nativeConflictFiles(originalBasePath_);
+        const nonGsdUnmerged = remainingUnmerged.filter((f) => !f.startsWith(".gsd/"));
+        const markerCandidates = Array.from(new Set([
+          ...nonGsdUnmerged,
+          ...nativeLsFiles(originalBasePath_, "."),
+        ])).filter((f) => !f.startsWith(".gsd/"));
+        const nonGsdMarkerConflicts = markerCandidates.filter((f) =>
+          hasConflictMarkers(join(originalBasePath_, f)),
+        );
+        const hasRemainingNonGsdConflicts = nonGsdUnmerged.length > 0 || nonGsdMarkerConflicts.length > 0;
+        if (hasRemainingNonGsdConflicts) {
+          const files = Array.from(new Set([...nonGsdUnmerged, ...nonGsdMarkerConflicts]));
+          logWarning("reconcile", "Leaving stash because non-.gsd conflicts remain after auto-resolution", {
+            files: files.join(", "),
+          });
+        }
+
+        // No non-.gsd conflicts remain — safe to drop the stash.
+        if (!hasRemainingNonGsdConflicts && stashRefForDrop) {
           try {
             execFileSync("git", ["stash", "drop", stashRefForDrop], {
               cwd: originalBasePath_,
@@ -2264,7 +2283,7 @@ export function mergeMilestoneToMain(
           } catch (err) { /* stash may already be consumed */
             logWarning("worktree", `git stash drop failed: ${err instanceof Error ? err.message : String(err)}`);
           }
-        } else {
+        } else if (!hasRemainingNonGsdConflicts) {
           logWarning("worktree", "recorded stash entry could not be resolved; skipping automatic drop");
         }
       } else if (nonGsdUU.length > 0) {
