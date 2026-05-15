@@ -1654,8 +1654,24 @@ export async function buildDiscussMilestonePrompt(
   midTitle: string,
   base: string,
   structuredQuestionsAvailable = "false",
+  { headless = false }: { headless?: boolean } = {},
 ): Promise<string> {
   const discussTemplates = inlineTemplate("context", "Context");
+
+  if (headless) {
+    const roadmapPath = resolveMilestoneFile(base, mid, "ROADMAP");
+    const roadmapContent = roadmapPath ? await loadFile(roadmapPath) : null;
+    return loadPrompt("discuss-headless", {
+      seedContext: roadmapContent ?? "",
+      inlinedTemplates: discussTemplates,
+      workingDirectory: base,
+      milestoneId: mid,
+      contextPath: relMilestoneFile(base, mid, "CONTEXT"),
+      commitInstruction: "Do not commit planning artifacts — .gsd/ is managed externally.",
+      multiMilestoneCommitInstruction: "Do not commit planning artifacts — .gsd/ is managed externally.",
+    });
+  }
+
   const contextModeInstructions = renderContextModeForPrompt("discuss-milestone", base);
 
   const basePrompt = loadPrompt("guided-discuss-milestone", {

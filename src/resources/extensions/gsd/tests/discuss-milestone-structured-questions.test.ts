@@ -62,3 +62,22 @@ test("auto-dispatch preserves structuredQuestionsAvailable=false for discuss-mil
     /\*\*Structured questions available: false\*\*/,
   );
 });
+
+test("auto-dispatch uses discuss-headless prompt when GSD_HEADLESS is set", async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), "gsd-discuss-milestone-headless-"));
+  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+
+  const previous = process.env.GSD_HEADLESS;
+  process.env.GSD_HEADLESS = "1";
+  t.after(() => {
+    if (previous === undefined) delete process.env.GSD_HEADLESS;
+    else process.env.GSD_HEADLESS = previous;
+  });
+
+  const result = await resolveDispatch(makeContext(tmp, "pre-planning", "true"));
+
+  assert.equal(result.action, "dispatch");
+  assert.equal(result.unitType, "discuss-milestone");
+  assert.match(result.prompt, /This is a \*\*headless\*\* flow/);
+  assert.doesNotMatch(result.prompt, /\*\*Structured questions available: true\*\*/);
+});
