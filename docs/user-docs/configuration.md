@@ -638,6 +638,38 @@ github:
 - `/github-sync bootstrap` — initial setup and sync
 - `/github-sync status` — show sync mapping counts
 
+### `workspace` (v2.49)
+
+Multi-repository parent workspace configuration. This lets one `.gsd` state manage multiple child repositories and constrains planning file paths to declared repository roots.
+
+```yaml
+workspace:
+  mode: parent                  # "project" (default) or "parent"
+  repositories:
+    frontend:
+      path: frontend            # relative to project root (or absolute path within project root)
+      role: ui                  # optional
+      verification:             # optional default verification commands
+        - npm run test
+      commit_policy: auto       # optional: "auto" or "skip"
+    backend:
+      path: backend
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `mode` | string | `project` | Workspace mode. `parent` enables multi-repo registry behavior. |
+| `repositories` | object | `{}` | Map of repository ids to repository config objects. |
+| `repositories.<id>.path` | string | required | Repository root path. Relative paths resolve from project root and must stay inside project root. |
+| `repositories.<id>.role` | string | (none) | Optional human-oriented label for prompts/reporting. |
+| `repositories.<id>.verification` | string[] | (none) | Optional default verification commands for that repository. |
+| `repositories.<id>.commit_policy` | string | (none) | Optional per-repo auto-mode turn commit policy: `auto` or `skip`. |
+
+**Path-scope behavior:**
+- During planning (`plan-slice`/`replan-slice`), file paths are validated against the selected `targetRepositories`.
+- Absolute and relative paths are both checked; paths that resolve outside declared repository roots are rejected.
+- If no explicit `targetRepositories` are provided, planning defaults to `["project"]`.
+
 ### `notifications`
 
 Control what notifications GSD sends during auto mode:
