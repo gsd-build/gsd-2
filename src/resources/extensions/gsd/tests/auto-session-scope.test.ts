@@ -275,6 +275,23 @@ describe("AutoSession.scope — resume from persisted state", () => {
     assert.equal(s.scope.workspace.worktreeRoot, null);
   });
 
+  test("resume without worktree: trailing slash in originalBasePath preserves project-root parity", () => {
+    // Regression guard: persisted metadata can carry a trailing slash; scope
+    // reconstruction must still target the same canonical project root.
+    const mid = "M003";
+    s.currentMilestoneId = mid;
+    s.originalBasePath = `${projectDir}/`;
+    s.basePath = `${projectDir}/`;
+
+    applyRebuildScope(s, s.originalBasePath, s.currentMilestoneId);
+
+    assert.ok(s.scope, "scope should be reconstructed");
+    assert.equal(s.scope.milestoneId, mid);
+    assert.equal(s.scope.workspace.mode, "project");
+    assert.equal(s.scope.workspace.projectRoot, realpathSync(projectDir));
+    assert.equal(s.scope.workspace.worktreeRoot, null);
+  });
+
   test("resume with valid worktree path: scope mode is worktree", () => {
     // Mirror the paused-session resume path where worktreePath exists on disk:
     //   rawPath = worktreePath (existsSync true)
