@@ -343,6 +343,8 @@ export const KNOWN_UNIT_TYPES = [
   "run-uat",
   "gate-evaluate",
   "rewrite-docs",
+  "triage-captures",
+  "quick-task",
   // Deep planning mode (project-level) units
   "workflow-preferences",
   "discuss-project",
@@ -632,6 +634,36 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
       onDemand: [],
     },
     maxSystemPromptChars: COMMON_BUDGET_MEDIUM,
+  },
+  "triage-captures": {
+    skills: { mode: "all" },
+    knowledge: "scoped",
+    memory: "prompt-relevant",
+    codebaseMap: false,
+    preferences: "active-only",
+    contextMode: "planning",
+    tools: TOOLS_PLANNING,
+    artifacts: {
+      inline: ["slice-plan", "roadmap"],
+      excerpt: [],
+      onDemand: [],
+    },
+    maxSystemPromptChars: COMMON_BUDGET_SMALL,
+  },
+  "quick-task": {
+    skills: { mode: "all" },
+    knowledge: "scoped",
+    memory: "prompt-relevant",
+    codebaseMap: true,
+    preferences: "active-only",
+    contextMode: "execution",
+    tools: TOOLS_ALL,
+    artifacts: {
+      inline: ["slice-plan"],
+      excerpt: [],
+      onDemand: [],
+    },
+    maxSystemPromptChars: COMMON_BUDGET_SMALL,
   },
 
   // ─── Deep planning mode (project-level) units ────────────────────────

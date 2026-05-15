@@ -116,6 +116,8 @@ test("Context Mode: every manifest declares the expected contextMode lane", () =
     "complete-slice": "verification",
     "complete-milestone": "verification",
     "rewrite-docs": "docs",
+    "triage-captures": "planning",
+    "quick-task": "execution",
   };
 
   assert.deepEqual(Object.keys(expected).sort(), [...KNOWN_UNIT_TYPES].sort());
@@ -234,6 +236,7 @@ test('#4934: only execution units and closeout units may use tools.mode "all"', 
   const allowedAllUnits = new Set([
     "execute-task",
     "reactive-execute",
+    "quick-task",
     "validate-milestone",
     "complete-milestone",
     "complete-slice",
