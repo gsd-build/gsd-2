@@ -1819,12 +1819,14 @@ export function reconcileWorktreeDb(
       const wtSliceInfo = adapter.prepare("PRAGMA wt.table_info('slices')").all();
       const hasIsSketch = wtSliceInfo.some((col) => col["name"] === "is_sketch");
       const hasSketchScope = wtSliceInfo.some((col) => col["name"] === "sketch_scope");
+      const hasSliceTargetRepositories = wtSliceInfo.some((col) => col["name"] === "target_repositories");
       const wtTaskInfo = adapter.prepare("PRAGMA wt.table_info('tasks')").all();
       const hasBlockerSource = wtTaskInfo.some((col) => col["name"] === "blocker_source");
       const hasEscalationPending = wtTaskInfo.some((col) => col["name"] === "escalation_pending");
       const hasEscalationAwaiting = wtTaskInfo.some((col) => col["name"] === "escalation_awaiting_review");
       const hasEscalationArtifact = wtTaskInfo.some((col) => col["name"] === "escalation_artifact_path");
       const hasEscalationOverride = wtTaskInfo.some((col) => col["name"] === "escalation_override_applied_at");
+      const hasTaskTargetRepositories = wtTaskInfo.some((col) => col["name"] === "target_repositories");
       const wtArtifactInfo = adapter.prepare("PRAGMA wt.table_info('artifacts')").all();
       const hasArtifactContentHash = wtArtifactInfo.some((col) => col["name"] === "content_hash");
       const wtMemoryInfo = adapter.prepare("PRAGMA wt.table_info('memories')").all();
@@ -1934,7 +1936,7 @@ export function reconcileWorktreeDb(
             milestone_id, id, title, status, risk, depends, demo, created_at, completed_at,
             full_summary_md, full_uat_md, goal, success_criteria, proof_level,
             integration_closure, observability_impact, sequence, replan_triggered_at,
-            is_sketch, sketch_scope
+            is_sketch, sketch_scope, target_repositories
           )
           SELECT w.milestone_id, w.id, w.title,
                  CASE
@@ -1949,7 +1951,8 @@ export function reconcileWorktreeDb(
                  w.full_summary_md, w.full_uat_md, w.goal, w.success_criteria, w.proof_level,
                  w.integration_closure, w.observability_impact, w.sequence, w.replan_triggered_at,
                  ${hasIsSketch ? "w.is_sketch" : "COALESCE(m.is_sketch, 0)"},
-                 ${hasSketchScope ? "w.sketch_scope" : "COALESCE(m.sketch_scope, '')"}
+                 ${hasSketchScope ? "w.sketch_scope" : "COALESCE(m.sketch_scope, '')"},
+                 ${hasSliceTargetRepositories ? "w.target_repositories" : "COALESCE(m.target_repositories, '[]')"}
           FROM wt.slices w
           LEFT JOIN slices m ON m.milestone_id = w.milestone_id AND m.id = w.id
         `).run());
@@ -1965,7 +1968,7 @@ export function reconcileWorktreeDb(
             description, estimate, files, verify, inputs, expected_output,
             observability_impact, full_plan_md, sequence,
             blocker_source, escalation_pending, escalation_awaiting_review,
-            escalation_artifact_path, escalation_override_applied_at
+            escalation_artifact_path, escalation_override_applied_at, target_repositories
           )
           SELECT w.milestone_id, w.slice_id, w.id, w.title,
                  CASE
@@ -1986,7 +1989,8 @@ export function reconcileWorktreeDb(
                  ${hasEscalationPending ? "w.escalation_pending" : "COALESCE(m.escalation_pending, 0)"},
                  ${hasEscalationAwaiting ? "w.escalation_awaiting_review" : "COALESCE(m.escalation_awaiting_review, 0)"},
                  ${hasEscalationArtifact ? "w.escalation_artifact_path" : "m.escalation_artifact_path"},
-                 ${hasEscalationOverride ? "w.escalation_override_applied_at" : "m.escalation_override_applied_at"}
+                 ${hasEscalationOverride ? "w.escalation_override_applied_at" : "m.escalation_override_applied_at"},
+                 ${hasTaskTargetRepositories ? "w.target_repositories" : "COALESCE(m.target_repositories, '[]')"}
           FROM wt.tasks w
           LEFT JOIN tasks m ON m.milestone_id = w.milestone_id AND m.slice_id = w.slice_id AND m.id = w.id
         `).run());
@@ -2811,8 +2815,8 @@ export function restoreManifest(manifest: StateManifest): void {
       `INSERT INTO slices (milestone_id, id, title, status, risk, depends, demo,
         created_at, completed_at, full_summary_md, full_uat_md,
         goal, success_criteria, proof_level, integration_closure, observability_impact,
-        sequence, replan_triggered_at, is_sketch, sketch_scope)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        sequence, replan_triggered_at, is_sketch, sketch_scope, target_repositories)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const s of manifest.slices) {
       slStmt.run(
@@ -2823,6 +2827,7 @@ export function restoreManifest(manifest: StateManifest): void {
         s.sequence, s.replan_triggered_at,
         s.is_sketch ?? 0,
         s.sketch_scope ?? "",
+        JSON.stringify(s.target_repositories ?? ["project"]),
       );
     }
 
@@ -2834,8 +2839,8 @@ export function restoreManifest(manifest: StateManifest): void {
         full_summary_md, description, estimate, files, verify,
         inputs, expected_output, observability_impact, sequence,
         blocker_source, escalation_pending, escalation_awaiting_review,
-        escalation_artifact_path, escalation_override_applied_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        escalation_artifact_path, escalation_override_applied_at, target_repositories)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const t of manifest.tasks) {
       tkStmt.run(
@@ -2851,6 +2856,7 @@ export function restoreManifest(manifest: StateManifest): void {
         t.escalation_awaiting_review ?? 0,
         t.escalation_artifact_path ?? null,
         t.escalation_override_applied_at ?? null,
+        JSON.stringify(t.target_repositories ?? ["project"]),
       );
     }
 

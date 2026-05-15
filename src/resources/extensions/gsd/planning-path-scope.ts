@@ -33,9 +33,11 @@ export function validatePlanningPathScope(
   for (const { field, values } of fields) {
     for (const raw of values) {
       const candidate = normalizePlannedFileReference(raw);
-      if (!isAbsolute(candidate)) continue;
-      if (isInsideAnyBase(absoluteRoots, candidate)) continue;
-      return `${field} contains absolute path outside allowed repository roots: ${candidate}. Use a path relative to one of: ${absoluteRoots.join(", ")}.`;
+      const resolvedCandidate = isAbsolute(candidate)
+        ? resolve(candidate)
+        : resolve(basePath, candidate);
+      if (isInsideAnyBase(absoluteRoots, resolvedCandidate)) continue;
+      return `${field} contains path outside allowed repository roots: ${candidate}. Use a path relative to one of: ${absoluteRoots.join(", ")}.`;
     }
   }
 

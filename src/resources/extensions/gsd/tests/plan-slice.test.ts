@@ -358,7 +358,7 @@ test('handlePlanSlice rejects absolute task IO paths outside the active worktree
     }, base);
 
     assert.ok('error' in result);
-    assert.match(result.error, /validation failed: tasks\[0\]\.inputs contains absolute path outside allowed repository roots/);
+    assert.match(result.error, /validation failed: tasks\[0\]\.inputs contains path outside allowed repository roots/);
     assert.equal(getSliceTasks('M001', 'S02').length, 0, 'invalid planning IO must not persist tasks');
   } finally {
     cleanup(base);
