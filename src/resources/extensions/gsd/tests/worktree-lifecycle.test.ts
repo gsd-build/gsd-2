@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import {
   WorktreeLifecycle,
+  mergeMilestoneStandalone,
   resolvePausedResumeBasePath,
   type WorktreeLifecycleDeps,
   type WorktreeLifecycleTestOverrides,
@@ -910,4 +911,30 @@ test("adoptOrphanWorktree restores prior paths when callback throws", () => {
   );
   assert.equal(s.basePath, "/prior");
   assert.equal(s.originalBasePath, "/prior-original");
+});
+
+test("mergeMilestoneStandalone fails closed when worktree pre-merge chdir fails (#6164)", () => {
+  const base = makeGitRepoBase({ isolation: "worktree" });
+  const previousCwd = process.cwd();
+  const deps = makeDeps({
+    mergeMilestoneToMain: () => {
+      throw new Error("mergeMilestoneToMain should not be reached");
+    },
+  });
+
+  try {
+    assert.throws(
+      () =>
+        mergeMilestoneStandalone(deps, {
+          originalBasePath: base,
+          worktreeBasePath: "/definitely/missing/worktree/path",
+          milestoneId: "M001",
+          isolationDegraded: false,
+          notify: () => {},
+        }),
+      /Could not enter worktree directory before merge/,
+    );
+  } finally {
+    cleanupRepoBase(base, previousCwd);
+  }
 });

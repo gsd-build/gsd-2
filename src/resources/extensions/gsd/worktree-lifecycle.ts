@@ -1304,13 +1304,19 @@ export function mergeMilestoneStandalone(
     try {
       process.chdir(targetCwd);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       debugLog("WorktreeLifecycle", {
         action: "mergeAndExit",
         phase: "pre-merge-chdir-failed",
         milestoneId,
         targetCwd,
-        error: err instanceof Error ? err.message : String(err),
+        error: msg,
       });
+      if (mode === "worktree" || inWorktree) {
+        throw new Error(
+          `Could not enter worktree directory before merge (${targetCwd}): ${msg}`,
+        );
+      }
     }
   }
 
