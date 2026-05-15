@@ -309,11 +309,11 @@ export function postflightPopStash(
     }
     const trackedPaths = listStashTrackedPaths(basePath, stashRef);
     const untrackedPaths = listStashUntrackedPaths(basePath, stashRef);
-    if (trackedPaths === null || untrackedPaths === null) {
-      throw new Error(`Could not inspect stash contents for ${stashRef}; preserving stash for manual recovery.`);
-    }
-    const stashPaths = [...(trackedPaths ?? []), ...(untrackedPaths ?? [])];
-    if (stashPaths.length > 0 && stashPaths.every((path) => isGsdOwnedPath(path))) {
+    // Only classify as metadata-only when both inspections succeeded.
+    // If either is null, fall through to `git stash apply` as the safe default.
+    if (trackedPaths !== null && untrackedPaths !== null) {
+      const stashPaths = [...trackedPaths, ...untrackedPaths];
+      if (stashPaths.length > 0 && stashPaths.every((path) => isGsdOwnedPath(path))) {
       let dropped = true;
       try {
         execFileSync("git", ["stash", "drop", stashRef], {
@@ -337,6 +337,7 @@ export function postflightPopStash(
         stashRef,
         resolution: dropped ? "already-present-dropped" : "already-present-preserved",
       };
+    }
     }
     execFileSync("git", ["stash", "apply", stashRef], {
       cwd: basePath,
