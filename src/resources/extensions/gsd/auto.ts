@@ -660,7 +660,17 @@ function registerSigtermHandler(currentBasePath: string): void {
   s.sigtermHandler = _registerSigtermHandler(
     currentBasePath,
     s.sigtermHandler,
-    () => closeOutSignalInterruptedUnit(currentBasePath),
+    () => {
+      closeOutSignalInterruptedUnit(currentBasePath);
+      try {
+        if (s.workerId) {
+          markWorkerStopping(s.workerId);
+          s.workerId = null;
+        }
+      } catch (err) {
+        logWarning("engine", `signal worker cleanup failed: ${getErrorMessage(err)}`, { file: "auto.ts" });
+      }
+    },
   );
 }
 
@@ -1761,6 +1771,15 @@ export async function pauseAuto(
   if (lockBase()) {
     releaseSessionLock(lockBase());
     clearLock(lockBase());
+  }
+
+  if (s.workerId) {
+    try {
+      markWorkerStopping(s.workerId);
+    } catch {
+      // best-effort cleanup; pause must still complete
+    }
+    s.workerId = null;
   }
 
   deregisterSigtermHandler();
