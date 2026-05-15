@@ -146,6 +146,10 @@ test("#2766: stash pop conflict on non-.gsd files preserves stash for manual res
       result.commitMessage.includes("GSD-Milestone: M301"),
       "merge succeeds even with non-.gsd stash pop conflict",
     );
+
+    // Non-.gsd conflicts must keep stash entries for manual resolution.
+    const stashList = run("git stash list", repo);
+    assert.ok(stashList.length > 0, "stash is preserved when non-.gsd conflicts remain");
   } finally {
     cleanupTempRepo(repo);
   }
