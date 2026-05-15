@@ -225,7 +225,7 @@ export function formatFailureContext(result: VerificationResult): string {
 // ─── Gate Execution ─────────────────────────────────────────────────────────
 
 /** Characters that indicate shell injection when found in a command string. */
-const SHELL_INJECTION_PATTERN = /[;|`<>]|\$\(/;
+const SHELL_INJECTION_PATTERN = /[;`<>]|\$\(|\|\|/;
 
 /**
  * Known executable first-tokens that are safe to run.
@@ -302,7 +302,7 @@ export function isLikelyCommand(cmd: string): boolean {
  */
 export function validateVerificationCommand(cmd: string): { ok: true } | { ok: false; reason: string } {
   if (SHELL_INJECTION_PATTERN.test(cmd)) {
-    return { ok: false, reason: "contains shell control syntax such as pipes, redirects, semicolons, backticks, or command substitution" };
+    return { ok: false, reason: "contains shell control syntax such as redirects, semicolons, backticks, command substitution, or || (logical OR/fallbacks)" };
   }
   if (!isLikelyCommand(cmd)) {
     return { ok: false, reason: "does not look like a runnable command" };
@@ -358,7 +358,14 @@ export function runVerificationGate(options: RunVerificationGateOptions): Verifi
     // Pass the command string as an argument to the shell explicitly
     // to avoid Node.js DEP0190 (spawnSync with shell: true and no args).
     const shellBin = process.platform === "win32" ? "cmd" : "sh";
-    const shellArgs = process.platform === "win32" ? ["/c", rewrittenCommand] : ["-c", rewrittenCommand];
+    const shellArgs = process.platform === "win32"
+      ? ["/c", rewrittenCommand]
+      : [
+          "-c",
+          "if command -v bash >/dev/null 2>&1; then exec bash -o pipefail -c \"$1\" verification-gate; fi\nexec sh -c \"$1\" verification-gate",
+          "verification-gate",
+          rewrittenCommand,
+        ];
     const result: SpawnSyncReturns<string> = spawnSync(shellBin, shellArgs, {
       cwd: options.cwd,
       stdio: "pipe",

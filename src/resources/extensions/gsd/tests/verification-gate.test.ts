@@ -216,13 +216,13 @@ describe("verification-gate: discovery", () => {
     assert.deepStrictEqual(result.commands, ["npm run test"]);
   });
 
-  test("taskPlanVerify rejects piped pytest command", () => {
+  test("taskPlanVerify accepts piped command", () => {
     const result = discoverCommands({
-      taskPlanVerify: "python3 -m pytest tests/ -q --tb=short 2>&1 | tail -5",
+      taskPlanVerify: "grep 'KEY' .env.example | grep -q STRIPE_WEBHOOK_SECRET",
       cwd: tmp,
     });
-    assert.equal(result.source, "none");
-    assert.deepStrictEqual(result.commands, []);
+    assert.equal(result.source, "task-plan");
+    assert.deepStrictEqual(result.commands, ["grep 'KEY' .env.example | grep -q STRIPE_WEBHOOK_SECRET"]);
   });
 
   test("Python project with tests discovers pytest when package.json is absent", () => {
@@ -450,7 +450,7 @@ describe("verification-gate: execution", () => {
     assert.ok(result.checks[2].stdout.includes("third"));
   });
 
-  test("gate execution uses cwd for spawnSync", () => {
+test("gate execution uses cwd for spawnSync", () => {
     // pwd should report the temp dir
     const result = runVerificationGate({
       cwd: tmp,
@@ -460,6 +460,17 @@ describe("verification-gate: execution", () => {
     assert.equal(result.checks.length, 1);
     // The stdout should contain the tmp dir path (resolving symlinks)
     assert.ok(result.checks[0].stdout.trim().length > 0, "pwd should produce output");
+  });
+
+  test("piped command failure propagates on non-windows shells", () => {
+    if (process.platform === "win32") return;
+    const result = runVerificationGate({
+      cwd: tmp,
+      preferenceCommands: ["__missing_command_for_pipefail__ | tail -1"],
+    });
+    assert.equal(result.passed, false);
+    assert.equal(result.checks.length, 1);
+    assert.notEqual(result.checks[0].exitCode, 0);
   });
 });
 
@@ -578,6 +589,14 @@ test("isLikelyCommand: short lowercase tokens without flags are accepted (could 
 test("validateVerificationCommand rejects shell control syntax", () => {
   assert.deepEqual(validateVerificationCommand("python3 -m pytest tests/ -q --tb=short").ok, true);
   const result = validateVerificationCommand("python3 -m pytest tests/ -q --tb=short 2>&1 | tail -5");
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.match(result.reason, /shell control syntax/);
+  }
+});
+
+test("validateVerificationCommand rejects logical OR fallback syntax", () => {
+  const result = validateVerificationCommand("npm test || true");
   assert.equal(result.ok, false);
   if (!result.ok) {
     assert.match(result.reason, /shell control syntax/);
