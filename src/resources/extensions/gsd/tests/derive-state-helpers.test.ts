@@ -532,6 +532,40 @@ describe('derive-state-helpers', () => {
     }
   });
 
+  test('handleAllSlicesDone: needs-attention with all slices done returns blocked', async () => {
+    const base = createFixtureBase();
+    try {
+      const doneRoadmap = `# M001: Attention Test\n\n**Vision:** Test.\n\n## Slices\n\n- [x] **S01: Done** \`risk:low\` \`depends:[]\`\n  > Done.\n`;
+      writeFile(base, 'milestones/M001/M001-ROADMAP.md', doneRoadmap);
+      writeFile(base, 'milestones/M001/M001-VALIDATION.md',
+        '---\nverdict: needs-attention\nremediation_round: 0\n---\n\n# Validation\nNeeds attention.');
+
+      openDatabase(':memory:');
+      insertMilestone({ id: 'M001', title: 'Attention Test', status: 'active' });
+      insertSlice({ id: 'S01', milestoneId: 'M001', title: 'Done', status: 'complete', risk: 'low', depends: [] });
+      insertAssessment({
+        path: 'milestones/M001/M001-VALIDATION.md',
+        milestoneId: 'M001',
+        status: 'needs-attention',
+        scope: 'milestone-validation',
+        fullContent: 'verdict: needs-attention',
+      });
+
+      invalidateStateCache();
+      const state = await deriveStateFromDb(base);
+
+      assert.equal(state.phase, 'blocked', 'attention-stuck: phase is blocked (no dead-end completion phase)');
+      assert.equal(state.activeMilestone?.id, 'M001', 'attention-stuck: activeMilestone is M001');
+      assert.ok(
+        state.blockers.some(b => b.includes('needs-attention') && b.includes('M001')),
+        'attention-stuck: blocker message mentions milestone and verdict',
+      );
+    } finally {
+      closeDatabase();
+      cleanup(base);
+    }
+  });
+
   // ─── Deferred queued shell: shell milestone deferred, real one promoted ──
   test('buildRegistryAndFindActive: queued shell deferred, later real milestone becomes active (#3470)', async () => {
     const base = createFixtureBase();

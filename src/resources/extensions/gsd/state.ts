@@ -582,18 +582,22 @@ async function handleAllSlicesDone(
   }
 
   // All roadmap slices are done (enforced by caller) and verdict is
-  // needs-remediation — remediation cannot progress without new slices.
-  // Return blocked instead of re-dispatching validate-milestone (#4506).
-  if (verdict === 'needs-remediation') {
+  // non-passing. Return blocked instead of entering completing-milestone.
+  if (verdict === 'needs-remediation' || verdict === 'needs-attention') {
+    const remediation = verdict === 'needs-remediation';
     return {
       activeMilestone, activeSlice: null, activeTask: null,
       phase: 'blocked',
       recentDecisions: [],
       blockers: [
-        `Milestone ${activeMilestone.id} validation verdict is needs-remediation but all slices are complete. ` +
-          `Add remediation slices via gsd_reassess_roadmap, or run \`/gsd verdict pass --rationale "..."\` to override.`,
+        `Milestone ${activeMilestone.id} validation verdict is ${verdict} but all slices are complete. ` +
+          (remediation
+            ? `Add remediation slices via gsd_reassess_roadmap, or run \`/gsd verdict pass --rationale "..."\` to override.`
+            : `Address validation findings and re-run validation, or run \`/gsd verdict pass --rationale "..."\` to override.`),
       ],
-      nextAction: `Resolve ${activeMilestone.id} remediation before proceeding.`,
+      nextAction: remediation
+        ? `Resolve ${activeMilestone.id} remediation before proceeding.`
+        : `Resolve ${activeMilestone.id} validation findings before proceeding.`,
       registry, requirements,
       progress: { milestones: milestoneProgress, slices: sliceProgress },
     };
@@ -1074,8 +1078,9 @@ export async function _deriveStateImpl(
       const validationContent = validationFile ? await cachedLoadFile(validationFile) : null;
       const validationTerminal = validationContent ? isValidationTerminal(validationContent) : false;
       const verdict = validationContent ? extractVerdict(validationContent) : undefined;
-      // needs-remediation is terminal but requires re-validation (#3596)
-      const needsRevalidation = !validationTerminal || verdict === 'needs-remediation';
+      // needs-remediation / needs-attention are terminal but require
+      // re-validation before completion.
+      const needsRevalidation = !validationTerminal || verdict === 'needs-remediation' || verdict === 'needs-attention';
 
       if (summaryFile && await isTerminalMilestoneSummaryFile(summaryFile, cachedLoadFile)) {
         // Summary exists → milestone is complete regardless of validation state.
@@ -1305,7 +1310,8 @@ export async function _deriveStateImpl(
       };
     }
 
-    if (verdict === 'needs-remediation') {
+    if (verdict === 'needs-remediation' || verdict === 'needs-attention') {
+      const remediation = verdict === 'needs-remediation';
       return {
         activeMilestone,
         activeSlice: null,
@@ -1313,10 +1319,14 @@ export async function _deriveStateImpl(
         phase: 'blocked',
         recentDecisions: [],
         blockers: [
-          `Milestone ${activeMilestone.id} validation verdict is needs-remediation but all slices are complete. ` +
-            `Add remediation slices via gsd_reassess_roadmap, or run \`/gsd verdict pass --rationale "..."\` to override.`,
+          `Milestone ${activeMilestone.id} validation verdict is ${verdict} but all slices are complete. ` +
+            (remediation
+              ? `Add remediation slices via gsd_reassess_roadmap, or run \`/gsd verdict pass --rationale "..."\` to override.`
+              : `Address validation findings and re-run validation, or run \`/gsd verdict pass --rationale "..."\` to override.`),
         ],
-        nextAction: `Resolve ${activeMilestone.id} remediation before proceeding.`,
+        nextAction: remediation
+          ? `Resolve ${activeMilestone.id} remediation before proceeding.`
+          : `Resolve ${activeMilestone.id} validation findings before proceeding.`,
         registry,
         requirements,
         progress: {
