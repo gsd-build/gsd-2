@@ -149,7 +149,7 @@ check_blob() {
   decoded=$(printf '%s' "$blob" | base64 --decode 2>/dev/null) || return 0
 
   # Skip binary output: strip printable chars + whitespace; if anything remains it's binary
-  remainder=$(printf '%s' "$decoded" | tr -d '[:print:][:space:]')
+  remainder=$(printf '%s' "$decoded" | LC_ALL=C tr -d '[:print:][:space:]')
   [[ -n "$remainder" ]] && return 0
 
   # Skip trivially short decoded content
