@@ -164,6 +164,44 @@ Verification commands must be simple executable commands, not shell pipelines or
 
 When `verification_commands` is empty and no task-level `verify` command is available, GSD can auto-discover project checks. JavaScript projects use `package.json` scripts in this order: `typecheck`, `lint`, `test`. Python projects use the `python-project` discovery source and run `python3 -m pytest` when GSD finds explicit pytest evidence: `pytest.ini`, a pytest configuration section in `pyproject.toml` such as `[tool.pytest.ini_options]`, or files matching pytest's default test file patterns (`test_*.py` or `*_test.py`) under `tests/`.
 
+### `workspace`
+
+Multi-repository workspace configuration for parent projects:
+
+```yaml
+workspace:
+  mode: parent
+  repositories:
+    frontend:
+      path: apps/frontend
+      role: web
+      verification:
+        - pnpm -C apps/frontend test
+      commit_policy: auto
+    backend:
+      path: services/backend
+      role: api
+      verification:
+        - pnpm -C services/backend test
+      commit_policy: skip
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `workspace.mode` | `"project" \| "parent"` | `"project"` | Workspace operating mode. |
+| `workspace.repositories` | object | `{}` | Mapping of repository IDs to repository config. |
+| `workspace.repositories.<id>.path` | string | required | Child repository path, resolved relative to project root. Must stay inside the project root. |
+| `workspace.repositories.<id>.role` | string | optional | Human-oriented role label used in prompts/reporting. |
+| `workspace.repositories.<id>.verification` | string[] | optional | Default verification commands for that repository. |
+| `workspace.repositories.<id>.commit_policy` | `"auto" \| "skip"` | optional | Per-repository auto-mode turn-commit policy. |
+
+Validation rules:
+
+- Repository IDs must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`.
+- Repository paths are normalized and must be unique (case-insensitive).
+- Paths resolving outside the project root are rejected.
+- Unknown `workspace` keys are ignored with warnings.
+
 ### `phases`
 
 Fine-grained control over which phases run:
