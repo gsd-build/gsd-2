@@ -397,6 +397,29 @@ test("enterMilestone returns ok:false reason:invalid-milestone-id on path traver
 // drive Lifecycle through Resolver delegation until step E retires the
 // Resolver class entirely). When that retirement lands, those tests move
 // here verbatim.
+test("exitMilestone forwards preserveWorktree to teardown on non-merge exit", () => {
+  let capturedOpts: { preserveBranch?: boolean; preserveWorktree?: boolean } | undefined;
+  const s = makeSession({
+    basePath: "/project/.gsd/worktrees/M001",
+    originalBasePath: "/project",
+  });
+  const deps = makeDeps({
+    isInAutoWorktree: () => true,
+    teardownAutoWorktree: (_basePath, _mid, opts) => {
+      capturedOpts = opts;
+    },
+  });
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  const result = lifecycle.exitMilestone(
+    "M001",
+    { merge: false, preserveBranch: true, preserveWorktree: true },
+    makeCtx(),
+  );
+
+  assert.deepEqual(result, { ok: true, merged: false, codeFilesChanged: false });
+  assert.deepEqual(capturedOpts, { preserveBranch: true, preserveWorktree: true });
+});
 
 // ─── Queries (issue #5587) ────────────────────────────────────────────────────
 

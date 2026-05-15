@@ -912,7 +912,9 @@ export async function runPreDispatch(
               `Slice-parallel: started ${result.started.length} worker(s): ${result.started.join(", ")}.`,
               "info",
             );
-            await deps.stopAuto(ctx, pi, `Slice-parallel dispatched for ${mid}`);
+            await deps.stopAuto(ctx, pi, `Slice-parallel dispatched for ${mid}`, {
+              preserveWorktree: true,
+            });
             return { action: "break", reason: "slice-parallel-dispatched" };
           }
           // Fall through to sequential if no workers started

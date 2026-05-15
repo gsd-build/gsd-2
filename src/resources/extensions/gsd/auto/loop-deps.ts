@@ -27,6 +27,7 @@ import type { UokTurnObserver } from "../uok/contracts.js";
 import type { PostflightResult, PreflightResult } from "../clean-root-preflight.js";
 
 export interface StopAutoOptions {
+  preserveWorktree?: boolean;
   completionWidget?: {
     milestoneId?: string | null;
     milestoneTitle?: string | null;

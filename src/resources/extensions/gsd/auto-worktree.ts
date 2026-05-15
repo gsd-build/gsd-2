@@ -1324,12 +1324,12 @@ export function createAutoWorktree(
 export function teardownAutoWorktree(
   originalBasePath: string,
   milestoneId: string,
-  opts: { preserveBranch?: boolean } = {},
+  opts: { preserveBranch?: boolean; preserveWorktree?: boolean } = {},
 ): void {
   originalBasePath = resolveWorktreeProjectRoot(originalBasePath);
 
   const branch = autoWorktreeBranch(milestoneId);
-  const { preserveBranch = false } = opts;
+  const { preserveBranch = false, preserveWorktree = false } = opts;
   const previousCwd = process.cwd();
 
   // Wrap the entire teardown body in a single try/finally so activeWorkspace
@@ -1374,18 +1374,21 @@ export function teardownAutoWorktree(
 
     nudgeGitBranchCache(previousCwd);
 
-    // 3. Remove the worktree. Errors propagate naturally — the outer finally
-    //    ensures activeWorkspace is cleared regardless.
-    removeWorktree(originalBasePath, milestoneId, {
-      branch,
-      deleteBranch: !preserveBranch,
-    });
+    // 3. Remove the worktree unless this exit path explicitly preserves it
+    //    (slice-parallel dispatch stops the parent loop but keeps the parent
+    //    milestone worktree for restart/re-entry).
+    if (!preserveWorktree) {
+      removeWorktree(originalBasePath, milestoneId, {
+        branch,
+        deleteBranch: !preserveBranch,
+      });
+    }
 
     // Verify cleanup succeeded — warn if the worktree directory is still on disk.
     // On Windows, bash-based cleanup can silently fail when paths contain
     // backslashes (#1436), leaving ~1 GB+ orphaned directories.
     const wtDir = worktreePath(originalBasePath, milestoneId);
-    if (existsSync(wtDir)) {
+    if (!preserveWorktree && existsSync(wtDir)) {
       logWarning(
         "reconcile",
         `Worktree directory still exists after teardown: ${wtDir}. ` +

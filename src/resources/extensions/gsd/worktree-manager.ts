@@ -463,6 +463,10 @@ export function findNestedGitDirs(rootPath: string): string[] {
       // A .git file is a worktree pointer and is legitimate.
       // A .git directory is a standalone repo created by scaffolding.
       const innerGit = join(fullPath, ".git");
+      if (!existsSync(innerGit)) {
+        walk(fullPath, depth + 1);
+        continue;
+      }
       try {
         const innerStat = lstatSync(innerGit);
         if (innerStat.isDirectory()) {
@@ -471,9 +475,7 @@ export function findNestedGitDirs(rootPath: string): string[] {
           continue;
         }
       } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
-          logWarning("worktree", `existsSync/.git check failed for ${fullPath}: ${(e as Error).message}`);
-        }
+        logWarning("worktree", `.git check failed for ${fullPath}: ${(e as Error).message}`);
       }
 
       walk(fullPath, depth + 1);

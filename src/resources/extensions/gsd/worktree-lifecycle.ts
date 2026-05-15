@@ -297,7 +297,7 @@ type WorktreeLifecyclePrimitiveOverrides = {
   teardownAutoWorktree?: (
     basePath: string,
     milestoneId: string,
-    opts?: { preserveBranch?: boolean },
+    opts?: { preserveBranch?: boolean; preserveWorktree?: boolean },
   ) => void;
   createAutoWorktree?: (basePath: string, milestoneId: string) => string;
   enterAutoWorktree?: (basePath: string, milestoneId: string) => string;
@@ -387,7 +387,7 @@ function lifecycleTeardownAutoWorktree(
   deps: WorktreeLifecycleDeps,
   basePath: string,
   milestoneId: string,
-  opts?: { preserveBranch?: boolean },
+  opts?: { preserveBranch?: boolean; preserveWorktree?: boolean },
 ): void {
   const override = primitiveOverrides(deps).teardownAutoWorktree;
   if (override) {
@@ -1374,7 +1374,7 @@ export class WorktreeLifecycle {
    */
   exitMilestone(
     milestoneId: string,
-    opts: { merge: boolean; preserveBranch?: boolean },
+    opts: { merge: boolean; preserveBranch?: boolean; preserveWorktree?: boolean },
     ctx: NotifyCtx,
   ): ExitResult {
     if (opts.merge) {
@@ -1395,6 +1395,7 @@ export class WorktreeLifecycle {
     try {
       this._exitWithoutMerge(milestoneId, ctx, {
         preserveBranch: opts.preserveBranch,
+        preserveWorktree: opts.preserveWorktree,
       });
       return { ok: true, merged: false, codeFilesChanged: false };
     } catch (err) {
@@ -1461,7 +1462,7 @@ export class WorktreeLifecycle {
   private _exitWithoutMerge(
     milestoneId: string,
     ctx: NotifyCtx,
-    opts: { preserveBranch?: boolean },
+    opts: { preserveBranch?: boolean; preserveWorktree?: boolean },
   ): void {
     validateMilestoneId(milestoneId);
     if (!lifecycleIsInAutoWorktree(this.deps, this.s.basePath)) {
@@ -1517,6 +1518,7 @@ export class WorktreeLifecycle {
     try {
       lifecycleTeardownAutoWorktree(this.deps, this.s.originalBasePath, milestoneId, {
         preserveBranch: opts.preserveBranch ?? false,
+        preserveWorktree: opts.preserveWorktree ?? false,
       });
     } catch (err) {
       teardownFailed = true;

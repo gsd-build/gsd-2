@@ -1340,7 +1340,11 @@ export async function stopAuto(
           // Milestone still in progress — preserve branch for later resumption
           const r = lifecycle.exitMilestone(
             s.currentMilestoneId,
-            { merge: false, preserveBranch: true },
+            {
+              merge: false,
+              preserveBranch: true,
+              preserveWorktree: options.preserveWorktree ?? false,
+            },
             notifyCtx,
           );
           if (!r.ok && r.cause instanceof Error) throw r.cause;
