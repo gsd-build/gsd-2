@@ -1246,7 +1246,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
           const isUserSkip = /queued user message/i.test(s.lastToolInvocationError);
           const errMsg = isUserSkip
             ? `Tool skipped for ${s.currentUnit.type}: ${s.lastToolInvocationError}. Queued user message interrupted the turn — pausing auto-mode.`
-            : `Tool invocation failed for ${s.currentUnit.type}: ${s.lastToolInvocationError}. Structured argument generation failed — pausing auto-mode.`;
+            : `Tool invocation/runtime failed for ${s.currentUnit.type}: ${s.lastToolInvocationError}. Retrying cannot resolve this deterministic failure — pausing auto-mode.`;
           debugLog("postUnit", { phase: "tool-invocation-error-pause", unitType: s.currentUnit.type, unitId: s.currentUnit.id, error: s.lastToolInvocationError });
           ctx.ui.notify(errMsg, "error");
           s.lastToolInvocationError = null;

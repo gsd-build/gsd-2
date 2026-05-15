@@ -101,6 +101,19 @@ describe("#2883: isToolInvocationError classification", () => {
     );
   });
 
+  test("detects ESM export-link errors", () => {
+    assert.equal(
+      isToolInvocationError("The requested module '../paths.js' does not provide an export named 'gsdProjectionRoot'"),
+      true,
+    );
+  });
+
+  test("detects module-not-found and package export errors", () => {
+    assert.equal(isToolInvocationError("Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/tmp/x.mjs'"), true);
+    assert.equal(isToolInvocationError("Named export 'x' not found. The requested module 'y' is a CommonJS module"), true);
+    assert.equal(isToolInvocationError("Error [ERR_PACKAGE_PATH_NOT_EXPORTED]: Package subpath './x' is not defined"), true);
+  });
+
   test("detects raw write-gate CONTEXT failures for non-GSD write tools", () => {
     resetWriteGateState(process.cwd());
     const result = shouldBlockContextWrite(
