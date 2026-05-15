@@ -75,9 +75,20 @@ export const STATE_TRANSITION_MATRIX: readonly StateTransitionEntry[] = [
     reasonCode: "state",
   },
   {
+    // Defense-in-depth (#6137): needs-attention verdict must never advance to
+    // completing-milestone. Explicit event ensures the matrix routes blocked
+    // even if upstream derivation logic changes.
+    from: "validating-milestone",
+    event: "validation-needs-attention",
+    guard: "validation verdict is needs-attention",
+    to: "blocked",
+    onFail: "blocked",
+    reasonCode: "policy",
+  },
+  {
     from: "blocked",
     event: "recovery-plan-ready",
-    guard: "reassessment produced an executable next action",
+
     to: "executing",
     onFail: "blocked",
     reasonCode: "recovery",
