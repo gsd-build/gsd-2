@@ -673,6 +673,41 @@ describe("auto-worktree-milestone-merge", { timeout: 300_000 }, () => {
     assert.ok(branches.includes("milestone/M150"), "milestone branch preserved on divergence (#1846)");
   });
 
+  test("branch ahead of stale worktree HEAD does not throw divergence (#6164)", () => {
+    const repo = freshRepo();
+    const wtPath = createAutoWorktree(repo, "M151");
+
+    addSliceToMilestone(repo, wtPath, "M151", "S01", "Base work", [
+      { file: "base.ts", content: "export const base = true;\n", message: "add base" },
+    ]);
+
+    const baseHead = run("git rev-parse HEAD", wtPath);
+    writeFileSync(join(wtPath, "branch-ahead.ts"), "export const ahead = true;\n");
+    run("git add .", wtPath);
+    run('git commit -m "branch ahead of worktree"', wtPath);
+
+    // Detach worktree back to the previous commit so worktree HEAD is stale
+    // while the named milestone branch remains ahead.
+    run(`git checkout --detach ${baseHead}`, wtPath);
+
+    process.chdir(wtPath);
+
+    const roadmap = makeRoadmap("M151", "Branch ahead of stale worktree", [
+      { id: "S01", title: "Base work" },
+    ]);
+
+    let threw = false;
+    let errMsg = "";
+    try {
+      mergeMilestoneToMain(repo, "M151", roadmap);
+    } catch (err) {
+      threw = true;
+      errMsg = err instanceof Error ? err.message : String(err);
+    }
+    assert.ok(!threw, `should not throw when branch is ahead of worktree HEAD (got: ${errMsg})`);
+    assert.ok(existsSync(join(repo, "branch-ahead.ts")), "branch-ahead commit merged to main");
+  });
+
   test("#1853 bug 1: SQUASH_MSG cleaned up after successful squash-merge", () => {
     const repo = freshRepo();
     const wtPath = createAutoWorktree(repo, "M160");

@@ -1842,6 +1842,14 @@ export function mergeMilestoneToMain(
             oldRef: branchHead.slice(0, 8),
             newRef: worktreeHead.slice(0, 8),
           });
+        } else if (nativeIsAncestor(originalBasePath_, worktreeHead, branchHead)) {
+          // Branch ref is ahead of worktree HEAD (stale worktree). Safe:
+          // merge uses the branch tip and no commits are at risk.
+          logWarning(
+            "worktree",
+            `Worktree HEAD (${worktreeHead.slice(0, 8)}) is behind ` +
+              `${milestoneBranch} (${branchHead.slice(0, 8)}); using branch ref for merge.`,
+          );
         } else {
           // Diverged — fail loudly rather than silently losing commits
           process.chdir(previousCwd);
