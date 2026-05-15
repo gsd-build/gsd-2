@@ -517,16 +517,18 @@ async function executeToolCalls(
 	stream: EventStream<AgentEvent, AgentMessage[]>,
 ): Promise<ToolExecutionResult> {
 	const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall") as AgentToolCall[];
+	const toolLookup = createToolLookup(currentContext.tools);
 	if (config.toolExecution === "sequential") {
-		return executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, stream);
+		return executeToolCallsSequential(currentContext, assistantMessage, toolCalls, toolLookup, config, signal, stream);
 	}
-	return executeToolCallsParallel(currentContext, assistantMessage, toolCalls, config, signal, stream);
+	return executeToolCallsParallel(currentContext, assistantMessage, toolCalls, toolLookup, config, signal, stream);
 }
 
 async function executeToolCallsSequential(
 	currentContext: AgentContext,
 	assistantMessage: AssistantMessage,
 	toolCalls: AgentToolCall[],
+	toolLookup: ToolLookup,
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 	stream: EventStream<AgentEvent, AgentMessage[]>,
@@ -536,20 +538,21 @@ async function executeToolCallsSequential(
 	let preparationErrorCount = 0;
 
 	for (let index = 0; index < toolCalls.length; index++) {
-		const toolCall = toolCalls[index];
+		const resolved = resolveToolCall(toolLookup, toolCalls[index]);
+
 		stream.push({
 			type: "tool_execution_start",
-			toolCallId: toolCall.id,
-			toolName: toolCall.name,
-			args: toolCall.arguments,
+			toolCallId: resolved.toolCall.id,
+			toolName: resolved.toolCall.name,
+			args: resolved.toolCall.arguments,
 		});
 
-		const preparation = await prepareToolCall(currentContext, assistantMessage, toolCall, config, signal);
+		const preparation = await prepareToolCall(currentContext, assistantMessage, resolved, config, signal);
 		if (preparation.kind === "immediate") {
 			if (preparation.isError) {
 				preparationErrorCount++;
 			}
-			results.push(emitToolCallOutcome(toolCall, preparation.result, preparation.isError, stream));
+			results.push(emitToolCallOutcome(resolved.toolCall, preparation.result, preparation.isError, stream));
 		} else {
 			const executed = await executePreparedToolCall(preparation, signal, stream);
 			results.push(
@@ -571,7 +574,7 @@ async function executeToolCallsSequential(
 				steeringMessages = steering;
 				const remainingCalls = toolCalls.slice(index + 1);
 				for (const skipped of remainingCalls) {
-					results.push(skipToolCall(skipped, stream));
+					results.push(skipToolCall(resolveToolCall(toolLookup, skipped).toolCall, stream));
 				}
 				break;
 			}
@@ -585,6 +588,7 @@ async function executeToolCallsParallel(
 	currentContext: AgentContext,
 	assistantMessage: AssistantMessage,
 	toolCalls: AgentToolCall[],
+	toolLookup: ToolLookup,
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 	stream: EventStream<AgentEvent, AgentMessage[]>,
@@ -595,20 +599,21 @@ async function executeToolCallsParallel(
 	let preparationErrorCount = 0;
 
 	for (let index = 0; index < toolCalls.length; index++) {
-		const toolCall = toolCalls[index];
+		const resolved = resolveToolCall(toolLookup, toolCalls[index]);
+
 		stream.push({
 			type: "tool_execution_start",
-			toolCallId: toolCall.id,
-			toolName: toolCall.name,
-			args: toolCall.arguments,
+			toolCallId: resolved.toolCall.id,
+			toolName: resolved.toolCall.name,
+			args: resolved.toolCall.arguments,
 		});
 
-		const preparation = await prepareToolCall(currentContext, assistantMessage, toolCall, config, signal);
+		const preparation = await prepareToolCall(currentContext, assistantMessage, resolved, config, signal);
 		if (preparation.kind === "immediate") {
 			if (preparation.isError) {
 				preparationErrorCount++;
 			}
-			results.push(emitToolCallOutcome(toolCall, preparation.result, preparation.isError, stream));
+			results.push(emitToolCallOutcome(resolved.toolCall, preparation.result, preparation.isError, stream));
 		} else {
 			runnableCalls.push(preparation);
 		}
@@ -622,7 +627,7 @@ async function executeToolCallsParallel(
 				}
 				const remainingCalls = toolCalls.slice(index + 1);
 				for (const skipped of remainingCalls) {
-					results.push(skipToolCall(skipped, stream));
+					results.push(skipToolCall(resolveToolCall(toolLookup, skipped).toolCall, stream));
 				}
 				return { toolResults: results, steeringMessages, preparationErrorCount };
 			}
@@ -677,14 +682,49 @@ type ExecutedToolCallOutcome = {
 	isError: boolean;
 };
 
+type ToolLookup = {
+	exact: Map<string, AgentTool<any>>;
+	caseInsensitive: Map<string, AgentTool<any>>;
+};
+
+type ResolvedToolCall = {
+	toolCall: AgentToolCall;
+	tool: AgentTool<any> | undefined;
+};
+
+function createToolLookup(tools: AgentTool<any>[] | undefined): ToolLookup {
+	const exact = new Map<string, AgentTool<any>>();
+	const caseInsensitive = new Map<string, AgentTool<any>>();
+
+	for (const tool of tools ?? []) {
+		if (!exact.has(tool.name)) {
+			exact.set(tool.name, tool);
+		}
+		const lowerName = tool.name.toLowerCase();
+		if (!caseInsensitive.has(lowerName)) {
+			caseInsensitive.set(lowerName, tool);
+		}
+	}
+
+	return { exact, caseInsensitive };
+}
+
+function resolveToolCall(toolLookup: ToolLookup, toolCall: AgentToolCall): ResolvedToolCall {
+	const tool = toolLookup.exact.get(toolCall.name) ?? toolLookup.caseInsensitive.get(toolCall.name.toLowerCase());
+	return {
+		toolCall: tool && tool.name !== toolCall.name ? { ...toolCall, name: tool.name } : toolCall,
+		tool,
+	};
+}
+
 async function prepareToolCall(
 	currentContext: AgentContext,
 	assistantMessage: AssistantMessage,
-	toolCall: AgentToolCall,
+	resolved: ResolvedToolCall,
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 ): Promise<PreparedToolCall | ImmediateToolCallOutcome> {
-	const tool = currentContext.tools?.find((t) => t.name === toolCall.name);
+	const { toolCall, tool } = resolved;
 	if (!tool) {
 		return {
 			kind: "immediate",
