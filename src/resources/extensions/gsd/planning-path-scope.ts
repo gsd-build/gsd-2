@@ -37,7 +37,7 @@ export function validatePlanningPathScope(
         ? resolve(candidate)
         : resolve(basePath, candidate);
       if (isInsideAnyBase(absoluteRoots, resolvedCandidate)) continue;
-      return `${field} contains path outside allowed repository roots: ${candidate}. Use a path relative to one of: ${absoluteRoots.join(", ")}.`;
+      return `${field} contains path outside allowed repository roots: ${candidate}. Use a path within one of: ${absoluteRoots.join(", ")}.`;
     }
   }
 

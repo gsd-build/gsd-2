@@ -196,6 +196,50 @@ test('handlePlanSlice enforces absolute path scope to declared target repositori
   }
 });
 
+test('handlePlanSlice rejects relative traversal outside declared target repositories', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParentSlice();
+    mkdirSync(join(base, 'frontend'), { recursive: true });
+    mkdirSync(join(base, 'backend'), { recursive: true });
+    writeFileSync(
+      join(base, '.gsd', 'PREFERENCES.md'),
+      [
+        '---',
+        'workspace:',
+        '  mode: parent',
+        '  repositories:',
+        '    frontend:',
+        '      path: frontend',
+        '    backend:',
+        '      path: backend',
+        '---',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const result = await handlePlanSlice({
+      ...validParams(),
+      targetRepositories: ['frontend'],
+      tasks: [
+        {
+          ...validParams().tasks[0],
+          files: ['../sibling-repo/src/server.ts'],
+          targetRepositories: ['frontend'],
+        },
+      ],
+    }, base);
+
+    assert.ok('error' in result);
+    assert.match(result.error, /outside allowed repository roots/);
+    assert.equal(getSliceTasks('M001', 'S02').length, 0, 'relative traversal outside scope must not persist');
+  } finally {
+    cleanup(base);
+  }
+});
+
 test('handlePlanSlice renders plan artifacts under worktree-local .gsd while using project DB', async () => {
   const base = makeTmpBase();
   const worktree = join(base, '.gsd', 'worktrees', 'M001');

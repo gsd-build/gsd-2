@@ -111,6 +111,7 @@ const providerLoader = createSqliteProviderLoader({
 });
 
 export const SCHEMA_VERSION = 29;
+const DEFAULT_TARGET_REPOSITORIES: string[] = [];
 
 function initSchema(db: DbAdapter, fileBacked: boolean, dbPath: string | null): void {
   const conservativeFilePragmas = fileBacked && _isLikelyWslDrvFsPathForTest(dbPath);
@@ -2827,7 +2828,7 @@ export function restoreManifest(manifest: StateManifest): void {
         s.sequence, s.replan_triggered_at,
         s.is_sketch ?? 0,
         s.sketch_scope ?? "",
-        JSON.stringify(s.target_repositories ?? ["project"]),
+        JSON.stringify(s.target_repositories ?? DEFAULT_TARGET_REPOSITORIES),
       );
     }
 
@@ -2856,7 +2857,7 @@ export function restoreManifest(manifest: StateManifest): void {
         t.escalation_awaiting_review ?? 0,
         t.escalation_artifact_path ?? null,
         t.escalation_override_applied_at ?? null,
-        JSON.stringify(t.target_repositories ?? ["project"]),
+        JSON.stringify(t.target_repositories ?? DEFAULT_TARGET_REPOSITORIES),
       );
     }
 
