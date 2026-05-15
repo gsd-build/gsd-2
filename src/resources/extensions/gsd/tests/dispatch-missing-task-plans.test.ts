@@ -138,3 +138,28 @@ test("dispatch: plan-slice recovery loop — second call after plan-slice still 
   assert.ok(r2.action === "dispatch" && r2.unitType === "plan-slice",
     "should keep dispatching plan-slice until task plans appear");
 });
+
+test("dispatch: worktree projection task plan is honored for execute-task dispatch", async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), "gsd-909-wt-"));
+  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+
+  const projectRoot = join(tmp, "project");
+  const worktreeBase = join(projectRoot, ".gsd", "worktrees", "M002");
+
+  scaffoldMilestoneContext(projectRoot, "M002");
+  scaffoldSlicePlan(projectRoot, "M002", "S03");
+  scaffoldTaskPlan(worktreeBase, "M002", "S03", "T01");
+
+  const ctx = makeContext(worktreeBase);
+  const result = await resolveDispatch(ctx);
+
+  assert.equal(result.action, "dispatch");
+  assert.ok(
+    result.action === "dispatch" && result.unitType === "execute-task",
+    `unitType should be execute-task, got: ${result.action === "dispatch" ? result.unitType : "(stop)"}`,
+  );
+  assert.ok(
+    result.action === "dispatch" && result.unitId === "M002/S03/T01",
+    `unitId should be M002/S03/T01, got: ${result.action === "dispatch" ? result.unitId : "(stop)"}`,
+  );
+});
