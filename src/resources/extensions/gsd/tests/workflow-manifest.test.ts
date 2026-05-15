@@ -105,12 +105,15 @@ test('workflow-manifest: snapshotState captures tasks', () => {
   openDatabase(tempDbPath(base));
   try {
     insertMilestone({ id: 'M001' });
-    insertSlice({ id: 'S01', milestoneId: 'M001' });
-    insertTask({ id: 'T01', sliceId: 'S01', milestoneId: 'M001', title: 'Do thing', status: 'complete' });
+    insertSlice({ id: 'S01', milestoneId: 'M001', planning: { targetRepositories: ['project', 'frontend'] } });
+    insertTask({ id: 'T01', sliceId: 'S01', milestoneId: 'M001', title: 'Do thing', status: 'complete', planning: { targetRepositories: ['backend'] } });
     const snap = snapshotState();
+    const s = snap.slices.find((r) => r.id === 'S01');
+    assert.deepStrictEqual(s?.target_repositories, ['project', 'frontend']);
     const t = snap.tasks.find((r) => r.id === 'T01');
     assert.ok(t !== undefined, 'T01 should appear in snapshot');
     assert.strictEqual(t!.status, 'complete');
+    assert.deepStrictEqual(t!.target_repositories, ['backend']);
   } finally {
     closeDatabase();
     cleanupDir(base);
@@ -160,6 +163,49 @@ test('workflow-manifest: bootstrapFromManifest restores DB from manifest (round-
     const t = snap.tasks.find((r) => r.id === 'T01');
     assert.ok(t !== undefined, 'T01 should be restored');
     assert.strictEqual(t!.status, 'complete');
+    assert.deepStrictEqual(s?.target_repositories, []);
+    assert.deepStrictEqual(t!.target_repositories, []);
+  } finally {
+    closeDatabase();
+    cleanupDir(base);
+  }
+});
+
+test('workflow-manifest: bootstrapFromManifest preserves target_repositories', () => {
+  const base = tempDir();
+  openDatabase(tempDbPath(base));
+  try {
+    insertMilestone({ id: 'M001', title: 'Restored Milestone' });
+    insertSlice({ id: 'S01', milestoneId: 'M001', planning: { targetRepositories: ['frontend'] } });
+    insertTask({ id: 'T01', sliceId: 'S01', milestoneId: 'M001', planning: { targetRepositories: ['backend'] } });
+    writeManifest(base);
+    closeDatabase();
+
+    const newDbPath = path.join(base, 'new.db');
+    openDatabase(newDbPath);
+    const restored = bootstrapFromManifest(base);
+    assert.strictEqual(restored, true);
+
+    const snap = snapshotState();
+    assert.deepStrictEqual(snap.slices.find((r) => r.id === 'S01')?.target_repositories, ['frontend']);
+    assert.deepStrictEqual(snap.tasks.find((r) => r.id === 'T01')?.target_repositories, ['backend']);
+  } finally {
+    closeDatabase();
+    cleanupDir(base);
+  }
+});
+
+test('workflow-manifest: insertTask can clear target_repositories with explicit empty array', () => {
+  const base = tempDir();
+  openDatabase(tempDbPath(base));
+  try {
+    insertMilestone({ id: 'M001', title: 'Milestone' });
+    insertSlice({ id: 'S01', milestoneId: 'M001', title: 'Slice' });
+    insertTask({ id: 'T01', sliceId: 'S01', milestoneId: 'M001', planning: { targetRepositories: ['frontend'] } });
+    insertTask({ id: 'T01', sliceId: 'S01', milestoneId: 'M001', planning: { targetRepositories: [] } });
+
+    const snap = snapshotState();
+    assert.deepStrictEqual(snap.tasks.find((r) => r.id === 'T01')?.target_repositories, []);
   } finally {
     closeDatabase();
     cleanupDir(base);

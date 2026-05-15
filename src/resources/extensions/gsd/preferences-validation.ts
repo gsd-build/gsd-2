@@ -1216,6 +1216,113 @@ export function validatePreferences(preferences: GSDPreferences): {
     }
   }
 
+  // ─── Workspace Repository Registry ─────────────────────────────────
+  if (preferences.workspace !== undefined) {
+    if (typeof preferences.workspace === "object" && preferences.workspace !== null && !Array.isArray(preferences.workspace)) {
+      const workspace = preferences.workspace as Record<string, unknown>;
+      const validWorkspace: NonNullable<GSDPreferences["workspace"]> = {};
+
+      if (workspace.mode !== undefined) {
+        if (workspace.mode === "project" || workspace.mode === "parent") {
+          validWorkspace.mode = workspace.mode;
+        } else {
+          errors.push('workspace.mode must be one of: project, parent');
+        }
+      }
+
+      if (workspace.repositories !== undefined) {
+        if (
+          typeof workspace.repositories === "object" &&
+          workspace.repositories !== null &&
+          !Array.isArray(workspace.repositories)
+        ) {
+          const repos = workspace.repositories as Record<string, unknown>;
+          const validRepos: NonNullable<NonNullable<GSDPreferences["workspace"]>["repositories"]> = {};
+          const normalizedPaths = new Set<string>();
+
+          for (const [repoId, repoValue] of Object.entries(repos)) {
+            if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(repoId)) {
+              errors.push(`workspace.repositories key "${repoId}" must match /^[A-Za-z0-9][A-Za-z0-9._-]*$/`);
+              continue;
+            }
+            if (typeof repoValue !== "object" || repoValue === null || Array.isArray(repoValue)) {
+              errors.push(`workspace.repositories.${repoId} must be an object`);
+              continue;
+            }
+
+            const repo = repoValue as Record<string, unknown>;
+            const validRepo: import("./preferences-types.js").WorkspaceRepositoryPreference = { path: "" };
+
+            if (typeof repo.path === "string" && repo.path.trim().length > 0) {
+              validRepo.path = repo.path.trim();
+              const normalizedPathKey = validRepo.path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+              if (normalizedPaths.has(normalizedPathKey)) {
+                errors.push(`workspace.repositories contains duplicate path: ${validRepo.path}`);
+                continue;
+              }
+              normalizedPaths.add(normalizedPathKey);
+            } else {
+              errors.push(`workspace.repositories.${repoId}.path must be a non-empty string`);
+              continue;
+            }
+
+            if (repo.role !== undefined) {
+              if (typeof repo.role === "string" && repo.role.trim().length > 0) validRepo.role = repo.role.trim();
+              else errors.push(`workspace.repositories.${repoId}.role must be a non-empty string`);
+            }
+
+            if (repo.verification !== undefined) {
+              if (
+                Array.isArray(repo.verification) &&
+                repo.verification.every((v) => typeof v === "string" && v.trim().length > 0)
+              ) {
+                validRepo.verification = repo.verification.map((v) => v.trim());
+              } else {
+                errors.push(`workspace.repositories.${repoId}.verification must be an array of non-empty strings`);
+              }
+            }
+
+            if (repo.commit_policy !== undefined) {
+              if (repo.commit_policy === "auto" || repo.commit_policy === "skip") {
+                validRepo.commit_policy = repo.commit_policy;
+              } else {
+                errors.push(`workspace.repositories.${repoId}.commit_policy must be one of: auto, skip`);
+              }
+            }
+
+            const knownRepoKeys = new Set(["path", "role", "verification", "commit_policy"]);
+            for (const key of Object.keys(repo)) {
+              if (!knownRepoKeys.has(key)) {
+                warnings.push(`unknown workspace.repositories.${repoId} key "${key}" — ignored`);
+              }
+            }
+
+            validRepos[repoId] = validRepo;
+          }
+
+          if (Object.keys(validRepos).length > 0) {
+            validWorkspace.repositories = validRepos;
+          }
+        } else {
+          errors.push("workspace.repositories must be an object mapping repo ids to config");
+        }
+      }
+
+      const knownWorkspaceKeys = new Set(["mode", "repositories"]);
+      for (const key of Object.keys(workspace)) {
+        if (!knownWorkspaceKeys.has(key)) {
+          warnings.push(`unknown workspace key "${key}" — ignored`);
+        }
+      }
+
+      if (Object.keys(validWorkspace).length > 0) {
+        validated.workspace = validWorkspace;
+      }
+    } else {
+      errors.push("workspace must be an object");
+    }
+  }
+
   // ─── Enhanced Verification ──────────────────────────────────────────────────
   if (preferences.enhanced_verification !== undefined) {
     if (typeof preferences.enhanced_verification === "boolean") {

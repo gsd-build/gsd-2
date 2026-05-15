@@ -22,6 +22,7 @@ export interface SliceRow {
   replan_triggered_at: string | null;
   is_sketch: number;
   sketch_scope: string;
+  target_repositories?: string[];
 }
 
 export interface TaskRow {
@@ -55,6 +56,7 @@ export interface TaskRow {
   escalation_awaiting_review: number;
   escalation_artifact_path: string | null;
   escalation_override_applied_at: string | null;
+  target_repositories?: string[];
 }
 
 type DbRow = Record<string, unknown>;
@@ -107,6 +109,7 @@ export function rowToSlice(row: DbRow): SliceRow {
     replan_triggered_at: (row["replan_triggered_at"] as string) ?? null,
     is_sketch: (row["is_sketch"] as number) ?? 0,
     sketch_scope: (row["sketch_scope"] as string) ?? "",
+    target_repositories: parseTaskArrayColumn(row["target_repositories"]),
   };
 }
 
@@ -142,5 +145,6 @@ export function rowToTask(row: DbRow): TaskRow {
     escalation_awaiting_review: (row["escalation_awaiting_review"] as number) ?? 0,
     escalation_artifact_path: (row["escalation_artifact_path"] as string) ?? null,
     escalation_override_applied_at: (row["escalation_override_applied_at"] as string) ?? null,
+    target_repositories: parseTaskArrayColumn(row["target_repositories"]),
   };
 }

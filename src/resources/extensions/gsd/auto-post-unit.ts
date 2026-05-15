@@ -516,9 +516,14 @@ async function runCloseoutGitAction(
 
   try {
     let taskContext: TaskCommitContext | undefined;
+    let targetRepositories: string[] | undefined;
 
     if (turnAction === "commit" && unit.type === "execute-task") {
       taskContext = await buildTaskCommitContextForUnit(s.basePath, unit.id);
+      const { milestone: mid, slice: sid, task: tid } = parseUnitId(unit.id);
+      if (mid && sid && tid && isDbAvailable()) {
+        targetRepositories = getTask(mid, sid, tid)?.target_repositories;
+      }
     }
 
     // Invalidate the nativeHasChanges cache before auto-commit (#1853).
@@ -544,6 +549,7 @@ async function runCloseoutGitAction(
         unitType: unit.type,
         unitId: unit.id,
         taskContext,
+        targetRepositories,
       });
       for (let attempt = 1; gitResult.status === "failed" && attempt < maxAttempts; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
@@ -553,6 +559,7 @@ async function runCloseoutGitAction(
           unitType: unit.type,
           unitId: unit.id,
           taskContext,
+          targetRepositories,
         });
       }
 
@@ -570,7 +577,11 @@ async function runCloseoutGitAction(
           error: gitResult.error,
           metadata: {
             dirty: gitResult.dirty,
+            dirtyRepositories: gitResult.dirtyRepositories,
             commitMessage: gitResult.commitMessage,
+            commitMessages: gitResult.commitMessages,
+            commitErrors: gitResult.commitErrors,
+            skippedRepositories: gitResult.skippedRepositories,
             snapshotLabel: gitResult.snapshotLabel,
           },
         });

@@ -81,6 +81,7 @@ import {
   applyMigrationV26MilestoneCommitAttributions,
   applyMigrationV27ArtifactHash,
   applyMigrationV28MemoryLastHitAt,
+  applyMigrationV29RepositoryTargets,
 } from "./db-migration-steps.js";
 import { isMemoriesFtsAvailableSchema, tryCreateMemoriesFtsSchema } from "./db-memory-fts-schema.js";
 import { createDbOpenState, type DbOpenPhase } from "./db-open-state.js";
@@ -109,7 +110,7 @@ const providerLoader = createSqliteProviderLoader({
   writeStderr: (message: string) => process.stderr.write(message),
 });
 
-export const SCHEMA_VERSION = 28;
+export const SCHEMA_VERSION = 29;
 
 function initSchema(db: DbAdapter, fileBacked: boolean, dbPath: string | null): void {
   const conservativeFilePragmas = fileBacked && _isLikelyWslDrvFsPathForTest(dbPath);
@@ -358,6 +359,11 @@ function migrateSchema(db: DbAdapter): void {
     if (currentVersion < 28) {
       applyMigrationV28MemoryLastHitAt(db);
       recordSchemaVersion(db, 28);
+    }
+
+    if (currentVersion < 29) {
+      applyMigrationV29RepositoryTargets(db);
+      recordSchemaVersion(db, 29);
     }
 
     db.exec("COMMIT");
@@ -974,6 +980,7 @@ export interface SlicePlanningRecord {
   proofLevel: string;
   integrationClosure: string;
   observabilityImpact: string;
+  targetRepositories?: string[];
 }
 
 export interface TaskPlanningRecord {
@@ -986,6 +993,7 @@ export interface TaskPlanningRecord {
   expectedOutput: string[];
   observabilityImpact: string;
   fullPlanMd?: string;
+  targetRepositories?: string[];
 }
 
 export function insertMilestone(m: {
@@ -1083,11 +1091,11 @@ export function insertSlice(s: {
   currentDb.prepare(
     `INSERT INTO slices (
       milestone_id, id, title, status, risk, depends, demo, created_at,
-      goal, success_criteria, proof_level, integration_closure, observability_impact, sequence,
+      goal, success_criteria, proof_level, integration_closure, observability_impact, target_repositories, sequence,
       is_sketch, sketch_scope
     ) VALUES (
       :milestone_id, :id, :title, :status, :risk, :depends, :demo, :created_at,
-      :goal, :success_criteria, :proof_level, :integration_closure, :observability_impact, :sequence,
+      :goal, :success_criteria, :proof_level, :integration_closure, :observability_impact, :target_repositories, :sequence,
       :is_sketch, :sketch_scope
     )
     ON CONFLICT (milestone_id, id) DO UPDATE SET
@@ -1101,6 +1109,7 @@ export function insertSlice(s: {
       proof_level = CASE WHEN :raw_proof_level IS NOT NULL THEN excluded.proof_level ELSE slices.proof_level END,
       integration_closure = CASE WHEN :raw_integration_closure IS NOT NULL THEN excluded.integration_closure ELSE slices.integration_closure END,
       observability_impact = CASE WHEN :raw_observability_impact IS NOT NULL THEN excluded.observability_impact ELSE slices.observability_impact END,
+      target_repositories = CASE WHEN :raw_target_repositories IS NOT NULL THEN excluded.target_repositories ELSE slices.target_repositories END,
       sequence = CASE WHEN :raw_sequence IS NOT NULL THEN excluded.sequence ELSE slices.sequence END,
       is_sketch = CASE WHEN :raw_is_sketch IS NOT NULL THEN excluded.is_sketch ELSE slices.is_sketch END,
       sketch_scope = CASE WHEN :raw_sketch_scope IS NOT NULL THEN excluded.sketch_scope ELSE slices.sketch_scope END`,
@@ -1118,6 +1127,7 @@ export function insertSlice(s: {
     ":proof_level": s.planning?.proofLevel ?? "",
     ":integration_closure": s.planning?.integrationClosure ?? "",
     ":observability_impact": s.planning?.observabilityImpact ?? "",
+    ":target_repositories": JSON.stringify(s.planning?.targetRepositories ?? []),
     ":sequence": s.sequence ?? 0,
     ":is_sketch": s.isSketch ? 1 : 0,
     ":sketch_scope": s.sketchScope ?? "",
@@ -1130,6 +1140,7 @@ export function insertSlice(s: {
     ":raw_proof_level": s.planning?.proofLevel ?? null,
     ":raw_integration_closure": s.planning?.integrationClosure ?? null,
     ":raw_observability_impact": s.planning?.observabilityImpact ?? null,
+    ":raw_target_repositories": s.planning?.targetRepositories ? JSON.stringify(s.planning.targetRepositories) : null,
     ":raw_sequence": s.sequence ?? null,
     ":raw_is_sketch": s.isSketch === undefined ? null : (s.isSketch ? 1 : 0),
     // NOTE: use !== undefined (not ??) so an explicit empty string "" is treated
@@ -1169,7 +1180,8 @@ export function upsertSlicePlanning(milestoneId: string, sliceId: string, planni
       success_criteria = COALESCE(:success_criteria, success_criteria),
       proof_level = COALESCE(:proof_level, proof_level),
       integration_closure = COALESCE(:integration_closure, integration_closure),
-      observability_impact = COALESCE(:observability_impact, observability_impact)
+      observability_impact = COALESCE(:observability_impact, observability_impact),
+      target_repositories = COALESCE(:target_repositories, target_repositories)
      WHERE milestone_id = :milestone_id AND id = :id`,
   ).run({
     ":milestone_id": milestoneId,
@@ -1179,6 +1191,7 @@ export function upsertSlicePlanning(milestoneId: string, sliceId: string, planni
     ":proof_level": planning.proofLevel ?? null,
     ":integration_closure": planning.integrationClosure ?? null,
     ":observability_impact": planning.observabilityImpact ?? null,
+    ":target_repositories": planning.targetRepositories ? JSON.stringify(planning.targetRepositories) : null,
   });
 }
 
@@ -1208,11 +1221,13 @@ export function insertTask(t: {
       verification_result, duration, completed_at, blocker_discovered,
       deviations, known_issues, key_files, key_decisions, full_summary_md,
       description, estimate, files, verify, inputs, expected_output, observability_impact, sequence
+      , target_repositories
     ) VALUES (
       :milestone_id, :slice_id, :id, :title, :status, :one_liner, :narrative,
       :verification_result, :duration, :completed_at, :blocker_discovered,
       :deviations, :known_issues, :key_files, :key_decisions, :full_summary_md,
       :description, :estimate, :files, :verify, :inputs, :expected_output, :observability_impact, :sequence
+      , :target_repositories
     )
     ON CONFLICT(milestone_id, slice_id, id) DO UPDATE SET
       title = CASE WHEN NULLIF(:title, '') IS NOT NULL THEN :title ELSE tasks.title END,
@@ -1235,7 +1250,8 @@ export function insertTask(t: {
       inputs = CASE WHEN NULLIF(:inputs, '[]') IS NOT NULL THEN :inputs ELSE tasks.inputs END,
       expected_output = CASE WHEN NULLIF(:expected_output, '[]') IS NOT NULL THEN :expected_output ELSE tasks.expected_output END,
       observability_impact = CASE WHEN NULLIF(:observability_impact, '') IS NOT NULL THEN :observability_impact ELSE tasks.observability_impact END,
-      sequence = :sequence`,
+      sequence = :sequence,
+      target_repositories = CASE WHEN :raw_target_repositories IS NOT NULL THEN :target_repositories ELSE tasks.target_repositories END`,
   ).run({
     ":milestone_id": t.milestoneId,
     ":slice_id": t.sliceId,
@@ -1261,6 +1277,8 @@ export function insertTask(t: {
     ":expected_output": JSON.stringify(t.planning?.expectedOutput ?? []),
     ":observability_impact": t.planning?.observabilityImpact ?? "",
     ":sequence": t.sequence ?? 0,
+    ":target_repositories": JSON.stringify(t.planning?.targetRepositories ?? []),
+    ":raw_target_repositories": t.planning?.targetRepositories === undefined ? null : 1,
   });
 }
 
@@ -1297,7 +1315,8 @@ export function upsertTaskPlanning(milestoneId: string, sliceId: string, taskId:
       inputs = COALESCE(:inputs, inputs),
       expected_output = COALESCE(:expected_output, expected_output),
       observability_impact = COALESCE(:observability_impact, observability_impact),
-      full_plan_md = COALESCE(:full_plan_md, full_plan_md)
+      full_plan_md = COALESCE(:full_plan_md, full_plan_md),
+      target_repositories = COALESCE(:target_repositories, target_repositories)
      WHERE milestone_id = :milestone_id AND slice_id = :slice_id AND id = :id`,
   ).run({
     ":milestone_id": milestoneId,
@@ -1312,6 +1331,7 @@ export function upsertTaskPlanning(milestoneId: string, sliceId: string, taskId:
     ":expected_output": planning.expectedOutput ? JSON.stringify(planning.expectedOutput) : null,
     ":observability_impact": planning.observabilityImpact ?? null,
     ":full_plan_md": planning.fullPlanMd ?? null,
+    ":target_repositories": planning.targetRepositories ? JSON.stringify(planning.targetRepositories) : null,
   });
 }
 
@@ -1800,8 +1820,10 @@ export function reconcileWorktreeDb(
       const wtSliceInfo = adapter.prepare("PRAGMA wt.table_info('slices')").all();
       const hasIsSketch = wtSliceInfo.some((col) => col["name"] === "is_sketch");
       const hasSketchScope = wtSliceInfo.some((col) => col["name"] === "sketch_scope");
+      const hasSliceTargetRepositories = wtSliceInfo.some((col) => col["name"] === "target_repositories");
       const wtTaskInfo = adapter.prepare("PRAGMA wt.table_info('tasks')").all();
       const hasBlockerSource = wtTaskInfo.some((col) => col["name"] === "blocker_source");
+      const hasTaskTargetRepositories = wtTaskInfo.some((col) => col["name"] === "target_repositories");
       const hasEscalationPending = wtTaskInfo.some((col) => col["name"] === "escalation_pending");
       const hasEscalationAwaiting = wtTaskInfo.some((col) => col["name"] === "escalation_awaiting_review");
       const hasEscalationArtifact = wtTaskInfo.some((col) => col["name"] === "escalation_artifact_path");
@@ -1914,7 +1936,7 @@ export function reconcileWorktreeDb(
           INSERT OR REPLACE INTO slices (
             milestone_id, id, title, status, risk, depends, demo, created_at, completed_at,
             full_summary_md, full_uat_md, goal, success_criteria, proof_level,
-            integration_closure, observability_impact, sequence, replan_triggered_at,
+            integration_closure, observability_impact, target_repositories, sequence, replan_triggered_at,
             is_sketch, sketch_scope
           )
           SELECT w.milestone_id, w.id, w.title,
@@ -1928,7 +1950,9 @@ export function reconcileWorktreeDb(
                    THEN m.completed_at ELSE w.completed_at
                  END,
                  w.full_summary_md, w.full_uat_md, w.goal, w.success_criteria, w.proof_level,
-                 w.integration_closure, w.observability_impact, w.sequence, w.replan_triggered_at,
+                 w.integration_closure, w.observability_impact,
+                 ${hasSliceTargetRepositories ? "w.target_repositories" : "COALESCE(m.target_repositories, '[]')"},
+                 w.sequence, w.replan_triggered_at,
                  ${hasIsSketch ? "w.is_sketch" : "COALESCE(m.is_sketch, 0)"},
                  ${hasSketchScope ? "w.sketch_scope" : "COALESCE(m.sketch_scope, '')"}
           FROM wt.slices w
@@ -1944,7 +1968,7 @@ export function reconcileWorktreeDb(
             verification_result, duration, completed_at, blocker_discovered,
             deviations, known_issues, key_files, key_decisions, full_summary_md,
             description, estimate, files, verify, inputs, expected_output,
-            observability_impact, full_plan_md, sequence,
+            observability_impact, full_plan_md, target_repositories, sequence,
             blocker_source, escalation_pending, escalation_awaiting_review,
             escalation_artifact_path, escalation_override_applied_at
           )
@@ -1962,7 +1986,9 @@ export function reconcileWorktreeDb(
                  w.blocker_discovered,
                  w.deviations, w.known_issues, w.key_files, w.key_decisions, w.full_summary_md,
                  w.description, w.estimate, w.files, w.verify, w.inputs, w.expected_output,
-                 w.observability_impact, w.full_plan_md, w.sequence,
+                 w.observability_impact, w.full_plan_md,
+                 ${hasTaskTargetRepositories ? "w.target_repositories" : "COALESCE(m.target_repositories, '[]')"},
+                 w.sequence,
                  ${hasBlockerSource ? "w.blocker_source" : "COALESCE(m.blocker_source, '')"},
                  ${hasEscalationPending ? "w.escalation_pending" : "COALESCE(m.escalation_pending, 0)"},
                  ${hasEscalationAwaiting ? "w.escalation_awaiting_review" : "COALESCE(m.escalation_awaiting_review, 0)"},
@@ -2791,16 +2817,16 @@ export function restoreManifest(manifest: StateManifest): void {
     const slStmt = db.prepare(
       `INSERT INTO slices (milestone_id, id, title, status, risk, depends, demo,
         created_at, completed_at, full_summary_md, full_uat_md,
-        goal, success_criteria, proof_level, integration_closure, observability_impact,
+        goal, success_criteria, proof_level, integration_closure, observability_impact, target_repositories,
         sequence, replan_triggered_at, is_sketch, sketch_scope)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const s of manifest.slices) {
       slStmt.run(
         s.milestone_id, s.id, s.title, s.status, s.risk,
         JSON.stringify(s.depends), s.demo,
         s.created_at, s.completed_at, s.full_summary_md, s.full_uat_md,
-        s.goal, s.success_criteria, s.proof_level, s.integration_closure, s.observability_impact,
+        s.goal, s.success_criteria, s.proof_level, s.integration_closure, s.observability_impact, JSON.stringify(s.target_repositories ?? []),
         s.sequence, s.replan_triggered_at,
         s.is_sketch ?? 0,
         s.sketch_scope ?? "",
@@ -2813,10 +2839,10 @@ export function restoreManifest(manifest: StateManifest): void {
         one_liner, narrative, verification_result, duration, completed_at,
         blocker_discovered, deviations, known_issues, key_files, key_decisions,
         full_summary_md, description, estimate, files, verify,
-        inputs, expected_output, observability_impact, sequence,
+        inputs, expected_output, observability_impact, target_repositories, sequence,
         blocker_source, escalation_pending, escalation_awaiting_review,
         escalation_artifact_path, escalation_override_applied_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const t of manifest.tasks) {
       tkStmt.run(
@@ -2826,7 +2852,7 @@ export function restoreManifest(manifest: StateManifest): void {
         JSON.stringify(t.key_files), JSON.stringify(t.key_decisions),
         t.full_summary_md, t.description, t.estimate, JSON.stringify(t.files), t.verify,
         JSON.stringify(t.inputs), JSON.stringify(t.expected_output),
-        t.observability_impact, t.sequence,
+        t.observability_impact, JSON.stringify(t.target_repositories ?? []), t.sequence,
         t.blocker_source ?? "",
         t.escalation_pending ?? 0,
         t.escalation_awaiting_review ?? 0,

@@ -424,6 +424,11 @@ export function applyMigrationV28MemoryLastHitAt(db: DbAdapter): void {
   ensureColumn(db, "memories", "last_hit_at", "ALTER TABLE memories ADD COLUMN last_hit_at TEXT DEFAULT NULL");
 }
 
+export function applyMigrationV29RepositoryTargets(db: DbAdapter): void {
+  ensureColumn(db, "slices", "target_repositories", "ALTER TABLE slices ADD COLUMN target_repositories TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(db, "tasks", "target_repositories", "ALTER TABLE tasks ADD COLUMN target_repositories TEXT NOT NULL DEFAULT '[]'");
+}
+
 export interface MigrationV22Hooks {
   copyQualityGateRowsToRepairedTable(db: DbAdapter): void;
 }

@@ -7,6 +7,7 @@ import {
   restoreManifest,
 } from "./gsd-db.js";
 import type { MilestoneRow } from "./db-milestone-artifact-rows.js";
+import { parseTaskArrayColumn } from "./db-task-slice-rows.js";
 import type { SliceRow, TaskRow } from "./db-task-slice-rows.js";
 import type { VerificationEvidenceRow } from "./db-verification-evidence-rows.js";
 import type { Decision } from "./types.js";
@@ -109,6 +110,7 @@ export function snapshotState(): StateManifest {
     proof_level: (r["proof_level"] as string) ?? "",
     integration_closure: (r["integration_closure"] as string) ?? "",
     observability_impact: (r["observability_impact"] as string) ?? "",
+    target_repositories: parseTaskArrayColumn(r["target_repositories"]),
     sequence: toNumeric(r["sequence"], 0) as number,
     replan_triggered_at: (r["replan_triggered_at"] as string) ?? null,
     is_sketch: toNumeric(r["is_sketch"], 0) as number,
@@ -141,6 +143,7 @@ export function snapshotState(): StateManifest {
     expected_output: JSON.parse((r["expected_output"] as string) || "[]"),
     observability_impact: (r["observability_impact"] as string) ?? "",
     full_plan_md: (r["full_plan_md"] as string) ?? "",
+    target_repositories: parseTaskArrayColumn(r["target_repositories"]),
     sequence: toNumeric(r["sequence"], 0) as number,
     blocker_source: (r["blocker_source"] as string) ?? "",
     escalation_pending: toNumeric(r["escalation_pending"], 0) as number,

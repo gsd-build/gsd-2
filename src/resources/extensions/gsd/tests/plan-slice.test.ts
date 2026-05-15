@@ -88,6 +88,8 @@ test('handlePlanSlice writes slice/task planning state and renders plan artifact
     assert.equal(tasks[0]?.title, 'Write slice handler');
     assert.equal(tasks[0]?.description, 'Implement the slice planning handler.');
     assert.equal(tasks[1]?.estimate, '30m');
+    assert.deepEqual(slice?.target_repositories, ['project']);
+    assert.deepEqual(tasks[0]?.target_repositories, ['project']);
 
     const planPath = join(base, '.gsd', 'milestones', 'M001', 'slices', 'S02', 'S02-PLAN.md');
     assert.ok(existsSync(planPath), 'slice plan should be rendered to disk');
@@ -100,6 +102,95 @@ test('handlePlanSlice writes slice/task planning state and renders plan artifact
     assert.ok(existsSync(taskPlanPath), 'task plan should be rendered to disk');
     const taskPlan = parseTaskPlanFile(readFileSync(taskPlanPath, 'utf-8'));
     assert.deepEqual(taskPlan.frontmatter.skills_used, []);
+  } finally {
+    cleanup(base);
+  }
+});
+
+test('handlePlanSlice persists explicit slice/task target repositories', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParentSlice();
+    const params = validParams();
+    const result = await handlePlanSlice({
+      ...params,
+      targetRepositories: ['project'],
+      tasks: [
+        { ...params.tasks[0], targetRepositories: ['project'] },
+        { ...params.tasks[1], targetRepositories: ['project'] },
+      ],
+    }, base);
+    assert.ok(!('error' in result), `unexpected error: ${'error' in result ? result.error : ''}`);
+
+    const slice = getSlice('M001', 'S02');
+    const task = getTask('M001', 'S02', 'T01');
+    assert.deepEqual(slice?.target_repositories, ['project']);
+    assert.deepEqual(task?.target_repositories, ['project']);
+  } finally {
+    cleanup(base);
+  }
+});
+
+test('handlePlanSlice rejects unknown target repositories', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParentSlice();
+    const result = await handlePlanSlice({
+      ...validParams(),
+      targetRepositories: ['frontend'],
+    }, base);
+    assert.ok('error' in result);
+    assert.match(result.error, /validation failed: unknown targetRepositories:/);
+    assert.equal(getSliceTasks('M001', 'S02').length, 0, 'invalid target repositories must not persist');
+  } finally {
+    cleanup(base);
+  }
+});
+
+test('handlePlanSlice enforces absolute path scope to declared target repositories', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParentSlice();
+    mkdirSync(join(base, 'frontend'), { recursive: true });
+    mkdirSync(join(base, 'backend'), { recursive: true });
+    writeFileSync(
+      join(base, '.gsd', 'PREFERENCES.md'),
+      [
+        '---',
+        'workspace:',
+        '  mode: parent',
+        '  repositories:',
+        '    frontend:',
+        '      path: frontend',
+        '    backend:',
+        '      path: backend',
+        '---',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const badPath = join(base, 'backend', 'src', 'server.ts');
+    const result = await handlePlanSlice({
+      ...validParams(),
+      targetRepositories: ['frontend'],
+      tasks: [
+        {
+          ...validParams().tasks[0],
+          files: [badPath],
+          targetRepositories: ['frontend'],
+        },
+      ],
+    }, base);
+
+    assert.ok('error' in result);
+    assert.match(result.error, /outside allowed repository roots/);
+    assert.equal(getSliceTasks('M001', 'S02').length, 0, 'invalid scoped path must not persist');
   } finally {
     cleanup(base);
   }
@@ -267,7 +358,7 @@ test('handlePlanSlice rejects absolute task IO paths outside the active worktree
     }, base);
 
     assert.ok('error' in result);
-    assert.match(result.error, /validation failed: tasks\[0\]\.inputs contains absolute path outside working directory/);
+    assert.match(result.error, /validation failed: tasks\[0\]\.inputs contains absolute path outside allowed repository roots/);
     assert.equal(getSliceTasks('M001', 'S02').length, 0, 'invalid planning IO must not persist tasks');
   } finally {
     cleanup(base);
