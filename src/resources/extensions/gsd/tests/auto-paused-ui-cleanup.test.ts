@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { cleanupAfterLoopExit, pauseAuto, rerootCommandSession, stopAuto } from "../auto.ts";
 import { autoSession } from "../auto-runtime-state.ts";
 import { closeDatabase, insertMilestone, insertSlice, openDatabase } from "../gsd-db.ts";
+import { getAutoWorker, registerAutoWorker } from "../db/auto-workers.ts";
 import { WorktreeLifecycle } from "../worktree-lifecycle.ts";
 
 test("cleanupAfterLoopExit preserves paused auto badge after provider pause", async () => {
@@ -186,6 +187,33 @@ test("pauseAuto preserves artifact retry counts across pause/resume", async () =
     assert.equal(autoSession.verificationRetryCount.get(retryKey), 2);
   } finally {
     autoSession.reset();
+    process.chdir(previousCwd);
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("pauseAuto marks active worker as stopping and clears workerId", async () => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-pause-worker-stop-"));
+  const previousCwd = process.cwd();
+  const dbPath = join(base, ".gsd", "gsd.db");
+  mkdirSync(join(base, ".gsd"), { recursive: true });
+
+  autoSession.reset();
+  autoSession.active = true;
+
+  try {
+    openDatabase(dbPath);
+    const workerId = registerAutoWorker({ projectRootRealpath: base });
+    autoSession.workerId = workerId;
+    process.chdir(base);
+
+    await pauseAuto();
+
+    assert.equal(autoSession.workerId, null);
+    assert.equal(getAutoWorker(workerId)?.status, "stopping");
+  } finally {
+    autoSession.reset();
+    try { closeDatabase(); } catch { /* noop */ }
     process.chdir(previousCwd);
     rmSync(base, { recursive: true, force: true });
   }
