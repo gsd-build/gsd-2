@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Main entry point for the coding agent CLI.
  *
  * This file handles CLI argument parsing and translates them into
@@ -352,11 +352,56 @@ async function handleConfigCommand(args: string[]): Promise<boolean> {
 
 export async function main(args: string[]) {
 	// Catch unhandled promise rejections so the process doesn't silently disappear
-	process.on("unhandledRejection", (reason) => {
-		const message = reason instanceof Error ? reason.stack ?? reason.message : String(reason);
-		console.error(`\nFatal: unhandled promise rejection\n${message}`);
-		process.exitCode = 1;
-	});
+// Restore terminal state on ANY exit path (normal, error, signal, Ctrl+Break).
+// This is the single source-of-truth cleanup — all other handlers delegate to it.
+function restoreTerminal(): void {
+	try {
+		process.stdout.write("\x1b[<u");
+		process.stdout.write("\x1b[>4;0m");
+		process.stdout.write("\x1b[?2004l");
+		process.stdout.write("\x1b[?25h");
+		process.stdout.write("\x1b[J");
+	} catch { /* terminal may already be closed */ }
+}
+
+// Catch unhandled promise rejections — includes terminal cleanup (was missing!)
+process.on("unhandledRejection", (reason) => {
+	const message = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
+	console.error(`\nFatal: unhandled promise rejection\n${message}`);
+	restoreTerminal();
+	process.exitCode = 1;
+});
+
+// Catch uncaught exceptions and restore terminal state before crashing.
+// When the process dies without calling terminal.stop(), the Kitty keyboard
+// protocol and raw mode remain active, causing garbled CSI-u escape
+// sequences to leak into the parent shell for every subsequent keypress.
+process.on("uncaughtException", (err) => {
+	restoreTerminal();
+	const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
+	console.error(`\nFatal: uncaught exception\n${message}`);
+	process.exit(1);
+});
+
+// Catch SIGINT (Ctrl+C). On Windows, setRawMode(true) may suppress this,
+// but it doesn't hurt to have it for Unix and terminal emulators that pass it through.
+process.on("SIGINT", () => {
+	restoreTerminal();
+	console.error("\nInterrupted — terminal state restored.");
+	process.exit(130);
+});
+
+// Catch Ctrl+Break on Windows — this always fires regardless of raw mode.
+process.on("SIGBREAK", () => {
+	restoreTerminal();
+	console.error("\nInterrupted (Ctrl+Break) — terminal state restored.");
+	process.exit(130);
+});
+
+// Safety net: failsafe exit handler for normal exits and any exit code path.
+process.on("exit", () => {
+	restoreTerminal();
+});
 
 	const offlineMode = args.includes("--offline") || isTruthyEnvFlag(process.env.PI_OFFLINE);
 	if (offlineMode) {
