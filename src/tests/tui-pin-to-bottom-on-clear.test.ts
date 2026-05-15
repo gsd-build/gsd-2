@@ -224,6 +224,129 @@ describe("TUI pin-to-bottom on clear", () => {
     );
   });
 
+  it("skips fullRender when off-screen content above the viewport mutates", () => {
+    // Regression: a ticking timer (e.g. `running · Ns`) on a tool-execution
+    // card that has scrolled out of view above the viewport must NOT cause
+    // a fullRender(true) — that path writes the entire buffer (thousands of
+    // lines of transcript) to the terminal every second, producing the
+    // top-to-bottom scroll-storm visible during streaming responses.
+    const terminal = new ResizableMockTerminal(20);
+    const tui = new TUI(terminal, false);
+    // Build a transcript that vastly exceeds the viewport (20 rows).
+    const initial = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`);
+    const component = new StaticLinesComponent(initial);
+    tui.addChild(component);
+    (tui as any).doRender();
+
+    terminal.writtenData = [];
+
+    // Simulate an off-screen mutation: line 10 (well above viewport top at
+    // index 180) changes its content. previousLines length stays at 200.
+    const mutated = initial.slice();
+    mutated[10] = "line 11 tick";
+    component.lines = mutated;
+    (tui as any).doRender();
+
+    const frame = terminal.writtenData.join("");
+    // Must not clear the viewport or reposition to top.
+    assert.ok(
+      !frame.includes("\x1b[2J"),
+      `off-screen mutation must not trigger \\x1b[2J, got ${JSON.stringify(frame.slice(0, 200))}`,
+    );
+    // Must not emit the mutated line itself (it is off-screen).
+    assert.ok(
+      !frame.includes("line 11 tick"),
+      `off-screen mutated line must not be written, got ${JSON.stringify(frame.slice(0, 200))}`,
+    );
+    // Bookkeeping must be updated so the next render's diff baseline is the
+    // mutated buffer. applyLineResets appends ANSI reset/OSC suffixes, so we
+    // assert substring rather than equality.
+    assert.ok(
+      (tui as any).previousLines[10].includes("line 11 tick"),
+      `previousLines should track the mutated buffer even when no write occurs, got ${JSON.stringify((tui as any).previousLines[10])}`,
+    );
+  });
+
+  it("fullRender only emits the visible window when content exceeds viewport", () => {
+    // Regression: when a tool-execution panel (e.g. streaming Write) grows
+    // past the terminal height AND its header timer ticks once per second,
+    // the diff sees firstChanged above the viewport (header) and lastChanged
+    // inside it (new body line). That triggers fullRender(true) — which
+    // previously wrote every off-screen line to the terminal, forcing it to
+    // physically scroll through the entire buffer each second.
+    const terminal = new ResizableMockTerminal(20);
+    const tui = new TUI(terminal, false);
+    // 200-line block on a 20-row viewport. The first ~180 lines are off-screen.
+    const initial = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`);
+    const component = new StaticLinesComponent(initial);
+    tui.addChild(component);
+    (tui as any).doRender();
+
+    terminal.writtenData = [];
+
+    // Mutate both an off-screen line (10, simulating a header timer tick) and
+    // an on-screen line (195, simulating new streaming content) — this forces
+    // the fullRender path because the change spans across the viewport edge.
+    const mutated = initial.slice();
+    mutated[10] = "header tick";
+    mutated[195] = "new streamed line";
+    component.lines = mutated;
+    (tui as any).doRender();
+
+    const frame = terminal.writtenData.join("");
+    assert.ok(
+      frame.includes("\x1b[2J"),
+      `expected fullRender to clear the viewport, got ${JSON.stringify(frame.slice(0, 200))}`,
+    );
+    // Off-screen content must NOT be written to the terminal.
+    assert.ok(
+      !frame.includes("header tick"),
+      `off-screen header mutation must not be emitted, got frame of length ${frame.length}`,
+    );
+    assert.ok(
+      !frame.includes("line 1\r\n"),
+      `off-screen line 1 must not be emitted, got ${JSON.stringify(frame.slice(0, 200))}`,
+    );
+    // On-screen content must be present.
+    assert.ok(
+      frame.includes("new streamed line"),
+      `on-screen mutated line must be emitted, got ${JSON.stringify(frame.slice(-200))}`,
+    );
+    // The total number of newlines emitted in the body should be height-1 (19),
+    // not newLines.length-1 (199). Count "\r\n" separators between lines.
+    const separatorCount = (frame.match(/\r\n/g) || []).length;
+    assert.strictEqual(
+      separatorCount,
+      19,
+      `expected ${20 - 1} line separators (one viewport's worth), got ${separatorCount}`,
+    );
+  });
+
+  it("still fullRenders when the change extends from above the viewport into it", () => {
+    // Guard rail: if a change starts above the viewport but reaches into it,
+    // the visible region really did move and we still need a full redraw.
+    const terminal = new ResizableMockTerminal(20);
+    const tui = new TUI(terminal, false);
+    const initial = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`);
+    const component = new StaticLinesComponent(initial);
+    tui.addChild(component);
+    (tui as any).doRender();
+
+    terminal.writtenData = [];
+
+    // Mutate a range that spans from above-viewport (line 10) into the
+    // visible region (last 20 lines start at index 180).
+    const mutated = initial.map((line, i) => (i >= 10 && i <= 190 ? `${line}!` : line));
+    component.lines = mutated;
+    (tui as any).doRender();
+
+    const frame = terminal.writtenData.join("");
+    assert.ok(
+      frame.includes("\x1b[2J"),
+      `visible change spanning above-viewport must trigger fullRender, got ${JSON.stringify(frame.slice(0, 200))}`,
+    );
+  });
+
   it("positions hardware cursor correctly within a short bottom-anchored block", () => {
     // Gap B: verify positionHardwareCursor emits correct relative moves when
     // content is short (negative previousViewportTop) and a CURSOR_MARKER is

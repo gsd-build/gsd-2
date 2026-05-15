@@ -674,7 +674,16 @@ export class TUI extends Container {
 		const fullRender = (clear: boolean): void => {
 			this.fullRedrawCount += 1;
 			let buffer = "\x1b[?2026h"; // Begin synchronized output
-			const startRow = Math.max(1, height - Math.max(1, newLines.length) + 1);
+			// Only emit lines that will actually fit in the viewport. When the
+			// content block exceeds the terminal height, writing the entire
+			// buffer forces the terminal to physically scroll through every
+			// off-screen line on each full redraw — that is what produces the
+			// top-to-bottom scroll storm during streaming tool calls. The
+			// off-screen head was not visible anyway; once `\x1b[2J` clears the
+			// viewport, the visible window at the end is all that matters.
+			const visibleStart = Math.max(0, newLines.length - height);
+			const visibleLineCount = newLines.length - visibleStart;
+			const startRow = Math.max(1, height - visibleLineCount + 1);
 			if (clear) {
 				// Clear viewport (scrollback preserved) and anchor the rendered
 				// block to the terminal bottom so the editor / belowEditor
@@ -685,8 +694,8 @@ export class TUI extends Container {
 			} else if (startRow > 1) {
 				buffer += `\x1b[${startRow};1H`;
 			}
-			for (let i = 0; i < newLines.length; i++) {
-				if (i > 0) buffer += "\r\n";
+			for (let i = visibleStart; i < newLines.length; i++) {
+				if (i > visibleStart) buffer += "\r\n";
 				let line = newLines[i];
 				if (!isImageLine(line) && visibleWidth(line) > width) {
 					line = truncateToWidth(line, width);
@@ -848,6 +857,20 @@ export class TUI extends Container {
 		// Use previousLines.length (not maxLinesRendered) to avoid false positives after content shrinks
 		const previousContentViewportTop = getViewportTop(this.previousLines.length);
 		if (firstChanged < previousContentViewportTop) {
+			// If every change is above the viewport, nothing visible moved.
+			// Refreshing here would otherwise emit a fullRender that writes the
+			// entire buffer (potentially thousands of lines of scrolled-up
+			// transcript), and any ticking off-screen widget would re-trigger it
+			// every second. Update bookkeeping and skip the write.
+			if (lastChanged < previousContentViewportTop) {
+				this.positionHardwareCursor(cursorPos, newLines.length);
+				this.previousLines = newLines;
+				this.previousWidth = width;
+				this.previousHeight = height;
+				this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
+				this.previousViewportTop = getViewportTop(this.maxLinesRendered);
+				return;
+			}
 			// First change is above previous viewport - need full re-render
 			logRedraw(`firstChanged < viewportTop (${firstChanged} < ${previousContentViewportTop})`);
 			fullRender(true);
