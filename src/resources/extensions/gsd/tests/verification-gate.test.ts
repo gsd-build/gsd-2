@@ -159,6 +159,15 @@ describe("verification-gate: discovery", () => {
     assert.equal(result.source, "task-plan");
   });
 
+  test("taskPlanVerify splits newline-delimited commands", () => {
+    const result = discoverCommands({
+      taskPlanVerify: "npm run lint\nnpm run test",
+      cwd: tmp,
+    });
+    assert.deepStrictEqual(result.commands, ["npm run lint", "npm run test"]);
+    assert.equal(result.source, "task-plan");
+  });
+
   test("whitespace-only preference commands fall through", () => {
     writeFileSync(
       join(tmp, "package.json"),
@@ -616,6 +625,10 @@ test("isLikelyCommand: empty or whitespace-only strings are rejected", () => {
 test("isLikelyCommand: short lowercase tokens without flags are accepted (could be custom scripts)", () => {
   assert.equal(isLikelyCommand("custom-verify"), true);
   assert.equal(isLikelyCommand("mycheck"), true);
+});
+
+test("isLikelyCommand: bash negation commands are accepted", () => {
+  assert.equal(isLikelyCommand("! grep 'needle' file.txt"), true);
 });
 
 test("validateVerificationCommand rejects shell control syntax", () => {
