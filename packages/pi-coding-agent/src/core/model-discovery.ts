@@ -57,6 +57,86 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
 	}
 }
 
+const DEFAULT_OPENAI_DISCOVERY_BASE = "https://api.openai.com/v1";
+const DEFAULT_OPENROUTER_DISCOVERY_BASE = "https://openrouter.ai/api/v1";
+const DEFAULT_GOOGLE_DISCOVERY_BASE = "https://generativelanguage.googleapis.com/v1beta";
+const DEFAULT_OLLAMA_DISCOVERY_BASE = "http://localhost:11434";
+
+function trimTrailingSlashes(base: string): string {
+	return base.replace(/\/+$/, "");
+}
+
+function parseUrlOrThrow(raw: string): URL {
+	try {
+		return new URL(raw);
+	} catch {
+		throw new Error(`Invalid discovery base URL: ${raw}`);
+	}
+}
+
+function ensureTrailingSlash(base: string): string {
+	const trimmed = trimTrailingSlashes(base);
+	return `${trimmed}/`;
+}
+
+function joinUnderBase(base: string, resourcePath: string): string {
+	try {
+		return new URL(resourcePath, ensureTrailingSlash(base)).href;
+	} catch {
+		throw new Error(`Invalid discovery base URL: ${base}`);
+	}
+}
+
+/**
+ * When `trimmedBase` has no path (origin only), use `${origin}${hostOnlyPathPrefix}` as the API root.
+ * `hostOnlyPathPrefix` must start with `/` (e.g. `/v1`, `/api/v1`, `/v1beta`).
+ */
+function resolveDiscoveryRoot(trimmedBase: string, hostOnlyPathPrefix: string): string {
+	const u = parseUrlOrThrow(trimmedBase);
+	const pathNoSlash = u.pathname.replace(/\/+$/, "") || "/";
+	const isHostOnly = pathNoSlash === "/";
+	return isHostOnly ? `${u.origin}${hostOnlyPathPrefix}` : trimmedBase;
+}
+
+function openAiStyleModelsListUrl(trimmedRoot: string, hostOnlyPathPrefix: string): string {
+	return joinUnderBase(resolveDiscoveryRoot(trimmedRoot, hostOnlyPathPrefix), "models");
+}
+
+function googleDiscoveryListUrl(apiKey: string, trimmedRoot: string): string {
+	const root = resolveDiscoveryRoot(trimmedRoot, "/v1beta");
+	const list = new URL("models", ensureTrailingSlash(root));
+	list.searchParams.set("key", apiKey);
+	return list.href;
+}
+
+// ─── HTTP discovery base ─────────────────────────────────────────────────────
+
+abstract class JsonDiscoveryAdapter implements ProviderDiscoveryAdapter {
+	supportsDiscovery = true;
+	abstract readonly provider: string;
+
+	abstract defaultBase(): string;
+	abstract resolveListUrl(apiKey: string, baseUrl?: string): string;
+	abstract requestInit(apiKey: string): RequestInit;
+	abstract httpErrorApiName(): string;
+	abstract parseBody(data: unknown): DiscoveredModel[];
+
+	async fetchModels(apiKey: string, baseUrl?: string): Promise<DiscoveredModel[]> {
+		const url = this.resolveListUrl(apiKey, baseUrl);
+		const response = await fetchWithTimeout(url, this.requestInit(apiKey));
+		if (!response.ok) {
+			throw new Error(`${this.httpErrorApiName()} returned ${response.status}: ${response.statusText}`);
+		}
+		return this.parseBody(await response.json());
+	}
+}
+
+abstract class BearerJsonDiscoveryAdapter extends JsonDiscoveryAdapter {
+	requestInit(apiKey: string): RequestInit {
+		return { headers: { Authorization: `Bearer ${apiKey}` } };
+	}
+}
+
 // ─── OpenAI Adapter ──────────────────────────────────────────────────────────
 
 const OPENAI_EXCLUDED_PREFIXES = ["embedding", "tts", "dall-e", "whisper", "text-embedding", "davinci", "babbage"];
@@ -124,26 +204,30 @@ function parseOpenAICompatibleModel(rawModel: Record<string, unknown>): Discover
 	};
 }
 
-class OpenAIDiscoveryAdapter implements ProviderDiscoveryAdapter {
-	provider: string;
-	supportsDiscovery = true;
+class OpenAIDiscoveryAdapter extends BearerJsonDiscoveryAdapter {
+	readonly provider: string;
 
 	constructor(provider: string) {
+		super();
 		this.provider = provider;
 	}
 
-	async fetchModels(apiKey: string, baseUrl?: string): Promise<DiscoveredModel[]> {
-		const url = `${baseUrl ?? "https://api.openai.com"}/v1/models`;
-		const response = await fetchWithTimeout(url, {
-			headers: { Authorization: `Bearer ${apiKey}` },
-		});
+	defaultBase(): string {
+		return DEFAULT_OPENAI_DISCOVERY_BASE;
+	}
 
-		if (!response.ok) {
-			throw new Error(`OpenAI models API returned ${response.status}: ${response.statusText}`);
-		}
+	resolveListUrl(_apiKey: string, baseUrl?: string): string {
+		const root = trimTrailingSlashes(baseUrl ?? this.defaultBase());
+		return openAiStyleModelsListUrl(root, "/v1");
+	}
 
-		const data = (await response.json()) as { data?: Array<Record<string, unknown>> };
-		return (data.data ?? [])
+	httpErrorApiName(): string {
+		return "OpenAI models API";
+	}
+
+	parseBody(data: unknown): DiscoveredModel[] {
+		const payload = data as { data?: Array<Record<string, unknown>> };
+		return (payload.data ?? [])
 			.map((m) => parseOpenAICompatibleModel(m))
 			.filter((m): m is DiscoveredModel => !!m);
 	}
@@ -151,23 +235,31 @@ class OpenAIDiscoveryAdapter implements ProviderDiscoveryAdapter {
 
 // ─── Ollama Adapter ──────────────────────────────────────────────────────────
 
-class OllamaDiscoveryAdapter implements ProviderDiscoveryAdapter {
-	provider = "ollama";
-	supportsDiscovery = true;
+class OllamaDiscoveryAdapter extends JsonDiscoveryAdapter {
+	readonly provider = "ollama";
 
-	async fetchModels(_apiKey: string, baseUrl?: string): Promise<DiscoveredModel[]> {
-		const url = `${baseUrl ?? "http://localhost:11434"}/api/tags`;
-		const response = await fetchWithTimeout(url);
+	defaultBase(): string {
+		return DEFAULT_OLLAMA_DISCOVERY_BASE;
+	}
 
-		if (!response.ok) {
-			throw new Error(`Ollama tags API returned ${response.status}: ${response.statusText}`);
-		}
+	resolveListUrl(_apiKey: string, baseUrl?: string): string {
+		const root = trimTrailingSlashes(baseUrl ?? this.defaultBase());
+		return joinUnderBase(root, "api/tags");
+	}
 
-		const data = (await response.json()) as {
+	requestInit(): RequestInit {
+		return {};
+	}
+
+	httpErrorApiName(): string {
+		return "Ollama tags API";
+	}
+
+	parseBody(data: unknown): DiscoveredModel[] {
+		const payload = data as {
 			models: Array<{ name: string; size: number; details?: { parameter_size?: string } }>;
 		};
-
-		return (data.models ?? []).map((m) => ({
+		return (payload.models ?? []).map((m) => ({
 			id: m.name,
 			name: m.name,
 			input: ["text" as const],
@@ -177,21 +269,24 @@ class OllamaDiscoveryAdapter implements ProviderDiscoveryAdapter {
 
 // ─── OpenRouter Adapter ──────────────────────────────────────────────────────
 
-class OpenRouterDiscoveryAdapter implements ProviderDiscoveryAdapter {
-	provider = "openrouter";
-	supportsDiscovery = true;
+class OpenRouterDiscoveryAdapter extends BearerJsonDiscoveryAdapter {
+	readonly provider = "openrouter";
 
-	async fetchModels(apiKey: string, baseUrl?: string): Promise<DiscoveredModel[]> {
-		const url = `${baseUrl ?? "https://openrouter.ai"}/api/v1/models`;
-		const response = await fetchWithTimeout(url, {
-			headers: { Authorization: `Bearer ${apiKey}` },
-		});
+	defaultBase(): string {
+		return DEFAULT_OPENROUTER_DISCOVERY_BASE;
+	}
 
-		if (!response.ok) {
-			throw new Error(`OpenRouter models API returned ${response.status}: ${response.statusText}`);
-		}
+	resolveListUrl(_apiKey: string, baseUrl?: string): string {
+		const root = trimTrailingSlashes(baseUrl ?? this.defaultBase());
+		return openAiStyleModelsListUrl(root, "/api/v1");
+	}
 
-		const data = (await response.json()) as {
+	httpErrorApiName(): string {
+		return "OpenRouter models API";
+	}
+
+	parseBody(data: unknown): DiscoveredModel[] {
+		const payload = data as {
 			data: Array<{
 				id: string;
 				name: string;
@@ -200,8 +295,7 @@ class OpenRouterDiscoveryAdapter implements ProviderDiscoveryAdapter {
 				pricing?: { prompt: string; completion: string };
 			}>;
 		};
-
-		return (data.data ?? []).map((m) => {
+		return (payload.data ?? []).map((m) => {
 			const cost =
 				m.pricing?.prompt !== undefined && m.pricing?.completion !== undefined
 					? {
@@ -226,19 +320,28 @@ class OpenRouterDiscoveryAdapter implements ProviderDiscoveryAdapter {
 
 // ─── Google/Gemini Adapter ───────────────────────────────────────────────────
 
-class GoogleDiscoveryAdapter implements ProviderDiscoveryAdapter {
-	provider = "google";
-	supportsDiscovery = true;
+class GoogleDiscoveryAdapter extends JsonDiscoveryAdapter {
+	readonly provider = "google";
 
-	async fetchModels(apiKey: string, baseUrl?: string): Promise<DiscoveredModel[]> {
-		const url = `${baseUrl ?? "https://generativelanguage.googleapis.com"}/v1beta/models?key=${apiKey}`;
-		const response = await fetchWithTimeout(url);
+	defaultBase(): string {
+		return DEFAULT_GOOGLE_DISCOVERY_BASE;
+	}
 
-		if (!response.ok) {
-			throw new Error(`Google models API returned ${response.status}: ${response.statusText}`);
-		}
+	resolveListUrl(apiKey: string, baseUrl?: string): string {
+		const root = trimTrailingSlashes(baseUrl ?? this.defaultBase());
+		return googleDiscoveryListUrl(apiKey, root);
+	}
 
-		const data = (await response.json()) as {
+	requestInit(): RequestInit {
+		return {};
+	}
+
+	httpErrorApiName(): string {
+		return "Google models API";
+	}
+
+	parseBody(data: unknown): DiscoveredModel[] {
+		const payload = data as {
 			models: Array<{
 				name: string;
 				displayName: string;
@@ -247,8 +350,7 @@ class GoogleDiscoveryAdapter implements ProviderDiscoveryAdapter {
 				outputTokenLimit?: number;
 			}>;
 		};
-
-		return (data.models ?? [])
+		return (payload.models ?? [])
 			.filter((m) => m.supportedGenerationMethods?.includes("generateContent"))
 			.map((m) => ({
 				id: m.name.replace("models/", ""),
