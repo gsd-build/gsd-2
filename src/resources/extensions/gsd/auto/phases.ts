@@ -68,6 +68,7 @@ import { resetEvidence, loadEvidenceFromDisk } from "../safety/evidence-collecto
 import { parseUnitId } from "../unit-id.js";
 import { createCheckpoint, cleanupCheckpoint, rollbackToCheckpoint } from "../safety/git-checkpoint.js";
 import { resolveSafetyHarnessConfig } from "../safety/safety-harness.js";
+import { truncateAtSectionBoundary } from "../context-budget.js";
 import {
   getWorkflowTransportSupportError,
   getRequiredWorkflowToolsForAutoUnit,
@@ -81,6 +82,8 @@ import { buildPhaseHandoffOutcome, setAutoOutcomeWidget } from "../auto-dashboar
 import { getConsecutiveDispatchBlocker } from "../dispatch-guard.js";
 
 export const STUCK_WINDOW_SIZE = 6;
+const INLINE_CONTEXT_RATIO = 0.40;
+const VERIFICATION_RETRY_PREFIX_RE = /^\*\*VERIFICATION FAILED — AUTO-FIX ATTEMPT \d+\*\*[\s\S]*?\n\n---\n\n/;
 
 // ─── Path Comparison Helper ───────────────────────────────────────────────
 /** Compare two paths for physical identity, tolerating trailing slashes and symlinks. */
@@ -1872,6 +1875,7 @@ export async function runUnitPhase(
 
   // Prompt injection
   let finalPrompt = prompt;
+  let prependedRetryContext = false;
 
   if (unitType === "execute-task") {
     projectClassification ??= classifyProject(s.basePath);
@@ -1887,6 +1891,9 @@ export async function runUnitPhase(
   if (s.pendingVerificationRetry) {
     const retryCtx = s.pendingVerificationRetry;
     s.pendingVerificationRetry = null;
+    if (retryCtx.attempt >= 2) {
+      finalPrompt = finalPrompt.replace(VERIFICATION_RETRY_PREFIX_RE, "");
+    }
     const retrySpentChars = s.retryContextChars.get(retryCtx.unitId) ?? 0;
     const remaining = Math.max(0, MAX_RECOVERY_CHARS - retrySpentChars);
     const raw =
@@ -1898,6 +1905,7 @@ export async function runUnitPhase(
       : raw;
     s.retryContextChars.set(retryCtx.unitId, retrySpentChars + raw.length);
     if (raw.length > 0) {
+      prependedRetryContext = true;
       finalPrompt = `**VERIFICATION FAILED — AUTO-FIX ATTEMPT ${retryCtx.attempt}**\n\nThe verification gate ran after your previous attempt and found failures. Fix these issues before completing the task.\n\n${capped}\n\n---\n\n${finalPrompt}`;
     }
   }
@@ -1927,6 +1935,7 @@ export async function runUnitPhase(
           diagnostic.length > remaining
             ? raw + "\n\n[...diagnostic truncated to prevent memory exhaustion]"
             : raw;
+        prependedRetryContext = true;
         finalPrompt = `**RETRY — your previous attempt did not produce the required artifact.**\n\nDiagnostic from previous attempt:\n${cappedDiag}\n\nFix whatever went wrong and make sure you write the required file this time.\n\n---\n\n${finalPrompt}`;
       }
     }
@@ -1961,6 +1970,14 @@ export async function runUnitPhase(
       reorderErr instanceof Error ? reorderErr.message : String(reorderErr);
     logWarning("engine", "Prompt reorder failed", { error: msg });
   }
+  if (prependedRetryContext && (s.lastBaselineCharCount ?? 0) > 0) {
+    const baselineChars = s.lastBaselineCharCount ?? 0;
+    const nonBaselineChars = Math.max(0, finalPrompt.length - baselineChars);
+    const baselineBudget = Math.floor(baselineChars * INLINE_CONTEXT_RATIO);
+    const mergedPromptBudget = nonBaselineChars + baselineBudget;
+    finalPrompt = truncateAtSectionBoundary(finalPrompt, mergedPromptBudget).content;
+  }
+  s.lastPromptCharCount = finalPrompt.length;
 
   // Select and apply model (with tier escalation on retry — normal units only)
   const prevUnitRouting = s.currentUnitRouting;

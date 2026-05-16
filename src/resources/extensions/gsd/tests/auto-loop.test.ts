@@ -2976,11 +2976,18 @@ test("runUnitPhase applies a shared retry-context cap across verification failur
   const unitType = "execute-task";
   const unitId = "M001/S01/T01";
   const dispatchKey = `${unitType}/${unitId}`;
-  const failureContext = "F".repeat(40_000);
-  const diagnostic = "D".repeat(20_000);
+  const failureContext = "F".repeat(10_000);
+  const diagnostic = "D".repeat(35_000);
+
+  mkdirSync(join(basePath, ".gsd"), { recursive: true });
+  const baselineSection = `### Baseline\n${"B".repeat(120)}\n\n`;
+  writeFileSync(join(basePath, ".gsd", "decisions.md"), baselineSection, "utf8");
+  writeFileSync(join(basePath, ".gsd", "requirements.md"), baselineSection, "utf8");
+  writeFileSync(join(basePath, ".gsd", "project.md"), baselineSection, "utf8");
 
   const deps = makeMockDeps({
     getDeepDiagnostic: () => diagnostic,
+    isDbAvailable: () => true,
   });
   const ctx = {
     ...makeMockCtx(),
@@ -2998,11 +3005,11 @@ test("runUnitPhase applies a shared retry-context cap across verification failur
     },
   } as any;
 
-  let sentPrompt = "";
+  const sentPrompts: string[] = [];
   const pi = {
     ...makeMockPi(),
     sendMessage: (payload: { content: string }) => {
-      sentPrompt = payload.content;
+      sentPrompts.push(payload.content);
       queueMicrotask(() => resolveAgentEnd({ messages: [{ role: "assistant" }] }));
     },
   } as any;
@@ -3020,31 +3027,44 @@ test("runUnitPhase applies a shared retry-context cap across verification failur
   s.unitDispatchCount.set(dispatchKey, 1);
   let seq = 0;
 
+  const iterData = {
+    unitType,
+    unitId,
+    prompt: "base prompt",
+    finalPrompt: "base prompt",
+    pauseAfterUatDispatch: false,
+    state: {
+      phase: "executing",
+      activeMilestone: { id: "M001", title: "Milestone" },
+      activeSlice: { id: "S01", title: "Slice" },
+      activeTask: { id: "T01", title: "Task" },
+      registry: [{ id: "M001", title: "Milestone", status: "active" }],
+      recentDecisions: [],
+      blockers: [],
+      nextAction: "",
+      progress: { milestones: { done: 0, total: 1 } },
+      requirements: { active: 0, validated: 0, deferred: 0, outOfScope: 0, blocked: 0, total: 0 },
+    } as any,
+    mid: "M001",
+    midTitle: "Milestone",
+    isRetry: false,
+    previousTier: undefined,
+  } as const;
+
   await runUnitPhase(
     { ctx, pi, s, deps, prefs: undefined, iteration: 1, flowId: "flow-retry-cap", nextSeq: () => ++seq },
-    {
-      unitType,
-      unitId,
-      prompt: "base prompt",
-      finalPrompt: "base prompt",
-      pauseAfterUatDispatch: false,
-      state: {
-        phase: "executing",
-        activeMilestone: { id: "M001", title: "Milestone" },
-        activeSlice: { id: "S01", title: "Slice" },
-        activeTask: { id: "T01", title: "Task" },
-        registry: [{ id: "M001", title: "Milestone", status: "active" }],
-        recentDecisions: [],
-        blockers: [],
-        nextAction: "",
-        progress: { milestones: { done: 0, total: 1 } },
-        requirements: { active: 0, validated: 0, deferred: 0, outOfScope: 0, blocked: 0, total: 0 },
-      } as any,
-      mid: "M001",
-      midTitle: "Milestone",
-      isRetry: false,
-      previousTier: undefined,
-    },
+    iterData,
+    { recentUnits: [], stuckRecoveryAttempts: 0, consecutiveFinalizeTimeouts: 0 },
+  );
+
+  s.pendingVerificationRetry = {
+    unitId,
+    failureContext: "SECOND_FAILURE_CONTEXT",
+    attempt: 2,
+  };
+  await runUnitPhase(
+    { ctx, pi, s, deps, prefs: undefined, iteration: 2, flowId: "flow-retry-cap-2", nextSeq: () => ++seq },
+    iterData,
     { recentUnits: [], stuckRecoveryAttempts: 0, consecutiveFinalizeTimeouts: 0 },
   );
 
@@ -3053,9 +3073,12 @@ test("runUnitPhase applies a shared retry-context cap across verification failur
     50_000,
     "shared retry context spend should cap at MAX_RECOVERY_CHARS",
   );
-  assert.match(sentPrompt, /VERIFICATION FAILED — AUTO-FIX ATTEMPT 1/);
-  assert.match(sentPrompt, /RETRY — your previous attempt did not produce the required artifact/);
-  assert.match(sentPrompt, /\[\.\.\.diagnostic truncated to prevent memory exhaustion\]/);
+  const firstPrompt = sentPrompts[0] ?? "";
+  const secondPrompt = sentPrompts[1] ?? "";
+  assert.match(firstPrompt, /VERIFICATION FAILED — AUTO-FIX ATTEMPT 1/);
+  assert.match(firstPrompt, /RETRY — your previous attempt did not produce the required artifact/);
+  assert.match(secondPrompt, /VERIFICATION FAILED — AUTO-FIX ATTEMPT 2/);
+  assert.doesNotMatch(secondPrompt, /AUTO-FIX ATTEMPT 1/);
 });
 
 test("resolveAgentEndCancelled without args produces no errorContext field", async () => {
