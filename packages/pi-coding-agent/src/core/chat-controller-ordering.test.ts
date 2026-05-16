@@ -1569,3 +1569,73 @@ test("chat-controller: agent_end after message_end must not alter DOM", async ()
 		"agent_end after message_end must not add or remove DOM nodes",
 	);
 });
+
+test("chat-controller restores the working loader when the pinned zone tears down (#6198)", async () => {
+	// Regression (#6198): when tool output pushed assistant text off-screen, the
+	// pinned "Working · Latest Output" zone replaced the status loader and nulled
+	// host.loadingAnimation. When the terminal later grew and every pinnable
+	// candidate became visible again, the pinned zone was torn down but the loader
+	// was never rebuilt — the working animation disappeared for the rest of the
+	// turn. The teardown branch must restore the loader.
+	installTheme();
+
+	const host = createHost();
+	host.getMarkdownThemeWithSettings = () => ({});
+
+	// Stand-in for the loader created at agent_start. The pin path stops and
+	// discards it; the teardown path must build a real replacement.
+	let initialLoaderStopped = false;
+	host.loadingAnimation = {
+		stop: () => {
+			initialLoaderStopped = true;
+		},
+		setMessage: () => {},
+	};
+	host.pendingWorkingMessage = undefined;
+
+	const content = [
+		{ type: "text", text: "Analysis: inspecting the project layout before editing." },
+		{ type: "toolCall", id: "read-1", name: "read", arguments: { filePath: "a.ts" } },
+		{ type: "text", text: "trailing prose" },
+	];
+
+	await handleAgentEvent(host, { type: "message_start", message: makeAssistant([]) } as any);
+
+	// rows:1 (createHost default) keeps the off-screen threshold at its floor, so
+	// the tool segment after content[0] pushes the leading text into the pin.
+	await handleAgentEvent(host, {
+		type: "message_update",
+		message: makeAssistant(content),
+		assistantMessageEvent: {
+			type: "text_delta",
+			contentIndex: 2,
+			delta: "trailing prose",
+			partial: makeAssistant(content),
+		},
+	} as any);
+
+	assert.equal(initialLoaderStopped, true, "pinning should stop the status loader");
+	assert.equal(host.loadingAnimation, undefined, "pinning should clear host.loadingAnimation");
+
+	// Terminal grows: every candidate is back on-screen, so the next update tears
+	// the pinned zone down.
+	host.ui.terminal.rows = 200;
+
+	await handleAgentEvent(host, {
+		type: "message_update",
+		message: makeAssistant(content),
+		assistantMessageEvent: {
+			type: "text_delta",
+			contentIndex: 2,
+			delta: "trailing prose",
+			partial: makeAssistant(content),
+		},
+	} as any);
+
+	assert.ok(
+		host.loadingAnimation,
+		"tearing down the pinned zone must restore the working loader",
+	);
+
+	host.loadingAnimation?.stop?.();
+});
