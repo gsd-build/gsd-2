@@ -54,6 +54,7 @@ export interface WorktreeSafetyInput {
   unitRoot: string;
   milestoneId?: string | null;
   expectedBranch?: string | null;
+  isolationMode?: "none" | "worktree" | "branch";
   emptyWorktreeWithProjectContent?: boolean;
   lease?: {
     required: boolean;
@@ -156,6 +157,25 @@ export function createWorktreeSafetyModule(
 
       const projectRoot = resolve(input.projectRoot);
       const unitRoot = resolve(input.unitRoot);
+      const isolationMode = input.isolationMode ?? "worktree";
+      if (isolationMode === "none" || isolationMode === "branch") {
+        if (!samePath(unitRoot, projectRoot)) {
+          return failure(
+            "invalid-root",
+            `Unit root ${unitRoot} is not the project root for isolation mode ${isolationMode}.`,
+            "Dispatch source-writing Units from the project root when worktree isolation is disabled.",
+            { expectedRoot: projectRoot, unitRoot, isolationMode },
+          );
+        }
+        return {
+          ok: true,
+          kind: "safe",
+          projectRoot,
+          unitRoot,
+          milestoneId,
+        };
+      }
+
       const expectedRoot = join(projectRoot, ".gsd", "worktrees", milestoneId);
       if (!samePath(unitRoot, expectedRoot)) {
         return failure(

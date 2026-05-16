@@ -2024,6 +2024,7 @@ export function createWiredAutoOrchestrationModule(
           projectRoot: runtimeBasePath,
           unitRoot: dispatchBasePath,
           milestoneId,
+          isolationMode: getIsolationMode(runtimeBasePath),
           expectedBranch,
         });
         if (!result.ok) {
