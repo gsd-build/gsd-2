@@ -76,7 +76,8 @@ const READ_ONLY_TOOL_NAMES = new Set([
   "skill",
 ]);
 
-const READ_ONLY_EXEC_COMMAND_RE = /^\s*(cat|head|tail|ls|find|grep|rg|git\s+(status|log|show|diff|branch|remote|rev-parse|ls-files)|npm\s+(ls|list|info|view|show|outdated|audit|doctor|ping|--version|-v)|node\s+(--print|--version|-v\b)|python[23]?\s+(-c\s+'[^']*'|--version|-V\b)|jq\s|yq\s|env\b|printenv\b)/;
+const UNSAFE_SHELL_TOKENS_RE = /(?:&&|\|\||;|[<>]|`|\$\(|\n)/;
+const READ_ONLY_EXEC_COMMAND_RE = /^\s*(cat|head|tail|ls|find|grep|rg|git\s+(status|log|show|diff|branch|remote|rev-parse|ls-files)|npm\s+(ls|list|info|view|show|outdated|audit|doctor|ping|--version|-v)|node\s+(--version|-v\b)|python[23]?\s+(--version|-V\b)|jq|yq|env|printenv)\b[\w\s./:@,+-]*$/;
 
 function isReadOnlyReconnaissanceTool(call: ToolCall): boolean {
   const name = call.name.toLowerCase();
@@ -84,6 +85,7 @@ function isReadOnlyReconnaissanceTool(call: ToolCall): boolean {
   if (name !== "gsd_exec") return false;
   const command = String(call.input.command || call.input.cmd || "").trim();
   if (!command) return false;
+  if (UNSAFE_SHELL_TOKENS_RE.test(command)) return false;
   return READ_ONLY_EXEC_COMMAND_RE.test(command);
 }
 

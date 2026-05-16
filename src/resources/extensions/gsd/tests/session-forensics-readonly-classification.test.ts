@@ -31,3 +31,18 @@ test("classifyTraceProgress rejects mutating gsd_exec command", () => {
   assert.equal(result.isReadOnlyReconnaissanceOnly, false);
 });
 
+test("classifyTraceProgress rejects shell-chained gsd_exec command", () => {
+  const trace = traceWithToolCalls([
+    { name: "gsd_exec", input: { command: "cat file && echo x > y" }, isError: false },
+  ]);
+  const result = classifyTraceProgress(trace);
+  assert.equal(result.isReadOnlyReconnaissanceOnly, false);
+});
+
+test("classifyTraceProgress rejects script-eval gsd_exec command", () => {
+  const trace = traceWithToolCalls([
+    { name: "gsd_exec", input: { command: "python -c \"import pathlib; pathlib.Path('x').write_text('y')\"" }, isError: false },
+  ]);
+  const result = classifyTraceProgress(trace);
+  assert.equal(result.isReadOnlyReconnaissanceOnly, false);
+});
