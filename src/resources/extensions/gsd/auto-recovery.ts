@@ -97,6 +97,7 @@ export type ArtifactRecoveryDbRefreshResult =
 export function refreshRecoveryDbForArtifact(
   unitType: string,
   unitId: string,
+  basePath: string,
 ): ArtifactRecoveryDbRefreshResult {
   if (unitType !== "plan-slice" && unitType !== "execute-task" && unitType !== "complete-milestone") return { ok: true };
   if (!isDbAvailable()) return { ok: true };
@@ -170,6 +171,15 @@ export function refreshRecoveryDbForArtifact(
           message: `Stuck recovery found complete-milestone ${unitId} artifacts, but task ${slice.id}/${openTask.id} is still "${openTask.status}" in the DB.`,
         };
       }
+    }
+
+    if (hasImplementationArtifacts(basePath, mid) !== "present") {
+      return {
+        ok: false,
+        fatal: true,
+        reason: "complete-milestone-implementation-missing",
+        message: `Stuck recovery found complete-milestone ${unitId} artifacts, but implementation evidence is not present.`,
+      };
     }
 
     updateMilestoneStatus(mid, "complete", new Date().toISOString());
