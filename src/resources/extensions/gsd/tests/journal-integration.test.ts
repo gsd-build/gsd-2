@@ -770,7 +770,7 @@ test("runDispatch escapes Level 2 stuck stop when artifact verifies after cache 
   assert.equal(invalidateCalls, 1, "Level 2 escape should invalidate caches before rechecking artifacts");
   assert.equal(stopCalls, 0, "verified artifacts should escape Level 2 hard stop");
   assert.deepEqual(loopState.recentUnits, [], "Level 2 artifact escape should clear the stuck window");
-  assert.equal(loopState.stuckRecoveryAttempts, 0, "Level 2 artifact escape should reset the recovery counter");
+  assert.equal(loopState.stuckRecoveryAttempts, 1, "Level 2 artifact escape should preserve the recovery counter");
 });
 
 test("runUnitPhase emits unit-start and unit-end with causedBy reference", async () => {

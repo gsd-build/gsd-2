@@ -1056,7 +1056,7 @@ test("autoLoop exits on terminal complete state", async (t) => {
   );
 });
 
-test("autoLoop persists stuck counter reset when dispatch recovery continues", async () => {
+test("autoLoop preserves stuck recovery counter when dispatch recovery continues", async () => {
   _resetPendingResolve();
 
   const ctx = makeMockCtx();
@@ -1120,8 +1120,8 @@ test("autoLoop persists stuck counter reset when dispatch recovery continues", a
 
     assert.equal(
       getRuntimeKv<number>("global", basePath, "stuck_recovery_attempts"),
-      0,
-      "dispatch-level artifact recovery exits through continue, so the reset counter must still persist",
+      1,
+      "dispatch-level artifact recovery exits through continue and must preserve escalation state",
     );
   } finally {
     try { closeDatabase(); } catch { /* noop */ }
