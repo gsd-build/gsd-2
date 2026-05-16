@@ -20,6 +20,31 @@ import { GIT_NO_PROMPT_ENV } from "./git-constants.js";
 import { logWarning } from "./workflow-logger.js";
 import { nativeHasChanges } from "./native-git-bridge.js";
 
+const WINDOWS_RESERVED_BASENAMES = new Set([
+  "con",
+  "prn",
+  "aux",
+  "nul",
+  "com1",
+  "com2",
+  "com3",
+  "com4",
+  "com5",
+  "com6",
+  "com7",
+  "com8",
+  "com9",
+  "lpt1",
+  "lpt2",
+  "lpt3",
+  "lpt4",
+  "lpt5",
+  "lpt6",
+  "lpt7",
+  "lpt8",
+  "lpt9",
+]);
+
 export interface PreflightResult {
   /** true when a stash was pushed and postflightPopStash should be called */
   stashPushed: boolean;
@@ -79,6 +104,27 @@ function parseAlreadyExistsNoCheckoutPaths(text: string): string[] {
 
 function readZeroDelimitedPaths(output: string): string[] {
   return output.split("\0").filter(Boolean);
+}
+
+function listUntrackedPaths(basePath: string): string[] {
+  try {
+    const output = gitText(basePath, ["status", "--porcelain", "-z", "--untracked-files=all"]);
+    const entries = output.split("\0").filter(Boolean);
+    const untracked: string[] = [];
+    for (const entry of entries) {
+      if (entry.startsWith("?? ")) untracked.push(entry.slice(3));
+    }
+    return untracked;
+  } catch {
+    return [];
+  }
+}
+
+function hasWindowsReservedBasename(path: string): boolean {
+  const normalized = path.replace(/\\/g, "/");
+  const base = normalized.split("/").pop() ?? normalized;
+  const [name] = base.split(".", 1);
+  return WINDOWS_RESERVED_BASENAMES.has(name.toLowerCase());
 }
 
 function listStashUntrackedPaths(basePath: string, stashRef: string): string[] | null {
@@ -234,6 +280,17 @@ export function preflightCleanRoot(
   // Warn the user before stashing
   const warnMsg = `Working tree has uncommitted changes before milestone ${milestoneId} merge. Auto-stashing to allow clean merge (stash will be restored after merge).`;
   notify(warnMsg, "warning");
+
+  if (process.platform === "win32") {
+    const reservedUntracked = listUntrackedPaths(basePath).filter(hasWindowsReservedBasename);
+    if (reservedUntracked.length > 0) {
+      const reservedList = reservedUntracked.join(", ");
+      const msg = `Auto-stash blocked before milestone ${milestoneId} merge: untracked Windows reserved device name(s): ${reservedList}`;
+      logWarning("preflight", msg);
+      notify(`Auto-stash skipped before milestone ${milestoneId} merge — reserved Windows device name(s) detected: ${reservedList}`, "warning");
+      return { stashPushed: false, summary: `stash-skipped-reserved-device-names: ${reservedList}` };
+    }
+  }
 
   // Push the stash
   try {

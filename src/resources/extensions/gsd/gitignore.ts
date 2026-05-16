@@ -55,6 +55,13 @@ const BASELINE_PATTERNS = [
   // ── OS junk ──
   ".DS_Store",
   "Thumbs.db",
+  // Windows reserved device names (prevents undeletable untracked entries)
+  "nul",
+  "con",
+  "prn",
+  "aux",
+  "com[1-9]",
+  "lpt[1-9]",
 
   // ── Editor / IDE ──
   "*.swp",
