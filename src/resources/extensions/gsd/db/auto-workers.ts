@@ -250,15 +250,17 @@ function isWorkerProcessAlive(candidate: Pick<AutoWorkerRow, "host" | "pid">): b
 }
 
 /**
- * Phase C pt 2 — find the most recently active worker for a project root
- * whose heartbeat has lapsed (the "previous crashed session" indicator).
+ * Phase C pt 2 — find the most-recent active worker for a project root and
+ * return it when stale.
  *
  * Used by crash-recovery.ts:readCrashLock to detect when a prior auto-mode
- * session ended without cleanup. Workers are only treated as stale after
- * their heartbeat has lapsed and the OS PID liveness check says the process
- * is no longer alive.
+ * session ended without cleanup. Staleness is evaluated in two independent
+ * ways: (1) the worker PID is not alive via isWorkerProcessAlive(), or
+ * (2) the heartbeat has expired by HEARTBEAT_TTL_SECONDS
+ * (Date.parse(last_heartbeat_at) < cutoffMs).
  *
- * Returns null if no stale worker exists for this project root.
+ * Returns null when DB is unavailable or when no stale worker exists for this
+ * project root.
  */
 export function findStaleWorkerForProject(
   projectRootRealpath: string,
