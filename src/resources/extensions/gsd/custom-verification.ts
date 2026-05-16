@@ -166,13 +166,28 @@ function handleShellCommand(
     return "pause";
   }
 
+  // Load artifact_dir from PARAMS.json so ${GSD_ARTIFACT_DIR} resolves in
+  // shell-command verification commands.
+  let artifactDir = process.env.GSD_ARTIFACT_DIR ?? ".";
+  const paramsPath = join(runDir, "PARAMS.json");
+  if (existsSync(paramsPath) && !process.env.GSD_ARTIFACT_DIR) {
+    try {
+      const params = JSON.parse(readFileSync(paramsPath, "utf-8"));
+      if (params.artifact_dir && typeof params.artifact_dir === "string") {
+        artifactDir = params.artifact_dir;
+      }
+    } catch {
+      // Best effort — fall through to default
+    }
+  }
+
   const rewrittenCommand = rewriteCommandWithRtk(verify.command);
   const result = spawnSync("sh", ["-c", rewrittenCommand], {
     cwd: runDir,
     timeout: 30_000,
     encoding: "utf-8",
     stdio: "pipe",
-    env: { ...process.env, PATH: process.env.PATH },
+    env: { ...process.env, PATH: process.env.PATH, GSD_ARTIFACT_DIR: artifactDir },
   });
 
   if (result.status === 0) {
