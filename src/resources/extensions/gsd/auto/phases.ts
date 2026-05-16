@@ -1020,6 +1020,7 @@ export async function runPreDispatch(
     s.unitLifetimeDispatches.clear();
     loopState.recentUnits.length = 0;
     loopState.stuckRecoveryAttempts = 0;
+    persistStuckRecoveryAttempts(s, loopState);
 
     // Worktree lifecycle on milestone transition — merge current, enter next.
     // #2909 / #5538-followup: preflight stash + always-on postflight pop.
@@ -1567,6 +1568,7 @@ export async function runDispatch(
         to: derivedKey,
       });
       loopState.stuckRecoveryAttempts = 0;
+      persistStuckRecoveryAttempts(s, loopState);
     }
   }
 
