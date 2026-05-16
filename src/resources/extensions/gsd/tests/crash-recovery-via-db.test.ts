@@ -9,7 +9,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -306,4 +306,25 @@ test("clearLock marks stale worker crashed and releases held milestone lease", (
     `SELECT status FROM milestone_leases WHERE milestone_id = :m`,
   ).get({ ":m": "M001" }) as { status: string } | undefined;
   assert.equal(leaseRow?.status, "released");
+});
+
+test("clearLock marks dead lock PID worker stopping even before heartbeat expiry", (t) => {
+  const base = makeBase();
+  t.after(() => cleanup(base));
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  const projectRoot = normalizeRealPath(base);
+  const workerId = registerAutoWorker({ projectRootRealpath: projectRoot });
+  const deadPid = 99999;
+  setWorkerPid(workerId, deadPid);
+  writeFileSync(join(base, ".gsd", "auto.lock"), JSON.stringify({
+    pid: deadPid,
+    startedAt: new Date().toISOString(),
+    unitType: "starting",
+    unitId: "bootstrap",
+    unitStartedAt: new Date().toISOString(),
+  }));
+
+  clearLock(base);
+
+  assert.equal(getAutoWorker(workerId)?.status, "stopping");
 });

@@ -32,6 +32,7 @@ import {
   getAllAutoWorkers,
   markWorkerCrashed,
   markWorkerStopping,
+  markWorkerStoppingByPid,
   type AutoWorkerRow,
 } from "./db/auto-workers.js";
 import { forceReleaseLeasesForWorker } from "./db/milestone-leases.js";
@@ -216,11 +217,15 @@ export function writeLock(
  * stale session-file pointer.
  */
 export function clearLock(basePath: string): void {
+  const legacyLock = readLegacyLock(basePath);
   clearLegacyLockFile(basePath);
 
   if (!isDbAvailable()) return;
   try {
     const projectRoot = normalizeRealPath(basePath);
+    if (legacyLock?.pid) {
+      markWorkerStoppingByPid(projectRoot, legacyLock.pid);
+    }
     const staleWorker = findStaleWorkerForProject(projectRoot);
     if (staleWorker) {
       markWorkerCrashed(staleWorker.worker_id);

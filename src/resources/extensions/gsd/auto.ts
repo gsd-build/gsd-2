@@ -298,7 +298,11 @@ export type {
 import { autoSession as s } from "./auto-runtime-state.js";
 import { gsdHome } from "./gsd-home.js";
 import { createWorkspace, scopeMilestone } from "./workspace.js";
-import { registerAutoWorker, markWorkerStopping } from "./db/auto-workers.js";
+import {
+  registerAutoWorker,
+  markWorkerStopping,
+  markWorkerStoppingByPid,
+} from "./db/auto-workers.js";
 import { releaseMilestoneLease } from "./db/milestone-leases.js";
 import { normalizeRealPath } from "./paths.js";
 
@@ -869,6 +873,7 @@ export function checkRemoteAutoSession(projectRoot: string): {
 
   if (!isLockProcessAlive(lock)) {
     // Stale lock from a dead process — not a live remote session
+    markWorkerStoppingByPid(normalizeRealPath(projectRoot), lock.pid);
     return { running: false };
   }
 

@@ -19,8 +19,9 @@
 import { createRequire } from "node:module";
 import { existsSync, readFileSync, readdirSync, mkdirSync, unlinkSync, rmSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { gsdRoot } from "./paths.js";
+import { gsdRoot, normalizeRealPath } from "./paths.js";
 import { atomicWriteSync } from "./atomic-write.js";
+import { markWorkerStoppingByPid } from "./db/auto-workers.js";
 
 const _require = createRequire(import.meta.url);
 
@@ -308,7 +309,11 @@ export function acquireSessionLock(basePath: string): SessionLockResult {
   const lockDir = lockTarget + ".lock";
   if (existsSync(lockDir)) {
     const existingData = readExistingLockData(lp);
-    const isOrphan = !existingData || (existingData.pid && !isPidAlive(existingData.pid));
+    const isDeadPid = !!existingData?.pid && !isPidAlive(existingData.pid);
+    if (isDeadPid) {
+      markWorkerStoppingByPid(normalizeRealPath(basePath), existingData.pid);
+    }
+    const isOrphan = !existingData || isDeadPid;
     if (isOrphan) {
       try { rmSync(lockDir, { recursive: true, force: true }); } catch { /* best-effort */ }
       try { if (existsSync(lp)) unlinkSync(lp); } catch { /* best-effort */ }
@@ -346,7 +351,11 @@ export function acquireSessionLock(basePath: string): SessionLockResult {
     const existingPid = existingData?.pid;
 
     // If no lock file or no alive process, try to clean up and re-acquire (#1245)
-    if (!existingData || (existingPid && !isPidAlive(existingPid))) {
+    const isDeadPid = !!existingPid && !isPidAlive(existingPid);
+    if (isDeadPid) {
+      markWorkerStoppingByPid(normalizeRealPath(basePath), existingPid);
+    }
+    if (!existingData || isDeadPid) {
       try {
         const lockDir = join(lockTarget + ".lock");
         if (existsSync(lockDir)) rmSync(lockDir, { recursive: true, force: true });
@@ -401,6 +410,7 @@ function acquireFallbackLock(
         existingPid: existing.pid,
       };
     }
+    markWorkerStoppingByPid(normalizeRealPath(basePath), existing.pid);
     // Stale lock from dead process — we can take over
   }
 
