@@ -29,6 +29,27 @@ test('next is classified as multi-turn', () => {
   assert.equal(isMultiTurnHeadlessCommand('next'), true)
 })
 
+test('workflow is classified as multi-turn', () => {
+  assert.equal(isMultiTurnHeadlessCommand('workflow'), true)
+})
+
+test('compound workflow run command is classified as multi-turn', () => {
+  assert.equal(
+    isMultiTurnHeadlessCommand('workflow run test-workflow --params input=demo'),
+    true,
+  )
+})
+
+test('compound multi-turn commands require a word boundary', () => {
+  for (const cmd of ['automation', 'workflowish', 'planner', 'nextgen']) {
+    assert.equal(
+      isMultiTurnHeadlessCommand(cmd),
+      false,
+      `${cmd} should not be multi-turn`,
+    )
+  }
+})
+
 test('single-turn commands are not multi-turn', () => {
   for (const cmd of ['ask', 'chat', 'help', 'version', '', 'random-cmd']) {
     assert.equal(
