@@ -114,6 +114,8 @@ A sliding-window analysis detects stuck loops — catching cycles like A→B→A
 
 Auto mode also enforces a same-unit consecutive dispatch cap for `complete-milestone`, `validate-milestone`, and `research-slice`. The loop allows two consecutive dispatches of the same unit in the same phase and stops before a third attempt with a repeat-cap warning that instructs you to run `/gsd resume` after intervention.
 
+Auto mode also tracks consecutive dispatch-claim skips with reason `already-active`. If the same unit claim returns `already-active` 3 times in a row, auto mode pauses and requires manual recovery instead of retrying claim skips indefinitely.
+
 ### Timeout supervision
 
 | Timeout | Default | Behavior                   |

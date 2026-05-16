@@ -191,6 +191,8 @@ The sliding-window approach reduces false positives on legitimate retries (e.g.,
 
 Auto mode also enforces a same-unit consecutive dispatch cap for `complete-milestone`, `validate-milestone`, and `research-slice`. The loop allows two consecutive dispatches of the same unit in the same phase and stops before a third attempt with a repeat-cap warning that instructs you to run `/gsd resume` after intervention.
 
+Auto mode also tracks consecutive dispatch-claim skips with reason `already-active`. If the same unit claim returns `already-active` 3 times in a row, auto mode pauses and surfaces a manual-recovery warning instead of spinning indefinitely on claim retries.
+
 ### Artifact Verification Retries
 
 After each unit, GSD verifies that the expected artifact exists on disk. If the artifact is missing, auto mode re-dispatches the unit with explicit failure context and records an `artifact-verification-retry` journal event.

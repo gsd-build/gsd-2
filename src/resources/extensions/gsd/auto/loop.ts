@@ -112,6 +112,7 @@ import { handleCustomEngineReconcileOutcome } from "./workflow-custom-engine-rec
 // tolerates — same behavior as a fresh session.
 const STUCK_RECOVERY_ATTEMPTS_KEY = "stuck_recovery_attempts";
 const RECENT_UNIT_KEYS_LIMIT = 20;
+const MAX_CONSECUTIVE_ALREADY_ACTIVE_SKIPS = 3;
 
 function stableStuckStateScopeId(s: AutoSession): string {
   return normalizeRealPath(s.scope?.workspace.projectRoot ?? (s.originalBasePath || s.basePath));
@@ -292,6 +293,7 @@ export async function autoLoop(
   };
   let consecutiveErrors = 0;
   let consecutiveCooldowns = 0;
+  let consecutiveAlreadyActiveSkips = 0;
   const recentErrorMessages: string[] = [];
 
   while (s.active) {
@@ -904,15 +906,29 @@ export async function autoLoop(
       }
       if (dispatchDecision.action === "skip") {
         if (dispatchDecision.reason === "stale-lease") {
+          consecutiveAlreadyActiveSkips = 0;
           const msg = `Lost milestone lease for ${iterData.mid ?? "unknown"} while claiming ${iterData.unitType} ${iterData.unitId}; dispatch claim still failed after recovery.`;
           ctx.ui.notify(msg, "error");
           finishTurn("stopped", "execution", msg);
           await deps.stopAuto(ctx, pi, msg);
           break;
         }
+        if (dispatchDecision.reason === "already-active" || dispatchDecision.reason === "already_active") {
+          consecutiveAlreadyActiveSkips++;
+          if (consecutiveAlreadyActiveSkips >= MAX_CONSECUTIVE_ALREADY_ACTIVE_SKIPS) {
+            const msg = `Dispatch claim for ${iterData.unitType} ${iterData.unitId} remained already-active for ${consecutiveAlreadyActiveSkips} consecutive attempts. Pausing auto-mode for manual recovery.`;
+            ctx.ui.notify(msg, "error");
+            await deps.pauseAuto(ctx, pi);
+            finishTurn("paused", "manual-attention", msg);
+            break;
+          }
+        } else {
+          consecutiveAlreadyActiveSkips = 0;
+        }
         finishTurn("skipped", "execution", dispatchDecision.reason);
         continue;
       }
+      consecutiveAlreadyActiveSkips = 0;
       dispatchId = dispatchDecision.dispatchId;
 
       let unitPhaseResult: Awaited<ReturnType<typeof runUnitPhaseViaContract>>;

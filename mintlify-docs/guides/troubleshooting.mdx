@@ -28,6 +28,14 @@ It checks file structure, referential integrity, completion state consistency, g
     **Fix:** Check the task plan for clarity. Refine it manually, then `/gsd auto`.
   </Accordion>
 
+  <Accordion title="Auto mode pauses after repeated already-active dispatch claims">
+    **Symptoms:** Auto mode repeatedly skips dispatch with reason `already-active`, then pauses for manual recovery.
+
+    **Cause:** GSD pauses when the same unit hits 3 consecutive `already-active` claim skips, preventing an infinite claim-retry loop.
+
+    **Fix:** Repair the active-claim/worker state (usually `/gsd doctor` or `/gsd doctor fix`), then continue with `/gsd auto` or `/gsd resume`.
+  </Accordion>
+
   <Accordion title="Auto mode pauses after a timeout or finalize failure">
     **Symptoms:** Auto mode reports a hard timeout, finalize timeout, or post-unit closeout failure.
 

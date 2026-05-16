@@ -34,6 +34,14 @@ It checks:
 
 **Fix:** Check the task plan for clarity. If the plan is ambiguous, refine it manually, then `/gsd auto` to resume.
 
+### Auto mode pauses after repeated `already-active` dispatch claims
+
+**Symptoms:** Auto mode repeatedly skips dispatch with reason `already-active`, then pauses with a message that manual recovery is required.
+
+**Cause:** GSD treats 3 consecutive `already-active` claim skips for the same unit as a stuck claim path and pauses auto mode instead of retrying forever.
+
+**Fix:** Resolve the underlying active-claim/worker state (usually with `/gsd doctor` or `/gsd doctor fix`), then run `/gsd auto` or `/gsd resume`.
+
 ### Auto mode pauses after a timeout or finalize failure
 
 **Symptoms:** Auto mode reports a unit hard timeout, a finalize timeout, or a post-unit closeout failure.
