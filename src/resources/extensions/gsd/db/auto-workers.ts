@@ -268,7 +268,6 @@ export function findStaleWorkerForProject(
   if (!isDbAvailable()) return null;
   const db = _getAdapter()!;
   const cutoffMs = Date.now() - HEARTBEAT_TTL_SECONDS * 1000;
-  const cutoffIso = new Date(cutoffMs).toISOString();
   const row = db.prepare(
     `SELECT worker_id, host, pid, started_at, version,
             last_heartbeat_at, status, project_root_realpath
