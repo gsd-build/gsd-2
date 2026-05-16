@@ -913,7 +913,7 @@ export async function autoLoop(
           await deps.stopAuto(ctx, pi, msg);
           break;
         }
-        if (dispatchDecision.reason === "already-active") {
+        if (dispatchDecision.reason === "already-active" || dispatchDecision.reason === "already_active") {
           consecutiveAlreadyActiveSkips++;
           if (consecutiveAlreadyActiveSkips >= MAX_CONSECUTIVE_ALREADY_ACTIVE_SKIPS) {
             const msg = `Dispatch claim for ${iterData.unitType} ${iterData.unitId} remained already-active for ${consecutiveAlreadyActiveSkips} consecutive attempts. Pausing auto-mode for manual recovery.`;

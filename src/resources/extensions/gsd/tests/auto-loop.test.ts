@@ -2025,7 +2025,7 @@ test("autoLoop handles dispatch skip action by continuing", async (t) => {
   let dispatchCallCount = 0;
   // Pre-queued dispatch responses: first call returns "skip", second returns "stop"
   const dispatchResponses = [
-    { action: "skip" as const },
+    { action: "skip" as const, reason: "already-active" as const },
     { action: "stop" as const, reason: "done", level: "info" as const },
   ];
   const deps = makeMockDeps({
@@ -2050,6 +2050,10 @@ test("autoLoop handles dispatch skip action by continuing", async (t) => {
   assert.ok(
     deriveCalls.length >= 2,
     "deriveState should be called at least twice (one per iteration)",
+  );
+  assert.ok(
+    !deps.callLog.includes("pauseAuto"),
+    "single already-active skip should not pause auto-mode",
   );
 });
 
