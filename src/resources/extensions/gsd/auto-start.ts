@@ -1024,7 +1024,12 @@ export async function bootstrapAutoSession(
       s.currentMilestoneId = null;
     }
 
-    if (!hasSurvivorBranch && !deepProjectStagePending) {
+    // Custom workflow runs do not require an active milestone. They manage
+    // progression from GRAPH.yaml/runDir state instead of milestone planning
+    // state, so guided-flow discussion must not preempt them.
+    const isCustomWorkflowRun = !!s.activeEngineId && s.activeEngineId !== "dev";
+
+    if (!hasSurvivorBranch && !deepProjectStagePending && !isCustomWorkflowRun) {
       // No active work — start a new milestone via discuss flow
       if (!state.activeMilestone || state.phase === "complete") {
         // Guard against recursive dialog loop (#1348):
@@ -1099,8 +1104,8 @@ export async function bootstrapAutoSession(
       }
     }
 
-    // Unreachable safety check
-    if (!state.activeMilestone && !deepProjectStagePending) {
+    // Unreachable safety check (also guarded by isCustomWorkflowRun above)
+    if (!state.activeMilestone && !deepProjectStagePending && !isCustomWorkflowRun) {
       const { showSmartEntry } = await import("./guided-flow.js");
       await showSmartEntry(ctx, pi, base, { step: requestedStepMode });
       return releaseLockAndReturn();
