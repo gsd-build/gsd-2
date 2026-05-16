@@ -116,7 +116,11 @@ test("preflightCleanRoot — skips stash on Windows reserved untracked name", ()
   const repo = createTempRepo();
   try {
     Object.defineProperty(process, "platform", { value: "win32" });
-    writeFileSync(join(repo, "nul"), "");
+    if (originalPlatform !== "win32") {
+      writeFileSync(join(repo, "nul"), "");
+    } else {
+      writeFileSync(join(repo, "reserved-name-sentinel.txt"), "");
+    }
 
     const notifications: Array<{ msg: string; level: string }> = [];
     const result = preflightCleanRoot(repo, "M003W", (msg, level) => {

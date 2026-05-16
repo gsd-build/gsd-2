@@ -57,11 +57,17 @@ const BASELINE_PATTERNS = [
   "Thumbs.db",
   // Windows reserved device names (prevents undeletable untracked entries)
   "nul",
+  "nul.*",
   "con",
+  "con.*",
   "prn",
+  "prn.*",
   "aux",
+  "aux.*",
   "com[1-9]",
+  "com[1-9].*",
   "lpt[1-9]",
+  "lpt[1-9].*",
 
   // ── Editor / IDE ──
   "*.swp",
