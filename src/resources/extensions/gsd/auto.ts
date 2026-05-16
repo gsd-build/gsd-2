@@ -2014,7 +2014,8 @@ export function createWiredAutoOrchestrationModule(
         const safety = createWorktreeSafetyModule();
         const snapshot = await deriveState(dispatchBasePath);
         const milestoneId = snapshot.activeMilestone?.id ?? null;
-        const expectedBranch = milestoneId ? autoWorktreeBranch(milestoneId) : null;
+        const expectedBranch =
+          isolationMode === "none" ? null : milestoneId ? autoWorktreeBranch(milestoneId) : null;
         const result = safety.validateUnitRoot({
           unitType,
           unitId,

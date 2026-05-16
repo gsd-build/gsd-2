@@ -213,6 +213,8 @@ async function validateSourceWriteWorktreeSafety(
 
   const projectRoot = s.canonicalProjectRoot ?? resolveWorktreeProjectRoot(s.basePath, s.originalBasePath);
   const isolationMode = deps.getIsolationMode(projectRoot);
+  const expectedBranch =
+    isolationMode === "none" ? null : milestoneId ? deps.autoWorktreeBranch(milestoneId) : null;
 
   const safety = createWorktreeSafetyModule();
   const result = safety.validateUnitRoot({
@@ -223,7 +225,7 @@ async function validateSourceWriteWorktreeSafety(
     unitRoot: s.basePath,
     milestoneId,
     isolationMode,
-    expectedBranch: milestoneId ? deps.autoWorktreeBranch(milestoneId) : null,
+    expectedBranch,
     emptyWorktreeWithProjectContent: resolveEmptyWorktreeWithProjectContent(s.basePath, projectRoot),
     lease: s.workerId
       ? {
