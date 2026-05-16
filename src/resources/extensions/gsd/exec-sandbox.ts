@@ -118,6 +118,12 @@ function resolveCommand(runtime: ExecSandboxRequest["runtime"]): { cmd: string; 
   }
 }
 
+function sanitizeBashScriptForWindows(script: string): string {
+  if (process.platform !== "win32") return script;
+  // Git Bash can materialize literal `nul` files for NUL redirects.
+  return script.replace(/(\d*>>?) *\bNUL\b(?=\s|;|\||&|\)|$)/gi, "$1 /dev/null");
+}
+
 function tail(buf: Buffer, chars: number): string {
   if (chars <= 0) return "";
   const text = buf.toString("utf-8");
@@ -148,13 +154,14 @@ export function runExecSandbox(
 
     const timeoutMs = clampTimeout(request, opts);
     const { cmd, args } = resolveCommand(request.runtime);
+    const script = request.runtime === "bash" ? sanitizeBashScriptForWindows(request.script) : request.script;
     const env = buildChildEnv(opts);
     const useProcessGroup = process.platform !== "win32";
 
     const started = Date.now();
     let child;
     try {
-      child = spawn(cmd, [...args, request.script], {
+      child = spawn(cmd, [...args, script], {
         cwd: opts.baseDir,
         env,
         stdio: ["ignore", "pipe", "pipe"],

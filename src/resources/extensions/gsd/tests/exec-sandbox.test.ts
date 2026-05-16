@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -114,6 +114,23 @@ test('runExecSandbox: node runtime executes JS', async () => {
     assert.equal(result.exit_code, 0);
     assert.ok(result.digest.includes('node-ok:3'));
   } finally {
+    cleanup(base);
+  }
+});
+
+test('runExecSandbox: rewrites NUL redirects for bash on Windows', async () => {
+  const originalPlatform = process.platform;
+  Object.defineProperty(process, 'platform', { value: 'win32' });
+  const base = freshBase();
+  try {
+    const result = await runExecSandbox(
+      { runtime: 'bash', script: 'echo should-not-create-file > NUL' },
+      baseOpts(base),
+    );
+    assert.equal(result.exit_code, 0);
+    assert.equal(existsSync(join(base, 'NUL')), false, 'must not materialize a literal NUL file');
+  } finally {
+    Object.defineProperty(process, 'platform', { value: originalPlatform });
     cleanup(base);
   }
 });
