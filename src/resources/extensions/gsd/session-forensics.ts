@@ -64,6 +64,41 @@ export interface RecoveryBriefing {
   prompt: string;
 }
 
+const READ_ONLY_TOOL_NAMES = new Set([
+  "read",
+  "memory_query",
+  "gsd_resume",
+  "gsd_exec_search",
+  "grep",
+  "find",
+  "ls",
+  "glob",
+  "skill",
+]);
+
+const UNSAFE_SHELL_TOKENS_RE = /(?:&&|\|\||;|[<>]|`|\$\(|\n)/;
+const READ_ONLY_EXEC_COMMAND_RE = /^\s*(cat|head|tail|ls|find|grep|rg|git\s+(status|log|show|diff|branch|remote|rev-parse|ls-files)|npm\s+(ls|list|info|view|show|outdated|audit|doctor|ping|--version|-v)|node\s+(--version|-v\b)|python[23]?\s+(--version|-V\b)|jq|yq|env|printenv)\b[\w\s./:@,+-]*$/;
+
+function isReadOnlyReconnaissanceTool(call: ToolCall): boolean {
+  const name = call.name.toLowerCase();
+  if (READ_ONLY_TOOL_NAMES.has(name)) return true;
+  if (name !== "gsd_exec") return false;
+  const command = String(call.input.command || call.input.cmd || "").trim();
+  if (!command) return false;
+  if (UNSAFE_SHELL_TOKENS_RE.test(command)) return false;
+  return READ_ONLY_EXEC_COMMAND_RE.test(command);
+}
+
+export function classifyTraceProgress(trace: ExecutionTrace): { isReadOnlyReconnaissanceOnly: boolean } {
+  if (trace.toolCalls.length === 0) return { isReadOnlyReconnaissanceOnly: false };
+  for (const call of trace.toolCalls) {
+    if (!isReadOnlyReconnaissanceTool(call)) {
+      return { isReadOnlyReconnaissanceOnly: false };
+    }
+  }
+  return { isReadOnlyReconnaissanceOnly: true };
+}
+
 // ─── JSONL Parsing ────────────────────────────────────────────────────────────
 // MAX_JSONL_BYTES and parseJSONL are imported from ./jsonl-utils.js
 
@@ -543,4 +578,3 @@ function findLast<T>(arr: T[], predicate: (item: T) => boolean): T | undefined {
   }
   return undefined;
 }
-

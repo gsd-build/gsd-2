@@ -187,7 +187,7 @@ test("models wizard offers discovered models for enabled providers", async () =>
     },
     ui: {
       notify() {},
-      select: async (label: string, options: string[]) => {
+
         const choice = choices.shift();
         if (!choice && label === "GSD Preferences") return "── Save & Exit ──";
         if (!choice && options.includes("(keep current)")) return "(keep current)";

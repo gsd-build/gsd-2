@@ -442,19 +442,49 @@ function artifactValidationKind(unitType: string): "project" | "requirements" | 
   return null;
 }
 
-function describeArtifactVerificationFailure(unitType: string, unitId: string, basePath: string): string {
+const TASK_COMPLETION_TOOL_NAMES = new Set(["gsd_task_complete", "gsd_complete_task"]);
+
+function hasTaskCompletionToolCall(agentEndMessages?: unknown[] | null): boolean {
+  if (!Array.isArray(agentEndMessages)) return false;
+  for (const rawMessage of agentEndMessages) {
+    if (!rawMessage || typeof rawMessage !== "object") continue;
+    const message = rawMessage as { content?: unknown };
+    if (!Array.isArray(message.content)) continue;
+    for (const rawPart of message.content) {
+      if (!rawPart || typeof rawPart !== "object") continue;
+      const part = rawPart as { type?: unknown; name?: unknown };
+      if (part.type !== "toolCall") continue;
+      const name = String(part.name ?? "").toLowerCase();
+      if (TASK_COMPLETION_TOOL_NAMES.has(name)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function describeArtifactVerificationFailure(
+  unitType: string,
+  unitId: string,
+  basePath: string,
+  agentEndMessages?: unknown[] | null,
+): string {
   const worktreeFailure = diagnoseWorktreeIntegrityFailure(basePath);
   if (worktreeFailure) {
     return `${worktreeFailure} Unit: ${unitType} ${unitId}.`;
   }
 
   const artifactPath = resolveExpectedArtifactPath(unitType, unitId, basePath);
+  const expected = diagnoseExpectedArtifact(unitType, unitId, basePath);
   if (!artifactPath) {
     return `Artifact verification failed: ${unitType} "${unitId}" has no resolvable artifact path.`;
   }
   const relPath = relative(basePath, artifactPath);
   if (!existsSync(artifactPath)) {
-    return `Artifact verification failed: ${relPath} was not found on disk after unit execution.`;
+    const completionToolHint = unitType === "execute-task" && !hasTaskCompletionToolCall(agentEndMessages)
+      ? " No completion tool call detected (`gsd_task_complete`/alias)."
+      : "";
+    return `Artifact verification failed: ${relPath} was not found on disk after unit execution${expected ? ` (${expected})` : ""}.${completionToolHint}`;
   }
 
   const validationKind = artifactValidationKind(unitType);
@@ -469,9 +499,9 @@ function describeArtifactVerificationFailure(unitType: string, unitId: string, b
     }
   }
 
-  const expected = diagnoseExpectedArtifact(unitType, unitId, basePath);
   return `Artifact verification failed: ${relPath} exists but did not satisfy the ${unitType} completion contract${expected ? ` (${expected})` : ""}.`;
 }
+export const _describeArtifactVerificationFailureForTest = describeArtifactVerificationFailure;
 
 export async function autoCommitUnit(
   basePath: string,
@@ -1262,6 +1292,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
             s.currentUnit.type,
             s.currentUnit.id,
             s.basePath,
+            s.lastUnitAgentEndMessages,
           );
           if (attempt > MAX_ARTIFACT_VERIFICATION_RETRIES) {
             s.verificationRetryCount.delete(retryKey);
