@@ -2299,7 +2299,7 @@ test("stuck detection: window resets recovery when deriveState returns a differe
   );
 });
 
-test("stuck detection: verification retries remain visible to the sliding window", async () => {
+test("stuck detection: verification retries are not preempted while retry budget is active", async () => {
   _resetPendingResolve();
   mock.timers.enable({ apis: ["Date", "setTimeout"], now: 20_000 });
 
@@ -2313,13 +2313,12 @@ test("stuck detection: verification retries remain visible to the sliding window
     let verifyCallCount = 0;
     let stopReason = "";
 
-    // Pre-queued responses: 3 retries then a continue (exit). Failure
-    // contexts differ so this test exercises stuck-window behavior without
-    // tripping duplicate-failure suppression.
+    // Pre-queued responses: 3 retries then continue. While retry budget is
+    // active, same-unit stuck detection should stay suppressed.
     const verifyActions: Array<() => "retry" | "continue"> = [
-      () => { s.pendingVerificationRetry = { unitId: "M001/S01/T01", failureContext: "test failed: 1", attempt: 1 }; return "retry"; },
-      () => { s.pendingVerificationRetry = { unitId: "M001/S01/T01", failureContext: "test failed: 2", attempt: 2 }; return "retry"; },
-      () => { s.pendingVerificationRetry = { unitId: "M001/S01/T01", failureContext: "test failed: 3", attempt: 3 }; return "retry"; },
+      () => { s.verificationRetryCount.set("execute-task:M001/S01/T01", 1); s.pendingVerificationRetry = { unitId: "M001/S01/T01", failureContext: "missing artifact: summary", attempt: 1 }; return "retry"; },
+      () => { s.verificationRetryCount.set("execute-task:M001/S01/T01", 2); s.pendingVerificationRetry = { unitId: "M001/S01/T01", failureContext: "missing artifact: checklist", attempt: 2 }; return "retry"; },
+      () => { s.verificationRetryCount.set("execute-task:M001/S01/T01", 3); s.pendingVerificationRetry = { unitId: "M001/S01/T01", failureContext: "missing artifact: notes", attempt: 3 }; return "retry"; },
       () => { s.active = false; return "continue"; },
     ];
 
@@ -2354,9 +2353,9 @@ test("stuck detection: verification retries remain visible to the sliding window
 
     const loopPromise = autoLoop(ctx, pi, s, deps);
 
-    // Resolve agent_end for 3 attempts. The 4th iteration should stop before
-    // dispatch because retry dispatches stay visible to stuck detection.
-    for (let i = 1; i <= 3; i++) {
+    // Resolve agent_end for all 4 iterations. We should not stop early as
+    // stuck while retries are still in policy range.
+    for (let i = 1; i <= 4; i++) {
       await waitForMicrotasks(() => pi.calls.length === i, `dispatch ${i}`);
       resolveAgentEnd(makeEvent());
       await drainMicrotasks(100);
@@ -2365,15 +2364,8 @@ test("stuck detection: verification retries remain visible to the sliding window
 
     await loopPromise;
 
-    assert.ok(
-      stopReason.includes("Stuck"),
-      `stuck detection should fire during repeated verification retries, got: ${stopReason}`,
-    );
-    assert.equal(
-      verifyCallCount,
-      3,
-      "verification should stop before a 4th repeated retry dispatch",
-    );
+    assert.equal(stopReason, "", `stuck detection should not preempt bounded verification retries, got: ${stopReason}`);
+    assert.ok(verifyCallCount >= 4, "verification retries should continue through the bounded retry window");
   } finally {
     mock.timers.reset();
   }

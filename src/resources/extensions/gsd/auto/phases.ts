@@ -16,6 +16,7 @@ import type { LoopDeps } from "./loop-deps.js";
 import {
   USER_DRIVEN_DEEP_UNITS,
   isAwaitingUserInput,
+  MAX_ARTIFACT_VERIFICATION_RETRIES,
   type PostUnitContext,
   type PreVerificationOpts,
 } from "../auto-post-unit.js";
@@ -1384,7 +1385,20 @@ export async function runDispatch(
   loopState.recentUnits.push({ key: derivedKey });
   if (loopState.recentUnits.length > STUCK_WINDOW_SIZE) loopState.recentUnits.shift();
 
-  const stuckSignal = detectStuck(loopState.recentUnits);
+  const unitVerificationRetryKey = `${unitType}:${unitId}`;
+  const activeVerificationRetryAttempt = s.verificationRetryCount.get(unitVerificationRetryKey);
+  const isAttemptNumber = typeof activeVerificationRetryAttempt === "number"
+    && Number.isFinite(activeVerificationRetryAttempt);
+  const hasActiveVerificationRetry = s.pendingVerificationRetry?.unitId === unitId
+    && isAttemptNumber
+    && activeVerificationRetryAttempt >= 1;
+  const stuckSignal = detectStuck(loopState.recentUnits, hasActiveVerificationRetry
+    ? {
+        suppressSameUnitKey: derivedKey,
+        currentAttempt: activeVerificationRetryAttempt,
+        suppressSameUnitUntilAttempt: MAX_ARTIFACT_VERIFICATION_RETRIES,
+      }
+    : undefined);
   if (stuckSignal) {
       debugLog("autoLoop", {
         phase: "stuck-check",

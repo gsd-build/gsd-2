@@ -57,6 +57,11 @@ function retryBudgetSuppresses(unitKey: string): boolean {
  */
 export function detectStuck(
   window: readonly WindowEntry[],
+  options?: {
+    suppressSameUnitKey?: string;
+    suppressSameUnitUntilAttempt?: number;
+    currentAttempt?: number;
+  },
 ): { stuck: true; reason: string } | null {
   if (window.length < 2) return null;
 
@@ -80,9 +85,22 @@ export function detectStuck(
 
   // Rule 2: Same unit 3+ consecutive times — suppressed if unit_dispatches
   // says we're inside the retry-backoff window (codex MEDIUM B3).
+  const currentAttempt = options?.currentAttempt;
+  const suppressUntilAttempt = options?.suppressSameUnitUntilAttempt;
+  const suppressSameUnitStuck = Boolean(
+    options?.suppressSameUnitKey
+      && options.suppressSameUnitKey === last.key
+      && Number.isFinite(currentAttempt)
+      && Number.isFinite(suppressUntilAttempt)
+      && currentAttempt <= suppressUntilAttempt,
+  );
   if (window.length >= 3) {
     const lastThree = window.slice(-3);
-    if (lastThree.every((u) => u.key === last.key) && !retryBudgetSuppresses(last.key)) {
+    if (
+      lastThree.every((u) => u.key === last.key)
+      && !suppressSameUnitStuck
+      && !retryBudgetSuppresses(last.key)
+    ) {
       return {
         stuck: true,
         reason: `${last.key} derived 3 consecutive times without progress${suffix}`,
@@ -93,7 +111,7 @@ export function detectStuck(
   // Rule 2b: Same unit key 3+ times anywhere in the active window — same
   // retry-budget suppression as Rule 2.
   const countInWindow = window.filter((entry) => entry.key === last.key).length;
-  if (countInWindow >= 3 && !retryBudgetSuppresses(last.key)) {
+  if (countInWindow >= 3 && !suppressSameUnitStuck && !retryBudgetSuppresses(last.key)) {
     return {
       stuck: true,
       reason: `${last.key} derived ${countInWindow} times in last ${window.length} attempts without progress${suffix}`,
