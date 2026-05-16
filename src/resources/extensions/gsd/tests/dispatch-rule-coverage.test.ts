@@ -249,6 +249,51 @@ test("dispatch-rule-coverage: executing with task plan present → execute-task"
   );
 });
 
+test("dispatch-rule-coverage: executing honors pending verification retry unit", async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), "gsd-disp-cov-exec-retry-"));
+  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+
+  writeMilestoneFile(tmp, "M001", "CONTEXT", "# Context\n");
+  writeSliceFile(tmp, "M001", "S01", "PLAN", "# Plan\n");
+  writeTaskPlan(tmp, "M001", "S01", "T01");
+  writeTaskPlan(tmp, "M001", "S01", "T02");
+
+  const state = makeState({
+    phase: "executing",
+    activeSlice: { id: "S01", title: "First Slice" },
+    activeTask: { id: "T02", title: "Second Task" },
+  });
+  const ctx: DispatchContext = {
+    basePath: tmp,
+    mid: "M001",
+    midTitle: "Test Milestone",
+    state,
+    prefs: { reactive_execution: { enabled: false } } as DispatchContext["prefs"],
+    session: {
+      pendingVerificationRetry: {
+        unitId: "M001/S01/T01",
+        attempt: 2,
+        failureContext: "verification failed",
+      },
+    } as DispatchContext["session"],
+  };
+  const match = await findFirstMatch(ctx);
+  assertMatch(
+    match,
+    {
+      ruleName: "executing → execute-task",
+      action: "dispatch",
+      unitType: "execute-task",
+    },
+    "executing pending verification retry",
+  );
+  assert.equal(
+    match?.result.action === "dispatch" ? match.result.unitId : null,
+    "M001/S01/T01",
+    "executing pending verification retry: should redispatch the retry unit",
+  );
+});
+
 test("dispatch-rule-coverage: summarizing → complete-slice", async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), "gsd-disp-cov-sum-"));
   t.after(() => rmSync(tmp, { recursive: true, force: true }));
