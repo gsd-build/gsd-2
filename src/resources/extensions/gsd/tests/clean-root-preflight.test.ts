@@ -111,6 +111,37 @@ test("preflightCleanRoot — untracked file triggers stash with --include-untrac
   }
 });
 
+test("preflightCleanRoot — skips stash on Windows reserved untracked name", () => {
+  const originalPlatform = process.platform;
+  const repo = createTempRepo();
+  try {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    if (originalPlatform !== "win32") {
+      writeFileSync(join(repo, "nul"), "");
+    } else {
+      writeFileSync(join(repo, "reserved-name-sentinel.txt"), "");
+    }
+
+    const notifications: Array<{ msg: string; level: string }> = [];
+    const result = preflightCleanRoot(repo, "M003W", (msg, level) => {
+      notifications.push({ msg, level });
+    });
+
+    assert.equal(result.stashPushed, false, "stash must be skipped for reserved Windows names");
+    assert.match(result.summary, /stash-skipped-reserved-device-names/);
+    assert.ok(
+      notifications.some((n) => n.level === "warning" && n.msg.includes("reserved Windows device name")),
+      "warning notification must mention reserved Windows device names",
+    );
+    Object.defineProperty(process, "platform", { value: originalPlatform });
+    const stashList = run("git stash list", repo);
+    assert.equal(stashList, "", "no stash entry should be created");
+  } finally {
+    Object.defineProperty(process, "platform", { value: originalPlatform });
+    try { rmSync(repo, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* ignore */ }
+  }
+});
+
 // ── postflightPopStash: restores stashed changes ──────────────────────────
 
 test("postflightPopStash — restores stashed changes and emits info notification", () => {

@@ -60,4 +60,18 @@ describe('ensureGitignore writes .bg-shell/ baseline (#4902)', () => {
       cleanup(dir);
     }
   });
+
+  test('adds Windows reserved device-name patterns', () => {
+    const dir = makeTmpRepo();
+    try {
+      ensureGitignore(dir);
+      const ignore = fs.readFileSync(path.join(dir, '.gitignore'), 'utf-8');
+      const lines = new Set(ignore.split('\n').map((l) => l.trim()).filter(Boolean));
+      for (const pattern of ['nul', 'nul.*', 'con', 'con.*', 'prn', 'prn.*', 'aux', 'aux.*', 'com[1-9]', 'com[1-9].*', 'lpt[1-9]', 'lpt[1-9].*']) {
+        assert.ok(lines.has(pattern), `missing Windows reserved pattern: ${pattern}`);
+      }
+    } finally {
+      cleanup(dir);
+    }
+  });
 });
