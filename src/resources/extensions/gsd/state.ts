@@ -464,13 +464,11 @@ async function buildRegistryAndFindActive(
       }
 
       if (allSlicesDone) {
-        const validation = getLatestAssessmentByScope(m.id, "milestone-validation");
-        const verdict = typeof validation?.status === "string" ? validation.status : undefined;
-        if (verdict === "needs-attention") {
-          registry.push({ id: m.id, title, status: "parked", ...(deps.length > 0 ? { dependsOn: deps } : {}) });
-          continue;
-        }
-
+        // needs-attention must NOT be silently parked here. Doing so produces a
+        // phantom pre-planning phase when this is the only candidate, hiding the
+        // actionable blocker from the operator (#6137 supersedes the #6136 fix).
+        // Fall through to the active-milestone path so handleAllSlicesDone returns
+        // phase: 'blocked' with the validation-findings remediation guidance.
         activeMilestone = { id: m.id, title };
         activeMilestoneSlices = slices;
         activeMilestoneFound = true;
@@ -589,19 +587,24 @@ async function handleAllSlicesDone(
     };
   }
 
-  // All roadmap slices are done (enforced by caller) and verdict is
-  // needs-remediation — remediation cannot progress without new slices.
-  // Return blocked instead of re-dispatching validate-milestone (#4506).
-  if (verdict === 'needs-remediation') {
+  // All roadmap slices are done (enforced by caller) and verdict is terminal-blocking.
+  // - needs-remediation: cannot progress without new slices (#4506).
+  // - needs-attention: cannot progress without operator review of validation findings (#6137).
+  // Both must return blocked to avoid the dispatch guard rejecting completing-milestone
+  // on every tick, which produces a phantom completing-milestone phase that stops auto-mode.
+  if (verdict === 'needs-remediation' || verdict === 'needs-attention') {
+    const remediation = verdict === 'needs-remediation'
+      ? `Add remediation slices via gsd_reassess_roadmap, or run \`/gsd verdict pass --rationale "..."\` to override.`
+      : `Address the validation findings and re-run validation, or run \`/gsd verdict pass --rationale "..."\` to override.`;
+    const nextActionSuffix = verdict === 'needs-remediation' ? 'remediation' : 'validation findings';
     return {
       activeMilestone, activeSlice: null, activeTask: null,
       phase: 'blocked',
       recentDecisions: [],
       blockers: [
-        `Milestone ${activeMilestone.id} validation verdict is needs-remediation but all slices are complete. ` +
-          `Add remediation slices via gsd_reassess_roadmap, or run \`/gsd verdict pass --rationale "..."\` to override.`,
+        `Milestone ${activeMilestone.id} validation verdict is ${verdict} but all slices are complete. ${remediation}`,
       ],
-      nextAction: `Resolve ${activeMilestone.id} remediation before proceeding.`,
+      nextAction: `Resolve ${activeMilestone.id} ${nextActionSuffix} before proceeding.`,
       registry, requirements,
       progress: { milestones: milestoneProgress, slices: sliceProgress },
     };
@@ -1096,10 +1099,9 @@ export async function _deriveStateImpl(
       const validationContent = validationFile ? await cachedLoadFile(validationFile) : null;
       const validationTerminal = validationContent ? isValidationTerminal(validationContent) : false;
       const verdict = validationContent ? extractVerdict(validationContent) : undefined;
-      if (verdict === "needs-attention") {
-        registry.push({ id: mid, title, status: "parked" });
-        continue;
-      }
+      // needs-attention must NOT be silently parked here either (#6137 supersedes #6136).
+      // Fall through to the active-milestone path so the downstream guard returns
+      // phase: 'blocked' with actionable resolution text.
       // needs-remediation is terminal but requires re-validation (#3596)
       const needsRevalidation = !validationTerminal || verdict === 'needs-remediation';
 
@@ -1331,7 +1333,14 @@ export async function _deriveStateImpl(
       };
     }
 
-    if (verdict === 'needs-remediation') {
+    // needs-remediation and needs-attention both block completion (#4506, #6137).
+    // Without this guard auto-mode falls through to completing-milestone, then the
+    // dispatch guard rejects it on every tick — a phantom phase that stops auto-mode.
+    if (verdict === 'needs-remediation' || verdict === 'needs-attention') {
+      const remediation = verdict === 'needs-remediation'
+        ? `Add remediation slices via gsd_reassess_roadmap, or run \`/gsd verdict pass --rationale "..."\` to override.`
+        : `Address the validation findings and re-run validation, or run \`/gsd verdict pass --rationale "..."\` to override.`;
+      const nextActionSuffix = verdict === 'needs-remediation' ? 'remediation' : 'validation findings';
       return {
         activeMilestone,
         activeSlice: null,
@@ -1339,10 +1348,9 @@ export async function _deriveStateImpl(
         phase: 'blocked',
         recentDecisions: [],
         blockers: [
-          `Milestone ${activeMilestone.id} validation verdict is needs-remediation but all slices are complete. ` +
-            `Add remediation slices via gsd_reassess_roadmap, or run \`/gsd verdict pass --rationale "..."\` to override.`,
+          `Milestone ${activeMilestone.id} validation verdict is ${verdict} but all slices are complete. ${remediation}`,
         ],
-        nextAction: `Resolve ${activeMilestone.id} remediation before proceeding.`,
+        nextAction: `Resolve ${activeMilestone.id} ${nextActionSuffix} before proceeding.`,
         registry,
         requirements,
         progress: {
