@@ -37,13 +37,13 @@ test("#2007 bug 1: retry state can represent each allowed attempt before exhaust
     s.verificationRetryCount.set(retryKey, attempt);
     s.pendingVerificationRetry = {
       unitId: "M001/S01/T01",
-      failureContext: `Missing expected artifact (attempt ${attempt}/${MAX_ARTIFACT_VERIFICATION_RETRIES}).`,
+      failureContext: "Missing expected artifact.",
       attempt,
     };
 
     assert.equal(s.verificationRetryCount.get(retryKey), attempt);
     assert.equal(s.pendingVerificationRetry.attempt, attempt);
-    assert.match(s.pendingVerificationRetry.failureContext, /attempt \d\/3/);
+    assert.equal(s.pendingVerificationRetry.failureContext, "Missing expected artifact.");
   }
 });
 
@@ -66,7 +66,7 @@ test("#2007 bug 2: pendingVerificationRetry state is available for dispatch regr
   const s = new AutoSession();
   s.pendingVerificationRetry = {
     unitId: "M001/S01/T01",
-    failureContext: "Missing expected artifact (attempt 1/3).",
+    failureContext: "Missing expected artifact.",
     attempt: 1,
   };
 

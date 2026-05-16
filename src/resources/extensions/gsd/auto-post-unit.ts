@@ -1277,7 +1277,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
           s.verificationRetryCount.set(retryKey, attempt);
           s.pendingVerificationRetry = {
             unitId: s.currentUnit.id,
-            failureContext: `${failureDetails} (attempt ${attempt}/${MAX_ARTIFACT_VERIFICATION_RETRIES}).`,
+            failureContext: `${failureDetails}.`,
             attempt,
           };
           debugLog("postUnit", { phase: "artifact-verify-retry", unitType: s.currentUnit.type, unitId: s.currentUnit.id, attempt });
