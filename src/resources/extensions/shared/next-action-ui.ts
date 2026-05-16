@@ -45,6 +45,7 @@ import type { ExtensionCommandContext } from "@gsd/pi-coding-agent";
 import { type Theme } from "@gsd/pi-coding-agent";
 import { Key, matchesKey, type TUI } from "@gsd/pi-tui";
 import { makeUI } from "./ui.js";
+import { isInteractiveUIContext } from "./ui-context.js";
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -122,7 +123,7 @@ export async function showNextAction(
 	// to undefined immediately, and ctx.ui.select() does the same. Skip both and
 	// return the safe default so callers don't await two no-op promises before
 	// reaching a deterministic "not_yet". Lockup #5125 root protection.
-	if (!ctx.hasUI) {
+	if (!isInteractiveUIContext(ctx)) {
 		return "not_yet";
 	}
 

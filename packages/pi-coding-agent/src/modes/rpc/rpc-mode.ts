@@ -213,6 +213,8 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 	 * Create an extension UI context that uses the RPC protocol.
 	 */
 	const createExtensionUIContext = (): ExtensionUIContext => ({
+		mode: "rpc",
+
 		select: (title, options, opts) =>
 			createDialogPromise(opts, undefined, { method: "select", title, options, timeout: opts?.timeout, allowMultiple: opts?.allowMultiple }, (r) =>
 				"cancelled" in r && r.cancelled ? undefined : "values" in r ? r.values : "value" in r ? r.value : undefined,
@@ -407,7 +409,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 		setToolsExpanded(_expanded: boolean) {
 			// Tool expansion not supported in RPC mode - no TUI
 		},
-	});
+	} as ExtensionUIContext & { mode: "rpc" });
 
 	// Set up extensions with RPC-based UI context.
 	// Do not block the initial RPC handshake on extension session_start hooks:
