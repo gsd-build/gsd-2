@@ -273,26 +273,28 @@ export function findStaleWorkerForProject(
      FROM workers
      WHERE project_root_realpath = :project_root
        AND status = 'active'
-       AND last_heartbeat_at < :cutoff
      ORDER BY started_at DESC
      LIMIT 1`,
-  ).get({ ":project_root": projectRootRealpath, ":cutoff": cutoffIso }) as AutoWorkerRow | undefined;
+  ).get({ ":project_root": projectRootRealpath }) as AutoWorkerRow | undefined;
   if (row && !isWorkerProcessAlive(row)) return row;
+  if (row && Date.parse(row.last_heartbeat_at) < cutoffMs) return row;
 
   // Older rows and external fixtures may have captured a non-realpath spelling
   // of the same project root, e.g. /var/... vs /private/var/... on macOS.
   const canonicalProjectRoot = normalizeRealPath(projectRootRealpath);
-  const staleRows = db.prepare(
+  const activeRows = db.prepare(
     `SELECT worker_id, host, pid, started_at, version,
             last_heartbeat_at, status, project_root_realpath
      FROM workers
      WHERE status = 'active'
-       AND last_heartbeat_at < :cutoff
      ORDER BY started_at DESC`,
-  ).all({ ":cutoff": cutoffIso }) as unknown as AutoWorkerRow[];
-  return staleRows.find(
+  ).all() as unknown as AutoWorkerRow[];
+  return activeRows.find(
     (candidate) =>
       normalizeRealPath(candidate.project_root_realpath) === canonicalProjectRoot
-      && !isWorkerProcessAlive(candidate),
+      && (
+        !isWorkerProcessAlive(candidate)
+        || Date.parse(candidate.last_heartbeat_at) < cutoffMs
+      ),
   ) ?? null;
 }

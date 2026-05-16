@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 
 import { openDatabase, closeDatabase } from "../gsd-db.ts";
 import { _getAdapter } from "../gsd-db.ts";
@@ -16,6 +16,7 @@ import {
   markWorkerStoppingByPid,
   getActiveAutoWorkers,
   getAutoWorker,
+  findStaleWorkerForProject,
 } from "../db/auto-workers.ts";
 
 function makeBase(): string {
@@ -115,4 +116,34 @@ test("getActiveAutoWorkers filters by status and TTL", (t) => {
   const after = getActiveAutoWorkers();
   assert.equal(after.length, 1);
   assert.equal(after[0].worker_id, b);
+});
+
+test("findStaleWorkerForProject returns dead PID even with fresh heartbeat", (t) => {
+  const base = makeBase();
+  t.after(() => cleanup(base));
+  openDatabase(join(base, ".gsd", "gsd.db"));
+
+  const workerId = "auto-dead-pid-fresh-heartbeat";
+  const now = new Date().toISOString();
+  _getAdapter()!.prepare(
+    `INSERT INTO workers (
+      worker_id, host, pid, started_at, version,
+      last_heartbeat_at, status, project_root_realpath
+    ) VALUES (
+      :worker_id, :host, :pid, :started_at, :version,
+      :last_heartbeat_at, 'active', :project_root_realpath
+    )`,
+  ).run({
+    ":worker_id": workerId,
+    ":host": hostname(),
+    ":pid": 9_999_999,
+    ":started_at": now,
+    ":version": "1",
+    ":last_heartbeat_at": now,
+    ":project_root_realpath": base,
+  });
+
+  const stale = findStaleWorkerForProject(base);
+  assert.ok(stale, "dead PID should be surfaced immediately");
+  assert.equal(stale!.worker_id, workerId);
 });
