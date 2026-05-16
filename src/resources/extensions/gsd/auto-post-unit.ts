@@ -20,6 +20,7 @@ import { loadFile, parseSummary, resolveAllOverrides } from "./files.js";
 import { loadPrompt } from "./prompt-loader.js";
 import { isAwaitingUserInput } from "./user-input-boundary.js";
 import {
+  resolveMilestonePath,
   resolveSliceFile,
   resolveSlicePath,
   resolveTaskFile,
@@ -129,6 +130,36 @@ function stripKnownIdPrefix(value: string | undefined | null, id: string): strin
   const idLower = id.toLowerCase();
   if (lower.startsWith(`${idLower}:`)) return raw.slice(id.length + 1).trim() || undefined;
   return raw;
+}
+
+function resolveVerificationFailureMarkerPath(
+  unitType: string,
+  unitId: string,
+  basePath: string,
+): string | null {
+  const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
+  switch (unitType) {
+    case "complete-milestone": {
+      const existing = resolveMilestoneFile(basePath, mid, "VERIFICATION-FAILED");
+      if (existing) return existing;
+      const milestoneDir = resolveMilestonePath(basePath, mid);
+      return milestoneDir ? join(milestoneDir, `${mid}-VERIFICATION-FAILED.md`) : null;
+    }
+    case "complete-slice": {
+      const existing = resolveSliceFile(basePath, mid, sid!, "VERIFICATION-FAILED");
+      if (existing) return existing;
+      const sliceDir = resolveSlicePath(basePath, mid, sid!);
+      return sliceDir ? join(sliceDir, `${sid}-VERIFICATION-FAILED.md`) : null;
+    }
+    case "execute-task": {
+      const existing = resolveTaskFile(basePath, mid, sid!, tid!, "VERIFICATION-FAILED");
+      if (existing) return existing;
+      const tasksDir = resolveTasksDir(basePath, mid, sid!);
+      return tasksDir ? join(tasksDir, buildTaskFileName(tid!, "VERIFICATION-FAILED")) : null;
+    }
+    default:
+      return null;
+  }
 }
 
 async function buildTaskCommitContextForUnit(
@@ -1257,6 +1288,24 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
         const hasExpectedArtifact = resolveExpectedArtifactPath(s.currentUnit.type, s.currentUnit.id, s.basePath) !== null;
         if (hasExpectedArtifact) {
           const retryKey = `${s.currentUnit.type}:${s.currentUnit.id}`;
+          const verificationFailureMarker = resolveVerificationFailureMarkerPath(s.currentUnit.type, s.currentUnit.id, s.basePath);
+          if (verificationFailureMarker && existsSync(verificationFailureMarker)) {
+            s.pendingVerificationRetry = null;
+            s.verificationRetryCount.delete(retryKey);
+            s.verificationRetryFailureHashes.delete(retryKey);
+            debugLog("postUnit", {
+              phase: "artifact-verify-failure-marker-detected",
+              unitType: s.currentUnit.type,
+              unitId: s.currentUnit.id,
+              markerPath: verificationFailureMarker,
+            });
+            ctx.ui.notify(
+              `${s.currentUnit.type} ${s.currentUnit.id} declined closeout (see ${relative(s.basePath, verificationFailureMarker)}). Pausing for human review.`,
+              "error",
+            );
+            await pauseAuto(ctx, pi);
+            return "dispatched";
+          }
           const attempt = (s.verificationRetryCount.get(retryKey) ?? 0) + 1;
           const failureDetails = describeArtifactVerificationFailure(
             s.currentUnit.type,
