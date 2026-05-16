@@ -251,13 +251,11 @@ function isWorkerProcessAlive(candidate: Pick<AutoWorkerRow, "host" | "pid">): b
 
 /**
  * Phase C pt 2 — find the most-recent active worker for a project root and
- * return it when stale.
+ * return it when its PID is stale.
  *
  * Used by crash-recovery.ts:readCrashLock to detect when a prior auto-mode
- * session ended without cleanup. Staleness is evaluated in two independent
- * ways: (1) the worker PID is not alive via isWorkerProcessAlive(), or
- * (2) the heartbeat has expired by HEARTBEAT_TTL_SECONDS
- * (Date.parse(last_heartbeat_at) < cutoffMs).
+ * session ended without cleanup. A dead PID is enough to mark the worker
+ * stale immediately; the heartbeat TTL must not hide a crashed process.
  *
  * Returns null when DB is unavailable or when no stale worker exists for this
  * project root.
@@ -267,7 +265,6 @@ export function findStaleWorkerForProject(
 ): AutoWorkerRow | null {
   if (!isDbAvailable()) return null;
   const db = _getAdapter()!;
-  const cutoffMs = Date.now() - HEARTBEAT_TTL_SECONDS * 1000;
   const row = db.prepare(
     `SELECT worker_id, host, pid, started_at, version,
             last_heartbeat_at, status, project_root_realpath
@@ -278,7 +275,6 @@ export function findStaleWorkerForProject(
      LIMIT 1`,
   ).get({ ":project_root": projectRootRealpath }) as AutoWorkerRow | undefined;
   if (row && !isWorkerProcessAlive(row)) return row;
-  if (row && Date.parse(row.last_heartbeat_at) < cutoffMs) return row;
 
   // Older rows and external fixtures may have captured a non-realpath spelling
   // of the same project root, e.g. /var/... vs /private/var/... on macOS.
@@ -293,9 +289,6 @@ export function findStaleWorkerForProject(
   return activeRows.find(
     (candidate) =>
       normalizeRealPath(candidate.project_root_realpath) === canonicalProjectRoot
-      && (
-        !isWorkerProcessAlive(candidate)
-        || Date.parse(candidate.last_heartbeat_at) < cutoffMs
-      ),
+      && !isWorkerProcessAlive(candidate),
   ) ?? null;
 }
