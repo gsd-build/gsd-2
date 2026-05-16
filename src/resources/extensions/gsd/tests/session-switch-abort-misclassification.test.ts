@@ -205,7 +205,10 @@ test("missing agent_end content is classified as empty abort content", () => {
   assert.equal(_hasEmptyAgentEndContent(undefined), true);
   assert.equal(_hasEmptyAgentEndContent(null), true);
   assert.equal(_hasEmptyAgentEndContent([]), true);
+  assert.equal(_hasEmptyAgentEndContent([{ type: "text", text: "" }]), true);
+  assert.equal(_hasEmptyAgentEndContent([{ type: "text", text: "   " }]), true);
   assert.equal(_hasEmptyAgentEndContent([{ type: "text", text: "partial" }]), false);
+  assert.equal(_hasEmptyAgentEndContent([{ type: "thinking", text: "" }]), false);
 });
 
 test("completed assistant content with aborted stopReason during session-switch is ignored", () => {

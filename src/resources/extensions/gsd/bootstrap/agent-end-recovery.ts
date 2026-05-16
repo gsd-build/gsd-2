@@ -51,7 +51,15 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function _hasEmptyAgentEndContent(content: unknown): boolean {
-  return content == null || (Array.isArray(content) && content.length === 0);
+  if (content == null) return true;
+  if (!Array.isArray(content)) return false;
+  if (content.length === 0) return true;
+  return content.every((block) => {
+    if (!block || typeof block !== "object") return true;
+    if ((block as { type?: unknown }).type !== "text") return false;
+    const text = (block as { text?: unknown }).text;
+    return typeof text !== "string" || text.trim().length === 0;
+  });
 }
 
 /**
