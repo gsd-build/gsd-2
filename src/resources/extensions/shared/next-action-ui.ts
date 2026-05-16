@@ -44,6 +44,7 @@
 import type { ExtensionCommandContext } from "@gsd/pi-coding-agent";
 import { type Theme } from "@gsd/pi-coding-agent";
 import { Key, matchesKey, type TUI } from "@gsd/pi-tui";
+import { isInteractiveUIContext } from "./ui-context.js";
 import { makeUI } from "./ui.js";
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -118,11 +119,9 @@ export async function showNextAction(
 		}
 	});
 
-	// Headless guard: when no UI is bound (noOpUIContext), ctx.ui.custom() resolves
-	// to undefined immediately, and ctx.ui.select() does the same. Skip both and
-	// return the safe default so callers don't await two no-op promises before
-	// reaching a deterministic "not_yet". Lockup #5125 root protection.
-	if (!ctx.hasUI) {
+	// Guard non-interactive contexts (no-op, RPC, headless answer injection).
+	// In those modes, there is no human to answer next-action prompts.
+	if (!isInteractiveUIContext(ctx)) {
 		return "not_yet";
 	}
 

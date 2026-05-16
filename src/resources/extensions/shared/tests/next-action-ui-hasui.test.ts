@@ -109,4 +109,33 @@ describe("showNextAction ctx.hasUI guard (#5125 lockup root protection)", () => 
     assert.equal(result, "beta", "TUI selection should be returned verbatim");
     assert.equal(selectCalled, 0, "ctx.ui.select fallback must NOT fire when custom returns a value");
   });
+
+  it("returns 'not_yet' when ctx.hasUI is true but ui.mode is rpc", async () => {
+    let customCalled = 0;
+    let selectCalled = 0;
+
+    const ctx = {
+      hasUI: true,
+      ui: {
+        mode: "rpc",
+        custom: async () => {
+          customCalled++;
+          return undefined as never;
+        },
+        select: async () => {
+          selectCalled++;
+          return undefined;
+        },
+      },
+    };
+
+    const result = await showNextAction(ctx as any, {
+      title: "GSD — test",
+      actions: [{ id: "alpha", label: "Alpha", description: "first" }],
+    });
+
+    assert.equal(result, "not_yet", "rpc mode should be treated as non-interactive");
+    assert.equal(customCalled, 0, "ctx.ui.custom must not be called in rpc mode");
+    assert.equal(selectCalled, 0, "ctx.ui.select must not be called in rpc mode");
+  });
 });
