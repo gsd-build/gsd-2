@@ -158,9 +158,10 @@ test("postUnitPreVerification pauses instead of retrying when closeout failure m
     s.verificationRetryFailureHashes.set(retryKey, "seeded-hash");
 
     let pauseCalls = 0;
+    const notifyPayloads: unknown[] = [];
     const result = await postUnitPreVerification({
       s,
-      ctx: { ui: { notify() {} } } as any,
+      ctx: { ui: { notify(payload: unknown) { notifyPayloads.push(payload); } } } as any,
       pi: {} as any,
       buildSnapshotOpts: () => ({}),
       lockBase: () => base,
@@ -171,6 +172,10 @@ test("postUnitPreVerification pauses instead of retrying when closeout failure m
 
     assert.equal(result, "dispatched");
     assert.equal(pauseCalls, 1);
+    assert.ok(
+      notifyPayloads.some((payload) => JSON.stringify(payload).includes("M001-VERIFICATION-FAILED.md")),
+      "should notify marker-path closeout failure to UI",
+    );
     assert.equal(s.pendingVerificationRetry, null);
     assert.equal(s.verificationRetryCount.size, 0);
     assert.equal(s.verificationRetryFailureHashes.size, 0);
