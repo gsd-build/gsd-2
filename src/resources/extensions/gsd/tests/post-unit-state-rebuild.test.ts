@@ -148,6 +148,14 @@ test("postUnitPreVerification pauses instead of retrying when closeout failure m
     s.originalBasePath = base;
     s.currentMilestoneId = "M001";
     s.currentUnit = { type: "complete-milestone", id: "M001", startedAt: Date.now() };
+    const retryKey = `${s.currentUnit.type}:${s.currentUnit.id}`;
+    s.pendingVerificationRetry = {
+      unitId: s.currentUnit.id,
+      failureContext: "seeded failure context",
+      attempt: 2,
+    };
+    s.verificationRetryCount.set(retryKey, 2);
+    s.verificationRetryFailureHashes.set(retryKey, "seeded-hash");
 
     let pauseCalls = 0;
     const result = await postUnitPreVerification({
@@ -165,6 +173,7 @@ test("postUnitPreVerification pauses instead of retrying when closeout failure m
     assert.equal(pauseCalls, 1);
     assert.equal(s.pendingVerificationRetry, null);
     assert.equal(s.verificationRetryCount.size, 0);
+    assert.equal(s.verificationRetryFailureHashes.size, 0);
   } finally {
     closeDatabase();
     rmSync(base, { recursive: true, force: true });
