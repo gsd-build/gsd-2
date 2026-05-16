@@ -58,6 +58,8 @@ import { withTimeout, FINALIZE_PRE_TIMEOUT_MS, FINALIZE_POST_TIMEOUT_MS } from "
 import { getEligibleSlices } from "../slice-parallel-eligibility.js";
 import { isSliceParallelActive, startSliceParallel } from "../slice-parallel-orchestrator.js";
 import { isDbAvailable, getMilestoneSlices } from "../gsd-db.js";
+import { setRuntimeKv } from "../db/runtime-kv.js";
+import { getLatestForUnit } from "../db/unit-dispatches.js";
 import { reconcileBeforeSpawn } from "../state-reconciliation.js";
 import type { MinimalModelRegistry } from "../context-budget.js";
 import type { PostflightResult, PreflightResult } from "../clean-root-preflight.js";
@@ -79,13 +81,30 @@ import { isSuspiciousGhostCompletion } from "../auto-unit-closeout.js";
 import { decideVerificationRetry, verificationRetryKey } from "./verification-retry-policy.js";
 import { buildPhaseHandoffOutcome, setAutoOutcomeWidget } from "../auto-dashboard.js";
 import { getConsecutiveDispatchBlocker } from "../dispatch-guard.js";
+import { normalizeRealPath } from "../paths.js";
 
 export const STUCK_WINDOW_SIZE = 6;
+const STUCK_RECOVERY_ATTEMPTS_KEY = "stuck_recovery_attempts";
 
 // ─── Path Comparison Helper ───────────────────────────────────────────────
 /** Compare two paths for physical identity, tolerating trailing slashes and symlinks. */
 function isSamePathLocal(a: string, b: string): boolean {
   return normalizeWorktreePathForCompare(a) === normalizeWorktreePathForCompare(b);
+}
+
+function persistStuckRecoveryAttempts(s: AutoSession, loopState: LoopState): void {
+  const scopeId = normalizeRealPath(
+    s.scope?.workspace.projectRoot ?? (s.originalBasePath || s.basePath),
+  );
+  if (!scopeId) return;
+  try {
+    setRuntimeKv("global", scopeId, STUCK_RECOVERY_ATTEMPTS_KEY, loopState.stuckRecoveryAttempts);
+  } catch (err) {
+    debugLog("autoLoop", {
+      phase: "save-stuck-state-failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 async function applyVerificationRetryPolicy(
@@ -1413,7 +1432,9 @@ export async function runDispatch(
   // Always record this dispatch in the sliding window and run detection so
   // Rules 1/3/4 can catch retry loops with repeated failure content (#5719).
   // Rules 2/2b suppress legitimate retry backoff through the dispatch ledger.
-  loopState.recentUnits.push({ key: derivedKey });
+  const latestDispatch = getLatestForUnit(derivedKey);
+  const recentError = latestDispatch?.error_summary ?? undefined;
+  loopState.recentUnits.push({ key: derivedKey, error: recentError });
   while (loopState.recentUnits.length > STUCK_WINDOW_SIZE) {
     loopState.recentUnits.shift();
   }
@@ -1434,6 +1455,7 @@ export async function runDispatch(
       if (loopState.stuckRecoveryAttempts === 0) {
         // Level 1: try verifying the artifact, then cache invalidation + retry
         loopState.stuckRecoveryAttempts++;
+        persistStuckRecoveryAttempts(s, loopState);
         const artifactExists = verifyExpectedArtifact(
           unitType,
           unitId,
@@ -1504,7 +1526,6 @@ export async function runDispatch(
               "info",
             );
             loopState.recentUnits.length = 0;
-            loopState.stuckRecoveryAttempts = 0;
             return { action: "continue" };
           }
           ctx.ui.notify(
