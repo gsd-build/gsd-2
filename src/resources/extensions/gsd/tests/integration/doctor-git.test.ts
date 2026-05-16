@@ -77,6 +77,21 @@ Completed.
   return dir;
 }
 
+function createStashApplyConflict(): string {
+  const dir = createRepoWithCompletedMilestone();
+  writeFileSync(join(dir, "README.md"), "# local stashed work\n");
+  run('git stash push -m "local work"', dir);
+  writeFileSync(join(dir, "README.md"), "# merged milestone work\n");
+  run("git add README.md", dir);
+  run('git commit -m "feat: merged readme"', dir);
+  execSync("git stash apply 'stash@{0}' || true", {
+    cwd: dir,
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf-8",
+  });
+  return dir;
+}
+
 /** Create a repo whose slices are done but milestone closeout is still pending. */
 function createRepoWithSlicesDoneButNoMilestoneSummary(): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "doc-git-test-")));
@@ -293,6 +308,26 @@ describe('doctor-git', async () => {
 
       // Verify MERGE_HEAD is gone
       assert.ok(!existsSync(join(dir, ".git", "MERGE_HEAD")), "MERGE_HEAD removed after fix");
+    });
+
+    test('unresolved_git_conflicts is manual-only and preserves conflict state', async () => {
+      const dir = createStashApplyConflict();
+      cleanups.push(dir);
+      assert.equal(existsSync(join(dir, ".git", "MERGE_HEAD")), false, "stash apply conflict should not require MERGE_HEAD");
+
+      const detect = await runGSDDoctor(dir);
+      const conflictIssues = detect.issues.filter(i => i.code === "unresolved_git_conflicts");
+      assert.equal(conflictIssues.length, 1, "detects unresolved Git conflict index");
+      assert.equal(conflictIssues[0]?.severity, "error");
+      assert.equal(conflictIssues[0]?.fixable, false);
+      assert.match(conflictIssues[0]?.message ?? "", /README\.md/);
+
+      const fixed = await runGSDDoctor(dir, { fix: true });
+      assert.ok(
+        !fixed.fixesApplied.some((fix) => fix.includes("cleaned merge state")),
+        "doctor fix must not reset conflict files",
+      );
+      assert.match(run("git diff --name-only --diff-filter=U", dir), /README\.md/, "conflict remains for manual resolution");
     });
 
     // ─── Test 4: Tracked runtime files detection & fix ─────────────────

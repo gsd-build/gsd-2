@@ -111,6 +111,67 @@ test("preflightCleanRoot — untracked file triggers stash with --include-untrac
   }
 });
 
+test("preflightCleanRoot blocks dirty files that overlap milestone changes before stashing", () => {
+  const repo = createTempRepo();
+  try {
+    run("git checkout -b milestone/M003B", repo);
+    writeFileSync(join(repo, "README.md"), "# milestone change\n");
+    run("git add README.md", repo);
+    run('git commit -m "feat: change readme"', repo);
+    run("git checkout main", repo);
+
+    writeFileSync(join(repo, "README.md"), "# local work\n");
+
+    const notifications: Array<{ msg: string; level: string }> = [];
+    const result = preflightCleanRoot(repo, "M003B", (msg, level) => {
+      notifications.push({ msg, level });
+    });
+
+    assert.equal(result.blocked, true, "overlapping dirty paths must block before merge");
+    assert.equal(result.stashPushed, false, "blocked preflight must not stash");
+    assert.deepEqual(result.overlappingPaths, ["README.md"]);
+    assert.ok(
+      notifications.some((n) => n.level === "error" && n.msg.includes("README.md")),
+      "blocking notification must name the overlapping file",
+    );
+    assert.equal(run("git stash list", repo), "", "blocked preflight must not create a stash");
+    assert.match(run("git status --porcelain", repo), /M README\.md/, "local work must stay in the working tree");
+  } finally {
+    try { rmSync(repo, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* ignore */ }
+  }
+});
+
+test("preflightCleanRoot blocks unresolved stash-apply conflicts before stashing", () => {
+  const repo = createTempRepo();
+  try {
+    writeFileSync(join(repo, "README.md"), "# local stashed work\n");
+    run('git stash push -m "local work"', repo);
+    writeFileSync(join(repo, "README.md"), "# merged milestone work\n");
+    run("git add README.md", repo);
+    run('git commit -m "feat: merged readme"', repo);
+    execSync("git stash apply 'stash@{0}' || true", { cwd: repo, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" });
+
+    assert.match(run("git diff --name-only --diff-filter=U", repo), /README\.md/, "fixture must have unresolved conflict");
+
+    const notifications: Array<{ msg: string; level: string }> = [];
+    const result = preflightCleanRoot(repo, "M003C", (msg, level) => {
+      notifications.push({ msg, level });
+    });
+
+    assert.equal(result.blocked, true, "unresolved conflicts must block before merge");
+    assert.equal(result.blockedReason, "unmerged-conflicts");
+    assert.equal(result.stashPushed, false, "blocked preflight must not create another stash");
+    assert.deepEqual(result.conflictedPaths, ["README.md"]);
+    assert.ok(
+      notifications.some((n) => n.level === "error" && n.msg.includes("unresolved Git conflicts")),
+      "blocking notification must explain unresolved conflicts",
+    );
+  } finally {
+    run("git reset --hard HEAD 2>/dev/null || true", repo);
+    try { rmSync(repo, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* ignore */ }
+  }
+});
+
 // ── postflightPopStash: restores stashed changes ──────────────────────────
 
 test("postflightPopStash — restores stashed changes and emits info notification", () => {

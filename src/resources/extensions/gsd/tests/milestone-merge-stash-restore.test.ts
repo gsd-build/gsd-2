@@ -122,6 +122,22 @@ const STASH_NOT_PUSHED: PreflightResult = {
   summary: "",
 };
 
+const PREFLIGHT_BLOCKED: PreflightResult = {
+  stashPushed: false,
+  blocked: true,
+  blockedReason: "dirty-overlap",
+  overlappingPaths: ["todo.js", "test-todo-cli.js"],
+  summary: "Working tree has uncommitted files that overlap milestone M002 changes.",
+};
+
+const PREFLIGHT_UNMERGED: PreflightResult = {
+  stashPushed: false,
+  blocked: true,
+  blockedReason: "unmerged-conflicts",
+  conflictedPaths: ["todo.js", "test-todo-cli.js"],
+  summary: "Working tree has unresolved Git conflicts before milestone M002 merge.",
+};
+
 const POP_OK: PostflightResult = {
   restored: true,
   needsManualRecovery: false,
@@ -222,6 +238,50 @@ test("clean tree: no stash to pop, merge succeeds, no pop attempted", async () =
   assert.equal(result, null);
   assert.equal(log.postflightCalls, 0, "no pop when nothing was stashed");
   assert.equal(log.milestoneMergedInPhases, true);
+});
+
+test("dirty overlap: preflight stops before merge and postflight restore", async () => {
+  const { ic, log } = buildIc({
+    preflightResult: PREFLIGHT_BLOCKED,
+    mergeBehavior: "succeed",
+    postflightResult: POP_OK,
+  });
+
+  const result = await _runMilestoneMergeWithStashRestore(ic, "M002");
+
+  assert.deepEqual(result, {
+    action: "break",
+    reason: "preflight-dirty-overlap",
+  });
+  assert.equal(log.mergeCalls, 0, "blocked preflight must not start milestone merge");
+  assert.equal(log.postflightCalls, 0, "blocked preflight must not attempt stash restore");
+  assert.equal(log.stopAutoCalls.length, 1);
+  assert.match(
+    log.stopAutoCalls[0] ?? "",
+    /Pre-merge dirty working tree overlaps milestone M002/,
+  );
+});
+
+test("unmerged conflicts: preflight stops before merge and postflight restore", async () => {
+  const { ic, log } = buildIc({
+    preflightResult: PREFLIGHT_UNMERGED,
+    mergeBehavior: "succeed",
+    postflightResult: POP_OK,
+  });
+
+  const result = await _runMilestoneMergeWithStashRestore(ic, "M002");
+
+  assert.deepEqual(result, {
+    action: "break",
+    reason: "preflight-unmerged-conflicts",
+  });
+  assert.equal(log.mergeCalls, 0, "unmerged conflict preflight must not start milestone merge");
+  assert.equal(log.postflightCalls, 0, "unmerged conflict preflight must not attempt stash restore");
+  assert.equal(log.stopAutoCalls.length, 1);
+  assert.match(
+    log.stopAutoCalls[0] ?? "",
+    /Pre-merge unresolved Git conflicts block milestone M002/,
+  );
 });
 
 test("merge succeeds but stash pop needs manual recovery -> postflight-stash-restore-failed break", async () => {

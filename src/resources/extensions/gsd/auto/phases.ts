@@ -460,6 +460,18 @@ export async function _runMilestoneMergeWithStashRestore(
     milestoneId,
     ctx.ui.notify.bind(ctx.ui),
   );
+  if (preflight.blocked) {
+    const reason = preflight.blockedReason === "unmerged-conflicts"
+      ? `Pre-merge unresolved Git conflicts block milestone ${milestoneId}`
+      : `Pre-merge dirty working tree overlaps milestone ${milestoneId}`;
+    await deps.stopAuto(ctx, pi, reason);
+    return {
+      action: "break",
+      reason: preflight.blockedReason === "unmerged-conflicts"
+        ? "preflight-unmerged-conflicts"
+        : "preflight-dirty-overlap",
+    };
+  }
 
   let mergeError: unknown = null;
   const exitResult = deps.lifecycle.exitMilestone(

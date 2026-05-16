@@ -68,6 +68,21 @@ _None_
   return dir;
 }
 
+function createStashApplyConflict(): string {
+  const dir = createGitRepo();
+  writeFileSync(join(dir, "README.md"), "# local stashed work\n");
+  run('git stash push -m "local work"', dir);
+  writeFileSync(join(dir, "README.md"), "# merged milestone work\n");
+  run("git add README.md", dir);
+  run('git commit -m "feat: merged readme"', dir);
+  execSync("git stash apply 'stash@{0}' || true", {
+    cwd: dir,
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf-8",
+  });
+  return dir;
+}
+
 describe('doctor-proactive', async () => {
   const cleanups: string[] = [];
 
@@ -285,6 +300,23 @@ describe('doctor-proactive', async () => {
     } else {
       console.log("  (skipped on Windows)");
     }
+    });
+
+    test('health gate: unresolved stash-apply conflicts block without reset', async () => {
+      const dir = createStashApplyConflict();
+      cleanups.push(dir);
+      assert.equal(existsSync(join(dir, ".git", "MERGE_HEAD")), false, "stash apply conflict should not require MERGE_HEAD");
+
+      const result = await preDispatchHealthGate(dir);
+
+      assert.equal(result.proceed, false, "gate blocks unresolved conflict state");
+      assert.match(result.reason ?? "", /Unresolved Git conflicts/);
+      assert.match(result.reason ?? "", /README\.md/);
+      assert.ok(
+        !result.fixesApplied.some((fix) => fix.includes("cleaned merge state")),
+        "must not reset or auto-heal user conflict files",
+      );
+      assert.match(run("git diff --name-only --diff-filter=U", dir), /README\.md/, "conflict remains for manual resolution");
     });
 
     test('health gate: STATE.md missing — auto-healed', async () => {
