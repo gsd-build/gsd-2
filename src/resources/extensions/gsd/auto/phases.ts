@@ -1887,12 +1887,19 @@ export async function runUnitPhase(
   if (s.pendingVerificationRetry) {
     const retryCtx = s.pendingVerificationRetry;
     s.pendingVerificationRetry = null;
-    const capped =
-      retryCtx.failureContext.length > MAX_RECOVERY_CHARS
-        ? retryCtx.failureContext.slice(0, MAX_RECOVERY_CHARS) +
-          "\n\n[...failure context truncated]"
+    const retrySpentChars = s.retryContextChars.get(retryCtx.unitId) ?? 0;
+    const remaining = Math.max(0, MAX_RECOVERY_CHARS - retrySpentChars);
+    const raw =
+      retryCtx.failureContext.length > remaining
+        ? retryCtx.failureContext.slice(0, remaining)
         : retryCtx.failureContext;
-    finalPrompt = `**VERIFICATION FAILED — AUTO-FIX ATTEMPT ${retryCtx.attempt}**\n\nThe verification gate ran after your previous attempt and found failures. Fix these issues before completing the task.\n\n${capped}\n\n---\n\n${finalPrompt}`;
+    const capped = retryCtx.failureContext.length > remaining
+      ? `${raw}\n\n[...failure context truncated]`
+      : raw;
+    s.retryContextChars.set(retryCtx.unitId, retrySpentChars + raw.length);
+    if (raw.length > 0) {
+      finalPrompt = `**VERIFICATION FAILED — AUTO-FIX ATTEMPT ${retryCtx.attempt}**\n\nThe verification gate ran after your previous attempt and found failures. Fix these issues before completing the task.\n\n${capped}\n\n---\n\n${finalPrompt}`;
+    }
   }
 
   if (s.pendingCrashRecovery) {
@@ -1906,12 +1913,22 @@ export async function runUnitPhase(
   } else if (nextDispatchCount > 1) {
     const diagnostic = deps.getDeepDiagnostic(s.basePath);
     if (diagnostic) {
-      const cappedDiag =
-        diagnostic.length > MAX_RECOVERY_CHARS
-          ? diagnostic.slice(0, MAX_RECOVERY_CHARS) +
-            "\n\n[...diagnostic truncated to prevent memory exhaustion]"
-          : diagnostic;
-      finalPrompt = `**RETRY — your previous attempt did not produce the required artifact.**\n\nDiagnostic from previous attempt:\n${cappedDiag}\n\nFix whatever went wrong and make sure you write the required file this time.\n\n---\n\n${finalPrompt}`;
+      const retrySpentChars = s.retryContextChars.get(unitId) ?? 0;
+      const remaining = Math.max(0, MAX_RECOVERY_CHARS - retrySpentChars);
+      if (remaining <= 0) {
+        // Shared retry context budget exhausted for this unit; skip extra prepend.
+      } else {
+        const raw =
+          diagnostic.length > remaining
+            ? diagnostic.slice(0, remaining)
+            : diagnostic;
+        s.retryContextChars.set(unitId, retrySpentChars + raw.length);
+        const cappedDiag =
+          diagnostic.length > remaining
+            ? raw + "\n\n[...diagnostic truncated to prevent memory exhaustion]"
+            : raw;
+        finalPrompt = `**RETRY — your previous attempt did not produce the required artifact.**\n\nDiagnostic from previous attempt:\n${cappedDiag}\n\nFix whatever went wrong and make sure you write the required file this time.\n\n---\n\n${finalPrompt}`;
+      }
     }
   }
 
@@ -2414,6 +2431,7 @@ export async function runUnitPhase(
   if (artifactVerified) {
     s.unitDispatchCount.delete(dispatchKey);
     s.unitRecoveryCount.delete(`${unitType}/${unitId}`);
+    s.retryContextChars.delete(unitId);
   }
 
   // Write phase handoff anchor after successful research/planning completion

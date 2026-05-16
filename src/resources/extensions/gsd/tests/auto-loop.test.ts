@@ -898,6 +898,7 @@ function makeLoopSession(overrides?: Partial<Record<string, unknown>>) {
     lastBudgetAlertLevel: 0,
     pendingVerificationRetry: null,
     pendingCrashRecovery: null,
+    retryContextChars: new Map<string, number>(),
     verificationRetryFailureHashes: new Map<string, string>(),
     pendingQuickTasks: [],
     sidecarQueue: [],
@@ -2961,6 +2962,100 @@ test("runUnitPhase records failed routing outcome when expected artifact is miss
     [{ unitType: "execute-task", tier: "light", success: false }],
     "routing history must treat missing artifacts as failed outcomes so retries can escalate",
   );
+});
+
+test("runUnitPhase applies a shared retry-context cap across verification failure and diagnostic prepends", async (t) => {
+  _resetPendingResolve();
+
+  const basePath = mkdtempSync(join(tmpdir(), "gsd-retry-context-cap-"));
+  t.after(() => {
+    _resetPendingResolve();
+    rmSync(basePath, { recursive: true, force: true });
+  });
+
+  const unitType = "execute-task";
+  const unitId = "M001/S01/T01";
+  const dispatchKey = `${unitType}/${unitId}`;
+  const failureContext = "F".repeat(40_000);
+  const diagnostic = "D".repeat(20_000);
+
+  const deps = makeMockDeps({
+    getDeepDiagnostic: () => diagnostic,
+  });
+  const ctx = {
+    ...makeMockCtx(),
+    ui: {
+      notify: () => {},
+      setStatus: () => {},
+      setWorkingMessage: () => {},
+    },
+    sessionManager: {
+      getEntries: () => [],
+    },
+    modelRegistry: {
+      getProviderAuthMode: () => undefined,
+      isProviderRequestReady: () => true,
+    },
+  } as any;
+
+  let sentPrompt = "";
+  const pi = {
+    ...makeMockPi(),
+    sendMessage: (payload: { content: string }) => {
+      sentPrompt = payload.content;
+      queueMicrotask(() => resolveAgentEnd({ messages: [{ role: "assistant" }] }));
+    },
+  } as any;
+
+  const s = makeLoopSession({
+    basePath,
+    canonicalProjectRoot: basePath,
+    originalBasePath: basePath,
+    pendingVerificationRetry: {
+      unitId,
+      failureContext,
+      attempt: 1,
+    },
+  });
+  s.unitDispatchCount.set(dispatchKey, 1);
+  let seq = 0;
+
+  await runUnitPhase(
+    { ctx, pi, s, deps, prefs: undefined, iteration: 1, flowId: "flow-retry-cap", nextSeq: () => ++seq },
+    {
+      unitType,
+      unitId,
+      prompt: "base prompt",
+      finalPrompt: "base prompt",
+      pauseAfterUatDispatch: false,
+      state: {
+        phase: "executing",
+        activeMilestone: { id: "M001", title: "Milestone" },
+        activeSlice: { id: "S01", title: "Slice" },
+        activeTask: { id: "T01", title: "Task" },
+        registry: [{ id: "M001", title: "Milestone", status: "active" }],
+        recentDecisions: [],
+        blockers: [],
+        nextAction: "",
+        progress: { milestones: { done: 0, total: 1 } },
+        requirements: { active: 0, validated: 0, deferred: 0, outOfScope: 0, blocked: 0, total: 0 },
+      } as any,
+      mid: "M001",
+      midTitle: "Milestone",
+      isRetry: false,
+      previousTier: undefined,
+    },
+    { recentUnits: [], stuckRecoveryAttempts: 0, consecutiveFinalizeTimeouts: 0 },
+  );
+
+  assert.equal(
+    s.retryContextChars.get(unitId),
+    50_000,
+    "shared retry context spend should cap at MAX_RECOVERY_CHARS",
+  );
+  assert.match(sentPrompt, /VERIFICATION FAILED — AUTO-FIX ATTEMPT 1/);
+  assert.match(sentPrompt, /RETRY — your previous attempt did not produce the required artifact/);
+  assert.match(sentPrompt, /\[\.\.\.diagnostic truncated to prevent memory exhaustion\]/);
 });
 
 test("resolveAgentEndCancelled without args produces no errorContext field", async () => {
