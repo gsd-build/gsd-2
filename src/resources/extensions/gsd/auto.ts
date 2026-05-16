@@ -2003,16 +2003,14 @@ export function createWiredAutoOrchestrationModule(
             reason: `No Unit manifest is registered for ${unitType}`,
           };
         }
-        if (getIsolationMode(runtimeBasePath) !== "worktree") {
-          return { ok: true, reason: "not-required" };
-        }
         const writeScope =
           manifest.tools.mode === "all" || manifest.tools.mode === "docs"
             ? "source-writing"
             : "planning-only";
-        if (getIsolationMode(runtimeBasePath) !== "worktree") {
-          return { ok: true, reason: "isolation-not-worktree" };
+        if (writeScope === "planning-only") {
+          return { ok: true, reason: "not-required" };
         }
+        const isolationMode = getIsolationMode(runtimeBasePath);
         const safety = createWorktreeSafetyModule();
         const snapshot = await deriveState(dispatchBasePath);
         const milestoneId = snapshot.activeMilestone?.id ?? null;
@@ -2024,7 +2022,7 @@ export function createWiredAutoOrchestrationModule(
           projectRoot: runtimeBasePath,
           unitRoot: dispatchBasePath,
           milestoneId,
-          isolationMode: getIsolationMode(runtimeBasePath),
+          isolationMode,
           expectedBranch,
         });
         if (!result.ok) {

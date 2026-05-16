@@ -158,7 +158,8 @@ export function createWorktreeSafetyModule(
       const projectRoot = resolve(input.projectRoot);
       const unitRoot = resolve(input.unitRoot);
       const isolationMode = input.isolationMode ?? "worktree";
-      if (isolationMode === "none" || isolationMode === "branch") {
+      const worktreeIsolation = isolationMode === "worktree";
+      if (!worktreeIsolation) {
         if (!samePath(unitRoot, projectRoot)) {
           return failure(
             "invalid-root",
@@ -167,17 +168,10 @@ export function createWorktreeSafetyModule(
             { expectedRoot: projectRoot, unitRoot, isolationMode },
           );
         }
-        return {
-          ok: true,
-          kind: "safe",
-          projectRoot,
-          unitRoot,
-          milestoneId,
-        };
       }
 
       const expectedRoot = join(projectRoot, ".gsd", "worktrees", milestoneId);
-      if (!samePath(unitRoot, expectedRoot)) {
+      if (worktreeIsolation && !samePath(unitRoot, expectedRoot)) {
         return failure(
           "invalid-root",
           `Unit root ${unitRoot} is not the expected worktree root for ${milestoneId}.`,
@@ -186,7 +180,7 @@ export function createWorktreeSafetyModule(
         );
       }
 
-      if (!deps.existsSync(unitRoot)) {
+      if (worktreeIsolation && !deps.existsSync(unitRoot)) {
         return failure(
           "worktree-missing",
           `Worktree root ${unitRoot} does not exist.`,
@@ -196,7 +190,7 @@ export function createWorktreeSafetyModule(
       }
 
       const gitMarker = join(unitRoot, ".git");
-      if (!deps.existsSync(gitMarker)) {
+      if (worktreeIsolation && !deps.existsSync(gitMarker)) {
         return failure(
           "worktree-git-marker-missing",
           `Worktree root ${unitRoot} has no .git marker.`,
@@ -206,18 +200,20 @@ export function createWorktreeSafetyModule(
       }
 
       let gitMarkerStat: Pick<Stats, "isFile">;
-      try {
-        gitMarkerStat = deps.lstatSync(gitMarker);
-      } catch (error) {
-        return failure(
-          "worktree-git-probe-failed",
-          `Unable to inspect .git marker for worktree root ${unitRoot}.`,
-          "Recover or recreate the milestone worktree before dispatching the source-writing Unit.",
-          { gitMarker, error: errorMessage(error) },
-        );
+      if (worktreeIsolation) {
+        try {
+          gitMarkerStat = deps.lstatSync(gitMarker);
+        } catch (error) {
+          return failure(
+            "worktree-git-probe-failed",
+            `Unable to inspect .git marker for worktree root ${unitRoot}.`,
+            "Recover or recreate the milestone worktree before dispatching the source-writing Unit.",
+            { gitMarker, error: errorMessage(error) },
+          );
+        }
       }
 
-      if (!gitMarkerStat.isFile()) {
+      if (worktreeIsolation && !gitMarkerStat.isFile()) {
         return failure(
           "worktree-git-marker-not-file",
           `Worktree root ${unitRoot} has a .git directory, not a registered worktree .git file.`,
@@ -227,17 +223,19 @@ export function createWorktreeSafetyModule(
       }
 
       let registered: readonly RegisteredWorktree[] | undefined;
-      try {
-        registered = deps.listRegisteredWorktrees?.(projectRoot);
-      } catch (error) {
-        return failure(
-          "worktree-git-probe-failed",
-          `Unable to list registered worktrees for project root ${projectRoot}.`,
-          "Recover or recreate the milestone worktree before dispatching the source-writing Unit.",
-          { projectRoot, error: errorMessage(error) },
-        );
+      if (worktreeIsolation) {
+        try {
+          registered = deps.listRegisteredWorktrees?.(projectRoot);
+        } catch (error) {
+          return failure(
+            "worktree-git-probe-failed",
+            `Unable to list registered worktrees for project root ${projectRoot}.`,
+            "Recover or recreate the milestone worktree before dispatching the source-writing Unit.",
+            { projectRoot, error: errorMessage(error) },
+          );
+        }
       }
-      if (registered && !registered.some((worktree) => samePath(worktree.path, unitRoot))) {
+      if (worktreeIsolation && registered && !registered.some((worktree) => samePath(worktree.path, unitRoot))) {
         const wasPreviouslyTracked = unregisteredRecoveryFailed.has(unitRoot);
         let attemptedPrune = false;
 
@@ -275,7 +273,7 @@ export function createWorktreeSafetyModule(
         }
       }
 
-      if (input.emptyWorktreeWithProjectContent) {
+      if (worktreeIsolation && input.emptyWorktreeWithProjectContent) {
         return failure(
           "empty-worktree-with-project-content",
           `Worktree root ${unitRoot} has no project content, but the project root does.`,
