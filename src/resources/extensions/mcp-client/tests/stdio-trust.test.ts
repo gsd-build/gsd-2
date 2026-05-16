@@ -60,9 +60,19 @@ test("auto runtime + untrusted stdio server throws an actionable error", async (
 	await assert.rejects(
 		() => assertTrustedStdioServer(stdioServer() as never, ctx as never),
 		(err: Error) => {
-			assert.match(err.message, /\/gsd mcp trust demo/);
-			assert.match(err.message, /demo/);
+			assert.match(err.message, /\/gsd mcp trust "demo"/);
 			assert.match(err.message, /\/tmp\/project\/\.mcp\.json/);
+			return true;
+		},
+	);
+});
+
+test("actionable error quotes server names containing spaces", async () => {
+	const { ctx } = makeCtx(false, async () => false);
+	await assert.rejects(
+		() => assertTrustedStdioServer(stdioServer({ name: "my slow server" }) as never, ctx as never),
+		(err: Error) => {
+			assert.match(err.message, /\/gsd mcp trust "my slow server"/);
 			return true;
 		},
 	);
@@ -106,6 +116,6 @@ test("trust:true short-circuits before the ctx/hasUI check (no ctx required)", a
 test("untrusted server with no ctx throws the actionable error", async () => {
 	await assert.rejects(
 		() => assertTrustedStdioServer(stdioServer() as never, undefined),
-		/\/gsd mcp trust demo/,
+		/\/gsd mcp trust "demo"/,
 	);
 });

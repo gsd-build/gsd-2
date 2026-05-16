@@ -23,6 +23,7 @@ test("writes trust:true into an mcpServers-keyed config file", () => {
   try {
     const result = trustMcpServer(path, "foo");
     assert.equal(result.level, "info");
+    assert.equal(result.wrote, true);
     assert.match(result.message, /Trusted MCP server/);
 
     const parsed = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
@@ -59,6 +60,7 @@ test("is idempotent — an already-trusted server is a no-op", () => {
     const before = readFileSync(path, "utf-8");
     const result = trustMcpServer(path, "foo");
     assert.equal(result.level, "info");
+    assert.equal(result.wrote, false);
     assert.match(result.message, /already trusted/);
     assert.equal(readFileSync(path, "utf-8"), before, "file content must be unchanged");
   } finally {
@@ -73,6 +75,7 @@ test("warns on an unknown server name", () => {
   try {
     const result = trustMcpServer(path, "bar");
     assert.equal(result.level, "warning");
+    assert.equal(result.wrote, false);
     assert.match(result.message, /not found/);
   } finally {
     rmSync(dir, { recursive: true, force: true });

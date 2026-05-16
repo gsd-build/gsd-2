@@ -124,9 +124,9 @@ function readMcpConfigs(): McpServerRawConfig[] {
 export function trustMcpServer(
   configPath: string,
   serverName: string,
-): { message: string; level: "info" | "warning" | "error" } {
+): { message: string; level: "info" | "warning" | "error"; wrote: boolean } {
   if (!existsSync(configPath)) {
-    return { message: `Config file not found: ${configPath}`, level: "error" };
+    return { message: `Config file not found: ${configPath}`, level: "error", wrote: false };
   }
   const raw = readFileSync(configPath, "utf-8");
   let data: Record<string, unknown>;
@@ -136,6 +136,7 @@ export function trustMcpServer(
     return {
       message: `Failed to parse ${configPath}: ${err instanceof Error ? err.message : String(err)}`,
       level: "error",
+      wrote: false,
     };
   }
   // Config files may use either `mcpServers` or `servers` — preserve the file's key.
@@ -143,7 +144,11 @@ export function trustMcpServer(
   const servers = (data[key] ?? {}) as Record<string, Record<string, unknown>>;
   const entry = servers[serverName];
   if (!entry || typeof entry !== "object") {
-    return { message: `Server "${serverName}" not found in ${configPath}.`, level: "warning" };
+    return {
+      message: `Server "${serverName}" not found in ${configPath}.`,
+      level: "warning",
+      wrote: false,
+    };
   }
   // The trust flag is only consulted for stdio servers — HTTP servers are never
   // gated — so refuse to write a meaningless flag onto a non-stdio entry. The
@@ -152,12 +157,14 @@ export function trustMcpServer(
     return {
       message: `MCP server "${serverName}" uses non-stdio transport; trust can only be set for stdio servers.`,
       level: "warning",
+      wrote: false,
     };
   }
   if (entry.trust === true) {
     return {
       message: `MCP server "${serverName}" is already trusted in ${configPath}.`,
       level: "info",
+      wrote: false,
     };
   }
   entry.trust = true;
@@ -166,8 +173,9 @@ export function trustMcpServer(
   return {
     message:
       `Trusted MCP server "${serverName}" — wrote "trust": true to ${configPath}.\n` +
-      `Takes effect on the next GSD session (or run mcp_servers with refresh).`,
+      `Takes effect on the next mcp_call to this server.`,
     level: "info",
+    wrote: true,
   };
 }
 
@@ -334,6 +342,10 @@ export async function handleMcpStatus(
         return;
       }
       const result = trustMcpServer(server.sourcePath, server.name);
+      if (result.wrote) {
+        const resetConfigCache = mod._resetConfigCache as (() => void) | undefined;
+        if (typeof resetConfigCache === "function") resetConfigCache();
+      }
       ctx.ui.notify(result.message, result.level);
     } catch (err) {
       ctx.ui.notify(

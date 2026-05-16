@@ -215,7 +215,9 @@ export function _buildMcpTrustConfirmOptionsForTest(signal?: AbortSignal): { tim
 	return signal ? { timeout: 120_000, signal } : { timeout: 120_000 };
 }
 
-export function _resetConfigCacheForTest(): void {
+/** Drop the cached config so the next readConfigs() re-reads from disk. Used by
+ * /gsd mcp trust after a successful write, and by tests that mutate fixtures. */
+export function _resetConfigCache(): void {
 	configCache = null;
 }
 
@@ -237,7 +239,7 @@ export async function assertTrustedStdioServer(
 		throw new Error(
 			`MCP server "${config.name}" is an untrusted project-local stdio command ` +
 			`from ${config.sourcePath}. To use it in an automated session, run ` +
-			`/gsd mcp trust ${config.name} (or add "trust": true to that server's entry ` +
+			`/gsd mcp trust "${config.name}" (or add "trust": true to that server's entry ` +
 			`in ${config.sourcePath}).`,
 		);
 	}
