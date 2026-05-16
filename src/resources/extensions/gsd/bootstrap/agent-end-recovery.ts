@@ -56,6 +56,7 @@ export function _hasEmptyAgentEndContent(content: unknown): boolean {
   if (content.length === 0) return true;
   return content.every((block) => {
     if (!block || typeof block !== "object") return true;
+    // Non-text blocks indicate agent activity, so this is not empty content.
     if ((block as { type?: unknown }).type !== "text") return false;
     const text = (block as { text?: unknown }).text;
     return typeof text !== "string" || text.trim().length === 0;
