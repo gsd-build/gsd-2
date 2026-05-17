@@ -15,6 +15,8 @@ import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
 
 import { runGSDDoctor } from "../../doctor.ts";
+import { checkRuntimeHealth } from "../../doctor-runtime-checks.ts";
+import { invalidateStateCache } from "../../state.ts";
 function run(cmd: string, cwd: string): string {
   return execSync(cmd, { cwd, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" }).trim();
 }
@@ -276,6 +278,40 @@ None
         "fix removes orphaned .gsd.migrating when .gsd validates",
       );
       assert.ok(!existsSync(join(dir, ".gsd.migrating")), ".gsd.migrating removed after fix");
+    });
+
+    test('failed_migration orphan is preserved when .gsd is invalid', async () => {
+      const dir = createMinimalProject();
+      cleanups.push(dir);
+
+      // Simulate crash window where both directories exist.
+      mkdirSync(join(dir, ".gsd.migrating"), { recursive: true });
+      writeFileSync(join(dir, ".gsd", "STATE.md"), "# GSD State\n");
+
+      const detectIssues: Array<{ code: string }> = [];
+      await checkRuntimeHealth(dir, detectIssues as any, [], () => false);
+      const migrationIssues = detectIssues.filter(i => i.code === "failed_migration");
+      assert.ok(migrationIssues.length > 0, "detects failed migration orphan");
+
+      // Force deriveState() to throw in the doctor fallback safety gate by
+      // dropping a required table from the currently open DB connection.
+      const { openDatabase, _getAdapter, closeDatabase } = await import("../../gsd-db.ts");
+      openDatabase(join(dir, ".gsd", "gsd.db"));
+      try {
+        _getAdapter()!.exec("DROP TABLE milestones");
+        invalidateStateCache();
+
+        const fixIssues: Array<{ code: string }> = [];
+        const fixesApplied: string[] = [];
+        await checkRuntimeHealth(dir, fixIssues as any, fixesApplied, (code) => code === "failed_migration");
+        assert.ok(existsSync(join(dir, ".gsd.migrating")), ".gsd.migrating preserved when .gsd validation fails");
+        assert.ok(
+          !fixesApplied.some(f => f.includes("removed orphaned .gsd.migrating")),
+          "fix does not remove orphaned .gsd.migrating when .gsd is invalid",
+        );
+      } finally {
+        closeDatabase();
+      }
     });
 
     // ─── Test 7: Gitignore missing patterns detection & fix ───────────
