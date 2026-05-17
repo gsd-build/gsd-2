@@ -48,6 +48,22 @@ test("recoverFailedMigration returns false when both .gsd and .gsd.migrating exi
   assert.ok(existsSync(join(base, ".gsd.migrating")), ".gsd.migrating must still exist");
 });
 
+test("recoverFailedMigration removes .gsd.migrating orphan when .gsd is intact", (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-migrating-orphan-cleanup-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+
+  const gsdPath = join(base, ".gsd");
+  mkdirSync(gsdPath, { recursive: true });
+  writeFileSync(join(gsdPath, "STATE.md"), "# GSD State\n");
+  writeFileSync(join(gsdPath, "gsd.db"), "");
+  mkdirSync(join(base, ".gsd.migrating"), { recursive: true });
+
+  const recovered = recoverFailedMigration(base);
+  assert.equal(recovered, true, "should remove orphan migration directory");
+  assert.ok(existsSync(gsdPath), ".gsd must still exist");
+  assert.ok(!existsSync(join(base, ".gsd.migrating")), ".gsd.migrating should be removed");
+});
+
 test("recoverFailedMigration preserves contents of .gsd.migrating", (t) => {
   const base = mkdtempSync(join(tmpdir(), "gsd-migrating-contents-"));
   t.after(() => rmSync(base, { recursive: true, force: true }));

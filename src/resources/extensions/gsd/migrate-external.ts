@@ -199,7 +199,18 @@ export function recoverFailedMigration(basePath: string): boolean {
   const migratingPath = join(basePath, ".gsd.migrating");
 
   if (!existsSync(migratingPath)) return false;
-  if (existsSync(localGsd)) return false; // both exist -- ambiguous, don't touch
+  if (existsSync(localGsd)) {
+    // Safe orphan cleanup path: local state is present and migration snapshot remains.
+    const hasStateMd = existsSync(join(localGsd, "STATE.md"));
+    const hasDb = existsSync(join(localGsd, "gsd.db"));
+    if (!hasStateMd || !hasDb) return false; // ambiguous, don't touch
+    try {
+      rmSync(migratingPath, { recursive: true, force: true });
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   try {
     renameSync(migratingPath, localGsd);
