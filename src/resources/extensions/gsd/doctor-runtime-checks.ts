@@ -446,6 +446,18 @@ export async function checkRuntimeHealth(
         if (shouldFix("failed_migration")) {
           if (recoverFailedMigration(basePath)) {
             fixesApplied.push("recovered failed migration (.gsd.migrating → .gsd)");
+          } else {
+            // If both directories exist, keep `.gsd` as source of truth and
+            // only remove the orphan backup when the active state looks intact.
+            const statePath = resolveGsdRootFile(basePath, "STATE");
+            if (existsSync(localGsd) && existsSync(statePath)) {
+              try {
+                rmSync(migratingPath, { recursive: true, force: true });
+                fixesApplied.push("removed stale failed-migration orphan (.gsd.migrating)");
+              } catch {
+                // Non-fatal — keep issue visible if cleanup fails.
+              }
+            }
           }
         }
       }

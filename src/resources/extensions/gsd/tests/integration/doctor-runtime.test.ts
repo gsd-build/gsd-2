@@ -334,6 +334,30 @@ node_modules/
     } else {
     }
 
+    // ─── Test 8c: failed migration orphan cleanup when .gsd is intact ──
+    test('failed_migration orphan cleanup when .gsd and .gsd.migrating both exist', async () => {
+      const dir = createMinimalProject();
+      cleanups.push(dir);
+
+      // Mark the active .gsd as intact enough for doctor fix.
+      writeFileSync(join(dir, ".gsd", "STATE.md"), "# GSD State\n");
+      writeFileSync(join(dir, ".gsd", "PREFERENCES.md"), "---\nversion: 1\n---\n");
+      mkdirSync(join(dir, ".gsd.migrating"), { recursive: true });
+      writeFileSync(join(dir, ".gsd.migrating", "STATE.md"), "# stale\n");
+
+      const detect = await runGSDDoctor(dir);
+      const migrationIssues = detect.issues.filter(i => i.code === "failed_migration");
+      assert.ok(migrationIssues.length > 0, "detects failed migration orphan");
+
+      const fixed = await runGSDDoctor(dir, { fix: true });
+      assert.ok(
+        fixed.fixesApplied.some(f => f.includes("failed-migration orphan")),
+        `fix removes failed migration orphan (got: ${fixed.fixesApplied.join(", ")})`,
+      );
+      assert.ok(!existsSync(join(dir, ".gsd.migrating")), ".gsd.migrating removed after fix");
+      assert.ok(existsSync(join(dir, ".gsd")), ".gsd remains intact after fix");
+    });
+
     // ─── Test 9: Orphaned completed-units detection & fix ─────────────
     test('orphaned_completed_units', async () => {
       const dir = createMinimalProject();
