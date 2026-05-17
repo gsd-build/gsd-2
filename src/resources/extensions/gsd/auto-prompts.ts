@@ -51,6 +51,21 @@ import { classifyProject, type ProjectClassification } from "./detection.js";
  * from their configured executor window.
  */
 const MAX_PREAMBLE_CHARS = 20_000;
+const STATIC_CONTEXT_REINJECTION_CACHE = new Map<string, string>();
+
+function maybeSuppressRepeatedStaticContextInline(
+  base: string,
+  artifact: "project" | "requirements" | "decisions",
+  content: string | null,
+): string | null {
+  if (!content) return null;
+  const key = `${base}:${artifact}`;
+  const fingerprint = `${content.length}:${content}`;
+  const previousFingerprint = STATIC_CONTEXT_REINJECTION_CACHE.get(key);
+  if (previousFingerprint === fingerprint) return null;
+  STATIC_CONTEXT_REINJECTION_CACHE.set(key, fingerprint);
+  return content;
+}
 
 /**
  * Resolve prompt budgets from the configured executor context window.
@@ -829,7 +844,11 @@ export async function inlineDecisionsFromDb(
         const formatted = inlineLevel !== "full"
           ? formatDecisionsCompact(decisions)
           : formatDecisionsForPrompt(decisions);
-        return `### Decisions\nSource: \`.gsd/DECISIONS.md\`\n\n${formatted}`;
+        return maybeSuppressRepeatedStaticContextInline(
+          base,
+          "decisions",
+          `### Decisions\nSource: \`.gsd/DECISIONS.md\`\n\n${formatted}`,
+        );
       }
       // DB available but cascade returned empty — intentional per D020, don't fall back to file
       return null;
@@ -838,7 +857,11 @@ export async function inlineDecisionsFromDb(
     logWarning("prompt", `inlineDecisionsFromDb failed: ${err instanceof Error ? err.message : String(err)}`);
   }
   // DB unavailable — fall back to filesystem
-  return inlineGsdRootFile(base, "decisions.md", "Decisions");
+  return maybeSuppressRepeatedStaticContextInline(
+    base,
+    "decisions",
+    await inlineGsdRootFile(base, "decisions.md", "Decisions"),
+  );
 }
 
 /**
@@ -859,13 +882,21 @@ export async function inlineRequirementsFromDb(
         const formatted = inlineLevel !== "full"
           ? formatRequirementsCompact(requirements)
           : formatRequirementsForPrompt(requirements);
-        return `### Requirements\nSource: \`.gsd/REQUIREMENTS.md\`\n\n${formatted}`;
+        return maybeSuppressRepeatedStaticContextInline(
+          base,
+          "requirements",
+          `### Requirements\nSource: \`.gsd/REQUIREMENTS.md\`\n\n${formatted}`,
+        );
       }
     }
   } catch (err) {
     logWarning("prompt", `inlineRequirementsFromDb failed: ${err instanceof Error ? err.message : String(err)}`);
   }
-  return inlineGsdRootFile(base, "requirements.md", "Requirements");
+  return maybeSuppressRepeatedStaticContextInline(
+    base,
+    "requirements",
+    await inlineGsdRootFile(base, "requirements.md", "Requirements"),
+  );
 }
 
 /**
@@ -881,13 +912,21 @@ export async function inlineProjectFromDb(
       const { queryProject } = await import("./context-store.js");
       const content = queryProject();
       if (content) {
-        return `### Project\nSource: \`.gsd/PROJECT.md\`\n\n${content}`;
+        return maybeSuppressRepeatedStaticContextInline(
+          base,
+          "project",
+          `### Project\nSource: \`.gsd/PROJECT.md\`\n\n${content}`,
+        );
       }
     }
   } catch (err) {
     logWarning("prompt", `inlineProjectFromDb failed: ${err instanceof Error ? err.message : String(err)}`);
   }
-  return inlineGsdRootFile(base, "project.md", "Project");
+  return maybeSuppressRepeatedStaticContextInline(
+    base,
+    "project",
+    await inlineGsdRootFile(base, "project.md", "Project"),
+  );
 }
 
 // ─── Stopwords for keyword extraction ─────────────────────────────────────
