@@ -524,6 +524,50 @@ test("verifyExpectedArtifact plan-slice passes when all task plan files exist", 
   }
 });
 
+test("verifyExpectedArtifact plan-slice prefers active worktree projection artifacts when project root is stale (#6295)", () => {
+  const base = makeTmpBase();
+  try {
+    const rootSliceDir = join(base, ".gsd", "milestones", "M001", "slices", "S01");
+    const rootTasksDir = join(rootSliceDir, "tasks");
+    mkdirSync(rootTasksDir, { recursive: true });
+    writeFileSync(
+      join(rootSliceDir, "S01-PLAN.md"),
+      [
+        "# S01: stale root projection",
+        "",
+        "## Tasks",
+        "",
+        "- [ ] **T01: Task one** `est:1h`",
+      ].join("\n"),
+    );
+    // Intentionally do not create root T01-PLAN.md.
+
+    const worktreeBase = join(base, ".gsd", "worktrees", "M001");
+    mkdirSync(worktreeBase, { recursive: true });
+    writeFileSync(join(worktreeBase, ".git"), `gitdir: ${join(base, ".git", "worktrees", "M001")}\n`);
+
+    const wtSliceDir = join(worktreeBase, ".gsd", "milestones", "M001", "slices", "S01");
+    const wtTasksDir = join(wtSliceDir, "tasks");
+    mkdirSync(wtTasksDir, { recursive: true });
+    writeFileSync(
+      join(wtSliceDir, "S01-PLAN.md"),
+      [
+        "# S01: live worktree projection",
+        "",
+        "## Tasks",
+        "",
+        "- [ ] **T01: Task one** `est:1h`",
+      ].join("\n"),
+    );
+    writeFileSync(join(wtTasksDir, "T01-PLAN.md"), "# T01 Plan\n\nLive worktree task plan.");
+
+    const result = verifyExpectedArtifact("plan-slice", "M001/S01", base);
+    assert.equal(result, true, "verification should read active worktree projection artifacts");
+  } finally {
+    cleanup(base);
+  }
+});
+
 test("verifyExpectedArtifact plan-slice fails when a task plan file is missing (#739)", () => {
   const base = makeTmpBase();
   try {

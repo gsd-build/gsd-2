@@ -30,6 +30,9 @@ import {
   resolveMilestoneFile,
   clearPathCache,
   resolveGsdRootFile,
+  gsdProjectionRoot,
+  resolveDir,
+  resolveFile,
 } from "./paths.js";
 import {
   existsSync,
@@ -48,6 +51,7 @@ import { hasVerdict } from "./verdict-parser.js";
 import { validateArtifact } from "./schemas/validate.js";
 import { getProjectResearchStatus } from "./project-research-policy.js";
 import { isGsdWorktreePath } from "./worktree-root.js";
+import { resolveCanonicalMilestoneRoot } from "./worktree-manager.js";
 
 // Re-export so existing consumers of auto-recovery.ts keep working.
 export { resolveExpectedArtifactPath, diagnoseExpectedArtifact };
@@ -804,7 +808,24 @@ export function verifyExpectedArtifact(
     }
   }
 
-  const absPath = resolveExpectedArtifactPath(unitType, unitId, base);
+  let absPath = resolveExpectedArtifactPath(unitType, unitId, base);
+  if (unitType === "plan-slice") {
+    const { milestone: mid, slice: sid } = parseUnitId(unitId);
+    if (mid && sid) {
+      const canonicalBase = resolveCanonicalMilestoneRoot(base, mid);
+      const projectionRoot = gsdProjectionRoot(canonicalBase);
+      const mDir = resolveDir(join(projectionRoot, "milestones"), mid);
+      const sDir = mDir
+        ? resolveDir(join(projectionRoot, "milestones", mDir, "slices"), sid)
+        : null;
+      const pFile = sDir
+        ? resolveFile(join(projectionRoot, "milestones", mDir!, "slices", sDir), sid, "PLAN")
+        : null;
+      if (mDir && sDir && pFile) {
+        absPath = join(projectionRoot, "milestones", mDir, "slices", sDir, pFile);
+      }
+    }
+  }
   // For unit types with no verifiable artifact (null path), the parent directory
   // is missing on disk — treat as stale completion state so the key gets evicted (#313).
   if (!absPath) {
@@ -881,9 +902,9 @@ export function verifyExpectedArtifact(
         }
 
         if (taskIds && taskIds.length > 0) {
-          const tasksDir = resolveTasksDir(base, mid, sid);
-          if (!tasksDir) {
-            logWarning("recovery", `verify-fail ${unitType} ${unitId}: resolveTasksDir returned null for ${mid}/${sid}`);
+          const tasksDir = join(dirname(absPath), "tasks");
+          if (!existsSync(tasksDir)) {
+            logWarning("recovery", `verify-fail ${unitType} ${unitId}: tasks dir missing ${tasksDir}`);
             return false;
           }
           for (const tid of taskIds) {
