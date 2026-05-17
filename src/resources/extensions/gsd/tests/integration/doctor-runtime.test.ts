@@ -256,6 +256,28 @@ None
       assert.ok(content.includes("M001"), "rebuilt STATE.md references milestone");
     });
 
+    // ─── Test 6b: failed migration orphan cleanup when .gsd is intact ──
+    test('failed_migration orphan is removed when .gsd is valid', async () => {
+      const dir = createMinimalProject();
+      cleanups.push(dir);
+
+      // Simulate crash window where both directories exist.
+      mkdirSync(join(dir, ".gsd.migrating"), { recursive: true });
+      writeFileSync(join(dir, ".gsd", "STATE.md"), "# GSD State\n");
+
+      const detect = await runGSDDoctor(dir);
+      const migrationIssues = detect.issues.filter(i => i.code === "failed_migration");
+      assert.ok(migrationIssues.length > 0, "detects failed migration orphan");
+      assert.ok(migrationIssues[0]?.fixable === true, "failed migration orphan is fixable");
+
+      const fixed = await runGSDDoctor(dir, { fix: true });
+      assert.ok(
+        fixed.fixesApplied.some(f => f.includes("removed orphaned .gsd.migrating")),
+        "fix removes orphaned .gsd.migrating when .gsd validates",
+      );
+      assert.ok(!existsSync(join(dir, ".gsd.migrating")), ".gsd.migrating removed after fix");
+    });
+
     // ─── Test 7: Gitignore missing patterns detection & fix ───────────
     if (process.platform !== "win32") {
     test('gitignore_missing_patterns', async () => {
