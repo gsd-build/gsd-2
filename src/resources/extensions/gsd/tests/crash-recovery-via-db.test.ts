@@ -243,7 +243,7 @@ test("clearLock removes the session_file row for the active worker", (t) => {
     "session_file row deleted by clearLock");
 });
 
-test("clearLock marks stale worker crashed when no current-process worker matches", (t) => {
+test("clearLock marks stale worker stopping when no current-process worker matches", (t) => {
   const base = makeBase();
   t.after(() => cleanup(base));
   openDatabase(join(base, ".gsd", "gsd.db"));
@@ -257,12 +257,12 @@ test("clearLock marks stale worker crashed when no current-process worker matche
 
   clearLock(base);
 
-  assert.equal(getAutoWorker(workerId)?.status, "crashed");
+  assert.equal(getAutoWorker(workerId)?.status, "stopping");
   assert.equal(getRuntimeKv("worker", workerId, "session_file"), null);
   assert.equal(readCrashLock(base), null);
 });
 
-test("clearStaleWorkerLock crashes stale worker and cancels latest active dispatch", (t) => {
+test("clearStaleWorkerLock marks stale worker stopping and cancels latest active dispatch", (t) => {
   const base = makeBase();
   t.after(() => cleanup(base));
   openDatabase(join(base, ".gsd", "gsd.db"));
@@ -293,7 +293,7 @@ test("clearStaleWorkerLock crashes stale worker and cancels latest active dispat
 
   clearStaleWorkerLock(base);
 
-  assert.equal(getAutoWorker(workerId)?.status, "crashed");
+  assert.equal(getAutoWorker(workerId)?.status, "stopping");
   const dispatch = getLatestForUnit("M001/S01/T02");
   assert.ok(dispatch);
   assert.equal(dispatch!.status, "canceled");
@@ -302,7 +302,7 @@ test("clearStaleWorkerLock crashes stale worker and cancels latest active dispat
   assert.equal(readCrashLock(base), null);
 });
 
-test("clearLock marks stale worker crashed and releases held milestone lease", (t) => {
+test("clearLock marks stale worker stopping and releases held milestone lease", (t) => {
   const base = makeBase();
   t.after(() => cleanup(base));
   openDatabase(join(base, ".gsd", "gsd.db"));
@@ -319,7 +319,7 @@ test("clearLock marks stale worker crashed and releases held milestone lease", (
 
   clearLock(base);
 
-  assert.equal(getAutoWorker(workerId)?.status, "crashed");
+  assert.equal(getAutoWorker(workerId)?.status, "stopping");
   const leaseRow = _getAdapter()!.prepare(
     `SELECT status FROM milestone_leases WHERE milestone_id = :m`,
   ).get({ ":m": "M001" }) as { status: string } | undefined;
