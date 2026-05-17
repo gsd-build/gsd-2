@@ -1,17 +1,28 @@
+# Project/App: GSD-2
+# File Purpose: Triage new and updated issues and pull requests.
+
 name: AI Triage
 
 on:
   issues:
-    types: [opened]
+    types: [opened, edited, reopened]
+  issue_comment:
+    types: [created]
   pull_request_target:
-    types: [opened]
+    types: [opened, synchronize, reopened]
 
 permissions:
+  contents: read
   issues: write
   pull-requests: write
 
+concurrency:
+  group: ai-triage-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   triage:
+    if: ${{ github.event_name != 'issue_comment' || (github.event.comment.user.type != 'Bot' && (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'COLLABORATOR') && contains(github.event.comment.body, '/rerun-triage')) }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v6
@@ -19,29 +30,62 @@ jobs:
           sparse-checkout: |
             VISION.md
             CONTRIBUTING.md
+            scripts/ai-triage-policy.mjs
           sparse-checkout-cone-mode: false
 
-      - name: Triage with Claude
+      - name: Triage with model
         uses: actions/github-script@v7
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:
           script: |
             const fs = require('fs');
+            const {
+              CANONICAL_TRIAGE_LABELS,
+              TRIAGE_LABEL_COLORS,
+              TRIAGE_LABEL_DESCRIPTIONS,
+              normalizeTriageResult
+            } = await import(`${process.cwd()}/scripts/ai-triage-policy.mjs`);
             const vision = fs.readFileSync('VISION.md', 'utf8');
             const contributing = fs.readFileSync('CONTRIBUTING.md', 'utf8');
 
-            const isIssue = !!context.payload.issue;
+            const isIssueComment = context.eventName === 'issue_comment';
+            const isPullRequestComment = !!context.payload.issue?.pull_request;
+            const isIssue = !!context.payload.issue && !isPullRequestComment;
             const item = context.payload.issue || context.payload.pull_request;
             const number = item.number;
             const title = item.title;
             const body = item.body || '';
             const type = isIssue ? 'issue' : 'pull_request';
+            const latestComment = isIssueComment ? (context.payload.comment?.body || '') : '';
             let existingLabels = (item.labels || []).map(l => l.name);
 
-            // Ensure all newly opened issues enter the canonical triage queue,
-            // even when they bypass issue templates (API/import/manual labeling).
-            if (isIssue && !existingLabels.includes('needs-triage')) {
+            async function ensureCanonicalLabels(labels) {
+              for (const label of labels) {
+                if (!TRIAGE_LABEL_COLORS[label]) continue;
+                try {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: label,
+                    color: TRIAGE_LABEL_COLORS[label],
+                    description: TRIAGE_LABEL_DESCRIPTIONS[label]
+                  });
+                  core.info(`Created canonical triage label: ${label}`);
+                } catch (e) {
+                  if (e.status !== 422) throw e;
+                }
+              }
+            }
+
+            const isNewIssue = context.eventName === 'issues' && context.payload.action === 'opened';
+            const hasCanonicalTriageStatus = existingLabels.some(label =>
+              CANONICAL_TRIAGE_LABELS.includes(label)
+            );
+
+            // Ensure new issues enter the canonical triage queue when no triage status exists.
+            if (isNewIssue && !hasCanonicalTriageStatus) {
+              await ensureCanonicalLabels(['needs-triage']);
               await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -68,6 +112,7 @@ jobs:
             Title: ${title}
             Body: ${body}
             Existing labels: ${existingLabels.join(', ') || 'none'}
+            ${latestComment ? `Latest comment: ${latestComment}` : ''}
             </${type}>
 
             Available labels for classification (pick 1-3 that fit):
@@ -79,7 +124,13 @@ jobs:
             - tech-debt: Technical debt reduction
             - question: Further information is requested
             - good first issue: Good for newcomers
+
+            Available triage status labels (pick exactly 1 as triage_status):
+            - needs-triage: Maintainer needs to evaluate this issue
             - needs-info: Waiting for reporter information
+            - ready-for-agent: Fully specified, ready for an AFK agent
+            - ready-for-human: Requires human implementation
+            - wontfix: Will not be actioned
 
             Available priority labels (pick exactly 1 if you can assess priority):
             - High Priority
@@ -89,6 +140,7 @@ jobs:
             Respond in this exact JSON format:
             {
               "labels": ["label1", "label2"],
+              "triage_status": "needs-triage",
               "aligned": true,
               "violation_type": null,
               "explanation": null
@@ -141,22 +193,42 @@ jobs:
               const text = data.content?.[0]?.text ?? '';
 
               // Extract JSON from response (handle markdown code blocks)
-              const jsonMatch = text.match(/\{[\s\S]*\}/);
-              if (!jsonMatch) {
+              const fenced = text.match(/```json\s*([\s\S]*?)\s*```/i);
+              const loose = text.match(/\{[\s\S]*?\}/);
+              const jsonText = fenced?.[1] ?? loose?.[0];
+              if (!jsonText) {
                 core.warning(`Skipping AI triage because the model response was not parseable JSON: ${text}`);
                 return;
               }
 
-              result = JSON.parse(jsonMatch[0]);
+              result = JSON.parse(jsonText);
             } catch (e) {
               core.warning(`Skipping AI triage after unexpected failure: ${e.message}`);
               return;
             }
+            const normalized = normalizeTriageResult(result, existingLabels);
+            result.labels = normalized.labels;
             core.info(`Triage result: ${JSON.stringify(result, null, 2)}`);
+
+            for (const label of normalized.labelsToRemove) {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: number,
+                  name: label
+                });
+                existingLabels = existingLabels.filter(existing => existing !== label);
+                core.info(`Removed stale triage label: ${label}`);
+              } catch (e) {
+                if (e.status !== 404) throw e;
+              }
+            }
 
             // Apply labels
             const labelsToAdd = result.labels.filter(l => !existingLabels.includes(l));
             if (labelsToAdd.length > 0) {
+              await ensureCanonicalLabels(labelsToAdd);
               await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -169,6 +241,7 @@ jobs:
             // Flag misaligned issues/PRs
             if (!result.aligned) {
               // Add needs-review label
+              await ensureCanonicalLabels(['needs-review']);
               await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -191,7 +264,9 @@ jobs:
                 ? `\n\n**If this is a security vulnerability, please delete this ${type} and use [GitHub\'s private vulnerability reporting](https://github.com/gsd-build/GSD-2/security/advisories/new) instead.** See [CONTRIBUTING.md](https://github.com/gsd-build/GSD-2/blob/main/CONTRIBUTING.md#security) for details.`
                 : '';
 
-              const comment = `👋 Thanks for opening this ${type}!
+              const marker = '<!-- gsd-triage-bot:misalignment -->';
+              const comment = `${marker}
+            👋 Thanks for opening this ${type}!
 
             This was automatically flagged for maintainer review.
 
@@ -206,11 +281,30 @@ jobs:
             ---
             *This is an automated triage. The maintainers make all final decisions.*`;
 
-              await github.rest.issues.createComment({
+              const comments = await github.paginate(github.rest.issues.listComments, {
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: number,
-                body: comment
+                per_page: 100
               });
+              const existingBotComment = comments.find(c => (c.body || '').includes(marker));
+
+              if (existingBotComment) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existingBotComment.id,
+                  body: comment
+                });
+                core.info(`Updated existing misalignment comment: ${existingBotComment.id}`);
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: number,
+                  body: comment
+                });
+                core.info('Created misalignment comment');
+              }
               core.info(`Flagged as misaligned: ${result.violation_type}`);
             }

@@ -46,6 +46,8 @@ export class DynamicBorder implements Component {
 				ui.requestRender();
 			}
 		}, 200);
+		// The spinner is purely cosmetic — it must never keep the Node event loop
+		// alive on its own (otherwise a process can hang waiting for it to stop).
 		this.spinnerInterval.unref?.();
 		ui.requestRender();
 	}

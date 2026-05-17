@@ -17,6 +17,7 @@ repowise.db-*
 # ── GSD project state (development-only, lives in worktree branches) ──
 package-lock.json
 .claude/
+.agents/
 RELEASE-GUIDE.md
 *.tgz
 *.tsbuildinfo
@@ -84,3 +85,4 @@ bun.lock
 
 # ── GSD baseline (auto-generated) ──
 .gsd-id
+.gsd/gsd.db

@@ -1,0 +1,42 @@
+# Project/App: GSD-2
+# File Purpose: Block unsafe expansion of agent workflow triggers.
+
+name: Agent Workflow Guard
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: agent-workflow-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  non-write-users:
+    name: Check non-write-user trigger expansion
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+
+    steps:
+      - name: Checkout base
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.base_ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Check workflow patches
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node scripts/workflow-non-write-users-check.mjs

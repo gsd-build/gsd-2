@@ -53,6 +53,8 @@ export class Loader extends Text {
 				this.ui.requestRender();
 			}
 		}, 80);
+		// The loader animation is purely cosmetic — it must never keep the Node
+		// event loop alive on its own (otherwise a process can hang on exit).
 		this.intervalId.unref?.();
 		// Trigger initial render
 		if (this.ui) {

@@ -1,0 +1,61 @@
+# Project/App: GSD-2
+# File Purpose: Maintain canonical issue lifecycle comments and stale needs-info routing.
+
+name: Issue Lifecycle
+
+on:
+  issues:
+    types: [labeled]
+  schedule:
+    - cron: "22 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-lifecycle-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  comment:
+    name: Comment on lifecycle labels
+    if: ${{ github.event_name == 'issues' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+
+    steps:
+      - name: Checkout base
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Comment on label
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node scripts/issue-lifecycle.mjs comment
+
+  sweep:
+    name: Recycle stale needs-info issues
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+
+    steps:
+      - name: Checkout base
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Move stale needs-info issues back to triage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          NEEDS_INFO_MAX_DAYS: "14"
+        run: node scripts/issue-lifecycle.mjs sweep

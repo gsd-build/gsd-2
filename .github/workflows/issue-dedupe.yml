@@ -1,0 +1,43 @@
+# Project/App: GSD-2
+# File Purpose: Suggest possible duplicate issues without auto-closing.
+
+name: Issue Dedupe
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to check
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-dedupe-${{ github.event.issue.number || inputs.issue_number }}
+  cancel-in-progress: true
+
+jobs:
+  suggest-duplicates:
+    name: Suggest duplicate candidates
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout base
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Check for likely duplicates
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+        run: node scripts/issue-dedupe.mjs
