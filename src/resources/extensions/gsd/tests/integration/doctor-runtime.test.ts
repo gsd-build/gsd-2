@@ -341,6 +341,7 @@ node_modules/
 
       // Intact current state marker required by cleanup gate.
       writeFileSync(join(dir, ".gsd", "STATE.md"), "# GSD State\n");
+      writeFileSync(join(dir, ".gsd", "gsd.db"), "db");
       mkdirSync(join(dir, ".gsd.migrating"), { recursive: true });
       writeFileSync(join(dir, ".gsd.migrating", "stale.txt"), "stale snapshot");
 
@@ -352,6 +353,19 @@ node_modules/
       await runGSDDoctor(dir, { fix: true });
       assert.ok(!existsSync(join(dir, ".gsd.migrating")), "orphan .gsd.migrating removed");
       assert.ok(existsSync(join(dir, ".gsd")), "current .gsd preserved");
+    });
+
+    test('failed_migration orphan NOT removed when .gsd is incomplete', async () => {
+      const dir = createMinimalProject();
+      cleanups.push(dir);
+
+      rmSync(join(dir, ".gsd", "STATE.md"), { force: true });
+      mkdirSync(join(dir, ".gsd.migrating"), { recursive: true });
+      writeFileSync(join(dir, ".gsd.migrating", "STATE.md"), "# Migrating state\n");
+
+      await runGSDDoctor(dir, { fix: true });
+      assert.ok(existsSync(join(dir, ".gsd.migrating")), ".gsd.migrating preserved when current .gsd is incomplete");
+      assert.ok(existsSync(join(dir, ".gsd", "milestones", "M001")), "current .gsd milestones preserved");
     });
 
     test('orphaned_completed_units', async () => {

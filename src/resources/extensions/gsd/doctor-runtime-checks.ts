@@ -22,7 +22,10 @@ function isCurrentGsdStateIntactForMigratingCleanup(basePath: string): boolean {
   try {
     const stateFile = resolveGsdRootFile(basePath, "STATE");
     const milestonesPath = milestonesDir(basePath);
-    return existsSync(stateFile) && existsSync(milestonesPath);
+    const dbPath = join(gsdRoot(basePath), "gsd.db");
+    const hasDbFile = existsSync(dbPath);
+    const hasNonEmptyDb = hasDbFile && statSync(dbPath).size > 0;
+    return existsSync(stateFile) && existsSync(milestonesPath) && hasNonEmptyDb;
   } catch {
     return false;
   }
@@ -460,8 +463,8 @@ export async function checkRuntimeHealth(
             try {
               rmSync(migratingPath, { recursive: true, force: true });
               fixesApplied.push("removed stale .gsd.migrating orphan after validating current .gsd state");
-            } catch {
-              // Keep issue visible if cleanup fails
+            } catch (err) {
+              fixesApplied.push(`failed to remove stale .gsd.migrating orphan at ${migratingPath}: ${err instanceof Error ? err.message : String(err)}`);
             }
           }
         }
