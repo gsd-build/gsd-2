@@ -45,7 +45,7 @@ function buildState(phase: Phase): GSDState {
 
 function makeBasePath(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), `gsd-4671-${prefix}-`));
-  mkdirSync(join(dir, ".gsd", "milestones", "M001"), { recursive: true });
+  mkdirSync(join(dir, ".gsd", "milestones", "M001", "slices", "S01"), { recursive: true });
   return dir;
 }
 
@@ -94,6 +94,20 @@ describe("#4671 execution-entry phase missing-context recovery", () => {
       );
       const action = await findRule().match(buildCtx(basePath, buildState("executing")));
       assert.strictEqual(action, null, "rule must fall through when CONTEXT.md exists");
+    } finally {
+      rmSync(basePath, { recursive: true, force: true });
+    }
+  });
+
+  test("phase=executing with slice PLAN.md present → falls through (milestone already passed discuss)", async () => {
+    const basePath = makeBasePath("has-plan");
+    try {
+      writeFileSync(
+        join(basePath, ".gsd", "milestones", "M001", "slices", "S01", "S01-PLAN.md"),
+        "# S01 Plan\n\n- [ ] **T01**: work\n",
+      );
+      const action = await findRule().match(buildCtx(basePath, buildState("executing")));
+      assert.strictEqual(action, null, "rule must fall through when planning artifacts already exist");
     } finally {
       rmSync(basePath, { recursive: true, force: true });
     }

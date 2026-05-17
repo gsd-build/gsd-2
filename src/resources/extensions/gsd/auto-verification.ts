@@ -47,6 +47,8 @@ import { decideVerificationVerdict } from "./verification-verdict.js";
 import { createRepositoryRegistryFromPreferences, defaultRepositoryTargets } from "./repository-registry.js";
 import type { SliceRow } from "./db-task-slice-rows.js";
 import { getSlice } from "./gsd-db.js";
+import { getLedger } from "./metrics.js";
+import { getUnitCostSpikeAction } from "./auto-budget.js";
 
 export interface VerificationContext {
   s: AutoSession;
@@ -55,6 +57,28 @@ export interface VerificationContext {
 }
 
 export type VerificationResult = "continue" | "retry" | "pause";
+
+function getCurrentUnitCostStats(unitId: string): { unitCostUsd: number; rollingAvgUsd: number } {
+  const ledger = getLedger();
+  if (!ledger || !Array.isArray(ledger.units) || ledger.units.length === 0) {
+    return { unitCostUsd: 0, rollingAvgUsd: 0 };
+  }
+  let unitCostUsd = 0;
+  let totalCost = 0;
+  let totalUnits = 0;
+  for (const unit of ledger.units) {
+    const cost = typeof unit?.cost === "number" ? unit.cost : 0;
+    if (!Number.isFinite(cost) || cost < 0) continue;
+    totalCost += cost;
+    totalUnits++;
+    if (unit?.id === unitId) unitCostUsd += cost;
+  }
+  return {
+    unitCostUsd,
+    rollingAvgUsd: totalUnits > 0 ? totalCost / totalUnits : 0,
+  };
+}
+
 
 function resolveVerificationTargets(
   basePath: string,
@@ -66,8 +90,9 @@ function resolveVerificationTargets(
   const defaultTargets = defaultRepositoryTargets(registry);
   const taskTargetRepositories = task?.target_repositories?.length ? task.target_repositories : null;
   const sliceTargetRepositories = slice?.target_repositories?.length ? slice.target_repositories : null;
-  const explicitTargetsRequested = Boolean(taskTargetRepositories || sliceTargetRepositories);
-  const requestedIds = taskTargetRepositories ?? sliceTargetRepositories ?? defaultTargets;
+  const explicitIds = taskTargetRepositories ?? sliceTargetRepositories ?? null;
+  const explicitTargetsRequested = Boolean(explicitIds);
+  const requestedIds = explicitIds ?? defaultTargets;
 
   const targets: VerificationTarget[] = [];
   const seen = new Set<string>();
@@ -82,6 +107,7 @@ function resolveVerificationTargets(
     targets.push({
       id: repo.id,
       cwd: repo.root,
+      // Top-level verification commands override per-repo defaults.
       preferenceCommands: prefs?.verification_commands?.length
         ? undefined
         : repo.verification,
@@ -98,6 +124,7 @@ function resolveVerificationTargets(
 function hasExplicitVerificationTargets(task: TaskRow | null, slice: SliceRow | null): boolean {
   return Boolean(task?.target_repositories?.length || slice?.target_repositories?.length);
 }
+
 
 /**
  * Post-unit guard for `validate-milestone` units (#4094).
@@ -462,7 +489,7 @@ export async function runPostUnitVerification(
 
       if (enhancedEnabled && postEnabled && isDbAvailable()) {
         try {
-          // Use the previously fetched taskRow for post-execution checks.
+          // Reuse the already-loaded task row for post-execution checks.
           if (taskRow && taskRow.key_files && taskRow.key_files.length > 0) {
             // Get all tasks in the slice
             const allTasks = getSliceTasks(mid, sid);
@@ -668,6 +695,33 @@ export async function runPostUnitVerification(
       await pauseAuto(ctx, pi);
       return "pause";
     } else if (autoFixEnabled && attempt + 1 <= maxRetries) {
+      const { unitCostUsd, rollingAvgUsd } = getCurrentUnitCostStats(s.currentUnit.id);
+      const perUnitCapUsd =
+        typeof prefs?.per_unit_cost_cap_usd === "number" && Number.isFinite(prefs.per_unit_cost_cap_usd) && prefs.per_unit_cost_cap_usd > 0
+          ? prefs.per_unit_cost_cap_usd
+          : 5.0;
+      if (unitCostUsd >= perUnitCapUsd) {
+        s.verificationRetryCount.delete(retryKey);
+        s.verificationRetryFailureHashes.delete(retryKey);
+        s.pendingVerificationRetry = null;
+        ctx.ui.notify(
+          `Unit ${s.currentUnit.id} hit per-unit cap $${perUnitCapUsd.toFixed(2)} — pausing auto-mode.`,
+          "error",
+        );
+        await pauseAuto(ctx, pi);
+        return "pause";
+      }
+      if (getUnitCostSpikeAction(unitCostUsd, rollingAvgUsd, 3.0) === "pause") {
+        s.verificationRetryCount.delete(retryKey);
+        s.verificationRetryFailureHashes.delete(retryKey);
+        s.pendingVerificationRetry = null;
+        ctx.ui.notify(
+          `Unit ${s.currentUnit.id} cost spike detected (${unitCostUsd.toFixed(2)} vs avg ${rollingAvgUsd.toFixed(2)}) — pausing auto-mode.`,
+          "error",
+        );
+        await pauseAuto(ctx, pi);
+        return "pause";
+      }
       const nextAttempt = attempt + 1;
       s.verificationRetryCount.set(retryKey, nextAttempt);
       s.pendingVerificationRetry = {

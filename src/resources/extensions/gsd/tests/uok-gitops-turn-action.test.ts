@@ -197,3 +197,13 @@ test("uok gitops turn action keeps non-infrastructure git failures recoverable",
   assert.equal(result.status, "failed");
   assert.equal(result.error, "nothing to commit");
 });
+
+test("uok gitops turn action prefers stderr details for git failures", () => {
+  const err = Object.assign(new Error("Command failed: git commit -F -"), {
+    stderr: "fatal: unable to auto-detect email address",
+  });
+
+  const result = handleTurnGitActionError("commit", err);
+  assert.equal(result.status, "failed");
+  assert.equal(result.error, "fatal: unable to auto-detect email address");
+});

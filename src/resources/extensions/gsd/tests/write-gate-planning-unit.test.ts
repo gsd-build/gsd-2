@@ -117,6 +117,11 @@ test('planning-unit: allows read-only bash (cat)', () => {
   assert.strictEqual(r.block, false);
 });
 
+test('planning-unit: allows read-only bash prefixed with cd', () => {
+  const r = shouldBlockPlanningUnit('bash', 'cd .gsd && cat PROJECT.md', BASE, 'plan-slice', PLANNING_DISPATCH);
+  assert.strictEqual(r.block, false);
+});
+
 test('planning-unit: blocks mutating bash (rm -rf)', () => {
   const r = shouldBlockPlanningUnit('bash', 'rm -rf /tmp/foo', BASE, 'discuss-milestone', PLANNING);
   assert.strictEqual(r.block, true);

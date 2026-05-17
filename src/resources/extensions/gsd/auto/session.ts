@@ -54,6 +54,16 @@ export interface PendingVerificationRetry {
   attempt: number;
 }
 
+export interface PendingOrchestrationDispatch {
+  unitType: string;
+  unitId: string;
+  prompt: string;
+  pauseAfterUatDispatch: boolean;
+  state: import("../types.js").GSDState;
+  mid: string | undefined;
+  midTitle: string | undefined;
+}
+
 /**
  * A typed item enqueued by postUnitPostVerification for the main loop to
  * drain via the standard runUnit path. Replaces inline dispatch
@@ -244,6 +254,7 @@ export class AutoSession {
 
   // ── Orchestration seam ───────────────────────────────────────────────────
   orchestration: AutoOrchestrationModule | null = null;
+  pendingOrchestrationDispatch: PendingOrchestrationDispatch | null = null;
 
   // ── Loop promise state ──────────────────────────────────────────────────
   // Per-unit resolve function and session-switch guard live at module level
@@ -376,6 +387,7 @@ export class AutoSession {
 
     // Orchestration seam
     this.orchestration = null;
+    this.pendingOrchestrationDispatch = null;
 
     // Loop promise state lives in auto-loop.ts module scope
   }

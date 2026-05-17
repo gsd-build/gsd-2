@@ -607,4 +607,99 @@ describe('worktree-sync-milestones', async () => {
       rmSync(wtBase, { recursive: true, force: true });
     }
   }
+
+  // ─── 16. pre-dispatch sync projects missing future milestone top-level artifacts (#5687) ──
+  console.log('\n=== 16. pre-dispatch sync projects missing future milestone top-level artifacts (#5687) ===');
+  {
+    const mainBase = createBase('main');
+    const wtBase = createBase('wt');
+
+    try {
+      // Canonical .gsd has M003 context draft that complete-milestone needs.
+      const mainM003 = join(mainBase, '.gsd', 'milestones', 'M003');
+      mkdirSync(mainM003, { recursive: true });
+      writeFileSync(join(mainM003, 'M003-CONTEXT-DRAFT.md'), '# M003 Context Draft');
+      writeFileSync(join(mainM003, 'M003-ROADMAP.md'), '# M003 Roadmap');
+
+      // Worktree only has skeletal roadmap for M003.
+      const wtM003 = join(wtBase, '.gsd', 'milestones', 'M003');
+      mkdirSync(wtM003, { recursive: true });
+      writeFileSync(join(wtM003, 'M003-ROADMAP.md'), '# WT Roadmap');
+
+      // Worktree has current milestone file that must not be overwritten.
+      const mainM002 = join(mainBase, '.gsd', 'milestones', 'M002');
+      mkdirSync(mainM002, { recursive: true });
+      writeFileSync(join(mainM002, 'M002-ROADMAP.md'), '# Main M002 Roadmap');
+      const wtM002 = join(wtBase, '.gsd', 'milestones', 'M002');
+      mkdirSync(wtM002, { recursive: true });
+      writeFileSync(join(wtM002, 'M002-ROADMAP.md'), '# Worktree M002 Roadmap');
+
+      // Canonical .gsd has M004 with no corresponding worktree directory at all.
+      const mainM004 = join(mainBase, '.gsd', 'milestones', 'M004');
+      mkdirSync(mainM004, { recursive: true });
+      writeFileSync(join(mainM004, 'M004-CONTEXT-DRAFT.md'), '# M004 Context Draft');
+
+      syncProjectRootToWorktree(mainBase, wtBase, 'M002');
+
+      assert.ok(
+        existsSync(join(wtBase, '.gsd', 'milestones', 'M003', 'M003-CONTEXT-DRAFT.md')),
+        '#5687: future milestone context draft projected into worktree',
+      );
+      assert.equal(
+        readFileSync(join(wtBase, '.gsd', 'milestones', 'M003', 'M003-ROADMAP.md'), 'utf-8'),
+        '# WT Roadmap',
+        '#5687: existing worktree-local M003 file is not overwritten',
+      );
+      assert.equal(
+        readFileSync(join(wtBase, '.gsd', 'milestones', 'M002', 'M002-ROADMAP.md'), 'utf-8'),
+        '# Worktree M002 Roadmap',
+        '#5687: existing worktree-local files are not overwritten',
+      );
+      assert.ok(
+        existsSync(join(wtBase, '.gsd', 'milestones', 'M004', 'M004-CONTEXT-DRAFT.md')),
+        '#5687: future milestone context draft projected into worktree when no wt dir existed',
+      );
+    } finally {
+      cleanup(mainBase);
+      cleanup(wtBase);
+    }
+  }
+
+  // ─── 17. pre-dispatch sync creates absent worktree milestone dir before projecting artifacts (#5687) ──
+  console.log('\n=== 17. pre-dispatch sync creates absent worktree milestone dir before projecting artifacts (#5687) ===');
+  {
+    const mainBase = createBase('main');
+    const wtBase = createBase('wt');
+
+    try {
+      // Canonical .gsd has a future milestone M004 with a context draft.
+      const mainM004 = join(mainBase, '.gsd', 'milestones', 'M004');
+      mkdirSync(mainM004, { recursive: true });
+      writeFileSync(join(mainM004, 'M004-CONTEXT-DRAFT.md'), '# M004 Context Draft');
+
+      // Active milestone M002 exists in both main and worktree.
+      const mainM002 = join(mainBase, '.gsd', 'milestones', 'M002');
+      mkdirSync(mainM002, { recursive: true });
+      writeFileSync(join(mainM002, 'M002-ROADMAP.md'), '# Main M002 Roadmap');
+      const wtM002 = join(wtBase, '.gsd', 'milestones', 'M002');
+      mkdirSync(wtM002, { recursive: true });
+      writeFileSync(join(wtM002, 'M002-ROADMAP.md'), '# Worktree M002 Roadmap');
+
+      // M004 does NOT exist in the worktree at all before sync.
+      assert.ok(
+        !existsSync(join(wtBase, '.gsd', 'milestones', 'M004')),
+        '#5687: worktree M004 dir must not exist before sync',
+      );
+
+      syncProjectRootToWorktree(mainBase, wtBase, 'M002');
+
+      assert.ok(
+        existsSync(join(wtBase, '.gsd', 'milestones', 'M004', 'M004-CONTEXT-DRAFT.md')),
+        '#5687: context draft projected into worktree even when milestone dir was absent',
+      );
+    } finally {
+      cleanup(mainBase);
+      cleanup(wtBase);
+    }
+  }
 });

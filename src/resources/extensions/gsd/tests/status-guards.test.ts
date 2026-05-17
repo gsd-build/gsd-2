@@ -17,6 +17,10 @@ test('isClosedStatus: "skipped" returns true', () => {
   assert.equal(isClosedStatus('skipped'), true);
 });
 
+test('isClosedStatus: "closed" returns true', () => {
+  assert.equal(isClosedStatus('closed'), true);
+});
+
 test('isClosedStatus: "pending" returns false', () => {
   assert.equal(isClosedStatus('pending'), false);
 });

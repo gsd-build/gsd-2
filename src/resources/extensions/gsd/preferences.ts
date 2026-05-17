@@ -55,6 +55,8 @@ export type {
   UokTurnActionMode,
   UokPreferences,
   CodebaseMapPreferences,
+  ClaudeCodeMcpPerModelEntry,
+  ClaudeCodeMcpConfig,
   GSDPreferences,
   LoadedGSDPreferences,
   SkillResolution,
@@ -98,6 +100,9 @@ export {
   resolveSearchProviderFromPreferences,
   resolveDisabledModelProvidersFromPreferences,
 } from "./preferences-models.js";
+
+// ─── Re-exports: MCP ────────────────────────────────────────────────────────
+export { resolveModelMcpConfig } from "./preferences-mcp.js";
 
 // ─── Path Constants & Getters ───────────────────────────────────────────────
 
@@ -373,6 +378,10 @@ export function applyModeDefaults(mode: WorkflowMode, prefs: GSDPreferences): GS
 
 function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPreferences {
   return {
+    // Preserve validated preference keys that do not need custom merge logic.
+    // The explicit fields below still own defaults, arrays, and deep merges.
+    ...base,
+    ...override,
     version: override.version ?? base.version,
     mode: override.mode ?? base.mode,
     always_use_skills: mergeStringLists(base.always_use_skills, override.always_use_skills),

@@ -1,3 +1,4 @@
+
 /**
  * Evidence cross-reference for auto-mode safety harness.
  * Compares the LLM's claimed verification evidence (command + exitCode)
@@ -14,6 +15,7 @@ export interface ClaimedEvidence {
   command: string;
   exitCode: number;
   verdict: string;
+  createdAt?: string;
 }
 
 export interface EvidenceMismatch {
@@ -40,7 +42,7 @@ export function crossReferenceEvidence(
   );
   const mismatches: EvidenceMismatch[] = [];
 
-  for (const claimed of claimedEvidence) {
+  for (const claimed of latestClaimBatch(claimedEvidence)) {
     // Skip coerced entries — they're already flagged with exitCode: -1
     // and verdict: "unknown (coerced from string)" by db-tools.ts
     if (claimed.verdict?.includes("coerced from string")) continue;
@@ -49,10 +51,12 @@ export function crossReferenceEvidence(
     // Skip entries with empty or generic commands
     if (!claimed.command || claimed.command.length < 3) continue;
 
-    // Find matching bash call by command substring match
-    const match = findBestMatch(claimed.command, bashCalls);
+    // Find matching bash calls by command similarity. A command may be retried
+    // after a failed first run; the newest matching execution is the one that
+    // supports or rejects a claimed pass.
+    const matches = findMatches(claimed.command, bashCalls);
 
-    if (!match) {
+    if (matches.length === 0) {
       mismatches.push({
         severity: "warning",
         claimed,
@@ -63,6 +67,7 @@ export function crossReferenceEvidence(
     }
 
     // Exit code mismatch: LLM claims success but actual command failed
+    const match = latestMatch(matches);
     if (claimed.exitCode === 0 && match.exitCode !== 0) {
       mismatches.push({
         severity: "error",
@@ -79,42 +84,72 @@ export function crossReferenceEvidence(
 // ─── Internals ──────────────────────────────────────────────────────────────
 
 /**
- * Find the best matching bash evidence entry for a claimed command.
+ * Verification evidence rows are append-only across retries, but a task
+ * completion inserts one batch at a single created_at timestamp. When that
+ * timestamp is present, safety should judge the newest completion claim only.
+ */
+function latestClaimBatch(
+  claimedEvidence: readonly ClaimedEvidence[],
+): readonly ClaimedEvidence[] {
+  const dated = claimedEvidence
+    .map((claim) => ({
+      claim,
+      time: typeof claim.createdAt === "string" ? Date.parse(claim.createdAt) : Number.NaN,
+    }))
+    .filter((entry) => Number.isFinite(entry.time));
+
+  if (dated.length === 0) return claimedEvidence;
+
+  const latestTime = Math.max(...dated.map((entry) => entry.time));
+  return claimedEvidence.filter((claim) => (
+    typeof claim.createdAt === "string" && Date.parse(claim.createdAt) === latestTime
+  ));
+}
+
+/**
+ * Find bash evidence entries matching a claimed command.
  * Uses substring matching — the claimed command may be a shortened version
  * of the actual command, or vice versa.
  */
-function findBestMatch(
+function findMatches(
   claimedCommand: string,
   bashCalls: readonly BashEvidence[],
-): BashEvidence | null {
+): BashEvidence[] {
   const normalized = claimedCommand.trim();
 
-  // Exact match first
-  const exact = bashCalls.find(b => b.command.trim() === normalized);
-  if (exact) return exact;
+  // Exact matches first
+  const exact = bashCalls.filter(b => b.command.trim() === normalized);
+  if (exact.length > 0) return exact;
 
   // Substring match: claimed is contained in actual or actual in claimed
-  const substring = bashCalls.find(
+  const substring = bashCalls.filter(
     b => b.command.includes(normalized) || normalized.includes(b.command),
   );
-  if (substring) return substring;
+  if (substring.length > 0) return substring;
 
   // Token match: split on whitespace and check significant overlap
   const claimedTokens = normalized.split(/\s+/).filter(t => t.length > 2);
-  if (claimedTokens.length === 0) return null;
+  if (claimedTokens.length === 0) return [];
 
-  let bestMatch: BashEvidence | null = null;
-  let bestScore = 0;
+  const scoredMatches: Array<{ call: BashEvidence; score: number }> = [];
 
   for (const call of bashCalls) {
     const callTokens = new Set(call.command.split(/\s+/));
     const matchCount = claimedTokens.filter(t => callTokens.has(t)).length;
     const score = matchCount / claimedTokens.length;
-    if (score > bestScore && score >= 0.5) {
-      bestScore = score;
-      bestMatch = call;
+    if (score >= 0.5) {
+      scoredMatches.push({ call, score });
     }
   }
 
-  return bestMatch;
+  const bestScore = Math.max(0, ...scoredMatches.map((match) => match.score));
+  return scoredMatches
+    .filter((match) => match.score === bestScore)
+    .map((match) => match.call);
+}
+
+function latestMatch(matches: readonly BashEvidence[]): BashEvidence {
+  return matches.reduce((latest, match) => (
+    match.timestamp > latest.timestamp ? match : latest
+  ));
 }

@@ -42,8 +42,9 @@ It checks:
 - `.gsd/runtime/<unit-type>/<unit-id>.json` shows the latest runtime phase, timeout timestamp, recovery attempts, and progress marker. Timeout recovery uses progress kinds such as `idle-recovery-retry`, `hard-recovery-retry`, `finalize-pre-timeout`, `finalize-post-timeout`, and `finalize-success`.
 - `.gsd/journal/` shows the ordered loop events. Look for `unit-end`, then `post-unit-finalize-start`, `post-unit-finalize-end`, and `iteration-end`.
 - `post-unit-finalize-end.status` tells you whether closeout completed, retried, stopped, or failed. `iteration-end.status` and `iteration-end.reason` show the final loop outcome that caused auto mode to continue, retry, pause, or stop.
+- `.gsd/git-action-failures.log` appends each failed post-unit git action with timestamp and action mode (`commit` or `merge`) so you can inspect the exact git error that paused auto mode.
 
-**Fix:** If the runtime record shows fresh recovery progress, resume with `/gsd auto`; the failsafe defers cancellation while recovery is actively producing durable output. If the journal shows a stopped finalize reason such as a git closeout failure or repeated finalize timeout, resolve that underlying issue first, then resume.
+**Fix:** If the runtime record shows fresh recovery progress, resume with `/gsd auto`; the failsafe defers cancellation while recovery is actively producing durable output. If the journal shows a stopped finalize reason such as a git closeout failure or repeated finalize timeout, inspect `.gsd/git-action-failures.log`, resolve the underlying git issue, then resume.
 
 ### Wrong files in worktree
 
@@ -52,6 +53,29 @@ It checks:
 **Cause:** The LLM wrote to the main repo instead of the worktree.
 
 **Fix:** This was fixed in v2.14+. If you're on an older version, update. The dispatch prompt now includes explicit working directory instructions.
+
+### Milestone entry blocked by degraded worktree isolation
+
+**Symptoms:** Auto mode fails milestone entry with an isolation-degraded warning, often after a previous worktree cleanup/create problem on Windows.
+
+**Current behavior:** When isolation is configured as `worktree`, GSD now attempts a safe fallback to milestone `branch` mode instead of hard-failing immediately. Bootstrap also surfaces a specific isolation-degraded notification so the cause is visible.
+
+**Fix:**
+- Close editors, terminals, or antivirus tools that may be locking `.gsd/worktrees/*` paths.
+- Retry `/gsd auto`; if fallback succeeds, continue in branch mode for that milestone.
+- Run `/gsd doctor` after recovery to verify overall worktree health.
+
+### Windows `EPERM` / `EBUSY` while removing stale worktree directories
+
+**Symptoms:** Startup or milestone entry fails during stale worktree cleanup with `EPERM` or `EBUSY` from directory removal.
+
+**Cause:** A process still holds a handle under an old worktree path, preventing cleanup.
+
+**Current behavior:** GSD now fails with a targeted error explaining that file locks blocked cleanup and advising you to close locking tools before retrying.
+
+**Fix:**
+- Close apps that might hold file locks (editors, shells in old worktree paths, antivirus/indexers).
+- Retry the command after a short delay.
 
 ### `command not found: gsd` after install
 

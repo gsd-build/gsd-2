@@ -16,3 +16,10 @@ test("postUnitPreVerification blocks on git action failure", () => {
   assert.ok(failureBlock.includes('return "dispatched"'));
   assert.ok(!failureBlock.includes("git-action-failed-nonblocking"));
 });
+
+test("buildTaskCommitContextForUnit filters placeholder key_files entries", () => {
+  const keyFilesBlock = extractSourceRegion(source, "keyFiles:");
+  assert.ok(keyFilesBlock.includes("normalized.length > 0"));
+  assert.ok(keyFilesBlock.includes("!normalized.includes(\"{{\")"));
+  assert.ok(keyFilesBlock.includes("/^(?:\\(none\\)|none\\.?|n\\/a)$/i.test(normalized)"));
+});

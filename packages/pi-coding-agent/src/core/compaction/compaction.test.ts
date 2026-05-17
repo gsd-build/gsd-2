@@ -9,7 +9,14 @@ import { describe, it, mock } from "node:test";
 import type { AgentMessage } from "@gsd/pi-agent-core";
 import type { Model, AssistantMessage } from "@gsd/pi-ai";
 
-import { generateSummary, estimateTokens, chunkMessages, isDegenerateSummary, CompactionProducedNoSummaryError } from "./compaction.js";
+import {
+	generateSummary,
+	estimateTokens,
+	chunkMessages,
+	isDegenerateSummary,
+	CompactionProducedNoSummaryError,
+	calculateContextTokens,
+} from "./compaction.js";
 import { estimateSerializedTokens } from "./utils.js";
 
 // ---------------------------------------------------------------------------
@@ -184,6 +191,21 @@ describe("chunkMessages", () => {
 			estimateSerializedTokens(hugeAssistant) < 2_000,
 			"assistant thinking + text must each cap; total under 2x TOOL_RESULT_MAX_CHARS/4",
 		);
+	});
+});
+
+describe("calculateContextTokens", () => {
+	it("uses prompt-relevant usage only (input + cacheRead + cacheWrite)", () => {
+		const usage = {
+			input: 65,
+			output: 39_846,
+			cacheRead: 2_945_563,
+			cacheWrite: 243_452,
+			totalTokens: 3_228_926,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+
+		assert.equal(calculateContextTokens(usage), 3_189_080);
 	});
 });
 

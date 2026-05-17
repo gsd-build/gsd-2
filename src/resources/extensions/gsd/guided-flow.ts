@@ -2166,7 +2166,14 @@ export async function showSmartEntry(
       const ageMs = Date.now() - (entry.createdAt || 0);
       const manifestExists = existsSync(join(gsdRoot(basePath), "DISCUSSION-MANIFEST.json"));
       const milestoneHasContext = !!resolveMilestoneFile(basePath, entry.milestoneId, "CONTEXT");
-      if (!manifestExists && !milestoneHasContext && ageMs > 30_000) {
+      const milestoneHasRoadmap = !!resolveMilestoneFile(basePath, entry.milestoneId, "ROADMAP");
+      const milestoneRow = isDbAvailable() ? getMilestone(entry.milestoneId) : null;
+      const discussPlanComplete = milestoneHasRoadmap && !!milestoneRow && milestoneRow.status !== "queued";
+      if (discussPlanComplete) {
+        // The discuss flow already completed, but pending auto-start cleanup handshake did not run.
+        // Clear stale in-memory guard and continue through normal active-milestone routing.
+        deletePendingAutoStart(basePath);
+      } else if (!manifestExists && !milestoneHasContext && ageMs > 30_000) {
         // Stale entry from an interrupted discussion — clear and continue
         deletePendingAutoStart(basePath);
       } else {

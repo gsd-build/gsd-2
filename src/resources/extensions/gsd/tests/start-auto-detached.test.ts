@@ -105,6 +105,8 @@ test("auto bootstrap validates blocked directories before touching .gsd migratio
   const bootstrapIdx = autoStartSrc.indexOf("export async function bootstrapAutoSession(");
   const bootstrapBody = autoStartSrc.slice(bootstrapIdx);
   const bootstrapValidationIdx = bootstrapBody.indexOf("validateDirectory(base)");
+  const staleCrashReadIdx = bootstrapBody.indexOf("const startupLock = readCrashLock(base)");
+  const staleCrashClearIdx = bootstrapBody.indexOf("clearLock(base);");
   const lockIdx = bootstrapBody.indexOf("acquireSessionLock(base)");
   const bootstrapMigrationIdx = bootstrapBody.indexOf("migrateToExternalState(base)");
 
@@ -112,9 +114,15 @@ test("auto bootstrap validates blocked directories before touching .gsd migratio
   assert.ok(bootstrapValidationIdx > -1, "bootstrapAutoSession should validate the base directory");
   assert.ok(lockIdx > -1, "bootstrapAutoSession should acquire a session lock for safe projects");
   assert.ok(bootstrapMigrationIdx > -1, "bootstrapAutoSession should still migrate safe projects");
+  assert.ok(staleCrashReadIdx > -1, "bootstrapAutoSession should probe stale crash lock state before lock acquisition");
+  assert.ok(staleCrashClearIdx > -1, "bootstrapAutoSession should clear stale crash lock state when detected");
   assert.ok(
     bootstrapValidationIdx < lockIdx && bootstrapValidationIdx < bootstrapMigrationIdx,
     "fresh bootstrap must reject blocked directories before locking or migrating .gsd state",
+  );
+  assert.ok(
+    staleCrashReadIdx < lockIdx && staleCrashClearIdx < lockIdx,
+    "fresh bootstrap must auto-clear stale crash lock state before session lock acquisition",
   );
 });
 
@@ -290,4 +298,37 @@ test("discussion auto-start waits for the current command context to become idle
   assert.equal(launches.length, 1);
   assert.equal(launches[0][2], "/tmp/gsd-auto-start-idle-test");
   assert.deepEqual(launches[0][4], { step: true });
+});
+
+test("resume path only hard-exits on blocked stop, not blocked pause (#6154)", () => {
+  const autoSrc = readGsdFile("auto.ts");
+  const startAutoIdx = autoSrc.indexOf("export async function startAuto(");
+  const startAutoBody = autoSrc.slice(startAutoIdx);
+  const resumeSectionIdx = startAutoBody.indexOf("if (s.paused) {");
+  const freshStartSectionIdx = startAutoBody.indexOf("// ── Fresh start path — delegated to auto-start.ts ──");
+  const resumeBody = startAutoBody.slice(resumeSectionIdx, freshStartSectionIdx);
+
+  assert.ok(startAutoIdx > -1, "startAuto should exist");
+  assert.ok(resumeSectionIdx > -1, "resume path should exist");
+  assert.ok(freshStartSectionIdx > resumeSectionIdx, "resume assertions should be scoped before fresh start");
+  assert.ok(
+    resumeBody.includes('if (resumeResult?.kind === "blocked" && resumeResult.action === "stop")'),
+    "resume path should only hard-stop blocked resume when action is stop",
+  );
+  assert.ok(
+    resumeBody.includes('if (resumeResult?.kind === "blocked")'),
+    "resume path should still notify blocked resume results",
+  );
+});
+
+test("prepareForUnit skips worktree safety when isolation is not worktree (#6154)", () => {
+  const autoSrc = readGsdFile("auto.ts");
+  const prepareForUnitIdx = autoSrc.indexOf("async prepareForUnit(unitType, unitId) {");
+  const prepareForUnitBody = autoSrc.slice(prepareForUnitIdx, autoSrc.indexOf("async syncAfterUnit() {}", prepareForUnitIdx));
+
+  assert.ok(prepareForUnitIdx > -1, "prepareForUnit should exist");
+  assert.ok(
+    prepareForUnitBody.includes('if (getIsolationMode(runtimeBasePath) !== "worktree")'),
+    "prepareForUnit should bypass worktree safety validation outside worktree isolation mode",
+  );
 });

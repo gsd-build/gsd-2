@@ -97,6 +97,9 @@ export interface LoopState {
   stuckRecoveryAttempts: number;
   /** Consecutive finalize timeout count — stops auto-mode after threshold. */
   consecutiveFinalizeTimeouts: number;
+  consecutiveDispatchCount?: Map<string, number>;
+  lastDispatchedKey?: string | null;
+  lastDispatchPhase?: string | null;
 }
 
 /** Max consecutive finalize timeouts before hard-stopping auto-mode. */

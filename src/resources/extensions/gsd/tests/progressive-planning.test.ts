@@ -17,7 +17,7 @@ import {
   getSlice,
 } from "../gsd-db.ts";
 import { autoHealSketchFlags } from "../state-reconciliation/drift/sketch-flag.ts";
-import { deriveStateFromDb } from "../state.ts";
+import { deriveState, deriveStateFromDb } from "../state.ts";
 import { resolveDispatch } from "../auto-dispatch.ts";
 import type { DispatchContext } from "../auto-dispatch.ts";
 
@@ -196,6 +196,47 @@ test("ADR-011: autoHealSketchFlags flips is_sketch=0 when PLAN file exists", asy
   });
 
   assert.equal(getSlice("M001", "S02")?.is_sketch, 0, "post-heal: flag cleared");
+});
+
+test("ADR-011: deriveStateFromDb auto-heals stale sketch flag when PLAN exists", async (t) => {
+  const originalCwd = process.cwd();
+  const base = makeFixtureBase();
+  t.after(() => cleanup(base, originalCwd));
+
+  seedMilestoneWithSketchedS02(base);
+  writeS01Artifacts(base);
+  writePreferences(base, "phases:\n  skip_research: false");
+  // Simulate plan-slice completion where PLAN exists but is_sketch was not flipped.
+  writeFileSync(
+    join(base, ".gsd", "milestones", "M001", "slices", "S02", "S02-PLAN.md"),
+    "# S02 Plan\n",
+  );
+  process.chdir(base);
+
+  const state = await deriveStateFromDb(base);
+  assert.equal(getSlice("M001", "S02")?.is_sketch, 0, "derive should clear stale is_sketch");
+  assert.equal(state.phase, "planning", "state should advance past refining once stale flag is healed");
+});
+
+test("ADR-011: deriveState uses canonical artifact root for sketch-flag healing", async (t) => {
+  const originalCwd = process.cwd();
+  const base = makeFixtureBase();
+  t.after(() => cleanup(base, originalCwd));
+
+  seedMilestoneWithSketchedS02(base);
+  writeS01Artifacts(base);
+  writePreferences(base, "phases:\n  skip_research: false");
+  writeFileSync(
+    join(base, ".gsd", "milestones", "M001", "slices", "S02", "S02-PLAN.md"),
+    "# S02 Plan\n",
+  );
+  const worktreePath = join(base, "worker");
+  mkdirSync(worktreePath, { recursive: true });
+  process.chdir(worktreePath);
+
+  const state = await deriveState(worktreePath, { projectRootForReads: base });
+  assert.equal(getSlice("M001", "S02")?.is_sketch, 0, "deriveState should heal from canonical artifact root");
+  assert.equal(state.phase, "planning", "state should advance past refining when PLAN exists at canonical root");
 });
 
 test("ADR-011: schema v16 is idempotent — re-opening DB preserves is_sketch and sketch_scope columns", async (t) => {

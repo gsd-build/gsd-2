@@ -56,7 +56,7 @@ import { verifyExpectedArtifact, diagnoseExpectedArtifact, buildLoopRemediationS
 import { writeUnitRuntimeRecord } from "../unit-runtime.js";
 import { withTimeout, FINALIZE_PRE_TIMEOUT_MS, FINALIZE_POST_TIMEOUT_MS } from "./finalize-timeout.js";
 import { getEligibleSlices } from "../slice-parallel-eligibility.js";
-import { startSliceParallel } from "../slice-parallel-orchestrator.js";
+import { isSliceParallelActive, startSliceParallel } from "../slice-parallel-orchestrator.js";
 import { isDbAvailable, getMilestoneSlices } from "../gsd-db.js";
 import { reconcileBeforeSpawn } from "../state-reconciliation.js";
 import type { MinimalModelRegistry } from "../context-budget.js";
@@ -78,6 +78,9 @@ import { createWorktreeSafetyModule, type WorktreeSafetyResult } from "../worktr
 import { isSuspiciousGhostCompletion } from "../auto-unit-closeout.js";
 import { decideVerificationRetry, verificationRetryKey } from "./verification-retry-policy.js";
 import { buildPhaseHandoffOutcome, setAutoOutcomeWidget } from "../auto-dashboard.js";
+import { getConsecutiveDispatchBlocker } from "../dispatch-guard.js";
+
+export const STUCK_WINDOW_SIZE = 6;
 
 // ─── Path Comparison Helper ───────────────────────────────────────────────
 /** Compare two paths for physical identity, tolerating trailing slashes and symlinks. */
@@ -147,7 +150,12 @@ export function shouldDegradeEmptyWorktreeToProjectRoot(
 }
 
 function unitWritesSource(unitType: string): boolean | null {
-  const manifest = resolveManifest(unitType);
+  // Backward compatibility: sidecar queues from older builds may persist
+  // prefixed unit types (e.g. "sidecar/quick-task").
+  const normalizedUnitType = unitType.startsWith("sidecar/")
+    ? unitType.slice("sidecar/".length)
+    : unitType;
+  const manifest = resolveManifest(normalizedUnitType);
   if (!manifest) return null;
   return manifest.tools.mode === "all" || manifest.tools.mode === "docs";
 }
@@ -211,7 +219,8 @@ async function validateSourceWriteWorktreeSafety(
   if (!writesSource) return null;
 
   const projectRoot = s.canonicalProjectRoot ?? resolveWorktreeProjectRoot(s.basePath, s.originalBasePath);
-  if (deps.getIsolationMode(projectRoot) !== "worktree") return null;
+  const isolationMode = deps.getIsolationMode(projectRoot);
+  if (isolationMode !== "worktree") return null;
 
   const safety = createWorktreeSafetyModule();
   const result = safety.validateUnitRoot({
@@ -221,6 +230,7 @@ async function validateSourceWriteWorktreeSafety(
     projectRoot,
     unitRoot: s.basePath,
     milestoneId,
+    isolationMode,
     expectedBranch: milestoneId ? deps.autoWorktreeBranch(milestoneId) : null,
     emptyWorktreeWithProjectContent: resolveEmptyWorktreeWithProjectContent(s.basePath, projectRoot),
     lease: s.workerId
@@ -575,6 +585,13 @@ export function _buildCancelledUnitStopReason(
   };
 }
 
+export function _isPauseOriginCancelledResult(
+  isPaused: boolean,
+  errorContext?: { message: string; category: string },
+): boolean {
+  return isPaused && !errorContext;
+}
+
 async function failClosedOnFinalizeTimeout(
   ic: IterationContext,
   iterData: IterationData,
@@ -867,6 +884,12 @@ export async function runPreDispatch(
     isDbAvailable()
   ) {
     try {
+      const projectRoot = _resolveDispatchGuardBasePath(s);
+      if (isSliceParallelActive(projectRoot)) {
+        ctx.ui.notify("Slice-parallel: workers are still running; waiting for completion before next dispatch.", "info");
+        await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+        return { action: "continue" };
+      }
       const dbSlices = getMilestoneSlices(mid);
       if (dbSlices.length > 0) {
         const doneIds = new Set(dbSlices.filter(sl => sl.status === "complete" || sl.status === "done").map(sl => sl.id));
@@ -889,7 +912,7 @@ export async function runPreDispatch(
           );
           // ADR-017 #5707: reconcile before spawning so each worker doesn't
           // independently race on the same drift. Failure aborts the spawn.
-          const spawnGate = await reconcileBeforeSpawn(s.basePath);
+          const spawnGate = await reconcileBeforeSpawn(projectRoot);
           if (!spawnGate.ok) {
             ctx.ui.notify(
               `Slice-parallel: aborting spawn — ${spawnGate.reason}`,
@@ -898,7 +921,7 @@ export async function runPreDispatch(
             return { action: "break", reason: `slice-parallel-reconciliation-failed: ${spawnGate.reason}` };
           }
           const result = await startSliceParallel(
-            s.basePath,
+            projectRoot,
             mid,
             eligible,
             {
@@ -911,8 +934,7 @@ export async function runPreDispatch(
               `Slice-parallel: started ${result.started.length} worker(s): ${result.started.join(", ")}.`,
               "info",
             );
-            await deps.stopAuto(ctx, pi, `Slice-parallel dispatched for ${mid}`);
-            return { action: "break", reason: "slice-parallel-dispatched" };
+            return { action: "continue" };
           }
           // Fall through to sequential if no workers started
         }
@@ -1240,7 +1262,6 @@ export async function runDispatch(
 ): Promise<PhaseResult<IterationData>> {
   const { ctx, pi, s, deps, prefs } = ic;
   const { state, mid, midTitle } = preData;
-  const STUCK_WINDOW_SIZE = 6;
   const provider = ctx.model?.provider;
   const authMode = provider && typeof ctx.modelRegistry?.getProviderAuthMode === "function"
     ? ctx.modelRegistry.getProviderAuthMode(provider)
@@ -1353,6 +1374,18 @@ export async function runDispatch(
     return { action: "break", reason: "prior-slice-blocker" };
   }
 
+  const consecutiveDispatchBlocker = getConsecutiveDispatchBlocker(
+    loopState,
+    state.phase,
+    unitType,
+    unitId,
+  );
+  if (consecutiveDispatchBlocker) {
+    await deps.stopAuto(ctx, pi, consecutiveDispatchBlocker);
+    debugLog("autoLoop", { phase: "exit", reason: "consecutive-dispatch-blocker" });
+    return { action: "break", reason: "consecutive-dispatch-blocker" };
+  }
+
   const worktreeSafetyBlock = await validateSourceWriteWorktreeSafety(
     ic,
     unitType,
@@ -1369,9 +1402,14 @@ export async function runDispatch(
   // Rules 1/3/4 can catch retry loops with repeated failure content (#5719).
   // Rules 2/2b suppress legitimate retry backoff through the dispatch ledger.
   loopState.recentUnits.push({ key: derivedKey });
-  if (loopState.recentUnits.length > STUCK_WINDOW_SIZE) loopState.recentUnits.shift();
+  while (loopState.recentUnits.length > STUCK_WINDOW_SIZE) {
+    loopState.recentUnits.shift();
+  }
 
-  const stuckSignal = detectStuck(loopState.recentUnits);
+  const stuckSignal = detectStuck(loopState.recentUnits, {
+    pendingRetry: !!s.pendingVerificationRetry,
+    retryAttempt: s.pendingVerificationRetry?.attempt,
+  });
   if (stuckSignal) {
       debugLog("autoLoop", {
         phase: "stuck-check",
@@ -1426,7 +1464,6 @@ export async function runDispatch(
           );
           deps.invalidateAllCaches();
           loopState.recentUnits.length = 0;
-          loopState.stuckRecoveryAttempts = 0;
           return { action: "continue" };
         }
         ctx.ui.notify(
@@ -1882,7 +1919,11 @@ export async function runUnitPhase(
           ? diagnostic.slice(0, MAX_RECOVERY_CHARS) +
             "\n\n[...diagnostic truncated to prevent memory exhaustion]"
           : diagnostic;
-      finalPrompt = `**RETRY — your previous attempt did not produce the required artifact.**\n\nDiagnostic from previous attempt:\n${cappedDiag}\n\nFix whatever went wrong and make sure you write the required file this time.\n\n---\n\n${finalPrompt}`;
+      const retryInstruction =
+        unitType === "execute-task"
+          ? "The required artifact is `T##-SUMMARY.md`. Do NOT manually write this file. Call `gsd_task_complete` with `milestoneId`, `sliceId`, `taskId`, and the required completion fields. Do not re-run implementation work — call the tool."
+          : "Fix whatever went wrong and make sure you write the required file this time.";
+      finalPrompt = `**RETRY — your previous attempt did not produce the required artifact.**\n\nDiagnostic from previous attempt:\n${cappedDiag}\n\n${retryInstruction}\n\n---\n\n${finalPrompt}`;
     }
   }
 
@@ -2163,6 +2204,11 @@ export async function runUnitPhase(
   }
 
   if (unitResult.status === "cancelled") {
+    if (_isPauseOriginCancelledResult(s.paused, unitResult.errorContext)) {
+      debugLog("autoLoop", { phase: "cancelled-after-pause", unitType, unitId });
+      return { action: "break", reason: "paused" };
+    }
+
     const errorCategory = unitResult.errorContext?.category;
     // Provider-error pause: agent_end recovery normally pauses before this
     // branch. Provider readiness failures happen before dispatch, so pause here
@@ -2366,18 +2412,17 @@ export async function runUnitPhase(
     }
   }
 
-  if (s.currentUnitRouting) {
-    deps.recordOutcome(
-      unitType,
-      s.currentUnitRouting.tier as "light" | "standard" | "heavy",
-      true, // success assumed; dispatch will re-dispatch if artifact missing
-    );
-  }
-
   const skipArtifactVerification = unitType.startsWith("hook/") || unitType === "custom-step";
   const artifactVerified =
     skipArtifactVerification ||
     verifyExpectedArtifact(unitType, unitId, s.basePath);
+  if (s.currentUnitRouting) {
+    deps.recordOutcome(
+      unitType,
+      s.currentUnitRouting.tier as "light" | "standard" | "heavy",
+      artifactVerified,
+    );
+  }
   if (artifactVerified) {
     s.unitDispatchCount.delete(dispatchKey);
     s.unitRecoveryCount.delete(`${unitType}/${unitId}`);
@@ -2402,7 +2447,11 @@ export async function runUnitPhase(
     }
   }
 
-  deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "unit-end", data: { unitType, unitId, status: unitResult.status, artifactVerified, ...(unitResult.errorContext ? { errorContext: unitResult.errorContext } : {}) }, causedBy: { flowId: ic.flowId, seq: unitStartSeq } });
+  const unitEndStatus =
+    !artifactVerified && unitResult.status === "completed"
+      ? "no-artifact"
+      : unitResult.status;
+  deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "unit-end", data: { unitType, unitId, status: unitEndStatus, artifactVerified, ...(unitResult.errorContext ? { errorContext: unitResult.errorContext } : {}) }, causedBy: { flowId: ic.flowId, seq: unitStartSeq } });
 
   // ── Safety harness: checkpoint cleanup or rollback ──
   if (s.checkpointSha) {
@@ -2477,6 +2526,8 @@ export async function runFinalize(
   const preUnitSnapshot = s.currentUnit
     ? { type: s.currentUnit.type, id: s.currentUnit.id, startedAt: s.currentUnit.startedAt }
     : null;
+  s.currentUnit = null;
+  clearCurrentPhase();
   const preResultGuard = await withTimeout(
     deps.postUnitPreVerification(postUnitCtx, preVerificationOpts),
     FINALIZE_PRE_TIMEOUT_MS,
@@ -2649,9 +2700,6 @@ export async function runFinalize(
       });
     }
   }
-  s.currentUnit = null;
-  clearCurrentPhase();
-
   // Surface accumulated workflow-logger issues for this unit to the user.
   // Warnings/errors logged during the unit are buffered in the logger and
   // drained here so the user sees a single consolidated post-unit alert.

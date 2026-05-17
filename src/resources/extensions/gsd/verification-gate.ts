@@ -45,7 +45,8 @@ const PACKAGE_SCRIPT_KEYS = ["typecheck", "lint", "test"] as const;
  *   2. Task plan verify field (split on &&)
  *   3. package.json scripts (typecheck, lint, test)
  *   4. Python pytest project markers
- *   5. None found
+ *   5. Dependency-free Node test files
+ *   6. None found
  */
 export function discoverCommands(options: DiscoverCommandsOptions): DiscoveredCommands {
   // 1. Preference commands
@@ -97,8 +98,30 @@ export function discoverCommands(options: DiscoverCommandsOptions): DiscoveredCo
     return { commands: [pythonCommand], source: "python-project" };
   }
 
-  // 5. Nothing found
+  const nodeTestCommand = discoverNodeTestFileCommand(options.cwd);
+  if (nodeTestCommand) {
+    return { commands: [nodeTestCommand], source: "node-test-file" };
+  }
+
+  // 6. Nothing found
   return { commands: [], source: "none" };
+}
+
+function discoverNodeTestFileCommand(cwd: string): string | null {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(cwd, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+
+  const testFile = entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name)
+    .filter((name) => /^test-[A-Za-z0-9._-]+\.js$|^[A-Za-z0-9._-]+\.test\.js$/.test(name))
+    .sort()[0];
+
+  return testFile ? `node ${testFile}` : null;
 }
 
 function discoverPythonPytestCommand(cwd: string): string | null {
@@ -313,9 +336,16 @@ function mergeDiscoverySource(
   if (sources.length === 0) return "none";
   const first = sources[0];
   if (sources.every((source) => source === first)) return first;
-  // Keep the first concrete source to preserve existing precedence semantics
-  // when aggregating multi-target verification results.
-  return sources.find((source) => source !== "none") ?? "none";
+  const precedence: VerificationResult["discoverySource"][] = [
+    "preference",
+    "task-plan",
+    "package-json",
+    "python-project",
+  ];
+  for (const source of precedence) {
+    if (sources.includes(source)) return source;
+  }
+  return "none";
 }
 
 /**

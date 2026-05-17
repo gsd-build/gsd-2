@@ -232,6 +232,34 @@ ${params.uatContent}
 `;
 }
 
+function parseRequirementSection(
+  summaryMd: string,
+  heading: "Requirements Advanced" | "Requirements Validated" | "Requirements Invalidated or Re-scoped",
+  field: "how" | "proof" | "what",
+): Array<{ id: string; how?: string; proof?: string; what?: string }> {
+  const headingLine = `## ${heading}\n\n`;
+  const start = summaryMd.indexOf(headingLine);
+  if (start === -1) return [];
+  const contentStart = start + headingLine.length;
+  const nextHeading = summaryMd.indexOf("\n\n## ", contentStart);
+  const content = nextHeading === -1
+    ? summaryMd.slice(contentStart)
+    : summaryMd.slice(contentStart, nextHeading);
+  return content
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("- "))
+    .map((line) => line.slice(2).trim())
+    .map((line) => {
+      const pair = line.match(/^(.+?)\s*(?:—|-)\s+(.+)$/);
+      const id = pair ? pair[1].trim() : line.trim();
+      const detail = pair ? pair[2].trim() : "";
+      if (!id || !detail) return null;
+      return { id, [field]: detail };
+    })
+    .filter((entry): entry is { id: string; how?: string; proof?: string; what?: string } => entry !== null);
+}
+
 /**
  * Handle the complete_slice operation end-to-end.
  *
@@ -277,6 +305,7 @@ export async function handleCompleteSlice(
   // ── Guards + DB writes inside a single transaction (prevents TOCTOU) ───
   const completedAt = new Date().toISOString();
   let guardError: string | null = null;
+  let existingSummaryMd = "";
 
   transaction(() => {
     // State machine preconditions (inside txn for atomicity).
@@ -289,6 +318,7 @@ export async function handleCompleteSlice(
     }
 
     const slice = getSlice(params.milestoneId, params.sliceId);
+    existingSummaryMd = slice?.full_summary_md?.trim() ?? "";
     if (slice && isClosedStatus(slice.status)) {
       if (isStaleWrite("complete-slice")) {
         guardError = "__stale_duplicate__";
@@ -347,8 +377,27 @@ export async function handleCompleteSlice(
     return { error: guardError };
   }
 
+  const effectiveParams: CompleteSliceParams = { ...params };
+  if (existingSummaryMd) {
+    // Keep these heading names in lock-step with renderSliceSummaryMarkdown's
+    // section titles so omitted CompleteSliceParams requirement fields can be
+    // backfilled from previously rendered summary markdown.
+    if (effectiveParams.requirementsAdvanced === undefined) {
+      const parsed = parseRequirementSection(existingSummaryMd, "Requirements Advanced", "how");
+      if (parsed.length > 0) effectiveParams.requirementsAdvanced = parsed as Array<{ id: string; how: string }>;
+    }
+    if (effectiveParams.requirementsValidated === undefined) {
+      const parsed = parseRequirementSection(existingSummaryMd, "Requirements Validated", "proof");
+      if (parsed.length > 0) effectiveParams.requirementsValidated = parsed as Array<{ id: string; proof: string }>;
+    }
+    if (effectiveParams.requirementsInvalidated === undefined) {
+      const parsed = parseRequirementSection(existingSummaryMd, "Requirements Invalidated or Re-scoped", "what");
+      if (parsed.length > 0) effectiveParams.requirementsInvalidated = parsed as Array<{ id: string; what: string }>;
+    }
+  }
+
   // Render summary markdown
-  const summaryMd = renderSliceSummaryMarkdown(params);
+  const summaryMd = renderSliceSummaryMarkdown(effectiveParams);
 
   // Resolve and write summary to disk
   let summaryPath: string;
@@ -363,7 +412,7 @@ export async function handleCompleteSlice(
     summaryPath = join(manualSliceDir, `${params.sliceId}-SUMMARY.md`);
   }
 
-  const uatMd = renderUatMarkdown(params);
+  const uatMd = renderUatMarkdown(effectiveParams);
   const uatPath = summaryPath.replace(/-SUMMARY\.md$/, "-UAT.md");
   setSliceSummaryMd(params.milestoneId, params.sliceId, summaryMd, uatMd);
   let projectionStale = false;

@@ -40,7 +40,7 @@ npx skills update
 
 ### Onboarding Catalog
 
-During `gsd init`, GSD detects the project's tech stack and recommends relevant skill packs. For brownfield projects, detection is automatic; for greenfield projects, the user picks a tech stack.
+During `gsd init`, GSD detects the project's tech stack and recommends relevant skill packs. For brownfield projects, detection is automatic; for greenfield projects, the user picks a tech stack. If the project is already initialized, run `gsd init` again and choose **Suggest & install skills** from the "Already Initialized" menu.
 
 The curated catalog is maintained in `src/resources/extensions/gsd/skill-catalog.ts`. Each entry maps a tech stack to a skills.sh repo and specific skill names.
 

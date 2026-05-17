@@ -10,6 +10,7 @@ import {
   closeDatabase,
   _getAdapter,
   insertGateRow,
+  insertAssessment,
   upsertRequirement,
   getAllMilestones,
 } from "../gsd-db.ts";
@@ -26,6 +27,7 @@ import {
   executeTaskComplete,
   executeMilestoneStatus,
   executeSliceComplete,
+  executeSliceReopen,
   executeValidateMilestone,
 } from "../tools/workflow-tool-executors.ts";
 
@@ -140,6 +142,117 @@ test("executeTaskComplete coerces string verificationEvidence entries", async ()
 
     const summaryPath = String(result.details.summaryPath);
     assert.ok(existsSync(summaryPath), "task summary should be written to disk");
+  } finally {
+    closeDatabase();
+    cleanup(base);
+  }
+});
+
+test("executeSliceComplete preserves omitted optional requirement arrays", async () => {
+  const base = makeTmpBase();
+  try {
+    openTestDb(base);
+    await inProjectDir(base, () => executePlanMilestone({
+      milestoneId: "M001",
+      title: "Requirement preservation",
+      vision: "Ensure omitted arrays are not coerced to empties.",
+      slices: [
+        {
+          sliceId: "S01",
+          title: "Slice",
+          risk: "medium",
+          depends: [],
+          demo: "demo",
+          goal: "goal",
+          successCriteria: "done",
+          proofLevel: "integration",
+          integrationClosure: "closed",
+          observabilityImpact: "covered",
+        },
+      ],
+    }, base));
+    await inProjectDir(base, () => executePlanSlice({
+      milestoneId: "M001",
+      sliceId: "S01",
+      goal: "goal",
+      tasks: [
+        {
+          taskId: "T01",
+          title: "Task",
+          description: "desc",
+          estimate: "5m",
+          files: ["src/a.ts"],
+          verify: "node --test",
+          inputs: ["in"],
+          expectedOutput: ["out"],
+        },
+      ],
+    }, base));
+    await inProjectDir(base, () => executeTaskComplete({
+      milestoneId: "M001",
+      sliceId: "S01",
+      taskId: "T01",
+      oneLiner: "done",
+      narrative: "done",
+      verification: "ok",
+    }, base));
+
+    const result = await inProjectDir(base, () => executeSliceComplete({
+      milestoneId: "M001",
+      sliceId: "S01",
+      sliceTitle: "Slice",
+      oneLiner: "done",
+      narrative: "done",
+      verification: "ok",
+      uatContent: "ok",
+      requirementsAdvanced: [{ id: "R010", how: "advanced" }],
+      requirementsValidated: [{ id: "R010", proof: "validated" }],
+    }, base));
+
+    assert.equal(result.details.operation, "complete_slice");
+    const summaryPath = String(result.details.summaryPath);
+    const summary = readFileSync(summaryPath, "utf-8");
+    assert.match(summary, /R010 — advanced/);
+    assert.match(summary, /R010 — validated/);
+
+    const reopenResult = await inProjectDir(base, () => executeSliceReopen({
+      milestoneId: "M001",
+      sliceId: "S01",
+      reason: "validate idempotent overwrite behavior",
+    }, base));
+    assert.equal(reopenResult.details.operation, "reopen_slice");
+    await inProjectDir(base, () => executeTaskComplete({
+      milestoneId: "M001",
+      sliceId: "S01",
+      taskId: "T01",
+      oneLiner: "done (updated)",
+      narrative: "done (updated)",
+      verification: "ok",
+    }, base));
+
+    const recallResult = await inProjectDir(base, () => executeSliceComplete({
+      milestoneId: "M001",
+      sliceId: "S01",
+      sliceTitle: "Slice",
+      oneLiner: "done (updated)",
+      narrative: "done (updated)",
+      verification: "ok",
+      uatContent: "ok",
+    }, base));
+
+    assert.equal(recallResult.details.operation, "complete_slice");
+    const recallSummaryPath = String(recallResult.details.summaryPath);
+    const recallSummary = readFileSync(recallSummaryPath, "utf-8");
+    assert.match(
+      recallSummary,
+      /R010 — advanced/,
+      "requirementsAdvanced should be preserved from first call",
+    );
+    assert.match(
+      recallSummary,
+      /R010 — validated/,
+      "requirementsValidated should be preserved from first call",
+    );
   } finally {
     closeDatabase();
     cleanup(base);
@@ -360,6 +473,38 @@ test("executeValidateMilestone persists validation artifact and gate records", a
   }
 });
 
+test("executeValidateMilestone rejects verificationClasses that omit planned Operational class", async () => {
+  const base = makeTmpBase();
+  try {
+    openTestDb(base);
+    seedMilestone("M002", "Milestone Two");
+    const db = _getAdapter();
+    db!.prepare("UPDATE milestones SET verification_operational = ? WHERE id = ?").run(
+      "Camoufox subprocess lifecycle/cleanup proof",
+      "M002",
+    );
+    seedSlice("M002", "S02", "complete");
+
+    const result = await inProjectDir(base, () => executeValidateMilestone({
+      milestoneId: "M002",
+      verdict: "pass",
+      remediationRound: 0,
+      successCriteriaChecklist: "- [x] Works",
+      sliceDeliveryAudit: "| Slice | Result |\n| --- | --- |\n| S02 | pass |",
+      crossSliceIntegration: "No cross-slice issues.",
+      requirementCoverage: "All requirements covered.",
+      verificationClasses: "| Check | Result |\n| --- | --- |\n| Generic verification | PASS |",
+      verdictRationale: "Everything passed.",
+    }, base));
+
+    assert.equal(result.isError, true);
+    assert.match(String(result.details.error), /must include canonical row "Operational"/);
+  } finally {
+    closeDatabase();
+    cleanup(base);
+  }
+});
+
 test("executeCompleteMilestone sanitizes raw params and writes milestone summary", async () => {
   const base = makeTmpBase();
   try {
@@ -371,6 +516,13 @@ test("executeCompleteMilestone sanitizes raw params and writes milestone summary
     db!.prepare(
       "INSERT OR REPLACE INTO tasks (milestone_id, slice_id, id, title, status) VALUES (?, ?, ?, ?, ?)",
     ).run("M003", "S03", "T03", "Task T03", "complete");
+    insertAssessment({
+      path: join(".gsd", "milestones", "M003", "M003-VALIDATION.md"),
+      milestoneId: "M003",
+      status: "pass",
+      scope: "milestone-validation",
+      fullContent: "---\nverdict: pass\nremediation_round: 0\n---\n\n# Validation\nValidated.",
+    });
 
     const rawParams = {
       milestoneId: "M003",

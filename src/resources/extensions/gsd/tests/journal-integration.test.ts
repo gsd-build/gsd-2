@@ -636,7 +636,7 @@ test("runDispatch clears execute-task stuck state when artifacts and DB status a
   assert.equal(stopCalls, 0, "closed DB task should not hard-stop the loop");
   assert.equal(invalidateCalls, 1, "closed DB task recovery should invalidate caches once");
   assert.deepEqual(loopState.recentUnits, [], "closed DB task recovery should clear the stuck window");
-  assert.equal(loopState.stuckRecoveryAttempts, 0, "closed DB task recovery should reset the recovery counter");
+  assert.equal(loopState.stuckRecoveryAttempts, 1, "closed DB task recovery should preserve the recovery counter");
 });
 
 test("runDispatch clears stuck state after Level 1 artifact recovery", async (t) => {
@@ -703,7 +703,7 @@ test("runDispatch clears stuck state after Level 1 artifact recovery", async (t)
   assert.equal(invalidateCalls, 1, "Level 1 artifact recovery should invalidate caches");
   assert.equal(stopCalls, 0, "Level 1 artifact recovery should not hard-stop");
   assert.deepEqual(loopState.recentUnits, [], "Level 1 artifact recovery should clear the stuck window");
-  assert.equal(loopState.stuckRecoveryAttempts, 0, "Level 1 artifact recovery should reset the recovery counter");
+  assert.equal(loopState.stuckRecoveryAttempts, 1, "Level 1 artifact recovery should preserve the recovery counter");
 });
 
 test("runDispatch escapes Level 2 stuck stop when artifact verifies after cache invalidation", async (t) => {
@@ -828,7 +828,7 @@ test("runUnitPhase emits unit-start and unit-end with causedBy reference", async
   assert.equal(endEvents[0].flowId, ic.flowId);
   assert.equal((endEvents[0].data as any).unitType, "execute-task");
   assert.equal((endEvents[0].data as any).unitId, "M001/S01/T01");
-  assert.equal((endEvents[0].data as any).status, "completed");
+  assert.equal((endEvents[0].data as any).status, "no-artifact");
 
   // Verify causedBy: unit-end references unit-start's seq
   assert.ok(endEvents[0].causedBy, "unit-end must have a causedBy reference");

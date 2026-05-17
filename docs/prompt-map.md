@@ -219,6 +219,8 @@ run-uat  (user acceptance tests)
 | `validate-milestone.md` | 3 parallel reviewers: (A) requirements, (B) integration, (C) acceptance. | `subagent` × 3, `gsd_validate_milestone` |
 | `run-uat.md` | Execute UAT. Modes: artifact-driven, runtime, browser, human-experience. Runs under `verification` tools policy, so Bash is limited to read-only inspection and build/test verification commands. | `gsd_summary_save(ASSESSMENT)`, verification Bash |
 
+`run-uat` completion verification requires a canonical verdict in the written `S##-ASSESSMENT.md` (for example `verdict: PASS | FAIL | PARTIAL`). A pre-existing assessment file without `verdict` does not satisfy artifact verification.
+
 ### 5f. Completion Flow
 
 ```
@@ -461,7 +463,7 @@ Priority  Rule                                          Fires When
  3        execution-entry phase (no context) → discuss  re-entry into a milestone with no CONTEXT
  4        summarizing → complete-slice                  slice in 'summarizing' phase
  5        run-uat (post-completion)                     tasks done, UAT pending
- 6        uat-verdict-gate (non-PASS blocks)            UAT non-PASS — block until resolved
+ 6        uat-verdict-gate (non-PASS continues)         UAT non-PASS — continue for remediation; final milestone closure still requires PASS sign-off
  7        reassess-roadmap (post-completion)            slice closed, roadmap needs update
  8        needs-discussion → discuss-milestone          milestone explicitly flagged for discussion
  9        deep: workflow-preferences                    deep mode + PREFERENCES.md missing

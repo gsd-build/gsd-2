@@ -124,6 +124,7 @@ export const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "verification_commands",
   "verification_auto_fix",
   "verification_max_retries",
+  "per_unit_cost_cap_usd",
   "search_provider",
   "context_selection",
   "widget_mode",
@@ -152,6 +153,7 @@ export const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "context_window_override",
   "context_mode",
   "planning_depth",
+  "claude_code_mcp",
   "workspace",
 ]);
 
@@ -321,6 +323,18 @@ export interface CodebaseMapPreferences {
   collapse_threshold?: number;
 }
 
+/** Per-model MCP server allow/block lists for a single model prefix. */
+export interface ClaudeCodeMcpPerModelEntry {
+  allowed_servers?: string[];
+  blocked_servers?: string[];
+}
+
+/** Top-level claude_code_mcp preference: maps model-ID prefixes to server filter lists. */
+export interface ClaudeCodeMcpConfig {
+  per_model?: Record<string, ClaudeCodeMcpPerModelEntry>;
+}
+
+
 export interface WorkspaceRepositoryPreference {
   /** Child repository path; relative paths resolve from the project root. */
   path: string;
@@ -399,6 +413,7 @@ export interface GSDPreferences {
   verification_commands?: string[];
   verification_auto_fix?: boolean;
   verification_max_retries?: number;
+  per_unit_cost_cap_usd?: number;
   /** Search provider preference. "brave"/"tavily"/"ollama" force that backend and disable native Anthropic search. "native" forces native only. "auto" = current default behavior. */
   search_provider?: "brave" | "tavily" | "ollama" | "native" | "auto";
   /** Context selection mode for file inlining. "full" inlines entire files, "smart" uses semantic chunking. Default derived from token profile. */
@@ -519,6 +534,8 @@ export interface GSDPreferences {
    * (e.g. "Chinese", "zh", "German", "de", "日本語"). Persists across /clear.
    */
   language?: string;
+  /** Per-model MCP server filtering configuration. Uses longest-prefix-wins matching. */
+  claude_code_mcp?: ClaudeCodeMcpConfig;
 }
 
 export interface LoadedGSDPreferences {

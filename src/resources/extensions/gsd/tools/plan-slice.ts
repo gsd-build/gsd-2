@@ -188,12 +188,11 @@ function validateReferencedRepositories(
   return `unknown targetRepositories: ${missing.join(", ")}. Declared repositories: ${Array.from(known).join(", ")}`;
 }
 
-function resolveAllowedRootsForPathScope(params: PlanSliceParams, registry: RepositoryRegistry): string[] {
-  const defaults = defaultRepositoryTargets(registry);
+function resolveAllowedRootsForPathScope(params: PlanSliceParams, registry: RepositoryRegistry, defaultTargets: string[]): string[] {
   const requested = new Set<string>();
-  for (const id of params.targetRepositories ?? defaults) requested.add(id);
+  for (const id of params.targetRepositories ?? defaultTargets) requested.add(id);
   for (const task of params.tasks) {
-    for (const id of task.targetRepositories ?? params.targetRepositories ?? defaults) requested.add(id);
+    for (const id of task.targetRepositories ?? params.targetRepositories ?? defaultTargets) requested.add(id);
   }
   if (requested.size === 0) return [registry.projectRoot];
   const roots = Array.from(requested)
@@ -271,7 +270,7 @@ export async function handlePlanSlice(
     return { error: `validation failed: ${repoValidationError}` };
   }
 
-  const allowedAbsoluteRoots = resolveAllowedRootsForPathScope(params, repositoryRegistry);
+  const allowedAbsoluteRoots = resolveAllowedRootsForPathScope(params, repositoryRegistry, defaultTargets);
 
   const pathScopeError = validatePlanningPathScope(
     basePath,

@@ -3,6 +3,7 @@
 
 import type { GSDState } from "../types.js";
 import type { MinimalModelRegistry } from "../context-budget.js";
+import type { AutoSession } from "./session.js";
 
 export interface AutoSessionContext {
   basePath: string;
@@ -22,6 +23,8 @@ export interface AutoStatus {
 }
 
 export type AutoAdvanceResult =
+  | { kind: "started" }
+  | { kind: "resumed" }
   | { kind: "advanced"; unit: UnitRef; stateSnapshot: GSDState }
   | { kind: "blocked"; reason: string; action: "pause" | "stop"; stateSnapshot?: GSDState }
   | { kind: "stopped"; reason: string; stateSnapshot?: GSDState }
@@ -39,6 +42,8 @@ export interface AutoOrchestrationModule {
 export interface DispatchAdapter {
   decideNextUnit(input: {
     stateSnapshot: GSDState;
+    /** Optional live session context, forwarded to dispatch rules that need session-derived state. */
+    session?: AutoSession;
     /** Mirrors `DispatchContext.structuredQuestionsAvailable` — "true"/"false" string per the dispatch contract. */
     structuredQuestionsAvailable?: "true" | "false";
     /** Session model context window in tokens, forwarded to the budget engine. */

@@ -207,6 +207,24 @@ test("writeLock stores the session_file in runtime_kv (worker scope)", (t) => {
   assert.equal(lock!.sessionFile, "/tmp/session-xyz.jsonl");
 });
 
+test("writeLock without session file clears stale worker session_file pointer", (t) => {
+  const base = makeBase();
+  t.after(() => cleanup(base));
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  const projectRoot = normalizeRealPath(base);
+  const workerId = registerAutoWorker({ projectRootRealpath: projectRoot });
+
+  writeLock(base, "plan-slice", "M001/S01", "/tmp/session-stale.jsonl");
+  assert.equal(getRuntimeKv("worker", workerId, "session_file"), "/tmp/session-stale.jsonl");
+
+  writeLock(base, "execute-task", "M001/S01/T01");
+  assert.equal(
+    getRuntimeKv("worker", workerId, "session_file"),
+    null,
+    "preliminary lock write must clear stale session_file pointer",
+  );
+});
+
 test("clearLock removes the session_file row for the active worker", (t) => {
   const base = makeBase();
   t.after(() => cleanup(base));

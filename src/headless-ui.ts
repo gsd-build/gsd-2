@@ -217,12 +217,20 @@ export function handleExtensionUIRequest(
       // Lock-guard prompts list "View status" first, but headless needs "Force start"
       // to proceed. Detect by title and pick the force option.
       const title = String(event.title ?? '')
-      let selected = event.options?.[0] ?? ''
-      if (title.includes('Auto-mode is running') && event.options) {
-        const forceOption = event.options.find(o => o.toLowerCase().includes('force start'))
-        if (forceOption) selected = forceOption
+      const options = event.options ?? []
+      if (title.includes('Auto-mode is running')) {
+        const forceOption = options.find(o => o.toLowerCase().includes('force start'))
+        if (forceOption) {
+          client.sendUIResponse(id, { value: forceOption })
+          break
+        }
       }
-      client.sendUIResponse(id, { value: selected })
+      const safeOption = options.find(o => /\b(not yet|cancel|skip|exit|abort)\b/i.test(o))
+      if (safeOption) {
+        client.sendUIResponse(id, { value: safeOption })
+        break
+      }
+      client.sendUIResponse(id, { cancelled: true })
       break
     }
     case 'confirm':

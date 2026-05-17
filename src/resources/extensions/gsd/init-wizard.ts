@@ -421,7 +421,13 @@ export async function handleReinit(
       {
         id: "prefs",
         label: "Re-configure preferences",
-        description: "Update project preferences without affecting milestones",
+        description: "Run the preferences wizard without affecting milestones",
+        recommended: true,
+      },
+      {
+        id: "skills",
+        label: "Suggest & install skills",
+        description: "Detect project type and offer matching skill packs",
         recommended: true,
       },
       {
@@ -434,7 +440,16 @@ export async function handleReinit(
   });
 
   if (choice === "prefs") {
-    ctx.ui.notify("Use /gsd prefs project to update project preferences.", "info");
+    await handlePrefsWizard(ctx, "project");
+    return;
+  }
+
+  if (choice === "skills") {
+    try {
+      await runSkillInstallStep(ctx, detection.projectSignals);
+    } catch {
+      // Non-fatal — suggestion/install failures should not break re-init flow
+    }
   }
 }
 

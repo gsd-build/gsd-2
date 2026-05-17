@@ -15,6 +15,7 @@ import {
   transaction,
   insertAssessment,
   getMilestoneSlices,
+  getMilestone,
 } from "../gsd-db.js";
 import { resolveMilestonePath, clearPathCache } from "../paths.js";
 import { resolveCanonicalMilestoneRoot } from "../worktree-manager.js";
@@ -51,6 +52,24 @@ export interface ValidateMilestoneOptions {
   uokGatesEnabled?: boolean;
   traceId?: string;
   turnId?: string;
+}
+
+function isVerificationNotApplicable(value: string): boolean {
+  const v = (value ?? "").toLowerCase().trim().replace(/[.\s]+$/, "");
+  if (!v || v === "none") return true;
+  return /^(?:none(?:[\s._\u2014-]+[\s\S]*)?|n\/?a(?:[\s._\u2014-]+[\s\S]*)?|not[\s._-]+(?:applicable|required|needed|provided)(?:[\s._\u2014-]+[\s\S]*)?|no[\s._-]+operational[\s\S]*)$/i.test(v);
+}
+
+function getRequiredVerificationClasses(milestoneId: string): string[] {
+  const milestone = getMilestone(milestoneId);
+  if (!milestone) return [];
+
+  const required: string[] = [];
+  if (!isVerificationNotApplicable(milestone.verification_contract)) required.push("Contract");
+  if (!isVerificationNotApplicable(milestone.verification_integration)) required.push("Integration");
+  if (!isVerificationNotApplicable(milestone.verification_operational)) required.push("Operational");
+  if (!isVerificationNotApplicable(milestone.verification_uat)) required.push("UAT");
+  return required;
 }
 
 function renderValidationMarkdown(params: ValidateMilestoneParams): string {
@@ -98,6 +117,18 @@ export async function handleValidateMilestone(
   }
   if (!isValidMilestoneVerdict(params.verdict)) {
     return { error: `verdict must be one of: ${VALIDATION_VERDICTS.join(", ")}` };
+  }
+  const requiredClasses = getRequiredVerificationClasses(params.milestoneId);
+  if (requiredClasses.length > 0) {
+    const verificationClasses = params.verificationClasses ?? "";
+    const missingClass = requiredClasses.find(
+      (className) => !new RegExp(`\\b${className}\\b`, "i").test(verificationClasses),
+    );
+    if (missingClass) {
+      return {
+        error: `verificationClasses must include canonical row "${missingClass}" because this milestone planned ${missingClass.toLowerCase()} verification`,
+      };
+    }
   }
 
   // ── Resolve paths and render markdown ────────────────────────────────

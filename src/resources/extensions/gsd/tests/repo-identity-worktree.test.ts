@@ -1,6 +1,6 @@
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, existsSync, lstatSync, realpathSync, mkdirSync, symlinkSync, renameSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, existsSync, lstatSync, realpathSync, mkdirSync, symlinkSync, renameSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
@@ -226,6 +226,33 @@ test('validateProjectId accepts valid values', () => {
     for (const valid of ["my-project", "foo_bar", "abc123", "A-Z_0-9"]) {
       assert.ok(validateProjectId(valid), `validateProjectId accepts valid value: "${valid}"`);
     }
+});
+
+test('ensureGsdSymlink prefers marker directory when marker/computed identities diverge and both have state (#5685)', () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "gsd-split-brain-")));
+    run("git init -b main", repo);
+    run('git config user.name "Pi Test"', repo);
+    run('git config user.email "pi@example.com"', repo);
+    writeFileSync(join(repo, "README.md"), "# Split Brain Test\n", "utf-8");
+    run("git add README.md", repo);
+    run('git commit -m "init"', repo);
+
+    const computedPath = externalGsdRoot(repo);
+    mkdirSync(computedPath, { recursive: true });
+    writeFileSync(join(computedPath, "computed-state.txt"), "computed\n", "utf-8");
+
+    const markerId = "marker-state-id";
+    const markerPath = join(stateDir, "projects", markerId);
+    mkdirSync(markerPath, { recursive: true });
+    writeFileSync(join(markerPath, "marker-state.txt"), "marker\n", "utf-8");
+    writeFileSync(join(repo, ".gsd-id"), `${markerId}\n`, "utf-8");
+
+    const resolved = ensureGsdSymlink(repo);
+    assert.deepStrictEqual(resolved, markerPath, "marker-backed state directory is preferred in split-brain condition");
+    assert.deepStrictEqual(realpathSync(join(repo, ".gsd")), realpathSync(markerPath), ".gsd symlink resolves to marker-backed state directory");
+    assert.deepStrictEqual(readFileSync(join(repo, ".gsd-id"), "utf-8").trim(), markerId, ".gsd-id marker persists the marker-backed identity");
+
+    rmSync(repo, { recursive: true, force: true });
 });
 
 });

@@ -150,4 +150,72 @@ describe("handleValidateMilestone write ordering (#2725)", () => {
     assert.equal(row?.trace_id, "trace-val-1");
     assert.equal(row?.turn_id, "turn-val-1");
   });
+
+  it("rejects verificationClasses that omit planned Operational class", async () => {
+    base = makeTmpBase();
+    const dbPath = join(base, ".gsd", "gsd.db");
+    openDatabase(dbPath);
+    insertMilestone({
+      id: "M001",
+      planning: {
+        verificationOperational: "Camoufox subprocess lifecycle/cleanup proof",
+      },
+    });
+    insertSlice({ id: "S01", milestoneId: "M001" });
+
+    const result = await handleValidateMilestone(
+      { ...VALID_PARAMS, verificationClasses: "| Check | Result |\n| --- | --- |\n| Generic verification | PASS |" },
+      base,
+    );
+    assert.ok("error" in result, "expected validation to fail");
+    assert.match(result.error, /must include canonical row "Operational"/);
+
+    const adapter = _getAdapter()!;
+    const row = adapter.prepare(
+      `SELECT status FROM assessments WHERE milestone_id = 'M001' AND scope = 'milestone-validation'`,
+    ).get() as { status: string } | undefined;
+    assert.equal(row, undefined, "assessment row should not be written when verification classes are invalid");
+  });
+
+  it("accepts verificationClasses when planned Operational class is present", async () => {
+    base = makeTmpBase();
+    const dbPath = join(base, ".gsd", "gsd.db");
+    openDatabase(dbPath);
+    insertMilestone({
+      id: "M001",
+      planning: {
+        verificationOperational: "Camoufox subprocess lifecycle/cleanup proof",
+      },
+    });
+    insertSlice({ id: "S01", milestoneId: "M001" });
+
+    const result = await handleValidateMilestone(
+      {
+        ...VALID_PARAMS,
+        verificationClasses:
+          "| Class | Planned Check | Evidence | Verdict |\n| --- | --- | --- | --- |\n| Operational | Camoufox subprocess lifecycle/cleanup proof | S01 + process-death evidence | NEEDS-ATTENTION |",
+      },
+      base,
+    );
+    assert.ok(!("error" in result), `unexpected error: ${"error" in result ? result.error : ""}`);
+  });
+
+  it("treats 'not required - ...' verification values as not applicable", async () => {
+    base = makeTmpBase();
+    const dbPath = join(base, ".gsd", "gsd.db");
+    openDatabase(dbPath);
+    insertMilestone({
+      id: "M001",
+      planning: {
+        verificationOperational: "not required - backend-only",
+      },
+    });
+    insertSlice({ id: "S01", milestoneId: "M001" });
+
+    const result = await handleValidateMilestone(
+      { ...VALID_PARAMS, verificationClasses: "| Check | Result |\n| --- | --- |\n| Generic verification | PASS |" },
+      base,
+    );
+    assert.ok(!("error" in result), `unexpected error: ${"error" in result ? result.error : ""}`);
+  });
 });

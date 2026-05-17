@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { getPriorSliceCompletionBlocker } from "../dispatch-guard.ts";
+import { getConsecutiveDispatchBlocker, getPriorSliceCompletionBlocker } from "../dispatch-guard.ts";
 import { openDatabase, closeDatabase, insertMilestone, insertSlice } from "../gsd-db.ts";
 
 /** Helper: create temp dir and open an in-dir DB for dispatch-guard tests */
@@ -279,6 +279,46 @@ test("dispatch guard does not skip prior milestone from SUMMARY projection when 
     getPriorSliceCompletionBlocker(repo, "main", "plan-slice", "M002/S01"),
     "Cannot dispatch plan-slice M002/S01: earlier slice M001/S03-R is not complete.",
   );
+});
+
+test("consecutive dispatch guard blocks complete-milestone after repeat cap", () => {
+  // REPEAT_CAP = 2: two same-unit dispatches are allowed; the third is blocked.
+  const state = {
+    consecutiveDispatchCount: new Map<string, number>(),
+    lastDispatchedKey: null as string | null,
+    lastDispatchPhase: null as string | null,
+  };
+
+  assert.equal(getConsecutiveDispatchBlocker(state, "completing-milestone", "complete-milestone", "M009"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "completing-milestone", "complete-milestone", "M009"), null);
+  assert.match(
+    getConsecutiveDispatchBlocker(state, "completing-milestone", "complete-milestone", "M009") ?? "",
+    /same-unit repeat cap reached/,
+  );
+});
+
+test("consecutive dispatch guard resets when unit changes", () => {
+  const state = {
+    consecutiveDispatchCount: new Map<string, number>(),
+    lastDispatchedKey: null as string | null,
+    lastDispatchPhase: null as string | null,
+  };
+
+  assert.equal(getConsecutiveDispatchBlocker(state, "validating-milestone", "validate-milestone", "M001"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "validating-milestone", "research-slice", "M001/parallel-research"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "validating-milestone", "validate-milestone", "M001"), null);
+});
+
+test("consecutive dispatch guard resets when phase changes", () => {
+  const state = {
+    consecutiveDispatchCount: new Map<string, number>(),
+    lastDispatchedKey: null as string | null,
+    lastDispatchPhase: null as string | null,
+  };
+
+  assert.equal(getConsecutiveDispatchBlocker(state, "validating-milestone", "validate-milestone", "M001"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "validating-milestone", "validate-milestone", "M001"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "completing-milestone", "validate-milestone", "M001"), null);
 });
 
 test("dispatch guard does not skip failed milestone SUMMARY without blocker prose", (t) => {

@@ -32,6 +32,7 @@ import {
   getAllAutoWorkers,
   markWorkerCrashed,
   markWorkerStopping,
+  markWorkerStoppingByPid,
   type AutoWorkerRow,
 } from "./db/auto-workers.js";
 import { forceReleaseLeasesForWorker } from "./db/milestone-leases.js";
@@ -197,12 +198,18 @@ export function writeLock(
     // Best-effort — never throw from the lock writer.
   }
 
-  if (!isDbAvailable() || !sessionFile) return;
+  if (!isDbAvailable()) return;
   try {
     const projectRoot = normalizeRealPath(basePath);
     const worker = findActiveWorkerForCurrentProcess(projectRoot);
     if (!worker) return;
-    setRuntimeKv("worker", worker.worker_id, SESSION_FILE_KV_KEY, sessionFile);
+    if (sessionFile) {
+      setRuntimeKv("worker", worker.worker_id, SESSION_FILE_KV_KEY, sessionFile);
+    } else {
+      // Preliminary unit locks (before runUnit/newSession settles) must clear
+      // any prior pointer so crash recovery cannot ingest stale cross-unit context.
+      deleteRuntimeKv("worker", worker.worker_id, SESSION_FILE_KV_KEY);
+    }
   } catch {
     // Best-effort — never throw from the lock writer.
   }
@@ -228,6 +235,8 @@ export function clearLock(basePath: string): void {
       deleteRuntimeKv("worker", staleWorker.worker_id, SESSION_FILE_KV_KEY);
       return;
     }
+    const lock = readLegacyLock(basePath);
+    if (lock?.pid) markWorkerStoppingByPid(projectRoot, lock.pid);
     const worker = findActiveWorkerForCurrentProcess(projectRoot);
     if (worker) deleteRuntimeKv("worker", worker.worker_id, SESSION_FILE_KV_KEY);
 

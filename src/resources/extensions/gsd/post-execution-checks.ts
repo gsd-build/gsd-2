@@ -244,16 +244,6 @@ export function resolveImportPath(
       ".woff", ".woff2", ".ttf", ".otf", ".eot",
     ]);
     const runtimeFallbackExtensions = new Set([".js", ".jsx", ".mjs", ".cjs"]);
-    const dottedStemFallbackExtensions = new Set([".server", ".client", ".webhook"]);
-
-    if (
-      explicitExt !== "" &&
-      !runtimeFallbackExtensions.has(explicitExt) &&
-      !nonFallbackExtensions.has(explicitExt) &&
-      !dottedStemFallbackExtensions.has(explicitExt)
-    ) {
-      return { exists: false, resolvedPath: null };
-    }
 
     if (nonFallbackExtensions.has(explicitExt) && !runtimeFallbackExtensions.has(explicitExt)) {
       return { exists: false, resolvedPath: null };

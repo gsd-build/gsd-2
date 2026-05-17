@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import {
   assertWorktreeMaterialized,
+  nativeBranchList,
   nativeBranchDelete,
   nativeCommit,
   nativeGetCurrentBranch,
@@ -206,6 +207,22 @@ process.exit(result.status ?? 1);
       existsSync(join(wtPath, ".git")),
       true,
       "created worktree must have the .git file required by later health checks",
+    );
+  });
+
+  test("nativeBranchList strips linked-worktree '+' marker from fallback output", (t) => {
+    const wtPath = join(repo, ".gsd", "worktrees", "M001");
+    t.after(() => {
+      try { git(["worktree", "remove", "--force", wtPath], repo); } catch { /* noop */ }
+    });
+
+    git(["branch", "milestone/M001"], repo);
+    git(["worktree", "add", wtPath, "milestone/M001"], repo);
+
+    const listed = nativeBranchList(repo, "milestone/*");
+    assert.ok(
+      listed.includes("milestone/M001"),
+      `expected clean milestone branch name, got: ${JSON.stringify(listed)}`,
     );
   });
 });

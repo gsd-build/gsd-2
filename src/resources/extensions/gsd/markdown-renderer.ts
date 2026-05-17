@@ -788,11 +788,12 @@ export function detectStaleRenders(basePath: string): StaleEntry[] {
   const _require = createRequire(import.meta.url);
   let parseRoadmap: Function, parsePlan: Function;
   try {
-    const m = _require("./parsers-legacy.ts");
+    // Prefer compiled JS for packaged/runtime installs; TS exists only in source/dev contexts.
+    const m = _require("./parsers-legacy.js");
     parseRoadmap = m.parseRoadmap; parsePlan = m.parsePlan;
   } catch (e) {
-    logWarning("renderer", `parsers-legacy.ts require failed, falling back to .js: ${(e as Error).message}`);
-    const m = _require("./parsers-legacy.js");
+    logWarning("renderer", `parsers-legacy.js require failed, falling back to .ts: ${(e as Error).message}`);
+    const m = _require("./parsers-legacy.ts");
     parseRoadmap = m.parseRoadmap; parsePlan = m.parsePlan;
   }
 

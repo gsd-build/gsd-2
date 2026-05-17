@@ -26,6 +26,7 @@ export function defaultRepositoryTargets(registry: RepositoryRegistry): string[]
   return first ? [first.id] : [];
 }
 
+
 function assertInsideProjectRoot(projectRoot: string, candidateRoot: string, repoId: string): void {
   const rel = relative(projectRoot, candidateRoot);
   if (rel === "") return;

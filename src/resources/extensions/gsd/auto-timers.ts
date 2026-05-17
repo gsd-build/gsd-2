@@ -318,7 +318,14 @@ export function startUnitSupervision(sctx: SupervisionContext): void {
     if (runtime?.continueHereFired) return;
 
     const contextUsage = s.cmdCtx.getContextUsage();
-    if (!contextUsage || contextUsage.percent == null || contextUsage.percent < continueHereThreshold) return;
+    if (!contextUsage || contextUsage.percent == null) return;
+    const rawPercent = contextUsage.percent;
+    if (rawPercent > 150) {
+      logWarning("timer", `[continue-here] ignoring implausible context percent: ${rawPercent}`);
+      return;
+    }
+    const contextPercent = Math.max(0, Math.min(100, rawPercent));
+    if (contextPercent < continueHereThreshold) return;
 
     writeUnitRuntimeRecord(s.basePath, unitType, unitId, s.currentUnit!.startedAt, {
       continueHereFired: true,
@@ -326,7 +333,7 @@ export function startUnitSupervision(sctx: SupervisionContext): void {
 
     if (s.verbose) {
       ctx.ui.notify(
-        `Context at ${contextUsage.percent}% (threshold: ${continueHereThreshold}%) — sending wrap-up signal.`,
+        `Context at ${contextPercent}% (threshold: ${continueHereThreshold}%) — sending wrap-up signal.`,
         "info",
       );
     }
@@ -339,7 +346,7 @@ export function startUnitSupervision(sctx: SupervisionContext): void {
         display: s.verbose,
         content: [
           "**CONTEXT BUDGET WARNING — wrap up this unit now.**",
-          `Context window is at ${contextUsage.percent}% (threshold: ${continueHereThreshold}%).`,
+          `Context window is at ${contextPercent}% (threshold: ${continueHereThreshold}%).`,
           "The next unit needs a fresh context to work effectively. Wrap up now:",
           "1. Finish any in-progress file writes",
           "2. Write or update the required durable artifacts (summary, checkboxes)",

@@ -153,6 +153,7 @@ const laneLabelByMode: Record<string, string> = {
   verification: "verification",
   orchestration: "orchestration",
   docs: "documentation",
+  triage: "triage",
 };
 
 test("Context Mode composer: every known eligible unit renders its configured lane and required tools", () => {

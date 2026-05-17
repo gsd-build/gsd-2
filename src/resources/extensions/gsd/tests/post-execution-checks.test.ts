@@ -372,7 +372,23 @@ describe("resolveImportPath", () => {
     assert.ok(result.resolvedPath?.endsWith("route.server.ts"));
   });
 
-  test("missing unknown explicit extension does not match code-extension shadow", (t) => {
+  test("resolves dotted TS module stem like .test-utils via extension probing", (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "post-exec-test-dotted-stem-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, "src", "lib"), { recursive: true });
+    writeFileSync(join(dir, "src", "lib", "test-helpers.test-utils.ts"), "export {};\n");
+    writeFileSync(join(dir, "src", "main.integration.test.ts"), "");
+
+    const result = resolveImportPath(
+      "./lib/test-helpers.test-utils",
+      "src/main.integration.test.ts",
+      dir
+    );
+    assert.ok(result.exists);
+    assert.ok(result.resolvedPath?.endsWith("test-helpers.test-utils.ts"));
+  });
+
+  test("unknown dotted stem falls through to extension probing", (t) => {
     const dir = mkdtempSync(join(tmpdir(), "post-exec-test-unknown-shadow-"));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     mkdirSync(join(dir, "src"), { recursive: true });
@@ -380,8 +396,8 @@ describe("resolveImportPath", () => {
     writeFileSync(join(dir, "src", "main.ts"), "");
 
     const result = resolveImportPath("./video.mp4", "src/main.ts", dir);
-    assert.ok(!result.exists);
-    assert.equal(result.resolvedPath, null);
+    assert.ok(result.exists);
+    assert.ok(result.resolvedPath?.endsWith("video.mp4.ts"));
   });
 });
 

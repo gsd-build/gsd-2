@@ -28,6 +28,8 @@ When progressive planning is enabled, GSD fully plans the first slice and may le
 
 Milestone completion is safe to retry. If a `complete-milestone` unit is redispatched after the database already marks the milestone as closed, GSD treats the call as successful instead of returning an error. The existing summary projection is left intact, no duplicate completion event is appended, and the tool response includes `alreadyComplete: true` in its details so operators and integrations can distinguish a retry from the first completion.
 
+`complete-milestone` now also enforces a hard validation prerequisite: the latest `milestone-validation` assessment for that milestone must exist and have verdict `pass`. If the verdict is `fail`, `partial`, or absent, closeout is blocked until `validate-milestone` records a fresh passing verdict.
+
 ### Planning-Only Milestone Closeout
 
 When milestone history contains only `.gsd/` artifact changes (for example planning-only or documentation-only closeout), auto mode now continues `complete-milestone` dispatch instead of blocking completion for missing implementation files outside `.gsd/`. GSD emits a warning so operators can distinguish this path from implementation-bearing milestones.
@@ -85,6 +87,8 @@ Every task, research phase, and planning step gets a clean context window. No ac
 
 Each auto-mode unit has a `UnitContextManifest` with a `ToolsPolicy`, and GSD enforces that policy before tool calls execute. Execution units use `all` mode and may edit project files, run shell commands, and dispatch subagents. Most planning and discussion units use `planning` mode: they can read broadly, write planning artifacts under `.gsd/`, run only read-only shell commands, and cannot dispatch subagents. Selected planning and closeout units use `planning-dispatch` mode, which keeps the same source-write and bash restrictions but allows `subagent` dispatch for isolated recon, planning, or review work. Documentation units use `docs` mode, which keeps the same restrictions but also allows writes to the manifest's explicit documentation globs such as `docs/**`, top-level `README*.md`, `CHANGELOG.md`, and top-level `*.md`.
 
+The sidecar unit types now have distinct manifest behavior: `triage-captures` runs in `contextMode: triage` with `planning`-mode tools (read-heavy, `.gsd/`-scoped writes, no subagent dispatch), while `quick-task` runs in `contextMode: execution` with `all`-mode tools so it can apply and verify small inline fixes.
+
 Writes outside those allowed paths, unsafe bash commands, and subagent dispatch from non-dispatch planning units are blocked with a hard policy error instead of relying on prompt compliance. In `planning-dispatch` units, prompts steer the parent agent toward read-only specialists such as `scout`, `planner`, `researcher`, `reviewer`, `security`, or `tester`; implementation-tier agents still belong in `execute-task`.
 
 ### Pre-Dispatch Runtime Blocks
@@ -122,7 +126,9 @@ The amount of context inlined is controlled by your [token profile](./token-opti
 
 Context Mode is enabled by default for auto-mode runs. Eligible auto-mode units receive manifest-driven guidance to preserve the conversation window: use `gsd_exec` for noisy codebase scans, builds, tests, and diagnostics; use `gsd_exec_search` before repeating a prior sandboxed run; and use `gsd_resume` after compaction or session resume to read a prior compaction snapshot from `.gsd/last-snapshot.md` when one exists.
 
-`gsd_exec` writes capped stdout/stderr and metadata under `.gsd/exec/`; output may be truncated. It then returns only a short digest to the agent. This keeps large command output out of the LLM context while preserving exact evidence on disk. To opt out of Context Mode guidance, snapshot injection, `gsd_exec`, `gsd_exec_search`, and `gsd_resume`, set:
+`contextMode: triage` is used specifically for capture triage turns so they stay focused on classification and routing decisions instead of implementation work.
+
+`gsd_exec` writes capped stdout/stderr and metadata under `.gsd/exec/`; output may be truncated. It then returns only a short digest to the agent. This keeps large command output out of the LLM context while preserving exact evidence on disk. In milestone worktree mode, `gsd_exec` also rejects scripts that target the original project root (including traversal patterns such as `cd ../../..`) so execution stays inside the active worktree boundary. To opt out of Context Mode guidance, snapshot injection, `gsd_exec`, `gsd_exec_search`, and `gsd_resume`, set:
 
 ```yaml
 context_mode:
@@ -183,9 +189,15 @@ GSD uses a sliding-window analysis to detect stuck loops. Instead of a simple "s
 
 The sliding-window approach reduces false positives on legitimate retries (e.g., verification failures that self-correct) while catching genuine stuck loops faster.
 
+### Consecutive Dispatch Blocker
+
+Auto mode also enforces a same-unit consecutive dispatch cap for `complete-milestone`, `validate-milestone`, and `research-slice`. The loop allows two consecutive dispatches of the same unit in the same phase and stops before a third attempt with a repeat-cap warning that instructs you to run `/gsd resume` after intervention.
+
 ### Artifact Verification Retries
 
 After each unit, GSD verifies that the expected artifact exists on disk. If the artifact is missing, auto mode re-dispatches the unit with explicit failure context and records an `artifact-verification-retry` journal event.
+
+For `run-uat`, existence alone is not sufficient: a pre-existing `S##-ASSESSMENT.md` only counts as completed when it contains a canonical verdict field (for example frontmatter `verdict: PASS | FAIL | PARTIAL`). If the file exists but has no verdict, artifact verification fails and `run-uat` is redispatched.
 
 Artifact verification retries are capped at 3 attempts. If the expected artifact is still missing after those retries, GSD pauses auto mode with an "Artifact still missing..." error instead of relying on loop detection or an unbounded dispatch counter.
 
@@ -198,7 +210,11 @@ Artifact verification retries are capped at 3 attempts. If the expected artifact
 - **Metrics analysis** — cost, token counts, and execution time breakdowns
 - **Doctor integration** — includes structural health issues from `/gsd doctor`
 - **Journal correlation** — uses `.gsd/journal/` events such as `unit-start`, `unit-end`, `post-unit-finalize-start`, `post-unit-finalize-end`, and `iteration-end` to show where the loop stopped
+- **Worktree exit telemetry contract** — `auto-exit` journal events now include a normalized `reason` bucket plus `rawReason` (original free-form text) for operator debugging and analytics stability
 - **LLM-guided investigation** — an agent session with full tool access to investigate root causes
+
+Normalized `auto-exit` reason buckets are:
+`pause`, `stop`, `blocked`, `merge-conflict`, `merge-failed`, `slice-merge-conflict`, `provider-error`, `session-failed`, `stream-aborted`, `unit-aborted`, `verification-exhausted`, `all-complete`, `no-active-milestone`, `other`.
 
 ```
 /gsd forensics [optional problem description]

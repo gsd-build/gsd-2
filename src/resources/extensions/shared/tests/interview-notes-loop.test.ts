@@ -21,6 +21,7 @@ import { showInterviewRound, type Question, type RoundResult } from "../intervie
 const ENTER = "\r";
 const DOWN = "\x1b[B";
 const TAB = "\t";
+const SPACE = " ";
 
 /**
  * Drive showInterviewRound with a scripted sequence of key inputs.
@@ -138,6 +139,20 @@ describe("interview-ui notes loop regression (#3502)", () => {
 		const answer = result.answers.q1;
 		assert.ok(answer, "answer for q1 should exist");
 		assert.equal(answer.selected, "Web App");
+	});
+
+	it("single-select returns the committed option label as a string", async () => {
+		const result = await runWithInputs(questions, [
+			DOWN,        // cursor -> "CLI Tool"
+			SPACE,       // commit current selection without advancing
+			ENTER,       // advance to review
+			ENTER,       // submit from review
+		]);
+
+		const answer = result.answers.q1;
+		assert.ok(answer, "answer for q1 should exist");
+		assert.equal(typeof answer.selected, "string");
+		assert.equal(answer.selected, "CLI Tool");
 	});
 
 	it("ignores abort signals after a submitted answer", async () => {

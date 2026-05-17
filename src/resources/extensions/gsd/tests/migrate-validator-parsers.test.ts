@@ -74,6 +74,17 @@ const SAMPLE_MILESTONE_SECTIONED_ROADMAP = `# Project Roadmap
 - [ ] 31 — Notifications
 `;
 
+const SAMPLE_MILESTONE_SUMMARY_SUBSECTION_ROADMAP = `# Project Roadmap
+
+## Milestones
+- [x] **Phase 1: v1.0 MVP** — Phases 1-6 (shipped 2026-02-24)
+- [ ] **Phase 45: v1.8 Production Readiness** — Phases 45-54 (in progress)
+
+### v1.8 Production Readiness (Phases 45-54)
+- [ ] **Phase 45: Feature X** — long description...
+- [ ] **Phase 46: Feature Y** — long description...
+`;
+
 const SAMPLE_PLAN_XML = `---
 phase: "29-auth-system"
 plan: "01"
@@ -289,6 +300,30 @@ test('parseOldRoadmap: milestone-sectioned with <details>', () => {
     assert.deepStrictEqual(p29?.done, true, 'ms roadmap: phase 29 done');
     const p30 = v25?.phases.find(p => p.number === 30);
     assert.deepStrictEqual(p30?.done, false, 'ms roadmap: phase 30 not done');
+});
+
+test('parseOldRoadmap: milestones summary + vN.N subsections', () => {
+    const roadmap = parseOldRoadmap(SAMPLE_MILESTONE_SUMMARY_SUBSECTION_ROADMAP);
+    assert.deepStrictEqual(roadmap.phases.length, 0, 'summary+subsections: no flat phases');
+    assert.deepStrictEqual(roadmap.milestones.length, 2, 'summary+subsections: two milestones');
+
+    const v10 = roadmap.milestones.find(m => m.id === 'v1.0');
+    assert.ok(v10 !== undefined, 'summary+subsections: v1.0 found');
+    assert.deepStrictEqual(v10?.phases.length, 6, 'summary+subsections: v1.0 uses synthetic completed range');
+    assert.ok(v10?.phases.every(p => p.done) ?? false, 'summary+subsections: v1.0 synthetic phases marked done');
+
+    const v18 = roadmap.milestones.find(m => m.id === 'v1.8');
+    assert.ok(v18 !== undefined, 'summary+subsections: v1.8 found');
+    assert.deepStrictEqual(v18?.phases.length, 2, 'summary+subsections: v1.8 phases parsed from subsection');
+    assert.deepStrictEqual(v18?.phases[0]?.number, 45, 'summary+subsections: first subsection phase number');
+    assert.deepStrictEqual(v18?.phases[0]?.title, 'Feature X', 'summary+subsections: em-dash description stripped');
+    assert.deepStrictEqual(v18?.phases[1]?.number, 46, 'summary+subsections: second subsection phase number');
+});
+
+test('parseOldRoadmap: phase title strips em-dash suffix description', () => {
+    const roadmap = parseOldRoadmap('- [ ] Phase 45: Feature X — long description...');
+    assert.deepStrictEqual(roadmap.phases.length, 1, 'em-dash strip: one parsed phase');
+    assert.deepStrictEqual(roadmap.phases[0]?.title, 'Feature X', 'em-dash strip: title excludes suffix description');
 });
 
   // ═══════════════════════════════════════════════════════════════════════

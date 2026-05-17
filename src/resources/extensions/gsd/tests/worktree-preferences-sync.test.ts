@@ -86,6 +86,31 @@ test("#2684: syncGsdStateToWorktree forward-syncs PREFERENCES.md when missing fr
   );
 });
 
+test("syncGsdStateToWorktree creates missing worktree .gsd and projects DECISIONS.md", (t) => {
+  const mainBase = makeTempDir("main");
+  const wtBase = makeTempDir("wt");
+  t.after(() => cleanup(mainBase, wtBase));
+
+  const decisions = "# Decisions\n\n- D001: Test decision\n";
+  writeFile(mainBase, ".gsd/DECISIONS.md", decisions);
+
+  const result = syncGsdStateToWorktree(mainBase, wtBase);
+
+  assert.ok(
+    existsSync(join(wtBase, ".gsd", "DECISIONS.md")),
+    "DECISIONS.md should be projected into worktree .gsd",
+  );
+  assert.equal(
+    readFileSync(join(wtBase, ".gsd", "DECISIONS.md"), "utf-8"),
+    decisions,
+    "DECISIONS.md content should match project root projection",
+  );
+  assert.ok(
+    result.synced.includes("DECISIONS.md"),
+    "DECISIONS.md should appear in synced list",
+  );
+});
+
 test("syncGsdStateToWorktree still accepts legacy lowercase preferences.md", (t) => {
   const mainBase = makeTempDir("main");
   const wtBase = makeTempDir("wt");

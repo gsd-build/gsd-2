@@ -304,6 +304,7 @@ test("workspace.repositories rejects duplicate paths with leading ./ normalizati
   assert.ok(errors.some((e) => e.includes("workspace.repositories contains duplicate path")));
 });
 
+
 test("workspace is a recognized preference key (no unknown warning)", () => {
   const { warnings } = validatePreferences({
     workspace: { mode: "project" },

@@ -275,3 +275,58 @@ test("#2736: restoreRuntimeState clears stale state when all workers are stopped
   const stateFile = join(base, ".gsd", "orchestrator.json");
   assert.equal(existsSync(stateFile), false, "orchestrator.json should be removed");
 });
+
+test("#3428: refreshWorkerStatuses preserves terminal stopped state when disk status is missing", (t) => {
+  const base = makeTmpBase();
+  t.after(() => {
+    resetOrchestrator();
+    cleanup(base);
+  });
+
+  const persisted: PersistedState = {
+    active: true,
+    workers: [
+      {
+        milestoneId: "M001",
+        title: "Milestone 1",
+        pid: process.pid,
+        worktreePath: join(base, "worktrees", "M001"),
+        startedAt: Date.now() - 60_000,
+        state: "running",
+        cost: 0.4,
+      },
+      {
+        milestoneId: "M002",
+        title: "Milestone 2",
+        pid: process.pid,
+        worktreePath: join(base, "worktrees", "M002"),
+        startedAt: Date.now() - 60_000,
+        state: "running",
+        cost: 0.6,
+      },
+    ],
+    totalCost: 1.0,
+    startedAt: Date.now() - 60_000,
+    configSnapshot: { max_workers: 3 },
+  };
+  writePersistedState(base, persisted);
+
+  // Restore into memory first.
+  getWorkerStatuses(base);
+
+  // Simulate exit handler already marking the worker as stopped while session
+  // status file is missing and pid is dead.
+  const orchestrator = getOrchestratorState();
+  assert.ok(orchestrator, "orchestrator state should be restored");
+  const worker = orchestrator.workers.get("M001");
+  assert.ok(worker, "worker should exist");
+  worker.state = "stopped";
+  worker.pid = DEAD_PID;
+  writeSessionStatusFile(base, "M002", "running", process.pid);
+
+  refreshWorkerStatuses(base);
+
+  const refreshed = getOrchestratorState();
+  assert.ok(refreshed, "state should remain available for inspection");
+  assert.equal(refreshed.workers.get("M001")?.state, "stopped");
+});

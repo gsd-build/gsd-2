@@ -9,6 +9,7 @@
 import type { GitPreferences } from "./git-service.js";
 import type { PostUnitHookConfig, PreDispatchHookConfig, TokenProfile, PhaseSkipPreferences } from "./types.js";
 import type { DynamicRoutingConfig } from "./model-router.js";
+import { isAbsolute } from "node:path";
 import { VALID_BRANCH_NAME } from "./git-service.js";
 import { normalizeStringArray } from "../shared/format-utils.js";
 
@@ -925,6 +926,15 @@ export function validatePreferences(preferences: GSDPreferences): {
     }
   }
 
+  if (preferences.per_unit_cost_cap_usd !== undefined) {
+    const raw = preferences.per_unit_cost_cap_usd;
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+      validated.per_unit_cost_cap_usd = raw;
+    } else {
+      errors.push("per_unit_cost_cap_usd must be a positive number");
+    }
+  }
+
   // ─── Git Preferences ───────────────────────────────────────────────────
   if (preferences.git && typeof preferences.git === "object") {
     const git: Record<string, unknown> = {};
@@ -1216,6 +1226,41 @@ export function validatePreferences(preferences: GSDPreferences): {
     }
   }
 
+  // ─── Claude Code MCP Per-Model Config ───────────────────────────────────────
+  if (preferences.claude_code_mcp !== undefined) {
+    if (typeof preferences.claude_code_mcp === "object" && preferences.claude_code_mcp !== null) {
+      const raw = preferences.claude_code_mcp as unknown as Record<string, unknown>;
+      if (typeof raw.per_model !== "object" || raw.per_model === null || Array.isArray(raw.per_model)) {
+        warnings.push("claude_code_mcp.per_model must be an object — ignoring claude_code_mcp");
+      } else {
+        const perModel = raw.per_model as Record<string, unknown>;
+        const validPerModel: Record<string, { allowed_servers?: string[]; blocked_servers?: string[] }> = {};
+        for (const [prefix, entry] of Object.entries(perModel)) {
+          if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+            warnings.push(`claude_code_mcp.per_model["${prefix}"] must be an object — ignoring entry`);
+            continue;
+          }
+          const e = entry as Record<string, unknown>;
+          const validEntry: { allowed_servers?: string[]; blocked_servers?: string[] } = {};
+          for (const field of ["allowed_servers", "blocked_servers"] as const) {
+            if (e[field] !== undefined) {
+              if (Array.isArray(e[field]) && (e[field] as unknown[]).every((s) => typeof s === "string")) {
+                validEntry[field] = e[field] as string[];
+              } else {
+                warnings.push(`claude_code_mcp.per_model["${prefix}"].${field} must be an array of strings — ignoring field`);
+              }
+            }
+          }
+          validPerModel[prefix] = validEntry;
+        }
+        validated.claude_code_mcp = { per_model: validPerModel };
+      }
+    } else {
+      warnings.push("claude_code_mcp must be an object — ignoring");
+    }
+  }
+
+
   // ─── Workspace Repository Registry ─────────────────────────────────
   if (preferences.workspace !== undefined) {
     if (typeof preferences.workspace === "object" && preferences.workspace !== null && !Array.isArray(preferences.workspace)) {
@@ -1255,6 +1300,10 @@ export function validatePreferences(preferences: GSDPreferences): {
 
             if (typeof repo.path === "string" && repo.path.trim().length > 0) {
               validRepo.path = repo.path.trim();
+              if (isAbsolute(validRepo.path)) {
+                errors.push(`workspace.repositories.${repoId}.path must be a relative path`);
+                continue;
+              }
               const normalizedPathKey = validRepo.path.replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/\/+$/, "").toLowerCase();
               if (normalizedPaths.has(normalizedPathKey)) {
                 errors.push(`workspace.repositories contains duplicate path: ${validRepo.path}`);

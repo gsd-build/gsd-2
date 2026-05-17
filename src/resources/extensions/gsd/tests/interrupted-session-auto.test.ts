@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
+import { _handlePausedSessionResumeRecoveryForTest } from "../auto.ts";
 import { assessInterruptedSession } from "../interrupted-session.ts";
 import {
   openDatabase,
@@ -184,6 +185,45 @@ test("direct /gsd auto source only resumes paused-session metadata for recoverab
   assert.ok(source.includes('freshStartAssessment.hasResumableDiskState'));
   assert.ok(source.includes('|| !!freshStartAssessment.recoveryPrompt'));
   assert.ok(source.includes('|| !!freshStartAssessment.lock'));
+});
+
+test("direct /gsd auto skips paused-session replay when recovered unit already completed", async () => {
+  const base = makeTmpBase();
+  try {
+    writeRoadmap(base, false);
+    const sliceDir = join(base, ".gsd", "milestones", "M001", "slices", "S01");
+    const tasksDir = join(sliceDir, "tasks");
+    mkdirSync(tasksDir, { recursive: true });
+    writeFileSync(
+      join(sliceDir, "S01-PLAN.md"),
+      [
+        "# S01: Test Slice",
+        "",
+        "## Tasks",
+        "",
+        "- [ ] **T01: First task** `est:1h`",
+      ].join("\n"),
+      "utf-8",
+    );
+    writeFileSync(join(tasksDir, "T01-PLAN.md"), "# T01 Plan\n\nDo the thing.\n", "utf-8");
+
+    const state = {
+      pausedSessionFile: join(base, ".gsd", "activity", "paused-session.jsonl"),
+      currentUnit: null,
+      pausedUnitType: "plan-slice",
+      pausedUnitId: "M001/S01",
+      pendingCrashRecovery: "stale-recovery-prompt",
+    };
+
+    const result = _handlePausedSessionResumeRecoveryForTest(base, state);
+    assert.equal(result.skippedReplay, true);
+    assert.equal(state.pausedSessionFile, null);
+    assert.equal(state.pendingCrashRecovery, null);
+    assert.equal(state.pausedUnitType, null);
+    assert.equal(state.pausedUnitId, null);
+  } finally {
+    cleanup(base);
+  }
 });
 
 test("auto module imports successfully after interrupted-session changes", async () => {

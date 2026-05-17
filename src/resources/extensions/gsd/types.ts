@@ -106,7 +106,7 @@ export interface AuditWarning {
 export interface VerificationResult {
   passed: boolean; // true if all checks passed (or no checks discovered)
   checks: VerificationCheck[]; // per-command results
-  discoverySource: "preference" | "task-plan" | "package-json" | "python-project" | "none";
+  discoverySource: "preference" | "task-plan" | "package-json" | "python-project" | "node-test-file" | "none";
   timestamp: number; // Date.now() at gate start
   runtimeErrors?: RuntimeError[]; // optional — populated by captureRuntimeErrors()
   auditWarnings?: AuditWarning[]; // optional — populated by runDependencyAudit()

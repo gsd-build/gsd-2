@@ -9,7 +9,11 @@ export function isInternalSessionTransitionAbortEvent(
 }
 
 export function shouldIgnoreAgentEndForActiveUnit(
-  event: Pick<AgentEndEvent, "abortOrigin">,
+  event: Pick<AgentEndEvent, "abortOrigin" | "messages">,
 ): boolean {
-  return isInternalSessionTransitionAbortEvent(event);
+  if (!isInternalSessionTransitionAbortEvent(event)) return false;
+  const lastMsg = event.messages[event.messages.length - 1];
+  if (!lastMsg || typeof lastMsg !== "object") return true;
+  const stopReason = (lastMsg as { stopReason?: unknown }).stopReason;
+  return stopReason === "aborted" || stopReason === "error";
 }

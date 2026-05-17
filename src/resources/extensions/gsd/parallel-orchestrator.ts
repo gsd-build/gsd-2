@@ -1005,6 +1005,9 @@ export function refreshWorkerStatuses(
   for (const [mid, worker] of state.workers) {
     const diskStatus = statusMap.get(mid);
     if (!diskStatus) {
+      if (worker.state === "stopped" || worker.state === "error") {
+        continue;
+      }
       if (!isPidAlive(worker.pid)) {
         worker.cleanup?.();
         worker.cleanup = undefined;

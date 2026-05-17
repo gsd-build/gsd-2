@@ -158,6 +158,31 @@ export function markWorkerStopping(workerId: string): void {
 }
 
 /**
+ * Mark the active worker row for a specific PID/project root as stopping.
+ * Used when we detect a dead PID from lock metadata before heartbeat expiry.
+ */
+export function markWorkerStoppingByPid(
+  projectRootRealpath: string,
+  pid: number,
+): void {
+  if (!isDbAvailable()) return;
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  const db = _getAdapter()!;
+  transaction(() => {
+    db.prepare(
+      `UPDATE workers
+       SET status = 'stopping'
+       WHERE pid = :pid
+         AND project_root_realpath = :project_root
+         AND status = 'active'`,
+    ).run({
+      ":pid": pid,
+      ":project_root": projectRootRealpath,
+    });
+  });
+}
+
+/**
  * Return all workers whose status is 'active' AND whose heartbeat is within
  * the TTL window. Workers older than the TTL are NOT auto-marked crashed
  * here — that's a separate janitor responsibility — but they are filtered
@@ -242,6 +267,18 @@ export function findStaleWorkerForProject(
   const db = _getAdapter()!;
   const cutoffMs = Date.now() - HEARTBEAT_TTL_SECONDS * 1000;
   const cutoffIso = new Date(cutoffMs).toISOString();
+
+  const latestActiveRow = db.prepare(
+    `SELECT worker_id, host, pid, started_at, version,
+            last_heartbeat_at, status, project_root_realpath
+     FROM workers
+     WHERE project_root_realpath = :project_root
+       AND status = 'active'
+     ORDER BY started_at DESC
+     LIMIT 1`,
+  ).get({ ":project_root": projectRootRealpath }) as AutoWorkerRow | undefined;
+  if (latestActiveRow && !isWorkerProcessAlive(latestActiveRow)) return latestActiveRow;
+
   const row = db.prepare(
     `SELECT worker_id, host, pid, started_at, version,
             last_heartbeat_at, status, project_root_realpath

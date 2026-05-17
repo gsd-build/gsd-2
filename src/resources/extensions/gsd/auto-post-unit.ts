@@ -84,6 +84,8 @@ import {
 } from "./project-research-policy.js";
 import { validateArtifact } from "./schemas/validate.js";
 import { verificationRetryKey } from "./auto/verification-retry-policy.js";
+import { getLedger } from "./metrics.js";
+import { getUnitCostSpikeAction } from "./auto-budget.js";
 
 // ─── Path Comparison Helper ───────────────────────────────────────────────
 /** Compare two paths for physical identity, tolerating trailing slashes and symlinks. */
@@ -109,6 +111,40 @@ function formatPreExecutionCheckDetail(check: PreExecutionCheckJSON): string {
 
 const COMPLETE_MILESTONE_DB_SETTLE_MS = 1500;
 const COMPLETE_MILESTONE_DB_SETTLE_POLL_MS = 100;
+const GIT_ACTION_FAILURE_LOG_REL_PATH = ".gsd/git-action-failures.log";
+const DEFAULT_PER_UNIT_COST_CAP_USD = 5.0;
+
+function getCurrentUnitCostStats(unitId: string): { unitCostUsd: number; rollingAvgUsd: number } {
+  const ledger = getLedger();
+  if (!ledger || !Array.isArray(ledger.units) || ledger.units.length === 0) {
+    return { unitCostUsd: 0, rollingAvgUsd: 0 };
+  }
+  let unitCostUsd = 0;
+  let totalCost = 0;
+  let totalUnits = 0;
+  for (const unit of ledger.units) {
+    const cost = typeof unit?.cost === "number" ? unit.cost : 0;
+    if (!Number.isFinite(cost) || cost < 0) continue;
+    totalCost += cost;
+    totalUnits++;
+    if (unit?.id === unitId) unitCostUsd += cost;
+  }
+  return {
+    unitCostUsd,
+    rollingAvgUsd: totalUnits > 0 ? totalCost / totalUnits : 0,
+  };
+}
+
+function persistGitActionFailure(basePath: string, action: TurnGitActionMode, message: string): string {
+  const logPath = join(basePath, GIT_ACTION_FAILURE_LOG_REL_PATH);
+  const logDir = join(basePath, ".gsd");
+  const timestamp = new Date().toISOString();
+  const body = message.trim() || "unknown git failure";
+  const entry = `[${timestamp}] action=${action}\n${body}\n\n`;
+  mkdirSync(logDir, { recursive: true });
+  appendFileSync(logPath, entry, "utf-8");
+  return logPath;
+}
 
 function stripKnownIdPrefix(value: string | undefined | null, id: string): string | undefined {
   const raw = String(value ?? "").trim();
@@ -164,7 +200,12 @@ async function buildTaskCommitContextForUnit(
     sliceTitle: stripKnownIdPrefix(slice?.title, sid),
     oneLiner: summary?.oneLiner || task?.one_liner || undefined,
     keyFiles:
-      summary?.frontmatter.key_files?.filter(f => !f.includes("{{") && f.trim() !== "(none)") ??
+      summary?.frontmatter.key_files?.filter((f) => {
+        const normalized = f.trim();
+        return normalized.length > 0 &&
+          !normalized.includes("{{") &&
+          !/^(?:\(none\)|none\.?|n\/a)$/i.test(normalized);
+      }) ??
       task?.key_files ??
       undefined,
     issueNumber: ghIssueNumber,
@@ -241,7 +282,7 @@ import {
   unitVerb,
   describeNextUnit,
 } from "./auto-dashboard.js";
-import { existsSync, unlinkSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { join, relative } from "node:path";
 import { _resetHasChangesCache } from "./native-git-bridge.js";
 import { autoCommitCurrentBranch } from "./worktree.js";
@@ -590,6 +631,8 @@ async function runCloseoutGitAction(
       if (gitResult.status === "failed") {
         s.lastGitActionFailure = gitResult.error ?? `git ${turnAction} failed`;
         s.lastGitActionStatus = "failed";
+        const fullError = gitResult.error ?? "unknown error";
+        const failureLogPath = persistGitActionFailure(s.basePath, turnAction, fullError);
         if (uokFlags.gitops && uokFlags.gates) {
           const parsed = parseUnitId(unit.id);
           const gateRunner = new UokGateRunner();
@@ -600,7 +643,7 @@ async function runCloseoutGitAction(
               outcome: "fail",
               failureClass: "git",
               rationale: `turn git action "${turnAction}" failed`,
-              findings: gitResult.error ?? "unknown git failure",
+              findings: fullError,
             }),
           });
           await gateRunner.run("closeout-git-action", {
@@ -615,12 +658,13 @@ async function runCloseoutGitAction(
           });
         }
 
-        const failureMsg = `Git ${turnAction} failed: ${(gitResult.error ?? "unknown error").split("\n")[0]}`;
+        const failureMsg = `Git ${turnAction} failed: ${fullError.split("\n")[0]} (full details: ${failureLogPath})`;
         ctx.ui.notify(failureMsg, opts?.softFailure ? "warning" : "error");
         debugLog("postUnit", {
           phase: opts?.softFailure ? "git-action-failed-soft" : "git-action-failed-blocking",
           action: turnAction,
-          error: gitResult.error ?? "unknown error",
+          error: fullError,
+          failureLogPath,
         });
         if (opts?.softFailure) {
           return "continue";
@@ -998,6 +1042,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
                     command: row.command,
                     exitCode: row.exit_code,
                     verdict: row.verdict,
+                    createdAt: row.created_at,
                   }))
                   .filter((row) => typeof row.command === "string" && row.command.trim().length > 0);
                 const mismatches = crossReferenceEvidence(claimedEvidence, actual);
@@ -1241,6 +1286,34 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
         const hasExpectedArtifact = resolveExpectedArtifactPath(s.currentUnit.type, s.currentUnit.id, s.basePath) !== null;
         if (hasExpectedArtifact) {
           const retryKey = `${s.currentUnit.type}:${s.currentUnit.id}`;
+          const prefs = loadEffectiveGSDPreferences()?.preferences;
+          const perUnitCapUsd =
+            typeof prefs?.per_unit_cost_cap_usd === "number" && Number.isFinite(prefs.per_unit_cost_cap_usd) && prefs.per_unit_cost_cap_usd > 0
+              ? prefs.per_unit_cost_cap_usd
+              : DEFAULT_PER_UNIT_COST_CAP_USD;
+          const { unitCostUsd, rollingAvgUsd } = getCurrentUnitCostStats(s.currentUnit.id);
+          if (unitCostUsd >= perUnitCapUsd) {
+            s.pendingVerificationRetry = null;
+            s.verificationRetryCount.delete(retryKey);
+            s.verificationRetryFailureHashes.delete(retryKey);
+            ctx.ui.notify(
+              `Unit ${s.currentUnit.id} hit per-unit cap $${perUnitCapUsd.toFixed(2)} — pausing auto-mode.`,
+              "error",
+            );
+            await pauseAuto(ctx, pi);
+            return "dispatched";
+          }
+          if (getUnitCostSpikeAction(unitCostUsd, rollingAvgUsd, 3.0) === "pause") {
+            s.pendingVerificationRetry = null;
+            s.verificationRetryCount.delete(retryKey);
+            s.verificationRetryFailureHashes.delete(retryKey);
+            ctx.ui.notify(
+              `Unit ${s.currentUnit.id} cost spike detected (${unitCostUsd.toFixed(2)} vs avg ${rollingAvgUsd.toFixed(2)}) — pausing auto-mode.`,
+              "error",
+            );
+            await pauseAuto(ctx, pi);
+            return "dispatched";
+          }
           const attempt = (s.verificationRetryCount.get(retryKey) ?? 0) + 1;
           const failureDetails = describeArtifactVerificationFailure(
             s.currentUnit.type,
@@ -1513,7 +1586,9 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
         // s.canonicalProjectRoot is the project root and lacks files that a
         // prior slice wrote to the worktree but hasn't merged to main yet.
         const preExecutionBasePath = s.basePath;
-        const result: PreExecutionResult = await runPreExecutionChecks(tasks, preExecutionBasePath);
+        const result: PreExecutionResult = await runPreExecutionChecks(tasks, preExecutionBasePath, {
+          additionalRoots: [s.canonicalProjectRoot],
+        });
 
         // Log summary to stderr in existing verification output format
         const emoji = result.status === "pass" ? "✅" : result.status === "warn" ? "⚠️" : "❌";
@@ -1530,12 +1605,12 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
         }
 
         // Write evidence JSON to slice artifacts directory
-        const slicePath = resolveSlicePath(preExecutionBasePath, mid, sid);
+        const slicePath = resolveSlicePath(s.canonicalProjectRoot, mid, sid);
         const evidenceFileName = `${sid}-PRE-EXEC-VERIFY.json`;
         let evidencePath = join(".gsd", "milestones", mid, "slices", sid, evidenceFileName);
         if (slicePath) {
           writePreExecutionEvidence(result, slicePath, mid, sid);
-          evidencePath = relative(preExecutionBasePath, join(slicePath, evidenceFileName)) || evidenceFileName;
+          evidencePath = relative(s.canonicalProjectRoot, join(slicePath, evidenceFileName)) || evidenceFileName;
         }
 
         if (uokFlags.gates) {

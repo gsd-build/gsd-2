@@ -206,6 +206,38 @@ describe("queryJournal", () => {
     assert.ok(results.every(e => e.eventType === "dispatch-match"));
   });
 
+  test("keeps auto-orchestrator events separate from auto-loop events", () => {
+    emitJournalEvent(base, makeEntry({ eventType: "iteration-start", seq: 0 }));
+    emitJournalEvent(base, makeEntry({ eventType: "dispatch-match", seq: 1 }));
+    emitJournalEvent(
+      base,
+      makeEntry({
+        eventType: "orchestrator-iteration-start",
+        seq: 2,
+        data: { source: "auto-orchestrator", name: "start" },
+      }),
+    );
+    emitJournalEvent(
+      base,
+      makeEntry({
+        eventType: "orchestrator-dispatch-match",
+        seq: 3,
+        data: { source: "auto-orchestrator", name: "advance" },
+      }),
+    );
+
+    const loopMatches = queryJournal(base, { eventType: "dispatch-match" });
+    const orchestratorMatches = queryJournal(base, { eventType: "orchestrator-dispatch-match" });
+
+    assert.equal(loopMatches.length, 1, "loop dispatch telemetry should not include orchestrator advances");
+    assert.equal(orchestratorMatches.length, 1, "forensics needs orchestrator advances under their own type");
+    assert.equal(orchestratorMatches[0].seq, 3);
+    assert.deepEqual(orchestratorMatches[0].data, {
+      source: "auto-orchestrator",
+      name: "advance",
+    });
+  });
+
   test("filters by unitId (from data.unitId)", () => {
     emitJournalEvent(
       base,

@@ -5,6 +5,7 @@ import {
   formatMcpInitResult,
   formatMcpStatusReport,
   formatMcpServerDetail,
+  hasHostMcpTool,
   type McpServerStatus,
 } from "../commands-mcp-status.ts";
 
@@ -114,5 +115,15 @@ describe("formatMcpInitResult", () => {
   test("shows unchanged message when config is current", () => {
     const result = formatMcpInitResult("unchanged", "/tmp/project/.mcp.json", "/tmp/project");
     assert.match(result, /already up to date/i);
+  });
+});
+
+describe("hasHostMcpTool", () => {
+  test("detects host-provided MCP tool prefix for a server", () => {
+    assert.equal(hasHostMcpTool("tools: mcp__gsd-workflow__*", "gsd-workflow"), true);
+  });
+
+  test("does not match other servers", () => {
+    assert.equal(hasHostMcpTool("tools: mcp__other-server__*", "gsd-workflow"), false);
   });
 });

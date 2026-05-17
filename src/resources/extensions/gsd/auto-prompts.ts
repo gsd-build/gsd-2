@@ -3095,17 +3095,40 @@ export async function buildReactiveExecutePrompt(
       mid, sid, tid, node?.dependsOn ?? [], base,
     );
 
-    // Build a full execute-task prompt with dependency-based carry-forward
-    const taskPrompt = await buildExecuteTaskPrompt(
-      mid, sid, sTitle, tid, tTitle, base,
-      {
-        carryForwardPaths: depPaths,
-        sessionContextWindow: opts?.sessionContextWindow,
-        modelRegistry: opts?.modelRegistry,
-        sessionProvider: opts?.sessionProvider,
-        contextModeRenderMode: "nested",
-      },
-    );
+    const taskPlanPath = resolveTaskFile(base, mid, sid, tid, "PLAN");
+    const taskPlanContent = taskPlanPath ? await loadFile(taskPlanPath) : null;
+    const taskPlanRelPath = `${relSlicePath(base, mid, sid)}/tasks/${tid}-PLAN.md`;
+    const taskPlanInline = taskPlanContent
+      ? [
+          "## Inlined Task Plan (authoritative local execution contract)",
+          `Source: \`${taskPlanRelPath}\``,
+          "",
+          taskPlanContent.trim(),
+        ].join("\n")
+      : [
+          "## Inlined Task Plan (authoritative local execution contract)",
+          `Task plan not found at dispatch time. Read \`${taskPlanRelPath}\` before executing.`,
+        ].join("\n");
+    const carryForwardSection = await buildCarryForwardSection(depPaths, base);
+    const taskSummaryPath = `${relSlicePath(base, mid, sid)}/tasks/${tid}-SUMMARY.md`;
+    const taskPrompt = [
+      `## UNIT: Execute Task ${tid} ("${tTitle}")`,
+      "",
+      "Work only in the repository root.",
+      "Implement from the inlined task plan below. Verify changes, then call `gsd_task_complete`.",
+      "Do not run git commands.",
+      "",
+      carryForwardSection,
+      "",
+      taskPlanInline,
+      "",
+      "## Completion Contract",
+      `- Call \`gsd_task_complete\` with camelCase fields: \`milestoneId\`, \`sliceId\`, \`taskId\`, \`oneLiner\`, \`narrative\`, \`verification\`, and \`verificationEvidence\`.`,
+      `- Do not manually write \`${taskSummaryPath}\` or edit PLAN checkboxes; the completion tool is canonical.`,
+      `- Use \`blocker_discovered: true\` only if the task cannot be completed due to a real blocker.`,
+      "",
+      `When done, say: "Task ${tid} complete."`,
+    ].join("\n");
 
     const modelSuffix = subagentModel ? ` with model: "${subagentModel}"` : "";
     subagentSections.push([

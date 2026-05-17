@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { invalidateAllCaches } from '../cache.ts';
 import { parseUnitId } from "../unit-id.ts";
-import { openDatabase, closeDatabase, insertMilestone, insertSlice, insertTask } from "../gsd-db.ts";
+import { openDatabase, closeDatabase, insertMilestone, insertSlice, insertTask, insertAssessment } from "../gsd-db.ts";
 import { clearPathCache } from "../paths.ts";
 import { clearParseCache } from "../files.ts";
 
@@ -503,6 +503,49 @@ describe("complete-milestone", () => {
     }
   });
 
+  test("handleCompleteMilestone refuses closeout when latest validation verdict is needs-attention (#5661)", async () => {
+    const { handleCompleteMilestone } = await import("../tools/complete-milestone.ts");
+    const base = createFixtureBase();
+    const mid = "M001";
+    const dbPath = join(base, ".gsd", "gsd.db");
+    try {
+      openDatabase(dbPath);
+      insertMilestone({ id: mid, title: "Test Milestone", status: "active" });
+      insertSlice({ id: "S01", milestoneId: mid, title: "Slice One", status: "complete" });
+      insertTask({ id: "T01", sliceId: "S01", milestoneId: mid, title: "Task One", status: "complete" });
+      insertAssessment({
+        path: join(".gsd", "milestones", mid, `${mid}-VALIDATION.md`),
+        milestoneId: mid,
+        status: "needs-attention",
+        scope: "milestone-validation",
+        fullContent: "---\nverdict: needs-attention\nremediation_round: 1\n---\n\n# Validation\nNeeds attention.",
+      });
+
+      const result = await handleCompleteMilestone({
+        milestoneId: mid,
+        title: "Test Milestone",
+        oneLiner: "Test",
+        narrative: "Test narrative",
+        successCriteriaResults: "Results",
+        definitionOfDoneResults: "Done",
+        requirementOutcomes: "Outcomes",
+        keyDecisions: [],
+        keyFiles: [],
+        lessonsLearned: [],
+        followUps: "",
+        deviations: "",
+        verificationPassed: true,
+      }, base);
+
+      assert.ok("error" in result, "non-pass validation verdict should block completion");
+      assert.match((result as { error: string }).error, /needs-attention/i);
+      assert.match((result as { error: string }).error, /Only verdict=pass permits closeout/i);
+    } finally {
+      try { closeDatabase(); } catch { /* */ }
+      cleanup(base);
+    }
+  });
+
   test("deriveState completing-milestone integration", async () => {
     const { deriveState, isMilestoneComplete } = await import("../state.ts");
     const { invalidateAllCaches: invalidateAllCachesDynamic } = await import("../cache.ts");
@@ -655,6 +698,13 @@ describe("complete-milestone", () => {
       insertMilestone({ id: mid, title: "Empty Enrichment", status: "active" });
       insertSlice({ id: "S01", milestoneId: mid, title: "Slice", status: "complete" });
       insertTask({ id: "T01", sliceId: "S01", milestoneId: mid, title: "Task", status: "complete" });
+      insertAssessment({
+        path: join(".gsd", "milestones", mid, `${mid}-VALIDATION.md`),
+        milestoneId: mid,
+        status: "pass",
+        scope: "milestone-validation",
+        fullContent: "---\nverdict: pass\nremediation_round: 0\n---\n\n# Validation\nValidated.",
+      });
 
       const result = await handleCompleteMilestone({
         milestoneId: mid,

@@ -123,6 +123,8 @@ export async function handleDoctor(args: string, ctx: ExtensionCommandContext, p
   const { jsonMode, dryRun, fixFlag, includeBuild, includeTests, mode, requestedScope } = parseDoctorArgs(args);
   const scope = await selectDoctorScope(projectRoot(), requestedScope);
   const effectiveScope = mode === "audit" ? requestedScope : scope;
+  const { ensureDbOpen } = await import("./bootstrap/dynamic-tools.js");
+  await ensureDbOpen(projectRoot());
   const report = await runGSDDoctor(projectRoot(), {
     fix: mode === "fix" || mode === "heal" || dryRun || fixFlag,
     dryRun,

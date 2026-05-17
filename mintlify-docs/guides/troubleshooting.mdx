@@ -28,6 +28,17 @@ It checks file structure, referential integrity, completion state consistency, g
     **Fix:** Check the task plan for clarity. Refine it manually, then `/gsd auto`.
   </Accordion>
 
+  <Accordion title="Auto mode pauses after a timeout or finalize failure">
+    **Symptoms:** Auto mode reports a hard timeout, finalize timeout, or post-unit closeout failure.
+
+    **What to inspect:**
+    - `.gsd/runtime/<unit-type>/<unit-id>.json` for recovery progress markers and timeout phase
+    - `.gsd/journal/` for `post-unit-finalize-start`, `post-unit-finalize-end`, and `iteration-end`
+    - `.gsd/git-action-failures.log` for timestamped failed git closeout actions (`commit` or `merge`) and the exact git error
+
+    **Fix:** If recovery is still progressing, resume with `/gsd auto`. If finalize stopped on git closeout, inspect `.gsd/git-action-failures.log`, fix the git issue, then resume.
+  </Accordion>
+
   <Accordion title="command not found: gsd">
     **Cause:** npm's global bin directory isn't in `$PATH`.
 

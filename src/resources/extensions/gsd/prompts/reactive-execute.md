@@ -8,7 +8,7 @@
 
 You are executing **multiple tasks in parallel** for this slice. The task graph below shows which tasks are ready for simultaneous execution based on their input/output dependencies.
 
-**Critical rule:** Use the `subagent` tool in **parallel mode** to dispatch all ready tasks simultaneously. Each subagent gets a full `execute-task` prompt and is responsible for its own implementation, verification, task summary, and completion tool calls. The parent batch agent orchestrates, verifies, and records failures only when a dispatched task failed before it could leave its own summary behind.
+**Critical rule:** Use the `subagent` tool in **parallel mode** to dispatch all ready tasks simultaneously. Each subagent gets a task-specific execution packet (task plan + dependency carry-forward + completion contract) and is responsible for its own implementation, verification, task summary, and completion tool calls. The parent batch agent orchestrates, verifies, and records failures only when a dispatched task failed before it could leave its own summary behind.
 
 ## Task Dependency Graph
 

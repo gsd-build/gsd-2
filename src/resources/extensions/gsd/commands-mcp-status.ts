@@ -32,6 +32,11 @@ export interface McpServerDetail extends McpServerStatus {
   tools: string[];
 }
 
+export function hasHostMcpTool(systemPrompt: string, serverName: string): boolean {
+  const marker = `mcp__${serverName}__`;
+  return systemPrompt.includes(marker);
+}
+
 export function formatMcpInitResult(
   status: "created" | "updated" | "unchanged",
   configPath: string,
@@ -184,6 +189,7 @@ export async function handleMcpStatus(
   const trimmed = args.trim();
   const lowered = trimmed.toLowerCase();
   const configs = readMcpConfigs();
+  const systemPrompt = ctx.getSystemPrompt();
 
   // /gsd mcp init [dir]
   if (!lowered || lowered === "status") {
@@ -233,6 +239,7 @@ export async function handleMcpStatus(
     } catch {
       // mcp-client may not expose status helpers — that's fine
     }
+    if (!connected && !error && hasHostMcpTool(systemPrompt, serverName)) connected = true;
 
     ctx.ui.notify(
       formatMcpServerDetail({
@@ -270,6 +277,7 @@ export async function handleMcpStatus(
       } catch {
         // Fall back to unknown state
       }
+      if (!connected && !error && hasHostMcpTool(systemPrompt, config.name)) connected = true;
 
       statuses.push({
         name: config.name,

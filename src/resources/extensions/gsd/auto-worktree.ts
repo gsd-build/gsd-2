@@ -52,7 +52,7 @@ import {
   normalizeWorktreePathForCompare,
   resolveWorktreeProjectRoot,
 } from "./worktree-root.js";
-import { MergeConflictError, createDraftPR, readIntegrationBranch, RUNTIME_EXCLUSION_PATHS } from "./git-service.js";
+import { MergeConflictError, createDraftPR, readIntegrationBranch, resolveMilestoneIntegrationBranch, RUNTIME_EXCLUSION_PATHS } from "./git-service.js";
 import { buildPrEvidence } from "./pr-evidence.js";
 import { debugLog } from "./debug-logger.js";
 import { logWarning, logError } from "./workflow-logger.js";
@@ -701,7 +701,8 @@ export function syncGsdStateToWorktree(
   // If both resolve to the same directory (symlink), no sync needed
   if (isSamePath(mainGsd, wtGsd)) return { synced };
 
-  if (!existsSync(mainGsd) || !existsSync(wtGsd)) return { synced };
+  if (!existsSync(mainGsd)) return { synced };
+  mkdirSync(wtGsd, { recursive: true });
 
   // Sync root-level .gsd/ files (DECISIONS, REQUIREMENTS, PROJECT, KNOWLEDGE, etc.)
   for (const f of ROOT_STATE_FILES) {
@@ -1720,22 +1721,11 @@ export function mergeMilestoneToMain(
   const previousCwd = process.cwd();
   process.chdir(originalBasePath_);
 
-  // 4. Resolve integration branch — prefer milestone metadata, then preferences,
-  //    then auto-detect (origin/HEAD → main → master → current). Never hardcode
-  //    "main": repos using "master" or a custom default branch would fail at
-  //    checkout and leave the user with a broken merge state (#1668).
+  // 4. Resolve integration branch via shared resolver so stale/invalid
+  //    milestone metadata can recover to configured/detected fallbacks.
   const prefs = loadEffectiveGSDPreferences()?.preferences?.git ?? {};
-  const integrationBranch = readIntegrationBranch(
-    originalBasePath_,
-    milestoneId,
-  );
-  // Validate prefs.main_branch exists before using it — a stale preference
-  // (e.g. "master" when repo uses "main") causes merge failure (#3589).
-  const validatedPrefBranch = prefs.main_branch && nativeBranchExists(originalBasePath_, prefs.main_branch)
-    ? prefs.main_branch
-    : undefined;
-  const mainBranch =
-    integrationBranch ?? validatedPrefBranch ?? nativeDetectMainBranch(originalBasePath_);
+  const branchResolution = resolveMilestoneIntegrationBranch(originalBasePath_, milestoneId, prefs);
+  const mainBranch = branchResolution.effectiveBranch ?? nativeDetectMainBranch(originalBasePath_);
 
   // Fail closed when the resolved integration branch is the milestone branch
   // itself (#5024). Stale or corrupt metadata (e.g. integrationBranch recorded
@@ -1749,9 +1739,8 @@ export function mergeMilestoneToMain(
     throw new GSDError(
       GSD_GIT_ERROR,
       `Resolved integration branch "${mainBranch}" is the same ref as milestone branch ` +
-      `"${milestoneBranch}" — refusing to self-merge. Integration branch metadata is invalid; ` +
-      `set a distinct main_branch in GSD preferences or repair the milestone integration record ` +
-      `before retrying milestone completion.`,
+      `"${milestoneBranch}" — refusing to self-merge. ${branchResolution.reason}. ` +
+      `Repair milestone integration metadata before retrying milestone completion.`,
     );
   }
 

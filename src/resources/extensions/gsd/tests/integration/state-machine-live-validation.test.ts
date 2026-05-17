@@ -31,6 +31,7 @@ import {
   openDatabase,
   closeDatabase,
   insertMilestone,
+  insertAssessment,
   insertSlice,
   insertTask,
   getTask,
@@ -280,6 +281,16 @@ function makeMilestoneParams(milestoneId: string): Record<string, unknown> {
   };
 }
 
+function insertPassingMilestoneValidation(milestoneId: string): void {
+  insertAssessment({
+    path: `.gsd/milestones/${milestoneId}/${milestoneId}-VALIDATION.md`,
+    milestoneId,
+    status: "pass",
+    scope: "milestone-validation",
+    fullContent: "# Validation\n\nverdict: PASS",
+  });
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Test Suite
 // ═══════════════════════════════════════════════════════════════════════════
@@ -424,6 +435,7 @@ describe("state-machine-live-validation", () => {
       insertTask({ id: "T01", sliceId: "S01", milestoneId: "M001", title: "Impl", status: "complete" });
       insertTask({ id: "T02", sliceId: "S01", milestoneId: "M001", title: "Test", status: "complete" });
       insertTask({ id: "T01", sliceId: "S02", milestoneId: "M001", title: "Impl", status: "complete" });
+      insertPassingMilestoneValidation("M001");
 
       const result = await handleCompleteMilestone(makeMilestoneParams("M001") as any, base);
       assert.ok(!("error" in result), `expected success, got: ${JSON.stringify(result)}`);
@@ -528,6 +540,7 @@ describe("state-machine-live-validation", () => {
       base = createFullFixture();
       openDatabase(join(base, ".gsd", "gsd.db"));
       insertMilestone({ id: "M001", title: "Active", status: "active" });
+      insertPassingMilestoneValidation("M001");
 
       const result = await handleCompleteMilestone(makeMilestoneParams("M001") as any, base);
       assert.ok("error" in result);
@@ -542,6 +555,7 @@ describe("state-machine-live-validation", () => {
       insertSlice({ id: "S02", milestoneId: "M001", status: "in_progress" });
       insertTask({ id: "T01", sliceId: "S01", milestoneId: "M001", status: "complete" });
       insertTask({ id: "T01", sliceId: "S02", milestoneId: "M001", status: "pending" });
+      insertPassingMilestoneValidation("M001");
 
       const result = await handleCompleteMilestone(makeMilestoneParams("M001") as any, base);
       assert.ok("error" in result);
@@ -555,6 +569,7 @@ describe("state-machine-live-validation", () => {
       // Slice marked complete but task is still pending — simulates inconsistent state
       insertSlice({ id: "S01", milestoneId: "M001", status: "complete" });
       insertTask({ id: "T01", sliceId: "S01", milestoneId: "M001", status: "pending" });
+      insertPassingMilestoneValidation("M001");
 
       const result = await handleCompleteMilestone(makeMilestoneParams("M001") as any, base);
       assert.ok("error" in result);

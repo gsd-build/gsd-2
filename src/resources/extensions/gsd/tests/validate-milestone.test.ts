@@ -13,7 +13,7 @@ import { buildCompleteMilestonePrompt, buildValidateMilestonePrompt } from "../a
 import type { GSDState } from "../types.ts";
 import { clearPathCache } from "../paths.ts";
 import { clearParseCache } from "../files.ts";
-import { closeDatabase, insertMilestone, insertSlice, openDatabase, getMilestone } from "../gsd-db.ts";
+import { closeDatabase, insertAssessment, insertMilestone, insertSlice, openDatabase, getMilestone } from "../gsd-db.ts";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -200,6 +200,47 @@ test("deriveState returns blocked when needs-remediation has no incomplete slice
       state.blockers.some(b => b.includes("needs-remediation") && b.includes("M001")),
       "blocker message should mention milestone and verdict",
     );
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("deriveState parks milestone when validation verdict is needs-attention and no summary (#6136)", async () => {
+  const base = makeTmpBase();
+  try {
+    writeRoadmap(base, "M001", ALL_DONE_ROADMAP);
+    writeValidation(base, "M001", "---\nverdict: needs-attention\nremediation_round: 0\n---\n\n# Validation\nNeeds attention.");
+
+    const state = await deriveState(base);
+    assert.equal(state.phase, "pre-planning");
+    assert.equal(state.activeMilestone, null);
+    assert.equal(state.registry.find(entry => entry.id === "M001")?.status, "parked");
+    assert.ok(state.nextAction.includes("parked"));
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("deriveState parks DB-backed milestone when validation verdict is needs-attention (#6136)", async () => {
+  const base = makeTmpBase();
+  try {
+    openTestDb(base);
+    insertMilestone({ id: "M001", title: "Test Milestone", status: "active" });
+    insertSlice({ id: "S01", milestoneId: "M001", title: "First slice", status: "complete", depends: [] });
+    writeRoadmap(base, "M001", ALL_DONE_ROADMAP);
+    insertAssessment({
+      path: join(".gsd", "milestones", "M001", "M001-VALIDATION.md"),
+      milestoneId: "M001",
+      status: "needs-attention",
+      scope: "milestone-validation",
+      fullContent: "---\nverdict: needs-attention\nremediation_round: 0\n---\n\n# Validation\nNeeds attention.",
+    });
+
+    const state = await deriveState(base);
+    assert.equal(state.phase, "pre-planning");
+    assert.equal(state.activeMilestone, null);
+    assert.equal(state.registry.find(entry => entry.id === "M001")?.status, "parked");
+    assert.ok(state.nextAction.includes("parked"));
   } finally {
     cleanup(base);
   }

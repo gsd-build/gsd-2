@@ -25,6 +25,9 @@ import {
   isSessionLockHeld,
 } from '../session-lock.ts';
 import { gsdRoot } from '../paths.ts';
+import { openDatabase, closeDatabase, _getAdapter } from "../gsd-db.ts";
+import { registerAutoWorker, getAutoWorker } from "../db/auto-workers.ts";
+import { normalizeRealPath } from "../paths.ts";
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -90,6 +93,38 @@ describe('session-lock-regression', async () => {
       }
       assert.ok(!threw, 'double release does not throw');
     } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  }
+
+  // ─── 2b. Dead lock PID is marked stopping in workers table ────────────
+  console.log('\n=== 2b. dead lock PID marks worker stopping ===');
+  {
+    const base = mkdtempSync(join(tmpdir(), 'gsd-session-lock-'));
+    mkdirSync(join(base, '.gsd'), { recursive: true });
+
+    try {
+      openDatabase(join(base, ".gsd", "gsd.db"));
+      const projectRoot = normalizeRealPath(base);
+      const workerId = registerAutoWorker({ projectRootRealpath: projectRoot });
+      const deadPid = 99999;
+      writeFileSync(join(gsdRoot(base), "auto.lock"), JSON.stringify({
+        pid: deadPid,
+        startedAt: new Date().toISOString(),
+        unitType: "starting",
+        unitId: "bootstrap",
+        unitStartedAt: new Date().toISOString(),
+      }));
+      // Align worker PID with stale lock metadata.
+      _getAdapter()?.prepare("UPDATE workers SET pid = :pid WHERE worker_id = :id")
+        .run({ ":pid": deadPid, ":id": workerId });
+
+      const result = acquireSessionLock(base);
+      assert.ok(result.acquired, "acquire recovers stale lock");
+      assert.equal(getAutoWorker(workerId)?.status, "stopping");
+      releaseSessionLock(base);
+    } finally {
+      try { closeDatabase(); } catch { /* noop */ }
       rmSync(base, { recursive: true, force: true });
     }
   }
