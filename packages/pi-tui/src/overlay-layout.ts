@@ -185,7 +185,7 @@ export function resolveOverlayLayout(
 
 // ─── Line compositing ───────────────────────────────────────────────────────
 
-const SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
+const SEGMENT_RESET = "\x1b[39;49m\x1b]8;;\x07";
 
 /** Append reset sequences to each non-image line. */
 export function applyLineResets(lines: string[]): string[] {
