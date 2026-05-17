@@ -446,6 +446,12 @@ export async function checkRuntimeHealth(
         if (shouldFix("failed_migration")) {
           if (recoverFailedMigration(basePath)) {
             fixesApplied.push("recovered failed migration (.gsd.migrating → .gsd)");
+          } else {
+            const stateFile = join(localGsd, "STATE.md");
+            if (existsSync(localGsd) && existsSync(stateFile)) {
+              rmSync(migratingPath, { recursive: true, force: true });
+              fixesApplied.push("removed orphaned .gsd.migrating after verifying active .gsd state");
+            }
           }
         }
       }

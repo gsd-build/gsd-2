@@ -359,6 +359,26 @@ node_modules/
       assert.deepStrictEqual(content.length, 0, "all orphaned keys removed");
     });
 
+    test('failed_migration fix removes orphaned .gsd.migrating when .gsd is intact', async () => {
+      const dir = createMinimalProject();
+      cleanups.push(dir);
+
+      writeFileSync(join(dir, ".gsd", "STATE.md"), "# GSD State\n");
+      mkdirSync(join(dir, ".gsd.migrating"), { recursive: true });
+      writeFileSync(join(dir, ".gsd.migrating", "stale.txt"), "stale\n");
+
+      const detect = await runGSDDoctor(dir);
+      const migrationIssues = detect.issues.filter(i => i.code === "failed_migration");
+      assert.ok(migrationIssues.length > 0, "detects failed migration orphan");
+
+      const fixed = await runGSDDoctor(dir, { fix: true });
+      assert.ok(
+        fixed.fixesApplied.some(f => f.includes("removed orphaned .gsd.migrating")),
+        "fix removes orphaned .gsd.migrating when .gsd is intact",
+      );
+      assert.ok(!existsSync(join(dir, ".gsd.migrating")), ".gsd.migrating removed after fix");
+    });
+
     // ─── Test: hook/ compound keys are NOT flagged as orphaned (#2826) ─
     test('orphaned_completed_units — hook/ compound keys not flagged', async () => {
       const dir = createMinimalProject();
