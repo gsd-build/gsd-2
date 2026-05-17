@@ -117,7 +117,7 @@ function formatElapsed(ms: number): string {
 }
 
 function formatCommandPreview(command: string): string {
-	return truncateToWidth(command.replace(/\s+/g, " ").trim(), 64, "");
+	return command.replace(/\s+/g, " ").trim();
 }
 
 function appendLineOrRange(displayPath: string | undefined, target: ToolTargetMetadata): string | undefined {

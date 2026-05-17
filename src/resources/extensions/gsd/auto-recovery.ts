@@ -44,6 +44,7 @@ import {
   diagnoseExpectedArtifact,
 } from "./auto-artifact-paths.js";
 import { classifyMilestoneSummaryContent } from "./milestone-summary-classifier.js";
+import { hasVerdict } from "./verdict-parser.js";
 import { validateArtifact } from "./schemas/validate.js";
 import { getProjectResearchStatus } from "./project-research-policy.js";
 import { isGsdWorktreePath } from "./worktree-root.js";
@@ -223,6 +224,7 @@ export function hasImplementationArtifacts(basePath: string, milestoneId?: strin
         const milestoneEvidence = getChangedFilesFromMilestoneEvidence(basePath, milestoneId);
         if (!milestoneEvidence.ok) return "unknown";
         if (milestoneEvidence.matched) return classifyImplementationFiles(milestoneEvidence.files);
+        return "unknown";
       }
       if (currentBranch && currentBranch !== "HEAD") return "absent";
       return "unknown";
@@ -827,6 +829,14 @@ export function verifyExpectedArtifact(
     }
   }
 
+  if (unitType === "run-uat") {
+    const assessmentContent = readFileSync(absPath, "utf-8");
+    if (!hasVerdict(assessmentContent)) {
+      logWarning("recovery", `verify-fail ${unitType} ${unitId}: assessment missing verdict at ${absPath}`);
+      return false;
+    }
+  }
+
   if (unitType === "plan-milestone") {
     try {
       const roadmap = parseLegacyRoadmap(readFileSync(absPath, "utf-8"));
@@ -1078,7 +1088,7 @@ export function buildLoopRemediationSteps(
     case "execute-task": {
       if (!mid || !sid || !tid) break;
       return [
-        `   1. Run \`gsd undo-task ${tid}\` to reset the task state`,
+        `   1. Run \`gsd undo-task ${mid}/${sid}/${tid}\` to reset the task state`,
         `   2. Resume auto-mode — it will re-execute the task`,
         `   3. If the task keeps failing, run \`gsd recover\` to rebuild DB state from disk`,
       ].join("\n");
@@ -1099,7 +1109,7 @@ export function buildLoopRemediationSteps(
     case "complete-slice": {
       if (!mid || !sid) break;
       return [
-        `   1. Run \`gsd reset-slice ${sid}\` to reset the slice and all its tasks`,
+        `   1. Run \`gsd reset-slice ${mid}/${sid}\` to reset the slice and all its tasks`,
         `   2. Resume auto-mode — it will re-execute incomplete tasks and re-complete the slice`,
         `   3. If the slice keeps failing, run \`gsd recover\` to rebuild DB state from disk`,
       ].join("\n");

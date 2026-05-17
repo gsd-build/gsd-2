@@ -123,11 +123,38 @@ describe("shouldBlockWorktreeWrite (#5199)", () => {
     assert.equal(result.block, false);
   });
 
+  test("Case 6b: relative write from active worktree cwd is allowed", () => {
+    projectRoot = makeProject("worktree");
+    const inside = join(projectRoot, ".gsd", "worktrees", "M001");
+    mkdirSync(inside, { recursive: true });
+    const result = shouldBlockWorktreeWrite(
+      "write",
+      "DESIGN.md",
+      inside,
+      /* isAutoLive */ true,
+      null,
+    );
+    assert.equal(result.block, false);
+  });
+
   test("Case 7: isolation=worktree, auto active, effectiveBasePath is project root (cwd never flipped) → block", () => {
     projectRoot = makeProject("worktree");
     const result = shouldBlockWorktreeWrite(
       "write",
       join(projectRoot, "app.js"),
+      projectRoot,
+      /* isAutoLive */ true,
+      null,
+    );
+    assert.equal(result.block, true);
+    assert.match(result.reason ?? "", /HARD BLOCK/);
+  });
+
+  test("Case 7b: relative write from project root cwd is blocked", () => {
+    projectRoot = makeProject("worktree");
+    const result = shouldBlockWorktreeWrite(
+      "write",
+      "DESIGN.md",
       projectRoot,
       /* isAutoLive */ true,
       null,

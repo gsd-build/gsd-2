@@ -725,6 +725,22 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 						pinnedTextComponent = undefined;
 						host.pinnedMessageContainer.clear();
 						lastPinnedText = "";
+						if (!host.loadingAnimation) {
+							host.statusContainer.clear();
+							host.loadingAnimation = new Loader(
+								host.ui,
+								(spinner) => theme.fg("accent", spinner),
+								(text) => theme.fg("muted", text),
+								host.defaultWorkingMessage,
+							);
+							host.statusContainer.addChild(host.loadingAnimation);
+							if (host.pendingWorkingMessage !== undefined) {
+								if (host.pendingWorkingMessage) {
+									host.loadingAnimation.setMessage(host.pendingWorkingMessage);
+								}
+								host.pendingWorkingMessage = undefined;
+							}
+						}
 					}
 				}
 

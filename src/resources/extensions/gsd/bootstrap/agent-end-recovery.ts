@@ -51,7 +51,15 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function _hasEmptyAgentEndContent(content: unknown): boolean {
-  return content == null || (Array.isArray(content) && content.length === 0);
+  if (content == null) return true;
+  if (!Array.isArray(content)) return false;
+  if (content.length === 0) return true;
+  return content.every((block) => {
+    if (!block || typeof block !== "object") return true;
+    const typedBlock = block as { type?: unknown; text?: unknown };
+    if (typedBlock.type !== "text") return false;
+    return typeof typedBlock.text !== "string" || typedBlock.text.trim() === "";
+  });
 }
 
 /**
@@ -316,9 +324,22 @@ export async function handleAgentEnd(
   }
 
   if (isBareClaudeCodeStreamAbortPlaceholder(lastMsg)) {
-    // The Claude Code adapter can emit this placeholder after a prior turn has
-    // already completed and the next unit is active. It has no user/provider
-    // diagnostic value and must not cancel the newly-dispatched unit.
+    if (isSessionSwitchAbortGraceActive()) {
+      // Old turn leaking through after a session switch — drop it.
+      return;
+    }
+
+    // Mid-unit stream abort with no diagnostic. Treat as non-fatal so the loop
+    // can continue, but surface it to the user and resolve the in-flight unit.
+    ctx.ui.notify("Claude Code stream aborted mid-unit (no diagnostic). Continuing.", "warning");
+    try {
+      resetRetryState(retryState);
+      resolveAgentEnd(event);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      ctx.ui.notify(`Auto-mode error after stream-abort placeholder: ${message}. Stopping auto-mode.`, "error");
+      try { await pauseAuto(ctx, pi); } catch (e) { logWarning("bootstrap", `pauseAuto failed after stream-abort placeholder: ${(e as Error).message}`); }
+    }
     return;
   }
 

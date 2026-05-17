@@ -20,6 +20,7 @@ import { parseUnitId } from "./unit-id.js";
 import { isDbAvailable, getTask, getSliceTasks, getMilestoneSlices } from "./gsd-db.js";
 import type { TaskRow } from "./db-task-slice-rows.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
+import type { GSDPreferences } from "./preferences-types.js";
 import { extractVerdict } from "./verdict-parser.js";
 import { isClosedStatus } from "./status-guards.js";
 import { loadFile } from "./files.js";
@@ -27,10 +28,12 @@ import { parseRoadmap } from "./parsers-legacy.js";
 import { isMilestoneComplete } from "./state.js";
 import {
   runVerificationGate,
+  runVerificationGateForTargets,
   formatFailureContext,
   captureRuntimeErrors,
   runDependencyAudit,
 } from "./verification-gate.js";
+import type { VerificationTarget } from "./verification-gate.js";
 import { writeVerificationJSON, type PostExecutionCheckJSON, type EvidenceJSON } from "./verification-evidence.js";
 import { logWarning } from "./workflow-logger.js";
 import { runPostExecutionChecks, type PostExecutionResult } from "./post-execution-checks.js";
@@ -41,6 +44,11 @@ import { resolveUokFlags } from "./uok/flags.js";
 import { UokGateRunner } from "./uok/gate-runner.js";
 import { verificationRetryKey } from "./auto/verification-retry-policy.js";
 import { decideVerificationVerdict } from "./verification-verdict.js";
+import { createRepositoryRegistryFromPreferences } from "./repository-registry.js";
+import type { SliceRow } from "./db-task-slice-rows.js";
+import { getSlice } from "./gsd-db.js";
+import { getLedger } from "./metrics.js";
+import { getUnitCostSpikeAction } from "./auto-budget.js";
 
 export interface VerificationContext {
   s: AutoSession;
@@ -49,6 +57,71 @@ export interface VerificationContext {
 }
 
 export type VerificationResult = "continue" | "retry" | "pause";
+
+function getCurrentUnitCostStats(unitId: string): { unitCostUsd: number; rollingAvgUsd: number } {
+  const ledger = getLedger();
+  if (!ledger || !Array.isArray(ledger.units) || ledger.units.length === 0) {
+    return { unitCostUsd: 0, rollingAvgUsd: 0 };
+  }
+  let unitCostUsd = 0;
+  let totalCost = 0;
+  let totalUnits = 0;
+  for (const unit of ledger.units) {
+    const cost = typeof unit?.cost === "number" ? unit.cost : 0;
+    if (!Number.isFinite(cost) || cost < 0) continue;
+    totalCost += cost;
+    totalUnits++;
+    if (unit?.id === unitId) unitCostUsd += cost;
+  }
+  return {
+    unitCostUsd,
+    rollingAvgUsd: totalUnits > 0 ? totalCost / totalUnits : 0,
+  };
+}
+
+function resolveVerificationTargets(
+  basePath: string,
+  prefs: GSDPreferences | undefined,
+  task: TaskRow | null,
+  slice: SliceRow | null,
+): VerificationTarget[] {
+  const registry = createRepositoryRegistryFromPreferences(basePath, prefs);
+  const explicitIds =
+    task?.target_repositories?.length
+      ? task.target_repositories
+      : slice?.target_repositories?.length
+        ? slice.target_repositories
+        : null;
+  const requestedIds = explicitIds ?? ["project"];
+
+  const targets: VerificationTarget[] = [];
+  const seen = new Set<string>();
+  for (const id of requestedIds) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const repo = registry.byId.get(id);
+    if (!repo) {
+      if (explicitIds) {
+        throw new Error(`unknown verification target repository: ${id}`);
+      }
+      continue;
+    }
+    targets.push({
+      id: repo.id,
+      cwd: repo.root,
+      // Top-level verification commands override per-repo defaults.
+      preferenceCommands: prefs?.verification_commands?.length
+        ? undefined
+        : repo.verification,
+    });
+  }
+
+  if (!explicitIds && targets.length === 0) {
+    const project = registry.byId.get("project");
+    if (project) targets.push({ id: "project", cwd: project.root });
+  }
+  return targets;
+}
 
 /**
  * Post-unit guard for `validate-milestone` units (#4094).
@@ -241,18 +314,29 @@ export async function runPostUnitVerification(
     // Read task plan verify field
     const { milestone: mid, slice: sid, task: tid } = parseUnitId(s.currentUnit.id);
     let taskPlanVerify: string | undefined;
+    let taskRow: TaskRow | null = null;
+    let sliceRow: SliceRow | null = null;
     if (mid && sid && tid) {
       if (isDbAvailable()) {
-        taskPlanVerify = getTask(mid, sid, tid)?.verify;
+        taskRow = getTask(mid, sid, tid);
+        sliceRow = getSlice(mid, sid);
+        taskPlanVerify = taskRow?.verify;
       }
       // When DB unavailable, taskPlanVerify stays undefined — gate runs without task-specific checks
     }
 
-    const result = runVerificationGate({
-      cwd: s.basePath,
-      preferenceCommands: prefs?.verification_commands,
-      taskPlanVerify,
-    });
+    const verificationTargets = resolveVerificationTargets(s.basePath, prefs, taskRow, sliceRow);
+    const result = verificationTargets.length <= 1
+      ? runVerificationGate({
+        cwd: verificationTargets[0]?.cwd ?? s.basePath,
+        preferenceCommands: prefs?.verification_commands ?? verificationTargets[0]?.preferenceCommands,
+        taskPlanVerify,
+      })
+      : runVerificationGateForTargets({
+        targets: verificationTargets,
+        preferenceCommands: prefs?.verification_commands,
+        taskPlanVerify,
+      });
 
     // Capture runtime errors
     const runtimeErrors = await captureRuntimeErrors();
@@ -396,8 +480,7 @@ export async function runPostUnitVerification(
 
       if (enhancedEnabled && postEnabled && isDbAvailable()) {
         try {
-          // Get the completed task from DB
-          const taskRow = getTask(mid, sid, tid);
+          // Reuse the already-loaded task row for post-execution checks.
           if (taskRow && taskRow.key_files && taskRow.key_files.length > 0) {
             // Get all tasks in the slice
             const allTasks = getSliceTasks(mid, sid);
@@ -603,6 +686,33 @@ export async function runPostUnitVerification(
       await pauseAuto(ctx, pi);
       return "pause";
     } else if (autoFixEnabled && attempt + 1 <= maxRetries) {
+      const { unitCostUsd, rollingAvgUsd } = getCurrentUnitCostStats(s.currentUnit.id);
+      const perUnitCapUsd =
+        typeof prefs?.per_unit_cost_cap_usd === "number" && Number.isFinite(prefs.per_unit_cost_cap_usd) && prefs.per_unit_cost_cap_usd > 0
+          ? prefs.per_unit_cost_cap_usd
+          : 5.0;
+      if (unitCostUsd >= perUnitCapUsd) {
+        s.verificationRetryCount.delete(retryKey);
+        s.verificationRetryFailureHashes.delete(retryKey);
+        s.pendingVerificationRetry = null;
+        ctx.ui.notify(
+          `Unit ${s.currentUnit.id} hit per-unit cap $${perUnitCapUsd.toFixed(2)} — pausing auto-mode.`,
+          "error",
+        );
+        await pauseAuto(ctx, pi);
+        return "pause";
+      }
+      if (getUnitCostSpikeAction(unitCostUsd, rollingAvgUsd, 3.0) === "pause") {
+        s.verificationRetryCount.delete(retryKey);
+        s.verificationRetryFailureHashes.delete(retryKey);
+        s.pendingVerificationRetry = null;
+        ctx.ui.notify(
+          `Unit ${s.currentUnit.id} cost spike detected (${unitCostUsd.toFixed(2)} vs avg ${rollingAvgUsd.toFixed(2)}) — pausing auto-mode.`,
+          "error",
+        );
+        await pauseAuto(ctx, pi);
+        return "pause";
+      }
       const nextAttempt = attempt + 1;
       s.verificationRetryCount.set(retryKey, nextAttempt);
       s.pendingVerificationRetry = {

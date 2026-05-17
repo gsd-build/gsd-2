@@ -521,16 +521,6 @@ export function _enterMilestoneCore(
     };
   }
 
-  if (s.isolationDegraded) {
-    debugLog("WorktreeLifecycle", {
-      action: "enterMilestone",
-      milestoneId,
-      skipped: true,
-      reason: "isolation-degraded",
-    });
-    return { ok: false, reason: "isolation-degraded" };
-  }
-
   // Phase B: claim a milestone lease before any worktree mutation. Two
   // workers cannot enter the same milestone concurrently. Best-effort:
   // warn if no worker registered (single-worker fallback) or skip if DB
@@ -638,6 +628,38 @@ export function _enterMilestoneCore(
   // a worktree path — prevents double-nested worktree paths (#3729).
   const basePath = resolveWorktreeProjectRoot(s.basePath, s.originalBasePath);
   const mode = getIsolationMode(basePath);
+
+  if (s.isolationDegraded) {
+    if (mode === "worktree") {
+      try {
+        lifecycleEnterBranchMode(deps, basePath, milestoneId);
+        s.basePath = basePath;
+        rebuildGitService(s, deps);
+        invalidateAllCaches();
+        ctx.notify(
+          `Worktree isolation is degraded. Fell back to branch milestone/${milestoneId}.`,
+          "warning",
+        );
+        return { ok: true, mode: "branch", path: basePath };
+      } catch (err) {
+        debugLog("WorktreeLifecycle", {
+          action: "enterMilestone",
+          milestoneId,
+          skipped: true,
+          reason: "isolation-degraded",
+          fallback: "branch-failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    debugLog("WorktreeLifecycle", {
+      action: "enterMilestone",
+      milestoneId,
+      skipped: true,
+      reason: "isolation-degraded",
+    });
+    return { ok: false, reason: "isolation-degraded" };
+  }
 
   if (mode === "none") {
     debugLog("WorktreeLifecycle", {
@@ -1214,6 +1236,11 @@ export function mergeMilestoneStandalone(
 ): MergeStandaloneResult {
   const { originalBasePath, worktreeBasePath, milestoneId, notify } = mctx;
   validateMilestoneId(milestoneId);
+  if (!originalBasePath && !worktreeBasePath) {
+    throw new Error(
+      `Internal error: mergeMilestoneStandalone(${milestoneId}) requires originalBasePath or worktreeBasePath.`,
+    );
+  }
 
   if (mctx.isolationDegraded) {
     if (originalBasePath) {

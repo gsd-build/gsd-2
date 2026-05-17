@@ -141,6 +141,28 @@ async function reapplyValidatedModelOnFallback(
   }
 }
 
+/**
+ * Apply the --model CLI flag override to the active session.
+ * Searches available models by exact id or provider/id pattern and warns
+ * on stderr when the requested model is not found in the registry.
+ */
+function applyModelOverride(
+  session: { setModel(model: { provider: string; id: string }): unknown | Promise<unknown> },
+  modelRegistry: ModelRegistryInstance,
+  modelFlag: string | undefined,
+): void {
+  if (!modelFlag) return
+  const available = modelRegistry.getAvailable()
+  const match =
+    available.find((m) => m.id === modelFlag) ||
+    available.find((m) => `${m.provider}/${m.id}` === modelFlag)
+  if (match) {
+    void session.setModel(match)
+  } else {
+    process.stderr.write(`[gsd] Warning: Model "${modelFlag}" not found. Using configured default.\n`)
+  }
+}
+
 const cliFlags = parseCliArgs(process.argv)
 const isPrintMode = cliFlags.print || cliFlags.mode !== undefined
 
@@ -672,16 +694,7 @@ if (isPrintMode) {
   printExtensionErrors(extensionsResult.errors)
   printExtensionWarnings(extensionsResult.warnings)
 
-  // Apply --model override if specified
-  if (cliFlags.model) {
-    const available = modelRegistry.getAvailable()
-    const match =
-      available.find((m) => m.id === cliFlags.model) ||
-      available.find((m) => `${m.provider}/${m.id}` === cliFlags.model)
-    if (match) {
-      session.setModel(match)
-    }
-  }
+  applyModelOverride(session, modelRegistry, cliFlags.model)
 
   const mode = cliFlags.mode || 'text'
 
@@ -804,6 +817,8 @@ validateConfiguredModel(modelRegistry, settingsManager)
 await reapplyValidatedModelOnFallback(session, modelRegistry, settingsManager, interactiveFallbackMsg)
 printExtensionErrors(extensionsResult.errors)
 printExtensionWarnings(extensionsResult.warnings)
+
+applyModelOverride(session, modelRegistry, cliFlags.model)
 
 // Restore scoped models from settings on startup.
 // The upstream InteractiveMode reads enabledModels from settings when /scoped-models is opened,

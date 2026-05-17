@@ -18,13 +18,15 @@ import { randomUUID } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
+  lstatSync,
+  rmSync,
   writeFileSync,
   readFileSync,
   mkdirSync,
   renameSync,
   unlinkSync,
 } from "node:fs";
-import { join, dirname } from "node:path";
+import { isAbsolute, join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gsdRoot } from "./paths.js";
 import { createWorktree, worktreePath, removeWorktree } from "./worktree-manager.js";
@@ -103,6 +105,37 @@ export function _buildSliceWorkerEnvForTest(
     GSD_PARALLEL_WORKER: "1",
     GSD_SLICE_WORKER_TOKEN: workerToken,
   };
+}
+
+function isValidSliceWorktreePath(basePath: string, wtPath: string): boolean {
+  if (!existsSync(wtPath)) return false;
+  const gitPath = join(wtPath, ".git");
+  if (!existsSync(gitPath)) return false;
+  try {
+    if (!lstatSync(gitPath).isFile()) return false;
+    const content = readFileSync(gitPath, "utf8").trim();
+    if (!content.startsWith("gitdir: ")) return false;
+    const rawGitdir = content.slice("gitdir: ".length).trim();
+    if (!rawGitdir) return false;
+    const resolvedGitdir = isAbsolute(rawGitdir) ? rawGitdir : resolve(wtPath, rawGitdir);
+    const expectedPrefix = join(basePath, ".git", "worktrees").replaceAll("\\", "/");
+    const normalized = resolvedGitdir.replaceAll("\\", "/");
+    return normalized === expectedPrefix || normalized.startsWith(`${expectedPrefix}/`);
+  } catch {
+    return false;
+  }
+}
+
+function isWorkerPidAlive(pid: number): boolean {
+  if (!Number.isFinite(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === "ESRCH") return false;
+    return true;
+  }
 }
 
 interface PersistedSliceWorker {
@@ -334,7 +367,24 @@ export function restoreSliceState(basePath: string): PersistedSliceState | null 
  * crash followed by a fresh process is detectable. (Issue #4980 HIGH-8)
  */
 export function isSliceParallelActive(basePath?: string): boolean {
-  if (sliceState?.active === true) return true;
+  const hasRunningWorkers = (): boolean => {
+    if (!sliceState) return false;
+    for (const worker of sliceState.workers.values()) {
+      if (worker.state === "running") {
+        if (worker.process) return true;
+        if (isRecoveredSliceWorkerAlive(worker)) return true;
+      }
+    }
+    return false;
+  };
+
+  if (sliceState?.active === true) {
+    if (hasRunningWorkers()) return true;
+    sliceState.active = false;
+    removeSliceStateFile(sliceState.basePath);
+    return false;
+  }
+
   if (!basePath) return false;
   const restored = restoreSliceState(basePath);
   if (!restored || restored.workers.length === 0) return false;
@@ -365,7 +415,11 @@ export function isSliceParallelActive(basePath?: string): boolean {
       cost: w.cost,
     });
   }
-  return true;
+
+  if (hasRunningWorkers()) return true;
+  sliceState.active = false;
+  removeSliceStateFile(sliceState.basePath);
+  return false;
 }
 
 /**
@@ -427,6 +481,9 @@ export async function startSliceParallel(
       const wtName = `${milestoneId}-${slice.id}`;
       const wtPath = worktreePath(basePath, wtName);
 
+      if (existsSync(wtPath) && !isValidSliceWorktreePath(basePath, wtPath)) {
+        rmSync(wtPath, { recursive: true, force: true });
+      }
       if (!existsSync(wtPath)) {
         createWorktree(basePath, wtName, { branch: wtBranch });
       }
@@ -468,6 +525,21 @@ export async function startSliceParallel(
         removeWorktree(basePath, wtName, { deleteBranch: true, force: true });
       } catch { /* ignore cleanup failures */ }
     }
+  }
+
+  // Guard: if workers died immediately, treat as failed start so callers
+  // don't exit auto-mode and re-dispatch in a rapid loop.
+  for (let i = started.length - 1; i >= 0; i--) {
+    const sid = started[i];
+    const worker = sliceState.workers.get(sid);
+    if (worker && isWorkerPidAlive(worker.pid)) continue;
+    started.splice(i, 1);
+    errors.push({ sid, error: "Worker exited immediately after spawn" });
+    sliceState.workers.delete(sid);
+    const wtName = `${milestoneId}-${sid}`;
+    try {
+      removeWorktree(basePath, wtName, { deleteBranch: true, force: true });
+    } catch { /* ignore cleanup failures */ }
   }
 
   // If nothing started, deactivate

@@ -104,6 +104,8 @@ Every task gets a clean AI context window. No accumulated garbage, no quality de
 
 Context Mode is enabled by default for auto-mode runs. Eligible auto-mode units receive manifest-driven guidance to preserve the conversation window: use `gsd_exec` for noisy codebase scans, builds, tests, and diagnostics; use `gsd_exec_search` before repeating a prior sandboxed run; and use `gsd_resume` after compaction or session resume to read a prior compaction snapshot from `.gsd/last-snapshot.md` when one exists.
 
+`contextMode: triage` is used specifically for capture triage turns so they stay focused on classification and routing decisions instead of implementation work.
+
 `gsd_exec` writes capped stdout/stderr and metadata under `.gsd/exec/`; output may be truncated. It then returns only a short digest to the agent. This keeps large command output out of the LLM context while preserving exact evidence on disk. Opt out of Context Mode guidance, snapshot injection, `gsd_exec`, `gsd_exec_search`, and `gsd_resume` with:
 
 ```yaml
@@ -116,6 +118,8 @@ You can also tune sandbox behavior with `context_mode.exec_timeout_ms`, `context
 ## Runtime Tool Policy
 
 Every auto-mode unit declares a `ToolsPolicy` in its `UnitContextManifest`, and GSD enforces it before tool calls run. Execution units use `all` mode and can edit project files, run shell commands, and dispatch subagents. Most planning and discussion units use `planning` mode: read tools are allowed, writes are limited to `.gsd/`, bash must be read-only, and subagent dispatch is blocked. Selected planning and closeout units use `planning-dispatch` mode, which keeps the same source-write and bash restrictions but allows `subagent` dispatch for isolated recon, planning, or review work. Documentation units use `docs` mode, which also allows writes to the manifest's documentation globs such as `docs/**`, top-level `README*.md`, `CHANGELOG.md`, and top-level `*.md`.
+
+The sidecar unit types now have distinct manifest behavior: `triage-captures` runs in `contextMode: triage` with `planning`-mode tools (read-heavy, `.gsd/`-scoped writes, no subagent dispatch), while `quick-task` runs in `contextMode: execution` with `all`-mode tools so it can apply and verify small inline fixes.
 
 Policy violations return a hard block, so unsafe writes, unsafe bash, and subagent dispatch from non-dispatch planning units are stopped at runtime rather than handled as model instructions. In `planning-dispatch` units, prompts steer the parent agent toward read-only specialists such as `scout`, `planner`, `researcher`, `reviewer`, `security`, or `tester`; implementation-tier agents still belong in `execute-task`.
 
@@ -276,4 +280,6 @@ Two anomaly types surface from telemetry:
 - `worktree-orphan` — one per orphan reason-bucket
 - `worktree-unmerged-exit` — aggregate signal across the window
 
-For per-event detail (specific milestone IDs, timestamps, exit reasons) inspect `.gsd/journal/*.jsonl` directly.
+For per-event detail (specific milestone IDs, timestamps, exit reasons) inspect `.gsd/journal/*.jsonl` directly. `auto-exit` events now include:
+- `reason`: normalized bucket for stable analytics (`pause`, `stop`, `blocked`, `merge-conflict`, `merge-failed`, `slice-merge-conflict`, `provider-error`, `session-failed`, `stream-aborted`, `unit-aborted`, `verification-exhausted`, `all-complete`, `no-active-milestone`, `other`)
+- `rawReason`: original free-form reason text before normalization, preserved for debugging and audit trails

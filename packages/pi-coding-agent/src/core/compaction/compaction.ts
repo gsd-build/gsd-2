@@ -107,10 +107,15 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 
 /**
  * Calculate total context tokens from usage.
- * Uses the native totalTokens field when available, falls back to computing from components.
+ * Uses prompt-relevant components only:
+ * - input: current user/tool payload sent to model
+ * - cacheRead/cacheWrite: context replay + newly cached context
+ *
+ * Excludes output because output tokens are not part of the current prompt size.
+ * Excludes totalTokens because some providers report cumulative loop/session totals.
  */
 export function calculateContextTokens(usage: Usage): number {
-	return usage.totalTokens || usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+	return usage.input + usage.cacheRead + usage.cacheWrite;
 }
 
 /**

@@ -50,9 +50,46 @@ export type AutoExitReason =
   | "merge-conflict"
   | "merge-failed"
   | "slice-merge-conflict"
+  | "provider-error"
+  | "session-failed"
+  | "stream-aborted"
+  | "unit-aborted"
+  | "verification-exhausted"
   | "all-complete"
   | "no-active-milestone"
   | "other";
+
+export function normalizeAutoExitReason(rawReason?: string): AutoExitReason {
+  const reason = rawReason ?? "stop";
+  const reasonLc = reason.toLowerCase();
+  return reasonLc.startsWith("blocked:")
+    ? "blocked"
+    : reasonLc.startsWith("merge conflict")
+      ? "merge-conflict"
+      : reasonLc.startsWith("merge error") || reasonLc.startsWith("merge failed")
+        ? "merge-failed"
+        : reasonLc.startsWith("slice-parallel dispatched")
+          ? "stop"
+          : reasonLc.startsWith("slice-merge-conflict")
+            ? "slice-merge-conflict"
+            : reasonLc.startsWith("provider error")
+              ? "provider-error"
+              : reasonLc.startsWith("session creation")
+                ? "session-failed"
+                : reasonLc.startsWith("operation aborted") || reasonLc.includes("stream aborted")
+                  ? "stream-aborted"
+                  : reasonLc.startsWith("auto-mode stopped")
+                    ? "unit-aborted"
+                    : reasonLc.includes("pausing auto-mode after") && reasonLc.includes("retries")
+                      ? "verification-exhausted"
+                      : reasonLc === "all milestones complete"
+                        ? "all-complete"
+                        : reasonLc === "no active milestone"
+                          ? "no-active-milestone"
+                          : reasonLc === "stop" || reasonLc === "pause"
+                            ? reasonLc
+                            : "other";
+}
 
 // ─── Emitters ────────────────────────────────────────────────────────────
 
@@ -125,6 +162,7 @@ export function emitAutoExit(
      *  reasons (e.g. stopAuto's `reason?: string` parameter) should map to
      *  the closed set before emitting. */
     reason: AutoExitReason;
+    rawReason?: string;
     milestoneId?: string;
     milestoneMerged: boolean;
     isolationMode?: WorktreeIsolationMode;
@@ -133,6 +171,7 @@ export function emitAutoExit(
 ): void {
   emitJournalEvent(projectRoot, baseEntry("auto-exit", {
     reason: meta.reason,
+    rawReason: meta.rawReason,
     flowId: meta.flowId,
     milestoneId: meta.milestoneId,
     milestoneMerged: meta.milestoneMerged,

@@ -11,6 +11,9 @@ on:
     - cron: "0 6 * * 1"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   SECURITY_AUDIT_BLOCKING: ${{ vars.SECURITY_AUDIT_BLOCKING }}
   NPM_AUDIT_SEVERITY: ${{ vars.NPM_AUDIT_SEVERITY }}

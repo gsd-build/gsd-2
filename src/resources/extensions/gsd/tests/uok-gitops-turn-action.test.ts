@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
@@ -12,6 +12,10 @@ function run(cmd: string, cwd: string): string {
 
 function makeRepo(): string {
   const repo = mkdtempSync(join(tmpdir(), "gsd-uok-gitops-"));
+  return initRepo(repo);
+}
+
+function initRepo(repo: string): string {
   run("git init", repo);
   run('git config user.email "test@example.com"', repo);
   run('git config user.name "Test User"', repo);
@@ -32,6 +36,7 @@ test("uok gitops turn action status-only reports working tree dirtiness", () => 
     });
     assert.equal(clean.status, "ok");
     assert.equal(clean.dirty, false);
+    assert.deepEqual(clean.dirtyRepositories, { project: false });
 
     writeFileSync(join(repo, "README.md"), "# Dirty\n", "utf-8");
     const dirty = runTurnGitAction({
@@ -42,8 +47,54 @@ test("uok gitops turn action status-only reports working tree dirtiness", () => 
     });
     assert.equal(dirty.status, "ok");
     assert.equal(dirty.dirty, true);
+    assert.deepEqual(dirty.dirtyRepositories, { project: true });
   } finally {
     rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("uok gitops turn action status-only reports per-repository dirtiness in parent mode", () => {
+  const root = mkdtempSync(join(tmpdir(), "gsd-uok-gitops-parent-"));
+  try {
+    initRepo(root);
+    mkdirSync(join(root, ".gsd"), { recursive: true });
+    mkdirSync(join(root, "frontend"), { recursive: true });
+    mkdirSync(join(root, "backend"), { recursive: true });
+    initRepo(join(root, "frontend"));
+    initRepo(join(root, "backend"));
+    writeFileSync(join(root, ".gitignore"), "frontend/\nbackend/\n", "utf-8");
+    run("git add .gitignore", root);
+    run('git commit -m "chore: ignore nested repos"', root);
+    writeFileSync(join(root, ".gsd", "PREFERENCES.md"), `---
+version: 1
+workspace:
+  mode: parent
+  repositories:
+    frontend:
+      path: frontend
+    backend:
+      path: backend
+---
+`, "utf-8");
+    run("git add .gsd/PREFERENCES.md", root);
+    run('git commit -m "chore: configure parent workspace repos"', root);
+
+    writeFileSync(join(root, "frontend", "README.md"), "# Dirty frontend\n", "utf-8");
+
+    const result = runTurnGitAction({
+      basePath: root,
+      action: "status-only",
+      unitType: "execute-task",
+      unitId: "M001/S01/T01",
+    });
+
+    assert.equal(result.status, "ok");
+    assert.equal(result.dirty, true);
+    assert.equal(result.dirtyRepositories?.project, false);
+    assert.equal(result.dirtyRepositories?.frontend, true);
+    assert.equal(result.dirtyRepositories?.backend, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -84,6 +135,55 @@ test("uok gitops turn action commit creates commit with unit trailer", () => {
   }
 });
 
+test("uok gitops turn action commit honors per-repo commit_policy skip", () => {
+  const root = mkdtempSync(join(tmpdir(), "gsd-uok-gitops-commit-policy-"));
+  try {
+    initRepo(root);
+    mkdirSync(join(root, ".gsd"), { recursive: true });
+    mkdirSync(join(root, "frontend"), { recursive: true });
+    mkdirSync(join(root, "backend"), { recursive: true });
+    initRepo(join(root, "frontend"));
+    initRepo(join(root, "backend"));
+    writeFileSync(join(root, ".gitignore"), "frontend/\nbackend/\n", "utf-8");
+    run("git add .gitignore", root);
+    run('git commit -m "chore: ignore nested repos"', root);
+    writeFileSync(join(root, ".gsd", "PREFERENCES.md"), `---
+version: 1
+workspace:
+  mode: parent
+  repositories:
+    frontend:
+      path: frontend
+      commit_policy: skip
+    backend:
+      path: backend
+---
+`, "utf-8");
+    run("git add .gsd/PREFERENCES.md", root);
+    run('git commit -m "chore: configure commit policies"', root);
+
+    writeFileSync(join(root, "frontend", "README.md"), "# frontend dirty\n", "utf-8");
+    writeFileSync(join(root, "backend", "README.md"), "# backend dirty\n", "utf-8");
+
+    const result = runTurnGitAction({
+      basePath: root,
+      action: "commit",
+      unitType: "execute-task",
+      unitId: "M001/S01/T03",
+      targetRepositories: ["frontend", "backend"],
+    });
+
+    assert.equal(result.status, "ok");
+    assert.deepEqual(result.skippedRepositories, ["frontend"]);
+    assert.equal(typeof result.commitMessages?.backend, "string");
+    assert.equal(result.commitMessages?.frontend, undefined);
+    assert.equal(run("git status --porcelain", join(root, "frontend")).length > 0, true);
+    assert.equal(run("git status --porcelain", join(root, "backend")), "");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("uok gitops turn action rethrows infrastructure failures", () => {
   const err = Object.assign(new Error("ENFILE: file table overflow"), { code: "ENFILE" });
 
@@ -96,4 +196,14 @@ test("uok gitops turn action keeps non-infrastructure git failures recoverable",
   assert.equal(result.action, "commit");
   assert.equal(result.status, "failed");
   assert.equal(result.error, "nothing to commit");
+});
+
+test("uok gitops turn action prefers stderr details for git failures", () => {
+  const err = Object.assign(new Error("Command failed: git commit -F -"), {
+    stderr: "fatal: unable to auto-detect email address",
+  });
+
+  const result = handleTurnGitActionError("commit", err);
+  assert.equal(result.status, "failed");
+  assert.equal(result.error, "fatal: unable to auto-detect email address");
 });

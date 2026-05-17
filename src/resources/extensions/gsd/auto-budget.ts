@@ -30,3 +30,14 @@ export function getBudgetEnforcementAction(
   if (enforcement === "pause") return "pause";
   return "warn";
 }
+
+export function getUnitCostSpikeAction(
+  unitCostUsd: number,
+  rollingAvgUsd: number,
+  multiplier = 3.0,
+): "none" | "pause" {
+  if (!Number.isFinite(unitCostUsd) || unitCostUsd < 0) return "none";
+  if (!Number.isFinite(rollingAvgUsd) || rollingAvgUsd <= 0) return "none";
+  if (!Number.isFinite(multiplier) || multiplier <= 0) return "none";
+  return unitCostUsd >= (rollingAvgUsd * multiplier) ? "pause" : "none";
+}

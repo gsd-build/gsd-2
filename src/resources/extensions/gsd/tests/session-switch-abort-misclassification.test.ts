@@ -7,11 +7,19 @@ import assert from "node:assert/strict";
 import {
   _hasEmptyAgentEndContent,
   _handleSessionSwitchAgentEnd,
+  handleAgentEnd,
   isBareClaudeCodeStreamAbortPlaceholder,
   isClaudeCodeSessionSwitchAbortMessage,
 } from "../bootstrap/agent-end-recovery.js";
+import { _setAutoActiveForTest } from "../auto.js";
 import { shouldIgnoreAgentEndForActiveUnit } from "../auto/unit-runner-events.js";
+import { _resetPendingResolve, _setCurrentResolve } from "../auto/resolve.js";
 import type { ErrorContext } from "../auto/types.js";
+
+test.afterEach(() => {
+  _setAutoActiveForTest(false);
+  _resetPendingResolve();
+});
 
 test("user-abort message during session-switch is dropped (not propagated as cancellation)", () => {
   // The Anthropic SDK emits this exact string when newSession() aborts an
@@ -113,23 +121,61 @@ test("late bare Claude Code stream-aborted placeholder is classified as internal
   );
 });
 
+test("mid-unit bare Claude Code stream-aborted placeholder resolves the unit", async () => {
+  // A placeholder without an active session-switch grace window belongs to the
+  // current unit. Resolving it prevents auto-mode from hanging while still
+  // allowing the next unit to run.
+  const results: unknown[] = [];
+  const warnings: string[] = [];
+  _setAutoActiveForTest(true);
+  _setCurrentResolve((result) => results.push(result));
+
+  const event = {
+    messages: [{
+      stopReason: "aborted",
+      content: [{ type: "text", text: "Claude Code stream aborted by caller" }],
+    }],
+  };
+
+  await handleAgentEnd({} as any, event, {
+    ui: {
+      notify: (message: string, level: string) => {
+        if (level === "warning") warnings.push(message);
+      },
+    },
+  } as any);
+
+  assert.deepEqual(results, [{ status: "completed", event }]);
+  assert.deepEqual(warnings, ["Claude Code stream aborted mid-unit (no diagnostic). Continuing."]);
+});
+
 test("typed session-transition abort events are classified as internal", () => {
   assert.equal(
     shouldIgnoreAgentEndForActiveUnit({
       abortOrigin: "session-transition",
+      messages: [{ stopReason: "aborted" }],
     }),
     true,
   );
 
   assert.equal(
     shouldIgnoreAgentEndForActiveUnit({
-      abortOrigin: "user",
+      abortOrigin: "session-transition",
+      messages: [{ stopReason: "end_turn" }],
     }),
     false,
   );
 
   assert.equal(
-    shouldIgnoreAgentEndForActiveUnit({}),
+    shouldIgnoreAgentEndForActiveUnit({
+      abortOrigin: "user",
+      messages: [{ stopReason: "aborted" }],
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldIgnoreAgentEndForActiveUnit({ messages: [] }),
     false,
   );
 });
@@ -195,6 +241,8 @@ test("missing agent_end content is classified as empty abort content", () => {
   assert.equal(_hasEmptyAgentEndContent(undefined), true);
   assert.equal(_hasEmptyAgentEndContent(null), true);
   assert.equal(_hasEmptyAgentEndContent([]), true);
+  assert.equal(_hasEmptyAgentEndContent([{ type: "text", text: "" }]), true);
+  assert.equal(_hasEmptyAgentEndContent([{ type: "text", text: "   " }]), true);
   assert.equal(_hasEmptyAgentEndContent([{ type: "text", text: "partial" }]), false);
 });
 

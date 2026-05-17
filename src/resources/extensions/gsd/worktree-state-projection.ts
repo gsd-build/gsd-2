@@ -123,6 +123,45 @@ function forceOverwriteAssessmentsWithVerdict(
   }
 }
 
+function syncTopLevelMilestoneArtifacts(
+  srcMilestonesDir: string,
+  dstMilestonesDir: string,
+): void {
+  if (!existsSync(srcMilestonesDir)) return;
+
+  try {
+    for (const milestoneEntry of readdirSync(srcMilestonesDir, { withFileTypes: true })) {
+      if (!milestoneEntry.isDirectory()) continue;
+      const srcMilestoneDir = join(srcMilestonesDir, milestoneEntry.name);
+      const dstMilestoneDir = join(dstMilestonesDir, milestoneEntry.name);
+
+      try {
+        mkdirSync(dstMilestoneDir, { recursive: true });
+        for (const fileEntry of readdirSync(srcMilestoneDir, { withFileTypes: true })) {
+          if (!fileEntry.isFile()) continue;
+          if (!fileEntry.name.endsWith(".md") && !fileEntry.name.endsWith(".json")) continue;
+
+          safeCopy(
+            join(srcMilestoneDir, fileEntry.name),
+            join(dstMilestoneDir, fileEntry.name),
+            { force: false },
+          );
+        }
+      } catch (err) {
+        logWarning(
+          "worktree",
+          `milestone top-level artifact sync failed (${milestoneEntry.name}): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  } catch (err) {
+    logWarning(
+      "worktree",
+      `milestone artifact scan failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
 /**
  * Root-level .gsd/ files copied from worktree back to project root for
  * post-merge diagnostics. Markdown projections are NOT in this list — DB
@@ -175,6 +214,10 @@ export function _projectRootToWorktreeImpl(
     join(wtGsd, "milestones", milestoneId),
     { force: false },
   );
+
+  // Additively project missing top-level milestone files for all milestones
+  // so worktree-bound units can verify future-milestone context artifacts.
+  syncTopLevelMilestoneArtifacts(join(prGsd, "milestones"), join(wtGsd, "milestones"));
 
   // Force-sync ASSESSMENT files that have a verdict from project root (#2821).
   // The additive-only copy above preserves worktree-local files, but

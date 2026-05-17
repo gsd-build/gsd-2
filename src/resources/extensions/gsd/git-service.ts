@@ -17,6 +17,7 @@ import { gsdRoot } from "./paths.js";
 import { GIT_NO_PROMPT_ENV } from "./git-constants.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { logWarning } from "./workflow-logger.js";
+import { createRepositoryRegistryFromPreferences } from "./repository-registry.js";
 
 
 import {
@@ -123,6 +124,10 @@ export interface TurnGitActionResult {
   commitMessage?: string;
   snapshotLabel?: string;
   dirty?: boolean;
+  dirtyRepositories?: Record<string, boolean>;
+  commitMessages?: Record<string, string>;
+  commitErrors?: Record<string, string>;
+  skippedRepositories?: string[];
   error?: string;
 }
 
@@ -452,6 +457,10 @@ export interface IntegrationBranchResolution {
   reason: string;
 }
 
+function normalizeLocalBranchRef(branch: string): string {
+  return branch.replace(/^refs\/heads\//, "");
+}
+
 /**
  * Resolve a milestone's recorded integration branch into an actionable status.
  *
@@ -475,7 +484,14 @@ export function resolveMilestoneIntegrationBranch(
     };
   }
 
-  if (nativeBranchExists(basePath, recordedBranch)) {
+  const normalizedRecordedBranch = normalizeLocalBranchRef(recordedBranch);
+  const isRecordedMilestoneBranch = normalizedRecordedBranch.startsWith("milestone/");
+  const recordedBranchUsable = !isRecordedMilestoneBranch;
+  const recordedBranchStateMessage = isRecordedMilestoneBranch
+    ? `Recorded integration branch "${recordedBranch}" for milestone ${milestoneId} is invalid (milestone branches cannot be merge targets)`
+    : `Recorded integration branch "${recordedBranch}" for milestone ${milestoneId} no longer exists`;
+
+  if (recordedBranchUsable && nativeBranchExists(basePath, recordedBranch)) {
     return {
       recordedBranch,
       effectiveBranch: recordedBranch,
@@ -494,7 +510,7 @@ export function resolveMilestoneIntegrationBranch(
         recordedBranch,
         effectiveBranch: configuredBranch,
         status: "fallback",
-        reason: `Recorded integration branch "${recordedBranch}" for milestone ${milestoneId} no longer exists; using configured git.main_branch "${configuredBranch}" instead.`,
+        reason: `${recordedBranchStateMessage}; using configured git.main_branch "${configuredBranch}" instead.`,
       };
     }
 
@@ -502,7 +518,7 @@ export function resolveMilestoneIntegrationBranch(
       recordedBranch,
       effectiveBranch: null,
       status: "missing",
-      reason: `Recorded integration branch "${recordedBranch}" for milestone ${milestoneId} no longer exists, and configured git.main_branch "${configuredBranch}" is unavailable.`,
+      reason: `${recordedBranchStateMessage}, and configured git.main_branch "${configuredBranch}" is unavailable.`,
     };
   }
 
@@ -513,7 +529,7 @@ export function resolveMilestoneIntegrationBranch(
         recordedBranch,
         effectiveBranch: detectedBranch,
         status: "fallback",
-        reason: `Recorded integration branch "${recordedBranch}" for milestone ${milestoneId} no longer exists; using detected fallback branch "${detectedBranch}" instead.`,
+        reason: `${recordedBranchStateMessage}; using detected fallback branch "${detectedBranch}" instead.`,
       };
     }
   } catch {
@@ -524,7 +540,7 @@ export function resolveMilestoneIntegrationBranch(
     recordedBranch,
     effectiveBranch: null,
     status: "missing",
-    reason: `Recorded integration branch "${recordedBranch}" for milestone ${milestoneId} no longer exists, and no safe fallback branch could be determined.`,
+    reason: `${recordedBranchStateMessage}, and no safe fallback branch could be determined.`,
   };
 }
 
@@ -906,7 +922,19 @@ export class GitServiceImpl {
     const message = taskContext
       ? buildTaskCommitMessage(taskContext)
       : `chore: auto-commit after ${unitType}\n\nGSD-Unit: ${unitId}`;
-    nativeCommit(this.basePath, message, { allowEmpty: false });
+    try {
+      nativeCommit(this.basePath, message, { allowEmpty: false });
+    } catch (err) {
+      // Some pre-commit hooks intentionally rewrite files and fail the first
+      // commit to force a re-stage + retry.
+      if (!nativeHasChanges(this.basePath)) throw err;
+      const retriedScoped = taskContext
+        ? this.scopedStageTaskFiles(taskContext, extraExclusions)
+        : false;
+      if (!retriedScoped) this.smartStage(extraExclusions);
+      if (!nativeHasStagedChanges(this.basePath)) throw err;
+      nativeCommit(this.basePath, message, { allowEmpty: false });
+    }
 
     // Absorb any preceding gsd snapshot commits into this real commit.
     // Walk backwards from HEAD~1 counting consecutive snapshot subjects,
@@ -1200,11 +1228,76 @@ export function handleTurnGitActionError(action: TurnGitActionMode, err: unknown
   if (isInfrastructureError(err)) {
     throw err;
   }
+  const errorWithStreams = err as { stderr?: string; message?: string };
   return {
     action,
     status: "failed",
-    error: getErrorMessage(err),
+    error: errorWithStreams.stderr?.trim() || errorWithStreams.message || getErrorMessage(err),
   };
+}
+
+function collectRepositoryDirtyStatus(basePath: string): Record<string, boolean> {
+  const preferences = loadEffectiveGSDPreferences(basePath)?.preferences;
+  const registry = createRepositoryRegistryFromPreferences(basePath, preferences);
+  const dirtyByRepository: Record<string, boolean> = {};
+  for (const repo of registry.repositories) {
+    try {
+      dirtyByRepository[repo.id] = runGit(repo.root, ["status", "--porcelain"]).length > 0;
+    } catch {
+      // Fallback preserves legacy behavior if explicit status probing fails.
+      dirtyByRepository[repo.id] = nativeHasChanges(repo.root);
+    }
+  }
+  return dirtyByRepository;
+}
+
+function runPerRepositoryCommitAction(args: {
+  basePath: string;
+  unitType: string;
+  unitId: string;
+  taskContext?: TaskCommitContext;
+  targetRepositories?: string[];
+}): {
+  commitMessages: Record<string, string>;
+  commitErrors: Record<string, string>;
+  skippedRepositories: string[];
+} {
+  const preferences = loadEffectiveGSDPreferences(args.basePath)?.preferences;
+  const registry = createRepositoryRegistryFromPreferences(args.basePath, preferences);
+  const repoIds = args.targetRepositories ?? ["project"];
+  const gitPrefs = preferences?.git ?? {};
+  const commitMessages: Record<string, string> = {};
+  const commitErrors: Record<string, string> = {};
+  const skippedRepositories: string[] = [];
+
+  for (const repoId of repoIds) {
+    const repo = registry.byId.get(repoId);
+    if (!repo) {
+      commitErrors[repoId] = `unknown repository target: ${repoId}`;
+      continue;
+    }
+    if (repo.commitPolicy === "skip") {
+      skippedRepositories.push(repo.id);
+      continue;
+    }
+
+    try {
+      const message =
+        new GitServiceImpl(repo.root, gitPrefs).autoCommit(
+          args.unitType,
+          args.unitId,
+          [],
+          args.taskContext,
+        ) ?? "";
+      if (message) {
+        commitMessages[repo.id] = message;
+      }
+    } catch (err) {
+      commitErrors[repo.id] = getErrorMessage(err);
+    }
+  }
+
+  return { commitMessages, commitErrors, skippedRepositories };
 }
 
 export function runTurnGitAction(args: {
@@ -1213,15 +1306,19 @@ export function runTurnGitAction(args: {
   unitType: string;
   unitId: string;
   taskContext?: TaskCommitContext;
+  targetRepositories?: string[];
 }): TurnGitActionResult {
   try {
     // Force fresh working-tree status per turn; nativeHasChanges caches briefly.
     _resetHasChangesCache();
+    const dirtyRepositories = collectRepositoryDirtyStatus(args.basePath);
+    const dirty = Object.values(dirtyRepositories).some(Boolean);
     if (args.action === "status-only") {
       return {
         action: args.action,
         status: "ok",
-        dirty: nativeHasChanges(args.basePath),
+        dirty,
+        dirtyRepositories,
       };
     }
 
@@ -1233,16 +1330,38 @@ export function runTurnGitAction(args: {
         action: args.action,
         status: "ok",
         snapshotLabel: label,
-        dirty: nativeHasChanges(args.basePath),
+        dirty,
+        dirtyRepositories,
       };
     }
 
-    const commitMessage = git.autoCommit(args.unitType, args.unitId, [], args.taskContext) ?? undefined;
+    const repoCommitResult = runPerRepositoryCommitAction(args);
+    if (Object.keys(repoCommitResult.commitErrors).length > 0) {
+      return {
+        action: args.action,
+        status: "failed",
+        error: Object.entries(repoCommitResult.commitErrors)
+          .map(([repoId, msg]) => `${repoId}: ${msg}`)
+          .join("; "),
+        dirty,
+        dirtyRepositories,
+        commitMessages: repoCommitResult.commitMessages,
+        commitErrors: repoCommitResult.commitErrors,
+        skippedRepositories: repoCommitResult.skippedRepositories,
+      };
+    }
+
+    const primaryMessage =
+      repoCommitResult.commitMessages[args.targetRepositories?.[0] ?? "project"]
+      ?? Object.values(repoCommitResult.commitMessages)[0];
     return {
       action: args.action,
       status: "ok",
-      commitMessage,
-      dirty: nativeHasChanges(args.basePath),
+      commitMessage: primaryMessage,
+      dirty,
+      dirtyRepositories,
+      commitMessages: repoCommitResult.commitMessages,
+      skippedRepositories: repoCommitResult.skippedRepositories,
     };
   } catch (err) {
     return handleTurnGitActionError(args.action, err);

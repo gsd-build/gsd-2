@@ -21,6 +21,8 @@ Plan → Execute (per task) → Complete → Reassess Roadmap → Next Slice
 
 When progressive planning is enabled, GSD fully plans the first slice and may leave later slices as sketches. Those slices render in `M###-ROADMAP.md` with a `` `[sketch]` `` badge, meaning the slice has an approved scope boundary but has not yet been expanded into task plans. Auto mode runs `refine-slice` just before execution to convert the sketch into a full slice plan using the current codebase and prior slice summaries.
 
+`complete-milestone` enforces a hard validation prerequisite: the latest `milestone-validation` assessment for the milestone must exist with verdict `pass`. If the latest verdict is `fail`, `partial`, or missing, milestone closeout is blocked until `validate-milestone` records a fresh passing verdict.
+
 ## Deep planning mode
 
 Enable project-level deep planning with `/gsd new-project --deep`, `/gsd new-milestone --deep`, or this project preference:
@@ -109,6 +111,10 @@ Auto mode persists worker state, unit-dispatch state, and paused-session metadat
 ### Stuck detection
 
 A sliding-window analysis detects stuck loops — catching cycles like A→B→A→B as well as single-unit repeats. On detection, GSD retries once with a diagnostic prompt. If it fails again, auto mode stops with the exact file it expected.
+
+### Consecutive dispatch blocker
+
+Auto mode also enforces a same-unit consecutive dispatch cap for `complete-milestone`, `validate-milestone`, and `research-slice`. The loop allows two consecutive dispatches of the same unit in the same phase and stops before a third attempt with a repeat-cap warning that instructs you to run `/gsd resume` after intervention.
 
 ### Timeout supervision
 

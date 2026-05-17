@@ -22,7 +22,7 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { discoverCommands, runVerificationGate, formatFailureContext, captureRuntimeErrors, runDependencyAudit, isLikelyCommand, validateVerificationCommand } from "../verification-gate.ts";
+import { discoverCommands, runVerificationGate, runVerificationGateForTargets, formatFailureContext, captureRuntimeErrors, runDependencyAudit, isLikelyCommand, validateVerificationCommand } from "../verification-gate.ts";
 import type { CaptureRuntimeErrorsOptions, DependencyAuditOptions } from "../verification-gate.ts";
 import { validatePreferences } from "../preferences.ts";
 
@@ -183,6 +183,21 @@ describe("verification-gate: discovery", () => {
       cwd: tmp,
     });
     // Prose should be rejected, so it falls through to package.json
+    assert.equal(result.source, "package-json");
+    assert.deepStrictEqual(result.commands, ["npm run test"]);
+  });
+
+  test("non-ASCII prose taskPlanVerify is rejected, falls through to package.json", () => {
+    writeFileSync(
+      join(tmp, "package.json"),
+      JSON.stringify({ scripts: { test: "vitest" } }),
+    );
+    const result = discoverCommands({
+      // Chinese prose: "All commands output one line of JSONL; go test ./... passes"
+      taskPlanVerify: "所有 命令 输出 一行 JSONL go test ./... 通过",
+      cwd: tmp,
+    });
+    // Non-ASCII prose should be rejected, so it falls through to package.json
     assert.equal(result.source, "package-json");
     assert.deepStrictEqual(result.commands, ["npm run test"]);
   });
@@ -460,6 +475,49 @@ describe("verification-gate: execution", () => {
     assert.equal(result.checks.length, 1);
     // The stdout should contain the tmp dir path (resolving symlinks)
     assert.ok(result.checks[0].stdout.trim().length > 0, "pwd should produce output");
+  });
+
+  test("multi-target execution runs verification in each repository root", () => {
+    const frontend = join(tmp, "frontend");
+    const backend = join(tmp, "backend");
+    mkdirSync(frontend, { recursive: true });
+    mkdirSync(backend, { recursive: true });
+
+    const result = runVerificationGateForTargets({
+      targets: [
+        { id: "frontend", cwd: frontend },
+        { id: "backend", cwd: backend },
+      ],
+      preferenceCommands: ["pwd"],
+    });
+
+    assert.equal(result.checks.length, 2);
+    assert.equal(result.checks[0].command, "[frontend] pwd");
+    assert.equal(result.checks[1].command, "[backend] pwd");
+    assert.ok(result.checks[0].stdout.includes("frontend"));
+    assert.ok(result.checks[1].stdout.includes("backend"));
+    assert.equal(result.discoverySource, "preference");
+  });
+
+  test("multi-target execution falls back to per-repo package.json discovery", () => {
+    const frontend = join(tmp, "frontend");
+    const backend = join(tmp, "backend");
+    mkdirSync(frontend, { recursive: true });
+    mkdirSync(backend, { recursive: true });
+    writeFileSync(join(frontend, "package.json"), JSON.stringify({ scripts: { test: "echo front-ok" } }), "utf-8");
+    writeFileSync(join(backend, "package.json"), JSON.stringify({ scripts: { test: "echo back-ok" } }), "utf-8");
+
+    const result = runVerificationGateForTargets({
+      targets: [
+        { id: "frontend", cwd: frontend },
+        { id: "backend", cwd: backend },
+      ],
+    });
+
+    assert.equal(result.checks.length, 2);
+    assert.equal(result.checks[0].command, "[frontend] npm run test");
+    assert.equal(result.checks[1].command, "[backend] npm run test");
+    assert.equal(result.discoverySource, "package-json");
   });
 });
 

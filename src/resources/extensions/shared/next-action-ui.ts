@@ -118,11 +118,9 @@ export async function showNextAction(
 		}
 	});
 
-	// Headless guard: when no UI is bound (noOpUIContext), ctx.ui.custom() resolves
-	// to undefined immediately, and ctx.ui.select() does the same. Skip both and
-	// return the safe default so callers don't await two no-op promises before
-	// reaching a deterministic "not_yet". Lockup #5125 root protection.
-	if (!ctx.hasUI) {
+	// Headless/non-interactive guard: avoid emitting interactive select requests
+	// in contexts where no human can answer (no UI, RPC/headless shims).
+	if (!isInteractiveUIContext(ctx)) {
 		return "not_yet";
 	}
 
@@ -217,4 +215,12 @@ export async function showNextAction(
 	}
 
 	return result;
+}
+
+function isInteractiveUIContext(ctx: ExtensionCommandContext): boolean {
+	if (!ctx.hasUI) return false;
+	if (process.env.GSD_HEADLESS === "1") return false;
+	const uiMode = (ctx.ui as { mode?: string } | undefined)?.mode;
+	if (uiMode === "rpc" || uiMode === "headless") return false;
+	return true;
 }

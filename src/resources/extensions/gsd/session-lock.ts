@@ -19,8 +19,9 @@
 import { createRequire } from "node:module";
 import { existsSync, readFileSync, readdirSync, mkdirSync, unlinkSync, rmSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { gsdRoot } from "./paths.js";
+import { gsdRoot, normalizeRealPath } from "./paths.js";
 import { atomicWriteSync } from "./atomic-write.js";
+import { markWorkerStoppingByPid } from "./db/auto-workers.js";
 
 const _require = createRequire(import.meta.url);
 
@@ -281,6 +282,13 @@ export function acquireSessionLock(basePath: string): SessionLockResult {
   // Clean up numbered lock file variants from cloud sync conflicts (#1315)
   cleanupStrayLockFiles(basePath);
 
+  // If lock metadata points to a dead PID, mark that worker row stopping so
+  // crash diagnostics do not keep surfacing it as active.
+  const existingPreflight = readExistingLockData(lp);
+  if (existingPreflight?.pid && !isPidAlive(existingPreflight.pid)) {
+    markWorkerStoppingByPid(normalizeRealPath(basePath), existingPreflight.pid);
+  }
+
   // Write our lock data first (the content is informational; the OS lock is the real guard)
   const lockData: SessionLockData = {
     pid: process.pid,
@@ -308,7 +316,9 @@ export function acquireSessionLock(basePath: string): SessionLockResult {
   const lockDir = lockTarget + ".lock";
   if (existsSync(lockDir)) {
     const existingData = readExistingLockData(lp);
-    const isOrphan = !existingData || (existingData.pid && !isPidAlive(existingData.pid));
+    const deadPid = existingData?.pid && !isPidAlive(existingData.pid) ? existingData.pid : null;
+    if (deadPid) markWorkerStoppingByPid(normalizeRealPath(basePath), deadPid);
+    const isOrphan = !existingData || !!deadPid;
     if (isOrphan) {
       try { rmSync(lockDir, { recursive: true, force: true }); } catch { /* best-effort */ }
       try { if (existsSync(lp)) unlinkSync(lp); } catch { /* best-effort */ }
@@ -344,6 +354,9 @@ export function acquireSessionLock(basePath: string): SessionLockResult {
     // Check: if auto.lock is gone and no process is alive, the lock dir is stale.
     const existingData = readExistingLockData(lp);
     const existingPid = existingData?.pid;
+    if (existingPid && !isPidAlive(existingPid)) {
+      markWorkerStoppingByPid(normalizeRealPath(basePath), existingPid);
+    }
 
     // If no lock file or no alive process, try to clean up and re-acquire (#1245)
     if (!existingData || (existingPid && !isPidAlive(existingPid))) {

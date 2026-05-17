@@ -124,6 +124,7 @@ export const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "verification_commands",
   "verification_auto_fix",
   "verification_max_retries",
+  "per_unit_cost_cap_usd",
   "search_provider",
   "context_selection",
   "widget_mode",
@@ -152,6 +153,8 @@ export const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "context_window_override",
   "context_mode",
   "planning_depth",
+  "claude_code_mcp",
+  "workspace",
 ]);
 
 /**
@@ -320,6 +323,33 @@ export interface CodebaseMapPreferences {
   collapse_threshold?: number;
 }
 
+/** Per-model MCP server allow/block lists for a single model prefix. */
+export interface ClaudeCodeMcpPerModelEntry {
+  allowed_servers?: string[];
+  blocked_servers?: string[];
+}
+
+/** Top-level claude_code_mcp preference: maps model-ID prefixes to server filter lists. */
+export interface ClaudeCodeMcpConfig {
+  per_model?: Record<string, ClaudeCodeMcpPerModelEntry>;
+}
+
+export interface WorkspaceRepositoryPreference {
+  /** Child repository path; relative paths resolve from the project root. */
+  path: string;
+  /** Optional human-oriented role label (for prompts/reporting). */
+  role?: string;
+  /** Optional default verification commands for this repository. */
+  verification?: string[];
+  /** Optional per-repository commit execution policy for auto-mode turn commits. */
+  commit_policy?: "auto" | "skip";
+}
+
+export interface WorkspacePreferences {
+  /** Parent-workspace uses one parent .gsd coordinating child repos. */
+  mode?: "project" | "parent";
+  repositories?: Record<string, WorkspaceRepositoryPreference>;
+}
 export interface GSDPreferences {
   version?: number;
   mode?: WorkflowMode;
@@ -381,6 +411,7 @@ export interface GSDPreferences {
   verification_commands?: string[];
   verification_auto_fix?: boolean;
   verification_max_retries?: number;
+  per_unit_cost_cap_usd?: number;
   /** Search provider preference. "brave"/"tavily"/"ollama" force that backend and disable native Anthropic search. "native" forces native only. "auto" = current default behavior. */
   search_provider?: "brave" | "tavily" | "ollama" | "native" | "auto";
   /** Context selection mode for file inlining. "full" inlines entire files, "smart" uses semantic chunking. Default derived from token profile. */
@@ -415,6 +446,8 @@ export interface GSDPreferences {
   experimental?: ExperimentalPreferences;
   /** Configuration for the codebase map generator (/gsd codebase). */
   codebase?: CodebaseMapPreferences;
+  /** Multi-repository parent workspace configuration. */
+  workspace?: WorkspacePreferences;
   /** Slice-level parallelism within a milestone. Disabled by default. */
   slice_parallel?: { enabled?: boolean; max_workers?: number };
   /** LLM safety harness configuration. Monitors, validates, and constrains LLM behavior during auto-mode. Enabled by default with warn-and-continue policy. */
@@ -499,6 +532,8 @@ export interface GSDPreferences {
    * (e.g. "Chinese", "zh", "German", "de", "日本語"). Persists across /clear.
    */
   language?: string;
+  /** Per-model MCP server filtering configuration. Uses longest-prefix-wins matching. */
+  claude_code_mcp?: ClaudeCodeMcpConfig;
 }
 
 export interface LoadedGSDPreferences {

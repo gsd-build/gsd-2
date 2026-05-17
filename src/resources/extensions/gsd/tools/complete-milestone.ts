@@ -15,6 +15,7 @@ import {
   getMilestone,
   getMilestoneSlices,
   getSliceTasks,
+  getLatestAssessmentByScope,
   updateMilestoneStatus,
 } from "../gsd-db.js";
 import { resolveMilestonePath, clearPathCache } from "../paths.js";
@@ -153,6 +154,15 @@ export async function handleCompleteMilestone(
     }
     if (isClosedStatus(milestone.status)) {
       alreadyComplete = true;
+      return;
+    }
+
+    // Defense-in-depth: only a passing milestone validation permits closeout.
+    const validation = getLatestAssessmentByScope(params.milestoneId, "milestone-validation");
+    if (validation?.status !== "pass") {
+      guardError =
+        `Refusing to complete ${params.milestoneId}: latest milestone-validation verdict is ` +
+        `"${validation?.status ?? "absent"}". Only verdict=pass permits closeout.`;
       return;
     }
 

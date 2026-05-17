@@ -83,4 +83,16 @@ describe("evidence-collector: toolCallId-based matching (A-3)", () => {
     assert.equal(entries[1].kind, "edit");
     assert.equal(entries[1].toolCallId, "tc-edit");
   });
+
+  it("treats PowerShell and async_bash as execution evidence", () => {
+    recordToolCall("tc-ps", "PowerShell", { command: "Get-ChildItem" });
+    recordToolCall("tc-async", "async_bash", { command: "npm run build" });
+
+    const entries = getEvidence() as readonly BashEvidence[];
+    assert.equal(entries.length, 2);
+    assert.equal(entries[0].kind, "bash");
+    assert.equal(entries[0].command, "Get-ChildItem");
+    assert.equal(entries[1].kind, "bash");
+    assert.equal(entries[1].command, "npm run build");
+  });
 });

@@ -11,7 +11,7 @@ Turn scattered GSD runtime artifacts into one coherent cause chain. The delivera
 GSD persists a lot of runtime evidence under `.gsd/`:
 
 - `activity/{seq}-{unitType}-{unitId}.jsonl` — full tool-call and message stream per unit
-- `journal/YYYY-MM-DD.jsonl` — iteration-level events (dispatch-match, stuck-detected, guard-block, unit-start/end, terminal)
+- `journal/YYYY-MM-DD.jsonl` — iteration-level events. Orchestrator path emits `orchestrator-*` events (`orchestrator-dispatch-match`, `orchestrator-guard-block`, `orchestrator-terminal`, etc.); legacy loop events (`dispatch-match`, `stuck-detected`, `guard-block`, `unit-start/end`, `terminal`) can still appear on non-orchestrator paths.
 - `metrics.json` — token/cost ledger; duplicate `type/id` entries indicate a stuck loop
 - `auto.lock` — JSON snapshot of the currently-owning PID; stale lock = crash mid-unit
 - `forensics/` — saved prior reports

@@ -20,6 +20,22 @@ import { handlePrBranch } from "../../commands-pr-branch.js";
 import { currentDirectoryRoot, projectRoot } from "../context.js";
 
 export async function handleOpsCommand(trimmed: string, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<boolean> {
+  const directDispatchAlias = new Map<string, string>([
+    ["research-milestone", "research"],
+    ["research-slice", "research"],
+    ["plan-milestone", "plan"],
+    ["plan-slice", "plan"],
+    ["execute-task", "execute"],
+    ["complete-slice", "complete"],
+    ["validate-milestone", "uat"],
+    ["complete-milestone", "complete"],
+  ]);
+  const aliasPhase = directDispatchAlias.get(trimmed);
+  if (aliasPhase) {
+    await dispatchDirectPhase(ctx, pi, aliasPhase, projectRoot());
+    return true;
+  }
+
   if (trimmed === "init") {
     const { detectProjectState } = await import("../../detection.js");
     const { handleReinit, showProjectInit } = await import("../../init-wizard.js");

@@ -168,6 +168,7 @@ export function createBaseSchemaObjects(db: DbAdapter, hooks: BaseSchemaHooks): 
       proof_level TEXT NOT NULL DEFAULT '',
       integration_closure TEXT NOT NULL DEFAULT '',
       observability_impact TEXT NOT NULL DEFAULT '',
+      target_repositories TEXT NOT NULL DEFAULT '[]',
       sequence INTEGER DEFAULT 0,
       replan_triggered_at TEXT DEFAULT NULL,
       is_sketch INTEGER NOT NULL DEFAULT 0,
@@ -208,6 +209,7 @@ export function createBaseSchemaObjects(db: DbAdapter, hooks: BaseSchemaHooks): 
       expected_output TEXT NOT NULL DEFAULT '[]',
       observability_impact TEXT NOT NULL DEFAULT '',
       full_plan_md TEXT NOT NULL DEFAULT '',
+      target_repositories TEXT NOT NULL DEFAULT '[]',
       sequence INTEGER DEFAULT 0,
       PRIMARY KEY (milestone_id, slice_id, id),
       FOREIGN KEY (milestone_id, slice_id) REFERENCES slices(milestone_id, id)

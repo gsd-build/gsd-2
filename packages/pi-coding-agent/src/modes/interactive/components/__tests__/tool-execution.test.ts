@@ -39,6 +39,7 @@ function renderToolCollapsed(
 		details?: Record<string, unknown>;
 	},
 	toolDefinition?: { label?: string; renderCall?: (...args: any[]) => any; renderResult?: (...args: any[]) => any },
+	width = 120,
 ): string {
 	const component = new ToolExecutionComponent(
 		toolName,
@@ -48,7 +49,7 @@ function renderToolCollapsed(
 		{ requestRender() {} } as any,
 	);
 	if (result) component.updateResult(result);
-	return stripAnsi(component.render(120).join("\n"));
+	return stripAnsi(component.render(width).join("\n"));
 }
 
 describe("ToolExecutionComponent", () => {
@@ -292,6 +293,21 @@ describe("ToolExecutionComponent", () => {
 		assert.match(rendered, /\$ npm run typecheck -- --watch false/);
 		assert.doesNotMatch(rendered, /├/, "collapsed command cards should not include internal divider lines");
 		assert.doesNotMatch(rendered, /\bok\b/);
+	});
+
+	test("uses available row width for compact bash command text", () => {
+		const rendered = renderToolCollapsed(
+			"bash",
+			{
+				command:
+					'grep -n "expanded\\|toolOutputExpanded\\|setExpanded\\|defaultExpanded" /tmp/project/src/tool-execution.ts',
+			},
+			{ content: [{ type: "text", text: "ok" }], isError: false, details: { cwd: "/tmp/project" } },
+			undefined,
+			200,
+		);
+
+		assert.match(rendered, /defaultExpanded/);
 	});
 
 	test("keeps failed tools expanded and error visible", () => {

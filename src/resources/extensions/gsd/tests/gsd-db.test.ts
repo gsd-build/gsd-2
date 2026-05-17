@@ -30,6 +30,7 @@ import {
   insertTask,
   getTask,
   getSliceTasks,
+  getActiveMilestoneFromDb,
   deleteMilestone,
   clearEngineHierarchy,
   recordMilestoneCommitAttribution,
@@ -215,6 +216,22 @@ describe('gsd-db', () => {
     // Non-existent
     const missing = getRequirementById('R999');
     assert.deepStrictEqual(missing, null, 'non-existent requirement returns null');
+
+    closeDatabase();
+  });
+
+  test("gsd-db: getActiveMilestoneFromDb excludes closed statuses", () => {
+    openDatabase(":memory:");
+
+    insertMilestone({ id: "M001", title: "Done", status: "complete" });
+    insertMilestone({ id: "M002", title: "Legacy done", status: "done" });
+    insertMilestone({ id: "M003", title: "Skipped", status: "skipped" });
+    insertMilestone({ id: "M004", title: "Closed", status: "closed" });
+    insertMilestone({ id: "M005", title: "Parked", status: "parked" });
+    insertMilestone({ id: "M006", title: "Active", status: "active" });
+
+    const active = getActiveMilestoneFromDb();
+    assert.equal(active?.id, "M006", "closed/complete/done/skipped/parked should be excluded from active milestone selection");
 
     closeDatabase();
   });

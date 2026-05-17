@@ -71,9 +71,6 @@ export function setupEditorSubmitHandler(host: InteractiveModeStateHost & {
 			}
 		}
 
-		// Consume pending images for prompt submissions
-		const images = consumePendingImages(host);
-
 		// Evaluate contextual tips before sending to agent
 		const tip = host.contextualTips.evaluate({
 			input: text,
@@ -84,6 +81,15 @@ export function setupEditorSubmitHandler(host: InteractiveModeStateHost & {
 		if (tip) {
 			host.showTip(tip);
 		}
+
+		if (host.onInputCallback) {
+			host.onInputCallback(text);
+			host.editor.addToHistory?.(text);
+			return;
+		}
+
+		// Consume pending images for prompt submissions
+		const images = consumePendingImages(host);
 
 		if (host.session.isCompacting) {
 			if (host.isExtensionCommand(text)) {
@@ -111,12 +117,6 @@ export function setupEditorSubmitHandler(host: InteractiveModeStateHost & {
 		}
 
 		host.flushPendingBashComponents();
-
-		if (host.onInputCallback) {
-			host.onInputCallback(text);
-			host.editor.addToHistory?.(text);
-			return;
-		}
 
 		if (host.options?.submitPromptsDirectly) {
 			host.editor.addToHistory?.(text);

@@ -54,6 +54,8 @@ const WORKFLOW_MCP_ENV_KEYS = [
 	"GSD_WORKFLOW_MCP_ARGS",
 	"GSD_WORKFLOW_MCP_ENV",
 	"GSD_WORKFLOW_MCP_CWD",
+	"GSD_PROJECT_ROOT",
+	"GSD_WORKFLOW_PROJECT_ROOT",
 ] as const;
 
 type WorkflowMcpEnvKey = (typeof WORKFLOW_MCP_ENV_KEYS)[number];
@@ -64,6 +66,9 @@ function setWorkflowMcpEnv(
 	const prev: Partial<Record<WorkflowMcpEnvKey, string | undefined>> = {};
 	for (const key of WORKFLOW_MCP_ENV_KEYS) {
 		prev[key] = process.env[key];
+		// Clear all managed keys so tests run in a clean env state.
+		// Keys present in `values` are set to the desired test value below.
+		delete process.env[key];
 	}
 	for (const [key, value] of Object.entries(values)) {
 		process.env[key] = value;
@@ -978,6 +983,39 @@ describe("stream-adapter — session persistence (#2859)", () => {
 		}
 	});
 
+	test("buildSdkOptions does not inject workflow MCP when already declared in project .mcp.json (avoids duplicate registration)", () => {
+		const restore = setWorkflowMcpEnv({
+			GSD_WORKFLOW_MCP_COMMAND: "node",
+			GSD_WORKFLOW_MCP_NAME: "gsd-workflow",
+			GSD_WORKFLOW_MCP_ARGS: JSON.stringify(["packages/mcp-server/dist/cli.js"]),
+			GSD_WORKFLOW_MCP_ENV: JSON.stringify({ GSD_CLI_PATH: "/tmp/gsd" }),
+			GSD_WORKFLOW_MCP_CWD: "/tmp/project",
+		});
+		const originalCwd = process.cwd();
+		const projectDir = mkdtempSync(join(tmpdir(), "claude-mcp-dup-"));
+		try {
+			// Simulate a project that already has gsd-workflow in its .mcp.json
+			writeFileSync(
+				join(projectDir, ".mcp.json"),
+				JSON.stringify({ mcpServers: { "gsd-workflow": { command: "node", args: ["old-cli.js"] }, "other-mcp": { command: "npx", args: ["other"] } } }),
+			);
+			process.chdir(projectDir);
+			const options = buildSdkOptions("claude-sonnet-4-20250514", "test");
+			// Should NOT inject gsd-workflow via mcpServers (project already has it)
+			assert.equal(options.mcpServers, undefined, "mcpServers should be omitted when workflow already in .mcp.json");
+			// But allowedTools should still include the workflow pattern
+			const allowedTools = options.allowedTools as string[];
+			assert.ok(allowedTools.includes("mcp__gsd-workflow__*"), "allowedTools must include workflow pattern even when not injected");
+			// AskUserQuestion should be disallowed (workflow is available via project config)
+			const disallowedTools = options.disallowedTools as string[];
+			assert.ok(disallowedTools.includes("AskUserQuestion"), "AskUserQuestion should be suppressed when workflow is available");
+		} finally {
+			process.chdir(originalCwd);
+			rmSync(projectDir, { recursive: true, force: true });
+			restore();
+		}
+	});
+
 	test("buildSdkOptions preserves runtime callbacks such as onElicitation", () => {
 		const restore = setWorkflowMcpEnv({});
 		const onElicitation = async () => ({ action: "decline" as const });
@@ -1468,8 +1506,8 @@ describe("stream-adapter — Windows Claude path lookup (#3770)", () => {
 	test("normalizeClaudePathForSdk swaps Windows shim paths to bundled cli.js", () => {
 		const shimPath = "C:\\Users\\djeff\\AppData\\Roaming\\npm\\claude";
 		const bundled = "C:\\repo\\node_modules\\@anthropic-ai\\claude-agent-sdk\\cli.js";
-		assert.equal(normalizeClaudePathForSdk(shimPath, "win32", bundled), bundled);
-		assert.equal(normalizeClaudePathForSdk("C:\\Program Files\\Claude\\claude.exe", "win32", bundled), "C:\\Program Files\\Claude\\claude.exe");
+		assert.equal(normalizeClaudePathForSdk(shimPath, "win32", bundled), "C:/repo/node_modules/@anthropic-ai/claude-agent-sdk/cli.js");
+		assert.equal(normalizeClaudePathForSdk("C:\\Program Files\\Claude\\claude.exe", "win32", bundled), "C:/Program Files/Claude/claude.exe");
 	});
 
 	test("resolveBundledClaudeCliPath returns a .js path when SDK package is present", () => {

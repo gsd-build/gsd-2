@@ -251,3 +251,25 @@ test("handlePrefsWizard — accepts pathOverride to target a non-cwd location", 
     "handlePrefsWizard must honor opts.pathOverride before falling back to scope-derived path",
   );
 });
+
+test("handleReinit — exposes skills flow and runs prefs wizard directly (#5173)", () => {
+  const src = readFileSync(
+    new URL("../init-wizard.ts", import.meta.url),
+    "utf-8",
+  );
+  assert.match(
+    src,
+    /id:\s*"skills"[\s\S]*?label:\s*"Suggest & install skills"/,
+    "handleReinit should offer Suggest & install skills",
+  );
+  assert.match(
+    src,
+    /if \(choice === "skills"\)\s*\{[\s\S]*?await runSkillInstallStep\(ctx,\s*.*\)/,
+    "handleReinit skills branch should invoke runSkillInstallStep",
+  );
+  assert.match(
+    src,
+    /if \(choice === "prefs"\)\s*\{[\s\S]*?await handlePrefsWizard\(ctx,\s*"project"\)/,
+    "handleReinit prefs branch should launch prefs wizard directly",
+  );
+});

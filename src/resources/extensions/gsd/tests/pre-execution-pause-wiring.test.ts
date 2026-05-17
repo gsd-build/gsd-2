@@ -556,6 +556,60 @@ describe("Pre-execution checks → pauseAuto wiring", () => {
     );
   });
 
+  test("files absent from s.basePath but present in canonicalProjectRoot do not block", async () => {
+    writePreferences({
+      enhanced_verification: true,
+      enhanced_verification_pre: true,
+      enhanced_verification_strict: false,
+    });
+
+    const worktreeDir = join(tempDir, "worktree-missing-src");
+    mkdirSync(join(worktreeDir, ".gsd", "milestones", "M001", "slices", "S01", "tasks"), { recursive: true });
+
+    mkdirSync(join(tempDir, "src", "engine"), { recursive: true });
+    writeFileSync(join(tempDir, "src", "engine", "bus.ts"), "export const bus = {};");
+
+    insertMilestone({ id: "M001" });
+    insertSlice({ id: "S01", milestoneId: "M001", title: "Test Slice", risk: "low" });
+    insertTask({
+      id: "T01",
+      sliceId: "S01",
+      milestoneId: "M001",
+      title: "Task that reads canonical-root source files",
+      status: "pending",
+      planning: {
+        description: "Reads src/engine/bus.ts from canonical root",
+        estimate: "1h",
+        files: [],
+        verify: "npm test",
+        inputs: ["`src/engine/bus.ts` — lifecycle helper subscription API"],
+        expectedOutput: ["src/engine/helper.ts"],
+        observabilityImpact: "",
+      },
+      sequence: 0,
+    });
+
+    const ctx = makeMockCtx();
+    const pi = makeMockPi();
+    const pauseAutoMock = mock.fn(async () => {});
+    const s = makeMockSession(worktreeDir, { type: "plan-slice", id: "M001/S01" });
+    Object.defineProperty(s, "canonicalProjectRoot", { get: () => tempDir });
+
+    const pctx = makePostUnitContext(s, ctx, pi, pauseAutoMock);
+    const result = await postUnitPostVerification(pctx);
+
+    assert.equal(
+      pauseAutoMock.mock.callCount(),
+      0,
+      "pauseAuto should NOT be called when referenced files exist in canonicalProjectRoot",
+    );
+    assert.equal(
+      result,
+      "continue",
+      "postUnitPostVerification should return 'continue' when canonical root files satisfy pre-exec inputs",
+    );
+  });
+
   test("uok gate runner persists pre-execution gate outcomes when enabled", async () => {
     writePreferences({
       enhanced_verification: true,

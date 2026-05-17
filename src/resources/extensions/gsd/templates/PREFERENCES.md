@@ -69,6 +69,7 @@ parallel:
 verification_commands: []
 verification_auto_fix:
 verification_max_retries:
+per_unit_cost_cap_usd:
 notifications:
   enabled:
   on_complete:

@@ -598,7 +598,10 @@ export function nativeBranchList(basePath: string, pattern?: string): string[] {
   const result = gitFileExec(basePath, args, true);
   if (!result) return [];
 
-  return result.split("\n").map(b => b.trim().replace(/^\* /, "")).filter(Boolean);
+  return result
+    .split("\n")
+    .map(b => b.trim().replace(/^[*+]\s+/, ""))
+    .filter(Boolean);
 }
 
 /**
@@ -991,7 +994,11 @@ export function nativeCommit(
     if (combined.includes("nothing to commit") || combined.includes("nothing added to commit") || combined.includes("no changes added")) {
       return null;
     }
-    throw err;
+    const commitDetail = errObj.stderr?.trim() || errObj.message || "git commit failed";
+    const wrapped = new Error(`git commit failed: ${commitDetail}`);
+    (wrapped as Error & { stdout?: string; stderr?: string }).stdout = errObj.stdout;
+    (wrapped as Error & { stdout?: string; stderr?: string }).stderr = errObj.stderr;
+    throw wrapped;
   }
 }
 

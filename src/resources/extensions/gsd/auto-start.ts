@@ -28,7 +28,7 @@ import { migrateToExternalState, recoverFailedMigration } from "./migrate-extern
 import { collectSecretsFromManifest } from "../get-secrets-from-user.js";
 import { gsdRoot, resolveMilestoneFile } from "./paths.js";
 import { invalidateAllCaches } from "./cache.js";
-import { writeLock, clearLock } from "./crash-recovery.js";
+import { writeLock, clearLock, readCrashLock, isLockProcessAlive } from "./crash-recovery.js";
 import {
   acquireSessionLock,
   releaseSessionLock,
@@ -620,6 +620,12 @@ export async function bootstrapAutoSession(
     return false;
   }
 
+  const startupLock = readCrashLock(base);
+  if (startupLock && !isLockProcessAlive(startupLock)) {
+    clearLock(base);
+    ctx.ui.notify("Cleared stale auto-mode worker state.", "info");
+  }
+
   const lockResult = acquireSessionLock(base);
   if (!lockResult.acquired) {
     ctx.ui.notify(lockResult.reason, "error");
@@ -952,12 +958,14 @@ export async function bootstrapAutoSession(
     // hasSurvivorBranch after a successful promotion.
     if (decideSurvivorAction(hasSurvivorBranch, state.phase) === "finalize") {
       const mid = survivorMilestoneId!;
+      const lifecycle = buildLifecycle();
+      lifecycle.adoptSessionRoot(base);
       // Commit 68ef58a3c made `_mergeBranchMode` throw on wrong-branch
       // instead of returning false silently. Wrap the call so the throw is
       // converted into an error notify + clean bootstrap abort, not an
       // unhandled exception propagating to the slash-command caller (#5549
       // post-merge audit, R2).
-      const finalize = _finalizeSurvivorBranch(buildLifecycle(), mid, ctx.ui);
+      const finalize = _finalizeSurvivorBranch(lifecycle, mid, ctx.ui);
       if (!finalize.merged) {
         return releaseLockAndReturn();
       }
@@ -1214,6 +1222,11 @@ export async function bootstrapAutoSession(
         } else if (enterResult.reason === "creation-failed") {
           ctx.ui.notify(
             `Cannot enter milestone ${s.currentMilestoneId}: worktree/branch creation failed. Isolation is degraded.`,
+            "error",
+          );
+        } else if (enterResult.reason === "isolation-degraded") {
+          ctx.ui.notify(
+            `Cannot enter milestone ${s.currentMilestoneId}: isolation is degraded from a prior worktree failure. Close processes locking the worktree and retry, or run /gsd doctor fix.`,
             "error",
           );
         } else if (enterResult.reason === "invalid-milestone-id") {

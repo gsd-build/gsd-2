@@ -25,13 +25,18 @@ function findTestFiles(dir) {
 	return out
 }
 
-function findDistTestFiles(pkgDir) {
-	const distTestPkg = join(REPO_ROOT, 'dist-test', 'packages', relative(join(REPO_ROOT, 'packages'), pkgDir))
+function selectPackageTestFiles(distTestPkg, pkgDist) {
+	const fromCompiledSrc = findTestFiles(join(distTestPkg, 'src'))
+	if (fromCompiledSrc.length > 0) return fromCompiledSrc
 	const fromDistTest = findTestFiles(distTestPkg)
 	if (fromDistTest.length > 0) return fromDistTest
 	// Fall back to package-local build outputs when test:compile does not cover a package yet.
-	const pkgDist = join(pkgDir, 'dist')
 	return findTestFiles(pkgDist)
+}
+
+function findDistTestFiles(pkgDir) {
+	const distTestPkg = join(REPO_ROOT, 'dist-test', 'packages', relative(join(REPO_ROOT, 'packages'), pkgDir))
+	return selectPackageTestFiles(distTestPkg, join(pkgDir, 'dist'))
 }
 
 function commandExists(command, args = ['--version']) {
@@ -120,62 +125,73 @@ function runPackageScript(command, args, cwd = REPO_ROOT, label = command) {
 	return result.status ?? 1
 }
 
-const packages = getLinkablePackages()
-const summary = []
-for (const pkg of packages) {
-	if (pkg.packageName === '@gsd/native') {
-		const canRunNative = hasNativeAddon() || commandExists('cargo')
-		summary.push({
-			pkg: pkg.packageName,
-			dir: pkg.dir,
-			count: canRunNative ? 'package-script' : 'skipped',
-		})
-		continue
-	}
-
-	const files = findDistTestFiles(pkg.path)
-	summary.push({ pkg: pkg.packageName, dir: pkg.dir, count: files.length })
-}
-
-process.stderr.write('Workspace package tests:\n')
-for (const row of summary) {
-	if (typeof row.count === 'number') {
-		process.stderr.write(`  ${row.pkg} (${row.dir}): ${row.count} file${row.count === 1 ? '' : 's'}\n`)
-		continue
-	}
-	process.stderr.write(`  ${row.pkg} (${row.dir}): ${row.count}\n`)
-}
-
-let failureCount = 0
-
-for (const pkg of packages) {
-	if (pkg.packageName === '@gsd/native') {
-		if (!hasNativeAddon() && !commandExists('cargo')) {
-			process.stderr.write(
-				`Skipping ${pkg.packageName}: no native addon present and \`cargo\` is unavailable in this environment.\n`
-			)
+function main() {
+	const packages = getLinkablePackages()
+	const summary = []
+	for (const pkg of packages) {
+		if (pkg.packageName === '@gsd/native') {
+			const canRunNative = hasNativeAddon() || commandExists('cargo')
+			summary.push({
+				pkg: pkg.packageName,
+				dir: pkg.dir,
+				count: canRunNative ? 'package-script' : 'skipped',
+			})
 			continue
 		}
-		process.stderr.write(`\nRunning ${pkg.packageName} package tests via workspace script...\n`)
-		if (
-			runPackageScript(getNpmCommand(), ['run', 'test', '-w', pkg.packageName], REPO_ROOT, pkg.packageName) !==
-			0
-		) {
+
+		const files = findDistTestFiles(pkg.path)
+		summary.push({ pkg: pkg.packageName, dir: pkg.dir, count: files.length })
+	}
+
+	process.stderr.write('Workspace package tests:\n')
+	for (const row of summary) {
+		if (typeof row.count === 'number') {
+			process.stderr.write(`  ${row.pkg} (${row.dir}): ${row.count} file${row.count === 1 ? '' : 's'}\n`)
+			continue
+		}
+		process.stderr.write(`  ${row.pkg} (${row.dir}): ${row.count}\n`)
+	}
+
+	let failureCount = 0
+
+	for (const pkg of packages) {
+		if (pkg.packageName === '@gsd/native') {
+			if (!hasNativeAddon() && !commandExists('cargo')) {
+				process.stderr.write(
+					`Skipping ${pkg.packageName}: no native addon present and \`cargo\` is unavailable in this environment.\n`
+				)
+				continue
+			}
+			process.stderr.write(`\nRunning ${pkg.packageName} package tests via workspace script...\n`)
+			if (
+				runPackageScript(getNpmCommand(), ['run', 'test', '-w', pkg.packageName], REPO_ROOT, pkg.packageName) !==
+				0
+			) {
+				failureCount += 1
+			}
+			continue
+		}
+
+		const files = findDistTestFiles(pkg.path)
+		if (files.length === 0) {
+			process.stderr.write(`Skipping ${pkg.packageName}: no compiled test files found.\n`)
+			continue
+		}
+
+		process.stderr.write(`\nRunning ${pkg.packageName} package tests...\n`)
+		if (runCommand(process.execPath, ['--test', ...files], REPO_ROOT, pkg.packageName) !== 0) {
 			failureCount += 1
 		}
-		continue
 	}
 
-	const files = findDistTestFiles(pkg.path)
-	if (files.length === 0) {
-		process.stderr.write(`Skipping ${pkg.packageName}: no compiled test files found.\n`)
-		continue
-	}
-
-	process.stderr.write(`\nRunning ${pkg.packageName} package tests...\n`)
-	if (runCommand(process.execPath, ['--test', ...files], REPO_ROOT, pkg.packageName) !== 0) {
-		failureCount += 1
-	}
+	return failureCount === 0 ? 0 : 1
 }
 
-process.exit(failureCount === 0 ? 0 : 1)
+if (require.main === module) {
+	process.exit(main())
+}
+
+module.exports = {
+	findTestFiles,
+	selectPackageTestFiles,
+}

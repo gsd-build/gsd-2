@@ -28,6 +28,8 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { PartialMessageBuilder, ZERO_USAGE, mapUsage } from "./partial-builder.js";
 import { buildWorkflowMcpServers } from "../gsd/workflow-mcp.js";
+import { loadProjectGSDPreferences } from "../gsd/preferences.js";
+import { discoverMcpServerNames, computeMcpDisallowedTools } from "../gsd/mcp-filter.js";
 import { showInterviewRound, type Question, type RoundResult } from "../shared/tui.js";
 import type {
 	SDKAssistantMessage,
@@ -249,8 +251,8 @@ export function normalizeClaudePathForSdk(
 	bundledCliPath: string | null = resolveBundledClaudeCliPath(),
 ): string {
 	if (platform !== "win32") return resolvedPath;
-	if (/\.exe$/i.test(resolvedPath)) return resolvedPath;
-	if (bundledCliPath) return bundledCliPath;
+	if (/\.exe$/i.test(resolvedPath)) return resolvedPath.replaceAll("\\", "/");
+	if (bundledCliPath) return bundledCliPath.replaceAll("\\", "/");
 	return resolvedPath;
 }
 
@@ -313,6 +315,21 @@ export function buildPromptFromContext(context: Context): string {
 		"Respond only to the final user message below. " +
 			"Do not emit <user_message>, <assistant_message>, or <prior_system_context> tags in your response.",
 	];
+
+	// The prior system context lists pi-native tool names (lowercase: bash, read, gsd_exec, etc.)
+	// but this process runs inside Claude Code where tool names differ. Inject a remapping note
+	// before the prior context so the model uses correct names regardless of what the prior
+	// context describes.
+	parts.push(
+		"<tool_context>\n" +
+			"You are running inside Claude Code. Use these exact tool names — do not use lowercase or pi-native names:\n" +
+			"- Shell commands: 'Bash' (not 'bash')\n" +
+			"- File operations: 'Read', 'Write', 'Edit', 'Glob', 'Grep' (PascalCase, not lowercase)\n" +
+			"- GSD workflow tools (gsd_exec, gsd_slice_complete, gsd_task_complete, gsd_plan_slice, etc.) " +
+			"are MCP tools — call them as mcp__gsd-workflow__<tool_name> " +
+			"(e.g. mcp__gsd-workflow__gsd_exec, mcp__gsd-workflow__gsd_slice_complete)\n" +
+			"</tool_context>",
+	);
 
 	if (context.systemPrompt) {
 		parts.push(`<prior_system_context>\n${context.systemPrompt}\n</prior_system_context>`);
@@ -1317,13 +1334,42 @@ export function buildSdkOptions(
 	const sdkCwd = typeof cwd === "string" && cwd.trim().length > 0 ? cwd : process.cwd();
 	const mcpServers = buildWorkflowMcpServers(sdkCwd);
 	const permissionMode = overrides?.permissionMode ?? "bypassPermissions";
+
+	const preferences = loadProjectGSDPreferences(sdkCwd);
+	const mcpConfig = preferences?.preferences.claude_code_mcp;
+	const workflowServerName = mcpServers ? Object.keys(mcpServers)[0] : undefined;
+
+	// Always discover project MCPs — needed for both duplicate detection and filtering.
+	const discovered = discoverMcpServerNames(sdkCwd);
+
+	// If the workflow MCP is already declared in the project's .mcp.json or
+	// .claude/settings.json, do not inject it again via mcpServers. Passing the
+	// same server name from two sources causes a duplicate registration conflict
+	// that prevents the MCP server from loading (tools become unavailable).
+	const workflowAlreadyInProject = workflowServerName !== undefined && discovered.includes(workflowServerName);
+	let filteredMcpServers = workflowAlreadyInProject ? undefined : mcpServers;
+	let extraDisallowedTools: string[] = [];
+	let workflowExplicitlyBlocked = false;
+
+	if (mcpConfig) {
+		extraDisallowedTools = computeMcpDisallowedTools(modelId, mcpConfig, discovered, workflowServerName);
+		if (workflowServerName && extraDisallowedTools.includes(`mcp__${workflowServerName}__*`)) {
+			filteredMcpServers = undefined;
+			workflowExplicitlyBlocked = true;
+		}
+	}
+
 	// Globally unblock the tools GSD expects Claude Code to run. When the
 	// workflow MCP server is available, prefer its `ask_user_questions` tool over
 	// Claude Code's native `AskUserQuestion`; the MCP path carries stable IDs and
 	// routes responses through the GSD elicitation bridge.
 	// Opt back into gated mode with GSD_CLAUDE_CODE_PERMISSION_MODE=acceptEdits.
-	const workflowMcpTools = mcpServers ? Object.keys(mcpServers).map((serverName) => `mcp__${serverName}__*`) : [];
-	const disallowedTools: string[] = workflowMcpTools.length > 0 ? ["AskUserQuestion"] : [];
+	// Include the workflow pattern in allowedTools whether the server is GSD-injected
+	// or declared in the project config — but not if explicitly blocked by user prefs.
+	const workflowMcpTools = filteredMcpServers
+		? Object.keys(filteredMcpServers).map((serverName) => `mcp__${serverName}__*`)
+		: (!workflowExplicitlyBlocked && workflowServerName ? [`mcp__${workflowServerName}__*`] : []);
+	const disallowedTools: string[] = [...(workflowMcpTools.length > 0 ? ["AskUserQuestion"] : []), ...extraDisallowedTools];
 	const allowedTools = [
 		"Read",
 		"Write",
@@ -1363,7 +1409,7 @@ export function buildSdkOptions(
 		systemPrompt: { type: "preset", preset: "claude_code" },
 		disallowedTools,
 		...(allowedTools.length > 0 ? { allowedTools } : {}),
-		...(mcpServers ? { mcpServers } : {}),
+		...(filteredMcpServers ? { mcpServers: filteredMcpServers } : {}),
 		betas: (modelId.includes("sonnet") || modelId.includes("opus-4-7") || modelId.includes("opus-4.7")) ? ["context-1m-2025-08-07"] : [],
 		...(thinkingConfig ?? {}),
 		...(effort ? { effort } : {}),

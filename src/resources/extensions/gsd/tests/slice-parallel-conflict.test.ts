@@ -21,9 +21,9 @@ function makeTmpBase(): string {
 }
 
 function writeSlicePlan(base: string, mid: string, sid: string, content: string): void {
-  const dir = join(base, ".gsd", "milestones", mid, sid);
+  const dir = join(base, ".gsd", "milestones", mid, "slices", sid);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "PLAN.md"), content, "utf-8");
+  writeFileSync(join(dir, `${sid}-PLAN.md`), content, "utf-8");
 }
 
 describe("hasFileConflict", () => {

@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { getBudgetAlertLevel, getNewBudgetAlertLevel, getBudgetEnforcementAction } from "../resources/extensions/gsd/auto-budget.js";
+import {
+  getBudgetAlertLevel,
+  getNewBudgetAlertLevel,
+  getBudgetEnforcementAction,
+  getUnitCostSpikeAction,
+} from "../resources/extensions/gsd/auto-budget.js";
 
 describe("auto-budget", () => {
   describe("getBudgetAlertLevel", () => {
@@ -66,6 +71,36 @@ describe("auto-budget", () => {
 
     it("returns warn when at ceiling with warn enforcement", () => {
       assert.equal(getBudgetEnforcementAction("warn", 1.0), "warn");
+    });
+  });
+
+  describe("getUnitCostSpikeAction", () => {
+    it("returns none when below spike threshold", () => {
+      assert.equal(getUnitCostSpikeAction(2.9, 1.0), "none");
+    });
+
+    it("returns pause when at or above threshold", () => {
+      assert.equal(getUnitCostSpikeAction(3.0, 1.0), "pause");
+      assert.equal(getUnitCostSpikeAction(6.5, 2.0), "pause");
+    });
+
+    it("returns none for invalid averages", () => {
+      assert.equal(getUnitCostSpikeAction(10, 0), "none");
+      assert.equal(getUnitCostSpikeAction(10, Number.NaN), "none");
+    });
+
+    it("returns none for invalid unit costs", () => {
+      assert.equal(getUnitCostSpikeAction(-1, 1), "none");
+      assert.equal(getUnitCostSpikeAction(Number.NEGATIVE_INFINITY, 1), "none");
+      assert.equal(getUnitCostSpikeAction(Number.POSITIVE_INFINITY, 1), "none");
+      assert.equal(getUnitCostSpikeAction(Number.NaN, 1), "none");
+    });
+
+    it("returns none for invalid multipliers", () => {
+      assert.equal(getUnitCostSpikeAction(10, 1, 0), "none");
+      assert.equal(getUnitCostSpikeAction(10, 1, -1), "none");
+      assert.equal(getUnitCostSpikeAction(10, 1, Number.NEGATIVE_INFINITY), "none");
+      assert.equal(getUnitCostSpikeAction(10, 1, Number.NaN), "none");
     });
   });
 });

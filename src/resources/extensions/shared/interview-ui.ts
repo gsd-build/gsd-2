@@ -311,9 +311,10 @@ export async function showInterviewRound(
 					if (selected.length > 0 || notes) answers[q.id] = { selected, notes };
 				} else {
 					if (st.committedIndex === null && !notes) continue;
+					const effectiveCommittedIndex = st.committedIndex ?? st.cursorIndex;
 					let selected = OTHER_OPTION_LABEL;
-					if (st.committedIndex !== null) {
-						const idx = st.committedIndex;
+					if (effectiveCommittedIndex !== null) {
+						const idx = effectiveCommittedIndex;
 						if (idx < q.options.length) selected = q.options[idx].label;
 						else if (idx === noneOrDoneIdx(i)) selected = OTHER_OPTION_LABEL;
 					}
@@ -484,9 +485,10 @@ export async function showInterviewRound(
 					const selected = Array.from(st.checkedIndices).sort((a, b) => a - b).map((idx) => q.options[idx].label);
 					for (const label of selected) push(ui.answer(`    ${INDENT.cursor}${label}`));
 				} else {
+					const effectiveCommittedIndex = st.committedIndex ?? st.cursorIndex;
 					let label = OTHER_OPTION_LABEL;
-					if (st.committedIndex !== null && st.committedIndex < q.options.length) {
-						label = q.options[st.committedIndex].label;
+					if (effectiveCommittedIndex < q.options.length) {
+						label = q.options[effectiveCommittedIndex].label;
 					}
 					push(ui.answer(`    ${INDENT.cursor}${label}`));
 				}

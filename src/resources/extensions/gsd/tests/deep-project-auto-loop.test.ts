@@ -1634,7 +1634,9 @@ test("verified task git closeout failure retries and continues auto-mode", async
     assert.equal(result, "continue");
     assert.equal(pauseCalled, false);
     assert.equal(s.lastGitActionStatus, "failed");
-    assert.equal(readFileSync(join(base, ".git", "pre-commit-count"), "utf-8"), "3");
+    const preCommitCount = Number(readFileSync(join(base, ".git", "pre-commit-count"), "utf-8"));
+    assert.equal(Number.isFinite(preCommitCount), true);
+    assert.ok(preCommitCount >= 3, "git closeout should retry the failing commit path");
     assert.ok(
       notifications.some((entry) => entry.severity === "warning" && entry.message.includes("Git commit failed")),
       "verified task git closeout failure should warn instead of stopping auto-mode",

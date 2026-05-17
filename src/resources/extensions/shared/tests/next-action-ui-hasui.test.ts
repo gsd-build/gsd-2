@@ -81,6 +81,38 @@ describe("showNextAction ctx.hasUI guard (#5125 lockup root protection)", () => 
     assert.equal(result, "alpha", "fallback should map the picked label back to the chosen action id");
   });
 
+  it("returns 'not_yet' immediately when UI mode is rpc even if ctx.hasUI is true", async () => {
+    let customCalled = 0;
+    let selectCalled = 0;
+
+    const ctx = {
+      hasUI: true,
+      ui: {
+        mode: "rpc",
+        custom: async () => {
+          customCalled++;
+          return undefined as never;
+        },
+        select: async () => {
+          selectCalled++;
+          return undefined;
+        },
+      },
+    };
+
+    const result = await showNextAction(ctx as any, {
+      title: "GSD — test",
+      actions: [
+        { id: "alpha", label: "Alpha", description: "first", recommended: true },
+        { id: "beta", label: "Beta", description: "second" },
+      ],
+    });
+
+    assert.equal(result, "not_yet", "rpc-backed UI is non-interactive for next-action");
+    assert.equal(customCalled, 0, "ctx.ui.custom must not be called in rpc mode");
+    assert.equal(selectCalled, 0, "ctx.ui.select must not be called in rpc mode");
+  });
+
   it("returns the resolved id when ctx.ui.custom completes normally", async () => {
     let selectCalled = 0;
 

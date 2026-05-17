@@ -99,7 +99,8 @@ export type ContextModePolicy =
   | "execution"
   | "verification"
   | "orchestration"
-  | "docs";
+  | "docs"
+  | "triage";
 
 /**
  * Tool-access policy per unit type (#4934).
@@ -343,6 +344,9 @@ export const KNOWN_UNIT_TYPES = [
   "run-uat",
   "gate-evaluate",
   "rewrite-docs",
+  // Sidecar units (triage, quick-task)
+  "triage-captures",
+  "quick-task",
   // Deep planning mode (project-level) units
   "workflow-preferences",
   "discuss-project",
@@ -409,11 +413,9 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     codebaseMap: false,
     preferences: "active-only",
     contextMode: "verification",
-    // planning-dispatch: validation is a verification-fan-out unit. It reads
-    // the milestone surface and dispatches reviewer/security/tester subagents
-    // to report findings without touching user source. Write isolation to
-    // .gsd/ is preserved.
-    tools: TOOLS_PLANNING_DISPATCH_REVIEW,
+    // Validation may need to run shell verification commands and apply source
+    // fixes before milestone closeout can proceed.
+    tools: TOOLS_ALL,
     artifacts: {
       inline: ["roadmap", "slice-summary", "slice-uat", "requirements", "decisions", "templates"],
       excerpt: [],
@@ -518,10 +520,9 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     codebaseMap: false,
     preferences: "active-only",
     contextMode: "verification",
-    // See complete-milestone — same rationale: dispatch to reviewer / security /
-    // tester subagents to fan out review work without bloating this unit's
-    // context.
-    tools: TOOLS_PLANNING_DISPATCH_REVIEW,
+    // Slice closeout may need to run shell verification commands and apply
+    // source fixes before completion can be recorded.
+    tools: TOOLS_ALL,
     artifacts: {
       // Phase 3 migration (#4782): matches today's actual
       // buildCompleteSlicePrompt inlining order. Overrides prepend +
@@ -631,6 +632,36 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     tools: TOOLS_DOCS,
     artifacts: {
       inline: ["project", "requirements", "decisions", "templates"],
+      excerpt: [],
+      onDemand: [],
+    },
+    maxSystemPromptChars: COMMON_BUDGET_MEDIUM,
+  },
+  "triage-captures": {
+    skills: { mode: "all" },
+    knowledge: "scoped",
+    memory: "prompt-relevant",
+    codebaseMap: false,
+    preferences: "active-only",
+    contextMode: "triage",
+    tools: TOOLS_PLANNING,
+    artifacts: {
+      inline: ["roadmap", "slice-plan", "slice-summary", "requirements", "decisions", "templates"],
+      excerpt: [],
+      onDemand: [],
+    },
+    maxSystemPromptChars: COMMON_BUDGET_MEDIUM,
+  },
+  "quick-task": {
+    skills: { mode: "all" },
+    knowledge: "full",
+    memory: "prompt-relevant",
+    codebaseMap: true,
+    preferences: "active-only",
+    contextMode: "execution",
+    tools: TOOLS_ALL,
+    artifacts: {
+      inline: ["roadmap", "slice-plan", "task-plan", "requirements", "decisions", "templates"],
       excerpt: [],
       onDemand: [],
     },

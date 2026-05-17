@@ -58,6 +58,7 @@ const PREF_SAMPLE_VALUES: Record<string, unknown> = {
   verification_commands: ["npm test"],
   verification_auto_fix: true,
   verification_max_retries: 1,
+  per_unit_cost_cap_usd: 5,
   search_provider: "web",
   context_selection: "auto",
   widget_mode: "small",
@@ -86,6 +87,17 @@ const PREF_SAMPLE_VALUES: Record<string, unknown> = {
   context_window_override: 128000,
   context_mode: { enabled: true },
   planning_depth: "deep",
+  claude_code_mcp: { per_model: { "claude-haiku": { allowed_servers: ["gsd-workflow"] } } },
+  workspace: {
+    mode: "parent",
+    repositories: {
+      frontend: {
+        path: "frontend",
+        role: "web UI",
+        verification: ["npm test"],
+      },
+    },
+  },
 };
 
 test("prefs wizard save path preserves every known preference key", async () => {
@@ -158,13 +170,21 @@ test("models wizard offers discovered models for enabled providers", async () =>
     "(keep current)",
   ];
   const ctx = {
+    // `getAllWithDiscovered` reads `this._all` so the wizard must call it as a
+    // method — invoking a detached reference would lose `this` and throw,
+    // mirroring the real ModelRegistry implementation.
     modelRegistry: {
-      getAvailable: () => [{ provider: "local", id: "baseline-model" }],
-      getAllWithDiscovered: () => [
+      _all: [
         { provider: "local", id: "baseline-model" },
         { provider: "local", id: "discovered-model" },
         { provider: "disabled", id: "hidden-model" },
       ],
+      getAvailable() {
+        return [{ provider: "local", id: "baseline-model" }];
+      },
+      getAllWithDiscovered() {
+        return this._all;
+      },
     },
     ui: {
       notify() {},

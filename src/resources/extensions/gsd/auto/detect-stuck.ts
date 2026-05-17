@@ -57,6 +57,7 @@ function retryBudgetSuppresses(unitKey: string): boolean {
  */
 export function detectStuck(
   window: readonly WindowEntry[],
+  _retryContext?: { pendingRetry?: boolean; retryAttempt?: number },
 ): { stuck: true; reason: string } | null {
   if (window.length < 2) return null;
 

@@ -65,7 +65,14 @@ export type JournalEventType =
   | "milestone-resquash"
   // dispatch telemetry — measure agent/subagent invocation frequency and shape
   | "subagent-invoked"
-  | "subagent-completed";
+  | "subagent-completed"
+  // auto orchestrator telemetry namespace (kept separate from auto-loop events)
+  | "orchestrator-iteration-start"
+  | "orchestrator-dispatch-match"
+  | "orchestrator-dispatch-stop"
+  | "orchestrator-guard-block"
+  | "orchestrator-terminal"
+  | "orchestrator-iteration-end";
 
 /** A single structured event in the journal. */
 export interface JournalEntry {

@@ -993,6 +993,8 @@ export function registerDbTools(pi: ExtensionAPI): void {
     promptGuidelines: [
       "Use gsd_validate_milestone when all slices are done and the milestone needs validation before completion.",
       "Parameters: milestoneId, verdict, remediationRound, successCriteriaChecklist, sliceDeliveryAudit, crossSliceIntegration, requirementCoverage, verificationClasses (optional), verdictRationale, remediationPlan (optional).",
+      "If verification classes were planned, verificationClasses must include canonical class rows using the exact class names Contract, Integration, Operational, and UAT when present in planning.",
+      "Planned verification text marked as none/not required/not applicable/N/A (including suffixed variants such as 'not required - backend-only') is treated as not applicable and does not require a class row.",
       "If verdict is 'needs-remediation', also provide remediationPlan and use gsd_reassess_roadmap to add remediation slices to the roadmap.",
       "On success, returns validationPath where VALIDATION.md was written.",
     ],
@@ -1004,7 +1006,7 @@ export function registerDbTools(pi: ExtensionAPI): void {
       sliceDeliveryAudit: Type.String({ description: "Markdown table auditing each slice's claimed vs delivered output" }),
       crossSliceIntegration: Type.String({ description: "Markdown describing any cross-slice boundary mismatches" }),
       requirementCoverage: Type.String({ description: "Markdown describing any unaddressed requirements" }),
-      verificationClasses: Type.Optional(Type.String({ description: "Markdown describing verification class compliance and gaps" })),
+      verificationClasses: Type.Optional(Type.String({ description: "Markdown describing verification class compliance and gaps using canonical class names (Contract, Integration, Operational, UAT) for each applicable planned class" })),
       verdictRationale: Type.String({ description: "Why this verdict was chosen" }),
       remediationPlan: Type.Optional(Type.String({ description: "Remediation plan (required if verdict is needs-remediation)" })),
     }),

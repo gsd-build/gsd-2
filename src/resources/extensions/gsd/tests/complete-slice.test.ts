@@ -13,6 +13,7 @@ import {
   getSlice,
   updateSliceStatus,
   getSliceTasks,
+  setSliceSummaryMd,
   SCHEMA_VERSION,
 } from '../gsd-db.ts';
 import { handleCompleteSlice } from '../tools/complete-slice.ts';
@@ -401,6 +402,60 @@ console.log('\n=== complete-slice: handler with missing roadmap ===');
   if (!('error' in result)) {
     assertTrue(fs.existsSync(result.summaryPath), 'summary should be written even without roadmap');
     assertTrue(fs.existsSync(result.uatPath), 'UAT should be written even without roadmap');
+  }
+
+  cleanupDir(basePath);
+  cleanup(dbPath);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// complete-slice: backfills omitted requirements from rendered summary
+// ═══════════════════════════════════════════════════════════════════════════
+
+console.log('\n=== complete-slice: backfills omitted requirements from rendered summary ===');
+{
+  const dbPath = tempDbPath();
+  openDatabase(dbPath);
+
+  const { basePath } = createTempProject();
+
+  insertMilestone({ id: 'M001' });
+  insertSlice({ id: 'S01', milestoneId: 'M001' });
+  insertTask({ id: 'T01', sliceId: 'S01', milestoneId: 'M001', status: 'complete', title: 'Task 1' });
+
+  const seedParams = makeValidSliceParams();
+  const seeded = await handleCompleteSlice(seedParams, basePath);
+  assertTrue(!('error' in seeded), 'seed completion should succeed');
+  if ('error' in seeded) {
+    cleanupDir(basePath);
+    cleanup(dbPath);
+    throw new Error('seed completion unexpectedly failed');
+  }
+
+  const seededSummary = fs.readFileSync(seeded.summaryPath, 'utf-8');
+  transaction(() => {
+    updateSliceStatus('M001', 'S01', 'pending', undefined);
+    setSliceSummaryMd('M001', 'S01', seededSummary, '');
+  });
+
+  const backfillParams = makeValidSliceParams();
+  delete (backfillParams as Partial<CompleteSliceParams>).requirementsAdvanced;
+  delete (backfillParams as Partial<CompleteSliceParams>).requirementsValidated;
+  delete (backfillParams as Partial<CompleteSliceParams>).requirementsInvalidated;
+  const backfilled = await handleCompleteSlice(backfillParams as CompleteSliceParams, basePath);
+  assertTrue(!('error' in backfilled), 'backfill completion should succeed');
+  if (!('error' in backfilled)) {
+    const summary = fs.readFileSync(backfilled.summaryPath, 'utf-8');
+    assertMatch(summary, /## Requirements Advanced/, 'summary should include advanced requirements heading');
+    assertMatch(summary, /- R001 — Handler validates task completion/, 'advanced requirement should be backfilled from summary markdown');
+
+    const sliceAfterBackfill = getSlice('M001', 'S01');
+    assertTrue(sliceAfterBackfill !== null, 'slice should exist after backfill');
+    assertMatch(
+      sliceAfterBackfill!.full_summary_md,
+      /- R001 — Handler validates task completion/,
+      'DB full_summary_md should persist the backfilled advanced requirement',
+    );
   }
 
   cleanupDir(basePath);

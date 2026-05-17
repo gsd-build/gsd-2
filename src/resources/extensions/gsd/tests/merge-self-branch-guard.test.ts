@@ -1,12 +1,9 @@
-// gsd-2 / merge-self-branch-guard.test.ts — regression for #5024
+// gsd-2 / merge-self-branch-guard.test.ts — regressions for #5024 and #6250
 //
-// mergeMilestoneToMain() must fail closed when the resolved integration
-// branch is the same ref as the milestone branch. Stale or corrupt
-// integration metadata (e.g. integrationBranch recorded as "milestone/<MID>")
-// would otherwise let the squash merge resolve to a self-merge: the post-
-// merge no-op safety check (#1792) compares main vs milestone and finds an
-// empty diff (because they're the same ref), so the helper returns success
-// for work that never landed on a distinct integration branch.
+// mergeMilestoneToMain() must recover from stale/corrupt integration metadata
+// that points at milestone branches (integrationBranch recorded as
+// "milestone/<MID>"). #6250 requires this to fall back to a safe integration
+// target (configured/detected main branch) instead of failing forever.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -42,7 +39,7 @@ function createTempRepo(): string {
   return dir;
 }
 
-function assertSelfMergeRefIsRejected(recordedIntegrationBranch: string): void {
+function assertSelfMergeRefRecoversToMain(recordedIntegrationBranch: string): void {
   const savedCwd = process.cwd();
   let tempDir = "";
 
@@ -70,39 +67,23 @@ function assertSelfMergeRefIsRejected(recordedIntegrationBranch: string): void {
     git(["add", "."], tempDir);
     git(["commit", "-m", "chore: plant corrupt M001 meta"], tempDir);
 
-    // Create the milestone branch ref so any pre-guard branch operations
-    // wouldn't fail for unrelated reasons.
-    git(["branch", "milestone/M001"], tempDir);
+    // Create milestone branch with a unique commit so successful merge-back
+    // to main can be observed.
+    git(["checkout", "-b", "milestone/M001"], tempDir);
+    writeFileSync(join(tempDir, "feature.txt"), "feature work\n");
+    git(["add", "feature.txt"], tempDir);
+    git(["commit", "-m", "feat: milestone work"], tempDir);
+    git(["checkout", "main"], tempDir);
 
     const mainHeadBefore = git(["rev-parse", "main"], tempDir);
-    const milestoneHeadBefore = git(["rev-parse", "milestone/M001"], tempDir);
-
     process.chdir(tempDir);
 
-    assert.throws(
-      () => mergeMilestoneToMain(tempDir, "M001", ""),
-      (err: unknown) => {
-        assert.ok(err instanceof Error, "expected an Error to be thrown");
-        assert.match(
-          err.message,
-          /self-merge|same ref/i,
-          "error message should explain the self-merge refusal",
-        );
-        return true;
-      },
-    );
+    mergeMilestoneToMain(tempDir, "M001", "");
 
-    // Postcondition: neither branch should have been advanced by a merge
-    // commit. The guard fires before checkout/merge, so both refs must be
-    // unchanged from their pre-call state.
+    // Postcondition: merge-back lands on main.
     const mainHeadAfter = git(["rev-parse", "main"], tempDir);
-    const milestoneHeadAfter = git(["rev-parse", "milestone/M001"], tempDir);
-    assert.equal(mainHeadAfter, mainHeadBefore, "main must not have advanced");
-    assert.equal(
-      milestoneHeadAfter,
-      milestoneHeadBefore,
-      "milestone branch must not have advanced",
-    );
+    assert.notEqual(mainHeadAfter, mainHeadBefore, "main must advance via merge-back");
+    assert.equal(git(["rev-parse", "HEAD"], tempDir), mainHeadAfter, "repo remains on main after merge-back");
   } finally {
     process.chdir(savedCwd);
     process.env.HOME = originalHome;
@@ -115,10 +96,10 @@ function assertSelfMergeRefIsRejected(recordedIntegrationBranch: string): void {
   }
 }
 
-test("mergeMilestoneToMain refuses exact milestone branch self-merge metadata (#5024)", () => {
-  assertSelfMergeRefIsRejected("milestone/M001");
+test("mergeMilestoneToMain recovers from exact milestone self-ref integration metadata (#6250)", () => {
+  assertSelfMergeRefRecoversToMain("milestone/M001");
 });
 
-test("mergeMilestoneToMain refuses refs/heads milestone branch self-merge metadata (#5024)", () => {
-  assertSelfMergeRefIsRejected("refs/heads/milestone/M001");
+test("mergeMilestoneToMain recovers from refs/heads milestone self-ref integration metadata (#6250)", () => {
+  assertSelfMergeRefRecoversToMain("refs/heads/milestone/M001");
 });

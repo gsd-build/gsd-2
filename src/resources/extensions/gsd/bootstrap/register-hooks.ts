@@ -508,6 +508,13 @@ export function registerHooks(
       const milestoneId = extractDepthVerificationMilestoneId(pendingApprovalGate);
       if (milestoneId) markDepthVerified(milestoneId, beforeAgentBasePath);
       clearPendingGate(beforeAgentBasePath);
+      if (isAutoPaused() && !isAutoActive()) {
+        const { resumeAutoAfterProviderDelay } = await import("./provider-error-resume.js");
+        void resumeAutoAfterProviderDelay(pi, ctx).catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          ctx.ui.notify(`Failed to resume auto-mode after approval: ${message}`, "warning");
+        });
+      }
     }
     clearDeferredApprovalGate(beforeAgentBasePath);
 
@@ -641,6 +648,7 @@ export function registerHooks(
     if (approvalQuestionAbortInFlight) return;
 
     const dash = getAutoRuntimeSnapshot();
+    if (dash.active) return;
     let unitType = dash.currentUnit?.type;
     let unitId = dash.currentUnit?.id;
 
@@ -807,11 +815,10 @@ export function registerHooks(
     // git.isolation=worktree but auto-mode hasn't created the milestone
     // worktree yet. Without this, writes silently orphan outside git history.
     if (isToolCallEventType("write", event) || isToolCallEventType("edit", event)) {
-      const wtBasePath = resolveWorktreeProjectRoot(dash.basePath ?? discussionBasePath);
       const wtGuard = shouldBlockWorktreeWrite(
         event.toolName,
         event.input.path,
-        wtBasePath,
+        dash.basePath ?? discussionBasePath,
         isAutoActive(),
         dash.currentUnit?.type,
       );

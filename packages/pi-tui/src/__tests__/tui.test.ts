@@ -7,11 +7,11 @@ import { Container, CURSOR_MARKER, TUI } from "../tui.js";
 import type { Component } from "../tui.js";
 import type { Terminal } from "../terminal.js";
 
-function makeTerminal(writes?: string[]): Terminal {
+function makeTerminal(writes?: string[], rows = 24): Terminal {
 	return {
 		isTTY: true,
 		columns: 80,
-		rows: 24,
+		rows,
 		kittyProtocolActive: false,
 		start() {},
 		stop() {},
@@ -67,8 +67,94 @@ describe("TUI", () => {
 		anyTui.doRender();
 
 		const renderWrite = writes[writeCountAfterFirstRender];
-		assert.ok(renderWrite.startsWith("\x1b[?2026h\r"), "editor diff should start at the current cursor row");
-		assert.ok(!renderWrite.startsWith("\x1b[?2026h\x1b[1A\r"), "editor diff must not move above the cursor row");
+		const withoutSyncWrapper = renderWrite.replace(/^\x1b\[\?2026h/, "");
+		assert.ok(withoutSyncWrapper.startsWith("\r"), "editor diff should start at the current cursor row");
+		assert.ok(!withoutSyncWrapper.startsWith("\x1b[1A\r"), "editor diff must not move above the cursor row");
+	});
+
+	it("omits synchronized-output wrappers when PI_DISABLE_SYNC_OUTPUT is enabled", () => {
+		const previous = process.env.PI_DISABLE_SYNC_OUTPUT;
+		process.env.PI_DISABLE_SYNC_OUTPUT = "1";
+		try {
+			const writes: string[] = [];
+			const tui = new TUI(makeTerminal(writes));
+			tui.addChild({
+				render: () => ["content"],
+				invalidate() {},
+			});
+
+			(tui as any).doRender();
+
+			const rendered = writes.join("");
+			assert.ok(rendered.includes("content"), "render should still write component output");
+			assert.ok(
+				!rendered.includes("\x1b[?2026h") && !rendered.includes("\x1b[?2026l"),
+				"PI_DISABLE_SYNC_OUTPUT=1 must suppress synchronized-output escape sequences",
+			);
+		} finally {
+			if (previous === undefined) {
+				delete process.env.PI_DISABLE_SYNC_OUTPUT;
+			} else {
+				process.env.PI_DISABLE_SYNC_OUTPUT = previous;
+			}
+		}
+	});
+
+	it("does not full-clear when a tall buffer shrinks (flicker regression #6130)", () => {
+		// Tall-buffer-shrink path: both prev and new exceed viewport height. The fix
+		// falls through to differential render instead of emitting \x1b[2J, which used
+		// to cause the bottom panel to flash on every shrink.
+		const writes: string[] = [];
+		const terminal = makeTerminal(writes, 10);
+		const tui = new TUI(terminal);
+		let lines = Array.from({ length: 20 }, (_, i) => `line-${i}`);
+		tui.addChild({
+			render: () => lines,
+			invalidate() {},
+		});
+		const anyTui = tui as any;
+
+		anyTui.doRender();
+		const writeCountAfterFirstRender = writes.length;
+
+		// Shrink: still taller than viewport, but smaller than before.
+		lines = Array.from({ length: 15 }, (_, i) => `line-${i}`);
+		anyTui.doRender();
+
+		const shrinkWrites = writes.slice(writeCountAfterFirstRender).join("");
+		assert.ok(
+			!shrinkWrites.includes("\x1b[2J"),
+			"tall buffer shrink must not emit \\x1b[2J — that causes the bottom panel to flash",
+		);
+	});
+
+	it("does not full-clear when firstChanged is above the viewport (flicker regression #6130)", () => {
+		// firstChanged-above-viewport path: a line above the current viewport changes.
+		// The fix clamps firstChanged to the viewport top and repaints in place instead
+		// of emitting \x1b[2J + full repaint, which used to cause a bottom-panel flash.
+		const writes: string[] = [];
+		const terminal = makeTerminal(writes, 10);
+		const tui = new TUI(terminal);
+		let lines = Array.from({ length: 20 }, (_, i) => `line-${i}`);
+		tui.addChild({
+			render: () => lines,
+			invalidate() {},
+		});
+		const anyTui = tui as any;
+
+		anyTui.doRender();
+		const writeCountAfterFirstRender = writes.length;
+
+		// Change a line above the viewport (viewportTop = 20 - 10 = 10, so line 0 is above).
+		lines = lines.slice();
+		lines[0] = "changed-above-viewport";
+		anyTui.doRender();
+
+		const clampWrites = writes.slice(writeCountAfterFirstRender).join("");
+		assert.ok(
+			!clampWrites.includes("\x1b[2J"),
+			"firstChanged-above-viewport must not emit \\x1b[2J — that causes the bottom panel to flash",
+		);
 	});
 
 	it("does not swallow a bare Escape keypress while waiting for the cell-size response", () => {

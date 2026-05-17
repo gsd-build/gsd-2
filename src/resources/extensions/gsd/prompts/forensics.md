@@ -50,11 +50,11 @@ GSD extension source: `{{gsdSourceDir}}`
 
 The journal is a structured event log for auto-mode iterations. Daily files contain JSONL:
 
-```
-{ ts: "ISO-8601", flowId: "UUID", seq: 0, eventType: "iteration-start", rule?: "rule-name", causedBy?: { flowId, seq }, data?: { unitId, status, ... } }
+```json
+{ ts: "ISO-8601", flowId: "UUID", seq: 0, eventType: "orchestrator-iteration-start", rule?: "rule-name", causedBy?: { flowId, seq }, data?: { unitId, status, ... } }
 ```
 
-Key events: `iteration-start/end`, `dispatch-match/stop`, `unit-start/end`, `terminal`, `guard-block`, `stuck-detected`, `milestone-transition`, worktree events. `flowId` groups one loop; `causedBy` links causal events; `seq` orders events. Trace stuck loops with `stuck-detected` -> `flowId`; guard blocks with `guard-block` and `data.reason`.
+Key orchestrator events: `orchestrator-iteration-start/end`, `orchestrator-dispatch-match/stop`, `orchestrator-guard-block`, `orchestrator-terminal`. Legacy loop and phase events (`iteration-start/end`, `dispatch-match/stop`, `unit-start/end`, `terminal`, `guard-block`, `stuck-detected`, `milestone-transition`) still appear for non-orchestrator paths, along with worktree events. `flowId` groups one loop; `causedBy` links causal events; `seq` orders events. Trace orchestrator stalls with `orchestrator-guard-block`/`orchestrator-dispatch-stop` and `data.reason`.
 
 ### Crash Lock Format (`auto.lock`)
 

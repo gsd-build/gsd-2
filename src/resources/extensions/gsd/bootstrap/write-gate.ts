@@ -64,7 +64,7 @@ const QUEUE_SAFE_TOOLS = new Set([
  *   env / printenv      — print environment variables
  *   true / false        — shell no-ops / test exit codes
  */
-const BASH_READ_ONLY_RE = /^\s*(cat|head|tail|less|more|wc|file|stat|du|df|which|type|echo|printf|ls|find|grep|rg|awk|sed\b(?!.*-i)|sort|uniq|diff|comm|tr|cut|tee\s+-a\s+\/dev\/null|git\s+(log|show|diff|status|branch|tag|remote|rev-parse|ls-files|blame|shortlog|describe|stash\s+list|config\s+--get|cat-file)|gh\s+(issue|pr|api|repo|release)\s+(view|list|diff|status|checks)|mkdir\s+-p\s+\.gsd|rtk\s|npm\s+run\s+(test|test:\w+|lint|lint:\w+|typecheck|type-check|type-check:\w+|check|verify|audit|outdated|format:check|ci|validate)\b|npm\s+(ls|list|info|view|show|outdated|audit|explain|doctor|ping|--version|-v)\b|npx\s|tsx\s|node\s+(--print|--version|-v\b)|python[23]?\s+(-c\s+'[^']*'|--version|-V\b|-m\s+(pip\s+show|pip\s+list|site))|pip[23]?\s+(show|list|freeze|check|index\s+versions)\b|jq\s|yq\s|curl\s+(-s\b|--silent\b)(?!\s+[^|>]*\s-[oO]\b)(?!\s+[^|>]*\s--output\b)[^|>]*$|openssl\s+(version|x509|s_client)|env\b|printenv\b|true\b|false\b)/;
+const BASH_READ_ONLY_RE = /^\s*((?:cd|pushd|popd)(?:\s|$)|cat|head|tail|less|more|wc|file|stat|du|df|which|type|echo|printf|ls|find|grep|rg|awk|sed\b(?!.*-i)|sort|uniq|diff|comm|tr|cut|tee\s+-a\s+\/dev\/null|git\s+(log|show|diff|status|branch|tag|remote|rev-parse|ls-files|blame|shortlog|describe|stash\s+list|config\s+--get|cat-file)|gh\s+(issue|pr|api|repo|release)\s+(view|list|diff|status|checks)|mkdir\s+-p\s+\.gsd|rtk\s|npm\s+run\s+(test|test:\w+|lint|lint:\w+|typecheck|type-check|type-check:\w+|check|verify|audit|outdated|format:check|ci|validate)\b|npm\s+(ls|list|info|view|show|outdated|audit|explain|doctor|ping|--version|-v)\b|npx\s|tsx\s|node\s+(--print|--version|-v\b)|python[23]?\s+(-c\s+'[^']*'|--version|-V\b|-m\s+(pip\s+show|pip\s+list|site))|pip[23]?\s+(show|list|freeze|check|index\s+versions)\b|jq\s|yq\s|curl\s+(-s\b|--silent\b)(?!\s+[^|>]*\s-[oO]\b)(?!\s+[^|>]*\s--output\b)[^|>]*$|openssl\s+(version|x509|s_client)|env\b|printenv\b|true\b|false\b)/;
 const BASH_VERIFICATION_RE = /^\s*(npm\s+(run\s+(build|test|test:\w+|lint|lint:\w+|typecheck|type-check|verify|ci|validate)\b|test\b)|pnpm\s+(build|test|lint|typecheck|verify)\b|yarn\s+(build|test|lint|typecheck|verify)\b|vitest\b|jest\b|go\s+test\b)/;
 
 interface InMemoryWriteGateState {
@@ -967,9 +967,9 @@ function isPathContained(target: string, container: string): boolean {
  * while `git.isolation: worktree` is in effect and auto-mode hasn't created
  * (or flipped cwd into) the milestone worktree.
  *
- * Pure / unit-testable. Callers in `register-hooks.ts` supply the resolved
- * project root and current auto liveness; this function does no I/O beyond
- * realpath resolution.
+ * Pure / unit-testable. Callers in `register-hooks.ts` supply the effective
+ * execution base path (worker cwd or project root) and current auto liveness;
+ * this function does no I/O beyond realpath resolution.
  *
  * Allow rules (in order):
  *   1. Tool isn't a planning-write (write/edit/multi_edit/notebook_edit).
@@ -1007,10 +1007,11 @@ export function shouldBlockWorktreeWrite(
     };
   }
 
-  // Resolve the target relative to the project root, then realpath to defeat
+  // Resolve relative targets against the effective execution base path, then
+  // canonicalize against the project root to defeat
   // symlink-based escapes and prefix tricks (e.g. .gsd/worktrees-extra/).
   const projectRoot = resolveWorktreeProjectRoot(effectiveBasePath);
-  const absTarget = isAbsolute(targetPath) ? targetPath : resolve(projectRoot, targetPath);
+  const absTarget = isAbsolute(targetPath) ? targetPath : resolve(effectiveBasePath, targetPath);
   const realTarget = realpathOrResolve(absTarget);
   const realRoot = realpathOrResolve(projectRoot);
   const realGsd = realpathOrResolve(join(projectRoot, ".gsd"));

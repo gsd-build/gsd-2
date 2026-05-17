@@ -6,6 +6,26 @@ import { processStreamChunk } from "@gsd/native/stream-process";
 const require_ = createRequire(import.meta.url);
 const { native } = require_("../../dist/native.js");
 
+function replaceNativeProcessStreamChunk(t, value) {
+  const original = native.processStreamChunk;
+  try {
+    native.processStreamChunk = value;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    t.skip(`native addon export is not writable in this environment: ${message}`);
+    return null;
+  }
+
+  if (native.processStreamChunk !== value) {
+    t.skip("native addon export is not writable in this environment");
+    return null;
+  }
+
+  return () => {
+    native.processStreamChunk = original;
+  };
+}
+
 describe("processStreamChunk", () => {
   test("processes a single chunk without state", () => {
     const result = processStreamChunk(Buffer.from("hello world\n"));
@@ -36,21 +56,21 @@ describe("processStreamChunk", () => {
     assert.ok(!(result.state.ansiPending instanceof Buffer), "ansiPending should not be a Buffer");
   });
 
-  test("falls back when the native stream symbol is missing", () => {
-    const original = native.processStreamChunk;
-    native.processStreamChunk = undefined;
+  test("falls back when the native stream symbol is missing", (t) => {
+    const restore = replaceNativeProcessStreamChunk(t, undefined);
+    if (!restore) return;
     try {
       const result = processStreamChunk(Buffer.from("\x1b[32mgreen\x1b[0m\n"));
       assert.equal(result.text, "green\n");
       assert.deepEqual(result.state, { utf8Pending: [], ansiPending: [] });
     } finally {
-      native.processStreamChunk = original;
+      restore();
     }
   });
 
-  test("fallback carries split ANSI sequences across chunks", () => {
-    const original = native.processStreamChunk;
-    native.processStreamChunk = undefined;
+  test("fallback carries split ANSI sequences across chunks", (t) => {
+    const restore = replaceNativeProcessStreamChunk(t, undefined);
+    if (!restore) return;
     try {
       const first = processStreamChunk(Buffer.from("\x1b[31"));
       assert.equal(first.text, "");
@@ -63,13 +83,13 @@ describe("processStreamChunk", () => {
       assert.equal(second.text, "OK\n");
       assert.deepEqual(second.state, { utf8Pending: [], ansiPending: [] });
     } finally {
-      native.processStreamChunk = original;
+      restore();
     }
   });
 
-  test("fallback carries split UTF-8 sequences across chunks", () => {
-    const original = native.processStreamChunk;
-    native.processStreamChunk = undefined;
+  test("fallback carries split UTF-8 sequences across chunks", (t) => {
+    const restore = replaceNativeProcessStreamChunk(t, undefined);
+    if (!restore) return;
     try {
       const check = Buffer.from("✓");
       const first = processStreamChunk(
@@ -82,7 +102,7 @@ describe("processStreamChunk", () => {
       assert.equal(second.text, "✓");
       assert.deepEqual(second.state, { utf8Pending: [], ansiPending: [] });
     } finally {
-      native.processStreamChunk = original;
+      restore();
     }
   });
 });

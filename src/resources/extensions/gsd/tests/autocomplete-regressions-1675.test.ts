@@ -120,3 +120,24 @@ test("bare /gsd skip shows usage and does not fall through to unknown-command wa
   );
 });
 
+test("direct loop verbs do not fall through to unknown-command warning", async () => {
+  const loopVerbs = [
+    "research-milestone",
+    "research-slice",
+    "plan-milestone",
+    "plan-slice",
+    "execute-task",
+    "complete-slice",
+    "validate-milestone",
+    "complete-milestone",
+  ];
+
+  for (const verb of loopVerbs) {
+    const ctx = createMockCtx();
+    await handleGSDCommand(verb, ctx as any, {} as any);
+    assert.ok(
+      !ctx.notifications.some((n) => n.message.startsWith(`Unknown: /gsd ${verb}`)),
+      `${verb} should be recognized as a valid /gsd command alias`,
+    );
+  }
+});

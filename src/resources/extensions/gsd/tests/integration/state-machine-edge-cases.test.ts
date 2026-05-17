@@ -883,7 +883,7 @@ describe("dispatch failure modes", () => {
     assert.ok(runUatIdx < uatGateIdx, "run-uat should precede uat-verdict-gate");
   });
 
-  test("UAT verdict gate: ASSESSMENT FAIL blocks closed slice progression", async () => {
+  test("UAT verdict gate: ASSESSMENT FAIL does not hard-stop progression", async () => {
     base = createFullFixture();
     openDatabase(join(base, ".gsd", "gsd.db"));
     insertMilestone({ id: "M001", title: "Active", status: "active" });
@@ -908,11 +908,7 @@ describe("dispatch failure modes", () => {
     ctx.prefs = { uat_dispatch: true } as any;
 
     const result = await getUatVerdictGate().match(ctx);
-    assert.equal(result?.action, "stop", "ASSESSMENT FAIL should block progression");
-    assert.ok(
-      (result as any).reason?.includes('UAT verdict for S01 is "fail"'),
-      "stop reason should report normalized ASSESSMENT verdict",
-    );
+    assert.equal(result, null, "ASSESSMENT FAIL should not hard-stop progression");
   });
 
   test("UAT verdict gate: ROADMAP fallback gates done slices when DB is unavailable", async () => {
@@ -964,15 +960,11 @@ describe("dispatch failure modes", () => {
     ctx.prefs = { uat_dispatch: true } as any;
 
     const result = await getUatVerdictGate().match(ctx);
-    assert.equal(result?.action, "stop", "ROADMAP done slices should be gated without DB");
-    assert.ok(
-      (result as any).reason?.includes('UAT verdict for S01 is "needs-remediation"'),
-      "stop reason should report normalized ASSESSMENT verdict from disk fallback",
-    );
+    assert.equal(result, null, "ROADMAP done slices should not hard-stop progression without DB");
   });
 
   for (const status of ["done", "skipped"]) {
-    test(`UAT verdict gate: legacy closed status "${status}" is gated`, async () => {
+    test(`UAT verdict gate: legacy closed status "${status}" does not hard-stop progression`, async () => {
       base = createFullFixture();
       openDatabase(join(base, ".gsd", "gsd.db"));
       insertMilestone({ id: "M001", title: "Active", status: "active" });
@@ -997,15 +989,7 @@ describe("dispatch failure modes", () => {
       ctx.prefs = { uat_dispatch: true } as any;
 
       const result = await getUatVerdictGate().match(ctx);
-      assert.equal(
-        result?.action,
-        "stop",
-        `${status} slices should be treated as closed for UAT verdict gating`,
-      );
-      assert.ok(
-        (result as any).reason?.includes('UAT verdict for S01 is "needs-remediation"'),
-        "stop reason should report normalized ASSESSMENT verdict",
-      );
+      assert.equal(result, null, `${status} slices should not hard-stop progression`);
     });
   }
 });

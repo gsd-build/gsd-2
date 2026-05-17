@@ -53,6 +53,8 @@ export type EvidenceEntry = BashEvidence | FileWriteEvidence | FileEditEvidence;
 const EXECUTION_TOOL_NAMES = new Set([
   "bash",
   "Bash",
+  "PowerShell",
+  "async_bash",
   "gsd_exec",
   "gsd_exec_search",
   "mcp__gsd-workflow__gsd_exec",

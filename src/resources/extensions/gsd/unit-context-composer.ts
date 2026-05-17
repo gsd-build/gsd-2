@@ -105,6 +105,7 @@ export interface ComposeContextModeInstructionOptions {
 const CONTEXT_MODE_LANE_LABELS: Record<Exclude<ContextModePolicy, "none">, string> = {
   interview: "interview",
   research: "research",
+  triage: "triage",
   planning: "planning",
   execution: "execution",
   verification: "verification",
@@ -117,6 +118,8 @@ const CONTEXT_MODE_GUIDANCE_BY_LANE: Record<Exclude<ContextModePolicy, "none">, 
     "Use `gsd_resume` to restore prior discussion, `gsd_exec` for noisy discovery, and `gsd_exec_search` before repeating scans.",
   research:
     "Use `gsd_exec` for noisy research scans, `gsd_exec_search` before reruns, and `gsd_resume` to restore prior findings.",
+  triage:
+    "Use `gsd_resume` to restore prior triage context, `gsd_exec_search` to reuse evidence, and `gsd_exec` for noisy validation checks.",
   planning:
     "Use `gsd_resume` for planning continuity, `gsd_exec` for noisy checks, and `gsd_exec_search` before rerunning diagnostics.",
   execution:

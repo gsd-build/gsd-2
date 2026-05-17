@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { _buildAbortedPauseContext, isUserInitiatedAbortMessage } from "../bootstrap/agent-end-recovery.js";
-import { _buildCancelledUnitStopReason } from "../auto/phases.js";
+import { _buildCancelledUnitStopReason, _isPauseOriginCancelledResult } from "../auto/phases.js";
 
 test("aborted agent_end maps errorMessage into structured aborted pause context", () => {
   const withMessage = _buildAbortedPauseContext({ errorMessage: "provider aborted request" });
@@ -35,4 +35,13 @@ test("provider user-abort errors are recognized as cancellations, not provider o
   assert.equal(isUserInitiatedAbortMessage("Claude Code process aborted by user"), true);
   assert.equal(isUserInitiatedAbortMessage("Request aborted by user"), true);
   assert.equal(isUserInitiatedAbortMessage("HTTP 503 Service Unavailable"), false);
+});
+
+test("cancelled-without-errorContext while paused is treated as pause-origin cancellation", () => {
+  assert.equal(_isPauseOriginCancelledResult(true, undefined), true);
+  assert.equal(_isPauseOriginCancelledResult(false, undefined), false);
+  assert.equal(
+    _isPauseOriginCancelledResult(true, { category: "aborted", message: "Operation aborted" }),
+    false,
+  );
 });
