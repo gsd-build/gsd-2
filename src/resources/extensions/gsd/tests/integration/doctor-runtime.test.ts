@@ -135,6 +135,35 @@ describe('doctor-runtime', async () => {
       assert.deepStrictEqual(Object.keys(content.cycleCounts).length, 0, "hook state cycle counts cleared");
     });
 
+    test('failed_migration fix removes orphan .gsd.migrating when .gsd is healthy', async (t) => {
+      const dir = createMinimalProject();
+      cleanups.push(dir);
+
+      // Integrity prerequisites for orphan cleanup: STATE.md + core DB tables.
+      writeFileSync(join(dir, ".gsd", "STATE.md"), "# GSD State\n");
+      const { openDatabase, closeDatabase } = await import("../../gsd-db.ts");
+      openDatabase(join(dir, ".gsd", "gsd.db"));
+      t.after(() => closeDatabase());
+
+      const migratingPath = join(dir, ".gsd.migrating");
+      mkdirSync(join(migratingPath, "milestones"), { recursive: true });
+
+      const detect = await runGSDDoctor(dir, { fix: false });
+      assert.ok(
+        detect.issues.some(i => i.code === "failed_migration"),
+        "detects failed migration when .gsd.migrating exists",
+      );
+      assert.ok(existsSync(migratingPath), ".gsd.migrating exists before fix");
+
+      const fixed = await runGSDDoctor(dir, { fix: true });
+      assert.ok(
+        fixed.fixesApplied.some(f => f.includes("removed orphan .gsd.migrating")),
+        "doctor fix removes orphan .gsd.migrating when .gsd is healthy",
+      );
+      assert.ok(!existsSync(migratingPath), ".gsd.migrating removed after fix");
+      assert.ok(existsSync(join(dir, ".gsd")), ".gsd remains in place");
+    });
+
     // ─── Test 3b: Exhausted run-uat retry counter detection & fix ──────
     test('uat_retry_exhausted', async () => {
       const dir = createMinimalProject();

@@ -15,8 +15,27 @@ import { readAllSessionStatuses, isSessionStale, removeSessionStatus } from "./s
 import { recoverFailedMigration } from "./migrate-external.js";
 import { splitCompletedKey } from "./forensics.js";
 import { findMilestoneIds } from "./milestone-ids.js";
+import { _getAdapter, isDbAvailable } from "./gsd-db.js";
 
 const MAX_UAT_ATTEMPTS = 3;
+
+function hasRequiredCoreTables(): boolean {
+  if (!isDbAvailable()) return false;
+  try {
+    const db = _getAdapter();
+    if (!db) return false;
+    const required = ["milestones", "slices", "tasks"];
+    for (const table of required) {
+      const row = db
+        .prepare("SELECT 1 as present FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get(table) as { present?: number } | undefined;
+      if (!row?.present) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function hasAssessmentVerdict(basePath: string, mid: string, sid: string): boolean {
   const assessmentPath = join(gsdRoot(basePath), "milestones", mid, "slices", sid, `${sid}-ASSESSMENT.md`);
@@ -446,6 +465,16 @@ export async function checkRuntimeHealth(
         if (shouldFix("failed_migration")) {
           if (recoverFailedMigration(basePath)) {
             fixesApplied.push("recovered failed migration (.gsd.migrating → .gsd)");
+          } else if (existsSync(localGsd)) {
+            const statePath = join(localGsd, "STATE.md");
+            if (existsSync(statePath) && hasRequiredCoreTables()) {
+              try {
+                rmSync(migratingPath, { recursive: true, force: true });
+                fixesApplied.push("removed orphan .gsd.migrating after verifying .gsd integrity");
+              } catch {
+                // Non-fatal — keep failed_migration issue visible for manual action
+              }
+            }
           }
         }
       }
