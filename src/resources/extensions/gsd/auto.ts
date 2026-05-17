@@ -1776,8 +1776,8 @@ export async function pauseAuto(
   if (s.workerId) {
     try {
       markWorkerStopping(s.workerId);
-    } catch {
-      // best-effort cleanup; pause must still complete
+    } catch (err) {
+      logWarning("engine", `pause worker cleanup failed: ${getErrorMessage(err)}`, { file: "auto.ts" });
     }
     s.workerId = null;
   }
