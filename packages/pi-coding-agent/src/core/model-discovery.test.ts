@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	DISCOVERY_TTLS,
 	getDefaultTTL,
@@ -140,5 +140,246 @@ describe("supportsDiscoveryForApi", () => {
 	it("returns false for non-discoverable APIs", () => {
 		assert.equal(supportsDiscoveryForApi("anthropic-messages"), false);
 		assert.equal(supportsDiscoveryForApi(undefined), false);
+	});
+});
+
+// ─── discovery list URL resolution (regression: no doubled /v1 or /api/v1) ─────
+
+describe("discovery fetchModels — list URL resolution", () => {
+	let prevFetch: typeof fetch;
+
+	beforeEach(() => {
+		prevFetch = globalThis.fetch;
+	});
+
+	afterEach(() => {
+		globalThis.fetch = prevFetch;
+	});
+
+	it("OpenRouter: registry-style base does not double /api/v1", async () => {
+		let requestedUrl = "";
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			requestedUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+			return new Response(JSON.stringify({ data: [] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("openrouter");
+		await adapter.fetchModels("sk-test", "https://openrouter.ai/api/v1");
+		assert.equal(requestedUrl, "https://openrouter.ai/api/v1/models");
+	});
+
+	it("OpenRouter: host-only base gets /api/v1/models", async () => {
+		let requestedUrl = "";
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			requestedUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+			return new Response(JSON.stringify({ data: [] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("openrouter");
+		await adapter.fetchModels("sk-test", "https://openrouter.example");
+		assert.equal(requestedUrl, "https://openrouter.example/api/v1/models");
+	});
+
+	it("OpenRouter: default base when baseUrl omitted", async () => {
+		let requestedUrl = "";
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			requestedUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+			return new Response(JSON.stringify({ data: [] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("openrouter");
+		await adapter.fetchModels("sk-test", undefined);
+		assert.equal(requestedUrl, "https://openrouter.ai/api/v1/models");
+	});
+
+	it("OpenAI adapter: registry-style base does not double /v1", async () => {
+		let requestedUrl = "";
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			requestedUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+			return new Response(JSON.stringify({ data: [] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("openai");
+		await adapter.fetchModels("sk-test", "https://api.openai.com/v1");
+		assert.equal(requestedUrl, "https://api.openai.com/v1/models");
+	});
+
+	it("OpenAI adapter: proxy path preserves single /v1 segment", async () => {
+		let requestedUrl = "";
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			requestedUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+			return new Response(JSON.stringify({ data: [] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("openai");
+		await adapter.fetchModels("sk-test", "https://proxy.example.com/route/v1");
+		assert.equal(requestedUrl, "https://proxy.example.com/route/v1/models");
+	});
+
+	it("OpenAI adapter: host-only base gets /v1/models", async () => {
+		let requestedUrl = "";
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			requestedUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+			return new Response(JSON.stringify({ data: [] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("openai");
+		await adapter.fetchModels("sk-test", "https://api.minimax.example");
+		assert.equal(requestedUrl, "https://api.minimax.example/v1/models");
+	});
+
+	it("OpenAI adapter: default base when baseUrl omitted", async () => {
+		let requestedUrl = "";
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			requestedUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+			return new Response(JSON.stringify({ data: [] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("openai");
+		await adapter.fetchModels("sk-test", undefined);
+		assert.equal(requestedUrl, "https://api.openai.com/v1/models");
+	});
+
+	it("Google: registry-style base does not double /v1beta", async () => {
+		let requestedUrl = "";
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			requestedUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+			return new Response(JSON.stringify({ models: [] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("google");
+		await adapter.fetchModels("google-key", "https://generativelanguage.googleapis.com/v1beta");
+		const parsed = new URL(requestedUrl);
+		assert.equal(parsed.pathname, "/v1beta/models");
+		assert.equal(parsed.searchParams.get("key"), "google-key");
+	});
+
+	it("Google: default base when baseUrl omitted", async () => {
+		let requestedUrl = "";
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			requestedUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+			return new Response(JSON.stringify({ models: [] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("google");
+		await adapter.fetchModels("gk", undefined);
+		const parsed = new URL(requestedUrl);
+		assert.equal(parsed.origin, "https://generativelanguage.googleapis.com");
+		assert.equal(parsed.pathname, "/v1beta/models");
+		assert.equal(parsed.searchParams.get("key"), "gk");
+	});
+
+	it("Ollama: default base when baseUrl omitted", async () => {
+		let requestedUrl = "";
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			requestedUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+			return new Response(JSON.stringify({ models: [] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("ollama");
+		await adapter.fetchModels("", undefined);
+		assert.equal(requestedUrl, "http://localhost:11434/api/tags");
+	});
+
+	it("OpenAI-compat custom provider: host-only base gets /v1/models", async () => {
+		let requestedUrl = "";
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			requestedUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+			return new Response(JSON.stringify({ data: [] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("my-proxy", ["openai-completions"]);
+		await adapter.fetchModels("k", "https://api.custom.example");
+		assert.equal(requestedUrl, "https://api.custom.example/v1/models");
+	});
+
+	it("OpenAI adapter: rejects discovery base URL with query string", async () => {
+		globalThis.fetch = (async () => {
+			throw new Error("fetch should not run");
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("openai");
+		await assert.rejects(adapter.fetchModels("sk-test", "https://api.openai.com/v1?x=1"), /query string or hash fragment/i);
+	});
+
+	it("Google: rejects discovery base URL with hash fragment", async () => {
+		globalThis.fetch = (async () => {
+			throw new Error("fetch should not run");
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("google");
+		await assert.rejects(
+			adapter.fetchModels("google-key", "https://generativelanguage.googleapis.com/v1beta#bad"),
+			/query string or hash fragment/i,
+		);
+	});
+
+	it("OpenAI adapter: non-array payload.data yields empty DiscoveredModel list", async () => {
+		globalThis.fetch = (async () => {
+			return new Response(JSON.stringify({ data: { not: "an-array" } }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("openai");
+		const models = await adapter.fetchModels("sk-test");
+		assert.deepEqual(models, []);
+	});
+
+	it("OpenRouter: invalid pricing strings omit cost (no NaN)", async () => {
+		globalThis.fetch = (async () => {
+			return new Response(
+				JSON.stringify({
+					data: [
+						{
+							id: "m1",
+							name: "M1",
+							pricing: { prompt: "not-a-number", completion: "0.000001" },
+						},
+					],
+				}),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			);
+		}) as typeof fetch;
+
+		const adapter = getDiscoveryAdapter("openrouter");
+		const models = await adapter.fetchModels("sk-test");
+		assert.equal(models.length, 1);
+		assert.equal(models[0].id, "m1");
+		assert.equal(models[0].cost, undefined);
 	});
 });
