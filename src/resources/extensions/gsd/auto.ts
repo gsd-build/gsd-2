@@ -2613,6 +2613,7 @@ export async function startAuto(
       rebuildScope(s.basePath, s.currentMilestoneId);
     }
 
+    const loopDeps = buildLoopDeps(pi);
     ensureOrchestrationModule(ctx, pi, s.basePath || base);
     registerSigtermHandler(lockBase());
 
@@ -2695,7 +2696,7 @@ export async function startAuto(
       ctx,
       pi,
       s,
-      deps: buildLoopDeps(pi),
+      deps: loopDeps,
       runKernelLoop: runUokKernelLoop,
       runLegacyLoop: runLegacyAutoLoop,
     });
