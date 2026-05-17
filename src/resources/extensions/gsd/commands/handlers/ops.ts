@@ -39,7 +39,7 @@ export async function handleOpsCommand(trimmed: string, ctx: ExtensionCommandCon
   if (trimmed === "init") {
     const { detectProjectState } = await import("../../detection.js");
     const { handleReinit, showProjectInit } = await import("../../init-wizard.js");
-    const basePath = projectRoot();
+    const basePath = currentDirectoryRoot();
     const detection = detectProjectState(basePath);
     if (detection.state === "v2-gsd" || detection.state === "v2-gsd-empty") {
       await handleReinit(ctx, detection);
