@@ -264,6 +264,10 @@ export class TUI extends Container {
 	private readonly useSynchronizedOutput =
 		process.platform !== "win32" && process.env.PI_DISABLE_SYNC_OUTPUT !== "1";
 	private _lastRenderedComponents: string[] | null = null;
+	// Whether the previous frame composited overlays onto the screen. When true,
+	// the next frame must redraw even if component output is byte-identical —
+	// otherwise a dismissed overlay is never erased from the terminal.
+	private _lastFrameHadOverlays = false;
 
 	// Overlay stack for modal components rendered on top of base content
 	private focusOrderCounter = 0;
@@ -653,10 +657,18 @@ export class TUI extends Container {
 
 		// Skip ALL post-processing if component output is unchanged.
 		// Container.render() returns the same array reference when stable.
-		if (newLines === this._lastRenderedComponents && this.overlayStack.length === 0) {
+		// Guard with _lastFrameHadOverlays: if the previous frame drew an
+		// overlay, the screen still shows it, so we must redraw to erase it
+		// even when the base component output is identical.
+		if (
+			newLines === this._lastRenderedComponents &&
+			this.overlayStack.length === 0 &&
+			!this._lastFrameHadOverlays
+		) {
 			return;
 		}
 		this._lastRenderedComponents = newLines;
+		this._lastFrameHadOverlays = this.overlayStack.length > 0;
 
 		// Composite overlays into the rendered lines (before differential compare)
 		if (this.overlayStack.length > 0) {

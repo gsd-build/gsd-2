@@ -72,6 +72,30 @@ describe("TUI", () => {
 		assert.ok(!withoutSyncWrapper.startsWith("\x1b[1A\r"), "editor diff must not move above the cursor row");
 	});
 
+	it("redraws to erase a dismissed overlay even when base output is unchanged", () => {
+		// Regression: doRender() short-circuits when component output is
+		// byte-identical to the previous frame. If the previous frame drew an
+		// overlay, an identical next frame with no overlay must still redraw —
+		// otherwise the dismissed overlay is never erased from the screen.
+		const writes: string[] = [];
+		const tui = new TUI(makeTerminal(writes));
+		tui.addChild({ render: () => ["base line one", "base line two"], invalidate() {} });
+		const anyTui = tui as any;
+
+		anyTui.doRender();
+		const overlay = tui.showOverlay({ render: () => ["OVERLAY"], invalidate() {} });
+		anyTui.doRender();
+		const writesBeforeHide = writes.length;
+
+		overlay.hide();
+		anyTui.doRender();
+
+		assert.ok(
+			writes.length > writesBeforeHide,
+			"dismissing an overlay must trigger a redraw to erase it, even when the base component output is byte-identical",
+		);
+	});
+
 	it("omits synchronized-output wrappers when PI_DISABLE_SYNC_OUTPUT is enabled", () => {
 		const previous = process.env.PI_DISABLE_SYNC_OUTPUT;
 		process.env.PI_DISABLE_SYNC_OUTPUT = "1";
