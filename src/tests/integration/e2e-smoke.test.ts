@@ -347,6 +347,21 @@ test("gsd with no TTY exits 1 with clean terminal-required error", async () => {
   assertNoCrashMarkers(combined);
 });
 
+test("gsd with unknown subcommand and no TTY exits 1 without hanging", async () => {
+  const result = await runGsd(["nonsense"], 15_000);
+
+  assert.ok(!result.timedOut, "process should not hang");
+  assert.strictEqual(result.code, 1, `expected exit 1, got ${result.code}`);
+
+  const combined = stripAnsi(result.stdout + result.stderr);
+  assert.ok(
+    combined.includes("TTY") || combined.includes("terminal") || combined.includes("Interactive"),
+    `expected TTY/terminal error message, got:\n${combined.slice(0, 500)}`,
+  );
+
+  assertNoCrashMarkers(combined);
+});
+
 // ---------------------------------------------------------------------------
 // 10. gsd with unknown flags does not crash
 // ---------------------------------------------------------------------------
