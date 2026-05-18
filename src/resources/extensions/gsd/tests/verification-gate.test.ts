@@ -593,6 +593,7 @@ test("isLikelyCommand: known command prefixes are accepted", () => {
   assert.equal(isLikelyCommand("cargo test"), true);
   assert.equal(isLikelyCommand("go test ./..."), true);
   assert.equal(isLikelyCommand("make test"), true);
+  assert.equal(isLikelyCommand("uv run pytest"), true);
 });
 
 test("isLikelyCommand: path-like first tokens are accepted", () => {
@@ -636,6 +637,19 @@ test("isLikelyCommand: short lowercase tokens without flags are accepted (could 
 test("validateVerificationCommand rejects shell control syntax", () => {
   assert.deepEqual(validateVerificationCommand("python3 -m pytest tests/ -q --tb=short").ok, true);
   const result = validateVerificationCommand("python3 -m pytest tests/ -q --tb=short 2>&1 | tail -5");
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.match(result.reason, /shell control syntax/);
+  }
+});
+
+test("validateVerificationCommand allows semicolons inside quoted python -c code", () => {
+  const result = validateVerificationCommand("uv run python3 -c \"import yaml; yaml.safe_load('x: 1')\"");
+  assert.equal(result.ok, true);
+});
+
+test("validateVerificationCommand rejects shell operators after single-quote backslash desync patterns", () => {
+  const result = validateVerificationCommand("echo 'x\\'; ls");
   assert.equal(result.ok, false);
   if (!result.ok) {
     assert.match(result.reason, /shell control syntax/);
