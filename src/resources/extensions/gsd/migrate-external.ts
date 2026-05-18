@@ -103,6 +103,11 @@ export function migrateToExternalState(basePath: string): MigrationResult {
           cpSync(localGsd, migratingPath, { recursive: true, force: true });
           rmSync(localGsd, { recursive: true, force: true });
         } catch (copyErr) {
+          // If copy succeeded but delete failed (e.g. EPERM file lock), remove
+          // the migrated copy so we don't leave an orphaned .gsd.migrating.
+          if (existsSync(localGsd) && existsSync(migratingPath)) {
+            try { rmSync(migratingPath, { recursive: true, force: true }); } catch { /* best-effort cleanup */ }
+          }
           return { migrated: false, error: `Migration rename/copy failed: ${copyErr instanceof Error ? copyErr.message : String(copyErr)}` };
         }
       } else {
