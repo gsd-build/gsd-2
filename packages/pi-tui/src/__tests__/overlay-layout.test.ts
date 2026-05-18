@@ -14,7 +14,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { compositeOverlays, type OverlayEntry } from "../overlay-layout.js";
+import { applyLineResets, compositeLineAt, compositeOverlays, type OverlayEntry } from "../overlay-layout.js";
 
 function makeEntry(
 	lines: string[],
@@ -128,6 +128,28 @@ function stripAnsi(line: string): string {
 		.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
 		.replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, "");
 }
+
+describe("overlay resets and hyperlink closure", () => {
+	it("applyLineResets appends only SGR reset when no hyperlink is open", () => {
+		const lines = ["plain"];
+		applyLineResets(lines);
+		assert.equal(lines[0], "plain\x1b[0m");
+	});
+
+	it("applyLineResets appends hyperlink close when OSC8 link is left open", () => {
+		const lines = ["\x1b]8;;https://example.com\x07text"];
+		applyLineResets(lines);
+		assert.equal(lines[0], "\x1b]8;;https://example.com\x07text\x1b[0m\x1b]8;;\x07");
+	});
+
+	it("compositeLineAt appends hyperlink close only for segments with unclosed links", () => {
+		const plain = compositeLineAt("AB", "Z", 1, 1, 2);
+		assert.equal(plain.includes("\x1b]8;;\x07"), false);
+
+		const withOpenLink = compositeLineAt("\x1b]8;;https://example.com\x07AB", "Z", 1, 1, 2);
+		assert.equal(withOpenLink.includes("\x1b[0m\x1b]8;;\x07Z"), true);
+	});
+});
 
 describe("compositeOverlays — backdrop", () => {
 	it("positions overlays against the visible terminal when base content is short", () => {
