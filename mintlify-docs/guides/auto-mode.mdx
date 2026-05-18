@@ -116,6 +116,13 @@ A sliding-window analysis detects stuck loops — catching cycles like A→B→A
 
 Auto mode also enforces a same-unit consecutive dispatch cap for `complete-milestone`, `validate-milestone`, and `research-slice`. The loop allows two consecutive dispatches of the same unit in the same phase and stops before a third attempt with a repeat-cap warning that instructs you to run `/gsd resume` after intervention.
 
+### Pre-execution blocking failures
+
+For planning units (`plan-slice` / `refine-slice`), pre-execution checks validate plan consistency (file references, task inputs, dependencies); when these checks fail, a two-step recovery path applies:
+
+1. The first blocking failure writes a replan trigger and auto mode continues into `replanning-slice` on the next dispatch.
+2. If blocking failures continue after a prior replan attempt, auto mode pauses and surfaces escalation details plus the evidence path.
+
 ### Timeout supervision
 
 | Timeout | Default | Behavior                   |

@@ -47,7 +47,7 @@ import { regenerateIfMissing } from "./workflow-projections.js";
 import { WorktreeStateProjection } from "./worktree-state-projection.js";
 import { createWorkspace, scopeMilestone } from "./workspace.js";
 import { normalizeWorktreePathForCompare } from "./worktree-root.js";
-import { isDbAvailable, getDbPath, refreshOpenDatabaseFromDisk, getTask, getSlice, getMilestone, updateTaskStatus, _getAdapter, getVerificationEvidence } from "./gsd-db.js";
+import { isDbAvailable, getDbPath, refreshOpenDatabaseFromDisk, getTask, getSlice, getMilestone, updateTaskStatus, _getAdapter, getVerificationEvidence, getReplanHistory } from "./gsd-db.js";
 import { renderPlanCheckboxes } from "./markdown-renderer.js";
 import { consumeSignal } from "./session-status-io.js";
 import {
@@ -86,6 +86,7 @@ import { validateArtifact } from "./schemas/validate.js";
 import { verificationRetryKey } from "./auto/verification-retry-policy.js";
 import { getLedger } from "./metrics.js";
 import { getUnitCostSpikeAction } from "./auto-budget.js";
+import { executeReplan } from "./triage-resolution.js";
 
 // ─── Path Comparison Helper ───────────────────────────────────────────────
 /** Compare two paths for physical identity, tolerating trailing slashes and symlinks. */
@@ -1652,23 +1653,56 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
             ? `\n  ${NOTIFICATION_BULLET} ...and ${blockingChecks.length - MAX_NOTIFICATION_DETAILS} more`
             : "";
           const evidenceNote = `\nSee ${evidencePath} for full details.`;
-          ctx.ui.notify(
-            `Pre-execution checks failed: ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"} found\n${details}${suffix}${evidenceNote}`,
-            "error",
-          );
-          // Persist failure context so the next plan-slice re-dispatch can inject
-          // it into the prompt and break the infinite loop (#4551).
-          s.lastPreExecFailure = {
-            unitId: currentUnit.id,
-            blockingFindings: blockingChecks.map(
-              c => `[${c.category}] ${c.target}: ${c.message}`,
-            ),
-            verdictExcerpt: `status=${result.status}; ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"} detected`,
-          };
-          // Track consecutive pre-exec failures per slice for loop detection.
-          const retryKey = currentUnit.id;
-          s.preExecRetryCount.set(retryKey, (s.preExecRetryCount.get(retryKey) ?? 0) + 1);
-          preExecPauseNeeded = true;
+          const replanHistory = getReplanHistory(mid, sid);
+          if (replanHistory.length > 0) {
+            ctx.ui.notify(
+              `Pre-execution checks failed after replan: ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"} found\n${details}${suffix}${evidenceNote}`,
+              "error",
+            );
+            // Persist failure context so the next plan-slice re-dispatch can inject
+            // it into the prompt and break the infinite loop (#4551).
+            s.lastPreExecFailure = {
+              unitId: currentUnit.id,
+              blockingFindings: blockingChecks.map(
+                c => `[${c.category}] ${c.target}: ${c.message}`,
+              ),
+              verdictExcerpt: `status=${result.status}; ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"} detected`,
+            };
+            // Track consecutive pre-exec failures per slice for loop detection.
+            const retryKey = currentUnit.id;
+            s.preExecRetryCount.set(retryKey, (s.preExecRetryCount.get(retryKey) ?? 0) + 1);
+            preExecPauseNeeded = true;
+          } else {
+            const triggerWritten = executeReplan(s.canonicalProjectRoot, mid, sid, {
+              id: "pre-exec-failure",
+              text: `Pre-execution checks found ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"} for ${mid}/${sid}`,
+              timestamp: new Date().toISOString(),
+              status: "resolved",
+              classification: "replan",
+              rationale: "Pre-execution checks found blocking issues. Replan to repair plan/task references before execution.",
+            });
+            if (triggerWritten) {
+              ctx.ui.notify(
+                `Pre-execution checks failed — triggering replan for ${sid} (${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"})`,
+                "warning",
+              );
+            } else {
+              ctx.ui.notify(
+                `Pre-execution checks failed: ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"} found\n${details}${suffix}${evidenceNote}`,
+                "error",
+              );
+              s.lastPreExecFailure = {
+                unitId: currentUnit.id,
+                blockingFindings: blockingChecks.map(
+                  c => `[${c.category}] ${c.target}: ${c.message}`,
+                ),
+                verdictExcerpt: `status=${result.status}; ${blockingCount} blocking issue${blockingCount === 1 ? "" : "s"} detected (replan trigger write failed)`,
+              };
+              const retryKey = currentUnit.id;
+              s.preExecRetryCount.set(retryKey, (s.preExecRetryCount.get(retryKey) ?? 0) + 1);
+              preExecPauseNeeded = true;
+            }
+          }
         } else if (result.status === "warn") {
           ctx.ui.notify(
             `Pre-execution checks passed with warnings`,

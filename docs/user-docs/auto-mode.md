@@ -203,6 +203,15 @@ For `run-uat`, existence alone is not sufficient: a pre-existing `S##-ASSESSMENT
 
 Artifact verification retries are capped at 3 attempts. If the expected artifact is still missing after those retries, GSD pauses auto mode with an "Artifact still missing..." error instead of relying on loop detection or an unbounded dispatch counter.
 
+### Pre-Execution Blocking Failures
+
+For planning units (`plan-slice` / `refine-slice`), pre-execution checks now use a two-step recovery path to avoid immediate hard stops:
+
+1. First blocking failure writes a replan trigger and auto mode continues into `replanning-slice` on the next dispatch.
+2. If blocking pre-execution failures still occur after a prior replan attempt, auto mode pauses and surfaces an escalation notification with blocking findings and evidence path.
+
+This keeps the first failure recoverable-by-default while still failing loud when replanning did not resolve the underlying plan issues.
+
 ### Post-Mortem Investigation (v2.40)
 
 `/gsd forensics` is a full-access GSD debugger for post-mortem analysis of auto-mode failures. It provides:
