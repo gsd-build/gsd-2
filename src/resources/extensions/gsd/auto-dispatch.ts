@@ -1651,7 +1651,18 @@ export async function resolveDispatch(
   // Delegate to registry when available
   try {
     const registry = getRegistry();
-    return annotateBackgroundable(await registry.evaluateDispatch(ctx));
+    const action = annotateBackgroundable(await registry.evaluateDispatch(ctx));
+    if (
+      action.action === "dispatch" &&
+      ctx.session?.exhaustedVerificationUnits?.has(`${action.unitType}:${action.unitId}`)
+    ) {
+      return {
+        action: "stop",
+        reason: `Unit ${action.unitId} exhausted verification retries this session.`,
+        level: "error",
+      };
+    }
+    return action;
   } catch (err) {
     // Registry not initialized — fall back to inline loop
     logWarning("dispatch", `registry dispatch failed, falling back to inline rules: ${err instanceof Error ? err.message : String(err)}`);
@@ -1661,7 +1672,19 @@ export async function resolveDispatch(
     const result = await rule.match(ctx);
     if (result) {
       if (result.action !== "skip") result.matchedRule = rule.name;
-      return annotateBackgroundable(result);
+      const action = annotateBackgroundable(result);
+      if (
+        action.action === "dispatch" &&
+        ctx.session?.exhaustedVerificationUnits?.has(`${action.unitType}:${action.unitId}`)
+      ) {
+        return {
+          action: "stop",
+          reason: `Unit ${action.unitId} exhausted verification retries this session.`,
+          level: "error",
+          matchedRule: rule.name,
+        };
+      }
+      return action;
     }
   }
 

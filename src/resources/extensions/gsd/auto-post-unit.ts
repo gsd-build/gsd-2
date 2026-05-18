@@ -1321,8 +1321,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
             s.basePath,
           );
           if (attempt > MAX_ARTIFACT_VERIFICATION_RETRIES) {
-            s.verificationRetryCount.delete(retryKey);
-            s.verificationRetryFailureHashes.delete(retryKey);
+            s.exhaustedVerificationUnits.add(retryKey);
             debugLog("postUnit", { phase: "artifact-verify-exhausted", unitType: s.currentUnit.type, unitId: s.currentUnit.id, attempt });
             ctx.ui.notify(
               `${failureDetails} Pausing auto-mode after ${MAX_ARTIFACT_VERIFICATION_RETRIES} retries.`,

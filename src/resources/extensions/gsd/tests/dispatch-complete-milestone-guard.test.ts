@@ -12,7 +12,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 
-import { DISPATCH_RULES, type DispatchContext } from "../auto-dispatch.ts";
+import { DISPATCH_RULES, resolveDispatch, type DispatchContext } from "../auto-dispatch.ts";
+import { AutoSession } from "../auto/session.ts";
 import { closeDatabase, insertMilestone, insertSlice, openDatabase } from "../gsd-db.ts";
 
 function makeBase(): string {
@@ -88,6 +89,23 @@ describe("completing-milestone dispatch guard (#4324)", () => {
     assert.equal(result?.action, "dispatch");
     assert.equal(result?.unitType, "complete-milestone");
     assert.equal(result?.unitId, "M001");
+  });
+
+  test("resolveDispatch stops complete-milestone when unit is exhausted in-session (#5662)", async () => {
+    base = makeBase();
+    openDatabase(join(base, ".gsd", "gsd.db"));
+    insertMilestone({ id: "M001", title: "Milestone One", status: "active" });
+
+    const ctx = buildDispatchCtx(base);
+    ctx.state.phase = "complete";
+
+    const session = new AutoSession();
+    session.exhaustedVerificationUnits.add("complete-milestone:M001");
+
+    const result = await resolveDispatch({ ...ctx, session });
+
+    assert.equal(result.action, "stop");
+    assert.match(result.reason, /exhausted verification retries this session/i);
   });
 
   test("dispatches complete-milestone when only .gsd/ files exist in git history (#5097)", async () => {
