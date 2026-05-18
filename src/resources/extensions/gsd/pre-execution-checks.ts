@@ -362,7 +362,12 @@ function extractPathFromAnnotation(raw: string): string {
 
   const backtickMatch = trimmed.match(/^(`+)([^`]+)\1(?:(?:\s+[—–-]\s+.+)|(?:\s+\([^()]+\)))?$/);
   if (backtickMatch) {
-    return backtickMatch[2].trim();
+    const inner = backtickMatch[2].trim();
+    const innerParenMatch = inner.match(/^(.+?)\s+\([^()]+\)$/);
+    if (innerParenMatch) return innerParenMatch[1].trim();
+    const innerAnnotatedMatch = inner.match(/^(.+?)\s+[—–-]\s+.+$/);
+    if (innerAnnotatedMatch) return innerAnnotatedMatch[1].trim();
+    return inner;
   }
 
   // Strip leading/trailing double or single quotes wrapping the whole value.
