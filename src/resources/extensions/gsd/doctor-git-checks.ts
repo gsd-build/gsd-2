@@ -1,7 +1,7 @@
 // GSD-2 doctor git health checks
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
-import { join, sep } from "node:path";
+import { join } from "node:path";
 
 import type { DoctorIssue, DoctorIssueCode } from "./doctor-types.js";
 import { loadFile } from "./files.js";
@@ -16,6 +16,7 @@ import { nativeIsRepo, nativeWorktreeList, nativeWorktreeRemove, nativeBranchLis
 import { getAllWorktreeHealth } from "./worktree-health.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { listUnmergedGitPaths } from "./git-conflict-state.js";
+import { resolveWorktreeProjectRoot } from "./worktree-root.js";
 
 /**
  * Returns true if the directory contains only doctor artifacts
@@ -544,12 +545,13 @@ export async function checkGitHealth(
   // Check GSD-managed worktrees for: merged branches, stale work, dirty
   // state, and unpushed commits. Only worktrees under .gsd/worktrees/.
   try {
-    const healthStatuses = getAllWorktreeHealth(basePath);
+    const healthBasePath = resolveWorktreeProjectRoot(basePath);
+    const healthStatuses = getAllWorktreeHealth(healthBasePath);
     const cwd = process.cwd();
 
     for (const health of healthStatuses) {
       const wt = health.worktree;
-      const isCwd = wt.path === cwd || cwd.startsWith(wt.path + sep);
+      const isCwd = isSameOrNestedPath(cwd, wt.path);
 
       // Branch fully merged into main — safe to remove
       if (health.mergedIntoMain) {
@@ -565,7 +567,7 @@ export async function checkGitHealth(
         if (health.safeToRemove && shouldFix("worktree_branch_merged") && !isCwd) {
           try {
             const { removeWorktree } = await import("./worktree-manager.js");
-            removeWorktree(basePath, wt.name, { deleteBranch: true, branch: wt.branch });
+            removeWorktree(healthBasePath, wt.name, { deleteBranch: true, branch: wt.branch });
             fixesApplied.push(`removed merged worktree "${wt.name}" and deleted branch ${wt.branch}`);
           } catch {
             fixesApplied.push(`failed to remove merged worktree "${wt.name}"`);
