@@ -13,12 +13,17 @@ export function fuzzyMatch(query: string, text: string): FuzzyMatch {
 	const queryLower = query.toLowerCase();
 	const textLower = text.toLowerCase();
 
+	// Iterate by Unicode code point, not UTF-16 code unit, so astral-plane
+	// characters (emoji, rare CJK) match as single units instead of surrogates.
+	const textChars = Array.from(textLower);
+
 	const matchQuery = (normalizedQuery: string): FuzzyMatch => {
-		if (normalizedQuery.length === 0) {
+		const queryChars = Array.from(normalizedQuery);
+		if (queryChars.length === 0) {
 			return { matches: true, score: 0 };
 		}
 
-		if (normalizedQuery.length > textLower.length) {
+		if (queryChars.length > textChars.length) {
 			return { matches: false, score: 0 };
 		}
 
@@ -27,9 +32,9 @@ export function fuzzyMatch(query: string, text: string): FuzzyMatch {
 		let lastMatchIndex = -1;
 		let consecutiveMatches = 0;
 
-		for (let i = 0; i < textLower.length && queryIndex < normalizedQuery.length; i++) {
-			if (textLower[i] === normalizedQuery[queryIndex]) {
-				const isWordBoundary = i === 0 || /[\s\-_./:]/.test(textLower[i - 1]!);
+		for (let i = 0; i < textChars.length && queryIndex < queryChars.length; i++) {
+			if (textChars[i] === queryChars[queryIndex]) {
+				const isWordBoundary = i === 0 || /[\s\-_./:]/.test(textChars[i - 1]!);
 
 				// Reward consecutive matches
 				if (lastMatchIndex === i - 1) {
@@ -56,7 +61,7 @@ export function fuzzyMatch(query: string, text: string): FuzzyMatch {
 			}
 		}
 
-		if (queryIndex < normalizedQuery.length) {
+		if (queryIndex < queryChars.length) {
 			return { matches: false, score: 0 };
 		}
 
