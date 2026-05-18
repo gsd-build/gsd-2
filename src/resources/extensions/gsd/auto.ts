@@ -1684,6 +1684,7 @@ export async function pauseAuto(
   _errorContext?: ErrorContext,
 ): Promise<void> {
   if (!s.active) return;
+  s.active = false;
   clearUnitTimeout();
   stopAutoCommandPolling();
 
@@ -1775,7 +1776,6 @@ export async function pauseAuto(
     debugLog("pause-orchestration-stop", { error: err instanceof Error ? err.message : String(err) });
   }
 
-  s.active = false;
   s.paused = true;
   deactivateGSD();
   restoreProjectRootEnv();
