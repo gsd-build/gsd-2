@@ -39,7 +39,7 @@ The Sketch Scope inlined above is a **hard constraint**. Plan within it. If code
 Before decomposing:
 
 1. Read inlined prior slice SUMMARY files. Note interface shifts, file-layout changes, and constraints.
-2. Use `rg`, `find`, and targeted reads to confirm current code for files the sketch references. If a module/type/API moved or changed, reflect that.
+2. Use `read`, `grep`, `glob`, `ls`, and targeted reads to confirm current code for files the sketch references. If you need richer search, use read-only `bash` commands. If a module/type/API moved or changed, reflect that.
 3. If prior slices flagged fragility or known issues relevant to this slice, fold them into task verification.
 
 ### Source Files
