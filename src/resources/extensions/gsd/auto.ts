@@ -188,6 +188,7 @@ import { recoverFailedMigration } from "./migrate-external.js";
 import { initRegistry, convertDispatchRules } from "./rule-registry.js";
 import { emitJournalEvent as _emitJournalEvent, type JournalEntry } from "./journal.js";
 import { isClosedStatus } from "./status-guards.js";
+import { MILESTONE_ID_RE } from "./milestone-ids.js";
 import {
   type AutoDashboardData,
   updateProgressWidget as _updateProgressWidget,
@@ -1321,7 +1322,11 @@ export async function stopAuto(
     // Skip if phases.ts already merged this milestone — avoids the double
     // mergeAndExit that fails because the branch was already deleted (#2645).
     try {
-      if (s.currentMilestoneId && !s.milestoneMergedInPhases) {
+      const stopMilestoneId = _resolveStopAutoMilestoneId(
+        s.currentMilestoneId,
+        s.basePath,
+      );
+      if (stopMilestoneId && !s.milestoneMergedInPhases) {
         const notifyCtx = ctx
           ? { notify: ctx.ui.notify.bind(ctx.ui) }
           : { notify: () => {} };
@@ -1338,19 +1343,19 @@ export async function stopAuto(
         let milestoneComplete = false;
         try {
           if (isDbAvailable()) {
-            const dbRow = getMilestone(s.currentMilestoneId);
+            const dbRow = getMilestone(stopMilestoneId);
             milestoneComplete = dbRow?.status === "complete";
           } else {
             const summaryPath = resolveMilestoneFile(
               s.originalBasePath || s.basePath,
-              s.currentMilestoneId,
+              stopMilestoneId,
               "SUMMARY",
             );
             if (!summaryPath) {
               // Also check in the worktree path (SUMMARY may not be synced yet)
               const wtSummaryPath = resolveMilestoneFile(
                 s.basePath,
-                s.currentMilestoneId,
+                stopMilestoneId,
                 "SUMMARY",
               );
               milestoneComplete = wtSummaryPath !== null;
@@ -1364,7 +1369,7 @@ export async function stopAuto(
         }
 
         const exitAction = _selectStopAutoWorktreeExit({
-          currentMilestoneId: s.currentMilestoneId,
+          currentMilestoneId: stopMilestoneId,
           milestoneComplete,
           milestoneMergedInPhases: s.milestoneMergedInPhases,
         });
@@ -1372,7 +1377,7 @@ export async function stopAuto(
         if (exitAction === "merge") {
           // Milestone is complete — merge worktree branch back to main
           const r = lifecycle.exitMilestone(
-            s.currentMilestoneId,
+            stopMilestoneId,
             { merge: true },
             notifyCtx,
           );
@@ -1380,7 +1385,7 @@ export async function stopAuto(
         } else if (exitAction === "preserve") {
           // Milestone still in progress — preserve branch for later resumption
           const r = lifecycle.exitMilestone(
-            s.currentMilestoneId,
+            stopMilestoneId,
             { merge: false, preserveBranch: true },
             notifyCtx,
           );
@@ -1663,6 +1668,15 @@ export async function stopAuto(
 }
 
 export type StopAutoWorktreeExitAction = "none" | "merge" | "preserve";
+
+export function _resolveStopAutoMilestoneId(
+  currentMilestoneId: string | null,
+  basePath: string,
+): string | null {
+  if (currentMilestoneId) return currentMilestoneId;
+  const detected = detectWorktreeName(basePath);
+  return detected && MILESTONE_ID_RE.test(detected) ? detected : null;
+}
 
 export function _selectStopAutoWorktreeExit(args: {
   currentMilestoneId: string | null;
