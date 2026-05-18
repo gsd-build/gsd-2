@@ -404,7 +404,7 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
           GSD_SKIP_RTK_INSTALL: '1'
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build core
         run: npm run build:core

@@ -4,11 +4,11 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { DISPATCH_RULES, getUatCount } from "../auto-dispatch.ts";
+import { DISPATCH_RULES, getUatCount, incrementUatCount } from "../auto-dispatch.ts";
 
 function makeUatProject(): string {
   const base = mkdtempSync(join(tmpdir(), "gsd-uat-cap-"));
@@ -62,5 +62,28 @@ test("run-uat dispatch skips after three attempts without a verdict", async () =
     assert.equal(getUatCount(basePath, "M001", "S01"), 4);
   } finally {
     rmSync(basePath, { recursive: true, force: true });
+  }
+});
+
+test("run-uat counter persists across recycled worktree base paths", () => {
+  const projectRoot = makeUatProject();
+  const worktreeA = join(projectRoot, ".gsd", "worktrees", "M001-a");
+  const worktreeB = join(projectRoot, ".gsd", "worktrees", "M001-b");
+  const canonicalCounter = join(projectRoot, ".gsd", "runtime", "uat-count-M001-S01.json");
+
+  mkdirSync(worktreeA, { recursive: true });
+  mkdirSync(worktreeB, { recursive: true });
+
+  try {
+    assert.equal(incrementUatCount(worktreeA, "M001", "S01"), 1);
+    assert.equal(incrementUatCount(worktreeB, "M001", "S01"), 2);
+    assert.equal(getUatCount(worktreeB, "M001", "S01"), 2);
+    assert.ok(existsSync(canonicalCounter), "counter should be stored under project-root .gsd/runtime");
+    assert.ok(
+      !existsSync(join(worktreeA, ".gsd", "runtime", "uat-count-M001-S01.json")),
+      "counter should not be stored under worktree-local .gsd/runtime",
+    );
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
   }
 });

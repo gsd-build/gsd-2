@@ -23,6 +23,7 @@ import { extractVerdict, isAcceptableUatVerdict } from "./verdict-parser.js";
 
 import {
   gsdRoot,
+  resolveGsdPathContract,
   resolveMilestoneFile,
   resolveMilestonePath,
   resolveSliceFile,
@@ -401,7 +402,7 @@ export function setRewriteCount(basePath: string, count: number): void {
 const MAX_UAT_ATTEMPTS = 3;
 
 function uatCountPath(basePath: string, mid: string, sid: string): string {
-  return join(gsdRoot(basePath), "runtime", `uat-count-${mid}-${sid}.json`);
+  return join(resolveGsdPathContract(basePath).projectGsd, "runtime", `uat-count-${mid}-${sid}.json`);
 }
 
 export function getUatCount(basePath: string, mid: string, sid: string): number {
@@ -416,7 +417,7 @@ export function getUatCount(basePath: string, mid: string, sid: string): number 
 export function incrementUatCount(basePath: string, mid: string, sid: string): number {
   const count = getUatCount(basePath, mid, sid) + 1;
   const filePath = uatCountPath(basePath, mid, sid);
-  mkdirSync(join(gsdRoot(basePath), "runtime"), { recursive: true });
+  mkdirSync(join(resolveGsdPathContract(basePath).projectGsd, "runtime"), { recursive: true });
   writeFileSync(filePath, JSON.stringify({ count, updatedAt: new Date().toISOString() }) + "\n");
   return count;
 }
