@@ -152,6 +152,7 @@ export const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "language",
   "context_window_override",
   "context_mode",
+  "interactive_routing",
   "planning_depth",
   "claude_code_mcp",
   "workspace",
@@ -260,6 +261,19 @@ export interface RemoteQuestionsConfig {
   channel_id: string | number;
   timeout_minutes?: number;        // clamped to 1-30
   poll_interval_seconds?: number;  // clamped to 2-30
+}
+
+export interface InteractiveRoutingConfig {
+  /** Master switch. Default: false (opt-in). */
+  enabled?: boolean;
+  /** Notify when model is changed by routing. Default: true. */
+  notify?: boolean;
+  /** Respect /model as ceiling — never upgrade beyond session model. Default: true. */
+  respect_model_command?: boolean;
+  /** Minimum turns between model switches to avoid flicker. Default: 2. */
+  anti_flicker_turns?: number;
+  /** Turns to respect after a manual /model switch before routing resumes. Default: 3. */
+  manual_override_cooldown?: number;
 }
 
 export interface CmuxPreferences {
@@ -527,6 +541,13 @@ export interface GSDPreferences {
    * same regardless of model.  Case-insensitive.
    */
   flat_rate_providers?: string[];
+  /**
+   * Interactive model routing. When enabled, GSD classifies each turn's work
+   * type and switches to the optimal model via dynamic routing — even outside
+   * auto-mode. Downgrade-only: never upgrades beyond the session model.
+   * Default: disabled (opt-in). See ADR-018.
+   */
+  interactive_routing?: InteractiveRoutingConfig;
   /**
    * Language preference for GSD responses. Accepts any language name or code
    * (e.g. "Chinese", "zh", "German", "de", "日本語"). Persists across /clear.

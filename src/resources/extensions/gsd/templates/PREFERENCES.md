@@ -39,6 +39,12 @@ dynamic_routing:
   budget_pressure:
   cross_provider:
   hooks:
+interactive_routing:
+  enabled:
+  notify: true
+  respect_model_command: true
+  anti_flicker_turns: 2
+  manual_override_cooldown: 3
 disabled_model_providers: []
 uok:
   enabled: true
