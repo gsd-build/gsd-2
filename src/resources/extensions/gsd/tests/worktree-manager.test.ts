@@ -129,6 +129,7 @@ describe("createWorktree — duplicate rejection", () => {
       "should throw on duplicate worktree name",
     );
   });
+
 });
 
 // ─── listWorktrees ────────────────────────────────────────────────────────────
@@ -153,6 +154,16 @@ describe("listWorktrees", () => {
     removeWorktree(base, "feature-x");
     const list = listWorktrees(base);
     assert.strictEqual(list.length, 0, "should have no worktrees after removal");
+  });
+
+  test("surfaces orphan milestone branches not in registered worktrees", () => {
+    run("git branch milestone/M003", base);
+    const list = listWorktrees(base);
+    const orphan = list.find((wt) => wt.branch === "milestone/M003");
+    assert.ok(orphan, "expected orphan milestone branch to be listed");
+    assert.strictEqual(orphan?.name, "M003", "orphan name should be derived from branch");
+    assert.strictEqual(orphan?.exists, false, "orphan should be marked missing on disk");
+    assert.strictEqual(orphan?.orphan, true, "orphan should be explicitly flagged");
   });
 });
 

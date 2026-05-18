@@ -24,6 +24,7 @@ import { join, resolve, sep } from "node:path";
 import { GSDError, GSD_PARSE_ERROR, GSD_STALE_STATE, GSD_LOCK_HELD, GSD_GIT_ERROR, GSD_MERGE_CONFLICT } from "./errors.js";
 import { logWarning } from "./workflow-logger.js";
 import {
+  nativeBranchList,
   nativeBranchDelete,
   nativeBranchExists,
   nativeBranchForceReset,
@@ -55,6 +56,7 @@ export interface WorktreeInfo {
   path: string;
   branch: string;
   exists: boolean;
+  orphan?: boolean;
 }
 
 /** Per-file line change stats from git diff --numstat. */
@@ -324,7 +326,14 @@ export function createWorktree(basePath: string, name: string, opts: { branch?: 
       }
       // Reset the stale branch to the start point, then attach worktree to it
       nativeBranchForceReset(basePath, branch, startPoint);
-      nativeWorktreeAdd(basePath, wtPath, branch);
+      try {
+        nativeWorktreeAdd(basePath, wtPath, branch);
+      } catch (error) {
+        // If add fails after reset, the branch now exists without a worktree.
+        // Clean it up so we do not accumulate orphan branches.
+        deleteBranchIfPresent(basePath, branch, "nativeBranchDelete failed after worktree add failure");
+        throw error;
+      }
     }
   } else {
     nativeWorktreeAdd(basePath, wtPath, branch, true, startPoint);
@@ -364,8 +373,6 @@ export function listWorktrees(basePath: string): WorktreeInfo[] {
     });
 
   const entries = nativeWorktreeList(basePath);
-
-  if (!entries.length) return [];
 
   const worktrees: WorktreeInfo[] = [];
 
@@ -418,6 +425,26 @@ export function listWorktrees(basePath: string): WorktreeInfo[] {
       path: resolvedEntryPath,
       branch,
       exists: existsSync(resolvedEntryPath),
+    });
+  }
+
+  const registeredBranches = new Set(
+    entries
+      .filter(entry => !entry.isBare && !!entry.branch)
+      .map(entry => entry.branch as string),
+  );
+  const orphanMilestoneBranches = nativeBranchList(basePath, "milestone/*")
+    .filter(branch => !registeredBranches.has(branch));
+
+  for (const branch of orphanMilestoneBranches) {
+    const name = branch.slice("milestone/".length);
+    if (!name || name.includes("/")) continue;
+    worktrees.push({
+      name,
+      path: worktreePath(basePath, name),
+      branch,
+      exists: false,
+      orphan: true,
     });
   }
 
