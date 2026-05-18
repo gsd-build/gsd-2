@@ -1,3 +1,5 @@
+// GSD-2 + packages/pi-tui/src/components/editor.ts - Multi-line editor with autocomplete rendering.
+
 import type { AutocompleteProvider, CombinedAutocompleteProvider } from "../autocomplete.js";
 import { getEditorKeybindings } from "../keybindings.js";
 import { decodeKittyPrintable, matchesKey } from "../keys.js";
@@ -159,6 +161,7 @@ export class Editor implements Component, Focusable {
 	private autocompleteState: "regular" | "force" | null = null;
 	private autocompletePrefix: string = "";
 	private autocompleteMaxVisible: number = 5;
+	private autocompleteRenderedRows: number = 0;
 
 	// Debounce for @ file autocomplete to prevent blocking the event loop
 	// with synchronous fuzzyFind calls on every keystroke
@@ -230,6 +233,7 @@ export class Editor implements Component, Focusable {
 		const newMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
 		if (this.autocompleteMaxVisible !== newMaxVisible) {
 			this.autocompleteMaxVisible = newMaxVisible;
+			this.autocompleteRenderedRows = Math.min(this.autocompleteRenderedRows, this.autocompleteMaxVisible + 1);
 			this.tui.requestRender();
 		}
 	}
@@ -446,10 +450,15 @@ export class Editor implements Component, Focusable {
 		// Add autocomplete list if active
 		if (this.autocompleteState && this.autocompleteList) {
 			const autocompleteResult = this.autocompleteList.render(contentWidth);
+			this.autocompleteRenderedRows = Math.max(this.autocompleteRenderedRows, autocompleteResult.length);
+			const reservedRows = Math.min(this.autocompleteRenderedRows, this.autocompleteMaxVisible + 1);
 			for (const line of autocompleteResult) {
 				const lineWidth = visibleWidth(line);
 				const linePadding = " ".repeat(Math.max(0, contentWidth - lineWidth));
 				result.push(`${leftPadding}${line}${linePadding}${rightPadding}`);
+			}
+			for (let i = autocompleteResult.length; i < reservedRows; i++) {
+				result.push(`${leftPadding}${" ".repeat(contentWidth)}${rightPadding}`);
 			}
 		}
 
@@ -2096,6 +2105,7 @@ https://github.com/EsotericSoftware/spine-runtimes/actions/runs/19536643416/job/
 		this.autocompleteState = null;
 		this.autocompleteList = undefined;
 		this.autocompletePrefix = "";
+		this.autocompleteRenderedRows = 0;
 		this.clearAutocompleteDebounce();
 	}
 

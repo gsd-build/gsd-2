@@ -282,13 +282,16 @@ test("dispatch guard does not skip prior milestone from SUMMARY projection when 
 });
 
 test("consecutive dispatch guard blocks complete-milestone after repeat cap", () => {
-  // REPEAT_CAP = 2: two same-unit dispatches are allowed; the third is blocked.
+  // REPEAT_CAP = 5: five same-unit dispatches are allowed; the sixth is blocked.
   const state = {
     consecutiveDispatchCount: new Map<string, number>(),
     lastDispatchedKey: null as string | null,
     lastDispatchPhase: null as string | null,
   };
 
+  assert.equal(getConsecutiveDispatchBlocker(state, "completing-milestone", "complete-milestone", "M009"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "completing-milestone", "complete-milestone", "M009"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "completing-milestone", "complete-milestone", "M009"), null);
   assert.equal(getConsecutiveDispatchBlocker(state, "completing-milestone", "complete-milestone", "M009"), null);
   assert.equal(getConsecutiveDispatchBlocker(state, "completing-milestone", "complete-milestone", "M009"), null);
   assert.match(
@@ -297,16 +300,50 @@ test("consecutive dispatch guard blocks complete-milestone after repeat cap", ()
   );
 });
 
-test("consecutive dispatch guard resets when unit changes", () => {
+test("consecutive dispatch guard blocks execute-task after repeat cap", () => {
   const state = {
     consecutiveDispatchCount: new Map<string, number>(),
     lastDispatchedKey: null as string | null,
     lastDispatchPhase: null as string | null,
   };
 
+  assert.equal(getConsecutiveDispatchBlocker(state, "executing-slice", "execute-task", "M001/S01/T01"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "executing-slice", "execute-task", "M001/S01/T01"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "executing-slice", "execute-task", "M001/S01/T01"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "executing-slice", "execute-task", "M001/S01/T01"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "executing-slice", "execute-task", "M001/S01/T01"), null);
+  assert.match(
+    getConsecutiveDispatchBlocker(state, "executing-slice", "execute-task", "M001/S01/T01") ?? "",
+    /same-unit repeat cap reached/,
+  );
+});
+
+test("consecutive dispatch guard preserves per-unit counts across unit switches", () => {
+  const state = {
+    consecutiveDispatchCount: new Map<string, number>(),
+    lastDispatchedKey: null as string | null,
+    lastDispatchPhase: null as string | null,
+  };
+
+  // Interleave 5 dispatches of each unit; per-unit counts accumulate independently.
   assert.equal(getConsecutiveDispatchBlocker(state, "validating-milestone", "validate-milestone", "M001"), null);
   assert.equal(getConsecutiveDispatchBlocker(state, "validating-milestone", "research-slice", "M001/parallel-research"), null);
   assert.equal(getConsecutiveDispatchBlocker(state, "validating-milestone", "validate-milestone", "M001"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "validating-milestone", "research-slice", "M001/parallel-research"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "validating-milestone", "validate-milestone", "M001"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "validating-milestone", "research-slice", "M001/parallel-research"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "validating-milestone", "validate-milestone", "M001"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "validating-milestone", "research-slice", "M001/parallel-research"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "validating-milestone", "validate-milestone", "M001"), null);
+  assert.equal(getConsecutiveDispatchBlocker(state, "validating-milestone", "research-slice", "M001/parallel-research"), null);
+  assert.match(
+    getConsecutiveDispatchBlocker(state, "validating-milestone", "validate-milestone", "M001") ?? "",
+    /same-unit repeat cap reached/,
+  );
+  assert.match(
+    getConsecutiveDispatchBlocker(state, "validating-milestone", "research-slice", "M001/parallel-research") ?? "",
+    /same-unit repeat cap reached/,
+  );
 });
 
 test("consecutive dispatch guard resets when phase changes", () => {

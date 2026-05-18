@@ -26,6 +26,7 @@ import { nativeIsRepo, nativeHasChanges, nativeLastCommitEpoch, nativeGetCurrent
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { runEnvironmentChecks } from "./doctor-environment.js";
 import { ensureDbOpen } from "./bootstrap/dynamic-tools.js";
+import { listUnmergedGitPaths } from "./git-conflict-state.js";
 
 // ── Health Score Tracking ──────────────────────────────────────────────────
 
@@ -215,6 +216,17 @@ export interface PreDispatchHealthResult {
 export async function preDispatchHealthGate(basePath: string): Promise<PreDispatchHealthResult> {
   const issues: string[] = [];
   const fixesApplied: string[] = [];
+  const unmergedPaths = nativeIsRepo(basePath) ? listUnmergedGitPaths(basePath) : [];
+  if (unmergedPaths === null) {
+    issues.push("Failed to evaluate unresolved Git conflicts. Resolve Git/worktree state manually before resuming auto-mode.");
+    return { proceed: false, reason: issues[0], issues, fixesApplied };
+  }
+
+  if (unmergedPaths.length > 0) {
+    issues.push(
+      `Unresolved Git conflicts: ${unmergedPaths.join(", ")}. Resolve these files manually before resuming auto-mode.`,
+    );
+  }
 
   // ── Stale crash lock blocks dispatch ──
   // If a stale lock exists, the crash recovery path should handle it,
@@ -241,7 +253,11 @@ export async function preDispatchHealthGate(basePath: string): Promise<PreDispat
       const blockers = ["MERGE_HEAD", "rebase-apply", "rebase-merge"].filter(
         f => existsSync(join(gitDir, f)),
       );
-      if (blockers.length > 0) {
+      if (blockers.length > 0 && unmergedPaths.length > 0) {
+        issues.push(
+          `Corrupt git state: ${blockers.join(", ")} with unresolved conflicts. Resolve conflicts manually before running /gsd doctor fix.`,
+        );
+      } else if (blockers.length > 0) {
         // Try to auto-heal
         try {
           const result = abortAndReset(basePath);
@@ -310,7 +326,7 @@ export async function preDispatchHealthGate(basePath: string): Promise<PreDispat
       const snapshotsEnabled = prefs.git?.snapshots !== false;
       const thresholdMinutes = prefs.stale_commit_threshold_minutes ?? 30;
 
-      if (snapshotsEnabled && thresholdMinutes > 0 && nativeHasChanges(basePath)) {
+      if (snapshotsEnabled && thresholdMinutes > 0 && unmergedPaths.length === 0 && nativeHasChanges(basePath)) {
         const branch = nativeGetCurrentBranch(basePath);
         const lastEpoch = nativeLastCommitEpoch(basePath, branch || "HEAD");
         const nowEpoch = Math.floor(Date.now() / 1000);

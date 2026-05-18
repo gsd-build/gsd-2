@@ -181,3 +181,72 @@ test("register-hooks does not write Context Mode snapshot when disabled", async 
     "disabled Context Mode should not write a snapshot",
   );
 });
+
+test("register-hooks falls back to 0.6 when compaction threshold preference is out of range", async (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-compaction-threshold-"));
+  mkdirSync(join(base, ".gsd"), { recursive: true });
+  writeFileSync(
+    join(base, ".gsd", "PREFERENCES.md"),
+    [
+      "---",
+      "version: 1",
+      "context_management:",
+      "  enabled: true",
+      "  compaction_threshold_percent: 0.99",
+      "---",
+      "",
+    ].join("\n"),
+    "utf-8",
+  );
+
+  const originalCwd = process.cwd();
+  const originalGsdHome = process.env.GSD_HOME;
+  const isolatedHome = join(base, ".isolated-gsd-home");
+  mkdirSync(isolatedHome, { recursive: true });
+  process.env.GSD_HOME = isolatedHome;
+  process.chdir(base);
+
+  t.after(() => {
+    process.chdir(originalCwd);
+    if (originalGsdHome === undefined) delete process.env.GSD_HOME;
+    else process.env.GSD_HOME = originalGsdHome;
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  const handlers = new Map<string, Array<(event: any, ctx?: any) => Promise<any> | any>>();
+  const pi = {
+    on(event: string, handler: (event: any, ctx?: any) => Promise<any> | any) {
+      const existing = handlers.get(event) ?? [];
+      existing.push(handler);
+      handlers.set(event, existing);
+    },
+  } as any;
+  registerHooks(pi, []);
+
+  const sessionStartHandlers = handlers.get("session_start");
+  assert.ok(sessionStartHandlers && sessionStartHandlers.length > 0, "session_start handler should be registered");
+
+  const observedThresholds: number[] = [];
+  const ctx = {
+    cwd: base,
+    hasUI: false,
+    ui: {
+      notify: () => {},
+      setStatus: () => {},
+      setWidget: () => {},
+    },
+    modelRegistry: {
+      setDisabledModelProviders: () => {},
+    },
+    setCompactionThresholdOverride: (value: number) => {
+      observedThresholds.push(value);
+    },
+  };
+
+  for (const handler of sessionStartHandlers ?? []) {
+    await handler({}, ctx);
+  }
+
+  assert.ok(observedThresholds.length > 0, "session_start should apply compaction threshold override");
+  assert.equal(observedThresholds.at(-1), 0.6);
+});

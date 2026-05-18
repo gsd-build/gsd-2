@@ -98,11 +98,6 @@ function rightAlign(left: string, right: string, width: number): string {
   return clampVisible(left + ' '.repeat(gap) + right, width)
 }
 
-function frameLine(content: string, width: number): string {
-  const inner = Math.max(1, width - 2)
-  return chalk.hex('#a7ba78')('│') + rpad(content, inner) + chalk.hex('#a7ba78')('│')
-}
-
 /** Clamp rendered terminal output by visible columns. Falls back to plain text only when truncating. */
 function clampVisible(s: string, w: number): string {
   if (w <= 0) return ''
@@ -131,7 +126,9 @@ export function buildWelcomeScreenLines(opts: WelcomeScreenOptions): string[] {
 
   const innerWidth = Math.max(1, termWidth - 2)
   const logoWidth = Math.max(...GSD_LOGO.map((line) => visLen(line)))
-  const divider = ` ${chalk.dim('│')} `
+  // Plain spaces, not a `│` divider — a vertical bar would be dragged into
+  // every copied logo row.
+  const divider = '   '
   const panelWidth = innerWidth - logoWidth - visLen(divider)
   if (panelWidth < 44) {
     return ['', `  Get Shit Done v${version}`, `  ${shortCwd}`, '']
@@ -172,13 +169,14 @@ export function buildWelcomeScreenLines(opts: WelcomeScreenOptions): string[] {
   ]
 
   // ── Render ──────────────────────────────────────────────────────────────────
+  // No box: logo + panel are indented, with a single closing rule. Every
+  // content line is plain text, so terminal selection copies cleanly.
   const out: string[] = ['']
-  out.push(chalk.hex('#a7ba78')('╭' + '─'.repeat(termWidth - 2) + '╮'))
   for (let i = 0; i < GSD_LOGO.length; i++) {
     const logo = rpad(chalk.hex('#a7ba78')(GSD_LOGO[i]), logoWidth)
-    out.push(frameLine(`${logo}${divider}${panelRows[i] ?? ''}`, termWidth))
+    out.push('  ' + clampVisible(`${logo}${divider}${panelRows[i] ?? ''}`, termWidth - 2))
   }
-  out.push(chalk.hex('#a7ba78')('╰' + '─'.repeat(termWidth - 2) + '╯'))
+  out.push(chalk.hex('#a7ba78')('─'.repeat(Math.max(0, termWidth))))
   out.push('')
 
   return out.map((line) => clampVisible(line, termWidth))

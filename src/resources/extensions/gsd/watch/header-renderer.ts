@@ -63,10 +63,16 @@ function rightAlign(left: string, right: string, width: number): string {
   return truncateToWidth(left + " ".repeat(gap) + right, width, "");
 }
 
-function frameLine(content: string, width: number): string {
-  if (width < 3) return truncateToWidth(content, Math.max(0, width), "");
-  const innerWidth = Math.max(0, width - 2);
-  return `${color("│", colors.border)}${padVisible(content, innerWidth)}${color("│", colors.border)}`;
+/** Left indent for borderless panel content. */
+const PANEL_INDENT = "  ";
+
+/**
+ * Indent a content line for the borderless header. No side bars are drawn, so
+ * terminal text selection copies clean content instead of `│` chars.
+ */
+function panelLine(content: string, width: number): string {
+  const innerWidth = Math.max(0, width - PANEL_INDENT.length);
+  return PANEL_INDENT + truncateToWidth(content, innerWidth, "");
 }
 
 // ─── Data Readers ─────────────────────────────────────────────────────────────
@@ -79,8 +85,9 @@ function frameLine(content: string, width: number): string {
 export function readModelFromPreferences(): string {
   try {
     const prefs = loadEffectiveGSDPreferences();
-    if (!prefs?.preferences.models) return "default";
-    const m = prefs.preferences.models as Record<string, unknown>;
+    const models = prefs?.preferences?.models;
+    if (!models) return "default";
+    const m = models as Record<string, unknown>;
     // Try common phases in priority order
     for (const phase of ["execution", "planning", "research", "discuss", "subagent"]) {
       const val = m[phase];
@@ -236,11 +243,13 @@ export function formatMcpRow(servers: string[], width: number): string {
 export function renderHeaderLines(data: HeaderData, width: number): string[] {
   if (width < 40) return renderStackedHeader(data, width);
   const outerWidth = width;
-  const innerWidth = Math.max(0, outerWidth - 2);
+  const innerWidth = Math.max(0, outerWidth - PANEL_INDENT.length);
   const logoLines = GSD_LOGO;
   const logoWidth = Math.max(...logoLines.map((line) => visibleWidth(line)));
-  const gap = ` ${color("│", colors.dim)} `;
-  const panelWidth = innerWidth - logoWidth - visibleWidth(gap);
+  // Plain spaces, not a `│` divider — a vertical bar here would be dragged
+  // into every copied logo row.
+  const gap = "   ";
+  const panelWidth = innerWidth - logoWidth - gap.length;
 
   if (panelWidth < 44) {
     return renderStackedHeader(data, width);
@@ -280,14 +289,14 @@ export function renderHeaderLines(data: HeaderData, width: number): string[] {
     ),
   ];
 
-  const lines = [
-    color("╭" + "─".repeat(Math.max(0, outerWidth - 2)) + "╮", colors.border),
-  ];
+  const lines: string[] = [];
   for (let i = 0; i < logoLines.length; i++) {
     const logo = padVisible(color(logoLines[i], colors.border), logoWidth);
-    lines.push(frameLine(`${logo}${gap}${panelLines[i] ?? ""}`, outerWidth));
+    lines.push(panelLine(`${logo}${gap}${panelLines[i] ?? ""}`, outerWidth));
   }
-  lines.push(color("╰" + "─".repeat(Math.max(0, outerWidth - 2)) + "╯", colors.border));
+  // Closing rule only — it sits on its own line, so selecting header content
+  // never picks it up.
+  lines.push(color("─".repeat(Math.max(0, outerWidth)), colors.border));
   return lines;
 }
 
@@ -299,22 +308,24 @@ function renderStackedHeader(data: HeaderData, width: number): string[] {
   if (outerWidth < 3) {
     return [color(truncateToWidth("GSD", outerWidth, ""), colors.accent)];
   }
-  const lines: string[] = [color("╭" + "─".repeat(Math.max(0, outerWidth - 2)) + "╮", colors.border)];
+  const innerWidth = Math.max(0, outerWidth - PANEL_INDENT.length);
+  const lines: string[] = [];
 
   // Title
-  lines.push(frameLine(`${color("GSD", colors.accent)} ${bold(color("Project Console", colors.text))}`, outerWidth));
+  lines.push(panelLine(`${color("GSD", colors.accent)} ${bold(color("Project Console", colors.text))}`, outerWidth));
 
   // Info
-  lines.push(frameLine(formatInfoLine("Project", data.directory, outerWidth - 2), outerWidth));
-  lines.push(frameLine(formatInfoLine("Command", "/gsd start", outerWidth - 2), outerWidth));
-  lines.push(frameLine(formatInfoLine("Branch", data.branch, outerWidth - 2), outerWidth));
-  lines.push(frameLine(formatInfoLine("Model", data.model, outerWidth - 2), outerWidth));
+  lines.push(panelLine(formatInfoLine("Project", data.directory, innerWidth), outerWidth));
+  lines.push(panelLine(formatInfoLine("Command", "/gsd start", innerWidth), outerWidth));
+  lines.push(panelLine(formatInfoLine("Branch", data.branch, innerWidth), outerWidth));
+  lines.push(panelLine(formatInfoLine("Model", data.model, innerWidth), outerWidth));
 
   // MCP
-  const mcpRow = formatMcpRow(data.mcpServers, Math.max(1, outerWidth - 7));
-  if (mcpRow) lines.push(frameLine(`${color("MCP", colors.muted)} ${mcpRow}`, outerWidth));
-  lines.push(frameLine(`${color("/gsd to begin", colors.accent)}  ${color("/gsd help", colors.muted)}`, outerWidth));
-  lines.push(color("╰" + "─".repeat(Math.max(0, outerWidth - 2)) + "╯", colors.border));
+  const mcpRow = formatMcpRow(data.mcpServers, Math.max(1, innerWidth - 5));
+  if (mcpRow) lines.push(panelLine(`${color("MCP", colors.muted)} ${mcpRow}`, outerWidth));
+  lines.push(panelLine(`${color("/gsd to begin", colors.accent)}  ${color("/gsd help", colors.muted)}`, outerWidth));
+  // Closing rule on its own line keeps header content copy-clean.
+  lines.push(color("─".repeat(outerWidth), colors.border));
 
   return lines;
 }

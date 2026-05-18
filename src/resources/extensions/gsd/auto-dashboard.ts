@@ -29,7 +29,7 @@ import { execFileSync } from "node:child_process";
 import { truncateToWidth, visibleWidth } from "@gsd/pi-tui";
 import { makeUI } from "../shared/tui.js";
 import { GLYPH, INDENT } from "../shared/mod.js";
-import { padRightVisible, renderFrame, renderProgressBar, rightAlign, wrapVisibleText } from "./tui/render-kit.js";
+import { padRightVisible, renderPanel, renderProgressBar, rightAlign, wrapVisibleText } from "./tui/render-kit.js";
 import { computeProgressScore } from "./progress-score.js";
 import {
   getGlobalGSDPreferencesPath,
@@ -1118,12 +1118,14 @@ export function setAutoOutcomeWidget(
           : snapshot.status === "blocked" ? "!"
             : snapshot.status === "paused" ? "||"
               : "●";
-      const innerWidth = Math.max(8, width - 4);
+      // renderPanel indents body lines by 2; mirror that for wrap width.
+      const innerWidth = Math.max(8, width - 2);
       const maxLines = 7;
       const lines: string[] = [];
       const elapsed = snapshot.startedAt ? formatAutoElapsed(snapshot.startedAt) : "";
       const heading = `${theme.fg(color, icon)} ${theme.fg("accent", theme.bold("GSD"))} ${theme.fg("text", snapshot.title)}`;
-      lines.push(rightAlign(heading, elapsed ? theme.fg("dim", elapsed) : "", innerWidth));
+      // Elapsed rides inline after the title on the header rule.
+      const title = elapsed ? `${heading}  ${theme.fg("dim", elapsed)}` : heading;
       const commands = snapshot.commands?.filter(Boolean) ?? [];
       const commandLine = commands.length > 0 ? theme.fg("dim", commands.join("  ·  ")) : null;
 
@@ -1149,7 +1151,7 @@ export function setAutoOutcomeWidget(
         lines.push(commandLine);
       }
 
-      return renderFrame(theme, lines, width, { borderColor: color, paddingX: 1 });
+      return renderPanel(theme, title, lines, width, { ruleColor: color });
     },
     invalidate(): void {},
     dispose(): void {},

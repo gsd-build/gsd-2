@@ -138,6 +138,36 @@ export function getProjectGSDPreferencesPath(basePath?: string): string {
   return projectPreferencesPath(basePath);
 }
 
+
+/**
+ * Normalize a value loaded from disk (or passed from another component) into
+ * a plain, mutable bare preferences object.
+ *
+ * Accepts:
+ *   - a `LoadedGSDPreferences` wrapper (`{ path, scope, preferences, ... }`)
+ *   - a bare `GSDPreferences` object
+ *   - `null` / `undefined` / any malformed value
+ *
+ * Returns a fresh `Record<string, unknown>` so callers may spread additional
+ * values without mutating the input. This is the single boundary the
+ * preferences wizard funnels existing-on-disk data through, so missing or
+ * partially-formed preference shapes can no longer reach code that assumes
+ * a fully-populated wrapper.
+ */
+export function normalizePreferencesShape(
+  loaded: unknown,
+): Record<string, unknown> {
+  if (!loaded || typeof loaded !== "object") return {};
+  const obj = loaded as Record<string, unknown>;
+  // Wrapper shape (`LoadedGSDPreferences`) carries the nested preferences
+  // under a `.preferences` key. Bare `GSDPreferences` never declares one
+  // (see preferences-types.ts), so the presence of that key is a reliable
+  // discriminator. Tolerate `preferences: undefined` by falling through to
+  // the empty-object return below.
+  const candidate = "preferences" in obj ? obj.preferences : obj;
+  if (!candidate || typeof candidate !== "object") return {};
+  return { ...(candidate as Record<string, unknown>) };
+}
 // ─── Loading ────────────────────────────────────────────────────────────────
 
 export function loadGlobalGSDPreferences(): LoadedGSDPreferences | null {

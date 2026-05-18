@@ -14,6 +14,7 @@ export type DoctorIssueCode =
   | "orphaned_auto_worktree"
   | "stale_milestone_branch"
   | "corrupt_merge_state"
+  | "unresolved_git_conflicts"
   | "tracked_runtime_files"
   | "legacy_slice_branches"
   | "stale_crash_lock"

@@ -9,6 +9,7 @@ import {
   padRightVisible,
   renderFrame,
   renderKeyHints,
+  renderPanel,
   renderProgressBar,
   rightAlign,
   safeLine,
@@ -57,6 +58,27 @@ describe("tui render kit", () => {
     for (const width of [3, 40, 80]) {
       assertWidth(renderFrame(theme, ["row", "long ".repeat(40)], width), width);
     }
+  });
+
+  test("renderPanel stays within width and draws no vertical borders", () => {
+    for (const width of [3, 40, 80]) {
+      const lines = renderPanel(theme, "Title", ["row", "long ".repeat(40)], width);
+      assertWidth(lines, width);
+      // The whole point of renderPanel: no `│` side bars on any line, so
+      // terminal text selection copies clean content.
+      for (const line of lines) {
+        assert.ok(!line.includes("│"), `renderPanel line must not contain a vertical bar: "${line}"`);
+      }
+    }
+  });
+
+  test("renderPanel indents body lines so chrome never sits on copyable text", () => {
+    const lines = renderPanel(theme, "Title", ["body"], 40);
+    // [header, blank, body, footer rule]
+    const body = lines[2];
+    assert.ok(body.startsWith("  body"), `body should be indented: "${body}"`);
+    assert.match(lines[0], /^── Title ─+$/, "header is an inline-titled rule");
+    assert.match(lines[lines.length - 1], /^─+$/, "panel closes with a plain rule");
   });
 
   test("renderKeyHints and renderProgressBar fit caller budgets", () => {

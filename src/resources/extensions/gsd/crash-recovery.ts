@@ -265,6 +265,7 @@ export function clearStaleWorkerLock(basePath: string): void {
     if (!worker) return;
     markLatestActiveForWorkerCanceled(worker.worker_id, "crash-recovered");
     markWorkerCrashed(worker.worker_id);
+    forceReleaseLeasesForWorker(worker.worker_id);
     deleteRuntimeKv("worker", worker.worker_id, SESSION_FILE_KV_KEY);
   } catch {
     // Best-effort.
@@ -343,6 +344,14 @@ export function emitCrashRecoveredUnitEnd(basePath: string, lock: LockData): voi
   emitOpenUnitEndForUnit(basePath, lock.unitType, lock.unitId, "crash-recovered");
 }
 
+/**
+ * Emit a synthetic unit-end journal event for a unit whose unit-start has
+ * no matching unit-end. Returns true if an event was emitted, false if the
+ * unit was already closed or no open start was found.
+ *
+ * Used by emitCrashRecoveredUnitEnd and the dispatch loop crash closeout
+ * path. Never throws — journal failure must not block recovery.
+ */
 export function emitOpenUnitEndForUnit(
   basePath: string,
   unitType: string,

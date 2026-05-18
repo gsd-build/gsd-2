@@ -19,12 +19,21 @@ import { join } from "node:path";
 import { GIT_NO_PROMPT_ENV } from "./git-constants.js";
 import { logWarning } from "./workflow-logger.js";
 import { nativeHasChanges } from "./native-git-bridge.js";
+import { listUnmergedGitPaths } from "./git-conflict-state.js";
 
 export interface PreflightResult {
   /** true when a stash was pushed and postflightPopStash should be called */
   stashPushed: boolean;
+  /** true when the merge must not start because dirty files need user action */
+  blocked?: boolean;
+  /** Machine-readable reason for blocked preflight. */
+  blockedReason?: "dirty-overlap" | "dirty-overlap-eval-failed" | "unmerged-conflicts" | "unmerged-conflicts-eval-failed";
   /** Unique marker embedded in the stash message for targeted restoration */
   stashMarker?: string;
+  /** Dirty paths that overlap the milestone branch diff and would conflict after merge */
+  overlappingPaths?: string[] | null;
+  /** Paths with unresolved Git conflict stages. */
+  conflictedPaths?: string[] | null;
   /** human-readable summary of what happened (empty string for clean trees) */
   summary: string;
 }
@@ -79,6 +88,51 @@ function parseAlreadyExistsNoCheckoutPaths(text: string): string[] {
 
 function readZeroDelimitedPaths(output: string): string[] {
   return output.split("\0").filter(Boolean);
+}
+
+function listDirtyPaths(basePath: string): string[] | null {
+  try {
+    const paths = new Set<string>();
+    for (const args of [
+      ["diff", "--name-only", "-z"],
+      ["diff", "--cached", "--name-only", "-z"],
+      ["ls-files", "--others", "--exclude-standard", "-z"],
+    ]) {
+      for (const path of readZeroDelimitedPaths(gitText(basePath, args))) {
+        paths.add(path);
+      }
+    }
+    return [...paths];
+  } catch {
+    return null;
+  }
+}
+
+function listMilestoneChangedPaths(basePath: string, milestoneId: string): string[] | null {
+  const milestoneBranch = `milestone/${milestoneId}`;
+  try {
+    gitText(basePath, ["rev-parse", "--verify", "--quiet", `refs/heads/${milestoneBranch}`]);
+  } catch {
+    return [];
+  }
+  try {
+    const mergeBase = gitText(basePath, ["merge-base", "HEAD", milestoneBranch]).trim();
+    if (!mergeBase) return null;
+    return readZeroDelimitedPaths(gitText(basePath, ["diff", "--name-only", "-z", mergeBase, milestoneBranch]));
+  } catch {
+    return null;
+  }
+}
+
+function findOverlappingDirtyMilestonePaths(basePath: string, milestoneId: string): string[] | null {
+  const dirtyPaths = listDirtyPaths(basePath);
+  const changedPaths = listMilestoneChangedPaths(basePath, milestoneId);
+  if (!dirtyPaths || !changedPaths) return null;
+
+  const changedPathSet = new Set(changedPaths.filter((path) => !path.startsWith(".gsd/")));
+  return dirtyPaths
+    .filter((path) => !path.startsWith(".gsd/") && changedPathSet.has(path))
+    .sort();
 }
 
 function listStashUntrackedPaths(basePath: string, stashRef: string): string[] | null {
@@ -229,6 +283,62 @@ export function preflightCleanRoot(
 
   if (!isDirty) {
     return { stashPushed: false, summary: "" };
+  }
+
+  const conflictedPaths = listUnmergedGitPaths(basePath);
+  if (conflictedPaths === null) {
+    const msg =
+      `Unable to verify unresolved Git conflicts before milestone ${milestoneId} merge. ` +
+      `Resolve Git/worktree state manually before resuming auto-mode.`;
+    notify(msg, "error");
+    return {
+      stashPushed: false,
+      blocked: true,
+      blockedReason: "unmerged-conflicts-eval-failed",
+      conflictedPaths: null,
+      summary: msg,
+    };
+  }
+  if (conflictedPaths.length > 0) {
+    const msg =
+      `Working tree has unresolved Git conflicts before milestone ${milestoneId} merge: ` +
+      `${conflictedPaths.join(", ")}. Resolve these files manually before resuming auto-mode.`;
+    notify(msg, "error");
+    return {
+      stashPushed: false,
+      blocked: true,
+      blockedReason: "unmerged-conflicts",
+      conflictedPaths,
+      summary: msg,
+    };
+  }
+
+  const overlappingPaths = findOverlappingDirtyMilestonePaths(basePath, milestoneId);
+  if (overlappingPaths === null) {
+    const msg =
+      `Unable to verify dirty-path overlap for milestone ${milestoneId}. ` +
+      `Resolve Git/worktree state manually before resuming auto-mode.`;
+    notify(msg, "error");
+    return {
+      stashPushed: false,
+      blocked: true,
+      blockedReason: "dirty-overlap-eval-failed",
+      overlappingPaths: null,
+      summary: msg,
+    };
+  }
+  if (overlappingPaths && overlappingPaths.length > 0) {
+    const msg =
+      `Working tree has uncommitted files that overlap milestone ${milestoneId} changes: ` +
+      `${overlappingPaths.join(", ")}. Commit, stash, or discard those files before resuming auto-mode.`;
+    notify(msg, "error");
+    return {
+      stashPushed: false,
+      blocked: true,
+      blockedReason: "dirty-overlap",
+      overlappingPaths,
+      summary: msg,
+    };
   }
 
   // Warn the user before stashing

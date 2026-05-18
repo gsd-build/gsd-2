@@ -86,9 +86,11 @@ import {
 import { annotateBackgroundable } from "./delegation-policy.js";
 import { invalidateAllCaches } from "./cache.js";
 import { insertMilestoneValidationGates } from "./milestone-validation-gates.js";
-import { nativeHasChanges } from "./native-git-bridge.js";
+import { nativeHasChanges, nativeIsRepo, _resetHasChangesCache } from "./native-git-bridge.js";
 import { debugLog, isDebugEnabled } from "./debug-logger.js";
 import { resolveCanonicalMilestoneRoot } from "./worktree-manager.js";
+import { listUnmergedGitPaths } from "./git-conflict-state.js";
+import { runTurnGitAction } from "./git-service.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -158,6 +160,54 @@ export interface DispatchRule {
   name: string;
   /** Return a DispatchAction if this rule matches, null to fall through */
   match: (ctx: DispatchContext) => Promise<DispatchAction | null>;
+}
+
+function commitPendingMilestoneCloseoutChanges(basePath: string, mid: string): DispatchAction | null {
+  if (!nativeIsRepo(basePath)) return null;
+
+  const conflictedPaths = listUnmergedGitPaths(basePath);
+  if (conflictedPaths === null) {
+    return {
+      action: "stop",
+      reason: `Cannot complete milestone ${mid}: failed to evaluate unresolved Git conflicts. Resolve Git/worktree state manually before closing.`,
+      level: "error",
+    };
+  }
+  if (conflictedPaths.length > 0) {
+    return {
+      action: "stop",
+      reason: `Cannot complete milestone ${mid}: unresolved Git conflicts detected in ${conflictedPaths.join(", ")}. Resolve conflicts before closing.`,
+      level: "error",
+    };
+  }
+
+  _resetHasChangesCache();
+  if (!nativeHasChanges(basePath)) return null;
+
+  const gitResult = runTurnGitAction({
+    basePath,
+    action: "commit",
+    unitType: "complete-milestone-preflight",
+    unitId: mid,
+  });
+  if (gitResult.status !== "ok") {
+    return {
+      action: "stop",
+      reason: `Cannot complete milestone ${mid}: failed to commit pending changes before closing: ${gitResult.error ?? "unknown git error"}.`,
+      level: "warning",
+    };
+  }
+
+  _resetHasChangesCache();
+  if (nativeHasChanges(basePath)) {
+    return {
+      action: "stop",
+      reason: `Cannot complete milestone ${mid}: uncommitted changes remain after the pre-completion commit. Commit or stash before closing.`,
+      level: "warning",
+    };
+  }
+
+  return null;
 }
 
 export type DeepProjectStage =
@@ -1410,14 +1460,8 @@ export const DISPATCH_RULES: DispatchRule[] = [
         }
       }
 
-      // Safety guard (#6132): refuse closure with uncommitted git changes.
-      if (nativeHasChanges(basePath)) {
-        return {
-          action: "stop",
-          reason: "Cannot complete milestone: uncommitted changes detected. Commit or stash before closing.",
-          level: "warning",
-        };
-      }
+      const closeoutGitStop = commitPendingMilestoneCloseoutChanges(basePath, mid);
+      if (closeoutGitStop) return closeoutGitStop;
 
       // Safety guard (#6132): when UAT dispatch is enabled, enforce a PASS
       // verdict for each closed slice before milestone closure.

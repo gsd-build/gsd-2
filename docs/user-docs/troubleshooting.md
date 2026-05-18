@@ -159,6 +159,21 @@ If recovery still fails, repair runtime state instead of manually deleting indiv
 
 **Fix:** GSD auto-resolves conflicts on `.gsd/` runtime files. For content conflicts in code files, the LLM is given an opportunity to resolve them via a fix-merge session. If that fails, manual resolution is needed.
 
+### Auto mode stops before merge with preflight conflict/overlap errors
+
+**Symptoms:** Auto mode stops with a pre-merge reason like unresolved Git conflicts or dirty working tree overlap.
+
+**What it means:** Milestone merge preflight now fail-closes before merge when either:
+- the repo already has unresolved conflict stages (`git diff --name-only --diff-filter=U` is non-empty), or
+- local dirty files overlap files modified by the milestone branch.
+
+In these states GSD does not auto-stash and does not auto-fix; it stops so you can resolve safely.
+
+**Fix:**
+- Resolve conflict markers and stage the resolved files.
+- Commit, stash, or discard overlapping local edits outside GSD.
+- Re-run `/gsd auto` after `git status` is clean (or at least free of overlapping/conflicted paths).
+
 ### Pre-dispatch says the milestone integration branch no longer exists
 
 **Symptoms:** Auto mode or `/gsd doctor` reports that a milestone recorded an integration branch that no longer exists in git.

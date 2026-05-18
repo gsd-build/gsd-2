@@ -32,6 +32,10 @@ function initGitRepo(base: string): void {
   execFileSync("git", ["commit", "-m", "initial"], { cwd: base, stdio: "ignore" });
 }
 
+function gitOutput(base: string, args: string[]): string {
+  return execFileSync("git", args, { cwd: base, encoding: "utf-8" });
+}
+
 function buildDispatchCtx(basePath: string): DispatchContext {
   return {
     basePath,
@@ -101,15 +105,39 @@ describe("completing-milestone dispatch guard (#4324)", () => {
     assert.equal(result?.unitId, "M001");
   });
 
-  test("blocks complete-milestone dispatch when the working tree is dirty (#6132)", async () => {
+  test("commits pending closeout changes before complete-milestone dispatch (#6132)", async () => {
     base = makeBase();
     initGitRepo(base);
     writeFileSync(join(base, "implementation.txt"), "dirty\n");
 
     const result = await rule.match(buildDispatchCtx(base));
 
+    assert.equal(result?.action, "dispatch");
+    assert.equal(result?.unitType, "complete-milestone");
+    assert.equal(gitOutput(base, ["status", "--porcelain"]), "");
+    assert.match(gitOutput(base, ["log", "-1", "--pretty=%B"]), /auto-commit after complete-milestone-preflight/);
+  });
+
+  test("blocks complete-milestone dispatch when unresolved Git conflicts remain (#6132)", async () => {
+    base = makeBase();
+    initGitRepo(base);
+    writeFileSync(join(base, "implementation.txt"), "stashed change\n");
+    execFileSync("git", ["stash", "push", "-m", "conflicting closeout"], { cwd: base, stdio: "ignore" });
+    writeFileSync(join(base, "implementation.txt"), "committed change\n");
+    execFileSync("git", ["add", "implementation.txt"], { cwd: base, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "change implementation"], { cwd: base, stdio: "ignore" });
+    try {
+      execFileSync("git", ["stash", "apply", "stash@{0}"], { cwd: base, stdio: "ignore" });
+    } catch {
+      // Expected conflict state.
+    }
+
+    const result = await rule.match(buildDispatchCtx(base));
+
     assert.equal(result?.action, "stop");
-    assert.match(result?.reason ?? "", /uncommitted changes detected/i);
+    assert.equal(result?.level, "error");
+    assert.match(result?.reason ?? "", /unresolved Git conflicts detected/i);
+    assert.match(gitOutput(base, ["status", "--porcelain"]), /^UU implementation\.txt/m);
   });
 
   test("blocks complete-milestone dispatch when UAT verdict is non-PASS and uat_dispatch is enabled (#6132)", async () => {

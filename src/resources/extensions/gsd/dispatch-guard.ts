@@ -18,12 +18,7 @@ const SLICE_DISPATCH_TYPES = new Set([
   "complete-slice",
 ]);
 
-const CONSECUTIVE_SAME_UNIT_CAP_TYPES = new Set([
-  "complete-milestone",
-  "validate-milestone",
-  "research-slice",
-]);
-const CONSECUTIVE_SAME_UNIT_CAP = 2;
+const CONSECUTIVE_SAME_UNIT_CAP = 5;
 
 type ConsecutiveDispatchState = Pick<
   LoopState,
@@ -33,10 +28,12 @@ type ConsecutiveDispatchState = Pick<
 /**
  * Prevent repeated dispatches of the same unit within the same phase.
  *
- * Applies only to unit types in `CONSECUTIVE_SAME_UNIT_CAP_TYPES`. The first
- * dispatch for a unit/phase pair starts a counter, unit or phase changes reset
- * tracking, and dispatch is blocked once the counter reaches
- * `CONSECUTIVE_SAME_UNIT_CAP`.
+ * Applies to all unit types. The first dispatch for a unit/phase pair starts
+ * a counter, phase changes reset tracking, and dispatch is blocked once the
+ * counter reaches `CONSECUTIVE_SAME_UNIT_CAP` (5). The cap is intentionally
+ * above the stuck-detection hard-stop threshold (4 consecutive dispatches) so
+ * that stuck detection always fires first; this guard acts as a last-resort
+ * safety net for edge cases where stuck detection is suppressed.
  *
  * Side effects: mutates `state.consecutiveDispatchCount`,
  * `state.lastDispatchedKey`, and `state.lastDispatchPhase`.
@@ -50,18 +47,12 @@ export function getConsecutiveDispatchBlocker(
   unitType: string,
   unitId: string,
 ): string | null {
-  if (!CONSECUTIVE_SAME_UNIT_CAP_TYPES.has(unitType)) return null;
   if (!state.consecutiveDispatchCount) state.consecutiveDispatchCount = new Map<string, number>();
 
   const key = `${unitType}:${unitId}`;
   const phaseChanged = state.lastDispatchPhase !== phase;
-  const switchedUnit = state.lastDispatchedKey !== key;
-  if (phaseChanged || switchedUnit) {
+  if (phaseChanged) {
     state.consecutiveDispatchCount.clear();
-    state.consecutiveDispatchCount.set(key, 1);
-    state.lastDispatchedKey = key;
-    state.lastDispatchPhase = phase;
-    return null;
   }
 
   const count = state.consecutiveDispatchCount.get(key) ?? 0;

@@ -271,6 +271,7 @@ test("ensureDispatchLease blocks when another worker holds the lease", () => {
   assert.deepEqual(outcome, {
     kind: "blocked",
     reason: "Milestone M001 is held by worker worker-2 until 2030-01-01T00:00:00.000Z.",
+    holderWorkerId: "worker-2",
   });
   assert.equal(session.milestoneLeaseToken, null);
   assert.deepEqual(failures, [{

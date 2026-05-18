@@ -240,6 +240,7 @@ test("session_start bootstraps the health widget alongside notifications", async
       getSessionId: () => null,
     },
     model: null,
+    setCompactionThresholdOverride: () => {},
   } as any);
 
   assert.ok(widgets.includes("gsd-health"), "health widget is bootstrapped");

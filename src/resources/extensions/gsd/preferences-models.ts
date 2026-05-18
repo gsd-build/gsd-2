@@ -46,8 +46,9 @@ export function resolveModelForUnit(unitType: string): string | undefined {
  */
 export function resolveModelWithFallbacksForUnit(unitType: string): ResolvedModelConfig | undefined {
   const prefs = loadEffectiveGSDPreferences(undefined, { availableModelIds: [] });
-  if (!prefs?.preferences.models) return undefined;
-  const m = prefs.preferences.models as GSDModelConfigV2;
+  const models = prefs?.preferences?.models;
+  if (!models) return undefined;
+  const m = models as GSDModelConfigV2;
 
   let phaseConfig: string | GSDPhaseModelConfig | undefined;
   switch (unitType) {
@@ -151,9 +152,10 @@ export function resolveDefaultSessionModel(
   sessionProvider?: string,
 ): { provider: string; id: string } | undefined {
   const prefs = loadEffectiveGSDPreferences(undefined, { availableModelIds: [] });
-  if (!prefs?.preferences.models) return undefined;
+  const models = prefs?.preferences?.models;
+  if (!models) return undefined;
 
-  const m = prefs.preferences.models as GSDModelConfigV2;
+  const m = models as GSDModelConfigV2;
 
   // Priority: execution → planning → first configured value
   const candidates: Array<string | GSDPhaseModelConfig | undefined> = [

@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, realpathSync, readFileSync, symlinkSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 
 import { runGSDDoctor } from "../../doctor.ts";
 import { closeDatabase, insertMilestone, insertSlice, openDatabase } from "../../gsd-db.ts";
@@ -74,6 +74,21 @@ Completed.
   run("git add -A", dir);
   run("git commit -m \"add milestone\"", dir);
 
+  return dir;
+}
+
+function createStashApplyConflict(): string {
+  const dir = createRepoWithCompletedMilestone();
+  writeFileSync(join(dir, "README.md"), "# local stashed work\n");
+  run('git stash push -m "local work"', dir);
+  writeFileSync(join(dir, "README.md"), "# merged milestone work\n");
+  run("git add README.md", dir);
+  run('git commit -m "feat: merged readme"', dir);
+  const apply = spawnSync("git", ["stash", "apply", "stash@{0}"], {
+    cwd: dir,
+    encoding: "utf-8",
+  });
+  if (apply.error) throw apply.error;
   return dir;
 }
 
@@ -293,6 +308,26 @@ describe('doctor-git', async () => {
 
       // Verify MERGE_HEAD is gone
       assert.ok(!existsSync(join(dir, ".git", "MERGE_HEAD")), "MERGE_HEAD removed after fix");
+    });
+
+    test('unresolved_git_conflicts is manual-only and preserves conflict state', async () => {
+      const dir = createStashApplyConflict();
+      cleanups.push(dir);
+      assert.equal(existsSync(join(dir, ".git", "MERGE_HEAD")), false, "stash apply conflict should not require MERGE_HEAD");
+
+      const detect = await runGSDDoctor(dir);
+      const conflictIssues = detect.issues.filter(i => i.code === "unresolved_git_conflicts");
+      assert.equal(conflictIssues.length, 1, "detects unresolved Git conflict index");
+      assert.equal(conflictIssues[0]?.severity, "error");
+      assert.equal(conflictIssues[0]?.fixable, false);
+      assert.match(conflictIssues[0]?.message ?? "", /README\.md/);
+
+      const fixed = await runGSDDoctor(dir, { fix: true });
+      assert.ok(
+        !fixed.fixesApplied.some((fix) => fix.includes("cleaned merge state")),
+        "doctor fix must not reset conflict files",
+      );
+      assert.match(run("git diff --name-only --diff-filter=U", dir), /README\.md/, "conflict remains for manual resolution");
     });
 
     // ─── Test 4: Tracked runtime files detection & fix ─────────────────

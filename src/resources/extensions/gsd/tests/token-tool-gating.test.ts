@@ -141,6 +141,28 @@ test("buildMinimalAutoGsdToolSet includes closeout tool for complete-slice", () 
   assert.ok(!result.includes("gsd_complete_slice"));
 });
 
+test("buildMinimalAutoGsdToolSet preserves workflow MCP-namespaced closeout tools", () => {
+  const result = buildMinimalAutoGsdToolSet([
+    "bash",
+    "read",
+    "mcp__gsd-workflow__gsd_task_reopen",
+    "mcp__gsd-workflow__gsd_replan_slice",
+    "mcp__gsd-workflow__gsd_slice_complete",
+    "mcp__gsd-workflow__gsd_complete_slice",
+    "mcp__gsd-workflow__gsd_exec",
+    "mcp__gsd-workflow__memory_query",
+    "mcp__gsd-workflow__capture_thought",
+  ], "complete-slice");
+
+  assert.ok(result.includes("mcp__gsd-workflow__gsd_task_reopen"));
+  assert.ok(result.includes("mcp__gsd-workflow__gsd_replan_slice"));
+  assert.ok(result.includes("mcp__gsd-workflow__gsd_slice_complete"));
+  assert.ok(!result.includes("mcp__gsd-workflow__gsd_complete_slice"));
+  assert.ok(result.includes("mcp__gsd-workflow__gsd_exec"));
+  assert.ok(result.includes("mcp__gsd-workflow__memory_query"));
+  assert.ok(result.includes("mcp__gsd-workflow__capture_thought"));
+});
+
 test("buildMinimalAutoGsdToolSet covers execute-task-simple", () => {
   const result = buildMinimalAutoGsdToolSet([
     "bash",

@@ -80,6 +80,50 @@ export function statusGlyph(
   }
 }
 
+/**
+ * Render a titled panel without vertical borders.
+ *
+ * Unlike {@link renderFrame}, this draws no `│` side bars — only a header rule
+ * with an inline title and a closing rule. Body lines are indented. Because no
+ * box-drawing character ever sits on a content line, terminal text selection
+ * copies clean text. Use this for inline output users may copy; keep
+ * {@link renderFrame} for transient overlays that benefit from a full box.
+ *
+ *   ── Title ────────────────────────────────
+ *
+ *     body line
+ *     body line
+ *   ──────────────────────────────────────────
+ */
+export function renderPanel(
+  theme: ThemeLike,
+  title: string,
+  inner: string[],
+  width: number,
+  options: { ruleColor?: string; indent?: number } = {},
+): string[] {
+  if (width < 4) {
+    return [safeLine(title, width), ...inner.map((line) => safeLine(line, width))];
+  }
+
+  const ruleColor = options.ruleColor ?? "borderAccent";
+  const indent = Math.max(0, options.indent ?? 2);
+  const rule = (text: string) => theme.fg(ruleColor, text);
+
+  // Header rule: "── <title> ───────"
+  const lead = "── ";
+  const headerUsed = visibleWidth(lead) + visibleWidth(title) + 1;
+  const headerFill = Math.max(0, width - headerUsed);
+  const header = safeLine(rule(lead) + title + " " + rule("─".repeat(headerFill)), width, "");
+
+  // Body lines, indented so no chrome sits on copyable text.
+  const pad = " ".repeat(indent);
+  const contentWidth = Math.max(0, width - indent);
+  const body = inner.map((line) => safeLine(pad + safeLine(line, contentWidth), width, ""));
+
+  return [header, "", ...body, rule("─".repeat(width))];
+}
+
 export function renderFrame(
   theme: ThemeLike,
   inner: string[],

@@ -104,6 +104,8 @@ Common block reasons and operator actions:
 | `missing-closeout-tool` | A closeout unit such as task, slice, milestone, UAT, or gate completion has no required workflow tool available. | Restore the missing `gsd_*` workflow tool registration or update the unit manifest/tool contract so the unit can durably save its result. |
 | `root-missing` / `root-not-directory` | A source-writing unit would run from a missing or invalid unit root. | Recreate or repair the milestone worktree/root, or clear an incorrect `GSD_UNIT_ROOT`, before launching another source-writing unit. |
 | `git-metadata-missing` | A source-writing unit root exists but is not a git worktree or repository root. | Run the unit from the project root or milestone worktree with valid `.git` metadata; recreate the worktree if it was deleted or partially copied. |
+| `preflight-unmerged-conflicts` | Milestone merge preflight found unresolved Git conflict stages in the working tree. | Resolve conflicts manually (`git status`, fix files, stage resolutions), then run `/gsd auto` to resume. |
+| `preflight-dirty-overlap` | Milestone merge preflight found local dirty files that overlap files changed by the milestone branch. | Commit or stash your local edits manually, or move them out of the way, then rerun `/gsd auto`. |
 
 Recovery classification now treats deterministic policy, tool-schema, stale-worker, and invalid-worktree failures as non-transient stops. Provider failures still use provider-specific transient classification and may retry automatically, while verification drift and unknown runtime failures escalate for inspection because repeating the same dispatch can preserve the drift.
 

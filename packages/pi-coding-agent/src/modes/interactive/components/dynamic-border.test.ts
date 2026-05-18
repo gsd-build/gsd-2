@@ -65,6 +65,26 @@ describe("DynamicBorder spinner", () => {
 		}
 	});
 
+	it("unref's the spinner interval so it never blocks process exit", () => {
+		// The pinned-zone spinner is purely cosmetic. A ref'd interval keeps the
+		// Node event loop alive until stopSpinner() runs — which made test
+		// processes hang and CI time out.
+		const border = new DynamicBorder((s) => s);
+		const tui = makeTUI();
+		try {
+			border.startSpinner(tui as any, (s) => s);
+			const interval = (border as any).spinnerInterval as NodeJS.Timeout;
+			assert.ok(interval, "startSpinner should create the animation interval");
+			assert.equal(
+				interval.hasRef(),
+				false,
+				"spinner interval must be unref'd so it never blocks process exit",
+			);
+		} finally {
+			border.stopSpinner();
+		}
+	});
+
 	it("updates lastExternalRender on each render() call", () => {
 		const border = new DynamicBorder((s) => s);
 		const anyBorder = border as any;

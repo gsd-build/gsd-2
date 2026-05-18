@@ -155,17 +155,19 @@ test('Project row does not truncate short milestone text', (t) => {
   assert.ok(!projectLine!.includes('…'), 'short title should not be truncated')
 })
 
-test('rounded command-center borders extend to full terminal width on wide terminals', (t) => {
+test('command-center renders a borderless panel with a full-width closing rule', (t) => {
   const origColumns = process.stderr.columns
   ;(process.stderr as any).columns = 250
   t.after(() => { ;(process.stderr as any).columns = origColumns })
 
   const out = strip(capture({ version: '1.0.0' }))
   const lines = out.split('\n')
-  // Top and bottom rounded borders should be 249 chars (columns - 1)
-  const borderLines = lines.filter(l => /^[╭╰]─+[╮╯]$/.test(l.trim()))
-  assert.equal(borderLines.length, 2, 'expected top and bottom rounded border lines')
-  for (const border of borderLines) {
-    assert.equal(border.trim().length, 249, `border should be 249 chars wide, got ${border.trim().length}`)
+  // No box corners — content lines must stay copy/paste-safe (no side bars).
+  for (const corner of ['╭', '╮', '╰', '╯']) {
+    assert.ok(!out.includes(corner), `welcome screen must not draw box border char ${corner}`)
   }
+  // Exactly one closing rule, spanning the terminal width (columns - 1 = 249).
+  const ruleLines = lines.filter(l => /^─+$/.test(l.trim()))
+  assert.equal(ruleLines.length, 1, 'expected exactly one closing rule line')
+  assert.equal(ruleLines[0].trim().length, 249, `rule should be 249 chars wide, got ${ruleLines[0].trim().length}`)
 })

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { webPreferencesPath } from "../../../../src/app-paths.ts";
 
 export const runtime = "nodejs";
@@ -11,19 +11,34 @@ interface WebPreferences {
   lastActiveProject?: string;
 }
 
+interface WebPreferencesResponse extends WebPreferences {
+  launchCwd: string | null;
+}
+
+function readLaunchCwd(): string | null {
+  const v = process.env.GSD_WEB_PROJECT_CWD;
+  if (typeof v !== "string" || v.length === 0) return null;
+  // Normalize so the value matches the resolved path the client compares against.
+  return resolve(v);
+}
+
 // ─── GET: read current preferences ─────────────────────────────────────────
 
 export async function GET(): Promise<Response> {
+  const launchCwd = readLaunchCwd();
   try {
     if (!existsSync(webPreferencesPath)) {
-      return Response.json({});
+      const body: WebPreferencesResponse = { launchCwd };
+      return Response.json(body);
     }
     const raw = readFileSync(webPreferencesPath, "utf-8");
     const prefs: WebPreferences = JSON.parse(raw);
-    return Response.json(prefs);
+    const body: WebPreferencesResponse = { ...prefs, launchCwd };
+    return Response.json(body);
   } catch {
-    // File corrupt or unreadable — return empty
-    return Response.json({});
+    // File corrupt or unreadable — return empty (but still surface launchCwd)
+    const body: WebPreferencesResponse = { launchCwd };
+    return Response.json(body);
   }
 }
 

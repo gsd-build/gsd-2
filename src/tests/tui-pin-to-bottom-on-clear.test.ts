@@ -101,9 +101,18 @@ describe("TUI pin-to-bottom on clear", () => {
     (tui as any).doRender();
 
     const frame = terminal.writtenData.join("");
+    const frameWithoutSync = frame.replace(/\x1b\[\?2026[hl]/g, "");
     assert.ok(
       !frame.includes("\x1b[2J"),
       `expected append to avoid full-screen clear to reduce flicker, got ${JSON.stringify(frame)}`,
+    );
+    assert.ok(
+      frameWithoutSync.startsWith("\x1b[17;1H"),
+      `expected short append to repaint from bottom anchor row 17 instead of scrolling, got ${JSON.stringify(frame)}`,
+    );
+    assert.ok(
+      !frameWithoutSync.startsWith("\r\n"),
+      `short bottom-anchored appends must not start with a newline that scrolls terminal history, got ${JSON.stringify(frame)}`,
     );
     assert.ok(
       frame.includes("line 4"),

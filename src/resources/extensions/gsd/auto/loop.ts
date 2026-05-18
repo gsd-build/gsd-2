@@ -12,6 +12,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 
 import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AutoSession } from "./session.js";
 import type { LoopDeps } from "./loop-deps.js";
 import {
@@ -40,9 +42,10 @@ import {
   markFailed as markDispatchFailed,
   getRecentForUnit as getRecentDispatchesForUnit,
   getRecentUnitKeysForProjectRoot,
+  markLatestActiveForWorkerCanceled,
 } from "../db/unit-dispatches.js";
-import { claimMilestoneLease, refreshMilestoneLease } from "../db/milestone-leases.js";
-import { heartbeatAutoWorker } from "../db/auto-workers.js";
+import { claimMilestoneLease, refreshMilestoneLease, forceReleaseLeasesForWorker } from "../db/milestone-leases.js";
+import { heartbeatAutoWorker, getAutoWorker, markWorkerCrashed } from "../db/auto-workers.js";
 import { getRuntimeKv, setRuntimeKv } from "../db/runtime-kv.js";
 import { resolveUokFlags } from "../uok/flags.js";
 import { scheduleSidecarQueue } from "../uok/execution-graph.js";
@@ -81,6 +84,7 @@ import { createWorkflowTurnReporter } from "./workflow-turn-reporter.js";
 import { validateWorkflowSessionLock } from "./workflow-session-lock.js";
 import { dequeueSidecarItem } from "./workflow-sidecar-queue.js";
 import { maintainWorkerHeartbeat } from "./workflow-worker-heartbeat.js";
+import { gsdRoot } from "../paths.js";
 import {
   measureMemoryPressure,
   shouldCheckMemoryPressure,
@@ -100,6 +104,27 @@ import {
 } from "./workflow-custom-engine-verify-outcome.js";
 import { handleCustomEngineReconcile } from "./workflow-custom-engine-reconcile.js";
 import { handleCustomEngineReconcileOutcome } from "./workflow-custom-engine-reconcile-outcome.js";
+
+/**
+ * Returns true if workerId is an active worker in this project whose OS
+ * process no longer exists. Used to detect dead lease holders before
+ * the heartbeat TTL expires. EPERM means the process is alive (we lack
+ * permission to signal it); any other kill(pid,0) error means dead.
+ */
+function isDeadLocalLeaseHolder(workerId: string, projectRoot: string): boolean {
+  const worker = getAutoWorker(workerId);
+  if (!worker) return false;
+  if (worker.status !== "active") return false;
+  if (worker.project_root_realpath !== projectRoot) return false;
+  if (!Number.isInteger(worker.pid) || worker.pid <= 0) return true;
+  if (worker.pid === process.pid) return false;
+  try {
+    process.kill(worker.pid, 0);
+    return false;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code !== "EPERM";
+  }
+}
 
 // ── Stuck detection persistence (#3704) ──────────────────────────────────
 // Phase C migration: stuck-state.json deleted in favor of DB-backed
@@ -216,6 +241,39 @@ const MAX_CUSTOM_ENGINE_VERIFY_RETRIES = 3;
 
 interface AutoLoopOptions {
   dispatchContract?: DispatchContract;
+}
+
+type CrashErrorType = "infrastructure" | "cooldown-exhausted" | "iteration-exhausted";
+
+function persistCrashNote(
+  s: AutoSession,
+  errorType: CrashErrorType,
+  errorMessage: string,
+  observedUnitType?: string,
+  observedUnitId?: string,
+): string | null {
+  try {
+    const activityDir = join(gsdRoot(s.basePath), "activity");
+    mkdirSync(activityDir, { recursive: true });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const filename = `${timestamp}-auto-crash-note.json`;
+    const notePath = join(activityDir, filename);
+    const payload = {
+      kind: "auto_crash_note",
+      createdAt: new Date().toISOString(),
+      errorType,
+      errorMessage,
+      workerId: s.workerId ?? null,
+      milestoneId: s.currentMilestoneId ?? null,
+      unitType: observedUnitType ?? s.currentUnit?.type ?? null,
+      unitId: observedUnitId ?? s.currentUnit?.id ?? null,
+      sessionFile: s.pausedSessionFile ?? null,
+    };
+    writeFileSync(notePath, JSON.stringify(payload, null, 2), "utf-8");
+    return notePath;
+  } catch {
+    return null;
+  }
 }
 
 async function enforceMinRequestInterval(s: AutoSession, prefs: IterationContext["prefs"]): Promise<void> {
@@ -856,11 +914,33 @@ export async function autoLoop(
       // process has a worker identity, make the milestone lease explicit before
       // claiming so a step-mode handoff cannot leave us running with a stale
       // in-memory token and no backing lease row.
-      const leaseBeforeClaim = ensureDispatchLease(s, iterData.mid, {
+      let leaseBeforeClaim = ensureDispatchLease(s, iterData.mid, {
         claimMilestoneLease,
         logLeaseRecovered: logDispatchLeaseRecovered,
         logLeaseRecoveryFailed: logDispatchLeaseRecoveryFailed,
       });
+      if (leaseBeforeClaim.kind === "blocked" && leaseBeforeClaim.holderWorkerId) {
+        const holderWorkerId = leaseBeforeClaim.holderWorkerId;
+        if (isDeadLocalLeaseHolder(holderWorkerId, s.canonicalProjectRoot)) {
+          markLatestActiveForWorkerCanceled(holderWorkerId, "crash-recovered");
+          markWorkerCrashed(holderWorkerId);
+          forceReleaseLeasesForWorker(holderWorkerId);
+          const retryLease = ensureDispatchLease(s, iterData.mid, {
+            claimMilestoneLease,
+            logLeaseRecovered: logDispatchLeaseRecovered,
+            logLeaseRecoveryFailed: logDispatchLeaseRecoveryFailed,
+          }, { forceReclaim: true });
+          if (retryLease.kind === "ready") {
+            leaseBeforeClaim = retryLease;
+          } else {
+            const msg = `Lost milestone lease for ${iterData.mid ?? "unknown"} before dispatching ${iterData.unitType} ${iterData.unitId}: ${retryLease.reason}`;
+            ctx.ui.notify(msg, "error");
+            finishTurn("stopped", "execution", msg);
+            await deps.stopAuto(ctx, pi, msg);
+            break;
+          }
+        }
+      }
       if (leaseBeforeClaim.kind === "blocked" || leaseBeforeClaim.kind === "failed") {
         const msg = `Lost milestone lease for ${iterData.mid ?? "unknown"} before dispatching ${iterData.unitType} ${iterData.unitId}: ${leaseBeforeClaim.reason}`;
         ctx.ui.notify(msg, "error");
@@ -1143,13 +1223,17 @@ export async function autoLoop(
           code: infraCode,
           errorMessage: msg,
         });
+        const crashNotePath = persistCrashNote(s, "infrastructure", msg, observedUnitType, observedUnitId);
         debugLog("autoLoop", {
           phase: "infrastructure-error",
           iteration,
           code: infraCode,
           error: msg,
         });
-        ctx.ui.notify(infraDecision.notifyMessage, "error");
+        ctx.ui.notify(
+          `${infraDecision.notifyMessage}${crashNotePath ? ` Crash note: ${crashNotePath}` : ""} Run /gsd auto to resume from the last checkpoint.`,
+          "error",
+        );
         await deps.stopAuto(ctx, pi, infraDecision.stopMessage);
         finishTurn(infraDecision.turnStatus, infraDecision.failureClass, msg);
         break;
@@ -1179,7 +1263,11 @@ export async function autoLoop(
         });
 
         if (cooldownDecision.action === "stop") {
-          ctx.ui.notify(cooldownDecision.notifyMessage, "error");
+          const crashNotePath = persistCrashNote(s, "cooldown-exhausted", msg, observedUnitType, observedUnitId);
+          ctx.ui.notify(
+            `${cooldownDecision.notifyMessage}${crashNotePath ? ` Crash note: ${crashNotePath}` : ""} Run /gsd auto to resume from the last checkpoint.`,
+            "error",
+          );
           finishTurn("stopped", "timeout", msg);
           await deps.stopAuto(ctx, pi, cooldownDecision.stopMessage);
           break;
@@ -1206,7 +1294,11 @@ export async function autoLoop(
         currentErrorMessage: msg,
       });
       if (errorDecision.action === "stop") {
-        ctx.ui.notify(errorDecision.notifyMessage, "error");
+        const crashNotePath = persistCrashNote(s, "iteration-exhausted", msg, observedUnitType, observedUnitId);
+        ctx.ui.notify(
+          `${errorDecision.notifyMessage}${crashNotePath ? ` Crash note: ${crashNotePath}` : ""} Run /gsd auto to resume from the last checkpoint.`,
+          "error",
+        );
         await deps.stopAuto(ctx, pi, errorDecision.stopMessage);
         finishTurn(errorDecision.turnStatus, "execution", msg);
         break;

@@ -122,6 +122,7 @@ test("session_switch toggles gsd-health from runtime auto state without touching
     },
     sessionManager: { getSessionId: () => null },
     model: null,
+    setCompactionThresholdOverride: () => {},
     modelRegistry: {
       setDisabledModelProviders: () => {},
       getProviderAuthMode: () => undefined,
@@ -212,6 +213,7 @@ test("session_start does NOT call setFooter or suppress gsd-health when isAutoAc
     },
     sessionManager: { getSessionId: () => null },
     model: null,
+    setCompactionThresholdOverride: () => {},
   } as any);
 
   assert.equal(setFooterCallCount, 0, "setFooter must NOT be called when isAutoActive() is false");
@@ -288,6 +290,7 @@ test("session_start installs the welcome screen as the TUI header", async (t) =>
     },
     sessionManager: { getSessionId: () => null },
     model: null,
+    setCompactionThresholdOverride: () => {},
   } as any);
 
   assert.equal(typeof headerFactory, "function", "session_start should install a header factory");
@@ -349,6 +352,7 @@ test("session_start and session_switch apply disabled model provider policy from
     },
     sessionManager: { getSessionId: () => null },
     model: null,
+    setCompactionThresholdOverride: () => {},
     modelRegistry: {
       setDisabledModelProviders: (providers: string[]) => {
         appliedPolicies.push([...providers]);

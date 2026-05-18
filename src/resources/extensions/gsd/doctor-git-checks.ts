@@ -15,6 +15,7 @@ import { RUNTIME_EXCLUSION_PATHS, resolveMilestoneIntegrationBranch, writeIntegr
 import { nativeIsRepo, nativeWorktreeList, nativeWorktreeRemove, nativeBranchList, nativeBranchDelete, nativeLsFiles, nativeRmCached, nativeHasChanges, nativeLastCommitEpoch, nativeGetCurrentBranch, nativeAddTracked, nativeCommit } from "./native-git-bridge.js";
 import { getAllWorktreeHealth } from "./worktree-health.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
+import { listUnmergedGitPaths } from "./git-conflict-state.js";
 
 /**
  * Returns true if the directory contains only doctor artifacts
@@ -116,6 +117,18 @@ export async function checkGitHealth(
   }
 
   const gitDir = resolveGitDir(basePath);
+  const unmergedPaths = listUnmergedGitPaths(basePath);
+  if (unmergedPaths === null) {
+    issues.push({
+      severity: "error",
+      code: "corrupt_merge_state",
+      scope: "project",
+      unitId: "project",
+      message: "Failed to evaluate unresolved Git conflicts. Resolve Git/worktree state manually before resuming auto-mode.",
+      fixable: false,
+    });
+    return;
+  }
 
   // ── Orphaned auto-worktrees & Stale milestone branches ────────────────
   // These checks only apply in worktree/branch modes — skip in none mode
@@ -264,6 +277,17 @@ export async function checkGitHealth(
       if (existsSync(join(gitDir, d))) found.push(d);
     }
 
+    if (unmergedPaths.length > 0) {
+      issues.push({
+        severity: "error",
+        code: "unresolved_git_conflicts",
+        scope: "project",
+        unitId: "project",
+        message: `Unresolved Git conflicts detected: ${unmergedPaths.join(", ")}. Resolve these files manually before auto-mode can proceed.`,
+        fixable: false,
+      });
+    }
+
     if (found.length > 0) {
       issues.push({
         severity: "error",
@@ -271,12 +295,14 @@ export async function checkGitHealth(
         scope: "project",
         unitId: "project",
         message: `Corrupt merge/rebase state detected: ${found.join(", ")}`,
-        fixable: true,
+        fixable: unmergedPaths.length === 0,
       });
 
-      if (shouldFix("corrupt_merge_state")) {
+      if (shouldFix("corrupt_merge_state") && unmergedPaths.length === 0) {
         const result = abortAndReset(basePath);
         fixesApplied.push(`cleaned merge state: ${result.cleaned.join(", ")}`);
+      } else if (shouldFix("corrupt_merge_state")) {
+        fixesApplied.push("skipped merge-state reset because unresolved conflicts require manual resolution");
       }
     }
   } catch {
