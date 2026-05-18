@@ -7,6 +7,7 @@ import {
 	Input,
 	Spacer,
 	Text,
+	TruncatedText,
 	type TUI,
 } from "@gsd/pi-tui";
 import type { ModelRegistry, ProviderAuthMode } from "../../../core/model-registry.js";
@@ -505,7 +506,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 				if (i > startIndex) {
 					this.listContainer.addChild(new Text("", 0, 0));
 				}
-				this.listContainer.addChild(new Text(`  ${providerLabel}${count}${authText}`, 0, 0));
+				this.listContainer.addChild(new TruncatedText(`  ${providerLabel}${count}${authText}`, 0, 0));
 			} else {
 				// Model row
 				const isSelected = i === this.selectedGroupIndex;
@@ -522,7 +523,9 @@ export class ModelSelectorComponent extends Container implements Focusable {
 					line = `    ${row.item.id}${ctxBadge}${checkmark}`;
 				}
 
-				this.listContainer.addChild(new Text(line, 0, 0));
+				// Single-line: a long model id must truncate, not wrap — a
+				// wrapped row would break the fixed-height selection window.
+				this.listContainer.addChild(new TruncatedText(line, 0, 0));
 			}
 		}
 
