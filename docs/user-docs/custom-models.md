@@ -12,6 +12,7 @@ Add custom providers and models (Ollama, vLLM, LM Studio, proxies) via `~/.gsd/a
 - [Overriding Built-in Providers](#overriding-built-in-providers)
 - [Per-model Overrides](#per-model-overrides)
 - [OpenAI Compatibility](#openai-compatibility)
+- [Per-Model Provider Options](#per-model-provider-options)
 
 ## Minimal Example
 
@@ -363,3 +364,143 @@ Vercel AI Gateway example:
   }
 }
 ```
+
+## Per-Model Provider Options
+
+For OpenAI-compatible servers that require specific payload shapes — extra parameters, thinking-control flags, or model ID mapping — use the `providerOptions` field on individual models. This is especially useful when the short alias you prefer isn't directly routable to the upstream API.
+
+Supported fields inside `providerOptions`:
+
+| Field | Description |
+|-------|-------------|
+| `actualModelId` | The real model name sent to the API. Lets you use a short alias in your config while routing to the correct upstream model. |
+| `payload` | Default values merged into every request body before sending. Explicit per-request values take precedence and are never overwritten by provider defaults. |
+
+### `payload` Fields
+
+These keys are forwarded directly into the completion request body:
+
+| Field | Description |
+|-------|-------------|
+| `temperature` | Sampling temperature |
+| `top_p` | Nucleus sampling threshold |
+| `top_k` | Top-K sampling threshold |
+| `min_p` | Min-P sampling threshold |
+| `presence_penalty` | Presence penalty |
+| `repetition_penalty` | Repetition penalty |
+| `chat_template_kwargs` | Arbitrary key-value pairs passed as-is to the request body (commonly used for thinking-control flags like `enable_thinking`) |
+
+Explicit per-request values always override provider option defaults. For example, if `providerOptions.payload.temperature` is set to `1.0` but you call GSD with `--temperature 0.7`, the request uses `0.7`.
+
+### Qwen 3.6 Examples
+
+Here's a real configuration for three Qwen 3.6 variants — thinking mode, deep-thinking mode, and instruct-only — all routed through the same underlying model:
+
+```json
+{
+  "providers": {
+    "local": {
+      "baseUrl": "http://localhost:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "...",
+      "models": [
+        {
+          "id": "qwen3.6-thinking",
+          "name": "Qwen3.6 35B-A3B (Thinking)",
+          "reasoning": true,
+          "contextWindow": 262144,
+          "maxTokens": 32768,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "compat": {
+            "supportsDeveloperRole": false,
+            "supportsStrictMode": false,
+            "supportsUsageInStreaming": false,
+            "maxTokensField": "max_tokens",
+            "thinkingFormat": "qwen"
+          },
+          "providerOptions": {
+            "actualModelId": "Qwen/Qwen3.6-35B-A3B",
+            "payload": {
+              "temperature": 1.0,
+              "top_p": 0.95,
+              "top_k": 20,
+              "min_p": 0,
+              "presence_penalty": 1.5,
+              "repetition_penalty": 1.0,
+              "chat_template_kwargs": {
+                "enable_thinking": true,
+                "preserve_thinking": false
+              }
+            }
+          }
+        },
+        {
+          "id": "qwen3.6-deep-think",
+          "name": "Qwen 3.6 35B-A3B (Deep Think)",
+          "reasoning": true,
+          "contextWindow": 262144,
+          "maxTokens": 32768,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "compat": {
+            "supportsDeveloperRole": false,
+            "supportsStrictMode": false,
+            "supportsUsageInStreaming": false,
+            "maxTokensField": "max_tokens",
+            "thinkingFormat": "qwen"
+          },
+          "providerOptions": {
+            "actualModelId": "Qwen/Qwen3.6-35B-A3B",
+            "payload": {
+              "temperature": 1.0,
+              "top_p": 0.95,
+              "top_k": 20,
+              "min_p": 0,
+              "presence_penalty": 1.5,
+              "repetition_penalty": 1.0,
+              "chat_template_kwargs": {
+                "enable_thinking": true,
+                "preserve_thinking": true
+              }
+            }
+          }
+        },
+        {
+          "id": "qwen3.6-instruct",
+          "name": "Qwen 3.6 35B A3B (Instruct)",
+          "reasoning": false,
+          "contextWindow": 262144,
+          "maxTokens": 48768,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "compat": {
+            "supportsDeveloperRole": false,
+            "supportsStrictMode": false,
+            "supportsUsageInStreaming": false,
+            "maxTokensField": "max_tokens"
+          },
+          "providerOptions": {
+            "actualModelId": "Qwen/Qwen3.6-35B-A3B",
+            "payload": {
+              "temperature": 0.7,
+              "top_p": 0.8,
+              "top_k": 20,
+              "min_p": 0,
+              "presence_penalty": 1.5,
+              "repetition_penalty": 1.0,
+              "chat_template_kwargs": {
+                "enable_thinking": false
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+Key observations from this setup:
+
+- **Same underlying model** — All three variants point to `Qwen/Qwen3.6-35B-A3B` via `actualModelId`, so the local server only needs one model loaded.
+- **`preserve_thinking`** — Set to `false` for thinking mode (strips thinking blocks from output) and `true` for deep-think mode (keeps them).
+- **Different behavior profiles** — Thinking uses `temperature: 1.0` and `maxTokens: 32768`; instruct uses lower temperature `0.7` and more output tokens `48768`.
+- **`enable_thinking: false`** — The instruct variant has thinking disabled at the prompt level.
