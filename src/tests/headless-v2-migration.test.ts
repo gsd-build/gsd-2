@@ -34,7 +34,13 @@ function mapStatusToExitCode(status: string): number {
 
 // ─── Extracted terminal detection (mirrors headless-events.ts) ──────────────
 
-const TERMINAL_PREFIXES = ['auto-mode stopped', 'step-mode stopped']
+const TERMINAL_PREFIXES = [
+  'auto-mode stopped',
+  'step-mode stopped',
+  'auto-mode complete',
+  'no active milestone',
+  'auto-mode idle',
+]
 
 function isTerminalNotification(event: Record<string, unknown>): boolean {
   if (event.type !== 'extension_ui_request' || event.method !== 'notify') return false
@@ -240,6 +246,20 @@ test('v1 fallback: terminal notification still triggers completion', () => {
 
   handleEvent(
     { type: 'extension_ui_request', method: 'notify', id: 'n1', message: 'Auto-mode stopped — all slices complete' },
+    state,
+    client,
+  )
+
+  assert.equal(state.completed, true)
+  assert.equal(state.exitCode, EXIT_SUCCESS)
+})
+
+test('v1 fallback: auto-mode complete notification triggers completion', () => {
+  const client = new MockRpcClient()
+  const state: EventHandlerState = { completed: false, blocked: false, exitCode: -1, v2Enabled: false }
+
+  handleEvent(
+    { type: 'extension_ui_request', method: 'notify', id: 'n2', message: 'Auto-mode complete — all milestones complete.' },
     state,
     client,
   )

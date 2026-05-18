@@ -27,7 +27,13 @@ const FIRE_AND_FORGET_METHODS = new Set([
   'notify', 'setStatus', 'setWidget', 'setTitle', 'set_editor_text',
 ]);
 
-const TERMINAL_PREFIXES = ['auto-mode stopped', 'step-mode stopped'];
+const TERMINAL_PREFIXES = [
+  'auto-mode stopped',
+  'step-mode stopped',
+  'auto-mode complete',
+  'no active milestone',
+  'auto-mode idle',
+];
 
 function findExecutableOnPath(command: string): string | null {
   const pathValue = getPathEnvValue();

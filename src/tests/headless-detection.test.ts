@@ -15,7 +15,13 @@ import assert from "node:assert/strict";
 
 // ─── Extracted detection logic (mirrors headless.ts) ────────────────────────
 
-const TERMINAL_PREFIXES = ['auto-mode stopped', 'step-mode stopped']
+const TERMINAL_PREFIXES = [
+  'auto-mode stopped',
+  'step-mode stopped',
+  'auto-mode complete',
+  'no active milestone',
+  'auto-mode idle',
+]
 
 function isTerminalNotification(event: Record<string, unknown>): boolean {
   if (event.type !== 'extension_ui_request' || event.method !== 'notify') return false
@@ -67,6 +73,18 @@ test("detects 'Auto-mode stopped (Milestone M001 complete).' as terminal", () =>
 
 test("detects 'Step-mode stopped.' as terminal", () => {
   assert.ok(isTerminalNotification(makeNotify("Step-mode stopped.")))
+})
+
+test("detects 'Auto-mode complete...' as terminal", () => {
+  assert.ok(isTerminalNotification(makeNotify('Auto-mode complete — all milestones complete.')))
+})
+
+test("detects 'No active milestone...' as terminal", () => {
+  assert.ok(isTerminalNotification(makeNotify('No active milestone in registry.')))
+})
+
+test("detects 'Auto-mode idle...' as terminal", () => {
+  assert.ok(isTerminalNotification(makeNotify('Auto-mode idle: no roadmap work items found.')))
 })
 
 // ─── False positives that previously triggered early exit (#879) ────────────

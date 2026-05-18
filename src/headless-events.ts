@@ -64,7 +64,13 @@ export function mapStatusToExitCode(status: string): number {
  *
  * Blocked detection is separate — checked via isBlockedNotification.
  */
-export const TERMINAL_PREFIXES = ['auto-mode stopped', 'step-mode stopped']
+export const TERMINAL_PREFIXES = [
+  'auto-mode stopped',
+  'step-mode stopped',
+  'auto-mode complete',
+  'no active milestone',
+  'auto-mode idle',
+]
 export const IDLE_TIMEOUT_MS = 15_000
 // new-milestone is a long-running creative task where the LLM may pause
 // between tool calls (e.g. after mkdir, before writing files). Use a
