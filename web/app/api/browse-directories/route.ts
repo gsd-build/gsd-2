@@ -1,6 +1,7 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
-import { homedir, platform } from "node:os";
+import { homedir, platform, userInfo } from "node:os";
+import { isAllowedBrowsePath, getAdditionalRoots } from "../../../lib/browse-scope.ts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,6 +10,23 @@ export const dynamic = "force-dynamic";
  * Resolve the configured dev root from web preferences.
  * Returns the devRoot path if set, otherwise the user's home directory.
  */
+function currentUsername(): string | undefined {
+  try {
+    return userInfo().username || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Resolve symlinks if the path exists; otherwise fall back to a lexical resolve. */
+function safeRealpath(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return resolve(p);
+  }
+}
+
 function getDevRoot(): string {
   try {
     const prefsPath = join(homedir(), ".gsd", "web-preferences.json");
@@ -25,85 +43,27 @@ function getDevRoot(): string {
 }
 
 /**
- * Get available mount points on Linux (external drives, removable media)
- * Returns paths like /media, /mnt, /run/media/<user>
- */
-function getLinuxMountPoints(): string[] {
-  const mountPoints: string[] = [];
-  const home = homedir();
-
-  const standardMounts = ["/media", "/mnt", "/run/media"];
-
-  for (const mp of standardMounts) {
-    if (existsSync(mp)) {
-      mountPoints.push(mp);
-    }
-  }
-
-  const runMediaUser = `/run/media/${home.split("/").pop()}`;
-  if (existsSync(runMediaUser)) {
-    mountPoints.push(runMediaUser);
-  }
-
-  return mountPoints;
-}
-
-/**
- * Get additional root-level directories to show as shortcuts on Linux
- * (for accessing external drives and mounted filesystems)
- */
-function getAdditionalRoots(): string[] {
-  const os = platform();
-  if (os === "linux") {
-    return getLinuxMountPoints();
-  }
-  if (os === "win32") {
-    const drives: string[] = [];
-    for (let code = 65; code <= 90; code++) {
-      const drive = `${String.fromCharCode(code)}:\\`;
-      if (existsSync(drive)) drives.push(drive);
-    }
-    return drives;
-  }
-  return [];
-}
-
-/**
  * GET /api/browse-directories?path=/some/path
  *
  * Returns the directory listing for the given path.
  * Defaults to the configured devRoot (or home directory) if no path is given.
  * Only returns directories (no files) for the folder picker use case.
  *
- * Security: Paths are restricted to the devRoot and its children. Requests
- * for paths outside devRoot are rejected with 403 to prevent full filesystem
- * enumeration.
+ * Scope:
+ *   - devRoot and its descendants
+ *   - the immediate parent of devRoot (one level up for context)
+ *   - the user's home directory and its descendants
+ *   - platform-specific mount roots (e.g. /Volumes on macOS, /media on Linux,
+ *     existing drive letters on Windows)
  */
 export async function GET(request: Request): Promise<Response> {
   try {
     const url = new URL(request.url);
     const rawPath = url.searchParams.get("path");
     const devRoot = getDevRoot();
+    const home = homedir();
+    const additionalRoots = getAdditionalRoots(platform(), existsSync, currentUsername());
     const targetPath = rawPath ? resolve(rawPath) : devRoot;
-
-    // Restrict browsing to devRoot and its subtree, or the home directory
-    // if no devRoot is configured. Navigating to the parent of devRoot is
-    // allowed (one level up) so the UI can show the devRoot in context,
-    // but nothing further.
-    // Also allow navigation to common mount points (/media, /mnt, /run/media) on Linux
-    const devRootParent = dirname(devRoot);
-    const additionalRoots = getAdditionalRoots();
-    const isAllowedPath =
-      targetPath.startsWith(devRoot) ||
-      targetPath === devRootParent ||
-      additionalRoots.some((root) => targetPath.startsWith(root));
-
-    if (!isAllowedPath) {
-      return Response.json(
-        { error: "Path outside allowed scope" },
-        { status: 403 },
-      );
-    }
 
     if (!existsSync(targetPath)) {
       return Response.json(
@@ -112,51 +72,61 @@ export async function GET(request: Request): Promise<Response> {
       );
     }
 
-    const stat = statSync(targetPath);
+    // Resolve symlinks before enforcing scope so an in-scope symlink that
+    // points outside the allowed roots cannot escape the picker. Compare
+    // canonical-against-canonical for both target and roots.
+    const canonical = safeRealpath(targetPath);
+    const canonicalOpts = {
+      devRoot: safeRealpath(devRoot),
+      home: safeRealpath(home),
+      additionalRoots: additionalRoots.map(safeRealpath),
+    };
+    if (!isAllowedBrowsePath(canonical, canonicalOpts)) {
+      return Response.json(
+        { error: "Path outside allowed scope" },
+        { status: 403 },
+      );
+    }
+
+    const stat = statSync(canonical);
     if (!stat.isDirectory()) {
       return Response.json(
-        { error: `Not a directory: ${targetPath}` },
+        { error: `Not a directory: ${canonical}` },
         { status: 400 },
       );
     }
 
-    const parentPath = dirname(targetPath);
-    // Only offer the parent navigation if it's within the allowed scope
+    const parentPath = dirname(canonical);
     const parentAllowed =
-      parentPath !== targetPath &&
-      (parentPath.startsWith(devRoot) ||
-        parentPath === devRootParent ||
-        additionalRoots.some((root) => parentPath.startsWith(root)));
+      parentPath !== canonical &&
+      isAllowedBrowsePath(parentPath, canonicalOpts);
+
+    // Surface mount roots / drive letters as quick-access when browsing $HOME or devRoot.
+    const showAdditionalRoots =
+      additionalRoots.length > 0 && (canonical === canonicalOpts.home || canonical === canonicalOpts.devRoot);
+
     const entries: Array<{ name: string; path: string }> = [];
 
-    // Show mount/drive roots as quick-access when browsing from home or dev root.
-    const os = platform();
-    const showAdditionalRoots = (os === "linux" || os === "win32") && (targetPath === homedir() || targetPath === devRoot);
-
     try {
-      const items = readdirSync(targetPath, { withFileTypes: true });
+      const items = readdirSync(canonical, { withFileTypes: true });
       for (const item of items) {
-        // Only directories, skip dotfiles and common non-project dirs
         if (!item.isDirectory()) continue;
         if (item.name.startsWith(".")) continue;
         if (item.name === "node_modules") continue;
 
         entries.push({
           name: item.name,
-          path: resolve(targetPath, item.name),
+          path: resolve(canonical, item.name),
         });
       }
 
-      // Add mount points/drives as quick-access entries.
       if (showAdditionalRoots) {
         for (const mp of additionalRoots) {
-          if (existsSync(mp)) {
-            const mpName = mp.split("/").pop() || mp;
-            entries.push({
-              name: mpName,
-              path: mp,
-            });
-          }
+          const mpName = mp.split(/[/\\]/).filter(Boolean).pop() || mp;
+          entries.push({
+            name: mpName,
+            path: mp,
+          });
         }
       }
     } catch {
@@ -166,7 +136,7 @@ export async function GET(request: Request): Promise<Response> {
     entries.sort((a, b) => a.name.localeCompare(b.name));
 
     return Response.json({
-      current: targetPath,
+      current: canonical,
       parent: parentAllowed ? parentPath : null,
       entries,
     });

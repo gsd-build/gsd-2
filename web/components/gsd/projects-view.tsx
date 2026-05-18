@@ -689,6 +689,7 @@ function FolderPickerDialog({
   const [entries, setEntries] = useState<BrowseEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pathInput, setPathInput] = useState<string>("")
 
   const browse = useCallback(async (targetPath?: string) => {
     setLoading(true)
@@ -702,6 +703,7 @@ function FolderPickerDialog({
       }
       const data: BrowseResult = await res.json()
       setCurrentPath(data.current)
+      setPathInput(data.current)
       setParentPath(data.parent)
       setEntries(data.entries)
     } catch (err) {
@@ -714,6 +716,12 @@ function FolderPickerDialog({
   useEffect(() => {
     if (open) {
       void browse(initialPath ?? undefined)
+    } else {
+      setCurrentPath("")
+      setParentPath(null)
+      setEntries([])
+      setError(null)
+      setPathInput("")
     }
   }, [open, initialPath, browse])
 
@@ -728,9 +736,26 @@ function FolderPickerDialog({
         </DialogHeader>
 
         <div className="border-y border-border/50 bg-muted/50 px-5 py-2">
-          <p className="font-mono text-xs text-muted-foreground truncate" title={currentPath}>
-            {currentPath}
-          </p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              const next = pathInput.trim()
+              if (next) void browse(next)
+            }}
+          >
+            <input
+              type="text"
+              value={pathInput}
+              onChange={(e) => setPathInput(e.target.value)}
+              spellCheck={false}
+              autoCorrect="off"
+              autoCapitalize="off"
+              placeholder="/absolute/path/to/folder"
+              aria-label="Folder path"
+              data-testid="folder-picker-path-input"
+              className="w-full bg-transparent font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
+            />
+          </form>
         </div>
 
         <ScrollArea className="h-[320px]">
