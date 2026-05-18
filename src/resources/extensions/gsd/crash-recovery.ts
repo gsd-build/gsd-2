@@ -30,7 +30,6 @@ import { join } from "node:path";
 import {
   findStaleWorkerForProject,
   getAllAutoWorkers,
-  markWorkerCrashed,
   markWorkerStopping,
   markWorkerStoppingByPid,
   type AutoWorkerRow,
@@ -230,7 +229,7 @@ export function clearLock(basePath: string): void {
     const projectRoot = normalizeRealPath(basePath);
     const staleWorker = findStaleWorkerForProject(projectRoot);
     if (staleWorker) {
-      markWorkerCrashed(staleWorker.worker_id);
+      markWorkerStopping(staleWorker.worker_id);
       forceReleaseLeasesForWorker(staleWorker.worker_id);
       deleteRuntimeKv("worker", staleWorker.worker_id, SESSION_FILE_KV_KEY);
       return;
@@ -264,7 +263,7 @@ export function clearStaleWorkerLock(basePath: string): void {
     const worker = findStaleWorkerForProject(projectRoot);
     if (!worker) return;
     markLatestActiveForWorkerCanceled(worker.worker_id, "crash-recovered");
-    markWorkerCrashed(worker.worker_id);
+    markWorkerStopping(worker.worker_id);
     deleteRuntimeKv("worker", worker.worker_id, SESSION_FILE_KV_KEY);
   } catch {
     // Best-effort.
