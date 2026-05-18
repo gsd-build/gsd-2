@@ -23,7 +23,7 @@ import { logWarning } from "./workflow-logger.js";
 import { isClosedStatus } from "./status-guards.js";
 import { deriveState } from "./state.js";
 import type { GSDState } from "./types.js";
-import { renderRoadmapFromDb } from "./markdown-renderer.js";
+import { renderPlanFromDb, renderRoadmapFromDb } from "./markdown-renderer.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -478,7 +478,7 @@ export async function regenerateIfMissing(
   try {
     switch (fileType) {
       case "PLAN":
-        renderPlanProjection(basePath, milestoneId, sliceId);
+        await renderPlanFromDb(basePath, milestoneId, sliceId);
         return existsSync(filePath);
       case "ROADMAP":
         await renderRoadmapFromDb(basePath, milestoneId);
