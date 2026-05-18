@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 
-import { gsdRoot, _clearGsdRootCache } from "../../paths.ts";
+import { gsdProjectionRoot, gsdRoot, _clearGsdRootCache } from "../../paths.ts";
 /** Create a tmp dir and resolve symlinks + 8.3 short names (macOS /var→/private/var, Windows RUNNER~1→runneradmin). */
 function tmp(): string {
   const p = mkdtempSync(join(tmpdir(), "gsd-paths-test-"));
@@ -94,5 +94,20 @@ describe('paths', () => {
       const result = gsdRoot(inner);
       assert.deepStrictEqual(result, join(inner, ".gsd"), "precedence: nearest .gsd wins over ancestor");
     } finally { cleanup(outer); }
+  });
+
+  test('Case 7: worktree path resolves to worktree-local .gsd and matches projection root', () => {
+    const root = tmp();
+    try {
+      initGit(root);
+      const worktree = join(root, ".gsd", "worktrees", "M123");
+      mkdirSync(worktree, { recursive: true });
+      mkdirSync(join(worktree, ".gsd"), { recursive: true });
+      _clearGsdRootCache();
+      const rootResult = gsdRoot(worktree);
+      const projectionResult = gsdProjectionRoot(worktree);
+      assert.deepStrictEqual(rootResult, join(worktree, ".gsd"), "worktree: gsdRoot uses worktree-local .gsd");
+      assert.deepStrictEqual(rootResult, projectionResult, "worktree: gsdRoot and gsdProjectionRoot agree");
+    } finally { cleanup(root); }
   });
 });
