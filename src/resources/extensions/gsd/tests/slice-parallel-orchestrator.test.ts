@@ -181,6 +181,30 @@ describe("slice-parallel stale worktree handling", () => {
       rmSync(basePath, { recursive: true, force: true });
     }
   });
+
+  it("returns no started workers when process exits during startup gate", async () => {
+    const basePath = makeTempProject();
+    const oldGsdBinPath = process.env.GSD_BIN_PATH;
+    try {
+      initGitProject(basePath);
+      const workerBin = join(basePath, "exit-fast-worker.js");
+      writeFileSync(workerBin, "process.exit(1);\n", "utf-8");
+      process.env.GSD_BIN_PATH = workerBin;
+
+      const result = await startSliceParallel(basePath, "M902", [{ id: "S01" }], { maxWorkers: 1 });
+      assert.deepEqual(result.started, []);
+      assert.equal(result.errors.length, 1);
+      assert.equal(result.errors[0]?.sid, "S01");
+      assert.equal(result.errors[0]?.error, "Worker failed startup gate");
+      assert.equal(getSliceOrchestratorState()?.active, false);
+    } finally {
+      stopSliceParallel();
+      resetSliceOrchestrator();
+      if (oldGsdBinPath === undefined) delete process.env.GSD_BIN_PATH;
+      else process.env.GSD_BIN_PATH = oldGsdBinPath;
+      rmSync(basePath, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("slice-parallel-orchestrator recovery identity", () => {

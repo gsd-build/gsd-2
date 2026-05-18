@@ -948,6 +948,15 @@ export async function runPreDispatch(
             );
             return { action: "continue" };
           }
+          if (result.errors.length > 0) {
+            const detail = result.errors
+              .map((err) => `${err.sid}: ${err.error}`)
+              .join("; ");
+            ctx.ui.notify(
+              `Slice-parallel startup failed; falling back to sequential execution. ${detail}`,
+              "warning",
+            );
+          }
           // Fall through to sequential if no workers started
         }
       }
