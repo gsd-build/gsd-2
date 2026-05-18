@@ -171,6 +171,38 @@ function formatWorktreeSafetyStopReason(result: Extract<WorktreeSafetyResult, { 
   return `Worktree Safety failed (${result.kind}).`;
 }
 
+type BlockerKind = "needs-remediation-dead-end" | "other";
+
+function classifyBlocker(blocker: string): BlockerKind {
+  const normalized = blocker.toLowerCase();
+  if (normalized.includes("needs-remediation") && normalized.includes("all slices are complete")) {
+    return "needs-remediation-dead-end";
+  }
+  return "other";
+}
+
+function sanitizeBlockerForUser(blocker: string): string {
+  return blocker.replaceAll("gsd_reassess_roadmap", "/gsd dispatch reassess");
+}
+
+/**
+ * Formats blocked resume guidance for users, ensuring internal tool names are
+ * never surfaced in notification text.
+ */
+function formatBlockedResumeMessage(blockers: string[]): string {
+  const classifiedBlockers = blockers.map((blocker) => ({
+    blocker: sanitizeBlockerForUser(blocker),
+    kind: classifyBlocker(blocker),
+  }));
+  const hasNeedsRemediationDeadEnd = classifiedBlockers.some(
+    (classifiedBlocker) => classifiedBlocker.kind === "needs-remediation-dead-end"
+  );
+  if (hasNeedsRemediationDeadEnd) {
+    return "Blocked: milestone validation requires remediation but all slices are complete. Run /gsd dispatch reassess to add remediation slices, then /gsd auto to continue.";
+  }
+  return `Blocked: ${classifiedBlockers.map((classifiedBlocker) => classifiedBlocker.blocker).join(", ")}. Fix and run /gsd auto to resume.`;
+}
+
 function resolveEmptyWorktreeWithProjectContent(
   unitRoot: string,
   projectRoot: string,
@@ -1133,14 +1165,14 @@ export async function runPreDispatch(
         `No milestones found — check basePath resolution`,
       );
     } else if (state.phase === "blocked") {
-      const blockerMsg = `Blocked: ${state.blockers.join(", ")}`;
+      const blockedResumeMessage = formatBlockedResumeMessage(state.blockers);
       // Pause instead of hard-stop so the session is resumable with `/gsd auto`.
       // Hard-stop here was causing premature termination when slice dependencies
       // were temporarily unresolvable (e.g. after reassessment added new slices).
       await deps.pauseAuto(ctx, pi);
-      ctx.ui.notify(`${blockerMsg}. Fix and run /gsd auto to resume.`, "warning");
-      deps.sendDesktopNotification("GSD", blockerMsg, "warning", "attention", basename(s.originalBasePath || s.basePath));
-      deps.logCmuxEvent(prefs, blockerMsg, "warning");
+      ctx.ui.notify(blockedResumeMessage, "warning");
+      deps.sendDesktopNotification("GSD", blockedResumeMessage, "warning", "attention", basename(s.originalBasePath || s.basePath));
+      deps.logCmuxEvent(prefs, blockedResumeMessage, "warning");
     } else {
       const ids = incomplete.map((m: { id: string }) => m.id).join(", ");
       const diag = `basePath=${s.basePath}, milestones=[${state.registry.map((m: { id: string; status: string }) => `${m.id}:${m.status}`).join(", ")}], phase=${state.phase}`;
@@ -1238,7 +1270,7 @@ export async function runPreDispatch(
 
   // Terminal: blocked — pause instead of hard-stop so the session is resumable.
   if (state.phase === "blocked") {
-    const blockerMsg = `Blocked: ${state.blockers.join(", ")}`;
+    const blockedResumeMessage = formatBlockedResumeMessage(state.blockers);
     if (s.currentUnit) {
       await deps.closeoutUnit(
         ctx,
@@ -1250,9 +1282,9 @@ export async function runPreDispatch(
       );
     }
     await deps.pauseAuto(ctx, pi);
-    ctx.ui.notify(`${blockerMsg}. Fix and run /gsd auto to resume.`, "warning");
-    deps.sendDesktopNotification("GSD", blockerMsg, "warning", "attention", basename(s.originalBasePath || s.basePath));
-    deps.logCmuxEvent(prefs, blockerMsg, "warning");
+    ctx.ui.notify(blockedResumeMessage, "warning");
+    deps.sendDesktopNotification("GSD", blockedResumeMessage, "warning", "attention", basename(s.originalBasePath || s.basePath));
+    deps.logCmuxEvent(prefs, blockedResumeMessage, "warning");
     debugLog("autoLoop", { phase: "exit", reason: "blocked" });
     deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "terminal", data: { reason: "blocked", blockers: state.blockers } });
     return { action: "break", reason: "blocked" };
