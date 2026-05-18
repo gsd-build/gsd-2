@@ -147,4 +147,24 @@ describe("parallel-eligibility: ghost milestone ineligibility (#2501)", () => {
     // (this is a separate fix path — Bug 1 is about writing DB status).
     // We verify the fix path through Bug 2's ghost handling above.
   });
+
+  test("reopens project DB when previously closed before eligibility analysis (#5565)", async () => {
+    const dbPath = join(base, ".gsd", "gsd.db");
+    closeDatabase();
+    openDatabase(dbPath);
+
+    writeMilestoneFile(base, "M001", "M001-CONTEXT.md", "# M001: Real Milestone\n\nA real milestone.");
+    writeMilestoneFile(base, "M001", "M001-ROADMAP.md", "# M001: Real Milestone\n\n## Slices\n\n- [ ] **S01: First Slice** `risk:low` `depends:[]`\n  > Do something.\n");
+    writeMilestoneFile(base, "M001", "slices/S01/S01-PLAN.md", "# S01: First Slice\n\n**Goal:** Do it.\n**Demo:** Done.\n\n## Tasks\n\n- [ ] **T01: Task One** `est:10m`\n  Do the thing.\n");
+    insertMilestone({ id: "M001", title: "M001: Real Milestone", status: "active" });
+    insertSlice({ id: "S01", milestoneId: "M001", title: "First Slice", status: "active", risk: "low", depends: [] });
+    insertTask({ id: "T01", sliceId: "S01", milestoneId: "M001", title: "Task One", status: "pending" });
+
+    closeDatabase();
+    invalidateStateCache();
+
+    const result = await analyzeParallelEligibility(base);
+    const m001 = result.eligible.find(e => e.milestoneId === "M001");
+    assert.ok(m001, "M001 should remain eligible after analyzeParallelEligibility reopens a closed DB");
+  });
 });
