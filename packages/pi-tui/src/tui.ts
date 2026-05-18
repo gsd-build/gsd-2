@@ -720,6 +720,31 @@ export class TUI extends Container {
 			fs.appendFileSync(logPath, msg);
 		};
 
+		const repaintBottomAnchoredShortBlock = (): void => {
+			const startRow = Math.max(1, height - Math.max(1, newLines.length) + 1);
+			let buffer = this.useSynchronizedOutput ? "\x1b[?2026h" : "";
+			buffer += `\x1b[${startRow};1H`;
+			for (let i = 0; i < newLines.length; i++) {
+				if (i > 0) buffer += "\r\n";
+				buffer += "\x1b[2K";
+				let line = newLines[i];
+				if (!isImageLine(line) && visibleWidth(line) > width) {
+					line = truncateToWidth(line, width);
+				}
+				buffer += line;
+			}
+			if (this.useSynchronizedOutput) buffer += "\x1b[?2026l";
+			this.terminal.write(buffer);
+			this.cursorRow = Math.max(0, newLines.length - 1);
+			this.hardwareCursorRow = this.cursorRow;
+			this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
+			this.previousViewportTop = getViewportTop(this.maxLinesRendered);
+			this.positionHardwareCursor(cursorPos, newLines.length);
+			this.previousLines = newLines;
+			this.previousWidth = width;
+			this.previousHeight = height;
+		};
+
 		// First render - just output everything without clearing (assumes clean screen)
 		if (this.previousLines.length === 0 && !widthChanged && !heightChanged) {
 			logRedraw("first render");
@@ -846,6 +871,11 @@ export class TUI extends Container {
 			this.positionHardwareCursor(cursorPos, newLines.length);
 			this.previousViewportTop = getViewportTop(this.maxLinesRendered);
 			this.previousHeight = height;
+			return;
+		}
+
+		if (appendedLines && this.previousLines.length <= height && newLines.length <= height) {
+			repaintBottomAnchoredShortBlock();
 			return;
 		}
 

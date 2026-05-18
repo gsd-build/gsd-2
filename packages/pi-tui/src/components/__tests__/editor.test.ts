@@ -1,3 +1,5 @@
+// GSD-2 + packages/pi-tui/src/components/__tests__/editor.test.ts - Editor component regression tests.
+
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
@@ -60,6 +62,41 @@ describe("Editor", () => {
 		const rendered = editor.render(40).join("\n");
 
 		assert.ok(rendered.includes(CURSOR_MARKER));
+	});
+
+	it("keeps autocomplete height stable while suggestions shrink", () => {
+		const editor = new Editor(new TUI(makeTerminal()), theme);
+		editor.focused = true;
+		editor.setText("/");
+
+		let autocompleteRows = [
+			"/gsd",
+			"/git",
+			"/grep",
+			"/go",
+			"/group",
+			"(1/6)",
+		];
+		(editor as any).autocompleteState = "regular";
+		(editor as any).autocompleteList = { render: () => autocompleteRows };
+
+		const openLength = editor.render(40).length;
+
+		autocompleteRows = ["/gsd"];
+		const filteredLength = editor.render(40).length;
+
+		assert.equal(
+			filteredLength,
+			openLength,
+			"autocomplete should reserve rows during a completion session so filtering does not resize the TUI",
+		);
+
+		(editor as any).cancelAutocomplete();
+		const closedLength = editor.render(40).length;
+		assert.ok(
+			closedLength < openLength,
+			"autocomplete row reservation should clear when the completion session closes",
+		);
 	});
 
 	it("maps kitty keypad digits to plain editor text", () => {
