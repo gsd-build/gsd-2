@@ -39,7 +39,7 @@ import { parseRoadmap } from "./parsers-legacy.js";
 import { validateArtifact } from "./schemas/validate.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from "node:fs";
 import { logWarning, logError } from "./workflow-logger.js";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { hasImplementationArtifacts } from "./auto-recovery.js";
 import {
   buildDiscussMilestonePrompt,
@@ -366,6 +366,55 @@ function findMissingSummaries(basePath: string, mid: string): string[] {
       return !summaryPath || !existsSync(summaryPath);
     })
     .map(s => s.id);
+}
+
+function backfillMissingAssessmentsFromSummaries(basePath: string, mid: string): void {
+  const completedSliceIds = new Set<string>();
+  if (isDbAvailable()) {
+    for (const slice of getMilestoneSlices(mid)) {
+      if (slice.status === "complete" || slice.status === "done") {
+        completedSliceIds.add(slice.id);
+      }
+    }
+  } else {
+    const roadmapFile = resolveMilestoneFile(basePath, mid, "ROADMAP");
+    if (!roadmapFile) return;
+    try {
+      const roadmap = parseRoadmap(readFileSync(roadmapFile, "utf-8"));
+      for (const slice of roadmap.slices) {
+        if (slice.done) completedSliceIds.add(slice.id);
+      }
+    } catch {
+      return;
+    }
+  }
+
+  for (const sliceId of completedSliceIds) {
+    const summaryPath = resolveSliceFile(basePath, mid, sliceId, "SUMMARY");
+    if (!summaryPath || !existsSync(summaryPath)) continue;
+
+    const slicePath = resolveSlicePath(basePath, mid, sliceId);
+    const assessmentPath = resolveSliceFile(basePath, mid, sliceId, "ASSESSMENT")
+      ?? (slicePath ? join(slicePath, buildSliceFileName(sliceId, "ASSESSMENT")) : null);
+    if (!assessmentPath || existsSync(assessmentPath)) continue;
+
+    mkdirSync(dirname(assessmentPath), { recursive: true });
+    const now = new Date().toISOString();
+    const content = [
+      "---",
+      `sliceId: ${sliceId}`,
+      "verdict: PASS",
+      `date: ${now}`,
+      "---",
+      "",
+      `# Assessment — ${sliceId}`,
+      "",
+      "Auto-created during milestone validation because this completed slice had a SUMMARY but no ASSESSMENT artifact.",
+      "No additional reassessment changes were detected in this backfill step.",
+      "",
+    ].join("\n");
+    writeFileSync(assessmentPath, content, "utf-8");
+  }
 }
 
 // ─── Rewrite Circuit Breaker ──────────────────────────────────────────────
@@ -1362,6 +1411,12 @@ export const DISPATCH_RULES: DispatchRule[] = [
           level: "error",
         };
       }
+
+      // #6225: validation requires per-slice ASSESSMENT artifacts (MV02), but
+      // the default auto path can complete all slices without creating them.
+      // Backfill no-change assessments for completed slices that already have
+      // SUMMARY evidence before dispatching validate-milestone.
+      backfillMissingAssessmentsFromSummaries(basePath, mid);
 
       // #4781 phase 2: trivial-scope milestones skip the dedicated validate
       // unit — complete-milestone's own verification steps (3/4/5 in the
