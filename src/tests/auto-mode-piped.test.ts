@@ -84,6 +84,7 @@ const modules = new Map([
     }
     export async function runHeadless(options) {
       process.stderr.write('AUTO_REDIRECT_RUN ' + JSON.stringify(options) + '\\\\n')
+      process.exitCode = 0
     }
   \`],
 ])

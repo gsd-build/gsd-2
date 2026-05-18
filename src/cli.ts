@@ -453,7 +453,9 @@ if (cliFlags.messages[0] === 'headless') {
   initResources(agentDir)
   const { runHeadless, parseHeadlessArgs } = await import('./headless.js')
   await runHeadless(parseHeadlessArgs(process.argv))
-  process.exit(0)
+  // runHeadless is expected to terminate the process. If it returns, fail loud
+  // instead of silently reporting success.
+  process.exit(process.exitCode ?? 1)
 }
 
 /**
@@ -466,7 +468,9 @@ async function runHeadlessFromAuto(headlessArgs: string[]): Promise<never> {
   const { runHeadless, parseHeadlessArgs } = await import('./headless.js')
   const argv = [process.argv[0], process.argv[1], 'headless', ...headlessArgs]
   await runHeadless(parseHeadlessArgs(argv))
-  process.exit(0)
+  // runHeadless should not return; preserve any explicit exitCode and default
+  // to failure if control reaches here.
+  process.exit(process.exitCode ?? 1)
 }
 
 function flushPendingProviderRegistrations(resourceLoader: DefaultResourceLoaderInstance, modelRegistry: ModelRegistryInstance): void {
