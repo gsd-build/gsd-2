@@ -15,7 +15,7 @@ import { appendEvent } from "./workflow-events.js";
 import { atomicWriteSync } from "./atomic-write.js";
 import { clearParseCache } from "./files.js";
 import { parseRoadmap as parseLegacyRoadmap, parsePlan as parseLegacyPlan } from "./parsers-legacy.js";
-import { isDbAvailable, getTask, getSlice, getSliceTasks, getPendingGates, updateTaskStatus, updateSliceStatus, insertSlice, getMilestone, refreshOpenDatabaseFromDisk, getCompletedMilestoneTaskFileHints, getMilestoneCommitAttributionShas, recordMilestoneCommitAttribution } from "./gsd-db.js";
+import { isDbAvailable, getTask, getSlice, getSliceTasks, getPendingGates, updateTaskStatus, updateSliceStatus, insertSlice, getMilestone, getMilestoneSlices, getLatestAssessmentByScope, updateMilestoneStatus, refreshOpenDatabaseFromDisk, getCompletedMilestoneTaskFileHints, getMilestoneCommitAttributionShas, recordMilestoneCommitAttribution } from "./gsd-db.js";
 import { isValidationTerminal } from "./state.js";
 import { getErrorMessage } from "./error-utils.js";
 import { logWarning, logError } from "./workflow-logger.js";
@@ -97,17 +97,93 @@ export type ArtifactRecoveryDbRefreshResult =
 export function refreshRecoveryDbForArtifact(
   unitType: string,
   unitId: string,
+  basePath: string,
 ): ArtifactRecoveryDbRefreshResult {
-  if (unitType !== "plan-slice" && unitType !== "execute-task") return { ok: true };
+  if (unitType !== "plan-slice" && unitType !== "execute-task" && unitType !== "complete-milestone") return { ok: true };
   if (!isDbAvailable()) return { ok: true };
 
   if (!refreshOpenDatabaseFromDisk()) {
     return {
       ok: false,
-      fatal: unitType === "execute-task",
+      fatal: unitType === "execute-task" || unitType === "complete-milestone",
       reason: `${unitType}-db-refresh-failed`,
       message: `Stuck recovery found ${unitType} ${unitId} artifacts, but the DB refresh failed.`,
     };
+  }
+
+  if (unitType === "complete-milestone") {
+    const { milestone: mid } = parseUnitId(unitId);
+    if (!mid) {
+      return {
+        ok: false,
+        fatal: true,
+        reason: "complete-milestone-invalid-unit-id",
+        message: `Stuck recovery found complete-milestone ${unitId} artifacts, but the unit id could not be parsed for DB reconciliation.`,
+      };
+    }
+
+    const milestone = getMilestone(mid);
+    if (!milestone) {
+      return {
+        ok: false,
+        fatal: true,
+        reason: "complete-milestone-artifact-db-missing",
+        message: `Stuck recovery found complete-milestone ${unitId} artifacts, but no matching DB milestone row exists after refresh.`,
+      };
+    }
+    if (isClosedStatus(milestone.status)) return { ok: true };
+
+    const validation = getLatestAssessmentByScope(mid, "milestone-validation");
+    if (validation?.status !== "pass") {
+      return {
+        ok: false,
+        fatal: true,
+        reason: "complete-milestone-validation-not-pass",
+        message: `Stuck recovery found complete-milestone ${unitId} artifacts, but milestone-validation is "${validation?.status ?? "absent"}" in the DB.`,
+      };
+    }
+
+    const slices = getMilestoneSlices(mid);
+    if (slices.length === 0) {
+      return {
+        ok: false,
+        fatal: true,
+        reason: "complete-milestone-slices-missing",
+        message: `Stuck recovery found complete-milestone ${unitId} artifacts, but no slices exist in the DB.`,
+      };
+    }
+    const openSlice = slices.find((slice) => !isClosedStatus(slice.status));
+    if (openSlice) {
+      return {
+        ok: false,
+        fatal: true,
+        reason: "complete-milestone-slice-open",
+        message: `Stuck recovery found complete-milestone ${unitId} artifacts, but slice ${openSlice.id} is still "${openSlice.status}" in the DB.`,
+      };
+    }
+    for (const slice of slices) {
+      const openTask = getSliceTasks(mid, slice.id).find((task) => !isClosedStatus(task.status));
+      if (openTask) {
+        return {
+          ok: false,
+          fatal: true,
+          reason: "complete-milestone-task-open",
+          message: `Stuck recovery found complete-milestone ${unitId} artifacts, but task ${slice.id}/${openTask.id} is still "${openTask.status}" in the DB.`,
+        };
+      }
+    }
+
+    if (hasImplementationArtifacts(basePath, mid) !== "present") {
+      return {
+        ok: false,
+        fatal: true,
+        reason: "complete-milestone-implementation-missing",
+        message: `Stuck recovery found complete-milestone ${unitId} artifacts, but implementation evidence is not present.`,
+      };
+    }
+
+    updateMilestoneStatus(mid, "complete", new Date().toISOString());
+    return { ok: true };
   }
 
   if (unitType !== "execute-task") return { ok: true };

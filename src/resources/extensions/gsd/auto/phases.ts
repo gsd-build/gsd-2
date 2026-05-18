@@ -1440,23 +1440,12 @@ export async function runDispatch(
           s.basePath,
         );
         if (artifactExists) {
-          if (unitType === "complete-milestone") {
-            const stuckDiag = diagnoseExpectedArtifact(unitType, unitId, s.basePath);
-            const stuckParts = [
-              `Detected ${unitType} ${unitId} output on disk, but the same unit is still being derived.`,
-              "This usually means the milestone summary exists while the DB row still does not mark the milestone complete.",
-            ];
-            if (stuckDiag) stuckParts.push(`Expected: ${stuckDiag}`);
-            ctx.ui.notify(stuckParts.join(" "), "warning");
-            await deps.pauseAuto(ctx, pi);
-            return { action: "break", reason: "complete-milestone-artifact-db-mismatch" };
-          }
           debugLog("autoLoop", {
             phase: "stuck-recovery",
             level: 1,
             action: "artifact-found",
           });
-          const recoveryDb = refreshRecoveryDbForArtifact(unitType, unitId);
+          const recoveryDb = refreshRecoveryDbForArtifact(unitType, unitId, s.basePath);
           if (!recoveryDb.ok) {
             ctx.ui.notify(
               recoveryDb.fatal
@@ -1491,13 +1480,13 @@ export async function runDispatch(
           unitId,
           s.basePath,
         );
-        if (artifactExists && unitType !== "complete-milestone") {
+        if (artifactExists) {
           debugLog("autoLoop", {
             phase: "stuck-recovery",
             level: 2,
             action: "artifact-found",
           });
-          const recoveryDb = refreshRecoveryDbForArtifact(unitType, unitId);
+          const recoveryDb = refreshRecoveryDbForArtifact(unitType, unitId, s.basePath);
           if (recoveryDb.ok) {
             ctx.ui.notify(
               `Stuck recovery: artifact for ${unitType} ${unitId} found on disk after cache invalidation. Continuing.`,

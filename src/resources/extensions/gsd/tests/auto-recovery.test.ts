@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 
 import { verifyExpectedArtifact, hasImplementationArtifacts, resolveExpectedArtifactPath, diagnoseExpectedArtifact, diagnoseWorktreeIntegrityFailure, buildLoopRemediationSteps, writeBlockerPlaceholder, refreshRecoveryDbForArtifact } from "../auto-recovery.ts";
 import { resolveMilestoneFile } from "../paths.ts";
-import { openDatabase, closeDatabase, insertMilestone, insertSlice, insertGateRow, insertTask, getMilestoneCommitAttributionShas } from "../gsd-db.ts";
+import { openDatabase, closeDatabase, insertMilestone, insertSlice, insertGateRow, insertTask, insertAssessment, getMilestone, getMilestoneCommitAttributionShas } from "../gsd-db.ts";
 import { clearParseCache } from "../files.ts";
 import { parseRoadmap } from "../parsers-legacy.ts";
 import { invalidateAllCaches } from "../cache.ts";
@@ -45,6 +45,10 @@ function makeTmpProject(): string {
   insertGateRow({ milestoneId: "M001", sliceId: "S01", gateId: "Q3", scope: "slice" });
   tmpDirs.push(dir);
   return dir;
+}
+
+function runGit(base: string, args: string[]): void {
+  execFileSync("git", args, { cwd: base, stdio: ["ignore", "pipe", "pipe"] });
 }
 
 afterEach(() => {
@@ -274,7 +278,7 @@ test("resolveExpectedArtifactPath returns correct path for all slice-level types
 test("refreshRecoveryDbForArtifact treats missing execute-task DB rows as fatal mismatches", () => {
   makeTmpProject();
 
-  const result = refreshRecoveryDbForArtifact("execute-task", "M001/S01/T01");
+  const result = refreshRecoveryDbForArtifact("execute-task", "M001/S01/T01", process.cwd());
 
   assert.deepEqual(result, {
     ok: false,
@@ -282,6 +286,117 @@ test("refreshRecoveryDbForArtifact treats missing execute-task DB rows as fatal 
     reason: "execute-task-artifact-db-missing",
     message: "Stuck recovery found execute-task M001/S01/T01 artifacts, but no matching DB task row exists after refresh.",
   });
+});
+
+test("refreshRecoveryDbForArtifact closes complete-milestone DB row when artifacts exist but DB is stale (#5568)", () => {
+  const base = mkdtempSync(join(tmpdir(), "auto-recovery-complete-ms-"));
+  mkdirSync(join(base, ".gsd"), { recursive: true });
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  tmpDirs.push(base);
+  insertMilestone({ id: "M001", title: "Stale completion", status: "active" });
+  insertSlice({
+    milestoneId: "M001",
+    id: "S01",
+    title: "Done Slice",
+    status: "complete",
+    risk: "low",
+    depends: [],
+  });
+  insertSlice({
+    milestoneId: "M001",
+    id: "S02",
+    title: "Done Slice",
+    status: "complete",
+    risk: "low",
+    depends: [],
+  });
+  insertTask({
+    milestoneId: "M001",
+    sliceId: "S01",
+    id: "T01",
+    title: "Done Task",
+    status: "complete",
+  });
+  insertTask({
+    milestoneId: "M001",
+    sliceId: "S02",
+    id: "T02",
+    title: "Done Task 2",
+    status: "complete",
+  });
+  insertAssessment({
+    path: ".gsd/milestones/M001/M001-VALIDATION.md",
+    milestoneId: "M001",
+    status: "pass",
+    scope: "milestone-validation",
+    fullContent: "---\nverdict: pass\n---\n",
+  });
+  const milestoneDir = join(base, ".gsd", "milestones", "M001");
+  mkdirSync(milestoneDir, { recursive: true });
+  writeFileSync(join(milestoneDir, "M001-SUMMARY.md"), "# Milestone Summary\n");
+  writeFileSync(join(milestoneDir, "M001-VALIDATION.md"), "---\nverdict: pass\n---\n");
+  runGit(base, ["init", "-b", "main"]);
+  runGit(base, ["config", "user.email", "test@example.com"]);
+  runGit(base, ["config", "user.name", "Test User"]);
+  runGit(base, ["checkout", "-b", "milestone/M001"]);
+  writeFileSync(join(base, "feature.ts"), "export const shipped = true;\n");
+  runGit(base, ["add", "feature.ts"]);
+  runGit(base, ["commit", "-m", "feat: implementation evidence"]);
+  writeFileSync(join(base, ".gsd", "integration-branch"), "main\n");
+
+  const result = refreshRecoveryDbForArtifact("complete-milestone", "M001", base);
+
+  assert.deepEqual(result, { ok: true });
+  assert.equal(getMilestone("M001")?.status, "complete");
+});
+
+test("refreshRecoveryDbForArtifact fails closed for complete-milestone without implementation evidence", () => {
+  const base = mkdtempSync(join(tmpdir(), "auto-recovery-complete-ms-no-impl-"));
+  mkdirSync(join(base, ".gsd"), { recursive: true });
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  tmpDirs.push(base);
+  insertMilestone({ id: "M001", title: "Stale completion", status: "active" });
+  insertSlice({
+    milestoneId: "M001",
+    id: "S01",
+    title: "Done Slice",
+    status: "complete",
+    risk: "low",
+    depends: [],
+  });
+  insertTask({
+    milestoneId: "M001",
+    sliceId: "S01",
+    id: "T01",
+    title: "Done Task",
+    status: "complete",
+  });
+  insertAssessment({
+    path: ".gsd/milestones/M001/M001-VALIDATION.md",
+    milestoneId: "M001",
+    status: "pass",
+    scope: "milestone-validation",
+    fullContent: "---\nverdict: pass\n---\n",
+  });
+  const milestoneDir = join(base, ".gsd", "milestones", "M001");
+  mkdirSync(milestoneDir, { recursive: true });
+  writeFileSync(join(milestoneDir, "M001-SUMMARY.md"), "# Milestone Summary\n");
+  writeFileSync(join(milestoneDir, "M001-VALIDATION.md"), "---\nverdict: pass\n---\n");
+  runGit(base, ["init", "-b", "main"]);
+  runGit(base, ["config", "user.email", "test@example.com"]);
+  runGit(base, ["config", "user.name", "Test User"]);
+  runGit(base, ["add", ".gsd"]);
+  runGit(base, ["commit", "-m", "chore: gsd artifacts only"]);
+
+  const result = refreshRecoveryDbForArtifact("complete-milestone", "M001", base);
+
+  assert.deepEqual(result, {
+    ok: false,
+    fatal: true,
+    reason: "complete-milestone-implementation-missing",
+    message: "Stuck recovery found complete-milestone M001 artifacts, but implementation evidence is not present.",
+  });
+  assert.equal(getMilestone("M001")?.status, "active");
 });
 
 // ─── diagnoseExpectedArtifact ─────────────────────────────────────────────
