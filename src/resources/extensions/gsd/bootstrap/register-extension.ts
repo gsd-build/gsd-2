@@ -29,6 +29,13 @@ export function handleRecoverableExtensionProcessError(err: Error): boolean {
   if ((err as NodeJS.ErrnoException).code === "EPIPE") {
     process.exit(0);
   }
+  if ((err as NodeJS.ErrnoException).code === "EIO") {
+    const syscall = (err as NodeJS.ErrnoException).syscall;
+    if (syscall === "read") {
+      process.stderr.write(`[gsd] EIO: ${err.message}\n`);
+      return true;
+    }
+  }
   if ((err as NodeJS.ErrnoException).code === "ENOENT") {
     const syscall = (err as NodeJS.ErrnoException).syscall;
     if (syscall?.startsWith("spawn")) {
