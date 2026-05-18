@@ -24,6 +24,7 @@ import {
 	createClaudeCodeElicitationHandler,
 	extractImageBlocksFromContext,
 	extractToolResultsFromSdkUserMessage,
+	serverToolUseToToolCallLike,
 	getClaudeLookupCommand,
 	parseAskUserQuestionsElicitation,
 	parseTextInputElicitation,
@@ -409,6 +410,36 @@ describe("stream-adapter — no transcript fabrication (#4102)", () => {
 });
 
 describe("stream-adapter — Claude Code external tool results", () => {
+	test("serverToolUseToToolCallLike preserves object input for extension tool_result routing", () => {
+		const toolCall = serverToolUseToToolCallLike({
+			id: "srv-1",
+			name: "workflow_gate",
+			input: { gateId: "Q3", verdict: "pass" },
+		});
+
+		assert.deepEqual(toolCall, {
+			type: "toolCall",
+			id: "srv-1",
+			name: "workflow_gate",
+			arguments: { gateId: "Q3", verdict: "pass" },
+		});
+	});
+
+	test("serverToolUseToToolCallLike wraps non-object input under input key", () => {
+		const toolCall = serverToolUseToToolCallLike({
+			id: "srv-2",
+			name: "workflow_gate",
+			input: "raw-value",
+		});
+
+		assert.deepEqual(toolCall, {
+			type: "toolCall",
+			id: "srv-2",
+			name: "workflow_gate",
+			arguments: { input: "raw-value" },
+		});
+	});
+
 	test("extractToolResultsFromSdkUserMessage maps tool_result content to tool payloads", () => {
 		const message: SDKUserMessage = {
 			type: "user",

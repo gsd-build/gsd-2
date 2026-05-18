@@ -493,12 +493,46 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		getProviderOptions: async (currentModel) => {
 			if (currentModel.provider !== "claude-code") return undefined;
 			const runner = extensionRunnerRef.current;
-			if (!runner?.hasUI()) {
+			if (!runner) {
 				return { cwd: workspaceRootRef.current };
 			}
 			return {
 				cwd: workspaceRootRef.current,
-				extensionUIContext: runner.getUIContext(),
+				...(runner.hasUI() ? { extensionUIContext: runner.getUIContext() } : {}),
+				onExternalToolCall: async (toolCall: { id: string; name: string; arguments: Record<string, unknown> }) => {
+					if (!runner.hasHandlers("tool_call")) return;
+					await runner.emitToolCall({
+						type: "tool_call",
+						toolCallId: toolCall.id,
+						toolName: toolCall.name,
+						input: toolCall.arguments,
+					});
+				},
+				onExternalToolResult: async (event: {
+					toolCall: { id: string; name: string; arguments: Record<string, unknown> };
+					result: {
+						content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+						details?: Record<string, unknown>;
+						isError: boolean;
+					};
+				}) => {
+					if (!runner.hasHandlers("tool_result")) return;
+					const content = event.result.content.map((block) => {
+						if (block.type === "image" && typeof block.data === "string" && typeof block.mimeType === "string") {
+							return { type: "image" as const, data: block.data, mimeType: block.mimeType };
+						}
+						return { type: "text" as const, text: typeof block.text === "string" ? block.text : "" };
+					});
+					await runner.emitToolResult({
+						type: "tool_result",
+						toolCallId: event.toolCall.id,
+						toolName: event.toolCall.name,
+						input: event.toolCall.arguments,
+						content,
+						details: event.result.details,
+						isError: event.result.isError,
+					});
+				},
 			};
 		},
 		getApiKey: async (provider) => {
