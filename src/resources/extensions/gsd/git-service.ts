@@ -935,6 +935,9 @@ export class GitServiceImpl {
       if (!nativeHasStagedChanges(this.basePath)) throw err;
       nativeCommit(this.basePath, message, { allowEmpty: false });
     }
+    // nativeHasChanges() uses a short TTL cache in fallback mode; invalidate it
+    // after a successful commit so post-commit checks observe a clean tree.
+    _resetHasChangesCache();
 
     // Absorb any preceding gsd snapshot commits into this real commit.
     // Walk backwards from HEAD~1 counting consecutive snapshot subjects,

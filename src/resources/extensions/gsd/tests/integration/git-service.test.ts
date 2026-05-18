@@ -23,7 +23,7 @@ import {
   type PreMergeCheckResult,
   type TaskCommitContext,
 } from "../../git-service.ts";
-import { nativeAddAllWithExclusions } from "../../native-git-bridge.ts";
+import { nativeAddAllWithExclusions, nativeHasChanges, _resetHasChangesCache } from "../../native-git-bridge.ts";
 function run(command: string, cwd: string): string {
   return execSync(command, { cwd, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" }).trim();
 }
@@ -1974,6 +1974,19 @@ describe('git-service', async () => {
     // No gsd snapshot commits in log
     const log = run("git log --oneline", repo);
     assert.ok(!log.includes("gsd snapshot"), "no gsd snapshot commits remain in history");
+
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test('autoCommit: resets nativeHasChanges cache after successful commit', () => {
+    const repo = initTempRepo();
+    createFile(repo, "cache-reset.ts", "before");
+
+    _resetHasChangesCache();
+    const svc = new GitServiceImpl(repo);
+    const message = svc.autoCommit("execute-task", "S01/T-cache");
+    assert.ok(message !== null, "autoCommit should commit dirty changes");
+    assert.equal(nativeHasChanges(repo), false, "post-commit has-changes check should observe a clean tree");
 
     rmSync(repo, { recursive: true, force: true });
   });

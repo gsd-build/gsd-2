@@ -69,6 +69,7 @@ test("preflightCleanRoot — dirty tree warns user and auto-stashes", () => {
     });
 
     assert.equal(result.stashPushed, true, "stashPushed must be true when tree was dirty");
+    assert.ok(result.stashMarker, "stashMarker must be set when a stash entry is created");
     assert.ok(result.summary.length > 0, "summary must be non-empty when stash was pushed");
 
     // A warning notification must have been emitted before stashing
@@ -84,6 +85,7 @@ test("preflightCleanRoot — dirty tree warns user and auto-stashes", () => {
     // The stash entry must exist
     const stashList = run("git stash list", repo);
     assert.ok(stashList.includes("gsd-preflight-stash"), "stash entry must be named gsd-preflight-stash");
+    assert.ok(stashList.includes(result.stashMarker!), "stash list must include the generated stash marker");
   } finally {
     try { rmSync(repo, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* ignore */ }
   }

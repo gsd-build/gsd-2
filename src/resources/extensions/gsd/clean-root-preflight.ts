@@ -354,10 +354,13 @@ export function preflightCleanRoot(
       encoding: "utf-8",
       env: GIT_NO_PROMPT_ENV,
     });
+    const stashCreated = findPreflightStashRef(basePath, milestoneId, stashMarker) !== null;
     return {
-      stashPushed: true,
-      stashMarker,
-      summary: `Stashed uncommitted changes before merge (milestone ${milestoneId}).`,
+      stashPushed: stashCreated,
+      stashMarker: stashCreated ? stashMarker : undefined,
+      summary: stashCreated
+        ? `Stashed uncommitted changes before merge (milestone ${milestoneId}).`
+        : `No stashable changes found before merge (milestone ${milestoneId}).`,
     };
   } catch (err) {
     // Stash failure is non-fatal — log and let the merge attempt proceed
