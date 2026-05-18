@@ -42,7 +42,7 @@ const PACKAGE_SCRIPT_KEYS = ["typecheck", "lint", "test"] as const;
 /**
  * Discover verification commands using the first-non-empty-wins strategy (D003):
  *   1. Explicit preference commands
- *   2. Task plan verify field (split on &&)
+ *   2. Task plan verify field (split on && and newlines)
  *   3. package.json scripts (typecheck, lint, test)
  *   4. Python pytest project markers
  *   5. Dependency-free Node test files
@@ -62,7 +62,7 @@ export function discoverCommands(options: DiscoverCommandsOptions): DiscoveredCo
   // 2. Task plan verify field (commands are untrusted — sanitize)
   if (options.taskPlanVerify && options.taskPlanVerify.trim()) {
     const commands = options.taskPlanVerify
-      .split("&&")
+      .split(/&&|\r?\n/)
       .map(c => c.trim())
       .filter(Boolean)
       .filter(c => sanitizeCommand(c) !== null);
@@ -271,27 +271,30 @@ export function isLikelyCommand(cmd: string): boolean {
 
   const tokens = trimmed.split(/\s+/);
   const firstToken = tokens[0];
+  const effectiveFirstToken = firstToken === "!" ? (tokens[1] ?? "") : firstToken;
+  const effectiveTokens = firstToken === "!" ? tokens.slice(1) : tokens;
+  if (firstToken === "!" && effectiveTokens.length === 0) return false;
 
   // Known command prefix → definitely a command
-  if (KNOWN_COMMAND_PREFIXES.has(firstToken)) return true;
+  if (KNOWN_COMMAND_PREFIXES.has(effectiveFirstToken)) return true;
 
   // Path-like first token → command
-  if (firstToken.startsWith("/") || firstToken.startsWith("./") || firstToken.startsWith("../")) return true;
+  if (effectiveFirstToken.startsWith("/") || effectiveFirstToken.startsWith("./") || effectiveFirstToken.startsWith("../")) return true;
 
   // Has flag-like tokens → command
-  if (tokens.some(t => t.startsWith("-"))) return true;
+  if (effectiveTokens.some(t => t.startsWith("-"))) return true;
 
   // First token starts with uppercase + 4 or more words → prose
-  if (/^[A-Z]/.test(firstToken) && tokens.length >= 4) return false;
+  if (/^[A-Z]/.test(effectiveFirstToken) && effectiveTokens.length >= 4) return false;
 
   // Contains comma-space patterns (prose clause separators) → prose
   if (/,\s/.test(trimmed) && tokens.length >= 4) return false;
 
   // First token has uppercase letters and no path separators → prose
-  if (/[A-Z]/.test(firstToken) && !firstToken.includes("/")) return false;
+  if (/[A-Z]/.test(effectiveFirstToken) && !effectiveFirstToken.includes("/")) return false;
 
   // Non-ASCII prose with multiple words should not be executed as a command.
-  if (!/[A-Za-z0-9]/.test(firstToken) && tokens.length >= 4) return false;
+  if (!/[A-Za-z0-9]/.test(effectiveFirstToken) && effectiveTokens.length >= 4) return false;
 
   return true;
 }

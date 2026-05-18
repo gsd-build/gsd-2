@@ -231,6 +231,24 @@ describe("verification-gate: discovery", () => {
     assert.deepStrictEqual(result.commands, ["npm run test"]);
   });
 
+  test("taskPlanVerify splits newline-delimited commands", () => {
+    const result = discoverCommands({
+      taskPlanVerify: "npm run lint\nnpm run test",
+      cwd: tmp,
+    });
+    assert.equal(result.source, "task-plan");
+    assert.deepStrictEqual(result.commands, ["npm run lint", "npm run test"]);
+  });
+
+  test("taskPlanVerify keeps bash negation commands", () => {
+    const result = discoverCommands({
+      taskPlanVerify: "! grep 'needle' file.txt\nnpm run test",
+      cwd: tmp,
+    });
+    assert.equal(result.source, "task-plan");
+    assert.deepStrictEqual(result.commands, ["! grep 'needle' file.txt", "npm run test"]);
+  });
+
   test("taskPlanVerify rejects piped pytest command", () => {
     const result = discoverCommands({
       taskPlanVerify: "python3 -m pytest tests/ -q --tb=short 2>&1 | tail -5",
@@ -631,6 +649,10 @@ test("isLikelyCommand: empty or whitespace-only strings are rejected", () => {
 test("isLikelyCommand: short lowercase tokens without flags are accepted (could be custom scripts)", () => {
   assert.equal(isLikelyCommand("custom-verify"), true);
   assert.equal(isLikelyCommand("mycheck"), true);
+});
+
+test("isLikelyCommand: bash negation with known command is accepted", () => {
+  assert.equal(isLikelyCommand("! grep needle file.txt"), true);
 });
 
 test("validateVerificationCommand rejects shell control syntax", () => {
