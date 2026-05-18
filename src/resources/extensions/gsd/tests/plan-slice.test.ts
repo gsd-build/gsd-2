@@ -270,6 +270,27 @@ test('handlePlanSlice clears sketch flag so DB-derived state leaves refining', a
   }
 });
 
+test('handlePlanSlice preserves sketch flag when render fails before artifacts exist', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    insertMilestone({ id: 'M001', title: 'Milestone', status: 'active' });
+    insertSlice({ id: 'S02', milestoneId: 'M001', title: 'Planning slice', status: 'pending', demo: 'Rendered plans exist.', isSketch: true });
+
+    const sliceDir = join(base, '.gsd', 'milestones', 'M001', 'slices', 'S02');
+    rmSync(sliceDir, { recursive: true, force: true });
+    writeFileSync(sliceDir, 'not a directory', 'utf-8');
+
+    const result = await handlePlanSlice(validParams(), base);
+    assert.ok('error' in result);
+    assert.match(result.error, /render failed:/);
+    assert.equal(getSlice('M001', 'S02')?.is_sketch, 1, 'sketch flag must stay set when plan artifacts could not render');
+  } finally {
+    cleanup(base);
+  }
+});
+
 test('handlePlanSlice leaves omitted enrichment fields empty instead of rendering placeholders', async () => {
   const base = makeTmpBase();
   openDatabase(join(base, '.gsd', 'gsd.db'));

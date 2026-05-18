@@ -329,7 +329,6 @@ export async function handlePlanSlice(
       if (isDeferredStatus(parentSlice.status)) {
         updateSliceStatus(params.milestoneId, params.sliceId, "pending");
       }
-      setSliceSketchFlag(params.milestoneId, params.sliceId, false);
 
       upsertSlicePlanning(params.milestoneId, params.sliceId, {
         goal: params.goal,
@@ -398,6 +397,7 @@ export async function handlePlanSlice(
     }
 
     const renderResult = await renderPlanFromDb(basePath, params.milestoneId, params.sliceId);
+    setSliceSketchFlag(params.milestoneId, params.sliceId, false);
     invalidateStateCache();
     clearParseCache();
 
