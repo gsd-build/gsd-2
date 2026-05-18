@@ -80,7 +80,7 @@ describe("require_slice_discussion dispatch rule (#3454)", () => {
         assert.match(action!.reason, /S01/);
         assert.match(action!.reason, /require_slice_discussion/);
         assert.match(action!.reason, /\/gsd discuss/);
-        assert.strictEqual(action!.level, "info");
+        assert.strictEqual(action!.level, "warning");
       }
     } finally {
       rmSync(basePath, { recursive: true, force: true });

@@ -883,7 +883,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
       return {
         action: "stop" as const,
         reason: `Slice ${state.activeSlice.id} requires discussion before planning (require_slice_discussion is enabled). Run /gsd discuss to discuss this slice, then /gsd auto to resume.`,
-        level: "info" as const,
+        level: "warning" as const,
       };
     },
   },
