@@ -1809,21 +1809,16 @@ export function registerWorkflowTools(realServer: McpToolServer): void {
       const { projectDir, milestoneId, sliceId, reason } = parseWorkflowArgs(skipSliceSchema, args);
       await enforceWorkflowWriteGate("gsd_skip_slice", projectDir, milestoneId);
       await runSerializedWorkflowDbOperation(projectDir, async () => {
-        const { getSlice, updateSliceStatus } = await importLocalModule<any>("../../../src/resources/extensions/gsd/gsd-db.js");
+        const { handleSkipSlice } = await importLocalModule<any>("../../../src/resources/extensions/gsd/tools/skip-slice.js");
         const { invalidateStateCache } = await importLocalModule<any>("../../../src/resources/extensions/gsd/state.js");
         const { rebuildState } = await importLocalModule<any>("../../../src/resources/extensions/gsd/doctor.js");
-        const slice = getSlice(milestoneId, sliceId);
-        if (!slice) {
-          throw new Error(`Slice ${sliceId} not found in milestone ${milestoneId}`);
+        const result = handleSkipSlice({ milestoneId, sliceId, reason });
+        if (result.error) {
+          throw new Error(result.error);
         }
-        if (slice.status === "complete" || slice.status === "done") {
-          throw new Error(`Slice ${sliceId} is already complete and cannot be skipped`);
-        }
-        if (slice.status !== "skipped") {
-          updateSliceStatus(milestoneId, sliceId, "skipped");
-          invalidateStateCache();
-          await rebuildState(projectDir);
-        }
+
+        invalidateStateCache();
+        await rebuildState(projectDir);
       });
       return {
         content: [{ type: "text" as const, text: `Skipped slice ${sliceId} (${milestoneId}). Reason: ${reason ?? "User-directed skip"}.` }],

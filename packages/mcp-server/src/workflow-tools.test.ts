@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 
 import { symlinkSync, realpathSync } from "node:fs";
 
-import { _getAdapter, closeDatabase } from "../../../src/resources/extensions/gsd/gsd-db.ts";
+import { _getAdapter, closeDatabase, getSliceTasks } from "../../../src/resources/extensions/gsd/gsd-db.ts";
 import { _buildImportCandidates, registerWorkflowTools, WORKFLOW_TOOL_NAMES, validateProjectDir } from "./workflow-tools.ts";
 
 function makeTmpBase(): string {
@@ -625,6 +625,120 @@ describe("workflow MCP tools", () => {
       assert.equal(parsed.milestoneId, "M001");
       assert.equal(parsed.sliceCount, 1);
       assert.equal(parsed.slices[0].id, "S01");
+    } finally {
+      cleanup(base);
+    }
+  });
+
+  it("gsd_skip_slice cascades pending/active tasks to skipped", async () => {
+    const base = makeTmpBase();
+    try {
+      const server = makeMockServer();
+      registerWorkflowTools(server as any);
+      const milestoneTool = server.tools.find((t) => t.name === "gsd_plan_milestone");
+      const sliceTool = server.tools.find((t) => t.name === "gsd_plan_slice");
+      const planTaskTool = server.tools.find((t) => t.name === "gsd_plan_task");
+      const skipTool = server.tools.find((t) => t.name === "gsd_skip_slice");
+      assert.ok(milestoneTool, "milestone planning tool should be registered");
+      assert.ok(sliceTool, "slice planning tool should be registered");
+      assert.ok(planTaskTool, "task planning tool should be registered");
+      assert.ok(skipTool, "skip slice tool should be registered");
+
+      await milestoneTool!.handler({
+        projectDir: base,
+        milestoneId: "M001",
+        title: "Skip slice cascade",
+        vision: "Ensure skip cascades task statuses.",
+        slices: [
+          {
+            sliceId: "S01",
+            title: "Slice to skip",
+            risk: "low",
+            depends: [],
+            demo: "Tasks are skipped when slice is skipped.",
+            goal: "Create pending tasks and skip the slice.",
+            successCriteria: "Tasks become skipped after gsd_skip_slice.",
+            proofLevel: "integration",
+            integrationClosure: "MCP skip tool updates slice and tasks together.",
+            observabilityImpact: "Regression test guards pending-task dead-end.",
+          },
+        ],
+      });
+
+      await sliceTool!.handler({
+        projectDir: base,
+        milestoneId: "M001",
+        sliceId: "S01",
+        goal: "Create tasks that should be cascaded.",
+        tasks: [
+          {
+            taskId: "T01",
+            title: "Pending one",
+            description: "Will be skipped via cascade.",
+            estimate: "5m",
+            files: ["src/a.ts"],
+            verify: "node --test",
+            inputs: ["M001-ROADMAP.md"],
+            expectedOutput: ["T01-PLAN.md"],
+          },
+          {
+            taskId: "T02",
+            title: "Pending two",
+            description: "Will be skipped via cascade.",
+            estimate: "5m",
+            files: ["src/b.ts"],
+            verify: "node --test",
+            inputs: ["M001-ROADMAP.md"],
+            expectedOutput: ["T02-PLAN.md"],
+          },
+        ],
+      });
+
+      await planTaskTool!.handler({
+        projectDir: base,
+        milestoneId: "M001",
+        sliceId: "S01",
+        taskId: "T01",
+        title: "Pending one",
+        description: "Will be skipped via cascade.",
+        estimate: "5m",
+        files: ["src/a.ts"],
+        verify: "node --test",
+        inputs: ["M001-ROADMAP.md"],
+        expectedOutput: ["T01-PLAN.md"],
+      });
+
+      await planTaskTool!.handler({
+        projectDir: base,
+        milestoneId: "M001",
+        sliceId: "S01",
+        taskId: "T02",
+        title: "Pending two",
+        description: "Will be skipped via cascade.",
+        estimate: "5m",
+        files: ["src/b.ts"],
+        verify: "node --test",
+        inputs: ["M001-ROADMAP.md"],
+        expectedOutput: ["T02-PLAN.md"],
+      });
+
+      _getAdapter()!
+        .prepare("UPDATE tasks SET status = 'active' WHERE milestone_id = ? AND slice_id = ? AND id = ?")
+        .run("M001", "S01", "T02");
+
+      const skipResult = await skipTool!.handler({
+        projectDir: base,
+        milestoneId: "M001",
+        sliceId: "S01",
+        reason: "descoped",
+      });
+      assert.match((skipResult as any).content[0].text as string, /Skipped slice S01/);
+
+      const tasks = getSliceTasks("M001", "S01");
+      assert.equal(tasks.length, 2, "expected planned tasks to exist");
+      for (const task of tasks) {
+        assert.equal(task.status, "skipped", `task ${task.id} should be skipped by cascade`);
+      }
     } finally {
       cleanup(base);
     }
