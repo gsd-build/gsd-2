@@ -900,9 +900,14 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
   if (internalProcess) {
     internalProcess.on('exit', (code: number | null) => {
       if (!completed) {
-        const msg = `[headless] Child process exited unexpectedly with code ${code ?? 'null'}\n`
-        process.stderr.write(msg)
-        exitCode = EXIT_ERROR
+        if (code === 0) {
+          process.stderr.write('[headless] Child exited cleanly (code 0) without terminal notification\n')
+          exitCode = EXIT_SUCCESS
+        } else {
+          const msg = `[headless] Child process exited unexpectedly with code ${code ?? 'null'}\n`
+          process.stderr.write(msg)
+          exitCode = EXIT_ERROR
+        }
         resolveCompletion()
       }
     })

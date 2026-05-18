@@ -178,6 +178,12 @@ function handleEvent(
   }
 }
 
+function handleChildExitWithoutTerminalNotification(code: number | null, state: EventHandlerState): void {
+  if (state.completed) return
+  state.completed = true
+  state.exitCode = code === 0 ? EXIT_SUCCESS : EXIT_ERROR
+}
+
 // ─── execution_complete event handling ──────────────────────────────────────
 
 test('execution_complete with status success triggers completion with EXIT_SUCCESS', () => {
@@ -230,6 +236,33 @@ test('execution_complete ignored if already completed', () => {
 
   // Should not change exitCode because already completed
   assert.equal(state.exitCode, EXIT_SUCCESS)
+})
+
+test('clean child exit without terminal notification is treated as success', () => {
+  const state: EventHandlerState = { completed: false, blocked: false, exitCode: -1, v2Enabled: true }
+
+  handleChildExitWithoutTerminalNotification(0, state)
+
+  assert.equal(state.completed, true)
+  assert.equal(state.exitCode, EXIT_SUCCESS)
+})
+
+test('nonzero child exit without terminal notification remains an error', () => {
+  const state: EventHandlerState = { completed: false, blocked: false, exitCode: -1, v2Enabled: true }
+
+  handleChildExitWithoutTerminalNotification(1, state)
+
+  assert.equal(state.completed, true)
+  assert.equal(state.exitCode, EXIT_ERROR)
+})
+
+test('null child exit without terminal notification remains an error', () => {
+  const state: EventHandlerState = { completed: false, blocked: false, exitCode: -1, v2Enabled: true }
+
+  handleChildExitWithoutTerminalNotification(null, state)
+
+  assert.equal(state.completed, true)
+  assert.equal(state.exitCode, EXIT_ERROR)
 })
 
 // ─── v1 string-matching fallback ────────────────────────────────────────────
