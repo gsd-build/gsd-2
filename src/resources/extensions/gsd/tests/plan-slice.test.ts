@@ -260,6 +260,7 @@ test('handlePlanSlice clears sketch flag so DB-derived state leaves refining', a
     const result = await handlePlanSlice(validParams(), base);
     assert.ok(!('error' in result), `unexpected error: ${'error' in result ? result.error : ''}`);
     assert.equal(getSlice('M001', 'S02')?.is_sketch, 0, 'planned slice must no longer be treated as a sketch');
+    assert.equal(getSlice('M001', 'S02')?.goal, 'Persist slice planning through the DB.');
 
     invalidateStateCache();
     const after = await deriveState(base);

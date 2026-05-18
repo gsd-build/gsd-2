@@ -329,7 +329,6 @@ export async function handlePlanSlice(
       if (isDeferredStatus(parentSlice.status)) {
         updateSliceStatus(params.milestoneId, params.sliceId, "pending");
       }
-      setSliceSketchFlag(params.milestoneId, params.sliceId, false);
 
       upsertSlicePlanning(params.milestoneId, params.sliceId, {
         goal: params.goal,
@@ -339,6 +338,7 @@ export async function handlePlanSlice(
         observabilityImpact: params.observabilityImpact,
         targetRepositories: params.targetRepositories ?? ["project"],
       });
+      setSliceSketchFlag(params.milestoneId, params.sliceId, false);
 
       for (const taskId of omittedTaskIds) {
         deleteTask(params.milestoneId, params.sliceId, taskId);
