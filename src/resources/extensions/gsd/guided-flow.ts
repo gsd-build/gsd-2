@@ -191,6 +191,11 @@ async function runQuickTaskChoice(ctx: ExtensionCommandContext, pi: ExtensionAPI
   await handleQuick(task, ctx, pi);
 }
 
+function isNonInteractiveContext(ctx: ExtensionCommandContext): boolean {
+  if (!ctx.hasUI) return true;
+  return process.env.GSD_HEADLESS === "1" || process.env.GSD_WEB_BRIDGE_TUI === "1";
+}
+
 /**
  * Scope-based overload of isGhostMilestone.
  * Binds basePath and milestoneId from the scope, ensuring path resolution
@@ -2217,6 +2222,10 @@ export async function showSmartEntry(
         basePath
       ), "gsd-run", ctx, "discuss-milestone", { basePath });
     } else {
+      if (isNonInteractiveContext(ctx)) {
+        ctx.ui.notify(`Auto-mode stopped — ${state.nextAction || "No active milestone."}`, "info");
+        return;
+      }
       const choice = await showNextAction(ctx, {
         title: "GSD — Get Shit Done",
         summary: ["No active milestone."],
@@ -2273,6 +2282,10 @@ export async function showSmartEntry(
 
   // ── All milestones complete → New milestone ──────────────────────────
   if (state.phase === "complete") {
+    if (isNonInteractiveContext(ctx)) {
+      ctx.ui.notify("Auto-mode stopped — all milestones complete.", "info");
+      return;
+    }
     const choice = await showNextAction(ctx, {
       title: `GSD — ${milestoneId}: ${milestoneTitle}`,
       summary: ["All milestones complete."],
