@@ -467,12 +467,15 @@ export function registerHooks(
 
   pi.on("session_start", async (_event, ctx) => {
     const basePath = contextBasePath(ctx);
+    const autoActive = isAutoActive();
     initSessionNotifications(ctx);
-    if (!isAutoActive()) {
+    if (!autoActive) {
       const { initHealthWidget } = await import("../health-widget.js");
       initHealthWidget(ctx);
     }
-    resetWriteGateState(basePath);
+    // #5945: preserve auto-dispatch pre-marked depth verification across
+    // spawned session startup so discuss-milestone can write CONTEXT.
+    if (!autoActive) resetWriteGateState(basePath);
     resetToolCallLoopGuard();
     approvalQuestionAbortInFlight = false;
     clearDeferredApprovalGate();
@@ -495,19 +498,20 @@ export function registerHooks(
     } catch { /* non-fatal */ }
     await installWelcomeHeader(ctx);
     await loadToolApiKeysForSession();
-    if (isAutoActive()) {
+    if (autoActive) {
       ctx.ui.setWidget("gsd-health", undefined);
     }
   });
 
   pi.on("session_switch", async (_event, ctx) => {
     const basePath = contextBasePath(ctx);
+    const autoActive = isAutoActive();
     initSessionNotifications(ctx);
-    resetWriteGateState(basePath);
+    if (!autoActive) resetWriteGateState(basePath);
     resetToolCallLoopGuard();
     clearDeferredApprovalGate();
     await resetAskUserQuestionsTurnCache();
-    clearDiscussionFlowState(basePath);
+    if (!autoActive) clearDiscussionFlowState(basePath);
     await syncServiceTierStatus(ctx);
     await applyDisabledModelProviderPolicy(ctx);
     await applyCompactionThresholdOverride(ctx);
@@ -521,7 +525,7 @@ export function registerHooks(
       prepareWorkflowMcpForProject(ctx, basePath);
     }
     await loadToolApiKeysForSession();
-    if (!isAutoActive()) {
+    if (!autoActive) {
       ctx.ui.setWidget("gsd-progress", undefined);
       ctx.ui.setWidget("gsd-outcome", undefined);
       const { initHealthWidget } = await import("../health-widget.js");
