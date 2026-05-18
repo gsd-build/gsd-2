@@ -45,6 +45,45 @@ interface McpServerConfig {
 	headers?: Record<string, string>;
 	/** OAuth config for HTTP transport. */
 	oauth?: McpHttpAuthConfig["oauth"];
+	/** When true, stdio servers are pre-trusted (skip the interactive confirm). */
+	trust?: boolean;
+	/** Per-server override (ms) for the mcp_call tool-invocation timeout. */
+	timeoutMs?: number;
+}
+
+// ─── mcp_call timeout configuration ───────────────────────────────────────────
+
+/** Built-in default for client.callTool() when nothing else is configured. */
+const DEFAULT_MCP_CALL_TIMEOUT_MS = 60_000;
+/** Hard upper bound — protects against an accidental hours-long hang. */
+const MAX_MCP_CALL_TIMEOUT_MS = 30 * 60_000;
+
+/** Returns the input if it is a positive integer in (0, MAX_MCP_CALL_TIMEOUT_MS]; otherwise undefined. */
+function sanitizeTimeoutMs(value: unknown): number | undefined {
+	if (typeof value !== "number") return undefined;
+	if (!Number.isFinite(value) || !Number.isInteger(value)) return undefined;
+	if (value <= 0) return undefined;
+	return Math.min(value, MAX_MCP_CALL_TIMEOUT_MS);
+}
+
+/**
+ * Resolve the mcp_call timeout following the documented priority:
+ *   per-call arg > per-server config > GSD_MCP_CALL_TIMEOUT_MS env > built-in default.
+ * Invalid values at any layer are ignored and the resolution falls through.
+ * The final value is also clamped to MAX_MCP_CALL_TIMEOUT_MS.
+ */
+export function resolveCallTimeoutMs(
+	perCall: unknown,
+	perServer: unknown,
+	envValue: string | undefined = process.env.GSD_MCP_CALL_TIMEOUT_MS,
+): number {
+	const fromCall = sanitizeTimeoutMs(perCall);
+	if (fromCall !== undefined) return fromCall;
+	const fromServer = sanitizeTimeoutMs(perServer);
+	if (fromServer !== undefined) return fromServer;
+	const fromEnv = envValue !== undefined ? sanitizeTimeoutMs(Number(envValue)) : undefined;
+	if (fromEnv !== undefined) return fromEnv;
+	return DEFAULT_MCP_CALL_TIMEOUT_MS;
 }
 
 interface McpToolSchema {
@@ -96,7 +135,7 @@ function stdioTrustKey(config: McpServerConfig): string {
 	});
 }
 
-function readConfigs(): McpServerConfig[] {
+export function readConfigs(): McpServerConfig[] {
 	if (configCache) return configCache;
 
 	const servers: McpServerConfig[] = [];
@@ -136,6 +175,8 @@ function readConfigs(): McpServerConfig[] {
 					name,
 					transport,
 					sourcePath: configPath,
+					trust: config.trust === true ? true : undefined,
+					timeoutMs: sanitizeTimeoutMs(config.timeoutMs),
 					...(hasCommand && {
 						command: config.command as string,
 						args: Array.isArray(config.args) ? (config.args as string[]) : undefined,
@@ -174,19 +215,32 @@ export function _buildMcpTrustConfirmOptionsForTest(signal?: AbortSignal): { tim
 	return signal ? { timeout: 120_000, signal } : { timeout: 120_000 };
 }
 
-async function assertTrustedStdioServer(
+/** Drop the cached config so the next readConfigs() re-reads from disk. Used by
+ * /gsd mcp trust after a successful write, and by tests that mutate fixtures. */
+export function _resetConfigCache(): void {
+	configCache = null;
+}
+
+export async function assertTrustedStdioServer(
 	config: McpServerConfig,
 	ctx?: ExtensionContext,
 	signal?: AbortSignal,
 ): Promise<string | undefined> {
 	if (config.transport !== "stdio") return undefined;
+
+	// Config flag — pre-trusted. Skip the confirm in both interactive and auto runtimes.
+	if (config.trust === true) return undefined;
+
 	const trustKey = stdioTrustKey(config);
+	// Approved interactively earlier this session.
 	if (trustedStdioServers.has(trustKey)) return undefined;
 
 	if (!ctx?.hasUI) {
 		throw new Error(
-			`MCP server "${config.name}" is a project-local stdio command from ${config.sourcePath}. ` +
-			"Run this from an interactive GSD session and approve the server before use.",
+			`MCP server "${config.name}" is an untrusted project-local stdio command ` +
+			`from ${config.sourcePath}. To use it in an automated session, run ` +
+			`/gsd mcp trust "${config.name}" (or add "trust": true to that server's entry ` +
+			`in ${config.sourcePath}).`,
 		);
 	}
 
@@ -525,11 +579,13 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Call a tool on an MCP server. Provide the server name, tool name, and arguments. " +
 			"Connects to the server on first call (lazy connection). " +
-			"Use mcp_discover first to see available tools and their required arguments.",
+			"Use mcp_discover first to see available tools and their required arguments. " +
+			"For slow tools (test runs, long searches), pass `timeoutMs` to extend the per-call timeout.",
 		promptSnippet: "Call a tool on an MCP server",
 		promptGuidelines: [
 			"Always use mcp_discover first to understand the tool's parameters before calling mcp_call.",
 			"Arguments are passed as a JSON object matching the tool's input schema.",
+			"Default timeout is 60s. Pass timeoutMs (ms, positive integer) to extend it for slow tools.",
 		],
 		parameters: Type.Object({
 			server: Type.String({
@@ -545,15 +601,24 @@ export default function (pi: ExtensionAPI) {
 						"Tool arguments as key-value pairs matching the tool's input schema",
 				}),
 			),
+			timeoutMs: Type.Optional(
+				Type.Integer({
+					minimum: 1,
+					description:
+						"Per-call timeout in milliseconds. Overrides the server's timeoutMs config and the GSD_MCP_CALL_TIMEOUT_MS env var. Use for slow tools (e.g. test runs).",
+				}),
+			),
 		}),
 
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			try {
 				const client = await getOrConnect(params.server, signal, ctx);
+				const serverConfig = getServerConfig(params.server);
+				const timeout = resolveCallTimeoutMs(params.timeoutMs, serverConfig?.timeoutMs);
 				const result = await client.callTool(
 					{ name: params.tool, arguments: params.args ?? {} },
 					undefined,
-					{ signal, timeout: 60000 },
+					{ signal, timeout },
 				);
 
 				// Serialize result content to text
