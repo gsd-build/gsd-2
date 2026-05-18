@@ -103,6 +103,73 @@ export function shouldArmHeadlessIdleTimeout(toolCallCount: number, interactiveT
   return toolCallCount > 0 && interactiveToolCount === 0
 }
 
+export interface HeadlessTrackedEventLike {
+  type: string
+  detail?: string
+}
+
+export type HeadlessFinalStatus = 'complete' | 'blocked' | 'cancelled' | 'error' | 'timeout' | 'no-work-deterministic'
+
+export interface HeadlessRunSummary {
+  exitCode: number
+  interrupted: boolean
+  totalEvents: number
+  toolCallCount: number
+  recentEvents: readonly HeadlessTrackedEventLike[]
+}
+
+function hasCancelledDetail(detail: string | undefined): boolean {
+  return /\bcancelled\b/i.test(String(detail ?? ''))
+}
+
+/**
+ * Detect deterministic no-work tails seen in repeatable headless failures:
+ * select -> input -> notify(cancelled)
+ */
+export function hasDeterministicNoWorkTail(recentEvents: readonly HeadlessTrackedEventLike[]): boolean {
+  const uiTail = recentEvents
+    .filter((event) => event.type === 'extension_ui_request')
+    .slice(-3)
+
+  if (uiTail.length < 3) return false
+  const [first, second, third] = uiTail
+  return first.detail?.startsWith('select:') === true
+    && second.detail?.startsWith('input:') === true
+    && third.detail?.startsWith('notify:') === true
+    && hasCancelledDetail(third.detail)
+}
+
+/**
+ * Classify final status for summary/logging. Keeps legacy semantics except
+ * for deterministic no-work tails, which are labeled distinctly.
+ */
+export function classifyHeadlessFinalStatus(args: {
+  blocked: boolean
+  exitCode: number
+  totalEvents: number
+  recentEvents: readonly HeadlessTrackedEventLike[]
+}): HeadlessFinalStatus {
+  if (args.blocked) return 'blocked'
+  if (args.exitCode === EXIT_CANCELLED) return 'cancelled'
+  if (args.exitCode === EXIT_ERROR) {
+    if (hasDeterministicNoWorkTail(args.recentEvents)) return 'no-work-deterministic'
+    return args.totalEvents === 0 ? 'error' : 'timeout'
+  }
+  return 'complete'
+}
+
+/**
+ * Decide whether a failed run is restart-eligible.
+ */
+export function shouldRestartHeadlessRun(summary: HeadlessRunSummary): boolean {
+  if (summary.interrupted) return false
+  if (summary.exitCode !== EXIT_ERROR) return false
+  if (hasDeterministicNoWorkTail(summary.recentEvents)) return false
+  if (summary.totalEvents === 0) return true
+  if (summary.toolCallCount > 0 && summary.totalEvents > 5) return true
+  return true
+}
+
 // ---------------------------------------------------------------------------
 // Quick Command Detection
 // ---------------------------------------------------------------------------

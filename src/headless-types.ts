@@ -18,7 +18,7 @@ export const VALID_OUTPUT_FORMATS: ReadonlySet<string> = new Set(['text', 'json'
 // ---------------------------------------------------------------------------
 
 export interface HeadlessJsonResult {
-  status: 'success' | 'error' | 'blocked' | 'cancelled' | 'timeout'
+  status: 'success' | 'error' | 'blocked' | 'cancelled' | 'timeout' | 'no-work-deterministic'
   exitCode: number
   sessionId?: string
   duration: number

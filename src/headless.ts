@@ -32,6 +32,8 @@ import {
   NEW_MILESTONE_IDLE_TIMEOUT_MS,
   isInteractiveHeadlessTool,
   shouldArmHeadlessIdleTimeout,
+  shouldRestartHeadlessRun,
+  classifyHeadlessFinalStatus,
   EXIT_SUCCESS,
   EXIT_ERROR,
   EXIT_BLOCKED,
@@ -247,14 +249,19 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
       process.exit(result.exitCode)
     }
 
-    // Crash/error — check if we should restart
-    if (restartCount >= maxRestarts) {
-      process.stderr.write(`[headless] Max restarts (${maxRestarts}) reached. Exiting.\n`)
+    // Don't restart if SIGINT/SIGTERM was received
+    if (result.interrupted) {
       process.exit(result.exitCode)
     }
 
-    // Don't restart if SIGINT/SIGTERM was received
-    if (result.interrupted) {
+    if (!shouldRestartHeadlessRun(result)) {
+      process.stderr.write(`[headless] Restart suppressed: ${result.status}\n`)
+      process.exit(result.exitCode)
+    }
+
+    // Crash/error — check if we should restart
+    if (restartCount >= maxRestarts) {
+      process.stderr.write(`[headless] Max restarts (${maxRestarts}) reached. Exiting.\n`)
       process.exit(result.exitCode)
     }
 
@@ -265,7 +272,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
   }
 }
 
-async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): Promise<{ exitCode: number; interrupted: boolean }> {
+async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): Promise<{ exitCode: number; interrupted: boolean; totalEvents: number; toolCallCount: number; recentEvents: TrackedEvent[]; status: string }> {
   let interrupted = false
   const startTime = Date.now()
   const isNewMilestone = options.command === 'new-milestone'
@@ -349,7 +356,15 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
   if (options.command === 'query') {
     const { handleQuery } = await import('./headless-query.js')
     const result = await handleQuery(process.cwd())
-    return { exitCode: result.exitCode, interrupted: false }
+    // query is a read-only snapshot: no RPC child, no tracked events.
+    return {
+      exitCode: result.exitCode,
+      interrupted: false,
+      totalEvents: 0,
+      toolCallCount: 0,
+      recentEvents: [],
+      status: result.exitCode === 0 ? 'success' : 'error',
+    }
   }
 
   // Recover: rebuild DB hierarchy from on-disk markdown projections, no RPC
@@ -443,10 +458,8 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
   function emitBatchJsonResult(): void {
     if (options.outputFormat !== 'json') return
     const duration = Date.now() - startTime
-    const status: HeadlessJsonResult['status'] = blocked ? 'blocked'
-      : exitCode === EXIT_CANCELLED ? 'cancelled'
-      : exitCode === EXIT_ERROR ? (totalEvents === 0 ? 'error' : 'timeout')
-      : 'success'
+    const finalStatus = classifyHeadlessFinalStatus({ blocked, exitCode, totalEvents, recentEvents })
+    const status: HeadlessJsonResult['status'] = finalStatus === 'complete' ? 'success' : finalStatus
     const result: HeadlessJsonResult = {
       status,
       exitCode,
@@ -971,7 +984,7 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
 
   // Summary
   const duration = ((Date.now() - startTime) / 1000).toFixed(1)
-  const status = blocked ? 'blocked' : exitCode === EXIT_CANCELLED ? 'cancelled' : exitCode === EXIT_ERROR ? (totalEvents === 0 ? 'error' : 'timeout') : 'complete'
+  const status = classifyHeadlessFinalStatus({ blocked, exitCode, totalEvents, recentEvents })
 
   process.stderr.write(`[headless] Status: ${status}\n`)
   process.stderr.write(`[headless] Duration: ${duration}s\n`)
@@ -1006,5 +1019,5 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
   // Emit structured JSON result in batch mode
   emitBatchJsonResult()
 
-  return { exitCode, interrupted }
+  return { exitCode, interrupted, totalEvents, toolCallCount, recentEvents: [...recentEvents], status }
 }

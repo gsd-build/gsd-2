@@ -344,7 +344,7 @@ echo "Build a CLI tool" | gsd headless new-milestone --context -
 | Flag | Description |
 |------|-------------|
 | `--timeout N` | Overall timeout in milliseconds (default: 300000 / 5 min) |
-| `--max-restarts N` | Auto-restart on crash with exponential backoff (default: 3). Set 0 to disable |
+| `--max-restarts N` | Auto-restart on crash with exponential backoff (default: 3). Set 0 to disable. Deterministic no-work failures are not restart-eligible. |
 | `--json` | Stream all events as JSONL to stdout |
 | `--model ID` | Override the model for the headless session |
 | `--context <file>` | Context file for `new-milestone` (use `-` for stdin) |
@@ -352,6 +352,8 @@ echo "Build a CLI tool" | gsd headless new-milestone --context -
 | `--auto` | Chain into auto-mode after milestone creation |
 
 **Exit codes:** `0` = complete, `1` = error or timeout, `2` = blocked.
+
+In `--output-format json` summaries, headless can also return `status: "no-work-deterministic"` for repeatable no-progress tails (for example select → input → cancelled). This status exits with code `1` and suppresses automatic restart loops.
 
 Any `/gsd` subcommand works as a positional argument — `gsd headless status`, `gsd headless doctor`, `gsd headless dispatch execute`, etc.
 
