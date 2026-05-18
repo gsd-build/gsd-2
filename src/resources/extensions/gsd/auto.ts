@@ -2613,6 +2613,7 @@ export async function startAuto(
       rebuildScope(s.basePath, s.currentMilestoneId);
     }
 
+    const loopDeps = buildLoopDeps(pi);
     ensureOrchestrationModule(ctx, pi, s.basePath || base);
     registerSigtermHandler(lockBase());
 
@@ -2695,7 +2696,7 @@ export async function startAuto(
       ctx,
       pi,
       s,
-      deps: buildLoopDeps(pi),
+      deps: loopDeps,
       runKernelLoop: runUokKernelLoop,
       runLegacyLoop: runLegacyAutoLoop,
     });
@@ -2732,6 +2733,7 @@ export async function startAuto(
   // Build scope after bootstrap has populated s.basePath / s.originalBasePath /
   // s.currentMilestoneId (including worktree setup inside bootstrapAutoSession).
   rebuildScope(s.basePath, s.currentMilestoneId);
+  const loopDeps = buildLoopDeps(pi);
   ensureOrchestrationModule(ctx, pi, s.basePath || base);
   captureProjectRootEnv(s.originalBasePath || s.basePath);
   registerAutoWorkerForSession(s);
@@ -2756,7 +2758,7 @@ export async function startAuto(
     ctx,
     pi,
     s,
-    deps: buildLoopDeps(pi),
+    deps: loopDeps,
     runKernelLoop: runUokKernelLoop,
     runLegacyLoop: runLegacyAutoLoop,
   });
