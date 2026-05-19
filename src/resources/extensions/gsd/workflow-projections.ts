@@ -168,6 +168,51 @@ export function renderRoadmapProjection(basePath: string, milestoneId: string): 
   atomicWriteSync(join(dir, `${milestoneId}-ROADMAP.md`), content);
 }
 
+function milestoneStatusGlyph(status: string): string {
+  if (status === "complete" || status === "done") return "\u2705";
+  if (status === "active" || status === "in_progress") return "\uD83D\uDD04";
+  if (status === "parked") return "\u23F8\uFE0F";
+  return "\u2B1C";
+}
+
+export function renderTopLevelRoadmapFromDb(basePath: string): void {
+  const milestones = getAllMilestones();
+  const lines: string[] = ["# Roadmap", "", "## Milestones", ""];
+
+  for (const milestone of milestones) {
+    const title = stripIdPrefix(milestone.title || milestone.id, milestone.id);
+    const depends = milestone.depends_on && milestone.depends_on.length > 0
+      ? milestone.depends_on.join(", ")
+      : "\u2014";
+    lines.push(`- ${milestoneStatusGlyph(milestone.status)} **${milestone.id}: ${title}** (\`depends:[${depends}]\`)`);
+  }
+
+  lines.push("");
+  const dir = join(basePath, ".gsd");
+  mkdirSync(dir, { recursive: true });
+  atomicWriteSync(join(dir, "ROADMAP.md"), lines.join("\n"));
+}
+
+export function renderTopLevelQueueFromDb(basePath: string): void {
+  const milestones = getAllMilestones();
+  const pending = milestones.filter(m => m.status !== "complete" && m.status !== "done");
+  const lines: string[] = ["# Queue", ""];
+
+  if (pending.length === 0) {
+    lines.push("- No queued milestones.");
+  } else {
+    for (const milestone of pending) {
+      const title = stripIdPrefix(milestone.title || milestone.id, milestone.id);
+      lines.push(`- ${milestoneStatusGlyph(milestone.status)} **${milestone.id}: ${title}**`);
+    }
+  }
+
+  lines.push("");
+  const dir = join(basePath, ".gsd");
+  mkdirSync(dir, { recursive: true });
+  atomicWriteSync(join(dir, "QUEUE.md"), lines.join("\n"));
+}
+
 // ─── SUMMARY.md Projection ──────────────────────────────────────────────
 
 /**
@@ -385,6 +430,16 @@ export async function renderAllProjections(basePath: string, milestoneId: string
     await renderRoadmapFromDb(basePath, milestoneId);
   } catch (err) {
     logWarning("projection", `renderRoadmapFromDb failed for ${milestoneId}: ${(err as Error).message}`);
+  }
+  try {
+    renderTopLevelRoadmapFromDb(basePath);
+  } catch (err) {
+    logWarning("projection", `renderTopLevelRoadmapFromDb failed: ${(err as Error).message}`);
+  }
+  try {
+    renderTopLevelQueueFromDb(basePath);
+  } catch (err) {
+    logWarning("projection", `renderTopLevelQueueFromDb failed: ${(err as Error).message}`);
   }
 
   // Query all slices for this milestone

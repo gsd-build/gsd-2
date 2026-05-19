@@ -46,6 +46,8 @@ describe('renderAllProjections must not overwrite PLAN.md (#3651)', () => {
 
       assert.equal(readFileSync(planPath, 'utf-8'), planContent)
       assert.ok(readFileSync(join(base, '.gsd', 'STATE.md'), 'utf-8').includes('M001'))
+      assert.ok(readFileSync(join(base, '.gsd', 'ROADMAP.md'), 'utf-8').includes('M001'))
+      assert.ok(readFileSync(join(base, '.gsd', 'QUEUE.md'), 'utf-8').includes('M001'))
     } finally {
       closeDatabase()
       rmSync(base, { recursive: true, force: true })
