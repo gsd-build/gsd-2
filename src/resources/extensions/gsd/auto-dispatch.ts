@@ -17,7 +17,7 @@ import type { GSDPreferences } from "./preferences.js";
 import type { UatType } from "./files.js";
 import type { MinimalModelRegistry } from "./context-budget.js";
 import { loadFile, extractUatType, loadActiveOverrides } from "./files.js";
-import { isDbAvailable, getMilestoneSlices, getPendingGates, markAllGatesOmitted, getMilestone, insertAssessment, transaction, getAssessment } from "./gsd-db.js";
+import { isDbAvailable, getMilestoneSlices, getPendingGates, markAllGatesOmitted, getMilestone, insertAssessment, setSliceSketchFlag, transaction, getAssessment } from "./gsd-db.js";
 import { isClosedStatus } from "./status-guards.js";
 import { extractVerdict, isAcceptableUatVerdict } from "./verdict-parser.js";
 
@@ -1010,6 +1010,17 @@ export const DISPATCH_RULES: DispatchRule[] = [
       if (!state.activeSlice) return missingSliceStop(mid, state.phase);
       const sid = state.activeSlice.id;
       const sTitle = state.activeSlice.title;
+
+      // Crash recovery: if PLAN exists but DB still says sketch, heal and
+      // skip so the next loop re-derives phase from corrected DB state.
+      if (isDbAvailable()) {
+        const planFile = resolveSliceFile(basePath, mid, sid, "PLAN");
+        if (planFile && existsSync(planFile)) {
+          setSliceSketchFlag(mid, sid, false);
+          return { action: "skip" };
+        }
+      }
+
       const progressiveOn = prefs?.phases?.progressive_planning === true;
       if (!progressiveOn) {
         // Graceful downgrade: treat the sketch as a normal slice needing a plan,
