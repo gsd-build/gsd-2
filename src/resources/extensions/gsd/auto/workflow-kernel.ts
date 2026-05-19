@@ -276,10 +276,28 @@ export function decideEngineDispatch(input: EngineDispatchInput): EngineDispatch
   return { action: "dispatch" };
 }
 
+const COMPLETE_AND_BREAK_REASONS = [
+  "step-wizard",
+  "post-verification-stopped",
+  "pre-verification-dispatched",
+  "uat-pause",
+  "verification-pause",
+  "finalize-pre-timeout",
+  "finalize-post-timeout",
+] as const;
+
+function isCompleteAndBreakReason(
+  reason: string,
+): reason is (typeof COMPLETE_AND_BREAK_REASONS)[number] {
+  return COMPLETE_AND_BREAK_REASONS.includes(
+    reason as (typeof COMPLETE_AND_BREAK_REASONS)[number],
+  );
+}
+
 export function decideFinalizeResult(input: FinalizeInput): FinalizeDecision {
   if (input.action === "break") {
     const reason = input.reason ?? "unknown";
-    if (reason === "step-wizard") {
+    if (isCompleteAndBreakReason(reason)) {
       return { action: "complete-and-break" };
     }
     return {

@@ -172,6 +172,22 @@ test("decideFinalizeResult maps step-wizard breaks to completed step exits", () 
   );
 });
 
+test("decideFinalizeResult maps finalize pause breaks to completed exits", () => {
+  for (const reason of [
+    "post-verification-stopped",
+    "pre-verification-dispatched",
+    "uat-pause",
+    "verification-pause",
+    "finalize-pre-timeout",
+    "finalize-post-timeout",
+  ]) {
+    assert.deepEqual(
+      decideFinalizeResult({ action: "break", reason }),
+      { action: "complete-and-break" },
+    );
+  }
+});
+
 test("decideFinalizeResult maps continue and next results", () => {
   assert.deepEqual(
     decideFinalizeResult({ action: "continue" }),
