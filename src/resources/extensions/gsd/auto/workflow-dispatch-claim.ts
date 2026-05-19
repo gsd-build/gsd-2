@@ -11,9 +11,11 @@ export type DispatchClaimOutcome =
 
 export type DispatchLeaseOutcome =
   | { kind: "ready"; token: number; recovered: boolean }
-  | { kind: "degraded"; reason: "missing-worker" | "missing-milestone" }
+  | { kind: "degraded"; reason: "missing-worker" | "missing-milestone" | "virtual-milestone" }
   | { kind: "blocked"; reason: string; holderWorkerId?: string }
   | { kind: "failed"; reason: string };
+
+const VIRTUAL_MILESTONE_IDS = new Set(["PROJECT"]);
 
 type ClaimMilestoneLeaseResult =
   | { ok: true; token: number; expiresAt: string }
@@ -87,6 +89,7 @@ export function ensureDispatchLease(
 ): DispatchLeaseOutcome {
   if (!s.workerId) return { kind: "degraded", reason: "missing-worker" };
   if (!milestoneId) return { kind: "degraded", reason: "missing-milestone" };
+  if (VIRTUAL_MILESTONE_IDS.has(milestoneId)) return { kind: "degraded", reason: "virtual-milestone" };
   if (!opts.forceReclaim && typeof s.milestoneLeaseToken === "number") {
     return { kind: "ready", token: s.milestoneLeaseToken, recovered: false };
   }

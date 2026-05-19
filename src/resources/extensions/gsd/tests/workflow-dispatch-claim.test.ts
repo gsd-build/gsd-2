@@ -194,6 +194,18 @@ test("ensureDispatchLease degrades without worker identity or milestone id", () 
   assert.deepEqual(calls, []);
 });
 
+test("ensureDispatchLease degrades for virtual milestone ids", () => {
+  const { deps, calls } = makeLeaseDeps({
+    claimMilestoneLease: () => assert.fail("claimMilestoneLease should not be called"),
+  });
+
+  assert.deepEqual(
+    ensureDispatchLease(makeSession(), "PROJECT", deps),
+    { kind: "degraded", reason: "virtual-milestone" },
+  );
+  assert.deepEqual(calls, []);
+});
+
 test("ensureDispatchLease reuses an existing numeric token", () => {
   const { deps, calls } = makeLeaseDeps({
     claimMilestoneLease: () => assert.fail("claimMilestoneLease should not be called"),
