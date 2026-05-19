@@ -95,3 +95,27 @@ test("missing recorded bash evidence remains a warning", () => {
   assert.equal(mismatches.length, 1);
   assert.equal(mismatches[0].severity, "warning");
 });
+
+test("claimed command absent from bash calls reports a warning mismatch with null actual", () => {
+  // Regression: postUnitPreVerification flags fabricated evidence by filtering
+  // crossReferenceEvidence mismatches on `severity === "warning" && actual === null`.
+  // A claimed command with no matching bash call must produce exactly that shape,
+  // otherwise fabricated evidence silently bypasses the safety check.
+  const mismatches = crossReferenceEvidence(
+    [{ command: "npm run verify", exitCode: 0, verdict: "passed" }],
+    [
+      {
+        kind: "bash",
+        toolCallId: "call-1",
+        command: "ls -la",
+        exitCode: 0,
+        outputSnippet: "files",
+        timestamp: Date.now(),
+      },
+    ] as EvidenceEntry[],
+  );
+
+  const missing = mismatches.filter((m) => m.severity === "warning" && m.actual === null);
+  assert.equal(missing.length, 1);
+  assert.equal(missing[0].actual, null);
+});

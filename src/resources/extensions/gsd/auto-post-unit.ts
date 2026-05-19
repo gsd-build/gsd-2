@@ -1033,7 +1033,6 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
         if (safetyConfig.evidence_cross_reference && s.currentUnit.type === "execute-task") {
           try {
             const actual = getEvidence();
-            const bashCalls = actual.filter(e => e.kind === "bash");
             if (sMid && sSid && sTid && isDbAvailable()) {
               const taskRow = getTask(sMid, sSid, sTid);
               if (taskRow?.status === "complete") {
@@ -1056,10 +1055,13 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
                   }
                 }
 
-                if (claimedEvidence.length > 0 && bashCalls.length === 0) {
-                  logWarning("safety", "task claimed verification command evidence but no execution tool calls were recorded");
+                const missingCommandMismatches = mismatches.filter((mismatch) => (
+                  mismatch.severity === "warning" && mismatch.actual === null
+                ));
+                if (missingCommandMismatches.length > 0) {
+                  logWarning("safety", `evidence mismatch: ${missingCommandMismatches.length} claimed command(s) not found in bash calls`);
                   ctx.ui.notify(
-                    `Safety: task ${sTid} claimed command evidence but no execution tool calls were recorded`,
+                    `Safety: task ${sTid} claimed ${missingCommandMismatches.length} command(s) not found in recorded bash calls`,
                     "warning",
                   );
                 }
