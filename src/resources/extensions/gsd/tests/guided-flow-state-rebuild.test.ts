@@ -23,6 +23,11 @@ import {
   insertSlice,
   insertTask,
 } from "../gsd-db.ts";
+import {
+  checkAutoStartAfterDiscuss,
+  clearPendingAutoStart,
+  setPendingAutoStart,
+} from "../guided-flow.ts";
 
 function createFixtureBase(): string {
   const base = mkdtempSync(join(tmpdir(), "gsd-guided-state-"));
@@ -40,6 +45,7 @@ describe("guided-flow STATE.md rebuild (#3475)", () => {
   let base: string;
 
   afterEach(() => {
+    clearPendingAutoStart();
     closeDatabase();
     if (base) rmSync(base, { recursive: true, force: true });
   });
@@ -99,5 +105,36 @@ describe("guided-flow STATE.md rebuild (#3475)", () => {
 
     assert.ok(md.includes("M070"), "State markdown should include active milestone M070");
     assert.ok(md.includes("Current Work") || md.includes("M070"), "State markdown should include milestone title or ID");
+  });
+
+  test("checkAutoStartAfterDiscuss trusts manifest when DB milestone read is stale", () => {
+    base = createFixtureBase();
+    openDatabase(":memory:");
+
+    writeFile(base, "milestones/M001/M001-CONTEXT.md", "# M001: Planned\n");
+    writeFile(base, "STATE.md", "# GSD State\n\n**Active Milestone:** M001: Planned\n");
+    writeFile(base, "state-manifest.json", JSON.stringify({
+      version: 1,
+      exported_at: new Date().toISOString(),
+      milestones: [{ id: "M001", title: "Planned" }],
+      slices: [],
+      tasks: [],
+      decisions: [],
+      verification_evidence: [],
+    }));
+
+    const notifications: Array<{ message: string; level: string }> = [];
+    const ctx = {
+      ui: { notify: (message: string, level: string) => notifications.push({ message, level }) },
+      waitForIdle: () => new Promise<void>(() => {}),
+    };
+    setPendingAutoStart(base, { basePath: base, milestoneId: "M001", ctx: ctx as any, pi: {} as any });
+
+    const accepted = checkAutoStartAfterDiscuss();
+
+    assert.equal(accepted, true);
+    assert.equal(notifications.some(n => n.level === "error" && n.message.includes("no DB row exists")), false);
+    assert.ok(notifications.some(n => n.level === "success" && n.message.includes("Milestone M001 ready.")));
+    clearPendingAutoStart(base);
   });
 });

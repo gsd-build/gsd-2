@@ -105,6 +105,7 @@ export {
   buildExistingMilestonesContext,
 } from "./guided-flow-queue.js";
 import { logWarning } from "./workflow-logger.js";
+import { readManifest } from "./workflow-manifest.js";
 import { deleteRuntimeKv } from "./db/runtime-kv.js";
 import { PAUSED_SESSION_KV_KEY } from "./interrupted-session.js";
 import { buildWorkflowDispatchContent } from "./workflow-protocol.js";
@@ -676,14 +677,25 @@ export function checkAutoStartAfterDiscuss(lookupBasePath?: string): boolean {
   if (isDbAvailable()) {
     const milestoneRow = getMilestone(milestoneId);
     if (!milestoneRow) {
-      ctx.ui.notify(
-        `Milestone ${milestoneId}: discuss artifacts on disk but no DB row exists. ` +
-        `PROJECT.md may have failed to register milestones. ` +
-        `Re-save PROJECT.md with canonical "- [ ] M001: Title — One-liner" lines, ` +
-        `then re-run /gsd to recover.`,
-        "error",
-      );
-      return false;
+      let manifestHasMilestone = false;
+      try {
+        const manifest = readManifest(basePath);
+        manifestHasMilestone = Array.isArray(manifest?.milestones) && manifest.milestones.some(m => m.id === milestoneId);
+      } catch (e) {
+        logWarning("guided", `R3b: failed to read state manifest: ${(e as Error).message}`);
+      }
+      if (manifestHasMilestone) {
+        logWarning("guided", `R3b: getMilestone(${milestoneId}) returned null but manifest has the row — treating as stale read`);
+      } else {
+        ctx.ui.notify(
+          `Milestone ${milestoneId}: discuss artifacts on disk but no DB row exists. ` +
+          `PROJECT.md may have failed to register milestones. ` +
+          `Re-save PROJECT.md with canonical "- [ ] M001: Title — One-liner" lines, ` +
+          `then re-run /gsd to recover.`,
+          "error",
+        );
+        return false;
+      }
     }
   }
 
