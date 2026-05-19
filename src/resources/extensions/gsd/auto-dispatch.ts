@@ -443,7 +443,7 @@ export function incrementUatCount(basePath: string, mid: string, sid: string): n
 export function isVerificationNotApplicable(value: string): boolean {
   const v = (value ?? "").toLowerCase().trim().replace(/[.\s]+$/, "");
   if (!v || v === "none") return true;
-  return /^(?:none(?:[\s._\u2014-]+[\s\S]*)?|n\/?a|not[\s._-]+(?:applicable|required|needed|provided)|no[\s._-]+operational[\s\S]*)$/i.test(v);
+  return /^(?:none(?:[\s._\u2014-]+[\s\S]*)?|n\/?a(?:[\s._\u2014-]+[\s\S]*)?|not[\s._-]+(?:applicable|required|needed|provided)|no[\s._-]+operational[\s\S]*)$/i.test(v);
 }
 
 // ─── Rules ────────────────────────────────────────────────────────────────

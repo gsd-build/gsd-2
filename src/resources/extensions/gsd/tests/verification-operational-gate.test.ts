@@ -51,6 +51,10 @@ test("isVerificationNotApplicable: 'n/a' is not applicable", () => {
   assert.equal(isVerificationNotApplicable("n/a"), true);
 });
 
+test("isVerificationNotApplicable: 'N/A — <rationale>' is not applicable", () => {
+  assert.equal(isVerificationNotApplicable("N/A — local-only tool."), true);
+});
+
 test("isVerificationNotApplicable: 'Not applicable' is not applicable", () => {
   assert.equal(isVerificationNotApplicable("Not applicable"), true);
 });
