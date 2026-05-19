@@ -28,6 +28,25 @@ test("buildNotificationWidgetLines shows unread count with shortcut pair", () =>
   }
 });
 
+test("buildNotificationWidgetLines keeps multiline notifications on one bounded widget row", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "gsd-notification-widget-"));
+  try {
+    mkdirSync(join(tmp, ".gsd"), { recursive: true });
+    _resetNotificationStore();
+    initNotificationStore(tmp);
+    appendNotification("Line one\nLine two\nLine three", "warning");
+
+    const lines = buildNotificationWidgetLines();
+    assert.equal(lines.length, 1, "belowEditor fallback must not grow extra rows for multiline messages");
+    const row = lines[0] ?? "";
+    assert.equal(row.includes("\n"), false, "widget row must not contain embedded line breaks");
+    assert.ok(row.length <= 82, `widget row should stay bounded, got ${row.length} chars`);
+  } finally {
+    _resetNotificationStore();
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("initNotificationWidget replaces prior interval and store subscription", () => {
   const tmp = mkdtempSync(join(tmpdir(), "gsd-notification-widget-"));
   const firstStatuses: Array<string | undefined> = [];

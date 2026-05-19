@@ -12,6 +12,7 @@ import { formattedShortcutPair } from "./shortcut-defs.js";
 // Key chosen to sort after alphabetic extension keys so the chip lands on the
 // far right of the extension-status block.
 const STATUS_KEY = "zz-notifications";
+const WIDGET_MAX_WIDTH = 80;
 
 export function buildNotificationChip(): string {
   const unread = getUnreadCount();
@@ -23,7 +24,12 @@ export function buildNotificationChip(): string {
 // that still expected a line-array widget. Returns empty when no unread.
 export function buildNotificationWidgetLines(): string[] {
   const chip = buildNotificationChip();
-  return chip ? [`  ${chip}`] : [];
+  if (!chip) return [];
+  const singleLine = chip.replace(/\s+/g, " ").trim();
+  const truncated = singleLine.length > WIDGET_MAX_WIDTH
+    ? `${singleLine.slice(0, WIDGET_MAX_WIDTH - 1)}…`
+    : singleLine;
+  return [`  ${truncated}`];
 }
 
 const REFRESH_INTERVAL_MS = 30_000;
