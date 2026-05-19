@@ -163,14 +163,26 @@ export interface TaskCommitContext {
 export function buildTaskCommitMessage(ctx: TaskCommitContext): string {
   const description = sanitizeCommitSubjectDescription(ctx.oneLiner || ctx.taskTitle);
   const type = inferCommitType(ctx.taskTitle, ctx.oneLiner);
+  const subjectPrefix = `${type}: `;
+  const maxSubjectBytes = 72;
+  const ellipsis = "...";
+  const maxDescBytes = maxSubjectBytes - Buffer.byteLength(subjectPrefix, "utf8");
+  const maxTruncatedDescBytes = maxDescBytes - Buffer.byteLength(ellipsis, "utf8");
 
-  // Truncate description to ~72 chars for subject line (full budget without scope)
-  const maxDescLen = 70 - type.length;
-  const truncated = description.length > maxDescLen
-    ? description.slice(0, maxDescLen - 1).trimEnd() + "…"
-    : description;
+  let truncated = description;
+  if (Buffer.byteLength(description, "utf8") > maxDescBytes) {
+    let bytes = 0;
+    let cut = "";
+    for (const ch of description) {
+      const chBytes = Buffer.byteLength(ch, "utf8");
+      if (bytes + chBytes > maxTruncatedDescBytes) break;
+      cut += ch;
+      bytes += chBytes;
+    }
+    truncated = cut.trimEnd() + ellipsis;
+  }
 
-  const subject = `${type}: ${truncated}`;
+  const subject = `${subjectPrefix}${truncated}`;
 
   // Build body with key files if available
   const bodyParts: string[] = [];

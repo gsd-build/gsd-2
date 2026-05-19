@@ -247,6 +247,27 @@ describe('git-service', async () => {
     assert.equal(subject.includes("\u0007"), false, "subject does not include control characters");
   });
 
+  test('buildTaskCommitMessage truncates long ASCII subject to <=72 UTF-8 bytes', () => {
+    const msg = buildTaskCommitMessage({
+      taskId: "S01/T05",
+      taskTitle: "implement lint metadata",
+      oneLiner: "Added the core lint contract, seven-rule metadata catalogue, and parse-derived mechanical lint mappings with structured suggested_fix objects.",
+    });
+    const subject = msg.split("\n")[0] ?? "";
+    assert.ok(Buffer.byteLength(subject, "utf8") <= 72, "subject is capped at 72 UTF-8 bytes");
+  });
+
+  test('buildTaskCommitMessage truncates multibyte subject without breaking UTF-8 boundaries', () => {
+    const msg = buildTaskCommitMessage({
+      taskId: "S01/T06",
+      taskTitle: "implement emoji handling",
+      oneLiner: "Added emoji support 😀😀😀😀😀😀😀😀😀😀 with robust UTF-8 truncation guards for commit subject generation across locales.",
+    });
+    const subject = msg.split("\n")[0] ?? "";
+    assert.ok(Buffer.byteLength(subject, "utf8") <= 72, "multibyte subject is capped at 72 UTF-8 bytes");
+    assert.ok(subject.endsWith("..."), "truncated subject uses ASCII ellipsis");
+  });
+
   {
     const msg = buildTaskCommitMessage({
       taskId: "S02/T01",
