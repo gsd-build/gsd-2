@@ -34,6 +34,7 @@ export interface CurrentUnit {
   type: string;
   id: string;
   startedAt: number;
+  workspaceRoot?: string;
 }
 
 export interface UnitRouting {

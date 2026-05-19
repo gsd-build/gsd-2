@@ -1109,10 +1109,11 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
     }
 
     // Artifact verification
+    const verificationBasePath = s.currentUnit.workspaceRoot ?? s.basePath;
     let triggerArtifactVerified = false;
     if (!s.currentUnit.type.startsWith("hook/")) {
       try {
-        triggerArtifactVerified = verifyExpectedArtifact(s.currentUnit.type, s.currentUnit.id, s.basePath);
+        triggerArtifactVerified = verifyExpectedArtifact(s.currentUnit.type, s.currentUnit.id, verificationBasePath);
         if (triggerArtifactVerified) {
           invalidateAllCaches();
         }
@@ -1129,7 +1130,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
             if (mid) {
               const settled = await waitForMilestoneDbClose(mid);
               if (settled) {
-                triggerArtifactVerified = verifyExpectedArtifact(s.currentUnit.type, s.currentUnit.id, s.basePath);
+                triggerArtifactVerified = verifyExpectedArtifact(s.currentUnit.type, s.currentUnit.id, verificationBasePath);
                 if (triggerArtifactVerified) {
                   invalidateAllCaches();
                 }
@@ -1174,13 +1175,13 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
       if (!triggerArtifactVerified && s.currentUnit.type === "research-project") {
         const retryKey = `${s.currentUnit.type}:${s.currentUnit.id}`;
         const outcome = finalizeProjectResearchTimeout(
-          s.basePath,
+          verificationBasePath,
           "Project research unit ended before all required dimensions produced durable files.",
         );
         s.pendingVerificationRetry = null;
         s.verificationRetryCount.delete(retryKey);
         s.verificationRetryFailureHashes.delete(retryKey);
-        triggerArtifactVerified = verifyExpectedArtifact(s.currentUnit.type, s.currentUnit.id, s.basePath);
+        triggerArtifactVerified = verifyExpectedArtifact(s.currentUnit.type, s.currentUnit.id, verificationBasePath);
         if (triggerArtifactVerified) {
           invalidateAllCaches();
           ctx.ui.notify(
@@ -1245,9 +1246,9 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
           "warning",
         );
         // Fall through to "continue" — do NOT enter the retry or db-unavailable paths.
-      } else if (!triggerArtifactVerified && diagnoseWorktreeIntegrityFailure(s.basePath)) {
+      } else if (!triggerArtifactVerified && diagnoseWorktreeIntegrityFailure(verificationBasePath)) {
         const retryKey = `${s.currentUnit.type}:${s.currentUnit.id}`;
-        const worktreeFailure = diagnoseWorktreeIntegrityFailure(s.basePath)!;
+        const worktreeFailure = diagnoseWorktreeIntegrityFailure(verificationBasePath)!;
         s.pendingVerificationRetry = null;
         s.verificationRetryCount.delete(retryKey);
         s.verificationRetryFailureHashes.delete(retryKey);
@@ -1255,7 +1256,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
           phase: "worktree-integrity-failure",
           unitType: s.currentUnit.type,
           unitId: s.currentUnit.id,
-          basePath: s.basePath,
+          basePath: verificationBasePath,
         });
         ctx.ui.notify(
           `${worktreeFailure} Retry ${s.currentUnit.id} after repair.`,
@@ -1265,7 +1266,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
         return "dispatched";
       } else if (!triggerArtifactVerified && !isDbAvailable()) {
         debugLog("postUnit", { phase: "artifact-verify-skip-db-unavailable", unitType: s.currentUnit.type, unitId: s.currentUnit.id });
-        const dbSkipDiag = diagnoseExpectedArtifact(s.currentUnit.type, s.currentUnit.id, s.basePath);
+        const dbSkipDiag = diagnoseExpectedArtifact(s.currentUnit.type, s.currentUnit.id, verificationBasePath);
         ctx.ui.notify(
           `Artifact missing for ${s.currentUnit.type} ${s.currentUnit.id} — DB unavailable, skipping retry.${dbSkipDiag ? ` Expected: ${dbSkipDiag}` : ""}`,
           "error",
@@ -1283,7 +1284,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
           return "dispatched";
         }
 
-        const hasExpectedArtifact = resolveExpectedArtifactPath(s.currentUnit.type, s.currentUnit.id, s.basePath) !== null;
+        const hasExpectedArtifact = resolveExpectedArtifactPath(s.currentUnit.type, s.currentUnit.id, verificationBasePath) !== null;
         if (hasExpectedArtifact) {
           const retryKey = `${s.currentUnit.type}:${s.currentUnit.id}`;
           const prefs = loadEffectiveGSDPreferences()?.preferences;
@@ -1318,7 +1319,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
           const failureDetails = describeArtifactVerificationFailure(
             s.currentUnit.type,
             s.currentUnit.id,
-            s.basePath,
+            verificationBasePath,
           );
           if (attempt > MAX_ARTIFACT_VERIFICATION_RETRIES) {
             s.verificationRetryCount.delete(retryKey);
