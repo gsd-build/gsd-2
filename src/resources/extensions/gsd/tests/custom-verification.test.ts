@@ -258,6 +258,81 @@ describe("shell-command policy", () => {
       fake.cleanup();
     }
   });
+
+  it("sets GSD_ARTIFACT_DIR from PARAMS.json when the environment omits it", () => {
+    const artifactDir = mkdtempSync(join(tmpdir(), "cv-artifacts-"));
+    writeFileSync(join(artifactDir, "artifact.txt"), "content", "utf-8");
+
+    const def = makeDef([
+      {
+        id: "step-1",
+        name: "Build external artifact",
+        prompt: "Build the artifact outside the run directory",
+        requires: [],
+        produces: ["artifact.txt"],
+        verify: {
+          policy: "shell-command",
+          command: 'test -f "$GSD_ARTIFACT_DIR/artifact.txt"',
+        },
+      },
+    ]);
+
+    const previous = process.env.GSD_ARTIFACT_DIR;
+    delete process.env.GSD_ARTIFACT_DIR;
+
+    try {
+      const runDir = makeTempRun(def);
+      writeFileSync(
+        join(runDir, "PARAMS.json"),
+        JSON.stringify({ artifact_dir: artifactDir }),
+        "utf-8",
+      );
+
+      const result = runCustomVerification(runDir, "step-1");
+      assert.equal(result, "continue");
+    } finally {
+      if (previous === undefined) delete process.env.GSD_ARTIFACT_DIR;
+      else process.env.GSD_ARTIFACT_DIR = previous;
+    }
+  });
+
+  it("preserves an explicit GSD_ARTIFACT_DIR environment override", () => {
+    const paramsArtifactDir = mkdtempSync(join(tmpdir(), "cv-params-artifacts-"));
+    const envArtifactDir = mkdtempSync(join(tmpdir(), "cv-env-artifacts-"));
+    writeFileSync(join(envArtifactDir, "artifact.txt"), "content", "utf-8");
+
+    const def = makeDef([
+      {
+        id: "step-1",
+        name: "Build external artifact",
+        prompt: "Build the artifact outside the run directory",
+        requires: [],
+        produces: ["artifact.txt"],
+        verify: {
+          policy: "shell-command",
+          command: 'test -f "$GSD_ARTIFACT_DIR/artifact.txt"',
+        },
+      },
+    ]);
+
+    const previous = process.env.GSD_ARTIFACT_DIR;
+    process.env.GSD_ARTIFACT_DIR = envArtifactDir;
+
+    try {
+      const runDir = makeTempRun(def);
+      writeFileSync(
+        join(runDir, "PARAMS.json"),
+        JSON.stringify({ artifact_dir: paramsArtifactDir }),
+        "utf-8",
+      );
+
+      const result = runCustomVerification(runDir, "step-1");
+      assert.equal(result, "continue");
+    } finally {
+      if (previous === undefined) delete process.env.GSD_ARTIFACT_DIR;
+      else process.env.GSD_ARTIFACT_DIR = previous;
+    }
+  });
 });
 
 // ─── prompt-verify tests ────────────────────────────────────────────────
