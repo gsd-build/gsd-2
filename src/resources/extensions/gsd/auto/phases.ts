@@ -2352,6 +2352,16 @@ export async function runUnitPhase(
       await emitCancelledUnitEnd(ic, unitType, unitId, unitStartSeq, unitResult.errorContext);
       return { action: "break", reason: "unit-aborted-pause" };
     }
+    if (s.paused && !unitResult.errorContext) {
+      const pauseContext = {
+        message: "Auto-mode paused during unit setup",
+        category: "aborted" as const,
+        isTransient: true,
+      };
+      await deps.autoCommitUnit?.(s.basePath, unitType, unitId, ctx);
+      await emitCancelledUnitEnd(ic, unitType, unitId, unitStartSeq, pauseContext);
+      return { action: "break", reason: "pause-during-setup" };
+    }
     // All other cancelled states (structural errors, non-transient failures): hard stop
     if (s.currentUnit) {
       await deps.closeoutUnit(
