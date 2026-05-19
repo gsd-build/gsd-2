@@ -54,6 +54,43 @@ describe("convertTools cache_control", () => {
 		assert.equal(result.length, 1);
 		assert.deepEqual((result[0] as any).cache_control, { type: "ephemeral" });
 	});
+
+	it("merges object variants when parameters is top-level anyOf", () => {
+		const tools = [
+			{
+				name: "gsd_summary_save",
+				description: "desc",
+				parameters: {
+					anyOf: [
+						{
+							type: "object",
+							properties: {
+								milestone_id: { type: "string" },
+								artifact_type: { type: "string" },
+								content: { type: "string" },
+							},
+							required: ["milestone_id", "artifact_type", "content"],
+						},
+						{
+							type: "object",
+							properties: {
+								artifact_type: { type: "string" },
+								content: { type: "string" },
+							},
+							required: ["artifact_type", "content"],
+						},
+					],
+				},
+			},
+		] as any;
+		const result = convertTools(tools, false);
+		assert.deepEqual((result[0] as any).input_schema.properties, {
+			milestone_id: { type: "string" },
+			artifact_type: { type: "string" },
+			content: { type: "string" },
+		});
+		assert.deepEqual((result[0] as any).input_schema.required, ["milestone_id", "artifact_type", "content"]);
+	});
 });
 
 describe("mapThinkingLevelToEffort", () => {

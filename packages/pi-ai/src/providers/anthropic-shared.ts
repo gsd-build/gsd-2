@@ -464,14 +464,39 @@ export function convertTools(
 
 	const result = tools.map((tool) => {
 		const jsonSchema = tool.parameters as any;
+		const variants = Array.isArray(jsonSchema?.anyOf)
+			? jsonSchema.anyOf
+			: Array.isArray(jsonSchema?.oneOf)
+				? jsonSchema.oneOf
+				: [];
+		const objectVariants = variants.filter(
+			(schema: any) =>
+				schema && schema.type === "object" && typeof schema.properties === "object" && schema.properties !== null,
+		);
+		const mergedProperties = objectVariants.reduce(
+			(acc: Record<string, unknown>, schema: any) => ({ ...acc, ...schema.properties }),
+			{},
+		);
+		const mergedRequired = Array.from(
+			new Set(
+				objectVariants.flatMap((schema: any) =>
+					Array.isArray(schema.required) ? schema.required.filter((key: unknown) => typeof key === "string") : [],
+				),
+			),
+		);
+		const properties =
+			typeof jsonSchema?.properties === "object" && jsonSchema.properties !== null
+				? jsonSchema.properties
+				: mergedProperties;
+		const required = Array.isArray(jsonSchema?.required) ? jsonSchema.required : mergedRequired;
 
 		return {
 			name: isOAuthToken ? toClaudeCodeName(tool.name) : tool.name,
 			description: tool.description,
 			input_schema: {
 				type: "object" as const,
-				properties: jsonSchema.properties || {},
-				required: jsonSchema.required || [],
+				properties,
+				required,
 			},
 		};
 	});
