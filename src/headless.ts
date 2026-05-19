@@ -93,12 +93,11 @@ export interface HeadlessOptions {
  * than grepping the source for identifier names.
  */
 export function isMultiTurnHeadlessCommand(command: string): boolean {
-  return (
-    command === 'auto' ||
-    command === 'next' ||
-    command === 'discuss' ||
-    command === 'plan'
-  )
+  // With --bare, the entire subcommand string lands as a single argument
+  // (e.g. "workflow run test-workflow --params ..."), so prefix-match in
+  // addition to exact match.
+  const multiTurnPrefixes = ['auto', 'next', 'discuss', 'plan', 'workflow']
+  return multiTurnPrefixes.some(p => command === p || command.startsWith(p + ' '))
 }
 
 interface TrackedEvent {
@@ -510,6 +509,10 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
   })
 
   // Idle timeout — fallback completion detection
+  // Multi-turn commands (auto, workflow, etc.) manage their own lifecycle via
+  // terminal notifications. Arming the idle timer after their agent_end causes
+  // a closeout race: auto-loop reconcile + next-step dispatch takes longer than
+  // the idle window, so headless resolves before the next step starts.
   let idleTimer: ReturnType<typeof setTimeout> | null = null
   let effectiveIdleTimeout = isNewMilestone
     ? NEW_MILESTONE_IDLE_TIMEOUT_MS
@@ -519,6 +522,7 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
 
   function resetIdleTimer(): void {
     if (idleTimer) clearTimeout(idleTimer)
+    if (isMultiTurnCommand) return // auto-loop manages its own completion
     if (
       effectiveIdleTimeout > 0 &&
       shouldArmHeadlessIdleTimeout(toolCallCount, interactiveToolCallIds.size)
@@ -781,7 +785,6 @@ async function runHeadlessOnce(options: HeadlessOptions, restartCount: number): 
       resolveCompletion()
       return
     }
-
     // Long-running commands: agent_end after tool execution — possible completion
     // The idle timer + terminal notification handle this case.
   })
