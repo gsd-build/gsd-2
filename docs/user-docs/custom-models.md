@@ -36,6 +36,7 @@ For local models (Ollama, LM Studio, vLLM), only `id` is required per model:
 The `apiKey` is required but Ollama ignores it, so any value works.
 
 Some OpenAI-compatible servers do not understand the `developer` role used for reasoning-capable models. For those providers, set `compat.supportsDeveloperRole` to `false` so GSD sends the system prompt as a `system` message instead. If the server also does not support `reasoning_effort`, set `compat.supportsReasoningEffort` to `false` too.
+Some servers (including certain vLLM/TensorRT-LLM deployments) can return 400 errors when prior assistant `reasoning_content` is replayed. Set `compat.stripReasoningContent` to `true` to remove those replayed fields from outbound history.
 
 You can set `compat` at the provider level to apply to all models, or at the model level to override a specific model. This commonly applies to Ollama, vLLM, SGLang, and similar OpenAI-compatible servers.
 
@@ -48,7 +49,8 @@ You can set `compat` at the provider level to apply to all models, or at the mod
       "apiKey": "ollama",
       "compat": {
         "supportsDeveloperRole": false,
-        "supportsReasoningEffort": false
+        "supportsReasoningEffort": false,
+        "stripReasoningContent": true
       },
       "models": [
         {
@@ -300,6 +302,7 @@ For providers with partial OpenAI compatibility, use the `compat` field.
 | `requiresToolResultName` | Include `name` on tool result messages |
 | `requiresAssistantAfterToolResult` | Insert an assistant message before a user message after tool results |
 | `requiresThinkingAsText` | Convert thinking blocks to plain text |
+| `stripReasoningContent` | Strip replayed assistant `reasoning_content` fields from outbound message history (default: `false`; enable for some vLLM/TensorRT-LLM endpoints that otherwise return 400 errors) |
 | `thinkingFormat` | Use `reasoning_effort`, `zai`, `qwen`, or `qwen-chat-template` thinking parameters |
 | `supportsStrictMode` | Include the `strict` field in tool definitions |
 | `openRouterRouting` | OpenRouter routing config passed to OpenRouter for model/provider selection |

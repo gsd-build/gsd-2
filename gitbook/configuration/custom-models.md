@@ -52,16 +52,20 @@ Local and non-standard servers often need compatibility adjustments:
   "compat": {
     "supportsDeveloperRole": false,
     "supportsReasoningEffort": false,
+    "stripReasoningContent": true,
     "supportsUsageInStreaming": false,
     "thinkingFormat": "qwen"
   }
 }
 ```
 
+Some OpenAI-compatible servers can return 400 errors when prior assistant `reasoning_content` is replayed (commonly seen on certain vLLM/TensorRT-LLM deployments). Set `compat.stripReasoningContent` to `true` to strip those replayed fields from outbound history.
+
 | Flag | Default | Purpose |
 |------|---------|---------|
 | `supportsDeveloperRole` | `true` | Set `false` if the server doesn't support the `developer` message role |
 | `supportsReasoningEffort` | `true` | Set `false` if the server doesn't support reasoning effort parameters |
+| `stripReasoningContent` | `false` | Set `true` to strip replayed assistant `reasoning_content` fields from outbound history (useful for some vLLM/TensorRT-LLM endpoints that otherwise return 400 errors) |
 | `supportsUsageInStreaming` | `true` | Set `false` if streaming responses don't include token usage |
 | `thinkingFormat` | — | Set `"qwen"` for Qwen thinking mode, `"qwen-chat-template"` for chat template variant |
 

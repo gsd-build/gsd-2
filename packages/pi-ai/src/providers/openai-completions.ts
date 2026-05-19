@@ -474,6 +474,11 @@ function maybeAddOpenRouterAnthropicCacheControl(
 	}
 }
 
+/**
+ * Convert pi-ai Context messages to OpenAI ChatCompletionMessageParam format.
+ * The compat object controls provider-specific behavior (e.g. stripReasoningContent,
+ * requiresThinkingAsText) that affects how assistant thinking blocks are serialized.
+ */
 export function convertMessages(
 	model: Model<"openai-completions">,
 	context: Context,
@@ -587,7 +592,7 @@ export function convertMessages(
 				} else {
 					// Use the signature from the first thinking block if available (for llama.cpp server + gpt-oss)
 					const signature = nonEmptyThinkingBlocks[0].thinkingSignature;
-					if (signature && signature.length > 0) {
+					if (!compat.stripReasoningContent && signature && signature.length > 0) {
 						(assistantMsg as any)[signature] = nonEmptyThinkingBlocks.map((b) => b.thinking).join("\n");
 					}
 				}
@@ -789,6 +794,7 @@ function detectCompat(model: Model<"openai-completions">): Required<OpenAIComple
 		requiresToolResultName: false,
 		requiresAssistantAfterToolResult: false,
 		requiresThinkingAsText: false,
+		stripReasoningContent: false,
 		thinkingFormat: isZai ? "zai" : "openai",
 		openRouterRouting: {},
 		vercelGatewayRouting: {},
@@ -815,6 +821,7 @@ function getCompat(model: Model<"openai-completions">): Required<OpenAICompletio
 		requiresAssistantAfterToolResult:
 			model.compat.requiresAssistantAfterToolResult ?? detected.requiresAssistantAfterToolResult,
 		requiresThinkingAsText: model.compat.requiresThinkingAsText ?? detected.requiresThinkingAsText,
+		stripReasoningContent: model.compat.stripReasoningContent ?? detected.stripReasoningContent,
 		thinkingFormat: model.compat.thinkingFormat ?? detected.thinkingFormat,
 		openRouterRouting: model.compat.openRouterRouting ?? {},
 		vercelGatewayRouting: model.compat.vercelGatewayRouting ?? detected.vercelGatewayRouting,

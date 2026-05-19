@@ -29,6 +29,8 @@ For local models (Ollama, LM Studio, vLLM):
 
 The `apiKey` is required but Ollama ignores it — any value works.
 
+Some OpenAI-compatible servers can return 400 errors when prior assistant `reasoning_content` is replayed (commonly seen on certain vLLM/TensorRT-LLM deployments). Set `compat.stripReasoningContent` to `true` to strip those replayed fields from outbound history.
+
 ## Supported APIs
 
 | API | Description |
@@ -101,7 +103,8 @@ For providers with partial OpenAI compatibility, use the `compat` field at provi
       "api": "openai-completions",
       "compat": {
         "supportsDeveloperRole": false,
-        "supportsReasoningEffort": false
+        "supportsReasoningEffort": false,
+        "stripReasoningContent": true
       },
       "models": [...]
     }
@@ -114,6 +117,7 @@ For providers with partial OpenAI compatibility, use the `compat` field at provi
 | `supportsDeveloperRole` | Use `developer` vs `system` role |
 | `supportsReasoningEffort` | Support for `reasoning_effort` parameter |
 | `supportsUsageInStreaming` | Support for `stream_options: { include_usage: true }` |
+| `stripReasoningContent` | Strip replayed assistant `reasoning_content` fields from outbound message history (default: `false`; enable for some vLLM/TensorRT-LLM endpoints that otherwise return 400 errors) |
 | `maxTokensField` | `max_completion_tokens` or `max_tokens` |
 | `thinkingFormat` | `reasoning_effort`, `zai`, `qwen`, or `qwen-chat-template` |
 | `openRouterRouting` | OpenRouter provider selection config |
