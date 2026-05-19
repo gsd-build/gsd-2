@@ -1260,6 +1260,7 @@ export function validatePreferences(preferences: GSDPreferences): {
     }
   }
 
+
   // ─── Workspace Repository Registry ─────────────────────────────────
   if (preferences.workspace !== undefined) {
     if (typeof preferences.workspace === "object" && preferences.workspace !== null && !Array.isArray(preferences.workspace)) {
@@ -1303,7 +1304,7 @@ export function validatePreferences(preferences: GSDPreferences): {
                 errors.push(`workspace.repositories.${repoId}.path must be a relative path`);
                 continue;
               }
-              const normalizedPathKey = validRepo.path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+              const normalizedPathKey = validRepo.path.replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/\/+$/, "").toLowerCase();
               if (normalizedPaths.has(normalizedPathKey)) {
                 errors.push(`workspace.repositories contains duplicate path: ${validRepo.path}`);
                 continue;
@@ -1370,6 +1371,7 @@ export function validatePreferences(preferences: GSDPreferences): {
       errors.push("workspace must be an object");
     }
   }
+
   // ─── Enhanced Verification ──────────────────────────────────────────────────
   if (preferences.enhanced_verification !== undefined) {
     if (typeof preferences.enhanced_verification === "boolean") {

@@ -1832,11 +1832,11 @@ export function reconcileWorktreeDb(
       const hasSliceTargetRepositories = wtSliceInfo.some((col) => col["name"] === "target_repositories");
       const wtTaskInfo = adapter.prepare("PRAGMA wt.table_info('tasks')").all();
       const hasBlockerSource = wtTaskInfo.some((col) => col["name"] === "blocker_source");
+      const hasTaskTargetRepositories = wtTaskInfo.some((col) => col["name"] === "target_repositories");
       const hasEscalationPending = wtTaskInfo.some((col) => col["name"] === "escalation_pending");
       const hasEscalationAwaiting = wtTaskInfo.some((col) => col["name"] === "escalation_awaiting_review");
       const hasEscalationArtifact = wtTaskInfo.some((col) => col["name"] === "escalation_artifact_path");
       const hasEscalationOverride = wtTaskInfo.some((col) => col["name"] === "escalation_override_applied_at");
-      const hasTaskTargetRepositories = wtTaskInfo.some((col) => col["name"] === "target_repositories");
       const wtArtifactInfo = adapter.prepare("PRAGMA wt.table_info('artifacts')").all();
       const hasArtifactContentHash = wtArtifactInfo.some((col) => col["name"] === "content_hash");
       const wtMemoryInfo = adapter.prepare("PRAGMA wt.table_info('memories')").all();

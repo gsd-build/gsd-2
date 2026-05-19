@@ -19,6 +19,14 @@ export interface RepositoryRegistry {
   byId: ReadonlyMap<string, RegisteredRepository>;
 }
 
+export function defaultRepositoryTargets(registry: RepositoryRegistry): string[] {
+  const project = registry.byId.get("project");
+  if (project) return [project.id];
+  const first = registry.repositories[0];
+  return first ? [first.id] : [];
+}
+
+
 function assertInsideProjectRoot(projectRoot: string, candidateRoot: string, repoId: string): void {
   const rel = relative(projectRoot, candidateRoot);
   if (rel === "") return;
@@ -52,9 +60,10 @@ export function createRepositoryRegistry(
   const mode = workspacePrefs?.mode ?? "project";
   const repoMap = new Map<string, RegisteredRepository>();
 
-  // Backward-compatible default for single-repo projects.
-  // Explicit workspacePrefs?.repositories entries can override "project"
-  // via resolveRepositoryRoot to customize role/verification/commit policy.
+  // Seed an implicit "project" repository for backward compatibility in
+  // single-repo mode and as a workspace-root reference in parent mode.
+  // A user-defined workspace.repositories.project entry may override this;
+  // override is allowed but generally discouraged.
   repoMap.set("project", { id: "project", root: projectRoot });
 
   for (const [repoId, repoConfig] of Object.entries(workspacePrefs?.repositories ?? {})) {

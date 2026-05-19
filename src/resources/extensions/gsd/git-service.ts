@@ -1264,7 +1264,7 @@ function runPerRepositoryCommitAction(args: {
 } {
   const preferences = loadEffectiveGSDPreferences(args.basePath)?.preferences;
   const registry = createRepositoryRegistryFromPreferences(args.basePath, preferences);
-  const repoIds = args.targetRepositories ?? ["project"];
+  const repoIds = args.targetRepositories?.length ? args.targetRepositories : ["project"];
   const gitPrefs = preferences?.git ?? {};
   const commitMessages: Record<string, string> = {};
   const commitErrors: Record<string, string> = {};

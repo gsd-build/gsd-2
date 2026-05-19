@@ -11,8 +11,20 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { dirname, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { lockSync, unlockSync } from "proper-lockfile";
+import { createRequire } from "node:module";
 import { gsdHome } from "./gsd-home.js";
+
+const _require = createRequire(import.meta.url);
+const { lockSync, unlockSync } = _require("proper-lockfile") as {
+  lockSync: (
+    path: string,
+    options?: {
+      retries?: number | { retries?: number; minTimeout?: number; maxTimeout?: number; factor?: number };
+      stale?: number;
+    },
+  ) => () => void;
+  unlockSync: (path: string) => void;
+};
 
 /**
  * Strict numeric comparison of two npm-style version strings.

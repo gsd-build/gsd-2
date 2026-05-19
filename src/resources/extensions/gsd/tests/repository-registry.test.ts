@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRepositoryRegistryFromPreferences } from "../repository-registry.ts";
+import { createRepositoryRegistryFromPreferences, defaultRepositoryTargets } from "../repository-registry.ts";
 
 test("repository registry includes implicit project root and declared child repos", (t) => {
   const base = mkdtempSync(join(tmpdir(), "gsd-repo-registry-"));
@@ -49,4 +49,32 @@ test("repository registry rejects repositories outside project root", (t) => {
     }),
     /outside project root/,
   );
+});
+
+test("defaultRepositoryTargets returns [project] for a single-repo project registry", (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-repo-registry-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  mkdirSync(join(base, ".gsd"), { recursive: true });
+
+  const registry = createRepositoryRegistryFromPreferences(base, undefined);
+
+  assert.deepEqual(defaultRepositoryTargets(registry), ["project"]);
+});
+
+test("defaultRepositoryTargets returns [project] for a parent-mode registry", (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-repo-registry-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  mkdirSync(join(base, ".gsd"), { recursive: true });
+  mkdirSync(join(base, "frontend"), { recursive: true });
+
+  const registry = createRepositoryRegistryFromPreferences(base, {
+    workspace: {
+      mode: "parent",
+      repositories: {
+        frontend: { path: "frontend" },
+      },
+    },
+  });
+
+  assert.deepEqual(defaultRepositoryTargets(registry), ["project"]);
 });

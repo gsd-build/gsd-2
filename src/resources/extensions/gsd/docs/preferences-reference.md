@@ -249,6 +249,16 @@ Setting `prefer_skills: []` does **not** disable skill discovery — it just mea
   - `auto_merge`: `"auto"`, `"confirm"`, or `"manual"` — merge behavior after completion. `"auto"` merges immediately; `"confirm"` asks first; `"manual"` leaves branches for you. Default: `"confirm"`.
   - `worker_model`: string — optional model override for parallel milestone workers. When set, workers use this model (e.g. `"claude-haiku-4-5"`) instead of inheriting the coordinator's model. Useful for cost savings on execution-heavy milestones.
 
+- `workspace`: repository-scoping for parent/multi-repo workspaces. Keys:
+  - `mode`: `"project"` | `"parent"` — enables single-repo (default) or parent workspace behavior.
+  - `repositories`: map of repository IDs to repository config:
+    - `path`: string (required) — path relative to project root.
+    - `role`: string (optional) — informational role label.
+    - `verification`: string[] (optional) — repository-specific verification commands used when global `verification_commands` is not set.
+    - `commit_policy`: `"auto"` | `"skip"` (optional) — per-repository closeout commit behavior.
+  - `project` is always an implicit repository target mapped to the project root for backward compatibility.
+  - Plan/task `targetRepositories` defaults to `["project"]` when omitted.
+
 - `verification_commands`: string[] — shell commands to run as verification after task execution (e.g., `["npm test", "npm run lint"]`). Commands run in order; if any fails, the task is marked as needing fixes.
 
 - `verification_auto_fix`: boolean — when `true`, automatically attempt to fix verification failures instead of just reporting them. Default: `false`.

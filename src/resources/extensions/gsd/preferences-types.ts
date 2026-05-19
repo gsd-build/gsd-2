@@ -334,6 +334,7 @@ export interface ClaudeCodeMcpConfig {
   per_model?: Record<string, ClaudeCodeMcpPerModelEntry>;
 }
 
+
 export interface WorkspaceRepositoryPreference {
   /** Child repository path; relative paths resolve from the project root. */
   path: string;
@@ -350,6 +351,7 @@ export interface WorkspacePreferences {
   mode?: "project" | "parent";
   repositories?: Record<string, WorkspaceRepositoryPreference>;
 }
+
 export interface GSDPreferences {
   version?: number;
   mode?: WorkflowMode;

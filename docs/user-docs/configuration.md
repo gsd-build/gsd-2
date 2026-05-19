@@ -533,6 +533,26 @@ Verification commands must be simple executable commands, not shell pipelines or
 
 When `verification_commands` is empty and no task-level `verify` command is available, GSD can auto-discover project checks. JavaScript projects use `package.json` scripts in this order: `typecheck`, `lint`, `test`. Python projects use the `python-project` discovery source and run `python3 -m pytest` when GSD finds files matching pytest's default test file patterns (`test_*.py` or `*_test.py`) under `tests/` or an explicit pytest configuration marker: `pytest.ini`, `[tool.pytest]`, `[tool.pytest.*]`, `[pytest]`, or `[tool:pytest]` in `pyproject.toml`.
 
+### Workspace Repository Scoping (v2.29)
+
+Use `workspace.mode: parent` plus `workspace.repositories` to target verification and closeout git actions per repository.
+
+```yaml
+workspace:
+  mode: parent
+  repositories:
+    frontend:
+      path: apps/frontend
+      verification:
+        - npm run lint
+      commit_policy: auto
+    backend:
+      path: services/api
+      commit_policy: skip
+```
+
+`project` is always available as an implicit repository ID pointing at the project root. If plan/task `targetRepositories` is omitted, GSD defaults to `["project"]`.
+
 ### URL Blocking (`fetch_page`)
 
 The `fetch_page` tool blocks requests to private and internal network addresses to prevent server-side request forgery (SSRF). This protects against the agent being tricked into accessing internal services, cloud metadata endpoints, or local files.

@@ -44,7 +44,7 @@ import { resolveUokFlags } from "./uok/flags.js";
 import { UokGateRunner } from "./uok/gate-runner.js";
 import { verificationRetryKey } from "./auto/verification-retry-policy.js";
 import { decideVerificationVerdict } from "./verification-verdict.js";
-import { createRepositoryRegistryFromPreferences } from "./repository-registry.js";
+import { createRepositoryRegistryFromPreferences, defaultRepositoryTargets } from "./repository-registry.js";
 import type { SliceRow } from "./db-task-slice-rows.js";
 import { getSlice } from "./gsd-db.js";
 import { getLedger } from "./metrics.js";
@@ -79,6 +79,7 @@ function getCurrentUnitCostStats(unitId: string): { unitCostUsd: number; rolling
   };
 }
 
+
 function resolveVerificationTargets(
   basePath: string,
   prefs: GSDPreferences | undefined,
@@ -86,13 +87,12 @@ function resolveVerificationTargets(
   slice: SliceRow | null,
 ): VerificationTarget[] {
   const registry = createRepositoryRegistryFromPreferences(basePath, prefs);
-  const explicitIds =
-    task?.target_repositories?.length
-      ? task.target_repositories
-      : slice?.target_repositories?.length
-        ? slice.target_repositories
-        : null;
-  const requestedIds = explicitIds ?? ["project"];
+  const defaultTargets = defaultRepositoryTargets(registry);
+  const taskTargetRepositories = task?.target_repositories?.length ? task.target_repositories : null;
+  const sliceTargetRepositories = slice?.target_repositories?.length ? slice.target_repositories : null;
+  const explicitIds = taskTargetRepositories ?? sliceTargetRepositories ?? null;
+  const explicitTargetsRequested = Boolean(explicitIds);
+  const requestedIds = explicitIds ?? defaultTargets;
 
   const targets: VerificationTarget[] = [];
   const seen = new Set<string>();
@@ -101,9 +101,7 @@ function resolveVerificationTargets(
     seen.add(id);
     const repo = registry.byId.get(id);
     if (!repo) {
-      if (explicitIds) {
-        throw new Error(`unknown verification target repository: ${id}`);
-      }
+      logWarning("engine", `verification: requested repository "${id}" not found; available: ${Array.from(registry.byId.keys()).join(", ")}`);
       continue;
     }
     targets.push({
@@ -116,12 +114,17 @@ function resolveVerificationTargets(
     });
   }
 
-  if (!explicitIds && targets.length === 0) {
+  if (!explicitTargetsRequested && targets.length === 0) {
     const project = registry.byId.get("project");
     if (project) targets.push({ id: "project", cwd: project.root });
   }
   return targets;
 }
+
+function hasExplicitVerificationTargets(task: TaskRow | null, slice: SliceRow | null): boolean {
+  return Boolean(task?.target_repositories?.length || slice?.target_repositories?.length);
+}
+
 
 /**
  * Post-unit guard for `validate-milestone` units (#4094).
@@ -326,6 +329,12 @@ export async function runPostUnitVerification(
     }
 
     const verificationTargets = resolveVerificationTargets(s.basePath, prefs, taskRow, sliceRow);
+    const explicitVerificationTargetsRequested = hasExplicitVerificationTargets(taskRow, sliceRow);
+    if (explicitVerificationTargetsRequested && verificationTargets.length === 0) {
+      logWarning("engine", "verification: explicit target_repositories requested but no repositories resolved");
+      await pauseAuto(ctx, pi);
+      return "pause";
+    }
     const result = verificationTargets.length <= 1
       ? runVerificationGate({
         cwd: verificationTargets[0]?.cwd ?? s.basePath,

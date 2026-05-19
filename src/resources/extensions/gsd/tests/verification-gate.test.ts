@@ -360,13 +360,13 @@ describe("verification-gate: execution", () => {
       cwd: tmp,
       preferenceCommands: ["echo hello", "echo world"],
     });
-    assert.equal(result.passed, true);
     assert.equal(result.checks.length, 2);
     assert.equal(result.discoverySource, "preference");
     assert.equal(result.checks[0].exitCode, 0);
     assert.equal(result.checks[1].exitCode, 0);
     assert.ok(result.checks[0].stdout.includes("hello"));
     assert.ok(result.checks[1].stdout.includes("world"));
+    assert.equal(result.passed, true);
     assert.equal(typeof result.timestamp, "number");
   });
 

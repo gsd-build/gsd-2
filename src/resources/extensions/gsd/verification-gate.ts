@@ -330,6 +330,10 @@ export interface VerificationTarget {
   preferenceCommands?: string[];
 }
 
+// When targets use different discovery methods, return the highest-priority
+// source. Precedence: explicit preference > task-plan > package-json >
+// python-project. This avoids a misleading "mixed" label while still
+// surfacing that at least one authoritative source was active.
 function mergeDiscoverySource(
   sources: VerificationResult["discoverySource"][],
 ): VerificationResult["discoverySource"] {
