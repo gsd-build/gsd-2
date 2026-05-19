@@ -1455,6 +1455,10 @@ export async function showDiscuss(
     return;
   }
 
+  // Ensure DB is open before deriving state (#5837).
+  const { ensureDbOpen } = await import("./bootstrap/dynamic-tools.js");
+  await ensureDbOpen(basePath);
+
   // Invalidate caches to pick up artifacts written by a just-completed discuss/plan
   invalidateAllCaches();
 
@@ -1550,14 +1554,6 @@ export async function showDiscuss(
     }
     return;
   }
-
-  // Ensure DB is open before querying slices (#2560).
-  // showDiscuss() is a command handler — unlike tool handlers, it has no
-  // automatic ensureDbOpen() call. Without this, isDbAvailable() returns
-  // false on cold-start sessions and normSlices falls to [] → false
-  // "All slices complete" exit.
-  const { ensureDbOpen } = await import("./bootstrap/dynamic-tools.js");
-  await ensureDbOpen();
 
   // Guard: no roadmap yet (unless DB has slices)
   const roadmapFile = resolveMilestoneFile(basePath, mid, "ROADMAP");
