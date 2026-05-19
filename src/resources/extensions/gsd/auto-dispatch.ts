@@ -91,6 +91,7 @@ import { debugLog, isDebugEnabled } from "./debug-logger.js";
 import { resolveCanonicalMilestoneRoot } from "./worktree-manager.js";
 import { listUnmergedGitPaths } from "./git-conflict-state.js";
 import { runTurnGitAction } from "./git-service.js";
+import { parseUnitId } from "./unit-id.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -1333,11 +1334,36 @@ export const DISPATCH_RULES: DispatchRule[] = [
   },
   {
     name: "executing → execute-task",
-    match: async ({ state, mid, basePath, sessionContextWindow, modelRegistry, sessionProvider }) => {
-      if (state.phase !== "executing" || !state.activeTask) return null;
+    match: async ({ state, mid, basePath, session, sessionContextWindow, modelRegistry, sessionProvider }) => {
+      if (state.phase !== "executing") return null;
       if (!state.activeSlice) return missingSliceStop(mid, state.phase);
       const sid = state.activeSlice!.id;
       const sTitle = state.activeSlice!.title;
+      const retryUnitId = session?.pendingVerificationRetry?.unitId;
+      if (retryUnitId) {
+        const { milestone: retryMid, slice: retrySid, task: retryTid } = parseUnitId(retryUnitId);
+        if (retryMid === mid && retrySid === sid && retryTid) {
+          const retryTitle = state.activeTask?.id === retryTid
+            ? state.activeTask.title
+            : retryTid;
+          return {
+            action: "dispatch",
+            unitType: "execute-task",
+            unitId: retryUnitId,
+            prompt: await buildExecuteTaskPrompt(
+              mid,
+              sid,
+              sTitle,
+              retryTid,
+              retryTitle,
+              basePath,
+              { sessionContextWindow, modelRegistry, sessionProvider },
+            ),
+          };
+        }
+      }
+
+      if (!state.activeTask) return null;
       const tid = state.activeTask.id;
       const tTitle = state.activeTask.title;
 
