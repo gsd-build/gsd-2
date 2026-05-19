@@ -64,10 +64,11 @@ import { initRoutingHistory } from "./routing-history.js";
 import { restoreHookState, resetHookState } from "./post-unit-hooks.js";
 import { resetProactiveHealing, setLevelChangeCallback } from "./doctor-proactive.js";
 import { snapshotSkills } from "./skill-discovery.js";
-import { isDbAvailable, getMilestone, getAllMilestones, openDatabase, getDbStatus } from "./gsd-db.js";
+import { isDbAvailable, getMilestone, getAllMilestones, insertMilestone, openDatabase, getDbStatus } from "./gsd-db.js";
 import { isClosedStatus } from "./status-guards.js";
 import { classifyMilestoneSummaryContent } from "./milestone-summary-classifier.js";
 import { auditOrphanedPreflightStashes } from "./orphan-stash-audit.js";
+import { parseProject } from "./schemas/parsers.js";
 
 import {
   debugLog,
@@ -149,6 +150,38 @@ export async function openProjectDbIfPresent(basePath: string): Promise<void> {
     openDatabase(gsdDbPath);
   } catch (err) {
     logWarning("engine", `gsd-db: failed to open existing database: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+export function reconcileProjectMilestonesFromDisk(basePath: string): number {
+  if (!isDbAvailable()) return 0;
+  const projectPath = join(basePath, ".gsd", "PROJECT.md");
+  if (!existsSync(projectPath)) return 0;
+
+  try {
+    const content = readFileSync(projectPath, "utf-8");
+    const parsed = parseProject(content);
+    if (parsed.milestones.length === 0) return 0;
+
+    const dbMilestones = new Set(getAllMilestones().map((m) => m.id));
+    let inserted = 0;
+    for (const milestone of parsed.milestones) {
+      if (dbMilestones.has(milestone.id)) continue;
+      insertMilestone({
+        id: milestone.id,
+        title: milestone.title,
+        status: milestone.done ? "complete" : "queued",
+      });
+      dbMilestones.add(milestone.id);
+      inserted += 1;
+    }
+    return inserted;
+  } catch (err) {
+    logWarning(
+      "bootstrap",
+      `PROJECT milestone reconciliation failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 0;
   }
 }
 
@@ -806,6 +839,7 @@ export async function bootstrapAutoSession(
     // only have a failure-path SUMMARY on disk (#4663).
     await openProjectDbIfPresent(base);
     registerAutoWorkerForSession(base);
+    reconcileProjectMilestonesFromDisk(base);
 
     // Clean stale runtime unit files for completed milestones (#887).
     // DB-authoritative: when DB is available, require DB status to be closed
