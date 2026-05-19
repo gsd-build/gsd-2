@@ -226,6 +226,14 @@ test("direct /gsd auto skips paused-session replay when recovered unit already c
   }
 });
 
+test("interrupted-session source preserves raw lock and excludes same-pid from running classification", async () => {
+  const source = await import(`node:fs/promises`).then((fs) =>
+    fs.readFile(new URL("../interrupted-session.ts", import.meta.url), "utf-8")
+  );
+  assert.ok(source.includes('const lock = readCrashLock(basePath);'));
+  assert.ok(source.includes('if (lock && lock.pid !== process.pid && isLockProcessAlive(lock)) {'));
+});
+
 test("auto module imports successfully after interrupted-session changes", async () => {
   const mod = await import(`../auto.ts?ts=${Date.now()}-${Math.random()}`);
   assert.equal(typeof mod.startAuto, "function");

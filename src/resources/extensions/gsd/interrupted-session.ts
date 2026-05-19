@@ -128,8 +128,7 @@ export async function assessInterruptedSession(
     ? existsSync(pausedSession.worktreePath)
     : false;
   const assessmentBasePath = worktreeExists ? pausedSession!.worktreePath! : basePath;
-  const rawLock = readCrashLock(basePath);
-  const lock = rawLock && rawLock.pid !== process.pid ? rawLock : null;
+  const lock = readCrashLock(basePath);
 
   if (!lock && !pausedSession) {
     return {
@@ -146,7 +145,7 @@ export async function assessInterruptedSession(
     };
   }
 
-  if (lock && isLockProcessAlive(lock)) {
+  if (lock && lock.pid !== process.pid && isLockProcessAlive(lock)) {
     return {
       classification: "running",
       lock,
