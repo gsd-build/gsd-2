@@ -720,8 +720,10 @@ export function detectStuckLoops(units: UnitMetrics[], anomalies: ForensicAnomal
     const count = hasSessionAwareData
       ? Math.max(...Array.from(sessionBuckets.values(), (starts) => starts.size))
       : (sessionBuckets.get("__legacy__")?.size ?? 0);
+    const isParallelResearchSentinel = key.endsWith("/parallel-research");
+    const dispatchThreshold = isParallelResearchSentinel ? 2 : 1;
 
-    if (count > 1) {
+    if (count > dispatchThreshold) {
       const [unitType, ...idParts] = key.split("/");
       anomalies.push({
         type: "stuck-loop",

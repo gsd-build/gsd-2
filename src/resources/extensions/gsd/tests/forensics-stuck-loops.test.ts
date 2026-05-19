@@ -165,6 +165,31 @@ test("#3760 detectStuckLoops still flags repeated dispatches within one auto ses
   );
 });
 
+test("#5072 detectStuckLoops allows two parallel-research sentinel dispatches", () => {
+  const anomalies: ForensicAnomaly[] = [];
+
+  const units: UnitMetrics[] = [
+    makeUnit({
+      type: "research-slice",
+      id: "M052/parallel-research",
+      startedAt: 1000,
+      finishedAt: 2000,
+      autoSessionKey: "session-a",
+    }),
+    makeUnit({
+      type: "research-slice",
+      id: "M052/parallel-research",
+      startedAt: 5000,
+      finishedAt: 6000,
+      autoSessionKey: "session-a",
+    }),
+  ];
+
+  detectStuckLoops(units, anomalies);
+
+  assert.equal(anomalies.length, 0, "two parallel-research sentinel dispatches should not be flagged as a stuck loop");
+});
+
 test("#4711 detectWorktreeOrphans suggests doctor fix for completed unmerged branches", () => {
   const anomalies: ForensicAnomaly[] = [];
   const summary: WorktreeTelemetrySummary = {
