@@ -150,6 +150,7 @@ export function shouldDegradeEmptyWorktreeToProjectRoot(
 }
 
 function unitWritesSource(unitType: string): boolean | null {
+  if (unitType.startsWith("hook/")) return false;
   // Backward compatibility: sidecar queues from older builds may persist
   // prefixed unit types (e.g. "sidecar/quick-task").
   const normalizedUnitType = unitType.startsWith("sidecar/")
