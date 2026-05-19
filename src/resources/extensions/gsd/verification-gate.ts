@@ -1,6 +1,6 @@
 // GSD Extension — Verification Gate
 // Pure functions for discovering and running verification commands.
-// Discovery order (D003): preference → task plan verify → package.json scripts.
+// Discovery order (D003): task plan verify → preference → package.json scripts.
 // First non-empty source wins.
 
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
@@ -41,25 +41,15 @@ const PACKAGE_SCRIPT_KEYS = ["typecheck", "lint", "test"] as const;
 
 /**
  * Discover verification commands using the first-non-empty-wins strategy (D003):
- *   1. Explicit preference commands
- *   2. Task plan verify field (split on &&)
+ *   1. Task plan verify field (split on &&)
+ *   2. Explicit preference commands
  *   3. package.json scripts (typecheck, lint, test)
  *   4. Python pytest project markers
  *   5. Dependency-free Node test files
  *   6. None found
  */
 export function discoverCommands(options: DiscoverCommandsOptions): DiscoveredCommands {
-  // 1. Preference commands
-  if (options.preferenceCommands && options.preferenceCommands.length > 0) {
-    const filtered = options.preferenceCommands
-      .map(c => c.trim())
-      .filter(Boolean);
-    if (filtered.length > 0) {
-      return { commands: filtered, source: "preference" };
-    }
-  }
-
-  // 2. Task plan verify field (commands are untrusted — sanitize)
+  // 1. Task plan verify field (commands are untrusted — sanitize)
   if (options.taskPlanVerify && options.taskPlanVerify.trim()) {
     const commands = options.taskPlanVerify
       .split("&&")
@@ -68,6 +58,16 @@ export function discoverCommands(options: DiscoverCommandsOptions): DiscoveredCo
       .filter(c => sanitizeCommand(c) !== null);
     if (commands.length > 0) {
       return { commands, source: "task-plan" };
+    }
+  }
+
+  // 2. Preference commands
+  if (options.preferenceCommands && options.preferenceCommands.length > 0) {
+    const filtered = options.preferenceCommands
+      .map(c => c.trim())
+      .filter(Boolean);
+    if (filtered.length > 0) {
+      return { commands: filtered, source: "preference" };
     }
   }
 

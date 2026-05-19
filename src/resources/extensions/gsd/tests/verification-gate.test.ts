@@ -81,7 +81,7 @@ describe("verification-gate: discovery", () => {
     assert.equal(result.source, "package-json");
   });
 
-  test("first-non-empty-wins — preference beats task plan and package.json", () => {
+  test("first-non-empty-wins — task plan beats preference and package.json", () => {
     writeFileSync(
       join(tmp, "package.json"),
       JSON.stringify({ scripts: { lint: "eslint ." } }),
@@ -91,8 +91,8 @@ describe("verification-gate: discovery", () => {
       taskPlanVerify: "npm run lint",
       cwd: tmp,
     });
-    assert.deepStrictEqual(result.commands, ["custom-check"]);
-    assert.equal(result.source, "preference");
+    assert.deepStrictEqual(result.commands, ["npm run lint"]);
+    assert.equal(result.source, "task-plan");
   });
 
   test("task plan verify beats package.json", () => {
