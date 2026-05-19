@@ -27,7 +27,14 @@ import { normalizeQuery, extractDomain } from "./url-utils.js";
 import { formatLLMContext, type LLMContextSnippet, type LLMContextSource } from "./format.js";
 import type { TavilyResult, TavilySearchResponse } from "./tavily.js";
 import { publishedDateToAge } from "./tavily.js";
-import { getTavilyApiKey, getOllamaApiKey, getBraveApiKey, braveHeaders, resolveSearchProvider } from "./provider.js";
+import {
+  getTavilyApiKey,
+  getOllamaApiKey,
+  getBraveApiKey,
+  braveHeaders,
+  resolveSearchProvider,
+  MISSING_SEARCH_API_KEY_MESSAGE,
+} from "./provider.js";
 
 // =============================================================================
 // Types
@@ -334,7 +341,7 @@ export function registerLLMContextTool(pi: ExtensionAPI) {
       const provider = resolveSearchProvider();
       if (!provider) {
         return {
-          content: [{ type: "text", text: "search_and_read unavailable: No search API key is set. Use secure_env_collect to set TAVILY_API_KEY, BRAVE_API_KEY, or OLLAMA_API_KEY." }],
+          content: [{ type: "text", text: `search_and_read unavailable: ${MISSING_SEARCH_API_KEY_MESSAGE}` }],
           isError: true,
           details: { errorKind: "auth_error", error: "No search API key set" } satisfies Partial<LLMContextDetails>,
         };

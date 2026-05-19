@@ -20,7 +20,14 @@ import { LRUTTLCache } from "./cache.js";
 import { fetchWithRetryTimed, fetchWithRetry, classifyError, type RateLimitInfo } from "./http.js";
 import { normalizeQuery, toDedupeKey, detectFreshness } from "./url-utils.js";
 import { formatSearchResults, type SearchResultFormatted, type FormatSearchOptions } from "./format.js";
-import { getTavilyApiKey, getOllamaApiKey, getBraveApiKey, braveHeaders, resolveSearchProvider } from "./provider.js";
+import {
+  getTavilyApiKey,
+  getOllamaApiKey,
+  getBraveApiKey,
+  braveHeaders,
+  resolveSearchProvider,
+  MISSING_SEARCH_API_KEY_MESSAGE,
+} from "./provider.js";
 import { normalizeTavilyResult, mapFreshnessToTavily, type TavilySearchResponse } from "./tavily.js";
 
 // =============================================================================
@@ -357,7 +364,7 @@ export function registerSearchTool(pi: ExtensionAPI) {
       const provider = resolveSearchProvider();
       if (!provider) {
         return {
-          content: [{ type: "text", text: "Web search unavailable: No search API key is set. Use secure_env_collect to set TAVILY_API_KEY, BRAVE_API_KEY, or OLLAMA_API_KEY." }],
+          content: [{ type: "text", text: `Web search unavailable: ${MISSING_SEARCH_API_KEY_MESSAGE}` }],
           isError: true,
           details: { errorKind: "auth_error", error: "No search API key set" } satisfies Partial<SearchDetails>,
         };

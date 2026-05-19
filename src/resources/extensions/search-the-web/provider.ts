@@ -10,7 +10,8 @@
  */
 
 import { AuthStorage } from '@gsd/pi-coding-agent'
-import { join } from 'path'
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { resolveSearchProviderFromPreferences } from '../gsd/preferences.js'
 import { gsdHome } from "../gsd/gsd-home.js";
 
@@ -26,15 +27,79 @@ export type SearchProviderPreference = SearchProvider | 'auto'
 
 const VALID_PREFERENCES = new Set<string>(['tavily', 'brave', 'ollama', 'auto'])
 const PREFERENCE_KEY = 'search_provider'
+export const MISSING_SEARCH_API_KEY_MESSAGE =
+  "No search API key is set. Configure TAVILY_API_KEY, BRAVE_API_KEY, or OLLAMA_API_KEY via live env, GSD keys, or project .env/.env.local, then retry."
 
-/** Returns the Tavily API key from the environment, or empty string if not set. */
-export function getTavilyApiKey(): string {
-  return process.env.TAVILY_API_KEY || ''
+function getStoredApiKey(providerId: SearchProvider): string {
+  try {
+    const auth = AuthStorage.create(authFilePath())
+    const cred = auth.getCredentialsForProvider(providerId).find(c => c.type === 'api_key' && c.key)
+    return cred?.type === 'api_key' ? cred.key : ''
+  } catch {
+    return ''
+  }
 }
 
-/** Returns the Brave API key from the environment, or empty string if not set. */
+function parseDotenvValue(content: string, key: string): string {
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const match = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
+    if (!match || match[1] !== key) continue
+    const value = match[2].trim()
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      return value.slice(1, -1)
+    }
+    return value.replace(/\s+#.*$/, '').trim()
+  }
+  return ''
+}
+
+function projectRootCandidates(): string[] {
+  const roots: string[] = []
+  const add = (dir: string | undefined): void => {
+    if (!dir) return
+    const resolved = resolve(dir)
+    if (!roots.includes(resolved)) roots.push(resolved)
+  }
+
+  add(process.env.GSD_PROJECT_ROOT)
+
+  let current = resolve(process.cwd())
+  while (true) {
+    add(current)
+    const parent = dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+
+  return roots
+}
+
+function readProjectDotenvKey(envVar: string): string {
+  for (const root of projectRootCandidates()) {
+    for (const fileName of ['.env', '.env.local']) {
+      const filePath = join(root, fileName)
+      if (!existsSync(filePath)) continue
+      const value = parseDotenvValue(readFileSync(filePath, 'utf-8'), envVar)
+      if (value) return value
+    }
+  }
+  return ''
+}
+
+function getToolApiKey(providerId: SearchProvider, envVar: string): string {
+  return process.env[envVar] || getStoredApiKey(providerId) || readProjectDotenvKey(envVar) || ''
+}
+
+/** Returns the Tavily API key from available configured sources, or empty string if not set. */
+export function getTavilyApiKey(): string {
+  return getToolApiKey('tavily', 'TAVILY_API_KEY')
+}
+
+/** Returns the Brave API key from available configured sources, or empty string if not set. */
 export function getBraveApiKey(): string {
-  return process.env.BRAVE_API_KEY || ''
+  return getToolApiKey('brave', 'BRAVE_API_KEY')
 }
 
 /** Standard headers for Brave Search API requests. */
@@ -46,9 +111,9 @@ export function braveHeaders(): Record<string, string> {
   }
 }
 
-/** Returns the Ollama API key from the environment, or empty string if not set. */
+/** Returns the Ollama API key from available configured sources, or empty string if not set. */
 export function getOllamaApiKey(): string {
-  return process.env.OLLAMA_API_KEY || ''
+  return getToolApiKey('ollama', 'OLLAMA_API_KEY')
 }
 
 /**
