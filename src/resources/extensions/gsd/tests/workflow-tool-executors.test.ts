@@ -439,6 +439,43 @@ test("executeSliceComplete coerces string enrichment entries and writes summary/
   }
 });
 
+test("executeSliceComplete normalizes requirement object aliases (how -> proof/what)", async () => {
+  const base = makeTmpBase();
+  try {
+    openTestDb(base);
+    seedMilestone("M001", "Milestone One");
+    seedSlice("M001", "S01", "pending");
+    writeRoadmap(base, "M001", ["S01"]);
+    const db = _getAdapter();
+    db!.prepare(
+      "INSERT OR REPLACE INTO tasks (milestone_id, slice_id, id, title, status) VALUES (?, ?, ?, ?, ?)",
+    ).run("M001", "S01", "T01", "Task T01", "complete");
+
+    const rawParams = {
+      milestoneId: "M001",
+      sliceId: "S01",
+      sliceTitle: "Slice S01",
+      oneLiner: "Completed slice",
+      narrative: "Implemented the slice",
+      verification: "node --test",
+      uatContent: "## UAT\n\nPASS",
+      requirementsValidated: [{ id: "R010", how: "Integration test passed" }],
+      requirementsInvalidated: [{ id: "R011", how: "Scope narrowed" }],
+    } as unknown as Parameters<typeof executeSliceComplete>[0];
+
+    const result = await inProjectDir(base, () => executeSliceComplete(rawParams, base));
+    assert.equal(result.details.operation, "complete_slice");
+    const summaryPath = String(result.details.summaryPath);
+    assert.ok(existsSync(summaryPath), "slice summary should be written to disk");
+    const summary = readFileSync(summaryPath, "utf-8");
+    assert.match(summary, /R010 — Integration test passed/);
+    assert.match(summary, /R011 — Scope narrowed/);
+  } finally {
+    closeDatabase();
+    cleanup(base);
+  }
+});
+
 test("executeValidateMilestone persists validation artifact and gate records", async () => {
   const base = makeTmpBase();
   try {

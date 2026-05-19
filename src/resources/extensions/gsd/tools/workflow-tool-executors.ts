@@ -567,12 +567,26 @@ export async function executeSliceComplete(
       if (typeof r !== "string") return r;
       const [id, proof] = splitPair(r);
       return { id, proof };
+    }).map((r) => {
+      if (!r || typeof r !== "object" || Array.isArray(r)) return r;
+      const record = r as Record<string, unknown>;
+      if (typeof record.id === "string" && typeof record.proof !== "string" && typeof record.how === "string") {
+        return { id: record.id, proof: record.how };
+      }
+      return r;
     }) as Array<{ id: string; proof: string }>;
     const requirementsInvalidated = wrapOptionalArray(params.requirementsInvalidated);
     if (requirementsInvalidated !== undefined) coerced.requirementsInvalidated = requirementsInvalidated.map((r) => {
       if (typeof r !== "string") return r;
       const [id, what] = splitPair(r);
       return { id, what };
+    }).map((r) => {
+      if (!r || typeof r !== "object" || Array.isArray(r)) return r;
+      const record = r as Record<string, unknown>;
+      if (typeof record.id === "string" && typeof record.what !== "string" && typeof record.how === "string") {
+        return { id: record.id, what: record.how };
+      }
+      return r;
     }) as Array<{ id: string; what: string }>;
 
     const result = await handleCompleteSlice(coerced as CompleteSliceParams, basePath);
