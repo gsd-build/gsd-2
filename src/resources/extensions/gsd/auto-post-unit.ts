@@ -263,6 +263,30 @@ export function _shouldDispatchQuickTaskForTest(
     state.currentUnit.type !== "quick-task";
 }
 
+function isExecutionToolName(name: unknown): boolean {
+  if (typeof name !== "string") return false;
+  const normalized = name.trim().toLowerCase();
+  return normalized === "bash" || normalized === "gsd_exec";
+}
+
+export function _hasExecutionToolCallsInSessionForTest(entries: readonly unknown[]): boolean {
+  for (const entry of entries) {
+    const e = entry as any;
+    if (e?.type === "toolCall" && isExecutionToolName(e?.name ?? e?.toolName)) {
+      return true;
+    }
+
+    if (e?.type !== "message") continue;
+    const msg = e?.message;
+    if (!msg || msg.role !== "assistant" || !Array.isArray(msg.content)) continue;
+    for (const block of msg.content) {
+      if (block?.type !== "toolCall") continue;
+      if (isExecutionToolName(block?.toolName ?? block?.name)) return true;
+    }
+  }
+  return false;
+}
+
 export function shouldDeferCloseoutGitAction(unitType: string): boolean {
   return unitType === "execute-task";
 }
@@ -1057,11 +1081,23 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
                 }
 
                 if (claimedEvidence.length > 0 && bashCalls.length === 0) {
+                  const entries = Array.isArray(opts?.agentEndMessages)
+                    ? opts.agentEndMessages
+                    : (ctx.sessionManager?.getEntries?.() ?? []);
+                  const hasSessionExecutionCalls = _hasExecutionToolCallsInSessionForTest(entries);
+                  if (hasSessionExecutionCalls) {
+                    debugLog("postUnit", {
+                      phase: "safety-evidence-xref",
+                      taskId: sTid,
+                      suppressedWarning: "evidence-empty-but-session-has-exec-calls",
+                    });
+                  } else {
                   logWarning("safety", "task claimed verification command evidence but no execution tool calls were recorded");
                   ctx.ui.notify(
                     `Safety: task ${sTid} claimed command evidence but no execution tool calls were recorded`,
                     "warning",
                   );
+                  }
                 }
 
                 const blockingMismatch = mismatches.find((mismatch) => mismatch.severity === "error");
