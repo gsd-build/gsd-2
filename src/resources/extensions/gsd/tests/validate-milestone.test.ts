@@ -205,23 +205,29 @@ test("deriveState returns blocked when needs-remediation has no incomplete slice
   }
 });
 
-test("deriveState parks milestone when validation verdict is needs-attention and no summary (#6136)", async () => {
+test("deriveState blocks milestone when validation verdict is needs-attention and no summary (#6137 supersedes #6136)", async () => {
+  // #6136 originally parked needs-attention milestones, producing a phantom
+  // pre-planning phase that hid the blocker. #6137 supersedes: needs-attention
+  // must derive phase:'blocked' so the operator sees the actionable resolution.
   const base = makeTmpBase();
   try {
     writeRoadmap(base, "M001", ALL_DONE_ROADMAP);
     writeValidation(base, "M001", "---\nverdict: needs-attention\nremediation_round: 0\n---\n\n# Validation\nNeeds attention.");
 
     const state = await deriveState(base);
-    assert.equal(state.phase, "pre-planning");
-    assert.equal(state.activeMilestone, null);
-    assert.equal(state.registry.find(entry => entry.id === "M001")?.status, "parked");
-    assert.ok(state.nextAction.includes("parked"));
+    assert.equal(state.phase, "blocked");
+    assert.equal(state.activeMilestone?.id, "M001");
+    assert.match(state.nextAction, /validation findings/i);
+    assert.ok(
+      state.blockers.some(b => b.includes("needs-attention") && b.includes("M001")),
+      "blocker text identifies the milestone and verdict",
+    );
   } finally {
     cleanup(base);
   }
 });
 
-test("deriveState parks DB-backed milestone when validation verdict is needs-attention (#6136)", async () => {
+test("deriveState blocks DB-backed milestone when validation verdict is needs-attention (#6137 supersedes #6136)", async () => {
   const base = makeTmpBase();
   try {
     openTestDb(base);
@@ -237,10 +243,13 @@ test("deriveState parks DB-backed milestone when validation verdict is needs-att
     });
 
     const state = await deriveState(base);
-    assert.equal(state.phase, "pre-planning");
-    assert.equal(state.activeMilestone, null);
-    assert.equal(state.registry.find(entry => entry.id === "M001")?.status, "parked");
-    assert.ok(state.nextAction.includes("parked"));
+    assert.equal(state.phase, "blocked");
+    assert.equal(state.activeMilestone?.id, "M001");
+    assert.match(state.nextAction, /validation findings/i);
+    assert.ok(
+      state.blockers.some(b => b.includes("needs-attention") && b.includes("M001")),
+      "blocker text identifies the milestone and verdict",
+    );
   } finally {
     cleanup(base);
   }
