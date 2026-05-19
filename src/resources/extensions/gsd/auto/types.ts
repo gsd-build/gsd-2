@@ -77,6 +77,7 @@ export interface UnitResult {
 export type PhaseResult<T = void> =
   | { action: "continue" }
   | { action: "break"; reason: string }
+  | { action: "retry"; reason: string; data?: T }
   | { action: "next"; data: T }
 
 export interface IterationContext {

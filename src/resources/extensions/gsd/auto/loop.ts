@@ -681,6 +681,17 @@ export async function autoLoop(
           finishTurn("stopped", "execution", "unit-break");
           break;
         }
+        if (unitPhaseResult.action === "retry") {
+          finishIncompleteIteration({
+            status: "retry",
+            reason: unitPhaseResult.reason,
+            retry: true,
+            unitType: iterData.unitType,
+            unitId: iterData.unitId,
+          });
+          finishTurn("retry", "execution", unitPhaseResult.reason);
+          continue;
+        }
 
         // ── Verify first, then reconcile (only mark complete on pass) ──
         debugLog("autoLoop", { phase: "custom-engine-verify", iteration, unitId: iterData.unitId });
@@ -865,6 +876,10 @@ export async function autoLoop(
             finishTurn("skipped");
             continue;
           }
+          if (preDispatchResult.action === "retry") {
+            finishTurn("retry", "execution", preDispatchResult.reason);
+            continue;
+          }
           const preData = preDispatchResult.data;
           const guardsResult = await runGuards(ic, preData.mid);
           phaseReporter.report("guard", guardsResult.action);
@@ -880,6 +895,10 @@ export async function autoLoop(
           }
           if (dispatchResult.action === "continue") {
             finishTurn("skipped");
+            continue;
+          }
+          if (dispatchResult.action === "retry") {
+            finishTurn("retry", "execution", dispatchResult.reason);
             continue;
           }
           iterData = dispatchResult.data;
@@ -1052,6 +1071,21 @@ export async function autoLoop(
         });
         finishTurn("stopped", "execution", "unit-break");
         break;
+      }
+      if (unitPhaseResult.action === "retry") {
+        dispatchSettled = settleDispatchFailed(dispatchId, unitPhaseResult.reason, {
+          markFailed: markDispatchFailed,
+          logWriteFailure: logDispatchLedgerWriteFailure,
+        }) || dispatchSettled;
+        finishIncompleteIteration({
+          status: "retry",
+          reason: unitPhaseResult.reason,
+          retry: true,
+          unitType: iterData.unitType,
+          unitId: iterData.unitId,
+        });
+        finishTurn("retry", "execution", unitPhaseResult.reason);
+        continue;
       }
 
       // ── Phase 5: Finalize ───────────────────────────────────────────────

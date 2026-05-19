@@ -2425,9 +2425,14 @@ export async function runUnitPhase(
             `${unitType} ${unitId} completed with 0 tool calls — context exhaustion, will retry`,
             "warning",
           );
-          // Fall through to next iteration where dispatch will re-derive
-          // and re-dispatch this unit.
-          return { action: "next", data: { unitStartedAt: _resolveCurrentUnitStartedAtForTest(s.currentUnit), requestDispatchedAt: unitResult.requestDispatchedAt } };
+          return {
+            action: "retry",
+            reason: "zero-tool-calls",
+            data: {
+              unitStartedAt: _resolveCurrentUnitStartedAtForTest(s.currentUnit),
+              requestDispatchedAt: unitResult.requestDispatchedAt,
+            },
+          };
         }
       }
     }
