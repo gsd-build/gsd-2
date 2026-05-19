@@ -948,6 +948,34 @@ describe("runPreExecutionChecks", () => {
     }
   });
 
+  test("resolves .gsd metadata inputs from canonical project root in worktree mode (#5492)", async () => {
+    const projectRoot = join(tmpdir(), `pre-exec-project-root-${Date.now()}`);
+    const worktreeRoot = join(tmpdir(), `pre-exec-worktree-root-${Date.now()}`);
+    mkdirSync(join(projectRoot, ".gsd"), { recursive: true });
+    mkdirSync(worktreeRoot, { recursive: true });
+    writeFileSync(join(projectRoot, ".gsd", "DECISIONS.md"), "# decisions");
+
+    try {
+      const tasks = [
+        createTask({
+          id: "T01",
+          files: [],
+          inputs: [".gsd/DECISIONS.md"],
+          expected_output: [],
+        }),
+      ];
+
+      const result = await runPreExecutionChecks(tasks, worktreeRoot, {
+        canonicalProjectRoot: projectRoot,
+      });
+      assert.equal(result.status, "pass");
+      assert.equal(result.checks.length, 0);
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+      rmSync(worktreeRoot, { recursive: true, force: true });
+    }
+  });
+
   test("returns fail status for unsafe Verify command before execution", async () => {
     tempDir = join(tmpdir(), `pre-exec-test-${Date.now()}`);
     mkdirSync(tempDir, { recursive: true });

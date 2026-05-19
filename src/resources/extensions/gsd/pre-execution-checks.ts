@@ -40,6 +40,25 @@ export interface PreExecutionResult {
 
 export interface PreExecutionCheckContext {
   additionalRoots?: string[];
+  canonicalProjectRoot?: string;
+}
+
+function inputExistsOnDisk(
+  normalizedFile: string,
+  basePath: string,
+  context?: PreExecutionCheckContext,
+): boolean {
+  if (existsSync(resolve(basePath, normalizedFile))) return true;
+
+  // Worktree mode: a referenced file may live at the canonical project root
+  // rather than inside the isolated worktree checkout — either project
+  // metadata (.gsd/...) or source from already-merged work that has not yet
+  // reached this worktree. Accept either as satisfying the input.
+  if (context?.canonicalProjectRoot) {
+    if (existsSync(resolve(context.canonicalProjectRoot, normalizedFile))) return true;
+  }
+
+  return (context?.additionalRoots ?? []).some((root) => existsSync(resolve(root, normalizedFile)));
 }
 
 export function checkVerificationCommands(tasks: TaskRow[]): PreExecutionCheckJSON[] {
@@ -496,7 +515,6 @@ export function checkFilePathConsistency(
   context?: PreExecutionCheckContext,
 ): PreExecutionCheckJSON[] {
   const results: PreExecutionCheckJSON[] = [];
-  const resolutionRoots = [basePath, ...(context?.additionalRoots ?? [])];
 
   // Build a set of all files created by any task at any position (normalized).
   // Used to suppress consistency errors for files that will be caught with a
@@ -526,7 +544,7 @@ export function checkFilePathConsistency(
       if (containsGlobPattern(normalizedFile)) continue;
 
       // Check if file exists on disk
-      const existsOnDisk = resolutionRoots.some((root) => existsSync(resolve(root, normalizedFile)));
+      const existsOnDisk = inputExistsOnDisk(normalizedFile, basePath, context);
 
       // Check if file is in prior expected outputs (priorOutputs already normalized)
       const inPriorOutputs = priorOutputs.has(normalizedFile);
@@ -576,7 +594,6 @@ export function checkTaskOrdering(
   context?: PreExecutionCheckContext,
 ): PreExecutionCheckJSON[] {
   const results: PreExecutionCheckJSON[] = [];
-  const resolutionRoots = [basePath, ...(context?.additionalRoots ?? [])];
 
   // Build map: normalized file → task index that creates it
   const fileCreators = new Map<string, { taskId: string; index: number; originalPath: string; completed: boolean }>();
@@ -614,7 +631,7 @@ export function checkTaskOrdering(
       // files, and a same-task output under the directory satisfies it.
       if (isDirectoryReference(file)) continue;
       const creator = fileCreators.get(normalizedFile);
-      const existsOnDisk = resolutionRoots.some((root) => existsSync(resolve(root, normalizedFile)));
+      const existsOnDisk = inputExistsOnDisk(normalizedFile, basePath, context);
       // Skip if the creating task has already completed — its output is available
       // regardless of disk state (e.g. file was a temp artifact cleaned up after
       // the task ran, or a replan introduced a new earlier-sequence task that

@@ -1587,7 +1587,7 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
         // prior slice wrote to the worktree but hasn't merged to main yet.
         const preExecutionBasePath = s.basePath;
         const result: PreExecutionResult = await runPreExecutionChecks(tasks, preExecutionBasePath, {
-          additionalRoots: [s.canonicalProjectRoot],
+          canonicalProjectRoot: s.canonicalProjectRoot,
         });
 
         // Log summary to stderr in existing verification output format
