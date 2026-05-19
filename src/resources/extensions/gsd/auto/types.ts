@@ -56,7 +56,7 @@ export interface AgentEndEvent {
  */
 export interface ErrorContext {
   message: string;
-  category: "provider" | "timeout" | "idle" | "network" | "aborted" | "session-failed" | "unknown";
+  category: "provider" | "tool-schema" | "timeout" | "idle" | "network" | "aborted" | "session-failed" | "unknown";
   stopReason?: string;
   isTransient?: boolean;
   retryAfterMs?: number;

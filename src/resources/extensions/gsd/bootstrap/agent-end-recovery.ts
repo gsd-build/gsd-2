@@ -521,6 +521,19 @@ export async function handleAgentEnd(
       return;
     }
 
+    if (cls.kind === "tool-schema") {
+      await pauseAutoForProviderError(ctx.ui, errorDetail, () => pauseAuto(ctx, pi, {
+        message: `Tool schema error${errorDetail}`,
+        category: "tool-schema",
+        isTransient: false,
+      }), {
+        isRateLimit: false,
+        isTransient: false,
+        retryAfterMs: 0,
+      });
+      return;
+    }
+
     // Cap rate-limit backoff for CLI-style providers (openai-codex, google-gemini-cli)
     // which use per-user quotas with shorter windows (#2922).
     if (cls.kind === "rate-limit") {

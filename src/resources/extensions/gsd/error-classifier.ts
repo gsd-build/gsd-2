@@ -13,6 +13,7 @@
 // ── ErrorClass discriminated union ──────────────────────────────────────────
 
 export type ErrorClass =
+  | { kind: "tool-schema";  retryAfterMs: 0 }
   | { kind: "network";      retryAfterMs: number }
   | { kind: "rate-limit";   retryAfterMs: number }
   | { kind: "server";       retryAfterMs: number }
@@ -66,6 +67,7 @@ const CONNECTION_RE = /terminated|connection.?(?:refused|error)|other side close
 // This eliminates the need to enumerate every error message variant individually.
 const STREAM_RE = /in JSON at position \d+|Unexpected end of JSON|SyntaxError.*JSON/i;
 const RESET_DELAY_RE = /reset in (\d+)s/i;
+const TOOL_SCHEMA_RE = /schema overload|consecutive tool validation failures/i;
 
 // Provider-side model entitlement rejection: the SDK accepted the model switch,
 // but the provider refused at request time because the current account/plan/tier
@@ -92,6 +94,12 @@ const UNSUPPORTED_MODEL_SCOPE_RE = /\b(?:account|plan|tier|subscription)\b/i;
  *  7. Unknown
  */
 export function classifyError(errorMsg: string, retryAfterMs?: number): ErrorClass {
+  // Tool-schema overload from repeated invalid tool args in preparation phase.
+  // Checked early to prevent misclassification as unknown/provider error.
+  if (TOOL_SCHEMA_RE.test(errorMsg)) {
+    return { kind: "tool-schema", retryAfterMs: 0 };
+  }
+
   const isPermanent = PERMANENT_RE.test(errorMsg);
   const isRateLimit = RATE_LIMIT_RE.test(errorMsg) || AFFORDABILITY_RE.test(errorMsg);
   const isUnsupportedModel =

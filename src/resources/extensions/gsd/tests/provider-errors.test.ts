@@ -157,6 +157,12 @@ test("classifyError treats unknown error as not transient", () => {
   assert.equal(result.kind, "unknown");
 });
 
+test("classifyError treats schema overload as tool-schema (non-transient)", () => {
+  const result = classifyError("Schema overload: consecutive tool validation failures exceeded cap");
+  assert.equal(result.kind, "tool-schema");
+  assert.ok(!isTransient(result));
+});
+
 test("classifyError treats empty string as not transient", () => {
   const result = classifyError("");
   assert.ok(!isTransient(result));
