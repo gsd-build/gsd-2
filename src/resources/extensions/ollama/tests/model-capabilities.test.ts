@@ -82,6 +82,48 @@ describe("getModelCapabilities", () => {
 		const caps = getModelCapabilities("Llama3.1:8B");
 		assert.equal(caps.contextWindow, 131072);
 	});
+
+	// ─── New reasoning-model fallback entries (cloud + local) ──────────────────
+	// These exist as a fallback for ollama versions whose /api/show response
+	// does not include the `capabilities` array. When capabilities are present,
+	// detection happens dynamically in ollama-discovery.ts.
+
+	it("flags gpt-oss as reasoning (covers :20b, :120b, :*-cloud)", () => {
+		assert.equal(getModelCapabilities("gpt-oss:20b").reasoning, true);
+		assert.equal(getModelCapabilities("gpt-oss:120b-cloud").reasoning, true);
+	});
+
+	it("flags deepseek-v3.1/v4 family as reasoning", () => {
+		assert.equal(getModelCapabilities("deepseek-v3.1:671b-cloud").reasoning, true);
+		assert.equal(getModelCapabilities("deepseek-v4-flash:cloud").reasoning, true);
+	});
+
+	it("flags glm-4.x/5.x family as reasoning", () => {
+		assert.equal(getModelCapabilities("glm-4.6:cloud").reasoning, true);
+		assert.equal(getModelCapabilities("glm-5.1:cloud").reasoning, true);
+	});
+
+	it("flags kimi-k2 family as reasoning", () => {
+		assert.equal(getModelCapabilities("kimi-k2:1t-cloud").reasoning, true);
+		assert.equal(getModelCapabilities("kimi-k2.6:cloud").reasoning, true);
+	});
+
+	it("flags qwen3 as reasoning (hybrid thinking model)", () => {
+		assert.equal(getModelCapabilities("qwen3:8b").reasoning, true);
+		assert.equal(getModelCapabilities("qwen3-next:cloud").reasoning, true);
+	});
+
+	it("flags minimax-m2 family as reasoning", () => {
+		assert.equal(getModelCapabilities("minimax-m2.7:cloud").reasoning, true);
+	});
+
+	it("flags gemma4 (with thinking) as reasoning", () => {
+		assert.equal(getModelCapabilities("gemma4:31b-cloud").reasoning, true);
+	});
+
+	it("flags gemini-3-flash-preview as reasoning", () => {
+		assert.equal(getModelCapabilities("gemini-3-flash-preview:cloud").reasoning, true);
+	});
 });
 
 // ─── Ordering / prefix-shadowing regression (#4991) ──────────────────────────
@@ -149,13 +191,30 @@ describe("getModelCapabilities — long-variant overrides aren't shadowed (#4991
 		assert.equal(caps.contextWindow, 262144);
 	});
 
-	it("minimax-m2.5:cloud and minimax-m2.7:cloud report 1M", () => {
+	it("minimax-m2.5:cloud at 1M (base default); minimax-m2.7:cloud at real 192K", () => {
+		// minimax-m2 family base was announced at 1M; m2.5 retained that.
+		// m2.7 ships at 196608 per ollama /api/show — confirmed empirically
+		// against gsd-build/gsd-2#4984 follow-up. Long-variant beats base.
 		assert.equal(getModelCapabilities("minimax-m2.5:cloud").contextWindow, 1048576);
-		assert.equal(getModelCapabilities("minimax-m2.7:cloud").contextWindow, 1048576);
+		assert.equal(getModelCapabilities("minimax-m2.7:cloud").contextWindow, 196608);
 	});
 
 	it("minimax-m2 base resolves to 1M", () => {
 		const caps = getModelCapabilities("minimax-m2:cloud");
+		assert.equal(caps.contextWindow, 1048576);
+	});
+
+	it("deepseek-v4-pro:cloud and deepseek-v4-flash:cloud resolve to 1M (long-variants beat deepseek-v4 base)", () => {
+		// Both long-variants must match before the bare `deepseek-v4` base
+		// entry, otherwise they'd inherit the family's old 131072 value.
+		// This pins the ordering invariant for the deepseek-v4 family that
+		// gsd-build/gsd-2#4984 covers for glm/kimi/minimax.
+		assert.equal(getModelCapabilities("deepseek-v4-pro:cloud").contextWindow, 1048576);
+		assert.equal(getModelCapabilities("deepseek-v4-flash:cloud").contextWindow, 1048576);
+	});
+
+	it("deepseek-v4 base also resolves to 1M (parity with long-variants)", () => {
+		const caps = getModelCapabilities("deepseek-v4:671b");
 		assert.equal(caps.contextWindow, 1048576);
 	});
 
