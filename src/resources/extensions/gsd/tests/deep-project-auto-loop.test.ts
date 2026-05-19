@@ -140,6 +140,18 @@ function makeRepo(): string {
   return base;
 }
 
+function makeLightRepo(): string {
+  const base = join(tmpdir(), `gsd-custom-workflow-bootstrap-${randomUUID()}`);
+  mkdirSync(join(base, ".gsd", "milestones"), { recursive: true });
+  execFileSync("git", ["init"], { cwd: base, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: base });
+  execFileSync("git", ["config", "user.name", "Test"], { cwd: base });
+  writeFileSync(join(base, "README.md"), "# test\n");
+  execFileSync("git", ["add", "-A"], { cwd: base, stdio: "ignore" });
+  execFileSync("git", ["commit", "-m", "init"], { cwd: base, stdio: "ignore" });
+  return base;
+}
+
 function makeCtx(sessionId = "test-session") {
   const model = { provider: "claude-code", id: "claude-sonnet-4-6", contextWindow: 128000 };
   return {
@@ -303,6 +315,70 @@ test("deep project setup: bootstrap can start auto-mode without an active milest
     assert.equal(s.active, true);
     assert.equal(s.currentMilestoneId, null);
   } finally {
+    try {
+      const { closeDatabase } = await import("../gsd-db.ts");
+      closeDatabase();
+    } catch {}
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("custom workflow bootstrap: no active milestone does not enter guided discuss", async () => {
+  const base = makeLightRepo();
+  const previousCwd = process.cwd();
+  const messages: unknown[] = [];
+  try {
+    process.chdir(base);
+    const s = new AutoSession();
+    s.activeEngineId = "custom";
+    s.activeRunDir = join(base, ".gsd", "workflow-runs", "test", "run");
+
+    const ready = await bootstrapAutoSession(
+      s,
+      makeCtx(`custom-${randomUUID()}`) as any,
+      {
+        ...makePi(messages),
+        getThinkingLevel: () => "medium",
+      } as any,
+      base,
+      false,
+      false,
+      {
+        shouldUseWorktreeIsolation: () => false,
+        registerSigtermHandler: () => {},
+        registerAutoWorkerForSession: () => {},
+        lockBase: () => base,
+        buildLifecycle: () => ({
+          adoptSessionRoot: (sessionBase: string, originalBase?: string) => {
+            s.basePath = sessionBase;
+            if (originalBase !== undefined) {
+              s.originalBasePath = originalBase;
+            } else if (!s.originalBasePath) {
+              s.originalBasePath = sessionBase;
+            }
+          },
+        }) as any,
+      },
+      {
+        classification: "none",
+        lock: null,
+        pausedSession: null,
+        state: null,
+        recovery: null,
+        recoveryPrompt: null,
+        recoveryToolCallCount: 0,
+        artifactSatisfied: false,
+        hasResumableDiskState: false,
+        isBootstrapCrash: false,
+      },
+    );
+
+    assert.equal(ready, true);
+    assert.equal(s.active, true);
+    assert.equal(s.currentMilestoneId, null);
+    assert.deepEqual(messages, [], "custom workflow bootstrap must not dispatch guided discuss");
+  } finally {
+    process.chdir(previousCwd);
     try {
       const { closeDatabase } = await import("../gsd-db.ts");
       closeDatabase();
